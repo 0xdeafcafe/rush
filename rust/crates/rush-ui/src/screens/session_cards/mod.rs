@@ -535,6 +535,11 @@ pub fn register(x: &mut Ext) {
         "compact this session, or have a cheaper model write the summary",
         |m, _| match open_key(m) {
             Some(k) => compact::open_compact(m, &k),
+            // An agent picked but no session open (compactsheet.go:41).
+            None if m.selected().is_some() => {
+                m.flash_err("#compact works on a session rush runs: open one first");
+                Out::Draw
+            }
             None => {
                 m.flash_err("select an agent first");
                 Out::Draw
@@ -555,20 +560,19 @@ pub fn register(x: &mut Ext) {
     x.command(
         "discuss",
         "a room on this chat: agents argue it, and the verdict comes back here",
+        // In a Session, a room on its chat; anywhere else, as #room
+        // (keys.go:935).
         |m, arg| match open_key(m) {
             Some(k) if !k.starts_with(mention::ROOM_KEY_PREFIX) => {
                 discuss::discuss(m, &k, arg, false)
             }
-            _ => Out::Pass,
+            _ => crate::screens::social::roomsetup::open_room_cmd(m, arg),
         },
     );
     x.command(
         "intervene",
         "a room goes through this chat and tells its agent what to do next",
-        |m, arg| match open_key(m) {
-            Some(k) => discuss::intervene(m, &k, arg),
-            None => Out::Pass,
-        },
+        discuss::intervene_cmd,
     );
 }
 

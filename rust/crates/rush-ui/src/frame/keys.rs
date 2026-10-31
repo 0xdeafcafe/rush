@@ -34,6 +34,21 @@ impl Model {
             return Out::Draw;
         }
         if k.s == "ctrl+q" {
+            // A memory file with unsaved edits asks first (keys.go:60-71).
+            if self.confirm.is_none()
+                && let Some(path) = crate::screens::session_core::memedit::dirty_path(self)
+            {
+                let q = super::confirm::Confirm::new(
+                    format!(
+                        "Quit with unsaved changes to {}?",
+                        crate::style::tildify(&path)
+                    ),
+                    |_| Out::Quit,
+                )
+                .detail("they're lost");
+                self.ask(q);
+                return Out::Draw;
+            }
             return Out::Quit;
         }
         if self.confirm.is_some() {
@@ -77,7 +92,7 @@ impl Model {
                 }
             }
             if k.s == "ctrl+c" {
-                return Out::Quit;
+                return self.quit_key();
             }
             if k.s == "?" || k.s == "f1" {
                 self.help = true;
@@ -102,7 +117,7 @@ impl Model {
                 self.wipe_prompt();
                 return Out::Draw;
             }
-            return Out::Quit;
+            return self.quit_key();
         }
         for i in 0..self.ext.list_keys.len() {
             let f = self.ext.list_keys[i];
@@ -132,7 +147,7 @@ impl Model {
                 self.back_to_agents();
                 return Out::Draw;
             }
-            "ctrl+c" => return Out::Quit,
+            "ctrl+c" => return self.quit_key(),
             _ => return Out::Idle,
         };
         if self.step_page(d) {
@@ -140,6 +155,17 @@ impl Model {
         } else {
             Out::Idle
         }
+    }
+
+    /// ctrl+c with nothing to clear or copy: the first arms quitting, a
+    /// second within 2s quits (keys.go:650 quitKey).
+    pub(crate) fn quit_key(&mut self) -> Out {
+        if rush_core::time::now() - self.quit_armed < 2000 {
+            return Out::Quit;
+        }
+        self.quit_armed = rush_core::time::now();
+        self.flash("ctrl+c again to quit");
+        Out::Draw
     }
 
     /// esc from a place, or a page of Agents: Agents' plain list.
@@ -206,8 +232,16 @@ impl Model {
         if t.is_empty() {
             return Out::Idle;
         }
-        if t.starts_with('#') {
+        // # and a letter: a Markdown heading (# Plan) or an issue (#123)
+        // is still a message (keys.go:841 isHashCmd).
+        if crate::screens::cmdbar::fleetslash::is_hash_cmd(t) {
             return self.command(t);
+        }
+        // /stop typed the old way runs #stop (keys.go:847 legacyCommand).
+        if t.starts_with('/')
+            && let Some(o) = crate::screens::cmdbar::fleetslash::legacy_command(self, t)
+        {
+            return o;
         }
         let tagged = self.input.sent(true);
         let t = tagged.trim();
@@ -361,6 +395,13 @@ impl Model {
     fn mouse_routed(&mut self, e: &Mouse) -> Out {
         use crate::screens::list_extras::split;
         let (x, y) = (e.x as usize, e.y as usize);
+        // The grid's tiles and edge, where they are on screen, before the
+        // Session beside the list takes the click at its own columns
+        // (model.go:1496, :1589, :1640 gridDrag, gridClick).
+        let o = crate::screens::list_extras::grid::mouse(self, e);
+        if o.used() {
+            return o;
+        }
         // The pointer coming onto the Session or the list gives it the
         // keys, once as it crosses (model.go:1556 focusAt).
         let mut crossed = split::pointer_at(self, x, e.kind == MouseKind::Moved);

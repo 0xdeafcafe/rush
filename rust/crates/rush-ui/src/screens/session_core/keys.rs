@@ -592,7 +592,8 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
         save_edit(m, key, i, was, text);
         return Out::Draw;
     }
-    if text.starts_with('#') {
+    // # and a letter; # Plan or #123 is sent as it is (rushmode.go:4705).
+    if crate::screens::cmdbar::fleetslash::is_hash_cmd(&text) {
         conn(m, key).input.clear_sent();
         return m.command(&text);
     }

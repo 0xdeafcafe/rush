@@ -10,6 +10,9 @@
 //!   (`cells`), and for frames that answer input, `lat`: µs from the
 //!   oldest key's arrival in the loop's queue to the frame written.
 //! - `mark`: the first frame whose text holds `RUSH_PERF_MARK`.
+//! - `shown <text>` / `gone <text>`: for each of `RUSH_PERF_WATCH`'s
+//!   texts (split by `|`), the frames it appears in and leaves: how long
+//!   a placeholder such as "reading…" stayed on screen.
 //!
 //! Off, it costs one load of a OnceLock per frame and per key.
 
@@ -23,6 +26,8 @@ pub(crate) struct Perf {
     file: Mutex<File>,
     mark: Option<String>,
     marked: AtomicBool,
+    /// RUSH_PERF_WATCH's texts, each with whether the last frame held it.
+    watch: Vec<(String, AtomicBool)>,
     /// The last frame's changed cells, set by the terminal.
     cells: AtomicU64,
 }
@@ -44,6 +49,12 @@ pub(crate) fn on() -> Option<&'static Perf> {
                 .ok()
                 .filter(|m| !m.is_empty()),
             marked: AtomicBool::new(false),
+            watch: std::env::var("RUSH_PERF_WATCH")
+                .unwrap_or_default()
+                .split('|')
+                .filter(|w| !w.is_empty())
+                .map(|w| (w.to_string(), AtomicBool::new(false)))
+                .collect(),
             cells: AtomicU64::new(0),
         };
         p.line(&format!(
@@ -111,12 +122,24 @@ impl Perf {
     /// changed, and the frame's text when a mark is still looked for.
     pub(crate) fn drawn(&self, cells: usize, text: impl FnOnce() -> String) {
         self.cells.store(cells as u64, Ordering::Relaxed);
+        let want = self.mark.is_some() && !self.marked.load(Ordering::Relaxed);
+        if !want && self.watch.is_empty() {
+            return;
+        }
+        let text = text();
         if let Some(m) = &self.mark
-            && !self.marked.load(Ordering::Relaxed)
-            && text().contains(m.as_str())
+            && want
+            && text.contains(m.as_str())
         {
             self.marked.store(true, Ordering::Relaxed);
             self.line(&format!("{} mark", now_us()));
+        }
+        for (w, was) in &self.watch {
+            let is = text.contains(w.as_str());
+            if is != was.swap(is, Ordering::Relaxed) {
+                let what = if is { "shown" } else { "gone" };
+                self.line(&format!("{} {what} {w}", now_us()));
+            }
         }
     }
 

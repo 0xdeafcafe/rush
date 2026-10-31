@@ -997,3 +997,26 @@ fn split_layout_doesnt_peek() {
     press(&mut m, "esc");
     assert!(m.session.is_none(), "esc doesn't go back in");
 }
+
+/// Each row's mark: ✓ for one put away done, ? for a question you've
+/// seen and left, and a live one spins with its harness's own frames
+/// (view.go:2210-2237).
+#[test]
+fn row_marks() {
+    let mut done = agent("d1", "finished work", State::Idle, 0);
+    done.done = true;
+    done.job.updated_at = NOW - 48 * HOUR;
+    let mut later = agent("w1", "a question left", State::Blocked, 102);
+    later.seen = true;
+    let mut codex = agent("c1", "codex at work", State::Working, 103);
+    codex.kind = "codex".into();
+    let m = model_of(vec![done, later, codex], 160, 40);
+    let mark = |i: usize| {
+        let l = m.agent_line(i, 160, 160, false, 30, false, None).plain();
+        l.chars().nth(1).unwrap()
+    };
+    assert_eq!(mark(0), '✓');
+    assert_eq!(mark(1), '?');
+    let frame = super::wall::spin("codex", m.tick + 2);
+    assert_eq!(mark(2).to_string(), frame);
+}

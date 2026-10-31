@@ -110,16 +110,23 @@ impl Worktree {
     /// much disk it takes. It can take seconds on a big checkout.
     pub fn check(&mut self) {
         if self.check_git() {
-            self.size = disk_usage_background(&[TempDir {
-                path: self.path.clone(),
-                keep: false,
-            }]);
+            self.measure();
         }
     }
 
-    /// Check without the size: only what git says.
-    pub(crate) fn check_git(&mut self) -> bool {
+    /// Check without the size: only what git says, which is all that
+    /// says whether it's safe to remove. False when git couldn't.
+    pub fn check_git(&mut self) -> bool {
         self.look().2
+    }
+
+    /// The rest of check: how much disk it takes, walked at a background
+    /// pace (a big checkout's build folders take minutes).
+    pub fn measure(&mut self) {
+        self.size = disk_usage_background(&[TempDir {
+            path: self.path.clone(),
+            keep: false,
+        }]);
     }
 
     /// Looks at it afresh with git and says, line by line, what removing it
@@ -547,7 +554,8 @@ pub(crate) fn linked_worktree(w: &Worktree) -> Result<(), String> {
     if path == repo
         || format!("{repo}/").starts_with(&format!("{path}/"))
         || path == "/"
-        || repo.is_empty()
+        // Before it's cleaned: clean("") is ".", never empty.
+        || w.repo.is_empty()
     {
         return Err(format!(
             "{path} is the repository itself, not a worktree; it's never removed"

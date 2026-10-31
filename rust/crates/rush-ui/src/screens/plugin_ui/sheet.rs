@@ -128,6 +128,9 @@ impl PluginSheet {
     }
 
     fn loaded(&mut self, m: &mut Model, l: Lists) -> Out {
+        if !self.loaded {
+            m.answered();
+        }
         self.loaded = true;
         match l {
             Err(e) => self.err = e,

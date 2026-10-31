@@ -235,6 +235,17 @@ pub fn editing(m: &mut Model, key: &str) -> bool {
         .is_some_and(|e| e.editing)
 }
 
+/// The open Session's memory file, when it has unsaved edits (ctrl+q asks
+/// first: keys.go:60 c.memEd.dirty()).
+pub fn dirty_path(m: &mut Model) -> Option<String> {
+    let key = open_key(m)?;
+    m.kept::<MemEdits>()
+        .by_key
+        .get(&key)
+        .filter(|e| e.ed.dirty())
+        .map(|e| e.ed.path.clone())
+}
+
 /// The memory view's keys for its picked file; while it's being edited,
 /// every key is the editor's (memoryKey).
 pub fn key(m: &mut Model, k: &Press) -> Out {

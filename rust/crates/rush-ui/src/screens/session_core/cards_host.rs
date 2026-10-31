@@ -264,21 +264,17 @@ pub(crate) fn reply_to(m: &mut Model, to: &str, text: String, tagged: &str) -> O
 fn seen(m: &mut Model, a: &rush_core::agent::Agent) {
     let waiting = a.job.state == State::Blocked || a.halted() || a.your_turn(m.now);
     let key = a.key.clone();
-    m.later(
-        move || {
-            let mut s = rush_state::Store::load();
-            let mut changed = s.overlay.done.remove(&key).is_some();
+    crate::overlay::save(
+        m,
+        move |o| {
+            let mut changed = o.done.remove(&key).is_some();
             if waiting {
-                s.overlay.seen.insert(key, rush_state::Time::now());
+                o.seen.insert(key, rush_state::Time::now());
                 changed = true;
             }
-            if changed {
-                s.save_overlay().map_err(|e| e.to_string())
-            } else {
-                Ok(())
-            }
+            changed
         },
-        |m, r: Result<(), String>| {
+        |m, r| {
             if let Err(e) = r {
                 m.fail(&e);
             }

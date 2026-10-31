@@ -208,10 +208,13 @@ impl Scripts {
                 }
                 "break" => r.held_at = w[1].parse().unwrap_or(0),
                 _ => {
-                    let (Ok(n), Ok(mut t)) = (w[0].parse::<i32>(), w[1].parse::<f64>()) else {
+                    // $EPOCHREALTIME has the locale's decimal mark: a
+                    // comma where it's one (bash 5.3 on a Dutch Mac).
+                    let at = w[1].replace(',', ".");
+                    let (Ok(n), Ok(mut t)) = (w[0].parse::<i32>(), at.parse::<f64>()) else {
                         continue;
                     };
-                    if !w[1].contains('.') {
+                    if !at.contains('.') {
                         t += base;
                     }
                     if r.held_at != 0 && n != r.held_at {
@@ -414,5 +417,27 @@ mod tests {
             }]
         );
         assert_eq!(s.read("none"), None);
+    }
+
+    // $EPOCHREALTIME with a comma for its decimal mark, as bash writes it
+    // where the locale has one, reads as with a point: the hits are kept
+    // and a breakpoint let go is seen to be.
+    #[test]
+    fn read_comma_time() {
+        let home = tempfile::tempdir().unwrap();
+        let s = Scripts::new(home.path());
+        std::fs::create_dir_all(s.dir()).unwrap();
+        std::fs::write(s.dir().join("k.sh"), "a\nb\n").unwrap();
+        std::fs::write(
+            s.dir().join("k.trace"),
+            "pid 42 1000\n1 1000,25\nbreak 1\n1 1001,5\n2 1002,75\n",
+        )
+        .unwrap();
+        let r = s.read("k").unwrap();
+        assert_eq!(
+            r.hits.iter().map(|h| (h.line, h.at)).collect::<Vec<_>>(),
+            [(1, when(1000.25)), (1, when(1001.5)), (2, when(1002.75))]
+        );
+        assert_eq!(r.held_at, 0, "let go: it's moved on");
     }
 }

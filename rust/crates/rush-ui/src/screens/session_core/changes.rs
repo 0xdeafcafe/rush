@@ -17,7 +17,7 @@
 //! Changes is open (subs.rs: rushmode.go:99-118 fullSubs, ownfiles.go:65-90
 //! setHelpers, after each read). The column beside the conversation and
 //! the status line count only the project's files (project_changes,
-//! project_of; rushmode.go:3325, bars.go:257,268). The agents a step ran
+//! project_count_of; rushmode.go:3325, bars.go:257,268). The agents a step ran
 //! (the conversation's kids) are that step's children here as Go's
 //! SetChildren makes them (spawn.go:573, shownSteps :614): their edits
 //! count under the step and again as their helper, as Go's do. Its
@@ -350,17 +350,14 @@ pub fn change_stat(files: &[FileChange]) -> (i64, i64) {
         .fold((0, 0), |(a, d), f| (a + f.add, d + f.del))
 }
 
-/// The open session's edits, worked out again only when a step changed,
-/// its own or a subagent's (Changes' memo).
-pub fn of_open(m: &mut Model) -> Arc<Vec<FileChange>> {
-    let Some(v) = m.session.as_ref() else {
-        return Arc::default();
-    };
+/// What the open session's edits are worked out from: its steps, its
+/// subagents' and the agents its steps ran, read so far (SetChildren's
+/// ranVer).
+fn memo_ver(v: &crate::session::SessionView) -> Ver {
     let mut ver = v.sess.step_ver();
     for h in &v.sess.helpers {
         ver += h.sess.step_ver() + 1;
     }
-    // And the agents its steps ran, read so far (SetChildren's ranVer).
     let mut ran = 0;
     for k in v.o.kids.values().flatten() {
         if let Some(ks) = &k.sess {
@@ -368,7 +365,16 @@ pub fn of_open(m: &mut Model) -> Arc<Vec<FileChange>> {
             ran += 1;
         }
     }
-    let at = (v.sess.serial(), ver, v.sess.helpers.len() + (ran << 32));
+    (v.sess.serial(), ver, v.sess.helpers.len() + (ran << 32))
+}
+
+/// The open session's edits, worked out again only when a step changed,
+/// its own or a subagent's (Changes' memo).
+pub fn of_open(m: &mut Model) -> Arc<Vec<FileChange>> {
+    let Some(v) = m.session.as_ref() else {
+        return Arc::default();
+    };
+    let at = memo_ver(v);
     if let Some((k, c)) = &m.kept::<Trees>().memo
         && *k == at
     {
@@ -403,20 +409,31 @@ pub fn project_changes(m: &mut Model) -> (Vec<FileChange>, Vec<FileChange>) {
     all.iter().cloned().partition(|fc| inside(&root, &fc.path))
 }
 
-/// s's edits in its project only, as project_changes splits them, read
-/// without asking git: its root as last read, else its folder. For what
-/// draws from a shared Model (the status line's lines and files
-/// segments, bars.go:257,268).
-pub fn project_of(m: &Model, s: &Session) -> Vec<FileChange> {
-    // The open session's steps have the agents they ran under them.
-    let all = match m.session.as_ref().filter(|v| std::ptr::eq(&v.sess, s)) {
-        Some(v) => changes_with(s, &v.o.kids),
-        None => changes(s),
-    };
-    let dir = open_dir(s);
+/// The lines and files project_changes counts for the project, without
+/// copying its changes out: what the header says each frame.
+pub fn project_count(m: &mut Model) -> ((i64, i64), usize) {
+    let all = of_open(m);
+    let dir = m
+        .session
+        .as_ref()
+        .map(|v| open_dir(&v.sess))
+        .unwrap_or_default();
     if dir.is_empty() || all.is_empty() {
-        return all;
+        return (change_stat(&all), all.len());
     }
+    let mut root = tree_of(m, &dir).root;
+    if root.is_empty() {
+        root = dir;
+    }
+    count(all.iter().filter(|fc| inside(&root, &fc.path)))
+}
+
+/// s's edits in its project only, as project_changes splits them, read
+/// without asking git (its root as last read, else its folder), counted:
+/// their lines and how many files. For what draws from a shared Model
+/// (the status line's lines and files segments, bars.go:257,268).
+pub fn project_count_of(m: &Model, s: &Session) -> ((i64, i64), usize) {
+    let dir = open_dir(s);
     let root = m
         .kept
         .peek::<Trees>()
@@ -424,9 +441,25 @@ pub fn project_of(m: &Model, s: &Session) -> Vec<FileChange> {
         .map(|t| t.root.clone())
         .filter(|r| !r.is_empty())
         .unwrap_or(dir);
-    all.into_iter()
-        .filter(|fc| inside(&root, &fc.path))
-        .collect()
+    let mine = |fc: &&FileChange| root.is_empty() || inside(&root, &fc.path);
+    // The open session's steps have the agents they ran under them; its
+    // edits as of_open last worked them out, when they still are (each
+    // frame's header reads them first). Worked out again each time, a
+    // long session's took most of a frame, several times a frame.
+    match m.session.as_ref().filter(|v| std::ptr::eq(&v.sess, s)) {
+        Some(v) => match m.kept.peek::<Trees>().and_then(|t| t.memo.as_ref()) {
+            Some((k, c)) if *k == memo_ver(v) => count(c.iter().filter(mine)),
+            _ => count(changes_with(s, &v.o.kids).iter().filter(mine)),
+        },
+        None => count(changes(s).iter().filter(mine)),
+    }
+}
+
+/// Files' lines added and removed, and how many.
+fn count<'a>(files: impl Iterator<Item = &'a FileChange>) -> ((i64, i64), usize) {
+    files.fold(((0, 0), 0), |((a, d), n), f| {
+        ((a + f.add, d + f.del), n + 1)
+    })
 }
 
 /// Where the session works: the host's folder, else its agent's.
@@ -659,11 +692,15 @@ pub fn tree_of(m: &mut Model, dir: &str) -> Tree {
             move |m: &mut Model, t: Tree| {
                 let ts = m.kept::<Trees>();
                 ts.reading.remove(&d);
+                let first = !ts.by_dir.contains_key(&d);
                 let same = ts
                     .by_dir
                     .get(&d)
                     .is_some_and(|o| o.files == t.files && o.head == t.head && o.err == t.err);
                 ts.by_dir.insert(d, t);
+                if first {
+                    m.answered(); // "reading git…" goes now
+                }
                 if same { Out::Idle } else { Out::Draw }
             }
         });
@@ -733,7 +770,9 @@ fn tree_diff(m: &mut Model, t: &Tree, f: &TreeFile, full: bool) -> Vec<String> {
             move |m, lines| {
                 let ts = m.kept::<Trees>();
                 ts.diff_reading.remove(&key);
-                ts.diffs.insert(key, (at, lines));
+                if ts.diffs.insert(key, (at, lines)).is_none() {
+                    m.answered(); // "reading the diff…" goes now
+                }
                 Out::Draw
             },
         );
