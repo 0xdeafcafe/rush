@@ -124,3 +124,12 @@ impl Perf {
         self.cells.load(Ordering::Relaxed)
     }
 }
+
+/// Notes a line in the timing log, when it's on: what the app itself
+/// times (a session's host dialled, its history read). `what` is only
+/// called when the log is on.
+pub fn note(what: impl FnOnce() -> String) {
+    if let Some(p) = on() {
+        p.line(&format!("{} {}", now_us(), what()));
+    }
+}
