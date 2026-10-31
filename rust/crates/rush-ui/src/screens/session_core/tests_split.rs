@@ -170,6 +170,20 @@ fn back_to_the_list_keys() {
     }
 }
 
+/// ctrl+o (reply) and ⌘↓ go from the list into the picked agent's
+/// Session box; ctrl+o with text typed too (keys.go:421, :456).
+#[test]
+fn ctrl_o_and_cmd_down_go_in() {
+    for (k, typed) in [("ctrl+o", ""), ("ctrl+o", "half"), ("super+down", "")] {
+        let mut m = opened(120, 40, "split");
+        press(&mut m, "esc");
+        assert!(m.session.is_none());
+        m.input.set(typed);
+        press(&mut m, k);
+        assert!(m.session.is_some(), "{k} with {typed:?}");
+    }
+}
+
 /// At 170 and wider the Session beside the list stays when the list
 /// takes the keys and esc is pressed there: it's beside the list by
 /// itself (autoSplit).

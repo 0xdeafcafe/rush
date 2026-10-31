@@ -515,18 +515,10 @@ impl Model {
             "?" | "f1" if empty => self.help = true,
             "q" if letters => return Out::Quit,
             // With nothing typed, into the Session, as tab does
-            // (keys.go:473).
-            "{" | "}" | "tab" if empty => {
-                if self.open_room_for(&self.sel.clone()) {
-                    // A room's row, or one of its agents: the room opens
-                    // in the pane (switchFocus → focusPane → openRoomFor,
-                    // rushmode.go:5295), so what's typed next goes to it.
-                    let key = self.sel.clone();
-                    crate::screens::social::rooms::open_room(self, &key);
-                } else if let Some(i) = self.selected() {
-                    self.open(i);
-                }
-            }
+            // (keys.go:473); ctrl+o (reply) whatever's typed, and ⌘↓ with
+            // nothing typed, as in the Finder (keys.go:421, :456 focusPane).
+            "{" | "}" | "tab" | "super+down" if empty => self.focus_pane(),
+            "ctrl+o" => self.focus_pane(),
             "esc" if empty => {
                 if peek::back(self) {
                     return Out::Draw; // back to the Session you peeked from
@@ -545,6 +537,21 @@ impl Model {
             _ => return self.box_key(k).or_idle(),
         }
         Out::Draw
+    }
+
+    /// Into the picked agent's Session, its box taking the keys; a room's
+    /// row, or one of its agents, opens the room (focusPane,
+    /// rushmode.go:5291).
+    fn focus_pane(&mut self) {
+        if self.open_room_for(&self.sel.clone()) {
+            // A room's row, or one of its agents: the room opens
+            // in the pane (switchFocus → focusPane → openRoomFor,
+            // rushmode.go:5295), so what's typed next goes to it.
+            let key = self.sel.clone();
+            crate::screens::social::rooms::open_room(self, &key);
+        } else if let Some(i) = self.selected() {
+            self.open(i);
+        }
     }
 
     /// ← on a heading folds it; on an agent with subagents running, tucks
