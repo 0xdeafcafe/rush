@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io;
 use std::path::Path;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex, RwLock};
 use std::time::Duration;
 
 use rush_core::time::{Ms, now};
@@ -506,16 +506,50 @@ fn with_tokens(
 static RENEWED_AT: LazyLock<Mutex<HashMap<String, Ms>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+fn always() -> bool {
+    true
+}
+
+/// Whether this rush may refresh an expired sign-in on its own, asked as
+/// each reading finds one: every process may unless told otherwise.
+static LEADS: RwLock<fn() -> bool> = RwLock::new(always);
+
+/// Makes refreshing an expired sign-in on its own wait on leads: only the
+/// rush that leads refreshes, as a refresh replaces the sign-in's tokens
+/// and the old ones stop working for whoever else holds them (a rush that
+/// follows reads beside the one that leads, on the same sign-ins). Asking
+/// for one (renew_login) isn't held back. Rust-only: Go's following view
+/// is the one over SSH, on the same Mac's keychain as the one it follows.
+pub fn renew_while(leads: fn() -> bool) {
+    *LEADS.write().unwrap_or_else(|e| e.into_inner()) = leads;
+}
+
+/// Whether a reading may refresh an expired sign-in now (renew_while).
+pub fn renews() -> bool {
+    (LEADS.read().unwrap_or_else(|e| e.into_inner()))()
+}
+
 /// fetch's reading; when its sign-in has expired it's refreshed first, at
-/// most once in ten minutes for key. Only a revoked sign-in shows as the
-/// refresh's own error.
+/// most once in ten minutes for key, by the rush that leads (renew_while)
+/// and not in a dry run. Only a revoked sign-in shows as the refresh's own
+/// error.
 pub fn or_renew(
     key: &str,
     fetch: impl Fn() -> Result<Usage, OauthError>,
     renew: impl FnOnce() -> Result<(), OauthError>,
 ) -> Result<Usage, OauthError> {
+    or_renew_if(renews(), key, fetch, renew)
+}
+
+/// or_renew, refreshing only when leads.
+pub fn or_renew_if(
+    leads: bool,
+    key: &str,
+    fetch: impl Fn() -> Result<Usage, OauthError>,
+    renew: impl FnOnce() -> Result<(), OauthError>,
+) -> Result<Usage, OauthError> {
     let got = fetch();
-    if got != Err(OauthError::Expired) {
+    if got != Err(OauthError::Expired) || !leads {
         return got;
     }
     {
@@ -524,6 +558,9 @@ pub fn or_renew(
             return got;
         }
         at.insert(key.to_string(), now());
+    }
+    if rush_core::dryrun::would("renew sign-in", key, "its sign-in expired") {
+        return got;
     }
     let rerr = renew();
     let mut f = json!({"account": key, "why": "its sign-in expired"});
@@ -693,6 +730,42 @@ pub(crate) mod tests {
             );
         }
         assert_eq!(renews.load(Ordering::SeqCst), 1);
+    }
+
+    // A rush that doesn't lead never refreshes a sign-in on its own, and a
+    // dry run only writes down that it would.
+    #[test]
+    fn or_renew_only_leading_and_not_dry() {
+        let renews = AtomicUsize::new(0);
+        let got = or_renew_if(
+            false,
+            "login:test-follows",
+            || Err(OauthError::Expired),
+            || {
+                renews.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+        );
+        assert_eq!(got, Err(OauthError::Expired));
+        let dir = tempfile::tempdir().unwrap();
+        rush_core::dryrun::set_thread(Some((true, Some(dir.path().join("dry.log")))));
+        let got = or_renew_if(
+            true,
+            "login:test-dry",
+            || Err(OauthError::Expired),
+            || {
+                renews.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+        );
+        rush_core::dryrun::set_thread(None);
+        assert_eq!(got, Err(OauthError::Expired));
+        assert_eq!(renews.load(Ordering::SeqCst), 0);
+        let log = std::fs::read_to_string(dir.path().join("dry.log")).unwrap();
+        assert!(
+            log.contains("renew sign-in") && log.contains("login:test-dry"),
+            "{log}"
+        );
     }
 
     #[test]
