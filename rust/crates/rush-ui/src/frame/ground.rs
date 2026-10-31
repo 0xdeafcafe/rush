@@ -111,7 +111,9 @@ pub fn recoloured(g: Ground, colour_blind: bool, c: Color, bg: bool) -> Color {
     let Some(mut rgb) = Rgb::of(c) else {
         return c;
     };
-    if colour_blind && !bg {
+    // Text and a button filled in the colour alike (btnFill,
+    // style.go:68-76).
+    if colour_blind {
         if c == theme::DARK.green {
             rgb = Rgb::of(theme::COLOURBLIND_GREEN).unwrap_or(rgb);
         } else if c == theme::DARK.red {
@@ -321,6 +323,15 @@ mod tests {
         );
         assert_eq!(
             recoloured(DARK, true, theme::DARK.red, false),
+            theme::COLOURBLIND_RED
+        );
+        // A button filled in green or red too.
+        assert_eq!(
+            recoloured(DARK, true, theme::DARK.green, true),
+            theme::COLOURBLIND_GREEN
+        );
+        assert_eq!(
+            recoloured(DARK, true, theme::DARK.red, true),
             theme::COLOURBLIND_RED
         );
         assert_eq!(of_theme("light"), LIGHT);
