@@ -778,6 +778,23 @@ pub fn ask_text(
     value: &str,
     then: impl FnOnce(&mut Model, String) -> Out + 'static,
 ) {
+    // On a Settings page it's the page's own line at the foot, the rows
+    // left in view (settings_providers.go addAccount, ask()).
+    if crate::screens::settings::dialog_open(m) {
+        let then = std::cell::RefCell::new(Some(then));
+        crate::screens::settings::ask(
+            m,
+            what,
+            value,
+            std::rc::Rc::new(
+                move |m: &mut Model, v: &str| match then.borrow_mut().take() {
+                    Some(f) => f(m, v.to_string()),
+                    None => Out::Idle,
+                },
+            ),
+        );
+        return;
+    }
     m.open_sheet(Box::new(AskText {
         what: what.into(),
         text: value.chars().collect(),

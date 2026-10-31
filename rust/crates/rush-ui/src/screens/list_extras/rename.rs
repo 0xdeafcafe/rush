@@ -177,15 +177,8 @@ fn enter_on(m: &mut Model) -> Out {
     if m.room_of(&key).is_some() {
         return Out::Pass;
     }
-    // Settings' copy once it's open (the enter sheet saves there), else
-    // the one Accounts read.
-    let cfg = crate::screens::settings::loaded_config(m).or_else(|| {
-        crate::screens::accounts::state::peek(m)
-            .store
-            .as_ref()
-            .map(|s| &s.config)
-    });
-    let Some(cfg) = cfg else {
+    // rush's one config, once it's read.
+    let Some(cfg) = crate::screens::settings::loaded_config(m) else {
         return Out::Pass;
     };
     match cfg.enter_on.as_str() {

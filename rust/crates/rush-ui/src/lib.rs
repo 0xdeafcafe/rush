@@ -13,6 +13,7 @@ mod header;
 pub mod hosted;
 pub mod lead;
 pub mod list;
+mod listcache;
 mod model;
 pub mod overlay;
 pub mod screens;
@@ -63,6 +64,8 @@ fn run_model(
     }
     lead::hold_renewals(&m);
     setup(&mut m);
+    // rush's colours for the Theme and Colours kept (applyColors).
+    screens::settings::apply_colors(&mut m);
     // Links rush knows the kind of say where they stand (model.go:448).
     screens::cmdbar::linkkinds::start(&m);
     // Anything holding the UI thread over 40 ms is noted in stalls.log.
@@ -75,7 +78,9 @@ fn run_model(
     let is_hosted = hosted.is_some();
     let give: Box<dyn FnOnce(worker::DiscoveryCtl) + Send> = Box::new(move |ctl| {
         let _ = tx.send(worker::Note::Apply(Box::new(move |m: &mut Model| {
-            m.kept::<worker::FleetIn>().0 = Some(ctl.handle());
+            let f = m.kept::<worker::FleetIn>();
+            f.0 = Some(ctl.handle());
+            f.1 = Some(ctl.again());
             if is_hosted {
                 hosted::set_discovery(m, ctl)
             } else {
@@ -107,10 +112,21 @@ fn run_model(
     // Hosted is only the one session: nothing about the app as a whole
     // (model.go:556 Init).
     if hosted.is_none() {
+        screens::settings::sheets::watch_net(&mut m);
+        screens::settings::sheets::start_menu_bar(&mut m);
+        screens::settings::updates::start(&mut m);
         screens::settings::sheets::start_view(&mut m);
+    }
+    // The list as last read, shown until the first reading lands
+    // (listcache.rs).
+    if hosted.is_none() {
+        listcache::load(&m);
     }
     let mut term = Term::new()?;
     m.keys_disambiguated = term.keys_disambiguated();
+    // Made again now the terminal has said its colours, for Theme's
+    // "match terminal" (model.go:1219 BackgroundColorMsg, applyColors).
+    screens::settings::apply_colors(&mut m);
     let (w, h) = term.size()?;
     m.w = w as usize;
     m.h = h as usize;
@@ -135,6 +151,7 @@ fn run_model(
     // start it (resumeAll).
     screens::projects_machine::shells::resume_all();
     worker::flush_spend();
+    listcache::save_now(&mut m);
     r.map(|()| m.reload_env())
 }
 

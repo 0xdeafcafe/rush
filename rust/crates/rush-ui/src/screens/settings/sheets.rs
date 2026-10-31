@@ -102,15 +102,34 @@ pub fn start_view(m: &mut Model) {
         m.open_sheet(Box::new(ViewSheet::default()));
         return;
     }
+    open_view(m);
     ask_menu_bar(m);
 }
 
+/// Puts the kept layout on screen (openView): the Session alone opens on
+/// the picked agent, with the whole screen; the others lay out on their
+/// own.
+pub fn open_view(m: &mut Model) {
+    m.full = false;
+    if config(m).view != "agent" {
+        return;
+    }
+    let Some(i) = m.selected() else {
+        return;
+    };
+    m.full = true;
+    if m.session.as_ref().is_none_or(|v| v.key != m.agents[i].key) {
+        m.open(i);
+    }
+}
+
 impl ViewSheet {
-    /// Keeps the layout chosen (pick).
+    /// Keeps the layout chosen and puts it on screen (pick).
     fn pick(&self, m: &mut Model) -> Out {
         config_mut(m).set_view(VIEW_CHOICES[self.cur].0);
         super::changed(m);
         m.sheet = None;
+        open_view(m);
         ask_menu_bar(m);
         if m.sheet.is_some() {
             return Out::Draw;
@@ -204,11 +223,55 @@ impl MenuBarSheet {
         let on = c.menu_bar;
         super::changed(m);
         if on {
-            // Building and starting the icon is the menu bar's own
-            // module's: it starts from what's kept here.
-            m.flash("putting rush in the menu bar…");
+            if m.leads() {
+                m.flash("putting rush in the menu bar…");
+            }
+            // A following rush says it leaves the icon alone.
+            menu_bar_changed(m, true);
         }
         Out::Close
+    }
+}
+
+/// Opens the menu bar icon when it's on, building it first if rush
+/// changed since; one left running by an older rush is replaced
+/// (startMenuBar, model.go:602). Off the UI; a failure is said. Only the
+/// rush that leads starts it (a following one, a test or `--render`
+/// never does: it's an app on the Mac, not this window's).
+pub fn start_menu_bar(m: &mut Model) {
+    if !super::store(m).config.menu_bar || m.sender().is_none() || !m.leads() {
+        return;
+    }
+    m.later(rush_menubar::start, |m, r| match r {
+        Ok(()) => Out::Idle,
+        Err(e) => {
+            m.fail(&e);
+            Out::Draw
+        }
+    });
+}
+
+/// Quits the menu bar icon, every copy of it (menubar.Stop): it reads its
+/// lock file and runs pkill, so off the UI. Only the rush that leads.
+pub fn stop_menu_bar(m: &mut Model) {
+    if m.sender().is_none() || !m.leads() {
+        return;
+    }
+    m.later(rush_menubar::stop, |_, ()| Out::Idle);
+}
+
+/// What the menu bar row and sheet do once the choice is kept: the icon
+/// started or stopped at once (settings_general.go:126-136); a rush that
+/// follows says it leaves it to the one that leads.
+pub fn menu_bar_changed(m: &mut Model, on: bool) {
+    if !m.leads() {
+        m.flash("kept · this rush follows another, so it leaves the menu bar icon alone");
+        return;
+    }
+    if on {
+        start_menu_bar(m);
+    } else {
+        stop_menu_bar(m);
     }
 }
 
@@ -296,12 +359,77 @@ pub fn net_seg() -> Line {
     }
 }
 
+/// The network watched for the TUI's whole life, as Go's Init starts it
+/// (model.go:560 watchNet): the top bar's "net steady / net shaky /
+/// offline" needs the API checked on its timings, as Go's netwatch always
+/// does.
+#[derive(Default)]
+struct NetWatched(Option<netwatch::ChecksGuard<'static>>);
+
+/// Starts netwatch and waits for the network to change (watchNet): each
+/// time the API comes back or the machine joins another network, what
+/// waited on it is asked again at once (onNet). Only with a loop: a test
+/// or `--render` never watches.
+pub fn watch_net(m: &mut Model) {
+    let Some(tx) = m.sender() else {
+        return;
+    };
+    if m.kept::<NetWatched>().0.is_some() {
+        return;
+    }
+    netwatch::start();
+    m.kept::<NetWatched>().0 = Some(netwatch::want_checks());
+    let tx = tx.lane(1);
+    let _ = std::thread::Builder::new()
+        .name("rush-net".into())
+        .spawn(move || {
+            loop {
+                let rx = netwatch::changes();
+                if rx.recv().is_err() {
+                    return;
+                }
+                let apply: crate::frame::work::Apply = Box::new(on_net);
+                if !tx.send(crate::worker::Note::Apply(apply)) {
+                    return;
+                }
+            }
+        });
+}
+
+/// Whether this rush watches the network (a TUI, after watch_net).
+pub fn net_watched(m: &Model) -> bool {
+    m.kept.peek::<NetWatched>().is_some_and(|n| n.0.is_some())
+}
+
+/// The API came back or the network changed: usage, logins and every
+/// other account's limits asked for again at once rather than at the
+/// next fetch, unless it's down (onNet).
+pub fn on_net(m: &mut Model) -> Out {
+    let s = netwatch::now();
+    let down = netwatch::down();
+    let mut f = serde_json::Map::new();
+    f.insert("up".into(), s.up.into());
+    f.insert("known".into(), s.known.into());
+    f.insert("target".into(), s.target.clone().into());
+    f.insert("why".into(), s.why.clone().into());
+    f.insert("refetch".into(), (!down).into());
+    rush_events::log("network-changed", f);
+    if !down {
+        crate::screens::accounts::logins::fetch_usage(m);
+        crate::screens::accounts::logins::find_logins(m);
+        crate::screens::bars::fetch::fetch_now(m);
+    }
+    Out::Draw
+}
+
 /// #network: whether the API answers, the network rush is on, what of
 /// rush's waits for it, and the sessions it stopped (netSheet). While
 /// it's open the network is checked and its rates read.
 pub struct NetSheet {
     _checks: netwatch::ChecksGuard<'static>,
     _rates: netwatch::RatesGuard<'static>,
+    /// When it's drawn again: a second after it last was.
+    next: Option<std::time::Instant>,
 }
 
 impl NetSheet {
@@ -310,6 +438,20 @@ impl NetSheet {
         NetSheet {
             _checks: netwatch::want_checks(),
             _rates: netwatch::watch_rates(),
+            next: None,
+        }
+    }
+}
+
+#[cfg(test)]
+impl NetSheet {
+    /// The sheet with netwatch not started: a test never asks the
+    /// network.
+    pub(crate) fn unstarted() -> NetSheet {
+        NetSheet {
+            _checks: netwatch::want_checks(),
+            _rates: netwatch::watch_rates(),
+            next: None,
         }
     }
 }
@@ -381,11 +523,13 @@ impl Sheet for NetSheet {
     }
 
     fn wake_at(&self, _m: &Model) -> Option<std::time::Instant> {
-        // Its ages and rates move while it's open.
-        Some(std::time::Instant::now() + Duration::from_secs(1))
+        // Its ages and rates move while it's open: drawn a second after
+        // it last was (a time fixed when drawn, so the wake comes due).
+        self.next
     }
 
     fn body(&mut self, m: &Model, w: usize, h: usize) -> Vec<Line> {
+        self.next = Some(std::time::Instant::now() + Duration::from_secs(1));
         let s = netwatch::now();
         let now = m.now;
         let label = |l: &str| sp(format!("{l:<13}"), SUB);

@@ -426,8 +426,9 @@ pub fn change_lines(c: Option<&Change>, harness: &str, lead: &str, w: usize, now
         return Vec::new();
     };
     let mut head = line([plain(lead), spb("Since the last start", SUB)]);
-    if c.at != 0 {
-        let ago = (now - c.at).max(0) / 1000 * 1000;
+    let at = c.at.ms();
+    if at != 0 {
+        let ago = (now - at).max(0) / 1000 * 1000;
         head.spans.push(dim(format!(
             " · restarted {} ago",
             rush_convo::render::dur(ago)

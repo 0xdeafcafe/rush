@@ -11,8 +11,10 @@ use crate::model::Model;
 pub(crate) fn on_fleet(m: &mut Model) {
     let mut idx: Vec<usize> = (0..m.agents.len()).collect();
     idx.sort_by_key(|i| std::cmp::Reverse(m.agents[*i].job.created_at));
-    let keys = idx.into_iter().map(|i| m.agents[i].key.clone()).collect();
-    accounts(m).newest = keys;
+    let keys = idx.iter().map(|&i| m.agents[i].key.clone()).collect();
+    let a = accounts(m);
+    a.newest = keys;
+    a.newest_at = idx;
 }
 
 /// Up to 3 setups the fleet's agents ran, newest first, each once, cur
@@ -24,11 +26,17 @@ pub fn recent_setups(m: &Model, cur: &StartOver) -> Vec<StartOver> {
     // Most of a fleet runs a few setups: each is weighed once.
     let mut tried: Vec<(String, String)> = Vec::new();
     let st = peek(m);
-    for key in &st.newest {
+    for (n, key) in st.newest.iter().enumerate() {
         if out.len() == 3 {
             break;
         }
-        let Some(a) = m.agents.iter().find(|a| a.key == *key) else {
+        // Where it was when sorted, unless the list has changed since.
+        let at = st
+            .newest_at
+            .get(n)
+            .and_then(|&i| m.agents.get(i))
+            .filter(|a| a.key == *key);
+        let Some(a) = at.or_else(|| m.agents.iter().find(|a| a.key == *key)) else {
             continue;
         };
         if a.advisor {

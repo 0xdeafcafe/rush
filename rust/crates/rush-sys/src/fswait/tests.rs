@@ -351,3 +351,162 @@ fn follow_misses_no_write() {
     assert_eq!(texts, ["x", "y", "z"]);
     stop.close();
 }
+
+// A watcher of many: a folder of many watched paths is watched through
+// one FSEvents stream, with no descriptor each, and tells what kqueue
+// would: a folder's entries added, removed or renamed, a file written,
+// but not a file written deep inside a watched folder.
+#[cfg(target_os = "macos")]
+#[test]
+fn watcher_many() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("sessions");
+    std::fs::create_dir(&root).unwrap();
+    let dirs: Vec<PathBuf> = (0..20)
+        .map(|i| {
+            let s = root.join(format!("s{i}"));
+            std::fs::create_dir(&s).unwrap();
+            std::fs::write(s.join("events.jsonl"), "a\n").unwrap();
+            s
+        })
+        .collect();
+    let files: Vec<PathBuf> = (0..10)
+        .map(|i| {
+            let f = root.join(format!("f{i}.json"));
+            std::fs::write(&f, "{}").unwrap();
+            f
+        })
+        .collect();
+    let lone = d.path().join("state.json");
+    std::fs::write(&lone, "{}").unwrap();
+    let mut paths = vec![root.clone(), lone.clone()];
+    paths.extend(dirs.iter().cloned());
+    paths.extend(files.iter().cloned());
+    let w = Watcher::many();
+    // Nothing keeps a descriptor for having changed lately, till below.
+    w.inner().recent = Duration::ZERO;
+    w.watch(&paths);
+    // Only the few have a descriptor each.
+    assert_eq!(w.inner().fds.len(), 2);
+    assert!(paths.iter().all(|p| w.watching(p)));
+    let (got, all) = w.changes();
+    assert!(all && got.len() == paths.len(), "first ask: {}", got.len());
+    // Told once a stream's news is in: wait for it (a wait times out true
+    // too, so what's told is what counts).
+    let next = |w: &Watcher| {
+        w.wait(None, Some(Duration::from_millis(500)));
+        w.changes()
+    };
+    assert_eq!(next(&w), (HashSet::new(), false), "nothing happened");
+    // What's told until p is, over a few waits.
+    let told = |w: &Watcher, p: &PathBuf| {
+        let mut got = w.changes().0;
+        for _ in 0..10 {
+            if got.contains(p) {
+                break;
+            }
+            got.extend(next(w).0);
+        }
+        got
+    };
+
+    // info.json replaced by rename in a session's folder: the folder.
+    let tmp = dirs[3].join("info.json.tmp");
+    std::fs::write(&tmp, "{}").unwrap();
+    let t0 = std::time::Instant::now();
+    std::fs::rename(&tmp, dirs[3].join("info.json")).unwrap();
+    assert!(w.wait(None, Some(Duration::from_secs(10))));
+    assert!(
+        t0.elapsed() < Duration::from_secs(5),
+        "slow: {:?}",
+        t0.elapsed()
+    );
+    assert_eq!(told(&w, &dirs[3]), HashSet::from([dirs[3].clone()]));
+
+    // Appends to a file inside a watched folder: kqueue on the folder
+    // wouldn't tell, nor does this.
+    for _ in 0..3 {
+        append(&dirs[5].join("events.jsonl"), "b\n");
+    }
+    assert_eq!(next(&w).0, HashSet::new(), "a deep append was told");
+
+    // A watched file written in place is told.
+    append(&files[2], " ");
+    assert_eq!(told(&w, &files[2]), HashSet::from([files[2].clone()]));
+
+    // A folder removed: told, and no longer watched; back, it's watched
+    // again by the next watch and told once.
+    std::fs::remove_dir_all(&dirs[7]).unwrap();
+    let got = told(&w, &dirs[7]);
+    assert!(got.contains(&dirs[7]) && !w.watching(&dirs[7]), "{got:?}");
+    // The sessions folder itself has a descriptor: told too.
+    assert!(got.contains(&root), "{got:?}");
+    std::fs::create_dir(&dirs[7]).unwrap();
+    w.watch(&paths);
+    assert!(w.watching(&dirs[7]));
+    assert!(w.changes().0.contains(&dirs[7]));
+
+    // The lone file keeps kqueue's word: told at once.
+    append(&lone, " ");
+    assert!(w.changes().0.contains(&lone));
+
+    // New since the folder was first watched, a path keeps a descriptor
+    // a while (a session just made is likely live): told at once.
+    std::fs::remove_dir_all(&dirs[13]).unwrap();
+    assert!(told(&w, &dirs[13]).contains(&dirs[13]));
+    std::fs::create_dir(&dirs[13]).unwrap();
+    w.inner().recent = Duration::from_secs(3600);
+    w.watch(&paths);
+    assert!(
+        w.inner().fds.contains_key(&dirs[13]),
+        "a new one on the stream"
+    );
+    w.changes();
+    std::fs::write(dirs[13].join("info.json"), "{}").unwrap();
+    assert!(w.changes().0.contains(&dirs[13]), "not told at once");
+    // Quiet a while, it goes onto the stream, its descriptor kept till
+    // the next ask has read what it told.
+    w.inner().recent = Duration::ZERO;
+    w.watch(&paths);
+    assert!(w.inner().fds.contains_key(&dirs[13]) && w.watching(&dirs[13]));
+    std::fs::write(dirs[13].join("events.jsonl.tmp"), "").unwrap();
+    assert!(
+        w.changes().0.contains(&dirs[13]),
+        "lost moving to the stream"
+    );
+    assert!(!w.inner().fds.contains_key(&dirs[13]) && w.watching(&dirs[13]));
+
+    // Told by the stream, a path stays on it: no stream made again.
+    let before = w.inner().streamed.clone();
+    std::fs::write(dirs[9].join("info.json"), "{}").unwrap();
+    assert!(told(&w, &dirs[9]).contains(&dirs[9]));
+    w.watch(&paths);
+    assert_eq!(w.inner().streamed, before);
+
+    // Written in deep inside, a folder gets a descriptor of its own
+    // (writes there cost the stream a delivery each); quiet, it goes back.
+    for _ in 0..3 {
+        append(&dirs[11].join("events.jsonl"), "b\n");
+    }
+    let mut got = false;
+    for _ in 0..20 {
+        w.wait(None, Some(Duration::from_millis(100)));
+        if w.inner().fds.contains_key(&dirs[11]) {
+            got = true;
+            break;
+        }
+    }
+    assert!(got, "a busy folder stayed on the stream");
+    assert!(!w.inner().streamed.iter().any(|p| p.ends_with("s11")));
+    std::fs::write(dirs[11].join("x"), "").unwrap();
+    assert!(w.changes().0.contains(&dirs[11]), "busy, not told at once");
+    w.watch(&paths);
+    w.changes();
+    assert!(!w.inner().fds.contains_key(&dirs[11]) && w.watching(&dirs[11]));
+
+    // Fewer than many in the folder: back to a descriptor each.
+    w.watch(&[&root, &dirs[0], &dirs[1]]);
+    assert_eq!(w.inner().fds.len(), 3);
+    assert!(w.inner().stream.is_none());
+    w.close();
+}

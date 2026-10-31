@@ -54,6 +54,37 @@ fn stacked_at_share() {
     assert!(m.stacked(40, 20), "too narrow always stacks");
 }
 
+/// Settings › Second line transparency fades a stacked row's second line
+/// toward the background: "50%" half way (view.go:2111 subLineFade,
+/// fadeText).
+#[test]
+fn the_second_line_fades() {
+    use crate::frame::ground::{Rgb, mix, painted};
+    let mut m = model_of(vec![agent("a1", "one", State::Idle, 1)], 300, 40);
+    let i = m.agents.iter().position(|a| a.key.ends_with("a1")).unwrap();
+    let fgs = |m: &crate::model::Model| -> Vec<_> {
+        m.agent_sub(i, 60)
+            .spans
+            .iter()
+            .skip(2)
+            .map(|s| s.style.fg)
+            .collect()
+    };
+    let before = fgs(&m);
+    assert!(!before.is_empty());
+    m.cfg.sub_line = "50%".into();
+    let after = fgs(&m);
+    for (b, a) in before.iter().zip(&after) {
+        let want = Rgb::of(*b).map(|c| mix(c, painted().bg, 0.5).color());
+        assert_eq!(Some(*a), want);
+    }
+    assert_eq!(
+        m.agent_sub(i, 60).spans[1].style.fg,
+        crate::style::FAINT,
+        "the hook stays as it is"
+    );
+}
+
 /// ↑↓ stop on every section heading; there the agent picked before stays
 /// the one shown (listmove_test.go).
 #[test]

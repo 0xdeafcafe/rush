@@ -1098,6 +1098,47 @@ fn exchange_guide_and_rejected_delivery() {
     );
 }
 
+// host.go:1907, :1916: an exchange the host takes goes on the feed while
+// it's on, in the two agents' thread.
+#[test]
+fn a_taken_exchange_goes_on_the_feed() {
+    let home = Home::new();
+    std::fs::write(home.path().join("config.json"), r#"{"twatter":true}"#).unwrap();
+    let mut e = exchange("fx", "please look at the cache", "codex");
+    e.direction = "received".into();
+    e.receiver = Peer {
+        session_id: "dest".into(),
+        kind: "claude".into(),
+        name: "Beta".into(),
+    };
+    let h = host(Config {
+        id: "dest".into(),
+        kind: "claude".into(),
+        ..Config::default()
+    });
+    h.do_op(op("exchange", |o| o.exchange = Some(Box::new(e.clone()))))
+        .unwrap();
+    let feed = rush_room::community::Feed::new();
+    let w = rush_sys::fswait::Watcher::new();
+    std::fs::create_dir_all(home.path().join("community")).unwrap();
+    w.watch(&[home.path().join("community")]);
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let rows = loop {
+        let rows = feed.list().unwrap_or_default();
+        let now = std::time::Instant::now();
+        if !rows.is_empty() || now >= deadline {
+            break rows;
+        }
+        w.wait(None, Some((deadline - now).min(Duration::from_millis(50))));
+    };
+    assert_eq!(rows.len(), 1, "not on the feed: {rows:?}");
+    let m = &rows[0].messages[0];
+    assert_eq!(m.author.session_id, "source");
+    assert_eq!(m.exchange, "fx");
+    assert_eq!(m.text, "please look at the cache");
+    assert_eq!(rows[0].to.as_ref().map(|a| a.name.as_str()), Some("Beta"));
+}
+
 // exchange_test.go:48
 #[test]
 fn exchange_queue_retains_attribution() {

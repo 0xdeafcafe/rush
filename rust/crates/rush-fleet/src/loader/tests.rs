@@ -1118,6 +1118,43 @@ fn fresh() {
     assert!(!l.fresh(&d.path().join("unwatched"), at));
 }
 
+// With its caller's watcher shared, the loader trusts only what the
+// caller tells: a path newly watched or told changed is looked at again,
+// one quiet since is trusted, and a sweep or a load told "can't tell"
+// trusts nothing.
+#[cfg(target_os = "macos")]
+#[test]
+fn fresh_shared() {
+    let d = tempfile::tempdir().unwrap();
+    let f = d.path().join("t.jsonl");
+    std::fs::write(&f, "a\n").unwrap();
+    let mut l = loader();
+    let w = std::sync::Arc::new(rush_sys::fswait::Watcher::new());
+    l.watch_shared(w.clone());
+    let t = now();
+    begin(&mut l, t); // the first sweeps
+    let at = l.checked();
+    w.watch(&[&f]);
+    l.told(Some(std::slice::from_ref(&f))); // newly watched: read before it was
+    begin(&mut l, t);
+    assert!(!l.fresh(&f, at), "trusted across being newly watched");
+    let at = l.checked();
+    begin(&mut l, t);
+    assert!(l.fresh(&f, at), "a quiet watched file isn't fresh");
+    l.told(Some(std::slice::from_ref(&f)));
+    begin(&mut l, t);
+    assert!(!l.fresh(&f, at), "trusted after being told it changed");
+    let at = l.checked();
+    begin(&mut l, t);
+    assert!(l.fresh(&f, at));
+    l.told(None);
+    begin(&mut l, t);
+    assert!(!l.fresh(&f, at), "trusted when the caller couldn't tell");
+    let at = l.checked();
+    begin(&mut l, t + 30_000);
+    assert!(!l.fresh(&f, at), "fresh in a sweep");
+}
+
 // A row with no subagents folder, rewound to a conversation that has one
 // in the same quiet project, counts the new one's runs.
 #[cfg(target_os = "macos")]

@@ -1228,6 +1228,7 @@ dependencies = [
  "rush-testenv",
  "signal-hook",
  "unicode-segmentation",
+ "unicode-width 0.2.0",
 ]
 
 [[package]]
@@ -1336,6 +1337,7 @@ dependencies = [
  "rush-gate",
  "rush-net",
  "rush-remind",
+ "rush-room",
  "rush-state",
  "rush-sys",
  "rush-testenv",

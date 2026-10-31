@@ -1,24 +1,27 @@
-//! The grid: agents pinned beside the open Session, or under it, each a
-//! tile drawn as the Wall draws one; a click on a tile swaps that agent
-//! in, and the one it replaces takes the tile; the edge between them is
-//! a handle that resizes the tiles. After Go's internal/ui/grid.go
-//! (gridState :16, gridLayout :31, gridMinW/H :37, gridAgents :43,
-//! gridPin :59, gridUnpin :83, gridSplit :98, gridJoin :136, gridClick
-//! :201, gridSave :334, gridDrag :347), the grid as it was left
-//! (model.go:485), laid round the Session as view.go:1216-1244 does,
-//! and its clicks and drags (model.go:1496, :1589, :1640). Kept in
-//! `Model::kept::<Grid>()`. Not here yet: a tile's own kept Session
-//! (gridSession, gridAdopt, gridPark, gridClose, gridKey), so each tile
-//! is drawn as the Wall draws one, as Go draws a tile with no session
-//! kept.
+//! The grid: agents pinned beside the open Session, or under it. A
+//! pinned agent's Session is kept open when another is opened, and its
+//! tile is that Session drawn small, its conversation and its own box; a
+//! tile with no Session kept is drawn as the Wall draws one. A click on a
+//! tile's box gives it the keys where it is; anywhere else on the tile
+//! swaps that agent in, and the one it replaces takes the tile; the edge
+//! between them is a handle that resizes the tiles. After Go's
+//! internal/ui/grid.go (gridState :16, gridLayout :31, gridMinW/H :37,
+//! gridAgents :43, gridPin :59, gridUnpin :83, gridSplit :98, gridJoin
+//! :136, gridClick :201, gridAdopt :256, gridPark :277, gridClose :289,
+//! withHost :305, gridSession :316, gridSave :334, gridDrag :347, gridKey
+//! :364), the grid as it was left (model.go:485), laid round the Session
+//! as view.go:1216-1244 does, and its clicks and drags (model.go:1496,
+//! :1589, :1640). Kept in `Model::kept::<Grid>()`; the tiles' Sessions in
+//! `Model::tiles`, whose host connections stay open with them (live.rs).
 
 use std::collections::HashMap;
 
 use rush_core::text::Line;
 use rush_draw::{Button, MouseKind};
 
-use crate::frame::{Mouse, Out};
+use crate::frame::{Mouse, Out, Press};
 use crate::model::Model;
+use crate::session::SessionView;
 use crate::style::*;
 
 /// Tiles narrower or shorter than these aren't drawn: the Session has it
@@ -59,6 +62,9 @@ pub struct Grid {
     pub drag: bool,
     /// Taken from the config already (the grid as it was left).
     pub loaded: bool,
+    /// The screen row each tile's box was drawn on, by agent key: a click
+    /// from there down gives the tile the keys (gridClick's c.dockY).
+    pub box_at: HashMap<String, usize>,
 }
 
 /// The grid, as it was left the first time it's asked for (model.go:485).
@@ -81,9 +87,9 @@ pub fn grid(m: &mut Model) -> &mut Grid {
     m.kept::<Grid>()
 }
 
-/// Keeps the grid for the next start (gridSave): in Settings' copy of
-/// the config too, so a setting changed there doesn't save the old grid
-/// back, and on disk in order with every other change.
+/// Keeps the grid for the next start (gridSave): in rush's store too,
+/// so a setting changed in Settings doesn't save the old grid back, and
+/// on disk in order with every other change.
 fn save(m: &mut Model) {
     let g = grid(m);
     let keys = g.keys.clone();
@@ -161,7 +167,169 @@ pub fn unpin(m: &mut Model, all: bool) {
     } else {
         g.keys.pop();
     }
+    close(m);
     save(m);
+}
+
+/// Keeps v, a Session being let go, for its tile when its agent is
+/// pinned; any other is let go (gridPark).
+pub fn park(m: &mut Model, v: SessionView) {
+    if grid(m).keys.contains(&v.key) {
+        m.tiles.insert(v.key.clone(), v);
+    }
+}
+
+/// The kept Session of key's tile, taken out to be the one shown; None
+/// when it has none (gridAdopt).
+pub fn adopt(m: &mut Model, key: &str) -> Option<SessionView> {
+    let v = m.tiles.remove(key)?;
+    let g = m.kept::<Grid>();
+    if g.focus == key {
+        g.focus.clear();
+    }
+    Some(v)
+}
+
+/// Lets go of the kept Sessions of tiles no longer pinned, and their
+/// hosts' connections (gridClose).
+pub fn close(m: &mut Model) {
+    let keys = grid(m).keys.clone();
+    let gone: Vec<String> = m
+        .tiles
+        .keys()
+        .filter(|k| !keys.contains(k))
+        .cloned()
+        .collect();
+    for k in gone {
+        m.tiles.remove(&k);
+        if crate::screens::session_core::live::showing(m).as_deref() != Some(k.as_str()) {
+            crate::screens::session_core::live::drop_link(m, &k);
+        }
+    }
+    let g = grid(m);
+    if !g.keys.contains(&g.focus) {
+        g.focus.clear();
+    }
+}
+
+/// A tile's Session is being drawn or given a key as though it were the
+/// open one (with_tile): which connection to keep open isn't decided
+/// meanwhile (live::sync), or the open one's would be let go.
+#[derive(Default)]
+pub struct InTile(pub bool);
+
+/// Runs f with key's kept Session as the open one, given the keys or not,
+/// then puts it back in its tile and the one that was open back where it
+/// was (withHost). None when key has none kept.
+fn with_tile<T>(
+    m: &mut Model,
+    key: &str,
+    focused: bool,
+    f: impl FnOnce(&mut Model) -> T,
+) -> Option<T> {
+    let v = m.tiles.remove(key)?;
+    let session = m.session.replace(v);
+    let pane = m.pane.take();
+    let sel = std::mem::replace(&mut m.sel, key.to_string());
+    let shown = m.shown.clone();
+    let idle = std::mem::replace(&mut m.pane_idle, !focused);
+    let hint = crate::screens::session_core::core(m).hint.clone();
+    let within = std::mem::replace(&mut m.kept::<InTile>().0, true);
+    let out = f(m);
+    m.kept::<InTile>().0 = within;
+    // Whichever slot it ended in, it goes back to its tile.
+    let back = m
+        .session
+        .take_if(|v| v.key == key)
+        .or_else(|| m.pane.take_if(|v| v.key == key));
+    if let Some(v) = back {
+        m.tiles.insert(key.to_string(), v);
+    }
+    m.session = session;
+    m.pane = pane;
+    m.sel = sel;
+    m.shown = shown;
+    m.pane_idle = idle;
+    crate::screens::session_core::core(m).hint = hint;
+    Some(out)
+}
+
+/// Agent i's tile w×h, its top on screen row top: its kept Session drawn
+/// small, a rule on its left (orange while its box has the keys), else
+/// as the Wall draws it (gridJoin's draw, gridSession). The row its box
+/// landed on is noted in box_at.
+fn tile(
+    m: &mut Model,
+    box_at: &mut HashMap<String, usize>,
+    focus: &str,
+    i: usize,
+    w: usize,
+    h: usize,
+    top: usize,
+) -> Vec<Line> {
+    let key = m.agents[i].key.clone();
+    let focused = focus == key;
+    // The open Session's spinner keeps going whatever the tile says.
+    let spinning = m.spinning();
+    let drawn = with_tile(m, &key, focused, |m| {
+        let lines = m.tile_frame(top, h, w.saturating_sub(1));
+        let edge = crate::screens::session_core::conn(m, &key)
+            .drawn
+            .lines()
+            .first()
+            .map(Line::plain);
+        (lines, edge)
+    });
+    m.keep_spinning(spinning);
+    box_at.remove(&key);
+    let Some((mut lines, edge)) = drawn else {
+        return super::wall::Wall::default().tile(m, i, w, h, false);
+    };
+    if let Some(e) = edge.filter(|e| !e.trim().is_empty())
+        && let Some(r) = lines.iter().rposition(|l| l.plain().contains(e.trim()))
+    {
+        box_at.insert(key.clone(), top + r);
+    }
+    let rule = if focused {
+        sp("┃", ORANGE)
+    } else {
+        sp("│", FAINT)
+    };
+    for l in &mut lines {
+        l.spans.insert(0, rule.clone());
+    }
+    lines
+}
+
+/// A key while a tile's box has them: its Session takes it where it is,
+/// as though it were open, the open one staying; esc in its empty box
+/// hands them back (gridKey). None when no tile has them.
+pub fn key(m: &mut Model, k: &Press) -> Option<Out> {
+    let focus = m.kept.peek::<Grid>().map(|g| g.focus.clone())?;
+    if focus.is_empty() || k.s == "tab" || m.sheet.is_some() || m.confirm.is_some() {
+        return None;
+    }
+    if !grid(m).keys.contains(&focus) || !m.tiles.contains_key(&focus) {
+        grid(m).focus.clear();
+        return None;
+    }
+    let empty = crate::screens::session_core::conn(m, &focus)
+        .input
+        .is_empty()
+        && m.tiles.get(&focus).is_some_and(|v| v.sel.is_empty());
+    if k.s == "esc" && empty {
+        grid(m).focus.clear();
+        return Some(Out::Draw);
+    }
+    let full = m.w;
+    let w = grid(m)
+        .at
+        .iter()
+        .find(|t| t.key == focus)
+        .map_or(full, |t| t.w.saturating_sub(1));
+    with_tile(m, &focus, true, |m| {
+        crate::screens::list_extras::split::in_pane(m, w, |m| m.session_press(k))
+    })
 }
 
 /// The Session's pane, pw wide and rows tall, with the grid's tiles laid
@@ -181,14 +349,26 @@ pub fn round_pane(
     let mut l = split(m, &g, pw.saturating_sub(3), rows);
     let out = if l.col.is_empty() && l.row.is_empty() {
         g.at.clear();
+        g.box_at.clear();
         (g.col_x, g.row_y) = (0, 0);
         draw(m, pw, rows)
     } else {
         l.sw += 3; // the Session's margins
         let pane = draw(m, l.sw, l.sh);
-        let wall = super::wall::Wall::default();
-        let tile = |i: usize, w: usize, h: usize| wall.tile(m, i, w, h, false);
-        join(m, &mut g, &pane, x, y, &l, &tile)
+        // Each tile drawn first, where it goes: its Session's box is
+        // found on screen for clicks.
+        let mut drawn: HashMap<usize, Vec<Line>> = HashMap::new();
+        let mut box_at = std::mem::take(&mut g.box_at);
+        for &i in &l.col {
+            drawn.insert(i, tile(m, &mut box_at, &g.focus, i, l.cw, l.ch, y));
+        }
+        for &i in &l.row {
+            let t = tile(m, &mut box_at, &g.focus, i, l.rw, l.rh, y + l.sh);
+            drawn.insert(i, t);
+        }
+        g.box_at = box_at;
+        let get = |i: usize, _: usize, _: usize| drawn.get(&i).cloned().unwrap_or_default();
+        join(m, &mut g, &pane, x, y, &l, &get)
     };
     *m.kept::<Grid>() = g;
     out
@@ -218,7 +398,7 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
             *m.kept::<Grid>() = g;
             match c {
                 Click::Miss => Out::Pass,
-                Click::Edge => Out::Draw,
+                Click::Edge | Click::Focus => Out::Draw,
                 Click::Swap(key) => {
                     if let Some(i) = m.agents.iter().position(|a| a.key == key) {
                         m.select(key);
@@ -362,13 +542,16 @@ pub enum Click {
     Miss,
     /// On the edge: held, it resizes the tiles.
     Edge,
+    /// On a tile's box: the tile has the keys, where it is.
+    Focus,
     /// On a tile: that agent is opened, the open one takes its place.
     Swap(String),
 }
 
-/// Which tile, or the edge, a click at (x, y) is on, and swaps the
-/// tile's agent for the open one in the grid (gridClick). The caller
-/// opens the agent Swap names.
+/// Which tile, or the edge, a click at (x, y) is on: on a kept Session's
+/// box the tile takes the keys; elsewhere on a tile its agent is swapped
+/// for the open one in the grid (gridClick). The caller opens the agent
+/// Swap names.
 pub fn click(m: &Model, g: &mut Grid, x: usize, y: usize) -> Click {
     let [bx, by, bw, bh] = g.pane;
     let row_end = if g.row_y > 0 { g.row_y } else { by + bh };
@@ -386,6 +569,11 @@ pub fn click(m: &Model, g: &mut Grid, x: usize, y: usize) -> Click {
     else {
         return Click::Miss;
     };
+    // A click on its box (its foot) gives the tile the keys, in place.
+    if m.tiles.contains_key(&t.key) && g.box_at.get(&t.key).is_some_and(|&by| y >= by) {
+        g.focus = t.key;
+        return Click::Focus;
+    }
     if let Some(f) = m.focused() {
         let open = m.agents[f].key.clone();
         for k in &mut g.keys {

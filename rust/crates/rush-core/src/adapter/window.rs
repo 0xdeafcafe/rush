@@ -7,7 +7,8 @@ pub const DEFAULT_WINDOW: i64 = 200_000;
 /// Where an agent compacts a session's context on its own, when its
 /// settings or environment set a window smaller than the model's. The
 /// default Compaction is none: the model's window is the one that counts.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Compaction {
     /// The window it compacts within; the model's own caps it.
     pub window: i64,

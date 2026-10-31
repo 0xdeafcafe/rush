@@ -77,6 +77,8 @@ mod tests_cold;
 #[cfg(test)]
 mod tests_drops;
 #[cfg(test)]
+mod tests_grid;
+#[cfg(test)]
 mod tests_header;
 #[cfg(test)]
 mod tests_jobs;
@@ -133,6 +135,9 @@ pub fn register(x: &mut Ext) {
     x.session_keys.push(memedit::key);
     x.session_keys.push(memedit::draft_key);
     x.list_keys.push(memedit::list_draft_key);
+    // enter and esc while a draft is carried from a Session, before the
+    // Prompt's own (keys.go:279 carryKey).
+    x.list_keys.insert(0, actions::carry_key);
     x.session_keys.push(keys::esc_twice);
     x.session_keys.push(textsel::key);
     x.session_keys.push(changes::full_key);
@@ -430,7 +435,7 @@ pub fn conn<'a>(m: &'a mut Model, key: &str) -> &'a mut Conn {
 }
 
 /// The key the row of keys says opens or closes a picked row: the one
-/// you set, else enter (rushmode.go:5161 rowKey). Settings' copy is the
+/// you set, else enter (rushmode.go:5161 rowKey). rush's store is the
 /// newest once it has read the config.
 pub fn row_key(m: &Model) -> String {
     let set = crate::screens::settings::loaded_config(m)

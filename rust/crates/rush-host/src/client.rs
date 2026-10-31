@@ -279,7 +279,13 @@ fn drop_dismissed(id: &str, info: &mut Info) {
 
 /// The config a session was started with, to restart it.
 pub fn read_config(id: &str) -> std::io::Result<Config> {
-    let b = std::fs::read(dir(id).join("config.json"))?;
+    let p = dir(id).join("config.json");
+    let b = std::fs::read(&p).map_err(|e| {
+        std::io::Error::new(
+            e.kind(),
+            format!("open {}: {}", p.display(), crate::reload::os_err(&e)),
+        )
+    })?;
     Config::parse(&b).map_err(std::io::Error::other)
 }
 

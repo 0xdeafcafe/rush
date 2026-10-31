@@ -108,3 +108,24 @@ fn double_click_opens() {
     assert_eq!(m.agents_page, 0, "the second opens it");
     assert_eq!(m.sel, "default/b");
 }
+
+/// A tile at work keeps the Wall waking a second after it was drawn: the
+/// same time however often it's asked, so the wake comes due and the
+/// spinner moves; with nothing at work it sleeps.
+#[test]
+fn a_working_tile_wakes_the_wall_each_second() {
+    use crate::frame::places::Place;
+    let a = agent("gpu", "GPU Terminal App Rust", State::Working, 101);
+    let m = model_of(vec![a], 120, 40);
+    let mut w = wall::Wall::default();
+    assert_eq!(w.wake_at(&m), None, "not drawn yet");
+    w.body(&m, 116, 36);
+    let at = w.wake_at(&m).expect("a wake while a tile works");
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    assert_eq!(w.wake_at(&m), Some(at), "the same wake, so it comes due");
+    assert!(at <= std::time::Instant::now() + std::time::Duration::from_secs(1));
+    let idle = agent("idle", "set up caching for CI", State::Idle, 104);
+    let m = model_of(vec![idle], 120, 40);
+    w.body(&m, 116, 36);
+    assert_eq!(w.wake_at(&m), None, "nothing at work: no wake");
+}

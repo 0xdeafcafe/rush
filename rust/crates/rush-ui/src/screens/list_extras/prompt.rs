@@ -489,6 +489,10 @@ pub(super) fn hint(m: &Model, w: usize) -> Option<Line> {
                 pairs.insert(0, p("ctrl+b", ag.continue_text()));
             }
         }
+        let n = crate::screens::settings::updates::count(m);
+        if n > 0 {
+            pairs.push((format!("{n} updates"), "in Settings".into()));
+        }
         if crate::hosted::id(m).is_some() {
             // Hosted's list: no command bar, and the way back to the
             // session (view.go:2842).

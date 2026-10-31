@@ -779,6 +779,7 @@ impl Model {
             std::time::Instant::now() + std::time::Duration::from_millis((regroup - now) as u64 + 5)
         });
         self.lines = lines;
+        self.memo.forget_widest_name();
         self.order = order;
         self.group_of = group_of;
         self.kept::<RoomRows>().grouped = rooms;
@@ -872,6 +873,13 @@ impl Model {
     /// The widest of the list's names with its badges (view.go:2060
     /// widestName).
     fn widest_name(&self) -> usize {
+        // Asked by the header and the rows: measured once a frame.
+        self.memo.widest_name(|| self.measure_widest_name())
+    }
+
+    fn measure_widest_name(&self) -> usize {
+        // Each name made one line in the same string, not a new one.
+        let mut name = String::new();
         self.lines
             .iter()
             .filter_map(|l| match l {
@@ -880,7 +888,12 @@ impl Model {
                 _ => None,
             })
             .map(|a| {
-                let n = width(&one_line(&a.display_name));
+                let n = if plain_one_line(&a.display_name) {
+                    a.display_name.len()
+                } else {
+                    one_line_into(&mut name, &a.display_name);
+                    width(&name)
+                };
                 match self.badges(a, false).width() {
                     0 => n,
                     b => n + b + 1,
@@ -1225,6 +1238,7 @@ impl Model {
             }
         }
         self.lines = lines;
+        self.memo.forget_widest_name();
         if self.lines.is_empty() {
             let msg = if let Some(m) = self.ext.list_empty.iter().find_map(|f| f(self)) {
                 m
@@ -1263,9 +1277,20 @@ impl Model {
         }
         self.row_keys.clear();
         let mut out = Vec::with_capacity(h);
+        // The list kept from last time, not read again yet: drawn quietly
+        // (listcache.rs).
+        let quiet = self.kept::<crate::listcache::Showing>().0;
         for r in &rows[self.scroll..end] {
             self.row_keys.push(r.key.clone());
-            out.push(self.row_line(r, w, name_col, two));
+            let mut l = self.row_line(r, w, name_col, two);
+            if quiet {
+                for s in &mut l.spans {
+                    if s.style.fg != rush_core::text::Color::Default || !s.text.trim().is_empty() {
+                        s.style.fg = FAINT;
+                    }
+                }
+            }
+            out.push(l);
         }
         if let Some(n) = more {
             self.row_keys.push(String::new());
@@ -2028,7 +2053,7 @@ impl Model {
     }
 
     /// A stacked row's second line: its summary, or where it works.
-    fn agent_sub(&self, i: usize, w: usize) -> Line {
+    pub(crate) fn agent_sub(&self, i: usize, w: usize) -> Line {
         let room = w.saturating_sub(5);
         let (summary, col, just) = self.row_summary(i);
         let mut l = line([plain("  "), sp("╰ ", FAINT)]);
@@ -2047,6 +2072,17 @@ impl Model {
             ));
         } else {
             l.spans.push(sp(tidy_fit(&summary, room), col));
+        }
+        // Faded toward the background by Settings › Second line
+        // transparency; a filter's snippet stays as it is (view.go:2111).
+        let by = crate::screens::settings::interface::sub_line_fade(&self.cfg.sub_line);
+        if by > 0.0 && filter::snippet(self, &self.agents[i], room).is_none() {
+            let bg = crate::frame::ground::painted().bg;
+            for s in l.spans.iter_mut().skip(2) {
+                if let Some(c) = crate::frame::ground::Rgb::of(s.style.fg) {
+                    s.style.fg = crate::frame::ground::mix(c, bg, by).color();
+                }
+            }
         }
         l
     }

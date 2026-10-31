@@ -92,6 +92,102 @@ pub fn set_painted(g: Ground) {
     *PAINTED.write().unwrap_or_else(|e| e.into_inner()) = g;
 }
 
+/// The ground Settings › Theme picks (model.go:569 applyColors): rush's
+/// dark or light, or for "match terminal" the terminal's own background
+/// and text, as it answered OSC 10 and 11 when rush took it; rush's dark
+/// when it didn't say.
+pub fn of_theme(theme: &str) -> Ground {
+    match theme {
+        "light" => LIGHT,
+        "dark" => DARK,
+        _ => answered(rush_draw::colour_replies()),
+    }
+}
+
+/// The terminal's ground from its OSC 10 and 11 replies (theme.Terminal).
+pub fn answered(replies: Vec<String>) -> Ground {
+    let (mut fg, mut bg) = (None, None);
+    for r in replies {
+        match super::scheme::parse_colour_report(&r) {
+            Some((10, c)) => fg = Some(c),
+            Some((11, c)) => bg = Some(c),
+            _ => {}
+        }
+    }
+    terminal(bg, fg)
+}
+
+/// Colour-blind's own grounds for an added and a removed line and their
+/// changed words, in place of green's and red's (convo/style.go:78-99
+/// SetColours). Go's failure ground (bgFailure) has no colour here.
+const COLOUR_BLIND_GROUNDS: [(Rgb, Rgb); 4] = [
+    (Rgb(0x16, 0x30, 0x1a), Rgb(0x10, 0x2a, 0x3c)),
+    (Rgb(0x3a, 0x17, 0x14), Rgb(0x30, 0x24, 0x0e)),
+    (Rgb(0x22, 0x52, 0x2b), Rgb(0x1a, 0x46, 0x64)),
+    (Rgb(0x62, 0x24, 0x1e), Rgb(0x52, 0x3a, 0x10)),
+];
+
+/// c, a colour written for DARK, as it's drawn on g (applyColors): a
+/// background is a surface, a grey is text (ink), anything with a hue an
+/// accent. colour_blind makes good and bad sky blue and amber, not green
+/// and red.
+pub fn recoloured(g: Ground, colour_blind: bool, c: Color, bg: bool) -> Color {
+    use rush_core::theme;
+    let Some(mut rgb) = Rgb::of(c) else {
+        return c;
+    };
+    // Text and a button filled in the colour alike (btnFill,
+    // style.go:68-76).
+    if colour_blind
+        && bg
+        && let Some((_, to)) = COLOUR_BLIND_GROUNDS.iter().find(|(from, _)| *from == rgb)
+    {
+        rgb = *to;
+    } else if colour_blind {
+        if c == theme::DARK.green {
+            rgb = Rgb::of(theme::COLOURBLIND_GREEN).unwrap_or(rgb);
+        } else if c == theme::DARK.red {
+            rgb = Rgb::of(theme::COLOURBLIND_RED).unwrap_or(rgb);
+        }
+    }
+    if g == DARK {
+        return rgb.color();
+    }
+    let spread = rgb.0.max(rgb.1).max(rgb.2) - rgb.0.min(rgb.1).min(rgb.2);
+    if bg {
+        g.surface(rgb).color()
+    } else if spread < 30 {
+        g.ink(rgb).color()
+    } else {
+        g.accent(rgb).color()
+    }
+}
+
+/// The ground and colour-blind choice the drawing is recoloured for now.
+static APPLIED: std::sync::Mutex<(Ground, bool)> = std::sync::Mutex::new((DARK, false));
+
+/// Makes every colour drawn from now on for ground g, colour-blind or
+/// not (applyColors): nothing is changed for rush's own dark in standard
+/// colours. Each colour is worked out once and kept.
+pub fn apply(g: Ground, colour_blind: bool) {
+    let mut was = APPLIED.lock().unwrap_or_else(|e| e.into_inner());
+    if *was == (g, colour_blind) {
+        return;
+    }
+    *was = (g, colour_blind);
+    if g == DARK && !colour_blind {
+        rush_draw::set_recolour(None);
+        return;
+    }
+    let made: std::sync::Mutex<std::collections::HashMap<(Color, bool), Color>> =
+        std::sync::Mutex::new(std::collections::HashMap::new());
+    rush_draw::set_recolour(Some(Box::new(move |c, bg| {
+        let mut m = made.lock().unwrap_or_else(|e| e.into_inner());
+        *m.entry((c, bg))
+            .or_insert_with(|| recoloured(g, colour_blind, c, bg))
+    })));
+}
+
 /// The contrast text needs to be read with ease: WCAG's AA.
 const READABLE: f64 = 4.5;
 /// How much stronger, in log contrast, grey text is drawn on a light
@@ -228,6 +324,69 @@ mod tests {
         assert_eq!(DARK.ink(c), c);
         assert_eq!(DARK.surface(c), c);
         assert_eq!(DARK.accent(c), c);
+    }
+
+    #[test]
+    fn themes_recolour() {
+        use rush_core::theme;
+        // Dark, standard: every colour as written.
+        let text = theme::DARK.text;
+        assert_eq!(recoloured(DARK, false, text, false), text);
+        assert_eq!(
+            recoloured(DARK, false, Color::Default, true),
+            Color::Default
+        );
+        // Light: text dark on the light ground, the row picked a light
+        // surface, orange still orange and readable.
+        let t = Rgb::of(recoloured(LIGHT, false, text, false)).unwrap();
+        assert!(!t.dark() || contrast(t, LIGHT.bg) >= 4.5, "{t:?}");
+        assert!(t.0 < 100, "dark text: {t:?}");
+        let sel = Rgb::of(recoloured(LIGHT, false, theme::DARK.sel_bg, true)).unwrap();
+        assert!(!sel.dark(), "{sel:?}");
+        let o = Rgb::of(recoloured(LIGHT, false, theme::DARK.orange, false)).unwrap();
+        assert!(o.0 > o.2, "{o:?}");
+        assert!(contrast(o, LIGHT.bg) >= 3.0);
+        // Colour-blind: green and red become sky blue and amber.
+        assert_eq!(
+            recoloured(DARK, true, theme::DARK.green, false),
+            theme::COLOURBLIND_GREEN
+        );
+        assert_eq!(
+            recoloured(DARK, true, theme::DARK.red, false),
+            theme::COLOURBLIND_RED
+        );
+        // A button filled in green or red too.
+        assert_eq!(
+            recoloured(DARK, true, theme::DARK.green, true),
+            theme::COLOURBLIND_GREEN
+        );
+        assert_eq!(
+            recoloured(DARK, true, theme::DARK.red, true),
+            theme::COLOURBLIND_RED
+        );
+        assert_eq!(of_theme("light"), LIGHT);
+        assert_eq!(of_theme("dark"), DARK);
+        // A diff's grounds go blue and amber too (SetColours).
+        assert_eq!(
+            recoloured(DARK, true, Color::Rgb(0x16, 0x30, 0x1a), true),
+            Color::Rgb(0x10, 0x2a, 0x3c)
+        );
+        assert_eq!(
+            recoloured(DARK, true, Color::Rgb(0x62, 0x24, 0x1e), true),
+            Color::Rgb(0x52, 0x3a, 0x10)
+        );
+        assert_eq!(
+            recoloured(DARK, false, Color::Rgb(0x16, 0x30, 0x1a), true),
+            Color::Rgb(0x16, 0x30, 0x1a)
+        );
+        // Matching the terminal: its own ground, rush's dark when it
+        // didn't say.
+        assert_eq!(answered(Vec::new()), DARK);
+        let g = answered(vec![
+            "\x1b]11;rgb:ffff/ffff/ffff\x1b\\".into(),
+            "\x1b]10;rgb:0000/0000/0000\x07".into(),
+        ]);
+        assert_eq!((g.bg, g.fg), (Rgb(255, 255, 255), Rgb(0, 0, 0)));
     }
 
     #[test]

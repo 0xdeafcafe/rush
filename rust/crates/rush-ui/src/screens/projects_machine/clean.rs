@@ -39,11 +39,12 @@ impl Temps {
     }
 }
 
-/// A worktree, sessions' temp folders of one kind, or /tmp's untouched
-/// scratch when neither.
-#[derive(Clone, Debug)]
+/// A worktree, something an agent left outside its project, sessions'
+/// temp folders of one kind, or /tmp's untouched scratch when none.
+#[derive(Clone, Debug, Default)]
 pub(crate) struct CleanItem {
     pub wt: Option<Worktree>,
+    pub left: Option<rush_fleet::LeftItem>,
     pub on: bool,
     /// An agent still running in it: it can't be ticked.
     pub busy: String,
@@ -56,6 +57,8 @@ impl CleanItem {
     fn group(&self) -> &'static str {
         if self.wt.is_some() {
             "Worktrees"
+        } else if self.left.is_some() {
+            "Left outside projects"
         } else {
             "Temporary"
         }
@@ -68,6 +71,9 @@ impl CleanItem {
     fn safe(&self) -> bool {
         if let Some(k) = self.kind {
             return k == Temps::Done;
+        }
+        if let Some(l) = &self.left {
+            return self.busy.is_empty() && l.safe();
         }
         self.busy.is_empty()
             && self
@@ -98,9 +104,7 @@ pub(crate) fn open_clean_sheet(m: &mut Model) {
         let mut it = CleanItem {
             wt: Some(w.clone()),
             on: w.own && w.verdict().can_go(),
-            busy: String::new(),
-            temps: Vec::new(),
-            kind: None,
+            ..CleanItem::default()
         };
         if let Some(g) = running(m, &w.agents) {
             let n = one_line(&g.a.display_name);
@@ -117,13 +121,30 @@ pub(crate) fn open_clean_sheet(m: &mut Model) {
                 .cmp(&a.wt.as_ref().map_or(0, |w| w.size)),
         )
     });
+    // What agents left outside their projects: ticked only when it's
+    // scratch in a temp folder nothing has touched since; the rest you may
+    // tick, unless it's held back (there before, changed since, git's).
+    for l in d.outside.iter().filter(|l| !l.gone) {
+        let mut it = CleanItem {
+            left: Some(l.clone()),
+            on: l.safe(),
+            busy: l.why().to_string(),
+            ..CleanItem::default()
+        };
+        if let Some(g) = agent_by_key(m, &l.agent.key)
+            && g.a.pid != 0
+        {
+            let n = one_line(&g.a.display_name);
+            let n = if n.is_empty() { "an agent".into() } else { n };
+            it.busy = format!("{n} is running");
+            it.on = false;
+        }
+        items.push(it);
+    }
     if d.tmp.stale_items > 0 {
         items.push(CleanItem {
-            wt: None,
             on: true,
-            busy: String::new(),
-            temps: Vec::new(),
-            kind: None,
+            ..CleanItem::default()
         });
     }
     // Sessions' own temp folders: a done one's goes, ticked; a stopped
@@ -151,7 +172,6 @@ pub(crate) fn open_clean_sheet(m: &mut Model) {
             continue;
         }
         items.push(CleanItem {
-            wt: None,
             on: k == Temps::Done,
             busy: if k == Temps::Running {
                 "in use".into()
@@ -160,6 +180,7 @@ pub(crate) fn open_clean_sheet(m: &mut Model) {
             },
             temps,
             kind: Some(k),
+            ..CleanItem::default()
         });
     }
     if items.is_empty() {
@@ -178,6 +199,10 @@ impl CleanSheet {
         let (mut n, mut losing, mut size) = (0, 0, 0);
         for it in self.items.iter().filter(|it| it.on) {
             n += 1;
+            if let Some(l) = &it.left {
+                size += l.size;
+                continue;
+            }
             if it.kind.is_some() {
                 size += it.temps_size();
                 continue;
@@ -219,6 +244,32 @@ impl CleanSheet {
                     sp(format!("{:>7}  ", disk(it.temps_size())), FAINT),
                     what,
                 ]),
+                w,
+            );
+        }
+        if let Some(l) = &it.left {
+            let mut why = if !it.busy.is_empty() {
+                bx = sp("· ", FAINT);
+                ln([sp(it.busy.clone(), DIM)])
+            } else if !l.temp {
+                ln([sp("outside temp: may be meant to stay", YELLOW)])
+            } else {
+                ln([sp("scratch, untouched since", GREEN)])
+            };
+            if l.shell {
+                why.spans.push(sp(" · from a shell command", FAINT));
+            }
+            let path = rush_draw::truncate(&tildify(&l.path), 43, "…").into_owned();
+            return fit(
+                cat(
+                    ln([
+                        bx,
+                        sp(pad_to(&path, 44), TEXT),
+                        sp(format!("{:>7}  ", disk(l.size)), FAINT),
+                        sp(format!("{} · ", one_line(&l.agent.display_name)), DIM),
+                    ]),
+                    why,
+                ),
                 w,
             );
         }
@@ -277,6 +328,14 @@ impl CleanSheet {
     fn confirm(&self, m: &mut Model) -> Out {
         let mut picked = Vec::new();
         for it in self.items.iter().filter(|it| it.on) {
+            if let Some(l) = &it.left {
+                picked.push(Doomed {
+                    left: Some(l.clone()),
+                    agents: vec![(l.agent.key.clone(), l.agent.display_name.clone())],
+                    ..Doomed::default()
+                });
+                continue;
+            }
             if it.kind.is_some() {
                 picked.push(Doomed {
                     agents: it
