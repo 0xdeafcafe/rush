@@ -92,6 +92,9 @@ impl Default for Starts {
 pub struct RushHosts {
     reg: Registry,
     starts: Starts,
+    /// The sessions as last listed, kept so only the info files that
+    /// changed are read again (Go's conversation's hostList, spawns.go:165).
+    lister: std::sync::Mutex<rush_host::client::Lister>,
 }
 
 impl RushHosts {
@@ -102,7 +105,11 @@ impl RushHosts {
 
     /// Hosts started and woken by starts (tests: rush-host's fake host).
     pub fn with(reg: Registry, starts: Starts) -> RushHosts {
-        RushHosts { reg, starts }
+        RushHosts {
+            reg,
+            starts,
+            lister: std::sync::Mutex::default(),
+        }
     }
 
     fn dial_id(&self, id: &str) -> Result<Arc<dyn Link>, String> {
@@ -461,7 +468,12 @@ impl Hosts for RushHosts {
     }
 
     fn spawned(&self, parent: &str) -> Vec<Spawned> {
-        hosted_runs(&self.reg, &rush_host::list(), parent)
+        let infos = self
+            .lister
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .list_shared();
+        hosted_runs(&self.reg, &infos, parent)
     }
 
     fn rewind(

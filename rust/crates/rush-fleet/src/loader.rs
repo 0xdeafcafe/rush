@@ -478,9 +478,24 @@ impl Loader {
     /// adapter's scanner; the next load shows it. Returns how many rows'
     /// spend changed.
     pub fn scan(&mut self, agents: &[Agent]) -> usize {
+        self.scan_targets(&Loader::kind_targets(agents))
+    }
+
+    /// The rows' transcripts to price, each with its agent's kind: what
+    /// scan_targets takes, kept between readings so the next scan needn't
+    /// keep the rows.
+    pub fn kind_targets(agents: &[Agent]) -> Vec<(String, SpendTarget)> {
+        Loader::targets(agents)
+            .into_iter()
+            .map(|(a, t)| (a.acct.kind.as_str().to_string(), t))
+            .collect()
+    }
+
+    /// scan, of targets kind_targets made.
+    pub fn scan_targets(&mut self, targets: &[(String, SpendTarget)]) -> usize {
         let mut by_kind: HashMap<&str, Vec<SpendTarget>> = HashMap::new();
-        for (a, t) in Loader::targets(agents) {
-            by_kind.entry(a.acct.kind.as_str()).or_default().push(t);
+        for (k, t) in targets {
+            by_kind.entry(k.as_str()).or_default().push(t.clone());
         }
         let mut got = HashMap::new();
         for (k, targets) in by_kind {
