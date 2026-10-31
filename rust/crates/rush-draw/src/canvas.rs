@@ -9,6 +9,7 @@ use ratatui::buffer::{Buffer, Cell};
 use ratatui::style::{Color as RColor, Modifier};
 use rush_core::text::{self, Color, Line, Link, Mods, Span, Style};
 use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthChar;
 
 /// A rectangle of cells.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -57,6 +58,9 @@ pub struct Canvas<'a> {
     w: u16,
     h: u16,
     cursor: Option<(u16, u16)>,
+    /// The last frame is on screen as it was drawn ([`Canvas::can_keep`]).
+    keepable: bool,
+    kept: bool,
 }
 
 impl<'a> Canvas<'a> {
@@ -69,11 +73,35 @@ impl<'a> Canvas<'a> {
             w,
             h,
             cursor: None,
+            keepable: false,
+            kept: false,
         }
+    }
+
+    pub(crate) fn keepable(mut self, k: bool) -> Self {
+        self.keepable = k;
+        self
     }
 
     pub(crate) fn cursor(&self) -> Option<(u16, u16)> {
         self.cursor
+    }
+
+    /// Whether the frame drawn last is on the screen as it was drawn
+    /// (nothing cleared or resized since), so [`Canvas::keep`] can stand
+    /// for drawing it again. Never on a screen in memory.
+    pub fn can_keep(&self) -> bool {
+        self.keepable
+    }
+
+    /// This frame is the last one again, cell for cell and cursor: nothing
+    /// is painted and nothing written. Only when [`Canvas::can_keep`].
+    pub fn keep(&mut self) {
+        self.kept = self.keepable;
+    }
+
+    pub(crate) fn kept(&self) -> bool {
+        self.kept
     }
 
     pub fn width(&self) -> u16 {
@@ -180,13 +208,63 @@ impl<'a> Canvas<'a> {
             recolour(style.bg, true),
             mods(style.mods),
         );
-        for g in s.graphemes(true) {
+        if s.is_ascii() {
+            // Each ASCII byte is a grapheme of its own (CR LF, the one
+            // pair, is controls, which take no cell): no segmenting.
+            for (i, b) in s.bytes().enumerate() {
+                if !(0x20..0x7f).contains(&b) {
+                    continue;
+                }
+                if x >= end {
+                    break;
+                }
+                self.unsplit(x, y);
+                self.set_link(x, y, style.link);
+                let c = self.cell(x, y);
+                c.set_symbol(&s[i..i + 1]);
+                c.fg = fg;
+                c.bg = bg;
+                c.modifier = m;
+                x += 1;
+            }
+            return x;
+        }
+        if s.chars().all(lone) {
+            // Each char a grapheme of its own: no segmenting, and its
+            // width the char's own (the same: tests.rs).
+            let chars = s
+                .char_indices()
+                .map(|(i, c)| (&s[i..i + c.len_utf8()], c.width().unwrap_or(0)));
+            return self.put_graphemes(x, y, chars, style, end);
+        }
+        let gs = s.graphemes(true).map(|g| {
             // Fast path for ASCII; controls (tabs, newlines) take no cell.
             let w = match g.as_bytes() {
                 [b] if (0x20..0x7f).contains(b) => 1,
                 _ if g.chars().any(char::is_control) => 0,
                 _ => text::width(g),
             };
+            (g, w)
+        });
+        self.put_graphemes(x, y, gs, style, end)
+    }
+
+    /// Writes graphemes, each with the cells it takes, from x up to (not
+    /// past) end; returns where it stopped.
+    fn put_graphemes<'s>(
+        &mut self,
+        mut x: u16,
+        y: u16,
+        gs: impl Iterator<Item = (&'s str, usize)>,
+        style: Style,
+        end: u16,
+    ) -> u16 {
+        let (fg, bg, m) = (
+            recolour(style.fg, false),
+            recolour(style.bg, true),
+            mods(style.mods),
+        );
+        for (g, w) in gs {
             if w == 0 {
                 continue;
             }
@@ -223,7 +301,8 @@ impl<'a> Canvas<'a> {
             return;
         }
         let c = self.cell(x - 1, y);
-        if text::width(c.symbol()) > 1 {
+        // One byte is one cell at most: only a longer symbol can be wide.
+        if c.symbol().len() > 1 && text::width(c.symbol()) > 1 {
             c.set_symbol(" ");
         }
     }
@@ -310,4 +389,20 @@ pub(crate) fn mods(m: Mods) -> Modifier {
         }
     }
     o
+}
+
+/// Whether c is a grapheme of its own wherever it stands: it joins neither
+/// the char before it (marks, joiners) nor the one after (prepended
+/// signs), nor pairs (flags, Hangul, CR LF). These ranges hold none of
+/// those: printable ASCII; Latin-1, Latin Extended and the spacing
+/// modifiers (up to the combining marks at U+0300); general punctuation
+/// but the zero-width and direction marks; super- and subscripts and
+/// currency (up to the combining marks at U+20D0); letterlike symbols
+/// through arrows, maths, technical symbols, box drawing, blocks, shapes,
+/// dingbats and more arrows. Checked against the segmenter in tests.
+pub(crate) fn lone(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x20..=0x7e | 0xa0..=0x2ff | 0x2010..=0x2027 | 0x2030..=0x205e | 0x2070..=0x20cf | 0x2100..=0x2bff
+    )
 }

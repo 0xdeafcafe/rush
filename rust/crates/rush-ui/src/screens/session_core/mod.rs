@@ -77,6 +77,8 @@ mod tests_cold;
 #[cfg(test)]
 mod tests_drops;
 #[cfg(test)]
+mod tests_grid;
+#[cfg(test)]
 mod tests_header;
 #[cfg(test)]
 mod tests_jobs;

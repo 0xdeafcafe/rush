@@ -110,6 +110,9 @@ pub struct Accounts {
     pub session_start: Option<fn(&Model, &str) -> Option<StartOver>>,
     /// The list's agents newest first, by key (newest).
     pub newest: Vec<String>,
+    /// Where each of newest was in the list when sorted: where to look
+    /// first for it (recent_setups).
+    pub newest_at: Vec<usize>,
     /// Claude Code's logins through rush's vault, once it's ported.
     pub login_ops: Option<super::keys::LoginOps>,
     /// A view another app hosts: Getting started and the tips are off
@@ -159,6 +162,7 @@ static EMPTY_CFG: LazyLock<Config> = LazyLock::new(Config::default);
 
 /// Accounts' state, to change.
 pub fn accounts(m: &mut Model) -> &mut Accounts {
+    m.memo.forget();
     m.kept::<Accounts>()
 }
 

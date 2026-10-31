@@ -23,6 +23,9 @@
 (deny process-exec
   (literal (string-append (param "HOME") "/go/bin/rush"))
   (literal (string-append (param "HOME") "/.local/share/rush-rs/rush"))
+  ; agtop is an old name of the Go rush; it leads and acts on the real machine.
+  (literal (string-append (param "HOME") "/go/bin/agtop"))
+  (regex #"/agtop[^/]*$")
   (literal "/opt/homebrew/bin/claude")
   (literal "/opt/homebrew/bin/codex")
   (subpath "/opt/homebrew/Caskroom/claude-code")
@@ -40,6 +43,9 @@
 
 ; No talking to Claude Code's own daemon for the real ~/.claude, which
 ; hosts its background sessions outside rush's folder (a bench rush once
-; stopped a real session through it). sbtest.sh passes its folder; a
-; test's own daemon is under another (its account's folder's hash).
+; stopped a real session through it). sbtest.sh passes its folder, and
+; CLAUDE_DAEMON_REAL the one for ~/.claude's resolved path when it's a
+; link (the same folder when it isn't); a test's own daemon is under
+; another (its account's folder's hash).
 (deny network-outbound (remote unix-socket (subpath (param "CLAUDE_DAEMON"))))
+(deny network-outbound (remote unix-socket (subpath (param "CLAUDE_DAEMON_REAL"))))
