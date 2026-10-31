@@ -1462,6 +1462,37 @@ impl Loader {
     /// The conversations rush sessions left behind when rewound: each
     /// session shows them itself.
     fn branches(&mut self, hosted: &[HostInfo], claimed: &mut HashSet<String>) {
+        // The first reading reads them all side by side, as `config` would
+        // read each; later ones read only those that changed, or are new,
+        // one by one.
+        if self.files.is_empty() && !hosted.is_empty() {
+            let at = self.checked();
+            let ids: Vec<String> = hosted.iter().map(|i| i.id.clone()).collect();
+            let paths: Vec<PathBuf> = ids
+                .iter()
+                .map(|id| host_root().join(id).join("config.json"))
+                .collect();
+            let stats = rush_core::par::map_with(
+                paths.clone(),
+                || (),
+                |_, p| match std::fs::metadata(&p) {
+                    Ok(m) => (m.modified().ok(), m.len() as i64),
+                    Err(_) => (None, -1),
+                },
+            );
+            let configs = self.hosts.configs(&ids);
+            for ((path, (modified, size)), v) in paths.into_iter().zip(stats).zip(configs) {
+                self.files.insert(
+                    path,
+                    FileMemo {
+                        modified,
+                        size,
+                        v,
+                        at,
+                    },
+                );
+            }
+        }
         for info in hosted {
             if let Some(cfg) = self.config(info) {
                 claimed.extend(cfg.branches);

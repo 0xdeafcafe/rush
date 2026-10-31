@@ -67,12 +67,11 @@ impl Hosts for Sessions {
     }
 
     fn config(&self, id: &str) -> Option<HostConfig> {
-        let c = read_config(id).ok()?;
-        Some(HostConfig {
-            branches: c.branches.into_iter().map(|b| b.session_id).collect(),
-            account: c.account,
-            env: c.env,
-        })
+        host_config(id)
+    }
+
+    fn configs(&self, ids: &[String]) -> Vec<Option<HostConfig>> {
+        rush_core::par::map_with(ids.to_vec(), || (), |_, id| host_config(&id))
     }
 
     fn revive(&self, info: &HostInfo) {
@@ -131,6 +130,16 @@ pub fn revive(info: &HostInfo) -> crate::client::Result<()> {
 
 fn ms(t: rush_state::Time) -> Ms {
     if t.is_zero() { 0 } else { t.to_ms() }
+}
+
+/// The config session id was started with, as the list needs it.
+fn host_config(id: &str) -> Option<HostConfig> {
+    let c = read_config(id).ok()?;
+    Some(HostConfig {
+        branches: c.branches.into_iter().map(|b| b.session_id).collect(),
+        account: c.account,
+        env: c.env,
+    })
 }
 
 /// info as the list reads it.
