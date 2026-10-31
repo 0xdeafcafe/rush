@@ -1605,3 +1605,23 @@ fn catalog_clicks_move_the_keys_between_the_panes() {
     assert!(dialog(&m).harness_inside);
     assert_eq!(dialog(&m).cursor, row, "the same row of the detail");
 }
+
+/// Keys › Commands lists rush's # commands as Go's fleetCommands, 51 of
+/// them in its order, and none of the aliases that stand for one
+/// (keybind.go:32-39; sweep 3 P3-10).
+#[test]
+fn keys_lists_the_commands_without_their_aliases() {
+    let (mut m, _d) = model(140, 50);
+    keys::set_keys(&mut m, rush_keymap::File::default());
+    let km = keys::key_map(&m);
+    let names: Vec<&str> = km
+        .actions()
+        .into_iter()
+        .filter_map(|a| a.id.strip_prefix("command:"))
+        .collect();
+    assert_eq!(names.len(), 51, "{names:?}");
+    assert_eq!(names[..3], ["expand", "collapse", "model"]);
+    for alias in ["preset", "profile", "agent", "net", "afk"] {
+        assert!(!names.contains(&alias), "{alias}");
+    }
+}

@@ -51,7 +51,7 @@ pub fn key_actions() -> Vec<Action> {
 }
 
 /// key_actions and what plugins offer (keyActions' pluginActions).
-fn actions_of(m: &Model) -> Vec<Action> {
+pub(crate) fn actions_of(m: &Model) -> Vec<Action> {
     let mut out = key_actions();
     out.extend(crate::screens::plugin_ui::hooks::plugin_key_actions(m));
     out
