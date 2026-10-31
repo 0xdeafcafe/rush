@@ -237,6 +237,12 @@ impl Model {
         if crate::screens::cmdbar::fleetslash::is_hash_cmd(t) {
             return self.command(t);
         }
+        // /stop typed the old way runs #stop (keys.go:847 legacyCommand).
+        if t.starts_with('/')
+            && let Some(o) = crate::screens::cmdbar::fleetslash::legacy_command(self, t)
+        {
+            return o;
+        }
         let tagged = self.input.sent(true);
         let t = tagged.trim();
         for i in 0..self.ext.submit.len() {

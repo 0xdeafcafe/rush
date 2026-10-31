@@ -644,3 +644,18 @@ fn hash_args_from_the_model() {
         ]
     );
 }
+
+/// A # command typed the old way, /quit, runs as #quit and says what it's
+/// called now (fleetslash.go:384 legacyCommand); a / word that isn't one
+/// of rush's is left to start a session.
+#[test]
+fn old_slash_names_run_the_hash_command() {
+    let mut m = list();
+    m.input.set("/quit");
+    assert_eq!(m.submit(), Out::Quit);
+    assert_eq!(
+        flash(&m),
+        "rush's commands start with # now: #quit · / starts a session with one of Claude's"
+    );
+    assert!(super::fleetslash::legacy_command(&mut m, "/review the diff").is_none());
+}

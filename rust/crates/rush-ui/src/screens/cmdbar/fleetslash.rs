@@ -12,6 +12,7 @@
 use rush_core::event::Command;
 use rush_core::text::Line;
 
+use crate::frame::Out;
 use crate::frame::caps::agent_can_run;
 use crate::model::Model;
 use crate::style::*;
@@ -323,6 +324,41 @@ pub fn typing_hash(text: &str) -> bool {
 /// Whether name (without its prefix) is one of rush's.
 pub fn is_fleet_command(name: &str) -> bool {
     FLEET_ALIASES.iter().any(|(a, _)| *a == name) || FLEET_COMMANDS.iter().any(|c| c.0 == name)
+}
+
+/// The / commands a new session from the Agents box would have: its
+/// agent's own and its skills, read from disk (newSessionCommands).
+fn new_session_commands(m: &Model) -> Vec<rush_core::adapter::Command> {
+    let kind = crate::screens::accounts::rows::start_kind(m);
+    let Some(ad) = m.reg.get(&kind) else {
+        return Vec::new();
+    };
+    let p = rush_core::adapter::Profile {
+        kind: rush_core::adapter::Kind::from(kind.as_str()),
+        ..Default::default()
+    };
+    let dir = crate::screens::list_extras::prompt::start_dir(m);
+    crate::screens::session_cards::claudescreen::local_commands(&m.reg, &ad, p, &dir)
+}
+
+/// A Prompt command typed the old way, /stop for #stop, run as the #
+/// command when the new session's agent has no command of that name,
+/// saying what it's called now; None when it isn't one (legacyCommand).
+pub fn legacy_command(m: &mut Model, text: &str) -> Option<Out> {
+    let first = text.split_whitespace().next()?;
+    let name = first.strip_prefix('/')?.to_lowercase();
+    if !is_fleet_command(&name) || new_session_commands(m).iter().any(|c| c.name == name) {
+        return None;
+    }
+    let before = m.flash.clone();
+    m.input.clear_sent();
+    let o = m.command(&format!("#{}", &text[1..]));
+    if m.flash == before {
+        m.flash(&format!(
+            "rush's commands start with # now: #{name} · / starts a session with one of Claude's"
+        ));
+    }
+    Some(o)
 }
 
 /// The commands whose name contains q, those starting with it first; an
