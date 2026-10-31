@@ -35,6 +35,21 @@ pub struct Window {
     pub resets_at: Ms,
 }
 
+impl Window {
+    /// A 5-hour window as read. Anthropic's top plan has no 5-hour limit:
+    /// the usage endpoint then sends five_hour as null, or with no
+    /// resets_at, and a session's report leaves it out or gives no
+    /// resetsAt. Such a window is no 5-hour limit, not one 0% used, so it
+    /// reads as absent. A 5-hour window in use always has its reset.
+    pub fn five_hour(self) -> Window {
+        if self.present && self.resets_at != 0 {
+            self
+        } else {
+            Window::default()
+        }
+    }
+}
+
 /// A reading of an account's plan usage. Its JSON is Go's, field names
 /// and all, as every rush process shares it through usage.json.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -230,6 +245,7 @@ pub fn live_usage(info: &[u8], at: Ms) -> Option<Usage> {
             };
         }
     }
+    u.five_hour = u.five_hour.five_hour();
     (u.five_hour.present || u.seven_day.present).then_some(u)
 }
 
@@ -317,7 +333,7 @@ fn parse_usage_file(b: &[u8]) -> io::Result<Usage> {
         (u.role, u.billing, u.org_type, u.extra) = (o.role, o.billing, o.org_type, o.extra);
     }
     if let Some(c) = f.cached {
-        u.five_hour = window_of(c.utilization.five_hour);
+        u.five_hour = window_of(c.utilization.five_hour).five_hour();
         u.seven_day = window_of(c.utilization.seven_day);
         u.fetched_at = c.fetched_at_ms;
     }
@@ -350,12 +366,18 @@ fn is_zero(t: &Ms) -> bool {
     *t == 0
 }
 
-/// The readings rush keeps at path, by config folder or login.
+/// The readings rush keeps at path, by config folder or login. A 5-hour
+/// window kept with no reset time, as rush wrote one before it knew of
+/// plans without that limit, reads as no 5-hour limit.
 pub fn load_fetched_usage(path: &Path) -> BTreeMap<String, FetchedUsage> {
-    fs::read(path)
+    let mut all: BTreeMap<String, FetchedUsage> = fs::read(path)
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    for f in all.values_mut() {
+        f.usage.five_hour = f.usage.five_hour.five_hour();
+    }
+    all
 }
 
 /// Records one account's entry, keeping the others.
@@ -758,12 +780,12 @@ mod tests {
         let path = dir.path().join("usage.json");
         let n = now() / 1000 * 1000;
         let wait = n + 3_600_000;
-        let at = |t, p| Usage {
+        let at = |t: Ms, p| Usage {
             fetched_at: t,
             five_hour: Window {
                 present: true,
                 percent: p,
-                resets_at: 0,
+                resets_at: t + 3_600_000,
             },
             ..Usage::default()
         };
@@ -808,12 +830,12 @@ mod tests {
         let a = Account::at("", dir.path().join("cfg"));
         let owner: &OwnerOf = &|_| Ok("alex".into());
         let n = now();
-        let at = |t, p| Usage {
+        let at = |t: Ms, p| Usage {
             fetched_at: t,
             five_hour: Window {
                 present: true,
                 percent: p,
-                resets_at: 0,
+                resets_at: t + 3_600_000,
             },
             ..Usage::default()
         };
@@ -883,6 +905,80 @@ mod tests {
         });
         assert_eq!(got.plan, "pro");
         assert_eq!(load_fetched_usage(&path)["new"].usage.plan, "pro");
+    }
+
+    // The three shapes a reading of an account takes now Anthropic's top
+    // plan has no 5-hour limit, as rush kept them in usage.json: the
+    // window not there; there but with no reset time (the API sent it with
+    // a null resets_at); and a real one. The first two are no 5-hour
+    // limit, the weekly alone deciding; the third keeps its window.
+    #[test]
+    fn readings_without_a_five_hour_limit() {
+        let b = br#"{
+"login:a4e79fcb":{"usage":{"AccountID":"a4e79fcb","Plan":"","FiveHour":{"Present":false,"Percent":0,"ResetsAt":"0001-01-01T00:00:00Z"},"SevenDay":{"Present":true,"Percent":66,"ResetsAt":"2099-11-01T16:00:00+01:00"},"FetchedAt":"2026-10-31T14:15:11+01:00","Fetched":true}},
+"login:e8b97b0d":{"usage":{"AccountID":"e8b97b0d","Plan":"","FiveHour":{"Present":true,"Percent":0,"ResetsAt":"0001-01-01T00:00:00Z"},"SevenDay":{"Present":true,"Percent":100,"ResetsAt":"2099-10-31T07:00:00Z"},"FetchedAt":"2026-10-30T23:28:45+01:00","Fetched":true}},
+"login:a9ac2531":{"usage":{"AccountID":"a9ac2531","Plan":"","FiveHour":{"Present":true,"Percent":65,"ResetsAt":"2099-10-30T23:20:00Z"},"SevenDay":{"Present":true,"Percent":100,"ResetsAt":"2099-10-31T16:00:00Z"},"FetchedAt":"2026-10-30T23:26:41+01:00","Fetched":true}}}"#;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("usage.json");
+        fs::write(&path, b).unwrap();
+        let all = load_fetched_usage(&path);
+        for (id, week) in [("a4e79fcb", 66.0), ("e8b97b0d", 100.0)] {
+            let u = &all[&login_key(id)].usage;
+            assert!(!u.five_hour.present, "{id}: a 5-hour window");
+            assert_eq!(u.used(), week, "{id}");
+            let q = u.quota("");
+            assert!(q.window("five_hour").is_none(), "{id}");
+            assert_eq!(q.windows.len(), 1, "{id}");
+            assert_eq!(q.used(""), week, "{id}");
+        }
+        let u = &all[&login_key("a9ac2531")].usage;
+        assert!(u.five_hour.present && u.five_hour.percent == 65.0);
+        assert_eq!(u.quota("").windows.len(), 2);
+        // Shared readings, as every screen gets them.
+        let r = readings(&path);
+        assert!(
+            r[&login_key("e8b97b0d")]
+                .windows
+                .iter()
+                .all(|w| w.id != "five_hour")
+        );
+        assert_eq!(r[&login_key("a9ac2531")].windows[0].id, "five_hour");
+        // A 5-hour window that has reset since its reading is still one:
+        // used 0%, not gone.
+        let n = now();
+        let reset = Usage {
+            five_hour: Window {
+                present: true,
+                percent: 65.0,
+                resets_at: n - 60_000,
+            },
+            ..Usage::default()
+        }
+        .since(n);
+        assert!(reset.quota("").window("five_hour").is_some());
+    }
+
+    // Claude Code's own cache, and a session's report, with no 5-hour
+    // limit: none read.
+    #[test]
+    fn cache_and_live_without_a_five_hour_limit() {
+        for b in [
+            &br#"{"cachedUsageUtilization":{"fetchedAtMs":1000,"utilization":{"seven_day":{"utilization":66,"resets_at":"2026-11-01T15:00:00Z"}}}}"#[..],
+            br#"{"cachedUsageUtilization":{"fetchedAtMs":1000,"utilization":{"five_hour":null,"seven_day":{"utilization":66,"resets_at":"2026-11-01T15:00:00Z"}}}}"#,
+            br#"{"cachedUsageUtilization":{"fetchedAtMs":1000,"utilization":{"five_hour":{"utilization":0,"resets_at":null},"seven_day":{"utilization":66,"resets_at":"2026-11-01T15:00:00Z"}}}}"#,
+        ] {
+            let u = parse_usage_file(b).unwrap();
+            assert!(!u.five_hour.present && u.seven_day.percent == 66.0);
+        }
+        let at = now();
+        for info in [
+            &br#"{"status":"allowed","unifiedWindows":{"seven_day":{"utilization":0.66,"resetsAt":1790521200}}}"#[..],
+            br#"{"status":"allowed","unifiedWindows":{"five_hour":null,"seven_day":{"utilization":0.66,"resetsAt":1790521200}}}"#,
+            br#"{"status":"allowed","unifiedWindows":{"five_hour":{"utilization":0},"seven_day":{"utilization":0.66,"resetsAt":1790521200}}}"#,
+        ] {
+            let u = live_usage(info, at).unwrap();
+            assert!(!u.five_hour.present && u.seven_day.present);
+        }
     }
 
     #[test]

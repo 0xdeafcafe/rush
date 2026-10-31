@@ -348,8 +348,15 @@ pub fn limits(m: &Model, r: &AcctRow, w1: usize, w2: usize) -> Line {
         return fit(line([sp("! ", YELLOW), sp(why, DIM)]), w1 + w2);
     }
     let mut out = Line::new();
+    // A plan without a 5-hour limit says so where that meter would be, so
+    // its weekly stays under the others'.
+    let no5 = q.no_five_hour();
     for (i, cw) in [w1, w2].into_iter().enumerate() {
-        let Some(win) = q.windows.get(i) else {
+        if no5 && i == 0 {
+            join(&mut out, fit(line([sp(usage::NO_FIVE_HOUR, FAINT)]), cw));
+            continue;
+        }
+        let Some(win) = q.windows.get(if no5 { i - 1 } else { i }) else {
             join(&mut out, fit(Line::new(), cw));
             continue;
         };
@@ -366,6 +373,11 @@ pub fn limits(m: &Model, r: &AcctRow, w1: usize, w2: usize) -> Line {
 /// A reading's windows, each with when it resets (windowLines).
 pub fn window_lines(q: &Quota, now: Ms, label: &dyn Fn(&str) -> Line) -> Vec<Line> {
     let mut out = Vec::new();
+    if q.no_five_hour() {
+        let mut s = label("5h");
+        s.spans.push(sp(usage::NO_FIVE_HOUR, FAINT));
+        out.push(s);
+    }
     for win in &q.windows {
         let mut s = label(&win.label);
         join(&mut s, bar(win.percent));
@@ -510,6 +522,8 @@ pub fn together(rows: &[AcctRow]) -> (Quota, usize) {
                 Some(i) => i,
                 None => {
                     all.windows.push(Window {
+                        id: win.id.clone(),
+                        span: win.span,
                         label: win.label.clone(),
                         name: win.name.clone(),
                         resets_at: win.resets_at,
@@ -529,6 +543,9 @@ pub fn together(rows: &[AcctRow]) -> (Quota, usize) {
     for w in &mut all.windows {
         w.percent /= count[&w.label];
     }
+    // The shortest first, whichever account was read first: one without a
+    // 5-hour limit leading mustn't put the weekly where the 5-hour goes.
+    all.windows.sort_by_key(|w| (w.span.is_zero(), w.span));
     for r in rows {
         if let Some(rs) = &r.q.resets {
             all.resets.get_or_insert_with(Default::default).available += rs.available;
