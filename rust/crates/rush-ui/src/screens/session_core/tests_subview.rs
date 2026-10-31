@@ -801,6 +801,8 @@ fn the_box_says_why_nothing_can_reach_the_run() {
     assert!(all.contains("the session isn't running in rush"), "{all}");
     press(&mut m, "right");
     assert!(!conn(&mut m, KEY).watch.msg_focus);
+    // → opens it instead, as everywhere else (openSub).
+    assert!(subview::watching(&m, KEY), "→ didn't open the run");
 }
 
 /// A workflow resumed after a restart lists an agent once a try: the

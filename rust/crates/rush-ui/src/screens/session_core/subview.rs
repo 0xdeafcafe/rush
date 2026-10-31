@@ -1582,14 +1582,21 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     let picked = sel(m);
     let name = super::views::view_name(m, &key);
     match s {
-        // → goes into the column beside the list: its box takes the keys.
+        // → goes into the column beside the list: its box takes the keys,
+        // when a message can reach the run; one nothing can reach opens,
+        // as → opens a run everywhere else (openSub).
         "right"
             if empty
                 && name == "subagents"
                 && picked.starts_with("sub:")
                 && box_run(m, &key).is_some_and(|id| picked[4..] == id) =>
         {
-            focus_box(m, &key);
+            let id = picked[4..].to_string();
+            if super::relay::route(m, &key, &id).is_ok() {
+                focus_box(m, &key);
+            } else {
+                open_sub(m, &key, &id);
+            }
             Out::Draw
         }
         // → on a step a subagent made opens that run in the subagents
