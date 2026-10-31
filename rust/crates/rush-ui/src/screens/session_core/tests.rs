@@ -1470,3 +1470,17 @@ fn a_cold_cache_asks_before_sending() {
     press(&mut m, "enter");
     assert!(m.confirm.is_none());
 }
+
+/// ctrl+l in a Session opens where its agent works, the folders #cd
+/// offers (rushmode.go:4434).
+#[test]
+fn ctrl_l_moves_the_session() {
+    let (mut m, _) = hosted("steer", Vec::new());
+    assert!(m.sheet.is_none());
+    press(&mut m, "ctrl+l");
+    let f = screen(&mut m).join("\n");
+    assert!(
+        f.contains("Move tidy the parser to"),
+        "the move picker\n{f}"
+    );
+}

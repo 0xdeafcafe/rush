@@ -44,6 +44,19 @@ pub fn register(x: &mut Ext) {
         },
     );
     x.list_keys.push(list_key);
+    x.session_keys.push(session_key);
+}
+
+/// ctrl+l in a Session: where its agent works, the same folders as #cd
+/// with no path (rushmode.go:4434).
+fn session_key(m: &mut Model, k: &Press) -> Out {
+    if k.s != "ctrl+l" || m.sheet.is_some() || m.confirm.is_some() {
+        return Out::Pass;
+    }
+    let Some(a) = super::open_key(m).and_then(|key| super::agent(m, &key).cloned()) else {
+        return Out::Pass;
+    };
+    open_move_picker(m, &a)
 }
 
 /// The agent picked, or says to pick one (need).
