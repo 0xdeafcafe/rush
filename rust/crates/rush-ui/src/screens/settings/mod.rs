@@ -258,6 +258,8 @@ pub fn apply_colors(m: &mut Model) {
 /// The list's own copy of the config, taken again from the store's.
 pub(crate) fn sync(m: &mut Model) {
     apply_colors(m);
+    let feed = config(m).feed;
+    m.feed_follows(feed);
     let cfg = serde_json::to_value(config(m))
         .ok()
         .and_then(|v| serde_json::from_value(v).ok());

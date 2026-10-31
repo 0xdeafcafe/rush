@@ -175,6 +175,23 @@ impl Model {
         on
     }
 
+    /// The feed turned on or off in the config (Settings › The feed, or
+    /// config.json changed outside rush): docked or taken away at once,
+    /// as Go reads the config's Feed every frame (stream.go:55, :115).
+    /// Nothing until the feed has been asked about once.
+    pub(crate) fn feed_follows(&mut self, on: bool) {
+        match self.kept::<Stream>().on {
+            Some(was) if was != on => {}
+            _ => return,
+        }
+        self.kept::<Stream>().on = Some(on);
+        if on {
+            self.load_stream();
+        } else {
+            self.kept::<Stream>().off();
+        }
+    }
+
     /// Reads the board off the UI thread, and has it read again whenever
     /// it changes while the feed is on (loadStream).
     pub(crate) fn load_stream(&mut self) {

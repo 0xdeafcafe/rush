@@ -1216,6 +1216,22 @@ fn keys_records_global_keys() {
     }
 }
 
+/// The feed row takes the feed away or brings it back at once, as #feed
+/// on|off does (stream.go reads the config's Feed every frame).
+#[test]
+fn the_feed_row_takes_effect_at_once() {
+    let (mut m, _d) = model(140, 50);
+    config_mut(&mut m).feed = true;
+    changed(&mut m);
+    assert!(m.feed_on());
+    config_mut(&mut m).feed = false;
+    changed(&mut m);
+    assert!(!m.feed_on(), "off at once");
+    config_mut(&mut m).feed = true;
+    changed(&mut m);
+    assert!(m.feed_on(), "back at once");
+}
+
 /// A key bound on Keys works at once: the keymap rush's keys go through
 /// takes it as keybindings.json does (saveBinding → setKeys).
 #[test]
