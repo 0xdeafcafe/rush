@@ -223,8 +223,11 @@ impl MenuBarSheet {
         let on = c.menu_bar;
         super::changed(m);
         if on {
-            m.flash("putting rush in the menu bar…");
-            start_menu_bar(m);
+            if m.leads() {
+                m.flash("putting rush in the menu bar…");
+            }
+            // A following rush says it leaves the icon alone.
+            menu_bar_changed(m, true);
         }
         Out::Close
     }

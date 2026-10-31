@@ -1407,6 +1407,20 @@ fn the_menu_bar_is_left_alone_unless_leading() {
     assert!(f.contains("leaves the menu bar icon alone"), "{f}");
 }
 
+/// The first-run Menu bar sheet's yes, in a following rush, says it
+/// leaves the icon alone rather than that it's putting it there.
+#[test]
+fn the_menu_bar_sheet_in_a_follower() {
+    use crate::frame::sheet::Sheet;
+    let (mut m, _d) = model(140, 50);
+    m.follows = true;
+    let mut s = sheets::MenuBarSheet::default();
+    s.key(&mut m, &crate::frame::Press::of("enter").unwrap());
+    let f = m.flash.clone().unwrap().0;
+    assert!(f.contains("leaves the menu bar icon alone"), "{f}");
+    assert!(config(&m).menu_bar && config(&m).menu_bar_asked);
+}
+
 /// A setting's means and names: how its value is shown (shown, now).
 #[test]
 fn setting_shown_and_now() {
