@@ -92,14 +92,29 @@ pub fn set_painted(g: Ground) {
     *PAINTED.write().unwrap_or_else(|e| e.into_inner()) = g;
 }
 
-/// The ground Settings › Theme picks (applyColors): rush's dark or
-/// light. "match terminal" is rush's dark until the terminal's answer to
-/// OSC 10 and 11 is read (scheme.rs: not wired yet).
+/// The ground Settings › Theme picks (model.go:569 applyColors): rush's
+/// dark or light, or for "match terminal" the terminal's own background
+/// and text, as it answered OSC 10 and 11 when rush took it; rush's dark
+/// when it didn't say.
 pub fn of_theme(theme: &str) -> Ground {
     match theme {
         "light" => LIGHT,
-        _ => DARK,
+        "dark" => DARK,
+        _ => answered(rush_draw::colour_replies()),
     }
+}
+
+/// The terminal's ground from its OSC 10 and 11 replies (theme.Terminal).
+pub fn answered(replies: Vec<String>) -> Ground {
+    let (mut fg, mut bg) = (None, None);
+    for r in replies {
+        match super::scheme::parse_colour_report(&r) {
+            Some((10, c)) => fg = Some(c),
+            Some((11, c)) => bg = Some(c),
+            _ => {}
+        }
+    }
+    terminal(bg, fg)
 }
 
 /// c, a colour written for DARK, as it's drawn on g (applyColors): a
@@ -335,7 +350,15 @@ mod tests {
             theme::COLOURBLIND_RED
         );
         assert_eq!(of_theme("light"), LIGHT);
-        assert_eq!(of_theme(""), DARK);
+        assert_eq!(of_theme("dark"), DARK);
+        // Matching the terminal: its own ground, rush's dark when it
+        // didn't say.
+        assert_eq!(answered(Vec::new()), DARK);
+        let g = answered(vec![
+            "\x1b]11;rgb:ffff/ffff/ffff\x1b\\".into(),
+            "\x1b]10;rgb:0000/0000/0000\x07".into(),
+        ]);
+        assert_eq!((g.bg, g.fg), (Rgb(255, 255, 255), Rgb(0, 0, 0)));
     }
 
     #[test]

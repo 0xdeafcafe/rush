@@ -18,7 +18,7 @@ pub use headless::Headless;
 pub use input::{Button, Event, Key, KeyMods, MouseKind, key_string, keystroke};
 pub use perf::note as perf_note;
 pub use run::{App, Loop, Msg, Outside, Sender, Step, TrySend};
-pub use term::Term;
+pub use term::{Term, colour_replies};
 
 #[cfg(test)]
 mod tests;

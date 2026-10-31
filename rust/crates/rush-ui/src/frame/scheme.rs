@@ -5,9 +5,11 @@
 //! internal/ui/scheme.go (startColours :19, StopSchemeReports :23) and
 //! model.go:553 (askColours, applyColors).
 //!
-//! The terminal's answers come back as input: these read them. rush-draw
-//! hands the UI keys, not raw replies, so the asking isn't wired in yet
-//! and rush draws on its dark ground (DESIGN.md "Screens", gaps).
+//! rush-draw asks for the colours as it takes the terminal, before its
+//! input thread reads, and keeps the replies (rush_draw::colour_replies);
+//! these read them. Not yet: asking again on focus or on a mode 2031
+//! report, so a terminal switched light or dark while rush runs keeps
+//! the colours it had (DESIGN.md "Screens", gaps).
 
 use super::ground::Rgb;
 
