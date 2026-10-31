@@ -475,6 +475,26 @@ fn question_mark_opens_the_key_guide() {
     assert_eq!(input(&mut m), "why?");
 }
 
+/// ← pushed into the start of a box with text, a third time within a
+/// second, asks to go back to the list; a fourth says yes, and what's
+/// typed stays (rushmode.go:4346, edgepush.go:8).
+#[test]
+fn left_pushed_into_the_box_asks_to_go_back() {
+    let (mut m, _) = hosted("steer", Vec::new());
+    typed(&mut m, "abc");
+    press(&mut m, "home");
+    press(&mut m, "left");
+    press(&mut m, "left");
+    assert!(m.confirm.is_none(), "two pushes don't ask");
+    press(&mut m, "left");
+    let q = m.confirm.as_ref().expect("the third asks");
+    assert_eq!(q.question, "Back to the list?");
+    assert_eq!(q.detail, "what's typed stays in this session's box");
+    press(&mut m, "left");
+    assert!(m.session.is_none(), "the fourth says yes");
+    assert_eq!(conn(&mut m, KEY).input.string(), "abc");
+}
+
 /// ctrl+] ↑ lifts a draft typed in the wrong session into the Prompt;
 /// enter puts it in the box of the one picked in the list, after what's
 /// there, and esc takes it back where it came from (keybind.go:244-310,
