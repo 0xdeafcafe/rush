@@ -941,3 +941,85 @@ fn a_diff_line_marks_spaces_and_tabs() {
     let t: String = l.spans.iter().map(|s| s.text.as_str()).collect();
     assert_eq!(t, "··long·›");
 }
+
+/// A live turn redrawn as its clock ticks, through the unit memo, is the
+/// same rows as one drawn afresh: the memo copies only what would be
+/// drawn the same (render.go:998 memoized).
+#[test]
+fn the_unit_memo_draws_as_afresh() {
+    for s in [session(), cases()] {
+        for w in [40, 80, 160] {
+            let mut r = Renderer::new();
+            for k in 0..6 {
+                let mut o = opts(w, at(100 + k * 7));
+                o.verbose = k == 4;
+                if k == 5 {
+                    o.selected = "t2".into();
+                }
+                let kept = r.render(&s, &o);
+                let fresh = Renderer::new().render(&s, &o);
+                assert!(
+                    kept == fresh,
+                    "width {w}, frame {k}:\n{}\n---\n{}",
+                    text(&kept),
+                    text(&fresh)
+                );
+            }
+        }
+    }
+}
+
+/// Real transcripts fed a slice at a time, each slice drawn through the
+/// unit memo and afresh: the same rows every time. MEMO_TRANSCRIPTS names a
+/// file listing them, one path a line; without it there's nothing to do.
+#[test]
+fn the_unit_memo_draws_real_transcripts_as_afresh() {
+    let Ok(list) = std::env::var("MEMO_TRANSCRIPTS") else {
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    for p in std::fs::read_to_string(list).unwrap().lines() {
+        let raw = std::fs::read(p).unwrap();
+        let lines: Vec<&[u8]> = raw.split_inclusive(|&b| b == b'\n').collect();
+        let step = (lines.len() / 80).max(1);
+        for w in [80, 200] {
+            let copy = dir.path().join("t.jsonl");
+            std::fs::write(&copy, b"").unwrap();
+            let mut tail = rush_convo::Tail::new(&copy, rush_convo::decode(rush_claude::messages));
+            let mut sess = Session::new();
+            let mut r = Renderer::new();
+            let mut f = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&copy)
+                .unwrap();
+            for (k, chunk) in lines.chunks(step).enumerate() {
+                use std::io::Write;
+                for l in chunk {
+                    f.write_all(l).unwrap();
+                }
+                f.flush().unwrap();
+                tail.read(&mut sess).unwrap();
+                // A second on at least each slice: a live turn kept by its clock
+                // (TurnKey) would otherwise show the last slice's time.
+                let o = opts(w, sess.last + 1000 + 1500 * k as i64);
+                let kept = r.render(&sess, &o);
+                let fresh = Renderer::new().render(&sess, &o);
+                if kept != fresh {
+                    let (a, b) = (text(&kept), text(&fresh));
+                    let at = a.lines().zip(b.lines()).position(|(x, y)| x != y);
+                    let near = |t: &str| {
+                        let i = at.unwrap_or(0);
+                        let v: Vec<&str> = t.lines().skip(i.saturating_sub(4)).take(10).collect();
+                        v.join("\n")
+                    };
+                    panic!(
+                        "{p} slice {k} width {w}: differ at row {at:?} (text same: {})\nkept:\n{}\nfresh:\n{}",
+                        a == b,
+                        near(&a),
+                        near(&b)
+                    );
+                }
+            }
+        }
+    }
+}

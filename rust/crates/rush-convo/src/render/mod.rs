@@ -22,6 +22,7 @@ mod spawn;
 pub(crate) mod style;
 pub(crate) mod txt;
 mod udiff;
+mod units;
 
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -285,6 +286,8 @@ struct Slot {
     /// Its rows estimated, open and gone past, for before it's drawn.
     est: (usize, usize),
     lines: Option<Vec<RenderedLine>>,
+    /// Its parts as last drawn, while it's drawn open (the unit memo).
+    units: units::Units,
     fast: bool,
     /// The window that last drew or showed it, for letting go of the
     /// longest unused first.
@@ -495,7 +498,15 @@ impl Renderer {
         let k = self.key(s, o, i, latest, folds);
         let slot = &self.slots[i];
         if slot.key.as_ref() != Some(&k) || slot.lines.is_none() {
-            let (lines, fast) = draw_turn(s, o, &self.places, i, k.latest, k.recent);
+            let (lines, fast) = draw_turn(
+                s,
+                o,
+                &self.places,
+                i,
+                k.latest,
+                k.recent,
+                &mut self.slots[i].units,
+            );
             let slot = &mut self.slots[i];
             self.kept = self.kept + lines.len() - slot.lines.as_ref().map_or(0, Vec::len);
             if slot.height != Some(lines.len()) {
@@ -531,6 +542,7 @@ impl Renderer {
                 break;
             }
             if let Some(ls) = self.slots[i].lines.take() {
+                self.slots[i].units.clear();
                 self.kept -= ls.len();
             }
         }
@@ -666,6 +678,7 @@ impl Renderer {
             if i < self.lo || i >= self.hi {
                 // Measuring keeps no rows.
                 if let Some(ls) = self.slots[i].lines.take() {
+                    self.slots[i].units.clear();
                     self.kept -= ls.len();
                 }
             }
@@ -907,6 +920,7 @@ fn draw_turn(
     i: usize,
     latest: Option<StepId>,
     recent: bool,
+    units: &mut units::Units,
 ) -> (Vec<RenderedLine>, bool) {
     let t = &s.turns[i];
     let mut d = Drawer::new(s, t, o, p);
@@ -918,10 +932,17 @@ fn draw_turn(
         open = *v;
     }
     if open {
+        // Drawn part by part through the unit memo: a turn on the clock
+        // redraws every frame, and only what runs in it is drawn anew
+        // (render.go:345).
+        d.ctx = Some(d.unit_ctx());
+        d.units = Some(units);
         d.open();
     } else if o.open.contains_key(&r) {
+        units.clear();
         d.folded();
     } else {
+        units.clear();
         d.settled();
     }
     squeezed(&mut d.lines);
