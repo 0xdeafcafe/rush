@@ -101,6 +101,38 @@ pub fn format_rfc3339(ms: Ms) -> String {
     s
 }
 
+/// `ms` as RFC 3339 in this machine's zone, as Go's time.Time of a
+/// time.Now() writes it in JSON (`2026-10-28T13:34:56.789+01:00`; `Z`
+/// where the zone is UTC's).
+pub fn format_rfc3339_local(ms: Ms) -> String {
+    let off = local_offset(ms.div_euclid(1000));
+    let mut s = format_rfc3339(ms + off * 1000);
+    s.pop();
+    if off == 0 {
+        s.push('Z');
+    } else {
+        let a = off.abs();
+        s.push_str(&format!(
+            "{}{:02}:{:02}",
+            if off < 0 { '-' } else { '+' },
+            a / 3600,
+            a / 60 % 60
+        ));
+    }
+    s
+}
+
+/// This machine's offset from UTC at Unix time secs, in seconds.
+fn local_offset(secs: i64) -> i64 {
+    let t = secs as libc::time_t;
+    // SAFETY: localtime_r writes only tm, which lives on this stack.
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    if unsafe { libc::localtime_r(&t, &mut tm) }.is_null() {
+        return 0;
+    }
+    tm.tm_gmtoff as i64
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -118,6 +150,19 @@ mod tests {
     }
 
     use super::*;
+
+    /// A time in this machine's zone reads back as the same instant.
+    #[test]
+    fn formats_local() {
+        for ms in [0, 1_793_190_896_789, 1_793_190_896_000, 951_782_400_000] {
+            let s = format_rfc3339_local(ms);
+            assert_eq!(parse_rfc3339(&s), ms, "{s}");
+            assert!(
+                s.ends_with('Z') || s[s.len() - 6..].starts_with(['+', '-']),
+                "{s}"
+            );
+        }
+    }
 
     #[test]
     fn parses() {

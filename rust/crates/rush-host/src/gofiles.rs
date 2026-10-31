@@ -8,12 +8,15 @@ use crate::lines::{self, Line, decode};
 use crate::op::Op;
 use crate::wire::{Config, Info};
 
+/// A fixture, its exchanges' times (Go's time.Now(), made in UTC there)
+/// in this machine's zone, as Go writes them here.
 fn fixture(name: &str) -> String {
-    std::fs::read_to_string(format!(
+    let text = std::fs::read_to_string(format!(
         "{}/tests/fixtures/{name}",
         env!("CARGO_MANIFEST_DIR")
     ))
-    .unwrap()
+    .unwrap();
+    rush_core::wire::in_local_zone(&text, "At")
 }
 
 #[test]
