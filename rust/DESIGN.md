@@ -1195,7 +1195,8 @@ apart from each other; the sandbox keeps them all from the user's.
 To check, run the tests under `sandbox-exec` with `rust/tools/rush-tests.sb`
 (through `rust/tools/sbtest.sh cargo test -p <crate>`), a profile that denies
 writes to the real `~/.config`, `~/.claude`, `~/.codex`,
-`~/Library/Caches/{agtop,rush}`, unix-socket connects there, exec of the
+`~/Library/Caches/{agtop,rush}`, unix-socket connects there and to Claude
+Code's daemon for the real `~/.claude`, exec of the
 user's claude, codex and rush, the keychain, and signals outside the sandbox: any
 denial shows in `log show --predicate 'sender == "Sandbox"'`. Under it,
 these tests fail for the sandbox's own reasons (it won't run setuid `ps`

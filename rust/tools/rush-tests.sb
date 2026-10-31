@@ -37,3 +37,9 @@
 ; rush's tests keep sign-ins in fake vaults.
 (deny mach-lookup (global-name "com.apple.SecurityServer") (global-name "com.apple.securityd.xpc"))
 (deny file-write* (subpath (string-append (param "HOME") "/Library/Keychains")))
+
+; No talking to Claude Code's own daemon for the real ~/.claude, which
+; hosts its background sessions outside rush's folder (a bench rush once
+; stopped a real session through it). sbtest.sh passes its folder; a
+; test's own daemon is under another (its account's folder's hash).
+(deny network-outbound (remote unix-socket (subpath (param "CLAUDE_DAEMON"))))
