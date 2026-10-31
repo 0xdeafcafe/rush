@@ -345,7 +345,9 @@ fn install_under_homebrew_runs_brew_upgrade() {
 
     // No brew where it should be.
     assert_eq!(
-        install_at(&url, &exe, state.path(), &Quiet).unwrap_err().0,
+        install_at(&url, "0.2.0", &exe, state.path(), &Quiet)
+            .unwrap_err()
+            .0,
         format!(
             "rush was installed with Homebrew, but there's no brew at {}",
             prefix.path().join("bin/brew").display()
@@ -353,7 +355,7 @@ fn install_under_homebrew_runs_brew_upgrade() {
     );
 
     fake_brew(prefix.path(), 0);
-    let l = install_at(&url, &exe, state.path(), &Quiet).unwrap();
+    let l = install_at(&url, "0.2.0", &exe, state.path(), &Quiet).unwrap();
     assert_eq!(l.version, "0.3.0");
     assert_eq!(
         std::fs::read_to_string(prefix.path().join("ran")).unwrap(),
@@ -366,7 +368,9 @@ fn install_under_homebrew_runs_brew_upgrade() {
 
     fake_brew(prefix.path(), 1);
     assert_eq!(
-        install_at(&url, &exe, state.path(), &Quiet).unwrap_err().0,
+        install_at(&url, "0.2.0", &exe, state.path(), &Quiet)
+            .unwrap_err()
+            .0,
         "brew upgrade: Error: no bottle"
     );
 }
@@ -421,7 +425,7 @@ fn install_replaces_the_running_rush() {
     std::fs::write(&exe, "old rush").unwrap();
     let notes = Notes::default();
 
-    let res = install_at(&url, &exe, state.path(), &notes);
+    let res = install_at(&url, "0.2.0", &exe, state.path(), &notes);
     if target().is_none() {
         assert_eq!(
             res.unwrap_err().0,
@@ -479,7 +483,9 @@ fn install_refuses_what_wasnt_released() {
         let state = tempfile::tempdir().unwrap();
         let exe = bin.path().join("rush");
         std::fs::write(&exe, "old rush").unwrap();
-        let err = install_at(&url, &exe, state.path(), &Quiet).unwrap_err().0;
+        let err = install_at(&url, "0.2.0", &exe, state.path(), &Quiet)
+            .unwrap_err()
+            .0;
         assert!(err.starts_with(&want), "{err}");
         assert_eq!(std::fs::read_to_string(&exe).unwrap(), "old rush");
         assert_eq!(names(bin.path()), ["rush"], "nothing left over");
@@ -494,7 +500,9 @@ fn install_refuses_what_wasnt_released() {
     let exe = bin.path().join("rush");
     std::fs::write(&exe, "old rush").unwrap();
     assert_eq!(
-        install_at(&url, &exe, bin.path(), &Quiet).unwrap_err().0,
+        install_at(&url, "0.2.0", &exe, bin.path(), &Quiet)
+            .unwrap_err()
+            .0,
         format!("release v0.3.0 has no {name}")
     );
 
@@ -503,11 +511,48 @@ fn install_refuses_what_wasnt_released() {
     std::fs::write(&other, "dev").unwrap();
     let url = serving_release(good, sum);
     assert!(
-        install_at(&url, &other, bin.path(), &Quiet)
+        install_at(&url, "0.2.0", &other, bin.path(), &Quiet)
             .unwrap_err()
             .0
             .ends_with("isn't called rush, so it's left alone")
     );
+}
+
+/// A release that isn't newer than the rush running is never installed:
+/// the same one again, an older one, or the release a newer nightly is
+/// ahead of; a nightly's own release is newer than it.
+#[cfg(unix)]
+#[test]
+fn install_refuses_what_isnt_newer() {
+    for cur in ["0.3.0", "0.4.0", "0.3.1-nightly.20261030"] {
+        let url = serving_release(tar_gz(&[("rush", b"new rush")]), String::new());
+        let bin = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let exe = bin.path().join("rush");
+        std::fs::write(&exe, "old rush").unwrap();
+        assert_eq!(
+            install_at(&url, cur, &exe, state.path(), &Quiet)
+                .unwrap_err()
+                .0,
+            format!("rush v{cur} is the newest: v0.3.0 isn't newer"),
+        );
+        assert_eq!(std::fs::read_to_string(&exe).unwrap(), "old rush");
+        assert_eq!(names(bin.path()), ["rush"], "nothing left over");
+        assert!(!state.path().join(CACHE).exists());
+    }
+    // Under Homebrew too: brew isn't run.
+    let (url, _) = serving(Box::new(|p, base| {
+        (p == LATEST).then(|| release_json(base, "v0.3.0", &[]))
+    }));
+    let prefix = tempfile::tempdir().unwrap();
+    let exe = prefix.path().join("Cellar/rush/0.3.0/bin/rush");
+    std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+    std::fs::write(&exe, "old").unwrap();
+    fake_brew(prefix.path(), 0);
+    assert!(install_at(&url, "0.3.0", &exe, prefix.path(), &Quiet).is_err());
+    assert!(!prefix.path().join("ran").exists(), "brew ran");
+    // The nightly before a release goes on to it.
+    assert!(newer("0.3.0-nightly.20261029", "0.3.0"));
 }
 
 // What tar itself makes reads too: a PAX header (here for a long name)

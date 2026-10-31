@@ -64,7 +64,7 @@ pub struct Model {
     pub(crate) flash: Option<(String, Ms, bool)>,
     /// The log of everything rush said, the last LOG_KEPT (#log).
     pub(crate) said: Vec<crate::frame::messages::LogLine>,
-    quit_armed: Ms,
+    pub(crate) quit_armed: Ms,
     pub(crate) help: bool,
     pub(crate) term_focused: bool,
     pub session: Option<SessionView>,
@@ -461,24 +461,42 @@ impl Model {
             "end" if empty => self.step(self.lines.len() as isize),
             "g" if letters => self.step(-(self.lines.len() as isize)),
             "G" if letters => self.step(self.lines.len() as isize),
+            // The agent that has waited longest for you, so a stack of
+            // questions clears with ctrl+n and an answer each
+            // (keys.go:595 nextNeedingYou).
             "ctrl+n" => {
-                let order = self.order.clone();
-                let at = order
+                let best = self
+                    .order
                     .iter()
-                    .position(|&i| self.agents[i].key == self.sel)
-                    .map_or(0, |p| p + 1);
-                let next = order[at.min(order.len())..]
-                    .iter()
-                    .chain(order.iter())
-                    .find(|&&i| self.agents[i].needs_you())
-                    .copied();
-                match next {
-                    Some(i) => {
-                        let k = self.agents[i].key.clone();
-                        self.select(k);
-                    }
+                    .map(|&i| &self.agents[i])
+                    .filter(|a| a.needs_you())
+                    .min_by_key(|a| a.job.updated_at)
+                    .map(|a| a.key.clone());
+                match best {
+                    Some(k) => self.select(k),
                     None => self.flash("nothing needs you"),
                 }
+            }
+            // → at the end of what's typed, a third time within a second,
+            // asks to open the picked agent; a fourth says yes
+            // (keys.go:314, edgepush.go:8).
+            "right"
+                if !empty
+                    && self.input.pos == self.input.text.len()
+                    && !self.sel.starts_with('§')
+                    && self.selected().is_some()
+                    && self.edge.push("list-right", Instant::now()) =>
+            {
+                let name = self.agents[self.selected().expect("picked")]
+                    .display_name
+                    .clone();
+                let mut q = crate::frame::confirm::Confirm::new(format!("Open {name}?"), |m| {
+                    m.focus_pane();
+                    Out::Draw
+                })
+                .detail("what you typed stays in this box");
+                q.again = "right".into();
+                self.ask(q);
             }
             "enter" | "right" if empty => {
                 if let Some(t) = self.sel.strip_prefix('§').map(str::to_string) {
@@ -515,18 +533,14 @@ impl Model {
             "?" | "f1" if empty => self.help = true,
             "q" if letters => return Out::Quit,
             // With nothing typed, into the Session, as tab does
-            // (keys.go:473).
-            "{" | "}" | "tab" if empty => {
-                if self.open_room_for(&self.sel.clone()) {
-                    // A room's row, or one of its agents: the room opens
-                    // in the pane (switchFocus → focusPane → openRoomFor,
-                    // rushmode.go:5295), so what's typed next goes to it.
-                    let key = self.sel.clone();
-                    crate::screens::social::rooms::open_room(self, &key);
-                } else if let Some(i) = self.selected() {
-                    self.open(i);
-                }
-            }
+            // (keys.go:473); ctrl+o (reply) whatever's typed, and ⌘↓ with
+            // nothing typed, as in the Finder (keys.go:421, :456 focusPane).
+            "{" | "}" | "super+down" if empty => self.focus_pane(),
+            // tab goes between the list and the Session whatever's typed,
+            // unless it completes a # command, which the picker took first
+            // (keys.go:253 switchFocus).
+            "tab" => self.focus_pane(),
+            "ctrl+o" => self.focus_pane(),
             "esc" if empty => {
                 if peek::back(self) {
                     return Out::Draw; // back to the Session you peeked from
@@ -545,6 +559,21 @@ impl Model {
             _ => return self.box_key(k).or_idle(),
         }
         Out::Draw
+    }
+
+    /// Into the picked agent's Session, its box taking the keys; a room's
+    /// row, or one of its agents, opens the room (focusPane,
+    /// rushmode.go:5291).
+    fn focus_pane(&mut self) {
+        if self.open_room_for(&self.sel.clone()) {
+            // A room's row, or one of its agents: the room opens
+            // in the pane (switchFocus → focusPane → openRoomFor,
+            // rushmode.go:5295), so what's typed next goes to it.
+            let key = self.sel.clone();
+            crate::screens::social::rooms::open_room(self, &key);
+        } else if let Some(i) = self.selected() {
+            self.open(i);
+        }
     }
 
     /// ← on a heading folds it; on an agent with subagents running, tucks
@@ -1415,7 +1444,11 @@ impl Model {
             }
             Note::Tail { r#gen, fresh } => match self.view_of(r#gen) {
                 Some(v) => {
+                    let first = !v.read;
                     v.take(*fresh);
+                    if first {
+                        self.hold.answer(); // "reading the conversation…" goes now
+                    }
                     self.follow_tail();
                     Step::Draw
                 }
@@ -1495,6 +1528,13 @@ impl App<Note> for Model {
             Msg::App(note) => self.note(note),
         };
         self.keep_undo(g);
+        // An #intervene @agent waiting for its chat (model.go:933
+        // interveneReady).
+        let st = if crate::screens::session_cards::discuss::intervene_ready(self) {
+            Step::Draw
+        } else {
+            st
+        };
         // A hosted view stays on its session (pinHosted).
         if crate::hosted::pin(self) && st == Step::Idle {
             return Step::Draw;
@@ -1546,6 +1586,13 @@ impl App<Note> for Model {
 }
 
 impl Model {
+    /// What a key asked for is in, landed from the background: its frame
+    /// is drawn at once, not held for the quarter second background work
+    /// waits between frames (frame/framehold.rs).
+    pub fn answered(&mut self) {
+        self.hold.answer();
+    }
+
     /// When the screen next changes with the clock alone: a spinner's
     /// frame, a flash going, a place or sheet that moves with time.
     fn draw_at(&self) -> Option<Instant> {

@@ -38,6 +38,7 @@ use rush_core::time::Ms;
 use rush_fleet::Predicates;
 
 use crate::model::Model;
+use crate::screens::list_extras::filter;
 use crate::screens::list_extras::landing::{land_of, tree_of};
 use crate::screens::session_core::turnwants::{
     turn_label, wants_mark, wants_of, wants_say, wants_you,
@@ -1076,7 +1077,7 @@ impl Model {
                     if rail && w > 7 {
                         push(Part::Where, true);
                     }
-                    if two && self.says_why(a) {
+                    if two && (self.says_why(a) || filter::has_match(self, a)) {
                         push(Part::Sub, true);
                     }
                     // Its running subagents, a row each under it.
@@ -1130,7 +1131,9 @@ impl Model {
                         }
                         pad = ins.saturating_sub(1); // a column in from the ▍
                     }
-                    let says = part == Part::Member && two && a.is_some_and(|a| self.says_why(a));
+                    let says = part == Part::Member
+                        && two
+                        && a.is_some_and(|a| self.says_why(a) || filter::has_match(self, a));
                     let subs = if part == Part::Member && rail {
                         crate::screens::list_extras::subs::rows(
                             self,
@@ -1569,14 +1572,22 @@ impl Model {
         } else if a.just_finished(now) {
             sp("✓", GREEN)
         } else if a.needs_you() {
-            spb("?", YELLOW)
+            spb("?", YELLOW) // a question: what to look at first
+        } else if a.waiting() {
+            sp("?", YELLOW)
         } else if live {
+            // Its harness's own spinner (convo.Spin).
             sp(
-                SPINNER[(self.tick + a.job.id.len()) % SPINNER.len()],
+                crate::screens::list_extras::wall::spin(
+                    a.kind.as_str(),
+                    self.tick + a.job.id.len(),
+                ),
                 ORANGE,
             )
         } else if a.busy() {
             sp("◌", ORANGE)
+        } else if a.done {
+            sp("✓", GREEN)
         } else if a.pid != 0 {
             sp("◦", DIM)
         } else {
@@ -1729,7 +1740,8 @@ impl Model {
             land = Some(t);
         }
         let mut name_room = room;
-        let with_summary = !summary.is_empty() && self.says_why(a) && !stacked;
+        let with_summary =
+            (!summary.is_empty() && self.says_why(a) || filter::has_match(self, a)) && !stacked;
         let mut name_col = name_col as isize;
         let (full, extra) = if sel || a.key == self.hover {
             let f = self.badges(a, true);
@@ -1784,7 +1796,9 @@ impl Model {
             if sw > 8 {
                 let sw = sw as usize;
                 left.spans.push(plain("  "));
-                if just {
+                if let Some(snip) = filter::snippet(self, a, sw) {
+                    join(&mut left, snip);
+                } else if just {
                     left.spans.push(sp("just finished", GREEN));
                     left.spans.push(sp(" · ", FAINT));
                     left.spans
@@ -1964,7 +1978,9 @@ impl Model {
         let room = w.saturating_sub(5);
         let (summary, col, just) = self.row_summary(i);
         let mut l = line([plain("  "), sp("╰ ", FAINT)]);
-        if just {
+        if let Some(snip) = filter::snippet(self, &self.agents[i], room) {
+            join(&mut l, snip);
+        } else if just {
             l.spans.push(sp("just finished", GREEN));
             l.spans.push(sp(" · ", FAINT));
             l.spans

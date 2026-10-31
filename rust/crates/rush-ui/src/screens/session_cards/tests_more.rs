@@ -297,6 +297,8 @@ fn mentions_mid_message() {
     let mut m = hosted(120, 40);
     let mut docs = agent("b", "docs");
     docs.job.cwd = "/src/site".into();
+    docs.rush = true;
+    docs.job.id = "b1b2c3d4".into();
     m.agents = vec![docs, agent("p", "old run")];
     m.order = vec![0, 1];
     m.kept::<Fake>().info.insert(
@@ -313,6 +315,19 @@ fn mentions_mid_message() {
     assert_eq!(got.len(), 1);
     assert_eq!(got[0], rush_room::community::name("b1b2c3d4"));
     assert!(tags(&m.agents[0], Some("b1b2c3d4"), "docs"));
+    // A rush agent with no host connected goes by its feed name too, from
+    // its own id (mentionName's a.Rush && a.ID).
+    m.kept::<Fake>().info.clear();
+    let got = mention_matches(&m, &input, back);
+    assert_eq!(got, vec![rush_room::community::name("b1b2c3d4")]);
+    m.kept::<Fake>().info.insert(
+        "b".into(),
+        HostInfo {
+            kind: "claude".into(),
+            id: "b1b2c3d4".into(),
+            ..HostInfo::default()
+        },
+    );
     let (out, b) = complete_mention(&input, back, "docs");
     assert_eq!(out.iter().collect::<String>(), "ask @docs and tell me");
     assert_eq!(b, "and tell me".len());
@@ -412,8 +427,16 @@ fn quick_ask_thread() {
         m.kept::<QuickAsk>().shown && !m.kept::<QuickAsk>().focused(),
         "again hands the keys back"
     );
-    // Into the open chat's box, as one paste.
-    assert_eq!(run_action(&mut m, "session.quickask.insert"), Out::Draw);
+    // Into the open chat's box, as one paste: ctrl+] i with the float
+    // holding the keys reaches the keymap, not its box (quickKey).
+    press(&mut m, "alt+/");
+    assert!(m.kept::<QuickAsk>().focused());
+    press(&mut m, "ctrl+]");
+    assert_eq!(press(&mut m, "i"), Out::Draw);
+    assert!(
+        !m.kept::<QuickAsk>().thread().unwrap().input.contains(&'i'),
+        "the chord's i wasn't typed"
+    );
     match acts(&mut m).last() {
         Some(Act::Paste(p)) => assert!(p.contains("Q: ctrl+tab?\nA: yes"), "{p}"),
         a => panic!("no paste: {a:?}"),
