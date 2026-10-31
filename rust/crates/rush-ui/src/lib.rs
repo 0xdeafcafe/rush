@@ -75,7 +75,9 @@ fn run_model(
     let is_hosted = hosted.is_some();
     let give: Box<dyn FnOnce(worker::DiscoveryCtl) + Send> = Box::new(move |ctl| {
         let _ = tx.send(worker::Note::Apply(Box::new(move |m: &mut Model| {
-            m.kept::<worker::FleetIn>().0 = Some(ctl.handle());
+            let f = m.kept::<worker::FleetIn>();
+            f.0 = Some(ctl.handle());
+            f.1 = Some(ctl.again());
             if is_hosted {
                 hosted::set_discovery(m, ctl)
             } else {
