@@ -485,7 +485,7 @@ pub fn screen_command(m: &mut Model, key: &str, name: &str, arg: &str) -> Out {
 /// Where session key works: the folder its session reports first, then
 /// the list's (rulesheet.go:71 firstNonEmpty(c.sess.Info.Cwd, a.Cwd)).
 pub fn session_cwd(m: &Model, key: &str, a: &rush_core::agent::Agent) -> String {
-    [m.session.as_ref(), m.pane.as_ref()]
+    [m.session.as_ref(), m.pane.as_ref(), m.tiles.get(key)]
         .into_iter()
         .flatten()
         .find(|v| v.key == key)

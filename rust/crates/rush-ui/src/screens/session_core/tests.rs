@@ -563,6 +563,20 @@ fn cards_in_the_conversation_act() {
     assert_eq!(flash(&m), "opened github.com/o/r/pull/7");
 }
 
+/// The folder a Session's screens read is the one its session reports,
+/// also for a grid tile's kept Session (rulesheet.go:71).
+#[test]
+fn screens_read_the_sessions_folder_in_a_tile_too() {
+    use crate::screens::session_cards::claudescreen::session_cwd;
+    let (mut m, _) = hosted("steer", Vec::new());
+    let a = m.agents[0].clone();
+    assert_eq!(session_cwd(&m, KEY, &a), "/src/checkout");
+    let mut v = m.session.take().unwrap();
+    v.sess.info.cwd = "/src/checkout/moved".into();
+    m.tiles.insert(KEY.into(), v);
+    assert_eq!(session_cwd(&m, KEY, &a), "/src/checkout/moved");
+}
+
 fn approval(id: &str) -> Event {
     Event::Approval(Box::new(Approval {
         id: id.into(),
