@@ -74,12 +74,15 @@ pub struct Of<'a> {
     pub saved_cwd: &'a str,
     /// The pointer is over its agent label.
     pub hover_label: bool,
+    /// How a room stands, said where an agent's connection is (roomConn):
+    /// Some for a room's row.
+    pub room: Option<Line>,
 }
 
 impl<'a> Of<'a> {
     /// Agent key's header, as known now; None when it's gone.
     pub fn read(m: &'a Model, key: &str) -> Option<Of<'a>> {
-        let a = m.agents.iter().find(|a| a.key == key)?;
+        let a = crate::screens::social::rooms::row_agent(m, key)?;
         let sess = m.session.as_ref().filter(|v| v.key == key).map(|v| &v.sess);
         let c = m.kept.peek::<Core>().and_then(|c| c.conns.get(key));
         // Only the project's files: not its memory or plans (bars.go:257,268).
@@ -109,6 +112,10 @@ impl<'a> Of<'a> {
                 .kept
                 .peek::<State>()
                 .is_some_and(|s| s.hover_label == key && !key.is_empty()),
+            room: key
+                .starts_with(crate::screens::social::rooms::ROOM_KEY_PREFIX)
+                .then(|| m.room_of(key).map(crate::screens::social::rooms::room_conn))
+                .flatten(),
         })
     }
 
@@ -533,6 +540,9 @@ fn conn_words(o: &Of) -> Line {
     if o.hosted || o.sleeping {
         return Line::new();
     }
+    if let Some(r) = &o.room {
+        return r.clone();
+    }
     let a = o.a;
     if a.rush {
         return one(dim("send to resume"));
@@ -768,7 +778,7 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     let Some(key) = core::open_key(m) else {
         return;
     };
-    if rows.len() <= META_ROW || m.agents.iter().all(|a| a.key != key) {
+    if rows.len() <= META_ROW || crate::screens::social::rooms::row_agent(m, &key).is_none() {
         return; // gone: the Session says so
     }
     let hw = w.saturating_sub(3);
