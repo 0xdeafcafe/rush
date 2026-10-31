@@ -454,6 +454,42 @@ fn opened(m: &mut Model, dir: &std::path::Path) {
     assert!(m.session.is_some(), "{}", flash(m));
 }
 
+/// Each row of the info sheet's Settings tab opens its sheet or page, as
+/// its / command does, never "isn't in this rush yet"
+/// (infotabs.go:318-333).
+#[test]
+fn info_settings_rows_open_their_sheets() {
+    let (mut m, d) = model(120, 40);
+    opened(&mut m, d.path());
+    open_info(&mut m, SETTINGS);
+    let names: Vec<String> = m
+        .sheet_as::<InfoSheet>()
+        .expect("the info sheet")
+        .settings
+        .iter()
+        .filter(|l| !l.claude)
+        .map(|l| l.name.clone())
+        .collect();
+    assert!(names.len() >= 6, "{names:?}");
+    for (i, name) in names.iter().enumerate() {
+        m.sheet = None;
+        m.place = crate::frame::PlaceId::Agents;
+        if m.session.is_none() {
+            m.open(0);
+        }
+        m.flash = None;
+        open_info(&mut m, SETTINGS);
+        m.sheet_as::<InfoSheet>().unwrap().cur = i;
+        m.press("enter");
+        let f = flash(&m);
+        assert!(!f.contains("isn't in this rush yet"), "{name}: {f}");
+        assert!(
+            m.sheet_as::<InfoSheet>().is_none(),
+            "{name}: the info sheet stayed"
+        );
+    }
+}
+
 #[test]
 fn info_sheet_tabs_at_go_width() {
     let (mut m, d) = model(120, 40);

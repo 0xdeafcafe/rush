@@ -1582,14 +1582,41 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     let picked = sel(m);
     let name = super::views::view_name(m, &key);
     match s {
-        // → goes into the column beside the list: its box takes the keys.
+        // → goes into the column beside the list: its box takes the keys,
+        // when a message can reach the run; one nothing can reach opens,
+        // as → opens a run everywhere else (openSub).
         "right"
             if empty
                 && name == "subagents"
                 && picked.starts_with("sub:")
                 && box_run(m, &key).is_some_and(|id| picked[4..] == id) =>
         {
-            focus_box(m, &key);
+            let id = picked[4..].to_string();
+            if super::relay::route(m, &key, &id).is_ok() {
+                focus_box(m, &key);
+            } else {
+                open_sub(m, &key, &id);
+            }
+            Out::Draw
+        }
+        // → on a step a subagent made opens that run in the subagents
+        // view; esc comes back to the step (rushmode.go:4270, subOfStep).
+        "right"
+            if name == "conversation"
+                && picked.contains(":s:")
+                && let Some(id) = run_of_step(m, &key, &picked) =>
+        {
+            super::views::show_view(m, &key, "subagents");
+            open_sub(m, &key, &id);
+            let w = &mut conn(m, &key).watch;
+            if w.open != id {
+                // Not found to read yet: the step opens in place instead.
+                super::views::show_view(m, &key, "conversation");
+                set_sel(m, picked);
+                return Out::Pass;
+            }
+            w.back = true;
+            w.from = picked;
             Out::Draw
         }
         "enter" | "space" | " " | "right" if !picked.is_empty() => {
@@ -1629,6 +1656,33 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         }
         _ => Out::Pass,
     }
+}
+
+/// The run the conversation's step picked draws: a subagent's call, or
+/// one of the agents a command ran ("step/run" when it ran several, each
+/// a row of its own) (subOfStep).
+fn run_of_step(m: &mut Model, key: &str, picked: &str) -> Option<String> {
+    let (_, id) = picked.split_once(":s:")?;
+    let id = id.to_string();
+    let kids = m
+        .session
+        .as_ref()
+        .filter(|v| v.key == key)
+        .and_then(|v| v.o.kids.get(id.split('/').next().unwrap_or("")))
+        .map_or(0, Vec::len);
+    let prefix = crate::screens::list_extras::spawns::SPAWN_PREFIX;
+    conn(m, key)
+        .runs
+        .subs
+        .iter()
+        .find(|sa| {
+            let run = sa.id.strip_prefix(prefix);
+            match (id.split_once('/'), run) {
+                (Some((step, kid)), Some(run)) => sa.tool_use_id == step && run == kid,
+                _ => sa.tool_use_id == id && (run.is_none() || kids <= 1),
+            }
+        })
+        .map(|sa| sa.id.clone())
 }
 
 /// A click on one of the dock's runs, in the conversation or the column

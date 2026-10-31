@@ -116,6 +116,9 @@ fn run_model(
     }
     let mut term = Term::new()?;
     m.keys_disambiguated = term.keys_disambiguated();
+    // Made again now the terminal has said its colours, for Theme's
+    // "match terminal" (model.go:1219 BackgroundColorMsg, applyColors).
+    screens::settings::apply_colors(&mut m);
     let (w, h) = term.size()?;
     m.w = w as usize;
     m.h = h as usize;

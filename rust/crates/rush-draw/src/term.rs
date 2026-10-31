@@ -78,6 +78,134 @@ fn leave() -> io::Result<()> {
     w
 }
 
+/// What the terminal answered when asked for its text and background
+/// colours as rush took it: its OSC 10 and 11 replies, each whole
+/// (`\x1b]11;rgb:1111/1010/0e0e\x07`). Empty when it didn't say.
+static COLOUR_REPLIES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// How long the terminal is given to answer: DA1's answer ends the wait
+/// at once on a terminal that's there; over SSH or a slow multiplexer
+/// the colours may take a while.
+const ASK_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The terminal didn't answer in time: a colour reply that comes later
+/// would reach the input thread as keys (crossterm can't read ESC ] … ST),
+/// so the reader drops the first one that comes (reader.rs late_osc).
+pub(crate) static LATE_OSC: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// The terminal's OSC 10 (text) and 11 (background) replies, as it gave
+/// them when rush took it.
+pub fn colour_replies() -> Vec<String> {
+    COLOUR_REPLIES.lock().map(|r| r.clone()).unwrap_or_default()
+}
+
+/// Asks the terminal for its text and background colours, then for its
+/// attributes (DA1), which every terminal answers: once that answer is
+/// in, whatever it said about colours is too, and a terminal that
+/// doesn't know OSC 10 and 11 costs no wait. Read before the input
+/// thread starts, so the replies never reach it as keys.
+fn ask_colours() {
+    use std::os::fd::AsRawFd;
+    let tty;
+    // SAFETY: isatty only asks.
+    let fd = if unsafe { libc::isatty(libc::STDIN_FILENO) } == 1 {
+        libc::STDIN_FILENO
+    } else {
+        match std::fs::File::open("/dev/tty") {
+            Ok(f) => {
+                tty = f;
+                tty.as_raw_fd()
+            }
+            Err(_) => return,
+        }
+    };
+    let mut out = io::stdout().lock();
+    if out
+        .write_all(b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\\x1b[c")
+        .and_then(|_| out.flush())
+        .is_err()
+    {
+        return;
+    }
+    drop(out);
+    let end = std::time::Instant::now() + ASK_WAIT;
+    let mut got = Vec::new();
+    loop {
+        let left = end.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        let mut p = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: one pollfd, ours, for at most what's left.
+        let n = unsafe { libc::poll(&mut p, 1, left.as_millis() as libc::c_int) };
+        if n < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+            continue; // a resize as rush starts
+        }
+        if n <= 0 {
+            break;
+        }
+        // A byte at a time, so nothing typed after the answer is taken:
+        // it stays for the input thread.
+        let mut b = [0u8; 1];
+        // SAFETY: reads into b, at most its length.
+        let r = unsafe { libc::read(fd, b.as_mut_ptr().cast(), 1) };
+        if r < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+            continue;
+        }
+        if r <= 0 {
+            break;
+        }
+        got.push(b[0]);
+        if da1_answered(&got) {
+            break;
+        }
+    }
+    if !da1_answered(&got) {
+        LATE_OSC.store(true, Ordering::SeqCst);
+    }
+    let replies = osc_replies(&String::from_utf8_lossy(&got));
+    if let Ok(mut r) = COLOUR_REPLIES.lock() {
+        *r = replies;
+    }
+}
+
+/// Whether b holds the terminal's answer to DA1: CSI ? … c.
+fn da1_answered(b: &[u8]) -> bool {
+    let Some(i) = b.windows(3).position(|w| w == b"\x1b[?") else {
+        return false;
+    };
+    b[i + 3..]
+        .iter()
+        .find(|c| !(c.is_ascii_digit() || **c == b';'))
+        == Some(&b'c')
+}
+
+/// The OSC 10 and 11 replies in s, each with its ending (BEL or ST).
+pub(crate) fn osc_replies(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = s;
+    while let Some(i) = rest.find("\x1b]1") {
+        let from = &rest[i..];
+        let end = match (from.find('\x07'), from.find("\x1b\\")) {
+            (Some(a), Some(b)) if a < b => a + 1,
+            (_, Some(b)) => b + 2,
+            (Some(a), None) => a + 1,
+            (None, None) => break,
+        };
+        let r = &from[..end];
+        if r.starts_with("\x1b]10;") || r.starts_with("\x1b]11;") {
+            out.push(r.to_string());
+        }
+        rest = &from[end..];
+    }
+    out
+}
+
 /// The terminal, taken over for rush's screens.
 pub struct Term {
     out: CrosstermBackend<BufWriter<Stdout>>,
@@ -122,6 +250,9 @@ impl Term {
         // thread reads (bubbletea's KeyboardEnhancementsMsg): a terminal
         // with the kitty keyboard answers the query for its flags.
         let disambiguated = crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
+        // Its text and background, which rush's colours are made from
+        // when Theme matches the terminal (Go's askColours, model.go:565).
+        ask_colours();
         // One write per frame: ratatui flushes once it has drawn.
         let out = BufWriter::with_capacity(1 << 16, io::stdout());
         let (w, h) = match crossterm::terminal::size() {
@@ -541,5 +672,25 @@ mod tests {
         ] {
             assert_eq!(super::base64(i.as_bytes()), o);
         }
+    }
+}
+
+#[cfg(test)]
+mod colour_tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_colour_replies() {
+        let got = "\x1b]10;rgb:e2e2/dddd/d3d3\x1b\\\x1b]11;rgb:1111/1010/0e0e\x07\x1b[?62;22c";
+        assert!(da1_answered(got.as_bytes()));
+        assert!(!da1_answered(b"\x1b]11;rgb:1/1/1\x07\x1b[?62;2"));
+        assert_eq!(
+            osc_replies(got),
+            vec![
+                "\x1b]10;rgb:e2e2/dddd/d3d3\x1b\\".to_string(),
+                "\x1b]11;rgb:1111/1010/0e0e\x07".to_string()
+            ]
+        );
+        assert!(osc_replies("\x1b[?62c").is_empty());
     }
 }

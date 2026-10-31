@@ -477,6 +477,21 @@ pub fn message_key_hook(m: &mut Model, k: &Press) -> Out {
     match k.s.as_str() {
         "ctrl+home" | "ctrl+end" => jump_user_message(m, &key, k.s == "ctrl+end"),
         "alt+enter" => open_user_message(m, &key, ""),
+        // A pull request's card opens it in the browser, a commit's copies
+        // its hash (rushmode.go:4290, :5128 actOnEntity).
+        "enter" | "space" | "right"
+            if m.session
+                .as_ref()
+                .is_some_and(|v| v.sel.starts_with(rush_convo::render::ENTITY_REF)) =>
+        {
+            let sel = m
+                .session
+                .as_ref()
+                .map(|v| v.sel.clone())
+                .unwrap_or_default();
+            act_on_entity(m, &sel[rush_convo::render::ENTITY_REF.len()..]);
+            Out::Draw
+        }
         "enter" => {
             let sel = m
                 .session
@@ -490,6 +505,21 @@ pub fn message_key_hook(m: &mut Model, k: &Press) -> Out {
             }
         }
         _ => Out::Pass,
+    }
+}
+
+/// What a card in the conversation offers: a pull request opened in the
+/// browser, a commit's hash copied (actOnEntity).
+pub fn act_on_entity(m: &mut Model, e: &str) {
+    if let Some(url) = e.strip_prefix("pr:") {
+        if m.sender().is_some() {
+            crate::screens::accounts::signin::browse(url);
+        }
+        m.flash(&format!("opened {}", url.trim_start_matches("https://")));
+        return;
+    }
+    if let Some(sha) = e.strip_prefix("commit:") {
+        m.copy_text(sha.to_string());
     }
 }
 

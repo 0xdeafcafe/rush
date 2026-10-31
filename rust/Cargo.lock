@@ -1209,6 +1209,7 @@ name = "rush-core"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "libc",
  "rush-testenv",
  "serde",
  "serde_json",

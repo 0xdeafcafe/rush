@@ -1122,10 +1122,12 @@ is made. Everything below is in `rush_ui::frame`.
   at second 8 of 15 working, 25 of 45 idle) rides the tick and never
   wakes rush itself. His mix uses `mul_add`, as Go's compiler fuses it on
   arm64, so every cell matches Go's (a hashed dump of every frame).
-- **Gaps.** Colours are still the dark ground's constants: `ground.rs`
-  (photon's theme), `headerwash.rs` and `scheme.rs` (the terminal's
-  colour and mode 2031 reports, parsed) are ported but the reports
-  aren't asked for, as rush-draw hands the UI keys, not raw replies.
+- **Gaps.** Colours are written as the dark ground's constants and
+  moved onto the ground picked as rush-draw paints (`ground.rs`,
+  photon's theme). For Theme "match terminal" rush-draw asks the
+  terminal's colours (OSC 10, 11, then DA1) as it takes the terminal,
+  before the input thread reads; they aren't asked again on focus or
+  a mode 2031 report, as rush-draw hands the UI keys, not raw replies.
   Handing the terminal to `$EDITOR` (Go's `editorCmd`) waits on
   rush-draw pausing its input reader: every $EDITOR use goes through
   `session_core::memedit::edit_then(m, path, done)`, which runs the
