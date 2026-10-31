@@ -364,15 +364,15 @@ pub fn ask_hide_room(m: &mut Model, a: &Agent) -> Out {
         let mut hide = members.clone();
         hide.push(key.clone());
         let keys = hide.clone();
-        m.later(
-            move || {
-                let mut st = rush_state::Store::load();
-                for k in &keys {
-                    st.hide(k);
+        crate::overlay::save(
+            m,
+            move |o| {
+                for k in keys {
+                    o.hidden.insert(k, rush_state::Time::now());
                 }
-                st.save_overlay().map_err(|e| e.to_string())
+                true
             },
-            |m, r: Result<(), String>| {
+            |m, r| {
                 if let Err(e) = r {
                     m.fail(&format!("couldn't keep it hidden: {e}"));
                 }

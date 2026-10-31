@@ -75,17 +75,17 @@ pub fn save(m: &mut Model, key: &str, name: &str) {
         a.display_name = name.to_string();
     }
     let (key, name) = (key.to_string(), name.to_string());
-    m.later(
-        move || {
-            let mut s = rush_state::Store::load();
+    crate::overlay::save(
+        m,
+        move |o| {
             if reset {
-                s.overlay.names.remove(&key);
+                o.names.remove(&key);
             } else {
-                s.overlay.names.insert(key, name);
+                o.names.insert(key, name);
             }
-            s.save_overlay().map_err(|e| e.to_string())
+            true
         },
-        |m, r: Result<(), String>| match r {
+        |m, r| match r {
             Ok(()) => Out::Idle,
             Err(e) => {
                 m.fail(&e);

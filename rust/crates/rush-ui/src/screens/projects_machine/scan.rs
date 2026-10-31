@@ -183,21 +183,44 @@ pub(crate) struct Found {
 /// Finds every agent's worktree and checks each with git and measures it,
 /// /tmp when it's due, the projects' agent scratch, and the tops of the
 /// folders the page names.
+///
+/// Rust-only: what git says of the worktrees is shown as soon as it's in,
+/// before their sizes are walked (at a background pace, a big checkout's
+/// build folders take minutes). Go showed nothing of the scan until all
+/// of it was done; the page still says it's asking until then.
 pub(crate) fn scan_worktrees(m: &mut Model) {
     if d(m).checking || d(m).frozen {
         return;
     }
     d(m).checking = true;
-    let scan = worktree_scan(m);
+    let early = m.sender().map(|tx| {
+        let tx = tx.lane(1);
+        Box::new(move |wts: Vec<Worktree>| {
+            tx.send(crate::worker::Note::Apply(Box::new(
+                move |m: &mut Model| {
+                    on_looked(m, wts);
+                    Out::Draw
+                },
+            )));
+        }) as Early
+    });
+    let scan = worktree_scan(m, early);
     m.later(scan, |m, f| {
         on_worktrees(m, f);
         Out::Draw
     });
 }
 
+/// Handed what git said of the worktrees, before their sizes.
+pub(crate) type Early = Box<dyn FnOnce(Vec<Worktree>) + Send>;
+
 /// The look scan_worktrees takes, to run off the UI (cleanup.go:155
-/// worktreeScan): the cleanup agent's start takes one too.
-pub(crate) fn worktree_scan(m: &mut Model) -> impl FnOnce() -> Found + Send + 'static {
+/// worktreeScan): the cleanup agent's start takes one too. early, when
+/// given, has the worktrees as git found them, before they're measured.
+pub(crate) fn worktree_scan(
+    m: &mut Model,
+    early: Option<Early>,
+) -> impl FnOnce() -> Found + Send + 'static {
     let workers: Vec<rush_core::agent::Agent> = agents(m).map(|g| g.a.clone()).collect();
     let tmp_due = now() - d(m).tmp.checked > TMP_EVERY;
     let mut tmps = Vec::new();
@@ -219,6 +242,13 @@ pub(crate) fn worktree_scan(m: &mut Model) -> impl FnOnce() -> Found + Send + 's
             peeks: HashMap::new(),
             outside: Vec::new(),
         };
+        // git first, each worktree measured after (Worktree::check).
+        let gh = Gh::shared();
+        f.wts = find_worktrees(&workers, Some(gh));
+        let looked = check_git_all(&mut f.wts);
+        if let Some(early) = early {
+            early(f.wts.clone());
+        }
         for t in tmps {
             if std::fs::metadata(&t).is_ok_and(|s| s.is_dir()) {
                 let n = disk_usage(&[t.as_str()]);
@@ -232,16 +262,58 @@ pub(crate) fn worktree_scan(m: &mut Model) -> impl FnOnce() -> Found + Send + 's
             f.tmp = Some(find_scratch(&reg, "/tmp"));
         }
         f.outside = rush_fleet::look_left(&workers);
-        let gh = Gh::shared();
-        f.wts = find_worktrees(&workers, Some(gh));
-        for w in &mut f.wts {
-            w.check();
+        for (w, ok) in f.wts.iter_mut().zip(looked) {
+            if ok {
+                w.measure();
+            }
         }
         f
     }
 }
 
-/// Takes what a worktree scan found (cleanup.go:370 onWorktrees).
+/// Looks at each worktree with git, GIT_AT_ONCE at a time (Go: one at a
+/// time; with dozens of checkouts on a busy machine that took minutes);
+/// whether git could, for each.
+fn check_git_all(wts: &mut [Worktree]) -> Vec<bool> {
+    const GIT_AT_ONCE: usize = 4;
+    if wts.len() < 2 {
+        return wts.iter_mut().map(Worktree::check_git).collect();
+    }
+    let per = wts.len().div_ceil(GIT_AT_ONCE);
+    std::thread::scope(|sc| {
+        let parts: Vec<_> = wts
+            .chunks_mut(per)
+            .map(|part| {
+                let n = part.len();
+                let h =
+                    sc.spawn(move || part.iter_mut().map(Worktree::check_git).collect::<Vec<_>>());
+                (n, h)
+            })
+            .collect();
+        parts
+            .into_iter()
+            .flat_map(|(n, h)| h.join().unwrap_or_else(|_| vec![false; n]))
+            .collect()
+    })
+}
+
+/// What git said of the worktrees, in before their sizes: each keeps the
+/// size it last measured until it's measured again. The scan isn't done:
+/// the page says it's still asking, and what waits for the whole scan
+/// (Clean up, the sizes that can go) still waits.
+fn on_looked(m: &mut Model, mut wts: Vec<Worktree>) {
+    let st = d(m);
+    if !st.checking {
+        return; // the whole scan beat it in
+    }
+    for w in &mut wts {
+        if let Some(old) = st.wts.iter().find(|o| o.path == w.path) {
+            w.size = old.size;
+        }
+    }
+    st.wts = wts;
+}
+
 pub(crate) fn on_worktrees(m: &mut Model, f: Found) {
     let st = d(m);
     st.checking = false;

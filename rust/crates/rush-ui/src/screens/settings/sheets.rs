@@ -1177,6 +1177,7 @@ pub fn open_permissions(m: &mut Model, k: &str, p: &Profile, cwd: &str) {
         |m, r| {
             if let Some(s) = m.sheet_as::<PermSheet>() {
                 s.adopt(r);
+                m.answered();
             }
             Out::Draw
         },

@@ -170,6 +170,46 @@ fn back_to_the_list_keys() {
     }
 }
 
+/// tab goes into the Session with text typed too; → pushed at the end
+/// of the text a third time asks to open the agent, a fourth says yes
+/// (keys.go:253 switchFocus, :314 edgePush).
+#[test]
+fn tab_and_a_pushed_right_go_in_with_text() {
+    let mut m = opened(120, 40, "split");
+    press(&mut m, "esc");
+    m.input.set("half");
+    press(&mut m, "tab");
+    assert!(m.session.is_some(), "tab with text");
+    assert_eq!(m.input.string(), "half", "what's typed stays");
+
+    let mut m = opened(120, 40, "split");
+    press(&mut m, "esc");
+    m.input.set("half");
+    press(&mut m, "right");
+    press(&mut m, "right");
+    assert!(m.confirm.is_none());
+    press(&mut m, "right");
+    let q = m.confirm.as_ref().expect("asked");
+    assert!(q.question.starts_with("Open ") && q.question.ends_with('?'));
+    assert_eq!(q.detail, "what you typed stays in this box");
+    press(&mut m, "right");
+    assert!(m.session.is_some(), "the fourth says yes");
+}
+
+/// ctrl+o (reply) and ⌘↓ go from the list into the picked agent's
+/// Session box; ctrl+o with text typed too (keys.go:421, :456).
+#[test]
+fn ctrl_o_and_cmd_down_go_in() {
+    for (k, typed) in [("ctrl+o", ""), ("ctrl+o", "half"), ("super+down", "")] {
+        let mut m = opened(120, 40, "split");
+        press(&mut m, "esc");
+        assert!(m.session.is_none());
+        m.input.set(typed);
+        press(&mut m, k);
+        assert!(m.session.is_some(), "{k} with {typed:?}");
+    }
+}
+
 /// At 170 and wider the Session beside the list stays when the list
 /// takes the keys and esc is pressed there: it's beside the list by
 /// itself (autoSplit).
@@ -528,4 +568,39 @@ fn no_split_under_84() {
     // rush's own 28% at 115 is 32 columns, leaving the Session 82.
     let m = opened(115, 40, "split");
     assert_eq!(split::widths(&m), (0, 115));
+}
+
+/// With the Session beside the list holding the keys, a click on a
+/// grid tile, where it is on screen, swaps that agent in: the tile's
+/// click is the grid's before the Session takes it at its own columns
+/// (model.go:1640 gridClick).
+#[test]
+fn a_click_on_a_grid_tile_beside_the_list() {
+    use crate::screens::list_extras::grid::Grid;
+    use rush_draw::{Button, KeyMods, MouseKind};
+    let mut m = opened(240, 60, "split");
+    let mut other = agent("claude", State::Idle);
+    other.key = "default/other".into();
+    other.display_name = "the other one".into();
+    other.job.id = "o1".into();
+    m.agents.push(other);
+    m.roots.push(String::new());
+    m.rebuild();
+    m.kept::<Grid>().keys = vec!["default/other".into()];
+    let _ = screen(&mut m);
+    let (lw, pw) = split::widths(&m);
+    assert!(lw > 0 && pw > 0 && m.session.is_some(), "{lw} {pw}");
+    let at = m.kept::<Grid>().at.first().cloned().expect("a tile drawn");
+    m.mouse_event(&crate::frame::Mouse {
+        kind: MouseKind::Down(Button::Left),
+        x: (at.x + 2) as u16,
+        y: (at.y + 1) as u16,
+        mods: KeyMods::default(),
+    });
+    assert_eq!(m.sel, "default/other");
+    assert_eq!(
+        m.kept::<Grid>().keys,
+        [super::tests::KEY],
+        "the open one takes the tile"
+    );
 }

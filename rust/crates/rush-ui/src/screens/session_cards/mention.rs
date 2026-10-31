@@ -107,7 +107,11 @@ pub fn tags(a: &Agent, host_id: Option<&str>, tag: &str) -> bool {
 pub fn listed(m: &Model) -> Vec<(usize, Option<String>)> {
     m.order
         .iter()
-        .map(|&i| (i, info(m, &m.agents[i].key).map(|h| h.id)))
+        .map(|&i| {
+            // The agent's own id, connected or not (mentionName's a.ID).
+            let id = super::handles::host_id(&m.agents[i]).map(str::to_string);
+            (i, id)
+        })
         .collect()
 }
 
@@ -233,7 +237,7 @@ pub fn with_mentions(m: &Model, text: &str, self_key: &str) -> String {
             continue;
         }
         let host = info(m, &a.key);
-        let id = host.as_ref().map(|h| h.id.clone());
+        let id = super::handles::host_id(a).map(str::to_string);
         let mut n = format!(
             "@{} is {}, another agent rush runs",
             mention_name(a, id.as_deref()),
@@ -292,10 +296,7 @@ pub fn mention_agents(m: &Model, input: &[char], back: usize) -> Vec<usize> {
 pub fn mention_matches(m: &Model, input: &[char], back: usize) -> Vec<String> {
     mention_agents(m, input, back)
         .into_iter()
-        .map(|i| {
-            let id = info(m, &m.agents[i].key).map(|h| h.id);
-            mention_name(&m.agents[i], id.as_deref())
-        })
+        .map(|i| mention_name(&m.agents[i], super::handles::host_id(&m.agents[i])))
         .collect()
 }
 
@@ -315,16 +316,12 @@ pub fn mention_rows(m: &Model, input: &[char], back: usize, sel: usize, w: usize
         if !a.branch.is_empty() {
             d.push(a.branch.clone());
         }
-        let id = info(m, &a.key).map(|h| h.id);
+        let id = super::handles::host_id(a);
         let name = {
             let n = one_line(&a.display_name);
-            if n.is_empty() {
-                mention_name(a, id.as_deref())
-            } else {
-                n
-            }
+            if n.is_empty() { mention_name(a, id) } else { n }
         };
-        let handle = format!("@{}", mention_name(a, id.as_deref()));
+        let handle = format!("@{}", mention_name(a, id));
         rows.push((name, d.join(" · "), handle));
     }
     picker_rows(&rows, sel, w, "", MENTION_HOW)
