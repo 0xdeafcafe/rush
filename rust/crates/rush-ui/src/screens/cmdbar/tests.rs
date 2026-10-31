@@ -602,6 +602,22 @@ fn remap_moves_a_key() {
     assert!(!bar::is_open(&m));
 }
 
+/// alt+/ is only the keymap's key for the guide: given another, alt+/
+/// opens nothing and the new key does (quickask.go:268).
+#[test]
+fn quick_ask_key_can_move() {
+    use crate::screens::session_cards::quickask::QuickAsk;
+    let mut m = model(120, 40);
+    let mut b = BTreeMap::new();
+    b.insert("quick.ask".to_string(), vec!["ctrl+x g".to_string()]);
+    set_keys(&mut m, File { bindings: b });
+    press(&mut m, "alt+/");
+    assert!(!m.kept::<QuickAsk>().shown, "alt+/ no longer opens it");
+    press(&mut m, "ctrl+x");
+    press(&mut m, "g");
+    assert!(m.kept::<QuickAsk>().focused(), "its new key does");
+}
+
 #[test]
 fn chord_runs_an_action() {
     let mut m = model(120, 40);

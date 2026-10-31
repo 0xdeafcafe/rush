@@ -342,13 +342,10 @@ pub fn insert_quick(m: &mut Model) -> Out {
     Out::Draw
 }
 
-/// Keys while the float has them: all but quitting and the command bar,
-/// and alt+/ anywhere (quickKey).
+/// Keys while the float has them: all but chords, quitting, the command
+/// bar and alt+/, which the keymap reads (quickKey).
 pub fn quick_key_hook(m: &mut Model, k: &Press) -> Out {
     let s = k.s.as_str();
-    if s == "alt+/" && m.confirm.is_none() {
-        return toggle_quick(m);
-    }
     // A chord's next key is the keymap's: ctrl+] q, ctrl+] i (quickKey).
     if !quick(m).focused()
         || m.confirm.is_some()
@@ -358,7 +355,8 @@ pub fn quick_key_hook(m: &mut Model, k: &Press) -> Out {
         return Out::Pass;
     }
     match s {
-        "ctrl+q" | "ctrl+k" | "super+k" => Out::Pass,
+        // alt+/ is the keymap's (quick.ask), so another key can take it.
+        "ctrl+q" | "ctrl+k" | "super+k" | "alt+/" => Out::Pass,
         "super+c" | "ctrl+c" => {
             let t = quick(m).thread().expect("focused");
             if let Some(txt) = t.sel_text() {
