@@ -400,6 +400,11 @@ pub(crate) fn dialog_len(m: &Model) -> usize {
     }
 }
 
+/// Whether a Settings or Harnesses page is showing.
+pub(crate) fn dialog_open(m: &Model) -> bool {
+    m.on_place() && m.kept.peek::<State>().is_some_and(|s| s.dialog.is_some())
+}
+
 /// Opens the input line for a typed value; answer gets it, trimmed,
 /// unless it's empty (ask).
 pub(crate) fn ask(m: &mut Model, what: &str, prefill: &str, answer: Answer) {

@@ -1293,6 +1293,28 @@ fn a_harness_beside_the_list_reads_its_files() {
     assert_eq!(shown_kind(&m), "claude");
 }
 
+/// A name asked for on a Settings page (a login's, adding an account) is
+/// asked on the page's own line at the foot, the rows left in view
+/// (settings_providers.go addAccount, ask()).
+#[test]
+fn a_name_is_asked_on_the_page() {
+    let (mut m, _d) = model(140, 50);
+    set_settings_page(&mut m, PAGE_PROVIDERS);
+    let got = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+    let g = got.clone();
+    crate::screens::accounts::keys::ask_text(&mut m, "login name", "", move |_, v| {
+        *g.borrow_mut() = v;
+        Out::Draw
+    });
+    assert!(m.sheet.is_none(), "no box over the rows");
+    assert_eq!(dialog(&m).asking, "login name");
+    for c in ["w", "o", "r", "k"] {
+        press(&mut m, c);
+    }
+    press(&mut m, "enter");
+    assert_eq!(*got.borrow(), "work");
+}
+
 /// The feed row takes the feed away or brings it back at once, as #feed
 /// on|off does (stream.go reads the config's Feed every frame).
 #[test]
