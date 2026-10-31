@@ -141,11 +141,26 @@ fn run(args: &[String]) -> i32 {
         _ => {}
     }
     match args.first().map(String::as_str) {
-        Some("--version" | "version") => println!("{}", version_line(VERSION, COMMIT)),
-        Some("--help" | "-h" | "help") => print!("{USAGE}{}", rush_plugin::cmd::plugins_usage()),
-        Some("--dump") => dump(),
-        Some("--render") => render(reg, &args[1..]),
-        Some("--soak") => soak(reg, &args[1..]),
+        Some("--version" | "version") => {
+            println!("{}", version_line(VERSION, COMMIT));
+            return 0;
+        }
+        Some("--help" | "-h" | "help") => {
+            print!("{USAGE}{}", rush_plugin::cmd::plugins_usage());
+            return 0;
+        }
+        Some("--dump") => {
+            dump();
+            return 0;
+        }
+        Some("--render") => {
+            render(reg, &args[1..]);
+            return 0;
+        }
+        Some("--soak") => {
+            soak(reg, &args[1..]);
+            return 0;
+        }
         Some("why") => {
             let log = rush_events::path();
             return rush_events::why_cmd(
@@ -160,7 +175,10 @@ fn run(args: &[String]) -> i32 {
         Some("update") => return exit_if(install::self_update(&mut stdout)),
         Some("on") => return exit_if(install::Setup::process().turn_on(&mut stdout)),
         Some("off") => return exit_if(install::Setup::process().turn_off(&mut stdout)),
-        Some("status") => install::Setup::process().status(&mut stdout),
+        Some("status") => {
+            install::Setup::process().status(&mut stdout);
+            return 0;
+        }
         // Its old names still work.
         Some("feed" | "twotter" | "twatter" | "twitter" | "twattr" | "community") => {
             let ctx = rush_room::FeedCtx::new();
@@ -949,6 +967,11 @@ mod tests {
         );
         for a in ["bogus", "--bogus", "-v"] {
             assert_eq!(run(&[a.to_string()]), 1, "{a}: not the view");
+        }
+        // A built-in command ends there: it never goes on to the view,
+        // which the held lock would refuse with 1 (main.go:87-102).
+        for a in ["--version", "version", "--help"] {
+            assert_eq!(run(&[a.to_string()]), 0, "{a}: went on to the view");
         }
         rush_state::set_thread_dir(None);
     }
