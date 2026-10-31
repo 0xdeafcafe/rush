@@ -1405,6 +1405,7 @@ impl<'a> Drawer<'a> {
         }
         let (mut verb, mut since, mut waiting) =
             (pick(OPENINGS, t.start).to_string(), t.start, false);
+        let mut tool_active = false;
         if let Some(last) = t.items.last() {
             let n = t.items.len() - 1;
             match last {
@@ -1421,10 +1422,22 @@ impl<'a> Drawer<'a> {
                 }
                 Item::Step(id) => {
                     let st = self.s.step(*id);
-                    if st.status == Status::Running {
-                        return; // the step's own row is spinning
-                    }
-                    if st.end != 0 {
+                    let docked = self.o.dock_activity;
+                    if st.status == Status::Running || docked && st.status == Status::Waiting {
+                        if !docked {
+                            return; // the step's own row is spinning
+                        }
+                        // Docked under the conversation, the step's row may
+                        // be folded or scrolled away: name it, and the
+                        // turn's time beside it (render.go:1158).
+                        tool_active = true;
+                        verb = if st.status == Status::Waiting {
+                            "waiting for approval".into()
+                        } else {
+                            format!("running {}", one_line(&st.tool))
+                        };
+                        since = st.start;
+                    } else if st.end != 0 {
                         verb = pick(WAITINGS, st.end).into();
                         since = st.end;
                         waiting = true;
@@ -1463,7 +1476,15 @@ impl<'a> Drawer<'a> {
         self.add("", Color::Default, pad.clone().and(head), Txt::new());
         let heard = t.heard.max(t.start);
         let quiet = self.o.now - heard;
-        if t.start != 0 && quiet >= STALL_AFTER {
+        if let Some(r) = &t.retry {
+            // A request failed and is tried again: the model hasn't
+            // stalled, its API has (render.go:1202).
+            let l = pad.and_raw("  ").and(paint(
+                C_YELLOW,
+                &format!("↻ {}", retry_words(r, self.o.now - t.retry_at)),
+            ));
+            self.add("", Color::Default, l, Txt::new());
+        } else if !tool_active && t.start != 0 && quiet >= STALL_AFTER {
             let s = dur(quiet);
             let l = pad.and_raw("  ").and(paint(
                 C_YELLOW,
@@ -3393,6 +3414,28 @@ impl<'a> Drawer<'a> {
         }
         self.card("", indent, head, Txt::new(), rows, foot, room, C_WARN_Q);
     }
+}
+
+/// What a retried request says: why, which attempt of how many, and when
+/// the next is (render.go:1325 retryWords).
+pub(crate) fn retry_words(r: &rush_core::event::Retry, since: Ms) -> String {
+    let why = match r.status {
+        529 => "the API is overloaded".to_string(),
+        429 => "rate limited".to_string(),
+        0 => "no answer from the API".to_string(),
+        n if n >= 500 => format!("the API failed ({n})"),
+        n if r.err.is_empty() => format!("error {n}"),
+        _ => r.err.clone(),
+    };
+    let mut s = format!("retrying · {why} · attempt {}", r.attempt);
+    if r.max > 0 {
+        s.push_str(&format!(" of {}", r.max));
+    }
+    let left = r.delay.as_millis() as Ms - since;
+    if left > 1000 {
+        s.push_str(&format!(" · next in {}", dur((left + 500) / 1000 * 1000)));
+    }
+    s
 }
 
 /// Joins the refs in a row's owner.

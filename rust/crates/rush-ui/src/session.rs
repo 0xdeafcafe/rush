@@ -393,6 +393,9 @@ impl SessionView {
         }
         o.focused = !self.idle;
         o.no_rule = self.beside;
+        // The pane's live line is docked: it names a running or waiting
+        // step and the turn's time (rushmode.go:2336 paneActivity).
+        o.dock_activity = true;
         o.zone = crate::model::local_zone(now);
         // Each time in the zone's offset then, as Go's time.Local: a
         // message from before the clocks changed keeps its hour.

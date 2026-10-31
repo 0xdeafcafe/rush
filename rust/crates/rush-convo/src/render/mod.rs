@@ -121,6 +121,10 @@ pub struct Options {
     pub history_open: bool,
     /// The live line is drawn elsewhere.
     pub hide_activity: bool,
+    /// The live line is the pane's docked one (activity.go:13): a running
+    /// or waiting step is named on it, with the turn's time, as its own
+    /// row may be folded or scrolled away.
+    pub dock_activity: bool,
     /// No rule in the gutter.
     pub no_rule: bool,
     /// Who answers under your messages, and what it is (its heading).
@@ -206,6 +210,7 @@ impl Options {
             self.zone_at,
         )
             .hash(&mut h);
+        self.dock_activity.hash(&mut h);
         let mut ran: Vec<_> = self.ran.iter().collect();
         ran.sort();
         ran.hash(&mut h);

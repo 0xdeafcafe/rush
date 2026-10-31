@@ -870,3 +870,59 @@ fn a_script_draws_as_its_file() {
         "failed:\n{out}"
     );
 }
+
+// The pane's live line is docked (activity_test.go): a running step is
+// named on it with the turn's time and is never called stalled; a step
+// waiting for leave says so; a retried request says why. Undocked, the
+// running step's own row spins and there's no line.
+#[test]
+fn the_docked_live_line_names_the_step() {
+    use rush_core::event::{Event, Retry};
+    let mut s = Session::new();
+    s.feed(sent("run"), at(0));
+    s.feed(
+        tool_use("b", "Bash", json!({"command": "go test ./..."})),
+        at(1),
+    );
+    let mut o = Options {
+        width: 100,
+        now: at(600),
+        ..Options::default()
+    };
+    let out = plain(&Renderer::new().render(&s, &o));
+    assert!(!out.contains("running Bash"), "undocked:\n{out}");
+    o.dock_activity = true;
+    let out = plain(&Renderer::new().render(&s, &o));
+    assert!(
+        out.contains("running Bash…  9m 59s  turn 10m 00s"),
+        "docked:\n{out}"
+    );
+    assert!(!out.contains("stalled"), "{out}");
+
+    let mut s = Session::new();
+    s.feed(sent("ask"), at(0));
+    s.feed(approval("c", "Bash", "r1"), at(2));
+    o.now = at(19);
+    let out = plain(&Renderer::new().render(&s, &o));
+    assert!(out.contains("waiting for approval…"), "approval:\n{out}");
+    assert!(out.contains("turn 19s"), "approval:\n{out}");
+
+    let mut s = Session::new();
+    s.feed(sent("go"), at(0));
+    s.feed(
+        Ev::Do(Event::Retry(Retry {
+            attempt: 1,
+            max: 3,
+            delay: std::time::Duration::from_secs(60),
+            status: 529,
+            err: String::new(),
+        })),
+        at(1),
+    );
+    o.now = at(11);
+    let out = plain(&Renderer::new().render(&s, &o));
+    assert!(
+        out.contains("↻ retrying · the API is overloaded · attempt 1 of 3 · next in 50s"),
+        "retry:\n{out}"
+    );
+}
