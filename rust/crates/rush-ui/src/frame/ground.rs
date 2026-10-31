@@ -118,14 +118,13 @@ pub fn answered(replies: Vec<String>) -> Ground {
 }
 
 /// Colour-blind's own grounds for an added and a removed line and their
-/// changed words, and a failure's, in place of green's and red's
-/// (convo/style.go:78-99 SetColours).
-const COLOUR_BLIND_GROUNDS: [(Rgb, Rgb); 5] = [
+/// changed words, in place of green's and red's (convo/style.go:78-99
+/// SetColours). Go's failure ground (bgFailure) has no colour here.
+const COLOUR_BLIND_GROUNDS: [(Rgb, Rgb); 4] = [
     (Rgb(0x16, 0x30, 0x1a), Rgb(0x10, 0x2a, 0x3c)),
     (Rgb(0x3a, 0x17, 0x14), Rgb(0x30, 0x24, 0x0e)),
     (Rgb(0x22, 0x52, 0x2b), Rgb(0x1a, 0x46, 0x64)),
     (Rgb(0x62, 0x24, 0x1e), Rgb(0x52, 0x3a, 0x10)),
-    (Rgb(0x2a, 0x1a, 0x1a), Rgb(0x2c, 0x24, 0x16)),
 ];
 
 /// c, a colour written for DARK, as it's drawn on g (applyColors): a
