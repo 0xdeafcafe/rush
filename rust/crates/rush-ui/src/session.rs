@@ -8,11 +8,12 @@
 //! adapter's history); this side only applies what it sends.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use rush_convo::{Decode, Fresh, Options, Renderer, Session, Tail};
 use rush_core::adapter::{self, AdapterRef, Kind, Registry, SLICE, migrated};
 use rush_core::agent::Agent;
-use rush_core::event::Event;
+use rush_core::event::{Event, Exchange};
 use rush_core::text::{Line, Span, Style, width};
 use rush_core::time::Ms;
 use rush_fleet::Predicates;
@@ -187,7 +188,9 @@ pub struct SessionView {
     /// A stopped rush session's past exchanges, from its journal: merged
     /// into what's read of its transcript once it's there, and again
     /// when the whole of it takes the end's place (rushmode.go:2106).
-    pub exchanges: Vec<rush_core::event::Exchange>,
+    pub exchanges: Arc<[Exchange]>,
+    /// Its agent has stopped, as follow last found it.
+    pub stopped: bool,
 }
 
 /// A conversation with this many steps is let go off the UI thread, its
@@ -228,7 +231,8 @@ impl SessionView {
             panels: Vec::new(),
             panel_refs: Vec::new(),
             drawn: crate::worker::Drawn::default(),
-            exchanges: Vec::new(),
+            exchanges: Arc::default(),
+            stopped: false,
         }
     }
 
@@ -236,7 +240,7 @@ impl SessionView {
     /// (RestoreExchanges); merging one again changes nothing.
     pub fn restore_exchanges(&mut self, records: Vec<rush_core::event::Exchange>) {
         if !records.is_empty() {
-            self.exchanges = records;
+            self.exchanges = records.into();
         }
         if self.read && !self.exchanges.is_empty() {
             self.sess.restore_exchanges(&self.exchanges);
@@ -303,10 +307,15 @@ impl SessionView {
         self.take_whole_drawn(whole, None);
     }
 
-    /// take_whole, with its end laid out already (r) by the worker that
-    /// read it, as this view last drew: the frame that shows it draws only
-    /// what changed since (Go's warmed, rushmode.go:2064).
-    pub fn take_whole_drawn(&mut self, mut whole: Session, r: Option<Renderer>) {
+    /// take_whole, with its end laid out already by the worker that read
+    /// it (r), as this view last drew and with the exchanges it merged:
+    /// the frame that shows it draws only what changed since (Go's warmed,
+    /// rushmode.go:2064).
+    pub fn take_whole_drawn(
+        &mut self,
+        mut whole: Session,
+        warm: Option<(Renderer, Arc<[Exchange]>)>,
+    ) {
         let part = &self.sess;
         let mut shift = whole.turns.len() as i64 - part.turns.len() as i64;
         if let Some(last) = part.turns.last() {
@@ -331,15 +340,21 @@ impl SessionView {
                 off,
             };
         }
+        let (r, merged) = match warm {
+            Some((r, x)) => (r, Arc::ptr_eq(&x, &self.exchanges)),
+            None => (Renderer::new(), false),
+        };
         let end = std::mem::replace(&mut self.sess, whole);
-        let drawn = std::mem::replace(&mut self.r, r.unwrap_or_default());
+        let drawn = std::mem::replace(&mut self.r, r);
         // The end it showed, and the reading of the whole before it, go
         // back to the system rather than sitting in the allocator.
         rush_sys::mem::let_go((end, drawn));
         if let Ok(mut d) = self.drawn.lock() {
             *d = None;
         }
-        self.restore_exchanges(Vec::new());
+        if !merged {
+            self.restore_exchanges(Vec::new());
+        }
     }
 
     /// Takes events an adapter's history gave: reset, the history was
@@ -391,11 +406,9 @@ impl SessionView {
         // the reading is still being read, not left open by the agent (Go
         // reads the whole before following it, rushmode.go:2117).
         let tail = matches!(self.source, Source::Transcript { .. });
-        if tail && self.caught_up && self.sess.live().is_some() && !a.job.live() {
-            let end = rush_core::event::TurnEnd {
-                reason: "done".into(),
-                ..Default::default()
-            };
+        self.stopped = !a.job.live();
+        if tail && self.caught_up && self.sess.live().is_some() && self.stopped {
+            let end = crate::worker::end_left_open();
             self.sess.apply(&rush_core::event::Event::TurnEnd(end), now);
             changed = true;
         }
@@ -503,7 +516,12 @@ impl SessionView {
         if self.sess.partial
             && let Ok(mut d) = self.drawn.lock()
         {
-            *d = Some((self.o.clone(), self.sess.info.clone()));
+            *d = Some(crate::worker::DrawnAs {
+                o: self.o.clone(),
+                info: self.sess.info.clone(),
+                exchanges: self.exchanges.clone(),
+                stopped: self.stopped,
+            });
         }
         let (start, base) = self.layout(rows);
         (self.start, self.base) = (start, base);
@@ -928,6 +946,45 @@ mod tests {
         assert_eq!(v.sel, "t5:s:c1");
         assert_eq!(v.o.open.get("t4"), Some(&true));
         assert_eq!(v.pos, Pos::At { n: 4, off: 3 });
+    }
+
+    /// The whole as the worker that read it made it: the past exchanges
+    /// merged and its end laid out. The view keeps both rather than
+    /// merging them again, which would change what was laid out.
+    #[test]
+    fn the_whole_as_the_worker_merged_it() {
+        let mut v = history_view();
+        said(&mut v.sess, &["four", "five"], 4000);
+        v.sess.partial = true;
+        v.read = true;
+        v.restore_exchanges(vec![Exchange {
+            at: 4500,
+            direction: "sent".into(),
+            text: "over to you".into(),
+            ..Exchange::default()
+        }]);
+        let mut whole = Session::new();
+        said(&mut whole, &["one", "two", "three"], 1000);
+        said(&mut whole, &["four", "five"], 4000);
+        whole.restore_exchanges(&v.exchanges);
+        let o = Options {
+            width: 80,
+            ..v.o.clone()
+        };
+        let mut r = Renderer::new();
+        r.tail(&whole, &o, 400);
+        let kept = r.kept_rows();
+        assert!(kept > 0);
+        v.take_whole_drawn(whole, Some((r, v.exchanges.clone())));
+        let rows = |s: &Session| {
+            s.turns
+                .iter()
+                .flat_map(|t| &t.items)
+                .filter(|i| matches!(i, rush_convo::Item::Exchange(_)))
+                .count()
+        };
+        assert_eq!(rows(&v.sess), 1, "merged once");
+        assert_eq!(v.r.kept_rows(), kept, "its end as the worker laid it out");
     }
 
     #[test]

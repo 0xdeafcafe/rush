@@ -374,7 +374,7 @@ impl Model {
         if let Some(id) = journal.filter(|id| !id.is_empty()) {
             let r#gen = self.r#gen;
             if self.tx.is_none() {
-                v.exchanges = rush_host::exchange_journal::read_exchanges(&id);
+                v.exchanges = rush_host::exchange_journal::read_exchanges(&id).into();
             } else {
                 self.later(
                     move || rush_host::exchange_journal::read_exchanges(&id),
@@ -397,6 +397,7 @@ impl Model {
                         tx.clone(),
                         decode.clone(),
                         v.drawn.clone(),
+                        Some((self.reg.clone(), a.kind.as_str().to_string())),
                     ),
                     session::Source::History { adapter, session } => {
                         // A stopped rush session's folder is its host's
@@ -1445,13 +1446,17 @@ impl Model {
             },
             Note::Whole { r#gen, sess, warm } => match self.view_of(r#gen) {
                 Some(v) if v.sess.partial => {
-                    let (r, changes) = match warm {
-                        Some(w) => (Some(w.r), Some(w.changes)),
-                        None => (None, None),
+                    let (r, changes, spawns) = match warm {
+                        Some(w) => (Some((w.r, w.exchanges)), Some(w.changes), w.spawn_steps),
+                        None => (None, None, None),
                     };
                     v.take_whole_drawn(*sess, r);
-                    if let Some((key, cwd, c)) = changes {
-                        crate::screens::session_core::changes::prime(self, key, &cwd, c);
+                    let key = v.key.clone();
+                    if let Some((ver, cwd, c)) = changes {
+                        crate::screens::session_core::changes::prime(self, ver, &cwd, c);
+                    }
+                    if let Some(sp) = spawns {
+                        crate::screens::session_core::subs::prime_spawns(self, &key, sp);
                     }
                     self.follow_tail();
                     Step::Draw
