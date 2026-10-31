@@ -822,6 +822,20 @@ fn on_reads_its_argument() {
     );
 }
 
+/// While a start on another machine waits, another #on goes back in the
+/// box with why (oncmd.go:62).
+#[test]
+fn on_waits_for_the_last_start() {
+    let mut m = model(120, 40);
+    m.kept::<super::oncmd::OnBusy>().0 = true;
+    super::oncmd::on_command(&mut m, "studio fix it");
+    assert_eq!(m.input.string(), "#on studio fix it");
+    assert_eq!(
+        m.flash.as_ref().unwrap().0,
+        "a start on another machine is still waiting: wait for it before sending another"
+    );
+}
+
 #[test]
 fn off_read_takes_once() {
     let r = super::offui::OffRead::<u32>::default();
