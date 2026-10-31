@@ -9,7 +9,9 @@
 //! ticks every second whatever happens; here the loop is woken only at
 //! the next second a chore is due, the chore's work goes off the UI
 //! thread, and a wake that only ran chores draws nothing, so an idle rush
-//! costs a wake every half a minute and no frame.
+//! costs a wake every half a minute and no frame. The battery and disk
+//! are read again at the same second while shown (Go's sysinfo, read
+//! every 30 seconds while drawn).
 
 use std::time::{Duration, Instant};
 
@@ -30,6 +32,19 @@ const CHORES: &[Chore] = &[
         every: 30,
         lead_only: false,
         run: crate::screens::settings::updates::watch_binary,
+    },
+    // The battery and disk, while the last frame showed them: Go reads
+    // them every 30 seconds while drawn (sysinfo.go:27), and each second
+    // draws them; here they're drawn only when they show differently.
+    Chore {
+        at: 3,
+        every: 30,
+        lead_only: false,
+        run: |_| {
+            if rush_sys::sysinfo::asked() {
+                rush_sys::sysinfo::read_again();
+            }
+        },
     },
     Chore {
         at: 15,
@@ -117,7 +132,7 @@ mod tests {
         assert_eq!(next_of(c, 0), 3);
         assert_eq!(next_of(c, 3), 33);
         assert_eq!(next_of(c, 40), 63);
-        let t = &CHORES[2];
+        let t = &CHORES[3];
         assert_eq!(next_of(t, 29), 30);
         assert_eq!(next_of(t, 30), 630);
     }

@@ -127,6 +127,16 @@ pub struct Model {
     hold: Hold,
     /// A wake-up a screen asked for (Model::wake_at).
     wake: Option<Instant>,
+    /// When a label the last frame drew changes its text with the clock
+    /// alone (style::turns_in).
+    turn: Option<Instant>,
+    /// When a list group's time runs out for an agent the list shows:
+    /// it's laid out again then (rebuild).
+    pub(crate) regroup: Option<Instant>,
+    /// The last frame showed more than the list, whose times aren't all
+    /// noted: drawn again when the chores wake the loop, as often as the
+    /// hosts are looked at (chores.rs).
+    clock_frame: bool,
     r#gen: u64,
     title: String,
     /// A spinner or clock was drawn: the next frame is due in a second.
@@ -203,6 +213,9 @@ impl Model {
             pending_copy: None,
             hold: Hold::default(),
             wake: None,
+            turn: None,
+            regroup: None,
+            clock_frame: false,
             r#gen: 0,
             title: String::new(),
             spinning: false,
@@ -771,6 +784,7 @@ impl Model {
         let h = self.h;
         self.now = self.clock.unwrap_or_else(now);
         crate::screens::list_extras::split::settle(self);
+        let mut inexact = self.on_place();
         let mut out = if self.on_place() {
             self.spinning = false;
             self.place_frame()
@@ -780,9 +794,11 @@ impl Model {
             let body_h = h.saturating_sub(head + 1);
             let (lw, pw) = crate::screens::list_extras::split::widths(self);
             if lw > 0 && pw > 0 {
+                inexact = true;
                 self.split_frame(&mut out, body_h, lw, pw);
             } else {
                 if self.session.is_some() {
+                    inexact = true;
                     // Tiles pinned to the grid take a column beside the
                     // Session, or a row under it (view.go:1216).
                     let w = self.w;
@@ -821,6 +837,12 @@ impl Model {
         }
         self.overlays(&mut out);
         out.truncate(h);
+        self.clock_frame = inexact
+            || self.sheet.is_some()
+            || self.help
+            || self.confirm.is_some()
+            || crate::screens::cmdbar::bar::is_open(self)
+            || crate::screens::cmdbar::keyhelp::is_open(self);
         out
     }
 
@@ -1220,7 +1242,10 @@ impl Model {
         } else if a.pid != 0 {
             line([sp("idle · still in memory", DIM)])
         } else {
-            line([sp(format!("finished {} ago", age(a.age(self.now))), DIM)])
+            line([sp(
+                format!("finished {} ago", age_since(a.age(self.now))),
+                DIM,
+            )])
         };
         let tw = title.width();
         let mut top = line([edge("╭─ ")]);
@@ -1565,16 +1590,25 @@ impl App<Note> for Model {
         let _busy = uistall::busy("frame");
         self.w = c.width() as usize;
         self.h = c.height() as usize;
+        crate::style::take_turn();
+        rush_sys::sysinfo::unasked();
         let rows = self.frame();
         for (y, l) in rows.iter().enumerate() {
             c.put_line(0, y as u16, l, self.w as u16);
         }
         self.title = self.make_title();
-        self.hold.drew(Instant::now());
+        let drawn = Instant::now();
+        self.hold.drew(drawn);
+        // A few ms past the turn, so the clock has passed it.
+        self.turn = crate::style::take_turn()
+            .map(|d| drawn + Duration::from_millis(d as u64) + Duration::from_millis(5));
     }
 
     fn wake_at(&self) -> Option<Instant> {
-        let at = self.draw_at();
+        let at = [self.draw_at(), self.turn, self.regroup]
+            .into_iter()
+            .flatten()
+            .min();
         match crate::chores::due_at(self) {
             Some(c) => Some(at.map_or(c, |a: Instant| a.min(c))),
             None => at,
@@ -1584,9 +1618,24 @@ impl App<Note> for Model {
     fn wake(&mut self) -> Step {
         let now_i = Instant::now();
         // Chores alone draw nothing: what they do lands as its own note.
-        crate::chores::run_due(self, now_i);
-        if self.draw_at().is_none_or(|t| t > now_i) {
-            return Step::Idle;
+        // A frame showing more than the list is drawn again with them.
+        let chores = crate::chores::run_due(self, now_i);
+        let due = |t: Option<Instant>| t.is_some_and(|t| t <= now_i);
+        // A label's or a group's time alone neither moves the spinners'
+        // tick nor runs what moves with it.
+        let clock = due(self.turn) || due(self.regroup) || chores && self.clock_frame;
+        if self.turn.is_some_and(|t| t <= now_i) {
+            self.turn = None;
+        }
+        // A group's time ran out: the list laid out again (Go lays it out
+        // every second, rebuild on each reading).
+        if self.regroup.is_some_and(|t| t <= now_i) {
+            self.regroup = None;
+            self.now = self.clock.unwrap_or_else(now);
+            self.rebuild();
+        }
+        if !due(self.draw_at()) {
+            return if clock { Step::Draw } else { Step::Idle };
         }
         self.wake_draw(now_i)
     }

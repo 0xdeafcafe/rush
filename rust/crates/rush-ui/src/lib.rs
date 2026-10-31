@@ -84,6 +84,14 @@ fn run_model(
         })));
     });
     worker::spawn_discovery_with(lp.sender(), is_hosted, Some(give));
+    // The battery and disk, read again while shown, drawn when they show
+    // differently (screens/bars/top.rs).
+    let tx = lp.sender().lane(1);
+    rush_sys::sysinfo::on_read(move |was, now| {
+        if screens::bars::top::shows_differently(was, now) {
+            let _ = tx.try_send(worker::Note::Apply(Box::new(|_| frame::Out::Draw)));
+        }
+    });
     // As Go's Init (internal/ui/model.go:548): plugins connected
     // (startHooks, pluginui.go:36), and the layout kept, or asked for the
     // first time (startView, model.go:574).

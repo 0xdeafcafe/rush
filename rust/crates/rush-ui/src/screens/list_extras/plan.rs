@@ -63,12 +63,51 @@ pub fn roughly(d: Ms) -> String {
     }
 }
 
+/// [`roughly`] of the time left until something, noted for the moment
+/// its text changes: rounded to the next unit down, or a unit less.
+pub fn roughly_left(d: Ms) -> String {
+    let u = if d < HOUR {
+        60_000
+    } else if d < 48 * HOUR {
+        HOUR
+    } else {
+        24 * HOUR
+    };
+    // Past the half of its unit it rounds down.
+    let edge = (d + u / 2) / u * u - u / 2;
+    if edge > 0 && d >= edge {
+        turns_in(d - edge + 1);
+    }
+    for unit in [HOUR, 48 * HOUR] {
+        if d >= unit {
+            turns_in(d - unit + 1);
+        }
+    }
+    roughly(d)
+}
+
+/// Notes when q changes with the clock alone: a window resetting, the
+/// reading growing stale (Quota::since, quotaNote).
+pub fn note_resets(q: &Quota, now: Ms) {
+    for w in &q.windows {
+        if w.resets_at != 0 {
+            turns_at(w.resets_at + 1, now);
+        }
+    }
+    if q.fetched_at != 0 {
+        turns_at(q.fetched_at + 3 * EVERY.as_millis() as Ms + 1, now);
+    }
+}
+
 /// When a window resets, faint: " ↻3h", or " reset" when it has (resetIn).
 pub fn reset_in(at: Ms, now: Ms) -> Option<Span> {
     match at {
         0 => None,
         at if at <= now => Some(sp(" reset", FAINT)),
-        at => Some(sp(format!(" ↻{}", roughly(at - now)), FAINT)),
+        at => {
+            turns_at(at, now);
+            Some(sp(format!(" ↻{}", roughly_left(at - now)), FAINT))
+        }
     }
 }
 
@@ -87,6 +126,7 @@ pub fn acct_meter(p: f64, n: usize) -> Line {
 
 /// How much of an account's tightest window is used (used).
 pub fn used(q: &Quota, now: Ms) -> f64 {
+    note_resets(q, now);
     q.since(now).used("").clamp(0.0, 100.0)
 }
 
@@ -98,6 +138,7 @@ pub fn near(q: &Quota, now: Ms) -> bool {
 /// When a reading can't be trusted: a window has reset since, or it's
 /// old (quotaNote).
 pub fn quota_note(q: &Quota, now: Ms) -> Option<Span> {
+    note_resets(q, now);
     if q.windows
         .iter()
         .any(|w| w.resets_at != 0 && now >= w.resets_at)
@@ -115,6 +156,7 @@ pub fn quota_note(q: &Quota, now: Ms) -> Option<Span> {
 /// its day and time past a day off; for one in use, its tightest
 /// window's reset once that's half used; for any other, that reset.
 pub fn back_in(q: &Quota, now: Ms, cur: bool) -> Option<Span> {
+    note_resets(q, now);
     let back = q
         .since(now)
         .windows
@@ -124,6 +166,7 @@ pub fn back_in(q: &Quota, now: Ms, cur: bool) -> Option<Span> {
         .max()
         .unwrap_or(0);
     if back != 0 {
+        turns_at(back - 24 * HOUR, now);
         if back - now > 24 * HOUR {
             return Some(sp(
                 format!(" until {}", super::meters::day_clock(back)),
@@ -460,7 +503,10 @@ pub fn compact_window(w: &Window, now: Ms) -> Line {
     if rate > 0.0 && p < 100.0 {
         let left = ((100.0 - p) / rate * HOUR as f64) as Ms;
         if left < HOUR && (w.resets_at == 0 || left < w.resets_at - now) {
-            l.spans.push(sp(format!(" out in {}", roughly(left)), RED));
+            // The rate moves with the clock: looked at again in a minute.
+            turns_in(60_000);
+            l.spans
+                .push(sp(format!(" out in {}", roughly_left(left)), RED));
         }
     }
     l.spans.extend(reset_in(w.resets_at, now));
@@ -480,6 +526,7 @@ pub fn plan_summary(name: Line, q: &Quota, now: Ms) -> Line {
         l.spans.push(sp("unavailable", YELLOW));
         return l;
     }
+    note_resets(q, now);
     let chosen = first_windows(q);
     let mut l = name;
     for (i, w) in chosen.iter().enumerate() {

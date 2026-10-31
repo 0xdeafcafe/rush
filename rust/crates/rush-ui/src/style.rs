@@ -178,6 +178,90 @@ pub fn age(d: Ms) -> String {
     }
 }
 
+/// The unit age's text counts in at d.
+fn age_unit(d: Ms) -> Ms {
+    if d < MIN {
+        SEC
+    } else if d < HOUR {
+        MIN
+    } else if d < 48 * HOUR {
+        HOUR
+    } else {
+        24 * HOUR
+    }
+}
+
+/// The unit dur's text counts in at d.
+fn dur_unit(d: Ms) -> Ms {
+    if d < MIN {
+        SEC
+    } else if d < 48 * HOUR {
+        MIN
+    } else {
+        HOUR
+    }
+}
+
+thread_local! {
+    /// The soonest, in ms from the frame's now, that something drawn
+    /// changes with the clock alone (see [`turns_in`]).
+    static TURN: std::cell::Cell<Ms> = const { std::cell::Cell::new(Ms::MAX) };
+}
+
+/// Notes that what's being drawn changes with the clock alone in d ms:
+/// the frame asks to be woken then, and is drawn again (Go draws every
+/// second; here only when a label's text changes, DESIGN.md "Goals").
+pub fn turns_in(d: Ms) {
+    if d > 0 {
+        TURN.with(|t| t.set(t.get().min(d)));
+    }
+}
+
+/// Notes that what's being drawn changes at t, now being now.
+pub fn turns_at(t: Ms, now: Ms) {
+    if t > now {
+        turns_in(t - now);
+    }
+}
+
+/// The soonest noted since the last take, forgotten.
+pub fn take_turn() -> Option<Ms> {
+    TURN.with(|t| Some(t.replace(Ms::MAX)).filter(|&d| d != Ms::MAX))
+}
+
+/// [`age`] of something d old that grows with the clock, noted for the
+/// moment its text changes.
+pub fn age_since(d: Ms) -> String {
+    if d < 0 {
+        turns_in(-d);
+    } else {
+        let u = age_unit(d);
+        turns_in(u - d % u);
+    }
+    age(d)
+}
+
+/// [`dur`] of a span that grows with the clock, noted for the moment its
+/// text changes.
+pub fn dur_since(d: Ms) -> String {
+    if d <= 0 {
+        turns_in(1 - d);
+    } else {
+        let u = dur_unit(d);
+        turns_in(u - d % u);
+    }
+    dur(d)
+}
+
+/// [`dur`] of the time left until something, which shrinks with the
+/// clock, noted for the moment its text changes.
+pub fn dur_left(d: Ms) -> String {
+    if d > 0 {
+        turns_in(d % dur_unit(d) + 1);
+    }
+    dur(d)
+}
+
 pub fn dur(d: Ms) -> String {
     if d <= 0 {
         "–".into()
@@ -543,6 +627,36 @@ pub fn wrap_line(l: &Line, w: usize) -> Vec<Line> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A label that moves with the clock says when its text changes: at
+    // the next whole unit it counts in, up or down.
+    #[test]
+    fn labels_say_when_they_turn() {
+        take_turn();
+        assert_eq!(take_turn(), None);
+        let cases: &[(fn(Ms) -> String, Ms, &str, Ms)] = &[
+            (age_since, 59_400, "59s", 600),
+            (age_since, 60_000, "1m", 60_000),
+            (age_since, 3_599_000, "59m", 1_000),
+            (age_since, 2 * HOUR + 5, "2h", HOUR - 5),
+            (dur_since, 0, "–", 1),
+            (dur_since, 7_380_000, "2h03m", 60_000),
+            (dur_since, 49 * HOUR + 1, "2d01h", HOUR - 1),
+            (dur_left, 61_000, "1m", 1_001),
+            (dur_left, 59_999, "59s", 1_000),
+            (dur_left, 500, "0s", 501),
+        ];
+        for &(f, d, text, turns) in cases {
+            assert_eq!(f(d), text, "{d}");
+            assert_eq!(take_turn(), Some(turns), "{text} at {d}");
+        }
+        // The soonest of several wins; dur_left of nothing left says none.
+        age_since(30 * MIN + 10_000);
+        age_since(5_500);
+        dur_left(0);
+        assert_eq!(take_turn(), Some(500));
+        assert_eq!(take_turn(), None);
+    }
 
     #[test]
     fn formats() {

@@ -6,6 +6,7 @@
 //! battery_darwin.go:1-19 and battery_other.go:1-26.
 
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// The machine's battery; `present` is false on one without.
@@ -31,38 +32,89 @@ struct Cur {
     disk: Disk,
     at: Option<Instant>,
     reading: bool,
+    /// What [`now`] last handed out: what's on screen.
+    given: (Battery, Disk),
 }
 
+const NONE: Battery = Battery {
+    present: false,
+    percent: 0,
+    charging: false,
+};
+
 static CUR: Mutex<Cur> = Mutex::new(Cur {
-    bat: Battery {
-        present: false,
-        percent: 0,
-        charging: false,
-    },
+    bat: NONE,
     disk: Disk { free: 0, total: 0 },
     at: None,
     reading: false,
+    given: (NONE, Disk { free: 0, total: 0 }),
 });
+
+/// Whether [`now`] was asked since [`unasked`]: the frame drawn showed
+/// the readings.
+static ASKED: AtomicBool = AtomicBool::new(false);
+
+/// Told each reading made, with what was last handed out and the new one
+/// (see [`on_read`]).
+type OnRead = Box<dyn Fn((Battery, Disk), (Battery, Disk)) + Send>;
+static ON_READ: Mutex<Option<OnRead>> = Mutex::new(None);
 
 /// The last readings, starting a new one when they're stale. Before the
 /// first has finished they're zero.
 pub fn now() -> (Battery, Disk) {
+    ASKED.store(true, Ordering::Relaxed);
     let mut c = CUR.lock().unwrap();
     if !c.reading && c.at.is_none_or(|at| at.elapsed() >= EVERY) {
         c.reading = true;
         std::thread::spawn(refresh);
     }
+    c.given = (c.bat, c.disk);
     (c.bat, c.disk)
+}
+
+/// Forgets that the readings were asked for: a frame is about to be
+/// drawn, and [`asked`] then says whether it showed them.
+pub fn unasked() {
+    ASKED.store(false, Ordering::Relaxed);
+}
+
+/// Whether the readings were asked for since [`unasked`].
+pub fn asked() -> bool {
+    ASKED.load(Ordering::Relaxed)
+}
+
+/// Reads again now, in the background, however fresh the last reading:
+/// for a screen showing them that draws only when they change (Go reads
+/// them every 30 seconds while they're drawn, every second).
+pub fn read_again() {
+    let mut c = CUR.lock().unwrap();
+    if !c.reading {
+        c.reading = true;
+        std::thread::spawn(refresh);
+    }
+}
+
+/// Has f told of each reading made from now on, with what [`now`] last
+/// handed out and the new reading, so a screen can draw it if it shows
+/// differently. It runs on the reading's thread.
+pub fn on_read(f: impl Fn((Battery, Disk), (Battery, Disk)) + Send + 'static) {
+    *ON_READ.lock().unwrap() = Some(Box::new(f));
 }
 
 fn refresh() {
     let b = read_battery();
     let d = read_disk();
-    let mut c = CUR.lock().unwrap();
-    c.bat = b;
-    c.disk = d;
-    c.at = Some(Instant::now());
-    c.reading = false;
+    let given = {
+        let mut c = CUR.lock().unwrap();
+        c.bat = b;
+        c.disk = d;
+        c.at = Some(Instant::now());
+        c.reading = false;
+        c.given
+    };
+    if let Some(f) = ON_READ.lock().unwrap().as_ref() {
+        f(given, (b, d));
+    }
 }
 
 /// The free and total space of the home folder's volume.

@@ -181,6 +181,8 @@ fn on_swept(m: &mut Model, s: Swept, asked: bool) -> Out {
             }),
         );
     }
+    // What the Updates page and the version tag show of it, before.
+    let was = (u.failed, u.stale, u.gone, u.rebuilt);
     if s.restart {
         u.failed = s.failed;
     }
@@ -201,6 +203,7 @@ fn on_swept(m: &mut Model, s: Swept, asked: bool) -> Out {
         }
     }
     let rebuilt = u.rebuilt;
+    let changed = was != (u.failed, u.stale, u.gone, u.rebuilt) || news.is_some();
     if rebuilt {
         m.kept::<crate::screens::social::services::Update>().rebuilt = true;
     }
@@ -225,6 +228,7 @@ fn on_swept(m: &mut Model, s: Swept, asked: bool) -> Out {
     } else {
         None
     };
+    let changed = changed || said.is_some();
     // Asked for, it's an answer; on its own, it's news.
     if let Some(t) = said {
         match (asked, s.failed > 0) {
@@ -245,7 +249,9 @@ fn on_swept(m: &mut Model, s: Swept, asked: bool) -> Out {
         rush_sys::events::log("reload", serde_json::json!({"why": "restart on install"}));
         return m.reload(false);
     }
-    Out::Draw
+    // A look that found what the last did draws nothing (Go redraws
+    // every second anyway; here only a change is drawn).
+    if changed { Out::Draw } else { Out::Idle }
 }
 
 fn upd(m: &Model) -> Option<&Updates> {
