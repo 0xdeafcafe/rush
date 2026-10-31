@@ -83,8 +83,16 @@ fn leave() -> io::Result<()> {
 /// (`\x1b]11;rgb:1111/1010/0e0e\x07`). Empty when it didn't say.
 static COLOUR_REPLIES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-/// How long the terminal is given to answer.
-const ASK_WAIT: std::time::Duration = std::time::Duration::from_millis(300);
+/// How long the terminal is given to answer: DA1's answer ends the wait
+/// at once on a terminal that's there; over SSH or a slow multiplexer
+/// the colours may take a while.
+const ASK_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The terminal didn't answer in time: a colour reply that comes later
+/// would reach the input thread as keys (crossterm can't read ESC ] … ST),
+/// so the reader drops the first one that comes (reader.rs late_osc).
+pub(crate) static LATE_OSC: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// The terminal's OSC 10 (text) and 11 (background) replies, as it gave
 /// them when rush took it.
@@ -135,19 +143,30 @@ fn ask_colours() {
         };
         // SAFETY: one pollfd, ours, for at most what's left.
         let n = unsafe { libc::poll(&mut p, 1, left.as_millis() as libc::c_int) };
+        if n < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+            continue; // a resize as rush starts
+        }
         if n <= 0 {
             break;
         }
-        let mut b = [0u8; 256];
+        // A byte at a time, so nothing typed after the answer is taken:
+        // it stays for the input thread.
+        let mut b = [0u8; 1];
         // SAFETY: reads into b, at most its length.
-        let r = unsafe { libc::read(fd, b.as_mut_ptr().cast(), b.len()) };
+        let r = unsafe { libc::read(fd, b.as_mut_ptr().cast(), 1) };
+        if r < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+            continue;
+        }
         if r <= 0 {
             break;
         }
-        got.extend_from_slice(&b[..r as usize]);
+        got.push(b[0]);
         if da1_answered(&got) {
             break;
         }
+    }
+    if !da1_answered(&got) {
+        LATE_OSC.store(true, Ordering::SeqCst);
     }
     let replies = osc_replies(&String::from_utf8_lossy(&got));
     if let Ok(mut r) = COLOUR_REPLIES.lock() {
