@@ -675,3 +675,26 @@ fn done_says_done() {
     assert_eq!(flash(&m), "moved back: tidy the parser");
 }
 
+/// ctrl+n picks the agent that has waited longest for you, whatever's
+/// picked (keys.go:595 nextNeedingYou).
+#[test]
+fn ctrl_n_takes_the_longest_waiting() {
+    let mut m = list();
+    let mut agents = m.agents.clone();
+    agents.push(agent("c3", "third"));
+    for (a, ago) in agents.iter_mut().zip([0, 50_000, 10_000]) {
+        a.job.state = State::Blocked;
+        a.job.updated_at = NOW - ago;
+    }
+    let roots = agents.iter().map(|a| a.repo.clone()).collect();
+    m.set_fleet(crate::worker::Fleet {
+        agents,
+        roots,
+        previews: Default::default(),
+        priced: true,
+    });
+    for _ in 0..2 {
+        press(&mut m, "ctrl+n");
+        assert_eq!(m.sel, "work/c2", "the oldest, every time");
+    }
+}

@@ -461,22 +461,19 @@ impl Model {
             "end" if empty => self.step(self.lines.len() as isize),
             "g" if letters => self.step(-(self.lines.len() as isize)),
             "G" if letters => self.step(self.lines.len() as isize),
+            // The agent that has waited longest for you, so a stack of
+            // questions clears with ctrl+n and an answer each
+            // (keys.go:595 nextNeedingYou).
             "ctrl+n" => {
-                let order = self.order.clone();
-                let at = order
+                let best = self
+                    .order
                     .iter()
-                    .position(|&i| self.agents[i].key == self.sel)
-                    .map_or(0, |p| p + 1);
-                let next = order[at.min(order.len())..]
-                    .iter()
-                    .chain(order.iter())
-                    .find(|&&i| self.agents[i].needs_you())
-                    .copied();
-                match next {
-                    Some(i) => {
-                        let k = self.agents[i].key.clone();
-                        self.select(k);
-                    }
+                    .map(|&i| &self.agents[i])
+                    .filter(|a| a.needs_you())
+                    .min_by_key(|a| a.job.updated_at)
+                    .map(|a| a.key.clone());
+                match best {
+                    Some(k) => self.select(k),
                     None => self.flash("nothing needs you"),
                 }
             }
