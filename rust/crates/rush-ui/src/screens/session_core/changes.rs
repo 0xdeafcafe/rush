@@ -692,11 +692,15 @@ pub fn tree_of(m: &mut Model, dir: &str) -> Tree {
             move |m: &mut Model, t: Tree| {
                 let ts = m.kept::<Trees>();
                 ts.reading.remove(&d);
+                let first = !ts.by_dir.contains_key(&d);
                 let same = ts
                     .by_dir
                     .get(&d)
                     .is_some_and(|o| o.files == t.files && o.head == t.head && o.err == t.err);
                 ts.by_dir.insert(d, t);
+                if first {
+                    m.answered(); // "reading git…" goes now
+                }
                 if same { Out::Idle } else { Out::Draw }
             }
         });
@@ -766,7 +770,9 @@ fn tree_diff(m: &mut Model, t: &Tree, f: &TreeFile, full: bool) -> Vec<String> {
             move |m, lines| {
                 let ts = m.kept::<Trees>();
                 ts.diff_reading.remove(&key);
-                ts.diffs.insert(key, (at, lines));
+                if ts.diffs.insert(key, (at, lines)).is_none() {
+                    m.answered(); // "reading the diff…" goes now
+                }
                 Out::Draw
             },
         );

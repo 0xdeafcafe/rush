@@ -1657,9 +1657,11 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
     }
     r.full.extend(got.full);
     let mut more = false;
+    let mut answered = false;
     if let (Some((id, d)), Some(det)) = (got.detail, r.detail.as_mut())
         && det.id == id
     {
+        answered = !det.view.read;
         match d {
             DetailGot::Fresh(f) => {
                 more = f.more;
@@ -1711,6 +1713,9 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
     // What waits for a run goes once it has taken a step.
     if open_key(m).as_deref() == Some(key) {
         super::relay::flush(m, key);
+    }
+    if answered {
+        m.answered(); // "reading its conversation…" goes now
     }
     Out::Draw
 }

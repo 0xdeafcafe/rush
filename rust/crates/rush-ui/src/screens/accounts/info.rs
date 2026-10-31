@@ -234,6 +234,7 @@ pub fn open_info(m: &mut Model, tab: usize) -> Out {
                 k.settings = settings_links(&reg, &kind, n, &mcp);
             }
             k.read = r;
+            m.answered();
             Out::Draw
         },
     );
