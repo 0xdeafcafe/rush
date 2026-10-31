@@ -1484,20 +1484,15 @@ fn focus_session(m: &mut Model) -> Option<String> {
 }
 
 /// The keys to Agents' box, where new sessions start (toPrompt). Only
-/// the keys move: the Session stays open beside the list as it is, still
-/// on its host (Go's paneFocus = false keeps m.host), pushed off the
-/// whole screen when there's room for both, so the Prompt shows (Go
-/// leaves m.full, the Prompt then out of sight); with no room the list
-/// takes the screen (leavePane).
+/// the keys move: a Session beside the list stays there as it is, still
+/// on its host (Go's paneFocus = false keeps m.host). Go leaves m.full and
+/// the layout as they are (cmdbar.go:871-880), so a Session alone on the
+/// screen stays open there, the Prompt out of sight.
 pub fn to_prompt(m: &mut Model) {
     use crate::screens::list_extras::split;
     go_place(m, PlaceId::Agents);
     m.agents_page = 0;
-    if m.session.is_some() {
-        let full = std::mem::replace(&mut m.full, false);
-        if !split::side_by_side(m) {
-            m.full = full; // leave_chat says how it was left
-        }
+    if m.session.is_some() && split::side_by_side(m) {
         split::leave_pane(m);
     }
 }

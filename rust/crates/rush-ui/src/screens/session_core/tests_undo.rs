@@ -266,6 +266,8 @@ fn renaming_keeps_the_box_undo() {
 #[test]
 fn draft_to_prompt_keeps_what_was_there() {
     let mut m = session();
+    // Beside the list, so the keys go to the Prompt (tests_split.rs).
+    (m.full, m.w) = (false, 160);
     m.input.set("old task");
     typed(&mut m, "move me");
     m.guarded(|m| super::actions::run_action(m, "session.toprompt"));

@@ -654,34 +654,28 @@ fn a_flash_beside_the_list_shows_once() {
     assert!(f.last().unwrap().contains("said once"), "{:?}", f.last());
 }
 
-/// From the Session on the whole screen, with room for both, ctrl+] u
-/// leaves it open beside the list, the same view on its host, and the
-/// Prompt in sight; with no room, the list takes the screen.
+/// From the Session on the whole screen ctrl+] u moves only the draft:
+/// as Go's toPrompt leaves m.full (cmdbar.go:871-880), the Session stays
+/// alone on the screen, the same view on its host, the Prompt out of
+/// sight; at any width.
 #[test]
 fn draft_to_prompt_from_the_whole_screen() {
-    let mut m = opened(160, 48, "split");
-    m.full = true;
-    assert!(!split::side_by_side(&m));
     let key = super::tests::KEY;
-    m.session
-        .as_mut()
-        .unwrap()
-        .o
-        .open
-        .insert("mark".into(), true);
-    super::conn(&mut m, key).input.text = "carry me".chars().collect();
-    m.guarded(|m| super::actions::run_action(m, "session.toprompt"));
-    assert!(m.session.is_none() && !m.full);
-    let v = m.pane.as_ref().expect("beside the list");
-    assert!(v.o.open.contains_key("mark"), "the same view");
-    assert!(split::side_by_side(&m) || split::widths(&m).1 > 0);
-    let f = rows(&mut m).join("\n");
-    assert!(f.contains("carry me"), "the Prompt in sight:\n{f}");
-    // No room for both: the list has the screen.
-    let mut m = opened(80, 24, "split");
-    m.full = true;
-    super::conn(&mut m, key).input.text = "carry me".chars().collect();
-    m.guarded(|m| super::actions::run_action(m, "session.toprompt"));
-    assert!(m.session.is_none() && !m.full);
-    assert_eq!(split::widths(&m).1, 0);
+    for (w, h) in [(160, 48), (80, 24)] {
+        let mut m = opened(w, h, "split");
+        m.full = true;
+        m.session
+            .as_mut()
+            .unwrap()
+            .o
+            .open
+            .insert("mark".into(), true);
+        super::conn(&mut m, key).input.text = "carry me".chars().collect();
+        m.guarded(|m| super::actions::run_action(m, "session.toprompt"));
+        assert_eq!(m.input.text.iter().collect::<String>(), "carry me");
+        assert!(m.full, "{w}: still the whole screen");
+        let v = m.session.as_ref().expect("still open");
+        assert!(v.o.open.contains_key("mark"), "{w}: the same view");
+        assert_eq!(split::widths(&m).0, 0, "{w}: the Session alone");
+    }
 }
