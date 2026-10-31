@@ -111,7 +111,9 @@ pub fn watch_hosts(m: &mut Model, restart: bool, asked: bool) {
     u.sweeping = true;
     let was = u.installed;
     let lister = u.lister.clone();
-    let sweep = u.sweep.unwrap_or(|l, now, r| l.sweep(now, r));
+    // Over the list's own listing, which its watcher keeps fresh, where
+    // Go looks at every session's info (stale.go:59).
+    let sweep = u.sweep.unwrap_or(|l, now, r| l.sweep_listed(now, r));
     let fake = u.sweep.is_some();
     m.later(
         move || {

@@ -66,6 +66,7 @@ impl Sessions {
 impl Hosts for Sessions {
     fn list(&mut self, fresh: &dyn Fn(&Path, u64) -> bool, at: u64) -> Arc<Vec<HostInfo>> {
         let infos = self.lister.list_trusting(fresh, at);
+        crate::client::listed(&infos);
         if let Some((src, out)) = &self.last
             && Arc::ptr_eq(src, &infos)
         {

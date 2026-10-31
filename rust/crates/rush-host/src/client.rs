@@ -441,51 +441,93 @@ impl Lister {
         installed: BinStamp,
         restart_due: bool,
     ) -> (usize, usize, usize, usize) {
-        let (mut stale, mut restarted, mut failed, mut gone) = (0, 0, 0, 0);
-        for i in self.list() {
-            // A sleeping one wakes on the new binary anyway.
-            if i.state == "stopped" || i.sleeping || !i.stale(installed) {
-                continue;
-            }
-            let cfg = read_config(&i.id);
-            if let Ok(c) = &cfg
-                && !c.cwd.is_empty()
-                && std::fs::metadata(&c.cwd)
-                    .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
-            {
-                gone += 1;
-                continue;
-            }
-            stale += 1;
-            if !restart_due || !crate::wire::restart_due(&i, installed) {
-                continue;
-            }
-            match cfg {
-                Ok(c) if c.owner == 0 => {}
-                _ => continue, // a stand-in's host ends with the program that started it
-            }
-            // Read again: a message may have come since the list was read.
-            match read_info(&i.id) {
-                Ok(now) if crate::wire::restart_due(&now, installed) => {}
-                _ => continue,
-            }
-            if rush_core::dryrun::would(
-                "restart-host",
-                &i.id,
-                "its host runs an older rush than the one installed, and it's between turns",
-            ) {
-                continue;
-            }
-            if let Err(e) = restart(&i.id, |_| {}) {
-                failed += 1;
-                log_event(&i.id, "restart-failed", json!({"err": e.to_string()}));
-                continue;
-            }
-            restarted += 1;
-            stale -= 1;
-        }
-        (stale, restarted, failed, gone)
+        sweep_over(&self.list(), false, installed, restart_due)
     }
+
+    /// [`Lister::sweep`] over the list's own last listing when there is
+    /// one (see [`listed`]): it reads again only what its watcher saw
+    /// change, where this would look at every session's info. A host
+    /// found gone since counts as lost, as a listing now would have it.
+    pub fn sweep_listed(
+        &mut self,
+        installed: BinStamp,
+        restart_due: bool,
+    ) -> (usize, usize, usize, usize) {
+        let last = LISTED.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        match last {
+            Some(infos) => sweep_over(&infos, true, installed, restart_due),
+            None => self.sweep(installed, restart_due),
+        }
+    }
+}
+
+/// The last listing the list made (hosts.rs's Sessions): kept as fresh as
+/// its watcher keeps the list, so a sweep needn't look at every session
+/// again.
+static LISTED: Mutex<Option<Arc<Vec<Info>>>> = Mutex::new(None);
+
+/// Keeps infos as the last listing the list made.
+pub(crate) fn listed(infos: &Arc<Vec<Info>>) {
+    let mut l = LISTED.lock().unwrap_or_else(|e| e.into_inner());
+    if !l.as_ref().is_some_and(|o| Arc::ptr_eq(o, infos)) {
+        *l = Some(infos.clone());
+    }
+}
+
+/// See [`Lister::sweep`]; with alive, a session whose host has gone since
+/// infos was listed counts as lost (stopped).
+fn sweep_over(
+    infos: &[Info],
+    alive: bool,
+    installed: BinStamp,
+    restart_due: bool,
+) -> (usize, usize, usize, usize) {
+    let (mut stale, mut restarted, mut failed, mut gone) = (0, 0, 0, 0);
+    for i in infos {
+        // A sleeping one wakes on the new binary anyway.
+        if i.state == "stopped" || i.sleeping || !i.stale(installed) {
+            continue;
+        }
+        if alive && !crate::alive(i.host_pid) {
+            continue; // lost: listed again, it's stopped (revive::lose)
+        }
+        let cfg = read_config(&i.id);
+        if let Ok(c) = &cfg
+            && !c.cwd.is_empty()
+            && std::fs::metadata(&c.cwd).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+        {
+            gone += 1;
+            continue;
+        }
+        stale += 1;
+        if !restart_due || !crate::wire::restart_due(i, installed) {
+            continue;
+        }
+        match cfg {
+            Ok(c) if c.owner == 0 => {}
+            _ => continue, // a stand-in's host ends with the program that started it
+        }
+        // Read again: a message may have come since the list was read.
+        match read_info(&i.id) {
+            Ok(now) if crate::wire::restart_due(&now, installed) => {}
+            _ => continue,
+        }
+        if rush_core::dryrun::would(
+            "restart-host",
+            &i.id,
+            "its host runs an older rush than the one installed, and it's between turns",
+        ) {
+            continue;
+        }
+        if let Err(e) = restart(&i.id, |_| {}) {
+            failed += 1;
+            log_event(&i.id, "restart-failed", json!({"err": e.to_string()}));
+            continue;
+        }
+        restarted += 1;
+        stale -= 1;
+    }
+    (stale, restarted, failed, gone)
 }
 
 /// A connection to one session's host.
