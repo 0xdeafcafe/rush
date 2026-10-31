@@ -232,7 +232,9 @@ impl Model {
         if t.is_empty() {
             return Out::Idle;
         }
-        if t.starts_with('#') {
+        // # and a letter: a Markdown heading (# Plan) or an issue (#123)
+        // is still a message (keys.go:841 isHashCmd).
+        if crate::screens::cmdbar::fleetslash::is_hash_cmd(t) {
             return self.command(t);
         }
         let tagged = self.input.sent(true);
