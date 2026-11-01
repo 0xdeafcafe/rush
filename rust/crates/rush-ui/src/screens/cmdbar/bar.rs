@@ -333,7 +333,34 @@ pub fn open(m: &mut Model, here: bool) {
         hint_at: None,
         memo: Default::default(),
     });
+    prepare_search(m);
     rebuild(m);
+}
+
+/// Rust-only: with a long conversation open, the words its typos are
+/// looked for among are gathered on another thread as the bar opens, so
+/// no key waits on reading it all (rush_convo's SearchMemo::prepare).
+/// None with no loop: --render and tests read as each key asks.
+fn prepare_search(m: &mut Model) {
+    if m.sender().is_none() {
+        return;
+    }
+    let Some(v) = &m.session else { return };
+    let Some(b) = m.kept.peek::<BarState>().and_then(|s| s.bar.as_ref()) else {
+        return;
+    };
+    let Some(job) = b.memo.borrow_mut().prepare(&v.sess) else {
+        return;
+    };
+    m.later(
+        move || job.make(),
+        |m, made| {
+            if let Some(b) = st(m).bar.as_ref() {
+                b.memo.borrow_mut().take(made);
+            }
+            Out::Idle
+        },
+    );
 }
 
 /// Whether ctrl+k would cut text in the Agents box (canCut).

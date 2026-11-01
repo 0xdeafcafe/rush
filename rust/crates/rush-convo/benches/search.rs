@@ -126,8 +126,27 @@ fn main() {
     println!("total {total:.1} ms");
     // The bar's way: each key's top hits, a memo kept from key to key,
     // typed on and backspaced, checked against search's.
-    for limit in [50, 300, 4] {
+    for (limit, made) in [
+        (50, false),
+        (300, false),
+        (4, false),
+        (50, true),
+        (300, true),
+    ] {
         let mut memo = SearchMemo::default();
+        if made {
+            let i0 = instructions();
+            let job = memo.prepare(&s).expect("long enough");
+            let i1 = instructions();
+            let v = job.make();
+            let i2 = instructions();
+            memo.take(v);
+            println!(
+                "vocabulary: copied in {:.1} M instructions, made in {:.1} M",
+                (i1 - i0) as f64 / 1e6,
+                (i2 - i1) as f64 / 1e6
+            );
+        }
         let mut tot = 0.0;
         let mut ins_all = Vec::new();
         for q in QUERIES {
@@ -162,7 +181,10 @@ fn main() {
             }
             let avg = mi.iter().sum::<f64>() / mi.len() as f64;
             let max = mi.iter().cloned().fold(0.0, f64::max);
-            println!("top {limit:<3} {q:<18} per key {avg:>7.1} M instr avg, {max:>7.1} max");
+            println!(
+                "top {limit:<3} {} {q:<18} per key {avg:>7.1} M instr avg, {max:>7.1} max",
+                if made { "v" } else { "-" }
+            );
             ins_all.extend(mi);
         }
         println!("top {limit}: {tot:.1} ms, all same as search's");

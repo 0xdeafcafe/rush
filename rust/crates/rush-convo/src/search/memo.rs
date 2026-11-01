@@ -17,7 +17,10 @@ use std::collections::HashMap;
 use crate::model::{Item, Session, StepId};
 use crate::render::hidden;
 
-use super::fuzzy::{SCORE_PHRASE, SCORE_TYPO, exact_match_from, typo_score_parts, typos};
+use super::fuzzy::{
+    SCORE_PHRASE, SCORE_TYPO, bit, distance, exact_match_from, lower, typo_score, typo_score_parts,
+    typo_start, typo_words, typos,
+};
 use super::{Hit, Query, WHO_AGENT, first_time, parse_query, snippet, step_parts, text_at};
 
 /// A text searched, in the order Session::search reads them.
@@ -47,6 +50,10 @@ const MISSING: At = At {
     byte: 0,
 };
 
+/// How much text to look for typos in before a vocabulary is worth making
+/// (on another thread).
+const VOCAB_FROM: usize = 256 << 10;
+
 /// A typo's score in a text: not worked out yet, none, or the score.
 const UNKNOWN: i8 = -1;
 const NO_TYPO: i8 = -2;
@@ -63,6 +70,160 @@ pub struct SearchMemo {
     exact: HashMap<String, Vec<At>>,
     /// By word: each text's typo score, as worked out so far.
     typo: HashMap<String, Vec<i8>>,
+    /// The words a typo is looked for among, once made.
+    vocab: Option<Vocab>,
+    /// The state a vocabulary is being made for (prepare).
+    asked: Option<(u64, u64, u64, usize)>,
+}
+
+/// Every word a typo is looked for among (the start of each text, as
+/// typo_score_parts reads it), lowered, each once; and which are in each
+/// text. A word's typos are then worked out once a word, not once a
+/// text it's in.
+struct Vocab {
+    words: Vec<Box<[char]>>,
+    /// Each word's letters, as bits (fuzzy::bit).
+    bits: Vec<u64>,
+    /// Each text's words: texts[x]..texts[x + 1] in ids.
+    texts: Vec<u32>,
+    ids: Vec<u32>,
+}
+
+/// A quick hash for the words (FxHash's): SipHash over every word of a
+/// conversation costs more than reading it.
+#[derive(Default)]
+struct Fx(u64);
+
+impl std::hash::Hasher for Fx {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for c in bytes.chunks(8) {
+            let mut b = [0u8; 8];
+            b[..c.len()].copy_from_slice(c);
+            self.0 = (self.0.rotate_left(5) ^ u64::from_le_bytes(b))
+                .wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+        }
+    }
+}
+
+type FxBuild = std::hash::BuildHasherDefault<Fx>;
+
+/// What a vocabulary is made from, copied out of the conversation so it
+/// can be made on another thread: the start of each text that a typo is
+/// looked for in, its parts joined by newlines, one after another.
+pub struct VocabJob {
+    key: (u64, u64, u64, usize),
+    starts: String,
+    ends: Vec<usize>,
+}
+
+/// A vocabulary made, for [`SearchMemo::take`].
+pub struct VocabMade {
+    key: (u64, u64, u64, usize),
+    vocab: Vocab,
+}
+
+impl VocabJob {
+    /// Makes the vocabulary (on whatever thread).
+    pub fn make(self) -> VocabMade {
+        let mut from = 0;
+        let texts = self.ends.iter().map(|&end| {
+            let t = &self.starts[from..end];
+            from = end;
+            t
+        });
+        VocabMade {
+            key: self.key,
+            vocab: Vocab::new(texts),
+        }
+    }
+}
+
+impl Vocab {
+    /// Of each text's start (as far as a typo is looked for), in order.
+    fn new<'a>(texts: impl Iterator<Item = &'a str>) -> Vocab {
+        let mut by: HashMap<Box<str>, u32, FxBuild> = HashMap::default();
+        let mut v = Vocab {
+            words: Vec::new(),
+            bits: Vec::new(),
+            texts: Vec::new(),
+            ids: Vec::new(),
+        };
+        let mut word = String::new();
+        for t in texts {
+            v.texts.push(v.ids.len() as u32);
+            let from = v.ids.len();
+            typo_words(&[t], |w| {
+                word.clear();
+                if w.is_ascii() {
+                    word.push_str(w);
+                    word.make_ascii_lowercase();
+                } else {
+                    word.extend(w.chars().map(lower));
+                }
+                let id = match by.get(word.as_str()) {
+                    Some(id) => *id,
+                    None => {
+                        let id = v.words.len() as u32;
+                        let chars: Box<[char]> = word.chars().collect();
+                        v.bits.push(chars.iter().fold(0, |m, c| m | bit(*c)));
+                        v.words.push(chars);
+                        by.insert(word.as_str().into(), id);
+                        id
+                    }
+                };
+                v.ids.push(id);
+            });
+            let mine = &mut v.ids[from..];
+            mine.sort_unstable();
+            let mut n = 0;
+            for i in 0..mine.len() {
+                if n == 0 || mine[i] != mine[n - 1] {
+                    mine[n] = mine[i];
+                    n += 1;
+                }
+            }
+            v.ids.truncate(from + n);
+        }
+        v.texts.push(v.ids.len() as u32);
+        v
+    }
+
+    /// Each text's typo score for w (typos(w) > 0): the closest of its
+    /// words within k letters, as typo_score_parts finds it.
+    fn typos(&self, w: &str) -> Vec<i8> {
+        let k = typos(w);
+        let lw: Vec<char> = w.chars().map(lower).collect();
+        let want = lw.iter().fold(0, |m, c| m | bit(*c));
+        let off: Vec<u8> = self
+            .words
+            .iter()
+            .zip(&self.bits)
+            .map(|(u, has)| {
+                if u.len().abs_diff(lw.len()) > k || (want & !has).count_ones() as usize > k {
+                    return (k + 1) as u8;
+                }
+                distance(&lw, u, k).min(k + 1) as u8
+            })
+            .collect();
+        self.texts
+            .windows(2)
+            .map(|r| {
+                let best = self.ids[r[0] as usize..r[1] as usize]
+                    .iter()
+                    .map(|id| off[*id as usize] as usize)
+                    .min()
+                    .unwrap_or(k + 1);
+                if best <= k {
+                    typo_score(best) as i8
+                } else {
+                    NO_TYPO
+                }
+            })
+            .collect()
+    }
 }
 
 impl SearchMemo {
@@ -76,6 +237,7 @@ impl SearchMemo {
         self.key = key;
         self.exact.clear();
         self.typo.clear();
+        self.vocab = None;
         self.texts.clear();
         for (ti, t) in s.turns.iter().enumerate() {
             self.texts.push(Text::Prompt(ti));
@@ -93,6 +255,47 @@ impl SearchMemo {
                     _ => {}
                 }
             }
+        }
+    }
+
+    /// What making the vocabulary of s's texts needs, copied, to make on
+    /// another thread and hand back to take: None when it's made already,
+    /// or s is short enough to read as each key asks.
+    pub fn prepare(&mut self, s: &Session) -> Option<VocabJob> {
+        self.prepare_from(s, VOCAB_FROM)
+    }
+
+    /// prepare, for any conversation with at least min bytes to read
+    /// (tests make one for a short one).
+    #[doc(hidden)]
+    pub fn prepare_from(&mut self, s: &Session, min: usize) -> Option<VocabJob> {
+        self.sync(s);
+        if self.vocab.is_some() || self.asked == Some(self.key) {
+            return None;
+        }
+        self.asked = Some(self.key);
+        let mut starts = String::new();
+        let mut ends = Vec::with_capacity(self.texts.len());
+        for &t in &self.texts {
+            let (ps, n) = parts(s, t);
+            typo_start(&ps[..n], &mut starts);
+            ends.push(starts.len());
+        }
+        if starts.len() < min {
+            return None;
+        }
+        Some(VocabJob {
+            key: self.key,
+            starts,
+            ends,
+        })
+    }
+
+    /// Takes a vocabulary made from prepare's copy, if s hasn't changed
+    /// since.
+    pub fn take(&mut self, made: VocabMade) {
+        if made.key == self.key && made.vocab.texts.len() == self.texts.len() + 1 {
+            self.vocab = Some(made.vocab);
         }
     }
 
@@ -233,7 +436,6 @@ impl Session {
                 if score + (SCORE_TYPO + 10) * (want as i32) < floor {
                     continue;
                 }
-                let (ps, n) = parts(self, memo.texts[x]);
                 let mut score = bonus;
                 let mut dead = false;
                 for w in &p.words {
@@ -242,11 +444,22 @@ impl Session {
                         score += a.score as i32;
                         continue;
                     }
-                    let col = memo.typo.get_mut(w).expect("made above");
-                    if col[x] == UNKNOWN {
-                        col[x] = typo_score_parts(&ps[..n], w).map_or(NO_TYPO, |s| s as i8);
+                    if memo.typo[w][x] == UNKNOWN {
+                        match &memo.vocab {
+                            // Every text's at once, from the vocabulary.
+                            Some(v) => {
+                                let col = v.typos(w);
+                                memo.typo.insert(w.clone(), col);
+                            }
+                            None => {
+                                let (ps, n) = parts(self, memo.texts[x]);
+                                let sc = typo_score_parts(&ps[..n], w);
+                                memo.typo.get_mut(w).expect("made above")[x] =
+                                    sc.map_or(NO_TYPO, |s| s as i8);
+                            }
+                        }
                     }
-                    match col[x] {
+                    match memo.typo[w][x] {
                         NO_TYPO => {
                             dead = true;
                             break;

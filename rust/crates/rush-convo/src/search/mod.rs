@@ -21,7 +21,7 @@ mod wordindex;
 
 pub use find::{Found, Library, Reader, Source, library};
 pub use fuzzy::{find_fold_span, match_span};
-pub use memo::SearchMemo;
+pub use memo::{SearchMemo, VocabJob, VocabMade};
 
 use rush_core::time::Ms;
 use rush_core::tool::Kind;

@@ -149,7 +149,7 @@ static ASCII_BITS: [u64; 256] = {
 /// lack more of w's than k can't be within k letters of it, as each
 /// letter missing takes an edit of its own to put in.
 #[inline]
-fn bit(c: char) -> u64 {
+pub(crate) fn bit(c: char) -> u64 {
     1 << (c as u32 % 64)
 }
 
@@ -258,6 +258,66 @@ pub(crate) fn word_score_parts(parts: &[&str], w: &str) -> Option<i32> {
         }
     }
     typo_score_parts(parts, w)
+}
+
+/// Each word of the parts joined by newlines, as far as a typo is looked
+/// for (as typo_score_parts reads them), handed to f.
+pub(crate) fn typo_words(parts: &[&str], mut f: impl FnMut(&str)) {
+    let mut at = 0;
+    for p in parts {
+        if at >= TYPO_SCAN {
+            break;
+        }
+        let mut cut = p.len().min(TYPO_SCAN - at);
+        while !p.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        let hay = &p[..cut];
+        let n = hay.len();
+        let mut i = 0;
+        while i < n {
+            let (is, len, _) = word_at(hay, i);
+            if !is {
+                i += len;
+                continue;
+            }
+            let start = i;
+            while i < n {
+                let (is, len, _) = word_at(hay, i);
+                if !is {
+                    break;
+                }
+                i += len;
+            }
+            f(&hay[start..i]);
+        }
+        at += p.len() + 1;
+    }
+}
+
+/// The start of the parts joined by newlines that a typo is looked for in,
+/// added to out.
+pub(crate) fn typo_start(parts: &[&str], out: &mut String) {
+    let mut at = 0;
+    for (i, p) in parts.iter().enumerate() {
+        if at >= TYPO_SCAN {
+            break;
+        }
+        if i > 0 {
+            out.push('\n');
+        }
+        let mut cut = p.len().min(TYPO_SCAN - at);
+        while !p.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        out.push_str(&p[..cut]);
+        at += p.len() + 1;
+    }
+}
+
+/// A typo's score, d letters off.
+pub(crate) fn typo_score(d: usize) -> i32 {
+    SCORE_TYPO - 10 * (d as i32 - 1)
 }
 
 /// word_score_parts's score for w a letter or two off, where it isn't

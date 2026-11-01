@@ -537,6 +537,9 @@ fn search() {
     // closest first with words, cut to the limit, as each key is typed
     // and taken back with one memo.
     let mut memo = rush_convo::search::SearchMemo::default();
+    let mut made = rush_convo::search::SearchMemo::default();
+    let job = made.prepare_from(&s, 0).expect("asked for");
+    made.take(job.make());
     for q in [
         "alt screen",
         "unreachable",
