@@ -182,7 +182,19 @@ pub fn text_of(m: &Model, s: &TextSel) -> String {
         Some(row) => Cell { row, col: c.col },
         None => Cell::default(),
     };
-    selected_text(&lines, rel(a), rel(b), v.o.width)
+    let (ra, rb) = (rel(a).row.min(rel(b).row), rel(a).row.max(rel(b).row));
+    let text = selected_text(&lines, rel(a), rel(b), v.o.width);
+    // Inside the Needs-you card each row's text starts where its own mark
+    // (a key cap, a "$") left off: its words, each row from its start.
+    let card = ra < rb && (ra..=rb).all(|r| bare.get(r).is_some_and(Option::is_some));
+    if card {
+        return text
+            .lines()
+            .map(str::trim_start)
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+    text
 }
 
 /// The text between two cells of the drawn lines, as it was written

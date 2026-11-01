@@ -79,11 +79,14 @@ pub const NEEDS_ALL: &str = "all";
 
 /// The words on the right of a row that say what a click does: not text
 /// of the answer, so not part of what a selection copies.
-const HINTS: [&str; 4] = [
+const HINTS: [&str; 7] = [
     "click copies",
     "click to reply",
     "click opens",
     "click copies all commands",
+    "type your own answer below",
+    "enter",
+    "puts it in your box",
 ];
 
 /// The marks that lead a row of the section.
@@ -99,7 +102,9 @@ pub fn without_chrome(l: &Line) -> Line {
         let t = sp.text.as_str();
         let blank = if lead {
             let t = t.trim();
-            if t.is_empty() || LEADS.contains(&t) || t == "╰" {
+            // A reply's key cap (" 1 ", " ✎ ") is a key, not its words.
+            let cap = t == "✎" || (!t.is_empty() && t.bytes().all(|b| b.is_ascii_digit()));
+            if t.is_empty() || LEADS.contains(&t) || t == "╰" || cap {
                 true
             } else {
                 lead = false;
