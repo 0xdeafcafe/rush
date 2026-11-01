@@ -1,0 +1,40 @@
+     !        rush   ● 1 needs you [ctrl+n] next   ✻ 2 working   3 finished                        – today · Anthropic
+    ▄▄▄▄      ✻ default · /src/checkout                                                            0.0G RAM · 6 agents
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    < > places
+    RUSH
+   ▀▀▀▀▀▀      Agents · Wall  [ ]
+────╭─ ✻ Go anywhere ─────────────────────────────────────────────────────────────────────────────────── ctrl+k ─╮──────
+  AG│ ❯ ▏an agent, words said in any conversation, or a place · # for commands                                   │ TIME
+┃ Ne│ ────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+▌ └─│ Needs you ───────────────────────────────────────────────────────────────────────────────────────────────  │ 2m ●
+▌   │ ▍● fix the flaky tax rounding test                  checkout · main                              needs you │
+    │                                                                                                            │
+┃ Wo│ Working ─────────────────────────────────────────────────────────────────────────────────────────────────  │
+┃ ├─│  ● move the design tokens to CSS variables          checkout · main                                working │  21m
+┃ │ │  ● add Apple Pay to checkout                        checkout · feat/apple-pay                      working │
+┃ └─│                                                                                                            │  20m
+┃   │ Idle ────────────────────────────────────────────────────────────────────────────────────────────────────  │
+    │  ○ set up caching for CI                            checkout · main                                   idle │
+┃ Id│                                                                                                            │
+┃ └─│ Earlier ─────────────────────────────────────────────────────────────────────────────────────────────────  │  10m
+┃   │  · why does the ledger import time out on big fil…  checkout · main                                 3h ago │
+    │  · rename Invoice to Bill everywhere                checkout · main                                 3d ago │
+┃ To│                                                                                                            │
+┃ └─│ Go to ───────────────────────────────────────────────────────────────────────────────────────────────────  │   3h
+┃   │  + Start an agent                                   in /src/checkout · Anthropic (Claude Code) · default … │
+    │                                                                                                            │
+ ▸ E│ ↑↓ choose  ·  enter go  ·  ctrl+f just Needs you  ·  # commands  ·  tab next section  ·  esc close         │
+    ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+  ╭─ waiting on you ─────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │  asks: Round half up, or half to even?                                                                           │
+  │                                                                                                                  │
+  │                                                                                                                  │
+  ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │  spent $0.19   │   out 0  cache 0   │   checkout · main                                                          │
+  ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ new agent in checkout ────────────────────────────────────────────────  ✻ Anthropic (Claude Code) · default model  ─╮
+│ ❯ describe a task                                                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  enter open  ·  shift+← · #view split back to side by side  ·  ctrl+o reply  ·  ctrl+n 1 needs you  ·  ? more

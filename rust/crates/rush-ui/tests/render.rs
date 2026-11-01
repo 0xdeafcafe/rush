@@ -130,6 +130,11 @@ fn model() -> Model {
     // As the binary does: the list names each agent through the registry.
     static REGISTER: std::sync::Once = std::sync::Once::new();
     REGISTER.call_once(|| rush_core::adapter::global().register(rush_claude::Claude::new()));
+    // Times are drawn in the local zone: the snapshots are UTC's, whatever
+    // the machine's. Before any test formats a time (every test starts here).
+    static ZONE: std::sync::Once = std::sync::Once::new();
+    // SAFETY: once, ahead of every other use of the environment in this binary.
+    ZONE.call_once(|| unsafe { std::env::set_var("TZ", "UTC") });
     let mut m = Model::new("0.1.0");
     m.clock = Some(NOW);
     m.launch_dir = "/src/checkout".into();
@@ -577,4 +582,96 @@ fn a_rendered_session_counts_its_hosted_agents_changes() {
     let f = plain(&mut m, 120, 30, &[]);
     assert!(f.contains("round.go"), "{f}");
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// ---- fixed-fixture snapshots for the crate split ----
+//
+// Every view below is drawn from the fixture fleet at three sizes, on a
+// clock that stands still, in the throwaway home. They are the exact-match
+// check each step of splitting rush-ui into crates must pass unchanged;
+// UPDATE_SNAPSHOTS=1 writes them again.
+
+const SIZES: [(u16, u16); 3] = [(80, 24), (120, 40), (200, 50)];
+
+/// Draws one view at every size, each from a fresh model, as
+/// `name_WxH`.
+fn views(name: &str, setup: impl Fn(&mut Model), keys: &[(Key, KeyMods)]) {
+    for (w, h) in SIZES {
+        let mut m = model();
+        setup(&mut m);
+        let f = plain(&mut m, w, h, keys);
+        snapshot(&format!("{name}_{w}x{h}"), &f);
+    }
+}
+
+#[test]
+fn snapshot_list() {
+    views("snap_list", |_| {}, &[]);
+}
+
+#[test]
+fn snapshot_session() {
+    // The transcript's folder is never drawn; the name is fixed so the
+    // frame can't depend on the process.
+    let dir = std::env::temp_dir().join(format!("rush-ui-snap-session-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("s.jsonl");
+    std::fs::write(
+        &path,
+        [
+            r#"{"type":"user","timestamp":"2026-10-28T12:00:00Z","cwd":"/src/checkout","message":{"role":"user","content":"fix the test"}}"#,
+            r#"{"type":"assistant","timestamp":"2026-10-28T12:00:02Z","message":{"id":"m1","model":"claude-opus-5-5","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cargo test"}}],"usage":{"input_tokens":5,"output_tokens":3}}}"#,
+            r#"{"type":"user","timestamp":"2026-10-28T12:00:09Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok","is_error":false}]},"toolUseResult":{"stdout":"ok","stderr":""}}"#,
+            r#"{"type":"assistant","timestamp":"2026-10-28T12:00:12Z","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"Fixed it."}]}}"#,
+            r#"{"type":"system","subtype":"turn_duration","timestamp":"2026-10-28T12:00:13Z"}"#,
+        ]
+        .join("\n")
+            + "\n",
+    )
+    .unwrap();
+    let p = path.to_string_lossy().into_owned();
+    views(
+        "snap_session",
+        |m| {
+            let i = m.agents.iter().position(|a| a.job.id == "d4").unwrap();
+            m.agents[i].job.transcript_path = p.clone();
+            m.sel = m.agents[i].key.clone();
+        },
+        &[(Key::Enter, KeyMods::NONE)],
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn snapshot_projects() {
+    // "." goes to the next place.
+    views(
+        "snap_projects",
+        rush_ui::screens::projects_machine::freeze,
+        &[(Key::Char('.'), KeyMods::NONE)],
+    );
+}
+
+#[test]
+fn snapshot_settings_general() {
+    views(
+        "snap_settings_general",
+        |m| {
+            rush_ui::screens::settings::set_settings_page(
+                m,
+                rush_ui::screens::settings::PAGE_GENERAL,
+            )
+        },
+        &[],
+    );
+}
+
+#[test]
+fn snapshot_command_bar() {
+    views("snap_ctrl_k", |_| {}, &[(Key::Char('k'), KeyMods::CTRL)]);
+}
+
+#[test]
+fn snapshot_key_help() {
+    views("snap_key_help", |_| {}, &[(Key::Char('?'), KeyMods::NONE)]);
 }

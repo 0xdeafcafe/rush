@@ -1,0 +1,23 @@
+     !        rush   ● 1 needs you [ctrl+n] next   ✻ 2 working   3 finished  ⋯
+    ▄▄▄▄      ✻ default · /src/checkout
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    < > places
+    RUSH
+   ▀▀▀▀▀▀      General   Keys   Plugins   Updates   Remote   [ ]
+────────────────────────────────────────────────────────────────────────────────
+  Sessions, notifications, background work, and how the workspace looks.
+
+
+  Idle and finished
+  ▍ Hibernate finished agents       ‹ off          ›
+    Keep stopped agents in Active … ‹ 5m           ›
+    Keep agents in Just left for    ‹ 120m         ›
+    Just left holds at most         ‹ 10           ›
+    Clean up done work after        ‹ 3h           ›
+    Orphaned processes              ‹ end          ›
+  Hibernate finished agents
+
+  A finished agent's process stays in memory (often 300–800 MB) until it is
+  off: finished agents stay in memory until you stop them (ctrl+x).
+    1 of 47 ───────────────────────────────────────────────────────────────
+  enter choose  ·  ? details  ·  ctrl+↑↓ section  ·  [ ] page  ·  esc back
+────────────────────────────────────────────────────────────────────────────────

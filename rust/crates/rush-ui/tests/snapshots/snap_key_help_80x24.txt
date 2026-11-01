@@ -1,0 +1,24 @@
+     !        rush   ● 1 needs you [ctrl+n] next   ✻ 2 working   3 finished  ⋯
+    ▄▄▄▄      ✻ default · /src/checkout
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    < > places
+  ╭─ ⌨ Keys ────────────────────────────────────────────────────────── f1 ─╮
+  │ ❯ ▏find a key by its keys or what it does                     132 keys │
+──│ ────────────────────────────────────────────────────────────────────── │────
+  │ Here · Agents and the Prompt ────────────────────────────────────────  │IME
+┃ │ ▍ ↑                  the agent above                                   │
+▌ │   ↓                  the agent below                                   │m ●
+▌ │   pgup               ten agents up                                     │
+▌ │   pgdown             ten agents down                                   │
+  │   home · shift+↑     the first agent                                   │
+  │   end · shift+↓      the last agent                                    │
+  │   enter              open or rename the agent, or send what's typed    │─╮
+  │   ctrl+o · ⌘↓        open the agent's Session                          │ │
+  │   →                  into the agent, or unfold a heading               │ │
+  │   ←                  fold the heading                                  │ │
+  │   esc                clear, go back, or (twice) quit                   │─┤
+  │   ctrl+r             rename the agent                                  │ │
+  │                                                                        │─╯
+╭─│ ↑↓ choose  ·  enter change its keys  ·  tab next section  ·  esc close │  ─╮
+│ ╰────────────────────────────────────────────────────────────────────────╯   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+  enter open  ·  ctrl+o reply  ·  ctrl+n 1 needs you  ·  ? more

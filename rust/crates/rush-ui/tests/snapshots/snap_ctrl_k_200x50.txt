@@ -1,0 +1,50 @@
+     !        rush   ● 1 needs you [ctrl+n] next   ✻ 2 working   3 finished                                                                                                        – today · Anthropic
+    ▄▄▄▄      ✻ default · /src/checkout                                                                                                                                            0.0G RAM · 6 agents
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    < > places
+    RUSH
+   ▀▀▀▀▀▀      Agents · Wall  [ ]
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  AGENTS▾                                   ╭─ ✻ Go anywhere ─────────────────────────────────────────────────────────────────────────────────── ctrl+k ─╮
+┃ Needs you  1 · $0.19                      │ ❯ ▏an agent, words said in any conversation, or a place · # for commands                                   │
+▌ └─ ? fix the flaky tax rounding test ✻   $│ ────────────────────────────────────────────────────────────────────────────────────────────────────────── │ · open in a terminal · /rush copies it here
+▌      checkout · main                      │ Needs you ───────────────────────────────────────────────────────────────────────────────────────────────  │
+▌        ╰ asks: Round half up, or half to e│ ▍● fix the flaky tax rounding test                  checkout · main                              needs you │──────────────────────────────────────────────
+                                            │                                                                                                            │                                  ▌
+┃ Working  2 · $5.72                        │ Working ─────────────────────────────────────────────────────────────────────────────────────────────────  │                                  │
+┃ ├─ ✳ add Apple Pay to checkout ✻ ↳1      $│  ● move the design tokens to CSS variables          checkout · main                                working │                                  │
+┃ │    checkout · feat/apple-pay            │  ● add Apple Pay to checkout                        checkout · feat/apple-pay                      working │                                  │
+┃ └─ ✳ move the design tokens to CSS … ✻   $│                                                                                                            │                                  │
+┃      checkout · main                      │ Idle ────────────────────────────────────────────────────────────────────────────────────────────────────  │                                  │
+                                            │  ○ set up caching for CI                            checkout · main                                   idle │                                  │
+┃ Idle  1 · $1.10 · 120M idle ram           │                                                                                                            │                                  │
+┃ └─ ◦ set up caching for CI ✻             $│ Earlier ─────────────────────────────────────────────────────────────────────────────────────────────────  │                                  │
+┃      checkout · main                      │  · why does the ledger import time out on big fil…  checkout · main                                 3h ago │                                  │
+                                            │  · rename Invoice to Bill everywhere                checkout · main                                 3d ago │                                  │
+┃ Today  1 · $1.71                          │                                                                                                            │                                  │
+┃ └─ · why does the ledger import tim… ✻   $│ Go to ───────────────────────────────────────────────────────────────────────────────────────────────────  │                                  │
+┃      checkout · main                      │  + Start an agent                                   in /src/checkout · Anthropic (Claude Code) · default … │                                  │
+                                            │                                                                                                            │                                  │
+ ▸ Earlier  1 · $0.42   rename Invoice to Bi│ ↑↓ choose  ·  enter go  ·  ctrl+f just Needs you  ·  # commands  ·  tab next section  ·  esc close         │                                  │
+                                            ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯                                  │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │
+╭─ new agent in checkout ──────────────────────────────╮│  ╭─ open in a terminal, so it can't take messages here ─────────────────────────────────────────────────────────────────────────╮
+│ ❯ describe a task                                    ││  │ ❯ enter or → to talk to this agent                                                                                           │
+╰──────────────────────────────────────────────────────╯│  ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  enter open  ·  ctrl+o reply  ·  ? more                │    enter · → type here  ·  ctrl+n next needing you
