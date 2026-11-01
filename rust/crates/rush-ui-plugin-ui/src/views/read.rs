@@ -70,9 +70,17 @@ pub fn read(id: &str) -> SessionViews {
     }
 }
 
+/// Whether you turned agents' views off (Settings): none show.
+pub fn views_off(m: &Model) -> bool {
+    rush_ui_base::accounts::config(m).views_off
+}
+
 /// The session's views as they show: a plugin's only while it runs
 /// allowed to draw them (viewsOf).
 pub fn views_of(m: &Model, id: &str) -> Vec<View> {
+    if views_off(m) {
+        return Vec::new();
+    }
     let Some(sv) = m.kept.peek::<Views>().and_then(|v| v.by_id.get(id)) else {
         return Vec::new();
     };
@@ -84,6 +92,9 @@ pub fn views_of(m: &Model, id: &str) -> Vec<View> {
 
 /// The session's views put away, as last read (pastViewsOf).
 pub fn past_views_of(m: &Model, id: &str) -> Vec<View> {
+    if views_off(m) {
+        return Vec::new();
+    }
     m.kept
         .peek::<Views>()
         .and_then(|v| v.by_id.get(id))

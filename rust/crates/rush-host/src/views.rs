@@ -18,7 +18,16 @@ use crate::wire::zero_time;
 
 /// Tells every agent it can keep a view: kept short, as every session
 /// carries it.
-pub const VIEWS_PROMPT: &str = "rush draws a panel beside this conversation that you fill with your `view` tool (or `rush view set <name>`, JSON on stdin). The panel is for live state only, things that change while you work: a test run or benchmark and its numbers, progress through a list you were handed, pull requests and their checks, a migration across modules, services you started, an incident. Make one on your own, without being asked, when such work starts, and set it again each time something in it changes. Never repeat in it what your reply says, and don't make one for a plan, a summary, a roadmap or a decision: those belong in your reply. rush already shows your running subagents at the top of the panel, so don't list them yourself. Pick the styles that fit (table, chart, timeline, board, hero number and more), and clear it once it's no use: rush keeps it among the past views the user can bring back, and puts away one you haven't touched in 3 turns. The user can click a row open to its detail and press buttons you put on it (actions: send you a message, open a link, copy, or change the row): give rows the next steps they'd take, so a click does it rather than typing. `rush view guide` is the style guide.";
+pub const VIEWS_PROMPT: &str = "Your `view` tool (or `rush view set <name>`, JSON on stdin) draws live state in a panel beside the chat: a test run or build and its numbers, benchmarks, progress through a list, PRs and their checks, a migration, services you started. Start one unasked when such work starts, set it again (same name) on each change, clear it when done. Never repeat your reply in it; not for plans or summaries; rush shows subagents itself. rush greys a view left alone for 10 min or a turn and puts it away after 45 min or 3 turns. `rush view guide` has the styles.";
+
+/// A view the agent hasn't touched for this long greys (and the agent is
+/// told once, while it works): long enough that a benchmark or a build
+/// between two updates doesn't, short enough that a long turn can't keep a
+/// dead view looking live.
+pub const STALE_MS: i64 = 10 * 60_000;
+/// One untouched this long is put away, working or not: the user can
+/// bring it back from the past views.
+pub const AWAY_MS: i64 = 45 * 60_000;
 
 /// Numbers as Go writes a float64: 9, not 9.0.
 pub(crate) mod floats {
@@ -678,6 +687,58 @@ pub fn put_away_stale(id: &str, since: Time) {
     }
 }
 
+/// What one look at a session's views at now finds (sweep).
+#[derive(Debug, Default, PartialEq)]
+pub struct Swept {
+    /// Names of views gone stale since the agent was last told.
+    pub stale: Vec<String>,
+    /// Whether the agent's views are left to look at again later.
+    pub more: bool,
+}
+
+/// Puts away the agent's views untouched for AWAY_MS (pinned ones stay),
+/// and says which others have been untouched for STALE_MS while the
+/// session works and the agent wasn't told yet: told maps a view's name to
+/// the update it was told of, so each stale period is told once.
+pub fn sweep(
+    id: &str,
+    now: Time,
+    working: bool,
+    told: &mut std::collections::HashMap<String, i64>,
+) -> Swept {
+    let mut out = Swept::default();
+    let (vs, _) = views(id);
+    let now = now.to_ms();
+    told.retain(|n, _| vs.iter().any(|v| v.name == *n));
+    for v in vs {
+        if !v.by.is_empty() || v.pinned {
+            continue;
+        }
+        let (up, age) = (v.updated.to_ms(), now - v.updated.to_ms());
+        if age >= AWAY_MS {
+            let _ = drop_view(id, &v.name);
+            told.remove(&v.name);
+            continue;
+        }
+        out.more = true;
+        if working && age >= STALE_MS && told.get(&v.name) != Some(&up) {
+            told.insert(v.name.clone(), up);
+            out.stale.push(v.name);
+        }
+    }
+    out
+}
+
+/// The line the agent is told when its views go stale: short, as every
+/// word is a token on its next turn.
+pub fn stale_note(names: &[String]) -> String {
+    format!(
+        "Views not updated in {} min: {}. Set again or clear.",
+        STALE_MS / 60_000,
+        names.join(", ")
+    )
+}
+
 /// The session's views, the one updated last first, and when its folder
 /// last changed, to read them again only then.
 pub fn views(id: &str) -> (Vec<View>, Option<std::time::SystemTime>) {
@@ -870,6 +931,54 @@ mod tests {
         assert!(super::past_views("s1").is_empty());
         put_away_stale("s1", Time::now().add_nanos(1_000_000_000));
         assert_eq!(super::views("s1").0.len(), 1, "a pinned view was put away");
+    }
+
+    // A view untouched for STALE_MS is told of once while the session
+    // works (not when it idles), one touched stays fresh, and one
+    // untouched for AWAY_MS is put away, pinned ones aside.
+    #[test]
+    fn sweep_tells_once_and_puts_away() {
+        let _h = Home::new();
+        std::fs::create_dir_all(dir("s1")).unwrap();
+        let mk = |name: &str| {
+            save_view(
+                "s1",
+                View {
+                    name: name.into(),
+                    title: name.into(),
+                    ..View::default()
+                },
+            )
+            .unwrap()
+        };
+        mk("old");
+        mk("fresh");
+        let t0 = Time::now();
+        let min = |n: i64| t0.add_nanos(n * 60_000_000_000);
+        let mut told = std::collections::HashMap::new();
+        let r = sweep("s1", min(5), true, &mut told);
+        assert!(r.stale.is_empty() && r.more, "{r:?}");
+        // Both were last touched at t0; touch fresh again at +9 min.
+        let touch = |name: &str, at: Time| {
+            let p = views_dir("s1").join(format!("{name}.json"));
+            let mut v: View = serde_json::from_slice(&std::fs::read(&p).unwrap()).unwrap();
+            v.updated = at;
+            std::fs::write(&p, crate::json::line(&v)).unwrap();
+        };
+        touch("fresh", min(9));
+        let r = sweep("s1", min(11), false, &mut told);
+        assert!(r.stale.is_empty(), "idle sessions aren't nudged: {r:?}");
+        let r = sweep("s1", min(11), true, &mut told);
+        assert_eq!(r.stale, ["old"], "{r:?}");
+        let r = sweep("s1", min(12), true, &mut told);
+        assert!(r.stale.is_empty(), "told once: {r:?}");
+        touch("old", min(13)); // the agent set it again
+        let r = sweep("s1", min(25), true, &mut told);
+        assert_eq!(r.stale, ["old", "fresh"], "{r:?}");
+        let r = sweep("s1", min(60), true, &mut told);
+        assert!(!r.more && super::views("s1").0.is_empty(), "{r:?}");
+        assert_eq!(past_views("s1").len(), 2);
+        assert!(stale_note(&["a".into(), "b".into()]).len() < 60);
     }
 
     #[test]

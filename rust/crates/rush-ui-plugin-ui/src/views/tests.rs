@@ -576,6 +576,41 @@ fn view_quiet() {
     );
 }
 
+/// A view left alone for ten minutes goes grey by the clock, even in one
+/// long turn that is still going; its foot says so in the warning tone;
+/// one touched since stays bright.
+#[test]
+fn view_stale_by_the_clock() {
+    use rush_convo::Turn;
+    let now = 1_800_000_000_000;
+    let mut v = roadmap_for_quiet(now);
+    v.blocks[0].items[0].meta = String::new();
+    v.blocks.push(Block {
+        kind: "list".into(),
+        items: vec![Item {
+            text: "benchmarks running".into(),
+            tone: "busy".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    let mut live = Turn::default();
+    (live.start, live.end, live.live) = (now - 4 * 3_600_000, 0, true);
+    let mut st = ViewsState::default();
+    let mut sess = rush_convo::Session::default();
+    sess.turns = vec![live];
+    assert_eq!(st.quiet_why(Some(&sess), &v, now), "", "touched 45s ago");
+    v.updated = rush_state::Time::from_ms(now - 3 * 3_600_000);
+    st.quiet = st.quiet_why(Some(&sess), &v, now);
+    assert_eq!(st.quiet, "not updated");
+    let rows = views_panel(std::slice::from_ref(&v), &[], 52, 30, now, &mut st);
+    let text: String = rows.iter().map(|l| l.plain() + "\n").collect();
+    assert!(text.contains("not updated · 3h"), "{text}");
+    assert!(!text.contains('◐'), "a busy mark in a stale view:\n{text}");
+    assert_eq!(ink_of(&rows, "not updated"), Some(YELLOW), "{text}");
+    assert_eq!(ink_of(&rows, "1. Scrollback"), Some(FAINT), "{text}");
+}
+
 /// Folded with room for the column, the views are its last part, a row a
 /// view; a click on one opens it (taskrow_test.go
 /// TestFoldedViewsInTheColumn, its rows and refs).

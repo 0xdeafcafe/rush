@@ -85,38 +85,18 @@ The drawing is shown as-is: plain text, no markdown, no fences."
 fn view_tool() -> Tool {
     Tool {
         name: "view".into(),
-        description: "Keep a live view of your work in rush's panel beside the conversation. The panel is for live state only, \
-things that change while you work: a test run or build and its numbers, benchmarks, progress through a list \
-you were handed, several pull requests and their checks, a migration across modules, services you started, an \
-incident. Never repeat in it what your reply says, and don't make one for a plan, a summary, a roadmap or a \
-decision: those belong in your reply. rush already shows your running subagents at the panel's top, so don't \
-list them yourself. Make one on your own, without being asked, as soon as such work starts, set it again (same \
-name) each time something in it changes, and clear it once it has stopped being useful: it goes to the user's \
-past views, where they can bring it back. rush greys a view you left alone for a whole turn, or one that says \
-what your reply says, and puts away one you haven't touched in 3 turns. Pick the styles that fit and mix them \
-as blocks: table, kv, checklist, log, list, bars, chart (columns or line), heatmap, compare, steps, timeline, \
-board, tree, hero, callout, code, text, stats, progress. Short words: the panel is about 50 columns. Colour \
-means something: tone good, bad, warn, busy or quiet. The user works it too: a click opens a row to its detail \
-and buttons you put on it (actions), and ticks a checklist; you hear what they changed. Run `rush view guide` \
-for the style guide with every field, and `rush view example <name>` for ready ones."
+        description: "Keep a live view of your work in rush's panel beside the chat: state that changes while you work (test or build runs and their numbers, benchmarks, progress through a list, PRs and checks, migrations, services, incidents). Not for plans, summaries or what your reply says; rush shows subagents itself. Make one when such work starts, set it again (same name) on each change, clear it when done. Left alone 10 min it greys; after 45 min or 3 turns it is put away. Rows take click actions that message you. `rush view guide` has every field; `rush view example <name>` samples."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
                 "name": { "type": "string", "description": "The view's name, lowercase and dashes: prs, tests, search. The same name again replaces it." },
                 "view": { "type": "object", "description": concat!(
-                    r#"The view: {"title", "summary" (your line in rush's list, 3-6 words), "#,
-                    r#""accent" (orange, blue, green, yellow, purple, red), "tone", "progress": {done, total, label}, "#,
+                    r#"{"title", "summary" (3-6 words for rush's list), "accent", "tone", "progress": {done, total, label}, "#,
                     r#""stats": [{value, label, tone, trend}], "blocks": [{"kind", "title", "tone", "folded", ...}], "note"}. "#,
-                    r#"Blocks by kind: table {columns, items:[{cells, tone, link}]}; kv {items:[{text: key, meta: value, tone}]}; "#,
-                    r#"checklist {items:[{text, done, meta}]}; log {items:[{time, text, tone}]}; list {items:[{text, meta, tone, link, progress}]}; "#,
-                    r#"bars {items:[{text, value, meta}]}; chart {values, labels, style: "line" or columns}; heatmap {columns, items:[{text, values}]}; "#,
-                    r#"compare {items:[{text, from, to, tone}]}; steps {items:[{text, meta, tone}]}; timeline {items:[{time, text, meta, tone}]}; "#,
-                    r#"board {items:[{text: column, tone, items:[cards {text, meta, tone}]}]}; tree {items:[{text, meta, tone, items}]}; "#,
-                    r#"hero {value, text, tone, trend}; callout {text, tone}; code {text}; text {text}; stats {stats}; progress {progress}. "#,
-                    r#"Any item may also have "detail" (shown when a click opens it), "id", and "actions": buttons [{label, tone, "#,
-                    r#"send: a message to you as the user's, open: a web link, copy: words, set: {done, tone, meta} changing that row at once}]; "#,
-                    r#"the view's own "actions" sit at its foot."#,
+                    r#"Kinds: table {columns, items:[{cells}]}, kv, checklist {items:[{text, done}]}, log, list, bars, chart {values, style}, "#,
+                    r#"heatmap, compare, steps, timeline, board, tree, hero, callout, code, text, stats, progress. Items: "#,
+                    r#"{text, meta, tone, detail, actions}. Tones: good bad warn busy quiet. Fields per kind: `rush view guide`."#,
                 ) },
                 "clear": { "type": "boolean", "description": "Put the view of this name away instead: it's no longer useful." },
             },

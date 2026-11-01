@@ -365,6 +365,23 @@ pub fn sections(m: &Model) -> Vec<Section> {
     if (m.ext.calls.bundled_on())(m, rush_bundled::apple_voice::NAME) {
         secs.push(Section::new("Push to talk", vec![microphone(m)]));
     }
+    let views = choice(
+        "Agent views",
+        if c.views_off { "off" } else { "on" },
+        "The live views agents draw in a panel beside the conversation. Off, the panel is hidden and agents are not told about the view tool (a session already running keeps its tool until it restarts, but its views stay hidden).",
+        &[
+            (
+                "on",
+                "agents may keep views of their work beside the conversation.",
+            ),
+            (
+                "off",
+                "no views: the panel is hidden and agents are not told of them.",
+            ),
+        ],
+        set(|m, v| config_mut(m).views_off = v == "off"),
+    );
+    secs.push(Section::new("Agent views", vec![views]));
 
     let mut low_disk = choice(
         "Offer a cleanup when disk is under",

@@ -114,6 +114,8 @@ const QUEUE_LATE: Duration = Duration::from_secs(120);
 
 /// How often an idle agent waiting to start again on another account is
 /// looked at for work of its own still running.
+/// How often the session's views are looked at for age.
+const VIEWS_EVERY: Duration = Duration::from_secs(60);
 const QUIET_CHECK: Duration = Duration::from_secs(2);
 
 /// How often a session an API error stopped looks whether it may try again.
@@ -343,6 +345,10 @@ pub(crate) struct State {
     last_step: String,
     heard: Option<Instant>,
     turn_ends: Vec<Time>,
+    /// Whether a look at the views is due, and the update of each view
+    /// the agent was told is stale (views::sweep).
+    views_armed: bool,
+    views_told: HashMap<String, i64>,
     quit: bool,
     /// info.json as last written, but for what changes on every message
     /// (see INFO_EVERY), when, and the latest info not written yet.
@@ -640,6 +646,8 @@ fn build(reg: Registry, hooks: Hooks, cfg: Config) -> (Host, Receiver<Msg>) {
         last_step: String::new(),
         heard: None,
         turn_ends: Vec::new(),
+        views_armed: false,
+        views_told: HashMap::new(),
         quit: false,
         info_key: Vec::new(),
         info_at: None,
@@ -1408,13 +1416,18 @@ impl Host {
         // helps when someone watches it in rush: a headless run is read by
         // the program that asked for it. Plugins' prompts and tools aren't
         // ported yet.
+        let views_off = rush_state::Store::load().config.views_off;
         let (tasks, decisions, views) = if c.headless {
             ("", "", "")
         } else {
             (
                 TASKS_PROMPT,
                 crate::decisions::DECISIONS_PROMPT,
-                crate::views::VIEWS_PROMPT,
+                if views_off {
+                    ""
+                } else {
+                    crate::views::VIEWS_PROMPT
+                },
             )
         };
         let note = crate::workspace::workspace_note(c.workspace.as_ref());
@@ -1624,6 +1637,7 @@ impl Host {
             st.info.queue_stuck = Time::default(); // sent, taken away, or held on purpose
         }
         self.note_state(st);
+        self.arm_views(st);
         let b = st.info.to_json();
         let line: Arc<[u8]> = lines::info_line(&b).into();
         self.write_info(st, b);
@@ -1652,6 +1666,51 @@ impl Host {
                 h.flush_info(&mut st);
             });
         }
+    }
+
+    /// Has the session's views looked at again in a minute once it works,
+    /// and while it works or keeps any: a session with neither costs nothing. Only the
+    /// views' age is looked at, off the main thread (views::sweep).
+    fn arm_views(&self, st: &mut State) {
+        if st.info.state == "working" {
+            self.arm_views_always(st);
+        }
+    }
+
+    /// Puts away the views left alone too long, and tells the agent once
+    /// of those gone stale while it works, as a notice at its next tool
+    /// call (the same inbox as rush's other notices; an agent without one
+    /// isn't told).
+    fn sweep_views(&self) {
+        let mut st = self.lock();
+        st.views_armed = false;
+        if st.quit || rush_state::Store::load().config.views_off {
+            return;
+        }
+        let working = st.info.state == "working";
+        let id = st.cfg.id.clone();
+        let mut told = std::mem::take(&mut st.views_told);
+        let swept = crate::views::sweep(&id, Time::now(), working, &mut told);
+        st.views_told = told;
+        if !swept.stale.is_empty() && st.info.inbox {
+            let _ = crate::inbox::tell(
+                &id,
+                crate::inbox::MAIN_NOTICE,
+                &crate::views::stale_note(&swept.stale),
+            );
+        }
+        if swept.more || working {
+            self.arm_views_always(&mut st);
+        }
+    }
+
+    fn arm_views_always(&self, st: &mut State) {
+        if st.views_armed || st.quit {
+            return;
+        }
+        st.views_armed = true;
+        let h = self.clone();
+        self.timers.after(VIEWS_EVERY, move || h.sweep_views());
     }
 
     /// Writes the info owed to info.json now, if any.

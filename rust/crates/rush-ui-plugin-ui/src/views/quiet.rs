@@ -20,13 +20,16 @@ pub struct QuietKey {
     updated: Ms,
     turns: usize,
     end: Ms,
+    /// Left alone for rush_host::views::STALE_MS: by the clock, so a long
+    /// turn can't keep a dead view looking live.
+    stale: bool,
 }
 
 impl ViewsState {
     /// Why the session's view v shows grey, in a few words for the
     /// panel's foot; "" when it doesn't. Kept until the view or the
     /// session's turns change (quietWhy).
-    pub fn quiet_why(&mut self, s: Option<&Session>, v: &View) -> String {
+    pub fn quiet_why(&mut self, s: Option<&Session>, v: &View, now: Ms) -> String {
         let Some(s) = s else { return String::new() };
         if !v.by.is_empty() || v.pinned {
             return String::new(); // a plugin's or one you brought back: theirs and yours
@@ -36,13 +39,27 @@ impl ViewsState {
             updated: v.updated.to_ms(),
             turns: s.turns.len(),
             end: s.turns.last().map_or(0, |t| t.end),
+            stale: is_stale(v, now),
         };
         if self.quiet_key != k {
-            self.quiet_memo = view_quiet(&s.turns, v).to_string();
+            let why = view_quiet(&s.turns, v);
+            self.quiet_memo = if why.is_empty() && k.stale {
+                STALE_WHY.to_string()
+            } else {
+                why.to_string()
+            };
             self.quiet_key = k;
         }
         self.quiet_memo.clone()
     }
+}
+
+/// What the foot says of a view left alone by the clock.
+pub const STALE_WHY: &str = "not updated";
+
+/// Whether the agent hasn't touched v for STALE_MS at now.
+pub fn is_stale(v: &View, now: Ms) -> bool {
+    now - v.updated.to_ms() >= rush_host::views::STALE_MS
 }
 
 /// quiet_why worked out from the session's turns (viewQuiet).

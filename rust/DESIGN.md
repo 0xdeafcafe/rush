@@ -1355,7 +1355,33 @@ is made. Everything below is in `rush_ui::frame`.
   (`subs::panel_subs`; the subagents wait on runs being read), and
   `quiet` (`quiet_why`) is worked out only when the view or the turns
   change; folded
-  beside the column, the views are its last part (`side_views`). Its sheets, the editor, the panel and
+  beside the column, the views are its last part (`side_views`).
+  **Stale views** (Rust-only; Go greyed by turns alone, and one long turn
+  never ended, so a view from 3 h ago still read live). Why it wasn't
+  greyed: `view_quiet` skips a view made in the turn still under way, and
+  the host's put-away needs four ended turns. Now the clock counts too,
+  in `rush_host::views`: untouched `STALE_MS` = 10 min (a build or
+  benchmark between two updates is rarely longer; a longer wait is what
+  the agent should say) the panel greys it, its foot reading "made by the
+  agent · not updated · 3h" with the "not updated" part in the warning
+  tone, and its busy marks (◐ ◉) drawn as quiet dots, so it doesn't
+  pretend to be live; untouched `AWAY_MS` = 45 min (or 3 turns, as
+  before) the host puts it away among the past views, whether the session
+  works or not, pinned ones aside. The host looks every minute (`VIEWS_EVERY`)
+  only once a session works and while it keeps agent views, off the
+  UI thread (`Host::sweep_views`, `views::sweep`). The first time a view
+  is stale while the session works, the agent is told through rush's
+  notice inbox (the hook output rush's other notices use, so only
+  harnesses with an inbox), one line, "Views not updated in 10 min: prs.
+  Set again or clear." (about 15 tokens, plus the notice's header), once
+  per view per untouched period (keyed by the view's last update), never
+  while idle or with views off. **Views off** (Settings, Agent views;
+  config `viewsOff`, on by default): the panel and list lines hide, the
+  prompt part and the `view` MCP tool aren't given to agents started
+  afterwards, a call is refused and no sweep or notice runs. The agent's
+  instructions were trimmed: the system prompt part 1235 to 560
+  characters, the tool's description and schema about 3.4k to 1.9k.
+  Its sheets, the editor, the panel and
   the artifacts view are checked against Go row by row, words and
   colours, at the widths 80, 120 and 200 column screens give them
   (`testdata/wide`), and the editor's JSON problems against jsontext's.
