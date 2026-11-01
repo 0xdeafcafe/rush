@@ -44,6 +44,13 @@ pub enum Note {
         r#gen: u64,
         err: String,
     },
+    /// A conversation just opened: as much of its end as is read first,
+    /// laid out as the view draws it, when it has drawn.
+    End {
+        r#gen: u64,
+        sess: Box<Session>,
+        warm: Option<Box<Warm>>,
+    },
     /// The whole of a conversation opened on its end, read after it, and
     /// its end laid out as the view last drew it, when it had.
     Whole {
@@ -554,6 +561,21 @@ pub fn spawn_tail(
             w.watch(&[&path]);
             let mut tail = Tail::from_end(&path, 2 << 20, decode.clone());
             tail.stop = Some(st.clone());
+            // Its end read whole here first and laid out as the view draws
+            // it, before the view has it (Go's warmed, rushmode.go:2064):
+            // the frame that shows it draws nothing new. What's written
+            // after comes a slice at a time, below.
+            let mut end = Session::new();
+            if tail.read(&mut end).unwrap_or(false) && !st.load(Ordering::Relaxed) {
+                let warm = warm(&mut end, &drawn, spawns.as_ref());
+                if !tx.send(Note::End {
+                    r#gen,
+                    sess: Box::new(end),
+                    warm,
+                }) {
+                    return;
+                }
+            }
             loop {
                 if st.load(Ordering::Relaxed) {
                     return;
@@ -1044,7 +1066,9 @@ mod tests {
         }
         impl App<Note> for Notes {
             fn update(&mut self, m: Msg<Note>) -> Step {
-                if let Msg::App(Note::Tail { .. }) = m {
+                // The first read comes as the end, what's added after as
+                // slices.
+                if let Msg::App(Note::End { .. } | Note::Tail { .. }) = m {
                     self.n += 1;
                     if self.n == 1 {
                         use std::io::Write;
@@ -1105,6 +1129,11 @@ mod tests {
                         let mut s = Session::new();
                         fresh.apply(&mut s);
                         assert!(s.partial, "the end first");
+                        self.tails += 1;
+                        Step::Idle
+                    }
+                    Msg::App(Note::End { sess, .. }) => {
+                        assert!(sess.partial, "the end first");
                         self.tails += 1;
                         Step::Idle
                     }

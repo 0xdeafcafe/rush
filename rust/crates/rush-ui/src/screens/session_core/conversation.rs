@@ -113,6 +113,7 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     let cw = w.saturating_sub(side);
     let mut n = rows;
     let mut out = if !v.read {
+        v.note_drawn();
         vec![fit(line([sp("reading the conversation…", DIM)]), cw)]
     } else if v.sess.turns.is_empty() {
         let first = if v.err.is_empty() {
