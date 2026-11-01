@@ -27,6 +27,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
 use rush_convo::{Decode, Session, Tail};
+use rush_core::adapter::{self, AdapterRef, Follow};
 use rush_core::agent::Agent;
 
 use crate::frame::Out;
@@ -48,6 +49,20 @@ enum What {
     /// A live session rush hosts: its transcript's end as live.rs's early
     /// reads it while its host is dialled.
     Early(Box<Agent>),
+    /// Another agent's history, as its follower reads it (host: a stopped
+    /// rush session's, whose folder says where it is).
+    History(AdapterRef, Box<adapter::Session>, String),
+}
+
+/// Where a read ahead stopped, for its reading to go on from there.
+enum From {
+    Tail(Box<Tail>),
+    /// A live session's end: read again rather than followed.
+    Early,
+    /// A history's follower, and the files it waits on as they were
+    /// before it read: None when it waits on something else, so it's
+    /// always topped up first.
+    Follow(Box<dyn Follow>, Option<Vec<(PathBuf, Option<Stat>)>>),
 }
 
 /// An agent whose conversation is likely shown next.
@@ -67,8 +82,8 @@ pub struct Ahead {
     /// ended: (length, modified, device, inode).
     path: PathBuf,
     seen: Option<Stat>,
-    /// Where a transcript's read stopped; None for a live session's end.
-    tail: Option<Box<Tail>>,
+    /// Where its read stopped.
+    from: From,
     sess: Box<Session>,
 }
 
@@ -78,8 +93,9 @@ impl Want {
         self.key == a.key
             && self.pid == a.pid
             && match &self.what {
-                What::Tail(p, _) => a.tail.is_some() && *p == a.path,
-                What::Early(_) => a.tail.is_none(),
+                What::Tail(p, _) => matches!(a.from, From::Tail(_)) && *p == a.path,
+                What::Early(_) => matches!(a.from, From::Early),
+                What::History(..) => matches!(a.from, From::Follow(..)),
             }
     }
 }
@@ -88,6 +104,13 @@ impl Want {
 pub struct Hit {
     pub fresh: bool,
     pub tail: Box<Tail>,
+    pub sess: Box<Session>,
+}
+
+/// A history read ahead, taken for a view.
+pub struct HistHit {
+    pub fresh: bool,
+    pub follow: Box<dyn Follow>,
     pub sess: Box<Session>,
 }
 
@@ -148,8 +171,11 @@ pub fn take(m: &mut Model, key: &str, path: &Path) -> Option<Hit> {
     let i = p
         .ready
         .iter()
-        .position(|a| a.key == key && a.tail.is_some())?;
+        .position(|a| a.key == key && matches!(a.from, From::Tail(_)))?;
     let a = p.ready.remove(i)?;
+    let From::Tail(tail) = a.from else {
+        return None;
+    };
     if a.path != path {
         return None;
     }
@@ -157,7 +183,7 @@ pub fn take(m: &mut Model, key: &str, path: &Path) -> Option<Hit> {
     used(p, key, fresh);
     Some(Hit {
         fresh,
-        tail: a.tail?,
+        tail,
         sess: a.sess,
     })
 }
@@ -169,11 +195,32 @@ pub fn take_early(m: &mut Model, key: &str, pid: i32) -> Option<Session> {
     let i = p
         .ready
         .iter()
-        .position(|a| a.key == key && a.tail.is_none())?;
+        .position(|a| a.key == key && matches!(a.from, From::Early))?;
     let a = p.ready.remove(i)?;
     let fresh = a.pid == pid && a.seen.is_some() && stat(&a.path) == a.seen;
     used(p, key, fresh);
     fresh.then_some(*a.sess)
+}
+
+/// Agent key's history read ahead, taken out: fresh when none of the
+/// files its follower waits on changed since before it read.
+pub fn take_history(m: &mut Model, key: &str) -> Option<HistHit> {
+    let p = m.kept.get::<Predict>();
+    let i = p
+        .ready
+        .iter()
+        .position(|a| a.key == key && matches!(a.from, From::Follow(..)))?;
+    let a = p.ready.remove(i)?;
+    let From::Follow(follow, seen) = a.from else {
+        return None;
+    };
+    let fresh = seen.is_some_and(|ps| ps.iter().all(|(p, s)| s.is_some() && stat(p) == *s));
+    used(p, key, fresh);
+    Some(HistHit {
+        fresh,
+        follow,
+        sess: a.sess,
+    })
 }
 
 /// Notes one read ahead taken, in the timing log.
@@ -193,8 +240,16 @@ fn what(m: &mut Model, i: usize) -> Option<What> {
         let h = crate::screens::session_core::host::hosts(m);
         return h.hosts(&a).then(|| What::Early(Box::new(a)));
     }
+    let host = if a.rush {
+        a.job.id.clone()
+    } else {
+        String::new()
+    };
     match Source::of(&m.reg, a)? {
         Source::Transcript { path, decode } => Some(What::Tail(path, decode)),
+        Source::History { adapter, session } if adapter.history_follower().is_some() => {
+            Some(What::History(adapter, session, host))
+        }
         _ => None,
     }
 }
@@ -338,8 +393,11 @@ fn next(m: &mut Model) {
     let (key, pid) = (w.key.clone(), w.pid);
     m.later(
         move || match w.what {
-            What::Tail(path, decode) => {
-                read(&path, decode, stop).map(|(t, s, seen)| (path, Some(t), s, seen))
+            What::Tail(path, decode) => read(&path, decode, stop)
+                .map(|(t, s, seen)| (path, From::Tail(Box::new(t)), s, seen)),
+            What::History(ad, s, host) => {
+                let (f, sess, seen) = read_history(&ad, *s, &host, &stop)?;
+                Some((PathBuf::new(), From::Follow(f, seen), sess, None))
             }
             What::Early(a) => {
                 let (s, path, was) = crate::screens::session_core::live::read_early(
@@ -350,7 +408,7 @@ fn next(m: &mut Model) {
                 // As it was before the read: one written to during it
                 // isn't taken as read.
                 let seen = was.as_ref().and_then(stat_of);
-                Some((PathBuf::from(path), None, s, seen))
+                Some((PathBuf::from(path), From::Early, s, seen))
             }
         },
         move |m, r| {
@@ -358,13 +416,18 @@ fn next(m: &mut Model) {
             if p.busy.as_ref().is_some_and(|(b, _)| *b == key) {
                 p.busy = None;
             }
-            if let Some((path, tail, sess, seen)) = r {
+            if r.is_none() {
+                // Stopped, or it can't be read: not tried again till the
+                // list moves on.
+                p.want.retain(|w| w.key != key);
+            }
+            if let Some((path, from, sess, seen)) = r {
                 let a = Ahead {
                     key,
                     pid,
                     path,
                     seen,
-                    tail: tail.map(Box::new),
+                    from,
                     sess: Box::new(sess),
                 };
                 if p.want.iter().any(|w| w.is(&a)) {
@@ -380,6 +443,41 @@ fn next(m: &mut Model) {
 }
 
 type Read = (Tail, Session, Option<Stat>);
+
+type Followed = (
+    Box<dyn Follow>,
+    Session,
+    Option<Vec<(PathBuf, Option<Stat>)>>,
+);
+
+/// A history read from its start as spawn_history's worker reads it, its
+/// slices applied in order, and its follower, to go on from there; with
+/// the files it waits on as they were before (None when it waits on
+/// something else). None when stopped or it can't be read.
+fn read_history(
+    ad: &AdapterRef,
+    s: adapter::Session,
+    host: &str,
+    stop: &AtomicBool,
+) -> Option<Followed> {
+    let s = crate::worker::history_session(s, host);
+    let mut f = ad.history_follower()?.follow_history(&s).ok()?;
+    let on = f.wait_on();
+    let seen = (on.fd.is_none() && on.every.is_none() && !on.paths.is_empty())
+        .then(|| on.paths.iter().map(|p| (p.clone(), stat(p))).collect());
+    let mut sess = Session::new();
+    loop {
+        if stop.load(Ordering::Relaxed) {
+            return None;
+        }
+        let sl = f.next(adapter::SLICE).ok()?;
+        crate::session::apply_events(&mut sess, &sl.events, sl.reset);
+        if !sl.more {
+            break;
+        }
+    }
+    Some((f, sess, seen))
+}
 
 /// A transcript's end read as the tail's worker reads it first, slices
 /// applied in order; None when stopped or it can't be read.

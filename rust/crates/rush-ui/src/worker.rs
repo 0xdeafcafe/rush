@@ -764,19 +764,11 @@ pub fn spawn_history(
     let tx = tx.lane(1);
     let wake = Arc::new(Stop::new().ok()?);
     let stop = Arc::new(AtomicBool::new(false));
-    let (ad, mut s, wk, host) = (ad.clone(), s.clone(), wake.clone(), host.to_string());
+    let (ad, s, wk, host) = (ad.clone(), s.clone(), wake.clone(), host.to_string());
     std::thread::Builder::new()
         .name("rush-history".into())
         .spawn(move || {
-            // A stopped rush session's folder is its host's to say: a
-            // Codex thread known by its id alone is looked for there
-            // (openHistory, history.go:53).
-            if s.profile.dir.is_empty()
-                && !host.is_empty()
-                && let Ok(cfg) = rush_host::client::read_config(&host)
-            {
-                s.profile.dir = cfg.account.dir;
-            }
+            let s = history_session(s, &host);
             let failed = |e: adapter::Error| {
                 tx.send(Note::TailFailed {
                     r#gen,
@@ -826,6 +818,81 @@ pub fn spawn_history(
                     failed(e);
                 }
             }
+        })
+        .ok()?;
+    Some(TailHandle { stop, wake })
+}
+
+/// Session s as its history is read: a stopped rush session's folder is
+/// its host's to say, so a Codex thread known by its id alone is looked
+/// for there (openHistory, history.go:53). Reads the disk.
+pub fn history_session(mut s: adapter::Session, host: &str) -> adapter::Session {
+    if s.profile.dir.is_empty()
+        && !host.is_empty()
+        && let Ok(cfg) = rush_host::client::read_config(host)
+    {
+        s.profile.dir = cfg.account.dir;
+    }
+    s
+}
+
+/// Follows a history from where a read of it ahead of time stopped
+/// (list_extras/predict.rs), as spawn_history follows one from its start.
+/// With the conversation read so far, which the UI doesn't have yet, what
+/// was written since is taken into it here first and it's sent whole
+/// (Note::Seeded); without, the UI has it already.
+pub fn spawn_history_from(
+    mut f: Box<dyn adapter::Follow>,
+    seed: Option<Box<Session>>,
+    r#gen: u64,
+    tx: Sender<Note>,
+) -> Option<TailHandle> {
+    let tx = tx.lane(1);
+    let wake = Arc::new(Stop::new().ok()?);
+    let stop = Arc::new(AtomicBool::new(false));
+    let wk = wake.clone();
+    std::thread::Builder::new()
+        .name("rush-history".into())
+        .spawn(move || {
+            let failed = |e: adapter::Error| {
+                tx.send(Note::TailFailed {
+                    r#gen,
+                    err: e.to_string(),
+                })
+            };
+            if let Some(mut sess) = seed {
+                loop {
+                    if wk.is_closed() {
+                        return;
+                    }
+                    match f.next(SLICE) {
+                        Ok(sl) => {
+                            crate::session::apply_events(&mut sess, &sl.events, sl.reset);
+                            if !sl.more {
+                                if !tx.send(Note::Seeded { r#gen, sess }) {
+                                    return;
+                                }
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            if !failed(e) {
+                                return;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            rush_sys::fswait::follow(f.as_mut(), SLICE, &wk, &mut |r| match r {
+                Ok(sl) => tx.send(Note::History {
+                    r#gen,
+                    events: sl.events,
+                    reset: sl.reset,
+                    more: sl.more,
+                }),
+                Err(e) => failed(e),
+            });
         })
         .ok()?;
     Some(TailHandle { stop, wake })
@@ -1242,6 +1309,64 @@ mod tests {
         assert_eq!(app.0, vec![("tail", 1)]);
         drop(h);
         std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// A history read ahead goes on from where its follower stopped: what
+    /// came since is taken into it and sent whole first, then followed.
+    #[test]
+    fn a_history_read_ahead_is_topped_up() {
+        use rush_core::adapter::{Follow, Slice, WaitOn};
+        use rush_draw::{App, Canvas, Loop, Msg, Step};
+        struct Slices(Vec<Slice>);
+        impl Follow for Slices {
+            fn next(&mut self, _: usize) -> adapter::Result<Slice> {
+                Ok(if self.0.is_empty() {
+                    Slice::default()
+                } else {
+                    self.0.remove(0)
+                })
+            }
+            fn wait_on(&self) -> WaitOn {
+                WaitOn {
+                    every: Some(Duration::from_millis(5)),
+                    ..WaitOn::default()
+                }
+            }
+        }
+        let ev = || Event::Status(rush_core::event::Status::default());
+        let slice = |more| Slice {
+            events: vec![ev()],
+            more,
+            ..Slice::default()
+        };
+        struct Notes(Vec<&'static str>);
+        impl App<Note> for Notes {
+            fn update(&mut self, m: Msg<Note>) -> Step {
+                match m {
+                    Msg::App(Note::Seeded { .. }) => self.0.push("seeded"),
+                    Msg::App(Note::History { .. }) => {
+                        self.0.push("history");
+                        return Step::Quit;
+                    }
+                    _ => {}
+                }
+                Step::Idle
+            }
+            fn draw(&mut self, _: &mut Canvas) {}
+        }
+        let lp: Loop<Note> = Loop::new();
+        // Two slices written since the read; then one more as it follows.
+        let f = Slices(vec![
+            slice(true),
+            slice(false),
+            Slice::default(),
+            slice(false),
+        ]);
+        let h = spawn_history_from(Box::new(f), Some(Box::default()), 1, lp.sender()).unwrap();
+        let mut app = Notes(Vec::new());
+        lp.run_with(&mut app, |_| Ok(())).unwrap();
+        assert_eq!(app.0, vec!["seeded", "history"]);
+        drop(h);
     }
 
     /// A transcript longer than the end a session opens on is read whole
