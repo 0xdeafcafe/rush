@@ -38,7 +38,9 @@ pub use draw::presets::check_names;
 pub use draw::{OWNER_SEP, each_paste, image_label, paste_chip};
 pub use draw::{drawing, fold_pastes};
 pub use markdown::{answer_lines, link_target, markdown_lines};
-pub use needs::{NEEDS_KINDS, Needs, NeedsItem, has_quote, needs_of, needs_ref};
+pub use needs::{
+    NEEDS_ALL, NEEDS_KINDS, Needs, NeedsItem, has_quote, needs_of, needs_ref, without_chrome,
+};
 pub use scriptdoc::{ScriptView, script_line, script_line_ref};
 pub use spawn::{Child, Spawn, agent_run, asked, spawn_of, tool_run, unquote_arg};
 pub use style::{SHOW_ALL_REF, dur, key_word, money};

@@ -133,3 +133,34 @@ fn quote_found() {
         assert_eq!(has_quote(text, q), want, "has_quote({text:?}, {q:?})");
     }
 }
+
+#[test]
+fn without_chrome_leaves_only_the_text() {
+    use rush_core::text::{Line, Span, Style};
+    let sp = |t: &str| Span::new(t, Style::default());
+    let l = Line {
+        spans: vec![
+            sp("▏ "),
+            sp("│"),
+            sp(" "),
+            sp("$"),
+            sp(" "),
+            sp("git push"),
+            sp("   "),
+            sp("click copies"),
+            sp("  "),
+        ],
+        ..Line::default()
+    };
+    assert_eq!(
+        rush_convo::render::without_chrome(&l).plain().trim(),
+        "git push"
+    );
+    assert_eq!(
+        rush_convo::render::without_chrome(&l)
+            .plain()
+            .chars()
+            .count(),
+        l.plain().chars().count()
+    );
+}

@@ -168,6 +168,22 @@ job:b1|▍     exit status 1
     assert_eq!(dump(&mut m, 200), want200);
 }
 
+/// A task a subagent started says whose it is, a dot between the agent's
+/// type and the task's words: they never run together.
+#[test]
+fn a_subagents_task_names_its_agent_apart() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = background(&d);
+    let r = &mut conn(&mut m, KEY).runs;
+    let st = rush_ui_session_core::subs::RunStat {
+        made: vec!["t2".into()],
+        ..Default::default()
+    };
+    r.stats.insert("x".into(), st);
+    let got = dump(&mut m, 120);
+    assert!(got.contains("→ Explore · npm run dev"), "{got}");
+}
+
 /// Opened, a task's whole recent output inside an edge down its left,
 /// and its launch script a d away; picked, the edge is the pick's bar.
 #[test]

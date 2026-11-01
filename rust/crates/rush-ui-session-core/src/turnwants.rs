@@ -429,16 +429,31 @@ pub fn sync_needs(m: &mut Model) {
     }
 }
 
+/// s on one line, cut to fit a flash.
+fn brief(s: &str) -> String {
+    let one = s.lines().next().unwrap_or("");
+    rush_draw::truncate(one, 40, "…").into_owned()
+}
+
 /// Does what a row of the Needs-you section offers: a command or value
 /// copied, a reply put in your message box to send or change, a link
 /// opened (actOnNeeds).
 pub fn act_on_needs(m: &mut Model, key: &str, kind: &str, text: &str) {
     match kind {
-        "run" => m.copy_text(text.to_string()),
+        "run" => {
+            m.copy_text(text.to_string());
+            m.flash(&format!("copied · {}", brief(text)));
+        }
+        // The heading: every command, a line each.
+        rush_convo::render::NEEDS_ALL => {
+            m.copy_text(text.to_string());
+            m.flash(&format!("copied {} commands", text.lines().count()));
+        }
         "copy" => {
             // The value, not what it is.
             let v = text.split(" — ").next().unwrap_or("");
             m.copy_text(v.to_string());
+            m.flash(&format!("copied · {}", brief(v)));
         }
         "reply" => {
             conn(m, key).input.set(text);

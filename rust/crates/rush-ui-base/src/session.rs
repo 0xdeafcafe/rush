@@ -764,6 +764,43 @@ impl SessionView {
         self.o.open.insert(self.sel.clone(), v);
     }
 
+    /// Closes what's open round the row picked, one level: the row itself
+    /// when it's open (a step, a group of steps, a turn), else the step or
+    /// group of steps it is in, innermost first; the pick moves to what closed (its header row).
+    /// Whether anything was open to close.
+    pub fn fold_in(&mut self, rows: usize) -> bool {
+        if self.sel.is_empty() {
+            return false;
+        }
+        self.layout(rows);
+        let sel = self.sel.clone();
+        let drawn = self.r.rows();
+        let mut chain = vec![sel.clone()];
+        if let Some(row) = drawn.iter().find(|l| l.r#ref == sel) {
+            chain.extend(
+                row.owner
+                    .rsplit(rush_convo::render::OWNER_SEP)
+                    // A turn round it stays: it closes only when picked.
+                    .filter(|o| !o.is_empty() && o.contains(':'))
+                    .map(str::to_string),
+            );
+        }
+        // Opened or closed by hand, else the header row says by its glyph.
+        let open = |r: &str| match self.o.open.get(r) {
+            Some(&v) => v,
+            None => drawn
+                .iter()
+                .find(|l| l.r#ref == r)
+                .is_some_and(|l| l.line.plain().contains('▾')),
+        };
+        let Some(hit) = chain.into_iter().find(|r| open(r)) else {
+            return false;
+        };
+        self.o.open.insert(hit.clone(), false);
+        self.sel = hit;
+        true
+    }
+
     /// Scrolls row r (a turn's or a step's ref) into view, a third of the
     /// way down, rows tall: what's there after the conversation is drawn
     /// another way. A ref not drawn leaves its turn at the top; one of no

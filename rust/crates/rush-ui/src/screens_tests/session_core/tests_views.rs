@@ -1479,6 +1479,99 @@ fn needs_you_under_the_last_answer() {
     assert_eq!(needs_of(&m, &a).reason, "");
 }
 
+/// The Needs-you card's commands: a click on a command copies that command
+/// alone and says so, a click on the heading copies them all a line each,
+/// and dragging over the card selects the text without its frame, marks or
+/// click hints.
+#[test]
+fn needs_you_commands_copy() {
+    use crate::screens::session_core::turnwants::{TurnState, TurnWants};
+    use rush_convo::render::NeedsItem;
+    let fake = Fake::new();
+    let mut a = agent("steer", State::Done);
+    a.job.updated_at = NOW - 60_000;
+    let mut m = open(a, &fake, 120, 40);
+    worked(&mut m);
+    let item = |k: &str, t: &str| NeedsItem {
+        kind: k.into(),
+        text: t.into(),
+    };
+    m.kept::<TurnState>().got.insert(
+        KEY.into(),
+        TurnWants {
+            at: NOW - 60_000,
+            wants: "you".into(),
+            line: "approve PR #52".into(),
+            ui: vec![
+                item("run", "make ship"),
+                item("run", "git push origin main"),
+                item("reply", "yes, ship it"),
+            ],
+            ..TurnWants::default()
+        },
+    );
+    let s = screen(&mut m);
+    let head = row_with(&mut m, "Needs you").expect("the section");
+    assert!(s[head].contains("click copies all commands"), "{}", s[head]);
+    // One command: exactly it, and a short confirmation.
+    let r = row_with(&mut m, "git push origin main").expect("the command");
+    assert!(s[r].contains("click copies"), "{}", s[r]);
+    let x = col_of(&s[r], "git push");
+    click(&mut m, MouseKind::Down(Button::Left), x, r);
+    click(&mut m, MouseKind::Up(Button::Left), x, r);
+    assert_eq!(m.pending_copy.as_deref(), Some("git push origin main"));
+    assert_eq!(flash(&m), "copied · git push origin main");
+    // The heading: all of them.
+    m.pending_copy = None;
+    let x = col_of(&s[head], "Needs you");
+    click(&mut m, MouseKind::Down(Button::Left), x, head);
+    click(&mut m, MouseKind::Up(Button::Left), x, head);
+    assert_eq!(
+        m.pending_copy.as_deref(),
+        Some("make ship\ngit push origin main")
+    );
+    assert_eq!(flash(&m), "copied 2 commands");
+    // Dragged over the whole card: its words, nothing of its frame.
+    m.pending_copy = None;
+    let last = row_with(&mut m, "yes, ship it").expect("the reply");
+    click(&mut m, MouseKind::Down(Button::Left), 2, head);
+    click(&mut m, MouseKind::Drag(Button::Left), 118, last);
+    click(&mut m, MouseKind::Up(Button::Left), 118, last);
+    press(&mut m, "super+c");
+    assert_eq!(
+        m.pending_copy.as_deref(),
+        Some("Needs you · approve PR #52\nmake ship\ngit push origin main\nyes, ship it")
+    );
+}
+
+/// ← in the conversation goes back a stage at a time: it closes the open
+/// step the pick is on, then, with nothing open, drops the pick to the
+/// message box, and from the box goes back to the Agents list.
+#[test]
+fn left_closes_then_leaves_the_pick_then_the_session() {
+    let mut m = opened(120, 40);
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "parse.rs").expect("the step");
+    let x = col_of(&s[y], "parse.rs");
+    click(&mut m, MouseKind::Down(Button::Left), x, y);
+    click(&mut m, MouseKind::Up(Button::Left), x, y);
+    let picked = m.session.as_ref().unwrap().sel.clone();
+    assert!(picked.contains(':'), "a step is picked: {picked:?}");
+    press(&mut m, "right");
+    let open = |m: &Model| m.session.as_ref().unwrap().o.open.get(&picked).copied();
+    assert_eq!(open(&m), Some(true), "→ opens the step");
+    // 1st: it closes, the pick stays on its header.
+    press(&mut m, "left");
+    assert_eq!(open(&m), Some(false), "← closes the step");
+    assert_eq!(m.session.as_ref().unwrap().sel, picked);
+    // 2nd: nothing open, so off the row, to the box.
+    press(&mut m, "left");
+    assert!(m.session.as_ref().is_some_and(|v| v.sel.is_empty()));
+    // 3rd: from the box, back to the list.
+    press(&mut m, "left");
+    assert!(m.session.is_none(), "back to the Agents list");
+}
+
 /// The conversation's rows carry their links: a right-click on a file a
 /// step names asks what to do with it, o on the picked step does too, and
 /// a left-click on one rush doesn't open itself is the text's
