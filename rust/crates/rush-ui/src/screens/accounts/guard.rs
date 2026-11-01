@@ -39,6 +39,17 @@ const EVERY: Ms = 5 * SEC;
 /// folder: `rush gate hook` reads it. It lapses on its own if no rush has
 /// looked for this long.
 pub const SPAWNS_FILE: &str = "guard.json";
+
+/// What the guard holds and has moved, in rush's folder, so the next rush
+/// to lead knows which held queues are its own to let go.
+pub const HELD_FILE: &str = "guard-held.json";
+
+#[derive(Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+struct Kept {
+    held: HashMap<String, Held>,
+    moved: HashMap<String, Ms>,
+}
 const SPAWNS_FOR: Ms = 2 * MIN;
 
 /// What the guard does to sessions and asks of the machine.
@@ -95,7 +106,7 @@ impl HostOps for Real {
 }
 
 /// A session the guard holds, why, and since when.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Held {
     pub hold: Hold,
     pub since: Ms,
@@ -223,6 +234,18 @@ fn ms(t: rush_state::Time) -> Ms {
 /// and held or let go as plan says.
 pub fn tick(mut i: Input, ops: &dyn HostOps) -> Output {
     let now = i.now;
+    // What a rush before this one held and moved is this one's too.
+    let kept_path = i.dir.join(HELD_FILE);
+    let kept: Kept = std::fs::read(&kept_path)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
+    for (id, h) in &kept.held {
+        i.held.entry(id.clone()).or_insert_with(|| h.clone());
+    }
+    for (id, t) in &kept.moved {
+        i.moved_at.entry(id.clone()).or_insert(*t);
+    }
     let path = i.dir.join(guard::FILE);
     let mut h = History::load(&path);
     let mut changed = false;
@@ -402,6 +425,17 @@ pub fn tick(mut i: Input, ops: &dyn HostOps) -> Output {
         .retain(|id, _| infos.iter().any(|x| x.id == *id));
     spawns(&i.dir, plan.spawns.as_deref(), now);
     out.plan = plan;
+    i.moved_at.retain(|_, t| now - *t < 24 * 60 * MIN);
+    let now_kept = Kept {
+        held: i.held.clone(),
+        moved: i.moved_at.clone(),
+    };
+    if now_kept != kept {
+        let _ = std::fs::write(
+            &kept_path,
+            serde_json::to_vec(&now_kept).unwrap_or_default(),
+        );
+    }
     out.held = i.held;
     out.let_through = i.let_through;
     out.accts = accts;

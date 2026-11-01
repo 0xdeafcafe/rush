@@ -372,7 +372,7 @@ pub struct Seat {
 }
 
 /// Why the guard holds a session's next turn.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Hold {
     /// Its account is past its pace and moving costs more than waiting.
     Pace {

@@ -494,6 +494,33 @@ fn away_tightens_and_relaxes() {
     assert_eq!(said, ["hold w false", "hold idle false"]);
 }
 
+/// A rush that leads after another knows the held queues it held, and
+/// lets them go; one you held yourself stays yours.
+#[test]
+fn a_new_rush_lets_go_what_the_last_held() {
+    let d = tempfile::tempdir().unwrap();
+    let s = Settings {
+        cap: 1,
+        ..Settings::default()
+    };
+    let hosts = Hosts::default();
+    *hosts.infos.lock().unwrap() = vec![working(info("w", "a")), info("h", "a")];
+    g::tick(input(d.path(), s.clone(), vec![], NOW), &hosts);
+    assert!(d.path().join(g::HELD_FILE).exists());
+    // A new rush, w done, and a session you held yourself.
+    {
+        let mut infos = hosts.infos.lock().unwrap();
+        infos[0].state = "idle".into();
+        infos.push(Info {
+            queue_held: true,
+            ..info("mine", "a")
+        });
+    }
+    let o = g::tick(input(d.path(), s, vec![], NOW + MIN), &hosts);
+    assert!(o.held.is_empty());
+    assert_eq!(hosts.said(), ["hold h true", "hold h false"]);
+}
+
 /// alt+h on a held session lets its next turn through: the guard notes
 /// it, doesn't hold it again until that turn has run.
 #[test]
