@@ -3,8 +3,8 @@
 //! shell's processes to the commands of its chain. Port of
 //! internal/convo/chainrun.go (Shell :15, ShellProc :22, partRun :31,
 //! PartProc :43, WatchShells :50, watch :117, wrappers :172, bare :176,
-//! partOf :199, RunningPart :346, live :358, RunningPart() :380).
-//! What the opened call says of each command (partMarks) isn't drawn yet.
+//! partOf :199, partMarks :243, runningPart :321, RunningPart :346,
+//! live :358, RunningPart() :380).
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -76,11 +76,27 @@ pub struct RunningPart {
     pub of: usize,
 }
 
+/// What an opened call says of one command of its chain: how long it ran,
+/// or runs (partMarks).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PartMark {
+    /// Not seen, and not known to have run.
+    Unknown,
+    /// Running now, since then; runs counts a loop's rounds.
+    Running { since: Ms, runs: usize },
+    /// Running now, but rush paused it.
+    Paused,
+    /// Ran this long; failed when it's where the failed call stopped.
+    Ran { took: Ms, runs: usize, failed: bool },
+    /// Came and went between looks: ran in a gap this long (None when
+    /// unknown), all of it, or at most it when shared (less).
+    Between { took: Option<Ms>, less: bool },
+}
+
 impl Session {
-    /// Matches the shells the agent has running to the Bash calls still
-    /// running, and each shell's processes to the commands of its chain,
-    /// so the call can say which of them runs now (WatchShells).
-    pub fn watch_shells(&mut self, shells: &[Shell], now: Ms) {
+    /// The Bash calls running now, a subagent's among them, and those sent
+    /// to the background whose shell runs on.
+    fn running_shells(&self) -> Vec<StepId> {
         let mut steps: Vec<StepId> = Vec::new();
         if let Some(t) = self.live() {
             let mut stack: Vec<StepId> = t
@@ -109,6 +125,20 @@ impl Session {
                 }
             }
         }
+        steps
+    }
+
+    /// Whether a Bash call runs now: the agent's shells are worth a look,
+    /// to say which command of a chain runs.
+    pub fn shell_running(&self) -> bool {
+        !self.running_shells().is_empty()
+    }
+
+    /// Matches the shells the agent has running to the Bash calls still
+    /// running, and each shell's processes to the commands of its chain,
+    /// so the call can say which of them runs now (WatchShells).
+    pub fn watch_shells(&mut self, shells: &[Shell], now: Ms) {
+        let steps = self.running_shells();
         if steps.is_empty() || shells.is_empty() {
             return;
         }
@@ -223,6 +253,112 @@ impl Session {
     fn call_live(&self, id: StepId) -> bool {
         let st = self.step(id);
         st.status == Status::Running || self.job_running(&st.id)
+    }
+
+    /// The command of step id's chain that runs now, as its place and its
+    /// first words: "2/4 go test"; "" when none is known (runningPart).
+    pub(crate) fn running_label(&self, id: StepId) -> String {
+        let Some(ch) = self.chains.get(&id).filter(|_| self.call_live(id)) else {
+            return String::new();
+        };
+        let Some((&k, r)) = ch.parts.iter().rfind(|(_, r)| r.end == 0) else {
+            return String::new();
+        };
+        let segs = segments(&self.step(id).call().input.command);
+        let Some(sg) = segs.get(k) else {
+            return String::new();
+        };
+        let w = bare(&fields_of(&sg.text));
+        let mut out = format!("{}/{}", k + 1, segs.len());
+        for x in w.iter().take(2) {
+            out.push(' ');
+            out.push_str(x);
+        }
+        if r.runs > 1 {
+            out.push_str(&format!(" · run {}", r.runs));
+        }
+        out
+    }
+
+    /// The command of step id's chain running now, while the call is: the
+    /// one an opened call draws brighter.
+    pub(crate) fn part_now(&self, id: StepId) -> Option<usize> {
+        let ch = self.chains.get(&id)?;
+        let r = ch.parts.get(&ch.at)?;
+        (r.end == 0 && self.call_live(id)).then_some(ch.at)
+    }
+
+    /// What the opened call says of each of the n commands of step id's
+    /// chain: how long it ran, or runs; empty when none was seen to
+    /// (partMarks). paused: rush has its command running now stopped.
+    pub(crate) fn part_marks(&self, id: StepId, n: usize, now: Ms, paused: bool) -> Vec<PartMark> {
+        let Some(ch) = self.chains.get(&id).filter(|c| !c.parts.is_empty()) else {
+            return Vec::new();
+        };
+        if n < 2 {
+            return Vec::new();
+        }
+        let st = self.step(id);
+        let live = self.call_live(id);
+        let end = if live || st.end == 0 { now } else { st.end };
+        let mut marks = vec![PartMark::Unknown; n];
+        for (&k, r) in ch.parts.iter().filter(|(k, _)| **k < n) {
+            let mut stop = r.end;
+            if stop == 0 && live {
+                marks[k] = if paused {
+                    PartMark::Paused
+                } else {
+                    PartMark::Running {
+                        since: r.start,
+                        runs: r.runs,
+                    }
+                };
+                continue;
+            }
+            if stop == 0 {
+                stop = end;
+            }
+            marks[k] = PartMark::Ran {
+                took: (stop - r.start).max(0),
+                runs: r.runs,
+                failed: st.status == Status::Failed && k == ch.at,
+            };
+        }
+        // Commands that came and went between looks, before one that was
+        // seen, ran; so did those after the last when the whole chain did.
+        // They ran in the gap between the ones seen either side: all of it
+        // when alone there, a share of it when not.
+        let last = if st.status == Status::Ok {
+            n - 1
+        } else {
+            ch.at
+        };
+        let mut k = 0;
+        while k <= last && k < n {
+            if marks[k] != PartMark::Unknown {
+                k += 1;
+                continue;
+            }
+            let (mut from, mut to, mut gap) = (st.start, end, k);
+            if let Some((_, r)) = ch.parts.range(..k).next_back() {
+                from = r.end;
+            }
+            while gap + 1 < n && !ch.parts.contains_key(&(gap + 1)) && gap < last {
+                gap += 1;
+            }
+            if let Some(r) = ch.parts.get(&(gap + 1)) {
+                to = r.start;
+            }
+            let took = (from != 0 && to >= from).then_some(to - from);
+            for m in marks.iter_mut().take(gap + 1).skip(k) {
+                *m = PartMark::Between {
+                    took,
+                    less: gap > k,
+                };
+            }
+            k = gap + 1;
+        }
+        marks
     }
 
     /// What the Bash call with this tool call id runs now, if it's a chain
@@ -444,6 +580,90 @@ mod tests {
             2_000,
         );
         assert_eq!(s.running_part("b1"), None);
+    }
+
+    /// Commands no look caught running still say how long they took: the
+    /// gap they ran in, alone, or at most it when they shared it
+    /// (TestPartMarksFillGaps).
+    #[test]
+    fn part_marks_fill_gaps() {
+        let mut s = session("a && b && c && d");
+        let id = s.step_by_call("b1").unwrap();
+        s.chains.insert(
+            id,
+            Chain {
+                parts: BTreeMap::from([(
+                    2,
+                    PartRun {
+                        start: 12_000,
+                        end: 17_000,
+                        runs: 1,
+                        ..PartRun::default()
+                    },
+                )]),
+                at: 0,
+            },
+        );
+        let st = &mut s.steps[id as usize];
+        (st.status, st.start, st.end) = (Status::Ok, 10_000, 20_000);
+        let shared = PartMark::Between {
+            took: Some(2_000),
+            less: true,
+        };
+        assert_eq!(
+            s.part_marks(id, 4, 30_000, false),
+            [
+                shared,
+                shared,
+                PartMark::Ran {
+                    took: 5_000,
+                    runs: 1,
+                    failed: false
+                },
+                PartMark::Between {
+                    took: Some(3_000),
+                    less: false
+                },
+            ]
+        );
+        // A start not known: no time for the gap before the first seen.
+        s.steps[id as usize].start = 0;
+        let unknown = PartMark::Between {
+            took: None,
+            less: true,
+        };
+        assert_eq!(s.part_marks(id, 4, 30_000, false)[..2], [unknown, unknown]);
+        // One command alone is no chain.
+        assert!(s.part_marks(id, 1, 30_000, false).is_empty());
+    }
+
+    /// The row's word for the command running now: its place and first
+    /// words, and a loop's round (runningPart).
+    #[test]
+    fn running_label_names_the_place() {
+        let cmd = "go build ./... && go test ./internal/ui; echo done";
+        let mut s = session(cmd);
+        let id = s.step_by_call("b1").unwrap();
+        s.watch_shells(
+            &[Shell {
+                command: cmd.into(),
+                start: 1_000,
+                kids: vec![proc_(12, "go test ./internal/ui", 3_000)],
+                ..Shell::default()
+            }],
+            4_000,
+        );
+        assert_eq!(s.running_label(id), "2/3 go test");
+        assert_eq!(s.part_now(id), Some(1));
+        let marks = s.part_marks(id, 3, 9_000, false);
+        assert_eq!(
+            marks[1],
+            PartMark::Running {
+                since: 3_000,
+                runs: 1
+            }
+        );
+        assert_eq!(s.part_marks(id, 3, 9_000, true)[1], PartMark::Paused);
     }
 
     #[test]

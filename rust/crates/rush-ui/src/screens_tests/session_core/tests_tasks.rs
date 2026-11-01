@@ -624,6 +624,52 @@ fn k_kills_and_p_pauses_the_chains_command() {
     assert!(ops(&fake).is_empty());
 }
 
+/// A running chain in the conversation says which command runs (2/3)
+/// and how long each took, and under it the keys: k skips the command
+/// running now, x stops the whole chain through the host.
+#[test]
+fn a_running_chain_says_where_it_is_and_k_and_x_act() {
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = hosted(&d, &fake);
+    chain_running(&mut m, "tck", "bck");
+    let convo = |m: &mut Model| {
+        let v = m.session.as_mut().unwrap();
+        v.sync(160, NOW, 0);
+        let rows = v.r.render(&v.sess, &v.o);
+        rows.iter()
+            .map(|r| r.line.plain() + "\n")
+            .collect::<String>()
+    };
+    let got = convo(&mut m);
+    assert!(got.contains("2/3 go test"), "{got}");
+    let vet = got
+        .lines()
+        .find(|l| l.contains("$  go vet ./..."))
+        .expect(&got);
+    assert!(vet.contains('✓'), "{vet}");
+    assert!(
+        got.contains(
+            "↑ pick this step, then  k skip go test · x stop the whole chain · p pause it"
+        ),
+        "{got}"
+    );
+    pick(&mut m, "t1:s:tck");
+    let got = convo(&mut m);
+    assert!(
+        got.contains("k skip go test · x stop the whole chain") && !got.contains("pick this step"),
+        "{got}"
+    );
+    press(&mut m, "k");
+    assert_eq!(
+        flash(&m),
+        "killing go test ./internal/ui · the chain stops there (&&) and Claude hears it failed"
+    );
+    assert!(ops(&fake).is_empty(), "k signals the command, not the host");
+    press(&mut m, "x");
+    assert_eq!(ops(&fake), [Op::StopTask { id: "bck".into() }]);
+}
+
 /// A running command picked says the key you set opens or closes its
 /// row, enter when none is (rushmode.go:3803 m.rowKey()).
 #[test]
