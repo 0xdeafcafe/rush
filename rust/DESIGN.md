@@ -1325,6 +1325,40 @@ is a descriptor. Discovery watches folders of many through FSEvents
 (Threads), so the list on a home of 1,200 sessions holds 42 open files,
 not 1,391.
 
+## Each rush home keeps its own sign-ins (Rust-only)
+
+rush keeps the sign-ins of logins not in use, and providers' API keys,
+in its vault (rush-state `vault.rs`): the login keychain on macOS, files
+under `<home>/logins` elsewhere. Every provider goes through it
+(`rush_state::vault()`), so the rule below holds for all of them.
+
+- The normal rush home, `~/.config/rush` (or `~/.config/agtop` while
+  that one is in use) of the user this runs as, keeps the keychain
+  service `rush-login`, as Go and every earlier rush did: nothing is
+  signed in again. A RUSH_HOME naming that same folder (a plugin, the
+  remote service, a link to it) is the normal home too: homes are
+  compared by canonical path. "The user" is the password file's home,
+  not HOME, as the keychain is the account's whatever HOME says.
+- Any other home has its own service, `rush-login-` and 8 hex of a
+  SHA-256 of its canonical path (`vault::service_for`), which starts
+  empty. Off macOS the files were per home already.
+- So a copy of the user's rush home (a test, a trial run) never reads,
+  renews or hands out the normal home's sign-ins: a login's home it
+  makes is filled only from its own store, and with nothing there it
+  says "rush has no sign-in for X; sign in to it again". Each login
+  home still has the keychain item Claude Code names for it
+  (`Claude Code-credentials-<hash>`), made by Claude Code's own rule.
+- Who sets RUSH_HOME for their real rush sees, there, the logins in its
+  config.json with no sign-ins behind them, and API keys rush kept
+  (keys in their variables still work): sign in again in Settings ›
+  Providers (`r` on a login signs in to it again, `l` adds another), and
+  put API keys in again there. There is no import from the normal home on purpose: a
+  sign-in copied to two stores is renewed by both, and the first renewal
+  ends the other copy, which is what this keeps from happening.
+- In a test (`rush_core::sandbox` active) `vault::keychain` is a map in
+  the process, so tests exercise the keychain path without the real
+  keychain.
+
 ## Tests never reach the real home
 
 Every crate's tests link `rush-testenv` (`rush_testenv::sandboxed!()` at
