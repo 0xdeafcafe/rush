@@ -2384,6 +2384,28 @@ impl<'a> Drawer<'a> {
     }
 
     /// What a step ran and did, under its row (render.go:3030).
+    /// While a shell step runs: dim rows of what it's doing now (its
+    /// processes) and the tail of the file it writes. Gone when it ends.
+    fn live_rows(&mut self, id: StepId, indent: usize) {
+        let st = self.s.step(id);
+        if st.status != Status::Running || st.id.is_empty() {
+            return;
+        }
+        let Some(l) = self.o.live.get(&*st.id) else {
+            return;
+        };
+        let room = (self.cw as isize - indent as isize - 4).max(8) as usize;
+        let mut rows: Vec<String> = Vec::new();
+        if !l.now.is_empty() {
+            rows.push(format!("now · {}", l.now));
+        }
+        rows.extend(l.tail.iter().map(|t| format!("│ {t}")));
+        for r in rows {
+            let l = self.sp(indent - 1).and(dim(&truncate_cells(&r, room)));
+            self.add("", Color::Default, l, Txt::new());
+        }
+    }
+
     fn body(&mut self, id: StepId, indent: usize) {
         self.lg = None;
         self.by_path = false;
@@ -2475,6 +2497,7 @@ impl<'a> Drawer<'a> {
                     drawn = self.shell_body(Some(id), cmd, indent);
                     self.marks = echo_marks(cmd);
                 }
+                self.live_rows(id, indent);
                 let o = &info.out;
                 if !o.stdout.is_empty() || !o.stderr.is_empty() {
                     if drawn > 0 && !format!("{}{}", o.stdout, o.stderr).trim().is_empty() {

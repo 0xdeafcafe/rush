@@ -45,7 +45,7 @@ pub struct ProcAsk {
 }
 
 /// A process's start as rush keeps times.
-fn ms(p: &proc::Proc) -> Ms {
+pub(crate) fn ms(p: &proc::Proc) -> Ms {
     p.start
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as Ms)
@@ -107,7 +107,7 @@ pub fn job_pid(t: &Table, agent: Pid, start: Ms) -> Pid {
 }
 
 /// A path's last element.
-fn base(p: &str) -> &str {
+pub(crate) fn base(p: &str) -> &str {
     p.trim_end_matches('/').rsplit('/').next().unwrap_or(p)
 }
 
@@ -127,12 +127,12 @@ fn short_cmd(pid: Pid, comm: &str) -> String {
 }
 
 /// Whether a program is a shell the agent runs a call in (shellComm).
-fn shell_comm(c: &str) -> bool {
+pub(crate) fn shell_comm(c: &str) -> bool {
     matches!(c.trim_start_matches('-'), "zsh" | "bash" | "sh")
 }
 
 /// The command a shell runs with -c, from its words (shellCommand).
-fn shell_command(args: &[String]) -> String {
+pub(crate) fn shell_command(args: &[String]) -> String {
     if args.len() < 3 || !shell_comm(base(&args[0])) {
         return String::new();
     }

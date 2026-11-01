@@ -45,6 +45,7 @@ pub mod overview;
 pub mod panelsubs;
 pub mod presets;
 pub use rush_ui_base::paint;
+pub mod livestep;
 pub mod queue;
 pub mod relay;
 pub mod running;
@@ -337,6 +338,8 @@ pub struct Conn {
     /// Its latest turns' shell calls rush ran as scripts, by tool call id,
     /// as last read (c.scripts).
     pub scripts: HashMap<String, scripts::Seen>,
+    /// What its running Bash calls are doing now, by tool call id.
+    pub lives: HashMap<String, livestep::Seen>,
     /// The / # @ picker's row (c.slashSel).
     pub slash_sel: usize,
     /// The commands and skills on disk for its agent's account and

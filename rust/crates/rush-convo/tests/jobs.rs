@@ -415,3 +415,23 @@ fn a_commands_writes() {
         ]
     );
 }
+
+/// The redirects that name a file for a running step's live tail.
+#[test]
+fn redirects_a_step_tails() {
+    let mut s = Session::new();
+    s.info.cwd = "/repo".into();
+    for (cmd, want) in [
+        ("make > out.log", vec!["/repo/out.log"]),
+        ("make >> out.log 2>&1", vec!["/repo/out.log"]),
+        ("make &> /tmp/b.log", vec!["/tmp/b.log"]),
+        ("make 2>&1 | tee /tmp/t.log", vec!["/tmp/t.log"]),
+        ("make 2>&1 | tee -a /tmp/t.log", vec!["/tmp/t.log"]),
+        ("cd sub && make > o.log", vec!["/repo/sub/o.log"]),
+        ("make 2>/dev/null", vec![]),
+        ("make 2>&1", vec![]),
+        ("make > $OUT", vec![]),
+    ] {
+        assert_eq!(s.writes(cmd), want, "{cmd}");
+    }
+}
