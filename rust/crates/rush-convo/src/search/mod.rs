@@ -15,11 +15,13 @@ mod cache;
 mod find;
 mod fuzzy;
 mod indexer;
+mod memo;
 mod pieces;
 mod wordindex;
 
 pub use find::{Found, Library, Reader, Source, library};
 pub use fuzzy::{find_fold_span, match_span};
+pub use memo::{SearchMemo, VocabJob, VocabMade};
 
 use rush_core::time::Ms;
 use rush_core::tool::Kind;
@@ -27,7 +29,7 @@ use rush_core::tool::Kind;
 use crate::model::{Item, Session, Step, Turn};
 use crate::render::{glyph_for, hidden, one_line};
 use crate::text::first_non_empty;
-use fuzzy::{SCORE_PHRASE, find_fold, word_match};
+use fuzzy::{SCORE_PHRASE, find_fold, word_match, word_score_parts};
 
 /// One search result: where it is and the text around the match
 /// (search.go:15 Hit).
@@ -130,6 +132,21 @@ impl Query {
         Some(total)
     }
 
+    /// score of the parts joined by newlines, without joining them.
+    pub(crate) fn score_parts(&self, parts: &[&str]) -> Option<i32> {
+        let mut total = 0;
+        for w in &self.words {
+            total += word_score_parts(parts, w)?;
+        }
+        if self.words.len() > 1 {
+            let phrase = self.words.join(" ");
+            if parts.iter().any(|p| find_fold(p, &phrase).is_some()) {
+                total += SCORE_PHRASE;
+            }
+        }
+        Some(total)
+    }
+
     /// Whether it narrows by kind, file or turn.
     fn filtered(&self) -> bool {
         !self.kinds.is_empty() || !self.file.is_empty() || self.from > 0
@@ -137,36 +154,51 @@ impl Query {
 
     /// A step as a hit, if it matches (search.go:197).
     fn step(&self, st: &Step, turn_ref: &str) -> Option<Hit> {
-        if hidden(st) {
+        if hidden(st) || !self.step_kind(st) {
             return None;
         }
+        let score = self.score_parts(&step_parts(st))?;
+        Some(self.step_hit(st, turn_ref, score))
+    }
+
+    /// Whether a step is of the kinds and file asked for.
+    fn step_kind(&self, st: &Step) -> bool {
         let x = &st.call().input;
         let g = glyph_for(st);
-        if self.has("failed") && st.status != crate::model::Status::Failed
+        !(self.has("failed") && st.status != crate::model::Status::Failed
             || self.has("edit") && g != "✎"
             || self.has("cmd") && g != "$"
             || self.has("read") && g != "◧"
             || !self.file.is_empty()
-                && !fuzzy::lower_str(&format!("{} {}", x.path, x.command)).contains(&self.file)
-        {
-            return None;
-        }
+                && !fuzzy::lower_str(&format!("{} {}", x.path, x.command)).contains(&self.file))
+    }
+
+    /// A step's hit, scored.
+    fn step_hit(&self, st: &Step, turn_ref: &str, score: i32) -> Hit {
         let label = step_label(st);
-        let file = step_file(st);
-        let hay = format!("{label}\n{}\n{file}\n{}", x.command, st.output);
-        let score = self.score(&hay)?;
         let mut snip = one_line(label);
         if !self.words.is_empty() && !self.matches(label) {
             snip = format!("{snip} · {}", snippet(&st.output, &self.words));
         }
-        Some(Hit {
+        Hit {
             r#ref: format!("{turn_ref}:s:{}", st.id),
             who: st.tool.to_string(),
             snippet: snip,
             score,
             ..Hit::default()
-        })
+        }
     }
+}
+
+/// What a step is searched in: Go's "{label}\n{command}\n{file}\n{output}",
+/// as parts.
+pub(crate) fn step_parts(st: &Step) -> [&str; 4] {
+    [
+        step_label(st),
+        &st.call().input.command,
+        step_file(st),
+        &st.output,
+    ]
 }
 
 /// A search's or glob's path is where it looked, not a file it's about.
