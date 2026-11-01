@@ -12,10 +12,10 @@ use rush_fleet::Scratch;
 use rush_fleet::Worktree;
 use rush_fleet::{Folder, GitState};
 
-use super::data::*;
 use crate::frame::{Out, PlaceId};
 use crate::model::Model;
 use crate::worker::Fleet;
+use rush_ui_projects_machine::data::*;
 
 const NOW: Ms = 1_793_190_896_789;
 const HOUR: Ms = 3_600_000;
@@ -249,7 +249,7 @@ fn rich_frames_match_go() {
     for ((w, cfg, pick, keys), (name, want)) in cases.into_iter().zip(want) {
         let mut m = rich(w, cfg);
         if !pick.is_empty() {
-            super::pick_in_projects(&mut m, pick);
+            rush_ui_projects_machine::pick_in_projects(&mut m, pick);
         }
         for k in keys {
             press(&mut m, k);
@@ -334,9 +334,9 @@ fn moving_keeps_level() {
 /// in it (deletesheet_test.go TestDeleteSheetSaysWhatGoes).
 #[test]
 fn delete_says_what_goes() {
-    use super::delete::{DeleteSheet, Doomed};
     use crate::frame::Press;
     use crate::frame::sheet::Sheet;
+    use rush_ui_projects_machine::delete::{DeleteSheet, Doomed};
     let done = agent("done", "Fix the parser", "/r", "/r", 0, HOUR);
     let run = agent("run", "Still going", "/r", "/r", 7, 0);
     let mut m = model(vec![done, run], 140, 60, classic());
@@ -463,7 +463,14 @@ fn worktree_row_says_what_it_has() {
     };
     let mut wt = Worktree::default();
     wt.size = 3 << 20;
-    let got = super::view::worktree_line("/r/.claude/worktrees/devclean", &st, &wt, 1, 120).plain();
+    let got = rush_ui_projects_machine::view::worktree_line(
+        "/r/.claude/worktrees/devclean",
+        &st,
+        &wt,
+        1,
+        120,
+    )
+    .plain();
     for want in [
         "devclean",
         "3 commits",
@@ -511,8 +518,8 @@ fn an_untouched_agent_says_it_can_go() {
 /// back to Clean up (deletesheet_test.go TestCleanSheetHandsToDelete).
 #[test]
 fn clean_up_hands_to_delete() {
-    use super::clean::{CleanSheet, open_clean_sheet};
-    use super::delete::DeleteSheet;
+    use rush_ui_projects_machine::clean::{CleanSheet, open_clean_sheet};
+    use rush_ui_projects_machine::delete::DeleteSheet;
     let mut m = model(Vec::new(), 140, 50, classic());
     let d = m.kept::<Data>();
     d.checked = NOW;
@@ -555,7 +562,7 @@ fn a_rush_sessions_own_temp_folder() {
     b.key = "default/b".into();
     b.rush = false;
     m.agents = vec![a, b];
-    super::scan::measure_temp(&mut m);
+    rush_ui_projects_machine::scan::measure_temp(&mut m);
     let d = m.kept::<Data>();
     let dirs = &d.temp["default/a:e57fb8f4"].dirs;
     assert_eq!(dirs[0].path, rush_fleet::temp_dir("e57fb8f4"));
@@ -683,10 +690,16 @@ fn clean_up_is_suggested_once_sizes_are_in() {
             .collect::<Vec<_>>()
     };
     assert!(said(&m).is_empty(), "before the scan: {:?}", said(&m));
-    super::scan::on_worktrees(&mut m, super::scan::found_tmp(big.clone()));
+    rush_ui_projects_machine::scan::on_worktrees(
+        &mut m,
+        rush_ui_projects_machine::scan::found_tmp(big.clone()),
+    );
     let got = said(&m);
     assert_eq!(got.len(), 1, "{got:?}");
     assert!(got[0].starts_with("3.0G could be cleaned up"), "{}", got[0]);
-    super::scan::on_worktrees(&mut m, super::scan::found_tmp(big));
+    rush_ui_projects_machine::scan::on_worktrees(
+        &mut m,
+        rush_ui_projects_machine::scan::found_tmp(big),
+    );
     assert_eq!(said(&m).len(), 1, "once a day");
 }

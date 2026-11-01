@@ -24,7 +24,7 @@ use crate::style::*;
 /// The Projects place: where the list's cursor is, and the one inside
 /// what's picked once enter has gone into it.
 #[derive(Default)]
-pub(crate) struct Projects {
+pub struct Projects {
     pub proj_in: bool,
     pub proj_pos: usize,
     pub proj_sel: String,
@@ -200,7 +200,7 @@ impl Place for Projects {
 }
 
 /// The bottom row's keys for the row r the cursor is on (projectsHint).
-pub(crate) fn projects_hint(m: &Model, r: &WorkRow, w: usize) -> Line {
+pub fn projects_hint(m: &Model, r: &WorkRow, w: usize) -> Line {
     let d = data(m);
     match &r.what {
         What::Pr(_) => keys_fit(
@@ -354,7 +354,7 @@ impl Projects {
                     What::Agent(key) => m.agents.iter().find(|a| a.key == **key).cloned(),
                     _ => None,
                 };
-                return crate::screens::list_extras::listkeys::open_pr(m, a.as_ref());
+                return m.ext.calls.open_pr()(m, a.as_ref());
             }
             "ctrl+b" | "alt+g" | "g" => match &r.what {
                 // The agent's own keep going, as the list's ctrl+b
@@ -375,7 +375,7 @@ impl Projects {
                 // (projects.go:1034 askClose).
                 What::Agent(key) => {
                     let a = m.agents.iter().find(|a| a.key == **key).cloned();
-                    return crate::screens::cmdbar::stops::ask_close(m, a);
+                    return m.ext.calls.ask_close()(m, a);
                 }
                 _ => return Out::Idle,
             },
@@ -446,7 +446,7 @@ fn list_key(m: &mut Model, key: &str, k: &Press) -> Out {
 }
 
 /// Opens url in the browser, off the UI.
-pub(crate) fn browse(m: &mut Model, url: &str) {
+pub fn browse(m: &mut Model, url: &str) {
     let url = url.to_string();
     m.later(
         {
@@ -477,7 +477,7 @@ pub(crate) fn browse(m: &mut Model, url: &str) {
 
 /// Asks before ending a System process: an orphan's whole tree, or one
 /// process with SIGTERM.
-pub(crate) fn end_proc(m: &mut Model, r: ProcRow) {
+pub fn end_proc(m: &mut Model, r: ProcRow) {
     let (pid, start) = (r.pid, r.start);
     if r.role == Role::Orphan && r.other {
         let q = format!(
@@ -550,7 +550,7 @@ fn kill_tree(m: &mut Model, pid: i32, start: std::time::SystemTime) -> Out {
 
 /// Ends each row's tree, SIGTERM then SIGKILL after 3s, and says what it
 /// freed.
-pub(crate) fn end_orphans(m: &mut Model, rows: Vec<ProcRow>, why: &'static str) -> Out {
+pub fn end_orphans(m: &mut Model, rows: Vec<ProcRow>, why: &'static str) -> Out {
     m.later(
         move || {
             let (mut n, mut freed, mut errs) = (0, 0u64, Vec::new());
@@ -589,7 +589,7 @@ pub(crate) fn end_orphans(m: &mut Model, rows: Vec<ProcRow>, why: &'static str) 
 }
 
 /// Asks before deleting the thing a row stands for.
-pub(crate) fn ask_remove_path(m: &mut Model, p: PathRow) {
+pub fn ask_remove_path(m: &mut Model, p: PathRow) {
     let st = data(m);
     let size = st
         .sizes
@@ -721,7 +721,7 @@ fn remove_all(p: &std::path::Path) -> Result<(), String> {
 
 /// Empties a project's agent scratch folder, keeping it: only ever a tmp
 /// folder in one of the agents' project folders, or one of rush's own.
-pub(crate) fn empty_scratch(dir: &str, project_folders: &[String]) -> Result<(), String> {
+pub fn empty_scratch(dir: &str, project_folders: &[String]) -> Result<(), String> {
     let p = std::path::Path::new(dir);
     let base = |q: Option<&std::path::Path>| {
         q.and_then(|q| q.file_name())

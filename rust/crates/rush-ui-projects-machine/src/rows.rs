@@ -17,7 +17,7 @@ use crate::style::*;
 /// Row kinds on the Projects page and the Delete sheet, each with its own
 /// mark and colour.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Kind {
+pub enum Kind {
     Project,
     Folder,
     Worktree,
@@ -25,7 +25,7 @@ pub(crate) enum Kind {
 }
 
 /// A kind's mark, in its colour.
-pub(crate) fn kind_mark(k: Kind) -> Span {
+pub fn kind_mark(k: Kind) -> Span {
     match k {
         Kind::Project => sp("◆", ORANGE),
         Kind::Folder => sp("◇", SUB),
@@ -36,7 +36,7 @@ pub(crate) fn kind_mark(k: Kind) -> Span {
 
 /// An item's head on the Delete sheet: its mark and name, what it is and
 /// how it goes, and its size at the right.
-pub(crate) fn kind_line(k: Kind, name: &str, what: &str, size: &str, w: usize) -> Line {
+pub fn kind_line(k: Kind, name: &str, what: &str, size: &str, w: usize) -> Line {
     let head = line([
         kind_mark(k),
         plain(" "),
@@ -50,14 +50,14 @@ pub(crate) fn kind_line(k: Kind, name: &str, what: &str, size: &str, w: usize) -
 }
 
 /// Bytes of disk the way mem says memory (the frame's, crate::style).
-pub(crate) use crate::style::disk;
+pub use crate::style::disk;
 
-pub(crate) fn plural(n: usize) -> &'static str {
+pub fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }
 }
 
 /// A command with home as ~, cut to n cells.
-pub(crate) fn trim_cmd(s: &str, n: usize) -> String {
+pub fn trim_cmd(s: &str, n: usize) -> String {
     let mut s = s.to_string();
     if let Some(home) = std::env::var_os("HOME") {
         let home = home.to_string_lossy();
@@ -72,7 +72,7 @@ pub(crate) fn trim_cmd(s: &str, n: usize) -> String {
 }
 
 /// left and right on one line w wide, or left alone when there's no room.
-pub(crate) fn spread(left: Line, right: Line, w: usize) -> Line {
+pub fn spread(left: Line, right: Line, w: usize) -> Line {
     let gap = w as isize - left.width() as isize - right.width() as isize;
     if gap < 2 {
         return fit(left, w);
@@ -85,7 +85,7 @@ pub(crate) fn spread(left: Line, right: Line, w: usize) -> Line {
 
 /// A process in the System section.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct ProcRow {
+pub struct ProcRow {
     pub pid: i32,
     pub depth: usize,
     pub n: usize,
@@ -101,7 +101,7 @@ pub(crate) struct ProcRow {
 
 /// A thing on disk a row stands for, which x deletes on its own.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct PathRow {
+pub struct PathRow {
     pub path: String,
     /// The session whose temp folder it's in.
     pub temp: String,
@@ -111,14 +111,14 @@ pub(crate) struct PathRow {
 
 /// A pull request on the page, and the repository it's in.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct PrRow {
+pub struct PrRow {
     pub root: String,
     pub pr: PR,
 }
 
 /// What a row stands for.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) enum What {
+pub enum What {
     #[default]
     Text,
     /// A project's head, by its key.
@@ -141,7 +141,7 @@ pub(crate) enum What {
 
 /// One line of the Projects page: something to pick, or text.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct WorkRow {
+pub struct WorkRow {
     pub id: String,
     pub line: Line,
     pub what: What,
@@ -168,7 +168,7 @@ impl WorkRow {
 
 /// The row picked, by its id at sel, following it if rows moved, else the
 /// nearest row that can be picked to pos.
-pub(crate) fn pick_row(rows: &[WorkRow], pos: &mut usize, sel: &mut String) -> Option<usize> {
+pub fn pick_row(rows: &[WorkRow], pos: &mut usize, sel: &mut String) -> Option<usize> {
     if *pos < rows.len() && rows[*pos].id == *sel && rows[*pos].pickable() {
         return Some(*pos);
     }
@@ -190,7 +190,7 @@ pub(crate) fn pick_row(rows: &[WorkRow], pos: &mut usize, sel: &mut String) -> O
 
 /// Lines in a rounded box w wide, its title and meta in the top edge; lit
 /// when it has the cursor. Each line is fitted inside.
-pub(crate) fn pbox(title: Line, meta: Line, body: Vec<Line>, w: usize, lit: bool) -> Vec<Line> {
+pub fn pbox(title: Line, meta: Line, body: Vec<Line>, w: usize, lit: bool) -> Vec<Line> {
     let col: Color = if lit { ORANGE } else { EDGE };
     let mut head = line([sp("╭─ ", col)]);
     join(&mut head, title);
@@ -222,11 +222,11 @@ pub(crate) fn pbox(title: Line, meta: Line, body: Vec<Line>, w: usize, lit: bool
 }
 
 /// The edge of a box without the cursor (Go's cEdge).
-pub(crate) const EDGE: Color = Color::Rgb(79, 73, 67);
+pub const EDGE: Color = Color::Rgb(79, 73, 67);
 
 /// A part of a box's head: a label in capitals, a count, and a hairline
 /// to the edge.
-pub(crate) fn psection(label: &str, meta: &str, w: usize) -> Line {
+pub fn psection(label: &str, meta: &str, w: usize) -> Line {
     let mut l = line([spb(label.to_uppercase(), SUB)]);
     if !meta.is_empty() {
         l.spans.push(plain("  "));
@@ -239,19 +239,19 @@ pub(crate) fn psection(label: &str, meta: &str, w: usize) -> Line {
 }
 
 /// A table's column names, each fitted to its width.
-pub(crate) fn thead(cols: &[(&str, usize)]) -> Line {
+pub fn thead(cols: &[(&str, usize)]) -> Line {
     let s: String = cols.iter().map(|(n, w)| fit_str(n, *w)).collect();
     line([sp(s, FAINT)])
 }
 
 /// A whole line on bg, w wide.
-pub(crate) fn shade(l: Line, bg: Color, w: usize) -> Line {
+pub fn shade(l: Line, bg: Color, w: usize) -> Line {
     on_ground(l, w, bg)
 }
 
 /// rows drawn w wide, the one at pick on the cursor: selected when the
 /// cursor is here, faintly otherwise.
-pub(crate) fn draw_rows(rows: &[WorkRow], pick: Option<usize>, w: usize, here: bool) -> Vec<Line> {
+pub fn draw_rows(rows: &[WorkRow], pick: Option<usize>, w: usize, here: bool) -> Vec<Line> {
     rows.iter()
         .enumerate()
         .map(|(i, r)| {
@@ -265,7 +265,7 @@ pub(crate) fn draw_rows(rows: &[WorkRow], pick: Option<usize>, w: usize, here: b
 }
 
 /// Two boxes of lines side by side, the shorter padded with blanks.
-pub(crate) fn side_by_side(l: Vec<Line>, r: Vec<Line>, lw: usize) -> Vec<Line> {
+pub fn side_by_side(l: Vec<Line>, r: Vec<Line>, lw: usize) -> Vec<Line> {
     let n = l.len().max(r.len());
     let mut l = l.into_iter();
     let mut r = r.into_iter();
@@ -280,7 +280,7 @@ pub(crate) fn side_by_side(l: Vec<Line>, r: Vec<Line>, lw: usize) -> Vec<Line> {
 }
 
 /// body filled out to n lines, so boxes side by side end together.
-pub(crate) fn pad_rows(mut body: Vec<Line>, n: usize) -> Vec<Line> {
+pub fn pad_rows(mut body: Vec<Line>, n: usize) -> Vec<Line> {
     while body.len() < n {
         body.push(Line::new());
     }
@@ -288,18 +288,18 @@ pub(crate) fn pad_rows(mut body: Vec<Line>, n: usize) -> Vec<Line> {
 }
 
 /// Spans joined into a line, with no empty ones.
-pub(crate) fn ln(spans: impl IntoIterator<Item = Span>) -> Line {
+pub fn ln(spans: impl IntoIterator<Item = Span>) -> Line {
     line(spans)
 }
 
 /// l then o.
-pub(crate) fn cat(mut l: Line, o: Line) -> Line {
+pub fn cat(mut l: Line, o: Line) -> Line {
     join(&mut l, o);
     l
 }
 
 /// The parts joined with sep between.
-pub(crate) fn joined(parts: Vec<Line>, sep: Span) -> Line {
+pub fn joined(parts: Vec<Line>, sep: Span) -> Line {
     let mut out = Line::new();
     for (i, p) in parts.into_iter().enumerate() {
         if i > 0 {

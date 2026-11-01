@@ -26,7 +26,7 @@ use crate::style::*;
 /// One thing a removal takes: a worktree, finished agents' temp work, or
 /// what's untouched in /tmp.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Doomed {
+pub struct Doomed {
     pub wt: Option<Worktree>,
     /// Whose temp work, by key and name.
     pub agents: Vec<(String, String)>,
@@ -59,7 +59,7 @@ fn remove_left(m: &mut Model, it: rush_fleet::LeftItem) {
 }
 
 /// The Delete sheet.
-pub(crate) struct DeleteSheet {
+pub struct DeleteSheet {
     pub items: Vec<Doomed>,
     /// The look afresh is still out.
     pub reading: bool,
@@ -73,7 +73,7 @@ fn own_roots(m: &Model) -> rush_core::adapter::Registry {
 }
 
 /// Opens Delete on what would go, and looks at each afresh.
-pub(crate) fn open_delete(m: &mut Model, back: Option<Box<dyn Sheet>>, items: Vec<Doomed>) {
+pub fn open_delete(m: &mut Model, back: Option<Box<dyn Sheet>>, items: Vec<Doomed>) {
     let look = items.clone();
     let temps: Vec<Vec<TempDir>> = items
         .iter()
@@ -559,7 +559,7 @@ impl Sheet for DeleteSheet {
 }
 
 /// Opens Delete on a worktree, once it's been looked at.
-pub(crate) fn ask_remove_worktree(m: &mut Model, wt: Worktree) {
+pub fn ask_remove_worktree(m: &mut Model, wt: Worktree) {
     if wt.checked == 0 || wt.repo.is_empty() {
         let name = wt.path.rsplit('/').next().unwrap_or(&wt.path).to_string();
         m.flash(&format!("{name} hasn't been looked at yet · a moment"));
@@ -576,7 +576,7 @@ pub(crate) fn ask_remove_worktree(m: &mut Model, wt: Worktree) {
 }
 
 /// Opens Delete on what's yours in /tmp untouched for a day.
-pub(crate) fn ask_clear_scratch(m: &mut Model) {
+pub fn ask_clear_scratch(m: &mut Model) {
     if data(m).tmp.stale_items == 0 {
         m.flash("everything of yours in /tmp was touched in the last day; it stays");
         return;
@@ -592,7 +592,7 @@ pub(crate) fn ask_clear_scratch(m: &mut Model) {
 }
 
 /// Opens Delete on an agent's temp work.
-pub(crate) fn ask_clean(m: &mut Model, key: &str) {
+pub fn ask_clean(m: &mut Model, key: &str) {
     let Some(g) = agent_by_key(m, key) else {
         m.flash_err("select an agent first");
         return;
@@ -619,7 +619,7 @@ pub(crate) fn ask_clean(m: &mut Model, key: &str) {
 }
 
 /// Opens Delete on the temp work of every agent that has finished.
-pub(crate) fn ask_clean_all(m: &mut Model) {
+pub fn ask_clean_all(m: &mut Model) {
     let d = data(m);
     let list: Vec<(String, String)> = agents(m)
         .filter(|g| g.a.pid == 0 && d.temp_of(&g.a.key) >= TEMP_SHOWN)
@@ -683,7 +683,7 @@ fn clear_tmp(m: &mut Model) {
 
 /// Whether dir is somewhere temp work may be deleted from: a temp folder,
 /// or two below the agent's own scratch root (fleet/temp.go:81).
-pub(crate) fn deletable(dir: &str, roots: &[String]) -> bool {
+pub fn deletable(dir: &str, roots: &[String]) -> bool {
     if crate::list::is_temp(dir) {
         return true;
     }

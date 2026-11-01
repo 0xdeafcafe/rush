@@ -16,6 +16,8 @@ rush-ui-base.workspace = true
 rush-ui-social.workspace = true
 # Settings and Harnesses, the screens under rush-ui.
 rush-ui-settings.workspace = true
+# The Projects place and the machine's care.
+rush-ui-projects-machine.workspace = true
 # Plugin sheets, approvals and an agent's views beside its conversation.
 rush-ui-plugin-ui.workspace = true
 # Accounts, sign-in and starting agents.

@@ -48,7 +48,7 @@ fn spin(m: &Model) -> Span {
 
 /// The page's top line: the machine's load and what can go without
 /// losing anything, at the right.
-pub(crate) fn summary_bar(m: &Model, w: usize) -> Line {
+pub fn summary_bar(m: &Model, w: usize) -> Line {
     let running = projects(m)
         .iter()
         .flat_map(|p| p.agents.iter())
@@ -58,7 +58,7 @@ pub(crate) fn summary_bar(m: &Model, w: usize) -> Line {
 }
 
 /// The machine's load and how much can go without losing anything.
-pub(crate) fn projects_summary(m: &Model, running: usize) -> Line {
+pub fn projects_summary(m: &Model, running: usize) -> Line {
     let d = data(m);
     let mc = &d.machine;
     let mut safe: i64 = 0;
@@ -102,7 +102,7 @@ fn running_of<'a>(m: &'a Model, keys: &[String]) -> Option<Ag<'a>> {
 }
 
 /// What the list's pick shows on the right.
-pub(crate) fn picked_rows(m: &Model, sel: &str, w: usize) -> Vec<WorkRow> {
+pub fn picked_rows(m: &Model, sel: &str, w: usize) -> Vec<WorkRow> {
     match sel {
         PANE_TEMP => temp_rows(m, w),
         PANE_SYSTEM => system_rows(m, w),
@@ -115,7 +115,7 @@ pub(crate) fn picked_rows(m: &Model, sel: &str, w: usize) -> Vec<WorkRow> {
 }
 
 /// The page's list: in the rail look a tree, else a table.
-pub(crate) fn project_list(m: &Model, w: usize) -> Vec<WorkRow> {
+pub fn project_list(m: &Model, w: usize) -> Vec<WorkRow> {
     if data(m).cfg.rail() {
         project_tree(m, w)
     } else {
@@ -128,7 +128,7 @@ fn kind_of(p: &Project) -> Kind {
 }
 
 /// Every project in one table: repositories, then the folders that aren't.
-pub(crate) fn classic_project_list(m: &Model, w: usize) -> Vec<WorkRow> {
+pub fn classic_project_list(m: &Model, w: usize) -> Vec<WorkRow> {
     let d = data(m);
     let list = projects(m);
     let now = m.now;
@@ -227,7 +227,7 @@ pub(crate) fn classic_project_list(m: &Model, w: usize) -> Vec<WorkRow> {
 
 /// A project's agents in a few cells: working, needing you, your turn,
 /// then how many in all.
-pub(crate) fn agent_counts(agents: &[Ag], now: Ms) -> Line {
+pub fn agent_counts(agents: &[Ag], now: Ms) -> Line {
     let (mut working, mut waiting, mut turn) = (0, 0, 0);
     for g in agents {
         if g.a.needs_you() || g.waiting() || g.a.halted() {
@@ -253,7 +253,7 @@ pub(crate) fn agent_counts(agents: &[Ag], now: Ms) -> Line {
 }
 
 /// A folder section's count of what its agents are doing.
-pub(crate) fn folder_meta(agents: &[Ag], now: Ms) -> Line {
+pub fn folder_meta(agents: &[Ag], now: Ms) -> Line {
     let (mut working, mut waiting, mut turn) = (0, 0, 0);
     let mut cost = 0.0;
     for g in agents {
@@ -286,7 +286,7 @@ pub(crate) fn folder_meta(agents: &[Ag], now: Ms) -> Line {
 }
 
 /// The project the list's cursor is on, else the first.
-pub(crate) fn picked_project<'a>(m: &'a Model, sel: &str) -> Option<Project<'a>> {
+pub fn picked_project<'a>(m: &'a Model, sel: &str) -> Option<Project<'a>> {
     if sel.starts_with('~') {
         return None;
     }
@@ -300,7 +300,7 @@ pub(crate) fn picked_project<'a>(m: &'a Model, sel: &str) -> Option<Project<'a>>
 
 /// A checkout's state in a few cells: branch, distance from upstream,
 /// what's uncommitted.
-pub(crate) fn git_bits(s: &GitState) -> Line {
+pub fn git_bits(s: &GitState) -> Line {
     if !s.err.is_empty() {
         return ln([sp("git failed", FAINT)]);
     }
@@ -335,7 +335,7 @@ fn work_said(g: &Ag) -> String {
 
 /// A session in Projects: its state, then how full its context, then how
 /// long since it changed.
-pub(crate) fn work_session(m: &Model, g: &Ag, w: usize, now: Ms) -> Line {
+pub fn work_session(m: &Model, g: &Ag, w: usize, now: Ms) -> Line {
     let a = g.a;
     let (marker, state): (Span, Line) = if a.halted() {
         (
@@ -373,30 +373,14 @@ pub(crate) fn work_session(m: &Model, g: &Ag, w: usize, now: Ms) -> Line {
     } else if g.busy() {
         // Its subagents, workflows and tasks, as the Wall says them
         // (workstreams.go:203 lanesLine).
-        (
-            sp("◎", BLUE),
-            ln([sp(crate::screens::list_extras::wall::lanes_line(a), BLUE)]),
-        )
+        (sp("◎", BLUE), ln([sp(crate::look::lanes_line(a), BLUE)]))
     } else {
         (sp("◦", DIM), ln([sp("idle", DIM)]))
     };
     let mut tail = Vec::new();
     // How far through its plan it is: tasks ticked of those planned
     // (workstreams.go:206-216).
-    let (mut planned, mut ticked) = (0i64, 0i64);
-    if let Some(ev) = m
-        .kept
-        .peek::<crate::screens::list_extras::work::WorkState>()
-        .and_then(|st| st.views.get(&a.key))
-    {
-        for e in ev.iter().filter(|e| e.run.is_empty()) {
-            match e.kind {
-                rush_core::adapter::EventKind::Plan => planned += e.n,
-                rush_core::adapter::EventKind::Tick => ticked += 1,
-                _ => {}
-            }
-        }
-    }
+    let (planned, ticked) = m.ext.calls.work_plan()(m, &a.key);
     if planned > 0 {
         tail.push(ln([sp(
             format!("✓ {}/{planned}", ticked.min(planned)),
@@ -428,7 +412,7 @@ pub(crate) fn work_session(m: &Model, g: &Ag, w: usize, now: Ms) -> Line {
 
 /// A folder's top in words: how many things, when last touched; "looking…"
 /// until the scan has looked.
-pub(crate) fn peek_line(m: &Model, dir: &str, now: Ms) -> String {
+pub fn peek_line(m: &Model, dir: &str, now: Ms) -> String {
     let Some(p) = data(m).peeks.get(dir) else {
         return "looking…".into();
     };
@@ -441,7 +425,7 @@ pub(crate) fn peek_line(m: &Model, dir: &str, now: Ms) -> String {
 
 /// One project whole: where it is, git, its agents and where each works,
 /// its worktrees, scratch, last commits and pull requests.
-pub(crate) fn project_detail(m: &Model, p: &Project, w: usize) -> Vec<WorkRow> {
+pub fn project_detail(m: &Model, p: &Project, w: usize) -> Vec<WorkRow> {
     let d = data(m);
     let now = m.now;
     let f = d.folders.get(&p.key);
@@ -688,7 +672,7 @@ fn left_note(l: &rush_fleet::LeftItem) -> String {
 
 /// Where the agents keep scratch in the project at root: each one's own
 /// folder's tmp (.claude/tmp).
-pub(crate) fn agent_tmp_dirs(m: &Model, root: &str) -> Vec<String> {
+pub fn agent_tmp_dirs(m: &Model, root: &str) -> Vec<String> {
     if !root.starts_with('/') {
         return Vec::new();
     }
@@ -700,7 +684,7 @@ pub(crate) fn agent_tmp_dirs(m: &Model, root: &str) -> Vec<String> {
 }
 
 /// A worktree table's column widths at w: name, branch, state, size.
-pub(crate) fn wt_cols(w: usize) -> (usize, usize, usize, usize) {
+pub fn wt_cols(w: usize) -> (usize, usize, usize, usize) {
     let (name, branch, size) = ((w / 5).min(28), (w / 5).min(26), 8);
     let state = 16.max(
         w as isize - name as isize - branch as isize - size as isize - 3 - (w / 6).min(30) as isize,
@@ -708,7 +692,7 @@ pub(crate) fn wt_cols(w: usize) -> (usize, usize, usize, usize) {
     (name, branch, state, size)
 }
 
-pub(crate) fn worktree_head(w: usize) -> Line {
+pub fn worktree_head(w: usize) -> Line {
     let (nw, bw, sw, zw) = wt_cols(w);
     let size = right("SIZE", zw);
     thead(&[
@@ -722,13 +706,7 @@ pub(crate) fn worktree_head(w: usize) -> Line {
 
 /// A worktree in a table row: name, branch, what it has of its own or
 /// that it's clean, size, and what it came from.
-pub(crate) fn worktree_line(
-    t: &str,
-    st: &GitState,
-    wt: &Worktree,
-    running: usize,
-    w: usize,
-) -> Line {
+pub fn worktree_line(t: &str, st: &GitState, wt: &Worktree, running: usize, w: usize) -> Line {
     let mut work = Vec::new();
     if running > 0 {
         work.push(ln([sp(format!("● {running} running"), ORANGE)]));
@@ -783,7 +761,7 @@ pub(crate) fn worktree_line(
 /// The Projects list as a tree: each repository on an edge, its main
 /// checkout and worktrees hung off it; then the pull requests, Temporary
 /// and System.
-pub(crate) fn project_tree(m: &Model, w: usize) -> Vec<WorkRow> {
+pub fn project_tree(m: &Model, w: usize) -> Vec<WorkRow> {
     let list = projects(m);
     let mut rows = Vec::new();
     if list.is_empty() {
@@ -900,7 +878,7 @@ fn project_tree_rows(m: &Model, p: &Project, w: usize) -> Vec<WorkRow> {
 
 /// A repository's worktrees as clean-up's scan found them: rush's own
 /// and Claude Code's first, a subagent's next, those made by hand last.
-pub(crate) fn repo_worktrees(d: &Data, p: &Project) -> Vec<Worktree> {
+pub fn repo_worktrees(d: &Data, p: &Project) -> Vec<Worktree> {
     let mut out: Vec<Worktree> = d.wts.iter().filter(|t| t.repo == p.key).cloned().collect();
     for path in project_trees(p, d.folders.get(&p.key)) {
         if !out.iter().any(|t| t.path == path) {
@@ -925,7 +903,7 @@ pub(crate) fn repo_worktrees(d: &Data, p: &Project) -> Vec<Worktree> {
 
 /// A worktree's name in the tree: its folder's, with where it sits when
 /// rush didn't make it.
-pub(crate) fn tree_name(t: &Worktree) -> String {
+pub fn tree_name(t: &Worktree) -> String {
     let name = base(&t.path);
     if t.made == MADE_BY_OTHER {
         let dir = t.path.rsplit_once('/').map_or("", |(d, _)| base(d));
@@ -1007,7 +985,7 @@ fn tree_what(m: &Model, t: &Worktree) -> Line {
 }
 
 /// What clean-up may do with a worktree, in a few words.
-pub(crate) fn tree_verdict(t: &Worktree) -> Line {
+pub fn tree_verdict(t: &Worktree) -> Line {
     let v = t.verdict();
     match v.kind {
         VerdictKind::KeepInUse => ln([sp("in use", DIM)]),
@@ -1055,7 +1033,7 @@ fn wt_tree_line(
 
 /// What agents leave behind that's no project's: yours in /tmp, and
 /// finished agents' temp work.
-pub(crate) fn temp_rows(m: &Model, _w: usize) -> Vec<WorkRow> {
+pub fn temp_rows(m: &Model, _w: usize) -> Vec<WorkRow> {
     const NAME_W: usize = 40;
     const SIZE_W: usize = 9;
     let d = data(m);
@@ -1165,7 +1143,7 @@ pub(crate) fn temp_rows(m: &Model, _w: usize) -> Vec<WorkRow> {
 }
 
 /// When an agent's temp work goes.
-pub(crate) fn temp_status(m: &Model, g: &Ag, now: Ms) -> Span {
+pub fn temp_status(m: &Model, g: &Ag, now: Ms) -> Span {
     if g.a.pid != 0 {
         return sp("running · stop before cleaning", YELLOW);
     }
@@ -1177,7 +1155,7 @@ pub(crate) fn temp_status(m: &Model, g: &Ag, now: Ms) -> Span {
 }
 
 /// When a session stopped, or that it runs.
-pub(crate) fn session_ended(g: &Ag, now: Ms) -> Span {
+pub fn session_ended(g: &Ag, now: Ms) -> Span {
     if g.a.pid != 0 {
         return sp("running", YELLOW);
     }
@@ -1245,7 +1223,7 @@ fn temp_entry_rows(m: &Model, key: &str, name_w: usize, size_w: usize, now: Ms) 
 
 /// The processes no project owns: orphans, with the few holding most of
 /// each one's memory, then Claude processes that belong to no agent.
-pub(crate) fn proc_rows(m: &Model) -> Vec<ProcRow> {
+pub fn proc_rows(m: &Model) -> Vec<ProcRow> {
     let d = data(m);
     let Some(tab) = &d.prev_table else {
         return Vec::new();
@@ -1308,7 +1286,7 @@ pub(crate) fn proc_rows(m: &Model) -> Vec<ProcRow> {
 }
 
 /// A role's heading in System.
-pub(crate) fn role_name(r: Role) -> &'static str {
+pub fn role_name(r: Role) -> &'static str {
     match r {
         Role::Daemon => "Daemon",
         Role::View => "Agent views",
@@ -1323,7 +1301,7 @@ fn ms_since(t: std::time::SystemTime, now: Ms) -> Ms {
     now - ms_of(t)
 }
 
-pub(crate) fn system_rows(m: &Model, w: usize) -> Vec<WorkRow> {
+pub fn system_rows(m: &Model, w: usize) -> Vec<WorkRow> {
     const LABEL_W: usize = 28;
     const CPU_W: usize = 9;
     const MEM_W: usize = 8;
@@ -1444,7 +1422,7 @@ fn pr_state_color(p: &PR) -> Color {
 }
 
 /// A project's pull requests as rows, or a line saying why there are none.
-pub(crate) fn prs_of(m: &Model, root: &str, repo: bool, w: usize) -> Vec<WorkRow> {
+pub fn prs_of(m: &Model, root: &str, repo: bool, w: usize) -> Vec<WorkRow> {
     let d = data(m);
     let t = |l: Line| WorkRow {
         line: l,
@@ -1484,7 +1462,7 @@ pub(crate) fn prs_of(m: &Model, root: &str, repo: bool, w: usize) -> Vec<WorkRow
 
 /// How many pull requests every project has open that concern you, and
 /// how many want something of you.
-pub(crate) fn pr_counts(m: &Model) -> (usize, usize) {
+pub fn pr_counts(m: &Model) -> (usize, usize) {
     let (mut open, mut want) = (0, 0);
     for r in data(m).prs.values() {
         for p in &r.prs {
@@ -1506,7 +1484,7 @@ fn pr_wants_you(p: &PR) -> bool {
 }
 
 /// The list's Pull requests row.
-pub(crate) fn prs_list_line(m: &Model) -> Line {
+pub fn prs_list_line(m: &Model) -> Line {
     let (open, want) = pr_counts(m);
     let mut s = ln([sp(format!("{open} open"), DIM)]);
     if want > 0 {
@@ -1525,7 +1503,7 @@ pub(crate) fn prs_list_line(m: &Model) -> Line {
 }
 
 /// Every project's pull requests, project by project.
-pub(crate) fn prs_rows(m: &Model, w: usize) -> Vec<WorkRow> {
+pub fn prs_rows(m: &Model, w: usize) -> Vec<WorkRow> {
     let d = data(m);
     let mut rows = Vec::new();
     for p in projects(m).iter().filter(|p| p.repo) {
@@ -1554,7 +1532,7 @@ pub(crate) fn prs_rows(m: &Model, w: usize) -> Vec<WorkRow> {
 }
 
 /// A pull request in a line: number, checks, where review is, title.
-pub(crate) fn gh_pr_line(pr: &PR, w: usize) -> Line {
+pub fn gh_pr_line(pr: &PR, w: usize) -> Line {
     let (ok, failed, pending) = pr.counts();
     let mut s = ln([sp(
         fit_str(&format!("⇡ #{}", pr.number), 8),
@@ -1593,7 +1571,7 @@ pub(crate) fn gh_pr_line(pr: &PR, w: usize) -> Line {
 }
 
 /// Where a pull request's review is, in a few words.
-pub(crate) fn pr_review_word(pr: &PR) -> Line {
+pub fn pr_review_word(pr: &PR) -> Line {
     if pr.state == "MERGED" {
         ln([sp("merged", BLUE)])
     } else if pr.state == "CLOSED" {
@@ -1615,6 +1593,6 @@ pub(crate) fn pr_review_word(pr: &PR) -> Line {
 
 /// The cells a string takes.
 #[allow(dead_code)]
-pub(crate) fn cells(s: &str) -> usize {
+pub fn cells(s: &str) -> usize {
     width(s)
 }

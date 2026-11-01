@@ -15,9 +15,10 @@ use crate::session::SessionView;
 pub mod bars;
 pub mod cmdbar;
 pub mod list_extras;
-pub mod projects_machine;
 pub mod session_cards;
 pub mod session_core;
+// Projects and the machine: rush-ui-projects-machine, at the old path.
+pub use rush_ui_projects_machine as projects_machine;
 // Settings and Harnesses: rush-ui-settings, at the old path.
 pub use rush_ui_settings as settings;
 // The plugin screens: rush-ui-plugin-ui, at the old path.
@@ -91,6 +92,12 @@ fn calls() -> Calls {
         guard_header: Some(accounts::guard::header_line),
         limits_fetched: Some(bars::fetch::fetched_once),
         machine_read: Some(projects_machine::machine_read),
+        ask_close: Some(cmdbar::stops::ask_close),
+        open_pr: Some(list_extras::listkeys::open_pr),
+        work_agents: Some(list_extras::work::work_agents),
+        work_plan: Some(list_extras::work::work_plan),
+        next_start: Some(accounts::setup::next_start),
+        start_profile: Some(accounts::rows::start_profile),
         plugin_status: Some(plugin_ui::hooks::plugin_status),
         view_summary: Some(|m, a| {
             plugin_ui::views::read::summary_of(m, a)
@@ -200,6 +207,7 @@ fn act(m: &mut Model, a: Act) {
             bars::fetch::fetch_now(m);
         }
         Act::ForgetMemory(key) => session_core::memory::forget(m, &key),
+        Act::ToggleDone(key) => cmdbar::stops::toggle_done(m, &key),
         Act::RebuildKeys => settings::keys::rebuild(m),
         Act::OpenRun { key, r } => {
             let workflow = m

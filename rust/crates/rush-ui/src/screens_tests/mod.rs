@@ -4,4 +4,5 @@
 
 mod accounts;
 mod plugin_ui;
+mod projects_machine;
 mod social;

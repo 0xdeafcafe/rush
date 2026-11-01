@@ -22,13 +22,13 @@ use serde::Deserialize;
 use crate::list::{folder_key, folder_titles};
 
 /// t as milliseconds since the epoch.
-pub(crate) fn ms_of(t: std::time::SystemTime) -> Ms {
+pub fn ms_of(t: std::time::SystemTime) -> Ms {
     t.duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as Ms)
 }
 
 /// How much disk the paths take, as du counts it.
-pub(crate) fn disk_usage(paths: &[&str]) -> i64 {
+pub fn disk_usage(paths: &[&str]) -> i64 {
     let dirs: Vec<rush_core::adapter::TempDir> = paths
         .iter()
         .map(|p| rush_core::adapter::TempDir {
@@ -41,7 +41,7 @@ pub(crate) fn disk_usage(paths: &[&str]) -> i64 {
 
 /// Process pid's start as the table has it, to end it by: the machine's
 /// rows keep it to the millisecond only.
-pub(crate) fn proc_start(
+pub fn proc_start(
     tab: Option<&rush_sys::proc::Table>,
     pid: rush_sys::proc::Pid,
     ms: Ms,
@@ -53,23 +53,23 @@ pub(crate) fn proc_start(
 use crate::model::Model;
 
 /// Temp work smaller than this isn't shown.
-pub(crate) const TEMP_SHOWN: i64 = 1 << 20;
+pub const TEMP_SHOWN: i64 = 1 << 20;
 /// How long an agent sits untouched before it can go, unless set.
-pub(crate) const DEFAULT_CLEANUP: Ms = 3 * 3600 * 1000;
+pub const DEFAULT_CLEANUP: Ms = 3 * 3600 * 1000;
 /// How often git is asked about the folders, at most.
-pub(crate) const FOLDER_EVERY: Ms = 15_000;
+pub const FOLDER_EVERY: Ms = 15_000;
 
 /// The List's rows that aren't projects, by id.
-pub(crate) const PANE_TEMP: &str = "~temp";
-pub(crate) const PANE_SYSTEM: &str = "~system";
-pub(crate) const PANE_PRS: &str = "~prs";
+pub const PANE_TEMP: &str = "~temp";
+pub const PANE_SYSTEM: &str = "~system";
+pub const PANE_PRS: &str = "~prs";
 
 /// The settings the page reads from rush's config.json (state.Config's
 /// ListLook, KeepOrphans, CleanupHours, CleanupDiskGB and
 /// CleanupRAMMinutes).
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub(crate) struct Cfg {
+pub struct Cfg {
     pub list_look: String,
     pub keep_orphans: bool,
     /// How long, in hours, done work waits before the tidy-up: 0 the
@@ -130,7 +130,7 @@ impl Cfg {
 /// The top of a folder as last looked at: how many things, and when the
 /// newest of them changed.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(crate) struct PathInfo {
+pub struct PathInfo {
     pub items: usize,
     pub modified: Ms,
     pub at: Ms,
@@ -138,7 +138,7 @@ pub(crate) struct PathInfo {
 
 /// One thing at the top of a session's temp folder.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct TempEntry {
+pub struct TempEntry {
     pub path: String,
     pub modified: Ms,
     pub dir: bool,
@@ -146,7 +146,7 @@ pub(crate) struct TempEntry {
 
 /// An agent's temp work: its folders, and what they hold, as last measured.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct TempWork {
+pub struct TempWork {
     pub dirs: Vec<rush_core::adapter::TempDir>,
     pub bytes: i64,
     /// bytes was measured (now or before a restart), or what a delete
@@ -156,7 +156,7 @@ pub(crate) struct TempWork {
 
 /// Everything the page knows, kept between frames.
 #[derive(Default)]
-pub(crate) struct Data {
+pub struct Data {
     /// Set by tests and --render: nothing is asked of git, GitHub or the disk.
     pub frozen: bool,
     /// A row to pick in the list, asked from outside (pickInProjects), and
@@ -258,7 +258,7 @@ impl Data {
 
 /// The page's state as the model holds it; the default before the place
 /// has ever been opened.
-pub(crate) fn data(m: &Model) -> &Data {
+pub fn data(m: &Model) -> &Data {
     static EMPTY: std::sync::LazyLock<Data> = std::sync::LazyLock::new(Data::default);
     m.kept.peek::<Data>().unwrap_or(&EMPTY)
 }
@@ -266,7 +266,7 @@ pub(crate) fn data(m: &Model) -> &Data {
 /// An agent with the main checkout of the repository it works in ("" when
 /// it isn't in one).
 #[derive(Clone, Copy)]
-pub(crate) struct Ag<'a> {
+pub struct Ag<'a> {
     pub a: &'a Agent,
     pub root: &'a str,
 }
@@ -305,7 +305,7 @@ impl<'a> Ag<'a> {
 }
 
 /// Every agent, with its main checkout.
-pub(crate) fn agents(m: &Model) -> impl Iterator<Item = Ag<'_>> {
+pub fn agents(m: &Model) -> impl Iterator<Item = Ag<'_>> {
     m.agents.iter().enumerate().map(|(i, a)| Ag {
         a,
         root: m.roots.get(i).map_or("", String::as_str),
@@ -314,8 +314,8 @@ pub(crate) fn agents(m: &Model) -> impl Iterator<Item = Ag<'_>> {
 
 /// The sessions worth reading: open, busy or at work within the window
 /// (workAgents, the work list's own).
-pub(crate) fn work_agents(m: &Model) -> Vec<Ag<'_>> {
-    crate::screens::list_extras::work::work_agents(m)
+pub fn work_agents(m: &Model) -> Vec<Ag<'_>> {
+    m.ext.calls.work_agents()(m)
         .into_iter()
         .map(|i| Ag {
             a: &m.agents[i],
@@ -326,7 +326,7 @@ pub(crate) fn work_agents(m: &Model) -> Vec<Ag<'_>> {
 
 /// One repository on the page, and its agents.
 #[derive(Clone)]
-pub(crate) struct Project<'a> {
+pub struct Project<'a> {
     pub key: String,
     pub title: String,
     pub agents: Vec<Ag<'a>>,
@@ -338,7 +338,7 @@ pub(crate) struct Project<'a> {
 
 /// The projects agents worked in over the last day: repositories first,
 /// those with an agent running first, then by name.
-pub(crate) fn projects(m: &Model) -> Vec<Project<'_>> {
+pub fn projects(m: &Model) -> Vec<Project<'_>> {
     let order: HashMap<&str, usize> = m
         .order
         .iter()
@@ -388,7 +388,7 @@ pub(crate) fn projects(m: &Model) -> Vec<Project<'_>> {
 
 /// A project's linked worktrees: those its agents are in, then the rest
 /// git lists.
-pub(crate) fn project_trees(p: &Project, f: Option<&Folder>) -> Vec<String> {
+pub fn project_trees(p: &Project, f: Option<&Folder>) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for g in &p.agents {
         let t = g.tree();
@@ -405,7 +405,7 @@ pub(crate) fn project_trees(p: &Project, f: Option<&Folder>) -> Vec<String> {
 }
 
 /// A worktree's commits past what it came from, or past its upstream.
-pub(crate) fn own_commits(st: &rush_fleet::GitState) -> usize {
+pub fn own_commits(st: &rush_fleet::GitState) -> usize {
     if st.base.is_empty() {
         st.ahead.max(0) as usize
     } else {
@@ -414,19 +414,19 @@ pub(crate) fn own_commits(st: &rush_fleet::GitState) -> usize {
 }
 
 /// The agent with key, and its root.
-pub(crate) fn agent_by_key<'a>(m: &'a Model, key: &str) -> Option<Ag<'a>> {
+pub fn agent_by_key<'a>(m: &'a Model, key: &str) -> Option<Ag<'a>> {
     agents(m).find(|g| g.a.key == key)
 }
 
 /// The first agent in keys with a process.
-pub(crate) fn running<'a>(m: &'a Model, keys: &[String]) -> Option<Ag<'a>> {
+pub fn running<'a>(m: &'a Model, keys: &[String]) -> Option<Ag<'a>> {
     keys.iter()
         .filter_map(|k| agent_by_key(m, k))
         .find(|g| g.a.pid != 0)
 }
 
 /// How long since an agent was last active.
-pub(crate) fn untouched(d: &Data, g: &Ag, now: Ms) -> Ms {
+pub fn untouched(d: &Data, g: &Ag, now: Ms) -> Ms {
     let age = g.a.age(now);
     match d.done.get(&g.a.key) {
         Some(&t) if now - t < age => now - t,
@@ -435,7 +435,7 @@ pub(crate) fn untouched(d: &Data, g: &Ag, now: Ms) -> Ms {
 }
 
 /// How long an agent sits untouched before it can go.
-pub(crate) fn goes_after(d: &Data) -> Ms {
+pub fn goes_after(d: &Data) -> Ms {
     match d.cfg.cleanup_after() {
         0 => DEFAULT_CLEANUP,
         n => n,
@@ -444,7 +444,7 @@ pub(crate) fn goes_after(d: &Data) -> Ms {
 
 /// A project's agent that's done with: stopped, untouched for goes_after,
 /// and leaving no work only its worktree has.
-pub(crate) fn can_go(d: &Data, g: &Ag, now: Ms) -> bool {
+pub fn can_go(d: &Data, g: &Ag, now: Ms) -> bool {
     if g.a.pid != 0
         || g.live()
         || g.busy()
@@ -464,13 +464,13 @@ pub(crate) fn can_go(d: &Data, g: &Ag, now: Ms) -> bool {
 /// without a turn, neither open, at work nor pinned, and asking nothing
 /// (model.go:2622 stale, :2632 earlier). A pinned one is never Earlier's
 /// by age, so its temp work and worktree never go by themselves.
-pub(crate) fn earlier(d: &Data, a: &Agent, now: Ms) -> bool {
+pub fn earlier(d: &Data, a: &Agent, now: Ms) -> bool {
     d.done.contains_key(&a.key) || crate::list::stale(a, now) && !crate::list::asks(a)
 }
 
 /// How long until done work of these agents goes by itself: zero when
 /// due now, None when it never will.
-pub(crate) fn due_in(m: &Model, d: &Data, keys: &[String], now: Ms) -> Option<Ms> {
+pub fn due_in(m: &Model, d: &Data, keys: &[String], now: Ms) -> Option<Ms> {
     let after = d.cfg.cleanup_after();
     if after == 0 || keys.is_empty() {
         return None;

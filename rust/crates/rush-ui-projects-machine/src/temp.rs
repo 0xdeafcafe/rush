@@ -17,7 +17,7 @@ const TEMP_SHARE: u32 = 50;
 
 /// An agent's temp work as last measured.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub(crate) struct TempSize {
+pub struct TempSize {
     #[serde(default)]
     pub bytes: i64,
     #[serde(default, with = "rush_core::wire::time")]
@@ -43,7 +43,7 @@ impl TempSize {
 
 /// The measurements, by agent key.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub(crate) struct TempSizes {
+pub struct TempSizes {
     #[serde(default)]
     pub sizes: HashMap<String, TempSize>,
     #[serde(skip)]
@@ -55,7 +55,7 @@ pub(crate) struct TempSizes {
 }
 
 /// Where they're kept.
-pub(crate) fn temp_path() -> PathBuf {
+pub fn temp_path() -> PathBuf {
     rush_state::dir::cache_path("temp.json")
 }
 

@@ -236,6 +236,9 @@ pub enum Act {
     /// An open session's memory read again, by its key
     /// (session_core/memory.rs forget).
     ForgetMemory(String),
+    /// An agent put away, or brought back from there, by its key
+    /// (cmdbar/stops.rs toggle_done).
+    ToggleDone(String),
     /// Keybindings put in force again, plugins' commands as they are now
     /// (settings/keys.rs rebuild).
     RebuildKeys,
@@ -367,6 +370,24 @@ calls! {
     /// The machine's processes have been read (projects_machine
     /// machine_read).
     machine_read("projects_machine"): fn(&Model) -> bool,
+    /// Always asked on an agent: hide, stop, restart or delete
+    /// (cmdbar/stops.rs ask_close).
+    ask_close("cmdbar"): fn(&mut Model, Option<Agent>) -> Out,
+    /// An agent's pull request opened, or that there's none
+    /// (list_extras/listkeys.rs open_pr).
+    open_pr("list_extras"): fn(&mut Model, Option<&Agent>) -> Out,
+    /// The sessions worth reading, by index (list_extras/work.rs
+    /// work_agents).
+    work_agents("list_extras"): fn(&Model) -> Vec<usize>,
+    /// How far through its plan an agent is: (tasks planned, tasks ticked)
+    /// from what the work page read (list_extras/work.rs WorkState).
+    work_plan("list_extras"): fn(&Model, &str) -> (i64, i64),
+    /// What the next session starts as in a folder (accounts/setup.rs
+    /// next_start).
+    next_start("accounts"): fn(&Model, &str) -> crate::accounts::StartOver,
+    /// The profile of yours a folder starts with (accounts/rows.rs
+    /// start_profile).
+    start_profile("accounts"): fn(&Model, &str) -> rush_state::Profile,
     /// What plugins put on an agent's row (plugin_ui/hooks.rs
     /// plugin_status).
     plugin_status("plugin_ui"): fn(&Model, &str) -> Line,
