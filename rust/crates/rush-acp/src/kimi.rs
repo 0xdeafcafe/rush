@@ -566,4 +566,28 @@ mod tests {
             std::env::remove_var("KIMI_CODE_HOME");
         }
     }
+
+    /// The shared check every adapter's end reader is held to
+    /// (adapter::conform), on a message log.
+    #[test]
+    fn its_end_is_the_end_of_its_whole() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("context.jsonl");
+        let mut b = String::new();
+        for i in 0..40 {
+            b += &format!(
+                r#"{{"role":"user","content":"ask {i} {}"}}"#,
+                "words ".repeat(40)
+            );
+            b.push('\n');
+            b += &format!(r#"{{"role":"assistant","content":"answer {i}"}}"#);
+            b.push('\n');
+        }
+        std::fs::write(&path, &b).unwrap();
+        let s = Session {
+            transcript: path.to_string_lossy().into_owned(),
+            ..Session::default()
+        };
+        rush_core::adapter::conform::check_tail(&Kimi::new(), &s, b.len() as i64 / 4);
+    }
 }

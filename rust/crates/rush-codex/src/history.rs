@@ -132,10 +132,16 @@ pub(crate) fn tail_before(
     if end <= most {
         return Ok((read_rollout(section(&f, 0, end), before)?, false));
     }
+    // The tail, found from the end backwards: its whole lines only, a
+    // line still being written left for the follower.
+    let span = rush_core::tailread::tail_span(&f, end as u64, most as u64)?;
+    if !span.cut() {
+        return Ok((read_rollout(section(&f, 0, end), before)?, false));
+    }
     // The first line, and the first turn_context, from before the tail.
     let mut head = Vec::new();
     let mut n = 0;
-    let mut hr = BufReader::with_capacity(64 << 10, section(&f, 0, end - most));
+    let mut hr = BufReader::with_capacity(64 << 10, section(&f, 0, span.start as i64));
     read_lines(&mut hr, |b, _| {
         n += 1;
         let context = n > 1
@@ -146,11 +152,7 @@ pub(crate) fn tail_before(
         }
         !context && n < 64
     })?;
-    // The tail, from the first whole line: the line before it ends with the
-    // byte before the tail's start.
-    let mut tail = BufReader::new(section(&f, end - most - 1, most + 1));
-    let mut skip = Vec::new();
-    tail.read_until(b'\n', &mut skip)?;
+    let tail = section(&f, span.start as i64, span.len() as i64);
     let evs = read_rollout(head.as_slice().chain(tail), before)?;
     Ok((evs, true))
 }
@@ -525,5 +527,27 @@ mod tests {
         let sl = f.next(1 << 20).unwrap();
         assert!(sl.reset && !sl.events.is_empty());
         assert!(describe(&sl.events[0]).starts_with("init thread-1"));
+    }
+
+    /// The shared check every adapter's end reader is held to
+    /// (adapter::conform).
+    #[test]
+    fn its_end_is_the_end_of_its_whole() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("rollout.jsonl");
+        let mut r = Rollout::new(t0()).add("session_meta", meta("thread-1", "cli".into()));
+        for i in 0..40 {
+            let ask = format!("ask {i} {}", "words ".repeat(40));
+            r = r
+                .add("turn_context", json!({"model": "gpt-5", "approval_policy": "never"}))
+                .response("message", user_msg(&[&ask]))
+                .response(
+                    "message",
+                    json!({"role": "assistant", "content": [{"type": "output_text", "text": format!("answer {i}")}]}),
+                );
+        }
+        r.write(&path);
+        let n = std::fs::metadata(&path).unwrap().len() as i64;
+        rush_core::adapter::conform::check_tail(&crate::Codex::new(), &at(&path), n / 4);
     }
 }

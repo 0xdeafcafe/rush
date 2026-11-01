@@ -3,15 +3,16 @@
 //! internal/ui/rushmode.go (paneHeader :2721, the conversation's keys
 //! :3954-4120, isOpen :4661, followTail :2117, the speaker :2400),
 //! history.go:45 (openHistory) and panegeometry.go:13 (paneFrameRow).
-//! The conversation is read and parsed on a worker (worker::spawn_tail
-//! for a Claude Code transcript, worker::spawn_history for any other
-//! adapter's history); this side only applies what it sends.
+//! The conversation is read and parsed on a worker (worker::spawn_read,
+//! the same for every agent: its end first, then the whole); this side
+//! only applies what it sends.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use rush_convo::{Decode, Fresh, Options, Renderer, Session, Tail};
-use rush_core::adapter::{self, AdapterRef, Kind, Registry, SLICE, migrated};
+use rush_convo::reading::{Reading, Slice};
+use rush_convo::{Decode, Options, Renderer, Session};
+use rush_core::adapter::{self, AdapterRef, Kind, Registry, migrated};
 use rush_core::agent::Agent;
 use rush_core::event::{Event, Exchange};
 use rush_core::text::{Line, Span, Style, width};
@@ -40,19 +41,60 @@ pub fn decoder(reg: &Registry, k: &str) -> Option<Decode> {
     }))
 }
 
-/// Applies events an adapter's history gave to sess: reset, the history
-/// was rewritten and it starts over. History events carry no times, so
-/// each is applied as of an unknown time (0).
-pub fn apply_events(sess: &mut Session, events: &[Event], reset: bool) {
-    if reset {
-        // What its host saved (its model, "opus 5.5 · 1M") isn't the
-        // history's to say: it stays, as take_whole keeps it.
-        let info = std::mem::take(&mut sess.info);
-        *sess = Session::new();
-        sess.info = info;
+pub use rush_convo::reading::apply_events;
+
+/// How conversation src is read (rush_convo::reading), whatever agent
+/// wrote it: a transcript in the form Claude Code writes, or another
+/// agent's history as its adapter reads it back. host: a stopped rush
+/// session's, whose folder says where its history is. Reads the disk.
+pub fn reading(src: &Source, host: &str) -> adapter::Result<Box<dyn Reading>> {
+    match src {
+        Source::Transcript { path, decode } => Ok(Box::new(rush_convo::reading::Transcript::new(
+            path.clone(),
+            decode.clone(),
+        ))),
+        Source::History { adapter, session } => {
+            let s = crate::worker::history_session((**session).clone(), host);
+            Ok(Box::new(rush_convo::reading::History::new(
+                adapter.clone(),
+                s,
+            )?))
+        }
+        Source::Hosted | Source::Room => Err("nothing to read on disk".into()),
     }
-    for ev in events {
-        sess.apply(ev, 0);
+}
+
+/// What a view knows of its session once it takes a reading whose own
+/// events said `read`, over `had`: a transcript's is the list's word alone
+/// (had); a history's events say it themselves (says), as when applied to
+/// the view's session one by one, with had where they said nothing.
+pub fn info_over(says: bool, read: rush_convo::Info, had: rush_convo::Info) -> rush_convo::Info {
+    if !says {
+        return had;
+    }
+    fn or(a: String, b: String) -> String {
+        if a.is_empty() { b } else { a }
+    }
+    rush_convo::Info {
+        cwd: or(read.cwd, had.cwd),
+        cost: if read.cost != 0.0 {
+            read.cost
+        } else {
+            had.cost
+        },
+        model: or(read.model, had.model),
+        id: or(read.id, had.id),
+        kind: or(read.kind, had.kind),
+        effort: or(read.effort, had.effort),
+        permission_mode: or(read.permission_mode, had.permission_mode),
+        started_at: if read.started_at != 0 {
+            read.started_at
+        } else {
+            had.started_at
+        },
+        started_by: or(read.started_by, had.started_by),
+        spawned_by: or(read.spawned_by, had.spawned_by),
+        started_from: or(read.started_from, had.started_from),
     }
 }
 
@@ -270,44 +312,43 @@ impl SessionView {
         }
     }
 
-    /// Reads it here and now, for a one-off frame (rush --render).
+    /// Reads it here and now, for a one-off frame (rush --render), as the
+    /// worker does (spawn_read): its end first, then the whole in its
+    /// place.
     pub fn read_now(&mut self) {
         self.read = true;
         self.caught_up = true;
-        match &self.source {
-            Source::Transcript { path, decode } => {
-                let mut t = Tail::from_end(path, 2 << 20, decode.clone());
-                if let Err(e) = t.read(&mut self.sess) {
-                    self.err = e.to_string();
-                } else if t.partway() {
-                    // Then the whole of it, as the worker does after.
-                    let mut whole = Session::new();
-                    if Tail::new(path, decode.clone()).read(&mut whole).is_ok() {
-                        self.take_whole(whole);
-                    }
-                }
+        if matches!(self.source, Source::Hosted | Source::Room) {
+            return;
+        }
+        let mut r = match reading(&self.source, "") {
+            Ok(r) => r,
+            Err(e) => {
+                self.err = e.to_string();
+                return;
             }
-            Source::History { adapter, session } => {
-                let r = match (adapter.history_follower(), adapter.history_reader()) {
-                    (Some(f), _) => f.follow_history(session).and_then(|mut f| {
-                        loop {
-                            let s = f.next(SLICE)?;
-                            self.take_events(s.events, s.reset);
-                            if !s.more {
-                                break Ok(());
-                            }
-                        }
-                    }),
-                    (None, Some(r)) => {
-                        adapter::read_history(r, session, 0).map(|evs| self.take_events(evs, false))
-                    }
-                    (None, None) => Ok(()),
-                };
-                if let Err(e) = r {
-                    self.err = e.to_string();
-                }
+        };
+        let end = r.end(crate::worker::TAIL_END);
+        if let Some(mut end) = end {
+            let had = std::mem::take(&mut self.sess.info);
+            end.info = self.info_after(std::mem::take(&mut end.info), had);
+            self.sess = end;
+        }
+        let mut whole = Session::new();
+        let never = std::sync::atomic::AtomicBool::new(false);
+        match rush_convo::reading::read_on(
+            r.as_mut(),
+            &mut whole,
+            crate::worker::TAIL_SLICE,
+            &never,
+        ) {
+            Ok(_) if self.sess.partial => self.take_whole(whole),
+            Ok(_) => {
+                let had = std::mem::take(&mut self.sess.info);
+                whole.info = self.info_after(std::mem::take(&mut whole.info), had);
+                self.sess = whole;
             }
-            Source::Hosted | Source::Room => {}
+            Err(e) => self.err = e.to_string(),
         }
     }
 
@@ -318,7 +359,8 @@ impl SessionView {
         self.read = true;
         self.caught_up = true;
         self.ended = true;
-        sess.info = std::mem::take(&mut self.sess.info);
+        let had = std::mem::take(&mut self.sess.info);
+        sess.info = self.info_after(std::mem::take(&mut sess.info), had);
         let (r, merged) = match warm {
             Some((r, x)) => (r, Arc::ptr_eq(&x, &self.exchanges)),
             None => (Renderer::new(), false),
@@ -330,9 +372,18 @@ impl SessionView {
         }
     }
 
+    /// What the view knows of its session once it takes a reading whose
+    /// own events said `read`, over `had`: a transcript's is the list's
+    /// word alone (had); a history's events say it themselves, as when
+    /// applied to the view's session one by one (take_events), with had
+    /// where they said nothing.
+    fn info_after(&self, read: rush_convo::Info, had: rush_convo::Info) -> rush_convo::Info {
+        info_over(matches!(self.source, Source::History { .. }), read, had)
+    }
+
     /// Takes what the worker read; true when it's the last slice of its
     /// first reading, the conversation's end now all in.
-    pub fn take(&mut self, f: Fresh) -> bool {
+    pub fn take(&mut self, f: Slice) -> bool {
         let first = !self.read;
         self.read = true;
         self.caught_up = !f.more;
@@ -383,7 +434,7 @@ impl SessionView {
                 shift = i as i64 - (n - 1);
             }
         }
-        whole.info = part.info.clone();
+        whole.info = self.info_after(std::mem::take(&mut whole.info), part.info.clone());
         self.sel = renumber(&self.sel, shift);
         self.o.open = std::mem::take(&mut self.o.open)
             .into_iter()
@@ -952,6 +1003,34 @@ mod tests {
         };
         a.job.state = rush_core::agent::State::Idle;
         a
+    }
+
+    /// A history's end, then its whole, taken as read on a worker: what
+    /// their events said of it is kept, what the view knew fills the
+    /// rest, as when its events are taken one by one.
+    #[test]
+    fn a_history_taken_whole_keeps_what_its_events_said() {
+        let mut v = history_view();
+        v.sess.info.cost = 1.5;
+        v.sess.info.model = "from the list".into();
+        let mut end = Session::new();
+        end.partial = true;
+        end.info.model = "gpt-5".into();
+        end.info.effort = "high".into();
+        v.take_end(end, None);
+        assert_eq!(
+            (v.sess.info.model.as_str(), v.sess.info.effort.as_str()),
+            ("gpt-5", "high")
+        );
+        assert_eq!(v.sess.info.cost, 1.5);
+        let mut whole = Session::new();
+        whole.info.effort = "low".into();
+        v.take_whole(whole);
+        assert_eq!(
+            (v.sess.info.model.as_str(), v.sess.info.effort.as_str()),
+            ("gpt-5", "low")
+        );
+        assert!(!v.sess.partial);
     }
 
     /// The history read again from its start keeps what the host saved:

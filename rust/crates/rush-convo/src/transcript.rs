@@ -142,9 +142,20 @@ impl Tail {
         if let Ok(m) = std::fs::metadata(&t.path)
             && m.len() > most
         {
-            // A byte early: the line cut short there runs to the first
-            // newline, which is that byte when the cut fell between lines.
-            t.start_at(m.len() - most);
+            // Found from the end backwards (rush_core::tailread): the start
+            // of the first whole line after the mark.
+            match rush_core::tailread::file_tail(&t.path, most) {
+                Ok((_, span)) if !span.is_empty() => {
+                    if span.cut() {
+                        t.off = span.start;
+                        t.partway = true;
+                    }
+                }
+                // No whole line in reach: a byte early, the line cut short
+                // there runs to the first newline, which is that byte when
+                // the cut fell between lines.
+                _ => t.start_at(m.len() - most),
+            }
         }
         t
     }

@@ -4,7 +4,7 @@
 //! fleetslash.go:23 (the commands' words).
 //!
 //! Reading another agent's session from its history (Go's history.go) is
-//! session.rs's Source::History and worker::spawn_history.
+//! session.rs's Source::History and worker::spawn_read.
 
 use super::{conn, open_key};
 use crate::frame::{Ext, Out};
