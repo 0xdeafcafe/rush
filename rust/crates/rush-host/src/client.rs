@@ -829,6 +829,11 @@ impl Client {
     pub fn hold_queue(&self, on: bool) -> Result<()> {
         self.op(|o| o.now = on, "queue_hold")
     }
+    /// The runaway guard holds the queue, or lets it go: while it holds
+    /// it, only what you send yourself goes.
+    pub fn guard_queue(&self, on: bool) -> Result<()> {
+        self.op(|o| o.now = on, "queue_guard")
+    }
     /// Sends queued messages one per turn instead of together.
     pub fn queue_separately(&self, on: bool) -> Result<()> {
         self.op(|o| o.now = on, "queue_separate")

@@ -485,6 +485,11 @@ pub struct Info {
     pub queue_exchanges: Vec<Option<Box<Exchange>>>,
     #[serde(rename = "queueHeld", skip_serializing_if = "zero")]
     pub queue_held: bool,
+    /// The runaway guard holds the queue (Rust-only): what starts without
+    /// you (another agent's message, rush's own) waits; what you send
+    /// yourself still goes. queue_held is yours, alt+h.
+    #[serde(rename = "queueGuarded", skip_serializing_if = "zero")]
+    pub queue_guarded: bool,
     #[serde(rename = "queueSeparate", skip_serializing_if = "zero")]
     pub queue_separate: bool,
     /// When the queue was found still waiting behind a turn its agent
@@ -843,6 +848,15 @@ pub fn queue_exchanges(i: &Info) -> Vec<Option<Box<Exchange>>> {
     let mut q = i.queue_exchanges.clone();
     q.resize(i.queue.len(), None);
     q
+}
+
+/// Whether what's queued may go when the turn ends: none of it while you
+/// hold the queue; while the runaway guard holds it, only what you sent
+/// yourself (a message with no exchange: not another agent's, nor rush's).
+pub fn queue_ready(i: &Info) -> bool {
+    !i.queue.is_empty()
+        && !i.queue_held
+        && (!i.queue_guarded || queue_exchanges(i).iter().any(Option::is_none))
 }
 
 /// Empty when no queued message has an exchange, so a queue that never

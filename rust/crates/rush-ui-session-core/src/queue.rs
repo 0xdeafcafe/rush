@@ -38,7 +38,11 @@ pub struct LocalQueue {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Queued {
     pub items: Vec<String>,
+    /// You hold it (alt+h): nothing in it goes until you let it go.
     pub held: bool,
+    /// The runaway guard holds it: what you sent goes, what starts
+    /// without you (another agent's message) waits.
+    pub guarded: bool,
     pub separate: bool,
     /// rush keeps it, not a host.
     pub local: bool,
@@ -57,6 +61,7 @@ pub fn queue_of(m: &mut Model, key: &str) -> Queued {
         return Queued {
             items: i.queue.clone(),
             held: i.queue_held,
+            guarded: i.queue_guarded,
             separate: i.queue_separate,
             local: false,
             stuck: i.queue_stuck != 0,
@@ -66,6 +71,7 @@ pub fn queue_of(m: &mut Model, key: &str) -> Queued {
         Some(q) => Queued {
             items: q.items.clone(),
             held: q.held,
+            guarded: false,
             separate: false,
             local: true,
             stuck: false,
@@ -210,7 +216,11 @@ pub fn sel(sel: &str, n: usize) -> Option<usize> {
 
 /// The keys for a picked queued message (queueHint).
 pub fn hint(q: &Queued, w: usize) -> rush_core::text::Line {
-    let hold = if q.held { "let go" } else { "hold" };
+    let hold = if q.held || q.guarded {
+        "let go"
+    } else {
+        "hold"
+    };
     let mut pairs = vec![
         ("space", "edit"),
         ("shift+↑↓", "merge up/down"),
@@ -302,7 +312,7 @@ pub fn key(m: &mut Model, key: &str, s: &str) -> Out {
         }
         "h" | "alt+h" => {
             conn(m, key).edit_held = false; // yours now, not the edit's
-            hold(m, key, !q.held);
+            hold_key(m, key);
         }
         "o" | "alt+o" => {
             if q.local {
@@ -441,6 +451,19 @@ fn steer(m: &mut Model, key: &str, i: usize, all: bool) {
     run_all(m, key, ops);
 }
 
+/// alt+h on a session: lets through what the runaway guard holds, else
+/// holds the queue or lets it go (holdQueue).
+pub fn hold_key(m: &mut Model, key: &str) {
+    let q = queue_of(m, key);
+    if q.guarded && !q.held {
+        conn(m, key).info.queue_guarded = false;
+        run(m, key, Op::GuardQueue(false));
+        m.flash("let through: the guard holds it no more until its next turn has run");
+        return;
+    }
+    hold(m, key, !q.held);
+}
+
 /// Holds the queue or lets it go (holdQueue).
 pub fn hold(m: &mut Model, key: &str, on: bool) {
     if !conn(m, key).hosted() {
@@ -543,27 +566,39 @@ pub fn when(m: &mut Model, key: &str, q: &Queued) -> rush_core::text::Line {
     // Yours if you moved it, not a fixed ctrl+enter (rushmode.go:3543-3546).
     let send_now = super::spawned::send_now_key(m);
     if q.held {
-        // The runaway guard's: why, and the key that lets it through.
+        // Yours: never silently stuck, say it's held and how it goes.
+        return line([
+            sp(" · held", YELLOW),
+            sp(format!(" · {send_now} sends it now"), DIM),
+        ]);
+    }
+    if q.guarded {
+        // The runaway guard's: what you sent goes, what starts without
+        // you (another agent's message) waits; why, and the key that lets
+        // it through.
         let who = m
             .agents
             .iter()
             .find(|a| a.key == key && a.rush)
             .map(|a| (a.job.id.clone(), a.job.live()));
-        if let Some(say) =
-            who.and_then(|(id, live)| rush_ui_accounts::guard::held_say(m, &id, live))
-        {
+        let live = who.as_ref().is_some_and(|w| w.1);
+        let why = who
+            .and_then(|(id, _)| rush_ui_accounts::guard::held_say(m, &id, false))
+            .map(|s| s.trim_start_matches("held: ").to_string())
+            .unwrap_or_else(|| "the runaway guard holds them".into());
+        if live {
             return line([
-                sp(format!(" · {say}"), YELLOW),
-                sp(
-                    format!(" · alt+h lets it through · {send_now} sends it now"),
-                    DIM,
-                ),
+                sp(" · yours go when this turn ends", DIM),
+                sp(format!(" · agents' wait: {why}"), YELLOW),
+                sp(" · alt+h lets them through", DIM),
             ]);
         }
-        // Never silently stuck: say it's held and how it goes.
         return line([
-            sp(" · held", YELLOW),
-            sp(format!(" · {send_now} sends it now"), DIM),
+            sp(format!(" · agents' wait: {why}"), YELLOW),
+            sp(
+                format!(" · alt+h lets them through · {send_now} sends it now"),
+                DIM,
+            ),
         ]);
     }
     if !q.local && q.stuck {

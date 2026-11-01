@@ -49,15 +49,29 @@ pub const HELD_FILE: &str = "guard-held.json";
 struct Kept {
     held: HashMap<String, Held>,
     moved: HashMap<String, Ms>,
+    /// Accounts past their pace, so a rush that leads next (one reloaded)
+    /// neither says so again as news nor forgets they stay past it until
+    /// back under release.
+    over: HashSet<String>,
 }
 const SPAWNS_FOR: Ms = 2 * MIN;
+
+/// A session you let through stays let through while you keep it busy:
+/// until it has sat idle this long.
+pub const LET_THROUGH_FOR: Ms = 10 * MIN;
 
 /// What the guard does to sessions and asks of the machine.
 pub trait HostOps: Send + Sync {
     /// Every rush session's host info.
     fn list(&self) -> Vec<Info>;
-    /// Holds session id's next turn, or lets it go.
+    /// Holds what would start session id's next turn without you (the
+    /// guard's hold on its queue: what you send still goes), or lets it go.
     fn hold(&self, id: &str, on: bool) -> Result<(), String>;
+    /// Lets go the hold an older rush's guard put on session id's queue
+    /// the way alt+h does, which held what you sent too.
+    fn unhold_old(&self, _id: &str) -> Result<(), String> {
+        Ok(())
+    }
     /// Has session id follow the account its agent runs on now.
     fn relogin(&self, id: &str) -> Result<(), String>;
     /// Notes an event: session id's, or rush's own when id is "".
@@ -78,7 +92,12 @@ impl HostOps for Real {
     }
     fn hold(&self, id: &str, on: bool) -> Result<(), String> {
         rush_host::Client::dial(id)
-            .and_then(|c| c.hold_queue(on))
+            .and_then(|c| c.guard_queue(on))
+            .map_err(|e| e.to_string())
+    }
+    fn unhold_old(&self, id: &str) -> Result<(), String> {
+        rush_host::Client::dial(id)
+            .and_then(|c| c.hold_queue(false))
             .map_err(|e| e.to_string())
     }
     fn relogin(&self, id: &str) -> Result<(), String> {
@@ -128,7 +147,7 @@ pub struct State {
     /// What it last decided.
     pub plan: Plan,
     /// Sessions you let through: true once the turn let through is
-    /// running.
+    /// running; they stay let through until idle for LET_THROUGH_FOR.
     pub let_through: HashMap<String, bool>,
     /// Whether you're away, as it last saw.
     pub away: bool,
@@ -188,6 +207,9 @@ pub struct Output {
     pub plan: Plan,
     pub held: HashMap<String, Held>,
     pub over: HashSet<String>,
+    /// The accounts past their pace before this look, the rush before
+    /// this one's too.
+    pub was_over: HashSet<String>,
     pub let_through: HashMap<String, bool>,
     /// Sessions to move: id, the account, why.
     pub moves: Vec<Move>,
@@ -246,6 +268,7 @@ pub fn tick(mut i: Input, ops: &dyn HostOps) -> Output {
     for (id, t) in &kept.moved {
         i.moved_at.entry(id.clone()).or_insert(*t);
     }
+    i.over.extend(kept.over.iter().cloned());
     let path = i.dir.join(guard::FILE);
     let mut h = History::load(&path);
     let mut changed = false;
@@ -259,7 +282,10 @@ pub fn tick(mut i: Input, ops: &dyn HostOps) -> Output {
         let _ = h.save(&path); // one that can't be written is read again next time
     }
     let cfg = i.settings.pace.unwrap_or_default();
-    let mut out = Output::default();
+    let mut out = Output {
+        was_over: i.over.clone(),
+        ..Output::default()
+    };
     for (a, _) in &mut i.accts {
         a.pace = guard::pace(h.of(&a.id), &cfg, i.over.contains(&a.id), now);
         out.paces.insert(a.id.clone(), a.pace);
@@ -283,7 +309,16 @@ pub fn tick(mut i: Input, ops: &dyn HostOps) -> Output {
         .collect();
     let mut seats = Vec::new();
     for x in &infos {
-        if i.held.contains_key(&x.id) && !x.queue_held {
+        if i.held.contains_key(&x.id) && !x.queue_guarded && x.queue_held {
+            // Held as an older rush's guard held it, as alt+h does, which
+            // held what you sent too: held the guard's way now.
+            if !rush_core::dryrun::would("guard-hold", &x.id, "held the guard's way now") {
+                let _ = ops.unhold_old(&x.id);
+                if let Err(e) = ops.hold(&x.id, true) {
+                    ops.log(&x.id, "guard-hold-failed", json!({"err": e}));
+                }
+            }
+        } else if i.held.contains_key(&x.id) && !x.queue_guarded {
             // You let it go yourself (alt+h): its next turn goes through.
             i.held.remove(&x.id);
             i.let_through.insert(x.id.clone(), false);
@@ -294,10 +329,14 @@ pub fn tick(mut i: Input, ops: &dyn HostOps) -> Output {
             );
         }
         if let Some(seen) = i.let_through.get_mut(&x.id) {
+            let idle_since = ms(x.idle_since);
             if x.state == "working" {
                 *seen = true;
-            } else if *seen {
-                i.let_through.remove(&x.id); // its turn has run
+            } else if *seen && (idle_since == 0 || now - idle_since >= LET_THROUGH_FOR) {
+                // Its turn has run and you've left it be: the guard looks
+                // at it again. While you keep sending it messages it stays
+                // let through, not held again after every turn.
+                i.let_through.remove(&x.id);
             }
         }
         let login = if x.login.is_empty() {
@@ -334,7 +373,18 @@ pub fn tick(mut i: Input, ops: &dyn HostOps) -> Output {
             .find(|x| x.id == *id)
             .expect("a seat is a session");
         match d {
-            Do::Go => {}
+            Do::Go => {
+                if x.queue_guarded && !i.held.contains_key(id) {
+                    // Its host keeps a hold this guard no longer has (held
+                    // before it slept, or by a rush before this one):
+                    // nothing holds it now, so it goes.
+                    if let Err(e) = ops.hold(id, false) {
+                        ops.log(id, "guard-release-failed", json!({"err": e}));
+                    } else {
+                        ops.log(id, "guard-released", json!({"why": "no longer held"}));
+                    }
+                }
+            }
             Do::Hold(hold) => {
                 if let Some(w) = i.held.get_mut(id) {
                     if w.hold.kind() != hold.kind() {
@@ -345,6 +395,18 @@ pub fn tick(mut i: Input, ops: &dyn HostOps) -> Output {
                         );
                     }
                     w.hold = hold.clone();
+                    continue;
+                }
+                if x.queue_guarded {
+                    // Its host has the guard's hold already (from before it
+                    // slept, or a rush before this one): this look's now.
+                    i.held.insert(
+                        id.clone(),
+                        Held {
+                            hold: hold.clone(),
+                            since: now,
+                        },
+                    );
                     continue;
                 }
                 if x.queue_held {
@@ -385,7 +447,7 @@ pub fn tick(mut i: Input, ops: &dyn HostOps) -> Output {
             }
             Do::Release => {
                 if let Some(was) = i.held.remove(id) {
-                    if x.queue_held
+                    if x.queue_guarded
                         && let Err(e) = ops.hold(id, false)
                     {
                         ops.log(id, "guard-release-failed", json!({"err": e}));
@@ -428,6 +490,7 @@ pub fn tick(mut i: Input, ops: &dyn HostOps) -> Output {
     let now_kept = Kept {
         held: i.held.clone(),
         moved: i.moved_at.clone(),
+        over: out.over.clone(),
     };
     if now_kept != kept {
         let _ = std::fs::write(
@@ -562,7 +625,8 @@ fn input(m: &mut Model, now: Ms) -> Input {
 /// switched to the account the plan picked, then the sessions moved.
 pub fn applied(m: &mut Model, o: Output, ops: Arc<dyn HostOps>, now: Ms) -> Out {
     let quiet = cfg(m).quiet;
-    let was_over = state(m).over.clone();
+    let mut was_over = state(m).over.clone();
+    was_over.extend(o.was_over.iter().cloned());
     let was_all = state(m).plan.all_paced.is_some();
     let was_away = state(m).away;
     let warn = cfg(m).guard.warn();

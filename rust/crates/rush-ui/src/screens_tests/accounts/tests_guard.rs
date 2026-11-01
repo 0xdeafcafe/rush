@@ -44,7 +44,7 @@ impl HostOps for Hosts {
         self.said.lock().unwrap().push(format!("hold {id} {on}"));
         for i in self.infos.lock().unwrap().iter_mut() {
             if i.id == id {
-                i.queue_held = on;
+                i.queue_guarded = on;
             }
         }
         Ok(())
@@ -426,7 +426,7 @@ fn the_cap_queues_and_releases() {
     *hosts.infos.lock().unwrap() = vec![
         busy,
         Info {
-            queue_held: true,
+            queue_guarded: true,
             ..queued
         },
     ];
@@ -464,7 +464,7 @@ fn away_tightens_and_relaxes() {
         *hosts.infos.lock().unwrap() = infos
             .iter()
             .map(|x| Info {
-                queue_held: held.contains_key(&x.id),
+                queue_guarded: held.contains_key(&x.id),
                 ..x.clone()
             })
             .collect();
@@ -533,8 +533,8 @@ fn a_held_turn_let_through() {
     *hosts.infos.lock().unwrap() = vec![working(info("w", "a")), info("h", "a")];
     let o = g::tick(input(d.path(), s.clone(), vec![], NOW), &hosts);
     assert!(o.held.contains_key("h"));
-    // You let it go (alt+h): its queue isn't held any more.
-    hosts.infos.lock().unwrap()[1].queue_held = false;
+    // You let it go (alt+h): the guard's hold is off.
+    hosts.infos.lock().unwrap()[1].queue_guarded = false;
     let mut i = input(d.path(), s.clone(), vec![], NOW + MIN);
     i.held = o.held;
     let o = g::tick(i, &hosts);
@@ -550,12 +550,57 @@ fn a_held_turn_let_through() {
     i.let_through = o.let_through;
     let o = g::tick(i, &hosts);
     assert_eq!(o.let_through.get("h"), Some(&true));
-    hosts.infos.lock().unwrap()[1].state = "idle".into();
-    let mut i = input(d.path(), s, vec![], NOW + 3 * MIN);
+    // Its turn over, you keep sending it messages: it stays let through,
+    // not held again after each turn.
+    {
+        let mut infos = hosts.infos.lock().unwrap();
+        infos[1].state = "idle".into();
+        infos[1].idle_since = Time::from_ms(NOW + 2 * MIN);
+    }
+    let mut i = input(d.path(), s.clone(), vec![], NOW + 3 * MIN);
+    i.let_through = o.let_through;
+    let o = g::tick(i, &hosts);
+    assert_eq!(o.let_through.get("h"), Some(&true));
+    assert!(!o.held.contains_key("h"));
+    // Left idle for 10 minutes: the guard holds it again.
+    let mut i = input(d.path(), s, vec![], NOW + 2 * MIN + g::LET_THROUGH_FOR);
     i.let_through = o.let_through;
     let o = g::tick(i, &hosts);
     assert!(o.let_through.is_empty());
     assert!(o.held.contains_key("h"));
+}
+
+/// A host keeping a guard hold this guard doesn't have (held before it
+/// slept, or by an older rush the way alt+h holds) is held the guard's
+/// way again, or let go when nothing holds it now.
+#[test]
+fn a_hold_the_guard_lost_is_taken_up_or_let_go() {
+    let d = tempfile::tempdir().unwrap();
+    let s = Settings {
+        cap: 1,
+        ..Settings::default()
+    };
+    let hosts = Hosts::default();
+    // Woken from sleep with the guard's hold still on, and room now.
+    *hosts.infos.lock().unwrap() = vec![Info {
+        queue_guarded: true,
+        ..info("woke", "a")
+    }];
+    let o = g::tick(input(d.path(), s.clone(), vec![], NOW), &hosts);
+    assert!(o.held.is_empty());
+    assert_eq!(hosts.said(), ["hold woke false"]);
+    assert_eq!(hosts.events("guard-released")[0].1["why"], "no longer held");
+    // At the cap, the same hold is taken up as this look's, not asked again.
+    *hosts.infos.lock().unwrap() = vec![
+        working(info("w", "a")),
+        Info {
+            queue_guarded: true,
+            ..info("woke", "a")
+        },
+    ];
+    let o = g::tick(input(d.path(), s, vec![], NOW + MIN), &hosts);
+    assert!(o.held.contains_key("woke"));
+    assert_eq!(hosts.said(), ["hold woke false"], "nothing asked of it");
 }
 
 /// The list, the header and the queue card say why a turn is held.

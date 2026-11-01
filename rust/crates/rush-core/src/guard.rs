@@ -276,6 +276,11 @@ fn spare(p: &Pace, now: Ms) -> f64 {
     (p.fair - p.burn).max(0.0) / (1.0 + hours / 24.0)
 }
 
+/// An account's agent kind, from its id (kind:id).
+fn kind_of(id: &str) -> &str {
+    id.split_once(':').map_or("", |k| k.0)
+}
+
 /// "alex resets in 4h with 38% left".
 pub fn room_said(a: &Acct, now: Ms) -> String {
     format!(
@@ -522,16 +527,37 @@ pub fn plan(
         .map(|a| a.id.clone())
         .collect();
     let release = s.pace.map_or(0.0, |c| c.release);
-    let cur = accts.iter().find(|a| a.current);
-    let mut dest: Option<&Acct> = cur.filter(|a| !over.contains(a.id.as_str()));
-    if !over.is_empty() && dest.is_none() {
-        // Clearly under its pace, and not tripped by the work it takes
-        // on (the burn of the one it leaves): of those, the one whose
-        // room would go unused soonest.
-        let load = cur.map_or(0.0, |c| c.pace.burn);
-        let trip = s.pace.map_or(f64::INFINITY, |c| c.trip);
-        dest = accts
+    let trip = s.pace.map_or(f64::INFINITY, |c| c.trip);
+    // Work only ever goes to an account of its own agent's kind: each
+    // kind's current account, or, past its pace, the one of that kind
+    // clearly under it whose room would go unused soonest (and isn't
+    // tripped by the work it takes on, the burn of the one it leaves).
+    let mut kinds: Vec<&str> = Vec::new();
+    for a in accts {
+        if !kinds.contains(&kind_of(&a.id)) {
+            kinds.push(kind_of(&a.id));
+        }
+    }
+    let mut dests: BTreeMap<&str, &Acct> = BTreeMap::new();
+    let mut paced: Vec<&str> = Vec::new();
+    for k in kinds {
+        let mine = |a: &&Acct| kind_of(&a.id) == k;
+        let cur = accts.iter().filter(mine).find(|a| a.current);
+        if let Some(c) = cur.filter(|a| !over.contains(a.id.as_str())) {
+            dests.insert(k, c);
+            continue;
+        }
+        if !accts
             .iter()
+            .filter(mine)
+            .any(|a| over.contains(a.id.as_str()))
+        {
+            continue;
+        }
+        let load = cur.map_or(0.0, |c| c.pace.burn);
+        let d = accts
+            .iter()
+            .filter(mine)
             .filter(|a| {
                 !a.current
                     && !a.borrowed
@@ -546,20 +572,28 @@ pub fn plan(
                     .total_cmp(&spare(&b.pace, now))
                     .then(b.pace.week.total_cmp(&a.pace.week))
             });
-        match dest {
-            Some(d) => p.new_on = Some(d.id.clone()),
-            None => {
-                p.all_paced = accts
-                    .iter()
-                    .filter(|a| over.contains(a.id.as_str()) && a.pace.frees_at != 0)
-                    .map(|a| a.pace.frees_at)
-                    .min()
-                    .or(Some(0));
+        match d {
+            Some(d) => {
+                dests.insert(k, d);
+                if p.new_on.is_none() {
+                    p.new_on = Some(d.id.clone());
+                    p.to_why = room_said(d, now);
+                }
             }
+            None => paced.push(k),
         }
     }
-    if let Some(d) = dest.filter(|_| !over.is_empty()) {
-        p.to_why = room_said(d, now);
+    if !paced.is_empty() {
+        p.all_paced = accts
+            .iter()
+            .filter(|a| {
+                paced.contains(&kind_of(&a.id))
+                    && over.contains(a.id.as_str())
+                    && a.pace.frees_at != 0
+            })
+            .map(|a| a.pace.frees_at)
+            .min()
+            .or(Some(0));
     }
     // The cap.
     p.cap = match (away, s.away) {
@@ -615,6 +649,8 @@ pub fn plan(
                     why,
                 })
             };
+            let dest = dests.get(kind_of(&x.login)).copied();
+            let to_why = dest.map(|d| room_said(d, now)).unwrap_or_default();
             match dest {
                 None => Do::Hold(Hold::AllPaced {
                     frees_at: p.all_paced.unwrap_or(0),
@@ -624,7 +660,7 @@ pub fn plan(
                     from: x.login.clone(),
                     cold: true,
                     context: 0,
-                    why: format!("a new session: no cache to lose · {}", p.to_why),
+                    why: format!("a new session: no cache to lose · {to_why}"),
                 },
                 Some(_) if x.moved_at != 0 && now - x.moved_at < s.move_gap => held(format!(
                     "it moved account once already in the last {}h: it waits for {}'s pace to ease",
@@ -645,7 +681,7 @@ pub fn plan(
                         "its cache is cold: its {} tokens of context are written again here or on {} alike · {}",
                         x.context,
                         name(&to.id),
-                        p.to_why
+                        to_why
                     ),
                 },
             }

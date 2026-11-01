@@ -81,6 +81,9 @@ pub enum Op {
         was: String,
     },
     HoldQueue(bool),
+    /// The runaway guard holds the queue (on), or you let it through
+    /// (off): while it holds it, only what you send yourself goes.
+    GuardQueue(bool),
     QueueSeparately(bool),
     /// Into a running subagent's inbox, for the end of its step.
     Tell {
@@ -183,6 +186,9 @@ pub struct Info {
     /// Each queued message's images.
     pub queue_images: Vec<Vec<String>>,
     pub queue_held: bool,
+    /// The runaway guard holds it: what starts without you waits, what
+    /// you send goes.
+    pub queue_guarded: bool,
     /// When the queue got stuck behind a turn that can't take a message
     /// (Kimi's), which may not end for hours; 0 when it isn't
     /// (Info.QueueStuck).

@@ -74,6 +74,36 @@ pub fn join_queue(items: &[String]) -> String {
     b
 }
 
+/// text with each image marker, [Image #n], numbered as to(n) says; one
+/// to says None of reads "[image no longer there]". Queued messages each
+/// number their images from 1: joined, they're numbered on.
+pub fn renumber(text: &str, to: impl Fn(usize) -> Option<usize>) -> String {
+    const OPEN: &str = "[Image #";
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find(OPEN) {
+        out.push_str(&rest[..i]);
+        let after = &rest[i + OPEN.len()..];
+        let digits = after.bytes().take_while(u8::is_ascii_digit).count();
+        let n = after[..digits].parse::<usize>().ok();
+        match n.filter(|_| after[digits..].starts_with(']')) {
+            Some(n) => {
+                match to(n) {
+                    Some(m) => out.push_str(&format!("[Image #{m}]")),
+                    None => out.push_str("[image no longer there]"),
+                }
+                rest = &after[digits + 1..];
+            }
+            None => {
+                out.push_str(OPEN);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// How many of queue q go now: all, or one when separate. A command
 /// (/compact, /clear…) goes alone, and what was queued after it waits for
 /// it to finish: joined to other text it's only words.
@@ -99,6 +129,21 @@ pub fn is_command(t: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Joined queued messages number their images on; an image gone says so.
+    #[test]
+    fn image_markers_renumbered() {
+        assert_eq!(
+            renumber("a [Image #1] b [Image #2] [Image #x] end [Image #3", |n| {
+                Some(n + 2)
+            }),
+            "a [Image #3] b [Image #4] [Image #x] end [Image #3"
+        );
+        assert_eq!(
+            renumber("[Image #1][Image #2]", |n| (n == 2).then_some(1)),
+            "[image no longer there][Image #1]"
+        );
+    }
 
     // name_test.go:5
     #[test]

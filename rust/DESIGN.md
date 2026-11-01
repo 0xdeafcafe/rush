@@ -806,7 +806,13 @@ UI thread, and does what it says.
   1.2×). When it frees up is worked out from its use ageing out of
   the 2 hours and its fair share growing as the reset nears. A provider
   without readings has no pace: only the cap and away cover it, as its
-  row says.
+  row says. A month-long window (Copilot's premium requests) is paced
+  the same way, over the days to its reset: its fair share is small
+  (88% left over 29 days is 0.13%/h), so a day's real use there reads
+  as tens of times its pace, and it is past its pace. Nothing of
+  another agent's runs on it, so it holds only its own sessions.
+  Accounts past their pace are kept in `guard-held.json` too, so a
+  reloaded rush doesn't say they tripped again.
 - **The cap**: agents working at once. A rush session's turn counts 1,
   each subagent in it 1 (its host's tasks not in the background), each
   background agent or workflow 1; background shells 0. Agents rush
@@ -817,23 +823,50 @@ UI thread, and does what it says.
   each session's running turn finishes, then holds; one on #away
   (keep working while I'm away) carries on.
 
-What trips never cuts a turn. A session's next turn is held with its
-host's queue hold (Op::HoldQueue, as alt+h): a message sent meanwhile
-queues, held, idle or not (Rust-only: a host held while idle queues too;
-sent now, it goes). What the guard holds and has moved is kept in
+What trips never cuts a turn, and never holds what you send yourself.
+A message you send goes: the guard holds only work that starts without
+you. Its hold is the host's guard hold (`Op::GuardQueue`, `queue_guard`,
+`Info::queue_guarded`), apart from yours (alt+h, `Op::HoldQueue`,
+`queue_held`): while it holds a session, a message with no exchange
+(yours, typed or answered) goes as it would, at once while idle, at the
+turn's end while working; another agent's message (an exchange) or
+rush's own waits in the queue (`wire::queue_ready`). The queue card
+says so ("yours go when this turn ends · agents' wait: past your pace
+on alex · 3.1× · alt+h lets them through"). A Claude Code turn its own
+background work starts isn't a message, and isn't held.
+
+`s` on a queued message, and the send-now key, always send now,
+whatever holds the queue, yours or the guard's: idle, it goes at once;
+mid-turn, the turn is stopped and it goes when it ends. Only what you
+sent now goes then (`go_now` in the host): the hold stays for the
+rest. A message the agent doesn't take (an image it can't read) is a
+`deliver-failed` event and the session's error, and a turn it was to
+start isn't left "working" with nothing running (which had a queue
+wait for a turn's end that never came, and a send now stop nothing). A
+queued image is sent from the copy made when it was queued, else from
+where you put it; one gone from both is left out (`image-gone`), its
+marker saying so, rather than keeping the queue from going. Joined,
+each queued message's images are numbered on, so each marker still
+names its own image.
+
+What the guard holds, has moved and has past its pace is kept in
 `guard-held.json`, so the next rush to lead lets go of its holds and
-not of yours; it looks only once the accounts have been read. The guard only lets go of what it held; alt+h on it lets
-the next turn through (it isn't held again until that turn has run),
-ctrl+enter sends one now. Held for the cap, sessions go again in the
-order held as room frees.
+not of yours; it looks only once the accounts have been read. A host
+that keeps a guard hold the guard no longer has (held before it slept)
+is held again or let go at the next look; one held the old way, as
+alt+h, is held the guard's way. alt+h on a session the guard holds lets
+it through: it isn't held again while you keep it busy, until it has
+sat idle for 10 minutes (`LET_THROUGH_FOR`). Held for the cap,
+sessions go again in the order held as room frees.
 
 Moves: when the account in use trips, new sessions switch (new sessions
 only, as `n` does) to the account under `release` that the work it'd
 take on (the tripped one's burn) wouldn't trip, of those the one whose
 room would go unused soonest ((fair − burn) ÷ (1 + hours to reset ÷
 24)), so room that would be lost at a reset days away counts for less;
-the event says why ("bob resets in 4h with 38% left"). With none, work
-waits. Then each session on a tripped account: a new one (no turns)
+the event says why ("bob resets in 4h with 38% left"). Work only ever
+moves to an account of its own agent's kind: a Claude session never to
+a Copilot account. With none of its kind, work waits. Then each session on a tripped account: a new one (no turns)
 moves; one whose prompt cache is warm (`Info::cache_warm`) waits, as a
 move writes its whole context again at full price; a cold one moves
 (`relogin`), at most once in `moveHours` (6); one that moved already
@@ -842,7 +875,7 @@ moves to an account the guard has past its pace.
 
 A session on an account past its pace is also refused new subagents and
 workflows (`Plan::spawns_for`: the sessions on a tripped account, minus
-any you let through with alt+h, whose spawns go until that turn has run;
+any you let through with alt+h, whose spawns go while you keep it busy;
 released, under 1.2×, lifts it). The refusal says plainly that the
 user's runaway guard is pausing new agents because the account is past
 its pace, and to finish the current work without starting new ones. It

@@ -1167,6 +1167,39 @@ fn queue_edits() {
     }
 }
 
+/// The runaway guard's hold on a queue: s still sends the picked message
+/// now; h (as alt+h) lets the rest through, the guard's hold off rather
+/// than yours on; the card says yours go and agents' wait.
+#[test]
+fn a_guard_held_queue_still_sends() {
+    let (mut m, fake) = hosted(
+        "steer",
+        vec![Said::Info(Info {
+            queue: vec!["a".into(), "b".into(), "c".into()],
+            queue_guarded: true,
+            ..Info::default()
+        })],
+    );
+    let q = super::queue::queue_of(&mut m, KEY);
+    let card = super::queue::when(&mut m, KEY, &q).plain();
+    assert!(card.contains("agents' wait"), "{card}");
+    assert!(card.contains("alt+h lets them through"), "{card}");
+    press(&mut m, "up");
+    press(&mut m, "up");
+    press(&mut m, "s");
+    assert_eq!(
+        fake.ops(),
+        [Op::SendQueued {
+            i: 1,
+            was: "b".into()
+        }]
+    );
+    press(&mut m, "h");
+    assert_eq!(fake.ops().last(), Some(&Op::GuardQueue(false)));
+    let c = conn(&mut m, KEY);
+    assert!(!c.info.queue_guarded && !c.info.queue_held);
+}
+
 /// alt+m on a picked queued message merges it, as m does, rather than
 /// opening what the next session starts as (keys.go:168,
 /// sessionviews.go:110).

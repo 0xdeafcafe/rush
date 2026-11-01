@@ -426,7 +426,10 @@ fn send_now_mid_turn_cuts_in() {
     }))
     .unwrap();
     assert_eq!(queue(&h), "b|a|now");
-    assert!(!h.lock().info.queue_held);
+    // Rust-only: what you sent now goes when the turn ends; the hold
+    // stays for whatever's queued after it.
+    assert!(h.lock().info.queue_held);
+    assert_eq!(h.lock().go_now, 3);
     assert_eq!(c.stops.load(Ordering::SeqCst), 2);
 }
 
@@ -1637,4 +1640,194 @@ fn info_is_written_at_once_for_a_change_readers_act_on() {
     st.info.detail = "four".into();
     h.publish(&mut st);
     assert_eq!(file().detail, "four");
+}
+
+// "s does nothing": s on a queued message sends it at once while idle,
+// whether you hold the queue (alt+h) or the runaway guard does; the hold
+// stays for the rest.
+#[test]
+fn s_sends_a_queued_message_while_held() {
+    for guard in [false, true] {
+        let _home = Home::new();
+        let h = host(Config {
+            id: format!("sh{guard}"),
+            kind: "claude".into(),
+            ..Config::default()
+        });
+        let c = Arc::new(Kept::default());
+        with_conn(&h, c.clone());
+        {
+            let mut st = h.lock();
+            st.info.state = "idle".into();
+            st.info.queue = vec!["a".into(), "b".into()];
+            if guard {
+                st.info.queue_guarded = true;
+                st.info.queue_exchanges = vec![
+                    Some(Box::new(exchange("x", "a", "codex"))),
+                    Some(Box::new(exchange("y", "b", "codex"))),
+                ];
+            } else {
+                st.info.queue_held = true;
+            }
+        }
+        h.do_op(op("queue_send", |o| {
+            o.index = 1;
+            o.was = "b".into();
+        }))
+        .unwrap();
+        assert_eq!(
+            c.got.lock().unwrap().last().unwrap().text,
+            "b",
+            "guard {guard}"
+        );
+        assert_eq!(queue(&h), "a");
+        let st = h.lock();
+        assert!(
+            st.info.queue_held || st.info.queue_guarded,
+            "the hold stays"
+        );
+        assert!(!h.ready(&st), "the rest stays held");
+    }
+}
+
+// Mid-turn, s stops the turn; when it ends only that message goes, the
+// rest still held.
+#[test]
+fn s_mid_turn_sends_only_that_message() {
+    let _home = Home::new();
+    let h = host(Config {
+        id: "sm".into(),
+        kind: "claude".into(),
+        ..Config::default()
+    });
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    {
+        let mut st = h.lock();
+        st.info.state = "working".into();
+        st.info.queue = vec!["a".into(), "b".into()];
+        st.info.queue_held = true;
+    }
+    h.do_op(op("queue_send", |o| {
+        o.index = 1;
+        o.was = "b".into();
+    }))
+    .unwrap();
+    assert_eq!(c.stops.load(Ordering::SeqCst), 1);
+    assert_eq!(queue(&h), "b|a");
+    h.lock().info.state = "idle".into(); // the stopped turn ends
+    assert!(h.ready(&h.lock()));
+    h.send_queue(&mut h.lock());
+    assert_eq!(c.got.lock().unwrap().last().unwrap().text, "b");
+    assert_eq!(queue(&h), "a");
+    let st = h.lock();
+    assert!(st.info.queue_held && !h.ready(&st));
+}
+
+// The runaway guard's hold holds only what starts without you: another
+// agent's message waits; yours goes, at once while idle, at the turn's
+// end while working; let through, the rest goes.
+#[test]
+fn the_guard_holds_only_what_starts_without_you() {
+    let _home = Home::new();
+    let h = host(Config {
+        id: "gy".into(),
+        kind: "claude".into(),
+        ..Config::default()
+    });
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    {
+        let mut st = h.lock();
+        st.info.state = "idle".into();
+        st.info.queue_guarded = true;
+    }
+    let e = exchange("x", "from codex", "codex");
+    h.send_exchange(&e.text, &[], false, Some(Box::new(e.clone())), "")
+        .unwrap();
+    assert_eq!(queue(&h), "from codex");
+    assert!(c.got.lock().unwrap().is_empty());
+    h.send("mine", &[], false).unwrap();
+    assert_eq!(c.got.lock().unwrap().last().unwrap().text, "mine");
+    assert_eq!(queue(&h), "from codex");
+    // Working: yours queues behind it, and only yours goes at the end.
+    h.send("later", &[], false).unwrap();
+    assert_eq!(queue(&h), "from codex|later");
+    h.lock().info.state = "idle".into();
+    assert!(h.ready(&h.lock()));
+    h.send_queue(&mut h.lock());
+    assert_eq!(c.got.lock().unwrap().last().unwrap().text, "later");
+    assert_eq!(queue(&h), "from codex");
+    // Nothing of yours left: nothing goes, and it isn't "stuck".
+    h.lock().info.state = "idle".into();
+    assert!(!h.ready(&h.lock()));
+    // Let through (alt+h): it goes.
+    h.do_op(op("queue_guard", |o| o.now = false)).unwrap();
+    assert_eq!(c.got.lock().unwrap().last().unwrap().text, "from codex");
+    assert_eq!(queue(&h), "");
+}
+
+// A message the agent doesn't take leaves the session idle with its
+// queue, not "working" on a turn that never ends; the error is said.
+#[test]
+fn a_message_not_taken_leaves_the_session_idle() {
+    let _home = Home::new();
+    let h = host(Config {
+        id: "nt".into(),
+        kind: "claude".into(),
+        ..Config::default()
+    });
+    with_conn(&h, Arc::new(Refuses));
+    {
+        let mut st = h.lock();
+        st.info.state = "idle".into();
+        st.info.queue = vec!["a".into()];
+    }
+    h.send_queue(&mut h.lock());
+    let st = h.lock();
+    assert_eq!(st.info.state, "idle");
+    assert_eq!(st.info.queue, vec!["a".to_string()]);
+    assert!(st.info.error.contains("rejected"), "{}", st.info.error);
+}
+
+// A queued image goes from where you put it when its copy is gone; one
+// gone from both is left out, its marker saying so, and the rest goes.
+// Joined, each message's images are numbered on.
+#[test]
+fn queued_images_survive_a_lost_copy() {
+    let _home = Home::new();
+    let d = tempfile::tempdir().unwrap();
+    let pic = d.path().join("shot.jpg").to_string_lossy().into_owned();
+    let gone = d.path().join("gone.jpg").to_string_lossy().into_owned();
+    std::fs::write(&pic, "jpeg").unwrap();
+    std::fs::write(&gone, "jpeg").unwrap();
+    let h = host(Config {
+        id: "ig".into(),
+        kind: "claude".into(),
+        ..Config::default()
+    });
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    h.lock().info.state = "working".into();
+    h.send("one [Image #1]", std::slice::from_ref(&pic), false)
+        .unwrap();
+    h.send("two [Image #1]", std::slice::from_ref(&gone), false)
+        .unwrap();
+    std::fs::remove_file(&gone).unwrap();
+    h.lock().pics.insert(
+        pic.clone(),
+        d.path().join("copy.webp").to_string_lossy().into_owned(),
+    );
+    h.lock().info.state = "idle".into();
+    h.send_queue(&mut h.lock());
+    let got = c.got.lock().unwrap();
+    let last = got.last().unwrap();
+    assert_eq!(last.images, vec![pic]);
+    assert!(last.text.contains("one [Image #1]"), "{}", last.text);
+    assert!(
+        last.text.contains("two [image no longer there]"),
+        "{}",
+        last.text
+    );
+    assert_eq!(h.lock().info.state, "working");
 }

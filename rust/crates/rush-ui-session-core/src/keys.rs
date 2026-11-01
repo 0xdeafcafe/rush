@@ -249,8 +249,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         }
         "alt+h" => {
             conn(m, &key).edit_held = false; // yours now, not the edit's
-            let held = queue_of(m, &key).held;
-            queue::hold(m, &key, !held);
+            queue::hold_key(m, &key);
             return Out::Draw;
         }
         "left" => {
