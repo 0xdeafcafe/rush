@@ -823,19 +823,20 @@ fn a_decisions_card_leaves_the_box_on_a_small_screen() {
 /// clickQuestion).
 #[test]
 fn clicks_on_the_decisions_card() {
-    // In the dock while the conversation is read, then on its end.
-    for read in [false, true] {
-        clicks_on_the_decisions_card_when(read);
+    // In the dock while the conversation is read, then on its end: with
+    // no turns yet (under "nothing yet"), and after some.
+    for (read, turns) in [(false, 0), (true, 0), (true, 30)] {
+        clicks_on_the_decisions_card_when(read, turns);
     }
 }
 
-fn clicks_on_the_decisions_card_when(read: bool) {
+fn clicks_on_the_decisions_card_when(read: bool, turns: usize) {
     use super::tests::{screen, sess};
     let (mut m, _fake) = super::tests::hosted("steer", Vec::new());
     m.cards().host = Some(super::cards_host::host());
     if read {
         let now = m.now;
-        for i in 0..30 {
+        for i in 0..turns {
             sess(&mut m).sent(format!("message {i}"), Vec::new(), now);
         }
         m.session.as_mut().unwrap().read = true;
@@ -848,6 +849,10 @@ fn clicks_on_the_decisions_card_when(read: bool) {
         .position(|r| r.contains("2  light"))
         .unwrap_or_else(|| panic!("no option\n{}", f.join("\n")));
     let x = f[y].find("light").unwrap();
+    // The card's first row is where clicks reckon it is.
+    let head = f.iter().position(|r| r.contains("? decide")).unwrap();
+    let (top, _, _) = crate::screens::session_cards::card_top(&m, KEY);
+    assert_eq!(top, head as isize, "read {read}, {turns} turns");
     let click = |m: &mut Model| {
         m.mouse_event(&crate::frame::Mouse {
             kind: rush_draw::MouseKind::Down(rush_draw::Button::Left),
@@ -1019,4 +1024,64 @@ fn m_on_the_finishing_card_asks_how_to_merge() {
     assert!(m.kept::<Data>().merging.is_empty(), "nothing merging yet");
     press(&mut m, "esc");
     assert!(m.confirm.is_none() && m.kept::<Data>().merging.is_empty());
+}
+
+/// A card scrolled with the conversation takes clicks only where it's in
+/// sight: not on the box under it once scrolled away below, nor on the
+/// pinned prompt over its top (panelClip, rushmode.go:2765).
+#[test]
+fn clicks_miss_a_card_out_of_sight() {
+    use super::tests::{press, screen, sess};
+    let (mut m, _fake) = super::tests::hosted("steer", Vec::new());
+    m.cards().host = Some(super::cards_host::host());
+    m.w = 100;
+    m.h = 30;
+    let now = m.now;
+    let end = rush_core::event::Event::TurnEnd(rush_core::event::TurnEnd::default());
+    for i in 0..30 {
+        sess(&mut m).sent(format!("message {i}"), Vec::new(), now);
+        sess(&mut m).apply(&end, now);
+    }
+    m.session.as_mut().unwrap().read = true;
+    conn(&mut m, KEY).info.now.decisions =
+        crate::screens::session_cards::question::decisions_of(FAKE_DECIDE, "d1");
+    let click = |m: &mut Model, y: usize| {
+        m.mouse_event(&crate::frame::Mouse {
+            kind: rush_draw::MouseKind::Down(rush_draw::Button::Left),
+            x: 10,
+            y: y as u16,
+            mods: Default::default(),
+        });
+        screen(m);
+    };
+    // The pin over the card's top.
+    let s = screen(&mut m);
+    let pin = s
+        .iter()
+        .position(|l| l.contains("latest  message 29"))
+        .unwrap_or_else(|| panic!("no pin\n{}", s.join("\n")));
+    let (top, _, _) = crate::screens::session_cards::card_top(&m, KEY);
+    assert!(top < pin as isize, "the card's top is under the pin");
+    let (_, floor, _) = crate::screens::session_cards::card_top(&m, KEY);
+    assert_eq!(floor, pin + 1, "clicks on the card start under the pin");
+    click(&mut m, pin);
+    assert!(!m.cards().conns[KEY].card_focus, "the pin isn't the card");
+    // Scrolled up, the card is below the view: the box isn't it.
+    press(&mut m, "pgup");
+    let s = screen(&mut m);
+    let boxed = s
+        .iter()
+        .position(|l| l.contains("a message for this agent"))
+        .unwrap();
+    let (top, _, _) = crate::screens::session_cards::card_top(&m, KEY);
+    let n = m.cards().conns[KEY].q_rows.len() as isize;
+    assert!(
+        top <= boxed as isize && (boxed as isize) < top + n,
+        "the hidden card would be under the box: {top} {boxed} {n}"
+    );
+    let (_, _, ceil) = crate::screens::session_cards::card_top(&m, KEY);
+    assert!(ceil <= boxed, "clicks on the card stop at the view's foot");
+    click(&mut m, boxed);
+    let c = &m.cards().conns[KEY];
+    assert!(!c.card_focus && c.q_click == 0, "the box isn't the card");
 }

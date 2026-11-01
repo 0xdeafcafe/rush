@@ -696,15 +696,26 @@ pub fn card_at(m: &mut Model, key: &str, off: usize, in_panels: bool) {
 }
 
 /// The card's first row on screen as last drawn (it may sit above the
-/// pane's top, scrolled up past it), and the first screen row a click on
-/// it can land on.
-pub fn card_top(m: &Model, key: &str) -> (isize, usize) {
+/// pane's top, scrolled up past it), and the screen rows a click on it
+/// can land on, [from, to): on the conversation's rows in sight, below a
+/// pinned prompt, when it scrolls with them (panelClip, rushmode.go:2765;
+/// question.go:562).
+pub fn card_top(m: &Model, key: &str) -> (isize, usize, usize) {
     let Some(c) = conn_ref(m, key) else {
-        return (0, 0);
+        return (0, 0, 0);
     };
     match m.session.as_ref().filter(|v| v.key == key) {
-        Some(v) if c.card_in_panels => (v.top as isize + v.panels_at + c.card_off as isize, v.top),
-        _ => ((m.session_dock_top + c.card_off) as isize, 0),
+        Some(v) if c.card_in_panels => {
+            let pinned = v.shown.first().is_some_and(|r| {
+                r.starts_with(crate::screens::session_core::conversation::PIN_REF)
+            });
+            (
+                v.top as isize + v.panels_at + c.card_off as isize,
+                v.top + usize::from(pinned),
+                v.top + v.shown.len(),
+            )
+        }
+        _ => ((m.session_dock_top + c.card_off) as isize, 0, usize::MAX),
     }
 }
 

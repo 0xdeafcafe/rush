@@ -117,7 +117,9 @@ fn make(tx: Option<Sender<Note>>, path: &str, w: usize, h: usize, look: Look) ->
             return s.clone();
         }
         if c.len() >= KEEP {
-            c.clear(); // made again as they're drawn
+            // Made again as they're drawn; those being made stay, so
+            // they're not made twice.
+            c.retain(|_, s| s.is_none());
         }
         c.insert(k.clone(), None);
     }

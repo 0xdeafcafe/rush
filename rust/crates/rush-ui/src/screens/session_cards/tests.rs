@@ -759,7 +759,7 @@ fn question_full_view_and_clicks() {
 
     m.cards().conns.get_mut("k").unwrap().q_cursor = 0;
     draw(&mut m);
-    let (top, _) = super::card_top(&m, "k");
+    let (top, _, _) = super::card_top(&m, "k");
     let c = &m.cards().conns["k"];
     let row = c
         .q_hit

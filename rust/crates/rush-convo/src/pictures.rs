@@ -150,7 +150,8 @@ mod tests {
     use super::*;
     use crate::{Options, Renderer, Session};
 
-    /// Only these tests' own files are made: the maker is the process's.
+    /// Only these tests' own files are made: set_maker stays set for the
+    /// whole test process, so every other test's images stay chips.
     fn maker(path: &str, w: usize, h: usize, look: Look) -> Option<Arc<Vec<Line>>> {
         let row = |c: &str, n: usize| Line::from_spans(vec![Span::plain(c.repeat(n))]);
         match (path, look) {

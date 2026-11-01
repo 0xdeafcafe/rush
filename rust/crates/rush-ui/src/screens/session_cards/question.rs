@@ -1768,10 +1768,10 @@ fn done(m: &mut Model, key: &str, c: &mut Conn, acts: Vec<Act>) -> Out {
 /// click on it picks it; on a key in its hints, it presses that key. One
 /// click never answers a question (clickQuestion, clickCard).
 pub fn click(m: &mut Model, key: &str, i: &HostInfo, x: usize, y: usize) -> Out {
-    let (top, floor) = super::card_top(m, key);
+    let (top, floor, ceil) = super::card_top(m, key);
     let c = take(m, key);
     let pane_x = 2;
-    if (y as isize) < top || y < floor || c.q_rows.is_empty() && c.btns.is_empty() {
+    if (y as isize) < top || y < floor || y >= ceil || c.q_rows.is_empty() && c.btns.is_empty() {
         put(m, key, c);
         return Out::Pass;
     }
