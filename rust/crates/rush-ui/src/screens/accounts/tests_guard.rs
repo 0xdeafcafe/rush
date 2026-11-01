@@ -258,7 +258,7 @@ fn new_sessions_switch_then_sessions_move() {
     m.now = NOW;
     set_store(&mut m, Store::default());
     let said: Said = Default::default();
-    let v = Arc::new(Vault(said.clone()));
+    let v = Arc::new(Vault(said.clone(), false));
     use_keeper(&mut m, v);
     for id in ["a", "b"] {
         let l = Login {
@@ -303,8 +303,51 @@ fn new_sessions_switch_then_sessions_move() {
     assert!(g::peek_state(&m).unwrap().moved_at.contains_key("cold"));
 }
 
+/// A switch that fails moves nothing.
+#[test]
+fn no_move_when_the_switch_fails() {
+    let d = tempfile::tempdir().unwrap();
+    rush_state::set_thread_dir(Some(d.path().to_path_buf()));
+    let mut m = Model::new("0.1.0");
+    m.reg = rush_core::adapter::Registry::new();
+    m.clock = Some(NOW);
+    m.now = NOW;
+    set_store(&mut m, Store::default());
+    let said: Said = Default::default();
+    use_keeper(&mut m, Arc::new(Vault(said.clone(), true)));
+    for id in ["a", "b"] {
+        accounts(&mut m).logins.push(LoginView {
+            login: Login {
+                id: id.into(),
+                name: id.into(),
+                ..Login::default()
+            },
+            current: id == "a",
+            ..LoginView::default()
+        });
+    }
+    let hosts = Arc::new(Hosts {
+        said: said.clone(),
+        ..Hosts::default()
+    });
+    let mut o = g::Output::default();
+    o.plan.new_on = Some(key("b"));
+    o.moves = vec![Move {
+        id: "cold".into(),
+        from: key("a"),
+        to: key("b"),
+        cold: true,
+        context: 1,
+        why: String::new(),
+    }];
+    g::applied(&mut m, o, hosts.clone(), NOW);
+    let s = said.lock().unwrap().clone();
+    assert!(!s.iter().any(|x| x.starts_with("relogin")), "{s:?}");
+    assert_eq!(hosts.events("guard-move-skipped").len(), 1);
+}
+
 #[derive(Default)]
-struct Vault(Said);
+struct Vault(Said, bool);
 
 impl LoginKeeper for Vault {
     fn find_logins(&self, _: &Config) -> FoundLogins {
@@ -320,6 +363,9 @@ impl LoginKeeper for Vault {
         String::new()
     }
     fn use_login(&self, _: &Config, l: &Login) -> std::io::Result<()> {
+        if self.1 {
+            return Err(std::io::Error::other("no keychain here"));
+        }
         self.0.lock().unwrap().push(format!("use {}", l.id));
         Ok(())
     }

@@ -606,7 +606,33 @@ pub(crate) fn applied(m: &mut Model, o: Output, ops: Arc<dyn HostOps>, now: Ms) 
     let moves = o.moves;
     if let Some(to) = &plan.new_on {
         let why = format!("the guard: {}", plan.to_why);
-        return switch_to(m, to, &why, Box::new(move |m| move_all(m, moves, ops, now)));
+        // Sessions move only once new ones start there: a switch that
+        // failed leaves them where they are.
+        let kind = to.split_once(':').map_or("", |k| k.0).to_string();
+        let was = move |m: &Model| {
+            if kind == LOGINS_KIND {
+                Some(peek(m).login_switched_at)
+            } else {
+                peek(m).switched_at.get(&kind).copied()
+            }
+        };
+        let before = was(m);
+        return switch_to(
+            m,
+            to,
+            &why,
+            Box::new(move |m| {
+                if was(m) == before {
+                    ops.log(
+                        "",
+                        "guard-move-skipped",
+                        json!({"why": "new sessions couldn't be switched to its account"}),
+                    );
+                    return Out::Draw;
+                }
+                move_all(m, moves, ops, now)
+            }),
+        );
     }
     if !moves.is_empty() {
         return move_all(m, moves, ops, now);
