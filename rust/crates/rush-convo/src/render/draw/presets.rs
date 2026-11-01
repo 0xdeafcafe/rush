@@ -589,6 +589,15 @@ impl Drawer<'_> {
                     let imgs = image_names(&x.images);
                     self.you_bubble(x.text.trim(), &imgs, "while it worked");
                 }
+                // A drawing shown with rush's show tool is part of what it
+                // said: drawn in its place between the bubbles.
+                Item::Step(id) if shown(self.s.step(*id)) => {
+                    if !said.is_empty() {
+                        self.agent_bubble(&said, false);
+                        said.clear();
+                    }
+                    self.step(*id, 0);
+                }
                 _ => {}
             }
         }
@@ -920,6 +929,15 @@ impl Drawer<'_> {
         }
         for id in &checks {
             self.check_row(*id, &checks);
+        }
+        // A drawing shown with rush's show tool is part of the reply, never
+        // left out: under the turn's changes.
+        for it in &t.items {
+            if let Item::Step(id) = it
+                && shown(self.s.step(*id))
+            {
+                self.step(*id, 0);
+            }
         }
         if t.live {
             let mut l = self.sp(1).and(paint(C_ORANGE, "✱ working"));
