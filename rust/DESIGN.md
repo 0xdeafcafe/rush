@@ -1522,7 +1522,10 @@ config.json as `convoView` ("" is Normal). Each answers one question:
   asks) with `[answer]`, Done (each answer's first sentence, no model
   call), Changed, Checks, Said to you (the rest of the last answer),
   Still going (running steps and background tasks). Never looked: the
-  last four turns. "Last looked" is kept per session in the UI
+  last four turns. A turn is new when it did anything after that: its
+  end, or its last step's when the end came over an hour later (a turn
+  left open is ended when rush reads it). "Last looked" is kept per
+  session in the UI
   (session-core conversation.rs `looked_since`): a look runs while the
   conversation is drawn frame after frame (`Model::frames`); one begun
   after a frame without it, 30 s or more later, starts from the end of

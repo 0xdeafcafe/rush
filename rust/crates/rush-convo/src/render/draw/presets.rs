@@ -43,19 +43,88 @@ const QUICK: Ms = 10_000;
 /// so it holds whichever agent ran it.
 pub fn check_names(cmd: &str) -> Vec<&'static str> {
     let mut out = Vec::new();
-    for seg in cmd.split(['\n', ';', '|', '&']) {
-        let words: Vec<&str> = seg
-            .split_whitespace()
-            .map(|w| w.trim_matches(['(', ')', '"', '\'', '`']))
-            .filter(|w| !w.is_empty())
-            .collect();
-        if let Some(n) = check_in(&words)
+    for seg in segments_of(cmd) {
+        if let Some(n) = check_in(&words_of(seg))
             && !out.contains(&n)
         {
             out.push(n);
         }
     }
     out
+}
+
+/// The command's parts as the shell runs them, split at ; | & and new
+/// lines; a heredoc's body is the program's input, not commands, and is
+/// left out.
+fn segments_of(cmd: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut until: Option<String> = None;
+    for line in cmd.split('\n') {
+        if let Some(end) = &until {
+            if line.trim() == end {
+                until = None;
+            }
+            continue;
+        }
+        if let Some(at) = line.find("<<") {
+            let w = line[at + 2..]
+                .trim_start_matches(['-', '~'])
+                .trim_start()
+                .split(|c: char| c.is_whitespace() || c == ';' || c == ')')
+                .next()
+                .unwrap_or("")
+                .trim_matches(['\'', '"']);
+            if !w.is_empty() && !w.starts_with('<') {
+                until = Some(w.to_string());
+            }
+        }
+        // At ; | and &, but not the & of a redirect (2>&1, &>).
+        let b = line.as_bytes();
+        let mut from = 0;
+        for (i, &c) in b.iter().enumerate() {
+            let redirect = c == b'&' && (i > 0 && b[i - 1] == b'>' || b.get(i + 1) == Some(&b'>'));
+            if matches!(c, b';' | b'|' | b'&') && !redirect {
+                out.push(&line[from..i]);
+                from = i + 1;
+            }
+        }
+        out.push(&line[from..]);
+    }
+    out
+}
+
+/// A command without the cd it starts with (cd dir && or cd dir;): what
+/// it runs, said short.
+fn no_cd(cmd: &str) -> &str {
+    static CD: LazyLock<Regex> =
+        LazyLock::new(|| re(r#"^cd\s+("[^"]+"|'[^']+'|\S+?)\s*(?:&&|;)\s*"#));
+    let cmd = cmd.trim();
+    match CD.find(cmd) {
+        Some(m) => &cmd[m.end()..],
+        None => cmd,
+    }
+}
+
+/// A part's words, quotes and brackets trimmed off.
+fn words_of(seg: &str) -> Vec<&str> {
+    seg.split_whitespace()
+        .map(|w| w.trim_matches(['(', ')', '"', '\'', '`']))
+        .filter(|w| !w.is_empty())
+        .collect()
+}
+
+/// The part of a command that runs its first check, as a check line
+/// names it (cargo test -p x, not the cd before it); the first line when
+/// none does.
+fn check_command(cmd: &str) -> String {
+    segments_of(cmd)
+        .into_iter()
+        .find(|seg| check_in(&words_of(seg)).is_some())
+        .map(|seg| {
+            let seg = seg.trim();
+            one_line(seg.strip_suffix("2>").unwrap_or(seg).trim_end())
+        })
+        .unwrap_or_else(|| one_line(first_line(no_cd(cmd))))
 }
 
 /// The check a command's words run, if any: the first tool that is one.
@@ -144,13 +213,34 @@ pub(crate) fn catch_from(s: &Session, since: Ms) -> (usize, bool) {
     let mut i = n;
     while i > 0 && n - i < CATCH_MOST {
         let t = &s.turns[i - 1];
-        if t.live || t.end.max(t.start) > since {
+        if t.live || last_heard(s, t) > since {
             i -= 1;
         } else {
             break;
         }
     }
     if i == n { (n - 1, false) } else { (i, true) }
+}
+
+/// When turn t last did anything: its end, unless that came over an hour
+/// after its last step (a turn left open, ended when rush read it), then
+/// its last step's.
+fn last_heard(s: &Session, t: &Turn) -> Ms {
+    let steps = t
+        .steps
+        .iter()
+        .map(|&id| {
+            let st = s.step(id);
+            st.end.max(st.start)
+        })
+        .max()
+        .unwrap_or(0)
+        .max(t.start);
+    if t.end > steps + 3_600_000 && !t.steps.is_empty() {
+        steps
+    } else {
+        t.end.max(t.start)
+    }
 }
 
 /// The first sentence of s as plain words: its first line up to the end
@@ -166,9 +256,27 @@ fn first_sentence(s: &str) -> String {
     line.trim_end_matches(':').to_string()
 }
 
+/// s as plain words on one line: markdown's marks, list bullets and
+/// headings' hashes taken off.
+fn flat(s: &str) -> String {
+    let lines: Vec<String> = s
+        .lines()
+        .map(|l| {
+            let l = l.trim_start();
+            let l = l.trim_start_matches('#').trim_start();
+            let l = ["- ", "* ", "• ", "> "]
+                .iter()
+                .find_map(|b| l.strip_prefix(b))
+                .unwrap_or(l);
+            crate::text::strip_marks(l)
+        })
+        .collect();
+    one_line(&lines.join(" "))
+}
+
 /// What follows the first sentence of s, on one line.
 fn after_first(s: &str) -> String {
-    let flat = one_line(&crate::text::strip_marks(s.trim()));
+    let flat = flat(s.trim());
     let first = first_sentence(s);
     match flat.find(first.trim_end_matches(':')) {
         Some(at) => flat[at + first.trim_end_matches(':').len()..]
@@ -929,7 +1037,7 @@ impl Drawer<'_> {
         } else {
             paint(C_GREEN, "✓")
         };
-        let cmd = one_line(first_line(&self.info(id).call.input.command));
+        let cmd = check_command(&self.info(id).call.input.command);
         let part = self.s.running_label(id);
         let detail = if running && !part.is_empty() {
             dim("running").and(faint(" · ")).and(paint(C_SUB, &part))
@@ -1125,22 +1233,22 @@ impl Drawer<'_> {
                 }
             }
             for id in self.check_steps(t) {
-                let counted = self.tests_counted(id);
+                // How many passed, from a run that passed and counted them.
+                let passed = self
+                    .tests_counted(id)
+                    .map(|c| c.0)
+                    .filter(|&p| p > 0 && !self.bad(id));
                 for (n, c) in self.checks_of(id) {
                     match checks.iter_mut().find(|x| x.0 == n) {
                         Some(x) => {
                             x.2 |= x.1 == Came::Failed;
                             x.1 = c;
-                            if n == "tests" && counted.is_some() {
-                                x.3 = counted.map(|c| c.0);
+                            if n == "tests" && c == Came::Passed {
+                                x.3 = passed;
                             }
                         }
                         None => {
-                            let tests = if n == "tests" {
-                                counted.map(|c| c.0)
-                            } else {
-                                None
-                            };
+                            let tests = if n == "tests" { passed } else { None };
                             checks.push((n, c, false, tests));
                         }
                     }
@@ -1227,7 +1335,10 @@ impl Drawer<'_> {
             for (i, w) in ws.iter().take(3).enumerate() {
                 let mut w = w.clone();
                 if i == 2 && ws.len() > 3 {
-                    w = w.truncate(room, &faint("…"));
+                    w = w.truncate(room.saturating_sub(1), &faint("…"));
+                    if !w.plain().ends_with('…') {
+                        w.push(faint("…"));
+                    }
                 }
                 let lead = if i == 0 {
                     label("Done", C_SUB)
@@ -1548,7 +1659,9 @@ impl Drawer<'_> {
             Kind::Edit | Kind::Write | Kind::Notebook | Kind::Delete | Kind::Move => {
                 ("edit", base(&x.path))
             }
-            Kind::Shell => ("shell", one_line(first_line(&x.command))),
+            // A shell step by what the agent said it does, else its command.
+            Kind::Shell if !x.description.trim().is_empty() => ("shell", one_line(&x.description)),
+            Kind::Shell => ("shell", one_line(first_line(no_cd(&x.command)))),
             Kind::Fetch | Kind::WebSearch => {
                 let w = if x.url.is_empty() { &x.query } else { &x.url };
                 ("web", one_line(w))

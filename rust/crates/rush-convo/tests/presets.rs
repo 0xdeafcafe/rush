@@ -268,6 +268,12 @@ fn checks_are_read_from_any_tool() {
         ("make build", &["build"]),
         ("npx tsc --noEmit", &["typecheck"]),
         ("ls -la", &[]),
+        (
+            "cd /w; python3 - <<'EOF'\nimport subprocess\nrun('make test')\nEOF\ngo vet ./...",
+            &["vet"],
+        ),
+        ("cat <<EOF > f\ncargo test\nEOF", &[]),
+        ("go test ./... 2>&1 | tail -5", &["tests"]),
         ("git commit -m 'test'", &[]),
     ];
     for (cmd, want) in cases {
