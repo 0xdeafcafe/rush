@@ -177,3 +177,27 @@ fn the_bars_pick_is_read_ahead() {
     assert_eq!(v.key, want);
     assert!(v.read, "shown with the key, not read after it");
 }
+
+/// The Session beside the list is kept as the pick moves off it, still
+/// following its file: going back shows it as it was, not read again.
+#[test]
+fn the_one_just_left_is_kept_for_going_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let lp: Loop<Note> = Loop::new();
+    let mut m = readable(dir.path());
+    m.w = 200;
+    m.h = 50;
+    m.tx = Some(lp.sender());
+    let k = keys(&m);
+    m.sel = k[0].clone();
+    m.frame();
+    let first = m.pane.as_ref().map(|v| (v.key.clone(), v.r#gen));
+    assert_eq!(first.as_ref().map(|f| f.0.as_str()), Some(k[0].as_str()));
+    press(&mut m, "down");
+    m.frame();
+    assert_eq!(m.pane.as_ref().map(|v| v.key.as_str()), Some(k[1].as_str()));
+    press(&mut m, "up");
+    m.frame();
+    let back = m.pane.as_ref().map(|v| (v.key.clone(), v.r#gen));
+    assert_eq!(back, first, "the same view, not read again");
+}

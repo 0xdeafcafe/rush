@@ -33,7 +33,7 @@ use rush_core::agent::Agent;
 use crate::frame::Out;
 use crate::list::ListLine;
 use crate::model::Model;
-use crate::session::Source;
+use crate::session::{SessionView, Source};
 use crate::worker::{TAIL_END, TAIL_SLICE};
 
 /// The most conversations' ends kept read ahead.
@@ -123,9 +123,46 @@ pub struct Predict {
     want: Vec<Want>,
     /// The one being read, and what stops it.
     busy: Option<(String, Arc<AtomicBool>)>,
+    /// The Session beside the list until the pick moved, kept as it was
+    /// (its reading still following its file), for going back to it.
+    pub(crate) left: Option<SessionView>,
     /// Reads made and taken, for the timing log.
     made: u64,
     used: u64,
+}
+
+/// The longest transcript whose Session is kept once the list moves off
+/// it: a longer one's conversation is read whole, and too big to keep.
+const LEFT_MOST: u64 = 4 << 20;
+
+/// Whether view v is kept once the list moves off it: a conversation read
+/// from its own file, not too long (a live session rush hosts is its
+/// host's, a room its log's).
+fn keeps(v: &SessionView) -> bool {
+    let path = match &v.source {
+        Source::Transcript { path, .. } => path.clone(),
+        Source::History { session, .. } if !session.transcript.is_empty() => {
+            PathBuf::from(&session.transcript)
+        }
+        _ => return false,
+    };
+    std::fs::metadata(path).is_ok_and(|m| m.len() <= LEFT_MOST)
+}
+
+/// The Session beside the list as the pick moves off it: kept if it can
+/// be, the one kept before let go.
+pub fn leave(m: &mut Model, v: SessionView) {
+    let keep = m.sender().is_some() && keeps(&v) && !memory_short();
+    rush_draw::perf_note(|| format!("predict left {} kept={keep}", v.key));
+    m.kept.get::<Predict>().left = keep.then_some(v);
+}
+
+/// The Session kept for agent key as the list moved off it, taken back.
+pub fn back(m: &mut Model, key: &str) -> Option<SessionView> {
+    let p = m.kept.get::<Predict>();
+    let v = p.left.take_if(|v| v.key == key)?;
+    rush_draw::perf_note(|| format!("predict back {key}"));
+    Some(v)
 }
 
 type Stat = (u64, SystemTime, u64, u64);
@@ -329,6 +366,7 @@ pub fn toward(m: &mut Model, keys: &[String]) {
         let p = m.kept.get::<Predict>();
         p.ready.clear();
         p.want.clear();
+        p.left = None;
         if let Some((_, s)) = p.busy.take() {
             s.store(true, Ordering::Relaxed);
         }
@@ -343,7 +381,15 @@ pub fn toward(m: &mut Model, keys: &[String]) {
         // the one picked (the one just left is still there till drawn).
         let showing = m.session.as_ref().is_some_and(|v| v.key == *k)
             || *k == m.sel && m.pane.as_ref().is_some_and(|v| v.key == *k);
-        if showing || want.iter().any(|w| w.key == *k) {
+        // Kept as the list moved off it, or about to be.
+        let kept = m
+            .kept
+            .get::<Predict>()
+            .left
+            .as_ref()
+            .is_some_and(|v| v.key == *k)
+            || *k != m.sel && m.pane.as_ref().is_some_and(|v| v.key == *k && keeps(v));
+        if showing || kept || want.iter().any(|w| w.key == *k) {
             continue;
         }
         if let Some(what) = what(m, i) {

@@ -535,6 +535,12 @@ impl Model {
             .into_iter()
             .flatten()
             .chain(self.tiles.values_mut())
+            .chain(
+                self.kept
+                    .get::<crate::screens::list_extras::predict::Predict>()
+                    .left
+                    .as_mut(),
+            )
             .find(|v| v.r#gen == r#gen)
     }
 
