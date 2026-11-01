@@ -1331,7 +1331,7 @@ impl<'a> Drawer<'a> {
         }
         // Its images as thumbnails in place of their chips, once made
         // (userbox.go:116).
-        let thumbs = crate::pictures::thumb_rows(pics, inner);
+        let thumbs = crate::pictures::thumb_rows(r, pics, inner);
         if thumbs.is_some() {
             chips.retain(|c| !c.shown.starts_with("▣ "));
         }
@@ -2572,8 +2572,12 @@ impl<'a> Drawer<'a> {
                 self.add("", Color::Default, l, Txt::new());
                 continue;
             };
+            // Each opens its file when clicked, as its chip does
+            // (render.go:3200 fileLink).
             for r in rows.iter() {
-                let l = self.sp(indent - 1).and(Txt(r.spans.clone()));
+                let l = self
+                    .sp(indent - 1)
+                    .and(self.file_link(src, Txt(r.spans.clone())));
                 self.add("", Color::Default, l, Txt::new());
             }
         }
@@ -4464,7 +4468,11 @@ fn image_chip(alt: &str, src: &str) -> Txt {
     if name != alt {
         chip.push(paint(C_DIM, &format!(" {name}")));
     }
-    chip
+    // It opens the image when clicked (render.go:1999).
+    match super::markdown::link_target(src) {
+        Some(u) => super::markdown::linked(chip, &u),
+        None => chip,
+    }
 }
 
 /// What a turn no message started says in its place.

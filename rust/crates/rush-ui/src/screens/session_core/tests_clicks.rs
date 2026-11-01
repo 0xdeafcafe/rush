@@ -213,3 +213,30 @@ fn the_mode_on_the_box_is_a_click_away() {
         assert!(open_key(&m).is_some());
     }
 }
+
+/// A click on an image's chip in the Session's box opens the image, the
+/// draft and its cursor as they were (messagesheet.go:403 draftImage).
+#[test]
+fn a_click_on_an_image_in_the_box_opens_it() {
+    let mut m = split_open(200, 50);
+    let (lw, _) = split::widths(&m);
+    let marker = conn(&mut m, KEY).imgs.add("/tmp/rush-test/shot.png");
+    let text = format!("look {marker} here");
+    session_input(&mut m, &text);
+    let (x, y) = cell_of(&mut m, "Image #1", lw + 1);
+    click(&mut m, x + 2, y);
+    let s = m
+        .sheet_as::<crate::screens::session_cards::message::MessageSheet>()
+        .expect("the image opened");
+    assert_eq!(s.tab, 1);
+    assert_eq!(s.messages[s.at].images, ["/tmp/rush-test/shot.png"]);
+    let c = conn(&mut m, KEY);
+    assert_eq!(c.input.string(), text, "the draft as it was");
+    assert_eq!(c.input.pos, text.chars().count());
+    // Off the chip, a click puts the cursor there as before.
+    m.sheet = None;
+    let (x, y) = cell_of(&mut m, "here", lw + 1);
+    click(&mut m, x, y);
+    assert!(m.sheet.is_none());
+    assert_eq!(conn(&mut m, KEY).input.pos, text.chars().count() - 4);
+}

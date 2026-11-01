@@ -370,6 +370,11 @@ pub fn link_under(m: &mut Model, key: &str, x: usize, y: usize) -> Option<String
     rush_core::text::link_at(&row.line, at.col).map(|u| u.to_string())
 }
 
+/// Whether a link is an image's file, one Preview opens.
+fn image_link(u: &str) -> bool {
+    u.starts_with("file:") && crate::screens::cmdbar::linkmenu::previewable(u)
+}
+
 /// The first file linked in the rows of the picked step: its own, and
 /// those under it with no step of their own, as its pictures
 /// (linkmenu.go:57 pickedLink).
@@ -428,6 +433,12 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
                     let o = crate::screens::session_cards::message::message_link(m, &key, &u);
                     if o.used() {
                         return o;
+                    }
+                    // An image's chip or thumbnail opens its menu, the
+                    // image drawn above what can be done with it, as o on
+                    // its step does.
+                    if image_link(&u) && crate::screens::cmdbar::linkmenu::open_link_menu(m, &u) {
+                        return Out::Draw;
                     }
                 }
                 return Out::Pass;

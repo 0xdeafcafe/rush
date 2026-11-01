@@ -292,6 +292,15 @@ pub(super) fn mouse(m: &mut Model, e: &Mouse) -> Out {
         return Out::Pass;
     }
     let p = b.at(y - st.y - 1, x as isize);
+    // An image's chip opens the image, the draft as it was (draftImage).
+    if let Some(sp) = crate::imagerefs::chip_on(&m.input.text, p) {
+        let marker: String = m.input.text[sp.from..sp.to].iter().collect();
+        let refs = m.imgs.clone();
+        let o = crate::screens::session_cards::message::draft_image(m, &marker, &refs);
+        if o.used() {
+            return o;
+        }
+    }
     // A paste chip clicked opens in place (clickBox's openChip).
     if m.input.open_chip_at(p) {
         return Out::Draw;
