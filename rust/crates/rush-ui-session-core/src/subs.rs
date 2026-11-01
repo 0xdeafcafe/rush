@@ -1539,7 +1539,11 @@ pub fn refresh(m: &mut Model, key: &str) {
         .filter(|(id, _)| bg_open.contains(id))
         .map(|(id, _)| id.clone())
         .collect();
-    let procs = (!open.is_empty() && agent_pid != 0).then_some(super::jobprocs::ProcAsk {
+    // While a Bash call runs, the agent's shells are read too: which
+    // command of a chain runs now, and how long each took (watchShells,
+    // read on every look at the fleet in Go: snapload.go:60).
+    let watch = !open.is_empty() || s.shell_running();
+    let procs = (watch && agent_pid != 0).then_some(super::jobprocs::ProcAsk {
         agent: agent_pid,
         shells,
         open,
@@ -1700,6 +1704,11 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
         // Which command of each running chain runs now (onShells).
         if let Some(v) = session.as_mut().filter(|v| v.key == key) {
             v.sess.watch_shells(&p.shells, got.now);
+        }
+        // A subagent shown whole runs in the same process: its own calls
+        // are shown theirs the same way.
+        if let Some(d) = r.detail.as_mut() {
+            d.view.sess.watch_shells(&p.shells, got.now);
         }
         r.procs = p;
     }

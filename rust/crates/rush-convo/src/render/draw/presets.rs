@@ -271,6 +271,15 @@ impl Drawer<'_> {
         if running {
             l.push(faint(" · "));
             l.push(paint(C_ORANGE, "✱ running"));
+            // Which command of a running chain runs now: 2/3 cargo test.
+            if let Some(p) = ids
+                .iter()
+                .map(|&id| self.s.running_label(id))
+                .find(|p| !p.is_empty())
+            {
+                l.push(faint(" "));
+                l.push(paint(C_SUB, &p));
+            }
         }
         l.push(faint(" · enter shows"));
         self.work(|d| d.add(&r, Color::Default, l, Txt::new()));
@@ -445,7 +454,10 @@ impl Drawer<'_> {
         } else {
             checks.iter().map(|c| c.0).collect::<Vec<_>>().join(", ")
         };
-        let detail = if running {
+        let part = self.s.running_label(id);
+        let detail = if running && !part.is_empty() {
+            dim("running").and(faint(" · ")).and(paint(C_SUB, &part))
+        } else if running {
             dim("running")
         } else if let Some((p, f)) = self.tests_counted(id) {
             if f > 0 {
@@ -491,7 +503,12 @@ impl Drawer<'_> {
             words
         };
         let from = self.lines.len();
-        self.work(|d| d.add(&r, Color::Default, lead.and(words).and(tail), right));
+        self.work(|d| {
+            d.add(&r, Color::Default, lead.and(words).and(tail), right);
+            if running {
+                d.chain_keys(id, GUTTER + 2);
+            }
+        });
         self.own(&r, from);
     }
 
@@ -767,6 +784,10 @@ impl Drawer<'_> {
         if st.status == Status::Waiting {
             cells.push(paint(C_YELLOW, "waiting on you"));
         }
+        let part = self.s.running_label(id);
+        if !part.is_empty() {
+            cells.push(paint(C_SUB, &part));
+        }
         if bad {
             let why = match self.tests_counted(id) {
                 Some((_, f)) if f > 0 => format!("{f} failed"),
@@ -805,6 +826,10 @@ impl Drawer<'_> {
         if room >= 12 && label.width() > room as usize {
             label = label.truncate(room as usize, &Txt::raw("…"));
         }
+        let picked = self.o.selected == r;
         self.add(&r, Color::Default, lead.and(label).and(cells), right);
+        if picked && st.status == Status::Running {
+            self.chain_keys(id, 12);
+        }
     }
 }
