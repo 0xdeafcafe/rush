@@ -20,8 +20,8 @@ use super::util::first_non_empty;
 use crate::frame::confirm::Confirm;
 use crate::frame::{Out, Press};
 use crate::model::Model;
-use rush_ui_projects_machine::memreview::{self, keeper};
 use crate::session::harness_name;
+use rush_ui_projects_machine::memreview::{self, keeper};
 
 /// Drafts a note from (what, around): the cheap model's, or a test's.
 pub type Drafter = Arc<dyn Fn(&str, &str) -> Result<MemoryNote, String> + Send + Sync>;

@@ -4,6 +4,28 @@
 
 pub use rush_ui_session_cards::*;
 
+// What the crate's root had in scope, which its tests used through super::*.
+#[allow(unused_imports)]
+use std::collections::HashMap;
+#[allow(unused_imports)]
+use std::sync::OnceLock;
+
+#[allow(unused_imports)]
+use rush_convo::{Session, StepId};
+#[allow(unused_imports)]
+use rush_core::event::Question;
+#[allow(unused_imports)]
+use rush_core::text::Line;
+#[allow(unused_imports)]
+use rush_draw::MouseKind;
+
+#[allow(unused_imports)]
+use crate::frame::{Ext, Mouse, Out};
+#[allow(unused_imports)]
+use crate::model::Model;
+#[allow(unused_imports)]
+use crate::style::*;
+
 mod tests;
 mod tests_compact;
 mod tests_go;

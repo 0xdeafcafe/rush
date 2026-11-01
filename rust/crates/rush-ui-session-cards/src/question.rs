@@ -21,10 +21,10 @@ use super::card::*;
 use super::permcard::{perm_btns, permission_card};
 use super::permissions::{bypass_mode, set_permission};
 use super::{Act, Conn, HostInfo, act, info_any, open_key, pending, session, set_input};
+use crate::ModelCards;
 use crate::frame::overlayclick::hint_key;
 use crate::frame::{Out, Press};
 use crate::model::Model;
-use crate::ModelCards;
 use crate::style::*;
 
 /// One question of those the agent asks (question).

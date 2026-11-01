@@ -82,15 +82,9 @@ fn carry_on(m: &mut Model, key: &str, sig: Signin) -> Out {
                 ..StartOver::default()
             };
             let k = key.to_string();
-            (m.ext.calls.switch_then())(
-                m,
-                &o,
-                Box::new(move |m| continue_signed_in(m, &k)),
-            )
+            (m.ext.calls.switch_then())(m, &o, Box::new(move |m| continue_signed_in(m, &k)))
         }
-        Signin::HandOver(o) => {
-            (m.ext.calls.switch_session_message())(m, key, o, "continue")
-        }
+        Signin::HandOver(o) => (m.ext.calls.switch_session_message())(m, key, o, "continue"),
     }
 }
 

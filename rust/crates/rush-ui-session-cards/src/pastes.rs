@@ -12,10 +12,8 @@ pub use rush_ui_base::pastes::{PASTE_CHIP, Pastes, chip_for, has_paste_chip, is_
 /// unlit, and space opens it while the boxes take keys, nothing over them
 /// (model.go:1464-1469, boxesTakeKeys).
 pub fn chip_key(m: &mut Model, k: &Press) -> Out {
-    let boxes = m.confirm.is_none()
-        && m.sheet.is_none()
-        && !m.on_place()
-        && !(m.ext.calls.bar_open())(m);
+    let boxes =
+        m.confirm.is_none() && m.sheet.is_none() && !m.on_place() && !(m.ext.calls.bar_open())(m);
     let s = if boxes { k.s.as_str() } else { "" };
     if let Some(key) = crate::sess::open_key(m)
         && crate::sess::conn(m, &key).input.hot != Seg::default()

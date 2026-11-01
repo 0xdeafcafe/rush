@@ -29,10 +29,10 @@ use crate::frame::caps::{can_run, can_screen, own_screens};
 use crate::frame::sheet::{Sheet, sheet_row, sheet_title};
 use crate::frame::{Out, Press};
 use crate::model::Model;
-use rush_ui_accounts::info as infosheet;
-use rush_ui_settings::{sheets, statusline};
 use crate::session::harness_name;
 use crate::style::{CHROME_BG, FAINT, ORANGE, SUB, TEXT, keys_fit, line, plain, sp, spb, wrap};
+use rush_ui_accounts::info as infosheet;
+use rush_ui_settings::{sheets, statusline};
 
 /// Claude Code's own screens, and what each shows (claudeScreens). rush
 /// draws most of them itself ([`RUSH_SCREENS`]); the rest hand the
@@ -400,13 +400,16 @@ pub fn screen_done(m: &mut Model, key: &str, screen: &str, r: crate::frame::outs
         ));
         return Out::Draw;
     }
-    m.act(crate::frame::ext::Act::SendAs { key: key.to_string(), text: "/reload-plugins".to_string() });
+    m.act(crate::frame::ext::Act::SendAs {
+        key: key.to_string(),
+        text: "/reload-plugins".to_string(),
+    });
     Out::Draw
 }
 
 /// The kind of agent session key runs: its host's word, else the list's
 /// (sessionAgent).
-pub(crate) fn kind_of(m: &mut Model, key: &str) -> String {
+pub fn kind_of(m: &mut Model, key: &str) -> String {
     let k = crate::sess::conn(m, key).info.began.kind.clone();
     if !k.is_empty() {
         return k;
@@ -418,7 +421,7 @@ pub(crate) fn kind_of(m: &mut Model, key: &str) -> String {
 
 /// The profile an agent runs on (a.Acct), else the one its agent knows
 /// by its account's name.
-pub(crate) fn acct_of(m: &Model, a: &rush_core::agent::Agent) -> Profile {
+pub fn acct_of(m: &Model, a: &rush_core::agent::Agent) -> Profile {
     if a.acct.name.is_empty() && a.acct.dir.is_empty() {
         crate::attached::profile_of(&m.reg, a)
     } else {
@@ -577,7 +580,7 @@ fn open_skills(m: &mut Model, key: &str, kind: &str, p: Profile, cwd: String) {
 /// The commands and skills on disk for an agent's account and folder:
 /// its first profile's when the account names no folder
 /// (sessionCommands). It reads the disk.
-pub(crate) fn local_commands(
+pub fn local_commands(
     reg: &rush_core::adapter::Registry,
     ad: &AdapterRef,
     mut p: Profile,

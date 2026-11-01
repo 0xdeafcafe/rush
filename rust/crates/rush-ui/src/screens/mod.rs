@@ -18,9 +18,6 @@ pub use rush_ui_list_extras as list_extras;
 // The bars (top bar and agent header): rush-ui-bars, at the old path.
 pub use rush_ui_bars as bars;
 pub mod cmdbar;
-// More of the Agents list (the box, the filter, the Wall, the grid, the
-// split, the live mirror): rush-ui-list-extras, at the old path.
-pub use rush_ui_list_extras as list_extras;
 // The cards and sheets on a session: rush-ui-session-cards, at the old path.
 pub use rush_ui_session_cards as session_cards;
 pub mod session_core;
