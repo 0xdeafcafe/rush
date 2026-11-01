@@ -14,6 +14,7 @@
 
 mod caps;
 mod cheap;
+pub mod conform;
 mod conn;
 mod feature;
 mod handoff;
@@ -218,6 +219,8 @@ pub trait Adapter: Send + Sync {
         discoverer: Discoverer;
         /// Runs a session headless.
         driver: Driver;
+        /// Takes up a session its host passed to itself across an exec.
+        adopter: Adopter;
         orphans: Orphans;
         history_reader: HistoryReader;
         history_follower: HistoryFollower;

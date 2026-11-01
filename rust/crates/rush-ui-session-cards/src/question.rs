@@ -651,9 +651,10 @@ pub fn draw_question(
         let o = &q.options[c.q_cursor];
         let (label, rec) = option_label(&o.label);
         let cap = keycap(&(c.q_cursor + 1).to_string(), true);
-        let mut name = line([spb(label.clone(), TEXT)]);
+        let name = line([spb(label.clone(), TEXT)]);
+        let mut chips: Vec<Span> = Vec::new();
         if rec || o.picked {
-            name.spans.extend([plain("  "), sp(rec_word(c), GREEN)]);
+            chips.push(sp(rec_word(c), GREEN));
         }
         c.q_hit.insert(out.len(), format!("@{}", c.q_cursor));
         let right = line([
@@ -663,7 +664,7 @@ pub fn draw_question(
         // A long label wraps under itself, past the key.
         let pw = 3 + cap.width() + 1;
         let nw = w.saturating_sub(1 + pw + right.width() + 1);
-        for (j, nl) in wrap_line(&name, nw).into_iter().enumerate() {
+        for (j, nl) in label_rows(&name, &chips, nw).into_iter().enumerate() {
             if j == 0 {
                 let mut left = line([
                     plain(" "),
@@ -750,7 +751,6 @@ pub fn draw_question(
         let on = cursor == Some(i);
         let (label, rec) = option_label(&o.label);
         let bar = if on { sp("▌", ORANGE) } else { plain(" ") };
-        let mut name = Line::new();
         let boxed = if q.multi {
             Some(if c.picked(c.q_idx, i) {
                 sp("☑ ", GREEN)
@@ -761,23 +761,24 @@ pub fn draw_question(
             None
         };
         let bw = boxed.as_ref().map_or(0, |b| b.width());
-        name.spans.push(if on {
+        let name = line([if on {
             spb(label, TEXT)
         } else {
             sp(label, TEXT)
-        });
+        }]);
+        let mut chips: Vec<Span> = Vec::new();
         if rec || o.picked {
-            name.spans.extend([plain("  "), sp(rec_word(c), GREEN)]);
+            chips.push(sp(rec_word(c), GREEN));
         }
         if !q.multi && prev == o.label {
-            name.spans.extend([plain("  "), sp("✓ your answer", GREEN)]);
+            chips.push(sp("✓ your answer", GREEN));
         }
         if !o.preview.is_empty() && !side && o.preview != preview {
-            name.spans.extend([plain("  "), sp("◇ preview", DIM)]);
+            chips.push(sp("◇ preview", DIM));
         }
         let hit = format!("@{i}");
         // A long label wraps under itself rather than running off the card.
-        for (j, l) in wrap_line(&name, avail.saturating_sub(pw + bw))
+        for (j, l) in label_rows(&name, &chips, avail.saturating_sub(pw + bw))
             .into_iter()
             .enumerate()
         {
@@ -1072,6 +1073,40 @@ fn question_strip(c: &Conn, qs: &[Q], w: usize) -> Vec<Line> {
             cur.spans.push(sep());
         }
         join(&mut cur, it);
+    }
+    rows.push(cur);
+    rows
+}
+
+/// An option's label wrapped to w, each continuation under the label's
+/// first character, and its chips (its pick, your answer) whole: on the
+/// label's last row when they fit there, else on rows of their own under
+/// it, never cut and never split.
+fn label_rows(name: &Line, chips: &[Span], w: usize) -> Vec<Line> {
+    let w = w.max(8);
+    let mut rows = wrap_line(name, w);
+    if chips.is_empty() {
+        return rows;
+    }
+    let all: usize = chips.iter().map(|c| 2 + c.width()).sum();
+    if let Some(last) = rows.last_mut()
+        && last.width() + all <= w
+    {
+        for c in chips {
+            last.spans.extend([plain("  "), c.clone()]);
+        }
+        return rows;
+    }
+    let mut cur = Line::new();
+    for c in chips {
+        let cw = c.width();
+        if !cur.spans.is_empty() && cur.width() + 2 + cw > w {
+            rows.push(std::mem::take(&mut cur));
+        }
+        if !cur.spans.is_empty() {
+            cur.spans.push(plain("  "));
+        }
+        cur.spans.push(c.clone());
     }
     rows.push(cur);
     rows

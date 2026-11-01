@@ -8,6 +8,7 @@ mod fit;
 mod headless;
 mod input;
 mod perf;
+mod qos;
 mod reader;
 mod run;
 mod term;

@@ -125,7 +125,6 @@ fn calls() -> Calls {
         open_peeked: Some(list_extras::peek::open_peeked),
         peek_back: Some(list_extras::peek::back),
         predict_take: Some(list_extras::predict::take),
-        predict_take_history: Some(list_extras::predict::take_history),
         predict_left: Some(predict_left),
         filter_match: Some(list_extras::filter::has_match),
         filter_snippet: Some(list_extras::filter::snippet),

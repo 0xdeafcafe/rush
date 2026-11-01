@@ -161,11 +161,10 @@ pub fn log_tail(id: &str, n: u64) -> String {
 }
 
 /// rush reload's second half: every session's host on an older rush
-/// that's between turns, restarted on this one. A session mid turn
-/// finishes its turn first. One the installed rush can't run stays on the
-/// one it has, and is counted failed; one whose folder is gone is counted
-/// gone, never tried. It's (stale, restarted, failed, gone)
-/// (reloadwant.go:47).
+/// moved onto this one in place (Lister::sweep). A session mid turn
+/// finishes its turn first. One that can't move stays on the one it has,
+/// and is counted failed; one whose folder is gone is counted gone, never
+/// tried. It's (stale, moved, failed, gone) (reloadwant.go:47).
 pub fn reload_agents(
     l: &mut crate::client::Lister,
     installed: crate::wire::BinStamp,
@@ -272,6 +271,7 @@ mod tests {
             id: id.into(),
             state: "working".into(),
             host_pid: std::process::id() as i64,
+            upgrades: true,
             exe: crate::wire::BinStamp {
                 mod_: rush_state::Time::from_unix(1_700_000_000, 0),
                 size: 1,

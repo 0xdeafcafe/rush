@@ -549,13 +549,31 @@ on every frame. Go retains about 22 MiB for the same.
    helper in `Command::Start.context`, the first 100 set as the speech
    request's contextualStrings.
 3. **Workers**: discovery (sessions/jobs files, process liveness), spend
-   scanning (incremental from the last offset), previews, the open
-   transcript's tail (its last 2 MB first; a longer one is then read
-   whole on the same worker and takes the end's place, its turns'
-   refs renumbered so nothing on screen moves: Go's twopass.go; that
-   worker also lays out the whole's last 400 rows as the view last drew
-   and works out its edits, so the frame that swaps it in draws little:
-   Go's warmed, rushmode.go:2064). Each
+   scanning (incremental from the last offset), previews, and the open
+   conversation (`worker::spawn_read`, one flow for every agent, Rust-only
+   in sharing it: Go's twopass.go and warmed, rushmode.go:2064). It reads
+   through `rush_convo::reading::Reading`: its last 2 MB first (`end`),
+   shown at once with "reading earlier…" above it; then the whole from its
+   start on the same worker, taking the end's place with its turns' refs
+   renumbered so nothing on screen moves, its last 400 rows laid out as
+   the view last drew and its edits worked out, so the frame that swaps
+   it in draws little; then what's added as it grows
+   (`fswait::follow_grows`). A transcript in the form Claude Code writes
+   (`reading::Transcript`, every adapter whose `claude_transcripts` says
+   so) and another agent's history as its adapter reads it back
+   (`reading::History`: its `TailReader` for the end, its follower or
+   reader for the whole) are the two forms read; an adapter that can't
+   read its end alone (Gemini, whose log rewinds; Copilot's remote log)
+   has its whole read first, off the UI thread, the same way. The
+   read-ahead (predict.rs) reads the same end and keeps only it. Every
+   end lands on a line's start found from the file's end backwards
+   (`rush_core::tailread`: whole lines only, a last line still being
+   written left out, the last line kept however long); every adapter's
+   `TailReader` is held to its own whole by `adapter::conform`. A 50 MB
+   Codex rollout (ctrl+k, enter): its end on screen 287-626 ms after
+   enter -> already there (its end read ahead in ~40 ms), memory with it
+   open 133-138 MB -> 77-81 MB, read ahead 85-115 MB -> 35-53
+   MB. Each
    watches files with `rush_sys::fswait::Watcher`
    (kqueue on macOS; the one file watcher in rush: `watch` before reading,
    `wait` blocks until a change, a `Stop` or a timeout; a path not there
@@ -588,6 +606,15 @@ on every frame. Go retains about 22 MiB for the same.
    (memory, CPU, how many): the loader lists the process table as Go does
    (one sysctl), which spawn folding and the machine's rows need, and
    fills memory and CPU only for the trees it shows.
+
+On macOS the UI and terminal reader threads run in the user-interactive
+class (rush-draw `qos`), as an app's main thread does: a CLI's threads
+otherwise share the default class with every compiler an agent starts,
+and with ten builds going a frame waited 250 ms to 3 s for CPU
+(stalls.log, load 160 on 10 cores). A program takes on the class of the
+thread that starts it, so what rush starts to keep running (hosts, the
+plugin broker, reminders, ollama, rooms, prdrive, pushlater, the sshd
+shell) goes back to the default in its pre_exec (`rush_sys::qos::plain`).
 
 4. **netwatch** (rush-net): whether the API can be reached. It checks
    once at start, when the network changes, and when a job fails on what
@@ -664,6 +691,66 @@ given back, and the binary runs the installed rush in its place
 (`rush_sys::selfexe::path`, exec), as Go's main.go:290-300. While a view
 runs it's listed for `rush reload` (`rush_state::instances`), whose
 SIGUSR1 is a #reload; a hosted view isn't listed.
+
+### Moving a host onto a new build (Rust-only)
+
+A host moves onto a newly installed rush in place, its agent running on
+(`rush-host/src/upgrade.rs`, `server/upgrade.rs`). Asked by the `upgrade`
+op, it waits until it's between turns (idle, nothing queued, asked,
+retried or running in the background, no start or stop under way), then:
+
+1. asks the installed rush `rush host can-upgrade <id>`: a rush from
+   before this answers with its usage, one whose adapter can't take its
+   agent up says why. Either way the host stays where it is.
+2. holds its agent through the Conn's `Upgrader::pass`: the adapter writes
+   what's queued for the agent, stops writing, and stops its reader
+   between two reads (Claude's reader polls its stdout and a wake pipe), so
+   nothing the agent says is lost: what was read of a line so far is
+   handed on as `unread`. It refuses while the agent waits on an answer.
+3. writes `sessions/<id>/upgrade.json` (0600): its info, the replay ring,
+   the session's commands and context lines, its listener's fd, and the
+   agent's `Upgrade` (pid, fds by name, unread, the adapter's own state:
+   for Claude its session id, sign-in, account and control request count).
+4. clears close-on-exec on the listener and the agent's fds (stdin,
+   stdout, stderr, and the pgguard's pipe: closed, the guard would end the
+   agent's group) and execs `rush host adopt <id> <state>` with the lock
+   held, so nothing changes while it goes.
+
+exec keeps the pid, so the agent stays its child and its owner watch,
+the list's pid and the session's socket are unchanged. Every other file
+closes, clients' connections among them: a client sees its connection end,
+finds the socket still answers (the listener's backlog holds the dial
+across the exec), and dials again, replayed as after any other let go
+(live.rs `resolve_close`). The new build (`server::adopt_with`) reads the
+state once and removes it, takes the listener, puts back info (same
+generation, its own `exe`), the ring and the rest, takes the agent up
+through the adapter's `Adopter` with the same tools, tap and sink a start
+gives it (no initialize, no prompt sent again), and serves on. The guard
+is taken over too (`pgguard::adopt`), and the agent is reaped by pid
+(`reexec::reap`), as no std Child has it any more.
+
+If the exec fails, the fds go back to close-on-exec, the state file is
+removed, the adapter is told to `keep` (its reader and writer carry on)
+and `Info.upgrade` says `failed: why`. Nothing is ever stopped to move.
+
+What survives: the agent process and its pipes, the conversation, the
+replay, queue/hold/away/decisions state, costs, the turn count. What
+doesn't: a client's open connection (it redials), timers (idle sleep and
+away are armed again; the rest only run mid-turn), a caffeinate held while
+away (started again). Adapters: only Claude Code's (`rush-claude`
+conn.rs `Upgrader` and `Adopter`) today; a host on any other agent has
+`Info.upgrades` false and stays on its build, as does a remote host or one
+from before this.
+
+Who asks: the leading rush's look at the hosts (Settings › Updates,
+`watch_hosts`) once the installed binary has settled, without Restart on
+install (a move stops nothing); enter on Settings › Updates › Sessions and
+`#upgrade` (asked: a failed move is tried again); and `rush reload`. The
+sweep (`client::sweep_over`) asks every movable host on an older build,
+mid-turn ones too, which move once their turn ends; hosts that can't
+move are counted and said, never restarted. A row whose host's
+`exe` is older than the installed rush shows a faint `old` (`old build`
+in full) beside its badge.
 
 ## The list kept between runs (Rust-only)
 
@@ -836,7 +923,13 @@ UI thread, and does what it says.
   1.2×). When it frees up is worked out from its use ageing out of
   the 2 hours and its fair share growing as the reset nears. A provider
   without readings has no pace: only the cap and away cover it, as its
-  row says.
+  row says. A month-long window (Copilot's premium requests) is paced
+  the same way, over the days to its reset: its fair share is small
+  (88% left over 29 days is 0.13%/h), so a day's real use there reads
+  as tens of times its pace, and it is past its pace. Nothing of
+  another agent's runs on it, so it holds only its own sessions.
+  Accounts past their pace are kept in `guard-held.json` too, so a
+  reloaded rush doesn't say they tripped again.
 - **The cap**: agents working at once. A rush session's turn counts 1,
   each subagent in it 1 (its host's tasks not in the background), each
   background agent or workflow 1; background shells 0. Agents rush
@@ -847,23 +940,50 @@ UI thread, and does what it says.
   each session's running turn finishes, then holds; one on #away
   (keep working while I'm away) carries on.
 
-What trips never cuts a turn. A session's next turn is held with its
-host's queue hold (Op::HoldQueue, as alt+h): a message sent meanwhile
-queues, held, idle or not (Rust-only: a host held while idle queues too;
-sent now, it goes). What the guard holds and has moved is kept in
+What trips never cuts a turn, and never holds what you send yourself.
+A message you send goes: the guard holds only work that starts without
+you. Its hold is the host's guard hold (`Op::GuardQueue`, `queue_guard`,
+`Info::queue_guarded`), apart from yours (alt+h, `Op::HoldQueue`,
+`queue_held`): while it holds a session, a message with no exchange
+(yours, typed or answered) goes as it would, at once while idle, at the
+turn's end while working; another agent's message (an exchange) or
+rush's own waits in the queue (`wire::queue_ready`). The queue card
+says so ("yours go when this turn ends · agents' wait: past your pace
+on alex · 3.1× · alt+h lets them through"). A Claude Code turn its own
+background work starts isn't a message, and isn't held.
+
+`s` on a queued message, and the send-now key, always send now,
+whatever holds the queue, yours or the guard's: idle, it goes at once;
+mid-turn, the turn is stopped and it goes when it ends. Only what you
+sent now goes then (`go_now` in the host): the hold stays for the
+rest. A message the agent doesn't take (an image it can't read) is a
+`deliver-failed` event and the session's error, and a turn it was to
+start isn't left "working" with nothing running (which had a queue
+wait for a turn's end that never came, and a send now stop nothing). A
+queued image is sent from the copy made when it was queued, else from
+where you put it; one gone from both is left out (`image-gone`), its
+marker saying so, rather than keeping the queue from going. Joined,
+each queued message's images are numbered on, so each marker still
+names its own image.
+
+What the guard holds, has moved and has past its pace is kept in
 `guard-held.json`, so the next rush to lead lets go of its holds and
-not of yours; it looks only once the accounts have been read. The guard only lets go of what it held; alt+h on it lets
-the next turn through (it isn't held again until that turn has run),
-ctrl+enter sends one now. Held for the cap, sessions go again in the
-order held as room frees.
+not of yours; it looks only once the accounts have been read. A host
+that keeps a guard hold the guard no longer has (held before it slept)
+is held again or let go at the next look; one held the old way, as
+alt+h, is held the guard's way. alt+h on a session the guard holds lets
+it through: it isn't held again while you keep it busy, until it has
+sat idle for 10 minutes (`LET_THROUGH_FOR`). Held for the cap,
+sessions go again in the order held as room frees.
 
 Moves: when the account in use trips, new sessions switch (new sessions
 only, as `n` does) to the account under `release` that the work it'd
 take on (the tripped one's burn) wouldn't trip, of those the one whose
 room would go unused soonest ((fair − burn) ÷ (1 + hours to reset ÷
 24)), so room that would be lost at a reset days away counts for less;
-the event says why ("bob resets in 4h with 38% left"). With none, work
-waits. Then each session on a tripped account: a new one (no turns)
+the event says why ("bob resets in 4h with 38% left"). Work only ever
+moves to an account of its own agent's kind: a Claude session never to
+a Copilot account. With none of its kind, work waits. Then each session on a tripped account: a new one (no turns)
 moves; one whose prompt cache is warm (`Info::cache_warm`) waits, as a
 move writes its whole context again at full price; a cold one moves
 (`relogin`), at most once in `moveHours` (6); one that moved already
@@ -872,7 +992,7 @@ moves to an account the guard has past its pace.
 
 A session on an account past its pace is also refused new subagents and
 workflows (`Plan::spawns_for`: the sessions on a tripped account, minus
-any you let through with alt+h, whose spawns go until that turn has run;
+any you let through with alt+h, whose spawns go while you keep it busy;
 released, under 1.2×, lifts it). The refusal says plainly that the
 user's runaway guard is pausing new agents because the account is past
 its pace, and to finish the current work without starting new ones. It
@@ -1405,7 +1525,33 @@ is made. Everything below is in `rush_ui::frame`.
   (`subs::panel_subs`; the subagents wait on runs being read), and
   `quiet` (`quiet_why`) is worked out only when the view or the turns
   change; folded
-  beside the column, the views are its last part (`side_views`). Its sheets, the editor, the panel and
+  beside the column, the views are its last part (`side_views`).
+  **Stale views** (Rust-only; Go greyed by turns alone, and one long turn
+  never ended, so a view from 3 h ago still read live). Why it wasn't
+  greyed: `view_quiet` skips a view made in the turn still under way, and
+  the host's put-away needs four ended turns. Now the clock counts too,
+  in `rush_host::views`: untouched `STALE_MS` = 10 min (a build or
+  benchmark between two updates is rarely longer; a longer wait is what
+  the agent should say) the panel greys it, its foot reading "made by the
+  agent · not updated · 3h" with the "not updated" part in the warning
+  tone, and its busy marks (◐ ◉) drawn as quiet dots, so it doesn't
+  pretend to be live; untouched `AWAY_MS` = 45 min (or 3 turns, as
+  before) the host puts it away among the past views, whether the session
+  works or not, pinned ones aside. The host looks every minute (`VIEWS_EVERY`)
+  only once a session works and while it keeps agent views, off the
+  UI thread (`Host::sweep_views`, `views::sweep`). The first time a view
+  is stale while the session works, the agent is told through rush's
+  notice inbox (the hook output rush's other notices use, so only
+  harnesses with an inbox), one line, "Views not updated in 10 min: prs.
+  Set again or clear." (about 15 tokens, plus the notice's header), once
+  per view per untouched period (keyed by the view's last update), never
+  while idle or with views off. **Views off** (Settings, Agent views;
+  config `viewsOff`, on by default): the panel and list lines hide, the
+  prompt part and the `view` MCP tool aren't given to agents started
+  afterwards, a call is refused and no sweep or notice runs. The agent's
+  instructions were trimmed: the system prompt part 1235 to 560
+  characters, the tool's description and schema about 3.4k to 1.9k.
+  Its sheets, the editor, the panel and
   the artifacts view are checked against Go row by row, words and
   colours, at the widths 80, 120 and 200 column screens give them
   (`testdata/wide`), and the editor's JSON problems against jsontext's.

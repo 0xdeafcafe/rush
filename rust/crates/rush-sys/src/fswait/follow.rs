@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use rush_core::adapter::{Follow, Result, Slice};
+use rush_core::adapter::{Follow, Result, Slice, WaitOn};
 
 use super::{Stop, Watcher};
 
@@ -25,6 +25,46 @@ pub fn follow(
     stop: &Stop,
     each: &mut dyn FnMut(Result<Slice>) -> bool,
 ) {
+    struct Events<'a>(&'a mut dyn Follow);
+    impl Grows for Events<'_> {
+        type Slice = Slice;
+        fn next(&mut self, most: usize) -> Result<(Slice, bool)> {
+            let s = self.0.next(most)?;
+            let worth = !s.events.is_empty() || s.reset;
+            Ok((s, worth))
+        }
+        fn more(s: &Slice) -> bool {
+            s.more
+        }
+        fn wait_on(&self) -> WaitOn {
+            self.0.wait_on()
+        }
+    }
+    follow_grows(&mut Events(f), most, stop, each);
+}
+
+/// Anything read a slice at a time as it grows, as a Follow is: a
+/// conversation in whichever form its agent writes it (rush_convo's
+/// reading), followed by follow_grows.
+pub trait Grows {
+    type Slice;
+    /// What's been written since the last call, from at most most bytes,
+    /// and whether it holds anything worth handing on.
+    fn next(&mut self, most: usize) -> Result<(Self::Slice, bool)>;
+    /// More is written already: read again without waiting.
+    fn more(s: &Self::Slice) -> bool;
+    /// What changes when there's more to read.
+    fn wait_on(&self) -> WaitOn;
+}
+
+/// follow for any Grows, in the same order: watch, read until nothing
+/// more is waiting, wait.
+pub fn follow_grows<G: Grows + ?Sized>(
+    f: &mut G,
+    most: usize,
+    stop: &Stop,
+    each: &mut dyn FnMut(Result<G::Slice>) -> bool,
+) {
     let w = Watcher::new();
     loop {
         let on = f.wait_on();
@@ -36,9 +76,9 @@ pub fn follow(
                 return;
             }
             match f.next(most) {
-                Ok(s) => {
-                    let more = s.more;
-                    if (!s.events.is_empty() || s.reset) && !each(Ok(s)) {
+                Ok((s, worth)) => {
+                    let more = G::more(&s);
+                    if worth && !each(Ok(s)) {
                         return;
                     }
                     if !more {

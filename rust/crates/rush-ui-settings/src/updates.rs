@@ -11,9 +11,11 @@
 //! Installing a newer rush and reloading onto it are the commands #update
 //! and #reload, run from here when they're registered. The sessions' hosts
 //! on an older rush are counted with each reading of the list, every 30s
-//! at most, off the UI; enter on Sessions restarts the idle ones, and the
-//! rush that leads restarts them by itself only with Restart on install,
-//! or while a reload still has sessions to move.
+//! at most, off the UI; enter on Sessions (or #upgrade) moves them onto
+//! the installed rush, and the rush that leads moves them by itself once
+//! the new rush has settled. A move is in place: the host execs the new
+//! rush, its agent running on (rush-host upgrade.rs, Rust-only); one in a
+//! turn moves once it ends, and none is restarted.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -86,8 +88,7 @@ pub fn note_start() {
 
 /// Every 30 seconds of the tick (chores.rs), while a loop runs: the
 /// installed rush looked at, and the sessions on an older one counted;
-/// the rush that leads restarts the idle ones with Restart on install
-/// (reload.go:134 watchBinary).
+/// the rush that leads moves them onto it (reload.go:134 watchBinary).
 pub fn watch_binary(m: &mut Model) {
     if m.sender().is_none() {
         return;
@@ -96,12 +97,12 @@ pub fn watch_binary(m: &mut Model) {
 }
 
 /// The installed rush's binary looked at, and the sessions on an older one
-/// counted; with restart, the ones between turns are restarted on it.
-/// That's you asking (enter, asked), or Restart on install once the binary
-/// has stopped changing, in the rush that leads; without either a new
-/// binary alone restarts nothing. A reload asks too: the leading rush
-/// restarts sessions until every one is on the rush it reloaded to. Off
-/// the UI (watchHosts).
+/// counted; with restart, they're moved onto it in place, their agents
+/// running on. That's you asking (enter, #upgrade: asked), or the rush
+/// that leads once the binary has stopped changing: a move stops nothing,
+/// so it needs no Restart on install (Rust-only; Go restarted, and only
+/// with it). A reload asks too: the leading rush moves sessions until
+/// every one is on the rush it reloaded to. Off the UI (watchHosts).
 pub fn watch_hosts(m: &mut Model, restart: bool, asked: bool) {
     let lead = m.leads();
     let u = &mut m.kept::<State>().updates;
@@ -119,12 +120,11 @@ pub fn watch_hosts(m: &mut Model, restart: bool, asked: bool) {
         move || {
             // In tests the stamp is the start's: nothing was installed.
             let now = if fake { *START_STAMP } else { BinStamp::exe() };
-            // Not asked, it restarts only by Restart on install, and only
-            // in the rush that leads.
-            let auto = !asked
-                && restart
-                && lead
-                && (fake || rush_state::Store::load().config.restart_on_install);
+            // Not asked, it moves them only in the rush that leads.
+            let auto = !asked && restart && lead;
+            // Restart on install reloads this rush too.
+            let restart_on_install =
+                auto && (fake || rush_state::Store::load().config.restart_on_install);
             // The same stamp as the last watch: a rush still being written
             // is never restarted onto.
             let settled = now == was;
@@ -136,12 +136,13 @@ pub fn watch_hosts(m: &mut Model, restart: bool, asked: bool) {
             let (mut stale, mut restarted, mut failed, mut gone) = (0, 0, 0, 0);
             if !now.mod_.is_zero() {
                 let mut l = lister.lock().unwrap_or_else(|e| e.into_inner());
+                l.retry = asked; // a move that failed is tried again only when you ask
                 (stale, restarted, failed, gone) = sweep(&mut l, now, restart);
+                l.retry = false;
             }
             if reloading && stale <= failed {
                 rush_host::reload::reload_done();
             }
-            let restart_on_install = auto;
             Swept {
                 now,
                 settled,
@@ -209,12 +210,16 @@ fn on_swept(m: &mut Model, s: Swept, asked: bool) -> Out {
     if rebuilt {
         m.kept::<crate::update::Update>().rebuilt = true;
     }
+    if !s.now.mod_.is_zero() {
+        m.kept::<crate::update::Update>().installed = s.now.mod_.to_ms();
+    }
     if let Some(n) = news {
         m.news(n, "");
     }
-    let said = if s.failed > 0 {
+    // Those that can't move are said once, not at every look.
+    let said = if s.failed > 0 && (asked || s.restarted > 0) {
         Some(format!(
-            "restarted {} sessions on the installed rush: {} failed, still on the old one · {} still busy{}",
+            "moved {} sessions to the new build · {} can't move while their agent runs, so stay on the old one · {} still busy{}",
             s.restarted,
             s.failed,
             s.stale - s.failed,
@@ -222,7 +227,7 @@ fn on_swept(m: &mut Model, s: Swept, asked: bool) -> Out {
         ))
     } else if asked || s.restarted > 0 {
         Some(format!(
-            "restarted {} sessions on the installed rush: {} still busy{}",
+            "moved {} sessions to the new build, their agents running on · {} still busy, moved once their turn ends{}",
             s.restarted,
             s.stale,
             gone_note(s.gone)
@@ -706,12 +711,14 @@ pub fn hosts_row(m: &Model) -> Setting {
     let (n, f, g) = upd(m).map_or((0, 0, 0), |u| (u.stale, u.failed, u.gone));
     let mut what = "none".to_string();
     if n == 1 {
-        what = "1 session on an older rush · enter restarts it once idle".into();
+        what = "1 session on an old build · enter moves it to the new one".into();
     } else if n > 0 {
-        what = format!("{n} sessions on an older rush · enter restarts the idle ones");
+        what = format!("{n} sessions on an old build · enter moves them to the new one");
     }
     if f > 0 {
-        what.push_str(&format!(" · {f} failed to restart, so stayed as they were"));
+        what.push_str(&format!(
+            " · {f} can't move while their agent runs, so stay as they are"
+        ));
     }
     what.push_str(&gone_note(g));
     let w1 = what.clone();
@@ -730,7 +737,7 @@ pub fn hosts_row(m: &Model) -> Setting {
         about: Some(Rc::new(move || {
             (
                 "Sessions".into(),
-                "Enter restarts the idle ones on the installed rush now; one in a turn, with something queued or a question waiting, is left until it's over.".into(),
+                "Enter moves sessions to the new build now, their agents running on: same process, same conversation. One in a turn, with something queued or a question waiting, moves once it's over. One whose host is from before moves, or on another machine, stays where it is.".into(),
                 what.clone(),
             )
         })),
@@ -738,7 +745,7 @@ pub fn hosts_row(m: &Model) -> Setting {
             watch_hosts(m, true, true);
             Out::Draw
         })),
-        keys: vec!["enter".into(), "restart the idle ones".into()],
+        keys: vec!["enter".into(), "move sessions to the new build".into()],
         ..Setting::default()
     }
 }

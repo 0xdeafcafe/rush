@@ -169,8 +169,10 @@ pub struct Dialog {
     /// The agent showing's own settings file, as last read.
     pub settings: Option<files::Loaded>,
     /// The project a new session would start in, for General's worktree
-    /// row.
+    /// rows: it goes first.
     pub project: String,
+    /// Every project rush knows, for General's Projects (prep).
+    pub projects: Vec<String>,
     /// The harness showing's own settings, as last read.
     pub own: Option<ownsettings::Read>,
 }
@@ -722,6 +724,14 @@ pub fn register(x: &mut Ext) {
         "whether the API answers, the network rush is on and how fast it moves, and what waits for it (#net)",
         |m, _| {
             m.open_sheet(Box::new(sheets::NetSheet::new()));
+            Out::Draw
+        },
+    );
+    x.command(
+        "upgrade",
+        "move every session to the new build now, its agent running on: one in a turn moves once it ends",
+        |m, _| {
+            updates::watch_hosts(m, true, true);
             Out::Draw
         },
     );

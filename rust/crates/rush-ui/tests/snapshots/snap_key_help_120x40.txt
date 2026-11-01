@@ -4,7 +4,7 @@
   AGENTS▾                               LATEST                               RUNNING   CPU    RAM TOKENS    COST   TIME
 ┃ Needs you  1 · $0.19
 ▌ └─ ? ╭─ ⌨ Keys ──────────────────────────────────────────────────────────────────────────────────────── f1 ─╮9   2m ●
-▌      │ ❯ ▏find a key by its keys or what it does                                                   133 keys │
+▌      │ ❯ ▏find a key by its keys or what it does                                                   134 keys │
        │ ──────────────────────────────────────────────────────────────────────────────────────────────────── │
 ┃ Worki│ Here · Agents and the Prompt ──────────────────────────────────────────────────────────────────────  │
 ┃ ├─ ✳ │ ▍ ↑                     the agent above                                                              │2    21m

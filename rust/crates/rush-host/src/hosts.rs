@@ -227,6 +227,7 @@ pub fn host_info(i: &Info) -> HostInfo {
         stalled: ms(i.stalled),
         proto: i.proto,
         sleeping: i.sleeping,
+        exe_mod: ms(i.exe.mod_),
         remote: i.remote.clone(),
         lost: i.lost,
         lost_idle: i.cut_idle,

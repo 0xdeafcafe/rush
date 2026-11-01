@@ -90,6 +90,9 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     // Its shell calls run as scripts, read again as they may have moved
     // on (rushmode.go:2404's scriptViews, once a frame).
     super::scripts::sync(m, &key);
+    // What its running Bash calls are doing now, from their processes
+    // and the files they write.
+    super::livestep::sync(m, &key);
     // Go's pane is the screen less 3, from column 2 (view.go:1210); the
     // box gives the map its width from 96 wide (rushmode.go:3224).
     let w = w.saturating_sub(INDENT + 1).max(20);
@@ -181,7 +184,11 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
 
     // The queue and a waiting card sit last, just above the box; a room
     // running on the chat before them (paneDock :3513).
-    let (room_rows, card_rows) = rush_ui_session_cards::dock_parts(m, w - 1);
+    // The views beside the conversation take their room of its width; the
+    // card stays inside what's left, so they never lie over its words.
+    let vw = rush_ui_plugin_ui::views::beside::views_beside(m, &key, w).2;
+    let (room_rows, card_rows) =
+        rush_ui_session_cards::dock_parts(m, w.saturating_sub(vw + 1).max(20));
     if !room_rows.is_empty() {
         block(&mut out, &mut blocks);
         out.extend(room_rows);

@@ -13,6 +13,7 @@ pub mod failure;
 pub mod guard;
 pub mod par;
 pub mod sandbox;
+pub mod tailread;
 pub mod text;
 pub mod theme;
 pub mod time;

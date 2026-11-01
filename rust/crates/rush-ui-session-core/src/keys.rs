@@ -249,8 +249,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         }
         "alt+h" => {
             conn(m, &key).edit_held = false; // yours now, not the edit's
-            let held = queue_of(m, &key).held;
-            queue::hold(m, &key, !held);
+            queue::hold_key(m, &key);
             return Out::Draw;
         }
         "left" => {
@@ -854,10 +853,14 @@ fn send_offline_as(
         // asleep is read off disk when the link didn't say.
         let asleep = c.sleeping;
         c.waking = true;
+        if asleep {
+            super::live::hold(m, key);
+        }
         let word = if asleep { "waking" } else { "resuming" };
         m.flash(&format!("{word} {name}…"));
         mark_sending(m, key, &text);
         let key = key.to_string();
+        let reg = m.reg.clone();
         super::later(
             m,
             move || {
@@ -865,7 +868,9 @@ fn send_offline_as(
                 // behind): dialled again with what was sent, as a wake,
                 // never a second host started over it.
                 if asleep || h.sleeping(&a) || h.running(&a) {
-                    Ok(h.wake(&a, &text, &images, now).map_err(|e| (e, text)))
+                    Ok(h.wake(&a, &text, &images, now)
+                        .map(|l| super::live::read_woken(&reg, &a, l))
+                        .map_err(|e| (e, text)))
                 } else {
                     Err(h.resume(&a, &text, &images))
                 }
@@ -890,6 +895,9 @@ fn send_offline_as(
                     conn(m, &key).waking = false;
                     match r {
                         Ok(()) => {
+                            // The conversation stays on screen while the new
+                            // host's comes in behind it.
+                            super::live::keep_shown(m, &key);
                             m.flash(&format!("resumed {name}"));
                             if let Some(id) = &answer {
                                 rush_ui_session_cards::question::answer_sent(m, &key, id);
@@ -945,14 +953,21 @@ pub fn start_then(m: &mut Model, key: &str, then: rush_ui_session_cards::Then) -
     }
     let asleep = c.sleeping;
     c.waking = true;
+    if asleep {
+        super::live::hold(m, key);
+    }
     let name = a.display_name.clone();
     m.flash(&format!("starting {name}…"));
     let key = key.to_string();
+    let reg = m.reg.clone();
     super::later(
         m,
         move || {
-            if asleep || h.sleeping(&a) {
-                Ok(h.wake(&a, "", &[], false))
+            // One still running that let this rush go is reached again,
+            // never a second host started over it.
+            if asleep || h.sleeping(&a) || h.running(&a) {
+                Ok(h.wake(&a, "", &[], false)
+                    .map(|l| super::live::read_woken(&reg, &a, l)))
             } else {
                 Err(h.resume(&a, "", &[]))
             }
@@ -961,9 +976,12 @@ pub fn start_then(m: &mut Model, key: &str, then: rush_ui_session_cards::Then) -
             Ok(r) => super::live::woke(m, &key, r, String::new()),
             Err(r) => {
                 conn(m, &key).waking = false;
-                if let Err(e) = r {
-                    conn(m, &key).on_up = None;
-                    m.fail(&e);
+                match r {
+                    Ok(()) => super::live::keep_shown(m, &key),
+                    Err(e) => {
+                        conn(m, &key).on_up = None;
+                        m.fail(&e);
+                    }
                 }
                 Out::Draw
             }

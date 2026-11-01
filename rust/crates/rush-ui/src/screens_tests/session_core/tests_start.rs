@@ -467,3 +467,199 @@ fn images_dropped_on_the_box_start_with_the_session() {
     assert_eq!(s.images, vec![a, b]);
     assert!(m.imgs.path.is_empty(), "the box lets its images go");
 }
+
+// ---- a message to a stalled session: its conversation stays on screen ----
+
+/// What the host says of a message sent.
+fn said(text: &str) -> Said {
+    Said::Sent {
+        text: text.into(),
+        images: Vec::new(),
+        exchange: None,
+    }
+}
+
+/// The open session's messages, in order: each turn's, and those sent
+/// into it while it worked.
+fn prompts(m: &Model) -> Vec<String> {
+    use rush_convo::model::Item;
+    let v = m.session.as_ref().expect("the session is open");
+    let mut out = Vec::new();
+    for t in &v.sess.turns {
+        out.push(t.prompt.clone());
+        out.extend(t.items.iter().filter_map(|i| match i {
+            Item::Interject(x) => Some(x.text.clone()),
+            _ => None,
+        }));
+    }
+    out
+}
+
+/// open_hosted, its host having replayed a message and gone idle.
+fn talked(fake: &Arc<Fake>, key: &str) -> Model {
+    let mut m = open_hosted(fake, key);
+    let r#gen = core(&mut m).link_gen;
+    let idle = Info {
+        state: "idle".into(),
+        ..Info::default()
+    };
+    live::take(
+        &mut m,
+        key,
+        r#gen,
+        vec![said("earlier words"), Said::Info(idle)],
+        false,
+    );
+    assert_eq!(prompts(&m), ["earlier words"]);
+    m
+}
+
+fn send(m: &mut Model, key: &str, text: &str) {
+    conn(m, key).input.insert_str(text);
+    crate::screens::session_core::keys::send(m, key, false);
+}
+
+// Asleep while it was watched: the woken host replays only what came since
+// it woke, and that goes on after the conversation on screen
+// (carryHostView), never in place of it.
+#[test]
+fn a_message_to_a_sleeping_host_keeps_the_conversation() {
+    let fake = Fake::new();
+    let key = "default/a:h1";
+    let mut m = talked(&fake, key);
+    let r#gen = core(&mut m).link_gen;
+    let asleep = Info {
+        state: "idle".into(),
+        sleeping: true,
+        ..Info::default()
+    };
+    live::take(&mut m, key, r#gen, vec![Said::Info(asleep)], true);
+    m.agents[0].pid = 0;
+    fake.asleep.lock().unwrap().push(key.into());
+    *fake.lines.lock().unwrap() = vec![said("carry on"), Said::Info(Info::default())];
+    send(&mut m, key, "carry on");
+    assert!(conn(&mut m, key).hosted(), "woken");
+    assert_eq!(prompts(&m), ["earlier words", "carry on"]);
+}
+
+// Opened once it slept (its info read from disk): the same.
+#[test]
+fn a_message_to_a_session_opened_asleep_keeps_the_conversation() {
+    let fake = Fake::new();
+    let key = "default/a:h1";
+    let (mut m, d) = model(&fake);
+    std::mem::forget(d);
+    fake.host(key);
+    fake.asleep.lock().unwrap().push(key.into());
+    let asleep = Info {
+        state: "idle".into(),
+        sleeping: true,
+        ..Info::default()
+    };
+    fake.saved.lock().unwrap().push((key.into(), asleep));
+    let mut a = hosted_agent(key, "h1");
+    a.pid = 0;
+    m.set_fleet(Fleet {
+        agents: vec![a],
+        roots: vec![String::new()],
+        ..Fleet::default()
+    });
+    m.select(key.into());
+    m.open(0);
+    live::sync(&mut m);
+    assert!(conn(&mut m, key).sleeping, "read as asleep");
+    let v = m.session.as_mut().unwrap();
+    v.sess.sent("earlier words".into(), Vec::new(), NOW);
+    *fake.lines.lock().unwrap() = vec![said("carry on"), Said::Info(Info::default())];
+    send(&mut m, key, "carry on");
+    assert!(conn(&mut m, key).hosted(), "woken");
+    assert_eq!(prompts(&m), ["earlier words", "carry on"]);
+}
+
+// A host that let this rush go and runs on replays all it has: what's on
+// screen stays until that's in, then its own conversation, nothing twice.
+#[test]
+fn a_message_to_a_host_that_let_go_keeps_the_conversation() {
+    let fake = Fake::new();
+    let key = "default/a:h1";
+    let mut m = talked(&fake, key);
+    fake.running.lock().unwrap().push(key.into());
+    conn(&mut m, key).link = None;
+    send(&mut m, key, "still there?");
+    assert!(conn(&mut m, key).hosted(), "reached again");
+    assert_eq!(
+        prompts(&m),
+        ["earlier words"],
+        "on screen till its replay's in"
+    );
+    let r#gen = core(&mut m).link_gen;
+    let replay = vec![
+        said("earlier words"),
+        said("still there?"),
+        Said::Info(Info::default()),
+    ];
+    live::take(&mut m, key, r#gen, replay, false);
+    assert_eq!(prompts(&m), ["earlier words", "still there?"]);
+}
+
+/// A host down, then a message: resumed, and its new host reached once the
+/// list has it. gone: the list still had its old process when it went.
+fn resumed_with_a_message(gone: bool) {
+    let fake = Fake::new();
+    let key = "default/a:h1";
+    let mut m = talked(&fake, key);
+    let r#gen = core(&mut m).link_gen;
+    *fake.down.lock().unwrap() = true;
+    if !gone {
+        m.agents[0].pid = 0;
+    }
+    live::take(&mut m, key, r#gen, Vec::new(), true);
+    assert!(!conn(&mut m, key).hosted());
+    m.agents[0].pid = 0;
+    // Read again as the list has it: from its transcript.
+    let v = m.session.as_mut().unwrap();
+    v.sess.sent("earlier words".into(), Vec::new(), NOW);
+    send(&mut m, key, "again");
+    assert_eq!(
+        fake.resumed.lock().unwrap().clone(),
+        vec![(key.to_string(), "again".to_string())]
+    );
+    *fake.down.lock().unwrap() = false;
+    m.agents[0].pid = 5151;
+    live::sync(&mut m);
+    assert!(conn(&mut m, key).hosted(), "its new host reached");
+    assert_eq!(
+        prompts(&m),
+        ["earlier words"],
+        "on screen till its replay's in"
+    );
+}
+
+#[test]
+fn a_message_to_a_stopped_host_keeps_the_conversation() {
+    resumed_with_a_message(false);
+}
+
+#[test]
+fn a_message_to_a_host_that_died_keeps_the_conversation() {
+    resumed_with_a_message(true);
+}
+
+// One that's connected and waiting (stalled mid-turn, or idle) takes the
+// message over its link: the conversation isn't touched.
+#[test]
+fn a_message_to_a_waiting_host_keeps_the_conversation() {
+    let fake = Fake::new();
+    let key = "default/a:h1";
+    let mut m = talked(&fake, key);
+    let r#gen = core(&mut m).link_gen;
+    let stalled = Info {
+        state: "working".into(),
+        ..Info::default()
+    };
+    live::take(&mut m, key, r#gen, vec![Said::Info(stalled)], false);
+    send(&mut m, key, "you there?");
+    assert!(!fake.ops().is_empty(), "sent over its link");
+    assert!(fake.wakes.lock().unwrap().is_empty() && fake.resumed.lock().unwrap().is_empty());
+    assert_eq!(prompts(&m), ["earlier words"]);
+}

@@ -27,6 +27,14 @@ pub struct Config {
         skip_serializing_if = "is_false"
     )]
     pub feed: bool,
+    /// Turns the views agents draw off: the panel hides them and agents
+    /// are not told of the view tool. Off by default (views are on).
+    #[serde(
+        rename = "viewsOff",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_false"
+    )]
+    pub views_off: bool,
     /// How little free disk, in GB, has rush offer to start a cleanup
     /// agent: 0 is 20, -1 never. CleanupRAMMinutes is how long the memory
     /// may be under pressure before it offers: 0 is 15, -1 never.

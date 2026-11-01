@@ -76,13 +76,15 @@ pub fn ensure_broker() -> Result<(), String> {
         .stdin(Stdio::null())
         .stdout(Stdio::from(lg))
         .stderr(Stdio::from(lg2));
-    // Its own session, so it outlives whoever started it.
-    // SAFETY: setsid is async-signal-safe, as pre_exec needs.
+    // Its own session, so it outlives whoever started it; in the default
+    // class, not the screen's (rush_sys::qos).
+    // SAFETY: setsid and plain are async-signal-safe, as pre_exec needs.
     unsafe {
         cmd.pre_exec(|| {
             if libc::setsid() < 0 {
                 return Err(std::io::Error::last_os_error());
             }
+            rush_sys::qos::plain();
             Ok(())
         });
     }

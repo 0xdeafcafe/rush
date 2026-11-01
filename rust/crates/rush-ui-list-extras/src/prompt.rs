@@ -29,10 +29,14 @@ pub struct PromptState {
     y: usize,
     drawn: Option<InputBox>,
     /// What a click takes on the box's top edge, by column: the folder,
-    /// the shelf's setups (shelfHits), the parts of its chip.
+    /// its own worktree chip, the shelf's setups (shelfHits), the parts
+    /// of its chip.
     hits: Vec<(usize, usize, EdgeAct)>,
-    /// The part of the top edge under the pointer, lit.
-    lit: Option<(usize, usize)>,
+    /// What a click takes on its bottom edge: a repository's offer.
+    foot_hits: Vec<(usize, usize, EdgeAct)>,
+    /// The part of an edge under the pointer, lit: the bottom one or the
+    /// top, from and to.
+    lit: Option<(bool, usize, usize)>,
 }
 
 /// What a click on a part of the box's top edge does.
@@ -46,6 +50,11 @@ pub enum EdgeAct {
     /// A part of the chip: the Start sheet on that row, as #model and
     /// #effort open it.
     Sheet(usize),
+    /// The own worktree chip: switches whether a session started in the
+    /// project gets a worktree of its own (#worktree on|off).
+    Worktree(String),
+    /// A repository's address typed: what tab does with it (gitlink).
+    Repo,
 }
 
 /// Label parts: from and to, cells into the label, and what a click does.
@@ -143,7 +152,7 @@ pub fn dir_label(m: &Model, dir: &str) -> String {
 /// The box's edge labels, left and right, what it says while empty, and
 /// the parts of each a click takes, as the text calls for (promptLines'
 /// switch).
-fn labels(m: &Model, text: &str, w: usize) -> (Line, Line, String, Parts, Parts) {
+fn labels(m: &mut Model, text: &str, w: usize) -> (Line, Line, String, Parts, Parts) {
     if let Some((top_l, holder)) = super::rename::labels(m) {
         return (top_l, Line::new(), holder, Vec::new(), Vec::new());
     }
@@ -159,9 +168,18 @@ fn labels(m: &Model, text: &str, w: usize) -> (Line, Line, String, Parts, Parts)
     }
     let dir = start_dir(m);
     let lead = "new agent in ";
-    let top_l = line([sp(lead, DIM), sp(dir_label(m, &dir), TEXT)]);
+    let mut top_l = line([sp(lead, DIM), sp(dir_label(m, &dir), TEXT)]);
     // The folder: a click picks another, as ctrl+l does.
-    let left = vec![(width(lead), top_l.width(), EdgeAct::Dir)];
+    let mut left = vec![(width(lead), top_l.width(), EdgeAct::Dir)];
+    // In a repository, whether it gets a worktree of its own: a click
+    // switches it for the project.
+    let (project, repo) = super::gitlink::box_project(m);
+    if repo {
+        top_l.spans.push(plain(" "));
+        let from = top_l.width();
+        join(&mut top_l, worktree_chip(m, &project));
+        left.push((from, top_l.width(), EdgeAct::Worktree(project)));
+    }
     // What it starts as, so a model or profile is never a surprise,
     // beside the others it could: ⌥1…9 or a click takes one; a click on
     // the chip's name, model or effort opens the Start sheet there.
@@ -178,6 +196,37 @@ fn labels(m: &Model, text: &str, w: usize) -> (Line, Line, String, Parts, Parts)
         }
     }
     (top_l, top_r, "describe a task".into(), left, right)
+}
+
+/// The own worktree chip: on, sessions started from the box in project
+/// get a worktree and branch of their own; off, they work in the
+/// checkout itself.
+pub fn worktree_chip(m: &Model, project: &str) -> Line {
+    let on = crate::accounts::cfg(m).own_worktree(project);
+    let mut l = if on {
+        line([sp(" own worktree ", TEXT)])
+    } else {
+        line([sp(" in the checkout ", DIM)])
+    };
+    for s in &mut l.spans {
+        s.style.bg = rush_ui_accounts::setup::BAR_CHIP;
+    }
+    l
+}
+
+/// The own worktree chip clicked: the project's switched and saved.
+fn switch_worktree(m: &mut Model, project: &str) -> Out {
+    use crate::accounts::{cfg, cfg_mut, save};
+    let on = !cfg(m).own_worktree(project);
+    cfg_mut(m).own_worktrees.insert(project.to_string(), on);
+    save(m);
+    let name = project.rsplit('/').next().unwrap_or(project);
+    m.flash(&if on {
+        format!("new sessions in {name} get a worktree and branch of their own")
+    } else {
+        format!("new sessions in {name} work in the checkout itself")
+    });
+    Out::Draw
 }
 
 /// The box at width w, before it's drawn (promptBoxAt).
@@ -201,8 +250,21 @@ fn box_at(m: &mut Model, w: usize) -> InputBox {
     } else {
         Line::new()
     };
+    // A repository's address typed: what tab does with it, on the left.
+    let foot_l = if super::rename::renaming(m).is_none() && !m.keys_beside && !embedded {
+        super::gitlink::offer_line(m, w.saturating_sub(foot_r.width() + 8)).unwrap_or_default()
+    } else {
+        m.kept::<super::gitlink::GitState>().shown = None;
+        Line::new()
+    };
+    let foot = if foot_l.spans.is_empty() {
+        Vec::new()
+    } else {
+        vec![(0, foot_l.width(), EdgeAct::Repo)]
+    };
     let b = InputBox {
         w,
+        foot_l,
         foot_r,
         // The Session beside it has the keys: its edge goes quiet
         // (promptBoxAt's focused).
@@ -228,11 +290,16 @@ fn box_at(m: &mut Model, w: usize) -> InputBox {
     let at = b.edge_at(false);
     let mut hits = at.place(false, &left);
     hits.extend(at.place(true, &right));
+    let foot_hits = b.edge_at(true).place(false, &foot);
     let st = m.kept::<PromptState>();
-    st.lit = st.lit.filter(|l| hits.iter().any(|h| (h.0, h.1) == *l));
+    st.lit = st.lit.filter(|&(f, x0, x1)| {
+        let on = if f { &foot_hits } else { &hits };
+        on.iter().any(|h| (h.0, h.1) == (x0, x1))
+    });
     let mut b = b;
-    b.lit = st.lit.map(|(f, t)| (false, f, t));
+    b.lit = st.lit;
     st.hits = hits;
+    st.foot_hits = foot_hits;
     // A dictation under way shows at the cursor (view.go:2719).
     if b.focused
         && m.sheet.is_none()
@@ -272,12 +339,17 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
         return Out::Pass;
     };
     let (x, y) = (e.x as usize, e.y as usize);
-    let hit = (y == st.y)
-        .then(|| st.hits.iter().find(|h| x >= h.0 && x < h.1).cloned())
-        .flatten();
+    let foot_y = st.y + b.rows() + 1;
+    let hit = if y == st.y {
+        st.hits.iter().find(|h| x >= h.0 && x < h.1).cloned()
+    } else if y == foot_y {
+        st.foot_hits.iter().find(|h| x >= h.0 && x < h.1).cloned()
+    } else {
+        None
+    };
     if e.kind == MouseKind::Moved {
-        // A part of the top edge a click takes, lit under the pointer.
-        let lit = hit.as_ref().map(|h| (h.0, h.1));
+        // A part of an edge a click takes, lit under the pointer.
+        let lit = hit.as_ref().map(|h| (y == foot_y, h.0, h.1));
         let edge = st.lit != lit;
         st.lit = lit;
         // The paste chip under the pointer lit (hoverChip).
@@ -337,6 +409,11 @@ fn edge_click(m: &mut Model, act: EdgeAct) -> Out {
             Out::Draw
         }
         EdgeAct::Sheet(row) => rush_ui_accounts::startsheet::open_on(m, row, ""),
+        EdgeAct::Worktree(project) => switch_worktree(m, &project),
+        EdgeAct::Repo => match super::gitlink::offer(m) {
+            Some(o) => super::gitlink::take(m, o),
+            None => Out::Draw,
+        },
     }
 }
 
@@ -419,6 +496,20 @@ pub fn hint(m: &Model, w: usize) -> Option<Line> {
             ("enter".to_string(), "start".to_string()),
             ("shift+tab".to_string(), "model".to_string()),
         ];
+        // A repository's address typed: tab moves there, or clones it.
+        match m
+            .kept
+            .peek::<super::gitlink::GitState>()
+            .and_then(|g| g.shown.clone())
+        {
+            Some(super::gitlink::Offer::Move { .. }) => {
+                pairs.insert(1, ("tab".into(), "move there".into()));
+            }
+            Some(super::gitlink::Offer::Clone { .. }) => {
+                pairs.insert(1, ("tab".into(), "clone it".into()));
+            }
+            None => {}
+        }
         if let Some(fk) = folder_key(m, a) {
             pairs.push(fk);
         }

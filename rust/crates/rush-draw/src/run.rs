@@ -348,6 +348,7 @@ impl<T: Send + 'static> Loop<T> {
 
     /// Runs `app` on the terminal until it quits.
     pub fn run(&self, term: &mut Term, app: &mut impl App<T>) -> io::Result<()> {
+        crate::qos::interactive();
         self.drive(
             app,
             term,

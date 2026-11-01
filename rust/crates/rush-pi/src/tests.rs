@@ -907,3 +907,43 @@ fn registers() {
     assert!(reg.supports(crate::KIND, rush_core::adapter::Feature::Run));
     let _ = discover::home();
 }
+
+/// The shared check every adapter's end reader is held to
+/// (adapter::conform), on a session that went back in its tree halfway:
+/// the end follows the branch it's on now, along parent links.
+#[test]
+fn its_end_is_the_end_of_its_whole() {
+    let d = tempfile::tempdir().unwrap();
+    let path = d.path().join("s.jsonl");
+    let usage = r#"{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}}"#;
+    let mut b = String::from(
+        r#"{"type":"session","version":3,"id":"s-1","timestamp":"2026-09-29T13:00:00.000Z","cwd":"/work"}"#,
+    );
+    b.push('\n');
+    b += r#"{"type":"model_change","id":"m0","parentId":null,"timestamp":"2026-09-29T13:00:00.000Z","provider":"ollama","modelId":"qwen"}"#;
+    b.push('\n');
+    let mut parent = "m0".to_string();
+    for i in 0..40 {
+        if i == 20 {
+            parent = "a5".into(); // went back in its tree
+        }
+        let pad = "words ".repeat(40);
+        b += &format!(
+            r#"{{"type":"message","id":"u{i}","parentId":"{parent}","timestamp":"2026-09-29T13:{:02}:00.000Z","message":{{"role":"user","content":[{{"type":"text","text":"ask {i} {pad}"}}],"timestamp":1}}}}"#,
+            i % 60
+        );
+        b.push('\n');
+        b += &format!(
+            r#"{{"type":"message","id":"a{i}","parentId":"u{i}","timestamp":"2026-09-29T13:{:02}:30.000Z","message":{{"role":"assistant","content":[{{"type":"text","text":"answer {i}"}}],"api":"x","provider":"ollama","model":"qwen","usage":{usage},"stopReason":"stop","timestamp":2}}}}"#,
+            i % 60
+        );
+        b.push('\n');
+        parent = format!("a{i}");
+    }
+    std::fs::write(&path, &b).unwrap();
+    let s = Session {
+        transcript: path.to_string_lossy().into_owned(),
+        ..Session::default()
+    };
+    rush_core::adapter::conform::check_tail(&Pi::new(), &s, b.len() as i64 / 4);
+}

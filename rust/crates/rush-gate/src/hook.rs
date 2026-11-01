@@ -161,6 +161,12 @@ fn programs(words: &[String]) -> Vec<Call> {
             return vec![call(rest), first_program(rest)];
         }
         "npx" | "bunx" | "pnpx" => return vec![call(rest), first_program(rest)],
+        // A project's own wrapper script (tools/sbtest.sh cargo build) runs
+        // the program it's given, often by its full path and with a PATH
+        // of its own that the shims aren't on: gated as that program.
+        _ if first.contains('/') || p.ends_with(".sh") => {
+            return vec![call(rest), first_program(rest)];
+        }
         _ => {}
     }
     vec![call(rest)]
@@ -218,6 +224,10 @@ mod tests {
             ("go run ./cmd/server", ""),
             ("vitest run src/a.test.ts", "vitest"),
             ("nice -n 5 go build", "go"),
+            ("cd x && GOFLAGS=-v tools/sbtest.sh go test ./...", "go"),
+            ("./scripts/check.sh tsc --noEmit", "tsc"),
+            ("run.sh go run ./cmd/server", ""),
+            ("./scripts/build.sh --fast", ""),
             (r#"git commit -m "go faster" && echo tsc"#, ""),
             ("ls -la", ""),
             ("pnpm typecheck", ""),

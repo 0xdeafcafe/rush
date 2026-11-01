@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use rush_core::adapter::{
-    self, Answerer, Asker, Backgrounder, CacheKeeper, Conn, ContextReader, Driver, Hearer, Homed,
+    self, Adopter, Answerer, Asker, Backgrounder, CacheKeeper, Conn, ContextReader, Driver, Hearer, Homed,
     Input, Orphans, Responder, Sink, StartOptions, TaskStopper, ToolServer,
 };
 use rush_core::agent::PreviewLine;
@@ -173,18 +173,7 @@ impl Driver for Claude {
         ho.env.push(headless::CHECKPOINT_ENV.into());
         ho.env.extend(o.env.iter().cloned());
         let names: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
-        let taps = o.tap.is_some();
-        if let Some(tap) = o.tap.clone() {
-            let tools = tools.clone();
-            ho.tap = Some(Arc::new(move |line: &[u8]| {
-                if !own_traffic(&tools, line) {
-                    tap(line);
-                }
-            }));
-        }
-        if o.lightly {
-            ho.skip = Some(Arc::new(relay_only));
-        }
+        let taps = set_tap(&o, &tools, &mut ho);
         let login = crate::login::signed_in_as(&acct);
         let (s, reader) = headless::start(&ho)?;
         // Every process needs rush's tools registered before its first
@@ -215,6 +204,31 @@ impl Driver for Claude {
             stale: AtomicBool::new(false),
             ended: AtomicBool::new(false),
         });
+        Ok(serve(inner, s, reader))
+    }
+}
+
+/// Points o's tap at ho's, but for rush's own tools' traffic, and has ho
+/// skip what's only relayed: whether it taps.
+fn set_tap(o: &StartOptions, tools: &[ToolServer], ho: &mut headless::Options) -> bool {
+    let taps = o.tap.is_some();
+    if let Some(tap) = o.tap.clone() {
+        let tools = tools.to_vec();
+        ho.tap = Some(Arc::new(move |line: &[u8]| {
+            if !own_traffic(&tools, line) {
+                tap(line);
+            }
+        }));
+    }
+    if o.lightly {
+        ho.skip = Some(Arc::new(relay_only));
+    }
+    taps
+}
+
+/// Reads session s's output into inner's sink: the conn, running.
+fn serve(inner: Arc<Inner>, s: Arc<Session>, reader: headless::Reader) -> Box<dyn Conn> {
+    {
         let on = inner.clone();
         let end = inner.clone();
         let mut n = Neutral::new();
@@ -228,7 +242,138 @@ impl Driver for Claude {
                 end.sink.ended(e.map(|e| Box::new(e) as adapter::Error));
             },
         );
-        Ok(Box::new(ClaudeConn(inner)))
+    }
+    Box::new(ClaudeConn(inner))
+}
+
+/// What a Claude session passed across an upgrade keeps beyond its
+/// files: its session, sign-in and control requests' count (Rust-only).
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+#[serde(default)]
+struct Passed {
+    sid: String,
+    login: String,
+    root: bool,
+    acct_name: String,
+    acct_dir: String,
+    init_id: String,
+    seq: i64,
+    guard_pid: i32,
+}
+
+impl Adopter for Claude {
+    /// Takes up the claude -p a host passed to itself across an exec: its
+    /// process runs on, told nothing; its output read from where the last
+    /// build stopped.
+    fn adopt(
+        &self,
+        o: StartOptions,
+        u: adapter::Upgrade,
+        sink: Arc<dyn Sink>,
+    ) -> adapter::Result<Box<dyn Conn>> {
+        let p: Passed = serde_json::from_value(u.state.clone())?;
+        let fd = |n: &str| {
+            u.fds
+                .get(n)
+                .copied()
+                .ok_or_else(|| err(format!("no {n} was passed")))
+        };
+        let guard = u.fds.get("guard").map(|&fd| (p.guard_pid, fd));
+        let k = headless::Kept {
+            pid: u.pid,
+            fds: headless::Fds {
+                stdin: fd("stdin")?,
+                stdout: fd("stdout")?,
+                stderr: fd("stderr")?,
+                guard,
+            },
+            unread: u.unread,
+            seq: p.seq,
+        };
+        let acct = Account::at(&p.acct_name, &p.acct_dir);
+        let tools = o.tools.clone();
+        let mut ho = headless::Options {
+            account: acct.clone(),
+            dir: o.dir.clone(),
+            ..headless::Options::default()
+        };
+        let taps = set_tap(&o, &tools, &mut ho);
+        let (s, reader) = headless::adopt(&ho, k)?;
+        let inner = Arc::new(Inner {
+            s: s.clone(),
+            sink,
+            tools,
+            init_id: p.init_id,
+            carried: Mutex::new(String::new()),
+            acct,
+            root: p.root,
+            login: p.login,
+            taps,
+            dir: o.dir.clone(),
+            sid: Mutex::new(if p.sid.is_empty() {
+                o.session_id.clone()
+            } else {
+                p.sid
+            }),
+            asks: Mutex::new(HashMap::new()),
+            waits: Mutex::new(HashMap::new()),
+            stale: AtomicBool::new(false),
+            ended: AtomicBool::new(false),
+        });
+        Ok(serve(inner, s, reader))
+    }
+}
+
+impl adapter::Upgrader for ClaudeConn {
+    /// Holds the session between two of its lines and says how the next
+    /// build reaches it: never while Claude Code waits on an answer, or
+    /// rush on one of its.
+    fn pass(&self) -> adapter::Result<adapter::Upgrade> {
+        let c = &self.0;
+        if c.ended.load(Ordering::SeqCst) {
+            return Err(err("the session has ended"));
+        }
+        if !lock(&c.asks).is_empty() {
+            return Err(err("it's waiting on your answer"));
+        }
+        if !lock(&c.waits).is_empty() {
+            return Err(err("it's answering a question of rush's"));
+        }
+        let unread = c.s.pause(Duration::from_secs(5))?;
+        if !lock(&c.asks).is_empty() || !lock(&c.waits).is_empty() {
+            c.s.resume();
+            return Err(err("it asked something as it was passed"));
+        }
+        let k = c.s.kept(unread);
+        let mut fds = std::collections::BTreeMap::new();
+        fds.insert("stdin".to_string(), k.fds.stdin);
+        fds.insert("stdout".to_string(), k.fds.stdout);
+        fds.insert("stderr".to_string(), k.fds.stderr);
+        let mut guard_pid = 0;
+        if let Some((pid, fd)) = k.fds.guard {
+            fds.insert("guard".to_string(), fd);
+            guard_pid = pid;
+        }
+        let p = Passed {
+            sid: lock(&c.sid).clone(),
+            login: c.login.clone(),
+            root: c.root,
+            acct_name: c.acct.name.clone(),
+            acct_dir: c.acct.config_dir.to_string_lossy().into_owned(),
+            init_id: c.init_id.clone(),
+            seq: k.seq,
+            guard_pid,
+        };
+        Ok(adapter::Upgrade {
+            pid: k.pid,
+            fds,
+            unread: k.unread,
+            state: serde_json::to_value(p)?,
+        })
+    }
+
+    fn keep(&self) {
+        self.0.s.resume();
     }
 }
 
@@ -514,6 +659,9 @@ impl Conn for ClaudeConn {
         Some(self)
     }
     fn cache_keeper(&self) -> Option<&dyn CacheKeeper> {
+        Some(self)
+    }
+    fn upgrader(&self) -> Option<&dyn adapter::Upgrader> {
         Some(self)
     }
 

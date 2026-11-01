@@ -133,3 +133,60 @@ pub fn start_dir(m: &Model) -> String {
     }
     dirs[pick.map_or(0, |p| p.idx) % dirs.len()].clone()
 }
+
+/// The project dir is in: its repository's main checkout, or dir when
+/// it's in none. Looks at the disk (stats only, no git).
+pub fn project_of(dir: &str) -> String {
+    rush_fleet::main_checkout(dir)
+}
+
+/// Whether project is a git repository's checkout (its .git is there).
+pub fn is_repo(project: &str) -> bool {
+    !project.is_empty() && std::path::Path::new(project).join(".git").exists()
+}
+
+/// Every project rush knows, each once: the one a new session would start
+/// in (box, its main checkout) first, then the repositories agents work
+/// in, those with a setting of their own and where rush was opened, by
+/// name.
+pub fn known_projects(m: &Model, box_project: &str) -> Vec<String> {
+    let mut rest: Vec<String> = Vec::new();
+    let mut add = |p: &str| {
+        if p.starts_with('/') && p != box_project && !rest.iter().any(|r| r == p) {
+            rest.push(p.to_string());
+        }
+    };
+    for r in &m.roots {
+        if work_dir(r) {
+            add(r);
+        }
+    }
+    for p in crate::accounts::cfg(m).own_worktrees.keys() {
+        add(p);
+    }
+    // Where rush was opened, when it's a repository.
+    if work_dir(&m.launch_dir) {
+        let p = project_of(&m.launch_dir);
+        if is_repo(&p) {
+            add(&p);
+        }
+    }
+    sort_projects(box_project, rest)
+}
+
+/// projects by name as the list titles them (a folder's name, more of
+/// its path when two share one), first ahead of them when it's set.
+pub fn sort_projects(first: &str, mut projects: Vec<String>) -> Vec<String> {
+    projects.retain(|p| p != first);
+    let titles = crate::list::folder_titles(projects.iter().map(String::as_str));
+    projects.sort_by_cached_key(|p| {
+        (
+            titles.get(p).cloned().unwrap_or_default().to_lowercase(),
+            p.clone(),
+        )
+    });
+    if !first.is_empty() {
+        projects.insert(0, first.to_string());
+    }
+    projects
+}

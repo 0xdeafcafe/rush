@@ -690,14 +690,14 @@ fn updates_page() {
         "update available",
         "up to date",
         "unknown",
-        "2 sessions on an older rush",
+        "2 sessions on an old build",
     ] {
         assert!(b.contains(want), "Updates lacks {want:?}:\n{b}");
     }
     // A session whose folder is gone is something to close, not a failure.
     let row = updates::hosts_row(&m).line.unwrap()(200).plain();
     assert!(
-        row.ends_with("2 sessions on an older rush · enter restarts the idle ones · 1 session's folder is gone · close it"),
+        row.ends_with("2 sessions on an old build · enter moves them to the new one · 1 session's folder is gone · close it"),
         "{row}"
     );
     let l = updates::update_line(
@@ -742,10 +742,9 @@ fn fake_sweep(
     if restart { (1, 2, 1, 1) } else { (3, 0, 0, 1) }
 }
 
-// settings_updates.go:143-200: on its own, a look at the hosts restarts
+// settings_updates.go:143-200: on its own, a look at the hosts moves
 // nothing until the binary has settled, and then only in the rush that
-// leads; enter restarts the idle ones either way, and says so with the
-// gone note.
+// leads; enter moves them either way, and says so with the gone note.
 #[test]
 fn watch_hosts_restarts_only_when_leading_or_asked() {
     for follows in [true, false] {
@@ -764,8 +763,8 @@ fn watch_hosts_restarts_only_when_leading_or_asked() {
         } else {
             assert!(
                 m.said.iter().any(|l| l.text
-                    == "restarted 2 sessions on the installed rush: 1 failed, still on the old one · 0 still busy · 1 session's folder is gone · close it"),
-                "news of what it restarted on its own"
+                    == "moved 2 sessions to the new build · 1 can't move while their agent runs, so stay on the old one · 0 still busy · 1 session's folder is gone · close it"),
+                "news of what it moved on its own"
             );
         }
         // Asked: restarted whether it leads or not, as an answer.
@@ -1708,5 +1707,67 @@ fn the_menu_bar_is_only_the_interactive_rushs() {
         m.kept::<sheets::Asked>().0.len(),
         2,
         "a follower: left alone"
+    );
+}
+
+/// Settings › General's Projects lists every project rush knows, a row
+/// each: the one the Agents box points at first, the rest by name; each
+/// switches with space like any other row, and changing the box's
+/// folder doesn't change which projects show.
+#[test]
+fn projects_lists_every_project() {
+    let (mut m, _d) = model(140, 50);
+    m.launch_dir = "/src/app".into();
+    m.roots = vec![
+        "/src/zeta".into(),
+        "/src/alpha".into(),
+        String::new(),
+        "/src/app".into(),
+    ];
+    config_mut(&mut m)
+        .own_worktrees
+        .insert("/src/beta".into(), false);
+    set_settings_page(&mut m, PAGE_GENERAL);
+    general::prep(&mut m);
+    assert_eq!(
+        dialog(&m).projects,
+        ["/src/app", "/src/alpha", "/src/beta", "/src/zeta"]
+    );
+    let secs = general::sections(&m);
+    let sec = secs
+        .iter()
+        .find(|s| s.title == "Projects")
+        .expect("a Projects section");
+    let labels: Vec<(&str, &str)> = sec
+        .rows
+        .iter()
+        .map(|r| (r.label.as_str(), r.value.as_str()))
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            ("Own worktree in app", "on"),
+            ("Own worktree in alpha", "on"),
+            ("Own worktree in beta", "off"),
+            ("Own worktree in zeta", "on"),
+        ]
+    );
+    assert!(sec.note.contains("app first"), "{}", sec.note);
+    // space on zeta's row switches zeta alone.
+    let at = form::flat(&secs)
+        .iter()
+        .position(|r| r.label == "Own worktree in zeta")
+        .expect("zeta's row");
+    dialog_mut(&mut m).cursor = at;
+    form::form_key(&mut m, &secs, "space");
+    assert!(!config(&m).own_worktree("/src/zeta"));
+    assert!(config(&m).own_worktree("/src/app"));
+    assert!(config(&m).own_worktree("/src/alpha"));
+    // The box pointed elsewhere: the same projects, that one first.
+    m.launch_dir = "/src/alpha".into();
+    general::prep(&mut m);
+    assert_eq!(
+        dialog(&m).projects,
+        ["/src/alpha", "/src/app", "/src/beta", "/src/zeta"]
     );
 }

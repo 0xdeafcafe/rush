@@ -100,6 +100,11 @@ pub trait Conn: Send + Sync {
     fn cache_keeper(&self) -> Option<&dyn CacheKeeper> {
         None
     }
+    /// It can be passed, running, to the same host process exec'd onto a
+    /// newer rush: see [`Upgrader`]. Rust-only.
+    fn upgrader(&self) -> Option<&dyn Upgrader> {
+        None
+    }
     /// The session holds a sign-in its profile has since left: it should
     /// rest once its turn ends, and pick up on the new one (Go's Staler).
     fn stale(&self) -> bool {
@@ -188,4 +193,36 @@ pub trait Hearer {
 /// crate::cachekeep for when.
 pub trait CacheKeeper {
     fn keep_warm(&self) -> Result<()>;
+}
+
+/// A running agent as its host passes it to itself, exec'd onto a newer
+/// rush: the agent's process goes on as it was, its pipes kept open across
+/// the exec, and the new build takes it up where the old left off
+/// ([`super::Adopter`]). Rust-only.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Upgrade {
+    /// The agent's process, the host's child before and after; 0 for an
+    /// agent with no process of its own.
+    pub pid: i32,
+    /// The files the agent is reached through, by name (stdin, stdout,
+    /// ...): their numbers in the host, which stay open across the exec.
+    pub fds: std::collections::BTreeMap<String, i32>,
+    /// What the agent wrote that was read but not yet taken in: the new
+    /// build reads it first.
+    pub unread: Vec<u8>,
+    /// What else the adapter needs to take its session up again, its own.
+    pub state: serde_json::Value,
+}
+
+/// A running session that can be passed to a newer build of its host
+/// without stopping its agent.
+pub trait Upgrader {
+    /// Stops taking in what the agent says, between two of its lines, and
+    /// says how the new build reaches it. The session must not be used
+    /// after, but through [`Upgrader::keep`]. An agent waiting on an
+    /// answer can't be passed: that's an error, and nothing changes.
+    fn pass(&self) -> Result<Upgrade>;
+    /// The exec didn't happen: carry on as before pass.
+    fn keep(&self);
 }

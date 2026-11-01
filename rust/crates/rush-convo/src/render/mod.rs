@@ -262,6 +262,18 @@ pub struct Options {
     /// The Bash calls, by tool call id, rush ran as scripts: drawn as the
     /// file they ran from (render.go:132 Scripts).
     pub scripts: HashMap<String, ScriptView>,
+    /// What a running Bash call is doing now, by tool call id, found from
+    /// its processes and the files it writes: one dim line under its
+    /// command while it runs. Set by whoever finds it.
+    pub live: HashMap<String, StepLive>,
+}
+
+/// What a running shell step is doing now: a line from its processes, and
+/// the last lines of a file its command writes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StepLive {
+    pub now: String,
+    pub tail: Vec<String>,
 }
 
 impl Options {

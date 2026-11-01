@@ -54,8 +54,10 @@ use crate::timer::{TimerId, Timers};
 use crate::wire::*;
 
 mod agent;
+mod upgrade;
 use agent::Watching;
 pub use agent::{ROOT_IDLE, SPAWNED_IDLE, STALL_AFTER};
+pub use upgrade::{Exec, adopt, adopt_with};
 
 /// macOS's malloc in its space-efficient mode, set in a host's environment
 /// as it's started (malloc reads it as a process starts). A busy turn
@@ -124,6 +126,8 @@ const QUEUE_LATE: Duration = Duration::from_secs(120);
 
 /// How often an idle agent waiting to start again on another account is
 /// looked at for work of its own still running.
+/// How often the session's views are looked at for age.
+const VIEWS_EVERY: Duration = Duration::from_secs(60);
 const QUIET_CHECK: Duration = Duration::from_secs(2);
 
 /// How often a session an API error stopped looks whether it may try again.
@@ -177,6 +181,9 @@ pub struct Hooks {
     pub cwd_settle: Duration,
     /// How often at most info.json is rewritten for what it's doing.
     pub info_every: Duration,
+    /// Stands in for the exec that moves the host onto a newer rush, and
+    /// for asking that rush first: for tests. Rust-only.
+    pub exec: Option<Exec>,
 }
 
 impl Hooks {
@@ -200,6 +207,7 @@ impl Hooks {
             heard_wait: Duration::from_secs(1),
             cwd_settle: Duration::from_secs(2),
             info_every: INFO_EVERY,
+            exec: None,
         }
     }
 
@@ -319,6 +327,9 @@ pub(crate) struct State {
     /// A message sent now while the agent asked something waits in the
     /// queue, and goes as soon as that's answered.
     after_ask: bool,
+    /// How many queued messages, from the front, you sent now: they go
+    /// when the turn they stopped ends, whatever holds the queue.
+    go_now: usize,
     /// Where each queued image is read from, by its path.
     pics: HashMap<String, String>,
     /// The session's slash command list, kept apart from the ring.
@@ -352,6 +363,10 @@ pub(crate) struct State {
     last_step: String,
     heard: Option<Instant>,
     turn_ends: Vec<Time>,
+    /// Whether a look at the views is due, and the update of each view
+    /// the agent was told is stale (views::sweep).
+    views_armed: bool,
+    views_told: HashMap<String, i64>,
     quit: bool,
     /// info.json as last written, but for what changes on every message
     /// (see INFO_EVERY), when, and the latest info not written yet.
@@ -360,6 +375,12 @@ pub(crate) struct State {
     info_owed: Option<Vec<u8>>,
     /// What the host watches of its agent: see server/agent.rs.
     w: Watching,
+    /// Asked to move onto a newer rush once between turns, and a move
+    /// being tried (server/upgrade.rs).
+    upgrade_due: bool,
+    upgrading: bool,
+    /// Its socket's listener, by number: what a move keeps open.
+    listen_fd: i32,
 }
 
 pub(crate) struct Shared {
@@ -481,6 +502,7 @@ pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
     let sock = sock_path(id);
     let _ = std::fs::remove_file(&sock);
     let ln = UnixListener::bind(&sock).map_err(|e| e.to_string())?;
+    sh.lock().listen_fd = std::os::fd::AsRawFd::as_raw_fd(&ln);
     // The agents' queue: one thread takes what every start says, in order.
     {
         let h2 = h.clone();
@@ -537,7 +559,7 @@ pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
         if !st.info.queue.is_empty() {
             if st.info.limit.is_some() {
                 h.schedule_continue(&mut st);
-            } else if !st.info.queue_held && st.info.state == "idle" {
+            } else if h.ready(&st) && st.info.state == "idle" {
                 h.send_queue(&mut st);
             }
         }
@@ -545,6 +567,15 @@ pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
             h.arm_idle(&mut st); // woken with nothing to do, or nothing came of it
         }
     }
+    serve_on(&h, ln, sock)
+}
+
+/// Serves h's clients on ln, sock's listener, and watches what stops it,
+/// until it's stopped: the end of run_with and of adopt_with.
+fn serve_on(h: &Host, ln: UnixListener, sock: PathBuf) -> Result<(), String> {
+    let sh = &h.0;
+    let id = sh.lock().cfg.id.clone();
+    let id = id.as_str();
     let lc = ln.try_clone().map_err(|e| e.to_string())?;
     {
         let h2 = h.clone();
@@ -600,6 +631,7 @@ fn build(reg: Registry, hooks: Hooks, cfg: Config) -> (Host, Receiver<Msg>) {
         homes: true,
         inbox,
         exe: BinStamp::exe(),
+        upgrades: crate::upgrade::adopts(&reg, &cfg.kind),
         workspace: cfg.workspace.clone(),
         generation: 1,
         ..Info::default()
@@ -621,6 +653,7 @@ fn build(reg: Registry, hooks: Hooks, cfg: Config) -> (Host, Receiver<Msg>) {
         next_client: 0,
         pending: HashMap::new(),
         after_ask: false,
+        go_now: 0,
         pics: HashMap::new(),
         commands: None,
         ctx_out: false,
@@ -649,11 +682,16 @@ fn build(reg: Registry, hooks: Hooks, cfg: Config) -> (Host, Receiver<Msg>) {
         last_step: String::new(),
         heard: None,
         turn_ends: Vec::new(),
+        views_armed: false,
+        views_told: HashMap::new(),
         quit: false,
         info_key: Vec::new(),
         info_at: None,
         info_owed: None,
         w: Watching::default(),
+        upgrade_due: false,
+        upgrading: false,
+        listen_fd: -1,
     };
     let sh = Arc::new_cyclic(|me| Shared {
         reg,
@@ -886,6 +924,14 @@ fn sent_by(mut f: Value, e: Option<&Exchange>) -> Value {
 
 /// A message from rush itself or an agent's answer back to the one that
 /// started it: nothing you sent, so it answers no open decisions.
+/// Queued message i has left the queue: one you sent now before it is
+/// one fewer.
+fn took_out(st: &mut State, i: usize) {
+    if i < st.go_now {
+        st.go_now -= 1;
+    }
+}
+
 fn unasked(e: Option<&Exchange>) -> bool {
     e.is_some_and(|e| e.sender.kind == "rush" || e.phase == "result")
 }
@@ -1002,6 +1048,7 @@ fn restore_sleeping_info(st: &mut State, old: &Info) {
     st.info.login = old.login.clone();
     st.info.billing = old.billing.clone();
     st.info.queue_held = old.queue_held;
+    st.info.queue_guarded = old.queue_guarded;
     st.info.queue_separate = old.queue_separate;
     st.info.detail = old.detail.clone();
 }
@@ -1018,6 +1065,7 @@ fn restore_queue(st: &mut State, old: &Info) {
     st.info.queue_images = old.queue_images.clone();
     st.info.queue_exchanges = old.queue_exchanges.clone();
     st.info.queue_held = old.queue_held;
+    st.info.queue_guarded = old.queue_guarded;
     st.info.queue_separate = old.queue_separate;
     if old.queue.is_empty() {
         return;
@@ -1224,7 +1272,7 @@ impl Host {
     fn agent_ended(&self, st: &mut State, key: u64, err: Option<String>, cut: bool) {
         if st.conn_key != key || st.conn.is_none() {
             if cut && st.info.state == "idle" && st.info.limit.is_none() && !st.info.sleeping {
-                if !st.info.queue.is_empty() && !st.info.queue_held {
+                if self.ready(st) {
                     self.send_queue(st); // the next turn reads what it was answering
                 } else {
                     let _ = self.send_locked(st, CUT_NOTE);
@@ -1265,7 +1313,7 @@ impl Host {
             );
             // Whatever was waiting for this turn to end goes now, rather
             // than sitting in a queue nothing will ever drain.
-            if !st.info.queue.is_empty() && !st.info.queue_held && st.info.limit.is_none() {
+            if self.ready(st) && st.info.limit.is_none() {
                 self.send_queue(st);
                 return;
             }
@@ -1408,13 +1456,18 @@ impl Host {
         // helps when someone watches it in rush: a headless run is read by
         // the program that asked for it. Plugins' prompts and tools aren't
         // ported yet.
+        let views_off = rush_state::Store::load().config.views_off;
         let (tasks, decisions, views) = if c.headless {
             ("", "", "")
         } else {
             (
                 TASKS_PROMPT,
                 crate::decisions::DECISIONS_PROMPT,
-                crate::views::VIEWS_PROMPT,
+                if views_off {
+                    ""
+                } else {
+                    crate::views::VIEWS_PROMPT
+                },
             )
         };
         let note = crate::workspace::workspace_note(c.workspace.as_ref());
@@ -1461,20 +1514,7 @@ impl Host {
         if !self.reg.supports(a.kind().as_str(), Feature::Prompt) && !o.resume && !o.fork {
             st.untold = o.prompt.clone(); // no system prompt to take it: it goes atop the first message
         }
-        st.next_key += 1;
-        let key = st.next_key;
-        let tx = self.tx.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let tap_tx = Mutex::new(tx.clone());
-        o.tap = Some(Arc::new(move |line: &[u8]| {
-            let _ = tap_tx
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .send(Msg::Tap(key, line.to_vec()));
-        }));
-        let sink: Arc<dyn Sink> = Arc::new(HostSink {
-            key,
-            tx: Mutex::new(tx),
-        });
+        let (key, sink) = self.agent_sink(st, &mut o);
         let conn = match d.start(o, sink) {
             Ok(c) => c,
             Err(e) => return Err(e.to_string()),
@@ -1494,6 +1534,26 @@ impl Host {
         let f = json!({"ev": ev, "cause": st.starting, "agent": c.kind, "pid": st.info.claude_pid, "cwd": c.cwd, "home": st.info.home, "login": st.info.login, "profile": c.account.dir});
         self.event(st, "agent-started", f);
         Ok(())
+    }
+
+    /// A new start's key, with o's tap and the sink it says what it says
+    /// to, both onto the agents' queue under that key.
+    fn agent_sink(&self, st: &mut State, o: &mut StartOptions) -> (u64, Arc<dyn Sink>) {
+        st.next_key += 1;
+        let key = st.next_key;
+        let tx = self.tx.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let tap_tx = Mutex::new(tx.clone());
+        o.tap = Some(Arc::new(move |line: &[u8]| {
+            let _ = tap_tx
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .send(Msg::Tap(key, line.to_vec()));
+        }));
+        let sink: Arc<dyn Sink> = Arc::new(HostSink {
+            key,
+            tx: Mutex::new(tx),
+        });
+        (key, sink)
     }
 
     /// Forgets the running session so nothing more is sent to it, and
@@ -1620,14 +1680,16 @@ impl Host {
         } else if st.info.idle_since.is_zero() && st.began {
             st.info.idle_since = st.info.updated_at; // none before its first turn
         }
-        if st.info.state != "working" || st.info.queue.is_empty() || st.info.queue_held {
+        if st.info.state != "working" || !queue_ready(&st.info) {
             st.info.queue_stuck = Time::default(); // sent, taken away, or held on purpose
         }
         self.note_state(st);
+        self.arm_views(st);
         let b = st.info.to_json();
         let line: Arc<[u8]> = lines::info_line(&b).into();
         self.write_info(st, b);
         self.push_all(st, &line);
+        self.upgrade_when_due(st);
     }
 
     /// Writes info.json, at once unless only what changes on every message
@@ -1652,6 +1714,51 @@ impl Host {
                 h.flush_info(&mut st);
             });
         }
+    }
+
+    /// Has the session's views looked at again in a minute once it works,
+    /// and while it works or keeps any: a session with neither costs nothing. Only the
+    /// views' age is looked at, off the main thread (views::sweep).
+    fn arm_views(&self, st: &mut State) {
+        if st.info.state == "working" {
+            self.arm_views_always(st);
+        }
+    }
+
+    /// Puts away the views left alone too long, and tells the agent once
+    /// of those gone stale while it works, as a notice at its next tool
+    /// call (the same inbox as rush's other notices; an agent without one
+    /// isn't told).
+    fn sweep_views(&self) {
+        let mut st = self.lock();
+        st.views_armed = false;
+        if st.quit || rush_state::Store::load().config.views_off {
+            return;
+        }
+        let working = st.info.state == "working";
+        let id = st.cfg.id.clone();
+        let mut told = std::mem::take(&mut st.views_told);
+        let swept = crate::views::sweep(&id, Time::now(), working, &mut told);
+        st.views_told = told;
+        if !swept.stale.is_empty() && st.info.inbox {
+            let _ = crate::inbox::tell(
+                &id,
+                crate::inbox::MAIN_NOTICE,
+                &crate::views::stale_note(&swept.stale),
+            );
+        }
+        if swept.more || working {
+            self.arm_views_always(&mut st);
+        }
+    }
+
+    fn arm_views_always(&self, st: &mut State) {
+        if st.views_armed || st.quit {
+            return;
+        }
+        st.views_armed = true;
+        let h = self.clone();
+        self.timers.after(VIEWS_EVERY, move || h.sweep_views());
     }
 
     /// Writes the info owed to info.json now, if any.
@@ -1738,10 +1845,12 @@ impl Host {
             st.after_ask = true;
         }
         let ex = exchange.as_deref();
-        // A held queue holds the next turn even while idle (Rust-only: the
-        // runaway guard holds a session's next turn this way); sent now,
-        // it goes all the same.
-        if !now && (busy || st.info.queue_held) {
+        // A held queue holds the next turn even while idle (Rust-only):
+        // yours (alt+h) holds every message; the runaway guard's only
+        // what starts without you, another agent's or rush's own. A
+        // message you send yourself goes, and sent now, anything does.
+        let held = st.info.queue_held || st.info.queue_guarded && exchange.is_some();
+        if !now && (busy || held) {
             if st.info.queue.is_empty() {
                 st.queued_at = Some(Instant::now());
                 let h = self.clone();
@@ -1768,9 +1877,10 @@ impl Host {
         }
         if !st.info.queue.is_empty() && (now || !st.info.queue_held) && (!busy || self.cuts_in(&st))
         {
-            // After what's waiting, never ahead of it.
+            // After what's waiting, never ahead of it. Sent now, all of it
+            // goes, whatever holds the queue; else what may go does.
             let at = st.info.queue.len();
-            self.cut_in(&mut st, text, images, Some(&pics), at, exchange);
+            self.cut_in(&mut st, text, images, Some(&pics), at, exchange, now);
             if !busy {
                 self.send_queue(&mut st);
                 self.publish(&mut st);
@@ -1781,7 +1891,7 @@ impl Host {
             return conn.map_or(Ok(()), |c| c.interrupt().map_err(|e| e.to_string()));
         }
         if now && self.cuts_in(&st) {
-            self.cut_in(&mut st, text, images, Some(&pics), 0, exchange);
+            self.cut_in(&mut st, text, images, Some(&pics), 0, exchange, true);
             let conn = st.conn.clone();
             drop(st);
             return conn.map_or(Ok(()), |c| c.interrupt().map_err(|e| e.to_string()));
@@ -1838,8 +1948,7 @@ impl Host {
         let mut st = self.lock();
         if st.conn.is_none()
             || st.info.state != "working"
-            || st.info.queue.is_empty()
-            || st.info.queue_held
+            || !self.ready(&st)
             || st.info.limit.is_some()
             || st
                 .queued_at
@@ -1880,10 +1989,12 @@ impl Host {
             && self.reg.supports(&st.cfg.kind, Feature::Interrupt)
     }
 
-    /// Puts text and its images at place at in the queue and lets the
-    /// queue go, so it's sent the moment the turn, which the caller stops,
-    /// ends. pics are the images as read to send, or None when they
-    /// already were.
+    /// Puts text and its images at place at in the queue, so it's sent
+    /// the moment the turn, which the caller stops, ends. go: you sent it
+    /// now, so it and what's before it go then whatever holds the queue;
+    /// the hold itself stays for the rest. pics are the images as read to
+    /// send, or None when they already were.
+    #[allow(clippy::too_many_arguments)]
     fn cut_in(
         &self,
         st: &mut State,
@@ -1892,6 +2003,7 @@ impl Host {
         pics: Option<&[String]>,
         at: usize,
         exchange: Option<Box<Exchange>>,
+        go: bool,
     ) {
         let mut qi = queue_images(&st.info);
         let mut qe = queue_exchanges(&st.info);
@@ -1905,8 +2017,22 @@ impl Host {
                 st.pics.insert(images[i].clone(), p.clone());
             }
         }
-        st.info.queue_held = false;
+        if go {
+            st.go_now = if at < st.go_now {
+                st.go_now + 1
+            } else {
+                at + 1
+            };
+        } else if at < st.go_now {
+            st.go_now += 1;
+        }
         self.publish(st);
+    }
+
+    /// Whether what's queued goes when the turn ends: what you sent now,
+    /// else what the holds let go (queue_ready).
+    fn ready(&self, st: &State) -> bool {
+        st.go_now > 0 && !st.info.queue.is_empty() || queue_ready(&st.info)
     }
 
     /// Sends queued text with its images, from where they were read when
@@ -1918,20 +2044,35 @@ impl Host {
         images: &[String],
         exchange: Option<Box<Exchange>>,
     ) -> Result<(), String> {
-        // The smaller copy made when it was queued, or the image itself
-        // when that copy has gone from the session's scratch: a missing
-        // copy would fail every try to send what's queued.
-        let pics: Vec<String> = images
-            .iter()
-            .map(|p| {
-                st.pics
-                    .get(p)
-                    .filter(|c| std::fs::metadata(c).is_ok())
-                    .cloned()
-                    .unwrap_or_else(|| p.clone())
-            })
-            .collect();
-        self.deliver_inline(st, text, images, &pics, exchange, "")?;
+        // Read from the copy made when it was queued, else from where you
+        // put it; one gone from both is left out, so one lost file never
+        // keeps the whole queue from going.
+        let mut sent = Vec::new();
+        let mut pics = Vec::new();
+        let mut to = Vec::new(); // each image's number among those sent
+        for p in images {
+            let from = [st.pics.get(p).cloned(), Some(p.clone())]
+                .into_iter()
+                .flatten()
+                .find(|f| std::fs::metadata(f).is_ok());
+            match from {
+                Some(f) => {
+                    sent.push(p.clone());
+                    pics.push(f);
+                    to.push(Some(sent.len()));
+                }
+                None => {
+                    self.event(st, "image-gone", json!({"path": p}));
+                    to.push(None);
+                }
+            }
+        }
+        let text = if sent.len() == images.len() {
+            text.to_string()
+        } else {
+            crate::name::renumber(text, |n| to.get(n.wrapping_sub(1)).copied().flatten())
+        };
+        self.deliver_inline(st, &text, &sent, &pics, exchange, "")?;
         for p in images {
             st.pics.remove(p);
         }
@@ -1939,27 +2080,63 @@ impl Host {
     }
 
     /// Sends what's queued: all of it as one message, or the first one if
-    /// you asked for one per turn. If the send fails it goes back on the
-    /// queue.
+    /// you asked for one per turn. What you sent now goes first, whatever
+    /// holds the queue; while you hold it nothing else goes, and while the
+    /// runaway guard holds it only what you sent yourself does. If the
+    /// send fails it goes back on the queue.
     fn send_queue(&self, st: &mut State) {
         let q = st.info.queue.clone();
         let qi = st.info.queue_images.clone();
         let all = queue_images(&st.info);
         let qe = queue_exchanges(&st.info);
-        let mut n = queue_cut(&q, st.info.queue_separate);
-        if let Some(i) = qe[..n].iter().position(Option::is_some) {
+        let go_was = st.go_now;
+        let pick: Vec<usize> = if st.go_now > 0 {
+            (0..st.go_now.min(q.len())).collect()
+        } else if st.info.queue_held {
+            Vec::new()
+        } else if st.info.queue_guarded {
+            (0..q.len()).filter(|&i| qe[i].is_none()).collect()
+        } else {
+            (0..q.len()).collect()
+        };
+        if pick.is_empty() {
+            st.go_now = 0;
+            return;
+        }
+        let texts: Vec<String> = pick.iter().map(|&i| q[i].clone()).collect();
+        let mut n = queue_cut(&texts, st.info.queue_separate);
+        if let Some(i) = pick[..n].iter().position(|&k| qe[k].is_some()) {
             n = i.max(1);
         }
-        let exchange = if n == 1 { qe[0].clone() } else { None };
-        let next = join_queue(&q[..n]);
-        let images: Vec<String> = all[..n].concat();
-        st.info.queue = q[n..].to_vec();
-        st.info.queue_images = trim_images(all[n..].to_vec());
-        st.info.queue_exchanges = trim_exchanges(qe[n..].to_vec());
+        let took = &pick[..n];
+        st.go_now = st.go_now.saturating_sub(n);
+        let exchange = if n == 1 { qe[took[0]].clone() } else { None };
+        // Each message numbers its images from 1: joined, they're
+        // numbered on, so each marker still names its own image.
+        let mut at = 0;
+        let mut joined = Vec::with_capacity(n);
+        for &k in took {
+            let o = at;
+            joined.push(if o == 0 {
+                q[k].clone()
+            } else {
+                crate::name::renumber(&q[k], |m| Some(m + o))
+            });
+            at += all[k].len();
+        }
+        let next = join_queue(&joined);
+        let images: Vec<String> = took.iter().flat_map(|&k| all[k].clone()).collect();
+        let keep = |k: &usize| !took.contains(k);
+        st.info.queue = (0..q.len()).filter(keep).map(|k| q[k].clone()).collect();
+        st.info.queue_images =
+            trim_images((0..q.len()).filter(keep).map(|k| all[k].clone()).collect());
+        st.info.queue_exchanges =
+            trim_exchanges((0..q.len()).filter(keep).map(|k| qe[k].clone()).collect());
         if self.deliver_queued(st, &next, &images, exchange).is_err() {
             st.info.queue = q;
             st.info.queue_images = qi;
             st.info.queue_exchanges = trim_exchanges(qe);
+            st.go_now = go_was;
             self.publish(st);
         }
     }
@@ -2058,11 +2235,12 @@ impl Host {
                     st.untold
                 );
             }
-            conn.send(Input {
+            if let Err(e) = conn.send(Input {
                 text: input,
                 images: pics.to_vec(),
-            })
-            .map_err(|e| e.to_string())?;
+            }) {
+                return Err(self.not_taken(st, turn, text, e.to_string(), &ev, cause));
+            }
             st.untold.clear();
             let mut received = e.clone();
             received.direction = "received".into();
@@ -2094,13 +2272,7 @@ impl Host {
             // reader waits on the lock, so the echo still comes before
             // the agent answers.
             if let Err(e) = conn.send(input.clone()) {
-                let e = e.to_string();
-                self.event(
-                    st,
-                    "deliver-failed",
-                    json!({"text": clip(text), "images": images.len(), "err": e, "ev": ev, "cause": cause}),
-                );
-                return Err(e);
+                return Err(self.not_taken(st, turn, text, e.to_string(), &ev, cause));
             }
             st.untold.clear();
             self.sent(st, &input);
@@ -2186,6 +2358,34 @@ impl Host {
             }
         });
         Ok(())
+    }
+
+    /// A message the agent didn't take (an image it couldn't read, its
+    /// input closed): said in the events and on the session, and a turn
+    /// it was to start isn't left "working" with nothing running, where
+    /// the queue would wait on a turn's end that never comes and a send
+    /// now would stop nothing. The error, for the caller.
+    fn not_taken(
+        &self,
+        st: &mut State,
+        turn: bool,
+        text: &str,
+        err: String,
+        ev: &str,
+        cause: &str,
+    ) -> String {
+        if turn && st.info.state == "working" {
+            st.info.state = "idle".into();
+            st.waiting = None;
+        }
+        st.info.error = err.clone();
+        self.event(
+            st,
+            "deliver-failed",
+            json!({"text": clip(text), "err": err, "ev": ev, "cause": cause}),
+        );
+        self.publish(st);
+        err
     }
 
     /// Asks the agent what fills the context window, unless it can't say
@@ -2332,6 +2532,10 @@ impl Host {
                 self.publish(&mut st);
                 return Ok(());
             }
+            "upgrade" => {
+                self.want_upgrade(&mut st);
+                return Ok(());
+            }
             "decisions_dismiss" => {
                 if let Some(d) = &st.info.decisions
                     && (o.id.is_empty() || o.id == d.id)
@@ -2345,13 +2549,17 @@ impl Host {
                 self.relogin(st, conn);
                 return Ok(());
             }
-            "queue_hold" | "queue_separate" => {
-                if o.op == "queue_hold" {
-                    st.info.queue_held = o.now;
+            "queue_hold" | "queue_guard" | "queue_separate" => {
+                if o.op == "queue_hold" || o.op == "queue_guard" {
+                    if o.op == "queue_hold" {
+                        st.info.queue_held = o.now;
+                    } else {
+                        st.info.queue_guarded = o.now;
+                    }
                     if !o.now
                         && st.info.state == "idle"
                         && st.info.limit.is_none()
-                        && !st.info.queue.is_empty()
+                        && self.ready(&st)
                     {
                         self.send_queue(&mut st);
                     }
@@ -2379,9 +2587,10 @@ impl Host {
                     let ex = qe.remove(i);
                     let images = qi.remove(i);
                     st.info.queue.remove(i);
+                    took_out(&mut st, i);
                     st.info.queue_images = trim_images(qi);
                     st.info.queue_exchanges = trim_exchanges(qe);
-                    self.cut_in(&mut st, &o.was, &images, None, 0, ex);
+                    self.cut_in(&mut st, &o.was, &images, None, 0, ex, true);
                     let c = st.conn.clone();
                     drop(st);
                     return c.map_or(Ok(()), |c| c.interrupt().map_err(|e| e.to_string()));
@@ -2652,6 +2861,7 @@ impl Host {
                 q.remove(i);
                 qi.remove(i);
                 qe.remove(i);
+                took_out(st, i);
             }
             "queue_move" => {
                 let to = (o.to.max(0) as usize).min(q.len() - 1);
@@ -2673,6 +2883,7 @@ impl Host {
                 let im = qi.remove(i + 1);
                 qi[i].extend(im);
                 qe.remove(i + 1);
+                took_out(st, i + 1);
             }
             "queue_send" => {
                 let (text, images, was) =
@@ -2686,7 +2897,10 @@ impl Host {
                 st.info.queue = rest;
                 st.info.queue_images = trim_images(qi);
                 st.info.queue_exchanges = trim_exchanges(qe2);
+                let go_was = st.go_now;
+                took_out(st, i);
                 if let Err(e) = self.deliver_queued(st, &text, &images, ex) {
+                    st.go_now = go_was;
                     st.info.queue = q;
                     st.info.queue_images = was;
                     st.info.queue_exchanges = trim_exchanges(qe);
@@ -2711,6 +2925,7 @@ impl Host {
         let mut qe = queue_exchanges(&st.info);
         let (images, ex) = (qi.remove(i), qe.remove(i));
         st.info.queue.remove(i);
+        took_out(&mut st, i);
         st.info.queue_images = trim_images(qi);
         st.info.queue_exchanges = trim_exchanges(qe);
         self.publish(&mut st);
@@ -2749,7 +2964,7 @@ impl Host {
             return;
         }
         st.after_ask = false;
-        if !st.info.queue.is_empty() && !st.info.queue_held && st.conn.is_some() {
+        if self.ready(st) && st.conn.is_some() {
             self.send_queue(st);
             self.publish(st);
         }
@@ -3180,7 +3395,7 @@ impl Host {
                 self.turn_done(st, &e);
                 return;
             }
-            if !st.info.queue.is_empty() && !st.info.queue_held {
+            if self.ready(st) {
                 // The whole queue goes as one message, unless you asked for
                 // them one per turn.
                 self.send_queue(st);
@@ -3390,7 +3605,7 @@ impl Host {
     /// Carries on a stalled turn: with the queue, if there is one, else
     /// with text.
     fn resume(&self, st: &mut State, text: &str) {
-        if !st.info.queue.is_empty() && !st.info.queue_held {
+        if self.ready(st) {
             self.send_queue(st);
             return;
         }
@@ -3519,7 +3734,7 @@ impl Host {
             st = self.wait_stopped(st);
         }
         st.info.limit = None;
-        if !st.info.queue.is_empty() && !st.info.queue_held {
+        if self.ready(&st) {
             self.send_queue(&mut st);
         } else {
             let _ = self.send_locked(&mut st, LIMIT_CONTINUE);
@@ -3573,7 +3788,7 @@ impl Host {
             return;
         }
         if busy {
-            if !st.info.queue.is_empty() && !st.info.queue_held {
+            if self.ready(&st) {
                 st.quiet_wait = false;
                 st.quiet_since = None;
                 self.event(
@@ -3611,7 +3826,7 @@ impl Host {
         if let Some(c) = self.detach(&mut st) {
             self.retire(&mut st, c);
         }
-        if !st.info.queue.is_empty() && !st.info.queue_held {
+        if self.ready(&st) {
             let mut st = self.wait_stopped(st);
             self.send_queue(&mut st);
             return;
@@ -3773,7 +3988,7 @@ impl Host {
         qe.push(None);
         st.info.queue_images = trim_images(qi);
         st.info.queue_exchanges = trim_exchanges(qe);
-        if st.info.state == "idle" && !st.info.queue_held {
+        if st.info.state == "idle" && self.ready(st) {
             self.send_queue(st);
             return;
         }

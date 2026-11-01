@@ -1752,7 +1752,10 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
         match d {
             DetailGot::Fresh(f) => {
                 more = f.more;
-                det.view.take(f);
+                det.view.take(rush_convo::reading::Slice {
+                    got: rush_convo::reading::Got::Lines(f),
+                    more,
+                });
             }
             DetailGot::Seeded(s) => det.view.seed(*s),
             DetailGot::Events(evs) => det.view.take_events(evs, true),

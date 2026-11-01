@@ -115,7 +115,7 @@ fn poll(stop: &Stop, files: &[File], every: Duration) -> bool {
 }
 
 mod follow;
-pub use follow::follow;
+pub use follow::{Grows, follow, follow_grows};
 
 #[cfg(test)]
 mod tests;

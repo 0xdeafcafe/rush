@@ -121,6 +121,39 @@ pub(crate) fn read(
     Ok(())
 }
 
+/// TailReader::history_tail: s's messages from the first whole line of its
+/// transcript's last most bytes, found from the end backwards
+/// (rush_core::tailread); the bool is whether that left some out.
+pub(crate) fn tail(s: &Session, most: i64) -> adapter::Result<(Vec<Event>, bool)> {
+    if s.transcript.is_empty() {
+        return Err(Box::new(NoTranscript));
+    }
+    let (mut f, span) =
+        rush_core::tailread::file_tail(std::path::Path::new(&s.transcript), most.max(1) as u64)?;
+    if !span.cut() {
+        let mut out = Vec::new();
+        read(s, 0, adapter::SLICE, &mut |evs| {
+            out.extend(evs);
+            true
+        })?;
+        return Ok((out, false));
+    }
+    f.seek(SeekFrom::Start(span.start))?;
+    let mut r = BufReader::with_capacity(64 << 10, f.take(span.len()));
+    let mut dec = crate::messages();
+    let (mut out, mut line) = (Vec::new(), Vec::new());
+    loop {
+        line.clear();
+        if r.read_until(b'\n', &mut line)? == 0 {
+            break;
+        }
+        if let Took::Events(evs) = take(dec.as_mut(), &line, 0) {
+            out.extend(evs);
+        }
+    }
+    Ok((out, true))
+}
+
 /// HistoryFollower::follow_history: s's transcript from its start, then
 /// what's added as it grows.
 pub(crate) fn follow(s: &Session) -> adapter::Result<Box<dyn Follow>> {
@@ -304,5 +337,33 @@ mod tests {
         let sl = f.next(1 << 20).unwrap();
         assert!(sl.reset, "a file renamed over it wasn't a rewrite");
         assert_eq!(texts(&sl.events), ["a", "a"]);
+    }
+
+    /// The shared check every adapter's end reader is held to
+    /// (adapter::conform).
+    #[test]
+    fn its_end_is_the_end_of_its_whole() {
+        let d = TempDir::new("claude-end");
+        let path = d.0.join("t.jsonl");
+        let mut b = String::new();
+        for i in 0..40 {
+            b += &format!(
+                r#"{{"type":"user","timestamp":"2026-09-29T10:{:02}:00Z","message":{{"role":"user","content":"ask {i} {}"}}}}"#,
+                i % 60,
+                "words ".repeat(40)
+            );
+            b.push('\n');
+            b += &format!(
+                r#"{{"type":"assistant","timestamp":"2026-09-29T10:{:02}:30Z","message":{{"id":"m{i}","role":"assistant","content":[{{"type":"text","text":"answer {i}"}}]}}}}"#,
+                i % 60
+            );
+            b.push('\n');
+        }
+        std::fs::write(&path, &b).unwrap();
+        let s = Session {
+            transcript: path.to_string_lossy().into_owned(),
+            ..Session::default()
+        };
+        rush_core::adapter::conform::check_tail(&crate::Claude::new(), &s, b.len() as i64 / 4);
     }
 }

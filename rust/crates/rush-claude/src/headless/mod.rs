@@ -18,9 +18,10 @@ mod neutral;
 pub mod workflow;
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::process::CommandExt;
-use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
+use std::io::{BufRead, BufReader, Cursor, Read, Write};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::unix::process::{CommandExt, ExitStatusExt};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -169,6 +170,43 @@ struct WriteQueue {
     err: Option<String>,
     /// The process has gone: nothing more is written.
     gone: bool,
+    /// A batch is being written.
+    inflight: bool,
+    /// Held for an upgrade: nothing is written until it's let go.
+    paused: bool,
+}
+
+/// The reader held between two reads for an upgrade (Rust-only).
+#[derive(Default)]
+struct Pause {
+    /// Asked to hold.
+    asked: bool,
+    /// Held, with what it had read and not taken in.
+    held: Option<Vec<u8>>,
+    /// The output was read to its end: nothing to hold.
+    ended: bool,
+}
+
+/// What a session is reached through, by number: what an upgrade keeps
+/// open across its exec.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Fds {
+    pub stdin: RawFd,
+    pub stdout: RawFd,
+    pub stderr: RawFd,
+    /// The guard's shell and its pipe (rush_sys::pgguard), when it has one.
+    pub guard: Option<(i32, RawFd)>,
+}
+
+/// A session a process before an exec ran, to take up again (Rust-only):
+/// its files kept open, what it had read and not taken in, and its control
+/// requests' count, so ids aren't used twice.
+#[derive(Clone, Debug, Default)]
+pub struct Kept {
+    pub pid: i32,
+    pub fds: Fds,
+    pub unread: Vec<u8>,
+    pub seq: i64,
 }
 
 /// What a session's threads share.
@@ -180,6 +218,12 @@ struct Shared {
     done: Mutex<Option<Option<Ended>>>,
     dsig: Condvar,
     stderr: Tail,
+    pause: Mutex<Pause>,
+    psig: Condvar,
+    /// Written to ask the reader to hold; read empty as it's let go.
+    wake_r: OwnedFd,
+    wake_w: OwnedFd,
+    fds: Fds,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -196,7 +240,11 @@ pub struct Session {
 /// A session's output, not yet read: [`Reader::spawn`] reads it on a
 /// thread of its own. Dropped unread, the session's output is never read.
 pub struct Reader {
-    child: Child,
+    child: Proc,
+    stdout: Option<OwnedFd>,
+    /// What to read before stdout: what the process before an exec had
+    /// read and not taken in.
+    unread: Vec<u8>,
     sh: Arc<Shared>,
     tap: Option<Tap>,
     skip: Option<Skip>,
@@ -234,19 +282,97 @@ pub fn start(o: &Options) -> Result<(Arc<Session>, Reader)> {
     }
     let mut child = cmd.spawn()?;
     let pid = child.id() as i32;
+    let stdin = OwnedFd::from(child.stdin.take().expect("stdin is piped"));
+    let stdout = OwnedFd::from(child.stdout.take().expect("stdout is piped"));
+    let stderr = OwnedFd::from(child.stderr.take().expect("stderr is piped"));
+    let guard = rush_sys::pgguard::watch(pid);
+    run(
+        o,
+        pid,
+        Proc::Std(child),
+        [stdin, stdout, stderr],
+        guard,
+        Vec::new(),
+        0,
+    )
+}
+
+/// Takes up a session the process before an exec ran (Rust-only): k's
+/// files, kept open across it, are this process's now, and its process
+/// this one's child, as it was.
+pub fn adopt(o: &Options, k: Kept) -> Result<(Arc<Session>, Reader)> {
+    let f = k.fds;
+    for fd in [f.stdin, f.stdout, f.stderr] {
+        if !rush_sys::reexec::is_open(fd) {
+            return Err(err(format!("its file {fd} didn't stay open")));
+        }
+    }
+    let mut fds = Vec::with_capacity(3);
+    for fd in [f.stdin, f.stdout, f.stderr] {
+        let _ = rush_sys::reexec::close_on_exec(fd);
+        // SAFETY: handed over open across the exec, and owned by nothing
+        // else in this process.
+        fds.push(unsafe { OwnedFd::from_raw_fd(fd) });
+    }
+    let [stdin, stdout, stderr]: [OwnedFd; 3] = fds.try_into().expect("three files");
+    let guard = f.guard.map(|(pid, fd)| rush_sys::pgguard::adopt(pid, fd));
+    run(
+        o,
+        k.pid,
+        Proc::Taken(k.pid),
+        [stdin, stdout, stderr],
+        guard,
+        k.unread,
+        k.seq,
+    )
+}
+
+/// A session's threads started on its process's files: what start and
+/// adopt share.
+fn run(
+    o: &Options,
+    pid: i32,
+    child: Proc,
+    [stdin, stdout, stderr]: [OwnedFd; 3],
+    guard: Option<rush_sys::pgguard::Guard>,
+    unread: Vec<u8>,
+    seq: i64,
+) -> Result<(Arc<Session>, Reader)> {
+    let (wake_r, wake_w) = std::io::pipe()?;
+    let (wake_r, wake_w) = (OwnedFd::from(wake_r), OwnedFd::from(wake_w));
+    // SAFETY: O_NONBLOCK on our own pipe's read end, so it drains without
+    // blocking.
+    unsafe {
+        let fl = libc::fcntl(wake_r.as_raw_fd(), libc::F_GETFL);
+        libc::fcntl(wake_r.as_raw_fd(), libc::F_SETFL, fl | libc::O_NONBLOCK);
+    }
+    let fds = Fds {
+        stdin: stdin.as_raw_fd(),
+        stdout: stdout.as_raw_fd(),
+        stderr: stderr.as_raw_fd(),
+        guard: guard.as_ref().and_then(|g| match g.parts() {
+            (p, Some(fd)) => Some((p, fd)),
+            _ => None,
+        }),
+    };
     let sh = Arc::new(Shared {
         w: Mutex::new(WriteQueue::default()),
         wsig: Condvar::new(),
         done: Mutex::new(None),
         dsig: Condvar::new(),
         stderr: Tail::default(),
+        pause: Mutex::new(Pause::default()),
+        psig: Condvar::new(),
+        wake_r,
+        wake_w,
+        fds,
     });
-    let stdin = child.stdin.take().expect("stdin is piped");
     let w = sh.clone();
+    let stdin = std::fs::File::from(stdin);
     std::thread::Builder::new()
         .name("claude-stdin".into())
         .spawn(move || writer(&w, stdin))?;
-    let mut err = child.stderr.take().expect("stderr is piped");
+    let mut err = std::fs::File::from(stderr);
     let e = sh.clone();
     let (stderr_tx, stderr_done) = mpsc::channel();
     std::thread::Builder::new()
@@ -261,15 +387,16 @@ pub fn start(o: &Options) -> Result<(Arc<Session>, Reader)> {
             }
             let _ = stderr_tx.send(());
         })?;
-    let guard = rush_sys::pgguard::watch(pid);
     Ok((
         Arc::new(Session {
             pid,
-            seq: AtomicI64::new(0),
+            seq: AtomicI64::new(seq),
             sh: sh.clone(),
         }),
         Reader {
             child,
+            stdout: Some(stdout),
+            unread,
             sh,
             tap: o.tap.clone(),
             skip: o.skip.clone(),
@@ -280,17 +407,82 @@ pub fn start(o: &Options) -> Result<(Arc<Session>, Reader)> {
     ))
 }
 
+/// The session's process: one this process started, or one it took over
+/// across an exec, which no std Child has.
+enum Proc {
+    Std(Child),
+    Taken(i32),
+}
+
+impl Proc {
+    fn wait(&mut self) -> std::io::Result<ExitStatus> {
+        match self {
+            Proc::Std(c) => c.wait(),
+            Proc::Taken(pid) => rush_sys::reexec::reap(*pid)
+                .map(ExitStatus::from_raw)
+                .ok_or_else(|| std::io::Error::other("Claude Code isn't this process's child")),
+        }
+    }
+}
+
+/// The session's output, read only once the reader isn't asked to hold:
+/// asked, a read says WouldBlock, between two reads.
+struct Polled {
+    f: std::fs::File,
+    wake: RawFd,
+}
+
+impl Read for Polled {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        loop {
+            let mut fds = [
+                libc::pollfd {
+                    fd: self.f.as_raw_fd(),
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+                libc::pollfd {
+                    fd: self.wake,
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+            ];
+            // SAFETY: poll on two descriptors we hold, into our array.
+            let n = unsafe { libc::poll(fds.as_mut_ptr(), 2, -1) };
+            if n < 0 {
+                let e = std::io::Error::last_os_error();
+                if e.kind() == std::io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(e);
+            }
+            if fds[1].revents & libc::POLLIN != 0 {
+                return Err(std::io::ErrorKind::WouldBlock.into());
+            }
+            return self.f.read(buf);
+        }
+    }
+}
+
+/// Reads the wake pipe empty.
+fn drain(fd: RawFd) {
+    let mut b = [0u8; 16];
+    // SAFETY: reads into our buffer from our non-blocking pipe.
+    while unsafe { libc::read(fd, b.as_mut_ptr().cast(), b.len()) } > 0 {}
+}
+
 /// Feeds queued writes to stdin until the session stops.
-fn writer(sh: &Shared, mut stdin: ChildStdin) {
+fn writer(sh: &Shared, mut stdin: std::fs::File) {
     loop {
         let (batch, closed) = {
             let mut q = lock(&sh.w);
-            while q.buf.is_empty() && !q.closed && !q.gone {
+            while (q.buf.is_empty() || q.paused) && !q.closed && !q.gone {
                 q = sh.wsig.wait(q).unwrap_or_else(|e| e.into_inner());
             }
             if q.gone && !q.closed && q.buf.is_empty() {
                 return;
             }
+            q.inflight = true;
             (std::mem::take(&mut q.buf), q.closed)
         };
         for b in batch {
@@ -300,6 +492,8 @@ fn writer(sh: &Shared, mut stdin: ChildStdin) {
             }
         }
         let _ = stdin.flush();
+        lock(&sh.w).inflight = false;
+        sh.wsig.notify_all();
         if closed {
             return; // stdin closes as it drops
         }
@@ -333,20 +527,32 @@ impl Reader {
     }
 
     fn read(mut self, s: &Session, mut on: impl FnMut(Event)) -> Option<Ended> {
-        let stdout = self.child.stdout.take().expect("stdout is piped");
-        let mut r = BufReader::with_capacity(64 << 10, stdout);
+        let stdout = self.stdout.take().expect("stdout is read once");
+        let src = Polled {
+            f: std::fs::File::from(stdout),
+            wake: self.sh.wake_r.as_raw_fd(),
+        };
+        let unread = std::mem::take(&mut self.unread);
+        let mut r = BufReader::with_capacity(64 << 10, Cursor::new(unread).chain(src));
         let mut line = Vec::new();
         let mut read_err = None;
         loop {
-            line.clear();
-            if line.capacity() > 1 << 20 {
+            if line.is_empty() && line.capacity() > 1 << 20 {
                 // One long line (an image, a big result) isn't kept for
                 // the session's life.
                 line = Vec::new();
             }
             match r.read_until(b'\n', &mut line) {
-                Ok(0) => break,
+                Ok(0) if line.is_empty() => break,
                 Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    // Asked to hold for an upgrade: what's read of a line
+                    // so far is the next build's to read first.
+                    let mut left = line.clone();
+                    left.extend_from_slice(r.buffer());
+                    self.hold(left);
+                    continue;
+                }
                 Err(e) => {
                     read_err = Some(e);
                     break;
@@ -354,15 +560,21 @@ impl Reader {
             }
             let l = line.strip_suffix(b"\n").unwrap_or(&line);
             if l.is_empty() {
+                line.clear();
                 continue;
             }
             if let Some(tap) = &self.tap {
                 tap(l);
             }
             if self.skip.as_ref().is_some_and(|skip| skip(l)) {
+                line.clear();
                 continue;
             }
-            let Ok(ev) = decode(l) else { continue };
+            let Ok(ev) = decode(l) else {
+                line.clear();
+                continue;
+            };
+            line.clear();
             if let Event::Other(o) = &ev
                 && o.kind == "control_request"
             {
@@ -386,6 +598,11 @@ impl Reader {
             let _ = rush_sys::proc::kill_group(s.pid, libc::SIGKILL);
         }
         let status = self.child.wait();
+        {
+            let mut p = lock(&self.sh.pause);
+            p.ended = true;
+            self.sh.psig.notify_all();
+        }
         if let Some(g) = self.guard.take() {
             g.release();
         }
@@ -422,6 +639,22 @@ impl Reader {
         err
     }
 
+    /// Holds, asked to for an upgrade, with left read and not taken in,
+    /// until let go ([`Session::resume`]); an exec ends the process
+    /// meanwhile, and this thread with it.
+    fn hold(&self, left: Vec<u8>) {
+        let mut p = lock(&self.sh.pause);
+        if p.asked {
+            p.held = Some(left);
+            self.sh.psig.notify_all();
+            while p.asked {
+                p = self.sh.psig.wait(p).unwrap_or_else(|e| e.into_inner());
+            }
+            p.held = None;
+        }
+        drain(self.sh.wake_r.as_raw_fd());
+    }
+
     /// Tells the session's waiters it has ended, and why.
     fn finish(&mut self, err: Option<Ended>) {
         self.finished = true;
@@ -443,7 +676,11 @@ impl Drop for Reader {
         if self.finished {
             return;
         }
-        let _ = rush_sys::proc::kill_group(self.child.id() as i32, libc::SIGKILL);
+        let pid = match &self.child {
+            Proc::Std(c) => c.id() as i32,
+            Proc::Taken(p) => *p,
+        };
+        let _ = rush_sys::proc::kill_group(pid, libc::SIGKILL);
         let _ = self.child.wait();
         if let Some(g) = self.guard.take() {
             g.release();
@@ -506,6 +743,81 @@ impl Session {
     /// Claude Code's process id.
     pub fn pid(&self) -> i32 {
         self.pid
+    }
+
+    /// What it's reached through, by number, and its control requests'
+    /// count: what an upgrade keeps (Rust-only).
+    pub fn kept(&self, unread: Vec<u8>) -> Kept {
+        Kept {
+            pid: self.pid,
+            fds: self.sh.fds,
+            unread,
+            seq: self.seq.load(Ordering::Relaxed),
+        }
+    }
+
+    /// Holds the session for an upgrade (Rust-only): what's queued for
+    /// Claude Code is written and nothing more is, and its output isn't
+    /// read past the line it's on. What it had read and not taken in, once
+    /// held within d; an error, and the session as it was, when it can't
+    /// be.
+    pub fn pause(&self, d: Duration) -> Result<Vec<u8>> {
+        let end = Instant::now() + d;
+        {
+            let q = lock(&self.sh.w);
+            let (mut q, _) = self
+                .sh
+                .wsig
+                .wait_timeout_while(q, d, |q| {
+                    (q.inflight || !q.buf.is_empty()) && !q.gone && !q.closed
+                })
+                .unwrap_or_else(|e| e.into_inner());
+            if q.gone || q.closed {
+                return Err(err("the session has ended"));
+            }
+            if q.inflight || !q.buf.is_empty() {
+                return Err(err("Claude Code isn't taking what it's sent"));
+            }
+            q.paused = true;
+        }
+        let mut p = lock(&self.sh.pause);
+        if p.ended {
+            drop(p);
+            self.unpause_writes();
+            return Err(err("the session has ended"));
+        }
+        p.asked = true;
+        // SAFETY: one byte into our own pipe.
+        unsafe { libc::write(self.sh.wake_w.as_raw_fd(), b"x".as_ptr().cast(), 1) };
+        let left = end.saturating_duration_since(Instant::now());
+        let (mut p, _) = self
+            .sh
+            .psig
+            .wait_timeout_while(p, left, |p| p.held.is_none() && !p.ended)
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some(h) = &p.held {
+            return Ok(h.clone());
+        }
+        p.asked = false;
+        self.sh.psig.notify_all();
+        drop(p);
+        self.unpause_writes();
+        Err(err("its output didn't stop to be handed on"))
+    }
+
+    /// Lets a session held by pause go on as it was.
+    pub fn resume(&self) {
+        {
+            let mut p = lock(&self.sh.pause);
+            p.asked = false;
+            self.sh.psig.notify_all();
+        }
+        self.unpause_writes();
+    }
+
+    fn unpause_writes(&self) {
+        lock(&self.sh.w).paused = false;
+        self.sh.wsig.notify_all();
     }
 
     /// Whether the process has exited and its output is read.

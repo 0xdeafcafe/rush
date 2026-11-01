@@ -64,8 +64,8 @@ WHAT IT'S FOR: LIVE STATE ONLY
   your running subagents at the panel's top, so don't list them yourself.
 
   Clear it once it's no use: it goes among the past views, where the user can bring it back.
-  rush greys a view you left alone for a whole turn, and one that says what your reply says;
-  it puts away one you haven't touched in 3 turns by itself. One the user brought back stays
+  rush greys a view you left alone for a whole turn or 10 minutes, and one that says what
+  your reply says; it puts away one you haven't touched in 3 turns or 45 minutes by itself. One the user brought back stays
   until they close it.
 
 PICK THE STYLE THAT FITS THE DATA

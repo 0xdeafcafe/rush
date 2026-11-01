@@ -93,7 +93,7 @@ pub fn paste(
             st.quiet = String::new();
             if !vs.is_empty() {
                 let shown = super::panel::shown_view(vs, &st.tab).clone();
-                st.quiet = st.quiet_why(Some(&v.sess), &shown);
+                st.quiet = st.quiet_why(Some(&v.sess), &shown, now);
             }
         }
         while out.len() < rows {

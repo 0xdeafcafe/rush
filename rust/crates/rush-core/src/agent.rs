@@ -70,6 +70,10 @@ pub struct Task {
 #[serde(default)]
 pub struct Job {
     pub id: String,
+    /// When the rush its host runs was written; 0 for a session rush
+    /// doesn't host, or a host that didn't say. Rust-only.
+    #[serde(skip_serializing_if = "is_zero_ms")]
+    pub host_exe: Ms,
     pub account: String,
     pub name: String,
     pub state: State,
@@ -387,4 +391,8 @@ pub struct SubagentTile {
     /// When it began to the nanosecond, when known (0 when not), for the
     /// order runs begun in the same millisecond go in.
     pub born_ns: i64,
+}
+
+fn is_zero_ms(v: &Ms) -> bool {
+    *v == 0
 }
