@@ -73,6 +73,8 @@ rush update     # install the newest rush
 
 rush checks for a newer version now and then and says so at the foot of the list. `#update` installs it from inside, the same as `rush update`; reopen rush to use it.
 
+Your sessions move to the new build by themselves, without stopping their agents. Each session runs in a small host process of its own, which keeps its agent (Claude Code, say) running; once a new rush is installed, each host moves onto it as soon as its agent is between turns: same agent process, same conversation, nothing lost. One in a turn moves when the turn ends. The view drops its connection for a moment and picks up where it was. `#upgrade` moves them all now, as does enter on Settings › Updates › Sessions. A row whose host still runs the old build shows a dim `old`. A host from before this feature, one on another machine, or one whose agent can't be handed over that way (today only Claude Code's can) stays on the build it runs, its agent untouched; Settings › Updates says how many.
+
 Getting started sits at the foot of the list until you've tried the basics, ticking each off as you go. `#tips` brings it back, `#tips off` puts it away, and `?` is a guide to the keys.
 
 ## Agents
@@ -241,7 +243,7 @@ The place next to Agents (`ctrl+\`, or `>` with nothing typed) lists each projec
 
 `ctrl+k` opens the command bar: a place, an agent, a Session's view, a turn (`#12`), `Back` to where you jumped from, or a new agent with what you typed. Words search the open conversation and every agent's transcript, and `in:name`, `is:failed`, `file:x` and `turn:10-13` narrow it. `ctrl+f` is the same bar, starting where you are. With many long transcripts, Settings › Appearance › *ctrl+k searches transcripts* › *on ctrl+enter* keeps typing to names and commands; `ctrl+enter` then searches the transcripts (`ctrl+j` in terminals that send `ctrl+enter` as `enter`).
 
-`#` runs rush's own commands on the selected agent: `#done` `#go` `#away` `#loop` `#back` `#stop` `#restart` `#rm` `#kill` `#clean` `#cd` `#rename` `#group` `#fork` `#pin` `#pr` `#full` `#sort` `#by` `#split` `#folder` `#new` `#with` `#use` `#account` `#statusline` `#view` `#width` `#dock` `#stash` `#hibernate` `#native` `#mackeys` `#ghostty` `#tips` `#update` `#ask` `#log`. `/` is left to the agent: its own commands only, some drawn rush's way (`/btw`, `/diff`). Anything rush adds takes `#`.
+`#` runs rush's own commands on the selected agent: `#done` `#go` `#away` `#loop` `#back` `#stop` `#restart` `#rm` `#kill` `#clean` `#cd` `#rename` `#group` `#fork` `#pin` `#pr` `#full` `#sort` `#by` `#split` `#folder` `#new` `#with` `#use` `#account` `#statusline` `#view` `#width` `#dock` `#stash` `#hibernate` `#native` `#mackeys` `#ghostty` `#tips` `#update` `#upgrade` `#ask` `#log`. `/` is left to the agent: its own commands only, some drawn rush's way (`/btw`, `/diff`). Anything rush adds takes `#`.
 
 `#ask` asks rush about itself: `#ask how do I make finished agents stop sooner?`, or `#ask turn the feed off`. It starts an agent in rush's own folder with this guide to hand, which answers, points you at the # command that does it, or changes rush's settings for you. rush takes up any change to its `config.json` within a few seconds, whoever makes it.
 

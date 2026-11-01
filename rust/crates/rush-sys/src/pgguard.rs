@@ -61,7 +61,40 @@ pub fn watch(pgid: i32) -> Option<Guard> {
     })
 }
 
+/// Takes over the guard a process this one was before an exec started
+/// (see [`Guard::parts`]): its shell, pid, a child of this process still,
+/// and the pipe's write end, fd, kept open across the exec. It's reaped
+/// here as it ends, as [`watch`]'s is.
+pub fn adopt(pid: i32, fd: std::os::fd::RawFd) -> Guard {
+    use std::os::fd::{FromRawFd, OwnedFd};
+    let _ = crate::reexec::close_on_exec(fd);
+    // SAFETY: fd is the guard's pipe, handed over open and owned by no one
+    // else in this process.
+    let w = PipeWriter::from(unsafe { OwnedFd::from_raw_fd(fd) });
+    let reaped = Arc::new(Mutex::new(false));
+    let r2 = reaped.clone();
+    std::thread::spawn(move || {
+        crate::cmd::wait_exit(pid);
+        let mut g = r2.lock().unwrap();
+        let _ = crate::reexec::reap(pid);
+        *g = true;
+    });
+    Guard {
+        pid,
+        w: Some(w),
+        reaped,
+    }
+}
+
 impl Guard {
+    /// The guard's shell and its pipe's write end, for a process that
+    /// execs to take it over ([`adopt`]): the pipe must be kept open across
+    /// the exec, or the guard ends the group.
+    pub fn parts(&self) -> (i32, Option<std::os::fd::RawFd>) {
+        use std::os::fd::AsRawFd;
+        (self.pid, self.w.as_ref().map(AsRawFd::as_raw_fd))
+    }
+
     /// Lets the guard go once the group has ended on its own. It's killed
     /// before its pipe closes, so it never signals a group id that's gone
     /// and may be another's.
@@ -135,6 +168,38 @@ mod tests {
             // SAFETY: the group this test made.
             unsafe { libc::kill(-shell, libc::SIGKILL) };
             panic!("the group outlived its parent: {shell} {child}");
+        }
+    }
+
+    // A guard taken over by its parts guards as before: released, it
+    // leaves the group be; its pipe closed, it ends it.
+    #[test]
+    fn an_adopted_guard_guards() {
+        for release in [true, false] {
+            let mut c = Command::new("sleep")
+                .arg("60")
+                .process_group(0)
+                .spawn()
+                .unwrap();
+            let g = watch(c.id() as i32).expect("no shell");
+            let (pid, fd) = g.parts();
+            let fd = fd.unwrap();
+            // What an exec does to the Guard: forgotten, its pipe left open.
+            std::mem::forget(g);
+            let g = adopt(pid, fd);
+            if release {
+                g.release();
+                assert!(gone_within(pid, Duration::from_secs(3)));
+                assert!(alive(c.id() as i32), "a released guard ended the group");
+                let _ = c.kill();
+            } else {
+                drop(g);
+                assert!(
+                    gone_within(c.id() as i32, Duration::from_secs(3)),
+                    "an adopted guard let go left the group running"
+                );
+            }
+            let _ = c.wait();
         }
     }
 

@@ -597,9 +597,18 @@ pub struct Info {
     pub home_at: Time,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub login: String,
-    /// The rush binary the host started from.
+    /// The rush binary the host started from, or moved onto since.
     #[serde(skip_serializing_if = "BinStamp::is_zero")]
     pub exe: BinStamp,
+    /// The host can move onto a newer rush in place, its agent running on
+    /// (the upgrade op, upgrade.rs). Rust-only.
+    #[serde(skip_serializing_if = "zero")]
+    pub upgrades: bool,
+    /// Where a move onto a newer rush stands: "due" once asked for, until
+    /// it's between turns; "failed: why" when it couldn't be done, and the
+    /// host stays on the rush it runs. Rust-only.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub upgrade: String,
     /// Set while it's left to carry on by itself.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub away: Option<Away>,

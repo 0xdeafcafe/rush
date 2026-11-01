@@ -1554,6 +1554,7 @@ impl Loader {
             session_id: info.session_id.clone(),
             created_at: info.started_at,
             updated_at: info.updated_at,
+            host_exe: info.exe_mod,
             ..Job::default()
         };
         if info.idle_since != 0 {

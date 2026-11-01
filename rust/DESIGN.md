@@ -692,6 +692,66 @@ given back, and the binary runs the installed rush in its place
 runs it's listed for `rush reload` (`rush_state::instances`), whose
 SIGUSR1 is a #reload; a hosted view isn't listed.
 
+### Moving a host onto a new build (Rust-only)
+
+A host moves onto a newly installed rush in place, its agent running on
+(`rush-host/src/upgrade.rs`, `server/upgrade.rs`). Asked by the `upgrade`
+op, it waits until it's between turns (idle, nothing queued, asked,
+retried or running in the background, no start or stop under way), then:
+
+1. asks the installed rush `rush host can-upgrade <id>`: a rush from
+   before this answers with its usage, one whose adapter can't take its
+   agent up says why. Either way the host stays where it is.
+2. holds its agent through the Conn's `Upgrader::pass`: the adapter writes
+   what's queued for the agent, stops writing, and stops its reader
+   between two reads (Claude's reader polls its stdout and a wake pipe), so
+   nothing the agent says is lost: what was read of a line so far is
+   handed on as `unread`. It refuses while the agent waits on an answer.
+3. writes `sessions/<id>/upgrade.json` (0600): its info, the replay ring,
+   the session's commands and context lines, its listener's fd, and the
+   agent's `Upgrade` (pid, fds by name, unread, the adapter's own state:
+   for Claude its session id, sign-in, account and control request count).
+4. clears close-on-exec on the listener and the agent's fds (stdin,
+   stdout, stderr, and the pgguard's pipe: closed, the guard would end the
+   agent's group) and execs `rush host adopt <id> <state>` with the lock
+   held, so nothing changes while it goes.
+
+exec keeps the pid, so the agent stays its child and its owner watch,
+the list's pid and the session's socket are unchanged. Every other file
+closes, clients' connections among them: a client sees its connection end,
+finds the socket still answers (the listener's backlog holds the dial
+across the exec), and dials again, replayed as after any other let go
+(live.rs `resolve_close`). The new build (`server::adopt_with`) reads the
+state once and removes it, takes the listener, puts back info (same
+generation, its own `exe`), the ring and the rest, takes the agent up
+through the adapter's `Adopter` with the same tools, tap and sink a start
+gives it (no initialize, no prompt sent again), and serves on. The guard
+is taken over too (`pgguard::adopt`), and the agent is reaped by pid
+(`reexec::reap`), as no std Child has it any more.
+
+If the exec fails, the fds go back to close-on-exec, the state file is
+removed, the adapter is told to `keep` (its reader and writer carry on)
+and `Info.upgrade` says `failed: why`. Nothing is ever stopped to move.
+
+What survives: the agent process and its pipes, the conversation, the
+replay, queue/hold/away/decisions state, costs, the turn count. What
+doesn't: a client's open connection (it redials), timers (idle sleep and
+away are armed again; the rest only run mid-turn), a caffeinate held while
+away (started again). Adapters: only Claude Code's (`rush-claude`
+conn.rs `Upgrader` and `Adopter`) today; a host on any other agent has
+`Info.upgrades` false and stays on its build, as does a remote host or one
+from before this.
+
+Who asks: the leading rush's look at the hosts (Settings › Updates,
+`watch_hosts`) once the installed binary has settled, without Restart on
+install (a move stops nothing); enter on Settings › Updates › Sessions and
+`#upgrade` (asked: a failed move is tried again); and `rush reload`. The
+sweep (`client::sweep_over`) asks every movable host on an older build,
+mid-turn ones too, which move once their turn ends; hosts that can't
+move are counted and said, never restarted. A row whose host's
+`exe` is older than the installed rush shows a faint `old` (`old build`
+in full) beside its badge.
+
 ## The list kept between runs (Rust-only)
 
 rush opens on the list as it last read it (rush-ui `listcache.rs`): each

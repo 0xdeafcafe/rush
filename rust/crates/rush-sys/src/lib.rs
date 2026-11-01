@@ -6,7 +6,8 @@
 //! calls (`script`), and storing idle transcripts compressed (`squeeze`);
 //! running a program with a time limit (`cmd`); a program started back in
 //! the default class (`qos`); the running rush as a
-//! file to start again, waiting out an install (`selfexe`). Which agent programs have
+//! file to start again, waiting out an install (`selfexe`); becoming a newer
+//! build in place, files kept open across the exec (`reexec`). Which agent programs have
 //! a newer version out is rush-harnessup's, so that users of these don't
 //! build a TLS stack.
 //!
@@ -22,6 +23,7 @@ pub mod mem;
 pub mod pgguard;
 pub mod proc;
 pub mod qos;
+pub mod reexec;
 pub mod script;
 pub mod selfexe;
 pub mod shellwords;

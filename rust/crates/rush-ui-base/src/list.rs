@@ -910,6 +910,17 @@ impl Model {
             .filter(|v| v.key == a.key && !v.sess.info.kind.is_empty())
             .map_or(a.kind.as_str(), |v| v.sess.info.kind.as_str());
         let mut l = line([crate::look::row_badge(&self.reg, kind, full)]);
+        // Its host on an older rush than the one installed: it moves once
+        // between turns (Rust-only).
+        let installed = self
+            .kept
+            .peek::<crate::update::Update>()
+            .map_or(0, |u| u.installed);
+        if a.job.host_exe != 0 && installed > a.job.host_exe {
+            l.spans.push(plain(" "));
+            l.spans
+                .push(sp(if full { "old build" } else { "old" }, FAINT));
+        }
         let headed = !a.prs.is_empty()
             && self.cfg.split_projects()
             && !self.group_of.get(&a.key).is_some_and(|g| by_time(g));

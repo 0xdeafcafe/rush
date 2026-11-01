@@ -54,8 +54,10 @@ use crate::timer::{TimerId, Timers};
 use crate::wire::*;
 
 mod agent;
+mod upgrade;
 use agent::Watching;
 pub use agent::{ROOT_IDLE, SPAWNED_IDLE, STALL_AFTER};
+pub use upgrade::{Exec, adopt, adopt_with};
 
 /// macOS's malloc in its space-efficient mode, set in a host's environment
 /// as it's started (malloc reads it as a process starts). A busy turn
@@ -169,6 +171,9 @@ pub struct Hooks {
     pub cwd_settle: Duration,
     /// How often at most info.json is rewritten for what it's doing.
     pub info_every: Duration,
+    /// Stands in for the exec that moves the host onto a newer rush, and
+    /// for asking that rush first: for tests. Rust-only.
+    pub exec: Option<Exec>,
 }
 
 impl Hooks {
@@ -192,6 +197,7 @@ impl Hooks {
             heard_wait: Duration::from_secs(1),
             cwd_settle: Duration::from_secs(2),
             info_every: INFO_EVERY,
+            exec: None,
         }
     }
 
@@ -357,6 +363,12 @@ pub(crate) struct State {
     info_owed: Option<Vec<u8>>,
     /// What the host watches of its agent: see server/agent.rs.
     w: Watching,
+    /// Asked to move onto a newer rush once between turns, and a move
+    /// being tried (server/upgrade.rs).
+    upgrade_due: bool,
+    upgrading: bool,
+    /// Its socket's listener, by number: what a move keeps open.
+    listen_fd: i32,
 }
 
 pub(crate) struct Shared {
@@ -478,6 +490,7 @@ pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
     let sock = sock_path(id);
     let _ = std::fs::remove_file(&sock);
     let ln = UnixListener::bind(&sock).map_err(|e| e.to_string())?;
+    sh.lock().listen_fd = std::os::fd::AsRawFd::as_raw_fd(&ln);
     // The agents' queue: one thread takes what every start says, in order.
     {
         let h2 = h.clone();
@@ -542,6 +555,15 @@ pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
             h.arm_idle(&mut st); // woken with nothing to do, or nothing came of it
         }
     }
+    serve_on(&h, ln, sock)
+}
+
+/// Serves h's clients on ln, sock's listener, and watches what stops it,
+/// until it's stopped: the end of run_with and of adopt_with.
+fn serve_on(h: &Host, ln: UnixListener, sock: PathBuf) -> Result<(), String> {
+    let sh = &h.0;
+    let id = sh.lock().cfg.id.clone();
+    let id = id.as_str();
     let lc = ln.try_clone().map_err(|e| e.to_string())?;
     {
         let h2 = h.clone();
@@ -597,6 +619,7 @@ fn build(reg: Registry, hooks: Hooks, cfg: Config) -> (Host, Receiver<Msg>) {
         homes: true,
         inbox,
         exe: BinStamp::exe(),
+        upgrades: crate::upgrade::adopts(&reg, &cfg.kind),
         workspace: cfg.workspace.clone(),
         generation: 1,
         ..Info::default()
@@ -653,6 +676,9 @@ fn build(reg: Registry, hooks: Hooks, cfg: Config) -> (Host, Receiver<Msg>) {
         info_at: None,
         info_owed: None,
         w: Watching::default(),
+        upgrade_due: false,
+        upgrading: false,
+        listen_fd: -1,
     };
     let sh = Arc::new_cyclic(|me| Shared {
         reg,
@@ -1474,20 +1500,7 @@ impl Host {
         if !self.reg.supports(a.kind().as_str(), Feature::Prompt) && !o.resume && !o.fork {
             st.untold = o.prompt.clone(); // no system prompt to take it: it goes atop the first message
         }
-        st.next_key += 1;
-        let key = st.next_key;
-        let tx = self.tx.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let tap_tx = Mutex::new(tx.clone());
-        o.tap = Some(Arc::new(move |line: &[u8]| {
-            let _ = tap_tx
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .send(Msg::Tap(key, line.to_vec()));
-        }));
-        let sink: Arc<dyn Sink> = Arc::new(HostSink {
-            key,
-            tx: Mutex::new(tx),
-        });
+        let (key, sink) = self.agent_sink(st, &mut o);
         let conn = match d.start(o, sink) {
             Ok(c) => c,
             Err(e) => return Err(e.to_string()),
@@ -1507,6 +1520,26 @@ impl Host {
         let f = json!({"ev": ev, "cause": st.starting, "agent": c.kind, "pid": st.info.claude_pid, "cwd": c.cwd, "home": st.info.home, "login": st.info.login, "profile": c.account.dir});
         self.event(st, "agent-started", f);
         Ok(())
+    }
+
+    /// A new start's key, with o's tap and the sink it says what it says
+    /// to, both onto the agents' queue under that key.
+    fn agent_sink(&self, st: &mut State, o: &mut StartOptions) -> (u64, Arc<dyn Sink>) {
+        st.next_key += 1;
+        let key = st.next_key;
+        let tx = self.tx.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let tap_tx = Mutex::new(tx.clone());
+        o.tap = Some(Arc::new(move |line: &[u8]| {
+            let _ = tap_tx
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .send(Msg::Tap(key, line.to_vec()));
+        }));
+        let sink: Arc<dyn Sink> = Arc::new(HostSink {
+            key,
+            tx: Mutex::new(tx),
+        });
+        (key, sink)
     }
 
     /// Forgets the running session so nothing more is sent to it, and
@@ -1642,6 +1675,7 @@ impl Host {
         let line: Arc<[u8]> = lines::info_line(&b).into();
         self.write_info(st, b);
         self.push_all(st, &line);
+        self.upgrade_when_due(st);
     }
 
     /// Writes info.json, at once unless only what changes on every message
@@ -2404,6 +2438,10 @@ impl Host {
             "away" => {
                 self.set_away(&mut st, o.away.clone());
                 self.publish(&mut st);
+                return Ok(());
+            }
+            "upgrade" => {
+                self.want_upgrade(&mut st);
                 return Ok(());
             }
             "decisions_dismiss" => {

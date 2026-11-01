@@ -100,6 +100,9 @@ pub struct HostInfo {
     pub proto: i64,
     /// A clean idle exit: explicit input wakes the saved session.
     pub sleeping: bool,
+    /// When the rush its host runs was written (Info.exe): one older than
+    /// the installed is an old build. 0 unknown.
+    pub exe_mod: Ms,
     /// The machine a session is really on, on rush remote attach's
     /// stand-in for it.
     pub remote: String,

@@ -13,4 +13,8 @@ pub struct Update {
     pub checked: bool,
     /// A newer rush than this one is installed: #reload runs it.
     pub rebuilt: bool,
+    /// When the installed rush was written, as the last look at the hosts
+    /// found it: a session whose host runs an older one shows "old build".
+    /// 0 unread. Rust-only.
+    pub installed: rush_core::time::Ms,
 }

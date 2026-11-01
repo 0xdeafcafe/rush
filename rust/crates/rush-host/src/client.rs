@@ -383,6 +383,9 @@ pub struct Lister {
     /// Keeps and lists only sessions their info says are neither stopped
     /// nor asleep: a sweep never looks at the rest, most of them.
     awake: bool,
+    /// A sweep asks again a host whose last move failed: you asked.
+    /// Rust-only.
+    pub retry: bool,
 }
 
 impl Lister {
@@ -533,12 +536,16 @@ impl Lister {
     }
 
     /// How many live sessions' hosts are on an older rush than the one
-    /// installed, how many of those it restarted (when restart is set)
-    /// because they were between turns, and how many of those restarts
-    /// failed. A session whose folder is gone can never be restarted, so
-    /// it isn't tried or counted stale: it is counted gone. It's (stale,
-    /// restarted, failed, gone). It reads every session's info and
-    /// restarts hosts, so never on the UI thread (stale.go:59-101).
+    /// installed, how many of those it moved onto it (when restart_due is
+    /// set) because they were between turns, and how many can't be moved:
+    /// a host from before moves (Info.upgrades), one on another machine,
+    /// or one whose move failed. A host is moved in place, its agent
+    /// running on (upgrade.rs); one in a turn is asked too, and moves once
+    /// it ends. None is restarted: a restart would stop its agent. A
+    /// session whose folder is gone is counted gone, never asked. It's
+    /// (stale, moved, failed, gone). It reads every session's info and
+    /// asks hosts, so never on the UI thread (stale.go:59-101, Rust-only
+    /// from the restart on).
     pub fn sweep(
         &mut self,
         installed: BinStamp,
@@ -547,7 +554,8 @@ impl Lister {
         // Those stopped or asleep are passed over: a Lister that sweeps
         // needn't keep them.
         self.awake = true;
-        sweep_over(&self.list_shared(), false, installed, restart_due)
+        let retry = self.retry;
+        sweep_over(&self.list_shared(), false, installed, restart_due, retry)
     }
 
     /// [`Lister::sweep`] over the list's own last listing when there is
@@ -561,7 +569,7 @@ impl Lister {
     ) -> (usize, usize, usize, usize) {
         let last = LISTED.lock().unwrap_or_else(|e| e.into_inner()).clone();
         match last {
-            Some(infos) => sweep_over(&infos, true, installed, restart_due),
+            Some(infos) => sweep_over(&infos, true, installed, restart_due, self.retry),
             None => self.sweep(installed, restart_due),
         }
     }
@@ -587,8 +595,9 @@ fn sweep_over(
     alive: bool,
     installed: BinStamp,
     restart_due: bool,
+    retry: bool,
 ) -> (usize, usize, usize, usize) {
-    let (mut stale, mut restarted, mut failed, mut gone) = (0, 0, 0, 0);
+    let (mut stale, mut moved, mut failed, mut gone) = (0, 0, 0, 0);
     for i in infos {
         // A sleeping one wakes on the new binary anyway.
         if i.state == "stopped" || i.sleeping || !i.stale(installed) {
@@ -606,34 +615,40 @@ fn sweep_over(
             continue;
         }
         stale += 1;
-        if !restart_due || !crate::wire::restart_due(i, installed) {
+        if !crate::upgrade::movable(i) {
+            failed += 1; // stays on the rush it runs, its agent untouched
             continue;
+        }
+        if i.upgrade.starts_with("failed") && !retry {
+            failed += 1;
+            continue;
+        }
+        if !restart_due || i.upgrade == "due" {
+            continue; // asked already: it moves once its turn ends
         }
         match cfg {
             Ok(c) if c.owner == 0 => {}
             _ => continue, // a stand-in's host ends with the program that started it
         }
-        // Read again: a message may have come since the list was read.
-        match read_info(&i.id) {
-            Ok(now) if crate::wire::restart_due(&now, installed) => {}
-            _ => continue,
-        }
         if rush_core::dryrun::would(
-            "restart-host",
+            "upgrade-host",
             &i.id,
-            "its host runs an older rush than the one installed, and it's between turns",
+            "its host runs an older rush than the one installed",
         ) {
             continue;
         }
-        if let Err(e) = restart(&i.id, |_| {}) {
+        if let Err(e) = crate::upgrade::ask(&i.id) {
             failed += 1;
-            log_event(&i.id, "restart-failed", json!({"err": e.to_string()}));
+            log_event(&i.id, "upgrade-ask-failed", json!({"err": e.to_string()}));
             continue;
         }
-        restarted += 1;
-        stale -= 1;
+        // Between turns it moves now; in one, once it's over.
+        if i.quiet() {
+            moved += 1;
+            stale -= 1;
+        }
     }
-    (stale, restarted, failed, gone)
+    (stale, moved, failed, gone)
 }
 
 /// A session's info as its file says; with awake, only one neither
