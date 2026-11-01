@@ -23,6 +23,7 @@ use super::tests_subview::KEY;
 use super::{conn, core};
 use crate::frame::Out;
 use crate::model::Model;
+use crate::screens::session_cards::ModelCards;
 use crate::screens::session_cards::compact::Summ;
 use crate::screens::session_cards::fork::Fork;
 use crate::screens::session_cards::rewind::{Branch, Rewound};

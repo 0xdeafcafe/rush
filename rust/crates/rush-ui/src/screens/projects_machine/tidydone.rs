@@ -762,7 +762,7 @@ mod tests {
     }
 
     fn model(follows: bool) -> Model {
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         m.follows = follows;
         m.agents = vec![agent("a")];
         m.roots = vec!["/r".into()];

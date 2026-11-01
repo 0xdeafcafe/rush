@@ -578,7 +578,7 @@ mod tests {
     #[test]
     fn finished_turns_that_want_you() {
         let now = 1_800_000_000_000;
-        let mut m = Model::new("0.1.0");
+        let mut m = crate::new_model("0.1.0");
         m.now = now;
         let agent = |key: &str| {
             let mut a = Agent {
@@ -640,7 +640,7 @@ mod tests {
     fn only_the_rush_that_leads_asks_the_turn_model() {
         let now = parse_rfc3339("2026-10-28T12:00:00Z");
         for follows in [true, false] {
-            let mut m = Model::new("0.1.0");
+            let mut m = crate::new_model("0.1.0");
             m.follows = follows;
             m.now = now;
             let mut a = Agent {

@@ -24,6 +24,7 @@ use super::{Act, Conn, HostInfo, act, info_any, open_key, pending, session, set_
 use crate::frame::overlayclick::hint_key;
 use crate::frame::{Out, Press};
 use crate::model::Model;
+use crate::screens::session_cards::ModelCards;
 use crate::style::*;
 
 /// One question of those the agent asks (question).

@@ -11,6 +11,7 @@ use super::tests_subview::KEY;
 use super::{conn, keys};
 use crate::frame::{Out, Press};
 use crate::model::Model;
+use crate::screens::session_cards::ModelCards;
 use crate::screens::session_cards::fork::ForkSheet;
 
 /// Agent KEY's conversation open, rush not running it.

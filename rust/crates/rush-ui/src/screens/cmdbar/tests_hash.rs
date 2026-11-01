@@ -70,7 +70,7 @@ fn agent(id: &str, name: &str) -> Agent {
 
 /// The Agents list with two agents, the first picked, nothing open.
 fn list() -> Model {
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.w = 120;
     m.h = 40;
     m.now = NOW;

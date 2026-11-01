@@ -107,7 +107,7 @@ fn steer(model: &str, effort: &str) -> StartOver {
         kind: "steer".into(),
         model: model.into(),
         effort: effort.into(),
-        ..now_as(&Model::new("0"), "").unwrap()
+        ..now_as(&crate::new_model("0"), "").unwrap()
     }
 }
 

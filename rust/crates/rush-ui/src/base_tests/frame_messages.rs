@@ -5,12 +5,12 @@
 use rush_core::text::Line;
 use rush_draw::{Button, KeyMods, MouseKind};
 
-use super::messages::*;
-use super::*;
+use crate::frame::messages::*;
+use crate::frame::*;
 use crate::model::Model;
 
 fn model(w: usize, h: usize) -> Model {
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.clock = Some(1_793_190_896_789);
     m.now = rush_core::time::now();
     m.w = w;

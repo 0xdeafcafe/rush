@@ -15,6 +15,7 @@ use rush_core::text::Line;
 use crate::frame::Out;
 use crate::frame::caps::agent_can_run;
 use crate::model::Model;
+use crate::screens::social::broadcast::ModelBroadcast;
 use crate::style::*;
 
 /// rush's # commands: name, what it does, and its argument's hint (<>

@@ -398,9 +398,15 @@ pub struct Conn {
     pub limit_usage: limit::LimitUsage,
 }
 
-impl Model {
+/// Model's side of this module: Model is rush-ui-base's, so its
+/// methods here are a trait's.
+pub(crate) trait ModelCards {
+    fn cards(&mut self) -> &mut Cards;
+}
+
+impl ModelCards for Model {
     /// The cards' state.
-    pub fn cards(&mut self) -> &mut Cards {
+    fn cards(&mut self) -> &mut Cards {
         self.kept::<Cards>()
     }
 }

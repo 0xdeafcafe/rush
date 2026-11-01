@@ -182,21 +182,29 @@ impl Default for Plugins {
     }
 }
 
-impl Model {
+/// Model's side of this module: Model is rush-ui-base's, so its
+/// methods here are a trait's.
+pub(crate) trait ModelPlugins {
+    fn plugins(&mut self) -> &mut Plugins;
+    fn hooks(&self) -> Option<Arc<Client>>;
+    fn screen_free(&self) -> bool;
+}
+
+impl ModelPlugins for Model {
     /// What plugins on screen keep.
-    pub fn plugins(&mut self) -> &mut Plugins {
+    fn plugins(&mut self) -> &mut Plugins {
         self.kept::<Plugins>()
     }
 
     /// The hooks client, when plugins are connected.
-    pub fn hooks(&self) -> Option<Arc<Client>> {
+    fn hooks(&self) -> Option<Arc<Client>> {
         self.kept.peek::<Plugins>()?.client.clone()
     }
 
     /// Whether nothing else has the screen: no sheet, no question, and the
     /// Agents list showing (Go's sheet, dialog, confirm and modeList
     /// checks before a sheet opens unasked).
-    pub fn screen_free(&self) -> bool {
+    fn screen_free(&self) -> bool {
         self.sheet.is_none()
             && self.confirm.is_none()
             && self.session.is_none()

@@ -6,6 +6,7 @@ use rush_core::agent::{Halt, State};
 
 use super::tests::{HOUR, MIN, NOW, agent, model_of};
 use crate::list::{FINISHED, IDLE, JUST_LEFT, ListLine, NEEDS, STUCK, section_key};
+use crate::screens::plugin_ui::ModelPlugins;
 use crate::style::text_of;
 
 fn sections(m: &crate::model::Model) -> Vec<String> {

@@ -196,7 +196,7 @@ mod tests {
     /// on a row picked to review it (TestProjectMemoryRow).
     #[test]
     fn project_memory_row() {
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         let key = "/src/app";
         let now = m.now;
         m.kept::<Data>().mem_counts.insert(

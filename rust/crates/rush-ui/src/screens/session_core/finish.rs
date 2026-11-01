@@ -265,7 +265,7 @@ mod tests {
     // done, not when the turn ends.
     #[test]
     fn finished_waits_for_background_work() {
-        let mut m = Model::new("test");
+        let mut m = crate::new_model("test");
         m.clock = Some(1_790_000_000_000);
         let mut a = Agent {
             key: "k".into(),
@@ -301,7 +301,7 @@ mod tests {
     /// (model.go:1975-1986).
     #[test]
     fn clanker_reacts() {
-        let mut m = Model::new("test");
+        let mut m = crate::new_model("test");
         m.clock = Some(1_790_000_000_000);
         let mut a = Agent {
             key: "k".into(),
@@ -372,7 +372,7 @@ mod tests {
     /// one that follows another (model.go:1990-2001).
     #[test]
     fn needs_you_notifies() {
-        let mut m = Model::new("test");
+        let mut m = crate::new_model("test");
         m.clock = Some(1_790_000_000_000);
         let mut a = working_agent();
         read(&mut m, &a);
@@ -404,7 +404,7 @@ mod tests {
     /// A stall is said once, and is a notification (model.go:2004-2011).
     #[test]
     fn a_stall_notifies() {
-        let mut m = Model::new("test");
+        let mut m = crate::new_model("test");
         let now = 1_790_000_000_000;
         m.clock = Some(now);
         let mut a = working_agent();
@@ -427,7 +427,7 @@ mod tests {
     /// (limitHandled, model.go:1963-1969).
     #[test]
     fn a_handled_limit_is_noted_quietly() {
-        let mut m = Model::new("test");
+        let mut m = crate::new_model("test");
         let now = 1_790_000_000_000;
         m.clock = Some(now);
         let login = |current: bool| crate::screens::accounts::state::LoginView {

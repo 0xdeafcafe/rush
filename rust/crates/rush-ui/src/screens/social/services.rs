@@ -61,9 +61,17 @@ impl rush_update::Host for Host {
     }
 }
 
-impl Model {
+/// Model's side of this module: Model is rush-ui-base's, so its
+/// methods here are a trait's.
+pub(crate) trait ModelUpdates {
+    fn check_update(&mut self);
+    fn install_update(&mut self) -> Out;
+    fn version_tag(&self) -> Line;
+}
+
+impl ModelUpdates for Model {
     /// Asks, in the background, whether a newer rush is out (checkUpdate).
-    pub(crate) fn check_update(&mut self) {
+    fn check_update(&mut self) {
         let u = self.kept::<Update>();
         if u.checked {
             return;
@@ -87,7 +95,7 @@ impl Model {
     }
 
     /// #update: the newest rush over this one (installUpdate).
-    pub(crate) fn install_update(&mut self) -> Out {
+    fn install_update(&mut self) -> Out {
         if self.kept::<Update>().updating {
             self.flash("already updating…");
             return Out::Draw;
@@ -124,7 +132,7 @@ impl Model {
 
     /// This window's rush, so two windows can be told apart, and what to
     /// do when it's behind (bars.go:157 versionTag).
-    pub fn version_tag(&self) -> Line {
+    fn version_tag(&self) -> Line {
         let v = format!("rush {}", self.version);
         let u = self.kept.peek::<Update>();
         if u.is_some_and(|u| u.rebuilt) {
@@ -186,12 +194,21 @@ pub fn installed_runs() -> Result<(), String> {
     }
 }
 
-impl Model {
+/// Model's side of this module: Model is rush-ui-base's, so its
+/// methods here are a trait's.
+pub(crate) trait ModelReload {
+    fn reload(&mut self, all: bool) -> Out;
+    fn reload_env(&self) -> Option<String>;
+    fn take_restore(&mut self, v: Option<String>);
+    fn apply_restore(&mut self);
+}
+
+impl ModelReload for Model {
     /// #reload: once the installed rush is seen to start, this view quits
     /// for the binary to run it in its place, with reload_env; one that
     /// doesn't start leaves this view open, saying so (reload,
     /// reloadAfter).
-    pub(crate) fn reload(&mut self, all: bool) -> Out {
+    fn reload(&mut self, all: bool) -> Out {
         let runs = self.kept::<Reload>().installed.unwrap_or(installed_runs);
         self.later(
             move || {
@@ -221,7 +238,7 @@ impl Model {
 
     /// What the next rush starts with, when #reload asked for one: the
     /// binary sets it in the environment of the rush it runs (Reload).
-    pub fn reload_env(&self) -> Option<String> {
+    fn reload_env(&self) -> Option<String> {
         if !self.kept.peek::<Reload>().is_some_and(|r| r.reloading) {
             return None;
         }
@@ -230,7 +247,7 @@ impl Model {
     }
 
     /// Reads what the last rush had picked, once (takeRestore).
-    pub(crate) fn take_restore(&mut self, v: Option<String>) {
+    fn take_restore(&mut self, v: Option<String>) {
         let r = self.kept::<Reload>();
         if r.took {
             return;
@@ -247,7 +264,7 @@ impl Model {
     /// Selects the agent the last rush had, once it has a row on screen:
     /// one in a folded section isn't picked, so the list's first row stays
     /// picked (applyRestore, reload.go:123 m.lines).
-    pub(crate) fn apply_restore(&mut self) {
+    fn apply_restore(&mut self) {
         let want = self.kept::<Reload>().restore.clone();
         if want.is_empty() || !self.items().contains(&want) {
             return;
@@ -316,10 +333,19 @@ fn halt_at(a: &Agent) -> Ms {
     a.spend.halt.as_ref().map_or(0, |h| h.at)
 }
 
-impl Model {
+/// Model's side of this module: Model is rush-ui-base's, so its
+/// methods here are a trait's.
+pub(crate) trait ModelOnline {
+    fn continue_waiting(&mut self) -> Vec<usize>;
+    fn look(&mut self) -> Look;
+    fn watch_online(&mut self);
+    fn on_online(&mut self, goes: &std::collections::HashSet<String>);
+}
+
+impl ModelOnline for Model {
     /// The agents an API error stopped that are due to be told to
     /// continue, once they may (continueWaiting).
-    pub(crate) fn continue_waiting(&mut self) -> Vec<usize> {
+    fn continue_waiting(&mut self) -> Vec<usize> {
         let now = self.now;
         let w = self.kept::<Online>();
         let (sent, tries) = (w.sent.clone(), w.tries.clone());
@@ -338,7 +364,7 @@ impl Model {
 
     /// What the next look needs: halts not yet shared, whether a session
     /// told to continue has answered, and who waits, warm or not (look).
-    pub(crate) fn look(&mut self) -> Look {
+    fn look(&mut self) -> Look {
         let now = self.now;
         let mut l = Look::default();
         let agents = self.agents.clone();
@@ -372,7 +398,7 @@ impl Model {
     /// Shares what's new about the API with every rush process, and looks
     /// at whether each waiting session may try again, off the UI thread
     /// (watchOnline).
-    pub(crate) fn watch_online(&mut self) {
+    fn watch_online(&mut self) {
         let w = self.kept::<Online>();
         if w.checking || w.checked.is_some_and(|t| t.elapsed() < ONLINE_EVERY) {
             return;
@@ -612,11 +638,17 @@ impl Default for Squeeze {
     }
 }
 
-impl Model {
+/// Model's side of this module: Model is rush-ui-base's, so its
+/// methods here are a trait's.
+pub(crate) trait ModelSqueeze {
+    fn squeeze_transcripts(&mut self);
+}
+
+impl ModelSqueeze for Model {
     /// Stores transcripts untouched for two days compressed, in the
     /// background: they read exactly as before, to every agent and
     /// everything else (squeezeTranscripts, onSqueezed).
-    pub(crate) fn squeeze_transcripts(&mut self) {
+    fn squeeze_transcripts(&mut self) {
         let s = self.kept::<Squeeze>();
         if s.running || Instant::now() < s.next {
             return;

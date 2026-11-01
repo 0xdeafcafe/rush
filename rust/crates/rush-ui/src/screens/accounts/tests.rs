@@ -48,7 +48,7 @@ fn reg() -> Registry {
 /// A model w×h on a fresh config in a rush folder of its own.
 fn model(w: usize, h: usize) -> (Model, tempfile::TempDir) {
     let d = home();
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.reg = reg();
     m.clock = Some(NOW);
     m.w = w;
@@ -967,7 +967,7 @@ fn whole_model() -> (Model, tempfile::TempDir, tempfile::TempDir) {
     // State's list of agents is told this registry alone, not whatever
     // another test's told it (claude found here, missing there).
     rush_state::agents::use_thread_list();
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.reg = reg;
     m.clock = Some(NOW);
     let mut s = Store::default();
@@ -1412,7 +1412,7 @@ fn sign_in_goes_to_the_terminal() {
             Ok((std::process::Command::new(prog), finish))
         })
     };
-    let mut m = Model::new("t");
+    let mut m = crate::new_model("t");
     m.open_sheet(Box::new(super::signin::SignInSheet::new(
         "Test",
         start("/usr/bin/true"),

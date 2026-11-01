@@ -1621,12 +1621,36 @@ dependencies = [
  "rush-state",
  "rush-sys",
  "rush-testenv",
+ "rush-ui-base",
  "rush-update",
  "serde",
  "serde_json",
  "signal-hook",
  "tempfile",
  "ureq",
+]
+
+[[package]]
+name = "rush-ui-base"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "regex",
+ "rush-claude",
+ "rush-convo",
+ "rush-core",
+ "rush-draw",
+ "rush-events",
+ "rush-fleet",
+ "rush-host",
+ "rush-net",
+ "rush-plugin",
+ "rush-room",
+ "rush-state",
+ "rush-sys",
+ "rush-testenv",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

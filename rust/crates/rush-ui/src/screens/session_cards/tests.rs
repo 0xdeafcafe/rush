@@ -68,7 +68,7 @@ fn fake_input(m: &mut Model, key: &str, text: &str) {
 
 /// A model of w×h with agent "k"'s conversation open and hosted.
 pub(super) fn hosted(w: usize, h: usize) -> Model {
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.clock = Some(1_793_190_896_789);
     m.w = w;
     m.h = h;

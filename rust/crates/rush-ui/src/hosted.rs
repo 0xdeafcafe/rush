@@ -344,7 +344,7 @@ mod tests {
 
     /// The view of session s1 alone, read with another agent beside it.
     fn hosted() -> Model {
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         m.w = 120;
         m.h = 40;
         set(&mut m, "s1");
@@ -513,7 +513,7 @@ mod tests {
     #[test]
     fn hosted_is_quiet() {
         assert!(quiet(&hosted()));
-        assert!(!quiet(&Model::new("t")));
+        assert!(!quiet(&crate::new_model("t")));
     }
 
     /// ctrl+6 shows every agent beside it, and ctrl+6 or esc from the list
@@ -544,7 +544,7 @@ mod tests {
     /// hosted's own (toggleList keeps m.sel, hosted.go:134-151).
     #[test]
     fn ctrl_6_keeps_a_session_from_earlier() {
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         m.w = 120;
         m.h = 40;
         set(&mut m, "s1");
@@ -566,7 +566,7 @@ mod tests {
     /// Not a hosted view: none of it applies.
     #[test]
     fn a_plain_view_is_untouched() {
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         let agents = vec![
             row("claude:x:s0", "s0", false),
             row("claude:x:s1", "s1", true),
@@ -583,7 +583,7 @@ mod tests {
 
     /// A plain view, wide, s1 picked.
     fn plain(w: usize, list_only: bool) -> Model {
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         m.w = w;
         m.h = 40;
         m.cfg.list_only = list_only;

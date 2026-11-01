@@ -13,7 +13,7 @@ use crate::model::Model;
 fn model() -> (Model, tempfile::TempDir) {
     let d = tempfile::tempdir().unwrap();
     rush_state::set_thread_dir(Some(d.path().to_path_buf()));
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     let r = Registry::new();
     r.register(rush_claude::Claude::new());
     m.reg = r;

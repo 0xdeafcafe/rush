@@ -82,7 +82,7 @@ fn agents(n: usize) -> Vec<Agent> {
 }
 
 fn model(n: usize, w: usize, h: usize) -> Model {
-    let mut m = Model::new("0.1.0");
+    let mut m = rush_ui::new_model("0.1.0");
     m.clock = Some(NOW);
     m.now = NOW;
     m.w = w;

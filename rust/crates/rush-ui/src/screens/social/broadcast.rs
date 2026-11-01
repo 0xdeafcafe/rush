@@ -72,14 +72,26 @@ pub fn mentionable(a: &Agent) -> bool {
     !a.interactive && !a.headless
 }
 
-impl Model {
-    /// The agents in list order.
-    fn in_order(&self) -> impl Iterator<Item = &Agent> {
-        self.order.iter().map(|&i| &self.agents[i])
-    }
+/// The agents in list order.
+fn in_order(m: &Model) -> impl Iterator<Item = &Agent> {
+    m.order.iter().map(|&i| &m.agents[i])
+}
 
+/// Model's side of this module: Model is rush-ui-base's, so its
+/// methods here are a trait's.
+pub(crate) trait ModelBroadcast {
+    fn mentions_in(&self, text: &str) -> Vec<usize>;
+    fn broadcast_all(&self) -> Vec<usize>;
+    fn broadcast_command(&mut self, arg: &str) -> Out;
+    fn broadcast_pick(&mut self, key: &str);
+    fn send_broadcast(&mut self, text: &str) -> Out;
+    fn broadcast_to(&mut self, to: &[usize], text: &str) -> Out;
+    fn reply_to(&mut self, a: &Agent, text: &str);
+}
+
+impl ModelBroadcast for Model {
     /// The agents the words after the first in text tag (mentionsIn).
-    pub(crate) fn mentions_in(&self, text: &str) -> Vec<usize> {
+    fn mentions_in(&self, text: &str) -> Vec<usize> {
         let mut out = Vec::new();
         for (i, f) in text.split_whitespace().enumerate() {
             let Some(tag) = f.strip_prefix('@') else {
@@ -101,7 +113,7 @@ impl Model {
 
     /// The agents "all" means: the ones a message can reach that are still
     /// at work, not finished or past (broadcastAll).
-    pub(crate) fn broadcast_all(&self) -> Vec<usize> {
+    fn broadcast_all(&self) -> Vec<usize> {
         self.order
             .iter()
             .copied()
@@ -113,7 +125,7 @@ impl Model {
     }
 
     /// #broadcast arg (broadcastCommand).
-    pub(crate) fn broadcast_command(&mut self, arg: &str) -> Out {
+    fn broadcast_command(&mut self, arg: &str) -> Out {
         let words: Vec<&str> = arg.split_whitespace().collect();
         let mut to = Vec::new();
         let mut n = 0;
@@ -152,8 +164,8 @@ impl Model {
 
     /// Picks or unpicks the agent at key, when it can be sent to
     /// (broadcastPick).
-    pub(crate) fn broadcast_pick(&mut self, key: &str) {
-        let Some(a) = self.in_order().find(|a| a.key == key) else {
+    fn broadcast_pick(&mut self, key: &str) {
+        let Some(a) = in_order(self).find(|a| a.key == key) else {
             return;
         };
         if !mentionable(a) || super::rooms::is_room_key(key) {
@@ -168,7 +180,7 @@ impl Model {
     }
 
     /// Sends text to the picked agents and leaves picking (sendBroadcast).
-    pub(crate) fn send_broadcast(&mut self, text: &str) -> Out {
+    fn send_broadcast(&mut self, text: &str) -> Out {
         let picked = self.kept::<Broadcast>().picked.clone().unwrap_or_default();
         let to: Vec<usize> = self
             .order
@@ -204,7 +216,7 @@ impl Model {
 
     /// Sends text to an agent rush doesn't run, through its adapter, off
     /// the UI thread (reply, replyOutside).
-    pub(crate) fn reply_to(&mut self, a: &Agent, text: &str) {
+    fn reply_to(&mut self, a: &Agent, text: &str) {
         let reg = self.reg.clone();
         let (kind, account, id, name) = (
             a.kind.to_string(),

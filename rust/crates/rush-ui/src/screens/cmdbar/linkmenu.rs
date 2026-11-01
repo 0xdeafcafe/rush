@@ -405,11 +405,11 @@ mod tests {
             *px = image::Rgba([if x < 200 { 200 } else { 10 }, 40, 90, 255]);
         }
         img.save(&p).unwrap();
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         (m.w, m.h) = (120, 50);
         let u = format!("file://{}", p.display());
         assert!(open_link_menu(&mut m, &u));
-        let other = Model::new("t");
+        let other = crate::new_model("t");
         let s = menu(&mut m);
         let shot = s.shot.clone().expect("drawn at once with no loop");
         assert_eq!((shot.len(), shot[0].width()), (12, 48));

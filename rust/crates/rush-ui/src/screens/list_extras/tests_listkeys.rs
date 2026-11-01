@@ -12,6 +12,7 @@ use super::listkeys::{attach_images, pr_row, take_images};
 use super::tests::{agent, model_of};
 use crate::frame::{Out, Press};
 use crate::model::Model;
+use crate::screens::plugin_ui::ModelPlugins;
 
 /// Held by each test that saves config.json: the tests share one home.
 fn one_at_a_time() -> std::sync::MutexGuard<'static, ()> {

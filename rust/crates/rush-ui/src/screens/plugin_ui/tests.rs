@@ -66,7 +66,7 @@ fn same_by(sets: Vec<Vec<Line>>, want: &str, what: &str, norm: fn(Vec<String>) -
 }
 
 fn model() -> Model {
-    Model::new("test")
+    crate::new_model("test")
 }
 
 fn pick() -> Pick {

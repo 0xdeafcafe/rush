@@ -19,6 +19,7 @@ use super::tests_subs::NOW;
 use super::tests_subview::{KEY, press};
 use super::{conn, running, views};
 use crate::model::Model;
+use crate::screens::session_cards::ModelCards;
 
 /// A dev server whose own output file is empty, its output in the file
 /// its command sends it to, and another it wrote at its start and left,

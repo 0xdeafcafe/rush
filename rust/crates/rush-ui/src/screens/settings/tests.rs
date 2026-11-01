@@ -25,6 +25,7 @@ use super::statusline::{self, StatusSheet};
 use super::*;
 use crate::frame::Press;
 use crate::model::Model;
+use crate::screens::plugin_ui::ModelPlugins;
 
 /// A model w×h whose rush folder is a temp dir, and a store loaded from
 /// it. The dir lives as long as the guard.
@@ -32,7 +33,7 @@ fn model(w: usize, h: usize) -> (Model, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("a temp dir");
     rush_state::set_thread_dir(Some(dir.path().to_path_buf()));
     rush_state::set_thread_cache_dir(Some(dir.path().join("cache")));
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.clock = Some(1_793_190_896_789);
     m.now = 1_793_190_896_789;
     m.w = w;

@@ -49,7 +49,7 @@ fn model(agents: Vec<(Agent, String)>, w: usize, h: usize, cfg: Cfg) -> Model {
     // process's would reach every other test's model.
     let reg = rush_core::adapter::Registry::default();
     reg.register(rush_claude::Claude::new());
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.reg = reg;
     m.clock = Some(NOW);
     m.now = NOW;
@@ -544,7 +544,7 @@ fn clean_up_hands_to_delete() {
 /// worked out by rush_fleet's own TempDirs off the UI thread.
 #[test]
 fn a_rush_sessions_own_temp_folder() {
-    let mut m = Model::new("t");
+    let mut m = crate::new_model("t");
     let mut a = Agent {
         key: "default/a:e57fb8f4".into(),
         rush: true,

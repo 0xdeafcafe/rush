@@ -82,7 +82,7 @@ fn model(w: usize, h: usize) -> Model {
     // every other test's model.
     let reg = rush_core::adapter::Registry::default();
     reg.register(rush_claude::Claude::new());
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.reg = reg;
     m.clock = Some(NOW);
     m.launch_dir = "/src/checkout".into();

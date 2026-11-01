@@ -85,7 +85,7 @@ impl Model {
     }
 
     /// A key for the opened Session: its screens' keys, then its own.
-    pub(crate) fn session_press(&mut self, k: &Press) -> Out {
+    pub fn session_press(&mut self, k: &Press) -> Out {
         {
             for i in 0..self.ext.session_keys.len() {
                 let f = self.ext.session_keys[i];

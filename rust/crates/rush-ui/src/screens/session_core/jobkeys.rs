@@ -21,6 +21,7 @@ use super::{conn, open_key};
 use crate::frame::{Out, Press};
 use crate::model::Model;
 use crate::screens::list_extras::spawns::SPAWN_PREFIX;
+use crate::screens::session_cards::ModelCards;
 
 /// What's picked in the open session (c.sel).
 fn sel(m: &Model) -> String {

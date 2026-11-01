@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn orphans_go_after_their_grace() {
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         m.follows = false;
         m.kept::<Data>().cfg_read = true;
         m.kept::<Data>().machine.rows = vec![orphan(7), orphan(8)];
@@ -217,7 +217,7 @@ mod tests {
     // none before Settings is read (it may say keep them).
     #[test]
     fn only_orphans_and_only_once_settings_say() {
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         m.follows = false;
         let mut other = orphan(5);
         other.role = Role::Other;
@@ -251,7 +251,7 @@ mod tests {
     #[test]
     fn only_the_rush_that_leads_ends_leftovers_and_orphans() {
         for follows in [true, false] {
-            let mut m = Model::new("t");
+            let mut m = crate::new_model("t");
             m.follows = follows;
             m.now = ORPHAN_GRACE * 3;
             m.kept::<Data>().cfg_read = true;

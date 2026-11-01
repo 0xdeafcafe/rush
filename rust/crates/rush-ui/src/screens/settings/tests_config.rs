@@ -2,7 +2,6 @@
 //! frame's save or hold reaches the copy of the config Settings holds.
 
 use crate::config::{hold, hold_writers, queue, save, write_waiting};
-use crate::model::Model;
 use crate::screens::accounts::askrush::on_config;
 use crate::screens::settings::{config, config_mut, use_store};
 
@@ -10,7 +9,7 @@ use crate::screens::settings::{config, config_mut, use_store};
 /// changed there afterwards doesn't save the old value back.
 #[test]
 fn a_change_reaches_settings_copy() {
-    let mut m = Model::new("t");
+    let mut m = crate::new_model("t");
     use_store(&mut m, rush_state::Store::load());
     let mark = "settings-copy-test".to_string();
     let f = mark.clone();
@@ -27,7 +26,7 @@ fn a_change_reaches_settings_copy() {
 /// whole save after doesn't write the old value back.
 #[test]
 fn a_kept_change_is_held() {
-    let mut m = Model::new("t");
+    let mut m = crate::new_model("t");
     use_store(&mut m, rush_state::Store::load());
     hold(&mut m, |c| c.set_view("agent"));
     assert_eq!(config(&m).view, "agent");
@@ -37,7 +36,7 @@ fn a_kept_change_is_held() {
 /// to be written keeps that change.
 #[test]
 fn an_outside_reload_keeps_waiting_changes() {
-    let mut m = Model::new("t");
+    let mut m = crate::new_model("t");
     use_store(&mut m, rush_state::Store::load());
     {
         // No writer takes it meanwhile (other tests write too).

@@ -136,7 +136,8 @@ impl Model {
     }
 
     /// A key while a question is asked (confirmKey).
-    pub(crate) fn confirm_key(&mut self, s: &str) -> Out {
+    #[doc(hidden)]
+    pub fn confirm_key(&mut self, s: &str) -> Out {
         let Some(mut c) = self.confirm.take() else {
             return Out::Pass;
         };

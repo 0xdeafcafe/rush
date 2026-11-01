@@ -17,6 +17,7 @@ use super::host::Op;
 use super::tests::{KEY, flash, hosted, press, screen, typed};
 use super::{conn, views};
 use crate::model::Model;
+use crate::screens::plugin_ui::ModelPlugins;
 use crate::screens::plugin_ui::{hooks, intercept};
 
 fn drafts(called: &str) -> UiPlugin {
@@ -297,7 +298,7 @@ fn haven() -> UiState {
 /// onHooks).
 #[test]
 fn plugin_commands_on_keys() {
-    let mut m = Model::new("test");
+    let mut m = crate::new_model("test");
     crate::screens::settings::keys::set_keys(&mut m, Default::default());
     let km = crate::screens::settings::keys::key_map(&m).into_owned();
     assert!(km.action("plugin:haven.open").is_none());
@@ -328,7 +329,7 @@ fn plugin_key_runs_its_command() {
 /// history (wipePrompt).
 #[test]
 fn prompt_wipe() {
-    let mut m = Model::new("test");
+    let mut m = crate::new_model("test");
     with(
         &mut m,
         UiState {
@@ -348,7 +349,7 @@ fn prompt_wipe() {
 /// A plugin's note for the Prompt sits on its bottom edge (view.go:2722).
 #[test]
 fn note_on_the_prompt() {
-    let mut m = Model::new("test");
+    let mut m = crate::new_model("test");
     m.w = 120;
     m.h = 30;
     with(

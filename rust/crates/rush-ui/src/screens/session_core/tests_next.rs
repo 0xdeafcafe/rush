@@ -474,7 +474,7 @@ fn ctrl_g_edits_the_draft_in_the_editor() {
 /// (keys.go:519).
 #[test]
 fn ctrl_g_edits_the_agents_box() {
-    let mut m = crate::model::Model::new("t");
+    let mut m = crate::new_model("t");
     m.input.set("plan it");
     m.set_editor_program("f() { printf ' well' >> \"$1\"; }; f");
     super::tests::press(&mut m, "ctrl+g");

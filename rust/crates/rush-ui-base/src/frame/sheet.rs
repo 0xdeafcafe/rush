@@ -64,7 +64,8 @@ impl Model {
     }
 
     /// Hands a key to the open sheet: closed when it says so.
-    pub(crate) fn sheet_key(&mut self, k: &Press) -> Out {
+    #[doc(hidden)]
+    pub fn sheet_key(&mut self, k: &Press) -> Out {
         let Some(mut s) = self.sheet.take() else {
             return Out::Pass;
         };

@@ -30,7 +30,7 @@ pub struct RoomRows {
 impl Model {
     /// Whether a room the list last read is running, so the rooms are
     /// read again each second (chores.rs).
-    pub(crate) fn rooms_running(&self) -> bool {
+    pub fn rooms_running(&self) -> bool {
         self.kept
             .peek::<RoomRows>()
             .is_some_and(|rr| rr.list.iter().any(|s| s.running))

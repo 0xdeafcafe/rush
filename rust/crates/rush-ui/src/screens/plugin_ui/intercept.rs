@@ -12,6 +12,7 @@ use super::hooks::{agent_by_key, ui_session};
 use crate::frame::Out;
 use crate::model::Model;
 use crate::screens::list_extras::prompt::is_hash_cmd;
+use crate::screens::plugin_ui::ModelPlugins;
 use crate::screens::session_core::{conn, keys};
 
 /// Whether text in a box goes past plugins before it's sent: a message,

@@ -5,40 +5,41 @@
 //! with no terminal for a while, as `rush --soak` does
 //! (cmd/rush/profile.go:46).
 
-pub mod changes;
-mod chores;
-mod clanker;
-pub mod config;
-pub mod frame;
-mod header;
+// The base's modules at their old paths (rush-ui-base), so crate::frame::..
+// and rush_ui::lead::.. read as they did. Each is the one module, not a
+// copy: its statics and kept types are the same ones.
+pub use rush_ui_base::{
+    changes, config, frame, imagerefs, landing, lead, list, look, mention, overlay, pastes,
+    predict, rooms, shells, spawns, split, style, turnwants, worker,
+};
+use rush_ui_base::{chores, clanker, header, listcache, model, session};
+
 pub mod hosted;
-pub mod imagerefs;
-pub mod landing;
-pub mod lead;
-pub mod list;
-mod listcache;
-pub mod look;
-pub mod mention;
-mod model;
-pub mod overlay;
-pub mod pastes;
-pub mod predict;
-pub mod rooms;
 pub mod screens;
-mod session;
-pub mod shells;
-pub mod spawns;
-pub mod split;
-pub mod style;
-pub mod turnwants;
-pub mod worker;
+
+#[cfg(test)]
+mod base_tests;
 
 use std::io;
 
 use rush_draw::{Headless, Key, KeyMods, Loop, Term};
 
+use crate::screens::social::rooms::ModelRooms;
+use crate::screens::social::services::ModelReload;
+
 pub use model::Model;
 pub use worker::{Fleet, Note};
+
+/// A model with no workers, every screen registered (screens::register):
+/// fed by hand (tests, rush --render). Model::bare is the base's.
+pub fn new_model(version: &str) -> Model {
+    Model::bare(version, screens::register)
+}
+
+/// A model whose workers send on tx, every screen registered.
+pub fn new_model_with_workers(version: &str, tx: rush_draw::Sender<Note>) -> Model {
+    Model::bare_with_workers(version, tx, screens::register)
+}
 
 /// Opens the TUI and runs it until quit.
 pub fn run(version: &str) -> io::Result<()> {
@@ -69,7 +70,7 @@ fn run_model(
     setup: impl FnOnce(&mut Model),
 ) -> io::Result<Option<String>> {
     let lp: Loop<Note> = Loop::new();
-    let mut m = Model::with_workers(version, lp.sender());
+    let mut m = crate::new_model_with_workers(version, lp.sender());
     m.cfg = config::Config::load();
     if let Some(id) = hosted {
         hosted::set(&mut m, id);
@@ -206,7 +207,7 @@ pub fn soak(
 ) -> io::Result<Soaked> {
     use std::time::Duration;
     let lp: Loop<Note> = Loop::new();
-    let mut m = Model::with_workers(version, lp.sender());
+    let mut m = crate::new_model_with_workers(version, lp.sender());
     m.cfg = config::Config::load();
     m.w = w as usize;
     m.h = h as usize;
@@ -355,7 +356,7 @@ pub fn render(
     keys: &[(Key, KeyMods)],
     setup: impl FnOnce(&mut Model),
 ) -> String {
-    let mut m = Model::new(version);
+    let mut m = crate::new_model(version);
     m.cfg = config::Config::load();
     setup(&mut m);
     // Rust-only: RUSH_RENDER_HOSTED=<id> draws `rush open <id>`'s view,

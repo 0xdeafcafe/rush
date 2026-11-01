@@ -24,6 +24,7 @@ use super::subqueue::{self, Due};
 use super::{conn, core, live};
 use crate::frame::{Out, Press};
 use crate::model::Model;
+use crate::screens::session_cards::ModelCards;
 use crate::session::{SessionView, Source};
 
 pub(super) const NOW: Ms = 1_793_190_896_789;
@@ -101,7 +102,7 @@ pub(super) fn agent(kind: &str, state: State) -> Agent {
 
 /// A model with a's conversation open, w×h, sending through fake.
 pub(super) fn open(a: Agent, fake: &Arc<Fake>, w: usize, h: usize) -> Model {
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.clock = Some(NOW);
     m.now = NOW;
     m.reg = registry();

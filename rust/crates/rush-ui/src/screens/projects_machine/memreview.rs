@@ -683,7 +683,7 @@ mod tests {
     #[test]
     fn mem_review() {
         let dir = tempfile::tempdir().unwrap();
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         let fake = Arc::new(Fake::default());
         let mut s = MemReviewSheet::new(review(dir.path()), Some(fake.clone()));
         let b = body(&mut s, &m);
@@ -729,7 +729,7 @@ mod tests {
     #[test]
     fn mem_review_edges() {
         let dir = tempfile::tempdir().unwrap();
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         let mut s = MemReviewSheet::new(review(dir.path()), Some(Arc::new(Fake::default())));
         s.r.notes = vec![s.cur().unwrap().f.clone()];
         s.r.items[0].same.clear();
@@ -768,7 +768,7 @@ mod tests {
             },
             Some(Arc::new(Fake::default())),
         );
-        let m = Model::new("t");
+        let m = crate::new_model("t");
         let b = body(&mut s, &m);
         assert!(b.contains("m merge into tests"), "{b}");
         assert!(
@@ -783,7 +783,7 @@ mod tests {
     fn e_edits_it_in_the_editor() {
         use crate::screens::session_core::memedit::{Done, set_editor};
         let dir = tempfile::tempdir().unwrap();
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         type Slot = Arc<Mutex<Option<(String, Done)>>>;
         let slot: Slot = Arc::new(Mutex::new(None));
         let s2 = slot.clone();
@@ -811,7 +811,7 @@ mod tests {
     #[test]
     fn e_runs_the_editor() {
         let dir = tempfile::tempdir().unwrap();
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         m.set_editor_program("f() { echo edited >> \"$1\"; }; f");
         let r = review(dir.path());
         let first = r.items[0].f.path.clone();
@@ -828,7 +828,7 @@ mod tests {
     #[test]
     fn mem_review_without_a_keeper() {
         let dir = tempfile::tempdir().unwrap();
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         let mut s = MemReviewSheet::new(review(dir.path()), None);
         assert_eq!(press(&mut s, &mut m, "m"), Out::Idle);
         assert_eq!(press(&mut s, &mut m, "g"), Out::Idle);

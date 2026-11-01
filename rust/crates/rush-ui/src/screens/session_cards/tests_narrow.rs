@@ -626,7 +626,7 @@ fn draw_all(sw: usize, h: usize, sheet: &dyn Fn(usize) -> usize, dw: usize, pw: 
         .into_iter()
         .enumerate()
         {
-            let mut qm = crate::model::Model::new("0.1.0");
+            let mut qm = crate::new_model("0.1.0");
             qm.w = sw;
             qm.h = 40;
             let q = qm.kept::<super::quickask::QuickAsk>();

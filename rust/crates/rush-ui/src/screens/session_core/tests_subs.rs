@@ -530,7 +530,7 @@ fn dock_reads_the_runs() {
     };
     a.job.transcript_path = t.to_string_lossy().into_owned();
     a.job.state = rush_core::agent::State::Working;
-    let mut m = crate::model::Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.reg = reg;
     m.w = 140;
     m.h = 40;

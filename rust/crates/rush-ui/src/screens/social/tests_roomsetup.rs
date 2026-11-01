@@ -34,7 +34,7 @@ fn claude(model: &str) -> StartOver {
 fn model() -> (Model, Arc<Fake>) {
     let d = tempfile::tempdir().unwrap();
     rush_state::set_thread_dir(Some(d.keep()));
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.reg = reg();
     m.w = 120;
     m.h = 40;

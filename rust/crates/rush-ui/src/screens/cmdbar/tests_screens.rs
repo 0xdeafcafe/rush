@@ -113,7 +113,7 @@ fn agent() -> Agent {
 /// A model with a hosted Claw session open, its host saying the commands
 /// it has.
 fn open() -> (Model, Claw, Arc<Fake>) {
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.w = 120;
     m.h = 40;
     let claw = Claw::default();
@@ -177,7 +177,7 @@ fn press(m: &mut Model, k: &str) -> Out {
 /// claudeSheet bodies, ANSI stripped).
 #[test]
 fn the_sheets_read_as_gos() {
-    let m = Model::new("0.1.0");
+    let m = crate::new_model("0.1.0");
     let mut out = String::new();
     for w in [68, 50] {
         let mut u = UnknownSheet {

@@ -9,16 +9,16 @@ use std::rc::Rc;
 use rush_core::text::Line;
 use rush_draw::{Button, Key, KeyMods, MouseKind};
 
-use super::editor::*;
-use super::inputbox::{InputBox, wrap_segs};
-use super::keyname::{key_of, mac_option_on};
-use super::sheet::{Sheet, sheet_row, sheet_tabs, sheet_title};
-use super::*;
+use crate::frame::editor::*;
+use crate::frame::inputbox::{InputBox, wrap_segs};
+use crate::frame::keyname::{key_of, mac_option_on};
+use crate::frame::sheet::{Sheet, sheet_row, sheet_tabs, sheet_title};
+use crate::frame::*;
 use crate::model::Model;
 use crate::style::*;
 
 fn model(w: usize, h: usize) -> Model {
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.clock = Some(1_793_190_896_789);
     m.w = w;
     m.h = h;
@@ -559,7 +559,10 @@ fn box_draws_its_edge_and_labels() {
         focused: false,
         ..b.clone()
     };
-    assert_eq!(quiet.lines()[0].spans[0].style.fg, super::inputbox::EDGE);
+    assert_eq!(
+        quiet.lines()[0].spans[0].style.fg,
+        crate::frame::inputbox::EDGE
+    );
     // Rows past max_rows scroll to keep the cursor in view.
     let long = InputBox {
         w: 24,
@@ -942,7 +945,7 @@ fn later_runs_off_the_ui_thread() {
     assert_eq!(m.flash.as_ref().unwrap().0, "got 42");
 
     let lp: rush_draw::Loop<crate::worker::Note> = rush_draw::Loop::new();
-    let mut m = Model::with_workers("0.1.0", lp.sender());
+    let mut m = crate::new_model_with_workers("0.1.0", lp.sender());
     m.later(
         || "off",
         |m, v| {

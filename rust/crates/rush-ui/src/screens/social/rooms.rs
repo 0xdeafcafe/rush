@@ -28,11 +28,17 @@ use crate::style::*;
 // What the list knows of rooms is the frame's (crate::rooms).
 pub use crate::rooms::{Grouped, ROOM_KEY_PREFIX, RoomRows, Under, grouped, is_room_key};
 
-impl Model {
+/// Model's side of this module: Model is rush-ui-base's, so its
+/// methods here are a trait's.
+pub(crate) trait ModelRooms {
+    fn load_rooms(&mut self);
+}
+
+impl ModelRooms for Model {
     /// Reads the rooms again, off the UI thread, once a reading of the
     /// list lands (loadRooms); the list is laid out again when they
     /// changed.
-    pub(crate) fn load_rooms(&mut self) {
+    fn load_rooms(&mut self) {
         let rr = self.kept::<RoomRows>();
         if rr.loading {
             return;

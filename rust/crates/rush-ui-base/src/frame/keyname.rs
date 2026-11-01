@@ -91,7 +91,8 @@ pub fn mac_option(code: Key, mods: KeyMods) -> (Key, KeyMods) {
     mac_option_on(cfg!(target_os = "macos"), code, mods)
 }
 
-pub(crate) fn mac_option_on(mac: bool, code: Key, mods: KeyMods) -> (Key, KeyMods) {
+#[doc(hidden)]
+pub fn mac_option_on(mac: bool, code: Key, mods: KeyMods) -> (Key, KeyMods) {
     if !mac || !mods.is_empty() {
         return (code, mods);
     }

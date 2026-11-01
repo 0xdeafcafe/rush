@@ -14,6 +14,7 @@ use rush_core::agent::Agent;
 use crate::frame::picker::{Pick, Picker};
 use crate::frame::{Out, Press};
 use crate::model::Model;
+use crate::screens::plugin_ui::ModelPlugins;
 use crate::screens::plugin_ui::sidebar::{group_label, group_modes};
 use crate::screens::session_cards::clipimage::{ClipState, clip_image};
 use crate::screens::session_cards::imagerefs::with_marks;

@@ -752,7 +752,7 @@ mod tests {
 
     #[test]
     fn says_it_whole() {
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         m.w = 160;
         m.now = 2 * 3_600_000;
         let mut s = sheet(true);
@@ -795,7 +795,7 @@ mod tests {
 
     #[test]
     fn your_own_isnt_reviewed_and_a_closed_one_isnt_acted_on() {
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         m.w = 160;
         let mut s = sheet(true);
         s.last.mine = true;
@@ -812,7 +812,7 @@ mod tests {
 
     #[test]
     fn writing_a_comment() {
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         m.w = 160;
         let mut s = sheet(true);
         s.key(&mut m, &Press::of("c").unwrap());
@@ -841,7 +841,7 @@ mod tests {
              rebase: each of its commits put on main in turn\n\
              merge commit: its commits as they are, joined by a merge"
         );
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         ask_merge(&mut m, sheet(true).at(), &pr());
         let c = m.confirm.as_ref().expect("asks");
         assert_eq!(c.question, "Merge #42 on GitHub?");
@@ -900,7 +900,7 @@ mod tests {
             assert!(Instant::now() < end, "the lookup never answered");
             std::thread::sleep(Duration::from_millis(1));
         }
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         (m.w, m.h) = (160, 50);
         m.kept::<Data>().frozen = true;
         assert_eq!(open_known_link(&mut m, u), Some(Out::Draw));

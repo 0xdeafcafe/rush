@@ -134,7 +134,7 @@ mod tests {
     // underlines the tag alone.
     #[test]
     fn tags_link_agents() {
-        let mut m = Model::new("test");
+        let mut m = crate::new_model("test");
         let mut docs = Agent {
             key: "b".into(),
             display_name: "docs site".into(),

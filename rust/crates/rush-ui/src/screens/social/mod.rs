@@ -8,6 +8,13 @@
 
 use crate::frame::{Ext, Out};
 use crate::model::Model;
+use crate::screens::social::feed::ModelFeed;
+use crate::screens::social::rooms::ModelRooms;
+use crate::screens::social::services::ModelOnline;
+use crate::screens::social::services::ModelReload;
+use crate::screens::social::services::ModelSqueeze;
+use crate::screens::social::services::ModelUpdates;
+use crate::screens::social::stream::ModelStream;
 
 pub mod broadcast;
 pub mod dock;
@@ -111,6 +118,7 @@ mod tests_roomsetup;
 mod tests {
     use super::feed::{FeedSheet, tests::feed_model};
     use crate::frame::Out;
+    use crate::screens::social::feed::ModelFeed;
 
     // The group's # commands, as Go's keys.go:1040-1080 names them.
     #[test]

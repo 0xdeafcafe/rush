@@ -3,7 +3,7 @@
 # reach, and exits 1 if there are any:
 #   rust/tools/ui-fence.sh <module path> [allowed group ...]
 #   rust/tools/ui-fence.sh crates/rush-ui/src/screens/bars bars
-#   rust/tools/ui-fence.sh crates/rush-ui/src/model.rs        # none allowed
+#   rust/tools/ui-fence.sh crates/rush-ui/src/hosted.rs       # none allowed
 # A group is a folder of crates/rush-ui/src/screens. Looks for
 # `crate::screens::<group>`, `crate::screens::{..<group>..}` and
 # `super::super::<group>` (the last only means a sibling group from a file

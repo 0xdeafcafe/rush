@@ -913,7 +913,7 @@ mod tests {
     /// there isn't, and the code under either (pairSheet.body).
     #[test]
     fn pair_sheet_draws_the_qr_code() {
-        let m = Model::new("0.1.0");
+        let m = crate::new_model("0.1.0");
         let url = "https://rush.example.ts.net:8443/pair#ABCD2345";
         let qr = qr_lines(url);
         assert_eq!(
@@ -955,7 +955,7 @@ mod tests {
     /// deviceRow).
     #[test]
     fn serve_and_devices_in_colour() {
-        let mut m = Model::new("0.1.0");
+        let mut m = crate::new_model("0.1.0");
         {
             let r = &mut m.kept::<State>().remote;
             r.devs = vec![Device {

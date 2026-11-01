@@ -232,7 +232,7 @@ mod tests {
     // Every slot the frame calls through is filled by register.
     #[test]
     fn every_call_registered() {
-        let m = crate::model::Model::new("t");
+        let m = crate::new_model("t");
         assert_eq!(m.ext.calls.missing(), Vec::<&str>::new());
         assert!(m.ext.act.is_some());
         assert_eq!(m.ext.chores.len(), 6);

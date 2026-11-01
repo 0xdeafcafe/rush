@@ -158,8 +158,9 @@ pub struct Mouse {
 
 /// The frame's extension points with its own in: a placeholder for each
 /// place and for Agents' Wall until a group registers the real one, and
-/// the frame's #commands; then every group's (screens/mod.rs).
-pub(crate) fn ext() -> Ext {
+/// the frame's #commands; then every group's, as register adds them
+/// (rush-ui's screens::register).
+pub(crate) fn ext(register: fn(&mut Ext)) -> Ext {
     let mut x = Ext::default();
     for id in [PlaceId::Projects, PlaceId::Harnesses, PlaceId::Settings] {
         x.place(id, Box::new(places::Placeholder(id.name())));
@@ -180,11 +181,6 @@ pub(crate) fn ext() -> Ext {
         "the last 50 things rush said: answers, what failed, and what it did on its own (clean-ups, worktrees kept, work landed)",
         messages::log_command,
     );
-    crate::screens::register(&mut x);
+    register(&mut x);
     x
 }
-
-#[cfg(test)]
-mod tests;
-#[cfg(test)]
-mod tests_messages;

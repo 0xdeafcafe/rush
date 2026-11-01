@@ -87,7 +87,8 @@ impl Model {
     }
 
     /// Runs f, keeping any change it made to a box for undo.
-    pub(crate) fn guarded<T>(&mut self, f: impl FnOnce(&mut Model) -> T) -> T {
+    #[doc(hidden)]
+    pub fn guarded<T>(&mut self, f: impl FnOnce(&mut Model) -> T) -> T {
         let g = self.guard_boxes();
         let out = f(self);
         self.keep_undo(g);

@@ -546,7 +546,7 @@ mod tests {
         image::RgbImage::from_pixel(100, 50, image::Rgb([10, 200, 30]))
             .save(&p)
             .unwrap();
-        let m = Model::new("0.1.0");
+        let m = crate::new_model("0.1.0");
         let rows = picture(&m, p.to_str().unwrap(), 20, 20).expect("made at once with no loop");
         assert_eq!(rows.len(), 3, "100×50 px in 10×20 cells: 10 by 3");
         assert!(rows.iter().all(|l| l.width() == 10));

@@ -164,9 +164,20 @@ fn take(m: &mut Model, got: Result<Option<(String, Vec<Post>)>, String>) -> crat
     }
 }
 
-impl Model {
+/// Model's side of this module: Model is rush-ui-base's, so its
+/// methods here are a trait's.
+pub(crate) trait ModelStream {
+    fn feed_on(&mut self) -> bool;
+    fn feed_follows(&mut self, on: bool);
+    fn load_stream(&mut self);
+    fn reload_stream(&mut self);
+    fn stream_name(&self, p: &Post) -> String;
+    fn stream_who(&self, p: &Post, col: Color, w: usize) -> Line;
+}
+
+impl ModelStream for Model {
     /// Whether the feed is on, reading the config the first time.
-    pub(crate) fn feed_on(&mut self) -> bool {
+    fn feed_on(&mut self) -> bool {
         if let Some(on) = self.kept::<Stream>().on {
             return on;
         }
@@ -179,7 +190,7 @@ impl Model {
     /// config.json changed outside rush): docked or taken away at once,
     /// as Go reads the config's Feed every frame (stream.go:55, :115).
     /// Nothing until the feed has been asked about once.
-    pub(crate) fn feed_follows(&mut self, on: bool) {
+    fn feed_follows(&mut self, on: bool) {
         match self.kept::<Stream>().on {
             Some(was) if was != on => {}
             _ => return,
@@ -194,7 +205,7 @@ impl Model {
 
     /// Reads the board off the UI thread, and has it read again whenever
     /// it changes while the feed is on (loadStream).
-    pub(crate) fn load_stream(&mut self) {
+    fn load_stream(&mut self) {
         if !self.feed_on() {
             return;
         }
@@ -214,14 +225,14 @@ impl Model {
     }
 
     /// The board read again at once: a post just went in.
-    pub(crate) fn reload_stream(&mut self) {
+    fn reload_stream(&mut self) {
         self.kept::<Stream>().stamp.clear();
         self.load_stream();
     }
 
     /// Who posted p by name: its agent's title now, else the name it
     /// posted under; none for you, whose handle says it (streamName).
-    pub(crate) fn stream_name(&self, p: &Post) -> String {
+    fn stream_name(&self, p: &Post) -> String {
         if p.author.session_id.is_empty() {
             return String::new();
         }
@@ -233,7 +244,7 @@ impl Model {
 
     /// A post's author in w cells: its @handle in col, kept whole, then
     /// its name, dim, cut to fit (streamWho).
-    pub(crate) fn stream_who(&self, p: &Post, col: Color, w: usize) -> Line {
+    fn stream_who(&self, p: &Post, col: Color, w: usize) -> Line {
         let h = p.handle();
         let mut who = line([spb(h.clone(), col)]);
         let n = self.stream_name(p);

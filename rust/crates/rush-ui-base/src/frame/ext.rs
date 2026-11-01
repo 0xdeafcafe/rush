@@ -158,9 +158,9 @@ pub struct Ext {
     /// list's letter keys (j k g G h l q) are text, as in Go.
     pub agents_box: bool,
     /// The places past Agents, by PlaceId (Agents is the frame's own).
-    pub(crate) places: [Option<Box<dyn Place>>; 4],
+    pub places: [Option<Box<dyn Place>>; 4],
     /// The Agents place's pages past its list ("Wall").
-    pub(crate) agents_pages: Vec<Option<Box<dyn Place>>>,
+    pub agents_pages: Vec<Option<Box<dyn Place>>>,
     /// What the frame asks of the screens by name (see [`Calls`]).
     pub calls: Calls,
     /// What the frame does at once for a screen (see [`Act`]).

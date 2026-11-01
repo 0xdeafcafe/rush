@@ -135,7 +135,7 @@ fn model() -> Model {
     static ZONE: std::sync::Once = std::sync::Once::new();
     // SAFETY: once, ahead of every other use of the environment in this binary.
     ZONE.call_once(|| unsafe { std::env::set_var("TZ", "UTC") });
-    let mut m = Model::new("0.1.0");
+    let mut m = rush_ui::new_model("0.1.0");
     m.clock = Some(NOW);
     m.launch_dir = "/src/checkout".into();
     let agents = fixture();

@@ -24,6 +24,7 @@ use super::tests_subview::KEY;
 use super::{conn, keys};
 use crate::frame::{Out, Press};
 use crate::model::Model;
+use crate::screens::session_cards::ModelCards;
 use crate::style::{BLUE, ORANGE, SUB};
 
 fn cmd(name: &str, description: &str) -> Command {

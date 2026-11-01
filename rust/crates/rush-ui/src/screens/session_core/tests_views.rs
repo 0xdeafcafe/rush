@@ -703,7 +703,7 @@ fn memory_view() {
     let fake = Fake::new();
     let mut a = agent("memo", State::Idle);
     a.job.cwd = dir.to_string_lossy().into_owned();
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.clock = Some(NOW);
     m.now = NOW;
     let reg = Registry::new();
@@ -1243,7 +1243,7 @@ fn narrow_wide_and_empty_never_panic() {
 fn memory_narrow_never_panics() {
     for w in (0..40).chain([80, 120]) {
         for h in [0, 1, 5, 12, 30] {
-            let mut m = Model::new("0.1.0");
+            let mut m = crate::new_model("0.1.0");
             m.clock = Some(NOW);
             m.now = NOW;
             let reg = Registry::new();

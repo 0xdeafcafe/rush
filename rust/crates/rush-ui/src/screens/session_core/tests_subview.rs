@@ -46,7 +46,7 @@ pub(super) fn model(d: &tempfile::TempDir) -> Model {
         display_name: "port it".into(),
         ..Default::default()
     };
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.reg = reg;
     m.w = 120;
     m.h = 40;

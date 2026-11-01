@@ -34,6 +34,7 @@ use rush_plugind::hooks::Msg;
 use super::{STASH_PLUGIN, toned};
 use crate::frame::Out;
 use crate::model::Model;
+use crate::screens::plugin_ui::ModelPlugins;
 use crate::style::*;
 
 /// What the last look at the fleet found, to tell what changed

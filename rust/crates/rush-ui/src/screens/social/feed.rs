@@ -24,6 +24,7 @@ use crate::frame::overlayclick::MouseEv;
 use crate::frame::sheet::{sheet_title, text_field};
 use crate::frame::{Out, Press, Sheet};
 use crate::model::Model;
+use crate::screens::social::stream::ModelStream;
 use crate::style::*;
 
 /// The feed sheet's own state.
@@ -60,9 +61,15 @@ pub struct Kept {
     pub sheet: Option<FeedSheet>,
 }
 
-impl Model {
+/// Model's side of this module: Model is rush-ui-base's, so its
+/// methods here are a trait's.
+pub(crate) trait ModelFeed {
+    fn open_feed(&mut self, arg: &str) -> Out;
+}
+
+impl ModelFeed for Model {
     /// #feed: the sheet, or #feed on|off for all of rush (openCommunity).
-    pub(crate) fn open_feed(&mut self, arg: &str) -> Out {
+    fn open_feed(&mut self, arg: &str) -> Out {
         let arg = arg.trim();
         if arg == "on" || arg == "off" {
             let on = arg == "on";
@@ -372,13 +379,27 @@ fn day_rule(at: Ms, now: Ms, w: usize) -> Line {
 /// The width of a row of the sheet.
 const MAX_W: usize = 120;
 
-impl Model {
+/// Model's side of this module: Model is rush-ui-base's, so its
+/// methods here are a trait's.
+pub(crate) trait ModelCommunity {
+    fn community_rows(
+        &self,
+        p: &Post,
+        tint: Color,
+        age_w: usize,
+        w: usize,
+        bg: Color,
+        now: Ms,
+    ) -> Vec<Line>;
+}
+
+impl ModelCommunity for Model {
     /// One chirp, w wide: its age right-aligned in a column age_w wide,
     /// then every line of its text beside it, so each chirp starts on its
     /// age and its lines share one left edge. A reply sits a step deeper,
     /// on bg: set in under ↳ and its @handle (name), the handle in tint,
     /// its later lines under the handle (communityRows).
-    pub(crate) fn community_rows(
+    fn community_rows(
         &self,
         p: &Post,
         tint: Color,
@@ -926,7 +947,7 @@ pub(crate) mod tests {
         rush_state::set_thread_dir(Some(std::path::PathBuf::from(
             "/nonexistent/rush-test-home",
         )));
-        let mut m = Model::new("test");
+        let mut m = crate::new_model("test");
         m.w = w;
         m.h = h;
         m.clock = Some(1_790_000_000_000);

@@ -38,7 +38,7 @@ fn lay(lines: &[&[&str]]) -> Layout {
 }
 
 fn model(w: usize) -> Model {
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.clock = Some(NOW);
     m.now = NOW;
     m.w = w;

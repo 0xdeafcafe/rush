@@ -1,6 +1,8 @@
 //! The group's screens at every width from nothing up, with wide
 //! chars and empty boards: none of them may panic or run past the screen.
 use super::stream::{Post, Stream};
+use crate::screens::social::dock::ModelDock;
+use crate::screens::social::feed::ModelFeed;
 use rush_core::agent::{Agent, Job, State};
 use rush_draw::{Key, KeyMods};
 use rush_room::community::Author;

@@ -167,7 +167,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("a note.md");
         std::fs::write(&file, "old").unwrap();
-        let mut m = Model::new("t");
+        let mut m = Model::bare("t", |_| {});
         // A fake editor: writes what it was given into the file.
         m.set_editor_program("f() { printf 'edited %s' \"$(basename \"$1\")\" > \"$1\"; }; f");
         let said = std::sync::Arc::new(std::sync::Mutex::new(None));

@@ -22,7 +22,8 @@ use crate::model::Model;
 use crate::style::{BLUE, DIM, FAINT, GREEN, ORANGE, RED, TEXT, YELLOW};
 
 /// Seconds between the idle bottle's shimmers (clkCycle).
-const CYCLE: usize = 45;
+#[doc(hidden)]
+pub const CYCLE: usize = 45;
 
 /// Something clanker is reacting to, weakest first: a stronger one takes
 /// over a weaker one already running, never the other way (fxKind).
@@ -464,8 +465,10 @@ fn fx_draw(g: &mut [[Cell; W]; H], fx: Reaction) {
 /// on, and the reaction as it was then, so one a stronger one replaced
 /// starts its own count.
 #[derive(Default)]
-struct FxClock {
-    last: Option<Instant>,
+#[doc(hidden)]
+pub struct FxClock {
+    #[doc(hidden)]
+    pub last: Option<Instant>,
     seen: Reaction,
 }
 
@@ -716,51 +719,6 @@ mod tests {
         assert_eq!((n, r.kind), (14, Fx::None));
     }
 
-    /// Working, a light passes over him at second 8 of every 15; idle, at
-    /// 25 of every 45; never over a reaction running (clkBeat).
-    #[test]
-    fn beat_shimmers_now_and_then() {
-        let mut m = Model::new("t");
-        m.clock = Some(1_790_000_000_000);
-        m.tick = 24;
-        let idle = m.mood(m.tally());
-        beat(&mut m);
-        assert_eq!(reaction(&m).kind, Fx::None);
-        m.tick = 25;
-        beat(&mut m);
-        let want = if idle == Mood::Idle {
-            Fx::Shimmer
-        } else {
-            Fx::None
-        };
-        assert_eq!(reaction(&m).kind, want, "{idle:?}");
-        *m.ext.calls.reaction_mut()(&mut m) = Reaction {
-            kind: Fx::Error,
-            frame: 3,
-        };
-        m.tick = 25 + CYCLE;
-        beat(&mut m);
-        assert_eq!(
-            reaction(&m),
-            Reaction {
-                kind: Fx::Error,
-                frame: 3
-            }
-        );
-    }
-
-    /// Now and then a light passes over him (clkBeat).
-    #[test]
-    fn shimmers_on_his_second() {
-        let mut m = Model::new("t");
-        m.clock = Some(1_790_000_000_000);
-        m.tick = 8;
-        let md = m.mood(m.tally());
-        m.tick = if md == Mood::Working { 8 } else { 25 };
-        beat(&mut m);
-        assert_eq!(reaction(&m).kind, Fx::Shimmer, "{md:?}");
-    }
-
     /// The same dump of Go's clkGrid after sprite with painted set to
     /// theme.Light and the palette left as on the dark ground: mono and
     /// clkGrey grey him but where the shimmer's band is.
@@ -790,22 +748,6 @@ mod tests {
             .unwrap();
         assert_eq!(label.style.bg, ORANGE);
         assert!(label.style.mods.contains(Mods::BOLD), "bold kept");
-    }
-
-    /// With nothing to react to, drawing him asks for no wake-up: idle
-    /// costs nothing. One running asks for its next frame.
-    #[test]
-    fn only_a_reaction_wakes() {
-        let mut m = Model::new("t");
-        step(&mut m);
-        assert!(m.kept.peek::<FxClock>().is_none_or(|c| c.last.is_none()));
-        *m.ext.calls.reaction_mut()(&mut m) = Reaction {
-            kind: Fx::Done,
-            frame: 0,
-        };
-        step(&mut m);
-        assert!(m.kept::<FxClock>().last.is_some());
-        assert_eq!(reaction(&m).kind, Fx::Done);
     }
 
     #[test]

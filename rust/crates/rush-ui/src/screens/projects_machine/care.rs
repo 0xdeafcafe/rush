@@ -877,7 +877,7 @@ mod tests {
     fn only_the_rush_that_leads_watches_for_a_cleanup() {
         for follows in [true, false] {
             let lp: rush_draw::Loop<crate::worker::Note> = rush_draw::Loop::new();
-            let mut m = Model::with_workers("t", lp.sender());
+            let mut m = crate::new_model_with_workers("t", lp.sender());
             m.follows = follows;
             m.now = CARE_EVERY * 2;
             watch_machine(&mut m);
@@ -911,7 +911,7 @@ mod tests {
         use rush_core::agent::State;
         for follows in [false, true] {
             let lp: rush_draw::Loop<crate::worker::Note> = rush_draw::Loop::new();
-            let mut m = Model::with_workers("t", lp.sender());
+            let mut m = crate::new_model_with_workers("t", lp.sender());
             let h = crate::screens::session_core::host::Fake::new();
             crate::screens::session_core::host::set_hosts(&mut m, std::sync::Arc::new(h.clone()));
             m.follows = follows;
@@ -949,7 +949,7 @@ mod tests {
     // yours: left alone.
     #[test]
     fn a_cleanup_agent_finished_before_is_left_alone() {
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         m.agents = vec![cleanup_agent(rush_core::agent::State::Done)];
         let (done, busy) = finished_care(&mut m, 1_000_000);
         assert!(done.is_empty() && !busy);
@@ -959,7 +959,7 @@ mod tests {
     // why on its row, and is watched from then.
     #[test]
     fn starts_as_rush_s_own() {
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         let h = crate::screens::session_core::host::Fake::new();
         crate::screens::session_core::host::set_hosts(&mut m, std::sync::Arc::new(h.clone()));
         start_care(
@@ -1021,7 +1021,7 @@ mod tests {
 
     #[test]
     fn sheet_says_what_it_reads() {
-        let m = Model::new("t");
+        let m = crate::new_model("t");
         let mut s = sheet(false);
         let t = text(&s.body(&m, 100, 30));
         assert!(t.starts_with("Cleanup  the disk has 10.0G free"), "{t}");
@@ -1043,7 +1043,7 @@ mod tests {
 
     #[test]
     fn sheet_keys() {
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         let mut s = sheet(false);
         for (k, cur) in [("down", 0), ("tab", 1), ("up", 0), ("shift+tab", 1)] {
             assert_eq!(s.key(&mut m, &Press::of(k).unwrap()), Out::Draw);
@@ -1062,7 +1062,7 @@ mod tests {
 
     #[test]
     fn busy_says_what_its_doing() {
-        let m = Model::new("t");
+        let m = crate::new_model("t");
         let last = |s: &mut CareSheet| text_of(s.body(&m, 100, 30).last().unwrap());
         let mut s = sheet(false);
         s.busy = true;
@@ -1130,7 +1130,7 @@ mod tests {
 
     #[test]
     fn known_before_and_after_a_look() {
-        let mut m = Model::new("t");
+        let mut m = crate::new_model("t");
         let mut out = Vec::new();
         care_known_with(&m, &mut out, 40);
         assert_eq!(out[0], "Memory: 40% available.");

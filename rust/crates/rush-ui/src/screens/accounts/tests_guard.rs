@@ -19,7 +19,6 @@ use super::guard::{self as g, HostOps, Input, Move};
 use super::logins::use_keeper;
 use super::look::LOGINS_KIND;
 use super::state::{LoginView, accounts, cfg_mut, set_store};
-use crate::model::Model;
 
 const NOW: Ms = 1_793_190_896_789;
 const MIN: Ms = 60_000;
@@ -252,7 +251,7 @@ fn past_its_pace_warm_waits_cold_moves() {
 fn new_sessions_switch_then_sessions_move() {
     let d = tempfile::tempdir().unwrap();
     rush_state::set_thread_dir(Some(d.path().to_path_buf()));
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.reg = rush_core::adapter::Registry::new();
     m.clock = Some(NOW);
     m.now = NOW;
@@ -308,7 +307,7 @@ fn new_sessions_switch_then_sessions_move() {
 fn no_move_when_the_switch_fails() {
     let d = tempfile::tempdir().unwrap();
     rush_state::set_thread_dir(Some(d.path().to_path_buf()));
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.reg = rush_core::adapter::Registry::new();
     m.clock = Some(NOW);
     m.now = NOW;
@@ -564,7 +563,7 @@ fn a_held_turn_let_through() {
 fn held_said_in_the_list_and_header() {
     let d = tempfile::tempdir().unwrap();
     rush_state::set_thread_dir(Some(d.path().to_path_buf()));
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.clock = Some(NOW);
     m.now = NOW;
     set_store(&mut m, Store::default());

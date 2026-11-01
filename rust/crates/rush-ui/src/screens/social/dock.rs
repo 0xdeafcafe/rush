@@ -18,6 +18,8 @@ use super::ink::{cells, clean_text, fields, tagged, tint_beside, truncate};
 use super::stream::{FRESH, Post, Stream, next_tint};
 use crate::frame::{Mouse, Out};
 use crate::model::Model;
+use crate::screens::social::feed::ModelFeed;
+use crate::screens::social::stream::ModelStream;
 use crate::style::*;
 
 /// A row's key: this, then its post's key.
@@ -48,10 +50,17 @@ pub struct Cols {
     pub age: usize,
 }
 
-impl Model {
+/// Model's side of this module: Model is rush-ui-base's, so its
+/// methods here are a trait's.
+pub(crate) trait ModelDock {
+    fn stream_lines(&mut self, w: usize, room: usize) -> Vec<(Line, String)>;
+    fn stream_cols(&self, posts: &[Post], w: usize, now: Ms) -> Cols;
+}
+
+impl ModelDock for Model {
     /// The docked timeline in at most room rows: none when the feed is
     /// off, quiet or the list too narrow (streamDock, streamLines).
-    pub fn stream_lines(&mut self, w: usize, room: usize) -> Vec<(Line, String)> {
+    fn stream_lines(&mut self, w: usize, room: usize) -> Vec<(Line, String)> {
         if self.kept::<Stream>().on != Some(true)
             || room < 2
             || w < 24
@@ -142,7 +151,7 @@ impl Model {
     }
 
     /// Where the dock's columns sit for posts in w cells (streamColsOf).
-    pub fn stream_cols(&self, posts: &[Post], w: usize, now: Ms) -> Cols {
+    fn stream_cols(&self, posts: &[Post], w: usize, now: Ms) -> Cols {
         let mut c = Cols {
             handle: 0,
             text: 0,

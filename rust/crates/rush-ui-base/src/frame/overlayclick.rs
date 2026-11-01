@@ -46,7 +46,7 @@ pub struct OverlayHit {
 impl Model {
     /// Notes a box drawn bw wide and h tall at (left, top), its body
     /// starting at (bx, by) (keepOverlay).
-    pub(crate) fn keep_overlay(
+    pub fn keep_overlay(
         &mut self,
         left: usize,
         top: usize,

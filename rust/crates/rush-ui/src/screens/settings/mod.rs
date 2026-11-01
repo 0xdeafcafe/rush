@@ -10,6 +10,8 @@
 //! page's rows change is rush's config.json, through rush-state's Store,
 //! saved after each change as Go saves it.
 
+use crate::screens::social::stream::ModelStream;
+
 pub mod acct;
 pub(crate) mod catalog;
 pub(crate) mod common;

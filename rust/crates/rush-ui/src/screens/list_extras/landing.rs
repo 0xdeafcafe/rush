@@ -19,6 +19,7 @@ use rush_fleet::{Folder, Predicates, check_folder, folder_wants};
 
 use crate::frame::{Out, Press};
 use crate::model::Model;
+use crate::screens::social::broadcast::ModelBroadcast;
 use crate::style::*;
 
 // What's left before an agent's work lands is the frame's (crate::landing).

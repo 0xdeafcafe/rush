@@ -9,6 +9,7 @@ use rush_bundled::drafts::{Words, words_for};
 
 use crate::frame::Out;
 use crate::model::Model;
+use crate::screens::plugin_ui::ModelPlugins;
 use crate::screens::plugin_ui::STASH_PLUGIN;
 use crate::screens::plugin_ui::hooks::{box_state, ui_session};
 

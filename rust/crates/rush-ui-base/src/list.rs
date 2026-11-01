@@ -202,7 +202,7 @@ pub fn asks(a: &Agent) -> bool {
 
 /// Left a day without a turn, neither open, at work nor pinned: Earlier
 /// has it unless it asks you something (model.go:2621).
-pub(crate) fn stale(a: &Agent, now: Ms) -> bool {
+pub fn stale(a: &Agent, now: Ms) -> bool {
     !a.job.open() && !a.busy() && !a.pinned && a.age(now) >= 24 * HOUR
 }
 
@@ -2046,7 +2046,8 @@ impl Model {
     }
 
     /// A stacked row's second line: its summary, or where it works.
-    pub(crate) fn agent_sub(&self, i: usize, w: usize) -> Line {
+    #[doc(hidden)]
+    pub fn agent_sub(&self, i: usize, w: usize) -> Line {
         let room = w.saturating_sub(5);
         let (summary, col, just) = self.row_summary(i);
         let mut l = line([plain("  "), sp("╰ ", FAINT)]);

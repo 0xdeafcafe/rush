@@ -118,7 +118,7 @@ mod tests {
     /// after the other, both kept.
     #[test]
     fn save_keeps_both() {
-        let mut m = Model::new("t");
+        let mut m = Model::bare("t", |_| {});
         let key = "overlay-save-test";
         save(
             &mut m,

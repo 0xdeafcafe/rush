@@ -25,6 +25,7 @@ use crate::screens::accounts::setup::{
 };
 use crate::screens::session_cards::discuss::{RoomAsk, brief, ctx_words};
 use crate::screens::session_core::host::hosts;
+use crate::screens::social::rooms::ModelRooms;
 use crate::style::*;
 
 /// The panel chosen last, to start the next set-up with (lastPanel).

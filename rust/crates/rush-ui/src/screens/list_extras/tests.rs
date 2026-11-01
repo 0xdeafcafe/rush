@@ -39,7 +39,7 @@ pub(super) fn agent(id: &str, name: &str, state: State, pid: i32) -> Agent {
 }
 
 pub(super) fn model_of(agents: Vec<Agent>, w: usize, h: usize) -> Model {
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.clock = Some(NOW);
     m.now = NOW;
     m.w = w;

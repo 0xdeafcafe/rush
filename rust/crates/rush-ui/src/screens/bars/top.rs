@@ -30,6 +30,7 @@ use crate::screens::list_extras::plan::{
 };
 use crate::screens::projects_machine::{TEMP_SHOWN, machine, temp_known};
 use crate::screens::social::parts::disk;
+use crate::screens::social::services::ModelUpdates;
 use crate::style::*;
 
 const HOUR: Ms = 3_600_000;

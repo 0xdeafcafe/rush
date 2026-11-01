@@ -21,7 +21,7 @@ fn model(w: usize, h: usize) -> (Model, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("a temp dir");
     rush_state::set_thread_dir(Some(dir.path().to_path_buf()));
     rush_state::set_thread_cache_dir(Some(dir.path().join("cache")));
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.w = w;
     m.h = h;
     use_store(&mut m, Store::load_with_env(&|_| None));

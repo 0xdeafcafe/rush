@@ -14,6 +14,7 @@ use super::*;
 use crate::screens::accounts::askrush::ask_rush;
 use crate::screens::accounts::setup::StartOver;
 use crate::screens::accounts::state::set_store;
+use crate::screens::session_cards::ModelCards;
 use crate::screens::session_core::host::{Fake, Info, Said, set_hosts};
 use crate::screens::session_core::{conn, live, spawned};
 use crate::worker::Fleet;
@@ -59,7 +60,7 @@ fn reg() -> Registry {
 fn model(fake: &Arc<Fake>) -> (Model, tempfile::TempDir) {
     let d = tempfile::tempdir().unwrap();
     rush_state::set_thread_dir(Some(d.path().to_path_buf()));
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.reg = reg();
     m.clock = Some(NOW);
     m.now = NOW;
@@ -167,7 +168,7 @@ fn a_start_that_fails_says_why() {
 fn no_hosts_start_nothing() {
     let d = tempfile::tempdir().unwrap();
     rush_state::set_thread_dir(Some(d.path().to_path_buf()));
-    let mut m = Model::new("0.1.0");
+    let mut m = crate::new_model("0.1.0");
     m.reg = reg();
     m.ext.agents_box = true;
     set_store(&mut m, Store::default());

@@ -14,6 +14,7 @@ use super::{approval, choice, settled, sheet_do};
 use crate::frame::sheet::{sheet_row, sheet_title};
 use crate::frame::{Out, Press, Sheet};
 use crate::model::Model;
+use crate::screens::plugin_ui::ModelPlugins;
 use crate::style::*;
 
 /// Looks, off the UI, in the repositories open sessions work in whenever

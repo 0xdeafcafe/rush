@@ -15,6 +15,7 @@ use super::{settled, sheet_do};
 use crate::frame::sheet::{sheet_row, sheet_title, window};
 use crate::frame::{Out, Press, Sheet};
 use crate::model::Model;
+use crate::screens::plugin_ui::ModelPlugins;
 use crate::style::*;
 
 /// One optional plugin to ask about (optPick).

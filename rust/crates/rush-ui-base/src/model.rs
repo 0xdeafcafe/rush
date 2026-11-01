@@ -70,15 +70,16 @@ pub struct Model {
     pub clock: Option<Ms>,
     /// What rush last said on the line under the box, when, and whether
     /// it was a failure, which stays till a key (frame/messages.rs).
-    pub(crate) flash: Option<(String, Ms, bool)>,
+    pub flash: Option<(String, Ms, bool)>,
     /// The log of everything rush said, the last LOG_KEPT (#log).
-    pub(crate) said: Vec<crate::frame::messages::LogLine>,
+    #[doc(hidden)]
+    pub said: Vec<crate::frame::messages::LogLine>,
     pub(crate) quit_armed: Ms,
-    pub(crate) help: bool,
-    pub(crate) term_focused: bool,
+    pub help: bool,
+    pub term_focused: bool,
     /// When you last pressed a key, clicked or pasted in rush: the
     /// runaway guard's away mode asks. 0: not since it started.
-    pub(crate) last_input: Ms,
+    pub last_input: Ms,
     pub session: Option<SessionView>,
     /// The picked agent's Session beside the list, on a screen split
     /// between them (list_extras/split.rs); the list keeps the keys.
@@ -92,16 +93,17 @@ pub struct Model {
     pub full: bool,
     /// The list is being drawn while the Session beside it has the keys:
     /// its box says how to come back (promptLines' sessionFocused).
-    pub(crate) keys_beside: bool,
+    pub keys_beside: bool,
     /// The Session is being drawn beside the list without the keys: its
     /// box and keys say how to give them to it (paneDock's !paneFocus).
-    pub(crate) pane_idle: bool,
+    pub pane_idle: bool,
     /// The opened Session is being drawn beside the list rather than on
     /// the whole screen (paneAlone false).
-    pub(crate) in_pane: bool,
+    pub in_pane: bool,
     /// The screen's width while `in_pane` narrows `w` to the pane's.
     pub(crate) screen_w: usize,
-    pub(crate) tx: Option<Sender<Note>>,
+    #[doc(hidden)]
+    pub tx: Option<Sender<Note>>,
     /// The place showing (Go's view), and Agents' page (0 its list).
     pub place: PlaceId,
     pub agents_page: usize,
@@ -136,7 +138,7 @@ pub struct Model {
     /// Frames for background work, held a quarter second apart.
     hold: Hold,
     /// What a frame's parts each ask the same, asked once a frame.
-    pub(crate) memo: std::rc::Rc<crate::frame::framememo::FrameMemo>,
+    pub memo: std::rc::Rc<crate::frame::framememo::FrameMemo>,
     /// A wake-up a screen asked for (Model::wake_at).
     wake: Option<Instant>,
     /// When a label the last frame drew changes its text with the clock
@@ -163,8 +165,10 @@ pub struct Model {
 }
 
 impl Model {
-    /// A model with no workers: fed by hand (tests, rush --render).
-    pub fn new(version: &str) -> Model {
+    /// A model with no workers: fed by hand (tests, rush --render), its
+    /// extension points filled by register (rush-ui's screens::register,
+    /// through rush_ui::new_model).
+    pub fn bare(version: &str, register: fn(&mut Ext)) -> Model {
         Model {
             reg: global().clone(),
             agents: Vec::new(),
@@ -215,7 +219,7 @@ impl Model {
             tx: None,
             place: PlaceId::Agents,
             agents_page: 0,
-            ext: crate::frame::ext(),
+            ext: crate::frame::ext(register),
             kept: Kept::default(),
             sheet: None,
             confirm: None,
@@ -244,9 +248,10 @@ impl Model {
         }
     }
 
-    /// A model whose workers send on tx.
-    pub fn with_workers(version: &str, tx: Sender<Note>) -> Model {
-        let mut m = Model::new(version);
+    /// A model whose workers send on tx, its extension points filled by
+    /// register (rush_ui::new_model_with_workers).
+    pub fn bare_with_workers(version: &str, tx: Sender<Note>, register: fn(&mut Ext)) -> Model {
+        let mut m = Model::bare(version, register);
         m.tx = Some(tx);
         crate::chores::start(&mut m);
         m
@@ -329,7 +334,7 @@ impl Model {
     }
 
     /// Picks the row with key (a heading's key starts with §).
-    pub(crate) fn select(&mut self, key: String) {
+    pub fn select(&mut self, key: String) {
         if !self.sel.is_empty() && !self.sel.starts_with('§') {
             self.shown = self.sel.clone();
         }
@@ -395,7 +400,7 @@ impl Model {
     /// Agent i's conversation as a view, its reading started on a worker
     /// (at once with no loop); None when it can't be read, said why
     /// unless quiet.
-    pub(crate) fn read_view(&mut self, i: usize, quiet: bool) -> Option<SessionView> {
+    pub fn read_view(&mut self, i: usize, quiet: bool) -> Option<SessionView> {
         // A copy: restoring exchanges below borrows the model.
         let a = &self.agents[i].clone();
         self.r#gen += 1;
@@ -543,7 +548,7 @@ impl Model {
 
     /// The opened Session gives up the keys (leavePane): beside the list
     /// it stays there; filling the screen, the list comes back.
-    pub(crate) fn close(&mut self) {
+    pub fn close(&mut self) {
         if self.ext.calls.hosted_keeps_open()(self) {
             // A hosted view's one session: no list to go back to, so esc
             // takes the keys off the box (paneKey's hostedAlone).
@@ -565,7 +570,7 @@ impl Model {
     /// questions is cleared with ctrl+n and an answer each; "nothing needs
     /// you" when none does (keys.go:595 nextNeedingYou). The list's and
     /// the Session's ctrl+n.
-    pub(crate) fn next_needing_you(&mut self) {
+    pub fn next_needing_you(&mut self) {
         let best = self
             .order
             .iter()
@@ -776,7 +781,8 @@ impl Model {
         Step::Draw
     }
 
-    pub(crate) fn mouse(&mut self, kind: MouseKind, x: u16, y: u16) -> Step {
+    #[doc(hidden)]
+    pub fn mouse(&mut self, kind: MouseKind, x: u16, y: u16) -> Step {
         let y = y as usize;
         let rows = self.session_rows();
         let (w, now, tick) = (self.w.saturating_sub(3), self.now, self.tick);
@@ -1048,7 +1054,7 @@ impl Model {
     /// The open Session drawn w wide and rows tall as a grid's tile, its
     /// top on screen row top, with no row of keys of its own: the screen
     /// narrowed to the tile while it's drawn (gridSession's rushPane).
-    pub(crate) fn tile_frame(&mut self, top: usize, rows: usize, w: usize) -> Vec<Line> {
+    pub fn tile_frame(&mut self, top: usize, rows: usize, w: usize) -> Vec<Line> {
         let in_pane = std::mem::replace(&mut self.in_pane, false);
         let out = crate::split::in_pane(self, w, |m| {
             let mut p = vec![Line::new(); top];
@@ -1495,7 +1501,7 @@ impl Model {
 
     /// Keeps the spinner going if it was before something else was drawn
     /// (a grid tile drawn after the open Session sets it for itself).
-    pub(crate) fn keep_spinning(&mut self, was: bool) {
+    pub fn keep_spinning(&mut self, was: bool) {
         self.spinning |= was;
     }
 }

@@ -1086,7 +1086,7 @@ mod tests {
     // terminal's codes taken out of it (FileView's cleanOutput).
     #[test]
     fn full_file_waits_for_git_and_drops_terminal_codes() {
-        let mut m = Model::new("0.1.0");
+        let mut m = crate::new_model("0.1.0");
         let reading = Tree {
             dir: String::new(),
             err: "reading git…".into(),

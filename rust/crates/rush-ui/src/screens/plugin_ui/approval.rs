@@ -11,6 +11,7 @@ use super::{choice, settled, sheet_do};
 use crate::frame::sheet::{sheet_row, sheet_title, window};
 use crate::frame::{Out, Press, Sheet};
 use crate::model::Model;
+use crate::screens::plugin_ui::ModelPlugins;
 use crate::style::*;
 
 /// Looks once, off the UI, for plugins never approved or changed since
