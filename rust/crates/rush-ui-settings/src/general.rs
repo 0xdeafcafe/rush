@@ -360,6 +360,12 @@ pub fn sections(m: &Model) -> Vec<Section> {
     );
     secs.push(Section::new("The feed", vec![feed]));
 
+    // Push-to-talk's microphone, while the apple voice plugin is on (new
+    // in the Rust port).
+    if (m.ext.calls.bundled_on())(m, rush_bundled::apple_voice::NAME) {
+        secs.push(Section::new("Push to talk", vec![microphone(m)]));
+    }
+
     let mut low_disk = choice(
         "Offer a cleanup when disk is under",
         &off_pick(c.cleanup_disk_gb, "G"),
@@ -456,4 +462,45 @@ pub fn sections(m: &Model) -> Vec<Section> {
     };
     secs.push(Section::new("Stalls", vec![stalls]));
     secs
+}
+
+/// Which microphone push-to-talk hears: the Mac's input unless you
+/// choose one of those the engine says it has. One chosen that isn't
+/// plugged in stays chosen, and says so.
+pub fn microphone(m: &Model) -> Setting {
+    let id = config(m).microphone.clone();
+    let mics = (m.ext.calls.dictation_mics())(m);
+    let mut st = choice(
+        "Microphone",
+        &id,
+        "What push-to-talk (ctrl+space, the apple voice plugin) hears. The Mac's input follows whatever macOS uses at the time; a microphone chosen here is used whenever it's plugged in.",
+        &[(
+            "",
+            "the Mac's input, whichever it is when you start talking.",
+        )],
+        set(|m, v| {
+            config_mut(m).microphone = v.to_string();
+            (m.ext.calls.dictation_set_mic())(m, v);
+        }),
+    );
+    st.unset = "Mac's input".into();
+    for (mic, name) in &mics {
+        if mic.is_empty() {
+            continue;
+        }
+        st.choices.push(mic.clone());
+        st.names.insert(mic.clone(), name.clone());
+        st.means
+            .insert(mic.clone(), format!("push-to-talk hears {name}."));
+    }
+    if !id.is_empty() && !mics.iter().any(|(mic, _)| *mic == id) {
+        st.choices.push(id.clone());
+        st.names
+            .insert(id.clone(), "a microphone not plugged in".into());
+        st.means.insert(
+            id,
+            "it isn't plugged in now, so push-to-talk hears the Mac's input.".into(),
+        );
+    }
+    st
 }

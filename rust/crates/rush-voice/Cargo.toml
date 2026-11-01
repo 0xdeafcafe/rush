@@ -1,0 +1,26 @@
+[package]
+name = "rush-voice"
+description = "rush's push-to-talk: a small macOS helper app (rush itself, in a bundle of its own) that hears the chosen microphone with Apple's on-device speech model and says what it hears, as it hears it, to the window"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-state.workspace = true
+rush-events.workspace = true
+rush-sys.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+libc.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6", features = ["exception"] }
+block2 = "0.6"
+dispatch2 = "0.3"
+objc2-foundation = "0.3"
+objc2-app-kit = "0.3"
+objc2-speech = "0.3"
+objc2-avf-audio = "0.3"
+
+[dev-dependencies]
+tempfile.workspace = true

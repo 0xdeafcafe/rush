@@ -3,9 +3,10 @@
 //! ground on screen, so where you type is never in doubt; its edge turns
 //! orange while your keys go there. After Go's internal/ui/inputbox.go
 //! (box :25, lines :63, rows :177, wrapSegs :198, window :248, scrolled
-//! :266, content :273, chipMask :383, at :437, near :450, col :467). Not
-//! ported: a dictation drawn live (yap's withLive :128) and images shown
-//! by name (named :402): theirs to add as they come.
+//! :266, content :273, chipMask :383, at :437, near :450, col :467), and
+//! a dictation drawn live at the cursor (withLive :128, the edge's light
+//! in lines :74-96, the inked words and cursor in content :300-345). Not
+//! ported: images shown by name (named :402): theirs to add as they come.
 
 use rush_core::text::{Color, Line, Span, Style, width};
 
@@ -49,6 +50,12 @@ pub struct InputBox {
     /// something: the bottom edge or the top, from and to, from the box's
     /// left edge.
     pub lit: Option<(bool, usize, usize)>,
+    /// A dictation under way, drawn at the cursor (see rush-ui-social's
+    /// dictation.rs).
+    pub live: Option<LiveText>,
+    /// What drawing live sets: where its words are, the frame its light
+    /// is at, the cursor's ground. Leave it unset: lines() fills it in.
+    pub look: Option<Look>,
 }
 
 /// Where an edge's labels landed, cells from the box's left edge: the
@@ -86,47 +93,101 @@ impl EdgeAt {
     }
 }
 
+/// A dictation as the box draws it (withLive's ink, caret, glowing and
+/// frame): its words at [from, to), the guessed ones from guess_from, the
+/// text's width for the light crossing it, and the cursor's ground.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Look {
+    from: usize,
+    guess_from: usize,
+    to: usize,
+    frame: usize,
+    w: usize,
+    caret: Color,
+}
+
 impl InputBox {
     /// The box: a top edge carrying its labels, the text wrapped with the
     /// cursor in place, and a bottom edge (lines).
     pub fn lines(&self) -> Vec<Line> {
+        if self.live.is_some() && self.focused && !self.idle {
+            return self.with_live().lines();
+        }
         let w = 20.max(self.w);
-        let edge = if self.focused { ORANGE } else { EDGE };
         let inner = w - 4;
         let rows = self.content(inner);
-        let mut out = vec![self.edge(false).0];
-        for row in rows {
-            let mut l = line([sp("│", edge)]);
+        let h = rows.len() + 2;
+        let mut out = vec![self.edge(false, h).0];
+        for (i, row) in rows.into_iter().enumerate() {
+            let mut l = self.run(0, i + 1, h, "│");
             let mut body = line([plain(" ")]);
             join(&mut body, row);
             join(&mut l, on_ground(body, inner + 2, INPUT_BG));
-            l.spans.push(sp("│", edge));
+            join(&mut l, self.run(w - 1, i + 1, h, "│"));
             out.push(l);
         }
-        out.push(self.edge(true).0);
+        out.push(self.edge(true, h).0);
         out
     }
 
-    /// The top edge (foot false) or the bottom one carrying their labels,
-    /// and where the labels landed (border). The part under the pointer
-    /// (lit) is on the pointer's ground.
-    fn edge(&self, foot: bool) -> (Line, EdgeAt) {
+    /// Edge glyphs s from cell x of row y of a box h rows tall: in the
+    /// edge's colour, or cell by cell with a dictation's light running
+    /// round it.
+    fn run(&self, x: usize, y: usize, h: usize, s: &str) -> Line {
         let w = 20.max(self.w);
         let edge = if self.focused { ORANGE } else { EDGE };
+        let Some(frame) = self.look.as_ref().map(|k| k.frame).filter(|_| h > 0) else {
+            return line([sp(s.to_string(), edge)]);
+        };
+        let n = 2 * (w - 1) + 2 * (h - 1);
+        let mut out = Line::new();
+        let mut last: Option<Color> = None;
+        let mut buf = String::new();
+        for (i, c) in s.chars().enumerate() {
+            let x = x + i;
+            let around = if y == 0 {
+                x
+            } else if x == w - 1 {
+                w - 1 + y
+            } else if y == h - 1 {
+                (2 * (w - 1) + h - 1).saturating_sub(x)
+            } else {
+                n - y // up the left
+            };
+            let col = yap_ink(yap_step(yap_glint(frame, around, n))).2;
+            if last.is_some_and(|l| l != col) {
+                out.spans
+                    .push(sp(std::mem::take(&mut buf), last.unwrap_or(edge)));
+            }
+            last = Some(col);
+            buf.push(c);
+        }
+        if !buf.is_empty() {
+            out.spans.push(sp(buf, last.unwrap_or(edge)));
+        }
+        out
+    }
+
+    /// The top edge (foot false) or the bottom one of a box h rows tall
+    /// carrying their labels, and where the labels landed (border). The
+    /// part under the pointer (lit) is on the pointer's ground.
+    fn edge(&self, foot: bool, h: usize) -> (Line, EdgeAt) {
+        let w = 20.max(self.w);
+        let y = if foot { h.saturating_sub(1) } else { 0 };
         let (l, r, left, right) = if foot {
             ("╰", "╯", &self.foot_l, &self.foot_r)
         } else {
             ("╭", "╮", &self.top_l, &self.top_r)
         };
         let mut at = EdgeAt::default();
-        let mut head = line([sp(format!("{l}─"), edge)]);
+        let mut head = self.run(0, y, h, &format!("{l}─"));
         if !left.spans.is_empty() {
             head.spans.push(plain(" "));
             join(&mut head, left.clone());
             head.spans.push(plain(" "));
             at.left = (3, left.width());
         }
-        let bare = line([sp(format!("─{r}"), edge)]);
+        let bare = self.run(w - 2, y, h, &format!("─{r}"));
         let mut tail = bare.clone();
         if !right.spans.is_empty() {
             let mut t = line([plain(" ")]);
@@ -148,8 +209,9 @@ impl InputBox {
             at.left.1 = at.left.1.min(keep.saturating_sub(at.left.0 + 1));
         }
         let fill = w.saturating_sub(head.width() + tail.width());
+        let hw = head.width();
         let mut out = head;
-        out.spans.push(sp("─".repeat(fill), edge));
+        join(&mut out, self.run(hw, y, h, &"─".repeat(fill)));
         join(&mut out, tail);
         if let Some((f, x0, x1)) = self.lit
             && f == foot
@@ -162,7 +224,66 @@ impl InputBox {
     /// Where the labels on the top edge (foot false) or the bottom one
     /// landed, from the box's left edge, for clicks on their parts.
     pub fn edge_at(&self, foot: bool) -> EdgeAt {
-        self.edge(foot).1
+        self.edge(foot, 0).1
+    }
+
+    /// The box drawing its dictation: the words put in at the cursor,
+    /// coloured as they're coloured, the cursor after them (withLive).
+    fn with_live(&self) -> InputBox {
+        let mut b = self.clone();
+        let Some(l) = b.live.take() else {
+            return b;
+        };
+        let cur = self.cursor.min(self.text.len());
+        let (pre, post) = self.text.split_at(cur);
+        let settled: Vec<char> = l.settled.chars().collect();
+        let guessing: Vec<char> = l.guessing.chars().collect();
+        let mut said = Vec::new();
+        if pre.last().is_some_and(|c| !c.is_whitespace()) && settled.len() + guessing.len() > 0 {
+            said.push(' ');
+        }
+        let from = pre.len() + said.len();
+        said.extend_from_slice(&settled);
+        if !settled.is_empty() && !guessing.is_empty() {
+            said.push(' ');
+        }
+        let guess_from = pre.len() + said.len();
+        said.extend_from_slice(&guessing);
+        let to = pre.len() + said.len();
+        b.text = pre.iter().chain(&said).chain(post).copied().collect();
+        b.cursor = to;
+        b.anchor = None;
+        b.hot = Seg::default();
+        b.top = 0;
+        b.holder = "listening…".into();
+        if !l.hint.is_empty() {
+            b.foot_r = line([sp(l.hint.clone(), DIM)]);
+        }
+        // The cursor brightens as you speak, and breathes while you don't.
+        let k = l.level.max(0.3 + 0.2 * (l.frame as f64 * 0.3).sin());
+        b.look = Some(Look {
+            from,
+            guess_from,
+            to,
+            frame: l.frame,
+            w: b.text_w(),
+            caret: yap_ink(yap_step(k)).3,
+        });
+        b
+    }
+
+    /// The colour the dictation gives the character at p, x cells into
+    /// row y of those shown; None for the box's own text.
+    fn ink(&self, p: usize, x: usize, y: usize) -> Option<Color> {
+        let k = self.look.as_ref()?;
+        if p < k.from || p >= k.to {
+            return None;
+        }
+        if p >= k.guess_from {
+            let sweep = yap_sweep(k.frame, p - k.guess_from, 0, k.to - k.guess_from);
+            return Some(yap_ink(yap_step(sweep)).1);
+        }
+        Some(yap_ink(yap_step(0.5 * yap_sweep(k.frame, x, y, k.w))).0)
     }
 
     /// How many text rows lines() draws (rows).
@@ -209,7 +330,11 @@ impl InputBox {
 
     fn content(&self, w: usize) -> Vec<Line> {
         let lw = self.lead.width();
-        let caret = reversed(Style::default());
+        // A dictation's cursor is its own ground, lit as you speak.
+        let caret = match &self.look {
+            Some(k) => Style::fg(TEXT).on(k.caret),
+            None => reversed(Style::default()),
+        };
         if self.text.is_empty() {
             let mut l = self.lead.clone();
             if self.focused && !self.idle {
@@ -244,15 +369,24 @@ impl InputBox {
                     l.spans.push(Span::new(std::mem::take(run), st));
                 }
             };
+            let mut x = 0;
             for p in sg.from..sg.to {
                 let c = self.text[p];
+                let ink = self.ink(p, x, i - start);
+                x += rune_w(c);
                 let st = if self.focused && !self.idle && p == self.cursor {
-                    reversed(Style::fg(TEXT))
+                    if self.look.is_some() {
+                        caret
+                    } else {
+                        reversed(Style::fg(TEXT))
+                    }
                 } else if sel.is_some_and(|(f, t)| p >= f && p < t) {
                     Style::fg(TEXT).on(MARK_BG)
                 } else if chips.as_ref().is_some_and(|m| m[p]) {
                     let lit = p >= self.hot.from && p < self.hot.to;
                     Style::fg(if lit { ORANGE } else { BLUE }).on(CHIP_BG)
+                } else if let Some(col) = ink {
+                    Style::fg(col)
                 } else {
                     Style::fg(TEXT)
                 };
@@ -393,4 +527,76 @@ pub fn chip_mask(text: &[char]) -> Option<Vec<bool>> {
         }
     }
     Some(mask)
+}
+
+// --- a dictation's look (yap.go:130-215), which the box draws ---
+
+/// The look's colours, in steps from each's resting colour to its lit one.
+pub const YAP_STEPS: usize = 16;
+
+/// A dictation as a box draws it (liveText).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LiveText {
+    pub settled: String,
+    pub guessing: String,
+    /// How loud, 0 to 1.
+    pub level: f64,
+    pub frame: usize,
+    /// What's going on, in the box's bottom edge.
+    pub hint: String,
+}
+
+/// The step of the look's colours k (0 to 1) is (yapStep).
+pub fn yap_step(k: f64) -> usize {
+    (k.clamp(0.0, 1.0) * YAP_STEPS as f64 + 0.5) as usize
+}
+
+/// How lit the text at column x of row y is: a band of light leaning
+/// like yap's, crossing w columns every 1.6s, as wide as a third of them
+/// (yapSweep).
+pub fn yap_sweep(frame: usize, x: usize, y: usize, w: usize) -> f64 {
+    const PERIOD: usize = 32; // frames a crossing
+    let band = (w as f64 / 3.0).clamp(3.0, 8.0);
+    let at = -band + (frame % PERIOD) as f64 / PERIOD as f64 * (w as f64 + 2.0 * band);
+    let d = (x as f64 + 2.0 * y as f64 - at).abs();
+    if d >= band {
+        return 0.0;
+    }
+    let k = 1.0 - d / band;
+    k * k
+}
+
+/// How lit a cell of the box's edge is, `around` cells clockwise from its
+/// top left out of n: a light with a fading tail, round the box every
+/// 2.4s (yapGlint).
+pub fn yap_glint(frame: usize, around: usize, n: usize) -> f64 {
+    const LAP: usize = 48;
+    const TAIL: f64 = 28.0;
+    if n == 0 {
+        return 0.0;
+    }
+    let at = (frame % LAP) * n / LAP;
+    let d = ((at as isize - around as isize) % n as isize + n as isize) % n as isize;
+    let d = d as f64;
+    if d >= TAIL {
+        return 0.0;
+    }
+    let k = 1.0 - d / TAIL;
+    k * k
+}
+
+/// The look's inks at step i of YAP_STEPS: the settled words, the guessed
+/// ones, the box's edge, and the cursor's ground (yapColours).
+pub fn yap_ink(i: usize) -> (Color, Color, Color, Color) {
+    let t = i.min(YAP_STEPS) as f64 / YAP_STEPS as f64;
+    let text = Color::Rgb(226, 221, 211);
+    let lit = Color::Rgb(255, 250, 240);
+    let ground = Color::Rgb(40, 36, 32);
+    let (orange, glint) = (Color::Rgb(217, 119, 87), Color::Rgb(255, 232, 205));
+    (
+        mix(text, lit, t),
+        mix(mix(text, ground, 0.5), lit, t),
+        mix(orange, glint, t),
+        mix(mix(orange, ground, 0.55), mix(orange, glint, 0.25), t),
+    )
 }

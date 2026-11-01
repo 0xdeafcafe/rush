@@ -20,6 +20,12 @@ rush-update.workspace = true
 rush-room = { path = "../rush-room" }
 # The social group's: efficiency's figures.
 rush-efficiency = { path = "../rush-efficiency" }
+# Push-to-talk's switch (the apple voice plugin) and yap's socket
+# (dictation.rs).
+rush-bundled = { path = "../rush-bundled" }
+# Push-to-talk's engine: rush's own helper app hearing the microphone
+# (pushtalk.rs).
+rush-voice.workspace = true
 # The frame and model under every screen.
 rush-ui-base.workspace = true
 regex.workspace = true

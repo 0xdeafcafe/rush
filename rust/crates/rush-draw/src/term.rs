@@ -32,12 +32,14 @@ use crate::canvas::Canvas;
 // Alternate screen, cursor hidden, mouse any-event + SGR (1003, 1006, as
 // tea.MouseModeAllMotion), bracketed paste, focus reports, then kitty
 // keyboard flags 1 (bubbletea's "basic key disambiguation", always on;
-// cursed_renderer.go:162-167). bubbletea also asks for xterm's
+// cursed_renderer.go:162-167) and 2 ("report event types"), so a key's
+// repeats and its letting go come as their own events: push-to-talk
+// hears ctrl+space let go (input.rs). bubbletea also asks for xterm's
 // modifyOtherKeys 2, whose CSI 27;mod;code~ crossterm can't read (it
 // drops them, keys and all), so that's left off: a terminal without the
 // kitty keyboard sends ctrl+\ ] ^ _ as the bytes 0x1c-0x1f, which
 // input.rs names as bubbletea does.
-const ENTER: &str = "\x1b[?1049h\x1b[?25l\x1b[?1003h\x1b[?1006h\x1b[?2004h\x1b[?1004h\x1b[>1u";
+const ENTER: &str = "\x1b[?1049h\x1b[?25l\x1b[?1003h\x1b[?1006h\x1b[?2004h\x1b[?1004h\x1b[>3u";
 // The same undone, in reverse; the cursor shown again.
 const LEAVE: &str =
     "\x1b[<1u\x1b[?1004l\x1b[?2004l\x1b[?1006l\x1b[?1003l\x1b[0m\x1b[?25h\x1b[?1049l";
@@ -337,6 +339,13 @@ impl Term {
     /// Whether the terminal tells ctrl+enter from enter, as it said when
     /// rush took it (Go's keysDisambiguated).
     pub fn keys_disambiguated(&self) -> bool {
+        self.disambiguated
+    }
+
+    /// Whether the terminal says when a key is let go
+    /// ([`crate::Event::KeyUp`]): one with the kitty keyboard was asked
+    /// to, with the flags rush pushed as it took it.
+    pub fn reports_releases(&self) -> bool {
         self.disambiguated
     }
 

@@ -642,6 +642,10 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         hot: c.input.hot,
         ..InputBox::default()
     };
+    // A dictation under way shows at the cursor (rushmode.go:3722).
+    if typing && m.sheet.is_none() && m.confirm.is_none() {
+        b.live = rush_ui_social::dictation::look(m);
+    }
     b = b.scrolled();
     // What a click takes on the top edge, where the edge drew it: the
     // permission mode on its right opens what changes it (as #perm),
