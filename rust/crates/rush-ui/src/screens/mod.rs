@@ -224,17 +224,9 @@ fn calls() -> Calls {
             Out::Pass
         }),
         clip_image: Some(session_cards::clipimage::clip_image),
-        picture_preview: Some(session_cards::pictures::preview),
-        cards_action: Some(session_cards::run_action),
         core_action: Some(session_core::actions::run_action),
-        mention_matches: Some(session_cards::mention::mention_matches),
-        mention_rows: Some(session_cards::mention::mention_rows),
-        complete_mention: Some(session_cards::mention::complete_mention),
-        local_commands: Some(session_cards::claudescreen::local_commands),
         reply_to: Some(session_core::cards_host::reply_to),
         views_of: Some(session_core::views::views),
-        wake_then: Some(|m, a, then| session_core::switch::wake_then(m, a, then)),
-        perm_command: Some(session_cards::permissions::perm_command),
         adopt: Some(session_core::keys::adopt),
         hosted_key: Some(crate::hosted::key),
     }
@@ -288,9 +280,6 @@ fn act(m: &mut Model, a: Act) {
         Act::GoAgent(key) => cmdbar::bar::go_agent(m, &key),
         Act::OpenClaudeScreen { key, screen } => {
             session_cards::claudescreen::open_screen(m, &key, &screen);
-        }
-        Act::ShowView { key, name } => {
-            session_core::views::show_view(m, &key, &name);
         }
     }
 }

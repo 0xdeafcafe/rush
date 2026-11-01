@@ -25,6 +25,7 @@ rush-ui-plugin-ui.workspace = true
 rush-ui-social.workspace = true
 rush-ui-list-extras.workspace = true
 rush-ui-bars.workspace = true
+rush-ui-session-cards.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]

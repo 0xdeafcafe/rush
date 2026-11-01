@@ -1,9 +1,10 @@
 //! rush-ui-cmdbar's stops.rs tests: they make a whole UI model.
 
 use super::stops::*;
-use super::*;
 use crate::host::{Fake, set_hosts};
+use crate::model::Model;
 use rush_core::agent::Job;
+use rush_core::agent::{Agent, State};
 
 fn agent(key: &str, state: State) -> Agent {
     Agent {
@@ -109,4 +110,3 @@ fn hibernate_leads_only() {
     assert!(to_hibernate(&mut m, 30, now).is_empty(), "one try each");
     assert!(to_hibernate(&mut m, 0, now).is_empty());
 }
-

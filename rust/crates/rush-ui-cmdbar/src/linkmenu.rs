@@ -18,8 +18,8 @@ use rush_core::text::{Line, Span};
 use super::linkkinds::{KindAct, known_link};
 use crate::frame::{Out, Pick, Picker, Press, Sheet};
 use crate::model::Model;
-use rush_ui_plugin_ui::{settled, sheet_do};
 use crate::style::{keys, tildify};
+use rush_ui_plugin_ui::{settled, sheet_do};
 
 /// The files Preview opens; the rest get Quick Look (previewable).
 pub fn previewable(path: &str) -> bool {
@@ -318,11 +318,10 @@ fn shot_for(m: &mut Model, path: String, big: bool, acts: usize) {
         return;
     }
     let (w, h) = (w as usize, h as usize);
-    let preview = m.ext.calls.picture_preview();
     sheet_do::<LinkMenu, Shot>(
         m,
         move || {
-            let rows = preview(&path, w, h, big);
+            let rows = rush_ui_session_cards::pictures::preview(&path, w, h, big);
             (path, big, rows)
         },
         took_shot,

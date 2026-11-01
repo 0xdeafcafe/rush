@@ -14,6 +14,7 @@ use rush_core::text::Line;
 use super::fleetslash::{completed, hash_matches, needs_arg, picker_move, picker_rows};
 use crate::frame::{Out, Press};
 use crate::model::Model;
+use rush_ui_session_cards::mention::{complete_mention, mention_matches, mention_rows};
 
 /// The picker's row, and what was typed when it was last looked at: the
 /// row goes back to the first as the text changes.
@@ -53,7 +54,7 @@ fn picker(m: &Model) -> (Vec<Command>, &'static str) {
     if !cmds.is_empty() {
         return (cmds, "#");
     }
-    let names = (m.ext.calls.mention_matches())(m, input, back);
+    let names = mention_matches(m, input, back);
     if !names.is_empty() {
         let cmds = names
             .into_iter()
@@ -90,7 +91,7 @@ fn lines(m: &mut Model, w: usize) -> Vec<Line> {
     if lead == "@" {
         let input = m.input.text.clone();
         let back = input.len() - m.input.pos.min(input.len());
-        return (m.ext.calls.mention_rows())(m, &input, back, sel, w);
+        return mention_rows(m, &input, back, sel, w);
     }
     picker_rows(
         &cmds,
@@ -152,7 +153,7 @@ pub(super) fn key(m: &mut Model, k: &Press) -> Out {
         }
         _ if lead == "@" => {
             let back = m.input.text.len() - m.input.pos.min(m.input.text.len());
-            let (text, back) = (m.ext.calls.complete_mention())(&m.input.text, back, &pick.name);
+            let (text, back) = complete_mention(&m.input.text, back, &pick.name);
             m.input.pos = text.len() - back;
             m.input.text = text;
             m.input.anchor = None;

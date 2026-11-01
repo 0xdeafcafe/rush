@@ -31,13 +31,6 @@ pub type ProjectCount = ((i64, i64), usize);
 
 /// A session's end read ahead of time: its conversation, the transcript it
 /// was read from and that file as it was just before.
-/// A box's text with the @mention at the cursor completed: the text and
-/// the cursor's place (mention.rs complete_mention).
-pub type CompleteMention = fn(&[char], usize, &str) -> (Vec<char>, usize);
-
-/// What an agent's woken host does once connected (switch.rs wake_then).
-pub type WakeThen = fn(&mut Model, &Agent, Box<dyn FnOnce(&mut Model) -> Out + Send>) -> Out;
-
 pub type ReadEarly = fn(
     &rush_core::adapter::Registry,
     &Agent,
@@ -272,9 +265,6 @@ pub enum Act {
     /// Claude Code's own screen for a session, with the terminal handed to
     /// it (session_cards/claudescreen.rs open_screen).
     OpenClaudeScreen { key: String, screen: String },
-    /// A session's view shown by name, if it has it (session_core/views.rs
-    /// show_view).
-    ShowView { key: String, name: String },
     /// The Agents place with agent key selected and opened (cmdbar/bar.rs
     /// go_agent).
     GoAgent(String),
@@ -640,48 +630,19 @@ calls! {
     /// The image on the clipboard as a file, read off the UI thread
     /// (session_cards/clipimage.rs clip_image).
     clip_image("session_cards"): fn() -> Result<Option<String>, String>,
-    /// An image drawn in half blocks, w by h cells, the fine quarter blocks
-    /// when the last is true (session_cards/pictures.rs preview).
-    picture_preview("session_cards"): fn(&str, usize, usize, bool) -> Vec<Line>,
-    /// The session's own key actions: quick ask, recall, discuss; Pass for
-    /// the ones it has none of (session_cards/mod.rs run_action).
-    cards_action("session_cards"): fn(&mut Model, &str) -> Out,
     /// The session's turns, depth, switch sheet, mode and box actions; Pass
     /// for the ones it has none of (session_core/actions.rs run_action).
     core_action("session_core"): fn(&mut Model, &str) -> Out,
-    /// The agents an @mention being typed could be, by name
-    /// (session_cards/mention.rs mention_matches).
-    mention_matches("session_cards"): fn(&Model, &[char], usize) -> Vec<String>,
-    /// Their rows, the one at sel lit, w cells wide (mention.rs
-    /// mention_rows).
-    mention_rows("session_cards"): fn(&Model, &[char], usize, usize, usize) -> Vec<Line>,
-    /// The box's text with the @mention at the cursor completed to a name
-    /// (mention.rs complete_mention): the text and the cursor's place.
-    complete_mention("session_cards"): CompleteMention,
-    /// The commands and skills on disk for an agent's account and folder
-    /// (session_cards/claudescreen.rs local_commands).
-    local_commands("session_cards"): fn(
-        &rush_core::adapter::Registry,
-        &rush_core::adapter::AdapterRef,
-        rush_core::adapter::Profile,
-        &str,
-    ) -> Vec<rush_core::adapter::Command>,
     /// Text sent to an agent as a reply: the text, and tagged, with its
     /// pastes marked (session_core/cards_host.rs reply_to).
     reply_to("session_core"): fn(&mut Model, &str, String, &str) -> Out,
     /// The views a session has, by name (session_core/views.rs views).
     views_of("session_core"): fn(&Model, &str) -> Vec<&'static str>,
-    /// Wakes an agent's sleeping host, then does the closure once it is
-    /// connected (session_core/switch.rs wake_then).
-    wake_then("session_core"): WakeThen,
-    /// #perm and #yolo for the open session's key, or the next session's
-    /// with none (session_cards/permissions.rs perm_command).
-    perm_command("session_cards"): fn(&mut Model, Option<&str>, &str, bool) -> Out,
-    /// A hosted view's keys (rush-ui hosted.rs key): ctrl+6 and the ones
-    /// it drops.
     /// An agent moved into rush mode with nothing to say, its conversation
     /// carried on in rush (session_core/keys.rs adopt).
     adopt("session_core"): fn(&mut Model, &Agent, &str),
+    /// A hosted view's keys (rush-ui hosted.rs key): ctrl+6 and the ones
+    /// it drops.
     hosted_key("hosted"): fn(&mut Model, &Press) -> Out,
 }
 

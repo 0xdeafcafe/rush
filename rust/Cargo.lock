@@ -1726,6 +1726,7 @@ dependencies = [
  "rush-ui-list-extras",
  "rush-ui-plugin-ui",
  "rush-ui-projects-machine",
+ "rush-ui-session-cards",
  "rush-ui-settings",
  "rush-ui-social",
  "serde_json",

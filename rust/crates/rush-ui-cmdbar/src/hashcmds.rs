@@ -82,7 +82,7 @@ fn go(m: &mut Model, _: &str) -> Out {
 /// Tells a, which stopped, to go on, or says why it can't (keepGoing,
 /// keys.go:747): #go, and ctrl+b / alt+g in the list, the Wall and
 /// Projects.
-pub(crate) fn keep_going(m: &mut Model, a: &Agent) -> Out {
+pub fn keep_going(m: &mut Model, a: &Agent) -> Out {
     let now = m.now;
     let name = a.display_name.clone();
     if a.interactive {
@@ -162,9 +162,7 @@ fn why(m: &mut Model, _: &str) -> Out {
     use crate::sess::open_key;
     let Some(a) = need(m) else { return Out::Draw };
     let ours = open_key(m).as_deref() == Some(a.key.as_str())
-        && !rush_ui_accounts::info::rush_id(m, &a.key)
-            .0
-            .is_empty();
+        && !rush_ui_accounts::info::rush_id(m, &a.key).0.is_empty();
     if !ours {
         m.flash_err("only a session rush hosts has a why: open it in rush first");
         return Out::Draw;
@@ -209,15 +207,16 @@ fn worktree(m: &mut Model, arg: &str) -> Out {
 /// next session's; an agent picked whose Session isn't open is asked to
 /// be opened first (command's perm, yolo).
 fn perm(m: &mut Model, arg: &str, yolo: bool) -> Out {
+    use rush_ui_session_cards::permissions::perm_command;
     let open = crate::sess::open_key(m);
     match target(m) {
         Some(a) if open.as_deref() == Some(a.key.as_str()) => {
-            (m.ext.calls.perm_command())(m, Some(&a.key), arg, yolo)
+            perm_command(m, Some(&a.key), arg, yolo)
         }
         Some(_) => {
             m.flash_err("Open the session first to change its permissions");
             Out::Draw
         }
-        None => (m.ext.calls.perm_command())(m, None, arg, yolo),
+        None => perm_command(m, None, arg, yolo),
     }
 }

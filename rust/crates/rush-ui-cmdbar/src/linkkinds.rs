@@ -19,8 +19,8 @@ use rush_gh::ghpr::PR;
 
 use crate::frame::Out;
 use crate::model::Model;
-use rush_ui_projects_machine::prsheet;
 use crate::worker::Note;
+use rush_ui_projects_machine::prsheet;
 
 /// Where a lookup's answer wakes the UI, on a lane of its own.
 static WAKE: Mutex<Option<Sender<Note>>> = Mutex::new(None);

@@ -380,12 +380,10 @@ pub fn ask_close(m: &mut Model, a: Option<Agent>) -> Out {
         c.more.push((
             "s".into(),
             "switch harness or model".into(),
-            Box::new(
-                move |m| match rush_ui_bars::agent::session_start(m, &key) {
-                    Some(o) => rush_ui_accounts::startsheet::open_switch_sheet(m, &key, o),
-                    None => Out::Idle,
-                },
-            ),
+            Box::new(move |m| match rush_ui_bars::agent::session_start(m, &key) {
+                Some(o) => rush_ui_accounts::startsheet::open_switch_sheet(m, &key, o),
+                None => Out::Idle,
+            }),
         ));
     }
     let removes = m

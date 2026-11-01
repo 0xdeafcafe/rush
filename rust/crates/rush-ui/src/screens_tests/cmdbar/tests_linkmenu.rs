@@ -1,7 +1,9 @@
 //! rush-ui-cmdbar's linkmenu.rs tests: they make a whole UI model.
 
 use super::linkmenu::*;
-use super::*;
+use crate::frame::{Press, Sheet};
+use crate::model::Model;
+use rush_core::text::Line;
 
 fn menu(m: &mut Model) -> &mut LinkMenu {
     m.sheet_as::<LinkMenu>().expect("an image's menu")
@@ -47,4 +49,3 @@ fn an_image_link_shows_its_picture() {
     assert!(open_link_menu(&mut m, "https://example.com/a.png"));
     assert!(m.sheet_as::<LinkMenu>().is_none());
 }
-

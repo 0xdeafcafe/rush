@@ -15,8 +15,8 @@ use rush_core::text::Line;
 use crate::frame::Out;
 use crate::frame::caps::agent_can_run;
 use crate::model::Model;
-use rush_ui_social::broadcast::ModelBroadcast;
 use crate::style::*;
+use rush_ui_social::broadcast::ModelBroadcast;
 
 // rush's # commands are the base's: the keymap's actions name them
 // (crate::keybind).
@@ -115,7 +115,7 @@ fn new_session_commands(m: &Model) -> Vec<rush_core::adapter::Command> {
         ..Default::default()
     };
     let dir = crate::startdir::start_dir(m);
-    (m.ext.calls.local_commands())(&m.reg, &ad, p, &dir)
+    rush_ui_session_cards::claudescreen::local_commands(&m.reg, &ad, p, &dir)
 }
 
 /// A Prompt command typed the old way, /stop for #stop, run as the #

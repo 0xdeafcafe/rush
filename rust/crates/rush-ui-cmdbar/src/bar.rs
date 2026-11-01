@@ -31,7 +31,6 @@ use super::fleetslash::{available_fleet_commands, completed, needs_agent, needs_
 use super::fuzzy::fuzzy_match;
 pub use crate::barfind::{lit_words, searchable, split_in, strip_in, who_glyph};
 use crate::frame::editor::{edit, line_end};
-use crate::frame::ext::Act;
 use crate::frame::{Out, PlaceId, Press};
 use crate::model::Model;
 use crate::search::{BarFound, Search};
@@ -1388,10 +1387,7 @@ pub fn run(m: &mut Model, go: &Go) -> Out {
         Go::View(v) => {
             go_place(m, PlaceId::Agents);
             if let Some(key) = focus_session(m) {
-                m.act(Act::ShowView {
-                    key,
-                    name: v.to_string(),
-                });
+                (m.ext.calls.show_view())(m, &key, v);
             }
         }
         Go::Full(key) => {
