@@ -386,6 +386,9 @@ pub struct Conn {
     /// Control requests passed to its agent, waiting on their answers, by
     /// id; and the last id given (c.asks, c.askN).
     pub asks: HashMap<String, crate::screens::session_cards::Reply>,
+    /// What to do once its host, started for it, has said its info
+    /// (Act::Start).
+    pub on_up: Option<crate::screens::session_cards::Then>,
     pub ask_n: u64,
     /// What fills its context window, as last counted, and what of it
     /// the session has never used, worked out when it came (sess.Usage,

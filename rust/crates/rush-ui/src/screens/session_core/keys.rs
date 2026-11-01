@@ -921,6 +921,56 @@ fn send_offline_as(
     Out::Draw
 }
 
+/// Starts the host of a session rush runs but that's stopped or asleep,
+/// with no message, then does then once its info is in (Act::Start):
+/// what a command that needs it running does rather than refusing. A
+/// session rush doesn't run says so, as before.
+pub fn start_then(m: &mut Model, key: &str, then: crate::screens::session_cards::Then) -> Out {
+    let Some(a) = agent(m, key).cloned() else {
+        return Out::Idle;
+    };
+    let h = hosts(m);
+    if a.interactive || a.past || !h.hosts(&a) {
+        m.flash_err("that works on a session rush runs: send it a message to move it over");
+        return Out::Draw;
+    }
+    if !can_resume(m, &a) {
+        return Out::Draw;
+    }
+    let c = conn(m, key);
+    c.on_up = Some(then);
+    if c.waking {
+        return Out::Draw;
+    }
+    let asleep = c.sleeping;
+    c.waking = true;
+    let name = a.display_name.clone();
+    m.flash(&format!("starting {name}…"));
+    let key = key.to_string();
+    super::later(
+        m,
+        move || {
+            if asleep || h.sleeping(&a) {
+                Ok(h.wake(&a, "", &[], false))
+            } else {
+                Err(h.resume(&a, "", &[]))
+            }
+        },
+        move |m, r| match r {
+            Ok(r) => super::live::woke(m, &key, r, String::new()),
+            Err(r) => {
+                conn(m, &key).waking = false;
+                if let Err(e) = r {
+                    conn(m, &key).on_up = None;
+                    m.fail(&e);
+                }
+                Out::Draw
+            }
+        },
+    );
+    Out::Draw
+}
+
 /// Whether a's agent can pick its conversation up again, saying so when
 /// it can't (canResume).
 pub fn can_resume(m: &mut Model, a: &Agent) -> bool {

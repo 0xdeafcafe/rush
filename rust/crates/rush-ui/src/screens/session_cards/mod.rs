@@ -181,6 +181,22 @@ pub struct HostInfo {
     pub error: String,
 }
 
+/// What's done once a session started for it is up (Act::Start).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Then {
+    /// Opens #compact's sheet on it.
+    Compact,
+}
+
+impl Then {
+    /// Does it on agent key's session.
+    pub fn run(self, m: &mut Model, key: &str) -> Out {
+        match self {
+            Then::Compact => compact::open_compact(m, key),
+        }
+    }
+}
+
 /// What a card asks of the session.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Act {
@@ -204,6 +220,10 @@ pub enum Act {
     /// the card back with its answers when it doesn't go
     /// (rushmode.go:5903 sendAnswers).
     Answer { id: String, text: String },
+    /// Starts a stopped or sleeping session's host with no message, then
+    /// does then once its info is in: a command that needs it running
+    /// (#compact) on a session that isn't.
+    Start(Then),
     /// Carries the session on from a rewind's session (/rewind, /clear,
     /// a branch gone back down): the host switches to it, says text, and
     /// puts draft back in the box once it's back (rewindHost, onRewound).

@@ -72,6 +72,11 @@ struct Found(Option<(String, Vec<Summ>, Vec<String>)>);
 /// Opens #compact on agent key's session (openCompact).
 pub fn open_compact(m: &mut Model, key: &str) -> Out {
     let Some(inf) = info(m, key) else {
+        if super::info_any(m, key).is_some() {
+            // Stopped or asleep: started first, the sheet opening once
+            // it's up.
+            return act(m, key, Act::Start(super::Then::Compact));
+        }
         m.flash_err("#compact works on a session rush runs: open one first");
         return Out::Draw;
     };

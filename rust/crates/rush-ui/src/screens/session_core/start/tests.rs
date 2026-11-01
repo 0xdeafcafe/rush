@@ -307,6 +307,41 @@ fn a_stopped_host_resumes() {
     assert_eq!(flash(&m), "resumed fix the flaky test");
 }
 
+// #compact on a stopped session starts its host with no message, and
+// does what it was asked once the host has said its info, rather than
+// refusing because rush isn't running it.
+#[test]
+fn compact_on_a_stopped_session_starts_it_first() {
+    let fake = Fake::new();
+    let key = "default/a:h1";
+    let mut m = open_hosted(&fake, key);
+    let r#gen = core(&mut m).link_gen;
+    m.agents[0].pid = 0;
+    live::take(&mut m, key, r#gen, Vec::new(), true);
+    assert!(!conn(&mut m, key).hosted());
+    m.cards().host = Some(crate::screens::session_core::cards_host::host());
+    crate::screens::session_cards::compact::open_compact(&mut m, key);
+    assert_eq!(
+        fake.resumed.lock().unwrap().clone(),
+        vec![(key.to_string(), String::new())],
+        "resumed with nothing sent"
+    );
+    assert_eq!(flash(&m), "starting fix the flaky test…");
+    // Its host back, the info that ends its replay runs what was asked.
+    let a = m.agents[0].clone();
+    let link = crate::screens::session_core::host::Hosts::dial(&fake, &a).unwrap();
+    live::opened(&mut m, key, Ok(link));
+    let r#gen = core(&mut m).link_gen;
+    live::take(&mut m, key, r#gen, vec![Said::Info(Info::default())], false);
+    assert!(
+        m.sheet_as::<crate::screens::session_cards::compact::CompactSheet>()
+            .is_some(),
+        "the compact sheet is open: {}",
+        flash(&m)
+    );
+    assert!(conn(&mut m, key).on_up.is_none(), "once");
+}
+
 // A model switched mid-session comes only as the host's info.
 #[test]
 fn the_hosts_info_switches_the_model() {
