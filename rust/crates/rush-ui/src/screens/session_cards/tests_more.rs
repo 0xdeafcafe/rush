@@ -1353,6 +1353,35 @@ fn intervene_from_chat() {
     }
 }
 
+/// #discuss and #intervene typed in the list's box take the chat shown
+/// beside it on the row picked (Go's m.host is the pane's, keys.go:936);
+/// with the pick moved off it, #intervene asks for a chat.
+#[test]
+fn discuss_and_intervene_from_the_list_take_the_chat_beside_it() {
+    let mut m = hosted(200, 45);
+    say(&mut m, "why is it slow");
+    m.pane = m.session.take();
+    m.sel = "k".into();
+    m.command("#discuss");
+    match acts(&mut m).pop() {
+        Some(Act::Room(r)) => assert_eq!(
+            (r.from.as_str(), r.topic.as_str(), r.ctx),
+            ("k", "why is it slow", 1)
+        ),
+        a => panic!("no room: {a:?}"),
+    }
+    m.kept::<super::tests::Fake>().acts.clear();
+    m.command("#intervene stalled");
+    match acts(&mut m).pop() {
+        Some(Act::Room(r)) => assert!(r.fill && r.from == "k", "{r:?}"),
+        a => panic!("no room: {a:?}"),
+    }
+    m.kept::<super::tests::Fake>().acts.clear();
+    m.sel = "other".into();
+    m.command("#intervene");
+    assert!(acts(&mut m).is_empty());
+}
+
 /// A verdict comes back once, and a room on the chat shows above its box
 /// while it runs, another chat's never (TestDiscussFromChat,
 /// TestChatRoomPanel).
