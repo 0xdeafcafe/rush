@@ -55,6 +55,13 @@ fn on_fleet(m: &mut Model) {
     care::watch_machine(m);
 }
 
+/// Nothing asked of git, GitHub, the disk or the process table, so a
+/// frame of Projects is the same on every machine (snapshot tests).
+#[doc(hidden)]
+pub fn freeze(m: &mut Model) {
+    m.kept::<data::Data>().frozen = true;
+}
+
 /// Settings › General's Hibernate after, in minutes, as last read with
 /// the settings (0 never; hibernate, model.go:2036).
 pub fn hibernate_after(m: &Model) -> i64 {
