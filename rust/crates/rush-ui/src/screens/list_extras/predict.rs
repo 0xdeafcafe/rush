@@ -100,19 +100,8 @@ impl Want {
     }
 }
 
-/// One taken for a view: fresh when nothing was written since it was read.
-pub struct Hit {
-    pub fresh: bool,
-    pub tail: Box<Tail>,
-    pub sess: Box<Session>,
-}
-
-/// A history read ahead, taken for a view.
-pub struct HistHit {
-    pub fresh: bool,
-    pub follow: Box<dyn Follow>,
-    pub sess: Box<Session>,
-}
+// What a view takes of what's read ahead is the frame's (crate::predict).
+pub use crate::predict::{HistHit, Hit};
 
 /// What's read ahead and what's wanted (Model::kept).
 #[derive(Default)]

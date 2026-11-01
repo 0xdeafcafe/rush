@@ -29,66 +29,8 @@ use crate::style::one_line;
 /// The feed keeps this many lines.
 const KEPT: usize = 30;
 
-/// Something clanker is reacting to, weakest first: a stronger one takes
-/// over a weaker one already running, never the other way (fxKind).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Fx {
-    #[default]
-    None,
-    /// A light passes over him, now and then.
-    Shimmer,
-    /// An agent finished: a glint and a drop.
-    Done,
-    /// One you kept waiting moved on: he greens, confetti.
-    Answered,
-    /// One started waiting on you: streaks fly off him.
-    Ask,
-    /// One hit an error, or rush did: he reddens, sparks.
-    Error,
-}
-
-impl Fx {
-    /// How many frames of FX_EVERY it runs for (fxLen).
-    pub fn frames(self) -> usize {
-        match self {
-            Fx::None => 0,
-            Fx::Shimmer => 14, // clkShine
-            Fx::Done => 14,
-            Fx::Answered => 22,
-            Fx::Ask => 18,
-            Fx::Error => 16,
-        }
-    }
-}
-
-/// How long a frame of a reaction is (fxEvery).
-pub const FX_EVERY: Ms = 70;
-
-/// The reaction under way and how far into it he is, in frames (clkFX).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Reaction {
-    pub kind: Fx,
-    pub frame: usize,
-}
-
-/// Starts a reaction, unless a stronger one is running (react).
-pub fn react(r: &mut Reaction, k: Fx) {
-    if k < r.kind {
-        return;
-    }
-    *r = Reaction { kind: k, frame: 0 };
-}
-
-/// Moves the reaction on a frame; it ends when it's over (onFXTick).
-/// Whether it still runs.
-pub fn fx_tick(r: &mut Reaction) -> bool {
-    r.frame += 1;
-    if r.frame >= r.kind.frames() {
-        *r = Reaction::default();
-        return false;
-    }
-    true
-}
+// What clanker reacts with is his (crate::clanker).
+pub use crate::clanker::{FX_EVERY, Fx, Reaction, fx_tick, react};
 
 /// What the last reading said of each agent.
 #[derive(Default)]

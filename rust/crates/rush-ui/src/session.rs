@@ -18,8 +18,8 @@ use rush_core::text::{Line, Span, Style, width};
 use rush_core::time::Ms;
 use rush_fleet::Predicates;
 
-use crate::screens::accounts::look::kind_name;
-use crate::screens::session_cards::mention::{ROOM_KEY_PREFIX, mention_name};
+use crate::look::kind_name;
+use crate::mention::{ROOM_KEY_PREFIX, mention_name};
 use crate::style::*;
 use crate::worker::TailHandle;
 
@@ -503,7 +503,7 @@ impl SessionView {
             o.kind = kind.to_string();
         }
         // The calls whose running command rush paused (rushmode.go:2403).
-        let paused = crate::screens::projects_machine::shells::paused_ids();
+        let paused = crate::shells::paused_ids();
         if o.paused != paused {
             o.paused = paused;
         }

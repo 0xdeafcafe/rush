@@ -2,11 +2,13 @@
 //! internal/convo/style.go:205 (row), overview.go (fitTo :706, tokens :168, bar :178) and
 //! internal/ui/textsel.go:216 (paintCols, the cutting part of it).
 
-use rush_core::text::{Color, Line, Span, width};
+use rush_core::text::{Color, Line, Span};
 
 use crate::style::*;
 
 pub use super::dock::spread;
+// Cutting a row's cells is the frame's (crate::style).
+pub use crate::style::cut;
 
 /// A row capw wide with right at its end, padded out to width, on ground
 /// bg when there is one (convo's row): right is left out when it can't
@@ -46,34 +48,6 @@ pub fn fit_to(l: Line, w: usize) -> Line {
         return rush_draw::truncate_line(&l, w, "…");
     }
     pad(l, w)
-}
-
-/// Cells [from, to) of l, a wide character cut in two becoming a blank.
-pub fn cut(l: &Line, from: usize, to: usize) -> Line {
-    let mut out = Line::new();
-    let mut col = 0;
-    for s in &l.spans {
-        let mut text = String::new();
-        for ch in s.text.chars() {
-            let cw = width(ch.encode_utf8(&mut [0; 4]));
-            if col >= from && col + cw <= to {
-                text.push(ch);
-            } else if col < to && col + cw > from {
-                text.push_str(&" ".repeat((col + cw).min(to) - col.max(from)));
-            }
-            col += cw;
-            if col >= to {
-                break;
-            }
-        }
-        if !text.is_empty() {
-            out.spans.push(Span::new(text, s.style));
-        }
-        if col >= to {
-            break;
-        }
-    }
-    out
 }
 
 /// A token count as the overview says it: 840, 12k, 1.2M (overview.go:168).

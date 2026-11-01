@@ -11,12 +11,11 @@
 //! widest_name), is kept the same way, forgotten when the list's lines are
 //! made again.
 
+use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use rush_state::Room;
-
-use crate::screens::accounts::rows::AcctRow;
 
 /// A frame being drawn ([`FrameMemo::drawing`]).
 pub struct Drawing(Rc<FrameMemo>);
@@ -31,7 +30,9 @@ impl Drop for Drawing {
 pub struct FrameMemo {
     /// Frames being drawn (a frame drawn inside one counts once).
     depth: Cell<u32>,
-    account_rows: RefCell<Option<Vec<AcctRow>>>,
+    /// The accounts' rows (accounts/rows.rs AcctRow), of the one type
+    /// they're asked for as.
+    account_rows: RefCell<Option<Box<dyn Any>>>,
     room: RefCell<Option<Room>>,
     widest_name: RefCell<Option<usize>>,
 }
@@ -73,8 +74,21 @@ impl FrameMemo {
         self.widest_name.borrow_mut().take();
     }
 
-    pub fn account_rows(&self, f: impl FnOnce() -> Vec<AcctRow>) -> Vec<AcctRow> {
-        self.get(&self.account_rows, f)
+    pub fn account_rows<T: Clone + 'static>(&self, f: impl FnOnce() -> T) -> T {
+        if self.depth.get() == 0 {
+            return f();
+        }
+        if let Some(v) = self
+            .account_rows
+            .borrow()
+            .as_ref()
+            .and_then(|b| b.downcast_ref::<T>())
+        {
+            return v.clone();
+        }
+        let v = f();
+        *self.account_rows.borrow_mut() = Some(Box::new(v.clone()));
+        v
     }
 
     pub fn room(&self, f: impl FnOnce() -> Room) -> Room {

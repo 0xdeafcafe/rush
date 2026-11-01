@@ -37,14 +37,11 @@ use rush_core::text::{Color, Line, width};
 use rush_core::time::Ms;
 use rush_fleet::Predicates;
 
+use crate::landing::{land_of, tree_of};
 use crate::model::Model;
-use crate::screens::list_extras::filter;
-use crate::screens::list_extras::landing::{land_of, tree_of};
-use crate::screens::session_core::turnwants::{
-    turn_label, wants_mark, wants_of, wants_say, wants_you,
-};
-use crate::screens::social::rooms::{ROOM_KEY_PREFIX, RoomRows, Under, grouped};
+use crate::rooms::{ROOM_KEY_PREFIX, RoomRows, Under, grouped};
 use crate::style::*;
+use crate::turnwants::{turn_label, wants_mark, wants_of, wants_say, wants_you};
 
 pub const NEEDS: &str = "Needs you";
 pub const FINISHED: &str = "Finished";
@@ -686,10 +683,7 @@ impl Model {
                     .map(|a| a.temp)
                     .sum();
                 if temp >= TEMP_SHOWN {
-                    meta.push_str(&format!(
-                        " · {} tmp",
-                        crate::screens::social::parts::disk(temp)
-                    ));
+                    meta.push_str(&format!(" · {} tmp", crate::style::disk(temp)));
                 }
             } else if g.name == IDLE {
                 let held: u64 = g
@@ -915,9 +909,7 @@ impl Model {
             .as_ref()
             .filter(|v| v.key == a.key && !v.sess.info.kind.is_empty())
             .map_or(a.kind.as_str(), |v| v.sess.info.kind.as_str());
-        let mut l = line([crate::screens::accounts::look::row_badge(
-            &self.reg, kind, full,
-        )]);
+        let mut l = line([crate::look::row_badge(&self.reg, kind, full)]);
         let headed = !a.prs.is_empty()
             && self.cfg.split_projects()
             && !self.group_of.get(&a.key).is_some_and(|g| by_time(g));
@@ -1136,7 +1128,7 @@ impl Model {
                     if rail && w > 7 {
                         push(Part::Where, true);
                     }
-                    if two && (self.says_why(a) || filter::has_match(self, a)) {
+                    if two && (self.says_why(a) || self.ext.calls.filter_match()(self, a)) {
                         push(Part::Sub, true);
                     }
                     // Its running subagents, a row each under it.
@@ -1191,7 +1183,9 @@ impl Model {
                     }
                     let says = part == Part::Member
                         && two
-                        && a.is_some_and(|a| self.says_why(a) || filter::has_match(self, a));
+                        && a.is_some_and(|a| {
+                            self.says_why(a) || self.ext.calls.filter_match()(self, a)
+                        });
                     let subs = if part == Part::Member && rail {
                         self.ext.calls.sub_rows()(self, &key, self.agents[agent].subagents.len())
                     } else {
@@ -1820,8 +1814,9 @@ impl Model {
             land = Some(t);
         }
         let mut name_room = room;
-        let with_summary =
-            (!summary.is_empty() && self.says_why(a) || filter::has_match(self, a)) && !stacked;
+        let with_summary = (!summary.is_empty() && self.says_why(a)
+            || self.ext.calls.filter_match()(self, a))
+            && !stacked;
         let mut name_col = name_col as isize;
         let (full, extra) = if sel || a.key == self.hover {
             let f = self.badges(a, true);
@@ -1876,7 +1871,7 @@ impl Model {
             if sw > 8 {
                 let sw = sw as usize;
                 left.spans.push(plain("  "));
-                if let Some(snip) = filter::snippet(self, a, sw) {
+                if let Some(snip) = self.ext.calls.filter_snippet()(self, a, sw) {
                     join(&mut left, snip);
                 } else if just {
                     left.spans.push(sp("just finished", GREEN));
@@ -1996,7 +1991,7 @@ impl Model {
             }
         }
         let land = land_of(self, a);
-        if land.kind != crate::screens::list_extras::landing::LandKind::None && land.pr > 0 {
+        if land.kind != crate::landing::LandKind::None && land.pr > 0 {
             // What's left of its pull request says its state.
         } else if let Some(pr) = &a.pr {
             parts.push(line([status_short(pr)])); // found from the branch, for every harness
@@ -2039,7 +2034,7 @@ impl Model {
     fn where_git(&self, a: &Agent, fk: &str) -> Option<&rush_fleet::GitState> {
         let f = self
             .kept
-            .peek::<crate::screens::list_extras::landing::ListFolders>()?
+            .peek::<crate::landing::ListFolders>()?
             .by_root
             .get(fk)?;
         let t = tree_of(a);
@@ -2055,7 +2050,7 @@ impl Model {
         let room = w.saturating_sub(5);
         let (summary, col, just) = self.row_summary(i);
         let mut l = line([plain("  "), sp("╰ ", FAINT)]);
-        if let Some(snip) = filter::snippet(self, &self.agents[i], room) {
+        if let Some(snip) = self.ext.calls.filter_snippet()(self, &self.agents[i], room) {
             join(&mut l, snip);
         } else if just {
             l.spans.push(sp("just finished", GREEN));
@@ -2074,7 +2069,7 @@ impl Model {
         // Faded toward the background by Settings › Second line
         // transparency; a filter's snippet stays as it is (view.go:2111).
         let by = self.ext.calls.sub_line_fade()(&self.cfg.sub_line);
-        if by > 0.0 && filter::snippet(self, &self.agents[i], room).is_none() {
+        if by > 0.0 && self.ext.calls.filter_snippet()(self, &self.agents[i], room).is_none() {
             let bg = crate::frame::ground::painted().bg;
             for s in l.spans.iter_mut().skip(2) {
                 if let Some(c) = crate::frame::ground::Rgb::of(s.style.fg) {

@@ -242,7 +242,7 @@ impl Model {
     pub fn land_on_needs(&mut self, from: PlaceId) {
         if from == PlaceId::Agents
             || self.place != PlaceId::Agents
-            || crate::hosted::id(self).is_some()
+            || self.ext.calls.hosted_id()(self).is_some()
         {
             return;
         }
@@ -270,7 +270,7 @@ impl Model {
         // its one session, and Projects with Efficiency shows no pages
         // (pageTabs, view.go:335).
         if matches!(self.place, PlaceId::Agents | PlaceId::Projects)
-            && crate::hosted::id(self).is_some()
+            && self.ext.calls.hosted_id()(self).is_some()
         {
             return None;
         }
@@ -361,7 +361,7 @@ impl Model {
         {
             return l;
         }
-        if self.place == PlaceId::Agents && crate::hosted::id(self).is_some() {
+        if self.place == PlaceId::Agents && self.ext.calls.hosted_id()(self).is_some() {
             return Line::new(); // no pages in hosted
         }
         let Some(t) = self.page_tabs() else {
@@ -423,7 +423,7 @@ impl Model {
             let i = at(&self.header_text[0], &names)?;
             // Hosted's Projects tab neither lights up nor opens
             // (header_pointer.go:39).
-            if i == PlaceId::Projects as usize && crate::hosted::id(self).is_some() {
+            if i == PlaceId::Projects as usize && self.ext.calls.hosted_id()(self).is_some() {
                 return None;
             }
             return Some((i, false));

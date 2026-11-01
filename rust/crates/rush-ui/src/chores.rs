@@ -136,7 +136,7 @@ mod tests {
     // (Go's tick refreshes and reads them): no room running, no wake.
     #[test]
     fn rooms_each_second_while_one_runs() {
-        use crate::screens::social::rooms::RoomRows;
+        use crate::rooms::RoomRows;
         let mut m = Model::new("t");
         start(&mut m);
         let s = m.kept.peek::<Clock>().unwrap().start.unwrap();

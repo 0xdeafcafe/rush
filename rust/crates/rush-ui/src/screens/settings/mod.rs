@@ -38,6 +38,8 @@ pub(crate) mod workspace;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_config;
+#[cfg(test)]
 mod tests_own;
 #[cfg(test)]
 mod tests_providers;

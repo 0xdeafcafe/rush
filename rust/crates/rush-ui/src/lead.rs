@@ -57,7 +57,7 @@ impl Model {
     /// Whether this rush does what rush does for every session on its own,
     /// not a hosted view nor one that follows (leads).
     pub fn leads(&self) -> bool {
-        crate::hosted::id(self).is_none() && !self.following()
+        self.ext.calls.hosted_id()(self).is_none() && !self.following()
     }
 }
 
@@ -74,7 +74,7 @@ fn unless_others_lead() -> bool {
 /// never refreshes the sign-ins of the rush it follows (one over SSH may
 /// once no view on the Mac leads).
 pub fn renews(m: &Model) -> fn() -> bool {
-    if m.follows || crate::hosted::id(m).is_some() {
+    if m.follows || m.ext.calls.hosted_id()(m).is_some() {
         never
     } else {
         unless_others_lead
@@ -92,7 +92,10 @@ pub fn hold_renewals(m: &Model) {
 pub fn log_lead(m: &Model) {
     let mut f = serde_json::Map::new();
     f.insert("leads".into(), m.leads().into());
-    f.insert("hosted".into(), crate::hosted::id(m).unwrap_or("").into());
+    f.insert(
+        "hosted".into(),
+        m.ext.calls.hosted_id()(m).unwrap_or("").into(),
+    );
     f.insert("following".into(), m.following().into());
     rush_events::log("lead", f);
 }

@@ -44,7 +44,7 @@ pub mod prompt;
 pub mod rename;
 pub mod rowmemo;
 pub mod shelf;
-pub mod spawns;
+pub use crate::spawns;
 pub mod split;
 pub mod stash;
 pub mod stuck;

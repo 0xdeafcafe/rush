@@ -17,7 +17,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use super::Press;
-use crate::screens::session_cards::pastes::{Pastes, is_long_paste};
+use crate::pastes::{Pastes, is_long_paste};
 
 /// A tagged paste's id: four hex digits, random as Go's rand.IntN(0x10000).
 fn paste_tag() -> u16 {

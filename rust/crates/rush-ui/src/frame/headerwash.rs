@@ -98,7 +98,7 @@ pub fn wash(l: &Line, colours: &[Color]) -> Line {
 /// last colour; the rule under them in the harness's grey
 /// (paneHeader's headerWash, paneFrameRow).
 pub fn wash_head(reg: &rush_core::adapter::Registry, kind: &str, rows: &mut [Line], w: usize) {
-    use crate::screens::accounts::look::look_of;
+    use crate::look::look_of;
     let iw = w.saturating_sub(3);
     if iw == 0 || rows.len() < 4 {
         return;
@@ -108,7 +108,7 @@ pub fn wash_head(reg: &rush_core::adapter::Registry, kind: &str, rows: &mut [Lin
     let ground = super::ground::painted();
     for (r, row) in rows.iter_mut().take(4).enumerate() {
         let colours = header_colours(ground, harness, provider, iw, r);
-        let inner = crate::screens::session_core::paint::cut(row, 2, 2 + iw);
+        let inner = crate::style::cut(row, 2, 2 + iw);
         let mut out = Line::from_spans(vec![Span::new(
             "  ",
             rush_core::text::Style::default().on(CHROME_BG),

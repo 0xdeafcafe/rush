@@ -5,20 +5,32 @@
 //! with no terminal for a while, as `rush --soak` does
 //! (cmd/rush/profile.go:46).
 
+pub mod changes;
 mod chores;
 mod clanker;
 pub mod config;
 pub mod frame;
 mod header;
 pub mod hosted;
+pub mod imagerefs;
+pub mod landing;
 pub mod lead;
 pub mod list;
 mod listcache;
+pub mod look;
+pub mod mention;
 mod model;
 pub mod overlay;
+pub mod pastes;
+pub mod predict;
+pub mod rooms;
 pub mod screens;
 mod session;
+pub mod shells;
+pub mod spawns;
+pub mod split;
 pub mod style;
+pub mod turnwants;
 pub mod worker;
 
 use std::io;

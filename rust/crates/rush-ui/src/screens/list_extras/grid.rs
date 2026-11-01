@@ -374,6 +374,19 @@ pub fn round_pane(
     out
 }
 
+/// round_pane with the Session drawn by a `&mut dyn FnMut`, for the
+/// frame to call by name (Ext::calls round_pane).
+pub fn round_pane_dyn(
+    m: &mut Model,
+    pw: usize,
+    rows: usize,
+    x: usize,
+    y: usize,
+    draw: &mut dyn FnMut(&mut Model, usize, usize) -> Vec<Line>,
+) -> Vec<Line> {
+    round_pane(m, pw, rows, x, y, draw)
+}
+
 /// A click on a tile swaps its agent in, the open one pinned in its
 /// place; on the edge, it's held, and dragging it resizes the tiles
 /// (model.go:1496, :1589, :1640 gridClick, gridDrag).

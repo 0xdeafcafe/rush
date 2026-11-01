@@ -21,7 +21,7 @@ mod rows;
 #[doc(hidden)]
 pub mod scan;
 pub mod scripts;
-pub mod shells;
+pub use crate::shells;
 mod temp;
 mod tidy;
 pub(crate) mod tidydone;

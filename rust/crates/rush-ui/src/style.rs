@@ -317,6 +317,19 @@ pub fn mem(b: u64) -> String {
     }
 }
 
+/// Disk use in a few characters: 1.2G, 340M, 12K, – for none (disk).
+pub fn disk(n: i64) -> String {
+    if n >= 1 << 30 {
+        format!("{:.1}G", n as f64 / (1u64 << 30) as f64)
+    } else if n >= 1 << 20 {
+        format!("{}M", n >> 20)
+    } else if n > 0 {
+        format!("{}K", n >> 10)
+    } else {
+        "–".into()
+    }
+}
+
 pub fn money(c: f64) -> String {
     if c <= 0.0 {
         "–".into()
@@ -696,6 +709,37 @@ pub fn wrap_line(l: &Line, w: usize) -> Vec<Line> {
     }
     out
 }
+
+/// Cells [from, to) of l, a wide character cut in two becoming a blank.
+pub fn cut(l: &Line, from: usize, to: usize) -> Line {
+    let mut out = Line::new();
+    let mut col = 0;
+    for s in &l.spans {
+        let mut text = String::new();
+        for ch in s.text.chars() {
+            let cw = width(ch.encode_utf8(&mut [0; 4]));
+            if col >= from && col + cw <= to {
+                text.push(ch);
+            } else if col < to && col + cw > from {
+                text.push_str(&" ".repeat((col + cw).min(to) - col.max(from)));
+            }
+            col += cw;
+            if col >= to {
+                break;
+            }
+        }
+        if !text.is_empty() {
+            out.spans.push(Span::new(text, s.style));
+        }
+        if col >= to {
+            break;
+        }
+    }
+    out
+}
+
+/// The undo keys' words, for flashes (undoHint).
+pub const UNDO_HINT: &str = "cmd+z or ctrl+/";
 
 #[cfg(test)]
 mod tests {

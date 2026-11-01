@@ -10,13 +10,18 @@
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
+use std::path::Path;
+use std::sync::Arc;
 
 use rush_core::agent::Agent;
 use rush_core::text::Line;
 
 use super::places::{Place, PlaceId};
-use super::{Mouse, Out, Press};
+use super::{Editor, Mouse, Out, Press};
+use crate::changes::{FileChange, Ver};
+use crate::clanker::Reaction;
 use crate::model::Model;
+use crate::predict::{HistHit, Hit};
 use crate::session::SessionView;
 
 /// A key handler: `Out::Pass` when the key isn't its.
@@ -196,6 +201,16 @@ impl Ext {
     }
 }
 
+/// The list's rows (lw wide) and the pane's (pw wide) side by side, n of
+/// them, the list's faded when fade_list: (m, left, lw, pane, pw, n,
+/// fade_list).
+pub type JoinSplit = fn(&Model, &[Line], usize, &[Line], usize, usize, bool) -> Vec<Line>;
+/// Draws the Session w wide and h tall: (m, w, h).
+pub type DrawPane<'a> = &'a mut dyn FnMut(&mut Model, usize, usize) -> Vec<Line>;
+/// The Session's pane at (x, y), pw wide and rows tall, with what's
+/// round it: (m, pw, rows, x, y, draw).
+pub type RoundPane = fn(&mut Model, usize, usize, usize, usize, DrawPane) -> Vec<Line>;
+
 /// Runs an [`Act`]: filled by screens/mod.rs's register.
 pub type ActFn = fn(&mut Model, Act);
 
@@ -338,6 +353,99 @@ calls! {
     emit_box("plugin_ui"): fn(&mut Model, &str, &str, &str),
     /// A box cleared, told to plugins (hooks.rs cleared).
     cleared("plugin_ui"): fn(&mut Model, &str, &str),
+    /// The Session beside the list follows the agent picked
+    /// (list_extras/split.rs follow).
+    pane_follow("list_extras"): fn(&mut Model),
+    /// The picked agent's own screen, mirrored, w wide and rows tall
+    /// (split.rs mirror).
+    pane_mirror("list_extras"): fn(&mut Model, usize, usize) -> Option<Vec<Line>>,
+    /// What the pane says while there's no Session to draw in it
+    /// (split.rs placeholder).
+    pane_placeholder("list_extras"): fn(&mut Model, usize, usize) -> Option<Vec<Line>>,
+    /// The list's rows (lw wide) and the pane's (pw wide) side by side, n
+    /// of them, the list's faded when fade_list (split.rs join_rows, with
+    /// pane_kind and divider_lit).
+    join_split("list_extras"): JoinSplit,
+    /// The Session's pane at (x, y), pw wide and rows tall, with the
+    /// grid's tiles round it, the Session drawn by the last argument
+    /// (list_extras/grid.rs round_pane).
+    round_pane("list_extras"): RoundPane,
+    /// The terminal lost or got back focus (split.rs pointer_back).
+    pointer_back("list_extras"): fn(&mut Model),
+    /// The list's edge and the mouse: Ok when the edge took it, else
+    /// whether its lighting changed (split.rs edge_mouse).
+    edge_mouse("list_extras"): fn(&mut Model, &Mouse) -> Result<Out, bool>,
+    /// The pointer at column x gives that side the keys as it crosses
+    /// (split.rs pointer_at).
+    pointer_at("list_extras"): fn(&mut Model, usize, bool) -> bool,
+    /// A click at column x gives that side the keys (split.rs focus_at).
+    focus_at("list_extras"): fn(&mut Model, usize) -> bool,
+    /// Agents are on screen for a peek from the Session alone
+    /// (list_extras/peek.rs peeking).
+    peeking("list_extras"): fn(&Model) -> bool,
+    /// enter while peeking opens agent i (peek.rs open_peeked).
+    open_peeked("list_extras"): fn(&mut Model, usize),
+    /// esc while peeking goes back to the Session left; false with no
+    /// peek (peek.rs back).
+    peek_back("list_extras"): fn(&mut Model) -> bool,
+    /// An agent's transcript's end, read ahead (list_extras/predict.rs
+    /// take).
+    predict_take("list_extras"): fn(&mut Model, &str, &Path) -> Option<Hit>,
+    /// An agent's history, read ahead (predict.rs take_history).
+    predict_take_history("list_extras"): fn(&mut Model, &str) -> Option<HistHit>,
+    /// The Session kept as the list moved off it (predict.rs Predict's
+    /// left).
+    predict_left("list_extras"): fn(&mut Kept) -> Option<&mut SessionView>,
+    /// The filter found something said in a's conversation
+    /// (list_extras/filter.rs has_match).
+    filter_match("list_extras"): fn(&Model, &Agent) -> bool,
+    /// The match the filter found in a's conversation, lit, w wide
+    /// (filter.rs snippet).
+    filter_snippet("list_extras"): fn(&Model, &Agent, usize) -> Option<Line>,
+    /// The hosts rush was given run a (session_core/host.rs hosts_of).
+    hosts_agent("session_core"): fn(&Model, &Agent) -> bool,
+    /// The open session's edits as the worker that read it worked them
+    /// out (session_core/changes.rs prime).
+    prime_changes("session_core"): fn(&mut Model, Ver, &str, Arc<Vec<FileChange>>),
+    /// The session with this key has its host reached (session_core
+    /// Conn::hosted).
+    conn_linked("session_core"): fn(&Model, &str) -> bool,
+    /// The message box of the session with this key, when it has one
+    /// (session_core Conn's input).
+    conn_box("session_core"): for<'a> fn(&'a Model, &str) -> Option<&'a Editor>,
+    /// conn_box, to change.
+    conn_box_mut("session_core"): for<'a> fn(&'a mut Model, &str) -> Option<&'a mut Editor>,
+    /// What clanker is reacting to now (session_core/finish.rs Finish's
+    /// fx).
+    reaction("session_core"): fn(&Model) -> Reaction,
+    /// reaction, to change.
+    reaction_mut("session_core"): fn(&mut Model) -> &mut Reaction,
+    /// The config the UI holds, Settings' and the accounts' one copy,
+    /// once loaded (accounts/state.rs Accounts' store).
+    held_config("accounts"): fn(&mut Model) -> Option<&mut rush_state::Config>,
+    /// `--render`: nothing is written (accounts/state.rs read_only).
+    read_only("accounts"): fn(&Model) -> bool,
+    /// The accounts have been read since rush started (state.rs
+    /// read_settled).
+    accounts_settled("accounts"): fn(&Model) -> bool,
+    /// The id of the one session a hosted view shows (hosted.rs id).
+    hosted_id("hosted"): fn(&Model) -> Option<&str>,
+    /// A hosted view showing its one session, the list hidden (hosted.rs
+    /// alone).
+    hosted_alone("hosted"): fn(&Model) -> bool,
+    /// Every agent, a hosted view's hidden ones included (hosted.rs
+    /// all_agents).
+    all_agents("hosted"): fn(&Model) -> &[Agent],
+    /// A reading of the list as a hosted view takes it (hosted.rs snap).
+    hosted_snap("hosted"): fn(&mut Model),
+    /// A hosted view stays on its session; whether it opened it
+    /// (hosted.rs pin).
+    hosted_pin("hosted"): fn(&mut Model) -> bool,
+    /// A hosted view's one session is open with no list to go back to
+    /// (hosted.rs keeps_open).
+    hosted_keeps_open("hosted"): fn(&Model) -> bool,
+    /// The keys come off a hosted view's box (hosted.rs set_away).
+    hosted_set_away("hosted"): fn(&mut Model),
 }
 
 /// State screens keep between calls, one value per type, made on first

@@ -185,7 +185,7 @@ static KEEPING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// Writes every change waiting, in the order they were made, on top of
 /// config.json as it is: whichever thread gets here first writes them
 /// all, so a later change never lands before an earlier one.
-fn write_waiting() -> Result<(), String> {
+pub fn write_waiting() -> Result<(), String> {
     let _g = KEEPING.lock().unwrap_or_else(|e| e.into_inner());
     let changes: Vec<Change> = WAITING
         .lock()
@@ -216,8 +216,8 @@ pub fn reapply_waiting(c: &mut rush_state::Config) {
 /// accounts share), for a change written to disk another way (keep, off
 /// the UI): the next whole save doesn't write the old value back.
 pub fn hold(m: &mut crate::model::Model, f: impl FnOnce(&mut rush_state::Config)) {
-    if let Some(s) = crate::screens::accounts::state::accounts(m).store.as_mut() {
-        f(&mut s.config);
+    if let Some(c) = m.ext.calls.held_config()(m) {
+        f(c);
     }
 }
 
@@ -251,11 +251,10 @@ pub fn save(
     what: &'static str,
     f: impl Fn(&mut rush_state::Config) + Send + 'static,
 ) {
-    use crate::screens::accounts::state::{accounts, read_only};
-    if let Some(s) = accounts(m).store.as_mut() {
-        f(&mut s.config);
+    if let Some(c) = m.ext.calls.held_config()(m) {
+        f(c);
     }
-    if read_only(m) {
+    if m.ext.calls.read_only()(m) {
         return; // --render leaves config.json as it was
     }
     WAITING
@@ -271,16 +270,24 @@ pub fn save(
     });
 }
 
+/// For tests: queues a change without writing it.
+#[doc(hidden)]
+pub fn queue(f: impl Fn(&mut rush_state::Config) + Send + 'static) {
+    WAITING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push_back(Box::new(f));
+}
+
+/// For tests: no writer takes the changes queued while it's held.
+#[doc(hidden)]
+pub fn hold_writers() -> std::sync::MutexGuard<'static, ()> {
+    KEEPING.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn queue(f: impl Fn(&mut rush_state::Config) + Send + 'static) {
-        WAITING
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push_back(Box::new(f));
-    }
 
     /// Two changes made in quick succession land in the order made, even
     /// when the later one's writer gets there first: Go saves them in
@@ -307,57 +314,5 @@ mod tests {
             !steps.contains(&"order-test-first".to_string()),
             "{steps:?}"
         );
-    }
-
-    /// A change is made in Settings' copy of the config too, so a setting
-    /// changed there afterwards doesn't save the old value back.
-    #[test]
-    fn a_change_reaches_settings_copy() {
-        let mut m = crate::model::Model::new("t");
-        crate::screens::settings::use_store(&mut m, rush_state::Store::load());
-        let mark = "settings-copy-test".to_string();
-        let f = mark.clone();
-        save(&mut m, "couldn't", move |c| {
-            c.onboarding.steps.push(f.clone())
-        });
-        let held = &crate::screens::settings::config_mut(&mut m)
-            .onboarding
-            .steps;
-        assert!(held.contains(&mark), "{held:?}");
-        let disk = rush_state::Store::load().config.onboarding.steps;
-        assert!(disk.contains(&mark), "{disk:?}");
-    }
-
-    /// A change kept off the UI is held in rush's one config too, so a
-    /// whole save after doesn't write the old value back.
-    #[test]
-    fn a_kept_change_is_held() {
-        let mut m = crate::model::Model::new("t");
-        crate::screens::settings::use_store(&mut m, rush_state::Store::load());
-        hold(&mut m, |c| c.set_view("agent"));
-        assert_eq!(crate::screens::settings::config(&m).view, "agent");
-    }
-
-    /// config.json taken in from outside while a change of rush's waits
-    /// to be written keeps that change.
-    #[test]
-    fn an_outside_reload_keeps_waiting_changes() {
-        let mut m = crate::model::Model::new("t");
-        crate::screens::settings::use_store(&mut m, rush_state::Store::load());
-        {
-            // No writer takes it meanwhile (other tests write too).
-            let _g = KEEPING.lock().unwrap_or_else(|e| e.into_inner());
-            queue(|c| c.onboarding.steps.push("reload-test-waiting".into()));
-            crate::screens::accounts::askrush::on_config(&mut m, br#"{"groupBy":"agent"}"#);
-        }
-        let c = crate::screens::settings::config(&m);
-        assert_eq!(c.group_by, "agent");
-        assert!(
-            c.onboarding
-                .steps
-                .iter()
-                .any(|s| s == "reload-test-waiting")
-        );
-        write_waiting().unwrap();
     }
 }

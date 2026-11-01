@@ -31,7 +31,7 @@ impl Model {
     pub fn tally(&self) -> Tally {
         let mut t = Tally::default();
         // A hosted view counts every agent, not only its one (tally).
-        for a in crate::hosted::all_agents(self) {
+        for a in self.ext.calls.all_agents()(self) {
             if a.needs_you() {
                 t.blocked += 1;
             } else if a.job.live() {
@@ -108,11 +108,7 @@ impl Model {
         let Some(v) = self.session.as_ref().filter(|_| !self.on_place()) else {
             return false;
         };
-        let linked = self
-            .kept
-            .peek::<crate::screens::session_core::Core>()
-            .and_then(|c| c.conns.get(&v.key))
-            .is_some_and(|c| c.hosted());
+        let linked = self.ext.calls.conn_linked()(self, &v.key);
         // A hosted one's conversation is its host's: only reaching it opens it.
         let hosted = matches!(v.source, crate::session::Source::Hosted);
         linked || !hosted && v.read && v.err.is_empty()
@@ -180,7 +176,7 @@ impl Model {
         };
         // < > go between places; in a Session's box they're text, so it's
         // ctrl+\ there (view.go:240).
-        let keys = if crate::hosted::id(self).is_some() || self.in_box() {
+        let keys = if self.ext.calls.hosted_id()(self).is_some() || self.in_box() {
             "ctrl+\\"
         } else {
             "< >"

@@ -46,7 +46,7 @@ pub mod finishcard;
 pub mod fork;
 pub mod handles;
 pub mod handoff;
-pub mod imagerefs;
+pub use crate::imagerefs;
 pub mod limit;
 pub mod memcard;
 pub mod mention;

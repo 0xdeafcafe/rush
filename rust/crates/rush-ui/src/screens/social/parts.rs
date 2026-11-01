@@ -12,6 +12,9 @@ use rush_core::text::{Color, Line};
 use super::ink::spread;
 use crate::style::*;
 
+// Disk use and the undo keys' words are the frame's (crate::style).
+pub use crate::style::{UNDO_HINT, disk};
+
 // --- the Overview's sections ---
 
 /// A row of the Overview: its line, and the ref a click or enter acts on.
@@ -27,19 +30,6 @@ impl RefLine {
             line,
             r#ref: String::new(),
         }
-    }
-}
-
-/// Disk use in a few characters: 1.2G, 340M, 12K, – for none (disk).
-pub fn disk(n: i64) -> String {
-    if n >= 1 << 30 {
-        format!("{:.1}G", n as f64 / (1u64 << 30) as f64)
-    } else if n >= 1 << 20 {
-        format!("{}M", n >> 20)
-    } else if n > 0 {
-        format!("{}K", n >> 10)
-    } else {
-        "–".into()
     }
 }
 
@@ -496,9 +486,6 @@ pub fn went_to(did: &str, tab: &str, on: bool, history: &str) -> String {
     }
     format!("{did} · {history} › {tab} has it")
 }
-
-/// The undo keys' words, for flashes (undoHint).
-pub const UNDO_HINT: &str = "cmd+z or ctrl+/";
 
 #[cfg(test)]
 mod tests {

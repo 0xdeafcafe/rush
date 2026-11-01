@@ -23,7 +23,6 @@ use crate::frame::framehold::Hold;
 use crate::frame::overlayclick::OverlayHit;
 use crate::frame::{Confirm, Editor, Ext, Mouse, Out, PlaceId, Press, Sheet, uistall};
 use crate::list::ListLine;
-use crate::screens::list_extras::peek;
 use crate::session::{self, SessionView};
 use crate::style::*;
 use crate::worker::{self, Fleet, Note};
@@ -118,7 +117,7 @@ pub struct Model {
     pub input: Editor,
     /// The images the Agents box holds, each [Image #N] in its text
     /// (Go's m.imgs).
-    pub imgs: crate::screens::session_cards::imagerefs::ImageRefs,
+    pub imgs: crate::imagerefs::ImageRefs,
     /// The box over the screen as last drawn, for the mouse.
     pub over: OverlayHit,
     /// The terminal said it tells ctrl+enter from enter (Go's
@@ -257,7 +256,7 @@ impl Model {
     pub fn set_fleet(&mut self, f: Fleet) {
         self.now = self.clock.unwrap_or_else(now);
         self.agents = f.agents;
-        crate::hosted::snap(self);
+        self.ext.calls.hosted_snap()(self);
         self.roots = f.roots;
         self.accounts = f.accounts;
         // Forget agents that are gone.
@@ -284,7 +283,7 @@ impl Model {
             let f = self.ext.on_fleet[i];
             f(self);
         }
-        crate::hosted::pin(self);
+        self.ext.calls.hosted_pin()(self);
     }
 
     /// State a screen keeps between calls, made on first use: one value
@@ -414,11 +413,7 @@ impl Model {
         };
         let source = source
             .or_else(|| session::Source::of(&self.reg, a))
-            .or_else(|| {
-                let h = crate::screens::session_core::host::hosts_of(self);
-                h.is_some_and(|h| h.hosts(a))
-                    .then_some(session::Source::Hosted)
-            });
+            .or_else(|| self.ext.calls.hosts_agent()(self, a).then_some(session::Source::Hosted));
         let Some(source) = source else {
             if quiet {
             } else if a.job.transcript_path.is_empty() {
@@ -458,7 +453,7 @@ impl Model {
         // since, else topped up first on the tail's worker.
         let ahead = match &v.source {
             session::Source::Transcript { path, .. } if self.tx.is_some() => {
-                crate::screens::list_extras::predict::take(self, &a.key, path)
+                self.ext.calls.predict_take()(self, &a.key, path)
             }
             _ => None,
         };
@@ -475,7 +470,7 @@ impl Model {
         // stopped.
         let hist = match &v.source {
             session::Source::History { .. } if self.tx.is_some() => {
-                crate::screens::list_extras::predict::take_history(self, &a.key).map(|h| {
+                self.ext.calls.predict_take_history()(self, &a.key).map(|h| {
                     if h.fresh {
                         v.seed(*h.sess);
                         rush_draw::perf_note(|| format!("tail end gen={} ahead", self.r#gen));
@@ -537,26 +532,22 @@ impl Model {
     /// The view a worker's reading of r#gen is for: the opened one's, the
     /// one beside the list, or a tile's kept open.
     fn view_of(&mut self, r#gen: u64) -> Option<&mut SessionView> {
+        let left = self.ext.calls.predict_left();
         [self.session.as_mut(), self.pane.as_mut()]
             .into_iter()
             .flatten()
             .chain(self.tiles.values_mut())
-            .chain(
-                self.kept
-                    .get::<crate::screens::list_extras::predict::Predict>()
-                    .left
-                    .as_mut(),
-            )
+            .chain(left(&mut self.kept))
             .find(|v| v.r#gen == r#gen)
     }
 
     /// The opened Session gives up the keys (leavePane): beside the list
     /// it stays there; filling the screen, the list comes back.
     pub(crate) fn close(&mut self) {
-        if crate::hosted::keeps_open(self) {
+        if self.ext.calls.hosted_keeps_open()(self) {
             // A hosted view's one session: no list to go back to, so esc
             // takes the keys off the box (paneKey's hostedAlone).
-            crate::hosted::set_away(self);
+            self.ext.calls.hosted_set_away()(self);
             return;
         }
         self.ext.calls.leave_pane()(self);
@@ -642,10 +633,10 @@ impl Model {
                     if s == "enter" || self.folded(&t) {
                         self.toggle_fold(&t);
                     }
-                } else if let Some(i) = self.selected().filter(|_| peek::peeking(self)) {
+                } else if let Some(i) = self.selected().filter(|_| self.ext.calls.peeking()(self)) {
                     // Peeking from a Session, enter opens the one picked,
                     // as it was (keys.go:386).
-                    peek::open_peeked(self, i);
+                    self.ext.calls.open_peeked()(self, i);
                 } else if self.open_room_for(&self.sel.clone()) {
                     // A room, or one of its agents: the room opens
                     // (keys.go:392), its box saying what's typed in it.
@@ -681,7 +672,7 @@ impl Model {
             "tab" => self.focus_pane(),
             "ctrl+o" => self.focus_pane(),
             "esc" if empty => {
-                if peek::back(self) {
+                if self.ext.calls.peek_back()(self) {
                     return Out::Draw; // back to the Session you peeked from
                 }
                 if self.ext.calls.preview()(self) {
@@ -807,7 +798,7 @@ impl Model {
         }
         // The Session beside the list: the wheel scrolls it, a click
         // gives it the keys, as enter does (model.go:1928 focusAt).
-        let (lw, pw) = crate::screens::list_extras::split::widths(self);
+        let (lw, pw) = crate::split::widths(self);
         if pw > 0 && x as usize > lw {
             let rows = self.h.saturating_sub(self.list_top + 1);
             match kind {
@@ -901,7 +892,7 @@ impl Model {
     fn frame_rows(&mut self) -> Vec<Line> {
         let h = self.h;
         self.now = self.clock.unwrap_or_else(now);
-        crate::screens::list_extras::split::settle(self);
+        crate::split::settle(self);
         let mut inexact = self.on_place();
         let mut out = if self.on_place() {
             self.spinning = false;
@@ -910,7 +901,7 @@ impl Model {
             let mut out = self.header();
             let head = out.len();
             let body_h = h.saturating_sub(head + 1);
-            let (lw, pw) = crate::screens::list_extras::split::widths(self);
+            let (lw, pw) = crate::split::widths(self);
             if lw > 0 && pw > 0 {
                 inexact = true;
                 self.split_frame(&mut out, body_h, lw, pw);
@@ -920,13 +911,13 @@ impl Model {
                     // Tiles pinned to the grid take a column beside the
                     // Session, or a row under it (view.go:1216).
                     let w = self.w;
-                    let pane = crate::screens::list_extras::grid::round_pane(
+                    let pane = self.ext.calls.round_pane()(
                         self,
                         w,
                         body_h,
                         0,
                         head,
-                        |m, pw, rows| {
+                        &mut |m, pw, rows| {
                             let full = m.w;
                             m.w = pw;
                             let mut p = vec![Line::new(); head];
@@ -969,7 +960,6 @@ impl Model {
     /// foot of the screen, past a divider; the side without the keys
     /// faded back (listView's split2, paneFrameRow).
     fn split_frame(&mut self, out: &mut Vec<Line>, body_h: usize, lw: usize, pw: usize) {
-        use crate::screens::list_extras::split;
         let head = out.len();
         let rows = body_h + 1;
         // The list's side, drawn as the list is with no Session open,
@@ -988,48 +978,33 @@ impl Model {
         self.keys_beside = false;
         self.session = focused;
         // The Session's side, with the grid's tiles round it.
-        let pane = crate::screens::list_extras::grid::round_pane(
-            self,
-            pw,
-            rows,
-            lw + 1,
-            head,
-            |m, pw, rows| m.split_pane(head, rows, pw),
-        );
+        let pane = self.ext.calls.round_pane()(self, pw, rows, lw + 1, head, &mut |m, pw, rows| {
+            m.split_pane(head, rows, pw)
+        });
         let fade_list = self.session.is_some();
-        let kind = split::pane_kind(self);
         out.truncate(head);
-        out.extend(split::join_rows(
-            &left,
-            lw,
-            &pane,
-            pw,
-            rows,
-            fade_list,
-            kind.as_deref(),
-            split::divider_lit(self),
-            &self.reg,
+        out.extend(self.ext.calls.join_split()(
+            self, &left, lw, &pane, pw, rows, fade_list,
         ));
     }
 
     /// The Session's side of the split: the opened one, or the picked
     /// agent's for now, drawn as an opened one is, pw wide.
     fn split_pane(&mut self, head: usize, rows: usize, pw: usize) -> Vec<Line> {
-        use crate::screens::list_extras::split;
         if self.session.is_some() {
             self.pane = None;
             self.pane_frame(head, rows, pw)
         } else {
-            split::follow(self);
+            self.ext.calls.pane_follow()(self);
             // An agent whose screen is mirrored, its summary picked: the
             // strip over it, so v brings the screen back (view.go:1225).
             let strip = |m: &mut Model| m.ext.calls.summary_strip()(m, pw);
-            match split::mirror(self, pw, rows) {
+            match self.ext.calls.pane_mirror()(self, pw, rows) {
                 Some(p) => p,
                 None => {
                     let strip = strip(self);
                     let top = usize::from(strip.is_some());
-                    let mut p = match split::placeholder(self, pw, rows - top) {
+                    let mut p = match self.ext.calls.pane_placeholder()(self, pw, rows - top) {
                         Some(p) => p,
                         None => {
                             self.session = self.pane.take();
@@ -1054,7 +1029,7 @@ impl Model {
     /// part of it lays itself out at the pane's width.
     /// head is the rows over it, for where its parts say they are.
     fn pane_frame(&mut self, head: usize, rows: usize, w: usize) -> Vec<Line> {
-        crate::screens::list_extras::split::in_pane(self, w, |m| {
+        crate::split::in_pane(self, w, |m| {
             let mut p = vec![Line::new(); head];
             m.session_frame(&mut p, rows.saturating_sub(1));
             p.drain(..head.min(p.len()));
@@ -1075,7 +1050,7 @@ impl Model {
     /// narrowed to the tile while it's drawn (gridSession's rushPane).
     pub(crate) fn tile_frame(&mut self, top: usize, rows: usize, w: usize) -> Vec<Line> {
         let in_pane = std::mem::replace(&mut self.in_pane, false);
-        let out = crate::screens::list_extras::split::in_pane(self, w, |m| {
+        let out = crate::split::in_pane(self, w, |m| {
             let mut p = vec![Line::new(); top];
             m.session_frame(&mut p, rows);
             p.drain(..top.min(p.len()));
@@ -1643,7 +1618,7 @@ impl Model {
         v.take_end(sess, r);
         let key = v.key.clone();
         if let Some((ver, cwd, c)) = changes {
-            crate::screens::session_core::changes::prime(self, ver, &cwd, c);
+            self.ext.calls.prime_changes()(self, ver, &cwd, c);
         }
         if let Some(sp) = spawns {
             self.ext.calls.prime_spawns()(self, &key, sp);
@@ -1724,7 +1699,7 @@ impl Model {
                     v.take_whole_drawn(*sess, r);
                     let key = v.key.clone();
                     if let Some((ver, cwd, c)) = changes {
-                        crate::screens::session_core::changes::prime(self, ver, &cwd, c);
+                        self.ext.calls.prime_changes()(self, ver, &cwd, c);
                     }
                     if let Some(sp) = spawns {
                         self.ext.calls.prime_spawns()(self, &key, sp);
@@ -1780,12 +1755,12 @@ impl App<Note> for Model {
                 }
                 Event::FocusGained => {
                     self.term_focused = true;
-                    crate::screens::list_extras::split::pointer_back(self);
+                    self.ext.calls.pointer_back()(self);
                     Step::Draw
                 }
                 Event::FocusLost => {
                     self.term_focused = false;
-                    crate::screens::list_extras::split::pointer_back(self);
+                    self.ext.calls.pointer_back()(self);
                     Step::Idle
                 }
                 Event::Paste(t) => self.paste(&t).step(),
@@ -1801,7 +1776,7 @@ impl App<Note> for Model {
             st
         };
         // A hosted view stays on its session (pinHosted).
-        if crate::hosted::pin(self) && st == Step::Idle {
+        if self.ext.calls.hosted_pin()(self) && st == Step::Idle {
             return Step::Draw;
         }
         st

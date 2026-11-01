@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use rush_convo::{Fresh, Options, Renderer, Session, Tail};
 
-use crate::screens::session_core::changes::{self, FileChange, Ver};
+use crate::changes::{self, FileChange, Ver};
 use rush_core::adapter::{self, AdapterRef, Registry, SLICE, global};
 use rush_core::agent::{Agent, Preview};
 use rush_core::event::Event;
@@ -800,9 +800,7 @@ fn warm(s: &mut Session, drawn: &Drawn, spawns: Option<&SpawnsBy>) -> Option<Box
                 rush_convo::Item::Step(id) => Some(*id),
                 _ => None,
             })
-            .filter(|id| {
-                crate::screens::list_extras::spawns::step_spawn(reg, s.step(*id), kind).is_some()
-            })
+            .filter(|id| crate::spawns::step_spawn(reg, s.step(*id), kind).is_some())
             .collect();
         ((s.serial(), s.step_ver()), ids)
     });

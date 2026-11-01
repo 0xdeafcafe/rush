@@ -49,18 +49,8 @@ pub(crate) fn kind_line(k: Kind, name: &str, what: &str, size: &str, w: usize) -
     l
 }
 
-/// Bytes of disk the way mem says memory.
-pub(crate) fn disk(n: i64) -> String {
-    if n >= 1 << 30 {
-        format!("{:.1}G", n as f64 / (1u64 << 30) as f64)
-    } else if n >= 1 << 20 {
-        format!("{}M", n >> 20)
-    } else if n > 0 {
-        format!("{}K", n >> 10)
-    } else {
-        "–".into()
-    }
-}
+/// Bytes of disk the way mem says memory (the frame's, crate::style).
+pub(crate) use crate::style::disk;
 
 pub(crate) fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }

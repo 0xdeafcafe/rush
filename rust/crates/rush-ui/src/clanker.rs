@@ -5,7 +5,8 @@
 //! works, and the coins off him on a dear day. And his reactions
 //! (sprite :246, shimmer :163, clkBand :301, tint :364, clkMix :404,
 //! clkFX.tint :463, draw :477, fxTick :457, onFXTick :555, clkBeat :565,
-//! clkState :574): what finish.rs keeps (Finish.fx) washes
+//! clkState :574), fxKind, fxLen and react (:429-552): what
+//! session_core/finish.rs keeps (Finish.fx) washes
 //! him and comes off him, a frame every 70 ms only while one runs. On a
 //! light ground he's grey in its shades but where a light passes over
 //! him (mono :307, darkGround :326, boldOf :329, clkGrey :339); on a
@@ -14,14 +15,75 @@
 use std::time::{Duration, Instant};
 
 use rush_core::text::{Color, Line, Mods, Span, Style};
+use rush_core::time::Ms;
 
 use crate::frame::ground::{self, Ground, Rgb};
 use crate::model::Model;
-use crate::screens::session_core::finish::{FX_EVERY, Finish, Fx, Reaction, fx_tick, react};
 use crate::style::{BLUE, DIM, FAINT, GREEN, ORANGE, RED, TEXT, YELLOW};
 
 /// Seconds between the idle bottle's shimmers (clkCycle).
 const CYCLE: usize = 45;
+
+/// Something clanker is reacting to, weakest first: a stronger one takes
+/// over a weaker one already running, never the other way (fxKind).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Fx {
+    #[default]
+    None,
+    /// A light passes over him, now and then.
+    Shimmer,
+    /// An agent finished: a glint and a drop.
+    Done,
+    /// One you kept waiting moved on: he greens, confetti.
+    Answered,
+    /// One started waiting on you: streaks fly off him.
+    Ask,
+    /// One hit an error, or rush did: he reddens, sparks.
+    Error,
+}
+
+impl Fx {
+    /// How many frames of FX_EVERY it runs for (fxLen).
+    pub fn frames(self) -> usize {
+        match self {
+            Fx::None => 0,
+            Fx::Shimmer => 14, // clkShine
+            Fx::Done => 14,
+            Fx::Answered => 22,
+            Fx::Ask => 18,
+            Fx::Error => 16,
+        }
+    }
+}
+
+/// How long a frame of a reaction is (fxEvery).
+pub const FX_EVERY: Ms = 70;
+
+/// The reaction under way and how far into it he is, in frames (clkFX).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Reaction {
+    pub kind: Fx,
+    pub frame: usize,
+}
+
+/// Starts a reaction, unless a stronger one is running (react).
+pub fn react(r: &mut Reaction, k: Fx) {
+    if k < r.kind {
+        return;
+    }
+    *r = Reaction { kind: k, frame: 0 };
+}
+
+/// Moves the reaction on a frame; it ends when it's over (onFXTick).
+/// Whether it still runs.
+pub fn fx_tick(r: &mut Reaction) -> bool {
+    r.frame += 1;
+    if r.frame >= r.kind.frames() {
+        *r = Reaction::default();
+        return false;
+    }
+    true
+}
 
 pub const W: usize = 9;
 pub const H: usize = 5;
@@ -409,7 +471,7 @@ struct FxClock {
 
 /// What clanker is reacting to now (m.fx).
 pub fn reaction(m: &Model) -> Reaction {
-    m.kept.peek::<Finish>().map(|f| f.fx).unwrap_or_default()
+    m.ext.calls.reaction()(m)
 }
 
 /// Moves his reaction on a frame for every 70 ms gone since the last, and
@@ -435,7 +497,7 @@ pub fn step(m: &mut Model) {
                         break;
                     }
                 }
-                m.kept::<Finish>().fx = fx;
+                *m.ext.calls.reaction_mut()(m) = fx;
             }
         }
         // Just started, or a stronger one took over: frame 0 is now.
@@ -463,7 +525,7 @@ pub fn beat(m: &mut Model) {
     let md = m.mood(m.tally());
     let t = m.tick;
     if md == Mood::Working && t % 15 == 8 || md == Mood::Idle && t % CYCLE == 25 {
-        react(&mut m.kept::<Finish>().fx, Fx::Shimmer);
+        react(m.ext.calls.reaction_mut()(m), Fx::Shimmer);
     }
 }
 
@@ -672,7 +734,7 @@ mod tests {
             Fx::None
         };
         assert_eq!(reaction(&m).kind, want, "{idle:?}");
-        m.kept::<Finish>().fx = Reaction {
+        *m.ext.calls.reaction_mut()(&mut m) = Reaction {
             kind: Fx::Error,
             frame: 3,
         };
@@ -737,7 +799,7 @@ mod tests {
         let mut m = Model::new("t");
         step(&mut m);
         assert!(m.kept.peek::<FxClock>().is_none_or(|c| c.last.is_none()));
-        m.kept::<Finish>().fx = Reaction {
+        *m.ext.calls.reaction_mut()(&mut m) = Reaction {
             kind: Fx::Done,
             frame: 0,
         };

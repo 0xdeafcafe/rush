@@ -13,7 +13,6 @@
 //! undo didn't gets the text it had as one step to undo.
 
 use crate::model::Model;
-use crate::screens::session_core::Core;
 
 /// What one box held before an event.
 struct Held {
@@ -56,16 +55,15 @@ impl Model {
     pub(crate) fn guard_boxes(&self) -> BoxGuard {
         let prompt = self.prompt_undoes().then(|| Held::of(&self.input));
         let mut conns = Vec::new();
-        if let Some(core) = self.kept.peek::<Core>() {
-            for v in [self.session.as_ref(), self.pane.as_ref()]
-                .into_iter()
-                .flatten()
+        let conn_box = self.ext.calls.conn_box();
+        for v in [self.session.as_ref(), self.pane.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            if let Some(input) = conn_box(self, &v.key)
+                && !conns.iter().any(|(k, _): &(String, Held)| *k == v.key)
             {
-                if let Some(c) = core.conns.get(&v.key)
-                    && !conns.iter().any(|(k, _): &(String, Held)| *k == v.key)
-                {
-                    conns.push((v.key.clone(), Held::of(&c.input)));
-                }
+                conns.push((v.key.clone(), Held::of(input)));
             }
         }
         BoxGuard { prompt, conns }
@@ -80,10 +78,10 @@ impl Model {
         if g.conns.is_empty() {
             return;
         }
-        let core = self.kept::<Core>();
+        let conn_box_mut = self.ext.calls.conn_box_mut();
         for (key, h) in g.conns {
-            if let Some(c) = core.conns.get_mut(&key) {
-                h.keep(&mut c.input);
+            if let Some(input) = conn_box_mut(self, &key) {
+                h.keep(input);
             }
         }
     }

@@ -75,11 +75,9 @@ impl Model {
         if self.session.is_some() {
             // Beside the list, the opened Session takes its keys laid out
             // at the pane's width, as it was drawn.
-            let (lw, pw) = crate::screens::list_extras::split::widths(self);
+            let (lw, pw) = crate::split::widths(self);
             if lw > 0 && pw > 0 && !self.in_pane {
-                return crate::screens::list_extras::split::in_pane(self, pw, |m| {
-                    m.session_press(k)
-                });
+                return crate::split::in_pane(self, pw, |m| m.session_press(k));
             }
             return self.session_press(k);
         }
@@ -278,7 +276,7 @@ impl Model {
         self.input.clear();
         self.flash(&format!(
             "cleared · {} brings it back",
-            crate::screens::social::parts::UNDO_HINT
+            crate::style::UNDO_HINT
         ));
         self.ext.calls.cleared()(self, "", &text);
     }
@@ -384,10 +382,9 @@ impl Model {
     /// The mouse: hooks, then a box over the screen, the header's tabs,
     /// then the screen showing (Update's mouse messages).
     pub fn mouse_event(&mut self, e: &Mouse) -> Out {
-        use crate::screens::list_extras::split;
         // The list's edge first: grabbed, it follows the mouse wherever
         // it goes (model.go:1528, :1658).
-        let lit = match split::edge_mouse(self, e) {
+        let lit = match self.ext.calls.edge_mouse()(self, e) {
             Ok(o) => return o,
             Err(changed) => changed,
         };
@@ -400,7 +397,6 @@ impl Model {
 
     /// The mouse, the list's edge having passed (mouse_event).
     fn mouse_routed(&mut self, e: &Mouse) -> Out {
-        use crate::screens::list_extras::split;
         let (x, y) = (e.x as usize, e.y as usize);
         // The grid's tiles and edge, where they are on screen, before the
         // Session beside the list takes the click at its own columns
@@ -411,7 +407,7 @@ impl Model {
         }
         // The pointer coming onto the Session or the list gives it the
         // keys, once as it crosses (model.go:1556 focusAt).
-        let mut crossed = split::pointer_at(self, x, e.kind == MouseKind::Moved);
+        let mut crossed = self.ext.calls.pointer_at()(self, x, e.kind == MouseKind::Moved);
         if !self.on_place()
             && self.confirm.is_none()
             && self.sheet.is_none()
@@ -422,7 +418,7 @@ impl Model {
             // own: in its box, the cursor goes there (model.go:1664
             // paneFocus, clickBox). One on the list gives the list the
             // keys (focusAt).
-            crossed |= split::focus_at(self, x);
+            crossed |= self.ext.calls.focus_at()(self, x);
         }
         let o = self.mouse_split(e, x, y);
         match o {
@@ -433,7 +429,7 @@ impl Model {
 
     /// The mouse on Agents and the Session beside it (mouse_routed).
     fn mouse_split(&mut self, e: &Mouse, x: usize, y: usize) -> Out {
-        use crate::screens::list_extras::split;
+        use crate::split;
         if !self.on_place() && self.confirm.is_none() && self.sheet.is_none() && y >= self.top_h() {
             let (lw, pw) = split::widths(self);
             if self.session.is_some() && lw > 0 && pw > 0 && x > lw {
