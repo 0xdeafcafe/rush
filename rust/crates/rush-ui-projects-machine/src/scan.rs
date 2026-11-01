@@ -38,7 +38,7 @@ fn d(m: &mut Model) -> &mut Data {
 
 /// Everything due, as the place opens or the list is read again while it
 /// shows. In tests (frozen) nothing is asked.
-pub(crate) fn refresh(m: &mut Model) {
+pub fn refresh(m: &mut Model) {
     read_settings(m);
     if m.place != PlaceId::Projects || d(m).frozen {
         return;
@@ -123,7 +123,7 @@ fn arm(m: &mut Model) {
 
 /// Asks git about each repository on the page, whole, every FOLDER_EVERY
 /// at most, and at once when one has no answer yet.
-pub(crate) fn refresh_folders(m: &mut Model) {
+pub fn refresh_folders(m: &mut Model) {
     if d(m).looking > 0 {
         return;
     }
@@ -188,7 +188,7 @@ pub struct Found {
 /// before their sizes are walked (at a background pace, a big checkout's
 /// build folders take minutes). Go showed nothing of the scan until all
 /// of it was done; the page still says it's asking until then.
-pub(crate) fn scan_worktrees(m: &mut Model) {
+pub fn scan_worktrees(m: &mut Model) {
     if d(m).checking || d(m).frozen {
         return;
     }
@@ -212,12 +212,12 @@ pub(crate) fn scan_worktrees(m: &mut Model) {
 }
 
 /// Handed what git said of the worktrees, before their sizes.
-pub(crate) type Early = Box<dyn FnOnce(Vec<Worktree>) + Send>;
+pub type Early = Box<dyn FnOnce(Vec<Worktree>) + Send>;
 
 /// The look scan_worktrees takes, to run off the UI (cleanup.go:155
 /// worktreeScan): the cleanup agent's start takes one too. early, when
 /// given, has the worktrees as git found them, before they're measured.
-pub(crate) fn worktree_scan(
+pub fn worktree_scan(
     m: &mut Model,
     early: Option<Early>,
 ) -> impl FnOnce() -> Found + Send + 'static {
@@ -314,7 +314,7 @@ fn on_looked(m: &mut Model, mut wts: Vec<Worktree>) {
     st.wts = wts;
 }
 
-pub(crate) fn on_worktrees(m: &mut Model, f: Found) {
+pub fn on_worktrees(m: &mut Model, f: Found) {
     let st = d(m);
     st.checking = false;
     st.checked = now();
@@ -401,7 +401,7 @@ fn load_sizes(m: &mut Model) {
 /// once, finished ones again only after they've done something, running
 /// ones every ten minutes, longer for ones slow to walk (tempwork.go:28
 /// measureTemp, onTemp). The sizes are saved off the UI thread.
-pub(crate) fn measure_temp(m: &mut Model) {
+pub fn measure_temp(m: &mut Model) {
     if d(m).frozen || d(m).listing_temp {
         return;
     }
@@ -492,7 +492,7 @@ fn took_temp_dirs(m: &mut Model, found: Vec<(rush_core::agent::Agent, Vec<TempDi
 }
 
 /// The top of dir: its things, and when the newest changed. Only the top.
-pub(crate) fn peek_dir(dir: &str) -> PathInfo {
+pub fn peek_dir(dir: &str) -> PathInfo {
     let mut p = PathInfo {
         at: now(),
         ..PathInfo::default()
@@ -515,7 +515,7 @@ pub(crate) fn peek_dir(dir: &str) -> PathInfo {
 
 /// Reads the process table and the machine's agent rows from it, and
 /// what the agents left running (reap).
-pub(crate) fn read_machine(m: &mut Model) {
+pub fn read_machine(m: &mut Model) {
     let st = d(m);
     if st.reading || st.frozen || now() - st.machine_at < MACHINE_EVERY {
         return;
@@ -548,13 +548,13 @@ pub(crate) fn read_machine(m: &mut Model) {
 }
 
 /// The machine read again now, its CPU from the reading before.
-pub(crate) fn read_machine_again(m: &mut Model) {
+pub fn read_machine_again(m: &mut Model) {
     d(m).machine_at = 0;
     read_machine(m);
 }
 
 /// Asks GitHub again of each repository on the page whose answer is due.
-pub(crate) fn refresh_prs(m: &mut Model) {
+pub fn refresh_prs(m: &mut Model) {
     let roots: Vec<String> = projects(m)
         .into_iter()
         .filter(|p| p.repo)
@@ -567,7 +567,7 @@ pub(crate) fn refresh_prs(m: &mut Model) {
 /// is, for its Overview and Changes and its finishing card (refreshPRs'
 /// m.host, prs.go:72). Only with a loop to ask it off the UI, and never
 /// in tests (frozen).
-pub(crate) fn refresh_open_prs(m: &mut Model) {
+pub fn refresh_open_prs(m: &mut Model) {
     if m.sender().is_none() || d(m).frozen {
         return;
     }
@@ -617,7 +617,7 @@ fn ask_prs(m: &mut Model, roots: Vec<String>) {
 }
 
 /// Forgets when GitHub was last asked, so it's asked now.
-pub(crate) fn ask_prs_again(m: &mut Model) {
+pub fn ask_prs_again(m: &mut Model) {
     for r in d(m).prs.values_mut() {
         r.next = 0;
     }
@@ -646,7 +646,7 @@ fn list_temp(dirs: &[TempDir]) -> Vec<TempEntry> {
 
 /// Shows or hides what's in a session's temp folders: listed off the UI,
 /// then each thing measured once.
-pub(crate) fn open_temp(m: &mut Model, key: &str) {
+pub fn open_temp(m: &mut Model, key: &str) {
     let st = d(m);
     if !st.opened.remove(key) {
         st.opened.insert(key.to_string());

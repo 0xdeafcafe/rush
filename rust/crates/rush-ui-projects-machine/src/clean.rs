@@ -23,7 +23,7 @@ use crate::style::*;
 
 /// Kinds of sessions' temp folders, as Clean up lists them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Temps {
+pub enum Temps {
     Done,
     Stopped,
     Running,
@@ -42,7 +42,7 @@ impl Temps {
 /// A worktree, something an agent left outside its project, sessions'
 /// temp folders of one kind, or /tmp's untouched scratch when none.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct CleanItem {
+pub struct CleanItem {
     pub wt: Option<Worktree>,
     pub left: Option<rush_fleet::LeftItem>,
     pub on: bool,
@@ -84,13 +84,13 @@ impl CleanItem {
 }
 
 #[derive(Clone)]
-pub(crate) struct CleanSheet {
+pub struct CleanSheet {
     pub items: Vec<CleanItem>,
     pub cur: usize,
 }
 
 /// Opens Clean up, once git has looked at the worktrees.
-pub(crate) fn open_clean_sheet(m: &mut Model) {
+pub fn open_clean_sheet(m: &mut Model) {
     let d = data(m);
     if d.checked == 0 {
         m.flash("still looking at worktrees with git · a moment");
@@ -459,7 +459,7 @@ impl Sheet for CleanSheet {
 
 /// Says, once a day at most, when there's a lot that could go: the prompt
 /// to open Clean up. Remembered only while rush runs.
-pub(crate) fn nudge_clean(m: &mut Model) {
+pub fn nudge_clean(m: &mut Model) {
     let d = data(m);
     if m.now - d.nudged < 24 * 3600 * 1000 || m.place == crate::frame::PlaceId::Projects {
         return;

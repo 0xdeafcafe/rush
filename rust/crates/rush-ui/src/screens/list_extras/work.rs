@@ -51,6 +51,22 @@ pub fn work_agents(m: &Model) -> Vec<usize> {
         .collect()
 }
 
+/// How far through its plan a session is, as (planned, ticked): the
+/// plan's tasks of what was read, and those ticked (workstreams.go:206-216).
+pub fn work_plan(m: &Model, key: &str) -> (i64, i64) {
+    let (mut planned, mut ticked) = (0i64, 0i64);
+    if let Some(ev) = m.kept.peek::<WorkState>().and_then(|st| st.views.get(key)) {
+        for e in ev.iter().filter(|e| e.run.is_empty()) {
+            match e.kind {
+                EventKind::Plan => planned += e.n,
+                EventKind::Tick => ticked += 1,
+                _ => {}
+            }
+        }
+    }
+    (planned, ticked)
+}
+
 /// Reads what the open sessions' transcripts have gained, off the UI
 /// thread (workLoad).
 pub fn load(m: &mut Model) {

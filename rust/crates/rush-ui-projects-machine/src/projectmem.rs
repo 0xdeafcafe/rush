@@ -21,7 +21,7 @@ const MEM_EVERY: Ms = 30_000;
 
 /// A project's memory as Projects shows it (memSummary).
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct MemSummary {
+pub struct MemSummary {
     pub p: Profile,
     pub root: String,
     pub notes: usize,
@@ -53,7 +53,7 @@ fn mem_profile(reg: &Registry, agents: &[(String, String)]) -> Option<Profile> {
 
 /// Reads the memory of each repository on the page that's due, off the
 /// UI: at most every half minute (memSummaryOf).
-pub(crate) fn refresh_memory(m: &mut Model) {
+pub fn refresh_memory(m: &mut Model) {
     let now = m.now;
     let due: Vec<(String, Vec<(String, String)>)> = {
         let d = data(m);
@@ -140,7 +140,7 @@ fn read_summary(reg: &Registry, ags: &[(String, String)], root: &str) -> Result<
 
 /// A project's Memory section: how many notes of each kind, and how many
 /// to review, on a row enter reviews (projectMemory).
-pub(crate) fn project_memory(m: &Model, p: &Project, w: usize, rows: &mut Vec<WorkRow>) {
+pub fn project_memory(m: &Model, p: &Project, w: usize, rows: &mut Vec<WorkRow>) {
     if !p.key.starts_with('/') || !p.repo {
         return;
     }
@@ -186,45 +186,4 @@ pub(crate) fn project_memory(m: &Model, p: &Project, w: usize, rows: &mut Vec<Wo
         what: What::Mem(Box::new(s.clone())),
         owner: p.key.clone(),
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Projects shows a project's memory by kind and how many to review,
-    /// on a row picked to review it (TestProjectMemoryRow).
-    #[test]
-    fn project_memory_row() {
-        let mut m = crate::new_model("t");
-        let key = "/src/app";
-        let now = m.now;
-        m.kept::<Data>().mem_counts.insert(
-            key.into(),
-            MemSummary {
-                root: key.into(),
-                notes: 3,
-                kinds: [("feedback".into(), 2), ("project".into(), 1)].into(),
-                review: 2,
-                at: now,
-                ..MemSummary::default()
-            },
-        );
-        let p = Project {
-            key: key.into(),
-            title: "app".into(),
-            agents: Vec::new(),
-            open: false,
-            repo: true,
-        };
-        let mut rows = Vec::new();
-        project_memory(&m, &p, 100, &mut rows);
-        let text: Vec<String> = rows.iter().map(|r| r.line.plain()).collect();
-        let text = text.join("\n");
-        for want in ["MEMORY  3 notes", "2 feedback · 1 project", "2 to review"] {
-            assert!(text.contains(want), "rows lack {want:?}:\n{text}");
-        }
-        let last = rows.last().unwrap();
-        assert!(last.pickable() && matches!(last.what, What::Mem(_)));
-    }
 }

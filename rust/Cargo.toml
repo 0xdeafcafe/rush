@@ -18,6 +18,7 @@ rush-ui = { path = "crates/rush-ui" }
 rush-ui-base = { path = "crates/rush-ui-base" }
 rush-ui-social = { path = "crates/rush-ui-social" }
 rush-ui-settings = { path = "crates/rush-ui-settings" }
+rush-ui-projects-machine = { path = "crates/rush-ui-projects-machine" }
 rush-sys = { path = "crates/rush-sys" }
 rush-events = { path = "crates/rush-events" }
 rush-gh = { path = "crates/rush-gh" }

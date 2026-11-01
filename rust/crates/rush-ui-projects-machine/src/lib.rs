@@ -5,34 +5,45 @@
 //! machinecare.go, workstreams.go, shells.go, memory.go, memcard.go,
 //! memreview.go, projectmem.go (each file's header names the lines).
 
+// The base's modules, so crate::frame::.. and the like read as they did
+// in rush-ui. Each is the one module, not a copy.
+use rush_ui_base::{config, frame, header, host, list, look, model, sess, session, style, worker};
+
 use crate::frame::{Ext, PlaceId};
 use crate::model::Model;
 
-mod care;
-mod clean;
-pub(crate) mod data;
-pub(crate) mod delete;
+#[doc(hidden)]
+pub mod care;
+#[doc(hidden)]
+pub mod clean;
+pub mod data;
+pub mod delete;
 pub mod memory;
 pub mod memreview;
-pub(crate) mod place;
-mod projectmem;
-pub(crate) mod prsheet;
-mod rows;
+pub mod place;
+#[doc(hidden)]
+pub mod projectmem;
+pub mod prsheet;
+#[doc(hidden)]
+pub mod rows;
 #[doc(hidden)]
 pub mod scan;
 pub mod scripts;
-pub use crate::shells;
-mod temp;
-mod tidy;
-pub(crate) mod tidydone;
-mod view;
+pub use rush_ui_base::shells;
+#[doc(hidden)]
+pub mod temp;
+#[doc(hidden)]
+pub mod tidy;
+pub mod tidydone;
+#[doc(hidden)]
+pub mod view;
 
 pub use care::{
     CareStart, CareStarter, StartCare, care_started, start_with_hosts as care_start_with_hosts,
 };
-pub(crate) use data::{PANE_PRS, PANE_SYSTEM, PANE_TEMP};
+pub use data::{PANE_PRS, PANE_SYSTEM, PANE_TEMP};
 pub use place::{pick_in_projects, projects_sel};
-pub(crate) use view::gh_pr_line;
+pub use view::gh_pr_line;
 
 /// Adds this group's places, pages, sheets' openers, keys, hooks and
 /// commands to x (frame/ext.rs).
@@ -106,4 +117,4 @@ pub fn temp_known(m: &Model, key: &str) -> Option<i64> {
 pub const TEMP_SHOWN: i64 = data::TEMP_SHOWN;
 
 #[cfg(test)]
-mod tests;
+rush_testenv::sandboxed!();

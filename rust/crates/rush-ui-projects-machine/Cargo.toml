@@ -1,0 +1,31 @@
+[package]
+name = "rush-ui-projects-machine"
+description = "rush's Projects place and the machine: projects, worktrees, folders, processes, clean-up and the machine's own care"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-convo.workspace = true
+rush-fleet.workspace = true
+rush-draw.workspace = true
+# The frame, the model, the list and their workers, under every screen.
+rush-ui-base.workspace = true
+rush-sys.workspace = true
+rush-gh.workspace = true
+rush-state.workspace = true
+rush-events.workspace = true
+rush-memory.workspace = true
+rush-prdrive.workspace = true
+rush-gate = { path = "../rush-gate" }
+rush-plugin = { path = "../rush-plugin" }
+rush-host = { path = "../rush-host" }
+libc.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }
+tempfile.workspace = true
