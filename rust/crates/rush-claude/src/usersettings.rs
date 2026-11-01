@@ -257,12 +257,17 @@ fn apply_to(f: &mut Settings, edits: &[Edit]) -> io::Result<()> {
 }
 
 /// The settings.json each of dirs reads, once each: a link and its
-/// target are one file.
+/// target are one file. The first is written whether it's there or not;
+/// another only when it's there (a login with no home yet, or one whose
+/// link leads nowhere, gets no file of rush's making).
 pub fn settings_paths(dirs: &[PathBuf]) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = Vec::new();
     let mut seen: Vec<PathBuf> = Vec::new();
-    for d in dirs {
+    for (i, d) in dirs.iter().enumerate() {
         let p = d.join("settings.json");
+        if i > 0 && fs::metadata(&p).is_err() {
+            continue;
+        }
         let real = fs::canonicalize(&p).unwrap_or_else(|_| p.clone());
         if seen.contains(&real) {
             continue;
@@ -515,9 +520,23 @@ mod tests {
         symlink(root.join("settings.json"), linked.join("settings.json")).unwrap();
         fs::write(own.join("settings.json"), r#"{"mine":true}"#).unwrap();
 
-        let homes = vec![linked.clone(), own.clone()];
-        let paths = settings_paths(&[root.clone(), linked.clone(), own.clone()]);
-        assert_eq!(paths.len(), 2, "a link and its target are one file");
+        let none = d.path().join("home-none");
+        let dangling = d.path().join("home-dangling");
+        fs::create_dir_all(&dangling).unwrap();
+        symlink(d.path().join("gone.json"), dangling.join("settings.json")).unwrap();
+        let homes = vec![linked.clone(), own.clone(), none.clone(), dangling.clone()];
+        let paths = settings_paths(&[
+            root.clone(),
+            linked.clone(),
+            own.clone(),
+            none.clone(),
+            dangling.clone(),
+        ]);
+        assert_eq!(
+            paths.len(),
+            2,
+            "a link and its target are one file; a home with none, or a link to nothing, isn't written"
+        );
         let s = Snapshot::read(&root, &homes, env(&[])).unwrap();
         assert_eq!(s.paths, paths);
         write(&s.paths, &compact_edits("400k").unwrap()).unwrap();
@@ -552,6 +571,8 @@ mod tests {
             theirs,
             serde_json::json!({"mine": true, "autoCompactWindow": 400000})
         );
+        assert!(!none.exists(), "no home made for a login without one");
+        assert!(!d.path().join("gone.json").exists());
         // No temp file left behind.
         for dir in [&root, &own] {
             let names: Vec<_> = fs::read_dir(dir)

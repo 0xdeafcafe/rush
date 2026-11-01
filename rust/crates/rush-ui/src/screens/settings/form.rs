@@ -313,7 +313,7 @@ pub fn pick_value(m: &mut Model, st: Setting) {
     );
     p.about = st.what.clone();
     p.cursor = cursor;
-    if !st.source.is_empty() {
+    if !st.source.is_empty() && st.source != "default" {
         p.note = format!("now from {}", st.source);
     }
     if st.typed {

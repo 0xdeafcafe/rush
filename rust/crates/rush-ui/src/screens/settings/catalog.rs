@@ -196,7 +196,13 @@ pub fn body(
         k.extend(keys);
         keys = k;
     }
-    keys.extend(["[ ]", "pages", "esc", "back"].map(String::from));
+    // ← goes back where esc does: said once.
+    if let Some(i) = keys.iter().position(|k| k == "←") {
+        keys[i] = "← esc".into();
+        keys.extend(["[ ]", "pages"].map(String::from));
+    } else {
+        keys.extend(["[ ]", "pages", "esc", "back"].map(String::from));
+    }
     let pairs: Vec<(&str, &str)> = keys
         .chunks(2)
         .filter(|p| p.len() == 2)
