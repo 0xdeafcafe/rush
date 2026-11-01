@@ -4,8 +4,8 @@
 //! does what [`plan`] says.
 //!
 //! - Pace, per account: its fair share is the weekly room left over the
-//!   time to the weekly reset; its burn is how much of the week it used
-//!   over the last few hours, from the plan's own readings (every machine
+//!   time to the weekly reset, counting 15 active hours of every 24; its
+//!   burn is how much of the week it used over the last few hours, from the plan's own readings (every machine
 //!   and session on the account, priced by Anthropic). Past `warn` times
 //!   its fair share it warns, past `trip` it trips, and it stays tripped
 //!   until it's back under `release`.
@@ -198,10 +198,17 @@ pub struct Pace {
     pub resets_at: Ms,
 }
 
+/// The hours of a day you're taken to use an account: its fair share is
+/// spread over these, not over all 24, so a normal day doesn't trip it.
+const ACTIVE_HOURS: f64 = 15.0;
+
 /// How fast a week used to week% may be used from at to its reset at
-/// resets_at, in percent an hour.
+/// resets_at, in percent an hour of use: the room left over the hours
+/// you'll be active before the reset, 15 of every 24. (The guard only
+/// reads the weekly window, which is longer than a day. The 5-hour
+/// window isn't scaled: within it you are active.)
 fn fair(week: f64, resets_at: Ms, at: Ms) -> f64 {
-    let hours = ((resets_at - at) as f64 / HOUR as f64).max(0.25);
+    let hours = ((resets_at - at) as f64 / HOUR as f64 * ACTIVE_HOURS / 24.0).max(0.25);
     (100.0 - week).max(0.0) / hours
 }
 

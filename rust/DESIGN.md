@@ -825,7 +825,9 @@ UI thread, and does what it says.
 
 - **Pace**, per account, any provider: the fair share is the room left
   in its longest window (`Quota::weekly`: Claude's week, Codex's
-  secondary) over the time to its reset; the burn is what that window
+  secondary) over the time to its reset, counting 15 active hours of
+  every 24 (you aren't on an account round the clock: 24 tripped normal
+  days at 2-3×); the burn is what that window
   gained over the last 2 hours. Each reading of each account's week is
   kept in `weekuse.json` (3 hours of them, every rush's readings
   merged), whether or not the guard is on, so turning it on has the

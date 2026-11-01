@@ -20,17 +20,29 @@ fn on() -> PaceCfg {
 
 #[test]
 fn pace_against_a_reset_far_and_close() {
-    // 6% of the week in the last 2 hours: 3% an hour, with 60% left.
+    // 6% of the week in the last 2 hours: 3% an hour, with 60% left. The
+    // fair share spreads the room over 15 active hours of every 24.
     for (name, reset_in, ratio, level) in [
         (
-            "reset in 100h: 0.6%/h is fair",
+            "reset in 100h: 0.96%/h is fair",
             100 * HOUR,
-            5.0,
+            3.125,
             Level::Over,
         ),
-        ("reset in 30h: 2%/h is fair", 30 * HOUR, 1.5, Level::Warn),
-        ("reset in 10h: 6%/h is fair", 10 * HOUR, 0.5, Level::Under),
-        // Under 15 minutes left counts as 15: it's spent or lost anyway.
+        (
+            "reset in 50h: 1.92%/h is fair",
+            50 * HOUR,
+            1.5625,
+            Level::Warn,
+        ),
+        (
+            "reset in 10h: 9.6%/h is fair",
+            10 * HOUR,
+            0.3125,
+            Level::Under,
+        ),
+        // Under 15 minutes of active time left counts as 15: it's spent or
+        // lost anyway.
         ("reset in 5m", 5 * MIN, 0.0125, Level::Under),
     ] {
         let v = steady(2 * HOUR, 34.0, 40.0, T0 + reset_in);
@@ -40,6 +52,18 @@ fn pace_against_a_reset_far_and_close() {
         assert_eq!(p.level, level, "{name}");
         assert_eq!(p.frees_at != 0, level == Level::Over, "{name}");
     }
+}
+
+/// A normal day: 2%/h with 62% left and 70h to the reset would be 2.3x
+/// its fair share over all 24 hours of a day (a trip), but is 1.41x over
+/// the 15 hours you are active.
+#[test]
+fn a_normal_days_use_is_under_its_pace() {
+    let v = steady(2 * HOUR, 34.0, 38.0, T0 + 70 * HOUR);
+    let p = pace(&v, &on(), false, T0);
+    assert!((p.fair - 62.0 / (70.0 * 15.0 / 24.0)).abs() < 1e-9, "{p:?}");
+    assert!((p.ratio - 1.4113).abs() < 1e-3, "{p:?}");
+    assert_eq!(p.level, Level::Under);
 }
 
 #[test]
@@ -55,10 +79,10 @@ fn pace_needs_half_an_hour_read() {
 fn tripped_stays_until_clearly_under() {
     // 1.5×: a warning, unless it had tripped, when it stays over until
     // under 1.2×.
-    let v = steady(2 * HOUR, 34.0, 40.0, T0 + 30 * HOUR);
+    let v = steady(2 * HOUR, 34.0, 40.0, T0 + 50 * HOUR);
     assert_eq!(pace(&v, &on(), false, T0).level, Level::Warn);
     assert_eq!(pace(&v, &on(), true, T0).level, Level::Over);
-    let v = steady(2 * HOUR, 36.0, 40.0, T0 + 30 * HOUR); // 1.0×
+    let v = steady(2 * HOUR, 36.0, 40.0, T0 + 50 * HOUR); // 1.04×
     assert_eq!(pace(&v, &on(), true, T0).level, Level::Under);
 }
 
@@ -212,10 +236,10 @@ fn of_equal_room_the_one_resetting_sooner_wins() {
 
 #[test]
 fn a_nearly_full_account_resetting_soon_loses_when_it_would_trip() {
-    // 1% left for 2 hours: 0.5%/h is its fair share, and the 1.2%/h the
-    // work brings would be 2.4× it. The roomy one, resetting in 100 hours,
+    // 0.5% left for 2 hours (1.25 active): 0.4%/h is its fair share, and
+    // the 1.2%/h the work brings would be 3× it. The roomy one, resetting in 100 hours,
     // takes it at 1.5×.
-    let soon = room("soon", 99.0, 2);
+    let soon = room("soon", 99.5, 2);
     let far = room("far", 20.0, 100);
     let p = plan(
         &pace_on(),
@@ -437,7 +461,7 @@ fn no_flip_flop_near_the_line() {
     assert_eq!(p.new_on, None);
     assert!(held(did(&p, "new")));
     // Hysteresis in the pace itself: b at 1.9× having tripped is still over.
-    let v = steady(2 * HOUR, 34.0, 40.0, T0 + 33 * HOUR);
+    let v = steady(2 * HOUR, 34.0, 40.0, T0 + 60 * HOUR);
     let r = pace(&v, &PaceCfg::default(), true, T0);
     assert!(r.ratio > 1.2 && r.ratio < 2.0, "{r:?}");
     assert_eq!(r.level, Level::Over);
