@@ -254,9 +254,8 @@ pub fn tick(mut i: Input, ops: &dyn HostOps) -> Output {
             changed |= h.note(&a.id, *s, now);
         }
     }
-    let ids: Vec<&str> = i.accts.iter().map(|(a, _)| a.id.as_str()).collect();
-    changed |= h.keep_only(&ids);
-    if changed && !ids.is_empty() {
+    changed |= h.forget_stale(now);
+    if changed {
         let _ = h.save(&path); // one that can't be written is read again next time
     }
     let cfg = i.settings.pace.unwrap_or_default();

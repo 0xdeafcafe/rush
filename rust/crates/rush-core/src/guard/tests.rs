@@ -120,7 +120,8 @@ fn readings_kept_and_pruned() {
     let p = d.path().join(FILE);
     h.save(&p).unwrap();
     assert_eq!(History::load(&p), h);
-    assert!(h.keep_only(&["b"]));
+    assert!(!h.forget_stale(T0 + 7 * HOUR), "read at 4h30: kept");
+    assert!(h.forget_stale(T0 + 8 * HOUR));
     assert!(h.0.is_empty());
 }
 

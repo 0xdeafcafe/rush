@@ -95,10 +95,13 @@ impl History {
         changed
     }
 
-    /// Forgets the logins not in ids.
-    pub fn keep_only(&mut self, ids: &[&str]) -> bool {
+    /// Forgets the accounts with no reading in the last few hours: one
+    /// gone, or not read lately. (Not by the accounts listed: a rush that
+    /// has yet to read its logins would forget them all.)
+    pub fn forget_stale(&mut self, now: Ms) -> bool {
         let n = self.0.len();
-        self.0.retain(|k, _| ids.contains(&k.as_str()));
+        self.0
+            .retain(|_, v| v.last().is_some_and(|s| s.0 > now - KEEP));
         n != self.0.len()
     }
 
