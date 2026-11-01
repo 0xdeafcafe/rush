@@ -32,9 +32,9 @@ use rush_plugin::{
 use rush_plugind::hooks::Msg;
 
 use super::{STASH_PLUGIN, toned};
+use crate::ModelPlugins;
 use crate::frame::Out;
 use crate::model::Model;
-use crate::screens::plugin_ui::ModelPlugins;
 use crate::style::*;
 
 /// What the last look at the fleet found, to tell what changed
@@ -679,7 +679,7 @@ pub fn plugin_key_actions(m: &Model) -> Vec<rush_keymap::Action> {
 /// built from, with plugins' commands as they are now (onHooks' setKeys).
 pub fn rebuild_keys(m: &mut Model) {
     crate::keybind::rebuild(m);
-    crate::screens::settings::keys::rebuild(m);
+    m.act(crate::frame::ext::Act::RebuildKeys);
 }
 
 /// The stash's words, and whether it's running (stash.go:101 stash).

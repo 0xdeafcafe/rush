@@ -7,7 +7,7 @@
 //! subs.rs (panelsubs.go); laid beside the conversation, and clicked, by
 //! beside.rs.
 
-use crate::screens::plugin_ui::ModelPlugins;
+use crate::ModelPlugins;
 
 pub mod acts;
 pub mod beside;
@@ -17,7 +17,6 @@ pub mod model;
 pub mod panel;
 pub mod quiet;
 pub mod read;
-pub mod subs;
 mod tabular;
 mod visual;
 

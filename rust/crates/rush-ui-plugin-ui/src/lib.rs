@@ -22,6 +22,10 @@ use rush_core::text::{Color, Line, Span};
 use rush_plugin::{Bundle, Offer, Plugin, Sidebar};
 use rush_plugind::hooks::Client;
 
+// The base's modules, so crate::frame::.. and the like read as they did
+// in rush-ui. Each is the one module, not a copy.
+use rush_ui_base::{config, frame, keybind, model, sess, sidecol, style, worker};
+
 use crate::frame::{Ext, Out, Sheet};
 use crate::model::Model;
 use crate::style::*;
@@ -40,8 +44,9 @@ pub mod sheet;
 pub mod sidebar;
 pub mod views;
 
+// Every test runs in a throwaway home (rush-testenv).
 #[cfg(test)]
-mod tests;
+rush_testenv::sandboxed!();
 
 /// The bundled plugin that is the stash (stash.go:97 stashPlugin).
 pub const STASH_PLUGIN: &str = "drafts";
@@ -184,7 +189,7 @@ impl Default for Plugins {
 
 /// Model's side of this module: Model is rush-ui-base's, so its
 /// methods here are a trait's.
-pub(crate) trait ModelPlugins {
+pub trait ModelPlugins {
     fn plugins(&mut self) -> &mut Plugins;
     fn hooks(&self) -> Option<Arc<Client>>;
     fn screen_free(&self) -> bool;
@@ -210,6 +215,34 @@ impl ModelPlugins for Model {
             && self.session.is_none()
             && self.place == crate::frame::PlaceId::Agents
     }
+}
+
+/// What plugin_ui asks of session_core, which is above it: set once by
+/// the top crate's register (screens/mod.rs), as settings' Broker is.
+pub struct PanelHost {
+    /// The rows of what a session runs, for the top of its views panel
+    /// (key, the panel's state, how many views, its width); None when
+    /// they show in the dock instead.
+    pub panel_subs: fn(
+        &Model,
+        &str,
+        &views::panel::ViewsState,
+        usize,
+        usize,
+    ) -> Option<Vec<views::acts::ViewLine>>,
+}
+
+static PANEL_HOST: std::sync::OnceLock<PanelHost> = std::sync::OnceLock::new();
+
+/// Sets what session_core gives the views panel; the first call stands.
+pub fn provide_panel(h: PanelHost) {
+    let _ = PANEL_HOST.set(h);
+}
+
+pub(crate) fn panel_host() -> &'static PanelHost {
+    PANEL_HOST
+        .get()
+        .expect("panel_subs registered by session_core")
 }
 
 /// Connects this window to its plugins (model.go's startHooks): the
@@ -238,7 +271,7 @@ pub fn start(m: &mut Model, client: Arc<Client>) {
     }
     hooks::read_bundled(m);
     // Hosted asks no plugin approvals (model.go:556 Init).
-    if !crate::hosted::quiet(m) {
+    if m.ext.calls.hosted_id()(m).is_none() {
         approval::check(m);
     }
     // Go looks for optional plugins on its fifth tick: one look a few
@@ -257,17 +290,6 @@ pub fn start(m: &mut Model, client: Arc<Client>) {
 /// Adds this group's hooks: after each reading of the list plugins hear
 /// what changed, and what waits on you is offered once the screen is free.
 pub fn register(x: &mut Ext) {
-    // Settings › Plugins asks the broker through this window's hooks
-    // client (settings_plugins.go:192 m.hooks.State().Plugins, :456
-    // m.hooks.SetSetting).
-    crate::screens::settings::plugins::provide(crate::screens::settings::plugins::Broker {
-        running: |m| {
-            m.hooks()
-                .map(|h| h.state().plugins.clone())
-                .unwrap_or_default()
-        },
-        set_setting: set_plugin_setting,
-    });
     x.on_fleet.push(on_fleet);
     // The list's view summaries, and the open session's views.
     x.on_fleet.push(views::beside::on_fleet);
@@ -277,9 +299,18 @@ pub fn register(x: &mut Ext) {
     x.overlays.push(|m, _| hooks::emit_input(m));
 }
 
+/// The plugins running, as the broker last said: Settings › Plugins
+/// reads them through this window's hooks client
+/// (settings_plugins.go:192 m.hooks.State().Plugins).
+pub fn running(m: &Model) -> Vec<rush_plugin::ui::UiPlugin> {
+    m.hooks()
+        .map(|h| h.state().plugins.clone())
+        .unwrap_or_default()
+}
+
 /// Changes one of a running plugin's settings, off the UI thread; a
-/// failure is flashed (settings_plugins.go:455).
-fn set_plugin_setting(m: &mut Model, name: &str, key: &str, value: &str) -> Out {
+/// failure is flashed (settings_plugins.go:455, :456 m.hooks.SetSetting).
+pub fn set_plugin_setting(m: &mut Model, name: &str, key: &str, value: &str) -> Out {
     let Some(h) = m.hooks() else {
         m.flash_err(&format!("{name}: rush isn't talking to its plugins yet"));
         return Out::Draw;

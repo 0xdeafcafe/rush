@@ -16,14 +16,24 @@
 use rush_draw::{Button, MouseKind};
 
 use super::model::{Action, View};
-use super::panel::{Click, VIEWS_STRIP, pane_views_side, views_width};
+use super::panel::{Click, VIEWS_STRIP, ViewsState, pane_views_side, views_width};
 use super::read::{self, id_of, past_views_of, views_of};
-use super::subs::{Runs, panel_subs, subs_in_panel};
+use crate::frame::ext::Act;
 use crate::frame::{Mouse, Out};
 use crate::model::Model;
-use crate::screens::session_core as core;
-use crate::screens::session_core::side::side_width;
+use crate::panel_host;
 use crate::sess::open_key;
+use crate::sidecol::{side_width, text_width};
+
+/// Whether what's running shows at the top of the session's panel: it's
+/// open on one of the agent's views, and there are tasks to show; the
+/// dock leaves them out then (subsInPanel). width is the panel's.
+pub fn subs_in_panel(any: bool, st: &ViewsState, side: usize, width: usize) -> bool {
+    if width <= VIEWS_STRIP || side == 0 || st.shut || st.past {
+        return false;
+    }
+    any
+}
 
 /// The session's views and past views shown beside a conversation w
 /// wide, and how much of w they take: 0 when there are none or no room,
@@ -35,7 +45,7 @@ pub fn views_beside(m: &mut Model, key: &str, w: usize) -> (Vec<View>, Vec<View>
         .unwrap_or("")
         .to_string();
     read::follow(m, &id);
-    if core::views::view_name(m, key) != "conversation" || id.is_empty() {
+    if (m.ext.calls.view_name())(m, key) != "conversation" || id.is_empty() {
         return (Vec::new(), Vec::new(), 0);
     }
     let (side, past) = (views_of(m, &id), past_views_of(m, &id));
@@ -69,32 +79,16 @@ pub fn paste(
     past: &[View],
     top: usize,
 ) {
-    let (now, tick) = (m.now, m.tick);
+    let now = m.now;
     let mut st = std::mem::take(read::state(m, key));
     st.w = w;
     st.live.clear();
     if w > 0 {
         if let Some(v) = m.session.as_ref().filter(|v| v.key == key) {
-            let core = m.kept.get::<crate::screens::session_core::Core>();
-            let runs = core.conns.get(key).map(|c| &c.runs);
-            if subs_in_panel(runs.is_some_and(|r| r.shown.any()), &st, vs.len(), w) {
-                let out = |j: &rush_convo::Job| runs.and_then(|r| r.out_of(j));
-                let kind = m
-                    .agents
-                    .iter()
-                    .find(|a| a.key == key)
-                    .map(|a| a.kind.as_str().to_string())
-                    .unwrap_or_default();
-                let r = Runs {
-                    sel: &v.sel,
-                    tick,
-                    now,
-                    out: &out,
-                    runs,
-                    reg: &m.reg,
-                    kind: &kind,
-                };
-                st.live = panel_subs(&v.sess, &st, w - 4, &r);
+            // What runs shows at the panel's top when the dock leaves it
+            // out: session_core draws those rows (panel_host().panel_subs).
+            if let Some(rows) = (panel_host().panel_subs)(m, key, &st, vs.len(), w) {
+                st.live = rows;
             }
             st.quiet = String::new();
             if !vs.is_empty() {
@@ -119,7 +113,7 @@ fn open_panel(m: &mut Model) -> Option<String> {
         return None;
     }
     let key = open_key(m)?;
-    if core::views::view_name(m, &key) != "conversation" {
+    if (m.ext.calls.view_name())(m, &key) != "conversation" {
         return None;
     }
     read::state_of(m, &key).filter(|st| st.w > 0)?;
@@ -142,9 +136,7 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
                 return if changed { Out::Draw } else { Out::Pass };
             }
             // Nothing under it in the conversation is lit meanwhile.
-            let c = core::conn(m, &key);
-            let lit = !c.vs.hover_ref.is_empty();
-            c.vs.hover_ref.clear();
+            let lit = (m.ext.calls.clear_hover())(m, &key);
             if changed || lit { Out::Draw } else { Out::Idle }
         }
         MouseKind::ScrollUp | MouseKind::ScrollDown => {
@@ -227,20 +219,10 @@ pub fn on_click(m: &mut Model, key: &str, c: Click) -> Out {
             // subagents view, shown beside its list rather than across the
             // whole view, a task is picked: its keys show under it
             // (agentviews.go:908-916; the user asked for the pick).
-            let workflow = m
-                .session
-                .as_ref()
-                .is_some_and(|v| core::workflow::is_workflow_ref(&v.sess, &r));
-            if workflow {
-                core::subview::open_workflow(m, key, &r);
-            } else if let Some(id) = r.strip_prefix("run:") {
-                let id = id.to_string();
-                core::subview::pick_run(m, key, &id);
-            } else if r.starts_with("job:")
-                && let Some(v) = m.session.as_mut()
-            {
-                v.sel = r;
-            }
+            m.act(Act::OpenRun {
+                key: key.to_string(),
+                r,
+            });
             Out::Draw
         }
     }
@@ -321,7 +303,10 @@ fn send_as(m: &mut Model, key: &str, text: &str) {
         m.flash_err("that works in rush-mode sessions · /rush moves this one over");
         return;
     }
-    core::keys::send_as(m, key, text);
+    m.act(Act::SendAs {
+        key: key.to_string(),
+        text: text.to_string(),
+    });
 }
 
 /// A click on the views folded into the column: opens them, on a view's
@@ -364,11 +349,7 @@ pub fn folded_in_side(
         return None;
     }
     let edge = side.first().map_or(crate::style::SUB, super::view_accent);
-    let (rows, refs) = super::panel::side_views(
-        &side,
-        &past,
-        crate::screens::session_core::side::text_width(sw),
-    );
+    let (rows, refs) = super::panel::side_views(&side, &past, text_width(sw));
     Some((edge, rows, refs))
 }
 
@@ -387,7 +368,7 @@ pub fn on_fleet(m: &mut Model) {
 pub fn subs_shown_in_panel(m: &mut Model, key: &str, w: usize) -> bool {
     let (side, _, width) = views_beside(m, key, w);
     let st = read::state(m, key).clone();
-    let any = crate::screens::session_core::running::any(m, key);
+    let any = (m.ext.calls.running_any())(m, key);
     m.session
         .as_ref()
         .filter(|v| v.key == key)

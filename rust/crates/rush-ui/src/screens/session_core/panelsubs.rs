@@ -17,10 +17,14 @@ use rush_core::adapter::Registry;
 use rush_core::text::{Color, Line, width};
 use rush_core::time::Ms;
 
-use super::acts::{ViewAct, ViewLine};
-use super::panel::{ViewsState, view_heading};
+use crate::model::Model;
+
 use crate::screens::list_extras::jobs::{Tailed, dock_jobs, job_icon, job_label, job_right};
 use crate::style::*;
+use rush_ui_plugin_ui::views::acts::{ViewAct, ViewLine};
+use rush_ui_plugin_ui::views::beside::subs_in_panel;
+use rush_ui_plugin_ui::views::panel::{ViewsState, view_heading};
+use rush_ui_plugin_ui::views::spread;
 
 /// The key the subagents' heading folds by.
 pub const SUBS_FOLD: &str = "§subagents";
@@ -29,14 +33,14 @@ pub const JOBS_FOLD: &str = "§tasks";
 
 /// What a frame of the panel's runs is drawn from: the run picked (its
 /// ref), the spinner's step, now, and each task's output as last read.
-pub struct Runs<'a> {
+pub struct PanelRuns<'a> {
     pub sel: &'a str,
     pub tick: usize,
     pub now: Ms,
     pub out: &'a dyn Fn(&Job) -> Option<&'a Tailed>,
     /// The session's runs as read, and what the dock shows of them; None
     /// with none read.
-    pub runs: Option<&'a crate::screens::session_core::subs::Runs>,
+    pub runs: Option<&'a super::subs::Runs>,
     pub reg: &'a Registry,
     /// The session's own agent.
     pub kind: &'a str,
@@ -47,16 +51,6 @@ pub struct Runs<'a> {
 /// dockJobs).
 pub fn loose_jobs(s: &Session) -> Vec<&Job> {
     dock_jobs(s)
-}
-
-/// Whether what's running shows at the top of the session's panel: it's
-/// open on one of the agent's views, and there are tasks to show; the
-/// dock leaves them out then (subsInPanel). width is the panel's.
-pub fn subs_in_panel(any: bool, st: &ViewsState, side: usize, width: usize) -> bool {
-    if width <= super::panel::VIEWS_STRIP || side == 0 || st.shut || st.past {
-        return false;
-    }
-    any
 }
 
 /// The tasks' heading: Shells, Monitors, or Tasks when they're of kinds
@@ -78,10 +72,49 @@ pub fn jobs_word(s: &Session, jobs: &[&Job]) -> String {
     }
 }
 
+/// The rows of what session key has running, for the top of its panel w
+/// wide, when they show there rather than in the dock: the panel is open
+/// on nviews views (subsInPanel, then panelSubs). The views panel asks
+/// for these through plugin_ui's host table.
+pub fn rows(
+    m: &Model,
+    key: &str,
+    st: &ViewsState,
+    nviews: usize,
+    w: usize,
+) -> Option<Vec<ViewLine>> {
+    let v = m.session.as_ref().filter(|v| v.key == key)?;
+    let runs = m
+        .kept
+        .peek::<super::Core>()
+        .and_then(|c| c.conns.get(key))
+        .map(|c| &c.runs);
+    if !subs_in_panel(runs.is_some_and(|r| r.shown.any()), st, nviews, w) {
+        return None;
+    }
+    let out = |j: &Job| runs.and_then(|r| r.out_of(j));
+    let kind = m
+        .agents
+        .iter()
+        .find(|a| a.key == key)
+        .map(|a| a.kind.as_str().to_string())
+        .unwrap_or_default();
+    let r = PanelRuns {
+        sel: &v.sel,
+        tick: m.tick,
+        now: m.now,
+        out: &out,
+        runs,
+        reg: &m.reg,
+        kind: &kind,
+    };
+    Some(panel_subs(&v.sess, st, w - 4, &r))
+}
+
 /// What the session has running, for the top of its panel, w wide: its
 /// shells, monitors and other tasks under their heading, two lines each
 /// (panelSubs).
-pub fn panel_subs(s: &Session, st: &ViewsState, w: usize, r: &Runs) -> Vec<ViewLine> {
+pub fn panel_subs(s: &Session, st: &ViewsState, w: usize, r: &PanelRuns) -> Vec<ViewLine> {
     let mut out = Vec::new();
     if let Some(runs) = r.runs {
         subs(&mut out, s, st, w, r, runs);
@@ -121,7 +154,15 @@ pub fn panel_subs(s: &Session, st: &ViewsState, w: usize, r: &Runs) -> Vec<ViewL
 
 /// A task's two lines: its mark, kind and command, and how long it has
 /// run, then its latest line of output; picked, what its keys do (job).
-fn job(out: &mut Vec<ViewLine>, s: &Session, j: &Job, lead: &str, i: usize, w: usize, r: &Runs) {
+fn job(
+    out: &mut Vec<ViewLine>,
+    s: &Session,
+    j: &Job,
+    lead: &str,
+    i: usize,
+    w: usize,
+    r: &PanelRuns,
+) {
     let kind = s.job_kind(j);
     let (icon, col) = job_icon(kind);
     let mark = if j.background {
@@ -140,7 +181,7 @@ fn job(out: &mut Vec<ViewLine>, s: &Session, j: &Job, lead: &str, i: usize, w: u
         - right.width() as isize
         - 2;
     let label = rush_draw::truncate(&job_label(s, j), room.max(8) as usize, "…").into_owned();
-    let top = super::spread(
+    let top = spread(
         line([
             plain(lead),
             mark,
@@ -183,8 +224,8 @@ fn subs(
     s: &Session,
     st: &ViewsState,
     w: usize,
-    r: &Runs,
-    runs: &crate::screens::session_core::subs::Runs,
+    r: &PanelRuns,
+    runs: &super::subs::Runs,
 ) {
     let sh = &runs.shown;
     if !sh.runs() {
@@ -224,8 +265,8 @@ fn subs(
 struct Panel<'a, 'b> {
     s: &'a Session,
     w: usize,
-    r: &'a Runs<'b>,
-    runs: &'a crate::screens::session_core::subs::Runs,
+    r: &'a PanelRuns<'b>,
+    runs: &'a super::subs::Runs,
 }
 
 impl Panel<'_, '_> {
@@ -249,7 +290,7 @@ impl Panel<'_, '_> {
         right: &str,
         sa: &Subagent,
     ) -> Line {
-        use crate::screens::session_core::subname::{sub_name, sub_tag, sub_task};
+        use super::subname::{sub_name, sub_tag, sub_task};
         let room = (self.w as isize - width(lead) as isize - 2 - width(right) as isize - 2).max(8)
             as usize;
         // What runs it only when the task shows whole beside it.
@@ -262,7 +303,7 @@ impl Panel<'_, '_> {
         };
         let mut l = line([plain(lead), mark, plain(" ")]);
         join(&mut l, name);
-        super::spread(l, line([sp(right, DIM)]), self.w)
+        spread(l, line([sp(right, DIM)]), self.w)
     }
 
     /// A running run's second line: what it's doing now, else what it
@@ -284,9 +325,7 @@ impl Panel<'_, '_> {
     /// How long a run has gone, to end (ran).
     fn ran(&self, sa: &Subagent) -> String {
         match self.runs.stats.get(&sa.id) {
-            Some(t) if t.first > 0 => dur(crate::screens::session_core::workflow::round_s(
-                self.r.now - t.first,
-            )),
+            Some(t) if t.first > 0 => dur(super::workflow::round_s(self.r.now - t.first)),
             _ => String::new(),
         }
     }
@@ -297,7 +336,7 @@ impl Panel<'_, '_> {
         let under = self.doing(lead, sa);
         row(out, self.r, &format!("run:{}", sa.id), self.w, [top, under]);
         // The shells it runs, under it.
-        for (k, j) in crate::screens::session_core::subs::jobs_of(self.runs, self.s, &sa.id)
+        for (k, j) in super::subs::jobs_of(self.runs, self.s, &sa.id)
             .iter()
             .enumerate()
         {
@@ -307,13 +346,8 @@ impl Panel<'_, '_> {
 
     /// A workflow: what it's for and the phase it's in, then its agents
     /// working under it (flow).
-    fn flow(
-        &self,
-        out: &mut Vec<ViewLine>,
-        f: &crate::screens::session_core::workflow::DockFlow,
-        i: usize,
-    ) {
-        use crate::screens::session_core::workflow::{round_s, workflow_now};
+    fn flow(&self, out: &mut Vec<ViewLine>, f: &super::workflow::DockFlow, i: usize) {
+        use super::workflow::{round_s, workflow_now};
         let right = if f.g.start > 0 {
             dur(round_s(self.r.now - f.g.start))
         } else {
@@ -325,7 +359,7 @@ impl Panel<'_, '_> {
             "…",
         )
         .into_owned();
-        let top = super::spread(
+        let top = spread(
             line([
                 sp(SPINNER[(self.r.tick + i) % SPINNER.len()], ORANGE),
                 plain(" "),
@@ -355,9 +389,9 @@ impl Panel<'_, '_> {
 
     /// A run that ended lately: ticked off, how it ended and when, and
     /// the last thing it said (finished).
-    fn finished(&self, out: &mut Vec<ViewLine>, d: &crate::screens::session_core::subs::DoneRun) {
-        use crate::screens::session_core::subname::sub_mark;
-        use crate::screens::session_core::workflow::round_s;
+    fn finished(&self, out: &mut Vec<ViewLine>, d: &super::subs::DoneRun) {
+        use super::subname::sub_mark;
+        use super::workflow::round_s;
         let jobs = self.s.subagent_jobs();
         let (status, _) = self.runs.state(self.s, &d.sa, &jobs, self.r.now);
         let word = if status == "failed" || status == "stopped" {
@@ -408,7 +442,13 @@ fn trimmed(mut l: Line) -> Option<Line> {
 
 /// Adds a run's lines, lit when it's picked: a click watches it, or picks
 /// it (panelRuns.row).
-fn row<const N: usize>(out: &mut Vec<ViewLine>, r: &Runs, id: &str, w: usize, lines: [Line; N]) {
+fn row<const N: usize>(
+    out: &mut Vec<ViewLine>,
+    r: &PanelRuns,
+    id: &str,
+    w: usize,
+    lines: [Line; N],
+) {
     for l in lines {
         if l.spans.iter().all(|s| s.text.is_empty()) {
             continue;

@@ -10,14 +10,15 @@ use rush_core::adapter::{Marketplace, Plugin as AgentPlugin, PluginParts};
 use rush_core::text::Line;
 use rush_plugin::{Manifest, Offer, Pick, PickAction, PickItem, Plugin, UiDo};
 
-use super::approval::ApprovalSheet;
-use super::layout::LayoutSheet;
-use super::offer::OfferSheet;
-use super::pick::PickSheet;
-use super::picks::{OptPick, OptionalSheet};
-use super::sheet::{DISCOVER, INSTALLED, MARKETS, PluginSheet};
-use super::*;
 use crate::frame::{Press, Sheet};
+use crate::model::Model;
+use rush_ui_plugin_ui::approval::ApprovalSheet;
+use rush_ui_plugin_ui::layout::LayoutSheet;
+use rush_ui_plugin_ui::offer::OfferSheet;
+use rush_ui_plugin_ui::pick::PickSheet;
+use rush_ui_plugin_ui::picks::{OptPick, OptionalSheet};
+use rush_ui_plugin_ui::sheet::{DISCOVER, INSTALLED, MARKETS, PluginSheet};
+use rush_ui_plugin_ui::*;
 
 fn plain_rows(ls: Vec<Line>) -> Vec<String> {
     ls.into_iter()
@@ -127,7 +128,14 @@ fn pick_matches_go() {
         s.filter = "zzz".chars().collect();
         sets.push(s.body(&m, w, 30));
     }
-    same(sets, include_str!("testdata/pick.txt"), "pick");
+    same(
+        sets,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/pick.txt"
+        )),
+        "pick",
+    );
 }
 
 fn offer() -> Offer {
@@ -159,7 +167,14 @@ fn offer_matches_go() {
         s.busy = true;
         sets.push(s.body(&m, w, 30));
     }
-    same(sets, include_str!("testdata/offer.txt"), "offer");
+    same(
+        sets,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/offer.txt"
+        )),
+        "offer",
+    );
 }
 
 fn weather() -> Plugin {
@@ -198,7 +213,10 @@ fn approval_matches_go() {
     }
     same_by(
         sets,
-        include_str!("testdata/approval.txt"),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/approval.txt"
+        )),
         "approval",
         no_data_dir,
     );
@@ -248,7 +266,14 @@ fn optional_matches_go() {
         s.busy = true;
         sets.push(s.body(&m, w, 30));
     }
-    same(sets, include_str!("testdata/optional.txt"), "optional");
+    same(
+        sets,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/optional.txt"
+        )),
+        "optional",
+    );
 }
 
 #[test]
@@ -261,7 +286,14 @@ fn layout_matches_go() {
         v.cur = 2;
         sets.push(v.body(&m, w, 30));
     }
-    same(sets, include_str!("testdata/layout.txt"), "layout");
+    same(
+        sets,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/layout.txt"
+        )),
+        "layout",
+    );
 }
 
 fn ap(id: &str, name: &str, market: &str) -> AgentPlugin {
@@ -381,7 +413,14 @@ fn plugins_matches_go() {
         q.loaded = false;
         sets.push(q.body(&m, w, 34));
     }
-    same(sets, include_str!("testdata/plugins.txt"), "plugins");
+    same(
+        sets,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/plugins.txt"
+        )),
+        "plugins",
+    );
 }
 
 const MD_TEXT: &str = "---\nname: note\ndescription: what this is\ntype: opinion\n---\n\n# Notes\n\nSome **bold** and *italic* and `code`, with a [link](missing.md) and [[other]].\n\n- one\n- [x] done item\n- [ ] open item that is long enough to wrap around the edge of a narrow editor\n1. first\n> a quote\n\n```go\nfunc main() {\n\tx := \"str\" // c\n}\n```\n| a | b |\n---\nend";
@@ -416,7 +455,14 @@ fn doc_matches_go() {
         }
     }
     let _ = std::fs::remove_dir_all(&dir);
-    same(sets, include_str!("testdata/doc.txt"), "doc");
+    same(
+        sets,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/doc.txt"
+        )),
+        "doc",
+    );
 }
 
 /// A disk that keeps what's done to it, for the keys.
@@ -939,5 +985,5 @@ fn plugin_notes() {
     );
 }
 
-#[path = "tests_wide.rs"]
+#[path = "wide.rs"]
 mod wide;

@@ -239,6 +239,15 @@ pub enum Act {
     /// An agent put away, or brought back from there, by its key
     /// (cmdbar/stops.rs toggle_done).
     ToggleDone(String),
+    /// Keybindings put in force again, plugins' commands as they are now
+    /// (settings/keys.rs rebuild).
+    RebuildKeys,
+    /// A run clicked in the views panel: a workflow's agents, a run picked
+    /// in the subagents view, or a task picked (session_core/subview.rs).
+    OpenRun { key: String, r: String },
+    /// The agent sent text as if typed, in a session rush runs
+    /// (session_core/keys.rs send_as).
+    SendAs { key: String, text: String },
 }
 
 impl Model {
@@ -506,6 +515,17 @@ calls! {
     /// The rooms as just read: each finished room on a chat hands its
     /// verdict back (session_cards/discuss.rs verdicts_back).
     verdicts_back("session_cards"): fn(&mut Model, Vec<rush_room::room::Summary>),
+    /// The view a session shows (session_core/views.rs view_name).
+    view_name("session_core"): fn(&Model, &str) -> &'static str,
+    /// Whether a session has runs or tasks the dock would show
+    /// (session_core/running.rs any).
+    running_any("session_core"): fn(&mut Model, &str) -> bool,
+    /// Clears the conversation's lit row under the pointer; whether one
+    /// was lit (session_core views ViewState hover_ref).
+    clear_hover("session_core"): fn(&mut Model, &str) -> bool,
+    /// What's in a session's box sent, or held for plugins to answer
+    /// first (session_core/keys.rs send).
+    send_box("session_core"): fn(&mut Model, &str, bool) -> Out,
 }
 
 /// State screens keep between calls, one value per type, made on first

@@ -1621,6 +1621,7 @@ dependencies = [
  "rush-sys",
  "rush-testenv",
  "rush-ui-base",
+ "rush-ui-plugin-ui",
  "rush-ui-projects-machine",
  "rush-ui-settings",
  "rush-ui-social",
@@ -1653,6 +1654,32 @@ dependencies = [
  "rush-sys",
  "rush-testenv",
  "rush-update",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rush-ui-plugin-ui"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "rush-bundled",
+ "rush-claude",
+ "rush-convo",
+ "rush-core",
+ "rush-draw",
+ "rush-events",
+ "rush-fleet",
+ "rush-hl",
+ "rush-host",
+ "rush-keymap",
+ "rush-net",
+ "rush-plugin",
+ "rush-plugind",
+ "rush-state",
+ "rush-sys",
+ "rush-testenv",
+ "rush-ui-base",
  "serde",
  "serde_json",
 ]

@@ -257,7 +257,7 @@ fn views_of_plugins() {
         ..Default::default()
     };
     let list = vec![ci.clone(), mine.clone()];
-    let mut m = crate::new_model("test");
+    let mut m = crate::model::Model::bare("test", |_| {});
     let shown = shown_views(&list, |p| plugin_draws_views(&m, p));
     assert_eq!(shown.len(), 1, "a plugin that isn't running drew");
     assert_eq!(shown[0].name, "mine");

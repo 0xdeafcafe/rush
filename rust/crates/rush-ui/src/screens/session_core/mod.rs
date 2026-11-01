@@ -40,6 +40,7 @@ pub mod memory;
 pub mod minimap;
 pub mod moveto;
 pub mod overview;
+pub mod panelsubs;
 pub use crate::paint;
 pub mod queue;
 pub mod relay;

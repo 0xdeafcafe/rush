@@ -9,17 +9,15 @@
 use rush_plugin::{Intercept, InterceptResult, clean_notice};
 
 use super::hooks::{agent_by_key, ui_session};
+use crate::ModelPlugins;
 use crate::frame::Out;
 use crate::model::Model;
-use crate::screens::list_extras::prompt::is_hash_cmd;
-use crate::screens::plugin_ui::ModelPlugins;
-use crate::screens::session_core::keys;
 use crate::sess::conn;
 
 /// Whether text in a box goes past plugins before it's sent: a message,
 /// not a # or / command, nor a line to be carried on with a trailing
 /// backslash (wantsIntercept's text half).
-pub fn message(raw: &str, now: bool) -> bool {
+pub fn message(is_hash_cmd: fn(&str) -> bool, raw: &str, now: bool) -> bool {
     let t = raw.trim();
     !(t.is_empty() || is_hash_cmd(t) || t.starts_with('/') || raw.ends_with('\\') && !now)
 }
@@ -29,11 +27,12 @@ pub fn message(raw: &str, now: bool) -> bool {
 /// queued (wantsIntercept).
 pub fn wants(m: &mut Model, key: &str, now: bool) -> bool {
     let Some(h) = m.hooks() else { return false };
+    let is_hash = m.ext.calls.is_hash_cmd();
     let c = conn(m, key);
     if c.intercepted || c.edit_q > 0 || !h.intercepts() {
         return false;
     }
-    message(&c.input.string(), now)
+    message(is_hash, &c.input.string(), now)
 }
 
 /// Asks plugins about what's in session key's box, in the background;
@@ -105,7 +104,7 @@ pub fn answered(m: &mut Model, key: &str, was: &str, now: bool, r: InterceptResu
         _ => {}
     }
     conn(m, key).intercepted = true;
-    let o = keys::send(m, key, now);
+    let o = (m.ext.calls.send_box())(m, key, now);
     conn(m, key).intercepted = false;
     match o {
         Out::Pass | Out::Idle => Out::Draw,

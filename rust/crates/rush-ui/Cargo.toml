@@ -18,6 +18,8 @@ rush-ui-social.workspace = true
 rush-ui-settings.workspace = true
 # The Projects place and the machine's care.
 rush-ui-projects-machine.workspace = true
+# Plugin sheets, approvals and an agent's views beside its conversation.
+rush-ui-plugin-ui.workspace = true
 rush-sys.workspace = true
 rush-gh.workspace = true
 rush-gate = { path = "../rush-gate" }
