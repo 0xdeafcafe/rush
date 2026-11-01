@@ -16,13 +16,14 @@ use rush_core::usage::{EVERY, LEAD, Quota, Window};
 use super::BAR_TOP;
 use super::line::{Ctx, Seg, bar_line};
 use crate::accounts::{cfg, peek};
+use crate::frame::ext::Gauges;
 use crate::header::Drops;
 use crate::look::{LOGINS_KIND, look_of, provider_name};
 use crate::meters::{MeterRow, meter_row, mini_bar, pct, usage_color};
 use crate::model::Model;
 use crate::plan::{
-    InQueue, Queue, account_chain, compact_window, drains, plan_rows, plan_summary, reset_in,
-    system_alerts, upcoming,
+    InQueue, Queue, account_chain, drains, plan_rows, plan_summary, reset_in, system_alerts,
+    upcoming,
 };
 use crate::style::disk;
 use crate::style::*;
@@ -296,20 +297,10 @@ pub fn quiet_system() -> Line {
     )
 }
 
-/// The agents' leftovers among the counts (view.go:189): how many, what
-/// they hold, and where to end them.
-pub fn orphans(m: &Model) -> Option<Line> {
-    let mc = machine(m);
-    if mc.orphans == 0 {
-        return None;
-    }
-    Some(line([
-        sp(
-            format!("{} orphaned · {}", mc.orphans, mem(mc.orphan_mem)),
-            YELLOW,
-        ),
-        dim(" · Projects to end"),
-    ]))
+/// How many leftovers of agents there are, for the Projects tab's badge
+/// (view.go:189).
+pub fn orphans(m: &Model) -> usize {
+    machine(m).orphans as usize
 }
 
 // ---- the accounts ----
@@ -687,44 +678,84 @@ fn runs_out(pct_: f64, rate: f64, resets: Ms, now: Ms) -> Option<Span> {
     ))
 }
 
-/// The header's right side while the top bar is the default: spend and
-/// the account, a bar for each limit, then the machine, a row each. None
-/// when they don't fit in w (headerGauges).
-pub fn header_gauges(m: &Model, today: f64, w: usize) -> Option<Vec<Line>> {
-    if super::layout(m, BAR_TOP).lines != rush_bundled::statusline::default_top().lines {
-        return None; // a top bar of your own is drawn as you built it
-    }
-    let (name, q) = start_plan(m);
-    let now = now(m);
-    let mut rows = vec![line([
-        sp(money(today), TEXT),
-        dim(format!(" today · {name}")),
-    ])];
-    let mut wins = q.windows.clone();
-    wins.sort_by(|a, b| match (a.span.is_zero(), b.span.is_zero()) {
-        _ if a.span == b.span => a.label.cmp(&b.label),
-        (true, _) => std::cmp::Ordering::Greater,
-        (_, true) => std::cmp::Ordering::Less,
-        _ => a.span.cmp(&b.span),
-    });
-    for win in wins.iter().take(2) {
-        rows.push(compact_window(win, now));
-    }
-    if wins.is_empty() && !q.problem.is_empty() {
-        rows.push(line([dim("limits "), sp("unavailable", YELLOW)]));
-    }
-    let g = machine(m).total_mem as f64 / (1u64 << 30) as f64;
-    let mut mc = line([dim(format!("{g:.1}G RAM · {} agents", m.agents.len()))]);
-    let s = quiet_system();
-    if s.width() > 0 {
-        mc.spans.push(dim(" · "));
-        join(&mut mc, s);
-    }
-    rows.push(mc);
-    if rows.iter().any(|r| r.width() > w) {
+/// The header's right side while the top bar is the default: the account
+/// new sessions start on with a small bar of its tightest limit, its pace
+/// while the guard is on and one is past its warning, and the machine's
+/// readings. None for a top bar of your own that shows more than this
+/// does (headerGauges).
+pub fn header_gauges(m: &Model) -> Option<Gauges> {
+    // What the calm header shows itself, or has moved to where it's acted
+    // on (the version and the network to Settings): a top bar of only these
+    // is drawn as the calm header; one with more, as you built it.
+    const CALM: &[&str] = &[
+        "version", "plan", "usage", "account", "cpu", "ram", "memory", "net", "disk", "battery",
+        "system",
+    ];
+    let lines = super::layout(m, BAR_TOP).lines;
+    if lines != rush_bundled::statusline::default_top().lines
+        && lines.iter().flatten().any(|s| !CALM.contains(&s.as_str()))
+    {
         return None;
     }
-    Some(rows)
+    let (_, q) = start_plan(m);
+    let mut account = line([sp(start_account(m), TEXT)]);
+    if !q.windows.is_empty() {
+        let p = q.used("");
+        let fill = ((p / 100.0 * 3.0 + 0.5) as usize).min(3);
+        account.spans.push(plain(" "));
+        account.spans.push(sp("▰".repeat(fill), usage_color(p)));
+        account.spans.push(sp("▱".repeat(3 - fill), FAINT));
+    } else if !q.problem.is_empty() {
+        account.spans.push(sp(" limits unavailable", YELLOW));
+    }
+    let pace = match m.ext.calls.guard_state()(m).1 {
+        Some((name, r)) => sp(
+            format!("{name} {} pace", rush_core::guard::times(r)),
+            YELLOW,
+        ),
+        None => Span::new("", Default::default()),
+    };
+    let pace = if pace.text.is_empty() {
+        Line::new()
+    } else {
+        one(pace)
+    };
+    let mut machine_row = Vec::new();
+    // Trouble first, so it is the last to go.
+    let net = net_seg();
+    if net.width() > 0 && net.plain() != "net steady" {
+        machine_row.push(net);
+    }
+    machine_row.push(one(dim(format!("{:.0}% cpu", machine(m).total_cpu))));
+    machine_row.push(one(dim(mem(machine(m).total_mem))));
+    let (b, d) = rush_sys::sysinfo::now();
+    if d.total > 0 {
+        let v = format!("{} free", disk(d.free as i64));
+        machine_row.push(one(if d.free < 5 << 30 {
+            sp(v, RED)
+        } else if d.free < 20 << 30 {
+            sp(v, YELLOW)
+        } else {
+            dim(v)
+        }));
+    }
+    if b.present {
+        let v = format!("{}%", b.percent);
+        machine_row.push(one(if b.charging {
+            dim(format!("⚡{v}"))
+        } else if b.percent < 15 {
+            sp(v, RED)
+        } else if b.percent < 30 {
+            sp(v, YELLOW)
+        } else {
+            dim(v)
+        }));
+    }
+    Some(Gauges {
+        account,
+        pace,
+        machine: machine_row,
+    })
 }
 
 /// The top bar's lines, one in each of rooms' rows. The plan alone on a

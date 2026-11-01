@@ -54,6 +54,19 @@ static CUR: Mutex<Cur> = Mutex::new(Cur {
 /// the readings.
 static ASKED: AtomicBool = AtomicBool::new(false);
 
+/// Set by [`pin`]: the readings stay as given and are never read.
+static PINNED: AtomicBool = AtomicBool::new(false);
+
+/// Holds the readings at b and d, never reading the machine: for tests
+/// whose frames must not depend on the machine they run on.
+pub fn pin(b: Battery, d: Disk) {
+    PINNED.store(true, Ordering::Relaxed);
+    let mut c = CUR.lock().unwrap();
+    c.bat = b;
+    c.disk = d;
+    c.given = (b, d);
+}
+
 /// Told each reading made, with what was last handed out and the new one
 /// (see [`on_read`]).
 type OnRead = Box<dyn Fn((Battery, Disk), (Battery, Disk)) + Send>;
@@ -64,7 +77,8 @@ static ON_READ: Mutex<Option<OnRead>> = Mutex::new(None);
 pub fn now() -> (Battery, Disk) {
     ASKED.store(true, Ordering::Relaxed);
     let mut c = CUR.lock().unwrap();
-    if !c.reading && c.at.is_none_or(|at| at.elapsed() >= EVERY) {
+    if !c.reading && !PINNED.load(Ordering::Relaxed) && c.at.is_none_or(|at| at.elapsed() >= EVERY)
+    {
         c.reading = true;
         std::thread::spawn(refresh);
     }
@@ -88,7 +102,7 @@ pub fn asked() -> bool {
 /// them every 30 seconds while they're drawn, every second).
 pub fn read_again() {
     let mut c = CUR.lock().unwrap();
-    if !c.reading {
+    if !c.reading && !PINNED.load(Ordering::Relaxed) {
         c.reading = true;
         std::thread::spawn(refresh);
     }

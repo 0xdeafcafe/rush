@@ -1,8 +1,5 @@
-     !        rush   ● 1 needs you [ctrl+n] next   ✻ 2 working   3 finished                        – today · Anthropic
-    ▄▄▄▄      ✻ default · /src/checkout                                                            0.0G RAM · 6 agents
-   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    < > places
-    RUSH
-   ▀▀▀▀▀▀
+    RUSH      rush   ● 1 needs you   ✻ 2 working                                                               default
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings                                  0% cpu · – · 37.0G free · 80%
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
                                                                                           ● 3 running · – ram · 0% cpu
 
@@ -28,6 +25,9 @@
   │  main checkout       ✳ move the design tokens to… working                                                    30s │
   │  main checkout       ◦ set up caching for CI      idle                                                       10m │
   ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+
 
 
 

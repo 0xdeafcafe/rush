@@ -1,8 +1,5 @@
-     !        rush   ● 1 needs you [ctrl+n] next   ✻ 2 working   3 finished  ⋯
-    ▄▄▄▄      ✻ default · /src/checkout
-   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    < > places
-    RUSH
-   ▀▀▀▀▀▀      General   Keys   Plugins   Updates   Remote   [ ]
+    RUSH      rush   ● 1 needs you   ✻ 2 working                       default
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    General   Keys   ›
 ────────────────────────────────────────────────────────────────────────────────
   Sessions, notifications, background work, and how the workspace looks.
 
@@ -14,9 +11,12 @@
     Just left holds at most         ‹ 10           ›
     Clean up done work after        ‹ 3h           ›
     Orphaned processes              ‹ end          ›
+    When rush is installed again    ‹ ask          ›
+
   Hibernate finished agents
 
   A finished agent's process stays in memory (often 300–800 MB) until it is
+  stopped. Hibernating stops it; the conversation is kept and enter resumes
   off: finished agents stay in memory until you stop them (ctrl+x).
     1 of 47 ───────────────────────────────────────────────────────────────
   enter choose  ·  ? details  ·  ctrl+↑↓ section  ·  [ ] page  ·  esc back

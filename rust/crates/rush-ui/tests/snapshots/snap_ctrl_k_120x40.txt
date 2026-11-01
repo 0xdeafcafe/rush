@@ -1,29 +1,29 @@
-     !        rush   ● 1 needs you [ctrl+n] next   ✻ 2 working   3 finished                        – today · Anthropic
-    ▄▄▄▄      ✻ default · /src/checkout                                                            0.0G RAM · 6 agents
-   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    < > places
-    RUSH
-   ▀▀▀▀▀▀      Agents · Wall  [ ]
-────╭─ ✻ Go anywhere ─────────────────────────────────────────────────────────────────────────────────── ctrl+k ─╮──────
-  AG│ ❯ ▏an agent, words said in any conversation, or a place · # for commands                                   │ TIME
-┃ Ne│ ────────────────────────────────────────────────────────────────────────────────────────────────────────── │
-▌ └─│ Needs you ───────────────────────────────────────────────────────────────────────────────────────────────  │ 2m ●
-▌   │ ▍● fix the flaky tax rounding test                  checkout · main                              needs you │
-    │                                                                                                            │
-┃ Wo│ Working ─────────────────────────────────────────────────────────────────────────────────────────────────  │
-┃ ├─│  ● move the design tokens to CSS variables          checkout · main                                working │  21m
-┃ │ │  ● add Apple Pay to checkout                        checkout · feat/apple-pay                      working │
-┃ └─│                                                                                                            │  20m
-┃   │ Idle ────────────────────────────────────────────────────────────────────────────────────────────────────  │
-    │  ○ set up caching for CI                            checkout · main                                   idle │
+    RUSH      rush   ● 1 needs you   ✻ 2 working                                                               default
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    Agents · Wall  [ ]            0% cpu · – · 37.0G free · 80%
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  AGENTS▾                               LATEST                               RUNNING   CPU    RAM TOKENS    COST   TIME
+┃ Needs you  1 · $0.19
+▌ └─╭─ ✻ Go anywhere ─────────────────────────────────────────────────────────────────────────────────── ctrl+k ─╮ 2m ●
+▌   │ ❯ ▏an agent, words said in any conversation, or a place · # for commands                                   │
+    │ ────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+┃ Wo│ Needs you ───────────────────────────────────────────────────────────────────────────────────────────────  │
+┃ ├─│ ▍● fix the flaky tax rounding test                  checkout · main                              needs you │  21m
+┃ │ │                                                                                                            │
+┃ └─│ Working ─────────────────────────────────────────────────────────────────────────────────────────────────  │  20m
+┃   │  ● move the design tokens to CSS variables          checkout · main                                working │
+    │  ● add Apple Pay to checkout                        checkout · feat/apple-pay                      working │
 ┃ Id│                                                                                                            │
-┃ └─│ Earlier ─────────────────────────────────────────────────────────────────────────────────────────────────  │  10m
-┃   │  · why does the ledger import time out on big fil…  checkout · main                                 3h ago │
-    │  · rename Invoice to Bill everywhere                checkout · main                                 3d ago │
-┃ To│                                                                                                            │
-┃ └─│ Go to ───────────────────────────────────────────────────────────────────────────────────────────────────  │   3h
-┃   │  + Start an agent                                   in /src/checkout · Anthropic (Claude Code) · default … │
+┃ └─│ Idle ────────────────────────────────────────────────────────────────────────────────────────────────────  │  10m
+┃   │  ○ set up caching for CI                            checkout · main                                   idle │
     │                                                                                                            │
- ▸ E│ ↑↓ choose  ·  enter go  ·  ctrl+f just Needs you  ·  # commands  ·  tab next section  ·  esc close         │
+┃ To│ Earlier ─────────────────────────────────────────────────────────────────────────────────────────────────  │
+┃ └─│  · why does the ledger import time out on big fil…  checkout · main                                 3h ago │   3h
+┃   │  · rename Invoice to Bill everywhere                checkout · main                                 3d ago │
+    │                                                                                                            │
+ ▸ E│ Go to ───────────────────────────────────────────────────────────────────────────────────────────────────  │
+    │  + Start an agent                                   in /src/checkout · Anthropic (Claude Code) · default … │
+    │                                                                                                            │
+    │ ↑↓ choose  ·  enter go  ·  ctrl+f just Needs you  ·  # commands  ·  tab next section  ·  esc close         │
     ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 
 

@@ -96,7 +96,7 @@ fn calls() -> Calls {
         room_line: Some(social::rooms::room_line),
         room_member_line: Some(social::rooms::room_member_line),
         row_note: Some(accounts::guard::row_note),
-        guard_header: Some(accounts::guard::header_line),
+        guard_state: Some(accounts::guard::header_state),
         limits_fetched: Some(bars::fetch::fetched_once),
         machine_read: Some(projects_machine::machine_read),
         ask_close: Some(cmdbar::stops::ask_close),

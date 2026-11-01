@@ -1,8 +1,5 @@
-     !        rush   ● 1 needs you [ctrl+n] next   ✻ 2 working   3 finished  ⋯
-    ▄▄▄▄      ✻ default · /src/checkout
-   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    < > places
-    RUSH
-   ▀▀▀▀▀▀
+    RUSH      rush   ● 1 needs you   ✻ 2 working                       default
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings             0% cpu · –
 ────────────────────────────────────────────────────────────────────────────────
                                                   ● 3 running · – ram · 0% cpu
 
@@ -20,5 +17,8 @@
   ╭─ ◆ checkout ──────────────────────── 2 working · 1 need you · 4 · $7.01 ─╮
   │ /src/checkout                                                            │
   │ asking git…                                                              │
+  │                                                                          │
+  │ AGENTS  4 ────────────────────────────────────────────────────────────── │
+  │  WHERE                 AGENT                      DOING                  │
 ────────────────────────────────────────────────────────────────────────────────
   ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back

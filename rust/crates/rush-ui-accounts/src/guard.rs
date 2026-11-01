@@ -876,3 +876,28 @@ pub fn pace_chip(m: &Model, kind: &str, id: &str) -> Line {
         _ => Line::new(),
     }
 }
+
+/// For the header's calm row: how many sessions the guard holds, and the
+/// account most past its pace with its ratio, while the guard is on and
+/// one is past its warning.
+pub fn header_state(m: &Model) -> (usize, Option<(String, f64)>) {
+    let Some(st) = peek_state(m) else {
+        return (0, None);
+    };
+    if !cfg(m).guard.settings().on() {
+        return (0, None);
+    }
+    let pace = st
+        .paces
+        .iter()
+        .filter(|(_, p)| matches!(p.level, Level::Warn | Level::Over))
+        .max_by(|a, b| a.1.ratio.total_cmp(&b.1.ratio))
+        .map(|(key, p)| {
+            let name = account_rows(m)
+                .iter()
+                .find(|r| !r.head && key_of(r) == *key)
+                .map_or_else(|| key.clone(), |r| r.name(m));
+            (name, p.ratio)
+        });
+    (st.held.len(), pace)
+}

@@ -1,8 +1,5 @@
-     !        rush   ● 1 needs you [ctrl+n] next   ✻ 2 working   3 finished                        – today · Anthropic
-    ▄▄▄▄      ✻ default · /src/checkout                                                            0.0G RAM · 6 agents
-   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    < > places
-    RUSH
-   ▀▀▀▀▀▀      Agents · Wall  [ ]
+    RUSH      rush   ● 1 needs you   ✻ 2 working                                                               default
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    Agents · Wall  [ ]            0% cpu · – · 37.0G free · 80%
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   AGENTS▾                               LATEST                               RUNNING   CPU    RAM TOKENS    COST   TIME
 ┃ Needs you  1 · $0.19
@@ -24,6 +21,9 @@
 ┃      checkout · main
 
  ▸ Earlier  1 · $0.42   rename Invoice to Bill everywhere
+
+
+
 
 
 

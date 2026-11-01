@@ -1,8 +1,5 @@
-     !        rush   ● 1 needs you [ctrl+n] next   ✻ 2 working   3 finished  ⋯
-    ▄▄▄▄      ✻ default · /src/checkout
-   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    < > places
-    RUSH
-   ▀▀▀▀▀▀      Agents · Wall  [ ]
+    RUSH      rush   ● 1 needs you   ✻ 2 working                       default
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    Agents · Wall  [ ]
 ────────────────────────────────────────────────────────────────────────────────
   AGENTS▾                                             RAM TOKENS    COST   TIME
 ┃ Needs you  1 · $0.19
@@ -10,7 +7,10 @@
 ▌      checkout · main
 ▌        ╰ asks: Round half up, or half to even?
 
-  ↓ 14 more lines
+┃ Working  2 · $5.72
+┃ ├─ ✳ add Apple Pay to checkout ✻ ↳1                874M   140k   $2.62    21m
+┃ │    checkout · feat/apple-pay
+  ↓ 11 more lines
   ╭─ waiting on you ─────────────────────────────────────────────────────────╮
   │  asks: Round half up, or half to even?                                   │
   │                                                                          │
