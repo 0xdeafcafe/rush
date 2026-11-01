@@ -260,8 +260,19 @@ pub fn tick(mut i: Input, ops: &dyn HostOps) -> Output {
     }
     let cfg = i.settings.pace.unwrap_or_default();
     let mut out = Output::default();
-    for (a, _) in &mut i.accts {
-        a.pace = guard::pace(h.of(&a.id), &cfg, i.over.contains(&a.id), now);
+    let xs: Vec<guard::ToPace> = i
+        .accts
+        .iter()
+        .map(|(a, _)| guard::ToPace {
+            id: &a.id,
+            v: h.of(&a.id),
+            was_over: i.over.contains(&a.id),
+            shares: !a.borrowed && !a.out,
+        })
+        .collect();
+    let paces = guard::pace_all(&xs, &cfg, now);
+    for ((a, _), p) in i.accts.iter_mut().zip(paces) {
+        a.pace = p;
         out.paces.insert(a.id.clone(), a.pace);
         if i.settings.pace.is_some() && a.pace.level == Level::Over {
             out.over.insert(a.id.clone());

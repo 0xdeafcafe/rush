@@ -139,6 +139,7 @@ fn acct(id: &str, current: bool, ratio: f64, level: Level) -> Acct {
             ratio,
             level,
             fair,
+            own: fair,
             burn: ratio * fair,
             week: 40.0,
             resets_at: T0 + (60.0 / fair) as Ms * HOUR,
@@ -156,7 +157,8 @@ fn room(id: &str, week: f64, hours: Ms) -> Acct {
         name: id.into(),
         pace: Pace {
             level: Level::Under,
-            fair: fair(week, resets_at, T0),
+            fair: fair(week, resets_at, T0, 24 * HOUR),
+            own: fair(week, resets_at, T0, 24 * HOUR),
             week,
             resets_at,
             ..Pace::default()
@@ -174,6 +176,7 @@ fn hot() -> Acct {
         pace: Pace {
             level: Level::Over,
             fair: 0.5,
+            own: 0.5,
             burn: 1.2,
             ratio: 2.4,
             week: 40.0,
@@ -673,4 +676,79 @@ fn a_pace_hold_said_while_the_turn_runs() {
         Hold::Away.say_running(&clock),
         "held: you're away · it carries on when you're back"
     );
+}
+
+#[test]
+fn a_working_day_spreads_the_week_over_fewer_hours() {
+    // 60% left, reset in 100h: round the clock 0.6%/h; working 12h a day,
+    // 50 working hours, 1.2%/h.
+    let v = steady(2 * HOUR, 34.0, 40.0, T0 + 100 * HOUR);
+    let c = PaceCfg {
+        day: 12 * HOUR,
+        ..on()
+    };
+    let p = pace(&v, &c, false, T0);
+    assert!((p.own - 1.2).abs() < 1e-9, "{}", p.own);
+    assert!((p.ratio - 2.5).abs() < 1e-9, "{}", p.ratio);
+    // A reset in 3h: all 3 are working hours.
+    let v = steady(2 * HOUR, 34.0, 40.0, T0 + 3 * HOUR);
+    assert!((pace(&v, &c, false, T0).own - 20.0).abs() < 1e-9);
+    assert_eq!(work_hours(20.0, 12 * HOUR), 12.0);
+    assert_eq!(work_hours(48.0, 24 * HOUR), 48.0);
+}
+
+#[test]
+fn other_accounts_lend_their_unused_share() {
+    let c = PaceCfg {
+        day: 12 * HOUR,
+        ..on()
+    };
+    // Busy: 3%/h, 1.2%/h of its own. Two idle ones of the same agent, a
+    // fresh week each: 100/84 = 1.19%/h each. One of codex lends nothing.
+    let busy = steady(2 * HOUR, 34.0, 40.0, T0 + 100 * HOUR);
+    let idle = steady(2 * HOUR, 0.0, 0.0, T0 + 160 * HOUR);
+    let xs = |shares: bool| {
+        vec![
+            ToPace {
+                id: "claude:a",
+                v: &busy,
+                was_over: false,
+                shares: true,
+            },
+            ToPace {
+                id: "claude:b",
+                v: &idle,
+                was_over: false,
+                shares,
+            },
+            ToPace {
+                id: "claude:c",
+                v: &idle,
+                was_over: false,
+                shares,
+            },
+            ToPace {
+                id: "codex:d",
+                v: &idle,
+                was_over: false,
+                shares: true,
+            },
+        ]
+    };
+    let ps = pace_all(&xs(true), &c, T0);
+    let week = 100.0 / 84.0;
+    assert!(
+        (ps[0].fair - (1.2 + 2.0 * week)).abs() < 1e-9,
+        "{}",
+        ps[0].fair
+    );
+    assert_eq!(ps[0].level, Level::Under, "{}", ps[0].ratio);
+    // The idle ones lend to each other too, and borrow what busy leaves:
+    // nothing, as it's over its own.
+    assert!((ps[1].fair - (100.0 / 80.0 + week)).abs() < 1e-9);
+    assert!((ps[3].fair - ps[3].own).abs() < 1e-9);
+    // Borrowed or out accounts lend nothing: busy is on its own again.
+    let ps = pace_all(&xs(false), &c, T0);
+    assert_eq!(ps[0].level, Level::Over);
+    assert!((ps[0].fair - 1.2).abs() < 1e-9);
 }
