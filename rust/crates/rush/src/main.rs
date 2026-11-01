@@ -90,6 +90,14 @@ fn main() {
         }
         return;
     }
+    // So is the push-to-talk helper, in a bundle of its own.
+    if rush_voice::bundled() {
+        if let Err(e) = rush_voice::helper_main() {
+            eprintln!("rush: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     // A view lives long and keeps much: malloc's space-efficient mode
     // holds it in about half the memory (rush_sys::malloc). Not a one-shot

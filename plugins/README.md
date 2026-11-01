@@ -63,6 +63,8 @@ Past the gate, a guard stops the largest program under any agent, or named as a 
 
 **yap** (on until you turn it off) shows a [yap](https://github.com/0xdeafcafe/yap) dictation in the message box as you speak. yap is dictation for macOS on Apple's own speech model: hold fn, talk, let go and it pastes. While you talk, the box with the keys shows the words it's sure of, the ones it's still guessing dimmer with a light passing over them, a cursor that brightens as you speak, and a light running round the box's edge. When you let go, yap's paste goes in as typed, never folded into a chip. It shows only while rush's terminal has the keys and yap is pasting into it. yap says what it hears on `~/.config/yap/live.sock`, which only your user can open; without yap running the plugin does nothing.
 
+**apple voice** (`apple-voice`, on until you turn it off) is rush's own push-to-talk, for when yap isn't there. Hold ctrl+space and speak, let go and the words go into the message box at the cursor, as typed; nothing is sent until you send it. A quick tap instead keeps it listening hands-free until you press ctrl+space again, and esc drops what it heard. In a terminal that can't tell rush when a key is let go, each press starts or stops it. It hears the microphone you pick in Settings › General › Microphone (the Mac's input unless you choose one) with Apple's on-device speech model, through a small helper app of rush's own that macOS asks you to allow the microphone and speech recognition for; nothing leaves your Mac. While it listens the box shows it the way it shows a yap dictation. Needs macOS 26. With both on, fn is yap's and ctrl+space is rush's; the box shows whichever is listening.
+
 **search-guard** (off until you turn it on) refuses an agent's wasteful searches in Claude Code sessions rush starts, through the same Bash hook as the gate, and tells the agent the cheaper command: a recursive `grep -r` (use `rg` or `git grep`, which skip nested worktrees and ignored files), a `git grep` or `rg` pattern with more than 15 alternatives, and a loop or script that runs one whole-tree `git grep` per name (write the words to a file and run one `rg -F -w -f words.txt` pass). Turn it on with `rush plugin on search-guard`.
 
 **hex** (off until you turn it on) adds a hex view of what agents' steps print and read: `v` on a step cycles to its bytes, coloured by kind, with an ASCII column, and binary output opens in it. With it off, `v` still switches between text, pretty and image.
@@ -74,7 +76,7 @@ A plugin can do anything its manifest allows, so rush doesn't go by what it can 
 | Category | | Plugins |
 |---|---|---|
 | `messages` | Messages: what you type and send | drafts, queue, autodrafts |
-| `voice` | Voice: talk instead of typing | yap |
+| `voice` | Voice: talk instead of typing | yap, apple-voice |
 | `agents` | Agents: start, follow, arrange and continue them | delegate, neighbours, reconnect |
 | `code` | Code: help agents read and change code | ts |
 | `pull-requests` | Pull requests and their checks | drive, watch |

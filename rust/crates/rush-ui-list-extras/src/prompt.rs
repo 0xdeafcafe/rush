@@ -233,6 +233,15 @@ fn box_at(m: &mut Model, w: usize) -> InputBox {
     let mut b = b;
     b.lit = st.lit.map(|(f, t)| (false, f, t));
     st.hits = hits;
+    // A dictation under way shows at the cursor (view.go:2719).
+    if b.focused
+        && m.sheet.is_none()
+        && m.confirm.is_none()
+        && let Some(l) = rush_ui_social::dictation::look(m)
+    {
+        b.idle = false;
+        b.live = Some(l);
+    }
     b.scrolled()
 }
 

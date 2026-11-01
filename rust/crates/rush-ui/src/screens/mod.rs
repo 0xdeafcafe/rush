@@ -158,6 +158,24 @@ fn calls() -> Calls {
         edit_then: Some(session_core::memedit::edit_then),
         reload: Some(|m, all| m.reload(all)),
         feed_follows: Some(|m, on| m.feed_follows(on)),
+        dictation_released: Some(social::dictation::released),
+        dictation_repeated: Some(social::dictation::repeated),
+        dictation_sync: Some(social::dictation::sync),
+        dictation_after_frame: Some(social::dictation::after_frame),
+        dictation_read_mics: Some(social::dictation::read_mics),
+        dictation_mics: Some(|m| {
+            social::dictation::mics(m)
+                .into_iter()
+                .map(|d| (d.id, d.name))
+                .collect()
+        }),
+        dictation_set_mic: Some(social::dictation::set_mic),
+        bundled_on: Some(|m, name| {
+            m.kept
+                .peek::<plugin_ui::Plugins>()
+                .and_then(|p| p.bundled_on.get(name).copied())
+                .unwrap_or(false)
+        }),
         hosted_id: Some(crate::hosted::id),
         hosted_alone: Some(crate::hosted::alone),
         all_agents: Some(crate::hosted::all_agents),

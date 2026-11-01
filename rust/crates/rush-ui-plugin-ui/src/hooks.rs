@@ -65,6 +65,7 @@ pub fn read_bundled(m: &mut Model) {
         move || disk.bundles_on(),
         |m, on| {
             m.plugins().bundled_on = on;
+            (m.ext.calls.dictation_sync())(m);
             Out::Draw
         },
     );
@@ -87,6 +88,7 @@ pub fn set_bundled(m: &mut Model, name: &str, on: bool) {
             if let Some(st) = st {
                 m.plugins().bundled_on = st;
             }
+            (m.ext.calls.dictation_sync())(m);
             if let Some(e) = err {
                 m.fail(&format!("{name}: {e}"));
             }

@@ -38,6 +38,7 @@ rush-fleet = { path = "crates/rush-fleet" }
 rush-watch = { path = "crates/rush-watch" }
 rush-prdrive = { path = "crates/rush-prdrive" }
 rush-memory = { path = "crates/rush-memory" }
+rush-voice = { path = "crates/rush-voice" }
 base64 = "0.23"
 flate2 = "1"
 memchr = "2"

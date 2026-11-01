@@ -534,6 +534,20 @@ on every frame. Go retains about 22 MiB for the same.
    memory view's and review's notes, settings' files, ctrl+g's draft)
    and a sign-in sent to the terminal. With no loop (tests) a program
    waits for `Model::run_outside`.
+   The kitty keyboard is asked for flags 1 and 2 (`\x1b[>3u`): keys
+   disambiguated, and their event types, so a held key's repeats come as
+   `Event::KeyRepeat` (handled as a press everywhere) and its letting go
+   as `Event::KeyUp` (ignored everywhere but push-to-talk,
+   rush-ui-social's `dictation.rs`, which the model reaches through
+   `Calls::dictation_released`). `Term::reports_releases` says whether
+   the terminal answered the kitty query; without it ctrl+space toggles.
+   Both dictations are told the words on screen (session, repo, branch
+   and file names, identifiers in the visible conversation, the open
+   session's first, at most 200: rush-ui-social's `screenwords.rs`): yap as
+   a `{"context":{"app":…,"words":[…]}}` line on its socket, re-read after
+   a frame at most once a second and only while yap is followed; rush's
+   helper in `Command::Start.context`, the first 100 set as the speech
+   request's contextualStrings.
 3. **Workers**: discovery (sessions/jobs files, process liveness), spend
    scanning (incremental from the last offset), previews, and the open
    conversation (`worker::spawn_read`, one flow for every agent, Rust-only

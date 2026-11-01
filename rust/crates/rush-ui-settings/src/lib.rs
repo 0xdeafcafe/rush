@@ -281,6 +281,8 @@ pub fn open_dialog(m: &mut Model, p: usize) {
         keys::load(m);
     }
     match p {
+        // Microphones plugged in since show at once.
+        PAGE_GENERAL => (m.ext.calls.dictation_read_mics())(m),
         PAGE_PLUGINS => plugins::read(m),
         PAGE_UPDATES => updates::recheck_after(m),
         PAGE_REMOTE => remote::want(m),

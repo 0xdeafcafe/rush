@@ -1716,6 +1716,13 @@ impl Model {
 
 impl App<Note> for Model {
     fn update(&mut self, msg: Msg<Note>) -> Step {
+        // A key let go is only push-to-talk's: nothing else changes.
+        if let Msg::Input(Event::KeyUp { code, mods }) = msg {
+            return match self.ext.calls.dictation_released {
+                Some(f) => f(self, code, mods),
+                None => Step::Idle,
+            };
+        }
         let _busy = uistall::busy(match &msg {
             Msg::Input(_) => "input",
             Msg::App(_) => "note",
@@ -1728,6 +1735,12 @@ impl App<Note> for Model {
         let st = match msg {
             Msg::Input(ev) => match ev {
                 Event::Key { code, mods } => self.key(code, mods),
+                // A held key said again types again, as a press does.
+                Event::KeyRepeat { code, mods } => match self.ext.calls.dictation_repeated {
+                    Some(f) => f(self, code, mods),
+                    None => self.key(code, mods),
+                },
+                Event::KeyUp { .. } => Step::Idle,
                 Event::Mouse { kind, x, y, mods } => {
                     self.mouse_event(&Mouse { kind, x, y, mods }).step()
                 }
@@ -1781,6 +1794,10 @@ impl App<Note> for Model {
                 c.put_line(0, y as u16, l, self.w as u16);
             }
             self.drawn = rows;
+        }
+        // yap is told the words on screen, read at most once a second.
+        if let Some(f) = self.ext.calls.dictation_after_frame {
+            f(self);
         }
         self.title = self.make_title();
         let drawn = Instant::now();

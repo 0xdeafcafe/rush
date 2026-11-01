@@ -164,6 +164,12 @@ fn run_model(
             frame::Out::Draw
         })));
     });
+    // Push-to-talk hears through rush's own helper app (apple voice).
+    screens::social::dictation::use_engine(
+        &mut m,
+        std::sync::Arc::new(screens::social::pushtalk::AppleVoice),
+        term.reports_releases(),
+    );
     let (w, h) = term.size()?;
     m.w = w as usize;
     m.h = h as usize;
