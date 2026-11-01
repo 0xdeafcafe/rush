@@ -227,11 +227,23 @@ pub(crate) fn load_json<T: DeserializeOwned>(path: &Path) -> Option<T> {
     if json::valid(&b) {
         note_config(path, &b);
         let v = json::from_slice(&b).ok();
-        let _ = write_file_mode(&with_suffix(path, ".bak"), &b, 0o600);
+        keep_backup(&with_suffix(path, ".bak"), &b);
         return v;
     }
     let _ = write_file_mode(&with_suffix(path, ".broken"), &b, 0o600);
     read_json(&with_suffix(path, ".bak"))
+}
+
+/// Keeps b as the copy last read whole, written only when it isn't that
+/// already: every rush, its menubar and its hosts load the store again
+/// and again, and rewriting the same bytes each time was most of what
+/// they wrote to disk.
+fn keep_backup(bak: &Path, b: &[u8]) {
+    let same = fs::metadata(bak).is_ok_and(|m| m.len() == b.len() as u64)
+        && fs::read(bak).is_ok_and(|old| old == b);
+    if !same {
+        let _ = write_file_mode(bak, b, 0o600);
+    }
 }
 
 /// os.WriteFile: the file made with mode when new, truncated when not.
@@ -426,6 +438,34 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
             .collect();
         assert!(tmps.is_empty(), "temp files left behind");
+    }
+
+    // Loading again what was loaded before writes nothing: the copy kept
+    // is written again only once the file has changed.
+    #[test]
+    fn load_keeps_backup_without_rewriting() {
+        let d = home();
+        let mut s = Store::load_with_env(&no_env);
+        s.config.sort_by = "cost".into();
+        s.save_config().unwrap();
+        Store::load_with_env(&no_env);
+        let bak = with_suffix(&d.path().join("config.json"), ".bak");
+        let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+        fs::File::options()
+            .write(true)
+            .open(&bak)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        Store::load_with_env(&no_env);
+        assert_eq!(fs::metadata(&bak).unwrap().modified().unwrap(), old);
+        let mut s = Store::load_with_env(&no_env);
+        s.config.sort_by = "name".into();
+        s.save_config().unwrap();
+        Store::load_with_env(&no_env);
+        assert_ne!(fs::metadata(&bak).unwrap().modified().unwrap(), old);
+        let kept: Config = read_json(&bak).unwrap();
+        assert_eq!(kept.sort_by, "name");
     }
 
     // Two saves close together: the watcher woken by the first reads it
