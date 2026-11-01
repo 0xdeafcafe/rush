@@ -99,7 +99,8 @@ pub(crate) struct Drawer<'a> {
     pub(crate) ctx: Option<u64>,
     /// The turn's index in the session, for another view (presets.rs).
     pub(crate) ti: usize,
-    /// Steps show open unless folded by hand: code's edits.
+    /// Steps show open unless folded by hand, and diffs whole: a file
+    /// opened in the Code view.
     pub(crate) force_open: bool,
     /// The start hooks stay out: another view's turn.
     pub(crate) no_hooks: bool,
@@ -3241,7 +3242,7 @@ impl<'a> Drawer<'a> {
         let lg = lang_for(&info.call.input.path);
         let pad = self.sp(indent - 1);
         let w = (self.cw as isize - indent as isize - 9).max(0) as usize;
-        let verbose = self.o.verbose;
+        let verbose = self.o.verbose || self.force_open;
         if o.created {
             let mut hs = HlState::default();
             let content = info.call.input.content.trim_end_matches('\n');

@@ -177,6 +177,8 @@ Local summarization processes long conversations in ordered chunks before combin
 
 An agent run in rush mode (headless, hosted by rush) opens in a Session beside the list. `[` and `]` move between its views: Conversation, Overview and Changes always, then Tasks, Queue, Subagents, Background and Artifacts when there's something in them, and Memory. What agents did lately fills the rows the list leaves empty beside it.
 
+The Conversation can be shown five ways, one choice for every session: `alt+s` (or `ctrl+] g`) goes through them, and the view's name on the tab row opens a picker. **Normal** shows everything. **Chat** answers "what did we say?": your messages in bubbles on the right, the agent's words on the left, and what it asks you as a line in its bubble. **Code** answers "what did it change?": each turn's edits as diffs, a few rows a file until enter opens the whole diff, and a line for each test, build or lint run with how it came out. **Catch-up** answers "what happened while I was away?": one card for everything since you last looked at the session, what needs you first, then what was done, changed and checked, what it last said, and what's still going. **Trail** answers "where did the time go?": a line a step, each with a bar as long as it took, and the turn's time split into thinking, tools and waiting on you. In any of them, enter on a turn or a step opens it in Normal.
+
 <table>
   <tr>
     <td width="50%" valign="top">

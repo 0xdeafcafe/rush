@@ -29,6 +29,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 use rush_core::text::Line;
 use rush_core::time::Ms;
+use rush_core::tool::Kind;
 
 pub use cards::ENTITY_REF;
 pub use code::{set_show_whitespace, show_whitespace};
@@ -120,11 +121,13 @@ pub enum Depth {
 }
 
 /// Which way the conversation is shown, one for every session (the
-/// config's convoView): Normal as it always was; Chat only what's said and
-/// asked; Code the edits as diffs and the checks a line each; CatchUp a
-/// card per turn; Trail the steps a line each. Each draws the same
-/// parsed turns, a turn at a time, so a long conversation costs what a
-/// screen of it does whichever is picked.
+/// config's convoView), each answering one question: Normal as it always
+/// was; Chat "what did we say?" (bubbles, yours right, the agent's left);
+/// Code "what did it change?" (each turn's diffs and checks); CatchUp
+/// "what happened while I was away?" (one card since you last looked);
+/// Trail "where did the time go?" (a line a step on a time axis). Each
+/// draws the same parsed turns, a turn at a time, so a long conversation
+/// costs what a screen of it does whichever is picked.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Preset {
     #[default]
@@ -171,10 +174,10 @@ impl Preset {
     pub fn about(self) -> &'static str {
         match self {
             Preset::Normal => "everything, as usual",
-            Preset::Chat => "only what's said and asked",
-            Preset::Code => "the code written, and the checks",
-            Preset::CatchUp => "a card per turn",
-            Preset::Trail => "every step, a line each",
+            Preset::Chat => "what did we say?",
+            Preset::Code => "what did it change?",
+            Preset::CatchUp => "what happened while I was away?",
+            Preset::Trail => "where did the time go?",
         }
     }
 
@@ -210,6 +213,9 @@ pub struct Options {
     pub depth: Depth,
     /// Which way the conversation is shown.
     pub preset: Preset,
+    /// When you last looked at this session before now (0: never, as far
+    /// as rush knows): the Catch-up view's card covers what came after.
+    pub since: Ms,
     pub selected: String,
     pub focused: bool,
     /// Rows may run the whole width, past CAP_ROW.
@@ -308,6 +314,9 @@ impl Options {
         )
             .hash(&mut h);
         (self.dock_activity, code::show_whitespace(), self.preset).hash(&mut h);
+        if self.preset == Preset::CatchUp {
+            self.since.hash(&mut h);
+        }
         let mut ran: Vec<_> = self.ran.iter().collect();
         ran.sort();
         ran.hash(&mut h);
@@ -348,6 +357,10 @@ struct TurnKey {
     paused: usize,
     /// What of its scripts shows (scriptsSig, render.go:392).
     scripts: u64,
+    /// What another view draws it from besides the turn itself: in
+    /// Catch-up, whether the card covers it, and the background tasks the
+    /// last turn's card says are still going.
+    view: u64,
 }
 
 /// How many rows of drawn turns are kept for drawing again cheaply: several
@@ -395,6 +408,8 @@ pub struct Renderer {
     /// Windows drawn so far; rows kept.
     windows: u64,
     kept: usize,
+    /// The first turn the Catch-up card covers, as last counted.
+    catch: usize,
 }
 
 impl Renderer {
@@ -439,12 +454,21 @@ impl Renderer {
         } else {
             self.links
         };
+        // The turns the catch-up card covers draw nothing; when that
+        // changes, every turn is counted again.
+        let catch = if o.preset == Preset::CatchUp {
+            draw::presets::catch_from(s, o.since).0
+        } else {
+            0
+        };
         if sig != self.sig
             || links != self.links
             || s.serial() != self.serial
             || s.turns.len() < self.slots.len()
             || places
+            || catch != self.catch
         {
+            self.catch = catch;
             self.clear();
             self.sig = sig;
             self.links = links;
@@ -452,7 +476,7 @@ impl Renderer {
         }
         let was = self.slots.len();
         for i in was..s.turns.len() {
-            let est = estimate(s, o, i);
+            let est = estimate(s, o, i, self.catch);
             self.slots.push(Slot {
                 est,
                 ..Slot::default()
@@ -548,6 +572,22 @@ impl Renderer {
                 _ => None,
             });
             k.scripts = scriptdoc::scripts_sig(&o.scripts, ids);
+        }
+        if o.preset == Preset::CatchUp {
+            let last = i + 1 == s.turns.len();
+            let mut h = DefaultHasher::new();
+            (i >= self.catch, last).hash(&mut h);
+            if last {
+                let mut going = false;
+                for j in s.running_jobs().filter(|j| j.background) {
+                    (&j.id, &j.label).hash(&mut h);
+                    going = true;
+                }
+                if going {
+                    (o.now / 1000).hash(&mut h);
+                }
+            }
+            k.view = h.finish();
         }
         // The agents its steps ran, as they work.
         if !o.kids.is_empty() {
@@ -849,9 +889,9 @@ impl RowIndex {
 /// heading, its words wrapped, and the gap after it; open, a row a step;
 /// gone past, a row a run of plain steps and one for each step that stays
 /// out of a run (Go's estimate, window.go).
-fn estimate(s: &Session, o: &Options, i: usize) -> (usize, usize) {
+fn estimate(s: &Session, o: &Options, i: usize, catch: usize) -> (usize, usize) {
     if o.preset != Preset::Normal {
-        let n = presets_estimate(s, o, i);
+        let n = presets_estimate(s, o, i, catch);
         return (n, n);
     }
     let t = &s.turns[i];
@@ -905,14 +945,14 @@ fn estimate(s: &Session, o: &Options, i: usize) -> (usize, usize) {
     (open, past)
 }
 
-/// How many rows turn i takes in another view, before it's drawn: a card
-/// for catch-up, a row a step for the trail, what's said for the rest.
-fn presets_estimate(s: &Session, o: &Options, i: usize) -> usize {
+/// How many rows turn i takes in another view, before it's drawn: Chat
+/// its bubbles, Code a heading and each file's few rows, Catch-up a row
+/// for a turn before the card and the card on the last, Trail a row a
+/// step.
+fn presets_estimate(s: &Session, o: &Options, i: usize, catch: usize) -> usize {
     let t = &s.turns[i];
-    let w = 20
-        .max(o.width.min(o.prose_cap()).saturating_sub(GUTTER))
-        .max(1);
-    let lines = |x: &str| x.matches('\n').count() + x.len() / w;
+    let w = 20.max(o.width.min(o.prose_cap()) * 3 / 5).max(1);
+    let lines = |x: &str| 1 + x.matches('\n').count() + x.len() / w;
     let steps = || {
         t.items
             .iter()
@@ -920,16 +960,38 @@ fn presets_estimate(s: &Session, o: &Options, i: usize) -> usize {
             .count()
     };
     match o.preset {
-        Preset::CatchUp => 8,
-        Preset::Trail => 2 + steps(),
+        Preset::CatchUp if i + 1 == s.turns.len() => 9,
+        Preset::CatchUp if i >= catch => 0,
+        Preset::CatchUp => 1,
+        Preset::Trail => 4 + steps(),
+        Preset::Code => {
+            let edits = t
+                .steps
+                .iter()
+                .filter(|id| {
+                    matches!(
+                        s.step(**id).kind,
+                        Kind::Edit | Kind::Write | Kind::Notebook | Kind::Delete | Kind::Move
+                    )
+                })
+                .count();
+            let shells = t
+                .items
+                .iter()
+                .filter(|it| matches!(it, Item::Step(id) if s.step(*id).kind == Kind::Shell))
+                .count();
+            2 + edits * 8 + shells / 2
+        }
         _ => {
             let mut n = 4 + lines(&t.prompt);
+            let mut said = 0;
             for it in &t.items {
-                match it {
-                    Item::Text { text, .. } => n += 2 + lines(text).min(6),
-                    Item::Step(_) if o.preset == Preset::Code => n += 1,
-                    _ => {}
+                if let Item::Text { text, .. } = it {
+                    said += lines(text) + 1;
                 }
+            }
+            if said > 0 || !t.items.is_empty() {
+                n += 2 + said;
             }
             n
         }

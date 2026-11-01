@@ -1486,37 +1486,69 @@ is made. Everything below is in `rush_ui::frame`.
 ## Conversation views (Rust-only)
 
 The Conversation tab has five views, one for every session, kept in
-config.json as `convoView` ("" is Normal): Normal (as always), Chat (what
-you and the agent said, and what it asked; each stretch of steps one quiet
-"n steps hidden" row that opens in place), Code (each edit open on its
-diff, each check or failed command one line, the agent's words cut to
-three lines), Catch-up (a card a turn: asked, said, changed, checks, open,
-time and cost) and Trail (a line a step). ⌥s (session.preset, also
-ctrl+] g) goes through them; the tab row names one other than Normal and a
-click on it opens a picker; enter or a click on a catch-up card or a
-trail's step opens it in Normal. Changing view keeps the picked row, else
-the turn at the top.
+config.json as `convoView` ("" is Normal). Each answers one question:
+
+- Normal: everything, as always.
+- Chat, "what did we say?": your messages in bubbles on the right, the
+  agent's words (markdown) in bubbles on the left, at most 3/5 of the
+  width; no steps or output. Images are chips; open decisions, questions
+  and waiting permissions are a line in the bubble. The last bubble's
+  foot names the speaker, the time, the steps and files, and opens the
+  turn in Normal.
+- Code, "what did it change?": a heading a turn (its files, +a −d, or "no
+  code changes"), each changed file's diff from the edits' own patches
+  (the Normal diff's line numbers, highlighting and grounds), 12 rows a
+  file until enter opens the whole diff, and a line for each check (tests,
+  builds, linters) with its result, time, and "→ passed next run" when a
+  later run of it passed.
+- Catch-up, "what happened while I was away?": one card for every turn
+  since you last looked at the session (`Options.since`), drawn with the
+  last turn; the turns it covers before that draw nothing, and the turns
+  before it a row each (enter opens them in Normal). The card: needs you
+  first (open decisions, waiting permissions, what the last message
+  asks) with `[answer]`, Done (each answer's first sentence, no model
+  call), Changed, Checks, Said to you (the rest of the last answer),
+  Still going (running steps and background tasks). Never looked: the
+  last four turns. "Last looked" is kept per session in the UI
+  (session-core conversation.rs `looked_since`): a look runs while the
+  conversation is drawn frame after frame (`Model::frames`); one begun
+  after a frame without it, 30 s or more later, starts from the end of
+  the one before.
+- Trail, "where did the time go?": what you said, then a line a step on a
+  time axis, steps of a kind quicker than 10 s side by side merged ("read
+  4 files"), a bar as long as the step against the turn's longest, the
+  slowest marked when it took 10 s and 30% of the turn, the reply's first
+  sentence, and a line splitting the turn into thinking, tools (their
+  spans, overlaps once) and waiting on you.
+
+⌥s (session.preset, also ctrl+] g) goes through them; the tab row names
+one other than Normal and a click on it opens a picker; enter or a click
+on a turn or a step in any of them opens it in Normal. Changing view
+keeps the picked row, else the turn at the top.
 
 They are `Options.preset` (rush_convo::Preset), part of the renderer's
-signature: the same parsed turns, drawn a turn at a time
-(render/draw/presets.rs), so only the turns in view are drawn whichever is
-picked. Checks are read from the command's words (cargo, go, npm/pnpm/
-yarn/bun scripts, make, pytest, eslint, ruff, tsc, …) and its exit code,
-never from one harness's own result shape.
+signature (and `since` with Catch-up): the same parsed turns, drawn a turn
+at a time (render/draw/presets.rs), so only the turns in view are drawn
+whichever is picked. Catch-up's first turn is counted again as turns come
+(`Renderer.catch`), and its last turn's key carries the background tasks
+it says are going. Checks are read from the command's words (cargo, go,
+npm/pnpm/yarn/bun scripts, make, pytest, eslint, ruff, tsc, …) and its
+exit code, never from one harness's own result shape.
 
 `cargo bench -p rush-convo --bench render`, 3000 turns at 120 wide
-(µs per frame, before → each view):
+(µs per frame):
 
-| frame | Normal (main) | Normal | Chat | Code | Catch-up | Trail |
-|---|---|---|---|---|---|---|
-| cold, at the end | 6354* | 1813 | 546 | 528 | 184 | 186 |
-| warm, at the end | 4.4 | 9.6 | 4.8 | 46.5 | 44.8 | 3.7 |
-| warm, mid-way | 4.1 | 4.2 | 4.5 | 4.8 | 34.0 | 3.4 |
+| frame | Normal | Chat | Code | Catch-up | Trail |
+|---|---|---|---|---|---|
+| cold, at the end | 780 | 559 | 192 | 235 | 173 |
+| warm, at the end | 4.3 | 5.8 | 2.2 | 18.5 | 4.3 |
+| warm, mid-way | 4.0 | 5.5 | 1.9 | 18.4 | 4.1 |
 
-*Cold frames swing with the machine's load: the same Normal frame measured
-790–1813 µs in the branch's own runs. Warm frames are the steady cost.
-Code and Catch-up redraw the bench's live last turn on every tick (no
-unit memo for them); still far under a millisecond.
+Cold frames swing with the machine's load (a run under heavier load had
+Code's at 3151 µs and Normal's main-bench one at 2925 µs); warm frames are
+the steady cost. Catch-up's window holds ~50 turns of one row each before
+the card, so its warm frame checks 50 turns' keys: still far under a
+millisecond.
 
 ## Panics
 

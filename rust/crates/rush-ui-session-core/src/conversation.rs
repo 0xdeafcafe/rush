@@ -77,6 +77,40 @@ fn opening(m: &mut Model, key: &str) -> (String, String, bool, String) {
     (parent, from, !id.is_empty(), brief)
 }
 
+/// When each session's conversation was looked at, for the Catch-up
+/// view's "since you last looked": a look runs while the conversation is
+/// drawn frame after frame; one begun after a frame without it (and a
+/// while since) starts from the end of the one before. Rust-only: Go rush
+/// had no such view.
+#[derive(Default)]
+pub struct Looked(std::collections::HashMap<String, Look>);
+
+#[derive(Clone, Copy, Default)]
+struct Look {
+    /// When the look before this one ended; 0 for the first.
+    since: rush_core::time::Ms,
+    /// The frame it was last drawn in, and when.
+    frame: u64,
+    at: rush_core::time::Ms,
+}
+
+/// A frame gap shorter than this keeps the look going: a glance at the
+/// list and back isn't looking away.
+const AWAY: rush_core::time::Ms = 30_000;
+
+/// When you last looked at session key's conversation before this look
+/// (0: not since rush started), noting that it's looked at now.
+pub fn looked_since(m: &mut Model, key: &str) -> rush_core::time::Ms {
+    let (frame, now) = (m.frames, m.now);
+    let l = m.kept::<Looked>().0.entry(key.to_string()).or_default();
+    if l.frame != 0 && l.frame + 1 < frame && now - l.at >= AWAY {
+        l.since = l.at;
+    }
+    l.frame = frame;
+    l.at = now;
+    l.since
+}
+
 /// The conversation's rows, `rows` tall and `w` wide, with the map in its
 /// last MINI_WIDTH cells when it's on.
 pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
@@ -97,6 +131,7 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     let mut mm = std::mem::take(&mut conn(m, key).map);
     let opening = opening(m, key);
     let preset = super::presets::current(m);
+    let since = looked_since(m, key);
     // Rows run the whole width while no column stands right of them
     // (rushmode.go:2366 Wide: len(c.side) == 0); hosted alone, always.
     let wide = conn(m, key).side.rows.is_empty() || (m.ext.calls.hosted_alone())(m);
@@ -108,6 +143,7 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     let o = &mut v.o;
     o.wide = wide;
     o.preset = preset;
+    o.since = since;
     (o.parent, o.started_from, o.hosted) = (opening.0, opening.1, opening.2);
     if o.brief != opening.3 {
         o.brief = opening.3;

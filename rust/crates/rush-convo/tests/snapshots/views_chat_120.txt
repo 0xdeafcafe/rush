@@ -1,0 +1,22 @@
+              |                                                                   ╭──────────────────────────────────────────────────╮
+              |                                                                   │ the decision card still overlaps on long options │
+              |                                                                   │ ▣ screenshot 22.13.55                            │
+              |                                                                   ╰──────────────────────────────────────────── 00:00╯
+              | ╭──────────────────────────────────────────────────────────────────╮
+              | │ Looking at how the card lays out its options.                    │
+              | │                                                                  │
+              | │ Found it: the card was laid out at the full width, but the views │
+              | │ beside it take room. Fixed, the options wrap now.                │
+              | │                                                                  │
+              | │ • dock.rs takes the views' width off                             │
+              | │ • question.rs wraps each option                                  │
+t1            | ╰ Claude · 00:17 · 10 steps  2 files ──────────────────────────────╯
+              |
+              |                                                                                                     ╭────────────────╮
+              |                                                                                                     │ nice, merge it │
+              |                                                                                                     ╰────────── 00:26╯
+              | ╭───────────────────────────────────────────────────╮
+              | │ Merged to main as f3760931. One decision for you. │
+              | │                                                   │
+              | │ ? 1 decision for you: Read from the end           │
+t2            | ╰ Claude · 00:26 · 1 step ──────────────────────────╯

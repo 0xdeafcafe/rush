@@ -753,19 +753,13 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
         );
     }
     let view = super::views::view_name(m, key);
-    // The conversation's view: a card or a step opens in Normal, and the
+    // The conversation's view: a turn or a step opens in Normal, and the
     // key to the next view is said while one other than Normal shows.
     let preset = super::presets::current(m);
     let preset_key = super::presets::key_hint(m);
     let next_view = format!("view: {}", preset.next().title().to_lowercase());
     let other_view = view == "conversation" && preset != rush_convo::Preset::Normal;
-    if other_view
-        && matches!(
-            preset,
-            rush_convo::Preset::CatchUp | rush_convo::Preset::Trail
-        )
-        && super::presets::turn_or_step(picked)
-    {
+    if other_view && super::presets::turn_or_step(picked) {
         return fit_keys(
             w,
             &[

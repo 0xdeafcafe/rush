@@ -30,7 +30,7 @@ pub fn strip_markdown(s: &str) -> String {
     s.trim_start_matches(['#', '>', ' ', '-', '*']).to_owned()
 }
 
-fn strip_marks(s: &str) -> String {
+pub(crate) fn strip_marks(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let b = s.as_bytes();
     let mut i = 0;
