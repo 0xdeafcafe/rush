@@ -11,7 +11,10 @@ use crate::frame::Out;
 use crate::model::Model;
 
 /// rush's full guide (docs/guide.md), which the #ask agent answers from.
-pub const GUIDE: &str = include_str!("../../../../../../docs/guide.md");
+pub const GUIDE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../docs/guide.md"
+));
 
 /// A session rush hosts, started for rush's own ends (#ask): what the
 /// screens that host sessions are handed (startHosted with its config).

@@ -1,0 +1,50 @@
+     !        rush   ● 1 needs you [ctrl+n] next   ✻ 2 working   3 finished                                                                                                        – today · Anthropic
+    ▄▄▄▄      ✻ default · /src/checkout                                                                                                                                            0.0G RAM · 6 agents
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    < > places
+    RUSH
+   ▀▀▀▀▀▀      Agents · Wall  [ ]
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  AGENTS▾                                   COS╭─ ⌨ Keys ──────────────────────────────────────────────────────────────────────────────────────── f1 ─╮
+┃ Needs you  1 · $0.19                         │ ❯ ▏find a key by its keys or what it does                                                   132 keys │
+▌ └─ ? fix the flaky tax rounding test ✻   $0.1│ ──────────────────────────────────────────────────────────────────────────────────────────────────── │ode · open in a terminal · /rush copies it here
+▌      checkout · main                         │ Here · Agents and the Prompt ──────────────────────────────────────────────────────────────────────  │
+▌        ╰ asks: Round half up, or half to even│ ▍ ↑                     the agent above                                                              │─────────────────────────────────────────────────
+                                               │   ↓                     the agent below                                                              │                                     ▌
+┃ Working  2 · $5.72                           │   pgup                  ten agents up                                                                │                                     │
+┃ ├─ ✳ add Apple Pay to checkout ✻ ↳1      $2.6│   pgdown                ten agents down                                                              │                                     │
+┃ │    checkout · feat/apple-pay               │   home · shift+↑        the first agent                                                              │                                     │
+┃ └─ ✳ move the design tokens to CSS … ✻   $3.1│   end · shift+↓         the last agent                                                               │                                     │
+┃      checkout · main                         │   enter                 open or rename the agent, or send what's typed                               │                                     │
+                                               │   ctrl+o · ⌘↓           open the agent's Session                                                     │                                     │
+┃ Idle  1 · $1.10 · 120M idle ram              │   →                     into the agent, or unfold a heading                                          │                                     │
+┃ └─ ◦ set up caching for CI ✻             $1.1│   ←                     fold the heading                                                             │                                     │
+┃      checkout · main                         │   esc                   clear, go back, or (twice) quit                                              │                                     │
+                                               │   ctrl+r                rename the agent                                                             │                                     │
+┃ Today  1 · $1.71                             │   shift+tab · ⌥m        pick the next session's agent, model and effort                              │                                     │
+┃ └─ · why does the ledger import tim… ✻   $1.7│   ctrl+] l · ⌥l         new sessions from a worktree agent: its worktree or main checkout            │                                     │
+┃      checkout · main                         │   ctrl+l                choose the folder, or move the agent                                         │                                     │
+                                               │   ctrl+y                open the agent's pull request                                                │                                     │
+ ▸ Earlier  1 · $0.42   rename Invoice to Bill │   ctrl+t                pin the agent                                                                │                                     │
+                                               │   ctrl+s                group agents by the next                                                     │                                     │
+                                               │   ctrl+p                split each section by project, or stop                                       │                                     │
+                                               │   ctrl+x                stop the agent with all it started, and hide it                              │                                     │
+                                               │   ctrl+] x              hide, stop, restart, switch or delete the agent                              │                                     │
+                                               │   ctrl+d · ctrl+] d     stop the agent and put it away in Earlier, or bring it back                  │                                     │
+                                               │   ctrl+b · ⌥g           tell the agent to keep going                                                 │                                     │
+                                               │   ctrl+] p · ⌥p         tell the agent to land its work: commit, then merge its branch or pull requ… │                                     │
+                                               │   v                     a Claude Code agent's screen or its summary, with nothing typed              │                                     │
+ ✦ Getting started  1/8                        │   [                     the agent's view before                                                      │                                     │
+ ○ Start an agent                              │   ]                     the agent's next view                                                        │                                     │
+ ○ Open its Session                            │   ctrl+n                the next agent that needs you                                                │                                     │
+ ○ Run a command                               │   shift+← · ⌥←          less of the screen for the list                                              │                                     │
+ ○ Jump to who needs you                       │   shift+→ · ⌥→          more of the screen for the list                                              │                                     │
+ ○ Rename an agent                             │   ?                     the keys, with nothing typed                                                 │                                     │
+ ○ Pin one to the top                          │   ctrl+g                write what's typed in your editor; with nothing typed, bring a Done agent b… │                                     │
+ ○ Put one away                                │   ctrl+v · ⌘v           paste an image                                                               │                                     │
+ ✓ See all the keys                            │                                                                                                      │                                     │
+                                               │ ↑↓ choose  ·  enter change its keys  ·  tab next section  ·  esc close                               │                                     │
+ # for commands · #tips off hides this         ╰──────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ new agent in checkout ──────────────────────────────╮│  ╭─ open in a terminal, so it can't take messages here ─────────────────────────────────────────────────────────────────────────╮
+│ ❯ describe a task                                    ││  │ ❯ enter or → to talk to this agent                                                                                           │
+╰──────────────────────────────────────────────────────╯│  ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  enter open  ·  ctrl+o reply  ·  ? more                │    enter · → type here  ·  ctrl+n next needing you

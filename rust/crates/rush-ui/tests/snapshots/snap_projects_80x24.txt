@@ -1,0 +1,24 @@
+     !        rush   ● 1 needs you [ctrl+n] next   ✻ 2 working   3 finished  ⋯
+    ▄▄▄▄      ✻ default · /src/checkout
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    < > places
+    RUSH
+   ▀▀▀▀▀▀
+────────────────────────────────────────────────────────────────────────────────
+                                                  ● 3 running · – ram · 0% cpu
+
+  ╭─ Projects ─────────────────────────────────────────────────────────── 1 ─╮
+  │ ┃ checkout  /src/checkout · asking git…                                  │
+  │ ┃ └─   main checkout                                           keep      │
+  │                                                                          │
+  │ ⇡ Pull requests       asking GitHub…                                     │
+  │                                                                          │
+  │ NO PROJECT'S ─────────────────────────────────────────────────────────── │
+  │ ◌ Temporary           –                                                  │
+  │ ⚙ System              0 processes                                        │
+  ╰──────────────────────────────────────────────────────────────────────────╯
+
+  ╭─ ◆ checkout ──────────────────────── 2 working · 1 need you · 4 · $7.01 ─╮
+  │ /src/checkout                                                            │
+  │ asking git…                                                              │
+────────────────────────────────────────────────────────────────────────────────
+  ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back

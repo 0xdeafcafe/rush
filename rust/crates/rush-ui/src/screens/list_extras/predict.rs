@@ -555,8 +555,8 @@ fn read(path: &Path, decode: Decode, stop: Arc<AtomicBool>) -> Option<Read> {
 }
 
 /// The agents whose conversations are read ahead now, newest first.
-#[cfg(test)]
-pub(crate) fn ready(m: &mut Model) -> Vec<String> {
+#[doc(hidden)]
+pub fn ready(m: &mut Model) -> Vec<String> {
     m.kept
         .get::<Predict>()
         .ready
@@ -566,8 +566,8 @@ pub(crate) fn ready(m: &mut Model) -> Vec<String> {
 }
 
 /// Reads made so far, and whether one is under way.
-#[cfg(test)]
-pub(crate) fn reads(m: &mut Model) -> (u64, bool) {
+#[doc(hidden)]
+pub fn reads(m: &mut Model) -> (u64, bool) {
     let p = m.kept.get::<Predict>();
     (p.made, p.busy.is_some())
 }

@@ -105,8 +105,8 @@ pub struct Finish {
     /// The decisions each agent was last notified of, by key: the same
     /// asked again isn't said again (toldCard).
     told_card: HashMap<String, String>,
-    /// The notifications posted, as (title, body), in tests.
-    #[cfg(test)]
+    /// The notifications posted, as (title, body), in a test's sandbox,
+    /// where none is really sent.
     pub told: Vec<(String, String)>,
 }
 
@@ -175,29 +175,24 @@ pub fn limit_handled(m: &Model, a: &Agent) -> bool {
 /// whether the menu bar runs is a look at the disk. With unless_menu_bar,
 /// the menu bar posts it instead when it runs (notifyLater).
 fn notify_later(f: &mut Finish, title: String, body: String, unless_menu_bar: bool) {
-    #[cfg(test)]
-    {
-        let _ = unless_menu_bar;
+    if rush_core::sandbox::active() {
         f.told.push((title, body));
+        return;
     }
-    #[cfg(not(test))]
-    {
-        let _ = f;
-        std::thread::spawn(move || {
-            let by = if unless_menu_bar && rush_menubar::running() {
-                "menu bar"
-            } else {
-                rush_sys::actions::notify(&title, &body);
-                "rush"
-            };
-            rush_sys::events::log(
-                "notify",
-                serde_json::json!({
-                    "title": title, "body": rush_host::events::clip(&body), "by": by,
-                }),
-            );
-        });
-    }
+    std::thread::spawn(move || {
+        let by = if unless_menu_bar && rush_menubar::running() {
+            "menu bar"
+        } else {
+            rush_sys::actions::notify(&title, &body);
+            "rush"
+        };
+        rush_sys::events::log(
+            "notify",
+            serde_json::json!({
+                "title": title, "body": rush_host::events::clip(&body), "by": by,
+            }),
+        );
+    });
 }
 
 /// With each reading of the list (notify).

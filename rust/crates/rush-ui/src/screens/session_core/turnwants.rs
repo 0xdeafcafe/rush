@@ -125,11 +125,12 @@ pub type Wanter = fn(&Registry, &str, &str) -> Option<TurnWants>;
 
 /// Who reads a last message (turnWanter): a cheap model, except in tests,
 /// which never spend a model call.
-static WANTER: RwLock<Wanter> = RwLock::new(if cfg!(test) { no_model } else { ask_model });
+/// Unset, it is the model, or none in a test's sandbox (set_wanter overrides).
+static WANTER: RwLock<Option<Wanter>> = RwLock::new(None);
 
 /// Sets who reads a last message.
 pub fn set_wanter(f: Wanter) {
-    *WANTER.write().unwrap_or_else(|e| e.into_inner()) = f;
+    *WANTER.write().unwrap_or_else(|e| e.into_inner()) = Some(f);
 }
 
 fn no_model(_: &Registry, _: &str, _: &str) -> Option<TurnWants> {
@@ -450,7 +451,13 @@ fn read_turn(m: &mut Model) {
     );
     state(m).reading = true;
     let reg = m.reg.clone();
-    let wanter = *WANTER.read().unwrap_or_else(|e| e.into_inner());
+    let wanter = (*WANTER.read().unwrap_or_else(|e| e.into_inner())).unwrap_or(
+        if rush_core::sandbox::active() {
+            no_model
+        } else {
+            ask_model
+        },
+    );
     let k = key.clone();
     m.later(
         move || {

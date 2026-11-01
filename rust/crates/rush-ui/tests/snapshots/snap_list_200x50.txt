@@ -1,0 +1,50 @@
+     !        rush   ● 1 needs you [ctrl+n] next   ✻ 2 working   3 finished                                                                                                        – today · Anthropic
+    ▄▄▄▄      ✻ default · /src/checkout                                                                                                                                            0.0G RAM · 6 agents
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    < > places
+    RUSH
+   ▀▀▀▀▀▀      Agents · Wall  [ ]
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  AGENTS▾                                   COST   TIME │
+┃ Needs you  1 · $0.19                                  │    fix the flaky tax rounding test   @fix-flaky-tax  ·  needs you
+▌ └─ ? fix the flaky tax rounding test ✻   $0.19   2m ● │    checkout · main                                                   ✻ Claude Code   Claude Code · open in a terminal · /rush copies it here
+▌      checkout · main                                  │    Conversation   Overview   Changes    [ ] views
+▌        ╰ asks: Round half up, or half to even?        │───━━━━━━━━━━━━━━──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+                                                        │  couldn't read it: No such file or directory (os error 2)                                                                         ▌
+┃ Working  2 · $5.72                                    │                                                                                                                                   │
+┃ ├─ ✳ add Apple Pay to checkout ✻ ↳1      $2.62    21m │                                                                                                                                   │
+┃ │    checkout · feat/apple-pay                        │                                                                                                                                   │
+┃ └─ ✳ move the design tokens to CSS … ✻   $3.10    20m │                                                                                                                                   │
+┃      checkout · main                                  │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+┃ Idle  1 · $1.10 · 120M idle ram                       │                                                                                                                                   │
+┃ └─ ◦ set up caching for CI ✻             $1.10    10m │                                                                                                                                   │
+┃      checkout · main                                  │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+┃ Today  1 · $1.71                                      │                                                                                                                                   │
+┃ └─ · why does the ledger import tim… ✻   $1.71     3h │                                                                                                                                   │
+┃      checkout · main                                  │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+ ▸ Earlier  1 · $0.42   rename Invoice to Bill everyw…  │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │                                                                                                                                   │
+                                                        │
+╭─ new agent in checkout ──────────────────────────────╮│  ╭─ open in a terminal, so it can't take messages here ─────────────────────────────────────────────────────────────────────────╮
+│ ❯ describe a task                                    ││  │ ❯ enter or → to talk to this agent                                                                                           │
+╰──────────────────────────────────────────────────────╯│  ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  enter open  ·  ctrl+o reply  ·  ? more                │    enter · → type here  ·  ctrl+n next needing you

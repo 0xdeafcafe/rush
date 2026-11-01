@@ -266,7 +266,7 @@ pub fn apply_colors(m: &mut Model) {
     // Spaces and tabs in diffs marked or not, at start and as the row
     // changes, a --render too (model.go:477, settings_interface.go:157).
     // A test leaves it as it is: it's the whole process's.
-    if m.sender().is_some() || !cfg!(test) {
+    if m.sender().is_some() || !rush_core::sandbox::active() {
         rush_convo::render::set_show_whitespace(store(m).config.show_whitespace);
     }
     if m.sender().is_none() {

@@ -18,7 +18,8 @@ pub(crate) mod place;
 mod projectmem;
 pub(crate) mod prsheet;
 mod rows;
-mod scan;
+#[doc(hidden)]
+pub mod scan;
 pub mod scripts;
 pub mod shells;
 mod temp;
@@ -52,6 +53,13 @@ fn on_fleet(m: &mut Model) {
         scan::read_machine(m);
     }
     care::watch_machine(m);
+}
+
+/// Nothing asked of git, GitHub, the disk or the process table, so a
+/// frame of Projects is the same on every machine (snapshot tests).
+#[doc(hidden)]
+pub fn freeze(m: &mut Model) {
+    m.kept::<data::Data>().frozen = true;
 }
 
 /// Settings › General's Hibernate after, in minutes, as last read with

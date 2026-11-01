@@ -242,7 +242,7 @@ pub fn start_menu_bar(m: &mut Model) {
     if !super::store(m).config.menu_bar || !owns_menu_bar(m) {
         return;
     }
-    if cfg!(test) {
+    if rush_core::sandbox::active() {
         m.kept::<Asked>().0.push(true); // tests never reach the real icon
         return;
     }
@@ -261,7 +261,7 @@ pub fn stop_menu_bar(m: &mut Model) {
     if !owns_menu_bar(m) {
         return;
     }
-    if cfg!(test) {
+    if rush_core::sandbox::active() {
         m.kept::<Asked>().0.push(false); // tests never reach the real icon
         return;
     }
@@ -290,8 +290,9 @@ pub struct Asked(pub Vec<bool>);
 /// stopped here, if this rush leads (start_menu_bar and stop_menu_bar
 /// ask); a following one leaves it to the one that does.
 pub fn menu_bar_turned(m: &mut Model, on: bool) {
-    #[cfg(test)]
-    m.kept::<Turned>().0.push(on);
+    if rush_core::sandbox::active() {
+        m.kept::<Turned>().0.push(on);
+    }
     if on {
         start_menu_bar(m);
     } else {
@@ -300,7 +301,7 @@ pub fn menu_bar_turned(m: &mut Model, on: bool) {
 }
 
 /// What menu_bar_turned was asked, for tests.
-#[cfg(test)]
+#[doc(hidden)]
 #[derive(Default)]
 pub struct Turned(pub Vec<bool>);
 
@@ -487,11 +488,11 @@ impl NetSheet {
     }
 }
 
-#[cfg(test)]
+#[doc(hidden)]
 impl NetSheet {
     /// The sheet with netwatch not started: a test never asks the
     /// network.
-    pub(crate) fn unstarted() -> NetSheet {
+    pub fn unstarted() -> NetSheet {
         NetSheet {
             _checks: netwatch::want_checks(),
             _rates: netwatch::watch_rates(),

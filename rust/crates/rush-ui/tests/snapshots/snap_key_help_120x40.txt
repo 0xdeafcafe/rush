@@ -1,0 +1,40 @@
+     !        rush   ● 1 needs you [ctrl+n] next   ✻ 2 working   3 finished                        – today · Anthropic
+    ▄▄▄▄      ✻ default · /src/checkout                                                            0.0G RAM · 6 agents
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    < > places
+    RUSH
+   ▀▀▀▀▀▀      Agents · Wall  [ ]
+───────╭─ ⌨ Keys ──────────────────────────────────────────────────────────────────────────────────────── f1 ─╮─────────
+  AGENT│ ❯ ▏find a key by its keys or what it does                                                   132 keys │T   TIME
+┃ Needs│ ──────────────────────────────────────────────────────────────────────────────────────────────────── │
+▌ └─ ? │ Here · Agents and the Prompt ──────────────────────────────────────────────────────────────────────  │9   2m ●
+▌      │ ▍ ↑                     the agent above                                                              │
+       │   ↓                     the agent below                                                              │
+┃ Worki│   pgup                  ten agents up                                                                │
+┃ ├─ ✳ │   pgdown                ten agents down                                                              │2    21m
+┃ │    │   home · shift+↑        the first agent                                                              │
+┃ └─ ✳ │   end · shift+↓         the last agent                                                               │0    20m
+┃      │   enter                 open or rename the agent, or send what's typed                               │
+  ↓ 9 m│   ctrl+o · ⌘↓           open the agent's Session                                                     │
+       │   →                     into the agent, or unfold a heading                                          │
+ ✦ Gett│   ←                     fold the heading                                                             │
+ ○ Star│   esc                   clear, go back, or (twice) quit                                              │ enter
+ ○ Open│   ctrl+r                rename the agent                                                             │   { }
+ ○ Run │   shift+tab · ⌥m        pick the next session's agent, model and effort                              │     #
+ ○ Jump│   ctrl+] l · ⌥l         new sessions from a worktree agent: its worktree or main checkout            │ctrl+n
+ ○ Rena│   ctrl+l                choose the folder, or move the agent                                         │ctrl+r
+ ○ Pin │   ctrl+y                open the agent's pull request                                                │  #pin
+ ○ Put │   ctrl+t                pin the agent                                                                │ #done
+ ✓ See │   ctrl+s                group agents by the next                                                     │
+       │   ctrl+p                split each section by project, or stop                                       │
+ # for │   ctrl+x                stop the agent with all it started, and hide it                              │
+  ╭─ wa│   ctrl+] x              hide, stop, restart, switch or delete the agent                              │──────╮
+  │  as│   ctrl+d · ctrl+] d     stop the agent and put it away in Earlier, or bring it back                  │      │
+  │    │   ctrl+b · ⌥g           tell the agent to keep going                                                 │      │
+  │    │   ctrl+] p · ⌥p         tell the agent to land its work: commit, then merge its branch or pull requ… │      │
+  ├────│   v                     a Claude Code agent's screen or its summary, with nothing typed              │──────┤
+  │  sp│                                                                                                      │      │
+  ╰────│ ↑↓ choose  ·  enter change its keys  ·  tab next section  ·  esc close                               │──────╯
+╭─ new ╰──────────────────────────────────────────────────────────────────────────────────────────────────────╯model  ─╮
+│ ❯ describe a task                                                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  enter open  ·  shift+← · #view split back to side by side  ·  ctrl+o reply  ·  ctrl+n 1 needs you  ·  ? more
