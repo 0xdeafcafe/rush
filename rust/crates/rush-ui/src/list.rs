@@ -1509,7 +1509,7 @@ impl Model {
 
     /// Whether a row's summary earns its place.
     pub fn says_why(&self, a: &Agent) -> bool {
-        asks(a) || a.stuck(self.now)
+        asks(a) || a.stuck(self.now) || crate::screens::accounts::guard::row_note(self, a).is_some()
     }
 
     /// The latest thing an agent said or is doing, its colour, and whether
@@ -1525,6 +1525,10 @@ impl Model {
             col = RED;
         } else if wants_you(self, a) {
             summary = wants_say(&wants_of(self, a));
+            col = YELLOW;
+        } else if let Some(s) = crate::screens::accounts::guard::row_note(self, a) {
+            // The runaway guard holds its next turn.
+            summary = s;
             col = YELLOW;
         } else if a.your_turn(now) && !a.just_finished(now) {
             summary = one_line(&a.job.detail);

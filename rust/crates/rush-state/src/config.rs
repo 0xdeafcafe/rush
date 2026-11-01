@@ -218,6 +218,13 @@ pub struct Config {
         skip_serializing_if = "String::is_empty"
     )]
     pub at_limit: String,
+    /// The runaway guard (Rust-only): every part off until set.
+    #[serde(
+        rename = "guard",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_default"
+    )]
+    pub guard: Guard,
     /// The harness each provider runs in, by provider, where it isn't its
     /// usual one: "ollama": "pi" runs Ollama in Pi.
     #[serde(
@@ -779,6 +786,123 @@ fn home() -> Folder {
     }
 }
 
+/// The runaway guard as set (Rust-only): its pace check, the cap on
+/// agents working at once, and what's stricter while you're away; each
+/// off until set. A number left 0 is its default.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Guard {
+    #[serde(
+        rename = "pace",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_false"
+    )]
+    pub pace: bool,
+    /// Warns past this many times an account's fair share: 0 is 1.5.
+    #[serde(
+        rename = "paceWarn",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_zero_f64"
+    )]
+    pub pace_warn: f64,
+    /// Holds or moves work past this many: 0 is 2.
+    #[serde(
+        rename = "paceTrip",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_zero_f64"
+    )]
+    pub pace_trip: f64,
+    /// At most this many agents working at once: 0 is no cap.
+    #[serde(
+        rename = "cap",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_zero_i64"
+    )]
+    pub cap: i64,
+    #[serde(
+        rename = "away",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_false"
+    )]
+    pub away: bool,
+    /// Away after this many minutes with no keys: 0 is 20.
+    #[serde(
+        rename = "awayMinutes",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_zero_i64"
+    )]
+    pub away_minutes: i64,
+    /// At most this many agents working at once while away: 0 is 2.
+    #[serde(
+        rename = "awayCap",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_zero_i64"
+    )]
+    pub away_cap: i64,
+    /// A session moves to another account at most once in this many
+    /// hours: 0 is 6.
+    #[serde(
+        rename = "moveHours",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_zero_i64"
+    )]
+    pub move_hours: i64,
+}
+
+impl Guard {
+    pub fn warn(&self) -> f64 {
+        if self.pace_warn > 0.0 {
+            self.pace_warn
+        } else {
+            1.5
+        }
+    }
+    pub fn trip(&self) -> f64 {
+        if self.pace_trip > 0.0 {
+            self.pace_trip
+        } else {
+            2.0
+        }
+    }
+    pub fn away_after_minutes(&self) -> i64 {
+        if self.away_minutes > 0 {
+            self.away_minutes
+        } else {
+            20
+        }
+    }
+    pub fn cap_away(&self) -> i64 {
+        if self.away_cap > 0 { self.away_cap } else { 2 }
+    }
+    pub fn move_gap_hours(&self) -> i64 {
+        if self.move_hours > 0 {
+            self.move_hours
+        } else {
+            6
+        }
+    }
+
+    /// The guard's settings as rush-core's plan takes them.
+    pub fn settings(&self) -> rush_core::guard::Settings {
+        use rush_core::guard::{AwayCfg, PaceCfg, Settings};
+        const MIN: i64 = 60_000;
+        Settings {
+            pace: self.pace.then(|| PaceCfg {
+                warn: self.warn(),
+                trip: self.trip(),
+                release: (self.warn() - 0.3).clamp(1.0, self.trip()),
+                ..PaceCfg::default()
+            }),
+            cap: self.cap.max(0) as usize,
+            away: self.away.then(|| AwayCfg {
+                after: self.away_after_minutes() * MIN,
+                cap: self.cap_away().max(1) as usize,
+            }),
+            move_gap: self.move_gap_hours() * 60 * MIN,
+        }
+    }
+}
+
 /// What SwitchOnLimit can be.
 pub const ON_LIMIT_ACCOUNT: &str = ""; // another account of the same agent
 pub const ON_LIMIT_AGENT: &str = "agent"; // then the next agent
@@ -1118,6 +1242,28 @@ fn key_in_own(id: &str, k: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_guard_is_off_until_set() {
+        let c = Config::default();
+        assert!(!c.guard.settings().on());
+        let j = serde_json::to_string(&c).unwrap();
+        assert!(!j.contains("guard"), "{j}");
+        let c: Config =
+            serde_json::from_str(r#"{"guard":{"pace":true,"cap":4,"away":true}}"#).unwrap();
+        let s = c.guard.settings();
+        let p = s.pace.unwrap();
+        assert_eq!((p.warn, p.trip, p.release), (1.5, 2.0, 1.2));
+        assert_eq!(s.cap, 4);
+        let a = s.away.unwrap();
+        assert_eq!((a.after, a.cap), (20 * 60_000, 2));
+        assert_eq!(s.move_gap, 6 * 3_600_000);
+        let j = serde_json::to_string(&c).unwrap();
+        assert!(
+            j.contains(r#""guard":{"pace":true,"cap":4,"away":true}"#),
+            "{j}"
+        );
+    }
 
     // Quick start is on until it's turned off, and turning it off sticks.
     #[test]

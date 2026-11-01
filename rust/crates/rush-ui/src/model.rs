@@ -77,6 +77,9 @@ pub struct Model {
     pub(crate) quit_armed: Ms,
     pub(crate) help: bool,
     pub(crate) term_focused: bool,
+    /// When you last pressed a key, clicked or pasted in rush: the
+    /// runaway guard's away mode asks. 0: not since it started.
+    pub(crate) last_input: Ms,
     pub session: Option<SessionView>,
     /// The picked agent's Session beside the list, on a screen split
     /// between them (list_extras/split.rs); the list keeps the keys.
@@ -201,6 +204,7 @@ impl Model {
             quit_armed: 0,
             help: false,
             term_focused: true,
+            last_input: 0,
             session: None,
             pane: None,
             tiles: HashMap::new(),
@@ -1760,6 +1764,9 @@ impl App<Note> for Model {
         });
         // Whatever changes a box, undo can take back (frame/keepundo.rs).
         let g = self.guard_boxes();
+        if let Msg::Input(Event::Key { .. } | Event::Mouse { .. } | Event::Paste(_)) = &msg {
+            self.last_input = self.clock.unwrap_or_else(rush_core::time::now);
+        }
         let st = match msg {
             Msg::Input(ev) => match ev {
                 Event::Key { code, mods } => self.key(code, mods),

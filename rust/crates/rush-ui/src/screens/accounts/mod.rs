@@ -21,6 +21,7 @@ pub mod bits;
 pub mod bridge;
 pub mod choices;
 pub mod forsettings;
+pub mod guard;
 pub mod handoff;
 pub mod info;
 pub mod keys;
@@ -41,6 +42,8 @@ pub mod state;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_guard;
+#[cfg(test)]
 mod tests_logins;
 #[cfg(test)]
 mod tests_newcmd;
@@ -59,6 +62,7 @@ pub fn register(x: &mut Ext) {
     x.list_keys.push(list_key);
     x.on_fleet.push(logins::on_fleet);
     x.on_fleet.push(state::on_fleet);
+    x.on_fleet.push(guard::on_fleet);
     x.on_fleet.push(onboard::note_progress);
     x.on_fleet.push(recent::on_fleet);
     x.on_fleet.push(askrush::on_fleet);

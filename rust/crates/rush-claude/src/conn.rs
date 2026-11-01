@@ -108,7 +108,7 @@ impl Driver for Claude {
         if !o.bash_hook.is_empty() {
             hooks.insert(
                 "PreToolUse".into(),
-                json!([{"matcher": "Bash", "hooks": [{"type": "command", "command": o.bash_hook, "timeout": 10}]}]),
+                json!([{"matcher": "Bash|Agent|Task|Workflow", "hooks": [{"type": "command", "command": o.bash_hook, "timeout": 10}]}]),
             );
         }
         if !hooks.is_empty() {

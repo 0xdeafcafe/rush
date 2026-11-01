@@ -543,6 +543,23 @@ pub fn when(m: &mut Model, key: &str, q: &Queued) -> rush_core::text::Line {
     // Yours if you moved it, not a fixed ctrl+enter (rushmode.go:3543-3546).
     let send_now = super::spawned::send_now_key(m);
     if q.held {
+        // The runaway guard's: why, and the key that lets it through.
+        let id = m
+            .agents
+            .iter()
+            .find(|a| a.key == key && a.rush)
+            .map(|a| a.job.id.clone());
+        if let Some(say) =
+            id.and_then(|id: String| crate::screens::accounts::guard::held_say(m, &id))
+        {
+            return line([
+                sp(format!(" · {say}"), YELLOW),
+                sp(
+                    format!(" · alt+h lets it through · {send_now} sends it now"),
+                    DIM,
+                ),
+            ]);
+        }
         // Never silently stuck: say it's held and how it goes.
         return line([
             sp(" · held", YELLOW),

@@ -112,7 +112,8 @@ pub struct StartOptions {
     pub inbox: String,
     /// A command to run before each shell call, the call's hook input on
     /// its stdin; what it prints may rewrite the call. For the gate: agents
-    /// without hooks go without.
+    /// without hooks go without. A harness that can also runs it before
+    /// each new subagent or workflow, so the runaway guard can refuse one.
     pub bash_hook: String,
     /// When set, pays for the session per token with the provider's API key
     /// rather than out of the subscription signed in.

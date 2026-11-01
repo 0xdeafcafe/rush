@@ -44,6 +44,8 @@ pub struct AcctRow {
     pub who: Vec<String>,
     pub current: bool,
     pub q: Quota,
+    /// The account's own id: a login's uuid, or another agent's.
+    pub id: String,
 }
 
 impl AcctRow {
@@ -782,6 +784,10 @@ fn account_row(m: &Model, r: AcctRow) -> Setting {
     let use_line = {
         let mut l = limits(m, &r, 26, 26);
         join(&mut l, resets_chip(&r.q));
+        join(
+            &mut l,
+            crate::screens::accounts::guard::pace_chip(m, &r.kind, &r.id),
+        );
         if signed_out {
             // Its usage reads stale only because the agent is signed out.
             l = line([

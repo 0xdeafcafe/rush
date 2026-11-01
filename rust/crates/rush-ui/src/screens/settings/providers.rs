@@ -368,6 +368,11 @@ pub fn head(m: &Model, id: &str, w: usize) -> Vec<Line> {
         out.push(l);
     }
     out.extend(window_lines(q, m.now, &label));
+    if let Some(p) = crate::screens::accounts::guard::pace_words(m, &u.in_use.kind, &u.in_use.id) {
+        let mut l = label("pace");
+        join(&mut l, p);
+        out.push(l);
+    }
     out
 }
 

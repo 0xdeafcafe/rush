@@ -161,7 +161,14 @@ pub fn auto_switch(m: &mut Model) -> Out {
     if cfg(m).default_profile().limit() == LIMIT_WAIT && !stopped {
         return Out::Idle;
     }
-    let logins = peek(m).logins.clone();
+    // An account the runaway guard has past its pace isn't one to move
+    // to.
+    let logins: Vec<LoginView> = peek(m)
+        .logins
+        .iter()
+        .filter(|l| l.current || !super::guard::over(m, LOGINS_KIND, &l.id))
+        .cloned()
+        .collect();
     if stopped && has_room(m) && logins.len() > 1 {
         // Stopped under a login rush has switched away from since: the
         // one in use has room, so they carry on in it.
@@ -286,7 +293,11 @@ pub fn check_limits(m: &mut Model) -> Out {
         if k == LOGINS_KIND || !switches(m, &k) || now - at < SWITCH_GAP {
             continue;
         }
-        if let Some((to, why)) = next_account(m, &accounts_of(&rows, &k), now) {
+        let accts: Vec<AcctRow> = accounts_of(&rows, &k)
+            .into_iter()
+            .filter(|r| r.current || !super::guard::over(m, &r.kind, r.id()))
+            .collect();
+        if let Some((to, why)) = next_account(m, &accts, now) {
             accounts(m).switched_at.insert(k.clone(), now);
             if rush_core::dryrun::would("switch-account", &format!("{k}: {}", to.name(m)), &why) {
                 continue;

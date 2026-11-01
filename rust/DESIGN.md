@@ -768,12 +768,88 @@ The actions, by the name the log gives them:
   memory guard);
 - `ask-turn-model` (`session_core/turnwants.rs`), `send-continue` (the
   API back, `social/services.rs`), `set-attribution`
-  (`frame/everywhere.rs`).
+  (`frame/everywhere.rs`);
+- `guard-hold`, `guard-move`, `guard-refuse-spawns`, and its
+  `switch-login`/`switch-account` (the runaway guard,
+  `accounts/guard.rs`).
 
 Rush's own files (its state, caches, the search index, the events log)
 are still written. To try a rush that leads without it touching anything,
 run it under a sandbox that denies writes outside a copy of rush's folder
 and signals to other processes as well (the sweep's `lead-trial.sb`).
+
+## The runaway guard (Rust-only)
+
+Three checks that keep a busy few hours from spending a week's limit,
+each off until set (config.json `guard`; Settings › General › Runaway
+guard). rush-core's `guard` decides from what it's handed; the accounts
+module's `guard.rs` runs it in the rush that leads, every 5 s, off the
+UI thread, and does what it says.
+
+- **Pace**, per account, any provider: the fair share is the room left
+  in its longest window (`Quota::weekly`: Claude's week, Codex's
+  secondary) over the time to its reset; the burn is what that window
+  gained over the last 2 hours. Each reading of each account's week is
+  kept in `weekuse.json` (3 hours of them, every rush's readings
+  merged), whether or not the guard is on, so turning it on has the
+  hours behind it. A reading of a new week counts from 0; one lower
+  than the most seen (an older cache) adds nothing. Under 30 minutes
+  read says nothing. Past `warn` (1.5×) it's said once; past `trip`
+  (2×) it trips, and stays tripped until under `release` (warn − 0.3,
+  1.2×). When it frees up is worked out from its use ageing out of
+  the 2 hours and its fair share growing as the reset nears. A provider
+  without readings has no pace: only the cap and away cover it, as its
+  row says.
+- **The cap**: agents working at once. A rush session's turn counts 1,
+  each subagent in it 1 (its host's tasks not in the background), each
+  background agent or workflow 1; background shells 0. Agents rush
+  doesn't run count (1 + their running subagents) but are never held.
+- **Away**: no key in rush (`Model::last_input`) nor anywhere on the
+  Mac (rush-sys `idle`: HIDIdleTime) for `awayMinutes` (20), or the
+  screen locked. A lower cap (2), no new subagents or workflows, and
+  each session's running turn finishes, then holds; one on #away
+  (keep working while I'm away) carries on.
+
+What trips never cuts a turn. A session's next turn is held with its
+host's queue hold (Op::HoldQueue, as alt+h): a message sent meanwhile
+queues, held, idle or not (Rust-only: a host held while idle queues too;
+sent now, it goes). What the guard holds and has moved is kept in
+`guard-held.json`, so the next rush to lead lets go of its holds and
+not of yours; it looks only once the accounts have been read. The guard only lets go of what it held; alt+h on it lets
+the next turn through (it isn't held again until that turn has run),
+ctrl+enter sends one now. Held for the cap, sessions go again in the
+order held as room frees.
+
+Moves: when the account in use trips, new sessions switch (new sessions
+only, as `n` does) to the account under `release` that the work it'd
+take on (the tripped one's burn) wouldn't trip, of those the one whose
+room would go unused soonest ((fair − burn) ÷ (1 + hours to reset ÷
+24)), so room that would be lost at a reset days away counts for less;
+the event says why ("bob resets in 4h with 38% left"). With none, work
+waits. Then each session on a tripped account: a new one (no turns)
+moves; one whose prompt cache is warm (`Info::cache_warm`) waits, as a
+move writes its whole context again at full price; a cold one moves
+(`relogin`), at most once in `moveHours` (6); one that moved already
+waits. rush's own switching (auto-switch, other agents' accounts) never
+moves to an account the guard has past its pace.
+
+Said: the list row ("held: past your pace on alex · 2.1× · frees at
+14:20"), the header's counts row, the queue card, the provider's
+`pace` line and a chip on each account's row; news when an account
+trips, warns, or you go away or come back; a desktop notification
+(unless Notify is off) when one trips or every account is past its
+pace. Events: `guard-tripped` (rush's own), and per session
+`guard-held`, `guard-moved` (with the context size and whether its cache
+was cold), `guard-released`, `guard-refused` (a spawn), so `rush why`
+tells them. New subagents and workflows are refused through
+`guard.json` in rush's folder, which `rush gate hook` reads: Claude
+Code's PreToolUse hook matches Bash|Agent|Task|Workflow; it lapses 2
+minutes after the last look. A harness without that hook isn't
+refused spawns.
+
+Not yet: a session you start yourself isn't held (its first turn goes
+on the account picked); the menu bar shows a held session only as
+idle.
 
 ## A session's runs
 

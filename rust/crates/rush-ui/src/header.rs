@@ -143,6 +143,11 @@ impl Model {
             let at = counts.len() - usize::from(self.news_head().is_some());
             counts.insert(at, o);
         }
+        if let Some(g) = crate::screens::accounts::guard::header_line(self) {
+            // What the runaway guard holds, ahead of what rush said.
+            let at = counts.len() - usize::from(self.news_head().is_some());
+            counts.insert(at, g);
+        }
         let robot = if self.cfg.hide_logo {
             vec![Line::new(); clanker::H]
         } else {

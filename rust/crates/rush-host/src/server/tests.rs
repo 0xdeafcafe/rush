@@ -493,6 +493,35 @@ fn cut_in_keeps_images() {
     assert_eq!(c.stops.load(Ordering::SeqCst), 2);
 }
 
+// Rust-only: idle with its queue held (the runaway guard's hold), a
+// message waits in the queue; let go, it's sent; sent now, it goes.
+#[test]
+fn held_idle_holds_the_next_turn() {
+    let _home = Home::new();
+    let h = host(Config {
+        id: "hi".into(),
+        kind: "claude".into(),
+        ..Config::default()
+    });
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    {
+        let mut st = h.lock();
+        st.info.state = "idle".into();
+        st.info.queue_held = true;
+    }
+    h.send("next", &[], false).unwrap();
+    assert_eq!(queue(&h), "next");
+    assert!(c.got.lock().unwrap().is_empty());
+    h.do_op(op("queue_hold", |o| o.now = false)).unwrap();
+    assert_eq!(queue(&h), "");
+    assert_eq!(c.got.lock().unwrap()[0].text, "next");
+    h.lock().info.state = "idle".into();
+    h.lock().info.queue_held = true;
+    h.send("go", &[], true).unwrap();
+    assert_eq!(c.got.lock().unwrap().last().unwrap().text, "go");
+}
+
 // host_test.go:732: a message sent while idle, with the queue still
 // waiting and not held, goes after what's queued, all of it together.
 #[test]
