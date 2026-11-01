@@ -262,6 +262,61 @@ fn queued_images_go_with_their_message() {
     assert!(st.info.queue.is_empty() && st.info.queue_images.is_empty());
 }
 
+// A queued image whose smaller copy has gone from the session's scratch
+// goes as the image itself, not failing every try to send the queue.
+#[test]
+fn a_queued_image_whose_copy_is_gone_goes_as_itself() {
+    let _home = Home::new();
+    let d = tempfile::tempdir().unwrap();
+    let pic = d.path().join("shot.jpg").to_string_lossy().into_owned();
+    std::fs::write(&pic, "jpeg").unwrap();
+    let h = host(Config {
+        id: "qg".into(),
+        ..Config::default()
+    });
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    h.lock().info.state = "working".into();
+    h.send("look", std::slice::from_ref(&pic), false).unwrap();
+    let gone = d
+        .path()
+        .join("shot-gone.webp")
+        .to_string_lossy()
+        .into_owned();
+    h.lock().pics.insert(pic.clone(), gone);
+    h.send_queue(&mut h.lock());
+    let got = c.got.lock().unwrap();
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].images, vec![pic]);
+}
+
+// What the agent never took isn't drawn: the queue goes back and each try
+// adds no copy of your messages.
+#[test]
+fn a_send_the_agent_refuses_is_not_echoed() {
+    let _home = Home::new();
+    let h = host(Config {
+        id: "qr".into(),
+        ..Config::default()
+    });
+    with_conn(&h, Arc::new(Refuses));
+    h.lock().info.state = "working".into();
+    h.send("hello", &[], false).unwrap();
+    let before = h.lock().ring.len();
+    h.send_queue(&mut h.lock());
+    h.send_queue(&mut h.lock());
+    let st = h.lock();
+    assert_eq!(
+        st.info.queue,
+        vec!["hello".to_string()],
+        "back on the queue"
+    );
+    let echoed = st.ring[before..]
+        .iter()
+        .any(|l| String::from_utf8_lossy(l).contains("hello"));
+    assert!(!echoed, "not drawn");
+}
+
 // host_test.go:538
 #[test]
 fn rewind_keeps_branches() {

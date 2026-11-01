@@ -390,6 +390,9 @@ impl Hosts for RushHosts {
         // dismissDecisions with no client (rushmode.go:5936).
         rush_host::decisions::dismiss_asleep(&a.job.id, dec_id).map_err(|e| e.to_string())
     }
+    fn running(&self, a: &Agent) -> bool {
+        rush_host::read_info(&a.job.id).is_ok_and(|i| !i.sleeping && rush_host::client::running(&i))
+    }
 
     fn saved(&self, a: &Agent) -> Option<Info> {
         // openSavedHost (sleep_host.go:172-190).
