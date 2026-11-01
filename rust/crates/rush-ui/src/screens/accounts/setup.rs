@@ -27,15 +27,7 @@ use crate::model::Model;
 use crate::style::*;
 
 // What a session starts as is the base's (crate::accounts).
-pub use crate::accounts::{StartOver, setup_label};
-
-/// A provider id (claude, claude-key, ollama) and the agents here that
-/// run it (route).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Route {
-    pub id: String,
-    pub kinds: Vec<String>,
-}
+pub use crate::accounts::{Route, StartOver, billing_of, setup_label};
 
 /// The valid ways to start here, of kinds (the agents that run here): a
 /// split provider's subscription in its own harness only, its API key in
@@ -70,16 +62,6 @@ pub fn routes(reg: &Registry, kinds: &[String], has_key: &dyn Fn(&str) -> bool) 
         }
     }
     out
-}
-
-/// How agent k is paid for as provider id: by key when id is a key, or k
-/// runs only on one (billingOf).
-pub fn billing_of(reg: &Registry, id: &str, k: &str) -> String {
-    if reg.billed(id).1 || reg.key_only(k) {
-        BILLING_KEY.into()
-    } else {
-        String::new()
-    }
 }
 
 /// The provider o is paid through: a split provider's key one when it

@@ -786,7 +786,7 @@ mod tests {
     }
 
     fn model(agents: Vec<Agent>) -> (Model, std::sync::Arc<Fake>) {
-        let mut m = crate::screens::social::feed::tests::model(120, 30);
+        let mut m = crate::kit::model(120, 30);
         let n = agents.len();
         m.set_fleet(crate::worker::Fleet {
             agents,

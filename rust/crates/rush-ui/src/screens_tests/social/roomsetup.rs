@@ -8,12 +8,12 @@ use std::sync::Arc;
 use rush_core::adapter::Registry;
 use rush_core::text::Line;
 
-use super::roomsetup::{RoomSetup, chat_room, room_choice};
 use crate::accounts::StartOver;
 use crate::frame::{Out, Press, Sheet};
 use crate::host::{Fake, set_hosts};
 use crate::model::Model;
-use crate::screens::session_cards::discuss::RoomAsk;
+use rush_ui_base::rooms::RoomAsk;
+use rush_ui_social::roomsetup::{RoomSetup, chat_room, room_choice};
 
 fn reg() -> Registry {
     let r = Registry::new();
@@ -198,7 +198,7 @@ fn create_opens_the_room() {
         Some("room:room-1")
     );
     // The next set-up starts with the same panel.
-    super::roomsetup::room_setup(&mut m, "");
+    rush_ui_social::roomsetup::room_setup(&mut m, "");
     assert_eq!(m.sheet_as::<RoomSetup>().unwrap().selected.len(), 2);
 }
 

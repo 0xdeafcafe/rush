@@ -16,17 +16,15 @@ use rush_core::text::Line;
 use rush_room::room::{self as r, DEFAULT_ROUNDS, Member, Room};
 
 use super::rooms::{ROOM_KEY_PREFIX, RoomRows};
+use crate::accounts::{StartOver, billing_of};
 use crate::frame::editor::{clean_paste, edit, insert};
 use crate::frame::sheet::{sheet_row, text_field, window};
 use crate::frame::{Out, Press, Sheet};
 use crate::host::hosts;
 use crate::model::Model;
-use crate::screens::accounts::setup::{
-    StartOver, billing_of, models, start_defaults, start_routes,
-};
-use crate::screens::session_cards::discuss::{RoomAsk, brief, ctx_words};
-use crate::screens::social::rooms::ModelRooms;
+use crate::rooms::ModelRooms;
 use crate::style::*;
+use rush_ui_base::rooms::{RoomAsk, brief, ctx_words};
 
 /// The panel chosen last, to start the next set-up with (lastPanel).
 #[derive(Default)]
@@ -66,7 +64,8 @@ pub struct RoomSetup {
     pub fill: bool,
     /// Where the chat stands, ahead of its turns (#intervene).
     pub head: String,
-    pub(super) serial: u64,
+    #[doc(hidden)]
+    pub serial: u64,
 }
 
 /// #room: the newest room's row, else a new room; #room new or #room
@@ -106,9 +105,9 @@ pub fn room_setup(m: &mut Model, topic: &str) -> Out {
         ..RoomSetup::default()
     };
     let mut kinds = Vec::new();
-    for route in start_routes(m) {
+    for route in m.ext.calls.start_routes()(m) {
         for kind in &route.kinds {
-            let mut o = start_defaults(m, kind);
+            let mut o = m.ext.calls.start_defaults()(m, kind);
             o.billing = billing_of(&m.reg, &route.id, kind);
             s.options.push(o);
             kinds.push(kind.clone());
@@ -116,7 +115,7 @@ pub fn room_setup(m: &mut Model, topic: &str) -> Out {
     }
     m.open_sheet(Box::new(s));
     for k in kinds {
-        crate::screens::accounts::startsheet::load_models(m, &k);
+        m.ext.calls.load_models()(m, &k);
     }
     Out::Draw
 }
@@ -161,7 +160,7 @@ pub fn choices(m: &Model, options: &[StartOver]) -> Vec<StartOver> {
     let mut out = Vec::new();
     for o in options {
         out.push(o.clone());
-        for c in models(m, &o.kind) {
+        for c in m.ext.calls.models()(m, &o.kind) {
             if c.id != o.model {
                 let mut with = o.clone();
                 with.model = c.id;
@@ -244,16 +243,13 @@ impl RoomSetup {
             .selected
             .iter()
             .map(|o| {
-                let context = models(m, &o.kind)
+                let context = m.ext.calls.models()(m, &o.kind)
                     .into_iter()
                     .filter(|c| c.id == o.model)
                     .map(|c| c.context)
                     .next_back()
                     .unwrap_or(0);
-                (
-                    crate::screens::session_core::start::config_as(m, o, &self.dir),
-                    context,
-                )
+                (m.ext.calls.config_as()(m, o, &self.dir), context)
             })
             .collect();
         let (h, named) = (hosts(m), Named(m.reg.clone()));

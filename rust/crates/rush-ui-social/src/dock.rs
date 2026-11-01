@@ -16,10 +16,10 @@ use rush_draw::{Button, MouseKind};
 
 use super::ink::{cells, clean_text, fields, tagged, tint_beside, truncate};
 use super::stream::{FRESH, Post, Stream, next_tint};
+use crate::feed::ModelFeed;
 use crate::frame::{Mouse, Out};
 use crate::model::Model;
-use crate::screens::social::feed::ModelFeed;
-use crate::screens::social::stream::ModelStream;
+use crate::stream::ModelStream;
 use crate::style::*;
 
 /// A row's key: this, then its post's key.
@@ -52,7 +52,7 @@ pub struct Cols {
 
 /// Model's side of this module: Model is rush-ui-base's, so its
 /// methods here are a trait's.
-pub(crate) trait ModelDock {
+pub trait ModelDock {
     fn stream_lines(&mut self, w: usize, room: usize) -> Vec<(Line, String)>;
     fn stream_cols(&self, posts: &[Post], w: usize, now: Ms) -> Cols;
 }
@@ -236,7 +236,7 @@ fn join_to(mut a: Line, b: Line) -> Line {
 /// The dock at the foot of the Agents list: up to six posts, at most a
 /// third of the body (streamDock); what rush did on its own sits under
 /// them while the list keeps 12 rows (view.go:1163, messages.go newsDock).
-pub(super) fn foot(m: &mut Model, w: usize, body_h: usize) -> Vec<(Line, String)> {
+pub fn foot(m: &mut Model, w: usize, body_h: usize) -> Vec<(Line, String)> {
     let mut rows = m.stream_lines(w, (DOCK_POSTS + 1).min(body_h / 3));
     if body_h.saturating_sub(rows.len()) >= 12 {
         rows.extend(m.news_dock(w));
@@ -245,7 +245,7 @@ pub(super) fn foot(m: &mut Model, w: usize, body_h: usize) -> Vec<(Line, String)
 }
 
 /// A click on a docked post opens the feed at it (model.go:800).
-pub(super) fn mouse(m: &mut Model, e: &Mouse) -> Out {
+pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     if e.kind != MouseKind::Down(Button::Left)
         || m.sheet.is_some()
         || m.session.is_some()
@@ -268,129 +268,4 @@ pub(super) fn mouse(m: &mut Model, e: &Mouse) -> Out {
     };
     let id = id.to_string();
     m.open_feed(&id)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::screens::social::feed::tests::feed_model;
-
-    fn rows(m: &mut Model, w: usize, room: usize) -> Vec<String> {
-        m.stream_lines(w, room)
-            .iter()
-            .map(|(l, _)| l.plain())
-            .collect()
-    }
-
-    // Under a title rule, oldest first, newest at the bottom, each row
-    // keyed to its post; nothing while the feed is off, and nothing in
-    // too little room (stream_test.go TestStreamLines).
-    #[test]
-    fn lines() {
-        let mut m = feed_model();
-        m.now = m.clock.unwrap();
-        let ls = m.stream_lines(60, 40);
-        assert!(
-            ls[0].0.plain().starts_with("── the feed 🐓 ──"),
-            "{:?}",
-            ls[0].0.plain()
-        );
-        assert_eq!(ls.last().unwrap().1, format!("{KEY_PREFIX}a/1"));
-        assert_eq!(ls.len(), 4);
-        for (l, _) in &ls[1..] {
-            assert_eq!(l.width(), 59, "{:?}", l.plain());
-        }
-        let text: Vec<String> = ls.iter().map(|(l, _)| l.plain()).collect();
-        assert!(
-            text[1].contains("go test hangs") && text[3].contains("-race"),
-            "{text:?}"
-        );
-        // Room for two rows: the title and the newest.
-        let two = rows(&mut m, 60, 2);
-        assert!(two.len() == 2 && two[1].contains("-race"), "{two:?}");
-        assert!(rows(&mut m, 60, 1).is_empty());
-        assert!(rows(&mut m, 23, 10).is_empty());
-        m.kept::<Stream>().on = Some(false);
-        assert!(rows(&mut m, 60, 10).is_empty());
-    }
-
-    // Quiet, it's faded; a new post or the pointer lights it.
-    #[test]
-    fn fades_when_quiet() {
-        let mut m = feed_model();
-        let now = m.clock.unwrap();
-        for p in &mut m.kept::<Stream>().posts {
-            p.at = now - 3_600_000;
-        }
-        m.now = now;
-        let fg = |m: &mut Model| {
-            let ls = m.stream_lines(60, 8);
-            ls[0].0.spans[1].style.fg
-        };
-        let quiet = fg(&mut m);
-        assert_ne!(quiet, TEXT);
-        m.hover = format!("{KEY_PREFIX}a/0");
-        assert_eq!(fg(&mut m), TEXT);
-        m.hover.clear();
-        m.kept::<Stream>().posts[2].at = now - 1000;
-        assert_eq!(fg(&mut m), TEXT);
-    }
-
-    // The ticker stops once the end is in view, and never splits a wide
-    // char (stream_test.go TestTicker).
-    #[test]
-    fn ticker_steps() {
-        let cases: &[(&str, usize, i64, &str, bool)] = &[
-            ("abcdefghij", 4, 0, "abcd", true),
-            ("abcdefghij", 4, 3, "defg", true),
-            ("abcdefghij", 4, 6, "ghij", false),
-            ("abcdefghij", 4, 60, "ghij", false),
-            ("日本語のテキスト", 5, 1, "本語", true),
-            ("short", 12, 5, "short", false),
-        ];
-        for &(text, w, step, want, more) in cases {
-            let (got, m) = ticker(text, w, step);
-            assert_eq!((got.as_str(), m), (want, more), "{text} {w} {step}");
-            assert!(cells(&got) <= w);
-        }
-    }
-
-    // Docked at the very foot of the list with the list behind it; a
-    // click on a post opens the feed at it.
-    #[test]
-    fn docks_and_clicks() {
-        let mut m = feed_model();
-        let n = 12;
-        let agents: Vec<rush_core::agent::Agent> = (0..n)
-            .map(|i| rush_core::agent::Agent {
-                key: format!("k{i}"),
-                display_name: format!("agent {i}"),
-                ..Default::default()
-            })
-            .collect();
-        m.set_fleet(crate::worker::Fleet {
-            agents,
-            roots: vec![String::new(); n],
-            ..Default::default()
-        });
-        let f: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
-        let y = f
-            .iter()
-            .position(|l| l.contains("the feed 🐓"))
-            .expect("docked");
-        let last = f.iter().rposition(|l| l.contains("-race")).expect("newest");
-        assert!(last > y, "{f:#?}");
-        assert_eq!(m.row_keys[y - m.list_top], KEY_PREFIX);
-        let e = Mouse {
-            kind: MouseKind::Down(Button::Left),
-            x: 5,
-            y: last as u16,
-            mods: rush_draw::KeyMods::NONE,
-        };
-        assert_ne!(mouse(&mut m, &e), Out::Pass);
-        let s = m
-            .sheet_as::<super::super::feed::FeedSheet>()
-            .expect("the feed opened");
-        assert_eq!(s.picked, "a/1");
-    }
 }

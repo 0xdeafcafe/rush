@@ -1622,6 +1622,7 @@ dependencies = [
  "rush-sys",
  "rush-testenv",
  "rush-ui-base",
+ "rush-ui-social",
  "rush-update",
  "serde",
  "serde_json",
@@ -1651,6 +1652,28 @@ dependencies = [
  "rush-sys",
  "rush-testenv",
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rush-ui-social"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "rush-claude",
+ "rush-convo",
+ "rush-core",
+ "rush-draw",
+ "rush-efficiency",
+ "rush-events",
+ "rush-fleet",
+ "rush-net",
+ "rush-room",
+ "rush-state",
+ "rush-sys",
+ "rush-testenv",
+ "rush-ui-base",
+ "rush-update",
  "serde_json",
 ]
 

@@ -6,15 +6,22 @@
 //! the UI thread). After Go's internal/ui files of the same names; each
 //! module cites its own.
 
+// The base's modules, so crate::frame::.. and the like read as they did
+// in rush-ui. Each is the one module, not a copy.
+use rush_ui_base::{
+    accounts, config, finish, frame, host, list, look, mention, model, overlay, sess, session,
+    startdir, style, worker,
+};
+
+use crate::feed::ModelFeed;
 use crate::frame::{Ext, Out};
 use crate::model::Model;
-use crate::screens::social::feed::ModelFeed;
-use crate::screens::social::rooms::ModelRooms;
-use crate::screens::social::services::ModelOnline;
-use crate::screens::social::services::ModelReload;
-use crate::screens::social::services::ModelSqueeze;
-use crate::screens::social::services::ModelUpdates;
-use crate::screens::social::stream::ModelStream;
+use crate::rooms::ModelRooms;
+use crate::services::ModelOnline;
+use crate::services::ModelReload;
+use crate::services::ModelSqueeze;
+use crate::services::ModelUpdates;
+use crate::stream::ModelStream;
 
 pub mod broadcast;
 pub mod dock;
@@ -26,8 +33,6 @@ pub mod parts;
 pub mod rooms;
 pub mod roomsetup;
 pub mod services;
-#[cfg(test)]
-mod sizes;
 pub mod stream;
 
 /// Adds this group's places, pages, sheets' openers, keys, hooks and
@@ -77,7 +82,7 @@ fn on_fleet(m: &mut Model) {
     if m.sender().is_none() {
         return;
     }
-    if crate::hosted::quiet(m) {
+    if m.ext.calls.hosted_id()(m).is_some() {
         // Hosted reads only the rooms: no stream, update check or watch
         // on the API (model.go:556 Init, :1096 leads).
         m.load_rooms();
@@ -111,55 +116,6 @@ fn on_fleet(m: &mut Model) {
     }
 }
 
+// Every test runs in a throwaway home (rush-testenv).
 #[cfg(test)]
-mod tests_roomsetup;
-
-#[cfg(test)]
-mod tests {
-    use super::feed::{FeedSheet, tests::feed_model};
-    use crate::frame::Out;
-    use crate::screens::social::feed::ModelFeed;
-
-    // The group's # commands, as Go's keys.go:1040-1080 names them.
-    #[test]
-    fn commands() {
-        let m = feed_model();
-        for name in ["feed", "room", "broadcast", "update", "reload"] {
-            assert!(
-                m.ext.commands.iter().any(|c| c.name == name),
-                "#{name} isn't registered"
-            );
-        }
-    }
-
-    // The feed sheet's keys: what each does, as community.go:523 has them.
-    #[test]
-    fn feed_keys() {
-        let mut m = feed_model();
-        m.open_feed("");
-        type Check = fn(&FeedSheet) -> bool;
-        let table: &[(&str, Check)] = &[
-            ("g", |s| s.graph),
-            ("g", |s| !s.graph),
-            ("n", |s| s.composing && s.reply_to.is_empty()),
-            ("esc", |s| !s.composing),
-            ("enter", |s| s.composing && !s.reply_to.is_empty()),
-            ("esc", |s| !s.composing),
-            ("r", |s| s.composing),
-            ("esc", |s| !s.composing),
-            ("up", |s| !s.follow),
-            ("down", |s| s.follow),
-        ];
-        for (k, ok) in table {
-            let out = m.press(k);
-            assert_ne!(out, Out::Pass, "{k} isn't the sheet's");
-            let s = m.sheet_as::<FeedSheet>().expect("still open");
-            assert!(ok(s), "after {k}: {s:?}");
-        }
-        assert_eq!(m.press("esc"), Out::Close);
-        assert!(m.sheet.is_none());
-        // Opened again, it's where it was.
-        m.open_feed("");
-        assert!(m.sheet_as::<FeedSheet>().is_some());
-    }
-}
+rush_testenv::sandboxed!();

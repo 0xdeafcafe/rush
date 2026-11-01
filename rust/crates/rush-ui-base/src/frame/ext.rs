@@ -226,6 +226,9 @@ pub enum Act {
     OpenRoom(String),
     /// Projects at a project's folder (projects_machine pick_in_projects).
     PickInProjects(String),
+    /// The hosts are watched again after an update (settings/updates.rs
+    /// watch_hosts); with rebuilt_said, an installed one counts as said.
+    WatchHosts { rebuilt_said: bool },
 }
 
 impl Model {
@@ -438,6 +441,26 @@ calls! {
     hosted_keeps_open("hosted"): fn(&Model) -> bool,
     /// The keys come off a hosted view's box (hosted.rs set_away).
     hosted_set_away("hosted"): fn(&mut Model),
+    /// The agent row after a key in its section, or the one before ("" when
+    /// alone): list_extras/mod.rs neighbour.
+    neighbour("list_extras"): fn(&Model, &str) -> String,
+    /// The ways a session can start here now (accounts/setup.rs
+    /// start_routes).
+    start_routes("accounts"): fn(&Model) -> Vec<crate::accounts::Route>,
+    /// Agent k as Settings says it starts (accounts/setup.rs
+    /// start_defaults).
+    start_defaults("accounts"): fn(&Model, &str) -> crate::accounts::StartOver,
+    /// What agent k can start on (accounts/setup.rs models).
+    models("accounts"): fn(&Model, &str) -> Vec<rush_core::adapter::Choice>,
+    /// Agent k's models read from its home off the UI thread
+    /// (accounts/startsheet.rs load_models).
+    load_models("accounts"): fn(&mut Model, &str),
+    /// A new session in a folder as a start says, with what Settings gives
+    /// its agent for the rest (session_core/start.rs config_as).
+    config_as("session_core"): fn(&Model, &crate::accounts::StartOver, &str) -> crate::host::Start,
+    /// The rooms as just read: each finished room on a chat hands its
+    /// verdict back (session_cards/discuss.rs verdicts_back).
+    verdicts_back("session_cards"): fn(&mut Model, Vec<rush_room::room::Summary>),
 }
 
 /// State screens keep between calls, one value per type, made on first

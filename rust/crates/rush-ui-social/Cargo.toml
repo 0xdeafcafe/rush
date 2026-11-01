@@ -1,0 +1,29 @@
+[package]
+name = "rush-ui-social"
+description = "rush's social screens: the feed and its graph, rooms, broadcasts, updates and reloading"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-convo.workspace = true
+rush-fleet.workspace = true
+rush-draw.workspace = true
+rush-sys.workspace = true
+rush-state.workspace = true
+rush-events.workspace = true
+rush-net.workspace = true
+rush-claude.workspace = true
+rush-update.workspace = true
+# Rooms and the feed's posts (community.go).
+rush-room = { path = "../rush-room" }
+# The social group's: efficiency's figures.
+rush-efficiency = { path = "../rush-efficiency" }
+# The frame and model under every screen.
+rush-ui-base.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }

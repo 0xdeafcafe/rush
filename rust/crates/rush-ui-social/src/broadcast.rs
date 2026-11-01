@@ -22,8 +22,10 @@ pub struct Broadcast {
     pub picked: Option<HashSet<String>>,
 }
 
-const NICK_WORDS: &str = "brave quick sleepy muddy lucky fuzzy jolly tiny grumpy sunny dizzy bold calm cheeky clever cosy daring eager fancy gentle happy humble keen lively loyal merry nimble plucky proud quiet rusty scruffy shy silly snappy speedy spry sturdy swift wily witty zesty";
-const NICK_NAMES: &str = "biscuit pickle waffles noodle pepper bean maple ziggy rocket bonnie mochi pudding scout banjo tofu nugget juniper dottie fudge pip heron robin wren finch puffin magpie kestrel plover osprey lark sparrow starling swift tern ibis egret pelican toucan kiwi dodo condor";
+#[doc(hidden)]
+pub const NICK_WORDS: &str = "brave quick sleepy muddy lucky fuzzy jolly tiny grumpy sunny dizzy bold calm cheeky clever cosy daring eager fancy gentle happy humble keen lively loyal merry nimble plucky proud quiet rusty scruffy shy silly snappy speedy spry sturdy swift wily witty zesty";
+#[doc(hidden)]
+pub const NICK_NAMES: &str = "biscuit pickle waffles noodle pepper bean maple ziggy rocket bonnie mochi pudding scout banjo tofu nugget juniper dottie fudge pip heron robin wren finch puffin magpie kestrel plover osprey lark sparrow starling swift tern ibis egret pelican toucan kiwi dodo condor";
 
 /// key's nickname: the same key always gets the same one (nickname).
 pub fn nickname(key: &str) -> String {
@@ -51,8 +53,7 @@ pub fn title_tag(title: &str) -> String {
 /// name, any other its title's tag, with no title yet a nickname from its
 /// key (mentionName).
 pub fn mention_name(a: &Agent) -> String {
-    use crate::screens::session_cards::{handles, mention};
-    mention::mention_name(a, handles::host_id(a))
+    crate::mention::mention_name(a, crate::mention::host_id(a))
 }
 
 /// Whether tag names agent a: its tag, its nickname or its title (tags).
@@ -79,7 +80,7 @@ fn in_order(m: &Model) -> impl Iterator<Item = &Agent> {
 
 /// Model's side of this module: Model is rush-ui-base's, so its
 /// methods here are a trait's.
-pub(crate) trait ModelBroadcast {
+pub trait ModelBroadcast {
     fn mentions_in(&self, text: &str) -> Vec<usize>;
     fn broadcast_all(&self) -> Vec<usize>;
     fn broadcast_command(&mut self, arg: &str) -> Out;
@@ -304,72 +305,4 @@ pub(super) fn mouse(m: &mut Model, e: &Mouse) -> Out {
 /// #broadcast.
 pub(super) fn command(m: &mut Model, arg: &str) -> Out {
     m.broadcast_command(arg)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn agent(key: &str, name: &str) -> Agent {
-        Agent {
-            key: key.into(),
-            display_name: name.into(),
-            ..Agent::default()
-        }
-    }
-
-    #[test]
-    fn picks() {
-        let mut m = super::super::feed::tests::model(100, 30);
-        let mut term = agent("d", "terminal one");
-        term.interactive = true;
-        let mut old = agent("c", "old work");
-        old.past = true;
-        let agents = vec![agent("a", "fix login bug"), agent("b", "docs"), old, term];
-        m.set_fleet(crate::worker::Fleet {
-            roots: vec![String::new(); agents.len()],
-            agents,
-            ..Default::default()
-        });
-        let picked = |m: &mut Model| {
-            let mut v: Vec<String> = m
-                .kept::<Broadcast>()
-                .picked
-                .clone()
-                .unwrap_or_default()
-                .into_iter()
-                .collect();
-            v.sort();
-            v
-        };
-        m.broadcast_command("all");
-        assert_eq!(
-            picked(&mut m),
-            ["a", "b"],
-            "all picks the agents a message can reach"
-        );
-        m.broadcast_command("@docs");
-        assert_eq!(picked(&mut m), ["b"], "a tag picks that agent");
-        m.broadcast_pick("a");
-        m.broadcast_pick("d"); // can't be messaged from here
-        m.broadcast_pick("b");
-        assert_eq!(picked(&mut m), ["a"], "a click picks, a second unpicks");
-        m.broadcast_command("@nobody hi");
-        assert_eq!(picked(&mut m), ["a"], "an unknown tag changes nothing");
-        m.broadcast_command("hello there");
-        assert!(picked(&mut m).is_empty() && m.input.string() == "hello there");
-        m.press("esc");
-        assert!(m.kept::<Broadcast>().picked.is_none(), "esc stops");
-    }
-
-    #[test]
-    fn nicknames_are_go_s() {
-        // The same key always gets the same nickname, from Go's lists.
-        let n = nickname("claude:default:abc");
-        let (w, name) = n.split_once('-').unwrap();
-        assert!(NICK_WORDS.split(' ').any(|x| x == w) && NICK_NAMES.split(' ').any(|x| x == name));
-        assert_eq!(n, nickname("claude:default:abc"));
-        let a = agent("k", "Fix the login bug");
-        assert!(tags(&a, &mention_name(&a)) && tags(&a, "Fix-the-login-bug"));
-    }
 }

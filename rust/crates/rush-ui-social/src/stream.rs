@@ -166,7 +166,7 @@ fn take(m: &mut Model, got: Result<Option<(String, Vec<Post>)>, String>) -> crat
 
 /// Model's side of this module: Model is rush-ui-base's, so its
 /// methods here are a trait's.
-pub(crate) trait ModelStream {
+pub trait ModelStream {
     fn feed_on(&mut self) -> bool;
     fn feed_follows(&mut self, on: bool);
     fn load_stream(&mut self);

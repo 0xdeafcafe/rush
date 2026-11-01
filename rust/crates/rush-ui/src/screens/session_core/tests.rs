@@ -382,7 +382,7 @@ fn the_ways_enter_sends() {
     assert!(fake.ops().is_empty());
     assert_eq!(input(&mut m), "");
     let s = m
-        .sheet_as::<crate::screens::social::roomsetup::RoomSetup>()
+        .sheet_as::<rush_ui_social::roomsetup::RoomSetup>()
         .expect("the room's set-up");
     assert_eq!(s.from, KEY);
     assert!(s.fill);

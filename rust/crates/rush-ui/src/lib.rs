@@ -18,8 +18,14 @@ use rush_ui_base::{chores, clanker, header, listcache, model, session};
 pub mod hosted;
 pub mod screens;
 
+/// Helpers several screens' tests share (kit::model).
+#[doc(hidden)]
+pub mod kit;
+
 #[cfg(test)]
 mod base_tests;
+#[cfg(test)]
+mod screens_tests;
 
 use std::io;
 

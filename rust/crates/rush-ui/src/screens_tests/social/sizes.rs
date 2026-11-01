@@ -1,11 +1,11 @@
 //! The group's screens at every width from nothing up, with wide
 //! chars and empty boards: none of them may panic or run past the screen.
-use super::stream::{Post, Stream};
-use crate::screens::social::dock::ModelDock;
-use crate::screens::social::feed::ModelFeed;
 use rush_core::agent::{Agent, Job, State};
 use rush_draw::{Key, KeyMods};
 use rush_room::community::Author;
+use rush_ui_social::dock::ModelDock;
+use rush_ui_social::feed::ModelFeed;
+use rush_ui_social::stream::{Post, Stream};
 
 fn posts(now: i64) -> Vec<Post> {
     let a = |n: &str, h: &str| Author {
@@ -153,7 +153,7 @@ fn never_panic_at_any_size() {
                 vec!["[", "up", "enter"],
             ] {
                 for empty in [false, true] {
-                    let mut m = super::feed::tests::model(w as usize, h as usize);
+                    let mut m = crate::kit::model(w as usize, h as usize);
                     m.clock = Some(now);
                     m.set_fleet(crate::worker::Fleet {
                         agents: agents(now),
@@ -173,7 +173,7 @@ fn never_panic_at_any_size() {
                 }
             }
             for hover in ["", "community:w/0", "community:a/0"] {
-                let mut m = super::feed::tests::model(w as usize, h as usize);
+                let mut m = crate::kit::model(w as usize, h as usize);
                 m.clock = Some(now);
                 m.set_fleet(crate::worker::Fleet {
                     agents: agents(now),

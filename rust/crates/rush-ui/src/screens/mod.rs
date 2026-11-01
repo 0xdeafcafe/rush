@@ -19,7 +19,8 @@ pub mod projects_machine;
 pub mod session_cards;
 pub mod session_core;
 pub mod settings;
-pub mod social;
+// The social group is a crate of its own (rush-ui-social); its old path stays.
+pub use rush_ui_social as social;
 
 /// Every group's screens, registered in this order.
 pub(crate) fn register(x: &mut Ext) {
@@ -123,6 +124,13 @@ fn calls() -> Calls {
         hosted_pin: Some(crate::hosted::pin),
         hosted_keeps_open: Some(crate::hosted::keeps_open),
         hosted_set_away: Some(crate::hosted::set_away),
+        neighbour: Some(list_extras::neighbour),
+        start_routes: Some(accounts::setup::start_routes),
+        start_defaults: Some(accounts::setup::start_defaults),
+        models: Some(accounts::setup::models),
+        load_models: Some(accounts::startsheet::load_models),
+        config_as: Some(session_core::start::config_as),
+        verdicts_back: Some(session_cards::discuss::verdicts_back),
     }
 }
 
@@ -137,6 +145,14 @@ fn act(m: &mut Model, a: Act) {
         Act::OpenKeyHelp => cmdbar::keyhelp::open(m),
         Act::OpenRoom(key) => social::rooms::open_room(m, &key),
         Act::PickInProjects(dir) => projects_machine::pick_in_projects(m, &dir),
+        Act::WatchHosts { rebuilt_said } => {
+            // Said already: the hosts' look doesn't say it again
+            // (model.go:1288).
+            if rebuilt_said {
+                m.kept::<settings::State>().updates.rebuilt_said = true;
+            }
+            settings::updates::watch_hosts(m, false, false);
+        }
     }
 }
 
