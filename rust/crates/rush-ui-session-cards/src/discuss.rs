@@ -104,7 +104,7 @@ fn intervene_on(m: &mut Model, i: usize, focus: &str) -> Out {
     }
     m.kept::<Intervening>().pending =
         Some((key.clone(), focus.to_string(), std::time::Instant::now()));
-    crate::screens::cmdbar::bar::go_agent(m, &key);
+    m.act(crate::frame::ext::Act::GoAgent(key));
     Out::Draw
 }
 

@@ -17,6 +17,9 @@ pub mod clanker;
 pub mod config;
 pub mod context;
 pub mod finish;
+pub mod finish_card;
+#[cfg(test)]
+mod finish_card_tests;
 pub mod frame;
 pub mod header;
 pub mod host;

@@ -17,10 +17,9 @@ use rush_core::tool::Call;
 
 use super::CardBtn;
 use crate::model::Model;
-use crate::screens::projects_machine::memory::{
+use rush_ui_projects_machine::memory::{
     MemCard, MemPeek, NoteWrite, mem_btns_for, mem_note_of, memory_card, peek_mem,
 };
-use crate::screens::session_core::views;
 
 /// What's on disk for each note a card asks about, by approval and path,
 /// and the notes to open once written, by session.
@@ -134,8 +133,8 @@ pub fn open_written(m: &mut Model, key: &str) {
         None | Some(Status::Running | Status::Waiting) => {}
         Some(st) => {
             m.kept::<MemCards>().edit_after.remove(key);
-            if st == Status::Ok && views::show_view(m, key, "memory") {
-                crate::screens::session_core::memory::forget(m, key);
+            if st == Status::Ok && (m.ext.calls.show_view())(m, key, "memory") {
+                m.act(crate::frame::ext::Act::ForgetMemory(key.to_string()));
                 if let Some(v) = m.session.as_mut() {
                     v.sel = format!("mem:{path}");
                 }

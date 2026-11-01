@@ -286,7 +286,7 @@ pub fn open_rewind_at(m: &mut Model, key: &str, n: u32, prompt: &str) -> Out {
 }
 
 /// The open conversation's transcript, when it's read from one.
-pub(super) fn transcript_of(m: &Model, key: &str) -> String {
+pub fn transcript_of(m: &Model, key: &str) -> String {
     match m
         .session
         .as_ref()

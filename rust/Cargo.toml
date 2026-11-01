@@ -21,6 +21,7 @@ rush-ui-settings = { path = "crates/rush-ui-settings" }
 rush-ui-projects-machine = { path = "crates/rush-ui-projects-machine" }
 rush-ui-plugin-ui = { path = "crates/rush-ui-plugin-ui" }
 rush-ui-accounts = { path = "crates/rush-ui-accounts" }
+rush-ui-session-cards = { path = "crates/rush-ui-session-cards" }
 rush-ui-bars = { path = "crates/rush-ui-bars" }
 rush-ui-list-extras = { path = "crates/rush-ui-list-extras" }
 rush-ui-cmdbar = { path = "crates/rush-ui-cmdbar" }

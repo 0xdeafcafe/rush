@@ -20,7 +20,8 @@ pub use rush_ui_bars as bars;
 // The command bar, the keys guide, the keymap and the # commands: rush-ui-cmdbar,
 // at the old path.
 pub use rush_ui_cmdbar as cmdbar;
-pub mod session_cards;
+// The cards and sheets on a session: rush-ui-session-cards, at the old path.
+pub use rush_ui_session_cards as session_cards;
 pub mod session_core;
 // Projects and the machine: rush-ui-projects-machine, at the old path.
 pub use rush_ui_projects_machine as projects_machine;
@@ -184,6 +185,13 @@ fn calls() -> Calls {
         next_account: Some(list_extras::plan::next_account),
         rush_screen: Some(session_cards::claudescreen::rush_screen),
         hash_arg: Some(session_core::rushcmd::hash_arg),
+        open_known_link: Some(cmdbar::linkkinds::open_known_link),
+        show_view: Some(session_core::views::show_view),
+        open_doc: Some(session_core::memedit::open_doc),
+        memory_known: Some(session_core::memory::memory_known),
+        wake_then: Some(|m, a, then| session_core::switch::wake_then(m, a, then)),
+        switch_then: Some(session_core::start::switch_then),
+        switch_session_message: Some(session_core::switch::switch_session_message),
         hover_context: Some(|m, key| {
             m.kept
                 .peek::<session_core::Core>()
@@ -277,6 +285,7 @@ fn act(m: &mut Model, a: Act) {
         }
         Act::SendAs { key, text } => session_core::keys::send_as(m, &key, &text),
         Act::FetchNow => bars::fetch::fetch_now(m),
+        Act::GoAgent(key) => cmdbar::bar::go_agent(m, &key),
         Act::OpenClaudeScreen { key, screen } => {
             session_cards::claudescreen::open_screen(m, &key, &screen);
         }

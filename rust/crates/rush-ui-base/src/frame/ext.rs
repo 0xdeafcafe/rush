@@ -275,6 +275,9 @@ pub enum Act {
     /// A session's view shown by name, if it has it (session_core/views.rs
     /// show_view).
     ShowView { key: String, name: String },
+    /// The Agents place with agent key selected and opened (cmdbar/bar.rs
+    /// go_agent).
+    GoAgent(String),
 }
 
 impl Model {
@@ -586,6 +589,30 @@ calls! {
     /// #model and #effort with the agent's session open: its /model and
     /// /effort; None when it isn't (session_core/rushcmd.rs hash_arg).
     hash_arg("session_core"): fn(&mut Model, &str, &str) -> Option<Out>,
+    /// A link to a kind of thing rush opens itself (a pull request): its
+    /// sheet; None when the link isn't one (cmdbar/linkkinds.rs
+    /// open_known_link).
+    open_known_link("cmdbar"): fn(&mut Model, &str) -> Option<Out>,
+    /// A session's view shown by name; whether it has one so named
+    /// (session_core/views.rs show_view).
+    show_view("session_core"): fn(&mut Model, &str, &str) -> bool,
+    /// A file of a session's memory opened for editing, once read
+    /// (session_core/memedit.rs open_doc).
+    open_doc("session_core"): fn(&mut Model, &str, &str) -> Out,
+    /// What a session's agent reads for its project, as last read; None
+    /// before (session_core/memory.rs memory_known).
+    memory_known("session_core"): fn(&mut Model, &str) -> Option<rush_core::adapter::Memory>,
+    /// A sleeping agent's host woken, then the closure run once it is
+    /// connected (session_core/switch.rs wake_then).
+    wake_then("session_core"): fn(&mut Model, &Agent, crate::accounts::AfterSwitch) -> Out,
+    /// The account a start names switched to, then the closure run
+    /// (session_core/start.rs switch_then).
+    switch_then("session_core"):
+        fn(&mut Model, &crate::accounts::StartOver, crate::accounts::AfterSwitch) -> Out,
+    /// A session switched to another account or harness, with a message
+    /// sent on it (session_core/switch.rs switch_session_message).
+    switch_session_message("session_core"):
+        fn(&mut Model, &str, crate::accounts::StartOver, &str) -> Out,
     /// ctrl+b, #go and the Wall's: tell a stopped agent to go on, or say
     /// why it can't (cmdbar/hashcmds.rs keep_going).
     keep_going("cmdbar"): fn(&mut Model, &Agent) -> Out,

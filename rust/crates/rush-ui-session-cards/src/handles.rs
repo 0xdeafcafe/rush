@@ -30,7 +30,7 @@ struct HandleKey {
 struct HandlesFor(Option<Vec<HandleKey>>);
 
 // An agent's host id (the frame's, crate::mention) gives it its handle.
-pub use crate::mention::host_id;
+pub use rush_ui_base::mention::host_id;
 
 /// Tells the conversation which agent each tag names: its handle first,
 /// then its nickname and title where nothing else does. Only when what
@@ -131,7 +131,7 @@ mod tests {
     // underlines the tag alone.
     #[test]
     fn tags_link_agents() {
-        let mut m = crate::new_model("test");
+        let mut m = crate::model::Model::bare("test", |_| {});
         let mut docs = Agent {
             key: "b".into(),
             display_name: "docs site".into(),

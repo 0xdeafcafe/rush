@@ -18,7 +18,7 @@ use crate::model::Model;
 use crate::style::*;
 
 // An agent's handle and its nickname are the frame's (crate::mention).
-pub use crate::mention::{
+pub use rush_ui_base::mention::{
     ROOM_KEY_PREFIX, handle_tint, mention_name, mentionable, nickname, title_tag,
 };
 

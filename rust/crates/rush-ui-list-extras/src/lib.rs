@@ -42,7 +42,8 @@ use crate::model::Model;
 // words are the base's (the header and the host read them).
 pub use rush_ui_base::{away, meters, plan, spawns};
 pub mod filter;
-pub mod finish;
+// The finishing card's rows and keys: rush-ui-base's, for session_cards.
+pub use rush_ui_base::finish_card as finish;
 pub mod fuzzy;
 pub mod grid;
 pub mod hosted;

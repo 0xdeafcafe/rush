@@ -437,7 +437,8 @@ pub fn btw_overlay(m: &mut Model, rows: &mut Vec<Line>) {
 
 /// The panel pw wide and at most max_h tall: a title, the thread (the
 /// latest at the bottom), the question box and its keys (lines).
-pub(super) fn thread_lines(t: &mut Thread, pw: usize, max_h: usize, now: Ms) -> Vec<Line> {
+#[doc(hidden)]
+pub fn thread_lines(t: &mut Thread, pw: usize, max_h: usize, now: Ms) -> Vec<Line> {
     let on = t.focused;
     let edge = if on {
         sp("▍", ORANGE)

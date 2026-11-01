@@ -13,7 +13,7 @@ use super::{Act, Conn, HostInfo, act};
 use crate::accounts::StartOver;
 use crate::frame::Out;
 use crate::model::Model;
-use crate::screens::accounts::signedout::{Signin, signed_out_rows, signin_key};
+use rush_ui_accounts::signedout::{Signin, signed_out_rows, signin_key};
 
 /// Whether the session sits stopped because its sign-in ran out, and no
 /// continue has gone yet (signedOut).
@@ -82,15 +82,9 @@ fn carry_on(m: &mut Model, key: &str, sig: Signin) -> Out {
                 ..StartOver::default()
             };
             let k = key.to_string();
-            crate::screens::session_core::start::switch_then(
-                m,
-                &o,
-                Box::new(move |m| continue_signed_in(m, &k)),
-            )
+            (m.ext.calls.switch_then())(m, &o, Box::new(move |m| continue_signed_in(m, &k)))
         }
-        Signin::HandOver(o) => {
-            crate::screens::session_core::switch::switch_session_message(m, key, o, "continue")
-        }
+        Signin::HandOver(o) => (m.ext.calls.switch_session_message())(m, key, o, "continue"),
     }
 }
 
