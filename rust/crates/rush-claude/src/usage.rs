@@ -569,7 +569,25 @@ pub fn refresh_usage_for(
             u
         }
         Err(e) => {
-            u.problem = e.to_string();
+            // Kept beside the last reading, so every rush process, and the
+            // rows that read usage.json rather than this answer, say why
+            // it's old ("sign-in revoked · l signs in again"), not only
+            // that it is. "sign-in expired" says less than one kept already
+            // (a rush that doesn't lead finds the sign-in expired without
+            // trying to refresh it). A newer reading clears it.
+            let expired = e == OauthError::Expired;
+            if !(expired && !f.usage.problem.is_empty()) {
+                u.problem = e.to_string();
+            }
+            let (at, problem) = (f.usage.fetched_at, u.problem.clone());
+            let _ = update_fetched_usage(path, |all| {
+                let k = all.entry(key.to_string()).or_default();
+                if k.usage.fetched_at != at || k.usage.problem == problem {
+                    return false;
+                }
+                k.usage.problem = problem;
+                true
+            });
             u
         }
     }
@@ -905,6 +923,45 @@ mod tests {
         });
         assert_eq!(got.plan, "pro");
         assert_eq!(load_fetched_usage(&path)["new"].usage.plan, "pro");
+    }
+
+    // Why a reading failed is kept beside the last one in usage.json, so
+    // the rows (which read the file, not the answer) say it rather than
+    // only "not read since"; asking again isn't held back by it, and the
+    // next good reading clears it. "sign-in expired" doesn't hide a reason
+    // kept already.
+    #[test]
+    fn a_failed_reading_keeps_why() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("usage.json");
+        let old = now() - 60 * 60_000;
+        let last = Usage {
+            fetched_at: old,
+            plan: "max".into(),
+            ..Usage::default()
+        };
+        record_usage(&path, "k", last).unwrap();
+        let revoked = OauthError::Revoked.to_string();
+        let got = refresh_usage_for(&path, "k", false, || Err(OauthError::Revoked));
+        assert_eq!(got.problem, revoked);
+        let kept = &readings(&path)["k"];
+        assert_eq!(
+            (kept.problem.as_str(), kept.fetched_at),
+            (revoked.as_str(), old),
+            "the reason isn't kept with the last reading"
+        );
+        let got = refresh_usage_for(&path, "k", false, || Err(OauthError::Expired));
+        assert_eq!(got.problem, revoked);
+        assert_eq!(readings(&path)["k"].problem, revoked);
+        let got = refresh_usage_for(&path, "k", false, || {
+            Ok(Usage {
+                fetched_at: now(),
+                plan: "max".into(),
+                ..Usage::default()
+            })
+        });
+        assert_eq!(got.problem, "");
+        assert_eq!(readings(&path)["k"].problem, "");
     }
 
     // The three shapes a reading of an account takes now Anthropic's top

@@ -371,7 +371,14 @@ Claude, fleet, the other adapters) builds on these.
   `Claude::find_logins`, `refresh_login`, `renew_login`, `use_login`,
   `adopt_login`, `forget_login` are Go's state.LoginKeeper, and
   `Claude` is rush-state's `vault::LoginKeeper` through them (the binary
-  registers it with rush-ui's `accounts::logins::register_keeper`). efficiency.rs reads transcripts into a
+  registers it with rush-ui's `accounts::logins::register_keeper`).
+  Unlike Go, a refresh token Anthropic called revoked isn't sent again
+  by that process (only a new sign-in is tried); a reading whose
+  sign-in can't be refreshed says why (revoked, or in use by a running
+  Claude Code) until the next try, not "sign-in expired"; and a failed
+  reading's reason is kept beside the last one in usage.json, so the
+  rows say it rather than only "not read since" (oauth.rs, usage.rs).
+  efficiency.rs reads transcripts into a
   `Figures` trait, which the efficiency module's File will be. Its
   features are Go's (claude.go:62): Compact and btw through the host's
   control requests, cd and add-dir through its cd op, a hand-off in
