@@ -69,6 +69,7 @@ pub mod timeline;
 pub mod tools;
 pub mod transcript;
 pub mod usage;
+pub mod usersettings;
 
 mod json;
 

@@ -174,7 +174,12 @@ pub fn compaction(src: &CompactSource) -> Compaction {
     // A settings file's env block goes into the session's environment
     // over what it was started with.
     let mut setting = 0i64;
+    // settings.json's autoCompactEnabled, over the state file's.
+    let mut enabled: Option<bool> = None;
     for s in src.settings.iter().flatten() {
+        if let Some(b) = s.get::<bool>("autoCompactEnabled") {
+            enabled = Some(b);
+        }
         if let Some(block) = s.get::<BTreeMap<String, Value>>("env") {
             for (k, v) in block {
                 if compact_var(&k) {
@@ -193,9 +198,12 @@ pub fn compaction(src: &CompactSource) -> Compaction {
     if truthy(var("DISABLE_COMPACT")) || truthy(var("DISABLE_AUTO_COMPACT")) {
         return Compaction::default();
     }
-    if let Some(st) = &src.state
-        && st.get::<bool>("autoCompactEnabled") == Some(false)
-    {
+    let state = || {
+        src.state
+            .as_ref()
+            .and_then(|st| st.get::<bool>("autoCompactEnabled"))
+    };
+    if enabled.or_else(state) == Some(false) {
         return Compaction::default();
     }
     let mut room = OUTPUT_ROOM;
@@ -393,14 +401,21 @@ pub fn settings_page() -> SettingsPage {
                 "effortLevel",
                 "How hard sessions think by default",
                 text,
-                strs(&["low", "medium", "high", "xhigh", "max"]),
+                strs(&["low", "medium", "high", "xhigh"]),
             ),
             row(
                 "Permission mode",
                 "permissions.defaultMode",
                 "What sessions may do without asking. Your allow and deny rules are kept",
                 text,
-                strs(&["default", "acceptEdits", "plan", "auto"]),
+                strs(&[
+                    "default",
+                    "acceptEdits",
+                    "plan",
+                    "auto",
+                    "dontAsk",
+                    "bypassPermissions",
+                ]),
             ),
             row(
                 "Always think",
@@ -729,6 +744,20 @@ mod tests {
                 &[],
                 r#"{"autoCompactEnabled":false}"#,
                 none,
+            ),
+            (
+                "auto-compact off in settings.json",
+                &[],
+                &[r#"{"autoCompactEnabled":false,"autoCompactWindow":300000}"#],
+                "",
+                none,
+            ),
+            (
+                "settings.json's on over the state file's off",
+                &[],
+                &[r#"{"autoCompactEnabled":true,"autoCompactWindow":300000}"#],
+                r#"{"autoCompactEnabled":false}"#,
+                c(300_000, 33_000),
             ),
         ];
         for (name, env, settings, state, want) in cases {
