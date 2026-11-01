@@ -1140,7 +1140,12 @@ is made. Everything below is in `rush_ui::frame`.
   moved onto the ground picked as rush-draw paints (`ground.rs`,
   photon's theme). For Theme "match terminal" rush-draw asks the
   terminal's colours (OSC 10, 11, then DA1) as it takes the terminal,
-  before the input thread reads; they aren't asked again on focus or
+  before the input thread reads, waiting at most 50 ms for it to start
+  answering (Rust-only: Go's bubbletea applies them whenever they come).
+  Replies are kept in rush's cache by terminal (`term-colours.json`);
+  one that hasn't answered in time starts on what it said last time, and
+  the input thread takes its late replies in as colours (rush-draw
+  `reader.rs` LateOsc), which are applied then. They aren't asked again on focus or
   a mode 2031 report, as rush-draw hands the UI keys, not raw replies.
   Handing the terminal to `$EDITOR` (Go's `editorCmd`) waits on
   rush-draw pausing its input reader: every $EDITOR use goes through

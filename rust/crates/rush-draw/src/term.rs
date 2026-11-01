@@ -83,28 +83,73 @@ fn leave() -> io::Result<()> {
 /// (`\x1b]11;rgb:1111/1010/0e0e\x07`). Empty when it didn't say.
 static COLOUR_REPLIES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-/// How long the terminal is given to answer: DA1's answer ends the wait
-/// at once on a terminal that's there; over SSH or a slow multiplexer
-/// the colours may take a while.
-const ASK_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+/// How long the terminal is given to start answering before the first
+/// frame is drawn without its colours: a terminal that's there answers
+/// at once; over SSH or a slow multiplexer the colours come later, read
+/// by the input thread and applied then (reader.rs LateOsc).
+const ASK_WAIT: std::time::Duration = std::time::Duration::from_millis(50);
+/// How long an answer that has started is waited for to its end, so no
+/// half of it reaches the input thread as keys.
+const ANSWER_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// The terminal didn't answer in time: a colour reply that comes later
-/// would reach the input thread as keys (crossterm can't read ESC ] … ST),
-/// so the reader drops the first one that comes (reader.rs late_osc).
-pub(crate) static LATE_OSC: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+/// How many colour replies the terminal still owes after rush stopped
+/// waiting: a reply that comes later would reach the input thread as
+/// keys (crossterm can't read ESC ] … ST), so the reader takes that many
+/// in as colours (reader.rs LateOsc).
+pub(crate) static LATE_OSC: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Whether the terminal hadn't answered at all when the first frame was
+/// due: its colours may yet come (see [`on_late_colours`]).
+static UNANSWERED: AtomicBool = AtomicBool::new(false);
+
+/// Told when a colour reply came after the first frame.
+type OnLate = Box<dyn Fn() + Send + Sync>;
+static ON_LATE: Mutex<Option<OnLate>> = Mutex::new(None);
 
 /// The terminal's OSC 10 (text) and 11 (background) replies, as it gave
-/// them when rush took it.
+/// them when rush took it, and any that came after.
 pub fn colour_replies() -> Vec<String> {
     COLOUR_REPLIES.lock().map(|r| r.clone()).unwrap_or_default()
+}
+
+/// Whether the terminal hadn't answered rush's colour query by the time
+/// the first frame was due: its replies may come later, or never.
+pub fn colours_unanswered() -> bool {
+    UNANSWERED.load(Ordering::SeqCst)
+}
+
+/// Has f told, on the input thread, each time a colour reply comes after
+/// the first frame (it's in [`colour_replies`] by then).
+pub fn on_late_colours(f: impl Fn() + Send + Sync + 'static) {
+    if let Ok(mut l) = ON_LATE.lock() {
+        *l = Some(Box::new(f));
+    }
+}
+
+/// A colour reply that came late, as the input thread read it: the
+/// part between `ESC ]` and its end (`11;rgb:1111/1010/0e0e`).
+pub(crate) fn late_colour(body: &str) {
+    let r = format!("\x1b]{body}\x1b\\");
+    if osc_replies(&r).is_empty() {
+        return;
+    }
+    if let Ok(mut rs) = COLOUR_REPLIES.lock() {
+        rs.retain(|x| x.get(..5) != r.get(..5));
+        rs.push(r);
+    }
+    if let Ok(f) = ON_LATE.lock()
+        && let Some(f) = f.as_ref()
+    {
+        f();
+    }
 }
 
 /// Asks the terminal for its text and background colours, then for its
 /// attributes (DA1), which every terminal answers: once that answer is
 /// in, whatever it said about colours is too, and a terminal that
 /// doesn't know OSC 10 and 11 costs no wait. Read before the input
-/// thread starts, so the replies never reach it as keys.
+/// thread starts, so the replies never reach it as keys. A terminal that
+/// hasn't started answering within ASK_WAIT isn't waited for.
 fn ask_colours() {
     use std::os::fd::AsRawFd;
     let tty;
@@ -129,10 +174,16 @@ fn ask_colours() {
         return;
     }
     drop(out);
-    let end = std::time::Instant::now() + ASK_WAIT;
+    let start = std::time::Instant::now();
     let mut got = Vec::new();
     loop {
-        let left = end.saturating_duration_since(std::time::Instant::now());
+        // Until it starts answering, ASK_WAIT; then to its end.
+        let wait = if got.is_empty() {
+            ASK_WAIT
+        } else {
+            ANSWER_WAIT
+        };
+        let left = (start + wait).saturating_duration_since(std::time::Instant::now());
         if left.is_zero() {
             break;
         }
@@ -142,7 +193,7 @@ fn ask_colours() {
             revents: 0,
         };
         // SAFETY: one pollfd, ours, for at most what's left.
-        let n = unsafe { libc::poll(&mut p, 1, left.as_millis() as libc::c_int) };
+        let n = unsafe { libc::poll(&mut p, 1, left.as_millis().max(1) as libc::c_int) };
         if n < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
             continue; // a resize as rush starts
         }
@@ -165,10 +216,11 @@ fn ask_colours() {
             break;
         }
     }
-    if !da1_answered(&got) {
-        LATE_OSC.store(true, Ordering::SeqCst);
-    }
     let replies = osc_replies(&String::from_utf8_lossy(&got));
+    if !da1_answered(&got) {
+        LATE_OSC.store(2 - replies.len().min(2) as u8, Ordering::SeqCst);
+        UNANSWERED.store(got.is_empty(), Ordering::SeqCst);
+    }
     if let Ok(mut r) = COLOUR_REPLIES.lock() {
         *r = replies;
     }

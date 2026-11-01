@@ -131,6 +131,14 @@ fn run_model(
     // Made again now the terminal has said its colours, for Theme's
     // "match terminal" (model.go:1219 BackgroundColorMsg, applyColors).
     screens::settings::apply_colors(&mut m);
+    // A terminal slow to answer: its colours made again when they come.
+    let tx = lp.sender().lane(1);
+    rush_draw::on_late_colours(move || {
+        let _ = tx.send(worker::Note::Apply(Box::new(|m: &mut Model| {
+            screens::settings::apply_colors(m);
+            frame::Out::Draw
+        })));
+    });
     let (w, h) = term.size()?;
     m.w = w as usize;
     m.h = h as usize;
