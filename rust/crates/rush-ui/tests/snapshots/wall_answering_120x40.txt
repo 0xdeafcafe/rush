@@ -10,7 +10,7 @@
   ┃ ▍                                                                                                                ┃  
   ┃ ▍ ▌  2  small tiles                                                                                              ┃  
   ┃ ▍                                                                                                                ┃  
-  ┃ ▍    ✎  Something else  type your own answer below                                                               ┃  
+  ┃ ▍    ✎  Something else  opens the session to type your own                                                       ┃  
   ┃ ▍                                                                                                                ┃  
   ┃ ▍  a takes its picks  ·  s · esc sends nothing  ·  ↑↓ choose  ·  enter picks  ·  ←→ questions                    ┃  
   ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛  

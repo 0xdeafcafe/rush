@@ -238,9 +238,14 @@ fn answers_decisions_from_the_wall() {
         "1. Subagents on the Wall",
         "fold them in  ★ its pick",
         "a takes its picks",
+        "Something else  opens the session to type your own",
     ] {
         assert!(f.contains(t), "{t:?} on the card:\n{f}");
     }
+    assert!(
+        !f.contains("type your own answer below"),
+        "no box here:\n{f}"
+    );
     for k in ["down", "enter", "1"] {
         press(&mut m, k);
     }

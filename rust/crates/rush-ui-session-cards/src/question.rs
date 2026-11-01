@@ -816,18 +816,19 @@ pub fn draw_question(
     }
     let own = cursor == Some(n_opts);
     let bar = if own { sp("▌", ORANGE) } else { plain(" ") };
-    let mut own_text = if own {
-        line([
-            spb("Something else", TEXT),
-            plain("  "),
-            sp("enter, then type it below", SUB),
-        ])
+    // On a Wall tile there's no box below: the session opens for it.
+    let (own_on, own_off) = if c.q_on_tile {
+        (
+            "enter opens the session to type your own",
+            "opens the session to type your own",
+        )
     } else {
-        line([
-            sp("Something else", TEXT),
-            plain("  "),
-            sp("type your own answer below", DIM),
-        ])
+        ("enter, then type it below", "type your own answer below")
+    };
+    let mut own_text = if own {
+        line([spb("Something else", TEXT), plain("  "), sp(own_on, SUB)])
+    } else {
+        line([sp("Something else", TEXT), plain("  "), sp(own_off, DIM)])
     };
     if own_answer(q, &prev) {
         own_text
@@ -1964,6 +1965,7 @@ pub fn tile_rows(
 ) -> (Vec<Line>, HashMap<usize, String>) {
     let mut c = super::conn_ref(m, key).cloned().unwrap_or_default();
     c.card_focus = true;
+    c.q_on_tile = true;
     let rows = question_card(&mut c, q, Some(q), w, max_h);
     (rows, c.q_hit)
 }
