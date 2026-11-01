@@ -125,8 +125,17 @@ fn refuses_rush_and_the_wrong_process() {
 // A paused tree stops (ps says T) and goes on again when let go.
 #[test]
 fn signal_tree_pauses_and_resumes() {
-    let mut c = Command::new("sleep").arg("30").spawn().unwrap();
-    let pid = c.id() as Pid;
+    // Killed on drop, so a failed step (the sandbox refuses signals) never
+    // leaves it paused for days, holding the test's output open.
+    struct Reap(std::process::Child);
+    impl Drop for Reap {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let c = Reap(Command::new("sleep").arg("30").spawn().unwrap());
+    let pid = c.0.id() as Pid;
     let start = proc::snapshot().procs[&pid].start;
     let state = || {
         let out = Command::new("ps")
@@ -149,8 +158,6 @@ fn signal_tree_pauses_and_resumes() {
         signal_tree(pid, start + Duration::from_secs(1), libc::SIGSTOP).is_err(),
         "a process started at another time isn't the one picked"
     );
-    let _ = c.kill();
-    let _ = c.wait();
 }
 
 #[test]
