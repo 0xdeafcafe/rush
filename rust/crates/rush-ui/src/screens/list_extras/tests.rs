@@ -278,62 +278,104 @@ fn neighbour_in_its_section() {
 // ---- wall_test.go ----
 
 #[test]
-fn wall_grid() {
-    for (n, w, h, cols) in [
-        (1, 200, 40, 1),
-        (2, 200, 40, 2),
-        (4, 200, 40, 2),
-        (9, 200, 40, 3),
+fn wall_columns() {
+    for (w, n, cols) in [
+        (236, 9, 3),
+        (236, 2, 2),
+        (120, 9, 2),
+        (60, 9, 1),
+        (200, 1, 1),
     ] {
-        let (c, r, th) = wall::grid(&vec![1; n], w, h);
-        assert!(
-            c == cols && th >= wall::MIN_H && c * r >= n,
-            "{n}: {c}×{r} {th}"
-        );
+        assert_eq!(wall::columns(w, n), cols, "{w} wide, {n} groups");
     }
-    let (_, r, th) = wall::grid(&[1; 40], 120, 30);
-    assert!(
-        th >= wall::MIN_H && r * wall::MIN_H <= 30,
-        "40 tiles: {r} rows {th} tall"
-    );
 }
 
+/// Each group goes in the column with least in it, its subagents under
+/// its agent; room left goes to the tiles that want more, no further
+/// than they want.
 #[test]
 fn wall_layout() {
-    let shape = |rows: Vec<wall::Row>| {
-        rows.iter()
-            .map(|r| {
-                let cells: Vec<String> = r
-                    .cells
-                    .iter()
-                    .map(|c| format!("{}:c{}/{}/{}", c.item, c.col, c.k, c.n))
-                    .collect();
-                format!("{}{:?}", cells.join(" "), r.joined)
-            })
-            .collect::<Vec<_>>()
-            .join(" | ")
-    };
+    let want = |min, most| wall::Want { min, most };
+    // Agent 0 with two subagents, then agents 3 and 4.
+    let wants = [want(9, 30), want(3, 3), want(3, 3), want(9, 12), want(5, 5)];
+    let p = wall::layout(&[3, 1, 1], &wants, 2, 40);
+    let shape: Vec<(usize, usize, usize)> = p.iter().map(|p| (p.col, p.y, p.h)).collect();
     assert_eq!(
-        shape(wall::layout(&[1, 3, 1], 3, 2)),
-        "0:c0/0/1[false, false, false] | 1:c0/0/1 2:c1/0/1 3:c2/0/1[true, true, false] | 4:c0/0/1[false, false, false]"
+        shape,
+        [(0, 0, 30), (0, 30, 3), (0, 33, 3), (1, 0, 12), (1, 12, 5)]
     );
-    assert_eq!(
-        shape(wall::layout(&[6], 3, 3)),
-        "0:c0/0/1 1:c1/0/3 2:c1/1/3 3:c1/2/3 4:c2/0/2 5:c2/1/2[true, true, false]"
-    );
-    assert_eq!(
-        shape(wall::layout(&[6], 3, 1)),
-        "0:c0/0/1 1:c1/0/1 2:c2/0/1[true, true, false] | 3:c1/0/1 4:c2/0/1[false, true, false] | 5:c1/0/1[false, false, false]"
-    );
+    // Too much for the screen: each at its least, and it scrolls.
+    let p = wall::layout(&[1, 1, 1], &[want(9, 30); 3], 1, 20);
+    assert_eq!(p.iter().map(|p| p.h).collect::<Vec<_>>(), [9, 9, 9]);
+    assert_eq!(p[2].y, 18);
 }
 
 #[test]
 fn wall_step() {
-    let geo = wall::geos(&wall::layout(&[4, 1], 2, 3), 5);
+    let want = |min, most| wall::Want { min, most };
+    let wants = [want(9, 9), want(3, 3), want(3, 3), want(9, 9), want(9, 9)];
+    let geo = wall::geos(&wall::layout(&[3, 1, 1], &wants, 2, 40));
+    // 0, 1, 2 down the first column; 3 and 4 down the second.
     assert_eq!(wall::step(&geo, 2, 0, -1), Some(1));
-    assert_eq!(wall::step(&geo, 2, -1, 0), Some(0));
-    assert_eq!(wall::step(&geo, 0, 1, 0), Some(1));
+    assert_eq!(wall::step(&geo, 0, 0, 1), Some(1));
+    assert_eq!(wall::step(&geo, 1, 1, 0), Some(4));
+    assert_eq!(wall::step(&geo, 0, 1, 0), Some(3));
     assert_eq!(wall::step(&geo, 3, 0, 1), Some(4));
+    assert_eq!(wall::step(&geo, 4, -1, 0), Some(1));
+}
+
+/// A reply on a tile is plain words: no table rules or pipes, no code,
+/// no decisions block.
+#[test]
+fn wall_plain_reply() {
+    let s = "Two agents are running:\n\n| Work | State |\n|---|---|\n| Updates wait | running |\n\n```\n┌─ box ─┐\n```\n## Next\n**Bold** words.\n\nDecisions:\n1. **Scope:** (a) all; (b) some.\nMy picks: 1a.";
+    assert_eq!(
+        wall::plain_reply(s),
+        "Two agents are running: Work · State Updates wait · running Next Bold words."
+    );
+}
+
+/// A run of the same step is one line with its count.
+#[test]
+fn wall_merges_repeated_steps() {
+    use rush_core::agent::{Preview, PreviewLine};
+    let tool = |d: &str| PreviewLine {
+        role: "tool".into(),
+        doing: d.into(),
+        ..Default::default()
+    };
+    let p = Preview {
+        recent: vec![
+            tool("editing app.rs"),
+            tool("editing app.rs"),
+            tool("editing app.rs"),
+            tool("running nice"),
+        ],
+        ..Default::default()
+    };
+    let ls: Vec<String> = wall::stream(&p, true, "", 60, 10)
+        .iter()
+        .map(Line::plain)
+        .collect();
+    assert_eq!(ls.len(), 2, "{ls:#?}");
+    assert!(ls[0].contains("editing app.rs ×3"), "{ls:#?}");
+    assert!(ls[1].contains("running nice") && !ls[1].contains('×'));
+}
+
+#[test]
+fn wall_typed_picks() {
+    use rush_convo::decisions::decisions_in;
+    let (_, ds, _) = decisions_in(
+        "Decisions:\n1. **Subagents:** (a) fold them; (b) small tiles.\n2. **Scope:** (a) all six; (b) two.\nMy picks: 1a 2a.",
+    );
+    let picks = wall::typed_picks("1b2 a 3c");
+    assert_eq!(picks.get("1").map(String::as_str), Some("b"));
+    assert_eq!(picks.get("2").map(String::as_str), Some("a"));
+    assert_eq!(
+        wall::answer_text(&ds, &picks).as_deref(),
+        Some("1b. Subagents: small tiles\n\n2a. Scope: all six")
+    );
+    assert_eq!(wall::answer_text(&ds, &wall::typed_picks("9z")), None);
 }
 
 fn wall_fleet(n: usize, w: usize, h: usize) -> Model {
