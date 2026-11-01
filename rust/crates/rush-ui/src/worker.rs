@@ -137,21 +137,11 @@ impl Discovery {
     /// (or changed) are scanned after it, and read again if their spend
     /// moved: one load a reading, not two, every row as priced as before.
     pub fn load(&mut self, now: Ms, price: bool) -> Fleet {
-        self.load_with(now, price, false)
-    }
-
-    /// The rows, as load reads them; quick leaves out what can wait (the
-    /// loader's load_quick: subagent runs, counted at the next reading).
-    fn load_with(&mut self, now: Ms, price: bool, quick: bool) -> Fleet {
         let prev = self.targets.take().filter(|_| price);
         if let Some(t) = &prev {
             self.loader.scan_targets(t);
         }
-        let mut snap = if quick {
-            self.loader.load_quick(now)
-        } else {
-            self.loader.load(now)
-        };
+        let mut snap = self.loader.load(now);
         if price {
             let mut fresh = Loader::kind_targets(&snap.agents);
             if let Some(t) = &prev {
@@ -407,9 +397,7 @@ pub fn spawn_discovery_with(
             // at again.
             let w = Arc::new(Watcher::many());
             d.loader.watch_shared(w.clone());
-            // The first list shown as soon as it's read: subagent runs
-            // and spend come with the next reading, straight after.
-            let first = d.load_with(now(), false, true);
+            let first = d.load(now(), false);
             // Watched before each reading after, so a change during it
             // still wakes; the first says what there is to watch.
             d.watch(&w);

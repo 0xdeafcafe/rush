@@ -225,6 +225,19 @@ struct FileMemo {
     at: u64,
 }
 
+/// A row's subagent runs to count, with what they're counted under:
+/// a reading counts every row's side by side once its rows are made.
+struct PendingSubs {
+    key: String,
+    e: SubsEntry,
+    transcript: String,
+    gone: bool,
+    since: Ms,
+    now: Ms,
+    dir: Ms,
+    main: u64,
+}
+
 /// A past conversation's row as last made, and what it was made from.
 #[derive(PartialEq)]
 struct PastIn {
@@ -295,6 +308,9 @@ pub struct Loader {
     subs: HashMap<String, SubsEntry>,
     /// This load leaves out what can wait: see load_quick.
     quick: bool,
+    /// While a reading makes its rows, the subagent runs they're to count
+    /// (subagents leaves them here; finish_subs counts them).
+    pending_subs: Option<Vec<PendingSubs>>,
     fetched: HashMap<String, Reading>,
     /// Each login's last reading a minute or more old.
     burns: HashMap<String, Quota>,
@@ -367,6 +383,7 @@ impl Loader {
             print: HashMap::new(),
             subs: HashMap::new(),
             quick: false,
+            pending_subs: None,
             fetched: HashMap::new(),
             burns: HashMap::new(),
             usage_path: PathBuf::new(),
@@ -702,6 +719,7 @@ impl Loader {
         let mut tab = sample.then(|| self.procs.snapshot());
 
         let mut seen: HashSet<String> = HashSet::new();
+        self.pending_subs = Some(Vec::new());
         let checked = self.checked();
         let hosted = {
             let w = self.watching.as_ref();
@@ -976,6 +994,7 @@ impl Loader {
             &mut read,
         );
         snap.agents.extend(others);
+        self.finish_subs(&mut snap.agents);
         self.read = read;
         // What each row's subagents were counted under is kept while the
         // row is read, folded into its parent's or not.
@@ -1197,6 +1216,49 @@ impl Loader {
         self.sub_watch.push(PathBuf::from(path));
     }
 
+    /// Counts the subagent runs the reading's rows left pending, side by
+    /// side, each as subagents would have counted it, and gives each row
+    /// (and the finished row kept for it) what it counted. Rust-only: Go
+    /// counts each row's as it makes it.
+    fn finish_subs(&mut self, agents: &mut [Agent]) {
+        let Some(pending) = self.pending_subs.take() else {
+            return;
+        };
+        if pending.is_empty() {
+            return;
+        }
+        let done = rush_core::par::map_with(
+            pending,
+            || (),
+            |_, mut j| {
+                if let Some(runs) = &mut j.e.runs {
+                    runs.set_gone(j.gone);
+                    runs.set_since(j.since);
+                    j.e.st = runs.stats(&j.transcript, j.now);
+                    j.e.tiles = subagent_tiles(&j.transcript, &runs.running());
+                }
+                let e = &mut j.e;
+                (e.at, e.dir, e.main, e.gone, e.since) = (j.now, j.dir, j.main, j.gone, j.since);
+                j
+            },
+        );
+        let mut got: HashMap<String, (SubagentStats, Vec<SubagentTile>)> = HashMap::new();
+        for j in done {
+            got.insert(j.key.clone(), (j.e.st, j.e.tiles.clone()));
+            self.subs.insert(j.key, j.e);
+        }
+        for a in agents.iter_mut() {
+            if let Some((st, tiles)) = got.get(&a.key) {
+                (a.subs, a.subagents) = (*st, tiles.clone());
+            }
+        }
+        for r in self.idle_rows.values_mut() {
+            if let Some((st, tiles)) = got.get(&r.row.key) {
+                (r.row.subs, r.row.subagents) = (*st, tiles.clone());
+            }
+        }
+    }
+
     /// Counts an agent's subagent runs, and those still working. Whether
     /// one is working is read from the transcripts: its call without a
     /// result, or a background launch not yet reported done, unless gone
@@ -1300,6 +1362,22 @@ impl Loader {
         }
         if e.runs.is_none() {
             e.runs = f.subagent_runs();
+        }
+        if e.runs.is_some()
+            && let Some(p) = self.pending_subs.as_mut()
+        {
+            // Counted with the reading's others, side by side (finish_subs).
+            p.push(PendingSubs {
+                key: key.to_string(),
+                e,
+                transcript: transcript.to_string(),
+                gone,
+                since,
+                now,
+                dir,
+                main,
+            });
+            return Default::default();
         }
         match &mut e.runs {
             Some(runs) => {
