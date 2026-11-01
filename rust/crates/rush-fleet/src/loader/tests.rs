@@ -353,6 +353,42 @@ fn hosted_cost_is_the_transcripts_once_priced() {
     }
 }
 
+/// Before the first scan, a row whose transcript it prices never shows its
+/// host's saved figure: an older host summed Claude Code's running total
+/// again on every restart. Rust-only (Go's fleet.go:1058 showed the
+/// host's until then). One no scan priced (put away) still takes it.
+#[test]
+fn hosted_cost_waits_for_a_transcript_that_is_priced() {
+    let d = tempfile::tempdir().unwrap();
+    let (reg, p) = claude_reg(d.path());
+    let tr = reg.transcript_path("claude", &p, "/work/app", "sid1");
+    std::fs::create_dir_all(Path::new(&tr).parent().unwrap()).unwrap();
+    std::fs::write(&tr, "{}\n").unwrap();
+    let mut l = Loader::new(reg);
+    let t = now();
+    let mut i = info("w", "stopped", "/work/app", t);
+    i.kind = "claude".into();
+    i.session_id = "sid1".into();
+    i.cost_usd = 506_066.56;
+    let a = l.hosted_agent(&p, &i, None, t);
+    assert_eq!(a.job.transcript_path, tr);
+    assert_eq!(a.spend.cost, 0.0, "the host's saved figure");
+    l.priced = true; // a scan that didn't price it
+    assert_eq!(l.hosted_agent(&p, &i, None, t).spend.cost, 506_066.56);
+    let key = a.key.clone();
+    l.spend.insert(
+        key,
+        Spend {
+            cost: 2106.0,
+            ready: true,
+            ..Spend::default()
+        },
+    );
+    assert_eq!(l.hosted_agent(&p, &i, None, t).spend.cost, 2106.0);
+    // An agent that leaves no transcript: the host's is all there is
+    // (hosted_cost_is_the_transcripts_once_priced).
+}
+
 #[test]
 fn hosted_location_follows_newer_transcript_cd() {
     let d = tempfile::tempdir().unwrap();
@@ -1028,6 +1064,53 @@ fn hosted_spawns() {
             .len(),
         2
     );
+}
+
+// A run folded into the session that ran it is priced with the rows, its
+// transcript's figure counted with its session's rather than its host's
+// (Rust-only: Go never priced one).
+#[test]
+fn folded_runs_are_priced() {
+    let d = tempfile::tempdir().unwrap();
+    let (reg, p) = claude_reg(d.path());
+    let tr = reg.transcript_path("claude", &p, "/work/app", "kid");
+    std::fs::create_dir_all(Path::new(&tr).parent().unwrap()).unwrap();
+    std::fs::write(&tr, "{}\n").unwrap();
+    let mut l = Loader::new(reg);
+    let row = |key: &str, id: &str| {
+        let mut a = Agent {
+            key: key.into(),
+            rush: true,
+            ..Agent::default()
+        };
+        a.acct.kind = Kind::from("claude");
+        a.job.id = id.into();
+        a
+    };
+    let parent = row("claude/a:parent00", "parent00");
+    let mut kid = row("claude/a:kid00000", "kid00000");
+    kid.job.transcript_path = tr.clone();
+    kid.spend.cost = 506_066.56; // as its host saved it
+    let hosted = vec![
+        HostInfo {
+            id: "parent00".into(),
+            ..HostInfo::default()
+        },
+        HostInfo {
+            id: "kid00000".into(),
+            meta: HashMap::from([("spawnedBy".to_string(), "parent00".to_string())]),
+            ..HostInfo::default()
+        },
+    ];
+    let agents = vec![parent, kid];
+    let spawned = l.hosted_spawns(&hosted, &agents, Vec::new());
+    let got = l.fold_spawns(None, agents, spawned, &mut HashSet::new());
+    assert_eq!(got.len(), 1);
+    assert_eq!(l.folded.len(), 1);
+    assert_eq!(l.folded[0].1.path, tr);
+    assert_eq!(l.scan_targets(&[]), 1, "the folded run wasn't priced");
+    let sp = &l.spend["claude/a:kid00000"];
+    assert!(sp.ready && sp.cost == 0.0, "{sp:?}");
 }
 
 // A finished codex exec never seen running is found by its prompt in the

@@ -285,8 +285,6 @@ pub(crate) struct State {
     /// prompt.
     untold: String,
     start_cwd: String,
-    /// The running process's last cost total: see turn_cost.
-    spent: f64,
     ring: Vec<Arc<[u8]>>,
     ring_n: usize,
     clients: HashMap<u64, ClientConn>,
@@ -589,7 +587,6 @@ fn build(reg: Registry, hooks: Hooks, cfg: Config) -> (Host, Receiver<Msg>) {
         began,
         untold: String::new(),
         start_cwd: String::new(),
-        spent: 0.0,
         ring: Vec::new(),
         ring_n: 0,
         clients: HashMap::new(),
@@ -703,8 +700,12 @@ fn end_strays(reg: &Registry, kind: &str, session_id: &str) -> Vec<i32> {
 
 /// What one turn cost. A process's results carry its running total, not
 /// the turn's, so it is the rise since the last total, spent; a total
-/// below that is a new process counting from zero.
+/// below that is a new process counting from zero. No total (0) says
+/// nothing, and leaves spent as it was.
 pub fn turn_cost(spent: &mut f64, total: f64) -> f64 {
+    if total <= 0.0 {
+        return 0.0;
+    }
     let mut d = total - *spent;
     if d < 0.0 {
         d = total;
@@ -963,6 +964,7 @@ fn restore_sleeping_info(st: &mut State, old: &Info) {
         st.info.permission_mode = old.permission_mode.clone();
     }
     st.info.cost_usd = old.cost_usd;
+    st.info.spent_usd = old.spent_usd.clone(); // as its cost: see turn_cost
     st.info.context_tokens = old.context_tokens;
     st.info.cache_warm = old.cache_warm;
     st.info.home = old.home.clone();
@@ -1268,7 +1270,10 @@ impl Host {
         if st.conn.is_some() {
             return Ok(());
         }
-        st.spent = 0.0; // a new process counts from zero
+        // Its conversation's running total is kept on (info.spent_usd): a
+        // resumed agent carries it on. Rust-only: Go counted every start
+        // from zero (internal/host/agent.go:52), so each restart, wake
+        // or account move added the whole conversation's cost again.
         self.leave_gone_worktree(st);
         st.start_cwd = st.cfg.cwd.clone();
         let Some(a) = self.reg.get(&st.cfg.kind) else {
@@ -2942,9 +2947,21 @@ impl Host {
         if e.turns > 0 || !e.text.trim().is_empty() {
             st.w.unheard = None;
         }
-        let mut spent = st.spent;
-        st.info.cost_usd += turn_cost(&mut spent, e.cost);
-        st.spent = spent;
+        // The rise in this conversation's total, kept by session id across
+        // the agent's and this host's restarts: a resumed Claude Code says
+        // its whole conversation's total, which a new conversation (a new
+        // id, a fork's, one started afresh) begins again from zero.
+        // Rust-only: Go kept the total for one process only
+        // (internal/host/agent.go:52 and :572), so every restart added the
+        // whole total again (one host said $5,117 of a $2,106 transcript).
+        let sid = st.info.session_id.clone();
+        let d = turn_cost(st.info.spent_usd.entry(sid.clone()).or_default(), e.cost);
+        st.info.cost_usd += d;
+        // Only those it can still go back to: this one and its branches.
+        let branches = &st.cfg.branches;
+        st.info
+            .spent_usd
+            .retain(|k, _| *k == sid || branches.iter().any(|b| b.session_id == *k));
         if !e.text.trim().is_empty() {
             st.waiting = None; // it said something: ours was answered
         }

@@ -31,6 +31,11 @@ pub(crate) struct Asking {
     paths: Vec<String>,
 }
 
+/// What a run folded out of the list is priced from (scan_targets).
+fn fold_target(a: &Agent) -> Option<(String, rush_core::adapter::SpendTarget)> {
+    Some((a.acct.kind.as_str().to_string(), Loader::target(a)?))
+}
+
 /// Counts what a run it folds in cost with its own.
 fn add_spend(a: &mut Agent, cost: f64, today: f64) {
     a.spend.cost += cost;
@@ -115,6 +120,7 @@ impl Loader {
             }
         }
         let mut keep = vec![true; agents.len()];
+        let mut folded = Vec::new();
         for i in 0..agents.len() {
             let a = &agents[i];
             // One asking you something is never folded out of sight:
@@ -124,6 +130,7 @@ impl Loader {
             }
             let (cost, today, live) = (a.spend.cost, a.spend.today, a.job.live());
             if let Some(&p) = gone.get(&a.key) {
+                folded.extend(fold_target(a));
                 add_spend(&mut agents[p], cost, today);
                 keep[i] = false;
                 continue;
@@ -135,6 +142,7 @@ impl Loader {
                 && p != i
                 && !gone.contains_key(&agents[p].key)
             {
+                folded.extend(fold_target(a));
                 agents[p].subs.spawned += 1;
                 if live {
                     agents[p].subs.direct += 1; // its parent is busy, not your turn, while it works
@@ -145,6 +153,7 @@ impl Loader {
         }
         let mut k = keep.into_iter();
         agents.retain(|_| k.next().unwrap_or(true));
+        self.folded = folded;
         agents
     }
 
