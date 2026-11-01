@@ -250,6 +250,7 @@ impl adapter::Adapter for Claude {
         default_modeler: DefaultModeler,
         commander: Commander,
         chooser: Chooser,
+        spawnable: Spawnable,
         skill_rooter: SkillRooter,
         brancher: Brancher,
         model_namer: ModelNamer,
@@ -664,5 +665,16 @@ mod tests {
         }
         assert_eq!(f.len(), 36, "{f:?}");
         assert_eq!(f[&Guide], Support::YES.with("at its next step"));
+    }
+
+    // Go's SpawnCommand (claude.go:184): what a shell hands rush to host.
+    #[test]
+    fn spawns_claude_code() {
+        let c = super::Claude::new();
+        let sp = Adapter::spawnable(&c).expect("Claude is spawnable");
+        assert_eq!(
+            sp.spawn_command(),
+            (r#"claude -p "<task>""#.to_string(), "--model".to_string())
+        );
     }
 }
