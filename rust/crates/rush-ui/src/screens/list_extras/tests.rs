@@ -51,6 +51,7 @@ pub(super) fn model_of(agents: Vec<Agent>, w: usize, h: usize) -> Model {
         roots,
         previews: HashMap::new(),
         priced: true,
+        accounts: Vec::new(),
     });
     m
 }

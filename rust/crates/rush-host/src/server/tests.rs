@@ -1477,3 +1477,48 @@ fn join_within<T: Send + 'static>(h: std::thread::JoinHandle<T>, d: Duration) ->
         Err(_) => panic!("the host didn't stop within {d:?}"),
     }
 }
+
+// A turn streaming hundreds of messages a second rewrites info.json for
+// what it's doing at most every INFO_EVERY, the latest always written; any
+// other change is written at once.
+#[test]
+fn info_is_written_at_once_for_a_change_readers_act_on() {
+    let _home = Home::new();
+    std::fs::create_dir_all(dir("iw")).unwrap();
+    let hooks = Hooks {
+        info_every: Duration::from_secs(3600),
+        ..Hooks::quiet()
+    };
+    let cfg = Config {
+        id: "iw".into(),
+        ..Config::default()
+    };
+    let (h, _rx) = build(registry(), hooks, cfg);
+    let file = || crate::client::read_info_file("iw").unwrap();
+    let mut st = h.lock();
+    st.info.state = "working".into();
+    st.info.detail = "one".into();
+    h.publish(&mut st);
+    assert_eq!(file().detail, "one");
+    st.info.detail = "two".into();
+    st.info.context_tokens = 5;
+    h.publish(&mut st);
+    assert_eq!(file().detail, "one", "what it's doing waits for INFO_EVERY");
+    st.info.state = "blocked".into();
+    st.info.needs = "permission".into();
+    h.publish(&mut st);
+    let f = file();
+    assert_eq!((f.state.as_str(), f.detail.as_str()), ("blocked", "two"));
+    st.info.detail = "three".into();
+    h.publish(&mut st);
+    assert_eq!(file().detail, "two");
+    let sent = st.info.to_json();
+    h.flush_info(&mut st);
+    assert_eq!(std::fs::read(dir("iw").join("info.json")).unwrap(), sent);
+    // Idle, every change is written at once.
+    st.info.state = "idle".into();
+    h.publish(&mut st);
+    st.info.detail = "four".into();
+    h.publish(&mut st);
+    assert_eq!(file().detail, "four");
+}

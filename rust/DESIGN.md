@@ -16,6 +16,16 @@ speed or memory claim has a number behind it.
   (watchBinary every 30 s; in the rush that leads, settleLanded every
   minute and tidyDone every 10) wake the loop only at the second one is
   due, hand their work to a thread, and draw nothing (rush-ui chores.rs).
+  What Go redraws every second for the clock's sake is drawn when its
+  text changes: a label that moves with the clock (`style::age_since`,
+  `dur_since`, `dur_left`, plan's `roughly_left` and `note_resets`) notes
+  when it next turns, and the frame asks to be woken then; the list is
+  laid out again when an agent's group runs out of time (rebuild's
+  `group_turn`). Screens past the list (a Session, a place, a sheet) are
+  drawn again with the chores' wake, every 30 seconds, as before. The
+  battery and disk are read at the same wake while shown (IOKit, not
+  pmset) and drawn only when they'd show differently; the hosts' sweep
+  goes over the list's own listing, which its watcher keeps fresh.
 - **Small memory.** Measured as macOS *physical footprint*
   (`/usr/bin/footprint -p <pid>`), not RSS. Go rush sits at about 40 MB with
   a session open; opening one large transcript retains about 22 MB. Target:
@@ -498,7 +508,10 @@ on every frame. Go retains about 22 MiB for the same.
    scanning (incremental from the last offset), previews, the open
    transcript's tail (its last 2 MB first; a longer one is then read
    whole on the same worker and takes the end's place, its turns'
-   refs renumbered so nothing on screen moves: Go's twopass.go). Each
+   refs renumbered so nothing on screen moves: Go's twopass.go; that
+   worker also lays out the whole's last 400 rows as the view last drew
+   and works out its edits, so the frame that swaps it in draws little:
+   Go's warmed, rushmode.go:2064). Each
    watches files with `rush_sys::fswait::Watcher`
    (kqueue on macOS; the one file watcher in rush: `watch` before reading,
    `wait` blocks until a change, a `Stop` or a timeout; a path not there
@@ -1286,6 +1299,18 @@ Go rush is gone from the tree; its last version is the `go-final` tag
   then the frame — in µs, instructions, bytes and allocations per frame.
   Then the same with ctrl+k's bar open over it. `-- profile` draws the
   list for 20 s instead, for `sample`; `-- profile-bar` the bar.
+- A conversation keeps what's drawn, not what was sent: a step's
+  structured result only for the keys something reads
+  (`rush_convo::model::RESULT_KEYS`; no file contents, shell streams or
+  MCP screenshots), and a shell's streams once when its output is them
+  run together. The 125 MB "Scoping Trace Sharing" transcript read whole
+  retains 12.7 MiB (30.2 before, 2026-10-30); its open TUI's footprint
+  went 231-255 → 185-197 MB (the list and ctrl+k's held searches are
+  most of the rest). ctrl+k lets go of what it held on Go's two-minute
+  timer, not at the next search: 2-4 minutes after it, the live heap
+  falls 124 → 79 MiB and the footprint 180 → 125 MB. A long
+  conversation closed or replaced is freed on a thread of its own and
+  its pages given back (`rush_sys::mem::let_go`).
 - Footprint: `/usr/bin/footprint -p <pid>` idle on the list, and with the
   largest transcript under `~/.claude/projects` open; side by side with Go.
 - Idle: `top -l` CPU and wakeups over 60 s with nothing changing.
@@ -1336,6 +1361,18 @@ left to strip. Where the memory goes, and what the host module does about it:
   stalled in `codex-code-mode-host`, not seen again). The commands Codex
   runs are kept from it (`shell_environment_policy.exclude`). No effect on
   Claude Code (Bun has its own allocator).
+- **The host itself.** rush starts every host with `MallocSpaceEfficient=1`
+  (the host takes it out of its environment, so its agent doesn't inherit
+  it; Rust-only): after `flood 15000` on the live bench a host's footprint
+  is 4.6 MB against 21 MB, idle fresh 4.2 against 5.5, for about 0.3 s more
+  CPU per 15,000 streamed steps and none idle. `malloc_zone_pressure_relief`
+  at a turn's end gives nothing back on macOS 27's malloc.
+- **A streaming turn's info.json.** The host writes what a turn is doing
+  (detail, context tokens, cache warmth, updatedAt) to info.json at most
+  every 250 ms, the latest always; any other change, and every change while
+  idle, at once, as Go does (Rust-only). Writing it on every message was
+  ~90% of a busy host's time and woke every watcher of the folder: `flood
+  15000`, host CPU 8.5 s → 1.9 s, folder writes 89,592 → 81.
 - **One Codex app-server can hold many threads.** rush starts one per
   session today (`internal/adapters/codex/conn.go`); one per Codex account
   saves a process per extra session, at the cost of one crash ending them

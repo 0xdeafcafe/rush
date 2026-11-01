@@ -93,6 +93,7 @@ fn model(w: usize, h: usize) -> Model {
         roots: vec!["/src/checkout".into(); 5],
         previews: HashMap::new(),
         priced: true,
+        accounts: Vec::new(),
     });
     m
 }
@@ -368,6 +369,7 @@ fn bar_searches_transcripts() {
         roots: vec!["/src/checkout".into(); 5],
         previews: HashMap::new(),
         priced: true,
+        accounts: Vec::new(),
     });
     press(&mut m, "ctrl+k");
     typed(&mut m, "zebracorn");
@@ -428,6 +430,7 @@ fn list_filter_searches_transcripts() {
         roots: vec!["/src/checkout".into(); 5],
         previews: HashMap::new(),
         priced: true,
+        accounts: Vec::new(),
     });
     press(&mut m, "alt+f");
     typed(&mut m, "zebracorn");
@@ -950,6 +953,7 @@ fn bar_matches_names_by_words() {
         roots: vec!["/src/checkout".into(); 5],
         previews: HashMap::new(),
         priced: true,
+        accounts: Vec::new(),
     });
     press(&mut m, "ctrl+k");
     typed(&mut m, "index");
@@ -1020,6 +1024,7 @@ fn bar_finds_agents_that_said_it() {
         roots: vec!["/src/checkout".into(); 5],
         previews: HashMap::new(),
         priced: true,
+        accounts: Vec::new(),
     });
     press(&mut m, "ctrl+k");
     typed(&mut m, "zebracorn");
@@ -1217,6 +1222,7 @@ fn bar_searches_transcripts_on_key() {
         roots: vec!["/src/checkout".into(); 5],
         previews: HashMap::new(),
         priced: true,
+        accounts: Vec::new(),
     });
     crate::screens::settings::store(&mut m)
         .config

@@ -12,10 +12,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use rush_convo::{Fresh, Session, Tail};
+use rush_convo::{Fresh, Options, Renderer, Session, Tail};
+
+use crate::screens::session_core::changes::{self, FileChange, Ver};
 use rush_core::adapter::{self, AdapterRef, Registry, SLICE, global};
 use rush_core::agent::{Agent, Preview};
 use rush_core::event::Event;
+use rush_core::event::Exchange;
 use rush_core::time::{Ms, now};
 use rush_draw::Sender;
 use rush_fleet::{HostInfo, Loader};
@@ -41,10 +44,18 @@ pub enum Note {
         r#gen: u64,
         err: String,
     },
-    /// The whole of a conversation opened on its end, read after it.
+    /// A conversation's end read ahead of time, topped up with what was
+    /// written since: the view's first reading (TailStart::From).
+    Seeded {
+        r#gen: u64,
+        sess: Box<Session>,
+    },
+    /// The whole of a conversation opened on its end, read after it, and
+    /// its end laid out as the view last drew it, when it had.
     Whole {
         r#gen: u64,
         sess: Box<Session>,
+        warm: Option<Box<Warm>>,
     },
     /// Work a screen handed off the UI thread, done: run with the model
     /// on it (frame/work.rs, Model::later).
@@ -60,6 +71,8 @@ pub struct Fleet {
     pub previews: HashMap<String, Preview>,
     /// Their transcripts have been priced.
     pub priced: bool,
+    /// Each account's usage, today's spend and running count.
+    pub accounts: Vec<rush_fleet::AccountView>,
 }
 
 /// While something is live, how often discovery reads again.
@@ -69,6 +82,45 @@ pub const PICKED_WINDOW: i64 = 384 << 10;
 /// How much of a transcript the tail reads at once: the UI applies each
 /// slice in one short step, so a flood or a reread never holds up typing.
 pub const TAIL_SLICE: usize = 512 << 10;
+/// How much of a conversation's end is laid out ahead of the frame that
+/// shows it, off the UI's thread (Go's warmRows, rushmode.go:2056).
+pub const WARM_ROWS: usize = 400;
+
+/// How a conversation's view last drew it, while it shows only the end of
+/// a long one: the worker reading the whole makes it as the view will,
+/// and lays out its end the same way.
+pub type Drawn = Arc<std::sync::Mutex<Option<DrawnAs>>>;
+
+/// What Drawn holds.
+#[derive(Clone)]
+pub struct DrawnAs {
+    pub o: Options,
+    /// What the list said of it.
+    pub info: rush_convo::Info,
+    /// The past exchanges merged into it.
+    pub exchanges: Arc<[Exchange]>,
+    /// Its agent has stopped: a turn its transcript leaves open is ended
+    /// as the view's follow ends it (SessionView::follow).
+    pub stopped: bool,
+}
+
+/// What the worker that read a whole conversation did ahead of the frame
+/// that shows it: the exchanges merged into it, its end laid out, and its
+/// edits worked out (the key and folder they're of, and them).
+pub struct Warm {
+    pub exchanges: Arc<[Exchange]>,
+    pub r: Renderer,
+    pub changes: (Ver, String, Arc<Vec<FileChange>>),
+    /// The steps that ran an agent, and the session and version of its
+    /// steps they're of (subs' Runs::spawn_steps).
+    pub spawn_steps: Option<SpawnSteps>,
+}
+
+/// What a step's spawn is read with: the adapters, and the session's kind.
+pub type SpawnsBy = (Registry, String);
+
+/// The steps that ran an agent, by (serial, step version) of the session.
+pub type SpawnSteps = ((u64, u64), Vec<rush_convo::StepId>);
 
 /// Reads the list once, as `rush --dump` and `--render` do: rows, a spend
 /// scan, rows again.
@@ -185,6 +237,7 @@ impl Discovery {
             roots,
             previews,
             priced: price,
+            accounts: snap.accounts,
         }
     }
 
@@ -496,6 +549,10 @@ impl Drop for TailHandle {
     }
 }
 
+/// How much of a transcript's end is read first, before the whole of a
+/// long one.
+pub const TAIL_END: u64 = 2 << 20;
+
 /// Reads a transcript's last 2 MB, then what's added as it grows, a
 /// TAIL_SLICE at a time; each slice parsed here and sent for the UI
 /// thread to apply, the next read while it does.
@@ -504,6 +561,31 @@ pub fn spawn_tail(
     r#gen: u64,
     tx: Sender<Note>,
     decode: rush_convo::Decode,
+    drawn: Drawn,
+    spawns: Option<SpawnsBy>,
+) -> Option<TailHandle> {
+    spawn_tail_at(TailStart::End(path), r#gen, tx, decode, drawn, spawns)
+}
+
+/// Where a tail's worker starts reading.
+pub enum TailStart {
+    /// The transcript's last 2 MB.
+    End(PathBuf),
+    /// Where a read of it ahead of time stopped (list_extras/predict.rs):
+    /// what was written since is read first. With the conversation read
+    /// so far, which the UI doesn't have yet, it's topped up with that
+    /// and sent whole (Note::Seeded); without, the UI has it already.
+    From(Box<Tail>, Option<Box<Session>>),
+}
+
+/// spawn_tail from where start says.
+pub fn spawn_tail_at(
+    start: TailStart,
+    r#gen: u64,
+    tx: Sender<Note>,
+    decode: rush_convo::Decode,
+    drawn: Drawn,
+    spawns: Option<SpawnsBy>,
 ) -> Option<TailHandle> {
     // One slice waits at most: the next is read while the UI applies it.
     let tx = tx.lane(1);
@@ -514,12 +596,45 @@ pub fn spawn_tail(
     std::thread::Builder::new()
         .name("rush-tail".into())
         .spawn(move || {
+            let path = match &start {
+                TailStart::End(p) => p.clone(),
+                TailStart::From(t, _) => t.path.clone(),
+            };
             // Watched before the first read, so nothing written between a
             // read and the wait is missed.
             let w = Watcher::new();
             w.watch(&[&path]);
-            let mut tail = Tail::from_end(&path, 2 << 20, decode.clone());
+            let (mut tail, seed) = match start {
+                TailStart::End(p) => (Tail::from_end(&p, TAIL_END, decode.clone()), None),
+                TailStart::From(t, s) => (*t, s),
+            };
             tail.stop = Some(st.clone());
+            if let Some(mut sess) = seed {
+                // What was written since it was read ahead, taken in here;
+                // one that can't be read now is read as if never read
+                // ahead.
+                let read = loop {
+                    if st.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    match tail.fetch_most(TAIL_SLICE) {
+                        Ok(f) => {
+                            let more = f.more;
+                            f.apply(&mut sess);
+                            if !more {
+                                break true;
+                            }
+                        }
+                        Err(_) => break false,
+                    }
+                };
+                if !read {
+                    tail = Tail::from_end(&path, TAIL_END, decode.clone());
+                    tail.stop = Some(st.clone());
+                } else if !tx.send(Note::Seeded { r#gen, sess }) {
+                    return;
+                }
+            }
             loop {
                 if st.load(Ordering::Relaxed) {
                     return;
@@ -547,9 +662,11 @@ pub fn spawn_tail(
                             whole.stop = Some(st.clone());
                             let mut sess = Session::new();
                             if whole.read(&mut sess).is_ok() && !st.load(Ordering::Relaxed) {
+                                let warm = warm(&mut sess, &drawn, spawns.as_ref());
                                 if !tx.send(Note::Whole {
                                     r#gen,
                                     sess: Box::new(sess),
+                                    warm,
                                 }) {
                                     return;
                                 }
@@ -576,6 +693,72 @@ pub fn spawn_tail(
         })
         .ok()?;
     Some(TailHandle { stop, wake })
+}
+
+/// The end of s laid out as its view last drew (drawn), WARM_ROWS of it,
+/// and its edits worked out: the frame that shows it then finds those
+/// turns drawn, rather than drawing a long conversation's end while you
+/// wait (Go's warmed, rushmode.go:2064). None when the view hasn't drawn
+/// yet. s takes what the list said of it, as the view's will.
+fn warm(s: &mut Session, drawn: &Drawn, spawns: Option<&SpawnsBy>) -> Option<Box<Warm>> {
+    let DrawnAs {
+        mut o,
+        info,
+        exchanges,
+        stopped,
+    } = drawn.lock().ok()?.clone()?;
+    if o.width == 0 {
+        return None;
+    }
+    o.now = now();
+    s.info = info;
+    // As the view merges them once the whole is in (take_whole_drawn), and
+    // ends the turn its stopped agent left open (follow): done after, they
+    // would change what was laid out here.
+    if !exchanges.is_empty() {
+        s.restore_exchanges(&exchanges);
+    }
+    if stopped && s.live().is_some() {
+        s.apply(&rush_core::event::Event::TurnEnd(end_left_open()), o.now);
+    }
+    let mut r = Renderer::new();
+    r.tail(s, &o, WARM_ROWS);
+    let changes = (
+        changes::memo_key_of(s, &o.kids),
+        s.info.cwd.clone(),
+        Arc::new(changes::changes_with(s, &o.kids)),
+    );
+    // The steps that ran an agent, as the dock's runs work them out
+    // (subs::refresh): every step looked at once.
+    let spawn_steps = spawns.map(|(reg, kind)| {
+        let ids = s
+            .turns
+            .iter()
+            .flat_map(|t| &t.items)
+            .filter_map(|it| match it {
+                rush_convo::Item::Step(id) => Some(*id),
+                _ => None,
+            })
+            .filter(|id| {
+                crate::screens::list_extras::spawns::step_spawn(reg, s.step(*id), kind).is_some()
+            })
+            .collect();
+        ((s.serial(), s.step_ver()), ids)
+    });
+    Some(Box::new(Warm {
+        exchanges,
+        r,
+        changes,
+        spawn_steps,
+    }))
+}
+
+/// How a turn a stopped agent's transcript leaves open is ended.
+pub fn end_left_open() -> rush_core::event::TurnEnd {
+    rush_core::event::TurnEnd {
+        reason: "done".into(),
+        ..Default::default()
+    }
 }
 
 /// Follows an adapter's history as it grows (its HistoryFollower), a
@@ -663,6 +846,33 @@ pub fn spawn_history(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The worker makes the whole as the view will once it's in: the turn
+    /// a stopped agent left open ended, the past exchanges merged; and
+    /// lays out its end for that, not for what the view would change.
+    #[test]
+    fn warm_makes_the_whole_as_the_view_will() {
+        let drawn = Drawn::default();
+        let mut s = Session::new();
+        s.sent("go".into(), Vec::new(), 1000);
+        assert!(warm(&mut s, &drawn, None).is_none(), "nothing drawn yet");
+        let as_drawn = |stopped| DrawnAs {
+            o: Options {
+                width: 80,
+                ..Options::default()
+            },
+            info: rush_convo::Info::default(),
+            exchanges: Arc::default(),
+            stopped,
+        };
+        *drawn.lock().unwrap() = Some(as_drawn(false));
+        assert!(warm(&mut s, &drawn, None).is_some());
+        assert!(s.live().is_some(), "a running agent's turn stays open");
+        *drawn.lock().unwrap() = Some(as_drawn(true));
+        let w = warm(&mut s, &drawn, None).unwrap();
+        assert!(s.live().is_none(), "a stopped agent's turn ended");
+        assert!(w.r.kept_rows() > 0);
+    }
 
     #[test]
     fn main_checkout_of_a_worktree() {
@@ -935,7 +1145,7 @@ mod tests {
         }
         let lp: Loop<Note> = Loop::new();
         let decode = rush_convo::decode(rush_claude::messages);
-        let h = spawn_tail(p.clone(), 1, lp.sender(), decode).unwrap();
+        let h = spawn_tail(p.clone(), 1, lp.sender(), decode, Drawn::default(), None).unwrap();
         let mut app = Notes {
             n: 0,
             path: p.clone(),
@@ -943,6 +1153,105 @@ mod tests {
         };
         lp.run_with(&mut app, |_| Ok(())).unwrap();
         assert_eq!(app.n, 2, "the append wasn't read");
+        drop(h);
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// A conversation's end read ahead of time is topped up with what was
+    /// written since, from where that read stopped, and sent whole before
+    /// anything else; one handed on as it was read sends only what's new.
+    #[test]
+    fn a_tail_read_ahead_is_topped_up() {
+        use rush_draw::{App, Canvas, Loop, Msg, Step};
+        let d = std::env::temp_dir().join(format!("rush-ui-ahead-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let p = d.join("t.jsonl");
+        let ask = |i: usize| {
+            format!(
+                r#"{{"type":"user","timestamp":"2026-09-29T10:00:00Z","message":{{"role":"user","content":"ask {i}"}}}}"#
+            ) + "\n"
+        };
+        let append = |p: &PathBuf, s: String| {
+            use std::io::Write;
+            std::fs::OpenOptions::new()
+                .append(true)
+                .open(p)
+                .unwrap()
+                .write_all(s.as_bytes())
+                .unwrap();
+        };
+        let decode = rush_convo::decode(rush_claude::messages);
+        let ahead = || {
+            let mut t = Tail::from_end(&p, TAIL_END, decode.clone());
+            let mut s = Session::new();
+            t.fetch_most(TAIL_SLICE).unwrap().apply(&mut s);
+            (t, s)
+        };
+        /// Each note's turns: Seeded's as sent, Tail's applied alone.
+        struct Notes(Vec<(&'static str, usize)>, PathBuf, String);
+        impl App<Note> for Notes {
+            fn update(&mut self, m: Msg<Note>) -> Step {
+                let n = match m {
+                    Msg::App(Note::Seeded { sess, .. }) => ("seeded", sess.turns.len()),
+                    Msg::App(Note::Tail { fresh, .. }) => {
+                        let mut s = Session::new();
+                        fresh.apply(&mut s);
+                        ("tail", s.turns.len())
+                    }
+                    _ => return Step::Idle,
+                };
+                self.0.push(n);
+                if self.0.len() == 1 && !self.2.is_empty() {
+                    use std::io::Write;
+                    std::fs::OpenOptions::new()
+                        .append(true)
+                        .open(&self.1)
+                        .unwrap()
+                        .write_all(std::mem::take(&mut self.2).as_bytes())
+                        .unwrap();
+                    return Step::Idle;
+                }
+                Step::Quit
+            }
+            fn draw(&mut self, _: &mut Canvas) {}
+        }
+        // Written to since: topped up and sent whole, then followed.
+        std::fs::write(&p, (0..3).map(ask).collect::<String>()).unwrap();
+        let (t, s) = ahead();
+        assert_eq!(s.turns.len(), 3);
+        append(&p, ask(3) + &ask(4));
+        let lp: Loop<Note> = Loop::new();
+        let start = TailStart::From(Box::new(t), Some(Box::new(s)));
+        let h = spawn_tail_at(
+            start,
+            1,
+            lp.sender(),
+            decode.clone(),
+            Drawn::default(),
+            None,
+        )
+        .unwrap();
+        let mut app = Notes(Vec::new(), p.clone(), ask(5));
+        lp.run_with(&mut app, |_| Ok(())).unwrap();
+        assert_eq!(app.0, vec![("seeded", 5), ("tail", 1)]);
+        drop(h);
+        // As it was read: nothing sent until something is written.
+        std::fs::write(&p, (0..3).map(ask).collect::<String>()).unwrap();
+        let (t, _) = ahead();
+        let lp: Loop<Note> = Loop::new();
+        let h = spawn_tail_at(
+            TailStart::From(Box::new(t), None),
+            1,
+            lp.sender(),
+            decode,
+            Drawn::default(),
+            None,
+        )
+        .unwrap();
+        append(&p, ask(3));
+        let mut app = Notes(Vec::new(), p.clone(), String::new());
+        lp.run_with(&mut app, |_| Ok(())).unwrap();
+        assert_eq!(app.0, vec![("tail", 1)]);
         drop(h);
         std::fs::remove_dir_all(&d).unwrap();
     }
@@ -990,7 +1299,7 @@ mod tests {
         }
         let lp: Loop<Note> = Loop::new();
         let decode = rush_convo::decode(rush_claude::messages);
-        let h = spawn_tail(p.clone(), 1, lp.sender(), decode).unwrap();
+        let h = spawn_tail(p.clone(), 1, lp.sender(), decode, Drawn::default(), None).unwrap();
         let mut app = Notes {
             tails: 0,
             whole: None,

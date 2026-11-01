@@ -1271,6 +1271,9 @@ mod tests {
             "◇ room",
             "between turns · 2 agents",
             "Conversation   Overview   Changes",
+            // The box says what enter does, as a busy agent's
+            // (rushmode.go:3680).
+            "queuing",
         ] {
             assert!(f.contains(want), "no {want:?} in:\n{f}");
         }
@@ -1287,6 +1290,31 @@ mod tests {
             !f.contains("settle tabs or spaces"),
             "the log under Overview:\n{f}"
         );
+        // Over, the box's edge says enter replies (rushmode.go:3684). A
+        // member keeps the over room in the list.
+        let mut s = m.kept::<RoomRows>().list[0].clone();
+        s.running = false;
+        s.sessions.insert("sid-opus".into(), "Opus".into());
+        m.kept::<RoomRows>().list = vec![s];
+        m.agents.push(Agent {
+            key: "rush:opus".into(),
+            rush: true,
+            job: rush_core::agent::Job {
+                id: "sid-opus".into(),
+                ..Default::default()
+            },
+            ..Agent::default()
+        });
+        m.roots.push(String::new());
+        m.rebuild();
+        m.press("[");
+        let f = m
+            .frame()
+            .iter()
+            .map(|l| l.plain())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(f.contains("enter replies through Claude Code"), "{f}");
         rush_state::set_thread_dir(None);
     }
 

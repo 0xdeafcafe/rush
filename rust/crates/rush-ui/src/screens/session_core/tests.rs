@@ -512,6 +512,10 @@ fn a_draft_is_carried_to_another_session() {
     m.roots = vec![String::new(); 2];
     m.rebuild();
     conn(&mut m, "default/k2").input.set("its own draft");
+    // Beside the list: from the Session alone the keys stay its, as Go's
+    // toPrompt leaves m.full (tests_split.rs).
+    (m.full, m.w) = (false, 160);
+    assert!(crate::screens::list_extras::split::side_by_side(&m));
     typed(&mut m, "meant for the other one");
     run_action(&mut m, "session.carry");
     assert!(m.session.is_none(), "the Prompt has the keys");
@@ -762,12 +766,68 @@ fn sending_shows_in_the_dock() {
         vec![Said::Sent {
             text: "look at the parser".into(),
             images: Vec::new(),
+            exchange: None,
         }],
         false,
     );
     let f = screen(&mut m).join("\n");
     assert!(!f.contains("sending"), "{f}");
     assert!(f.contains("look at the parser"), "{f}");
+}
+
+/// Another agent's message, mid-turn, is its card alone: the host's Sent
+/// of it carries its exchange and attaches to the card, never a second
+/// "You, while it worked" (usermessages.go:21, exchange.go:31).
+#[test]
+fn another_agents_message_shows_once() {
+    use rush_convo::model::Item;
+    use rush_core::event::{Event, Exchange, Peer};
+    let (mut m, _) = hosted("steer", Vec::new());
+    let e = Exchange {
+        at: NOW,
+        id: "x1".into(),
+        direction: "received".into(),
+        phase: "message".into(),
+        text: "second note from alpha".into(),
+        sender: Peer {
+            session_id: "p1".into(),
+            kind: "claude".into(),
+            name: "live alpha".into(),
+        },
+        ..Exchange::default()
+    };
+    let r#gen = conn(&mut m, KEY).link_gen;
+    live::take(
+        &mut m,
+        KEY,
+        r#gen,
+        vec![
+            Said::Sent {
+                text: "first".into(),
+                images: Vec::new(),
+                exchange: None,
+            },
+            Said::Event(Event::Exchange(Box::new(e.clone()))),
+            Said::Sent {
+                text: e.text.clone(),
+                images: Vec::new(),
+                exchange: Some(Box::new(e)),
+            },
+        ],
+        false,
+    );
+    let items: Vec<&Item> = sess(&mut m).turns.iter().flat_map(|t| &t.items).collect();
+    let cards = items
+        .iter()
+        .filter(|i| matches!(i, Item::Exchange(_)))
+        .count();
+    let yours = items
+        .iter()
+        .filter(|i| matches!(i, Item::Interject(_)))
+        .count();
+    assert_eq!((cards, yours), (1, 0));
+    let f = screen(&mut m).join("\n");
+    assert!(!f.contains("while it worked"), "{f}");
 }
 
 // ---- localqueue.go: the queue of a session rush doesn't run ----

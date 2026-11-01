@@ -149,7 +149,13 @@ pub enum Said {
     /// The time the events after it happened (host.Stamp).
     Stamp(Ms),
     /// You sent this (host.Sent): the agent's copy of it is matched.
-    Sent { text: String, images: Vec<String> },
+    /// Another agent's message carries its exchange, so it attaches to
+    /// that message's row rather than reading as yours.
+    Sent {
+        text: String,
+        images: Vec<String>,
+        exchange: Option<Box<rush_core::event::Exchange>>,
+    },
     /// An approval was answered or withdrawn (host.Answered).
     Answered(String),
     /// What the host keeps beside the conversation (host.InfoEvent): the

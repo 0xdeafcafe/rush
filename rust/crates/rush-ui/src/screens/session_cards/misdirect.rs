@@ -143,6 +143,8 @@ pub fn ask_misdirected(m: &mut Model, key: &str, text: &str, send: Then) -> bool
         words.join(", ")
     ));
     c.yes_text = "send there".into();
+    // Asked on this Session's box's top line (misdirect.go:110 box: c).
+    c.box_key = key.to_string();
     // Space says yes too, beside enter.
     c.again = "space".into();
     c.more.push((

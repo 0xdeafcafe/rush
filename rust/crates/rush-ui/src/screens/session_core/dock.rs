@@ -8,8 +8,10 @@
 //! :3563-3685), sendmode.go:95 (sendModeTop), sessionviews.go:49
 //! (picked1), :3729 (slashLines, slash.rs) and view.go (keysFit :800, fewKeys :829).
 //!
-//! Not here yet: the cards (approval, question, limit, sign-in: the
-//! cards'), the subagents and jobs on the box or in the column beside a
+//! The cards (approval, question, limit, sign-in: session_cards') sit
+//! last above the box, scrolling with a conversation as Go's panels do.
+//!
+//! Not here yet: the subagents and jobs on the box or in the column beside a
 //! wide conversation (side.rs has its tasks and changes), a room's
 //! verdict, images drawn as chips in queued messages and the stash's keys.
 
@@ -213,7 +215,13 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         out.extend(notes);
     }
 
-    // The queue, last before the box.
+    // The queue and a waiting card sit last, just above the box; a room
+    // running on the chat before them (paneDock :3513).
+    let (room_rows, card_rows) = crate::screens::session_cards::dock_parts(m, w - 1);
+    if !room_rows.is_empty() {
+        block(&mut out, &mut blocks);
+        out.extend(room_rows);
+    }
     let picked = m
         .session
         .as_ref()
@@ -229,6 +237,14 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         q_off = out.len();
         q_rows = at;
         out.extend(dock_card(QUEUE, rows, w));
+    }
+    // A card waiting on you, last, just above the box: the first stop
+    // for ↑ (paneDock's cards :3412).
+    let mut card_off = None;
+    if !card_rows.is_empty() {
+        block(&mut out, &mut blocks);
+        card_off = Some(out.len());
+        out.extend(card_rows);
     }
     // And room before the box. In a conversation one row scrolls with the
     // transcript, so it never ends flush against the box, and one stays
@@ -249,6 +265,9 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         panels = out.drain(..n).collect();
     }
     let aux = panels.len();
+    if let Some(at) = card_off {
+        crate::screens::session_cards::card_at(m, &key, at, scrolls);
+    }
     // The runs' rows keep their refs there, for clicks.
     let mut panel_refs = vec![String::new(); aux];
     {
@@ -415,7 +434,8 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         .then(|| super::memedit::picked_path(m, key))
         .flatten();
     let watching = super::subview::watching(m, key);
-    let a = agent(m, key).cloned();
+    // A room's pane is its row's, as Go's room rows are agents.
+    let a = crate::screens::social::rooms::row_agent(m, key).cloned();
     let c = conn(m, key);
     let hosted = c.hosted();
     let typed = !c.input.is_empty();
@@ -511,7 +531,13 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
                 );
             }
         } else {
-            let harness = harness_name(&m.reg, &a.kind);
+            // Go says Claude Code whatever the agent (rushmode.go:3684); a
+            // room has no harness of its own, so it keeps Go's words.
+            let harness = if crate::screens::social::rooms::is_room_key(&a.key) {
+                "Claude Code".to_string()
+            } else {
+                harness_name(&m.reg, &a.kind)
+            };
             add(
                 &mut top,
                 line([sp(format!("enter replies through {harness}"), DIM)]),
@@ -599,6 +625,11 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
             sp("why? told to the agent", ORANGE),
             sp(format!(" · enter {what} and sends this · esc cancels"), DIM),
         ]);
+    }
+    // A question asked on this box: its top line (rushmode.go:3740).
+    if let Some(q) = m.confirm.as_mut().filter(|q| q.box_key == key) {
+        top = q.box_line();
+        q.inlined = true;
     }
     // What plugins put on the box's edge (rushmode.go:3728 boxNote).
     let foot_r = crate::screens::plugin_ui::hooks::box_note(m, key);

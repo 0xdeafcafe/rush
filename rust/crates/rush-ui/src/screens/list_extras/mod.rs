@@ -38,6 +38,7 @@ pub mod live;
 pub mod meters;
 pub mod peek;
 pub mod plan;
+pub mod predict;
 pub mod progstatus;
 pub mod prompt;
 pub mod rename;
@@ -72,6 +73,8 @@ mod tests_listkeys;
 mod tests_live;
 #[cfg(test)]
 mod tests_plan;
+#[cfg(test)]
+mod tests_predict;
 #[cfg(test)]
 mod tests_rename;
 #[cfg(test)]

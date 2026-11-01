@@ -14,10 +14,13 @@
 //! through a spawn_agent call or a command, with the model each ran on
 //! (overview.go:596-622, b4fe1488).
 //!
-//! Not here yet: the artifacts and the pull request's section (no
-//! artifacts or PR reading in Rust), and what's still there of the
-//! places it wrote outside its scratch (the Projects place's cleaning
-//! doesn't read them yet).
+//! Its Pull requests (prs.go:813 prSectionLines, GitHub's word read with
+//! the list's readings) and Artifacts (overviewsections.go:63) come
+//! before its Session files; enter on an art: row opens the page, on a
+//! pr: row the PR sheet (rushmode.go:4243-4249, views.rs act).
+//!
+//! Not here yet: what's still there of the places it wrote outside its
+//! scratch (the Projects place's cleaning doesn't read them yet).
 //! Plugins' sections follow the session's own (rushmode.go:2452
 //! pluginOverview).
 
@@ -428,6 +431,92 @@ pub fn session_files(own: &[super::changes::FileChange], w: usize) -> Vec<(Line,
         right.spans.push(plain("  "));
         out.push((fit(super::paint::spread(name, right, w), w), String::new()));
     }
+    out
+}
+
+/// An agent's pull requests for its Overview and Changes: a heading, and
+/// a row for each that space opens (prSectionLines, prs.go:813). GitHub's
+/// word on them is read off the UI with the list's readings
+/// (projects_machine's refresh_open_prs); the transcript's stand in.
+pub fn pr_section(m: &Model, key: &str, w: usize) -> Vec<(Line, String)> {
+    let Some(a) = m.agents.iter().find(|a| a.key == key) else {
+        return Vec::new();
+    };
+    let prs = crate::screens::session_cards::finishcard::agent_prs(m, a);
+    if prs.is_empty() {
+        return Vec::new();
+    }
+    let sel = m.session.as_ref().map_or("", |v| v.sel.as_str());
+    let focused = !m.pane_idle;
+    let mut out = vec![
+        (Line::new(), String::new()),
+        (
+            section(
+                "Pull requests",
+                &format!("{} · space opens one", prs.len()),
+                w,
+                3,
+            ),
+            String::new(),
+        ),
+    ];
+    for (_, pr) in &prs {
+        let r = format!("pr:{}", pr.number);
+        let mut row = line([plain("    ")]);
+        join(
+            &mut row,
+            crate::screens::projects_machine::gh_pr_line(pr, w.saturating_sub(6)),
+        );
+        let row = if sel == r {
+            super::dock::picked1(row, w, focused)
+        } else {
+            fit(row, w)
+        };
+        out.push((row, r));
+    }
+    out
+}
+
+/// The pages the session published, for its Overview: a heading, then
+/// each page as the artifacts view draws it (overviewSections' Artifacts,
+/// overviewsections.go:63; artifacts.go:91 artifactLines).
+pub fn artifacts_section(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
+    let Some(v) = m.session.as_ref().filter(|v| v.key == key) else {
+        return Vec::new();
+    };
+    let (sel, focused, now) = (v.sel.clone(), !m.pane_idle, m.now);
+    let arts = {
+        let s = &m.session.as_ref().expect("the session").sess;
+        let k = &mut m
+            .kept
+            .get::<super::Core>()
+            .conns
+            .entry(key.to_string())
+            .or_default()
+            .arts;
+        k.of(s).to_vec()
+    };
+    if arts.is_empty() {
+        return Vec::new();
+    }
+    let mut out = vec![
+        (Line::new(), String::new()),
+        (
+            section(
+                "Artifacts",
+                &format!("{} published · enter opens one", arts.len()),
+                w,
+                3,
+            ),
+            String::new(),
+        ),
+    ];
+    // Past its own heading.
+    out.extend(
+        crate::screens::plugin_ui::artifacts::artifact_lines(&arts, w, now, &sel, focused)
+            .into_iter()
+            .skip(2),
+    );
     out
 }
 
