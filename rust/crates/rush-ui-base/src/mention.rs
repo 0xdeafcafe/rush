@@ -52,6 +52,12 @@ pub fn title_tag(title: &str) -> String {
     rush_room::community::tag(&one_line(title))
 }
 
+/// An agent's host id, when rush runs it: its handle is the animal name
+/// that id gives it.
+pub fn host_id(a: &Agent) -> Option<&str> {
+    a.rush.then_some(a.job.id.as_str())
+}
+
 /// An agent's handle, how it's tagged: a session rush runs has the fixed
 /// animal name it chirps under on the feed, any other agent the first
 /// few words of its title, with no title yet a nickname from its key

@@ -13,6 +13,7 @@
 //! is screens/accounts/look.rs's.
 
 use rush_core::adapter::{Kind, Level, Registry};
+use rush_core::agent::Agent;
 use rush_core::text::{Color, Line, Span};
 use rush_state::Profile;
 
@@ -364,4 +365,33 @@ pub fn not_installed(reg: &Registry) -> Line {
 /// (providers.go:149 showProfile).
 pub fn show_profile(cfg: &rush_state::Config, name: &str) -> bool {
     !name.is_empty() && !name.eq_ignore_ascii_case(&cfg.default_profile().name)
+}
+
+/// What a busy agent still runs (lanesLine).
+pub fn lanes_line(a: &Agent) -> String {
+    let (mut agents, mut workflows, mut other) = (0, 0, 0);
+    for b in &a.job.background {
+        if b.starts_with("agent\0") {
+            agents += 1;
+        } else if b.starts_with("workflow\0") {
+            workflows += 1;
+        } else {
+            other += 1;
+        }
+    }
+    let s = |n: usize| if n == 1 { "" } else { "s" };
+    let mut parts = Vec::new();
+    if workflows > 0 {
+        parts.push(format!("{workflows} workflow{} running", s(workflows)));
+    }
+    if agents > 0 {
+        parts.push(format!("{agents} subagent{} running", s(agents)));
+    }
+    if other > 0 {
+        parts.push(format!("{other} task{} running", s(other)));
+    }
+    if parts.is_empty() {
+        return "background work running".into();
+    }
+    parts.join(", ")
 }

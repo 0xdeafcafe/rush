@@ -29,11 +29,8 @@ struct HandleKey {
 #[derive(Default)]
 struct HandlesFor(Option<Vec<HandleKey>>);
 
-/// An agent's host id, when rush runs it: its handle is the animal name
-/// that id gives it.
-pub fn host_id(a: &Agent) -> Option<&str> {
-    a.rush.then_some(a.job.id.as_str())
-}
+// An agent's host id (the frame's, crate::mention) gives it its handle.
+pub use crate::mention::host_id;
 
 /// Tells the conversation which agent each tag names: its handle first,
 /// then its nickname and title where nothing else does. Only when what

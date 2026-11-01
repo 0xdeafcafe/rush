@@ -407,7 +407,7 @@ fn a_room_from_a_chat_opens_its_set_up() {
         })),
     );
     let s = m
-        .sheet_as::<crate::screens::social::roomsetup::RoomSetup>()
+        .sheet_as::<rush_ui_social::roomsetup::RoomSetup>()
         .expect("the room's set-up");
     assert_eq!(s.from, KEY);
     assert_eq!((s.ctx, s.fill, s.dir.as_str()), (1, true, "/src/chat"));

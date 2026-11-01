@@ -83,7 +83,7 @@ fn agent(key: &str, state: State) -> Agent {
 }
 
 fn model(agents: Vec<Agent>) -> (Model, Arc<Fake>) {
-    let mut m = crate::screens::social::feed::tests::model(120, 30);
+    let mut m = crate::kit::model(120, 30);
     let reg = Registry::new();
     reg.register(Movable);
     reg.register(Stuck);

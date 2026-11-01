@@ -16,13 +16,16 @@ pub mod accounts;
 pub mod bars;
 pub mod cmdbar;
 pub mod list_extras;
-pub mod plugin_ui;
-pub mod projects_machine;
 pub mod session_cards;
 pub mod session_core;
+// Projects and the machine: rush-ui-projects-machine, at the old path.
+pub use rush_ui_projects_machine as projects_machine;
 // Settings and Harnesses: rush-ui-settings, at the old path.
 pub use rush_ui_settings as settings;
-pub mod social;
+// The plugin screens: rush-ui-plugin-ui, at the old path.
+pub use rush_ui_plugin_ui as plugin_ui;
+// The social group is a crate of its own (rush-ui-social); its old path stays.
+pub use rush_ui_social as social;
 
 /// Every group's screens, registered in this order.
 pub(crate) fn register(x: &mut Ext) {
@@ -33,6 +36,16 @@ pub(crate) fn register(x: &mut Ext) {
     projects_machine::register(x);
     settings::register(x);
     accounts::register(x);
+    // Settings › Plugins asks the broker through this window's hooks
+    // client (settings_plugins.go:192, :456); the views panel draws what a
+    // session runs through session_core.
+    settings::plugins::provide(settings::plugins::Broker {
+        running: plugin_ui::running,
+        set_setting: plugin_ui::set_plugin_setting,
+    });
+    plugin_ui::provide_panel(plugin_ui::PanelHost {
+        panel_subs: session_core::panelsubs::rows,
+    });
     plugin_ui::register(x);
     social::register(x);
     // After the Session's own: the agent header goes over its rows.
@@ -78,6 +91,12 @@ fn calls() -> Calls {
         guard_header: Some(accounts::guard::header_line),
         limits_fetched: Some(bars::fetch::fetched_once),
         machine_read: Some(projects_machine::machine_read),
+        ask_close: Some(cmdbar::stops::ask_close),
+        open_pr: Some(list_extras::listkeys::open_pr),
+        work_agents: Some(list_extras::work::work_agents),
+        work_plan: Some(list_extras::work::work_plan),
+        next_start: Some(accounts::setup::next_start),
+        start_profile: Some(accounts::rows::start_profile),
         plugin_status: Some(plugin_ui::hooks::plugin_status),
         view_summary: Some(|m, a| {
             plugin_ui::views::read::summary_of(m, a)
@@ -139,6 +158,22 @@ fn calls() -> Calls {
         hosted_pin: Some(crate::hosted::pin),
         hosted_keeps_open: Some(crate::hosted::keeps_open),
         hosted_set_away: Some(crate::hosted::set_away),
+        neighbour: Some(list_extras::neighbour),
+        start_routes: Some(accounts::setup::start_routes),
+        start_defaults: Some(accounts::setup::start_defaults),
+        models: Some(accounts::setup::models),
+        load_models: Some(accounts::startsheet::load_models),
+        config_as: Some(session_core::start::config_as),
+        verdicts_back: Some(session_cards::discuss::verdicts_back),
+        view_name: Some(session_core::views::view_name),
+        running_any: Some(session_core::running::any),
+        clear_hover: Some(|m, key| {
+            let hover = &mut session_core::conn(m, key).vs.hover_ref;
+            let lit = !hover.is_empty();
+            hover.clear();
+            lit
+        }),
+        send_box: Some(session_core::keys::send),
     }
 }
 
@@ -153,12 +188,39 @@ fn act(m: &mut Model, a: Act) {
         Act::OpenKeyHelp => cmdbar::keyhelp::open(m),
         Act::OpenRoom(key) => social::rooms::open_room(m, &key),
         Act::PickInProjects(dir) => projects_machine::pick_in_projects(m, &dir),
+        Act::WatchHosts { rebuilt_said } => {
+            // Said already: the hosts' look doesn't say it again
+            // (model.go:1288).
+            if rebuilt_said {
+                m.kept::<settings::State>().updates.rebuilt_said = true;
+            }
+            settings::updates::watch_hosts(m, false, false);
+        }
         Act::RefetchUsage => {
             accounts::logins::fetch_usage(m);
             accounts::logins::find_logins(m);
             bars::fetch::fetch_now(m);
         }
         Act::ForgetMemory(key) => session_core::memory::forget(m, &key),
+        Act::ToggleDone(key) => cmdbar::stops::toggle_done(m, &key),
+        Act::RebuildKeys => settings::keys::rebuild(m),
+        Act::OpenRun { key, r } => {
+            let workflow = m
+                .session
+                .as_ref()
+                .is_some_and(|v| session_core::workflow::is_workflow_ref(&v.sess, &r));
+            if workflow {
+                session_core::subview::open_workflow(m, &key, &r);
+            } else if let Some(id) = r.strip_prefix("run:") {
+                let id = id.to_string();
+                session_core::subview::pick_run(m, &key, &id);
+            } else if r.starts_with("job:")
+                && let Some(v) = m.session.as_mut()
+            {
+                v.sel = r;
+            }
+        }
+        Act::SendAs { key, text } => session_core::keys::send_as(m, &key, &text),
     }
 }
 

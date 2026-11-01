@@ -115,7 +115,7 @@ fn a_chip_opens_in_place() {
 /// ctrl+g there edits the paste.
 #[test]
 fn the_agents_box_folds_pastes() {
-    let mut m = crate::screens::social::feed::tests::model(120, 30);
+    let mut m = crate::kit::model(120, 30);
     m.paste("  fix   the\n");
     assert_eq!(m.input.string(), "fix the");
     m.input.clear();

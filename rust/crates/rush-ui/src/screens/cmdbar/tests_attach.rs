@@ -162,7 +162,7 @@ fn agent(key: &str) -> Agent {
 }
 
 fn model(agents: Vec<Agent>) -> (Model, Jobs, Arc<Fake>) {
-    let mut m = crate::screens::social::feed::tests::model(120, 30);
+    let mut m = crate::kit::model(120, 30);
     let jobs = Jobs::new();
     let reg = Registry::new();
     reg.register(jobs.clone());

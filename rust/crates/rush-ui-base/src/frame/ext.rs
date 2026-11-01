@@ -226,6 +226,9 @@ pub enum Act {
     OpenRoom(String),
     /// Projects at a project's folder (projects_machine pick_in_projects).
     PickInProjects(String),
+    /// The hosts are watched again after an update (settings/updates.rs
+    /// watch_hosts); with rebuilt_said, an installed one counts as said.
+    WatchHosts { rebuilt_said: bool },
     /// The limits of every account asked for again, and the logins looked
     /// for (accounts logins::fetch_usage and find_logins, bars
     /// fetch::fetch_now).
@@ -233,6 +236,18 @@ pub enum Act {
     /// An open session's memory read again, by its key
     /// (session_core/memory.rs forget).
     ForgetMemory(String),
+    /// An agent put away, or brought back from there, by its key
+    /// (cmdbar/stops.rs toggle_done).
+    ToggleDone(String),
+    /// Keybindings put in force again, plugins' commands as they are now
+    /// (settings/keys.rs rebuild).
+    RebuildKeys,
+    /// A run clicked in the views panel: a workflow's agents, a run picked
+    /// in the subagents view, or a task picked (session_core/subview.rs).
+    OpenRun { key: String, r: String },
+    /// The agent sent text as if typed, in a session rush runs
+    /// (session_core/keys.rs send_as).
+    SendAs { key: String, text: String },
 }
 
 impl Model {
@@ -349,6 +364,24 @@ calls! {
     /// The machine's processes have been read (projects_machine
     /// machine_read).
     machine_read("projects_machine"): fn(&Model) -> bool,
+    /// Always asked on an agent: hide, stop, restart or delete
+    /// (cmdbar/stops.rs ask_close).
+    ask_close("cmdbar"): fn(&mut Model, Option<Agent>) -> Out,
+    /// An agent's pull request opened, or that there's none
+    /// (list_extras/listkeys.rs open_pr).
+    open_pr("list_extras"): fn(&mut Model, Option<&Agent>) -> Out,
+    /// The sessions worth reading, by index (list_extras/work.rs
+    /// work_agents).
+    work_agents("list_extras"): fn(&Model) -> Vec<usize>,
+    /// How far through its plan an agent is: (tasks planned, tasks ticked)
+    /// from what the work page read (list_extras/work.rs WorkState).
+    work_plan("list_extras"): fn(&Model, &str) -> (i64, i64),
+    /// What the next session starts as in a folder (accounts/setup.rs
+    /// next_start).
+    next_start("accounts"): fn(&Model, &str) -> crate::accounts::StartOver,
+    /// The profile of yours a folder starts with (accounts/rows.rs
+    /// start_profile).
+    start_profile("accounts"): fn(&Model, &str) -> rush_state::Profile,
     /// What plugins put on an agent's row (plugin_ui/hooks.rs
     /// plugin_status).
     plugin_status("plugin_ui"): fn(&Model, &str) -> Line,
@@ -462,6 +495,37 @@ calls! {
     hosted_keeps_open("hosted"): fn(&Model) -> bool,
     /// The keys come off a hosted view's box (hosted.rs set_away).
     hosted_set_away("hosted"): fn(&mut Model),
+    /// The agent row after a key in its section, or the one before ("" when
+    /// alone): list_extras/mod.rs neighbour.
+    neighbour("list_extras"): fn(&Model, &str) -> String,
+    /// The ways a session can start here now (accounts/setup.rs
+    /// start_routes).
+    start_routes("accounts"): fn(&Model) -> Vec<crate::accounts::Route>,
+    /// Agent k as Settings says it starts (accounts/setup.rs
+    /// start_defaults).
+    start_defaults("accounts"): fn(&Model, &str) -> crate::accounts::StartOver,
+    /// What agent k can start on (accounts/setup.rs models).
+    models("accounts"): fn(&Model, &str) -> Vec<rush_core::adapter::Choice>,
+    /// Agent k's models read from its home off the UI thread
+    /// (accounts/startsheet.rs load_models).
+    load_models("accounts"): fn(&mut Model, &str),
+    /// A new session in a folder as a start says, with what Settings gives
+    /// its agent for the rest (session_core/start.rs config_as).
+    config_as("session_core"): fn(&Model, &crate::accounts::StartOver, &str) -> crate::host::Start,
+    /// The rooms as just read: each finished room on a chat hands its
+    /// verdict back (session_cards/discuss.rs verdicts_back).
+    verdicts_back("session_cards"): fn(&mut Model, Vec<rush_room::room::Summary>),
+    /// The view a session shows (session_core/views.rs view_name).
+    view_name("session_core"): fn(&Model, &str) -> &'static str,
+    /// Whether a session has runs or tasks the dock would show
+    /// (session_core/running.rs any).
+    running_any("session_core"): fn(&mut Model, &str) -> bool,
+    /// Clears the conversation's lit row under the pointer; whether one
+    /// was lit (session_core views ViewState hover_ref).
+    clear_hover("session_core"): fn(&mut Model, &str) -> bool,
+    /// What's in a session's box sent, or held for plugins to answer
+    /// first (session_core/keys.rs send).
+    send_box("session_core"): fn(&mut Model, &str, bool) -> Out,
 }
 
 /// State screens keep between calls, one value per type, made on first

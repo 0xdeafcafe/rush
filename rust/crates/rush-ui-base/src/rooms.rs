@@ -12,6 +12,46 @@ use rush_room::room::{Lister, Summary};
 
 use crate::model::Model;
 
+/// A room's set-up on a chat, for the room screens to open: its topic,
+/// the chat's exchanges, how many of the latest go in as context, where
+/// it runs, a status to lead the context, and whether the verdict fills
+/// the box when it comes (roomSetup's fields chatRoom sets).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RoomAsk {
+    pub topic: String,
+    pub from: String,
+    pub turns: Vec<String>,
+    pub ctx: usize,
+    pub dir: String,
+    pub head: String,
+    pub fill: bool,
+}
+
+/// The context chosen: the chat's latest ctx exchanges, the status
+/// first when there is one (brief).
+pub fn brief(r: &RoomAsk) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    if !r.head.is_empty() {
+        parts.push(&r.head);
+    }
+    parts.extend(
+        r.turns[r.turns.len().saturating_sub(r.ctx)..]
+            .iter()
+            .map(String::as_str),
+    );
+    parts.join("\n---\n")
+}
+
+/// What the context count means (ctxWords).
+pub fn ctx_words(n: usize, total: usize) -> String {
+    match (n, total) {
+        (_, 0) => "the chat has nothing to give yet".into(),
+        (0, _) => "the topic alone".into(),
+        (1, _) => "the latest exchange of the chat".into(),
+        _ => format!("the latest {n} of the chat's {total} exchanges"),
+    }
+}
+
 /// A room's row in the list is keyed by its id after this.
 pub const ROOM_KEY_PREFIX: &str = "room:";
 

@@ -23,6 +23,24 @@ use crate::frame::Out;
 use crate::look::agent_name;
 use crate::model::Model;
 
+/// A provider id (claude, claude-key, ollama) and the agents here that
+/// run it (route).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Route {
+    pub id: String,
+    pub kinds: Vec<String>,
+}
+
+/// How agent k is paid for as provider id: by key when id is a key, or k
+/// runs only on one (billingOf).
+pub fn billing_of(reg: &Registry, id: &str, k: &str) -> String {
+    if reg.billed(id).1 || reg.key_only(k) {
+        BILLING_KEY.into()
+    } else {
+        String::new()
+    }
+}
+
 /// What a session starts as, over what its folder's profile and Settings
 /// say (startOver).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

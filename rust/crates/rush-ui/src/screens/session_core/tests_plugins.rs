@@ -76,7 +76,11 @@ fn what_goes_past_plugins() {
         ("carry on\\", false, false),
         ("carry on\\", true, true),
     ] {
-        assert_eq!(intercept::message(raw, now), want, "{raw:?} now={now}");
+        assert_eq!(
+            intercept::message(crate::screens::cmdbar::fleetslash::is_hash_cmd, raw, now),
+            want,
+            "{raw:?} now={now}"
+        );
     }
     assert_eq!(intercept::clip_log("short"), "short");
     let long = "é".repeat(301);

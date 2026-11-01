@@ -346,34 +346,8 @@ fn offscreen(placed: &[Placed], top: usize, h: usize) -> (usize, usize) {
     (above, below)
 }
 
-/// What a busy agent still runs (lanesLine).
-pub fn lanes_line(a: &Agent) -> String {
-    let (mut agents, mut workflows, mut other) = (0, 0, 0);
-    for b in &a.job.background {
-        if b.starts_with("agent\0") {
-            agents += 1;
-        } else if b.starts_with("workflow\0") {
-            workflows += 1;
-        } else {
-            other += 1;
-        }
-    }
-    let s = |n: usize| if n == 1 { "" } else { "s" };
-    let mut parts = Vec::new();
-    if workflows > 0 {
-        parts.push(format!("{workflows} workflow{} running", s(workflows)));
-    }
-    if agents > 0 {
-        parts.push(format!("{agents} subagent{} running", s(agents)));
-    }
-    if other > 0 {
-        parts.push(format!("{other} task{} running", s(other)));
-    }
-    if parts.is_empty() {
-        return "background work running".into();
-    }
-    parts.join(", ")
-}
+// What a busy agent still runs (lanesLine): the base's, at its old path.
+pub use crate::look::lanes_line;
 
 /// An agent's spinner frame: its own where its program has one
 /// (convo.Spin).
