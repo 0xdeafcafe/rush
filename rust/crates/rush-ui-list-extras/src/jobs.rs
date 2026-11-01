@@ -615,6 +615,16 @@ fn card_row(
     rows
 }
 
+/// Whose a task is, then a dim "·" before what comes after it, so the
+/// agent's type and the task's words don't run together.
+fn join_who(l: &mut Line, who: Line) {
+    if who.spans.is_empty() {
+        return;
+    }
+    join(l, who);
+    l.spans.push(sp(" · ", FAINT));
+}
+
 /// No one's: the session's own task, at home.
 pub fn nobody(_: &Job) -> Line {
     Line::new()
@@ -1114,7 +1124,7 @@ fn job_block(
             spb(format!("{:<8}", c.kind), TEXT),
             plain(" "),
         ]);
-        join(&mut left, who);
+        join_who(&mut left, who);
         join(&mut left, segs(&c.body));
         let keep = (w as isize - right.width() as isize - 2).max(20) as usize;
         left = rush_draw::truncate_line(&left, keep, "…");
@@ -1128,7 +1138,7 @@ fn job_block(
             spb(format!("{kind:<8}"), TEXT),
             plain(" "),
         ]);
-        join(&mut left, who);
+        join_who(&mut left, who);
         left.spans.push(sp(
             rush_draw::truncate(&job_label(s, j), room as usize, "…").into_owned(),
             SUB,
