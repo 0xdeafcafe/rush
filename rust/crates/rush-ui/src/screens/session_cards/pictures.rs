@@ -6,6 +6,10 @@
 //! thumbSlots :54, Preview :93, readThumb :190, shrinkTo :225, halfBlocks
 //! :261, sameish :295) and photon's termimg (Cell, Fit).
 //!
+//! It makes the conversation's too (rush_convo::pictures, start): a
+//! step's thumbnail and your message's images, every turn drawn again
+//! as one's made (picture.go:76 lookupsGen).
+//!
 //! Gap (pictures.go): Kitty pictures, and asking the terminal its cell
 //! size, wait on rush-draw writing raw output; every terminal gets the
 //! blocks Go draws where Kitty isn't there, on Go's 10×20 cell.
@@ -15,6 +19,9 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 use image::imageops::FilterType;
 use rush_core::text::{Color, Line, Span, Style};
+
+use rush_convo::pictures::Look;
+use rush_draw::Sender;
 
 use crate::model::Model;
 use crate::worker::Note;
@@ -36,6 +43,7 @@ struct Key {
     path: String,
     w: usize,
     h: usize,
+    look: Look,
 }
 
 /// None while it's being made; Some(empty) when it can't be read.
@@ -67,15 +75,41 @@ fn with_slot<T>(f: impl FnOnce() -> T) -> T {
     v
 }
 
+/// Where the conversation's pictures, made, wake the UI: the loop's, once
+/// it runs (start).
+static WAKE: Mutex<Option<Sender<Note>>> = Mutex::new(None);
+
+/// Has the conversation draw its pictures (rush_convo::pictures), made
+/// off the UI on the loop's thread once m has one, at once without.
+pub fn start(m: &Model) {
+    if let Some(tx) = m.sender() {
+        *WAKE.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx.lane(1));
+    }
+    rush_convo::pictures::set_maker(make_for_convo);
+}
+
+/// The conversation's maker: as picture, on the loop it was started with.
+fn make_for_convo(path: &str, w: usize, h: usize, look: Look) -> Option<Arc<Vec<Line>>> {
+    let tx = WAKE.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    make(tx, path, w, h, look)
+}
+
 /// The image at path fitted to w cells by h rows: its rows once made
 /// (none when it can't be read), None until then. It never decodes on
 /// the UI thread: the first ask starts the making, and the frame after
 /// it's made has it. With no loop (tests, --render) it's made at once.
 pub fn picture(m: &Model, path: &str, w: usize, h: usize) -> Option<Arc<Vec<Line>>> {
+    make(m.sender(), path, w, h, Look::Fit)
+}
+
+/// The picture look asks for: fitted in quarter blocks (Picture), or a
+/// step's thumbnail in half blocks (thumbOf).
+fn make(tx: Option<Sender<Note>>, path: &str, w: usize, h: usize, look: Look) -> Slot {
     let k = Key {
         path: path.to_string(),
         w,
         h,
+        look,
     };
     {
         let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
@@ -83,33 +117,35 @@ pub fn picture(m: &Model, path: &str, w: usize, h: usize) -> Option<Arc<Vec<Line
             return s.clone();
         }
         if c.len() >= KEEP {
-            c.clear(); // made again as they're drawn
+            // Made again as they're drawn; those being made stay, so
+            // they're not made twice.
+            c.retain(|_, s| s.is_none());
         }
         c.insert(k.clone(), None);
     }
-    let Some(tx) = m.sender() else {
-        let rows = Arc::new(draw_picture(path, w, h));
+    let draw = move |p: &str| match look {
+        Look::Fit => draw_picture(p, w, h),
+        Look::Thumb => preview(p, w, h, false),
+    };
+    let Some(tx) = tx else {
+        let rows = Arc::new(draw(path));
         put(k, rows.clone());
         return Some(rows);
     };
     let p = path.to_string();
+    let key = k.clone();
     let made = std::thread::Builder::new()
         .name("rush-picture".into())
         .spawn(move || {
-            let rows = with_slot(|| draw_picture(&p, w, h));
-            put(k, Arc::new(rows));
+            let rows = with_slot(|| draw(&p));
+            put(key, Arc::new(rows));
+            // Every turn is drawn again with it (lookupsGen).
+            rush_convo::pictures::made();
             tx.lane(1)
                 .send(Note::Apply(Box::new(|_| crate::frame::Out::Draw)));
         });
     if made.is_err() {
-        put(
-            Key {
-                path: path.to_string(),
-                w,
-                h,
-            },
-            Arc::new(Vec::new()),
-        );
+        put(k, Arc::new(Vec::new()));
     }
     None
 }
@@ -403,60 +439,9 @@ fn quad_cell(q: &[[i32; 3]; 4]) -> Span {
     )
 }
 
-/// Pictures side by side, gap cells apart, wrapping to w cells; each row
-/// of them top-aligned, a blank row between. Where each landed: x, y,
-/// width and height (Tile).
-pub fn tile(pics: &[Vec<Line>], w: usize, gap: usize) -> (Vec<Line>, Vec<[usize; 4]>) {
-    let pw = |p: &Vec<Line>| p.first().map_or(0, Line::width);
-    let mut rows: Vec<Line> = Vec::new();
-    let mut at = vec![[0usize; 4]; pics.len()];
-    let mut group: Vec<usize> = Vec::new();
-    let mut x = 0;
-    let flush = |rows: &mut Vec<Line>, group: &mut Vec<usize>| {
-        if !rows.is_empty() {
-            rows.push(Line::new()); // a row of them apart from the last
-        }
-        let h = group.iter().map(|&i| pics[i].len()).max().unwrap_or(0);
-        for y in 0..h {
-            let mut l = Line::new();
-            for (k, &i) in group.iter().enumerate() {
-                if k > 0 {
-                    l.spans.push(Span::plain(" ".repeat(gap)));
-                }
-                match pics[i].get(y) {
-                    Some(r) => l.spans.extend(r.spans.iter().cloned()),
-                    None => l.spans.push(Span::plain(" ".repeat(pw(&pics[i])))),
-                }
-            }
-            rows.push(l);
-        }
-        group.clear();
-    };
-    for (i, p) in pics.iter().enumerate() {
-        if p.is_empty() {
-            continue;
-        }
-        let n = pw(p);
-        if !group.is_empty() && x + gap + n > w {
-            flush(&mut rows, &mut group);
-            x = 0;
-        }
-        if !group.is_empty() {
-            x += gap;
-        }
-        let mut y = rows.len();
-        if y > 0 {
-            y += 1; // the blank row flush puts first
-        }
-        at[i] = [x, y, n, p.len()];
-        group.push(i);
-        x += n;
-    }
-    if !group.is_empty() {
-        flush(&mut rows, &mut group);
-    }
-    (rows, at)
-}
+/// Pictures side by side, gap cells apart, wrapping to w cells (Tile):
+/// the conversation's, which draws them too.
+pub use rush_convo::pictures::tile;
 
 #[cfg(test)]
 mod tests {

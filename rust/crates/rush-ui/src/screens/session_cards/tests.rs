@@ -759,7 +759,7 @@ fn question_full_view_and_clicks() {
 
     m.cards().conns.get_mut("k").unwrap().q_cursor = 0;
     draw(&mut m);
-    let top = m.session_dock_top;
+    let (top, _, _) = super::card_top(&m, "k");
     let c = &m.cards().conns["k"];
     let row = c
         .q_hit
@@ -768,7 +768,7 @@ fn question_full_view_and_clicks() {
         .map(|(r, _)| *r)
         .min()
         .unwrap();
-    let y = top + c.card_off + row;
+    let y = top as usize + row;
     m.cards().conns.get_mut("k").unwrap().q_cursor = 1;
     let click = |m: &mut Model| {
         m.mouse_event(&crate::frame::Mouse {

@@ -30,6 +30,7 @@ pub use care::{
     CareStart, CareStarter, StartCare, care_started, start_with_hosts as care_start_with_hosts,
 };
 pub use place::{pick_in_projects, projects_sel};
+pub(crate) use view::gh_pr_line;
 
 /// Adds this group's places, pages, sheets' openers, keys, hooks and
 /// commands to x (frame/ext.rs).
@@ -43,6 +44,7 @@ pub fn register(x: &mut Ext) {
 /// measured (scan::on_worktrees).
 fn on_fleet(m: &mut Model) {
     scan::refresh(m);
+    scan::refresh_open_prs(m);
     // What agents left running is looked for with every reading, wherever
     // rush is (snapload.go:86), only with a loop to end it off the UI.
     if m.sender().is_some() {

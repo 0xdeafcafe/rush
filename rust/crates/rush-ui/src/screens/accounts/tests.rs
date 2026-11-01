@@ -1642,3 +1642,45 @@ fn a_switch_to_a_stored_login_runs_what_follows_once_done() {
     then(&mut m);
     assert!(RAN.load(Ordering::Relaxed), "once it is");
 }
+
+/// The Usage tab ends with every account side by side: its windows,
+/// today's spend and what runs on it, this agent's marked ◂
+/// (infosheet.go:553).
+#[test]
+fn usage_tab_lists_every_account() {
+    let (mut m, d) = model(120, 40);
+    opened(&mut m, d.path());
+    let dir = m.agents[0].acct.dir.clone();
+    let win = |label: &str, percent: f64| rush_core::usage::Window {
+        label: label.into(),
+        percent,
+        ..Default::default()
+    };
+    let mut mine = rush_fleet::AccountView {
+        today: 98.0,
+        live: 2,
+        ..Default::default()
+    };
+    mine.folder.name = "default".into();
+    mine.folder.config_dir = dir;
+    mine.quota.windows = vec![win("7d", 67.0)];
+    let mut work = rush_fleet::AccountView {
+        today: 1.5,
+        ..Default::default()
+    };
+    work.folder.name = "work".into();
+    work.folder.config_dir = "/elsewhere".into();
+    work.quota.windows = vec![win("5h", 12.0), win("7d", 90.0)];
+    m.accounts = vec![mine, work];
+    open_info(&mut m, USAGE);
+    assert!(m.sheet_as::<InfoSheet>().unwrap().shown.contains(&USAGE));
+    m.sheet_as::<InfoSheet>().unwrap().tab = USAGE;
+    let f = screen(&mut m);
+    for want in [
+        "  Every account",
+        "default ◂      7d  67%  ·  $98 today  ·  2 running",
+        "work           5h  12%  ·  7d  90%  ·  $1.50 today",
+    ] {
+        assert!(f.contains(want), "no {want:?} in\n{f}");
+    }
+}

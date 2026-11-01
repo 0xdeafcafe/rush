@@ -34,6 +34,10 @@ pub struct Model {
     pub reg: Registry,
     pub agents: Vec<Agent>,
     pub roots: Vec<String>,
+    /// Each account's folder with its usage, what its sessions spent
+    /// today and how many run, as the list's reading had them (Go's
+    /// m.snap.Accounts).
+    pub accounts: Vec<rush_fleet::AccountView>,
     pub previews: HashMap<String, Preview>,
     pub cfg: Config,
     pub now: Ms,
@@ -163,6 +167,7 @@ impl Model {
             reg: global().clone(),
             agents: Vec::new(),
             roots: Vec::new(),
+            accounts: Vec::new(),
             previews: HashMap::new(),
             cfg: Config::default(),
             now: now(),
@@ -250,6 +255,7 @@ impl Model {
         self.agents = f.agents;
         crate::hosted::snap(self);
         self.roots = f.roots;
+        self.accounts = f.accounts;
         // Forget agents that are gone.
         let keys: HashSet<&str> = self.agents.iter().map(|a| a.key.as_str()).collect();
         self.asked.retain(|k, _| keys.contains(k.as_str()));

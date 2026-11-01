@@ -65,6 +65,8 @@ pub struct Fleet {
     pub previews: HashMap<String, Preview>,
     /// Their transcripts have been priced.
     pub priced: bool,
+    /// Each account's usage, today's spend and running count.
+    pub accounts: Vec<rush_fleet::AccountView>,
 }
 
 /// While something is live, how often discovery reads again.
@@ -229,6 +231,7 @@ impl Discovery {
             roots,
             previews,
             priced: price,
+            accounts: snap.accounts,
         }
     }
 
