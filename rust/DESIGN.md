@@ -498,7 +498,10 @@ on every frame. Go retains about 22 MiB for the same.
    scanning (incremental from the last offset), previews, the open
    transcript's tail (its last 2 MB first; a longer one is then read
    whole on the same worker and takes the end's place, its turns'
-   refs renumbered so nothing on screen moves: Go's twopass.go). Each
+   refs renumbered so nothing on screen moves: Go's twopass.go; that
+   worker also lays out the whole's last 400 rows as the view last drew
+   and works out its edits, so the frame that swaps it in draws little:
+   Go's warmed, rushmode.go:2064). Each
    watches files with `rush_sys::fswait::Watcher`
    (kqueue on macOS; the one file watcher in rush: `watch` before reading,
    `wait` blocks until a change, a `Stop` or a timeout; a path not there
@@ -602,6 +605,19 @@ given back, and the binary runs the installed rush in its place
 (`rush_sys::selfexe::path`, exec), as Go's main.go:290-300. While a view
 runs it's listed for `rush reload` (`rush_state::instances`), whose
 SIGUSR1 is a #reload; a hosted view isn't listed.
+
+## The list kept between runs (Rust-only)
+
+rush opens on the list as it last read it (rush-ui `listcache.rs`): each
+priced reading is saved to rush's cache (`list-kept.json`, at most once a
+minute and on quitting), read on a thread as rush starts, and drawn in the
+first frames until the first live reading replaces it whole. Until then
+its rows are drawn faint, so a row that was working last time doesn't
+claim to be now, the header still says "costing transcripts…", and
+nothing acts on it: no host is dialled and no reading's hooks run. One
+from another version or older than a week isn't shown. Measured on the
+bench copy (872 agents): the list on screen 31-36 ms after start, against
+1.35 s for the first reading.
 
 ## Following (Rust-only)
 
@@ -1109,10 +1125,12 @@ is made. Everything below is in `rush_ui::frame`.
   at second 8 of 15 working, 25 of 45 idle) rides the tick and never
   wakes rush itself. His mix uses `mul_add`, as Go's compiler fuses it on
   arm64, so every cell matches Go's (a hashed dump of every frame).
-- **Gaps.** Colours are still the dark ground's constants: `ground.rs`
-  (photon's theme), `headerwash.rs` and `scheme.rs` (the terminal's
-  colour and mode 2031 reports, parsed) are ported but the reports
-  aren't asked for, as rush-draw hands the UI keys, not raw replies.
+- **Gaps.** Colours are written as the dark ground's constants and
+  moved onto the ground picked as rush-draw paints (`ground.rs`,
+  photon's theme). For Theme "match terminal" rush-draw asks the
+  terminal's colours (OSC 10, 11, then DA1) as it takes the terminal,
+  before the input thread reads; they aren't asked again on focus or
+  a mode 2031 report, as rush-draw hands the UI keys, not raw replies.
   Handing the terminal to `$EDITOR` (Go's `editorCmd`) waits on
   rush-draw pausing its input reader: every $EDITOR use goes through
   `session_core::memedit::edit_then(m, path, done)`, which runs the
@@ -1234,7 +1252,8 @@ writes to the real `~/.config`, `~/.claude`, `~/.codex`,
 `~/Library/Caches/{agtop,rush}`, unix-socket connects there and to Claude
 Code's daemon for the real `~/.claude`, exec of the
 user's claude, codex and rush, the keychain, and signals outside the sandbox: any
-denial shows in `log show --predicate 'sender == "Sandbox"'`. Under it,
+denial shows in `log show --predicate 'sender == "Sandbox"'`. The profile
+needs `-D CLAUDE_DAEMON` and `-D CLAUDE_DAEMON_REAL` (sbtest.sh passes them). Under it,
 these tests fail for the sandbox's own reasons (it won't run setuid `ps`
 nor set a setuid bit):
 
@@ -1270,6 +1289,18 @@ Go rush is gone from the tree; its last version is the `go-final` tag
   then the frame — in µs, instructions, bytes and allocations per frame.
   Then the same with ctrl+k's bar open over it. `-- profile` draws the
   list for 20 s instead, for `sample`; `-- profile-bar` the bar.
+- A conversation keeps what's drawn, not what was sent: a step's
+  structured result only for the keys something reads
+  (`rush_convo::model::RESULT_KEYS`; no file contents, shell streams or
+  MCP screenshots), and a shell's streams once when its output is them
+  run together. The 125 MB "Scoping Trace Sharing" transcript read whole
+  retains 12.7 MiB (30.2 before, 2026-10-30); its open TUI's footprint
+  went 231-255 → 185-197 MB (the list and ctrl+k's held searches are
+  most of the rest). ctrl+k lets go of what it held on Go's two-minute
+  timer, not at the next search: 2-4 minutes after it, the live heap
+  falls 124 → 79 MiB and the footprint 180 → 125 MB. A long
+  conversation closed or replaced is freed on a thread of its own and
+  its pages given back (`rush_sys::mem::let_go`).
 - Footprint: `/usr/bin/footprint -p <pid>` idle on the list, and with the
   largest transcript under `~/.claude/projects` open; side by side with Go.
 - Idle: `top -l` CPU and wakeups over 60 s with nothing changing.

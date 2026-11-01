@@ -1605,3 +1605,53 @@ fn catalog_clicks_move_the_keys_between_the_panes() {
     assert!(dialog(&m).harness_inside);
     assert_eq!(dialog(&m).cursor, row, "the same row of the detail");
 }
+
+/// Keys › Commands lists rush's # commands as Go's fleetCommands, 51 of
+/// them in its order, and none of the aliases that stand for one
+/// (keybind.go:32-39; sweep 3 P3-10).
+#[test]
+fn keys_lists_the_commands_without_their_aliases() {
+    let (mut m, _d) = model(140, 50);
+    keys::set_keys(&mut m, rush_keymap::File::default());
+    let km = keys::key_map(&m);
+    let names: Vec<&str> = km
+        .actions()
+        .into_iter()
+        .filter_map(|a| a.id.strip_prefix("command:"))
+        .collect();
+    assert_eq!(names.len(), 51, "{names:?}");
+    assert_eq!(names[..3], ["expand", "collapse", "model"]);
+    for alias in ["preset", "profile", "agent", "net", "afk"] {
+        assert!(!names.contains(&alias), "{alias}");
+    }
+}
+
+/// A `rush --soak` copy has workers and may lead, but the icon is only
+/// the interactive rush's to start and stop (MenuBarOwner, set by run):
+/// as Go's m.offline in startMenuBar (model.go:603).
+#[test]
+fn the_menu_bar_is_only_the_interactive_rushs() {
+    let (mut m, _d) = model(140, 50);
+    let lp: rush_draw::Loop<crate::worker::Note> = rush_draw::Loop::new();
+    m.tx = Some(lp.sender());
+    m.follows = false;
+    config_mut(&mut m).menu_bar = true;
+    sheets::start_menu_bar(&mut m);
+    sheets::menu_bar_changed(&mut m, false);
+    sheets::menu_bar_turned(&mut m, true);
+    assert!(
+        m.kept::<sheets::Asked>().0.is_empty(),
+        "soak-like: left alone"
+    );
+    m.kept::<sheets::MenuBarOwner>().0 = true;
+    sheets::start_menu_bar(&mut m);
+    sheets::menu_bar_turned(&mut m, false);
+    assert_eq!(m.kept::<sheets::Asked>().0, [true, false]);
+    m.follows = true;
+    sheets::menu_bar_turned(&mut m, true);
+    assert_eq!(
+        m.kept::<sheets::Asked>().0.len(),
+        2,
+        "a follower: left alone"
+    );
+}

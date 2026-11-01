@@ -268,6 +268,33 @@ fn layout_preview_says_whats_below() {
     }
 }
 
+/// The preview is drawn at the width it's shown at (the list's, when
+/// that's less), so it has that width's columns, not wider ones cut short
+/// with "…" (view.go:1526 listPreview: min(listW, w)).
+#[test]
+fn layout_preview_is_the_lists_width() {
+    let (mut m, _d) = model();
+    twelve_working(&mut m);
+    m.w = 160;
+    super::interface::refresh_preview(&mut m);
+    let secs = super::interface::sections(&m);
+    let layout = super::form::flat(&secs)
+        .into_iter()
+        .find(|s| s.label == "Layout")
+        .expect("Layout");
+    let p = layout.preview.as_ref().expect("a preview");
+    // Inline (the dialog's width) and in the help sheet (88 wide), each at
+    // its own width: TIME stays the header's last column, never cut.
+    for w in [m.w - 6, 88] {
+        let lines: Vec<String> = p(w, 12).iter().map(|l| l.plain()).collect();
+        assert!(
+            lines[1].contains("TIME") && !lines[1].contains('…'),
+            "at {w}:\n{}",
+            lines.join("\n")
+        );
+    }
+}
+
 /// Twelve agents working in one checkout: more than a preview has room for.
 fn twelve_working(m: &mut Model) {
     let agents: Vec<rush_core::agent::Agent> = (0..12)

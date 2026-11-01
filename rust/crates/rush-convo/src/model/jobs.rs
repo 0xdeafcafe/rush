@@ -435,6 +435,7 @@ impl Session {
                 status: Status::Ok,
                 output: Box::default(),
                 out: None,
+                streams: None,
                 result: None,
                 exit: -1,
                 start,

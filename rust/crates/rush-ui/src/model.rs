@@ -77,6 +77,10 @@ pub struct Model {
     /// The picked agent's Session beside the list, on a screen split
     /// between them (list_extras/split.rs); the list keeps the keys.
     pub pane: Option<SessionView>,
+    /// The grid's tiles' Sessions, kept open while their agents are
+    /// pinned, by agent key: each tile drawn as its Session (Go's
+    /// grid.conns; list_extras/grid.rs).
+    pub tiles: HashMap<String, SessionView>,
     /// The Session has the whole screen because you pushed it there
     /// (ctrl+6 from the split, shift+←, #view agent): Go's m.full.
     pub full: bool,
@@ -184,6 +188,7 @@ impl Model {
             term_focused: true,
             session: None,
             pane: None,
+            tiles: HashMap::new(),
             full: false,
             keys_beside: false,
             pane_idle: false,
@@ -248,6 +253,7 @@ impl Model {
             self.previews.insert(k, p);
         }
         self.loaded = true;
+        crate::listcache::took_reading(self, f.priced);
         self.rebuild();
         self.ask_preview();
         self.follow_tail();
@@ -334,15 +340,35 @@ impl Model {
     /// Opens agent i's conversation: the one beside the list when it's
     /// that agent's, else read anew.
     pub fn open(&mut self, i: usize) {
-        if let Some(v) = self.pane.take_if(|v| v.key == self.agents[i].key) {
-            self.session = Some(v);
-            self.follow_tail();
+        use crate::screens::list_extras::grid;
+        let key = self.agents[i].key.clone();
+        if let Some(v) = self.pane.take_if(|v| v.key == key) {
+            self.set_session(v);
+            return;
+        }
+        // The one beside the list, a pinned agent's: kept for its tile.
+        let pinned = grid::grid(self).keys.clone();
+        if let Some(p) = self.pane.take_if(|v| pinned.contains(&v.key)) {
+            grid::park(self, p);
+        }
+        // A tile's Session, kept open: in at once (gridAdopt).
+        if let Some(v) = grid::adopt(self, &key) {
+            self.set_session(v);
             return;
         }
         if let Some(v) = self.read_view(i, false) {
-            self.session = Some(v);
-            self.follow_tail();
+            self.set_session(v);
         }
+    }
+
+    /// v is the opened Session from now on; the one it replaces, another
+    /// agent's, is kept for its tile when that agent is pinned (gridPark).
+    fn set_session(&mut self, v: SessionView) {
+        let key = v.key.clone();
+        if let Some(old) = self.session.replace(v).filter(|o| o.key != key) {
+            crate::screens::list_extras::grid::park(self, old);
+        }
+        self.follow_tail();
     }
 
     /// Agent i's conversation as a view, its reading started on a worker
@@ -388,7 +414,7 @@ impl Model {
         if let Some(id) = journal.filter(|id| !id.is_empty()) {
             let r#gen = self.r#gen;
             if self.tx.is_none() {
-                v.exchanges = rush_host::exchange_journal::read_exchanges(&id);
+                v.exchanges = rush_host::exchange_journal::read_exchanges(&id).into();
             } else {
                 self.later(
                     move || rush_host::exchange_journal::read_exchanges(&id),
@@ -423,12 +449,28 @@ impl Model {
         match &self.tx {
             Some(tx) => {
                 v.tail = match &v.source {
-                    session::Source::Transcript { path, decode } => match start {
-                        Some(s) => worker::spawn_tail_at(s, self.r#gen, tx.clone(), decode.clone()),
-                        None => {
-                            worker::spawn_tail(path.clone(), self.r#gen, tx.clone(), decode.clone())
+                    session::Source::Transcript { path, decode } => {
+                        let drawn = v.drawn.clone();
+                        let spawns = Some((self.reg.clone(), a.kind.as_str().to_string()));
+                        match start {
+                            Some(s) => worker::spawn_tail_at(
+                                s,
+                                self.r#gen,
+                                tx.clone(),
+                                decode.clone(),
+                                drawn,
+                                spawns,
+                            ),
+                            None => worker::spawn_tail(
+                                path.clone(),
+                                self.r#gen,
+                                tx.clone(),
+                                decode.clone(),
+                                drawn,
+                                spawns,
+                            ),
                         }
-                    },
+                    }
                     session::Source::History { adapter, session } => {
                         // A stopped rush session's folder is its host's
                         // to say, when the list doesn't (history.go:53).
@@ -446,12 +488,13 @@ impl Model {
         Some(v)
     }
 
-    /// The view a worker's reading of r#gen is for: the opened one's, or
-    /// the one beside the list.
+    /// The view a worker's reading of r#gen is for: the opened one's, the
+    /// one beside the list, or a tile's kept open.
     fn view_of(&mut self, r#gen: u64) -> Option<&mut SessionView> {
         [self.session.as_mut(), self.pane.as_mut()]
             .into_iter()
             .flatten()
+            .chain(self.tiles.values_mut())
             .find(|v| v.r#gen == r#gen)
     }
 
@@ -574,7 +617,7 @@ impl Model {
             "[" | "]" if empty => {
                 self.step_page(if s == "[" { -1 } else { 1 });
             }
-            "?" | "f1" if empty => self.help = true,
+            "?" | "f1" if empty => crate::screens::cmdbar::keyhelp::open(self),
             "q" if letters => return Out::Quit,
             // With nothing typed, into the Session, as tab does
             // (keys.go:473); ctrl+o (reply) whatever's typed, and ⌘↓ with
@@ -796,6 +839,9 @@ impl Model {
     /// The frame as lines, top to bottom, h of them: the place showing,
     /// then what's over it (view.go:604 render).
     pub fn frame(&mut self) -> Vec<Line> {
+        if let Some(q) = self.confirm.as_mut() {
+            q.inlined = false; // the box asking it inline says so as it's drawn
+        }
         let _drawing = crate::frame::framememo::FrameMemo::drawing(&self.memo);
         self.frame_rows()
     }
@@ -955,9 +1001,31 @@ impl Model {
             while p.len() < rows.saturating_sub(1) {
                 p.push(Line::new());
             }
-            p.push(m.status_line(w));
+            // Beside the list, the list's line says what rush said: the
+            // Session keeps its keys (rushmode.go:3862-3866 shows it there
+            // only with the Session on the whole screen).
+            p.push(m.foot_line(w, false));
             p
         })
+    }
+
+    /// The open Session drawn w wide and rows tall as a grid's tile, its
+    /// top on screen row top, with no row of keys of its own: the screen
+    /// narrowed to the tile while it's drawn (gridSession's rushPane).
+    pub(crate) fn tile_frame(&mut self, top: usize, rows: usize, w: usize) -> Vec<Line> {
+        let in_pane = std::mem::replace(&mut self.in_pane, false);
+        let out = crate::screens::list_extras::split::in_pane(self, w, |m| {
+            let mut p = vec![Line::new(); top];
+            m.session_frame(&mut p, rows);
+            p.drain(..top.min(p.len()));
+            p.truncate(rows);
+            while p.len() < rows {
+                p.push(Line::new());
+            }
+            p
+        });
+        self.in_pane = in_pane;
+        out
     }
 
     /// The rows the dock hooks draw under the list or the conversation.
@@ -1119,7 +1187,14 @@ impl Model {
 
     /// The bottom row, w wide: a flash for a few seconds, else the keys.
     fn status_line(&self, w: usize) -> Line {
-        if self.status_shown()
+        self.foot_line(w, true)
+    }
+
+    /// The bottom row, w wide: the keys, or with flash a flash for a few
+    /// seconds in their place.
+    fn foot_line(&self, w: usize, flash: bool) -> Line {
+        if flash
+            && self.status_shown()
             && let Some((s, _, err)) = &self.flash
         {
             let c = if *err { RED } else { TEXT };
@@ -1378,6 +1453,12 @@ impl Model {
     pub fn spinning(&self) -> bool {
         self.spinning
     }
+
+    /// Keeps the spinner going if it was before something else was drawn
+    /// (a grid tile drawn after the open Session sets it for itself).
+    pub(crate) fn keep_spinning(&mut self, was: bool) {
+        self.spinning |= was;
+    }
 }
 
 fn ctx_bar(pct: f64) -> Line {
@@ -1536,9 +1617,20 @@ impl Model {
                 }
                 _ => Step::Idle,
             },
-            Note::Whole { r#gen, sess } => match self.view_of(r#gen) {
+            Note::Whole { r#gen, sess, warm } => match self.view_of(r#gen) {
                 Some(v) if v.sess.partial => {
-                    v.take_whole(*sess);
+                    let (r, changes, spawns) = match warm {
+                        Some(w) => (Some((w.r, w.exchanges)), Some(w.changes), w.spawn_steps),
+                        None => (None, None, None),
+                    };
+                    v.take_whole_drawn(*sess, r);
+                    let key = v.key.clone();
+                    if let Some((ver, cwd, c)) = changes {
+                        crate::screens::session_core::changes::prime(self, ver, &cwd, c);
+                    }
+                    if let Some(sp) = spawns {
+                        crate::screens::session_core::subs::prime_spawns(self, &key, sp);
+                    }
                     self.follow_tail();
                     Step::Draw
                 }

@@ -107,11 +107,11 @@ pub struct InfoSheet {
     pub tab: usize,
     scroll: [usize; TABS],
     /// The Settings tab's row.
-    cur: usize,
+    pub(super) cur: usize,
     /// The tabs the agent has.
     pub shown: Vec<usize>,
     pub(super) read: InfoRead,
-    settings: Vec<SettingsLink>,
+    pub(super) settings: Vec<SettingsLink>,
     pub(super) loaded: bool,
 }
 
@@ -370,12 +370,25 @@ impl Sheet for InfoSheet {
                 {
                     // Claude Code's own screen, with the terminal handed
                     // to it (infotabs.go:333).
+                    let key = self.key.clone();
                     if l.claude && l.screen == "mcp" {
-                        let key = self.key.clone();
                         crate::screens::session_cards::claudescreen::open_screen(m, &key, "mcp");
                         return Out::Close;
                     }
-                    m.flash_err(&format!("{} isn't in this rush yet", l.name));
+                    // Each opens its sheet, as its / command does; the
+                    // harness's own row its provider on Settings
+                    // (infotabs.go:318-331, openAgentSettings).
+                    let screen = if l.screen.is_empty() {
+                        "config"
+                    } else {
+                        l.screen
+                    };
+                    let name = l.name.clone();
+                    match crate::screens::session_cards::claudescreen::rush_screen(m, &key, screen)
+                    {
+                        Out::Pass => m.flash_err(&format!("{name} isn't in this rush yet")),
+                        _ => return Out::Close,
+                    }
                 }
             }
             _ => return Out::Idle,

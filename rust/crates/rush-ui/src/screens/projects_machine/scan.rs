@@ -325,6 +325,9 @@ pub(crate) fn on_worktrees(m: &mut Model, f: Found) {
     if let Some(t) = f.tmp {
         st.tmp = t;
     }
+    // Only on the whole scan, sizes in: git's look alone has none, and the
+    // one nudge a day would say "–" (cleanup.go:376-379).
+    super::clean::nudge_clean(m);
 }
 
 /// What the few biggest processes under each orphan run, in words: their
@@ -651,4 +654,16 @@ pub(crate) fn open_temp(m: &mut Model, key: &str) {
             Out::Draw
         },
     );
+}
+
+/// What a scan found of /tmp alone, for tests.
+#[cfg(test)]
+pub(crate) fn found_tmp(tmp: rush_fleet::Scratch) -> Found {
+    Found {
+        wts: Vec::new(),
+        tmp: Some(tmp),
+        agent_tmp: HashMap::new(),
+        peeks: HashMap::new(),
+        outside: Vec::new(),
+    }
 }

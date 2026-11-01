@@ -194,7 +194,11 @@ pub fn leave_pane(m: &mut Model) {
 pub fn leave_chat(m: &mut Model) {
     let alone = m.session.is_some() && chat_alone(m);
     super::peek::leave_chat(m, alone);
-    m.session = None; // the tail's worker stops with its handle
+    // The tail's worker stops with its handle, unless its agent is pinned
+    // and it's kept for its tile (gridPark).
+    if let Some(v) = m.session.take() {
+        super::grid::park(m, v);
+    }
     m.full = false;
     end_preview(m);
 }
@@ -624,6 +628,16 @@ pub fn follow(m: &mut Model) {
         return;
     }
     if m.pane.is_none() && m.kept::<Unreadable>().0 == key {
+        return;
+    }
+    // The one beside the list until now kept for its tile when its agent
+    // is pinned (gridPark); a tile's kept Session in at once (gridAdopt).
+    if let Some(v) = m.pane.take() {
+        super::grid::park(m, v);
+    }
+    if let Some(v) = super::grid::adopt(m, &key) {
+        m.pane = Some(v);
+        crate::screens::session_core::live::sync(m);
         return;
     }
     m.pane = m.read_view(i, true);

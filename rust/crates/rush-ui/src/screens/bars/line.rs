@@ -180,8 +180,11 @@ fn sheet_agent(m: &Model) -> String {
         .unwrap_or_default()
 }
 
-/// One segment on its own, as the bar would draw it now (sample).
-pub fn sample(m: &Model, which: usize, id: &str) -> Line {
+/// One segment on its own, as the bar would draw it now, for agent key
+/// ("" the one the builder was opened on, else the conversation open):
+/// the builder hands its own agent, as it isn't m.sheet while it's drawn
+/// (sample, statuslinesheet.go:737).
+pub fn sample(m: &Model, which: usize, key: &str, id: &str) -> Line {
     let Some(s) = find(which, id) else {
         return Line::new();
     };
@@ -189,7 +192,11 @@ pub fn sample(m: &Model, which: usize, id: &str) -> Line {
     if which == BAR_TOP {
         return (s.draw)(&x);
     }
-    let key = sheet_agent(m);
+    let key = if key.is_empty() {
+        sheet_agent(m)
+    } else {
+        key.to_string()
+    };
     let Some(of) = Of::read(m, &key) else {
         return Line::new();
     };

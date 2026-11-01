@@ -5,9 +5,11 @@
 //! internal/ui/scheme.go (startColours :19, StopSchemeReports :23) and
 //! model.go:553 (askColours, applyColors).
 //!
-//! The terminal's answers come back as input: these read them. rush-draw
-//! hands the UI keys, not raw replies, so the asking isn't wired in yet
-//! and rush draws on its dark ground (DESIGN.md "Screens", gaps).
+//! rush-draw asks for the colours as it takes the terminal, before its
+//! input thread reads, and keeps the replies (rush_draw::colour_replies);
+//! these read them. Not yet: asking again on focus or on a mode 2031
+//! report, so a terminal switched light or dark while rush runs keeps
+//! the colours it had (DESIGN.md "Screens", gaps).
 
 use super::ground::Rgb;
 
@@ -32,6 +34,10 @@ pub fn parse_colour_report(s: &str) -> Option<(u8, Rgb)> {
     let mut parts = rgb.split('/');
     let mut ch = || -> Option<u8> {
         let p = parts.next()?;
+        // 1 to 4 hex digits, as X11 says; anything else isn't a colour.
+        if p.is_empty() || p.len() > 4 || !p.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
         let v = u32::from_str_radix(p, 16).ok()?;
         // 1 to 4 hex digits, scaled to 8 bits.
         let max = (1u32 << (4 * p.len() as u32)) - 1;
@@ -64,6 +70,15 @@ mod tests {
             Some((10, Rgb(255, 255, 255)))
         );
         assert_eq!(parse_colour_report("\x1b]11;?\x07"), None);
+        // Parts that aren't 1 to 4 hex digits.
+        for bad in [
+            "\x1b]11;rgb:111111111/0/0\x07",
+            "\x1b]11;rgb:11111/0/0\x07",
+            "\x1b]11;rgb:/0/0\x07",
+            "\x1b]11;rgb:+f/0/0\x07",
+        ] {
+            assert_eq!(parse_colour_report(bad), None, "{bad:?}");
+        }
         assert_eq!(parse_scheme_report("\x1b[?997;1n"), Some(true));
         assert_eq!(parse_scheme_report("\x1b[?997;2n"), Some(false));
         assert_eq!(parse_scheme_report("x"), None);

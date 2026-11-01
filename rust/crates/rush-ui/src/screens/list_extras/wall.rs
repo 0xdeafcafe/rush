@@ -81,6 +81,8 @@ pub struct Wall {
     size: (usize, usize),
     /// A live tile was drawn: its spinner moves.
     moving: bool,
+    /// When it was last drawn, which its spinner's wake counts from.
+    drawn: Option<Instant>,
     last_click: Option<Instant>,
     names: HashMap<String, String>,
 }
@@ -1234,6 +1236,7 @@ impl Place for Wall {
         (self.above, self.below) = (0, 0);
         self.size = (w, h);
         self.moving = false;
+        self.drawn = Some(Instant::now());
         if items.is_empty() {
             return Self::empty(m, w, h);
         }
@@ -1404,8 +1407,11 @@ impl Place for Wall {
         Out::Draw
     }
 
-    /// A spinner moves only while a tile at work is drawn.
+    /// A spinner moves only while a tile at work is drawn: a second after
+    /// it last was (a time fixed when drawn, so the wake comes due).
     fn wake_at(&self, _m: &Model) -> Option<Instant> {
-        self.moving.then(|| Instant::now() + Duration::from_secs(1))
+        self.drawn
+            .filter(|_| self.moving)
+            .map(|d| d + Duration::from_secs(1))
     }
 }

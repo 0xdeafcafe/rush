@@ -127,29 +127,42 @@ pub fn on_command(m: &mut Model, arg: &str) -> Out {
             let attached = r.is_ok() && rush_remote::client::attached(&p.name);
             (p.name, r, attached)
         },
-        move |m, (machine, r, attached)| {
-            m.kept::<OnBusy>().0 = false;
-            match r {
-                Err(e) => {
-                    let back = on_back(m, &draft);
-                    if e.contains(rush_remote::client::MAYBE_STARTED) {
-                        m.fail(&format!("{e} · check the list before sending it again"));
-                    } else if back {
-                        m.fail(&format!("{e} · your command is back in the box"));
-                    } else {
-                        m.fail(&format!("{e} · your command: {draft}"));
-                    }
-                }
-                Ok(s) => {
-                    let mut text = format!("started {} on {machine}{note}", s.info.name);
-                    if !attached {
-                        text.push_str(&format!(" · rush remote attach {machine} shows it here"));
-                    }
-                    m.flash(&text);
-                }
-            }
-            Out::Draw
-        },
+        move |m, (machine, r, attached)| on_done(m, &draft, note, &machine, r, attached),
     );
+    Out::Draw
+}
+
+/// A start on another machine answered (onCommand's callback): said, and
+/// the fleet read again for the new session; failed, the command back in
+/// the box if nothing's been typed since.
+pub fn on_done(
+    m: &mut Model,
+    draft: &str,
+    note: &str,
+    machine: &str,
+    r: Result<rush_remote::Session, String>,
+    attached: bool,
+) -> Out {
+    m.kept::<OnBusy>().0 = false;
+    match r {
+        Err(e) => {
+            let back = on_back(m, draft);
+            if e.contains(rush_remote::client::MAYBE_STARTED) {
+                m.fail(&format!("{e} · check the list before sending it again"));
+            } else if back {
+                m.fail(&format!("{e} · your command is back in the box"));
+            } else {
+                m.fail(&format!("{e} · your command: {draft}"));
+            }
+        }
+        Ok(s) => {
+            let mut text = format!("started {} on {machine}{note}", s.info.name);
+            if !attached {
+                text.push_str(&format!(" · rush remote attach {machine} shows it here"));
+            }
+            m.flash(&text);
+            m.kept::<crate::worker::FleetIn>().refresh();
+        }
+    }
     Out::Draw
 }

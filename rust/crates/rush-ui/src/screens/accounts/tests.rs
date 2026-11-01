@@ -247,6 +247,20 @@ fn ask_starts_an_agent_in_rushs_folder() {
     assert_eq!(got[0].dir, rush_state::dir().to_string_lossy());
 }
 
+/// The menu bar icon turned on or off by another rush: this one starts
+/// or stops it as its own row would (only if it leads: start_menu_bar
+/// and stop_menu_bar ask); a change of anything else leaves it be
+/// (sweep 3 P3-5).
+#[test]
+fn the_menu_bar_turned_elsewhere_is_started_here() {
+    use crate::screens::settings::sheets::Turned;
+    let (mut m, _d) = model(120, 40);
+    on_config(&mut m, br#"{"menuBar":true}"#);
+    on_config(&mut m, br#"{"menuBar":true,"quiet":true}"#);
+    on_config(&mut m, br#"{"menuBar":false}"#);
+    assert_eq!(m.kept::<Turned>().0, [true, false]);
+}
+
 #[test]
 fn config_changed_elsewhere_is_taken_in() {
     let (mut m, _d) = model(120, 40);
@@ -438,6 +452,42 @@ fn opened(m: &mut Model, dir: &std::path::Path) {
     m.sel = "claude:default:s1".into();
     m.open(0);
     assert!(m.session.is_some(), "{}", flash(m));
+}
+
+/// Each row of the info sheet's Settings tab opens its sheet or page, as
+/// its / command does, never "isn't in this rush yet"
+/// (infotabs.go:318-333).
+#[test]
+fn info_settings_rows_open_their_sheets() {
+    let (mut m, d) = model(120, 40);
+    opened(&mut m, d.path());
+    open_info(&mut m, SETTINGS);
+    let names: Vec<String> = m
+        .sheet_as::<InfoSheet>()
+        .expect("the info sheet")
+        .settings
+        .iter()
+        .filter(|l| !l.claude)
+        .map(|l| l.name.clone())
+        .collect();
+    assert!(names.len() >= 6, "{names:?}");
+    for (i, name) in names.iter().enumerate() {
+        m.sheet = None;
+        m.place = crate::frame::PlaceId::Agents;
+        if m.session.is_none() {
+            m.open(0);
+        }
+        m.flash = None;
+        open_info(&mut m, SETTINGS);
+        m.sheet_as::<InfoSheet>().unwrap().cur = i;
+        m.press("enter");
+        let f = flash(&m);
+        assert!(!f.contains("isn't in this rush yet"), "{name}: {f}");
+        assert!(
+            m.sheet_as::<InfoSheet>().is_none(),
+            "{name}: the info sheet stayed"
+        );
+    }
 }
 
 #[test]

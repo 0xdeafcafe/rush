@@ -614,7 +614,9 @@ pub struct Peer {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "PascalCase")]
 pub struct Exchange {
-    #[serde(with = "wire::time")]
+    /// When the host took it (Go's time.Now()), so written in this
+    /// machine's zone as Go's is.
+    #[serde(with = "wire::local_time")]
     pub at: Ms,
     /// Restored history; never starts a live turn.
     pub archived: bool,

@@ -62,15 +62,10 @@ pub struct KeysDialog {
 
 /// Every action a key can be bound to: rush's keys, its # commands and
 /// plugins' commands (keyActions, keybind.go:32-39).
+/// Go's fleetCommands, in their order, without the aliases rush also
+/// takes (#preset, #net…): those run the command they stand for.
 fn actions(m: &Model) -> Vec<Action> {
-    let mut out = rush_keymap::defaults();
-    for c in &m.ext.commands {
-        let mut a = Action::new(rush_keymap::command_id(c.name), Context::Any);
-        a.title = format!("#{}: {}", c.name, c.about);
-        out.push(a);
-    }
-    out.extend(crate::screens::plugin_ui::hooks::plugin_key_actions(m));
-    out
+    crate::screens::cmdbar::keybind::actions_of(m)
 }
 
 /// The keymap in force (keyMap); rush's own before keybindings.json is

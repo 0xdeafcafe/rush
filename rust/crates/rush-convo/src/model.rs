@@ -102,6 +102,9 @@ pub struct Step {
     /// How the call came out, as rush's own, once it's back: its text is
     /// `output`, and its raw is dropped.
     out: Option<Box<Output>>,
+    /// When the output is the shell's stdout then its stderr, run
+    /// together: where stdout ends in it. Neither is kept twice then.
+    streams: Option<u32>,
     /// Claude Code's structured result (patches, stdout/stderr) as JSON,
     /// with what nothing draws dropped (slim_result); another agent's
     /// result put as Claude's would be.
@@ -167,6 +170,10 @@ impl Step {
             let mut o = Output::clone(o);
             o.call_id = self.id.to_string();
             o.text = self.output.to_string();
+            if let Some(n) = self.streams {
+                let (out, err) = self.output.split_at(n as usize);
+                (o.stdout, o.stderr) = (out.to_owned(), err.to_owned());
+            }
             return o;
         }
         let failed = self.status == Status::Failed;
@@ -1128,6 +1135,7 @@ impl Session {
             status: Status::Running,
             output: Box::default(),
             out: None,
+            streams: None,
             result: None,
             exit: -1,
             start: now,
@@ -1252,18 +1260,34 @@ impl Session {
         // Claude Code's structured result is kept as it sent it; another
         // agent's is put as Claude's would be.
         st.result = if claudes(&st.call) {
-            slim_result(kind, o.raw.as_ref().map_or("", RawJson::get))
+            slim_result(o.raw.as_ref().map_or("", RawJson::get))
         } else {
-            slim_result(kind, &claude_result(o))
+            slim_result(&claude_result(o))
         };
         // Its text is the step's output, and what's drawn is read from the
-        // rest: neither its raw nor its id is kept twice.
+        // rest: neither its raw nor its id is kept twice, nor its streams
+        // when the text is them run together.
+        st.streams = (!(o.stdout.is_empty() && o.stderr.is_empty())
+            && text.len() == o.stdout.len() + o.stderr.len()
+            && text.starts_with(&o.stdout)
+            && text.ends_with(&o.stderr))
+        .then(|| u32::try_from(o.stdout.len()).ok())
+        .flatten();
+        let streams = st.streams.is_some();
         st.out = Some(Box::new(Output {
             call_id: String::new(),
             text: String::new(),
             is_error: o.is_error,
-            stdout: o.stdout.clone(),
-            stderr: o.stderr.clone(),
+            stdout: if streams {
+                String::new()
+            } else {
+                o.stdout.clone()
+            },
+            stderr: if streams {
+                String::new()
+            } else {
+                o.stderr.clone()
+            },
             exit: o.exit,
             patches: o.patches.clone(),
             lines: o.lines,
@@ -1634,6 +1658,7 @@ impl Session {
             status: Status::Running,
             output: Box::default(),
             out: None,
+            streams: None,
             result: None,
             exit: -1,
             start: at,
@@ -1676,6 +1701,7 @@ impl Session {
                 .ok()
                 .map(String::into_boxed_str);
         let failed = st.status == Status::Failed;
+        st.streams = None;
         st.out = Some(Box::new(Output {
             is_error: failed,
             stdout: stdout.to_owned(),
@@ -1829,53 +1855,53 @@ fn compact_ask(t: &mut Turn) {
     t.prompt.clear();
 }
 
-/// Drops from a tool's result what nothing draws: the whole file an edit
-/// or write was made to, and a read file's text, which its output already
-/// has. Else a long session holds a copy of every file it touched.
-pub fn slim_result(k: Kind, raw: &str) -> Option<Box<str>> {
+/// The keys of a tool's structured result that anything reads: the
+/// renderer's tool_summary (ToolSearch, Monitor, EnterWorktree), delivery
+/// (SendMessage, PushNotification), recipient (Agent, Task: who a message
+/// went to), stopped_command (TaskStop) and agent_name (Agent, Task). Add
+/// a key here before reading it.
+pub const RESULT_KEYS: [&str; 12] = [
+    "agentId",
+    "agentType",
+    "command",
+    "description",
+    "localSent",
+    "matches",
+    "message",
+    "persistent",
+    "pushSent",
+    "resumedAgentId",
+    "timeoutMs",
+    "worktreeBranch",
+];
+
+/// A result this long or shorter is kept as sent: reading it costs more
+/// than it holds.
+const SHORT_RESULT: usize = 128;
+
+/// What's kept of a tool's structured result: a short one as sent, a long
+/// one only for the keys anything reads (RESULT_KEYS). Else a long session
+/// holds a copy of every file it read or edited, every shell's output its
+/// text already has, and every screenshot an MCP tool gave back as base64.
+/// One that isn't an object reads as no result at all, as it always did to
+/// every reader; an object with no key read is kept as one with nothing
+/// read in it (`{"":0}`), which delivery still tells from none.
+pub fn slim_result(raw: &str) -> Option<Box<str>> {
     if raw.is_empty() {
         return None;
     }
-    if raw.len() < 2 << 10 || !matches!(k, Kind::Edit | Kind::Write | Kind::Read) {
+    if raw.len() <= SHORT_RESULT {
         return Some(raw.into());
     }
     type Obj<'a> = BTreeMap<std::borrow::Cow<'a, str>, &'a RawValue>;
     let Ok(mut m) = serde_json::from_str::<Obj>(raw) else {
-        return Some(raw.into());
+        return None;
     };
-    let file: Box<RawValue>;
-    match k {
-        Kind::Edit | Kind::Write => {
-            if m.remove("originalFile").is_none() {
-                return Some(raw.into());
-            }
-        }
-        _ => {
-            let Some(f) = m.get("file") else {
-                return Some(raw.into());
-            };
-            let Ok(mut f) = serde_json::from_str::<Obj>(f.get()) else {
-                return Some(raw.into());
-            };
-            let text = f.remove("content").is_some();
-            let image = f.remove("base64").is_some();
-            if !text && !image {
-                return Some(raw.into());
-            }
-            let Some(b) = serde_json::to_string(&f)
-                .ok()
-                .and_then(|s| RawValue::from_string(s).ok())
-            else {
-                return Some(raw.into());
-            };
-            file = b;
-            m.insert("file".into(), &file);
-        }
+    m.retain(|k, _| RESULT_KEYS.contains(&k.as_ref()));
+    if m.is_empty() {
+        return Some(r#"{"":0}"#.into());
     }
-    match serde_json::to_string(&m) {
-        Ok(s) => Some(s.into_boxed_str()),
-        Err(_) => Some(raw.into()),
-    }
+    serde_json::to_string(&m).ok().map(String::into_boxed_str)
 }
 
 #[cfg(test)]
@@ -1897,28 +1923,28 @@ mod tests {
     fn slims_results() {
         let big = "x".repeat(3000);
         let edit = format!(r#"{{"filePath":"/a","originalFile":"{big}","structuredPatch":[]}}"#);
-        assert_eq!(
-            slim_result(Kind::Edit, &edit).as_deref(),
-            Some(r#"{"filePath":"/a","structuredPatch":[]}"#)
-        );
+        assert_eq!(slim_result(&edit).as_deref(), Some(r#"{"":0}"#));
         let read = format!(
             r#"{{"type":"text","file":{{"filePath":"/a","content":"{big}","numLines":3}}}}"#
         );
+        assert_eq!(slim_result(&read).as_deref(), Some(r#"{"":0}"#));
+        // Short: kept as sent.
         assert_eq!(
-            slim_result(Kind::Read, &read).as_deref(),
-            Some(r#"{"file":{"filePath":"/a","numLines":3},"type":"text"}"#)
-        );
-        // Small, or of a kind nothing drops from: kept as sent.
-        assert_eq!(
-            slim_result(Kind::Edit, r#"{"originalFile":"x"}"#).as_deref(),
+            slim_result(r#"{"originalFile":"x"}"#).as_deref(),
             Some(r#"{"originalFile":"x"}"#)
         );
         let bash = format!(r#"{{"stdout":"{big}"}}"#);
+        assert_eq!(slim_result(&bash).as_deref(), Some(r#"{"":0}"#));
+        assert_eq!(slim_result(""), None);
+        // An MCP tool's blocks, a screenshot among them: nothing reads them.
+        let shot = format!(r#"[{{"type":"image","source":{{"data":"{big}"}}}}]"#);
+        assert_eq!(slim_result(&shot), None);
+        // What's read stays, long or not.
+        let sent = format!(r#"{{"message":"{big}","pushSent":true,"other":"{big}"}}"#);
         assert_eq!(
-            slim_result(Kind::Shell, &bash).as_deref(),
-            Some(bash.as_str())
+            slim_result(&sent).as_deref(),
+            Some(format!(r#"{{"message":"{big}","pushSent":true}}"#).as_str())
         );
-        assert_eq!(slim_result(Kind::Shell, ""), None);
     }
 
     #[test]

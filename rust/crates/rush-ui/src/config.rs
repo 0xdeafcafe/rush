@@ -48,6 +48,9 @@ pub struct Config {
     /// The one key that opens or closes a picked row, "" for both enter
     /// and space (state.go RowKey).
     pub row_key: String,
+    /// How see-through a stacked row's second line is: "50%", or the
+    /// older "dim" and "faint" (state.go SubLine).
+    pub sub_line: String,
 }
 
 /// rush's folder: RUSH_HOME, else ~/.config/rush, or ~/.config/agtop while

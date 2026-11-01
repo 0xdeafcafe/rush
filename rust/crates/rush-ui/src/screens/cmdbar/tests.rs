@@ -852,6 +852,32 @@ fn on_waits_for_the_last_start() {
     );
 }
 
+/// A start on another machine that answered is said, and the fleet is
+/// read again at once for the session it started (oncmd.go:108
+/// m.refresh); one that failed isn't.
+#[test]
+fn on_started_reads_the_fleet_again() {
+    let mut m = model(120, 40);
+    let again = std::sync::Arc::new(crate::worker::Again::default());
+    m.kept::<crate::worker::FleetIn>().1 = Some(again.clone());
+    m.kept::<super::oncmd::OnBusy>().0 = true;
+    super::oncmd::on_done(
+        &mut m,
+        "#on studio x",
+        "",
+        "studio",
+        Err("down".into()),
+        true,
+    );
+    assert!(!again.asked(), "a failed start reads nothing again");
+    let mut s = rush_remote::Session::default();
+    s.info.name = "tidy".into();
+    super::oncmd::on_done(&mut m, "#on studio x", "", "studio", Ok(s), true);
+    assert_eq!(m.flash.as_ref().unwrap().0, "started tidy on studio");
+    assert!(!m.kept::<super::oncmd::OnBusy>().0);
+    assert!(again.asked(), "the fleet is read again");
+}
+
 #[test]
 fn off_read_takes_once() {
     let r = super::offui::OffRead::<u32>::default();

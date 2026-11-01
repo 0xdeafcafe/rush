@@ -215,6 +215,22 @@ mod tests {
     use super::*;
     use crate::testing::Home;
 
+    // Go says which file it couldn't open: "open …/config.json: no such
+    // file or directory", for host preflight and host run alike.
+    #[test]
+    fn a_missing_session_names_its_config() {
+        let _h = Home::new();
+        let want = format!(
+            "open {}: no such file or directory",
+            crate::paths::dir("nope").join("config.json").display()
+        );
+        assert_eq!(preflight_here(&Registry::new(), "nope"), Err(want.clone()));
+        assert_eq!(
+            crate::server::run_with(Registry::new(), crate::server::Hooks::quiet(), "nope"),
+            Err(want)
+        );
+    }
+
     #[test]
     fn preflight_reads_config_folder_and_agent() {
         let _h = Home::new();
