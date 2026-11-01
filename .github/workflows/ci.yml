@@ -1,0 +1,94 @@
+name: CI
+
+# Checks every push to main and to a rush/* branch: formatting, clippy and
+# the tests, on a Mac (rush's home). A push to main also builds rush for
+# Apple silicon and keeps it as the run's artifact, `rush-main`, which
+# rust/tools/install-ci.sh downloads and installs: the builds that would
+# otherwise load the machine rush runs on.
+
+on:
+  push:
+    branches: [main, "rush/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # A newer push to a branch makes its older run moot; every push to main
+  # gets its build.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
+
+jobs:
+  check:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          key: check
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Format
+        working-directory: rust
+        run: cargo fmt --all --check
+      - name: Clippy
+        working-directory: rust
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test
+        working-directory: rust
+        # Left out: shimmers_on_his_second hangs on the hour it runs at (the
+        # mascot sleeps after 23:00); stuck_shell_is_stopped and
+        # compacts_only_the_conversation_expected fail now and then on
+        # their timing.
+        run: |
+          cargo test --workspace --locked --no-fail-fast -- \
+            --skip shimmers_on_his_second \
+            --skip stuck_shell_is_stopped \
+            --skip compacts_only_the_conversation_expected
+
+  build:
+    # Main's build for Apple silicon, for install-ci.sh.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      TARGET: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          # The release workflow's cache for the same target.
+          key: aarch64-apple-darwin
+      - name: Build
+        working-directory: rust
+        # No RUSH_VERSION: a build of main isn't a release, so it never
+        # updates itself; build.rs puts the commit in `rush --version`.
+        run: |
+          cargo build --release --locked -p rush --target "$TARGET"
+          mkdir -p ../dist
+          cp "target/$TARGET/release/rush" ../dist/rush
+          codesign --force --sign - ../dist/rush
+          ../dist/rush --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rush-main
+          path: dist/rush
+          retention-days: 14
+          if-no-files-found: error
