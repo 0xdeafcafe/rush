@@ -8,7 +8,20 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::PathBuf;
 use std::time::Instant;
 
-use rush_convo::{Session, Tail};
+use rush_convo::search::SearchMemo;
+use rush_convo::{Hit, Session, Tail};
+
+/// What the bar shows of search's hits: the latest first, the closest
+/// first when words are typed, cut to limit.
+fn shown(s: &Session, q: &str, limit: usize) -> Vec<Hit> {
+    let mut hits = s.search(q);
+    hits.reverse();
+    if !rush_convo::search::words(q).is_empty() {
+        hits.sort_by_key(|h| std::cmp::Reverse(h.score));
+    }
+    hits.truncate(limit);
+    hits
+}
 
 const QUERIES: [&str; 8] = [
     "rust port",
@@ -111,4 +124,47 @@ fn main() {
         );
     }
     println!("total {total:.1} ms");
+    // The bar's way: each key's top hits, a memo kept from key to key,
+    // typed on and backspaced, checked against search's.
+    for limit in [50, 300, 4] {
+        let mut memo = SearchMemo::default();
+        let mut tot = 0.0;
+        let mut ins_all = Vec::new();
+        for q in QUERIES {
+            let chars: Vec<char> = q.chars().collect();
+            let typed: Vec<String> = (1..=chars.len())
+                .chain((1..chars.len()).rev())
+                .map(|i| chars[..i].iter().collect())
+                .collect();
+            let mut mi = Vec::new();
+            for t in &typed {
+                let i0 = instructions();
+                let c = Instant::now();
+                let got = s.search_top(t, limit, &mut memo);
+                tot += c.elapsed().as_secs_f64() * 1e3;
+                mi.push((instructions() - i0) as f64 / 1e6);
+                let want = shown(&s, t, limit);
+                if got != want {
+                    let brief = |v: &[Hit]| {
+                        v.iter()
+                            .map(|h| format!("{}={}", h.r#ref, h.score))
+                            .collect::<Vec<_>>()
+                    };
+                    let i = got.iter().zip(&want).take_while(|(a, b)| a == b).count();
+                    panic!(
+                        "{t:?} limit {limit}: differs at {i} of {}/{}\n got {:?}\nwant {:?}",
+                        got.len(),
+                        want.len(),
+                        &brief(&got)[i.min(got.len())..(i + 5).min(got.len())],
+                        &brief(&want)[i.min(want.len())..(i + 5).min(want.len())],
+                    );
+                }
+            }
+            let avg = mi.iter().sum::<f64>() / mi.len() as f64;
+            let max = mi.iter().cloned().fold(0.0, f64::max);
+            println!("top {limit:<3} {q:<18} per key {avg:>7.1} M instr avg, {max:>7.1} max");
+            ins_all.extend(mi);
+        }
+        println!("top {limit}: {tot:.1} ms, all same as search's");
+    }
 }

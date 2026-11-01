@@ -257,6 +257,12 @@ pub(crate) fn word_score_parts(parts: &[&str], w: &str) -> Option<i32> {
             return Some(sc);
         }
     }
+    typo_score_parts(parts, w)
+}
+
+/// word_score_parts's score for w a letter or two off, where it isn't
+/// in the parts as typed.
+pub(crate) fn typo_score_parts(parts: &[&str], w: &str) -> Option<i32> {
     let k = typos(w);
     if k == 0 {
         return None;
@@ -288,6 +294,19 @@ pub(crate) fn word_score_parts(parts: &[&str], w: &str) -> Option<i32> {
 /// whole word, a word's start or inside one.
 fn exact_match(text: &str, w: &str) -> Option<(i32, usize, usize)> {
     let (i, j) = find_fold(text, w)?;
+    Some((place_score(text, i, j), i, j))
+}
+
+/// exact_match from byte from of text on: the first match at or after it.
+pub(crate) fn exact_match_from(text: &str, w: &str, from: usize) -> Option<(i32, usize, usize)> {
+    let (i, j) = find_fold(&text[from..], w)?;
+    let (i, j) = (from + i, from + j);
+    Some((place_score(text, i, j), i, j))
+}
+
+/// How a match at text[i..j] scores: a whole word, a word's start, or
+/// inside one.
+fn place_score(text: &str, i: usize, j: usize) -> i32 {
     let mut score = SCORE_INSIDE;
     let before = text[..i].chars().next_back();
     let after = text[j..].chars().next();
@@ -297,7 +316,7 @@ fn exact_match(text: &str, w: &str) -> Option<(i32, usize, usize)> {
             score = SCORE_WHOLE;
         }
     }
-    Some((score, i, j))
+    score
 }
 
 /// How many letters a and b are apart (added, dropped, changed or two

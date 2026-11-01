@@ -192,6 +192,8 @@ pub struct Bar {
     pub rows_at: Vec<(usize, usize)>,
     /// The hint row's screen row and first cell.
     pub hint_at: Option<(usize, usize)>,
+    /// What the open conversation's last search kept for the next key's.
+    pub memo: std::cell::RefCell<cs::SearchMemo>,
 }
 
 impl Bar {
@@ -329,6 +331,7 @@ pub fn open(m: &mut Model, here: bool) {
         done: false,
         rows_at: Vec::new(),
         hint_at: None,
+        memo: Default::default(),
     });
     rebuild(m);
 }
@@ -631,7 +634,7 @@ pub fn rebuild(m: &mut Model) {
             if m.session.as_ref().is_some_and(|v| v.key == sc.key) {
                 add(
                     &format!("This chat · {}", session_title(m)),
-                    bar_turns(m, &q),
+                    bar_turns(m, &q, 300),
                     300,
                 );
             }
@@ -716,7 +719,7 @@ pub fn rebuild(m: &mut Model) {
                 let limit = if raw.is_empty() { 4 } else { 50 };
                 add(
                     &format!("This session · {}", session_title(m)),
-                    bar_turns(m, &q),
+                    bar_turns(m, &q, limit),
                     limit,
                 );
             }
@@ -1126,8 +1129,10 @@ pub fn agent_state(a: &Agent, now: Ms) -> String {
 }
 
 /// The open conversation's turns, the latest first, or its matches for
-/// the query (barTurns).
-pub fn bar_turns(m: &Model, q: &str) -> Vec<Item> {
+/// the query (barTurns). Rust-only: the matches are only the limit the
+/// section shows (the closest first, as it sorts them), found with what
+/// the last key's search kept (rush_convo's SearchMemo).
+pub fn bar_turns(m: &Model, q: &str, limit: usize) -> Vec<Item> {
     let Some(v) = &m.session else {
         return Vec::new();
     };
@@ -1167,8 +1172,12 @@ pub fn bar_turns(m: &Model, q: &str) -> Vec<Item> {
         return items;
     }
     let words = cs::words(q);
-    let mut hits = s.search(q);
-    hits.reverse(); // of those as close, the latest first
+    let Some(b) = m.kept.peek::<BarState>().and_then(|s| s.bar.as_ref()) else {
+        return items;
+    };
+    // The latest first; of those as close, the closest first: as the
+    // section sorts them, cut to its limit.
+    let hits = s.search_top(q, limit, &mut b.memo.borrow_mut());
     for h in hits {
         let tail = match when_ago(h.at, m.now) {
             at if !at.is_empty() => format!("#{} · sent {at}", h.turn),
