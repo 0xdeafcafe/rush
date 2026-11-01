@@ -1179,6 +1179,7 @@ dependencies = [
  "rush-core",
  "rush-gh",
  "rush-hl",
+ "rush-sys",
  "rush-testenv",
  "serde",
  "serde_json",

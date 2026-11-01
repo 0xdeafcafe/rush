@@ -420,7 +420,7 @@ impl Model {
         if let Some(id) = journal.filter(|id| !id.is_empty()) {
             let r#gen = self.r#gen;
             if self.tx.is_none() {
-                v.exchanges = rush_host::exchange_journal::read_exchanges(&id);
+                v.exchanges = rush_host::exchange_journal::read_exchanges(&id).into();
             } else {
                 self.later(
                     move || rush_host::exchange_journal::read_exchanges(&id),
@@ -437,9 +437,14 @@ impl Model {
         match &self.tx {
             Some(tx) => {
                 v.tail = match &v.source {
-                    session::Source::Transcript { path, decode } => {
-                        worker::spawn_tail(path.clone(), self.r#gen, tx.clone(), decode.clone())
-                    }
+                    session::Source::Transcript { path, decode } => worker::spawn_tail(
+                        path.clone(),
+                        self.r#gen,
+                        tx.clone(),
+                        decode.clone(),
+                        v.drawn.clone(),
+                        Some((self.reg.clone(), a.kind.as_str().to_string())),
+                    ),
                     session::Source::History { adapter, session } => {
                         // A stopped rush session's folder is its host's
                         // to say, when the list doesn't (history.go:53).
@@ -807,6 +812,9 @@ impl Model {
     /// The frame as lines, top to bottom, h of them: the place showing,
     /// then what's over it (view.go:604 render).
     pub fn frame(&mut self) -> Vec<Line> {
+        if let Some(q) = self.confirm.as_mut() {
+            q.inlined = false; // the box asking it inline says so as it's drawn
+        }
         let _drawing = crate::frame::framememo::FrameMemo::drawing(&self.memo);
         self.frame_rows()
     }
@@ -966,7 +974,10 @@ impl Model {
             while p.len() < rows.saturating_sub(1) {
                 p.push(Line::new());
             }
-            p.push(m.status_line(w));
+            // Beside the list, the list's line says what rush said: the
+            // Session keeps its keys (rushmode.go:3862-3866 shows it there
+            // only with the Session on the whole screen).
+            p.push(m.foot_line(w, false));
             p
         })
     }
@@ -1149,7 +1160,14 @@ impl Model {
 
     /// The bottom row, w wide: a flash for a few seconds, else the keys.
     fn status_line(&self, w: usize) -> Line {
-        if self.status_shown()
+        self.foot_line(w, true)
+    }
+
+    /// The bottom row, w wide: the keys, or with flash a flash for a few
+    /// seconds in their place.
+    fn foot_line(&self, w: usize, flash: bool) -> Line {
+        if flash
+            && self.status_shown()
             && let Some((s, _, err)) = &self.flash
         {
             let c = if *err { RED } else { TEXT };
@@ -1556,9 +1574,20 @@ impl Model {
                 }
                 _ => Step::Idle,
             },
-            Note::Whole { r#gen, sess } => match self.view_of(r#gen) {
+            Note::Whole { r#gen, sess, warm } => match self.view_of(r#gen) {
                 Some(v) if v.sess.partial => {
-                    v.take_whole(*sess);
+                    let (r, changes, spawns) = match warm {
+                        Some(w) => (Some((w.r, w.exchanges)), Some(w.changes), w.spawn_steps),
+                        None => (None, None, None),
+                    };
+                    v.take_whole_drawn(*sess, r);
+                    let key = v.key.clone();
+                    if let Some((ver, cwd, c)) = changes {
+                        crate::screens::session_core::changes::prime(self, ver, &cwd, c);
+                    }
+                    if let Some(sp) = spawns {
+                        crate::screens::session_core::subs::prime_spawns(self, &key, sp);
+                    }
                     self.follow_tail();
                     Step::Draw
                 }

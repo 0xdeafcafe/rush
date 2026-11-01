@@ -39,8 +39,9 @@ pub fn register(x: &mut Ext) {
     x.on_fleet.push(on_fleet);
 }
 
-/// Each reading of the list: what's due asked again while Projects shows,
-/// and Clean up suggested when a lot could go (model.go:1097 tick).
+/// Each reading of the list: what's due asked again while Projects shows
+/// (model.go:1097 tick). Clean up is suggested once the worktrees are
+/// measured (scan::on_worktrees).
 fn on_fleet(m: &mut Model) {
     scan::refresh(m);
     scan::refresh_open_prs(m);
@@ -49,7 +50,6 @@ fn on_fleet(m: &mut Model) {
     if m.sender().is_some() {
         scan::read_machine(m);
     }
-    clean::nudge_clean(m);
     care::watch_machine(m);
 }
 
