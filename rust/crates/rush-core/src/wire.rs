@@ -14,7 +14,7 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::value::RawValue;
 
-use crate::time::{Ms, format_rfc3339, parse_rfc3339};
+use crate::time::{Ms, format_rfc3339, format_rfc3339_local, parse_rfc3339};
 
 /// Go's zero time, as it writes it.
 pub const ZERO_TIME: &str = "0001-01-01T00:00:00Z";
@@ -42,6 +42,57 @@ pub mod time {
             return 0;
         }
         parse_rfc3339(s)
+    }
+}
+
+/// want, a line Go's tests write with times made in UTC (`…Z`), with the
+/// times under key as [`local_time`] writes them on this machine: in its
+/// zone. For tests; the zero time stays as it is.
+#[doc(hidden)]
+pub fn in_local_zone(want: &str, key: &str) -> String {
+    let tag = format!("\"{key}\":");
+    let mut out = String::with_capacity(want.len());
+    let mut rest = want;
+    while let Some(at) = rest.find(&tag) {
+        let after = &rest[at + tag.len()..];
+        // Indented, Go puts a space after the colon.
+        let open = after.len() - after.trim_start_matches(' ').len();
+        if !after[open..].starts_with('"') {
+            out.push_str(&rest[..at + tag.len()]);
+            rest = after;
+            continue;
+        }
+        let (head, tail) = rest.split_at(at + tag.len() + open + 1);
+        out.push_str(head);
+        let end = tail.find('"').unwrap_or(tail.len());
+        let t = &tail[..end];
+        let ms = parse_rfc3339(t);
+        if t.starts_with("0001-") || format_rfc3339(ms) != t {
+            out.push_str(t);
+        } else {
+            out.push_str(&format_rfc3339_local(ms));
+        }
+        rest = &tail[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// A time.Time Go made with time.Now() as Unix milliseconds: written in
+/// this machine's zone, as Go writes it (`…+01:00`), read in any; 0 is
+/// Go's zero time.
+pub mod local_time {
+    use super::*;
+
+    pub fn serialize<S: Serializer>(ms: &Ms, s: S) -> Result<S::Ok, S::Error> {
+        if *ms == 0 {
+            return s.serialize_str(ZERO_TIME);
+        }
+        s.serialize_str(&format_rfc3339_local(*ms))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Ms, D::Error> {
+        super::time::deserialize(d)
     }
 }
 
@@ -249,6 +300,37 @@ mod tests {
         f: f64,
         #[serde(with = "bytes")]
         b: Vec<u8>,
+    }
+
+    /// A time Go made with time.Now() is written in this machine's zone
+    /// and reads back the same; the zero time stays Go's.
+    #[test]
+    fn local_times_as_go_writes_them() {
+        #[derive(Serialize, Deserialize, PartialEq, Debug)]
+        struct L {
+            #[serde(with = "local_time")]
+            at: Ms,
+        }
+        let got = serde_json::to_string(&L {
+            at: 1_790_510_400_123,
+        })
+        .unwrap();
+        assert_eq!(
+            got,
+            format!(r#"{{"at":"{}"}}"#, format_rfc3339_local(1_790_510_400_123))
+        );
+        assert_eq!(
+            got,
+            in_local_zone(r#"{"at":"2026-09-27T12:00:00.123Z"}"#, "at")
+        );
+        assert_eq!(
+            serde_json::from_str::<L>(&got).unwrap().at,
+            1_790_510_400_123
+        );
+        assert_eq!(
+            serde_json::to_string(&L { at: 0 }).unwrap(),
+            r#"{"at":"0001-01-01T00:00:00Z"}"#
+        );
     }
 
     #[test]

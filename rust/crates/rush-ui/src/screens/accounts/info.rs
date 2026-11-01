@@ -6,7 +6,8 @@
 //! it's open; what's on disk is read off the UI thread when it opens.
 //! After Go's internal/ui/infosheet.go (infoSheet :28, tabs :79,
 //! openInfo :102, step :163, infoRow :186, key :193, body :226,
-//! statusLines :282, bigMeter :409, usageLines :453, billedRow :660) and
+//! statusLines :282, bigMeter :409, usageLines :453 (its Every account
+//! :553, from the list's reading of each account), billedRow :660) and
 //! infotabs.go (contextLines :24, historyLines :103, bigTokens :168,
 //! short :176, hourSpark :189, settingsCounts :219, readSettingsCounts
 //! :226, add :245, settingsLinks :280, settingsLines :354), caps.go:21
@@ -107,11 +108,11 @@ pub struct InfoSheet {
     pub tab: usize,
     scroll: [usize; TABS],
     /// The Settings tab's row.
-    cur: usize,
+    pub(super) cur: usize,
     /// The tabs the agent has.
     pub shown: Vec<usize>,
     pub(super) read: InfoRead,
-    settings: Vec<SettingsLink>,
+    pub(super) settings: Vec<SettingsLink>,
     pub(super) loaded: bool,
 }
 
@@ -370,12 +371,25 @@ impl Sheet for InfoSheet {
                 {
                     // Claude Code's own screen, with the terminal handed
                     // to it (infotabs.go:333).
+                    let key = self.key.clone();
                     if l.claude && l.screen == "mcp" {
-                        let key = self.key.clone();
                         crate::screens::session_cards::claudescreen::open_screen(m, &key, "mcp");
                         return Out::Close;
                     }
-                    m.flash_err(&format!("{} isn't in this rush yet", l.name));
+                    // Each opens its sheet, as its / command does; the
+                    // harness's own row its provider on Settings
+                    // (infotabs.go:318-331, openAgentSettings).
+                    let screen = if l.screen.is_empty() {
+                        "config"
+                    } else {
+                        l.screen
+                    };
+                    let name = l.name.clone();
+                    match crate::screens::session_cards::claudescreen::rush_screen(m, &key, screen)
+                    {
+                        Out::Pass => m.flash_err(&format!("{name} isn't in this rush yet")),
+                        _ => return Out::Close,
+                    }
                 }
             }
             _ => return Out::Idle,
@@ -1040,6 +1054,42 @@ fn usage_lines(
                     w,
                 ));
             }
+        }
+    }
+
+    // Every account side by side: its windows, today's spend and what
+    // runs on it, this agent's marked ◂ (usageLines' Every account).
+    if !m.accounts.is_empty() && other.is_none() {
+        out.push(Line::new());
+        out.push(info_head("Every account"));
+        for x in &m.accounts {
+            let mut parts: Vec<Line> = x
+                .quota
+                .windows
+                .iter()
+                .map(|win| {
+                    line([
+                        sp(format!("{} ", win.label), DIM),
+                        sp(format!("{:3.0}%", win.percent), usage_color(win.percent)),
+                    ])
+                })
+                .collect();
+            parts.push(then(text(money(x.today)), dim(" today")));
+            if x.live > 0 {
+                parts.push(dim(format!("{} running", x.live)));
+            }
+            let mut row = Line::new();
+            for (i, p) in parts.into_iter().enumerate() {
+                if i > 0 {
+                    row.spans.push(sp("  ·  ", DIM));
+                }
+                join(&mut row, p);
+            }
+            let mut name = x.folder.name.clone();
+            if x.folder.config_dir == a.acct.dir {
+                name += " ◂";
+            }
+            out.push(info_row(&name, row, w));
         }
     }
     out

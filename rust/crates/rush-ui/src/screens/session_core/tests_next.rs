@@ -234,6 +234,7 @@ fn whole_takes_the_lines_kept_meanwhile() {
         vec![Said::Sent {
             text: "turn three".into(),
             images: Vec::new(),
+            exchange: None,
         }],
         false,
     );

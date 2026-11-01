@@ -152,15 +152,17 @@ mod tests {
     fn reads_what_go_writes() {
         let _h = Home::new();
         std::fs::create_dir_all(dir("j")).unwrap();
-        let go = include_bytes!("../tests/fixtures/exchange.json");
+        // Its time as Go writes it on this machine: in its zone.
+        let go = include_str!("../tests/fixtures/exchange.json");
+        let go = rush_core::wire::in_local_zone(go, "At").into_bytes();
         let mut journal = b"\n".to_vec();
-        journal.extend_from_slice(go);
+        journal.extend_from_slice(&go);
         journal.push(b'\n');
         std::fs::write(path("j"), &journal).unwrap();
         let got = read_exchanges("j");
         assert_eq!(got.len(), 1);
         let mut e = got[0].clone();
         e.archived = false;
-        assert_eq!(crate::json::line(&e), go.to_vec());
+        assert_eq!(crate::json::line(&e), go);
     }
 }

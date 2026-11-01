@@ -2,7 +2,7 @@
 //! what each tree of processes costs (`proc`), the battery and free disk
 //! (`sysinfo`), ending process trees and making git worktrees (`actions`),
 //! ending a process group when its host goes (`pgguard`), waiting for files
-//! to grow without polling (`fswait`), following an agent's longer shell
+//! to grow without polling (`fswait`), giving freed memory back (`mem`), following an agent's longer shell
 //! calls (`script`), and storing idle transcripts compressed (`squeeze`);
 //! running a program with a time limit (`cmd`); the running rush as a
 //! file to start again, waiting out an install (`selfexe`). Which agent programs have
@@ -15,6 +15,7 @@ pub mod actions;
 pub mod cmd;
 pub mod events;
 pub mod fswait;
+pub mod mem;
 pub mod pgguard;
 pub mod proc;
 pub mod script;

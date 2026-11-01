@@ -26,7 +26,7 @@ use crate::screens::accounts::state::{cfg, peek};
 use crate::screens::list_extras::meters::{MeterRow, meter_row, mini_bar, pct, usage_color};
 use crate::screens::list_extras::plan::{
     InQueue, Queue, account_chain, compact_window, drains, plan_rows, plan_summary, reset_in,
-    roughly, system_alerts, upcoming,
+    system_alerts, upcoming,
 };
 use crate::screens::projects_machine::{TEMP_SHOWN, machine, temp_known};
 use crate::screens::social::parts::disk;
@@ -235,7 +235,11 @@ pub static SEGS: &[Seg] = &[
         id: "clock",
         name: "Clock",
         about: "the time of day",
-        draw: |x| one(dim(crate::screens::accounts::rows::clock(now(x.m), false))),
+        draw: |x| {
+            let t = now(x.m);
+            crate::style::turns_in(60_000 - t.rem_euclid(60_000));
+            one(dim(crate::screens::accounts::rows::clock(t, false)))
+        },
     },
     Seg {
         id: "version",
@@ -259,6 +263,24 @@ fn net_seg() -> Line {
     } else {
         dim("net steady")
     })
+}
+
+/// Whether the battery and disk show differently read as now than as
+/// was: the free disk as its segment prints it, the colours and alerts
+/// it takes, the battery whole.
+pub fn shows_differently(
+    was: (rush_sys::sysinfo::Battery, rush_sys::sysinfo::Disk),
+    now: (rush_sys::sysinfo::Battery, rush_sys::sysinfo::Disk),
+) -> bool {
+    let disk = |d: rush_sys::sysinfo::Disk| {
+        (
+            d.total == 0,
+            disk(d.free as i64),
+            d.free < 5 << 30,
+            d.free < 20 << 30,
+        )
+    };
+    was.0 != now.0 || disk(was.1) != disk(now.1)
 }
 
 /// Only what needs attention: healthy battery, disk and network say
@@ -356,6 +378,9 @@ pub fn acct_queues(m: &Model) -> (Vec<Queue>, Vec<MeterRow>) {
                     current: l.current,
                 })
                 .collect();
+            for l in &logins {
+                crate::screens::list_extras::plan::note_resets(&l.quota, now);
+            }
             for k in rush_fleet::chain(&logins, now) {
                 qu.accts.push(InQueue {
                     name: k.login.login.name.clone(),
@@ -458,6 +483,7 @@ fn other_meters(m: &Model, k: &str, w: usize) -> Line {
         .into_iter()
         .filter(|r| r.kind != k)
         .map(|mut r| {
+            crate::screens::list_extras::plan::note_resets(&r.q, now);
             r.q = r.q.since(now); // a window that has reset since is empty
             r
         })
@@ -544,6 +570,10 @@ fn usage_detail(m: &Model, u: &Quota, cells: usize, when: bool) -> Line {
         .iter()
         .map(|r| meter_of(m, r))
         .collect();
+    crate::screens::list_extras::plan::note_resets(u, now);
+    for a in &accts {
+        crate::screens::list_extras::plan::note_resets(&a.q, now);
+    }
     let waits = cfg(m).default_profile().limit() == rush_state::profiles::LIMIT_WAIT;
     if let Some(next) = upcoming(&accts, u.used(""), waits, now) {
         // Where sessions go at the switch: glyph, name, and a short bar
@@ -573,6 +603,9 @@ fn usage_detail(m: &Model, u: &Quota, cells: usize, when: bool) -> Line {
         join(&mut s, p);
     }
     let every = EVERY.as_millis() as Ms;
+    if u.fetched_at != 0 {
+        crate::style::turns_at(u.fetched_at + 20 * HOUR + 1, now);
+    }
     if u.fetched_at != 0 && now - u.fetched_at > 3 * every {
         let day = now - u.fetched_at > 20 * HOUR;
         let when = crate::screens::accounts::rows::clock(u.fetched_at, day);
@@ -604,6 +637,14 @@ pub fn usage_meter(win: &Window, rate: f64, now: Ms, w: usize, when: bool) -> Li
         fill = 1;
     }
     let tick = pace.map(|p| ((p * w as f64).max(0.0) as usize).min(w.saturating_sub(1)));
+    if let (Some(t), true) = (tick, span > 0 && w > 0) {
+        // The tick steps a cell on, the colour turns as pace passes the
+        // share used, and both go at the reset.
+        let at = |share: f64| resets - (span as f64 * (1.0 - share)) as Ms;
+        crate::style::turns_at(at((t + 1) as f64 / w as f64) + 1, now);
+        crate::style::turns_at(at(pct_ / 100.0 - 0.1) + 1, now);
+        crate::style::turns_at(resets, now);
+    }
     let mut s = line([dim(format!("{} ", win.label))]);
     for i in 0..w {
         let at = tick == Some(i);
@@ -638,7 +679,14 @@ fn runs_out(pct_: f64, rate: f64, resets: Ms, now: Ms) -> Option<Span> {
     if resets != 0 && resets > now && left >= resets - now {
         return Some(sp(" lasts", FAINT));
     }
-    Some(sp(format!(" out in {}", roughly(left)), RED))
+    crate::style::turns_in(60_000); // the rate moves with the clock
+    Some(sp(
+        format!(
+            " out in {}",
+            crate::screens::list_extras::plan::roughly_left(left)
+        ),
+        RED,
+    ))
 }
 
 /// The header's right side while the top bar is the default: spend and

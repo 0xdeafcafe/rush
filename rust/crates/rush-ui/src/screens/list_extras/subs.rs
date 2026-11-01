@@ -82,7 +82,10 @@ pub fn line_of(
     let mut right = line([plain(" ")]);
     if time_w > 0 && s.born != 0 {
         right = line([
-            sp(crate::style::right(&dur(now - s.born), time_w), DIM),
+            sp(
+                crate::style::right(&crate::style::dur_since(now - s.born), time_w),
+                DIM,
+            ),
             plain(" "),
         ]);
     }

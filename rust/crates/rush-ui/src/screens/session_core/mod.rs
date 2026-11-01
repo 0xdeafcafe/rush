@@ -135,6 +135,9 @@ pub fn register(x: &mut Ext) {
     x.session_keys.push(memedit::key);
     x.session_keys.push(memedit::draft_key);
     x.list_keys.push(memedit::list_draft_key);
+    // enter and esc while a draft is carried from a Session, before the
+    // Prompt's own (keys.go:279 carryKey).
+    x.list_keys.insert(0, actions::carry_key);
     x.session_keys.push(keys::esc_twice);
     x.session_keys.push(textsel::key);
     x.session_keys.push(changes::full_key);
@@ -276,6 +279,9 @@ pub fn in_order(
 /// aren't the conversation's view).
 #[derive(Default)]
 pub struct Conn {
+    /// The pages it published, worked out again only as the session
+    /// changes (artifactsOf).
+    pub arts: crate::screens::plugin_ui::artifacts::Kept,
     /// Its host, when rush runs it and it's connected.
     pub link: Option<Arc<dyn Link>>,
     pub link_gen: u64,

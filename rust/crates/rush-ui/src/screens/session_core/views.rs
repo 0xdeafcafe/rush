@@ -514,6 +514,16 @@ fn move_sel(m: &mut Model, key: &str, d: isize) {
     v.sel = seen[next].clone();
 }
 
+/// Opens url in the browser and says so (browse); with no loop (tests,
+/// rush --render) only says it.
+fn browse(m: &mut Model, url: &str) {
+    if m.sender().is_some() {
+        crate::screens::projects_machine::place::browse(m, url);
+    } else {
+        m.flash(&format!("opened {url}"));
+    }
+}
+
 /// enter, space or → on a view's row (paneKey's enter on a pick).
 fn act(m: &mut Model, key: &str, name: &str, s: &str) -> Out {
     let sel = m
@@ -533,6 +543,30 @@ fn act(m: &mut Model, key: &str, name: &str, s: &str) -> Out {
             conn(m, key).vs.view = 0;
             return Out::Draw;
         }
+    }
+    // A page it published opens in the browser (rushmode.go:4243).
+    if let Some(url) = sel.strip_prefix("art:")
+        && name == "overview"
+    {
+        browse(m, url);
+        return Out::Draw;
+    }
+    // One of its pull requests opens whole, or on GitHub when GitHub
+    // hasn't said more of it than its transcript (openAgentPR, prs.go:797).
+    if let Some(n) = sel.strip_prefix("pr:") {
+        let Some(a) = m.agents.iter().find(|a| a.key == key) else {
+            return Out::Idle;
+        };
+        let prs = crate::screens::session_cards::finishcard::agent_prs(m, a);
+        let Some((root, pr)) = prs.into_iter().find(|(_, p)| p.number.to_string() == n) else {
+            return Out::Idle;
+        };
+        if root.is_empty() {
+            browse(m, &pr.url);
+        } else {
+            crate::screens::projects_machine::prsheet::open_pr_sheet(m, &root, &pr);
+        }
+        return Out::Draw;
     }
     if sel == "go:memory" {
         if let Some(v) = m.session.as_mut() {
@@ -616,6 +650,10 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
                     .into_iter()
                     .map(|l| (l, String::new())),
             );
+            // Its pull requests and the pages it published, then what it
+            // edited outside the project (overviewSections).
+            l.extend(super::overview::pr_section(m, &key, w));
+            l.extend(super::overview::artifacts_section(m, &key, w));
             let own = super::changes::own_changes(m, &key).1;
             l.extend(super::overview::session_files(&own, w));
             l.extend(super::overview::scratch_section(m, &key, w));
@@ -626,7 +664,12 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
         }
         "changes" => match super::changes::full_file(m, &key) {
             Some(p) => super::changes::file_view(m, &p, w),
-            None => super::changes::lines(m, &key, w),
+            // Its pull requests head the changes (rushmode.go:2464).
+            None => {
+                let mut l = super::overview::pr_section(m, &key, w);
+                l.extend(super::changes::lines(m, &key, w));
+                l
+            }
         },
         "tasks" => super::tasks::lines(m, w),
         "background" => super::running::background_lines(m, &key, w),

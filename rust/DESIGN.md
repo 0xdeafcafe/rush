@@ -16,6 +16,16 @@ speed or memory claim has a number behind it.
   (watchBinary every 30 s; in the rush that leads, settleLanded every
   minute and tidyDone every 10) wake the loop only at the second one is
   due, hand their work to a thread, and draw nothing (rush-ui chores.rs).
+  What Go redraws every second for the clock's sake is drawn when its
+  text changes: a label that moves with the clock (`style::age_since`,
+  `dur_since`, `dur_left`, plan's `roughly_left` and `note_resets`) notes
+  when it next turns, and the frame asks to be woken then; the list is
+  laid out again when an agent's group runs out of time (rebuild's
+  `group_turn`). Screens past the list (a Session, a place, a sheet) are
+  drawn again with the chores' wake, every 30 seconds, as before. The
+  battery and disk are read at the same wake while shown (IOKit, not
+  pmset) and drawn only when they'd show differently; the hosts' sweep
+  goes over the list's own listing, which its watcher keeps fresh.
 - **Small memory.** Measured as macOS *physical footprint*
   (`/usr/bin/footprint -p <pid>`), not RSS. Go rush sits at about 40 MB with
   a session open; opening one large transcript retains about 22 MB. Target:
@@ -498,7 +508,10 @@ on every frame. Go retains about 22 MiB for the same.
    scanning (incremental from the last offset), previews, the open
    transcript's tail (its last 2 MB first; a longer one is then read
    whole on the same worker and takes the end's place, its turns'
-   refs renumbered so nothing on screen moves: Go's twopass.go). Each
+   refs renumbered so nothing on screen moves: Go's twopass.go; that
+   worker also lays out the whole's last 400 rows as the view last drew
+   and works out its edits, so the frame that swaps it in draws little:
+   Go's warmed, rushmode.go:2064). Each
    watches files with `rush_sys::fswait::Watcher`
    (kqueue on macOS; the one file watcher in rush: `watch` before reading,
    `wait` blocks until a change, a `Stop` or a timeout; a path not there
@@ -1122,10 +1135,12 @@ is made. Everything below is in `rush_ui::frame`.
   at second 8 of 15 working, 25 of 45 idle) rides the tick and never
   wakes rush itself. His mix uses `mul_add`, as Go's compiler fuses it on
   arm64, so every cell matches Go's (a hashed dump of every frame).
-- **Gaps.** Colours are still the dark ground's constants: `ground.rs`
-  (photon's theme), `headerwash.rs` and `scheme.rs` (the terminal's
-  colour and mode 2031 reports, parsed) are ported but the reports
-  aren't asked for, as rush-draw hands the UI keys, not raw replies.
+- **Gaps.** Colours are written as the dark ground's constants and
+  moved onto the ground picked as rush-draw paints (`ground.rs`,
+  photon's theme). For Theme "match terminal" rush-draw asks the
+  terminal's colours (OSC 10, 11, then DA1) as it takes the terminal,
+  before the input thread reads; they aren't asked again on focus or
+  a mode 2031 report, as rush-draw hands the UI keys, not raw replies.
   Handing the terminal to `$EDITOR` (Go's `editorCmd`) waits on
   rush-draw pausing its input reader: every $EDITOR use goes through
   `session_core::memedit::edit_then(m, path, done)`, which runs the
@@ -1284,6 +1299,18 @@ Go rush is gone from the tree; its last version is the `go-final` tag
   then the frame — in µs, instructions, bytes and allocations per frame.
   Then the same with ctrl+k's bar open over it. `-- profile` draws the
   list for 20 s instead, for `sample`; `-- profile-bar` the bar.
+- A conversation keeps what's drawn, not what was sent: a step's
+  structured result only for the keys something reads
+  (`rush_convo::model::RESULT_KEYS`; no file contents, shell streams or
+  MCP screenshots), and a shell's streams once when its output is them
+  run together. The 125 MB "Scoping Trace Sharing" transcript read whole
+  retains 12.7 MiB (30.2 before, 2026-10-30); its open TUI's footprint
+  went 231-255 → 185-197 MB (the list and ctrl+k's held searches are
+  most of the rest). ctrl+k lets go of what it held on Go's two-minute
+  timer, not at the next search: 2-4 minutes after it, the live heap
+  falls 124 → 79 MiB and the footprint 180 → 125 MB. A long
+  conversation closed or replaced is freed on a thread of its own and
+  its pages given back (`rush_sys::mem::let_go`).
 - Footprint: `/usr/bin/footprint -p <pid>` idle on the list, and with the
   largest transcript under `~/.claude/projects` open; side by side with Go.
 - Idle: `top -l` CPU and wakeups over 60 s with nothing changing.

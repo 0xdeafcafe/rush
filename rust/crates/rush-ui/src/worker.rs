@@ -6,16 +6,19 @@
 //! 128k, the selected one at 384k), fleet/worktree.go:427 (mainCheckout)
 //! and the refresh tick of ui/model.go:1081.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use rush_convo::{Fresh, Session, Tail};
+use rush_convo::{Fresh, Options, Renderer, Session, Tail};
+
+use crate::screens::session_core::changes::{self, FileChange, Ver};
 use rush_core::adapter::{self, AdapterRef, Registry, SLICE, global};
 use rush_core::agent::{Agent, Preview};
 use rush_core::event::Event;
+use rush_core::event::Exchange;
 use rush_core::time::{Ms, now};
 use rush_draw::Sender;
 use rush_fleet::{HostInfo, Loader};
@@ -41,10 +44,12 @@ pub enum Note {
         r#gen: u64,
         err: String,
     },
-    /// The whole of a conversation opened on its end, read after it.
+    /// The whole of a conversation opened on its end, read after it, and
+    /// its end laid out as the view last drew it, when it had.
     Whole {
         r#gen: u64,
         sess: Box<Session>,
+        warm: Option<Box<Warm>>,
     },
     /// Work a screen handed off the UI thread, done: run with the model
     /// on it (frame/work.rs, Model::later).
@@ -60,6 +65,8 @@ pub struct Fleet {
     pub previews: HashMap<String, Preview>,
     /// Their transcripts have been priced.
     pub priced: bool,
+    /// Each account's usage, today's spend and running count.
+    pub accounts: Vec<rush_fleet::AccountView>,
 }
 
 /// While something is live, how often discovery reads again.
@@ -69,6 +76,45 @@ pub const PICKED_WINDOW: i64 = 384 << 10;
 /// How much of a transcript the tail reads at once: the UI applies each
 /// slice in one short step, so a flood or a reread never holds up typing.
 pub const TAIL_SLICE: usize = 512 << 10;
+/// How much of a conversation's end is laid out ahead of the frame that
+/// shows it, off the UI's thread (Go's warmRows, rushmode.go:2056).
+pub const WARM_ROWS: usize = 400;
+
+/// How a conversation's view last drew it, while it shows only the end of
+/// a long one: the worker reading the whole makes it as the view will,
+/// and lays out its end the same way.
+pub type Drawn = Arc<std::sync::Mutex<Option<DrawnAs>>>;
+
+/// What Drawn holds.
+#[derive(Clone)]
+pub struct DrawnAs {
+    pub o: Options,
+    /// What the list said of it.
+    pub info: rush_convo::Info,
+    /// The past exchanges merged into it.
+    pub exchanges: Arc<[Exchange]>,
+    /// Its agent has stopped: a turn its transcript leaves open is ended
+    /// as the view's follow ends it (SessionView::follow).
+    pub stopped: bool,
+}
+
+/// What the worker that read a whole conversation did ahead of the frame
+/// that shows it: the exchanges merged into it, its end laid out, and its
+/// edits worked out (the key and folder they're of, and them).
+pub struct Warm {
+    pub exchanges: Arc<[Exchange]>,
+    pub r: Renderer,
+    pub changes: (Ver, String, Arc<Vec<FileChange>>),
+    /// The steps that ran an agent, and the session and version of its
+    /// steps they're of (subs' Runs::spawn_steps).
+    pub spawn_steps: Option<SpawnSteps>,
+}
+
+/// What a step's spawn is read with: the adapters, and the session's kind.
+pub type SpawnsBy = (Registry, String);
+
+/// The steps that ran an agent, by (serial, step version) of the session.
+pub type SpawnSteps = ((u64, u64), Vec<rush_convo::StepId>);
 
 /// Reads the list once, as `rush --dump` and `--render` do: rows, a spend
 /// scan, rows again.
@@ -95,6 +141,10 @@ pub struct Discovery {
     /// rush's sessions as the last reading listed them: their folders are
     /// watched.
     hosted: Arc<Vec<HostInfo>>,
+    /// The transcripts the last reading's rows price from, with each
+    /// one's kind: the next priced reading scans these before it loads,
+    /// as Go scans the last snapshot's (model.go:627 scan).
+    targets: Option<Vec<(String, rush_core::adapter::SpendTarget)>>,
 }
 
 impl Default for Discovery {
@@ -114,6 +164,7 @@ impl Discovery {
             reg,
             roots: HashMap::new(),
             hosted: Arc::default(),
+            targets: None,
         }
     }
 
@@ -123,16 +174,31 @@ impl Discovery {
             reg,
             roots: HashMap::new(),
             hosted: Arc::default(),
+            targets: None,
         }
     }
 
-    /// The rows; `price` scans spend first.
+    /// The rows; `price` scans spend first. The transcripts the last
+    /// reading had are scanned before one load; only rows new to this one
+    /// (or changed) are scanned after it, and read again if their spend
+    /// moved: one load a reading, not two, every row as priced as before.
     pub fn load(&mut self, now: Ms, price: bool) -> Fleet {
+        let prev = self.targets.take().filter(|_| price);
+        if let Some(t) = &prev {
+            self.loader.scan_targets(t);
+        }
         let mut snap = self.loader.load(now);
         if price {
-            self.loader.scan(&snap.agents);
-            snap = self.loader.load(now);
+            let mut fresh = Loader::kind_targets(&snap.agents);
+            if let Some(t) = &prev {
+                let had: HashSet<&(String, rush_core::adapter::SpendTarget)> = t.iter().collect();
+                fresh.retain(|x| !had.contains(x));
+            }
+            if !fresh.is_empty() && self.loader.scan_targets(&fresh) > 0 {
+                snap = self.loader.load(now);
+            }
         }
+        self.targets = Some(Loader::kind_targets(&snap.agents));
         let agents = snap.agents;
         self.hosted = snap.hosted;
         let roots = agents
@@ -165,6 +231,7 @@ impl Discovery {
             roots,
             previews,
             priced: price,
+            accounts: snap.accounts,
         }
     }
 
@@ -180,10 +247,20 @@ impl Discovery {
         paths
     }
 
+    /// Has w watch what the last reading read. What it didn't watch yet
+    /// may have changed since it was read: the next load looks again.
+    fn watch(&mut self, w: &Watcher) {
+        let paths = self.watched();
+        let new: Vec<PathBuf> = paths.iter().filter(|p| !w.watching(p)).cloned().collect();
+        w.watch(&paths);
+        self.loader.told(Some(&new));
+    }
+
     /// What it watches changed (None: it can't tell what): the adapters
     /// read those again at the next load, however lately they did.
     pub fn changed(&mut self, paths: Option<&[PathBuf]>) {
         self.loader.changed(paths);
+        self.loader.told(paths);
         // rush's state changed (a row put away in Earlier, hidden or
         // renamed, here or by another rush): the next reading has it.
         let dir = rush_state::dir();
@@ -349,18 +426,22 @@ pub fn spawn_discovery_with(
                 });
                 again
             });
+            // Many: a thousand session folders are one stream, not a
+            // thousand descriptors. The loader trusts what it says hasn't
+            // changed: a session's folder unchanged, its info isn't looked
+            // at again.
+            let w = Arc::new(Watcher::many());
+            d.loader.watch_shared(w.clone());
             let first = d.load(now(), false);
             // Watched before each reading after, so a change during it
-            // still wakes; the first says what there is to watch. Many:
-            // a thousand session folders are one stream, not a thousand
-            // descriptors.
-            let w = Watcher::many();
-            w.watch(&d.watched());
+            // still wakes; the first says what there is to watch.
+            d.watch(&w);
             let mut last = first.clone();
             if !tx.send(Note::Fleet(first)) {
                 return;
             }
             loop {
+                let began = std::time::Instant::now();
                 let f = d.load(now(), true);
                 let live = f.agents.iter().any(|a| a.job.live());
                 if f != last {
@@ -375,13 +456,54 @@ pub fn spawn_discovery_with(
                 w.wait(stop.as_deref(), live.then_some(POLL));
                 // What changed: the adapters read it again, whatever they
                 // kept (a project folder listed a second ago included).
-                let (paths, all) = w.changes();
+                let (mut paths, mut all) = w.changes();
+                if !all && !urgent(&paths) && gap(began, stop.as_deref()) {
+                    // A busy agent's files, changing on and on: read at
+                    // most once a GAP, as Go reads on its tick.
+                    let (more, a) = w.changes();
+                    paths.extend(more);
+                    all |= a;
+                }
                 let paths: Vec<PathBuf> = paths.into_iter().collect();
                 d.changed((!all).then_some(paths.as_slice()));
                 // New jobs or project folders: watch them too.
-                w.watch(&d.watched());
+                d.watch(&w);
             }
         });
+}
+
+/// The least time between two readings that follow a busy agent's files
+/// (a transcript growing, a host's info rewritten each step): Go reads the
+/// list once a second, on its tick (model.go tickMsg).
+pub const GAP: Duration = Duration::from_secs(1);
+
+/// What changed that's read at once, however lately the last reading was:
+/// rush's state (something you did: a row renamed, hidden, put away) and
+/// its sessions folder (a session started or gone).
+fn urgent(paths: &HashSet<PathBuf>) -> bool {
+    if paths.is_empty() {
+        return false;
+    }
+    let dir = rush_state::dir();
+    let root = rush_fleet::host_root();
+    paths
+        .iter()
+        .any(|p| *p == dir || p.parent() == Some(dir.as_path()) || *p == root)
+}
+
+/// Waits until GAP has passed since a reading began, unless stop closes
+/// first; whether it waited at all.
+fn gap(began: std::time::Instant, stop: Option<&Stop>) -> bool {
+    let until = began + GAP;
+    let mut waited = false;
+    loop {
+        let now = std::time::Instant::now();
+        if now >= until || stop.is_some_and(Stop::is_closed) {
+            return waited;
+        }
+        waited = true;
+        std::thread::sleep((until - now).min(Duration::from_millis(50)));
+    }
 }
 
 /// Reads one agent's preview off the UI thread.
@@ -417,6 +539,8 @@ pub fn spawn_tail(
     r#gen: u64,
     tx: Sender<Note>,
     decode: rush_convo::Decode,
+    drawn: Drawn,
+    spawns: Option<SpawnsBy>,
 ) -> Option<TailHandle> {
     // One slice waits at most: the next is read while the UI applies it.
     let tx = tx.lane(1);
@@ -460,9 +584,11 @@ pub fn spawn_tail(
                             whole.stop = Some(st.clone());
                             let mut sess = Session::new();
                             if whole.read(&mut sess).is_ok() && !st.load(Ordering::Relaxed) {
+                                let warm = warm(&mut sess, &drawn, spawns.as_ref());
                                 if !tx.send(Note::Whole {
                                     r#gen,
                                     sess: Box::new(sess),
+                                    warm,
                                 }) {
                                     return;
                                 }
@@ -489,6 +615,72 @@ pub fn spawn_tail(
         })
         .ok()?;
     Some(TailHandle { stop, wake })
+}
+
+/// The end of s laid out as its view last drew (drawn), WARM_ROWS of it,
+/// and its edits worked out: the frame that shows it then finds those
+/// turns drawn, rather than drawing a long conversation's end while you
+/// wait (Go's warmed, rushmode.go:2064). None when the view hasn't drawn
+/// yet. s takes what the list said of it, as the view's will.
+fn warm(s: &mut Session, drawn: &Drawn, spawns: Option<&SpawnsBy>) -> Option<Box<Warm>> {
+    let DrawnAs {
+        mut o,
+        info,
+        exchanges,
+        stopped,
+    } = drawn.lock().ok()?.clone()?;
+    if o.width == 0 {
+        return None;
+    }
+    o.now = now();
+    s.info = info;
+    // As the view merges them once the whole is in (take_whole_drawn), and
+    // ends the turn its stopped agent left open (follow): done after, they
+    // would change what was laid out here.
+    if !exchanges.is_empty() {
+        s.restore_exchanges(&exchanges);
+    }
+    if stopped && s.live().is_some() {
+        s.apply(&rush_core::event::Event::TurnEnd(end_left_open()), o.now);
+    }
+    let mut r = Renderer::new();
+    r.tail(s, &o, WARM_ROWS);
+    let changes = (
+        changes::memo_key_of(s, &o.kids),
+        s.info.cwd.clone(),
+        Arc::new(changes::changes_with(s, &o.kids)),
+    );
+    // The steps that ran an agent, as the dock's runs work them out
+    // (subs::refresh): every step looked at once.
+    let spawn_steps = spawns.map(|(reg, kind)| {
+        let ids = s
+            .turns
+            .iter()
+            .flat_map(|t| &t.items)
+            .filter_map(|it| match it {
+                rush_convo::Item::Step(id) => Some(*id),
+                _ => None,
+            })
+            .filter(|id| {
+                crate::screens::list_extras::spawns::step_spawn(reg, s.step(*id), kind).is_some()
+            })
+            .collect();
+        ((s.serial(), s.step_ver()), ids)
+    });
+    Some(Box::new(Warm {
+        exchanges,
+        r,
+        changes,
+        spawn_steps,
+    }))
+}
+
+/// How a turn a stopped agent's transcript leaves open is ended.
+pub fn end_left_open() -> rush_core::event::TurnEnd {
+    rush_core::event::TurnEnd {
+        reason: "done".into(),
+        ..Default::default()
+    }
 }
 
 /// Follows an adapter's history as it grows (its HistoryFollower), a
@@ -576,6 +768,33 @@ pub fn spawn_history(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The worker makes the whole as the view will once it's in: the turn
+    /// a stopped agent left open ended, the past exchanges merged; and
+    /// lays out its end for that, not for what the view would change.
+    #[test]
+    fn warm_makes_the_whole_as_the_view_will() {
+        let drawn = Drawn::default();
+        let mut s = Session::new();
+        s.sent("go".into(), Vec::new(), 1000);
+        assert!(warm(&mut s, &drawn, None).is_none(), "nothing drawn yet");
+        let as_drawn = |stopped| DrawnAs {
+            o: Options {
+                width: 80,
+                ..Options::default()
+            },
+            info: rush_convo::Info::default(),
+            exchanges: Arc::default(),
+            stopped,
+        };
+        *drawn.lock().unwrap() = Some(as_drawn(false));
+        assert!(warm(&mut s, &drawn, None).is_some());
+        assert!(s.live().is_some(), "a running agent's turn stays open");
+        *drawn.lock().unwrap() = Some(as_drawn(true));
+        let w = warm(&mut s, &drawn, None).unwrap();
+        assert!(s.live().is_none(), "a stopped agent's turn ended");
+        assert!(w.r.kept_rows() > 0);
+    }
 
     #[test]
     fn main_checkout_of_a_worktree() {
@@ -848,7 +1067,7 @@ mod tests {
         }
         let lp: Loop<Note> = Loop::new();
         let decode = rush_convo::decode(rush_claude::messages);
-        let h = spawn_tail(p.clone(), 1, lp.sender(), decode).unwrap();
+        let h = spawn_tail(p.clone(), 1, lp.sender(), decode, Drawn::default(), None).unwrap();
         let mut app = Notes {
             n: 0,
             path: p.clone(),
@@ -903,7 +1122,7 @@ mod tests {
         }
         let lp: Loop<Note> = Loop::new();
         let decode = rush_convo::decode(rush_claude::messages);
-        let h = spawn_tail(p.clone(), 1, lp.sender(), decode).unwrap();
+        let h = spawn_tail(p.clone(), 1, lp.sender(), decode, Drawn::default(), None).unwrap();
         let mut app = Notes {
             tails: 0,
             whole: None,

@@ -89,6 +89,7 @@ fn list() -> Model {
         roots,
         previews: Default::default(),
         priced: true,
+        accounts: Vec::new(),
     });
     m.sel = "work/c1".into();
     m
@@ -416,6 +417,7 @@ fn perm_opens_the_permissions_row() {
         roots: Vec::new(),
         previews: Default::default(),
         priced: true,
+        accounts: Vec::new(),
     });
     m.command("#permissions");
     if let Some(s) = m.sheet_as::<StartSheet>() {
@@ -735,6 +737,7 @@ fn ctrl_n_takes_the_longest_waiting() {
         roots,
         previews: Default::default(),
         priced: true,
+        accounts: Vec::new(),
     });
     for _ in 0..2 {
         press(&mut m, "ctrl+n");

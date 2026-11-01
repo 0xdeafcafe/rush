@@ -4,7 +4,7 @@
 
 use rush_core::agent::{Halt, State};
 
-use super::tests::{MIN, NOW, agent, model_of};
+use super::tests::{HOUR, MIN, NOW, agent, model_of};
 use crate::list::{FINISHED, IDLE, JUST_LEFT, ListLine, NEEDS, STUCK, section_key};
 use crate::style::text_of;
 
@@ -52,6 +52,37 @@ fn stacked_at_share() {
     m.cfg.stack_at = -1;
     assert!(!m.stacked(126, 20), "turned off, a roomy list doesn't");
     assert!(m.stacked(40, 20), "too narrow always stacks");
+}
+
+/// Settings › Second line transparency fades a stacked row's second line
+/// toward the background: "50%" half way (view.go:2111 subLineFade,
+/// fadeText).
+#[test]
+fn the_second_line_fades() {
+    use crate::frame::ground::{Rgb, mix, painted};
+    let mut m = model_of(vec![agent("a1", "one", State::Idle, 1)], 300, 40);
+    let i = m.agents.iter().position(|a| a.key.ends_with("a1")).unwrap();
+    let fgs = |m: &crate::model::Model| -> Vec<_> {
+        m.agent_sub(i, 60)
+            .spans
+            .iter()
+            .skip(2)
+            .map(|s| s.style.fg)
+            .collect()
+    };
+    let before = fgs(&m);
+    assert!(!before.is_empty());
+    m.cfg.sub_line = "50%".into();
+    let after = fgs(&m);
+    for (b, a) in before.iter().zip(&after) {
+        let want = Rgb::of(*b).map(|c| mix(c, painted().bg, 0.5).color());
+        assert_eq!(Some(*a), want);
+    }
+    assert_eq!(
+        m.agent_sub(i, 60).spans[1].style.fg,
+        crate::style::FAINT,
+        "the hook stays as it is"
+    );
 }
 
 /// ↑↓ stop on every section heading; there the agent picked before stays
@@ -286,5 +317,35 @@ fn badges_name_the_open_sessions_harness_and_plugins_status() {
     assert!(
         f.contains(&format!("fix the tax rounding {full} 2 drafts")),
         "{f}"
+    );
+}
+
+/// Idle, the list asks to be drawn again only when what it shows turns
+/// with the clock: a row's "1m" when it reads "2m", a group when an agent
+/// leaves it; and nothing on screen that moves, nothing asked.
+#[test]
+fn woken_when_a_time_turns() {
+    use rush_draw::App;
+    use std::time::{Duration, Instant};
+    let mut a = agent("a1", "one", State::Idle, 0);
+    a.job.updated_at = NOW - MIN - 15_000; // "1m", "2m" in 45 s
+    let mut m = model_of(vec![a], 160, 40);
+    let mut hd = rush_draw::Headless::new(160, 40);
+    hd.draw(|c| m.draw(c));
+    let at = m.wake_at().expect("a wake for the time column");
+    let left = at.saturating_duration_since(Instant::now());
+    assert!(left <= Duration::from_secs(46), "{left:?}");
+    assert!(left > Duration::from_secs(40), "{left:?}");
+    // Long gone: its "3d" turns in a day; Earlier keeps it for good.
+    let mut b = agent("b1", "old", State::Done, 0);
+    b.job.updated_at = NOW - 72 * HOUR - 1_000;
+    let mut m = model_of(vec![b], 160, 40);
+    hd.draw(|c| m.draw(c));
+    let left = m
+        .wake_at()
+        .map(|t| t.saturating_duration_since(Instant::now()));
+    assert!(
+        left.is_none_or(|d| d > Duration::from_secs(20 * 3600)),
+        "{left:?}"
     );
 }
