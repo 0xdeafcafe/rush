@@ -932,6 +932,8 @@ fn spawn(term: &str, (cols, rows): (u16, u16)) -> io::Result<(Child, File)> {
             if libc::setsid() < 0 {
                 return Err(io::Error::last_os_error());
             }
+            // The default class, not the screen's: see rush_sys::qos.
+            rush_sys::qos::plain();
             if libc::ioctl(0, libc::TIOCSCTTY as _, 0) < 0 {
                 return Err(io::Error::last_os_error());
             }

@@ -293,6 +293,8 @@ impl Rooms {
         unsafe {
             cmd.pre_exec(|| {
                 libc::setsid();
+                // The default class, not the screen's: see rush_sys::qos.
+                rush_sys::qos::plain();
                 Ok(())
             });
         }

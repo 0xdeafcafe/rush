@@ -134,7 +134,10 @@ pub(crate) fn start(push: impl Fn(Event) -> bool + Send + 'static) -> io::Result
     let me = r.clone();
     thread::Builder::new()
         .name("rush-input".into())
-        .spawn(move || run(&me, &tty, &wake_r, &winch_r, push))?;
+        .spawn(move || {
+            crate::qos::interactive();
+            run(&me, &tty, &wake_r, &winch_r, push)
+        })?;
     Ok(r)
 }
 

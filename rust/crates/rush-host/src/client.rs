@@ -211,11 +211,14 @@ pub(crate) fn spawn_on(mut cfg: Config, exe: Option<&Path>) -> Result<Config> {
         cmd.env(crate::server::MALLOC_VAR, "1")
             .env(crate::server::MALLOC_SET, "1");
     }
-    // Its own session, so closing rush or its terminal leaves it running.
-    // SAFETY: setsid is async-signal-safe and touches nothing of ours.
+    // Its own session, so closing rush or its terminal leaves it running;
+    // in the default class, not the screen's (rush_sys::qos), so its agents
+    // and what they run don't go ahead of rush.
+    // SAFETY: setsid and plain are async-signal-safe and touch nothing of ours.
     unsafe {
         cmd.pre_exec(|| {
             libc::setsid();
+            rush_sys::qos::plain();
             Ok(())
         });
     }

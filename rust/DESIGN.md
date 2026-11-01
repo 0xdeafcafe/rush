@@ -607,6 +607,15 @@ on every frame. Go retains about 22 MiB for the same.
    (one sysctl), which spawn folding and the machine's rows need, and
    fills memory and CPU only for the trees it shows.
 
+On macOS the UI and terminal reader threads run in the user-interactive
+class (rush-draw `qos`), as an app's main thread does: a CLI's threads
+otherwise share the default class with every compiler an agent starts,
+and with ten builds going a frame waited 250 ms to 3 s for CPU
+(stalls.log, load 160 on 10 cores). A program takes on the class of the
+thread that starts it, so what rush starts to keep running (hosts, the
+plugin broker, reminders, ollama, rooms, prdrive, pushlater, the sshd
+shell) goes back to the default in its pre_exec (`rush_sys::qos::plain`).
+
 4. **netwatch** (rush-net): whether the API can be reached. It checks
    once at start, when the network changes, and when a job fails on what
    looks like the network; on Go's timings (2 min steady, 30 s shaky, 5–30
