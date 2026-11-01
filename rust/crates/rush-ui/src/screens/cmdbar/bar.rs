@@ -1497,6 +1497,16 @@ pub fn to_prompt(m: &mut Model) {
     }
 }
 
+/// The agent the open bar's pick goes to, if it's an agent's row or a
+/// conversation found.
+pub fn picked_agent(m: &mut Model) -> Option<String> {
+    let b = st(m).bar.as_ref()?;
+    match &b.items.get(b.cursor)?.go {
+        Go::Agent(key) | Go::Found { key, .. } => Some(key.clone()),
+        _ => None,
+    }
+}
+
 /// Selects an agent and opens its conversation (goAgent).
 pub fn go_agent(m: &mut Model, key: &str) {
     go_place(m, PlaceId::Agents);
