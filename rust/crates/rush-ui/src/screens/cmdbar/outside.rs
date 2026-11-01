@@ -11,20 +11,7 @@ use rush_core::agent::Agent;
 
 use crate::session::harness_name;
 
-/// The profile a's session runs under, as its adapter knows it.
-pub(crate) fn profile_of(reg: &Registry, a: &Agent) -> Profile {
-    reg.get(a.kind.as_str())
-        .and_then(|ad| {
-            reg.profiles_of(&ad)
-                .into_iter()
-                .find(|p| p.name == a.job.account)
-        })
-        .unwrap_or_else(|| Profile {
-            kind: a.kind.clone(),
-            name: a.job.account.clone(),
-            dir: String::new(),
-        })
-}
+pub(crate) use crate::attached::profile_of;
 
 /// Ends a's process and keeps its conversation, the agent's own way; one
 /// whose agent has none gets a SIGTERM. A rush session stops with the

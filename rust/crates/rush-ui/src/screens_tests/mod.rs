@@ -4,6 +4,7 @@
 
 mod accounts;
 mod bars;
+mod list_extras;
 mod plugin_ui;
 mod projects_machine;
 mod social;

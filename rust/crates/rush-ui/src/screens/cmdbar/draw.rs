@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use rush_core::text::{Color, Line, Span, Style, width};
 
 use super::bar::{Bar, BarState, Item, ScopeKind};
+pub use crate::barfind::lit_title;
 use crate::frame::dialog::panel;
 use crate::model::Model;
 use crate::style::*;
@@ -332,30 +333,6 @@ pub fn bar_row(it: &Item, w: usize, col: usize, sel: bool) -> Line {
     if sel {
         l.spans[0] = sp("▍", ORANGE);
         return highlight(l, w);
-    }
-    l
-}
-
-/// title painted, its matched chars bright, cut to w cells (litTitle).
-pub fn lit_title(title: &str, lit: &[usize], w: usize) -> Line {
-    let t = if width(title) > w {
-        rush_draw::truncate(title, w, "…").into_owned()
-    } else {
-        title.to_string()
-    };
-    if lit.is_empty() {
-        return sp_line(t, TEXT);
-    }
-    let mut l = Line::new();
-    for (i, c) in t.chars().enumerate() {
-        let s = c.to_string();
-        let on = lit.contains(&i);
-        let span = if on { spb(s, ORANGE) } else { sp(s, TEXT) };
-        // Neighbours of one look run together.
-        match l.spans.last_mut() {
-            Some(last) if last.style == span.style => last.text.push(c),
-            _ => l.spans.push(span),
-        }
     }
     l
 }

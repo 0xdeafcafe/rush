@@ -9,9 +9,9 @@ use rush_bundled::drafts::{Words, words_for};
 
 use crate::frame::Out;
 use crate::model::Model;
-use crate::screens::plugin_ui::ModelPlugins;
-use crate::screens::plugin_ui::STASH_PLUGIN;
-use crate::screens::plugin_ui::hooks::{box_state, ui_session};
+use rush_ui_plugin_ui::ModelPlugins;
+use rush_ui_plugin_ui::STASH_PLUGIN;
+use rush_ui_plugin_ui::hooks::{box_state, ui_session};
 
 /// What the stash is called, and whether it's running: from what the
 /// plugin broker last said (stash).

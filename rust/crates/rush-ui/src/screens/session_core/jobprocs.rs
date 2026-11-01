@@ -19,18 +19,8 @@ use rush_sys::proc::{self, Pid, Table};
 use crate::screens::list_extras::jobs::strip_ansi;
 use crate::style::{one_line, tildify};
 
-/// A process under an opened task: its program, its words, and what it
-/// uses now.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct ProcRow {
-    pub pid: i32,
-    /// Its program's name (filepath.Base of its comm).
-    pub comm: String,
-    /// Its words, short (shortCmd).
-    pub cmd: String,
-    pub cpu: f64,
-    pub footprint: u64,
-}
+// A process under an opened task is the base's (the Tasks box reads it).
+pub use crate::jobprocs::ProcRow;
 
 /// What the last read of the processes found.
 #[derive(Clone, Debug, Default)]

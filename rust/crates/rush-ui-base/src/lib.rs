@@ -7,7 +7,9 @@
 
 pub mod accounts;
 pub mod agentry;
+pub mod attached;
 pub mod away;
+pub mod barfind;
 pub mod bridge;
 pub mod changes;
 pub mod chores;
@@ -19,6 +21,7 @@ pub mod frame;
 pub mod header;
 pub mod host;
 pub mod imagerefs;
+pub mod jobprocs;
 pub mod keybind;
 pub mod landing;
 pub mod lead;
@@ -34,6 +37,7 @@ pub mod pastes;
 pub mod plan;
 pub mod predict;
 pub mod rooms;
+pub mod search;
 pub mod sess;
 pub mod session;
 pub mod shells;

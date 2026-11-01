@@ -59,14 +59,9 @@ impl Search {
     }
 
     /// Searches the jobs for q on a few threads, after the pause when
-    /// pause is set, handing back what they find in batches through tx
-    /// (searchAgentTranscripts).
-    pub fn start(tx: Sender<Note>, r#gen: u64, jobs: Vec<Job>, q: String, pause: bool) -> Search {
-        Search::start_to(tx, r#gen, jobs, q, pause, super::bar::took)
-    }
-
-    /// start, each batch handed to took rather than the bar's (the
-    /// Agents list's filter searches the same way: listfilter.go:93).
+    /// pause is set, handing back what they find in batches through tx,
+    /// each to took: the bar's, or the Agents list's filter's
+    /// (searchAgentTranscripts, listfilter.go:93).
     pub fn start_to(
         tx: Sender<Note>,
         r#gen: u64,

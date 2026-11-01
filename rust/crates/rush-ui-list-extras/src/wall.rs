@@ -41,10 +41,8 @@ use crate::frame::{Mouse, Out, Press};
 use crate::host::SendErr;
 use crate::list::{folder_key, folder_titles, project_tint};
 use crate::model::Model;
-use crate::screens::session_core::turnwants::{
-    WANTS_PROBLEM, unlooked, wants_mark, wants_of, wants_say, wants_you,
-};
 use crate::style::*;
+use crate::turnwants::{WANTS_PROBLEM, unlooked, wants_mark, wants_of, wants_say, wants_you};
 
 /// Tiles are at least this big, unless they've less to show; below it
 /// they scroll.
@@ -809,7 +807,7 @@ impl Wall {
 
     /// One agent's tile, w×h, its edge heavy when it's picked
     /// (wallAgentTile).
-    pub(super) fn tile(&self, m: &Model, i: usize, w: usize, h: usize, picked: bool) -> Vec<Line> {
+    pub fn tile(&self, m: &Model, i: usize, w: usize, h: usize, picked: bool) -> Vec<Line> {
         if w < 8 || h < 3 {
             return Vec::new();
         }
@@ -1279,14 +1277,14 @@ pub fn read(m: &mut Model) {
 }
 
 /// ctrl+b on a tile, a row or a project's agent (keys.go:747 keepGoing).
-pub(super) fn keep_going(m: &mut Model, i: usize) -> Out {
+pub fn keep_going(m: &mut Model, i: usize) -> Out {
     let a = m.agents[i].clone();
-    crate::screens::cmdbar::hashcmds::keep_going(m, &a)
+    m.ext.calls.keep_going()(m, &a)
 }
 
 /// After each reading of the list: the tiles' transcripts read again
 /// while the Wall shows, or the grid's pinned ones while it doesn't.
-pub(super) fn on_fleet(m: &mut Model) {
+pub fn on_fleet(m: &mut Model) {
     // Agents gone, subagents ended and tiles unpinned take their reads
     // with them.
     let keys: HashSet<String> = read_items(m).into_iter().map(|it| it.key).collect();

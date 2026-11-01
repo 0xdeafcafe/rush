@@ -29,10 +29,11 @@ use rush_fleet::Predicates;
 
 use super::fleetslash::{available_fleet_commands, completed, needs_agent, needs_arg, round_move};
 use super::fuzzy::fuzzy_match;
-use super::search::{BarFound, Search};
+pub use crate::barfind::{lit_words, searchable, split_in, strip_in, who_glyph};
 use crate::frame::editor::{edit, line_end};
 use crate::frame::{Out, PlaceId, Press};
 use crate::model::Model;
+use crate::search::{BarFound, Search};
 use crate::session::{Pos, harness_name};
 use crate::style::*;
 
@@ -504,15 +505,6 @@ fn search_now(m: &mut Model) {
     search_transcripts(m, false);
 }
 
-/// A query with enough to it to be worth reading every transcript for.
-pub fn searchable(q: &str) -> bool {
-    cs::words(&strip_in(q))
-        .iter()
-        .map(String::len)
-        .sum::<usize>()
-        >= 3
-}
-
 /// Starts reading every agent's transcript for the query, the most
 /// recently active first, leaving out the one open (its matches are under
 /// This session); in:<name> narrows the agents (searchTranscripts). With
@@ -542,7 +534,7 @@ fn search_transcripts(m: &mut Model, pause: bool) {
     let jobs: Vec<_> = agents
         .iter()
         .filter_map(|a| {
-            super::search::conversation_of(&m.reg, a)
+            crate::search::conversation_of(&m.reg, a)
                 .map(|s| (a.key.clone(), one_line(&a.display_name), s))
         })
         .collect();
@@ -555,10 +547,10 @@ fn search_transcripts(m: &mut Model, pause: bool) {
         return;
     }
     match tx {
-        Some(tx) => b.search = Some(Search::start(tx, r#gen, jobs, q, pause)),
+        Some(tx) => b.search = Some(Search::start_to(tx, r#gen, jobs, q, pause, took)),
         None => {
             b.search = Some(Search::idle());
-            let found = super::search::search_all(&jobs, &q);
+            let found = crate::search::search_all(&jobs, &q);
             took(m, r#gen, found, true);
         }
     }
@@ -609,24 +601,6 @@ pub fn sort_found(found: &mut [BarFound]) {
             .cmp(&a.found.best())
             .then(a.rank.cmp(&b.rank))
     });
-}
-
-/// Takes in:<name> out of a query (splitIn).
-pub fn split_in(q: &str) -> (String, String) {
-    let mut keep = Vec::new();
-    let mut inn = String::new();
-    for f in q.split_whitespace() {
-        if let Some(v) = f.to_lowercase().strip_prefix("in:") {
-            inn = v.to_string();
-            continue;
-        }
-        keep.push(f);
-    }
-    (keep.join(" "), inn)
-}
-
-pub fn strip_in(q: &str) -> String {
-    split_in(q).0
 }
 
 /// Lists what the query matches, section by section (barRebuild).
@@ -1225,15 +1199,6 @@ pub fn homeless(s: &str) -> String {
     }
 }
 
-/// Who said a hit: you, the agent, or a tool (whoGlyph).
-pub fn who_glyph(who: &str) -> Span {
-    match who {
-        "you" => sp("›", TEXT),
-        cs::WHO_AGENT => sp("✻", ORANGE),
-        _ => sp("·", SUB),
-    }
-}
-
 /// items, then every agent whose conversation has the words (in group,
 /// when one's given), saying how often and where (withSaid).
 pub fn with_said(m: &Model, mut items: Vec<Item>, group: &str) -> Vec<Item> {
@@ -1377,19 +1342,6 @@ fn local_date(ms: Ms) -> (i64, u32, u32) {
     let mo = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     let y = yoe + era * 400 + i64::from(mo <= 2);
     (y, mo, d)
-}
-
-/// The chars of s where the query's words are found (litWords).
-pub fn lit_words(s: &str, words: &[String]) -> Vec<usize> {
-    let mut at = Vec::new();
-    for w in words {
-        let Some((i, j)) = cs::match_span(s, w) else {
-            continue;
-        };
-        let from = s[..i].chars().count();
-        at.extend(from..from + s[i..j].chars().count());
-    }
-    at
 }
 
 /// Does what a picked row says.

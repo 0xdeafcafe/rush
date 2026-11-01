@@ -19,11 +19,11 @@ use rush_fleet::{Folder, Predicates, check_folder, folder_wants};
 
 use crate::frame::{Out, Press};
 use crate::model::Model;
-use crate::screens::social::broadcast::ModelBroadcast;
 use crate::style::*;
+use rush_ui_social::broadcast::ModelBroadcast;
 
 // What's left before an agent's work lands is the frame's (crate::landing).
-pub use crate::landing::{
+pub use rush_ui_base::landing::{
     FOLDER_EVERY, LandKind, LandState, ListFolders, land_of, land_target, tree_of,
 };
 
@@ -88,7 +88,7 @@ pub fn land(m: &mut Model, i: Option<usize>) {
 }
 
 /// alt+p in the list (keys.go:470).
-pub(super) fn key(m: &mut Model, k: &Press) -> Out {
+pub fn key(m: &mut Model, k: &Press) -> Out {
     if k.s != "alt+p" {
         return Out::Pass;
     }
@@ -98,7 +98,7 @@ pub(super) fn key(m: &mut Model, k: &Press) -> Out {
 }
 
 /// #land (keys.go:994).
-pub(super) fn command(m: &mut Model, _: &str) -> Out {
+pub fn command(m: &mut Model, _: &str) -> Out {
     let i = m.selected();
     land(m, i);
     Out::Draw
@@ -108,7 +108,7 @@ pub(super) fn command(m: &mut Model, _: &str) -> Out {
 /// UI thread: every FOLDER_EVERY, and at once when a project or worktree
 /// has no answer yet (refreshFolders, onFolders). Only with a loop
 /// running; a model drawn once (tests, --render) is handed its answers.
-pub(super) fn refresh(m: &mut Model) {
+pub fn refresh(m: &mut Model) {
     if m.sender().is_none() {
         return;
     }

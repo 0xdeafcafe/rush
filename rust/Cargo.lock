@@ -1623,6 +1623,7 @@ dependencies = [
  "rush-ui-accounts",
  "rush-ui-bars",
  "rush-ui-base",
+ "rush-ui-list-extras",
  "rush-ui-plugin-ui",
  "rush-ui-projects-machine",
  "rush-ui-settings",
@@ -1699,6 +1700,31 @@ dependencies = [
  "rush-testenv",
  "rush-update",
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rush-ui-list-extras"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "regex",
+ "rush-bundled",
+ "rush-convo",
+ "rush-core",
+ "rush-draw",
+ "rush-fleet",
+ "rush-gh",
+ "rush-host",
+ "rush-state",
+ "rush-sys",
+ "rush-testenv",
+ "rush-ui-accounts",
+ "rush-ui-base",
+ "rush-ui-plugin-ui",
+ "rush-ui-projects-machine",
+ "rush-ui-settings",
+ "rush-ui-social",
  "serde_json",
 ]
 

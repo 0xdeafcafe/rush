@@ -5,17 +5,19 @@
 //! frame/ext.rs and DESIGN.md "Screens".
 
 use crate::chores::{Chore, always};
-use crate::frame::Ext;
 use crate::frame::ext::{Act, Calls, Kept};
+use crate::frame::{Ext, Out};
 use crate::model::Model;
 use crate::screens::social::services::ModelReload;
 use crate::screens::social::stream::ModelStream;
 use crate::session::SessionView;
 
+// More of the Agents list (the box, the filter, the Wall, the grid, the
+// split, the live mirror): rush-ui-list-extras, at the old path.
+pub use rush_ui_list_extras as list_extras;
 // The bars (top bar and agent header): rush-ui-bars, at the old path.
 pub use rush_ui_bars as bars;
 pub mod cmdbar;
-pub mod list_extras;
 pub mod session_cards;
 pub mod session_core;
 // Projects and the machine: rush-ui-projects-machine, at the old path.
@@ -192,6 +194,26 @@ fn calls() -> Calls {
         header_context: Some(session_core::views::header_context),
         rush_cmd: Some(session_core::rushcmd::run),
         permission_command: Some(session_cards::permissions::permission_command),
+        keep_going: Some(cmdbar::hashcmds::keep_going),
+        sync_host: Some(session_core::live::sync),
+        drop_link: Some(session_core::live::drop_link),
+        read_early: Some(session_core::live::read_early),
+        open_dir_picker: Some(session_core::moveto::open_dir_picker),
+        ask_enter: Some(session_cards::enter::ask_enter),
+        draft_image: Some(session_cards::message::draft_image),
+        float_mouse: Some(|m, e| {
+            for f in [
+                session_cards::quickask::quick_mouse,
+                session_cards::btw::btw_mouse,
+            ] {
+                let o = f(m, e);
+                if o.used() {
+                    return o;
+                }
+            }
+            Out::Pass
+        }),
+        clip_image: Some(session_cards::clipimage::clip_image),
     }
 }
 

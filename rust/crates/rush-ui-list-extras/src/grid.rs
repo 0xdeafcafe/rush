@@ -202,8 +202,8 @@ pub fn close(m: &mut Model) {
         .collect();
     for k in gone {
         m.tiles.remove(&k);
-        if crate::screens::session_core::live::showing(m).as_deref() != Some(k.as_str()) {
-            crate::screens::session_core::live::drop_link(m, &k);
+        if crate::sess::showing(m).as_deref() != Some(k.as_str()) {
+            m.ext.calls.drop_link()(m, &k);
         }
     }
     let g = grid(m);
@@ -326,7 +326,7 @@ pub fn key(m: &mut Model, k: &Press) -> Option<Out> {
         .find(|t| t.key == focus)
         .map_or(full, |t| t.w.saturating_sub(1));
     with_tile(m, &focus, true, |m| {
-        crate::screens::list_extras::split::in_pane(m, w, |m| m.session_press(k))
+        rush_ui_base::split::in_pane(m, w, |m| m.session_press(k))
     })
 }
 

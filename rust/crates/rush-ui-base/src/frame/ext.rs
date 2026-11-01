@@ -29,6 +29,14 @@ pub type KeyHook = fn(&mut Model, &Press) -> Out;
 /// A project's changes: lines added and removed, and how many files.
 pub type ProjectCount = ((i64, i64), usize);
 
+/// A session's end read ahead of time: its conversation, the transcript it
+/// was read from and that file as it was just before.
+pub type ReadEarly = fn(
+    &rush_core::adapter::Registry,
+    &Agent,
+    rush_core::time::Ms,
+) -> Option<(rush_convo::Session, String, Option<std::fs::Metadata>)>;
+
 /// A mouse handler: `Out::Pass` when the event isn't its.
 pub type MouseHook = fn(&mut Model, &Mouse) -> Out;
 /// A paste handler: `Out::Pass` when the paste isn't its.
@@ -568,6 +576,33 @@ calls! {
     /// #model and #effort with the agent's session open: its /model and
     /// /effort; None when it isn't (session_core/rushcmd.rs hash_arg).
     hash_arg("session_core"): fn(&mut Model, &str, &str) -> Option<Out>,
+    /// ctrl+b, #go and the Wall's: tell a stopped agent to go on, or say
+    /// why it can't (cmdbar/hashcmds.rs keep_going).
+    keep_going("cmdbar"): fn(&mut Model, &Agent) -> Out,
+    /// The connection and screen of the Session shown follow the pane
+    /// (session_core/live.rs sync).
+    sync_host("session_core"): fn(&mut Model),
+    /// Lets go of session key's connection (session_core/live.rs
+    /// drop_link).
+    drop_link("session_core"): fn(&mut Model, &str),
+    /// A session's end read from disk ahead of time (session_core/live.rs
+    /// read_early): the conversation, its transcript and that file as it was.
+    read_early("session_core"): ReadEarly,
+    /// ctrl+l with nothing to move: the folder new sessions start in
+    /// (session_core/moveto.rs open_dir_picker).
+    open_dir_picker("session_core"): fn(&mut Model) -> Out,
+    /// Asks what enter should do for an agent (session_cards/enter.rs
+    /// ask_enter).
+    ask_enter("session_cards"): fn(&mut Model, &str),
+    /// A click on an image in a draft opens it (session_cards/message.rs
+    /// draft_image): the marker clicked and the box's images.
+    draft_image("session_cards"): fn(&mut Model, &str, &crate::imagerefs::ImageRefs) -> Out,
+    /// A click on the quick ask or the btw box floating over the list's
+    /// edge is theirs (session_cards quickask::quick_mouse, btw::btw_mouse).
+    float_mouse("session_cards"): fn(&mut Model, &Mouse) -> Out,
+    /// The image on the clipboard as a file, read off the UI thread
+    /// (session_cards/clipimage.rs clip_image).
+    clip_image("session_cards"): fn() -> Result<Option<String>, String>,
 }
 
 /// State screens keep between calls, one value per type, made on first

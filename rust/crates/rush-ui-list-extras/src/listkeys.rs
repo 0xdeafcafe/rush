@@ -13,12 +13,12 @@ use rush_core::agent::Agent;
 
 use crate::frame::picker::{Pick, Picker};
 use crate::frame::{Out, Press};
+use crate::imagerefs::ClipState;
 use crate::imagerefs::with_marks;
 use crate::model::Model;
-use crate::screens::plugin_ui::ModelPlugins;
-use crate::screens::plugin_ui::sidebar::{group_label, group_modes};
-use crate::screens::session_cards::clipimage::{ClipState, clip_image};
 use crate::style::*;
+use rush_ui_plugin_ui::ModelPlugins;
+use rush_ui_plugin_ui::sidebar::{group_label, group_modes};
 
 /// The list's keys (listKey's switch): Pass for any other.
 pub fn key(m: &mut Model, k: &Press) -> Out {
@@ -60,7 +60,7 @@ pub fn toggle_pin(m: &mut Model, a: &Agent) -> Out {
         m.flash_err(&format!("{}'s agent keeps no pins", a.display_name));
         return Out::Draw;
     };
-    let p = crate::screens::cmdbar::attach::acct_of(m, a);
+    let p = crate::attached::acct_of(m, a);
     let id = a.job.id.clone();
     m.later(
         move || {
@@ -136,7 +136,7 @@ pub fn open_pr(m: &mut Model, a: Option<&Agent>) -> Out {
         return Out::Draw;
     };
     if a.prs.len() == 1 {
-        crate::screens::projects_machine::place::browse(m, &a.prs[0].url);
+        rush_ui_projects_machine::place::browse(m, &a.prs[0].url);
         return Out::Draw;
     }
     let rows = a.prs.iter().map(pr_row).collect();
@@ -145,7 +145,7 @@ pub fn open_pr(m: &mut Model, a: Option<&Agent>) -> Out {
         rows,
         Box::new(|m, pick, _| {
             if let Some(url) = pick.map(|p| p.value.clone()) {
-                crate::screens::projects_machine::place::browse(m, &url);
+                rush_ui_projects_machine::place::browse(m, &url);
             }
             Out::Draw
         }),
@@ -218,6 +218,7 @@ pub fn paste_image(m: &mut Model) -> Out {
     }
     m.kept::<ClipState>().pasting = true;
     m.flash(READING);
+    let clip_image = m.ext.calls.clip_image();
     m.later(clip_image, |m, r| {
         m.kept::<ClipState>().pasting = false;
         match r {

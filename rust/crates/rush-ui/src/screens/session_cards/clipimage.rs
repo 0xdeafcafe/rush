@@ -12,11 +12,7 @@ use crate::frame::Out;
 use crate::frame::editor::is_image_file;
 use crate::model::Model;
 
-/// Whether a read of the clipboard is under way (pastingImg).
-#[derive(Default)]
-pub struct ClipState {
-    pub pasting: bool,
-}
+pub use crate::imagerefs::ClipState;
 
 /// ctrl+v and cmd+v in a Session's box read an image off the clipboard: a
 /// terminal that pastes only text lets them through when the clipboard
