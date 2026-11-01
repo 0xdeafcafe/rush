@@ -1708,7 +1708,10 @@ impl Host {
             st.after_ask = true;
         }
         let ex = exchange.as_deref();
-        if !now && busy {
+        // A held queue holds the next turn even while idle (Rust-only: the
+        // runaway guard holds a session's next turn this way); sent now,
+        // it goes all the same.
+        if !now && (busy || st.info.queue_held) {
             if st.info.queue.is_empty() {
                 st.queued_at = Some(Instant::now());
                 let h = self.clone();
