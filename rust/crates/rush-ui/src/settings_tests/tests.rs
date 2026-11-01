@@ -1710,3 +1710,65 @@ fn the_menu_bar_is_only_the_interactive_rushs() {
         "a follower: left alone"
     );
 }
+
+/// Settings › General's Projects lists every project rush knows, a row
+/// each: the one the Agents box points at first, the rest by name; each
+/// switches with space like any other row, and changing the box's
+/// folder doesn't change which projects show.
+#[test]
+fn projects_lists_every_project() {
+    let (mut m, _d) = model(140, 50);
+    m.launch_dir = "/src/app".into();
+    m.roots = vec![
+        "/src/zeta".into(),
+        "/src/alpha".into(),
+        String::new(),
+        "/src/app".into(),
+    ];
+    config_mut(&mut m)
+        .own_worktrees
+        .insert("/src/beta".into(), false);
+    set_settings_page(&mut m, PAGE_GENERAL);
+    general::prep(&mut m);
+    assert_eq!(
+        dialog(&m).projects,
+        ["/src/app", "/src/alpha", "/src/beta", "/src/zeta"]
+    );
+    let secs = general::sections(&m);
+    let sec = secs
+        .iter()
+        .find(|s| s.title == "Projects")
+        .expect("a Projects section");
+    let labels: Vec<(&str, &str)> = sec
+        .rows
+        .iter()
+        .map(|r| (r.label.as_str(), r.value.as_str()))
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            ("Own worktree in app", "on"),
+            ("Own worktree in alpha", "on"),
+            ("Own worktree in beta", "off"),
+            ("Own worktree in zeta", "on"),
+        ]
+    );
+    assert!(sec.note.contains("app first"), "{}", sec.note);
+    // space on zeta's row switches zeta alone.
+    let at = form::flat(&secs)
+        .iter()
+        .position(|r| r.label == "Own worktree in zeta")
+        .expect("zeta's row");
+    dialog_mut(&mut m).cursor = at;
+    form::form_key(&mut m, &secs, "space");
+    assert!(!config(&m).own_worktree("/src/zeta"));
+    assert!(config(&m).own_worktree("/src/app"));
+    assert!(config(&m).own_worktree("/src/alpha"));
+    // The box pointed elsewhere: the same projects, that one first.
+    m.launch_dir = "/src/alpha".into();
+    general::prep(&mut m);
+    assert_eq!(
+        dialog(&m).projects,
+        ["/src/alpha", "/src/app", "/src/beta", "/src/zeta"]
+    );
+}
