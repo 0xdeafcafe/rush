@@ -164,56 +164,73 @@ pub fn card_buttons(
 
 /// An option's preview framed under its name: Claude writes it as
 /// markdown, most often a mockup or code, so its lines are kept as they
-/// are (fences dropped), cut to the width and to max_rows rows
-/// (previewBox).
+/// are (fences dropped); one wider than the box wraps on its words, under
+/// its own indent. At most max_rows rows are drawn (previewBox).
 pub fn preview_box(name: &str, md: &str, w: usize, max_rows: usize) -> Vec<Line> {
     let md = md.replace('\t', "    ");
-    let mut body: Vec<String> = md
+    let body: Vec<String> = md
         .split('\n')
         .filter(|l| !l.trim().starts_with("```"))
         .map(|l| strip_ansi(l.trim_end_matches([' ', '\r'])))
         .collect();
+    let mut body = body;
     while body.last().is_some_and(|l| l.trim().is_empty()) {
         body.pop();
     }
-    let mut more = 0;
-    if body.len() > max_rows {
-        more = body.len() - max_rows + 1;
-        body.truncate(max_rows.saturating_sub(1));
-    }
+    let name = one_line(name);
+    let room = 8.max(w.saturating_sub(4));
+    // The box is as wide as its widest line or its name, up to the room.
     let mut inner = 8;
     for l in &body {
         inner = inner.max(width(l));
     }
-    inner = inner.min(8.max(w.saturating_sub(4)));
-    let label =
-        rush_draw::truncate(&one_line(name), 4.max(inner.saturating_sub(2)), "…").into_owned();
-    let mut out = vec![line([
-        sp("╭─", FAINT),
-        plain(" "),
-        sp(label.clone(), SUB),
-        plain(" "),
-        sp(
-            format!("{}╮", "─".repeat(inner.saturating_sub(width(&label) + 1))),
-            FAINT,
-        ),
-    ])];
+    inner = inner.max(width(&name) + 2).min(room);
+    let mut rows: Vec<String> = Vec::new();
     for l in body {
-        let mut l = l;
-        let mut more_mark = None;
-        if width(&l) > inner {
-            l = rush_draw::truncate(&l, inner - 1, "").into_owned();
-            more_mark = Some(sp("›", FAINT));
+        if width(&l) <= inner {
+            rows.push(l);
+            continue;
         }
-        let lw = width(&l) + usize::from(more_mark.is_some());
-        let mut r = line([sp("│", FAINT), plain(" "), sp(l, TEXT)]);
-        if let Some(m) = more_mark {
-            r.spans.push(m);
+        let indent = l.chars().take_while(|c| *c == ' ').count().min(inner / 2);
+        let pad = " ".repeat(indent);
+        for piece in wrap(l.trim_start(), inner - indent) {
+            rows.push(format!("{pad}{piece}"));
         }
-        r.spans.push(plain(blanks(inner.saturating_sub(lw))));
-        r.spans.push(plain(" "));
-        r.spans.push(sp("│", FAINT));
-        out.push(r);
+    }
+    let mut more = 0;
+    if rows.len() > max_rows {
+        more = rows.len() - max_rows + 1;
+        rows.truncate(max_rows.saturating_sub(1));
+    }
+    let mut out = Vec::new();
+    if width(&name) + 2 <= inner {
+        out.push(line([
+            sp("╭─", FAINT),
+            plain(" "),
+            sp(name.clone(), SUB),
+            plain(" "),
+            sp(
+                format!("{}╮", "─".repeat(inner.saturating_sub(width(&name) + 1))),
+                FAINT,
+            ),
+        ]));
+    } else {
+        // A name wider than the card wraps above the box.
+        for t in wrap(&name, room) {
+            out.push(line([sp(t, SUB)]));
+        }
+        out.push(line([sp(format!("╭{}╮", "─".repeat(inner + 2)), FAINT)]));
+    }
+    for l in rows {
+        let lw = width(&l);
+        out.push(line([
+            sp("│", FAINT),
+            plain(" "),
+            sp(l, TEXT),
+            plain(blanks(inner.saturating_sub(lw))),
+            plain(" "),
+            sp("│", FAINT),
+        ]));
     }
     if more > 0 {
         let t = format!("… {more} more lines");

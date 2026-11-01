@@ -83,6 +83,8 @@ mod tests_narrow;
 mod tests_remember;
 #[cfg(test)]
 mod tests_sheets;
+#[cfg(test)]
+mod tests_wrap;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
