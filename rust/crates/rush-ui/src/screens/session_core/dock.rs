@@ -459,6 +459,10 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
     let relay = super::relay::relay_sub(m, key);
     let inbox = conn(m, key).info.inbox;
     let mut top = Line::new();
+    // Where the send mode is on the top edge's left label, while it's
+    // the label's.
+    let mut send_part: Option<(usize, usize)> = None;
+    let mut send_top = String::new();
     if let Some(sa) = relay.as_ref() {
         top = line([
             sp("to the subagent ", DIM),
@@ -586,8 +590,16 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         if next != cur {
             l.spans
                 .push(sp(format!(" · {SEND_MODE} {}", next.switch()), DIM));
+            // A click on it goes round as ctrl+t does.
+            let at = if top.spans.is_empty() {
+                0
+            } else {
+                top.width() + 3
+            };
+            send_part = Some((at, at + l.width()));
         }
         add(&mut top, l);
+        send_top = top.plain();
     }
     let away = crate::hosted::away(m) || m.pane_idle;
     let typing = picked.is_empty() && !away && !card_focus && !btw_on;
@@ -636,6 +648,9 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
     // With the stash running, the empty box names its history
     // (rushmode.go:3717, sendmode.go:154 historyHint).
     let history_hint = history_hint(m);
+    // Any of the words above that took the label's place took the send
+    // mode's with it.
+    let send_part = send_part.filter(|_| top.plain() == send_top);
     let c = conn(m, key);
     let mut b = InputBox {
         w,
@@ -664,7 +679,28 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         ..InputBox::default()
     };
     b = b.scrolled();
+    // What a click takes on the top edge, where the edge drew it: the
+    // permission mode on its right opens what changes it (as #perm),
+    // the send mode on its left goes round (as ctrl+t).
+    let at = b.edge_at(false);
+    let mut hits = at.place(true, &[(0, b.top_r.width(), EdgeAct::Mode)]);
+    if let Some((f, t)) = send_part {
+        hits.extend(at.place(false, &[(f, t, EdgeAct::SendMode)]));
+    }
+    let c = conn(m, key);
+    c.edge_lit = c.edge_lit.filter(|l| hits.iter().any(|h| (h.0, h.1) == *l));
+    b.lit = c.edge_lit.map(|(f, t)| (false, f, t));
+    c.edge_hits = hits;
     b
+}
+
+/// What a click on a part of the message box's top edge does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EdgeAct {
+    /// The permission mode: what changes it (#perm).
+    Mode,
+    /// How a message goes: the next way (ctrl+t).
+    SendMode,
 }
 
 /// Hosted with the keys off the box: how to get them back, stop a turn
@@ -1064,7 +1100,7 @@ fn history_hint(m: &Model) -> String {
 /// answer it in your own words, and whether a card has the keys
 /// (decisionsCard, c.qOwn, c.cardFocus).
 fn cards_now(m: &Model, key: &str) -> (bool, bool, bool) {
-    use crate::screens::session_cards::{Cards, info, question};
+    use crate::screens::session_cards::{Cards, info_any, question};
     let Some(c) = m.kept.peek::<Cards>().and_then(|k| k.conns.get(key)) else {
         return (false, false, false);
     };
@@ -1073,7 +1109,8 @@ fn cards_now(m: &Model, key: &str) -> (bool, bool, bool) {
         .as_ref()
         .filter(|v| v.key == key)
         .map_or(0, |v| v.sess.pending().len());
-    let deciding = info(m, key).is_some_and(|i| question::decisions_card(c, &i, pending).is_some());
+    let deciding =
+        info_any(m, key).is_some_and(|i| question::decisions_card(c, &i, pending).is_some());
     let focus = c.card_focus && !c.card_shown.is_empty();
     (deciding, c.q_own, focus)
 }

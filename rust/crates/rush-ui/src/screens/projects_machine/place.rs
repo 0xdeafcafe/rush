@@ -40,7 +40,8 @@ pub fn pick_in_projects(m: &mut Model, id: &str) {
 
 /// The row picked on the Projects page, by id (the command bar's spot).
 pub fn projects_sel(m: &Model) -> String {
-    data(m).sel.clone()
+    let d = data(m);
+    d.pick.clone().unwrap_or_else(|| d.sel.clone())
 }
 
 impl Projects {

@@ -533,6 +533,44 @@ fn search() {
     }
     assert!(!s.search("is:agent").is_empty());
     assert_eq!(s.search("is:claude").len(), s.search("is:agent").len());
+    // The bar's search (Rust-only): the same hits, the latest first, the
+    // closest first with words, cut to the limit, as each key is typed
+    // and taken back with one memo.
+    let mut memo = rush_convo::search::SearchMemo::default();
+    let mut made = rush_convo::search::SearchMemo::default();
+    let job = made.prepare_from(&s, 0).expect("asked for");
+    made.take(job.make());
+    for q in [
+        "alt screen",
+        "unreachable",
+        "is:failed",
+        "is:edit go",
+        "file:editor.go",
+        "turn:2 is:cmd",
+        "is:you attach",
+        "is:agent",
+        "screen alt",
+        "editr",
+        "attahc",
+    ] {
+        let chars: Vec<char> = q.chars().collect();
+        for i in (1..=chars.len()).chain((1..chars.len()).rev()) {
+            let typed: String = chars[..i].iter().collect();
+            for limit in [1, 2, 50] {
+                let mut want = s.search(&typed);
+                want.reverse();
+                if !rush_convo::search::words(&typed).is_empty() {
+                    want.sort_by_key(|h| std::cmp::Reverse(h.score));
+                }
+                want.truncate(limit);
+                assert_eq!(
+                    s.search_top(&typed, limit, &mut memo),
+                    want,
+                    "{typed:?} {limit}"
+                );
+            }
+        }
+    }
     // A subagent's step opens under its parent.
     assert_eq!(s.parent_ref("t2:s:a1g"), "t2:s:a1");
     assert_eq!(s.parent_ref("t2:s:b2"), "");

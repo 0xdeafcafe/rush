@@ -412,6 +412,9 @@ impl<T: Send + 'static> Loop<T> {
             let mut draw = false;
             let next = self.next(true, app.wake_at(), true);
             let woke = Instant::now();
+            if perf.is_some() {
+                tally.cpu0 = crate::perf::thread_cpu_us();
+            }
             let st = match next {
                 Some(n) => {
                     tally.count(&n);
@@ -439,6 +442,9 @@ impl<T: Send + 'static> Loop<T> {
             }
             if draw {
                 let drawn = Instant::now();
+                if perf.is_some() {
+                    tally.cpu1 = crate::perf::thread_cpu_us();
+                }
                 present(s, app)?;
                 if let Some(p) = perf {
                     tally.upd = drawn.duration_since(woke);
@@ -460,6 +466,10 @@ struct Tally {
     /// Times the loop woke and drew nothing.
     quiet: u32,
     upd: Duration,
+    /// The UI thread's CPU time (µs) when it woke and when it began
+    /// drawing: what the frame cost it, whatever else the machine runs.
+    cpu0: u64,
+    cpu1: u64,
 }
 
 impl Tally {
@@ -476,8 +486,9 @@ impl Tally {
         let lat = at.map_or(String::new(), |a| {
             format!(" lat={}", done.duration_since(a).as_micros())
         });
+        let cpu2 = crate::perf::thread_cpu_us();
         p.line(&format!(
-            "{} frame keys={} msgs={} wake={} quiet={} upd={} draw={} cells={}{lat}",
+            "{} frame keys={} msgs={} wake={} quiet={} upd={} draw={} cells={} ucpu={} dcpu={}{lat}",
             crate::perf::now_us(),
             self.keys,
             self.msgs,
@@ -486,6 +497,8 @@ impl Tally {
             self.upd.as_micros(),
             done.duration_since(drawn).as_micros(),
             p.cells(),
+            self.cpu1.saturating_sub(self.cpu0),
+            cpu2.saturating_sub(self.cpu1),
         ));
         *self = Tally::default();
     }

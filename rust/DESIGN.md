@@ -623,8 +623,9 @@ priced reading is saved to rush's cache (`list-kept.json`, at most once a
 minute and on quitting), read on a thread as rush starts, and drawn in the
 first frames until the first live reading replaces it whole. Until then
 its rows are drawn faint, so a row that was working last time doesn't
-claim to be now, the header still says "costing transcripts…", and
-nothing acts on it: no host is dialled and no reading's hooks run. One
+claim to be now, a top bar of #statusline lines still says "costing
+transcripts…" (the default gauges never do, as Go's view.go:255-262),
+and nothing acts on it: no host is dialled and no reading's hooks run. One
 from another version or older than a week isn't shown. Measured on the
 bench copy (872 agents): the list on screen 31-36 ms after start, against
 1.35 s for the first reading.
@@ -940,6 +941,20 @@ is made. Everything below is in `rush_ui::frame`.
   (`Summarizer::summary_exclusions`). A rewind's message put back in a
   session beside the list opens it, as Go's paneFocus gives its box the
   keys.
+  A decisions card stays on a session rush doesn't run now when its
+  answers would wake or resume it (`HostInfo::wakes`: asleep, as Go, or
+  stopped with no host running, beyond Go, whose card vanished there and
+  whose d said "can't take answers here"); `session_cards::card_info` is
+  what its card, keys and clicks read. Its answers are `Act::Answer`:
+  shown as sending, sent over the link, or waking or resuming it as a
+  typed message does (`keys::send_offline_as`); answers that don't go
+  bring the card back on its send page with them kept
+  (`question::answer_failed`) rather than leaving a block that reads as
+  answered. Set aside with no host, it's noted beside its info
+  (`Hosts::dismiss_asleep`). The block the card is up for is pinned only
+  once the last turn ends with one (a view reading from the start has
+  an earlier turn last for a moment), and follows its turn when the
+  view's turns are numbered afresh (`take_whole`).
 - **Moving agents** (`session_core::rushmove`, `session_core::moveto`;
   rushmode.go moveToRush, picker.go). /rush, #rush and a message to a
   past session move it to rush mode through `Hosts::adopt` (the new
@@ -1108,7 +1123,20 @@ is made. Everything below is in `rush_ui::frame`.
   `session::header` (the name cut to leave the low note room), then the
   bar's two lines, what the agent runs as and how it's reached, and
   keeps where the context and the permission mode landed; a click on
-  the mode is `session_cards::permissions::permission_command`. The
+  the mode is `session_cards::permissions::permission_command`. Not in
+  Go: `bar_line` keeps where each segment it drew landed (`Ctx::at`), and
+  the model, effort, account and billing segments take clicks too
+  (`agent::HeadAct`: /model's and /effort's lists, the switch sheet on
+  its Account row), lit under the pointer (`style::light_cells`); a click
+  on the agent label opens the switch sheet on the part clicked
+  (harness, account, model). The same for the boxes' edges:
+  `InputBox::edge_at` says where an edge's labels landed, cut or
+  dropped for room, `EdgeAt::place` puts a label's parts there and
+  `InputBox::lit` lights the one under the pointer. The Prompt's folder
+  opens ctrl+l's picker, its chip's name, model and effort the Start
+  sheet on that row (the other setups are picked, as in Go); a
+  Session's box takes clicks on its permission mode (as #perm) and its
+  send mode (as ctrl+t). The
   layout is the one being built in /statusline while its tab shows,
   else bars.json, read off the UI thread with the first list reading;
   what a line left out is kept by `which*10+line` for /statusline.
@@ -1294,6 +1322,13 @@ Go rush is gone from the tree; its last version is the `go-final` tag
 - `cargo bench -p rush-convo`: apply events, open a large transcript cold,
   warm frame of a 3,000-turn conversation, incremental tail.
 - `cargo bench -p rush-claude`: spend scan, preview read.
+- `cargo bench -p rush-convo --bench search` (RUSH_BENCH_TRANSCRIPT=<a
+  transcript>): an open conversation searched as the command bar does on
+  each key, letter by letter: Session::search's instructions per key and
+  a digest of its hits, then Session::search_top (the bar's This session
+  and This chat: only the hits a section shows, with a memo kept from key
+  to key and a vocabulary of the words typos are looked for among, made
+  on another thread as the bar opens) checked hit for hit against it.
 - `cargo bench -p rush-ui --bench frame` (under `tools/sbtest.sh`): a frame
   of the Agents list, 300 agents at 160x48 — its rows, painted, and a key
   then the frame — in µs, instructions, bytes and allocations per frame.
@@ -1322,7 +1357,8 @@ Go rush is gone from the tree; its last version is the `go-final` tag
   Run it against a throwaway HOME under `tools/sbtest.sh` when testing.
 - Timing log (Rust-only, off by default): `RUSH_PERF_LOG=<file>` writes the
   process's start time and one line per frame (what it handled, µs spent
-  handling and drawing, cells changed, and a key's latency from its
+  handling and drawing, the UI thread's own CPU µs for each (`ucpu`,
+  `dcpu`: steady on a busy machine), cells changed, and a key's latency from its
   arrival to the frame written); `RUSH_PERF_MARK=<text>` notes the first
   frame showing that text, and `RUSH_PERF_WATCH=<a|b|…>` each frame
   each text shows in and leaves, to time a placeholder (rush-draw

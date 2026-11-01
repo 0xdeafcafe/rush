@@ -20,6 +20,7 @@ mod serve;
 mod session;
 mod spawn;
 
+use std::io::Write;
 use std::time::Instant;
 
 use rush_core::time::now;
@@ -149,11 +150,11 @@ fn run(args: &[String]) -> i32 {
     }
     match args.first().map(String::as_str) {
         Some("--version" | "version") => {
-            println!("{}", version_line(VERSION, COMMIT));
+            print_quiet(|w| writeln!(w, "{}", version_line(VERSION, COMMIT)));
             return 0;
         }
         Some("--help" | "-h" | "help") => {
-            print!("{USAGE}{}", rush_plugin::cmd::plugins_usage());
+            print_quiet(|w| write!(w, "{USAGE}{}", rush_plugin::cmd::plugins_usage()));
             return 0;
         }
         Some("--dump") => {
@@ -626,9 +627,6 @@ fn dump() {
     std::thread::sleep(std::time::Duration::from_secs(1));
     let mut snap = l.load(now());
     let now = now();
-    for a in &snap.agents {
-        println!("{}", dump_line(a, now));
-    }
     if let Some(av) = snap.accounts.first_mut()
         && !av.daemon
     {
@@ -636,20 +634,54 @@ fn dump() {
         // says so itself (Joiner::service_up).
         av.daemon = rush_claude::Account::from_env().daemon_running();
     }
+    print_quiet(|w| dump_to(w, &snap, now, scan));
+}
+
+/// The dump's lines, written to w; stops at the first write that fails.
+fn dump_to(
+    w: &mut dyn Write,
+    snap: &rush_fleet::Snapshot,
+    now: i64,
+    scan: std::time::Duration,
+) -> std::io::Result<()> {
+    for a in &snap.agents {
+        writeln!(w, "{}", dump_line(a, now))?;
+    }
     for av in &snap.accounts {
-        print!("{}", account_line(av));
-        println!();
+        writeln!(w, "{}", account_line(av))?;
     }
     for r in &snap.machine.rows {
-        println!("{}", proc_line(r));
+        writeln!(w, "{}", proc_line(r))?;
     }
-    println!(
+    writeln!(
+        w,
         "machine mem={:.0}M cpu={:.1}% spares={} scan={}",
         snap.machine.total_mem as f64 / (1u64 << 20) as f64,
         snap.machine.total_cpu,
         snap.machine.spares,
         go_duration(scan.as_nanos() as i64)
-    );
+    )
+}
+
+/// Writes to stdout through f, stopping quietly where the pipe closed
+/// early (`rush --dump | head` ends Go's rush by SIGPIPE, silently, where
+/// println! would panic).
+fn print_quiet(f: impl FnOnce(&mut dyn Write) -> std::io::Result<()>) {
+    let mut out = std::io::stdout().lock();
+    if let Err(e) = quiet_on_closed_pipe(f(&mut out).and_then(|()| out.flush())) {
+        // Any other failure (a full disk) is said and ends rush with 1.
+        eprintln!("rush: {e}");
+        std::process::exit(1);
+    }
+}
+
+/// A closed pipe is the reader having had enough, as `| head` does: not an
+/// error. Anything else still is.
+fn quiet_on_closed_pipe(r: std::io::Result<()>) -> std::io::Result<()> {
+    match r {
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        r => r,
+    }
 }
 
 /// `account %s daemon=%v live=%d agents=%d spend=$%.2f today=$%.2f` and
@@ -764,7 +796,8 @@ fn render(reg: &rush_core::adapter::Registry, args: &[String]) {
         let h = hosted::RushHosts::new(reg.clone());
         rush_ui::screens::session_core::host::set_hosts(m, std::sync::Arc::new(h));
     };
-    println!("{}", rush_ui::render(&version(), w, h, &keys, setup));
+    let frame = rush_ui::render(&version(), w, h, &keys, setup);
+    print_quiet(|o| writeln!(o, "{frame}"));
 }
 
 /// The sessions id's config and the others' say it's linked to: the one
@@ -854,23 +887,28 @@ fn soak(reg: &rush_core::adapter::Registry, args: &[String]) {
         rss *= 1024.0;
     }
     let mb = |b: f64| b / (1 << 20) as f64;
-    println!("soak {} at {w}x{h}", go_dur(wall.as_secs_f64()));
-    println!(
-        "  cpu        {} ({:.2}% of one core)",
-        go_dur(cpu),
-        100.0 * cpu / wall.as_secs_f64()
-    );
-    println!("  max rss    {:.1} MB", mb(rss));
-    println!(
-        "  terminal   {:.1} KB written in {} writes",
-        out.bytes as f64 / 1024.0,
-        out.writes
-    );
-    println!("  threads    {}", threads());
-    let s = std::env::var("RUSH_RENDER_SELECT").unwrap_or_default();
-    if !s.trim().is_empty() {
-        println!("  session    {:?}", s.trim());
-    }
+    let session = std::env::var("RUSH_RENDER_SELECT").unwrap_or_default();
+    print_quiet(|o| {
+        writeln!(o, "soak {} at {w}x{h}", go_dur(wall.as_secs_f64()))?;
+        writeln!(
+            o,
+            "  cpu        {} ({:.2}% of one core)",
+            go_dur(cpu),
+            100.0 * cpu / wall.as_secs_f64()
+        )?;
+        writeln!(o, "  max rss    {:.1} MB", mb(rss))?;
+        writeln!(
+            o,
+            "  terminal   {:.1} KB written in {} writes",
+            out.bytes as f64 / 1024.0,
+            out.writes
+        )?;
+        writeln!(o, "  threads    {}", threads())?;
+        if !session.trim().is_empty() {
+            writeln!(o, "  session    {:?}", session.trim())?;
+        }
+        Ok(())
+    });
 }
 
 /// This process's resource use so far.
@@ -1040,6 +1078,44 @@ mod tests {
         for &(ns, want) in cases {
             assert_eq!(go_duration(ns), want, "{ns}");
         }
+    }
+
+    // A pipe closed early (`rush --dump | head`): the dump stops at the
+    // write that fails, with its error, and panics nowhere.
+    /// Only a closed pipe goes unsaid; a full disk is still an error.
+    #[test]
+    fn only_a_closed_pipe_is_quiet() {
+        use std::io::{Error, ErrorKind};
+        assert!(quiet_on_closed_pipe(Err(Error::from(ErrorKind::BrokenPipe))).is_ok());
+        assert!(quiet_on_closed_pipe(Ok(())).is_ok());
+        assert_eq!(
+            quiet_on_closed_pipe(Err(Error::from(ErrorKind::StorageFull)))
+                .unwrap_err()
+                .kind(),
+            ErrorKind::StorageFull
+        );
+    }
+
+    #[test]
+    fn dump_stops_on_a_closed_pipe() {
+        struct Closed(usize);
+        impl std::io::Write for Closed {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                self.0 += 1;
+                Err(std::io::ErrorKind::BrokenPipe.into())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let snap = rush_fleet::Snapshot {
+            agents: vec![Default::default(), Default::default()],
+            ..Default::default()
+        };
+        let mut w = Closed(0);
+        let r = dump_to(&mut w, &snap, 0, Default::default());
+        assert_eq!(r.unwrap_err().kind(), std::io::ErrorKind::BrokenPipe);
+        assert_eq!(w.0, 1);
     }
 
     #[test]

@@ -88,6 +88,9 @@ pub enum Go {
     /// Agents' page by name ("Wall").
     AgentsPage(usize),
     Place(PlaceId, Option<usize>),
+    /// Projects with this row of its list picked ("" for the first
+    /// project; a pane's id for Temporary, System or Pull requests).
+    Projects(String),
     FindHere,
     /// The open session's view by name ("changes").
     View(String),
@@ -159,6 +162,8 @@ pub struct Spot {
     pub name: String,
     pub r#ref: String,
     pub open: bool,
+    /// The Projects list's picked row, on Projects (projSel).
+    pub proj_sel: String,
 }
 
 /// A jump into an agent's conversation waiting for it to open: the hit is
@@ -192,6 +197,8 @@ pub struct Bar {
     pub rows_at: Vec<(usize, usize)>,
     /// The hint row's screen row and first cell.
     pub hint_at: Option<(usize, usize)>,
+    /// What the open conversation's last search kept for the next key's.
+    pub memo: std::cell::RefCell<cs::SearchMemo>,
 }
 
 impl Bar {
@@ -329,8 +336,36 @@ pub fn open(m: &mut Model, here: bool) {
         done: false,
         rows_at: Vec::new(),
         hint_at: None,
+        memo: Default::default(),
     });
+    prepare_search(m);
     rebuild(m);
+}
+
+/// Rust-only: with a long conversation open, the words its typos are
+/// looked for among are gathered on another thread as the bar opens, so
+/// no key waits on reading it all (rush_convo's SearchMemo::prepare).
+/// None with no loop: --render and tests read as each key asks.
+fn prepare_search(m: &mut Model) {
+    if m.sender().is_none() {
+        return;
+    }
+    let Some(v) = &m.session else { return };
+    let Some(b) = m.kept.peek::<BarState>().and_then(|s| s.bar.as_ref()) else {
+        return;
+    };
+    let Some(job) = b.memo.borrow_mut().prepare(&v.sess) else {
+        return;
+    };
+    m.later(
+        move || job.make(),
+        |m, made| {
+            if let Some(b) = st(m).bar.as_ref() {
+                b.memo.borrow_mut().take(made);
+            }
+            Out::Idle
+        },
+    );
 }
 
 /// Whether ctrl+k would cut text in the Agents box (canCut).
@@ -631,7 +666,7 @@ pub fn rebuild(m: &mut Model) {
             if m.session.as_ref().is_some_and(|v| v.key == sc.key) {
                 add(
                     &format!("This chat · {}", session_title(m)),
-                    bar_turns(m, &q),
+                    bar_turns(m, &q, 300),
                     300,
                 );
             }
@@ -716,7 +751,7 @@ pub fn rebuild(m: &mut Model) {
                 let limit = if raw.is_empty() { 4 } else { 50 };
                 add(
                     &format!("This session · {}", session_title(m)),
-                    bar_turns(m, &q),
+                    bar_turns(m, &q, limit),
                     limit,
                 );
             }
@@ -818,14 +853,11 @@ pub fn bar_places(m: &Model, q: &str) -> Vec<Item> {
             Go::AgentsPage(i + 1),
         );
     }
-    // Projects and its pages are always offered, as Go names them; a page
-    // is found by its name once the Projects place has it.
+    // Projects and its panes, as Go offers them: each picks its row of
+    // the list (pickInProjects, cmdbar.go:761-771).
+    use crate::screens::projects_machine::{PANE_PRS, PANE_SYSTEM, PANE_TEMP};
     const PROJECTS_WORDS: &str = "projects repositories repos folders git branches worktrees commits prs cleanup clean disk temporary scratch processes orphans machine system ";
-    let projects_pages = m.ext.places[PlaceId::Projects as usize]
-        .as_ref()
-        .map(|p| p.pages(m))
-        .unwrap_or_default();
-    for (name, page, what) in [
+    for (name, id, what) in [
         (
             "Projects",
             "",
@@ -833,25 +865,26 @@ pub fn bar_places(m: &Model, q: &str) -> Vec<Item> {
         ),
         (
             "Projects › Temporary",
-            "Temporary",
+            PANE_TEMP,
             "/tmp and finished agents' temp work",
         ),
-        ("Projects › System", "System", "processes no project owns"),
+        (
+            "Projects › System",
+            PANE_SYSTEM,
+            "processes no project owns",
+        ),
         (
             "Projects › Pull requests",
-            "Pull requests",
+            PANE_PRS,
             "yours and asking for your review, by project",
         ),
     ] {
-        let at = (!page.is_empty())
-            .then(|| projects_pages.iter().position(|p| p == page))
-            .flatten();
         add(
             sub("◇"),
             name.into(),
             what.into(),
             format!("{PROJECTS_WORDS}{name}"),
-            Go::Place(PlaceId::Projects, at),
+            Go::Projects(id.into()),
         );
     }
     for id in [PlaceId::Harnesses, PlaceId::Settings] {
@@ -1126,8 +1159,10 @@ pub fn agent_state(a: &Agent, now: Ms) -> String {
 }
 
 /// The open conversation's turns, the latest first, or its matches for
-/// the query (barTurns).
-pub fn bar_turns(m: &Model, q: &str) -> Vec<Item> {
+/// the query (barTurns). Rust-only: the matches are only the limit the
+/// section shows (the closest first, as it sorts them), found with what
+/// the last key's search kept (rush_convo's SearchMemo).
+pub fn bar_turns(m: &Model, q: &str, limit: usize) -> Vec<Item> {
     let Some(v) = &m.session else {
         return Vec::new();
     };
@@ -1167,8 +1202,12 @@ pub fn bar_turns(m: &Model, q: &str) -> Vec<Item> {
         return items;
     }
     let words = cs::words(q);
-    let mut hits = s.search(q);
-    hits.reverse(); // of those as close, the latest first
+    let Some(b) = m.kept.peek::<BarState>().and_then(|s| s.bar.as_ref()) else {
+        return items;
+    };
+    // The latest first; of those as close, the closest first: as the
+    // section sorts them, cut to its limit.
+    let hits = s.search_top(q, limit, &mut b.memo.borrow_mut());
     for h in hits {
         let tail = match when_ago(h.at, m.now) {
             at if !at.is_empty() => format!("#{} · sent {at}", h.turn),
@@ -1389,6 +1428,10 @@ pub fn run(m: &mut Model, go: &Go) -> Out {
             if let Some(p) = page {
                 m.set_page(*p);
             }
+        }
+        Go::Projects(id) => {
+            go_place(m, PlaceId::Projects);
+            crate::screens::projects_machine::pick_in_projects(m, id);
         }
         Go::FindHere => {
             go_place(m, PlaceId::Agents);
@@ -1611,6 +1654,11 @@ pub fn here(m: &mut Model) -> Spot {
         name,
         r#ref: r,
         open,
+        proj_sel: if m.place == PlaceId::Projects {
+            crate::screens::projects_machine::projects_sel(m)
+        } else {
+            String::new()
+        },
     }
 }
 
@@ -1621,6 +1669,15 @@ impl Spot {
             PlaceId::Agents if self.agents_page > 0 => format!("Agents › {}", self.page_name),
             PlaceId::Agents if self.name.is_empty() => "Agents".into(),
             PlaceId::Agents => self.name.clone(),
+            PlaceId::Projects => {
+                use crate::screens::projects_machine::{PANE_PRS, PANE_SYSTEM, PANE_TEMP};
+                match self.proj_sel.as_str() {
+                    PANE_TEMP => "Projects › Temporary".into(),
+                    PANE_SYSTEM => "Projects › System".into(),
+                    PANE_PRS => "Projects › Pull requests".into(),
+                    _ => "Projects".into(),
+                }
+            }
             p if self.page_name.is_empty() => p.name().into(),
             p => format!("{} › {}", p.name(), self.page_name),
         }
@@ -1632,6 +1689,11 @@ impl Spot {
 fn go_spot(m: &mut Model, s: Spot) -> Out {
     let back = here(m);
     st(m).back = Some(back);
+    if s.place == PlaceId::Projects {
+        go_place(m, PlaceId::Projects);
+        crate::screens::projects_machine::pick_in_projects(m, &s.proj_sel);
+        return Out::Draw;
+    }
     if s.place != PlaceId::Agents {
         go_place(m, s.place);
         m.set_page(s.page);

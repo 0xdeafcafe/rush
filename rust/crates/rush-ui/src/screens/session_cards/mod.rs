@@ -137,6 +137,10 @@ pub struct HostInfo {
     pub permission_modes: Vec<Mode>,
     /// Its host is asleep: it wakes for an answer.
     pub asleep: bool,
+    /// Cold, but a message wakes its host or resumes it: asleep, or a
+    /// stopped rush session with no host running. Its decisions card is
+    /// still there to answer, and the answers wake or resume it.
+    pub wakes: bool,
     /// The subagents it runs.
     pub subs: Vec<Sub>,
     /// The decisions block its last turn ended with, open (Info.Decisions).
@@ -193,6 +197,11 @@ pub enum Act {
     DismissDecisions(String),
     /// Sends text as your next message.
     Send(String),
+    /// Sends text, the answers to decisions card id, as your next message:
+    /// waking or resuming a session rush doesn't run now, and bringing
+    /// the card back with its answers when it doesn't go
+    /// (rushmode.go:5903 sendAnswers).
+    Answer { id: String, text: String },
     /// Carries the session on from a rewind's session (/rewind, /clear,
     /// a branch gone back down): the host switches to it, says text, and
     /// puts draft back in the box once it's back (rewindHost, onRewound).
@@ -337,6 +346,10 @@ pub struct Conn {
     pub q_rows: Vec<Line>,
     /// The decisions card answered here.
     pub dec_answered: String,
+    /// The decisions card whose answers are on their way, and the
+    /// answers, until they've gone: one that didn't comes back with them
+    /// (answer_failed).
+    pub q_sent: Option<question::Sent>,
     /// q_again's block in the conversation; dec_shown the Open key of the
     /// block whose card is up, drawn as one row meanwhile; dec_id the card
     /// dec_shown is for (qAgainRef, decShown, decID).
@@ -381,6 +394,31 @@ pub fn host(m: &Model) -> Option<Host> {
 /// What the cards know of agent key's hosted session.
 pub fn info(m: &Model, key: &str) -> Option<HostInfo> {
     info_any(m, key).filter(|i| !i.cold)
+}
+
+/// What the decisions card reads of agent key's session: as [`info`],
+/// and a cold one whose answers would wake or resume it while it has a
+/// decisions card (Go's decisionsCard on a sleeping hostConn). Only the
+/// decisions card is drawn for a cold one, so its saved limit and error
+/// are left out.
+pub fn card_info(m: &Model, key: &str) -> Option<HostInfo> {
+    let mut i = info_any(m, key)?;
+    if !i.cold {
+        return Some(i);
+    }
+    if !i.wakes {
+        return None;
+    }
+    let empty = Conn::default();
+    let c = m
+        .kept
+        .peek::<Cards>()
+        .and_then(|c| c.conns.get(key))
+        .unwrap_or(&empty);
+    question::decisions_card(c, &i, 0)?;
+    i.limit = None;
+    i.error.clear();
+    Some(i)
 }
 
 /// What the cards know of agent key's session, hosted or not: what /fork,
@@ -465,6 +503,23 @@ pub fn session_view<'a>(m: &'a Model, key: &str) -> Option<&'a crate::session::S
 /// The open conversation's agent key.
 pub fn open_key(m: &Model) -> Option<String> {
     m.session.as_ref().map(|v| v.key.clone())
+}
+
+/// The chat the box's # commands go to: the one open, else the one shown
+/// beside the list on the row picked (Go's m.host, which syncHost
+/// keeps on the pane's chat, rushmode.go:2003; keys.go:936-952).
+pub fn chat_key(m: &Model) -> Option<String> {
+    open_key(m).or_else(|| {
+        m.pane
+            .as_ref()
+            .filter(|v| v.key == m.sel)
+            .map(|v| v.key.clone())
+    })
+}
+
+/// The conversation of agent key, open or beside the list.
+pub fn chat<'a>(m: &'a Model, key: &str) -> Option<&'a Session> {
+    session(m, key).or_else(|| m.pane.as_ref().filter(|v| v.key == key).map(|v| &v.sess))
 }
 
 /// The conversation of agent key, when it's the one open.
@@ -563,7 +618,7 @@ pub fn register(x: &mut Ext) {
         "a room on this chat: agents argue it, and the verdict comes back here",
         // In a Session, a room on its chat; anywhere else, as #room
         // (keys.go:935).
-        |m, arg| match open_key(m) {
+        |m, arg| match chat_key(m) {
             Some(k) if !k.starts_with(mention::ROOM_KEY_PREFIX) => {
                 discuss::discuss(m, &k, arg, false)
             }
@@ -657,7 +712,7 @@ pub fn dock_parts(m: &mut Model, w: usize) -> (Vec<Line>, Vec<Line>) {
         return (Vec::new(), Vec::new());
     };
     question::sync_decisions_shown(m, &key);
-    let Some(inf) = info(m, &key) else {
+    let Some(inf) = card_info(m, &key) else {
         return (Vec::new(), Vec::new());
     };
     // Three fifths of the Session's rows, not the screen's: the box and
@@ -728,7 +783,7 @@ fn mouse(m: &mut Model, e: &Mouse) -> Out {
     let Some(key) = open_key(m) else {
         return Out::Pass;
     };
-    let Some(inf) = info(m, &key) else {
+    let Some(inf) = card_info(m, &key) else {
         return Out::Pass;
     };
     question::click(m, &key, &inf, e.x as usize, e.y as usize)

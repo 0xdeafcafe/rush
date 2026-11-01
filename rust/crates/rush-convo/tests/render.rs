@@ -871,6 +871,42 @@ fn a_script_draws_as_its_file() {
     );
 }
 
+// Docked, the live line has a row of room above and below it, not the
+// turn's rail: rushPane wraps Session.Activity's rows, their rail rows
+// stripped, in empty rows (rushmode.go:2339-2346, activity.go:24), so a
+// card under it never sits flush against it.
+#[test]
+fn the_docked_live_line_has_room_either_side() {
+    let mut s = Session::new();
+    s.feed(sent("run"), at(0));
+    s.feed(
+        tool_use("b", "Bash", json!({"command": "go test ./..."})),
+        at(1),
+    );
+    let o = Options {
+        width: 100,
+        now: at(5),
+        dock_activity: true,
+        ..Options::default()
+    };
+    let out = plain(&Renderer::new().render(&s, &o));
+    // Each row is its ref, a bar, then what it says.
+    let rows: Vec<&str> = out
+        .lines()
+        .map(|l| l.split_once('|').map_or(l, |(_, t)| t))
+        .collect();
+    let i = rows
+        .iter()
+        .position(|l| l.contains("running Bash…"))
+        .expect(&out);
+    assert!(
+        i + 2 == rows.len(),
+        "the live line ends the turn but for a row:\n{out}"
+    );
+    assert_eq!(rows[i - 1].trim(), "", "room above:\n{out}");
+    assert_eq!(rows[i + 1].trim(), "", "room below:\n{out}");
+}
+
 // The pane's live line is docked (activity_test.go): a running step is
 // named on it with the turn's time and is never called stalled; a step
 // waiting for leave says so; a retried request says why. Undocked, the
@@ -940,4 +976,86 @@ fn a_diff_line_marks_spaces_and_tabs() {
     let l = rush_convo::render::marked_code_line("x.txt", &mut st, "  long words here", base, 8);
     let t: String = l.spans.iter().map(|s| s.text.as_str()).collect();
     assert_eq!(t, "··long·›");
+}
+
+/// A live turn redrawn as its clock ticks, through the unit memo, is the
+/// same rows as one drawn afresh: the memo copies only what would be
+/// drawn the same (render.go:998 memoized).
+#[test]
+fn the_unit_memo_draws_as_afresh() {
+    for s in [session(), cases()] {
+        for w in [40, 80, 160] {
+            let mut r = Renderer::new();
+            for k in 0..6 {
+                let mut o = opts(w, at(100 + k * 7));
+                o.verbose = k == 4;
+                if k == 5 {
+                    o.selected = "t2".into();
+                }
+                let kept = r.render(&s, &o);
+                let fresh = Renderer::new().render(&s, &o);
+                assert!(
+                    kept == fresh,
+                    "width {w}, frame {k}:\n{}\n---\n{}",
+                    text(&kept),
+                    text(&fresh)
+                );
+            }
+        }
+    }
+}
+
+/// Real transcripts fed a slice at a time, each slice drawn through the
+/// unit memo and afresh: the same rows every time. MEMO_TRANSCRIPTS names a
+/// file listing them, one path a line; without it there's nothing to do.
+#[test]
+fn the_unit_memo_draws_real_transcripts_as_afresh() {
+    let Ok(list) = std::env::var("MEMO_TRANSCRIPTS") else {
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    for p in std::fs::read_to_string(list).unwrap().lines() {
+        let raw = std::fs::read(p).unwrap();
+        let lines: Vec<&[u8]> = raw.split_inclusive(|&b| b == b'\n').collect();
+        let step = (lines.len() / 80).max(1);
+        for w in [80, 200] {
+            let copy = dir.path().join("t.jsonl");
+            std::fs::write(&copy, b"").unwrap();
+            let mut tail = rush_convo::Tail::new(&copy, rush_convo::decode(rush_claude::messages));
+            let mut sess = Session::new();
+            let mut r = Renderer::new();
+            let mut f = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&copy)
+                .unwrap();
+            for (k, chunk) in lines.chunks(step).enumerate() {
+                use std::io::Write;
+                for l in chunk {
+                    f.write_all(l).unwrap();
+                }
+                f.flush().unwrap();
+                tail.read(&mut sess).unwrap();
+                // A second on at least each slice: a live turn kept by its clock
+                // (TurnKey) would otherwise show the last slice's time.
+                let o = opts(w, sess.last + 1000 + 1500 * k as i64);
+                let kept = r.render(&sess, &o);
+                let fresh = Renderer::new().render(&sess, &o);
+                if kept != fresh {
+                    let (a, b) = (text(&kept), text(&fresh));
+                    let at = a.lines().zip(b.lines()).position(|(x, y)| x != y);
+                    let near = |t: &str| {
+                        let i = at.unwrap_or(0);
+                        let v: Vec<&str> = t.lines().skip(i.saturating_sub(4)).take(10).collect();
+                        v.join("\n")
+                    };
+                    panic!(
+                        "{p} slice {k} width {w}: differ at row {at:?} (text same: {})\nkept:\n{}\nfresh:\n{}",
+                        a == b,
+                        near(&a),
+                        near(&b)
+                    );
+                }
+            }
+        }
+    }
 }

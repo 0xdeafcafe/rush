@@ -313,6 +313,10 @@ pub struct Conn {
     /// The box as last drawn, and the screen row its top edge landed on.
     pub drawn: InputBox,
     pub box_y: Option<usize>,
+    /// What a click takes on the box's top edge, from and to, cells from
+    /// the box's left edge, and the part the pointer is over, lit.
+    pub edge_hits: Vec<(usize, usize, dock::EdgeAct)>,
+    pub edge_lit: Option<(usize, usize)>,
     /// The box's top edge, and the queue card's first row, as rows into
     /// the dock.
     pub box_off: usize,

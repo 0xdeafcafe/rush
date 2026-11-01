@@ -5,9 +5,11 @@
 //!
 //! Until then the kept list is only shown: its rows are drawn quietly
 //! (dimmed, so a row that was working when rush last looked doesn't claim
-//! to be now), the header still says "costing transcripts…", and nothing
-//! acts on it: no host is dialled and no reading's hooks run. Kept a week
-//! at most; one from another version of rush is left unread.
+//! to be now), a top bar of #statusline lines still says "costing
+//! transcripts…" (the default gauges never do, as Go's view.go:255-262),
+//! and nothing acts on it: no host is dialled and no reading's hooks
+//! run. Kept a week at most; one from another version of rush is left
+//! unread.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};

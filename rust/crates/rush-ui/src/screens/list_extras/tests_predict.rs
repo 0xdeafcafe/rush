@@ -5,7 +5,7 @@
 use rush_core::agent::State;
 use rush_draw::{App, Canvas, Loop, Msg, Step};
 
-use super::predict::ready;
+use super::predict::{reads, ready};
 use super::tests::{agent, model_of};
 use crate::frame::Press;
 use crate::model::Model;
@@ -176,4 +176,48 @@ fn the_bars_pick_is_read_ahead() {
     let v = m.session.as_ref().expect("opened");
     assert_eq!(v.key, want);
     assert!(v.read, "shown with the key, not read after it");
+}
+
+/// The Session beside the list is kept as the pick moves off it, still
+/// following its file: going back shows it as it was, not read again.
+#[test]
+fn the_one_just_left_is_kept_for_going_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let lp: Loop<Note> = Loop::new();
+    let mut m = readable(dir.path());
+    m.w = 200;
+    m.h = 50;
+    m.tx = Some(lp.sender());
+    let k = keys(&m);
+    m.sel = k[0].clone();
+    m.frame();
+    let first = m.pane.as_ref().map(|v| (v.key.clone(), v.r#gen));
+    assert_eq!(first.as_ref().map(|f| f.0.as_str()), Some(k[0].as_str()));
+    press(&mut m, "down");
+    m.frame();
+    assert_eq!(m.pane.as_ref().map(|v| v.key.as_str()), Some(k[1].as_str()));
+    press(&mut m, "up");
+    m.frame();
+    let back = m.pane.as_ref().map(|v| (v.key.clone(), v.r#gen));
+    assert_eq!(back, first, "the same view, not read again");
+}
+
+/// A row that can't be read is read once, not over and over.
+#[test]
+fn one_that_cant_be_read_is_read_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let lp: Loop<Note> = Loop::new();
+    let mut m = readable(dir.path());
+    m.tx = Some(lp.sender());
+    let k = keys(&m);
+    m.sel = k[0].clone();
+    for key in &k[1..3] {
+        let a = m.agents.iter().find(|a| a.key == *key).unwrap();
+        std::fs::remove_file(&a.job.transcript_path).unwrap();
+    }
+    press(&mut m, "down");
+    run_until(&mut m, lp, |m| !reads(m).1);
+    // The two that can't be read and the one after them, once each.
+    assert_eq!(reads(&mut m), (3, false), "each tried once");
+    assert_eq!(ready(&mut m), vec![k[3].clone()]);
 }

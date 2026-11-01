@@ -29,7 +29,7 @@ pub use model::{
 pub use render::{Depth, Options, RenderedLine, Renderer};
 pub use runname::{other_harness, run_tag, set_peer_mark};
 pub use search::{Found, Hit, Library, WHO_AGENT, library};
-pub use shellwrites::{ShellWrite, shell_run, shell_writes};
+pub use shellwrites::{ShellWrite, shell_run, shell_run_kept, shell_writes};
 pub use subagents::{Subagent, Subagents, list_subagents};
 pub use transcript::{Decode, Fresh, Tail, decode, history, history_from, history_start, injected};
 

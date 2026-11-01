@@ -713,6 +713,52 @@ pub fn send_as(m: &mut Model, key: &str, text: &str) {
     );
 }
 
+/// Sends a decisions card's answers to the session rush hosts, as
+/// send_as does; their card comes back if they don't go.
+pub(super) fn send_answer(m: &mut Model, key: &str, text: String, id: String) {
+    mark_sending(m, key, &text);
+    let Some(link) = conn(m, key).link.clone() else {
+        conn(m, key).out.failed();
+        answer_failed(m, key, &id);
+        m.flash_err("this session can't take answers here");
+        return;
+    };
+    let key = key.to_string();
+    super::later(
+        m,
+        move || {
+            link.op(Op::Send {
+                text,
+                images: Vec::new(),
+                now: false,
+            })
+        },
+        move |m, r| match r {
+            Ok(()) => {
+                crate::screens::session_cards::question::answer_sent(m, &key, &id);
+                Out::Idle
+            }
+            Err(e) => {
+                conn(m, &key).out.failed();
+                answer_failed(m, &key, &id);
+                m.fail(&e);
+                Out::Draw
+            }
+        },
+    );
+}
+
+/// A decisions card's answers to a session rush doesn't run now: they
+/// wake its host or resume it, as a message from the box does
+/// (sendAnswers' wakeHost).
+pub(super) fn send_offline_answer(m: &mut Model, key: &str, text: String, id: String) -> Out {
+    send_offline_as(m, key, text, Vec::new(), false, Some(id))
+}
+
+fn answer_failed(m: &mut Model, key: &str, id: &str) {
+    crate::screens::session_cards::question::answer_failed(m, key, id);
+}
+
 /// Shows text as sending until the agent has it (markSending).
 fn mark_sending(m: &mut Model, key: &str, text: &str) {
     let now = m.now;
@@ -755,7 +801,23 @@ fn sending_via(m: &mut Model, key: &str, op: Op) {
 /// with it, and one its agent's daemon runs gets it as a reply, or queued
 /// while it works.
 fn send_offline(m: &mut Model, key: &str, text: String, images: Vec<String>, now: bool) -> Out {
+    send_offline_as(m, key, text, images, now, None)
+}
+
+/// send_offline, answer the decisions card the text answers, if it does:
+/// what doesn't go brings that card back rather than the text to the box.
+fn send_offline_as(
+    m: &mut Model,
+    key: &str,
+    text: String,
+    images: Vec<String>,
+    now: bool,
+    answer: Option<String>,
+) -> Out {
     let Some(a) = agent(m, key).cloned() else {
+        if let Some(id) = &answer {
+            answer_failed(m, key, id);
+        }
         return Out::Idle;
     };
     let name = a.display_name.clone();
@@ -770,10 +832,17 @@ fn send_offline(m: &mut Model, key: &str, text: String, images: Vec<String>, now
     let h = hosts(m);
     if h.hosts(&a) {
         if !can_resume(m, &a) {
+            if let Some(id) = &answer {
+                answer_failed(m, key, id);
+            }
             return Out::Draw;
         }
         let c = conn(m, key);
         if c.waking {
+            if let Some(id) = &answer {
+                answer_failed(m, key, id);
+                m.flash_err("it's waking: send the answers again once it's up");
+            }
             return Out::Draw;
         }
         // Asleep, its host wakes with what was sent going over its new
@@ -797,18 +866,36 @@ fn send_offline(m: &mut Model, key: &str, text: String, images: Vec<String>, now
             },
             move |m, r| match r {
                 Ok(r) => {
-                    let (r, text) = match r {
+                    let (r, mut text) = match r {
                         Ok(l) => (Ok(l), String::new()),
                         Err((e, t)) => (Err(e), t),
                     };
+                    if let Some(id) = &answer {
+                        // Answers come back on their card, not in the box.
+                        text.clear();
+                        match r {
+                            Ok(_) => {
+                                crate::screens::session_cards::question::answer_sent(m, &key, id)
+                            }
+                            Err(_) => answer_failed(m, &key, id),
+                        }
+                    }
                     super::live::woke(m, &key, r, text)
                 }
                 Err(r) => {
                     conn(m, &key).waking = false;
                     match r {
-                        Ok(()) => m.flash(&format!("resumed {name}")),
+                        Ok(()) => {
+                            m.flash(&format!("resumed {name}"));
+                            if let Some(id) = &answer {
+                                crate::screens::session_cards::question::answer_sent(m, &key, id);
+                            }
+                        }
                         Err(e) => {
                             conn(m, &key).out.failed();
+                            if let Some(id) = &answer {
+                                answer_failed(m, &key, id);
+                            }
                             m.fail(&e);
                         }
                     }
@@ -938,6 +1025,20 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     let Some(top) = c.box_y else {
         return Out::Pass;
     };
+    // The parts of the box's top edge a click takes: the permission
+    // mode, the send mode.
+    if let Some(act) = edge_hit(c, top, x, y) {
+        c.edge_lit = None;
+        return match act {
+            super::dock::EdgeAct::Mode => {
+                crate::screens::session_cards::permissions::permission_command(m, &key, "", false)
+            }
+            super::dock::EdgeAct::SendMode => {
+                cycle_mode(m, &key);
+                Out::Draw
+            }
+        };
+    }
     // The task rows on the box: the head opens or shuts them, the rest
     // (and "all tasks ›") opens the Tasks view (clickTasks).
     if c.task_rows > 0 && y + c.task_rows >= top && y < top {
@@ -982,6 +1083,16 @@ fn hover_chip(m: &mut Model, e: &Mouse) -> Out {
     };
     let (x, y) = (e.x as usize, e.y as usize);
     let c = conn(m, &key);
+    // A part of the top edge a click takes, lit under the pointer.
+    let lit = c.box_y.and_then(|top| {
+        let x = x.checked_sub(dock_x())?;
+        (y == top)
+            .then(|| c.edge_hits.iter().find(|h| x >= h.0 && x < h.1))
+            .flatten()
+            .map(|h| (h.0, h.1))
+    });
+    let edge = c.edge_lit != lit;
+    c.edge_lit = lit;
     let at = c.box_y.and_then(|top| {
         let rows = c.drawn.rows();
         let x0 = dock_x() + 2;
@@ -992,11 +1103,21 @@ fn hover_chip(m: &mut Model, e: &Mouse) -> Out {
             b.at(y - top - 1, x as isize - dock_x() as isize)
         })
     });
-    if c.input.hover(at) {
+    if c.input.hover(at) || edge {
         Out::Draw
     } else {
         Out::Pass
     }
+}
+
+/// What a click at x, y takes on the top edge of the box drawn from row
+/// top (dock_x's columns in).
+fn edge_hit(c: &super::Conn, top: usize, x: usize, y: usize) -> Option<super::dock::EdgeAct> {
+    let x = x.checked_sub(dock_x())?;
+    (y == top)
+        .then(|| c.edge_hits.iter().find(|h| x >= h.0 && x < h.1))
+        .flatten()
+        .map(|h| h.2)
 }
 
 /// The column the dock's box starts at.

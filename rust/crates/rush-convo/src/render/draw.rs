@@ -74,23 +74,27 @@ pub(crate) struct Drawer<'a> {
     pub first: bool,
     /// A timer under FAST_UNDER was drawn.
     pub fast: bool,
-    named: bool,
-    rule: bool,
-    peek: bool,
+    pub(crate) named: bool,
+    pub(crate) rule: bool,
+    pub(crate) peek: bool,
     pub(crate) tool: i32,
-    helper: i32,
-    while_: bool,
-    worked: bool,
-    marks: HashSet<String>,
-    lg: Option<&'static Lang>,
-    by_path: bool,
-    hs: HlState,
-    hs_path: String,
-    hs_n: usize,
-    spans: Vec<OutSpan>,
-    view: &'static str,
-    nowrap: bool,
+    pub(crate) helper: i32,
+    pub(crate) while_: bool,
+    pub(crate) worked: bool,
+    pub(crate) marks: HashSet<String>,
+    pub(crate) lg: Option<&'static Lang>,
+    pub(crate) by_path: bool,
+    pub(crate) hs: HlState,
+    pub(crate) hs_path: String,
+    pub(crate) hs_n: usize,
+    pub(crate) spans: Vec<OutSpan>,
+    pub(crate) view: &'static str,
+    pub(crate) nowrap: bool,
     infos: std::cell::RefCell<HashMap<StepId, Rc<Info>>>,
+    /// An open turn's parts as last drawn, when it's drawn through the
+    /// unit memo, and what they all read besides their own items.
+    pub(crate) units: Option<&'a mut super::units::Units>,
+    pub(crate) ctx: Option<u64>,
 }
 
 impl<'a> Drawer<'a> {
@@ -133,6 +137,8 @@ impl<'a> Drawer<'a> {
             view: "",
             nowrap: false,
             infos: Default::default(),
+            units: None,
+            ctx: None,
         }
     }
 
@@ -403,7 +409,12 @@ impl<'a> Drawer<'a> {
         self.add("", Color::Default, Txt::new(), Txt::new());
     }
 
-    fn is_blank(&self, i: usize) -> bool {
+    /// Row i holds only the spine, whatever its ref.
+    pub(crate) fn spine_only(&self, i: usize) -> bool {
+        trimmed_is(&self.lines[i].line, self.spine_text())
+    }
+
+    pub(crate) fn is_blank(&self, i: usize) -> bool {
         let l = &self.lines[i];
         l.r#ref.is_empty() && trimmed_is(&l.line, self.spine_text())
     }
@@ -673,7 +684,11 @@ impl<'a> Drawer<'a> {
             self.draw_items(0, items.len(), keep);
         }
         if t.live && !self.o.hide_activity {
-            self.live_line();
+            if self.o.dock_activity {
+                self.docked_live_line();
+            } else {
+                self.live_line();
+            }
         }
         if t.stopped {
             let l = self.spine().and_raw("   ").and(dim("⏹ stopped"));
@@ -1061,29 +1076,33 @@ impl<'a> Drawer<'a> {
                 if j - i >= 2 || runs && j > i {
                     let ids: Vec<StepId> = (i..j).filter_map(step_of).collect();
                     let r = format!("{}:run:{i}", self.r);
-                    if !self.o.open.get(&r).copied().unwrap_or(false) {
-                        self.run(&r, &ids);
-                        // What the run did that you'd want to see stays
-                        // out, what's about one change as one card.
-                        self.run_cards(&ids, GUTTER + 2);
-                    } else {
-                        self.railed(GUTTER - 2, true, |d| {
-                            d.work(|d| {
-                                let l = d
-                                    .sp(GUTTER - 1)
-                                    .and(faint(&format!("▾ hide {}", plural(ids.len(), "step"))));
-                                d.add(&r, Color::Default, l, Txt::new());
+                    self.memoized(i, j, |d| {
+                        if !d.o.open.get(&r).copied().unwrap_or(false) {
+                            d.run(&r, &ids);
+                            // What the run did that you'd want to see
+                            // stays out, what's about one change as one
+                            // card.
+                            d.run_cards(&ids, GUTTER + 2);
+                        } else {
+                            d.railed(GUTTER - 2, true, |d| {
+                                d.work(|d| {
+                                    let l = d.sp(GUTTER - 1).and(faint(&format!(
+                                        "▾ hide {}",
+                                        plural(ids.len(), "step")
+                                    )));
+                                    d.add(&r, Color::Default, l, Txt::new());
+                                });
+                                for &id in &ids {
+                                    d.step(id, 1);
+                                }
                             });
-                            for &id in &ids {
-                                d.step(id, 1);
-                            }
-                        });
-                    }
+                        }
+                    });
                     i = j;
                     continue;
                 }
             }
-            self.item(i);
+            self.memoized(i, i + 1, |d| d.item(i));
             i += 1;
         }
     }
@@ -1407,6 +1426,33 @@ impl<'a> Drawer<'a> {
     }
 
     // ---- live ----
+
+    /// The live line as the pane docks it under the conversation: a row
+    /// of room either side, not the turn's rail (Session.Activity strips
+    /// its leading rail rows, activity.go:24; rushPane wraps it in empty
+    /// rows, rushmode.go:2339-2346), so a card or the box's room under it
+    /// never runs flush against it.
+    fn docked_live_line(&mut self) {
+        let spine = self.spine_text().to_string();
+        while self.lines.len() > 1 {
+            let l = self.lines.last().unwrap();
+            if l.r#ref.is_empty() && trimmed_is(&l.line, &spine) {
+                self.lines.pop();
+            } else {
+                break;
+            }
+        }
+        self.add("", Color::Default, Txt::new(), Txt::new());
+        let at = self.lines.len();
+        self.live_line();
+        while at < self.lines.len()
+            && self.lines[at].r#ref.is_empty()
+            && trimmed_is(&self.lines[at].line, &spine)
+        {
+            self.lines.remove(at);
+        }
+        self.add("", Color::Default, Txt::new(), Txt::new());
+    }
 
     /// What the agent is doing right now, at the end of a running turn
     /// (render.go:1131).

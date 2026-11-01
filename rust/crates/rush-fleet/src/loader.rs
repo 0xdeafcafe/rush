@@ -2384,6 +2384,17 @@ impl Loader {
         self.quick
     }
 
+    /// The last reading's agents with their processes sampled again and
+    /// nothing else read (Go's Settle on its tick: nothing new on disk,
+    /// the last reading, processes sampled again).
+    pub fn resample(&mut self, agents: &mut [Agent]) {
+        let mut tab = self.snapshot_procs();
+        for a in agents.iter_mut() {
+            self.sample(Some(&mut tab), a);
+        }
+        self.set_prev_tab(Arc::new(tab));
+    }
+
     pub(crate) fn snapshot_procs(&mut self) -> Table {
         self.procs.snapshot()
     }

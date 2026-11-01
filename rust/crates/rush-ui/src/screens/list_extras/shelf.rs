@@ -28,6 +28,8 @@ pub struct Hit {
     pub x0: usize,
     pub x1: usize,
     pub o: StartOver,
+    /// It's the chip: what the next session starts as now.
+    pub chip: bool,
 }
 
 /// o as words, for telling setups apart (setupKey).
@@ -122,7 +124,7 @@ pub fn shelf_line(m: &Model, dir: &str, w: usize) -> (Line, Vec<Hit>) {
     }
     let mut out = Line::new();
     let mut hits = Vec::new();
-    for (i, (l, o, _)) in segs.into_iter().enumerate() {
+    for (i, (l, o, chip)) in segs.into_iter().enumerate() {
         if i > 0 {
             out.spans.push(plain(" "));
         }
@@ -132,9 +134,33 @@ pub fn shelf_line(m: &Model, dir: &str, w: usize) -> (Line, Vec<Hit>) {
             x0,
             x1: out.width(),
             o,
+            chip,
         });
     }
     (out, hits)
+}
+
+/// The chip's parts, cells into it as setup_chip draws it, each with the
+/// Start sheet's row a click on it opens: its name (Provider), its model
+/// (Model) and its effort (Effort), the row #model and #effort open.
+pub fn chip_parts(m: &Model, o: &StartOver) -> Vec<(usize, usize, usize)> {
+    use crate::screens::accounts::startsheet::{ROW_EFFORT, ROW_MODEL, ROW_PROVIDER};
+    let words = start_words(m, o);
+    let g = crate::screens::accounts::look::glyph(&m.reg, &o.kind).width();
+    // " ", the glyph, " ", then the name.
+    let mut x = 2 + g + rush_core::text::width(&words[0]);
+    let mut out = vec![(0, x, ROW_PROVIDER)];
+    for (i, w) in words[1..].iter().enumerate() {
+        x += 3; // " · "
+        let to = x + rush_core::text::width(w);
+        out.push((x, to, if i == 0 { ROW_MODEL } else { ROW_EFFORT }));
+        x = to;
+    }
+    // The chip's last cell goes with its last part.
+    if let Some(l) = out.last_mut() {
+        l.1 += 1;
+    }
+    out
 }
 
 /// Starts the next session as o (shelfPick).
