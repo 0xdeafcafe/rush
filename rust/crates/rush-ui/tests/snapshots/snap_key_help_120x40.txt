@@ -1,20 +1,20 @@
-     !        rush   ● 1 needs you [ctrl+n] next   ✻ 2 working   3 finished                        – today · Anthropic
-    ▄▄▄▄      ✻ default · /src/checkout                                                            0.0G RAM · 6 agents
-   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    < > places
-    RUSH
-   ▀▀▀▀▀▀      Agents · Wall  [ ]
-───────╭─ ⌨ Keys ──────────────────────────────────────────────────────────────────────────────────────── f1 ─╮─────────
-  AGENT│ ❯ ▏find a key by its keys or what it does                                                   132 keys │T   TIME
-┃ Needs│ ──────────────────────────────────────────────────────────────────────────────────────────────────── │
-▌ └─ ? │ Here · Agents and the Prompt ──────────────────────────────────────────────────────────────────────  │9   2m ●
-▌      │ ▍ ↑                     the agent above                                                              │
-       │   ↓                     the agent below                                                              │
-┃ Worki│   pgup                  ten agents up                                                                │
-┃ ├─ ✳ │   pgdown                ten agents down                                                              │2    21m
-┃ │    │   home · shift+↑        the first agent                                                              │
-┃ └─ ✳ │   end · shift+↓         the last agent                                                               │0    20m
-┃      │   enter                 open or rename the agent, or send what's typed                               │
-  ↓ 9 m│   ctrl+o · ⌘↓           open the agent's Session                                                     │
+    RUSH      rush   ● 1 needs you   ✻ 2 working                                                               default
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    Agents · Wall  [ ]            0% cpu · – · 37.0G free · 80%
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  AGENTS▾                               LATEST                               RUNNING   CPU    RAM TOKENS    COST   TIME
+┃ Needs you  1 · $0.19
+▌ └─ ? ╭─ ⌨ Keys ──────────────────────────────────────────────────────────────────────────────────────── f1 ─╮9   2m ●
+▌      │ ❯ ▏find a key by its keys or what it does                                                   132 keys │
+       │ ──────────────────────────────────────────────────────────────────────────────────────────────────── │
+┃ Worki│ Here · Agents and the Prompt ──────────────────────────────────────────────────────────────────────  │
+┃ ├─ ✳ │ ▍ ↑                     the agent above                                                              │2    21m
+┃ │    │   ↓                     the agent below                                                              │
+┃ └─ ✳ │   pgup                  ten agents up                                                                │0    20m
+┃      │   pgdown                ten agents down                                                              │
+       │   home · shift+↑        the first agent                                                              │
+┃ Idle │   end · shift+↓         the last agent                                                               │
+┃ └─ ◦ │   enter                 open or rename the agent, or send what's typed                               │0    10m
+  ↓ 6 m│   ctrl+o · ⌘↓           open the agent's Session                                                     │
        │   →                     into the agent, or unfold a heading                                          │
  ✦ Gett│   ←                     fold the heading                                                             │
  ○ Star│   esc                   clear, go back, or (twice) quit                                              │ enter

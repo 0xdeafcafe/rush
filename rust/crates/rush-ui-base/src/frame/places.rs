@@ -265,7 +265,7 @@ impl Model {
 
     /// The pages of what's showing, and the one up; None where there are
     /// none (pageTabs).
-    pub fn page_tabs(&mut self) -> Option<Pages> {
+    pub fn page_tabs(&self) -> Option<Pages> {
         // Hosted has no page tabs outside the Settings dialog's: Agents is
         // its one session, and Projects with Efficiency shows no pages
         // (pageTabs, view.go:335).
@@ -334,6 +334,16 @@ impl Model {
             .iter()
             .enumerate()
             .map(|(i, v)| {
+                // Projects carries a small count of the agents' leftovers
+                // to end, where they are.
+                let left = if *v == PlaceId::Projects {
+                    self.ext.top_bar.map_or(0, |tb| (tb.orphans)(self))
+                } else {
+                    0
+                };
+                if left > 0 {
+                    return self.projects_tab(i, *v, left);
+                }
                 let text = format!(" {} ", v.name());
                 if *v == self.place {
                     line([rush_core::text::Span::new(
@@ -352,9 +362,37 @@ impl Model {
             .collect()
     }
 
+    /// The Projects tab with its count of leftovers after the name, as a
+    /// small raised number.
+    fn projects_tab(&self, i: usize, v: PlaceId, left: usize) -> Line {
+        use rush_core::text::{Span, Style};
+        const UP: [char; 10] = ['⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'];
+        let n: String = left
+            .to_string()
+            .chars()
+            .map(|c| UP[c.to_digit(10).unwrap_or(0) as usize])
+            .collect();
+        let (name, badge, tail) = if v == self.place {
+            let on = Style::fg(TAB_ON_FG).on(ORANGE).bold();
+            (on, on, on)
+        } else {
+            let off = Style::fg(SUB).on(TAB_OFF_BG);
+            (off, Style::fg(YELLOW).on(TAB_OFF_BG), off)
+        };
+        let l = line([
+            Span::new(format!(" {} ", v.name()), name),
+            Span::new(n, badge),
+            Span::new(" ", tail),
+        ]);
+        if v != self.place && self.top_hover == Some((i, false)) {
+            return hover_line(l, v.name().len() + 3);
+        }
+        l
+    }
+
     /// The pages row's words, as many as width has room for, the page
     /// showing bright; nothing where there are no pages (pagesWidth). Leading blanks are the caller's.
-    pub fn pages_line(&mut self, width: usize) -> Line {
+    pub fn pages_line(&self, width: usize) -> Line {
         if self.place != PlaceId::Agents
             && let Some(Some(p)) = self.ext.places.get(self.place as usize)
             && let Some(l) = p.pages_line(self, width.saturating_sub(3))
@@ -395,7 +433,7 @@ impl Model {
 
     /// The tab at (x, y) of the header as last drawn: (index, is a page)
     /// (headerTabAt).
-    pub fn header_tab_at(&mut self, x: usize, y: usize) -> Option<(usize, bool)> {
+    pub fn header_tab_at(&self, x: usize, y: usize) -> Option<(usize, bool)> {
         if self.sheet.is_some() || x >= self.w || y >= self.top_h() {
             return None;
         }
@@ -411,11 +449,21 @@ impl Model {
             }
             None
         };
-        if y == self.top_h() - 2 {
-            let names = self.page_tabs()?.names;
-            return at(&self.header_text[1], &names).map(|i| (i, true));
+        // Small screens give the pages a row under the places; otherwise
+        // both are along the header's second row.
+        let narrow = self.w < crate::header::NARROW;
+        let (places_y, pages_y) = if narrow {
+            (2, self.top_h() - 2)
+        } else {
+            (1, 1)
+        };
+        if y == pages_y
+            && let Some(t) = self.page_tabs()
+            && let Some(i) = at(&self.header_text[1], &t.names)
+        {
+            return Some((i, true));
         }
-        if y == 2 {
+        if y == places_y {
             let names: Vec<String> = PlaceId::ALL
                 .iter()
                 .map(|p| format!(" {} ", p.name()))

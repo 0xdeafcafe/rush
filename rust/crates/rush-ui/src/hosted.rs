@@ -390,9 +390,7 @@ mod tests {
             for not in ["another session", "esc back to the list", "Agents · Wall"] {
                 assert!(!out.contains(not), "{w}: shows {not:?}:\n{out}");
             }
-            for want in ["2 finished", "ctrl+\\ places", "agent s1"] {
-                assert!(out.contains(want), "{w}: lacks {want:?}:\n{out}");
-            }
+            assert!(out.contains("agent s1"), "{w}: lacks the agent:\n{out}");
         }
         let out = crate::frame(&mut m, 120, 40, &[], false);
         assert!(
@@ -498,12 +496,12 @@ mod tests {
             .find(" Projects ")
             .map(|j| rush_core::text::width(&row[..j]) + 2);
         let x = x.expect("the Projects tab");
-        assert_eq!(m.header_tab_at(x, 2), None);
+        assert_eq!(m.header_tab_at(x, 1), None);
         let x = row
             .find(" Settings ")
             .map(|j| rush_core::text::width(&row[..j]) + 2);
         assert!(
-            m.header_tab_at(x.unwrap(), 2).is_some(),
+            m.header_tab_at(x.unwrap(), 1).is_some(),
             "Settings still opens"
         );
     }

@@ -134,7 +134,7 @@ fn frames_match_go() {
     let want = oracle(include_str!("testdata/projects.txt"));
     assert_eq!(want.len(), cases.len());
     for ((w, cfg, keys), (name, want)) in cases.into_iter().zip(want) {
-        let mut m = model(three(), w, 45, cfg);
+        let mut m = model(three(), w, 42, cfg);
         for k in keys {
             press(&mut m, k);
         }
@@ -172,7 +172,7 @@ fn rich(w: usize, cfg: Cfg) -> Model {
     let old = agent("a2", "old probe", "/src/alpha", "/src/alpha", 0, 5 * HOUR);
     let mut dl = agent("d1", "Sort downloads", "", "", 0, 5 * HOUR);
     dl.0.job.cwd = "/Users/me/Downloads".into();
-    let mut m = model(vec![fix, old, dl], w, 60, cfg);
+    let mut m = model(vec![fix, old, dl], w, 57, cfg);
     let d = m.kept::<Data>();
     let mut f = Folder {
         root: "/src/alpha".into(),

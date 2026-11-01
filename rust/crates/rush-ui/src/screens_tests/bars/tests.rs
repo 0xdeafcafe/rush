@@ -113,12 +113,12 @@ fn the_top_bar_goes_down_the_right() {
         "{:?}",
         rows[1]
     );
-    assert!(rows[2].trim_end().ends_with("– today"), "{:?}", rows[2]);
     // Each ends two cells in from the edge, as Go's do.
     assert_eq!(rush_core::text::width(rows[0].trim_end()), 118);
-    // The folder alone on the second row only while usage shows.
-    assert!(rows[1].contains("· /src/checkout"), "{:?}", rows[1]);
+    // The header is two rows now: a third line has no row.
+    assert!(!rows[2].contains("today"), "{:?}", rows[2]);
     m.loaded = false;
+    m.w = 160; // the places and pages leave it room
     let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
     assert!(
         rows[1].contains("costing transcripts…   #statusline details"),
@@ -126,10 +126,10 @@ fn the_top_bar_goes_down_the_right() {
         rows[1]
     );
     // What had no room is kept for /statusline to point out.
-    let mut m = model(64);
+    let mut m = model(60);
     with_bars(
         &mut m,
-        lay(&[&["version", "statushelp"], &[], &[]]),
+        lay(&[&["version", "statushelp", "today"], &[], &[]]),
         default_agent(),
     );
     m.frame();
@@ -142,13 +142,23 @@ fn the_top_bar_goes_down_the_right() {
 fn the_default_top_bar_is_gauges() {
     let mut m = model(140);
     with_bars(&mut m, default_top(), default_agent());
+    // A top bar of only what the calm header shows is drawn as it too.
+    let mine = lay(&[
+        &["version"],
+        &["plan"],
+        &["cpu", "ram", "net", "disk", "battery"],
+    ]);
+    with_bars(&mut m, mine, default_agent());
+    assert!(top::header_gauges(&m).is_some());
+    with_bars(&mut m, default_top(), default_agent());
     let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
-    assert!(rows[0].contains("– today · "), "{:?}", rows[0]);
-    assert!(rows[1].contains("0.0G RAM · 0 agents"), "{:?}", rows[1]);
-    // Its own layout draws its lines instead.
-    assert!(top::header_gauges(&m, 0.0, 200).is_some());
-    with_bars(&mut m, lay(&[&["version"]]), default_agent());
-    assert!(top::header_gauges(&m, 0.0, 200).is_none());
+    assert!(rows[0].contains("rush"), "{:?}", rows[0]);
+    assert!(rows[1].contains("% cpu"), "{:?}", rows[1]);
+    assert!(!rows[0].contains("finished"), "{:?}", rows[0]);
+    // A layout with more than the calm header shows draws its lines.
+    assert!(top::header_gauges(&m).is_some());
+    with_bars(&mut m, lay(&[&["version", "clock"]]), default_agent());
+    assert!(top::header_gauges(&m).is_none());
 }
 
 /// A plan window: what's used, a tick for how far through the window
@@ -576,40 +586,29 @@ fn samples_are_the_builders_agent() {
 }
 
 /// While the readings aren't in, the top bar draws what it said last
-/// time for them: the plan's rows and the machine's figures, where the
+/// time for them: the machine's figures, where the
 /// live ones go; the version, which needs no reading, live (listcache.rs).
 #[test]
 fn a_kept_top_bar_stands_in_till_its_readings_are_in() {
     let mut m = model(160);
-    with_bars(
-        &mut m,
-        lay(&[&["version"], &["plan"], &["ram", "version"]]),
-        default_agent(),
-    );
     let l = |t: &str| crate::style::line([crate::style::sp(t, crate::style::DIM)]);
     crate::listcache::stand_in(
         &mut m,
         &[("ram", l("3.3G ram")), ("version", l("rush old"))],
         vec![l("✻ ▸ alex ▱▱▱▱▱▱  +2 ready"), l("◎◈◐ ▰▱▱▱")],
     );
+    // The machine's figures stand in; the version is live.
+    with_bars(
+        &mut m,
+        lay(&[&["clock", "version"], &["ram", "version"]]),
+        default_agent(),
+    );
     let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
     assert!(rows[0].trim_end().ends_with("rush 0.1.0"), "{:?}", rows[0]);
     assert!(
-        rows[1].trim_end().ends_with("✻ ▸ alex ▱▱▱▱▱▱  +2 ready"),
+        rows[1].trim_end().ends_with("3.3G ram · rush 0.1.0"),
         "{:?}",
         rows[1]
-    );
-    assert_eq!(
-        rush_core::text::width(rows[1].trim_end()),
-        158,
-        "{:?}",
-        rows[1]
-    );
-    assert!(rows[2].trim_end().ends_with("◎◈◐ ▰▱▱▱"), "{:?}", rows[2]);
-    assert!(
-        rows[3].trim_end().ends_with("3.3G ram · rush 0.1.0"),
-        "{:?}",
-        rows[3]
     );
 }
 
