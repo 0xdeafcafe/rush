@@ -865,9 +865,24 @@ pub struct Guard {
         skip_serializing_if = "is_zero_i64"
     )]
     pub move_hours: i64,
+    /// How many hours a day you use the accounts: a week's room is
+    /// spread over those, not round the clock. 0 is 12.
+    #[serde(
+        rename = "paceHours",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_zero_i64"
+    )]
+    pub pace_hours: i64,
 }
 
 impl Guard {
+    pub fn day_hours(&self) -> i64 {
+        if self.pace_hours > 0 {
+            self.pace_hours.min(24)
+        } else {
+            12
+        }
+    }
     pub fn warn(&self) -> f64 {
         if self.pace_warn > 0.0 {
             self.pace_warn
@@ -909,6 +924,7 @@ impl Guard {
                 warn: self.warn(),
                 trip: self.trip(),
                 release: (self.warn() - 0.3).clamp(1.0, self.trip()),
+                day: self.day_hours() * 60 * MIN,
                 ..PaceCfg::default()
             }),
             cap: self.cap.max(0) as usize,

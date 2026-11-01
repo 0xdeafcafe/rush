@@ -138,9 +138,11 @@ fn input(dir: &std::path::Path, s: Settings, accts: Vec<(Acct, Option<Sample>)>,
     }
 }
 
+/// Round the clock, so the readings below read simply.
 fn pace_on() -> Settings {
     rush_state::config::Guard {
         pace: true,
+        pace_hours: 24,
         ..Default::default()
     }
     .settings()
