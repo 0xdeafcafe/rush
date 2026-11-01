@@ -174,15 +174,23 @@ pub fn views_panel(
     }
     if h >= 2 {
         let bottom = if st.past {
-            views_bottom(w, "", "", 0, 0)
+            views_bottom(w, "", "", false, 0, 0)
         } else {
             let v = shown_view(vs, &st.tab);
             let below = body.len() as i64 - st.scroll as i64 - bh as i64;
             let mut when = ago(now - v.updated.to_ms());
             if !st.quiet.is_empty() {
-                when = format!("{} · {when}", st.quiet);
+                // Stale: what's wrong, and for how long, in the warning tone.
+                when = format!("{} · {}", st.quiet, when.trim_end_matches(" ago"));
             }
-            views_bottom(w, &v.by, &when, st.scroll, below.max(0) as usize)
+            views_bottom(
+                w,
+                &v.by,
+                &when,
+                !st.quiet.is_empty(),
+                st.scroll,
+                below.max(0) as usize,
+            )
         };
         out.push(bottom);
     }
@@ -310,7 +318,7 @@ fn past_body(past: &[View], w: usize, now: i64) -> Vec<ViewLine> {
 
 /// The panel's bottom edge: who made it and when it last changed it, and
 /// how many rows are scrolled past above and below (viewsBottom).
-fn views_bottom(w: usize, by: &str, when: &str, above: usize, below: usize) -> Line {
+fn views_bottom(w: usize, by: &str, when: &str, stale: bool, above: usize, below: usize) -> Line {
     let mut r = Vec::new();
     if above > 0 {
         r.push(format!("↑ {above}"));
@@ -342,7 +350,17 @@ fn views_bottom(w: usize, by: &str, when: &str, above: usize, below: usize) -> L
     for label in labels {
         if (cw(&label) as isize) < w as isize - 3 - right.width() as isize - 3 {
             if !label.is_empty() {
-                left.spans.push(dim(label));
+                // The stale part (after the first dot) in the warning tone.
+                match label.split_once(" · ").filter(|_| stale) {
+                    Some((who, rest))
+                        if label.starts_with("made by") || label.starts_with("by ") =>
+                    {
+                        left.spans.push(dim(format!("{who} · ")));
+                        left.spans.push(paint(YELLOW, rest.to_string()));
+                    }
+                    _ if stale => left.spans.push(paint(YELLOW, label)),
+                    _ => left.spans.push(dim(label)),
+                }
                 left.spans.push(plain(" "));
             }
             break;
@@ -489,7 +507,9 @@ pub fn view_body(v: &View, w: usize, st: &ViewsState) -> Vec<ViewLine> {
     if fade {
         // Greyed: the agent has stopped keeping it.
         for l in &mut out[ours..] {
-            l.s = ln([faint(l.s.plain())]);
+            // Nothing in it looks live: a busy mark is a quiet dot, the
+            // step under way an empty one, everything in the faint grey.
+            l.s = ln([faint(l.s.plain().replace('◐', "·").replace('◉', "○"))]);
             l.act.lit = None;
         }
     }

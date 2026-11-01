@@ -72,7 +72,8 @@ impl Agents for SubAgents {
     }
 
     fn viewer(&self) -> Option<&dyn Viewer> {
-        Some(self)
+        // Views off: the tool isn't listed and a call is refused.
+        (!rush_state::Store::load().config.views_off).then_some(self as &dyn Viewer)
     }
 
     fn headless(&self) -> bool {
