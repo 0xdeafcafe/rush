@@ -358,7 +358,15 @@ fn next(m: &mut Model) {
             if p.busy.as_ref().is_some_and(|(b, _)| *b == key) {
                 p.busy = None;
             }
-            if let Some((path, tail, sess, seen)) = r {
+            let Some((path, tail, sess, seen)) = r else {
+                // It can't be read (its transcript gone, a Scratch row's):
+                // not wanted again until the list asks anew, or next would
+                // read it over and over.
+                p.want.retain(|w| w.key != key);
+                next(m);
+                return Out::Idle;
+            };
+            {
                 let a = Ahead {
                     key,
                     pid,
