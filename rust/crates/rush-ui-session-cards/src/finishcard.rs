@@ -17,7 +17,7 @@ use rush_gh::ghpr::{Check, PR, Status};
 use super::card::CardBtn;
 use super::{Act, Conn, act, pending, session};
 use crate::model::Model;
-use crate::screens::list_extras::finish::{self, FinishAct, FinishCard, Pick, TabHit};
+use crate::finish_card::{self, FinishAct, FinishCard, Pick, TabHit};
 
 /// The Session's side of the card: the card as last built, the ones set
 /// aside, and the number of the one picked (c.finish, finishGone,
@@ -71,7 +71,7 @@ pub fn agent_prs(m: &Model, a: &Agent) -> Vec<(String, PR)> {
     let root = root_of(m, a);
     let data = m
         .kept
-        .peek::<crate::screens::projects_machine::data::Data>();
+        .peek::<rush_ui_projects_machine::data::Data>();
     let gh = data
         .and_then(|d| d.prs.get(&root))
         .map_or(&[][..], |r| r.prs.as_slice());
@@ -115,7 +115,7 @@ fn merges(m: &Model, root: &str) -> (HashMap<u64, String>, HashMap<u64, String>,
     let (mut merging, mut failed, mut merged) = (HashMap::new(), HashMap::new(), HashSet::new());
     let Some(d) = m
         .kept
-        .peek::<crate::screens::projects_machine::data::Data>()
+        .peek::<rush_ui_projects_machine::data::Data>()
     else {
         return (merging, failed, merged);
     };
@@ -161,7 +161,7 @@ pub fn sync(m: &Model, key: &str, c: &mut Conn) {
     let (merging, failed, merged) = merges(m, &root);
     let asking = m
         .kept
-        .peek::<crate::screens::projects_machine::data::Data>()
+        .peek::<rush_ui_projects_machine::data::Data>()
         .is_some_and(|d| d.asking.contains(&root));
     let old = c.finish.card.take();
     c.finish.card = finish::build(&Pick {
@@ -232,7 +232,7 @@ pub fn key(m: &mut Model, key: &str, c: &mut Conn, s: &str) -> crate::frame::Out
             act(m, key, Act::Send(text))
         }
         FinishAct::Merge => {
-            crate::screens::projects_machine::prsheet::ask_merge_pr(m, &froot, &pr);
+            rush_ui_projects_machine::prsheet::ask_merge_pr(m, &froot, &pr);
             Out::Draw
         }
         FinishAct::Flash(why) => {
@@ -240,7 +240,7 @@ pub fn key(m: &mut Model, key: &str, c: &mut Conn, s: &str) -> crate::frame::Out
             Out::Draw
         }
         FinishAct::Browse(url) => {
-            crate::screens::projects_machine::place::browse(m, &url);
+            rush_ui_projects_machine::place::browse(m, &url);
             Out::Draw
         }
         FinishAct::Gone => {

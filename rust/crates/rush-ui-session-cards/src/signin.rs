@@ -13,7 +13,7 @@ use super::{Act, Conn, HostInfo, act};
 use crate::accounts::StartOver;
 use crate::frame::Out;
 use crate::model::Model;
-use crate::screens::accounts::signedout::{Signin, signed_out_rows, signin_key};
+use rush_ui_accounts::signedout::{Signin, signed_out_rows, signin_key};
 
 /// Whether the session sits stopped because its sign-in ran out, and no
 /// continue has gone yet (signedOut).
@@ -28,7 +28,7 @@ pub fn signed_out(c: &Conn, i: &HostInfo) -> bool {
 
 /// What session key runs as now (sessionStart).
 fn from(m: &Model, key: &str, i: &HostInfo) -> StartOver {
-    crate::screens::bars::agent::session_start(m, key).unwrap_or_else(|| StartOver {
+    (m.ext.calls.session_start())(m, key).unwrap_or_else(|| StartOver {
         kind: i.kind.clone(),
         ..StartOver::default()
     })
@@ -82,14 +82,14 @@ fn carry_on(m: &mut Model, key: &str, sig: Signin) -> Out {
                 ..StartOver::default()
             };
             let k = key.to_string();
-            crate::screens::session_core::start::switch_then(
+            (m.ext.calls.switch_then())(
                 m,
                 &o,
                 Box::new(move |m| continue_signed_in(m, &k)),
             )
         }
         Signin::HandOver(o) => {
-            crate::screens::session_core::switch::switch_session_message(m, key, o, "continue")
+            (m.ext.calls.switch_session_message())(m, key, o, "continue")
         }
     }
 }

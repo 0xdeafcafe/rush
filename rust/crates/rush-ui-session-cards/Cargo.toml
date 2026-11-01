@@ -1,0 +1,37 @@
+[package]
+name = "rush-ui-session-cards"
+description = "rush's cards and sheets on a session: approvals, Claude's questions, limits, sign-in, /rewind, /fork, /compact, #slim, the message sheet, the quick ask, /btw, rooms on a session, handing a session to another harness, pastes and pictures"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-convo.workspace = true
+rush-fleet.workspace = true
+rush-draw.workspace = true
+rush-sys.workspace = true
+rush-state.workspace = true
+rush-gh.workspace = true
+rush-memory.workspace = true
+rush-net.workspace = true
+rush-room = { path = "../rush-room" }
+# A session's host: what it can start and switch (host/*.go).
+rush-host = { path = "../rush-host" }
+# The frame and model under every screen.
+rush-ui-base.workspace = true
+# The screens below the cards in rank: plugin_ui < settings < accounts <
+# projects_machine < social < session_cards.
+rush-ui-plugin-ui.workspace = true
+rush-ui-settings.workspace = true
+rush-ui-accounts.workspace = true
+rush-ui-projects-machine.workspace = true
+rush-ui-social.workspace = true
+# Pictures in quarter blocks (convo/picture.go, thumb.go): the formats Go
+# decodes, nothing else.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+regex.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }

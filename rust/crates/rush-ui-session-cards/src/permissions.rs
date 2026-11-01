@@ -60,7 +60,6 @@ pub fn bypass_mode(m: &Model, kind: &str, c: Option<&HostInfo>) -> String {
 
 /// Switches agent key's hosted session to mode (setPermission).
 pub fn set_permission(m: &mut Model, key: &str, mode: &str) -> Out {
-    use crate::screens::session_core::switch;
     use crate::sess::agent;
     // A host gone to sleep is woken first, then asked (setPermission's
     // wakeHostThen, permissions.go:60).
@@ -68,7 +67,7 @@ pub fn set_permission(m: &mut Model, key: &str, mode: &str) -> Out {
         && let Some(a) = agent(m, key).cloned()
     {
         let (key, mode) = (key.to_string(), mode.to_string());
-        return switch::wake_then(m, &a, move |m| set_permission(m, &key, &mode));
+        return (m.ext.calls.wake_then())(m, &a, Box::new(move |m| set_permission(m, &key, &mode)));
     }
     let Some(c) = info(m, key) else {
         m.flash_err("Permissions can be changed in a hosted session; use #rush first");
@@ -97,14 +96,14 @@ pub fn permission_command(m: &mut Model, key: &str, arg: &str, yolo: bool) -> Ou
 /// if its harness has it; nothing named opens the setup sheet on its
 /// Permissions row, to apply only (permissionCommand).
 pub fn perm_command(m: &mut Model, key: Option<&str>, arg: &str, yolo: bool) -> Out {
-    use crate::screens::accounts::{setup, startsheet};
+    use rush_ui_accounts::{setup, startsheet};
     let c = key.and_then(|k| info(m, k));
     let next = |m: &Model| {
         let dir = crate::startdir::start_dir(m);
         setup::next_start(m, &dir)
     };
     let mut o = match key {
-        Some(k) => crate::screens::bars::agent::session_start(m, k).unwrap_or_else(|| next(m)),
+        Some(k) => (m.ext.calls.session_start())(m, k).unwrap_or_else(|| next(m)),
         None => next(m),
     };
     let mut arg = arg.trim().to_string();

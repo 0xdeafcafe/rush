@@ -29,9 +29,8 @@ use crate::frame::caps::{can_run, can_screen, own_screens};
 use crate::frame::sheet::{Sheet, sheet_row, sheet_title};
 use crate::frame::{Out, Press};
 use crate::model::Model;
-use crate::screens::accounts::info as infosheet;
-use crate::screens::session_core;
-use crate::screens::settings::{sheets, statusline};
+use rush_ui_accounts::info as infosheet;
+use rush_ui_settings::{sheets, statusline};
 use crate::session::harness_name;
 use crate::style::{CHROME_BG, FAINT, ORANGE, SUB, TEXT, keys_fit, line, plain, sp, spb, wrap};
 
@@ -353,7 +352,7 @@ pub fn open_screen(m: &mut Model, key: &str, screen: &str) -> Out {
     );
     let cwd = session_cwd(m, key, &a);
     let acct = if a.acct.name.is_empty() && a.acct.dir.is_empty() {
-        crate::screens::cmdbar::outside::profile_of(&m.reg, &a)
+        crate::accounts::profile_of(&m.reg, &a)
     } else {
         a.acct.clone()
     };
@@ -401,7 +400,7 @@ pub fn screen_done(m: &mut Model, key: &str, screen: &str, r: crate::frame::outs
         ));
         return Out::Draw;
     }
-    session_core::keys::send_as(m, key, "/reload-plugins");
+    m.act(crate::frame::ext::Act::SendAs { key: key.to_string(), text: "/reload-plugins".to_string() });
     Out::Draw
 }
 
@@ -421,7 +420,7 @@ pub(crate) fn kind_of(m: &mut Model, key: &str) -> String {
 /// by its account's name.
 pub(crate) fn acct_of(m: &Model, a: &rush_core::agent::Agent) -> Profile {
     if a.acct.name.is_empty() && a.acct.dir.is_empty() {
-        crate::screens::cmdbar::outside::profile_of(&m.reg, a)
+        crate::accounts::profile_of(&m.reg, a)
     } else {
         a.acct.clone()
     }
@@ -515,12 +514,12 @@ pub fn rush_screen(m: &mut Model, key: &str, screen: &str) -> Out {
                 m.flash_err(&format!("{h} has no plugins rush manages"));
                 return Out::Draw;
             }
-            crate::screens::plugin_ui::sheet::open(m, &a, &cwd);
+            rush_ui_plugin_ui::sheet::open(m, &a, &cwd);
             return Out::Draw;
         }
-        "memory" if session_core::views::show_view(m, key, "memory") => return Out::Draw,
+        "memory" if (m.ext.calls.show_view())(m, key, "memory") => return Out::Draw,
         "config" => {
-            crate::screens::settings::providers::open_agent_settings(m, &kind);
+            rush_ui_settings::providers::open_agent_settings(m, &kind);
             return Out::Draw;
         }
         "statusline" => {
@@ -692,7 +691,7 @@ fn open_unknown(m: &mut Model, key: &str, line: String, now: bool) -> bool {
 /// (sendRaw).
 fn send_raw(m: &mut Model, key: &str, now: bool) -> Out {
     m.kept::<Screens>().send_raw = true;
-    let out = session_core::keys::send(m, key, now);
+    let out = (m.ext.calls.send_box())(m, key, now);
     m.kept::<Screens>().send_raw = false;
     out
 }

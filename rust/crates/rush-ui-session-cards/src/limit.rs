@@ -146,7 +146,7 @@ pub fn refresh_limit_usage_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut su
             r.quota(&rush_fleet::reading_key(&p.dir, &r))
         })
     } else if ad.quota_source().is_some() {
-        let rows = crate::screens::accounts::rows::account_rows(m);
+        let rows = rush_ui_accounts::rows::account_rows(m);
         let account = full_account(&rows, p.kind.as_str(), &q.account);
         let path = rush_host::kind::quotas_path();
         let qkey = if ad.reads_any_account() && !account.key.is_empty() {

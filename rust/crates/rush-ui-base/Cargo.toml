@@ -16,6 +16,8 @@ rush-events.workspace = true
 # The keymap in force (keybind.rs).
 rush-keymap.workspace = true
 rush-net.workspace = true
+# The finishing card's pull request (finish_card.rs).
+rush-gh.workspace = true
 # What is known of newer rushes (update.rs).
 rush-update.workspace = true
 # A workflow's files and a sign-in's renewal (lead.rs).

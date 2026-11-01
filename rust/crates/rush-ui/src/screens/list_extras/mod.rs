@@ -27,7 +27,8 @@ use crate::model::Model;
 
 pub use crate::away;
 pub mod filter;
-pub mod finish;
+// The finishing card's rows and keys: rush-ui-base's, for session_cards.
+pub use crate::finish_card as finish;
 pub mod fuzzy;
 pub mod grid;
 pub mod hosted;
@@ -55,8 +56,6 @@ pub mod work;
 
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod tests_finish;
 #[cfg(test)]
 mod tests_grid;
 #[cfg(test)]

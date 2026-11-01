@@ -5,4 +5,5 @@
 mod accounts;
 mod plugin_ui;
 mod projects_machine;
+mod session_cards;
 mod social;

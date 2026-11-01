@@ -513,7 +513,7 @@ pub fn message_key_hook(m: &mut Model, k: &Press) -> Out {
 pub fn act_on_entity(m: &mut Model, e: &str) {
     if let Some(url) = e.strip_prefix("pr:") {
         if m.sender().is_some() {
-            crate::screens::accounts::signin::browse(url);
+            rush_ui_accounts::signin::browse(url);
         }
         m.flash(&format!("opened {}", url.trim_start_matches("https://")));
         return;
@@ -547,13 +547,13 @@ pub fn jump_user_message(m: &mut Model, key: &str, last: bool) -> Out {
 /// that message; rush:agent/<tag> goes to that agent. Anything else is
 /// Pass. (messageLink, pane_pointer.go:154 linkedAgent.)
 pub fn message_link(m: &mut Model, key: &str, target: &str) -> Out {
-    if let Some(out) = crate::screens::cmdbar::linkkinds::open_known_link(m, target) {
+    if let Some(out) = (m.ext.calls.open_known_link())(m, target) {
         return out;
     }
     if target.starts_with("rush:agent/") {
         let to = super::handles::linked_agent(m, target).map(|i| m.agents[i].key.clone());
         match to {
-            Some(k) => crate::screens::cmdbar::bar::go_agent(m, &k),
+            Some(k) => m.act(crate::frame::ext::Act::GoAgent(k)),
             None => m.flash_err("that agent isn't in the list any more"),
         }
         return Out::Draw;

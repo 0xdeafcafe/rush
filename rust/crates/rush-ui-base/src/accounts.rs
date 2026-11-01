@@ -24,6 +24,21 @@ use crate::frame::Out;
 use crate::look::agent_name;
 use crate::model::Model;
 
+/// The profile a's session runs under, as its adapter knows it.
+pub fn profile_of(reg: &Registry, a: &rush_core::agent::Agent) -> Profile {
+    reg.get(a.kind.as_str())
+        .and_then(|ad| {
+            reg.profiles_of(&ad)
+                .into_iter()
+                .find(|p| p.name == a.job.account)
+        })
+        .unwrap_or_else(|| Profile {
+            kind: a.kind.clone(),
+            name: a.job.account.clone(),
+            dir: String::new(),
+        })
+}
+
 /// A provider id (claude, claude-key, ollama) and the agents here that
 /// run it (route).
 #[derive(Clone, Debug, PartialEq, Eq)]

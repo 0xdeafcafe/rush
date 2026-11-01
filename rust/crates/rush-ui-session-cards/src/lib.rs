@@ -46,7 +46,7 @@ pub mod finishcard;
 pub mod fork;
 pub mod handles;
 pub mod handoff;
-pub use crate::imagerefs;
+pub use rush_ui_base::imagerefs;
 pub mod limit;
 pub mod memcard;
 pub mod mention;
@@ -67,24 +67,6 @@ pub mod slim;
 pub mod stopnote;
 pub mod util;
 
-#[cfg(test)]
-mod tests;
-#[cfg(test)]
-mod tests_compact;
-#[cfg(test)]
-mod tests_go;
-#[cfg(test)]
-mod tests_limit;
-#[cfg(test)]
-mod tests_more;
-#[cfg(test)]
-mod tests_narrow;
-#[cfg(test)]
-mod tests_remember;
-#[cfg(test)]
-mod tests_sheets;
-#[cfg(test)]
-mod tests_wrap;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -94,13 +76,24 @@ use rush_core::event::Question;
 use rush_core::text::Line;
 use rush_draw::MouseKind;
 
+// The base's modules, so crate::frame::.. and the like read as they did
+// in rush-ui. Each is the one module, not a copy.
+use rush_ui_base::{
+    accounts, config, finish, frame, host, keybind, list, model, paint, rooms,
+    sess, session, startdir, style, worker,
+};
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();
+
 use crate::frame::{Ext, Mouse, Out};
 use crate::model::Model;
 use crate::style::*;
 
 pub use card::CardBtn;
 
-pub use crate::host::Mode;
+pub use rush_ui_base::host::Mode;
 
 /// A subagent the session runs: the call that started it, its type and
 /// what it was given to do (convo.Subagent's).
@@ -376,7 +369,7 @@ pub struct Conn {
     pub finish: finishcard::FinishState,
     /// The signed-out card: the account picked and whether it has the
     /// keys; and the error a continue went for (signinPick, signinSent).
-    pub signin: crate::screens::accounts::signedout::Card,
+    pub signin: rush_ui_accounts::signedout::Card,
     pub signin_sent: String,
     pub dec_shown: String,
     pub dec_id: String,
@@ -393,7 +386,7 @@ pub struct Conn {
 
 /// Model's side of this module: Model is rush-ui-base's, so its
 /// methods here are a trait's.
-pub(crate) trait ModelCards {
+pub trait ModelCards {
     fn cards(&mut self) -> &mut Cards;
 }
 
@@ -643,7 +636,7 @@ pub fn register(x: &mut Ext) {
             Some(k) if !k.starts_with(mention::ROOM_KEY_PREFIX) => {
                 discuss::discuss(m, &k, arg, false)
             }
-            _ => crate::screens::social::roomsetup::open_room_cmd(m, arg),
+            _ => rush_ui_social::roomsetup::open_room_cmd(m, arg),
         },
     );
     x.command(

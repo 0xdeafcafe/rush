@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use rush_core::text::Line;
 use rush_gh::ghpr::{Check, PR, Status};
 
-use super::finish::*;
+use crate::finish_card::*;
 
 fn check(name: &str, state: &str) -> Check {
     Check {

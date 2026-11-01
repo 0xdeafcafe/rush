@@ -20,8 +20,7 @@ use super::util::first_non_empty;
 use crate::frame::confirm::Confirm;
 use crate::frame::{Out, Press};
 use crate::model::Model;
-use crate::screens::projects_machine::memreview::{self, keeper};
-use crate::screens::session_core::{self as core, views};
+use rush_ui_projects_machine::memreview::{self, keeper};
 use crate::session::harness_name;
 
 /// Drafts a note from (what, around): the cheap model's, or a test's.
@@ -207,7 +206,7 @@ fn keep(m: &mut Model, d: Draft, edit: bool) -> Out {
                     return Out::Draw;
                 }
             };
-            core::memory::forget(m, &key);
+            m.act(crate::frame::ext::Act::ForgetMemory(key.clone()));
             memreview::drop_mem_cache(m);
             let mut msg = format!("remembered: {title} · in the memory view");
             if others > 0 {
@@ -216,11 +215,11 @@ fn keep(m: &mut Model, d: Draft, edit: bool) -> Out {
             }
             m.flash(&msg);
             if edit
-                && views::show_view(m, &key, "memory")
+                && (m.ext.calls.show_view())(m, &key, "memory")
                 && let Some(v) = m.session.as_mut().filter(|v| v.key == key)
             {
                 v.sel = format!("mem:{path}");
-                return core::memedit::open_doc(m, &key, &path);
+                return (m.ext.calls.open_doc())(m, &key, &path);
             }
             Out::Draw
         },
@@ -272,7 +271,7 @@ pub fn memory_wide_key_hook(m: &mut Model, k: &Press) -> Out {
         .session
         .as_ref()
         .is_some_and(|v| v.sel.starts_with("mem:"));
-    if !picked || views::view_name(m, &key) != "memory" {
+    if !picked || (m.ext.calls.view_name())(m, &key) != "memory" {
         return Out::Pass;
     }
     match k.s.as_str() {
@@ -294,7 +293,7 @@ pub fn memory_wide_key_hook(m: &mut Model, k: &Press) -> Out {
         }
         _ => {
             let kind = kind_of(m, &key);
-            let dir = core::memory::memory_known(m, &key)
+            let dir = (m.ext.calls.memory_known())(m, &key)
                 .map(|mem| mem.dir)
                 .unwrap_or_default();
             let Some(mk) = keeper(m, &kind).filter(|_| !dir.is_empty()) else {
@@ -303,7 +302,7 @@ pub fn memory_wide_key_hook(m: &mut Model, k: &Press) -> Out {
             m.later(
                 move || mk.tidy_memory(&dir),
                 move |m, r| {
-                    core::memory::forget(m, &key);
+                    m.act(crate::frame::ext::Act::ForgetMemory(key.clone()));
                     match r {
                         Err(e) => m.fail(&e),
                         Ok(did) if did.is_empty() => m.flash(

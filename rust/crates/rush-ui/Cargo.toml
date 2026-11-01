@@ -22,6 +22,8 @@ rush-ui-projects-machine.workspace = true
 rush-ui-plugin-ui.workspace = true
 # Accounts, sign-in and starting agents.
 rush-ui-accounts.workspace = true
+# The cards and sheets on a session.
+rush-ui-session-cards.workspace = true
 rush-sys.workspace = true
 rush-gh.workspace = true
 rush-gate = { path = "../rush-gate" }
