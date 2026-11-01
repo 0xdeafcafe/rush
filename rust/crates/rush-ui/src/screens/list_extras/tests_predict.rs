@@ -5,7 +5,7 @@
 use rush_core::agent::State;
 use rush_draw::{App, Canvas, Loop, Msg, Step};
 
-use super::predict::ready;
+use super::predict::{reads, ready};
 use super::tests::{agent, model_of};
 use crate::frame::Press;
 use crate::model::Model;
@@ -200,4 +200,24 @@ fn the_one_just_left_is_kept_for_going_back() {
     m.frame();
     let back = m.pane.as_ref().map(|v| (v.key.clone(), v.r#gen));
     assert_eq!(back, first, "the same view, not read again");
+}
+
+/// A row that can't be read is read once, not over and over.
+#[test]
+fn one_that_cant_be_read_is_read_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let lp: Loop<Note> = Loop::new();
+    let mut m = readable(dir.path());
+    m.tx = Some(lp.sender());
+    let k = keys(&m);
+    m.sel = k[0].clone();
+    for key in &k[1..3] {
+        let a = m.agents.iter().find(|a| a.key == *key).unwrap();
+        std::fs::remove_file(&a.job.transcript_path).unwrap();
+    }
+    press(&mut m, "down");
+    run_until(&mut m, lp, |m| !reads(m).1);
+    // The two that can't be read and the one after them, once each.
+    assert_eq!(reads(&mut m), (3, false), "each tried once");
+    assert_eq!(ready(&mut m), vec![k[3].clone()]);
 }

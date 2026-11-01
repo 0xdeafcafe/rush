@@ -29,6 +29,7 @@ mod view;
 pub use care::{
     CareStart, CareStarter, StartCare, care_started, start_with_hosts as care_start_with_hosts,
 };
+pub(crate) use data::{PANE_PRS, PANE_SYSTEM, PANE_TEMP};
 pub use place::{pick_in_projects, projects_sel};
 pub(crate) use view::gh_pr_line;
 

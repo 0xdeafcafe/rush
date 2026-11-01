@@ -75,8 +75,9 @@ pub struct Fleet {
     pub accounts: Vec<rush_fleet::AccountView>,
 }
 
-/// While something is live, how often discovery reads again.
-pub const POLL: Duration = Duration::from_secs(2);
+/// While an agent works or has a process, how often discovery reads
+/// again: Go's tick.
+pub const POLL: Duration = Duration::from_secs(1);
 const LIVE_WINDOW: i64 = 128 << 10;
 pub const PICKED_WINDOW: i64 = 384 << 10;
 /// How much of a transcript the tail reads at once: the UI applies each
@@ -449,7 +450,10 @@ pub fn spawn_discovery_with(
             loop {
                 let began = std::time::Instant::now();
                 let f = d.load(now(), true);
-                let live = f.agents.iter().any(|a| a.job.live());
+                // Every second while any agent works or has a process, as
+                // Go's tick reads and samples them (model.go tickMsg).
+                let working = f.agents.iter().any(|a| a.job.live());
+                let procs = f.agents.iter().any(|a| a.pid != 0);
                 if f != last {
                     last = f.clone();
                     if !tx.send(Note::Fleet(f)) {
@@ -459,17 +463,45 @@ pub fn spawn_discovery_with(
                 // Woken for a reading asked for (refresh, everyAgent): a
                 // fresh Stop each wait, as a closed one stays so.
                 let stop = again.as_ref().and_then(|a| a.next());
-                w.wait(stop.as_deref(), live.then_some(POLL));
-                // What changed: the adapters read it again, whatever they
-                // kept (a project folder listed a second ago included).
-                let (mut paths, mut all) = w.changes();
-                if !all && !urgent(&paths) && gap(began, stop.as_deref()) {
-                    // A busy agent's files, changing on and on: read at
-                    // most once a GAP, as Go reads on its tick.
-                    let (more, a) = w.changes();
-                    paths.extend(more);
-                    all |= a;
-                }
+                let (paths, all) = loop {
+                    w.wait(stop.as_deref(), (working || procs).then_some(POLL));
+                    // What changed: the adapters read it again, whatever
+                    // they kept (a project folder listed a second ago
+                    // included).
+                    let (mut paths, mut all) = w.changes();
+                    if !all && !urgent(&paths) && gap(began, stop.as_deref()) {
+                        // A busy agent's files, changing on and on: read
+                        // at most once a GAP, as Go reads on its tick.
+                        let (more, a) = w.changes();
+                        paths.extend(more);
+                        all |= a;
+                    }
+                    let asked = stop.as_ref().is_some_and(|s| s.is_closed());
+                    if working || asked || all || !paths.is_empty() {
+                        break (paths, all);
+                    }
+                    // Woken by the clock alone with no agent at work:
+                    // nothing new on disk, so the last reading with its
+                    // processes sampled again and nothing read (Go's tick,
+                    // loader.Settle): their CPU and memory as Go shows them.
+                    let idx: Vec<usize> = (0..last.agents.len())
+                        .filter(|&i| last.agents[i].pid != 0)
+                        .collect();
+                    let mut few: Vec<Agent> = idx.iter().map(|&i| last.agents[i].clone()).collect();
+                    d.loader.resample(&mut few);
+                    let moved = few.iter().zip(&idx).any(|(a, &i)| {
+                        let b = &last.agents[i];
+                        (a.mem, a.cpu, a.procs) != (b.mem, b.cpu, b.procs)
+                    });
+                    if moved {
+                        for (a, &i) in few.into_iter().zip(&idx) {
+                            last.agents[i] = a;
+                        }
+                        if !tx.send(Note::Fleet(last.clone())) {
+                            return;
+                        }
+                    }
+                };
                 let paths: Vec<PathBuf> = paths.into_iter().collect();
                 d.changed((!all).then_some(paths.as_slice()));
                 // New jobs or project folders: watch them too.

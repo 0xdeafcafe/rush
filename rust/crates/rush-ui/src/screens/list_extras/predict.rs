@@ -462,12 +462,15 @@ fn next(m: &mut Model) {
             if p.busy.as_ref().is_some_and(|(b, _)| *b == key) {
                 p.busy = None;
             }
-            if r.is_none() {
-                // Stopped, or it can't be read: not tried again till the
-                // list moves on.
+            let Some((path, from, sess, seen)) = r else {
+                // It can't be read (its transcript gone, a Scratch row's):
+                // not wanted again until the list asks anew, or next would
+                // read it over and over.
                 p.want.retain(|w| w.key != key);
-            }
-            if let Some((path, from, sess, seen)) = r {
+                next(m);
+                return Out::Idle;
+            };
+            {
                 let a = Ahead {
                     key,
                     pid,
@@ -560,4 +563,11 @@ pub(crate) fn ready(m: &mut Model) -> Vec<String> {
         .iter()
         .map(|a| a.key.clone())
         .collect()
+}
+
+/// Reads made so far, and whether one is under way.
+#[cfg(test)]
+pub(crate) fn reads(m: &mut Model) -> (u64, bool) {
+    let p = m.kept.get::<Predict>();
+    (p.made, p.busy.is_some())
 }

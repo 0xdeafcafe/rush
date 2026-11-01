@@ -467,6 +467,23 @@ pub fn open_key(m: &Model) -> Option<String> {
     m.session.as_ref().map(|v| v.key.clone())
 }
 
+/// The chat the box's # commands go to: the one open, else the one shown
+/// beside the list on the row picked (Go's m.host, which syncHost
+/// keeps on the pane's chat, rushmode.go:2003; keys.go:936-952).
+pub fn chat_key(m: &Model) -> Option<String> {
+    open_key(m).or_else(|| {
+        m.pane
+            .as_ref()
+            .filter(|v| v.key == m.sel)
+            .map(|v| v.key.clone())
+    })
+}
+
+/// The conversation of agent key, open or beside the list.
+pub fn chat<'a>(m: &'a Model, key: &str) -> Option<&'a Session> {
+    session(m, key).or_else(|| m.pane.as_ref().filter(|v| v.key == key).map(|v| &v.sess))
+}
+
 /// The conversation of agent key, when it's the one open.
 pub fn session<'a>(m: &'a Model, key: &str) -> Option<&'a Session> {
     m.session.as_ref().filter(|v| v.key == key).map(|v| &v.sess)
@@ -563,7 +580,7 @@ pub fn register(x: &mut Ext) {
         "a room on this chat: agents argue it, and the verdict comes back here",
         // In a Session, a room on its chat; anywhere else, as #room
         // (keys.go:935).
-        |m, arg| match open_key(m) {
+        |m, arg| match chat_key(m) {
             Some(k) if !k.starts_with(mention::ROOM_KEY_PREFIX) => {
                 discuss::discuss(m, &k, arg, false)
             }
