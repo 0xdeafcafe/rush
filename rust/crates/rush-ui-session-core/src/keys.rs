@@ -277,10 +277,16 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
                 return Out::Draw;
             }
             if empty {
-                // ← only ever means back: off the picked row, then to the
-                // list. It never folds anything.
+                // ← goes back a stage at a time: it closes what's open
+                // round the picked row (a step, a group of steps, a turn),
+                // then, with nothing open, off the row to the box, then
+                // from the box to the list.
                 if !picked.is_empty() {
-                    set_sel(m, String::new());
+                    let rows = conn(m, &key).vs.rows.max(1);
+                    let closed = m.session.as_mut().is_some_and(|v| v.fold_in(rows));
+                    if !closed {
+                        set_sel(m, String::new());
+                    }
                 } else {
                     // Back to Agents, as esc goes (leavePane).
                     m.close();

@@ -4,7 +4,7 @@
 //! needsHere, needsSection) and render.go:416, :811 (its cache key and
 //! where it's drawn).
 
-use rush_core::text::Color;
+use rush_core::text::{Color, Line, Span, width};
 
 use super::draw::Drawer;
 use super::style::*;
@@ -41,6 +41,48 @@ pub const NEEDS_KINDS: [&str; 6] = ["do", "run", "copy", "reply", "link", "note"
 /// reply put in your message box, a link opened.
 pub fn needs_ref(kind: &str, text: &str) -> String {
     format!("needs:{kind}:{text}")
+}
+
+/// The kind of needs_ref a click on the section's heading acts on: it
+/// copies every command of the section, one to a line.
+pub const NEEDS_ALL: &str = "all";
+
+/// The words on the right of a row that say what a click does: not text
+/// of the answer, so not part of what a selection copies.
+const HINTS: [&str; 4] = [
+    "click copies",
+    "click to reply",
+    "click opens",
+    "click copies all commands",
+];
+
+/// The marks that lead a row of the section.
+const LEADS: [&str; 12] = ["▏", "▍", "☐", "$", "⧉", "↩", "↗", "·", "!", "?", "╭", "│"];
+
+/// A row of the section as a selection should read it: the frame at its
+/// left, the mark leading the row and the words on its right that say what
+/// a click does blanked, cell for cell, so only the text is left.
+pub fn without_chrome(l: &Line) -> Line {
+    let mut out = l.clone();
+    let mut lead = true;
+    for sp in out.spans.iter_mut() {
+        let t = sp.text.as_str();
+        let blank = if lead {
+            let t = t.trim();
+            if t.is_empty() || LEADS.contains(&t) || t == "╰" {
+                true
+            } else {
+                lead = false;
+                false
+            }
+        } else {
+            HINTS.contains(&t.trim())
+        };
+        if blank {
+            *sp = Span::new(" ".repeat(width(&sp.text)), sp.style);
+        }
+    }
+    out
 }
 
 /// The kind and text of a needs_ref.
@@ -116,12 +158,27 @@ impl Drawer<'_> {
         let pad = || pad0.clone();
         let w = 16.max(self.cw.min(CAP_ROW).saturating_sub(GUTTER + 6));
         self.gap();
+        // Many commands: the heading copies them all.
+        let cmds: Vec<&str> = n
+            .items
+            .iter()
+            .filter(|it| it.kind == "run")
+            .map(|it| it.text.as_str())
+            .collect();
+        let (all_ref, all_hint) = if cmds.len() > 1 {
+            (
+                needs_ref(NEEDS_ALL, &cmds.join("\n")),
+                dim("click copies all commands").and_raw("  "),
+            )
+        } else {
+            (String::new(), Txt::new())
+        };
         let mut head = mark.and_raw(" ").and(paint(strong(C_TEXT), "Needs you"));
         if !n.reason.is_empty() {
             head = head.and(dim(" · ")).and(paint(C_TEXT, &n.reason));
         }
         let l = pad().and(paint(frame, "╭")).and_raw(" ").and(head);
-        self.add("", Color::Default, l, Txt::new());
+        self.add(&all_ref, Color::Default, l, all_hint);
         let mut rows: Vec<(String, Txt, Txt)> = Vec::new();
         for it in &n.items {
             let (lead, ink, hint, r) = match it.kind.as_str() {

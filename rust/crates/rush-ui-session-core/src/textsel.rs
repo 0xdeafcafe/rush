@@ -163,7 +163,20 @@ pub fn text_of(m: &Model, s: &TextSel) -> String {
     let (a, b) = s.span();
     let base = v.base;
     let rows = v.r.rows();
-    let lines: Vec<(&Line, bool)> = rows.iter().map(|l| (&l.line, l.wrap)).collect();
+    // The Needs-you card's frame, marks and click hints aren't text.
+    let bare: Vec<Option<Line>> = rows
+        .iter()
+        .map(|l| {
+            rush_convo::render::needs_of(&l.r#ref)
+                .is_some()
+                .then(|| rush_convo::render::without_chrome(&l.line))
+        })
+        .collect();
+    let lines: Vec<(&Line, bool)> = rows
+        .iter()
+        .zip(&bare)
+        .map(|(l, b)| (b.as_ref().unwrap_or(&l.line), l.wrap))
+        .collect();
     // Rows above the window drawn are gone: it starts at its first.
     let rel = |c: Cell| match c.row.checked_sub(base) {
         Some(row) => Cell { row, col: c.col },
