@@ -12,7 +12,7 @@
 
   ▍ Claude  12:00 · @set-up-caching
   │   ✓ cargo test                                                         7s
-  │       ▏ok
+  │       │ ok
   ▍
   ▍ Fixed it.
   ▍                                                              1 step   13s

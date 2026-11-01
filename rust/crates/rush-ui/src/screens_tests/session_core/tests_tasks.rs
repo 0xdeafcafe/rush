@@ -645,7 +645,7 @@ fn a_running_chain_says_where_it_is_and_k_and_x_act() {
     assert!(got.contains("2/3 go test"), "{got}");
     let vet = got
         .lines()
-        .find(|l| l.contains("$  go vet ./..."))
+        .find(|l| l.contains("$ go vet ./..."))
         .expect(&got);
     assert!(vet.contains('✓'), "{vet}");
     assert!(

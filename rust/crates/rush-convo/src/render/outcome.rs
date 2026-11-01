@@ -728,6 +728,11 @@ pub fn outcome(cmd: &str, out: &str, diags: &[Diag], ok: bool) -> Vec<Came> {
             }
         }
     }
+    // One tool that only passed says nothing its command doesn't: the
+    // head stays the command ("✓ cargo test", not "✓ tests  ✓").
+    if res.len() == 1 && res[0].what == "✓" {
+        res.clear();
+    }
     res
 }
 

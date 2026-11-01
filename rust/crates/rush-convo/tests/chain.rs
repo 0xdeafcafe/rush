@@ -86,17 +86,17 @@ fn normal_shows_the_place_the_times_and_the_keys() {
     assert!(row.contains("19s"), "how long the call has run: {row}");
     let build = got
         .lines()
-        .find(|l| l.contains("$  cargo build"))
+        .find(|l| l.contains("$ cargo build"))
         .expect(&got);
     assert!(build.contains("✓ 4"), "the build took 4s: {build}");
     let test = got
         .lines()
-        .find(|l| l.contains("&& cargo test"))
+        .find(|l| l.contains("▸ cargo test"))
         .expect(&got);
     assert!(test.contains("15"), "the tests run 15s now: {test}");
     let clippy = got
         .lines()
-        .find(|l| l.contains("$  cargo clippy"))
+        .find(|l| l.contains("$ cargo clippy"))
         .expect(&got);
     assert!(!clippy.contains('✓'), "clippy hasn't run: {clippy}");
     assert!(
