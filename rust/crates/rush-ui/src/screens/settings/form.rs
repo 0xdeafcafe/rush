@@ -1,5 +1,5 @@
-//! A form page's rows: sections of settings, each a value ←→ go through or
-//! one you type, or a line of its own; the keys on the highlighted row,
+//! A form page's rows: sections of settings, each a value picked from its
+//! choices (enter), switched (space) or typed, or a line of its own; the keys on the highlighted row,
 //! and how a row and its explanation are drawn. After Go's
 //! internal/ui/settings.go:262-527 (section, setting, shown, now, flat,
 //! cycle, formKey, rowAt, formRows, formKeys, settingRow, about,
@@ -20,7 +20,7 @@ use crate::style::*;
 pub type SetFn = Rc<dyn Fn(&mut Model, &str)>;
 /// Sets a value with work to start.
 pub type RunFn = Rc<dyn Fn(&mut Model, &str) -> Out>;
-/// A row's own keys, before ←→: Pass when it isn't one.
+/// A row's own keys, before the form's: Pass when it isn't one.
 pub type KeyFn = Rc<dyn Fn(&mut Model, &str) -> Out>;
 /// Draws a row itself, w wide.
 pub type LineFn = Rc<dyn Fn(usize) -> Line>;
@@ -50,7 +50,7 @@ impl Section {
     }
 }
 
-/// One line of a form (setting): a value that ←→ go through or you type,
+/// One line of a form (setting): a value picked, switched or typed,
 /// or, with line and key, a line of its own.
 #[derive(Clone, Default)]
 pub struct Setting {
@@ -63,7 +63,7 @@ pub struct Setting {
     /// The value as the row shows it, in colours of its own, when it has
     /// them (Go's value painted): a fixed value only.
     pub styled: Line,
-    /// What ←→ go through.
+    /// What it can be set to.
     pub choices: Vec<String>,
     pub set: Option<SetFn>,
     /// Set instead, for a change with work to start.
@@ -76,8 +76,12 @@ pub struct Setting {
     pub unset: String,
     /// How other values show, when not as kept.
     pub names: HashMap<String, String>,
-    /// enter types a value rather than choosing one.
+    /// enter types a value rather than choosing one; with choices, the
+    /// picker takes one typed too.
     pub typed: bool,
+    /// Where the value comes from, when that's worth saying ("env",
+    /// "settings.json", "default"): after the value, quieter.
+    pub source: String,
     /// Shown after label in a catalog's list.
     pub tag: Line,
     pub line: Option<LineFn>,
@@ -184,7 +188,21 @@ pub fn cycle(m: &mut Model, s: &Setting, dir: isize) -> Out {
     Out::Draw
 }
 
-/// A key on a form's highlighted row (formKey).
+/// Whether space switches the row rather than opening its choices: a row
+/// of two values, on and off (with "not set" among them or not), or one
+/// with a preview, which shows each value as space steps through them.
+pub fn switches(st: &Setting) -> bool {
+    if st.line.is_some() || st.choices.len() < 2 {
+        return false;
+    }
+    let set: Vec<&String> = st.choices.iter().filter(|c| !c.is_empty()).collect();
+    st.choices.len() == 2 || set.iter().all(|c| *c == "on" || *c == "off") || st.preview.is_some()
+}
+
+/// A key on a form's highlighted row (formKey). Unlike Go's, ← and h
+/// never change a value: they're the page's, to go back. enter and →
+/// open the row's choices (or the edit box of a typed one), space
+/// switches an on/off row.
 pub fn form_key(m: &mut Model, secs: &[Section], s: &str) -> Out {
     let rows = flat(secs);
     let Some(st) = rows.get(dialog(m).cursor).cloned() else {
@@ -199,39 +217,145 @@ pub fn form_key(m: &mut Model, secs: &[Section], s: &str) -> Out {
     if !st.typed && st.choices.len() < 2 {
         return Out::Idle;
     }
-    let done = |m: &mut Model, o: Out| {
-        changed(m);
-        if o == Out::Pass { Out::Draw } else { o }
-    };
     match s {
-        "enter" | "right" | "l" | "space" => {
-            if st.typed && (s == "enter" || st.choices.is_empty()) {
-                let label = st.label.clone();
-                let value = st.value.clone();
-                let answer: Answer = Rc::new(move |m: &mut Model, v: &str| {
-                    let o = match (&st.run, &st.set) {
-                        (Some(run), _) => run(m, v),
-                        (None, Some(set)) => {
-                            set(m, v);
-                            Out::Draw
-                        }
-                        _ => Out::Draw,
-                    };
-                    changed(m);
-                    o
-                });
-                ask(m, &label, &value, answer);
-                return Out::Draw;
+        "space" if switches(&st) => {
+            // Unset that means on or off goes to the other.
+            let flip = match st.unset.as_str() {
+                "on" => "off",
+                "off" => "on",
+                _ => "",
+            };
+            if st.value.is_empty() && !flip.is_empty() && st.choices.iter().any(|c| c == flip) {
+                return take(m, &st, flip);
             }
             let o = cycle(m, &st, 1);
-            done(m, o)
+            changed(m);
+            if o == Out::Pass { Out::Draw } else { o }
         }
-        "left" | "h" => {
-            let o = cycle(m, &st, -1);
-            done(m, o)
+        "enter" | "right" | "l" | "space" => {
+            if st.typed && st.choices.is_empty() {
+                type_value(m, st);
+            } else {
+                pick_value(m, st);
+            }
+            Out::Draw
         }
         _ => Out::Idle,
     }
+}
+
+/// Sets st to v as a typed or picked value would, and saves.
+fn take(m: &mut Model, st: &Setting, v: &str) -> Out {
+    let o = match (&st.run, &st.set) {
+        (Some(run), _) => run(m, v),
+        (None, Some(set)) => {
+            set(m, v);
+            Out::Draw
+        }
+        _ => Out::Draw,
+    };
+    changed(m);
+    if o == Out::Pass { Out::Draw } else { o }
+}
+
+/// The edit box for a typed row, filled with its value.
+fn type_value(m: &mut Model, st: Setting) {
+    let (label, value) = (st.label.clone(), st.value.clone());
+    let answer: Answer = Rc::new(move |m: &mut Model, v: &str| take(m, &st, v));
+    ask(m, &label, &value, answer);
+}
+
+/// Opens st's choices in a picker, the cursor on its value; a typed row
+/// takes what's typed as a value of its own.
+pub fn pick_value(m: &mut Model, st: Setting) {
+    use crate::frame::picker::{Pick, Picker};
+    let mut rows = Vec::new();
+    let mut cursor = 0;
+    for (i, c) in st.choices.iter().enumerate() {
+        let shown = Setting {
+            value: c.clone(),
+            ..st.clone()
+        }
+        .shown();
+        let on = *c == st.value;
+        if on {
+            cursor = i;
+        }
+        let mut l = line([
+            if on {
+                sp("● ", ORANGE)
+            } else {
+                sp("○ ", FAINT)
+            },
+            sp(shown.clone(), TEXT),
+        ]);
+        if let Some(means) = st.means.get(c).filter(|s| !s.is_empty()) {
+            l.spans.push(sp(format!("  {means}"), FAINT));
+        }
+        rows.push(Pick {
+            label: l,
+            find: shown,
+            value: c.clone(),
+            ..Pick::default()
+        });
+    }
+    let st2 = st.clone();
+    let mut p = Picker::new(
+        st.label.clone(),
+        rows,
+        Box::new(move |m, pick, typed| {
+            let v = match pick {
+                Some(p) => p.value.clone(),
+                None => typed.trim().to_string(),
+            };
+            take(m, &st2, &v)
+        }),
+    );
+    p.about = st.what.clone();
+    p.cursor = cursor;
+    if !st.source.is_empty() && st.source != "default" {
+        p.note = format!("now from {}", st.source);
+    }
+    if st.typed {
+        p.query = Some(("or type one ❯ ".into(), Vec::new()));
+        p.typed = Some(Box::new(|q: &str| {
+            (!q.is_empty()).then(|| Pick {
+                label: line([sp("✎ ", ORANGE), sp(q.to_string(), TEXT)]),
+                find: q.to_string(),
+                value: q.to_string(),
+                ..Pick::default()
+            })
+        }));
+        p.keys = vec![
+            ("↑↓".into(), "choose".into()),
+            ("type".into(), "a value of your own".into()),
+            ("enter".into(), "set it".into()),
+            ("esc".into(), "keep it".into()),
+        ];
+    } else {
+        p.keys = vec![
+            ("↑↓".into(), "choose".into()),
+            ("enter".into(), "set it".into()),
+            ("esc".into(), "keep it".into()),
+        ];
+    }
+    m.open_sheet(Box::new(p));
+}
+
+/// The keys that change row st, for a key line: space for an on/off
+/// row, enter for one with choices or typed.
+pub fn change_keys(st: &Setting) -> Vec<String> {
+    let mut keys: Vec<&str> = Vec::new();
+    if st.line.is_none() && st.choices.len() > 1 {
+        if switches(st) {
+            keys.extend(["space", "switch", "enter", "choose"]);
+        } else {
+            keys.extend(["enter", "choose"]);
+        }
+    } else if st.typed {
+        keys.extend(["enter", "type it"]);
+    }
+    keys.into_iter().map(String::from).collect()
 }
 
 /// A form's sections drawn, row cur highlighted (formRows).
@@ -270,20 +394,7 @@ pub fn form_rows(secs: &[Section], cur: usize, w: usize) -> Vec<Line> {
 
 /// The key line for row cur of a form (formKeys).
 pub fn form_keys(cur: &Setting, page_keys: &[String], w: usize) -> Line {
-    let mut keys: Vec<String> = Vec::new();
-    if cur.line.is_none() && cur.choices.len() > 1 {
-        let change = if page_keys.first().is_some_and(|k| k.starts_with('←')) {
-            "→ space" // the page's ← goes back
-        } else {
-            "←→"
-        };
-        keys.push(change.into());
-        keys.push("change".into());
-    }
-    if cur.typed {
-        keys.push("enter".into());
-        keys.push("type it".into());
-    }
+    let mut keys: Vec<String> = change_keys(cur);
     keys.extend(cur.keys.iter().cloned());
     keys.extend(page_keys.iter().cloned());
     keys.extend(PAGES_KEYS.iter().map(|s| s.to_string()));
@@ -346,6 +457,9 @@ pub fn setting_row(on: bool, st: &Setting, label_w: usize, value_w: usize, w: us
             sp(" › ", FAINT),
         ]);
     }
+    if !st.source.is_empty() {
+        l.spans.push(sp(format!(" {}", st.source), FAINT));
+    }
     let l = trunc(l, w.saturating_sub(2));
     if on {
         let mut r = line([sp("▍", ORANGE), plain(" ")]);
@@ -384,7 +498,11 @@ pub fn about(st: &Setting, w: usize) -> Vec<Line> {
         out.push(body.get(i).cloned().unwrap_or_default());
     }
     if let Some(p) = &st.preview {
-        out.push(rule("Preview", "as it looks now · ←→ to change it", w));
+        out.push(rule(
+            "Preview",
+            "as it looks now · space to step through",
+            w,
+        ));
         for l in p(w.saturating_sub(2), 12) {
             let mut r = line([plain("  ")]);
             join(&mut r, l);

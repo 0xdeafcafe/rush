@@ -35,15 +35,20 @@ use crate::style::*;
 pub fn page() -> Page {
     Page {
         name: "Harnesses",
-        pre: Some(|m, s| {
+        // ← and esc go back to the list, never changing the row it's on
+        // (Go's ← changed it).
+        back: Some(|m| {
             let d = dialog_mut(m);
-            if d.harness_inside && matches!(s, "esc" | "backspace") {
-                d.harness_inside = false;
-                d.cursor = d.harness_return;
-                d.catalog_scroll.set(0);
-                return Out::Draw;
+            if !d.harness_inside {
+                return false;
             }
-            let inside = d.harness_inside;
+            d.harness_inside = false;
+            d.cursor = d.harness_return;
+            d.catalog_scroll.set(0);
+            true
+        }),
+        pre: Some(|m, s| {
+            let inside = dialog(m).harness_inside;
             catalog::key(m, s, inside)
         }),
         rows: Some(|m| flat(&sections(m)).len()),
@@ -531,6 +536,8 @@ pub fn agent_sections(m: &Model, k: &str) -> Vec<Section> {
     let mut secs = Vec::new();
     let mut advanced = Vec::new();
     let mut all = extras(m, k);
+    // What the harness offers of its own settings, shown open.
+    all.extend(super::ownsettings::sections(m, k));
     all.extend(super::files::file_sections(m, k));
     for s in all {
         if s.advanced {
@@ -556,7 +563,7 @@ pub fn agent_sections(m: &Model, k: &str) -> Vec<Section> {
             ])
         })),
         key: Some(Rc::new(|m, s| {
-            if matches!(s, "enter" | "right" | "left" | "space") {
+            if matches!(s, "enter" | "right" | "space") {
                 let d = dialog_mut(m);
                 d.advanced = !d.advanced;
                 return Out::Draw;

@@ -9,11 +9,11 @@ use std::path::Path;
 
 use rush_core::adapter::{
     self, AgentDef, Attributor, Brancher, BuiltinDefNamer, Choice, Choices, Commander, Compacter,
-    Compaction, DefaultModeler, Definer, LastQuotaReader, Marketplace, Media, MediaReader, Memory,
-    MemoryKeeper, MemoryNote, MemoryReader, ModelNamer, Plugger, Plugin, PluginChange, Profile,
-    Published, Publisher, Scratcher, SettingsFile, SettingsFiler, SettingsPage, SettingsPager,
-    SkillRooter, Stats, StatsReader, StatusLineProfiler, StatusLiner, Summarizer, TempDir,
-    Timeliner,
+    Compaction, DefaultModeler, Definer, HarnessSettings, LastQuotaReader, Marketplace, Media,
+    MediaReader, Memory, MemoryKeeper, MemoryNote, MemoryReader, ModelNamer, OwnEdit, OwnSettings,
+    Plugger, Plugin, PluginChange, Profile, Published, Publisher, Scratcher, SettingsFile,
+    SettingsFiler, SettingsPage, SettingsPager, SkillRooter, Stats, StatsReader,
+    StatusLineProfiler, StatusLiner, Summarizer, TempDir, Timeliner,
 };
 
 use crate::account::{Account, path_str};
@@ -235,6 +235,28 @@ impl StatusLineProfiler for Claude {
 impl SettingsPager for Claude {
     fn settings_page(&self) -> SettingsPage {
         crate::settings::settings_page()
+    }
+}
+
+impl HarnessSettings for Claude {
+    fn own_settings(&self, p: &Profile, env: &[(String, String)]) -> adapter::Result<OwnSettings> {
+        let homes = crate::ownsettings::homes();
+        Ok(crate::ownsettings::read(
+            std::path::Path::new(&p.dir),
+            &homes,
+            env,
+        )?)
+    }
+    fn check_setting(&self, key: &str, value: &str) -> Result<(), String> {
+        crate::ownsettings::edits_for(key, value).map(|_| ())
+    }
+    fn set_own_settings(&self, p: &Profile, edits: &[OwnEdit]) -> adapter::Result<()> {
+        let homes = crate::ownsettings::homes();
+        Ok(crate::ownsettings::write(
+            std::path::Path::new(&p.dir),
+            &homes,
+            edits,
+        )?)
     }
 }
 

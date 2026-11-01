@@ -176,10 +176,17 @@ pub fn body(
     }
     let mut keys: Vec<String> = match controls {
         Some(c) => c,
-        None if inside => ["↑↓", "select", "←→", "change", "enter", "action"]
-            .map(String::from)
-            .to_vec(),
-        None => ["↑↓", "select", "→", "controls"].map(String::from).to_vec(),
+        None if inside => {
+            let mut k = vec!["↑↓".to_string(), "select".to_string()];
+            k.extend(form::change_keys(&row_at(
+                &super::harnesses::sections(m),
+                d.cursor,
+            )));
+            k.extend(row_at(&super::harnesses::sections(m), d.cursor).keys);
+            k.extend(["←".to_string(), "back".to_string()]);
+            k
+        }
+        None => ["↑↓", "select", "→", "open"].map(String::from).to_vec(),
     };
     if rows.len() > pane_h {
         let mut k = vec![
@@ -189,7 +196,13 @@ pub fn body(
         k.extend(keys);
         keys = k;
     }
-    keys.extend(["[ ]", "pages", "esc", "back"].map(String::from));
+    // ← goes back where esc does: said once.
+    if let Some(i) = keys.iter().position(|k| k == "←") {
+        keys[i] = "← esc".into();
+        keys.extend(["[ ]", "pages"].map(String::from));
+    } else {
+        keys.extend(["[ ]", "pages", "esc", "back"].map(String::from));
+    }
     let pairs: Vec<(&str, &str)> = keys
         .chunks(2)
         .filter(|p| p.len() == 2)
@@ -307,10 +320,12 @@ pub fn detail(
     let mut cursor = 0;
     if let Some(cur) = cur {
         cursor = frame_cursor(&rows);
+        // What the row does and what it's set to now, from where (Go
+        // said only what it does).
         let selected = row_at(&secs, cur);
-        if !selected.what.is_empty() {
-            rows.push(Line::new());
-            rows.push(trunc(line([sp(selected.what, DIM)]), w));
+        let (_, what, now) = selected.explained();
+        if !what.is_empty() || !now.is_empty() {
+            rows.extend(form::about(&selected, w));
         }
     }
     rows.push(Line::new());

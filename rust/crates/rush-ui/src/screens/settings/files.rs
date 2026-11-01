@@ -376,7 +376,9 @@ pub fn file_sections(m: &Model, k: &str) -> Vec<Section> {
     let Some(pg) = a.settings_pager() else {
         return Vec::new();
     };
-    if !reg().supports(k, rush_core::adapter::Feature::Settings) {
+    // A harness that offers its own settings has them on its page whole,
+    // with where each comes from (ownsettings.rs).
+    if super::ownsettings::offers(k) || !reg().supports(k, rush_core::adapter::Feature::Settings) {
         return Vec::new();
     }
     let Some(s) = dialog(m).settings.as_ref().filter(|l| l.kind == k) else {

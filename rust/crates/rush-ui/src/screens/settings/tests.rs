@@ -258,7 +258,7 @@ fn harnesses_catalog_wide_and_narrow() {
         wide.contains("What every harness starts with; each one shows only what it changes."),
         "{wide}"
     );
-    assert!(wide.contains("→ controls"), "{wide}");
+    assert!(wide.contains("→ open"), "{wide}");
     let narrow = body(&m, 60);
     assert!(
         !narrow.contains('│'),
@@ -271,8 +271,18 @@ fn harnesses_catalog_wide_and_narrow() {
     assert!(inside.contains("Effort"), "{inside}");
     assert!(inside.contains("Credit in commits and PRs"), "{inside}");
     assert!(inside.contains("About Effort"), "{inside}");
-    // → changes the effort every harness starts with, saved at once.
+    // → opens the effort's choices; ↓ enter takes the next, saved at
+    // once.
     press(&mut m, "right");
+    assert!(m.picker().is_some(), "→ opens the choices");
+    assert_eq!(
+        config(&m).dispatch.every.effort,
+        "",
+        "opening changes nothing"
+    );
+    press(&mut m, "down");
+    press(&mut m, "enter");
+    assert!(m.picker().is_none(), "picking closes it");
     assert_eq!(config(&m).dispatch.every.effort, "low");
     let saved = std::fs::read_to_string(rush_state::dir().join("config.json")).expect("saved");
     assert!(saved.contains("\"low\""), "{saved}");
@@ -417,38 +427,82 @@ fn rows_stay_within_width_and_hints_are_unique() {
 // ---- the form's keys: what Go's formKey does with each ----
 
 /// The keys a form row takes, and what each does to a choice of three:
-/// → l space enter forward, ← h back, round the ends; anything else
-/// nothing (formKey).
+/// A value changes only by a pick or space: enter, → and l open the
+/// row's choices on its value, space switches a row of two, and ←, h and
+/// anything else change nothing (formKey; Go's ← stepped back).
 #[test]
 fn form_key_table() {
     let (mut m, _d) = model(140, 50);
     open_dialog(&mut m, PAGE_GENERAL);
     let seen = Rc::new(std::cell::RefCell::new(String::new()));
-    let row = |v: &str| {
+    let row = |v: &str, choices: &[(&str, &str)]| {
         let s2 = seen.clone();
         choice(
             "Pick",
             v,
             "what",
-            &[("a", ""), ("b", ""), ("c", "")],
+            choices,
             form::set(move |_, v| *s2.borrow_mut() = v.into()),
         )
     };
-    for (key, from, want) in [
-        ("right", "a", "b"),
-        ("l", "a", "b"),
-        ("space", "a", "b"),
-        ("enter", "a", "b"),
-        ("right", "c", "a"),
-        ("left", "a", "c"),
-        ("h", "b", "a"),
-        ("x", "a", ""),
-        ("up", "a", ""),
+    let three: &[(&str, &str)] = &[("a", ""), ("b", ""), ("c", "")];
+    let two: &[(&str, &str)] = &[("on", ""), ("off", "")];
+    // (key, row's value, its choices, set at once, a picker opens)
+    for (key, from, choices, want, picks) in [
+        ("right", "a", three, "", true),
+        ("l", "a", three, "", true),
+        ("enter", "b", three, "", true),
+        ("space", "a", three, "", true),
+        ("space", "on", two, "off", false),
+        ("space", "off", two, "on", false),
+        ("enter", "on", two, "", true),
+        ("left", "b", three, "", false),
+        ("h", "b", three, "", false),
+        ("left", "on", two, "", false),
+        ("x", "a", three, "", false),
+        ("up", "a", three, "", false),
     ] {
         seen.borrow_mut().clear();
-        form_key(&mut m, &[Section::new("", vec![row(from)])], key);
+        m.sheet = None;
+        form_key(&mut m, &[Section::new("", vec![row(from, choices)])], key);
         assert_eq!(*seen.borrow(), want, "{key} on {from}");
+        assert_eq!(m.picker().is_some(), picks, "{key} on {from}: a picker");
+        if picks {
+            let p = m.picker().unwrap();
+            let on = p.rows[p.cursor].value.clone();
+            assert_eq!(on, from, "the picker opens on the value");
+        }
     }
+    // The picker sets what's picked.
+    m.sheet = None;
+    form_key(&mut m, &[Section::new("", vec![row("a", three)])], "enter");
+    press(&mut m, "down");
+    press(&mut m, "down");
+    press(&mut m, "enter");
+    assert_eq!(*seen.borrow(), "c");
+}
+
+/// A typed row with choices takes a value typed in its picker.
+#[test]
+fn picker_takes_a_typed_value() {
+    let (mut m, _d) = model(140, 50);
+    open_dialog(&mut m, PAGE_GENERAL);
+    let seen = Rc::new(std::cell::RefCell::new(String::new()));
+    let s2 = seen.clone();
+    let mut st = choice(
+        "Window",
+        "",
+        "",
+        &[("", ""), ("200k", "")],
+        form::set(move |_, v| *s2.borrow_mut() = v.into()),
+    );
+    st.typed = true;
+    form_key(&mut m, &[Section::new("", vec![st])], "enter");
+    for k in ["4", "0", "0", "k"] {
+        press(&mut m, k);
+    }
+    press(&mut m, "enter");
+    assert_eq!(*seen.borrow(), "400k");
 }
 
 /// A typed row asks for its value on enter, prefilled, and the answer is
@@ -520,7 +574,7 @@ fn general_at_140_as_go_draws_it() {
         .expect("the keys");
     assert_eq!(
         keys.trim_end(),
-        "  ←→ change  ·  ? details  ·  ctrl+↑↓ section  ·  [ ] page  ·  esc back"
+        "  enter choose  ·  ? details  ·  ctrl+↑↓ section  ·  [ ] page  ·  esc back"
     );
     assert!(
         f.iter()
@@ -768,7 +822,7 @@ fn remote_switch_writes_remote_json() {
         .position(|s| s.label == "Web app")
         .expect("Web app");
     dialog_mut(&mut m).cursor = web;
-    press(&mut m, "right");
+    press(&mut m, "space");
     let raw = std::fs::read_to_string(rush_state::dir().join("remote.json")).unwrap();
     assert!(
         raw.contains("\"web\": true") || raw.contains("\"web\":true"),

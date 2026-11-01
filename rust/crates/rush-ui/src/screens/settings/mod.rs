@@ -22,6 +22,7 @@ pub(crate) mod interface;
 pub(crate) mod keyboard;
 pub(crate) mod keys;
 pub(crate) mod ollama;
+pub(crate) mod ownsettings;
 pub(crate) mod paint;
 pub mod plugins;
 pub mod providers;
@@ -35,6 +36,8 @@ pub(crate) mod workspace;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_own;
 #[cfg(test)]
 mod tests_providers;
 
@@ -78,6 +81,10 @@ pub struct Page {
     /// Sees a key before the page moves or closes: a page with a page
     /// inside it takes esc back to itself.
     pub pre: Option<PageKey>,
+    /// Goes up a level, out of what's open in the page (a provider, a
+    /// harness, a plugin, a cell's models): ← and esc do it; false when
+    /// the page is at its top, where ← is the page's own.
+    pub back: Option<fn(&mut Model) -> bool>,
     pub form: Option<fn(&Model) -> Vec<Section>>,
     /// Lines above a form's sections.
     pub head: Option<fn(&Model, usize) -> Vec<Line>>,
@@ -103,6 +110,7 @@ pub(crate) fn pages() -> Vec<Page> {
                 s.extend(interface::sections(m));
                 s
             }),
+            prep: Some(general::prep),
             ..Page::default()
         },
         Page {
@@ -156,6 +164,11 @@ pub(crate) struct Dialog {
     pub plugin: String,
     /// The agent showing's own settings file, as last read.
     pub settings: Option<files::Loaded>,
+    /// The project a new session would start in, for General's worktree
+    /// row.
+    pub project: String,
+    /// The harness showing's own settings, as last read.
+    pub own: Option<ownsettings::Read>,
 }
 
 /// The settings group's state: the dialog while a settings place shows,
@@ -361,6 +374,7 @@ pub(crate) fn prep(m: &mut Model) {
     }
     let k = shown_kind(m);
     files::want(m, &k);
+    ownsettings::want(m, &k);
 }
 
 /// Shows one of the pages, in the place it's on (setSettingsPage).
@@ -501,6 +515,14 @@ pub(crate) fn dialog_key(m: &mut Model, k: &Press) -> Out {
         return Out::Draw;
     }
     let p = cur_page(m);
+    // The rule on every page: ← and esc go up a level and never change a
+    // value (Go's ← stepped the row's value back).
+    if matches!(s.as_str(), "left" | "h" | "esc" | "backspace")
+        && let Some(back) = p.back
+        && back(m)
+    {
+        return Out::Draw;
+    }
     if let Some(pre) = p.pre {
         let o = pre(m, &s);
         if o.used() {

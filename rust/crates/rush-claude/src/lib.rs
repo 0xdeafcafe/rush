@@ -52,6 +52,7 @@ mod native;
 pub mod neutral;
 pub mod notes;
 pub mod oauth;
+pub mod ownsettings;
 pub mod parts;
 pub mod past;
 pub mod plugins;
@@ -69,6 +70,7 @@ pub mod timeline;
 pub mod tools;
 pub mod transcript;
 pub mod usage;
+pub mod usersettings;
 
 mod json;
 
