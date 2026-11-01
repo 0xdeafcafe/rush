@@ -621,7 +621,10 @@ fn images_go_into_the_box() {
     conn(&mut m, KEY).input.set("look");
     act(
         &mut m,
-        Act::AttachImages(vec!["/tmp/a.png".into(), "/tmp/b.png".into()]),
+        Act::AttachImages(vec![
+            "/nonexistent/a.png".into(),
+            "/nonexistent/b.png".into(),
+        ]),
     );
     assert_eq!(
         conn(&mut m, KEY).input.string(),
@@ -631,7 +634,7 @@ fn images_go_into_the_box() {
     let got = ops(&fake);
     assert!(
         got.iter().any(|o| matches!(o, Op::Send { text, images, .. }
-            if text == "look [Image #1] [Image #2]" && images == &["/tmp/a.png", "/tmp/b.png"])),
+            if text == "look [Image #1] [Image #2]" && images == &["/nonexistent/a.png", "/nonexistent/b.png"])),
         "{got:?}"
     );
 }

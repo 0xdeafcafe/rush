@@ -87,7 +87,7 @@ fn what_a_drop_becomes() {
         let mut paths: Vec<(usize, String)> = r.path.into_iter().collect();
         paths.sort();
         let paths: Vec<String> = paths.into_iter().map(|(_, p)| p).collect();
-        assert_eq!(paths, files, "{paste:?}");
+        assert_eq!(kept_names(&paths), names(&files), "{paste:?}");
         match got {
             None => assert!(files.is_empty(), "{paste:?}"),
             Some(t) if !want.is_empty() => assert_eq!(t, want, "{paste:?}"),
@@ -112,13 +112,9 @@ fn a_drop_on_the_box_is_an_image_at_once() {
         Op::Send { text, images, .. } => Some((text, images)),
         _ => None,
     });
-    assert_eq!(
-        sent,
-        Some((
-            "what's this [Image #1]".to_string(),
-            vec![f.p("Screen Shot 1.png")]
-        ))
-    );
+    let (text, images) = sent.expect("sent");
+    assert_eq!(text, "what's this [Image #1]");
+    assert_eq!(kept_names(&images), ["Screen Shot 1.png"]);
 }
 
 /// A path typed out, or dropped in as keys, becomes the image once a space
@@ -133,4 +129,35 @@ fn a_typed_path_becomes_an_image_at_its_space() {
     let c = conn(&mut m, KEY);
     assert_eq!(c.input.string(), "[Image #1] ");
     assert_eq!(c.input.pos, c.input.text.len());
+}
+
+/// Images as attached: rush's own copies, under their own names (keep).
+/// Their names, each checked to be a copy.
+fn names(ps: &[String]) -> Vec<String> {
+    ps.iter()
+        .map(|p| {
+            std::path::Path::new(p)
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect()
+}
+
+pub(crate) fn kept_names(ps: &[String]) -> Vec<String> {
+    let dir = crate::imagerefs::attached_dir();
+    ps.iter()
+        .map(|p| {
+            assert!(
+                std::path::Path::new(p).starts_with(&dir),
+                "{p} isn't a copy"
+            );
+            std::path::Path::new(p)
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect()
 }

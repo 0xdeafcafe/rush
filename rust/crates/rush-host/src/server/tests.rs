@@ -1694,3 +1694,62 @@ fn info_is_written_at_once_for_a_change_readers_act_on() {
     h.publish(&mut st);
     assert_eq!(file().detail, "four");
 }
+
+// Rust-only: an image that's there but can't be read (a Mac screenshot's
+// preview, dropped from the corner of the screen, lives where only the
+// terminal may read it) is refused as it's sent, by name, not taken to
+// fail later.
+#[test]
+fn unreadable_image_is_refused_by_name() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = tempfile::tempdir().unwrap();
+    let pic = d.path().join("shot.jpg");
+    std::fs::write(&pic, "jpeg").unwrap();
+    std::fs::set_permissions(&pic, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::File::open(&pic).is_ok() {
+        return; // root reads anything
+    }
+    let err = read_image(&pic.to_string_lossy(), d.path()).unwrap_err();
+    assert!(err.starts_with("can't read shot.jpg: "), "{err}");
+}
+
+// Rust-only: a queued image that can't be read by the time the queue goes
+// is left off with a word about it; the messages still go, and nothing is
+// left on the queue to fail again.
+#[test]
+fn unreadable_queued_image_does_not_hold_the_queue() {
+    use std::os::unix::fs::PermissionsExt;
+    let _home = Home::new();
+    let d = tempfile::tempdir().unwrap();
+    let pic = d.path().join("shot.jpg");
+    std::fs::write(&pic, "jpeg").unwrap();
+    let pic_s = pic.to_string_lossy().into_owned();
+    let h = host(Config {
+        id: "qu".into(),
+        kind: "claude".into(),
+        ..Config::default()
+    });
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    h.lock().info.state = "working".into();
+    h.send("look", std::slice::from_ref(&pic_s), false).unwrap();
+    std::fs::set_permissions(&pic, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::File::open(&pic).is_ok() {
+        return; // root reads anything
+    }
+    h.lock().info.state = "idle".into();
+    h.do_op(op("queue_send", |o| {
+        o.index = 0;
+        o.was = "look".into();
+    }))
+    .unwrap();
+    assert!(h.lock().info.queue.is_empty());
+    let got = c.got.lock().unwrap();
+    let last = got.last().expect("sent");
+    assert!(last.images.is_empty(), "{:?}", last.images);
+    assert!(
+        last.text.contains("can't read shot.jpg") && last.text.contains("left off"),
+        "{}",
+        last.text
+    );
+}
