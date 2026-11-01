@@ -93,6 +93,7 @@ fn model(w: usize, h: usize) -> Model {
         roots: vec!["/src/checkout".into(); 5],
         previews: HashMap::new(),
         priced: true,
+        accounts: Vec::new(),
     });
     m
 }
@@ -368,6 +369,7 @@ fn bar_searches_transcripts() {
         roots: vec!["/src/checkout".into(); 5],
         previews: HashMap::new(),
         priced: true,
+        accounts: Vec::new(),
     });
     press(&mut m, "ctrl+k");
     typed(&mut m, "zebracorn");
@@ -428,6 +430,7 @@ fn list_filter_searches_transcripts() {
         roots: vec!["/src/checkout".into(); 5],
         previews: HashMap::new(),
         priced: true,
+        accounts: Vec::new(),
     });
     press(&mut m, "alt+f");
     typed(&mut m, "zebracorn");
@@ -950,6 +953,7 @@ fn bar_matches_names_by_words() {
         roots: vec!["/src/checkout".into(); 5],
         previews: HashMap::new(),
         priced: true,
+        accounts: Vec::new(),
     });
     press(&mut m, "ctrl+k");
     typed(&mut m, "index");
@@ -992,6 +996,40 @@ fn bar_offers_projects_pages() {
     );
 }
 
+/// Each Projects entry opens Projects on its pane, and Back comes back
+/// to that pane (cmdbar.go:761-771, goSpot :1361-1364, spot.where).
+#[test]
+fn bar_projects_entries_pick_their_pane() {
+    use crate::screens::projects_machine::{PANE_PRS, PANE_SYSTEM, PANE_TEMP, projects_sel};
+    let mut m = model(120, 40);
+    for (title, id) in [
+        ("Projects › Temporary", PANE_TEMP),
+        ("Projects › System", PANE_SYSTEM),
+        ("Projects › Pull requests", PANE_PRS),
+        ("Projects", ""),
+    ] {
+        press(&mut m, "ctrl+k");
+        typed(&mut m, "proj");
+        let it = the_bar(&m)
+            .items
+            .iter()
+            .find(|it| it.title == title)
+            .expect(title)
+            .clone();
+        bar::close(&mut m);
+        bar::run(&mut m, &it.go);
+        assert_eq!(m.place, PlaceId::Projects, "{title}");
+        assert_eq!(projects_sel(&m), id, "{title}");
+    }
+    crate::screens::projects_machine::pick_in_projects(&mut m, PANE_SYSTEM);
+    let spot = bar::here(&mut m);
+    assert_eq!(spot.where_(), "Projects › System");
+    m.set_place(PlaceId::Agents);
+    bar::run(&mut m, &bar::Go::Back(spot));
+    assert_eq!(m.place, PlaceId::Projects);
+    assert_eq!(projects_sel(&m), PANE_SYSTEM);
+}
+
 /// Who said it comes before what was said, the closest first, a typo
 /// after the word as typed, each match with its times
 /// (TestBarFindsAgentsThatSaidIt, TestBarRanksByRelevanceWithTimes).
@@ -1020,6 +1058,7 @@ fn bar_finds_agents_that_said_it() {
         roots: vec!["/src/checkout".into(); 5],
         previews: HashMap::new(),
         priced: true,
+        accounts: Vec::new(),
     });
     press(&mut m, "ctrl+k");
     typed(&mut m, "zebracorn");
@@ -1217,6 +1256,7 @@ fn bar_searches_transcripts_on_key() {
         roots: vec!["/src/checkout".into(); 5],
         previews: HashMap::new(),
         priced: true,
+        accounts: Vec::new(),
     });
     crate::screens::settings::store(&mut m)
         .config

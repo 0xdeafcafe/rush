@@ -871,6 +871,42 @@ fn a_script_draws_as_its_file() {
     );
 }
 
+// Docked, the live line has a row of room above and below it, not the
+// turn's rail: rushPane wraps Session.Activity's rows, their rail rows
+// stripped, in empty rows (rushmode.go:2339-2346, activity.go:24), so a
+// card under it never sits flush against it.
+#[test]
+fn the_docked_live_line_has_room_either_side() {
+    let mut s = Session::new();
+    s.feed(sent("run"), at(0));
+    s.feed(
+        tool_use("b", "Bash", json!({"command": "go test ./..."})),
+        at(1),
+    );
+    let o = Options {
+        width: 100,
+        now: at(5),
+        dock_activity: true,
+        ..Options::default()
+    };
+    let out = plain(&Renderer::new().render(&s, &o));
+    // Each row is its ref, a bar, then what it says.
+    let rows: Vec<&str> = out
+        .lines()
+        .map(|l| l.split_once('|').map_or(l, |(_, t)| t))
+        .collect();
+    let i = rows
+        .iter()
+        .position(|l| l.contains("running Bash…"))
+        .expect(&out);
+    assert!(
+        i + 2 == rows.len(),
+        "the live line ends the turn but for a row:\n{out}"
+    );
+    assert_eq!(rows[i - 1].trim(), "", "room above:\n{out}");
+    assert_eq!(rows[i + 1].trim(), "", "room below:\n{out}");
+}
+
 // The pane's live line is docked (activity_test.go): a running step is
 // named on it with the turn's time and is never called stalled; a step
 // waiting for leave says so; a retried request says why. Undocked, the

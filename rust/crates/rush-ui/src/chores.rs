@@ -9,7 +9,9 @@
 //! ticks every second whatever happens; here the loop is woken only at
 //! the next second a chore is due, the chore's work goes off the UI
 //! thread, and a wake that only ran chores draws nothing, so an idle rush
-//! costs a wake every half a minute and no frame.
+//! costs a wake every half a minute and no frame. The battery and disk
+//! are read again at the same second while shown (Go's sysinfo, read
+//! every 30 seconds while drawn).
 
 use std::time::{Duration, Instant};
 
@@ -21,7 +23,13 @@ struct Chore {
     at: u64,
     every: u64,
     lead_only: bool,
+    /// Whether it's wanted now; a chore not wanted isn't woken for.
+    when: fn(&Model) -> bool,
     run: fn(&mut Model),
+}
+
+fn always(_: &Model) -> bool {
+    true
 }
 
 const CHORES: &[Chore] = &[
@@ -29,25 +37,54 @@ const CHORES: &[Chore] = &[
         at: 3,
         every: 30,
         lead_only: false,
+        when: always,
         run: crate::screens::settings::updates::watch_binary,
+    },
+    // The battery and disk, while the last frame showed them: Go reads
+    // them every 30 seconds while drawn (sysinfo.go:27), and each second
+    // draws them; here they're drawn only when they show differently.
+    Chore {
+        at: 3,
+        every: 30,
+        lead_only: false,
+        when: always,
+        run: |_| {
+            if rush_sys::sysinfo::asked() {
+                rush_sys::sysinfo::read_again();
+            }
+        },
     },
     Chore {
         at: 15,
         every: 60,
         lead_only: true,
+        when: always,
         run: crate::screens::projects_machine::tidydone::settle_tick,
     },
     Chore {
         at: 30,
         every: 600,
         lead_only: true,
+        when: always,
         run: crate::screens::projects_machine::tidydone::tidy_tick,
     },
     Chore {
         at: 20,
         every: 30,
         lead_only: true,
+        when: always,
         run: crate::screens::list_extras::stuck::nudge_stuck_subs,
+    },
+    // The rooms, every second while one runs: Go reads them on each
+    // reading, which its tick makes every second (model.go:1089-1092,
+    // snapload.go:60), so a room's round and verdict show though no
+    // session changed. Read off the UI thread, drawn only when changed.
+    Chore {
+        at: 1,
+        every: 1,
+        lead_only: false,
+        when: crate::screens::social::rooms::any_running,
+        run: crate::screens::social::rooms::tick_rooms,
     },
 ];
 
@@ -78,7 +115,7 @@ pub fn due_at(m: &Model) -> Option<Instant> {
     let lead = m.leads();
     CHORES
         .iter()
-        .filter(|c| lead || !c.lead_only)
+        .filter(|c| (lead || !c.lead_only) && (c.when)(m))
         .map(|c| next_of(c, clock.through))
         .min()
         .map(|t| start + Duration::from_secs(t))
@@ -99,7 +136,7 @@ pub fn run_due(m: &mut Model, now: Instant) -> bool {
     let lead = m.leads();
     let mut ran = false;
     for c in CHORES {
-        if (lead || !c.lead_only) && next_of(c, through) <= tick {
+        if (lead || !c.lead_only) && next_of(c, through) <= tick && (c.when)(m) {
             (c.run)(m);
             ran = true;
         }
@@ -117,7 +154,7 @@ mod tests {
         assert_eq!(next_of(c, 0), 3);
         assert_eq!(next_of(c, 3), 33);
         assert_eq!(next_of(c, 40), 63);
-        let t = &CHORES[2];
+        let t = &CHORES[3];
         assert_eq!(next_of(t, 29), 30);
         assert_eq!(next_of(t, 30), 630);
     }
@@ -135,5 +172,29 @@ mod tests {
         assert_eq!(due_at(&m), Some(s + Duration::from_secs(33)));
         m.follows = false;
         assert_eq!(due_at(&m), Some(s + Duration::from_secs(15)));
+    }
+
+    // While a room the list read runs, the rooms are read each second
+    // (Go's tick refreshes and reads them): no room running, no wake.
+    #[test]
+    fn rooms_each_second_while_one_runs() {
+        use crate::screens::social::rooms::RoomRows;
+        let mut m = Model::new("t");
+        start(&mut m);
+        let s = m.kept.peek::<Clock>().unwrap().start.unwrap();
+        m.follows = true;
+        let lp: rush_draw::Loop<crate::worker::Note> = rush_draw::Loop::new();
+        m.tx = Some(lp.sender());
+        m.kept::<Clock>().through = 5;
+        assert_eq!(due_at(&m), Some(s + Duration::from_secs(33)));
+        let mut room = rush_room::room::Summary::default();
+        m.kept::<RoomRows>().list = vec![room.clone()];
+        assert_eq!(due_at(&m), Some(s + Duration::from_secs(33)));
+        room.running = true;
+        m.kept::<RoomRows>().list = vec![room];
+        assert_eq!(due_at(&m), Some(s + Duration::from_secs(6)));
+        // Drawn once (no loop): nothing to wake for.
+        m.tx = None;
+        assert_eq!(due_at(&m), Some(s + Duration::from_secs(33)));
     }
 }

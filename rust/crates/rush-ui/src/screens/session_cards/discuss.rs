@@ -51,11 +51,11 @@ pub fn discuss(m: &mut Model, key: &str, topic: &str, fill: bool) -> Out {
             .unwrap_or_default();
     }
     if topic.is_empty()
-        && let Some(t) = super::session(m, key).and_then(|s| s.turns.last())
+        && let Some(t) = super::chat(m, key).and_then(|s| s.turns.last())
     {
         topic = one_line(&t.prompt);
     }
-    let turns = super::session(m, key)
+    let turns = super::chat(m, key)
         .map(|s| chat_turns(s, false))
         .unwrap_or_default();
     chat_room(m, key, topic, turns, 3, fill, String::new())
@@ -71,7 +71,7 @@ pub fn intervene(m: &mut Model, key: &str, focus: &str) -> Out {
         topic.push_str(&format!(" The user's concern: {focus}"));
     }
     let now = super::now(m);
-    let (turns, head) = super::session(m, key)
+    let (turns, head) = super::chat(m, key)
         .map(|s| (chat_turns(s, true), chat_status(s, now)))
         .unwrap_or_default();
     chat_room(m, key, topic, turns, 10, true, head)
@@ -90,7 +90,7 @@ pub fn intervene_cmd(m: &mut Model, arg: &str) -> Out {
         let focus = arg[tag.len()..].trim().to_string();
         return intervene_on(m, i, &focus);
     }
-    match open_key(m) {
+    match super::chat_key(m) {
         Some(k) if !k.starts_with(super::mention::ROOM_KEY_PREFIX) => intervene(m, &k, arg),
         _ => {
             m.flash_err("#intervene works in a chat, or tag one: #intervene @agent");

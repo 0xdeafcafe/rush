@@ -79,7 +79,13 @@ fn bar_keys(m: &mut Model, k: &Press) -> Out {
         return o;
     }
     if bar::is_open(m) && k.s != "ctrl+q" {
-        return bar::key(m, k).or_idle();
+        let o = bar::key(m, k).or_idle();
+        // The agent picked is read ahead, for enter to show at once
+        // (list_extras/predict.rs).
+        if let Some(key) = bar::picked_agent(m) {
+            crate::screens::list_extras::predict::toward(m, &[key]);
+        }
+        return o;
     }
     Out::Pass
 }

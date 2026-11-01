@@ -88,6 +88,9 @@ pub enum Go {
     /// Agents' page by name ("Wall").
     AgentsPage(usize),
     Place(PlaceId, Option<usize>),
+    /// Projects with this row of its list picked ("" for the first
+    /// project; a pane's id for Temporary, System or Pull requests).
+    Projects(String),
     FindHere,
     /// The open session's view by name ("changes").
     View(String),
@@ -159,6 +162,8 @@ pub struct Spot {
     pub name: String,
     pub r#ref: String,
     pub open: bool,
+    /// The Projects list's picked row, on Projects (projSel).
+    pub proj_sel: String,
 }
 
 /// A jump into an agent's conversation waiting for it to open: the hit is
@@ -848,14 +853,11 @@ pub fn bar_places(m: &Model, q: &str) -> Vec<Item> {
             Go::AgentsPage(i + 1),
         );
     }
-    // Projects and its pages are always offered, as Go names them; a page
-    // is found by its name once the Projects place has it.
+    // Projects and its panes, as Go offers them: each picks its row of
+    // the list (pickInProjects, cmdbar.go:761-771).
+    use crate::screens::projects_machine::{PANE_PRS, PANE_SYSTEM, PANE_TEMP};
     const PROJECTS_WORDS: &str = "projects repositories repos folders git branches worktrees commits prs cleanup clean disk temporary scratch processes orphans machine system ";
-    let projects_pages = m.ext.places[PlaceId::Projects as usize]
-        .as_ref()
-        .map(|p| p.pages(m))
-        .unwrap_or_default();
-    for (name, page, what) in [
+    for (name, id, what) in [
         (
             "Projects",
             "",
@@ -863,25 +865,26 @@ pub fn bar_places(m: &Model, q: &str) -> Vec<Item> {
         ),
         (
             "Projects › Temporary",
-            "Temporary",
+            PANE_TEMP,
             "/tmp and finished agents' temp work",
         ),
-        ("Projects › System", "System", "processes no project owns"),
+        (
+            "Projects › System",
+            PANE_SYSTEM,
+            "processes no project owns",
+        ),
         (
             "Projects › Pull requests",
-            "Pull requests",
+            PANE_PRS,
             "yours and asking for your review, by project",
         ),
     ] {
-        let at = (!page.is_empty())
-            .then(|| projects_pages.iter().position(|p| p == page))
-            .flatten();
         add(
             sub("◇"),
             name.into(),
             what.into(),
             format!("{PROJECTS_WORDS}{name}"),
-            Go::Place(PlaceId::Projects, at),
+            Go::Projects(id.into()),
         );
     }
     for id in [PlaceId::Harnesses, PlaceId::Settings] {
@@ -1426,6 +1429,10 @@ pub fn run(m: &mut Model, go: &Go) -> Out {
                 m.set_page(*p);
             }
         }
+        Go::Projects(id) => {
+            go_place(m, PlaceId::Projects);
+            crate::screens::projects_machine::pick_in_projects(m, id);
+        }
         Go::FindHere => {
             go_place(m, PlaceId::Agents);
             focus_session(m);
@@ -1533,6 +1540,16 @@ pub fn to_prompt(m: &mut Model) {
     }
 }
 
+/// The agent the open bar's pick goes to, if it's an agent's row or a
+/// conversation found.
+pub fn picked_agent(m: &mut Model) -> Option<String> {
+    let b = st(m).bar.as_ref()?;
+    match &b.items.get(b.cursor)?.go {
+        Go::Agent(key) | Go::Found { key, .. } => Some(key.clone()),
+        _ => None,
+    }
+}
+
 /// Selects an agent and opens its conversation (goAgent).
 pub fn go_agent(m: &mut Model, key: &str) {
     go_place(m, PlaceId::Agents);
@@ -1637,6 +1654,11 @@ pub fn here(m: &mut Model) -> Spot {
         name,
         r#ref: r,
         open,
+        proj_sel: if m.place == PlaceId::Projects {
+            crate::screens::projects_machine::projects_sel(m)
+        } else {
+            String::new()
+        },
     }
 }
 
@@ -1647,6 +1669,15 @@ impl Spot {
             PlaceId::Agents if self.agents_page > 0 => format!("Agents › {}", self.page_name),
             PlaceId::Agents if self.name.is_empty() => "Agents".into(),
             PlaceId::Agents => self.name.clone(),
+            PlaceId::Projects => {
+                use crate::screens::projects_machine::{PANE_PRS, PANE_SYSTEM, PANE_TEMP};
+                match self.proj_sel.as_str() {
+                    PANE_TEMP => "Projects › Temporary".into(),
+                    PANE_SYSTEM => "Projects › System".into(),
+                    PANE_PRS => "Projects › Pull requests".into(),
+                    _ => "Projects".into(),
+                }
+            }
             p if self.page_name.is_empty() => p.name().into(),
             p => format!("{} › {}", p.name(), self.page_name),
         }
@@ -1658,6 +1689,11 @@ impl Spot {
 fn go_spot(m: &mut Model, s: Spot) -> Out {
     let back = here(m);
     st(m).back = Some(back);
+    if s.place == PlaceId::Projects {
+        go_place(m, PlaceId::Projects);
+        crate::screens::projects_machine::pick_in_projects(m, &s.proj_sel);
+        return Out::Draw;
+    }
     if s.place != PlaceId::Agents {
         go_place(m, s.place);
         m.set_page(s.page);
