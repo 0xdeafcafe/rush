@@ -933,6 +933,7 @@ impl Link for HostLink {
             Op::SendQueued { i, was } => c.send_queued(i as i64, &was),
             Op::SteerQueued { i, was } => c.steer_queued(i as i64, &was),
             Op::HoldQueue(on) => c.hold_queue(on),
+            Op::GuardQueue(on) => c.guard_queue(on),
             Op::QueueSeparately(on) => c.queue_separately(on),
             Op::Tell { sub, text } => c.tell(&sub, &text),
             Op::StopTask { id } => c.stop_task(&id),
@@ -1045,6 +1046,7 @@ fn info(i: &rush_host::Info) -> Info {
         queue: i.queue.clone(),
         queue_images: i.queue_images.clone(),
         queue_held: i.queue_held,
+        queue_guarded: i.queue_guarded,
         queue_stuck: if i.queue_stuck.is_zero() {
             0
         } else {

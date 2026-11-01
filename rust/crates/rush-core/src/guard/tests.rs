@@ -674,3 +674,76 @@ fn a_pace_hold_said_while_the_turn_runs() {
         "held: you're away · it carries on when you're back"
     );
 }
+
+// Work only moves to an account of its own agent's kind: a Claude account
+// past its pace never sends its sessions to a Copilot account with room,
+// and a Copilot account past its pace (a month's premium requests, 42×)
+// holds nothing of Claude's.
+#[test]
+fn work_moves_only_to_an_account_of_its_own_kind() {
+    let claude = Acct {
+        id: "claude:a".into(),
+        ..hot()
+    };
+    let copilot = Acct {
+        id: "copilot:0xdeafcafe".into(),
+        current: true,
+        ..room("copilot", 10.0, 700)
+    };
+    let p = plan(
+        &pace_on(),
+        &[claude.clone(), copilot.clone()],
+        &[
+            seat("s", "claude:a"),
+            Seat {
+                turns: 0,
+                ..seat("new", "claude:a")
+            },
+        ],
+        0,
+        false,
+        T0,
+    );
+    assert_eq!(p.new_on, None, "never to another kind's account");
+    assert!(held(did(&p, "s")) && held(did(&p, "new")), "{:?}", p.seats);
+    // One of its own kind with room takes it.
+    let other = Acct {
+        id: "claude:b".into(),
+        ..room("b", 40.0, 20)
+    };
+    let p = plan(
+        &pace_on(),
+        &[claude.clone(), copilot, other],
+        &[Seat {
+            turns: 0,
+            ..seat("new", "claude:a")
+        }],
+        0,
+        false,
+        T0,
+    );
+    assert_eq!(p.new_on.as_deref(), Some("claude:b"));
+    assert!(matches!(did(&p, "new"), Do::Move { to, .. } if to == "claude:b"));
+    // The Copilot account past its pace: Claude's sessions go on.
+    let mut month = Acct {
+        id: "copilot:0xdeafcafe".into(),
+        current: true,
+        ..hot()
+    };
+    month.pace.ratio = 42.0;
+    let cool = Acct {
+        id: "claude:a".into(),
+        current: true,
+        ..room("a", 40.0, 100)
+    };
+    let p = plan(
+        &pace_on(),
+        &[cool, month],
+        &[seat("s", "claude:a")],
+        0,
+        false,
+        T0,
+    );
+    assert_eq!(did(&p, "s"), &Do::Go);
+    assert_eq!(p.new_on, None);
+}
