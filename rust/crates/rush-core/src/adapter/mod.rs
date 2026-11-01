@@ -14,6 +14,7 @@
 
 mod caps;
 mod cheap;
+pub mod conform;
 mod conn;
 mod feature;
 mod handoff;

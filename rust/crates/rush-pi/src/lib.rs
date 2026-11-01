@@ -22,7 +22,7 @@ use rush_core::adapter::{
     self, AccountSummary, AccountSummaryReader, Authenticator, Command, Commander, Conn,
     Discoverer, Driver, Feature, Features, Follow, HistoryFollower, HistoryReader, Kind, Level,
     Memory, MemoryReader, Orphans, Profile, Programmer, Published, Publisher, Registry, Session,
-    SettingsFile, SettingsFiler, Sink, StartOptions, Support,
+    SettingsFile, SettingsFiler, Sink, StartOptions, Support, TailReader,
 };
 use rush_core::event::Event;
 use rush_core::time::Ms;
@@ -154,6 +154,7 @@ impl adapter::Adapter for Pi {
         orphans: Orphans,
         history_reader: HistoryReader,
         history_follower: HistoryFollower,
+        tail_reader: TailReader,
         programmer: Programmer,
         publisher: Publisher,
         account_summary_reader: AccountSummaryReader,
@@ -231,6 +232,14 @@ impl HistoryReader for Pi {
         each: &mut dyn FnMut(Vec<Event>) -> bool,
     ) -> adapter::Result<()> {
         history::read(&history::path_of(s)?, before, most, each)
+    }
+}
+
+impl TailReader for Pi {
+    /// The end of the branch it's on, read from the file's end back along
+    /// parent links.
+    fn history_tail(&self, s: &Session, most: i64) -> adapter::Result<(Vec<Event>, bool)> {
+        history::tail(&history::path_of(s)?, most)
     }
 }
 

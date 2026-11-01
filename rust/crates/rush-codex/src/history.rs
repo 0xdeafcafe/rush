@@ -528,4 +528,26 @@ mod tests {
         assert!(sl.reset && !sl.events.is_empty());
         assert!(describe(&sl.events[0]).starts_with("init thread-1"));
     }
+
+    /// The shared check every adapter's end reader is held to
+    /// (adapter::conform).
+    #[test]
+    fn its_end_is_the_end_of_its_whole() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("rollout.jsonl");
+        let mut r = Rollout::new(t0()).add("session_meta", meta("thread-1", "cli".into()));
+        for i in 0..40 {
+            let ask = format!("ask {i} {}", "words ".repeat(40));
+            r = r
+                .add("turn_context", json!({"model": "gpt-5", "approval_policy": "never"}))
+                .response("message", user_msg(&[&ask]))
+                .response(
+                    "message",
+                    json!({"role": "assistant", "content": [{"type": "output_text", "text": format!("answer {i}")}]}),
+                );
+        }
+        r.write(&path);
+        let n = std::fs::metadata(&path).unwrap().len() as i64;
+        rush_core::adapter::conform::check_tail(&crate::Codex::new(), &at(&path), n / 4);
+    }
 }

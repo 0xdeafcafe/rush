@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use rush_core::adapter::{
     Adapter, Choice, Conn, ContextWindower, Discoverer, Driver, Feature, Features, HistoryReader,
     Kind, Level, Media, MediaReader, ModelLister, ModelNamer, Orphans, Pricer, Profile, Programmer,
-    Provided, Registry, Result, Rider, Session, Sink, StartOptions, Support,
+    Provided, Registry, Result, Rider, Session, Sink, StartOptions, Support, TailReader,
 };
 use rush_core::agent::TokenUsage;
 use rush_core::event::Event;
@@ -260,6 +260,7 @@ impl Adapter for OllamaPi {
         driver: Driver,
         discoverer: Discoverer,
         history_reader: HistoryReader,
+        tail_reader: TailReader,
         orphans: Orphans,
         media_reader: MediaReader,
         model_lister: ModelLister,
@@ -355,6 +356,16 @@ impl HistoryReader for OllamaPi {
         let a = self.pi().ok_or_else(no)?;
         let r = a.history_reader().ok_or_else(no)?;
         r.history(s, before, most, each)
+    }
+}
+
+impl TailReader for OllamaPi {
+    /// A session's end, as Pi's own are read.
+    fn history_tail(&self, s: &Session, most: i64) -> Result<(Vec<Event>, bool)> {
+        let no = || err(format!("rush can't read {PI}'s history"));
+        let a = self.pi().ok_or_else(no)?;
+        let r = a.tail_reader().ok_or_else(no)?;
+        r.history_tail(s, most)
     }
 }
 

@@ -12,12 +12,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use rush_convo::{Fresh, Options, Renderer, Session, Tail};
+use rush_convo::reading::{Reading, Slice, read_on};
+use rush_convo::{Options, Renderer, Session};
 
 use crate::changes::{self, FileChange, Ver};
-use rush_core::adapter::{self, AdapterRef, Registry, SLICE, global};
+use rush_core::adapter::{self, Registry, global};
 use rush_core::agent::{Agent, Preview};
-use rush_core::event::Event;
+
 use rush_core::event::Exchange;
 use rush_core::time::{Ms, now};
 use rush_draw::Sender;
@@ -28,17 +29,10 @@ use rush_sys::fswait::{Stop, Watcher};
 pub enum Note {
     Fleet(Fleet),
     Preview(String, Box<Preview>),
+    /// What a conversation open gained, read as it grows.
     Tail {
         r#gen: u64,
-        fresh: Box<Fresh>,
-    },
-    /// Events another adapter's history gave; reset, start over.
-    History {
-        r#gen: u64,
-        events: Vec<Event>,
-        reset: bool,
-        /// More is written than this slice took: it's sent at once.
-        more: bool,
+        fresh: Box<Slice>,
     },
     TailFailed {
         r#gen: u64,
@@ -52,7 +46,7 @@ pub enum Note {
         warm: Option<Box<Warm>>,
     },
     /// A conversation's end read ahead of time, topped up with what was
-    /// written since: the view's first reading (TailStart::From), laid
+    /// written since: the view's first reading (Resume::TopUp), laid
     /// out as End's is.
     Seeded {
         r#gen: u64,
@@ -594,37 +588,45 @@ impl Drop for TailHandle {
 /// long one.
 pub const TAIL_END: u64 = 2 << 20;
 
-/// Reads a transcript's last 2 MB, then what's added as it grows, a
-/// TAIL_SLICE at a time; each slice parsed here and sent for the UI
-/// thread to apply, the next read while it does.
-pub fn spawn_tail(
-    path: PathBuf,
-    r#gen: u64,
-    tx: Sender<Note>,
-    decode: rush_convo::Decode,
-    drawn: Drawn,
-    spawns: Option<SpawnsBy>,
-) -> Option<TailHandle> {
-    spawn_tail_at(TailStart::End(path), r#gen, tx, decode, drawn, spawns)
+/// Where a conversation's worker starts.
+pub enum Open {
+    /// Where it's read from, and for a stopped rush session its host (its
+    /// folder says where the history is): the reading is made on the
+    /// worker, as it may read the disk.
+    Source(crate::session::Source, String),
+    /// A reading made already: one read ahead (list_extras/predict.rs).
+    Reading(Box<dyn Reading>),
 }
 
-/// Where a tail's worker starts reading.
-pub enum TailStart {
-    /// The transcript's last 2 MB.
-    End(PathBuf),
-    /// Where a read of it ahead of time stopped (list_extras/predict.rs):
-    /// what was written since is read first. With the conversation read
-    /// so far, which the UI doesn't have yet, it's topped up with that
-    /// and sent whole (Note::Seeded); without, the UI has it already.
-    From(Box<Tail>, Option<Box<Session>>),
+/// How a conversation's reading goes on from what was read of it before
+/// the view opened.
+pub enum Resume {
+    /// Nothing read yet: its end first, then the whole.
+    Start,
+    /// The view shows its end, read ahead, the reading still at its start:
+    /// the whole is read and takes the end's place, then it's followed.
+    Whole,
+    /// The view shows all of it, read ahead with nothing written since:
+    /// followed from where that read stopped.
+    Follow,
+    /// All of it was read ahead but written to since, which the view
+    /// doesn't have yet: topped up here and sent whole (Note::Seeded).
+    TopUp(Box<Session>),
 }
 
-/// spawn_tail from where start says.
-pub fn spawn_tail_at(
-    start: TailStart,
+/// Reads a conversation, whatever agent wrote it (rush_convo::reading):
+/// its last 2 MB first, found from the end backwards, sent for the view
+/// to show at once (Note::End, "reading earlier…" above it); then the
+/// whole from its start, here, laid out as the view last drew, to take the
+/// end's place (Note::Whole; a short one's whole is its first reading,
+/// Note::End); then what's added as it grows, a TAIL_SLICE at a time
+/// (Note::Tail), parsed here for the UI thread to apply, the next read
+/// while it does. Stops when the handle is dropped.
+pub fn spawn_read(
+    open: Open,
+    resume: Resume,
     r#gen: u64,
     tx: Sender<Note>,
-    decode: rush_convo::Decode,
     drawn: Drawn,
     spawns: Option<SpawnsBy>,
 ) -> Option<TailHandle> {
@@ -635,122 +637,123 @@ pub fn spawn_tail_at(
     let st = stop.clone();
     let wk = wake.clone();
     std::thread::Builder::new()
-        .name("rush-tail".into())
+        .name("rush-read".into())
         .spawn(move || {
-            let path = match &start {
-                TailStart::End(p) => p.clone(),
-                TailStart::From(t, _) => t.path.clone(),
+            let failed = |e: adapter::Error| {
+                tx.send(Note::TailFailed {
+                    r#gen,
+                    err: e.to_string(),
+                })
             };
-            // Watched before the first read, so nothing written between a
-            // read and the wait is missed.
-            let w = Watcher::new();
-            w.watch(&[&path]);
-            // fresh: read from its end here, not where a read ahead stopped.
-            let (mut tail, seed, mut fresh) = match start {
-                TailStart::End(p) => (Tail::from_end(&p, TAIL_END, decode.clone()), None, true),
-                TailStart::From(t, s) => (*t, s, false),
-            };
-            tail.stop = Some(st.clone());
-            if let Some(mut sess) = seed {
-                // What was written since it was read ahead, taken in here;
-                // one that can't be read now is read as if never read
-                // ahead.
-                let read = loop {
-                    if st.load(Ordering::Relaxed) {
+            let mut r = match open {
+                Open::Reading(r) => r,
+                Open::Source(src, host) => match crate::session::reading(&src, &host) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        failed(e);
                         return;
                     }
-                    match tail.fetch_most(TAIL_SLICE) {
-                        Ok(f) => {
-                            let more = f.more;
-                            f.apply(&mut sess);
-                            if !more {
-                                break true;
+                },
+            };
+            r.stop_on(st.clone());
+            let says = r.says_itself();
+            let warm_of = |s: &mut Session| warm(s, &drawn, spawns.as_ref(), says);
+            let gone = || st.load(Ordering::Relaxed);
+            match resume {
+                Resume::Start => {
+                    // Its end, laid out as the view draws it before the
+                    // view has it (Go's warmed, rushmode.go:2064): the
+                    // frame that shows it draws nothing new.
+                    let shown = match r.end(TAIL_END) {
+                        Some(mut end) if !gone() => {
+                            let warm = warm_of(&mut end);
+                            if !tx.send(Note::End {
+                                r#gen,
+                                sess: Box::new(end),
+                                warm,
+                            }) {
+                                return;
+                            }
+                            true
+                        }
+                        _ => false,
+                    };
+                    if gone() {
+                        return;
+                    }
+                    // Then the whole, here, taken in where the end was
+                    // (Go's readWhole, twopass.go:33); a short one's is
+                    // its first reading.
+                    let mut whole = Session::new();
+                    let read = read_on(r.as_mut(), &mut whole, TAIL_SLICE, &st);
+                    if gone() {
+                        return;
+                    }
+                    let mut err = read.err();
+                    if shown && let Some(e) = err.take() {
+                        // What was read of the whole is gone with it: the
+                        // end stays as it is.
+                        failed(e);
+                        return;
+                    }
+                    let warm = warm_of(&mut whole);
+                    let sess = Box::new(whole);
+                    let sent = if shown {
+                        tx.send(Note::Whole { r#gen, sess, warm })
+                    } else {
+                        tx.send(Note::End { r#gen, sess, warm })
+                    };
+                    if !sent {
+                        return;
+                    }
+                    if let Some(e) = err {
+                        failed(e);
+                    }
+                }
+                Resume::Whole => {
+                    let mut whole = Session::new();
+                    match read_on(r.as_mut(), &mut whole, TAIL_SLICE, &st) {
+                        Ok(true) => {
+                            let warm = warm_of(&mut whole);
+                            if !tx.send(Note::Whole {
+                                r#gen,
+                                sess: Box::new(whole),
+                                warm,
+                            }) {
+                                return;
                             }
                         }
-                        Err(_) => break false,
-                    }
-                };
-                if !read {
-                    tail = Tail::from_end(&path, TAIL_END, decode.clone());
-                    tail.stop = Some(st.clone());
-                    fresh = true;
-                } else {
-                    let warm = warm(&mut sess, &drawn, spawns.as_ref());
-                    if !tx.send(Note::Seeded { r#gen, sess, warm }) {
-                        return;
-                    }
-                }
-            }
-            // Its end read whole here first and laid out as the view draws
-            // it, before the view has it (Go's warmed, rushmode.go:2064):
-            // the frame that shows it draws nothing new. What's written
-            // after comes a slice at a time, below.
-            let mut end = Session::new();
-            if fresh && tail.read(&mut end).unwrap_or(false) && !st.load(Ordering::Relaxed) {
-                let warm = warm(&mut end, &drawn, spawns.as_ref());
-                if !tx.send(Note::End {
-                    r#gen,
-                    sess: Box::new(end),
-                    warm,
-                }) {
-                    return;
-                }
-            }
-            loop {
-                if st.load(Ordering::Relaxed) {
-                    return;
-                }
-                match tail.fetch_most(TAIL_SLICE) {
-                    Ok(f) => {
-                        let more = f.more;
-                        if (!f.is_empty() || f.reset)
-                            && !tx.send(Note::Tail {
-                                r#gen,
-                                fresh: Box::new(f),
-                            })
-                        {
+                        Ok(false) => return,
+                        Err(e) => {
+                            failed(e);
                             return;
                         }
-                        if more {
-                            continue; // the send waited for the UI to take the last
-                        }
-                        // Its end shown, the whole of a long one is read
-                        // after, here, and taken in where the end was; it
-                        // is followed from there on (Go's readWhole,
-                        // twopass.go:33).
-                        if tail.partway() {
-                            let mut whole = Tail::new(&path, decode.clone());
-                            whole.stop = Some(st.clone());
-                            let mut sess = Session::new();
-                            if whole.read(&mut sess).is_ok() && !st.load(Ordering::Relaxed) {
-                                let warm = warm(&mut sess, &drawn, spawns.as_ref());
-                                if !tx.send(Note::Whole {
-                                    r#gen,
-                                    sess: Box::new(sess),
-                                    warm,
-                                }) {
-                                    return;
-                                }
-                                tail = whole;
-                                continue; // what was written while it was read
-                            }
+                    }
+                }
+                Resume::Follow => {}
+                Resume::TopUp(mut sess) => match read_on(r.as_mut(), &mut sess, TAIL_SLICE, &st) {
+                    Ok(true) => {
+                        let warm = warm_of(&mut sess);
+                        if !tx.send(Note::Seeded { r#gen, sess, warm }) {
+                            return;
                         }
                     }
+                    Ok(false) => return,
                     Err(e) => {
-                        if !path.exists() {
-                            tx.send(Note::TailFailed {
-                                r#gen,
-                                err: e.to_string(),
-                            });
-                        }
+                        failed(e);
+                        return;
                     }
-                }
-                if !w.wait(Some(&wk), None) {
-                    return;
-                }
-                // Replaced or removed: watch what's there now.
-                w.watch(&[&path]);
+                },
             }
+            // What's added from here on, watched before each read so a
+            // write is never missed (fswait::follow_grows).
+            rush_sys::fswait::follow_grows(r.as_mut(), TAIL_SLICE, &wk, &mut |res| match res {
+                Ok(fresh) => tx.send(Note::Tail {
+                    r#gen,
+                    fresh: Box::new(fresh),
+                }),
+                Err(e) => failed(e),
+            });
         })
         .ok()?;
     Some(TailHandle { stop, wake })
@@ -761,7 +764,12 @@ pub fn spawn_tail_at(
 /// turns drawn, rather than drawing a long conversation's end while you
 /// wait (Go's warmed, rushmode.go:2064). None when the view hasn't drawn
 /// yet. s takes what the list said of it, as the view's will.
-fn warm(s: &mut Session, drawn: &Drawn, spawns: Option<&SpawnsBy>) -> Option<Box<Warm>> {
+fn warm(
+    s: &mut Session,
+    drawn: &Drawn,
+    spawns: Option<&SpawnsBy>,
+    says: bool,
+) -> Option<Box<Warm>> {
     let DrawnAs {
         mut o,
         info,
@@ -772,14 +780,14 @@ fn warm(s: &mut Session, drawn: &Drawn, spawns: Option<&SpawnsBy>) -> Option<Box
         return None;
     }
     o.now = now();
-    s.info = info;
+    s.info = crate::session::info_over(says, std::mem::take(&mut s.info), info);
     // As the view merges them once the whole is in (take_whole_drawn), and
     // ends the turn its stopped agent left open (follow): done after, they
     // would change what was laid out here.
     if !exchanges.is_empty() {
         s.restore_exchanges(&exchanges);
     }
-    if stopped && s.live().is_some() {
+    if stopped && !says && s.live().is_some() {
         s.apply(&rush_core::event::Event::TurnEnd(end_left_open()), o.now);
     }
     let mut r = Renderer::new();
@@ -820,212 +828,6 @@ pub fn end_left_open() -> rush_core::event::TurnEnd {
     }
 }
 
-/// Follows an adapter's history as it grows (its HistoryFollower), a
-/// SLICE at a time, through fswait::follow (watched before each read, so a
-/// write is never missed); one with only a HistoryReader is read once.
-/// Each slice is sent for the UI thread to apply, the next read while it
-/// does.
-pub fn spawn_history(
-    ad: &AdapterRef,
-    s: &adapter::Session,
-    host: &str,
-    r#gen: u64,
-    tx: Sender<Note>,
-) -> Option<TailHandle> {
-    let tx = tx.lane(1);
-    let wake = Arc::new(Stop::new().ok()?);
-    let stop = Arc::new(AtomicBool::new(false));
-    let (ad, s, wk, host) = (ad.clone(), s.clone(), wake.clone(), host.to_string());
-    std::thread::Builder::new()
-        .name("rush-history".into())
-        .spawn(move || {
-            let s = history_session(s, &host);
-            // A long one's end first, read from the end through its
-            // adapter's TailReader, for it to show at once; the whole is
-            // read after, here, and put in its place, and followed from
-            // there (as a transcript's: spawn_tail).
-            if let Some(end) = history_end(&ad, &s) {
-                if !tx.send(Note::End {
-                    r#gen,
-                    sess: Box::new(end),
-                    warm: None,
-                }) {
-                    return;
-                }
-                if let Some(f) = ad.history_follower() {
-                    match f.follow_history(&s) {
-                        Ok(f) => whole_then_follow(f, r#gen, &tx, &wk),
-                        Err(e) => {
-                            tx.send(Note::TailFailed {
-                                r#gen,
-                                err: e.to_string(),
-                            });
-                        }
-                    }
-                } else if let Some(r) = ad.history_reader() {
-                    let mut whole = Session::new();
-                    let res = r.history(&s, 0, SLICE, &mut |evs| {
-                        crate::session::apply_events(&mut whole, &evs, false);
-                        !wk.is_closed()
-                    });
-                    match res {
-                        Ok(()) if !wk.is_closed() => {
-                            tx.send(Note::Whole {
-                                r#gen,
-                                sess: Box::new(whole),
-                                warm: None,
-                            });
-                        }
-                        Ok(()) => {}
-                        Err(e) => {
-                            tx.send(Note::TailFailed {
-                                r#gen,
-                                err: e.to_string(),
-                            });
-                        }
-                    }
-                }
-                return;
-            }
-            let failed = |e: adapter::Error| {
-                tx.send(Note::TailFailed {
-                    r#gen,
-                    err: e.to_string(),
-                })
-            };
-            let sent = |events, reset, more| {
-                tx.send(Note::History {
-                    r#gen,
-                    events,
-                    reset,
-                    more,
-                })
-            };
-            if let Some(f) = ad.history_follower() {
-                let mut f = match f.follow_history(&s) {
-                    Ok(f) => f,
-                    Err(e) => {
-                        failed(e);
-                        return;
-                    }
-                };
-                rush_sys::fswait::follow(f.as_mut(), SLICE, &wk, &mut |r| match r {
-                    Ok(sl) => sent(sl.events, sl.reset, sl.more),
-                    Err(e) => failed(e),
-                });
-            } else if let Some(r) = ad.history_reader() {
-                // Each slice is sent once the next is read, so the last
-                // is known to be the last.
-                let mut held: Option<Vec<Event>> = None;
-                let mut first = true;
-                let res = r.history(&s, 0, SLICE, &mut |evs| {
-                    let ok = match held.replace(evs) {
-                        Some(prev) => {
-                            let ok = sent(prev, first, true);
-                            first = false;
-                            ok
-                        }
-                        None => true,
-                    };
-                    ok && !wk.is_closed()
-                });
-                // Nothing in it: it's read all the same. One cut short by
-                // an error isn't read to its end.
-                sent(held.take().unwrap_or_default(), first, res.is_err());
-                if let Err(e) = res {
-                    failed(e);
-                }
-            }
-        })
-        .ok()?;
-    Some(TailHandle { stop, wake })
-}
-
-/// How much of a history's end is read first, before the whole of a long
-/// one: as much as a transcript's (TAIL_END).
-pub const HISTORY_END: i64 = TAIL_END as i64;
-
-/// A long history's end, read from the end through its adapter's
-/// TailReader, as the conversation so far, marked partial ("reading
-/// earlier…") for the whole to take its place. None when the adapter
-/// can't read just its end, or its end is all of it (read whole then).
-pub fn history_end(ad: &AdapterRef, s: &adapter::Session) -> Option<Session> {
-    let t = ad.tail_reader()?;
-    let (evs, cut) = t.history_tail(s, HISTORY_END).ok()?;
-    if !cut {
-        return None;
-    }
-    let mut sess = Session::new();
-    crate::session::apply_events(&mut sess, &evs, false);
-    sess.partial = true;
-    Some(sess)
-}
-
-/// Reads the whole of a history whose end the view shows, through f from
-/// its start, here; sends it to take the end's place (Note::Whole), then
-/// follows it from there. Stops when wk closes.
-fn whole_then_follow(mut f: Box<dyn adapter::Follow>, r#gen: u64, tx: &Sender<Note>, wk: &Stop) {
-    let failed = |e: adapter::Error| {
-        tx.send(Note::TailFailed {
-            r#gen,
-            err: e.to_string(),
-        })
-    };
-    let mut whole = Session::new();
-    loop {
-        if wk.is_closed() {
-            return;
-        }
-        match f.next(SLICE) {
-            Ok(sl) => {
-                crate::session::apply_events(&mut whole, &sl.events, sl.reset);
-                if !sl.more {
-                    break;
-                }
-            }
-            Err(e) => {
-                failed(e);
-                return;
-            }
-        }
-    }
-    if !tx.send(Note::Whole {
-        r#gen,
-        sess: Box::new(whole),
-        warm: None,
-    }) {
-        return;
-    }
-    rush_sys::fswait::follow(f.as_mut(), SLICE, wk, &mut |r| match r {
-        Ok(sl) => tx.send(Note::History {
-            r#gen,
-            events: sl.events,
-            reset: sl.reset,
-            more: sl.more,
-        }),
-        Err(e) => failed(e),
-    });
-}
-
-/// Follows a history whose end the view has already (read ahead through
-/// history_end, list_extras/predict.rs), with f still at its start: the
-/// whole is read and put in the end's place, then followed.
-pub fn spawn_history_whole(
-    f: Box<dyn adapter::Follow>,
-    r#gen: u64,
-    tx: Sender<Note>,
-) -> Option<TailHandle> {
-    let tx = tx.lane(1);
-    let wake = Arc::new(Stop::new().ok()?);
-    let stop = Arc::new(AtomicBool::new(false));
-    let wk = wake.clone();
-    std::thread::Builder::new()
-        .name("rush-history".into())
-        .spawn(move || whole_then_follow(f, r#gen, &tx, &wk))
-        .ok()?;
-    Some(TailHandle { stop, wake })
-}
-
 /// Session s as its history is read: a stopped rush session's folder is
 /// its host's to say, so a Codex thread known by its id alone is looked
 /// for there (openHistory, history.go:53). Reads the disk.
@@ -1039,77 +841,41 @@ pub fn history_session(mut s: adapter::Session, host: &str) -> adapter::Session 
     s
 }
 
-/// Follows a history from where a read of it ahead of time stopped
-/// (list_extras/predict.rs), as spawn_history follows one from its start.
-/// With the conversation read so far, which the UI doesn't have yet, what
-/// was written since is taken into it here first and it's sent whole
-/// (Note::Seeded); without, the UI has it already.
-pub fn spawn_history_from(
-    mut f: Box<dyn adapter::Follow>,
-    seed: Option<Box<Session>>,
-    r#gen: u64,
-    tx: Sender<Note>,
-) -> Option<TailHandle> {
-    let tx = tx.lane(1);
-    let wake = Arc::new(Stop::new().ok()?);
-    let stop = Arc::new(AtomicBool::new(false));
-    let wk = wake.clone();
-    std::thread::Builder::new()
-        .name("rush-history".into())
-        .spawn(move || {
-            let failed = |e: adapter::Error| {
-                tx.send(Note::TailFailed {
-                    r#gen,
-                    err: e.to_string(),
-                })
-            };
-            if let Some(mut sess) = seed {
-                loop {
-                    if wk.is_closed() {
-                        return;
-                    }
-                    match f.next(SLICE) {
-                        Ok(sl) => {
-                            crate::session::apply_events(&mut sess, &sl.events, sl.reset);
-                            if !sl.more {
-                                // No layout made here: the UI lays out this
-                                // history's end itself.
-                                if !tx.send(Note::Seeded {
-                                    r#gen,
-                                    sess,
-                                    warm: None,
-                                }) {
-                                    return;
-                                }
-                                break;
-                            }
-                        }
-                        Err(e) => {
-                            if !failed(e) {
-                                return;
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-            rush_sys::fswait::follow(f.as_mut(), SLICE, &wk, &mut |r| match r {
-                Ok(sl) => tx.send(Note::History {
-                    r#gen,
-                    events: sl.events,
-                    reset: sl.reset,
-                    more: sl.more,
-                }),
-                Err(e) => failed(e),
-            });
-        })
-        .ok()?;
-    Some(TailHandle { stop, wake })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::Source;
+    use rush_core::adapter::AdapterRef;
+    use rush_core::event::Event;
+
+    /// Opens src on a worker as a view does, its end first.
+    fn open(src: Source, host: &str, tx: Sender<Note>) -> TailHandle {
+        spawn_read(
+            Open::Source(src, host.into()),
+            Resume::Start,
+            1,
+            tx,
+            Drawn::default(),
+            None,
+        )
+        .unwrap()
+    }
+
+    /// Another agent's history, through ad.
+    fn history_of(ad: AdapterRef) -> Source {
+        Source::History {
+            adapter: ad,
+            session: Box::default(),
+        }
+    }
+
+    /// A transcript in the form Claude Code writes.
+    fn transcript_of(p: &Path) -> Source {
+        Source::Transcript {
+            path: p.to_path_buf(),
+            decode: rush_convo::decode(rush_claude::messages),
+        }
+    }
 
     /// The worker makes the whole as the view will once it's in: the turn
     /// a stopped agent left open ended, the past exchanges merged; and
@@ -1119,7 +885,10 @@ mod tests {
         let drawn = Drawn::default();
         let mut s = Session::new();
         s.sent("go".into(), Vec::new(), 1000);
-        assert!(warm(&mut s, &drawn, None).is_none(), "nothing drawn yet");
+        assert!(
+            warm(&mut s, &drawn, None, false).is_none(),
+            "nothing drawn yet"
+        );
         let as_drawn = |stopped| DrawnAs {
             o: Options {
                 width: 80,
@@ -1130,10 +899,10 @@ mod tests {
             stopped,
         };
         *drawn.lock().unwrap() = Some(as_drawn(false));
-        assert!(warm(&mut s, &drawn, None).is_some());
+        assert!(warm(&mut s, &drawn, None, false).is_some());
         assert!(s.live().is_some(), "a running agent's turn stays open");
         *drawn.lock().unwrap() = Some(as_drawn(true));
-        let w = warm(&mut s, &drawn, None).unwrap();
+        let w = warm(&mut s, &drawn, None, false).unwrap();
         assert!(s.live().is_none(), "a stopped agent's turn ended");
         assert!(w.r.kept_rows() > 0);
     }
@@ -1159,8 +928,8 @@ mod tests {
         std::fs::remove_dir_all(&t).unwrap();
     }
 
-    /// Another adapter's history is followed on a worker: what it reads
-    /// arrives as a History note, and the worker stops when dropped.
+    /// Another adapter's history is read on a worker: its first reading
+    /// arrives as the end, and the worker stops when dropped.
     #[test]
     fn history_is_followed() {
         use rush_core::adapter::{
@@ -1211,8 +980,8 @@ mod tests {
         struct Notes(usize);
         impl App<Note> for Notes {
             fn update(&mut self, m: Msg<Note>) -> Step {
-                if let Msg::App(Note::History { events, .. }) = m {
-                    self.0 += events.len();
+                if let Msg::App(Note::End { .. }) = m {
+                    self.0 += 1;
                     return Step::Quit;
                 }
                 Step::Idle
@@ -1220,17 +989,16 @@ mod tests {
             fn draw(&mut self, _: &mut Canvas) {}
         }
         let lp: Loop<Note> = Loop::new();
-        let ad: AdapterRef = Arc::new(Hist);
-        let h = spawn_history(&ad, &adapter::Session::default(), "", 1, lp.sender()).unwrap();
+        let h = open(history_of(Arc::new(Hist)), "", lp.sender());
         let mut app = Notes(0);
         lp.run_with(&mut app, |_| Ok(())).unwrap();
         assert_eq!(app.0, 1);
         drop(h); // its wait ends with the handle
     }
 
-    /// A history read once is sent a slice at a time, the first starting
-    /// it over and the last saying it's the last: the conversation is
-    /// read to its end only then. One cut short by an error never says so.
+    /// A history that can only be read once is read whole, then sent as
+    /// its first reading; one cut short by an error is sent as far as it
+    /// got, and the error told.
     #[test]
     fn history_read_once_says_its_last_slice() {
         use rush_core::adapter::{Adapter, Features, HistoryReader, Kind, Level, Profile};
@@ -1271,31 +1039,30 @@ mod tests {
                 Ok(())
             }
         }
-        struct Notes(Vec<(bool, bool)>);
+        struct Notes(Vec<&'static str>, bool);
         impl App<Note> for Notes {
             fn update(&mut self, m: Msg<Note>) -> Step {
                 match m {
-                    Msg::App(Note::History { reset, more, .. }) => {
-                        self.0.push((reset, more));
-                        if !more {
+                    Msg::App(Note::End { .. }) => {
+                        self.0.push("end");
+                        if !self.1 {
                             return Step::Quit;
                         }
                     }
-                    Msg::App(Note::TailFailed { .. }) => return Step::Quit,
+                    Msg::App(Note::TailFailed { .. }) => {
+                        self.0.push("failed");
+                        return Step::Quit;
+                    }
                     _ => {}
                 }
                 Step::Idle
             }
             fn draw(&mut self, _: &mut Canvas) {}
         }
-        for (fails, want) in [
-            (false, vec![(true, true), (false, true), (false, false)]),
-            (true, vec![(true, true), (false, true), (false, true)]),
-        ] {
+        for (fails, want) in [(false, vec!["end"]), (true, vec!["end", "failed"])] {
             let lp: Loop<Note> = Loop::new();
-            let ad: AdapterRef = Arc::new(Hist(fails));
-            let h = spawn_history(&ad, &adapter::Session::default(), "", 1, lp.sender()).unwrap();
-            let mut app = Notes(Vec::new());
+            let h = open(history_of(Arc::new(Hist(fails))), "", lp.sender());
+            let mut app = Notes(Vec::new(), fails);
             lp.run_with(&mut app, |_| Ok(())).unwrap();
             assert_eq!(app.0, want, "fails={fails}");
             drop(h);
@@ -1362,7 +1129,7 @@ mod tests {
                 _: &adapter::Session,
                 most: i64,
             ) -> adapter::Result<(Vec<Event>, bool)> {
-                assert_eq!(most, HISTORY_END);
+                assert_eq!(most, TAIL_END as i64);
                 Ok((
                     vec![prompt("three"), Event::TurnEnd(end_left_open())],
                     self.0,
@@ -1376,16 +1143,13 @@ mod tests {
                 match m {
                     Msg::App(Note::End { sess, .. }) => {
                         self.0.push(("end", sess.turns.len(), sess.partial));
+                        if !sess.partial {
+                            return Step::Quit;
+                        }
                     }
                     Msg::App(Note::Whole { sess, .. }) => {
                         self.0.push(("whole", sess.turns.len(), sess.partial));
                         return Step::Quit;
-                    }
-                    Msg::App(Note::History { events, more, .. }) => {
-                        self.0.push(("history", events.len(), more));
-                        if !more {
-                            return Step::Quit;
-                        }
                     }
                     Msg::App(Note::TailFailed { .. }) => return Step::Quit,
                     _ => {}
@@ -1396,11 +1160,10 @@ mod tests {
         }
         for (cut, want) in [
             (true, vec![("end", 1, true), ("whole", 3, false)]),
-            (false, vec![("history", 4, true), ("history", 2, false)]),
+            (false, vec![("end", 3, false)]),
         ] {
             let lp: Loop<Note> = Loop::new();
-            let ad: AdapterRef = Arc::new(Long(cut));
-            let h = spawn_history(&ad, &adapter::Session::default(), "", 1, lp.sender()).unwrap();
+            let h = open(history_of(Arc::new(Long(cut))), "", lp.sender());
             let mut app = Notes::default();
             lp.run_with(&mut app, |_| Ok(())).unwrap();
             assert_eq!(app.0, want, "cut={cut}");
@@ -1464,8 +1227,7 @@ mod tests {
         std::fs::write(d.join("config.json"), cfg.to_json_indent()).unwrap();
         for (host, want) in [(id.as_str(), "/profiles/work"), ("", "")] {
             let lp: Loop<Note> = Loop::new();
-            let ad: AdapterRef = Arc::new(Hist);
-            let h = spawn_history(&ad, &adapter::Session::default(), host, 1, lp.sender()).unwrap();
+            let h = open(history_of(Arc::new(Hist)), host, lp.sender());
             let mut app = Said(String::new());
             lp.run_with(&mut app, |_| Ok(())).unwrap();
             assert_eq!(app.0, format!("read in {want:?}"), "host {host:?}");
@@ -1516,8 +1278,7 @@ mod tests {
             fn draw(&mut self, _: &mut Canvas) {}
         }
         let lp: Loop<Note> = Loop::new();
-        let decode = rush_convo::decode(rush_claude::messages);
-        let h = spawn_tail(p.clone(), 1, lp.sender(), decode, Drawn::default(), None).unwrap();
+        let h = open(transcript_of(&p), "", lp.sender());
         let mut app = Notes {
             n: 0,
             path: p.clone(),
@@ -1554,9 +1315,9 @@ mod tests {
         };
         let decode = rush_convo::decode(rush_claude::messages);
         let ahead = || {
-            let mut t = Tail::from_end(&p, TAIL_END, decode.clone());
+            let mut t = rush_convo::reading::Transcript::new(&p, decode.clone());
             let mut s = Session::new();
-            t.fetch_most(TAIL_SLICE).unwrap().apply(&mut s);
+            read_on(&mut t, &mut s, TAIL_SLICE, &AtomicBool::new(false)).unwrap();
             (t, s)
         };
         /// Each note's turns: Seeded's as sent, Tail's applied alone.
@@ -1593,12 +1354,11 @@ mod tests {
         assert_eq!(s.turns.len(), 3);
         append(&p, ask(3) + &ask(4));
         let lp: Loop<Note> = Loop::new();
-        let start = TailStart::From(Box::new(t), Some(Box::new(s)));
-        let h = spawn_tail_at(
-            start,
+        let h = spawn_read(
+            Open::Reading(Box::new(t)),
+            Resume::TopUp(Box::new(s)),
             1,
             lp.sender(),
-            decode.clone(),
             Drawn::default(),
             None,
         )
@@ -1611,11 +1371,11 @@ mod tests {
         std::fs::write(&p, (0..3).map(ask).collect::<String>()).unwrap();
         let (t, _) = ahead();
         let lp: Loop<Note> = Loop::new();
-        let h = spawn_tail_at(
-            TailStart::From(Box::new(t), None),
+        let h = spawn_read(
+            Open::Reading(Box::new(t)),
+            Resume::Follow,
             1,
             lp.sender(),
-            decode,
             Drawn::default(),
             None,
         )
@@ -1628,19 +1388,35 @@ mod tests {
         std::fs::remove_dir_all(&d).unwrap();
     }
 
-    /// A history read ahead goes on from where its follower stopped: what
+    /// A history read ahead goes on from where its reading stopped: what
     /// came since is taken into it and sent whole first, then followed.
     #[test]
     fn a_history_read_ahead_is_topped_up() {
-        use rush_core::adapter::{Follow, Slice, WaitOn};
+        use rush_convo::reading::{Got, Slice};
+        use rush_core::adapter::WaitOn;
         use rush_draw::{App, Canvas, Loop, Msg, Step};
-        struct Slices(Vec<Slice>);
-        impl Follow for Slices {
+        struct Feed(Vec<(bool, bool)>);
+        impl Reading for Feed {
+            fn end(&mut self, _: u64) -> Option<Session> {
+                None
+            }
             fn next(&mut self, _: usize) -> adapter::Result<Slice> {
-                Ok(if self.0.is_empty() {
-                    Slice::default()
+                let (some, more) = if self.0.is_empty() {
+                    (false, false)
                 } else {
                     self.0.remove(0)
+                };
+                let events = if some {
+                    vec![Event::Status(rush_core::event::Status::default())]
+                } else {
+                    Vec::new()
+                };
+                Ok(Slice {
+                    got: Got::Events {
+                        events,
+                        reset: false,
+                    },
+                    more,
                 })
             }
             fn wait_on(&self) -> WaitOn {
@@ -1649,20 +1425,17 @@ mod tests {
                     ..WaitOn::default()
                 }
             }
+            fn says_itself(&self) -> bool {
+                true
+            }
         }
-        let ev = || Event::Status(rush_core::event::Status::default());
-        let slice = |more| Slice {
-            events: vec![ev()],
-            more,
-            ..Slice::default()
-        };
         struct Notes(Vec<&'static str>);
         impl App<Note> for Notes {
             fn update(&mut self, m: Msg<Note>) -> Step {
                 match m {
                     Msg::App(Note::Seeded { .. }) => self.0.push("seeded"),
-                    Msg::App(Note::History { .. }) => {
-                        self.0.push("history");
+                    Msg::App(Note::Tail { .. }) => {
+                        self.0.push("tail");
                         return Step::Quit;
                     }
                     _ => {}
@@ -1673,16 +1446,24 @@ mod tests {
         }
         let lp: Loop<Note> = Loop::new();
         // Two slices written since the read; then one more as it follows.
-        let f = Slices(vec![
-            slice(true),
-            slice(false),
-            Slice::default(),
-            slice(false),
+        let f = Feed(vec![
+            (true, true),
+            (true, false),
+            (false, false),
+            (true, false),
         ]);
-        let h = spawn_history_from(Box::new(f), Some(Box::default()), 1, lp.sender()).unwrap();
+        let h = spawn_read(
+            Open::Reading(Box::new(f)),
+            Resume::TopUp(Box::default()),
+            1,
+            lp.sender(),
+            Drawn::default(),
+            None,
+        )
+        .unwrap();
         let mut app = Notes(Vec::new());
         lp.run_with(&mut app, |_| Ok(())).unwrap();
-        assert_eq!(app.0, vec!["seeded", "history"]);
+        assert_eq!(app.0, vec!["seeded", "tail"]);
         drop(h);
     }
 
@@ -1733,8 +1514,7 @@ mod tests {
             fn draw(&mut self, _: &mut Canvas) {}
         }
         let lp: Loop<Note> = Loop::new();
-        let decode = rush_convo::decode(rush_claude::messages);
-        let h = spawn_tail(p.clone(), 1, lp.sender(), decode, Drawn::default(), None).unwrap();
+        let h = open(transcript_of(&p), "", lp.sender());
         let mut app = Notes {
             tails: 0,
             whole: None,

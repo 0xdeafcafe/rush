@@ -458,90 +458,60 @@ impl Model {
             }
         }
         // Its end read ahead of time, as the list was moved through
-        // (list_extras/predict.rs): shown now if nothing was written
-        // since, else topped up first on the tail's worker.
+        // (list_extras/predict.rs), whatever agent's: shown now if nothing
+        // was written since, else read again (only its end was read) or
+        // topped up first on the worker.
         let ahead = match &v.source {
-            session::Source::Transcript { path, .. } if self.tx.is_some() => {
-                self.ext.calls.predict_take()(self, &a.key, path)
+            session::Source::Transcript { .. } | session::Source::History { .. }
+                if self.tx.is_some() =>
+            {
+                self.ext.calls.predict_take()(self, &a.key)
             }
             _ => None,
         };
-        let start = ahead.map(|h| {
-            if h.fresh {
-                v.seed(*h.sess);
-                rush_draw::perf_note(|| format!("tail end gen={} ahead", self.r#gen));
-                worker::TailStart::From(h.tail, None)
-            } else {
-                worker::TailStart::From(h.tail, Some(h.sess))
-            }
+        let start = ahead.and_then(|h| {
+            let resume = match (h.sess.partial, h.fresh) {
+                (true, false) => return None,
+                (true, true) => worker::Resume::Whole,
+                (false, true) => worker::Resume::Follow,
+                (false, false) => return Some((h.reading, worker::Resume::TopUp(h.sess))),
+            };
+            v.seed(*h.sess);
+            rush_draw::perf_note(|| format!("tail end gen={} ahead", self.r#gen));
+            Some((h.reading, resume))
         });
-        // The same for a history read ahead, followed on from where it
-        // stopped.
-        let hist = match &v.source {
-            session::Source::History { .. } if self.tx.is_some() => {
-                self.ext.calls.predict_take_history()(self, &a.key).and_then(|h| {
-                    if h.sess.partial {
-                        // Only its end was read ahead, its follower still
-                        // at its start: shown now, the whole read after;
-                        // one written to since is read as if never read.
-                        if !h.fresh {
-                            return None;
-                        }
-                        v.seed(*h.sess);
-                        rush_draw::perf_note(|| format!("tail end gen={} ahead", self.r#gen));
-                        return Some(Hist::Whole(h.follow));
-                    }
-                    Some(if h.fresh {
-                        v.seed(*h.sess);
-                        rush_draw::perf_note(|| format!("tail end gen={} ahead", self.r#gen));
-                        Hist::From(h.follow, None)
-                    } else {
-                        Hist::From(h.follow, Some(h.sess))
-                    })
-                })
-            }
-            _ => None,
-        };
         match &self.tx {
             Some(tx) => {
                 v.tail = match &v.source {
-                    session::Source::Transcript { path, decode } => {
-                        let drawn = v.drawn.clone();
-                        let spawns = Some((self.reg.clone(), a.kind.as_str().to_string()));
-                        match start {
-                            Some(s) => worker::spawn_tail_at(
-                                s,
-                                self.r#gen,
-                                tx.clone(),
-                                decode.clone(),
-                                drawn,
-                                spawns,
-                            ),
-                            None => worker::spawn_tail(
-                                path.clone(),
-                                self.r#gen,
-                                tx.clone(),
-                                decode.clone(),
-                                drawn,
-                                spawns,
-                            ),
-                        }
-                    }
-                    session::Source::History { adapter, session } => match hist {
-                        Some(Hist::From(f, seed)) => {
-                            worker::spawn_history_from(f, seed, self.r#gen, tx.clone())
-                        }
-                        Some(Hist::Whole(f)) => {
-                            worker::spawn_history_whole(f, self.r#gen, tx.clone())
-                        }
-                        None => {
-                            // A stopped rush session's folder is its host's
-                            // to say, when the list doesn't (history.go:53).
-                            let host = if a.rush { a.job.id.as_str() } else { "" };
-                            worker::spawn_history(adapter, session, host, self.r#gen, tx.clone())
-                        }
-                    },
                     session::Source::Hosted | session::Source::Room => None,
+                    src => {
+                        let (open, resume) = match start {
+                            Some((r, resume)) => (worker::Open::Reading(r), resume),
+                            None => {
+                                // A stopped rush session's folder is its
+                                // host's to say, when the list doesn't
+                                // (history.go:53).
+                                let host = if a.rush {
+                                    a.job.id.clone()
+                                } else {
+                                    String::new()
+                                };
+                                (
+                                    worker::Open::Source(src.clone(), host),
+                                    worker::Resume::Start,
+                                )
+                            }
+                        };
+                        let spawns = Some((self.reg.clone(), a.kind.as_str().to_string()));
+                        worker::spawn_read(
+                            open,
+                            resume,
+                            self.r#gen,
+                            tx.clone(),
+                            v.drawn.clone(),
+                            spawns,
+                        )
+                    }
                 };
             }
             None => {
@@ -1635,19 +1605,6 @@ fn local_tm(ms: Ms) -> Option<libc::tm> {
     }
 }
 
-/// How a history read ahead is gone on with as its view opens.
-enum Hist {
-    /// Followed from where the read stopped, topped up first with what
-    /// was written since when the conversation read so far comes along.
-    From(
-        Box<dyn rush_core::adapter::Follow>,
-        Option<Box<rush_convo::Session>>,
-    ),
-    /// Only its end was read: the whole is read through the follower, from
-    /// its start, then followed.
-    Whole(Box<dyn rush_core::adapter::Follow>),
-}
-
 impl Model {
     /// A conversation's end as the worker that read it first made it
     /// (Note::End; Note::Seeded when read ahead), with what it worked out
@@ -1717,30 +1674,6 @@ impl Model {
                 _ => Step::Idle,
             },
             Note::Seeded { r#gen, sess, warm } => self.take_end(r#gen, *sess, warm, true),
-            Note::History {
-                r#gen,
-                events,
-                reset,
-                more,
-            } => match self.view_of(r#gen) {
-                Some(v) => {
-                    let first = !v.read;
-                    v.take_events(events, reset);
-                    v.caught_up = !more;
-                    let ended = !more && !std::mem::replace(&mut v.ended, true);
-                    if ended {
-                        rush_draw::perf_note(|| format!("tail end gen={}", r#gen));
-                    }
-                    if first || ended {
-                        // As a transcript's: its placeholder goes, and its
-                        // first reading shows once all in, at once.
-                        self.hold.answer();
-                    }
-                    self.follow_tail();
-                    Step::Draw
-                }
-                _ => Step::Idle,
-            },
             Note::Whole { r#gen, sess, warm } => match self.view_of(r#gen) {
                 Some(v) if v.sess.partial => {
                     let (r, changes, spawns) = match warm {

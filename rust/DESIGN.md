@@ -519,24 +519,30 @@ on every frame. Go retains about 22 MiB for the same.
    and a sign-in sent to the terminal. With no loop (tests) a program
    waits for `Model::run_outside`.
 3. **Workers**: discovery (sessions/jobs files, process liveness), spend
-   scanning (incremental from the last offset), previews, the open
-   transcript's tail (its last 2 MB first; a longer one is then read
-   whole on the same worker and takes the end's place, its turns'
-   refs renumbered so nothing on screen moves: Go's twopass.go; that
-   worker also lays out the whole's last 400 rows as the view last drew
-   and works out its edits, so the frame that swaps it in draws little:
-   Go's warmed, rushmode.go:2064). Another agent's history (Codex,
-   Antigravity, Kimi, Vibe: any adapter with a `TailReader`) opens the
-   same way, Rust-only: `worker::history_end` reads its last 2 MB through
-   the adapter, the view shows it ("reading earlier…" above), then the
-   whole is read through its follower and takes its place, and is
-   followed from there; read ahead (predict.rs), only the end is read
-   and kept. Every tail lands on a line's start found from the file's end
-   backwards (`rush_core::tailread`: whole lines only, a last line still
-   being written left out, the last line kept however long). A
-   50 MB Codex rollout (ctrl+k, enter): its end on screen 287-626 ms
-   after enter -> already there (its end read ahead in ~40 ms), memory
-   with it open 133-138 MB -> 77-81 MB, read ahead 85-115 MB -> 35-53
+   scanning (incremental from the last offset), previews, and the open
+   conversation (`worker::spawn_read`, one flow for every agent, Rust-only
+   in sharing it: Go's twopass.go and warmed, rushmode.go:2064). It reads
+   through `rush_convo::reading::Reading`: its last 2 MB first (`end`),
+   shown at once with "reading earlier…" above it; then the whole from its
+   start on the same worker, taking the end's place with its turns' refs
+   renumbered so nothing on screen moves, its last 400 rows laid out as
+   the view last drew and its edits worked out, so the frame that swaps
+   it in draws little; then what's added as it grows
+   (`fswait::follow_grows`). A transcript in the form Claude Code writes
+   (`reading::Transcript`, every adapter whose `claude_transcripts` says
+   so) and another agent's history as its adapter reads it back
+   (`reading::History`: its `TailReader` for the end, its follower or
+   reader for the whole) are the two forms read; an adapter that can't
+   read its end alone (Gemini, whose log rewinds; Copilot's remote log)
+   has its whole read first, off the UI thread, the same way. The
+   read-ahead (predict.rs) reads the same end and keeps only it. Every
+   end lands on a line's start found from the file's end backwards
+   (`rush_core::tailread`: whole lines only, a last line still being
+   written left out, the last line kept however long); every adapter's
+   `TailReader` is held to its own whole by `adapter::conform`. A 50 MB
+   Codex rollout (ctrl+k, enter): its end on screen 287-626 ms after
+   enter -> already there (its end read ahead in ~40 ms), memory with it
+   open 133-138 MB -> 77-81 MB, read ahead 85-115 MB -> 35-53
    MB. Each
    watches files with `rush_sys::fswait::Watcher`
    (kqueue on macOS; the one file watcher in rush: `watch` before reading,

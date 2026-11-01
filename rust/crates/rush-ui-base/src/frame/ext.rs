@@ -10,7 +10,7 @@
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
-use std::path::Path;
+
 use std::sync::Arc;
 
 use rush_core::agent::Agent;
@@ -20,7 +20,7 @@ use super::places::{Place, PlaceId};
 use super::{Mouse, Out, Press};
 use crate::changes::{FileChange, Ver};
 use crate::model::Model;
-use crate::predict::{HistHit, Hit};
+use crate::predict::Hit;
 use crate::sess::ConnCore;
 use crate::session::SessionView;
 
@@ -448,11 +448,9 @@ calls! {
     /// esc while peeking goes back to the Session left; false with no
     /// peek (peek.rs back).
     peek_back("list_extras"): fn(&mut Model) -> bool,
-    /// An agent's transcript's end, read ahead (list_extras/predict.rs
-    /// take).
-    predict_take("list_extras"): fn(&mut Model, &str, &Path) -> Option<Hit>,
-    /// An agent's history, read ahead (predict.rs take_history).
-    predict_take_history("list_extras"): fn(&mut Model, &str) -> Option<HistHit>,
+    /// An agent's conversation's end, read ahead (list_extras/predict.rs
+    /// take), whatever agent's.
+    predict_take("list_extras"): fn(&mut Model, &str) -> Option<Hit>,
     /// The Session kept as the list moved off it (predict.rs Predict's
     /// left).
     predict_left("list_extras"): fn(&mut Kept) -> Option<&mut SessionView>,

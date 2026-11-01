@@ -271,6 +271,81 @@ pub(crate) fn read(
     Ok(())
 }
 
+/// TailReader::history_tail: the end of the branch the session is on now,
+/// found from the file's end backwards (rush_core::tailread): from its
+/// newest entry back along parent links, through the whole lines of its
+/// last most bytes only; the bool is whether that left some of it out.
+/// The header (its id and folder) is read from the file's first line. A
+/// run whose start is left out counts its time and cost from what's read.
+pub(crate) fn tail(path: &str, most: i64) -> adapter::Result<(Vec<Event>, bool)> {
+    let mut f = File::open(path)?;
+    let size = f.metadata()?.len();
+    let most = most.max(1) as u64;
+    if size <= most {
+        let mut out = Vec::new();
+        read(path, 0, adapter::SLICE, &mut |evs| {
+            out.extend(evs);
+            true
+        })?;
+        return Ok((out, false));
+    }
+    let mut back = rush_core::tailread::BackLines::new(&mut f, size)?;
+    let end = back.whole_end();
+    // The entry wanted next: the newest at first (None), then each one's
+    // parent, which pi always writes before it.
+    let mut want: Option<String> = None;
+    let mut rev: Vec<Entry> = Vec::new();
+    let mut root = false;
+    while let Some((at, line)) = back.next_line()? {
+        let Ok(e) = serde_json::from_slice::<Entry>(line.trim_ascii()) else {
+            continue;
+        };
+        if e.typ == "session" {
+            root = true;
+            break;
+        }
+        let wanted = match &want {
+            None => true,
+            Some(id) => *id == e.id,
+        };
+        if wanted {
+            root = e.parent_id.is_empty();
+            want = Some(e.parent_id.clone());
+            rev.push(e);
+            if root {
+                break;
+            }
+        }
+        if end - at >= most && !rev.is_empty() {
+            break;
+        }
+    }
+    rev.reverse();
+    // The header: the session's id and folder.
+    let mut init = Init::default();
+    let mut head = Vec::new();
+    BufReader::new(File::open(path)?)
+        .take(1 << 20)
+        .read_until(b'\n', &mut head)?;
+    if let Ok(h) = serde_json::from_slice::<Entry>(head.trim_ascii())
+        && h.typ == "session"
+    {
+        (init.session_id, init.cwd) = (h.id, h.cwd);
+    }
+    if let Some(e) = rev
+        .iter()
+        .find(|e| e.typ == "model_change" && !e.model_id.is_empty())
+    {
+        init.model = e.model_id.clone();
+    }
+    let mut out = vec![Event::Init(Box::new(init))];
+    let mut run = Run::default();
+    for e in &rev {
+        run.entry(e, &mut out);
+    }
+    Ok((out, !root))
+}
+
 /// HistoryFollower::follow_history: the session at path, from its start,
 /// then what's added as it grows.
 pub(crate) fn follow(path: String) -> Box<dyn Follow> {

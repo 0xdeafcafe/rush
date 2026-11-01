@@ -12,6 +12,7 @@ pub mod handles;
 pub mod linkinfo;
 pub mod model;
 pub mod pictures;
+pub mod reading;
 pub mod render;
 pub mod runname;
 pub mod search;

@@ -32,7 +32,8 @@ use rush_core::adapter::{
     self, ContextWindower, Describer, Discoverer, FastPricer, Feature, Features, HistoryFollower,
     HistoryReader, Homer, JobKeeper, Keyed, Kind, Level, LoginHinter, Made, Native, Previewer,
     Pricer, Profile, Programmer, ProjectFolderer, RunFollower, Session, Speaker, SpendReader,
-    SpendScanner, SpendTarget, SubagentStats, Support, TranscriptLocator, Transcripts, Worded,
+    SpendScanner, SpendTarget, SubagentStats, Support, TailReader, TranscriptLocator, Transcripts,
+    Worded,
 };
 use rush_core::agent::{Preview, Spend, TokenUsage};
 use rush_core::time::{Ms, now};
@@ -224,6 +225,7 @@ impl adapter::Adapter for Claude {
         native: Native,
         history_reader: HistoryReader,
         history_follower: HistoryFollower,
+        tail_reader: TailReader,
         programmer: Programmer,
         project_folderer: ProjectFolderer,
         login_hinter: LoginHinter,
@@ -581,6 +583,17 @@ impl HistoryReader for Claude {
         each: &mut dyn FnMut(Vec<rush_core::event::Event>) -> bool,
     ) -> adapter::Result<()> {
         history::read(s, before, most, each)
+    }
+}
+
+impl TailReader for Claude {
+    /// Its transcript's end, read from the end backwards.
+    fn history_tail(
+        &self,
+        s: &Session,
+        most: i64,
+    ) -> adapter::Result<(Vec<rush_core::event::Event>, bool)> {
+        history::tail(s, most)
     }
 }
 
