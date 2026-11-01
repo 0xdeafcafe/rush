@@ -402,12 +402,33 @@ impl Model {
                 );
             }
         }
+        // Its end read ahead of time, as the list was moved through
+        // (list_extras/predict.rs): shown now if nothing was written
+        // since, else topped up first on the tail's worker.
+        let ahead = match &v.source {
+            session::Source::Transcript { path, .. } if self.tx.is_some() => {
+                crate::screens::list_extras::predict::take(self, &a.key, path)
+            }
+            _ => None,
+        };
+        let start = ahead.map(|h| {
+            if h.fresh {
+                v.seed(*h.sess);
+                rush_draw::perf_note(|| format!("tail end gen={} ahead", self.r#gen));
+                worker::TailStart::From(h.tail, None)
+            } else {
+                worker::TailStart::From(h.tail, Some(h.sess))
+            }
+        });
         match &self.tx {
             Some(tx) => {
                 v.tail = match &v.source {
-                    session::Source::Transcript { path, decode } => {
-                        worker::spawn_tail(path.clone(), self.r#gen, tx.clone(), decode.clone())
-                    }
+                    session::Source::Transcript { path, decode } => match start {
+                        Some(s) => worker::spawn_tail_at(s, self.r#gen, tx.clone(), decode.clone()),
+                        None => {
+                            worker::spawn_tail(path.clone(), self.r#gen, tx.clone(), decode.clone())
+                        }
+                    },
                     session::Source::History { adapter, session } => {
                         // A stopped rush session's folder is its host's
                         // to say, when the list doesn't (history.go:53).
@@ -619,6 +640,7 @@ impl Model {
     fn step(&mut self, d: isize) {
         self.move_sel(d);
         self.ask_preview();
+        crate::screens::list_extras::predict::moved(self, d);
     }
 
     fn session_rows(&self) -> usize {
@@ -1485,6 +1507,16 @@ impl Model {
                         // quarter second after its first slice.
                         self.hold.answer();
                     }
+                    self.follow_tail();
+                    Step::Draw
+                }
+                _ => Step::Idle,
+            },
+            Note::Seeded { r#gen, sess } => match self.view_of(r#gen) {
+                Some(v) if !v.read => {
+                    v.seed(*sess);
+                    rush_draw::perf_note(|| format!("tail end gen={} ahead", r#gen));
+                    self.hold.answer(); // "reading the conversation…" goes now
                     self.follow_tail();
                     Step::Draw
                 }

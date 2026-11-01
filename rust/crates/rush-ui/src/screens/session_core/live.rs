@@ -129,11 +129,17 @@ pub fn sync(m: &mut Model) {
 /// what's there shows at once rather than "connecting…" while a busy
 /// host answers and what came before its replay is read. Only taken
 /// while the view has nothing and the host isn't reached yet; the host's
-/// own conversation replaces it once its replay is in (take).
+/// own conversation replaces it once its replay is in (take). One read
+/// ahead as the list moved (list_extras/predict.rs) is taken at once.
 fn early(m: &mut Model, key: &str, a: &rush_core::agent::Agent) {
     // With no loop (tests, --render) the dial is done at once: nothing to
     // wait on.
     if m.sender().is_none() || view_of(m, key).is_none_or(|v| !v.sess.turns.is_empty()) {
+        return;
+    }
+    if let Some(s) = crate::screens::list_extras::predict::take_early(m, key, a.pid) {
+        rush_draw::perf_note(|| format!("live early turns={} ahead", s.turns.len()));
+        let _ = took_early(m, key, Some(s));
         return;
     }
     let reg = m.reg.clone();
@@ -141,64 +147,86 @@ fn early(m: &mut Model, key: &str, a: &rush_core::agent::Agent) {
     let key = key.to_string();
     m.later(
         move || {
-            let now = rush_core::time::now();
-            let mut p = read_pre(&reg, &a, now);
-            if p.path.is_empty() || p.decode.is_none() || p.other.is_some() {
-                // Not resumed: what the transcript holds is all the replay's.
-                let id = &a.job.id;
-                let info = rush_host::read_info(id).ok();
-                let mut cfg = rush_host::read_config(id).ok().unwrap_or_default();
-                cfg.resume = true;
-                let path = if a.job.transcript_path.is_empty() {
-                    a.history.clone()
-                } else {
-                    a.job.transcript_path.clone()
-                };
-                p = pre_for(&reg, info.as_ref(), Some(&cfg), path, a.acct.clone(), now);
-            }
-            if p.path.is_empty() || p.decode.is_none() || p.other.is_some() {
-                return None;
-            }
-            // Its end up to now, not just what came before the replay.
-            p.before = now + 60_000;
-            p.at = None;
-            let s = p.tail();
-            rush_draw::perf_note(|| format!("live early turns={}", s.turns.len()));
-            (!s.turns.is_empty()).then_some(s)
+            let s = read_early(&reg, &a, rush_core::time::now()).map(|(s, ..)| s);
+            rush_draw::perf_note(|| {
+                format!(
+                    "live early turns={}",
+                    s.as_ref().map_or(0, |s| s.turns.len())
+                )
+            });
+            s
         },
-        move |m, s: Option<Session>| {
-            let Some(s) = s else { return Out::Idle };
-            let linked = conn(m, &key).link.is_some();
-            let Some(v) = view_of(m, &key) else {
-                return Out::Idle;
-            };
-            if !matches!(v.source, crate::session::Source::Hosted) {
-                return Out::Idle;
-            }
-            if linked {
-                // Reached first, but nothing from it yet: its conversation
-                // goes behind the end until its replay is in.
-                if v.read {
-                    return Out::Idle;
-                }
-                let behind = std::mem::replace(&mut v.sess, s);
-                v.read = true;
-                v.pos = Pos::End;
-                let c = conn(m, &key);
-                c.shadow = Some(behind);
-                c.shadow_until = Some(std::time::Instant::now() + REPLAY_MOST);
-                return Out::Draw;
-            }
-            if !v.sess.turns.is_empty() {
-                return Out::Idle;
-            }
-            v.sess = s;
-            v.read = true;
-            v.pos = Pos::End;
-            conn(m, &key).early = true;
-            Out::Draw
-        },
+        move |m, s: Option<Session>| took_early(m, &key, s),
     );
+}
+
+/// Live session a's transcript end up to now, as `early` shows it, the
+/// transcript it was read from and that file as it was just before; None
+/// with nothing to show. Reads the disk.
+pub(crate) fn read_early(
+    reg: &Registry,
+    a: &rush_core::agent::Agent,
+    now: Ms,
+) -> Option<(Session, String, Option<std::fs::Metadata>)> {
+    let mut p = read_pre(reg, a, now);
+    if p.path.is_empty() || p.decode.is_none() || p.other.is_some() {
+        // Not resumed: what the transcript holds is all the replay's.
+        let id = &a.job.id;
+        let info = rush_host::read_info(id).ok();
+        let mut cfg = rush_host::read_config(id).ok().unwrap_or_default();
+        cfg.resume = true;
+        let path = if a.job.transcript_path.is_empty() {
+            a.history.clone()
+        } else {
+            a.job.transcript_path.clone()
+        };
+        p = pre_for(reg, info.as_ref(), Some(&cfg), path, a.acct.clone(), now);
+    }
+    if p.path.is_empty() || p.decode.is_none() || p.other.is_some() {
+        return None;
+    }
+    // Its end up to now, not just what came before the replay.
+    p.before = now + 60_000;
+    p.at = None;
+    let was = std::fs::metadata(&p.path).ok();
+    let s = p.tail();
+    (!s.turns.is_empty()).then_some((s, p.path, was))
+}
+
+/// A live session's transcript end read (early): shown while its host
+/// hasn't said anything yet.
+fn took_early(m: &mut Model, key: &str, s: Option<Session>) -> Out {
+    let Some(s) = s else { return Out::Idle };
+    let linked = conn(m, key).link.is_some();
+    let Some(v) = view_of(m, key) else {
+        return Out::Idle;
+    };
+    if !matches!(v.source, crate::session::Source::Hosted) {
+        return Out::Idle;
+    }
+    if linked {
+        // Reached first, but nothing from it yet: its conversation
+        // goes behind the end until its replay is in.
+        if v.read {
+            return Out::Idle;
+        }
+        let behind = std::mem::replace(&mut v.sess, s);
+        v.read = true;
+        v.pos = Pos::End;
+        let c = conn(m, key);
+        c.shadow = Some(behind);
+        c.shadow_until = Some(std::time::Instant::now() + REPLAY_MOST);
+        return Out::Draw;
+    }
+    if !v.sess.turns.is_empty() {
+        return Out::Idle;
+    }
+    v.sess = s;
+    v.read = true;
+    v.pos = Pos::End;
+    conn(m, key).early = true;
+    m.answered(); // "connecting to …" goes now
+    Out::Draw
 }
 
 /// A stopped rush session shown: its host's info as it was left, read

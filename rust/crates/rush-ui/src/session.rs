@@ -285,6 +285,16 @@ impl SessionView {
         ended
     }
 
+    /// Takes its end read ahead of time (list_extras/predict.rs), as the
+    /// worker's slices of it would have been taken.
+    pub fn seed(&mut self, sess: Session) {
+        self.sess = sess;
+        self.read = true;
+        self.caught_up = true;
+        self.ended = true;
+        self.restore_exchanges(Vec::new());
+    }
+
     /// Puts the whole conversation where its end was. Refs name turns by
     /// number, and the end numbered its own from 1: what was opened,
     /// picked or scrolled to moves to the same turn, so nothing on screen
