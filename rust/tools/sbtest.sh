@@ -17,7 +17,8 @@ daemon_real=$daemon
 [ -n "$real" ] && [ "$real" != "$HOME/.claude" ] && daemon_real=/private/tmp/cc-daemon-$(id -u)/$(hash8 "$real")
 cmd=$1; shift
 case $cmd in cargo) cmd=/opt/homebrew/bin/cargo ;; esac
-exec env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+exec env -i HOME="$HOME" PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin \
+  CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}" \
   CARGO_HOME="$HOME/.cargo" RUSTUP_HOME="$HOME/.rustup" \
   RUSTC=/opt/homebrew/bin/rustc RUSTDOC=/opt/homebrew/bin/rustdoc \
   CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$scratch/t-sbtest}" \
