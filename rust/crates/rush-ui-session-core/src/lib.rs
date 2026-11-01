@@ -43,6 +43,7 @@ pub mod minimap;
 pub mod moveto;
 pub mod overview;
 pub mod panelsubs;
+pub mod presets;
 pub use rush_ui_base::paint;
 pub mod queue;
 pub mod relay;
@@ -108,6 +109,9 @@ pub fn register(x: &mut Ext) {
     // Prompt's own (keys.go:279 carryKey).
     x.list_keys.insert(0, actions::carry_key);
     x.session_keys.push(keys::esc_twice);
+    // The conversation's views: the key through them, and enter on a
+    // catch-up card or a trail's step, before a picked row's own keys.
+    x.session_keys.push(presets::key);
     x.session_keys.push(textsel::key);
     x.session_keys.push(changes::full_key);
     x.session_keys.push(subview::key_first);

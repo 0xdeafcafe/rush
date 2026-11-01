@@ -51,6 +51,9 @@ pub struct Config {
     /// How see-through a stacked row's second line is: "50%", or the
     /// older "dim" and "faint" (state.go SubLine).
     pub sub_line: String,
+    /// How the Session's conversation is shown, one for every session
+    /// (convoView): "" is Normal.
+    pub convo_view: String,
 }
 
 /// rush's folder: RUSH_HOME, else ~/.config/rush, or ~/.config/agtop while

@@ -522,6 +522,14 @@ pub struct Config {
         skip_serializing_if = "is_false"
     )]
     pub advisor: bool,
+    /// How the Session's conversation is shown, for every session until
+    /// it's changed: "" or "normal", "chat", "code", "catch-up", "trail".
+    #[serde(
+        rename = "convoView",
+        deserialize_with = "lenient",
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub convo_view: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -1242,6 +1250,23 @@ fn key_in_own(id: &str, k: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The conversation's view is kept as convoView, and left out while it's
+    // Normal (""), so a config that never changed it reads as before.
+    #[test]
+    fn the_conversation_view_is_kept() {
+        let j = serde_json::to_string(&Config::default()).unwrap();
+        assert!(!j.contains("convoView"), "{j}");
+        let c = Config {
+            convo_view: "catch-up".into(),
+            ..Config::default()
+        };
+        let b = crate::json::to_vec(&c).unwrap();
+        let s = String::from_utf8(b.clone()).unwrap();
+        assert!(s.contains(r#""convoView":"catch-up""#), "{s}");
+        let back: Config = crate::json::from_slice(&b).unwrap();
+        assert_eq!(back.convo_view, "catch-up");
+    }
 
     #[test]
     fn the_guard_is_off_until_set() {

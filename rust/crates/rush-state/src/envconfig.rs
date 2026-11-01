@@ -106,6 +106,7 @@ static FIELDS: &[Field] = fields![
     "menuBarAsked" => Bool: menu_bar_asked,
     "onboarding.hidden" => Bool: onboarding.hidden,
     "advisor" => Bool: advisor,
+    "convoView" => Str: convo_view,
 ];
 
 /// One setting the environment set.

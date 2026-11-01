@@ -749,6 +749,29 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
         );
     }
     let view = super::views::view_name(m, key);
+    // The conversation's view: a card or a step opens in Normal, and the
+    // key to the next view is said while one other than Normal shows.
+    let preset = super::presets::current(m);
+    let preset_key = super::presets::key_hint(m);
+    let next_view = format!("view: {}", preset.next().title().to_lowercase());
+    let other_view = view == "conversation" && preset != rush_convo::Preset::Normal;
+    if other_view
+        && matches!(
+            preset,
+            rush_convo::Preset::CatchUp | rush_convo::Preset::Trail
+        )
+        && super::presets::turn_or_step(picked)
+    {
+        return fit_keys(
+            w,
+            &[
+                ("enter", "open in Normal"),
+                ("↑↓", "pick"),
+                (preset_key.as_str(), next_view.as_str()),
+                ("esc", "back to message"),
+            ],
+        );
+    }
     if !picked.is_empty() {
         // The picked row's keys (paneDock's hint, rushmode.go:3792-3830).
         let turn = picked.split(':').next().is_some_and(|t| {
@@ -962,16 +985,19 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     }
     // Alone in a hosted view: the list is ctrl+6 away, and esc only
     // leaves the box (rushmode.go:3766).
-    let back: &[(&str, &str)] = if (m.ext.calls.hosted_alone())(m) {
-        &[
+    let mut back: Vec<(&str, &str)> = if (m.ext.calls.hosted_alone())(m) {
+        vec![
             ("f1", "more"),
             ("ctrl+6", "Agents"),
             ("esc", "leave the box"),
         ]
     } else {
-        &[("f1", "more"), ("esc", "back")]
+        vec![("f1", "more"), ("esc", "back")]
     };
-    few_keys(w, 3, &pairs, back)
+    if other_view {
+        back.insert(0, (preset_key.as_str(), next_view.as_str()));
+    }
+    few_keys(w, 3, &pairs, &back)
 }
 
 /// The conversation's rows on screen as last drawn.

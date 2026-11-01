@@ -126,6 +126,7 @@ const DEFAULTS: &[Row] = &[
     ("session.depth.2", S, "depth m2: as usual", &["ctrl+] 2"], true),
     ("session.depth.3", S, "depth m3: everything open", &["ctrl+] 3"], true),
     ("session.verbose", S, "more or less detail", &["ctrl+o"], false),
+    ("session.preset", S, "the conversation's view: normal, chat, code, catch-up, trail", &["ctrl+] g", "alt+s"], false),
     ("session.stop", S, "stop it; again puts it away in Earlier", &["ctrl+x"], false),
     ("session.close", S, "hide, stop, restart, switch or delete it", &["ctrl+] x"], true),
     ("session.carry", S, "move what's typed to another session: pick it in the list, enter puts it in its box, esc brings it back", &["ctrl+] up"], true),

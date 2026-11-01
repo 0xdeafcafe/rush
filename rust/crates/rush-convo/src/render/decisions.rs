@@ -70,6 +70,20 @@ fn answered(s: &Session, ti: usize, ds: &[Decision]) -> bool {
     false
 }
 
+/// How many decisions turn ti's answer asks that no message of yours
+/// after it has answered yet: what a catch-up card says is still open.
+pub(crate) fn open_decisions(s: &Session, ti: usize) -> usize {
+    let Some(t) = s.turns.get(ti) else {
+        return 0;
+    };
+    let ds = decisions_of(t);
+    if ds.is_empty() || answered(s, ti, &ds) {
+        0
+    } else {
+        ds.len()
+    }
+}
+
 impl Drawer<'_> {
     /// An answer, its decisions block drawn as a list (decisions.go:94).
     pub(crate) fn answer_item(&mut self, text: &str) {

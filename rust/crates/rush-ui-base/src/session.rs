@@ -713,6 +713,29 @@ impl SessionView {
         self.o.open.insert(self.sel.clone(), v);
     }
 
+    /// Scrolls row r (a turn's or a step's ref) into view, a third of the
+    /// way down, rows tall: what's there after the conversation is drawn
+    /// another way. A ref not drawn leaves its turn at the top; one of no
+    /// turn leaves the view where it is. Whether r is drawn.
+    pub fn reveal(&mut self, r: &str, rows: usize) -> bool {
+        let turn = r.split(':').next().unwrap_or("");
+        let Some(n) = turn.strip_prefix('t').and_then(|n| n.parse::<u32>().ok()) else {
+            return false;
+        };
+        if turn_index(&self.sess, n).is_none() {
+            return false;
+        }
+        self.pos = Pos::At { n, off: 0 };
+        let (_, base) = self.layout(rows);
+        let at = self.r.rows().iter().position(|l| l.r#ref == r);
+        if let Some(j) = at {
+            let total = self.total();
+            let row = base + j;
+            self.set_start(row.saturating_sub(rows / 3), total, rows);
+        }
+        at.is_some()
+    }
+
     /// The ref on screen row y, if any.
     pub fn ref_at(&self, y: usize) -> Option<&str> {
         let i = y.checked_sub(self.top)?;

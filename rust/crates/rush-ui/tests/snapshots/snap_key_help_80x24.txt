@@ -2,7 +2,7 @@
     ▄▄▄▄      ✻ default · /src/checkout
    ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    < > places
   ╭─ ⌨ Keys ────────────────────────────────────────────────────────── f1 ─╮
-  │ ❯ ▏find a key by its keys or what it does                     132 keys │
+  │ ❯ ▏find a key by its keys or what it does                     133 keys │
 ──│ ────────────────────────────────────────────────────────────────────── │────
   │ Here · Agents and the Prompt ────────────────────────────────────────  │IME
 ┃ │ ▍ ↑                  the agent above                                   │

@@ -49,6 +49,8 @@ use crate::transcript::pr_news_parts;
 use rush_core::event::{Exchange, Peer};
 use rush_core::tool::{Call, Kind, Output};
 
+pub(crate) mod presets;
+
 fn re(s: &str) -> Regex {
     Regex::new(s).expect("a valid pattern")
 }
@@ -95,6 +97,12 @@ pub(crate) struct Drawer<'a> {
     /// unit memo, and what they all read besides their own items.
     pub(crate) units: Option<&'a mut super::units::Units>,
     pub(crate) ctx: Option<u64>,
+    /// The turn's index in the session, for another view (presets.rs).
+    pub(crate) ti: usize,
+    /// Steps show open unless folded by hand: code's edits.
+    pub(crate) force_open: bool,
+    /// The start hooks stay out: another view's turn.
+    pub(crate) no_hooks: bool,
 }
 
 impl<'a> Drawer<'a> {
@@ -139,6 +147,9 @@ impl<'a> Drawer<'a> {
             infos: Default::default(),
             units: None,
             ctx: None,
+            ti: 0,
+            force_open: false,
+            no_hooks: false,
         }
     }
 
@@ -597,7 +608,7 @@ impl<'a> Drawer<'a> {
 
     /// What start hooks said, at the top of the first turn (hooks.go:58).
     fn hooks(&mut self) {
-        if !self.first {
+        if !self.first || self.no_hooks {
             return;
         }
         for (i, h) in self.s.hooks.iter().enumerate() {
@@ -1809,7 +1820,9 @@ impl<'a> Drawer<'a> {
         if let Some(v) = self.o.open.get(r) {
             return *v;
         }
-        self.o.verbose || Some(id) == self.latest && self.step_cards(id).is_empty()
+        self.force_open
+            || self.o.verbose
+            || Some(id) == self.latest && self.step_cards(id).is_empty()
     }
 
     fn status_mark(&self, st: &Step) -> Txt {
