@@ -452,6 +452,13 @@ pub struct Info {
     pub permission_modes: Vec<PermissionMode>,
     #[serde(rename = "costUsd", skip_serializing_if = "zero", with = "float")]
     pub cost_usd: f64,
+    /// Each conversation's running total as its agent last said it, by
+    /// session id: a resumed agent carries its conversation's total on,
+    /// so a turn costs the rise since then, however often the agent or
+    /// this host started again (see turn_cost). Rust-only: Go kept the
+    /// total for one process only (internal/host/agent.go:52 and :572).
+    #[serde(rename = "spentUsd", skip_serializing_if = "BTreeMap::is_empty")]
+    pub spent_usd: BTreeMap<String, f64>,
     /// plan, overage or metered; empty until the agent says.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub billing: String,

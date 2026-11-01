@@ -83,6 +83,93 @@ fn turn_cost_takes_the_rise_in_a_running_total() {
     );
 }
 
+#[test]
+fn turn_cost_ignores_no_total() {
+    let mut spent = 2.0;
+    assert_eq!(turn_cost(&mut spent, 0.0), 0.0);
+    assert_eq!(spent, 2.0, "a turn with no total forgot the last");
+    assert_eq!(turn_cost(&mut spent, 2.5), 0.5);
+}
+
+/// The host's cost after a turn whose agent's running total is total.
+fn cost_after(h: &Host, total: f64) -> f64 {
+    let conn: Arc<dyn Conn> = Arc::new(Kept::default());
+    with_conn(h, conn.clone());
+    let mut st = h.lock();
+    st.info.state = "working".into();
+    h.on_turn_end(
+        &mut st,
+        &conn,
+        event::TurnEnd {
+            reason: "done".into(),
+            cost: total,
+            ..Default::default()
+        },
+    );
+    st.info.cost_usd
+}
+
+// Rust-only (Go's agent.go:52 and :572 counted each start from zero): a
+// resumed agent says its conversation's whole total, which is counted
+// once however often the agent or its host starts again; a new
+// conversation in the same host adds its own; a total below the last is
+// a process counting from zero.
+#[test]
+fn a_conversations_cost_is_counted_once_across_restarts() {
+    let _home = Home::new();
+    let id = "costs001";
+    let h = host(Config {
+        id: id.into(),
+        kind: "fake".into(),
+        session_id: "s1".into(),
+        resume: true,
+        ..Config::default()
+    });
+    assert_eq!(cost_after(&h, 10.0), 10.0);
+    assert_eq!(cost_after(&h, 12.0), 12.0);
+    // The agent starts again (a wake, an account move) and carries on.
+    {
+        let mut st = h.lock();
+        h.detach(&mut st);
+        h.start_locked(&mut st).unwrap();
+        let c = h.detach(&mut st).unwrap();
+        drop(st);
+        stop_agent(&c);
+    }
+    assert_eq!(cost_after(&h, 12.0), 12.0, "a resume added its total again");
+    assert_eq!(cost_after(&h, 15.0), 15.0);
+
+    // This host stops asleep, and the next carries the conversation on.
+    let old = {
+        let mut st = h.lock();
+        st.info.sleeping = true;
+        st.info.clone()
+    };
+    let saved: Info = serde_json::from_slice(&old.to_json()).unwrap();
+    assert_eq!(saved.spent_usd, old.spent_usd, "not kept in info.json");
+    let h = host(h.lock().cfg.clone());
+    restore_sleeping_info(&mut h.lock(), &saved);
+    assert_eq!(cost_after(&h, 15.5), 15.5, "a woken host added it again");
+
+    // A new conversation in the same host (afresh, or a fork's own id)
+    // counts from zero, the one left still its branch.
+    {
+        let mut st = h.lock();
+        st.cfg.branches.push(Branch {
+            session_id: "s1".into(),
+            ..Branch::default()
+        });
+        st.info.session_id = "s2".into();
+    }
+    assert_eq!(cost_after(&h, 3.0), 18.5);
+    // A process that counts from zero says less than the last total.
+    assert_eq!(cost_after(&h, 1.0), 19.5);
+    assert_eq!(cost_after(&h, 0.0), 19.5, "no total costs nothing");
+    // Back to the first conversation: only what it spent since.
+    h.lock().info.session_id = "s1".into();
+    assert_eq!(cost_after(&h, 16.0), 20.0);
+}
+
 // host_test.go:272
 #[test]
 fn queue_edits() {
