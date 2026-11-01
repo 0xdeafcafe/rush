@@ -110,7 +110,7 @@ fn own_worktree_row(m: &Model) -> Setting {
 /// harness's own from here.
 fn compact_row(m: &Model) -> Setting {
     let c = config(m);
-    let pruner = crate::screens::session_cards::compact::PRUNER_KIND;
+    let pruner = crate::config::PRUNER_KIND;
     let now = if c.compact_kind.is_empty() {
         String::new()
     } else if c.compact_kind == pruner {

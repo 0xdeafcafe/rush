@@ -10,41 +10,40 @@
 //! page's rows change is rush's config.json, through rush-state's Store,
 //! saved after each change as Go saves it.
 
-use crate::screens::social::stream::ModelStream;
+// The base's modules, so `crate::frame::..` and the like read as they did
+// in rush-ui.
+use rush_ui_base::{
+    accounts, config, frame, keybind, model, sess, split, startdir, style, update, worker,
+};
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();
 
 pub mod acct;
-pub(crate) mod catalog;
-pub(crate) mod common;
-pub(crate) mod configpage;
-pub(crate) mod files;
-pub(crate) mod form;
-pub(crate) mod general;
-pub(crate) mod guard;
-pub(crate) mod harnesses;
-pub(crate) mod interface;
-pub(crate) mod keyboard;
-pub(crate) mod keys;
-pub(crate) mod ollama;
-pub(crate) mod ownsettings;
-pub(crate) mod paint;
+pub mod catalog;
+pub mod common;
+pub mod configpage;
+pub mod files;
+pub mod form;
+pub mod general;
+pub mod guard;
+pub mod harnesses;
+pub mod interface;
+pub mod keyboard;
+pub mod keys;
+pub mod ollama;
+pub mod ownsettings;
+pub mod paint;
 pub mod plugins;
 pub mod providers;
-pub(crate) mod qr;
+pub mod qr;
 pub mod remote;
-pub(crate) mod sample;
+pub mod sample;
 pub mod sheets;
 pub mod statusline;
-pub(crate) mod updates;
-pub(crate) mod workspace;
-
-#[cfg(test)]
-mod tests;
-#[cfg(test)]
-mod tests_config;
-#[cfg(test)]
-mod tests_own;
-#[cfg(test)]
-mod tests_providers;
+pub mod updates;
+pub mod workspace;
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -56,7 +55,7 @@ use crate::frame::{Ext, Mouse, Out, Place, PlaceId, Press};
 use crate::model::Model;
 use crate::style::*;
 
-pub(crate) use form::Section;
+pub use form::Section;
 use workspace::Geometry;
 
 /// The pages, in order (settings.go:39).
@@ -71,9 +70,9 @@ pub const PAGE_REMOTE: usize = 7;
 
 /// A page's own drawing, when it isn't a form: w wide, h tall, its
 /// geometry noted for the mouse.
-pub(crate) type BodyFn = fn(&Model, &mut Geometry, usize, usize) -> Vec<Line>;
+pub type BodyFn = fn(&Model, &mut Geometry, usize, usize) -> Vec<Line>;
 /// A page's own keys; Pass when it isn't one.
-pub(crate) type PageKey = fn(&mut Model, &str) -> Out;
+pub type PageKey = fn(&mut Model, &str) -> Out;
 
 /// One page of Settings: a form, or one that draws itself (page).
 #[derive(Clone, Default)]
@@ -101,7 +100,7 @@ pub struct Page {
 }
 
 /// The pages (settingsPages).
-pub(crate) fn pages() -> Vec<Page> {
+pub fn pages() -> Vec<Page> {
     vec![
         providers::page(),
         harnesses::page(),
@@ -131,12 +130,12 @@ pub(crate) fn pages() -> Vec<Page> {
 }
 
 /// What a typed answer does with the text.
-pub(crate) type Answer = Rc<dyn Fn(&mut Model, &str) -> Out>;
+pub type Answer = Rc<dyn Fn(&mut Model, &str) -> Out>;
 
 /// Settings while it's open: the page, the cursor, and a value being
 /// typed (dialog).
 #[derive(Default)]
-pub(crate) struct Dialog {
+pub struct Dialog {
     pub page: usize,
     pub cursor: usize,
     /// What the input line is for; empty when not typing.
@@ -178,7 +177,7 @@ pub(crate) struct Dialog {
 /// The settings group's state: the dialog while a settings place shows,
 /// the page each place was last on, and rush's store.
 #[derive(Default)]
-pub(crate) struct State {
+pub struct State {
     pub dialog: Option<Dialog>,
     pub settings_page: usize,
     pub harness_page: usize,
@@ -204,7 +203,7 @@ thread_local! {
 }
 
 /// The dialog as it is; an empty one when none is open.
-pub(crate) fn dialog(m: &Model) -> &Dialog {
+pub fn dialog(m: &Model) -> &Dialog {
     m.kept
         .peek::<State>()
         .and_then(|s| s.dialog.as_ref())
@@ -212,7 +211,7 @@ pub(crate) fn dialog(m: &Model) -> &Dialog {
 }
 
 /// The dialog, to change; opened on General if none is.
-pub(crate) fn dialog_mut(m: &mut Model) -> &mut Dialog {
+pub fn dialog_mut(m: &mut Model) -> &mut Dialog {
     m.kept::<State>().dialog.get_or_insert_with(Dialog::default)
 }
 
@@ -221,7 +220,7 @@ pub use crate::accounts::{config, config_mut, loaded_config, store, use_store};
 
 /// After a change: config.json saved, and the list drawn from it again
 /// (formKey's changed: SaveConfig, rebuild).
-pub(crate) fn changed(m: &mut Model) {
+pub fn changed(m: &mut Model) {
     if let Err(e) = crate::config::write_store(store(m)) {
         m.fail(&format!("couldn't save the settings: {e}"));
     }
@@ -248,10 +247,10 @@ pub fn apply_colors(m: &mut Model) {
 }
 
 /// The list's own copy of the config, taken again from the store's.
-pub(crate) fn sync(m: &mut Model) {
+pub fn sync(m: &mut Model) {
     apply_colors(m);
     let feed = config(m).feed;
-    m.feed_follows(feed);
+    (m.ext.calls.feed_follows())(m, feed);
     let cfg = serde_json::to_value(config(m))
         .ok()
         .and_then(|v| serde_json::from_value(v).ok());
@@ -263,7 +262,7 @@ pub(crate) fn sync(m: &mut Model) {
 
 /// Settings' pages a place shows: Harnesses the agents' set-up, Settings
 /// the rest (placePages).
-pub(crate) fn place_pages(p: PlaceId) -> (usize, usize) {
+pub fn place_pages(p: PlaceId) -> (usize, usize) {
     if p == PlaceId::Harnesses {
         (PAGE_PROVIDERS, PAGE_GENERAL)
     } else {
@@ -272,7 +271,7 @@ pub(crate) fn place_pages(p: PlaceId) -> (usize, usize) {
 }
 
 /// Opens page p afresh (openDialog, loadDialog).
-pub(crate) fn open_dialog(m: &mut Model, p: usize) {
+pub fn open_dialog(m: &mut Model, p: usize) {
     store(m);
     m.kept::<State>().dialog = Some(Dialog {
         page: p,
@@ -326,7 +325,7 @@ pub fn reload_dialog(m: &mut Model) {
 /// Harnesses list, inside or not (its Advanced line names what it reads
 /// from the first, as Go reads agentDefs as it's drawn), or the
 /// provider opened on Providers.
-pub(crate) fn shown_kind(m: &Model) -> String {
+pub fn shown_kind(m: &Model) -> String {
     let d = dialog(m);
     match d.page {
         PAGE_HARNESSES => d.model_kind.clone(),
@@ -337,7 +336,7 @@ pub(crate) fn shown_kind(m: &Model) -> String {
 
 /// What a page shows, settled after a key: its own prep, and what the
 /// agent it's about reads, read again.
-pub(crate) fn prep(m: &mut Model) {
+pub fn prep(m: &mut Model) {
     if m.kept.peek::<State>().is_none_or(|s| s.dialog.is_none()) {
         return;
     }
@@ -369,7 +368,7 @@ pub fn set_settings_page(m: &mut Model, p: usize) {
 }
 
 /// [ and ]: the next page of the place's, round (stepSettingsPage).
-pub(crate) fn step_settings_page(m: &mut Model, d: isize) {
+pub fn step_settings_page(m: &mut Model, d: isize) {
     let (lo, hi) = place_pages(m.place);
     let n = (hi - lo) as isize;
     let cur = dialog(m).page.clamp(lo, hi - 1) as isize - lo as isize;
@@ -377,14 +376,14 @@ pub(crate) fn step_settings_page(m: &mut Model, d: isize) {
 }
 
 /// The page showing (curPage).
-pub(crate) fn cur_page(m: &Model) -> Page {
+pub fn cur_page(m: &Model) -> Page {
     let mut ps = pages();
     let i = dialog(m).page.min(ps.len() - 1);
     ps.swap_remove(i)
 }
 
 /// How many lines the cursor goes through (dialogLen).
-pub(crate) fn dialog_len(m: &Model) -> usize {
+pub fn dialog_len(m: &Model) -> usize {
     let p = cur_page(m);
     match (p.form, p.rows) {
         (Some(f), _) => form::flat(&f(m)).len(),
@@ -394,13 +393,13 @@ pub(crate) fn dialog_len(m: &Model) -> usize {
 }
 
 /// Whether a Settings or Harnesses page is showing.
-pub(crate) fn dialog_open(m: &Model) -> bool {
+pub fn dialog_open(m: &Model) -> bool {
     m.on_place() && m.kept.peek::<State>().is_some_and(|s| s.dialog.is_some())
 }
 
 /// Opens the input line for a typed value; answer gets it, trimmed,
 /// unless it's empty (ask).
-pub(crate) fn ask(m: &mut Model, what: &str, prefill: &str, answer: Answer) {
+pub fn ask(m: &mut Model, what: &str, prefill: &str, answer: Answer) {
     let d = dialog_mut(m);
     d.asking = what.to_string();
     d.input = prefill.chars().collect();
@@ -409,7 +408,7 @@ pub(crate) fn ask(m: &mut Model, what: &str, prefill: &str, answer: Answer) {
 }
 
 /// ask for a secret, shown as dots (askSecret).
-pub(crate) fn ask_secret(m: &mut Model, what: &str, answer: Answer) {
+pub fn ask_secret(m: &mut Model, what: &str, answer: Answer) {
     ask(m, what, "", answer);
     dialog_mut(m).secret = true;
 }
@@ -453,7 +452,7 @@ impl SettingsPlace {
 }
 
 /// A key on a settings page (dialogKey).
-pub(crate) fn dialog_key(m: &mut Model, k: &Press) -> Out {
+pub fn dialog_key(m: &mut Model, k: &Press) -> Out {
     // Where there's no list and Session to go between, tab and shift+tab
     // turn the page, as ] and [ do (keys.go:199).
     let s = match k.s.as_str() {
@@ -554,7 +553,7 @@ fn dialog_edit(m: &mut Model, k: &Press) {
 }
 
 /// The page at width w, h tall (dialogBody).
-pub(crate) fn dialog_body(m: &Model, geo: &mut Geometry, w: usize, h: usize) -> Vec<Line> {
+pub fn dialog_body(m: &Model, geo: &mut Geometry, w: usize, h: usize) -> Vec<Line> {
     let p = cur_page(m);
     *geo = Geometry::default();
     let mut out = workspace::heading(m, w);
@@ -677,28 +676,28 @@ pub fn resized(m: &mut Model) {
 }
 
 /// The rows a page has under the header (settingsHeight).
-pub(crate) fn settings_height(m: &Model) -> usize {
+pub fn settings_height(m: &Model) -> usize {
     m.h.saturating_sub(m.top_h() + 2).max(1)
 }
 
 /// What goes before the page's description: the plugin open on Plugins.
-pub(crate) fn extra_title(m: &Model) -> Option<String> {
+pub fn extra_title(m: &Model) -> Option<String> {
     let p = &dialog(m).plugin;
     (!p.is_empty()).then(|| p.clone())
 }
 
 /// The line under Providers' description: what's been spent.
-pub(crate) fn totals_line(m: &Model, _w: usize) -> Option<Line> {
+pub fn totals_line(m: &Model, _w: usize) -> Option<Line> {
     (dialog(m).page == PAGE_PROVIDERS).then(|| acct::totals(m))
 }
 
 /// A click on a page laid out as a catalog (catalogMouse).
-pub(crate) fn catalog_mouse(m: &mut Model, g: &Geometry, x: usize, y: usize) -> Out {
+pub fn catalog_mouse(m: &mut Model, g: &Geometry, x: usize, y: usize) -> Out {
     catalog::mouse(m, g, x, y)
 }
 
 /// The wheel on a page laid out as a catalog (catalogWheel).
-pub(crate) fn catalog_wheel(m: &mut Model, g: &Geometry, x: usize, y: usize, d: isize) -> Out {
+pub fn catalog_wheel(m: &mut Model, g: &Geometry, x: usize, y: usize, d: isize) -> Out {
     catalog::wheel(m, g, x, y, d)
 }
 

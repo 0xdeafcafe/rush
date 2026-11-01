@@ -34,7 +34,6 @@ use super::paint::{first_non_empty, trunc};
 use super::{Page, State};
 use crate::frame::Out;
 use crate::model::Model;
-use crate::screens::social::services::ModelReload;
 use crate::style::*;
 
 /// What the page knows, all of it read off the UI (updatesState).
@@ -208,7 +207,7 @@ fn on_swept(m: &mut Model, s: Swept, asked: bool) -> Out {
     let rebuilt = u.rebuilt;
     let changed = was != (u.failed, u.stale, u.gone, u.rebuilt) || news.is_some();
     if rebuilt {
-        m.kept::<crate::screens::social::services::Update>().rebuilt = true;
+        m.kept::<crate::update::Update>().rebuilt = true;
     }
     if let Some(n) = news {
         m.news(n, "");
@@ -250,7 +249,7 @@ fn on_swept(m: &mut Model, s: Swept, asked: bool) -> Out {
         )
     {
         rush_sys::events::log("reload", serde_json::json!({"why": "restart on install"}));
-        return m.reload(false);
+        return (m.ext.calls.reload())(m, false);
     }
     // A look that found what the last did draws nothing (Go redraws
     // every second anyway; here only a change is drawn).
@@ -441,11 +440,11 @@ pub fn check(m: &mut Model, force: bool) {
 }
 
 /// How often the look for updates wakes to see whether one is due.
-pub(crate) const RECHECK_WAKE: std::time::Duration = std::time::Duration::from_secs(60);
+pub const RECHECK_WAKE: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Whether a look last made at checked_at (None: never) is due again at
 /// now: once EVERY has passed.
-pub(crate) fn recheck_due(checked_at: Option<Instant>, now: Instant) -> bool {
+pub fn recheck_due(checked_at: Option<Instant>, now: Instant) -> bool {
     checked_at.is_none_or(|at| now.saturating_duration_since(at) >= rush_harnessup::EVERY)
 }
 
@@ -581,7 +580,7 @@ fn rush_row(m: &Model) -> Setting {
     // that #reload runs (m.updating, m.newer, m.rebuilt).
     let (updating, rebuilt, out) = m
         .kept
-        .peek::<crate::screens::social::services::Update>()
+        .peek::<crate::update::Update>()
         .map_or((false, false, None), |u| {
             (u.updating, u.rebuilt, u.newer.clone())
         });
@@ -703,7 +702,7 @@ pub fn gone_note(gone: usize) -> String {
 }
 
 /// The sessions' hosts: how many are on an older rush (hostsRow).
-pub(crate) fn hosts_row(m: &Model) -> Setting {
+pub fn hosts_row(m: &Model) -> Setting {
     let (n, f, g) = upd(m).map_or((0, 0, 0), |u| (u.stale, u.failed, u.gone));
     let mut what = "none".to_string();
     if n == 1 {

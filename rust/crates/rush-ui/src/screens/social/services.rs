@@ -15,7 +15,6 @@ use rush_core::agent::Agent;
 use rush_core::text::Line;
 use rush_core::time::Ms;
 use rush_fleet::Predicates;
-use rush_update::Release;
 use serde_json::{Map, Value, json};
 
 use crate::frame::Out;
@@ -24,16 +23,8 @@ use crate::style::*;
 
 // --- updates ---
 
-/// What's known of newer rushes.
-#[derive(Default)]
-pub struct Update {
-    /// A newer rush that's out.
-    pub newer: Option<Release>,
-    pub updating: bool,
-    checked: bool,
-    /// A newer rush than this one is installed: #reload runs it.
-    pub rebuilt: bool,
-}
+/// What's known of newer rushes: the base's, which Settings reads.
+pub use rush_ui_base::update::Update;
 
 /// What an update does around it: rush's log and the network watch.
 struct Host;
@@ -708,6 +699,7 @@ impl ModelSqueeze for Model {
 mod tests {
     use super::*;
     use rush_core::agent::{Halt, State};
+    use rush_update::Release;
 
     #[test]
     fn backs_off() {

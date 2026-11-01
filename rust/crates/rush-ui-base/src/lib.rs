@@ -38,6 +38,7 @@ pub mod split;
 pub mod startdir;
 pub mod style;
 pub mod turnwants;
+pub mod update;
 pub mod worker;
 
 pub use model::Model;

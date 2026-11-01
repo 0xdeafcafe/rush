@@ -294,6 +294,9 @@ pub fn hold_writers() -> std::sync::MutexGuard<'static, ()> {
     KEEPING.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// CompactKind for a default that prunes with PruneModel (prunerKind).
+pub const PRUNER_KIND: &str = "ollama-prune";
+
 #[cfg(test)]
 mod tests {
     use super::*;

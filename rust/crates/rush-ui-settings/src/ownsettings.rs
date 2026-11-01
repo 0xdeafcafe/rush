@@ -33,18 +33,18 @@ pub struct Read {
 /// and the environment its sessions start in.
 type Source = (AdapterRef, Profile, Vec<(String, String)>);
 
-#[cfg(test)]
 thread_local! {
     /// What a test's page reads in place of the registry's: the harness,
-    /// the profile and the environment.
-    pub(crate) static TEST: std::cell::RefCell<Option<Source>> =
+    /// the profile and the environment. Only tests (the ones in rush-ui)
+    /// set it.
+    #[doc(hidden)]
+    pub static TEST: std::cell::RefCell<Option<Source>> =
         const { std::cell::RefCell::new(None) };
 }
 
 /// Harness k, the profile its page is about, and the environment its
 /// sessions start in; none when it offers no settings of its own.
 fn source(m: &Model, k: &str) -> Option<Source> {
-    #[cfg(test)]
     if let Some(t) = TEST.with(|t| t.borrow().clone()) {
         return Some(t);
     }
@@ -302,7 +302,6 @@ pub fn offers(k: &str) -> bool {
 
 /// offers, or a test's harness.
 fn has(k: &str) -> bool {
-    #[cfg(test)]
     if TEST.with(|t| t.borrow().is_some()) {
         return true;
     }

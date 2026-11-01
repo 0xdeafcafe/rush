@@ -11,12 +11,14 @@
 pub use rush_ui_base::{
     accounts, away, bridge, changes, config, finish, frame, host, imagerefs, keybind, landing,
     lead, list, look, mention, overlay, paint, pastes, predict, rooms, sess, shells, spawns, split,
-    startdir, style, turnwants, worker,
+    startdir, style, turnwants, update, worker,
 };
 use rush_ui_base::{chores, clanker, header, listcache, model, session};
 
 pub mod hosted;
 pub mod screens;
+#[cfg(test)]
+mod settings_tests;
 
 #[cfg(test)]
 mod base_tests;

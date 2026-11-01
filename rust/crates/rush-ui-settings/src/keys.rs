@@ -76,18 +76,14 @@ pub fn key_map(m: &Model) -> std::borrow::Cow<'_, Map> {
         None => std::borrow::Cow::Owned(Map::build(
             &actions(m),
             &File::default(),
-            &crate::screens::plugin_ui::hooks::plugin_keys(m),
+            &(m.ext.calls.plugin_keys())(m),
         )),
     }
 }
 
 /// Puts f in force (setKeys).
 pub fn set_keys(m: &mut Model, f: File) {
-    let map = Map::build(
-        &actions(m),
-        &f,
-        &crate::screens::plugin_ui::hooks::plugin_keys(m),
-    );
+    let map = Map::build(&actions(m), &f, &(m.ext.calls.plugin_keys())(m));
     let k = &mut m.kept::<State>().keys;
     k.file = f;
     k.map = Some(map);

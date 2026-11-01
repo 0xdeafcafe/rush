@@ -763,7 +763,7 @@ pub fn native_sign_in_with(m: &mut Model, a: rush_core::adapter::AdapterRef, k: 
 }
 
 /// k's account as its own sign-in says (nativeAccountRows).
-pub(crate) fn native_account_rows(m: &Model, k: &str) -> Vec<Setting> {
+pub fn native_account_rows(m: &Model, k: &str) -> Vec<Setting> {
     let a = accounts();
     let info = (a.summary)(m, k);
     let mut status = if (a.signed_in)(m, k) {
