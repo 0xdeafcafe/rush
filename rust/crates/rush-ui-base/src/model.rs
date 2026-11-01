@@ -41,6 +41,9 @@ pub struct Model {
     pub cfg: Config,
     pub now: Ms,
     pub tick: usize,
+    /// Frames drawn so far: a screen not drawn in the last one wasn't on
+    /// screen (the Catch-up view's "since you last looked").
+    pub frames: u64,
     pub w: usize,
     pub h: usize,
     /// The rows the open Session is drawn in, its header's with them, as
@@ -178,6 +181,7 @@ impl Model {
             cfg: Config::default(),
             now: now(),
             tick: 0,
+            frames: 0,
             w: 80,
             h: 24,
             session_h: 0,
@@ -880,6 +884,7 @@ impl Model {
             q.inlined = false; // the box asking it inline says so as it's drawn
         }
         let _drawing = crate::frame::framememo::FrameMemo::drawing(&self.memo);
+        self.frames += 1;
         self.frame_rows()
     }
 

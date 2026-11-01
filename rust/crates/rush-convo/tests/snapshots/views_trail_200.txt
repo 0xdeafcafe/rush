@@ -1,0 +1,15 @@
+t1            |  00:00  You        the decision card still overlaps on long options
+t1:s:r1       |  00:00  ├ read     4 files                                                              ▏                   4.0s
+t1:s:g1       |  00:00  ├ search   "label_rows"                                                         ▏                   2.0s
+t1:s:e1       |  00:00  ├ edit     dock.rs                                                              ▎                     8s
+t1:s:e2       |  00:00  ├ edit     question.rs                                                          ▊                    31s
+t1:s:b1       |  00:01  ├ cargo clippy -p rush-ui-session-cards -- -D warnings ✗                        ██████            4m 10s
+t1:s:e3       |  00:05  ├ edit     question.rs                                                          ▏                     5s
+t1:s:b2       |  00:05  ├ cargo test -p rush-ui-session-cards                                           ████████████████ 11m 00s   ← slow
+              |  00:17  └ reply    "Found it: the card was laid out at the full width, but the views beside it take room."
+              |         turn 17m 01s · thinking 1m 01s · tools 16m 00s · waiting on you 0
+              |
+t2            |  00:26  You        nice, merge it
+t2:s:b3       |  00:26  ├ git merge --ff-only rush/card-wrap                                            ████████████████    2.0s
+              |  00:26  └ reply    "Merged to main as f3760931."
+              |         turn 11s · thinking 9s · tools 2.0s · waiting on you 0

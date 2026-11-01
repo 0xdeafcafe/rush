@@ -1,9 +1,11 @@
 //! The conversation's views: Normal, Chat, Code, Catch-up and Trail
 //! (rush_convo::Preset), one for every session, kept in rush's config
 //! (convoView) until changed. The key that goes through them, the picker
-//! the header's label opens, and enter or a click on a catch-up card or a
-//! trail's step opening it in Normal. Changing view keeps the view on the
-//! message it was on. New in the Rust port: Go rush had no such views.
+//! the header's label opens, and enter or a click on a turn or a step in
+//! any of them (a chat bubble's foot, a code heading or check, the
+//! catch-up card or a turn before it, a trail's row) opening it in
+//! Normal. Changing view keeps the view on the message it was on. New in
+//! the Rust port: Go rush had no such views.
 
 use rush_convo::Preset;
 
@@ -145,7 +147,7 @@ pub fn turn_or_step(r: &str) -> bool {
 }
 
 /// The views' keys in the conversation: the key through them; enter, space
-/// or → on a catch-up card or a trail's step opens it in Normal.
+/// or → on a turn or a step in another view opens it in Normal.
 pub fn key(m: &mut Model, k: &Press) -> Out {
     let Some(key) = open_key(m) else {
         return Out::Pass;
@@ -159,9 +161,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         set(m, p);
         return Out::Draw;
     }
-    if !matches!(current(m), Preset::CatchUp | Preset::Trail)
-        || !matches!(s, "enter" | "space" | " " | "right")
-    {
+    if current(m) == Preset::Normal || !matches!(s, "enter" | "space" | " " | "right") {
         return Out::Pass;
     }
     let sel = m
@@ -175,10 +175,10 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     open_in_normal(m, &sel)
 }
 
-/// A click on row r of the conversation, when a catch-up card or a
-/// trail's row takes it: a turn's at once, a step's once picked.
+/// A click on row r of the conversation in a view other than Normal: a
+/// turn's opens it at once, a step's once picked.
 pub fn click(m: &mut Model, r: &str) -> Option<Out> {
-    if !matches!(current(m), Preset::CatchUp | Preset::Trail) || !turn_or_step(r) {
+    if current(m) == Preset::Normal || !turn_or_step(r) {
         return None;
     }
     let picked = m.session.as_ref().is_some_and(|v| v.sel == r);

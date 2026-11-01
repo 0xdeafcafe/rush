@@ -43,7 +43,7 @@ static ANSWER_OPENS: LazyLock<Regex> =
 const PREVIEW_MOST: usize = 14;
 
 /// The decisions block t's answer ends with, if it has one.
-fn decisions_of(t: &Turn) -> Vec<Decision> {
+pub(crate) fn decisions_of(t: &Turn) -> Vec<Decision> {
     for it in t.items.iter().rev() {
         if let Item::Text { text, answer: true } = it {
             return decisions_in(text).1;
@@ -97,6 +97,12 @@ fn still_open(s: &Session, ti: usize) -> Vec<Decision> {
     }
 }
 
+/// The decisions turn ti's answer asks that still wait on you
+/// (still_open): what the Chat and Catch-up views say needs you.
+pub(crate) fn open_list(s: &Session, ti: usize) -> Vec<Decision> {
+    still_open(s, ti)
+}
+
 /// The decisions blocks still open, newest first: each one's turn number
 /// and its decisions (still_open), for the column beside a wide
 /// conversation.
@@ -108,12 +114,6 @@ pub fn open_decisions(s: &Session) -> Vec<(u32, Vec<Decision>)> {
             (!ds.is_empty()).then(|| (s.turns[ti].n, ds))
         })
         .collect()
-}
-
-/// How many decisions turn ti's answer asks that still wait on you: what
-/// a catch-up card says is still open (still_open).
-pub(crate) fn open_in_turn(s: &Session, ti: usize) -> usize {
-    still_open(s, ti).len()
 }
 
 impl Drawer<'_> {

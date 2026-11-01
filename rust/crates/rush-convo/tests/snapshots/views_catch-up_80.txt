@@ -1,0 +1,9 @@
+              |
+t1            |  The last 2 turns · $1.51
+t2            |  ┃ ? needs you   Read from the end   [answer]
+              |  ┃
+              |  ┃ Done          Found it: the card was laid out at the full width, but the
+              |  ┃               views beside it take room. Merged to main as f3760931.
+              |  ┃ Changed       2 files  +9 −5   (dock.rs, question.rs)
+              |  ┃ Checks        ✗ clippy   ✓ tests 108
+              |  ┃ Said to you   "One decision for you."

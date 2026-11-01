@@ -94,20 +94,36 @@ fn the_view_is_named_on_the_tabs_row() {
     assert!(f.contains("answer 2"), "{f}");
 }
 
-/// Enter on a catch-up card opens its turn in Normal, picked.
+/// Enter on the catch-up card opens the first turn it covers in Normal,
+/// picked; with no look before, the card covers the last turns.
 #[test]
 fn enter_on_a_card_opens_its_turn_in_normal() {
-    let mut m = talked(3);
+    let mut m = talked(6);
     super::presets::set(&mut m, Preset::CatchUp);
     let f = screen(&mut m).join("\n");
-    assert!(f.contains("asked") && f.contains("question 1"), "{f}");
-    m.session.as_mut().unwrap().sel = "t2".into();
-    let f = screen(&mut m).join("\n");
-    assert!(f.contains("enter opens it in Normal"), "{f}");
+    assert!(f.contains("The last 4 turns"), "{f}");
+    assert!(f.contains("Done") && f.contains("answer 5"), "{f}");
+    assert!(f.contains("question 1"), "a turn before the card: {f}");
+    m.session.as_mut().unwrap().sel = "t3".into();
+    let _ = screen(&mut m);
     press(&mut m, "enter");
     assert_eq!(super::presets::current(&m), Preset::Normal);
     let v = m.session.as_ref().unwrap();
-    assert_eq!(v.sel, "t2");
-    assert_eq!(v.o.open.get("t2"), Some(&true));
+    assert_eq!(v.sel, "t3");
+    assert_eq!(v.o.open.get("t3"), Some(&true));
     assert_eq!(kept(&m), "");
+}
+
+/// Chat draws bubbles; enter on a bubble's foot opens its turn in Normal.
+#[test]
+fn enter_on_a_bubble_opens_its_turn_in_normal() {
+    let mut m = talked(3);
+    super::presets::set(&mut m, Preset::Chat);
+    let f = screen(&mut m).join("\n");
+    assert!(f.contains("╭") && f.contains("answer 2"), "{f}");
+    m.session.as_mut().unwrap().sel = "t2".into();
+    let _ = screen(&mut m);
+    press(&mut m, "enter");
+    assert_eq!(super::presets::current(&m), Preset::Normal);
+    assert_eq!(m.session.as_ref().unwrap().sel, "t2");
 }

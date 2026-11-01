@@ -113,7 +113,7 @@ fn normal_shows_the_place_the_times_and_the_keys() {
     );
 }
 
-/// Code's check line, Trail's step line and Chat's hidden stretch say
+/// Code's check line, Trail's step line and Chat's bubble foot say
 /// which command runs; Code shows the keys, Trail once it's picked.
 #[test]
 fn other_views_say_it_too() {
