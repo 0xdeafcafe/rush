@@ -5,8 +5,9 @@
 //! Port of internal/host/revive.go:79-99 (Revive; the rest is revive.rs)
 //! and the host.List / ReadConfig calls of internal/fleet/fleet.go:706.
 
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use rush_core::agent::{Left, Workspace};
@@ -22,6 +23,10 @@ use crate::wire::Info;
 
 /// How recently a lost session must have been heard from to be revived.
 const REVIVE_WITHIN: Ms = 24 * 60 * 60 * 1000;
+
+/// How long a lost session is left before it's looked at again for
+/// bringing back.
+const REVIVE_LOOK: Ms = 30 * 1000;
 
 /// A listing, and what it was made into for the list.
 type Made = (Arc<Vec<Arc<Info>>>, Arc<Vec<HostInfo>>);
@@ -89,11 +94,31 @@ impl Hosts for Sessions {
         if self.follows.is_some_and(|f| f()) {
             return;
         }
+        // Asked of every lost session at each reading of the list: one too
+        // long lost is passed over here, and one looked at in the last
+        // half minute too, rather than a thread started for each, each time.
+        if rush_core::time::now() - info.updated_at > REVIVE_WITHIN || !revive_due(&info.id) {
+            return;
+        }
         let info = info.clone();
         std::thread::spawn(move || {
             let _ = revive(&info);
         });
     }
+}
+
+/// Whether session id's revival is to be looked at now: at most once a
+/// REVIVE_LOOK.
+fn revive_due(id: &str) -> bool {
+    static LOOKED: Mutex<Option<HashMap<String, Ms>>> = Mutex::new(None);
+    let now = rush_core::time::now();
+    let mut looked = LOOKED.lock().unwrap_or_else(|e| e.into_inner());
+    let looked = looked.get_or_insert_with(HashMap::new);
+    if looked.get(id).is_some_and(|&at| now - at < REVIVE_LOOK) {
+        return false;
+    }
+    looked.insert(id.to_string(), now);
+    true
 }
 
 /// Starts a lost session's host again on the same conversation and tells

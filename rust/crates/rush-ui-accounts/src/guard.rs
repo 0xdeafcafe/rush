@@ -88,7 +88,9 @@ struct Real;
 
 impl HostOps for Real {
     fn list(&self) -> Vec<Info> {
-        rush_host::client::list()
+        // Every few seconds: the list's own last listing, not every
+        // session's info read again.
+        rush_host::client::list_known()
     }
     fn hold(&self, id: &str, on: bool) -> Result<(), String> {
         rush_host::Client::dial(id)

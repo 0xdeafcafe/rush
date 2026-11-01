@@ -343,6 +343,19 @@ pub fn list() -> Vec<Info> {
     Lister::default().list()
 }
 
+/// The sessions as the list last listed them, kept as fresh as its
+/// watcher keeps the list, so nothing is read for them; every session's
+/// info read now, as [`list`] does, where no list has listed them. For
+/// what asks every few seconds: list reads all of them, a thousand files
+/// and more, each time.
+pub fn list_known() -> Vec<Info> {
+    let last = LISTED.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    match last {
+        Some(infos) => infos.iter().map(|i| Info::clone(i)).collect(),
+        None => list(),
+    }
+}
+
 struct Listed {
     mod_: Option<SystemTime>,
     size: u64,
