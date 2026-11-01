@@ -327,15 +327,26 @@ impl Store {
     /// Records a real request getting an answer at at. A process writes it
     /// at most every few seconds.
     pub fn answer(&self, target: &str, at: SystemTime) {
-        {
-            let mut m = self.answered.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(last) = m.get(target)
-                && at.duration_since(*last).map_or(true, |d| d < self.every)
-            {
-                return;
-            }
-            m.insert(target.to_string(), at);
+        if self.answer_due(target, at) {
+            self.record_answer(target, at);
         }
+    }
+
+    /// Whether an answer at at is to be written: none was for every. A
+    /// true is taken as written; record_answer writes it.
+    pub fn answer_due(&self, target: &str, at: SystemTime) -> bool {
+        let mut m = self.answered.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(last) = m.get(target)
+            && at.duration_since(*last).map_or(true, |d| d < self.every)
+        {
+            return false;
+        }
+        m.insert(target.to_string(), at);
+        true
+    }
+
+    /// Writes an answer answer_due said is due.
+    pub fn record_answer(&self, target: &str, at: SystemTime) {
         self.update(target, |p| {
             let was = p.answering();
             if after(Some(at), p.answered) {
@@ -438,6 +449,16 @@ pub fn fail(target: &str, at: SystemTime) {
 /// See [`Store::answer`].
 pub fn answer(target: &str, at: SystemTime) {
     store().answer(target, at)
+}
+
+/// [`Store::answer`] without waiting: what's due is written on a thread of
+/// its own, and only then, so a session streaming many messages a second
+/// starts no thread for each.
+pub fn answer_soon(target: &str, at: SystemTime) {
+    if store().answer_due(target, at) {
+        let target = target.to_string();
+        std::thread::spawn(move || store().record_answer(&target, at));
+    }
 }
 
 /// See [`Store::claim`].

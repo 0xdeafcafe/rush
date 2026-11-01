@@ -1361,6 +1361,18 @@ left to strip. Where the memory goes, and what the host module does about it:
   stalled in `codex-code-mode-host`, not seen again). The commands Codex
   runs are kept from it (`shell_environment_policy.exclude`). No effect on
   Claude Code (Bun has its own allocator).
+- **The host itself.** rush starts every host with `MallocSpaceEfficient=1`
+  (the host takes it out of its environment, so its agent doesn't inherit
+  it; Rust-only): after `flood 15000` on the live bench a host's footprint
+  is 4.6 MB against 21 MB, idle fresh 4.2 against 5.5, for about 0.3 s more
+  CPU per 15,000 streamed steps and none idle. `malloc_zone_pressure_relief`
+  at a turn's end gives nothing back on macOS 27's malloc.
+- **A streaming turn's info.json.** The host writes what a turn is doing
+  (detail, context tokens, cache warmth, updatedAt) to info.json at most
+  every 250 ms, the latest always; any other change, and every change while
+  idle, at once, as Go does (Rust-only). Writing it on every message was
+  ~90% of a busy host's time and woke every watcher of the folder: `flood
+  15000`, host CPU 8.5 s → 1.9 s, folder writes 89,592 → 81.
 - **One Codex app-server can hold many threads.** rush starts one per
   session today (`internal/adapters/codex/conn.go`); one per Codex account
   saves a process per extra session, at the cost of one crash ending them
