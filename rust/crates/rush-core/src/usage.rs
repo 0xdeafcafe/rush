@@ -350,6 +350,19 @@ impl Quota {
         self.tightest(model).map_or(0.0, |w| w.percent)
     }
 
+    /// Its longest window that limits every model: the one whose room has
+    /// to last, a week for most plans (Claude's seven_day, Codex's
+    /// secondary, Copilot's month). The runaway guard paces it.
+    pub fn weekly(&self) -> Option<&Window> {
+        let mut out: Option<&Window> = None;
+        for w in &self.windows {
+            if w.scope.models.is_empty() && out.is_none_or(|o| w.span > o.span) {
+                out = Some(w);
+            }
+        }
+        out
+    }
+
     /// The window called id, if the reading has it.
     pub fn window(&self, id: &str) -> Option<&Window> {
         self.windows.iter().find(|w| w.id == id)

@@ -126,7 +126,10 @@ fn readings_kept_and_pruned() {
 
 // ---- What the guard does ----
 
+/// An account at ratio of its pace: fair 1%/h for the one in use, 5%/h
+/// for the others, 40% of the week used.
 fn acct(id: &str, current: bool, ratio: f64, level: Level) -> Acct {
+    let fair = if current { 1.0 } else { 5.0 };
     Acct {
         id: id.into(),
         name: id.into(),
@@ -134,12 +137,100 @@ fn acct(id: &str, current: bool, ratio: f64, level: Level) -> Acct {
         pace: Pace {
             ratio,
             level,
+            fair,
+            burn: ratio * fair,
             week: 40.0,
+            resets_at: T0 + (60.0 / fair) as Ms * HOUR,
             frees_at: if level == Level::Over { T0 + HOUR } else { 0 },
+        },
+        ..Acct::default()
+    }
+}
+
+/// An account not in use, idle, week% used and resetting in hours.
+fn room(id: &str, week: f64, hours: Ms) -> Acct {
+    let resets_at = T0 + hours * HOUR;
+    Acct {
+        id: id.into(),
+        name: id.into(),
+        pace: Pace {
+            level: Level::Under,
+            fair: fair(week, resets_at, T0),
+            week,
+            resets_at,
             ..Pace::default()
         },
         ..Acct::default()
     }
+}
+
+/// The one in use, over its pace: 1.2%/h against 0.5%/h.
+fn hot() -> Acct {
+    Acct {
+        id: "a".into(),
+        name: "a".into(),
+        current: true,
+        pace: Pace {
+            level: Level::Over,
+            fair: 0.5,
+            burn: 1.2,
+            ratio: 2.4,
+            week: 40.0,
+            resets_at: T0 + 120 * HOUR,
+            frees_at: T0 + HOUR,
+        },
+        ..Acct::default()
+    }
+}
+
+#[test]
+fn of_equal_room_the_one_resetting_sooner_wins() {
+    let accts = [hot(), room("far", 40.0, 80), room("soon", 40.0, 20)];
+    let p = plan(&pace_on(), &accts, &[], 0, false, T0);
+    assert_eq!(p.new_on.as_deref(), Some("soon"));
+    assert_eq!(p.to_why, "soon resets in 20h with 60% left");
+    let p = plan(
+        &pace_on(),
+        &[hot(), room("far", 40.0, 80), room("soon", 40.0, 40)],
+        &[Seat {
+            turns: 0,
+            ..seat("new", "a")
+        }],
+        0,
+        false,
+        T0,
+    );
+    match did(&p, "new") {
+        Do::Move { to, why, .. } => {
+            assert_eq!(to, "soon");
+            assert!(why.ends_with("soon resets in 40h with 60% left"), "{why}");
+        }
+        d => panic!("{d:?}"),
+    }
+}
+
+#[test]
+fn a_nearly_full_account_resetting_soon_loses_when_it_would_trip() {
+    // 1% left for 2 hours: 0.5%/h is its fair share, and the 1.2%/h the
+    // work brings would be 2.4× it. The roomy one, resetting in 100 hours,
+    // takes it at 1.5×.
+    let soon = room("soon", 99.0, 2);
+    let far = room("far", 20.0, 100);
+    let p = plan(
+        &pace_on(),
+        &[hot(), soon.clone(), far.clone()],
+        &[],
+        0,
+        false,
+        T0,
+    );
+    assert_eq!(p.new_on.as_deref(), Some("far"));
+    // Bringing less, it would take it: it resets first.
+    let mut mild = hot();
+    mild.pace.burn = 0.4;
+    mild.pace.fair = 0.15;
+    let p = plan(&pace_on(), &[mild, soon, far], &[], 0, false, T0);
+    assert_eq!(p.new_on.as_deref(), Some("soon"));
 }
 
 fn seat(id: &str, login: &str) -> Seat {

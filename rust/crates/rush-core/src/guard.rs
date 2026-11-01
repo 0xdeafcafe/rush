@@ -261,6 +261,37 @@ fn frees_at(us: &[(Ms, f64)], used: f64, p: &Pace, c: &PaceCfg) -> Ms {
     us.last().map_or(p.resets_at, |u| u.0 + c.window)
 }
 
+/// How much an account's room is worth spending now: the room it would
+/// leave unused by its reset at the pace it goes, an hour, counting less
+/// the further off its reset is. Room on one that resets in 4 hours is
+/// lost if it isn't used; on one that resets in 6 days it has to last.
+fn spare(p: &Pace, now: Ms) -> f64 {
+    let hours = ((p.resets_at - now) as f64 / HOUR as f64).max(0.25);
+    (p.fair - p.burn).max(0.0) / (1.0 + hours / 24.0)
+}
+
+/// "alex resets in 4h with 38% left".
+pub fn room_said(a: &Acct, now: Ms) -> String {
+    format!(
+        "{} resets in {} with {:.0}% left",
+        a.name,
+        roughly(a.pace.resets_at - now),
+        (100.0 - a.pace.week).max(0.0)
+    )
+}
+
+/// A duration to one unit: 40m, 3h, 5d.
+pub fn roughly(d: Ms) -> String {
+    let d = d.max(0);
+    if d < HOUR {
+        format!("{}m", (d / MIN).max(1))
+    } else if d < 48 * HOUR {
+        format!("{}h", (d + HOUR / 2) / HOUR)
+    } else {
+        format!("{}d", (d + 12 * HOUR) / (24 * HOUR))
+    }
+}
+
 /// "2.1×".
 pub fn times(r: f64) -> String {
     if r.is_infinite() {
@@ -435,6 +466,8 @@ pub struct Plan {
     pub over: Vec<String>,
     /// Every account is past its pace: when the first frees up.
     pub all_paced: Option<Ms>,
+    /// Why new_on: its reset and room.
+    pub to_why: String,
 }
 
 /// What the guard does at now with accts and the rush sessions seats;
@@ -469,7 +502,11 @@ pub fn plan(
     let cur = accts.iter().find(|a| a.current);
     let mut dest: Option<&Acct> = cur.filter(|a| !over.contains(a.id.as_str()));
     if !over.is_empty() && dest.is_none() {
-        // Clearly under its pace, with room: the one furthest under.
+        // Clearly under its pace, and not tripped by the work it takes
+        // on (the burn of the one it leaves): of those, the one whose
+        // room would go unused soonest.
+        let load = cur.map_or(0.0, |c| c.pace.burn);
+        let trip = s.pace.map_or(f64::INFINITY, |c| c.trip);
         dest = accts
             .iter()
             .filter(|a| {
@@ -478,12 +515,13 @@ pub fn plan(
                     && !a.out
                     && a.pace.level != Level::Unknown
                     && a.pace.ratio < release
+                    && a.pace.fair > 0.0
+                    && (a.pace.burn + load) / a.pace.fair < trip
             })
-            .min_by(|a, b| {
-                a.pace
-                    .ratio
-                    .total_cmp(&b.pace.ratio)
-                    .then(a.pace.week.total_cmp(&b.pace.week))
+            .max_by(|a, b| {
+                spare(&a.pace, now)
+                    .total_cmp(&spare(&b.pace, now))
+                    .then(b.pace.week.total_cmp(&a.pace.week))
             });
         match dest {
             Some(d) => p.new_on = Some(d.id.clone()),
@@ -496,6 +534,9 @@ pub fn plan(
                     .or(Some(0));
             }
         }
+    }
+    if let Some(d) = dest.filter(|_| !over.is_empty()) {
+        p.to_why = room_said(d, now);
     }
     // The cap.
     p.cap = match (away, s.away) {
@@ -550,7 +591,7 @@ pub fn plan(
                     from: x.login.clone(),
                     cold: true,
                     context: 0,
-                    why: "a new session: no cache to lose".into(),
+                    why: format!("a new session: no cache to lose · {}", p.to_why),
                 },
                 Some(_) if x.moved_at != 0 && now - x.moved_at < s.move_gap => held(format!(
                     "it moved account once already in the last {}h: it waits for {}'s pace to ease",
@@ -568,9 +609,10 @@ pub fn plan(
                     cold: true,
                     context: x.context,
                     why: format!(
-                        "its cache is cold: its {} tokens of context are written again here or on {} alike",
+                        "its cache is cold: its {} tokens of context are written again here or on {} alike · {}",
                         x.context,
-                        name(&to.id)
+                        name(&to.id),
+                        p.to_why
                     ),
                 },
             }
