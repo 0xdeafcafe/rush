@@ -17,6 +17,7 @@ use rush_core::text::Line;
 use super::places::{Place, PlaceId};
 use super::{Mouse, Out, Press};
 use crate::model::Model;
+use crate::session::SessionView;
 
 /// A key handler: `Out::Pass` when the key isn't its.
 pub type KeyHook = fn(&mut Model, &Press) -> Out;
@@ -155,6 +156,12 @@ pub struct Ext {
     pub(crate) places: [Option<Box<dyn Place>>; 4],
     /// The Agents place's pages past its list ("Wall").
     pub(crate) agents_pages: Vec<Option<Box<dyn Place>>>,
+    /// What the frame asks of the screens by name (see [`Calls`]).
+    pub calls: Calls,
+    /// What the frame does at once for a screen (see [`Act`]).
+    pub act: Option<ActFn>,
+    /// What rush does by itself on Go's tick (chores.rs), in this order.
+    pub chores: Vec<crate::chores::Chore>,
 }
 
 impl Ext {
@@ -187,6 +194,150 @@ impl Ext {
         self.commands.retain(|c| c.name != name);
         self.commands.push(Command { name, about, run });
     }
+}
+
+/// Runs an [`Act`]: filled by screens/mod.rs's register.
+pub type ActFn = fn(&mut Model, Act);
+
+/// Something the frame has a screen do, at once on the UI thread (never
+/// queued: a queued act could land a frame later). [`Model::act`] runs
+/// it; the one match is screens/mod.rs's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Act {
+    /// The key guide (cmdbar/keyhelp.rs open).
+    OpenKeyHelp,
+    /// A room in the pane, by its row's key or a member's
+    /// (social/rooms.rs open_room).
+    OpenRoom(String),
+    /// Projects at a project's folder (projects_machine pick_in_projects).
+    PickInProjects(String),
+}
+
+impl Model {
+    /// Has a screen do a, at once.
+    pub fn act(&mut self, a: Act) {
+        let f = self.ext.act.expect("act registered by screens");
+        f(self, a);
+    }
+}
+
+/// Declares [`Calls`]: each slot a `fn` a screen fills at register, and
+/// an accessor that panics loudly, naming who fills it, when it wasn't.
+macro_rules! calls {
+    ($($(#[$doc:meta])* $name:ident($by:literal): $ty:ty,)*) => {
+        /// What the frame asks the screens for and has them do by name,
+        /// each filled once by screens/mod.rs's register: the calls the
+        /// frame made into a screen's module.
+        #[derive(Default)]
+        pub struct Calls {
+            $($(#[$doc])* pub $name: Option<$ty>,)*
+        }
+
+        impl Calls {
+            $($(#[$doc])* pub fn $name(&self) -> $ty {
+                self.$name
+                    .expect(concat!(stringify!($name), " registered by ", $by))
+            })*
+
+            /// The slots no screen filled.
+            pub fn missing(&self) -> Vec<&'static str> {
+                let mut out = Vec::new();
+                $(if self.$name.is_none() {
+                    out.push(stringify!($name));
+                })*
+                out
+            }
+        }
+    };
+}
+
+calls! {
+    /// The command bar is open (cmdbar/bar.rs is_open).
+    bar_open("cmdbar"): fn(&Model) -> bool,
+    /// The key guide is open (cmdbar/keyhelp.rs is_open).
+    key_help_open("cmdbar"): fn(&Model) -> bool,
+    /// `#` and a command's name, not a heading or an issue
+    /// (cmdbar/fleetslash.rs is_hash_cmd).
+    is_hash_cmd("cmdbar"): fn(&str) -> bool,
+    /// /stop typed the old way, run as #stop (fleetslash.rs legacy_command).
+    legacy_command("cmdbar"): fn(&mut Model, &str) -> Option<Out>,
+    /// The command a name stands for (fleetslash.rs alias_of).
+    alias_of("cmdbar"): fn(&str) -> &str,
+    /// A grid tile's box takes the key (list_extras/grid.rs key).
+    grid_key("list_extras"): fn(&mut Model, &Press) -> Option<Out>,
+    /// The grid's tiles and edge take the mouse (grid.rs mouse).
+    grid_mouse("list_extras"): fn(&mut Model, &Mouse) -> Out,
+    /// The pinned agents' keys, the grid's (grid.rs grid().keys).
+    grid_keys("list_extras"): fn(&mut Model) -> Vec<String>,
+    /// A pinned agent's Session kept for its tile (grid.rs park).
+    grid_park("list_extras"): fn(&mut Model, SessionView),
+    /// A tile's Session, taken to open (grid.rs adopt).
+    grid_adopt("list_extras"): fn(&mut Model, &str) -> Option<SessionView>,
+    /// The opened Session gives up the keys (list_extras/split.rs
+    /// leave_pane).
+    leave_pane("list_extras"): fn(&mut Model),
+    /// The Session beside the list is there for now (split.rs preview).
+    preview("list_extras"): fn(&Model) -> bool,
+    /// The Session beside the list for now goes (split.rs leave_chat).
+    leave_chat("list_extras"): fn(&mut Model),
+    /// What's being renamed, if a name is (list_extras/rename.rs renaming).
+    renaming("list_extras"): fn(&Model) -> Option<&str>,
+    /// An agent's subagent rows tucked away or brought back
+    /// (list_extras/subs.rs toggle).
+    sub_toggle("list_extras"): fn(&mut Model, &str),
+    /// How many subagent rows an agent with n has (subs.rs rows).
+    sub_rows("list_extras"): fn(&Model, &str, usize) -> usize,
+    /// An agent's subagent row i (subs.rs row_of).
+    sub_row_of("list_extras"): fn(&Model, &Agent, usize, usize, usize) -> Line,
+    /// The list moved by d: what's read ahead follows
+    /// (list_extras/predict.rs moved).
+    predict_moved("list_extras"): fn(&mut Model, isize),
+    /// The strip over a mirrored screen (list_extras/live.rs summary_strip).
+    summary_strip("list_extras"): fn(&mut Model, usize) -> Option<Line>,
+    /// A harness's own spinner at a tick (list_extras/wall.rs spin).
+    spin("list_extras"): fn(&str, usize) -> &'static str,
+    /// An #intervene waiting for its chat, run when ready
+    /// (session_cards/discuss.rs intervene_ready).
+    intervene_ready("session_cards"): fn(&mut Model) -> bool,
+    /// A memory file with unsaved edits (session_core/memedit.rs
+    /// dirty_path).
+    dirty_path("session_core"): fn(&mut Model) -> Option<String>,
+    /// The spawn steps read with a conversation, kept for its subagents
+    /// (session_core/subs.rs prime_spawns).
+    prime_spawns("session_core"): fn(&mut Model, &str, crate::worker::SpawnSteps),
+    /// The screen's size changed (settings resized).
+    resized("settings"): fn(&mut Model),
+    /// How far a second line fades (settings/interface.rs sub_line_fade).
+    sub_line_fade("settings"): fn(&str) -> f64,
+    /// A room's Session header: its agent and line (social/rooms.rs
+    /// pane_head).
+    pane_head("social"): fn(&Model, &str) -> Option<(Agent, Line)>,
+    /// A room's row (rooms.rs room_line).
+    room_line("social"): fn(&rush_room::room::Summary, usize, bool, usize) -> Line,
+    /// A room member's row (rooms.rs room_member_line).
+    room_member_line("social"):
+        fn(Option<&rush_room::room::Summary>, &Agent, usize, bool, usize) -> Line,
+    /// What the runaway guard says on an agent's row
+    /// (accounts/guard.rs row_note).
+    row_note("accounts"): fn(&Model, &Agent) -> Option<String>,
+    /// What the runaway guard holds, in the header (guard.rs header_line).
+    guard_header("accounts"): fn(&Model) -> Option<Line>,
+    /// The limits have been fetched once (bars/fetch.rs fetched_once).
+    limits_fetched("bars"): fn(&Model) -> bool,
+    /// The machine's processes have been read (projects_machine
+    /// machine_read).
+    machine_read("projects_machine"): fn(&Model) -> bool,
+    /// What plugins put on an agent's row (plugin_ui/hooks.rs
+    /// plugin_status).
+    plugin_status("plugin_ui"): fn(&Model, &str) -> Line,
+    /// An agent's own view, said short (plugin_ui/views summary_of,
+    /// view_summary_short).
+    view_summary("plugin_ui"): fn(&Model, &Agent) -> Option<Line>,
+    /// Something happened in a box, told to plugins (plugin_ui/hooks.rs
+    /// emit_box).
+    emit_box("plugin_ui"): fn(&mut Model, &str, &str, &str),
+    /// A box cleared, told to plugins (hooks.rs cleared).
+    cleared("plugin_ui"): fn(&mut Model, &str, &str),
 }
 
 /// State screens keep between calls, one value per type, made on first

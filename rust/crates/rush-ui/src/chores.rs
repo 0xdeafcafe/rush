@@ -18,75 +18,29 @@ use std::time::{Duration, Instant};
 use crate::model::Model;
 
 /// A chore: run at Go's tick `at` and every `every` ticks after, in every
-/// rush or only the one that leads.
-struct Chore {
-    at: u64,
-    every: u64,
-    lead_only: bool,
+/// rush or only the one that leads. The screens push theirs into
+/// Ext::chores at register (screens/mod.rs), in the order they run.
+pub struct Chore {
+    pub at: u64,
+    pub every: u64,
+    pub lead_only: bool,
     /// Whether it's wanted now; a chore not wanted isn't woken for.
-    when: fn(&Model) -> bool,
-    run: fn(&mut Model),
+    pub when: fn(&Model) -> bool,
+    pub run: fn(&mut Model),
 }
 
-fn always(_: &Model) -> bool {
+pub fn always(_: &Model) -> bool {
     true
 }
 
-const CHORES: &[Chore] = &[
-    Chore {
-        at: 3,
-        every: 30,
-        lead_only: false,
-        when: always,
-        run: crate::screens::settings::updates::watch_binary,
-    },
-    // The battery and disk, while the last frame showed them: Go reads
-    // them every 30 seconds while drawn (sysinfo.go:27), and each second
-    // draws them; here they're drawn only when they show differently.
-    Chore {
-        at: 3,
-        every: 30,
-        lead_only: false,
-        when: always,
-        run: |_| {
-            if rush_sys::sysinfo::asked() {
-                rush_sys::sysinfo::read_again();
-            }
-        },
-    },
-    Chore {
-        at: 15,
-        every: 60,
-        lead_only: true,
-        when: always,
-        run: crate::screens::projects_machine::tidydone::settle_tick,
-    },
-    Chore {
-        at: 30,
-        every: 600,
-        lead_only: true,
-        when: always,
-        run: crate::screens::projects_machine::tidydone::tidy_tick,
-    },
-    Chore {
-        at: 20,
-        every: 30,
-        lead_only: true,
-        when: always,
-        run: crate::screens::list_extras::stuck::nudge_stuck_subs,
-    },
-    // The rooms, every second while one runs: Go reads them on each
-    // reading, which its tick makes every second (model.go:1089-1092,
-    // snapload.go:60), so a room's round and verdict show though no
-    // session changed. Read off the UI thread, drawn only when changed.
-    Chore {
-        at: 1,
-        every: 1,
-        lead_only: false,
-        when: crate::screens::social::rooms::any_running,
-        run: crate::screens::social::rooms::tick_rooms,
-    },
-];
+/// The battery and disk read again, while the last frame showed them: Go
+/// reads them every 30 seconds while drawn (sysinfo.go:27), and each
+/// second draws them; here they're drawn only when they show differently.
+pub fn read_sysinfo(_: &mut Model) {
+    if rush_sys::sysinfo::asked() {
+        rush_sys::sysinfo::read_again();
+    }
+}
 
 /// When the tick started, and the last tick whose chores ran.
 #[derive(Default)]
@@ -113,7 +67,8 @@ pub fn due_at(m: &Model) -> Option<Instant> {
     let clock = m.kept.peek::<Clock>()?;
     let start = clock.start?;
     let lead = m.leads();
-    CHORES
+    m.ext
+        .chores
         .iter()
         .filter(|c| (lead || !c.lead_only) && (c.when)(m))
         .map(|c| next_of(c, clock.through))
@@ -135,9 +90,11 @@ pub fn run_due(m: &mut Model, now: Instant) -> bool {
     m.kept::<Clock>().through = tick;
     let lead = m.leads();
     let mut ran = false;
-    for c in CHORES {
-        if (lead || !c.lead_only) && next_of(c, through) <= tick && (c.when)(m) {
-            (c.run)(m);
+    for i in 0..m.ext.chores.len() {
+        let c = &m.ext.chores[i];
+        let (run, when) = (c.run, c.when);
+        if (lead || !c.lead_only) && next_of(c, through) <= tick && when(m) {
+            run(m);
             ran = true;
         }
     }
@@ -150,11 +107,12 @@ mod tests {
 
     #[test]
     fn at_gos_seconds() {
-        let c = &CHORES[0];
+        let m = Model::new("t");
+        let c = &m.ext.chores[0];
         assert_eq!(next_of(c, 0), 3);
         assert_eq!(next_of(c, 3), 33);
         assert_eq!(next_of(c, 40), 63);
-        let t = &CHORES[3];
+        let t = &m.ext.chores[3];
         assert_eq!(next_of(t, 29), 30);
         assert_eq!(next_of(t, 30), 630);
     }

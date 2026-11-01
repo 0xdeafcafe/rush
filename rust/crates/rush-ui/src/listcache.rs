@@ -155,13 +155,12 @@ pub(crate) fn stand_in(m: &mut Model, segs: &[(&str, Line)], plan: Vec<Line>) {
 /// Whether what top bar segment id shows has been read since rush
 /// started: until then what it said last time stands in for it.
 fn seg_in(m: &Model, id: &str) -> bool {
-    use crate::screens::projects_machine::machine_read;
     let sys = || rush_sys::sysinfo::now().1.total != 0;
     let net = || rush_net::netwatch::now().known;
     let accts = || crate::screens::accounts::state::read_settled(m);
-    let limits = || accts() && crate::screens::bars::fetch::fetched_once(m);
+    let limits = || accts() && m.ext.calls.limits_fetched()(m);
     match id {
-        "cpu" | "ram" | "memory" => machine_read(m),
+        "cpu" | "ram" | "memory" => m.ext.calls.machine_read()(m),
         "disk" | "battery" => sys(),
         "net" => net(),
         "system" => sys() && net(),

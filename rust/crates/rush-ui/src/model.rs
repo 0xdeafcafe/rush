@@ -18,7 +18,7 @@ use rush_fleet::Predicates;
 
 use crate::config::Config;
 use crate::frame::edgepush::EdgePush;
-use crate::frame::ext::Kept;
+use crate::frame::ext::{Act, Kept};
 use crate::frame::framehold::Hold;
 use crate::frame::overlayclick::OverlayHit;
 use crate::frame::{Confirm, Editor, Ext, Mouse, Out, PlaceId, Press, Sheet, uistall};
@@ -363,19 +363,18 @@ impl Model {
     /// Opens agent i's conversation: the one beside the list when it's
     /// that agent's, else read anew.
     pub fn open(&mut self, i: usize) {
-        use crate::screens::list_extras::grid;
         let key = self.agents[i].key.clone();
         if let Some(v) = self.pane.take_if(|v| v.key == key) {
             self.set_session(v);
             return;
         }
         // The one beside the list, a pinned agent's: kept for its tile.
-        let pinned = grid::grid(self).keys.clone();
+        let pinned = self.ext.calls.grid_keys()(self);
         if let Some(p) = self.pane.take_if(|v| pinned.contains(&v.key)) {
-            grid::park(self, p);
+            self.ext.calls.grid_park()(self, p);
         }
         // A tile's Session, kept open: in at once (gridAdopt).
-        if let Some(v) = grid::adopt(self, &key) {
+        if let Some(v) = self.ext.calls.grid_adopt()(self, &key) {
             self.set_session(v);
             return;
         }
@@ -389,7 +388,7 @@ impl Model {
     fn set_session(&mut self, v: SessionView) {
         let key = v.key.clone();
         if let Some(old) = self.session.replace(v).filter(|o| o.key != key) {
-            crate::screens::list_extras::grid::park(self, old);
+            self.ext.calls.grid_park()(self, old);
         }
         self.follow_tail();
     }
@@ -560,7 +559,7 @@ impl Model {
             crate::hosted::set_away(self);
             return;
         }
-        crate::screens::list_extras::split::leave_pane(self);
+        self.ext.calls.leave_pane()(self);
     }
 
     /// Handles a key; Quit when it ends rush. A Mac's Option letters are
@@ -651,7 +650,7 @@ impl Model {
                     // A room, or one of its agents: the room opens
                     // (keys.go:392), its box saying what's typed in it.
                     let key = self.sel.clone();
-                    crate::screens::social::rooms::open_room(self, &key);
+                    self.act(Act::OpenRoom(key));
                 } else if let Some(i) = self.selected() {
                     self.open(i);
                 }
@@ -670,7 +669,7 @@ impl Model {
             "[" | "]" if empty => {
                 self.step_page(if s == "[" { -1 } else { 1 });
             }
-            "?" | "f1" if empty => crate::screens::cmdbar::keyhelp::open(self),
+            "?" | "f1" if empty => self.act(Act::OpenKeyHelp),
             "q" if letters => return Out::Quit,
             // With nothing typed, into the Session, as tab does
             // (keys.go:473); ctrl+o (reply) whatever's typed, and ⌘↓ with
@@ -685,9 +684,9 @@ impl Model {
                 if peek::back(self) {
                     return Out::Draw; // back to the Session you peeked from
                 }
-                if crate::screens::list_extras::split::preview(self) {
+                if self.ext.calls.preview()(self) {
                     // The Session beside the list for now goes (leaveChat).
-                    crate::screens::list_extras::split::leave_chat(self);
+                    self.ext.calls.leave_chat()(self);
                     return Out::Draw;
                 }
                 if now() - self.quit_armed < 2000 {
@@ -710,7 +709,7 @@ impl Model {
             // in the pane (switchFocus → focusPane → openRoomFor,
             // rushmode.go:5295), so what's typed next goes to it.
             let key = self.sel.clone();
-            crate::screens::social::rooms::open_room(self, &key);
+            self.act(Act::OpenRoom(key));
         } else if let Some(i) = self.selected() {
             self.open(i);
         }
@@ -729,14 +728,14 @@ impl Model {
             && !self.agents[i].subagents.is_empty()
         {
             let k = self.agents[i].key.clone();
-            crate::screens::list_extras::subs::toggle(self, &k);
+            self.ext.calls.sub_toggle()(self, &k);
         }
     }
 
     fn step(&mut self, d: isize) {
         self.move_sel(d);
         self.ask_preview();
-        crate::screens::list_extras::predict::moved(self, d);
+        self.ext.calls.predict_moved()(self, d);
     }
 
     fn session_rows(&self) -> usize {
@@ -960,8 +959,8 @@ impl Model {
             || self.sheet.is_some()
             || self.help
             || self.confirm.is_some()
-            || crate::screens::cmdbar::bar::is_open(self)
-            || crate::screens::cmdbar::keyhelp::is_open(self);
+            || self.ext.calls.bar_open()(self)
+            || self.ext.calls.key_help_open()(self);
         out
     }
 
@@ -1024,7 +1023,7 @@ impl Model {
             split::follow(self);
             // An agent whose screen is mirrored, its summary picked: the
             // strip over it, so v brings the screen back (view.go:1225).
-            let strip = |m: &mut Model| crate::screens::list_extras::live::summary_strip(m, pw);
+            let strip = |m: &mut Model| m.ext.calls.summary_strip()(m, pw);
             match split::mirror(self, pw, rows) {
                 Some(p) => p,
                 None => {
@@ -1180,7 +1179,7 @@ impl Model {
         self.session_h = body_h;
         let (w, now, tick) = (self.w, self.now, self.tick);
         let room = match &self.session {
-            Some(v) => crate::screens::social::rooms::pane_head(self, &v.key),
+            Some(v) => self.ext.calls.pane_head()(self, &v.key),
             None => return,
         };
         let (beside, idle) = (self.in_pane, self.pane_idle);
@@ -1647,7 +1646,7 @@ impl Model {
             crate::screens::session_core::changes::prime(self, ver, &cwd, c);
         }
         if let Some(sp) = spawns {
-            crate::screens::session_core::subs::prime_spawns(self, &key, sp);
+            self.ext.calls.prime_spawns()(self, &key, sp);
         }
         let ahead = if ahead { " ahead" } else { "" };
         rush_draw::perf_note(|| format!("tail end gen={}{ahead}", r#gen));
@@ -1728,7 +1727,7 @@ impl Model {
                         crate::screens::session_core::changes::prime(self, ver, &cwd, c);
                     }
                     if let Some(sp) = spawns {
-                        crate::screens::session_core::subs::prime_spawns(self, &key, sp);
+                        self.ext.calls.prime_spawns()(self, &key, sp);
                     }
                     self.follow_tail();
                     Step::Draw
@@ -1776,7 +1775,7 @@ impl App<Note> for Model {
                 Event::Resize(w, h) => {
                     self.w = w as usize;
                     self.h = h as usize;
-                    crate::screens::settings::resized(self);
+                    self.ext.calls.resized()(self);
                     Step::Draw
                 }
                 Event::FocusGained => {
@@ -1796,7 +1795,7 @@ impl App<Note> for Model {
         self.keep_undo(g);
         // An #intervene @agent waiting for its chat (model.go:933
         // interveneReady).
-        let st = if crate::screens::session_cards::discuss::intervene_ready(self) {
+        let st = if self.ext.calls.intervene_ready()(self) {
             Step::Draw
         } else {
             st

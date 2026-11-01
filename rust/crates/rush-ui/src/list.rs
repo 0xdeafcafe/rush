@@ -1140,8 +1140,7 @@ impl Model {
                         push(Part::Sub, true);
                     }
                     // Its running subagents, a row each under it.
-                    let n =
-                        crate::screens::list_extras::subs::rows(self, &a.key, a.subagents.len());
+                    let n = self.ext.calls.sub_rows()(self, &a.key, a.subagents.len());
                     for s in 0..n {
                         push(Part::Subagent(s), true);
                     }
@@ -1194,11 +1193,7 @@ impl Model {
                         && two
                         && a.is_some_and(|a| self.says_why(a) || filter::has_match(self, a));
                     let subs = if part == Part::Member && rail {
-                        crate::screens::list_extras::subs::rows(
-                            self,
-                            &key,
-                            self.agents[agent].subagents.len(),
-                        )
+                        self.ext.calls.sub_rows()(self, &key, self.agents[agent].subagents.len())
                     } else {
                         0
                     };
@@ -1339,10 +1334,9 @@ impl Model {
                             Part::Where => {
                                 join(&mut l, self.agent_where_in(a, self.row_root(r), rw))
                             }
-                            Part::Subagent(s) => join(
-                                &mut l,
-                                crate::screens::list_extras::subs::row_of(self, a, s, w - 7, w),
-                            ),
+                            Part::Subagent(s) => {
+                                join(&mut l, self.ext.calls.sub_row_of()(self, a, s, w - 7, w))
+                            }
                             _ => join(&mut l, self.agent_sub(r.agent, rw)),
                         }
                     }
@@ -1393,7 +1387,7 @@ impl Model {
                 let a = &self.agents[r.agent];
                 join(
                     &mut l,
-                    crate::screens::list_extras::subs::row_of(self, a, s, rw.saturating_sub(3), w),
+                    self.ext.calls.sub_row_of()(self, a, s, rw.saturating_sub(3), w),
                 );
                 l
             }
@@ -1509,7 +1503,7 @@ impl Model {
 
     /// Whether a row's summary earns its place.
     pub fn says_why(&self, a: &Agent) -> bool {
-        asks(a) || a.stuck(self.now) || crate::screens::accounts::guard::row_note(self, a).is_some()
+        asks(a) || a.stuck(self.now) || self.ext.calls.row_note()(self, a).is_some()
     }
 
     /// The latest thing an agent said or is doing, its colour, and whether
@@ -1526,7 +1520,7 @@ impl Model {
         } else if wants_you(self, a) {
             summary = wants_say(&wants_of(self, a));
             col = YELLOW;
-        } else if let Some(s) = crate::screens::accounts::guard::row_note(self, a) {
+        } else if let Some(s) = self.ext.calls.row_note()(self, a) {
             // The runaway guard holds its next turn.
             summary = s;
             col = YELLOW;
@@ -1662,10 +1656,7 @@ impl Model {
         } else if live {
             // Its harness's own spinner (convo.Spin).
             sp(
-                crate::screens::list_extras::wall::spin(
-                    a.kind.as_str(),
-                    self.tick + a.job.id.len(),
-                ),
+                self.ext.calls.spin()(a.kind.as_str(), self.tick + a.job.id.len()),
                 ORANGE,
             )
         } else if a.busy() {
@@ -1800,7 +1791,7 @@ impl Model {
         let short = self.badges(a, false);
         let mut badges = short.clone();
         // What plugins put on its row, after its badges (view.go:2336).
-        let ps = crate::screens::plugin_ui::hooks::plugin_status(self, &a.key);
+        let ps = self.ext.calls.plugin_status()(self, &a.key);
         if !ps.spans.is_empty() {
             if badges.width() > 0 {
                 badges.spans.push(plain(" "));
@@ -1929,7 +1920,10 @@ impl Model {
     /// A room's row, or a member's under it (roomrows.go:190 roomLine,
     /// :210 roomMemberLine).
     fn room_row(&self, r: &Row, a: &Agent, w: usize) -> Line {
-        use crate::screens::social::rooms::{room_line, room_member_line};
+        let (room_line, room_member_line) = (
+            self.ext.calls.room_line(),
+            self.ext.calls.room_member_line(),
+        );
         let tick = self.tick;
         if r.part == Part::Room {
             return self
@@ -1962,12 +1956,9 @@ impl Model {
         if let Some(mut by) = started_by(a) {
             // A job rush or a plugin runs, in your home folder: who runs
             // it, and why, say more than where.
-            if let Some(v) = crate::screens::plugin_ui::views::read::summary_of(self, a) {
+            if let Some(v) = self.ext.calls.view_summary()(self, a) {
                 by.spans.push(sp(" · ", FAINT));
-                join(
-                    &mut by,
-                    crate::screens::plugin_ui::views::view_summary_short(&v),
-                );
+                join(&mut by, v);
             }
             return fit(by, w);
         }
@@ -2027,15 +2018,12 @@ impl Model {
             }
             join(&mut l, p);
         }
-        if let Some(v) = crate::screens::plugin_ui::views::read::summary_of(self, a) {
+        if let Some(v) = self.ext.calls.view_summary()(self, a) {
             // Its own view says where it stands (rail.go:121).
             if !l.spans.is_empty() {
                 l.spans.push(sp(" · ", FAINT));
             }
-            join(
-                &mut l,
-                crate::screens::plugin_ui::views::view_summary_short(&v),
-            );
+            join(&mut l, v);
         }
         fit(l, w)
     }
@@ -2085,7 +2073,7 @@ impl Model {
         }
         // Faded toward the background by Settings › Second line
         // transparency; a filter's snippet stays as it is (view.go:2111).
-        let by = crate::screens::settings::interface::sub_line_fade(&self.cfg.sub_line);
+        let by = self.ext.calls.sub_line_fade()(&self.cfg.sub_line);
         if by > 0.0 && filter::snippet(self, &self.agents[i], room).is_none() {
             let bg = crate::frame::ground::painted().bg;
             for s in l.spans.iter_mut().skip(2) {

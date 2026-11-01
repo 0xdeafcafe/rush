@@ -36,7 +36,7 @@ impl Model {
         if k.s == "ctrl+q" {
             // A memory file with unsaved edits asks first (keys.go:60-71).
             if self.confirm.is_none()
-                && let Some(path) = crate::screens::session_core::memedit::dirty_path(self)
+                && let Some(path) = self.ext.calls.dirty_path()(self)
             {
                 let q = super::confirm::Confirm::new(
                     format!(
@@ -69,7 +69,7 @@ impl Model {
         }
         // A grid tile's box has the keys: its Session takes them where it
         // is (keys.go:137 gridKey).
-        if let Some(o) = crate::screens::list_extras::grid::key(self, k) {
+        if let Some(o) = self.ext.calls.grid_key()(self, k) {
             return o;
         }
         if self.session.is_some() {
@@ -102,7 +102,7 @@ impl Model {
             // ? with nothing typed opens the key guide, the same one f1
             // opens (rushmode.go:4025 openKeyHelp).
             if k.s == "?" || k.s == "f1" {
-                crate::screens::cmdbar::keyhelp::open(self);
+                self.act(crate::frame::ext::Act::OpenKeyHelp);
                 return Out::Draw;
             }
             self.session_key(&k.s).into()
@@ -241,12 +241,12 @@ impl Model {
         }
         // # and a letter: a Markdown heading (# Plan) or an issue (#123)
         // is still a message (keys.go:841 isHashCmd).
-        if crate::screens::cmdbar::fleetslash::is_hash_cmd(t) {
+        if self.ext.calls.is_hash_cmd()(t) {
             return self.command(t);
         }
         // /stop typed the old way runs #stop (keys.go:847 legacyCommand).
         if t.starts_with('/')
-            && let Some(o) = crate::screens::cmdbar::fleetslash::legacy_command(self, t)
+            && let Some(o) = self.ext.calls.legacy_command()(self, t)
         {
             return o;
         }
@@ -258,7 +258,7 @@ impl Model {
             if o.used() {
                 self.input.clear_sent();
                 // For the stash's history's Sent (keys.go:790).
-                crate::screens::plugin_ui::hooks::emit_box(self, rush_plugin::EV_INPUT_SENT, "", t);
+                self.ext.calls.emit_box()(self, rush_plugin::EV_INPUT_SENT, "", t);
                 return o;
             }
         }
@@ -280,7 +280,7 @@ impl Model {
             "cleared · {} brings it back",
             crate::screens::social::parts::UNDO_HINT
         ));
-        crate::screens::plugin_ui::hooks::cleared(self, "", &text);
+        self.ext.calls.cleared()(self, "", &text);
     }
 
     /// Runs a #command typed: its name lower-cased, #view:list as #view
@@ -297,7 +297,7 @@ impl Model {
         }
         // Other names a command answers to: #twotter is #feed, #history
         // #stash (keys.go:884-889).
-        let to = crate::screens::cmdbar::fleetslash::alias_of(&name);
+        let to = self.ext.calls.alias_of()(&name);
         if to != name {
             if matches!(name.as_str(), "agent" | "handoff" | "profile") {
                 self.flash(&format!("#{name} is now called #{to}"));
@@ -405,7 +405,7 @@ impl Model {
         // The grid's tiles and edge, where they are on screen, before the
         // Session beside the list takes the click at its own columns
         // (model.go:1496, :1589, :1640 gridDrag, gridClick).
-        let o = crate::screens::list_extras::grid::mouse(self, e);
+        let o = self.ext.calls.grid_mouse()(self, e);
         if o.used() {
             return o;
         }

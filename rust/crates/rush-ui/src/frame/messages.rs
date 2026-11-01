@@ -157,7 +157,7 @@ impl Model {
         if let Some(dir) = r.strip_prefix(NEWS_REF_PROJECTS) {
             let dir = dir.to_string();
             self.set_place(PlaceId::Projects);
-            crate::screens::projects_machine::pick_in_projects(self, &dir);
+            self.act(crate::frame::ext::Act::PickInProjects(dir));
             return Out::Draw;
         }
         Out::Idle

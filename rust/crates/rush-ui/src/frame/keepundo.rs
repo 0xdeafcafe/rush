@@ -50,7 +50,7 @@ impl Model {
     /// The Agents box holds a message, whose changes undo takes back: not
     /// a name being renamed.
     fn prompt_undoes(&self) -> bool {
-        crate::screens::list_extras::rename::renaming(self).is_none()
+        self.ext.calls.renaming()(self).is_none()
     }
 
     pub(crate) fn guard_boxes(&self) -> BoxGuard {
