@@ -6,6 +6,7 @@
 
 use rush_core::text::{Color, Line, Span, width};
 
+use super::cards::key_hint;
 use super::draw::Drawer;
 use super::style::*;
 use super::txt::{Txt, blanks, wrap};
@@ -36,6 +37,35 @@ pub struct NeedsItem {
 
 /// The kinds of row the section draws.
 pub const NEEDS_KINDS: [&str; 6] = ["do", "run", "copy", "reply", "link", "note"];
+
+/// The kind of needs_ref of the row under the replies to choose from: a
+/// click there, or enter on it, gives the keys to your message box to
+/// answer in your own words.
+pub const NEEDS_OWN: &str = "own";
+
+/// The replies of n to choose from, in order: the one keyed k is the
+/// (k-1)th.
+pub fn needs_choices(n: &Needs) -> Vec<&str> {
+    n.items
+        .iter()
+        .filter(|it| it.kind == "reply")
+        .map(|it| it.text.as_str())
+        .collect()
+}
+
+/// A key's cap, as the cards draw it: " 1 " on its own ground, lit when
+/// its row is the one picked.
+const CAP_BG: Color = Color::Rgb(48, 44, 40);
+const CAP_INK: Color = Color::Rgb(33, 28, 22);
+
+fn keycap(k: &str, lit: bool) -> Txt {
+    let k = format!(" {k} ");
+    if lit {
+        let o = C_ORANGE.fg;
+        return Txt::styled(&k, rush_core::text::Style::fg(CAP_INK).on(o).bold());
+    }
+    Txt::styled(&k, C_SUB.on(CAP_BG))
+}
 
 /// The ref of a row of the section a click acts on: a command copied, a
 /// reply put in your message box, a link opened.
@@ -181,6 +211,10 @@ impl Drawer<'_> {
         self.add(&all_ref, Color::Default, l, all_hint);
         let mut rows: Vec<(String, Txt, Txt)> = Vec::new();
         for it in &n.items {
+            if it.kind == "reply" {
+                rows.extend(self.choice_rows(&n, it, w));
+                continue;
+            }
             let (lead, ink, hint, r) = match it.kind.as_str() {
                 "do" => (paint(C_TEXT, "☐"), C_TEXT, "", String::new()),
                 "run" => (
@@ -241,5 +275,73 @@ impl Drawer<'_> {
             let l = pad().and(paint(frame, edge)).and_raw(" ").and(body);
             self.add(&r, Color::Default, l, right);
         }
+    }
+}
+
+impl Drawer<'_> {
+    /// A reply of the section as a choice, the way a question's card lays
+    /// its options out: its key (1, 2…) on a cap, then the reply, wrapped
+    /// under itself; the last reply has the row for your own words under
+    /// it. The row picked has its cap lit and says what enter does; a
+    /// click, enter or its key puts the reply in your message box.
+    fn choice_rows(&self, n: &Needs, it: &NeedsItem, w: usize) -> Vec<(String, Txt, Txt)> {
+        let all = needs_choices(n);
+        let at = n
+            .items
+            .iter()
+            .filter(|x| x.kind == "reply")
+            .position(|x| std::ptr::eq(x, it))
+            .unwrap_or(0);
+        let sel = self.o.selected.as_str();
+        let mut out = Vec::new();
+        let r = needs_ref(&it.kind, &it.text);
+        let on = sel == r;
+        let cap = keycap(&(at + 1).to_string(), on);
+        let ind = cap.width() + 1;
+        let label = if on {
+            paint(C_WHITE.bold(), &it.text)
+        } else {
+            paint(C_TEXT, &it.text)
+        };
+        for (k, l) in wrap(&label, w.saturating_sub(ind).max(8))
+            .into_iter()
+            .enumerate()
+        {
+            let (left, right) = if k == 0 {
+                let right = if on {
+                    key_hint("enter", "puts it in your box").and_raw("  ")
+                } else {
+                    dim("click to reply").and_raw("  ")
+                };
+                (cap.clone().and_raw(" ").and(l), right)
+            } else {
+                (blanks(ind).and(l), Txt::new())
+            };
+            out.push((r.clone(), left, right));
+        }
+        if at + 1 == all.len() {
+            let r = needs_ref(NEEDS_OWN, "");
+            let on = sel == r;
+            let left = keycap("✎", on).and_raw(" ").and(if on {
+                paint(C_WHITE.bold(), "Something else")
+            } else {
+                paint(C_TEXT, "Something else")
+            });
+            let left = left.and_raw("  ").and(dim("type your own answer below"));
+            let keys = if all.len() == 1 {
+                "1".to_string()
+            } else {
+                format!("1–{}", all.len())
+            };
+            let right = if on {
+                key_hint("enter", "types it").and_raw("  ")
+            } else if sel.starts_with("needs:") {
+                Txt::new()
+            } else {
+                dim(&format!("↑ then {keys} picks")).and_raw("  ")
+            };
+            out.push((r, left, right));
+        }
+        out
     }
 }

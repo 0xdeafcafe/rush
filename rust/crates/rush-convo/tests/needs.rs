@@ -5,7 +5,9 @@ rush_testenv::sandboxed!();
 
 use std::collections::{HashMap, HashSet};
 
-use rush_convo::render::{Needs, NeedsItem, has_quote, needs_of, needs_ref};
+use rush_convo::render::{
+    NEEDS_OWN, Needs, NeedsItem, has_quote, needs_choices, needs_of, needs_ref,
+};
 use rush_convo::{Options, Renderer, Session};
 
 mod common;
@@ -94,20 +96,91 @@ fn needs_section() {
         "☐ rebuild rush",
         "$ git push origin main",
         "click copies",
-        "╰ ↩ yes, push it",
+        " 1  yes, push it",
+        "╰  ✎  Something else  type your own answer below",
         "⧉ docs.example.com — the CNAME target",
     ] {
         assert!(all.contains(want), "no {want:?} in\n{all}");
     }
     assert!(
         refs.contains(needs_ref("run", "git push origin main").as_str())
-            && refs.contains(needs_ref("reply", "yes, push it").as_str()),
+            && refs.contains(needs_ref("reply", "yes, push it").as_str())
+            && refs.contains(needs_ref(NEEDS_OWN, "").as_str()),
         "the command and reply rows aren't clickable"
     );
     assert!(
         !all.contains('▌') && !all.contains("it said"),
         "the answer is still marked:\n{all}"
     );
+}
+
+/// The section's replies are choices, laid out as a question card's
+/// options: each a row with its key on a cap, then a row for your own
+/// words; the row picked has its cap lit and says what enter does.
+#[test]
+fn needs_replies_are_choices() {
+    let s = needs_session();
+    let n = Needs {
+        kind: "ask".into(),
+        reason: "which way".into(),
+        quote: String::new(),
+        items: [
+            ("note", "both build"),
+            ("reply", "ship it now"),
+            ("reply", "wait for CI"),
+        ]
+        .iter()
+        .map(|(k, t)| NeedsItem {
+            kind: (*k).into(),
+            text: (*t).into(),
+        })
+        .collect(),
+    };
+    assert_eq!(needs_choices(&n), vec!["ship it now", "wait for CI"]);
+    let section = |sel: &str| -> Vec<String> {
+        let mut o = opts(80, n.clone());
+        o.selected = sel.into();
+        let lines = Renderer::new().render(&s, &o);
+        let got: Vec<String> = lines
+            .iter()
+            .map(|l| l.line.plain().trim_end().to_string())
+            .collect();
+        let at = got.iter().position(|l| l.contains("Needs you")).unwrap();
+        got[at..].to_vec()
+    };
+    let want = [
+        "▍   ╭ ? Needs you · which way",
+        "▍   │ · both build",
+        "▍   │  1  ship it now                                           click to reply",
+        "▍   │  2  wait for CI                                           click to reply",
+        "▍   ╰  ✎  Something else  type your own answer below          ↑ then 1–2 picks",
+    ];
+    let got = section("");
+    assert_eq!(got, want, "\n{}", got.join("\n"));
+    let got = section(&needs_ref("reply", "wait for CI"));
+    assert!(
+        got[3].contains(" 2  wait for CI") && got[3].contains("enter puts it in your box"),
+        "\n{}",
+        got.join("\n")
+    );
+    assert!(!got[4].contains("picks"), "\n{}", got.join("\n"));
+    // The picked one's cap is lit: its own ground, not the others'.
+    let mut o = opts(80, n.clone());
+    o.selected = needs_ref("reply", "wait for CI");
+    let lines = Renderer::new().render(&s, &o);
+    let ground = |text: &str, cap: &str| {
+        let l = lines
+            .iter()
+            .find(|l| l.line.plain().contains(text))
+            .unwrap();
+        l.line
+            .spans
+            .iter()
+            .find(|sp| sp.text == cap)
+            .map(|sp| sp.style.bg)
+            .unwrap()
+    };
+    assert_ne!(ground("wait for CI", " 2 "), ground("ship it now", " 1 "));
 }
 
 // TestNeedsRef.

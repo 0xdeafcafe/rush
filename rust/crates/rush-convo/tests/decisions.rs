@@ -68,16 +68,31 @@ fn decision_answer_drawn_as_choices() {
     );
 }
 
-/// A block is open until a message answers it, as the conversation says
-/// "not answered": the column beside a wide conversation lists it.
+/// A block is open until a message of yours comes after it, picking from
+/// it or not, as rush's host takes its card away for either: the column
+/// beside a wide conversation lists it, the catch-up card counts it and
+/// the block says "not answered" only until then. A turn another agent
+/// began leaves it open; a newer block is open in its turn.
 #[test]
 fn open_decisions_until_answered() {
     let mut s = decisions_session(LOADER_ANSWER);
     let open = rush_convo::render::open_decisions(&s);
     assert_eq!(open.len(), 1);
     assert_eq!(open[0].1[0].topic, "Committing the loader work");
-    answer(&mut s, "something else first");
+    assert!(draw(&s).contains("not answered"));
+    answer(&mut s, "a task finished");
+    s.turns.last_mut().unwrap().from = "a background task".into();
     assert_eq!(rush_convo::render::open_decisions(&s).len(), 1);
+    answer(&mut s, "something else first");
+    assert!(rush_convo::render::open_decisions(&s).is_empty());
+    let got = draw(&s);
+    assert!(!got.contains("not answered"), "{got}");
+    s.feed(sent("and now?"), at(35));
+    s.feed(say(LOADER_ANSWER), at(36));
+    s.feed(done(0.0), at(37));
+    let open = rush_convo::render::open_decisions(&s);
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].0, s.turns.last().unwrap().n);
     answer(&mut s, "1a. Committing the loader work: yes");
     assert!(rush_convo::render::open_decisions(&s).is_empty());
 }

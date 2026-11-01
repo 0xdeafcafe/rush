@@ -601,7 +601,8 @@ fn a_rendered_session_counts_its_hosted_agents_changes() {
 /// A wide session keeps the conversation at its reading width and runs
 /// the column beside it from the top: the decisions not answered, the
 /// tool at work, what changed. Narrower, there's no column (the 120x40
-/// snapshot).
+/// snapshot). A message of yours after a block, picking from it or not,
+/// leaves it no longer open, in the column as in the conversation.
 #[test]
 fn a_wide_session_has_the_column_beside_it() {
     let dir = std::env::temp_dir().join(format!("rush-ui-render-side-{}", std::process::id()));
@@ -636,12 +637,12 @@ fn a_wide_session_has_the_column_beside_it() {
             .unwrap_or_else(|| panic!("no {what:?} in\n{f}"))
     };
     let (dec, run, chg) = (
-        at("Decisions  not answered"),
+        at("Decisions  none open"),
         at(" Running  1 step"),
         at("▌ Changes"),
     );
     assert!(dec < run && run < chg, "{f}");
-    assert!(rows[dec + 1].contains("1. Rounding mode"), "{f}");
+    assert!(!f.contains("not answered"), "{f}");
     assert!(rows[run + 1].contains("Run the tests  cargo"), "{f}");
     assert!(rows[chg + 1].contains("tax/round.go"), "{f}");
     // The column starts on the conversation's second row, not at its foot.
@@ -650,6 +651,47 @@ fn a_wide_session_has_the_column_beside_it() {
         .position(|r| r.contains("Conversation"))
         .unwrap();
     assert!(dec <= head + 4, "{f}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A block nothing of yours has come after is listed in the column, each
+/// decision a row with the agent's suggestion, as the conversation says
+/// it's not answered.
+#[test]
+fn a_wide_session_lists_the_decisions_still_open() {
+    let dir = std::env::temp_dir().join(format!("rush-ui-render-open-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("s.jsonl");
+    std::fs::write(
+        &path,
+        [
+            r#"{"type":"user","timestamp":"2026-10-28T12:00:00Z","cwd":"/src/checkout","message":{"role":"user","content":"fix the rounding"}}"#,
+            r#"{"type":"assistant","timestamp":"2026-10-28T12:00:08Z","message":{"id":"m2","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"Rounded.\n\nDecisions:\n1. **Rounding mode:** banks differ. (a) half up: as the old code; (b) half even: as the spec.\nMy picks: 1b."}],"usage":{"input_tokens":5,"output_tokens":3}}}"#,
+            r#"{"type":"system","subtype":"turn_duration","timestamp":"2026-10-28T12:00:09Z"}"#,
+        ]
+        .join("\n")
+            + "\n",
+    )
+    .unwrap();
+    let mut m = model();
+    let i = m.agents.iter().position(|a| a.job.id == "d4").unwrap();
+    m.agents[i].job.transcript_path = path.to_string_lossy().into_owned();
+    m.sel = m.agents[i].key.clone();
+    let f = plain(&mut m, 260, 60, &[(Key::Enter, KeyMods::NONE)]);
+    snapshot("snap_session_side_open_260x60", &f);
+    let rows: Vec<&str> = f.lines().collect();
+    let dec = rows
+        .iter()
+        .position(|r| r.contains("Decisions  not answered"))
+        .unwrap_or_else(|| panic!("no open decisions in\n{f}"));
+    assert!(
+        rows[dec + 1].contains("1. Rounding mode") && rows[dec + 1].contains("☆ half even"),
+        "{f}"
+    );
+    assert!(
+        f.contains("Decisions · not answered · d opens the card"),
+        "{f}"
+    );
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

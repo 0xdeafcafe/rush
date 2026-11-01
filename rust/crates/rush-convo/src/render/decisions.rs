@@ -70,36 +70,50 @@ fn answered(s: &Session, ti: usize, ds: &[Decision]) -> bool {
     false
 }
 
-/// The decisions blocks not answered, newest first: each one's turn
-/// number and its decisions. A turn still under way has none yet; a
-/// block is answered as the conversation draws it ("not answered"
-/// otherwise), for the column beside a wide conversation.
-pub fn open_decisions(s: &Session) -> Vec<(u32, Vec<Decision>)> {
-    let mut out = Vec::new();
-    for (ti, t) in s.turns.iter().enumerate().rev() {
-        if t.live {
-            continue;
-        }
-        let ds = decisions_of(t);
-        if !ds.is_empty() && !answered(s, ti, &ds) {
-            out.push((t.n, ds));
-        }
-    }
-    out
+/// Whether a message of yours came after turn ti, as its own turn or sent
+/// while a later one worked: it answered the block turn ti ends with, or
+/// passed it over for something else. Either way the block waits on you
+/// no longer, as rush's host takes its card away for either; a turn rush
+/// or another agent began doesn't count. Read from the conversation alone,
+/// so it says the same after the session is opened again or rush reloads.
+fn replied(s: &Session, ti: usize) -> bool {
+    s.turns.get(ti + 1..).unwrap_or_default().iter().any(|u| {
+        let yours = u.from.is_empty()
+            && u.cause.is_empty()
+            && (!u.prompt.trim().is_empty() || !u.images.is_empty());
+        yours || u.items.iter().any(|it| matches!(it, Item::Interject(_)))
+    })
 }
 
-/// How many decisions turn ti's answer asks that no message of yours
-/// after it has answered yet: what a catch-up card says is still open.
-pub(crate) fn open_in_turn(s: &Session, ti: usize) -> usize {
-    let Some(t) = s.turns.get(ti) else {
-        return 0;
-    };
-    let ds = decisions_of(t);
-    if ds.is_empty() || answered(s, ti, &ds) {
-        0
-    } else {
-        ds.len()
+/// The decisions turn ti's answer asks that still wait on you: none once
+/// the turn is under way again or a message of yours came after it
+/// (replied). The one rule for every place that says a block is open:
+/// the column beside a wide conversation, the catch-up card and the
+/// block's own "not answered".
+fn still_open(s: &Session, ti: usize) -> Vec<Decision> {
+    match s.turns.get(ti) {
+        Some(t) if !t.live && !replied(s, ti) => decisions_of(t),
+        _ => Vec::new(),
     }
+}
+
+/// The decisions blocks still open, newest first: each one's turn number
+/// and its decisions (still_open), for the column beside a wide
+/// conversation.
+pub fn open_decisions(s: &Session) -> Vec<(u32, Vec<Decision>)> {
+    (0..s.turns.len())
+        .rev()
+        .filter_map(|ti| {
+            let ds = still_open(s, ti);
+            (!ds.is_empty()).then(|| (s.turns[ti].n, ds))
+        })
+        .collect()
+}
+
+/// How many decisions turn ti's answer asks that still wait on you: what
+/// a catch-up card says is still open (still_open).
+pub(crate) fn open_in_turn(s: &Session, ti: usize) -> usize {
+    still_open(s, ti).len()
 }
 
 impl Drawer<'_> {
@@ -146,7 +160,7 @@ impl Drawer<'_> {
             && !opened(&decisions_sent(&r))
             && !ti.is_some_and(|ti| answered(self.s, ti, ds));
         let mut head = pad.clone().and(paint(strong(C_TEXT), "Decisions"));
-        if passed {
+        if passed && ti.is_some_and(|ti| !still_open(self.s, ti).is_empty()) {
             head.push(dim(" · not answered · d opens the card"));
         }
         self.add(&r, Color::Default, head, Txt::new());

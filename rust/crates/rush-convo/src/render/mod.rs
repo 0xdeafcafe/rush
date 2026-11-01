@@ -46,6 +46,9 @@ pub use spawn::{Child, Spawn, agent_run, asked, spawn_of, tool_run, unquote_arg}
 pub use style::{SHOW_ALL_REF, dur, key_word, money};
 pub use udiff::clean_output;
 
+// The Needs-you section's replies as choices.
+pub use needs::{NEEDS_OWN, needs_choices};
+
 /// s with its inline markdown drawn (**bold**, `code`, links) over base,
 /// as one line: a run with no colour of its own takes base's (Go's
 /// convo.Inline, render.go:1881, for the UI's cards).
@@ -552,6 +555,10 @@ impl Renderer {
         }
         if i + 1 == s.turns.len() {
             k.needs = o.needs.key();
+            // A row of the Needs-you section picked lights its key.
+            if o.selected.starts_with("needs:") {
+                k.sel = o.selected.clone();
+            }
         }
         if i == 0 {
             k.opening = opening::opening_print(s, o);
