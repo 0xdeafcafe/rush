@@ -700,6 +700,16 @@ so `leads()` is neither. What only the rush that leads does:
   verdict and settle (`projects_machine/tidydone.rs` `tidy_plan`,
   `settle_looks`; cleanup.go:236, :741), every 10 minutes and every
   minute at most, with readings of the list;
+  Beyond Go: a session whose branch has landed is put away at once, but
+  while its host still runs it (process alive, not stopped or asleep in
+  info.json; `tidydone.rs` `host_running`) its worktree and branch wait,
+  as Go would have removed them 49 s after an idle turn and left a
+  session sent more work running with its folder gone. A later minute's
+  look removes them, by the same rule, once it has stopped or gone to
+  sleep; a message before then (it brings the session back from put away)
+  keeps them. One `worktree-kept` event ("its session is still running")
+  is logged per session, and the 10-minute clean-up of done work passes
+  over a running session's worktree the same way;
 - restarts sessions' hosts on a new install with Restart on install, or
   while a reload has sessions to move (`settings/updates.rs`
   `watch_hosts`; settings_updates.go:143); enter on Sessions restarts

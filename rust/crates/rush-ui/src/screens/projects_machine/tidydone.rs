@@ -52,6 +52,10 @@ pub(crate) struct Tidy {
     /// Sessions whose worktree stayed (work it would lose), and when.
     pub stayed: HashMap<String, Ms>,
     pub marked_landed: HashSet<String>,
+    /// Sessions put away as landed whose host still runs: their worktree
+    /// and branch wait until it has stopped or gone to sleep, and are kept
+    /// if you send the session something first.
+    pub waiting: HashSet<String>,
 }
 
 /// Whether a is Earlier's: put away, or left a day without a turn and
@@ -119,9 +123,27 @@ fn session_gone(w: &Worktree) -> bool {
         .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
 }
 
+/// Whether the host of a session is still running it: its process alive
+/// and not stopped or asleep (info.json), or coming back (lost). One rush
+/// can't read is taken as running, so its worktree stays. A session rush
+/// doesn't host has only its process (pid) to say.
+pub(crate) fn host_running(id: &str, pid: i32) -> bool {
+    if id.is_empty() {
+        return pid != 0 && rush_host::alive(i64::from(pid));
+    }
+    match rush_host::read_info(id) {
+        // A host publishes "stopped" just before it exits: its process
+        // has to be gone too.
+        Ok(i) => i.lost || !(i.sleeping || i.state == "stopped" && !rush_host::alive(i.host_pid)),
+        Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+    }
+}
+
 /// What the clean-up of done work takes off the UI thread.
 pub(crate) struct TidyPlan {
     agents: Vec<Agent>,
+    /// Each session's host (its id, else "", and pid), by key.
+    hosts: HashMap<String, (String, i32)>,
     due: HashMap<String, bool>,
     finished: HashMap<String, Ms>,
     kept: HashSet<String>,
@@ -158,6 +180,7 @@ pub(crate) fn tidy_plan(m: &mut Model, now: Ms) -> Option<TidyPlan> {
     let mut stale = Vec::new();
     let mut due = HashMap::new();
     let mut finished = HashMap::new();
+    let mut hosts = HashMap::new();
     for g in agents(m) {
         let a = g.a;
         let is_due = due_in(m, d, std::slice::from_ref(&a.key), now) == Some(0);
@@ -168,6 +191,12 @@ pub(crate) fn tidy_plan(m: &mut Model, now: Ms) -> Option<TidyPlan> {
             stale.push(a.clone());
         }
         due.insert(a.key.clone(), is_due);
+        let id = if a.rush {
+            a.job.id.clone()
+        } else {
+            String::new()
+        };
+        hosts.insert(a.key.clone(), (id, a.pid));
         if earlier_of(d, a, now) && !a.in_use() {
             finished.insert(a.key.clone(), now - untouched(d, &g, now));
         }
@@ -182,6 +211,7 @@ pub(crate) fn tidy_plan(m: &mut Model, now: Ms) -> Option<TidyPlan> {
     t.tidying = true;
     Some(TidyPlan {
         agents: m.agents.clone(),
+        hosts,
         due,
         finished,
         kept,
@@ -203,6 +233,15 @@ pub(crate) fn tidy(reg: &rush_core::adapter::Registry, p: TidyPlan) -> Tidied {
     for i in tidyable(&out.wts, &p.due, &p.finished, &session_gone) {
         let w = &out.wts[i];
         if p.kept.contains(&w.path) {
+            continue;
+        }
+        // Put away is not stopped: a session still running keeps its
+        // folder until its host has stopped or gone to sleep.
+        if w.agents.iter().any(|k| {
+            p.hosts
+                .get(k)
+                .is_some_and(|(id, pid)| host_running(id, *pid))
+        }) {
             continue;
         }
         match rush_fleet::tidy_worktree(w) {
@@ -414,6 +453,7 @@ pub(crate) struct Look {
     name: String,
     /// The rush session's id, for the pull requests it follows.
     id: String,
+    pid: i32,
     w: Worktree,
 }
 
@@ -436,13 +476,24 @@ pub(crate) fn settle_looks(m: &mut Model, now: Ms) -> Option<Vec<Look>> {
     if m.kept::<Tidy>().settling {
         return None;
     }
+    m.kept.peek::<Tidy>()?;
+    // A message brought it back from put away: its worktree is kept.
+    let back: Vec<String> = m
+        .agents
+        .iter()
+        .filter(|a| !a.done)
+        .map(|a| a.key.clone())
+        .collect();
+    for k in &back {
+        m.kept::<Tidy>().waiting.remove(k);
+    }
     let t = m.kept.peek::<Tidy>()?;
     let mut looks = Vec::new();
     for a in &m.agents {
         if a.job.live()
             || a.busy()
             || !a.peer.is_empty()
-            || t.settled.contains(&a.key)
+            || t.settled.contains(&a.key) && !t.waiting.contains(&a.key)
             || t.stayed
                 .get(&a.key)
                 .is_some_and(|&at| now - at < LOOK_AGAIN)
@@ -488,6 +539,7 @@ pub(crate) fn settle_looks(m: &mut Model, now: Ms) -> Option<Vec<Look>> {
             } else {
                 String::new()
             },
+            pid: a.pid,
             w,
         });
     }
@@ -506,6 +558,9 @@ pub(crate) struct Landed {
     pub did: Vec<String>,
     /// Agent key → why its worktree stays.
     pub stays: HashMap<String, String>,
+    /// Agent key → its worktree's path and branch, for a landed session
+    /// whose host still runs: put away, its worktree left for now.
+    pub waits: HashMap<String, (String, String)>,
 }
 
 /// A rush session come to life since the list was read: in a turn, with
@@ -526,7 +581,14 @@ fn stirring(id: &str) -> bool {
 /// first; one that has is settled by the rule: removed if rush made it and
 /// it loses nothing, its branch deleted, main brought up to date. Off the
 /// UI thread (settleLanded's work).
-pub(crate) fn settle(mut looks: Vec<Look>) -> Landed {
+pub(crate) fn settle(looks: Vec<Look>) -> Landed {
+    settle_with(looks, &|l| host_running(&l.id, l.pid))
+}
+
+/// settle, with running saying whether a look's session is still run by
+/// its host: such a session's work has landed, but its worktree and
+/// branch wait until it has stopped or gone to sleep.
+fn settle_with(mut looks: Vec<Look>, running: &dyn Fn(&Look) -> bool) -> Landed {
     let mut out = Landed::default();
     for l in &mut looks {
         if !std::fs::metadata(&l.w.path).is_ok_and(|s| s.is_dir()) {
@@ -540,6 +602,11 @@ pub(crate) fn settle(mut looks: Vec<Look>) -> Landed {
             continue;
         }
         out.done.push((l.key.clone(), why));
+        if running(l) {
+            out.waits
+                .insert(l.key.clone(), (l.w.path.clone(), l.w.branch.clone()));
+            continue;
+        }
         match rush_fleet::settle(&l.w) {
             Err(e) => {
                 out.stays.insert(l.key.clone(), e);
@@ -561,7 +628,18 @@ pub(crate) fn on_landed(m: &mut Model, l: Landed) -> Out {
     let mut marked = 0;
     let mut stays: Vec<(String, String)> = Vec::new();
     for (k, why) in &l.done {
-        if let Some(s) = l.stays.get(k) {
+        if let Some((path, branch)) = l.waits.get(k) {
+            m.kept::<Tidy>().settled.insert(k.clone());
+            if m.kept::<Tidy>().waiting.insert(k.clone()) {
+                rush_sys::events::log(
+                    "worktree-kept",
+                    serde_json::json!({
+                        "agent": k, "path": path, "branch": branch,
+                        "why": "its session is still running",
+                    }),
+                );
+            }
+        } else if let Some(s) = l.stays.get(k) {
             if !m.kept::<Tidy>().stayed.contains_key(k) {
                 let (mut name, mut repo, mut s) =
                     ("a done session".to_string(), String::new(), s.as_str());
@@ -581,6 +659,7 @@ pub(crate) fn on_landed(m: &mut Model, l: Landed) -> Out {
             }
             m.kept::<Tidy>().stayed.insert(k.clone(), now);
         } else {
+            m.kept::<Tidy>().waiting.remove(k);
             m.kept::<Tidy>().settled.insert(k.clone());
         }
         let done = m.agents.iter().any(|a| a.key == *k && a.done);
@@ -728,6 +807,7 @@ mod tests {
             done: vec![("a".into(), "pull request #9 merged".into())],
             did: vec!["a: removed a, deleted branch rush/a".into()],
             stays: HashMap::new(),
+            waits: HashMap::new(),
         };
         on_landed(&mut m, l);
         assert!(m.agents[0].done);
@@ -750,6 +830,7 @@ mod tests {
                 done: vec![("a".into(), "its branch is on main".into())],
                 did: Vec::new(),
                 stays,
+                waits: HashMap::new(),
             },
         );
         let texts: Vec<&str> = m.said.iter().map(|s| s.text.as_str()).collect();
@@ -796,5 +877,194 @@ mod tests {
                     && t.ends_with("nothing lost, branches kept")),
             "{texts:?}"
         );
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let o = std::process::Command::new("git")
+            .args(["-c", "user.email=t@t", "-c", "user.name=t"])
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(o.status.success(), "git {args:?}: {:?}", o);
+    }
+
+    /// A repo with a worktree whose branch has landed on main, a model
+    /// whose session "a" is put away over it, and its look.
+    fn landed(name: &str) -> (tempfile::TempDir, Model, std::path::PathBuf, Vec<Look>) {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().canonicalize().unwrap();
+        let (remote, repo) = (root.join("remote.git"), root.join("repo"));
+        std::fs::create_dir_all(&repo).unwrap();
+        git(
+            &root,
+            &[
+                "init",
+                "-q",
+                "--bare",
+                "-b",
+                "main",
+                remote.to_str().unwrap(),
+            ],
+        );
+        git(&repo, &["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join("a.txt"), "a\n").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-qm", "first"]);
+        git(
+            &repo,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        git(&repo, &["push", "-q", "-u", "origin", "main"]);
+        let wt = repo.join(".claude/worktrees").join(name);
+        let branch = format!("rush/{name}");
+        git(
+            &repo,
+            &["worktree", "add", "-q", "-b", &branch, wt.to_str().unwrap()],
+        );
+        let head = std::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(&wt)
+            .output()
+            .unwrap();
+        let base = String::from_utf8(head.stdout).unwrap().trim().to_string();
+        std::fs::write(wt.join("b.txt"), "b\n").unwrap();
+        git(&wt, &["add", "."]);
+        git(&wt, &["commit", "-qm", "the work"]);
+        git(&repo, &["merge", "-q", "--ff-only", &branch]);
+        git(&repo, &["push", "-q", "origin", "main"]);
+        let mut m = model(false);
+        let mut a = agent(name);
+        a.pid = 1;
+        a.done = true;
+        let ws = a.workspace.as_mut().unwrap();
+        ws.path = wt.to_string_lossy().into_owned();
+        ws.repo = repo.to_string_lossy().into_owned();
+        ws.branch = branch;
+        ws.base = base;
+        m.agents = vec![a];
+        m.roots = vec![ws_repo(&m)];
+        write_info(name, "idle", false, i64::from(std::process::id()));
+        let looks = settle_looks(&mut m, 10 * 3_600_000).expect("looks");
+        (d, m, wt, looks)
+    }
+
+    /// What the host of session id last published in info.json.
+    fn write_info(id: &str, state: &str, sleeping: bool, pid: i64) {
+        let dir = rush_host::dir(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        let info = rush_host::Info {
+            id: id.into(),
+            state: state.into(),
+            sleeping,
+            host_pid: pid,
+            ..Default::default()
+        };
+        std::fs::write(dir.join("info.json"), serde_json::to_vec(&info).unwrap()).unwrap();
+    }
+
+    fn ws_repo(m: &Model) -> String {
+        m.agents[0].workspace.as_ref().unwrap().repo.clone()
+    }
+
+    fn branch_exists(repo: &str, b: &str) -> bool {
+        let o = std::process::Command::new("git")
+            .args(["rev-parse", "--verify", "-q", &format!("refs/heads/{b}")])
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        o.status.success()
+    }
+
+    /// Runs one pass of the look for landed work with the session running
+    /// or not, and takes in what it found.
+    fn pass(m: &mut Model, running: bool) {
+        let looks = settle_looks(m, 10 * 3_600_000);
+        let Some(looks) = looks else { return };
+        let l = settle_with(looks, &|_| running);
+        on_landed(m, l);
+    }
+
+    // A landed branch of a live session: put away, but its worktree and
+    // branch stay; once it has stopped, the next pass removes them.
+    #[test]
+    fn landed_live_session_keeps_its_worktree_until_it_stops() {
+        let (_d, mut m, wt, looks) = landed("live");
+        let repo = ws_repo(&m);
+        m.agents[0].done = false;
+        let l = settle_with(looks, &|_| true);
+        assert!(l.waits.contains_key("live"), "{:?}", l.waits.keys());
+        on_landed(&mut m, l);
+        assert!(m.agents[0].done, "put away at once");
+        assert!(wt.exists(), "worktree removed under a running session");
+        assert!(branch_exists(&repo, "rush/live"));
+        // Still running on the next pass: nothing happens, and it isn't
+        // said again.
+        pass(&mut m, true);
+        assert!(wt.exists());
+        assert!(m.kept::<Tidy>().waiting.contains("live"));
+        // Stopped: it goes, with its branch.
+        pass(&mut m, false);
+        assert!(!wt.exists(), "worktree kept after the session stopped");
+        assert!(!branch_exists(&repo, "rush/live"));
+        assert!(!m.kept::<Tidy>().waiting.contains("live"));
+    }
+
+    // A message before it stops brings it back from put away: the
+    // worktree is kept, even when it stops after.
+    #[test]
+    fn a_message_before_it_stops_keeps_the_worktree() {
+        let (_d, mut m, wt, looks) = landed("msg");
+        m.agents[0].done = false;
+        on_landed(&mut m, settle_with(looks, &|_| true));
+        assert!(m.agents[0].done);
+        crate::screens::cmdbar::stops::undone(&mut m, "msg");
+        assert!(!m.agents[0].done);
+        pass(&mut m, false);
+        pass(&mut m, false);
+        assert!(wt.exists(), "a session you wrote to lost its worktree");
+        assert!(!m.kept::<Tidy>().waiting.contains("msg"));
+    }
+
+    // The host's say: running while its process lives, whatever it
+    // published; gone once stopped with its process gone, or asleep.
+    #[test]
+    fn host_running_reads_the_host() {
+        let me = i64::from(std::process::id());
+        let write = write_info;
+        write("hr-idle", "idle", false, me);
+        write("hr-working", "working", false, me);
+        write("hr-stopping", "stopped", false, me);
+        write("hr-stopped", "stopped", false, 0);
+        write("hr-asleep", "idle", true, 0);
+        write("hr-asleep-up", "idle", true, me);
+        assert!(host_running("hr-idle", 0));
+        assert!(host_running("hr-working", 0));
+        assert!(host_running("hr-stopping", 0), "process still there");
+        assert!(!host_running("hr-stopped", 0));
+        assert!(!host_running("hr-asleep", 0));
+        assert!(!host_running("hr-asleep-up", 0));
+        assert!(!host_running("hr-nothing-at-all", 0), "no host left");
+        assert!(host_running("", std::process::id() as i32));
+        assert!(!host_running("", 0));
+    }
+
+    // The same, end to end through the host's own files: idle and alive
+    // keeps the worktree, stopped removes it, asleep removes it.
+    #[test]
+    fn worktree_follows_the_hosts_state() {
+        let me = i64::from(std::process::id());
+        for (name, state, sleeping, pid, goes) in [
+            ("e2e-idle", "idle", false, me, false),
+            ("e2e-stopped", "stopped", false, 0, true),
+            ("e2e-asleep", "idle", true, 0, true),
+        ] {
+            let (_d, mut m, wt, looks) = landed(name);
+            m.agents[0].done = false;
+            write_info(name, state, sleeping, pid);
+            on_landed(&mut m, settle(looks));
+            assert!(m.agents[0].done, "{name}: put away");
+            assert_eq!(!wt.exists(), goes, "{name}");
+        }
     }
 }
