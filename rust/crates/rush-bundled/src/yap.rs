@@ -6,7 +6,10 @@
 //! which the window reads (follow). The plugin is the switch.
 //! Ported from internal/bundled/yap/plugin.go:1-116. New in the Rust port
 //! (no Go original): the window also tells yap the words on its screen on
-//! that socket ([`context_line`]), so yap spells them as they're written.
+//! that socket ([`context_line`]), so yap spells them as they're written,
+//! and answers each finished dictation: it put it in its box itself
+//! ([`took_line`]), so a yap that waits for that skips its paste, or it
+//! left it ([`left_line`]), so yap pastes without waiting longer.
 
 use std::io::{BufRead, BufReader, Write as _};
 use std::os::unix::net::UnixStream;
@@ -82,27 +85,68 @@ struct Hello<'a> {
 struct Context<'a> {
     app: &'a str,
     words: &'a [String],
+    /// The window answers a finished dictation: it put it in its box
+    /// itself ([`took_line`]) or left it ([`left_line`]); a yap that
+    /// knows waits a moment for the answers before it pastes.
+    takes: bool,
 }
 
 /// The line that tells yap the words on the window's screen, most wanted
-/// first, and the app it is (its bundle id, empty when unknown):
-/// `{"context":{"app":"…","words":["Redis","rushd"]}}` and a newline.
+/// first, the app it is (its bundle id, empty when unknown), and that it
+/// takes a finished dictation itself:
+/// `{"context":{"app":"…","words":["Redis","rushd"],"takes":true}}` and a
+/// newline.
 pub fn context_line(app: &str, words: &[String]) -> String {
     let mut s = serde_json::to_string(&Hello {
-        context: Context { app, words },
+        context: Context {
+            app,
+            words,
+            takes: true,
+        },
     })
     .unwrap_or_default();
     s.push('\n');
     s
 }
 
+/// The line that tells yap the window put the dictation it just finished
+/// (text, as its done said it) in its box, so yap needn't paste it:
+/// `{"took":"…"}` and a newline. A yap that doesn't know it ignores it.
+pub fn took_line(text: &str) -> String {
+    answer("took", text)
+}
+
+/// The line that tells yap the window left the dictation it just finished
+/// to its paste (it hasn't the keys, or no box has): `{"left":"…"}` and a
+/// newline.
+pub fn left_line(text: &str) -> String {
+    answer("left", text)
+}
+
+fn answer(what: &str, text: &str) -> String {
+    let mut m = serde_json::Map::new();
+    m.insert(what.into(), text.into());
+    let mut s = serde_json::Value::Object(m).to_string();
+    s.push('\n');
+    s
+}
+
+/// A line for yap: one that's said again each time yap is found (the
+/// words on screen, latest wins), or one said once, to the yap there now.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Say {
+    Kept(String),
+    Once(String),
+}
+
 /// Hands out each state yap reports until stop is sent to or dropped,
 /// finding yap again whenever it starts. Losing yap mid-dictation ends the
 /// dictation. Each line sent on say goes to yap as it is (a newline put
-/// on its end if it hasn't one); the latest is said again each time yap
-/// is found. A line that can't be written ends that connection, as one
-/// that can't be read does.
-pub fn follow(stop: mpsc::Receiver<()>, say: mpsc::Receiver<String>, out: impl FnMut(State)) {
+/// on its end if it hasn't one); the latest kept one is said again each
+/// time yap is found, a once one only to the yap there (lost when there's
+/// none). A line that can't be written ends that connection, as one that
+/// can't be read does.
+pub fn follow(stop: mpsc::Receiver<()>, say: mpsc::Receiver<Say>, out: impl FnMut(State)) {
     follow_at(&socket(), stop, say, out);
 }
 
@@ -121,12 +165,19 @@ fn lock(s: &Shared) -> std::sync::MutexGuard<'_, Link> {
     s.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Writes the latest kept line on the connection.
+fn write_line(g: &mut Link) {
+    if let Some(line) = g.latest.clone() {
+        write_str(g, &line);
+    }
+}
+
 /// Writes line on the connection; one that fails is shut, which ends its
 /// read.
-fn write_line(g: &mut Link) {
-    let failed = match (&g.conn, &g.latest) {
-        (Some(c), Some(line)) => (&*c).write_all(line.as_bytes()).is_err(),
-        _ => false,
+fn write_str(g: &mut Link, line: &str) {
+    let failed = match &g.conn {
+        Some(c) => (&*c).write_all(line.as_bytes()).is_err(),
+        None => false,
     };
     if failed && let Some(c) = g.conn.take() {
         let _ = c.shutdown(std::net::Shutdown::Both);
@@ -136,7 +187,7 @@ fn write_line(g: &mut Link) {
 fn follow_at(
     path: &std::path::Path,
     stop: mpsc::Receiver<()>,
-    say: mpsc::Receiver<String>,
+    say: mpsc::Receiver<Say>,
     mut out: impl FnMut(State),
 ) {
     // stop is watched on a thread of its own, which wakes a blocked read
@@ -159,7 +210,11 @@ fn follow_at(
     // same lock: a connection handed over is told the latest first.
     let cur = current.clone();
     std::thread::spawn(move || {
-        for mut line in say {
+        for said in say {
+            let (kept, mut line) = match said {
+                Say::Kept(l) => (true, l),
+                Say::Once(l) => (false, l),
+            };
             if !line.ends_with('\n') {
                 line.push('\n');
             }
@@ -167,8 +222,12 @@ fn follow_at(
             if g.stopped {
                 return;
             }
-            g.latest = Some(line);
-            write_line(&mut g);
+            if kept {
+                g.latest = Some(line);
+                write_line(&mut g);
+            } else {
+                write_str(&mut g, &line);
+            }
         }
     });
     loop {
@@ -278,23 +337,30 @@ mod tests {
             (
                 "com.mitchellh.ghostty",
                 &["Redis", "rushd"],
-                "{\"context\":{\"app\":\"com.mitchellh.ghostty\",\"words\":[\"Redis\",\"rushd\"]}}\n",
+                "{\"context\":{\"app\":\"com.mitchellh.ghostty\",\"words\":[\"Redis\",\"rushd\"],\"takes\":true}}\n",
             ),
-            ("", &[], "{\"context\":{\"app\":\"\",\"words\":[]}}\n"),
+            (
+                "",
+                &[],
+                "{\"context\":{\"app\":\"\",\"words\":[],\"takes\":true}}\n",
+            ),
             (
                 "",
                 &["say \"hi\""],
-                "{\"context\":{\"app\":\"\",\"words\":[\"say \\\"hi\\\"\"]}}\n",
+                "{\"context\":{\"app\":\"\",\"words\":[\"say \\\"hi\\\"\"],\"takes\":true}}\n",
             ),
         ];
         for (app, words, want) in cases {
             let words: Vec<String> = words.iter().map(|w| w.to_string()).collect();
             assert_eq!(context_line(app, &words), *want, "{app} {words:?}");
         }
+        assert_eq!(took_line("say \"hi\""), "{\"took\":\"say \\\"hi\\\"\"}\n");
+        assert_eq!(left_line("ship it"), "{\"left\":\"ship it\"}\n");
     }
 
-    // The latest line is said as yap is found, each new one as it comes,
-    // and a yap found again is told the latest again.
+    // The latest kept line is said as yap is found, each new one as it
+    // comes, and a yap found again is told the latest kept one again; a
+    // once line goes only to the yap there.
     #[test]
     fn follow_tells_yap_the_words() {
         let home = tempfile::tempdir().unwrap();
@@ -305,7 +371,7 @@ mod tests {
             for n in 0..2 {
                 let Ok((c, _)) = l.accept() else { return };
                 let mut r = BufReader::new(c);
-                let lines = if n == 0 { 2 } else { 1 };
+                let lines = if n == 0 { 3 } else { 1 };
                 for _ in 0..lines {
                     let mut line = String::new();
                     if r.read_line(&mut line).unwrap_or(0) == 0 {
@@ -321,7 +387,9 @@ mod tests {
         });
         let (stop_tx, stop) = mpsc::channel();
         let (say_tx, say) = mpsc::channel();
-        say_tx.send(context_line("", &["Redis".into()])).unwrap();
+        say_tx
+            .send(Say::Kept(context_line("", &["Redis".into()])))
+            .unwrap();
         let t = std::thread::spawn(move || follow_at(&sock, stop, say, |_| {}));
         let next = || {
             heard
@@ -331,9 +399,13 @@ mod tests {
         assert_eq!(next(), (0, context_line("", &["Redis".into()])));
         // Said without its newline: one is put on.
         say_tx
-            .send(context_line("", &["rushd".into()]).trim_end().to_string())
+            .send(Say::Kept(
+                context_line("", &["rushd".into()]).trim_end().to_string(),
+            ))
             .unwrap();
         assert_eq!(next(), (0, context_line("", &["rushd".into()])));
+        say_tx.send(Say::Once(took_line("ship it"))).unwrap();
+        assert_eq!(next(), (0, took_line("ship it")));
         assert_eq!(next(), (1, context_line("", &["rushd".into()])));
         drop(stop_tx);
         t.join().unwrap();

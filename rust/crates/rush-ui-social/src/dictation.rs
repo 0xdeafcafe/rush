@@ -4,9 +4,14 @@
 //! speak, and a light running round the box's edge.
 //!
 //! Two engines feed it. yap, followed on its socket while the yap plugin
-//! is on: when you let go yap pastes, and that paste goes in as text
-//! however long it is: it's what you said, not a log to fold away. And
-//! rush's own push-to-talk (pushtalk.rs), while the apple voice plugin
+//! is on: when you let go and yap says it's done, the words go straight
+//! into the box with the keys and yap is told rush took them, so a yap
+//! that waits for that doesn't paste (a window that doesn't take them
+//! says it left them, so yap pastes at once). The paste of an older yap,
+//! the same words into the same box a moment later, is dropped before
+//! it's drawn, and so is yap saying done again. Where no box takes them,
+//! yap's paste goes in as text however long it is: it's what you said,
+//! not a log to fold away. And rush's own push-to-talk (pushtalk.rs), while the apple voice plugin
 //! is on: ctrl+space starts it, and its words go in at the cursor as
 //! typed when it's done. Both on, fn is yap's and ctrl+space is rush's;
 //! the box shows whichever is under way.
@@ -35,6 +40,7 @@ use super::screenwords;
 use crate::frame::{Editor, Out, Press};
 use crate::model::Model;
 use crate::worker::Note;
+use rush_bundled::yap::Say;
 
 /// The yap plugin's name: its switch.
 pub const YAP: &str = "yap";
@@ -54,8 +60,9 @@ pub struct Dictation {
     /// is off.
     pub yap: YapState,
     yap_stop: Option<mpsc::Sender<()>>,
-    /// Lines for yap while it's followed: the words on screen.
-    yap_say: Option<mpsc::Sender<String>>,
+    /// Lines for yap while it's followed: the words on screen, and that a
+    /// dictation was taken.
+    yap_say: Option<mpsc::Sender<Say>>,
     /// The words on screen as last read, when, what they were read from,
     /// and whether a wake is asked to read them again.
     words: Vec<String>,
@@ -66,6 +73,16 @@ pub struct Dictation {
     /// yap said it.
     yap_final: String,
     yap_final_at: rush_core::time::Ms,
+    /// yap's done is dealt with (its words went into a box, by rush or by
+    /// a paste): another done is the same dictation said again, not shown.
+    /// Until yap says another phase.
+    yap_handled: bool,
+    /// The dictation rush put in a box itself, when, and which box, until
+    /// yap's paste of it arrives.
+    yap_took: Option<(String, rush_core::time::Ms, String)>,
+    /// A paste that came while yap was finishing, before its done, and
+    /// when: the dictation, if done says the same words.
+    yap_early: Option<(String, rush_core::time::Ms)>,
     /// What hears push-to-talk; None leaves ctrl+space alone.
     engine: Option<Arc<dyn Engine>>,
     talk: Talk,
@@ -154,6 +171,8 @@ pub fn sync(m: &mut Model) {
         d.yap_say = None;
         d.yap = YapState::default();
         d.yap_final.clear();
+        d.yap_took = None;
+        d.yap_early = None;
         return;
     }
     if state(m).yap_stop.is_some() {
@@ -238,7 +257,10 @@ fn read_words(m: &mut Model, now: Instant) -> bool {
 fn say_words(m: &mut Model) {
     let d = state(m);
     if let Some(tx) = &d.yap_say {
-        let _ = tx.send(rush_bundled::yap::context_line(this_app(), &d.words));
+        let _ = tx.send(Say::Kept(rush_bundled::yap::context_line(
+            this_app(),
+            &d.words,
+        )));
     }
 }
 
@@ -255,14 +277,70 @@ fn words_now(m: &mut Model) -> Vec<String> {
     state(m).words.clone()
 }
 
-/// Takes what yap says (onYap).
+/// Takes what yap says (onYap). A done going to this window, with a box
+/// that has the keys, goes into that box at once, as yap's paste would
+/// have put it, and yap is told it was taken; the look ends in the same
+/// step, so no frame shows the words twice.
 pub fn on_yap(m: &mut Model, s: YapState) -> Out {
     let now = m.clock.unwrap_or_else(rush_core::time::now);
-    let d = state(m);
-    if s.phase == "done" {
-        d.yap_final = s.settled.clone();
-        d.yap_final_at = now;
+    if s.phase != "done" {
+        let d = state(m);
+        d.yap_handled = false;
+        if s.phase != "finishing" {
+            d.yap_early = None;
+        } else if d.yap_early.is_some() {
+            // Its paste is in already: the look stays away.
+            return Out::Idle;
+        }
+        d.yap = s;
+        return Out::Draw;
     }
+    let hidden = YapState {
+        phase: "hidden".into(),
+        ..YapState::default()
+    };
+    let d = state(m);
+    // Said again after it was dealt with: nothing new.
+    if d.yap_handled {
+        d.yap = hidden;
+        return Out::Draw;
+    }
+    // Its paste came first and went in as an ordinary paste.
+    if let Some((text, at)) = d.yap_early.take()
+        && is_dictation(&s.settled, at, now, &text)
+    {
+        d.yap_handled = true;
+        d.yap = hidden;
+        return Out::Draw;
+    }
+    let shown = yap_shown(&s, m.term_focused, this_app());
+    let into = target_id(m);
+    if shown
+        && !s.settled.trim().is_empty()
+        && let Some(into) = into
+        && let Some(ed) = target(m)
+    {
+        // Just as yap pastes it: the words and a space.
+        ed.insert_str(&crate::frame::editor::clean_paste(&format!(
+            "{} ",
+            s.settled
+        )));
+        let d = state(m);
+        if let Some(tx) = &d.yap_say {
+            let _ = tx.send(Say::Once(rush_bundled::yap::took_line(&s.settled)));
+        }
+        d.yap_took = Some((s.settled, now, into));
+        d.yap_final.clear();
+        d.yap_handled = true;
+        d.yap = hidden;
+        return Out::Draw;
+    }
+    let d = state(m);
+    if let Some(tx) = &d.yap_say {
+        let _ = tx.send(Say::Once(rush_bundled::yap::left_line(&s.settled)));
+    }
+    d.yap_final = s.settled.clone();
+    d.yap_final_at = now;
     d.yap = s;
     Out::Draw
 }
@@ -543,6 +621,13 @@ fn target(m: &mut Model) -> Option<&mut Editor> {
     None
 }
 
+/// Which box target() is: the open Session's key, or "" for Agents'.
+fn target_id(m: &mut Model) -> Option<String> {
+    let key = crate::sess::open_key(m);
+    target(m)?;
+    Some(key.unwrap_or_default())
+}
+
 /// Push-to-talk's words, in the box at its cursor as typed, a space
 /// before them as the look showed; on the clipboard when no box takes
 /// them, so what you said isn't lost.
@@ -561,13 +646,25 @@ fn type_in(m: &mut Model, said: &str) {
     m.flash("what you said is on the clipboard: no box had the keys");
 }
 
-/// A paste that's the dictation yap just finished goes in as typed, never
-/// folded into a chip, the prompt's newlines kept; any paste ends the
-/// dictation's look (yapPaste, yapDictated).
+/// yap's paste of a dictation rush already put in the same box, a moment
+/// ago, is dropped before it's drawn. Else a paste that's the dictation
+/// yap just finished goes in as typed, never folded into a chip, the
+/// prompt's newlines kept; any paste ends the dictation's look (yapPaste,
+/// yapDictated).
 pub fn paste(m: &mut Model, text: &str) -> Out {
     let now = m.clock.unwrap_or_else(rush_core::time::now);
+    if let Some((took, at, into)) = state(m).yap_took.clone()
+        && is_dictation(&took, at, now, text)
+        && target_id(m).as_deref() == Some(into.as_str())
+    {
+        state(m).yap_took = None;
+        return Out::Draw;
+    }
     let d = state(m);
     let (final_, at) = (std::mem::take(&mut d.yap_final), d.yap_final_at);
+    if d.yap.phase == "finishing" {
+        d.yap_early = Some((text.to_string(), now));
+    }
     if d.yap.phase == "done" || d.yap.phase == "finishing" {
         d.yap = YapState {
             phase: "hidden".into(),
@@ -577,6 +674,7 @@ pub fn paste(m: &mut Model, text: &str) -> Out {
     if !is_dictation(&final_, at, now, text) {
         return Out::Pass;
     }
+    state(m).yap_handled = true;
     let text = crate::frame::editor::clean_paste(text);
     match target(m) {
         Some(ed) => {
