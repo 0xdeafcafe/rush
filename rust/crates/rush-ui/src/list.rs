@@ -1951,8 +1951,8 @@ impl Model {
     /// far it is from pushed, its uncommitted files, its PR, what's left
     /// before Earlier has it, what its finished turn wants of you and
     /// what its own view says of where it stands (rail.go:80 agentWhere).
-    #[cfg(test)]
-    pub(crate) fn agent_where(&self, a: &Agent, i: usize, w: usize) -> Line {
+    #[doc(hidden)]
+    pub fn agent_where(&self, a: &Agent, i: usize, w: usize) -> Line {
         self.agent_where_in(a, &self.roots[i], w)
     }
 

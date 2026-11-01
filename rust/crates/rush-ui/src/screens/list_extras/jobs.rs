@@ -867,7 +867,7 @@ pub struct RowsMemo {
     rows: Vec<Line>,
 }
 
-#[cfg(test)]
+#[doc(hidden)]
 impl RowsMemo {
     /// Marks the kept rows, to see them used.
     pub fn mark_for_test(&mut self) {

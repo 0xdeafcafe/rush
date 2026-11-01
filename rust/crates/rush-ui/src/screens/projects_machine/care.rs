@@ -174,7 +174,7 @@ fn menubar_running() -> bool {
 /// A notification, off the UI thread; unless_menu_bar leaves it to the
 /// menu bar when that runs (notifyLater). Not from tests.
 fn notify_later(title: &'static str, body: &'static str, unless_menu_bar: bool) {
-    if cfg!(test) {
+    if rush_core::sandbox::active() {
         return;
     }
     std::thread::spawn(move || {

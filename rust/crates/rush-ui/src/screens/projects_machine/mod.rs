@@ -18,7 +18,8 @@ pub(crate) mod place;
 mod projectmem;
 pub(crate) mod prsheet;
 mod rows;
-mod scan;
+#[doc(hidden)]
+pub mod scan;
 pub mod scripts;
 pub mod shells;
 mod temp;

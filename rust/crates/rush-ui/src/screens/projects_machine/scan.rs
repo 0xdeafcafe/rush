@@ -172,7 +172,7 @@ pub(crate) fn refresh_folders(m: &mut Model) {
 }
 
 /// What the worktree scan found.
-pub(crate) struct Found {
+pub struct Found {
     wts: Vec<Worktree>,
     tmp: Option<rush_fleet::Scratch>,
     agent_tmp: HashMap<String, i64>,
@@ -687,8 +687,8 @@ pub(crate) fn open_temp(m: &mut Model, key: &str) {
 }
 
 /// What a scan found of /tmp alone, for tests.
-#[cfg(test)]
-pub(crate) fn found_tmp(tmp: rush_fleet::Scratch) -> Found {
+#[doc(hidden)]
+pub fn found_tmp(tmp: rush_fleet::Scratch) -> Found {
     Found {
         wts: Vec::new(),
         tmp: Some(tmp),
