@@ -18,6 +18,6 @@
   A finished agent's process stays in memory (often 300–800 MB) until it is
   stopped. Hibernating stops it; the conversation is kept and enter resumes
   off: finished agents stay in memory until you stop them (ctrl+x).
-    1 of 47 ───────────────────────────────────────────────────────────────
+    1 of 48 ───────────────────────────────────────────────────────────────
   enter choose  ·  ? details  ·  ctrl+↑↓ section  ·  [ ] page  ·  esc back
 ────────────────────────────────────────────────────────────────────────────────
