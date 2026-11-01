@@ -689,6 +689,12 @@ pub trait Plugger {
 /// transcript (if it has one yet) is at transcript.
 pub trait MemoryReader {
     fn memory(&self, p: &Profile, cwd: &str, transcript: &str) -> Memory;
+    /// The folder p's sessions in cwd keep their own memory notes in, ""
+    /// when it keeps none: memory's dir, without reading every file. The
+    /// host asks it when a write into that folder is answered.
+    fn memory_dir(&self, p: &Profile, cwd: &str) -> String {
+        self.memory(p, cwd, "").dir
+    }
     /// Deletes one of its files, and whatever points to it.
     fn forget_file(&self, path: &str) -> Result<()>;
 }

@@ -55,6 +55,7 @@ use crate::wire::*;
 
 mod agent;
 use agent::Watching;
+mod memallow;
 pub use agent::{ROOT_IDLE, SPAWNED_IDLE, STALL_AFTER};
 
 /// macOS's malloc in its space-efficient mode, set in a host's environment
@@ -306,6 +307,11 @@ pub(crate) struct State {
     clients: HashMap<u64, ClientConn>,
     next_client: u64,
     pending: HashMap<String, Asked>,
+    /// The call each pending approval asks about.
+    calls: HashMap<String, tool::Call>,
+    /// How the user last answered a write into the memory folder: the
+    /// rest of that memory's writes are answered so too (memallow).
+    mem_answer: Option<memallow::MemAnswer>,
     /// A message sent now while the agent asked something waits in the
     /// queue, and goes as soon as that's answered.
     after_ask: bool,
@@ -608,6 +614,8 @@ fn build(reg: Registry, hooks: Hooks, cfg: Config) -> (Host, Receiver<Msg>) {
         clients: HashMap::new(),
         next_client: 0,
         pending: HashMap::new(),
+        calls: HashMap::new(),
+        mem_answer: None,
         after_ask: false,
         pics: HashMap::new(),
         commands: None,
@@ -1233,6 +1241,8 @@ impl Host {
         st.task_start.clear();
         st.info.relogin = false; // the next one starts on the account signed in now
         st.pending.clear();
+        st.calls.clear();
+        st.mem_answer = None;
         if matches!(st.info.state.as_str(), "working" | "blocked" | "starting") {
             // It died mid-turn; the next message resumes it.
             st.info.state = "idle".into();
@@ -1494,6 +1504,8 @@ impl Host {
         st.not_asked.clear();
         st.info.relogin = false;
         st.pending.clear();
+        st.calls.clear();
+        st.mem_answer = None;
         c
     }
 
@@ -2303,10 +2315,16 @@ impl Host {
                 let (Some(req), Some(c)) = (st.pending.get(&o.id).copied(), conn) else {
                     return Err(format!("no pending request {}", o.id));
                 };
+                let call = st.calls.remove(&o.id);
                 self.answered(&mut st, &o.id);
                 self.publish(&mut st);
                 let opts = st.options.remove(&o.id).unwrap_or_default();
                 drop(st);
+                if let Some(call) = call {
+                    // Before the agent hears it: the memory's next write
+                    // may be asked at once.
+                    self.note_mem_answer(&o.id, &call, o.op == "allow");
+                }
                 let r = answer_agent(&c, &o.id, req, o, &opts);
                 let mut st = self.lock();
                 self.after_answer(&mut st);
@@ -2640,6 +2658,7 @@ impl Host {
 
     /// Forgets a permission request and tells clients it is settled.
     fn answered(&self, st: &mut State, id: &str) {
+        st.calls.remove(id);
         if st.pending.remove(id).is_none() {
             return;
         }
@@ -2783,8 +2802,9 @@ impl Host {
             Event::Approval(a) => {
                 st.options.insert(a.id.clone(), a.options.clone());
                 st.pending.insert(a.id.clone(), Asked::default());
+                st.calls.insert(a.id.clone(), a.call.clone());
                 let needs = needs_call(&a.call);
-                if !self.hold(st, &a.id, "permission", &needs) {
+                if !self.answer_as_memory(st, &a) && !self.hold(st, &a.id, "permission", &needs) {
                     st.info.state = "blocked".into();
                     st.info.needs = needs;
                 }
@@ -2850,6 +2870,7 @@ impl Host {
             }
             Event::TurnEnd(e) => {
                 st.w.waits_on.clear();
+                st.mem_answer = None; // a memory's writes are its turn's
                 self.on_turn_end(st, conn, e);
                 return;
             }

@@ -299,6 +299,20 @@ impl MemoryReader for Claude {
     fn memory(&self, p: &Profile, cwd: &str, transcript: &str) -> Memory {
         crate::memory::memory(&p.dir, cwd, transcript)
     }
+    /// Its auto memory folder for p's sessions in cwd, as memory says, read
+    /// from no file; a profile without a folder is ~/.claude.
+    fn memory_dir(&self, p: &Profile, cwd: &str) -> String {
+        let cfg = if p.dir.is_empty() {
+            path_str(&Account::home().config_dir)
+        } else {
+            p.dir.clone()
+        };
+        let proj = crate::memory::project_folder(&cfg, cwd);
+        if proj.is_empty() {
+            return String::new();
+        }
+        crate::files::join(&[&proj, "memory"])
+    }
     fn forget_file(&self, path: &str) -> adapter::Result<()> {
         Ok(crate::memory::forget_file(path)?)
     }

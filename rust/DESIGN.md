@@ -815,6 +815,16 @@ are still written. To try a rush that leads without it touching anything,
 run it under a sandbox that denies writes outside a copy of rush's folder
 and signals to other processes as well (the sweep's `lead-trial.sb`).
 
+## One answer for a memory (Rust-only)
+
+The host keeps how you answered a Write or Edit into the session's own
+memory folder (the harness names it: `MemoryReader::memory_dir`, Claude
+Code's `projects/<repo>/memory`). For the rest of that turn, up to two
+minutes, the agent's next request to write the same note or its index,
+MEMORY.md, is answered the same way without a card, and logged as
+`permission-auto` (reason `memory`). Any other path still asks.
+`rush-host/src/server/memallow.rs`.
+
 ## The runaway guard (Rust-only)
 
 Three checks that keep a busy few hours from spending a week's limit,
