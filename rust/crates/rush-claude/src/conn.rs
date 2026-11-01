@@ -16,8 +16,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use rush_core::adapter::{
-    self, Adopter, Answerer, Asker, Backgrounder, CacheKeeper, Conn, ContextReader, Driver, Hearer, Homed,
-    Input, Orphans, Responder, Sink, StartOptions, TaskStopper, ToolServer,
+    self, Adopter, Answerer, Asker, Backgrounder, CacheKeeper, Conn, ContextReader, Driver, Hearer,
+    Homed, Input, Orphans, Responder, Sink, StartOptions, TaskStopper, ToolServer,
 };
 use rush_core::agent::PreviewLine;
 use rush_core::event::{self, Event};

@@ -233,8 +233,8 @@ pub struct Config {
         skip_serializing_if = "is_default"
     )]
     pub guard: Guard,
-    /// Keeping idle sessions' prompt caches warm (Rust-only): on until
-    /// turned off.
+    /// Keeping idle sessions' prompt caches warm (Rust-only): off until
+    /// turned on.
     #[serde(
         rename = "cacheKeep",
         deserialize_with = "lenient",
@@ -937,18 +937,18 @@ impl Guard {
     }
 }
 
-/// Keeping idle sessions' prompt caches warm, as set (Rust-only): on
-/// unless turned off, for every harness that can or for some. A number
+/// Keeping idle sessions' prompt caches warm, as set (Rust-only): off
+/// until turned on, for every harness that can or for some. A number
 /// left 0 is its default. See rush_core::cachekeep.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CacheKeep {
     #[serde(
-        rename = "off",
+        rename = "on",
         deserialize_with = "lenient",
         skip_serializing_if = "is_false"
     )]
-    pub off: bool,
+    pub on: bool,
     /// Kept this many minutes after a session goes idle: 0 is 15.
     #[serde(
         rename = "minutes",
@@ -973,7 +973,7 @@ impl CacheKeep {
 
     /// Whether sessions of harness kind have their caches kept.
     pub fn on_for(&self, kind: &str) -> bool {
-        self.harnesses.get(kind).copied().unwrap_or(!self.off)
+        self.harnesses.get(kind).copied().unwrap_or(self.on)
     }
 
     /// As rush-core's decide takes it.

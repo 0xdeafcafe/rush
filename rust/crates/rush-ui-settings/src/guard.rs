@@ -149,14 +149,14 @@ pub fn sections(m: &Model) -> Vec<Section> {
 }
 
 /// Settings › General's Prompt cache (Rust-only): keeping idle sessions'
-/// prompt caches warm, on until turned off. What it does is the accounts
+/// prompt caches warm, off until turned on. What it does is the accounts
 /// module's (guard.rs keep_warm) and rush_core::cachekeep's; each harness
 /// can be set apart on its own page.
 pub fn cache_sections(m: &Model) -> Vec<Section> {
     let k = config(m).cache_keep.clone();
     let mut rows = vec![choice(
         "Keep it warm",
-        on_off(!k.off),
+        on_off(k.on),
         "A provider keeps a session's prompt cached for a while after its last request (Claude: 5 minutes, or an hour), and a message after that pays to write the whole context again: 1.25× the input price for a 5-minute cache, 2× for an hour's. Just before an idle session's cache lapses, rush sends one small request that reads the whole cached context, a tenth of the price, and its life starts over. It isn't a message: nothing is added to the conversation, no turn runs, nothing notifies. It only does this for a session that went idle within the time below, with a context worth it; never one asleep, done, held, or on an account past its pace, nor while you're away. Each is in the session's events as cache-kept, with its cost.",
         &[
             (
@@ -168,9 +168,9 @@ pub fn cache_sections(m: &Model) -> Vec<Section> {
                 "caches lapse 5 minutes (or an hour) after the last request.",
             ),
         ],
-        set(|m, v| config_mut(m).cache_keep.off = v == "off"),
+        set(|m, v| config_mut(m).cache_keep.on = v == "on"),
     )];
-    if !k.off {
+    if k.on {
         rows.push(numbers(
             "  for",
             k.minutes as f64,
@@ -183,7 +183,7 @@ pub fn cache_sections(m: &Model) -> Vec<Section> {
     }
     vec![Section {
         title: "Prompt cache".into(),
-        note: "harnesses that can, Claude Code for now".into(),
+        note: "off until you turn it on; Claude Code for now".into(),
         rows,
         ..Section::default()
     }]
@@ -218,10 +218,10 @@ pub fn cache_harness_section(m: &Model, kind: &str) -> Option<Section> {
             };
         }),
     );
-    row.unset = if ck.off {
-        "as General: off"
-    } else {
+    row.unset = if ck.on {
         "as General: on"
+    } else {
+        "as General: off"
     }
     .into();
     Some(Section::new("Prompt cache", vec![row]))

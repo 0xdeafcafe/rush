@@ -743,7 +743,7 @@ fn input(m: &mut Model, now: Ms) -> Input {
 /// harness: the rush sessions it may keep, by id.
 fn keep_in(m: &Model) -> Option<KeepIn> {
     let ck = &cfg(m).cache_keep;
-    if ck.off && !ck.harnesses.values().any(|on| *on) {
+    if !ck.on && !ck.harnesses.values().any(|on| *on) {
         return None;
     }
     let ids = m

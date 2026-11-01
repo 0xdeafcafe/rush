@@ -761,13 +761,13 @@ fn caches_kept_warm_while_it_pays() {
 #[test]
 fn cache_keep_is_set_per_harness() {
     let mut c = rush_state::config::CacheKeep::default();
-    assert!(c.on_for("claude") && c.on_for("codex"), "on by default");
+    assert!(!c.on_for("claude") && !c.on_for("codex"), "off by default");
     assert_eq!(c.settings().keep_for, 15 * MIN);
-    c.harnesses.insert("codex".into(), false);
-    assert!(c.on_for("claude") && !c.on_for("codex"));
-    c.off = true;
     c.harnesses.insert("claude".into(), true);
     assert!(c.on_for("claude") && !c.on_for("pi"));
+    c.on = true;
+    c.harnesses.insert("codex".into(), false);
+    assert!(c.on_for("claude") && c.on_for("pi") && !c.on_for("codex"));
     let mut cfg = Config::default();
     assert!(!serde_json::to_string(&cfg).unwrap().contains("cacheKeep"));
     cfg.cache_keep.minutes = 30;
