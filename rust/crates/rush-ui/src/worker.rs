@@ -44,11 +44,20 @@ pub enum Note {
         r#gen: u64,
         err: String,
     },
+    /// A conversation just opened: as much of its end as is read first,
+    /// laid out as the view draws it, when it has drawn.
+    End {
+        r#gen: u64,
+        sess: Box<Session>,
+        warm: Option<Box<Warm>>,
+    },
     /// A conversation's end read ahead of time, topped up with what was
-    /// written since: the view's first reading (TailStart::From).
+    /// written since: the view's first reading (TailStart::From), laid
+    /// out as End's is.
     Seeded {
         r#gen: u64,
         sess: Box<Session>,
+        warm: Option<Box<Warm>>,
     },
     /// The whole of a conversation opened on its end, read after it, and
     /// its end laid out as the view last drew it, when it had.
@@ -636,9 +645,10 @@ pub fn spawn_tail_at(
             // read and the wait is missed.
             let w = Watcher::new();
             w.watch(&[&path]);
-            let (mut tail, seed) = match start {
-                TailStart::End(p) => (Tail::from_end(&p, TAIL_END, decode.clone()), None),
-                TailStart::From(t, s) => (*t, s),
+            // fresh: read from its end here, not where a read ahead stopped.
+            let (mut tail, seed, mut fresh) = match start {
+                TailStart::End(p) => (Tail::from_end(&p, TAIL_END, decode.clone()), None, true),
+                TailStart::From(t, s) => (*t, s, false),
             };
             tail.stop = Some(st.clone());
             if let Some(mut sess) = seed {
@@ -663,7 +673,26 @@ pub fn spawn_tail_at(
                 if !read {
                     tail = Tail::from_end(&path, TAIL_END, decode.clone());
                     tail.stop = Some(st.clone());
-                } else if !tx.send(Note::Seeded { r#gen, sess }) {
+                    fresh = true;
+                } else {
+                    let warm = warm(&mut sess, &drawn, spawns.as_ref());
+                    if !tx.send(Note::Seeded { r#gen, sess, warm }) {
+                        return;
+                    }
+                }
+            }
+            // Its end read whole here first and laid out as the view draws
+            // it, before the view has it (Go's warmed, rushmode.go:2064):
+            // the frame that shows it draws nothing new. What's written
+            // after comes a slice at a time, below.
+            let mut end = Session::new();
+            if fresh && tail.read(&mut end).unwrap_or(false) && !st.load(Ordering::Relaxed) {
+                let warm = warm(&mut end, &drawn, spawns.as_ref());
+                if !tx.send(Note::End {
+                    r#gen,
+                    sess: Box::new(end),
+                    warm,
+                }) {
                     return;
                 }
             }
@@ -1157,7 +1186,9 @@ mod tests {
         }
         impl App<Note> for Notes {
             fn update(&mut self, m: Msg<Note>) -> Step {
-                if let Msg::App(Note::Tail { .. }) = m {
+                // The first read comes as the end, what's added after as
+                // slices.
+                if let Msg::App(Note::End { .. } | Note::Tail { .. }) = m {
                     self.n += 1;
                     if self.n == 1 {
                         use std::io::Write;
@@ -1317,6 +1348,11 @@ mod tests {
                         let mut s = Session::new();
                         fresh.apply(&mut s);
                         assert!(s.partial, "the end first");
+                        self.tails += 1;
+                        Step::Idle
+                    }
+                    Msg::App(Note::End { sess, .. }) => {
+                        assert!(sess.partial, "the end first");
                         self.tails += 1;
                         Step::Idle
                     }

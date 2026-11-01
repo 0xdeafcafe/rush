@@ -407,8 +407,9 @@ pub struct Helper {
     pub sess: std::sync::Arc<Session>,
 }
 
-/// Everything known about one session.
-#[derive(Debug, Default)]
+/// Everything known about one session. A copy keeps its serial: it's the
+/// same session, read on (a reader keeps one while the UI draws another).
+#[derive(Clone, Debug, Default)]
 pub struct Session {
     pub turns: Vec<Turn>,
     /// What start hooks told the agent, shown ahead of the first turn.

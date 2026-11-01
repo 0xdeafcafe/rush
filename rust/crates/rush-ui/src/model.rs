@@ -430,6 +430,9 @@ impl Model {
         let journal = (a.rush && !live_host).then(|| a.job.id.clone());
         let mut v = SessionView::new(a.key.clone(), source, self.r#gen);
         v.name_speaker(a);
+        // Whether its agent has stopped, for the worker that lays out its
+        // end before the view has it (follow says so from then on).
+        v.stopped = !a.job.live();
         if let Some(id) = journal.filter(|id| !id.is_empty()) {
             let r#gen = self.r#gen;
             if self.tx.is_none() {
@@ -1590,6 +1593,38 @@ fn local_tm(ms: Ms) -> Option<libc::tm> {
 }
 
 impl Model {
+    /// A conversation's end as the worker that read it first made it
+    /// (Note::End; Note::Seeded when read ahead), with what it worked out
+    /// ahead of the frame that shows it.
+    fn take_end(
+        &mut self,
+        r#gen: u64,
+        sess: rush_convo::Session,
+        warm: Option<Box<crate::worker::Warm>>,
+        ahead: bool,
+    ) -> Step {
+        let Some(v) = self.view_of(r#gen).filter(|v| !v.read) else {
+            return Step::Idle;
+        };
+        let (r, changes, spawns) = match warm {
+            Some(w) => (Some((w.r, w.exchanges)), Some(w.changes), w.spawn_steps),
+            None => (None, None, None),
+        };
+        v.take_end(sess, r);
+        let key = v.key.clone();
+        if let Some((ver, cwd, c)) = changes {
+            crate::screens::session_core::changes::prime(self, ver, &cwd, c);
+        }
+        if let Some(sp) = spawns {
+            crate::screens::session_core::subs::prime_spawns(self, &key, sp);
+        }
+        let ahead = if ahead { " ahead" } else { "" };
+        rush_draw::perf_note(|| format!("tail end gen={}{ahead}", r#gen));
+        self.hold.answer(); // "reading the conversation…" goes now
+        self.follow_tail();
+        Step::Draw
+    }
+
     /// A worker's note taken in: what it changed, and whether that's
     /// worth a frame (background work draws at most every 250 ms:
     /// frame/framehold.rs).
@@ -1606,6 +1641,7 @@ impl Model {
                 self.previews.insert(k, *p);
                 Step::Draw
             }
+            Note::End { r#gen, sess, warm } => self.take_end(r#gen, *sess, warm, false),
             Note::Tail { r#gen, fresh } => match self.view_of(r#gen) {
                 Some(v) => {
                     let first = !v.read;
@@ -1624,16 +1660,7 @@ impl Model {
                 }
                 _ => Step::Idle,
             },
-            Note::Seeded { r#gen, sess } => match self.view_of(r#gen) {
-                Some(v) if !v.read => {
-                    v.seed(*sess);
-                    rush_draw::perf_note(|| format!("tail end gen={} ahead", r#gen));
-                    self.hold.answer(); // "reading the conversation…" goes now
-                    self.follow_tail();
-                    Step::Draw
-                }
-                _ => Step::Idle,
-            },
+            Note::Seeded { r#gen, sess, warm } => self.take_end(r#gen, *sess, warm, true),
             Note::History {
                 r#gen,
                 events,

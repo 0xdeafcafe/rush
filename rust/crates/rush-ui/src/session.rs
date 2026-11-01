@@ -295,6 +295,25 @@ impl SessionView {
         }
     }
 
+    /// Takes a conversation's end as the worker that read it first made
+    /// it: laid out (warm) as this view draws, with the exchanges it
+    /// merged. What the list says of it stays the view's.
+    pub fn take_end(&mut self, mut sess: Session, warm: Option<(Renderer, Arc<[Exchange]>)>) {
+        self.read = true;
+        self.caught_up = true;
+        self.ended = true;
+        sess.info = std::mem::take(&mut self.sess.info);
+        let (r, merged) = match warm {
+            Some((r, x)) => (r, Arc::ptr_eq(&x, &self.exchanges)),
+            None => (Renderer::new(), false),
+        };
+        self.sess = sess;
+        self.r = r;
+        if !merged {
+            self.restore_exchanges(Vec::new());
+        }
+    }
+
     /// Takes what the worker read; true when it's the last slice of its
     /// first reading, the conversation's end now all in.
     pub fn take(&mut self, f: Fresh) -> bool {
@@ -539,17 +558,24 @@ impl SessionView {
         (start, base)
     }
 
-    /// The conversation's rows in view, `rows` tall; notes their refs.
-    pub fn body(&mut self, rows: usize) -> Vec<Line> {
-        if self.sess.partial
-            && let Ok(mut d) = self.drawn.lock()
-        {
+    /// Notes how it's drawn now, for the worker reading it to lay out what
+    /// it reads the same way: while it's yet to be read, and while it
+    /// shows only a long conversation's end.
+    pub fn note_drawn(&self) {
+        if let Ok(mut d) = self.drawn.lock() {
             *d = Some(crate::worker::DrawnAs {
                 o: self.o.clone(),
                 info: self.sess.info.clone(),
                 exchanges: self.exchanges.clone(),
                 stopped: self.stopped,
             });
+        }
+    }
+
+    /// The conversation's rows in view, `rows` tall; notes their refs.
+    pub fn body(&mut self, rows: usize) -> Vec<Line> {
+        if self.sess.partial {
+            self.note_drawn();
         }
         let (start, base) = self.layout(rows);
         (self.start, self.base) = (start, base);
