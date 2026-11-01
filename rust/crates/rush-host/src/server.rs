@@ -58,6 +58,18 @@ mod agent;
 use agent::Watching;
 pub use agent::{ROOT_IDLE, SPAWNED_IDLE, STALL_AFTER};
 
+/// macOS's malloc in its space-efficient mode, set in a host's environment
+/// as it's started (malloc reads it as a process starts). A busy turn
+/// leaves the host's pages half used, freed lines among the replay's kept
+/// ones, and with malloc's defaults they stay the host's for as long as it
+/// runs: one host after `flood 15000` on the live bench, 22 MB against
+/// 4.5 MB space-efficient, for a quarter more CPU while it streams and
+/// none idle. Every session runs a host, so it counts once per session.
+/// Rust-only.
+pub const MALLOC_VAR: &str = "MallocSpaceEfficient";
+/// Says rush set MALLOC_VAR for the host, which takes both out again.
+pub const MALLOC_SET: &str = "RUSH_HOST_MALLOC";
+
 /// What bounds what a reconnecting client is replayed.
 pub const RING_MAX: usize = 8 << 20;
 
@@ -376,6 +388,14 @@ pub fn run(id: &str) -> Result<(), String> {
     let path = crate::shim::without_shims(&std::env::var("PATH").unwrap_or_default());
     // SAFETY: the host sets its environment before it starts any thread.
     unsafe { std::env::set_var("PATH", path) };
+    if std::env::var_os(MALLOC_SET).is_some() {
+        // malloc has read it: what the host starts doesn't inherit it.
+        // SAFETY: as above.
+        unsafe {
+            std::env::remove_var(MALLOC_SET);
+            std::env::remove_var(MALLOC_VAR);
+        }
+    }
     rush_events::set_process("host");
     let r = run_with(adapter::global().clone(), Hooks::real(), id);
     crate::events::flush();
