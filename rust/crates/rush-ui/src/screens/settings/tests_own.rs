@@ -254,6 +254,15 @@ fn arrows_on_the_agents_pages() {
     );
     press(&mut m, "left");
     assert_eq!(m.place, PlaceId::Harnesses, "← on the list stays");
+    // Providers: → goes into one, ← back out.
+    set_settings_page(&mut m, PAGE_PROVIDERS);
+    if !providers::items(&m).is_empty() {
+        press(&mut m, "right");
+        assert!(dialog(&m).inside, "→ went in");
+        press(&mut m, "left");
+        assert!(!dialog(&m).inside, "← came out");
+        assert_eq!(m.place, PlaceId::Harnesses);
+    }
     // Config's At a usage limit row: ← changes nothing, enter picks.
     set_settings_page(&mut m, PAGE_CONFIG);
     let n = configpage::harnesses(&m).len();

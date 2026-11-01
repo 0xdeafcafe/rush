@@ -81,6 +81,10 @@ pub struct Page {
     /// Sees a key before the page moves or closes: a page with a page
     /// inside it takes esc back to itself.
     pub pre: Option<PageKey>,
+    /// Goes up a level, out of what's open in the page (a provider, a
+    /// harness, a plugin, a cell's models): ← and esc do it; false when
+    /// the page is at its top, where ← is the page's own.
+    pub back: Option<fn(&mut Model) -> bool>,
     pub form: Option<fn(&Model) -> Vec<Section>>,
     /// Lines above a form's sections.
     pub head: Option<fn(&Model, usize) -> Vec<Line>>,
@@ -511,6 +515,14 @@ pub(crate) fn dialog_key(m: &mut Model, k: &Press) -> Out {
         return Out::Draw;
     }
     let p = cur_page(m);
+    // The rule on every page: ← and esc go up a level and never change a
+    // value (Go's ← stepped the row's value back).
+    if matches!(s.as_str(), "left" | "h" | "esc" | "backspace")
+        && let Some(back) = p.back
+        && back(m)
+    {
+        return Out::Draw;
+    }
     if let Some(pre) = p.pre {
         let o = pre(m, &s);
         if o.used() {

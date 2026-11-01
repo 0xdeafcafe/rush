@@ -98,10 +98,19 @@ pub fn page() -> Page {
             )]
         }),
         form: Some(sections),
+        // ← backs out of an open plugin as esc does (Go: esc and q).
+        back: Some(|m| {
+            let d = dialog_mut(m);
+            if d.plugin.is_empty() {
+                return false;
+            }
+            d.plugin.clear();
+            d.cursor = 0;
+            true
+        }),
         pre: Some(|m, s| {
             let d = dialog_mut(m);
-            // ← backs out of an open plugin as esc does (Go: esc and q).
-            if !d.plugin.is_empty() && matches!(s, "esc" | "q" | "left" | "h" | "backspace") {
+            if !d.plugin.is_empty() && s == "q" {
                 d.plugin.clear();
                 d.cursor = 0;
                 return Out::Draw;

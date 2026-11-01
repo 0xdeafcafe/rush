@@ -35,17 +35,20 @@ use crate::style::*;
 pub fn page() -> Page {
     Page {
         name: "Harnesses",
-        pre: Some(|m, s| {
+        // ← and esc go back to the list, never changing the row it's on
+        // (Go's ← changed it).
+        back: Some(|m| {
             let d = dialog_mut(m);
-            // ← goes back to the list as esc does, never changing the
-            // row it's on (Go's ← changed it).
-            if d.harness_inside && matches!(s, "esc" | "backspace" | "left" | "h") {
-                d.harness_inside = false;
-                d.cursor = d.harness_return;
-                d.catalog_scroll.set(0);
-                return Out::Draw;
+            if !d.harness_inside {
+                return false;
             }
-            let inside = d.harness_inside;
+            d.harness_inside = false;
+            d.cursor = d.harness_return;
+            d.catalog_scroll.set(0);
+            true
+        }),
+        pre: Some(|m, s| {
+            let inside = dialog(m).harness_inside;
             catalog::key(m, s, inside)
         }),
         rows: Some(|m| flat(&sections(m)).len()),

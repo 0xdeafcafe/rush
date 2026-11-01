@@ -35,9 +35,19 @@ use crate::style::*;
 pub fn page() -> Page {
     Page {
         name: "Providers",
+        back: Some(|m| {
+            let d = dialog_mut(m);
+            if !d.inside {
+                return false;
+            }
+            d.inside = false;
+            d.cursor = d.pick;
+            d.catalog_scroll.set(0);
+            true
+        }),
         pre: Some(|m, s| {
             let d = dialog_mut(m);
-            if d.inside && matches!(s, "esc" | "q" | "backspace") {
+            if d.inside && s == "q" {
                 d.inside = false;
                 d.cursor = d.pick;
                 d.catalog_scroll.set(0);
@@ -140,15 +150,8 @@ pub fn prov_kind(m: &Model, id: &str) -> String {
 /// A key on the page (providersKey).
 pub fn key(m: &mut Model, s: &str) -> Out {
     if dialog(m).inside {
+        // ← went back already (Page::back).
         let secs = provider_form(m, &picked(m));
-        if s == "left" || s == "h" {
-            // Back out, as esc: going back never changes a setting; enter
-            // and space do (as Go here).
-            let d = dialog_mut(m);
-            d.inside = false;
-            d.cursor = d.pick;
-            return Out::Draw;
-        }
         return form::form_key(m, &secs, s);
     }
     let items = items(m);

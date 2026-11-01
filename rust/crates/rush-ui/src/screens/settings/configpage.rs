@@ -38,6 +38,8 @@ pub struct CellPick {
 pub fn page() -> Page {
     Page {
         name: "Config",
+        // ← and esc close a cell's models; at the table ← is a column left.
+        back: Some(|m| dialog_mut(m).cell_pick.take().is_some()),
         pre: Some(|m, s| {
             if dialog(m).cell_pick.is_some() {
                 return cell_pick_key(m, s).or_idle();
@@ -589,7 +591,7 @@ fn cell_pick_key(m: &mut Model, s: &str) -> Out {
     let models = cell_models(m, &p);
     p.cursor = p.cursor.min(models.len());
     match s {
-        "esc" | "enter" | "q" | "backspace" | "left" => {
+        "enter" | "q" => {
             dialog_mut(m).cell_pick = None;
             return Out::Draw;
         }
