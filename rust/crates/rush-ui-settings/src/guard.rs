@@ -95,8 +95,8 @@ pub fn sections(m: &Model) -> Vec<Section> {
             "  you work",
             g.pace_hours as f64,
             "How many hours a day you use the accounts. A week's room is spread over those hours to the reset, not round the clock, so a working day may spend more of it.",
-            &[0.0, 8.0, 16.0, 24.0],
-            "12 hours a day",
+            &[0.0, 8.0, 12.0, 15.0, 18.0, 24.0],
+            "15 hours a day",
             &|x| format!("{x:.0} hours a day"),
             |m, v| config_mut(m).guard.pace_hours = v as i64,
         ));

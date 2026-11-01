@@ -888,7 +888,7 @@ impl Guard {
         if self.pace_hours > 0 {
             self.pace_hours.min(24)
         } else {
-            12
+            15
         }
     }
     pub fn warn(&self) -> f64 {
