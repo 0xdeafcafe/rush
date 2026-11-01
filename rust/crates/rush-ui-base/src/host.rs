@@ -490,6 +490,12 @@ pub trait Hosts: Send + Sync {
     fn sleeping(&self, _: &Agent) -> bool {
         false
     }
+    /// Whether a's host is still running, awake: a connection to it that
+    /// closed (one too far behind is let go) is dialled again, not a new
+    /// host started over it. Reads the disk.
+    fn running(&self, _: &Agent) -> bool {
+        false
+    }
     /// A stopped rush session's host info as it last wrote it, read with
     /// no socket and no wake (sleep_host.go:172 openSavedHost's
     /// host.ReadInfo): its header and box say how it was left. Reads the
@@ -788,6 +794,8 @@ pub struct Fake {
     pub starts: Mutex<Vec<Start>>,
     /// Agents by key whose host sleeps.
     pub asleep: Mutex<Vec<String>>,
+    /// Agents by key whose host still runs, awake, with no link to it.
+    pub running: Mutex<Vec<String>>,
     /// Stopped sessions' info as their hosts left it, by key; and how
     /// many times it was read.
     pub saved: Mutex<Vec<(String, Info)>>,
@@ -968,6 +976,9 @@ impl Hosts for Arc<Fake> {
         let d = (a.key.clone(), dec_id.to_string());
         self.dismissed.lock().unwrap().push(d);
         Ok(())
+    }
+    fn running(&self, a: &Agent) -> bool {
+        self.running.lock().unwrap().contains(&a.key)
     }
     fn saved(&self, a: &Agent) -> Option<Info> {
         *self.saved_reads.lock().unwrap() += 1;

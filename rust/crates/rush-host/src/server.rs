@@ -1888,9 +1888,18 @@ impl Host {
         images: &[String],
         exchange: Option<Box<Exchange>>,
     ) -> Result<(), String> {
+        // The smaller copy made when it was queued, or the image itself
+        // when that copy has gone from the session's scratch: a missing
+        // copy would fail every try to send what's queued.
         let pics: Vec<String> = images
             .iter()
-            .map(|p| st.pics.get(p).cloned().unwrap_or_else(|| p.clone()))
+            .map(|p| {
+                st.pics
+                    .get(p)
+                    .filter(|c| std::fs::metadata(c).is_ok())
+                    .cloned()
+                    .unwrap_or_else(|| p.clone())
+            })
             .collect();
         self.deliver_inline(st, text, images, &pics, exchange, "")?;
         for p in images {
@@ -2038,31 +2047,40 @@ impl Host {
             self.record_event(st, Event::Exchange(Box::new(received.clone())));
             self.record(st, lines::echo_line(text, images, Some(&received)));
         } else {
-            // Echo it so every client shows the message before the agent
-            // answers.
+            let mut input = text.to_string();
+            if !st.untold.is_empty() {
+                input = format!(
+                    "<system-reminder>\n{}\n</system-reminder>\n\n{input}",
+                    st.untold
+                );
+            }
+            let input = Input {
+                text: input,
+                images: pics.to_vec(),
+            };
+            // Taken first, then echoed: one the agent never got isn't
+            // drawn, so a queue that goes back after a failed send and
+            // tries again doesn't show your messages once a try. Its
+            // reader waits on the lock, so the echo still comes before
+            // the agent answers.
+            if let Err(e) = conn.send(input.clone()) {
+                let e = e.to_string();
+                self.event(
+                    st,
+                    "deliver-failed",
+                    json!({"text": clip(text), "images": images.len(), "err": e, "ev": ev, "cause": cause}),
+                );
+                return Err(e);
+            }
+            st.untold.clear();
+            self.sent(st, &input);
             self.record(st, lines::echo_line(text, images, None));
         }
         st.info.state = "working".into();
         st.info.detail.clear();
         self.publish(st);
         st.waiting = Some(Instant::now());
-        if ex.is_some() {
-            return Ok(());
-        }
-        let mut text = text.to_string();
-        if !st.untold.is_empty() {
-            text = format!(
-                "<system-reminder>\n{}\n</system-reminder>\n\n{text}",
-                st.untold
-            );
-            st.untold.clear();
-        }
-        let input = Input {
-            text,
-            images: pics.to_vec(),
-        };
-        self.sent(st, &input);
-        conn.send(input).map_err(|e| e.to_string())
+        Ok(())
     }
 
     /// Asks the agent what fills the context window, unless it can't say

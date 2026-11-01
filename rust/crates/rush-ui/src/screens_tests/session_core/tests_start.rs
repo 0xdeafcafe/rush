@@ -291,6 +291,30 @@ fn a_wake_that_fails_keeps_the_message() {
     assert_eq!(flash(&m), "session is still asleep; message was not sent");
 }
 
+// A host that let this rush go for falling behind, and runs on, is dialled
+// again: at the next reading, and with a message sent meanwhile, never a
+// second host started over it ("<id> is already running").
+#[test]
+fn a_host_that_let_go_and_runs_on_is_dialled_again() {
+    let fake = Fake::new();
+    let key = "default/a:h1";
+    let mut m = open_hosted(&fake, key);
+    fake.running.lock().unwrap().push(key.into());
+    let r#gen = core(&mut m).link_gen;
+    live::take(&mut m, key, r#gen, Vec::new(), true);
+    assert!(conn(&mut m, key).hosted(), "dialled again at once");
+    // Before that dial is in, a message wakes it over a new connection.
+    conn(&mut m, key).link = None;
+    conn(&mut m, key).input.insert_str("still there?");
+    crate::screens::session_core::keys::send(&mut m, key, false);
+    assert_eq!(
+        fake.wakes.lock().unwrap().clone(),
+        vec![(key.to_string(), "still there?".to_string(), false)]
+    );
+    assert!(fake.resumed.lock().unwrap().is_empty(), "not resumed");
+    assert!(conn(&mut m, key).hosted(), "connected again");
+}
+
 // A host that stopped, not asleep, is resumed with the message instead.
 #[test]
 fn a_stopped_host_resumes() {
