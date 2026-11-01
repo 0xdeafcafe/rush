@@ -68,26 +68,61 @@ fn minutes(v: &str) -> i64 {
     off_value(v)
 }
 
-/// The project a new session would start in, settled before General is
-/// drawn: finding its main checkout looks at the disk.
+/// The project a new session would start in, and every other one rush
+/// knows, settled before General is drawn: finding the first's main
+/// checkout looks at the disk.
 pub fn prep(m: &mut Model) {
     let dir = crate::startdir::start_dir(m);
-    let project = rush_fleet::main_checkout(&dir);
-    dialog_mut(m).project = project;
+    let project = crate::startdir::project_of(&dir);
+    let projects = crate::startdir::known_projects(m, &project);
+    let d = dialog_mut(m);
+    d.project = project;
+    d.projects = projects;
 }
 
-/// Whether a session started from the box in the project it would start
-/// in gets a worktree of its own, as #worktree on|off says.
-fn own_worktree_row(m: &Model) -> Setting {
-    let project = dialog(m).project.clone();
-    let name = std::path::Path::new(&project)
+/// Projects: each project rush knows, a row each for what's set by
+/// project, the one the Agents box points at first.
+fn project_rows(m: &Model) -> Vec<Setting> {
+    let d = dialog(m);
+    // Drawn before any key settled them (prep): the projects the list
+    // knows.
+    let projects = if d.projects.is_empty() {
+        crate::startdir::known_projects(m, &d.project)
+    } else {
+        d.projects.clone()
+    };
+    let titles = rush_ui_base::list::folder_titles(projects.iter().map(String::as_str));
+    projects
+        .iter()
+        .map(|p| {
+            let name = titles.get(p).cloned().unwrap_or_else(|| p.clone());
+            own_worktree_row(m, p, &name)
+        })
+        .collect()
+}
+
+/// What Projects says after its title: which project goes first, as new
+/// agents start there.
+fn projects_note(m: &Model) -> String {
+    let p = &dialog(m).project;
+    if p.is_empty() {
+        return "every project rush knows".into();
+    }
+    let name = std::path::Path::new(p)
         .file_name()
-        .map_or(project.clone(), |n| n.to_string_lossy().into_owned());
+        .map_or(p.clone(), |n| n.to_string_lossy().into_owned());
+    format!("every project rush knows · {name} first: new agents start there")
+}
+
+/// Whether a session started from the box in project gets a worktree of
+/// its own, as #worktree on|off and the box's own worktree chip say.
+fn own_worktree_row(m: &Model, project: &str, name: &str) -> Setting {
     let mut st = choice(
         &format!("Own worktree in {name}"),
-        on_off(config(m).own_worktree(&project)),
+        on_off(config(m).own_worktree(project)),
         &format!(
-            "Whether a session started from the box in {name} gets a git worktree and branch of its own, or works in the checkout itself. It's said by project: the one a new session would start in now. #worktree on|off says the same."
+            "Whether a session started from the box in {name} ({}) gets a git worktree and branch of its own, or works in the checkout itself. For the project the Agents box points at, a click on its own worktree chip, or #worktree on|off, says the same.",
+            tildify(project)
         ),
         &[
             (
@@ -98,6 +133,7 @@ fn own_worktree_row(m: &Model) -> Setting {
         ],
         None,
     );
+    let project = project.to_string();
     st.set = set(move |m, v| {
         config_mut(m)
             .own_worktrees
@@ -407,7 +443,9 @@ pub fn sections(m: &Model) -> Vec<Section> {
         vec![low_disk, high_ram, trim],
     ));
 
-    secs.push(Section::new("Projects", vec![own_worktree_row(m)]));
+    let mut projects = Section::new("Projects", project_rows(m));
+    projects.note = projects_note(m);
+    secs.push(projects);
 
     let tips = choice(
         "Getting started",

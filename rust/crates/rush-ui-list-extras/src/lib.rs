@@ -45,6 +45,7 @@ pub mod filter;
 // The finishing card's rows and keys: rush-ui-base's, for session_cards.
 pub use rush_ui_base::finish_card as finish;
 pub mod fuzzy;
+pub mod gitlink;
 pub mod grid;
 pub mod hosted;
 pub mod jobs;
@@ -121,6 +122,9 @@ pub fn register(x: &mut Ext) {
     x.list_keys.push(shelf::key);
     // alt+l: a worktree agent's new sessions in its worktree or checkout.
     x.list_keys.push(prompt::worktree_key);
+    // tab with a repository's address typed: the box moves to its clone,
+    // or clones it first; before tab's own (the Session).
+    x.list_keys.insert(0, gitlink::key);
     // The grid's tiles round the Session (a click swaps one in, its edge
     // resizes them) take the mouse in frame/keys.rs, at screen columns.
     x.command(

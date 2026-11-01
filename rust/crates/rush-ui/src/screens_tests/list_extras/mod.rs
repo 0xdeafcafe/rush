@@ -5,6 +5,7 @@
 pub use rush_ui_list_extras::*;
 
 mod tests;
+mod tests_gitlink;
 mod tests_grid;
 mod tests_grouping;
 mod tests_jobs;

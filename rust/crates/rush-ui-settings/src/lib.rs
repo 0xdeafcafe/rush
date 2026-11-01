@@ -168,8 +168,10 @@ pub struct Dialog {
     /// The agent showing's own settings file, as last read.
     pub settings: Option<files::Loaded>,
     /// The project a new session would start in, for General's worktree
-    /// row.
+    /// rows: it goes first.
     pub project: String,
+    /// Every project rush knows, for General's Projects (prep).
+    pub projects: Vec<String>,
     /// The harness showing's own settings, as last read.
     pub own: Option<ownsettings::Read>,
 }
