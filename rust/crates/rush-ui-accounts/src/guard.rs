@@ -67,6 +67,10 @@ pub trait HostOps: Send + Sync {
     /// How long since any key on the machine, and whether its screen is
     /// locked; None where it can't tell.
     fn idle(&self) -> (Option<Ms>, Option<bool>);
+    /// Keeps session id's prompt cache warm (its host's keep_warm op).
+    fn keep_warm(&self, _id: &str) -> Result<(), String> {
+        Err("keep_warm isn't something this rush can do".into())
+    }
 }
 
 /// rush's own hosts and the machine.
@@ -103,6 +107,11 @@ impl HostOps for Real {
             rush_sys::idle::screen_locked(),
         )
     }
+    fn keep_warm(&self, id: &str) -> Result<(), String> {
+        rush_host::Client::dial(id)
+            .and_then(|c| c.keep_warm())
+            .map_err(|e| e.to_string())
+    }
 }
 
 /// A session the guard holds, why, and since when.
@@ -132,6 +141,8 @@ pub struct State {
     pub let_through: HashMap<String, bool>,
     /// Whether you're away, as it last saw.
     pub away: bool,
+    /// Each idle session's stretch of keeping its cache warm, by rush id.
+    pub stretches: HashMap<String, Stretch>,
     /// When this rush began looking: with no key since, you've been away
     /// since then.
     started: Ms,
@@ -159,6 +170,27 @@ pub fn key_of(r: &AcctRow) -> String {
     format!("{}:{}", r.kind, r.id())
 }
 
+/// The first host protocol with the keep_warm op: an older host's
+/// session is left alone.
+const KEEP_WARM_PROTO: i64 = 12;
+
+/// One idle stretch of a session's cache kept warm: the idle it is, how
+/// many bumps it has had, and when the last was tried.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Stretch {
+    pub idle_since: Ms,
+    pub bumps: u32,
+    pub tried: Ms,
+}
+
+/// What keeping caches warm starts from: how it's set, and the sessions
+/// it may keep (their harness can and is set to, and they aren't done).
+#[derive(Clone, Debug, Default)]
+pub struct KeepIn {
+    pub settings: rush_core::cachekeep::Settings,
+    pub ids: HashSet<String>,
+}
+
 /// What a look starts from: the accounts, the guard as set, and what it
 /// last did.
 pub struct Input {
@@ -178,6 +210,9 @@ pub struct Input {
     pub moved_at: HashMap<String, Ms>,
     pub over: HashSet<String>,
     pub let_through: HashMap<String, bool>,
+    /// Keeping caches warm: None while it's off everywhere.
+    pub keep: Option<KeepIn>,
+    pub stretches: HashMap<String, Stretch>,
 }
 
 /// What a look found and did; the moves are left to do once new sessions
@@ -194,6 +229,7 @@ pub struct Output {
     pub away: bool,
     /// Accounts by key, as weighed.
     pub accts: Vec<Acct>,
+    pub stretches: HashMap<String, Stretch>,
 }
 
 /// A session to move.
@@ -435,10 +471,89 @@ pub fn tick(mut i: Input, ops: &dyn HostOps) -> Output {
             serde_json::to_vec(&now_kept).unwrap_or_default(),
         );
     }
+    out.stretches = keep_warm(
+        i.keep.as_ref(),
+        &i.stretches,
+        &i.held,
+        &infos,
+        &seats,
+        &out,
+        ops,
+        now,
+    );
     out.held = i.held;
     out.let_through = i.let_through;
     out.accts = accts;
     out
+}
+
+/// Keeps the prompt cache of each idle session about to lapse warm, as
+/// rush_core::cachekeep says, and returns each one's stretch. Never one
+/// asleep (none is in infos), done, held by the guard or by you, working
+/// or with a queue, on an account past its pace, nor while you're away:
+/// each bump is in its events (cache-kept, from its host).
+#[allow(clippy::too_many_arguments)]
+fn keep_warm(
+    keep: Option<&KeepIn>,
+    stretches: &HashMap<String, Stretch>,
+    held: &HashMap<String, Held>,
+    infos: &[Info],
+    seats: &[Seat],
+    out: &Output,
+    ops: &dyn HostOps,
+    now: Ms,
+) -> HashMap<String, Stretch> {
+    use rush_core::cachekeep::{RETRY, Seat as KSeat, Verdict, decide};
+    let mut kept = HashMap::new();
+    let Some(k) = keep else { return kept };
+    for x in infos {
+        let idle_since = ms(x.idle_since);
+        if x.state != "idle" || idle_since == 0 {
+            continue; // a stretch is one idle: working ends it
+        }
+        let mut st = stretches
+            .get(&x.id)
+            .copied()
+            .filter(|s| s.idle_since == idle_since)
+            .unwrap_or(Stretch {
+                idle_since,
+                ..Stretch::default()
+            });
+        let login = seats
+            .iter()
+            .find(|s| s.id == x.id)
+            .map_or("", |s| s.login.as_str());
+        let barred = !k.ids.contains(&x.id)
+            || x.proto < KEEP_WARM_PROTO
+            || out.away
+            || x.queue_held
+            || !x.queue.is_empty()
+            || x.limit.is_some()
+            || x.retry.is_some()
+            || held.contains_key(&x.id)
+            || out.over.contains(login)
+            || now - st.tried < RETRY;
+        if !barred {
+            let seat = KSeat {
+                idle_since,
+                warm_until: ms(x.cache_warm),
+                ttl: x.cache_ttl * 1000,
+                context: x.context_tokens,
+                bumps: st.bumps,
+            };
+            if decide(&k.settings, &seat, now) == Verdict::Keep
+                && !rush_core::dryrun::would("cache-keep", &x.id, "its cache is about to lapse")
+            {
+                st.tried = now;
+                match ops.keep_warm(&x.id) {
+                    Ok(()) => st.bumps += 1,
+                    Err(e) => ops.log(&x.id, "cache-keep-failed", json!({"err": e})),
+                }
+            }
+        }
+        kept.insert(x.id.clone(), st);
+    }
+    kept
 }
 
 /// Says where `rush gate hook` reads it whether new subagents and
@@ -542,6 +657,7 @@ fn input(m: &mut Model, now: Ms) -> Input {
     } else {
         state(m).started
     };
+    let keep = keep_in(m);
     let st = state(m);
     Input {
         settings: c.settings(),
@@ -555,7 +671,34 @@ fn input(m: &mut Model, now: Ms) -> Input {
         moved_at: st.moved_at.clone(),
         over: st.over.clone(),
         let_through: st.let_through.clone(),
+        keep,
+        stretches: st.stretches.clone(),
     }
+}
+
+/// What keeping caches warm starts from, None while it's off for every
+/// harness: the rush sessions it may keep, by id.
+fn keep_in(m: &Model) -> Option<KeepIn> {
+    let ck = &cfg(m).cache_keep;
+    if ck.off && !ck.harnesses.values().any(|on| *on) {
+        return None;
+    }
+    let ids = m
+        .agents
+        .iter()
+        .filter(|a| {
+            a.rush
+                && !a.done
+                && ck.on_for(a.kind.as_str())
+                && m.reg
+                    .supports(a.kind.as_str(), rush_core::adapter::Feature::KeepWarm)
+        })
+        .map(|a| a.job.id.clone())
+        .collect();
+    Some(KeepIn {
+        settings: ck.settings(),
+        ids,
+    })
 }
 
 /// What a look found, kept; what's newly past its pace said; new sessions
@@ -636,6 +779,7 @@ pub fn applied(m: &mut Model, o: Output, ops: Arc<dyn HostOps>, now: Ms) -> Out 
     st.over = o.over;
     st.held = o.held;
     st.let_through = o.let_through;
+    st.stretches = o.stretches;
     st.away = o.away;
     let plan = o.plan.clone();
     st.plan = o.plan;

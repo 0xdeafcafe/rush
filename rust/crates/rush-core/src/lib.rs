@@ -6,6 +6,7 @@
 
 pub mod adapter;
 pub mod agent;
+pub mod cachekeep;
 pub mod dryrun;
 pub mod event;
 pub mod failure;

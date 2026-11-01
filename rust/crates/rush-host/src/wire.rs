@@ -27,9 +27,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// sessions as rush's own events, 5 the client's hello (hello.rs), 6
 /// Claude Code's sessions as rush's own events too, to a client that says
 /// it reads them, 7 steering with a queued message (queue_send's guide),
-/// 8 exchanges, 9 guarded compaction, 10 idle host sleep, 11 away. A client
-/// sends its build's in the hello.
-pub const PROTO: i64 = 11;
+/// 8 exchanges, 9 guarded compaction, 10 idle host sleep, 11 away, 12
+/// keeping the prompt cache warm (the keep_warm op, Info.cache_ttl). A
+/// client sends its build's in the hello.
+pub const PROTO: i64 = 12;
 
 /// How many left paths an agent remembers.
 pub const MAX_BRANCHES: usize = 30;
@@ -501,6 +502,11 @@ pub struct Info {
     /// When the prompt cache written by the last request expires.
     #[serde(rename = "cacheWarm")]
     pub cache_warm: Time,
+    /// How long, in seconds, the prompt cache lives after a request, as
+    /// the last that wrote it said (Anthropic's 5 minutes or an hour); 0
+    /// until one has.
+    #[serde(rename = "cacheTtl", skip_serializing_if = "zero")]
+    pub cache_ttl: i64,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub error: String,
     #[serde(rename = "startedAt")]

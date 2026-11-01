@@ -16,8 +16,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use rush_core::adapter::{
-    self, Answerer, Asker, Backgrounder, Conn, ContextReader, Driver, Hearer, Homed, Input,
-    Orphans, Responder, Sink, StartOptions, TaskStopper, ToolServer,
+    self, Answerer, Asker, Backgrounder, CacheKeeper, Conn, ContextReader, Driver, Hearer, Homed,
+    Input, Orphans, Responder, Sink, StartOptions, TaskStopper, ToolServer,
 };
 use rush_core::agent::PreviewLine;
 use rush_core::event::{self, Event};
@@ -513,6 +513,9 @@ impl Conn for ClaudeConn {
     fn hearer(&self) -> Option<&dyn Hearer> {
         Some(self)
     }
+    fn cache_keeper(&self) -> Option<&dyn CacheKeeper> {
+        Some(self)
+    }
 
     /// Whether the folder is signed in as another login than the one it
     /// started on.
@@ -609,6 +612,39 @@ impl Asker for ClaudeConn {
         Ok(r.body
             .unwrap_or_else(|| RawJson::new("null").expect("null is JSON")))
     }
+}
+
+/// What the bump asks: Claude Code answers a side question from the
+/// conversation as its last request sent it (getLastCacheSafeParams), so
+/// the request reads that whole cached prefix, which starts its life over.
+/// An empty history keeps /btw's own threads out of it; nothing is written
+/// to the transcript, and no turn starts.
+const KEEP_WARM: &str =
+    "rush is keeping this conversation's prompt cache warm. Reply with just: ok";
+
+impl CacheKeeper for ClaudeConn {
+    fn keep_warm(&self) -> adapter::Result<()> {
+        let req = json!({"subtype": "side_question", "question": KEEP_WARM, "history": []});
+        let r = self.0.wait_on(|| self.0.s.ask(&req.to_string()))?;
+        bumped(r.body.as_ref().map(|b| b.get()))
+    }
+}
+
+/// Whether a side question's reply says a request was made. No answer
+/// (null) means none was: a process with no request of its own yet has
+/// nothing cached to answer from. A synthetic one stands in for a request
+/// that failed.
+fn bumped(body: Option<&str>) -> adapter::Result<()> {
+    let v: Value = body
+        .and_then(|b| serde_json::from_str(b).ok())
+        .unwrap_or(Value::Null);
+    if !v.get("response").is_some_and(Value::is_string) {
+        return Err(err("no request was made: nothing of its own is cached yet"));
+    }
+    if v.get("synthetic").and_then(Value::as_bool) == Some(true) {
+        return Err(err("the request didn't answer"));
+    }
+    Ok(())
 }
 
 impl ContextReader for ClaudeConn {
@@ -748,3 +784,24 @@ fn uuid() -> std::io::Result<String> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod keep_tests {
+    // A bump counts only when Claude Code made the request: a reply with
+    // an answer, not null (nothing to answer from) nor a stand-in.
+    #[test]
+    fn a_bump_needs_a_real_answer() {
+        for (body, ok) in [
+            (Some(r#"{"response":"ok","synthetic":false}"#), true),
+            (Some(r#"{"response":"ok"}"#), true),
+            (Some(r#"{"response":null}"#), false),
+            (
+                Some(r#"{"response":"(No answer available)","synthetic":true}"#),
+                false,
+            ),
+            (None, false),
+        ] {
+            assert_eq!(super::bumped(body).is_ok(), ok, "{body:?}");
+        }
+    }
+}

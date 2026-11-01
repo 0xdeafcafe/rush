@@ -536,6 +536,7 @@ pub fn agent_sections(m: &Model, k: &str) -> Vec<Section> {
     let mut secs = Vec::new();
     let mut advanced = Vec::new();
     let mut all = extras(m, k);
+    all.extend(super::guard::cache_harness_section(m, k));
     // What the harness offers of its own settings, shown open.
     all.extend(super::ownsettings::sections(m, k));
     all.extend(super::files::file_sections(m, k));

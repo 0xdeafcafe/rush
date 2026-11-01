@@ -1694,3 +1694,133 @@ fn info_is_written_at_once_for_a_change_readers_act_on() {
     h.publish(&mut st);
     assert_eq!(file().detail, "four");
 }
+
+/// A conn whose agent can keep its cache warm, counting the bumps.
+#[derive(Default)]
+struct Warm {
+    kept: Kept,
+    bumps: AtomicUsize,
+}
+
+impl Conn for Warm {
+    fn send(&self, input: Input) -> adapter::Result<()> {
+        self.kept.send(input)
+    }
+    fn answer(&self, _: &str, _: &str) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn interrupt(&self) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn set_model(&self, _: &str) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn set_mode(&self, _: &str) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn close(&self) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn cache_keeper(&self) -> Option<&dyn adapter::CacheKeeper> {
+        Some(self)
+    }
+}
+
+impl adapter::CacheKeeper for Warm {
+    fn keep_warm(&self) -> adapter::Result<()> {
+        self.bumps.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+// Rust-only: the cache's life is what the agent's last write said, and a
+// bump starts it over without a turn, a message or use: the idle wait,
+// the turns and what was sent stay as they were, and cache-kept says what
+// it cost. A busy session, a lapsed cache and an agent that can't are
+// refused.
+#[test]
+fn keep_warm_bumps_the_cache_and_nothing_else() {
+    let _home = Home::new();
+    let h = host(Config {
+        id: "kw".into(),
+        kind: "fake".into(),
+        ..Config::default()
+    });
+    {
+        let mut st = h.lock();
+        h.on_message(
+            &mut st,
+            &event::Message {
+                role: "assistant".into(),
+                tokens: Some(rush_core::agent::TokenUsage {
+                    cache_read: 90_000,
+                    cache_write_5m: 10_000,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+        assert_eq!(st.info.cache_ttl, 300);
+        let left = st.info.cache_warm.to_ms() - Time::now().to_ms();
+        assert!((290_000..=300_000).contains(&left), "{left}");
+        assert_eq!(st.info.context_tokens, 100_000);
+    }
+    // No agent running: nothing to keep.
+    assert!(h.do_op(op("keep_warm", |_| {})).is_err());
+    let w = Arc::new(Warm::default());
+    with_conn(&h, w.clone());
+    let turn = {
+        let mut st = h.lock();
+        st.info.state = "idle".into();
+        st.info.cache_warm = Time::now() + Duration::from_secs(30);
+        st.turn
+    };
+    std::fs::remove_file(crate::paths::events_path("kw")).ok();
+    h.do_op(op("keep_warm", |_| {})).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while h.lock().keeping {
+        assert!(std::time::Instant::now() < deadline, "never came back");
+        std::thread::yield_now();
+    }
+    assert_eq!(w.bumps.load(Ordering::SeqCst), 1);
+    {
+        let st = h.lock();
+        let left = st.info.cache_warm.to_ms() - Time::now().to_ms();
+        assert!(left > 290_000, "the cache's life didn't start over: {left}");
+        assert_eq!(st.turn, turn, "a bump counted as a turn");
+        assert_eq!(st.asking, 0);
+        assert_eq!(st.info.state, "idle");
+    }
+    assert!(
+        w.kept.got.lock().unwrap().is_empty(),
+        "a bump was sent as a message"
+    );
+    crate::events::flush();
+    let b = std::fs::read_to_string(crate::paths::events_path("kw")).unwrap();
+    let kept: Vec<Value> = b
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|v| v["kind"] == "cache-kept")
+        .collect();
+    assert_eq!(kept.len(), 1, "{b}");
+    assert_eq!(kept[0]["context"], 100_000);
+    assert_eq!(kept[0]["ttl"], 300);
+    assert!(
+        !b.contains("\"setting\""),
+        "the op was logged as a setting: {b}"
+    );
+    // Busy, or lapsed: refused.
+    h.lock().info.state = "working".into();
+    assert!(h.do_op(op("keep_warm", |_| {})).is_err());
+    {
+        let mut st = h.lock();
+        st.info.state = "idle".into();
+        st.info.cache_warm = Time::from_ms(Time::now().to_ms() - 1000);
+    }
+    assert!(h.do_op(op("keep_warm", |_| {})).is_err());
+    assert_eq!(w.bumps.load(Ordering::SeqCst), 1);
+    // An agent with no way to keep it.
+    with_conn(&h, Arc::new(Kept::default()));
+    h.lock().info.cache_warm = Time::now() + Duration::from_secs(30);
+    assert!(h.do_op(op("keep_warm", |_| {})).is_err());
+}

@@ -399,7 +399,14 @@ pub static SEGS: &[Seg] = &[
                 return Line::new();
             };
             let t = now(x.m);
-            match crate::agentry::cache_cold(s, t) {
+            // Its host knows best: the cache's own life, and a bump that
+            // kept it warm with no request in the transcript.
+            let host = of(x).info.map_or(0, |i| i.cache_warm);
+            let cold = match crate::agentry::cache_cold(s, t) {
+                _ if host != 0 => Some((host, t > host)),
+                c => c,
+            };
+            match cold {
                 None => Line::new(),
                 Some((at, true)) => line([
                     sp("cache cold", YELLOW),

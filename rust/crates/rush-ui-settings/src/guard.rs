@@ -147,3 +147,82 @@ pub fn sections(m: &Model) -> Vec<Section> {
         ..Section::default()
     }]
 }
+
+/// Settings › General's Prompt cache (Rust-only): keeping idle sessions'
+/// prompt caches warm, on until turned off. What it does is the accounts
+/// module's (guard.rs keep_warm) and rush_core::cachekeep's; each harness
+/// can be set apart on its own page.
+pub fn cache_sections(m: &Model) -> Vec<Section> {
+    let k = config(m).cache_keep.clone();
+    let mut rows = vec![choice(
+        "Keep it warm",
+        on_off(!k.off),
+        "A provider keeps a session's prompt cached for a while after its last request (Claude: 5 minutes, or an hour), and a message after that pays to write the whole context again: 1.25× the input price for a 5-minute cache, 2× for an hour's. Just before an idle session's cache lapses, rush sends one small request that reads the whole cached context, a tenth of the price, and its life starts over. It isn't a message: nothing is added to the conversation, no turn runs, nothing notifies. It only does this for a session that went idle within the time below, with a context worth it; never one asleep, done, held, or on an account past its pace, nor while you're away. Each is in the session's events as cache-kept, with its cost.",
+        &[
+            (
+                "on",
+                "idle sessions' caches are kept for the time below, then lapse.",
+            ),
+            (
+                "off",
+                "caches lapse 5 minutes (or an hour) after the last request.",
+            ),
+        ],
+        set(|m, v| config_mut(m).cache_keep.off = v == "off"),
+    )];
+    if !k.off {
+        rows.push(numbers(
+            "  for",
+            k.minutes as f64,
+            "How long after a session goes idle its cache is kept. A 5-minute cache kept 15 minutes takes 3 small requests, about 30% of the context's price, to save a rewrite of 125% of it; an hour's cache is left alone unless this is longer than an hour.",
+            &[0.0, 5.0, 30.0, 60.0, 120.0],
+            "15 minutes",
+            &|x| format!("{x:.0} minutes"),
+            |m, v| config_mut(m).cache_keep.minutes = v as i64,
+        ));
+    }
+    vec![Section {
+        title: "Prompt cache".into(),
+        note: "harnesses that can, Claude Code for now".into(),
+        rows,
+        ..Section::default()
+    }]
+}
+
+/// A harness's own row for it, on its page, where it can.
+pub fn cache_harness_section(m: &Model, kind: &str) -> Option<Section> {
+    if !m.reg.supports(kind, rush_core::adapter::Feature::KeepWarm) {
+        return None;
+    }
+    let ck = &config(m).cache_keep;
+    let v = ck
+        .harnesses
+        .get(kind)
+        .map_or("", |on| if *on { "on" } else { "off" });
+    let k = kind.to_string();
+    let mut row = choice(
+        "Keep its cache warm",
+        v,
+        "Whether this harness's idle sessions have their prompt cache kept warm, apart from Settings › General's Prompt cache.",
+        &[
+            ("", "as Settings › General says."),
+            ("on", "kept, whatever General says."),
+            ("off", "never kept."),
+        ],
+        set(move |m, v| {
+            let h = &mut config_mut(m).cache_keep.harnesses;
+            match v {
+                "on" => h.insert(k.clone(), true),
+                "off" => h.insert(k.clone(), false),
+                _ => h.remove(&k),
+            };
+        }),
+    );
+    row.unset = if ck.off {
+        "as General: off"
+    } else {
+        "as General: on"
+    }
+    .into();
+    Some(Section::new("Prompt cache", vec![row]))
+}

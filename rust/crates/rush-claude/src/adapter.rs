@@ -177,6 +177,9 @@ fn features() -> Features {
     .map(|k| (k, Support::YES))
     .collect();
     f.insert(Guide, Support::YES.with("at its next step"));
+    // A side question with nothing of its own: it reads the cached
+    // conversation and adds nothing to it.
+    f.insert(KeepWarm, Support::YES.with("through a side question"));
     f
 }
 
@@ -691,7 +694,9 @@ mod tests {
             let s = f.get(&k).unwrap_or_else(|| panic!("{k:?} missing"));
             assert_eq!(s.is, rush_core::adapter::Has::Yes, "{k:?} is {s:?}");
         }
-        assert_eq!(f.len(), 36, "{f:?}");
+        assert_eq!(f.len(), 37, "{f:?}");
         assert_eq!(f[&Guide], Support::YES.with("at its next step"));
+        // Rust-only: it keeps an idle session's prompt cache warm.
+        assert_eq!(f[&KeepWarm], Support::YES.with("through a side question"));
     }
 }

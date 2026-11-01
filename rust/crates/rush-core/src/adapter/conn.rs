@@ -97,6 +97,9 @@ pub trait Conn: Send + Sync {
     fn hearer(&self) -> Option<&dyn Hearer> {
         None
     }
+    fn cache_keeper(&self) -> Option<&dyn CacheKeeper> {
+        None
+    }
     /// The session holds a sign-in its profile has since left: it should
     /// rest once its turn ends, and pick up on the new one (Go's Staler).
     fn stale(&self) -> bool {
@@ -176,4 +179,13 @@ pub trait Homed {
 /// None when it can't tell.
 pub trait Hearer {
     fn heard(&self, text: &str, since: Ms) -> Option<bool>;
+}
+
+/// Keeps the prompt cache of an idle session warm: one small request that
+/// reads the whole cached context, so its life starts over, and adds
+/// nothing to the conversation (no turn, no message, nothing in the
+/// transcript). It returns once the request is answered. See
+/// crate::cachekeep for when.
+pub trait CacheKeeper {
+    fn keep_warm(&self) -> Result<()>;
 }

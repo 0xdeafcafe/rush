@@ -900,6 +900,116 @@ Not yet: a session you start yourself isn't held (its first turn goes
 on the account picked); the menu bar shows a held session only as
 idle.
 
+## Keeping the prompt cache warm (Rust-only)
+
+A provider caches a session's prompt for a while after its last request.
+A message after it lapses pays to write the whole context again. Just
+before an idle session's cache lapses, rush can send one small request
+that reads the whole cached context: the cache's life starts over at a
+tenth of the price. That request is called a bump below.
+
+Prices, as a share of the input price, per token of context:
+
+| provider | cache write | cache read | cache lives |
+|---|---|---|---|
+| Anthropic, 5-minute cache | 1.25× | 0.1× | 5 min after each request |
+| Anthropic, 1-hour cache | 2× | 0.1× | 1 h after each request |
+| OpenAI (GPT-5 family) | 1× (no extra) | 0.1× | 5–10 min idle, up to 1 h |
+| Gemini (implicit) | 1× (no extra) | 0.1–0.25× | minutes, not stated |
+| DeepSeek | 1× (no extra) | 0.1× | hours (on disk) |
+
+What one idle stretch costs, for a context of C tokens (Anthropic):
+
+```
+                       5-minute cache             1-hour cache
+message, cache warm    0.1 C                      0.1 C
+message, after lapse   1.25 C  (+1.15 C)          2 C  (+1.9 C)
+one bump               0.1 C + ~300 tokens        0.1 C + ~300 tokens
+bumps that equal one   ~11                        ~19
+  lapse
+```
+
+A bump is worth it only if you come back while the cache is kept: 3
+bumps (0.3 C) pay off if the chance you come back in those 15 minutes is
+over 26% (0.3 / 1.15). That chance falls the longer a session sits, so
+the rule keeps the cache for a short while after the turn ends and then
+lets it go:
+
+- A bump goes when the cache has under a minute left (`LEAD`), the
+  session went idle less than **15 minutes** ago (Settings › General ›
+  Prompt cache › for), its context is at least 20k tokens, and the bumps
+  this idle stretch stay under half a rewrite (5 for a 5-minute cache, 9
+  for an hour's) and under the rewrite itself counting each bump's ~300
+  tokens of question and answer.
+- A 5-minute cache kept 15 minutes takes 3 bumps (at about 4, 8 and 12
+  minutes idle) and lapses at about 17 minutes: 0.3 C spent to save 1.15
+  C. Example: 150k tokens on Opus at $5/M input: a lapse adds $0.86, the
+  3 bumps cost $0.23.
+- An hour's cache (Claude Code signed in) is left alone at the default:
+  it lapses at 60 minutes idle, past the 15. Set "for" to 2 hours and it
+  gets one bump at 59 minutes (0.1 C to save 1.9 C if you're back in hour
+  two).
+- 20k tokens is the floor because below it a rewrite costs cents ($0.13
+  at 20k on Opus at $5/M) and Claude Code's own instructions and tools are
+  most of the context; the bump's own ~300 tokens matter only far below
+  that.
+- A cache that has lapsed already is never bumped: that bump would be
+  the full rewrite it's there to save.
+
+Never compacted instead. Compacting before the lapse costs a read of the
+context, a summary of a few thousand output tokens (5× the input price)
+and a write of the summary next time: about 0.3 C at 150k, paid whether
+you come back or not, against a 1.15 C rewrite paid only if you do. It
+also loses detail the agent then reads back from files, which costs
+turns. Claude Code already compacts itself when its window fills. So past
+the 15 minutes the cache just lapses.
+
+Never bumped: a session asleep (its program has exited; waking it costs
+more than the bump), done, working, with a queue, held by the runaway
+guard or by you (alt+h), stopped by a limit or retrying an API error, on
+an account past its pace, or while you're away (the guard's away
+check). A rush id may be bumped once in 2 minutes (`RETRY`).
+
+How. The pure rule is `rush_core::cachekeep` (`decide`, the multipliers,
+`worth`). The leading rush's runaway guard look (every 5 s,
+rush-ui-accounts `guard.rs keep_warm`, gated by `lead::leads` as the
+guard is) weighs each idle hosted session and keeps per session its idle
+stretch (when it went idle, its bumps). The host's `keep_warm` op (host
+proto 12) sends the bump through the Conn's `CacheKeeper`, found only on
+an agent with `Feature::KeepWarm`; it refuses a session that isn't idle,
+has a queue, has no agent running, or whose cache has lapsed. The bump
+isn't use: the idle wait to sleep runs on, no turn starts, nothing is
+sent as a message or queued, no notification, and the op isn't logged as
+a setting. Once back, the host sets `cacheWarm` to now plus the cache's
+life and logs `cache-kept` (context, ttl, idleFor, warmUntil, costUsd
+the read, savesUsd the lapse it avoids, at the agent's own prices); a
+failure logs `cache-keep-failed`.
+
+The cache's life: the host reads it from each request's usage. Any
+5-minute write makes it 5 minutes (the newest part of the context lapses
+first), else an hour's write makes it an hour; a request that wrote
+nothing leaves it as it was. Unknown, `cacheWarm` stays an hour after the
+last request, as before, and nothing is bumped. The header's "cache warm"
+reads the host's `cacheWarm` when there is one.
+
+Claude Code: the bump is a `side_question` control request with an empty
+history. Claude Code answers it from the last request's own cache-safe
+params (`getLastCacheSafeParams`: the same system prompt, tools and
+messages), so it reads the main conversation's cache; nothing is written
+to the transcript and no turn starts. A process that has made no request
+yet (just woken) has nothing to answer from and replies null; that, or a
+synthetic stand-in answer, is a failure, and `cacheWarm` stays. Other harnesses don't declare
+`KeepWarm` yet and are skipped: Codex has no request outside a turn;
+OpenAI, Gemini and DeepSeek charge no extra to write the cache, so a
+lapse there costs 0.9 C at most and DeepSeek's cache lives for hours.
+
+Settings: General › Prompt cache: "Keep it warm" (on by default; on
+because it only acts in the minutes after a turn, when you're most
+likely to come back, and 3 bumps cost a quarter of the rewrite they
+save) and "for" (15 minutes; 5, 30, 60, 120). Each harness that can has
+"Keep its cache warm" on its own page (as General says, on, off),
+kept in config.json's `cacheKeep.harnesses`.
+
 ## A session's runs
 
 The Session follows the runs its session started (session_core's

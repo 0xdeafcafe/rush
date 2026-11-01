@@ -114,7 +114,7 @@ pub fn clip(text: &str) -> String {
 }
 
 /// Ops asked of a session all the time, which change nothing.
-const QUIET_OPS: [&str; 4] = ["send", "exchange", "hello", "context"];
+const QUIET_OPS: [&str; 5] = ["send", "exchange", "hello", "context", "keep_warm"];
 
 /// The fields of the setting event an op a client asked of the session
 /// is logged with, and what came of it; None for the quiet ones.
