@@ -88,6 +88,32 @@ fn kq_wait(pid: i32, timeout: Option<Duration>) -> Option<bool> {
     }
 }
 
+/// How much a host's socket holds each way: macOS gives a unix socket
+/// 8 KiB, so a busy session's lines went across a context switch per
+/// 8 KiB, the host's writer and the client taking turns, and in a burst
+/// the client fell behind. The kernel takes it only as lines wait in it
+/// (Rust-only).
+pub const SOCK_BUF: usize = 4 << 20;
+
+/// Gives a connection to a host SOCK_BUF each way, at both ends. A
+/// socket that can't take it keeps what it has.
+pub fn widen(s: &std::os::unix::net::UnixStream) {
+    use std::os::fd::AsRawFd;
+    let v = SOCK_BUF as libc::c_int;
+    for opt in [libc::SO_SNDBUF, libc::SO_RCVBUF] {
+        // SAFETY: a valid descriptor and an int option of its size.
+        unsafe {
+            libc::setsockopt(
+                s.as_raw_fd(),
+                libc::SOL_SOCKET,
+                opt,
+                (&v as *const libc::c_int).cast(),
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

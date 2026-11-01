@@ -106,6 +106,36 @@ pub fn is_claude_line(l: &[u8]) -> bool {
     l.starts_with(br#"{"type":""#) && !l.starts_with(br#"{"type":"agtop_"#)
 }
 
+/// Whether l is one of the host's own lines that [`decode`] reads as
+/// something other than the agent's (an agtop_* line of a type it knows,
+/// or the echo of what was sent), told by its type alone: a host's writer
+/// passes these on as they are, and an info line is too big to take
+/// apart once per client for that (Rust-only). False when unsure.
+pub fn is_host_line(l: &[u8]) -> bool {
+    if is_claude_line(l) {
+        return false;
+    }
+    #[derive(Deserialize)]
+    struct T<'a> {
+        #[serde(rename = "type", default, borrow)]
+        typ: Option<&'a str>,
+        #[serde(default)]
+        agtop_sent: bool,
+    }
+    const OWN: [&str; 8] = [
+        TYPE_INFO,
+        TYPE_ANSWERED,
+        TYPE_ERROR,
+        TYPE_COMMANDS,
+        TYPE_REPLY,
+        TYPE_CONTEXT,
+        TYPE_TIME,
+        TYPE_EVENT,
+    ];
+    serde_json::from_slice::<T>(l)
+        .is_ok_and(|t| t.agtop_sent || t.typ.is_some_and(|t| OWN.contains(&t)))
+}
+
 /// A line the native agent wrote, as its own event.
 pub fn native_line(line: &[u8]) -> Result<Box<dyn Any + Send>, DecodeError> {
     let Some(n) = global().native_agent() else {

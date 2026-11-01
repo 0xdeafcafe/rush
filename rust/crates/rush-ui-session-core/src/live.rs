@@ -32,9 +32,10 @@
 //! a rewind's message goes back in the box once its host is reached
 //! again (rushmode.go:2156).
 
+use std::collections::VecDeque;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use rush_convo::{Decode, Session, history_from, history_start};
 use rush_core::adapter::{self, AdapterRef, Profile, Registry, migrated};
@@ -701,9 +702,12 @@ impl Pre {
     }
 }
 
-/// Reads the host's lines on a worker of their own, a batch at a time,
-/// on a lane of one. With no loop (tests, `rush --render`) what the link
-/// has is taken here and now.
+/// Reads the host's lines on a worker of their own. It never waits for
+/// the UI: what it reads while the UI is busy gathers in a [`Gathered`],
+/// and the UI takes all of it at its next turn, so the host's socket
+/// keeps draining through a burst and the host never has to let the
+/// connection go. With no loop (tests, `rush --render`) what the link has
+/// is taken here and now.
 fn follow(m: &mut Model, key: &str, link: Arc<dyn Link>, r#gen: u64, stop: Arc<AtomicBool>) {
     let Some(tx) = m.sender() else {
         link.follow(&mut |batch| {
@@ -712,28 +716,101 @@ fn follow(m: &mut Model, key: &str, link: Arc<dyn Link>, r#gen: u64, stop: Arc<A
         });
         return;
     };
-    let tx = tx.lane(1);
+    // One message waiting at most, and the one being handled: a send never
+    // waits (see Gathered::post).
+    let tx = tx.lane(2);
     let key = key.to_string();
     let spawned = std::thread::Builder::new()
         .name("rush-host-lines".into())
         .spawn(move || {
-            link.follow(&mut |batch| {
-                if stop.load(Ordering::Relaxed) {
-                    return false;
-                }
-                let key = key.clone();
-                tx.send(Note::Apply(Box::new(move |m: &mut Model| {
-                    take(m, &key, r#gen, batch, false)
-                })))
+            let g = Arc::new(Gathered {
+                tx,
+                key,
+                r#gen,
+                q: Mutex::new(Queue::default()),
             });
+            link.follow(&mut |batch| !stop.load(Ordering::Relaxed) && g.add(batch, false));
             if !stop.load(Ordering::Relaxed) {
-                tx.send(Note::Apply(Box::new(move |m: &mut Model| {
-                    take(m, &key, r#gen, Vec::new(), true)
-                })));
+                g.add(Vec::new(), true);
             }
         });
     if spawned.is_err() {
         m.fail("couldn't start a thread for the session");
+    }
+}
+
+/// The most the UI takes of a link's lines in one turn: a burst gathered
+/// while it drew is taken over a few turns, keys handled between them.
+const TAKE_MAX: usize = 4096;
+
+/// What a link's follower has read that the UI hasn't taken yet.
+struct Gathered {
+    tx: rush_draw::Sender<Note>,
+    key: String,
+    r#gen: u64,
+    q: Mutex<Queue>,
+}
+
+#[derive(Default)]
+struct Queue {
+    said: VecDeque<Said>,
+    /// The host has gone: said once all of `said` is taken.
+    closed: bool,
+    /// A message to take it is on its way to the UI.
+    posted: bool,
+}
+
+impl Gathered {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Queue> {
+        self.q.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Adds what the follower read; the UI is told unless it has been
+    /// already. False once the loop has ended.
+    fn add(self: &Arc<Self>, batch: Vec<Said>, closed: bool) -> bool {
+        let mut q = self.lock();
+        q.said.extend(batch);
+        q.closed |= closed;
+        if q.posted {
+            return true;
+        }
+        q.posted = true;
+        drop(q);
+        self.post(false)
+    }
+
+    /// Sends the UI a message to take what's gathered. The lane holds two
+    /// and only one is ever waiting, so it never waits; from the UI thread
+    /// (more left after a turn) it's tried, never waited for.
+    fn post(self: &Arc<Self>, ui: bool) -> bool {
+        let g = self.clone();
+        let note = Note::Apply(Box::new(move |m: &mut Model| g.take(m)));
+        if ui {
+            return self.tx.try_send(note).is_ok();
+        }
+        self.tx.send(note)
+    }
+
+    /// The UI's turn: takes up to TAKE_MAX of what's gathered, and asks
+    /// for another turn for the rest.
+    fn take(self: &Arc<Self>, m: &mut Model) -> Out {
+        let (batch, closed, more) = {
+            let mut q = self.lock();
+            let n = q.said.len().min(TAKE_MAX);
+            let batch: Vec<Said> = q.said.drain(..n).collect();
+            let more = !q.said.is_empty();
+            let closed = q.closed && !more;
+            q.closed &= more;
+            q.posted = more;
+            (batch, closed, more)
+        };
+        if more && !self.post(true) {
+            self.lock().posted = false;
+        }
+        if batch.is_empty() && !closed {
+            return Out::Idle;
+        }
+        take(m, &self.key, self.r#gen, batch, closed)
     }
 }
 

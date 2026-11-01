@@ -263,6 +263,22 @@ Claude, fleet, the other adapters) builds on these.
   (`convo::Info::{id, kind, effort, started_at, started_by, spawned_by,
   started_from}`) and its commands event `Session::commands`, which the
   first turn's opening card draws (render/opening.rs, in the turn's key).
+- **A host's lines in a burst.** A session streaming big tool results
+  makes tens of thousands of lines a second. Each end of a host's socket
+  asks for 4 MiB (rush-host `sys::widen`; macOS gives 8 KiB, so the
+  host's writer and the client took turns every 8 KiB), the client reads
+  256 KiB at a time, and the host lets a client go only once 32 MiB
+  (`CLIENT_BEHIND`, four rings) wait for it, never waiting on it itself
+  (Go: 4096 lines, passed in a tenth of a second, so the list's preview
+  was let go, replayed and let go again through a burst). The UI's
+  follower (session_core `live::follow`) never waits for the UI: what it
+  reads while the UI is busy gathers (`Gathered`), and one message takes
+  all of it, at most `TAKE_MAX` lines a turn. A host's writer passes its
+  own lines (info above all, sent on every step) on without taking them
+  apart (`lines::is_host_line`). Live bench, a session flooding (`flood
+  15000`, ~90,000 lines in 2-4 s) with the list's preview on it: let go
+  and dialled again 4-5 times a burst before, so 7-66 thousand of the
+  lines came and the rest as replays; none after, all 90,000 taken.
 - **Reading history.** `HistoryReader::history(session, before, most,
   each)` hands events to `each` a slice at a time, each slice read from
   at most `most` bytes of transcript (`SLICE` = 1 MiB by default); `each`
