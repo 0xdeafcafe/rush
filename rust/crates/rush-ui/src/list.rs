@@ -1526,6 +1526,10 @@ impl Model {
         } else if wants_you(self, a) {
             summary = wants_say(&wants_of(self, a));
             col = YELLOW;
+        } else if let Some(s) = crate::screens::accounts::guard::row_note(self, a) {
+            // The runaway guard holds its next turn.
+            summary = s;
+            col = YELLOW;
         } else if a.your_turn(now) && !a.just_finished(now) {
             summary = one_line(&a.job.detail);
             col = SUB;

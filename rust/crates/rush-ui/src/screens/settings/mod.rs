@@ -17,6 +17,7 @@ pub(crate) mod configpage;
 pub(crate) mod files;
 pub(crate) mod form;
 pub(crate) mod general;
+pub(crate) mod guard;
 pub(crate) mod harnesses;
 pub(crate) mod interface;
 pub(crate) mod keyboard;
@@ -100,6 +101,7 @@ pub(crate) fn pages() -> Vec<Page> {
             name: "General",
             form: Some(|m| {
                 let mut s = general::sections(m);
+                s.extend(guard::sections(m));
                 s.extend(interface::sections(m));
                 s
             }),

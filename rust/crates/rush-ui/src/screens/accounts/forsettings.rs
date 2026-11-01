@@ -284,6 +284,7 @@ fn to_settings(m: &Model, r: &AcctRow) -> SRow {
         who,
         current: r.current,
         q: r.q.clone(),
+        id: r.id().to_string(),
     }
 }
 
