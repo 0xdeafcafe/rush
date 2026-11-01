@@ -356,6 +356,10 @@ pub struct Runs {
     /// The steps that ran an agent, and the session (its serial) and
     /// version of its steps they were worked out at.
     pub(super) spawn_steps: ((u64, u64), Vec<rush_convo::StepId>),
+    /// Whether each step ran an agent, by the session (its serial) and the
+    /// step, as of its call's input: a step is read for it once, not
+    /// again each time another lands.
+    pub(super) spawn_seen: (u64, HashMap<rush_convo::StepId, (usize, bool)>),
     /// What this frame shows of them all (running.rs).
     pub shown: super::running::Shown,
     pub(super) reading: bool,
@@ -1301,11 +1305,26 @@ pub fn refresh(m: &mut Model, key: &str) {
         let ver = (s.serial(), s.step_ver());
         if r.spawn_steps.0 != ver {
             let mut ids = Vec::new();
+            if r.spawn_seen.0 != s.serial() {
+                r.spawn_seen = (s.serial(), HashMap::new());
+            }
+            let seen = &mut r.spawn_seen.1;
             for t in &s.turns {
                 for it in &t.items {
-                    if let rush_convo::Item::Step(id) = it
-                        && step_spawn(&reg, s.step(*id), &kind).is_some()
-                    {
+                    let rush_convo::Item::Step(id) = it else {
+                        continue;
+                    };
+                    let st = s.step(*id);
+                    let sig = st.input_json().len();
+                    let ran = match seen.get(id) {
+                        Some(&(was, ran)) if was == sig => ran,
+                        _ => {
+                            let ran = step_spawn(&reg, st, &kind).is_some();
+                            seen.insert(*id, (sig, ran));
+                            ran
+                        }
+                    };
+                    if ran {
                         ids.push(*id);
                     }
                 }

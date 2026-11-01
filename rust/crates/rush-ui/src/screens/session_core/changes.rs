@@ -202,15 +202,16 @@ fn changes_now(s: &Session, kids: &Kids) -> Vec<FileChange> {
                     } else {
                         &input.cwd
                     };
-                    let (writes, gone, end) = rush_convo::shell_run(&input.command, at);
+                    let run = rush_convo::shell_run_kept(&input.command, at);
+                    let (writes, gone, end) = (&run.0, &run.1, &run.2);
                     if input.cwd.is_empty() {
                         shell_at = home.clone();
-                        if !home.is_empty() && inside(&home, &end) {
-                            shell_at = end;
+                        if !home.is_empty() && inside(&home, end) {
+                            shell_at = end.clone();
                         }
                     }
                     let cmd = input.command.trim().split('\n').next().unwrap_or("");
-                    for w in writes {
+                    for w in writes.iter() {
                         removed.remove(&w.path);
                         let i = slot(&mut out, &w.path);
                         let fc = &mut out[i];
@@ -222,7 +223,7 @@ fn changes_now(s: &Session, kids: &Kids) -> Vec<FileChange> {
                         fc.cmds.push(cmd.to_string());
                     }
                     // After what it wrote: a scratch file goes last.
-                    removed.extend(gone);
+                    removed.extend(gone.iter().cloned());
                     continue;
                 }
                 _ => continue,
@@ -1501,5 +1502,34 @@ mod tests {
                 .as_deref(),
             None
         );
+    }
+
+    /// How long working out a real session's edits takes, the first time
+    /// and again (MEMO_TRANSCRIPTS names a file listing transcripts; without
+    /// it there's nothing to do). For measuring: `cargo test --release -p
+    /// rush-ui changes_cost -- --nocapture`.
+    #[test]
+    fn changes_cost() {
+        let Ok(list) = std::env::var("MEMO_TRANSCRIPTS") else {
+            return;
+        };
+        for p in std::fs::read_to_string(list).unwrap().lines().take(12) {
+            let mut s = Session::new();
+            let mut t = rush_convo::Tail::new(p, rush_convo::decode(rush_claude::messages));
+            t.read(&mut s).unwrap();
+            let time = || {
+                let t0 = std::time::Instant::now();
+                let n = changes(&s).len();
+                (t0.elapsed().as_micros(), n)
+            };
+            let (a, n) = time();
+            let (b, m) = time();
+            assert_eq!(n, m);
+            println!(
+                "{} steps {} files {n}: first {a} us, again {b} us",
+                p.rsplit('/').next().unwrap_or(""),
+                s.steps().len()
+            );
+        }
     }
 }
