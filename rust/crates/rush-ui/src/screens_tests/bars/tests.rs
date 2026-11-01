@@ -107,23 +107,23 @@ fn the_top_bar_goes_down_the_right() {
         default_agent(),
     );
     let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
-    assert!(rows[0].trim_end().ends_with("rush 0.1.0"), "{:?}", rows[0]);
+    assert!(rows[1].trim_end().ends_with("rush 0.1.0"), "{:?}", rows[1]);
     assert!(
-        rows[1].trim_end().ends_with("#statusline details"),
+        rows[2].trim_end().ends_with("#statusline details"),
         "{:?}",
-        rows[1]
+        rows[2]
     );
     // Each ends two cells in from the edge, as Go's do.
-    assert_eq!(rush_core::text::width(rows[0].trim_end()), 118);
+    assert_eq!(rush_core::text::width(rows[1].trim_end()), 118);
     // The header is two rows now: a third line has no row.
-    assert!(!rows[2].contains("today"), "{:?}", rows[2]);
+    assert!(!rows[3].contains("today"), "{:?}", rows[3]);
     m.loaded = false;
     m.w = 160; // the places and pages leave it room
     let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
     assert!(
-        rows[1].contains("costing transcripts…   #statusline details"),
+        rows[2].contains("costing transcripts…   #statusline details"),
         "{:?}",
-        rows[1]
+        rows[2]
     );
     // What had no room is kept for /statusline to point out.
     let mut m = model(60);
@@ -152,9 +152,9 @@ fn the_default_top_bar_is_gauges() {
     assert!(top::header_gauges(&m).is_some());
     with_bars(&mut m, default_top(), default_agent());
     let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
-    assert!(rows[0].contains("rush"), "{:?}", rows[0]);
-    assert!(rows[1].contains("% cpu"), "{:?}", rows[1]);
-    assert!(!rows[0].contains("finished"), "{:?}", rows[0]);
+    assert!(rows[1].contains("rush"), "{:?}", rows[1]);
+    assert!(rows[2].contains("% cpu"), "{:?}", rows[2]);
+    assert!(!rows[1].contains("finished"), "{:?}", rows[1]);
     // A layout with more than the calm header shows draws its lines.
     assert!(top::header_gauges(&m).is_some());
     with_bars(&mut m, lay(&[&["version", "clock"]]), default_agent());
@@ -534,7 +534,7 @@ fn temp_files_counts_what_the_reading_says() {
     m.agents = vec![a];
     with_bars(&mut m, lay(&[&["tmp"]]), default_agent());
     let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
-    assert!(rows[0].contains("300M tmp"), "{:?}", rows[0]);
+    assert!(rows[1].contains("300M tmp"), "{:?}", rows[1]);
 }
 
 /// Temp work Projects cleaned to nothing counts as nothing, not as the
@@ -560,13 +560,13 @@ fn temp_files_cleaned_to_nothing() {
     );
     with_bars(&mut m, lay(&[&["tmp"]]), default_agent());
     let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
-    assert!(rows[0].contains("300M tmp"), "{:?}", rows[0]);
+    assert!(rows[1].contains("300M tmp"), "{:?}", rows[1]);
     // Deleted: nothing left.
     if let Some(t) = m.kept::<Data>().temp.get_mut("default/a:1") {
         t.known = true;
     }
     let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
-    assert!(!rows[0].contains("tmp"), "{:?}", rows[0]);
+    assert!(!rows[1].contains("tmp"), "{:?}", rows[1]);
 }
 
 /// #statusline's Agent header samples are the agent it was opened on,
@@ -604,11 +604,11 @@ fn a_kept_top_bar_stands_in_till_its_readings_are_in() {
         default_agent(),
     );
     let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
-    assert!(rows[0].trim_end().ends_with("rush 0.1.0"), "{:?}", rows[0]);
+    assert!(rows[1].trim_end().ends_with("rush 0.1.0"), "{:?}", rows[1]);
     assert!(
-        rows[1].trim_end().ends_with("3.3G ram · rush 0.1.0"),
+        rows[2].trim_end().ends_with("3.3G ram · rush 0.1.0"),
         "{:?}",
-        rows[1]
+        rows[2]
     );
 }
 

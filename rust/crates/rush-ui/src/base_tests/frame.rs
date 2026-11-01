@@ -141,7 +141,7 @@ fn places_and_focus() {
 fn agents_pages() {
     let mut m = model(120, 40);
     let f = screen(&mut m);
-    assert!(f[1].contains("Agents · Wall  [ ]"), "{f:?}");
+    assert!(f[2].contains("Agents · Wall  [ ]"), "{f:?}");
     press(&mut m, "]");
     assert_eq!(m.agents_page, 1);
     let f = screen(&mut m);
@@ -170,8 +170,8 @@ fn a_place_draws_in_the_frame() {
     press(&mut m, ">");
     let f = screen(&mut m);
     assert_eq!(f.len(), 24);
-    assert!(f[1].contains(" Projects "), "{f:?}");
-    assert!(f[2].starts_with("────"));
+    assert!(f[2].contains(" Projects "), "{f:?}");
+    assert!(f[5].starts_with("────"));
     assert!(f[22].starts_with("────"), "{f:?}");
     // The place's own keys (Projects' once its group fills it), esc last.
     assert!(f[23].trim_end().ends_with("esc back"), "{f:?}");
@@ -188,8 +188,8 @@ fn a_place_draws_in_the_frame() {
 fn clicking_the_tabs() {
     let mut m = model(120, 40);
     let f = screen(&mut m);
-    let x = f[1].find(" Settings ").unwrap();
-    let x = rush_core::text::width(&f[1][..x]) + 2;
+    let x = f[2].find(" Settings ").unwrap();
+    let x = rush_core::text::width(&f[2][..x]) + 2;
     let click = |m: &mut Model, x: usize, y: usize| {
         m.mouse_event(&Mouse {
             kind: MouseKind::Down(Button::Left),
@@ -198,15 +198,15 @@ fn clicking_the_tabs() {
             mods: KeyMods::NONE,
         })
     };
-    assert_eq!(click(&mut m, x, 1), Out::Draw);
+    assert_eq!(click(&mut m, x, 2), Out::Draw);
     assert_eq!(m.place, PlaceId::Settings);
     let f = screen(&mut m);
-    let x = rush_core::text::width(&f[1][..f[1].find(" Agents ").unwrap()]) + 2;
-    click(&mut m, x, 1);
+    let x = rush_core::text::width(&f[2][..f[2].find(" Agents ").unwrap()]) + 2;
+    click(&mut m, x, 2);
     assert_eq!(m.place, PlaceId::Agents);
     let f = screen(&mut m);
-    let x = rush_core::text::width(&f[1][..f[1].find("Wall").unwrap()]) + 1;
-    click(&mut m, x, 1);
+    let x = rush_core::text::width(&f[2][..f[2].find("Wall").unwrap()]) + 1;
+    click(&mut m, x, 2);
     assert_eq!(m.agents_page, 1);
 }
 

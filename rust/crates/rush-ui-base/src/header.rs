@@ -18,6 +18,9 @@ use crate::style::*;
 /// Below this the header drops clanker's body for his face.
 pub const NARROW: usize = 60;
 
+/// The row of clanker's head: the text's first row is level with it.
+pub const TEXT_AT: usize = 1;
+
 #[derive(Default, Clone, Copy)]
 pub struct Tally {
     pub blocked: usize,
@@ -65,10 +68,28 @@ impl Model {
         clanker::draw_fx(md, self.tick, t.today >= 500.0, clanker::reaction(self))
     }
 
-    /// The rows above the body: two rows of header and a rule; the small
+    /// The rows above the body: the header and a rule. With clanker the
+    /// header is as tall as he is and the two rows of text sit beside his
+    /// head and body (`TEXT_AT`); without him it is the two rows. The small
     /// screens keep the taller one, its places and pages a row each.
     pub fn top_h(&self) -> usize {
-        if self.w < NARROW { 5 } else { 3 }
+        if self.w < NARROW {
+            5
+        } else if self.cfg.hide_logo {
+            3
+        } else {
+            clanker::H + 1
+        }
+    }
+
+    /// The header row the first of the two rows of text is on: level with
+    /// clanker's head, the second beside his body.
+    pub fn text_at(&self) -> usize {
+        if self.w < NARROW || self.cfg.hide_logo {
+            0
+        } else {
+            TEXT_AT
+        }
     }
 
     /// The counts along the header's left: what needs you, what is
@@ -126,7 +147,7 @@ impl Model {
             (vec![Line::new(); 2], "")
         } else {
             let r = self.robot(md, t);
-            (vec![r[3].clone(), r[4].clone()], "   ")
+            (vec![r[TEXT_AT].clone(), r[TEXT_AT + 1].clone()], "   ")
         };
         let lead = |i: usize| {
             let mut l = line([plain("  ")]);
@@ -310,11 +331,29 @@ impl Model {
             counts.extend(self.news_badge());
             return self.narrow_header(md, counts);
         }
-        let (mut out, text, drops) = self.head_rows(w);
+        let (text_rows, text, drops) = self.head_rows(w);
         if let Some(tb) = self.ext.top_bar {
             (tb.dropped)(self, drops);
         }
         self.header_text = text;
+        // clanker whole, his rows above and below the text's two.
+        let mut out = Vec::new();
+        if self.cfg.hide_logo {
+            out = text_rows;
+        } else {
+            let t = self.tally();
+            let robot = self.robot(self.mood(t), t);
+            let mut rows = text_rows.into_iter();
+            for (i, r) in robot.into_iter().enumerate() {
+                if (TEXT_AT..TEXT_AT + 2).contains(&i) {
+                    out.extend(rows.next());
+                } else {
+                    let mut l = line([plain("  ")]);
+                    join(&mut l, r);
+                    out.push(fit(l, w));
+                }
+            }
+        }
         out.push(line([sp("─".repeat(w), FAINT)]));
         out
     }

@@ -455,7 +455,7 @@ impl Model {
         let (places_y, pages_y) = if narrow {
             (2, self.top_h() - 2)
         } else {
-            (1, 1)
+            (self.text_at() + 1, self.text_at() + 1)
         };
         if y == pages_y
             && let Some(t) = self.page_tabs()

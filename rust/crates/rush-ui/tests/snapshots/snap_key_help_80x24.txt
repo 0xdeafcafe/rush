@@ -1,15 +1,15 @@
-    RUSH      rush   ● 1 needs you   ✻ 2 working                       default
+     !
+    ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working                       default
    ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    Agents · Wall  [ ]
-────────────────────────────────────────────────────────────────────────────────
-  ╭─ ⌨ Keys ────────────────────────────────────────────────────────── f1 ─╮IME
-┃ │ ❯ ▏find a key by its keys or what it does                     134 keys │
-▌ │ ────────────────────────────────────────────────────────────────────── │m ●
-▌ │ Here · Agents and the Prompt ────────────────────────────────────────  │
-▌ │ ▍ ↑                  the agent above                                   │
-  │   ↓                  the agent below                                   │
-┃ │   pgup               ten agents up                                     │
-┃ │   pgdown             ten agents down                                   │21m
-┃ │   home · shift+↑     the first agent                                   │
+  ╭─ ⌨ Keys ────────────────────────────────────────────────────────── f1 ─╮
+  │ ❯ ▏find a key by its keys or what it does                     134 keys │
+──│ ────────────────────────────────────────────────────────────────────── │────
+  │ Here · Agents and the Prompt ────────────────────────────────────────  │IME
+┃ │ ▍ ↑                  the agent above                                   │
+▌ │   ↓                  the agent below                                   │m ●
+▌ │   pgup               ten agents up                                     │
+▌ │   pgdown             ten agents down                                   │
+  │   home · shift+↑     the first agent                                   │
   │   end · shift+↓      the last agent                                    │
   │   enter              open or rename the agent, or send what's typed    │─╮
   │   ctrl+o · ⌘↓        open the agent's Session                          │ │

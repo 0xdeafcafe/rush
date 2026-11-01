@@ -1,5 +1,8 @@
-    RUSH      rush   ● 1 needs you   ✻ 2 working                                                                                                                                               default
+     !
+    ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working                                                                                                                                               default
    ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    Agents · Wall  [ ]                                                                                            0% cpu · – · 37.0G free · 80%
+    RUSH
+   ▀▀▀▀▀▀
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   AGENTS▾                                   COST   TIME │
 ┃ Needs you  1 · $0.19                                  │    set up caching for CI   @set-up-caching  ·  idle                                                                               context 0%
@@ -22,9 +25,6 @@
 ┃      checkout · main                                  │                                                                                                                                   │
                                                         │                                                                                                                                   │
  ▸ Earlier  1 · $0.42   rename Invoice to Bill everyw…  │                                                                                                                                   │
-                                                        │                                                                                                                                   │
-                                                        │                                                                                                                                   │
-                                                        │                                                                                                                                   │
                                                         │                                                                                                                                   │
                                                         │                                                                                                                                   │
                                                         │                                                                                                                                   │
