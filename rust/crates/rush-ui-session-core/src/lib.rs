@@ -121,6 +121,9 @@ pub fn register(x: &mut Ext) {
     // The picker over the box has ↑↓ tab enter while a command is typed
     // (paneKey :4079 slashKey).
     x.session_keys.push(slash::key);
+    // A reply of the Needs-you section picked: its number or enter puts
+    // it in the box.
+    x.session_keys.push(turnwants::needs_key);
     x.session_keys.push(keys::key);
     x.session_dock.push(dock::dock);
     x.session_body.push(views::body);

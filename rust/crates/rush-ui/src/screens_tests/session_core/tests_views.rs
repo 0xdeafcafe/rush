@@ -1457,7 +1457,11 @@ fn needs_you_under_the_last_answer() {
             at: NOW - 60_000,
             wants: "you".into(),
             line: "approve PR #52".into(),
-            ui: vec![item("run", "make ship"), item("reply", "yes, ship it")],
+            ui: vec![
+                item("run", "make ship"),
+                item("reply", "yes, ship it"),
+                item("reply", "not yet"),
+            ],
             ..TurnWants::default()
         },
     );
@@ -1466,13 +1470,42 @@ fn needs_you_under_the_last_answer() {
     let y = row_with(&mut m, "Needs you · approve PR #52").expect("the section");
     assert!(s[y].contains("╭ ! Needs you"), "{}", s[y]);
     let r = row_with(&mut m, "yes, ship it").expect("the reply");
-    assert!(s[r].contains("↩ yes, ship it") && s[r].contains("click to reply"));
+    assert!(s[r].contains(" 1  yes, ship it") && s[r].contains("click to reply"));
+    assert!(s[r + 1].contains(" 2  not yet"), "{}", s[r + 1]);
+    assert!(s[r + 2].contains(" ✎  Something else"), "{}", s[r + 2]);
     let x = s[r].find("yes").unwrap();
     let x = rush_core::text::width(&s[r][..x]);
     click(&mut m, MouseKind::Down(Button::Left), x, r);
     click(&mut m, MouseKind::Up(Button::Left), x, r);
     assert_eq!(input(&mut m), "yes, ship it");
     assert_eq!(flash(&m), "in your message box · enter sends it");
+    // ↑ from the empty box picks the row for your own words; a reply's
+    // number puts it in the box, the box has the keys again.
+    conn(&mut m, KEY).input.clear();
+    press(&mut m, "up");
+    let own = rush_convo::render::needs_ref(rush_convo::render::NEEDS_OWN, "");
+    assert_eq!(m.session.as_ref().unwrap().sel, own);
+    let s = screen(&mut m);
+    assert!(s[r + 2].contains("enter types it"), "{}", s[r + 2]);
+    press(&mut m, "2");
+    assert_eq!(input(&mut m), "not yet");
+    assert_eq!(m.session.as_ref().unwrap().sel, "");
+    // A number typed into the box is only typed.
+    press(&mut m, "1");
+    assert_eq!(input(&mut m), "not yet1");
+    // Enter on the row for your own words gives the box the keys.
+    conn(&mut m, KEY).input.clear();
+    press(&mut m, "up");
+    press(&mut m, "enter");
+    assert_eq!(m.session.as_ref().unwrap().sel, "");
+    assert_eq!(input(&mut m), "");
+    // A click on it too.
+    screen(&mut m);
+    let o = row_with(&mut m, "Something else").expect("the row");
+    click(&mut m, MouseKind::Down(Button::Left), 8, o);
+    click(&mut m, MouseKind::Up(Button::Left), 8, o);
+    assert_eq!(m.session.as_ref().unwrap().sel, "");
+    assert_eq!(flash(&m), "type your answer · enter sends it");
     // A turn after it: what was read is of the one before.
     m.agents[0].job.updated_at = NOW;
     let a = m.agents[0].clone();

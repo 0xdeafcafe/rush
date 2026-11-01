@@ -447,10 +447,60 @@ pub fn act_on_needs(m: &mut Model, key: &str, kind: &str, text: &str) {
             }
             m.flash("in your message box · enter sends it");
         }
+        // The row under the replies: your own words, typed in the box.
+        rush_convo::render::NEEDS_OWN => {
+            if let Some(v) = m.session.as_mut() {
+                v.sel.clear(); // back to typing
+            }
+            m.flash("type your answer · enter sends it");
+        }
         "link" => {
             rush_ui_accounts::signin::browse(text);
             m.flash(&format!("opened {}", text.trim_start_matches("https://")));
         }
         _ => {}
     }
+}
+
+/// A key on a picked row of the Needs-you section, nothing typed: a
+/// reply's number (1, 2…) puts that reply in your message box, as a click
+/// on it does; enter on a reply, or on the row for your own words, does
+/// what a click on it does. Only once a row is picked (↑ from the box), as
+/// a question card's numbers wait for ↑: a number typed into the box
+/// starts a message.
+pub fn needs_key(m: &mut Model, k: &crate::frame::Press) -> Out {
+    if m.sheet.is_some() || m.confirm.is_some() {
+        return Out::Pass;
+    }
+    let Some(key) = open_key(m) else {
+        return Out::Pass;
+    };
+    if !conn(m, &key).input.is_empty() {
+        return Out::Pass;
+    }
+    let Some(v) = m.session.as_ref().filter(|v| v.key == key) else {
+        return Out::Pass;
+    };
+    let Some((kind, text)) = rush_convo::render::needs_of(&v.sel) else {
+        return Out::Pass;
+    };
+    let s = k.s.as_str();
+    let (kind, text) = if s == "enter" && matches!(kind, "reply" | rush_convo::render::NEEDS_OWN) {
+        (kind.to_string(), text.to_string())
+    } else if let Some(t) = s
+        .parse::<usize>()
+        .ok()
+        .and_then(|d| d.checked_sub(1))
+        .and_then(|i| {
+            rush_convo::render::needs_choices(&v.o.needs)
+                .get(i)
+                .map(|t| t.to_string())
+        })
+    {
+        ("reply".to_string(), t)
+    } else {
+        return Out::Pass;
+    };
+    act_on_needs(m, &key, &kind, &text);
+    Out::Draw
 }
