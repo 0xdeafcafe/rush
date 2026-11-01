@@ -1295,6 +1295,13 @@ Go rush is gone from the tree; its last version is the `go-final` tag
 - `cargo bench -p rush-convo`: apply events, open a large transcript cold,
   warm frame of a 3,000-turn conversation, incremental tail.
 - `cargo bench -p rush-claude`: spend scan, preview read.
+- `cargo bench -p rush-convo --bench search` (RUSH_BENCH_TRANSCRIPT=<a
+  transcript>): an open conversation searched as the command bar does on
+  each key, letter by letter: Session::search's instructions per key and
+  a digest of its hits, then Session::search_top (the bar's This session
+  and This chat: only the hits a section shows, with a memo kept from key
+  to key and a vocabulary of the words typos are looked for among, made
+  on another thread as the bar opens) checked hit for hit against it.
 - `cargo bench -p rush-ui --bench frame` (under `tools/sbtest.sh`): a frame
   of the Agents list, 300 agents at 160x48 — its rows, painted, and a key
   then the frame — in µs, instructions, bytes and allocations per frame.
@@ -1323,7 +1330,8 @@ Go rush is gone from the tree; its last version is the `go-final` tag
   Run it against a throwaway HOME under `tools/sbtest.sh` when testing.
 - Timing log (Rust-only, off by default): `RUSH_PERF_LOG=<file>` writes the
   process's start time and one line per frame (what it handled, µs spent
-  handling and drawing, cells changed, and a key's latency from its
+  handling and drawing, the UI thread's own CPU µs for each (`ucpu`,
+  `dcpu`: steady on a busy machine), cells changed, and a key's latency from its
   arrival to the frame written); `RUSH_PERF_MARK=<text>` notes the first
   frame showing that text, and `RUSH_PERF_WATCH=<a|b|…>` each frame
   each text shows in and leaves, to time a placeholder (rush-draw
