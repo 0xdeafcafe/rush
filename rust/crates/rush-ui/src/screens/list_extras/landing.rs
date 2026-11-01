@@ -79,6 +79,17 @@ pub struct ListFolders {
     pub by_root: HashMap<String, Folder>,
     pub asked: Ms,
     pub looking: bool,
+    /// Rust-only: the checkouts asked about, watched (rush_sys's Deep):
+    /// git is asked again once something in one changed, FOLDER_EVERY
+    /// apart at most, as Go's tick would have, and not while nothing
+    /// does. Where there's no stream, a timer asks every FOLDER_EVERY.
+    watch: Option<(Vec<String>, rush_sys::fswait::Deep)>,
+    /// Something in a watched checkout changed since git was last asked.
+    changed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// The stream's news is on its way to the UI thread.
+    told: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// A wake is set for when asking again is due.
+    due: bool,
 }
 
 /// The linked worktree a works in, "" in the main checkout (treeOf).
@@ -272,9 +283,14 @@ pub fn ask_folders(m: &mut Model) {
     if wants.is_empty() {
         return;
     }
-    let now = m.now;
+    let now = m.clock.unwrap_or_else(rush_core::time::now);
+    watch(m, &wants);
     let f = m.kept::<ListFolders>();
-    let mut stale = now - f.asked >= FOLDER_EVERY;
+    let due = now - f.asked >= FOLDER_EVERY;
+    let watching = f.watch.is_some();
+    let changed = f.changed.load(std::sync::atomic::Ordering::Relaxed);
+    // Watched, only what changed is asked again; else every FOLDER_EVERY.
+    let mut stale = due && (changed || !watching);
     for (root, trees) in &wants {
         match f.by_root.get(root) {
             None => stale = true,
@@ -282,10 +298,16 @@ pub fn ask_folders(m: &mut Model) {
         }
     }
     if !stale {
+        let left = f.asked + FOLDER_EVERY - now;
+        if (changed || !watching) && !f.due {
+            wake_at(m, left);
+        }
         return;
     }
+    f.changed.store(false, std::sync::atomic::Ordering::Relaxed);
     f.looking = true;
     f.asked = now;
+    rush_draw::perf_note(|| format!("folders asked {} watched={watching}", wants.len()));
     let wants: Vec<(String, Vec<String>)> = wants.into_iter().collect();
     m.later(
         move || {
@@ -313,6 +335,79 @@ pub fn ask_folders(m: &mut Model) {
             Out::Draw
         },
     );
+}
+
+/// Asks again once `left` has passed (only with a loop running).
+fn wake_at(m: &mut Model, left: Ms) {
+    if m.sender().is_none() {
+        return;
+    }
+    m.kept::<ListFolders>().due = true;
+    let left = std::time::Duration::from_millis(left.clamp(0, FOLDER_EVERY) as u64);
+    m.later(
+        move || std::thread::sleep(left),
+        |m, ()| {
+            m.kept::<ListFolders>().due = false;
+            ask_folders(m);
+            Out::Idle
+        },
+    );
+}
+
+/// Keeps the stream on the checkouts git is asked about: each root, and
+/// each worktree not under one. What asking git writes (a checkout's
+/// index, its objects) doesn't count as a change.
+fn watch(m: &mut Model, wants: &HashMap<String, Vec<String>>) {
+    let Some(tx) = m.sender() else { return };
+    let mut paths: Vec<String> = wants.keys().cloned().collect();
+    for (root, trees) in wants {
+        for t in trees {
+            if !std::path::Path::new(t).starts_with(root) {
+                paths.push(t.clone());
+            }
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    let f = m.kept::<ListFolders>();
+    if f.watch.as_ref().is_some_and(|(p, _)| *p == paths) {
+        return;
+    }
+    let roots: Vec<std::path::PathBuf> = paths.iter().map(std::path::PathBuf::from).collect();
+    let mut skip = Vec::new();
+    for r in &roots {
+        let git = r.join(".git");
+        skip.push(git.join("index"));
+        skip.push(git.join("index.lock"));
+        skip.push(git.join("objects"));
+        skip.push(git.join("worktrees")); // each worktree's own index
+    }
+    let (changed, told) = (f.changed.clone(), f.told.clone());
+    // Two: news that comes while the last is being handled still lands.
+    let tx = tx.lane(2);
+    let tell: rush_sys::fswait::Tell = Box::new(move |v| {
+        rush_draw::perf_note(|| format!("folders changed {v:?}"));
+        changed.store(true, std::sync::atomic::Ordering::Relaxed);
+        if told.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            return; // the last news is still on its way
+        }
+        let told = told.clone();
+        let sent = tx.try_send(crate::worker::Note::Apply(Box::new(
+            move |m: &mut Model| {
+                m.kept::<ListFolders>()
+                    .told
+                    .store(false, std::sync::atomic::Ordering::Relaxed);
+                ask_folders(m);
+                Out::Idle
+            },
+        )));
+        if sent.is_err() {
+            told.store(false, std::sync::atomic::Ordering::Relaxed);
+        }
+    });
+    f.watch = rush_sys::fswait::Deep::new(&roots, &skip, tell).map(|d| (paths, d));
+    let on = f.watch.is_some();
+    rush_draw::perf_note(|| format!("folders watched {roots:?} on={on}"));
 }
 
 /// Under the name in the rail look: what's left before Earlier has it
