@@ -208,18 +208,101 @@ fn box_without_dictation_is_unchanged() {
 
 // --- yap's paste (yap_test.go TestYapPasteIsTheDictation) ---
 
+fn yap(phase: &str, settled: &str) -> YapState {
+    YapState {
+        phase: phase.into(),
+        settled: settled.into(),
+        ..YapState::default()
+    }
+}
+
+/// How many times the screen shows what.
+fn shown(m: &mut Model, what: &str) -> usize {
+    plain(&m.frame()).matches(what).count()
+}
+
+// yap says done: the words go into the box at once, the look ends in the
+// same step, and yap's own paste of them, and its done said again, change
+// nothing; no frame shows them twice. A different paste still goes in.
+#[test]
+fn yaps_done_goes_in_once() {
+    let (mut m, _, _d) = window(true, Fake::default());
+    m.clock = Some(10_000);
+    m.input.set("check the ");
+    let _ = on_yap(&mut m, yap("listening", "migration replays"));
+    assert_eq!(shown(&mut m, "migration replays"), 1, "the look");
+    let _ = on_yap(&mut m, yap("done", "migration replays"));
+    assert_eq!(m.input.string(), "check the migration replays ");
+    assert!(
+        look(&mut m).is_none(),
+        "the look outlived the words going in"
+    );
+    assert_eq!(shown(&mut m, "migration replays"), 1, "done drew it twice");
+    // yap publishes done again just after it.
+    let _ = on_yap(&mut m, yap("done", "migration replays"));
+    assert_eq!(
+        shown(&mut m, "migration replays"),
+        1,
+        "done again drew it twice"
+    );
+    m.clock = Some(10_400);
+    assert_eq!(m.paste("migration replays "), Out::Draw);
+    assert_eq!(m.input.string(), "check the migration replays ");
+    assert_eq!(shown(&mut m, "migration replays"), 1, "yap's paste went in");
+    let _ = on_yap(&mut m, yap("hidden", ""));
+    assert_eq!(shown(&mut m, "migration replays"), 1);
+    // Another paste is yours.
+    let _ = m.paste("now");
+    assert_eq!(m.input.string(), "check the migration replays now");
+}
+
+// Only yap's paste is dropped: a different one goes in, and the same
+// words long after are a paste of your own.
+#[test]
+fn only_yaps_paste_is_dropped() {
+    let (mut m, _, _d) = window(true, Fake::default());
+    m.clock = Some(10_000);
+    let _ = on_yap(&mut m, yap("done", "ship it"));
+    assert_eq!(m.input.string(), "ship it ");
+    let _ = m.paste("and tag it ");
+    // An ordinary short paste goes in as one line, its ends trimmed.
+    assert_eq!(
+        m.input.string(),
+        "ship it and tag it",
+        "a different paste was dropped"
+    );
+    m.clock = Some(10_000 + YAP_PASTE_WAIT + 1_000);
+    let _ = m.paste("ship it ");
+    assert_eq!(
+        m.input.string().matches("ship it").count(),
+        2,
+        "a paste long after was dropped"
+    );
+}
+
+// An older yap's paste that comes before its done goes in as a paste, and
+// the done after it neither shows nor types them again.
+#[test]
+fn a_paste_before_done_is_the_dictation() {
+    let (mut m, _, _d) = window(true, Fake::default());
+    m.clock = Some(10_000);
+    let _ = on_yap(&mut m, yap("finishing", "ship it"));
+    let _ = m.paste("ship it ");
+    assert_eq!(m.input.string(), "ship it");
+    let _ = on_yap(&mut m, yap("done", "ship it"));
+    assert_eq!(m.input.string(), "ship it", "typed twice");
+    assert_eq!(shown(&mut m, "ship it"), 1, "drawn twice");
+}
+
+// Where rush doesn't take the words (its terminal hasn't the keys), yap's
+// paste goes in as typed, once.
 #[test]
 fn yaps_paste_is_the_dictation() {
     let (mut m, _, _d) = window(true, Fake::default());
     m.clock = Some(10_000);
-    let _ = on_yap(
-        &mut m,
-        YapState {
-            phase: "done".into(),
-            settled: "ship it".into(),
-            ..YapState::default()
-        },
-    );
+    m.term_focused = false;
+    let _ = on_yap(&mut m, yap("done", "ship it"));
+    assert_eq!(m.input.string(), "", "taken without the keys");
     let long = "ship it";
     assert_eq!(
         paste(&mut m, "ship it "),
@@ -237,14 +320,8 @@ fn yaps_paste_is_the_dictation() {
         "a second paste was taken as it too"
     );
     // Too late: an ordinary paste.
-    let _ = on_yap(
-        &mut m,
-        YapState {
-            phase: "done".into(),
-            settled: "ship it".into(),
-            ..YapState::default()
-        },
-    );
+    let _ = on_yap(&mut m, yap("hidden", ""));
+    let _ = on_yap(&mut m, yap("done", "ship it"));
     m.clock = Some(10_000 + YAP_PASTE_WAIT + 1_000);
     assert_eq!(
         paste(&mut m, "ship it"),
