@@ -1259,7 +1259,10 @@ mod tests {
         assert_eq!((a.after, a.cap), (20 * 60_000, 2));
         assert_eq!(s.move_gap, 6 * 3_600_000);
         let j = serde_json::to_string(&c).unwrap();
-        assert!(j.contains(r#""guard":{"pace":true,"cap":4,"away":true}"#), "{j}");
+        assert!(
+            j.contains(r#""guard":{"pace":true,"cap":4,"away":true}"#),
+            "{j}"
+        );
     }
 
     // Quick start is on until it's turned off, and turning it off sticks.
