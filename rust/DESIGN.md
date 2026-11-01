@@ -840,8 +840,18 @@ move writes its whole context again at full price; a cold one moves
 waits. rush's own switching (auto-switch, other agents' accounts) never
 moves to an account the guard has past its pace.
 
-Said: the list row ("held: past your pace on alex · 2.1× · frees at
-14:20"), the header's counts row, the queue card, the provider's
+A session on an account past its pace is also refused new subagents and
+workflows (`Plan::spawns_for`: the sessions on a tripped account, minus
+any you let through with alt+h, whose spawns go until that turn has run;
+released, under 1.2×, lifts it). The refusal says plainly that the
+user's runaway guard is pausing new agents because the account is past
+its pace, and to finish the current work without starting new ones. It
+goes through the same `guard.json` / `rush gate hook` path as away.
+
+Said: the list row and queue card ("pauses after this turn: past your
+pace on alex · 2.2× · frees at 20:52" while the session's turn runs, then
+"held: past your pace on alex · 2.1× · frees at 14:20" once the turn has
+finished and the next is waiting; `Hold::say_running`), the header's counts row, the queue card, the provider's
 `pace` line and a chip on each account's row; news when an account
 trips, warns, or you go away or come back; a desktop notification
 (unless Notify is off) when one trips or every account is past its
@@ -849,7 +859,9 @@ pace. Events: `guard-tripped` (rush's own), and per session
 `guard-held`, `guard-moved` (with the context size and whether its cache
 was cold), `guard-released`, `guard-refused` (a spawn), so `rush why`
 tells them. New subagents and workflows are refused through
-`guard.json` in rush's folder, which `rush gate hook` reads: Claude
+`guard.json` in rush's folder, which `rush gate hook` reads (`refuse`:
+for every session, away and the cap; `sessions`: by rush id, for an
+account past its pace): Claude
 Code's PreToolUse hook matches Bash|Agent|Task|Workflow; it lapses 2
 minutes after the last look. A harness without that hook isn't
 refused spawns.

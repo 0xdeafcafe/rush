@@ -591,7 +591,11 @@ fn held_said_in_the_list_and_header() {
         Some("held: past your pace on alex · 2.1×")
     );
     a.job.state = rush_core::agent::State::Working;
-    assert_eq!(g::row_note(&m, &a), None, "its turn runs: it's held after");
+    assert_eq!(
+        g::row_note(&m, &a).as_deref(),
+        Some("pauses after this turn: past your pace on alex · 2.1×"),
+        "its turn runs: it only pauses after"
+    );
     let h = g::header_line(&m).unwrap().plain();
     assert_eq!(
         h,

@@ -544,12 +544,14 @@ pub fn when(m: &mut Model, key: &str, q: &Queued) -> rush_core::text::Line {
     let send_now = super::spawned::send_now_key(m);
     if q.held {
         // The runaway guard's: why, and the key that lets it through.
-        let id = m
+        let who = m
             .agents
             .iter()
             .find(|a| a.key == key && a.rush)
-            .map(|a| a.job.id.clone());
-        if let Some(say) = id.and_then(|id: String| rush_ui_accounts::guard::held_say(m, &id)) {
+            .map(|a| (a.job.id.clone(), a.job.live()));
+        if let Some(say) =
+            who.and_then(|(id, live)| rush_ui_accounts::guard::held_say(m, &id, live))
+        {
             return line([
                 sp(format!(" · {say}"), YELLOW),
                 sp(

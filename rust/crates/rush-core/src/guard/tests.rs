@@ -625,3 +625,52 @@ fn holds_said() {
         "held: 6 of 6 agents working"
     );
 }
+
+#[test]
+fn a_tripped_account_refuses_its_sessions_new_agents() {
+    let accts = [
+        acct("a", true, 2.4, Level::Over),
+        acct("b", false, 0.5, Level::Under),
+    ];
+    let xs = [
+        working("s1", "a", 1),
+        seat("s2", "b"),
+        Seat {
+            let_through: true,
+            ..working("s3", "a", 1)
+        },
+    ];
+    // Tripped: only the session on it, not let through, is refused.
+    let p = plan(&pace_on(), &accts, &xs, 0, false, T0);
+    assert_eq!(p.spawns, None);
+    let ids: Vec<&str> = p.spawns_for.iter().map(|(i, _)| i.as_str()).collect();
+    assert_eq!(ids, ["s1"]);
+    assert!(p.spawns_for[0].1.contains("is past its pace"));
+    // Released (under the line): allowed.
+    let accts = [acct("a", true, 1.0, Level::Under)];
+    let p = plan(&pace_on(), &accts, &[working("s1", "a", 1)], 0, false, T0);
+    assert!(p.spawns_for.is_empty());
+}
+
+#[test]
+fn a_pace_hold_said_while_the_turn_runs() {
+    let clock = |_: Ms| "20:52".to_string();
+    let h = Hold::Pace {
+        acct: "alex".into(),
+        ratio: 2.2,
+        frees_at: T0,
+        why: String::new(),
+    };
+    assert_eq!(
+        h.say_running(&clock),
+        "pauses after this turn: past your pace on alex · 2.2× · frees at 20:52"
+    );
+    assert_eq!(
+        h.say(&clock),
+        "held: past your pace on alex · 2.2× · frees at 20:52"
+    );
+    assert_eq!(
+        Hold::Away.say_running(&clock),
+        "held: you're away · it carries on when you're back"
+    );
+}

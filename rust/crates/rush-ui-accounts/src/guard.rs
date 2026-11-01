@@ -422,7 +422,7 @@ pub fn tick(mut i: Input, ops: &dyn HostOps) -> Output {
     i.held.retain(|id, _| infos.iter().any(|x| x.id == *id));
     i.let_through
         .retain(|id, _| infos.iter().any(|x| x.id == *id));
-    spawns(&i.dir, plan.spawns.as_deref(), now);
+    spawns(&i.dir, plan.spawns.as_deref(), &plan.spawns_for, now);
     out.plan = plan;
     i.moved_at.retain(|_, t| now - *t < 24 * 60 * MIN);
     let now_kept = Kept {
@@ -442,21 +442,25 @@ pub fn tick(mut i: Input, ops: &dyn HostOps) -> Output {
 }
 
 /// Says where `rush gate hook` reads it whether new subagents and
-/// workflows are refused, and why; none, when they aren't.
-fn spawns(dir: &std::path::Path, why: Option<&str>, now: Ms) {
+/// workflows are refused, and why: for every session (why), or for the
+/// sessions in each (by rush id); nothing written when they aren't.
+fn spawns(dir: &std::path::Path, why: Option<&str>, each: &[(String, String)], now: Ms) {
     let p = dir.join(SPAWNS_FILE);
-    match why {
-        Some(w) if rush_core::dryrun::would("guard-refuse-spawns", "", w) => {}
-        Some(w) => {
-            let b = json!({"refuse": w, "until": now + SPAWNS_FOR}).to_string();
-            let tmp = p.with_extension(format!("json.{}", std::process::id()));
-            if std::fs::write(&tmp, b).is_ok() {
-                let _ = std::fs::rename(&tmp, &p);
-            }
-        }
-        None => {
-            let _ = std::fs::remove_file(&p);
-        }
+    if why.is_none() && each.is_empty() {
+        let _ = std::fs::remove_file(&p);
+        return;
+    }
+    let what = why.unwrap_or_else(|| each.first().map_or("", |e| e.1.as_str()));
+    if rush_core::dryrun::would("guard-refuse-spawns", "", what) {
+        return;
+    }
+    let sessions: serde_json::Map<String, serde_json::Value> =
+        each.iter().map(|(id, w)| (id.clone(), json!(w))).collect();
+    let b = json!({"refuse": why.unwrap_or(""), "sessions": sessions, "until": now + SPAWNS_FOR})
+        .to_string();
+    let tmp = p.with_extension(format!("json.{}", std::process::id()));
+    if std::fs::write(&tmp, b).is_ok() {
+        let _ = std::fs::rename(&tmp, &p);
     }
 }
 
@@ -758,17 +762,25 @@ pub fn pace_of(m: &Model, kind: &str, id: &str) -> Option<Pace> {
 }
 
 /// Why the guard holds a rush session's next turn, by its rush id.
-pub fn held_say(m: &Model, id: &str) -> Option<String> {
+/// While its turn runs, a pace hold reads "pauses after this turn: ...";
+/// "held: ..." once the turn is over and the next is really waiting.
+pub fn held_say(m: &Model, id: &str, running: bool) -> Option<String> {
     let h = peek_state(m)?.held.get(id)?;
-    Some(h.hold.say(&|t| super::rows::clock(t, false)))
+    let clock = |t: Ms| super::rows::clock(t, false);
+    Some(if running {
+        h.hold.say_running(&clock)
+    } else {
+        h.hold.say(&clock)
+    })
 }
 
-/// The list's note for a row the guard holds: once its turn is over.
+/// The list's note for a row the guard holds: "held: ..." once its turn
+/// is over, "pauses after this turn: ..." while it runs.
 pub fn row_note(m: &Model, a: &rush_core::agent::Agent) -> Option<String> {
-    if !a.rush || a.job.live() {
+    if !a.rush {
         return None;
     }
-    held_say(m, &a.job.id)
+    held_say(m, &a.job.id, a.job.live())
 }
 
 /// The header's line while the guard holds anything, or you're away:

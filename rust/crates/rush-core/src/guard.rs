@@ -15,6 +15,9 @@
 //! - Away: while you're away, a lower cap, no new subagents or workflows,
 //!   and each session's running turn finishes, then holds.
 //!
+//! A session on an account past its pace is refused new subagents and
+//! workflows as well (`Plan::spawns_for`), until you let it through.
+//!
 //! What trips never cuts a running turn: a session's next turn waits
 //! (held), or moves to another account. Moving costs: the session's
 //! context is written again at full price on the new account unless its
@@ -422,6 +425,20 @@ impl Hold {
         }
     }
 
+    /// The hold as a row or queue card says it while the session's turn is
+    /// still running: a pace hold only pauses what comes after the turn.
+    /// Other holds read as they do.
+    pub fn say_running(&self, clock: &dyn Fn(Ms) -> String) -> String {
+        let s = self.say(clock);
+        match self {
+            Hold::Pace { .. } | Hold::AllPaced { .. } => match s.strip_prefix("held: ") {
+                Some(rest) => format!("pauses after this turn: {rest}"),
+                None => s,
+            },
+            _ => s,
+        }
+    }
+
     /// The kind, for the events log.
     pub fn kind(&self) -> &'static str {
         match self {
@@ -465,6 +482,9 @@ pub struct Plan {
     pub cap: usize,
     /// Why new subagents and workflows are refused; None when they aren't.
     pub spawns: Option<String>,
+    /// Sessions refused new subagents and workflows on their own, by id,
+    /// and why: those on an account past its pace (unless let through).
+    pub spawns_for: Vec<(String, String)>,
     /// Accounts past their pace, by id.
     pub over: Vec<String>,
     /// Every account is past its pace: when the first frees up.
@@ -568,6 +588,16 @@ pub fn plan(
     };
     for i in order {
         let x = &seats[i];
+        if over.contains(x.login.as_str()) && !x.let_through {
+            let n = accts
+                .iter()
+                .find(|a| a.id == x.login)
+                .map_or(x.login.as_str(), |a| a.name.as_str());
+            p.spawns_for.push((
+                x.id.clone(),
+                format!("the account this session runs on ({n}) is past its pace"),
+            ));
+        }
         let d = if x.let_through {
             Do::Release
         } else if away && !x.keeps_on {
