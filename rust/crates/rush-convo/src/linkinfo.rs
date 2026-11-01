@@ -167,6 +167,12 @@ pub fn lookups_gen() -> u64 {
     GEN.load(Ordering::SeqCst)
 }
 
+/// Says what links draw may have changed, so what was drawn is drawn
+/// again (messages.go:70 lookupsGen.Add).
+pub(crate) fn bump_gen() {
+    GEN.fetch_add(1, Ordering::SeqCst);
+}
+
 /// The kind that knows u, and u's key for it.
 fn kind_of(u: &str) -> Option<(Arc<Erased>, String)> {
     github();

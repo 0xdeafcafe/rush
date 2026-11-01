@@ -110,6 +110,19 @@ pub fn peer_names(codes: &HashMap<String, String>, agents: &[Agent]) -> HashMap<
     names
 }
 
+/// Tells the conversation view which session each codename is, from every
+/// adapter's codenames and the list as it stands (sidebar.go:98 namePeers,
+/// run at the end of nameAgents).
+pub fn name_peers(agents: &[Agent]) {
+    let mut codes: HashMap<String, String> = HashMap::new();
+    for r in rush_core::adapter::global().all().iter() {
+        if let Some(c) = r.codenamer() {
+            codes.extend(c.codenames()); // sidebar.go:101-110
+        }
+    }
+    rush_convo::set_peers(peer_names(&codes, agents));
+}
+
 /// The section an agent goes in under the arrangement, how high that
 /// section ranks, and the agent's place in it (sidebarPlace).
 pub fn place(sb: &Sidebar, a: &Agent) -> (String, usize, i64) {
@@ -121,4 +134,31 @@ pub fn place(sb: &Sidebar, a: &Agent) -> (String, usize, i64) {
         return (sb.sections[i].title.clone(), i, p.order);
     }
     (OTHER_SECTION.to_string(), sb.sections.len(), 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn agent(sid: &str, pid: i32, name: &str) -> Agent {
+        let mut a = Agent::default();
+        a.job.session_id = sid.into();
+        a.pid = pid;
+        a.display_name = name.into();
+        a
+    }
+
+    /// A codename used again goes to the session that has it now
+    /// (sidebar.go:98 namePeers).
+    #[test]
+    fn sidebar_peer_names_a_live_session_wins_a_reused_codename() {
+        let codes: HashMap<String, String> = [("old", "rush-8a"), ("new", "rush-8a")]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        let got = peer_names(&codes, &[agent("new", 42, "Live"), agent("old", 0, "Gone")]);
+        assert_eq!(got.get("rush-8a").map(String::as_str), Some("Live"));
+        let got = peer_names(&codes, &[agent("old", 0, "Gone"), agent("new", 42, "Live")]);
+        assert_eq!(got.get("rush-8a").map(String::as_str), Some("Live"));
+    }
 }
