@@ -623,8 +623,9 @@ priced reading is saved to rush's cache (`list-kept.json`, at most once a
 minute and on quitting), read on a thread as rush starts, and drawn in the
 first frames until the first live reading replaces it whole. Until then
 its rows are drawn faint, so a row that was working last time doesn't
-claim to be now, the header still says "costing transcripts…", and
-nothing acts on it: no host is dialled and no reading's hooks run. One
+claim to be now, a top bar of #statusline lines still says "costing
+transcripts…" (the default gauges never do, as Go's view.go:255-262),
+and nothing acts on it: no host is dialled and no reading's hooks run. One
 from another version or older than a week isn't shown. Measured on the
 bench copy (872 agents): the list on screen 31-36 ms after start, against
 1.35 s for the first reading.
