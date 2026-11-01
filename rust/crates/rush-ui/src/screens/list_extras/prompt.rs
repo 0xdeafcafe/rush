@@ -420,6 +420,14 @@ pub(super) fn mouse(m: &mut Model, e: &Mouse) -> Out {
     Out::Draw
 }
 
+/// What a click takes on the box's top edge as last drawn, and the row
+/// it's on.
+#[cfg(test)]
+pub(super) fn edge_hits(m: &mut Model) -> (usize, Vec<(usize, usize, EdgeAct)>) {
+    let st = m.kept::<PromptState>();
+    (st.y, st.hits.clone())
+}
+
 /// A click on a part of the box's top edge.
 fn edge_click(m: &mut Model, act: EdgeAct) -> Out {
     match act {
