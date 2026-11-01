@@ -1506,11 +1506,12 @@ fn a_failed_write_keeps_unread_ops() {
         .write_all(b"{\"op\":\"effort\",\"effort\":\"high\"}\n")
         .unwrap();
     drop(client); // sent and gone at once
-    let (tx, rx) = sync_channel::<Arc<[u8]>>(4);
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Arc<[u8]>>(4);
     drop(tx); // nothing more to write: it returns once the info has gone
     let ws = host_end.try_clone().unwrap();
     let info = br#"{"type":"agtop_info","info":{}}"#.repeat(4096);
-    write_client(ws, None, Vec::new(), Vec::new(), info, rx);
+    let queued = std::sync::atomic::AtomicUsize::new(0);
+    write_client(ws, None, Vec::new(), Vec::new(), info, rx, &queued);
     let mut got = String::new();
     (&host_end).read_to_string(&mut got).unwrap();
     assert_eq!(got, "{\"op\":\"effort\",\"effort\":\"high\"}\n");

@@ -30,9 +30,8 @@ use std::io::{BufRead, BufWriter, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 
-use std::sync::mpsc::{
-    Receiver, Sender, SyncSender, TryRecvError, TrySendError, channel, sync_channel,
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -72,6 +71,10 @@ pub const MALLOC_SET: &str = "RUSH_HOST_MALLOC";
 
 /// What bounds what a reconnecting client is replayed.
 pub const RING_MAX: usize = 8 << 20;
+
+/// How much a client's writer gathers before a write: a burst goes to
+/// the socket in big writes, not a line at a time.
+const WRITE_BUF: usize = 256 << 10;
 
 /// How often at most info.json is rewritten for a change only of what it
 /// says it's doing (detail, context, cache, updatedAt): a turn streaming
@@ -243,25 +246,38 @@ impl Sink for HostSink {
     }
 }
 
-/// One connected client: its lines go to its writer on a queue of 4096;
-/// one too far behind to catch up is let go, and reconnects for a replay.
+/// How far behind its writer a client may fall, in bytes queued for it,
+/// before it's let go to reconnect for a replay: that far behind, the
+/// replay (at most RING_MAX) is the quicker way back. Go lets one go at
+/// 4096 lines, which a burst of big tool results passes in a tenth of a
+/// second: the client was let go, replayed, let go again mid-replay, and
+/// fell further behind with each (Rust-only).
+const CLIENT_BEHIND: usize = 4 * RING_MAX;
+
+/// What a queued line counts for besides its bytes, so a flood of tiny
+/// lines is bounded too.
+const LINE_COST: usize = 64;
+
+/// One connected client: its lines go to its writer on a queue bounded
+/// by CLIENT_BEHIND; one too far behind to catch up is let go, and
+/// reconnects for a replay. The host never waits on it.
 struct ClientConn {
-    tx: SyncSender<Arc<[u8]>>,
+    tx: Sender<Arc<[u8]>>,
+    /// Bytes queued for its writer, as CLIENT_BEHIND counts them.
+    queued: Arc<AtomicUsize>,
     stream: UnixStream,
 }
 
 impl ClientConn {
     fn push(&self, line: &Arc<[u8]>) -> bool {
-        match self.tx.try_send(line.clone()) {
-            Ok(()) => true,
-            Err(TrySendError::Full(_)) => {
-                self.close();
-                false
-            }
-            // Its writer has stopped on a failed write and said so to the
-            // client: what the client sent is still read to its end.
-            Err(TrySendError::Disconnected(_)) => false,
+        let n = line.len() + LINE_COST;
+        if self.queued.fetch_add(n, Ordering::Relaxed) + n > CLIENT_BEHIND {
+            self.close();
+            return false;
         }
+        // An error: its writer has stopped on a failed write and said so
+        // to the client; what the client sent is still read to its end.
+        self.tx.send(line.clone()).is_ok()
     }
 
     fn close(&self) {
@@ -3648,12 +3664,14 @@ impl Host {
     // ---- Serving a client ----
 
     fn serve(&self, nc: UnixStream) {
+        crate::sys::widen(&nc);
         let Ok((proto, mut ops, first)) = hello(&nc) else {
             return;
         };
         let id = self.lock().cfg.id.clone();
         let archived = crate::exchange_journal::read_exchanges(&id);
-        let (tx, rx) = sync_channel::<Arc<[u8]>>(4096);
+        let (tx, rx) = channel::<Arc<[u8]>>();
+        let queued = Arc::new(AtomicUsize::new(0));
         let Ok(ws) = nc.try_clone() else { return };
         let (cid, replay, info) = {
             let mut st = self.lock();
@@ -3680,14 +3698,21 @@ impl Host {
             st.next_client += 1;
             let cid = st.next_client;
             let Ok(s) = nc.try_clone() else { return };
-            st.clients.insert(cid, ClientConn { tx, stream: s });
+            st.clients.insert(
+                cid,
+                ClientConn {
+                    tx,
+                    queued: queued.clone(),
+                    stream: s,
+                },
+            );
             (cid, replay, info)
         };
         let writer = {
             let enc = (proto >= EVENTS_FROM).then(Encoder::default);
             std::thread::Builder::new()
                 .name("host-writer".into())
-                .spawn(move || write_client(ws, enc, replay, archived, info, rx))
+                .spawn(move || write_client(ws, enc, replay, archived, info, rx, &queued))
         };
         let mut buf = first;
         loop {
@@ -3731,7 +3756,8 @@ impl Host {
 }
 
 /// The client's writer: the replay, the archived exchanges and the info,
-/// then every line as it comes, a batch at a time.
+/// then every line as it comes, a batch at a time; queued counts down
+/// what it takes off rx (ClientConn::push counts it up).
 fn write_client(
     ws: UnixStream,
     mut enc: Option<Encoder>,
@@ -3739,6 +3765,7 @@ fn write_client(
     archived: Vec<Exchange>,
     info: Vec<u8>,
     rx: Receiver<Arc<[u8]>>,
+    queued: &AtomicUsize,
 ) {
     // A failed write stops the writing only: ops the client sent before
     // it went, not read yet, are still read and done (a client that
@@ -3747,7 +3774,8 @@ fn write_client(
     let close = |w: &BufWriter<UnixStream>| {
         let _ = w.get_ref().shutdown(std::net::Shutdown::Write);
     };
-    let mut w = BufWriter::with_capacity(64 << 10, ws);
+    let mut w = BufWriter::with_capacity(WRITE_BUF, ws);
+    let took = |l: &[u8]| queued.fetch_sub(l.len() + LINE_COST, Ordering::Relaxed);
     let write = |w: &mut BufWriter<UnixStream>, enc: &mut Option<Encoder>, l: &[u8]| -> bool {
         match enc {
             Some(e) => e.encode(w, l).is_ok(),
@@ -3785,6 +3813,7 @@ fn write_client(
             return;
         }
         let Ok(l) = rx.recv() else { return };
+        took(&l);
         if !write(&mut w, &mut enc, &l) {
             close(&w);
             return;
@@ -3792,6 +3821,7 @@ fn write_client(
         loop {
             match rx.try_recv() {
                 Ok(l) => {
+                    took(&l);
                     write(&mut w, &mut enc, &l);
                 }
                 Err(TryRecvError::Empty) => break,

@@ -670,12 +670,14 @@ impl Client {
         let sock = sock_path(id);
         rush_core::sandbox::guard("a host's socket", &sock);
         let c = UnixStream::connect(sock)?;
+        crate::sys::widen(&c);
         let r = c.try_clone()?;
         let (tx, rx) = sync_channel(1024);
         std::thread::Builder::new()
             .name("host-client".into())
             .spawn(move || {
-                let mut r = BufReader::with_capacity(64 << 10, r);
+                // Read in big slices: a burst comes in a few reads.
+                let mut r = BufReader::with_capacity(256 << 10, r);
                 let mut l = Vec::new();
                 loop {
                     l.clear();
