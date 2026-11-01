@@ -22,23 +22,26 @@
 //! tall as what it has to show; a subagent's tile is one line, what it's
 //! doing; a reply shows as plain words, no tables or code; a run of the
 //! same step is one line with its count; and a tile whose last reply ends
-//! with a decisions block shows them, answered from the Wall by typing
-//! 1a 2b and enter.
+//! with a decisions block shows them, and enter (or a click) on it opens
+//! its session's decisions card in the tile, answered there with the
+//! card's own keys and sent as the card sends it (session_cards'
+//! question.rs, through the decide_* slots).
 
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use rush_convo::decisions::{Decision, decisions_in};
+use rush_convo::decisions::{Decision, DecisionOption, decisions_in};
 use rush_core::adapter::fill_of;
 use rush_core::agent::{Agent, Preview, PreviewLine};
+use rush_core::event::Question;
 use rush_core::text::{Color, Line, Span, width};
 use rush_core::time::Ms;
 use rush_draw::{Button, MouseKind};
 use rush_fleet::Predicates;
 
+use crate::frame::overlayclick::hint_key;
 use crate::frame::places::Place;
-use crate::frame::{Mouse, Out, Press};
-use crate::host::SendErr;
+use crate::frame::{Decided, Mouse, Out, Press};
 use crate::list::{folder_key, folder_titles, project_tint};
 use crate::model::Model;
 use crate::style::*;
@@ -70,9 +73,16 @@ pub struct WallState {
     pub shown: bool,
     pub reads: HashMap<String, (Preview, u64)>,
     reading: HashSet<String>,
-    /// The replies whose decisions were answered from the Wall, by agent,
-    /// by when the reply was written: their tiles stop asking.
-    pub answered: HashMap<String, Ms>,
+    /// The decisions card each tile was answered with, by agent: when its
+    /// reply was written, and the card's id. Once the card is answered or
+    /// set aside its tile stops asking, and asks again if the answers
+    /// didn't go.
+    pub asked: HashMap<String, (Ms, String)>,
+    /// The open decisions card of each rush session the list says has
+    /// one, as its host last wrote it (info.json), by agent: the
+    /// headings it was read for (Agent::decisions_key), and the card.
+    pub hosted: HashMap<String, (String, Option<Question>)>,
+    host_reading: HashSet<String>,
 }
 
 /// A tile as last drawn, for clicks.
@@ -95,8 +105,10 @@ pub struct Wall {
     tiles: Vec<Tile>,
     /// Where each tile was last drawn, for the arrows.
     geo: Vec<Geo>,
-    /// What's typed to answer a tile's decisions: its key, and the text.
-    answer: (String, String),
+    /// The tile whose decisions are being answered on it, by its agent's
+    /// key, and its card as last drawn.
+    answering: String,
+    card: Option<CardAt>,
     above: usize,
     below: usize,
     /// A live tile was drawn: its spinner moves.
@@ -105,6 +117,18 @@ pub struct Wall {
     drawn: Option<Instant>,
     last_click: Option<Instant>,
     names: HashMap<String, String>,
+}
+
+/// A decisions card as drawn on its tile: its rows, where its first is in
+/// the Wall's body (its top may be scrolled off, so above 0), and what a
+/// click on each row presses.
+#[derive(Clone, Debug)]
+struct CardAt {
+    key: String,
+    x: usize,
+    y: isize,
+    rows: Vec<Line>,
+    hits: HashMap<usize, String>,
 }
 
 /// The Wall's tiles, agents by their place in Model::agents, in an order
@@ -481,9 +505,9 @@ pub fn plain_reply(s: &str) -> String {
     unmark(&one_line(&out.join("\n")))
 }
 
-/// The decisions a's last reply ends with, and when it was written:
-/// while its turn is over and they're not answered from here yet.
-pub fn decisions_of(m: &Model, a: &Agent) -> Option<(Vec<Decision>, Ms)> {
+/// a's last reply, while its turn is over and nothing of yours came
+/// after it.
+fn last_reply<'a>(m: &'a Model, a: &Agent) -> Option<&'a PreviewLine> {
     if a.job.live() || a.busy() {
         return None;
     }
@@ -498,56 +522,139 @@ pub fn decisions_of(m: &Model, a: &Agent) -> Option<(Vec<Decision>, Ms)> {
     if asked.is_some_and(|u| u > at) {
         return None;
     }
-    let answered = m
-        .kept
-        .peek::<WallState>()
-        .and_then(|s| s.answered.get(&a.key));
-    if answered == Some(&e.at) {
+    Some(e)
+}
+
+/// The decisions card a rush session's host keeps open for it, as read
+/// for the headings the list has now.
+fn host_card<'a>(m: &'a Model, a: &Agent) -> Option<&'a Question> {
+    if !a.decides {
         return None;
     }
-    let (_, ds, _) = decisions_in(&e.text);
-    (!ds.is_empty()).then_some((ds, e.at))
+    let (k, q) = m.kept.peek::<WallState>()?.hosted.get(&a.key)?;
+    q.as_ref().filter(|_| *k == a.decisions_key)
 }
 
-/// The picks typed, by decision number: "1a 2b", "1a2b" or "1 a".
-pub fn typed_picks(s: &str) -> HashMap<String, String> {
-    let cs: Vec<char> = s.chars().collect();
-    let mut out = HashMap::new();
-    let mut i = 0;
-    while i < cs.len() {
-        if !cs[i].is_ascii_digit() {
-            i += 1;
-            continue;
-        }
-        let from = i;
-        while i < cs.len() && cs[i].is_ascii_digit() {
-            i += 1;
-        }
-        let n: String = cs[from..i].iter().collect();
-        while i < cs.len() && cs[i] == ' ' {
-            i += 1;
-        }
-        if i < cs.len() && cs[i].is_ascii_lowercase() {
-            out.insert(n, cs[i].to_string());
-            i += 1;
+/// Agent key's card id, asked for the reply written at at, was answered
+/// or set aside.
+fn gone(m: &Model, key: &str, at: Ms, id: &str) -> bool {
+    m.kept
+        .peek::<WallState>()
+        .and_then(|s| s.asked.get(key))
+        .is_some_and(|(a, i)| *a == at && i == id && m.ext.calls.decide_gone()(m, key, id))
+}
+
+/// A card's decisions as a block's, to draw on a tile.
+fn decisions_from(q: &Question) -> Vec<Decision> {
+    q.asks
+        .iter()
+        .map(|a| Decision {
+            r#ref: a.id.clone(),
+            topic: a.header.clone(),
+            context: String::new(),
+            options: a
+                .options
+                .iter()
+                .map(|o| DecisionOption {
+                    key: o.key.clone(),
+                    label: o.label.clone(),
+                    detail: o.description.clone(),
+                    preview: o.preview.clone(),
+                    recommended: o.picked,
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+/// The decisions a asks, and when the reply asking them was written (0
+/// for its host's card): its host's open card for a rush session, else
+/// the block its last reply ends with while its turn is over; none once
+/// their card is answered or set aside (here or in its session, the
+/// card's state is the one).
+pub fn decisions_of(m: &Model, a: &Agent) -> Option<(Vec<Decision>, Ms)> {
+    if let Some(q) = host_card(m, a) {
+        return (!gone(m, &a.key, 0, &q.id)).then(|| (decisions_from(q), 0));
+    }
+    let e = last_reply(m, a)?;
+    let (_, ds, _) = decisions_in(&e.text);
+    if ds.is_empty() {
+        return None;
+    }
+    // The card it was answered with, if it was: its id is in asked.
+    let id = m
+        .kept
+        .peek::<WallState>()
+        .and_then(|s| s.asked.get(&a.key))
+        .map(|(_, id)| id.as_str());
+    if id.is_some_and(|id| gone(m, &a.key, e.at, id)) {
+        return None;
+    }
+    Some((ds, e.at))
+}
+
+/// The decisions card a's tile answers, and when the reply it's for was
+/// written: its host's open card, else its session's or its reply's
+/// block (decide_question).
+fn card_of(m: &Model, a: &Agent) -> Option<(Question, Ms)> {
+    decisions_of(m, a)?;
+    if let Some(q) = host_card(m, a) {
+        return Some((q.clone(), 0));
+    }
+    let e = last_reply(m, a)?;
+    let q = m.ext.calls.decide_question()(m, &a.key, &e.text, e.at)?;
+    Some((q, e.at))
+}
+
+/// Reads, off the UI thread, the open decisions card of each rush
+/// session on the Wall whose list row says it has one that isn't read
+/// yet: what its tile shows and answers, the very card its session has.
+fn read_hosted(m: &mut Model) {
+    let all = m.kept::<WallState>().all;
+    let mut wants = Vec::new();
+    {
+        let items = wall_items(m, all);
+        let st = m.kept.get::<WallState>();
+        let open: HashSet<&str> = items.iter().map(|it| it.key.as_str()).collect();
+        st.hosted.retain(|k, _| open.contains(k.as_str()));
+        for it in items.iter().filter(|it| it.sub.is_none()) {
+            let a = &m.agents[it.a];
+            let read = st.hosted.get(&a.key).map(|(k, _)| k);
+            if !a.decides
+                || a.job.id.is_empty()
+                || read == Some(&a.decisions_key)
+                || st.host_reading.contains(&a.key)
+            {
+                continue;
+            }
+            st.host_reading.insert(a.key.clone());
+            wants.push((a.key.clone(), a.job.id.clone(), a.decisions_key.clone()));
         }
     }
-    out
-}
-
-/// The answer picks give ds, a paragraph a decision answered, "1a.
-/// Topic: label" as the session's card writes it (DecisionAnswer); None
-/// when none of them is an option.
-pub fn answer_text(ds: &[Decision], picks: &HashMap<String, String>) -> Option<String> {
-    let out: Vec<String> = ds
-        .iter()
-        .filter_map(|d| {
-            let k = picks.get(&d.r#ref)?;
-            let o = d.options.iter().find(|o| &o.key == k)?;
-            Some(format!("{}{k}. {}: {}", d.r#ref, d.topic, o.label))
-        })
-        .collect();
-    (!out.is_empty()).then(|| out.join("\n\n"))
+    if wants.is_empty() {
+        return;
+    }
+    m.later(
+        move || {
+            wants
+                .into_iter()
+                .map(|(key, id, k)| {
+                    let q = rush_host::client::read_info(&id)
+                        .ok()
+                        .and_then(|i| i.decisions);
+                    (key, k, q)
+                })
+                .collect::<Vec<_>>()
+        },
+        |m, got| {
+            let st = m.kept::<WallState>();
+            for (key, k, q) in got {
+                st.host_reading.remove(&key);
+                st.hosted.insert(key, (k, q));
+            }
+            Out::Draw
+        },
+    );
 }
 
 /// A tile's decisions, w wide: each one's number and topic, and under it
@@ -911,20 +1018,13 @@ impl Wall {
                 .unwrap_or_default()
         };
         let asks = decisions_of(m, a);
-        let typed = self.typed(&a.key);
-        let now1 = if asks.is_some() && !typed.is_empty() {
-            line([
-                spb("answer ", YELLOW),
-                spb(typed.to_string(), BRIGHT),
-                sp("▏", ORANGE),
-            ])
-        } else if let Some((ds, _)) = &asks {
+        let now1 = if let Some((ds, _)) = &asks {
             let n = ds.len();
             let s = if n == 1 { "" } else { "s" };
             line([
                 spb("needs you", YELLOW),
                 sp(" · ", DIM),
-                sp(format!("{n} decision{s} · type 1a… to answer"), TEXT),
+                sp(format!("{n} decision{s} to answer"), TEXT),
             ])
         } else if a.needs_you() {
             line([
@@ -965,10 +1065,18 @@ impl Wall {
         if a.spend.cost > 0.0 {
             stat(sp(money_short(a.spend.cost), DIM));
         }
-        if asks.is_some() && !typed.is_empty() {
-            stats = line([sp("enter sends · esc clears", DIM)]);
-        }
         let foot = spread(now1, stats, iw);
+
+        // Its decisions being answered: their card, under its place, in
+        // all the room there is; the card has its own keys at its foot.
+        if let Some(c) = self.card.as_ref().filter(|c| c.key == a.key) {
+            let room = h.saturating_sub(3);
+            inner.extend(c.rows.iter().take(room).map(|l| fit(l.clone(), iw)));
+            for _ in c.rows.len()..room {
+                inner.push(plain_line(iw));
+            }
+            return frame_close(top, inner, edge, w, h, picked);
+        }
 
         // Between them, the decisions it asks, or the stream.
         let room = h as isize - 4;
@@ -1111,7 +1219,7 @@ impl Wall {
     fn content(&self, m: &Model, i: usize, w: usize, room: usize) -> Vec<Line> {
         let a = &m.agents[i];
         if let Some((ds, _)) = decisions_of(m, a) {
-            let mut l = decision_lines(&ds, &typed_picks(self.typed(&a.key)), w);
+            let mut l = decision_lines(&ds, &HashMap::new(), w);
             l.truncate(room);
             return l;
         }
@@ -1130,6 +1238,16 @@ impl Wall {
                 most: SUB_H,
             };
         }
+        if self.answering == it.key
+            && let Some((q, _)) = card_of(m, &m.agents[it.a])
+        {
+            // Its card whole, when the Wall's that tall: two edges and
+            // its place besides.
+            let (rows, _) =
+                m.ext.calls.decide_rows()(m, &it.key, &q, w.saturating_sub(4), h.saturating_sub(3));
+            let most = (rows.len() + 3).min(h.max(MIN_H));
+            return Want { min: most, most };
+        }
         // Two edges, its place and its foot.
         let shows = self
             .content(m, it.a, w.saturating_sub(4), h.max(MIN_H))
@@ -1141,49 +1259,48 @@ impl Wall {
         }
     }
 
-    /// What's typed to answer agent key's decisions.
-    fn typed(&self, key: &str) -> &str {
-        if self.answer.0 == key {
-            &self.answer.1
-        } else {
-            ""
-        }
-    }
-
-    /// Sends what's typed as the answer to agent i's decisions, "1a.
-    /// Topic: label" a paragraph each as the session's card answers
-    /// (DecisionAnswer), through its host or its agent's own daemon.
-    fn send_answer(&mut self, m: &mut Model, i: usize) -> Out {
-        let a = m.agents[i].clone();
-        let Some((ds, at)) = decisions_of(m, &a) else {
+    /// Opens agent i's decisions card on its tile, the keys on it.
+    fn start_answer(&mut self, m: &mut Model, i: usize) -> Out {
+        let a = &m.agents[i];
+        let Some((q, at)) = card_of(m, a) else {
             return Out::Idle;
         };
-        let Some(text) = answer_text(&ds, &typed_picks(self.typed(&a.key))) else {
-            m.flash_err("type a decision's number and an option's letter, like 1a");
+        let key = a.key.clone();
+        m.kept::<WallState>().asked.insert(key.clone(), (at, q.id));
+        self.answering = key;
+        Out::Draw
+    }
+
+    /// Key s on agent i's decisions card on its tile, as its session's
+    /// card takes it; what it sends goes as the card sends it, and the
+    /// card closes once it's answered or set aside. Answering one in your
+    /// own words opens its session, where they're typed.
+    fn answer_key(&mut self, m: &mut Model, i: usize, s: &str) -> Out {
+        let a = m.agents[i].clone();
+        let Some((q, at)) = card_of(m, &a) else {
+            self.answering.clear();
             return Out::Draw;
         };
-        self.answer = Default::default();
-        m.kept::<WallState>().answered.insert(a.key.clone(), at);
-        let h = crate::host::hosts(m);
-        let (key, name) = (a.key.clone(), a.display_name.clone());
-        m.later(
-            move || h.reply(&a, &text),
-            move |m, r| {
-                let e = match r {
-                    Ok(()) => {
-                        m.flash(&format!("answered {name}"));
-                        return Out::Draw;
-                    }
-                    Err(SendErr::Gone) => format!("{name} has gone · open it to answer"),
-                    Err(SendErr::Failed(e)) => e,
-                };
-                // Not sent: its tile asks again.
-                m.kept::<WallState>().answered.remove(&key);
-                m.fail(&e);
+        m.kept::<WallState>()
+            .asked
+            .insert(a.key.clone(), (at, q.id.clone()));
+        match m.ext.calls.decide_key()(m, &a.key, &q, s) {
+            Decided::Yes => Out::Draw,
+            Decided::Done => {
+                self.answering.clear();
                 Out::Draw
-            },
-        );
-        Out::Draw
+            }
+            Decided::Own => {
+                self.answering.clear();
+                Self::go(m, &a.key)
+            }
+            // The card's keys stay its own while it's open: the arrows
+            // never move off the tile, a letter never starts a message;
+            // [ and ] still turn the page.
+            Decided::No if s == "[" || s == "]" => Out::Pass,
+            Decided::No if s.chars().count() == 1 || is_arrow(s) => Out::Idle,
+            Decided::No => Out::Pass,
+        }
     }
 
     /// Opens agent key's conversation from the Wall (goAgent); a
@@ -1197,6 +1314,13 @@ impl Wall {
         m.open(i);
         Out::Close
     }
+}
+
+fn is_arrow(s: &str) -> bool {
+    matches!(
+        s,
+        "up" | "down" | "left" | "right" | "space" | "tab" | "shift+tab"
+    )
 }
 
 fn plain_line(w: usize) -> Line {
@@ -1309,6 +1433,9 @@ pub fn on_fleet(m: &mut Model) {
     let keys: HashSet<String> = read_items(m).into_iter().map(|it| it.key).collect();
     m.kept::<WallState>().reads.retain(|k, _| keys.contains(k));
     read(m);
+    if m.kept::<WallState>().shown {
+        read_hosted(m);
+    }
 }
 
 impl Place for Wall {
@@ -1319,6 +1446,7 @@ impl Place for Wall {
     fn enter(&mut self, m: &mut Model) {
         m.kept::<WallState>().shown = true;
         read(m);
+        read_hosted(m);
     }
 
     fn leave(&mut self, m: &mut Model) {
@@ -1335,6 +1463,7 @@ impl Place for Wall {
         let items = wall_items(m, all);
         self.tiles.clear();
         self.geo.clear();
+        self.card = None;
         (self.above, self.below) = (0, 0);
         self.moving = false;
         self.drawn = Some(Instant::now());
@@ -1368,6 +1497,26 @@ impl Place for Wall {
             let inset = if it.sub.is_some() { SUB_IN } else { 0 };
             let cw = col_w[p.col];
             let tw = cw.saturating_sub(inset);
+            if it.sub.is_none()
+                && self.answering == it.key
+                && let Some((q, _)) = card_of(m, a)
+            {
+                // Under its top edge and its place, inside its side edge.
+                let (rows, hits) = m.ext.calls.decide_rows()(
+                    m,
+                    &it.key,
+                    &q,
+                    tw.saturating_sub(4),
+                    p.h.saturating_sub(3),
+                );
+                self.card = Some(CardAt {
+                    key: it.key.clone(),
+                    x: col_x[p.col] + inset + 2,
+                    y: (p.y + 2) as isize - top as isize,
+                    rows,
+                    hits,
+                });
+            }
             let t = self.item_tile(m, it, tw, p.h, k == pick);
             for (ly, l) in t.into_iter().enumerate() {
                 let y = p.y + ly;
@@ -1419,14 +1568,18 @@ impl Place for Wall {
             _ => "keep going",
         };
         let asks = picked.is_some_and(|a| decisions_of(m, a).is_some());
-        let typing = asks && !self.typed(&self.sel).is_empty();
-        let pairs: Vec<(&str, &str)> = if typing {
-            vec![("enter", "send"), ("esc", "clear"), ("←↑↓→", "move")]
+        let answering = asks && self.answering == self.sel;
+        let pairs: Vec<(&str, &str)> = if answering {
+            vec![
+                ("enter", "picks"),
+                ("a", "takes its picks"),
+                ("s · esc", "sends nothing"),
+            ]
         } else if asks {
             vec![
-                ("1a 2b", "answer"),
+                ("enter", "answer"),
+                ("o", "open"),
                 ("←↑↓→", "move"),
-                ("enter", "open"),
                 ("esc", "back"),
             ]
         } else {
@@ -1477,38 +1630,22 @@ impl Place for Wall {
             };
         }
         let i = self.pick(&items);
-        // Typing 1a 2b answers the picked tile's decisions: a number
-        // starts it, and while it's typed letters and space go to it.
+        // The picked tile's decisions: enter opens their card on it, and
+        // while it's open the keys are the card's.
         let asks = items[i].sub.is_none() && decisions_of(m, &m.agents[items[i].a]).is_some();
-        let key = items[i].key.clone();
-        let typing = asks && !self.typed(&key).is_empty();
-        if asks {
-            let c = s.chars().next().filter(|_| s.chars().count() == 1);
-            let starts = c.is_some_and(|c| c.is_ascii_digit());
-            let goes_on = typing
-                && (s == "space"
-                    || c.is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
-            if starts || goes_on {
-                if !typing {
-                    self.answer = (key, String::new());
-                }
-                self.answer
-                    .1
-                    .push(if s == "space" { ' ' } else { c.unwrap_or(' ') });
-                return Out::Draw;
+        if !asks || self.answering != items[i].key {
+            self.answering.clear();
+        }
+        if asks && !self.answering.is_empty() {
+            return self.answer_key(m, items[i].a, s);
+        }
+        match s {
+            "enter" if asks => return self.start_answer(m, items[i].a),
+            "o" if asks => {
+                let key = items[i].key.clone();
+                return Self::go(m, &key);
             }
-            match s {
-                "backspace" if typing => {
-                    self.answer.1.pop();
-                    return Out::Draw;
-                }
-                "esc" if typing => {
-                    self.answer = Default::default();
-                    return Out::Draw;
-                }
-                "enter" if typing => return self.send_answer(m, items[i].a),
-                _ => {}
-            }
+            _ => {}
         }
         let geo = if self.geo.len() == items.len() {
             self.geo.clone()
@@ -1516,7 +1653,6 @@ impl Place for Wall {
             Vec::new()
         };
         let mut moved = |dx: isize, dy: isize| {
-            self.answer = Default::default();
             let j = (!geo.is_empty())
                 .then(|| step(&geo, i, dx, dy))
                 .flatten()
@@ -1560,6 +1696,30 @@ impl Place for Wall {
         if e.kind != MouseKind::Down(Button::Left) {
             return Out::Idle;
         }
+        // On a decisions card: an option picks it, a button or a key in
+        // its hints presses that key.
+        if let Some(c) = self.card.clone()
+            && x >= c.x
+            && (y as isize) >= c.y
+            && ((y as isize - c.y) as usize) < c.rows.len()
+            && let Some(t) = self.tiles.iter().find(|t| t.key == c.key)
+            && x < t.x + t.w
+        {
+            let dy = (y as isize - c.y) as usize;
+            let k = c
+                .hits
+                .get(&dy)
+                .cloned()
+                .or_else(|| hint_key(&c.rows[dy], x - c.x))
+                .unwrap_or_default();
+            let Some(i) = m.agents.iter().position(|a| a.key == c.key) else {
+                return Out::Idle;
+            };
+            if k.is_empty() {
+                return Out::Idle;
+            }
+            return self.answer_key(m, i, &k);
+        }
         // The body starts under the header's rule.
         let Some(t) = self
             .tiles
@@ -1575,8 +1735,19 @@ impl Place for Wall {
                 .is_some_and(|c| c.elapsed() < Duration::from_millis(400));
         self.sel = t.key.clone();
         self.last_click = Some(Instant::now());
+        if self.answering != t.key {
+            self.answering.clear();
+        }
         if double {
             return Self::go(m, &t.key);
+        }
+        // A click on a tile that asks opens its decisions card on it.
+        if self.answering.is_empty()
+            && let Some(i) = m.agents.iter().position(|a| a.key == t.key)
+            && !t.key.contains('\0')
+            && decisions_of(m, &m.agents[i]).is_some()
+        {
+            return self.start_answer(m, i);
         }
         Out::Draw
     }

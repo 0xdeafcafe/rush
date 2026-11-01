@@ -37,6 +37,24 @@ pub type ReadEarly = fn(
     rush_core::time::Ms,
 ) -> Option<(rush_convo::Session, String, Option<std::fs::Metadata>)>;
 
+/// What a key did on a decisions card drawn away from its session, on a
+/// Wall tile (session_cards/question.rs tile_key).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Decided {
+    /// Not the card's.
+    No,
+    /// Taken: the card is still being answered.
+    Yes,
+    /// Sent, or set aside: the card is done.
+    Done,
+    /// You chose to answer one in your own words: that's typed in its
+    /// session's box.
+    Own,
+}
+
+/// A decisions card's rows as drawn, and what a click on each presses.
+pub type DecideRows = (Vec<Line>, HashMap<usize, String>);
+
 /// A mouse handler: `Out::Pass` when the event isn't its.
 pub type MouseHook = fn(&mut Model, &Mouse) -> Out;
 /// A paste handler: `Out::Pass` when the paste isn't its.
@@ -642,6 +660,23 @@ calls! {
     /// ctrl+b, #go and the Wall's: tell a stopped agent to go on, or say
     /// why it can't (cmdbar/hashcmds.rs keep_going).
     keep_going("cmdbar"): fn(&mut Model, &Agent) -> Out,
+    /// The decisions card a Wall tile answers, for agent key's reply text
+    /// written at a time: its session's open block when rush has it, so
+    /// both are the one card, else the block the text ends with
+    /// (session_cards/question.rs tile_question).
+    decide_question("session_cards"):
+        fn(&Model, &str, &str, rush_core::time::Ms) -> Option<rush_core::event::Question>,
+    /// Agent key's decisions card drawn w wide, folded to max_h rows, the
+    /// keys on it, as its session draws it (question.rs tile_rows).
+    decide_rows("session_cards"):
+        fn(&Model, &str, &rush_core::event::Question, usize, usize) -> DecideRows,
+    /// A key on agent key's decisions card, as its session's card takes
+    /// it; "@n" picks option n (question.rs tile_key).
+    decide_key("session_cards"):
+        fn(&mut Model, &str, &rush_core::event::Question, &str) -> Decided,
+    /// Agent key's decisions card id was answered or set aside
+    /// (question.rs tile_gone).
+    decide_gone("session_cards"): fn(&Model, &str, &str) -> bool,
     /// The connection and screen of the Session shown follow the pane
     /// (session_core/live.rs sync).
     sync_host("session_core"): fn(&mut Model),

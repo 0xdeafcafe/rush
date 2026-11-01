@@ -1,0 +1,37 @@
+  ┏━ ● Making Rush Screen More Useful ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1m ━┓  
+  ┃ checkout · main                                                                                                  ┃  
+  ┃ ▍  ? decide   2 decisions, yours to make                                                       0 of 2 answered   ┃  
+  ┃ ▍                                                                                                                ┃  
+  ┃ ▍   Subagents on the Wall   ›  ○ Scope  ›  ○ send                                                                ┃  
+  ┃ ▍                                                                                                                ┃  
+  ┃ ▍  1. Subagents on the Wall                                                                                      ┃  
+  ┃ ▍                                                                                                                ┃  
+  ┃ ▍    1  fold them in  ★ its pick                                                                                 ┃  
+  ┃ ▍                                                                                                                ┃  
+  ┃ ▍ ▌  2  small tiles                                                                                              ┃  
+  ┃ ▍                                                                                                                ┃  
+  ┃ ▍    ✎  Something else  opens the session to type your own                                                       ┃  
+  ┃ ▍                                                                                                                ┃  
+  ┃ ▍  a takes its picks  ·  s · esc sends nothing  ·  ↑↓ choose  ·  enter picks  ·  ←→ questions                    ┃  
+  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛  
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  enter picks  ·  a takes its picks  ·  s · esc sends nothing                                                           

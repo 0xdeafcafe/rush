@@ -238,7 +238,7 @@ When a turn ends and nothing is left running, Claude Code is stopped a few secon
 
 The place next to Agents (`ctrl+\`, or `>` with nothing typed) lists each project agents worked in: its main checkout and every worktree, with its branch and changes and whether removing it would lose anything, then Pull requests, Temporary (agents' temp work) and System (every agent's processes). `enter` goes into a project: where it is and where it pushes, its git state, its memory, its agents and what they're doing, their scratch and its recent commits. `c` opens Clean up. `x` on an agent asks first whether to hide it, stop it and keep it, restart it or delete it for good.
 
-**Wall** is Agents' second page: every agent at once, streaming.
+**Wall** is Agents' second page: every agent at once, streaming. A tile whose agent ended with decisions shows them; `enter` or a click opens their card on the tile, answered with the session card's keys (`↑↓` choose, `1`–`9` or `enter` pick, `←→` between them, `a` takes its picks, `s` or `esc` sends nothing) and sent as the card sends them; `o` opens its session.
 
 **Links rush knows** say where they stand after them, asked of GitHub through `gh` in the background: a pull request's link shows it merged, closed, a draft, or open with its checks and review; an issue's shows it open or how it closed. A click on a pull request's link, in any repository, opens it in rush with its checks, reviews and conversation, to merge, approve or comment on; right-click offers Open in rush and Merge… before the browser.
 

@@ -1,6 +1,7 @@
 //! The Wall's subagent tiles and its mouse, after Go's wall.go (wallItems
 //! :136, wallGroups :150, wallSubTile :684, wallKey :1001, wallClick
-//! :1066).
+//! :1066), and its decisions answered on their tile with the session's
+//! card.
 
 use rush_core::agent::{State, SubagentTile};
 use rush_core::text::Line;
@@ -8,8 +9,10 @@ use rush_draw::{Button, KeyMods, MouseKind};
 
 use super::tests::{agent, model_of};
 use super::wall;
-use crate::frame::{Mouse, Press};
+use crate::frame::{Mouse, Out, Press};
 use crate::model::Model;
+use crate::screens::session_cards::question::decisions_of;
+use crate::screens::session_cards::{Act, Host, HostInfo, ModelCards};
 
 fn press(m: &mut Model, s: &str) {
     m.press_key(&Press::of(s).unwrap());
@@ -135,30 +138,24 @@ fn a_working_tile_wakes_the_wall_each_second() {
     assert_eq!(w.wake_at(&m), None, "nothing at work: no wake");
 }
 
-/// A tile whose last reply ends with decisions shows them; typing 1b 2a
-/// and enter answers it from the Wall, as the session's card would, and
-/// the tile stops asking.
-#[test]
-fn answers_decisions_from_the_wall() {
-    use rush_core::agent::{Preview, PreviewLine};
-    use std::sync::Arc;
-
-    use crate::host::{Fake, set_hosts};
-
-    let a = agent("d", "Making Rush Screen More Useful", State::Done, 101);
-    let mut m = model_of(vec![a], 120, 40);
-    let fake = Fake::new();
-    set_hosts(&mut m, Arc::new(fake.clone()));
-    let said = "Here's what I found.\n\nDecisions:\n\
+const SAID: &str = "Here's what I found.\n\nDecisions:\n\
 1. **Subagents on the Wall:** (a) fold them in; (b) small tiles.\n\
 2. **Scope:** (a) all six; (b) two.\n\
 My picks: 1a 2a.";
+
+/// A Wall whose one tile, agent d's, ends its last reply with SAID's
+/// decisions, in a terminal w×h; the Wall open.
+fn deciding(w: usize, h: usize) -> Model {
+    use rush_core::agent::{Preview, PreviewLine};
+    let mut a = agent("d", "Making Rush Screen More Useful", State::Done, 101);
+    a.interactive = false;
+    let mut m = model_of(vec![a], w, h);
     m.previews.insert(
         "default/d".into(),
         Preview {
             recent: vec![PreviewLine {
                 role: "assistant".into(),
-                text: said.into(),
+                text: SAID.into(),
                 at: 5,
                 ..Default::default()
             }],
@@ -166,12 +163,66 @@ My picks: 1a 2a.";
         },
     );
     press(&mut m, "]");
+    m
+}
+
+/// A host for the cards that keeps what's asked of each session: d's
+/// open decisions card is SAID's, as d1.
+#[derive(Default)]
+struct Asked(Vec<(String, Act)>);
+
+fn asked_info(_: &Model, key: &str) -> Option<HostInfo> {
+    (key == "default/d").then(|| HostInfo {
+        kind: "claude".into(),
+        cold: true,
+        wakes: true,
+        decisions: decisions_of(SAID, "d1"),
+        ..HostInfo::default()
+    })
+}
+
+fn asked_act(m: &mut Model, key: &str, a: Act) -> Out {
+    m.kept::<Asked>().0.push((key.into(), a));
+    Out::Draw
+}
+
+fn recording(m: &mut Model) {
+    m.cards().host = Some(Host {
+        info: asked_info,
+        act: asked_act,
+        set_input: |_, _, _| {},
+        ask: |_, _, _, _| false,
+        setting: |_, _| String::new(),
+        save_setting: |_, _, _| Ok(()),
+    });
+}
+
+fn acts(m: &mut Model) -> Vec<Act> {
+    m.kept::<Asked>().0.iter().map(|(_, a)| a.clone()).collect()
+}
+
+/// A tile whose last reply ends with decisions shows them; enter opens
+/// their card on the tile, where ↓ and enter pick, a digit picks, and
+/// enter on the review sends the answers as the session's card does,
+/// through the session's own path: here its agent's daemon. The tile
+/// stops asking, and the card's state, the session's, has it answered.
+#[test]
+fn answers_decisions_from_the_wall() {
+    use std::sync::Arc;
+
+    use crate::host::{Fake, set_hosts};
+
+    let mut m = deciding(120, 40);
+    m.cards().host = Some(crate::screens::session_core::cards_host::host());
+    let fake = Fake::new();
+    set_hosts(&mut m, Arc::new(fake.clone()));
     let f = screen(&mut m).join("\n");
     for t in [
         "1 Subagents on the Wall",
         "a fold them in  b small tiles",
         "2 Scope",
-        "2 decisions · type 1a… to answer",
+        "2 decisions to answer",
+        "enter answer",
     ] {
         assert!(f.contains(t), "{t:?} on the tile:\n{f}");
     }
@@ -179,11 +230,31 @@ My picks: 1a 2a.";
         !f.contains("Decisions:"),
         "the block isn't in the reply:\n{f}"
     );
-    for k in ["1", "b", "space", "2", "a"] {
+    press(&mut m, "enter");
+    let f = screen(&mut m).join("\n");
+    for t in [
+        "? decide",
+        "2 decisions, yours to make",
+        "1. Subagents on the Wall",
+        "fold them in  ★ its pick",
+        "a takes its picks",
+        "Something else  opens the session to type your own",
+    ] {
+        assert!(f.contains(t), "{t:?} on the card:\n{f}");
+    }
+    assert!(
+        !f.contains("type your own answer below"),
+        "no box here:\n{f}"
+    );
+    for k in ["down", "enter", "1"] {
         press(&mut m, k);
     }
+    assert!(
+        screen(&mut m).join("\n").contains("Send these answers?"),
+        "{}",
+        screen(&mut m).join("\n")
+    );
     assert_eq!(m.agents_page, 1, "still on the Wall");
-    assert!(screen(&mut m).join("\n").contains("answer 1b 2a"));
     press(&mut m, "enter");
     assert_eq!(
         *fake.replies.lock().unwrap(),
@@ -195,6 +266,153 @@ My picks: 1a 2a.";
     assert_eq!(m.agents_page, 1, "still on the Wall");
     let f = screen(&mut m).join("\n");
     assert!(!f.contains("1 Subagents on the Wall"), "answered:\n{f}");
+    assert!(!f.contains("? decide"), "the card's closed:\n{f}");
+    let c = &m.cards().conns["default/d"];
+    assert!(c.q_gone.starts_with("wall-") && c.dec_answered == c.q_gone);
+}
+
+/// The card on the tile is the session's: its id, and its answer as the
+/// card writes it. A click on an option picks it at once, and a takes
+/// the agent's picks for the rest and sends.
+#[test]
+fn a_click_picks_and_a_takes_its_picks_on_a_tile() {
+    let mut m = deciding(120, 40);
+    recording(&mut m);
+    // A click on the tile opens its card; one on an option picks it.
+    let f = screen(&mut m);
+    let click = |m: &mut Model, x: usize, y: usize| {
+        m.mouse_event(&Mouse {
+            kind: MouseKind::Down(Button::Left),
+            x: x as u16,
+            y: y as u16,
+            mods: KeyMods::NONE,
+        })
+    };
+    let (y, l) = f
+        .iter()
+        .enumerate()
+        .find(|(_, l)| l.contains("Scope"))
+        .expect("the tile");
+    click(
+        &mut m,
+        rush_core::text::width(&l[..l.find("Scope").unwrap()]),
+        y,
+    );
+    let f = screen(&mut m);
+    assert!(f.join("\n").contains("? decide"), "{}", f.join("\n"));
+    let (y, l) = f
+        .iter()
+        .enumerate()
+        .find(|(_, l)| l.contains("small tiles"))
+        .expect("option b");
+    click(
+        &mut m,
+        rush_core::text::width(&l[..l.find("small").unwrap()]),
+        y,
+    );
+    let c = &m.cards().conns["default/d"];
+    assert_eq!(c.q_idx, 1, "picked, on to the next");
+    assert_eq!(c.q_answer["1. Subagents on the Wall"], "small tiles");
+    press(&mut m, "a");
+    assert_eq!(
+        acts(&mut m),
+        vec![Act::Answer {
+            id: "d1".into(),
+            text: "1b. Subagents on the Wall: small tiles\n\n2a. Scope: all six".into()
+        }]
+    );
+    assert!(!screen(&mut m).join("\n").contains("? decide"));
+    assert_eq!(m.agents_page, 1, "still on the Wall");
+}
+
+/// a straight away sends every one of the agent's picks.
+#[test]
+fn a_sends_its_picks_from_a_tile() {
+    let mut m = deciding(120, 40);
+    recording(&mut m);
+    press(&mut m, "enter");
+    press(&mut m, "a");
+    assert_eq!(
+        acts(&mut m),
+        vec![Act::Answer {
+            id: "d1".into(),
+            text: "1a. Subagents on the Wall: fold them in\n\n2a. Scope: all six".into()
+        }]
+    );
+}
+
+/// esc and s on a tile's card send nothing: the card is set aside as
+/// the session's is (the host told, nothing to the agent), and the tile
+/// stops asking; the Wall stays.
+#[test]
+fn esc_and_s_send_nothing_from_a_tile() {
+    for k in ["esc", "s"] {
+        let mut m = deciding(120, 40);
+        recording(&mut m);
+        press(&mut m, "enter");
+        press(&mut m, "down");
+        press(&mut m, k);
+        assert_eq!(
+            acts(&mut m),
+            vec![Act::DismissDecisions("d1".into())],
+            "{k}"
+        );
+        assert_eq!(m.agents_page, 1, "{k}: still on the Wall");
+        let f = screen(&mut m).join("\n");
+        assert!(!f.contains("? decide"), "{k}: closed:\n{f}");
+        assert!(!f.contains("2 decisions to answer"), "{k}: set aside:\n{f}");
+    }
+}
+
+/// A rush session whose host keeps its decisions card open asks on its
+/// tile with no transcript to read: the card is its host's, so what the
+/// tile sends answers the session's own card, by its id.
+#[test]
+fn a_rush_sessions_host_card_is_answered_on_its_tile() {
+    let mut a = agent("r", "live alpha", State::Blocked, 101);
+    a.interactive = false;
+    a.decides = true;
+    a.decisions_key = "Subagents on the Wall\x1fScope\x1f".into();
+    let mut m = model_of(vec![a.clone()], 120, 40);
+    recording(&mut m);
+    let mut q = decisions_of(SAID, "decisions-host1").unwrap();
+    q.id = "decisions-host1".into();
+    m.kept::<wall::WallState>()
+        .hosted
+        .insert(a.key.clone(), (a.decisions_key.clone(), Some(q)));
+    press(&mut m, "]");
+    let f = screen(&mut m).join("\n");
+    assert!(f.contains("2 decisions to answer"), "{f}");
+    press(&mut m, "enter");
+    press(&mut m, "a");
+    assert_eq!(
+        acts(&mut m),
+        vec![Act::Answer {
+            id: "decisions-host1".into(),
+            text: "1a. Subagents on the Wall: fold them in\n\n2a. Scope: all six".into()
+        }]
+    );
+    assert!(!screen(&mut m).join("\n").contains("2 decisions to answer"));
+}
+
+/// A tile while its decisions are answered on it, at 120×40: its card in
+/// place of its stream, the agent's pick under the cursor.
+#[test]
+fn snapshot_a_tile_answering() {
+    let mut m = deciding(120, 40);
+    recording(&mut m);
+    press(&mut m, "enter");
+    press(&mut m, "down");
+    // The Wall's body and keys, not the header: it reads the machine.
+    let got = screen(&mut m)[3..].join("\n") + "\n";
+    let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/snapshots/wall_answering_120x40.txt");
+    if std::env::var_os("UPDATE_SNAPSHOTS").is_some() || !p.exists() {
+        std::fs::write(&p, &got).unwrap();
+        return;
+    }
+    let want = std::fs::read_to_string(&p).unwrap();
+    assert_eq!(got, want, "differs; UPDATE_SNAPSHOTS=1 to accept");
 }
 
 /// A decision's long topic and long option labels wrap under their own

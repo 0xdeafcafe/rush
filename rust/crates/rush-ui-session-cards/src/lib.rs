@@ -345,6 +345,9 @@ pub struct Conn {
     pub q_own: bool,
     /// It's a decisions block, not a question of the agent's.
     pub q_decide: bool,
+    /// It's drawn on a Wall tile, where there's no box to type in: your
+    /// own words are typed in its session.
+    pub q_on_tile: bool,
     /// The decisions card set aside, and one opened again.
     pub q_gone: String,
     pub q_again: Option<Question>,
