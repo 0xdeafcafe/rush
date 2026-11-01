@@ -894,12 +894,21 @@ impl Conn for Session {
     fn answerer(&self) -> Option<&dyn Answerer> {
         Some(self)
     }
+    fn effort_setter(&self) -> Option<&dyn rush_core::adapter::EffortSetter> {
+        Some(self)
+    }
     fn pid(&self) -> Option<i32> {
         let p = self.process();
         (p > 0).then_some(p)
     }
     fn end_tasks(&self) -> Vec<String> {
         crate::tasks_ended::end_tasks(&self.inner)
+    }
+}
+
+impl rush_core::adapter::EffortSetter for Session {
+    fn set_effort(&self, effort: &str) -> adapter::Result<()> {
+        Ok(Session::set_effort(self, effort)?)
     }
 }
 

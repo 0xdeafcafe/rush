@@ -1436,3 +1436,79 @@ fn join_within<T: Send + 'static>(h: std::thread::JoinHandle<T>, d: Duration) ->
         Err(_) => panic!("the host didn't stop within {d:?}"),
     }
 }
+
+/// A conn that takes a new effort live, or refuses it.
+struct LiveEffort {
+    ok: bool,
+    got: Mutex<Vec<String>>,
+}
+
+impl rush_core::adapter::EffortSetter for LiveEffort {
+    fn set_effort(&self, effort: &str) -> adapter::Result<()> {
+        self.got.lock().unwrap().push(effort.into());
+        if self.ok { Ok(()) } else { Err("no".into()) }
+    }
+}
+
+impl Conn for LiveEffort {
+    fn send(&self, _: Input) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn answer(&self, _: &str, _: &str) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn interrupt(&self) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn set_model(&self, _: &str) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn set_mode(&self, _: &str) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn close(&self) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn effort_setter(&self) -> Option<&dyn rush_core::adapter::EffortSetter> {
+        Some(self)
+    }
+}
+
+// host.go:2089-2100: an agent that takes effort live keeps running; one
+// that doesn't, or refuses, restarts when idle.
+#[test]
+fn effort_applies_live_or_restarts() {
+    let _home = Home::new();
+    let live = Arc::new(LiveEffort {
+        ok: true,
+        got: Mutex::new(Vec::new()),
+    });
+    let refuses = Arc::new(LiveEffort {
+        ok: false,
+        got: Mutex::new(Vec::new()),
+    });
+    let conns: [(&str, Arc<dyn Conn>, bool); 3] = [
+        ("effort-live", live.clone(), true),
+        ("effort-refused", refuses.clone(), false),
+        ("effort-plain", Arc::new(Kept::default()), false),
+    ];
+    for (id, conn, keeps) in conns {
+        let h = host(Config {
+            id: id.into(),
+            kind: "claude".into(),
+            ..Config::default()
+        });
+        with_conn(&h, conn);
+        h.lock().info.state = "idle".into();
+        h.do_op(op("effort", |o| o.effort = "high".into())).unwrap();
+        let st = h.lock();
+        assert_eq!(st.conn.is_some(), keeps, "{id}: running after");
+        assert_eq!(
+            (st.cfg.effort.as_str(), st.info.effort.as_str()),
+            ("high", "high"),
+            "{id}"
+        );
+    }
+    assert_eq!(*live.got.lock().unwrap(), ["high"]);
+    assert_eq!(*refuses.got.lock().unwrap(), ["high"]);
+}

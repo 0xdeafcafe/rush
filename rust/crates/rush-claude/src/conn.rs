@@ -55,15 +55,32 @@ fn unset(name: &str) -> bool {
     std::env::var_os(name).is_none_or(|v| v.is_empty())
 }
 
+/// The account a ~/.claude session starts as: run, the login in use, or
+/// the home it last ran in while that still has a sign-in (conn.go:33-37).
+pub(crate) fn start_account(run: Account, home: &str) -> Account {
+    if !home.is_empty() && Path::new(home) != run.config_dir {
+        let h = Account::at("", home);
+        if crate::home::has_home(&h) {
+            return h; // still warm on the login it last ran as
+        }
+    }
+    run
+}
+
+/// Whether a ~/.claude session on acct would start as another account now
+/// that new ones run as now (conn.go:365-367).
+pub(crate) fn moved_off(root: bool, now: &Account, acct: &Account) -> bool {
+    root && now.config_dir != acct.config_dir
+}
+
 impl Driver for Claude {
     /// Runs claude -p for rush to draw.
     fn start(&self, mut o: StartOptions, sink: Arc<dyn Sink>) -> adapter::Result<Box<dyn Conn>> {
         let mut acct = account(&o.profile);
         let mut root = false;
         if acct.is_default() {
-            // ~/.claude runs as the login in use, in its home. Login homes
-            // aren't ported yet: the login in use is ~/.claude's own.
-            acct = self.run_as();
+            // ~/.claude runs as the login in use, in its home (conn.go:33).
+            acct = start_account(self.run_as(), &o.home);
             root = true;
         }
         let tools = o.tools.clone();
@@ -206,6 +223,7 @@ impl Driver for Claude {
             carried: Mutex::new(carried),
             acct,
             root,
+            run_as: self.config_source(),
             login,
             taps,
             dir: o.dir.clone(),
@@ -340,6 +358,8 @@ struct Inner {
     /// Whether it was started for ~/.claude and runs in the home of the
     /// login in use then.
     root: bool,
+    /// Where to read which login new sessions run as now.
+    run_as: crate::adapter::ConfigFn,
     /// The account it started signed in as: its plan usage readings are
     /// that login's.
     login: String,
@@ -695,10 +715,16 @@ impl Homed for ClaudeConn {
         }
         self.0.acct.config_dir.display().to_string()
     }
-    /// Whether ~/.claude's new sessions run as another login now. With no
-    /// login homes yet they always run in ~/.claude itself.
+    /// Whether ~/.claude's new sessions run as another login now
+    /// (conn.go:365-367).
     fn moved(&self) -> bool {
-        false
+        // Only a session on ~/.claude reads who the login in use is.
+        self.0.root
+            && moved_off(
+                true,
+                &crate::adapter::run_as_in(&(self.0.run_as)()),
+                &self.0.acct,
+            )
     }
     fn login(&self) -> String {
         self.0.login.clone()

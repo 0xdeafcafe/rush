@@ -97,6 +97,10 @@ pub trait Conn: Send + Sync {
     fn hearer(&self) -> Option<&dyn Hearer> {
         None
     }
+    /// It takes a new reasoning effort while it runs (host.go:2089).
+    fn effort_setter(&self) -> Option<&dyn EffortSetter> {
+        None
+    }
     /// The session holds a sign-in its profile has since left: it should
     /// rest once its turn ends, and pick up on the new one (Go's Staler).
     fn stale(&self) -> bool {
@@ -123,6 +127,12 @@ pub trait Conn: Send + Sync {
     fn end_tasks(&self) -> Vec<String> {
         Vec::new()
     }
+}
+
+/// Takes a new reasoning effort live, without a restart (Go's
+/// `interface{ SetEffort(string) error }`, host.go:2089).
+pub trait EffortSetter {
+    fn set_effort(&self, effort: &str) -> Result<()>;
 }
 
 /// Takes answers to a Question: each Ask's chosen labels, keyed by the

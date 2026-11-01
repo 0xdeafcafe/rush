@@ -29,11 +29,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use rush_core::adapter::{
-    self, ContextWindower, CwdReader, Describer, Discoverer, FastPricer, Feature, Features,
-    HistoryFollower, HistoryReader, Homer, JobKeeper, Keyed, Kind, Level, LoginHinter, Made,
-    Native, Previewer, Pricer, Profile, Programmer, ProjectFolderer, RunFollower, Session, Speaker,
-    SpendReader, SpendScanner, SpendTarget, SubagentStats, Support, TranscriptLocator, Transcripts,
-    Worded,
+    self, Codenamer, ContextWindower, CwdReader, Describer, Discoverer, FastPricer, Feature,
+    Features, HistoryFollower, HistoryReader, Homer, JobKeeper, Keyed, Kind, Level, LoginHinter,
+    Made, Native, Previewer, Pricer, Profile, Programmer, ProjectFolderer, RunFollower, Session,
+    Speaker, SpendReader, SpendScanner, SpendTarget, SubagentStats, Support, TranscriptLocator,
+    Transcripts, Worded,
 };
 use rush_core::agent::{Preview, Spend, TokenUsage};
 use rush_core::time::{Ms, now};
@@ -106,17 +106,29 @@ impl Claude {
     /// The folder a session started for ~/.claude runs in: the home of the
     /// login in use, ready, or ~/.claude when it can't be readied.
     pub fn run_as(&self) -> Account {
-        let cfg = self.config();
-        let acct = crate::home::run_account(&cfg);
-        if acct.is_default() {
-            return acct;
-        }
-        let root = crate::home::active(&cfg);
-        if crate::home::link_home(&acct, &root).is_err() || !crate::home::has_home(&acct) {
-            return root;
-        }
-        acct
+        run_as_in(&self.config())
     }
+
+    /// Where rush's config comes from, to read it again later.
+    pub(crate) fn config_source(&self) -> ConfigFn {
+        match &self.config {
+            Some(f) => f.clone(),
+            None => Arc::new(|| rush_state::Store::load().config),
+        }
+    }
+}
+
+/// [`Claude::run_as`] for a config already read.
+pub(crate) fn run_as_in(cfg: &rush_state::Config) -> Account {
+    let acct = crate::home::run_account(cfg);
+    if acct.is_default() {
+        return acct;
+    }
+    let root = crate::home::active(cfg);
+    if crate::home::link_home(&acct, &root).is_err() || !crate::home::has_home(&acct) {
+        return root;
+    }
+    acct
 }
 
 /// A Claude config folder as a profile of rush's.
@@ -217,6 +229,7 @@ impl adapter::Adapter for Claude {
         transcripts: Transcripts,
         transcript_locator: TranscriptLocator,
         previewer: Previewer,
+        codenamer: Codenamer,
         spend_reader: SpendReader,
         run_follower: RunFollower,
         pricer: Pricer,
@@ -280,6 +293,13 @@ impl adapter::Adapter for Claude {
         timeliner: Timeliner,
         scratcher: Scratcher,
     );
+}
+
+/// Each session's codename, by session id (discover.go:137 Codenames).
+impl Codenamer for Claude {
+    fn codenames(&self) -> std::collections::HashMap<String, String> {
+        crate::sessions::codenames()
+    }
 }
 
 impl Homer for Claude {

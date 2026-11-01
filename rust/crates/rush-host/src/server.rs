@@ -2200,7 +2200,25 @@ impl Host {
             "effort" => {
                 // Effort is fixed for an agent's process, so it takes hold
                 // the next time one starts: right away when idle, else
-                // after this turn.
+                // after this turn. One that takes it live (ACP's thinking
+                // option) keeps running (host.go:2089-2100).
+                if let Some(c) = &conn
+                    && c.effort_setter().is_some()
+                    && !o.effort.is_empty()
+                {
+                    drop(st);
+                    let r = c
+                        .effort_setter()
+                        .map_or(Ok(()), |es| es.set_effort(&o.effort));
+                    st = self.lock();
+                    if r.is_ok() && same_conn(&st.conn, &conn) {
+                        st.cfg.effort = o.effort.clone();
+                        st.info.effort = o.effort.clone();
+                        self.save_config(&st);
+                        self.publish(&mut st);
+                        return Ok(());
+                    }
+                }
                 st.cfg.effort = o.effort.clone();
                 st.info.effort = o.effort.clone();
                 self.publish(&mut st);
