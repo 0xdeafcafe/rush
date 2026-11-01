@@ -1100,7 +1100,7 @@ fn history_hint(m: &Model) -> String {
 /// answer it in your own words, and whether a card has the keys
 /// (decisionsCard, c.qOwn, c.cardFocus).
 fn cards_now(m: &Model, key: &str) -> (bool, bool, bool) {
-    use crate::screens::session_cards::{Cards, info, question};
+    use crate::screens::session_cards::{Cards, info_any, question};
     let Some(c) = m.kept.peek::<Cards>().and_then(|k| k.conns.get(key)) else {
         return (false, false, false);
     };
@@ -1109,7 +1109,8 @@ fn cards_now(m: &Model, key: &str) -> (bool, bool, bool) {
         .as_ref()
         .filter(|v| v.key == key)
         .map_or(0, |v| v.sess.pending().len());
-    let deciding = info(m, key).is_some_and(|i| question::decisions_card(c, &i, pending).is_some());
+    let deciding =
+        info_any(m, key).is_some_and(|i| question::decisions_card(c, &i, pending).is_some());
     let focus = c.card_focus && !c.card_shown.is_empty();
     (deciding, c.q_own, focus)
 }

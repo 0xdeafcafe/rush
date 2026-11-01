@@ -941,6 +941,20 @@ is made. Everything below is in `rush_ui::frame`.
   (`Summarizer::summary_exclusions`). A rewind's message put back in a
   session beside the list opens it, as Go's paneFocus gives its box the
   keys.
+  A decisions card stays on a session rush doesn't run now when its
+  answers would wake or resume it (`HostInfo::wakes`: asleep, as Go, or
+  stopped with no host running, beyond Go, whose card vanished there and
+  whose d said "can't take answers here"); `session_cards::card_info` is
+  what its card, keys and clicks read. Its answers are `Act::Answer`:
+  shown as sending, sent over the link, or waking or resuming it as a
+  typed message does (`keys::send_offline_as`); answers that don't go
+  bring the card back on its send page with them kept
+  (`question::answer_failed`) rather than leaving a block that reads as
+  answered. Set aside with no host, it's noted beside its info
+  (`Hosts::dismiss_asleep`). The block the card is up for is pinned only
+  once the last turn ends with one (a view reading from the start has
+  an earlier turn last for a moment), and follows its turn when the
+  view's turns are numbered afresh (`take_whole`).
 - **Moving agents** (`session_core::rushmove`, `session_core::moveto`;
   rushmode.go moveToRush, picker.go). /rush, #rush and a message to a
   past session move it to rush mode through `Hosts::adopt` (the new

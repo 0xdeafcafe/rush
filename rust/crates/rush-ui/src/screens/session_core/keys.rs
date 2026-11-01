@@ -713,6 +713,52 @@ pub fn send_as(m: &mut Model, key: &str, text: &str) {
     );
 }
 
+/// Sends a decisions card's answers to the session rush hosts, as
+/// send_as does; their card comes back if they don't go.
+pub(super) fn send_answer(m: &mut Model, key: &str, text: String, id: String) {
+    mark_sending(m, key, &text);
+    let Some(link) = conn(m, key).link.clone() else {
+        conn(m, key).out.failed();
+        answer_failed(m, key, &id);
+        m.flash_err("this session can't take answers here");
+        return;
+    };
+    let key = key.to_string();
+    super::later(
+        m,
+        move || {
+            link.op(Op::Send {
+                text,
+                images: Vec::new(),
+                now: false,
+            })
+        },
+        move |m, r| match r {
+            Ok(()) => {
+                crate::screens::session_cards::question::answer_sent(m, &key, &id);
+                Out::Idle
+            }
+            Err(e) => {
+                conn(m, &key).out.failed();
+                answer_failed(m, &key, &id);
+                m.fail(&e);
+                Out::Draw
+            }
+        },
+    );
+}
+
+/// A decisions card's answers to a session rush doesn't run now: they
+/// wake its host or resume it, as a message from the box does
+/// (sendAnswers' wakeHost).
+pub(super) fn send_offline_answer(m: &mut Model, key: &str, text: String, id: String) -> Out {
+    send_offline_as(m, key, text, Vec::new(), false, Some(id))
+}
+
+fn answer_failed(m: &mut Model, key: &str, id: &str) {
+    crate::screens::session_cards::question::answer_failed(m, key, id);
+}
+
 /// Shows text as sending until the agent has it (markSending).
 fn mark_sending(m: &mut Model, key: &str, text: &str) {
     let now = m.now;
@@ -755,7 +801,23 @@ fn sending_via(m: &mut Model, key: &str, op: Op) {
 /// with it, and one its agent's daemon runs gets it as a reply, or queued
 /// while it works.
 fn send_offline(m: &mut Model, key: &str, text: String, images: Vec<String>, now: bool) -> Out {
+    send_offline_as(m, key, text, images, now, None)
+}
+
+/// send_offline, answer the decisions card the text answers, if it does:
+/// what doesn't go brings that card back rather than the text to the box.
+fn send_offline_as(
+    m: &mut Model,
+    key: &str,
+    text: String,
+    images: Vec<String>,
+    now: bool,
+    answer: Option<String>,
+) -> Out {
     let Some(a) = agent(m, key).cloned() else {
+        if let Some(id) = &answer {
+            answer_failed(m, key, id);
+        }
         return Out::Idle;
     };
     let name = a.display_name.clone();
@@ -770,10 +832,17 @@ fn send_offline(m: &mut Model, key: &str, text: String, images: Vec<String>, now
     let h = hosts(m);
     if h.hosts(&a) {
         if !can_resume(m, &a) {
+            if let Some(id) = &answer {
+                answer_failed(m, key, id);
+            }
             return Out::Draw;
         }
         let c = conn(m, key);
         if c.waking {
+            if let Some(id) = &answer {
+                answer_failed(m, key, id);
+                m.flash_err("it's waking: send the answers again once it's up");
+            }
             return Out::Draw;
         }
         // Asleep, its host wakes with what was sent going over its new
@@ -797,18 +866,36 @@ fn send_offline(m: &mut Model, key: &str, text: String, images: Vec<String>, now
             },
             move |m, r| match r {
                 Ok(r) => {
-                    let (r, text) = match r {
+                    let (r, mut text) = match r {
                         Ok(l) => (Ok(l), String::new()),
                         Err((e, t)) => (Err(e), t),
                     };
+                    if let Some(id) = &answer {
+                        // Answers come back on their card, not in the box.
+                        text.clear();
+                        match r {
+                            Ok(_) => {
+                                crate::screens::session_cards::question::answer_sent(m, &key, id)
+                            }
+                            Err(_) => answer_failed(m, &key, id),
+                        }
+                    }
                     super::live::woke(m, &key, r, text)
                 }
                 Err(r) => {
                     conn(m, &key).waking = false;
                     match r {
-                        Ok(()) => m.flash(&format!("resumed {name}")),
+                        Ok(()) => {
+                            m.flash(&format!("resumed {name}"));
+                            if let Some(id) = &answer {
+                                crate::screens::session_cards::question::answer_sent(m, &key, id);
+                            }
+                        }
                         Err(e) => {
                             conn(m, &key).out.failed();
+                            if let Some(id) = &answer {
+                                answer_failed(m, &key, id);
+                            }
                             m.fail(&e);
                         }
                     }
