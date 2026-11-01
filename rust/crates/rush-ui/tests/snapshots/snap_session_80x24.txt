@@ -1,14 +1,14 @@
-    RUSH      rush   ● 1 needs you   ✻ 2 working                       default
+     !
+    ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working                       default
    ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    Agents · Wall  [ ]
+    RUSH
+   ▀▀▀▀▀▀
 ────────────────────────────────────────────────────────────────────────────────
 
     set up caching for CI   @set-up-caching  ·  idle                context 0%
     checkout · main    Claude Code · open in a terminal · /rush copies it here
     Conversation   Overview   Changes    [ ] views        esc back to the list
 ───━━━━━━━━━━━━━━───────────────────────────────────────────────────────────────
-
-  ▍ You  12:00
-  ▍ fix the test
 
   ▍ Claude  12:00 · @set-up-caching
   │   ✓ cargo test                                                         7s

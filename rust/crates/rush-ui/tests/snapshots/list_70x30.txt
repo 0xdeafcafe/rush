@@ -1,5 +1,8 @@
-    RUSH      rush   ● 1 needs you   ✻ 2 working             default
+     !
+    ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working             default
    ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings
+    RUSH
+   ▀▀▀▀▀▀
 ──────────────────────────────────────────────────────────────────────
   AGENTS▾                                          RAM    COST   TIME
 ┃ Needs you  1 · $0.19
@@ -13,10 +16,7 @@
 ┃ └─ ✳ move the design tokens to CSS variabl… ✻   316M   $3.10    20m
 ┃      checkout · main
 
-┃ Idle  1 · $1.10 · 120M idle ram
-┃ └─ ◦ set up caching for CI ✻                    120M   $1.10    10m
-┃      checkout · main
-  ↓ 5 more lines
+  ↓ 8 more lines
   ╭─ waiting on you ───────────────────────────────────────────────╮
   │  asks: Round half up, or half to even?                         │
   │                                                                │

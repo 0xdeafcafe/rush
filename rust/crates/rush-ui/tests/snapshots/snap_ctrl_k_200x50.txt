@@ -1,30 +1,30 @@
-    RUSH      rush   ● 1 needs you   ✻ 2 working                                                                                                                                               default
+     !
+    ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working                                                                                                                                               default
    ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    Agents · Wall  [ ]                                                                                            0% cpu · – · 37.0G free · 80%
+    RUSH
+   ▀▀▀▀▀▀
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  AGENTS▾                                   COST   TIME │
-┃ Needs you  1 · $0.19                                  │    fix the flaky tax rounding test   @fix-flaky-tax  ·  needs you
-▌ └─ ? fix the flaky tax rounding test ✻   $0.19   2m ● │    checkout · main                                                   ✻ Claude Code   Claude Code · open in a terminal · /rush copies it here
-▌      checkout · main                      ╭─ ✻ Go anywhere ─────────────────────────────────────────────────────────────────────────────────── ctrl+k ─╮
-▌        ╰ asks: Round half up, or half to e│ ❯ ▏an agent, words said in any conversation, or a place · # for commands                                   │──────────────────────────────────────────────
-                                            │ ────────────────────────────────────────────────────────────────────────────────────────────────────────── │                                  ▌
-┃ Working  2 · $5.72                        │ Needs you ───────────────────────────────────────────────────────────────────────────────────────────────  │                                  │
-┃ ├─ ✳ add Apple Pay to checkout ✻ ↳1      $│ ▍● fix the flaky tax rounding test                  checkout · main                              needs you │                                  │
-┃ │    checkout · feat/apple-pay            │                                                                                                            │                                  │
-┃ └─ ✳ move the design tokens to CSS … ✻   $│ Working ─────────────────────────────────────────────────────────────────────────────────────────────────  │                                  │
-┃      checkout · main                      │  ● move the design tokens to CSS variables          checkout · main                                working │                                  │
-                                            │  ● add Apple Pay to checkout                        checkout · feat/apple-pay                      working │                                  │
+  AGENTS▾                                   ╭─ ✻ Go anywhere ─────────────────────────────────────────────────────────────────────────────────── ctrl+k ─╮
+┃ Needs you  1 · $0.19                      │ ❯ ▏an agent, words said in any conversation, or a place · # for commands                                   │
+▌ └─ ? fix the flaky tax rounding test ✻   $│ ────────────────────────────────────────────────────────────────────────────────────────────────────────── │ · open in a terminal · /rush copies it here
+▌      checkout · main                      │ Needs you ───────────────────────────────────────────────────────────────────────────────────────────────  │
+▌        ╰ asks: Round half up, or half to e│ ▍● fix the flaky tax rounding test                  checkout · main                              needs you │──────────────────────────────────────────────
+                                            │                                                                                                            │                                  ▌
+┃ Working  2 · $5.72                        │ Working ─────────────────────────────────────────────────────────────────────────────────────────────────  │                                  │
+┃ ├─ ✳ add Apple Pay to checkout ✻ ↳1      $│  ● move the design tokens to CSS variables          checkout · main                                working │                                  │
+┃ │    checkout · feat/apple-pay            │  ● add Apple Pay to checkout                        checkout · feat/apple-pay                      working │                                  │
+┃ └─ ✳ move the design tokens to CSS … ✻   $│                                                                                                            │                                  │
+┃      checkout · main                      │ Idle ────────────────────────────────────────────────────────────────────────────────────────────────────  │                                  │
+                                            │  ○ set up caching for CI                            checkout · main                                   idle │                                  │
 ┃ Idle  1 · $1.10 · 120M idle ram           │                                                                                                            │                                  │
-┃ └─ ◦ set up caching for CI ✻             $│ Idle ────────────────────────────────────────────────────────────────────────────────────────────────────  │                                  │
-┃      checkout · main                      │  ○ set up caching for CI                            checkout · main                                   idle │                                  │
+┃ └─ ◦ set up caching for CI ✻             $│ Earlier ─────────────────────────────────────────────────────────────────────────────────────────────────  │                                  │
+┃      checkout · main                      │  · why does the ledger import time out on big fil…  checkout · main                                 3h ago │                                  │
+                                            │  · rename Invoice to Bill everywhere                checkout · main                                 3d ago │                                  │
+┃ Today  1 · $1.71                          │                                                                                                            │                                  │
+┃ └─ · why does the ledger import tim… ✻   $│ Go to ───────────────────────────────────────────────────────────────────────────────────────────────────  │                                  │
+┃      checkout · main                      │  + Start an agent                                   in /src/checkout · Anthropic (Claude Code) · default … │                                  │
                                             │                                                                                                            │                                  │
-┃ Today  1 · $1.71                          │ Earlier ─────────────────────────────────────────────────────────────────────────────────────────────────  │                                  │
-┃ └─ · why does the ledger import tim… ✻   $│  · why does the ledger import time out on big fil…  checkout · main                                 3h ago │                                  │
-┃      checkout · main                      │  · rename Invoice to Bill everywhere                checkout · main                                 3d ago │                                  │
-                                            │                                                                                                            │                                  │
- ▸ Earlier  1 · $0.42   rename Invoice to Bi│ Go to ───────────────────────────────────────────────────────────────────────────────────────────────────  │                                  │
-                                            │  + Start an agent                                   in /src/checkout · Anthropic (Claude Code) · default … │                                  │
-                                            │                                                                                                            │                                  │
-                                            │ ↑↓ choose  ·  enter go  ·  ctrl+f just Needs you  ·  # commands  ·  tab next section  ·  esc close         │                                  │
+ ▸ Earlier  1 · $0.42   rename Invoice to Bi│ ↑↓ choose  ·  enter go  ·  ctrl+f just Needs you  ·  # commands  ·  tab next section  ·  esc close         │                                  │
                                             ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯                                  │
                                                         │                                                                                                                                   │
                                                         │                                                                                                                                   │

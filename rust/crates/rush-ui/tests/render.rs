@@ -187,14 +187,14 @@ fn list_at_120() {
     let f = plain(&mut m, 120, 40, &[]);
     snapshot("list_120x40", &f);
     let rows: Vec<&str> = f.lines().collect();
-    assert!(rows[0].contains("rush   ● 1 needs you   ✻ 2 working"));
-    assert!(!rows[0].contains("finished"));
-    assert!(rows[3].starts_with("  AGENTS▾"));
-    assert!(rows[3].ends_with("RUNNING   CPU    RAM TOKENS    COST   TIME"));
+    assert!(rows[1].contains("rush   ● 1 needs you   ✻ 2 working"));
+    assert!(!rows[1].contains("finished"));
+    assert!(rows[6].starts_with("  AGENTS▾"));
+    assert!(rows[6].ends_with("RUNNING   CPU    RAM TOKENS    COST   TIME"));
     // What needs you floats to the top, picked.
-    assert_eq!(rows[4].trim_end(), "┃ Needs you  1 · $0.19");
-    assert!(rows[5].starts_with("▌ └─ ? fix the flaky tax rounding test ✻ Claude Co…"));
-    assert!(rows[5].contains("asks: Round half up,…"));
+    assert_eq!(rows[7].trim_end(), "┃ Needs you  1 · $0.19");
+    assert!(rows[8].starts_with("▌ └─ ? fix the flaky tax rounding test ✻ Claude Co…"));
+    assert!(rows[8].contains("asks: Round half up,…"));
     assert!(f.contains("┃ Working  2 · $5.72"));
     assert!(f.contains(" ▸ Earlier  1 · $0.42"));
 }
@@ -204,7 +204,7 @@ fn narrow_lists_stack_and_drop_columns() {
     let mut m = model();
     let f = plain(&mut m, 70, 30, &[]);
     snapshot("list_70x30", &f);
-    let head = f.lines().nth(3).unwrap();
+    let head = f.lines().nth(6).unwrap();
     assert!(!head.contains("CPU") && !head.contains("TOKENS") && !head.contains("LATEST"));
     assert!(head.contains("RAM") && head.contains("COST") && head.contains("TIME"));
     // Stacked: the question hangs under its name.

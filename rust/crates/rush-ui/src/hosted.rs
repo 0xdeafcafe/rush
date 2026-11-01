@@ -496,12 +496,12 @@ mod tests {
             .find(" Projects ")
             .map(|j| rush_core::text::width(&row[..j]) + 2);
         let x = x.expect("the Projects tab");
-        assert_eq!(m.header_tab_at(x, 1), None);
+        assert_eq!(m.header_tab_at(x, 2), None);
         let x = row
             .find(" Settings ")
             .map(|j| rush_core::text::width(&row[..j]) + 2);
         assert!(
-            m.header_tab_at(x.unwrap(), 1).is_some(),
+            m.header_tab_at(x.unwrap(), 2).is_some(),
             "Settings still opens"
         );
     }

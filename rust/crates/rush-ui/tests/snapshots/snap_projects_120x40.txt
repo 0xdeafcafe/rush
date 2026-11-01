@@ -1,5 +1,8 @@
-    RUSH      rush   ● 1 needs you   ✻ 2 working                                                               default
+     !
+    ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working                                                               default
    ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings                                  0% cpu · – · 37.0G free · 80%
+    RUSH
+   ▀▀▀▀▀▀
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
                                                                                           ● 3 running · – ram · 0% cpu
 
@@ -25,9 +28,6 @@
   │  main checkout       ✳ move the design tokens to… working                                                    30s │
   │  main checkout       ◦ set up caching for CI      idle                                                       10m │
   ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-
-
-
 
 
 
