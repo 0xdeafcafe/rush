@@ -87,6 +87,10 @@ const DEFAULTS: &[Row] = &[
     ("page.next", Pg, "the next page", &["]", "tab"], false),
     ("page.go", Pg, "tell the agent to keep going", &["ctrl+b", "alt+g"], false),
     ("page.pr", Pg, "open the agent's pull request (Projects)", &["ctrl+y"], false),
+    // Settings' and Harnesses' rows (rush-only: Go's ← stepped a value back).
+    ("page.in", Pg, "Settings: go in, or open a row's choices to pick one", &["right", "enter"], false),
+    ("page.back", Pg, "Settings: back out, a column left on Config; never changes a value", &["left"], false),
+    ("page.switch", Pg, "Settings: switch an on/off row", &["space"], false),
 
     ("session.send", S, "send now, the queue first", &["ctrl+enter", "ctrl+s"], false),
     ("session.enter", S, "send the message from the composer", &["enter"], false),

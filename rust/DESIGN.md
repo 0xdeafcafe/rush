@@ -1096,6 +1096,25 @@ is made. Everything below is in `rush_ui::frame`.
   `open_skills`, `statusline::open_status_line`; `#network` and
   `#statusline` are registered commands; `sheets::start_view` is the
   first-run layout question.
+  Keys differ from Go's on purpose (rush-only): a value changes only by
+  a pick, a typed value or space. `form::form_key` opens a row's choices
+  in a `frame::picker::Picker` on enter or → (a typed row with choices
+  takes a value typed there; one without asks in the input line), space
+  switches a row of two values or on/off (and steps a row with a
+  preview), and ← and h are never a row's: an open provider, harness or
+  plugin backs out on them as on esc, Config moves a column left, a flat
+  form does nothing. Go's ← stepped the value back, except on an open
+  provider. The key lines say these (`form::change_keys`), and keymap's
+  `page.in`, `page.back`, `page.switch` describe them in the guide.
+  Harnesses › Claude Code shows its settings.json whole
+  (`settings::claudecode`, reading and writing through
+  `rush_claude::usersettings`): each row's value with where it comes
+  from (`Setting::source`: env, settings.json, ~/.claude.json, default),
+  the env block and enabledPlugins; changes are made to what's shown at
+  once and written off the UI to every distinct settings.json the
+  accounts read (a home's link and its target are one), keeping the
+  rest of each file and its links, mode 0600. files.rs's generic
+  settings-file section is left for other agents that offer a page.
 
 - **Plugins on screen** (`screens/plugin_ui`). Everything plugins add
   goes through `rush_plugind::hooks::Client`, kept in `m.plugins()`
