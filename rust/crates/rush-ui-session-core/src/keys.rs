@@ -861,7 +861,10 @@ fn send_offline_as(
         super::later(
             m,
             move || {
-                if asleep || h.sleeping(&a) {
+                // Running still, its connection was let go (too far
+                // behind): dialled again with what was sent, as a wake,
+                // never a second host started over it.
+                if asleep || h.sleeping(&a) || h.running(&a) {
                     Ok(h.wake(&a, &text, &images, now).map_err(|e| (e, text)))
                 } else {
                     Err(h.resume(&a, &text, &images))

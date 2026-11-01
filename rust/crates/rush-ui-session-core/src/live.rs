@@ -57,7 +57,8 @@ pub fn on_fleet(m: &mut Model) {
 
 /// Keeps one connection open, to the hosted session showing, and lets it
 /// go when the Session moves on (syncHost). A host that closed is dialled
-/// again only once another process runs the session.
+/// again once another process runs the session, or at once when it let
+/// this one go while running on (resolve_close).
 pub fn sync(m: &mut Model) {
     if m.kept
         .peek::<rush_ui_list_extras::grid::InTile>()
