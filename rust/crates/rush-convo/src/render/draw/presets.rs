@@ -575,7 +575,20 @@ impl Drawer<'_> {
         let mut foot = paint(C_ORANGE.bold(), who);
         let r = if last { self.r.clone() } else { String::new() };
         if last {
-            if t.live {
+            // Which command of a running chain runs now: 2/3 cargo test.
+            let part = t
+                .items
+                .iter()
+                .filter_map(|it| match it {
+                    Item::Step(id) => Some(self.s.running_label(*id)),
+                    _ => None,
+                })
+                .find(|p| !p.is_empty());
+            if let Some(p) = part.filter(|_| t.live) {
+                foot.push(faint(" · "));
+                foot.push(paint(C_ORANGE, "✱ running "));
+                foot.push(paint(C_SUB, &p));
+            } else if t.live {
                 foot.push(faint(" · "));
                 foot.push(paint(C_ORANGE, "✱ working"));
                 if t.start != 0 {
@@ -917,7 +930,10 @@ impl Drawer<'_> {
             paint(C_GREEN, "✓")
         };
         let cmd = one_line(first_line(&self.info(id).call.input.command));
-        let detail = if running {
+        let part = self.s.running_label(id);
+        let detail = if running && !part.is_empty() {
+            dim("running").and(faint(" · ")).and(paint(C_SUB, &part))
+        } else if running {
             dim("running")
         } else if let Some((p, f)) = self.tests_counted(id) {
             if f > 0 {
@@ -973,6 +989,10 @@ impl Drawer<'_> {
         }
         let l = lead.and(words).and(blanks(3)).and(detail);
         self.add(&r, Color::Default, l, right);
+        // A running chain's keys: skip the command, stop it all, pause.
+        if running {
+            self.chain_keys(id, 4);
+        }
     }
 
     // ---- Catch-up ----
@@ -1132,7 +1152,12 @@ impl Drawer<'_> {
         for &id in &last.steps {
             let st = s.step(id);
             if st.status == Status::Running && st.parent.is_none() {
-                let w = self.label(id).plain();
+                let part = s.running_label(id);
+                let w = if part.is_empty() {
+                    self.label(id).plain()
+                } else {
+                    part
+                };
                 let at = if st.start != 0 {
                     format!(" · {}", self.since(st.start))
                 } else {
@@ -1369,17 +1394,33 @@ impl Drawer<'_> {
                 .and(dim(&when(self, g.start)))
                 .and_raw("  ")
                 .and(faint(tree));
-            let what = self.leg_words(g);
-            let room = self.cw.saturating_sub(lead.width() + right.width() + 3);
-            let mut what = what.truncate(room.max(8), &faint("…"));
+            let first = g.ids[0];
+            let mut tail = Txt::new();
             if g.bad {
-                what.push(paint(C_RED, " ✗"));
+                tail.push(paint(C_RED, " ✗"));
             }
             if g.waiting {
-                what.push(paint(C_YELLOW, " · waiting on you"));
+                tail.push(paint(C_YELLOW, " · waiting on you"));
             }
-            let sr = self.step_ref(self.s.step(g.ids[0]));
+            let part = self.s.running_label(first);
+            if g.running && !part.is_empty() {
+                tail.push(faint(" · "));
+                tail.push(paint(C_SUB, &part));
+            }
+            let room = self
+                .cw
+                .saturating_sub(lead.width() + right.width() + tail.width() + 3);
+            let what = self
+                .leg_words(g)
+                .truncate(room.max(8), &faint("…"))
+                .and(tail);
+            let sr = self.step_ref(self.s.step(first));
+            let picked = self.o.selected == sr;
             self.add(&sr, Color::Default, lead.and(what), right);
+            // Picked, a running chain's keys under it.
+            if picked && g.running {
+                self.chain_keys(first, 12);
+            }
         }
         // How it ended.
         if !ending.is_empty() {

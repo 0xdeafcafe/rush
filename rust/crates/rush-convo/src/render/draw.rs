@@ -49,6 +49,7 @@ use crate::transcript::pr_news_parts;
 use rush_core::event::{Exchange, Peer};
 use rush_core::tool::{Call, Kind, Output};
 
+pub(crate) mod chain;
 pub(crate) mod presets;
 
 fn re(s: &str) -> Regex {
@@ -2005,6 +2006,11 @@ impl<'a> Drawer<'a> {
         let run_end = self.run_end(st);
         let end = st.end.max(run_end);
         if (st.status == Status::Running || self.run_live(st)) && st.start != 0 {
+            // Which command of its chain runs now: 2/3 cargo test.
+            let p = self.s.running_label(id);
+            if !p.is_empty() {
+                parts.push(paint(C_SUB, &p));
+            }
             let s = self.since(st.start);
             right = dim(&s);
             if self.o.now - st.start >= 30_000 {
@@ -2472,9 +2478,15 @@ impl<'a> Drawer<'a> {
             Kind::Shell => {
                 let mut drawn = 0;
                 let cmd = x.command.trim();
-                if !cmd.is_empty() && (!self.peek || shell_shape(self.p, cmd).kind == "write") {
+                // A chain seen running shows its commands even at a peek:
+                // which runs now, how long each took, and the keys.
+                let chain = !self.s.running_label(id).is_empty();
+                if !cmd.is_empty()
+                    && (!self.peek || chain || shell_shape(self.p, cmd).kind == "write")
+                {
                     drawn = self.shell_body(Some(id), cmd, indent);
                     self.marks = echo_marks(cmd);
+                    self.chain_keys(id, indent);
                 }
                 let o = &info.out;
                 if !o.stdout.is_empty() || !o.stderr.is_empty() {
@@ -2611,16 +2623,26 @@ impl<'a> Drawer<'a> {
             return 0;
         }
         let pad = self.sp(indent - 1);
-        let room = self.cw as isize - indent as isize - 4;
-        let room = room.max(0) as usize;
+        let mut room = self.cw as isize - indent as isize - 4;
         let mut raw = shell_lines(cmd);
+        // A script (a loop, an if, a group) reads as one: its statements
+        // aren't a chain's commands, with a time and a running marker each.
         let script = compound(&raw);
+        let marks = match step {
+            Some(id) if !script => self.chain_marks(id, segments(cmd).len()),
+            _ => Vec::new(),
+        };
+        let now_part = step.and_then(|id| self.s.part_now(id)).filter(|_| !script);
+        if !marks.is_empty() {
+            room -= 12;
+        }
+        let room = room.max(0) as usize;
         let home = self.p.home.clone();
         let start = CwdAt {
             dir: self.p.bases.first().cloned().unwrap_or_default(),
             sure: false,
         };
-        if !cmd.contains('\n') {
+        if marks.is_empty() && !cmd.contains('\n') {
             let mut cur = start.clone();
             let one = short_paths(&expand_tabs(cmd), &home, &mut cur, !script);
             if width(&one) <= room {
@@ -2698,8 +2720,20 @@ impl<'a> Drawer<'a> {
         let mut widest = 0;
         let mut lg: Option<&'static Lang> = None;
         let mut hs = HlState::default();
+        // Which command of the chain each line is, for its time.
+        let mut part: Option<usize> = None;
         for i in 0..lines.len() {
             let l = &lines[i];
+            let mut mark = Txt::new();
+            if !l.verbatim && l.depth == 0 && !l.text.starts_with("| ") {
+                let k = part.map_or(0, |p| p + 1);
+                part = Some(k);
+                if let Some(m) = marks.get(k) {
+                    mark = m.clone();
+                }
+            }
+            // The command running now reads brighter.
+            let now = !l.verbatim && part.is_some() && part == now_part;
             let mut lead = Txt::raw(&blank);
             let mut textv = l.text.clone();
             if i == 0 || !script && !l.verbatim && l.depth == 0 {
@@ -2709,6 +2743,9 @@ impl<'a> Drawer<'a> {
             if !script && !l.verbatim && (op == "&& " || op == "|| ") {
                 lead = paint(C_ORANGE, &op[..2]).and_raw(" ");
                 textv = l.text[3..].to_string();
+            }
+            if now && matches!(lead.plain().trim(), "" | "$") {
+                lead = paint(C_ORANGE, "▸").and_raw(&blank[1..]);
             }
             if !l.verbatim && l.text.contains("<<") {
                 lg = super::shell::heredoc_lang(&l.text);
@@ -2756,24 +2793,33 @@ impl<'a> Drawer<'a> {
             }
             let fit = (room as isize - hang.len() as isize - num.width() as isize).max(0) as usize;
             let rows = if !script && !l.verbatim {
-                let toks = quiet_tokens(&expand_tabs(&textv));
+                let mut toks = quiet_tokens(&expand_tabs(&textv));
+                if now {
+                    for t in &mut toks {
+                        *t = paint(C_TEXT.bold(), &t.plain());
+                    }
+                }
                 token_rows(&toks, fit, fit.saturating_sub(2))
             } else {
                 wrap(&colored, fit)
             };
             for (j, r) in rows.into_iter().enumerate() {
                 let (mut lead, mut num, mut r) = (lead.clone(), num.clone(), r);
+                let mut right = Txt::new();
                 if j > 0 {
                     lead = Txt::raw(&blank);
                     r = Txt::raw("  ").and(r);
                     if !num.is_empty() {
                         num = blanks(num_w + 2);
                     }
+                } else if !mark.is_empty() {
+                    // The steps' time column.
+                    right = mark.clone().and_raw("  ");
                 }
                 let body = lead.and(num).and_raw(&hang).and(r);
                 widest = widest.max(body.width());
                 let left = pad.clone().and(body);
-                self.add("", BG_WELL, left, Txt::new());
+                self.add("", BG_WELL, left, right);
                 if j > 0 {
                     self.wrapped();
                 }

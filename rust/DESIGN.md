@@ -1030,7 +1030,10 @@ reads the machine's process table (session_core::jobprocs: one sysctl and
 the agent's tree filled, the last table kept for CPU and let go once
 nothing's open): the task's process, its CPU and memory, the processes
 under it, and the shells its Bash calls run in, for the chain's command
-running now. A shell whose own output file is empty is read from the
+running now. While any Bash call of the session runs (`Session::shell_running`)
+the shells are read on every look too, opened or not, as Go read them on
+every fleet read (snapload.go:60), so the conversation can say which command
+of a chain runs. A shell whose own output file is empty is read from the
 files its command writes (jobTailFrom), every other one listed once it's
 opened; a plugin's card stands for a task it knows; a finished task's
 rows are kept until what they're drawn from changes. The agents rush
@@ -1203,6 +1206,16 @@ is made. Everything below is in `rush_ui::frame`.
   millisecond) and ended or signalled off the UI thread. What's paused
   lives in `projects_machine::shells`'s one map; the conversation marks
   it (`Options::paused`) and rush lets them all go on as it quits.
+  In the conversation (`render::draw::chain`), a running chain's step row
+  says its place (`2/3 cargo test`, runningPart), each command its time
+  beside it (`Session::part_marks`, partMarks: ✓ how long, the spinner
+  and how long for the one running now, ✗ where it failed), and under the
+  commands a row of the keys: k skips the command running now, x stops the
+  whole chain, p pauses (with "↑ pick this step, then" until it's picked;
+  new in the Rust port, Go showed them only in the hint row). Code's check
+  line and Trail's step line say the place too, Chat's bubble foot and
+  Catch-up's "Still going" name it; Code shows the keys, Trail once the
+  step is picked.
 - **Scripts** (`session_core::scripts`, scripts.go). A session's
   latest calls run as scripts are read off the UI thread every 300 ms
   while they run; each read's view goes to the open conversation's
