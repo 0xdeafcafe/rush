@@ -1173,6 +1173,7 @@ name = "rush-convo"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "libc",
  "memchr",
  "regex",
  "rush-claude",

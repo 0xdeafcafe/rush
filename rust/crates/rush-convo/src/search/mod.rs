@@ -27,7 +27,7 @@ use rush_core::tool::Kind;
 use crate::model::{Item, Session, Step, Turn};
 use crate::render::{glyph_for, hidden, one_line};
 use crate::text::first_non_empty;
-use fuzzy::{SCORE_PHRASE, find_fold, word_match};
+use fuzzy::{SCORE_PHRASE, find_fold, word_match, word_score_parts};
 
 /// One search result: where it is and the text around the match
 /// (search.go:15 Hit).
@@ -130,6 +130,21 @@ impl Query {
         Some(total)
     }
 
+    /// score of the parts joined by newlines, without joining them.
+    pub(crate) fn score_parts(&self, parts: &[&str]) -> Option<i32> {
+        let mut total = 0;
+        for w in &self.words {
+            total += word_score_parts(parts, w)?;
+        }
+        if self.words.len() > 1 {
+            let phrase = self.words.join(" ");
+            if parts.iter().any(|p| find_fold(p, &phrase).is_some()) {
+                total += SCORE_PHRASE;
+            }
+        }
+        Some(total)
+    }
+
     /// Whether it narrows by kind, file or turn.
     fn filtered(&self) -> bool {
         !self.kinds.is_empty() || !self.file.is_empty() || self.from > 0
@@ -153,8 +168,8 @@ impl Query {
         }
         let label = step_label(st);
         let file = step_file(st);
-        let hay = format!("{label}\n{}\n{file}\n{}", x.command, st.output);
-        let score = self.score(&hay)?;
+        // Go searches "{label}\n{command}\n{file}\n{output}".
+        let score = self.score_parts(&[label, &x.command, file, &st.output])?;
         let mut snip = one_line(label);
         if !self.words.is_empty() && !self.matches(label) {
             snip = format!("{snip} · {}", snippet(&st.output, &self.words));
