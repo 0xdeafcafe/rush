@@ -58,6 +58,8 @@ pub struct Of<'a> {
     pub mode: String,
     /// Messages waiting for the turn to end.
     pub queued: usize,
+    /// You hold them (alt+h) or the runaway guard does.
+    pub queue_held: bool,
     /// Lines added and removed, and files changed, in its project.
     pub stat: (i64, i64),
     pub files: usize,
@@ -95,6 +97,7 @@ impl<'a> Of<'a> {
                 .map(|c| c.info.permission_mode.clone())
                 .unwrap_or_default(),
             queued: c.map_or(0, |c| c.info.queue.len()),
+            queue_held: c.is_some_and(|c| c.info.queue_held || c.info.queue_guarded),
             stat,
             files,
             hover_mode: m
@@ -421,6 +424,9 @@ pub static SEGS: &[Seg] = &[
             let n = of(x).queued;
             if n == 0 {
                 return Line::new();
+            }
+            if of(x).queue_held {
+                return line([sp(format!("{n} queued"), ORANGE), sp(" ⏸ held", YELLOW)]);
             }
             one(sp(format!("{n} queued"), ORANGE))
         },

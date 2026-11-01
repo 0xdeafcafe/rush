@@ -576,15 +576,13 @@ pub fn draw_question(
         cl(&mut out, line([plain("  "), Span::new(send, face)]));
         cl(&mut out, Line::new());
         let ww = w.saturating_sub(6);
-        let esc = esc_word();
         let hint = if c.card_focus && c.q_decide && qs.len() == 1 {
             keys_fit(
                 ww,
                 &[
                     ("enter", "sends it"),
                     (&change, "changes it"),
-                    ("s", "sends nothing"),
-                    ("esc", esc),
+                    ("s · esc", "sends nothing"),
                 ],
             )
         } else if c.card_focus && c.q_decide {
@@ -593,8 +591,7 @@ pub fn draw_question(
                 &[
                     ("enter", "sends your answers"),
                     (&change, "changes one"),
-                    ("s", "sends nothing"),
-                    ("esc", esc),
+                    ("s · esc", "sends nothing"),
                 ],
             )
         } else if c.card_focus {
@@ -603,8 +600,7 @@ pub fn draw_question(
                 &[
                     ("enter", "sends your answers"),
                     (&change, "changes one"),
-                    ("s", "skips them all"),
-                    ("esc", esc),
+                    ("s · esc", "skips them all"),
                 ],
             )
         } else if qs.len() == 1 {
@@ -950,14 +946,14 @@ pub fn draw_question(
         }
         if c.q_decide {
             // Its own keys first: they're what a narrow card keeps.
-            let mut p = vec![("a", "takes its picks"), ("s", "sends nothing")];
+            let mut p = vec![("a", "takes its picks"), ("s · esc", "sends nothing")];
             p.extend(pairs);
             pairs = p;
             if q.options.iter().any(|o| !o.preview.is_empty()) {
                 pairs.push(("v", "full view"));
             }
         } else {
-            pairs.extend([("v", "full view"), ("s", "skips"), ("esc", esc_word())]);
+            pairs.extend([("v", "full view"), ("s · esc", "skips")]);
         }
         let mut l = line([plain("  ")]);
         join(&mut l, keys_fit(ww, &pairs));
@@ -1085,12 +1081,6 @@ fn rec_word(c: &Conn) -> &'static str {
     } else {
         "★ recommended"
     }
-}
-
-/// What esc does on a question: back to typing (escWord; the modal's
-/// "later" is the modal's).
-fn esc_word() -> &'static str {
-    "type instead"
 }
 
 // ---- answering ----
@@ -1777,7 +1767,7 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
             else {
                 return Out::Pass;
             };
-            if c.card_focus && s == "s" {
+            if c.card_focus && (s == "s" || s == "esc") && !c.q_full {
                 return done(
                     m,
                     key,
@@ -1803,7 +1793,7 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
                 return Out::Pass;
             };
             c.sync_question(&req, i.decisions.as_ref());
-            if c.card_focus && s == "s" {
+            if c.card_focus && (s == "s" || s == "esc") && !c.q_full {
                 // Set aside: nothing goes to the agent.
                 c.q_gone = req.id.clone();
                 c.q_for.clear();

@@ -830,7 +830,7 @@ fn decisions_card() {
         "1. Scope",
         "the full recommendation  ★ its pick",
         "a takes its picks",
-        "s sends nothing",
+        "s · esc sends nothing",
     ] {
         assert!(card.contains(want), "card missing {want:?}:\n{card}");
     }
@@ -1045,6 +1045,19 @@ fn decisions_card_waits_for_up() {
     assert!(acts(&mut m).is_empty());
     card_key(&mut m, "k", &i, "up", true);
     assert!(m.cards().conns["k"].card_focus, "↑ puts you on the card");
+}
+
+/// esc on the decisions card sends the same as s: nothing, the card set
+/// aside.
+#[test]
+fn decisions_card_esc_sends_nothing() {
+    let mut m = decisions_model(DECISIONS_MSG);
+    let i = info(&m, "k").unwrap();
+    card_key(&mut m, "k", &i, "up", true);
+    assert_ne!(card_key(&mut m, "k", &i, "esc", true), Out::Pass);
+    assert_eq!(acts(&mut m), vec![Act::DismissDecisions("d1".into())]);
+    let c = m.cards().conns["k"].clone();
+    assert_eq!(card_kind(&m, "k", &c, &i), "");
 }
 
 /// Once answered the card is gone, and d on the block in the
