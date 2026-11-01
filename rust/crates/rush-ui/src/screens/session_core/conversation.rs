@@ -226,19 +226,26 @@ fn your_prompt(t: &rush_convo::Turn) -> bool {
     t.from.is_empty() && !t.prompt.trim().is_empty()
 }
 
-/// What you asked that you're reading the answer to, pinned over the top
-/// row while it's scrolled off it: scrolled up, the current one; at the
-/// end, the latest. Only with a body to spare (pinPrompts,
-/// promptpins.go:31).
+/// Prompts pinned over the body so you can find your way while scrolling
+/// (pinPrompts, promptpins.go:31, and more): the first, at the top, once
+/// it's scrolled off; the one before what you're reading under it ("current",
+/// or "latest" at the end); the next one after what you're reading, over the
+/// bottom row while it's below the screen. A short pane keeps its rows for
+/// the conversation: none under 7 rows, one top pin (the before one wins)
+/// under 10, the bottom one from 7.
 fn pin_prompt(v: &mut crate::session::SessionView, b: &mut [Line], w: usize) {
-    let (start, end) = (v.start, v.start + b.len());
+    let h = b.len();
+    if h < 7 {
+        return; // a short pane keeps its rows for the conversation
+    }
+    let (start, end) = (v.start, v.start + h);
     let turns = &v.sess.turns;
     let Some(first) = turns.iter().position(your_prompt) else {
         return;
     };
     let off = |i: usize| v.r.turn_row(i) < start;
     let (mut latest, mut current) = (None, None);
-    for i in (first + 1..turns.len()).rev() {
+    for i in (first..turns.len()).rev() {
         if !your_prompt(&turns[i]) {
             continue;
         }
@@ -254,30 +261,45 @@ fn pin_prompt(v: &mut crate::session::SessionView, b: &mut [Line], w: usize) {
     } else if latest.is_some_and(|l| v.r.turn_row(l) < end) {
         current = None; // the latest is on screen: that's what it's on
     }
-    let Some(i) = current.filter(|&i| off(i)) else {
-        return;
-    };
-    if end - start < 1 + 6 {
-        return; // a short pane keeps its rows for the conversation
+    let before = current.filter(|&i| i != first && off(i));
+    let top_first = off(first).then_some(first);
+    let next = (first..turns.len()).find(|&i| your_prompt(&turns[i]) && v.r.turn_row(i) >= end);
+    let mut pins: Vec<(usize, usize, &str)> = Vec::new();
+    match (top_first, before) {
+        (Some(f), Some(c)) if h >= 10 => {
+            pins.push((0, f, "first  "));
+            pins.push((1, c, label));
+        }
+        (_, Some(c)) => pins.push((0, c, label)),
+        (Some(f), None) => pins.push((0, f, "first  ")),
+        (None, None) => {}
     }
-    let t = &turns[i];
-    let text = one_line(&rush_convo::render::fold_pastes(&t.prompt));
-    let row = line([
-        sp("▍", BLUE),
-        plain(" "),
-        sp(label, FAINT),
-        plain(" "),
-        sp(text, TEXT),
-    ]);
+    if let Some(n) = next {
+        pins.push((h - 1, n, "next   "));
+    }
     // With a column beside the text, the pin stops where it starts, as
     // the text does, rather than running across a wide Session.
     let sw = super::side::side_width(w);
     let pw = if sw > 0 { w - sw - 2 } else { w };
-    b[0] = on_ground(fit(row, pw), pw, CHROME_BG);
-    let r = format!("{PIN_REF}t{}", t.n);
-    match v.shown.first_mut() {
-        Some(s) => *s = r,
-        None => v.shown.push(r),
+    let mut refs = Vec::new();
+    for (y, i, label) in pins {
+        let t = &turns[i];
+        let text = one_line(&rush_convo::render::fold_pastes(&t.prompt));
+        let row = line([
+            sp("▍", BLUE),
+            plain(" "),
+            sp(label, FAINT),
+            plain(" "),
+            sp(text, TEXT),
+        ]);
+        b[y] = on_ground(fit(row, pw), pw, CHROME_BG);
+        refs.push((y, format!("{PIN_REF}t{}", t.n)));
+    }
+    for (y, r) in refs {
+        if v.shown.len() <= y {
+            v.shown.resize(y + 1, String::new());
+        }
+        v.shown[y] = r;
     }
 }
 
