@@ -103,8 +103,11 @@ pub struct HostInfo {
     /// The machine a session is really on, on rush remote attach's
     /// stand-in for it.
     pub remote: String,
-    /// The host went away mid-turn without saying so.
+    /// The host went away without saying so, mid-turn or between turns
+    /// awake: it's brought back.
     pub lost: bool,
+    /// Of a lost one, it went between turns: nothing was cut off.
+    pub lost_idle: bool,
     /// The agent it runs; Claude Code's kind when the host wrote none.
     pub kind: String,
     /// The profile it was started under.
@@ -153,6 +156,12 @@ pub trait Hosts: Send {
     fn list(&mut self, fresh: &dyn Fn(&Path, u64) -> bool, at: u64) -> Arc<Vec<HostInfo>>;
     /// The config session id was started with; None once it's gone.
     fn config(&self, id: &str) -> Option<HostConfig>;
+    /// Each of ids' configs, as `config` reads it, in order: a Hosts that
+    /// can reads them side by side (a list's first reading reads them
+    /// all).
+    fn configs(&self, ids: &[String]) -> Vec<Option<HostConfig>> {
+        ids.iter().map(|id| self.config(id)).collect()
+    }
     /// Brings back a session whose host went away mid-turn, in the
     /// background: its next reading shows it working again.
     fn revive(&self, _info: &HostInfo) {}

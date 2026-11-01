@@ -394,6 +394,7 @@ pub(crate) fn read_info(dir: &Path) -> Option<HostInfo> {
         sleeping: w.sleeping,
         remote: w.remote,
         lost: false,
+        lost_idle: false,
         // migration: older hosts wrote no kind for Claude Code.
         kind: if w.kind.is_empty() {
             "claude".into()

@@ -532,6 +532,49 @@ pub fn hover_line(l: Line, w: usize) -> Line {
     on_ground(l, w, HOVER_BG)
 }
 
+/// l with its cells from x0 up to x1 on the pointer's ground, as
+/// hover_line lights a whole part: what a click there takes, lit where it
+/// sits in a longer line (an edge's label, a header's segment).
+pub fn light_cells(l: &Line, x0: usize, x1: usize) -> Line {
+    let mut out = Line {
+        spans: Vec::with_capacity(l.spans.len() + 2),
+        bg: l.bg,
+    };
+    let mut at = 0;
+    for s in &l.spans {
+        let w = s.width();
+        if at + w <= x0 || at >= x1 {
+            out.spans.push(s.clone());
+            at += w;
+            continue;
+        }
+        // Split the span where the lit cells start and end.
+        let (mut before, mut lit, mut after) = (String::new(), String::new(), String::new());
+        for c in s.text.chars() {
+            let cw = width(c.encode_utf8(&mut [0; 4]));
+            if at < x0 {
+                before.push(c);
+            } else if at < x1 {
+                lit.push(c);
+            } else {
+                after.push(c);
+            }
+            at += cw;
+        }
+        for (t, on) in [(before, false), (lit, true), (after, false)] {
+            if t.is_empty() {
+                continue;
+            }
+            let mut st = s.style;
+            if on {
+                st.bg = HOVER_BG;
+            }
+            out.spans.push(Span::new(t, st));
+        }
+    }
+    out
+}
+
 /// s with its reverse video on: a cursor's block.
 pub fn reversed(mut st: Style) -> Style {
     st.mods = st.mods.with(Mods::REVERSE);

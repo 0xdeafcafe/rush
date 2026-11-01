@@ -15,6 +15,7 @@ pub mod actions;
 pub mod cmd;
 pub mod events;
 pub mod fswait;
+pub mod malloc;
 pub mod mem;
 pub mod pgguard;
 pub mod proc;

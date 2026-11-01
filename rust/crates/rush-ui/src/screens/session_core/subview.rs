@@ -215,10 +215,15 @@ fn show_detail(m: &mut Model, key: &str, id: &str, src: DetailSrc) {
     {
         return;
     }
-    r.detail = Some(Detail {
+    let seed = super::subs::seed_detail(m, key, id, &src);
+    let mut view = SessionView::new(key.to_string(), Source::Hosted, 0);
+    if let Some(s) = seed {
+        view.seed(s);
+    }
+    conn(m, key).runs.detail = Some(Detail {
         id: id.to_string(),
         src,
-        view: SessionView::new(key.to_string(), Source::Hosted, 0),
+        view,
     });
     super::subs::kick(m, key);
     super::subs::refresh(m, key);

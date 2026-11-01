@@ -612,3 +612,76 @@ fn a_kept_top_bar_stands_in_till_its_readings_are_in() {
         rows[3]
     );
 }
+
+/// The model, effort and account in an agent's header take clicks where
+/// they're drawn, at every width: lit under the pointer, those dropped
+/// for room leaving nothing to click; a click on the model opens
+/// /model's list.
+#[test]
+fn the_header_segments_are_a_click_away() {
+    use super::agent::HeadAct;
+    for w in [160, 120, 90, 70, 50] {
+        let mut m = opened("default");
+        m.w = w;
+        if let Some(v) = m.session.as_mut() {
+            v.sess.model = "claude-opus-4-1".into();
+            v.sess.info.effort = "high".into();
+        }
+        with_bars(
+            &mut m,
+            default_top(),
+            lay(&[&["model", "effort", "mode"], &["account", "folder"]]),
+        );
+        let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
+        let top = m.session.as_ref().unwrap().top;
+        let head = top - crate::session::HEAD_H;
+        let hits = m.kept::<State>().hits.clone();
+        for &(row, f, t, act) in &hits.segs {
+            let cells: Vec<char> = rows[head + row].chars().collect();
+            let s: String = cells[2 + f..2 + t].iter().collect();
+            match act {
+                HeadAct::Model => assert!(s.to_lowercase().contains("opus"), "w {w}: {s:?}"),
+                HeadAct::Effort => assert_eq!(s, "high", "w {w}"),
+                HeadAct::Sheet(_) => assert!(s.starts_with("Plain Code"), "w {w}: {s:?}"),
+            }
+        }
+        if w >= 120 {
+            let acts: Vec<HeadAct> = hits.segs.iter().map(|h| h.3).collect();
+            assert!(
+                acts.contains(&HeadAct::Model) && acts.contains(&HeadAct::Effort),
+                "w {w}: {acts:?}"
+            );
+        }
+        let Some(&(row, f, t, act)) = hits.segs.iter().find(|h| h.3 == HeadAct::Model) else {
+            continue;
+        };
+        // Lit under the pointer, and only there.
+        assert_eq!(
+            click(&mut m, MouseKind::Moved, 2 + f, head + row),
+            Out::Draw
+        );
+        let lit = m.frame()[head + row].clone();
+        let mut x = 0;
+        for s in &lit.spans {
+            if s.style.bg == crate::style::HOVER_BG {
+                assert!(x >= 2 + f && x + s.width() <= 2 + t, "w {w}: {s:?} at {x}");
+            }
+            x += s.width();
+        }
+        assert!(
+            lit.spans
+                .iter()
+                .any(|s| s.style.bg == crate::style::HOVER_BG),
+            "w {w}"
+        );
+        assert_eq!(click(&mut m, MouseKind::Moved, 0, head + row), Out::Draw);
+        assert!(m.kept::<State>().hover_seg.is_none());
+        // A click opens what /model opens, or says why it can't.
+        assert_eq!(act, HeadAct::Model);
+        click(&mut m, MouseKind::Down(Button::Left), t - 1 + 2, head + row);
+        assert!(
+            m.sheet.is_some() || m.flash.is_some(),
+            "w {w}: nothing came of it"
+        );
+    }
+}

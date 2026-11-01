@@ -56,6 +56,12 @@ pub struct State {
     /// Where the open Session's agent label was drawn on its second row:
     /// from and width, cells into the row's content (hostConn.label).
     pub label_at: (usize, usize),
+    /// Where the open Session's other clickable segments and its label's
+    /// parts were drawn (see agent::Hits).
+    pub hits: agent::Hits,
+    /// The segment the pointer is over: the session, its header row,
+    /// from and to, cells into the row's content.
+    pub hover_seg: Option<(String, usize, usize, usize)>,
     /// When the installed rush was written, as read at start: a host on
     /// one written before is on an older rush (upd.installed). 0 unread.
     pub installed: rush_core::time::Ms,

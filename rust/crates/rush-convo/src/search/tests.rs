@@ -347,3 +347,94 @@ fn search_read() {
     assert_eq!(lib.search(&p, "cookie", 3, &other).unwrap().total, 1);
     assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
+
+/// find_fold as Go's, every character tried: what the faster one must
+/// match.
+fn find_fold_slow(s: &str, w: &str) -> Option<(usize, usize)> {
+    use super::fuzzy::lower;
+    let mut wc = w.chars().map(lower);
+    let Some(first) = wc.next() else {
+        return Some((0, 0));
+    };
+    let rest: Vec<char> = wc.collect();
+    'outer: for (i, c) in s.char_indices() {
+        if lower(c) != first {
+            continue;
+        }
+        let mut end = i + c.len_utf8();
+        let mut sc = s[end..].chars();
+        for &want in &rest {
+            match sc.next() {
+                Some(c) if lower(c) == want => end += c.len_utf8(),
+                _ => continue 'outer,
+            }
+        }
+        return Some((i, end));
+    }
+    None
+}
+
+#[test]
+fn lowers_to_ascii_is_every_such_char() {
+    use super::fuzzy::{LOWERS_TO_ASCII, lower};
+    let found: Vec<(char, char)> = (0x80..=0x10ffff)
+        .filter_map(char::from_u32)
+        .filter(|c| lower(*c).is_ascii())
+        .map(|c| (c, lower(c)))
+        .collect();
+    assert_eq!(found, LOWERS_TO_ASCII.to_vec());
+}
+
+#[test]
+fn find_fold_fast_matches_slow() {
+    let texts = [
+        "",
+        "Hello WORLD hello",
+        "İstanbul is big; KELVIN \u{212a}elvin kelvin",
+        "naïve ÜBER über café Straße",
+        "a\u{130}b ai\u{307}b",
+        "x_y z-error ERROR, Errors",
+        "日本語のテキスト error 日本",
+    ];
+    let words = [
+        "hello", "world", "i", "istanbul", "kelvin", "k", "über", "ber", "café", "straße", "ai",
+        "error", "errors", "本語", "x_y", "", "z", "naïve", "aib",
+    ];
+    for t in texts {
+        for w in words {
+            assert_eq!(find_fold(t, w), find_fold_slow(t, w), "{t:?} {w:?}");
+        }
+    }
+}
+
+#[test]
+fn score_parts_is_score_of_the_joined_text() {
+    let parts_list: [&[&str]; 5] = [
+        &["run tests", "cargo test", "", "error: tset failed"],
+        &["", "", "src/main.rs", "fn main() {}"],
+        &["Edit", "", "src/lib.rs", "teh quick brwn fox jumps"],
+        &["a", "b", "c", &"padding ".repeat(9000)],
+        &["label", "cmd", "", &("x".repeat(65530) + " quikc brown")],
+    ];
+    let queries = [
+        "test",
+        "tset",
+        "error failed",
+        "main",
+        "quick brown",
+        "the",
+        "brown",
+        "padding",
+        "quick",
+        "cargo test",
+        "zzzzzz",
+        "src lib",
+    ];
+    for parts in parts_list {
+        let joined = parts.join("\n");
+        for q in queries {
+            let p = parse_query(q);
+            assert_eq!(p.score_parts(parts), p.score(&joined), "{parts:?} {q:?}");
+        }
+    }
+}

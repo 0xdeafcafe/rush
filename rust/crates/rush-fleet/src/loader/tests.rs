@@ -591,6 +591,24 @@ fn new_hosted_agent_is_not_your_turn() {
     assert!(l.hosted(&test_profile(), &i, None, t).your_turn(t));
 }
 
+// A host gone without a word is being brought back: mid-turn it says so,
+// and one gone between turns (beyond Go) doesn't say it was cut off.
+#[test]
+fn a_lost_host_says_it_is_coming_back() {
+    let mut l = loader();
+    let t = now();
+    let d = tempfile::tempdir().unwrap();
+    let mut i = info("lost", "stopped", &s(d.path()), t);
+    i.lost = true;
+    let detail = |l: &mut Loader, i: &HostInfo| l.hosted(&test_profile(), i, None, t).job.detail;
+    assert_eq!(
+        detail(&mut l, &i),
+        "its host went away mid-turn · bringing it back"
+    );
+    i.lost_idle = true;
+    assert_eq!(detail(&mut l, &i), "its host went away · bringing it back");
+}
+
 // Idle while you're away, it's told to keep going at its check-in: not
 // your turn. Asking something, it still needs you.
 #[test]
@@ -693,6 +711,51 @@ fn idle_rows_are_not_watched() {
         l.sub_watch.contains(&PathBuf::from(&tr)),
         "a working row's isn't"
     );
+}
+
+// Looked for all at once ahead of the rows (look_ahead), each rush
+// session's transcript is where transcript_of alone finds it: in the
+// folder it started in, in the project it moved to, or, nowhere, where it
+// would be, not looked for again until its wait is up.
+#[test]
+fn transcripts_looked_for_ahead_are_as_found_alone() {
+    let d = tempfile::tempdir().unwrap();
+    let (reg, p) = claude_reg(d.path());
+    let write = |cwd: &str, sid: &str| {
+        let tr = reg.transcript_path("claude", &p, cwd, sid);
+        std::fs::create_dir_all(Path::new(&tr).parent().unwrap()).unwrap();
+        std::fs::write(&tr, "{}\n").unwrap();
+        tr
+    };
+    let home = write("/work/app", "home");
+    let moved = write("/work/app/.claude/worktrees/x", "moved");
+    let t = now();
+    let hosted: Vec<HostInfo> = ["home", "moved", "gone"]
+        .into_iter()
+        .map(|sid| {
+            let mut i = info(sid, "stopped", "/work/app", t);
+            i.kind = "claude".into();
+            i.session_id = sid.into();
+            i
+        })
+        .collect();
+    let rows = |ahead: bool| {
+        let mut l = Loader::new(reg.clone());
+        if ahead {
+            l.look_ahead(&p, &hosted);
+        }
+        let got: Vec<String> = hosted
+            .iter()
+            .map(|i| l.hosted_base(&p, i, None, t).job.transcript_path)
+            .collect();
+        (got, l.unfound.contains_key("gone"))
+    };
+    let gone = reg.transcript_path("claude", &p, "/work/app", "gone");
+    assert_eq!(
+        rows(false),
+        (vec![home.clone(), moved.clone(), gone.clone()], true)
+    );
+    assert_eq!(rows(true), (vec![home, moved, gone], true));
 }
 
 /// A loader reading one fake agent with a past and a live session, home

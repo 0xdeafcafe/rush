@@ -42,6 +42,13 @@ pub const START_ROWS: [&str; 7] = [
     "Permissions",
 ];
 
+/// The rows a click on an agent's setup opens the sheet on.
+pub const ROW_PROVIDER: usize = 1;
+pub const ROW_HARNESS: usize = 2;
+pub const ROW_ACCOUNT: usize = 3;
+pub const ROW_MODEL: usize = 4;
+pub const ROW_EFFORT: usize = 5;
+
 /// The order tab goes through them: the columns left to right. Preset is
 /// no longer one: profiles are gone (Settings › Config).
 const TAB_ORDER: [usize; 6] = [1, 2, 4, 3, 5, 6];
@@ -92,6 +99,17 @@ pub fn open_start_sheet(m: &mut Model) -> Out {
 pub fn open_switch_sheet(m: &mut Model, key: &str, o: StartOver) -> Out {
     ensure_store(m);
     open_setup_sheet(m, key, o)
+}
+
+/// Opens the switch sheet on row, START_ROWS' part in focus: a click on
+/// a part of what a session runs as (its harness, account) opens the
+/// sheet there.
+pub fn open_switch_sheet_on(m: &mut Model, key: &str, o: StartOver, row: usize) -> Out {
+    let out = open_switch_sheet(m, key, o);
+    if let Some(s) = m.sheet_as::<StartSheet>() {
+        s.row = row;
+    }
+    out
 }
 
 fn open_setup_sheet(m: &mut Model, conn: &str, o: StartOver) -> Out {

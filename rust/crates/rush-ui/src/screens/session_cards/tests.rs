@@ -109,6 +109,17 @@ pub(super) fn acts(m: &mut Model) -> Vec<Act> {
         .collect()
 }
 
+/// The decisions answers sent, by their text.
+pub(super) fn answered(m: &mut Model) -> Vec<String> {
+    acts(m)
+        .into_iter()
+        .filter_map(|a| match a {
+            Act::Answer { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect()
+}
+
 pub(super) fn set_info(m: &mut Model, f: impl FnOnce(&mut HostInfo)) {
     f(m.kept::<Fake>().info.get_mut("k").unwrap());
 }
@@ -829,9 +840,10 @@ fn decisions_card() {
     assert_eq!(card_key(&mut m, "k", &i, "a", true), Out::Draw);
     assert_eq!(
         acts(&mut m),
-        vec![Act::Send(
-            "1b. Scope: the easier alternative\n\n2b. Answer format: keep Q:/A:".into()
-        )]
+        vec![Act::Answer {
+            id: "d1".into(),
+            text: "1b. Scope: the easier alternative\n\n2b. Answer format: keep Q:/A:".into()
+        }]
     );
     let c = m.cards().conns["k"].clone();
     assert_eq!(
@@ -891,8 +903,8 @@ fn decisions_card_loader() {
     assert!(!card.contains("no: leave"));
     card_key(&mut m, "k", &i, "a", true);
     assert_eq!(
-        acts(&mut m),
-        vec![Act::Send("1a. Committing the loader work: yes".into())]
+        answered(&mut m),
+        vec!["1a. Committing the loader work: yes"]
     );
 }
 
@@ -997,10 +1009,7 @@ fn decisions_card_choose_another() {
         "{card}"
     );
     card_key(&mut m, "k", &i, "enter", true);
-    assert_eq!(
-        acts(&mut m),
-        vec![Act::Send("1b. Committing the loader work: no".into())]
-    );
+    assert_eq!(answered(&mut m), vec!["1b. Committing the loader work: no"]);
 }
 
 /// Words of your own go as "1: their words" (TestDecisionsCardOwnWords).
@@ -1016,10 +1025,7 @@ fn decisions_card_own_words() {
     });
     let i = info(&m, "k").unwrap();
     card_key(&mut m, "k", &i, "enter", false);
-    assert_eq!(
-        acts(&mut m),
-        vec![Act::Send("1: commit it, but squash into one".into())]
-    );
+    assert_eq!(answered(&mut m), vec!["1: commit it, but squash into one"]);
 }
 
 /// A decisions card coming up doesn't take the keys: a message starting
@@ -1064,10 +1070,7 @@ fn decisions_decide_again() {
     assert_eq!(card_kind(&m, "k", &c, &i), "decisions");
     card_key(&mut m, "k", &i, "2", true);
     card_key(&mut m, "k", &i, "enter", true); // sends it
-    assert_eq!(
-        acts(&mut m),
-        vec![Act::Send("1b. Committing the loader work: no".into())]
-    );
+    assert_eq!(answered(&mut m), vec!["1b. Committing the loader work: no"]);
     let c = m.cards().conns["k"].clone();
     assert_eq!(card_kind(&m, "k", &c, &i), "");
 }
@@ -1093,8 +1096,8 @@ fn decisions_block_on_the_card() {
     press(&mut m, "enter"); // its pick
     press(&mut m, "enter"); // Send answers
     assert_eq!(
-        acts(&mut m),
-        vec![Act::Send("1a. Committing the loader work: yes".into())]
+        answered(&mut m),
+        vec!["1a. Committing the loader work: yes"]
     );
     let out = text(&m.frame());
     assert!(!out.contains("on the card below"), "{out}");
@@ -1102,6 +1105,183 @@ fn decisions_block_on_the_card() {
         !out.contains("not answered"),
         "sent, not passed over:\n{out}"
     );
+}
+
+/// A session rush doesn't run now whose answers would wake its host or
+/// resume it (asleep, or stopped with no host running) keeps its card:
+/// it's up under the block, the block one row, and the answers go as a
+/// message, which wakes or resumes it (Go's TestDecisionsCardAsleep, and
+/// a stopped one too).
+#[test]
+fn decisions_card_with_no_host() {
+    let mut m = loader_model(LOADER_MSG, true);
+    set_info(&mut m, |i| {
+        i.cold = true;
+        i.wakes = true;
+    });
+    let out = text(&m.frame());
+    assert!(
+        out.contains("Decisions · 1 decision · on the card below"),
+        "{out}"
+    );
+    assert!(out.contains("yours to decide"), "the card is up:\n{out}");
+    press(&mut m, "up");
+    press(&mut m, "enter"); // its pick
+    press(&mut m, "enter"); // Send answers
+    assert_eq!(
+        answered(&mut m),
+        vec!["1a. Committing the loader work: yes"]
+    );
+}
+
+/// Set aside, d on its block (or enter on it picked) opens it again, as
+/// on a hosted one; s sets it aside with no host to tell.
+#[test]
+fn decisions_decide_again_with_no_host() {
+    let mut m = loader_model(LOADER_MSG, true);
+    set_info(&mut m, |i| {
+        i.cold = true;
+        i.wakes = true;
+    });
+    m.frame();
+    press(&mut m, "up");
+    press(&mut m, "s");
+    assert_eq!(acts(&mut m), vec![Act::DismissDecisions("d1".into())]);
+    let i = info_any(&m, "k").unwrap();
+    let c = m.cards().conns["k"].clone();
+    assert_eq!(card_kind(&m, "k", &c, &i), "", "set aside");
+    for k in ["d", "enter"] {
+        m.session.as_mut().unwrap().sel = rush_convo::render::decisions_ref("t1");
+        assert_eq!(press(&mut m, k), Out::Draw);
+        let c = m.cards().conns["k"].clone();
+        assert_eq!(card_kind(&m, "k", &c, &i), "decisions", "{k} opens it");
+        assert!(c.card_focus, "{k}: the keys on the card");
+        press(&mut m, "s");
+    }
+    assert_eq!(info_any(&m, "k").unwrap().input, "", "no d typed");
+}
+
+/// One that can't take answers (rush doesn't run it and nothing would
+/// wake it) has no card, and d on its block says why rather than typing
+/// a d into the box (decideAgain's flash).
+#[test]
+fn decisions_cold_cant_answer() {
+    let mut m = loader_model(LOADER_MSG, true);
+    set_info(&mut m, |i| i.cold = true);
+    let out = text(&m.frame());
+    assert!(out.contains("not answered · d opens the card"), "{out}");
+    assert!(!out.contains("yours to decide"), "no card:\n{out}");
+    m.session.as_mut().unwrap().sel = rush_convo::render::decisions_ref("t1");
+    assert_eq!(press(&mut m, "d"), Out::Draw);
+    let flash = m.flash.as_ref().map(|f| f.0.clone()).unwrap_or_default();
+    assert_eq!(flash, "this session can't take answers here");
+    assert!(acts(&mut m).is_empty());
+}
+
+/// Answers that didn't go (no host took them, or the wake or resume
+/// failed) bring the card back on "Send this answer?" with them kept,
+/// and the block isn't left reading as answered; enter sends them again.
+#[test]
+fn decisions_answer_failed_brings_the_card_back() {
+    let mut m = loader_model(LOADER_MSG, true);
+    m.frame();
+    press(&mut m, "up");
+    press(&mut m, "down"); // no
+    press(&mut m, "enter");
+    press(&mut m, "enter"); // Send answers
+    assert_eq!(answered(&mut m), vec!["1b. Committing the loader work: no"]);
+    m.frame();
+    question::answer_failed(&mut m, "k", "d1");
+    let i = info(&m, "k").unwrap();
+    let c = m.cards().conns["k"].clone();
+    assert_eq!(card_kind(&m, "k", &c, &i), "decisions", "the card is back");
+    let out = text(&m.frame());
+    assert!(out.contains("Send this answer?"), "{out}");
+    assert!(out.contains("✓ no"), "its answer kept:\n{out}");
+    assert!(out.contains("on the card below"), "{out}");
+    press(&mut m, "enter");
+    assert_eq!(
+        answered(&mut m),
+        vec![
+            "1b. Committing the loader work: no",
+            "1b. Committing the loader work: no"
+        ]
+    );
+    // Gone this time: a late word of the first failure brings nothing back.
+    question::answer_sent(&mut m, "k", "d1");
+    question::answer_failed(&mut m, "k", "d1");
+    let c = m.cards().conns["k"].clone();
+    assert_eq!(card_kind(&m, "k", &c, &i), "");
+}
+
+/// The loader block as an answer: what the agent says at its turn's end.
+fn loader_answer(s: &mut rush_convo::model::Session, prompt: &str, at: i64) {
+    use rush_core::event::{Message, Part, PartKind, TurnEnd};
+    s.sent(prompt.into(), vec![], at);
+    let msg = Message {
+        role: "assistant".into(),
+        id: format!("a{at}"),
+        parts: vec![Part {
+            kind: PartKind::Text,
+            text: LOADER_MSG.into(),
+            ..Part::default()
+        }],
+        ..Message::default()
+    };
+    s.apply(&Event::Message(msg), at);
+    s.apply(&Event::TurnEnd(TurnEnd::default()), at);
+}
+
+/// A view still reading its conversation from the start has an earlier
+/// turn last for a moment: the card's block is the turn that ends with
+/// it once read, one row "on the card below", not drawn in full above
+/// the card as not answered.
+#[test]
+fn decisions_block_on_the_card_while_reading() {
+    use rush_core::event::TurnEnd;
+    let mut m = hosted(120, 50);
+    let s = &mut m.session.as_mut().unwrap().sess;
+    s.sent("one".into(), vec![], 100);
+    s.apply(&Event::TurnEnd(TurnEnd::default()), 100);
+    set_info(&mut m, |i| {
+        i.state = "idle".into();
+        i.decisions = decisions_of(LOADER_MSG, "d1");
+    });
+    m.frame();
+    loader_answer(&mut m.session.as_mut().unwrap().sess, "go", 200);
+    let out = text(&m.frame());
+    assert!(out.contains("on the card below"), "{out}");
+    assert!(!out.contains("not answered"), "{out}");
+}
+
+/// Its end read first, then the whole of it: the turns are numbered
+/// afresh, and the card still knows its block, so once answered the
+/// block shows again with its picks, not as on a card that's gone.
+#[test]
+fn decisions_block_on_the_card_once_read_whole() {
+    let mut m = loader_model(LOADER_MSG, true);
+    m.session.as_mut().unwrap().sess.partial = true;
+    let out = text(&m.frame());
+    assert!(out.contains("on the card below"), "{out}");
+    let mut whole = rush_convo::model::Session::new();
+    for (i, p) in ["one", "two"].iter().enumerate() {
+        whole.sent(p.to_string(), vec![], 100 + i as i64);
+        whole.apply(
+            &Event::TurnEnd(rush_core::event::TurnEnd::default()),
+            100 + i as i64,
+        );
+    }
+    loader_answer(&mut whole, "go", 1_000);
+    m.session.as_mut().unwrap().take_whole(whole);
+    let out = text(&m.frame());
+    assert!(out.contains("on the card below"), "{out}");
+    press(&mut m, "up");
+    press(&mut m, "enter"); // its pick
+    press(&mut m, "enter"); // Send answers
+    assert_eq!(answered(&mut m).len(), 1);
+    let out = text(&m.frame());
+    assert!(!out.contains("on the card below"), "{out}");
+    assert!(out.contains("Committing the loader work"), "{out}");
 }
 
 const PR_LAYOUT_MSG: &str = "Two ways to show several pull requests.\n\nDecisions:\n\

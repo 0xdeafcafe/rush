@@ -41,6 +41,55 @@ pub fn shell_writes(cmd: &str, cwd: &str) -> Vec<ShellWrite> {
 
 const NOT_A_PATH: &[char] = &['$', '*', '?', '`', '(', ')', '{', '}', '<', '>', '|'];
 
+/// What shell_run made of a command run in a folder.
+type Run = (Vec<ShellWrite>, Vec<String>, String);
+
+/// Kept runs, by a hash of command and folder, with the two they're of.
+type Runs = HashMap<u64, (Box<str>, Box<str>, std::rc::Rc<Run>)>;
+
+thread_local! {
+    /// Each command's run as last read, by it and its folder: a session's
+    /// Changes reads every command again as each step lands (Go's
+    /// textMemo for commands' text, cards.go:180). Starts again past a
+    /// few thousand.
+    static RUNS: std::cell::RefCell<Runs> = Default::default();
+}
+
+const RUNS_KEPT: usize = 8192;
+
+/// FNV-1a over command and folder: looked up for every shell step every
+/// time Changes is worked out, so cheap and allocating nothing.
+fn run_key(cmd: &str, cwd: &str) -> u64 {
+    let mut h: u64 = 14_695_981_039_346_656_037;
+    for &b in cmd.as_bytes().iter().chain(&[0]).chain(cwd.as_bytes()) {
+        h = (h ^ u64::from(b)).wrapping_mul(1_099_511_628_211);
+    }
+    h
+}
+
+/// shell_run, worked out once a command and folder (a kept answer).
+pub fn shell_run_kept(cmd: &str, cwd: &str) -> std::rc::Rc<Run> {
+    let k = run_key(cmd, cwd);
+    let hit = RUNS.with(|m| {
+        m.borrow()
+            .get(&k)
+            .filter(|(c, d, _)| **c == *cmd && **d == *cwd)
+            .map(|(_, _, r)| r.clone())
+    });
+    if let Some(r) = hit {
+        return r;
+    }
+    let r = std::rc::Rc::new(shell_run(cmd, cwd));
+    RUNS.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.len() >= RUNS_KEPT {
+            m.clear();
+        }
+        m.insert(k, (cmd.into(), cwd.into(), r.clone()));
+    });
+    r
+}
+
 /// shell_writes, with the files the command removes (rm) and the folder
 /// it ends in: an agent's shell that keeps its folder between commands
 /// runs the next there.
@@ -432,5 +481,18 @@ mod tests {
         assert_eq!(w.len(), 1);
         assert_eq!(gone, ["/w/sub/a.txt", "/w/sub/b.txt"]);
         assert_eq!(end, "/w/sub");
+    }
+
+    #[test]
+    fn a_kept_run_is_the_run() {
+        for (cmd, cwd) in [
+            ("cd sub && touch a.txt && rm a.txt b.txt", "/w"),
+            ("cd sub && touch a.txt && rm a.txt b.txt", "/x"),
+            ("echo hi > out.txt", "/w"),
+        ] {
+            let want = shell_run(cmd, cwd);
+            assert_eq!(*shell_run_kept(cmd, cwd), want);
+            assert_eq!(*shell_run_kept(cmd, cwd), want, "{cmd} in {cwd}, kept");
+        }
     }
 }

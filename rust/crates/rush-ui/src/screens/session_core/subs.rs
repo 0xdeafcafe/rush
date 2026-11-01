@@ -263,6 +263,9 @@ pub struct FlowSeen {
     pub w: Workflow,
 }
 
+/// A run's transcript read on: its tail, and the session it's read into.
+type ReadOn = (Tail, Arc<Session>);
+
 /// The reader's side: what stays with the transcripts, never the UI's.
 #[derive(Default)]
 pub(super) struct Reader {
@@ -274,8 +277,9 @@ pub(super) struct Reader {
     /// The run shown whole, and its tail.
     detail: Option<(String, Tail)>,
     /// Each run read whole for Changes, by id: how big its transcript
-    /// was when read (fullSubs).
-    full: HashMap<String, u64>,
+    /// was when read (fullSubs), and, one in Claude Code's format, its
+    /// tail and the session it's read on into, shared with the UI.
+    full: HashMap<String, (u64, Option<ReadOn>)>,
     /// The process table last read, for CPU; let go when nothing's open.
     table: Option<rush_sys::proc::Table>,
 }
@@ -302,6 +306,9 @@ pub struct Detail {
 /// What a read of the run shown whole brought.
 enum DetailGot {
     Fresh(rush_convo::Fresh),
+    /// The whole of it as its numbers were read (Reader::tails), with
+    /// what was written since: its first reading.
+    Seeded(Box<Session>),
     Events(Vec<rush_core::event::Event>),
     Failed(String),
 }
@@ -356,6 +363,10 @@ pub struct Runs {
     /// The steps that ran an agent, and the session (its serial) and
     /// version of its steps they were worked out at.
     pub(super) spawn_steps: ((u64, u64), Vec<rush_convo::StepId>),
+    /// Whether each step ran an agent, by the session (its serial) and the
+    /// step, as of its call's input: a step is read for it once, not
+    /// again each time another lands.
+    pub(super) spawn_seen: (u64, HashMap<rush_convo::StepId, (usize, bool)>),
     /// What this frame shows of them all (running.rs).
     pub shown: super::running::Shown,
     pub(super) reading: bool,
@@ -538,30 +549,44 @@ impl Ask {
                 }
             }
         }
-        // The runs read whole, again only once each grew (a conversation
-        // shared with the UI is read afresh, not added to): a spawned
-        // agent's in another format by its own adapter (spawnRun.view).
+        // The runs read whole, again only once each grew: one in Claude
+        // Code's format read on from where it got to (the UI's copy is
+        // copied first while it still holds it), a spawned agent's in
+        // another format by its own adapter (spawnRun.view).
+        // A run no longer read whole isn't kept read on.
+        r.full
+            .retain(|id, _| self.full.iter().any(|(want, ..)| want == id));
         for (id, path, whole, kind) in &self.full {
             let size = std::fs::metadata(path).map_or(0, |m| m.len());
-            if r.full.get(id) == Some(&size) {
+            if r.full.get(id).is_some_and(|(at, _)| *at == size) {
                 continue;
             }
-            r.full.insert(id.clone(), size);
+            let kept = r.full.remove(id).and_then(|(_, k)| k);
+            let mut tailed = None;
             let s = if !kind.is_empty() {
-                read_history(reg, kind, path)
+                read_history(reg, kind, path).map(Arc::new)
             } else if let Some(decode) = &self.decode {
-                let mut t = if *whole {
-                    Tail::new(path, decode.clone())
-                } else {
-                    Tail::subagent(path, decode.clone())
-                };
-                let mut s = Session::new();
-                t.read(&mut s).ok().map(|_| s)
+                let (mut t, mut s) = kept.unwrap_or_else(|| {
+                    let t = if *whole {
+                        Tail::new(path, decode.clone())
+                    } else {
+                        Tail::subagent(path, decode.clone())
+                    };
+                    (t, Arc::new(Session::new()))
+                });
+                match t.read(Arc::make_mut(&mut s)) {
+                    Ok(_) => {
+                        tailed = Some((t, s.clone()));
+                        Some(s)
+                    }
+                    Err(_) => None,
+                }
             } else {
                 None
             };
+            r.full.insert(id.clone(), (size, tailed));
             // One that can't be read isn't asked again until it grows.
-            got.full.insert(id.clone(), Arc::new(s.unwrap_or_default()));
+            got.full.insert(id.clone(), s.unwrap_or_default());
         }
         if let Some((id, src)) = &self.detail {
             got.detail = Some((
@@ -616,6 +641,26 @@ fn read_history(reg: &rush_core::adapter::Registry, kind: &str, path: &str) -> O
     Some(s)
 }
 
+/// Rust-only: run id's conversation as its numbers' reading has it, for
+/// the run shown whole to show at once: taken over by the run shown
+/// whole (its tail goes on from there) when the reader isn't busy and
+/// nothing was written since; None otherwise, and it's read as before.
+pub(super) fn seed_detail(m: &mut Model, key: &str, id: &str, src: &DetailSrc) -> Option<Session> {
+    let DetailSrc::Transcript { path, .. } = src else {
+        return None;
+    };
+    let reader = conn(m, key).runs.reader.clone();
+    let mut r = reader.try_lock().ok()?;
+    let (t, _) = r.tails.get(id)?;
+    let len = std::fs::metadata(path).ok()?.len();
+    if t.path.to_string_lossy() != path.as_str() || t.size() != len {
+        return None;
+    }
+    let (t, s) = r.tails.remove(id)?;
+    r.detail = Some((id.to_string(), t));
+    Some(s)
+}
+
 /// Reads what the run shown whole has gained: a transcript's new lines,
 /// or another agent's session read again.
 fn read_detail(
@@ -631,6 +676,17 @@ fn read_detail(
                 return DetailGot::Failed("rush can't read this agent's transcripts".into());
             };
             if r.detail.as_ref().is_none_or(|(at, _)| at != id) {
+                // Rust-only: its numbers' reading has the whole of it
+                // already (every run's while the subagents view shows):
+                // taken over, topped up, rather than read again from the
+                // start. Its numbers read it afresh next time.
+                if let Some((mut t, mut s)) = r.tails.remove(id)
+                    && t.path.to_string_lossy() == path.as_str()
+                    && t.read(&mut s).is_ok()
+                {
+                    r.detail = Some((id.to_string(), t));
+                    return DetailGot::Seeded(Box::new(s));
+                }
                 let t = if *whole {
                     Tail::new(path, decode.clone())
                 } else {
@@ -1301,11 +1357,26 @@ pub fn refresh(m: &mut Model, key: &str) {
         let ver = (s.serial(), s.step_ver());
         if r.spawn_steps.0 != ver {
             let mut ids = Vec::new();
+            if r.spawn_seen.0 != s.serial() {
+                r.spawn_seen = (s.serial(), HashMap::new());
+            }
+            let seen = &mut r.spawn_seen.1;
             for t in &s.turns {
                 for it in &t.items {
-                    if let rush_convo::Item::Step(id) = it
-                        && step_spawn(&reg, s.step(*id), &kind).is_some()
-                    {
+                    let rush_convo::Item::Step(id) = it else {
+                        continue;
+                    };
+                    let st = s.step(*id);
+                    let sig = st.input_json().len();
+                    let ran = match seen.get(id) {
+                        Some(&(was, ran)) if was == sig => ran,
+                        _ => {
+                            let ran = step_spawn(&reg, st, &kind).is_some();
+                            seen.insert(*id, (sig, ran));
+                            ran
+                        }
+                    };
+                    if ran {
                         ids.push(*id);
                     }
                 }
@@ -1683,6 +1754,7 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
                 more = f.more;
                 det.view.take(f);
             }
+            DetailGot::Seeded(s) => det.view.seed(*s),
             DetailGot::Events(evs) => det.view.take_events(evs, true),
             DetailGot::Failed(e) => {
                 det.view.read = true;

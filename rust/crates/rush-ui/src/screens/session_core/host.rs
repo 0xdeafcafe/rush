@@ -500,6 +500,12 @@ pub trait Hosts: Send + Sync {
     fn saved(&self, _: &Agent) -> Option<Info> {
         None
     }
+    /// Sets decisions card dec_id aside on a, a session whose host isn't
+    /// running, without waking it: every reader of its info leaves the
+    /// card out (host.DismissAsleep). Writes the disk.
+    fn dismiss_asleep(&self, _: &Agent, _dec_id: &str) -> Result<(), String> {
+        Err(NOT_YET.into())
+    }
     /// Wakes a's sleeping host and, unless text and images are both
     /// empty, sends them over the new connection, once (wakeHost:
     /// host.Ensure, Dial, SendImages). Waits.
@@ -729,6 +735,8 @@ pub struct Fake {
     /// What follow hands over, once.
     pub lines: Mutex<Vec<Said>>,
     pub dials: Mutex<usize>,
+    /// Its host is down: dialling it fails.
+    pub down: Mutex<bool>,
     /// Sessions started, in order; each is started as fake-<n>.
     pub starts: Mutex<Vec<Start>>,
     /// Agents by key whose host sleeps.
@@ -739,6 +747,8 @@ pub struct Fake {
     pub saved_reads: Mutex<usize>,
     /// Wakes, as (key, text, now).
     pub wakes: Mutex<Vec<(String, String, bool)>>,
+    /// Decisions cards set aside with no host to tell, as (key, id).
+    pub dismissed: Mutex<Vec<(String, String)>>,
     /// Sends without a view, as (id, text, now).
     pub sent_to: Mutex<Vec<(String, String, bool)>>,
     /// Kinds that take nothing mid-turn.
@@ -824,6 +834,9 @@ impl Hosts for Arc<Fake> {
     }
     fn dial(&self, _: &Agent) -> Result<Arc<dyn Link>, String> {
         *self.dials.lock().unwrap() += 1;
+        if *self.down.lock().unwrap() {
+            return Err("no host".into());
+        }
         if let Some(e) = self.failed() {
             return Err(e);
         }
@@ -903,6 +916,11 @@ impl Hosts for Arc<Fake> {
     }
     fn sleeping(&self, a: &Agent) -> bool {
         self.asleep.lock().unwrap().contains(&a.key)
+    }
+    fn dismiss_asleep(&self, a: &Agent, dec_id: &str) -> Result<(), String> {
+        let d = (a.key.clone(), dec_id.to_string());
+        self.dismissed.lock().unwrap().push(d);
+        Ok(())
     }
     fn saved(&self, a: &Agent) -> Option<Info> {
         *self.saved_reads.lock().unwrap() += 1;

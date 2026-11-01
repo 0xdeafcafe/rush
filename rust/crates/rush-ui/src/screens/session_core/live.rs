@@ -885,13 +885,28 @@ fn resolve_close(m: &mut Model, key: &str) {
     conn(m, key).waking = true; // the box keeps what's typed till it's known
     let key = key.to_string();
     m.later(
-        move || h.sleeping(&a),
-        move |m, asleep| {
+        move || {
+            let asleep = h.sleeping(&a);
+            // Still answering: it let this client go (one too far behind,
+            // in a flood, is let go to reconnect and be replayed), not
+            // stopped.
+            let answers = !asleep && h.dial(&a).map(|l| l.close()).is_ok();
+            (asleep, answers)
+        },
+        move |m, (asleep, answers)| {
             let c = conn(m, &key);
             c.waking = false;
             if asleep {
                 c.sleeping = true;
                 return Out::Idle;
+            }
+            // dropHost: let go; one still answering is dialled again (Go's
+            // syncHost dials once m.host is nil), else the session is read
+            // as a stopped one until another process runs it.
+            let pid = c.dialed_pid;
+            drop_link(m, &key);
+            if !answers {
+                conn(m, &key).dialed_pid = pid;
             }
             // A tile's kept Session whose host has gone: the tile is drawn
             // as the Wall draws one again (onHostLines' closed tile).
@@ -911,6 +926,7 @@ fn resolve_close(m: &mut Model, key: &str) {
                 if let (Some(v), Some(p)) = (m.session.as_mut(), pos) {
                     v.pos = p;
                 }
+                sync(m);
             }
             Out::Draw
         },

@@ -386,6 +386,11 @@ impl Hosts for RushHosts {
         rush_host::read_info(&a.job.id).is_ok_and(|i| i.sleeping)
     }
 
+    fn dismiss_asleep(&self, a: &Agent, dec_id: &str) -> Result<(), String> {
+        // dismissDecisions with no client (rushmode.go:5936).
+        rush_host::decisions::dismiss_asleep(&a.job.id, dec_id).map_err(|e| e.to_string())
+    }
+
     fn saved(&self, a: &Agent) -> Option<Info> {
         // openSavedHost (sleep_host.go:172-190).
         rush_host::read_info(&a.job.id).ok().map(|i| info(&i))
@@ -780,9 +785,14 @@ fn clip_log(text: &str) -> String {
 /// The sessions rush hosted for rush session parent's shell or its
 /// spawn_agent calls, each with where its agent writes (spawns.go:215
 /// hostedRuns). One whose transcript can't be found is left out.
-fn hosted_runs(reg: &Registry, infos: &[rush_host::Info], parent: &str) -> Vec<Spawned> {
+fn hosted_runs<I: std::borrow::Borrow<rush_host::Info>>(
+    reg: &Registry,
+    infos: &[I],
+    parent: &str,
+) -> Vec<Spawned> {
     let mut out = Vec::new();
     for i in infos {
+        let i: &rush_host::Info = i.borrow();
         if i.meta.get("spawnedBy").map(String::as_str) != Some(parent) {
             continue;
         }

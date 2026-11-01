@@ -12,13 +12,14 @@
 //! boxNote). Not here: the # picker over it (fleetslash.go).
 
 use rush_core::agent::Agent;
-use rush_core::text::Line;
+use rush_core::text::{Line, width};
 use rush_draw::{Button, MouseKind};
 use rush_fleet::Predicates;
 
 use crate::frame::{InputBox, Mouse, Out};
 use crate::list::is_temp;
 use crate::model::Model;
+use crate::screens::accounts::setup::StartOver;
 use crate::style::*;
 
 /// What the box keeps between frames: the first wrapped row shown, and
@@ -29,9 +30,28 @@ pub(super) struct PromptState {
     /// The box's first row on screen, and the box as drawn.
     y: usize,
     drawn: Option<InputBox>,
-    /// The shelf's setups on the box's top edge, by column (shelfHits).
-    shelf: Vec<super::shelf::Hit>,
+    /// What a click takes on the box's top edge, by column: the folder,
+    /// the shelf's setups (shelfHits), the parts of its chip.
+    hits: Vec<(usize, usize, EdgeAct)>,
+    /// The part of the top edge under the pointer, lit.
+    lit: Option<(usize, usize)>,
 }
+
+/// What a click on a part of the box's top edge does.
+#[derive(Clone, Debug)]
+pub(super) enum EdgeAct {
+    /// The folder new sessions start in: ctrl+l's picker.
+    Dir,
+    /// Another setup on the shelf: the next session starts as it
+    /// (shelfClick).
+    Pick(StartOver),
+    /// A part of the chip: the Start sheet on that row, as #model and
+    /// #effort open it.
+    Sheet(usize),
+}
+
+/// Label parts: from and to, cells into the label, and what a click does.
+type Parts = Vec<(usize, usize, EdgeAct)>;
 
 /// Whether text is a # command: # and a letter, so a heading (# Plan) or
 /// an issue (#123) is still a message (isHashCmd).
@@ -240,11 +260,11 @@ pub fn dir_label(m: &Model, dir: &str) -> String {
 }
 
 /// The box's edge labels, left and right, what it says while empty, and
-/// the shelf's setups on its edge by column, as the text calls for
-/// (promptLines' switch).
-fn labels(m: &Model, text: &str, w: usize) -> (Line, Line, String, Vec<super::shelf::Hit>) {
+/// the parts of each a click takes, as the text calls for (promptLines'
+/// switch).
+fn labels(m: &Model, text: &str, w: usize) -> (Line, Line, String, Parts, Parts) {
     if let Some((top_l, holder)) = super::rename::labels(m) {
-        return (top_l, Line::new(), holder, Vec::new());
+        return (top_l, Line::new(), holder, Vec::new(), Vec::new());
     }
     if typing_hash(text) {
         return (
@@ -253,24 +273,30 @@ fn labels(m: &Model, text: &str, w: usize) -> (Line, Line, String, Vec<super::sh
             crate::screens::accounts::newcmd::new_preview(m, text).unwrap_or_default(),
             String::new(),
             Vec::new(),
+            Vec::new(),
         );
     }
     let dir = start_dir(m);
-    let top_l = line([sp("new agent in ", DIM), sp(dir_label(m, &dir), TEXT)]);
+    let lead = "new agent in ";
+    let top_l = line([sp(lead, DIM), sp(dir_label(m, &dir), TEXT)]);
+    // The folder: a click picks another, as ctrl+l does.
+    let left = vec![(width(lead), top_l.width(), EdgeAct::Dir)];
     // What it starts as, so a model or profile is never a surprise,
-    // beside the others it could: ⌥1…9 or a click takes one.
+    // beside the others it could: ⌥1…9 or a click takes one; a click on
+    // the chip's name, model or effort opens the Start sheet there.
     let room = w.saturating_sub(top_l.width() + 10);
-    let (top_r, mut hits) = super::shelf::shelf_line(m, &dir, room);
-    if top_r.width() <= room {
-        let x0 = w.saturating_sub(3 + top_r.width());
-        for h in &mut hits {
-            h.x0 += x0;
-            h.x1 += x0;
+    let (top_r, hits) = super::shelf::shelf_line(m, &dir, room);
+    let mut right = Vec::new();
+    for h in hits {
+        if h.chip {
+            for (f, t, row) in super::shelf::chip_parts(m, &h.o) {
+                right.push((h.x0 + f, (h.x0 + t).min(h.x1), EdgeAct::Sheet(row)));
+            }
+        } else {
+            right.push((h.x0, h.x1, EdgeAct::Pick(h.o)));
         }
-    } else {
-        hits.clear();
     }
-    (top_l, top_r, "describe a task".into(), hits)
+    (top_l, top_r, "describe a task".into(), left, right)
 }
 
 /// The box at width w, before it's drawn (promptBoxAt).
@@ -278,8 +304,7 @@ fn box_at(m: &mut Model, w: usize) -> InputBox {
     let max_rows = 6.min(1.max(m.h as isize - m.top_h() as isize - 4 - 5) as usize);
     let top = m.kept::<PromptState>().top;
     let text = m.input.string();
-    let (top_l, top_r, mut holder, hits) = labels(m, &text, w);
-    m.kept::<PromptState>().shelf = hits;
+    let (top_l, top_r, mut holder, left, right) = labels(m, &text, w);
     let embedded = super::live::embedded(m);
     if m.keys_beside || embedded {
         // The Session has the keys; this box waits, and says how back.
@@ -317,6 +342,16 @@ fn box_at(m: &mut Model, w: usize) -> InputBox {
         hot: m.input.hot,
         ..InputBox::default()
     };
+    // Where the parts landed, as the edge drew them: cut short, or with no
+    // room, they take no clicks.
+    let at = b.edge_at(false);
+    let mut hits = at.place(false, &left);
+    hits.extend(at.place(true, &right));
+    let st = m.kept::<PromptState>();
+    st.lit = st.lit.filter(|l| hits.iter().any(|h| (h.0, h.1) == *l));
+    let mut b = b;
+    b.lit = st.lit.map(|(f, t)| (false, f, t));
+    st.hits = hits;
     b.scrolled()
 }
 
@@ -347,11 +382,18 @@ pub(super) fn mouse(m: &mut Model, e: &Mouse) -> Out {
         return Out::Pass;
     };
     let (x, y) = (e.x as usize, e.y as usize);
+    let hit = (y == st.y)
+        .then(|| st.hits.iter().find(|h| x >= h.0 && x < h.1).cloned())
+        .flatten();
     if e.kind == MouseKind::Moved {
+        // A part of the top edge a click takes, lit under the pointer.
+        let lit = hit.as_ref().map(|h| (h.0, h.1));
+        let edge = st.lit != lit;
+        st.lit = lit;
         // The paste chip under the pointer lit (hoverChip).
         let at =
             (y > st.y && y <= st.y + b.rows() && x < b.w).then(|| b.at(y - st.y - 1, x as isize));
-        return if m.input.hover(at) {
+        return if m.input.hover(at) || edge {
             Out::Draw
         } else {
             Out::Pass
@@ -360,13 +402,9 @@ pub(super) fn mouse(m: &mut Model, e: &Mouse) -> Out {
     if e.kind != MouseKind::Down(Button::Left) {
         return Out::Pass;
     }
-    if y == st.y {
-        // The shelf's setups on the box's top edge (shelfClick).
-        if let Some(h) = st.shelf.iter().find(|h| x >= h.x0 && x < h.x1) {
-            let o = h.o.clone();
-            super::shelf::pick(m, o);
-            return Out::Draw;
-        }
+    if let Some((_, _, act)) = hit {
+        st.lit = None;
+        return edge_click(m, act);
     }
     let rows = b.rows();
     if y <= st.y || y > st.y + rows {
@@ -380,6 +418,27 @@ pub(super) fn mouse(m: &mut Model, e: &Mouse) -> Out {
     m.input.pos = p.min(m.input.text.len());
     m.input.anchor = None;
     Out::Draw
+}
+
+/// What a click takes on the box's top edge as last drawn, and the row
+/// it's on.
+#[cfg(test)]
+pub(super) fn edge_hits(m: &mut Model) -> (usize, Vec<(usize, usize, EdgeAct)>) {
+    let st = m.kept::<PromptState>();
+    (st.y, st.hits.clone())
+}
+
+/// A click on a part of the box's top edge.
+fn edge_click(m: &mut Model, act: EdgeAct) -> Out {
+    match act {
+        EdgeAct::Dir => crate::screens::session_core::moveto::open_dir_picker(m),
+        // The shelf's other setups (shelfClick).
+        EdgeAct::Pick(o) => {
+            super::shelf::pick(m, o);
+            Out::Draw
+        }
+        EdgeAct::Sheet(row) => crate::screens::accounts::startsheet::open_on(m, row, ""),
+    }
 }
 
 /// How many agents wait on you (needingYou).

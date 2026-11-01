@@ -51,6 +51,12 @@ pub fn flush() {
 
 /// Tests log sessions' events to their own folders only: never to rush's
 /// log in the real rush folder.
+/// Writes out what tests logged so far.
+#[cfg(test)]
+pub(crate) fn flush_test() {
+    test_logger().flush();
+}
+
 #[cfg(test)]
 fn test_logger() -> &'static rush_events::Logger {
     static L: std::sync::OnceLock<rush_events::Logger> = std::sync::OnceLock::new();
