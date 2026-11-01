@@ -658,11 +658,12 @@ fn read_detail(
                 // already (every run's while the subagents view shows):
                 // taken over, topped up, rather than read again from the
                 // start. Its numbers read it afresh next time.
-                if let Some((mut t, mut s)) = r.tails.remove(id) {
-                    if t.path.to_string_lossy() == path.as_str() && t.read(&mut s).is_ok() {
-                        r.detail = Some((id.to_string(), t));
-                        return DetailGot::Seeded(Box::new(s));
-                    }
+                if let Some((mut t, mut s)) = r.tails.remove(id)
+                    && t.path.to_string_lossy() == path.as_str()
+                    && t.read(&mut s).is_ok()
+                {
+                    r.detail = Some((id.to_string(), t));
+                    return DetailGot::Seeded(Box::new(s));
                 }
                 let t = if *whole {
                     Tail::new(path, decode.clone())
