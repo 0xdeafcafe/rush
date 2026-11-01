@@ -293,6 +293,10 @@ pub struct Loader {
     spend: HashMap<String, Spend>,
     /// A scan has priced the rows: before one, spend_of takes the cache's.
     priced: bool,
+    /// The transcripts of the runs the last reading folded into the
+    /// sessions that ran them (fold_spawns), priced with the rows': what
+    /// they cost is their session's.
+    pub(crate) folded: Vec<(String, SpendTarget)>,
     /// Counts each agent's spend updates, so an unchanged past row is
     /// reused.
     spend_ver: HashMap<String, u64>,
@@ -374,6 +378,7 @@ impl Loader {
             using_login: None,
             spend: HashMap::new(),
             priced: false,
+            folded: Vec::new(),
             spend_ver: HashMap::new(),
             nudged: HashMap::new(),
             git: HashMap::new(),
@@ -483,17 +488,18 @@ impl Loader {
     pub fn targets(agents: &[Agent]) -> Vec<(&Agent, SpendTarget)> {
         agents
             .iter()
-            .filter(|a| !a.job.transcript_path.is_empty())
-            .map(|a| {
-                let t = SpendTarget {
-                    key: a.key.clone(),
-                    path: a.job.transcript_path.clone(),
-                    live: a.job.live() || a.pid != 0,
-                    past: a.past,
-                };
-                (a, t)
-            })
+            .filter_map(|a| Some((a, Loader::target(a)?)))
             .collect()
+    }
+
+    /// What a row's transcripts are priced from, if it has one.
+    pub(crate) fn target(a: &Agent) -> Option<SpendTarget> {
+        (!a.job.transcript_path.is_empty()).then(|| SpendTarget {
+            key: a.key.clone(),
+            path: a.job.transcript_path.clone(),
+            live: a.job.live() || a.pid != 0,
+            past: a.past,
+        })
     }
 
     /// Prices the rows' transcripts, as far as they grew, each through its
@@ -513,10 +519,15 @@ impl Loader {
             .collect()
     }
 
-    /// scan, of targets kind_targets made.
+    /// scan, of targets kind_targets made, and the runs the last reading
+    /// folded into their sessions: their rows are gone from the list, but
+    /// what they cost is counted with the session's, priced as any row's
+    /// rather than as their hosts saved it. Rust-only: Go never priced a
+    /// folded run, taking its host's figure (fleet.go:1058), which a host
+    /// before Rust's could have far out (host agent.go:52, :572).
     pub fn scan_targets(&mut self, targets: &[(String, SpendTarget)]) -> usize {
         let mut by_kind: HashMap<&str, Vec<SpendTarget>> = HashMap::new();
-        for (k, t) in targets {
+        for (k, t) in targets.iter().chain(&self.folded) {
             by_kind.entry(k.as_str()).or_default().push(t.clone());
         }
         let mut got = HashMap::new();
@@ -1423,11 +1434,29 @@ impl Loader {
             }
         }
         // A transcript is priced call by call; the host's own figure is
-        // only for agents that leave none.
-        if !a.spend.ready && a.spend.cost < info.cost_usd {
+        // only for agents that leave none, or a row no scan prices (one
+        // put away). Rust-only: Go took the host's until the first scan
+        // (fleet.go:1058), but a host before Rust's summed its agent's
+        // running total again on every restart (host agent.go:52, :572),
+        // so its saved figure can be far out ($506,066 of one session):
+        // before the first scan, a row it will price waits for it.
+        if !a.spend.ready
+            && a.spend.cost < info.cost_usd
+            && (self.priced || !self.prices(a.kind.as_str(), &a.job.transcript_path))
+        {
             a.spend.cost = info.cost_usd;
         }
         a
+    }
+
+    /// Whether a row's transcript is priced: it has one, and its agent's
+    /// adapter reads spend.
+    fn prices(&self, kind: &str, transcript: &str) -> bool {
+        !transcript.is_empty()
+            && self
+                .reg
+                .get(kind)
+                .is_some_and(|r| r.spend_reader().is_some())
     }
 
     /// Finished hosted rows are often hundreds: one is made again only
