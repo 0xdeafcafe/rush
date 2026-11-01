@@ -20,7 +20,7 @@ use serde_json::{Map, Value, json};
 use super::card::*;
 use super::permcard::{perm_btns, permission_card};
 use super::permissions::{bypass_mode, set_permission};
-use super::{Act, Conn, HostInfo, act, info, open_key, pending, session, set_input};
+use super::{Act, Conn, HostInfo, act, info_any, open_key, pending, session, set_input};
 use crate::frame::overlayclick::hint_key;
 use crate::frame::{Out, Press};
 use crate::model::Model;
@@ -93,9 +93,14 @@ impl Conn {
 }
 
 /// The decisions block the agent's last turn ended with, while nothing
-/// else waits on you and you haven't answered or set it aside
-/// (decisionsCard).
+/// else waits on you and you haven't answered or set it aside, and
+/// there's a host to take the answers or they'd wake or resume one
+/// (decisionsCard; Go's asleep only, here a stopped rush session too,
+/// whose answers resume it as a message does).
 pub fn decisions_card(c: &Conn, i: &HostInfo, pending: usize) -> Option<Question> {
+    if i.cold && !i.wakes {
+        return None;
+    }
     let d = c.q_again.clone().or_else(|| i.decisions.clone())?;
     if pending > 0 || d.id == c.q_gone {
         return None;
@@ -111,7 +116,7 @@ pub fn decisions_card(c: &Conn, i: &HostInfo, pending: usize) -> Option<Question
 /// (rushmode.go:5601 syncDecisionsShown).
 pub fn sync_decisions_shown(m: &mut Model, key: &str) {
     let mut c = take(m, key);
-    let card = info(m, key).and_then(|i| decisions_card(&c, &i, pending(m, key).len()));
+    let card = info_any(m, key).and_then(|i| decisions_card(&c, &i, pending(m, key).len()));
     let (mut want, mut id) = (String::new(), String::new());
     if let Some(d) = card {
         id = d.id;
@@ -1237,7 +1242,17 @@ fn send_answers(c: &mut Conn, req: &Question) -> Res {
         if text.is_empty() {
             return Res::Do(Act::DismissDecisions(req.id.clone()));
         }
-        return Res::Do(Act::Send(text));
+        // Kept until it's known to have gone: one that didn't brings the
+        // card back as it was (answer_failed).
+        c.q_sent = Some(Sent {
+            req: req.clone(),
+            answers: c.q_answer.clone(),
+            again,
+        });
+        return Res::Do(Act::Answer {
+            id: req.id.clone(),
+            text,
+        });
     }
     let b = answer_input(req, &c.q_answer);
     c.q_for.clear();
@@ -1246,6 +1261,56 @@ fn send_answers(c: &mut Conn, req: &Question) -> Res {
         input: Some(b),
         always: false,
     })
+}
+
+/// A decisions card's answers on their way: the card, the answers, and
+/// whether it was opened again from its block (q_again).
+#[derive(Clone, Debug)]
+pub struct Sent {
+    pub req: Question,
+    pub answers: HashMap<String, String>,
+    pub again: bool,
+}
+
+/// The answers to decisions card id have gone: nothing to bring back.
+pub fn answer_sent(m: &mut Model, key: &str, id: &str) {
+    let mut c = take(m, key);
+    if c.q_sent.as_ref().is_some_and(|s| s.req.id == id) {
+        c.q_sent = None;
+    }
+    put(m, key, c);
+}
+
+/// The answers to decisions card id didn't go (no host took them, or
+/// the wake or resume failed): the card comes back as it was, on "Send
+/// these answers?" with them kept, and its block no longer reads as
+/// answered, so nothing says you answered what the agent never got.
+pub fn answer_failed(m: &mut Model, key: &str, id: &str) {
+    let mut c = take(m, key);
+    let Some(s) = c.q_sent.take().filter(|s| s.req.id == id) else {
+        put(m, key, c);
+        return;
+    };
+    if c.q_gone == id {
+        c.q_gone.clear();
+    }
+    if c.dec_answered == id {
+        c.dec_answered.clear();
+    }
+    if s.again {
+        c.q_again = Some(s.req.clone());
+    }
+    c.q_for = s.req.id.clone();
+    c.q_decide = true;
+    c.q_own = false;
+    c.q_answer = s.answers;
+    c.q_idx = s.req.asks.len();
+    c.q_cursor = 0;
+    c.card_focus = true;
+    put(m, key, c);
+    if let Some(v) = m.session.as_mut().filter(|v| v.key == key) {
+        v.o.open.retain(|k, _| !k.ends_with(":dec:sent"));
+    }
 }
 
 /// Text's decisions block as a question card, None when it has none: each
@@ -1354,7 +1419,7 @@ pub fn card_key_hook(m: &mut Model, k: &Press) -> Out {
     let Some(key) = open_key(m) else {
         return Out::Pass;
     };
-    let Some(i) = info(m, &key) else {
+    let Some(i) = super::card_info(m, &key) else {
         return Out::Pass;
     };
     let empty = i.input.is_empty();
@@ -1370,7 +1435,9 @@ pub fn decide_key_hook(m: &mut Model, k: &Press) -> Out {
     let Some(key) = open_key(m) else {
         return Out::Pass;
     };
-    if info(m, &key).is_none_or(|i| !i.input.is_empty()) {
+    // A session rush doesn't run now has its block too: d says why it
+    // can't, or opens it when the answers would wake or resume it.
+    if info_any(m, &key).is_none_or(|i| !i.input.is_empty()) {
         return Out::Pass;
     }
     let sel = m
@@ -1387,7 +1454,7 @@ pub fn decide_key_hook(m: &mut Model, k: &Press) -> Out {
 /// Opens the decisions block of the turn r is in as the card, the keys on
 /// it: the open one as it is, an earlier one anew (decideAgain).
 pub fn decide_again(m: &mut Model, key: &str, r: &str) -> Out {
-    let Some(i) = info(m, key) else {
+    let Some(i) = info_any(m, key).filter(|i| !i.cold || i.wakes) else {
         m.flash_err("this session can't take answers here");
         return Out::Draw;
     };

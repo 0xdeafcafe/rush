@@ -77,6 +77,19 @@ fn info(m: &Model, key: &str) -> Option<HostInfo> {
         acct: a.map(|a| a.acct.clone()).unwrap_or_default(),
         permission_mode: c.info.permission_mode.clone(),
         asleep: c.sleeping || c.info.sleeping,
+        // No host running for it: a message wakes it or resumes it. One
+        // whose host runs and isn't reached yet isn't, so answers never
+        // start a second host beside it.
+        wakes: !c.hosted()
+            && a.is_some_and(|a| {
+                !a.interactive
+                    && !a.past
+                    && m.kept
+                        .peek::<super::Core>()
+                        .and_then(|k| k.hosts.as_ref())
+                        .is_some_and(|h| h.hosts(a))
+                    && (c.sleeping || c.info.sleeping || a.pid == 0)
+            }),
         input: c.input.string(),
         cwd: a.map(|a| a.job.cwd.clone()).unwrap_or_default(),
         id: a.map(|a| a.job.id.clone()).unwrap_or_default(),
@@ -188,6 +201,8 @@ fn act(m: &mut Model, key: &str, a: Act) -> Out {
             input.insert_str(&format!("{chip} "));
             Out::Draw
         }
+        Act::Answer { id, text } => answer(m, key, id, text),
+        Act::DismissDecisions(id) if !conn(m, key).hosted() => dismiss_cold(m, key, id),
         Act::DismissDecisions(id) => send_op(m, key, Op::DismissDecisions(id)),
         Act::ContinueAtReset(yes) => send_op(m, key, Op::ContinueAtReset(yes)),
         Act::RestartAgent(text) => {
@@ -223,6 +238,40 @@ fn act(m: &mut Model, key: &str, a: Act) -> Out {
         Act::EnterOn(open) => enter_on(m, key, open),
         Act::Room(ask) => crate::screens::social::roomsetup::chat_room(m, *ask),
     }
+}
+
+/// Sends a decisions card's answers as your next message: shown as
+/// sending, as a typed one is; a host asleep wakes for them and a stopped
+/// rush session resumes with them (sendAnswers' wakeHost, sendAs). Ones
+/// that don't go bring the card back with them (answer_failed).
+fn answer(m: &mut Model, key: &str, id: String, text: String) -> Out {
+    if !conn(m, key).hosted() {
+        return super::keys::send_offline_answer(m, key, text, id);
+    }
+    super::keys::send_answer(m, key, text, id);
+    Out::Draw
+}
+
+/// Sets decisions card id aside on a session rush doesn't run now,
+/// noted beside its info rather than waking it for nothing
+/// (dismissDecisions' host.DismissAsleep).
+fn dismiss_cold(m: &mut Model, key: &str, id: String) -> Out {
+    let Some(a) = agent(m, key).cloned() else {
+        m.flash_err("this session can't take answers here");
+        return Out::Draw;
+    };
+    let h = super::host::hosts(m);
+    m.later(
+        move || h.dismiss_asleep(&a, &id),
+        |m, r| match r {
+            Ok(()) => Out::Idle,
+            Err(e) => {
+                m.fail(&e);
+                Out::Draw
+            }
+        },
+    );
+    Out::Draw
 }
 
 /// Sends text to agent to however it takes messages: its host, a resume
