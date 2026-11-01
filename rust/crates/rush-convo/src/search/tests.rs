@@ -247,6 +247,34 @@ fn index_one() {
     Library::new(None).index_in_background(vec![src]);
 }
 
+/// Asked again of a conversation unchanged since, the indexer doesn't look
+/// on disk: each reading of the list asks of every agent's.
+#[test]
+fn index_one_remembers_what_stands() {
+    let d = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let lib = Library::new(Some(home.path().to_path_buf()));
+    let p = write_transcript(&d, &FIND_LINES);
+    let src = Source {
+        path: p.clone(),
+        read: claude(),
+    };
+    assert!(lib.index_one(&src));
+    let lib = Library::new(Some(home.path().to_path_buf()));
+    assert!(!lib.index_one(&src), "the pieces on disk stand");
+    std::fs::remove_dir_all(home.path()).unwrap();
+    std::fs::create_dir(home.path()).unwrap();
+    assert!(!lib.index_one(&src), "looked on disk again");
+    // One with nothing to index is read once, not on every reading.
+    let d2 = tempfile::tempdir().unwrap();
+    let empty = Source {
+        path: write_transcript(&d2, &[]),
+        read: Reader::Other(Arc::new(|| None)),
+    };
+    assert!(lib.index_one(&empty));
+    assert!(!lib.index_one(&empty));
+}
+
 fn read(p: &str) -> crate::Session {
     let mut t = Tail::new(p, decode(rush_claude::messages));
     let mut s = crate::Session::new();
