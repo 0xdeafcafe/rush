@@ -23,6 +23,8 @@ type Calls = Arc<Mutex<Vec<String>>>;
 #[derive(Default)]
 struct Fake {
     calls: Calls,
+    /// The words the last start was told to expect.
+    context: Arc<Mutex<Vec<String>>>,
     unavailable: bool,
     mics: Vec<Mic>,
 }
@@ -37,9 +39,11 @@ impl Engine for Fake {
     fn start(
         &self,
         device: &str,
+        context: Vec<String>,
         _out: rush_ui_social::pushtalk::Out,
     ) -> Result<Box<dyn Listening>, String> {
         self.calls.lock().unwrap().push(format!("start {device}"));
+        *self.context.lock().unwrap() = context;
         Ok(Box::new(FakeListening(self.calls.clone())))
     }
 }
@@ -277,6 +281,31 @@ fn held_past_the_hold_stops_and_types_what_was_said() {
         "typed at the cursor, spaced"
     );
     assert!(look(&mut m).is_none(), "the box still shows a dictation");
+}
+
+#[test]
+fn push_to_talk_expects_the_words_on_screen() {
+    let fake = Fake::default();
+    let context = fake.context.clone();
+    let (mut m, c, _d) = window(true, fake);
+    m.agents = vec![rush_core::agent::Agent {
+        key: "a".into(),
+        display_name: "LangWatch exporter".into(),
+        branch: "fix/rushd-restart".into(),
+        ..Default::default()
+    }];
+    m.sel = "a".into();
+    let _ = press(&mut m, "ctrl+space");
+    assert_eq!(calls(&c), ["start "]);
+    assert_eq!(
+        *context.lock().unwrap(),
+        [
+            "LangWatch exporter",
+            "LangWatch",
+            "fix/rushd-restart",
+            "rushd-restart"
+        ]
+    );
 }
 
 #[test]

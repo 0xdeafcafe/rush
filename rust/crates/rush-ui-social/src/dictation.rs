@@ -11,6 +11,11 @@
 //! typed when it's done. Both on, fn is yap's and ctrl+space is rush's;
 //! the box shows whichever is under way.
 //!
+//! Both are told the words on the window's screen (screenwords.rs) so
+//! names come out spelled as written: yap on its socket whenever they
+//! change while it's followed (read after a frame, at most once a second),
+//! push-to-talk as it starts. That has no Go original.
+//!
 //! The yap side is ported from Go's internal/ui/yap.go (yapLive :23,
 //! yapSync :50, onYap :94, onYapTick :108, yapShown :124, yapPaste :131,
 //! yapLook :142, yapDictated :217) and its callers (model.go:1179-1182,
@@ -26,6 +31,7 @@ use rush_draw::{Key, KeyMods, Step};
 
 use super::parts::{LiveText, YapState, is_dictation, yap_shown};
 use super::pushtalk::{Do, Engine, Heard, Listening, Mic, Talk};
+use super::screenwords;
 use crate::frame::{Editor, Out, Press};
 use crate::model::Model;
 use crate::worker::Note;
@@ -48,6 +54,14 @@ pub struct Dictation {
     /// is off.
     pub yap: YapState,
     yap_stop: Option<mpsc::Sender<()>>,
+    /// Lines for yap while it's followed: the words on screen.
+    yap_say: Option<mpsc::Sender<String>>,
+    /// The words on screen as last read, when, what they were read from,
+    /// and whether a wake is asked to read them again.
+    words: Vec<String>,
+    words_at: Option<Instant>,
+    words_sig: Option<u64>,
+    words_due: bool,
     /// A finished yap dictation's text until its paste arrives, and when
     /// yap said it.
     yap_final: String,
@@ -137,6 +151,7 @@ pub fn sync(m: &mut Model) {
     if !switched_on(m, YAP) {
         let d = state(m);
         d.yap_stop = None; // dropped: follow stops
+        d.yap_say = None;
         d.yap = YapState::default();
         d.yap_final.clear();
         return;
@@ -148,12 +163,18 @@ pub fn sync(m: &mut Model) {
         return;
     };
     let (stop_tx, stop) = mpsc::channel();
-    state(m).yap_stop = Some(stop_tx);
+    let (say_tx, say) = mpsc::channel();
+    let d = state(m);
+    d.yap_stop = Some(stop_tx);
+    d.yap_say = Some(say_tx);
+    // yap hears the words on screen as it's found.
+    read_words(m, Instant::now());
+    say_words(m);
     let tx = tx.lane(64);
     let _ = std::thread::Builder::new()
         .name("rush-yap".into())
         .spawn(move || {
-            rush_bundled::yap::follow(stop, move |s| {
+            rush_bundled::yap::follow(stop, say, move |s| {
                 let s = YapState {
                     phase: s.phase,
                     settled: s.settled,
@@ -166,6 +187,72 @@ pub fn sync(m: &mut Model) {
                 let _ = tx.try_send(Note::Apply(Box::new(move |m: &mut Model| on_yap(m, s))));
             });
         });
+}
+
+/// After each frame: while yap is followed, the words on screen are read
+/// again once the last reading is a second old, and yap told when they
+/// changed. A frame sooner asks for a wake at that second, so the last
+/// change before the screen goes still isn't missed.
+pub fn after_frame(m: &mut Model) {
+    let Some(d) = m.kept.peek::<Dictation>() else {
+        return;
+    };
+    if d.yap_say.is_none() {
+        return;
+    }
+    let now = Instant::now();
+    if let Some(t) = d.words_at
+        && now.duration_since(t) < screenwords::EVERY
+    {
+        if !d.words_due {
+            state(m).words_due = true;
+            m.ask_wake(t + screenwords::EVERY);
+        }
+        return;
+    }
+    state(m).words_due = false;
+    if read_words(m, now) {
+        say_words(m);
+    }
+}
+
+/// Reads the words on screen again unless what they're read from is the
+/// same; whether they changed.
+fn read_words(m: &mut Model, now: Instant) -> bool {
+    state(m).words_at = Some(now);
+    let sig = screenwords::fingerprint(m);
+    if state(m).words_sig == Some(sig) {
+        return false;
+    }
+    state(m).words_sig = Some(sig);
+    let words = screenwords::collect(m);
+    let d = state(m);
+    if words == d.words {
+        return false;
+    }
+    d.words = words;
+    true
+}
+
+/// Tells yap the words on screen, while it's followed.
+fn say_words(m: &mut Model) {
+    let d = state(m);
+    if let Some(tx) = &d.yap_say {
+        let _ = tx.send(rush_bundled::yap::context_line(this_app(), &d.words));
+    }
+}
+
+/// The words on screen for a dictation starting now: as last read, read
+/// again when that's a second old.
+fn words_now(m: &mut Model) -> Vec<String> {
+    let now = Instant::now();
+    let stale = state(m)
+        .words_at
+        .is_none_or(|t| now.duration_since(t) >= screenwords::EVERY);
+    if stale && read_words(m, now) {
+        say_words(m);
+    }
+    state(m).words.clone()
 }
 
 /// Takes what yap says (onYap).
@@ -352,6 +439,7 @@ pub fn released(m: &mut Model, code: Key, _mods: KeyMods) -> Step {
 /// comes back to the UI thread as a note.
 fn start(m: &mut Model) {
     let device = mic(m);
+    let context = words_now(m);
     let tx = m.sender().map(|t| t.lane(64));
     let d = state(m);
     d.serial += 1;
@@ -371,7 +459,7 @@ fn start(m: &mut Model) {
             })));
         }
     });
-    match e.start(&device, out) {
+    match e.start(&device, context, out) {
         Ok(l) => state(m).listening = Some(l),
         Err(e) => {
             end(m);

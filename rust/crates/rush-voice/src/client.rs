@@ -47,6 +47,7 @@ pub(crate) fn encode<T: serde::Serialize>(v: &T) -> Vec<u8> {
 
 pub(crate) fn start(
     device: &str,
+    context: Vec<String>,
     mut out: impl FnMut(Live) + Send + 'static,
 ) -> Result<Conn, String> {
     if bundle::build_app()? {
@@ -68,6 +69,7 @@ pub(crate) fn start(
     };
     conn.send(&Command::Start {
         device: device.to_string(),
+        context,
     });
     let finished = conn.finished.clone();
     std::thread::Builder::new()

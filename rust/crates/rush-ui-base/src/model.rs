@@ -1835,6 +1835,10 @@ impl App<Note> for Model {
             }
             self.drawn = rows;
         }
+        // yap is told the words on screen, read at most once a second.
+        if let Some(f) = self.ext.calls.dictation_after_frame {
+            f(self);
+        }
         self.title = self.make_title();
         let drawn = Instant::now();
         self.hold.drew(drawn);

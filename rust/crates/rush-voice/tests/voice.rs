@@ -12,14 +12,23 @@ fn commands_on_the_wire() {
         (
             Command::Start {
                 device: "BuiltInMicrophoneDevice".into(),
+                context: Vec::new(),
             },
             r#"{"cmd":"start","device":"BuiltInMicrophoneDevice"}"#,
         ),
         (
             Command::Start {
                 device: String::new(),
+                context: Vec::new(),
             },
             r#"{"cmd":"start","device":""}"#,
+        ),
+        (
+            Command::Start {
+                device: String::new(),
+                context: vec!["Redis".into(), "rushd".into()],
+            },
+            r#"{"cmd":"start","device":"","context":["Redis","rushd"]}"#,
         ),
         (Command::Stop, r#"{"cmd":"stop"}"#),
         (Command::Cancel, r#"{"cmd":"cancel"}"#),

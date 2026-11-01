@@ -77,13 +77,24 @@ pub struct Live {
 #[serde(tag = "cmd", rename_all = "lowercase")]
 pub enum Command {
     /// Begin listening on the device with this id; empty is the Mac's
-    /// input.
-    Start { device: String },
+    /// input. context is the words on the window's screen (names, repos,
+    /// branches, files, identifiers) the speech model should expect, so
+    /// they come out spelled as they're written; left out when empty, and
+    /// a line without it still reads.
+    Start {
+        device: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        context: Vec<String>,
+    },
     /// Stop listening and finish: the last change is done.
     Stop,
     /// Stop listening and drop it: the last change is hidden.
     Cancel,
 }
+
+/// How many of a dictation's context words the speech model is given:
+/// Apple suggests no more than a hundred.
+pub const CONTEXT_MAX: usize = 100;
 
 /// A dictation under way, from [`start`]. Dropping it cancels it.
 pub struct Dictation {
@@ -120,15 +131,21 @@ impl Live {
 }
 
 /// Begins a dictation on the microphone with this id (empty: the Mac's
-/// input), building and starting the helper first if it isn't running.
+/// input), expecting the words in context (the first [`CONTEXT_MAX`],
+/// most wanted first), building and starting the helper first if it
+/// isn't running.
 /// Hands each change to out, on a thread of its own, until one whose
 /// phase is done, failed or hidden. Returns at once; a helper that can't
 /// be started is an Err, one that fails later is a failed change.
-pub fn start(device: &str, out: impl FnMut(Live) + Send + 'static) -> Result<Dictation, String> {
+pub fn start(
+    device: &str,
+    context: Vec<String>,
+    out: impl FnMut(Live) + Send + 'static,
+) -> Result<Dictation, String> {
     if !cfg!(target_os = "macos") {
         return Err("push-to-talk needs macOS".into());
     }
-    client::start(device, out).map(|inner| Dictation { inner })
+    client::start(device, context, out).map(|inner| Dictation { inner })
 }
 
 /// The Mac's microphones, the input first. Asked in this process (listing

@@ -34,6 +34,7 @@ pub mod parts;
 pub mod pushtalk;
 pub mod rooms;
 pub mod roomsetup;
+pub mod screenwords;
 pub mod services;
 pub mod stream;
 

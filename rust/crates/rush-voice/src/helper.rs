@@ -31,7 +31,7 @@ use objc2_avf_audio::{
     AVAudioApplication, AVAudioApplicationRecordPermission, AVAudioEngine, AVAudioPCMBuffer,
     AVAudioTime,
 };
-use objc2_foundation::{NSError, NSLocale, NSOperationQueue};
+use objc2_foundation::{NSArray, NSError, NSLocale, NSOperationQueue, NSString};
 use objc2_speech::{
     SFSpeechAudioBufferRecognitionRequest, SFSpeechRecognitionResult, SFSpeechRecognitionTask,
     SFSpeechRecognizer, SFSpeechRecognizerAuthorizationStatus,
@@ -39,7 +39,7 @@ use objc2_speech::{
 use serde_json::{Map, Value};
 
 use crate::client::encode;
-use crate::{Command, Live, audio, split};
+use crate::{CONTEXT_MAX, Command, Live, audio, split};
 
 /// How long the helper stays with nobody connected before it quits.
 const IDLE: Duration = Duration::from_secs(10 * 60);
@@ -71,6 +71,9 @@ struct Session {
     conn: u64,
     out: Out,
     device: String,
+    /// The words the window's screen shows, for the speech model to
+    /// expect.
+    context: Vec<String>,
     live: Live,
     engine: Option<Retained<AVAudioEngine>>,
     request: Option<Retained<SFSpeechAudioBufferRecognitionRequest>>,
@@ -262,7 +265,7 @@ fn of_conn(conn: u64) -> Option<u64> {
 
 fn command(conn: u64, out: Out, cmd: Command) {
     match cmd {
-        Command::Start { device } => {
+        Command::Start { device, context } => {
             // One at a time: a new one drops the old.
             if let Some(mut old) = NOW.with(|n| n.borrow_mut().take()) {
                 old.end("hidden");
@@ -274,6 +277,7 @@ fn command(conn: u64, out: Out, cmd: Command) {
                     conn,
                     out,
                     device,
+                    context,
                     live: Live::default(),
                     engine: None,
                     request: None,
@@ -389,11 +393,11 @@ fn begin(id: u64) {
 /// Starts the microphone and the speech model for the dictation with this
 /// id.
 fn hear(id: u64) -> Result<(), String> {
-    let Some(device) = NOW.with(|n| {
+    let Some((device, context)) = NOW.with(|n| {
         n.borrow()
             .as_ref()
             .filter(|s| s.id == id)
-            .map(|s| s.device.clone())
+            .map(|s| (s.device.clone(), s.context.clone()))
     }) else {
         return Ok(());
     };
@@ -416,6 +420,16 @@ fn hear(id: u64) -> Result<(), String> {
         req.setRequiresOnDeviceRecognition(true);
         req.setShouldReportPartialResults(true);
         req.setAddsPunctuation(true);
+        // The words on the window's screen, so names come out spelled as
+        // they're written there.
+        if !context.is_empty() {
+            let words: Vec<Retained<NSString>> = context
+                .iter()
+                .take(CONTEXT_MAX)
+                .map(|w| NSString::from_str(w))
+                .collect();
+            req.setContextualStrings(&NSArray::from_retained_slice(&words));
+        }
 
         let engine = AVAudioEngine::new();
         let input = engine.inputNode();

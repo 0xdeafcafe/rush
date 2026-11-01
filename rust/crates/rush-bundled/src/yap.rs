@@ -4,9 +4,11 @@
 //! box's edge. yap (github.com/0xdeafcafe/yap) is dictation for macOS on
 //! Apple's own speech model; it says what it hears on a socket of its own,
 //! which the window reads (follow). The plugin is the switch.
-//! Ported from internal/bundled/yap/plugin.go:1-116.
+//! Ported from internal/bundled/yap/plugin.go:1-116. New in the Rust port
+//! (no Go original): the window also tells yap the words on its screen on
+//! that socket ([`context_line`]), so yap spells them as they're written.
 
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write as _};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -66,45 +68,124 @@ pub fn socket() -> PathBuf {
 
 /// How long follow waits between looks for yap.
 const RETRY: Duration = Duration::from_secs(2);
+/// How long a line to yap may take to go: a yap that doesn't read ends
+/// the connection, as one that doesn't answer would.
+const WRITE_LIMIT: Duration = Duration::from_secs(1);
+
+/// What the window tells yap: the app it is and the words on its screen.
+#[derive(Serialize)]
+struct Hello<'a> {
+    context: Context<'a>,
+}
+
+#[derive(Serialize)]
+struct Context<'a> {
+    app: &'a str,
+    words: &'a [String],
+}
+
+/// The line that tells yap the words on the window's screen, most wanted
+/// first, and the app it is (its bundle id, empty when unknown):
+/// `{"context":{"app":"…","words":["Redis","rushd"]}}` and a newline.
+pub fn context_line(app: &str, words: &[String]) -> String {
+    let mut s = serde_json::to_string(&Hello {
+        context: Context { app, words },
+    })
+    .unwrap_or_default();
+    s.push('\n');
+    s
+}
 
 /// Hands out each state yap reports until stop is sent to or dropped,
 /// finding yap again whenever it starts. Losing yap mid-dictation ends the
-/// dictation.
-pub fn follow(stop: mpsc::Receiver<()>, out: impl FnMut(State)) {
-    follow_at(&socket(), stop, out);
+/// dictation. Each line sent on say goes to yap as it is (a newline put
+/// on its end if it hasn't one); the latest is said again each time yap
+/// is found. A line that can't be written ends that connection, as one
+/// that can't be read does.
+pub fn follow(stop: mpsc::Receiver<()>, say: mpsc::Receiver<String>, out: impl FnMut(State)) {
+    follow_at(&socket(), stop, say, out);
 }
 
-fn follow_at(path: &std::path::Path, stop: mpsc::Receiver<()>, mut out: impl FnMut(State)) {
+/// What follow's threads share: whether it's stopped, the connection to
+/// yap if there is one, and the latest line to say to it.
+#[derive(Default)]
+struct Link {
+    stopped: bool,
+    conn: Option<UnixStream>,
+    latest: Option<String>,
+}
+
+type Shared = std::sync::Arc<std::sync::Mutex<Link>>;
+
+fn lock(s: &Shared) -> std::sync::MutexGuard<'_, Link> {
+    s.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Writes line on the connection; one that fails is shut, which ends its
+/// read.
+fn write_line(g: &mut Link) {
+    let failed = match (&g.conn, &g.latest) {
+        (Some(c), Some(line)) => (&*c).write_all(line.as_bytes()).is_err(),
+        _ => false,
+    };
+    if failed && let Some(c) = g.conn.take() {
+        let _ = c.shutdown(std::net::Shutdown::Both);
+    }
+}
+
+fn follow_at(
+    path: &std::path::Path,
+    stop: mpsc::Receiver<()>,
+    say: mpsc::Receiver<String>,
+    mut out: impl FnMut(State),
+) {
     // stop is watched on a thread of its own, which wakes a blocked read
     // by shutting the socket down. Both sides take the lock, so a socket
     // handed over is always seen by a stop that comes after.
     let (stopped_tx, stopped) = mpsc::channel::<()>();
-    type Shared = std::sync::Arc<std::sync::Mutex<(bool, Option<UnixStream>)>>;
     let current: Shared = Default::default();
     let cur = current.clone();
     std::thread::spawn(move || {
         let _ = stop.recv();
-        let mut g = cur.lock().unwrap_or_else(|e| e.into_inner());
-        g.0 = true;
-        if let Some(c) = g.1.take() {
+        let mut g = lock(&cur);
+        g.stopped = true;
+        if let Some(c) = g.conn.take() {
             let _ = c.shutdown(std::net::Shutdown::Both);
         }
         drop(g);
         let _ = stopped_tx.send(());
     });
+    // What's to be said is written on a thread of its own too, under the
+    // same lock: a connection handed over is told the latest first.
+    let cur = current.clone();
+    std::thread::spawn(move || {
+        for mut line in say {
+            if !line.ends_with('\n') {
+                line.push('\n');
+            }
+            let mut g = lock(&cur);
+            if g.stopped {
+                return;
+            }
+            g.latest = Some(line);
+            write_line(&mut g);
+        }
+    });
     loop {
         if let Ok(c) = UnixStream::connect(path)
             && let Ok(c2) = c.try_clone()
         {
+            let _ = c2.set_write_timeout(Some(WRITE_LIMIT));
             {
-                let mut g = current.lock().unwrap_or_else(|e| e.into_inner());
-                if g.0 {
+                let mut g = lock(&current);
+                if g.stopped {
                     return;
                 }
-                g.1 = Some(c2);
+                g.conn = Some(c2);
+                write_line(&mut g);
             }
             read(c, &mut out);
-            current.lock().unwrap_or_else(|e| e.into_inner()).1.take();
+            lock(&current).conn.take();
         }
         match stopped.recv_timeout(RETRY) {
             Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -162,8 +243,9 @@ mod tests {
         });
         let (got_tx, got) = mpsc::channel();
         let (stop_tx, stop) = mpsc::channel();
+        let (_say_tx, say) = mpsc::channel();
         let t = std::thread::spawn(move || {
-            follow_at(&sock, stop, move |s| {
+            follow_at(&sock, stop, say, move |s| {
                 let _ = got_tx.send(s);
             })
         });
@@ -186,6 +268,73 @@ mod tests {
                 .expect("nothing came");
             assert_eq!(s, w);
         }
+        drop(stop_tx);
+        t.join().unwrap();
+    }
+
+    #[test]
+    fn context_lines() {
+        let cases: &[(&str, &[&str], &str)] = &[
+            (
+                "com.mitchellh.ghostty",
+                &["Redis", "rushd"],
+                "{\"context\":{\"app\":\"com.mitchellh.ghostty\",\"words\":[\"Redis\",\"rushd\"]}}\n",
+            ),
+            ("", &[], "{\"context\":{\"app\":\"\",\"words\":[]}}\n"),
+            (
+                "",
+                &["say \"hi\""],
+                "{\"context\":{\"app\":\"\",\"words\":[\"say \\\"hi\\\"\"]}}\n",
+            ),
+        ];
+        for (app, words, want) in cases {
+            let words: Vec<String> = words.iter().map(|w| w.to_string()).collect();
+            assert_eq!(context_line(app, &words), *want, "{app} {words:?}");
+        }
+    }
+
+    // The latest line is said as yap is found, each new one as it comes,
+    // and a yap found again is told the latest again.
+    #[test]
+    fn follow_tells_yap_the_words() {
+        let home = tempfile::tempdir().unwrap();
+        let sock = home.path().join("live.sock");
+        let l = UnixListener::bind(&sock).unwrap();
+        let (heard_tx, heard) = mpsc::channel::<(usize, String)>();
+        std::thread::spawn(move || {
+            for n in 0..2 {
+                let Ok((c, _)) = l.accept() else { return };
+                let mut r = BufReader::new(c);
+                let lines = if n == 0 { 2 } else { 1 };
+                for _ in 0..lines {
+                    let mut line = String::new();
+                    if r.read_line(&mut line).unwrap_or(0) == 0 {
+                        return;
+                    }
+                    let _ = heard_tx.send((n, line));
+                }
+                // yap quits; the second time it stays till the test ends.
+                if n == 1 {
+                    let _ = r.read_line(&mut String::new());
+                }
+            }
+        });
+        let (stop_tx, stop) = mpsc::channel();
+        let (say_tx, say) = mpsc::channel();
+        say_tx.send(context_line("", &["Redis".into()])).unwrap();
+        let t = std::thread::spawn(move || follow_at(&sock, stop, say, |_| {}));
+        let next = || {
+            heard
+                .recv_timeout(Duration::from_secs(10))
+                .expect("nothing came")
+        };
+        assert_eq!(next(), (0, context_line("", &["Redis".into()])));
+        // Said without its newline: one is put on.
+        say_tx
+            .send(context_line("", &["rushd".into()]).trim_end().to_string())
+            .unwrap();
+        assert_eq!(next(), (0, context_line("", &["rushd".into()])));
+        assert_eq!(next(), (1, context_line("", &["rushd".into()])));
         drop(stop_tx);
         t.join().unwrap();
     }

@@ -162,6 +162,7 @@ fn calls() -> Calls {
         dictation_released: Some(social::dictation::released),
         dictation_repeated: Some(social::dictation::repeated),
         dictation_sync: Some(social::dictation::sync),
+        dictation_after_frame: Some(social::dictation::after_frame),
         dictation_read_mics: Some(social::dictation::read_mics),
         dictation_mics: Some(|m| {
             social::dictation::mics(m)

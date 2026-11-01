@@ -155,8 +155,15 @@ pub trait Engine: Send + Sync {
     /// The microphones it can hear, asked off the UI thread.
     fn devices(&self) -> Vec<Mic>;
     /// Begins hearing the microphone with this id (empty: the Mac's
-    /// input), handing each change to out until its last.
-    fn start(&self, device: &str, out: Out) -> Result<Box<dyn Listening>, String>;
+    /// input), expecting the words in context (those on the window's
+    /// screen, most wanted first), handing each change to out until its
+    /// last.
+    fn start(
+        &self,
+        device: &str,
+        context: Vec<String>,
+        out: Out,
+    ) -> Result<Box<dyn Listening>, String>;
 }
 
 /// A dictation an engine has under way. Dropping it drops the dictation.
@@ -186,8 +193,13 @@ impl Engine for AppleVoice {
             .collect()
     }
 
-    fn start(&self, device: &str, mut out: Out) -> Result<Box<dyn Listening>, String> {
-        let d = rush_voice::start(device, move |l: rush_voice::Live| {
+    fn start(
+        &self,
+        device: &str,
+        context: Vec<String>,
+        mut out: Out,
+    ) -> Result<Box<dyn Listening>, String> {
+        let d = rush_voice::start(device, context, move |l: rush_voice::Live| {
             out(Heard {
                 phase: l.phase,
                 settled: l.settled,

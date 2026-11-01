@@ -520,6 +520,9 @@ calls! {
     /// yap followed while its plugin is on, push-to-talk dropped when its
     /// plugin goes off (social/dictation.rs sync).
     dictation_sync("social"): fn(&mut Model),
+    /// After each frame: yap told the words on screen, read at most once a
+    /// second (social/dictation.rs after_frame).
+    dictation_after_frame("social"): fn(&mut Model),
     /// The microphones asked for again (social/dictation.rs read_mics).
     dictation_read_mics("social"): fn(&mut Model),
     /// The microphones push-to-talk's engine said it has, as last asked:
