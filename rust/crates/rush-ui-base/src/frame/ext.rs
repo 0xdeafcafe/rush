@@ -17,11 +17,11 @@ use rush_core::agent::Agent;
 use rush_core::text::Line;
 
 use super::places::{Place, PlaceId};
-use super::{Editor, Mouse, Out, Press};
+use super::{Mouse, Out, Press};
 use crate::changes::{FileChange, Ver};
-use crate::clanker::Reaction;
 use crate::model::Model;
 use crate::predict::{HistHit, Hit};
+use crate::sess::ConnCore;
 use crate::session::SessionView;
 
 /// A key handler: `Out::Pass` when the key isn't its.
@@ -402,32 +402,24 @@ calls! {
     /// The match the filter found in a's conversation, lit, w wide
     /// (filter.rs snippet).
     filter_snippet("list_extras"): fn(&Model, &Agent, usize) -> Option<Line>,
-    /// The hosts rush was given run a (session_core/host.rs hosts_of).
-    hosts_agent("session_core"): fn(&Model, &Agent) -> bool,
     /// The open session's edits as the worker that read it worked them
     /// out (session_core/changes.rs prime).
     prime_changes("session_core"): fn(&mut Model, Ver, &str, Arc<Vec<FileChange>>),
-    /// The session with this key has its host reached (session_core
-    /// Conn::hosted).
-    conn_linked("session_core"): fn(&Model, &str) -> bool,
-    /// The message box of the session with this key, when it has one
-    /// (session_core Conn's input).
-    conn_box("session_core"): for<'a> fn(&'a Model, &str) -> Option<&'a Editor>,
-    /// conn_box, to change.
-    conn_box_mut("session_core"): for<'a> fn(&'a mut Model, &str) -> Option<&'a mut Editor>,
-    /// What clanker is reacting to now (session_core/finish.rs Finish's
-    /// fx).
-    reaction("session_core"): fn(&Model) -> Reaction,
-    /// reaction, to change.
-    reaction_mut("session_core"): fn(&mut Model) -> &mut Reaction,
-    /// The config the UI holds, Settings' and the accounts' one copy,
-    /// once loaded (accounts/state.rs Accounts' store).
-    held_config("accounts"): fn(&mut Model) -> Option<&mut rush_state::Config>,
-    /// `--render`: nothing is written (accounts/state.rs read_only).
-    read_only("accounts"): fn(&Model) -> bool,
-    /// The accounts have been read since rush started (state.rs
-    /// read_settled).
-    accounts_settled("accounts"): fn(&Model) -> bool,
+    /// Session key's side every screen reads, made on first use
+    /// (session_core conn's base).
+    conn("session_core"): for<'a> fn(&'a mut Model, &str) -> &'a mut ConnCore,
+    /// Session key's side, when it has one, to read.
+    peek_conn("session_core"): for<'a> fn(&'a Model, &str) -> Option<&'a ConnCore>,
+    /// Session key's side, when it has one, to change: none is made.
+    conn_if("session_core"): for<'a> fn(&'a mut Model, &str) -> Option<&'a mut ConnCore>,
+    /// Hosts that can start sessions were set: the screens start through
+    /// them (session_core/start.rs install).
+    start_install("session_core"): fn(&mut Model),
+    /// The actions plugins offer a key for (plugin_ui/hooks.rs
+    /// plugin_key_actions).
+    plugin_key_actions("plugin_ui"): fn(&Model) -> Vec<rush_keymap::Action>,
+    /// The keys plugins suggest for their actions (hooks.rs plugin_keys).
+    plugin_keys("plugin_ui"): fn(&Model) -> std::collections::BTreeMap<String, Vec<String>>,
     /// The id of the one session a hosted view shows (hosted.rs id).
     hosted_id("hosted"): fn(&Model) -> Option<&str>,
     /// A hosted view showing its one session, the list hidden (hosted.rs

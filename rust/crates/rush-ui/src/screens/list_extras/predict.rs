@@ -263,7 +263,7 @@ fn what(m: &mut Model, i: usize) -> Option<What> {
     let a = &m.agents[i];
     if a.rush && a.pid != 0 {
         let a = a.clone();
-        let h = crate::screens::session_core::host::hosts(m);
+        let h = crate::host::hosts(m);
         return h.hosts(&a).then(|| What::Early(Box::new(a)));
     }
     let host = if a.rush {

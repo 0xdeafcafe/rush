@@ -1428,7 +1428,7 @@ fn a_new_binding_works_without_a_restart() {
     m.kept::<State>().keys.path = Some(d.path().join("keybindings.json"));
     let id = rush_keymap::defaults()[0].id.clone();
     keys::save_binding(&mut m, &id, Some(vec!["alt+j".into()]));
-    let t = crate::screens::cmdbar::keybind::key_map(&mut m).key_text(&id);
+    let t = crate::keybind::key_map(&mut m).key_text(&id);
     assert!(t.contains("⌥j") || t.contains("alt+j"), "{id}: {t}");
 }
 

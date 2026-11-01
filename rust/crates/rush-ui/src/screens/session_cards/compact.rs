@@ -113,7 +113,7 @@ pub fn open_compact(m: &mut Model, key: &str) -> Out {
     }
     m.open_sheet(Box::new(s));
     let all = m.reg.installed_all();
-    let h = crate::screens::session_core::host::hosts(m);
+    let h = crate::host::hosts(m);
     let k = key.to_string();
     m.later(
         move || {
@@ -487,15 +487,12 @@ pub fn ask_cold(m: &mut Model, key: &str, text: &str, send: crate::frame::confir
         .agents
         .iter()
         .find(|a| a.key == key)
-        .is_some_and(crate::screens::session_core::busy);
+        .is_some_and(crate::sess::busy);
     if busy_row || inf.as_ref().is_some_and(|i| i.state == "working") {
         return false;
     }
     let what = if context > 0 {
-        format!(
-            "{} tokens of context",
-            crate::screens::session_core::paint::tokens(context)
-        )
+        format!("{} tokens of context", crate::paint::tokens(context))
     } else {
         "the whole context".to_string()
     };

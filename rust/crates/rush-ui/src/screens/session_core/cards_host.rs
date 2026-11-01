@@ -84,10 +84,7 @@ fn info(m: &Model, key: &str) -> Option<HostInfo> {
             && a.is_some_and(|a| {
                 !a.interactive
                     && !a.past
-                    && m.kept
-                        .peek::<super::Core>()
-                        .and_then(|k| k.hosts.as_ref())
-                        .is_some_and(|h| h.hosts(a))
+                    && crate::host::hosts_of(m).is_some_and(|h| h.hosts(a))
                     && (c.sleeping || c.info.sleeping || a.pid == 0)
             }),
         input: c.input.string(),
@@ -355,8 +352,7 @@ fn attach_images(m: &mut Model, key: &str, imgs: &[String]) {
     let c = conn(m, key);
     let (text, pos) = (c.input.text.clone(), c.input.pos.min(c.input.text.len()));
     c.input.undo.save(&text, pos, false);
-    let marked =
-        crate::screens::session_cards::imagerefs::with_marks(&text, pos, &mut c.imgs, imgs);
+    let marked = crate::imagerefs::with_marks(&text, pos, &mut c.imgs, imgs);
     c.input.pos = pos + (marked.len() - text.len());
     c.input.text = marked;
     c.input.anchor = None;
@@ -411,7 +407,7 @@ fn ask(m: &mut Model, key: &str, req: serde_json::Value, done: Reply) -> bool {
 /// rush's config by its JSON name, as a word: a switch is "true" or
 /// "false". The config is read from disk while Settings hasn't yet.
 fn setting(m: &Model, name: &str) -> String {
-    let cfg = crate::screens::settings::loaded_config(m);
+    let cfg = crate::accounts::loaded_config(m);
     let v = match cfg {
         Some(c) => serde_json::to_value(c),
         None => serde_json::to_value(rush_state::Store::load().config),
@@ -426,7 +422,8 @@ fn setting(m: &Model, name: &str) -> String {
 /// Saves value as rush's config field name: a switch from "true" or
 /// "false", a number from its digits, anything else as words.
 fn save_setting(m: &mut Model, name: &str, value: &str) -> Result<(), String> {
-    use crate::screens::settings::{changed, config_mut};
+    use crate::accounts::config_mut;
+    use crate::screens::settings::changed;
     let mut v = serde_json::to_value(&*config_mut(m)).map_err(|e| e.to_string())?;
     let Some(obj) = v.as_object_mut() else {
         return Err("rush's config can't be saved here".into());

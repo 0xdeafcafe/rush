@@ -30,21 +30,11 @@ use crate::model::Model;
 use crate::session::harness_name;
 use crate::style::*;
 
+// Shared with the other screens: the base's (crate::paint).
+pub use crate::paint::{fit_keys, pairs_line, spread};
+
 /// The dock's rows start this far in, and stop as far from the right.
 pub const INDENT: usize = 2;
-
-/// left and right on one row w wide, apart; left alone when they don't
-/// both fit (spread).
-pub fn spread(left: Line, right: Line, w: usize) -> Line {
-    let gap = w as isize - left.width() as isize - right.width() as isize;
-    if gap < 2 {
-        return fit(left, w);
-    }
-    let mut out = left;
-    out.spans.push(plain(blanks(gap as usize)));
-    join(&mut out, right);
-    out
-}
 
 /// Rows w wide on a ground of their own, edged down the left in the
 /// colour that says what they are (dockCard).
@@ -81,38 +71,12 @@ pub fn picked1(row: Line, w: usize, focused: bool) -> Line {
     on_ground(l, w, SEL_BG)
 }
 
-/// "key what" pairs, keys as the keyboard names them (keys).
-pub fn pairs_line(pairs: &[(&str, &str)]) -> Line {
-    let words: Vec<(String, String)> = pairs
-        .iter()
-        .map(|(k, w)| (rush_convo::render::key_word(k), w.to_string()))
-        .collect();
-    let refs: Vec<(&str, &str)> = words
-        .iter()
-        .map(|(k, w)| (k.as_str(), w.as_str()))
-        .collect();
-    keys(&refs)
-}
-
 /// The first n of pairs, then always, fitted to w: a row of keys says
 /// what matters now and leaves the rest to the help (fewKeys).
 pub fn few_keys(w: usize, n: usize, pairs: &[(&str, &str)], always: &[(&str, &str)]) -> Line {
     let mut all: Vec<(&str, &str)> = pairs.iter().take(n).copied().collect();
     all.extend_from_slice(always);
     fit_keys(w, &all)
-}
-
-/// keysFit with the keys as the keyboard names them.
-pub fn fit_keys(w: usize, pairs: &[(&str, &str)]) -> Line {
-    let words: Vec<(String, String)> = pairs
-        .iter()
-        .map(|(k, w)| (rush_convo::render::key_word(k), w.to_string()))
-        .collect();
-    let refs: Vec<(&str, &str)> = words
-        .iter()
-        .map(|(k, w)| (k.as_str(), w.as_str()))
-        .collect();
-    keys_fit(w, &refs)
 }
 
 /// The rows under the open conversation, the screen's width w: the
@@ -321,7 +285,7 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     } else {
         hint(m, &key, w, &picked)
     };
-    core(m).hint = Some(hint);
+    crate::sess::state(m).hint = Some(hint);
     conn(m, &key).dock_rows = out.len();
     out.into_iter()
         .map(|l| {
@@ -435,7 +399,7 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         .flatten();
     let watching = super::subview::watching(m, key);
     // A room's pane is its row's, as Go's room rows are agents.
-    let a = crate::screens::social::rooms::row_agent(m, key).cloned();
+    let a = crate::rooms::row_agent(m, key).cloned();
     let c = conn(m, key);
     let hosted = c.hosted();
     let typed = !c.input.is_empty();
@@ -537,7 +501,7 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         } else {
             // Go says Claude Code whatever the agent (rushmode.go:3684); a
             // room has no harness of its own, so it keeps Go's words.
-            let harness = if crate::screens::social::rooms::is_room_key(&a.key) {
+            let harness = if crate::rooms::is_room_key(&a.key) {
                 "Claude Code".to_string()
             } else {
                 harness_name(&m.reg, &a.kind)
@@ -817,12 +781,12 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
                         "kill {} only",
                         crate::screens::list_extras::jobs::first_word(&rp.command)
                     ),
-                    crate::screens::projects_machine::shells::pause_word(&shell_id),
+                    crate::shells::pause_word(&shell_id),
                 )
             });
         // Yours, or enter, opens or closes the row (rowKey).
         let rk = super::row_key(m);
-        let mut bound = |id: &str| crate::screens::cmdbar::keybind::bound_key(m, id);
+        let mut bound = |id: &str| crate::keybind::bound_key(m, id);
         let remember = bound("session.remember");
         let (open_all, close_older) = (
             bound("session.history.open"),
@@ -1021,7 +985,7 @@ fn conn_rows(m: &mut Model, key: &str) -> usize {
 /// The bottom row while a Session shows: its hint (the status hook).
 pub fn status(m: &Model, _w: usize) -> Option<Line> {
     m.session.as_ref()?;
-    let h = m.kept.peek::<Core>()?.hint.clone()?;
+    let h = crate::sess::peek_state(m)?.hint.clone()?;
     // "  "+hint, in the pane two in (paneDock's last row).
     let mut l = line([plain(blanks(INDENT + 2))]);
     join(&mut l, h);
@@ -1058,7 +1022,7 @@ pub fn locate(m: &mut Model, out: &mut Vec<Line>) {
         return;
     }
     // Beside the list the Session starts past the list and its divider.
-    let (lw, pw) = crate::screens::list_extras::split::widths(m);
+    let (lw, pw) = crate::split::widths(m);
     let col = if lw > 0 && pw > 0 { lw + 1 } else { 0 } + INDENT;
     let c = conn(m, &key);
     let Some(edge) = c.drawn.lines().first().map(Line::plain) else {

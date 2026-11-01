@@ -8,15 +8,15 @@
 
 use rush_core::text::Line;
 
+use crate::accounts::accounts;
 use crate::frame::{Out, Press};
+use crate::look::model_word;
 use crate::model::Model;
-use crate::screens::accounts::look::model_word;
 use crate::screens::accounts::recent::recent_setups;
 use crate::screens::accounts::rows::start_profile;
 use crate::screens::accounts::setup::{
     StartOver, by_profile, next_start, setup_chip, start_defaults, start_with_words, start_words,
 };
-use crate::screens::accounts::state::accounts;
 use crate::style::*;
 
 /// How many setups the shelf holds: one per ⌥ digit (shelfMax).
@@ -146,7 +146,7 @@ pub fn shelf_line(m: &Model, dir: &str, w: usize) -> (Line, Vec<Hit>) {
 pub fn chip_parts(m: &Model, o: &StartOver) -> Vec<(usize, usize, usize)> {
     use crate::screens::accounts::startsheet::{ROW_EFFORT, ROW_MODEL, ROW_PROVIDER};
     let words = start_words(m, o);
-    let g = crate::screens::accounts::look::glyph(&m.reg, &o.kind).width();
+    let g = crate::look::glyph(&m.reg, &o.kind).width();
     // " ", the glyph, " ", then the name.
     let mut x = 2 + g + rush_core::text::width(&words[0]);
     let mut out = vec![(0, x, ROW_PROVIDER)];

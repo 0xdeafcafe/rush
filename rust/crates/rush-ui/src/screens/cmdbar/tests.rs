@@ -707,23 +707,15 @@ fn chord_moves_the_prompt_to_the_agent() {
     m.agents[3].rush = true;
     let key = m.agents[3].key.clone();
     m.open(3);
-    crate::screens::session_core::conn(&mut m, &key).input.text = "first".chars().collect();
+    crate::sess::conn(&mut m, &key).input.text = "first".chars().collect();
     m.input.text = "second".chars().collect();
     super::keybind::run_action(&mut m, "prompt.append");
-    let got: String = crate::screens::session_core::conn(&mut m, &key)
-        .input
-        .text
-        .iter()
-        .collect();
+    let got: String = crate::sess::conn(&mut m, &key).input.text.iter().collect();
     assert_eq!(got, "first\nsecond");
     assert!(m.input.is_empty(), "the Prompt kept it");
     m.input.text = "third".chars().collect();
     super::keybind::run_action(&mut m, "prompt.replace");
-    let got: String = crate::screens::session_core::conn(&mut m, &key)
-        .input
-        .text
-        .iter()
-        .collect();
+    let got: String = crate::sess::conn(&mut m, &key).input.text.iter().collect();
     assert_eq!(got, "third");
 }
 
@@ -1200,17 +1192,13 @@ fn draft_to_prompt_and_back() {
     let key = m.agents[3].key.clone();
     m.select(key.clone());
     m.open(3);
-    crate::screens::session_core::conn(&mut m, &key).input.text = "draft".chars().collect();
+    crate::sess::conn(&mut m, &key).input.text = "draft".chars().collect();
     press(&mut m, "ctrl+]");
     press(&mut m, "u");
     assert_eq!(m.input.text.iter().collect::<String>(), "draft");
     press(&mut m, "ctrl+]");
     press(&mut m, "a");
-    let got: String = crate::screens::session_core::conn(&mut m, &key)
-        .input
-        .text
-        .iter()
-        .collect();
+    let got: String = crate::sess::conn(&mut m, &key).input.text.iter().collect();
     assert_eq!(got, "draft", "{:?}", m.flash);
     assert!(m.input.is_empty());
 }
@@ -1258,7 +1246,7 @@ fn bar_searches_transcripts_on_key() {
         priced: true,
         accounts: Vec::new(),
     });
-    crate::screens::settings::store(&mut m)
+    crate::accounts::store(&mut m)
         .config
         .search_transcripts_on_key = true;
     press(&mut m, "ctrl+k");
@@ -1373,9 +1361,7 @@ fn chord_refuses_an_agent_outside_rush() {
         let f = m.flash.clone().expect("a flash").0;
         assert_eq!(f, "no agent open to send it to", "{action}");
         assert!(
-            crate::screens::session_core::conn(&mut m, &key)
-                .input
-                .is_empty(),
+            crate::sess::conn(&mut m, &key).input.is_empty(),
             "{action}: moved to a box never sent"
         );
     }

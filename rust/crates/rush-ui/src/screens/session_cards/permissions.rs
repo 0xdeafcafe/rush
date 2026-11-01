@@ -60,13 +60,11 @@ pub fn bypass_mode(m: &Model, kind: &str, c: Option<&HostInfo>) -> String {
 
 /// Switches agent key's hosted session to mode (setPermission).
 pub fn set_permission(m: &mut Model, key: &str, mode: &str) -> Out {
-    use crate::screens::session_core::{agent, switch};
+    use crate::screens::session_core::switch;
+    use crate::sess::agent;
     // A host gone to sleep is woken first, then asked (setPermission's
     // wakeHostThen, permissions.go:60).
-    if m.kept
-        .peek::<crate::screens::session_core::Core>()
-        .and_then(|c| c.conns.get(key))
-        .is_some_and(|c| !c.hosted() && c.sleeping)
+    if crate::sess::peek_conn(m, key).is_some_and(|c| !c.hosted() && c.sleeping)
         && let Some(a) = agent(m, key).cloned()
     {
         let (key, mode) = (key.to_string(), mode.to_string());
@@ -102,7 +100,7 @@ pub fn perm_command(m: &mut Model, key: Option<&str>, arg: &str, yolo: bool) -> 
     use crate::screens::accounts::{setup, startsheet};
     let c = key.and_then(|k| info(m, k));
     let next = |m: &Model| {
-        let dir = crate::screens::list_extras::prompt::start_dir(m);
+        let dir = crate::startdir::start_dir(m);
         setup::next_start(m, &dir)
     };
     let mut o = match key {
@@ -133,7 +131,7 @@ pub fn perm_command(m: &mut Model, key: Option<&str>, arg: &str, yolo: bool) -> 
         }
         o.mode = arg.clone();
         o.mode_set = true;
-        crate::screens::accounts::state::accounts(m).start_over = Some(o);
+        crate::accounts::accounts(m).start_over = Some(o);
         m.flash(&format!("Next session permissions: {arg}"));
         return Out::Draw;
     }

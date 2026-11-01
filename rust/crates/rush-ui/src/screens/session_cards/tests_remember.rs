@@ -142,15 +142,11 @@ fn remember_asks_then_keeps() {
 fn a_draft_waits_while_you_type() {
     let tmp = tempfile::tempdir().unwrap();
     let (mut m, _, _) = model(tmp.path());
-    crate::screens::session_core::conn(&mut m, "k")
-        .input
-        .set("half a message");
+    crate::sess::conn(&mut m, "k").input.set("half a message");
     super::remember::remember_command(&mut m, "I like tabs");
     assert!(m.confirm.is_none());
     assert_eq!(flash(&m), "the note is ready · #remember alone shows it");
-    crate::screens::session_core::conn(&mut m, "k")
-        .input
-        .clear();
+    crate::sess::conn(&mut m, "k").input.clear();
     super::remember::remember_command(&mut m, "");
     assert!(m.confirm.is_some(), "shown");
 }
@@ -264,12 +260,7 @@ fn memory_view_plus_and_tidy() {
     );
     m.session.as_mut().unwrap().sel = format!("mem:{note}");
     press(&mut m, "+");
-    assert_eq!(
-        crate::screens::session_core::conn(&mut m, "k")
-            .input
-            .string(),
-        "#remember "
-    );
+    assert_eq!(crate::sess::conn(&mut m, "k").input.string(), "#remember ");
     assert!(m.session.as_ref().unwrap().sel.is_empty());
 }
 

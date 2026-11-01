@@ -336,7 +336,7 @@ pub fn claude_screen(name: &str) -> Option<&'static str> {
 /// Hands the terminal to the agent's program on one of its own screens,
 /// for session key's account and folder (openScreen).
 pub fn open_screen(m: &mut Model, key: &str, screen: &str) -> Out {
-    let Some(a) = session_core::agent(m, key).cloned() else {
+    let Some(a) = crate::sess::agent(m, key).cloned() else {
         return Out::Idle;
     };
     let harness = harness_name(&m.reg, &a.kind);
@@ -385,15 +385,15 @@ pub fn screen_done(m: &mut Model, key: &str, screen: &str, r: crate::frame::outs
         return Out::Draw;
     }
     if screen != "plugin"
-        || session_core::open_key(m).as_deref() != Some(key)
-        || !session_core::conn(m, key).hosted()
+        || crate::sess::open_key(m).as_deref() != Some(key)
+        || !crate::sess::conn(m, key).hosted()
     {
         return Out::Draw;
     }
     // A running session only sees newly enabled plugins once it reloads
     // them; mid-turn, that's left to you.
-    if session_core::conn(m, key).info.state == "working" {
-        let name = session_core::agent(m, key)
+    if crate::sess::conn(m, key).info.state == "working" {
+        let name = crate::sess::agent(m, key)
             .map(|a| a.display_name.clone())
             .unwrap_or_default();
         m.flash(&format!(
@@ -408,11 +408,11 @@ pub fn screen_done(m: &mut Model, key: &str, screen: &str, r: crate::frame::outs
 /// The kind of agent session key runs: its host's word, else the list's
 /// (sessionAgent).
 pub(crate) fn kind_of(m: &mut Model, key: &str) -> String {
-    let k = session_core::conn(m, key).info.began.kind.clone();
+    let k = crate::sess::conn(m, key).info.began.kind.clone();
     if !k.is_empty() {
         return k;
     }
-    session_core::agent(m, key)
+    crate::sess::agent(m, key)
         .map(|a| a.kind.as_str().to_string())
         .unwrap_or_default()
 }
@@ -452,7 +452,7 @@ pub fn command(m: &mut Model, key: &str, name: &str, arg: &str) -> (Out, String)
         return (Out::Draw, name);
     }
     if let Some(cloud) = cloud
-        && session_core::agent(m, key).is_some()
+        && crate::sess::agent(m, key).is_some()
     {
         m.open_sheet(Box::new(ClaudeSheet {
             conn: key.to_string(),
@@ -472,7 +472,7 @@ pub fn screen_command(m: &mut Model, key: &str, name: &str, arg: &str) -> Out {
         return Out::Pass;
     };
     if !arg.is_empty() && (screen == "mcp" || screen == "config")
-        || session_core::agent(m, key).is_none()
+        || crate::sess::agent(m, key).is_none()
     {
         return Out::Pass;
     }
@@ -498,7 +498,7 @@ pub fn session_cwd(m: &Model, key: &str, a: &rush_core::agent::Agent) -> String 
 /// where it has one; Pass for the rest, which open Claude Code's
 /// (rushScreen).
 pub fn rush_screen(m: &mut Model, key: &str, screen: &str) -> Out {
-    let Some(a) = session_core::agent(m, key).cloned() else {
+    let Some(a) = crate::sess::agent(m, key).cloned() else {
         return Out::Pass;
     };
     let kind = kind_of(m, key);
@@ -567,7 +567,7 @@ fn open_skills(m: &mut Model, key: &str, kind: &str, p: Profile, cwd: String) {
         move || local_commands(&reg, &ad, p, &cwd),
         move |m, all| {
             let use_it: sheets::UseIt = Rc::new(move |m, name| {
-                session_core::conn(m, &key).input.set(&format!("/{name} "));
+                crate::sess::conn(m, &key).input.set(&format!("/{name} "));
             });
             sheets::open_skills(m, &kind, all, use_it);
             Out::Draw
@@ -621,7 +621,7 @@ pub fn ask_unknown(m: &mut Model, key: &str, text: &str, now: bool) -> bool {
     if m.kept::<Screens>().send_raw {
         return false;
     }
-    let Some(a) = session_core::agent(m, key).cloned() else {
+    let Some(a) = crate::sess::agent(m, key).cloned() else {
         return false;
     };
     // Claude Code sessions are typed into, and know their own commands;
@@ -634,7 +634,7 @@ pub fn ask_unknown(m: &mut Model, key: &str, text: &str, now: bool) -> bool {
         .map(|v| v.sess.commands.clone())
         .unwrap_or_default();
     let kind = kind_of(m, key);
-    if !session_core::conn(m, key).hosted() || said.is_empty() || !own_screens(&m.reg, &kind) {
+    if !crate::sess::conn(m, key).hosted() || said.is_empty() || !own_screens(&m.reg, &kind) {
         return false;
     }
     let t = text.trim();
@@ -727,13 +727,13 @@ impl Sheet for UnknownSheet {
                 Out::Draw
             }
             "enter" => {
-                if session_core::agent(m, &self.conn).is_none() {
+                if crate::sess::agent(m, &self.conn).is_none() {
                     return Out::Close;
                 }
                 if self.cur == 1 {
                     return closed(send_raw(m, &self.conn, self.now));
                 }
-                session_core::conn(m, &self.conn).input.clear_sent();
+                crate::sess::conn(m, &self.conn).input.clear_sent();
                 closed(open_screen(m, &self.conn, &self.line))
             }
             _ => Out::Idle,
@@ -789,10 +789,10 @@ impl Sheet for ClaudeSheet {
         match k.s.as_str() {
             "esc" | "ctrl+c" => Out::Close,
             "enter" => {
-                if session_core::agent(m, &self.conn).is_none() {
+                if crate::sess::agent(m, &self.conn).is_none() {
                     return Out::Close;
                 }
-                session_core::conn(m, &self.conn).input.clear_sent();
+                crate::sess::conn(m, &self.conn).input.clear_sent();
                 closed(open_screen(m, &self.conn, &self.line))
             }
             _ => Out::Idle,

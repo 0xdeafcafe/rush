@@ -232,7 +232,7 @@ impl Panel<'_, '_> {
     /// The agent run sa is: a spawned one's own, else the session's.
     fn kind(&self, sa: &Subagent) -> String {
         sa.id
-            .strip_prefix(crate::screens::list_extras::spawns::SPAWN_PREFIX)
+            .strip_prefix(crate::spawns::SPAWN_PREFIX)
             .and_then(|h| self.runs.spawns.get(h))
             .map(|r| r.kind.clone())
             .filter(|k| !k.is_empty())
@@ -292,8 +292,7 @@ impl Panel<'_, '_> {
     }
 
     fn running(&self, out: &mut Vec<ViewLine>, sa: &Subagent, lead: &str, i: usize) {
-        let mark =
-            crate::screens::accounts::look::spin_of(self.r.reg, &self.kind(sa), self.r.tick + i);
+        let mark = crate::look::spin_of(self.r.reg, &self.kind(sa), self.r.tick + i);
         let top = self.name(lead, mark, TEXT, &self.ran(sa), sa);
         let under = self.doing(lead, sa);
         row(out, self.r, &format!("run:{}", sa.id), self.w, [top, under]);

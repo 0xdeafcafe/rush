@@ -10,9 +10,9 @@ use rush_core::text::Line;
 use rush_host::server::AUTH_STOPPED;
 
 use super::{Act, Conn, HostInfo, act};
+use crate::accounts::StartOver;
 use crate::frame::Out;
 use crate::model::Model;
-use crate::screens::accounts::setup::StartOver;
 use crate::screens::accounts::signedout::{Signin, signed_out_rows, signin_key};
 
 /// Whether the session sits stopped because its sign-in ran out, and no

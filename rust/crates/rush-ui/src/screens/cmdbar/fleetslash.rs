@@ -18,233 +18,9 @@ use crate::model::Model;
 use crate::screens::social::broadcast::ModelBroadcast;
 use crate::style::*;
 
-/// rush's # commands: name, what it does, and its argument's hint (<>
-/// needs one, [] can go without).
-pub const FLEET_COMMANDS: &[(&str, &str, &str)] = &[
-    (
-        "expand",
-        "open all conversation turns; tool details keep their own folds",
-        "",
-    ),
-    (
-        "collapse",
-        "preview older turns, keeping the latest turn open",
-        "",
-    ),
-    ("model", "choose the current session’s model", "[model]"),
-    (
-        "effort",
-        "choose the current session’s reasoning effort",
-        "[level]",
-    ),
-    (
-        "use",
-        "what the next session starts as, or in a session switch it (same row; the old one retires), then a message to send it; alone opens the sheet (Shift+Tab)",
-        "[harness:account[:effort]] [message]",
-    ),
-    (
-        "done",
-        "put the agent away in Earlier (alt+d); its idle process stops",
-        "",
-    ),
-    (
-        "room",
-        "a full-screen group chat: fresh agents argue a topic to a verdict, and you're in it",
-        "[new|topic]",
-    ),
-    (
-        "discuss",
-        "a room on this chat: agents argue it, with its latest turns as context, and the verdict comes back here",
-        "[topic]",
-    ),
-    (
-        "intervene",
-        "two agents go through this chat (or @agent's): plan, status, turns and tool calls; they tell you why it's stuck, and what the agent must do goes in its box",
-        "[@agent] [concern]",
-    ),
-    (
-        "broadcast",
-        "send one message to several agents: all, @names, or alone to click them in the list",
-        "[all|@agent…] [message]",
-    ),
-    (
-        "log",
-        "the last 50 things rush said: answers, what failed, and what it did on its own (clean-ups, worktrees kept, work landed)",
-        "",
-    ),
-    (
-        "feed",
-        "the feed your agents share: blockers, fixes, heads-ups; on|off switches it for all of rush; open|closed lets agents cross projects",
-        "[on|off|open|closed|new]",
-    ),
-    (
-        "land",
-        "tell the agent to land its work: commit it, then merge its branch or pull request (alt+p)",
-        "",
-    ),
-    (
-        "go",
-        "tell the agent to keep going (alt+g); after an error, to continue",
-        "",
-    ),
-    (
-        "away",
-        "leave the session to carry on while you're gone: at each check-in (every 30m unless you say) it's told to keep going, and what it asks or needs approved is saved for when you're back, until the time's up or it's all done; off, or alone, says what happened",
-        "[3h [every 15m]|off]",
-    ),
-    (
-        "loop",
-        "tell the agent to keep going each time it's idle at a check-in (every 30m unless you say), till it's all done or the time you give is up; questions wait for you as ever",
-        "[3h] [every 15m]|off",
-    ),
-    (
-        "back",
-        "what happened while you were away: check-ins, its last words, what it saved for you; ends away",
-        "",
-    ),
-    ("stop", "stop the agent", ""),
-    (
-        "rm",
-        "delete the session, and its worktree when that's safe",
-        "",
-    ),
-    (
-        "worktree",
-        "whether new sessions in this project get a git worktree and branch of their own (on unless turned off); alone says which",
-        "[on|off]",
-    ),
-    ("kill", "kill the agent and everything it started", ""),
-    (
-        "perm",
-        "choose session permissions (also in Shift+Tab)",
-        "[mode]",
-    ),
-    (
-        "yolo",
-        "explicitly enable this harness’s supported bypass permission mode",
-        "",
-    ),
-    (
-        "fork",
-        "copy this conversation to another harness in a new session, from a summary, and keep both",
-        "<harness>",
-    ),
-    (
-        "compact",
-        "compact this session with a model of your choosing: its own (keeps the cache), a cheaper Claude, or a local Ollama one",
-        "",
-    ),
-    (
-        "remember",
-        "keep something in this project's memory: a cheap model writes the note (alt+k on a message remembers it)",
-        "<what to remember>",
-    ),
-    (
-        "slim",
-        "what this session carries every request and never uses (MCP servers, subagents, skills): drop them for it alone, or compact it (#optimise)",
-        "",
-    ),
-    (
-        "clean",
-        "delete the agent's temp work; all does every finished agent",
-        "[all]",
-    ),
-    (
-        "cd",
-        "tell the agent to work in another folder from now on",
-        "[path]",
-    ),
-    ("rename", "rename the agent, or type the new name", "[name]"),
-    ("pin", "pin or unpin the agent in its harness", ""),
-    ("pr", "open the agent's pull request", ""),
-    (
-        "full",
-        "open a Claude Code agent full screen, in Claude Code",
-        "",
-    ),
-    (
-        "rush",
-        "move the agent into rush mode (a terminal one is copied, not stopped)",
-        "",
-    ),
-    (
-        "new",
-        "start an agent on any harness, provider, model and effort, once; defaults stay as they are",
-        "[harness@provider[:account]] [model] [effort] [task]",
-    ),
-    (
-        "on",
-        "start an agent on another machine's rush (rush remote add): its folder, its agent; shows here while rush remote attach runs",
-        "MACHINE [folder] [agent=KIND] task",
-    ),
-    (
-        "with",
-        "what the next session starts as, once: #new without a task",
-        "[harness@provider[:account]] [model] [effort]",
-    ),
-    (
-        "mackeys",
-        "send Terminal.app's ⌘← → ⌘⌫ ⌘⌦ ⌘Z on to rush through Hammerspoon, installed with brew if need be; alone says whether it's on",
-        "[on|off]",
-    ),
-    (
-        "ghostty",
-        "put Ghostty on LangWatch's light and dark themes, following the system; off puts its own colours back; alone says whether it's on",
-        "[on|off]",
-    ),
-    (
-        "statusline",
-        "build the top bar, the agent header and Claude Code's status line",
-        "",
-    ),
-    (
-        "why",
-        "what rush did to this session in the last hour and why: woken, held, moved on, stopped (rush why)",
-        "",
-    ),
-    (
-        "network",
-        "whether the API answers, the network rush is on and how fast it moves, and what waits for it (#net)",
-        "",
-    ),
-    (
-        "view",
-        "Agents and the Session side by side, the agent's Session alone, or Agents alone (shift+← →)",
-        "<split|agent|list>",
-    ),
-    (
-        "stash",
-        "what you set aside, sent, cleared and replaced, to put back in the box (ctrl+r · ctrl+s sets what's typed aside)",
-        "",
-    ),
-    (
-        "guide",
-        "ask the guide, a fast model that sees your sessions: what's next, which one needs you, where something is; it opens the one it means",
-        "[question]",
-    ),
-    (
-        "ask",
-        "ask rush about itself, or have it change a setting for you: an agent in rush's own folder, with its guide",
-        "[question]",
-    ),
-    ("help", "a short guide to rush", ""),
-    (
-        "update",
-        "install the newest rush (brew, or its GitHub release); #reload runs it",
-        "",
-    ),
-    (
-        "reload",
-        "run the installed rush in this one's place, where you were; sessions carry on and move onto it between turns; all reloads the other rush views first",
-        "[all]",
-    ),
-    (
-        "tips",
-        "Getting started and tips from the top; off puts them away",
-        "[off]",
-    ),
-    ("quit", "leave rush", ""),
-];
+// rush's # commands are the base's: the keymap's actions name them
+// (crate::keybind).
+pub use crate::keybind::FLEET_COMMANDS;
 
 /// Other names a command answers to.
 pub const FLEET_ALIASES: &[(&str, &str)] = &[
@@ -338,7 +114,7 @@ fn new_session_commands(m: &Model) -> Vec<rush_core::adapter::Command> {
         kind: rush_core::adapter::Kind::from(kind.as_str()),
         ..Default::default()
     };
-    let dir = crate::screens::list_extras::prompt::start_dir(m);
+    let dir = crate::startdir::start_dir(m);
     crate::screens::session_cards::claudescreen::local_commands(&m.reg, &ad, p, &dir)
 }
 
@@ -413,7 +189,7 @@ pub fn fleet_args_of(m: &Model, name: &str) -> (Vec<String>, String) {
             (opts, String::new())
         }
         "view" => {
-            let now = match crate::screens::list_extras::split::widths(m) {
+            let now = match crate::split::widths(m) {
                 (0, _) => "agent",
                 (_, 0) => "list",
                 _ => "split",
@@ -510,12 +286,8 @@ pub fn available_fleet_commands(m: &Model) -> Vec<Command> {
         .or_else(|| m.selected().map(|i| &m.agents[i]));
     // rush runs it and has counted what fills its context (c.client,
     // c.sess.Usage): #slim has nothing to show before.
-    let counted = |k: &str| {
-        m.kept
-            .peek::<crate::screens::session_core::Core>()
-            .and_then(|c| c.conns.get(k))
-            .is_some_and(|c| c.hosted() && c.context.is_some())
-    };
+    let counted =
+        |k: &str| crate::sess::peek_conn(m, k).is_some_and(|c| c.hosted() && c.context.is_some());
     fleet_commands()
         .into_iter()
         .filter(|c| {

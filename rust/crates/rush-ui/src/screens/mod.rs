@@ -5,9 +5,8 @@
 //! frame/ext.rs and DESIGN.md "Screens".
 
 use crate::chores::{Chore, always};
-use crate::clanker::Reaction;
+use crate::frame::Ext;
 use crate::frame::ext::{Act, Calls, Kept};
-use crate::frame::{Editor, Ext};
 use crate::model::Model;
 use crate::session::SessionView;
 
@@ -100,26 +99,23 @@ fn calls() -> Calls {
         predict_left: Some(predict_left),
         filter_match: Some(list_extras::filter::has_match),
         filter_snippet: Some(list_extras::filter::snippet),
-        hosts_agent: Some(|m, a| session_core::host::hosts_of(m).is_some_and(|h| h.hosts(a))),
         prime_changes: Some(session_core::changes::prime),
-        conn_linked: Some(|m, key| {
+        conn: Some(|m, key| &mut session_core::conn(m, key).base),
+        peek_conn: Some(|m, key| {
             m.kept
                 .peek::<session_core::Core>()
                 .and_then(|c| c.conns.get(key))
-                .is_some_and(|c| c.hosted())
+                .map(|c| &c.base)
         }),
-        conn_box: Some(conn_box),
-        conn_box_mut: Some(conn_box_mut),
-        reaction: Some(|m| {
-            m.kept
-                .peek::<session_core::finish::Finish>()
-                .map(|f| f.fx)
-                .unwrap_or_default()
+        conn_if: Some(|m, key| {
+            m.kept::<session_core::Core>()
+                .conns
+                .get_mut(key)
+                .map(|c| &mut c.base)
         }),
-        reaction_mut: Some(reaction_mut),
-        held_config: Some(held_config),
-        read_only: Some(accounts::state::read_only),
-        accounts_settled: Some(accounts::state::read_settled),
+        start_install: Some(session_core::start::install),
+        plugin_key_actions: Some(plugin_ui::hooks::plugin_key_actions),
+        plugin_keys: Some(plugin_ui::hooks::plugin_keys),
         hosted_id: Some(crate::hosted::id),
         hosted_alone: Some(crate::hosted::alone),
         all_agents: Some(crate::hosted::all_agents),
@@ -133,36 +129,6 @@ fn calls() -> Calls {
 /// The Session kept as the list moved off it (list_extras/predict.rs).
 fn predict_left(k: &mut Kept) -> Option<&mut SessionView> {
     k.get::<list_extras::predict::Predict>().left.as_mut()
-}
-
-/// The message box of the session with key, when it has one
-/// (session_core's Conn).
-fn conn_box<'a>(m: &'a Model, key: &str) -> Option<&'a Editor> {
-    m.kept
-        .peek::<session_core::Core>()
-        .and_then(|c| c.conns.get(key))
-        .map(|c| &c.input)
-}
-
-/// conn_box, to change.
-fn conn_box_mut<'a>(m: &'a mut Model, key: &str) -> Option<&'a mut Editor> {
-    m.kept::<session_core::Core>()
-        .conns
-        .get_mut(key)
-        .map(|c| &mut c.input)
-}
-
-/// What clanker is reacting to, to change (session_core/finish.rs).
-fn reaction_mut(m: &mut Model) -> &mut Reaction {
-    &mut m.kept::<session_core::finish::Finish>().fx
-}
-
-/// The config the UI holds, once loaded (accounts/state.rs).
-fn held_config(m: &mut Model) -> Option<&mut rush_state::Config> {
-    accounts::state::accounts(m)
-        .store
-        .as_mut()
-        .map(|s| &mut s.config)
 }
 
 /// Does what the frame has a screen do (Model::act), at once.

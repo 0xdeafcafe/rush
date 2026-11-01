@@ -26,22 +26,8 @@ use crate::frame::Out;
 use crate::model::Model;
 use crate::style::*;
 
-/// What a session starts as, over what its folder's profile and Settings
-/// say (startOver).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct StartOver {
-    pub kind: String,
-    pub model: String,
-    pub effort: String,
-    pub mode: String,
-    pub mode_set: bool,
-    /// BILLING_KEY pays with the provider's API key; "" as it's signed in.
-    pub billing: String,
-    /// The account's name; "" is the one in use.
-    pub account: String,
-    /// The profile of yours it is; "" none.
-    pub profile: String,
-}
+// What a session starts as is the base's (crate::accounts).
+pub use crate::accounts::{StartOver, setup_label};
 
 /// A provider id (claude, claude-key, ollama) and the agents here that
 /// run it (route).
@@ -273,18 +259,6 @@ pub fn setup_name(reg: &Registry, k: &str, billing: &str, account: &str) -> Stri
         return format!("{w}:{}", name_word(account));
     }
     w
-}
-
-/// A setup as it's shown: OpenAI (Codex) · alex, Anthropic (Pi) · API key
-/// (setupLabel).
-pub fn setup_label(reg: &Registry, k: &str, billing: &str, account: &str) -> String {
-    if billing == BILLING_KEY || reg.key_only(k) {
-        return format!("{} · API key", reg.label(k));
-    }
-    if !account.is_empty() && reg.harness_of(k).as_str() == k {
-        return format!("{} · {account}", reg.label(k));
-    }
-    reg.label(k)
 }
 
 /// A setup's name before provider words: <harness>:<account>, pi:ollama.

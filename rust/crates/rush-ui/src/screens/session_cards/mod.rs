@@ -100,14 +100,7 @@ use crate::style::*;
 
 pub use card::CardBtn;
 
-/// A permission mode a running harness says it has (host.Info's
-/// PermissionModes).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Mode {
-    pub id: String,
-    pub name: String,
-    pub description: String,
-}
+pub use crate::host::Mode;
 
 /// A subagent the session runs: the call that started it, its type and
 /// what it was given to do (convo.Subagent's).
@@ -174,7 +167,7 @@ pub struct HostInfo {
     pub stops: (bool, bool),
     /// The usage limit that stopped it, while one has (Info.Limit), and
     /// when its host last changed its info (Info.UpdatedAt).
-    pub limit: Option<crate::screens::session_core::host::Limit>,
+    pub limit: Option<crate::host::Limit>,
     pub updated: rush_core::time::Ms,
     /// Why its agent last failed (Info.Error): a sign-in that ran out
     /// starts with rush_host's AUTH_STOPPED.
@@ -789,9 +782,10 @@ pub fn card_top(m: &Model, key: &str) -> (isize, usize, usize) {
     };
     match m.session.as_ref().filter(|v| v.key == key) {
         Some(v) if c.card_in_panels => {
-            let pinned = v.shown.first().is_some_and(|r| {
-                r.starts_with(crate::screens::session_core::conversation::PIN_REF)
-            });
+            let pinned = v
+                .shown
+                .first()
+                .is_some_and(|r| r.starts_with(crate::sess::PIN_REF));
             (
                 v.top as isize + v.panels_at + c.card_off as isize,
                 v.top + usize::from(pinned),

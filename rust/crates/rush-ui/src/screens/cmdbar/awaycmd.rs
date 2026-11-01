@@ -7,12 +7,14 @@
 
 use rush_core::text::Line;
 
+use crate::away::{Away, back_lines, clock, held_reply, parse_away};
 use crate::frame::sheet::Sheet;
 use crate::frame::{Out, Press};
+use crate::host::Op;
 use crate::model::Model;
-use crate::screens::list_extras::away::{Away, back_lines, clock, held_reply, parse_away};
-use crate::screens::session_core::host::Op;
-use crate::screens::session_core::{agent, conn, open_key, switch};
+use crate::screens::session_core::switch;
+use crate::sess::conn;
+use crate::sess::{agent, open_key};
 use crate::style::dur;
 
 /// The protocol a host speaks from which it keeps an away (Info.Proto).
@@ -145,10 +147,7 @@ pub fn back_from_away(m: &mut Model, key: &str) {
 /// Session of's away, while it's the one open.
 fn away_of(m: &Model, of: &str) -> Option<Away> {
     m.session.as_ref().filter(|v| v.key == of)?;
-    m.kept
-        .peek::<crate::screens::session_core::Core>()
-        .and_then(|c| c.conns.get(of))
-        .and_then(|c| c.info.away.as_deref().cloned())
+    crate::sess::peek_conn(m, of).and_then(|c| c.info.away.as_deref().cloned())
 }
 
 impl Sheet for BackSheet {

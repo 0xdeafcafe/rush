@@ -15,7 +15,7 @@ use super::moveto::{disk_dirs, move_note};
 use super::{core, rushmove};
 use crate::frame::{Out, Press};
 use crate::model::Model;
-use crate::screens::list_extras::prompt::start_dir;
+use crate::startdir::start_dir;
 
 /// An agent that picks its conversations up again.
 struct Movable;

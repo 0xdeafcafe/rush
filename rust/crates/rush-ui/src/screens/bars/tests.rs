@@ -19,7 +19,6 @@ use super::top::usage_meter;
 use super::*;
 use crate::frame::Mouse;
 use crate::header::Drops;
-use crate::screens::session_core as core;
 use crate::session::{SessionView, Source};
 
 const NOW: Ms = 1_793_190_896_789;
@@ -251,7 +250,7 @@ fn opened(mode: &str) -> Model {
     m.agents = vec![a];
     m.session = Some(v);
     m.full = true; // the Session alone
-    core::conn(&mut m, KEY).info.permission_mode = mode.into();
+    crate::sess::conn(&mut m, KEY).info.permission_mode = mode.into();
     with_bars(
         &mut m,
         default_top(),
@@ -363,7 +362,7 @@ fn every_segment_is_listed() {
 /// it waits for, retries run out say why (rushmode.go:2858 paneHeader).
 #[test]
 fn the_state_in_gos_words() {
-    use crate::screens::session_core::host::{Info, Limit, Retry};
+    use crate::host::{Info, Limit, Retry};
     let m = opened("default");
     let words = |info: Info, sleeping: bool| {
         let mut o = super::agent::Of::read(&m, KEY).unwrap();
@@ -450,7 +449,7 @@ fn the_state_in_gos_words() {
 /// paneHeader).
 #[test]
 fn a_running_workflow_says_working() {
-    use crate::screens::session_core::host::Info;
+    use crate::host::Info;
     let mut m = opened("default");
     if let Some(a) = m.agents.iter_mut().find(|a| a.key == KEY) {
         a.job.in_flight = 1;
@@ -469,7 +468,7 @@ fn a_running_workflow_says_working() {
 /// stale.go:41): a host from before it said its rush is never older.
 #[test]
 fn billing_and_an_older_rush() {
-    use crate::screens::session_core::host::Info;
+    use crate::host::Info;
     let mut m = opened("default");
     with_bars(
         &mut m,

@@ -321,7 +321,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
             if k.s == "space" || k.s == "enter" {
                 // A path you typed to an image becomes the image once it's
                 // done, where it was typed (rushmode.go:4483-4489).
-                inline_typed(&mut c.input, &mut c.imgs);
+                inline_typed(&mut c.base.input, &mut c.base.imgs);
             }
             if !copied.is_empty() {
                 m.copy_text(copied);
@@ -524,16 +524,16 @@ pub fn box_vert(m: &mut Model, key: &str, d: isize, shift: bool) {
     let mut b = c.drawn.clone();
     b.text = c.input.text.clone();
     let segs = b.segs();
-    let text = &c.input.text;
+    let text = &c.base.input.text;
     let mut pos = c.input.pos.min(text.len());
     let row = segs
         .iter()
         .position(|sg| pos >= sg.from && pos <= sg.to)
         .unwrap_or(segs.len().saturating_sub(1));
     if shift && c.input.anchor.is_none() {
-        c.input.anchor = Some(pos);
+        c.base.input.anchor = Some(pos);
     } else if !shift {
-        c.input.anchor = None;
+        c.base.input.anchor = None;
     }
     let to = row as isize + d;
     if to < 0 {
@@ -1049,7 +1049,7 @@ pub fn paste(m: &mut Model, text: &str) -> Out {
 /// (rushmode.go:4486-4489).
 pub(crate) fn inline_typed(
     input: &mut crate::frame::Editor,
-    imgs: &mut crate::screens::session_cards::imagerefs::ImageRefs,
+    imgs: &mut crate::imagerefs::ImageRefs,
 ) {
     let text = input.string();
     if let Some(t) = imgs.inline(&text, &look_disk) {

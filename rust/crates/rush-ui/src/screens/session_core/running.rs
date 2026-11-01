@@ -24,8 +24,8 @@ use super::subs::{DOCK_RUNS_SHOWN, DoneRun, Runs, jobs_of, loose_jobs};
 use super::workflow::{DockFlow, dock_flows, flow_row, round_s, workflow_now, workflow_of};
 use super::{conn, core, open_key};
 use crate::frame::Out;
+use crate::look::spin_of;
 use crate::model::Model;
-use crate::screens::accounts::look::spin_of;
 use crate::screens::list_extras::jobs::{Bg, Dock, job_lines, job_row, jobs_preview};
 use crate::style::*;
 
@@ -370,7 +370,7 @@ pub fn running_preview(
 /// (subKind).
 pub fn sub_kind(c: &Ctx, sa: &Subagent) -> String {
     sa.id
-        .strip_prefix(crate::screens::list_extras::spawns::SPAWN_PREFIX)
+        .strip_prefix(crate::spawns::SPAWN_PREFIX)
         .and_then(|step| c.r.spawns.get(step))
         .map(|r| r.kind.clone())
         .filter(|k| !k.is_empty())

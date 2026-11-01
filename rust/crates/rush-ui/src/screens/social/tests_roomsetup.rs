@@ -9,11 +9,11 @@ use rush_core::adapter::Registry;
 use rush_core::text::Line;
 
 use super::roomsetup::{RoomSetup, chat_room, room_choice};
+use crate::accounts::StartOver;
 use crate::frame::{Out, Press, Sheet};
+use crate::host::{Fake, set_hosts};
 use crate::model::Model;
-use crate::screens::accounts::setup::StartOver;
 use crate::screens::session_cards::discuss::RoomAsk;
-use crate::screens::session_core::host::{Fake, set_hosts};
 
 fn reg() -> Registry {
     let r = Registry::new();

@@ -49,10 +49,8 @@ mod tests_providers;
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::LazyLock;
 
 use rush_core::text::Line;
-use rush_state::{Config, Store};
 
 use crate::frame::{Ext, Mouse, Out, Place, PlaceId, Press};
 use crate::model::Model;
@@ -204,7 +202,6 @@ thread_local! {
     /// The dialog read while none is open: empty.
     static NO_DIALOG: &'static Dialog = Box::leak(Box::default());
 }
-static NO_CONFIG: LazyLock<Config> = LazyLock::new(Config::default);
 
 /// The dialog as it is; an empty one when none is open.
 pub(crate) fn dialog(m: &Model) -> &Dialog {
@@ -219,39 +216,8 @@ pub(crate) fn dialog_mut(m: &mut Model) -> &mut Dialog {
     m.kept::<State>().dialog.get_or_insert_with(Dialog::default)
 }
 
-/// rush's store, read the first time it's wanted. It is the one store the
-/// accounts hold too (Go's one m.store): a change made here and one made
-/// there land in the same copy, so neither saves the other's old value
-/// back.
-pub(crate) fn store(m: &mut Model) -> &mut Store {
-    crate::screens::accounts::state::ensure_store(m);
-    crate::screens::accounts::state::accounts(m)
-        .store
-        .get_or_insert_with(Store::load)
-}
-
-/// rush's config as loaded; the defaults before it is.
-pub(crate) fn config(m: &Model) -> &Config {
-    loaded_config(m).unwrap_or(&NO_CONFIG)
-}
-
-/// rush's config, once it's been read.
-pub(crate) fn loaded_config(m: &Model) -> Option<&Config> {
-    crate::screens::accounts::state::peek(m)
-        .store
-        .as_ref()
-        .map(|s| &s.config)
-}
-
-/// rush's config, to change: save it after with [`changed`].
-pub(crate) fn config_mut(m: &mut Model) -> &mut Config {
-    &mut store(m).config
-}
-
-/// Puts a store in place of the one on disk (tests).
-pub fn use_store(m: &mut Model, s: Store) {
-    crate::screens::accounts::state::set_store(m, s);
-}
+// rush's store is the one the accounts hold: the base's (crate::accounts).
+pub use crate::accounts::{config, config_mut, loaded_config, store, use_store};
 
 /// After a change: config.json saved, and the list drawn from it again
 /// (formKey's changed: SaveConfig, rebuild).

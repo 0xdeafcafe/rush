@@ -418,7 +418,11 @@ impl Model {
         };
         let source = source
             .or_else(|| session::Source::of(&self.reg, a))
-            .or_else(|| self.ext.calls.hosts_agent()(self, a).then_some(session::Source::Hosted));
+            .or_else(|| {
+                crate::host::hosts_of(self)
+                    .is_some_and(|h| h.hosts(a))
+                    .then_some(session::Source::Hosted)
+            });
         let Some(source) = source else {
             if quiet {
             } else if a.job.transcript_path.is_empty() {
@@ -1578,6 +1582,20 @@ fn overlay(base: &Line, top: Line, x: usize, w: usize) -> Line {
         col += sw;
     }
     out
+}
+
+/// The local wall clock at ms, as 15:04, or Mon 15:04 with day.
+pub fn clock(ms: Ms, day: bool) -> String {
+    let t = (ms / 1000) as libc::time_t;
+    // SAFETY: localtime_r writes only the tm it's given.
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    unsafe { libc::localtime_r(&t, &mut tm) };
+    let hm = format!("{:02}:{:02}", tm.tm_hour, tm.tm_min);
+    if !day {
+        return hm;
+    }
+    const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    format!("{} {hm}", DAYS[tm.tm_wday.clamp(0, 6) as usize])
 }
 
 /// The local hour at ms.

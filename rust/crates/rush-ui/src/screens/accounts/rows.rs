@@ -21,61 +21,12 @@ use rush_core::usage::{self, Quota, Source, Window};
 use rush_state::{Pick, Profile, Room, Seat, SignIn};
 
 use super::look::{LOGINS_KIND, agent_name};
-use super::setup::setup_label;
 use super::state::{LoginView, cfg, peek};
 use crate::model::Model;
 use crate::style::*;
 
-/// An agent, or one of its accounts (acctRow).
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct AcctRow {
-    pub kind: String,
-    /// The agent's own line.
-    pub head: bool,
-    /// One of Claude Code's logins.
-    pub login: Option<LoginView>,
-    /// Another agent's account.
-    pub acct: Account,
-    pub current: bool,
-    pub q: Quota,
-}
-
-impl AcctRow {
-    pub fn name(&self, m: &Model) -> String {
-        if self.head {
-            return agent_name(&m.reg, &self.kind);
-        }
-        match &self.login {
-            Some(l) => l.name.clone(),
-            None => self.acct.name.clone(),
-        }
-    }
-
-    pub fn email(&self) -> String {
-        match &self.login {
-            Some(l) => l.email.clone(),
-            None if !self.acct.email.is_empty() => self.acct.email.clone(),
-            None => self.q.email.clone(),
-        }
-    }
-
-    /// The account's own id: a login's uuid, or another agent's.
-    pub fn id(&self) -> &str {
-        match &self.login {
-            Some(l) => &l.id,
-            None => &self.acct.id,
-        }
-    }
-
-    /// The account as rush names it: harness:account, or the harness alone
-    /// for one with a single sign-in of its own (label).
-    pub fn label(&self, m: &Model) -> String {
-        if self.head {
-            return setup_label(&m.reg, &self.kind, "", "");
-        }
-        setup_label(&m.reg, &self.kind, "", &self.name(m))
-    }
-}
+// An account's row is the base's (crate::accounts).
+pub use crate::accounts::AcctRow;
 
 /// Where an account's limits are kept (acctKey).
 pub fn acct_key(kind: &str, id: &str) -> String {
@@ -262,7 +213,7 @@ fn room_now(m: &Model) -> Room {
 
 /// The folder new sessions start in (startDir): the box's, so a sheet,
 /// #new and the bars agree with it.
-pub use crate::screens::list_extras::prompt::start_dir;
+pub use crate::startdir::start_dir;
 
 /// The profile a session started in dir gets (startProfile).
 pub fn start_profile(m: &Model, dir: &str) -> Profile {
@@ -480,19 +431,8 @@ pub fn quota_window_name(w: &Window) -> String {
         .unwrap_or_else(|| "Provider quota".into())
 }
 
-/// The local wall clock at ms, as 15:04, or Mon 15:04 with day.
-pub fn clock(ms: Ms, day: bool) -> String {
-    let t = (ms / 1000) as libc::time_t;
-    // SAFETY: localtime_r writes only the tm it's given.
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    unsafe { libc::localtime_r(&t, &mut tm) };
-    let hm = format!("{:02}:{:02}", tm.tm_hour, tm.tm_min);
-    if !day {
-        return hm;
-    }
-    const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    format!("{} {hm}", DAYS[tm.tm_wday.clamp(0, 6) as usize])
-}
+// The wall clock is the base's (crate::model).
+pub use crate::model::clock;
 
 /// An account's first two windows, each a labelled meter, or its balance,
 /// or why there are none, w1 + w2 wide (limits).

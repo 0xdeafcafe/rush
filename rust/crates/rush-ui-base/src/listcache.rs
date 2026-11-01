@@ -157,7 +157,7 @@ pub fn stand_in(m: &mut Model, segs: &[(&str, Line)], plan: Vec<Line>) {
 fn seg_in(m: &Model, id: &str) -> bool {
     let sys = || rush_sys::sysinfo::now().1.total != 0;
     let net = || rush_net::netwatch::now().known;
-    let accts = || m.ext.calls.accounts_settled()(m);
+    let accts = || crate::accounts::read_settled(m);
     let limits = || accts() && m.ext.calls.limits_fetched()(m);
     match id {
         "cpu" | "ram" | "memory" => m.ext.calls.machine_read()(m),

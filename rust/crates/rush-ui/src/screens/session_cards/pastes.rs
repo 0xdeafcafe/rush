@@ -4,7 +4,6 @@
 use crate::frame::editor::Seg;
 use crate::frame::{Out, Press};
 use crate::model::Model;
-use crate::screens::session_core;
 
 // A box's pastes are the frame's (crate::pastes): each box keeps its own.
 pub use crate::pastes::{PASTE_CHIP, Pastes, chip_for, has_paste_chip, is_long_paste};
@@ -18,9 +17,9 @@ pub fn chip_key(m: &mut Model, k: &Press) -> Out {
         && !m.on_place()
         && !crate::screens::cmdbar::bar::is_open(m);
     let s = if boxes { k.s.as_str() } else { "" };
-    if let Some(key) = session_core::open_key(m)
-        && session_core::conn(m, &key).input.hot != Seg::default()
-        && session_core::conn(m, &key).input.key_on_hot(s)
+    if let Some(key) = crate::sess::open_key(m)
+        && crate::sess::conn(m, &key).input.hot != Seg::default()
+        && crate::sess::conn(m, &key).input.key_on_hot(s)
     {
         return Out::Draw;
     }

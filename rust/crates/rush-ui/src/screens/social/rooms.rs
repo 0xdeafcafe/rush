@@ -26,7 +26,9 @@ use crate::session::{SessionView, Source};
 use crate::style::*;
 
 // What the list knows of rooms is the frame's (crate::rooms).
-pub use crate::rooms::{Grouped, ROOM_KEY_PREFIX, RoomRows, Under, grouped, is_room_key};
+pub use crate::rooms::{
+    Grouped, ROOM_KEY_PREFIX, RoomRows, Under, grouped, is_room_key, row_agent,
+};
 
 /// Model's side of this module: Model is rush-ui-base's, so its
 /// methods here are a trait's.
@@ -724,16 +726,6 @@ pub fn open_room(m: &mut Model, key: &str) {
     }
 }
 
-/// The agent row key is: an agent's, or a room's (Go's room rows are
-/// agents in the list, so a room's pane has an agent's header).
-pub fn row_agent<'a>(m: &'a Model, key: &str) -> Option<&'a Agent> {
-    if let Some(a) = m.agents.iter().find(|a| a.key == key) {
-        return Some(a);
-    }
-    let id = key.strip_prefix(ROOM_KEY_PREFIX)?;
-    m.rooms_grouped()?.row.get(id)
-}
-
 /// The room row an open view of room key is, and what its header says
 /// where an agent's says how it's connected (roomConn).
 pub fn pane_head(m: &Model, key: &str) -> Option<(Agent, Line)> {
@@ -814,16 +806,14 @@ pub fn send_from(m: &mut Model, key: &str) -> Option<Out> {
     if !is_room_key(key) {
         return None;
     }
-    let text = crate::screens::session_core::conn(m, key).input.string();
+    let text = crate::sess::conn(m, key).input.string();
     let feed = m.kept::<RoomFeed>();
     if feed.key != key || text.trim().is_empty() {
         return Some(Out::Idle);
     }
     let (room, running) = (feed.room.clone(), feed.running);
     if running {
-        crate::screens::session_core::conn(m, key)
-            .input
-            .clear_sent();
+        crate::sess::conn(m, key).input.clear_sent();
     }
     Some(send_room(m, &room, running, &text))
 }

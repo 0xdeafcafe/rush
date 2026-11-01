@@ -13,6 +13,8 @@ rush-draw.workspace = true
 rush-sys.workspace = true
 rush-state.workspace = true
 rush-events.workspace = true
+# The keymap in force (keybind.rs).
+rush-keymap.workspace = true
 rush-net.workspace = true
 # A workflow's files and a sign-in's renewal (lead.rs).
 rush-claude.workspace = true

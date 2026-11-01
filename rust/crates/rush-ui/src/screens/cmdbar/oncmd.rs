@@ -105,10 +105,7 @@ pub fn on_command(m: &mut Model, arg: &str) -> Out {
         m.flash_err("images aren't sent to another machine yet: remove them or start here");
         return Out::Draw;
     }
-    let note = if crate::screens::accounts::state::peek(m)
-        .start_over
-        .is_some()
-    {
+    let note = if crate::accounts::peek(m).start_over.is_some() {
         " · your start options aren't used there"
     } else {
         ""

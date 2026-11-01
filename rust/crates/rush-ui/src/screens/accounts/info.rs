@@ -94,9 +94,7 @@ const WHY_WINDOW: Ms = 60 * 60 * 1000;
 /// The rush id of the session key and the one that started it, when rush
 /// hosts it or did (Info.ID, Meta spawnedBy).
 pub(crate) fn rush_id(m: &Model, key: &str) -> (String, String) {
-    m.kept
-        .peek::<crate::screens::session_core::Core>()
-        .and_then(|k| k.conns.get(key))
+    crate::sess::peek_conn(m, key)
         .map(|c| (c.info.began.id.clone(), c.info.began.spawned_by.clone()))
         .unwrap_or_default()
 }
@@ -672,10 +670,7 @@ fn status_lines(
 fn context_lines(m: &Model, a: &Agent, s: &rush_convo::Session, w: usize) -> Vec<Line> {
     use crate::screens::session_core::context as cx;
     let k = a.kind.as_str();
-    let c = m
-        .kept
-        .peek::<crate::screens::session_core::Core>()
-        .and_then(|core| core.conns.get(&a.key));
+    let c = crate::sess::peek_conn(m, &a.key);
     let Some(u) = c.and_then(|c| c.context.as_deref()).filter(|u| u.max > 0) else {
         let mut out = Vec::new();
         if s.context > 0 {
@@ -716,14 +711,14 @@ fn context_lines(m: &Model, a: &Agent, s: &rush_convo::Session, w: usize) -> Vec
     let f = fill_of(u.total, u.max, a.compaction);
     let mut meta = format!(
         "{} of {} · {:.0}%",
-        crate::screens::session_core::paint::tokens(u.total),
+        crate::paint::tokens(u.total),
         tokens(f.window),
         f.pct()
     );
     if u.auto_compact && u.auto_compact_at > 0 {
         meta.push_str(&format!(
             " · auto-compacts at {}",
-            crate::screens::session_core::paint::tokens(u.auto_compact_at)
+            crate::paint::tokens(u.auto_compact_at)
         ));
     }
     if f.compacts() {
@@ -775,7 +770,7 @@ fn context_since(
     m: &Model,
     a: &Agent,
     s: &rush_convo::Session,
-    c: Option<&crate::screens::session_core::Conn>,
+    c: Option<&crate::sess::ConnCore>,
     w: usize,
 ) -> Vec<Line> {
     use crate::screens::session_core::context as cx;

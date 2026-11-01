@@ -298,7 +298,7 @@ fn after_question(m: &mut Model, what: &'static str, f: Work) -> Out {
 
 /// Has the memory view and Projects read memory again (dropMemCache).
 pub(crate) fn drop_mem_cache(m: &mut Model) {
-    if let Some(key) = crate::screens::session_core::open_key(m) {
+    if let Some(key) = crate::sess::open_key(m) {
         crate::screens::session_core::memory::forget(m, &key);
     }
     m.kept::<Data>().mem_counts.clear();

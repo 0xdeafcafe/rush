@@ -105,7 +105,7 @@ fn keep_view(m: &mut Model, v: &'static str) {
 /// Opens the picked agent, or room, with the keys (focusPane).
 fn open_picked(m: &mut Model) {
     let key = m.sel.clone();
-    if crate::screens::social::rooms::is_room_key(&key) {
+    if crate::rooms::is_room_key(&key) {
         crate::screens::social::rooms::open_room(m, &key);
     } else if let Some(i) = m.focused() {
         m.open(i);
@@ -188,7 +188,7 @@ pub fn pointer_at(m: &mut Model, x: usize, moved: bool) -> bool {
 /// with the keys, else the list has the screen. The layout #view keeps
 /// isn't changed.
 pub fn toggle(m: &mut Model) -> Out {
-    let room = crate::screens::social::rooms::is_room_key(&m.sel);
+    let room = crate::rooms::is_room_key(&m.sel);
     if !room && m.focused().is_none() {
         return Out::Idle;
     }
@@ -447,7 +447,7 @@ struct Unreadable(String);
 pub fn follow(m: &mut Model) {
     // A room's row: its log drawn as its agents' conversation (syncHost's
     // syncRoom).
-    if crate::screens::social::rooms::is_room_key(&m.sel) {
+    if crate::rooms::is_room_key(&m.sel) {
         let key = m.sel.clone();
         if m.pane.as_ref().is_none_or(|v| v.key != key) {
             m.pane = crate::screens::social::rooms::room_view(m, &key);
@@ -512,7 +512,7 @@ fn connecting(m: &mut Model, v: &session::SessionView, w: usize, rows: usize) ->
     } else {
         format!("  connecting to {name}…")
     };
-    let c = crate::screens::session_core::conn(m, &v.key);
+    let c = crate::sess::conn(m, &v.key);
     if c.link.is_some() {
         return None;
     }
@@ -605,10 +605,7 @@ pub fn join_split(
 /// harness's grey when a Session is there (divider).
 pub fn divider(kind: Option<&str>, reg: &rush_core::adapter::Registry) -> Line {
     match kind {
-        Some(k) => line([sp(
-            "│",
-            crate::screens::accounts::look::harness_border(reg, k),
-        )]),
+        Some(k) => line([sp("│", crate::look::harness_border(reg, k))]),
         None => line([sp("│", FAINT)]),
     }
 }
@@ -679,7 +676,7 @@ pub fn join_rows(
             if two_sided && !fade_list {
                 // The pane's gutters keep their colours; its rows fade
                 // (paneFrameRow round paneRow).
-                use crate::screens::session_core::paint::cut;
+                use crate::paint::cut;
                 let bg = p.bg;
                 let mut f = cut(&p, 0, 2);
                 join(&mut f, fade_row(cut(&p, 2, pw.saturating_sub(1))));

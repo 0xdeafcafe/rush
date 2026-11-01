@@ -179,9 +179,7 @@ fn misdirected_asks_from_the_box() {
     let mut m = misdirect_model();
     m.session.as_mut().unwrap().key = "lw".into();
     let text = "this history needs to use macos liquid glass ui!!";
-    crate::screens::session_core::conn(&mut m, "lw")
-        .input
-        .set(text);
+    crate::sess::conn(&mut m, "lw").input.set(text);
     crate::screens::session_core::keys::send(&mut m, "lw", false);
     let c = m.confirm.as_ref().expect("asks first");
     assert!(
@@ -209,9 +207,7 @@ fn misdirected_asks_from_the_box() {
     );
     press(&mut m, "esc");
     assert_eq!(
-        crate::screens::session_core::conn(&mut m, "lw")
-            .input
-            .string(),
+        crate::sess::conn(&mut m, "lw").input.string(),
         text,
         "left in the box to edit"
     );

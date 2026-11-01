@@ -15,10 +15,11 @@ use rush_convo::Session;
 use super::host::{Info, hosts};
 use super::{agent, conn, core, later, live};
 use crate::frame::Out;
+use crate::host::Branch;
+use crate::host::Fork;
 use crate::model::Model;
 use crate::screens::session_cards::compact::Summ;
-use crate::screens::session_cards::fork::Fork;
-use crate::screens::session_cards::rewind::{Branch, Rewound, left_of, restart_note};
+use crate::screens::session_cards::rewind::{Rewound, left_of, restart_note};
 
 /// A probability at or over which a decision model's step is kept: tev1
 /// scores what the work still needs around 0.4–0.55, the unrelated under

@@ -6,7 +6,6 @@ use rush_core::text::{Color, Line, Span};
 
 use crate::style::*;
 
-pub use super::dock::spread;
 // Cutting a row's cells is the frame's (crate::style).
 pub use crate::style::cut;
 
@@ -103,6 +102,45 @@ pub fn section(title: &str, meta: &str, w: usize, less: usize) -> Line {
     head.spans.push(plain(" "));
     head.spans.push(faint("─".repeat(n)));
     head
+}
+
+/// left and right on one row w wide, apart; left alone when they don't
+/// both fit (spread).
+pub fn spread(left: Line, right: Line, w: usize) -> Line {
+    let gap = w as isize - left.width() as isize - right.width() as isize;
+    if gap < 2 {
+        return fit(left, w);
+    }
+    let mut out = left;
+    out.spans.push(plain(blanks(gap as usize)));
+    join(&mut out, right);
+    out
+}
+
+/// "key what" pairs, keys as the keyboard names them (keys).
+pub fn pairs_line(pairs: &[(&str, &str)]) -> Line {
+    let words: Vec<(String, String)> = pairs
+        .iter()
+        .map(|(k, w)| (rush_convo::render::key_word(k), w.to_string()))
+        .collect();
+    let refs: Vec<(&str, &str)> = words
+        .iter()
+        .map(|(k, w)| (k.as_str(), w.as_str()))
+        .collect();
+    keys(&refs)
+}
+
+/// keysFit with the keys as the keyboard names them.
+pub fn fit_keys(w: usize, pairs: &[(&str, &str)]) -> Line {
+    let words: Vec<(String, String)> = pairs
+        .iter()
+        .map(|(k, w)| (rush_convo::render::key_word(k), w.to_string()))
+        .collect();
+    let refs: Vec<(&str, &str)> = words
+        .iter()
+        .map(|(k, w)| (k.as_str(), w.as_str()))
+        .collect();
+    keys_fit(w, &refs)
 }
 
 #[cfg(test)]

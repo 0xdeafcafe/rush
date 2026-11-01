@@ -77,7 +77,7 @@ fn limit_quota_from(m: &Model, key: &str, i: &HostInfo, own: Quota) -> Quota {
         }
     };
     if let Some(a) = m.agents.iter().find(|a| a.key == key) {
-        let acc = crate::screens::accounts::state::peek(m);
+        let acc = crate::accounts::peek(m);
         let p = profile(m, key, i).unwrap_or_default();
         for k in [a.acct.dir.clone(), rush_host::kind::quota_key(&p)] {
             if let Some(r) = acc.quotas.get(&k) {
@@ -180,7 +180,7 @@ pub fn refresh_limit_usage_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut su
 /// with), else only its kind and key (refreshLimitUsage,
 /// usage_limit.go:84).
 pub(crate) fn full_account(
-    rows: &[crate::screens::accounts::rows::AcctRow],
+    rows: &[crate::accounts::AcctRow],
     kind: &str,
     key: &str,
 ) -> rush_core::adapter::Account {
@@ -378,5 +378,5 @@ pub fn card_rows(m: &Model, key: &str, i: &HostInfo, w: usize, max_h: usize) -> 
 }
 
 fn fit_keys(w: usize, pairs: &[(&str, &str)]) -> Line {
-    crate::screens::session_core::dock::fit_keys(w, pairs)
+    crate::paint::fit_keys(w, pairs)
 }

@@ -71,7 +71,7 @@ fn minutes(v: &str) -> i64 {
 /// The project a new session would start in, settled before General is
 /// drawn: finding its main checkout looks at the disk.
 pub fn prep(m: &mut Model) {
-    let dir = crate::screens::list_extras::prompt::start_dir(m);
+    let dir = crate::startdir::start_dir(m);
     let project = rush_fleet::main_checkout(&dir);
     dialog_mut(m).project = project;
 }

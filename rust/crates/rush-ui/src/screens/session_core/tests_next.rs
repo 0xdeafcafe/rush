@@ -327,7 +327,7 @@ fn held_and_stuck_name_your_send_now_key() {
         ..Queued::default()
     };
     assert!(plain(super::queue::when(&mut m, KEY, &held)).contains("ctrl+enter sends it now"));
-    crate::screens::cmdbar::keybind::set_keys(
+    crate::keybind::set_keys(
         &mut m,
         rush_keymap::File {
             bindings: BTreeMap::from([("session.send".to_string(), vec!["ctrl+g".to_string()])]),

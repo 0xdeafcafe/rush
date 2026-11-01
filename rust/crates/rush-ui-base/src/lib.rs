@@ -5,13 +5,19 @@
 //! the entry points that run the TUI, are in rush-ui, which makes the
 //! model with them registered (rush_ui::new_model, Model::bare).
 
+pub mod accounts;
+pub mod away;
+pub mod bridge;
 pub mod changes;
 pub mod chores;
 pub mod clanker;
 pub mod config;
+pub mod finish;
 pub mod frame;
 pub mod header;
+pub mod host;
 pub mod imagerefs;
+pub mod keybind;
 pub mod landing;
 pub mod lead;
 pub mod list;
@@ -20,13 +26,16 @@ pub mod look;
 pub mod mention;
 pub mod model;
 pub mod overlay;
+pub mod paint;
 pub mod pastes;
 pub mod predict;
 pub mod rooms;
+pub mod sess;
 pub mod session;
 pub mod shells;
 pub mod spawns;
 pub mod split;
+pub mod startdir;
 pub mod style;
 pub mod turnwants;
 pub mod worker;

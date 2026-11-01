@@ -353,7 +353,7 @@ pub fn quick_key_hook(m: &mut Model, k: &Press) -> Out {
     if !quick(m).focused()
         || m.confirm.is_some()
         || s == "ctrl+]"
-        || crate::screens::cmdbar::keybind::chord_waiting(m)
+        || crate::keybind::chord_waiting(m)
     {
         return Out::Pass;
     }

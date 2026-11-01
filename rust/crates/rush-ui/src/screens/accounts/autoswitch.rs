@@ -131,14 +131,8 @@ pub fn next_login(logins: &[LoginView], stopped: bool, now: Ms) -> Option<LoginV
     (best.quota.used("") < 100.0).then(|| (*best).clone())
 }
 
-/// Whether a rush session on the login folder named root was stopped by a
-/// usage limit, under a profile that moves on from it; set by the screens
-/// that host sessions.
-pub type LimitStopped = fn(&Model, &str) -> bool;
-/// Tells every rush session in the folder named root that it runs as
-/// another login now, carrying on those a limit stopped (reloginHosts);
-/// set by the screens that host sessions.
-pub type Relogin = fn(&mut Model, &str) -> Out;
+// What the screens that host sessions set is the base's (crate::accounts).
+pub use crate::accounts::{LimitStopped, Relogin};
 
 /// Moves new sessions to another login when the one in use is nearly out
 /// of its 5-hour or weekly usage, or a rush session was stopped by a

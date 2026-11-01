@@ -117,7 +117,7 @@ fn claim_spawn_tool() {
 
 #[test]
 fn shell_command_argv() {
-    use crate::screens::projects_machine::shells::shell_command;
+    use crate::shells::shell_command;
     for (args, want) in [
         (
             &["/bin/zsh", "-lc", "go build && go test"][..],
@@ -139,7 +139,7 @@ fn shell_command_argv() {
 
 #[test]
 fn pause_words() {
-    use crate::screens::projects_machine::shells::*;
+    use crate::shells::*;
     assert_eq!(pause_word("call-x"), "pause it");
     note_paused("call-x", PausedPart::default());
     assert_eq!(pause_word("call-x"), "let it go on");
@@ -183,8 +183,8 @@ mod nudges {
 
     use super::super::stuck::{nudge_done, nudge_stuck_subs, nudge_text};
     use super::super::tests::{MIN, NOW, agent, model_of};
+    use crate::host::{Fake, Op, set_hosts};
     use crate::model::Model;
-    use crate::screens::session_core::host::{Fake, Op, set_hosts};
 
     /// A rush session at work whose transcript holds the call t1, and its
     /// run s1 ("find the loop") on that call, quiet for quiet.

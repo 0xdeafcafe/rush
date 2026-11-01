@@ -106,8 +106,8 @@ pub(crate) fn keep_going(m: &mut Model, a: &Agent) -> Out {
 /// Asks a rush session silent for quiet what it's waiting on, into its
 /// turn without stopping it (askStuck).
 fn ask_stuck(m: &mut Model, a: &Agent, quiet: rush_core::time::Ms) {
+    use crate::host::{Op, hosts};
     use crate::screens::list_extras::stuck::{ask_done, ask_text};
-    use crate::screens::session_core::host::{Op, hosts};
     let h = hosts(m);
     let (a, text) = (a.clone(), ask_text(quiet));
     m.later(
@@ -159,7 +159,7 @@ fn pr(m: &mut Model, _: &str) -> Out {
 /// It needs only the session's rush id, kept from its host, not a live
 /// connection to it: what rush did is read from its log.
 fn why(m: &mut Model, _: &str) -> Out {
-    use crate::screens::session_core::open_key;
+    use crate::sess::open_key;
     let Some(a) = need(m) else { return Out::Draw };
     let ours = open_key(m).as_deref() == Some(a.key.as_str())
         && !crate::screens::accounts::info::rush_id(m, &a.key)
@@ -176,8 +176,8 @@ fn why(m: &mut Model, _: &str) -> Out {
 /// project gets its own worktree; alone, it says which
 /// (ownWorktreeCommand).
 fn worktree(m: &mut Model, arg: &str) -> Out {
-    use crate::screens::accounts::state::{cfg, cfg_mut, save};
-    let dir = crate::screens::list_extras::prompt::start_dir(m);
+    use crate::accounts::{cfg, cfg_mut, save};
+    let dir = crate::startdir::start_dir(m);
     let project = rush_fleet::main_checkout(&dir);
     let name = std::path::Path::new(&project)
         .file_name()
@@ -187,7 +187,7 @@ fn worktree(m: &mut Model, arg: &str) -> Out {
             cfg_mut(m).own_worktrees.insert(project.clone(), a == "on");
             save(m);
         }
-        "" => crate::screens::accounts::state::ensure_store(m),
+        "" => crate::accounts::ensure_store(m),
         _ => {
             m.flash_err("#worktree on or #worktree off");
             return Out::Draw;
@@ -210,7 +210,7 @@ fn worktree(m: &mut Model, arg: &str) -> Out {
 /// be opened first (command's perm, yolo).
 fn perm(m: &mut Model, arg: &str, yolo: bool) -> Out {
     use crate::screens::session_cards::permissions::perm_command;
-    let open = crate::screens::session_core::open_key(m);
+    let open = crate::sess::open_key(m);
     match target(m) {
         Some(a) if open.as_deref() == Some(a.key.as_str()) => {
             perm_command(m, Some(&a.key), arg, yolo)

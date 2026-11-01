@@ -15,7 +15,6 @@ use std::path::Path;
 use rush_convo::{Decode, Session, Tail};
 use rush_core::adapter::{AdapterRef, FileRewind, Profile};
 use rush_core::text::Line;
-use rush_core::time::Ms;
 
 use super::util::{first_non_empty, plural};
 use super::{Act, act, info};
@@ -91,17 +90,7 @@ fn trim(b: &[u8]) -> &[u8] {
     &b[s..e]
 }
 
-/// A path left by an earlier rewind: its session, when it was left, the
-/// first turn of its own, your messages on it and the last of them
-/// (host.Branch).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Branch {
-    pub session_id: String,
-    pub left: Ms,
-    pub from: u32,
-    pub turns: usize,
-    pub last: String,
-}
+pub use crate::host::Branch;
 
 /// A rewind, its agent-side work done, for the session's host to carry
 /// on from: session_id (resumed, or fresh), the path left kept as a

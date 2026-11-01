@@ -10,7 +10,7 @@ use rush_core::text::{Color, Line, Span, width};
 
 use super::paint::dim;
 use super::subs::RunStat;
-use crate::screens::accounts::look::spin_of;
+use crate::look::spin_of;
 use crate::style::*;
 
 /// What run sa was asked, in a line (subTask).

@@ -165,7 +165,7 @@ fn refreshed(m: &mut Model, r: Result<Vec<rush_ollama::Model>, String>) -> Out {
         m.kept::<State>()
             .listed
             .insert(k.to_string(), choices.clone());
-        crate::screens::accounts::state::accounts(m)
+        crate::accounts::accounts(m)
             .listed
             .insert(k.to_string(), choices.clone());
     }

@@ -186,7 +186,7 @@ impl OrDraw for Out {
 pub fn hash_arg(m: &mut Model, name: &str, arg: &str) -> Option<Out> {
     let key = super::open_key(m)?;
     let a = m.selected_row()?;
-    if a.key != key || crate::screens::social::rooms::is_room_key(&key) {
+    if a.key != key || crate::rooms::is_room_key(&key) {
         return None;
     }
     Some(run(m, &key, format!("/{name} {arg}").trim()))

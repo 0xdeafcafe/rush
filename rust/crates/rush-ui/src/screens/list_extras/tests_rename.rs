@@ -170,7 +170,7 @@ fn enter_does_what_you_chose() {
     let _one = one_at_a_time();
     let mut m = fleet();
     m.sel = "default/b2".into();
-    crate::screens::settings::use_store(&mut m, rush_state::Store::default());
+    crate::accounts::use_store(&mut m, rush_state::Store::default());
     press(&mut m, "enter");
     assert!(
         m.sheet_as::<crate::screens::session_cards::enter::EnterSheet>()
@@ -180,13 +180,13 @@ fn enter_does_what_you_chose() {
     m.sheet = None;
     let mut s = rush_state::Store::default();
     s.config.enter_on = "rename".into();
-    crate::screens::settings::use_store(&mut m, s);
+    crate::accounts::use_store(&mut m, s);
     press(&mut m, "enter");
     assert_eq!(renaming(&m), Some("default/b2"));
     press(&mut m, "esc");
     let mut s = rush_state::Store::default();
     s.config.enter_on = "open".into();
-    crate::screens::settings::use_store(&mut m, s);
+    crate::accounts::use_store(&mut m, s);
     press(&mut m, "enter");
     assert_eq!(renaming(&m), None);
     assert!(m.sheet.is_none());

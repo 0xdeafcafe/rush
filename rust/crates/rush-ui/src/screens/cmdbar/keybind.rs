@@ -11,104 +11,19 @@
 //! to screens not in this group (the quick ask, the stash) do nothing
 //! until those screens register them.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use rush_keymap::{Action, Context, File, Map, Seq};
+use rush_keymap::{Context, Seq};
 
-use super::fleetslash::FLEET_COMMANDS;
 use super::{bar, keyhelp};
 use crate::frame::{Out, Press};
 use crate::model::Model;
 
-/// How long a chord waits for its next key (chordWait).
-pub const CHORD_WAIT: Duration = Duration::from_secs(2);
-
-/// The keymap in force and a chord being typed (keyState).
-#[derive(Default)]
-pub struct KeyState {
-    pub map: Option<Map>,
-    pub file: File,
-    /// The keys of a chord typed so far, and when the last came.
-    pub chord: Seq,
-    pub chord_at: Option<Instant>,
-    /// Asked for keybindings.json already.
-    loading: bool,
-    /// A key handed on, remapped, through every binding again: it isn't
-    /// turned a second time.
-    passing: bool,
-}
-
-/// Every action a key can be bound to: rush's keys and its # commands
-/// (keyActions). Plugins' come with the plugin screens.
-pub fn key_actions() -> Vec<Action> {
-    let mut out = rush_keymap::defaults();
-    for (name, about, _) in FLEET_COMMANDS {
-        let mut a = Action::new(rush_keymap::command_id(name), Context::Any);
-        a.title = format!("#{name}: {about}");
-        out.push(a);
-    }
-    out
-}
-
-/// key_actions and what plugins offer (keyActions' pluginActions).
-pub(crate) fn actions_of(m: &Model) -> Vec<Action> {
-    let mut out = key_actions();
-    out.extend(crate::screens::plugin_ui::hooks::plugin_key_actions(m));
-    out
-}
-
-/// Puts f in force (setKeys), with the keys plugins suggest.
-pub fn set_keys(m: &mut Model, f: File) {
-    let map = Map::build(
-        &actions_of(m),
-        &f,
-        &crate::screens::plugin_ui::hooks::plugin_keys(m),
-    );
-    let k = m.kept::<KeyState>();
-    k.file = f;
-    k.map = Some(map);
-}
-
-/// The keymap in force; before keybindings.json is read, rush's own
-/// (keyMap). With a loop running, the first call reads the file off the
-/// UI thread (loadKeys).
-pub fn key_map(m: &mut Model) -> &Map {
-    if m.sender().is_some() && !m.kept::<KeyState>().loading {
-        m.kept::<KeyState>().loading = true;
-        m.later(rush_keymap::load, |m, r| {
-            match r {
-                Ok(f) => set_keys(m, f),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => m.flash_err(&format!("keybindings.json: {e}")),
-            }
-            Out::Draw
-        });
-    }
-    if m.kept::<KeyState>().map.is_none() {
-        let map = Map::build(
-            &actions_of(m),
-            &File::default(),
-            &crate::screens::plugin_ui::hooks::plugin_keys(m),
-        );
-        m.kept::<KeyState>().map = Some(map);
-    }
-    m.kept::<KeyState>().map.as_ref().expect("built")
-}
-
-/// The keymap put in force again from the file it was built from, once
-/// plugins' commands come or go (onHooks' setKeys); none is built until
-/// it's needed.
-pub fn rebuild(m: &mut Model) {
-    let Some(f) = m
-        .kept
-        .peek::<KeyState>()
-        .filter(|k| k.map.is_some())
-        .map(|k| k.file.clone())
-    else {
-        return;
-    };
-    set_keys(m, f);
-}
+// The keymap in force and its lookups are the base's (crate::keybind).
+pub use crate::keybind::{
+    CHORD_WAIT, KeyState, actions_of, bound_key, chord_waiting, key_actions, key_map, rebuild,
+    set_keys,
+};
 
 /// Where a key lands now, beyond Global: nothing more while a box over the
 /// screen has the keys (keyContexts).
@@ -140,12 +55,6 @@ pub fn on_pages(m: &Model) -> bool {
         return false;
     }
     m.on_place() && !m.place_asking()
-}
-
-/// A chord is waiting for its next key (len(m.keys.chord) > 0).
-pub fn chord_waiting(m: &mut Model) -> bool {
-    let st = m.kept::<KeyState>();
-    !st.chord.is_empty() && st.chord_at.is_some_and(|t| t.elapsed() <= CHORD_WAIT)
 }
 
 /// What the keymap makes of k (remapKey): Pass hands it on as it is,
@@ -318,9 +227,7 @@ pub fn prompt_to_agent(m: &mut Model, replace: bool) -> Out {
     // Go's m.host stays the agent last opened once the keys go back to
     // the Prompt (ctrl+] u): here, the picked agent, if it was opened.
     let sel = m.sel.clone();
-    let opened = crate::screens::session_core::core(m)
-        .conns
-        .contains_key(&sel);
+    let opened = crate::sess::conn_if(m, &sel).is_some();
     let picked = (opened && !sel.starts_with('§')).then_some(sel);
     let Some(key) = m
         .session
@@ -342,7 +249,7 @@ pub fn prompt_to_agent(m: &mut Model, replace: bool) -> Out {
     let text = std::mem::take(&mut m.input.text);
     let pastes = std::mem::take(&mut m.input.pastes);
     m.input.clear();
-    let c = &mut crate::screens::session_core::conn(m, &key).input;
+    let c = &mut crate::sess::conn(m, &key).input;
     if replace || c.is_empty() {
         c.text = text;
         c.pastes = pastes;
@@ -359,14 +266,4 @@ pub fn prompt_to_agent(m: &mut Model, replace: bool) -> Out {
         m.open(i);
     }
     Out::Draw
-}
-
-/// The keys bound to an action, the first of them, for a hint: "" for
-/// none (boundKey).
-pub fn bound_key(m: &mut Model, id: &str) -> String {
-    key_map(m)
-        .keys(id)
-        .first()
-        .map(Seq::to_string)
-        .unwrap_or_default()
 }

@@ -15,7 +15,7 @@
 use rush_core::adapter::{Account, AccountSummary, Profile};
 use rush_core::text::Line;
 use rush_core::usage;
-use rush_state::{Login, SignIn};
+use rush_state::SignIn;
 
 use super::look::{LOGINS_KIND, agent_name, harness_name};
 use super::rows::{AcctRow, account_rows, expired, profile_of, start_kind};
@@ -26,22 +26,8 @@ use crate::frame::{Confirm, Out, Press};
 use crate::model::Model;
 use crate::style::*;
 
-/// What's done with Claude Code's logins through rush's vault: set once
-/// the vault is ported (switchLogin, renewLogin, addLogin, and forgetting
-/// a login's keychain entry).
-#[derive(Clone, Copy)]
-pub struct LoginOps {
-    /// Makes to the login new sessions run as; with move, idle sessions
-    /// follow at once.
-    pub switch: fn(&mut Model, Login, &str, bool) -> Out,
-    /// switch, then the last argument once the login is written, whether
-    /// it went or not (accountSwitch in a tea.Sequence).
-    pub switch_then: fn(&mut Model, Login, &str, bool, AfterSwitch) -> Out,
-    pub renew: fn(&mut Model, &LoginView) -> Out,
-    /// Signs in to a login named so.
-    pub add: fn(&mut Model, &str) -> Out,
-    pub forget: fn(&mut Model, &str),
-}
+// The vault's operations are the base's (crate::accounts).
+pub use crate::accounts::{AfterSwitch, LoginOps};
 
 /// The vault's operations, when there are any.
 pub fn login_ops(m: &Model) -> Option<LoginOps> {
@@ -329,9 +315,6 @@ pub fn took_sign_ins(m: &mut Model, s: SignIns) -> Out {
 pub fn switch_account(m: &mut Model, a: Account, why: &str) -> Out {
     switch_account_and(m, a, why, None)
 }
-
-/// What runs once a switch is done.
-pub type AfterSwitch = Box<dyn FnOnce(&mut Model) -> Out + Send>;
 
 /// switch_account, then then once it's done, as Go sequences a session's
 /// start after it (accountSwitch, tea.Sequence): then runs whether the

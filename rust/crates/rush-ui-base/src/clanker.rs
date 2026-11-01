@@ -474,7 +474,10 @@ pub struct FxClock {
 
 /// What clanker is reacting to now (m.fx).
 pub fn reaction(m: &Model) -> Reaction {
-    m.ext.calls.reaction()(m)
+    m.kept
+        .peek::<crate::finish::Finish>()
+        .map(|f| f.fx)
+        .unwrap_or_default()
 }
 
 /// Moves his reaction on a frame for every 70 ms gone since the last, and
@@ -500,7 +503,7 @@ pub fn step(m: &mut Model) {
                         break;
                     }
                 }
-                *m.ext.calls.reaction_mut()(m) = fx;
+                m.kept::<crate::finish::Finish>().fx = fx;
             }
         }
         // Just started, or a stronger one took over: frame 0 is now.
@@ -528,7 +531,7 @@ pub fn beat(m: &mut Model) {
     let md = m.mood(m.tally());
     let t = m.tick;
     if md == Mood::Working && t % 15 == 8 || md == Mood::Idle && t % CYCLE == 25 {
-        react(m.ext.calls.reaction_mut()(m), Fx::Shimmer);
+        react(&mut m.kept::<crate::finish::Finish>().fx, Fx::Shimmer);
     }
 }
 

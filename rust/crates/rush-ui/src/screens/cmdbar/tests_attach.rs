@@ -15,8 +15,8 @@ use rush_core::adapter::{
 use rush_core::agent::{Agent, Job, State};
 
 use crate::frame::Out;
+use crate::host::{Fake, set_hosts};
 use crate::model::Model;
-use crate::screens::session_core::host::{Fake, set_hosts};
 
 /// How the fake's joined screen ends.
 #[derive(Clone, Copy, Debug, PartialEq)]

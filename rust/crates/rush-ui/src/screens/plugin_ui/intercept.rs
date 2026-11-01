@@ -13,7 +13,8 @@ use crate::frame::Out;
 use crate::model::Model;
 use crate::screens::list_extras::prompt::is_hash_cmd;
 use crate::screens::plugin_ui::ModelPlugins;
-use crate::screens::session_core::{conn, keys};
+use crate::screens::session_core::keys;
+use crate::sess::conn;
 
 /// Whether text in a box goes past plugins before it's sent: a message,
 /// not a # or / command, nor a line to be carried on with a trailing

@@ -19,12 +19,13 @@ use rush_core::text::Line;
 
 use crate::frame::sheet::Sheet;
 use crate::frame::{Out, Press};
+use crate::host::{Fake, Op, set_hosts};
 use crate::model::Model;
 use crate::screens::session_cards::claudescreen::{
     ClaudeSheet, UnknownSheet, claude_cloud_name, off_command,
 };
-use crate::screens::session_core::host::{Fake, Op, set_hosts};
-use crate::screens::session_core::{conn, keys, live};
+use crate::screens::session_core::{keys, live};
+use crate::sess::conn;
 use crate::session::{SessionView, Source};
 
 const KEY: &str = "work/c1";

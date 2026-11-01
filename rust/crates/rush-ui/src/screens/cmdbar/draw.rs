@@ -110,13 +110,11 @@ pub fn search_key(m: &Model) -> &'static str {
 /// each item landed on, counted from the body's top.
 pub fn bar_box(m: &mut Model, w: usize, h: usize) -> Vec<Line> {
     let sort = m.kept::<BarState>().sort;
-    let on_key = crate::screens::settings::store(m)
-        .config
-        .search_transcripts_on_key;
+    let on_key = crate::accounts::store(m).config.search_transcripts_on_key;
     let search = search_key(m);
     // What "Start an agent" starts as (cmdbar.go:1428).
     let with = {
-        let dir = crate::screens::list_extras::prompt::start_dir(m);
+        let dir = crate::startdir::start_dir(m);
         let mut l = line([sp("new agents: ", DIM)]);
         join(&mut l, crate::screens::accounts::setup::start_with(m, &dir));
         l
@@ -367,9 +365,7 @@ pub fn overlay(m: &mut Model, out: &mut [Line]) {
     let bw = m.w.saturating_sub(6).min(110);
     let bh = 8.max(m.h * 2 / 3);
     let body = bar_box(m, bw, bh.saturating_sub(2));
-    let on_key = crate::screens::settings::store(m)
-        .config
-        .search_transcripts_on_key;
+    let on_key = crate::accounts::store(m).config.search_transcripts_on_key;
     let Some(b) = m.kept::<BarState>().bar.as_ref() else {
         return;
     };

@@ -516,7 +516,7 @@ fn a_draft_is_carried_to_another_session() {
     // Beside the list: from the Session alone the keys stay its, as Go's
     // toPrompt leaves m.full (tests_split.rs).
     (m.full, m.w) = (false, 160);
-    assert!(crate::screens::list_extras::split::side_by_side(&m));
+    assert!(crate::split::side_by_side(&m));
     typed(&mut m, "meant for the other one");
     run_action(&mut m, "session.carry");
     assert!(m.session.is_none(), "the Prompt has the keys");
@@ -1486,7 +1486,7 @@ fn the_link_follows_the_session() {
     m.session = None;
     live::sync(&mut m);
     assert!(!conn(&mut m, KEY).hosted());
-    assert!(core(&mut m).linked.is_empty());
+    assert!(crate::sess::state(&mut m).linked.is_empty());
     // A turn ending clears what was live.
     let (mut m, _) = hosted("steer", Vec::new());
     working(&mut m, "go");

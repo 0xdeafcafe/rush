@@ -22,12 +22,14 @@ use super::tests_subs::NOW;
 use super::tests_subview::KEY;
 use super::{conn, core};
 use crate::frame::Out;
+use crate::host::Branch;
+use crate::host::Fork;
+use crate::host::Mode;
 use crate::model::Model;
+use crate::screens::session_cards::Act;
 use crate::screens::session_cards::ModelCards;
 use crate::screens::session_cards::compact::Summ;
-use crate::screens::session_cards::fork::Fork;
-use crate::screens::session_cards::rewind::{Branch, Rewound};
-use crate::screens::session_cards::{Act, Mode};
+use crate::screens::session_cards::rewind::Rewound;
 
 /// The session KEY, hosted by fake and linked, its host speaking proto.
 fn hosted(d: &tempfile::TempDir, fake: &Arc<Fake>, proto: i64) -> Model {

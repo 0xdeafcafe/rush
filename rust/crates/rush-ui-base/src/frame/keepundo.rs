@@ -55,12 +55,11 @@ impl Model {
     pub(crate) fn guard_boxes(&self) -> BoxGuard {
         let prompt = self.prompt_undoes().then(|| Held::of(&self.input));
         let mut conns = Vec::new();
-        let conn_box = self.ext.calls.conn_box();
         for v in [self.session.as_ref(), self.pane.as_ref()]
             .into_iter()
             .flatten()
         {
-            if let Some(input) = conn_box(self, &v.key)
+            if let Some(input) = crate::sess::conn_box(self, &v.key)
                 && !conns.iter().any(|(k, _): &(String, Held)| *k == v.key)
             {
                 conns.push((v.key.clone(), Held::of(input)));
@@ -78,9 +77,8 @@ impl Model {
         if g.conns.is_empty() {
             return;
         }
-        let conn_box_mut = self.ext.calls.conn_box_mut();
         for (key, h) in g.conns {
-            if let Some(input) = conn_box_mut(self, &key) {
+            if let Some(input) = crate::sess::conn_box_mut(self, &key) {
                 h.keep(input);
             }
         }

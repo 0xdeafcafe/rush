@@ -19,12 +19,12 @@ use super::rooms::{ROOM_KEY_PREFIX, RoomRows};
 use crate::frame::editor::{clean_paste, edit, insert};
 use crate::frame::sheet::{sheet_row, text_field, window};
 use crate::frame::{Out, Press, Sheet};
+use crate::host::hosts;
 use crate::model::Model;
 use crate::screens::accounts::setup::{
     StartOver, billing_of, models, start_defaults, start_routes,
 };
 use crate::screens::session_cards::discuss::{RoomAsk, brief, ctx_words};
-use crate::screens::session_core::host::hosts;
 use crate::screens::social::rooms::ModelRooms;
 use crate::style::*;
 
@@ -100,7 +100,7 @@ pub fn room_setup(m: &mut Model, topic: &str) -> Out {
         pos: topic.len(),
         topic,
         rounds: DEFAULT_ROUNDS,
-        dir: crate::screens::list_extras::prompt::start_dir(m),
+        dir: crate::startdir::start_dir(m),
         selected: m.kept::<LastPanel>().0.clone(),
         serial,
         ..RoomSetup::default()
@@ -175,7 +175,7 @@ pub fn choices(m: &Model, options: &[StartOver]) -> Vec<StartOver> {
 /// One choice as its row says it: its model, harness and provider, and
 /// the model's id (roomChoice).
 pub fn room_choice(reg: &Registry, o: &StartOver) -> Line {
-    let word = crate::screens::accounts::look::model_word(reg, &o.kind, &o.model);
+    let word = crate::look::model_word(reg, &o.kind, &o.model);
     let mut s = if word.is_empty() {
         "default model".to_string()
     } else {

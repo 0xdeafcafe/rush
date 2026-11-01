@@ -21,7 +21,7 @@ use super::subqueue::{self, Due, SubNote};
 use super::{conn, core};
 use crate::frame::Out;
 use crate::model::Model;
-use crate::screens::list_extras::spawns::SPAWN_PREFIX;
+use crate::spawns::SPAWN_PREFIX;
 
 /// The run watched, and whether it still works.
 fn watched(m: &mut Model, key: &str) -> Option<(Subagent, bool)> {

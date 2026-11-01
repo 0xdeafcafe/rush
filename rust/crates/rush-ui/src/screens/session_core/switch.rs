@@ -21,10 +21,11 @@ use rush_core::agent::{Agent, PreviewLine, Todo};
 
 use super::host::{HandOver, HandedOver, Op, hosts};
 use super::{agent, conn, core};
+use crate::accounts::StartOver;
+use crate::accounts::accounts;
 use crate::frame::Out;
 use crate::model::Model;
-use crate::screens::accounts::setup::{StartOver, start_name};
-use crate::screens::accounts::state::accounts;
+use crate::screens::accounts::setup::start_name;
 use crate::session::Source;
 
 /// Lets the start sheet's switch and a usage limit's hand-on move hosted
@@ -102,7 +103,7 @@ pub fn switch_session_message(m: &mut Model, key: &str, o: StartOver, message: &
     }
     if o.model != from.model {
         ops.push(Op::Model(o.model.clone()));
-        let w = crate::screens::accounts::look::model_word(&m.reg, &o.kind, &o.model);
+        let w = crate::look::model_word(&m.reg, &o.kind, &o.model);
         said.push(if w.is_empty() {
             "its default model".into()
         } else {

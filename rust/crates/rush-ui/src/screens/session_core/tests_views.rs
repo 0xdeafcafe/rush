@@ -556,7 +556,7 @@ fn the_map() {
 #[test]
 fn dragged_over_text_with_copy_on_select_off() {
     let mut m = opened(90, 40);
-    crate::screens::settings::config_mut(&mut m).copy_on_select = Some(false);
+    crate::accounts::config_mut(&mut m).copy_on_select = Some(false);
     let s = screen(&mut m);
     let y = row_with(&mut m, "Fixed: b is 3 now.").unwrap();
     let x = col_of(&s[y], "Fixed");

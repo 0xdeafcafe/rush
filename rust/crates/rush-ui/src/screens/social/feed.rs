@@ -12,7 +12,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use regex::Regex;
 use rush_core::text::{Color, Line};
 use rush_core::time::Ms;
 use rush_room::community::{self, Author, Feed};
@@ -907,35 +906,8 @@ impl Sheet for FeedSheet {
     }
 }
 
-/// A line in the from-your-agents box: an agent finished, asked, or
-/// failed (feed.go agentEvent).
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct AgentEvent {
-    pub at: Ms,
-    pub key: String,
-    pub name: String,
-    pub glyph: String,
-    pub what: String,
-    /// Its last words then, for telling news from routine.
-    pub said: String,
-}
-
-/// An agent's last words saying something went badly wrong or it found
-/// something big: what lifts a finish out of the routine (newsRe).
-pub fn news_re() -> &'static Regex {
-    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"(?i)\b(broke|broken|lost|wiped|corrupt\w*|data loss|catastroph\w*|disaster|irrecoverabl\w*|can'?t recover|force[- ]push\w*|wtf|what the|root cause|found it|breakthrough|turns out|figured (it )?out|discover\w*|huge)\b")
-            .expect("newsRe compiles")
-    })
-}
-
-impl AgentEvent {
-    /// Only an agent starting and stopping.
-    pub fn routine(&self) -> bool {
-        self.glyph == "✓" && !news_re().is_match(&self.said)
-    }
-}
+// The lines from your agents are the base's (crate::finish).
+pub use crate::finish::{AgentEvent, news_re};
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -1404,8 +1376,8 @@ pub(crate) mod tests {
         m.open_feed("");
         let all = m.kept::<Stream>().posts.clone();
         let posts = sheet(&mut m).shown(&all);
-        let name = Regex::new(r"^(▎ @|── )").unwrap();
-        let pin = Regex::new(r"^▎ (@|\s*\d+[smhd]\s+↳ @)").unwrap();
+        let name = regex::Regex::new(r"^(▎ @|── )").unwrap();
+        let pin = regex::Regex::new(r"^▎ (@|\s*\d+[smhd]\s+↳ @)").unwrap();
         let mut pinned = 0;
         for h in 14..24 {
             let mut s = m.sheet.take().unwrap();

@@ -21,7 +21,7 @@ fn beat_shimmers_now_and_then() {
         Fx::None
     };
     assert_eq!(reaction(&m).kind, want, "{idle:?}");
-    *m.ext.calls.reaction_mut()(&mut m) = Reaction {
+    m.kept::<crate::finish::Finish>().fx = Reaction {
         kind: Fx::Error,
         frame: 3,
     };
@@ -55,7 +55,7 @@ fn only_a_reaction_wakes() {
     let mut m = crate::new_model("t");
     step(&mut m);
     assert!(m.kept.peek::<FxClock>().is_none_or(|c| c.last.is_none()));
-    *m.ext.calls.reaction_mut()(&mut m) = Reaction {
+    m.kept::<crate::finish::Finish>().fx = Reaction {
         kind: Fx::Done,
         frame: 0,
     };

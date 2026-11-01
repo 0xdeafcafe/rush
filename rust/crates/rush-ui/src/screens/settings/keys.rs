@@ -65,7 +65,7 @@ pub struct KeysDialog {
 /// Go's fleetCommands, in their order, without the aliases rush also
 /// takes (#preset, #net…): those run the command they stand for.
 fn actions(m: &Model) -> Vec<Action> {
-    crate::screens::cmdbar::keybind::actions_of(m)
+    crate::keybind::actions_of(m)
 }
 
 /// The keymap in force (keyMap); rush's own before keybindings.json is
@@ -644,7 +644,7 @@ fn taken(m: &mut Model) -> Out {
 pub fn save_binding(m: &mut Model, id: &str, keys: Option<Vec<String>>) -> Out {
     let f = m.kept::<State>().keys.file.with(id, keys.clone());
     set_keys(m, f.clone());
-    crate::screens::cmdbar::keybind::set_keys(m, f.clone());
+    crate::keybind::set_keys(m, f.clone());
     match &keys {
         None => m.flash(&format!("{id}: rush's keys again")),
         Some(k) if k.is_empty() => m.flash(&format!("{id}: no key")),

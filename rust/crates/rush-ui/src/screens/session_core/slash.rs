@@ -417,9 +417,9 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         match s {
             "up" => c.slash_sel = round_move(c.slash_sel, -1, args.len()),
             "down" => c.slash_sel = round_move(c.slash_sel, 1, args.len()),
-            "tab" => c.input.set(&format!("/{}", args[c.slash_sel].name)),
+            "tab" => c.base.input.set(&format!("/{}", args[c.slash_sel].name)),
             _ => {
-                c.input.set(&format!("/{}", args[c.slash_sel].name));
+                c.base.input.set(&format!("/{}", args[c.slash_sel].name));
                 return keys::send(m, &key, false);
             }
         }
@@ -480,11 +480,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
             let full = typed == name
                 || format!("claude:{typed}") == name
                 || alias(&typed) == Some(pick.as_str());
-            if full
-                && crate::screens::settings::store(m)
-                    .config
-                    .enter_sends_command
-            {
+            if full && crate::accounts::store(m).config.enter_sends_command {
                 return Out::Pass; // typed in full, there's nothing to complete
             }
             complete(m, " ");

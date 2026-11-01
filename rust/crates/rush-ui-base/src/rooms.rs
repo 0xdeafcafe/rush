@@ -195,3 +195,13 @@ pub fn grouped(
 pub fn is_room_key(key: &str) -> bool {
     key.starts_with(ROOM_KEY_PREFIX)
 }
+
+/// The agent row key is: an agent's, or a room's (Go's room rows are
+/// agents in the list, so a room's pane has an agent's header).
+pub fn row_agent<'a>(m: &'a Model, key: &str) -> Option<&'a Agent> {
+    if let Some(a) = m.agents.iter().find(|a| a.key == key) {
+        return Some(a);
+    }
+    let id = key.strip_prefix(ROOM_KEY_PREFIX)?;
+    m.rooms_grouped()?.row.get(id)
+}

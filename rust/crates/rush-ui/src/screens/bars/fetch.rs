@@ -18,11 +18,11 @@ use rush_core::time::Ms;
 use rush_core::usage::{self, EVERY, Reading};
 use rush_state::{Config, Login};
 
+use crate::accounts::{cfg, peek};
 use crate::frame::Out;
+use crate::look::LOGINS_KIND;
 use crate::model::Model;
-use crate::screens::accounts::look::LOGINS_KIND;
 use crate::screens::accounts::rows::{agent_order, profile_of, sign_in_account};
-use crate::screens::accounts::state::{cfg, peek};
 
 /// Reads a saved login's plan usage into the readings shared through
 /// path (state.LoginKeeper's RefreshLogin): the logins agent's.
@@ -136,9 +136,9 @@ fn read_again(m: &mut Model, asked: bool) {
             // usageMsg and quotaMsg keep it: the shared files only hold
             // the good ones.
             for (k, u) in got.readings {
-                crate::screens::accounts::state::set_fetched(m, k, u);
+                crate::accounts::set_fetched(m, k, u);
             }
-            crate::screens::accounts::state::set_quotas(m, got.quotas);
+            crate::accounts::set_quotas(m, got.quotas);
             crate::screens::accounts::state::read(m);
             Out::Idle
         },

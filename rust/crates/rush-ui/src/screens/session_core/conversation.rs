@@ -220,8 +220,8 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     out
 }
 
-/// What a pinned row's ref starts with: a click on it goes to its turn.
-pub const PIN_REF: &str = "pin:";
+// What a pinned row's ref starts with is the base's (crate::sess).
+pub use crate::sess::PIN_REF;
 
 /// Whether turn t began with something you said (yourPrompt).
 fn your_prompt(t: &rush_convo::Turn) -> bool {

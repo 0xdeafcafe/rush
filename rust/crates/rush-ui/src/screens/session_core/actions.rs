@@ -162,7 +162,7 @@ pub fn carry_key(m: &mut Model, k: &crate::frame::Press) -> Out {
         }
         _ => return Out::Pass,
     };
-    if to.starts_with(crate::screens::session_cards::mention::ROOM_KEY_PREFIX) {
+    if to.starts_with(crate::mention::ROOM_KEY_PREFIX) {
         m.flash_err("a room's box takes no draft: pick a session");
         return Out::Draw;
     }

@@ -27,19 +27,19 @@ use rush_fleet::Predicates;
 use super::line::{Ctx, Seg, bar_line};
 use super::top::{in_use_rows, meter_of, now};
 use super::{BAR_AGENT, State, layout};
+use crate::accounts::StartOver;
+use crate::accounts::{cfg, peek};
 use crate::frame::Out;
 use crate::frame::location::{branch_words, folder, session_location};
 use crate::header::Drops;
+use crate::look::{LOGINS_KIND, glyph, harness_name, model_word, show_profile};
 use crate::model::Model;
 use crate::screens::accounts::info::pretty_model;
-use crate::screens::accounts::look::{LOGINS_KIND, glyph, harness_name, model_word, show_profile};
 use crate::screens::accounts::rows::{account_of, account_rows, switches};
-use crate::screens::accounts::setup::StartOver;
-use crate::screens::accounts::state::{cfg, peek};
 use crate::screens::list_extras::meters::{MeterRow, switch_note};
 use crate::screens::projects_machine::{TEMP_SHOWN, temp_of};
 use crate::screens::session_core::{self as core, Core};
-use crate::screens::social::parts::disk;
+use crate::style::disk;
 use crate::style::*;
 use rush_draw::{Button, MouseKind};
 
@@ -66,7 +66,7 @@ pub struct Of<'a> {
     pub hover_mode: bool,
     pub hover_context: bool,
     /// Its host's word on it, when rush hosts it and it's connected.
-    pub info: Option<&'a core::host::Info>,
+    pub info: Option<&'a crate::host::Info>,
     /// Its host sleeps, the session kept.
     pub sleeping: bool,
     /// Where its host last said it is, for a stopped rush session whose
@@ -82,7 +82,7 @@ pub struct Of<'a> {
 impl<'a> Of<'a> {
     /// Agent key's header, as known now; None when it's gone.
     pub fn read(m: &'a Model, key: &str) -> Option<Of<'a>> {
-        let a = crate::screens::social::rooms::row_agent(m, key)?;
+        let a = crate::rooms::row_agent(m, key)?;
         let sess = m.session.as_ref().filter(|v| v.key == key).map(|v| &v.sess);
         let c = m.kept.peek::<Core>().and_then(|c| c.conns.get(key));
         // Only the project's files: not its memory or plans (bars.go:257,268).
@@ -113,7 +113,7 @@ impl<'a> Of<'a> {
                 .peek::<State>()
                 .is_some_and(|s| s.hover_label == key && !key.is_empty()),
             room: key
-                .starts_with(crate::screens::social::rooms::ROOM_KEY_PREFIX)
+                .starts_with(crate::rooms::ROOM_KEY_PREFIX)
                 .then(|| m.room_of(key).map(crate::screens::social::rooms::room_conn))
                 .flatten(),
         })
@@ -433,7 +433,7 @@ pub static SEGS: &[Seg] = &[
         draw: |x| {
             let o = of(x);
             let k = o.a.kind.as_str();
-            let name = crate::screens::accounts::look::agent_name(&x.m.reg, k);
+            let name = crate::look::agent_name(&x.m.reg, k);
             let login =
                 session_login(x.m, o).map(|l| crate::screens::accounts::rows::login_name(&l));
             match login {
@@ -458,17 +458,17 @@ pub static SEGS: &[Seg] = &[
         id: "clock",
         name: "Clock",
         about: "the time of day",
-        draw: |x| one(dim(crate::screens::accounts::rows::clock(now(x.m), false))),
+        draw: |x| one(dim(crate::model::clock(now(x.m), false))),
     },
 ];
 
 /// The login a rush session's agent runs on, when it says
 /// (logins.go:752 sessionLogin).
-pub fn session_login(m: &Model, o: &Of) -> Option<crate::screens::accounts::state::LoginView> {
+pub fn session_login(m: &Model, o: &Of) -> Option<crate::accounts::LoginView> {
     let id = o.info.map(|i| i.login.as_str()).filter(|l| !l.is_empty())?;
     let found = peek(m).logins.iter().find(|l| l.id == id).cloned();
     Some(found.unwrap_or_else(|| {
-        let mut l = crate::screens::accounts::state::LoginView::default();
+        let mut l = crate::accounts::LoginView::default();
         l.login.id = id.to_string();
         l
     }))
@@ -570,11 +570,11 @@ fn conn_words(o: &Of) -> Line {
         return one(dim("past conversation · a message resumes it in rush mode"));
     }
     if a.headless {
-        return one(dim(format!("Claude Code · {}", core::where_(a))));
+        return one(dim(format!("Claude Code · {}", crate::sess::where_(a))));
     }
     if a.interactive {
         return line([
-            dim(format!("Claude Code · {} · ", core::where_(a))),
+            dim(format!("Claude Code · {} · ", crate::sess::where_(a))),
             sp("/rush", ORANGE),
             dim(" copies it here"),
         ]);
@@ -716,10 +716,7 @@ fn rows_with(
                 // room (away.go:220 awayChip).
                 let wide = hw.saturating_sub(state.width()) >= 120;
                 state.spans.push(plain("   "));
-                join(
-                    &mut state,
-                    crate::screens::list_extras::away::away_chip(away, now(m), wide),
-                );
+                join(&mut state, crate::away::away_chip(away, now(m), wide));
             }
             // A name is often the whole first message; it's cut short so
             // the state and what's on the right keep their room.
@@ -853,10 +850,10 @@ fn chrome(l: Line, iw: usize) -> Line {
 /// as and how it's connected (paneHeader). Where the context and the
 /// mode landed is kept for the pointer.
 pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
-    let Some(key) = core::open_key(m) else {
+    let Some(key) = crate::sess::open_key(m) else {
         return;
     };
-    if rows.len() <= META_ROW || crate::screens::social::rooms::row_agent(m, &key).is_none() {
+    if rows.len() <= META_ROW || crate::rooms::row_agent(m, &key).is_none() {
         return; // gone: the Session says so
     }
     let hw = w.saturating_sub(3);
@@ -975,7 +972,7 @@ pub fn state_words(o: &Of, now: Ms) -> Line {
 /// An agent's @handle painted to go after its name (mention.go:47
 /// nameHandle).
 pub fn name_handle(a: &Agent) -> rush_core::text::Span {
-    use crate::screens::session_cards::mention::{handle_tint, mention_name};
+    use crate::mention::{handle_tint, mention_name};
     let h = format!("@{}", mention_name(a, a.rush.then_some(a.job.id.as_str())));
     let c = handle_tint(&h);
     sp(h, c)
@@ -991,10 +988,7 @@ fn cache_words(o: &Of, now: Ms) -> Option<Line> {
     Some(if now < i.cache_warm {
         line([
             dim("cache warm until "),
-            sp(
-                crate::screens::accounts::rows::clock(i.cache_warm, false),
-                GREEN,
-            ),
+            sp(crate::model::clock(i.cache_warm, false), GREEN),
         ])
     } else {
         one(sp("cache cold", YELLOW))
@@ -1005,7 +999,7 @@ fn cache_words(o: &Of, now: Ms) -> Option<Line> {
 /// commits to push or pull, and its pull request, as the list says them
 /// (rushmode.go:1517 headerGit).
 pub fn header_git(m: &Model, a: &Agent) -> Line {
-    use crate::screens::list_extras::landing::{ListFolders, tree_of};
+    use crate::landing::{ListFolders, tree_of};
     let f = m
         .kept
         .peek::<ListFolders>()
@@ -1077,7 +1071,7 @@ pub fn mouse(m: &mut Model, e: &crate::frame::Mouse) -> Out {
     if m.session.is_none() || m.on_place() || m.sheet.is_some() || m.confirm.is_some() {
         return Out::Pass;
     }
-    let Some(key) = core::open_key(m) else {
+    let Some(key) = crate::sess::open_key(m) else {
         return Out::Pass;
     };
     let Some(top) = m.session.as_ref().map(|v| v.top) else {

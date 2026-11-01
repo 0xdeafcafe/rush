@@ -20,8 +20,8 @@ use super::host::Op;
 use super::{conn, open_key};
 use crate::frame::{Out, Press};
 use crate::model::Model;
-use crate::screens::list_extras::spawns::SPAWN_PREFIX;
 use crate::screens::session_cards::ModelCards;
+use crate::spawns::SPAWN_PREFIX;
 
 /// What's picked in the open session (c.sel).
 fn sel(m: &Model) -> String {
@@ -230,7 +230,7 @@ fn waits_on_command(m: &mut Model, key: &str) -> bool {
 /// The processes still running a command of a chain, each with its start
 /// as the system has it (the conversation keeps it to the millisecond):
 /// one gone, or its pid reused, is left out.
-fn live_parts(procs: &[PartProc]) -> Vec<crate::screens::projects_machine::shells::PartProc> {
+fn live_parts(procs: &[PartProc]) -> Vec<crate::shells::PartProc> {
     procs
         .iter()
         .filter_map(|p| {
@@ -238,8 +238,7 @@ fn live_parts(procs: &[PartProc]) -> Vec<crate::screens::projects_machine::shell
             let ms = start
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_millis() as rush_core::time::Ms);
-            (ms == p.start)
-                .then_some(crate::screens::projects_machine::shells::PartProc { pid: p.pid, start })
+            (ms == p.start).then_some(crate::shells::PartProc { pid: p.pid, start })
         })
         .collect()
 }
@@ -306,7 +305,7 @@ pub fn kill_part(m: &mut Model, key: &str, id: &str) -> Out {
 /// Pauses the command of call id's chain that runs now, and all it
 /// started, or lets one paused go on (pausePart).
 pub fn pause_part(m: &mut Model, key: &str, id: &str) -> Out {
-    use crate::screens::projects_machine::shells as sh;
+    use crate::shells as sh;
     // A script held at a breakpoint goes on from there (scripts.go:203).
     if let Some(o) = super::scripts::go_on_from_break(m, key, id) {
         return o;

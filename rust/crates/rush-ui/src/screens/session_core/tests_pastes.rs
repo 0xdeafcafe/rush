@@ -12,7 +12,7 @@ use super::host::Op;
 use super::tests::{KEY, hosted, press, typed};
 use crate::frame::Mouse;
 use crate::model::Model;
-use crate::screens::session_cards::pastes::chip_for;
+use crate::pastes::chip_for;
 
 const LOG: &str = "panic: nil map\ngoroutine 1 [running]:\nmain.main()\n";
 

@@ -657,7 +657,7 @@ impl ModelSqueeze for Model {
         s.next = Instant::now() + Duration::from_secs(6 * 3600);
         // Only the folder in use's transcripts, as Go's (squeeze.go:24):
         // ~/.claude's, signed in as whichever login.
-        let active = crate::screens::accounts::state::cfg(self).active_account();
+        let active = crate::accounts::cfg(self).active_account();
         let kind = rush_state::profiles::LOGINS_KIND;
         let p = rush_core::adapter::Profile {
             kind: rush_core::adapter::Kind::new(kind),

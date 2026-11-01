@@ -11,7 +11,7 @@ use rush_room::room::{Member, Room, Summary};
 use super::tests::{MIN, NOW, agent, model_of};
 use crate::list::ListLine;
 use crate::model::Model;
-use crate::screens::social::rooms::RoomRows;
+use crate::rooms::RoomRows;
 
 fn member(id: &str, name: &str) -> Agent {
     let mut a = agent(

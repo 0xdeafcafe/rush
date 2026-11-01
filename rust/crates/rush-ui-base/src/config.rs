@@ -216,9 +216,18 @@ pub fn reapply_waiting(c: &mut rush_state::Config) {
 /// accounts share), for a change written to disk another way (keep, off
 /// the UI): the next whole save doesn't write the old value back.
 pub fn hold(m: &mut crate::model::Model, f: impl FnOnce(&mut rush_state::Config)) {
-    if let Some(c) = m.ext.calls.held_config()(m) {
+    if let Some(c) = held_config(m) {
         f(c);
     }
+}
+
+/// The config the UI holds, Settings' and the accounts' one copy, once
+/// loaded (crate::accounts' store).
+fn held_config(m: &mut crate::model::Model) -> Option<&mut rush_state::Config> {
+    crate::accounts::accounts(m)
+        .store
+        .as_mut()
+        .map(|s| &mut s.config)
 }
 
 /// Writes a whole copy of the config the UI holds (Settings', the
@@ -251,10 +260,10 @@ pub fn save(
     what: &'static str,
     f: impl Fn(&mut rush_state::Config) + Send + 'static,
 ) {
-    if let Some(c) = m.ext.calls.held_config()(m) {
+    if let Some(c) = held_config(m) {
         f(c);
     }
-    if m.ext.calls.read_only()(m) {
+    if crate::accounts::read_only(m) {
         return; // --render leaves config.json as it was
     }
     WAITING

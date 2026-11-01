@@ -22,9 +22,9 @@ use rush_fleet::Predicates;
 
 use super::outside::{remove_outside, stop_outside};
 use crate::frame::{Confirm, Ext, Out, Press};
+use crate::host::hosts;
 use crate::model::Model;
-use crate::screens::session_core::host::hosts;
-use crate::screens::social::rooms::is_room_key;
+use crate::rooms::is_room_key;
 
 /// Adds the commands and list keys (keys.go:462-466, :998-1043).
 pub fn register(x: &mut Ext) {
@@ -374,7 +374,7 @@ pub fn ask_close(m: &mut Model, a: Option<Agent>) -> Out {
             Box::new(move |m| restart(m, b, String::new())),
         ));
     }
-    let linked = crate::screens::session_core::core(m).linked == a.key;
+    let linked = crate::sess::state(m).linked == a.key;
     if linked {
         let key = a.key.clone();
         c.more.push((
@@ -477,7 +477,7 @@ pub fn relaunch(m: &mut Model, a: Agent, to: rush_core::adapter::Profile) -> Out
     if !m.reg.get(&kind).is_some_and(|ad| ad.mover().is_some()) {
         m.flash_err(&format!(
             "{} can't move a session outside rush mode · /rush moves it over first",
-            crate::screens::accounts::look::harness_name(&m.reg, &kind)
+            crate::look::harness_name(&m.reg, &kind)
         ));
         return Out::Draw;
     }
@@ -767,7 +767,7 @@ fn hibernate(m: &mut Model) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::screens::session_core::host::{Fake, set_hosts};
+    use crate::host::{Fake, set_hosts};
     use rush_core::agent::Job;
 
     fn agent(key: &str, state: State) -> Agent {

@@ -9,8 +9,9 @@
 // and rush_ui::lead::.. read as they did. Each is the one module, not a
 // copy: its statics and kept types are the same ones.
 pub use rush_ui_base::{
-    changes, config, frame, imagerefs, landing, lead, list, look, mention, overlay, pastes,
-    predict, rooms, shells, spawns, split, style, turnwants, worker,
+    accounts, away, bridge, changes, config, finish, frame, host, imagerefs, keybind, landing,
+    lead, list, look, mention, overlay, paint, pastes, predict, rooms, sess, shells, spawns, split,
+    startdir, style, turnwants, worker,
 };
 use rush_ui_base::{chores, clanker, header, listcache, model, session};
 

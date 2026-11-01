@@ -15,22 +15,22 @@ use rush_core::usage::{EVERY, LEAD, Quota, Window};
 
 use super::BAR_TOP;
 use super::line::{Ctx, Seg, bar_line};
+use crate::accounts::{cfg, peek};
 use crate::header::Drops;
+use crate::look::{LOGINS_KIND, look_of, provider_name};
 use crate::model::Model;
-use crate::screens::accounts::look::{LOGINS_KIND, look_of, provider_name};
 use crate::screens::accounts::rows::{
     AcctRow, account_rows, accounts_of, start_account, start_dir, start_kind, start_profile,
     start_quota, switches,
 };
-use crate::screens::accounts::state::{cfg, peek};
 use crate::screens::list_extras::meters::{MeterRow, meter_row, mini_bar, pct, usage_color};
 use crate::screens::list_extras::plan::{
     InQueue, Queue, account_chain, compact_window, drains, plan_rows, plan_summary, reset_in,
     system_alerts, upcoming,
 };
 use crate::screens::projects_machine::{TEMP_SHOWN, machine, temp_known};
-use crate::screens::social::parts::disk;
 use crate::screens::social::services::ModelUpdates;
+use crate::style::disk;
 use crate::style::*;
 
 const HOUR: Ms = 3_600_000;
@@ -239,7 +239,7 @@ pub static SEGS: &[Seg] = &[
         draw: |x| {
             let t = now(x.m);
             crate::style::turns_in(60_000 - t.rem_euclid(60_000));
-            one(dim(crate::screens::accounts::rows::clock(t, false)))
+            one(dim(crate::model::clock(t, false)))
         },
     },
     Seg {
@@ -609,7 +609,7 @@ fn usage_detail(m: &Model, u: &Quota, cells: usize, when: bool) -> Line {
     }
     if u.fetched_at != 0 && now - u.fetched_at > 3 * every {
         let day = now - u.fetched_at > 20 * HOUR;
-        let when = crate::screens::accounts::rows::clock(u.fetched_at, day);
+        let when = crate::model::clock(u.fetched_at, day);
         s.spans.push(sp(format!(" as of {when}"), FAINT));
     }
     s

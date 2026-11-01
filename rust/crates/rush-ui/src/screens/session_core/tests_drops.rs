@@ -8,7 +8,7 @@ use super::conn;
 use super::host::Op;
 use super::tests::{KEY, hosted, press, typed};
 use crate::frame::editor::{Look, look_disk};
-use crate::screens::session_cards::imagerefs::ImageRefs;
+use crate::imagerefs::ImageRefs;
 
 /// A folder of image files, and other files, for a drop.
 struct Files {

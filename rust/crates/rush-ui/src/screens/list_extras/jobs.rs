@@ -497,7 +497,7 @@ pub fn job_hint(j: &Job, workflow: bool, part: Option<(&str, &str)>) -> Line {
 /// a command of its chain runs (jobHint).
 pub fn picked_hint(s: &Session, j: &Job) -> Line {
     let part = s.running_part(&j.tool_use_id);
-    let pause = crate::screens::projects_machine::shells::pause_word(&j.tool_use_id);
+    let pause = crate::shells::pause_word(&j.tool_use_id);
     job_hint(
         j,
         s.job_kind(j) == "workflow",
@@ -1161,7 +1161,7 @@ fn job_block(
         fact(&mut facts, vec![sp(format!("{} steps", j.tool_uses), SUB)]);
     }
     if j.tokens > 0 {
-        let t = crate::screens::session_core::paint::tokens(j.tokens);
+        let t = crate::paint::tokens(j.tokens);
         fact(&mut facts, vec![sp(format!("{t} tokens"), SUB)]);
     }
     let said = if j.error.is_empty() {

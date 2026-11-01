@@ -585,7 +585,7 @@ fn context_tab_draws_the_breakdown() {
         ..Context::default()
     };
     let key = m.agents[0].key.clone();
-    crate::screens::session_core::conn(&mut m, &key).context = Some(Box::new(u));
+    crate::sess::conn(&mut m, &key).context = Some(Box::new(u));
     open_info(&mut m, CONTEXT);
     if !m.sheet_as::<InfoSheet>().unwrap().shown.contains(&CONTEXT) {
         panic!("no Context tab");
@@ -611,7 +611,7 @@ fn context_tab_on_an_idle_session() {
     let (mut m, d) = model(120, 40);
     opened(&mut m, d.path());
     let key = m.agents[0].key.clone();
-    crate::screens::session_core::conn(&mut m, &key).sleeping = true;
+    crate::sess::conn(&mut m, &key).sleeping = true;
     open_info(&mut m, CONTEXT);
     if !m.sheet_as::<InfoSheet>().unwrap().shown.contains(&CONTEXT) {
         panic!("no Context tab");
@@ -637,10 +637,7 @@ fn why_tab_on_a_session_rush_hosts() {
         !m.sheet_as::<InfoSheet>().unwrap().shown.contains(&WHY),
         "rush logs only what it hosts"
     );
-    crate::screens::session_core::conn(&mut m, &key)
-        .info
-        .began
-        .id = "r1".into();
+    crate::sess::conn(&mut m, &key).info.began.id = "r1".into();
     open_info(&mut m, WHY);
     let k = m.sheet_as::<InfoSheet>().unwrap();
     assert_eq!(k.tab, WHY);

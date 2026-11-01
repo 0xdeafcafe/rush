@@ -178,7 +178,7 @@ fn enter_on(m: &mut Model) -> Out {
         return Out::Pass;
     }
     // rush's one config, once it's read.
-    let Some(cfg) = crate::screens::settings::loaded_config(m) else {
+    let Some(cfg) = crate::accounts::loaded_config(m) else {
         return Out::Pass;
     };
     match cfg.enter_on.as_str() {

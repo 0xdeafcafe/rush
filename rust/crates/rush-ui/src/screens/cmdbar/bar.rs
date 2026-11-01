@@ -375,8 +375,7 @@ fn can_cut(m: &Model) -> bool {
     }
     // The Session's box, when it has the keys (canCut's paneFocus).
     if let Some(v) = m.session.as_ref() {
-        let core = m.kept.peek::<crate::screens::session_core::Core>();
-        return core.and_then(|c| c.conns.get(&v.key)).is_some_and(|c| {
+        return crate::sess::peek_conn(m, &v.key).is_some_and(|c| {
             let pos = c.input.pos;
             line_end(&c.input.text, pos) > pos
         });
@@ -470,9 +469,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
 /// Rebuilds the rows for a new query and, once typing pauses, searches the
 /// transcripts for its words (barChanged).
 pub fn changed(m: &mut Model) {
-    let on_key = crate::screens::settings::store(m)
-        .config
-        .search_transcripts_on_key;
+    let on_key = crate::accounts::store(m).config.search_transcripts_on_key;
     let s = st(m);
     s.r#gen += 1;
     let g = s.r#gen;
@@ -815,7 +812,7 @@ pub fn bar_places(m: &Model, q: &str) -> Vec<Item> {
             Go::Back(bk),
         );
     }
-    let start = crate::screens::list_extras::prompt::start_dir(m);
+    let start = crate::startdir::start_dir(m);
     let dir = tildify(&start);
     add(
         sp("+", GREEN),
@@ -1003,10 +1000,7 @@ pub fn bar_commands(m: &Model, q: &str) -> Vec<Item> {
 /// Starts a new agent with what's typed as its task (barStart).
 fn bar_start(m: &Model, task: &str) -> Item {
     let mut it = Item::new(sp("+", GREEN), task, Go::Start(task.into()));
-    it.meta = format!(
-        "new agent in {}",
-        tildify(&crate::screens::list_extras::prompt::start_dir(m))
-    );
+    it.meta = format!("new agent in {}", tildify(&crate::startdir::start_dir(m)));
     it
 }
 

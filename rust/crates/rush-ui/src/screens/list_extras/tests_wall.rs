@@ -143,7 +143,7 @@ fn answers_decisions_from_the_wall() {
     use rush_core::agent::{Preview, PreviewLine};
     use std::sync::Arc;
 
-    use crate::screens::session_core::host::{Fake, set_hosts};
+    use crate::host::{Fake, set_hosts};
 
     let a = agent("d", "Making Rush Screen More Useful", State::Done, 101);
     let mut m = model_of(vec![a], 120, 40);

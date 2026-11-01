@@ -233,7 +233,7 @@ fn with_tile<T>(
     let sel = std::mem::replace(&mut m.sel, key.to_string());
     let shown = m.shown.clone();
     let idle = std::mem::replace(&mut m.pane_idle, !focused);
-    let hint = crate::screens::session_core::core(m).hint.clone();
+    let hint = crate::sess::state(m).hint.clone();
     let within = std::mem::replace(&mut m.kept::<InTile>().0, true);
     let out = f(m);
     m.kept::<InTile>().0 = within;
@@ -250,7 +250,7 @@ fn with_tile<T>(
     m.sel = sel;
     m.shown = shown;
     m.pane_idle = idle;
-    crate::screens::session_core::core(m).hint = hint;
+    crate::sess::state(m).hint = hint;
     Some(out)
 }
 
@@ -273,7 +273,7 @@ fn tile(
     let spinning = m.spinning();
     let drawn = with_tile(m, &key, focused, |m| {
         let lines = m.tile_frame(top, h, w.saturating_sub(1));
-        let edge = crate::screens::session_core::conn(m, &key)
+        let edge = crate::sess::conn(m, &key)
             .drawn
             .lines()
             .first()
@@ -313,9 +313,7 @@ pub fn key(m: &mut Model, k: &Press) -> Option<Out> {
         grid(m).focus.clear();
         return None;
     }
-    let empty = crate::screens::session_core::conn(m, &focus)
-        .input
-        .is_empty()
+    let empty = crate::sess::conn(m, &focus).input.is_empty()
         && m.tiles.get(&focus).is_some_and(|v| v.sel.is_empty());
     if k.s == "esc" && empty {
         grid(m).focus.clear();

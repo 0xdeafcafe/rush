@@ -37,7 +37,7 @@ use rush_core::tool::Kind;
 
 use super::paint::{bar, dim, faint, fit_to, plural, row, section, text, tokens};
 use crate::model::Model;
-use crate::screens::list_extras::spawns::SPAWN_PREFIX;
+use crate::spawns::SPAWN_PREFIX;
 use crate::style::*;
 
 /// What the session's agent says of its models: prices and windows
@@ -291,7 +291,7 @@ pub fn lines(m: &Model, key: &str, w: usize) -> Vec<(Line, String)> {
         return Vec::new();
     };
     let mut out: Vec<(Line, String)> = vec![(Line::new(), String::new())];
-    if let Some(a) = crate::screens::social::rooms::row_agent(m, key) {
+    if let Some(a) = crate::rooms::row_agent(m, key) {
         out.push((
             fit(
                 line([
@@ -361,10 +361,8 @@ pub fn scratch_section(m: &Model, key: &str, w: usize) -> Vec<(Line, String)> {
     let a = m.agents.iter().find(|a| a.key == key);
     let mut row = line([plain("    "), text(tildify(t))]);
     if let Some(a) = a.filter(|a| a.temp > 0) {
-        row.spans.push(dim(format!(
-            " · {}",
-            crate::screens::social::parts::disk(a.temp)
-        )));
+        row.spans
+            .push(dim(format!(" · {}", crate::style::disk(a.temp))));
     }
     let mut out = vec![
         (Line::new(), String::new()),

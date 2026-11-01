@@ -21,15 +21,19 @@ use super::read::{self, id_of, past_views_of, views_of};
 use super::subs::{Runs, panel_subs, subs_in_panel};
 use crate::frame::{Mouse, Out};
 use crate::model::Model;
+use crate::screens::session_core as core;
 use crate::screens::session_core::side::side_width;
-use crate::screens::session_core::{self as core, open_key};
+use crate::sess::open_key;
 
 /// The session's views and past views shown beside a conversation w
 /// wide, and how much of w they take: 0 when there are none or no room,
 /// a slim strip when they're folded or only past (viewsBeside). It
 /// follows the session's views folder while it's open.
 pub fn views_beside(m: &mut Model, key: &str, w: usize) -> (Vec<View>, Vec<View>, usize) {
-    let id = core::agent(m, key).map(id_of).unwrap_or("").to_string();
+    let id = crate::sess::agent(m, key)
+        .map(id_of)
+        .unwrap_or("")
+        .to_string();
     read::follow(m, &id);
     if core::views::view_name(m, key) != "conversation" || id.is_empty() {
         return (Vec::new(), Vec::new(), 0);
@@ -174,7 +178,10 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
 /// Does what a click on the panel asked of the session (clickViews' host
 /// calls, viewAction, the runs at its top).
 pub fn on_click(m: &mut Model, key: &str, c: Click) -> Out {
-    let id = core::agent(m, key).map(id_of).unwrap_or("").to_string();
+    let id = crate::sess::agent(m, key)
+        .map(id_of)
+        .unwrap_or("")
+        .to_string();
     match c {
         Click::Missed => Out::Pass,
         Click::Drew => Out::Draw,
@@ -265,7 +272,10 @@ fn host_then<T: Send + 'static>(
 /// changes the row, opens its link, copies its words, sends the agent its
 /// message (viewAction).
 pub fn view_action(m: &mut Model, sess: &str, name: &str, key: &str, a: Action) -> Out {
-    let Some(id) = core::agent(m, sess).map(id_of).filter(|id| !id.is_empty()) else {
+    let Some(id) = crate::sess::agent(m, sess)
+        .map(id_of)
+        .filter(|id| !id.is_empty())
+    else {
         return Out::Idle;
     };
     let id = id.to_string();
@@ -307,7 +317,7 @@ fn open_link(m: &mut Model, link: &str) {
 
 /// Sends the agent text as if typed, in a session rush runs (sendAs).
 fn send_as(m: &mut Model, key: &str, text: &str) {
-    if !core::conn(m, key).hosted() {
+    if !crate::sess::conn(m, key).hosted() {
         m.flash_err("that works in rush-mode sessions · /rush moves this one over");
         return;
     }
@@ -318,7 +328,10 @@ fn send_as(m: &mut Model, key: &str, text: &str) {
 /// row at that view (clickRef's side views). rest is what follows the
 /// ref's prefix.
 pub fn open_from_side(m: &mut Model, key: &str, rest: &str) {
-    let id = core::agent(m, key).map(id_of).unwrap_or("").to_string();
+    let id = crate::sess::agent(m, key)
+        .map(id_of)
+        .unwrap_or("")
+        .to_string();
     let none = views_of(m, &id).is_empty();
     let st = read::state(m, key);
     st.shut = false;

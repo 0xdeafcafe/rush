@@ -199,7 +199,7 @@ pub fn stash_keys(m: &Model) -> (String, String) {
     let w = stash(m).0;
     let bound = |id: &str| {
         m.kept
-            .peek::<crate::screens::cmdbar::keybind::KeyState>()
+            .peek::<crate::keybind::KeyState>()
             .and_then(|k| k.map.as_ref())
             .map_or_else(
                 || {
@@ -530,10 +530,7 @@ fn emit_focus_and_net(m: &mut Model, offline: bool) {
 /// boxState).
 pub fn box_state(m: &Model) -> Option<(TextBox, String)> {
     if let Some(v) = m.session.as_ref() {
-        let c = m
-            .kept
-            .peek::<crate::screens::session_core::Core>()
-            .and_then(|co| co.conns.get(&v.key));
+        let c = crate::sess::peek_conn(m, &v.key);
         let b = c.map_or_else(TextBox::default, |c| TextBox {
             text: c.input.string(),
             cursor: c.input.pos as i64,
@@ -638,7 +635,7 @@ fn set_session_box(m: &mut Model, d: &UiDo) {
     if m.session.as_ref().is_none_or(|v| v.key != d.session) {
         return;
     }
-    let c = crate::screens::session_core::conn(m, &d.session);
+    let c = crate::sess::conn(m, &d.session);
     if d.if_text.as_ref().is_some_and(|t| *t != c.input.string()) {
         return;
     }
@@ -681,7 +678,7 @@ pub fn plugin_key_actions(m: &Model) -> Vec<rush_keymap::Action> {
 /// Puts the keymaps built already in force again, from the file each was
 /// built from, with plugins' commands as they are now (onHooks' setKeys).
 pub fn rebuild_keys(m: &mut Model) {
-    crate::screens::cmdbar::keybind::rebuild(m);
+    crate::keybind::rebuild(m);
     crate::screens::settings::keys::rebuild(m);
 }
 
@@ -741,10 +738,7 @@ pub fn keep_sent(m: &mut Model, key: &str, text: &str) {
 /// emitBox and flash). key is the session's, "" the Agents box's.
 pub fn cleared(m: &mut Model, key: &str, text: &str) {
     emit_box(m, rush_plugin::EV_INPUT_CLEARED, key, text);
-    let did = format!(
-        "cleared · {} brings it back",
-        crate::screens::social::parts::UNDO_HINT
-    );
+    let did = format!("cleared · {} brings it back", crate::style::UNDO_HINT);
     let said = went_to(m, &did, "Cleared");
     m.flash(&said);
 }

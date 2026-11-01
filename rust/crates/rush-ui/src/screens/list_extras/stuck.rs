@@ -20,8 +20,8 @@ use rush_core::time::Ms;
 use rush_fleet::{Predicates, STUCK_SUB_AFTER};
 use serde_json::json;
 
+use crate::host::{Hosts, Op, hosts_of};
 use crate::model::Model;
-use crate::screens::session_core::host::{Hosts, Op, hosts_of};
 
 /// What the session is told of its subagent what (its description, else
 /// its type) gone quiet; moved, that rush moved the call it waits on to

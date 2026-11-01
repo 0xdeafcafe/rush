@@ -12,13 +12,15 @@ use rush_state::LOGINS_KIND;
 
 use super::core;
 use super::host::{Start, Started, hosts};
+use crate::accounts::HostedStart;
+use crate::accounts::StartOver;
+use crate::accounts::{accounts, cfg};
 use crate::frame::Out;
 use crate::frame::editor::{extract_images, look_disk};
 use crate::model::Model;
-use crate::screens::accounts::askrush::HostedStart;
-use crate::screens::accounts::rows::{account_rows, accounts_of, start_dir, start_profile};
-use crate::screens::accounts::setup::{StartOver, next_start, start_id};
-use crate::screens::accounts::state::{accounts, cfg};
+use crate::screens::accounts::rows::{account_rows, accounts_of, start_profile};
+use crate::screens::accounts::setup::{next_start, start_id};
+use crate::startdir::start_dir;
 
 /// Lets the screens that start sessions start them here (set_hosts with
 /// hosts that can).
@@ -82,7 +84,7 @@ pub(crate) fn switch_then(m: &mut Model, o: &StartOver, then: Then) -> Out {
             None => {
                 m.flash_err(&format!(
                     "{}'s logins can't be switched from this rush yet · start it on the one in use",
-                    crate::screens::accounts::look::harness_name(&m.reg, LOGINS_KIND)
+                    crate::look::harness_name(&m.reg, LOGINS_KIND)
                 ));
                 Out::Draw
             }
@@ -91,7 +93,7 @@ pub(crate) fn switch_then(m: &mut Model, o: &StartOver, then: Then) -> Out {
 }
 
 /// What runs once an account switch is done.
-pub type Then = crate::screens::accounts::keys::AfterSwitch;
+pub type Then = crate::accounts::AfterSwitch;
 
 /// A new rush-mode session in dir with text its first message: the model,
 /// effort and mode Settings gives its agent, or the start picked for this

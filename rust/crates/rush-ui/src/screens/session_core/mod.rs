@@ -30,7 +30,7 @@ pub mod dock;
 pub mod exchange;
 pub mod finish;
 pub mod history;
-pub mod host;
+pub use crate::host;
 pub mod jobkeys;
 pub mod jobprocs;
 pub mod keys;
@@ -40,7 +40,7 @@ pub mod memory;
 pub mod minimap;
 pub mod moveto;
 pub mod overview;
-pub mod paint;
+pub use crate::paint;
 pub mod queue;
 pub mod relay;
 pub mod running;
@@ -108,16 +108,11 @@ mod tests_tasks;
 mod tests_undo;
 
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 
-use rush_core::agent::{Agent, State};
 use rush_core::time::Ms;
 
-use crate::frame::inputbox::InputBox;
-use crate::frame::{Editor, Ext};
+use crate::frame::Ext;
 use crate::model::Model;
-use host::{Hosts, Info, Link};
 use queue::LocalQueue;
 use sending::Outbox;
 use sendmode::SendMode;
@@ -188,8 +183,6 @@ pub fn register_last(x: &mut Ext) {
 /// What the Session keeps between frames, for every session opened.
 #[derive(Default)]
 pub struct Core {
-    /// Where messages go (NoHosts until set).
-    pub hosts: Option<Arc<dyn Hosts>>,
     /// Each session's box, outbox and connection, by its key.
     pub conns: HashMap<String, Conn>,
     /// Messages waiting for sessions rush doesn't run, by key, and for
@@ -199,10 +192,6 @@ pub struct Core {
     pub send_modes: HashMap<String, SendMode>,
     /// Messages meant for subagents their conversation doesn't show.
     pub sub_notes: HashMap<String, Vec<SubNote>>,
-    /// The bottom row's keys, as the dock last worked them out.
-    pub hint: Option<rush_core::text::Line>,
-    /// The session whose link is open.
-    pub linked: String,
     /// No map beside the conversation, whatever the config says (tests
     /// drawn as Go's, with HideMinimap).
     pub hide_map: bool,
@@ -279,40 +268,11 @@ pub fn in_order(
 /// aren't the conversation's view).
 #[derive(Default)]
 pub struct Conn {
+    /// What every screen reads of it: its link, info and box (sess.rs).
+    pub base: ConnCore,
     /// The pages it published, worked out again only as the session
     /// changes (artifactsOf).
     pub arts: crate::screens::plugin_ui::artifacts::Kept,
-    /// Its host, when rush runs it and it's connected.
-    pub link: Option<Arc<dyn Link>>,
-    pub link_gen: u64,
-    /// The worker following the link stops once this is set.
-    pub stop: Arc<AtomicBool>,
-    /// Dialling the host is under way.
-    pub dialing: bool,
-    /// Its host sleeps, the session kept: the socket's let go and the
-    /// conversation stays; a message wakes it (sleep_host.go parkHost).
-    pub sleeping: bool,
-    /// A wake is under way: the box keeps what was sent until it's known
-    /// to have gone (c.waking).
-    pub waking: bool,
-    /// The back sheet has opened on this connection: an away that ended
-    /// opens it by itself once (c.backShown).
-    pub back_shown: bool,
-    /// Plugins are being asked about what's in the box before it goes,
-    /// and have just been: it goes past them once (c.intercepting,
-    /// c.intercepted; plugin_ui::intercept).
-    pub intercepting: bool,
-    pub intercepted: bool,
-    /// The process last dialled: a host gone is dialled again only once
-    /// another runs it.
-    pub dialed_pid: i32,
-    /// The host's queue and state.
-    pub info: Info,
-    /// The message box.
-    pub input: Editor,
-    /// The box as last drawn, and the screen row its top edge landed on.
-    pub drawn: InputBox,
-    pub box_y: Option<usize>,
     /// What a click takes on the box's top edge, from and to, cells from
     /// the box's left edge, and the part the pointer is over, lit.
     pub edge_hits: Vec<(usize, usize, dock::EdgeAct)>,
@@ -333,6 +293,8 @@ pub struct Conn {
     pub task_rows: usize,
     pub task_w: usize,
     pub tasks_open: bool,
+    /// The screen row the box's top edge landed on, as last drawn.
+    pub box_y: Option<usize>,
     /// The column beside a wide conversation, as the dock last made it.
     pub side: side::Side,
     pub q_shown: (usize, usize),
@@ -342,11 +304,6 @@ pub struct Conn {
     /// When it was last asked to stop.
     pub stop_armed: Ms,
     pub last_send: Ms,
-    /// The queued message being edited in the box, +1; 0 when none; its
-    /// text before, and whether editing held the queue.
-    pub edit_q: usize,
-    pub edit_was: String,
-    pub edit_held: bool,
     /// Its views: which shows, where each is, what the pointer is over.
     pub vs: views::ViewState,
     /// Text dragged over in its conversation.
@@ -390,16 +347,12 @@ pub struct Conn {
     /// (Act::Start).
     pub on_up: Option<crate::screens::session_cards::Then>,
     pub ask_n: u64,
-    /// What fills its context window, as last counted, and what of it
-    /// the session has never used, worked out when it came (sess.Usage,
-    /// Unused).
-    pub context: Option<Box<rush_core::usage::Context>>,
+    /// What of its context window the session has never used, worked out
+    /// when its count came (Unused).
     pub unused: Option<Vec<crate::screens::session_cards::slim::Unused>>,
     /// The paths its rewinds left, newest first, as read when its host
     /// was reached.
-    pub branches: Vec<crate::screens::session_cards::rewind::Branch>,
-    /// The images its box holds, each [Image #N] in its text (c.imgs).
-    pub imgs: crate::screens::session_cards::imagerefs::ImageRefs,
+    pub branches: Vec<crate::host::Branch>,
     /// Its latest turns' shell calls rush ran as scripts, by tool call id,
     /// as last read (c.scripts).
     pub scripts: HashMap<String, scripts::Seen>,
@@ -417,22 +370,22 @@ pub struct Conn {
     pub picked: HashMap<String, String>,
 }
 
-impl Conn {
-    /// rush hosts it and it's connected (Go's c.client != nil).
-    pub fn hosted(&self) -> bool {
-        self.link.is_some()
+impl std::ops::Deref for Conn {
+    type Target = ConnCore;
+    fn deref(&self) -> &ConnCore {
+        &self.base
     }
 }
 
-/// The open session's key, if one is open.
-pub fn open_key(m: &Model) -> Option<String> {
-    m.session.as_ref().map(|v| v.key.clone())
+impl std::ops::DerefMut for Conn {
+    fn deref_mut(&mut self) -> &mut ConnCore {
+        &mut self.base
+    }
 }
 
-/// The agent with key, as the list last read it.
-pub fn agent<'a>(m: &'a Model, key: &str) -> Option<&'a Agent> {
-    m.agents.iter().find(|a| a.key == key)
-}
+// The open session's key, an agent by key, busy and where an agent is
+// driven from are the base's (crate::sess).
+pub use crate::sess::{ConnCore, agent, busy, open_key, where_};
 
 /// The Session's state.
 pub fn core(m: &mut Model) -> &mut Core {
@@ -448,28 +401,11 @@ pub fn conn<'a>(m: &'a mut Model, key: &str) -> &'a mut Conn {
 /// you set, else enter (rushmode.go:5161 rowKey). rush's store is the
 /// newest once it has read the config.
 pub fn row_key(m: &Model) -> String {
-    let set = crate::screens::settings::loaded_config(m)
-        .map_or(m.cfg.row_key.as_str(), |c| c.row_key.as_str());
+    let set =
+        crate::accounts::loaded_config(m).map_or(m.cfg.row_key.as_str(), |c| c.row_key.as_str());
     if set.is_empty() {
         "enter".into()
     } else {
         set.into()
     }
-}
-
-/// Working or waiting on you (localqueue.go busy).
-pub fn busy(a: &Agent) -> bool {
-    matches!(a.job.state, State::Working | State::Blocked)
-}
-
-/// The agent's own words for where an interactive-kind session is driven
-/// from (fleet.go:1551 Where).
-pub fn where_(a: &Agent) -> &'static str {
-    if a.headless && a.kind.as_str() == "claude" {
-        return "run by another program (claude -p)";
-    }
-    if a.headless {
-        return "run by another program";
-    }
-    "open in a terminal"
 }

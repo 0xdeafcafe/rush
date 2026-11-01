@@ -16,23 +16,8 @@ pub const GUIDE: &str = include_str!(concat!(
     "/../../../docs/guide.md"
 ));
 
-/// A session rush hosts, started for rush's own ends (#ask): what the
-/// screens that host sessions are handed (startHosted with its config).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct HostedStart {
-    /// The first message; "" starts it waiting.
-    pub task: String,
-    pub dir: String,
-    /// Its name; "" lets the task name it.
-    pub name: String,
-    /// In a worktree of its own (false in rush's folder: no project's
-    /// work goes on there).
-    pub own_worktree: bool,
-    pub system_prompt: String,
-}
-
-/// Starts a HostedStart: set by the screens that host sessions.
-pub type HostedStarter = fn(&mut Model, HostedStart) -> Out;
+// What #ask starts is the base's (crate::accounts).
+pub use crate::accounts::{HostedStart, HostedStarter};
 
 /// What #ask starts for question, rush's folder being dir (askRush).
 pub fn ask_start(question: &str, dir: &str) -> HostedStart {

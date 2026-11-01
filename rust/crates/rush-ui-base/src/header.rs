@@ -108,7 +108,7 @@ impl Model {
         let Some(v) = self.session.as_ref().filter(|_| !self.on_place()) else {
             return false;
         };
-        let linked = self.ext.calls.conn_linked()(self, &v.key);
+        let linked = crate::sess::linked(self, &v.key);
         // A hosted one's conversation is its host's: only reaching it opens it.
         let hosted = matches!(v.source, crate::session::Source::Hosted);
         linked || !hosted && v.read && v.err.is_empty()

@@ -21,7 +21,7 @@ use crate::model::Model;
 
 /// The key that sends now in a Session (sendNowKey).
 pub fn send_now_key(m: &mut Model) -> String {
-    let k = crate::screens::cmdbar::keybind::bound_key(m, "session.send");
+    let k = crate::keybind::bound_key(m, "session.send");
     if k.is_empty() { "ctrl+enter".into() } else { k }
 }
 

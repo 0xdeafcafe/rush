@@ -73,7 +73,7 @@ pub fn dialog_reload(m: &mut Model, r: Result<(), String>) -> Out {
         }
         super::prep(m);
     }
-    if let Some(key) = crate::screens::session_core::open_key(m) {
+    if let Some(key) = crate::sess::open_key(m) {
         crate::screens::session_core::memory::forget(m, &key);
     }
     if let Err(e) = r {

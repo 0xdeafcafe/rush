@@ -1643,6 +1643,7 @@ dependencies = [
  "rush-events",
  "rush-fleet",
  "rush-host",
+ "rush-keymap",
  "rush-net",
  "rush-plugin",
  "rush-room",

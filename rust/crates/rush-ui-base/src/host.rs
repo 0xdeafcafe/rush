@@ -25,9 +25,9 @@ use rush_core::agent::Agent;
 use rush_core::event::Event;
 use rush_core::time::Ms;
 
+use rush_core::adapter::Profile;
+
 use crate::model::Model;
-use crate::screens::session_cards::fork::Fork;
-use crate::screens::session_cards::rewind::Branch;
 
 /// One thing asked of a session's host (Go's op).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -137,7 +137,7 @@ pub enum Op {
     },
     /// Leaves it to carry on while you're gone, or loops it; None ends
     /// either (client.go SetAway).
-    Away(Option<Box<crate::screens::list_extras::away::Away>>),
+    Away(Option<Box<crate::away::Away>>),
 }
 
 /// What the host says to the UI, in order (Go's host.Decode of each
@@ -225,7 +225,7 @@ pub struct Info {
     pub cache_warm: Ms,
     /// Set while it's away or looping, or an away has just ended
     /// (Info.Away).
-    pub away: Option<Box<crate::screens::list_extras::away::Away>>,
+    pub away: Option<Box<crate::away::Away>>,
     /// How it began, for the card its conversation opens on.
     pub began: Box<Began>,
     /// What it runs with now, as the cards read it.
@@ -243,7 +243,7 @@ pub struct Now {
     pub effort: String,
     pub without: Vec<String>,
     /// The permission modes its agent says it has.
-    pub permission_modes: Vec<crate::screens::session_cards::Mode>,
+    pub permission_modes: Vec<Mode>,
     /// The decisions block its last turn ended with, still open.
     pub decisions: Option<rush_core::event::Question>,
     /// The conversation it runs now, and when its host last changed it,
@@ -308,10 +308,7 @@ impl Limit {
         }
         .to_string();
         if self.resets_at != 0 {
-            t += &format!(
-                " · resets {}",
-                crate::screens::accounts::rows::clock(self.resets_at, false)
-            );
+            t += &format!(" · resets {}", crate::model::clock(self.resets_at, false));
         }
         if self.continue_ {
             t += " · continues then";
@@ -661,28 +658,78 @@ impl Hosts for NoHosts {
     }
 }
 
+/// The hosts set in a model (Model::kept): NoHosts until set.
+#[derive(Default)]
+pub struct HostsHeld {
+    pub hosts: Option<Arc<dyn Hosts>>,
+}
+
 /// Where the session's messages go from now on in m, and what starts
 /// sessions: with hosts that can start them, the box, #new, #use, the
-/// sheets and #ask start through them (start.rs).
+/// sheets and #ask start through them (session_core/start.rs, through
+/// the start_install slot).
 pub fn set_hosts(m: &mut Model, h: Arc<dyn Hosts>) {
     let starts = h.can_start();
-    m.kept::<super::Core>().hosts = Some(h);
+    m.kept::<HostsHeld>().hosts = Some(h);
     if starts {
-        super::start::install(m);
+        let install = m.ext.calls.start_install();
+        install(m);
     }
 }
 
 /// The hosts set in m, to read while drawing; None until set.
 pub fn hosts_of(m: &Model) -> Option<Arc<dyn Hosts>> {
-    m.kept.peek::<super::Core>().and_then(|c| c.hosts.clone())
+    m.kept.peek::<HostsHeld>().and_then(|c| c.hosts.clone())
 }
 
 /// The hosts m sends through.
 pub fn hosts(m: &mut Model) -> Arc<dyn Hosts> {
-    m.kept::<super::Core>()
+    m.kept::<HostsHeld>()
         .hosts
         .get_or_insert_with(|| Arc::new(NoHosts))
         .clone()
+}
+
+/// A fork to start, its conversation copied already when it's part of
+/// one or in another folder: the host starts session_id in cwd, as the
+/// agent's own fork of it (Claude Code's --fork-session) when fork.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Fork {
+    pub name: String,
+    pub cwd: String,
+    pub acct: Profile,
+    pub session_id: String,
+    pub fork: bool,
+    /// The session it was forked from.
+    pub from: String,
+    /// "" for as now: the host fills in what the session runs with, or
+    /// was started with, or the dispatch default.
+    pub model: String,
+    pub effort: String,
+    pub perm: String,
+    /// What to tell it first.
+    pub prompt: String,
+}
+
+/// A path left by an earlier rewind: its session, when it was left, the
+/// first turn of its own, your messages on it and the last of them
+/// (host.Branch).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Branch {
+    pub session_id: String,
+    pub left: Ms,
+    pub from: u32,
+    pub turns: usize,
+    pub last: String,
+}
+
+/// A permission mode a running harness says it has (host.Info's
+/// PermissionModes).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Mode {
+    pub id: String,
+    pub name: String,
+    pub description: String,
 }
 
 /// The queue as one message, each part its own (host/queue.go:11).

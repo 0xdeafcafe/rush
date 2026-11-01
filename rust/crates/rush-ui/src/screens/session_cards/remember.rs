@@ -55,7 +55,7 @@ fn mem_profile(m: &Model, key: &str) -> (Profile, String) {
         .filter(|v| v.key == key)
         .map(|v| v.sess.info.cwd.clone())
         .unwrap_or_default();
-    match core::agent(m, key) {
+    match crate::sess::agent(m, key) {
         Some(a) => {
             let mut p = a.acct.clone();
             if p.kind.is_empty() {
@@ -69,7 +69,7 @@ fn mem_profile(m: &Model, key: &str) -> (Profile, String) {
 
 /// The kind of session key's agent.
 fn kind_of(m: &Model, key: &str) -> String {
-    core::agent(m, key)
+    crate::sess::agent(m, key)
         .map(|a| a.kind.as_str().to_string())
         .unwrap_or_default()
 }
@@ -77,9 +77,9 @@ fn kind_of(m: &Model, key: &str) -> String {
 /// #remember <what>: for the open session; the agent picked in the list
 /// must be the one open.
 pub fn remember_command(m: &mut Model, arg: &str) -> Out {
-    let open = core::open_key(m);
+    let open = crate::sess::open_key(m);
     if !m.sel.is_empty() && open.as_deref() != Some(m.sel.as_str()) {
-        let name = core::agent(m, &m.sel.clone())
+        let name = crate::sess::agent(m, &m.sel.clone())
             .map(|a| a.job.name.clone())
             .unwrap_or_default();
         if !name.is_empty() {
@@ -146,7 +146,7 @@ pub fn remember(m: &mut Model, key: Option<&str>, what: &str, around: &str) -> O
             let d = Draft { key, p, cwd, n };
             // The draft takes a while: if you've moved on to something
             // else meanwhile, it waits rather than take your next key.
-            let typing = !core::conn(m, &d.key).input.is_empty();
+            let typing = !crate::sess::conn(m, &d.key).input.is_empty();
             if m.confirm.is_some() || m.sheet.is_some() || typing {
                 m.kept::<Remembering>().waiting = Some(d);
                 m.flash("the note is ready · #remember alone shows it");
@@ -235,10 +235,10 @@ pub fn remember_key_hook(m: &mut Model, k: &Press) -> Out {
     if k.s != "alt+k" {
         return Out::Pass;
     }
-    let Some(key) = core::open_key(m) else {
+    let Some(key) = crate::sess::open_key(m) else {
         return Out::Pass;
     };
-    if !core::conn(m, &key).input.is_empty() {
+    if !crate::sess::conn(m, &key).input.is_empty() {
         return Out::Pass;
     }
     let Some(v) = m.session.as_ref() else {
@@ -265,7 +265,7 @@ pub fn memory_wide_key_hook(m: &mut Model, k: &Press) -> Out {
     if !matches!(k.s.as_str(), "+" | "r" | "f") {
         return Out::Pass;
     }
-    let Some(key) = core::open_key(m) else {
+    let Some(key) = crate::sess::open_key(m) else {
         return Out::Pass;
     };
     let picked = m
@@ -277,7 +277,7 @@ pub fn memory_wide_key_hook(m: &mut Model, k: &Press) -> Out {
     }
     match k.s.as_str() {
         "+" => {
-            core::conn(m, &key).input.set("#remember ");
+            crate::sess::conn(m, &key).input.set("#remember ");
             if let Some(v) = m.session.as_mut() {
                 v.sel.clear();
             }

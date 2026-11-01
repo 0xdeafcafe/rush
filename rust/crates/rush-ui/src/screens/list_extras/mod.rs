@@ -25,7 +25,7 @@ use crate::frame::{Ext, Out};
 use crate::list::ListLine;
 use crate::model::Model;
 
-pub mod away;
+pub use crate::away;
 pub mod filter;
 pub mod finish;
 pub mod fuzzy;

@@ -38,9 +38,9 @@ use rush_fleet::Predicates;
 
 use crate::frame::places::Place;
 use crate::frame::{Mouse, Out, Press};
+use crate::host::SendErr;
 use crate::list::{folder_key, folder_titles, project_tint};
 use crate::model::Model;
-use crate::screens::session_core::host::SendErr;
 use crate::screens::session_core::turnwants::{
     WANTS_PROBLEM, unlooked, wants_mark, wants_of, wants_say, wants_you,
 };
@@ -1074,8 +1074,7 @@ impl Wall {
         } else {
             &sub.description
         });
-        let runs =
-            crate::screens::accounts::look::runs_on(&m.reg, a.kind.as_str(), &p.model, &p.effort);
+        let runs = crate::look::runs_on(&m.reg, a.kind.as_str(), &p.model, &p.effort);
         let took = if sub.born > 0 {
             age(now - sub.born)
         } else {
@@ -1185,7 +1184,7 @@ impl Wall {
         };
         self.answer = Default::default();
         m.kept::<WallState>().answered.insert(a.key.clone(), at);
-        let h = crate::screens::session_core::host::hosts(m);
+        let h = crate::host::hosts(m);
         let (key, name) = (a.key.clone(), a.display_name.clone());
         m.later(
             move || h.reply(&a, &text),

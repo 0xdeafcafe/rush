@@ -205,7 +205,7 @@ pub fn offers_full(a: &Agent) -> bool {
 /// The logins agent's own list of its sessions, on the account in use, in
 /// the terminal (nativeView). Nothing when it has none.
 pub fn native_view(m: &mut Model) -> Out {
-    use crate::screens::accounts::look::LOGINS_KIND;
+    use crate::look::LOGINS_KIND;
     let Some(ad) = m
         .reg
         .get(LOGINS_KIND)

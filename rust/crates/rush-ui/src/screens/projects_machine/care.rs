@@ -139,7 +139,7 @@ pub(crate) fn end_care(m: &mut Model, done: Vec<rush_core::agent::Agent>) {
         crate::screens::cmdbar::stops::toggle_done(m, &a.key);
         m.news("machine cleanup finished: its report is in Earlier", "");
         notify_later("Cleanup finished", "its report is in rush's Earlier", true);
-        let h = crate::screens::session_core::host::hosts(m);
+        let h = crate::host::hosts(m);
         let id = a.job.id.clone();
         m.later(
             move || h.stop(&id),
@@ -571,9 +571,9 @@ pub fn care_started(m: &mut Model, r: Result<String, String>) -> Out {
 /// mode when it has one, since nobody is watching to answer its
 /// permission prompts (pick's startHosted :313-322, autoMode :360).
 pub fn start_with_hosts(m: &mut Model, c: CareStart) -> Out {
+    use crate::host::hosts;
     use crate::screens::accounts::rows::start_profile;
     use crate::screens::accounts::setup::next_start;
-    use crate::screens::session_core::host::hosts;
     use crate::screens::session_core::start::config_as;
     let next = next_start(m, &c.cwd);
     let mut s = config_as(m, &next, &c.cwd);
@@ -912,8 +912,8 @@ mod tests {
         for follows in [false, true] {
             let lp: rush_draw::Loop<crate::worker::Note> = rush_draw::Loop::new();
             let mut m = crate::new_model_with_workers("t", lp.sender());
-            let h = crate::screens::session_core::host::Fake::new();
-            crate::screens::session_core::host::set_hosts(&mut m, std::sync::Arc::new(h.clone()));
+            let h = crate::host::Fake::new();
+            crate::host::set_hosts(&mut m, std::sync::Arc::new(h.clone()));
             m.follows = follows;
             m.agents = vec![cleanup_agent(State::Working)];
             m.roots = vec![String::new()];
@@ -960,8 +960,8 @@ mod tests {
     #[test]
     fn starts_as_rush_s_own() {
         let mut m = crate::new_model("t");
-        let h = crate::screens::session_core::host::Fake::new();
-        crate::screens::session_core::host::set_hosts(&mut m, std::sync::Arc::new(h.clone()));
+        let h = crate::host::Fake::new();
+        crate::host::set_hosts(&mut m, std::sync::Arc::new(h.clone()));
         start_care(
             &mut m,
             "the disk has 9G free",

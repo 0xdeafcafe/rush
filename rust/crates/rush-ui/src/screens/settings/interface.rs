@@ -74,7 +74,7 @@ pub const PREVIEW_ROWS: usize = 15;
 /// the ones the list shows (view.go:1526 listPreview).
 pub fn refresh_preview(m: &mut Model) {
     let room = m.w.saturating_sub(6).saturating_sub(4).max(10);
-    let (lw, _) = crate::screens::list_extras::split::widths(m);
+    let (lw, _) = crate::split::widths(m);
     let lw = if lw == 0 { m.w } else { lw };
     let w = lw.min(room);
     let all = preview_at(m, w);

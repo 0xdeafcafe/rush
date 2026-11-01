@@ -7,7 +7,7 @@
 use rush_core::adapter::{Feature, Registry};
 use rush_state::agents::{self, Adapter, Choice, Choices, Program};
 
-use super::state::accounts;
+use crate::accounts::accounts;
 use crate::model::Model;
 
 /// Tells state's list of agents about m's, once per model and again each

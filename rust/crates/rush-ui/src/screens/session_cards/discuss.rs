@@ -317,19 +317,14 @@ pub fn verdicts_back(m: &mut Model, list: Vec<Summary>) {
     v.rooms = list;
     // A chat not open hears of it as a line from your agents.
     for key in noted {
-        if let Some(a) = crate::screens::session_core::agent(m, &key).cloned() {
-            crate::screens::session_core::finish::note_event(
-                m,
-                &a,
-                "⇶",
-                "the room's verdict is in",
-            );
+        if let Some(a) = crate::sess::agent(m, &key).cloned() {
+            crate::finish::note_event(m, &a, "⇶", "the room's verdict is in");
         }
     }
     if back {
         let name = open
             .as_deref()
-            .and_then(|k| crate::screens::session_core::agent(m, k))
+            .and_then(|k| crate::sess::agent(m, k))
             .map_or("this chat".to_string(), |a| a.display_name.clone());
         m.news(
             &format!("the room's verdict is in: enter in {name} sends it on"),

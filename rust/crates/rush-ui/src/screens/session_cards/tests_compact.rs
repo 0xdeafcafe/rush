@@ -313,9 +313,9 @@ impl rush_core::adapter::Summarizer for Local {
 fn compact_lists_ollamas_decision_models_to_prune_with() {
     let mut m = compact_model("claude", 9, "idle");
     m.reg.register(Local);
-    let fake = crate::screens::session_core::host::Fake::new();
+    let fake = crate::host::Fake::new();
     *fake.deciders.lock().unwrap() = vec!["tev1:4b".into()];
-    crate::screens::session_core::host::set_hosts(&mut m, std::sync::Arc::new(fake));
+    crate::host::set_hosts(&mut m, std::sync::Arc::new(fake));
     open_compact(&mut m, "k");
     let mut s = std::mem::take(m.sheet_as::<CompactSheet>().unwrap());
     assert!(!s.loading);

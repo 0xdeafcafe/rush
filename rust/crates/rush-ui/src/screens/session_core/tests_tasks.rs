@@ -146,7 +146,7 @@ fn task(m: &mut Model, id: &str, call: &str, label: &str, bg: bool, at: i64) {
 /// The keys row under the box, as the dock w wide works it out.
 fn hint(m: &mut Model, w: usize) -> String {
     super::dock::dock(m, w);
-    super::core(m)
+    crate::sess::state(m)
         .hint
         .as_ref()
         .map(|l| l.plain())
@@ -493,7 +493,7 @@ fn finished_rows_are_kept() {
 /// TestFanOutFollowed).
 #[test]
 fn a_command_that_ran_several_agents() {
-    use crate::screens::list_extras::spawns::SpawnRun;
+    use crate::spawns::SpawnRun;
     let d = tempfile::tempdir().unwrap();
     let mut m = background(&d);
     bash(&mut m, "t7", "run a & run b & wait", NOW - 20_000);
@@ -583,7 +583,7 @@ fn chain_running(m: &mut Model, call: &str, job: &str) {
 /// render.go:2347).
 #[test]
 fn k_kills_and_p_pauses_the_chains_command() {
-    use crate::screens::projects_machine::shells::{pause_word, paused_ids};
+    use crate::shells::{pause_word, paused_ids};
     let d = tempfile::tempdir().unwrap();
     let fake = Fake::new();
     let mut m = hosted(&d, &fake);
@@ -647,7 +647,7 @@ fn a_picked_commands_keys_say_your_row_key() {
 /// it (scripts.go script, goOnFromBreak; shells.go:226).
 #[test]
 fn p_lets_a_script_held_at_a_breakpoint_go_on() {
-    use crate::screens::projects_machine::shells::paused_ids;
+    use crate::shells::paused_ids;
     let d = tempfile::tempdir().unwrap();
     let fake = Fake::new();
     let mut m = hosted(&d, &fake);
@@ -737,7 +737,7 @@ fn a_cards_paste_is_a_chip_in_the_box() {
         crate::screens::session_cards::Act::Paste("one\ntwo\n".into()),
     );
     let input = &conn(&mut m, KEY).input;
-    let chip = crate::screens::session_cards::pastes::chip_for(1, "one\ntwo\n");
+    let chip = crate::pastes::chip_for(1, "one\ntwo\n");
     assert_eq!(input.string(), format!("{chip} "));
     assert_eq!(input.sent(false), "one\ntwo\n ");
 }

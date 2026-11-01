@@ -18,7 +18,7 @@
 pub mod askrush;
 pub mod autoswitch;
 pub mod bits;
-pub mod bridge;
+pub use crate::bridge;
 pub mod choices;
 pub mod forsettings;
 pub mod guard;
@@ -158,7 +158,7 @@ fn use_command(m: &mut Model, arg: &str) -> Out {
 pub fn use_session(m: &Model) -> Option<String> {
     let key = m.session.as_ref().map(|v| v.key.clone())?;
     let a = m.selected_row()?;
-    (a.key == key && !crate::screens::social::rooms::is_room_key(&key)).then_some(key)
+    (a.key == key && !crate::rooms::is_room_key(&key)).then_some(key)
 }
 
 /// #preset, #profile, #agent: #use, as they were, saying what it's

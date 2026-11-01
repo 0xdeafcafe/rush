@@ -65,7 +65,7 @@ pub fn sync(m: &mut Model) {
         return; // a tile's Session drawn as the open one: not the one showing
     }
     let open = showing(m);
-    let linked = core(m).linked.clone();
+    let linked = crate::sess::state(m).linked.clone();
     // A tile's kept Session keeps its connection (gridPark): it's let go
     // when the tile is (grid::close).
     if !linked.is_empty()
@@ -95,7 +95,7 @@ pub fn sync(m: &mut Model) {
     if c.link.is_some() {
         // A tile's kept Session taken in (gridAdopt): its connection is
         // the showing one's now.
-        core(m).linked = key;
+        crate::sess::state(m).linked = key;
         return;
     }
     if c.dialing || c.dialed_pid == a.pid {
@@ -315,9 +315,9 @@ pub fn drop_link(m: &mut Model, key: &str) {
     if let Some(l) = c.link.take() {
         l.close();
     }
-    let core = core(m);
-    if core.linked == key {
-        core.linked.clear();
+    let s = crate::sess::state(m);
+    if s.linked == key {
+        s.linked.clear();
     }
 }
 
@@ -360,7 +360,7 @@ pub(super) fn opened_with(
     let core = core(m);
     core.link_gen += 1;
     let r#gen = core.link_gen;
-    core.linked = key.to_string();
+    crate::sess::state(m).linked = key.to_string();
     let stop = Arc::new(AtomicBool::new(false));
     let c = conn(m, key);
     c.link = Some(link.clone());
@@ -783,15 +783,15 @@ fn take_batch(m: &mut Model, key: &str, r#gen: u64, batch: Vec<Said>, closed: bo
                 // A model switched mid-session comes only as the host's info:
                 // the agent's init said the one it started on.
                 Said::Info(i) => {
-                    let mut model = c.info.model.clone();
+                    let mut model = c.base.info.model.clone();
                     apply_said(sess, Said::Info(i.clone()), &mut now, &mut model);
-                    c.info = i;
+                    c.base.info = i;
                     replayed = true; // the info that ends the replay
                 }
                 Said::Error(e) => errs.push(e),
                 Said::Reply { id, body } => replies.push((id, body)),
                 Said::Context(u) => {
-                    c.context = Some(u);
+                    c.base.context = Some(u);
                     counted = true;
                 }
                 s => apply_said(sess, s, &mut now, &mut String::new()),
@@ -824,8 +824,9 @@ fn take_batch(m: &mut Model, key: &str, r#gen: u64, batch: Vec<Said>, closed: bo
     if closed {
         c.link = None;
         c.sleeping = asleep;
-        if core.linked == key {
-            core.linked.clear();
+        let s = crate::sess::state(m);
+        if s.linked == key {
+            s.linked.clear();
         }
     }
     if !errs.is_empty() {

@@ -11,9 +11,9 @@ use rush_core::agent::{Agent, State};
 use rush_state::Store;
 
 use super::*;
+use crate::accounts::StartOver;
+use crate::accounts::set_store;
 use crate::screens::accounts::askrush::ask_rush;
-use crate::screens::accounts::setup::StartOver;
-use crate::screens::accounts::state::set_store;
 use crate::screens::session_cards::ModelCards;
 use crate::screens::session_core::host::{Fake, Info, Said, set_hosts};
 use crate::screens::session_core::{conn, live, spawned};

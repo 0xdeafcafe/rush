@@ -257,7 +257,7 @@ fn watching_a_run() {
         dock.contains("to the main session, port it, not the subagent"),
         "{dock}"
     );
-    let hint = super::core(&mut m).hint.clone().unwrap().plain();
+    let hint = crate::sess::state(&mut m).hint.clone().unwrap().plain();
     assert!(
         hint.starts_with("enter send to the main session  ·  esc · ← back to the list"),
         "{hint}"
@@ -568,7 +568,7 @@ fn a_watched_spawned_agent_takes_the_box() {
     .unwrap();
     conn(&mut m, KEY).runs.spawns.insert(
         "s1".into(),
-        crate::screens::list_extras::spawns::SpawnRun {
+        crate::spawns::SpawnRun {
             step: "t9".into(),
             kind: "claude".into(),
             name: "Claude Code".into(),

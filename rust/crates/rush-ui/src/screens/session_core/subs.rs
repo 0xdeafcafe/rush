@@ -33,7 +33,7 @@ use super::{agent, conn, open_key};
 use crate::frame::Out;
 use crate::model::Model;
 use crate::screens::list_extras::jobs::{Tailed, dock_jobs, read_tail};
-use crate::screens::list_extras::spawns::{
+use crate::spawns::{
     SPAWN_EVERY, SPAWN_GRACE, SPAWN_PREFIX, SpawnRun, Want, claim, find_spawn, spawn_dir,
     spawn_subs, step_spawn, windows,
 };
@@ -69,7 +69,7 @@ pub fn kids_of(
             ..Default::default()
         };
         if spawn.name.is_empty() {
-            spawn.name = crate::screens::accounts::look::harness_name(reg, &sp.kind);
+            spawn.name = crate::look::harness_name(reg, &sp.kind);
         }
         out.entry(sp.step.clone())
             .or_default()

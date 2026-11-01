@@ -276,7 +276,7 @@ fn names_make_room_for_their_badges() {
 /// sessionAgent).
 #[test]
 fn badges_name_the_open_sessions_harness_and_plugins_status() {
-    use crate::screens::accounts::look::row_badge;
+    use crate::look::row_badge;
     let a = agent("a1", "fix the tax rounding", State::Idle, 0);
     let mut m = model_of(vec![a], 120, 40);
     let claude = row_badge(&m.reg, "claude", false).text;

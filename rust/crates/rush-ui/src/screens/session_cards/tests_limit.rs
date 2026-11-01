@@ -7,7 +7,7 @@ use rush_core::usage::{Quota, Window};
 use super::limit::{LimitUsage, countdown};
 use super::tests::*;
 use super::*;
-use crate::screens::session_core::host::Limit;
+use crate::host::Limit;
 
 const NOW: i64 = 1_793_190_896_789;
 
@@ -177,7 +177,7 @@ fn numbers_as_go_prints_them() {
 // the Accounts rows (its home and sign-in), else its kind and key alone.
 #[test]
 fn refresh_reads_with_the_whole_account() {
-    use crate::screens::accounts::rows::AcctRow;
+    use crate::accounts::AcctRow;
     use rush_core::adapter::Account;
     let full = Account {
         kind: "codex".into(),

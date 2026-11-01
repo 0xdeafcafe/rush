@@ -53,7 +53,7 @@ pub fn provide() {
             if !loaded(m) {
                 return;
             }
-            let p = crate::screens::settings::config(m).default_profile();
+            let p = crate::accounts::config(m).default_profile();
             super::profiles::spill_to_for(m, &p, true);
         },
         why: |m, k| peek(m).why.get(k).cloned().unwrap_or_default(),

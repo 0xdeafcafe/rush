@@ -14,13 +14,14 @@ use rush_core::text::Line;
 use rush_state::Store;
 
 use super::fleetslash::{FLEET_ALIASES, FLEET_COMMANDS};
+use crate::accounts::{cfg, set_store};
+use crate::away::{Away, Held};
 use crate::frame::{Out, Press};
+use crate::host::{Fake, Op, set_hosts};
 use crate::model::Model;
 use crate::screens::accounts::startsheet::StartSheet;
-use crate::screens::accounts::state::{cfg, set_store};
-use crate::screens::list_extras::away::{Away, Held};
-use crate::screens::session_core::host::{Fake, Op, set_hosts};
-use crate::screens::session_core::{conn, live};
+use crate::screens::session_core::live;
+use crate::sess::conn;
 use crate::session::{SessionView, Source};
 
 /// A harness with nothing of its own: enough for a Session to open.
@@ -511,7 +512,7 @@ fn slim_waits_for_the_context_count() {
 /// (backFromAway, away.go:111; away_test.go TestBackFromAway).
 #[test]
 fn an_ended_away_opens_the_back_sheet() {
-    use crate::screens::session_core::host::Said;
+    use crate::host::Said;
     let (mut m, _) = open();
     let mut info = conn(&mut m, "work/c2").info.clone();
     info.away = Some(Box::new(Away {
@@ -548,7 +549,7 @@ fn an_ended_away_opens_the_back_sheet() {
 /// An away still on opens nothing by itself.
 #[test]
 fn an_away_on_opens_nothing() {
-    use crate::screens::session_core::host::Said;
+    use crate::host::Said;
     let (mut m, _) = open();
     let mut info = conn(&mut m, "work/c2").info.clone();
     info.away = Some(Box::new(Away {

@@ -44,8 +44,8 @@ use super::workflow::{Group, agent_row, groups, phase_mark, round_s, workflow_st
 use super::{agent, conn, open_key};
 use crate::frame::{Mouse, Out, Press};
 use crate::model::Model;
-use crate::screens::list_extras::spawns::SPAWN_PREFIX;
 use crate::session::{Pos, SessionView, Source};
+use crate::spawns::SPAWN_PREFIX;
 use crate::style::*;
 
 /// Watching a subagent: its own, cooler ground (bgSub).
@@ -1675,7 +1675,7 @@ fn run_of_step(m: &mut Model, key: &str, picked: &str) -> Option<String> {
         .filter(|v| v.key == key)
         .and_then(|v| v.o.kids.get(id.split('/').next().unwrap_or("")))
         .map_or(0, Vec::len);
-    let prefix = crate::screens::list_extras::spawns::SPAWN_PREFIX;
+    let prefix = crate::spawns::SPAWN_PREFIX;
     conn(m, key)
         .runs
         .subs

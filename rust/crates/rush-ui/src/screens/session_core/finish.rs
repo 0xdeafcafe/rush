@@ -15,77 +15,26 @@
 //! (fxKind, clkFX, fxLen, react) and feed.go:21 noteEvent. clanker.rs
 //! draws the reactions and ticks them on (clkFX.draw, tint, onFXTick).
 
-use std::collections::HashMap;
-
 use rush_core::agent::{Agent, State};
-use rush_core::time::Ms;
 use rush_fleet::Predicates;
 
 use crate::model::Model;
-use crate::screens::session_cards::mention::mention_name;
-use crate::screens::social::feed::AgentEvent;
-use crate::style::one_line;
 
-/// The feed keeps this many lines.
-const KEPT: usize = 30;
+// What each reading said of each agent, and the lines from your agents,
+// are the base's (crate::finish).
+use crate::finish::note;
+pub use crate::finish::{Finish, note_event};
+use crate::style::one_line;
 
 // What clanker reacts with is his (crate::clanker).
 pub use crate::clanker::{FX_EVERY, Fx, Reaction, fx_tick, react};
-
-/// What the last reading said of each agent.
-#[derive(Default)]
-pub struct Finish {
-    /// Each agent's state as last read, by key; busy reads as working
-    /// (lastState).
-    pub last_state: HashMap<String, &'static str>,
-    last_err: HashMap<String, bool>,
-    last_stall: HashMap<String, Ms>,
-    /// The lines from your agents, oldest first (m.events).
-    pub events: Vec<AgentEvent>,
-    /// What clanker is reacting to (m.fx).
-    pub fx: Reaction,
-    /// The decisions each agent was last notified of, by key: the same
-    /// asked again isn't said again (toldCard).
-    told_card: HashMap<String, String>,
-    /// The notifications posted, as (title, body), in a test's sandbox,
-    /// where none is really sent.
-    pub told: Vec<(String, String)>,
-}
-
-/// An agent's @handle (agentHandle).
-fn handle(a: &Agent) -> String {
-    let host = a.rush.then_some(a.job.id.as_str());
-    format!("@{}", mention_name(a, host))
-}
-
-/// Adds a line from your agents for agent a, keeping the last 30
-/// (noteEvent).
-pub fn note_event(m: &mut Model, a: &Agent, glyph: &str, what: &str) {
-    let now = m.now;
-    note(m.kept::<Finish>(), a, now, glyph, what.to_string());
-}
-
-fn note(f: &mut Finish, a: &Agent, now: Ms, glyph: &str, what: String) {
-    let said = one_line(&a.job.detail);
-    f.events.push(AgentEvent {
-        at: now,
-        key: a.key.clone(),
-        name: handle(a),
-        glyph: glyph.into(),
-        what: if what.is_empty() { said.clone() } else { what },
-        said,
-    });
-    if f.events.len() > KEPT {
-        let n = f.events.len() - KEPT;
-        f.events.drain(..n);
-    }
-}
 
 /// A rush session a usage limit stopped that rush moves on by itself: its
 /// profile doesn't wait, and a login, account or provider has room for
 /// it. Nobody needs telling it stopped (limitHandled).
 pub fn limit_handled(m: &Model, a: &Agent) -> bool {
-    use crate::screens::accounts::{autoswitch, keys, rows, state};
+    use crate::accounts as state;
+    use crate::screens::accounts::{autoswitch, keys, rows};
     use rush_state::profiles::{LIMIT_HANDOFF, LIMIT_WAIT};
     let rate = a
         .spend
@@ -148,7 +97,7 @@ pub fn on_fleet(m: &mut Model) {
     } else {
         String::new()
     };
-    let quiet = crate::screens::accounts::state::cfg(m).quiet || m.following();
+    let quiet = crate::accounts::cfg(m).quiet || m.following();
     for a in m.agents.iter().filter(|a| !a.checking) {
         let prev = f.last_state.get(&a.key).copied().unwrap_or("");
         // Agents it left running in the background are work: it finishes
@@ -430,7 +379,7 @@ mod tests {
         let mut m = crate::new_model("test");
         let now = 1_790_000_000_000;
         m.clock = Some(now);
-        let login = |current: bool| crate::screens::accounts::state::LoginView {
+        let login = |current: bool| crate::accounts::LoginView {
             current,
             quota: rush_core::usage::Quota {
                 fetched_at: now,
@@ -438,7 +387,7 @@ mod tests {
             },
             ..Default::default()
         };
-        crate::screens::accounts::state::accounts(&mut m).logins = vec![login(true), login(false)];
+        crate::accounts::accounts(&mut m).logins = vec![login(true), login(false)];
         let mut a = working_agent();
         a.rush = true;
         a.kind = rush_state::LOGINS_KIND.into();

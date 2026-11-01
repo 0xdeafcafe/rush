@@ -13,10 +13,10 @@ use super::host::{Fake, Op};
 use super::switch::{conversation, handoff_clip, in_place};
 use super::tests::{KEY, agent, open};
 use super::{conn, core};
+use crate::accounts::StartOver;
+use crate::accounts::accounts;
 use crate::frame::Out;
 use crate::model::Model;
-use crate::screens::accounts::setup::StartOver;
-use crate::screens::accounts::state::accounts;
 
 /// An agent that takes conversations on from others.
 struct Taker;

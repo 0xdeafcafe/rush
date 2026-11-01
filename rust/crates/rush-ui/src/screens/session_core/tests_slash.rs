@@ -125,7 +125,7 @@ fn session(d: &tempfile::TempDir) -> (Model, Arc<Fake>) {
         cmd("context", ""),
     ];
     s.commands = s.command_list.iter().map(|c| c.name.clone()).collect();
-    crate::screens::settings::use_store(&mut m, rush_state::Store::default());
+    crate::accounts::use_store(&mut m, rush_state::Store::default());
     (m, fake)
 }
 
@@ -303,7 +303,7 @@ fn a_full_word_sends_when_enter_sends() {
     typed(&mut m, "then run /pdf", 0);
     assert_eq!(slash::key(&mut m, &Press::of("enter").unwrap()), Out::Draw);
     assert_eq!(input(&mut m), "then run /pdf ");
-    crate::screens::settings::config_mut(&mut m).enter_sends_command = true;
+    crate::accounts::config_mut(&mut m).enter_sends_command = true;
     typed(&mut m, "then run /pdf", 0);
     assert_eq!(slash::key(&mut m, &Press::of("enter").unwrap()), Out::Pass);
     assert_eq!(input(&mut m), "then run /pdf");

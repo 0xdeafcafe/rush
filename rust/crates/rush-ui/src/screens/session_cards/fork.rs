@@ -22,26 +22,7 @@ use crate::frame::{Out, Press, Sheet};
 use crate::model::Model;
 use crate::style::*;
 
-/// A fork to start, its conversation copied already when it's part of
-/// one or in another folder: the host starts session_id in cwd, as the
-/// agent's own fork of it (Claude Code's --fork-session) when fork.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Fork {
-    pub name: String,
-    pub cwd: String,
-    pub acct: Profile,
-    pub session_id: String,
-    pub fork: bool,
-    /// The session it was forked from.
-    pub from: String,
-    /// "" for as now: the host fills in what the session runs with, or
-    /// was started with, or the dispatch default.
-    pub model: String,
-    pub effort: String,
-    pub perm: String,
-    /// What to tell it first.
-    pub prompt: String,
-}
+pub use crate::host::Fork;
 
 /// One of the conversation's turns, as the sheet offers it (forkTurn).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
