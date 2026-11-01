@@ -163,8 +163,9 @@ pub struct Spend {
     pub dir: String,
     /// When `dir` last changed.
     pub dir_at: Ms,
-    /// Folders it worked in, subagents included.
-    pub dirs: Vec<String>,
+    /// Folders it worked in, subagents included: shared with the spend
+    /// scanner's own and every copy of the row, as most are the same few.
+    pub dirs: Vec<std::sync::Arc<str>>,
     /// Pull request URLs its transcripts mention.
     pub prs: Vec<String>,
     /// The last count it reported moving ("lint 11,065 → 9,052"), and when.

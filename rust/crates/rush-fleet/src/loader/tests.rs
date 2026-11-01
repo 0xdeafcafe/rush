@@ -695,6 +695,51 @@ fn idle_rows_are_not_watched() {
     );
 }
 
+// Looked for all at once ahead of the rows (look_ahead), each rush
+// session's transcript is where transcript_of alone finds it: in the
+// folder it started in, in the project it moved to, or, nowhere, where it
+// would be, not looked for again until its wait is up.
+#[test]
+fn transcripts_looked_for_ahead_are_as_found_alone() {
+    let d = tempfile::tempdir().unwrap();
+    let (reg, p) = claude_reg(d.path());
+    let write = |cwd: &str, sid: &str| {
+        let tr = reg.transcript_path("claude", &p, cwd, sid);
+        std::fs::create_dir_all(Path::new(&tr).parent().unwrap()).unwrap();
+        std::fs::write(&tr, "{}\n").unwrap();
+        tr
+    };
+    let home = write("/work/app", "home");
+    let moved = write("/work/app/.claude/worktrees/x", "moved");
+    let t = now();
+    let hosted: Vec<HostInfo> = ["home", "moved", "gone"]
+        .into_iter()
+        .map(|sid| {
+            let mut i = info(sid, "stopped", "/work/app", t);
+            i.kind = "claude".into();
+            i.session_id = sid.into();
+            i
+        })
+        .collect();
+    let rows = |ahead: bool| {
+        let mut l = Loader::new(reg.clone());
+        if ahead {
+            l.look_ahead(&p, &hosted);
+        }
+        let got: Vec<String> = hosted
+            .iter()
+            .map(|i| l.hosted_base(&p, i, None, t).job.transcript_path)
+            .collect();
+        (got, l.unfound.contains_key("gone"))
+    };
+    let gone = reg.transcript_path("claude", &p, "/work/app", "gone");
+    assert_eq!(
+        rows(false),
+        (vec![home.clone(), moved.clone(), gone.clone()], true)
+    );
+    assert_eq!(rows(true), (vec![home, moved, gone], true));
+}
+
 /// A loader reading one fake agent with a past and a live session, home
 /// being Claude Code in a folder of its own.
 fn past_loader(d: &Path) -> Loader {

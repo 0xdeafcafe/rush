@@ -443,6 +443,13 @@ impl Transcripts for Claude {
         }
         String::new()
     }
+    fn find_transcripts(&self, p: &Profile, wants: &[(&str, &str)]) -> Vec<String> {
+        account(p)
+            .find_transcripts(wants)
+            .into_iter()
+            .map(|at| at.as_deref().map(path_str).unwrap_or_default())
+            .collect()
+    }
     fn transcripts_dir(&self, p: &Profile) -> String {
         path_str(&account(p).projects_dir())
     }
@@ -487,6 +494,15 @@ impl SpendScanner for ClaudeSpend {
         if let Ok(mut s) = self.0.try_lock() {
             s.save();
         }
+    }
+    fn kept(&self, path: &str) -> Option<Spend> {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .kept_spend(Path::new(path), now())
+    }
+    fn prepare(&self) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).load();
     }
 }
 

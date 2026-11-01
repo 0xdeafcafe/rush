@@ -302,11 +302,17 @@ pub fn list() -> Vec<Info> {
 struct Listed {
     mod_: Option<SystemTime>,
     size: u64,
-    info: Option<Info>,
+    /// Shared with the listings it's in, so an unchanged session's info
+    /// is held once however many listings are kept; once its host is
+    /// found gone, as revive::lose made it (`lost`).
+    info: Option<Arc<Info>>,
     /// The listing that last looked at it (see Lister::trust).
     at: u64,
     /// Its host was found gone, as last listed.
     dead: bool,
+    /// `info` is the lost one: the file is read again if its host is
+    /// ever found alive.
+    lost: bool,
 }
 
 /// Says whether a path is unchanged since a listing numbered at looked
@@ -326,16 +332,19 @@ pub struct Lister {
     pub at: u64,
     ids: Option<Vec<String>>,
     ids_at: u64,
-    last: Option<Arc<Vec<Info>>>,
+    last: Option<Arc<Vec<Arc<Info>>>>,
+    /// Keeps and lists only sessions their info says are neither stopped
+    /// nor asleep: a sweep never looks at the rest, most of them.
+    awake: bool,
 }
 
 impl Lister {
     pub fn list(&mut self) -> Vec<Info> {
-        self.list_shared().as_ref().clone()
+        self.list_shared().iter().map(|i| Info::clone(i)).collect()
     }
 
     /// The listing, shared with the last when nothing changed.
-    pub fn list_shared(&mut self) -> Arc<Vec<Info>> {
+    pub fn list_shared(&mut self) -> Arc<Vec<Arc<Info>>> {
         let t = self.trust.take();
         let at = self.at;
         let out = self.list_trusting(
@@ -349,7 +358,11 @@ impl Lister {
     /// The listing numbered at, trusting what fresh says is unchanged
     /// since the listing that last looked at it; shared with the last
     /// when nothing changed.
-    pub fn list_trusting(&mut self, fresh: &dyn Fn(&Path, u64) -> bool, at: u64) -> Arc<Vec<Info>> {
+    pub fn list_trusting(
+        &mut self,
+        fresh: &dyn Fn(&Path, u64) -> bool,
+        at: u64,
+    ) -> Arc<Vec<Arc<Info>>> {
         self.at = at;
         let trust = |p: &Path, at: u64| fresh(p, at);
         let mut same = self.last.is_some();
@@ -369,32 +382,52 @@ impl Lister {
         let mut stand = Vec::new();
         let mut n = 0;
         let ids = self.ids.clone().unwrap_or_default();
-        for id in &ids {
+        let trusted: Vec<bool> = ids
+            .iter()
+            .map(|id| self.infos.get(id).is_some_and(|c| trust(&dir(id), c.at)))
+            .collect();
+        // The info files not trusted are looked at, and those changed read,
+        // side by side (all of them, the first time), then taken in order.
+        let look: Vec<&String> = ids
+            .iter()
+            .zip(&trusted)
+            .filter(|(_, t)| !**t)
+            .map(|(id, _)| id)
+            .collect();
+        let (infos, awake) = (&self.infos, self.awake);
+        let mut looked = rush_core::par::map_with(
+            look,
+            || (),
+            |_, id| {
+                let st = std::fs::metadata(dir(id).join("info.json")).ok()?;
+                let (m, size) = (st.modified().ok(), st.len());
+                let changed = infos.get(id).is_none_or(|c| c.mod_ != m || c.size != size);
+                let read = changed.then(|| read_kept(id, awake));
+                Some((m, size, read))
+            },
+        )
+        .into_iter();
+        for (id, trusted) in ids.iter().zip(trusted) {
             let known = self.infos.contains_key(id);
-            let trusted = self.infos.get(id).is_some_and(|c| trust(&dir(id), c.at));
             if !trusted {
-                let Ok(st) = std::fs::metadata(dir(id).join("info.json")) else {
+                let Some((m, size, read)) = looked.next().flatten() else {
                     if known {
                         self.infos.remove(id);
                         same = false;
                     }
                     continue;
                 };
-                let (m, size) = (st.modified().ok(), st.len());
-                let changed = self
-                    .infos
-                    .get(id)
-                    .is_none_or(|c| c.mod_ != m || c.size != size);
-                if changed {
+                if let Some(info) = read {
                     let dead = self.infos.get(id).is_some_and(|c| c.dead);
                     self.infos.insert(
                         id.clone(),
                         Listed {
                             mod_: m,
                             size,
-                            info: read_info_file(id).ok(),
+                            info,
                             at: 0,
                             dead,
+                            lost: false,
                         },
                     );
                     same = false;
@@ -406,10 +439,26 @@ impl Lister {
             let Some(c) = self.infos.get_mut(id) else {
                 continue;
             };
-            let Some(info) = &c.info else { continue };
-            let dead = info.state != "stopped" && !crate::alive(info.host_pid);
+            let Some(info) = c.info.clone() else { continue };
+            // A lost one wasn't stopped when it was lost.
+            let dead = (c.lost || info.state != "stopped") && !crate::alive(info.host_pid);
+            if c.lost && !dead {
+                c.info = read_kept(id, awake); // its host is back: as it is
+                c.lost = false;
+                if c.info.is_none() {
+                    // Not read (or not kept): looked at afresh next time.
+                    (c.mod_, c.at) = (None, 0);
+                }
+            }
             same = same && dead == c.dead;
             c.dead = dead;
+            if dead && !c.lost {
+                let mut lost = Info::clone(&info);
+                crate::revive::lose(&mut lost);
+                c.info = Some(Arc::new(lost));
+                c.lost = true;
+            }
+            let Some(info) = &c.info else { continue };
             if info.is_remote() {
                 stand.push(info.host_pid as i32);
             }
@@ -428,11 +477,7 @@ impl Lister {
                 continue;
             };
             let Some(info) = &c.info else { continue };
-            let mut info = info.clone();
-            if c.dead {
-                crate::revive::lose(&mut info);
-            }
-            out.push(info);
+            out.push(info.clone());
         }
         out.sort_by_key(|a| std::cmp::Reverse(a.updated_at));
         let out = Arc::new(out);
@@ -452,7 +497,10 @@ impl Lister {
         installed: BinStamp,
         restart_due: bool,
     ) -> (usize, usize, usize, usize) {
-        sweep_over(&self.list(), false, installed, restart_due)
+        // Those stopped or asleep are passed over: a Lister that sweeps
+        // needn't keep them.
+        self.awake = true;
+        sweep_over(&self.list_shared(), false, installed, restart_due)
     }
 
     /// [`Lister::sweep`] over the list's own last listing when there is
@@ -475,10 +523,10 @@ impl Lister {
 /// The last listing the list made (hosts.rs's Sessions): kept as fresh as
 /// its watcher keeps the list, so a sweep needn't look at every session
 /// again.
-static LISTED: Mutex<Option<Arc<Vec<Info>>>> = Mutex::new(None);
+static LISTED: Mutex<Option<Arc<Vec<Arc<Info>>>>> = Mutex::new(None);
 
 /// Keeps infos as the last listing the list made.
-pub(crate) fn listed(infos: &Arc<Vec<Info>>) {
+pub(crate) fn listed(infos: &Arc<Vec<Arc<Info>>>) {
     let mut l = LISTED.lock().unwrap_or_else(|e| e.into_inner());
     if !l.as_ref().is_some_and(|o| Arc::ptr_eq(o, infos)) {
         *l = Some(infos.clone());
@@ -488,7 +536,7 @@ pub(crate) fn listed(infos: &Arc<Vec<Info>>) {
 /// See [`Lister::sweep`]; with alive, a session whose host has gone since
 /// infos was listed counts as lost (stopped).
 fn sweep_over(
-    infos: &[Info],
+    infos: &[Arc<Info>],
     alive: bool,
     installed: BinStamp,
     restart_due: bool,
@@ -539,6 +587,15 @@ fn sweep_over(
         stale -= 1;
     }
     (stale, restarted, failed, gone)
+}
+
+/// A session's info as its file says; with awake, only one neither
+/// stopped nor asleep (see Lister::awake).
+fn read_kept(id: &str, awake: bool) -> Option<Arc<Info>> {
+    read_info_file(id)
+        .ok()
+        .filter(|i| !awake || i.state != "stopped" && !i.sleeping)
+        .map(Arc::new)
 }
 
 /// A connection to one session's host.
@@ -1179,5 +1236,50 @@ fn stop_all_seen(id: &str, seen: &mut std::collections::HashSet<String>) -> Resu
         Ok(())
     } else {
         Err(errs.join("\n").into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::Home;
+
+    fn write(id: &str, state: &str, host_pid: i64) {
+        let d = dir(id);
+        std::fs::create_dir_all(&d).unwrap();
+        let info = Info {
+            id: id.into(),
+            state: state.into(),
+            host_pid,
+            ..Default::default()
+        };
+        std::fs::write(d.join("info.json"), serde_json::to_vec(&info).unwrap()).unwrap();
+    }
+
+    // A session whose host has gone is listed lost, stopped, listing after
+    // listing; one stopped or alive, as it is. A Lister that sweeps keeps
+    // only those neither stopped nor asleep.
+    #[test]
+    fn lists_gone_hosts_lost() {
+        let _h = Home::new();
+        write("a-working", "working", 0);
+        write("b-stopped", "stopped", 0);
+        write("c-alive", "idle", std::process::id() as i64);
+        let mut l = Lister::default();
+        for n in 0..2 {
+            let got = l.list();
+            assert_eq!(got.len(), 3, "listing {n}");
+            let a = got.iter().find(|i| i.id == "a-working").unwrap();
+            assert!(a.lost && a.state == "stopped", "listing {n}: {a:?}");
+            let c = got.iter().find(|i| i.id == "c-alive").unwrap();
+            assert!(!c.lost && c.state == "idle", "listing {n}: {c:?}");
+        }
+        let mut s = Lister {
+            awake: true,
+            ..Lister::default()
+        };
+        let mut ids: Vec<String> = s.list().into_iter().map(|i| i.id).collect();
+        ids.sort();
+        assert_eq!(ids, ["a-working", "c-alive"]);
     }
 }

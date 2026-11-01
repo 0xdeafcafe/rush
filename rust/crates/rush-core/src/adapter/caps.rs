@@ -283,6 +283,14 @@ pub trait SpendScanner: Send + Sync {
     fn run(&self, targets: &[SpendTarget]) -> HashMap<String, Spend>;
     /// Saves the cache, unless a run is under way.
     fn flush(&self);
+    /// A transcript's spend as the cache last kept it, reading no
+    /// transcript: what its row shows before the first run prices it.
+    fn kept(&self, _path: &str) -> Option<Spend> {
+        None
+    }
+    /// Reads the cache now, so the first kept or run needn't (it's called
+    /// on a thread of its own as discovery starts).
+    fn prepare(&self) {}
 }
 
 /// An agent whose transcripts rush prices itself.
@@ -349,6 +357,15 @@ pub trait Transcripts {
     /// Where session sid, started in cwd, keeps its conversation now:
     /// entering a worktree can move it.
     fn find_transcript(&self, p: &Profile, cwd: &str, sid: &str) -> String;
+    /// find_transcript for each (cwd, sid) of wants, in order: an agent
+    /// that can looks for them all at once (a list's first reading looks
+    /// for hundreds).
+    fn find_transcripts(&self, p: &Profile, wants: &[(&str, &str)]) -> Vec<String> {
+        wants
+            .iter()
+            .map(|(cwd, sid)| self.find_transcript(p, cwd, sid))
+            .collect()
+    }
     /// The folder they're all under.
     fn transcripts_dir(&self, p: &Profile) -> String;
 }
