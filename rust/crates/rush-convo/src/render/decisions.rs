@@ -154,13 +154,27 @@ impl Drawer<'_> {
             if i > 0 {
                 self.add(&r, Color::Default, pad.clone(), Txt::new());
             }
-            let l = pad
-                .clone()
-                .and(dim(&format!("{}.", dc.r#ref)))
-                .and_raw(" ")
-                .and(paint(C_WHITE.bold(), &dc.topic));
-            self.add(&r, Color::Default, l, Txt::new());
             let iw = dc.r#ref.len() + 2;
+            for (k, t) in wrap(
+                &paint(C_WHITE.bold(), &dc.topic),
+                (w - iw as isize).max(8) as usize,
+            )
+            .into_iter()
+            .enumerate()
+            {
+                let l = if k == 0 {
+                    pad.clone()
+                        .and(dim(&format!("{}.", dc.r#ref)))
+                        .and_raw(" ")
+                        .and(t)
+                } else {
+                    pad.clone().and(blanks(iw)).and(t)
+                };
+                self.add(&r, Color::Default, l, Txt::new());
+                if k > 0 {
+                    self.wrapped();
+                }
+            }
             if !dc.context.is_empty() {
                 for l in wrap(
                     &inline(&dc.context, C_SUB).over(C_SUB),
@@ -191,6 +205,55 @@ impl Drawer<'_> {
                     ink = C_TEXT;
                 }
                 let ow = width(&o.label);
+                // A label too long for beside its words wraps under its
+                // first letter, its words and tag below it.
+                let room = (w - iw as isize - 4).max(8) as usize;
+                if ow + 4 > room / 2 + 4 && ow > 24 {
+                    let tag = if o.recommended && passed {
+                        dim("its suggestion")
+                    } else if o.recommended {
+                        paint(C_GREEN, "its pick")
+                    } else {
+                        Txt::new()
+                    };
+                    let mut rows = wrap(&name, room);
+                    let ind = blanks(iw + 2);
+                    if !o.detail.is_empty() {
+                        rows.extend(wrap(&inline(&o.detail, ink).over(ink), room));
+                    }
+                    if !tag.is_empty() {
+                        let last = rows.pop().unwrap_or_default();
+                        if last.width() + 2 + tag.width() <= room {
+                            rows.push(trim_end(last).and_raw("  ").and(tag));
+                        } else {
+                            rows.push(last);
+                            rows.push(tag);
+                        }
+                    }
+                    for (k, row) in rows.into_iter().enumerate() {
+                        let l = if k == 0 {
+                            pad.clone()
+                                .and(blanks(iw))
+                                .and(mark.clone())
+                                .and_raw(" ")
+                                .and(row)
+                        } else {
+                            pad.clone().and(ind.clone()).and(row)
+                        };
+                        self.add(&r, Color::Default, l, Txt::new());
+                        if k > 0 {
+                            self.wrapped();
+                        }
+                    }
+                    let ppad = pad.clone().and(blanks(iw + 2));
+                    self.decision_preview(
+                        &r,
+                        &ppad,
+                        &o.preview,
+                        (w - iw as isize - 2).max(0) as usize,
+                    );
+                    continue;
+                }
                 let lead = mark
                     .and_raw(" ")
                     .and(name)

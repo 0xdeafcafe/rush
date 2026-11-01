@@ -220,3 +220,60 @@ fn a_decisions_card_wraps_its_header_and_hint() {
         }
     }
 }
+
+/// A long option label wraps under its first character; its chips (its
+/// pick, your answer) stay whole, on the label's last row or their own.
+#[test]
+fn a_long_label_and_its_chips_wrap_whole() {
+    let label = "skip the timing and merge on the passing tests and the first round's numbers (Codex: end shown at once, ~135→80 MB)";
+    let mut req = fixture();
+    req.asks.truncate(1);
+    req.asks[0].options = vec![
+        Choice {
+            label: "I build it and run the timing script myself".into(),
+            description: "about 10 minutes".into(),
+            ..Choice::default()
+        },
+        Choice {
+            label: label.into(),
+            picked: true,
+            ..Choice::default()
+        },
+    ];
+    for w in [40, 60, 80, 120, 200] {
+        for focus in [true, false] {
+            let mut c = Conn {
+                card_focus: focus,
+                q_decide: true,
+                ..Conn::default()
+            };
+            let (_, qs) = questions(&req);
+            c.sync_question(&req, None);
+            c.q_answer.insert(qs[0].question.clone(), label.to_string());
+            let rows = draw_on(&mut c, &req, w, false);
+            let all = rows.join("\n");
+            assert!(!all.contains('…'), "w={w}:\n{all}");
+            assert!(rows.iter().all(|r| width(r) <= w), "w={w}:\n{all}");
+            assert!(
+                all.contains("★ its pick") || all.contains("★ recommended"),
+                "w={w}: pick chip cut:\n{all}"
+            );
+            assert!(all.contains("✓ your answer"), "w={w}: chip cut:\n{all}");
+            for word in ["skip", "numbers", "Codex:", "MB)"] {
+                assert!(all.contains(word), "w={w}: {word:?} lost:\n{all}");
+            }
+            let at = rows
+                .iter()
+                .position(|r| r.contains(" 2  skip"))
+                .unwrap_or_else(|| panic!("w={w}: option 2:\n{all}"));
+            let x = col(&rows[at], "skip");
+            let end = rows[at..]
+                .iter()
+                .position(|r| r.trim_matches(['▍', ' ']).is_empty())
+                .map_or(rows.len(), |n| at + n);
+            for r in &rows[at + 1..end] {
+                assert_eq!(text_col(r), x, "w={w}: {r:?} not under the label");
+            }
+        }
+    }
+}

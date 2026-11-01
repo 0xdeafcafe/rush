@@ -556,11 +556,21 @@ pub fn answer_text(ds: &[Decision], picks: &HashMap<String, String>) -> Option<S
 pub fn decision_lines(ds: &[Decision], picks: &HashMap<String, String>, w: usize) -> Vec<Line> {
     let mut out = Vec::new();
     for d in ds {
-        let topic = rush_draw::truncate(&unmark(&d.topic), w.saturating_sub(3), "…").into_owned();
-        out.push(line([
-            spb(format!("{} ", d.r#ref), YELLOW),
-            spb(topic, TEXT),
-        ]));
+        // The topic wraps under its own words, past its number.
+        let ind = width(&d.r#ref) + 1;
+        let topic = line([spb(unmark(&one_line(&d.topic)), TEXT)]);
+        for (j, t) in wrap_line(&topic, w.saturating_sub(ind).max(8))
+            .into_iter()
+            .enumerate()
+        {
+            let mut l = if j == 0 {
+                line([spb(format!("{} ", d.r#ref), YELLOW)])
+            } else {
+                line([plain(blanks(ind))])
+            };
+            join(&mut l, t);
+            out.push(l);
+        }
         let picked = picks.get(&d.r#ref);
         let mut cur = line([plain("  ")]);
         for o in &d.options {
@@ -574,15 +584,24 @@ pub fn decision_lines(ds: &[Decision], picks: &HashMap<String, String>, w: usize
             } else {
                 (BLUE, TEXT)
             };
-            let label = unmark(&one_line(&o.label));
-            let label = rush_draw::truncate(&label, w.saturating_sub(6).min(48), "…").into_owned();
-            let piece = line([spb(o.key.clone(), kc), plain(" "), sp(label, lc)]);
+            // A label too long for a row wraps under its own first letter.
+            let kw = width(&o.key) + 1;
+            let label = line([sp(unmark(&one_line(&o.label)), lc)]);
+            let rows = wrap_line(&label, w.saturating_sub(2 + kw).max(8));
+            let mut piece = line([spb(o.key.clone(), kc), plain(" ")]);
+            join(&mut piece, rows[0].clone());
             if cur.width() > 2 && cur.width() + 2 + piece.width() > w {
                 out.push(std::mem::replace(&mut cur, line([plain("  ")])));
             } else if cur.width() > 2 {
                 cur.spans.push(plain("  "));
             }
             join(&mut cur, piece);
+            for r in &rows[1..] {
+                out.push(std::mem::replace(&mut cur, line([plain("  ")])));
+                let mut l = line([plain(blanks(2 + kw))]);
+                join(&mut l, r.clone());
+                cur = l;
+            }
         }
         if cur.width() > 2 {
             out.push(cur);

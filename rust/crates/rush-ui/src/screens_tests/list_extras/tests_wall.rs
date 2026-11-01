@@ -196,3 +196,45 @@ My picks: 1a 2a.";
     let f = screen(&mut m).join("\n");
     assert!(!f.contains("1 Subagents on the Wall"), "answered:\n{f}");
 }
+
+/// A decision's long topic and long option labels wrap under their own
+/// words at any width; nothing is cut with …
+#[test]
+fn a_tiles_long_decisions_wrap_instead_of_being_cut() {
+    use rush_convo::decisions::{Decision, DecisionOption};
+    let long = "skip the timing and merge on the passing tests and the first round's numbers (Codex: end shown at once, ~135→80 MB)";
+    let d = Decision {
+        r#ref: "1".into(),
+        topic: format!("Timing the read-from-end change: {long}"),
+        options: vec![
+            DecisionOption {
+                key: "a".into(),
+                label: long.into(),
+                recommended: true,
+                ..Default::default()
+            },
+            DecisionOption {
+                key: "b".into(),
+                label: "short".into(),
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    };
+    for w in [30, 44, 60, 100] {
+        let rows: Vec<String> =
+            wall::decision_lines(std::slice::from_ref(&d), &Default::default(), w)
+                .iter()
+                .map(|l| l.plain())
+                .collect();
+        let all = rows.join("\n");
+        assert!(!all.contains('…'), "w={w}:\n{all}");
+        assert!(
+            rows.iter().all(|r| rush_core::text::width(r) <= w),
+            "w={w}:\n{all}"
+        );
+        for word in ["merge", "numbers", "Codex:", "MB)", "short"] {
+            assert!(all.contains(word), "w={w}: {word:?} lost:\n{all}");
+        }
+    }
+}
