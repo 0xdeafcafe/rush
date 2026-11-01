@@ -33,8 +33,11 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # The Rust the machine rush is worked on has (Homebrew's), so clippy
+      # here and there agree; move it when Homebrew's moves.
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.98.1"
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
@@ -68,8 +71,9 @@ jobs:
       TARGET: aarch64-apple-darwin
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.98.1"
           targets: aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
         with:
