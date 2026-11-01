@@ -673,12 +673,13 @@ fn question_card_folds() {
         "cut with room to spare:\n{}",
         text(&full)
     );
-    let folded = question_card(&mut c, &req, None, 100, 16);
+    // Short of room it doesn't cut: the card grows past max_h and
+    // scrolls with the conversation.
+    let short = question_card(&mut c, &req, None, 100, 16);
     assert!(
-        folded.len() <= 16 && folded.len() < full.len(),
-        "{} of {}",
-        folded.len(),
-        full.len()
+        !text(&short).contains('…') && short.len() >= full.len() - 3,
+        "cut for want of room:\n{}",
+        text(&short)
     );
 }
 

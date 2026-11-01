@@ -480,14 +480,24 @@ pub fn draw_question(
         ));
     }
     right.spans.push(plain("  "));
-    let mut h = line([plain(" ")]);
-    join(&mut h, head);
-    cl(&mut out, spread(h, right, w.saturating_sub(1)));
+    // A long header or title wraps under itself; the count stays at the
+    // first row's far end.
+    let hw = w.saturating_sub(4 + right.width());
+    for (j, hl) in wrap_line(&head, hw).into_iter().enumerate() {
+        let mut h = line([plain(if j == 0 { " " } else { "   " })]);
+        join(&mut h, hl);
+        if j == 0 {
+            h = spread(h, right.clone(), w.saturating_sub(1));
+        }
+        cl(&mut out, h);
+    }
     if qs.len() > 1 {
         cl(&mut out, Line::new());
-        let mut l = line([plain("  ")]);
-        join(&mut l, question_strip(c, qs, w.saturating_sub(4)));
-        cl(&mut out, l);
+        for sl in question_strip(c, qs, w.saturating_sub(4)) {
+            let mut l = line([plain("  ")]);
+            join(&mut l, sl);
+            cl(&mut out, l);
+        }
     }
     cl(&mut out, Line::new());
 
@@ -507,36 +517,56 @@ pub fn draw_question(
                 format!("← · 1–{}", qs.len()),
             )
         };
-        cl(&mut out, line([plain("  "), spb(ask, TEXT)]));
+        for l in wrap_line(&line([spb(ask, TEXT)]), text_w) {
+            let mut r = line([plain("  ")]);
+            join(&mut r, l);
+            cl(&mut out, r);
+        }
         cl(&mut out, Line::new());
+        // Each question's name and answer wrap in their own columns,
+        // the name under the name, the answer under its words.
+        let kw = keycap(&qs.len().to_string(), false).width();
+        let ans_w = w.saturating_sub(1 + 2 + kw + 2 + label_w + 3 + 1).max(10);
         for (i, q) in qs.iter().enumerate() {
-            let name = rush_draw::truncate(&names[i], label_w, "…").into_owned();
-            let a = match c.q_answer.get(&q.question) {
-                Some(ans) => line([
-                    sp("✓ ", GREEN),
-                    spb(
-                        rush_draw::truncate(
-                            &shown_answer(ans),
-                            10.max(w.saturating_sub(label_w + 16)),
-                            "…",
-                        )
-                        .into_owned(),
-                        TEXT,
-                    ),
-                ]),
-                None => line([sp("○ not answered", YELLOW)]),
+            let names_l: Vec<String> = wrap(&names[i], label_w);
+            let (mark, mark_st, ans_l): (&str, Color, Vec<Line>) = match c.q_answer.get(&q.question)
+            {
+                Some(ans) => (
+                    "✓ ",
+                    GREEN,
+                    wrap(&shown_answer(ans), ans_w.saturating_sub(2))
+                        .into_iter()
+                        .map(|t| line([spb(t, TEXT)]))
+                        .collect(),
+                ),
+                None => ("", YELLOW, vec![line([sp("○ not answered", YELLOW)])]),
             };
-            c.q_hit.insert(out.len(), (i + 1).to_string());
-            let pad = label_w - width(&name) + 3;
-            let mut l = line([
-                plain("  "),
-                keycap(&(i + 1).to_string(), false),
-                plain("  "),
-                sp(name, SUB),
-                plain(blanks(pad)),
-            ]);
-            join(&mut l, a);
-            cl(&mut out, l);
+            for r in 0..names_l.len().max(ans_l.len()) {
+                if r == 0 {
+                    c.q_hit.insert(out.len(), (i + 1).to_string());
+                }
+                let mut l = line([plain("  ")]);
+                if r == 0 {
+                    l.spans
+                        .extend([keycap(&(i + 1).to_string(), false), plain("  ")]);
+                } else {
+                    l.spans.push(plain(blanks(kw + 2)));
+                }
+                let name = names_l.get(r).cloned().unwrap_or_default();
+                let pad = label_w - width(&name) + 3;
+                l.spans.extend([sp(name, SUB), plain(blanks(pad))]);
+                if let Some(a) = ans_l.get(r) {
+                    if !mark.is_empty() {
+                        l.spans.push(if r == 0 {
+                            sp(mark, mark_st)
+                        } else {
+                            plain("  ")
+                        });
+                    }
+                    join(&mut l, a.clone());
+                }
+                cl(&mut out, l);
+            }
         }
         cl(&mut out, Line::new());
         // The button enter presses: lit while the card has the keys.
@@ -599,12 +629,7 @@ pub fn draw_question(
         ask = q.question[i + 2..].trim().to_string();
     }
     if !lead.is_empty() {
-        let mut lines = inline_wrap(&lead, Style::fg(TEXT), text_w);
-        if fold >= 3 && lines.len() > 4 {
-            lines.truncate(4);
-            lines[3].spans.push(sp(" …", TEXT));
-        }
-        for l in lines {
+        for l in inline_wrap(&lead, Style::fg(TEXT), text_w) {
             let mut r = line([plain("  ")]);
             join(&mut r, l);
             cl(&mut out, r);
@@ -624,22 +649,36 @@ pub fn draw_question(
     if c.q_full && c.card_focus && c.q_cursor < q.options.len() {
         let o = &q.options[c.q_cursor];
         let (label, rec) = option_label(&o.label);
-        let mut name = line([
-            keycap(&(c.q_cursor + 1).to_string(), true),
-            plain(" "),
-            spb(label.clone(), TEXT),
-        ]);
+        let cap = keycap(&(c.q_cursor + 1).to_string(), true);
+        let mut name = line([spb(label.clone(), TEXT)]);
         if rec || o.picked {
             name.spans.extend([plain("  "), sp(rec_word(c), GREEN)]);
         }
         c.q_hit.insert(out.len(), format!("@{}", c.q_cursor));
-        let mut left = line([plain(" "), sp("▌", ORANGE), plain(" ")]);
-        join(&mut left, name);
         let right = line([
             sp(format!("{} of {}", c.q_cursor + 1, q.options.len()), DIM),
             plain("  "),
         ]);
-        cl(&mut out, spread(left, right, w.saturating_sub(1)));
+        // A long label wraps under itself, past the key.
+        let pw = 3 + cap.width() + 1;
+        let nw = w.saturating_sub(1 + pw + right.width() + 1);
+        for (j, nl) in wrap_line(&name, nw).into_iter().enumerate() {
+            if j == 0 {
+                let mut left = line([
+                    plain(" "),
+                    sp("▌", ORANGE),
+                    plain(" "),
+                    cap.clone(),
+                    plain(" "),
+                ]);
+                join(&mut left, nl);
+                cl(&mut out, spread(left, right.clone(), w.saturating_sub(1)));
+            } else {
+                let mut left = line([plain(blanks(pw))]);
+                join(&mut left, nl);
+                cl(&mut out, left);
+            }
+        }
         let d = o.description.trim();
         if !d.is_empty() {
             for l in inline_wrap(d, Style::fg(TEXT), text_w) {
@@ -698,7 +737,12 @@ pub fn draw_question(
         w.saturating_sub(1)
     };
     let mut rows: Vec<ORow> = Vec::new();
-    let desc_w = 16.max(lw.saturating_sub(10).min(104));
+    // The cells a row of the list can use, and those its key takes: a
+    // wrapped line starts under its text, not under its key.
+    let avail = if side { lw } else { w.saturating_sub(3) };
+    let kw = keycap("1", false).width().max(keycap("✎", false).width());
+    let pw = 3 + kw + 1;
+    let desc_w = 8.max(avail.saturating_sub(pw).min(104));
     let prev = c.q_answer.get(&q.question).cloned().unwrap_or_default();
     let n_opts = q.options.len();
     for (i, o) in q.options.iter().enumerate() {
@@ -706,13 +750,16 @@ pub fn draw_question(
         let (label, rec) = option_label(&o.label);
         let bar = if on { sp("▌", ORANGE) } else { plain(" ") };
         let mut name = Line::new();
-        if q.multi {
-            if c.picked(c.q_idx, i) {
-                name.spans.push(sp("☑ ", GREEN));
+        let boxed = if q.multi {
+            Some(if c.picked(c.q_idx, i) {
+                sp("☑ ", GREEN)
             } else {
-                name.spans.push(sp("☐ ", DIM));
-            }
-        }
+                sp("☐ ", DIM)
+            })
+        } else {
+            None
+        };
+        let bw = boxed.as_ref().map_or(0, |b| b.width());
         name.spans.push(if on {
             spb(label, TEXT)
         } else {
@@ -729,7 +776,7 @@ pub fn draw_question(
         }
         let hit = format!("@{i}");
         // A long label wraps under itself rather than running off the card.
-        for (j, l) in wrap_line(&name, 16.max(lw.saturating_sub(8)))
+        for (j, l) in wrap_line(&name, avail.saturating_sub(pw + bw))
             .into_iter()
             .enumerate()
         {
@@ -737,8 +784,9 @@ pub fn draw_question(
             if j == 0 {
                 t.spans
                     .extend([keycap(&(i + 1).to_string(), on), plain(" ")]);
+                t.spans.extend(boxed.clone());
             } else {
-                t.spans.push(plain("    "));
+                t.spans.push(plain(blanks(pw - 3 + bw)));
             }
             join(&mut t, l);
             rows.push(ORow {
@@ -750,16 +798,8 @@ pub fn draw_question(
         let d = o.description.trim();
         if !d.is_empty() {
             let ink = if on { TEXT } else { SUB };
-            let mut lines = inline_wrap(d, Style::fg(ink), desc_w);
-            let keep = if on { 12 } else { [6, 2, 1, 0][fold] };
-            if lines.len() > keep {
-                lines.truncate(keep);
-                if keep > 0 {
-                    lines[keep - 1].spans.push(sp(" …", ink));
-                }
-            }
-            for l in lines {
-                let mut t = line([plain(" "), bar.clone(), plain("     ")]);
+            for l in inline_wrap(d, Style::fg(ink), desc_w) {
+                let mut t = line([plain(" "), bar.clone(), plain(blanks(pw - 2))]);
                 join(&mut t, l);
                 rows.push(ORow {
                     text: t,
@@ -792,23 +832,27 @@ pub fn draw_question(
         ])
     };
     if own_answer(q, &prev) {
-        own_text.spans.extend([
-            plain("  "),
-            sp("✓ ", GREEN),
-            sp(
-                rush_draw::truncate(&shown_answer(&prev), 8.max(lw.saturating_sub(40)), "…")
-                    .into_owned(),
-                TEXT,
-            ),
-        ]);
+        own_text
+            .spans
+            .extend([plain("  "), sp("✓ ", GREEN), sp(shown_answer(&prev), TEXT)]);
     }
-    let mut t = line([plain(" "), bar, plain(" "), keycap("✎", own), plain(" ")]);
-    join(&mut t, own_text);
-    rows.push(ORow {
-        text: t,
-        sel: own,
-        hit: format!("@{n_opts}"),
-    });
+    for (j, l) in wrap_line(&own_text, avail.saturating_sub(pw))
+        .into_iter()
+        .enumerate()
+    {
+        let mut t = line([plain(" "), bar.clone(), plain(" ")]);
+        if j == 0 {
+            t.spans.extend([keycap("✎", own), plain(" ")]);
+        } else {
+            t.spans.push(plain(blanks(pw - 3)));
+        }
+        join(&mut t, l);
+        rows.push(ORow {
+            text: t,
+            sel: own,
+            hit: format!("@{n_opts}"),
+        });
+    }
     if q.multi {
         // Enter on an option only ticks it; moving on is this button.
         let btn = cursor == Some(n_opts + 1);
@@ -917,28 +961,29 @@ pub fn draw_question(
         let mut l = line([plain("  ")]);
         join(&mut l, keys_fit(ww, &pairs));
         cl(&mut out, l);
-    } else if c.q_decide {
-        cl(
-            &mut out,
-            line([
-                plain("  "),
-                sp("↑", SUB),
-                sp(" to decide   ·   a message typed below goes as ever", DIM),
-            ]),
-        );
     } else {
-        cl(
-            &mut out,
-            line([
-                plain("  "),
-                sp("↑", SUB),
-                sp(
-                    " to choose   ·   or type your own answer below and press ",
-                    DIM,
-                ),
-                sp("enter", SUB),
-            ]),
-        );
+        let (a, b, c2) = if c.q_decide {
+            (
+                "↑",
+                " to decide   ·   a message typed below goes as ever",
+                "",
+            )
+        } else {
+            (
+                "↑",
+                " to choose   ·   or type your own answer below and press ",
+                "enter",
+            )
+        };
+        let mut hint = line([sp(a, SUB), sp(b, DIM)]);
+        if !c2.is_empty() {
+            hint.spans.push(sp(c2, SUB));
+        }
+        for l in wrap_line(&hint, ww) {
+            let mut r = line([plain("  ")]);
+            join(&mut r, l);
+            cl(&mut out, r);
+        }
     }
     out
 }
@@ -980,38 +1025,55 @@ pub fn split_ask(q: &str) -> (String, String) {
     (String::new(), q.to_string())
 }
 
-/// A row naming every question: the one at hand lit, ✓ and its answer
-/// once answered, ○ the rest, then send (questionStrip).
-fn question_strip(c: &Conn, qs: &[Q], w: usize) -> Line {
-    let mut l = Line::new();
+/// Rows naming every question: the one at hand lit, ✓ and its answer
+/// once answered, ○ the rest, then send; they run on to the next row
+/// rather than being cut (questionStrip).
+fn question_strip(c: &Conn, qs: &[Q], w: usize) -> Vec<Line> {
+    let mut items: Vec<Line> = Vec::new();
     for (i, q) in qs.iter().enumerate() {
-        if i > 0 {
-            l.spans.push(sp("  ›  ", FAINT));
-        }
         let name = first_non_empty(&[&q.header, &format!("Question {}", i + 1)]).to_string();
-        if i == c.q_idx {
-            l.spans.push(chip(&name));
+        items.push(if i == c.q_idx {
+            line([chip(&name)])
         } else if let Some(ans) = c.q_answer.get(&q.question) {
-            l.spans.extend([
-                sp("✓ ", GREEN),
-                sp(name, SUB),
-                plain(" "),
-                sp(
-                    rush_draw::truncate(&shown_answer(ans), 18, "…").into_owned(),
-                    DIM,
-                ),
-            ]);
+            // A short answer shows beside its name; a long one is left to
+            // its own question and the review, whole, not cut.
+            let mut l = line([sp("✓ ", GREEN), sp(name, SUB)]);
+            let ans = shown_answer(ans);
+            if width(&ans) <= 18 {
+                l.spans.extend([plain(" "), sp(ans, DIM)]);
+            }
+            l
         } else {
-            l.spans.push(sp(format!("○ {name}"), DIM));
-        }
+            line([sp(format!("○ {name}"), DIM)])
+        });
     }
-    l.spans.push(sp("  ›  ", FAINT));
-    if c.q_idx >= qs.len() {
-        l.spans.push(chip("send"));
+    items.push(if c.q_idx >= qs.len() {
+        line([chip("send")])
     } else {
-        l.spans.push(sp("○ send", DIM));
+        line([sp("○ send", DIM)])
+    });
+    let sep = || sp("  ›  ", FAINT);
+    let mut rows: Vec<Line> = Vec::new();
+    let mut cur = Line::new();
+    for it in items {
+        let gap = if cur.spans.is_empty() { 0 } else { 5 };
+        if !cur.spans.is_empty() && cur.width() + gap + it.width() > w {
+            rows.push(std::mem::take(&mut cur));
+        }
+        if cur.spans.is_empty() && it.width() > w {
+            // One item wider than the card wraps within itself.
+            let mut parts = wrap_line(&it, w);
+            cur = parts.pop().unwrap_or_default();
+            rows.extend(parts);
+            continue;
+        }
+        if !cur.spans.is_empty() {
+            cur.spans.push(sep());
+        }
+        join(&mut cur, it);
     }
-    rush_draw::truncate_line(&l, w, "…")
+    rows.push(cur);
+    rows
 }
 
 /// Marks the option the agent recommends: on a decisions block, the one
