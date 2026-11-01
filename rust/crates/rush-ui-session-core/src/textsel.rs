@@ -206,7 +206,17 @@ pub fn selected_text(lines: &[(&Line, bool)], a: Cell, b: Cell, w: usize) -> Str
         }
         // An output's rail sits after its indent: layout, not text.
         let t = seg.trim_start_matches(' ');
-        if let Some(rest) = t.strip_prefix('▏').or_else(|| t.strip_prefix('┊')) {
+        // A shell step's gutter is "│ "; a frame's row (a drawing) ends with
+        // its edge too, and keeps both.
+        let gutter = t
+            .strip_prefix("│ ")
+            .or_else(|| (t == "│").then_some(""))
+            .filter(|_| !t.trim_end().ends_with('│') || t.trim_end() == "│");
+        if let Some(rest) = t
+            .strip_prefix('▏')
+            .or_else(|| t.strip_prefix('┊'))
+            .or(gutter)
+        {
             seg = format!("{}{rest}", &seg[..seg.len() - t.len()]);
         }
         let seg = seg.trim_end_matches(' ').to_string();
@@ -478,16 +488,23 @@ mod tests {
             line([plain("▍ "), plain("  hello there")]),
             line([plain("    world")]),
             line([plain("    ▏output line")]),
+            line([plain("    │ shell output")]),
+            line([plain("    │ a │")]),
         ];
-        let lines: Vec<(&Line, bool)> =
-            vec![(&rows[0], false), (&rows[1], true), (&rows[2], false)];
+        let lines: Vec<(&Line, bool)> = vec![
+            (&rows[0], false),
+            (&rows[1], true),
+            (&rows[2], false),
+            (&rows[3], false),
+            (&rows[4], false),
+        ];
         let t = selected_text(
             &lines,
             Cell { row: 0, col: 0 },
-            Cell { row: 2, col: 40 },
+            Cell { row: 4, col: 40 },
             40,
         );
-        assert_eq!(t, "hello there world\noutput line");
+        assert_eq!(t, "hello there world\noutput line\nshell output\n│ a │");
     }
 
     #[test]

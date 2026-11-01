@@ -1,0 +1,24 @@
+
+▍ You  00:00
+▍ lint the shared server
+
+▍ Agent  00:00
+│   ✗ lint  oxfmt ✓ · oxlint 6 errors in 5 files                                                                    9s
+│       $ cd /work/langwatch/.worktrees/feat-mcp-shared-server
+│       $ P="19 files"                                                                                 ▸ show the list
+│       $ pnpm exec oxfmt --check --disable-nested-config $P specs/mcp-server/shared-server.feature | tail -2
+│       $ pnpm exec oxlint --quiet --type-aware --config .oxlintrc.jsonc $P | tail -60
+│       │ All matched files use the correct format.
+│       │ Finished in 74ms on 19 files using 10 threads.
+│       │
+│       │ shared-instance.ts:135   condition-shape       test makes 3 calls; max 2
+│       │ shared-lock.ts:98        condition-shape       test makes 3 calls; max 2
+│       │ shared-wire.ts:62        cognitive-complexity  createResponseParser 52 / 15
+│       │ shared-relay.ts:108      cognitive-complexity  runRelay 159 / 15
+│       │ main.ts:12               cognitive-complexity  runCli 16 / 15
+│       │ shared-lock.ts:140       condition-shape       test makes 4 calls; max 2
+│       │                                                                             enter on a row: the full message
+▍
+▍ oxlint found 6 errors; fixing them.
+▍
+▍   · waiting for the agent…  20s

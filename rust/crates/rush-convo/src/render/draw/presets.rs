@@ -78,7 +78,7 @@ fn check_in(ws: &[&str]) -> Option<&'static str> {
             "eslint" | "ruff" | "flake8" | "pylint" | "golangci-lint" | "shellcheck"
             | "rubocop" | "biome" | "oxlint" | "stylelint" | "swiftlint" | "ktlint" => Some("lint"),
             "prettier" | "gofmt" | "rustfmt" | "black" | "isort" | "dprint" | "goimports"
-            | "swiftformat" | "clang-format" => Some("fmt"),
+            | "swiftformat" | "clang-format" | "oxfmt" => Some("fmt"),
             "tsc" | "vue-tsc" | "mypy" | "pyright" => Some("typecheck"),
             _ => None,
         };
@@ -306,7 +306,7 @@ impl Drawer<'_> {
             }
         }
         let m = self.meta();
-        if meta && !m.is_empty() && !t.live && t.step_count() > 0 {
+        if meta && !m.is_empty() && !t.live && self.steps_counted() > 0 {
             let sp = self.spine();
             self.add("", Color::Default, sp, dim(&m).and_raw("  "));
         }
@@ -332,7 +332,7 @@ impl Drawer<'_> {
                     if hidden(st) {
                         continue;
                     }
-                    if self.asks(st) || message_tool(&st.tool) {
+                    if self.asks(st) || message_tool(&st.tool) || shown(st) {
                         self.left_out(&mut run);
                         self.step(*id, 0);
                     } else {
@@ -379,7 +379,7 @@ impl Drawer<'_> {
                         self.force_open = true;
                         self.step(*id, 0);
                         self.force_open = false;
-                    } else if self.asks(st) {
+                    } else if self.asks(st) || shown(st) {
                         self.left_out(&mut run);
                         self.step(*id, 0);
                     } else if st.kind == Kind::Shell
@@ -646,7 +646,7 @@ impl Drawer<'_> {
         }
         let end = if t.live { self.o.now } else { t.end };
         let mut facts = Vec::new();
-        let n = t.step_count();
+        let n = self.steps_counted();
         if n > 0 {
             facts.push(plural(n, "step"));
         }
