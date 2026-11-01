@@ -23,7 +23,7 @@ use super::permissions::{bypass_mode, set_permission};
 use super::{Act, Conn, HostInfo, act, info_any, open_key, pending, session, set_input};
 use crate::ModelCards;
 use crate::frame::overlayclick::hint_key;
-use crate::frame::{Out, Press};
+use crate::frame::{Decided, Out, Press};
 use crate::model::Model;
 use crate::style::*;
 
@@ -1828,28 +1828,17 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
                 return Out::Pass;
             };
             c.sync_question(&req, i.decisions.as_ref());
-            if c.card_focus && (s == "s" || s == "esc") && !c.q_full {
-                // Set aside: nothing goes to the agent.
-                c.q_gone = req.id.clone();
-                c.q_for.clear();
-                if c.q_again.as_ref().is_some_and(|q| q.id == req.id) {
-                    c.q_again = None; // opened again here: nothing to dismiss
-                    return done(m, key, c, Vec::new());
-                }
-                return done(m, key, c, vec![Act::DismissDecisions(req.id.clone())]);
-            }
-            if c.card_focus && s == "a" {
-                // Its picks for whatever you haven't answered yourself.
-                for a in &req.asks {
-                    if !c.q_answer.contains_key(&a.text) && !a.options.is_empty() {
-                        let o = &a.options[picked_at(&a.options)];
-                        if o.picked {
-                            c.q_answer.insert(a.text.clone(), o.label.clone());
-                        }
-                    }
-                }
-                let r = send_answers(c, &req);
-                return finish(m, key, c, r);
+            let aside = (s == "s" || s == "esc") && !c.q_full;
+            if c.card_focus && (aside || s == "a") {
+                // s or esc sets it aside; opened again here, it's no card
+                // of the host's: nothing to dismiss.
+                let s = if aside { "s" } else { "a" };
+                let again = c.q_again.as_ref().is_some_and(|q| q.id == req.id);
+                return match decide_own_key(c, &req, s, again) {
+                    Res::Do(a) => done(m, key, c, vec![a]),
+                    Res::Yes if s == "s" => done(m, key, c, Vec::new()),
+                    r => finish(m, key, c, r),
+                };
             }
             // What's typed is a message as ever, unless you chose to
             // answer one in your own words.
@@ -1911,6 +1900,128 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
         c.card_focus = false; // anything else goes back to typing
     }
     Out::Pass
+}
+
+/// A decisions card's own keys, wherever it's drawn: s sets it aside,
+/// sending nothing (to the host too unless local, a card that isn't the
+/// host's), and a takes the agent's picks for whatever you haven't
+/// answered yourself and sends them. Res::No for any other key.
+pub fn decide_own_key(c: &mut Conn, req: &Question, s: &str, local: bool) -> Res {
+    match s {
+        "s" => {
+            c.q_gone = req.id.clone();
+            c.q_for.clear();
+            if c.q_again.as_ref().is_some_and(|q| q.id == req.id) {
+                c.q_again = None;
+            }
+            if local {
+                return Res::Yes;
+            }
+            Res::Do(Act::DismissDecisions(req.id.clone()))
+        }
+        "a" => {
+            for a in &req.asks {
+                if !c.q_answer.contains_key(&a.text) && !a.options.is_empty() {
+                    let o = &a.options[picked_at(&a.options)];
+                    if o.picked {
+                        c.q_answer.insert(a.text.clone(), o.label.clone());
+                    }
+                }
+            }
+            send_answers(c, req)
+        }
+        _ => Res::No,
+    }
+}
+
+// ---- a decisions card on a Wall tile ----
+
+/// The decisions agent key's tile asks, as a card: its session's open
+/// block when rush has it, so answering on the tile or in the session is
+/// the one card; else the block text ends with, named by its agent and
+/// when it was written (at).
+pub fn tile_question(
+    m: &Model,
+    key: &str,
+    text: &str,
+    at: rush_core::time::Ms,
+) -> Option<Question> {
+    if let Some(d) = info_any(m, key).and_then(|i| i.decisions) {
+        return Some(d);
+    }
+    decisions_of(text, &format!("wall-{key}-{at}"))
+}
+
+/// Agent key's decisions card q, w wide and folded to max_h rows, drawn
+/// with the keys on it as its session draws it, and what a click on each
+/// row presses. Drawn from a copy of its state: drawing changes nothing.
+pub fn tile_rows(
+    m: &Model,
+    key: &str,
+    q: &Question,
+    w: usize,
+    max_h: usize,
+) -> (Vec<Line>, HashMap<usize, String>) {
+    let mut c = super::conn_ref(m, key).cloned().unwrap_or_default();
+    c.card_focus = true;
+    let rows = question_card(&mut c, q, Some(q), w, max_h);
+    (rows, c.q_hit)
+}
+
+/// A key on agent key's decisions card q on a tile, taken as its
+/// session's card takes it with the keys on it: ↑↓ choose, a digit or
+/// enter picks, ←→ between decisions, a takes its picks, s or esc sends
+/// nothing; "@n" picks option n, as a click on it does. What it sends
+/// goes as the session's card sends it (Act::Answer), and the card's
+/// state is the session's, so either sees it answered.
+pub fn tile_key(m: &mut Model, key: &str, q: &Question, s: &str) -> Decided {
+    // A card the Wall made from a reply is no host's: nothing to dismiss.
+    let local = q.id.starts_with("wall-");
+    let mut c = take(m, key);
+    c.sync_question(q, Some(q));
+    c.card_focus = true;
+    let mut s = s.to_string();
+    if s == "esc" && c.q_full {
+        c.q_full = false;
+        put(m, key, c);
+        return Decided::Yes;
+    }
+    if s == "esc" {
+        s = "s".into();
+    }
+    if let Some(n) = s.strip_prefix('@').and_then(|n| n.parse::<usize>().ok()) {
+        c.q_cursor = n;
+        c.q_click = 0;
+        s = "enter".into();
+    }
+    let mut r = decide_own_key(&mut c, q, &s, local);
+    if r == Res::No {
+        let mut input = String::new();
+        r = question_key(&mut c, q, Some(q), &s, true, &mut input);
+    }
+    let out = match r {
+        Res::No => Decided::No,
+        Res::Do(a) => {
+            c.card_focus = false;
+            put(m, key, c);
+            act(m, key, a);
+            return Decided::Done;
+        }
+        Res::Yes if c.q_gone == q.id => {
+            c.card_focus = false;
+            Decided::Done
+        }
+        Res::Yes if c.q_own => Decided::Own,
+        Res::Yes => Decided::Yes,
+    };
+    put(m, key, c);
+    out
+}
+
+/// Agent key's decisions card id was answered or set aside, and hasn't
+/// come back for want of a host to take it (answer_failed).
+pub fn tile_gone(m: &Model, key: &str, id: &str) -> bool {
+    super::conn_ref(m, key).is_some_and(|c| !id.is_empty() && c.q_gone == id)
 }
 
 /// question_key with the session's box as its input.

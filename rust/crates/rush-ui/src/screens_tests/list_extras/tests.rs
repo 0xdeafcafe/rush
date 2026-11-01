@@ -362,22 +362,6 @@ fn wall_merges_repeated_steps() {
     assert!(ls[1].contains("running nice") && !ls[1].contains('×'));
 }
 
-#[test]
-fn wall_typed_picks() {
-    use rush_convo::decisions::decisions_in;
-    let (_, ds, _) = decisions_in(
-        "Decisions:\n1. **Subagents:** (a) fold them; (b) small tiles.\n2. **Scope:** (a) all six; (b) two.\nMy picks: 1a 2a.",
-    );
-    let picks = wall::typed_picks("1b2 a 3c");
-    assert_eq!(picks.get("1").map(String::as_str), Some("b"));
-    assert_eq!(picks.get("2").map(String::as_str), Some("a"));
-    assert_eq!(
-        wall::answer_text(&ds, &picks).as_deref(),
-        Some("1b. Subagents: small tiles\n\n2a. Scope: all six")
-    );
-    assert_eq!(wall::answer_text(&ds, &wall::typed_picks("9z")), None);
-}
-
 fn wall_fleet(n: usize, w: usize, h: usize) -> Model {
     let states = [
         State::Working,

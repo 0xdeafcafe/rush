@@ -830,6 +830,9 @@ fn send_offline_as(
     };
     let name = a.display_name.clone();
     if a.interactive {
+        if let Some(id) = &answer {
+            answer_failed(m, key, id);
+        }
         m.flash_err(&format!("{name} is {}; rush can't send to it", where_(&a)));
         return Out::Draw;
     }
@@ -932,7 +935,7 @@ fn send_offline_as(
         return Out::Draw;
     }
     mark_sending(m, key, &text);
-    send_reply(m, &a, text, true);
+    send_reply(m, &a, text, true, answer);
     Out::Draw
 }
 
@@ -1012,10 +1015,12 @@ pub fn can_resume(m: &mut Model, a: &Agent) -> bool {
 /// Sends text to a, a session rush doesn't run, through its agent's
 /// daemon (reply): one the daemon let go carries on in rush mode.
 pub fn reply(m: &mut Model, a: &Agent, text: String) {
-    send_reply(m, a, text, false);
+    send_reply(m, a, text, false, None);
 }
 
-fn send_reply(m: &mut Model, a: &Agent, text: String, sending: bool) {
+/// answer is the decisions card the text answers, if it does: it's
+/// known to have gone, or comes back when it didn't.
+fn send_reply(m: &mut Model, a: &Agent, text: String, sending: bool, answer: Option<String>) {
     let h = hosts(m);
     let a = a.clone();
     super::later(
@@ -1026,11 +1031,19 @@ fn send_reply(m: &mut Model, a: &Agent, text: String, sending: bool) {
         },
         move |m, (a, text, r)| {
             match r {
-                Ok(()) => m.flash(&format!("sent to {}", a.display_name)),
+                Ok(()) => {
+                    if let Some(id) = &answer {
+                        rush_ui_session_cards::question::answer_sent(m, &a.key, id);
+                    }
+                    m.flash(&format!("sent to {}", a.display_name));
+                }
                 Err(SendErr::Gone) => adopt(m, &a, &text),
                 Err(SendErr::Failed(e)) => {
                     if sending {
                         conn(m, &a.key).out.failed();
+                    }
+                    if let Some(id) = &answer {
+                        answer_failed(m, &a.key, id);
                     }
                     m.fail(&format!("couldn't send to {}: {e}", a.display_name));
                 }

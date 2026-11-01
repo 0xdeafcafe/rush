@@ -40,7 +40,7 @@ use rush_draw::{Key, KeyMods, MouseKind, Step};
 pub use choice::ChoiceSheet;
 pub use confirm::Confirm;
 pub use editor::Editor;
-pub use ext::{Command, Ext};
+pub use ext::{Command, Decided, Ext};
 pub use inputbox::{EdgeAt, InputBox};
 pub use picker::{Pick, Picker};
 pub use places::{Place, PlaceId};
