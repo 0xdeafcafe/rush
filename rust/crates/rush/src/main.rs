@@ -656,12 +656,25 @@ fn dump_to(
     )
 }
 
-/// Writes to stdout through f, quietly stopping where a write fails: a
-/// pipe closed early (`rush --dump | head`) ends Go's rush by SIGPIPE,
-/// silently, where println! would panic.
+/// Writes to stdout through f, stopping quietly where the pipe closed
+/// early (`rush --dump | head` ends Go's rush by SIGPIPE, silently, where
+/// println! would panic).
 fn print_quiet(f: impl FnOnce(&mut dyn Write) -> std::io::Result<()>) {
     let mut out = std::io::stdout().lock();
-    let _ = f(&mut out).and_then(|()| out.flush());
+    if let Err(e) = quiet_on_closed_pipe(f(&mut out).and_then(|()| out.flush())) {
+        // Any other failure (a full disk) is said and ends rush with 1.
+        eprintln!("rush: {e}");
+        std::process::exit(1);
+    }
+}
+
+/// A closed pipe is the reader having had enough, as `| head` does: not an
+/// error. Anything else still is.
+fn quiet_on_closed_pipe(r: std::io::Result<()>) -> std::io::Result<()> {
+    match r {
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        r => r,
+    }
 }
 
 /// `account %s daemon=%v live=%d agents=%d spend=$%.2f today=$%.2f` and
@@ -1062,6 +1075,20 @@ mod tests {
 
     // A pipe closed early (`rush --dump | head`): the dump stops at the
     // write that fails, with its error, and panics nowhere.
+    /// Only a closed pipe goes unsaid; a full disk is still an error.
+    #[test]
+    fn only_a_closed_pipe_is_quiet() {
+        use std::io::{Error, ErrorKind};
+        assert!(quiet_on_closed_pipe(Err(Error::from(ErrorKind::BrokenPipe))).is_ok());
+        assert!(quiet_on_closed_pipe(Ok(())).is_ok());
+        assert_eq!(
+            quiet_on_closed_pipe(Err(Error::from(ErrorKind::StorageFull)))
+                .unwrap_err()
+                .kind(),
+            ErrorKind::StorageFull
+        );
+    }
+
     #[test]
     fn dump_stops_on_a_closed_pipe() {
         struct Closed(usize);
