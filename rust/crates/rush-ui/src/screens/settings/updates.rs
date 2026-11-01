@@ -111,7 +111,9 @@ pub fn watch_hosts(m: &mut Model, restart: bool, asked: bool) {
     u.sweeping = true;
     let was = u.installed;
     let lister = u.lister.clone();
-    let sweep = u.sweep.unwrap_or(|l, now, r| l.sweep(now, r));
+    // Over the list's own listing, which its watcher keeps fresh, where
+    // Go looks at every session's info (stale.go:59).
+    let sweep = u.sweep.unwrap_or(|l, now, r| l.sweep_listed(now, r));
     let fake = u.sweep.is_some();
     m.later(
         move || {
@@ -181,6 +183,8 @@ fn on_swept(m: &mut Model, s: Swept, asked: bool) -> Out {
             }),
         );
     }
+    // What the Updates page and the version tag show of it, before.
+    let was = (u.failed, u.stale, u.gone, u.rebuilt);
     if s.restart {
         u.failed = s.failed;
     }
@@ -201,6 +205,7 @@ fn on_swept(m: &mut Model, s: Swept, asked: bool) -> Out {
         }
     }
     let rebuilt = u.rebuilt;
+    let changed = was != (u.failed, u.stale, u.gone, u.rebuilt) || news.is_some();
     if rebuilt {
         m.kept::<crate::screens::social::services::Update>().rebuilt = true;
     }
@@ -225,6 +230,7 @@ fn on_swept(m: &mut Model, s: Swept, asked: bool) -> Out {
     } else {
         None
     };
+    let changed = changed || said.is_some();
     // Asked for, it's an answer; on its own, it's news.
     if let Some(t) = said {
         match (asked, s.failed > 0) {
@@ -245,7 +251,9 @@ fn on_swept(m: &mut Model, s: Swept, asked: bool) -> Out {
         rush_sys::events::log("reload", serde_json::json!({"why": "restart on install"}));
         return m.reload(false);
     }
-    Out::Draw
+    // A look that found what the last did draws nothing (Go redraws
+    // every second anyway; here only a change is drawn).
+    if changed { Out::Draw } else { Out::Idle }
 }
 
 fn upd(m: &Model) -> Option<&Updates> {

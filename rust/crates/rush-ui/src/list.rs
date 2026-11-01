@@ -364,6 +364,10 @@ fn section_meta(n: usize, cost: f64) -> String {
 
 /// How much of the prompt cache's hour is left since it last wrote.
 fn cache_wheel(quiet: Ms) -> (&'static str, Color) {
+    // It turns at each fifth of the cache's life.
+    if let Some(k) = (1..=5).find(|k| quiet < CACHE_LIFE * k / 5) {
+        turns_in(CACHE_LIFE * k / 5 - quiet);
+    }
     let left = 1.0 - quiet as f64 / CACHE_LIFE as f64;
     if left > 0.8 {
         ("●", GREEN)
@@ -377,6 +381,42 @@ fn cache_wheel(quiet: Ms) -> (&'static str, Color) {
         ("○", RED)
     } else {
         ("⊘", FAINT)
+    }
+}
+
+/// Notes when a's row changes with the clock alone, past its time:
+/// its turn just finished, its turn left a day, quiet long enough to be
+/// stuck, a halt no longer continuing by itself (just_finished,
+/// your_turn, stuck, continues).
+/// When a's group next changes with the clock alone: its turn no longer
+/// just finished, a day gone, active or just left no more, quiet long
+/// enough to be stuck (rebuild's tests of time).
+fn group_turn(a: &Agent, now: Ms, active_for: Ms, just_left_for: Ms) -> Ms {
+    let up = a.job.updated_at;
+    let base = now - a.age(now);
+    let stuck = (a.job.state == State::Working || a.busy())
+        .then(|| now - a.quiet(now) + rush_fleet::STUCK_AFTER);
+    [
+        up + 2 * MINUTE,
+        up + 24 * HOUR,
+        base + active_for,
+        base + just_left_for,
+        base + 24 * HOUR,
+    ]
+    .into_iter()
+    .chain(stuck)
+    .filter(|&t| t > now)
+    .min()
+    .unwrap_or(Ms::MAX)
+}
+
+fn row_turns(a: &Agent, now: Ms) {
+    let up = a.job.updated_at;
+    turns_at(up + 2 * MINUTE, now);
+    turns_at(up + 24 * HOUR, now);
+    turns_at(now - a.quiet(now) + rush_fleet::STUCK_AFTER, now);
+    if let Some(h) = &a.spend.halt {
+        turns_at(h.at + 24 * HOUR, now);
     }
 }
 
@@ -480,11 +520,14 @@ impl Model {
             .map(|&i| Item::Agent(i))
             .chain(rooms.rooms.iter().map(|id| Item::Room(id.clone())))
             .collect();
+        // The soonest a group's time runs out for one listed.
+        let mut regroup = Ms::MAX;
         for it in laid {
             let a = of(&it);
             if !filters.iter().all(|f| f(self, a)) {
                 continue;
             }
+            regroup = regroup.min(group_turn(a, now, active_for, just_left_for));
             let fresh = !stale(a, now);
             let at = a.job.updated_at;
             let fk = folder_key(a, root(&it));
@@ -732,6 +775,9 @@ impl Model {
         self.titles = titles;
         self.run_since = next;
         self.run_init = run_init;
+        self.regroup = (regroup != Ms::MAX).then(|| {
+            std::time::Instant::now() + std::time::Duration::from_millis((regroup - now) as u64 + 5)
+        });
         self.lines = lines;
         self.memo.forget_widest_name();
         self.order = order;
@@ -1531,7 +1577,10 @@ impl Model {
             summary.clear();
         }
         if a.stuck(now) {
-            summary = format!("silent {} · ctrl+b asks why · {summary}", age(a.quiet(now)));
+            summary = format!(
+                "silent {} · ctrl+b asks why · {summary}",
+                age_since(a.quiet(now))
+            );
             col = YELLOW;
         }
         (unmark(&summary), col, just)
@@ -1701,23 +1750,28 @@ impl Model {
         if w_time == 0 {
             rt.spans.push(plain(" "));
         } else if a.stuck(now) {
-            rt.spans.push(sp(right(&age(a.quiet(now)), w_time), YELLOW));
+            rt.spans
+                .push(sp(right(&age_since(a.quiet(now)), w_time), YELLOW));
             rt.spans.push(plain(" "));
         } else if live && !a.needs_you() {
-            rt.spans.push(sp(right(&dur(self.run_for(a)), w_time), DIM));
+            rt.spans
+                .push(sp(right(&dur_since(self.run_for(a)), w_time), DIM));
             rt.spans.push(plain(" "));
         } else if group == Some(NEEDS) || group == Some(FINISHED) {
             let waited = a.age(now);
             let c = if waited >= 30 * MINUTE { YELLOW } else { TEXT };
-            rt.spans.push(sp(right(&age(waited), w_time - 2), c));
+            turns_in(30 * MINUTE - waited);
+            rt.spans.push(sp(right(&age_since(waited), w_time - 2), c));
             rt.spans.push(plain(" "));
             let (g, gc) = cache_wheel(a.quiet(now));
             rt.spans.push(sp(g, gc));
             rt.spans.push(plain(" "));
         } else {
-            rt.spans.push(sp(right(&age(a.age(now)), w_time), FAINT));
+            rt.spans
+                .push(sp(right(&age_since(a.age(now)), w_time), FAINT));
             rt.spans.push(plain(" "));
         }
+        row_turns(a, now);
         let rt = line(rt.spans);
 
         let name_color = if a.your_turn(now) && !sel {

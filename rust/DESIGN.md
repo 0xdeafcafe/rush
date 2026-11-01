@@ -16,6 +16,16 @@ speed or memory claim has a number behind it.
   (watchBinary every 30 s; in the rush that leads, settleLanded every
   minute and tidyDone every 10) wake the loop only at the second one is
   due, hand their work to a thread, and draw nothing (rush-ui chores.rs).
+  What Go redraws every second for the clock's sake is drawn when its
+  text changes: a label that moves with the clock (`style::age_since`,
+  `dur_since`, `dur_left`, plan's `roughly_left` and `note_resets`) notes
+  when it next turns, and the frame asks to be woken then; the list is
+  laid out again when an agent's group runs out of time (rebuild's
+  `group_turn`). Screens past the list (a Session, a place, a sheet) are
+  drawn again with the chores' wake, every 30 seconds, as before. The
+  battery and disk are read at the same wake while shown (IOKit, not
+  pmset) and drawn only when they'd show differently; the hosts' sweep
+  goes over the list's own listing, which its watcher keeps fresh.
 - **Small memory.** Measured as macOS *physical footprint*
   (`/usr/bin/footprint -p <pid>`), not RSS. Go rush sits at about 40 MB with
   a session open; opening one large transcript retains about 22 MB. Target:
