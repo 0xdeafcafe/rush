@@ -942,7 +942,13 @@ pub fn spawn_history_from(
                         Ok(sl) => {
                             crate::session::apply_events(&mut sess, &sl.events, sl.reset);
                             if !sl.more {
-                                if !tx.send(Note::Seeded { r#gen, sess }) {
+                                // No layout made here: the UI lays out this
+                                // history's end itself.
+                                if !tx.send(Note::Seeded {
+                                    r#gen,
+                                    sess,
+                                    warm: None,
+                                }) {
                                     return;
                                 }
                                 break;
