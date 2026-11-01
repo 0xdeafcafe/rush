@@ -223,6 +223,11 @@ fn main() {
         size_of::<Item>(),
         size_of::<Request>(),
     );
+    // A reader that keeps a session read on copies it when the UI still
+    // holds the last one (Arc::make_mut), rather than reading it again.
+    let (copied, c) = measure(|| s.clone());
+    report("whole session, copied", &[copied]);
+    drop(c);
     let t = Instant::now();
     drop(s);
     println!(

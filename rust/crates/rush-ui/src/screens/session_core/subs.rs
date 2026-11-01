@@ -263,6 +263,9 @@ pub struct FlowSeen {
     pub w: Workflow,
 }
 
+/// A run's transcript read on: its tail, and the session it's read into.
+type ReadOn = (Tail, Arc<Session>);
+
 /// The reader's side: what stays with the transcripts, never the UI's.
 #[derive(Default)]
 pub(super) struct Reader {
@@ -274,8 +277,9 @@ pub(super) struct Reader {
     /// The run shown whole, and its tail.
     detail: Option<(String, Tail)>,
     /// Each run read whole for Changes, by id: how big its transcript
-    /// was when read (fullSubs).
-    full: HashMap<String, u64>,
+    /// was when read (fullSubs), and, one in Claude Code's format, its
+    /// tail and the session it's read on into, shared with the UI.
+    full: HashMap<String, (u64, Option<ReadOn>)>,
     /// The process table last read, for CPU; let go when nothing's open.
     table: Option<rush_sys::proc::Table>,
 }
@@ -542,30 +546,44 @@ impl Ask {
                 }
             }
         }
-        // The runs read whole, again only once each grew (a conversation
-        // shared with the UI is read afresh, not added to): a spawned
-        // agent's in another format by its own adapter (spawnRun.view).
+        // The runs read whole, again only once each grew: one in Claude
+        // Code's format read on from where it got to (the UI's copy is
+        // copied first while it still holds it), a spawned agent's in
+        // another format by its own adapter (spawnRun.view).
+        // A run no longer read whole isn't kept read on.
+        r.full
+            .retain(|id, _| self.full.iter().any(|(want, ..)| want == id));
         for (id, path, whole, kind) in &self.full {
             let size = std::fs::metadata(path).map_or(0, |m| m.len());
-            if r.full.get(id) == Some(&size) {
+            if r.full.get(id).is_some_and(|(at, _)| *at == size) {
                 continue;
             }
-            r.full.insert(id.clone(), size);
+            let kept = r.full.remove(id).and_then(|(_, k)| k);
+            let mut tailed = None;
             let s = if !kind.is_empty() {
-                read_history(reg, kind, path)
+                read_history(reg, kind, path).map(Arc::new)
             } else if let Some(decode) = &self.decode {
-                let mut t = if *whole {
-                    Tail::new(path, decode.clone())
-                } else {
-                    Tail::subagent(path, decode.clone())
-                };
-                let mut s = Session::new();
-                t.read(&mut s).ok().map(|_| s)
+                let (mut t, mut s) = kept.unwrap_or_else(|| {
+                    let t = if *whole {
+                        Tail::new(path, decode.clone())
+                    } else {
+                        Tail::subagent(path, decode.clone())
+                    };
+                    (t, Arc::new(Session::new()))
+                });
+                match t.read(Arc::make_mut(&mut s)) {
+                    Ok(_) => {
+                        tailed = Some((t, s.clone()));
+                        Some(s)
+                    }
+                    Err(_) => None,
+                }
             } else {
                 None
             };
+            r.full.insert(id.clone(), (size, tailed));
             // One that can't be read isn't asked again until it grows.
-            got.full.insert(id.clone(), Arc::new(s.unwrap_or_default()));
+            got.full.insert(id.clone(), s.unwrap_or_default());
         }
         if let Some((id, src)) = &self.detail {
             got.detail = Some((
