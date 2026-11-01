@@ -1859,6 +1859,35 @@ fn queued_images_survive_a_lost_copy() {
     std::fs::write(&gone, "jpeg").unwrap();
     let h = host(Config {
         id: "ig".into(),
+        kind: "claude".into(),
+        ..Config::default()
+    });
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    h.lock().info.state = "working".into();
+    h.send("one [Image #1]", std::slice::from_ref(&pic), false)
+        .unwrap();
+    h.send("two [Image #1]", std::slice::from_ref(&gone), false)
+        .unwrap();
+    std::fs::remove_file(&gone).unwrap();
+    h.lock().pics.insert(
+        pic.clone(),
+        d.path().join("copy.webp").to_string_lossy().into_owned(),
+    );
+    h.lock().info.state = "idle".into();
+    h.send_queue(&mut h.lock());
+    let got = c.got.lock().unwrap();
+    let last = got.last().unwrap();
+    assert_eq!(last.images, vec![pic]);
+    assert!(last.text.contains("one [Image #1]"), "{}", last.text);
+    assert!(
+        last.text.contains("two [image no longer there]"),
+        "{}",
+        last.text
+    );
+    assert_eq!(h.lock().info.state, "working");
+}
+
 // Rust-only: an image that's there but can't be read (a Mac screenshot's
 // preview, dropped from the corner of the screen, lives where only the
 // terminal may read it) is refused as it's sent, by name, not taken to
@@ -1896,27 +1925,6 @@ fn unreadable_queued_image_does_not_hold_the_queue() {
     let c = Arc::new(Kept::default());
     with_conn(&h, c.clone());
     h.lock().info.state = "working".into();
-    h.send("one [Image #1]", std::slice::from_ref(&pic), false)
-        .unwrap();
-    h.send("two [Image #1]", std::slice::from_ref(&gone), false)
-        .unwrap();
-    std::fs::remove_file(&gone).unwrap();
-    h.lock().pics.insert(
-        pic.clone(),
-        d.path().join("copy.webp").to_string_lossy().into_owned(),
-    );
-    h.lock().info.state = "idle".into();
-    h.send_queue(&mut h.lock());
-    let got = c.got.lock().unwrap();
-    let last = got.last().unwrap();
-    assert_eq!(last.images, vec![pic]);
-    assert!(last.text.contains("one [Image #1]"), "{}", last.text);
-    assert!(
-        last.text.contains("two [image no longer there]"),
-        "{}",
-        last.text
-    );
-    assert_eq!(h.lock().info.state, "working");
     h.send("look", std::slice::from_ref(&pic_s), false).unwrap();
     std::fs::set_permissions(&pic, std::fs::Permissions::from_mode(0o000)).unwrap();
     if std::fs::File::open(&pic).is_ok() {
