@@ -113,6 +113,49 @@ pub fn spawn(cfg: Config) -> Result<Config> {
     spawn_on(cfg, None)
 }
 
+/// Moves a session whose folder has been removed (a worktree whose work
+/// landed and was tidied away) to one that's there, before its host
+/// starts in it: its worktree's repository, else the nearest folder above
+/// it that's still there. Its conversation stays where Claude Code keeps
+/// it: resuming finds it from any folder.
+pub(crate) fn leave_gone_folder(cfg: &mut Config) {
+    if cfg.cwd.is_empty() || Path::new(&cfg.cwd).is_dir() {
+        return;
+    }
+    let from = std::mem::take(&mut cfg.cwd);
+    let repo = cfg
+        .workspace
+        .as_ref()
+        .map(|w| w.repo.clone())
+        .filter(|r| !r.is_empty() && Path::new(r).is_dir());
+    let to = repo.unwrap_or_else(|| nearest_there(&from));
+    if cfg
+        .workspace
+        .as_ref()
+        .is_some_and(|w| w.path.is_empty() || !Path::new(&w.path).is_dir())
+    {
+        cfg.workspace = None;
+    }
+    log_event(&cfg.id, "folder-gone", json!({"path": from, "to": to}));
+    cfg.cwd = to;
+}
+
+/// The nearest folder at or above dir that's there, past a worktrees
+/// folder: the repository rather than the folder its worktrees sit in.
+fn nearest_there(dir: &str) -> String {
+    let mut p = Path::new(dir);
+    while let Some(up) = p.parent() {
+        p = up;
+        if p.ends_with(".claude/worktrees") || p.ends_with(".claude") {
+            continue;
+        }
+        if p.is_dir() {
+            return p.to_string_lossy().into_owned();
+        }
+    }
+    "/".into()
+}
+
 /// spawn on the rush at exe, this one when None. Given one, it also makes
 /// sure the host that answers was started from it, and ends a host that
 /// never came up rather than leave it: restart starts another.
@@ -132,6 +175,7 @@ pub(crate) fn spawn_on(mut cfg: Config, exe: Option<&Path>) -> Result<Config> {
             return Err(format!("{} is already running", cfg.id).into());
         }
     }
+    leave_gone_folder(&mut cfg);
     crate::json::write_private(&d.join("config.json"), &cfg.to_json_indent())?;
     let checked = exe.is_some();
     let exe: PathBuf = match exe {
@@ -1281,5 +1325,66 @@ mod tests {
         let mut ids: Vec<String> = s.list().into_iter().map(|i| i.id).collect();
         ids.sort();
         assert_eq!(ids, ["a-working", "c-alive"]);
+    }
+}
+
+#[cfg(test)]
+mod gone_folder_tests {
+    use super::*;
+    use crate::wire::Workspace;
+
+    fn s(p: &Path) -> String {
+        p.to_string_lossy().into_owned()
+    }
+
+    /// A session left in a worktree that's been tidied away starts in its
+    /// repository, its worktree let go, not in a folder that isn't there.
+    #[test]
+    fn a_removed_folder_moves_to_one_thats_there() {
+        let t = tempfile::tempdir().unwrap();
+        let repo = t.path().join("repo");
+        let trees = repo.join(".claude/worktrees");
+        std::fs::create_dir_all(&trees).unwrap();
+        let gone = s(&trees.join("merge-batch"));
+        let cases: Vec<(&str, Option<Workspace>, String, bool)> = vec![
+            (
+                "its worktree's repository",
+                Some(Workspace {
+                    path: s(&trees.join("e57fb8f4")),
+                    repo: s(&repo),
+                    ..Workspace::default()
+                }),
+                s(&repo),
+                false,
+            ),
+            ("past the worktrees folder", None, s(&repo), false),
+            (
+                "a worktree still there is kept",
+                Some(Workspace {
+                    path: s(&trees),
+                    repo: s(&repo),
+                    ..Workspace::default()
+                }),
+                s(&repo),
+                true,
+            ),
+        ];
+        for (name, ws, want, kept) in cases {
+            let mut cfg = Config {
+                id: "gone1".into(),
+                cwd: gone.clone(),
+                workspace: ws,
+                ..Config::default()
+            };
+            leave_gone_folder(&mut cfg);
+            assert_eq!(cfg.cwd, want, "{name}");
+            assert_eq!(cfg.workspace.is_some(), kept, "{name}");
+        }
+        let mut there = Config {
+            cwd: s(&repo),
+            ..Config::default()
+        };
+        leave_gone_folder(&mut there);
+        assert_eq!(there.cwd, s(&repo), "a folder that's there stays");
     }
 }
