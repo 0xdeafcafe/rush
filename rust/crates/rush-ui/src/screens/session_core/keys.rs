@@ -1120,6 +1120,16 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     b.text = c.input.text.clone();
     b.cursor = c.input.pos;
     let p = b.at(y - top - 1, x as isize - dock_x() as isize);
+    // An image's chip opens the image, the draft as it was (draftImage).
+    if let Some(sp) = crate::imagerefs::chip_on(&c.input.text, p) {
+        let marker: String = c.input.text[sp.from..sp.to].iter().collect();
+        let refs = c.imgs.clone();
+        let o = crate::screens::session_cards::message::draft_image(m, &marker, &refs);
+        if o.used() {
+            return o;
+        }
+    }
+    let c = conn(m, &key);
     if !c.input.open_chip_at(p) {
         c.input.pos = p;
         c.input.anchor = None;

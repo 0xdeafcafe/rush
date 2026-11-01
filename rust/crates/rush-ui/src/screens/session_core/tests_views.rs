@@ -1583,3 +1583,40 @@ fn hovering_an_agent_tag() {
     assert!(tag.style.mods.contains(rush_core::text::Mods::UNDERLINE));
     rush_convo::handles::set_handles(Default::default());
 }
+
+/// An image the agent points at is a chip that opens its menu on a
+/// left-click, the image drawn above what can be done with it, as o on
+/// its step does; a file that isn't an image stays the text's.
+#[test]
+fn a_click_on_an_image_in_the_conversation_opens_it() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("shot.png");
+    image::RgbaImage::new(40, 20).save(&p).unwrap();
+    let mut m = opened(100, 40);
+    let now = m.now;
+    sess(&mut m).sent("show me".into(), Vec::new(), now - 5_000);
+    sess(&mut m).apply(
+        &Event::Message(Message {
+            role: "assistant".into(),
+            id: "a-img".into(),
+            parts: vec![Part {
+                kind: PartKind::Text,
+                text: format!("Here: ![the shot]({})", p.display()),
+                ..Part::default()
+            }],
+            ..Message::default()
+        }),
+        now - 4_000,
+    );
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "the shot").expect("the chip drawn");
+    let x = col_of(&s[y], "the shot");
+    assert_eq!(
+        click(&mut m, MouseKind::Down(Button::Left), x, y),
+        Out::Draw
+    );
+    let menu = m
+        .sheet_as::<crate::screens::cmdbar::linkmenu::LinkMenu>()
+        .expect("the image's menu");
+    assert_eq!(menu.img, p.to_string_lossy());
+}

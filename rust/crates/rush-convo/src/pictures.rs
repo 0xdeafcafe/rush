@@ -52,18 +52,26 @@ pub(crate) fn picture(path: &str, w: usize, h: usize, look: Look) -> Option<Arc<
 }
 
 /// A message's images as thumbnails a few rows tall, side by side in w
-/// cells; None until every one is made and readable, so their chips stand
-/// in till then (thumbRows).
-pub(crate) fn thumb_rows(paths: &[String], w: usize) -> Option<Vec<Line>> {
+/// cells, each opening whole when clicked as its chip does
+/// (rush:message/<ref>/image/<n>); None until every one is made and
+/// readable, so their chips stand in till then (thumbRows).
+pub(crate) fn thumb_rows(r: &str, paths: &[String], w: usize) -> Option<Vec<Line>> {
     if paths.is_empty() {
         return None;
     }
     let mut pics = Vec::with_capacity(paths.len());
-    for p in paths {
+    for (i, p) in paths.iter().enumerate() {
         // The same height each, so a row of them lines up; small, as the
         // chips they stand for: opened, an image shows whole.
         let rows = picture(p, 8.max(32.min(w.saturating_sub(2))), 3, Look::Fit)?;
-        pics.push(framed(&rows));
+        let mut pic = framed(&rows);
+        let link = rush_core::text::Link::to(&format!("rush:message/{r}/image/{}", i + 1));
+        for l in &mut pic {
+            for s in &mut l.spans {
+                s.style.link = link;
+            }
+        }
+        pics.push(pic);
     }
     Some(tile(&pics, w, 2).0)
 }
@@ -168,7 +176,7 @@ mod tests {
         }
     }
 
-    fn drawn(s: &Session) -> String {
+    fn rows(s: &Session) -> Vec<crate::RenderedLine> {
         let o = Options {
             width: 80,
             now: 10_000,
@@ -178,11 +186,22 @@ mod tests {
         let mut r = Renderer::new();
         let total = r.count(s, &o);
         r.window(s, &o, 0, total);
-        r.rows()
+        r.rows().into_iter().cloned().collect()
+    }
+
+    fn drawn(s: &Session) -> String {
+        rows(s)
             .iter()
             .map(|l| l.line.plain())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    /// Where the cells drawn as `text` on a row link to.
+    fn link_of(ls: &[crate::RenderedLine], text: &str) -> Option<String> {
+        let l = ls.iter().find(|l| l.line.plain().contains(text))?;
+        let col = rush_core::text::width(&l.line.plain()[..l.line.plain().find(text)?]);
+        rush_core::text::link_at(&l.line, col).map(|u| u.to_string())
     }
 
     /// A step's image is a thumbnail under it and your message's images a
@@ -248,5 +267,25 @@ mod tests {
         assert!(f.contains("▀▀▀▀▀▀\n") || f.contains("▀▀▀▀▀▀ "), "read: {f}");
         assert!(!f.contains("▣ read.png"), "its chip gives way: {f}");
         assert!(f.contains("▣ later.png"), "not made yet: {f}");
+        // Each opens when clicked, as its chip does: yours its message's
+        // image, a step's its file (picture.go:199, render.go:3200).
+        let ls = rows(&s);
+        let r = ls
+            .iter()
+            .find(|l| l.line.plain().contains("look at this"))
+            .map(|l| l.r#ref.clone())
+            .unwrap();
+        assert_eq!(
+            link_of(&ls, "│████│"),
+            Some(format!("rush:message/{r}/image/1"))
+        );
+        assert_eq!(
+            link_of(&ls, "▀▀▀▀▀▀").as_deref(),
+            Some("file:///pics-test/read.png")
+        );
+        assert_eq!(
+            link_of(&ls, "▣ later.png").as_deref(),
+            Some("file:///pics-test/later.png")
+        );
     }
 }
