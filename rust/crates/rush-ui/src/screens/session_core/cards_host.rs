@@ -282,6 +282,7 @@ pub(crate) fn reply_to(m: &mut Model, to: &str, text: String, tagged: &str) -> O
         return Out::Idle;
     };
     seen(m, &a);
+    crate::screens::cmdbar::stops::undone(m, &a.key);
     m.flash(&format!("sending to {}…", a.display_name));
     if a.rush {
         // sendHosted: queued while it works.

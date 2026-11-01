@@ -759,8 +759,11 @@ fn answer_failed(m: &mut Model, key: &str, id: &str) {
     crate::screens::session_cards::question::answer_failed(m, key, id);
 }
 
-/// Shows text as sending until the agent has it (markSending).
+/// Shows text as sending until the agent has it, and brings it back from
+/// put away: else a put-away session sent to works on in Earlier
+/// (markSending, sending.go:46).
 fn mark_sending(m: &mut Model, key: &str, text: &str) {
+    crate::screens::cmdbar::stops::undone(m, key);
     let now = m.now;
     let queued = queue_of(m, key).items.len();
     let Some(v) = m.session.as_ref().filter(|v| v.key == key) else {

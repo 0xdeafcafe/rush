@@ -1692,3 +1692,19 @@ fn ctrl_l_moves_the_session() {
         "the move picker\n{f}"
     );
 }
+
+/// A put-away session sent a message comes back from Earlier at once:
+/// put away holds a row in Earlier even at work, so without it the
+/// session works on there (sending.go:46 markSending's undone).
+#[test]
+fn a_message_brings_a_put_away_session_back() {
+    let (mut m, _fake) = hosted("steer", Vec::new());
+    m.agents[0].job.updated_at = NOW; // at work a moment ago, not stuck
+    m.agents[0].done = true;
+    m.rebuild();
+    assert_eq!(m.group_of.get(KEY).map(String::as_str), Some("Earlier"));
+    typed(&mut m, "carry on");
+    press(&mut m, "enter");
+    assert!(!m.agents[0].done, "still put away");
+    assert_eq!(m.group_of.get(KEY).map(String::as_str), Some("Working"));
+}

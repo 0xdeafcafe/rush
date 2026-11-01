@@ -674,6 +674,19 @@ pub fn toggle_done(m: &mut Model, key: &str) {
     }
 }
 
+/// Brings the agent with key back from put away when you send it
+/// something: that holds it in Earlier against all else, at work or not,
+/// so a message is what brings it back. Its row moves now, not on the
+/// next reading (tempwork.go:326 undone).
+pub fn undone(m: &mut Model, key: &str) {
+    let Some(a) = m.agents.iter_mut().find(|a| a.key == key && a.done) else {
+        return;
+    };
+    a.done = false;
+    keep_done(m, key, false);
+    m.rebuild();
+}
+
 /// Keeps key put away (or not) in rush's state.json, off the UI thread.
 fn keep_done(m: &mut Model, key: &str, done: bool) {
     let key = key.to_string();
