@@ -213,8 +213,14 @@ fn pick_wide() {
     check(diffs(
         "pick",
         &sets,
-        include_str!("testdata/wide/pick.txt"),
-        include_str!("testdata/wide/pick.sty"),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/wide/pick.txt"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/wide/pick.sty"
+        )),
         none,
     ));
 }
@@ -242,8 +248,14 @@ fn offer_wide() {
     check(diffs(
         "offer",
         &sets,
-        include_str!("testdata/wide/offer.txt"),
-        include_str!("testdata/wide/offer.sty"),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/wide/offer.txt"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/wide/offer.sty"
+        )),
         none,
     ));
 }
@@ -271,8 +283,14 @@ fn approval_wide() {
     check(diffs(
         "approval",
         &sets,
-        include_str!("testdata/wide/approval.txt"),
-        include_str!("testdata/wide/approval.sty"),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/wide/approval.txt"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/wide/approval.sty"
+        )),
         data_dir,
     ));
 }
@@ -316,8 +334,14 @@ fn optional_wide() {
     check(diffs(
         "optional",
         &sets,
-        include_str!("testdata/wide/optional.txt"),
-        include_str!("testdata/wide/optional.sty"),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/wide/optional.txt"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/wide/optional.sty"
+        )),
         none,
     ));
 }
@@ -336,8 +360,14 @@ fn layout_wide() {
     check(diffs(
         "layout",
         &sets,
-        include_str!("testdata/wide/layout.txt"),
-        include_str!("testdata/wide/layout.sty"),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/wide/layout.txt"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/wide/layout.sty"
+        )),
         none,
     ));
 }
@@ -380,8 +410,14 @@ fn plugins_wide() {
     check(diffs(
         "plugins",
         &sets,
-        include_str!("testdata/wide/plugins.txt"),
-        include_str!("testdata/wide/plugins.sty"),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/wide/plugins.txt"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/wide/plugins.sty"
+        )),
         none,
     ));
 }
@@ -410,8 +446,14 @@ fn doc_wide() {
     check(diffs(
         "doc",
         &sets,
-        include_str!("testdata/wide/doc.txt"),
-        include_str!("testdata/wide/doc.sty"),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/wide/doc.txt"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/wide/doc.sty"
+        )),
         none,
     ));
 }
@@ -419,7 +461,11 @@ fn doc_wide() {
 #[test]
 fn views_wide() {
     use views::*;
-    let v: View = serde_json::from_str(include_str!("views/testdata/all.json")).unwrap();
+    let v: View = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../rush-ui-plugin-ui/src/views/testdata/all.json"
+    )))
+    .unwrap();
     let small = View {
         name: "prs".into(),
         title: "Pull requests".into(),
@@ -440,8 +486,14 @@ fn views_wide() {
     check(diffs(
         "views",
         &sets,
-        include_str!("testdata/wide/views.txt"),
-        include_str!("testdata/wide/views.sty"),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/wide/views.txt"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/wide/views.sty"
+        )),
         none,
     ));
 }
@@ -480,7 +532,11 @@ fn narrow_wide_and_empty() {
     empty.installed.clear();
     empty.available.clear();
     empty.markets.clear();
-    let v: View = serde_json::from_str(include_str!("views/testdata/all.json")).unwrap();
+    let v: View = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../rush-ui-plugin-ui/src/views/testdata/all.json"
+    )))
+    .unwrap();
     // Every word in every block made wide.
     fn widen(x: &mut serde_json::Value, k: &str, wide: &str) {
         match x {
@@ -497,8 +553,11 @@ fn narrow_wide_and_empty() {
             _ => {}
         }
     }
-    let mut raw: serde_json::Value =
-        serde_json::from_str(include_str!("views/testdata/all.json")).unwrap();
+    let mut raw: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../rush-ui-plugin-ui/src/views/testdata/all.json"
+    )))
+    .unwrap();
     widen(&mut raw, "", &wide);
     let mut wv: View = serde_json::from_value(raw).unwrap();
     wv.name = "wide".into();
@@ -836,7 +895,12 @@ fn unquote(s: &str) -> Option<String> {
 #[test]
 fn json_problems_match_go() {
     let mut bad = Vec::new();
-    for row in include_str!("testdata/wide/json.tsv").lines() {
+    for row in include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../rush-ui-plugin-ui/src/testdata/wide/json.tsv"
+    ))
+    .lines()
+    {
         let f: Vec<&str> = row.split('\t').collect();
         let Some(text) = unquote(f[0]) else { continue };
         let got = doc::json_problems(&text);
@@ -903,8 +967,14 @@ fn artifacts_wide() {
     check(diffs(
         "artifacts",
         &sets,
-        include_str!("testdata/wide/artifacts.txt"),
-        include_str!("testdata/wide/artifacts.sty"),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/wide/artifacts.txt"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rush-ui-plugin-ui/src/testdata/wide/artifacts.sty"
+        )),
         none,
     ));
 }

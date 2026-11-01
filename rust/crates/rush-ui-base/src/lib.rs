@@ -33,6 +33,7 @@ pub mod rooms;
 pub mod sess;
 pub mod session;
 pub mod shells;
+pub mod sidecol;
 pub mod spawns;
 pub mod split;
 pub mod startdir;

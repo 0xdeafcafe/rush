@@ -10,9 +10,9 @@ use std::collections::HashMap;
 use rush_core::agent::Agent;
 use rush_plugin::Sidebar;
 
+use crate::ModelPlugins;
 use crate::frame::Out;
 use crate::model::Model;
-use crate::screens::plugin_ui::ModelPlugins;
 
 pub const PLUGIN_GROUP_PREFIX: &str = "plugin:";
 pub const OTHER_SECTION: &str = "Other";

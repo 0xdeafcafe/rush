@@ -965,7 +965,7 @@ impl ViewsState {
 /// itself, and each row's ref. A click opens them, on a view's row at
 /// that view (sideViews).
 pub fn side_views(vs: &[View], past: &[View], w: usize) -> (Vec<Line>, Vec<String>) {
-    use crate::screens::session_core::side::{VIEWS_REF, side_head};
+    use crate::sidecol::{VIEWS_REF, side_head};
     let mut how = Vec::new();
     if !vs.is_empty() {
         how.push(vs.len().to_string());

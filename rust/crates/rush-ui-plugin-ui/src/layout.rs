@@ -6,11 +6,11 @@
 use rush_core::text::Line;
 
 use super::{choice, settled, sheet_do};
+use crate::ModelPlugins;
 use crate::frame::picker::round_move;
 use crate::frame::sheet::{sheet_row, sheet_title};
 use crate::frame::{Out, Press, Sheet};
 use crate::model::Model;
-use crate::screens::plugin_ui::ModelPlugins;
 use crate::style::*;
 
 /// The layouts, as config keeps them, named and said (viewChoices).

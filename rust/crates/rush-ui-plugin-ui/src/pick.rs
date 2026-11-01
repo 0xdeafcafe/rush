@@ -10,10 +10,10 @@ use rush_core::text::Line;
 use rush_plugin::{Pick, PickItem, Picked};
 
 use super::{STASH_PLUGIN, hooks, short_images};
+use crate::ModelPlugins;
 use crate::frame::sheet::{sheet_row, sheet_tabs, sheet_title, text_field, window};
 use crate::frame::{Out, Press, Sheet, editor};
 use crate::model::Model;
-use crate::screens::plugin_ui::ModelPlugins;
 use crate::style::*;
 
 /// A plugin's pick on screen (pickSheet).

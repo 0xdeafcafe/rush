@@ -2,4 +2,5 @@
 //! UI: they test the crate's code, here because only rush-ui can make a
 //! model with every screen registered (new_model).
 
+mod plugin_ui;
 mod social;

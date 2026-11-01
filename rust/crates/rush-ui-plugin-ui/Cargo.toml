@@ -1,0 +1,32 @@
+[package]
+name = "rush-ui-plugin-ui"
+description = "rush's plugin screens: plugin sheets, approvals, picks, an agent's views beside its conversation, artifacts and the file editor"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-convo.workspace = true
+rush-fleet.workspace = true
+rush-draw.workspace = true
+# The frame, the model, the list and their workers, under every screen.
+rush-ui-base.workspace = true
+rush-sys.workspace = true
+rush-events.workspace = true
+rush-keymap.workspace = true
+rush-state.workspace = true
+rush-net.workspace = true
+rush-claude.workspace = true
+rush-hl.workspace = true
+rush-plugin = { path = "../rush-plugin" }
+rush-plugind = { path = "../rush-plugind" }
+rush-bundled = { path = "../rush-bundled" }
+# A session's views beside its conversation: their files (host/views.go).
+rush-host = { path = "../rush-host" }
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }
