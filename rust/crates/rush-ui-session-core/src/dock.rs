@@ -316,11 +316,19 @@ fn queue_rows(
     let mut rows = Vec::new();
     let mut at = Vec::new();
     let pick = queue::sel(picked, q.items.len());
-    let title = line([
+    let mut title = line([
         plain(" "),
         spb("queue", QUEUE),
         sp(format!(" ·{}", q.items.len()), FAINT),
     ]);
+    // Held: said on the card's title, and on each row you hold.
+    if q.held {
+        title.spans.push(sp(" ⏸ held · alt+h lets it go", YELLOW));
+    } else if q.guarded {
+        title
+            .spans
+            .push(sp(" ⏸ held by the guard · alt+h lets it through", YELLOW));
+    }
     // Hovering a row only lights it; a click picks it, which is when its
     // own keys show.
     let mut how = Line::new();
@@ -358,6 +366,9 @@ fn queue_rows(
             line([sp(text, TEXT)])
         };
         let mut row = line([plain("  "), sp((i + 1).to_string(), SUB), plain("  ")]);
+        if q.held {
+            row.spans.push(sp("⏸ ", YELLOW));
+        }
         join(&mut row, body.clone());
         let mut row = rush_draw::truncate_line(&row, w, "…");
         if single {
@@ -374,6 +385,9 @@ fn queue_rows(
             }
             let mut left = title.clone();
             left.spans.push(plain("  "));
+            if q.held {
+                left.spans.push(sp("⏸ ", YELLOW));
+            }
             join(&mut left, body);
             let room = w.saturating_sub(right.width() + 2);
             row = spread(rush_draw::truncate_line(&left, room, "…"), right, w);

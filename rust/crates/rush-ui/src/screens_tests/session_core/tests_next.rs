@@ -334,7 +334,7 @@ fn held_and_stuck_name_your_send_now_key() {
         },
     );
     let h = plain(super::queue::when(&mut m, KEY, &held));
-    assert!(h.contains("held · ctrl+g sends it now"), "{h}");
+    assert!(h.contains("ctrl+g sends it now"), "{h}");
     let s = plain(super::queue::when(&mut m, KEY, &stuck));
     assert!(
         s.contains("its turn can't take it · ctrl+g stops the turn and sends it"),

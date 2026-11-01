@@ -1000,6 +1000,43 @@ fn the_local_queue_card() {
     assert!(f.contains("╭─ queuing · ctrl+enter sends it now ─"), "{f}");
 }
 
+/// A held queue says so on its title and on each row; one that isn't
+/// held doesn't.
+#[test]
+fn the_queue_card_says_when_it_is_held() {
+    let (mut m, _) = outside(State::Working);
+    typed(&mut m, "one");
+    press(&mut m, "enter");
+    let f = screen(&mut m).join("\n");
+    assert!(!f.contains("⏸"), "not held:\n{f}");
+    press(&mut m, "alt+h");
+    let f = screen(&mut m).join("\n");
+    assert!(f.contains("queue ·1 ⏸ held · alt+h lets it go"), "{f}");
+    assert!(f.contains("⏸ one"), "the row too:\n{f}");
+    press(&mut m, "alt+h");
+    let f = screen(&mut m).join("\n");
+    assert!(!f.contains("⏸"), "let go:\n{f}");
+}
+
+/// The runaway guard's hold is on the title, with the key that lets it
+/// through.
+#[test]
+fn the_queue_card_says_when_the_guard_holds_it() {
+    let (mut m, _) = hosted(
+        "steer",
+        vec![Said::Info(Info {
+            queue: vec!["a".into(), "b".into()],
+            queue_guarded: true,
+            ..Info::default()
+        })],
+    );
+    let f = screen(&mut m).join("\n");
+    assert!(
+        f.contains("queue ·2 ⏸ held by the guard · alt+h lets it through"),
+        "{f}"
+    );
+}
+
 /// A session open in a terminal can't take messages.
 #[test]
 fn interactive_sessions_cant_take_messages() {

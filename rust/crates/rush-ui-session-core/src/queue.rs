@@ -566,11 +566,8 @@ pub fn when(m: &mut Model, key: &str, q: &Queued) -> rush_core::text::Line {
     // Yours if you moved it, not a fixed ctrl+enter (rushmode.go:3543-3546).
     let send_now = super::spawned::send_now_key(m);
     if q.held {
-        // Yours: never silently stuck, say it's held and how it goes.
-        return line([
-            sp(" · held", YELLOW),
-            sp(format!(" · {send_now} sends it now"), DIM),
-        ]);
+        // Yours: the card's title says it's held; this says how it goes.
+        return line([sp(format!(" · {send_now} sends it now"), DIM)]);
     }
     if q.guarded {
         // The runaway guard's: what you sent goes, what starts without
