@@ -735,6 +735,8 @@ pub struct Fake {
     /// What follow hands over, once.
     pub lines: Mutex<Vec<Said>>,
     pub dials: Mutex<usize>,
+    /// Its host is down: dialling it fails.
+    pub down: Mutex<bool>,
     /// Sessions started, in order; each is started as fake-<n>.
     pub starts: Mutex<Vec<Start>>,
     /// Agents by key whose host sleeps.
@@ -832,6 +834,9 @@ impl Hosts for Arc<Fake> {
     }
     fn dial(&self, _: &Agent) -> Result<Arc<dyn Link>, String> {
         *self.dials.lock().unwrap() += 1;
+        if *self.down.lock().unwrap() {
+            return Err("no host".into());
+        }
         if let Some(e) = self.failed() {
             return Err(e);
         }

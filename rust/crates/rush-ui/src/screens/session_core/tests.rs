@@ -749,6 +749,35 @@ fn sending_queued_or_too_long() {
     assert!(o.sending.is_empty(), "waited on too long");
 }
 
+/// A host that closes the connection while it runs on (a client too far
+/// behind is let go to reconnect) is dialled again, and the Session filled
+/// from it: not left on "reading the conversation…" (resolveHostClose's
+/// dropHost, then syncHost).
+#[test]
+fn a_closed_link_to_a_running_host_is_dialled_again() {
+    let (mut m, fake) = hosted("steer", Vec::new());
+    assert_eq!(*fake.dials.lock().unwrap(), 1);
+    // What the host replays to the connection made again.
+    *fake.lines.lock().unwrap() = vec![Said::Sent {
+        text: "flood the parser".into(),
+        images: Vec::new(),
+        exchange: None,
+    }];
+    let r#gen = conn(&mut m, KEY).link_gen;
+    live::take(&mut m, KEY, r#gen, Vec::new(), true);
+    assert_eq!(*fake.dials.lock().unwrap(), 3, "asked, then dialled again");
+    assert!(conn(&mut m, KEY).hosted());
+    let f = screen(&mut m).join("\n");
+    assert!(!f.contains("reading the conversation"), "{f}");
+    assert!(f.contains("flood the parser"), "{f}");
+    // One that doesn't answer is a stopped one: not dialled again.
+    *fake.down.lock().unwrap() = true;
+    let r#gen = conn(&mut m, KEY).link_gen;
+    live::take(&mut m, KEY, r#gen, Vec::new(), true);
+    assert_eq!(*fake.dials.lock().unwrap(), 4, "asked only");
+    assert!(!conn(&mut m, KEY).hosted());
+}
+
 /// Sending shows under the conversation, and goes once the host says
 /// it's sent.
 #[test]

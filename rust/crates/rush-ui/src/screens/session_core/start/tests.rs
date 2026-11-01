@@ -294,6 +294,7 @@ fn a_stopped_host_resumes() {
     let key = "default/a:h1";
     let mut m = open_hosted(&fake, key);
     let r#gen = core(&mut m).link_gen;
+    *fake.down.lock().unwrap() = true;
     live::take(&mut m, key, r#gen, Vec::new(), true);
     assert!(!conn(&mut m, key).sleeping);
     m.agents[0].pid = 0;
