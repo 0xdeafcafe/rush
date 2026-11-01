@@ -81,6 +81,20 @@ struct Seen {
     at: Ms,
 }
 
+/// What looking at a target's files found (Scanner::look).
+enum Look {
+    /// A past conversation looked at lately: left as it is.
+    Skip,
+    /// Nothing changed since its last scan.
+    Same,
+    /// Its files, their sizes (None: gone), and which grew.
+    Files {
+        seen: Seen,
+        sizes: Vec<Option<u64>>,
+        grew: Vec<bool>,
+    },
+}
+
 /// Prices Claude Code's transcripts, keeping what it read.
 #[derive(Default)]
 pub struct Scanner {
@@ -135,47 +149,62 @@ impl Scanner {
         }
     }
 
-    /// A target's transcripts, its own and its subagents' first and its
-    /// workflows' agents' after them from the index returned, or None when
-    /// nothing about one that isn't live has changed since the last scan.
-    fn files(&mut self, t: &Target, now: Ms) -> Option<(Vec<PathBuf>, usize)> {
-        let prev = self.seen.get_mut(&t.path);
-        if let Some(p) = &prev
+    /// Looks at a target's files, reading none: whether anything about
+    /// one that isn't live changed since the last scan, and if so its
+    /// transcripts (its own and its subagents' first, its workflows'
+    /// agents' after them) and their sizes, as run takes them. Only looks,
+    /// so a run looks at every target's side by side.
+    fn look(&self, t: &Target, now: Ms, quiet: bool) -> Look {
+        let prev = self.seen.get(&t.path);
+        if let Some(p) = prev
             && t.past
             && !t.live
             && now - p.at < PAST_EVERY
         {
-            return None;
+            return Look::Skip;
         }
         let main = std::fs::metadata(&t.path).map(|m| m.len()).unwrap_or(0);
         let sub_dirs = folder_times(&t.path);
         let (subs, flows) = match prev {
             Some(p) if !t.live && p.main == main && p.sub_dirs == sub_dirs && !p.deferred => {
-                p.at = now;
-                return None;
+                return Look::Same;
             }
-            Some(p) if p.sub_dirs == sub_dirs => {
-                (std::mem::take(&mut p.subs), std::mem::take(&mut p.flows))
-            }
+            Some(p) if p.sub_dirs == sub_dirs => (p.subs.clone(), p.flows.clone()),
             _ => (subagent_transcripts(&t.path), workflow_transcripts(&t.path)),
         };
-        let mut files = Vec::with_capacity(1 + subs.len() + flows.len());
-        files.push(t.path.clone());
-        files.extend(subs.iter().cloned());
-        let own = files.len();
-        files.extend(flows.iter().cloned());
-        self.seen.insert(
-            t.path.clone(),
-            Seen {
+        let n = 1 + subs.len() + flows.len();
+        let (mut sizes, mut grew, mut deferred) = (Vec::with_capacity(n), vec![false; n], false);
+        let files = std::iter::once(&t.path).chain(&subs).chain(&flows);
+        for (i, f) in files.enumerate() {
+            if let Some(&(sz, at)) = self.sizes.get(f)
+                && i > 0
+                && t.live
+                && !quiet
+                && now - at > RUN_STALE
+            {
+                sizes.push(Some(sz)); // a live session's subagent, quiet a while: as it was
+                deferred = true;
+                continue;
+            }
+            let Ok(m) = std::fs::metadata(f) else {
+                sizes.push(None);
+                continue;
+            };
+            sizes.push(Some(m.len()));
+            grew[i] = self.sizes.get(f).map_or(0, |s| s.0) != m.len();
+        }
+        Look::Files {
+            seen: Seen {
                 main,
                 sub_dirs,
                 subs,
                 flows,
-                deferred: false,
+                deferred,
                 at: now,
             },
-        );
-        Some((files, own))
+            sizes,
+            grew,
+        }
     }
 
     /// Reads the cache from CACHE_FILE, the first time, if it's kept.
@@ -249,36 +278,34 @@ impl Scanner {
         if quiet {
             self.quiet_at = now;
         }
-        for t in targets {
-            let Some((files, own)) = self.files(t, now) else {
-                continue;
+        // Every target's files looked at side by side, then taken in order.
+        let looks = rush_core::par::map_with(
+            targets.iter().collect::<Vec<_>>(),
+            || (),
+            |_, t| self.look(t, now, quiet),
+        );
+        for (t, look) in targets.iter().zip(looks) {
+            let (seen, sizes, grew) = match look {
+                Look::Skip => continue,
+                Look::Same => {
+                    if let Some(p) = self.seen.get_mut(&t.path) {
+                        p.at = now;
+                    }
+                    continue;
+                }
+                Look::Files { seen, sizes, grew } => (seen, sizes, grew),
             };
-            let (mut changed, mut deferred) = (false, false);
-            let mut sizes: Vec<Option<u64>> = Vec::with_capacity(files.len());
-            for (i, f) in files.iter().enumerate() {
-                if let Some(&(sz, grew)) = self.sizes.get(f)
-                    && i > 0
-                    && t.live
-                    && !quiet
-                    && now - grew > RUN_STALE
-                {
-                    sizes.push(Some(sz)); // a live session's subagent, quiet a while: as it was
-                    deferred = true;
-                    continue;
-                }
-                let Ok(m) = std::fs::metadata(f) else {
-                    sizes.push(None);
-                    continue;
-                };
-                sizes.push(Some(m.len()));
-                if self.sizes.get(f).map_or(0, |s| s.0) != m.len() {
-                    changed = true;
-                    // Its size is set as it's read, below.
-                    self.sizes.entry(f.clone()).or_default().1 = now;
-                }
-            }
-            if let Some(st) = self.seen.get_mut(&t.path) {
-                st.deferred = deferred;
+            let mut files = Vec::with_capacity(sizes.len());
+            files.push(t.path.clone());
+            files.extend(seen.subs.iter().cloned());
+            let own = files.len();
+            files.extend(seen.flows.iter().cloned());
+            self.seen.insert(t.path.clone(), seen);
+            let mut changed = false;
+            for (f, _) in files.iter().zip(&grew).filter(|(_, g)| **g) {
+                changed = true;
+                // Its size is set as it's read, below.
+                self.sizes.entry(f.clone()).or_default().1 = now;
             }
             if !changed && !self.sizes.is_empty() && self.sizes.contains_key(&t.path) {
                 continue;
