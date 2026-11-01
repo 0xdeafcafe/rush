@@ -256,8 +256,10 @@ pub fn agent_counts(agents: &[Ag], now: Ms) -> Line {
 pub fn folder_meta(agents: &[Ag], now: Ms) -> Line {
     let (mut working, mut waiting, mut turn) = (0, 0, 0);
     let mut cost = 0.0;
+    let mut lapse = rush_core::subcache::SubCache::default();
     for g in agents {
         cost += g.a.spend.cost;
+        lapse.add(&g.a.spend.sub_cache);
         if g.a.needs_you() || g.waiting() || g.a.halted() {
             waiting += 1;
         } else if g.a.your_turn(now) {
@@ -276,11 +278,21 @@ pub fn folder_meta(agents: &[Ag], now: Ms) -> Line {
     if turn > 0 {
         parts.push(ln([sp(format!("{turn} your turn"), GREEN)]));
     }
-    let meta = if cost > 0.0 {
+    let mut meta = if cost > 0.0 {
         format!("{} · {}", agents.len(), money(cost))
     } else {
         agents.len().to_string()
     };
+    if lapse.lapses > 0 && lapse.cost >= 0.005 {
+        // What the subagents' prompt cache lapsing cost of it.
+        meta.push_str(&format!(" · {} lapsed", money(lapse.cost)));
+        if lapse.hour_saves() >= 0.005 {
+            meta.push_str(&format!(
+                ", 1-hour would save {}",
+                money(lapse.hour_saves())
+            ));
+        }
+    }
     parts.push(ln([sp(meta, DIM)]));
     joined(parts, sp(" · ", DIM))
 }

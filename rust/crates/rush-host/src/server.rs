@@ -1419,6 +1419,18 @@ impl Host {
             temp_dir: tmp.to_string_lossy().into_owned(),
             lean: c.lean,
             subagents: adapter::subagent_cap(),
+            // Read now, so a session started or moved onto a new build
+            // after a change in Settings takes it.
+            subagent_cache: if self.reg.supports(a.kind().as_str(), Feature::SubagentCache) {
+                rush_state::Store::load()
+                    .config
+                    .subagent_cache
+                    .get(a.kind().as_str())
+                    .cloned()
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            },
             lightly: true,
             // rush's own tools never ask: they draw, or start what the
             // Agent tool would.

@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rush_core::agent::{Halt, Preview, PreviewLine, SubagentStats, TokenUsage};
+use rush_core::subcache::{SubCache, Tracker};
 use rush_core::time::Ms;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -56,6 +57,11 @@ pub struct Totals {
     pub pending_use: TokenUsage,
     pub pending_fast: bool,
     pub pending_at: Ms,
+    /// When its first line was written: the request began about then.
+    pub pending_start: Ms,
+    /// Its requests followed for the prompt cache lapsing (subcache.rs);
+    /// only a subagent's count, in spend.rs.
+    pub track: Tracker,
     /// The error the session's last turn ended on; the next real reply
     /// clears it.
     #[serde(with = "halt_wire")]
@@ -117,6 +123,13 @@ impl Totals {
             Some((_, t)) => t.add(u),
             None => self.by_model.push((model.clone(), u)),
         }
+        let start = if self.pending_start != 0 {
+            self.pending_start
+        } else {
+            self.pending_at
+        };
+        self.track
+            .request(start, &model, &u, &|m, u| cost(m, *u, false));
         let c = cost(&model, u, self.pending_fast);
         self.cost += c;
         let d = day(self.pending_at);
@@ -140,6 +153,23 @@ impl Totals {
             self.cost + cost(&self.pending_model, self.pending_use, self.pending_fast),
             u,
         )
+    }
+
+    /// What the prompt cache lapsing cost this transcript's requests, the
+    /// pending one included.
+    pub fn sub_cache(&self) -> SubCache {
+        let mut t = self.track.clone();
+        if !self.pending_id.is_empty() {
+            let start = if self.pending_start != 0 {
+                self.pending_start
+            } else {
+                self.pending_at
+            };
+            t.request(start, &self.pending_model, &self.pending_use, &|m, u| {
+                cost(m, *u, false)
+            });
+        }
+        t.sum
     }
 
     /// What was spent on one local calendar day (yyyymmdd, see `day`).
@@ -400,6 +430,7 @@ pub fn consume(t: &mut Totals, b: &[u8]) {
     }
     if *m.id != *t.pending_id {
         t.pending_id = m.id.to_string();
+        t.pending_start = ts;
     }
     if *m.model != *t.pending_model {
         t.pending_model = m.model.to_string();
