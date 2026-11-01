@@ -1623,6 +1623,7 @@ dependencies = [
  "rush-ui-accounts",
  "rush-ui-bars",
  "rush-ui-base",
+ "rush-ui-cmdbar",
  "rush-ui-list-extras",
  "rush-ui-plugin-ui",
  "rush-ui-projects-machine",
@@ -1700,6 +1701,31 @@ dependencies = [
  "rush-testenv",
  "rush-update",
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rush-ui-cmdbar"
+version = "0.1.0"
+dependencies = [
+ "rush-convo",
+ "rush-core",
+ "rush-draw",
+ "rush-fleet",
+ "rush-gh",
+ "rush-keymap",
+ "rush-remote",
+ "rush-state",
+ "rush-sys",
+ "rush-testenv",
+ "rush-ui-accounts",
+ "rush-ui-bars",
+ "rush-ui-base",
+ "rush-ui-list-extras",
+ "rush-ui-plugin-ui",
+ "rush-ui-projects-machine",
+ "rush-ui-settings",
+ "rush-ui-social",
  "serde_json",
 ]
 

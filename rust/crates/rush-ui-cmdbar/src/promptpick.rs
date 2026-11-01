@@ -14,7 +14,6 @@ use rush_core::text::Line;
 use super::fleetslash::{completed, hash_matches, needs_arg, picker_move, picker_rows};
 use crate::frame::{Out, Press};
 use crate::model::Model;
-use crate::screens::session_cards::mention::{complete_mention, mention_matches, mention_rows};
 
 /// The picker's row, and what was typed when it was last looked at: the
 /// row goes back to the first as the text changes.
@@ -38,8 +37,8 @@ fn open(m: &Model) -> bool {
         && !m.help
         && !m.on_place()
         && !m.keys_beside
-        && !crate::screens::list_extras::live::embedded(m)
-        && crate::screens::list_extras::rename::renaming(m).is_none()
+        && !rush_ui_list_extras::live::embedded(m)
+        && rush_ui_list_extras::rename::renaming(m).is_none()
 }
 
 /// What the picker offers and the prefix its picks take: # for rush's
@@ -54,7 +53,7 @@ fn picker(m: &Model) -> (Vec<Command>, &'static str) {
     if !cmds.is_empty() {
         return (cmds, "#");
     }
-    let names = mention_matches(m, input, back);
+    let names = (m.ext.calls.mention_matches())(m, input, back);
     if !names.is_empty() {
         let cmds = names
             .into_iter()
@@ -91,7 +90,7 @@ fn lines(m: &mut Model, w: usize) -> Vec<Line> {
     if lead == "@" {
         let input = m.input.text.clone();
         let back = input.len() - m.input.pos.min(input.len());
-        return mention_rows(m, &input, back, sel, w);
+        return (m.ext.calls.mention_rows())(m, &input, back, sel, w);
     }
     picker_rows(
         &cmds,
@@ -116,7 +115,7 @@ pub(super) fn dock(m: &mut Model, w: usize) -> Vec<Line> {
 /// while one's typed, so the list doesn't jump as it opens
 /// (view.go:1134-1146): a list_foot before the card's own.
 pub(super) fn foot(m: &mut Model, w: usize, body_h: usize) -> Vec<(Line, String)> {
-    let card = crate::screens::accounts::onboard::foot(m, w, body_h);
+    let card = rush_ui_accounts::onboard::foot(m, w, body_h);
     let was = std::mem::replace(&mut m.kept::<PickState>().card_shown, !card.is_empty());
     if card.is_empty() || !was {
         return card;
@@ -153,7 +152,7 @@ pub(super) fn key(m: &mut Model, k: &Press) -> Out {
         }
         _ if lead == "@" => {
             let back = m.input.text.len() - m.input.pos.min(m.input.text.len());
-            let (text, back) = complete_mention(&m.input.text, back, &pick.name);
+            let (text, back) = (m.ext.calls.complete_mention())(&m.input.text, back, &pick.name);
             m.input.pos = text.len() - back;
             m.input.text = text;
             m.input.anchor = None;

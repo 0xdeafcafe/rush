@@ -117,7 +117,7 @@ pub fn bar_box(m: &mut Model, w: usize, h: usize) -> Vec<Line> {
     let with = {
         let dir = crate::startdir::start_dir(m);
         let mut l = line([sp("new agents: ", DIM)]);
-        join(&mut l, crate::screens::accounts::setup::start_with(m, &dir));
+        join(&mut l, rush_ui_accounts::setup::start_with(m, &dir));
         l
     };
     let Some(b) = m.kept::<BarState>().bar.as_mut() else {

@@ -20,7 +20,7 @@ use crate::frame::{Out, Press};
 use crate::model::Model;
 
 // The keymap in force and its lookups are the base's (crate::keybind).
-pub use crate::keybind::{
+pub use rush_ui_base::keybind::{
     CHORD_WAIT, KeyState, actions_of, bound_key, chord_waiting, key_actions, key_map, rebuild,
     set_keys,
 };
@@ -42,7 +42,7 @@ pub fn key_contexts(m: &Model) -> Vec<Context> {
     }
     // The Prompt's keys while it's the Prompt with text, not a name being
     // renamed (m.inKind == inPrompt).
-    if !m.input.is_empty() && crate::screens::list_extras::rename::renaming(m).is_none() {
+    if !m.input.is_empty() && rush_ui_list_extras::rename::renaming(m).is_none() {
         return vec![Context::Prompt, Context::List];
     }
     vec![Context::List]
@@ -131,7 +131,7 @@ pub fn run_action(m: &mut Model, id: &str) -> Out {
     }
     if let Some(rest) = id.strip_prefix("plugin:") {
         let a = m.focused().map(|i| m.agents[i].clone());
-        crate::screens::plugin_ui::hooks::run_plugin_command(m, rest, a.as_ref());
+        rush_ui_plugin_ui::hooks::run_plugin_command(m, rest, a.as_ref());
         return Out::Draw;
     }
     match id {
@@ -149,11 +149,11 @@ pub fn run_action(m: &mut Model, id: &str) -> Out {
         }
         "chat.next" | "chat.prev" => step_chat(m, if id == "chat.next" { 1 } else { -1 }),
         "grid.beside" | "grid.below" => {
-            crate::screens::list_extras::grid::pin(m, id == "grid.below");
+            rush_ui_list_extras::grid::pin(m, id == "grid.below");
             Out::Draw
         }
         "grid.unpin" => {
-            crate::screens::list_extras::grid::unpin(m, false);
+            rush_ui_list_extras::grid::unpin(m, false);
             Out::Draw
         }
         "prompt.append" | "prompt.replace" => prompt_to_agent(m, id == "prompt.replace"),
@@ -161,7 +161,7 @@ pub fn run_action(m: &mut Model, id: &str) -> Out {
         // listfilter.go:13); Go's runAction has no case for it yet.
         "list.filter" => {
             if m.input.is_empty() && !m.on_place() {
-                crate::screens::list_extras::filter::start(m);
+                rush_ui_list_extras::filter::start(m);
             }
             Out::Draw
         }
@@ -171,12 +171,12 @@ pub fn run_action(m: &mut Model, id: &str) -> Out {
             super::stops::ask_close(m, a)
         }
         // The Prompt's stash (keybind.go:208-211).
-        "prompt.stash" => crate::screens::list_extras::stash::command(m, "stash"),
-        "prompt.history" => crate::screens::list_extras::stash::command(m, "history"),
+        "prompt.stash" => rush_ui_list_extras::stash::command(m, "stash"),
+        "prompt.history" => rush_ui_list_extras::stash::command(m, "history"),
         // The session's own: quick ask, recall, discuss (keybind.go:188-211),
         // then its turns, depth, switch sheet, mode and box (:155-189).
-        _ => match crate::screens::session_cards::run_action(m, id) {
-            Out::Pass => crate::screens::session_core::actions::run_action(m, id),
+        _ => match (m.ext.calls.cards_action())(m, id) {
+            Out::Pass => (m.ext.calls.core_action())(m, id),
             o => o,
         },
     }

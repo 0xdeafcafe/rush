@@ -15,12 +15,12 @@ use rush_core::text::Line;
 use crate::frame::Out;
 use crate::frame::caps::agent_can_run;
 use crate::model::Model;
-use crate::screens::social::broadcast::ModelBroadcast;
+use rush_ui_social::broadcast::ModelBroadcast;
 use crate::style::*;
 
 // rush's # commands are the base's: the keymap's actions name them
 // (crate::keybind).
-pub use crate::keybind::FLEET_COMMANDS;
+pub use rush_ui_base::keybind::FLEET_COMMANDS;
 
 /// Other names a command answers to.
 pub const FLEET_ALIASES: &[(&str, &str)] = &[
@@ -106,7 +106,7 @@ pub fn is_fleet_command(name: &str) -> bool {
 /// The / commands a new session from the Agents box would have: its
 /// agent's own and its skills, read from disk (newSessionCommands).
 fn new_session_commands(m: &Model) -> Vec<rush_core::adapter::Command> {
-    let kind = crate::screens::accounts::rows::start_kind(m);
+    let kind = rush_ui_accounts::rows::start_kind(m);
     let Some(ad) = m.reg.get(&kind) else {
         return Vec::new();
     };
@@ -115,7 +115,7 @@ fn new_session_commands(m: &Model) -> Vec<rush_core::adapter::Command> {
         ..Default::default()
     };
     let dir = crate::startdir::start_dir(m);
-    crate::screens::session_cards::claudescreen::local_commands(&m.reg, &ad, p, &dir)
+    (m.ext.calls.local_commands())(&m.reg, &ad, p, &dir)
 }
 
 /// A Prompt command typed the old way, /stop for #stop, run as the #
@@ -183,7 +183,7 @@ pub fn fleet_args_of(m: &Model, name: &str) -> (Vec<String>, String) {
             for i in m.broadcast_all() {
                 opts.push(format!(
                     "@{}",
-                    crate::screens::social::broadcast::mention_name(&m.agents[i])
+                    rush_ui_social::broadcast::mention_name(&m.agents[i])
                 ));
             }
             (opts, String::new())
@@ -235,19 +235,19 @@ pub fn hash_matches(m: &Model, input: &[char], back: usize, extra: &[Command]) -
         None => (&text[1..], "", false),
     };
     if has_arg && (name == "new" || name == "with") {
-        return crate::screens::accounts::newcmd::new_args(m, name, q);
+        return rush_ui_accounts::newcmd::new_args(m, name, q);
     }
     let name = alias_of(name);
     if has_arg && name == "use" {
-        let now = crate::screens::accounts::setup::hash_start(m);
-        return crate::screens::accounts::setup::setup_args(m, &text, &now);
+        let now = rush_ui_accounts::setup::hash_start(m);
+        return rush_ui_accounts::setup::setup_args(m, &text, &now);
     }
     if !has_arg {
         let mut all = available_fleet_commands(m);
         all.extend(extra.iter().cloned());
         // Plugins' commands as # commands: #haven.open.
         all.extend(
-            crate::screens::plugin_ui::hooks::plugin_hash_commands(m)
+            rush_ui_plugin_ui::hooks::plugin_hash_commands(m)
                 .into_iter()
                 .map(|(name, description)| Command {
                     name,

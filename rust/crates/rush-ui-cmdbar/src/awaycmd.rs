@@ -12,7 +12,6 @@ use crate::frame::sheet::Sheet;
 use crate::frame::{Out, Press};
 use crate::host::Op;
 use crate::model::Model;
-use crate::screens::session_core::switch;
 use crate::sess::conn;
 use crate::sess::{agent, open_key};
 use crate::style::dur;
@@ -37,7 +36,8 @@ pub fn command(m: &mut Model, name: &str, arg: &str) -> Out {
             return Out::Draw;
         };
         let (name, arg) = (name.to_string(), arg.to_string());
-        return switch::wake_then(m, &a, move |m| command(m, &name, &arg));
+        let wake = m.ext.calls.wake_then();
+        return wake(m, &a, Box::new(move |m| command(m, &name, &arg)));
     }
     if !c.hosted() {
         m.flash_err(&format!(
@@ -204,10 +204,15 @@ fn set_away(m: &mut Model, key: &str, next: Option<Away>, nudges: usize) {
     if !c.hosted() && c.sleeping {
         if let Some(a) = agent(m, key).cloned() {
             let key = key.to_string();
-            switch::wake_then(m, &a, move |m| {
-                set_away(m, &key, next, nudges);
-                Out::Draw
-            });
+            let wake = m.ext.calls.wake_then();
+            wake(
+                m,
+                &a,
+                Box::new(move |m| {
+                    set_away(m, &key, next, nudges);
+                    Out::Draw
+                }),
+            );
         }
         return;
     }

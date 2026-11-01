@@ -31,6 +31,7 @@ use super::fleetslash::{available_fleet_commands, completed, needs_agent, needs_
 use super::fuzzy::fuzzy_match;
 pub use crate::barfind::{lit_words, searchable, split_in, strip_in, who_glyph};
 use crate::frame::editor::{edit, line_end};
+use crate::frame::ext::Act;
 use crate::frame::{Out, PlaceId, Press};
 use crate::model::Model;
 use crate::search::{BarFound, Search};
@@ -793,7 +794,7 @@ pub fn bar_places(m: &Model, q: &str) -> Vec<Item> {
         "Start an agent".into(),
         format!(
             "in {dir} · {}",
-            crate::screens::accounts::setup::start_with_words(m, &start)
+            rush_ui_accounts::setup::start_with_words(m, &start)
         ),
         "new session spawn prompt task model effort profile".into(),
         Go::Start(String::new()),
@@ -826,7 +827,7 @@ pub fn bar_places(m: &Model, q: &str) -> Vec<Item> {
     }
     // Projects and its panes, as Go offers them: each picks its row of
     // the list (pickInProjects, cmdbar.go:761-771).
-    use crate::screens::projects_machine::{PANE_PRS, PANE_SYSTEM, PANE_TEMP};
+    use rush_ui_projects_machine::{PANE_PRS, PANE_SYSTEM, PANE_TEMP};
     const PROJECTS_WORDS: &str = "projects repositories repos folders git branches worktrees commits prs cleanup clean disk temporary scratch processes orphans machine system ";
     for (name, id, what) in [
         (
@@ -891,7 +892,7 @@ pub fn bar_places(m: &Model, q: &str) -> Vec<Item> {
         .map(|s| s.key.clone());
     if let Some(key) = shown {
         let name = one_line(&host_name(m, &key));
-        for v in crate::screens::session_core::views::views(m, &key) {
+        for v in (m.ext.calls.views_of())(m, &key) {
             let mut c = v.chars();
             let title = c
                 .next()
@@ -1377,7 +1378,7 @@ pub fn run(m: &mut Model, go: &Go) -> Out {
         }
         Go::Projects(id) => {
             go_place(m, PlaceId::Projects);
-            crate::screens::projects_machine::pick_in_projects(m, id);
+            rush_ui_projects_machine::pick_in_projects(m, id);
         }
         Go::FindHere => {
             go_place(m, PlaceId::Agents);
@@ -1387,7 +1388,10 @@ pub fn run(m: &mut Model, go: &Go) -> Out {
         Go::View(v) => {
             go_place(m, PlaceId::Agents);
             if let Some(key) = focus_session(m) {
-                crate::screens::session_core::views::show_view(m, &key, v);
+                m.act(Act::ShowView {
+                    key,
+                    name: v.to_string(),
+                });
             }
         }
         Go::Full(key) => {
@@ -1478,7 +1482,7 @@ fn focus_session(m: &mut Model) -> Option<String> {
 /// the layout as they are (cmdbar.go:871-880), so a Session alone on the
 /// screen stays open there, the Prompt out of sight.
 pub fn to_prompt(m: &mut Model) {
-    use crate::screens::list_extras::split;
+    use rush_ui_list_extras::split;
     go_place(m, PlaceId::Agents);
     m.agents_page = 0;
     if m.session.is_some() && split::side_by_side(m) {
@@ -1601,7 +1605,7 @@ pub fn here(m: &mut Model) -> Spot {
         r#ref: r,
         open,
         proj_sel: if m.place == PlaceId::Projects {
-            crate::screens::projects_machine::projects_sel(m)
+            rush_ui_projects_machine::projects_sel(m)
         } else {
             String::new()
         },
@@ -1616,7 +1620,7 @@ impl Spot {
             PlaceId::Agents if self.name.is_empty() => "Agents".into(),
             PlaceId::Agents => self.name.clone(),
             PlaceId::Projects => {
-                use crate::screens::projects_machine::{PANE_PRS, PANE_SYSTEM, PANE_TEMP};
+                use rush_ui_projects_machine::{PANE_PRS, PANE_SYSTEM, PANE_TEMP};
                 match self.proj_sel.as_str() {
                     PANE_TEMP => "Projects › Temporary".into(),
                     PANE_SYSTEM => "Projects › System".into(),
@@ -1637,7 +1641,7 @@ fn go_spot(m: &mut Model, s: Spot) -> Out {
     st(m).back = Some(back);
     if s.place == PlaceId::Projects {
         go_place(m, PlaceId::Projects);
-        crate::screens::projects_machine::pick_in_projects(m, &s.proj_sel);
+        rush_ui_projects_machine::pick_in_projects(m, &s.proj_sel);
         return Out::Draw;
     }
     if s.place != PlaceId::Agents {

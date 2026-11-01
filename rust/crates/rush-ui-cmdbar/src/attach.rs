@@ -117,7 +117,7 @@ fn joined(m: &mut Model, a: Agent, r: Joined) -> Out {
         }
         Joined::Gone => {
             // Its agent has let the job go; its conversation carries on here.
-            crate::screens::session_core::keys::adopt(m, &a, "");
+            (m.ext.calls.adopt())(m, &a, "");
             return Out::Draw;
         }
         Joined::Failed(e) => e,
@@ -183,7 +183,7 @@ pub fn native_view(m: &mut Model) -> Out {
     else {
         return Out::Idle;
     };
-    let Some(p) = crate::screens::accounts::rows::profile_of(m, &ad) else {
+    let Some(p) = rush_ui_accounts::rows::profile_of(m, &ad) else {
         return Out::Idle;
     };
     // Making the command looks its program up: not on the UI thread.

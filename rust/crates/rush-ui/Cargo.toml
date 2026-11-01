@@ -26,6 +26,8 @@ rush-ui-accounts.workspace = true
 rush-ui-bars.workspace = true
 # More of the Agents list: the box, the filter, the Wall, the grid, the split.
 rush-ui-list-extras.workspace = true
+# ctrl+k, the keys guide, the keymap, the link menu, # commands and stopping.
+rush-ui-cmdbar.workspace = true
 rush-sys.workspace = true
 rush-gh.workspace = true
 rush-gate = { path = "../rush-gate" }

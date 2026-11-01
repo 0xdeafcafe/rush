@@ -19,7 +19,7 @@ use rush_gh::ghpr::PR;
 
 use crate::frame::Out;
 use crate::model::Model;
-use crate::screens::projects_machine::prsheet;
+use rush_ui_projects_machine::prsheet;
 use crate::worker::Note;
 
 /// Where a lookup's answer wakes the UI, on a lane of its own.

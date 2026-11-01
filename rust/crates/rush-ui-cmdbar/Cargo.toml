@@ -1,0 +1,31 @@
+[package]
+name = "rush-ui-cmdbar"
+description = "rush's command bar and key screens: ctrl+k, the keys guide, the keymap, the link menu, the # commands and stopping an agent"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-convo.workspace = true
+rush-fleet.workspace = true
+rush-draw.workspace = true
+rush-sys.workspace = true
+rush-state.workspace = true
+rush-gh.workspace = true
+rush-keymap.workspace = true
+rush-remote = { path = "../rush-remote" }
+# The frame and model under every screen.
+rush-ui-base.workspace = true
+# The groups below it in rank.
+rush-ui-settings.workspace = true
+rush-ui-accounts.workspace = true
+rush-ui-projects-machine.workspace = true
+rush-ui-plugin-ui.workspace = true
+rush-ui-social.workspace = true
+rush-ui-list-extras.workspace = true
+rush-ui-bars.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }

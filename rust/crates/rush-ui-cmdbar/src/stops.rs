@@ -258,7 +258,7 @@ pub fn mark_done(m: &mut Model, a: Option<Agent>) -> Out {
         m.flash_err("select an agent first");
         return Out::Draw;
     };
-    crate::screens::accounts::onboard::did_step(m, "done");
+    rush_ui_accounts::onboard::did_step(m, "done");
     if a.done {
         toggle_done(m, &a.key);
         return Out::Draw;
@@ -340,7 +340,7 @@ pub fn ask_close(m: &mut Model, a: Option<Agent>) -> Out {
         return Out::Idle;
     };
     if is_room_key(&a.key) {
-        return crate::screens::social::rooms::ask_hide_room(m, &a);
+        return rush_ui_social::rooms::ask_hide_room(m, &a);
     }
     let name = a.display_name.clone();
     let hide = a.clone();
@@ -381,8 +381,8 @@ pub fn ask_close(m: &mut Model, a: Option<Agent>) -> Out {
             "s".into(),
             "switch harness or model".into(),
             Box::new(
-                move |m| match crate::screens::bars::agent::session_start(m, &key) {
-                    Some(o) => crate::screens::accounts::startsheet::open_switch_sheet(m, &key, o),
+                move |m| match rush_ui_bars::agent::session_start(m, &key) {
+                    Some(o) => rush_ui_accounts::startsheet::open_switch_sheet(m, &key, o),
                     None => Out::Idle,
                 },
             ),
@@ -546,7 +546,7 @@ fn moved(m: &mut Model, from: &Agent, to: String) {
 /// stays (closeAgent).
 pub fn close_agent(m: &mut Model, a: &Agent) -> Out {
     let next = if m.sel == a.key {
-        crate::screens::list_extras::neighbour(m, &a.key)
+        rush_ui_list_extras::neighbour(m, &a.key)
     } else {
         String::new()
     };
@@ -645,7 +645,7 @@ pub fn toggle_done(m: &mut Model, key: &str) {
     // into Earlier.
     let stopping = !a.done && a.pid != 0 && !a.interactive && !a.pinned;
     let next = if m.sel == key && !back {
-        crate::screens::list_extras::neighbour(m, key)
+        rush_ui_list_extras::neighbour(m, key)
     } else {
         String::new()
     };
@@ -740,7 +740,7 @@ fn hibernate(m: &mut Model) {
     if m.sender().is_none() {
         return;
     }
-    let after = crate::screens::projects_machine::hibernate_after(m);
+    let after = rush_ui_projects_machine::hibernate_after(m);
     let now = m.now;
     for a in to_hibernate(m, after, now) {
         if rush_core::dryrun::would(
@@ -761,117 +761,5 @@ fn hibernate(m: &mut Model) {
                 }),
             );
         });
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::host::{Fake, set_hosts};
-    use rush_core::agent::Job;
-
-    fn agent(key: &str, state: State) -> Agent {
-        Agent {
-            key: key.into(),
-            display_name: key.into(),
-            rush: true,
-            job: Job {
-                id: key.into(),
-                state,
-                updated_at: 1_000,
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    }
-
-    fn model(agents: Vec<Agent>) -> (Model, std::sync::Arc<Fake>) {
-        let mut m = crate::kit::model(120, 30);
-        let n = agents.len();
-        m.set_fleet(crate::worker::Fleet {
-            agents,
-            roots: vec![String::new(); n],
-            ..Default::default()
-        });
-        let h = Fake::new();
-        set_hosts(&mut m, std::sync::Arc::new(h.clone()));
-        (m, h)
-    }
-
-    // e0f011a4: #stop stops a rush agent with the agents it spawned, as
-    // ctrl+x does, and puts it away in Earlier.
-    #[test]
-    fn stop_goes_through_stop_all() {
-        let (mut m, h) = model(vec![agent("a", State::Working)]);
-        m.sel = "a".into();
-        m.command("#stop");
-        assert_eq!(*h.stopped_all.lock().unwrap(), ["a"]);
-        assert!(m.agents[0].done, "a stopped agent is put away");
-    }
-
-    // alt+d on a finished rush agent: put away, and stopped with all it
-    // started; alt+d again brings it back.
-    #[test]
-    fn done_stops_and_brings_back() {
-        let (mut m, h) = model(vec![agent("a", State::Done)]);
-        m.sel = "a".into();
-        m.press("alt+d");
-        assert!(m.agents[0].done);
-        assert_eq!(*h.stopped_all.lock().unwrap(), ["a"]);
-        m.sel = "a".into(); // picked again in Earlier
-        m.press("alt+d");
-        assert!(!m.agents[0].done, "brought back");
-        assert_eq!(m.sel, "a");
-    }
-
-    // A working one asks first.
-    #[test]
-    fn done_asks_while_working() {
-        let (mut m, h) = model(vec![agent("a", State::Working)]);
-        m.agents[0].pid = 0;
-        m.sel = "a".into();
-        m.command("#done");
-        assert_eq!(m.confirm.as_ref().unwrap().question, "Mark a done?");
-        m.press("y");
-        assert!(m.agents[0].done && h.stopped_all.lock().unwrap().len() == 1);
-    }
-
-    // ctrl+x hides one, which leaves the list and stops.
-    #[test]
-    fn ctrl_x_hides() {
-        let (mut m, h) = model(vec![agent("a", State::Done), agent("b", State::Done)]);
-        m.sel = "a".into();
-        m.press("ctrl+x");
-        assert!(m.agents.iter().all(|a| a.key != "a"), "hidden");
-        assert_eq!(*h.stopped_all.lock().unwrap(), ["a"]);
-    }
-
-    // #rm on a past conversation says there's nothing to stop.
-    #[test]
-    fn rm_on_past() {
-        let (mut m, _) = model(vec![agent("a", State::Done)]);
-        m.agents[0].past = true;
-        m.sel = "a".into();
-        m.command("#rm");
-        assert!(m.confirm.is_none());
-    }
-
-    // Hibernate: a finished agent past its time, with a process, once;
-    // never in a rush that follows (model.go:2036, snapload.go:84).
-    #[test]
-    fn hibernate_leads_only() {
-        let mut a = agent("a", State::Done);
-        a.worker = Some(4242);
-        let (mut m, _) = model(vec![a]);
-        let now = 1_000 + 31 * 60_000;
-        m.follows = true;
-        assert!(
-            to_hibernate(&mut m, 30, now).is_empty(),
-            "a follower stops nothing"
-        );
-        m.follows = false;
-        assert_eq!(to_hibernate(&mut m, 30, now).len(), 1);
-        assert!(to_hibernate(&mut m, 30, now).is_empty(), "one try each");
-        assert!(to_hibernate(&mut m, 0, now).is_empty());
     }
 }

@@ -23,11 +23,24 @@ pub mod oncmd;
 pub mod outside;
 pub mod promptpick;
 // The transcript search is the base's (the Agents list's filter runs it too).
-pub use crate::search;
+pub use rush_ui_base::search;
 pub mod stops;
 
 use rush_core::text::Line;
 use rush_draw::{Button, MouseKind};
+
+// The base's modules, so crate::frame::.. and the like read as they did
+// in rush-ui. Each is the one module, not a copy. (The base's keybind and
+// search are named in full: the keymap's lookups are the base's, and this
+// crate has a keybind of its own.)
+use rush_ui_base::{
+    accounts, attached, away, barfind, config, frame, host, list,
+    look, model, overlay, rooms, sess, session, split, startdir, style, worker,
+};
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();
 
 use crate::frame::{Ext, Mouse, Out, Press};
 use crate::model::Model;
@@ -39,7 +52,7 @@ pub fn register(x: &mut Ext) {
     x.keys.push(keybind::remap);
     x.keys.push(keyhelp::key);
     // A hosted view's ctrl+6 and the keys it drops (keys.go:43-48).
-    x.keys.push(crate::hosted::key);
+    x.keys.push(hosted_key);
     x.keys.push(bar_keys);
     x.list_keys.push(list_question);
     // The Agents box's # and @ picker: over the box, or over Getting
@@ -69,10 +82,15 @@ pub fn register(x: &mut Ext) {
     );
 }
 
+/// A hosted view's ctrl+6 and the keys it drops: the top crate's.
+fn hosted_key(m: &mut Model, k: &Press) -> Out {
+    (m.ext.calls.hosted_key())(m, k)
+}
+
 /// ctrl+k, cmd+k and ctrl+f open the bar or change its scope; while it's
 /// open it has every key but ctrl+q (keys.go:51-55).
 fn bar_keys(m: &mut Model, k: &Press) -> Out {
-    if crate::hosted::no_bar(m) {
+    if m.ext.calls.hosted_id()(m).is_some() {
         return Out::Pass; // it reaches every agent and place
     }
     let o = bar::toggle(m, &k.s);
@@ -84,7 +102,7 @@ fn bar_keys(m: &mut Model, k: &Press) -> Out {
         // The agent picked is read ahead, for enter to show at once
         // (list_extras/predict.rs).
         if let Some(key) = bar::picked_agent(m) {
-            crate::screens::list_extras::predict::toward(m, &[key]);
+            rush_ui_list_extras::predict::toward(m, &[key]);
         }
         return o;
     }
@@ -196,11 +214,3 @@ fn mouse(m: &mut Model, e: &Mouse) -> Out {
     }
 }
 
-#[cfg(test)]
-mod tests;
-#[cfg(test)]
-mod tests_attach;
-#[cfg(test)]
-mod tests_hash;
-#[cfg(test)]
-mod tests_screens;

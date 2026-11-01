@@ -98,7 +98,7 @@ pub(crate) fn keep_going(m: &mut Model, a: &Agent) -> Out {
         m.flash(&format!("{name} is still working"));
     } else {
         let t = a.continue_text().to_string();
-        return crate::screens::session_core::cards_host::reply_to(m, &a.key, t.clone(), &t);
+        return (m.ext.calls.reply_to())(m, &a.key, t.clone(), &t);
     }
     Out::Draw
 }
@@ -107,7 +107,7 @@ pub(crate) fn keep_going(m: &mut Model, a: &Agent) -> Out {
 /// turn without stopping it (askStuck).
 fn ask_stuck(m: &mut Model, a: &Agent, quiet: rush_core::time::Ms) {
     use crate::host::{Op, hosts};
-    use crate::screens::list_extras::stuck::{ask_done, ask_text};
+    use rush_ui_list_extras::stuck::{ask_done, ask_text};
     let h = hosts(m);
     let (a, text) = (a.clone(), ask_text(quiet));
     m.later(
@@ -131,7 +131,7 @@ fn ask_stuck(m: &mut Model, a: &Agent, quiet: rush_core::time::Ms) {
 /// #clean [all]: Delete on the agent's temp work, or every finished
 /// agent's (askClean, askCleanAll).
 fn clean(m: &mut Model, arg: &str) -> Out {
-    use crate::screens::projects_machine::delete::{ask_clean, ask_clean_all};
+    use rush_ui_projects_machine::delete::{ask_clean, ask_clean_all};
     if arg.trim() == "all" {
         ask_clean_all(m);
     } else if let Some(a) = need(m) {
@@ -144,15 +144,15 @@ fn clean(m: &mut Model, arg: &str) -> Out {
 /// ctrl+t does.
 fn pin(m: &mut Model, _: &str) -> Out {
     let Some(a) = need(m) else { return Out::Draw };
-    crate::screens::accounts::onboard::did_step(m, "pin");
-    crate::screens::list_extras::listkeys::toggle_pin(m, &a)
+    rush_ui_accounts::onboard::did_step(m, "pin");
+    rush_ui_list_extras::listkeys::toggle_pin(m, &a)
 }
 
 /// #pr: the agent's pull request in the browser, asking which first when
 /// it has several (openPR), as ctrl+y does.
 fn pr(m: &mut Model, _: &str) -> Out {
     let Some(a) = need(m) else { return Out::Draw };
-    crate::screens::list_extras::listkeys::open_pr(m, Some(&a))
+    rush_ui_list_extras::listkeys::open_pr(m, Some(&a))
 }
 
 /// #why: what rush did to the open session it hosts (openInfo infoWhy).
@@ -162,14 +162,14 @@ fn why(m: &mut Model, _: &str) -> Out {
     use crate::sess::open_key;
     let Some(a) = need(m) else { return Out::Draw };
     let ours = open_key(m).as_deref() == Some(a.key.as_str())
-        && !crate::screens::accounts::info::rush_id(m, &a.key)
+        && !rush_ui_accounts::info::rush_id(m, &a.key)
             .0
             .is_empty();
     if !ours {
         m.flash_err("only a session rush hosts has a why: open it in rush first");
         return Out::Draw;
     }
-    crate::screens::accounts::info::open_info(m, crate::screens::accounts::info::WHY)
+    rush_ui_accounts::info::open_info(m, rush_ui_accounts::info::WHY)
 }
 
 /// #worktree on|off: whether a session started from the box in this
@@ -209,16 +209,15 @@ fn worktree(m: &mut Model, arg: &str) -> Out {
 /// next session's; an agent picked whose Session isn't open is asked to
 /// be opened first (command's perm, yolo).
 fn perm(m: &mut Model, arg: &str, yolo: bool) -> Out {
-    use crate::screens::session_cards::permissions::perm_command;
     let open = crate::sess::open_key(m);
     match target(m) {
         Some(a) if open.as_deref() == Some(a.key.as_str()) => {
-            perm_command(m, Some(&a.key), arg, yolo)
+            (m.ext.calls.perm_command())(m, Some(&a.key), arg, yolo)
         }
         Some(_) => {
             m.flash_err("Open the session first to change its permissions");
             Out::Draw
         }
-        None => perm_command(m, None, arg, yolo),
+        None => (m.ext.calls.perm_command())(m, None, arg, yolo),
     }
 }
