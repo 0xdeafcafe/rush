@@ -849,6 +849,13 @@ fn take_batch(m: &mut Model, key: &str, r#gen: u64, batch: Vec<Said>, closed: bo
             done(m, body);
         }
     }
+    // Started for a command: it runs now its host has said what it is.
+    if replayed
+        && !closed
+        && let Some(then) = conn(m, key).on_up.take()
+    {
+        then.run(m, key);
+    }
     crate::screens::cmdbar::awaycmd::back_from_away(m, key);
     Out::Draw
 }

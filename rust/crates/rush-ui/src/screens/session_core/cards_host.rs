@@ -236,6 +236,7 @@ fn act(m: &mut Model, key: &str, a: Act) -> Out {
             Out::Draw
         }
         Act::EnterOn(open) => enter_on(m, key, open),
+        Act::Start(then) => super::keys::start_then(m, key, then),
         Act::Room(ask) => crate::screens::social::roomsetup::chat_room(m, *ask),
     }
 }
