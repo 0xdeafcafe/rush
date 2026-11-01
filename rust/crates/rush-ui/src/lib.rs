@@ -14,7 +14,7 @@ pub use rush_ui_base::{
     pastes, plan, predict, rooms, search, sess, shells, sidecol, spawns, split, startdir, style,
     turnwants, update, worker,
 };
-use rush_ui_base::{chores, clanker, header, listcache, model, session};
+use rush_ui_base::{chores, listcache, model, session};
 
 pub mod hosted;
 pub mod screens;

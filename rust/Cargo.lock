@@ -1628,6 +1628,7 @@ dependencies = [
  "rush-ui-plugin-ui",
  "rush-ui-projects-machine",
  "rush-ui-session-cards",
+ "rush-ui-session-core",
  "rush-ui-settings",
  "rush-ui-social",
  "rush-update",
@@ -1833,6 +1834,38 @@ dependencies = [
  "rush-ui-projects-machine",
  "rush-ui-settings",
  "rush-ui-social",
+ "serde_json",
+]
+
+[[package]]
+name = "rush-ui-session-core"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "regex",
+ "rush-claude",
+ "rush-convo",
+ "rush-core",
+ "rush-draw",
+ "rush-fleet",
+ "rush-hl",
+ "rush-host",
+ "rush-memory",
+ "rush-menubar",
+ "rush-state",
+ "rush-sys",
+ "rush-testenv",
+ "rush-ui-accounts",
+ "rush-ui-bars",
+ "rush-ui-base",
+ "rush-ui-cmdbar",
+ "rush-ui-list-extras",
+ "rush-ui-plugin-ui",
+ "rush-ui-projects-machine",
+ "rush-ui-session-cards",
+ "rush-ui-settings",
+ "rush-ui-social",
+ "serde",
  "serde_json",
 ]
 

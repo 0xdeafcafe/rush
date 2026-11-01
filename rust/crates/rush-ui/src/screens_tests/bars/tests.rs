@@ -18,9 +18,9 @@ use super::line::{Ctx, bar_line, least_kept};
 use super::top::usage_meter;
 use super::*;
 use crate::frame::{Mouse, Out};
-use crate::header::Drops;
 use crate::model::Model;
 use crate::session::{SessionView, Source};
+use rush_ui_base::header::Drops;
 
 const NOW: Ms = 1_793_190_896_789;
 const KEY: &str = "default/k1";

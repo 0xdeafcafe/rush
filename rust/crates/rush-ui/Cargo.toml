@@ -30,6 +30,8 @@ rush-ui-bars.workspace = true
 rush-ui-list-extras.workspace = true
 # ctrl+k, the keys guide, the keymap, the link menu, # commands and stopping.
 rush-ui-cmdbar.workspace = true
+# The session: its box, sending, queue, views and live state.
+rush-ui-session-core.workspace = true
 rush-sys.workspace = true
 rush-gh.workspace = true
 rush-gate = { path = "../rush-gate" }

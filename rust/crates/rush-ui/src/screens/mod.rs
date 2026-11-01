@@ -22,7 +22,8 @@ pub use rush_ui_bars as bars;
 pub use rush_ui_cmdbar as cmdbar;
 // The cards and sheets on a session: rush-ui-session-cards, at the old path.
 pub use rush_ui_session_cards as session_cards;
-pub mod session_core;
+// The session itself: rush-ui-session-core, at the old path.
+pub use rush_ui_session_core as session_core;
 // Projects and the machine: rush-ui-projects-machine, at the old path.
 pub use rush_ui_projects_machine as projects_machine;
 // Settings and Harnesses: rush-ui-settings, at the old path.
@@ -165,6 +166,7 @@ fn calls() -> Calls {
         hosted_pin: Some(crate::hosted::pin),
         hosted_keeps_open: Some(crate::hosted::keeps_open),
         hosted_set_away: Some(crate::hosted::set_away),
+        hosted_away: Some(crate::hosted::away),
         neighbour: Some(list_extras::neighbour),
         start_routes: Some(accounts::setup::start_routes),
         start_defaults: Some(accounts::setup::start_defaults),

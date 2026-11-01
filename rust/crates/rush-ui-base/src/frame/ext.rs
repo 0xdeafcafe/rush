@@ -515,6 +515,8 @@ calls! {
     hosted_keeps_open("hosted"): fn(&Model) -> bool,
     /// The keys come off a hosted view's box (hosted.rs set_away).
     hosted_set_away("hosted"): fn(&mut Model),
+    /// The keys are off a hosted view's box (hosted.rs away).
+    hosted_away("hosted"): fn(&Model) -> bool,
     /// The agent row after a key in its section, or the one before ("" when
     /// alone): list_extras/mod.rs neighbour.
     neighbour("list_extras"): fn(&Model, &str) -> String,

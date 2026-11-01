@@ -1,7 +1,7 @@
 //! clanker.rs's tests (rush-ui-base) that read his reaction: it's kept
 //! by session_core's finish, through Ext::calls.
 
-use crate::clanker::*;
+use rush_ui_base::clanker::*;
 
 /// Working, a light passes over him at second 8 of every 15; idle, at
 /// 25 of every 45; never over a reaction running (clkBeat).
