@@ -103,7 +103,7 @@ pub const SHOW_ALL_REF: &str = "showall";
 pub(crate) fn folded(n: usize) -> Txt {
     let mut t = dim("… ");
     t.push(paint(C_TEXT.bold(), &n.to_string()));
-    t.push(dim(" lines "));
+    t.push(dim(if n == 1 { " line " } else { " lines " }));
     t.push(faint("·"));
     t.push_str(" ", PLAIN);
     t.push(paint(C_ORANGE.bold(), "ctrl+o"));

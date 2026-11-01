@@ -412,8 +412,8 @@ fn renders_the_fixture() {
         "Looking at how attach restores the terminal modes.",
         "▍ Fixed the alt screen.",
         "▍ add modern key stuff to input too",
-        "✗ go vet ./...",
-        "exit 1",
+        // The row says what happened, not the command.
+        "✗ vet  1 error",
         "✎ internal/ui/editor.go",
         "⇉ find the preview pane · Explore",
         "╰ ✶ ⌕ previewLines",
@@ -544,10 +544,10 @@ fn a_diff_printed_draws_as_an_edit() {
     );
     let out = text(&Renderer::new().render(&s, &opts(100, at(3))));
     for want in [
-        "▏x.go  +1 −1",
-        "▏    1   package x",
-        "▏    2 − var a = 1",
-        "▏    2 + var a = 2",
+        "│ x.go  +1 −1",
+        "│     1   package x",
+        "│     2 − var a = 1",
+        "│     2 + var a = 2",
     ] {
         assert!(out.contains(want), "missing {want:?} in:\n{out}");
     }
@@ -1100,14 +1100,432 @@ fn an_opened_step_wraps_inside_the_column() {
         // The long script line's continuation has no number of its own.
         let nums = out.lines().filter(|l| l.contains(" 3   print(")).count();
         assert_eq!(nums, 1, "{w}:\n{out}");
-        // Every wrapped output row is marked alike.
+        // Every wrapped output row sits on the one gutter, no hang.
         let tail = out.lines().filter(|l| l.contains("'key'")).count();
-        let marked = out.lines().filter(|l| l.contains('┊')).count();
-        assert!(tail >= 4 && marked >= 2, "{w}:\n{out}");
+        assert!(tail >= 4, "{w}:\n{out}");
+        assert!(!out.contains('┊') && !out.contains('▏'), "{w}:\n{out}");
         // The numbers start at the output's column.
         assert!(
-            out.lines().any(|l| l.ends_with("▏1")) && out.lines().any(|l| l.ends_with("▏68")),
+            out.lines().any(|l| l.ends_with("│ 1")) && out.lines().any(|l| l.ends_with("│ 68")),
             "{w}:\n{out}"
         );
+    }
+}
+
+// ---- a shell step drawn by what happened (step-output) ----
+
+/// The lint step Alex's concept draws: oxfmt then oxlint over 19 files,
+/// oxlint finding 6 errors in 5 files.
+pub fn lint_step_cmd() -> String {
+    let mut files: Vec<String> = [
+        "shared-instance",
+        "shared-lock",
+        "shared-wire",
+        "shared-relay",
+        "shared-server",
+        "shared-config",
+        "shared-client",
+        "shared-registry",
+        "shared-health",
+        "shared-port",
+    ]
+    .iter()
+    .map(|f| format!("mcp-server/src/shared/{f}.ts"))
+    .collect();
+    files.push("mcp-server/src/main.ts".into());
+    for t in [
+        "instance", "lock", "wire", "relay", "server", "config", "client", "registry",
+    ] {
+        files.push(format!("mcp-server/tests/shared-{t}.test.ts"));
+    }
+    assert_eq!(files.len(), 19);
+    format!(
+        "cd /work/langwatch/.worktrees/feat-mcp-shared-server && P=\"{}\" && pnpm exec oxfmt --check --disable-nested-config $P specs/mcp-server/shared-server.feature | tail -2 && pnpm exec oxlint --quiet --type-aware --config .oxlintrc.jsonc $P | tail -60",
+        files.join(" ")
+    )
+}
+
+pub fn lint_step_out() -> String {
+    let diag = |rule: &str, msg: &str, path: &str, line: usize, code: &str| {
+        format!(
+            "  x rush-local({rule}): {msg}\n     ,-[{path}:{line}:5]\n {p:>3} |   it(\"works\", async () => {{\n {line:>3} |     {code}\n     :     ^^^^^^\n     `----\n  help: Split it so each part does one thing.\n",
+            p = line - 1
+        )
+    };
+    let mut out = String::from(
+        "All matched files use the correct format.\nFinished in 74ms on 19 files using 10 threads.\n\n",
+    );
+    for (rule, msg, path, line) in [
+        (
+            "condition-shape",
+            "test makes 3 calls; max 2. Split the test so each one checks one condition.",
+            "mcp-server/src/shared/shared-instance.ts",
+            135,
+        ),
+        (
+            "condition-shape",
+            "test makes 3 calls; max 2. Split the test so each one checks one condition.",
+            "mcp-server/src/shared/shared-lock.ts",
+            98,
+        ),
+        (
+            "cognitive-complexity",
+            "createResponseParser 52 / 15. Break it into smaller functions.",
+            "mcp-server/src/shared/shared-wire.ts",
+            62,
+        ),
+        (
+            "cognitive-complexity",
+            "runRelay 159 / 15. Break it into smaller functions.",
+            "mcp-server/src/shared/shared-relay.ts",
+            108,
+        ),
+        (
+            "cognitive-complexity",
+            "runCli 16 / 15. Break it into smaller functions.",
+            "mcp-server/src/main.ts",
+            12,
+        ),
+        (
+            "condition-shape",
+            "test makes 4 calls; max 2. Split the test so each one checks one condition.",
+            "mcp-server/src/shared/shared-lock.ts",
+            140,
+        ),
+    ] {
+        out.push_str(&diag(
+            rule,
+            msg,
+            path,
+            line,
+            "expect(await connect()).toBe(server);",
+        ));
+        out.push('\n');
+    }
+    out.push_str("Found 0 warnings and 6 errors.\nFinished in 1.2s on 19 files with 112 rules using 10 threads.");
+    out
+}
+
+fn lint_session() -> Session {
+    let mut s = Session::new();
+    s.cwd = "/work/langwatch".into();
+    s.feed(sent("lint the shared server"), at(0));
+    s.feed(
+        tool_use("lint1", "Bash", json!({ "command": lint_step_cmd() })),
+        at(1),
+    );
+    s.feed(
+        tool_result(
+            "lint1",
+            &format!("Exit code 1\n{}", lint_step_out()),
+            true,
+            None,
+        ),
+        at(10),
+    );
+    s.feed(say("oxlint found 6 errors; fixing them."), at(11));
+    s
+}
+
+fn lint_opts(w: usize) -> Options {
+    let mut o = opts(w, at(20));
+    o.open.insert("t1:s:lint1".into(), true);
+    o
+}
+
+// Its row says what happened, not the command's words; its body is one
+// gutter: the commands, the files' list folded to a count, the formatter's
+// lines, the problems as a table, the hint, all inside the column.
+#[test]
+fn a_lint_step_says_what_happened() {
+    let s = lint_session();
+    for w in [80usize, 120, 200] {
+        let rows = Renderer::new().render(&s, &lint_opts(w));
+        let out = text(&rows);
+        let head = out
+            .lines()
+            .find(|l| l.contains("✗ lint"))
+            .unwrap_or_else(|| panic!("{w}: no head:\n{out}"));
+        assert!(
+            head.contains("lint  oxfmt ✓ · oxlint 6 errors in 5 files") && head.ends_with("9s"),
+            "{w}: {head}"
+        );
+        assert!(!head.contains("$P"), "{w}: {head}");
+        assert!(!out.contains("exit 1"), "{w}:\n{out}");
+        assert!(out.contains("P=\"19 files\""), "{w}:\n{out}");
+        assert!(out.contains("▸ show the list"), "{w}:\n{out}");
+        assert!(
+            out.contains("│ All matched files use the correct format."),
+            "{w}:\n{out}"
+        );
+        for row in [
+            "shared-instance.ts:135",
+            "shared-relay.ts:108",
+            "main.ts:12",
+        ] {
+            let l = out
+                .lines()
+                .find(|l| l.contains(row))
+                .unwrap_or_else(|| panic!("{w}: no {row}:\n{out}"));
+            assert!(l.trim_start().starts_with("│ "), "{w}: {l}");
+        }
+        assert!(out.contains("cognitive-complexity"), "{w}:\n{out}");
+        assert!(
+            out.contains("enter on a row: the full message"),
+            "{w}:\n{out}"
+        );
+        // Nothing of oxlint's snippets or its own count is drawn.
+        assert!(!out.contains(",-["), "{w}:\n{out}");
+        assert!(!out.contains("Found 0 warnings"), "{w}:\n{out}");
+        assert!(!out.contains('┊') && !out.contains('▏'), "{w}:\n{out}");
+        let col = w.min(rush_convo::render::CAP_ROW);
+        for l in out.lines() {
+            assert!(l.chars().count() <= col, "{w}: past {col}: {l}");
+        }
+        let want = format!(
+            "{}/tests/testdata/step_output_{w}.txt",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        match std::fs::read_to_string(&want) {
+            Ok(snap) if std::env::var_os("RUSH_BLESS").is_none() => {
+                assert_eq!(out.trim_end(), snap.trim_end(), "{w}: snapshot {want}")
+            }
+            _ => std::fs::write(&want, format!("{}\n", out.trim_end())).unwrap(),
+        }
+    }
+}
+
+// The list unfolds in place, broken between paths, never inside one; a
+// problem's row opens on everything it printed for it.
+#[test]
+fn a_lint_steps_list_and_rows_open() {
+    let s = lint_session();
+    let mut o = lint_opts(80);
+    let rows = Renderer::new().render(&s, &o);
+    let val = rows
+        .iter()
+        .find(|l| l.line.plain().contains("19 files"))
+        .map(|l| l.r#ref.clone())
+        .expect("the folded list's row");
+    let diag = rows
+        .iter()
+        .find(|l| l.line.plain().contains("shared-wire.ts:62"))
+        .map(|l| l.r#ref.clone())
+        .expect("a problem's row");
+    o.open.insert(val, true);
+    o.open.insert(diag, true);
+    let out = text(&Renderer::new().render(&s, &o));
+    assert!(out.contains("▾ hide the list"), "{out}");
+    assert!(!out.contains("\"19 files\""), "{out}");
+    for l in out.lines() {
+        // Every path of the list is whole on its row.
+        for w in l.split_whitespace() {
+            if w.contains("mcp-server/") && !w.contains("specs/") && !w.contains(",-[") {
+                let p = w.trim_matches(['"', '$']);
+                let p = p.split('"').next_back().unwrap_or(p);
+                assert!(p.ends_with(".ts"), "a path broken: {w}\n{out}");
+            }
+        }
+    }
+    assert!(out.contains("Break it into smaller functions."), "{out}");
+    assert!(
+        out.contains("help: Split it so each part does one thing."),
+        "{out}"
+    );
+}
+
+// Output past a screenful folds at its end, never in its middle, and one
+// line is "1 line".
+#[test]
+fn a_shell_steps_fold_is_at_the_end() {
+    for (n, want) in [
+        (9usize, "… 1 line · ctrl+o shows all"),
+        (20, "… 12 lines · ctrl+o shows all"),
+    ] {
+        let mut s = Session::new();
+        s.feed(sent("go"), at(0));
+        s.feed(
+            tool_use("a", "Bash", json!({ "command": "seq 1 99" })),
+            at(1),
+        );
+        let body: Vec<String> = (1..=n).map(|i| format!("line {i}")).collect();
+        s.feed(tool_result("a", &body.join("\n"), false, None), at(2));
+        let mut o = opts(100, at(10));
+        o.open.insert("t1:s:a".into(), true);
+        let out = text(&Renderer::new().render(&s, &o));
+        let last = out
+            .lines()
+            .collect::<Vec<_>>()
+            .iter()
+            .rposition(|l| l.contains("│ line "))
+            .expect("output rows");
+        let fold = out
+            .lines()
+            .position(|l| l.contains(want))
+            .unwrap_or_else(|| panic!("{n}: no {want}:\n{out}"));
+        assert!(fold > last, "{n}: fold in the middle:\n{out}");
+        assert!(!out.contains("1 lines"), "{out}");
+    }
+}
+
+// A drawing shown with rush's show tool is part of the reply: drawn
+// whatever view or depth folds the steps around it, and not one of them.
+#[test]
+fn a_show_drawing_is_never_folded_away() {
+    let mut s = Session::new();
+    s.feed(sent("explain it"), at(0));
+    s.feed(
+        tool_use("r1", "Read", json!({"file_path": "/w/a.rs"})),
+        at(1),
+    );
+    s.feed(tool_result("r1", "1\tfn main() {}", false, None), at(2));
+    s.feed(tool_use("b1", "Bash", json!({"command": "ls"})), at(3));
+    s.feed(tool_result("b1", "a.rs", false, None), at(4));
+    s.feed(
+        tool_use(
+            "sh1",
+            "mcp__rush__show",
+            json!({"title": "the flow", "drawing": "event ──▶ migration ──▶ replay"}),
+        ),
+        at(5),
+    );
+    s.feed(tool_result("sh1", "shown", false, None), at(6));
+    s.feed(say("That's the flow."), at(7));
+    s.feed(done(0.01), at(8));
+    // A later turn, so the first one is drawn as a turn gone past.
+    s.feed(sent("thanks"), at(20));
+    s.feed(say("Welcome."), at(21));
+    s.feed(done(0.01), at(22));
+    let cases: Vec<(&str, Options)> = vec![
+        ("normal", opts(120, at(30))),
+        ("chat", {
+            let mut o = opts(120, at(30));
+            o.preset = rush_convo::Preset::Chat;
+            o
+        }),
+        ("code", {
+            let mut o = opts(120, at(30));
+            o.preset = rush_convo::Preset::Code;
+            o
+        }),
+        ("runs", {
+            let mut o = opts(120, at(30));
+            o.depth = rush_convo::Depth::Runs;
+            o.open.insert("t1".into(), true);
+            o
+        }),
+        ("prose", {
+            let mut o = opts(120, at(30));
+            o.depth = rush_convo::Depth::Prose;
+            o.open.insert("t1".into(), true);
+            o
+        }),
+    ];
+    for (name, o) in cases {
+        let out = text(&Renderer::new().render(&s, &o));
+        assert!(
+            out.contains("event ──▶ migration ──▶ replay"),
+            "{name}:\n{out}"
+        );
+        assert!(out.contains("the flow"), "{name}:\n{out}");
+        assert!(
+            !out.contains("3 steps"),
+            "{name}: counted as a step:\n{out}"
+        );
+    }
+}
+
+// What rg -n printed of a .rs file is coloured as Rust, the word it
+// searched for marked, its numbers faint; the harness's note on stderr is
+// one quiet row, not a red heading.
+#[test]
+fn a_search_steps_code_is_coloured() {
+    use rush_core::text::{Color, Style};
+    let out = (0..12)
+        .map(|i| {
+            format!(
+                "{}:    let folder = p.activity.marks.then(|| pane_cwd(p)).flatten();",
+                1000 + i
+            )
+        })
+        .chain(["170:    pub(crate) marks: crate::complete::marks::Marks,".to_string()])
+        .collect::<Vec<_>>()
+        .join("\n");
+    for cmd in [
+        "rg -n 'marks' crates/rush-ui/src/pane.rs",
+        "cd /w && rg -n marks crates/rush-ui/src/pane.rs 2>&1 | head -40",
+    ] {
+        let mut s = Session::new();
+        s.cwd = "/w".into();
+        s.feed(sent("go"), at(0));
+        s.feed(tool_use("a", "Bash", json!({ "command": cmd })), at(1));
+        s.feed(
+            tool_result(
+                "a",
+                &out,
+                false,
+                Some(json!({"stdout": out, "stderr": "Shell cwd was reset to /Users/lw/x"})),
+            ),
+            at(2),
+        );
+        let mut o = opts(120, at(3));
+        o.open.insert("t1:s:a".into(), true);
+        let rows = Renderer::new().render(&s, &o);
+        let row = rows
+            .iter()
+            .find(|r| r.line.plain().contains("1000:"))
+            .unwrap_or_else(|| panic!("{cmd}: no code row"));
+        let span = |t: &str| {
+            row.line
+                .spans
+                .iter()
+                .find(|x| x.text.contains(t))
+                .map(|x| x.style)
+                .unwrap_or_else(|| panic!("{cmd}: no {t} in {:?}", row.line.spans))
+        };
+        let out_c = Color::Rgb(119, 113, 106);
+        assert_ne!(span("let").fg, out_c, "{cmd}: let is a keyword");
+        assert_ne!(span("then").fg, out_c, "{cmd}: then is a call");
+        assert_eq!(
+            span("1000:").fg,
+            Color::Rgb(94, 89, 82),
+            "{cmd}: number faint"
+        );
+        let hit: Style = row
+            .line
+            .spans
+            .iter()
+            .find(|x| x.text == "marks")
+            .map(|x| x.style)
+            .unwrap_or_else(|| panic!("{cmd}: marks not marked: {:?}", row.line.spans));
+        assert_eq!(hit.fg, Color::Rgb(229, 181, 103), "{cmd}");
+        let all = text(&rows);
+        let noise = all
+            .lines()
+            .find(|l| l.contains("Shell cwd was reset"))
+            .unwrap_or_else(|| panic!("{cmd}:\n{all}"));
+        assert!(
+            noise.contains("│ stderr · Shell cwd was reset to /Users/lw/x"),
+            "{noise}"
+        );
+        let nr = rows
+            .iter()
+            .find(|r| r.line.plain().contains("stderr ·"))
+            .unwrap();
+        assert!(
+            !nr.line
+                .spans
+                .iter()
+                .any(|x| x.style.fg == Color::Rgb(224, 104, 92)),
+            "{cmd}: stderr is red"
+        );
+        // What's left out is said at the end.
+        let lines: Vec<&str> = all.lines().collect();
+        let fold = lines
+            .iter()
+            .position(|l| l.contains("ctrl+o shows all"))
+            .expect("a fold");
+        let code = lines.iter().rposition(|l| l.contains("folder =")).unwrap();
+        assert!(fold > code, "{cmd}:\n{all}");
     }
 }

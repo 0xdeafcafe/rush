@@ -94,6 +94,13 @@ pub(crate) struct Drawer<'a> {
     pub(crate) view: &'static str,
     pub(crate) nowrap: bool,
     infos: std::cell::RefCell<HashMap<StepId, Rc<Info>>>,
+    /// How each finished shell step's tools came out, read once a render.
+    pub(crate) cames: std::cell::RefCell<HashMap<StepId, Rc<Vec<super::outcome::Came>>>>,
+    /// The shell step whose output is being drawn: one gutter, no hang,
+    /// its problems as a table, what's left out said at the end.
+    pub(crate) shell: Option<StepId>,
+    /// What a shell step searched for, marked where its output shows it.
+    pub(crate) hit: Option<Regex>,
     /// An open turn's parts as last drawn, when it's drawn through the
     /// unit memo, and what they all read besides their own items.
     pub(crate) units: Option<&'a mut super::units::Units>,
@@ -146,6 +153,9 @@ impl<'a> Drawer<'a> {
             view: "",
             nowrap: false,
             infos: Default::default(),
+            cames: Default::default(),
+            shell: None,
+            hit: None,
             units: None,
             ctx: None,
             ti: 0,
@@ -520,7 +530,7 @@ impl<'a> Drawer<'a> {
     /// Clean, routine steps a turn can fold into one row (render.go:2161).
     fn foldable(&self, id: StepId) -> bool {
         let st = self.s.step(id);
-        if st.status != Status::Ok || hidden(st) || !st.images.is_empty() {
+        if st.status != Status::Ok || hidden(st) || shown(st) || !st.images.is_empty() {
             return false;
         }
         if st.kind == Kind::Read && thumbable(&self.p.abs(&self.info(id).call.input.path)) {
@@ -550,11 +560,21 @@ impl<'a> Drawer<'a> {
         }
     }
 
+    /// The turn's steps, the drawings it showed not among them: they're
+    /// part of the reply.
+    pub(crate) fn steps_counted(&self) -> usize {
+        self.t
+            .steps
+            .iter()
+            .filter(|&&id| !shown(self.s.step(id)))
+            .count()
+    }
+
     fn meta(&self) -> String {
         let t = self.t;
         let end = if t.live { self.o.now } else { t.end };
         let mut parts = Vec::new();
-        let n = t.step_count();
+        let n = self.steps_counted();
         if n > 0 {
             parts.push(plural(n, "step"));
         }
@@ -722,7 +742,7 @@ impl<'a> Drawer<'a> {
             }
         }
         let m = self.meta();
-        if !m.is_empty() && !t.live && t.step_count() > 0 {
+        if !m.is_empty() && !t.live && self.steps_counted() > 0 {
             let sp = self.spine();
             self.add("", Color::Default, sp, dim(&m).and_raw("  "));
         }
@@ -743,7 +763,7 @@ impl<'a> Drawer<'a> {
             self.add("", Color::Default, l, Txt::new());
         }
         let m = self.meta();
-        if !m.is_empty() && self.t.step_count() > 0 {
+        if !m.is_empty() && self.steps_counted() > 0 {
             let sp = self.spine();
             self.add("", Color::Default, sp, dim(&m).and_raw("  "));
         }
@@ -840,7 +860,7 @@ impl<'a> Drawer<'a> {
         ) {
             return false;
         }
-        !hidden(st) && !message_tool(&st.tool) && !self.artifact(id) && !self.doc(id)
+        !hidden(st) && !message_tool(&st.tool) && !shown(st) && !self.artifact(id) && !self.doc(id)
     }
 
     /// The file a step wrote whole and what it wrote.
@@ -1047,11 +1067,19 @@ impl<'a> Drawer<'a> {
         };
         let mut i = lo;
         while i < hi {
+            if let Some(id) = step_of(i)
+                && shown(self.s.step(id))
+            {
+                self.memoized(i, i + 1, |d| d.item(i));
+                i += 1;
+                continue;
+            }
             if prose && step_of(i).is_some() {
                 let mut j = i;
                 let mut failed = 0;
                 while j < hi
                     && let Some(id) = step_of(j)
+                    && !shown(self.s.step(id))
                 {
                     if self.s.step(id).status == Status::Failed {
                         failed += 1;
@@ -1077,6 +1105,9 @@ impl<'a> Drawer<'a> {
                 while j < keep && j < hi {
                     let Some(id) = step_of(j) else { break };
                     let st = self.s.step(id);
+                    if shown(st) {
+                        break;
+                    }
                     if !((runs || self.foldable(id) && Some(id) != self.latest)
                         && !self.tests_failed(id)
                         && st.status != Status::Failed)
@@ -1859,6 +1890,13 @@ impl<'a> Drawer<'a> {
         }
         let r = self.step_ref(st);
         let from = self.lines.len();
+        // A drawing shown with rush's show tool is part of the reply: drawn
+        // in its flow, on the reply's rule, never as a step.
+        if shown(st) {
+            self.figure(id, &r, GUTTER + depth * 2);
+            self.own(&r, from);
+            return;
+        }
         self.tool += 1;
         // A subagent's row, and its work under it, are the subagent's: an
         // agent a command or a spawn_agent call ran too (render.go:2317).
@@ -1879,9 +1917,6 @@ impl<'a> Drawer<'a> {
 
     fn step_rows(&mut self, id: StepId, r: &str, indent: usize, depth: usize) {
         let st = self.s.step(id);
-        if &*st.tool == SHOW && st.status != Status::Failed && self.figure(id, r, indent) {
-            return;
-        }
         if message_tool(&st.tool) {
             self.message(id, r, indent);
             return;
@@ -1991,7 +2026,7 @@ impl<'a> Drawer<'a> {
         if !s.is_empty() && self.step_cards(id).is_empty() {
             parts.push(s);
         }
-        if st.kind == Kind::Shell && st.exit > 0 {
+        if st.kind == Kind::Shell && st.exit > 0 && self.came(id).is_empty() {
             parts.push(paint(
                 C_RED,
                 &match st.exit {
@@ -2063,6 +2098,11 @@ impl<'a> Drawer<'a> {
         }
         match st.kind {
             Kind::Shell => {
+                // What happened, when its tools say: "oxfmt ✓ · oxlint 6
+                // errors in 5 files", not the command's words.
+                if let Some(h) = self.shell_head(id, base) {
+                    return h;
+                }
                 let cmd = &x.command;
                 let desc = &one_line(&x.description);
                 if !desc.is_empty() {
@@ -2199,6 +2239,8 @@ impl<'a> Drawer<'a> {
         }
         let info = self.info(id);
         match st.kind {
+            // Its row already says how each of its tools came out.
+            Kind::Shell if !self.came(id).is_empty() => return Txt::new(),
             Kind::Shell => {
                 let out = bash_out(st, &info.out);
                 static GO_OK: LazyLock<Regex> = LazyLock::new(|| re(r"(?m)^ok\s+\S+"));
@@ -2417,6 +2459,7 @@ impl<'a> Drawer<'a> {
         self.by_path = false;
         self.reset_hl();
         self.body_rows(id, indent);
+        self.hit = None;
         self.lg = None;
         self.by_path = false;
         self.spans.clear();
@@ -2473,6 +2516,7 @@ impl<'a> Drawer<'a> {
             Kind::Search => self.by_path = true,
             Kind::Shell => {
                 let sh = shell_shape(self.p, &x.command);
+                self.hit = super::stepout::search_hit(&x.command);
                 match sh.kind {
                     "read" => self.lg = lang_for(&sh.what),
                     "search" => {
@@ -2512,9 +2556,9 @@ impl<'a> Drawer<'a> {
                 self.live_rows(id, indent);
                 let o = &info.out;
                 if !o.stdout.is_empty() || !o.stderr.is_empty() {
-                    if drawn > 0 && !format!("{}{}", o.stdout, o.stderr).trim().is_empty() {
-                        self.cmd_rule(indent, drawn);
-                    }
+                    // The command, then what it printed, on one gutter.
+                    let _ = drawn;
+                    self.shell = Some(id);
                     self.output(
                         &o.stdout,
                         indent,
@@ -2523,12 +2567,33 @@ impl<'a> Drawer<'a> {
                     self.spans.clear();
                     self.view = "";
                     if !o.stderr.trim().is_empty() {
-                        if !o.stdout.trim().is_empty() {
-                            let l = self.sp(indent - 1).and(paint(C_RED, "stderr"));
+                        self.hit = None;
+                        // The harness's own notes, or what a command that
+                        // went fine said aside: quiet, on one row when
+                        // it's one line. Red only for a real failure's.
+                        let quiet = st.status == Status::Ok && st.exit <= 0
+                            || super::stepout::noise_only(&o.stderr);
+                        let one = o.stderr.trim();
+                        let pad = self.sp(indent - 1).and(faint("│ "));
+                        if quiet && !one.contains('\n') {
+                            let room = self.cw.saturating_sub(indent + 12);
+                            let l = pad
+                                .and(faint("stderr · "))
+                                .and(dim(&truncate_cells(one, room)));
                             self.add("", Color::Default, l, Txt::new());
+                        } else {
+                            if !o.stdout.trim().is_empty() || quiet {
+                                let label = if quiet {
+                                    faint("stderr")
+                                } else {
+                                    paint(C_RED, "stderr")
+                                };
+                                self.add("", Color::Default, pad.and(label), Txt::new());
+                            }
+                            self.output(o.stderr.trim_start_matches('\n'), indent, !quiet);
                         }
-                        self.output(o.stderr.trim_start_matches('\n'), indent, true);
                     }
+                    self.shell = None;
                     self.marks.clear();
                     return;
                 }
@@ -2553,11 +2618,15 @@ impl<'a> Drawer<'a> {
             .replace("<tool_use_error>", "")
             .replace("</tool_use_error>", "");
         let out = EXIT.replace_all(&out, "");
+        if st.kind == Kind::Shell {
+            self.shell = Some(id);
+        }
         self.output(
             out.trim_start_matches('\n'),
             indent,
             st.status == Status::Failed,
         );
+        self.shell = None;
     }
 
     fn answers(&mut self, qa: &[(String, String)], indent: usize) {
@@ -2696,7 +2765,7 @@ impl<'a> Drawer<'a> {
                 last.to = l.to;
                 continue;
             }
-            if !l.verbatim && (l.text.starts_with("&& ") || l.text.starts_with("|| ")) {
+            if !l.verbatim && l.text.starts_with("|| ") {
                 gut = 3;
             }
             lines.extend(subshell_lines(l));
@@ -2739,6 +2808,11 @@ impl<'a> Drawer<'a> {
             verbose || body <= 8 || n <= 6 || fault > 0 && n + 1 >= fault && n <= fault + 1
         };
         let blank = " ".repeat(gut);
+        // A value folds only where a key can open it: in the conversation,
+        // not a task's launch script drawn on its own.
+        let step_r = step
+            .filter(|_| self.t.n > 0)
+            .map(|id| self.step_ref(self.s.step(id)));
         let mut widest = 0;
         let mut lg: Option<&'static Lang> = None;
         let mut hs = HlState::default();
@@ -2761,8 +2835,13 @@ impl<'a> Drawer<'a> {
             if i == 0 || !script && !l.verbatim && l.depth == 0 {
                 lead = faint("$").and_raw(&blank[1..]);
             }
+            // Each command of a chain starts its own $ line; only an
+            // "or else" keeps its mark.
             let op = l.text.get(..3).unwrap_or("");
-            if !script && !l.verbatim && (op == "&& " || op == "|| ") {
+            if !script && !l.verbatim && op == "&& " {
+                lead = faint("$").and_raw(&blank[1..]);
+                textv = l.text[3..].to_string();
+            } else if !script && !l.verbatim && op == "|| " {
                 lead = paint(C_ORANGE, &op[..2]).and_raw(" ");
                 textv = l.text[3..].to_string();
             }
@@ -2814,6 +2893,7 @@ impl<'a> Drawer<'a> {
                 }
             }
             let fit = (room as isize - hang.len() as isize - num.width() as isize).max(0) as usize;
+            let (mut fold_ref, mut fold_say) = (String::new(), Txt::new());
             let rows = if !script && !l.verbatim {
                 let mut toks = quiet_tokens(&expand_tabs(&textv));
                 if now {
@@ -2821,7 +2901,35 @@ impl<'a> Drawer<'a> {
                         *t = paint(C_TEXT.bold(), &t.plain());
                     }
                 }
-                token_rows(&toks, fit, fit.saturating_sub(2))
+                // A long quoted value (a list of files) folds to a count.
+                if let Some(sr) = &step_r {
+                    let k = super::stepout::value_ref(sr, i);
+                    let open = self.o.open.get(&k).copied().unwrap_or(false);
+                    let mut list = true;
+                    for t in toks.iter_mut() {
+                        let Some(c) = super::stepout::value_count(&t.plain(), fit) else {
+                            continue;
+                        };
+                        list &= !c.ends_with("chars");
+                        fold_ref = k.clone();
+                        if !open {
+                            *t = paint(C_DIM, &format!("\"{c}\""));
+                        }
+                    }
+                    if !fold_ref.is_empty() {
+                        let what = if list { "the list" } else { "it all" };
+                        fold_say = if open {
+                            faint("▾ ").and(dim(&format!("hide {what}")))
+                        } else {
+                            faint("▸ ").and(dim(&format!("show {what}")))
+                        }
+                        .and_raw("  ");
+                    }
+                }
+                let toks = super::stepout::split_quoted(toks);
+                let first =
+                    fit.saturating_sub(fold_say.width() + usize::from(!fold_say.is_empty()) * 2);
+                token_rows(&toks, first, fit.saturating_sub(2))
             } else {
                 wrap(&colored, fit)
             };
@@ -2841,7 +2949,11 @@ impl<'a> Drawer<'a> {
                 let body = lead.and(num).and_raw(&hang).and(r);
                 widest = widest.max(body.width());
                 let left = pad.clone().and(body);
-                self.add("", BG_WELL, left, right);
+                if j == 0 && !fold_ref.is_empty() {
+                    self.add(&fold_ref, BG_WELL, left, fold_say.clone().and(right));
+                } else {
+                    self.add("", BG_WELL, left, right);
+                }
                 if j > 0 {
                     self.wrapped();
                 }
@@ -2855,13 +2967,6 @@ impl<'a> Drawer<'a> {
             }
         }
         widest
-    }
-
-    /// A faint rule between a command and what it printed.
-    fn cmd_rule(&mut self, indent: usize, w: usize) {
-        let w = w.max(12).min(self.cw.saturating_sub(indent + 2));
-        let l = self.sp(indent - 1).and(faint(&"─".repeat(w)));
-        self.add("", Color::Default, l, Txt::new());
     }
 
     /// A failure in brief: the line of its output that says what went wrong
@@ -2934,6 +3039,25 @@ impl<'a> Drawer<'a> {
         if s.trim().is_empty() {
             return;
         }
+        // Numbered lines of code a shell step printed (grep -n, rg, cat -n,
+        // sed -n with nl) are coloured as their file's language, though no
+        // shape of its command said so.
+        if let Some(sid) = self.shell
+            && !failed
+            && self.lg.is_none()
+            && !self.by_path
+            && super::stepout::numbered_code(&s)
+        {
+            let lg = super::stepout::command_lang(&self.info(sid).call.input.command);
+            self.lg = lg;
+            self.by_path = true;
+            for sp in self.spans.iter_mut() {
+                if sp.lg.is_none() && !sp.by_path && !sp.diff {
+                    sp.lg = lg;
+                    sp.by_path = true;
+                }
+            }
+        }
         let mut s = s;
         let mut is_json = false;
         let mut hl = lang_for("json");
@@ -2963,11 +3087,16 @@ impl<'a> Drawer<'a> {
         }
         let lines: Vec<&str> = s.split('\n').collect();
         let pad = self.sp(indent - 1);
-        let edge = faint("▏");
+        // A shell step's output sits on the gutter its command's $ does.
+        let edge = if self.shell.is_some() {
+            faint("│ ")
+        } else {
+            faint("▏")
+        };
         let cw = self.cw;
         // Output wraps inside the conversation's column; it never widens
         // past it, under the side column.
-        let w = self.cw as isize - indent as isize - 2;
+        let w = self.cw as isize - indent as isize - 1 - edge.width() as isize;
         let w = w.max(0) as usize;
         let most = if self.nowrap { 1 } else { 6 };
         // Which of a chain's parts each line is in.
@@ -3144,6 +3273,7 @@ impl<'a> Drawer<'a> {
                 let mut hs = d.hs;
                 let b = highlight(Some(lg), &mut hs, &body, C_OUT, None);
                 d.hs = hs;
+                let b = d.marked(b);
                 put(d, faint(&pre), b);
                 return;
             }
@@ -3156,10 +3286,11 @@ impl<'a> Drawer<'a> {
             }
             let (n, path) = rush_hl::code::code_prefix(&l);
             if !failed && !path.is_empty() {
+                let body = d.marked(paint(C_OUT, &l[n..]));
                 if width(&l[..n]) <= w / 3 {
-                    put(d, faint(&l[..n]), paint(C_OUT, &l[n..]));
+                    put(d, faint(&l[..n]), body);
                 } else {
-                    put(d, Txt::new(), faint(&l[..n]).and(paint(C_OUT, &l[n..])));
+                    put(d, Txt::new(), faint(&l[..n]).and(body));
                 }
                 return;
             }
@@ -3179,6 +3310,90 @@ impl<'a> Drawer<'a> {
             let l = pad.clone().and(edge.clone()).and(folded(n));
             d.add(SHOW_ALL_REF, BG_WELL, l, Txt::new());
         };
+        // A shell step's output: the problems it lists as a table, the
+        // rest as printed, and what's left out said once, at the end.
+        if let Some(sid) = self.shell
+            && ud.is_none()
+            && !is_json
+        {
+            let cleaned: Vec<String> = lines
+                .iter()
+                .map(|l| expand_tabs(&clean_output(l)))
+                .collect();
+            let st = self.s.step(sid);
+            let known = !super::outcome::tools(&self.info(sid).call.input.command).is_empty();
+            let ds = if known || self.lg.is_none() && !self.by_path && span_of.is_empty() {
+                super::outcome::diagnostics(&cleaned, known)
+            } else {
+                Vec::new()
+            };
+            let n = lines.len();
+            let mut in_diag = vec![false; n];
+            for d in &ds {
+                for k in in_diag.iter_mut().take(d.to.min(n)).skip(d.from) {
+                    *k = true;
+                }
+            }
+            let (lo, hi) = (
+                ds.first().map_or(n, |d| d.from),
+                ds.last().map_or(0, |d| d.to),
+            );
+            // The lines drawn as printed: not a problem's, nor a count its
+            // row already says; blank runs as one.
+            let mut plain: Vec<usize> = Vec::new();
+            for (i, c) in cleaned.iter().enumerate() {
+                let blank = c.trim().is_empty();
+                if in_diag[i]
+                    || !ds.is_empty()
+                        && (i >= lo && i < hi && blank || super::outcome::tally_line(c))
+                {
+                    continue;
+                }
+                if blank && plain.last().is_none_or(|&p| cleaned[p].trim().is_empty()) {
+                    continue;
+                }
+                plain.push(i);
+            }
+            // Blank rows at the end go; one before the table stays.
+            while plain
+                .last()
+                .is_some_and(|&p| cleaned[p].trim().is_empty() && (ds.is_empty() || p >= hi))
+            {
+                plain.pop();
+            }
+            const MOST: usize = 8;
+            let keep: HashSet<usize> = if self.o.verbose || plain.len() <= MOST {
+                plain.iter().copied().collect()
+            } else if failed {
+                plain[plain.len() - MOST..].iter().copied().collect()
+            } else {
+                plain[..MOST].iter().copied().collect()
+            };
+            let mut hidden = plain.len() - keep.len();
+            let r = self.step_ref(st);
+            for (i, l) in lines.iter().enumerate() {
+                if i == lo && !ds.is_empty() {
+                    hidden += self.diag_rows(&r, &ds, &pad, &edge, w);
+                }
+                if keep.contains(&i) {
+                    emit(self, i, l, &mut last, &mut head, &mut ud);
+                }
+            }
+            if !ds.is_empty() {
+                let l = pad.clone().and(edge.clone());
+                self.add(
+                    "",
+                    BG_WELL,
+                    l,
+                    faint("enter on a row: the full message").and_raw("  "),
+                );
+            }
+            if hidden > 0 {
+                more(self, hidden, &mut head);
+            }
+            self.cw = cw;
+            return;
+        }
         let verbose = self.o.verbose;
         if !verbose && ud.as_ref().is_some_and(|u| u.whole) {
             let mut rows = 0;
@@ -3547,6 +3762,18 @@ impl<'a> Drawer<'a> {
         w: usize,
         most: usize,
     ) {
+        // A shell step's output carries on at its gutter: no hang.
+        if self.shell.is_some() {
+            let all = lead.and(body);
+            for (i, r) in self.code_rows(&all, w, most).into_iter().enumerate() {
+                let l = pad.clone().and(edge.clone()).and(r);
+                self.add("", bg, l, Txt::new());
+                if i > 0 {
+                    self.wrapped();
+                }
+            }
+            return;
+        }
         let w = w.saturating_sub(lead.width());
         if body.width() <= w {
             let l = pad.and(edge).and(lead).and(body);
@@ -4694,7 +4921,11 @@ fn woke(t: &Turn) -> (&'static str, Txt, bool) {
 }
 
 /// rush's show tool.
-const SHOW: &str = "mcp__rush__show";
+/// A drawing shown with rush's show tool, whichever harness called it:
+/// part of the reply, not a step.
+pub(crate) fn shown(st: &Step) -> bool {
+    st.tool.ends_with("__show") && st.status != Status::Failed && drawing(st).is_some()
+}
 
 /// The drawing a show step carries, a string a row, blank rows at either
 /// end dropped; None while it has none (render.go:4225).
