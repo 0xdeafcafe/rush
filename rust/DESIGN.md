@@ -1407,10 +1407,12 @@ never from one harness's own result shape.
 
 | frame | Normal (main) | Normal | Chat | Code | Catch-up | Trail |
 |---|---|---|---|---|---|---|
-| cold, at the end | BEFORE_COLD | 1813 | 546 | 528 | 184 | 186 |
-| warm, at the end | BEFORE_WARM | 9.6 | 4.8 | 46.5 | 44.8 | 3.7 |
-| warm, mid-way | BEFORE_MID | 4.2 | 4.5 | 4.8 | 34.0 | 3.4 |
+| cold, at the end | 6354* | 1813 | 546 | 528 | 184 | 186 |
+| warm, at the end | 4.4 | 9.6 | 4.8 | 46.5 | 44.8 | 3.7 |
+| warm, mid-way | 4.1 | 4.2 | 4.5 | 4.8 | 34.0 | 3.4 |
 
+*Cold frames swing with the machine's load: the same Normal frame measured
+790–1813 µs in the branch's own runs. Warm frames are the steady cost.
 Code and Catch-up redraw the bench's live last turn on every tick (no
 unit memo for them); still far under a millisecond.
 
