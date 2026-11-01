@@ -242,15 +242,28 @@ mod tests {
             .stdin(Stdio::piped())
             .spawn()
             .unwrap();
-        let mut busy = Command::new("sh")
-            .args(["-c", "while :; do :; done"])
-            .spawn()
-            .unwrap();
-        let mut waits = Command::new("sh")
-            .args(["-c", "sleep 60; true"])
-            .spawn()
-            .unwrap();
-        let shells = [idle.id() as Pid, busy.id() as Pid, waits.id() as Pid];
+        // Killed on drop, so a failed assert never leaves the busy loop
+        // spinning for hours.
+        struct Reap(std::process::Child);
+        impl Drop for Reap {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let busy = Reap(
+            Command::new("sh")
+                .args(["-c", "while :; do :; done"])
+                .spawn()
+                .unwrap(),
+        );
+        let waits = Reap(
+            Command::new("sh")
+                .args(["-c", "sleep 60; true"])
+                .spawn()
+                .unwrap(),
+        );
+        let shells = [idle.id() as Pid, busy.0.id() as Pid, waits.0.id() as Pid];
         // Each has started what it runs (sleep's child is there) before
         // the first look: the table is read again until it is.
         let mut tab;
@@ -289,9 +302,5 @@ mod tests {
         stop_tree(&tab, got[0], |_, f| tx.send(f).unwrap());
         idle.wait().unwrap();
         rx.recv().unwrap()(); // the follow-up finds nothing left to kill
-        let _ = busy.kill();
-        let _ = waits.kill();
-        let _ = busy.wait();
-        let _ = waits.wait();
     }
 }
