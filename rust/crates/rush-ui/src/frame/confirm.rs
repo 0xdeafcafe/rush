@@ -32,6 +32,11 @@ pub struct Confirm {
     pub again: String,
     /// Choices beside yes, each on a key of its own.
     pub more: Vec<(String, String, Then)>,
+    /// The Session whose message box asks it, on its top line, instead
+    /// of a box over the screen, by agent key; inlined is whether this
+    /// frame drew it there (confirmation's box, inlined).
+    pub box_key: String,
+    pub inlined: bool,
 }
 
 impl Confirm {
@@ -165,6 +170,11 @@ impl Model {
         let Some(c) = self.confirm.take() else {
             return;
         };
+        if c.inlined {
+            // Asked on its Session's box this frame (view.go:629).
+            self.confirm = Some(c);
+            return;
+        }
         let bw = self.w.saturating_sub(4).min(72);
         let body = c.body(bw);
         self.confirm = Some(c);

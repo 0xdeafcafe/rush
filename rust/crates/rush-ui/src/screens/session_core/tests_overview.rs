@@ -92,3 +92,124 @@ fn overview_has_its_scratch() {
     );
     assert_eq!(s[y + 1].trim(), "/tmp/rush-steer · 3M");
 }
+
+/// The Overview lists the agent's pull requests and the pages it
+/// published, before its own sections; enter on a page opens it, on a
+/// pull request GitHub has said more of, its sheet, else the page on
+/// GitHub (overviewsections.go:52-67, prs.go:797, rushmode.go:4243).
+#[test]
+fn overview_has_pull_requests_and_artifacts() {
+    use rush_core::tool::{Call, Kind, Output};
+    let mut m = two_turns();
+    let now = m.now;
+    let call = Call {
+        id: "art1".into(),
+        name: "Artifact".into(),
+        kind: Kind::Other,
+        raw: rush_core::wire::RawJson::new(
+            r#"{"action":"publish","file_path":"/tmp/report.html","description":"The report"}"#,
+        )
+        .ok(),
+        ..Call::default()
+    };
+    sess(&mut m).sent("publish it".into(), Vec::new(), now - 400_000);
+    sess(&mut m).apply(
+        &Event::Message(Message {
+            role: "assistant".into(),
+            id: "m-art1".into(),
+            parts: vec![Part {
+                kind: PartKind::ToolCall,
+                call: Some(Box::new(call)),
+                ..Part::default()
+            }],
+            ..Message::default()
+        }),
+        now - 390_000,
+    );
+    sess(&mut m).apply(
+        &Event::Message(Message {
+            role: "user".into(),
+            id: "r-art1".into(),
+            parts: vec![Part {
+                kind: PartKind::ToolResult,
+                output: Some(Box::new(Output {
+                    call_id: "art1".into(),
+                    text: "Published (Version 2): https://claude.ai/a/x1".into(),
+                    ..Output::default()
+                })),
+                ..Part::default()
+            }],
+            ..Message::default()
+        }),
+        now - 380_000,
+    );
+    sess(&mut m).apply(&Event::TurnEnd(TurnEnd::default()), now - 370_000);
+    let pr = |n: i64, title: &str| rush_core::adapter::Pr {
+        url: format!("https://github.com/o/r/pull/{n}"),
+        title: title.into(),
+        number: n,
+        state: "OPEN".into(),
+        ..Default::default()
+    };
+    m.agents[0].prs = vec![pr(118, "fix the tax test"), pr(119, "a second go")];
+    // GitHub's word on 118, read with the list's readings; never asked here.
+    let root = crate::list::folder_key(&m.agents[0], &m.roots[0]).to_string();
+    {
+        let d = m.kept::<crate::screens::projects_machine::data::Data>();
+        d.frozen = true;
+        let mut repo = rush_gh::ghpr::Repo::default();
+        repo.root.clone_from(&root);
+        repo.prs = vec![rush_gh::ghpr::PR {
+            number: 118,
+            title: "fix the tax test".into(),
+            url: "https://github.com/o/r/pull/118".into(),
+            state: "OPEN".into(),
+            ..Default::default()
+        }];
+        d.prs.insert(root.clone(), repo);
+    }
+    press(&mut m, "]");
+    let s = screen(&mut m).join("\n");
+    for want in [
+        "▾ Pull requests  2 · space opens one",
+        "⇡ #118",
+        "⇡ #119",
+        "▾ Artifacts  1 published · enter opens one",
+        "◆ report",
+        "https://claude.ai/a/x1",
+    ] {
+        assert!(s.contains(want), "no {want:?} in\n{s}");
+    }
+    let (prs, arts) = (
+        s.find("Pull requests").unwrap(),
+        s.find("Artifacts").unwrap(),
+    );
+    assert!(prs < arts, "pull requests first\n{s}");
+
+    let pick = |m: &mut Model, r: &str| m.session.as_mut().unwrap().sel = r.into();
+    pick(&mut m, "art:https://claude.ai/a/x1");
+    screen(&mut m);
+    press(&mut m, "enter");
+    assert_eq!(
+        m.flash.as_ref().map(|f| f.0.as_str()),
+        Some("opened https://claude.ai/a/x1")
+    );
+    // Only the transcript knows 119: it opens on GitHub.
+    pick(&mut m, "pr:119");
+    screen(&mut m);
+    press(&mut m, "space");
+    assert_eq!(
+        m.flash.as_ref().map(|f| f.0.as_str()),
+        Some("opened https://github.com/o/r/pull/119")
+    );
+    assert!(m.sheet.is_none());
+    // GitHub has said of 118: its sheet.
+    pick(&mut m, "pr:118");
+    screen(&mut m);
+    press(&mut m, "enter");
+    assert!(
+        m.sheet_as::<crate::screens::projects_machine::prsheet::PrSheet>()
+            .is_some(),
+        "the PR sheet"
+    );
+}

@@ -584,7 +584,8 @@ impl<'a> Drawer<'a> {
         if yours {
             let ask = if multi { "" } else { t.prompt.trim() };
             let r = self.r.clone();
-            self.user_box(&r, ask, &imgs, multi);
+            let pics = sent_images(&t.pictures, &t.images);
+            self.user_box(&r, ask, &imgs, &pics, multi);
         } else {
             self.other_ask(&ask, noun, how, wake);
         }
@@ -1182,7 +1183,8 @@ impl<'a> Drawer<'a> {
                 self.while_ = true;
                 let r = format!("{}:u:{i}", self.r);
                 let names = image_names(&x.images);
-                self.user_box(&r, x.text.trim(), &names, false);
+                let pics = sent_images(&x.pictures, &x.images);
+                self.user_box(&r, x.text.trim(), &names, &pics, false);
                 self.while_ = false;
             }
             Item::Step(id) => self.step(*id, 0),
@@ -1270,18 +1272,20 @@ impl<'a> Drawer<'a> {
 
     /// What you said: your edge, who said it and when, the words a column
     /// in, attachments as chips (userbox.go:70).
-    fn user_box(&mut self, r: &str, ask: &str, imgs: &[String], multi: bool) {
+    fn user_box(&mut self, r: &str, ask: &str, imgs: &[String], pics: &[String], multi: bool) {
         if !multi && let Some(parts) = queued_messages(ask) {
             for (i, part) in parts.iter().enumerate() {
                 if i > 0 {
                     // Each its own message, a row of the box between them.
                     self.add(r, Color::Default, paint(C_BLUE, "▍"), Txt::new());
                 }
-                self.user_box(r, part, &[], false);
+                self.user_box(r, part, &[], &[], false);
                 self.named = true; // one "you" for the lot
             }
-            if !imgs.is_empty() && !numbered_images_cover(ask, imgs.len()) {
-                self.user_box(r, "", imgs, false);
+            if (!imgs.is_empty() || !pics.is_empty())
+                && !numbered_images_cover(ask, imgs.len().max(pics.len()))
+            {
+                self.user_box(r, "", imgs, pics, false);
             }
             self.named = false;
             return;
@@ -1321,7 +1325,16 @@ impl<'a> Drawer<'a> {
                 href: format!("/image/{}", i + 1),
             });
         }
+        // Its images as thumbnails in place of their chips, once made
+        // (userbox.go:116).
+        let thumbs = crate::pictures::thumb_rows(pics, inner);
+        if thumbs.is_some() {
+            chips.retain(|c| !c.shown.starts_with("▣ "));
+        }
         rows.extend(chip_rows(r, &chips, inner));
+        if let Some(t) = thumbs {
+            rows.extend(t.into_iter().map(|l| Txt(l.spans)));
+        }
         let edge = if !r.is_empty() && r == self.o.selected {
             self.spine()
         } else {
@@ -2480,8 +2493,10 @@ impl<'a> Drawer<'a> {
         }
     }
 
-    /// The images a step read or was given back, as chips: rush-convo draws
-    /// no thumbnails (picture.go).
+    /// The images a step read or was given back, each a small thumbnail
+    /// once the UI has made it, its chip until then or when it can't be
+    /// (render.go:3176 pictures, thumb.go:55 thumbOf). It says whether
+    /// there were any.
     fn pictures(&mut self, id: StepId, indent: usize) -> bool {
         let st = self.s.step(id);
         let path = if st.kind == Kind::Read {
@@ -2489,21 +2504,49 @@ impl<'a> Drawer<'a> {
         } else {
             String::new()
         };
-        let n = if st.images.is_empty() && thumbable(&path) {
-            1
-        } else {
-            st.images.len()
-        };
-        for _ in 0..n {
-            let chip = if path.is_empty() {
-                paint(C_BLUE, "▣ ").and(paint(C_TEXT, "image"))
+        let srcs: Vec<String> = if st.images.is_empty() {
+            if thumbable(&path) {
+                vec![path.clone()]
             } else {
-                image_chip("", &path)
+                Vec::new()
+            }
+        } else {
+            st.images
+                .iter()
+                .map(|p| {
+                    if p.path.is_empty() {
+                        path.clone()
+                    } else {
+                        p.path.to_string()
+                    }
+                })
+                .collect()
+        };
+        let room = self.cw.saturating_sub(indent + 2);
+        for src in &srcs {
+            let thumb = crate::pictures::picture(
+                src,
+                crate::pictures::THUMB_W,
+                crate::pictures::THUMB_H,
+                crate::pictures::Look::Thumb,
+            )
+            .filter(|rows| rows[0].width() <= room);
+            let Some(rows) = thumb else {
+                let chip = if src.is_empty() {
+                    paint(C_BLUE, "▣ ").and(paint(C_TEXT, "image"))
+                } else {
+                    image_chip("", src)
+                };
+                let l = self.sp(indent - 1).and(chip);
+                self.add("", Color::Default, l, Txt::new());
+                continue;
             };
-            let l = self.sp(indent - 1).and(chip);
-            self.add("", Color::Default, l, Txt::new());
+            for r in rows.iter() {
+                let l = self.sp(indent - 1).and(Txt(r.spans.clone()));
+                self.add("", Color::Default, l, Txt::new());
+            }
         }
-        n > 0
+        !srcs.is_empty()
     }
 
     /// An opened shell step's command: on one line when it fits, else laid
@@ -4339,6 +4382,15 @@ pub fn paste_chip(n: usize, text: &str) -> String {
         return format!("[pasted text #{n} · {lines} {unit}]");
     }
     format!("[pasted text #{n} · {lines} {unit}: {preview}]")
+}
+
+/// The images sent with a message, to draw: those it held, by where rush
+/// keeps each, else its files (SentImages, picture.go:172).
+fn sent_images(held: &[crate::model::Picture], paths: &[Box<str>]) -> Vec<String> {
+    if !held.is_empty() {
+        return held.iter().map(|p| p.path.to_string()).collect();
+    }
+    paths.iter().map(|p| p.to_string()).collect()
 }
 
 /// A turn's images by name: their files, or Image #1, #2.

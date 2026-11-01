@@ -121,7 +121,8 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
         } else {
             line([sp(format!("couldn't read it: {}", v.err), RED)])
         };
-        // The panels follow what's there.
+        // The panels follow what's there, a row down.
+        v.panels_at = 1;
         let mut out = vec![fit(first, cw)];
         out.extend(v.panels.iter().cloned());
         v.shown = vec![String::new(); out.len().min(rows)];

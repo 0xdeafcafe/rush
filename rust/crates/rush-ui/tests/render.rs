@@ -140,6 +140,7 @@ fn model() -> Model {
         roots,
         previews: HashMap::new(),
         priced: true,
+        accounts: Vec::new(),
     });
     m
 }

@@ -604,3 +604,78 @@ fn a_click_on_a_grid_tile_beside_the_list() {
         "the open one takes the tile"
     );
 }
+
+/// ctrl+] u beside the list moves the draft and the keys, not the
+/// Session: it stays beside the list as it was, on its host, never read
+/// again from the transcript (Go's toPrompt sets paneFocus false and
+/// keeps m.host; sweep 3 N1).
+#[test]
+fn draft_to_prompt_keeps_the_session_beside_the_list() {
+    let mut m = opened(160, 48, "split");
+    assert!(split::side_by_side(&m));
+    let key = super::tests::KEY;
+    m.session
+        .as_mut()
+        .unwrap()
+        .o
+        .open
+        .insert("mark".into(), true);
+    super::conn(&mut m, key).input.text = "carry me".chars().collect();
+    m.guarded(|m| super::actions::run_action(m, "session.toprompt"));
+    assert_eq!(m.input.text.iter().collect::<String>(), "carry me");
+    assert!(m.session.is_none(), "the keys are the Prompt's");
+    let v = m.pane.as_ref().expect("the Session stays beside the list");
+    assert_eq!(v.key, key);
+    assert!(
+        v.o.open.contains_key("mark"),
+        "the same view, not read afresh"
+    );
+}
+
+/// Beside the list, what rush says shows once, on the list's line: the
+/// Session's row keeps its keys (rushmode.go:3862-3866, view.go:2863;
+/// sweep 3 L2). With the Session on the whole screen its row says it.
+#[test]
+fn a_flash_beside_the_list_shows_once() {
+    let mut m = opened(160, 48, "split");
+    let (lw, pw) = split::widths(&m);
+    assert!(lw > 0 && pw > 0);
+    m.flash("said once");
+    let f = rows(&mut m);
+    let last = f.last().unwrap();
+    assert_eq!(last.matches("said once").count(), 1, "{last}");
+    let at = last.find("said once").unwrap();
+    assert!(
+        last[..at].chars().count() < lw,
+        "on the list's side: {last}"
+    );
+    m.full = true;
+    let f = rows(&mut m);
+    assert!(f.last().unwrap().contains("said once"), "{:?}", f.last());
+}
+
+/// From the Session on the whole screen ctrl+] u moves only the draft:
+/// as Go's toPrompt leaves m.full (cmdbar.go:871-880), the Session stays
+/// alone on the screen, the same view on its host, the Prompt out of
+/// sight; at any width.
+#[test]
+fn draft_to_prompt_from_the_whole_screen() {
+    let key = super::tests::KEY;
+    for (w, h) in [(160, 48), (80, 24)] {
+        let mut m = opened(w, h, "split");
+        m.full = true;
+        m.session
+            .as_mut()
+            .unwrap()
+            .o
+            .open
+            .insert("mark".into(), true);
+        super::conn(&mut m, key).input.text = "carry me".chars().collect();
+        m.guarded(|m| super::actions::run_action(m, "session.toprompt"));
+        assert_eq!(m.input.text.iter().collect::<String>(), "carry me");
+        assert!(m.full, "{w}: still the whole screen");
+        let v = m.session.as_ref().expect("still open");
+        assert!(v.o.open.contains_key("mark"), "{w}: the same view");
+        assert_eq!(split::widths(&m).0, 0, "{w}: the Session alone");
+    }
+}

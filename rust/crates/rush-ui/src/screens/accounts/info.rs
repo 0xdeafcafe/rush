@@ -6,7 +6,8 @@
 //! it's open; what's on disk is read off the UI thread when it opens.
 //! After Go's internal/ui/infosheet.go (infoSheet :28, tabs :79,
 //! openInfo :102, step :163, infoRow :186, key :193, body :226,
-//! statusLines :282, bigMeter :409, usageLines :453, billedRow :660) and
+//! statusLines :282, bigMeter :409, usageLines :453 (its Every account
+//! :553, from the list's reading of each account), billedRow :660) and
 //! infotabs.go (contextLines :24, historyLines :103, bigTokens :168,
 //! short :176, hourSpark :189, settingsCounts :219, readSettingsCounts
 //! :226, add :245, settingsLinks :280, settingsLines :354), caps.go:21
@@ -1053,6 +1054,42 @@ fn usage_lines(
                     w,
                 ));
             }
+        }
+    }
+
+    // Every account side by side: its windows, today's spend and what
+    // runs on it, this agent's marked ◂ (usageLines' Every account).
+    if !m.accounts.is_empty() && other.is_none() {
+        out.push(Line::new());
+        out.push(info_head("Every account"));
+        for x in &m.accounts {
+            let mut parts: Vec<Line> = x
+                .quota
+                .windows
+                .iter()
+                .map(|win| {
+                    line([
+                        sp(format!("{} ", win.label), DIM),
+                        sp(format!("{:3.0}%", win.percent), usage_color(win.percent)),
+                    ])
+                })
+                .collect();
+            parts.push(then(text(money(x.today)), dim(" today")));
+            if x.live > 0 {
+                parts.push(dim(format!("{} running", x.live)));
+            }
+            let mut row = Line::new();
+            for (i, p) in parts.into_iter().enumerate() {
+                if i > 0 {
+                    row.spans.push(sp("  ·  ", DIM));
+                }
+                join(&mut row, p);
+            }
+            let mut name = x.folder.name.clone();
+            if x.folder.config_dir == a.acct.dir {
+                name += " ◂";
+            }
+            out.push(info_row(&name, row, w));
         }
     }
     out
