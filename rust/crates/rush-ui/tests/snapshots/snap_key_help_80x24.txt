@@ -2,7 +2,7 @@
    ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    Agents · Wall  [ ]
 ────────────────────────────────────────────────────────────────────────────────
   ╭─ ⌨ Keys ────────────────────────────────────────────────────────── f1 ─╮IME
-┃ │ ❯ ▏find a key by its keys or what it does                     133 keys │
+┃ │ ❯ ▏find a key by its keys or what it does                     134 keys │
 ▌ │ ────────────────────────────────────────────────────────────────────── │m ●
 ▌ │ Here · Agents and the Prompt ────────────────────────────────────────  │
 ▌ │ ▍ ↑                  the agent above                                   │
