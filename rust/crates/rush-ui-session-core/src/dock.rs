@@ -181,7 +181,11 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
 
     // The queue and a waiting card sit last, just above the box; a room
     // running on the chat before them (paneDock :3513).
-    let (room_rows, card_rows) = rush_ui_session_cards::dock_parts(m, w - 1);
+    // The views beside the conversation take their room of its width; the
+    // card stays inside what's left, so they never lie over its words.
+    let vw = rush_ui_plugin_ui::views::beside::views_beside(m, &key, w).2;
+    let (room_rows, card_rows) =
+        rush_ui_session_cards::dock_parts(m, w.saturating_sub(vw + 1).max(20));
     if !room_rows.is_empty() {
         block(&mut out, &mut blocks);
         out.extend(room_rows);

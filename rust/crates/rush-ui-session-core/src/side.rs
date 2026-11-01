@@ -74,17 +74,47 @@ pub fn decisions(open: &[(u32, Vec<Decision>)], w: usize) -> (Vec<Line>, Vec<Str
     let mut out = vec![spread(head, hint, w)];
     let mut refs = vec![r.clone()];
     for d in ds {
-        let mut left = line([plain("   "), dim(format!("{}.", d.r#ref)), plain(" ")]);
+        // The topic wraps under its own words; the agent's suggestion sits
+        // at the far end of its last row when it fits there, else on rows
+        // of its own under the topic, never cut.
+        let lead = format!("{}.", d.r#ref);
+        let ind = 3 + width(&lead) + 1;
+        let topic = line([spb(one_line(&d.topic), TEXT)]);
+        let mut rows = wrap_line(&topic, w.saturating_sub(ind + 1).max(8));
         let pick = d.options.iter().find(|o| o.recommended);
-        let right = match pick {
-            Some(o) => line([dim("☆ "), dim(one_line(&o.label)), plain(" ")]),
-            None => Line::new(),
-        };
-        let room = 8.max(w.saturating_sub(right.width() + 8));
-        left.spans
-            .push(spb(fit_str(&one_line(&d.topic), room), TEXT));
-        out.push(spread(left, right, w));
-        refs.push(r.clone());
+        let mut extra: Vec<Line> = Vec::new();
+        let mut right = Line::new();
+        if let Some(o) = pick {
+            let chip = line([dim("☆ "), dim(one_line(&o.label)), plain(" ")]);
+            let last = rows.last().map_or(0, |l| l.width());
+            if ind + last + 2 + chip.width() <= w {
+                right = chip;
+            } else {
+                let body = line([dim("☆ "), dim(one_line(&o.label))]);
+                extra = wrap_line(&body, w.saturating_sub(ind + 3).max(8));
+            }
+        }
+        let n = rows.len();
+        for (j, t) in rows.drain(..).enumerate() {
+            let mut left = if j == 0 {
+                line([plain("   "), dim(lead.clone()), plain(" ")])
+            } else {
+                line([plain(blanks(ind))])
+            };
+            join(&mut left, t);
+            out.push(if j + 1 == n {
+                spread(left, right.clone(), w)
+            } else {
+                left
+            });
+            refs.push(r.clone());
+        }
+        for t in extra {
+            let mut left = line([plain(blanks(ind + 2))]);
+            join(&mut left, t);
+            out.push(left);
+            refs.push(r.clone());
+        }
     }
     if open.len() > 1 {
         let more = open.len() - 1;
@@ -590,6 +620,36 @@ pub fn click(m: &mut Model, x: usize, y: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A long topic and a long suggestion wrap, the suggestion whole at
+    /// the row's end or on rows of its own; never cut with an ellipsis.
+    #[test]
+    fn decisions_wrap_instead_of_being_cut() {
+        use rush_convo::decisions::DecisionOption;
+        let long = "skip the timing and merge on the passing tests and the first round's numbers (Codex: end shown at once)";
+        let d = Decision {
+            r#ref: "1".into(),
+            topic: format!("Timing the change: {long}"),
+            options: vec![DecisionOption {
+                key: "a".into(),
+                label: long.into(),
+                recommended: true,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        for w in [30, 44, 60, 79] {
+            let (rows, refs) = decisions(&[(1, vec![d.clone()])], w);
+            let plain: Vec<String> = rows.iter().map(|l| l.plain()).collect();
+            let all = plain.join("\n");
+            assert!(!all.contains('…'), "w={w}:\n{all}");
+            assert!(plain.iter().all(|r| width(r) <= w), "w={w}:\n{all}");
+            assert_eq!(rows.len(), refs.len());
+            for word in ["merge", "numbers", "Codex:", "once)", "☆"] {
+                assert!(all.contains(word), "w={w}: {word:?} lost:\n{all}");
+            }
+        }
+    }
 
     /// The bar has a cell a task in its mark's colour, so tasks under way
     /// show apart from those done and those to do (taskrow_test.go
