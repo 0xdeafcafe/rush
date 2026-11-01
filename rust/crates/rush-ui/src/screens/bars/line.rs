@@ -39,6 +39,9 @@ pub struct Ctx<'a> {
     pub room: usize,
     /// The agent the header is of.
     pub a: Option<&'a Of<'a>>,
+    /// Where the last line drawn put each segment it shows: its id, and
+    /// from and to, cells into the line, for clicks on them.
+    pub at: Vec<(&'static str, usize, usize)>,
 }
 
 impl<'a> Ctx<'a> {
@@ -48,6 +51,7 @@ impl<'a> Ctx<'a> {
             today: m.tally().today,
             room: usize::MAX / 4,
             a: None,
+            at: Vec::new(),
         }
     }
 }
@@ -129,12 +133,13 @@ pub fn bar_line(
 ) -> Line {
     let l = layout(m, which);
     if i >= l.lines.len() || w == 0 {
+        x.at.clear();
         return Line::new();
     }
     let sep = if l.sep.is_empty() { " · " } else { &l.sep };
     let sep_w = rush_core::text::width(sep);
     let mut parts: Vec<Line> = Vec::new();
-    let mut ids: Vec<&str> = Vec::new();
+    let mut ids: Vec<&'static str> = Vec::new();
     for id in &l.lines[i] {
         let Some(s) = find(which, id) else {
             continue;
@@ -165,6 +170,12 @@ pub fn bar_line(
         }
     }
     drops.push((which * 10 + i, dropped));
+    x.at.clear();
+    let mut from = 0;
+    for (p, id) in parts.iter().zip(&ids) {
+        x.at.push((*id, from, from + p.width()));
+        from += p.width() + sep_w;
+    }
     out
 }
 

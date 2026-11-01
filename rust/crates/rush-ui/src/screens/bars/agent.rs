@@ -478,6 +478,14 @@ pub fn session_login(m: &Model, o: &Of) -> Option<crate::screens::accounts::stat
 /// harness · account, and its model unless the header's own model
 /// segment shows it (agentLabel).
 pub fn agent_label(m: &Model, o: &Of) -> Line {
+    agent_label_parts(m, o).0
+}
+
+/// agent_label, and its parts, cells into it, each with the switch
+/// sheet's row a click there opens: the harness, the account, the profile
+/// and the model.
+fn agent_label_parts(m: &Model, o: &Of) -> (Line, Vec<(usize, usize, usize)>) {
+    use crate::screens::accounts::startsheet::{ROW_ACCOUNT, ROW_HARNESS, ROW_MODEL, ROW_PROVIDER};
     let mut k = o.a.kind.as_str().to_string();
     if k.is_empty() {
         k = LOGINS_KIND.into();
@@ -488,24 +496,35 @@ pub fn agent_label(m: &Model, o: &Of) -> Line {
         profile.clear();
     }
     let mut name = harness_name(&m.reg, &k);
+    let g = glyph(&m.reg, &k);
+    // The glyph and the harness's name.
+    let mut x = g.width() + 1 + width(&name);
+    let mut parts = vec![(0, x, ROW_HARNESS)];
+    let mut add = |name: &mut String, word: &str, row: usize| {
+        name.push_str(" · ");
+        name.push_str(word);
+        parts.push((x + 3, x + 3 + width(word), row));
+        x += 3 + width(word);
+    };
     let account = if account.is_empty() {
         account_of(m, &k)
     } else {
         account
     };
     if !account.is_empty() && account != "default" {
-        name += &format!(" · {account}");
+        add(&mut name, &account, ROW_ACCOUNT);
     }
     if !profile.is_empty() {
-        name += &format!(" · {profile}");
+        add(&mut name, &profile, ROW_PROVIDER);
     }
-    let mut s = line([glyph(&m.reg, &k), plain(" "), sp(name, TEXT)]);
+    let mut s = line([g, plain(" "), sp(name, TEXT)]);
     let model = o.model();
     if !model.is_empty() && !layout(m, BAR_AGENT).shown("model") {
-        s.spans
-            .push(dim(format!(" · {}", model_word(&m.reg, &k, model))));
+        let word = model_word(&m.reg, &k, model);
+        parts.push((x + 3, x + 3 + width(&word), ROW_MODEL));
+        s.spans.push(dim(format!(" · {word}")));
     }
-    s
+    (s, parts)
 }
 
 /// What a session on provider k's account in use says once that account
@@ -620,6 +639,48 @@ pub struct Labels {
 /// width, cells into the row's content (hostConn.label).
 type LabelAt = (usize, usize);
 
+/// What a click on a segment of the header opens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HeadAct {
+    /// /model's list, the model it runs picked.
+    Model,
+    /// /effort's list, the effort it runs at picked.
+    Effort,
+    /// The switch sheet on START_ROWS' row: the account, as the account
+    /// and billing segments say it.
+    Sheet(usize),
+}
+
+/// What a click on a header segment opens, by its id; None for one that
+/// only says something.
+fn seg_act(id: &str) -> Option<HeadAct> {
+    use crate::screens::accounts::startsheet::ROW_ACCOUNT;
+    match id {
+        "model" => Some(HeadAct::Model),
+        "effort" => Some(HeadAct::Effort),
+        "account" | "billing" => Some(HeadAct::Sheet(ROW_ACCOUNT)),
+        _ => None,
+    }
+}
+
+/// Where the clickable segments and the agent label's parts landed:
+/// (row, from, to, what) for segments, (from, to, sheet row) for the
+/// label's parts, cells into the row's content.
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
+pub struct Hits {
+    pub segs: Vec<(usize, usize, usize, HeadAct)>,
+    pub label: Vec<(usize, usize, usize)>,
+}
+
+/// The segments a click takes of a bar line drawn at cell off of row.
+fn seg_hits(out: &mut Hits, row: usize, off: usize, at: &[(&'static str, usize, usize)]) {
+    for &(id, f, t) in at {
+        if let Some(a) = seg_act(id) {
+            out.segs.push((row, off + f, off + t, a));
+        }
+    }
+}
+
 /// The name's row and the one under it, hw wide: the name, its @handle
 /// and state (None: the name alone, for /statusline's preview), the bar's
 /// first line at their right, and under them its second line, what the
@@ -630,8 +691,9 @@ fn rows_with(
     state: Option<Line>,
     hw: usize,
     drops: &mut Drops,
-) -> (Line, Line, Labels, LabelAt) {
+) -> (Line, Line, Labels, LabelAt, Hits) {
     let mut labels = Labels::default();
+    let mut hits = Hits::default();
     let k = if o.a.kind.as_str().is_empty() {
         LOGINS_KIND
     } else {
@@ -681,9 +743,15 @@ fn rows_with(
         drops,
     );
     let right_plain = right.plain();
+    let at1 = std::mem::take(&mut x.at);
     right.spans.push(plain(" "));
     let row1 = pane_spread(left1, right, hw);
     let plain1 = row1.plain();
+    if !right_plain.is_empty()
+        && let Some(i) = plain1.rfind(&right_plain)
+    {
+        seg_hits(&mut hits, NAME_ROW, width(&plain1[..i]), &at1);
+    }
     if o.sess.is_some()
         && let Some(value) = core::views::header_context(m, false)
     {
@@ -706,7 +774,7 @@ fn rows_with(
         }
         conn = l;
     }
-    let mut tag = agent_label(m, o);
+    let (mut tag, tag_parts) = agent_label_parts(m, o);
     let tag_w = tag.width();
     if o.hover_label {
         tag = hover_line(tag, tag_w);
@@ -729,6 +797,7 @@ fn rows_with(
         drops,
     );
     let meta_plain = meta.plain();
+    let at2 = std::mem::take(&mut x.at);
     let mut left2 = line([plain(indent)]);
     join(&mut left2, meta);
     let more = header_git(m, o.a);
@@ -742,20 +811,29 @@ fn rows_with(
     let at = hw.saturating_sub(conn.width());
     if shown && at >= left2.width() + 2 {
         label = (at, tag_w);
+        hits.label = tag_parts
+            .iter()
+            .map(|&(f, t, r)| (at + f, at + t, r))
+            .collect();
     }
     let row2 = pane_spread(left2, conn, hw);
+    if !meta_plain.is_empty()
+        && let Some(i) = row2.plain().find(&meta_plain)
+    {
+        seg_hits(&mut hits, META_ROW, width(&row2.plain()[..i]), &at2);
+    }
     if labels.mode.2 == 0
         && let Some(at) = seg_at(&row2.plain(), &meta_plain, &o.mode, false)
     {
         labels.mode = (META_ROW, at, width(&o.mode));
     }
-    (row1, row2, labels, label)
+    (row1, row2, labels, label, hits)
 }
 
 /// The two rows for an agent not open, for /statusline's preview: its
 /// name alone on the first.
 pub fn rows(m: &Model, o: &Of, w: usize, drops: &mut Drops) -> (Line, Line, Labels) {
-    let (r1, r2, l, _) = rows_with(m, o, None, w, drops);
+    let (r1, r2, l, _, _) = rows_with(m, o, None, w, drops);
     (r1, r2, l)
 }
 
@@ -785,7 +863,7 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     // What's counted against its project, read once a step changes.
     let (stat, files) = core::changes::project_count(m);
     let mut drops = Drops::new();
-    let (r1, r2, labels, label) = {
+    let (r1, r2, labels, label, hits) = {
         let Some(mut o) = Of::read(m, &key) else {
             return;
         };
@@ -800,6 +878,14 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     let st = m.kept::<State>();
     st.mode_at = labels.mode;
     st.label_at = label;
+    // The segment under the pointer lit, while it's still where it was.
+    st.hover_seg = st.hover_seg.take().filter(|(k, r, f, t)| {
+        *k == key && hits.segs.iter().any(|h| (h.0, h.1, h.2) == (*r, *f, *t))
+    });
+    if let Some((_, r, f, t)) = &st.hover_seg {
+        rows[*r] = light_cells(&rows[*r], 2 + f, 2 + t);
+    }
+    st.hits = hits;
     super::line::keep_drops(&mut st.drops, drops);
 }
 
@@ -1014,24 +1100,59 @@ pub fn mouse(m: &mut Model, e: &crate::frame::Mouse) -> Out {
         .unwrap_or_default();
     let on_label =
         lw > 0 && head_top.is_some_and(|t| y == t + META_ROW) && x >= 2 + lx && x < 2 + lx + lw;
+    // The other segments a click takes (model, effort, account), and the
+    // label's part under the pointer.
+    let hits = m
+        .kept
+        .peek::<State>()
+        .map(|s| s.hits.clone())
+        .unwrap_or_default();
+    let row = head_top.and_then(|t| y.checked_sub(t));
+    let seg = row.and_then(|r| {
+        hits.segs
+            .iter()
+            .find(|h| h.0 == r && x >= 2 + h.1 && x < 2 + h.2)
+            .copied()
+    });
     match e.kind {
         MouseKind::Down(Button::Left) if on => {
             crate::screens::session_cards::permissions::permission_command(m, &key, "", false)
         }
         MouseKind::Down(Button::Left) if on_label => {
-            // A click on it opens the sheet to switch it (model.go:1683).
+            // A click on it opens the sheet to switch it (model.go:1683),
+            // on the part clicked: its harness, account or model.
+            let part = hits.label.iter().find(|h| x >= 2 + h.0 && x < 2 + h.1);
+            let row = part.map_or(crate::screens::accounts::startsheet::ROW_PROVIDER, |p| p.2);
             match session_start(m, &key) {
-                Some(o) => crate::screens::accounts::startsheet::open_switch_sheet(m, &key, o),
+                Some(o) => {
+                    crate::screens::accounts::startsheet::open_switch_sheet_on(m, &key, o, row)
+                }
+                None => Out::Pass,
+            }
+        }
+        MouseKind::Down(Button::Left) if seg.is_some() => {
+            m.kept::<State>().hover_seg = None;
+            match seg.map(|s| s.3) {
+                Some(HeadAct::Model) => core::rushcmd::run(m, &key, "/model"),
+                Some(HeadAct::Effort) => core::rushcmd::run(m, &key, "/effort"),
+                Some(HeadAct::Sheet(row)) => match session_start(m, &key) {
+                    Some(o) => {
+                        crate::screens::accounts::startsheet::open_switch_sheet_on(m, &key, o, row)
+                    }
+                    None => Out::Pass,
+                },
                 None => Out::Pass,
             }
         }
         MouseKind::Moved => {
             let st = m.kept::<State>();
             let want = if on { key.clone() } else { String::new() };
-            let want_label = if on_label { key } else { String::new() };
-            if st.hover_mode != want || st.hover_label != want_label {
+            let want_label = if on_label { key.clone() } else { String::new() };
+            let want_seg = seg.map(|s| (key, s.0, s.1, s.2));
+            if st.hover_mode != want || st.hover_label != want_label || st.hover_seg != want_seg {
                 st.hover_mode = want;
                 st.hover_label = want_label;
+                st.hover_seg = want_seg;
                 return Out::Draw;
             }
             Out::Pass

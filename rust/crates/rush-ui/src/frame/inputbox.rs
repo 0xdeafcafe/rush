@@ -45,6 +45,45 @@ pub struct InputBox {
     pub hot: Seg,
     /// Focused but not being typed in: the edge stays, the cursor doesn't.
     pub idle: bool,
+    /// Cells of an edge under the pointer, lit as a click there does
+    /// something: the bottom edge or the top, from and to, from the box's
+    /// left edge.
+    pub lit: Option<(bool, usize, usize)>,
+}
+
+/// Where an edge's labels landed, cells from the box's left edge: the
+/// left one's first cell and how many of its cells show whole (fewer when
+/// it's cut short with …), and the right one's first cell when it had
+/// room.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EdgeAt {
+    pub left: (usize, usize),
+    pub right: Option<usize>,
+}
+
+impl EdgeAt {
+    /// The parts of the left label (right false) or the right one, cells
+    /// into the label, placed where it landed: from and to on the edge,
+    /// each cut to what shows, those that don't show at all gone.
+    pub fn place<A: Clone>(
+        &self,
+        right: bool,
+        parts: &[(usize, usize, A)],
+    ) -> Vec<(usize, usize, A)> {
+        let (x, shown) = if right {
+            match self.right {
+                Some(x) => (x, usize::MAX),
+                None => return Vec::new(),
+            }
+        } else {
+            self.left
+        };
+        parts
+            .iter()
+            .filter(|p| p.0 < shown && p.1 > p.0)
+            .map(|p| (x + p.0, x + p.1.min(shown), p.2.clone()))
+            .collect()
+    }
 }
 
 impl InputBox {
@@ -55,36 +94,7 @@ impl InputBox {
         let edge = if self.focused { ORANGE } else { EDGE };
         let inner = w - 4;
         let rows = self.content(inner);
-        let border = |l: &str, r: &str, left: &Line, right: &Line| -> Line {
-            let mut head = line([sp(format!("{l}─"), edge)]);
-            if !left.spans.is_empty() {
-                head.spans.push(plain(" "));
-                join(&mut head, left.clone());
-                head.spans.push(plain(" "));
-            }
-            let bare = line([sp(format!("─{r}"), edge)]);
-            let mut tail = bare.clone();
-            if !right.spans.is_empty() {
-                let mut t = line([plain(" ")]);
-                join(&mut t, right.clone());
-                t.spans.push(plain(" "));
-                join(&mut t, bare.clone());
-                tail = t;
-            }
-            if head.width() + tail.width() > w {
-                tail = bare;
-            }
-            let over = (head.width() + tail.width()) as isize - w as isize;
-            if over > 0 {
-                head = rush_draw::truncate_line(&head, head.width() - over as usize - 1, "…");
-            }
-            let fill = w.saturating_sub(head.width() + tail.width());
-            let mut out = head;
-            out.spans.push(sp("─".repeat(fill), edge));
-            join(&mut out, tail);
-            out
-        };
-        let mut out = vec![border("╭", "╮", &self.top_l, &self.top_r)];
+        let mut out = vec![self.edge(false).0];
         for row in rows {
             let mut l = line([sp("│", edge)]);
             let mut body = line([plain(" ")]);
@@ -93,8 +103,66 @@ impl InputBox {
             l.spans.push(sp("│", edge));
             out.push(l);
         }
-        out.push(border("╰", "╯", &self.foot_l, &self.foot_r));
+        out.push(self.edge(true).0);
         out
+    }
+
+    /// The top edge (foot false) or the bottom one carrying their labels,
+    /// and where the labels landed (border). The part under the pointer
+    /// (lit) is on the pointer's ground.
+    fn edge(&self, foot: bool) -> (Line, EdgeAt) {
+        let w = 20.max(self.w);
+        let edge = if self.focused { ORANGE } else { EDGE };
+        let (l, r, left, right) = if foot {
+            ("╰", "╯", &self.foot_l, &self.foot_r)
+        } else {
+            ("╭", "╮", &self.top_l, &self.top_r)
+        };
+        let mut at = EdgeAt::default();
+        let mut head = line([sp(format!("{l}─"), edge)]);
+        if !left.spans.is_empty() {
+            head.spans.push(plain(" "));
+            join(&mut head, left.clone());
+            head.spans.push(plain(" "));
+            at.left = (3, left.width());
+        }
+        let bare = line([sp(format!("─{r}"), edge)]);
+        let mut tail = bare.clone();
+        if !right.spans.is_empty() {
+            let mut t = line([plain(" ")]);
+            join(&mut t, right.clone());
+            t.spans.push(plain(" "));
+            join(&mut t, bare.clone());
+            tail = t;
+        }
+        if head.width() + tail.width() > w {
+            tail = bare;
+        } else if !right.spans.is_empty() {
+            at.right = Some(w - tail.width() + 1);
+        }
+        let over = (head.width() + tail.width()) as isize - w as isize;
+        if over > 0 {
+            let keep = head.width() - over as usize - 1;
+            head = rush_draw::truncate_line(&head, keep, "…");
+            // What's left of the left label whole, before the …
+            at.left.1 = at.left.1.min(keep.saturating_sub(at.left.0 + 1));
+        }
+        let fill = w.saturating_sub(head.width() + tail.width());
+        let mut out = head;
+        out.spans.push(sp("─".repeat(fill), edge));
+        join(&mut out, tail);
+        if let Some((f, x0, x1)) = self.lit
+            && f == foot
+        {
+            out = light_cells(&out, x0, x1);
+        }
+        (out, at)
+    }
+
+    /// Where the labels on the top edge (foot false) or the bottom one
+    /// landed, from the box's left edge, for clicks on their parts.
+    pub fn edge_at(&self, foot: bool) -> EdgeAt {
+        self.edge(foot).1
     }
 
     /// How many text rows lines() draws (rows).

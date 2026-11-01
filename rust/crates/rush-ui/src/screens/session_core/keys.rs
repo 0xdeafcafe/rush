@@ -938,6 +938,20 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     let Some(top) = c.box_y else {
         return Out::Pass;
     };
+    // The parts of the box's top edge a click takes: the permission
+    // mode, the send mode.
+    if let Some(act) = edge_hit(c, top, x, y) {
+        c.edge_lit = None;
+        return match act {
+            super::dock::EdgeAct::Mode => {
+                crate::screens::session_cards::permissions::permission_command(m, &key, "", false)
+            }
+            super::dock::EdgeAct::SendMode => {
+                cycle_mode(m, &key);
+                Out::Draw
+            }
+        };
+    }
     // The task rows on the box: the head opens or shuts them, the rest
     // (and "all tasks ›") opens the Tasks view (clickTasks).
     if c.task_rows > 0 && y + c.task_rows >= top && y < top {
@@ -982,6 +996,16 @@ fn hover_chip(m: &mut Model, e: &Mouse) -> Out {
     };
     let (x, y) = (e.x as usize, e.y as usize);
     let c = conn(m, &key);
+    // A part of the top edge a click takes, lit under the pointer.
+    let lit = c.box_y.and_then(|top| {
+        let x = x.checked_sub(dock_x())?;
+        (y == top)
+            .then(|| c.edge_hits.iter().find(|h| x >= h.0 && x < h.1))
+            .flatten()
+            .map(|h| (h.0, h.1))
+    });
+    let edge = c.edge_lit != lit;
+    c.edge_lit = lit;
     let at = c.box_y.and_then(|top| {
         let rows = c.drawn.rows();
         let x0 = dock_x() + 2;
@@ -992,11 +1016,21 @@ fn hover_chip(m: &mut Model, e: &Mouse) -> Out {
             b.at(y - top - 1, x as isize - dock_x() as isize)
         })
     });
-    if c.input.hover(at) {
+    if c.input.hover(at) || edge {
         Out::Draw
     } else {
         Out::Pass
     }
+}
+
+/// What a click at x, y takes on the top edge of the box drawn from row
+/// top (dock_x's columns in).
+fn edge_hit(c: &super::Conn, top: usize, x: usize, y: usize) -> Option<super::dock::EdgeAct> {
+    let x = x.checked_sub(dock_x())?;
+    (y == top)
+        .then(|| c.edge_hits.iter().find(|h| x >= h.0 && x < h.1))
+        .flatten()
+        .map(|h| h.2)
 }
 
 /// The column the dock's box starts at.
