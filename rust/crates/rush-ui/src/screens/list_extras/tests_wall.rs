@@ -19,8 +19,8 @@ fn screen(m: &mut Model) -> Vec<String> {
     m.frame().iter().map(Line::plain).collect()
 }
 
-/// Each running subagent has a tile of its own, straight after its
-/// agent's and beside it; enter on one opens its agent.
+/// Each running subagent has a small tile of its own under its agent's:
+/// its name once, and what it's doing; enter on one opens its agent.
 #[test]
 fn subagents_have_their_own_tiles() {
     let mut a = agent("gpu", "GPU Terminal App Rust", State::Working, 101);
@@ -55,13 +55,18 @@ fn subagents_have_their_own_tiles() {
         "GPU Terminal App Rust",
         "Terminal comparison + README",
         "R.5 + R.7 memory",
-        "general-purpose · ",
-        "running · Terminal comparison + README",
+        "starting…",
     ] {
         assert!(f.contains(t), "{t:?} on the Wall:\n{f}");
     }
-    // Right to the first subagent's tile; enter opens its agent.
-    press(&mut m, "right");
+    assert_eq!(
+        f.matches("Terminal comparison + README").count(),
+        1,
+        "its name once:\n{f}"
+    );
+    // Down to the first subagent's tile, under its agent's; enter opens
+    // its agent.
+    press(&mut m, "down");
     assert!(
         screen(&mut m)
             .iter()
@@ -128,4 +133,66 @@ fn a_working_tile_wakes_the_wall_each_second() {
     let m = model_of(vec![idle], 120, 40);
     w.body(&m, 116, 36);
     assert_eq!(w.wake_at(&m), None, "nothing at work: no wake");
+}
+
+/// A tile whose last reply ends with decisions shows them; typing 1b 2a
+/// and enter answers it from the Wall, as the session's card would, and
+/// the tile stops asking.
+#[test]
+fn answers_decisions_from_the_wall() {
+    use rush_core::agent::{Preview, PreviewLine};
+    use std::sync::Arc;
+
+    use crate::screens::session_core::host::{Fake, set_hosts};
+
+    let a = agent("d", "Making Rush Screen More Useful", State::Done, 101);
+    let mut m = model_of(vec![a], 120, 40);
+    let fake = Fake::new();
+    set_hosts(&mut m, Arc::new(fake.clone()));
+    let said = "Here's what I found.\n\nDecisions:\n\
+1. **Subagents on the Wall:** (a) fold them in; (b) small tiles.\n\
+2. **Scope:** (a) all six; (b) two.\n\
+My picks: 1a 2a.";
+    m.previews.insert(
+        "default/d".into(),
+        Preview {
+            recent: vec![PreviewLine {
+                role: "assistant".into(),
+                text: said.into(),
+                at: 5,
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+    );
+    press(&mut m, "]");
+    let f = screen(&mut m).join("\n");
+    for t in [
+        "1 Subagents on the Wall",
+        "a fold them in  b small tiles",
+        "2 Scope",
+        "2 decisions · type 1a… to answer",
+    ] {
+        assert!(f.contains(t), "{t:?} on the tile:\n{f}");
+    }
+    assert!(
+        !f.contains("Decisions:"),
+        "the block isn't in the reply:\n{f}"
+    );
+    for k in ["1", "b", "space", "2", "a"] {
+        press(&mut m, k);
+    }
+    assert_eq!(m.agents_page, 1, "still on the Wall");
+    assert!(screen(&mut m).join("\n").contains("answer 1b 2a"));
+    press(&mut m, "enter");
+    assert_eq!(
+        *fake.replies.lock().unwrap(),
+        [(
+            "default/d".to_string(),
+            "1b. Subagents on the Wall: small tiles\n\n2a. Scope: all six".to_string()
+        )]
+    );
+    assert_eq!(m.agents_page, 1, "still on the Wall");
+    let f = screen(&mut m).join("\n");
+    assert!(!f.contains("1 Subagents on the Wall"), "answered:\n{f}");
 }
