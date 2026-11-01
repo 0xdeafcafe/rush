@@ -352,7 +352,7 @@ pub fn open_screen(m: &mut Model, key: &str, screen: &str) -> Out {
     );
     let cwd = session_cwd(m, key, &a);
     let acct = if a.acct.name.is_empty() && a.acct.dir.is_empty() {
-        crate::accounts::profile_of(&m.reg, &a)
+        crate::attached::profile_of(&m.reg, &a)
     } else {
         a.acct.clone()
     };
@@ -420,7 +420,7 @@ pub(crate) fn kind_of(m: &mut Model, key: &str) -> String {
 /// by its account's name.
 pub(crate) fn acct_of(m: &Model, a: &rush_core::agent::Agent) -> Profile {
     if a.acct.name.is_empty() && a.acct.dir.is_empty() {
-        crate::accounts::profile_of(&m.reg, a)
+        crate::attached::profile_of(&m.reg, a)
     } else {
         a.acct.clone()
     }

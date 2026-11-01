@@ -22,7 +22,8 @@ pub mod offui;
 pub mod oncmd;
 pub mod outside;
 pub mod promptpick;
-pub mod search;
+// The transcript search is the base's (the Agents list's filter runs it too).
+pub use crate::search;
 pub mod stops;
 
 use rush_core::text::Line;

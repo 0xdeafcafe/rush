@@ -24,6 +24,10 @@ rush-ui-plugin-ui.workspace = true
 rush-ui-accounts.workspace = true
 # The cards and sheets on a session.
 rush-ui-session-cards.workspace = true
+# The status lines: the top bar and the agent header.
+rush-ui-bars.workspace = true
+# More of the Agents list: the box, the filter, the Wall, the grid, the split.
+rush-ui-list-extras.workspace = true
 rush-sys.workspace = true
 rush-gh.workspace = true
 rush-gate = { path = "../rush-gate" }

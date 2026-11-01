@@ -5,16 +5,22 @@
 //! frame/ext.rs and DESIGN.md "Screens".
 
 use crate::chores::{Chore, always};
-use crate::frame::Ext;
 use crate::frame::ext::{Act, Calls, Kept};
+use crate::frame::{Ext, Out};
 use crate::model::Model;
 use crate::screens::social::services::ModelReload;
 use crate::screens::social::stream::ModelStream;
 use crate::session::SessionView;
 
-pub mod bars;
+// More of the Agents list (the box, the filter, the Wall, the grid, the
+// split, the live mirror): rush-ui-list-extras, at the old path.
+pub use rush_ui_list_extras as list_extras;
+// The bars (top bar and agent header): rush-ui-bars, at the old path.
+pub use rush_ui_bars as bars;
 pub mod cmdbar;
-pub mod list_extras;
+// More of the Agents list (the box, the filter, the Wall, the grid, the
+// split, the live mirror): rush-ui-list-extras, at the old path.
+pub use rush_ui_list_extras as list_extras;
 // The cards and sheets on a session: rush-ui-session-cards, at the old path.
 pub use rush_ui_session_cards as session_cards;
 pub mod session_core;
@@ -187,6 +193,38 @@ fn calls() -> Calls {
         wake_then: Some(|m, a, then| session_core::switch::wake_then(m, a, then)),
         switch_then: Some(session_core::start::switch_then),
         switch_session_message: Some(session_core::switch::switch_session_message),
+        hover_context: Some(|m, key| {
+            m.kept
+                .peek::<session_core::Core>()
+                .and_then(|c| c.conns.get(key))
+                .is_some_and(|c| c.vs.hover_context)
+        }),
+        set_context_at: Some(|m, key, at| session_core::conn(m, key).vs.context = at),
+        project_count: Some(session_core::changes::project_count),
+        project_count_of: Some(session_core::changes::project_count_of),
+        header_context: Some(session_core::views::header_context),
+        rush_cmd: Some(session_core::rushcmd::run),
+        permission_command: Some(session_cards::permissions::permission_command),
+        keep_going: Some(cmdbar::hashcmds::keep_going),
+        sync_host: Some(session_core::live::sync),
+        drop_link: Some(session_core::live::drop_link),
+        read_early: Some(session_core::live::read_early),
+        open_dir_picker: Some(session_core::moveto::open_dir_picker),
+        ask_enter: Some(session_cards::enter::ask_enter),
+        draft_image: Some(session_cards::message::draft_image),
+        float_mouse: Some(|m, e| {
+            for f in [
+                session_cards::quickask::quick_mouse,
+                session_cards::btw::btw_mouse,
+            ] {
+                let o = f(m, e);
+                if o.used() {
+                    return o;
+                }
+            }
+            Out::Pass
+        }),
+        clip_image: Some(session_cards::clipimage::clip_image),
     }
 }
 

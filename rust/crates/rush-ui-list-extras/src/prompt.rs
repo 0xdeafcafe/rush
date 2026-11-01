@@ -23,7 +23,7 @@ use crate::style::*;
 /// What the box keeps between frames: the first wrapped row shown, and
 /// where it was drawn, for clicks.
 #[derive(Default)]
-pub(super) struct PromptState {
+pub struct PromptState {
     top: usize,
     /// The box's first row on screen, and the box as drawn.
     y: usize,
@@ -37,7 +37,7 @@ pub(super) struct PromptState {
 
 /// What a click on a part of the box's top edge does.
 #[derive(Clone, Debug)]
-pub(super) enum EdgeAct {
+pub enum EdgeAct {
     /// The folder new sessions start in: ctrl+l's picker.
     Dir,
     /// Another setup on the shelf: the next session starts as it
@@ -151,7 +151,7 @@ fn labels(m: &Model, text: &str, w: usize) -> (Line, Line, String, Parts, Parts)
         return (
             line([sp("rush command · enter runs it", DIM)]),
             // What #new starts, or why it can't (view.go:2741 newPreview).
-            crate::screens::accounts::newcmd::new_preview(m, text).unwrap_or_default(),
+            rush_ui_accounts::newcmd::new_preview(m, text).unwrap_or_default(),
             String::new(),
             Vec::new(),
             Vec::new(),
@@ -197,7 +197,7 @@ fn box_at(m: &mut Model, w: usize) -> InputBox {
     }
     // What plugins put on its edge, while it's the Prompt (view.go:2722).
     let foot_r = if super::rename::renaming(m).is_none() {
-        crate::screens::plugin_ui::hooks::box_note(m, "")
+        rush_ui_plugin_ui::hooks::box_note(m, "")
     } else {
         Line::new()
     };
@@ -237,7 +237,7 @@ fn box_at(m: &mut Model, w: usize) -> InputBox {
 }
 
 /// The box under the list: a list_dock (promptLines' box).
-pub(super) fn dock(m: &mut Model, w: usize) -> Vec<Line> {
+pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     if m.session.is_some() {
         return Vec::new();
     }
@@ -254,7 +254,7 @@ pub(super) fn dock(m: &mut Model, w: usize) -> Vec<Line> {
 
 /// A click in the box puts the cursor there (the prompt's click in
 /// model.go's mouse).
-pub(super) fn mouse(m: &mut Model, e: &Mouse) -> Out {
+pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     if m.session.is_some() || m.on_place() || m.sheet.is_some() || m.confirm.is_some() {
         return Out::Pass;
     }
@@ -296,7 +296,7 @@ pub(super) fn mouse(m: &mut Model, e: &Mouse) -> Out {
     if let Some(sp) = crate::imagerefs::chip_on(&m.input.text, p) {
         let marker: String = m.input.text[sp.from..sp.to].iter().collect();
         let refs = m.imgs.clone();
-        let o = crate::screens::session_cards::message::draft_image(m, &marker, &refs);
+        let o = m.ext.calls.draft_image()(m, &marker, &refs);
         if o.used() {
             return o;
         }
@@ -312,8 +312,8 @@ pub(super) fn mouse(m: &mut Model, e: &Mouse) -> Out {
 
 /// What a click takes on the box's top edge as last drawn, and the row
 /// it's on.
-#[cfg(test)]
-pub(super) fn edge_hits(m: &mut Model) -> (usize, Vec<(usize, usize, EdgeAct)>) {
+#[doc(hidden)]
+pub fn edge_hits(m: &mut Model) -> (usize, Vec<(usize, usize, EdgeAct)>) {
     let st = m.kept::<PromptState>();
     (st.y, st.hits.clone())
 }
@@ -321,13 +321,13 @@ pub(super) fn edge_hits(m: &mut Model) -> (usize, Vec<(usize, usize, EdgeAct)>) 
 /// A click on a part of the box's top edge.
 fn edge_click(m: &mut Model, act: EdgeAct) -> Out {
     match act {
-        EdgeAct::Dir => crate::screens::session_core::moveto::open_dir_picker(m),
+        EdgeAct::Dir => m.ext.calls.open_dir_picker()(m),
         // The shelf's other setups (shelfClick).
         EdgeAct::Pick(o) => {
             super::shelf::pick(m, o);
             Out::Draw
         }
-        EdgeAct::Sheet(row) => crate::screens::accounts::startsheet::open_on(m, row, ""),
+        EdgeAct::Sheet(row) => rush_ui_accounts::startsheet::open_on(m, row, ""),
     }
 }
 
@@ -382,7 +382,7 @@ fn folder_key(m: &Model, a: Option<usize>) -> Option<(String, String)> {
 
 /// The row of keys under the box: what you can do right now, ? the rest
 /// (promptLines' hint).
-pub(super) fn hint(m: &Model, w: usize) -> Option<Line> {
+pub fn hint(m: &Model, w: usize) -> Option<Line> {
     if m.session.is_some() || m.on_place() {
         return None;
     }
@@ -438,11 +438,11 @@ pub(super) fn hint(m: &Model, w: usize) -> Option<Line> {
                 pairs.insert(0, p("ctrl+b", ag.continue_text()));
             }
         }
-        let n = crate::screens::settings::updates::count(m);
+        let n = rush_ui_settings::updates::count(m);
         if n > 0 {
             pairs.push((format!("{n} updates"), "in Settings".into()));
         }
-        if crate::hosted::id(m).is_some() {
+        if m.ext.calls.hosted_id()(m).is_some() {
             // Hosted's list: no command bar, and the way back to the
             // session (view.go:2842).
             pairs.retain(|(k, _)| k != "ctrl+k");

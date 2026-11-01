@@ -12,12 +12,12 @@ use crate::accounts::accounts;
 use crate::frame::{Out, Press};
 use crate::look::model_word;
 use crate::model::Model;
-use crate::screens::accounts::recent::recent_setups;
-use crate::screens::accounts::rows::start_profile;
-use crate::screens::accounts::setup::{
+use crate::style::*;
+use rush_ui_accounts::recent::recent_setups;
+use rush_ui_accounts::rows::start_profile;
+use rush_ui_accounts::setup::{
     StartOver, by_profile, next_start, setup_chip, start_defaults, start_with_words, start_words,
 };
-use crate::style::*;
 
 /// How many setups the shelf holds: one per ⌥ digit (shelfMax).
 pub const SHELF_MAX: usize = 9;
@@ -144,7 +144,7 @@ pub fn shelf_line(m: &Model, dir: &str, w: usize) -> (Line, Vec<Hit>) {
 /// Start sheet's row a click on it opens: its name (Provider), its model
 /// (Model) and its effort (Effort), the row #model and #effort open.
 pub fn chip_parts(m: &Model, o: &StartOver) -> Vec<(usize, usize, usize)> {
-    use crate::screens::accounts::startsheet::{ROW_EFFORT, ROW_MODEL, ROW_PROVIDER};
+    use rush_ui_accounts::startsheet::{ROW_EFFORT, ROW_MODEL, ROW_PROVIDER};
     let words = start_words(m, o);
     let g = crate::look::glyph(&m.reg, &o.kind).width();
     // " ", the glyph, " ", then the name.

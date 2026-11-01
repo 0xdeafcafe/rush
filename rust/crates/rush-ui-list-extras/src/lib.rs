@@ -21,14 +21,29 @@
 //! list and the Wall read. Each part is added through the frame's
 //! extension points in `register`.
 
+// The base's modules, so crate::frame::.. and the like read as they did
+// in rush-ui. Each is the one module, not a copy. (The base's split,
+// predict and landing are named in full: this crate has modules of those
+// names.)
+use rush_ui_base::{
+    accounts, attached, barfind, config, frame, host, imagerefs, jobprocs, list, look, model,
+    overlay, paint, rooms, search, sess, session, shells, startdir, style, turnwants, worker,
+};
+
+// Every test runs in a throwaway home (rush-testenv).
+#[cfg(test)]
+rush_testenv::sandboxed!();
+
 use crate::frame::{Ext, Out};
 use crate::list::ListLine;
 use crate::model::Model;
 
-pub use crate::away;
+// The limit meters, the plan's line, spawned agents' steps and #away's
+// words are the base's (the header and the host read them).
+pub use rush_ui_base::{away, meters, plan, spawns};
 pub mod filter;
 // The finishing card's rows and keys: rush-ui-base's, for session_cards.
-pub use crate::finish_card as finish;
+pub use rush_ui_base::finish_card as finish;
 pub mod fuzzy;
 pub mod grid;
 pub mod hosted;
@@ -36,16 +51,13 @@ pub mod jobs;
 pub mod landing;
 pub mod listkeys;
 pub mod live;
-pub mod meters;
 pub mod peek;
-pub mod plan;
 pub mod predict;
 pub mod progstatus;
 pub mod prompt;
 pub mod rename;
 pub mod rowmemo;
 pub mod shelf;
-pub use crate::spawns;
 pub mod split;
 pub mod stash;
 pub mod stuck;
@@ -53,37 +65,6 @@ pub mod subs;
 pub mod vt;
 pub mod wall;
 pub mod work;
-
-#[cfg(test)]
-mod tests;
-#[cfg(test)]
-mod tests_grid;
-#[cfg(test)]
-mod tests_grouping;
-#[cfg(test)]
-mod tests_jobs;
-#[cfg(test)]
-mod tests_landing;
-#[cfg(test)]
-mod tests_list;
-#[cfg(test)]
-mod tests_listkeys;
-#[cfg(test)]
-mod tests_live;
-#[cfg(test)]
-mod tests_plan;
-#[cfg(test)]
-mod tests_predict;
-#[cfg(test)]
-mod tests_rename;
-#[cfg(test)]
-mod tests_rooms;
-#[cfg(test)]
-mod tests_subs;
-#[cfg(test)]
-mod tests_turnwants;
-#[cfg(test)]
-mod tests_wall;
 
 /// Adds this group's places, pages, sheets' openers, keys, hooks and
 /// commands to x (frame/ext.rs).

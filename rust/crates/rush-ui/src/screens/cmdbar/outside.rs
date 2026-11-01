@@ -11,8 +11,7 @@ use rush_core::agent::Agent;
 
 use crate::session::harness_name;
 
-// The profile an agent runs under is rush-ui-base's (session_cards reads it).
-pub(crate) use crate::accounts::profile_of;
+pub(crate) use crate::attached::profile_of;
 
 /// Ends a's process and keeps its conversation, the agent's own way; one
 /// whose agent has none gets a SIGTERM. A rush session stops with the

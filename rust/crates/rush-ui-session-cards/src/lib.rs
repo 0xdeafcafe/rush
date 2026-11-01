@@ -79,6 +79,7 @@ use rush_draw::MouseKind;
 // The base's modules, so crate::frame::.. and the like read as they did
 // in rush-ui. Each is the one module, not a copy.
 use rush_ui_base::{
+    attached,
     accounts, config, finish, frame, host, keybind, list, model, paint, rooms,
     sess, session, startdir, style, worker,
 };

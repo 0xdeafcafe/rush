@@ -39,9 +39,9 @@ use rush_core::time::Ms;
 use rush_fleet::Predicates;
 
 use super::vt::Vt;
+use crate::attached::{Attached, acct_of, attached};
 use crate::frame::{Out, Press};
 use crate::model::Model;
-use crate::screens::cmdbar::attach::{Attached, acct_of, attached};
 use crate::style::*;
 use crate::worker::Note;
 
@@ -637,7 +637,7 @@ pub fn embed_key(m: &mut Model, k: &Press) -> Out {
         m.kept::<LiveState>().embedded = false;
         return Out::Draw;
     }
-    send_live(m, crate::screens::plugin_ui::embed::key_bytes(k));
+    send_live(m, rush_ui_plugin_ui::embed::key_bytes(k));
     Out::Idle
 }
 
@@ -661,7 +661,7 @@ pub fn paste(m: &mut Model, text: &str) -> Out {
         return Out::Pass;
     }
     if can_embed(m) {
-        send_live(m, crate::screens::plugin_ui::embed::paste_bytes(text));
+        send_live(m, rush_ui_plugin_ui::embed::paste_bytes(text));
     }
     Out::Idle
 }

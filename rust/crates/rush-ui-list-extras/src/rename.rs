@@ -38,7 +38,7 @@ pub fn start_rename(m: &mut Model, key: &str) {
         return;
     };
     let name: Vec<char> = a.display_name.chars().collect();
-    crate::screens::accounts::onboard::did_step(m, "rename");
+    rush_ui_accounts::onboard::did_step(m, "rename");
     m.kept::<Renaming>().0 = key.to_string();
     if m.kept::<HeldUndo>().0.is_none() {
         let u = std::mem::take(&mut m.input.undo);
@@ -184,7 +184,7 @@ fn enter_on(m: &mut Model) -> Out {
     match cfg.enter_on.as_str() {
         "open" => return Out::Pass,
         "rename" => start_rename(m, &key),
-        _ => crate::screens::session_cards::enter::ask_enter(m, &key),
+        _ => m.ext.calls.ask_enter()(m, &key),
     }
     Out::Draw
 }

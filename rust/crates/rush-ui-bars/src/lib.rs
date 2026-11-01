@@ -19,8 +19,16 @@ pub mod fetch;
 pub mod line;
 pub mod top;
 
+// The base's modules, so crate::frame::.. and the like read as they did
+// in rush-ui. Each is the one module, not a copy.
+use rush_ui_base::{
+    accounts, agentry, away, frame, header, host, landing, list, listcache, look, mention, meters,
+    model, plan, rooms, sess, session, style,
+};
+
+// Every test runs in a throwaway home (rush-testenv).
 #[cfg(test)]
-mod tests;
+rush_testenv::sandboxed!();
 
 use std::collections::HashMap;
 
@@ -29,7 +37,7 @@ use rush_bundled::statusline::{self as sl, Bars, Layout};
 use crate::frame::ext::TopBar;
 use crate::frame::{Ext, Out};
 use crate::model::Model;
-use crate::screens::settings::statusline::{self as builder, Header, StatusSheet};
+use rush_ui_settings::statusline::{self as builder, Header, StatusSheet};
 
 pub use line::{BAR_AGENT, BAR_TOP};
 

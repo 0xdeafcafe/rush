@@ -288,11 +288,7 @@ fn read_saved(
     );
 }
 
-/// The session whose host the screen shows: the one opened, else the
-/// one beside the list (Go's m.host is either).
-pub fn showing(m: &Model) -> Option<String> {
-    open_key(m).or_else(|| m.pane.as_ref().map(|v| v.key.clone()))
-}
+pub use crate::sess::showing;
 
 /// The view of session key on screen: opened, beside the list, or a
 /// tile's kept open.

@@ -17,11 +17,10 @@ use rush_draw::KeyMods;
 use rush_fleet::Predicates;
 
 use super::fuzzy;
+use crate::barfind::{lit_title, lit_words, searchable, who_glyph};
 use crate::frame::{Out, Press, editor};
 use crate::model::Model;
-use crate::screens::cmdbar::bar::{lit_words, searchable, who_glyph};
-use crate::screens::cmdbar::draw::lit_title;
-use crate::screens::cmdbar::search::{BarFound, Search, conversation_of, search_all};
+use crate::search::{BarFound, Search, conversation_of, search_all};
 use crate::style::*;
 
 /// The filter while it's open (listFilterState).
@@ -63,7 +62,7 @@ pub fn start(m: &mut Model) {
 /// esc and backspace step back out; anything else (the arrows, enter) is
 /// the list's, which by then sees only what matches (listFilterKey).
 /// alt+f with nothing typed opens it.
-pub(super) fn key(m: &mut Model, k: &Press) -> Out {
+pub fn key(m: &mut Model, k: &Press) -> Out {
     if state(m).is_none() {
         if k.s == "alt+f" && m.input.is_empty() {
             start(m);
@@ -141,7 +140,7 @@ fn apply(m: &mut Model) {
 
 /// Every agent with a conversation to search, the most recently active
 /// first (searchListFilter's hasConversation).
-fn jobs(m: &Model) -> Vec<crate::screens::cmdbar::search::Job> {
+fn jobs(m: &Model) -> Vec<crate::search::Job> {
     let now = m.now;
     let mut agents: Vec<&Agent> = m.agents.iter().collect();
     agents.sort_by_key(|a| a.age(now));
@@ -213,7 +212,7 @@ pub fn snippet(m: &Model, a: &Agent, w: usize) -> Option<Line> {
 /// Whether the list shows a: with something typed, only what matches by
 /// name, or (once the search reaches it) by something said in it
 /// (listFilterMatch).
-pub(super) fn shows(m: &Model, a: &Agent) -> bool {
+pub fn shows(m: &Model, a: &Agent) -> bool {
     match query(m) {
         Some(q) => fuzzy::matches(&q, &a.display_name).is_some() || has_match(m, a),
         None => true,
@@ -222,7 +221,7 @@ pub(super) fn shows(m: &Model, a: &Agent) -> bool {
 
 /// The column header while the filter is open: what's typed and how many
 /// agents match (listFilterHeader).
-pub(super) fn header(m: &Model, w: usize) -> Option<Line> {
+pub fn header(m: &Model, w: usize) -> Option<Line> {
     let f = state(m)?;
     let label = if f.query.is_empty() {
         "  ⌕ filter".to_string()
@@ -248,6 +247,6 @@ pub(super) fn header(m: &Model, w: usize) -> Option<Line> {
 }
 
 /// What the list says when nothing matches.
-pub(super) fn empty(m: &Model) -> Option<String> {
+pub fn empty(m: &Model) -> Option<String> {
     query(m).map(|q| format!("  No agents match {q:?}."))
 }

@@ -36,7 +36,7 @@ use rush_convo::{Job, RunningPart, Session};
 use rush_core::text::{Color, Line, Span, width};
 use rush_core::time::Ms;
 
-use crate::screens::session_core::jobprocs::ProcRow;
+use crate::jobprocs::ProcRow;
 use crate::style::*;
 
 /// How many running tasks the dock shows at once (dockJobsShown).

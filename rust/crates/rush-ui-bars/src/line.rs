@@ -13,12 +13,12 @@ use super::agent::Of;
 use super::layout;
 use crate::header::Drops;
 use crate::model::Model;
-use crate::screens::settings::statusline::{SegInfo, StatusSheet};
 use crate::style::*;
+use rush_ui_settings::statusline::{SegInfo, StatusSheet};
 
 /// The top bar, and the agent header (barTop, barAgent).
-pub const BAR_TOP: usize = crate::screens::settings::statusline::BAR_TOP;
-pub const BAR_AGENT: usize = crate::screens::settings::statusline::BAR_AGENT;
+pub const BAR_TOP: usize = rush_ui_settings::statusline::BAR_TOP;
+pub const BAR_AGENT: usize = rush_ui_settings::statusline::BAR_AGENT;
 
 /// One thing a line can show: draw paints it, or returns an empty line
 /// when it has nothing to say (barSeg).

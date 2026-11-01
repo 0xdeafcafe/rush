@@ -119,7 +119,7 @@ pub fn day_clock(ms: Ms) -> String {
     const DAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
     let local = ms / 1000 + crate::model::local_zone(ms);
     let day = DAYS[local.div_euclid(86_400).rem_euclid(7) as usize];
-    format!("{day} {}", super::away::clock(ms))
+    format!("{day} {}", crate::away::clock(ms))
 }
 
 /// How long until a limit resets, and when (limitCountdown).

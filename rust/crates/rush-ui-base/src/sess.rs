@@ -130,6 +130,12 @@ pub fn open_key(m: &Model) -> Option<String> {
     m.session.as_ref().map(|v| v.key.clone())
 }
 
+/// The session whose host the screen shows: the one opened, else the
+/// one beside the list (Go's m.host is either).
+pub fn showing(m: &Model) -> Option<String> {
+    open_key(m).or_else(|| m.pane.as_ref().map(|v| v.key.clone()))
+}
+
 /// The agent with key, as the list last read it.
 pub fn agent<'a>(m: &'a Model, key: &str) -> Option<&'a Agent> {
     m.agents.iter().find(|a| a.key == key)

@@ -29,11 +29,11 @@ use crate::session;
 use crate::style::*;
 
 // The split's geometry is the frame's (crate::split).
-pub use crate::split::{
+pub use rush_ui_base::split::{
     MIN_LIST, MIN_PANE, auto_split, can_split, chat_alone, chat_open, end_preview, in_pane,
     preview, settle, show, side_by_side, side_width, sw, wide, widths,
 };
-use crate::split::{Preview, go_widths};
+use rush_ui_base::split::{Preview, go_widths};
 
 /// The opened Session gives the list the keys back (leavePane): beside
 /// the list it stays there, where it was; with no list beside it, the
@@ -67,7 +67,7 @@ pub fn leave_chat(m: &mut Model) {
 /// The key back to the split, for the row of keys, while one side has
 /// the screen and there's room for both (splitHint).
 pub fn hint(m: &Model) -> Option<(String, String)> {
-    if crate::hosted::id(m).is_some() || !can_split(sw(m)) {
+    if m.ext.calls.hosted_id()(m).is_some() || !can_split(sw(m)) {
         return None;
     }
     let (l, p) = widths(m);
@@ -106,7 +106,7 @@ fn keep_view(m: &mut Model, v: &'static str) {
 fn open_picked(m: &mut Model) {
     let key = m.sel.clone();
     if crate::rooms::is_room_key(&key) {
-        crate::screens::social::rooms::open_room(m, &key);
+        rush_ui_social::rooms::open_room(m, &key);
     } else if let Some(i) = m.focused() {
         m.open(i);
     }
@@ -318,19 +318,16 @@ pub fn edge_mouse(m: &mut Model, e: &crate::frame::Mouse) -> Result<Out, bool> {
         && m.confirm.is_none()
         && m.sheet.is_none()
         && !m.over.on
-        && !crate::screens::cmdbar::keyhelp::is_open(m)
-        && !crate::screens::cmdbar::bar::is_open(m);
+        && !m.ext.calls.key_help_open()(m)
+        && !m.ext.calls.bar_open()(m);
     let on = free && e.y as usize >= m.top_h() && on_edge(m, x);
     match e.kind {
         MouseKind::Down(Button::Left) if on => {
             // The quick ask and the btw boxes float over the edge: a
             // click on one is theirs (clickQuick, clickBox come first).
-            use crate::screens::session_cards::{btw, quickask};
-            for f in [quickask::quick_mouse, btw::btw_mouse] {
-                let o = f(m, e);
-                if o.used() {
-                    return Ok(o);
-                }
+            let o = m.ext.calls.float_mouse()(m, e);
+            if o.used() {
+                return Ok(o);
             }
             m.kept::<Edge>().dragging = true;
             Ok(Out::Draw)
@@ -405,7 +402,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     };
     let w = sw(m);
     let floor = MIN_LIST;
-    if w.saturating_sub(floor + 1) < MIN_PANE || crate::hosted::id(m).is_some() {
+    if w.saturating_sub(floor + 1) < MIN_PANE || m.ext.calls.hosted_id()(m).is_some() {
         return Out::Pass; // too narrow for a split to step through
     }
     let ceil = (w * 3 / 4).min(w.saturating_sub(1 + MIN_PANE));
@@ -450,7 +447,7 @@ pub fn follow(m: &mut Model) {
     if crate::rooms::is_room_key(&m.sel) {
         let key = m.sel.clone();
         if m.pane.as_ref().is_none_or(|v| v.key != key) {
-            m.pane = crate::screens::social::rooms::room_view(m, &key);
+            m.pane = rush_ui_social::rooms::room_view(m, &key);
         }
         return;
     }
@@ -480,13 +477,13 @@ pub fn follow(m: &mut Model) {
     }
     if let Some(v) = super::grid::adopt(m, &key).or(back) {
         m.pane = Some(v);
-        crate::screens::session_core::live::sync(m);
+        m.ext.calls.sync_host()(m);
         return;
     }
     m.pane = m.read_view(i, true);
     m.kept::<Unreadable>().0 = if m.pane.is_none() { key } else { String::new() };
     // A live session rush hosts is its host's: dialled now (syncHost).
-    crate::screens::session_core::live::sync(m);
+    m.ext.calls.sync_host()(m);
 }
 
 /// n cells of the header's chrome.

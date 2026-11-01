@@ -1,0 +1,28 @@
+[package]
+name = "rush-ui-bars"
+description = "rush's status lines: the top bar down the header's right and the agent header over a Session's header rows, built in /statusline"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-convo.workspace = true
+rush-fleet.workspace = true
+rush-draw.workspace = true
+rush-sys.workspace = true
+rush-state.workspace = true
+rush-net.workspace = true
+# A session's host: the installed rush's stamp (host/*.go).
+rush-host = { path = "../rush-host" }
+rush-bundled = { path = "../rush-bundled" }
+# The frame and model under every screen.
+rush-ui-base.workspace = true
+# The groups below it in rank: the bars draw their rows and settings.
+rush-ui-settings.workspace = true
+rush-ui-accounts.workspace = true
+rush-ui-projects-machine.workspace = true
+rush-ui-social.workspace = true
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }

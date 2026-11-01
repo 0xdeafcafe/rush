@@ -15,7 +15,7 @@ use rush_core::text::{Color, Line, Span};
 use rush_core::time::Ms;
 use rush_core::usage::{EVERY, LEAD, Quota, Window};
 
-use super::meters::{FRESH, MeterRow, pct, usage_color};
+use crate::meters::{FRESH, MeterRow, pct, usage_color};
 use crate::style::*;
 
 /// Used from here on, an account's number shows (nearAt).
@@ -169,7 +169,7 @@ pub fn back_in(q: &Quota, now: Ms, cur: bool) -> Option<Span> {
         turns_at(back - 24 * HOUR, now);
         if back - now > 24 * HOUR {
             return Some(sp(
-                format!(" until {}", super::meters::day_clock(back)),
+                format!(" until {}", crate::meters::day_clock(back)),
                 DIM,
             ));
         }

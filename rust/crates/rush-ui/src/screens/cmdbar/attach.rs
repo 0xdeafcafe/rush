@@ -20,7 +20,7 @@ use rush_core::adapter::{Elsewhere, Gone, caused_by};
 use rush_core::agent::{Agent, State};
 use rush_fleet::Predicates;
 
-use super::outside::profile_of;
+pub use crate::attached::{Attached, acct_of, attached};
 use crate::frame::Out;
 use crate::model::Model;
 
@@ -32,26 +32,6 @@ enum Joined {
     /// It was opened in another window, which took it.
     Elsewhere,
     Failed(String),
-}
-
-/// Which session has the terminal (m.attached), and how the preview's
-/// live mirror is let go.
-#[derive(Default)]
-pub struct Attached {
-    /// The agent whose screen has the terminal; "" when none has.
-    pub key: String,
-    /// Lets go of the preview's live mirror (closeLive): set by the
-    /// preview that keeps one.
-    pub close_live: Option<fn(&mut Model)>,
-}
-
-/// The agent whose own screen has the terminal now, if one has: the
-/// preview opens no live mirror meanwhile (live.go:238).
-pub fn attached(m: &Model) -> Option<&str> {
-    m.kept
-        .peek::<Attached>()
-        .map(|a| a.key.as_str())
-        .filter(|k| !k.is_empty())
 }
 
 /// Notes that you've seen a, when it was waiting on you, so the list
@@ -162,16 +142,6 @@ fn joined(m: &mut Model, a: Agent, r: Joined) -> Out {
         },
     );
     Out::Draw
-}
-
-/// The profile a runs in (a.Acct), else the one its agent knows by its
-/// account's name.
-pub(crate) fn acct_of(m: &Model, a: &Agent) -> rush_core::adapter::Profile {
-    if a.acct.name.is_empty() && a.acct.dir.is_empty() {
-        profile_of(&m.reg, a)
-    } else {
-        a.acct.clone()
-    }
 }
 
 /// What an agent's program said as it ended (doneMsg).

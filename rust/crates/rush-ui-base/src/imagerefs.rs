@@ -180,3 +180,9 @@ pub fn with_marks(buf: &[char], pos: usize, r: &mut ImageRefs, imgs: &[String]) 
     }
     insert(buf, pos, &ins.chars().collect::<Vec<_>>())
 }
+
+/// Whether a read of the clipboard is under way (pastingImg).
+#[derive(Default)]
+pub struct ClipState {
+    pub pasting: bool,
+}

@@ -3,6 +3,8 @@
 //! model with every screen registered (new_model).
 
 mod accounts;
+mod bars;
+mod list_extras;
 mod plugin_ui;
 mod projects_machine;
 mod session_cards;

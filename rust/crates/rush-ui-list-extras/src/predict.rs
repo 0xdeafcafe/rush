@@ -101,7 +101,7 @@ impl Want {
 }
 
 // What a view takes of what's read ahead is the frame's (crate::predict).
-pub use crate::predict::{HistHit, Hit};
+pub use rush_ui_base::predict::{HistHit, Hit};
 
 /// What's read ahead and what's wanted (Model::kept).
 #[derive(Default)]
@@ -114,7 +114,7 @@ pub struct Predict {
     busy: Option<(String, Arc<AtomicBool>)>,
     /// The Session beside the list until the pick moved, kept as it was
     /// (its reading still following its file), for going back to it.
-    pub(crate) left: Option<SessionView>,
+    pub left: Option<SessionView>,
     /// Reads made and taken, for the timing log.
     made: u64,
     used: u64,
@@ -302,7 +302,7 @@ pub fn moved(m: &mut Model, d: isize) {
     let mut picks: Vec<usize> = Vec::new();
     // The one picked: what enter opens, unless it's beside the list now
     // or the split is about to read it.
-    let beside = crate::screens::list_extras::split::widths(m).1 > 0;
+    let beside = rush_ui_base::split::widths(m).1 > 0;
     if let Some(i) = at.and_then(|a| rows[a])
         && !beside
     {
@@ -409,6 +409,7 @@ pub fn toward(m: &mut Model, keys: &[String]) {
 /// Reads the most likely one wanted not yet read, when none is being.
 fn next(m: &mut Model) {
     let reg = m.reg.clone();
+    let read_early = m.ext.calls.read_early();
     let p = m.kept.get::<Predict>();
     if p.busy.is_some() {
         return;
@@ -435,11 +436,7 @@ fn next(m: &mut Model) {
                 Some((PathBuf::new(), From::Follow(f, seen), sess, None))
             }
             What::Early(a) => {
-                let (s, path, was) = crate::screens::session_core::live::read_early(
-                    &reg,
-                    &a,
-                    rush_core::time::now(),
-                )?;
+                let (s, path, was) = read_early(&reg, &a, rush_core::time::now())?;
                 // As it was before the read: one written to during it
                 // isn't taken as read.
                 let seen = was.as_ref().and_then(stat_of);
