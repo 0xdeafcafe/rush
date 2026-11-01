@@ -152,6 +152,48 @@ pub fn totals(s: &Session, now: Ms) -> Totals {
     t
 }
 
+/// What the subagents' prompt cache lapsing cost, from the requests the
+/// session's agent reported: any harness's, one run at a time.
+pub fn sub_cache(s: &Session, ag: &Agentry) -> rush_core::subcache::SubCache {
+    let mut runs: HashMap<&str, rush_core::subcache::Tracker> = HashMap::new();
+    for r in s.requests.iter().filter(|r| !r.run.is_empty()) {
+        runs.entry(&r.run)
+            .or_default()
+            .request(r.at, &r.model, &r.usage, &|model, u| ag.cost(model, u));
+    }
+    let mut sum = rush_core::subcache::SubCache::default();
+    for t in runs.values() {
+        sum.add(&t.sum);
+    }
+    sum
+}
+
+/// The Overview's line on it, and for a harness that can set its
+/// subagents' cache life (`settings` is its name), what an hour would
+/// save: "4 lapses · $1.40 · 1-hour would cost $0.60".
+pub fn sub_cache_text(c: &rush_core::subcache::SubCache, settings: Option<&str>) -> String {
+    let money = |x: f64| {
+        let m = rush_convo::render::money(x);
+        if m.is_empty() { "$0".to_string() } else { m }
+    };
+    let n = c.lapses;
+    let mut out = format!(
+        "{n} {} · {} · 1-hour would cost {}",
+        if n == 1 { "lapse" } else { "lapses" },
+        money(c.cost),
+        money(c.hour)
+    );
+    if let Some(name) = settings
+        && c.hour_saves() >= 0.005
+    {
+        out.push_str(&format!(
+            " · 1-hour would save {} (Settings › {name})",
+            money(c.hour_saves())
+        ));
+    }
+    out
+}
+
 /// A request that wrote the prompt cache rather than reading it, and why.
 #[derive(Debug, PartialEq)]
 pub struct ColdStart {
@@ -999,6 +1041,19 @@ pub fn overview(
         l.spans.push(dim("   written "));
         l.spans.push(text(tokens(t.cache_out)));
         add(&mut out, l, Line::new());
+        let sub = sub_cache(s, ag);
+        if !sub.is_empty() {
+            let mut l = label("subagents' cache");
+            l.spans.push(dim(sub_cache_text(
+                &sub,
+                ag.reg
+                    .supports(ag.kind, rush_core::adapter::Feature::SubagentCache)
+                    .then(|| ag.reg.get(ag.kind).map(|a| a.name().to_string()))
+                    .flatten()
+                    .as_deref(),
+            )));
+            add(&mut out, l, Line::new());
+        }
         if expected > 0 {
             let mut parts = Vec::new();
             for k in [

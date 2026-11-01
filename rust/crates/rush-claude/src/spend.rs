@@ -40,7 +40,8 @@ pub const CACHE_FILE: &str = "costs-rs.json";
 /// The spend cache's format: a file of another starts over. Bump it when
 /// Totals changes what it keeps.
 /// 1: Totals as transcript.rs has it.
-pub const CACHE_VERSION: i64 = 1;
+/// 2: and how the prompt cache lapsed (Totals::track).
+pub const CACHE_VERSION: i64 = 2;
 /// How often a run that read something saves the cache (spend.go:176).
 pub const SAVE_EVERY: Ms = 30_000;
 
@@ -360,6 +361,9 @@ fn add(sp: &mut Spend, tot: &Totals, main: bool, ours: bool, today: u32) {
     sp.cost += c;
     sp.usage.add(u);
     sp.today += tot.day_spend(today);
+    if !main {
+        sp.sub_cache.add(&tot.sub_cache());
+    }
     if main {
         sp.model.clone_from(&tot.last_model);
         sp.first = tot.first;
@@ -570,6 +574,49 @@ mod tests {
         assert!((sp.cost - 3.0 * 20.0 / 1e6).abs() < 1e-12);
         // Nothing changed: nothing to report.
         assert!(s.run(&t, now + 1).is_empty());
+    }
+
+    /// A subagent that waited 7 minutes between requests: its cache (5
+    /// minutes) had lapsed, so it wrote its context again where a read
+    /// would have done. Opus 5.5: $4 a million in, a write 1.25×, a read
+    /// $0.20 a million, and a 1-hour write 2×.
+    #[test]
+    fn counts_a_subagents_cache_lapse() {
+        let d = TempDir::new("lapse");
+        let (main, sub) = setup(&d);
+        let req = |id: &str, at: &str, read: i64, wrote: i64| {
+            format!(
+                r#"{{"type":"assistant","timestamp":"{at}","message":{{"id":"{id}","model":"claude-opus-5-5","content":[{{"type":"text","text":"x"}}],"usage":{{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":{read},"cache_creation_input_tokens":{wrote}}}}}}}"#
+            ) + "\n"
+        };
+        std::fs::write(&main, req("m1", "2026-09-23T10:00:00Z", 0, 50_000)).unwrap();
+        std::fs::write(
+            &sub,
+            req("s1", "2026-09-23T10:00:00Z", 0, 100_000)
+                + &req("s2", "2026-09-23T10:01:00Z", 100_000, 1_000)
+                + &req("s3", "2026-09-23T10:08:00Z", 0, 101_000)
+                + &req("s4", "2026-09-23T10:09:00Z", 101_000, 500),
+        )
+        .unwrap();
+        let t = [Target {
+            key: "k".into(),
+            path: main,
+            live: false,
+            past: false,
+        }];
+        let sp = &Scanner::new().run(&t, rush_core::time::now())["k"];
+        let c = sp.sub_cache;
+        assert_eq!(
+            c.lapses, 1,
+            "the main session's own requests aren't counted"
+        );
+        assert!(
+            (c.cost - 101_000.0 * (5.0 - 0.2) / 1e6).abs() < 1e-9,
+            "{c:?}"
+        );
+        // The 1-hour write costs $3 a million more, on all but the rewrite.
+        assert!((c.hour - 101_500.0 * 3.0 / 1e6).abs() < 1e-9, "{c:?}");
+        assert!(c.hour_saves() > 0.0);
     }
 
     fn line(id: &str, out: i64) -> String {

@@ -125,6 +125,10 @@ pub struct StartOptions {
     /// How many subagents it may run at once, where its harness caps them;
     /// 0 leaves the harness's own.
     pub subagents: i64,
+    /// How long its subagents' prompt cache lives, where its harness lets
+    /// rush say: "5m" or "1h"; empty leaves the harness's own
+    /// (Feature::SubagentCache).
+    pub subagent_cache: String,
     /// MCP servers rush serves in process for the session.
     pub tools: Vec<ToolServer>,
     /// Subagents to offer it, by name, each defined in its agent's own

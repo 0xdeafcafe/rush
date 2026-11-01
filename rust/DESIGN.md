@@ -1141,6 +1141,56 @@ minutes; 5, 30, 60, 120). Each harness that can has "Keep its cache warm"
 on its own page (as General says, on, off), kept in config.json's
 `cacheKeep` (`on`, `minutes`, `harnesses`).
 
+### Subagents' cache (Rust-only)
+
+Everything outside the main conversation (subagents, workflows,
+background and helper requests) has a prompt cache of its own, 5 minutes
+unless Claude Code is told otherwise (2.1.316: the environment variable
+`CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`, which wins, or the setting
+`subagentPromptCacheTtl`: "5m" or "1h"; `ENABLE_PROMPT_CACHING_1H=1` makes the
+unset case an hour). A subagent that waits on a long command past its
+cache's life pays to write its whole context again (1.25× the input price
+against 0.1× for a read). A 1-hour cache writes at 2× but lapses far less.
+
+Measured. `rush_core::subcache` is the pure rule: a `Tracker` per
+subagent takes its requests in order, with a way to price tokens (the
+agent's own `Pricer`; the core holds no price). A request is a lapse when
+more than the cache's life passed since the subagent's last request (5
+minutes until a request wrote a 1-hour cache; the newest part lapses
+first, so any 5-minute write makes it 5), it wrote the cache, and it read
+back less than the last request sent. The tokens that lapsed are the last
+request's size less what was read, up to what was written (at least 1,000);
+the lapse costs their write less their read. `SubCache` adds up `lapses`,
+`cost`, the part of it an hour's cache would have avoided (a gap under an
+hour: `avoidable`), and `hour`: the dearer write (2× against 1.25×) on every
+5-minute token written, bar the rewrites it would have avoided. An hour
+would save `avoidable − hour` when that's positive (`hour_saves`).
+
+Claude Code reports it from its transcripts: `Totals.track` follows each
+transcript's requests as they are priced (a request begins at its first
+line's time), and `spend.rs` adds a subagent's or workflow agent's into
+`Spend.sub_cache` (the spend cache's version is 2 for it). Shown:
+
+- the Overview's Cache section, a line from the session's own requests
+  (any harness's, a run at a time): `subagents' cache  4 lapses · $1.40 ·
+  1-hour would cost $0.60`, then ` · 1-hour would save $0.80 (Settings ›
+  Claude Code)` when it would have paid and the harness can set it;
+- the Projects list's section line, from each agent's `Spend.sub_cache`:
+  `· $1.40 lapsed, 1-hour would save $0.80`.
+
+There is no `rush spend` command in the port, so none shows it.
+
+Set. `Feature::SubagentCache` ("subagentcache") is the capability: the
+harness lets rush say how long its subagents' cache lives; only Claude
+Code declares it. Settings › Harnesses › Claude Code › Subagents' cache is
+automatic (sets nothing, the default), 5 minutes or 1 hour, kept in
+`config.subagentCache` by harness kind. The host reads it as a session
+starts (its first start, a wake, or a move onto a new build), into
+`StartOptions.subagent_cache`, and the Claude adapter puts
+`CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL=5m|1h` in the environment it starts
+Claude Code in; automatic sets nothing. A running session keeps what it
+started with.
+
 ## A session's runs
 
 The Session follows the runs its session started (session_core's

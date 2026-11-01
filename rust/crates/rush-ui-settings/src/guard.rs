@@ -235,3 +235,41 @@ pub fn cache_harness_section(m: &Model, kind: &str) -> Option<Section> {
     .into();
     Some(Section::new("Prompt cache", vec![row]))
 }
+
+/// A harness's "Subagents' cache" row, on its page, where it can say how
+/// long its subagents' prompt cache lives (Feature::SubagentCache). The
+/// host reads it as a session starts, so a change reaches sessions
+/// started or moved onto a new build after it.
+pub fn subagent_cache_section(m: &Model, kind: &str) -> Option<Section> {
+    if !m
+        .reg
+        .supports(kind, rush_core::adapter::Feature::SubagentCache)
+    {
+        return None;
+    }
+    let v = config(m)
+        .subagent_cache
+        .get(kind)
+        .map_or("", String::as_str)
+        .to_string();
+    let k = kind.to_string();
+    let mut row = choice(
+        "Subagents' cache",
+        &v,
+        "How long the prompt cache lives for everything outside the main conversation: subagents, workflows, background and helper requests. A request after it lapses pays to write the whole context again (1.25× the input price against 0.1× for a read); a 1-hour cache costs more to write (2×) but lapses less. The Overview's Cache section and the Projects list show what lapses cost and what an hour would have cost or saved. Applies to sessions started, or moved onto a new build, after the change; one running keeps what it started with. Sets CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL where rush starts Claude Code (2.1.316 or later).",
+        &[
+            ("", "automatic: sets nothing, Claude Code's own: 5 minutes."),
+            ("5m", "5 minutes: a write costs 1.25×."),
+            ("1h", "1 hour: a write costs 2×, and it lapses far less."),
+        ],
+        set(move |m, v| {
+            let h = &mut config_mut(m).subagent_cache;
+            match v {
+                "5m" | "1h" => h.insert(k.clone(), v.to_string()),
+                _ => h.remove(&k),
+            };
+        }),
+    );
+    row.unset = "automatic".into();
+    Some(Section::new("Subagents' cache", vec![row]))
+}

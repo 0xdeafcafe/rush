@@ -175,6 +175,8 @@ pub struct Spend {
     /// The last count it reported moving ("lint 11,065 → 9,052"), and when.
     pub progress: String,
     pub progress_at: Ms,
+    /// What its subagents' prompt cache lapsing cost (Rust-only).
+    pub sub_cache: crate::subcache::SubCache,
     /// Its transcripts have been priced.
     pub ready: bool,
 }

@@ -297,3 +297,18 @@ fn carries_another_agents_conversation() {
     assert_eq!(ls[1]["message"]["content"][0]["text"], "hello");
     assert_eq!(ls[0]["uuid"].as_str().unwrap().len(), 36);
 }
+
+/// The subagents' cache life is set in the environment only when chosen.
+#[test]
+fn subagent_cache_env_is_set_only_when_chosen() {
+    assert_eq!(super::subagent_cache_env(""), None);
+    assert_eq!(super::subagent_cache_env("auto"), None);
+    assert_eq!(
+        super::subagent_cache_env("5m").as_deref(),
+        Some("CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL=5m")
+    );
+    assert_eq!(
+        super::subagent_cache_env("1h").as_deref(),
+        Some("CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL=1h")
+    );
+}

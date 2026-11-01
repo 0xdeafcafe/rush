@@ -37,6 +37,15 @@ use crate::neutral::Neutral;
 /// silent.
 pub const STREAM_WATCHDOG_ENV: &str = "CLAUDE_ENABLE_STREAM_WATCHDOG";
 const SUBAGENT_CAP_ENV: &str = "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS";
+/// How long Claude Code's prompt cache lives for everything outside the
+/// main conversation (2.1.316): "5m" or "1h". Unset, it's 5 minutes.
+pub const SUBAGENT_CACHE_ENV: &str = "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL";
+
+/// The environment entry that sets the subagents' cache life, when one is
+/// chosen ("5m" or "1h"); nothing for automatic (empty) or anything else.
+pub fn subagent_cache_env(choice: &str) -> Option<String> {
+    matches!(choice, "5m" | "1h").then(|| format!("{SUBAGENT_CACHE_ENV}={choice}"))
+}
 
 /// How long a control request is waited on: Go's callers give it a minute
 /// at most (host.go:1723).
@@ -167,6 +176,7 @@ impl Driver for Claude {
         if o.subagents > 0 && unset(SUBAGENT_CAP_ENV) {
             ho.env.push(format!("{SUBAGENT_CAP_ENV}={}", o.subagents));
         }
+        ho.env.extend(subagent_cache_env(&o.subagent_cache));
         // Checkpoints, as Claude Code keeps them in a terminal, so a rewind
         // can put the files back too. The session's own environment goes
         // last, to have the last word.

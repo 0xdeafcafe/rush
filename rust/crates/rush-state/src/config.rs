@@ -241,6 +241,15 @@ pub struct Config {
         skip_serializing_if = "is_default"
     )]
     pub cache_keep: CacheKeep,
+    /// How long a harness's subagents' prompt cache lives, by harness
+    /// kind: "5m" or "1h"; absent is automatic, the harness's own
+    /// (Feature::SubagentCache). Read as a session starts.
+    #[serde(
+        rename = "subagentCache",
+        deserialize_with = "lenient",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    pub subagent_cache: BTreeMap<String, String>,
     /// The harness each provider runs in, by provider, where it isn't its
     /// usual one: "ollama": "pi" runs Ollama in Pi.
     #[serde(

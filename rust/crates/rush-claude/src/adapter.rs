@@ -181,6 +181,11 @@ fn features() -> Features {
     // A side question with nothing of its own: it reads the cached
     // conversation and adds nothing to it.
     f.insert(KeepWarm, Support::YES.with("through a side question"));
+    // CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL, where rush starts it.
+    f.insert(
+        SubagentCache,
+        Support::YES.with("5 minutes or 1 hour, from Claude Code 2.1.316"),
+    );
     f
 }
 
@@ -708,7 +713,7 @@ mod tests {
             let s = f.get(&k).unwrap_or_else(|| panic!("{k:?} missing"));
             assert_eq!(s.is, rush_core::adapter::Has::Yes, "{k:?} is {s:?}");
         }
-        assert_eq!(f.len(), 37, "{f:?}");
+        assert_eq!(f.len(), 38, "{f:?}");
         assert_eq!(f[&Guide], Support::YES.with("at its next step"));
         // Rust-only: it keeps an idle session's prompt cache warm.
         assert_eq!(f[&KeepWarm], Support::YES.with("through a side question"));
