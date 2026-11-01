@@ -59,6 +59,9 @@ pub struct ViewState {
     pub tabs: Vec<(usize, usize, usize)>,
     /// The context label on the name's row: from and width, in the pane.
     pub context: (usize, usize),
+    /// The conversation view's label on the tabs row, from and to, cells
+    /// into the pane; (0, 0) when it isn't drawn (Normal shows none).
+    pub preset_at: (usize, usize),
     /// What the pointer is over: a tab (+1), the context label, a row's
     /// item.
     pub hover_tab: usize,
@@ -300,8 +303,17 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
             join(&mut strip, t);
         }
     }
+    // The conversation's view, when it isn't Normal: a click picks another.
+    let preset = super::presets::current(m);
+    let preset_chip = (views[cur] == "conversation" && preset != rush_convo::Preset::Normal)
+        .then(|| line([sp("view ", DIM), sp(preset.title(), ORANGE), sp(" ▾", DIM)]));
     let v = m.session.as_ref();
     let mut chips = Line::new();
+    let preset_w = preset_chip.as_ref().map_or(0, |c| c.width());
+    if let Some(c) = preset_chip {
+        join(&mut chips, c);
+        chips.spans.push(plain("  "));
+    }
     match v.map(|v| (v.verbose, v.o.depth)) {
         Some((true, _)) => chips.spans.push(sp("m3 all shown", ORANGE)),
         Some((_, rush_convo::Depth::Prose)) => chips.spans.push(sp("m0 prose only", ORANGE)),
@@ -327,6 +339,13 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     for t in &mut tabs {
         t.1 = t.1.min(sw);
     }
+    let fits = hw as isize - strip.width() as isize - chips.width() as isize >= 2;
+    let preset_at = if preset_w > 0 && fits {
+        let x = hw - chips.width();
+        (x, x + preset_w)
+    } else {
+        (0, 0)
+    };
     let row3 = spread(strip, chips, hw);
     rows[3] = chrome(row3, hw);
     // A rule closes the chrome off in the harness's grey, lit under the
@@ -363,6 +382,7 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     let c = conn(m, &key);
     c.vs.tabs = tabs;
     c.vs.context = at;
+    c.vs.preset_at = preset_at;
 }
 
 /// A header row: two cells in, on the chrome's ground, a cell after.
@@ -811,6 +831,11 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
             }
         }
         MouseKind::Down(Button::Left) => {
+            let (px0, px1) = conn(m, &key).vs.preset_at;
+            if Some(y) == tabs_y && px1 > px0 && x >= 2 + px0 && x < 2 + px1 {
+                super::presets::open_picker(m);
+                return Out::Draw;
+            }
             let Some(i) = tab_at(m) else {
                 if name != "conversation" && y >= top && y < top + rows {
                     let r = conn(m, &key).vs.refs.get(y - top).cloned();

@@ -96,6 +96,7 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     let hover_tag = conn(m, key).vs.hover_tag.clone();
     let mut mm = std::mem::take(&mut conn(m, key).map);
     let opening = opening(m, key);
+    let preset = super::presets::current(m);
     // Rows run the whole width while no column stands right of them
     // (rushmode.go:2366 Wide: len(c.side) == 0); hosted alone, always.
     let wide = conn(m, key).side.rows.is_empty() || (m.ext.calls.hosted_alone())(m);
@@ -106,6 +107,7 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     v.sync(w, now, tick);
     let o = &mut v.o;
     o.wide = wide;
+    o.preset = preset;
     (o.parent, o.started_from, o.hosted) = (opening.0, opening.1, opening.2);
     if o.brief != opening.3 {
         o.brief = opening.3;

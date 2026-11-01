@@ -19,6 +19,7 @@ mod tests_move;
 mod tests_next;
 mod tests_pastes;
 mod tests_plugins;
+mod tests_presets;
 mod tests_scripts;
 mod tests_slash;
 mod tests_split;

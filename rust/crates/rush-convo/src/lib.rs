@@ -26,7 +26,7 @@ pub use model::{
     Request, RunningPart, Session, Shell, ShellProc, Status, Step, StepId, Task, ToolStat, Turn,
     exchange_peer, peer_label,
 };
-pub use render::{Depth, Options, RenderedLine, Renderer};
+pub use render::{Depth, Options, Preset, RenderedLine, Renderer};
 pub use runname::{other_harness, run_tag, set_peer_mark};
 pub use search::{Found, Hit, Library, WHO_AGENT, library};
 pub use shellwrites::{ShellWrite, shell_run, shell_run_kept, shell_writes};

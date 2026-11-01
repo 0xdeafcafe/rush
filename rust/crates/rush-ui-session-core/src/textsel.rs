@@ -390,6 +390,10 @@ fn click(m: &mut Model, key: &str, y: usize) -> Out {
     if let Some(out) = super::scripts::toggle_break(m, key, &r) {
         return out;
     }
+    // A catch-up card or a trail's step opens in Normal.
+    if let Some(o) = super::presets::click(m, &r) {
+        return o;
+    }
     let Some(v) = m.session.as_mut() else {
         return Out::Pass;
     };

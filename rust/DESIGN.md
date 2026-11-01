@@ -1409,6 +1409,41 @@ is made. Everything below is in `rush_ui::frame`.
   asking the terminal its cell size (Go's pictures.go) wait on rush-draw
   writing raw output; until then the cell is taken as Go's 10×20.
 
+## Conversation views (Rust-only)
+
+The Conversation tab has five views, one for every session, kept in
+config.json as `convoView` ("" is Normal): Normal (as always), Chat (what
+you and the agent said, and what it asked; each stretch of steps one quiet
+"n steps hidden" row that opens in place), Code (each edit open on its
+diff, each check or failed command one line, the agent's words cut to
+three lines), Catch-up (a card a turn: asked, said, changed, checks, open,
+time and cost) and Trail (a line a step). ⌥s (session.preset, also
+ctrl+] g) goes through them; the tab row names one other than Normal and a
+click on it opens a picker; enter or a click on a catch-up card or a
+trail's step opens it in Normal. Changing view keeps the picked row, else
+the turn at the top.
+
+They are `Options.preset` (rush_convo::Preset), part of the renderer's
+signature: the same parsed turns, drawn a turn at a time
+(render/draw/presets.rs), so only the turns in view are drawn whichever is
+picked. Checks are read from the command's words (cargo, go, npm/pnpm/
+yarn/bun scripts, make, pytest, eslint, ruff, tsc, …) and its exit code,
+never from one harness's own result shape.
+
+`cargo bench -p rush-convo --bench render`, 3000 turns at 120 wide
+(µs per frame, before → each view):
+
+| frame | Normal (main) | Normal | Chat | Code | Catch-up | Trail |
+|---|---|---|---|---|---|---|
+| cold, at the end | 6354* | 1813 | 546 | 528 | 184 | 186 |
+| warm, at the end | 4.4 | 9.6 | 4.8 | 46.5 | 44.8 | 3.7 |
+| warm, mid-way | 4.1 | 4.2 | 4.5 | 4.8 | 34.0 | 3.4 |
+
+*Cold frames swing with the machine's load: the same Normal frame measured
+790–1813 µs in the branch's own runs. Warm frames are the steady cost.
+Code and Catch-up redraw the bench's live last turn on every tick (no
+unit memo for them); still far under a millisecond.
+
 ## Panics
 
 Release builds unwind (`panic = "unwind"`), so one thread's panic ends
