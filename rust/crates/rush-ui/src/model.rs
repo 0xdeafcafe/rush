@@ -1641,8 +1641,18 @@ impl Model {
                 more,
             } => match self.view_of(r#gen) {
                 Some(v) => {
+                    let first = !v.read;
                     v.take_events(events, reset);
                     v.caught_up = !more;
+                    let ended = !more && !std::mem::replace(&mut v.ended, true);
+                    if ended {
+                        rush_draw::perf_note(|| format!("tail end gen={}", r#gen));
+                    }
+                    if first || ended {
+                        // As a transcript's: its placeholder goes, and its
+                        // first reading shows once all in, at once.
+                        self.hold.answer();
+                    }
                     self.follow_tail();
                     Step::Draw
                 }
@@ -1669,8 +1679,12 @@ impl Model {
             },
             Note::TailFailed { r#gen, err } => match self.view_of(r#gen) {
                 Some(v) => {
-                    v.read = true;
+                    let first = !std::mem::replace(&mut v.read, true);
                     v.err = err;
+                    if first {
+                        // Its placeholder goes now, for what went wrong.
+                        self.hold.answer();
+                    }
                     Step::Draw
                 }
                 _ => Step::Idle,
