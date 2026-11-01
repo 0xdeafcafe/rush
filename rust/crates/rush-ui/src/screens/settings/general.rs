@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use super::form::{Section, Setting, choice, set};
 use super::paint::on_off;
-use super::{config, config_mut};
+use super::{config, config_mut, dialog, dialog_mut};
 use crate::frame::Out;
 use crate::model::Model;
 use crate::style::*;
@@ -66,6 +66,80 @@ pub fn active_value(n: i64) -> String {
 /// minutes from a choice: "off" -1, "" 0, else its number.
 fn minutes(v: &str) -> i64 {
     off_value(v)
+}
+
+/// The project a new session would start in, settled before General is
+/// drawn: finding its main checkout looks at the disk.
+pub fn prep(m: &mut Model) {
+    let dir = crate::screens::list_extras::prompt::start_dir(m);
+    let project = rush_fleet::main_checkout(&dir);
+    dialog_mut(m).project = project;
+}
+
+/// Whether a session started from the box in the project it would start
+/// in gets a worktree of its own, as #worktree on|off says.
+fn own_worktree_row(m: &Model) -> Setting {
+    let project = dialog(m).project.clone();
+    let name = std::path::Path::new(&project)
+        .file_name()
+        .map_or(project.clone(), |n| n.to_string_lossy().into_owned());
+    let mut st = choice(
+        &format!("Own worktree in {name}"),
+        on_off(config(m).own_worktree(&project)),
+        &format!(
+            "Whether a session started from the box in {name} gets a git worktree and branch of its own, or works in the checkout itself. It's said by project: the one a new session would start in now. #worktree on|off says the same."
+        ),
+        &[
+            (
+                "on",
+                "each new session gets a worktree and branch of its own.",
+            ),
+            ("off", "new sessions work in the checkout itself."),
+        ],
+        None,
+    );
+    st.set = set(move |m, v| {
+        config_mut(m)
+            .own_worktrees
+            .insert(project.clone(), v == "on");
+    });
+    st
+}
+
+/// What #compact starts with, once its d saved a choice: back to each
+/// harness's own from here.
+fn compact_row(m: &Model) -> Setting {
+    let c = config(m);
+    let pruner = crate::screens::session_cards::compact::PRUNER_KIND;
+    let now = if c.compact_kind.is_empty() {
+        String::new()
+    } else if c.compact_kind == pruner {
+        format!("Ollama prune · {}", c.prune_model)
+    } else if c.compact_model.is_empty() {
+        c.compact_kind.clone()
+    } else {
+        format!("{} · {}", c.compact_kind, c.compact_model)
+    };
+    let mut pairs: Vec<(&str, &str)> =
+        vec![("", "#compact starts on the harness's own compaction.")];
+    if !now.is_empty() {
+        pairs.push((&now, "#compact starts on it; d in #compact saved it."));
+    }
+    let mut st = choice(
+        "#compact starts on",
+        &now,
+        "The choice #compact's picker starts on: the harness's own compaction, or a summary written by another model or Ollama's pruning, saved with d there. It never replaces a harness's automatic compaction.",
+        &pairs,
+        set(|m, v| {
+            if v.is_empty() {
+                let c = config_mut(m);
+                c.compact_kind.clear();
+                c.compact_model.clear();
+            }
+        }),
+    );
+    st.unset = "the harness's own".into();
+    st
 }
 
 /// General's sections on how sessions live and what rush watches.
@@ -312,7 +386,56 @@ pub fn sections(m: &Model) -> Vec<Section> {
         set(|m, v| config_mut(m).cleanup_ram_minutes = off_value(v)),
     );
     high_ram.unset = "15m".into();
-    secs.push(Section::new("Disk and memory", vec![low_disk, high_ram]));
+    // Rush-only rows from here to Stalls: config.json had these with no
+    // row (trimRunningTmp, ownWorktrees, onboarding.hidden, advisor,
+    // compactKind).
+    let trim = choice(
+        "Trim a running session's temp files",
+        on_off(c.trim_running_tmp),
+        "Each session has a temp folder of its own. With this on, when the disk is low (under 20G free, or a tenth of it) rush looks every 10 minutes and removes what's in a running session's temp folder that's 3 hours old and open in no process. Claude Code's own folders there stay. A session that's ended has its temp folder removed anyway.",
+        &[
+            ("off", "a running session's temp files stay until it ends."),
+            (
+                "on",
+                "when the disk is low, its old temp files that nothing has open go.",
+            ),
+        ],
+        set(|m, v| config_mut(m).trim_running_tmp = v == "on"),
+    );
+    secs.push(Section::new(
+        "Disk and memory",
+        vec![low_disk, high_ram, trim],
+    ));
+
+    secs.push(Section::new("Projects", vec![own_worktree_row(m)]));
+
+    let tips = choice(
+        "Getting started",
+        on_off(!c.onboarding.hidden),
+        "The Getting started steps and tips at the top of the list. #tips brings them back from the start; #tips off puts them away.",
+        &[
+            (
+                "on",
+                "the steps you haven't done, and tips, show at the top.",
+            ),
+            ("off", "put away."),
+        ],
+        set(|m, v| config_mut(m).onboarding.hidden = v == "off"),
+    );
+    let advisor = choice(
+        "Advisor",
+        on_off(c.advisor),
+        "Watches how you use your agents and says what would cut tokens or time. A cheap model (Haiku) reads a digest rush works out itself, at most every 3 hours, and an expensive one (Opus) checks the suggestions worth money against the transcripts before they reach you. It spends on your account; RUSH_ADVISOR decides it for one run.",
+        &[
+            ("off", "nothing runs."),
+            ("on", "it looks over your agents' figures now and then."),
+        ],
+        set(|m, v| config_mut(m).advisor = v == "on"),
+    );
+    secs.push(Section::new(
+        "Help and advice",
+        vec![tips, advisor, compact_row(m)],
+    ));
 
     // What keeps a turn from hanging on a stream that went silent: shown,
     // as it's always on.

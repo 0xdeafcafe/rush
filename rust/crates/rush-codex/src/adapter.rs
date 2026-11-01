@@ -17,10 +17,11 @@ use std::sync::Arc;
 
 use rush_core::adapter::{
     self, Account, Accounts, Adapter, ChildFinder, Choice, Choices, Chooser, Conn, Discoverer,
-    Driver, Feature, Features, HistoryFollower, HistoryReader, HistoryTailBeforeReader, Keyed,
-    Kind, Level, LoginHinter, Made, Media, MediaReader, ModelLister, Profile, Programmer,
-    ProjectFolderer, Published, Publisher, QuotaSource, ResetSpender, Session, SignInDone, Sink,
-    Spawnable, Speaker, StartOptions, Support, TailReader,
+    Driver, Feature, Features, HarnessSettings, HistoryFollower, HistoryReader,
+    HistoryTailBeforeReader, Keyed, Kind, Level, LoginHinter, Made, Media, MediaReader,
+    ModelLister, OwnEdit, OwnSettings, Profile, Programmer, ProjectFolderer, Published, Publisher,
+    QuotaSource, ResetSpender, Session, SignInDone, Sink, Spawnable, Speaker, StartOptions,
+    Support, TailReader,
 };
 use rush_core::event::Event;
 use rush_core::time::Ms;
@@ -129,7 +130,10 @@ fn features() -> Features {
         (Commands, Support::PLANNED),
         (Pricing, Support::PLANNED),
         (Memory, Support::PLANNED.with("its AGENTS.md files")),
-        (Settings, Support::PLANNED.with("config.toml")),
+        (
+            Settings,
+            yes("config.toml: model, reasoning effort, approvals, sandbox"),
+        ),
     ]
     .into_iter()
     .collect()
@@ -215,7 +219,23 @@ impl Adapter for Codex {
         made: Made,
         keyed: Keyed,
         speaker: Speaker,
+        harness_settings: HarnessSettings,
     );
+}
+
+impl HarnessSettings for Codex {
+    fn own_settings(&self, p: &Profile, _env: &[(String, String)]) -> adapter::Result<OwnSettings> {
+        Ok(crate::settings::read(&crate::settings::config_path(p))?)
+    }
+    fn check_setting(&self, key: &str, value: &str) -> Result<(), String> {
+        crate::settings::check(key, value)
+    }
+    fn set_own_settings(&self, p: &Profile, edits: &[OwnEdit]) -> adapter::Result<()> {
+        Ok(crate::settings::write(
+            &crate::settings::config_path(p),
+            edits,
+        )?)
+    }
 }
 
 impl Discoverer for Codex {

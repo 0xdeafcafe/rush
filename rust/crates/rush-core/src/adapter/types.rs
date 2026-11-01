@@ -1040,3 +1040,129 @@ mod tests {
         );
     }
 }
+
+/// A harness's own settings as they are now (HarnessSettings): its file,
+/// and its settings in groups.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnSettings {
+    /// Where they're kept, as shown ("~/.claude/settings.json").
+    pub file: String,
+    /// Its full path, to open in an editor.
+    pub path: String,
+    /// After the file: who reads it, where else it's written.
+    pub note: String,
+    pub groups: Vec<OwnGroup>,
+}
+
+/// A titled run of a harness's settings.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnGroup {
+    pub title: String,
+    pub note: String,
+    pub items: Vec<OwnSetting>,
+}
+
+/// One of a harness's settings, as it is now.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnSetting {
+    /// What an edit names: a key of the harness's own choosing
+    /// ("autoCompactWindow", "env:NAME", "plugin:id").
+    pub key: String,
+    pub label: String,
+    /// What it does.
+    pub what: String,
+    pub kind: OwnKind,
+    /// As kept; "" is unset.
+    pub value: String,
+    pub from: ValueFrom,
+    /// Values offered, each with what it means; "" among them is unset.
+    pub choices: Vec<(String, String)>,
+    /// How "" shows: what the harness does when it's unset.
+    pub unset: String,
+}
+
+/// How a setting is set.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OwnKind {
+    /// One of its choices.
+    #[default]
+    Choice,
+    /// One of its choices, or one typed.
+    Open,
+    /// On or off (its choices say which, "" for unset).
+    OnOff,
+    /// Typed text; its choices are suggestions.
+    Text,
+    /// A number typed, its choices suggestions.
+    Number,
+    /// A number of tokens typed ("400k"), its choices suggestions.
+    Tokens,
+    /// A variable sessions start with: its value typed, "" removes it.
+    Var,
+    /// Adds a variable: the value is typed as NAME=value.
+    NewVar,
+    /// A plugin, on or off.
+    Plugin,
+}
+
+/// Where a setting's value comes from.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum ValueFrom {
+    /// Nothing sets it: the harness's own default.
+    #[default]
+    Default,
+    /// Its settings file.
+    File,
+    /// A variable in the settings file's own env block.
+    EnvFile(String),
+    /// A variable in the environment rush runs in.
+    Env(String),
+    /// A state file of the harness's that keeps it apart from its
+    /// settings, named.
+    State(String),
+}
+
+impl ValueFrom {
+    /// The short word a row shows after its value; file is the settings
+    /// file's name.
+    pub fn word(&self, file: &str) -> String {
+        match self {
+            ValueFrom::Default => "default".into(),
+            ValueFrom::File => file.into(),
+            ValueFrom::EnvFile(_) | ValueFrom::Env(_) => "env".into(),
+            ValueFrom::State(name) => name.clone(),
+        }
+    }
+
+    /// Where it comes from, in a sentence's words.
+    pub fn said(&self, file: &str) -> String {
+        match self {
+            ValueFrom::Default => "the harness's own default".into(),
+            ValueFrom::File => file.into(),
+            ValueFrom::EnvFile(n) => format!("{n} in {file}'s env block"),
+            ValueFrom::Env(n) => format!("{n} in the environment rush runs in"),
+            ValueFrom::State(name) => name.clone(),
+        }
+    }
+
+    /// Whether a variable sets it, so the settings file can't.
+    pub fn is_env(&self) -> bool {
+        matches!(self, ValueFrom::EnvFile(_) | ValueFrom::Env(_))
+    }
+}
+
+/// A change to one of a harness's settings: "" unsets it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnEdit {
+    pub key: String,
+    pub value: String,
+}
+
+impl OwnEdit {
+    pub fn new(key: impl Into<String>, value: impl Into<String>) -> OwnEdit {
+        OwnEdit {
+            key: key.into(),
+            value: value.into(),
+        }
+    }
+}

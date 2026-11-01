@@ -12,7 +12,6 @@
 
 pub mod acct;
 pub(crate) mod catalog;
-pub(crate) mod claudecode;
 pub(crate) mod common;
 pub(crate) mod configpage;
 pub(crate) mod files;
@@ -23,6 +22,7 @@ pub(crate) mod interface;
 pub(crate) mod keyboard;
 pub(crate) mod keys;
 pub(crate) mod ollama;
+pub(crate) mod ownsettings;
 pub(crate) mod paint;
 pub mod plugins;
 pub mod providers;
@@ -37,7 +37,7 @@ pub(crate) mod workspace;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
-mod tests_claude;
+mod tests_own;
 #[cfg(test)]
 mod tests_providers;
 
@@ -106,6 +106,7 @@ pub(crate) fn pages() -> Vec<Page> {
                 s.extend(interface::sections(m));
                 s
             }),
+            prep: Some(general::prep),
             ..Page::default()
         },
         Page {
@@ -159,8 +160,11 @@ pub(crate) struct Dialog {
     pub plugin: String,
     /// The agent showing's own settings file, as last read.
     pub settings: Option<files::Loaded>,
-    /// Claude Code's settings, as last read, while its page shows.
-    pub claude: Option<rush_claude::usersettings::Snapshot>,
+    /// The project a new session would start in, for General's worktree
+    /// row.
+    pub project: String,
+    /// The harness showing's own settings, as last read.
+    pub own: Option<ownsettings::Read>,
 }
 
 /// The settings group's state: the dialog while a settings place shows,
@@ -366,7 +370,7 @@ pub(crate) fn prep(m: &mut Model) {
     }
     let k = shown_kind(m);
     files::want(m, &k);
-    claudecode::want(m, &k);
+    ownsettings::want(m, &k);
 }
 
 /// Shows one of the pages, in the place it's on (setSettingsPage).

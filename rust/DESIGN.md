@@ -1106,15 +1106,25 @@ is made. Everything below is in `rush_ui::frame`.
   form does nothing. Go's ← stepped the value back, except on an open
   provider. The key lines say these (`form::change_keys`), and keymap's
   `page.in`, `page.back`, `page.switch` describe them in the guide.
-  Harnesses › Claude Code shows its settings.json whole
-  (`settings::claudecode`, reading and writing through
-  `rush_claude::usersettings`): each row's value with where it comes
-  from (`Setting::source`: env, settings.json, ~/.claude.json, default),
-  the env block and enabledPlugins; changes are made to what's shown at
-  once and written off the UI to every distinct settings.json the
-  accounts read (a home's link and its target are one), keeping the
-  rest of each file and its links, mode 0600. files.rs's generic
-  settings-file section is left for other agents that offer a page.
+  A harness's own settings go through rush-core's `HarnessSettings`
+  (rush-only): `own_settings(profile, env)` says each setting's key,
+  label, kind (`OwnKind`: choice, open choice, on/off, text, number,
+  tokens, a variable, a new variable, a plugin), value, where it comes
+  from (`ValueFrom`: env, the file's env block, the file, a state file,
+  default) and its choices; `check_setting` refuses a value before it's
+  written; `set_own_settings` writes edits by key. `settings::ownsettings`
+  draws whatever a harness offers as sections of its Harnesses page
+  (`Setting::source` after the value) and writes off the UI, reading
+  back before the row shows it; a harness with none shows nothing.
+  Claude Code's (`rush_claude::ownsettings` over `usersettings`) is
+  settings.json, its env block and enabledPlugins, written to every
+  distinct settings.json the accounts read (a home's link and its target
+  are one), the rest of each file and its links kept, mode 0600.
+  Codex's (`rush_codex::settings`) is config.toml's model, reasoning
+  effort, approvals and sandbox, each key's line rewritten alone and the
+  result read as TOML before it's written. files.rs's generic
+  settings-file section is left for an agent that offers only a
+  SettingsPage.
 
 - **Plugins on screen** (`screens/plugin_ui`). Everything plugins add
   goes through `rush_plugind::hooks::Client`, kept in `m.plugins()`

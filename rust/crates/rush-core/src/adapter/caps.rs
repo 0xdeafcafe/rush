@@ -643,6 +643,21 @@ pub trait SettingsPager {
     fn settings_page(&self) -> SettingsPage;
 }
 
+/// A harness whose own settings rush shows and changes on its Harnesses
+/// page (rush-only): each with its value and where that comes from. The
+/// harness reads and writes its own files; rush draws what it offers and
+/// asks for changes by key. A harness without one shows none.
+pub trait HarnessSettings {
+    /// What p's settings are now, with env the environment rush runs in
+    /// (and so each session starts with). Reads files: never on the UI.
+    fn own_settings(&self, p: &Profile, env: &[(String, String)]) -> Result<OwnSettings>;
+    /// Whether value can be key's, before it's written: Err says why
+    /// not, in words to show. Reads nothing.
+    fn check_setting(&self, key: &str, value: &str) -> std::result::Result<(), String>;
+    /// Writes edits into p's settings, keeping everything else in them.
+    fn set_own_settings(&self, p: &Profile, edits: &[OwnEdit]) -> Result<()>;
+}
+
 /// An agent whose own agent, the one that runs when no definition is
 /// picked, has a name among its definitions.
 pub trait BuiltinDefNamer {

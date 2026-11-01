@@ -26,49 +26,10 @@ use std::path::{Path, PathBuf};
 use rush_state::settingsfile::File as Settings;
 use serde_json::Value;
 
-/// Where a value shown comes from.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum From {
-    /// A variable in settings.json's env block.
-    EnvBlock(String),
-    /// A variable in the environment rush (and so each session) runs in.
-    Env(String),
-    /// settings.json.
-    File,
-    /// Claude Code's state file (~/.claude.json), where its /config kept
-    /// some of these before settings.json took them.
-    State,
-    /// Nothing sets it: Claude Code's own default.
-    Default,
-}
+pub use rush_core::adapter::ValueFrom as From;
 
-impl From {
-    /// The short word a row shows after its value.
-    pub fn word(&self) -> &'static str {
-        match self {
-            From::EnvBlock(_) | From::Env(_) => "env",
-            From::File => "settings.json",
-            From::State => "~/.claude.json",
-            From::Default => "default",
-        }
-    }
-
-    /// Where it comes from, in a sentence's words.
-    pub fn said(&self) -> String {
-        match self {
-            From::EnvBlock(n) => format!("{n} in settings.json's env block"),
-            From::Env(n) => format!("{n} in the environment rush runs in"),
-            From::File => "settings.json".into(),
-            From::State => "Claude Code's state file (~/.claude.json)".into(),
-            From::Default => "Claude Code's own default".into(),
-        }
-    }
-
-    /// Whether an environment variable sets it, so settings.json can't.
-    pub fn is_env(&self) -> bool {
-        matches!(self, From::EnvBlock(_) | From::Env(_))
-    }
-}
+/// The state file's name, as a value from it says.
+pub const STATE: &str = "~/.claude.json";
 
 /// A value as shown, and where it comes from. "" is unset.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -78,7 +39,7 @@ pub struct Shown {
 }
 
 impl Shown {
-    fn new(value: impl Into<String>, from: From) -> Shown {
+    pub fn new(value: impl Into<String>, from: From) -> Shown {
         Shown {
             value: value.into(),
             from,
@@ -132,7 +93,7 @@ impl Snapshot {
     /// block over the environment.
     pub fn var(&self, name: &str) -> Option<Shown> {
         if let Some(v) = self.file.get::<Value>(&format!("env.{name}")) {
-            return Some(Shown::new(env_string(&v), From::EnvBlock(name.to_string())));
+            return Some(Shown::new(env_string(&v), From::EnvFile(name.to_string())));
         }
         self.env
             .get(name)
@@ -159,7 +120,7 @@ impl Snapshot {
                     .and_then(|s| s.get::<bool>("autoCompactEnabled"))
                     == Some(false)
                 {
-                    return Shown::new("off", From::State);
+                    return Shown::new("off", From::State(STATE.into()));
                 }
             }
         }
@@ -194,7 +155,7 @@ impl Snapshot {
             return Shown::new(on_off(b), From::File);
         }
         if state_too && let Some(b) = self.state.as_ref().and_then(|s| s.get::<bool>(key)) {
-            return Shown::new(on_off(b), From::State);
+            return Shown::new(on_off(b), From::State(STATE.into()));
         }
         Shown::new("", From::Default)
     }
@@ -516,14 +477,17 @@ mod tests {
         let s = Snapshot::read(dir, &[], env(&[(COMPACT_WINDOW_VAR, "600000")])).unwrap();
         assert_eq!(
             s.auto_compact(),
-            Shown::new("off", From::EnvBlock("DISABLE_AUTO_COMPACT".into()))
+            Shown::new("off", From::EnvFile("DISABLE_AUTO_COMPACT".into()))
         );
 
         // The state file says off; settings.json saying on wins.
         fs::write(dir.join(".claude.json"), r#"{"autoCompactEnabled":false}"#).unwrap();
         fs::write(dir.join("settings.json"), "{}").unwrap();
         let s = Snapshot::read(dir, &[], env(&[])).unwrap();
-        assert_eq!(s.auto_compact(), Shown::new("off", From::State));
+        assert_eq!(
+            s.auto_compact(),
+            Shown::new("off", From::State(STATE.into()))
+        );
         fs::write(dir.join("settings.json"), r#"{"autoCompactEnabled":true}"#).unwrap();
         let s = Snapshot::read(dir, &[], env(&[])).unwrap();
         assert_eq!(s.auto_compact(), Shown::new("", From::Default));

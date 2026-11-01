@@ -269,6 +269,7 @@ impl adapter::Adapter for Claude {
         status_liner: StatusLiner,
         status_line_profiler: StatusLineProfiler,
         settings_pager: SettingsPager,
+        harness_settings: HarnessSettings,
         builtin_def_namer: BuiltinDefNamer,
         definer: Definer,
         plugger: Plugger,

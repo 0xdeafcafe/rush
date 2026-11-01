@@ -1,7 +1,8 @@
-//! Harnesses › Claude Code's own settings (claudecode.rs): each value
-//! with where it comes from, changed by keys and written to settings.json
-//! with the rest of it kept, the links kept; and the arrow keys on the
-//! agents' pages, which never change a value going back.
+//! A harness's own settings on its page (ownsettings.rs), driven through
+//! Claude Code's HarnessSettings: each value with where it comes from,
+//! changed by keys and written to settings.json with the rest of it kept,
+//! the links kept; and the arrow keys on the agents' pages, which never
+//! change a value going back.
 
 use std::fs;
 use std::os::unix::fs::symlink;
@@ -10,8 +11,8 @@ use std::path::Path;
 use rush_state::Store;
 use serde_json::{Value, json};
 
-use super::claudecode::TEST_DIR;
 use super::form::flat;
+use super::ownsettings::TEST;
 use super::*;
 use crate::frame::Press;
 use crate::model::Model;
@@ -32,40 +33,50 @@ fn press(m: &mut Model, s: &str) -> Out {
     m.press_key(&p)
 }
 
+const K: &str = common::LOGINS_KIND;
+
 /// Claude Code's sections drawn, w wide.
 fn body(m: &Model, w: usize) -> String {
-    form::form_rows(&claudecode::sections(m), usize::MAX, w)
+    form::form_rows(&ownsettings::sections(m, K), usize::MAX, w)
         .iter()
         .map(rush_core::text::Line::plain)
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-/// Settings open with Claude Code's settings read from dir with env.
-/// (Its page is Harnesses' once Claude Code is registered, which the
-/// binary does; here its sections are driven as the page drives them.)
+/// Settings open with Claude Code's settings read from dir with env,
+/// through its HarnessSettings. (Its page is Harnesses' once Claude Code
+/// is registered, which the binary does; here its sections are driven as
+/// the page drives them.)
 fn claude_page(dir: &Path, env: &[(&str, &str)]) -> (Model, tempfile::TempDir) {
     let env = env
         .iter()
         .map(|(a, b)| (a.to_string(), b.to_string()))
         .collect();
-    TEST_DIR.with(|t| *t.borrow_mut() = Some((dir.to_path_buf(), env)));
+    let a: rush_core::adapter::AdapterRef =
+        std::sync::Arc::new(rush_claude::adapter::Claude::new());
+    let p = rush_core::adapter::Profile {
+        kind: rush_core::adapter::Kind::new(K),
+        name: String::new(),
+        dir: dir.to_string_lossy().into_owned(),
+    };
+    TEST.with(|t| *t.borrow_mut() = Some((a, p, env)));
     let (mut m, d) = model(160, 70);
     set_settings_page(&mut m, PAGE_HARNESSES);
-    claudecode::want(&mut m, common::LOGINS_KIND);
-    assert!(dialog(&m).claude.is_some(), "read");
+    ownsettings::want(&mut m, K);
+    assert!(dialog(&m).own.is_some(), "read");
     (m, d)
 }
 
 /// A key on the row the cursor is on, as the page hands it over.
 fn key(m: &mut Model, s: &str) -> Out {
-    let secs = claudecode::sections(m);
+    let secs = ownsettings::sections(m, K);
     form::form_key(m, &secs, s)
 }
 
 /// Puts the cursor on the row labelled label.
 fn to_row(m: &mut Model, label: &str) {
-    let rows = flat(&claudecode::sections(m));
+    let rows = flat(&ownsettings::sections(m, K));
     let i = rows
         .iter()
         .position(|r| r.label == label)
@@ -257,4 +268,15 @@ fn arrows_on_the_agents_pages() {
         assert!(m.picker().is_none());
         assert_eq!(config(&m).at_limit, was, "esc keeps it");
     }
+}
+
+/// A harness that offers no settings of its own shows none.
+#[test]
+fn a_harness_without_settings_shows_none() {
+    TEST.with(|t| *t.borrow_mut() = None);
+    let (mut m, _d) = model(140, 50);
+    set_settings_page(&mut m, PAGE_HARNESSES);
+    ownsettings::want(&mut m, "no-such-harness");
+    assert!(ownsettings::sections(&m, "no-such-harness").is_empty());
+    assert!(dialog(&m).own.is_none());
 }

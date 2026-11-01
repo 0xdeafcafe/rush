@@ -533,6 +533,8 @@ pub fn agent_sections(m: &Model, k: &str) -> Vec<Section> {
     let mut secs = Vec::new();
     let mut advanced = Vec::new();
     let mut all = extras(m, k);
+    // What the harness offers of its own settings, shown open.
+    all.extend(super::ownsettings::sections(m, k));
     all.extend(super::files::file_sections(m, k));
     for s in all {
         if s.advanced {
@@ -592,9 +594,7 @@ pub fn agent_sections(m: &Model, k: &str) -> Vec<Section> {
 /// definitions its sessions can start as (claudeSections).
 fn claude_sections(m: &Model) -> Vec<Section> {
     let (run, tuning) = claude_run_sections(m);
-    let mut secs = vec![run];
-    secs.extend(super::claudecode::sections(m));
-    secs.push(tuning);
+    let mut secs = vec![run, tuning];
     if let Some(def) = super::files::definitions_section(m, LOGINS_KIND) {
         secs.push(def);
     }
