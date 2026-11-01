@@ -4,6 +4,7 @@
 //! conversations so it takes little from the machine. Port of
 //! internal/convo/indexer.go:1-97.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,6 +18,11 @@ const INDEX_REST: Duration = Duration::from_millis(20);
 pub(crate) struct Indexer {
     want: Vec<Source>,
     running: bool,
+    /// The conversations whose pieces were found standing, or with nothing
+    /// in them to index, as they stood: each reading of the list asks
+    /// again of every agent's, and one unchanged since isn't looked at on
+    /// disk (or read whole) again.
+    standing: HashMap<String, Stat>,
 }
 
 impl Library {
@@ -44,18 +50,25 @@ impl Library {
     }
 
     fn run_indexer(&self) {
+        let mut read = false;
         loop {
             let src = {
                 let mut ix = self.indexer.lock().unwrap();
                 if ix.want.is_empty() {
                     ix.running = false;
-                    return;
+                    break;
                 }
                 ix.want.remove(0)
             };
             if self.index_one(&src) {
+                read = true;
                 std::thread::sleep(INDEX_REST);
             }
+        }
+        // A long conversation read whole is let go by now: its pages go
+        // back to the system rather than staying rush's.
+        if read {
+            rush_sys::mem::give_back();
         }
     }
 
@@ -72,6 +85,9 @@ impl Library {
             && let Some(s) = b.session()
         {
             self.index_session(&src.path, st, s);
+        } else {
+            let mut ix = self.indexer.lock().unwrap();
+            ix.standing.insert(src.path.clone(), st);
         }
         true
     }
@@ -80,7 +96,12 @@ impl Library {
     /// growing, its words read on as it does, to be indexed again once it
     /// settles.
     fn indexed_as_is(&self, path: &str, st: Stat) -> bool {
+        if self.indexer.lock().unwrap().standing.get(path) == Some(&st) {
+            return true;
+        }
         if pieces::stand(self.dir().as_deref(), path, st) {
+            let mut ix = self.indexer.lock().unwrap();
+            ix.standing.insert(path.to_string(), st);
             return true;
         }
         self.index_for(path, st).is_some() && !st.settled()
