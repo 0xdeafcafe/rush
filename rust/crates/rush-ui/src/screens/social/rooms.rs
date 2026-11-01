@@ -89,6 +89,14 @@ impl Model {
         );
     }
 
+    /// Whether a room the list last read is running, so the rooms are
+    /// read again each second (chores.rs).
+    pub(crate) fn rooms_running(&self) -> bool {
+        self.kept
+            .peek::<RoomRows>()
+            .is_some_and(|rr| rr.list.iter().any(|s| s.running))
+    }
+
     /// The room an agent's row is, or is a member of (roomOf).
     pub fn room_of(&self, key: &str) -> Option<&Summary> {
         let rr = self.kept.peek::<RoomRows>()?;
@@ -175,6 +183,17 @@ impl Grouped {
 pub enum Under {
     Room(String),
     Member(usize),
+}
+
+/// The tick's want: a running rush whose last reading has a room running.
+pub fn any_running(m: &Model) -> bool {
+    m.sender().is_some() && m.rooms_running()
+}
+
+/// The tick's reading of the rooms (Go's loadRooms on each second's
+/// refresh); a reading already under way is left to land.
+pub fn tick_rooms(m: &mut Model) {
+    m.load_rooms();
 }
 
 /// The agents the list lays out with each room as one row in place of its
