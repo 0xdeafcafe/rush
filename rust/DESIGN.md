@@ -534,6 +534,13 @@ on every frame. Go retains about 22 MiB for the same.
    memory view's and review's notes, settings' files, ctrl+g's draft)
    and a sign-in sent to the terminal. With no loop (tests) a program
    waits for `Model::run_outside`.
+   The kitty keyboard is asked for flags 1 and 2 (`\x1b[>3u`): keys
+   disambiguated, and their event types, so a held key's repeats come as
+   `Event::KeyRepeat` (handled as a press everywhere) and its letting go
+   as `Event::KeyUp` (ignored everywhere but push-to-talk,
+   rush-ui-social's `dictation.rs`, which the model reaches through
+   `Calls::dictation_released`). `Term::reports_releases` says whether
+   the terminal answered the kitty query; without it ctrl+space toggles.
 3. **Workers**: discovery (sessions/jobs files, process liveness), spend
    scanning (incremental from the last offset), previews, the open
    transcript's tail (its last 2 MB first; a longer one is then read

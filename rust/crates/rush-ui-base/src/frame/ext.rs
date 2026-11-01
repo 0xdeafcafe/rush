@@ -512,6 +512,24 @@ calls! {
     /// Whether the feed follows is now config's (social/stream.rs
     /// feed_follows).
     feed_follows("social"): fn(&mut Model, bool),
+    /// A key let go: only push-to-talk's (social/dictation.rs released).
+    dictation_released("social"): fn(&mut Model, rush_draw::Key, rush_draw::KeyMods) -> rush_draw::Step,
+    /// A held key said again, typed again as a press is (social/dictation.rs
+    /// repeated).
+    dictation_repeated("social"): fn(&mut Model, rush_draw::Key, rush_draw::KeyMods) -> rush_draw::Step,
+    /// yap followed while its plugin is on, push-to-talk dropped when its
+    /// plugin goes off (social/dictation.rs sync).
+    dictation_sync("social"): fn(&mut Model),
+    /// The microphones asked for again (social/dictation.rs read_mics).
+    dictation_read_mics("social"): fn(&mut Model),
+    /// The microphones push-to-talk's engine said it has, as last asked:
+    /// each one's id and name (social/dictation.rs mics).
+    dictation_mics("social"): fn(&Model) -> Vec<(String, String)>,
+    /// Settings chose a microphone (social/dictation.rs set_mic).
+    dictation_set_mic("social"): fn(&mut Model, &str),
+    /// Whether a bundled plugin is on, as last read: off until it's known
+    /// (plugin_ui's Plugins::bundled_on).
+    bundled_on("plugin_ui"): fn(&Model, &str) -> bool,
     /// The id of the one session a hosted view shows (hosted.rs id).
     hosted_id("hosted"): fn(&Model) -> Option<&str>,
     /// A hosted view showing its one session, the list hidden (hosted.rs

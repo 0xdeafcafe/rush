@@ -1,6 +1,7 @@
 //! rush's own keys, as its key handling is written.
 //!
-//! Ported from internal/keymap/defaults.go:1-148 (list.land as of 2e4662ff; session.remember as of b2a1a0b3).
+//! Ported from internal/keymap/defaults.go:1-148 (list.land as of 2e4662ff; session.remember as of b2a1a0b3);
+//! voice.talk is new in the Rust port.
 
 use crate::{Action, Context};
 
@@ -36,6 +37,10 @@ const DEFAULTS: &[Row] = &[
     ("grid.unpin", G, "take the newest tile off the grid", &["ctrl+] k"], true),
     ("quick.ask", G, "the guide: ask rush what's next, where something is, or anything quick; again moves the keys", &["alt+/", "ctrl+] q"], true),
     ("profile.pick", G, "switch the default profile or provider", &["ctrl+] w", "alt+w"], false),
+    // Push-to-talk, while the apple voice plugin is on (new in the Rust
+    // port): its press and its letting go are handled in
+    // screens/social/dictation.rs, so it stands in for itself.
+    ("voice.talk", G, "push to talk (apple voice): hold to speak and let go, or tap to start and tap again to stop", &["ctrl+space"], false),
 
     ("list.up", L, "the agent above", &["up"], false),
     ("list.down", L, "the agent below", &["down"], false),

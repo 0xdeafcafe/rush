@@ -77,7 +77,23 @@ pub enum MouseKind {
 /// One thing from the terminal.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Event {
+    /// A key pressed.
     Key {
+        code: Key,
+        mods: KeyMods,
+    },
+    /// A key held down saying itself again, from a terminal that tells
+    /// repeats apart (the kitty keyboard's event types). Handle it as a
+    /// press, as typing's auto-repeat wants; only what must tell a press
+    /// from holding (push-to-talk) looks closer.
+    KeyRepeat {
+        code: Key,
+        mods: KeyMods,
+    },
+    /// A key let go, from a terminal that says so (Term::reports_releases).
+    /// Ignore it, as every key handling did before there was one; only
+    /// push-to-talk listens for it.
+    KeyUp {
         code: Key,
         mods: KeyMods,
     },
@@ -108,7 +124,9 @@ impl Event {
     /// as itself, anything else as its keystroke. None when not a key.
     pub fn key_string(&self) -> Option<String> {
         match self {
-            Event::Key { code, mods } => Some(key_string(*code, *mods)),
+            Event::Key { code, mods } | Event::KeyRepeat { code, mods } => {
+                Some(key_string(*code, *mods))
+            }
             _ => None,
         }
     }
@@ -215,14 +233,11 @@ fn legacy_ctrl(c: char) -> char {
     }
 }
 
-/// crossterm's event as rush's; None for ones rush doesn't use (key
-/// releases, keys it has no name for).
+/// crossterm's event as rush's; None for ones rush doesn't use (keys it
+/// has no name for). A repeat and a release are their own events.
 pub(crate) fn translate(e: ct::Event) -> Option<Event> {
     Some(match e {
         ct::Event::Key(k) => {
-            if k.kind == ct::KeyEventKind::Release {
-                return None;
-            }
             let mut mods = key_mods(k.modifiers);
             let code = match k.code {
                 ct::KeyCode::Char(c) if mods == KeyMods::CTRL => Key::Char(legacy_ctrl(c)),
@@ -249,7 +264,11 @@ pub(crate) fn translate(e: ct::Event) -> Option<Event> {
                 ct::KeyCode::F(n) => Key::F(n),
                 _ => return None,
             };
-            Event::Key { code, mods }
+            match k.kind {
+                ct::KeyEventKind::Press => Event::Key { code, mods },
+                ct::KeyEventKind::Repeat => Event::KeyRepeat { code, mods },
+                ct::KeyEventKind::Release => Event::KeyUp { code, mods },
+            }
         }
         ct::Event::Mouse(m) => {
             let kind = match m.kind {
@@ -342,13 +361,57 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(e.key_string().as_deref(), Some("ctrl+shift+6"));
-        let release = ct::Event::Key(KeyEvent {
-            code: KeyCode::Char('a'),
-            modifiers: KeyModifiers::NONE,
+        // A repeat and a release, as the kitty keyboard's event types say:
+        // each its own event, named as the press is.
+        let kinds = [
+            (
+                KeyEventKind::Repeat,
+                Event::KeyRepeat {
+                    code: Key::Char('a'),
+                    mods: KeyMods::NONE,
+                },
+            ),
+            (
+                KeyEventKind::Release,
+                Event::KeyUp {
+                    code: Key::Char('a'),
+                    mods: KeyMods::NONE,
+                },
+            ),
+        ];
+        for (kind, want) in kinds {
+            let e = ct::Event::Key(KeyEvent {
+                code: KeyCode::Char('a'),
+                modifiers: KeyModifiers::NONE,
+                kind,
+                state: KeyEventState::NONE,
+            });
+            assert_eq!(translate(e), Some(want), "{kind:?}");
+        }
+        // ctrl+space, held and let go, is push-to-talk's.
+        let up = translate(ct::Event::Key(KeyEvent {
+            code: KeyCode::Char(' '),
+            modifiers: KeyModifiers::CONTROL,
             kind: KeyEventKind::Release,
             state: KeyEventState::NONE,
-        });
-        assert_eq!(translate(release), None);
+        }));
+        assert_eq!(
+            up,
+            Some(Event::KeyUp {
+                code: Key::Char(' '),
+                mods: KeyMods::CTRL
+            })
+        );
+        let rep = translate(ct::Event::Key(KeyEvent {
+            code: KeyCode::Char(' '),
+            modifiers: KeyModifiers::CONTROL,
+            kind: KeyEventKind::Repeat,
+            state: KeyEventState::NONE,
+        }));
+        assert_eq!(
+            rep.and_then(|e| e.key_string()).as_deref(),
+            Some("ctrl+space")
+        );
         let m = ct::Event::Mouse(ct::MouseEvent {
             kind: ct::MouseEventKind::Down(ct::MouseButton::Left),
             column: 3,

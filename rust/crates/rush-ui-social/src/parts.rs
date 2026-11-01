@@ -7,7 +7,7 @@
 //! the screen that owns the box or the view to call.
 
 use rush_core::adapter::Registry;
-use rush_core::text::{Color, Line};
+use rush_core::text::Line;
 
 use super::ink::spread;
 use crate::style::*;
@@ -324,20 +324,9 @@ pub fn shelf_tile(n: usize, word: &str) -> Line {
 
 // --- dictation's look ---
 
-/// The look's colours, in steps from each's resting colour to its lit one.
-pub const YAP_STEPS: usize = 16;
-
-/// A dictation as a box draws it (liveText).
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct LiveText {
-    pub settled: String,
-    pub guessing: String,
-    /// How loud, 0 to 1.
-    pub level: f64,
-    pub frame: usize,
-    /// What's going on, in the box's bottom edge.
-    pub hint: String,
-}
+// The look itself is the input box's, which draws it (rush-ui-base's
+// frame/inputbox.rs); here at their old path.
+pub use crate::frame::inputbox::{LiveText, YAP_STEPS, yap_glint, yap_ink, yap_step, yap_sweep};
 
 /// What yap says of a dictation (yap.State, as its plugin writes it).
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -379,61 +368,6 @@ impl YapState {
             hint: hint.into(),
         }
     }
-}
-
-/// The step of the look's colours k (0 to 1) is (yapStep).
-pub fn yap_step(k: f64) -> usize {
-    (k.clamp(0.0, 1.0) * YAP_STEPS as f64 + 0.5) as usize
-}
-
-/// How lit the text at column x of row y is: a band of light leaning
-/// like yap's, crossing w columns every 1.6s, as wide as a third of them
-/// (yapSweep).
-pub fn yap_sweep(frame: usize, x: usize, y: usize, w: usize) -> f64 {
-    const PERIOD: usize = 32; // frames a crossing
-    let band = (w as f64 / 3.0).clamp(3.0, 8.0);
-    let at = -band + (frame % PERIOD) as f64 / PERIOD as f64 * (w as f64 + 2.0 * band);
-    let d = (x as f64 + 2.0 * y as f64 - at).abs();
-    if d >= band {
-        return 0.0;
-    }
-    let k = 1.0 - d / band;
-    k * k
-}
-
-/// How lit a cell of the box's edge is, `around` cells clockwise from its
-/// top left out of n: a light with a fading tail, round the box every
-/// 2.4s (yapGlint).
-pub fn yap_glint(frame: usize, around: usize, n: usize) -> f64 {
-    const LAP: usize = 48;
-    const TAIL: f64 = 28.0;
-    if n == 0 {
-        return 0.0;
-    }
-    let at = (frame % LAP) * n / LAP;
-    let d = ((at as isize - around as isize) % n as isize + n as isize) % n as isize;
-    let d = d as f64;
-    if d >= TAIL {
-        return 0.0;
-    }
-    let k = 1.0 - d / TAIL;
-    k * k
-}
-
-/// The look's inks at step i of YAP_STEPS: the settled words, the guessed
-/// ones, the box's edge, and the cursor's ground (yapColours).
-pub fn yap_ink(i: usize) -> (Color, Color, Color, Color) {
-    let t = i.min(YAP_STEPS) as f64 / YAP_STEPS as f64;
-    let text = Color::Rgb(226, 221, 211);
-    let lit = Color::Rgb(255, 250, 240);
-    let ground = Color::Rgb(40, 36, 32);
-    let (orange, glint) = (Color::Rgb(217, 119, 87), Color::Rgb(255, 232, 205));
-    (
-        mix(text, lit, t),
-        mix(mix(text, ground, 0.5), lit, t),
-        mix(orange, glint, t),
-        mix(mix(orange, ground, 0.55), mix(orange, glint, 0.25), t),
-    )
 }
 
 /// How long after yap says it's done its paste is taken as the
@@ -490,6 +424,7 @@ pub fn went_to(did: &str, tab: &str, on: bool, history: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rush_core::text::Color;
 
     #[test]
     fn disks() {

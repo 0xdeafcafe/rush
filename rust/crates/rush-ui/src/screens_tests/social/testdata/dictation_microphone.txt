@@ -1,0 +1,6 @@
+▍ Microphone                      ‹ Mac's input                    ›            
+Mac's input: the Mac's input, whichever it is when you start talking.
+  Microphone                      ‹ AirPods Pro                    › 
+AirPods Pro: push-to-talk hears AirPods Pro.
+  Microphone                      ‹ a microphone not plugged in    › 
+a microphone not plugged in: it isn't plugged in now, so push-to-talk hears the Mac's input.

@@ -24,12 +24,14 @@ use crate::services::ModelUpdates;
 use crate::stream::ModelStream;
 
 pub mod broadcast;
+pub mod dictation;
 pub mod dock;
 pub mod feed;
 pub mod feedgraph;
 pub mod ink;
 pub mod memo;
 pub mod parts;
+pub mod pushtalk;
 pub mod rooms;
 pub mod roomsetup;
 pub mod services;
@@ -57,6 +59,10 @@ pub fn register(x: &mut Ext) {
         "run the installed rush in this one's place · all for every window",
         |m, arg| m.reload(arg.trim() == "all"),
     );
+    // Push-to-talk's key and esc before anything else has them, and yap's
+    // paste before a box folds it (dictation.rs).
+    x.keys.insert(0, dictation::key);
+    x.paste.insert(0, dictation::paste);
     x.list_keys.push(broadcast::list_key);
     x.mouse.push(broadcast::mouse);
     x.submit.push(broadcast::submit);
