@@ -68,6 +68,8 @@ fn run_model(
     screens::settings::apply_colors(&mut m);
     // Links rush knows the kind of say where they stand (model.go:448).
     screens::cmdbar::linkkinds::start(&m);
+    // The conversation's pictures, made off the UI (convo.Picture).
+    screens::session_cards::pictures::start(&m);
     // Anything holding the UI thread over 40 ms is noted in stalls.log.
     frame::uistall::watch_ui(config::dir().join("stalls.log"));
     // Hosted leaves past conversations out of each reading until its
@@ -89,6 +91,14 @@ fn run_model(
         })));
     });
     worker::spawn_discovery_with(lp.sender(), is_hosted, Some(give));
+    // The battery and disk, read again while shown, drawn when they show
+    // differently (screens/bars/top.rs).
+    let tx = lp.sender().lane(1);
+    rush_sys::sysinfo::on_read(move |was, now| {
+        if screens::bars::top::shows_differently(was, now) {
+            let _ = tx.try_send(worker::Note::Apply(Box::new(|_| frame::Out::Draw)));
+        }
+    });
     // As Go's Init (internal/ui/model.go:548): plugins connected
     // (startHooks, pluginui.go:36), and the layout kept, or asked for the
     // first time (startView, model.go:574).
@@ -105,6 +115,8 @@ fn run_model(
     // (model.go:556 Init).
     if hosted.is_none() {
         screens::settings::sheets::watch_net(&mut m);
+        // The icon is this rush's to start and stop (not a --soak copy's).
+        m.kept::<screens::settings::sheets::MenuBarOwner>().0 = true;
         screens::settings::sheets::start_menu_bar(&mut m);
         screens::settings::updates::start(&mut m);
         screens::settings::sheets::start_view(&mut m);

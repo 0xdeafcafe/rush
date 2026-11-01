@@ -95,6 +95,7 @@ fn model(n: usize, w: usize, h: usize) -> Model {
         roots,
         previews: HashMap::new(),
         priced: true,
+        accounts: Vec::new(),
     });
     m
 }

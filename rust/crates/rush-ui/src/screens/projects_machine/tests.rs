@@ -659,3 +659,34 @@ fn a_busy_agent_says_what_it_runs() {
     assert!(b.contains(&want), "{want:?}\n{b}");
     assert!(!b.contains("in the background"), "{b}");
 }
+
+/// Clean up is suggested once the whole scan is in, sizes and all, never
+/// on a reading of the list before it ("– could be cleaned up"), and
+/// then not again that day (cleanup.go:376-379 onWorktrees, sweep 3
+/// P3-6).
+#[test]
+fn clean_up_is_suggested_once_sizes_are_in() {
+    let mut m = model(Vec::new(), 140, 50, classic());
+    m.set_place(PlaceId::Agents);
+    let big = Scratch {
+        stale: 3 << 30,
+        stale_items: 4,
+        ..Scratch::default()
+    };
+    m.kept::<Data>().tmp = big.clone();
+    m.set_fleet(Fleet::default());
+    let said = |m: &Model| {
+        m.said
+            .iter()
+            .filter(|l| l.text.contains("could be cleaned up"))
+            .map(|l| l.text.clone())
+            .collect::<Vec<_>>()
+    };
+    assert!(said(&m).is_empty(), "before the scan: {:?}", said(&m));
+    super::scan::on_worktrees(&mut m, super::scan::found_tmp(big.clone()));
+    let got = said(&m);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(got[0].starts_with("3.0G could be cleaned up"), "{}", got[0]);
+    super::scan::on_worktrees(&mut m, super::scan::found_tmp(big));
+    assert_eq!(said(&m).len(), 1, "once a day");
+}

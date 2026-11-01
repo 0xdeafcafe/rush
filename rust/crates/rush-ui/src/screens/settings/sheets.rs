@@ -239,7 +239,11 @@ impl MenuBarSheet {
 /// rush that leads starts it (a following one, a test or `--render`
 /// never does: it's an app on the Mac, not this window's).
 pub fn start_menu_bar(m: &mut Model) {
-    if !super::store(m).config.menu_bar || m.sender().is_none() || !m.leads() {
+    if !super::store(m).config.menu_bar || !owns_menu_bar(m) {
+        return;
+    }
+    if cfg!(test) {
+        m.kept::<Asked>().0.push(true); // tests never reach the real icon
         return;
     }
     m.later(rush_menubar::start, |m, r| match r {
@@ -254,11 +258,51 @@ pub fn start_menu_bar(m: &mut Model) {
 /// Quits the menu bar icon, every copy of it (menubar.Stop): it reads its
 /// lock file and runs pkill, so off the UI. Only the rush that leads.
 pub fn stop_menu_bar(m: &mut Model) {
-    if m.sender().is_none() || !m.leads() {
+    if !owns_menu_bar(m) {
+        return;
+    }
+    if cfg!(test) {
+        m.kept::<Asked>().0.push(false); // tests never reach the real icon
         return;
     }
     m.later(rush_menubar::stop, |_, ()| Out::Idle);
 }
+
+/// The interactive rush's mark that the menu bar icon is its to start and
+/// stop: only `run` sets it (lib.rs), so a `rush --soak` copy, which has
+/// workers and may lead, never touches the real icon (Go's m.offline in
+/// startMenuBar, model.go:603).
+#[derive(Default)]
+pub struct MenuBarOwner(pub bool);
+
+/// Whether this rush may start or stop the icon: the interactive one, with
+/// a loop to do it off the UI, and leading.
+fn owns_menu_bar(m: &mut Model) -> bool {
+    m.kept::<MenuBarOwner>().0 && m.sender().is_some() && m.leads()
+}
+
+/// What start_menu_bar and stop_menu_bar went on to do, in tests: they
+/// never reach the real icon there.
+#[derive(Default)]
+pub struct Asked(pub Vec<bool>);
+
+/// The icon turned on or off in config.json by another rush: started or
+/// stopped here, if this rush leads (start_menu_bar and stop_menu_bar
+/// ask); a following one leaves it to the one that does.
+pub fn menu_bar_turned(m: &mut Model, on: bool) {
+    #[cfg(test)]
+    m.kept::<Turned>().0.push(on);
+    if on {
+        start_menu_bar(m);
+    } else {
+        stop_menu_bar(m);
+    }
+}
+
+/// What menu_bar_turned was asked, for tests.
+#[cfg(test)]
+#[derive(Default)]
+pub struct Turned(pub Vec<bool>);
 
 /// What the menu bar row and sheet do once the choice is kept: the icon
 /// started or stopped at once (settings_general.go:126-136); a rush that

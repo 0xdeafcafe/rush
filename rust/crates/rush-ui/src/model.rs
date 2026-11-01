@@ -34,6 +34,10 @@ pub struct Model {
     pub reg: Registry,
     pub agents: Vec<Agent>,
     pub roots: Vec<String>,
+    /// Each account's folder with its usage, what its sessions spent
+    /// today and how many run, as the list's reading had them (Go's
+    /// m.snap.Accounts).
+    pub accounts: Vec<rush_fleet::AccountView>,
     pub previews: HashMap<String, Preview>,
     pub cfg: Config,
     pub now: Ms,
@@ -133,6 +137,16 @@ pub struct Model {
     pub(crate) memo: std::rc::Rc<crate::frame::framememo::FrameMemo>,
     /// A wake-up a screen asked for (Model::wake_at).
     wake: Option<Instant>,
+    /// When a label the last frame drew changes its text with the clock
+    /// alone (style::turns_in).
+    turn: Option<Instant>,
+    /// When a list group's time runs out for an agent the list shows:
+    /// it's laid out again then (rebuild).
+    pub(crate) regroup: Option<Instant>,
+    /// The last frame showed more than the list, whose times aren't all
+    /// noted: drawn again when the chores wake the loop, as often as the
+    /// hosts are looked at (chores.rs).
+    clock_frame: bool,
     r#gen: u64,
     title: String,
     /// The rows of the frame drawn last (App::draw).
@@ -153,6 +167,7 @@ impl Model {
             reg: global().clone(),
             agents: Vec::new(),
             roots: Vec::new(),
+            accounts: Vec::new(),
             previews: HashMap::new(),
             cfg: Config::default(),
             now: now(),
@@ -213,6 +228,9 @@ impl Model {
             hold: Hold::default(),
             memo: Default::default(),
             wake: None,
+            turn: None,
+            regroup: None,
+            clock_frame: false,
             r#gen: 0,
             title: String::new(),
             drawn: Vec::new(),
@@ -237,6 +255,7 @@ impl Model {
         self.agents = f.agents;
         crate::hosted::snap(self);
         self.roots = f.roots;
+        self.accounts = f.accounts;
         // Forget agents that are gone.
         let keys: HashSet<&str> = self.agents.iter().map(|a| a.key.as_str()).collect();
         self.asked.retain(|k, _| keys.contains(k.as_str()));
@@ -428,17 +447,49 @@ impl Model {
                 );
             }
         }
+        // Its end read ahead of time, as the list was moved through
+        // (list_extras/predict.rs): shown now if nothing was written
+        // since, else topped up first on the tail's worker.
+        let ahead = match &v.source {
+            session::Source::Transcript { path, .. } if self.tx.is_some() => {
+                crate::screens::list_extras::predict::take(self, &a.key, path)
+            }
+            _ => None,
+        };
+        let start = ahead.map(|h| {
+            if h.fresh {
+                v.seed(*h.sess);
+                rush_draw::perf_note(|| format!("tail end gen={} ahead", self.r#gen));
+                worker::TailStart::From(h.tail, None)
+            } else {
+                worker::TailStart::From(h.tail, Some(h.sess))
+            }
+        });
         match &self.tx {
             Some(tx) => {
                 v.tail = match &v.source {
-                    session::Source::Transcript { path, decode } => worker::spawn_tail(
-                        path.clone(),
-                        self.r#gen,
-                        tx.clone(),
-                        decode.clone(),
-                        v.drawn.clone(),
-                        Some((self.reg.clone(), a.kind.as_str().to_string())),
-                    ),
+                    session::Source::Transcript { path, decode } => {
+                        let drawn = v.drawn.clone();
+                        let spawns = Some((self.reg.clone(), a.kind.as_str().to_string()));
+                        match start {
+                            Some(s) => worker::spawn_tail_at(
+                                s,
+                                self.r#gen,
+                                tx.clone(),
+                                decode.clone(),
+                                drawn,
+                                spawns,
+                            ),
+                            None => worker::spawn_tail(
+                                path.clone(),
+                                self.r#gen,
+                                tx.clone(),
+                                decode.clone(),
+                                drawn,
+                                spawns,
+                            ),
+                        }
+                    }
                     session::Source::History { adapter, session } => {
                         // A stopped rush session's folder is its host's
                         // to say, when the list doesn't (history.go:53).
@@ -651,6 +702,7 @@ impl Model {
     fn step(&mut self, d: isize) {
         self.move_sel(d);
         self.ask_preview();
+        crate::screens::list_extras::predict::moved(self, d);
     }
 
     fn session_rows(&self) -> usize {
@@ -806,6 +858,9 @@ impl Model {
     /// The frame as lines, top to bottom, h of them: the place showing,
     /// then what's over it (view.go:604 render).
     pub fn frame(&mut self) -> Vec<Line> {
+        if let Some(q) = self.confirm.as_mut() {
+            q.inlined = false; // the box asking it inline says so as it's drawn
+        }
         let _drawing = crate::frame::framememo::FrameMemo::drawing(&self.memo);
         self.frame_rows()
     }
@@ -814,6 +869,7 @@ impl Model {
         let h = self.h;
         self.now = self.clock.unwrap_or_else(now);
         crate::screens::list_extras::split::settle(self);
+        let mut inexact = self.on_place();
         let mut out = if self.on_place() {
             self.spinning = false;
             self.place_frame()
@@ -823,9 +879,11 @@ impl Model {
             let body_h = h.saturating_sub(head + 1);
             let (lw, pw) = crate::screens::list_extras::split::widths(self);
             if lw > 0 && pw > 0 {
+                inexact = true;
                 self.split_frame(&mut out, body_h, lw, pw);
             } else {
                 if self.session.is_some() {
+                    inexact = true;
                     // Tiles pinned to the grid take a column beside the
                     // Session, or a row under it (view.go:1216).
                     let w = self.w;
@@ -864,6 +922,12 @@ impl Model {
         }
         self.overlays(&mut out);
         out.truncate(h);
+        self.clock_frame = inexact
+            || self.sheet.is_some()
+            || self.help
+            || self.confirm.is_some()
+            || crate::screens::cmdbar::bar::is_open(self)
+            || crate::screens::cmdbar::keyhelp::is_open(self);
         out
     }
 
@@ -965,7 +1029,10 @@ impl Model {
             while p.len() < rows.saturating_sub(1) {
                 p.push(Line::new());
             }
-            p.push(m.status_line(w));
+            // Beside the list, the list's line says what rush said: the
+            // Session keeps its keys (rushmode.go:3862-3866 shows it there
+            // only with the Session on the whole screen).
+            p.push(m.foot_line(w, false));
             p
         })
     }
@@ -1148,7 +1215,14 @@ impl Model {
 
     /// The bottom row, w wide: a flash for a few seconds, else the keys.
     fn status_line(&self, w: usize) -> Line {
-        if self.status_shown()
+        self.foot_line(w, true)
+    }
+
+    /// The bottom row, w wide: the keys, or with flash a flash for a few
+    /// seconds in their place.
+    fn foot_line(&self, w: usize, flash: bool) -> Line {
+        if flash
+            && self.status_shown()
             && let Some((s, _, err)) = &self.flash
         {
             let c = if *err { RED } else { TEXT };
@@ -1282,7 +1356,10 @@ impl Model {
         } else if a.pid != 0 {
             line([sp("idle · still in memory", DIM)])
         } else {
-            line([sp(format!("finished {} ago", age(a.age(self.now))), DIM)])
+            line([sp(
+                format!("finished {} ago", age_since(a.age(self.now))),
+                DIM,
+            )])
         };
         let tw = title.width();
         let mut top = line([edge("╭─ ")]);
@@ -1532,10 +1609,26 @@ impl Model {
             Note::Tail { r#gen, fresh } => match self.view_of(r#gen) {
                 Some(v) => {
                     let first = !v.read;
-                    v.take(*fresh);
-                    if first {
-                        self.hold.answer(); // "reading the conversation…" goes now
+                    let ended = v.take(*fresh);
+                    if ended {
+                        rush_draw::perf_note(|| format!("tail end gen={}", r#gen));
                     }
+                    if first || ended {
+                        // "reading the conversation…" goes now, and the
+                        // end it was read for shows once all in, not a
+                        // quarter second after its first slice.
+                        self.hold.answer();
+                    }
+                    self.follow_tail();
+                    Step::Draw
+                }
+                _ => Step::Idle,
+            },
+            Note::Seeded { r#gen, sess } => match self.view_of(r#gen) {
+                Some(v) if !v.read => {
+                    v.seed(*sess);
+                    rush_draw::perf_note(|| format!("tail end gen={} ahead", r#gen));
+                    self.hold.answer(); // "reading the conversation…" goes now
                     self.follow_tail();
                     Step::Draw
                 }
@@ -1644,6 +1737,8 @@ impl App<Note> for Model {
         let _busy = uistall::busy("frame");
         self.w = c.width() as usize;
         self.h = c.height() as usize;
+        crate::style::take_turn();
+        rush_sys::sysinfo::unasked();
         let rows = self.frame();
         // The same rows as the frame on screen: it stands as it is.
         if c.can_keep() && rows == self.drawn {
@@ -1655,11 +1750,18 @@ impl App<Note> for Model {
             self.drawn = rows;
         }
         self.title = self.make_title();
-        self.hold.drew(Instant::now());
+        let drawn = Instant::now();
+        self.hold.drew(drawn);
+        // A few ms past the turn, so the clock has passed it.
+        self.turn = crate::style::take_turn()
+            .map(|d| drawn + Duration::from_millis(d as u64) + Duration::from_millis(5));
     }
 
     fn wake_at(&self) -> Option<Instant> {
-        let at = self.draw_at();
+        let at = [self.draw_at(), self.turn, self.regroup]
+            .into_iter()
+            .flatten()
+            .min();
         match crate::chores::due_at(self) {
             Some(c) => Some(at.map_or(c, |a: Instant| a.min(c))),
             None => at,
@@ -1669,9 +1771,24 @@ impl App<Note> for Model {
     fn wake(&mut self) -> Step {
         let now_i = Instant::now();
         // Chores alone draw nothing: what they do lands as its own note.
-        crate::chores::run_due(self, now_i);
-        if self.draw_at().is_none_or(|t| t > now_i) {
-            return Step::Idle;
+        // A frame showing more than the list is drawn again with them.
+        let chores = crate::chores::run_due(self, now_i);
+        let due = |t: Option<Instant>| t.is_some_and(|t| t <= now_i);
+        // A label's or a group's time alone neither moves the spinners'
+        // tick nor runs what moves with it.
+        let clock = due(self.turn) || due(self.regroup) || chores && self.clock_frame;
+        if self.turn.is_some_and(|t| t <= now_i) {
+            self.turn = None;
+        }
+        // A group's time ran out: the list laid out again (Go lays it out
+        // every second, rebuild on each reading).
+        if self.regroup.is_some_and(|t| t <= now_i) {
+            self.regroup = None;
+            self.now = self.clock.unwrap_or_else(now);
+            self.rebuild();
+        }
+        if !due(self.draw_at()) {
+            return if clock { Step::Draw } else { Step::Idle };
         }
         self.wake_draw(now_i)
     }

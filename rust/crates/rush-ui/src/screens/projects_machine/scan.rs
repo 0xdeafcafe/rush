@@ -325,6 +325,9 @@ pub(crate) fn on_worktrees(m: &mut Model, f: Found) {
     if let Some(t) = f.tmp {
         st.tmp = t;
     }
+    // Only on the whole scan, sizes in: git's look alone has none, and the
+    // one nudge a day would say "–" (cleanup.go:376-379).
+    super::clean::nudge_clean(m);
 }
 
 /// What the few biggest processes under each orphan run, in words: their
@@ -557,6 +560,36 @@ pub(crate) fn refresh_prs(m: &mut Model) {
         .filter(|p| p.repo)
         .map(|p| p.key)
         .collect();
+    ask_prs(m, roots);
+}
+
+/// The open agent's repository asked of GitHub when due, wherever rush
+/// is, for its Overview and Changes and its finishing card (refreshPRs'
+/// m.host, prs.go:72). Only with a loop to ask it off the UI, and never
+/// in tests (frozen).
+pub(crate) fn refresh_open_prs(m: &mut Model) {
+    if m.sender().is_none() || d(m).frozen {
+        return;
+    }
+    let Some(key) = m.session.as_ref().map(|v| v.key.clone()) else {
+        return;
+    };
+    let Some(i) = m.agents.iter().position(|a| a.key == key) else {
+        return;
+    };
+    let a = &m.agents[i];
+    if a.repo.is_empty() {
+        return;
+    }
+    let root = m.roots.get(i).map_or("", String::as_str);
+    let k = crate::list::folder_key(a, root).to_string();
+    if std::path::Path::new(&k).is_absolute() {
+        ask_prs(m, vec![k]);
+    }
+}
+
+/// Asks GitHub of each of roots whose answer is due, off the UI.
+fn ask_prs(m: &mut Model, roots: Vec<String>) {
     let t = now();
     for root in roots {
         let st = d(m);
@@ -651,4 +684,16 @@ pub(crate) fn open_temp(m: &mut Model, key: &str) {
             Out::Draw
         },
     );
+}
+
+/// What a scan found of /tmp alone, for tests.
+#[cfg(test)]
+pub(crate) fn found_tmp(tmp: rush_fleet::Scratch) -> Found {
+    Found {
+        wts: Vec::new(),
+        tmp: Some(tmp),
+        agent_tmp: HashMap::new(),
+        peeks: HashMap::new(),
+        outside: Vec::new(),
+    }
 }

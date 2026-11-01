@@ -512,6 +512,10 @@ fn a_draft_is_carried_to_another_session() {
     m.roots = vec![String::new(); 2];
     m.rebuild();
     conn(&mut m, "default/k2").input.set("its own draft");
+    // Beside the list: from the Session alone the keys stay its, as Go's
+    // toPrompt leaves m.full (tests_split.rs).
+    (m.full, m.w) = (false, 160);
+    assert!(crate::screens::list_extras::split::side_by_side(&m));
     typed(&mut m, "meant for the other one");
     run_action(&mut m, "session.carry");
     assert!(m.session.is_none(), "the Prompt has the keys");

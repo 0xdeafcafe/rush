@@ -317,6 +317,7 @@ fn twelve_working(m: &mut Model) {
         roots: vec!["/src/checkout".into(); 12],
         previews: Default::default(),
         priced: true,
+        accounts: Vec::new(),
     });
 }
 
