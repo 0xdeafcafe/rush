@@ -18,20 +18,20 @@ use super::line::{Ctx, Seg, bar_line};
 use crate::accounts::{cfg, peek};
 use crate::header::Drops;
 use crate::look::{LOGINS_KIND, look_of, provider_name};
+use crate::meters::{MeterRow, meter_row, mini_bar, pct, usage_color};
 use crate::model::Model;
-use crate::screens::accounts::rows::{
-    AcctRow, account_rows, accounts_of, start_account, start_dir, start_kind, start_profile,
-    start_quota, switches,
-};
-use crate::screens::list_extras::meters::{MeterRow, meter_row, mini_bar, pct, usage_color};
-use crate::screens::list_extras::plan::{
+use crate::plan::{
     InQueue, Queue, account_chain, compact_window, drains, plan_rows, plan_summary, reset_in,
     system_alerts, upcoming,
 };
-use crate::screens::projects_machine::{TEMP_SHOWN, machine, temp_known};
-use crate::screens::social::services::ModelUpdates;
 use crate::style::disk;
 use crate::style::*;
+use rush_ui_accounts::rows::{
+    AcctRow, account_rows, accounts_of, start_account, start_dir, start_kind, start_profile,
+    start_quota, switches,
+};
+use rush_ui_projects_machine::{TEMP_SHOWN, machine, temp_known};
+use rush_ui_social::services::ModelUpdates;
 
 const HOUR: Ms = 3_600_000;
 
@@ -230,7 +230,7 @@ pub static SEGS: &[Seg] = &[
         id: "account",
         name: "Account",
         about: "the agent and account new agents start on, and their profile",
-        draw: |x| crate::screens::accounts::look::start_tag(x.m),
+        draw: |x| rush_ui_accounts::look::start_tag(x.m),
     },
     Seg {
         id: "clock",
@@ -380,7 +380,7 @@ pub fn acct_queues(m: &Model) -> (Vec<Queue>, Vec<MeterRow>) {
                 })
                 .collect();
             for l in &logins {
-                crate::screens::list_extras::plan::note_resets(&l.quota, now);
+                crate::plan::note_resets(&l.quota, now);
             }
             for k in rush_fleet::chain(&logins, now) {
                 qu.accts.push(InQueue {
@@ -484,7 +484,7 @@ fn other_meters(m: &Model, k: &str, w: usize) -> Line {
         .into_iter()
         .filter(|r| r.kind != k)
         .map(|mut r| {
-            crate::screens::list_extras::plan::note_resets(&r.q, now);
+            crate::plan::note_resets(&r.q, now);
             r.q = r.q.since(now); // a window that has reset since is empty
             r
         })
@@ -571,9 +571,9 @@ fn usage_detail(m: &Model, u: &Quota, cells: usize, when: bool) -> Line {
         .iter()
         .map(|r| meter_of(m, r))
         .collect();
-    crate::screens::list_extras::plan::note_resets(u, now);
+    crate::plan::note_resets(u, now);
     for a in &accts {
-        crate::screens::list_extras::plan::note_resets(&a.q, now);
+        crate::plan::note_resets(&a.q, now);
     }
     let waits = cfg(m).default_profile().limit() == rush_state::profiles::LIMIT_WAIT;
     if let Some(next) = upcoming(&accts, u.used(""), waits, now) {
@@ -682,10 +682,7 @@ fn runs_out(pct_: f64, rate: f64, resets: Ms, now: Ms) -> Option<Span> {
     }
     crate::style::turns_in(60_000); // the rate moves with the clock
     Some(sp(
-        format!(
-            " out in {}",
-            crate::screens::list_extras::plan::roughly_left(left)
-        ),
+        format!(" out in {}", crate::plan::roughly_left(left)),
         RED,
     ))
 }

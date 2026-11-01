@@ -12,7 +12,8 @@ use crate::screens::social::services::ModelReload;
 use crate::screens::social::stream::ModelStream;
 use crate::session::SessionView;
 
-pub mod bars;
+// The bars (top bar and agent header): rush-ui-bars, at the old path.
+pub use rush_ui_bars as bars;
 pub mod cmdbar;
 pub mod list_extras;
 pub mod session_cards;
@@ -179,6 +180,18 @@ fn calls() -> Calls {
         next_account: Some(list_extras::plan::next_account),
         rush_screen: Some(session_cards::claudescreen::rush_screen),
         hash_arg: Some(session_core::rushcmd::hash_arg),
+        hover_context: Some(|m, key| {
+            m.kept
+                .peek::<session_core::Core>()
+                .and_then(|c| c.conns.get(key))
+                .is_some_and(|c| c.vs.hover_context)
+        }),
+        set_context_at: Some(|m, key, at| session_core::conn(m, key).vs.context = at),
+        project_count: Some(session_core::changes::project_count),
+        project_count_of: Some(session_core::changes::project_count_of),
+        header_context: Some(session_core::views::header_context),
+        rush_cmd: Some(session_core::rushcmd::run),
+        permission_command: Some(session_cards::permissions::permission_command),
     }
 }
 

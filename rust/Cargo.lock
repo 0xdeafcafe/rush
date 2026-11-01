@@ -1621,6 +1621,7 @@ dependencies = [
  "rush-sys",
  "rush-testenv",
  "rush-ui-accounts",
+ "rush-ui-bars",
  "rush-ui-base",
  "rush-ui-plugin-ui",
  "rush-ui-projects-machine",
@@ -1653,6 +1654,27 @@ dependencies = [
  "rush-ui-settings",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "rush-ui-bars"
+version = "0.1.0"
+dependencies = [
+ "rush-bundled",
+ "rush-convo",
+ "rush-core",
+ "rush-draw",
+ "rush-fleet",
+ "rush-host",
+ "rush-net",
+ "rush-state",
+ "rush-sys",
+ "rush-testenv",
+ "rush-ui-accounts",
+ "rush-ui-base",
+ "rush-ui-projects-machine",
+ "rush-ui-settings",
+ "rush-ui-social",
 ]
 
 [[package]]

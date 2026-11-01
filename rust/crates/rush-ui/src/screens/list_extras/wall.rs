@@ -366,18 +366,7 @@ pub fn spin(kind: &str, tick: usize) -> &'static str {
     fs[tick % fs.len()]
 }
 
-/// The bar of how full a context is (ctxBar).
-pub fn ctx_bar(pct: f64) -> Line {
-    let n = ((pct / 12.5 + 0.5).max(0.0) as usize).min(8);
-    let c = if pct >= 80.0 {
-        RED
-    } else if pct >= 50.0 {
-        YELLOW
-    } else {
-        SUB
-    };
-    line([sp("━".repeat(n), c), sp("━".repeat(8 - n), FAINT)])
-}
+pub use crate::look::ctx_bar;
 
 /// l on the left of w cells and r on the right, l cut first when they
 /// don't both fit (wallSpread).

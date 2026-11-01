@@ -26,6 +26,9 @@ use crate::session::SessionView;
 
 /// A key handler: `Out::Pass` when the key isn't its.
 pub type KeyHook = fn(&mut Model, &Press) -> Out;
+/// A project's changes: lines added and removed, and how many files.
+pub type ProjectCount = ((i64, i64), usize);
+
 /// A mouse handler: `Out::Pass` when the event isn't its.
 pub type MouseHook = fn(&mut Model, &Mouse) -> Out;
 /// A paste handler: `Out::Pass` when the paste isn't its.
@@ -535,6 +538,27 @@ calls! {
     /// What a session is running as, to switch it (bars/agent.rs
     /// session_start).
     session_start("bars"): fn(&Model, &str) -> Option<crate::accounts::StartOver>,
+    /// The pointer is over the context figure in a session's header
+    /// (session_core views.rs, hostConn.hoverCtx).
+    hover_context("session_core"): fn(&Model, &str) -> bool,
+    /// Where a session's header drew its context figure, for a click on it
+    /// (session_core views.rs ViewState.context).
+    set_context_at("session_core"): fn(&mut Model, &str, (usize, usize)),
+    /// The lines and files the open session's project counts, read again
+    /// as a step changes (session_core/changes.rs project_count).
+    project_count("session_core"): fn(&mut Model) -> ProjectCount,
+    /// The same for a session read from a shared Model (changes.rs
+    /// project_count_of).
+    project_count_of("session_core"):
+        fn(&Model, &rush_convo::Session) -> ProjectCount,
+    /// The used part of the open session's context window, on the name's
+    /// row (session_core/views.rs header_context).
+    header_context("session_core"): fn(&Model, bool) -> Option<Line>,
+    /// A /command run as typed in a session (session_core/rushcmd.rs run).
+    rush_cmd("session_core"): fn(&mut Model, &str, &str) -> Out,
+    /// #permission for a session (session_cards/permissions.rs
+    /// permission_command): the arg, and whether it's yolo.
+    permission_command("session_cards"): fn(&mut Model, &str, &str, bool) -> Out,
     /// The account to switch to when the one in use is nearly out, and
     /// why (list_extras/plan.rs next_account).
     next_account("list_extras"): crate::accounts::NextAccount,

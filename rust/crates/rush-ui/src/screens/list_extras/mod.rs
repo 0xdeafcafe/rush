@@ -35,9 +35,10 @@ pub mod jobs;
 pub mod landing;
 pub mod listkeys;
 pub mod live;
-pub mod meters;
+// The limit meters and the plan's line are the base's (the header reads them).
+pub use crate::meters;
 pub mod peek;
-pub mod plan;
+pub use crate::plan;
 pub mod predict;
 pub mod progstatus;
 pub mod prompt;

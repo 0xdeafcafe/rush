@@ -17,8 +17,9 @@ use super::agent::seg_at;
 use super::line::{Ctx, bar_line, least_kept};
 use super::top::usage_meter;
 use super::*;
-use crate::frame::Mouse;
+use crate::frame::{Mouse, Out};
 use crate::header::Drops;
+use crate::model::Model;
 use crate::session::{SessionView, Source};
 
 const NOW: Ms = 1_793_190_896_789;
@@ -301,7 +302,7 @@ fn the_permission_mode_is_a_click_away() {
     // Permissions row (permissions.go:105-111), or why it can't open.
     click(&mut m, MouseKind::Down(Button::Left), x, head + 1);
     let said = m.flash.as_ref().map(|f| f.0.clone()).unwrap_or_default();
-    match m.sheet_as::<crate::screens::accounts::startsheet::StartSheet>() {
+    match m.sheet_as::<rush_ui_accounts::startsheet::StartSheet>() {
         Some(s) => assert!(s.row == 6 && s.apply_only),
         None => assert_eq!(said, "rush can't run any harness here yet"),
     }
@@ -530,7 +531,7 @@ fn temp_files_counts_what_the_reading_says() {
 /// size the reading still carries (onTemp sets a.Temp, tempwork.go:71).
 #[test]
 fn temp_files_cleaned_to_nothing() {
-    use crate::screens::projects_machine::data::{Data, TempWork};
+    use rush_ui_projects_machine::data::{Data, TempWork};
     let mut m = model(140);
     let mut a = rush_core::agent::Agent {
         key: "default/a:1".into(),

@@ -33,15 +33,14 @@ use crate::frame::Out;
 use crate::frame::location::{branch_words, folder, session_location};
 use crate::header::Drops;
 use crate::look::{LOGINS_KIND, glyph, harness_name, model_word, show_profile};
+use crate::meters::{MeterRow, switch_note};
 use crate::model::Model;
-use crate::screens::accounts::info::pretty_model;
-use crate::screens::accounts::rows::{account_of, account_rows, switches};
-use crate::screens::list_extras::meters::{MeterRow, switch_note};
-use crate::screens::projects_machine::{TEMP_SHOWN, temp_of};
-use crate::screens::session_core::{self as core, Core};
 use crate::style::disk;
 use crate::style::*;
 use rush_draw::{Button, MouseKind};
+use rush_ui_accounts::info::pretty_model;
+use rush_ui_accounts::rows::{account_of, account_rows, switches};
+use rush_ui_projects_machine::{TEMP_SHOWN, temp_of};
 
 /// The Session's header rows: the name's, and the one under it.
 const NAME_ROW: usize = 1;
@@ -84,9 +83,9 @@ impl<'a> Of<'a> {
     pub fn read(m: &'a Model, key: &str) -> Option<Of<'a>> {
         let a = crate::rooms::row_agent(m, key)?;
         let sess = m.session.as_ref().filter(|v| v.key == key).map(|v| &v.sess);
-        let c = m.kept.peek::<Core>().and_then(|c| c.conns.get(key));
+        let c = crate::sess::peek_conn(m, key);
         // Only the project's files: not its memory or plans (bars.go:257,268).
-        let (stat, files) = sess.map_or(((0, 0), 0), |s| core::changes::project_count_of(m, s));
+        let (stat, files) = sess.map_or(((0, 0), 0), |s| m.ext.calls.project_count_of()(m, s));
         Some(Of {
             a,
             key: key.to_string(),
@@ -102,7 +101,7 @@ impl<'a> Of<'a> {
                 .kept
                 .peek::<State>()
                 .is_some_and(|s| s.hover_mode == key && !key.is_empty()),
-            hover_context: c.is_some_and(|c| c.vs.hover_context),
+            hover_context: m.ext.calls.hover_context()(m, key),
             info: c.filter(|c| c.hosted()).map(|c| &c.info),
             sleeping: c.is_some_and(|c| c.sleeping || c.info.sleeping),
             saved_cwd: c
@@ -114,7 +113,7 @@ impl<'a> Of<'a> {
                 .is_some_and(|s| s.hover_label == key && !key.is_empty()),
             room: key
                 .starts_with(crate::rooms::ROOM_KEY_PREFIX)
-                .then(|| m.room_of(key).map(crate::screens::social::rooms::room_conn))
+                .then(|| m.room_of(key).map(rush_ui_social::rooms::room_conn))
                 .flatten(),
         })
     }
@@ -178,7 +177,7 @@ pub static SEGS: &[Seg] = &[
             if o.sess.is_none() {
                 return Line::new();
             }
-            core::views::header_context(x.m, o.hover_context).unwrap_or_default()
+            x.m.ext.calls.header_context()(x.m, o.hover_context).unwrap_or_default()
         },
     },
     Seg {
@@ -193,11 +192,11 @@ pub static SEGS: &[Seg] = &[
             let win = if s.window > 0 {
                 s.window
             } else {
-                core::overview::agentry(x.m, &o.key).window(o.model())
+                crate::agentry::agentry(x.m, &o.key).window(o.model())
             };
             let f = rush_core::adapter::fill_of(s.context, win, Default::default());
             let mut l = line([dim("ctx ")]);
-            join(&mut l, crate::screens::list_extras::wall::ctx_bar(f.pct()));
+            join(&mut l, crate::look::ctx_bar(f.pct()));
             l.spans.push(plain(" "));
             l.spans.push(sp(
                 format!("{}/{} {:.0}%", tokens(f.used), tokens(f.window), f.pct()),
@@ -400,7 +399,7 @@ pub static SEGS: &[Seg] = &[
                 return Line::new();
             };
             let t = now(x.m);
-            match core::overview::cache_cold(s, t) {
+            match crate::agentry::cache_cold(s, t) {
                 None => Line::new(),
                 Some((at, true)) => line([
                     sp("cache cold", YELLOW),
@@ -434,8 +433,7 @@ pub static SEGS: &[Seg] = &[
             let o = of(x);
             let k = o.a.kind.as_str();
             let name = crate::look::agent_name(&x.m.reg, k);
-            let login =
-                session_login(x.m, o).map(|l| crate::screens::accounts::rows::login_name(&l));
+            let login = session_login(x.m, o).map(|l| rush_ui_accounts::rows::login_name(&l));
             match login {
                 Some(l) => one(dim(format!("{name} · {l}"))),
                 None => one(dim(name)),
@@ -485,7 +483,7 @@ pub fn agent_label(m: &Model, o: &Of) -> Line {
 /// sheet's row a click there opens: the harness, the account, the profile
 /// and the model.
 fn agent_label_parts(m: &Model, o: &Of) -> (Line, Vec<(usize, usize, usize)>) {
-    use crate::screens::accounts::startsheet::{ROW_ACCOUNT, ROW_HARNESS, ROW_MODEL, ROW_PROVIDER};
+    use rush_ui_accounts::startsheet::{ROW_ACCOUNT, ROW_HARNESS, ROW_MODEL, ROW_PROVIDER};
     let mut k = o.a.kind.as_str().to_string();
     if k.is_empty() {
         k = LOGINS_KIND.into();
@@ -654,7 +652,7 @@ pub enum HeadAct {
 /// What a click on a header segment opens, by its id; None for one that
 /// only says something.
 fn seg_act(id: &str) -> Option<HeadAct> {
-    use crate::screens::accounts::startsheet::ROW_ACCOUNT;
+    use rush_ui_accounts::startsheet::ROW_ACCOUNT;
     match id {
         "model" => Some(HeadAct::Model),
         "effort" => Some(HeadAct::Effort),
@@ -750,7 +748,7 @@ fn rows_with(
         seg_hits(&mut hits, NAME_ROW, width(&plain1[..i]), &at1);
     }
     if o.sess.is_some()
-        && let Some(value) = core::views::header_context(m, false)
+        && let Some(value) = m.ext.calls.header_context()(m, false)
     {
         let metric = value.plain();
         if let Some(i) = plain1.rfind(&metric)
@@ -858,7 +856,7 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     }
     let hw = w.saturating_sub(3);
     // What's counted against its project, read once a step changes.
-    let (stat, files) = core::changes::project_count(m);
+    let (stat, files) = m.ext.calls.project_count()(m);
     let mut drops = Drops::new();
     let (r1, r2, labels, label, hits) = {
         let Some(mut o) = Of::read(m, &key) else {
@@ -871,7 +869,7 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     };
     rows[NAME_ROW] = chrome(r1, hw);
     rows[META_ROW] = chrome(r2, hw);
-    core::conn(m, &key).vs.context = labels.context;
+    m.ext.calls.set_context_at()(m, &key, labels.context);
     let st = m.kept::<State>();
     st.mode_at = labels.mode;
     st.label_at = label;
@@ -960,10 +958,7 @@ pub fn state_words(o: &Of, now: Ms) -> Line {
         // info (rushmode.go paneHeader's info.Background).
         return line([
             spb("working", ORANGE),
-            sp(
-                format!(" · {}", crate::screens::list_extras::wall::lanes_line(a)),
-                ORANGE,
-            ),
+            sp(format!(" · {}", crate::look::lanes_line(a)), ORANGE),
         ]);
     }
     one(dim("idle"))
@@ -1109,30 +1104,24 @@ pub fn mouse(m: &mut Model, e: &crate::frame::Mouse) -> Out {
             .copied()
     });
     match e.kind {
-        MouseKind::Down(Button::Left) if on => {
-            crate::screens::session_cards::permissions::permission_command(m, &key, "", false)
-        }
+        MouseKind::Down(Button::Left) if on => m.ext.calls.permission_command()(m, &key, "", false),
         MouseKind::Down(Button::Left) if on_label => {
             // A click on it opens the sheet to switch it (model.go:1683),
             // on the part clicked: its harness, account or model.
             let part = hits.label.iter().find(|h| x >= 2 + h.0 && x < 2 + h.1);
-            let row = part.map_or(crate::screens::accounts::startsheet::ROW_PROVIDER, |p| p.2);
+            let row = part.map_or(rush_ui_accounts::startsheet::ROW_PROVIDER, |p| p.2);
             match session_start(m, &key) {
-                Some(o) => {
-                    crate::screens::accounts::startsheet::open_switch_sheet_on(m, &key, o, row)
-                }
+                Some(o) => rush_ui_accounts::startsheet::open_switch_sheet_on(m, &key, o, row),
                 None => Out::Pass,
             }
         }
         MouseKind::Down(Button::Left) if seg.is_some() => {
             m.kept::<State>().hover_seg = None;
             match seg.map(|s| s.3) {
-                Some(HeadAct::Model) => core::rushcmd::run(m, &key, "/model"),
-                Some(HeadAct::Effort) => core::rushcmd::run(m, &key, "/effort"),
+                Some(HeadAct::Model) => m.ext.calls.rush_cmd()(m, &key, "/model"),
+                Some(HeadAct::Effort) => m.ext.calls.rush_cmd()(m, &key, "/effort"),
                 Some(HeadAct::Sheet(row)) => match session_start(m, &key) {
-                    Some(o) => {
-                        crate::screens::accounts::startsheet::open_switch_sheet_on(m, &key, o, row)
-                    }
+                    Some(o) => rush_ui_accounts::startsheet::open_switch_sheet_on(m, &key, o, row),
                     None => Out::Pass,
                 },
                 None => Out::Pass,

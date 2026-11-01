@@ -28,7 +28,7 @@ pub fn signed_out(c: &Conn, i: &HostInfo) -> bool {
 
 /// What session key runs as now (sessionStart).
 fn from(m: &Model, key: &str, i: &HostInfo) -> StartOver {
-    crate::screens::bars::agent::session_start(m, key).unwrap_or_else(|| StartOver {
+    m.ext.calls.session_start()(m, key).unwrap_or_else(|| StartOver {
         kind: i.kind.clone(),
         ..StartOver::default()
     })

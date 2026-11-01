@@ -104,7 +104,7 @@ pub fn perm_command(m: &mut Model, key: Option<&str>, arg: &str, yolo: bool) -> 
         setup::next_start(m, &dir)
     };
     let mut o = match key {
-        Some(k) => crate::screens::bars::agent::session_start(m, k).unwrap_or_else(|| next(m)),
+        Some(k) => m.ext.calls.session_start()(m, k).unwrap_or_else(|| next(m)),
         None => next(m),
     };
     let mut arg = arg.trim().to_string();

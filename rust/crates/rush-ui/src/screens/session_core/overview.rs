@@ -40,31 +40,10 @@ use crate::model::Model;
 use crate::spawns::SPAWN_PREFIX;
 use crate::style::*;
 
-/// What the session's agent says of its models: prices and windows
-/// (Go's Session.cost, overview.go:639, and agent.ContextWindow).
-pub struct Agentry<'a> {
-    pub reg: &'a rush_core::adapter::Registry,
-    pub kind: &'a str,
-}
-
-impl Agentry<'_> {
-    /// What model's tokens u cost at the agent's prices, else the native
-    /// agent's; 0 when neither can say.
-    pub fn cost(&self, model: &str, u: &TokenUsage) -> f64 {
-        if let Some(c) = self.reg.price(self.kind, model, u) {
-            return c;
-        }
-        self.reg
-            .native_agent()
-            .and_then(|n| self.reg.price(n.kind().as_str(), model, u))
-            .unwrap_or(0.0)
-    }
-
-    /// model's context window.
-    pub fn window(&self, model: &str) -> i64 {
-        self.reg.context_window(self.kind, model)
-    }
-}
+// The agent's prices and windows, and when its cache goes cold, are the base's
+// (the agent header reads them).
+use crate::agentry::CACHE_HOUR;
+pub use crate::agentry::{Agentry, agentry, cache_cold};
 
 /// What each turn cost: its requests priced, the turn's own total where
 /// it has one (turnCosts, overview.go:770).
@@ -86,9 +65,6 @@ pub fn turn_costs(s: &Session, ag: &Agentry) -> Vec<f64> {
     }
     out
 }
-
-/// How long the main agent's prompt cache lives.
-const CACHE_HOUR: Ms = 3_600_000;
 
 /// claude-opus-5-5[1m] as "opus 5.5 · 1M" (PrettyModel).
 pub fn pretty_model(m: &str) -> String {
@@ -270,13 +246,6 @@ pub fn cold_starts(s: &Session) -> Vec<ColdStart> {
         });
     }
     out
-}
-
-/// When the main agent's cache goes cold, and whether it has (CacheCold).
-pub fn cache_cold(s: &Session, now: Ms) -> Option<(Ms, bool)> {
-    let r = s.requests.iter().rev().find(|r| r.run.is_empty())?;
-    let at = r.at + CACHE_HOUR;
-    Some((at, now > at))
 }
 
 /// Clock time hh:mm, local.
@@ -545,16 +514,6 @@ pub fn memory_section(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)>
         (section("Memory", "", w, 3), String::new()),
         (row, "go:memory".to_string()),
     ]
-}
-
-/// Session key's agent, as the registry knows it.
-pub fn agentry<'a>(m: &'a Model, key: &str) -> Agentry<'a> {
-    let kind = m
-        .agents
-        .iter()
-        .find(|a| a.key == key)
-        .map_or("", |a| a.kind.as_str());
-    Agentry { reg: &m.reg, kind }
 }
 
 /// What the Overview reads beside the conversation: the host's count of

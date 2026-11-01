@@ -395,3 +395,16 @@ pub fn lanes_line(a: &Agent) -> String {
     }
     parts.join(", ")
 }
+
+/// The bar of how full a context is (ctxBar).
+pub fn ctx_bar(pct: f64) -> Line {
+    let n = ((pct / 12.5 + 0.5).max(0.0) as usize).min(8);
+    let c = if pct >= 80.0 {
+        RED
+    } else if pct >= 50.0 {
+        YELLOW
+    } else {
+        SUB
+    };
+    line([sp("━".repeat(n), c), sp("━".repeat(8 - n), FAINT)])
+}

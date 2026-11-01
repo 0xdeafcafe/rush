@@ -6,6 +6,7 @@
 //! model with them registered (rush_ui::new_model, Model::bare).
 
 pub mod accounts;
+pub mod agentry;
 pub mod away;
 pub mod bridge;
 pub mod changes;
@@ -25,10 +26,12 @@ pub mod list;
 pub mod listcache;
 pub mod look;
 pub mod mention;
+pub mod meters;
 pub mod model;
 pub mod overlay;
 pub mod paint;
 pub mod pastes;
+pub mod plan;
 pub mod predict;
 pub mod rooms;
 pub mod sess;

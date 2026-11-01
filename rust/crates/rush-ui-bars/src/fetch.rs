@@ -22,7 +22,7 @@ use crate::accounts::{cfg, peek};
 use crate::frame::Out;
 use crate::look::LOGINS_KIND;
 use crate::model::Model;
-use crate::screens::accounts::rows::{agent_order, profile_of, sign_in_account};
+use rush_ui_accounts::rows::{agent_order, profile_of, sign_in_account};
 
 /// Reads a saved login's plan usage into the readings shared through
 /// path (state.LoginKeeper's RefreshLogin): the logins agent's.
@@ -91,7 +91,7 @@ pub fn fetched_once(m: &Model) -> bool {
 /// Every agent's plan read again, when due or asked (r).
 fn read_again(m: &mut Model, asked: bool) {
     // Hosted never fetches usage or quotas (model.go:556, :1125).
-    if m.sender().is_none() || crate::hosted::quiet(m) {
+    if m.sender().is_none() || m.ext.calls.hosted_id()(m).is_some() {
         return;
     }
     let now = rush_core::time::now();
@@ -139,7 +139,7 @@ fn read_again(m: &mut Model, asked: bool) {
                 crate::accounts::set_fetched(m, k, u);
             }
             crate::accounts::set_quotas(m, got.quotas);
-            crate::screens::accounts::state::read(m);
+            rush_ui_accounts::state::read(m);
             Out::Idle
         },
     );
