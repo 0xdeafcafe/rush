@@ -184,9 +184,14 @@ pub fn wake_then(
     let h = hosts(m);
     let (a, key) = (a.clone(), a.key.clone());
     conn(m, &key).waking = true;
+    super::live::hold(m, &key);
     m.flash(&format!("waking {}…", a.display_name));
+    let reg = m.reg.clone();
     m.later(
-        move || h.wake(&a, "", &[], false),
+        move || {
+            h.wake(&a, "", &[], false)
+                .map(|l| super::live::read_woken(&reg, &a, l))
+        },
         move |m, r| {
             let ok = r.is_ok();
             let out = super::live::woke(m, &key, r, String::new());

@@ -333,6 +333,19 @@ pub fn opened_with(
     r: Result<Arc<dyn Link>, String>,
     pre: Option<(Pre, Session)>,
 ) -> Out {
+    open_link(m, key, r, pre, false)
+}
+
+/// opened_with; carried, the conversation on screen stays the view's and
+/// the host's lines go on after it (carryHostView): a host woken from a
+/// sleep this view watched replays only what came since it woke.
+fn open_link(
+    m: &mut Model,
+    key: &str,
+    r: Result<Arc<dyn Link>, String>,
+    pre: Option<(Pre, Session)>,
+    carry: bool,
+) -> Out {
     conn(m, key).dialing = false;
     let link = match r {
         Ok(l) => l,
@@ -368,14 +381,20 @@ pub fn opened_with(
     let (pre, sess) = pre.map_or((None, Session::new()), |(p, s)| (Some(p), s));
     // Its end only: the whole of it is read next, the host's lines kept
     // meanwhile to put on top (onReplay's keep).
-    let whole = pre.filter(|p| sess.partial && p.any());
+    let whole = pre.filter(|p| !carry && sess.partial && p.any());
     c.keep = whole.is_some();
     let early =
         std::mem::take(&mut c.early) && view_of(m, key).is_some_and(|v| !v.sess.turns.is_empty());
     let c = conn(m, key);
     c.shadow = None;
     c.shadow_until = None;
-    if early {
+    if carry {
+        // The conversation stays as it is; the host's lines go on after it.
+        if let Some(v) = view_of(m, key) {
+            v.tail = None;
+            v.err.clear();
+        }
+    } else if early {
         // The transcript's end stays on screen while the host's own
         // conversation comes in behind it.
         c.shadow = Some(sess);
@@ -1015,19 +1034,44 @@ fn resolve_close(m: &mut Model, key: &str) {
     );
 }
 
+/// A host woken, and what its conversation held before its replay, read
+/// in the wake's worker as a dial reads it (sync).
+pub type Woken = (Arc<dyn Link>, Option<(Pre, Session)>);
+
+/// link, a's host just woken, with what came before its replay: read
+/// once it's reached, off the UI thread. Reads the disk.
+pub fn read_woken(reg: &Registry, a: &rush_core::agent::Agent, link: Arc<dyn Link>) -> Woken {
+    let mut pre = read_pre(reg, a, rush_core::time::now());
+    let sess = pre.tail();
+    (link, Some((pre, sess)))
+}
+
+/// A sleeping host being woken: the transcript the view of session key
+/// follows is let go now, so the message sent can't come from it as well
+/// as from the woken host's replay, which goes on after what's shown.
+pub fn hold(m: &mut Model, key: &str) {
+    if let Some(v) = view_of(m, key) {
+        v.tail = None; // its worker stops with its handle
+    }
+}
+
+/// The conversation on screen for session key stays there when its host
+/// is next reached, the host's own put together behind it until its
+/// replay is in (opened_with's shadow): for a host started again or woken
+/// while the view shows what it said before.
+pub fn keep_shown(m: &mut Model, key: &str) {
+    let shown = view_of(m, key).is_some_and(|v| !v.sess.turns.is_empty());
+    conn(m, key).early = shown;
+}
+
 /// What a message to a sleeping host does once it's tried to wake it
 /// (reconnectSleeping's result): connected, the link is the session's
-/// from now on and what was sent went over it; not, what was sent is put
-/// back in the box when it's empty.
-pub fn woke(
-    m: &mut Model,
-    key: &str,
-    r: Result<std::sync::Arc<dyn Link>, String>,
-    text: String,
-) -> Out {
+/// from now on and what was sent went over it, the conversation on screen
+/// kept; not, what was sent is put back in the box when it's empty.
+pub fn woke(m: &mut Model, key: &str, r: Result<Woken, String>, text: String) -> Out {
     conn(m, key).waking = false;
     match r {
-        Ok(link) => {
+        Ok((link, pre)) => {
             if open_key(m).as_deref() != Some(key) {
                 link.close(); // the Session moved on while it woke
                 return Out::Idle;
@@ -1035,7 +1079,17 @@ pub fn woke(
             if let Some(a) = agent(m, key) {
                 conn(m, key).dialed_pid = a.pid;
             }
-            opened(m, key, Ok(link))
+            // Woken from a sleep (parkHost, or read asleep from disk): what's
+            // on screen is all of it up to the sleep, and the woken host
+            // replays only what came since (carryHostView). A host that let
+            // this rush go and runs on replays all it has: what's on screen
+            // stays while that, after what came before its replay, is put
+            // together behind it. Never a blank pane.
+            let carry = conn(m, key).sleeping;
+            if !carry {
+                keep_shown(m, key);
+            }
+            open_link(m, key, Ok(link), pre, carry)
         }
         Err(e) => {
             let c = conn(m, key);
