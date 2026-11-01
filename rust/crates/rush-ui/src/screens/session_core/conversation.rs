@@ -233,15 +233,20 @@ fn your_prompt(t: &rush_convo::Turn) -> bool {
 /// bottom row while it's below the screen. A short pane keeps its rows for
 /// the conversation: none under 7 rows, one top pin (the before one wins)
 /// under 10, the bottom one from 7.
-fn pin_prompt(v: &mut crate::session::SessionView, b: &mut [Line], w: usize) {
-    let h = b.len();
+/// The pins shown with the view at row start, h rows tall: (screen row, turn
+/// index, label).
+pub fn pin_plan(
+    v: &crate::session::SessionView,
+    start: usize,
+    h: usize,
+) -> Vec<(usize, usize, &'static str)> {
     if h < 7 {
-        return; // a short pane keeps its rows for the conversation
+        return Vec::new(); // a short pane keeps its rows for the conversation
     }
-    let (start, end) = (v.start, v.start + h);
+    let end = start + h;
     let turns = &v.sess.turns;
     let Some(first) = turns.iter().position(your_prompt) else {
-        return;
+        return Vec::new();
     };
     let off = |i: usize| v.r.turn_row(i) < start;
     let (mut latest, mut current) = (None, None);
@@ -264,7 +269,7 @@ fn pin_prompt(v: &mut crate::session::SessionView, b: &mut [Line], w: usize) {
     let before = current.filter(|&i| i != first && off(i));
     let top_first = off(first).then_some(first);
     let next = (first..turns.len()).find(|&i| your_prompt(&turns[i]) && v.r.turn_row(i) >= end);
-    let mut pins: Vec<(usize, usize, &str)> = Vec::new();
+    let mut pins: Vec<(usize, usize, &'static str)> = Vec::new();
     match (top_first, before) {
         (Some(f), Some(c)) if h >= 10 => {
             pins.push((0, f, "first  "));
@@ -277,6 +282,13 @@ fn pin_prompt(v: &mut crate::session::SessionView, b: &mut [Line], w: usize) {
     if let Some(n) = next {
         pins.push((h - 1, n, "next   "));
     }
+    pins
+}
+
+fn pin_prompt(v: &mut crate::session::SessionView, b: &mut [Line], w: usize) {
+    let h = b.len();
+    let pins = pin_plan(v, v.start, h);
+    let turns = &v.sess.turns;
     // With a column beside the text, the pin stops where it starts, as
     // the text does, rather than running across a wide Session.
     let sw = super::side::side_width(w);
@@ -303,8 +315,9 @@ fn pin_prompt(v: &mut crate::session::SessionView, b: &mut [Line], w: usize) {
     }
 }
 
-/// A click on a pinned prompt goes to its turn, picked, at the top
-/// (clickRef's pin).
+/// A click on a pinned prompt goes to its turn, picked, landing just below
+/// the pins that will show there, so its heading is in view (clickRef's pin;
+/// the landing is `SessionView::want_start`).
 pub fn click_pin(v: &mut crate::session::SessionView, r: &str) -> bool {
     let Some(t) = r.strip_prefix(PIN_REF) else {
         return false;
@@ -314,6 +327,7 @@ pub fn click_pin(v: &mut crate::session::SessionView, r: &str) -> bool {
     };
     v.sel = t.to_string();
     v.pos = Pos::At { n, off: 0 };
+    v.land = true;
     true
 }
 

@@ -1028,8 +1028,58 @@ fn prompt_pins() {
     let v = m.session.as_ref().unwrap();
     assert_eq!(v.sel, "t26");
     let s = screen(&mut m);
-    // Its turn from the top, its heading under the two pins.
-    assert!(s[top + 2].contains("question 25"), "{:?}", s[top + 2]);
+    // Its turn from the top: its blank first row, then its "You" heading,
+    // right under the two pins (the one over it is the question before).
+    assert!(
+        s[top + 1].starts_with("  ▍ current question 24"),
+        "{:#?}",
+        &s[top..top + 6]
+    );
+    assert!(s[top + 2].trim().is_empty() || s[top + 2].trim().starts_with('│'));
+    assert!(s[top + 3].contains("You"), "{:#?}", &s[top..top + 6]);
+    assert!(
+        s[top + 4].contains("question 25"),
+        "{:#?}",
+        &s[top..top + 6]
+    );
+}
+
+/// A jump to a pinned prompt lands the turn's first row just below the top
+/// pins that show there: none, one or two. Each case: the pane's height, the
+/// turn jumped to, how many pins sit over it, and the question it shows.
+#[test]
+fn prompt_jump_lands_below_the_pins() {
+    let cases: [(&str, usize, u32, usize, &str); 5] = [
+        ("the first turn: no pins over it", 36, 1, 0, "question 0"),
+        ("the second: only the first pin", 36, 2, 1, "question 1"),
+        ("a later one: two pins", 36, 14, 2, "question 13"),
+        ("a short pane: one pin", 26, 14, 1, "question 13"),
+        ("a shorter one: none", 20, 14, 0, "question 13"),
+    ];
+    for (name, h, n, pins, want) in cases {
+        let fake = Fake::new();
+        let mut m = open(agent("steer", State::Idle), &fake, 123, h);
+        long(&mut m, 30);
+        screen(&mut m);
+        let v = m.session.as_mut().unwrap();
+        assert!(crate::screens::session_core::conversation::click_pin(
+            v,
+            &format!("pin:t{n}")
+        ));
+        let s = screen(&mut m);
+        let top = m.session.as_ref().unwrap().top;
+        for y in 0..pins {
+            assert!(
+                s[top + y].starts_with("  ▍ "),
+                "{name}: pin {y}: {:?}",
+                s[top + y]
+            );
+        }
+        let rows = &s[top..top + 6];
+        assert!(!s[top + pins].starts_with("  ▍ "), "{name}: {rows:#?}");
+        assert!(s[top + pins + 1].contains("You"), "{name}: {rows:#?}");
+        assert!(s[top + pins + 2].contains(want), "{name}: {rows:#?}");
+    }
 }
 
 /// Which pins show where the conversation is scrolled to, and how a pane
