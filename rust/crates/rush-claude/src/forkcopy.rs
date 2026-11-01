@@ -91,13 +91,39 @@ impl Account {
     /// The first project folder, by name, holding session_id's
     /// transcript; None when none does.
     pub fn moved_transcript(&self, session_id: &str) -> Option<PathBuf> {
-        if session_id.is_empty() || session_id.contains(['/', '*', '?', '[', '\\']) {
+        if !findable(session_id) {
             return None;
         }
         FIND_INDEX
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .find(&self.projects_dir(), session_id)
+    }
+
+    /// For each (cwd, session id) of wants, find_transcript's path when
+    /// a transcript is there: the folders they started in looked at side
+    /// by side, the project folders once for all those not there.
+    pub fn find_transcripts(&self, wants: &[(&str, &str)]) -> Vec<Option<PathBuf>> {
+        let mut out = rush_core::par::map_with(
+            wants.to_vec(),
+            || (),
+            |_, (cwd, sid)| Some(self.transcript_path(cwd, sid)).filter(|p| p.exists()),
+        );
+        let look: Vec<usize> = (0..wants.len())
+            .filter(|&i| out[i].is_none() && findable(wants[i].1))
+            .collect();
+        if look.is_empty() {
+            return out;
+        }
+        let sids: Vec<&str> = look.iter().map(|&i| wants[i].1).collect();
+        let found = FIND_INDEX
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .find_many(&self.projects_dir(), &sids);
+        for (i, f) in look.into_iter().zip(found) {
+            out[i] = f.filter(|p| p.exists());
+        }
+        out
     }
 
     /// Gives conversation to the file checkpoints (the files' old
@@ -162,14 +188,23 @@ static FIND_INDEX: LazyLock<Mutex<ProjectIndex>> =
 
 impl ProjectIndex {
     fn find(&mut self, root: &Path, sid: &str) -> Option<PathBuf> {
-        let modified = fs::metadata(root).ok()?.modified().ok()?;
+        self.find_many(root, &[sid]).pop().flatten()
+    }
+
+    /// Each of sids' transcripts, as find looks for each, every folder
+    /// looked at once for them all: a list's first reading looks for
+    /// hundreds.
+    fn find_many(&mut self, root: &Path, sids: &[&str]) -> Vec<Option<PathBuf>> {
+        let mut out = vec![None; sids.len()];
+        let Some(modified) = fs::metadata(root).ok().and_then(|m| m.modified().ok()) else {
+            return out;
+        };
         let fresh = self.roots.get(root).is_some_and(|r| r.modified == modified);
         if !fresh {
-            let mut ents: Vec<_> = fs::read_dir(root)
-                .ok()?
-                .flatten()
-                .map(|e| e.file_name())
-                .collect();
+            let Ok(rd) = fs::read_dir(root) else {
+                return out;
+            };
+            let mut ents: Vec<_> = rd.flatten().map(|e| e.file_name()).collect();
             ents.sort();
             let mut old = self.roots.remove(root);
             let mut r = ProjectsRoot {
@@ -185,8 +220,14 @@ impl ProjectIndex {
             }
             self.roots.insert(root.to_path_buf(), r);
         }
-        let r = self.roots.get_mut(root)?;
+        let Some(r) = self.roots.get_mut(root) else {
+            return out;
+        };
+        let mut left = sids.len();
         for n in &r.names {
+            if left == 0 {
+                break;
+            }
             let dir = root.join(n);
             let Ok(st) = fs::metadata(&dir) else {
                 continue;
@@ -203,12 +244,20 @@ impl ProjectIndex {
                 d.modified = m.unwrap_or(SystemTime::UNIX_EPOCH);
                 d.sids = list_sessions(&dir);
             }
-            if d.sids.contains(sid) {
-                return Some(dir.join(format!("{sid}.jsonl")));
+            for (o, sid) in out.iter_mut().zip(sids) {
+                if o.is_none() && d.sids.contains(*sid) {
+                    *o = Some(dir.join(format!("{sid}.jsonl")));
+                    left -= 1;
+                }
             }
         }
-        None
+        out
     }
+}
+
+/// Whether a session id can name a transcript to look for.
+fn findable(sid: &str) -> bool {
+    !sid.is_empty() && !sid.contains(['/', '*', '?', '[', '\\'])
 }
 
 /// The session ids whose transcripts are in dir.
@@ -290,6 +339,36 @@ mod tests {
         touch(&fresh);
         bump(&a.projects_dir());
         assert_eq!(a.find_transcript("/repo", "sid"), fresh);
+    }
+
+    // Looked for together, each is where find_transcript finds it alone:
+    // where it started, where it moved, or nowhere (None).
+    #[test]
+    fn find_transcripts_as_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = Account::at("", dir.path());
+        let home = a.transcript_path("/repo", "home");
+        touch(&home);
+        let moved = a.transcript_path("/repo/.claude/worktrees/x", "moved");
+        touch(&moved);
+        let wants = [
+            ("/repo", "home"),
+            ("/repo", "moved"),
+            ("/repo", "gone"),
+            ("/repo", "a/b"),
+        ];
+        assert_eq!(
+            a.find_transcripts(&wants),
+            vec![Some(home), Some(moved), None, None]
+        );
+        for (cwd, sid) in wants {
+            let alone = a.find_transcript(cwd, sid);
+            assert_eq!(
+                a.find_transcripts(&[(cwd, sid)]),
+                vec![Some(alone.clone()).filter(|p| p.exists())],
+                "{sid}"
+            );
+        }
     }
 
     /// Moves a folder's time on a second, as a file added in a later

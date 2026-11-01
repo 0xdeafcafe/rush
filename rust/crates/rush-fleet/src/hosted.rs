@@ -153,6 +153,12 @@ pub trait Hosts: Send {
     fn list(&mut self, fresh: &dyn Fn(&Path, u64) -> bool, at: u64) -> Arc<Vec<HostInfo>>;
     /// The config session id was started with; None once it's gone.
     fn config(&self, id: &str) -> Option<HostConfig>;
+    /// Each of ids' configs, as `config` reads it, in order: a Hosts that
+    /// can reads them side by side (a list's first reading reads them
+    /// all).
+    fn configs(&self, ids: &[String]) -> Vec<Option<HostConfig>> {
+        ids.iter().map(|id| self.config(id)).collect()
+    }
     /// Brings back a session whose host went away mid-turn, in the
     /// background: its next reading shows it working again.
     fn revive(&self, _info: &HostInfo) {}

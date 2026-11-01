@@ -89,6 +89,14 @@ fn main() {
         }
         return;
     }
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    // A view lives long and keeps much: malloc's space-efficient mode
+    // holds it in about half the memory (rush_sys::malloc). Not a one-shot
+    // --dump or --render: its memory goes as it ends, and the mode costs
+    // instructions. Before any thread starts.
+    if matches!(args.first().map(String::as_str), None | Some("open")) {
+        rush_sys::malloc::space_efficient();
+    }
     raise_open_files();
     register();
     // A dry run writes what it would do in rush's folder (DESIGN.md "Dry
@@ -96,7 +104,6 @@ fn main() {
     if rush_core::dryrun::on() {
         rush_core::dryrun::set_folder(rush_state::dir());
     }
-    let args: Vec<String> = std::env::args().skip(1).collect();
     // The host renames itself: see rush_host::run.
     rush_events::set_process(args.first().map_or("ui", String::as_str));
     let code = run(&args);

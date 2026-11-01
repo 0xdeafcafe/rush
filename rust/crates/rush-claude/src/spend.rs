@@ -19,8 +19,9 @@
 //! not their folders, pull requests or last word, which stay the
 //! session's and its subagents' (spend.go Run, `i >= len(files)-nFlows`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use rush_core::agent::Spend;
 use rush_core::time::Ms;
@@ -80,6 +81,20 @@ struct Seen {
     at: Ms,
 }
 
+/// What looking at a target's files found (Scanner::look).
+enum Look {
+    /// A past conversation looked at lately: left as it is.
+    Skip,
+    /// Nothing changed since its last scan.
+    Same,
+    /// Its files, their sizes (None: gone), and which grew.
+    Files {
+        seen: Seen,
+        sizes: Vec<Option<u64>>,
+        grew: Vec<bool>,
+    },
+}
+
 /// Prices Claude Code's transcripts, keeping what it read.
 #[derive(Default)]
 pub struct Scanner {
@@ -89,11 +104,14 @@ pub struct Scanner {
     /// Where it's kept, once read.
     file: Option<PathBuf>,
     saved: Ms,
-    sizes: HashMap<PathBuf, u64>,
-    /// When each file was last seen to grow, and when the subagents' that
-    /// haven't lately were last looked at.
-    grew: HashMap<PathBuf, Ms>,
+    /// Each file's size as last read, and when it was last seen to grow
+    /// (0: not since it was first read).
+    sizes: HashMap<PathBuf, (u64, Ms)>,
+    /// When the subagents' that haven't grown lately were last looked at.
     quiet_at: Ms,
+    /// The folders transcripts worked in, each held once however many
+    /// transcripts (and rows) name it: most name the same few.
+    dirs: HashSet<Arc<str>>,
     seen: HashMap<PathBuf, Seen>,
     buf: Vec<u8>,
     day: u32,
@@ -131,57 +149,123 @@ impl Scanner {
         }
     }
 
-    /// A target's transcripts, its own and its subagents' first and its
-    /// workflows' agents' after them from the index returned, or None when
-    /// nothing about one that isn't live has changed since the last scan.
-    fn files(&mut self, t: &Target, now: Ms) -> Option<(Vec<PathBuf>, usize)> {
-        let prev = self.seen.get_mut(&t.path);
-        if let Some(p) = &prev
+    /// Looks at a target's files, reading none: whether anything about
+    /// one that isn't live changed since the last scan, and if so its
+    /// transcripts (its own and its subagents' first, its workflows'
+    /// agents' after them) and their sizes, as run takes them. Only looks,
+    /// so a run looks at every target's side by side.
+    fn look(&self, t: &Target, now: Ms, quiet: bool) -> Look {
+        let prev = self.seen.get(&t.path);
+        if let Some(p) = prev
             && t.past
             && !t.live
             && now - p.at < PAST_EVERY
         {
-            return None;
+            return Look::Skip;
         }
         let main = std::fs::metadata(&t.path).map(|m| m.len()).unwrap_or(0);
         let sub_dirs = folder_times(&t.path);
         let (subs, flows) = match prev {
             Some(p) if !t.live && p.main == main && p.sub_dirs == sub_dirs && !p.deferred => {
-                p.at = now;
-                return None;
+                return Look::Same;
             }
-            Some(p) if p.sub_dirs == sub_dirs => {
-                (std::mem::take(&mut p.subs), std::mem::take(&mut p.flows))
-            }
+            Some(p) if p.sub_dirs == sub_dirs => (p.subs.clone(), p.flows.clone()),
             _ => (subagent_transcripts(&t.path), workflow_transcripts(&t.path)),
         };
-        let mut files = Vec::with_capacity(1 + subs.len() + flows.len());
-        files.push(t.path.clone());
-        files.extend(subs.iter().cloned());
-        let own = files.len();
-        files.extend(flows.iter().cloned());
-        self.seen.insert(
-            t.path.clone(),
-            Seen {
+        let n = 1 + subs.len() + flows.len();
+        let (mut sizes, mut grew, mut deferred) = (Vec::with_capacity(n), vec![false; n], false);
+        let files = std::iter::once(&t.path).chain(&subs).chain(&flows);
+        for (i, f) in files.enumerate() {
+            if let Some(&(sz, at)) = self.sizes.get(f)
+                && i > 0
+                && t.live
+                && !quiet
+                && now - at > RUN_STALE
+            {
+                sizes.push(Some(sz)); // a live session's subagent, quiet a while: as it was
+                deferred = true;
+                continue;
+            }
+            let Ok(m) = std::fs::metadata(f) else {
+                sizes.push(None);
+                continue;
+            };
+            sizes.push(Some(m.len()));
+            grew[i] = self.sizes.get(f).map_or(0, |s| s.0) != m.len();
+        }
+        Look::Files {
+            seen: Seen {
                 main,
                 sub_dirs,
                 subs,
                 flows,
-                deferred: false,
+                deferred,
                 at: now,
             },
-        );
-        Some((files, own))
+            sizes,
+            grew,
+        }
+    }
+
+    /// Reads the cache from CACHE_FILE, the first time, if it's kept.
+    pub fn load(&mut self) {
+        if self.kept && self.file.is_none() {
+            let f = rush_state::cache_path(CACHE_FILE);
+            self.cache = CostCache::load_from(&f, CACHE_VERSION);
+            self.file = Some(f);
+            let dirs = &mut self.dirs;
+            for tot in self.cache.files.values_mut() {
+                intern(dirs, &mut tot.dirs);
+            }
+        }
+    }
+
+    /// A transcript's spend as the cache last kept it, its subagents' and
+    /// workflows' agents' with it, as run sums them, reading no
+    /// transcript: what a row shows before its first scan. None when the
+    /// cache has nothing of it (nothing at all when it's gone).
+    pub fn kept_spend(&mut self, main: &Path, now: Ms) -> Option<Spend> {
+        self.load();
+        let key = main.to_string_lossy();
+        let Some(tot) = self.cache.files.get(&*key) else {
+            // A transcript that's gone is priced at nothing, as run would.
+            return (!main.exists()).then(|| Spend {
+                ready: true,
+                ..Spend::default()
+            });
+        };
+        let today = day(now);
+        let mut sp = Spend::default();
+        add(&mut sp, tot, true, true, today);
+        // Under main's subagents folder, in the cache's order (run's, but
+        // for workflows' agents listed after them).
+        let subs = format!("{}/", subagents_dir(main).to_string_lossy());
+        let flows = format!("{subs}{WORKFLOWS}/");
+        for (f, tot) in self.cache.files.range(subs.clone()..) {
+            if !f.starts_with(&subs) {
+                break;
+            }
+            if !f.ends_with(".jsonl") {
+                continue;
+            }
+            match f.strip_prefix(&flows) {
+                // workflows/<run>/<agent>.jsonl
+                Some(rest) if rest.matches('/').count() == 1 => {
+                    add(&mut sp, tot, false, false, today)
+                }
+                Some(_) => {}
+                None if !f[subs.len()..].contains('/') => add(&mut sp, tot, false, true, today),
+                None => {}
+            }
+        }
+        sp.ready = true;
+        Some(sp)
     }
 
     /// Scans every target whose files grew and returns their new spend, by
     /// key.
     pub fn run(&mut self, targets: &[Target], now: Ms) -> HashMap<String, Spend> {
-        if self.kept && self.file.is_none() {
-            let f = rush_state::cache_path(CACHE_FILE);
-            self.cache = CostCache::load_from(&f, CACHE_VERSION);
-            self.file = Some(f);
-        }
+        self.load();
         let mut out = HashMap::new();
         let today = day(now);
         if today != self.day {
@@ -189,41 +273,39 @@ impl Scanner {
             self.day = today;
             self.sizes.clear();
             self.seen.clear();
-            self.grew.clear();
         }
         let quiet = now - self.quiet_at >= QUIET_EVERY;
         if quiet {
             self.quiet_at = now;
         }
-        for t in targets {
-            let Some((files, own)) = self.files(t, now) else {
-                continue;
+        // Every target's files looked at side by side, then taken in order.
+        let looks = rush_core::par::map_with(
+            targets.iter().collect::<Vec<_>>(),
+            || (),
+            |_, t| self.look(t, now, quiet),
+        );
+        for (t, look) in targets.iter().zip(looks) {
+            let (seen, sizes, grew) = match look {
+                Look::Skip => continue,
+                Look::Same => {
+                    if let Some(p) = self.seen.get_mut(&t.path) {
+                        p.at = now;
+                    }
+                    continue;
+                }
+                Look::Files { seen, sizes, grew } => (seen, sizes, grew),
             };
-            let (mut changed, mut deferred) = (false, false);
-            let mut sizes: Vec<Option<u64>> = Vec::with_capacity(files.len());
-            for (i, f) in files.iter().enumerate() {
-                if let Some(&sz) = self.sizes.get(f)
-                    && i > 0
-                    && t.live
-                    && !quiet
-                    && now - self.grew.get(f).copied().unwrap_or(0) > RUN_STALE
-                {
-                    sizes.push(Some(sz)); // a live session's subagent, quiet a while: as it was
-                    deferred = true;
-                    continue;
-                }
-                let Ok(m) = std::fs::metadata(f) else {
-                    sizes.push(None);
-                    continue;
-                };
-                sizes.push(Some(m.len()));
-                if self.sizes.get(f).copied().unwrap_or(0) != m.len() {
-                    changed = true;
-                    self.grew.insert(f.clone(), now);
-                }
-            }
-            if let Some(st) = self.seen.get_mut(&t.path) {
-                st.deferred = deferred;
+            let mut files = Vec::with_capacity(sizes.len());
+            files.push(t.path.clone());
+            files.extend(seen.subs.iter().cloned());
+            let own = files.len();
+            files.extend(seen.flows.iter().cloned());
+            self.seen.insert(t.path.clone(), seen);
+            let mut changed = false;
+            for (f, _) in files.iter().zip(&grew).filter(|(_, g)| **g) {
+                changed = true;
+                // Its size is set as it's read, below.
+                self.sizes.entry(f.clone()).or_default().1 = now;
             }
             if !changed && !self.sizes.is_empty() && self.sizes.contains_key(&t.path) {
                 continue;
@@ -238,39 +320,18 @@ impl Scanner {
                     let before = tot.offset;
                     let _ = scan(f, tot, &mut self.buf);
                     read = tot.offset != before;
+                    if read {
+                        intern(&mut self.dirs, &mut tot.dirs);
+                    }
                 }
-                self.sizes.insert(f.clone(), tot.size);
-                let (c, u) = tot.spend();
-                sp.cost += c;
-                sp.usage.add(u);
-                sp.today += tot.day_spend(today);
+                match self.sizes.get_mut(f) {
+                    Some(s) => s.0 = tot.size,
+                    None => {
+                        self.sizes.insert(f.clone(), (tot.size, 0));
+                    }
+                }
                 // A workflow's agent: what it spent, nothing more.
-                let ours = n < own;
-                if *f == t.path {
-                    sp.model.clone_from(&tot.last_model);
-                    sp.first = tot.first;
-                    sp.last = tot.last;
-                    sp.halt.clone_from(&tot.halt);
-                    sp.progress.clone_from(&tot.progress);
-                    sp.progress_at = tot.progress_at;
-                    sp.context = tot.context();
-                    sp.compacts = tot.compacts;
-                    sp.dir.clone_from(&tot.dir);
-                    sp.dir_at = tot.dir_at;
-                }
-                if ours && tot.last > sp.last {
-                    sp.last = tot.last;
-                }
-                for p in tot.prs.iter().filter(|_| ours) {
-                    if !sp.prs.contains(p) {
-                        sp.prs.push(p.clone());
-                    }
-                }
-                for d in tot.dirs.iter().filter(|_| ours) {
-                    if !sp.dirs.contains(d) {
-                        sp.dirs.push(d.clone());
-                    }
-                }
+                add(&mut sp, tot, *f == t.path, n < own, today);
                 if read {
                     self.cache.mark_dirty();
                 }
@@ -284,8 +345,57 @@ impl Scanner {
         if now - self.saved > SAVE_EVERY {
             self.save();
             self.saved = now;
+            // Folders no transcript names any more.
+            self.dirs.retain(|d| Arc::strong_count(d) > 1);
         }
         out
+    }
+}
+
+/// Adds one transcript's totals to a target's spend: main is the
+/// target's own transcript, ours one of its own (not a workflow's agent,
+/// which adds what it spent and nothing more).
+fn add(sp: &mut Spend, tot: &Totals, main: bool, ours: bool, today: u32) {
+    let (c, u) = tot.spend();
+    sp.cost += c;
+    sp.usage.add(u);
+    sp.today += tot.day_spend(today);
+    if main {
+        sp.model.clone_from(&tot.last_model);
+        sp.first = tot.first;
+        sp.last = tot.last;
+        sp.halt.clone_from(&tot.halt);
+        sp.progress.clone_from(&tot.progress);
+        sp.progress_at = tot.progress_at;
+        sp.context = tot.context();
+        sp.compacts = tot.compacts;
+        sp.dir.clone_from(&tot.dir);
+        sp.dir_at = tot.dir_at;
+    }
+    if ours && tot.last > sp.last {
+        sp.last = tot.last;
+    }
+    for p in tot.prs.iter().filter(|_| ours) {
+        if !sp.prs.contains(p) {
+            sp.prs.push(p.clone());
+        }
+    }
+    for d in tot.dirs.iter().filter(|_| ours) {
+        if !sp.dirs.contains(d) {
+            sp.dirs.push(d.clone());
+        }
+    }
+}
+
+/// Swaps each of dirs for the one kept in `kept`, keeping it if new.
+fn intern(kept: &mut HashSet<Arc<str>>, dirs: &mut [Arc<str>]) {
+    for d in dirs {
+        match kept.get(d) {
+            Some(k) => *d = k.clone(),
+            None => {
+                kept.insert(d.clone());
+            }
+        }
     }
 }
 
@@ -379,24 +489,24 @@ mod tests {
             s.sizes.contains_key(&sub),
             "the subagent's transcript wasn't read"
         );
-        s.grew.insert(sub.clone(), t0 - RUN_STALE - 60_000);
-        let was = s.sizes[&sub];
+        s.sizes.get_mut(&sub).unwrap().1 = t0 - RUN_STALE - 60_000;
+        let was = s.sizes[&sub].0;
         grow(&sub);
         grow(&main);
         s.run(&targets, t0 + 1);
         assert_eq!(
-            s.sizes[&sub], was,
+            s.sizes[&sub].0, was,
             "a quiet subagent was looked at before QUIET_EVERY"
         );
         assert_eq!(
-            s.sizes[&main],
+            s.sizes[&main].0,
             size(&main),
             "the session's own transcript wasn't looked at"
         );
         s.quiet_at = 0;
         s.run(&targets, t0 + 2);
         assert_eq!(
-            s.sizes[&sub],
+            s.sizes[&sub].0,
             size(&sub),
             "a quiet subagent wasn't looked at after QUIET_EVERY"
         );
@@ -417,7 +527,7 @@ mod tests {
         }];
         let t0 = rush_core::time::now();
         s.run(&live, t0);
-        s.grew.insert(sub.clone(), t0 - RUN_STALE - 60_000);
+        s.sizes.get_mut(&sub).unwrap().1 = t0 - RUN_STALE - 60_000;
         grow(&sub);
         s.run(&live, t0 + 1); // deferred
         let idle = [Target {
@@ -426,7 +536,7 @@ mod tests {
         }];
         s.run(&idle, t0 + 2);
         assert_eq!(
-            s.sizes[&sub],
+            s.sizes[&sub].0,
             size(&sub),
             "the deferred write was never read"
         );
@@ -486,6 +596,35 @@ mod tests {
 
     fn output(s: &mut Scanner, t: &[Target]) -> i64 {
         s.run(t, rush_core::time::now())["k"].usage.output
+    }
+
+    // A session's spend as the cache kept it, its subagent's and its
+    // workflow's agent's with it, is what a run priced, with no transcript
+    // read; nothing for a transcript the cache hasn't.
+    #[test]
+    fn kept_spend_is_the_runs() {
+        let d = TempDir::new("keptspend");
+        let (main, _, t) = kept(&d);
+        let run = main
+            .with_extension("")
+            .join("subagents")
+            .join(WORKFLOWS)
+            .join("r1");
+        std::fs::create_dir_all(&run).unwrap();
+        std::fs::write(run.join("agent-w.jsonl"), line("w1", 5)).unwrap();
+        let now = rush_core::time::now();
+        let mut a = Scanner::kept();
+        let ran = a.run(&t, now).remove("k").unwrap();
+        a.save();
+        let mut b = Scanner::kept();
+        let got = b.kept_spend(&main, now).unwrap();
+        assert_eq!(got.usage.output, 1 + 2 + 5);
+        assert_eq!(format!("{got:?}"), format!("{ran:?}"));
+        let other = d.0.join("other.jsonl");
+        let gone = b.kept_spend(&other, now).unwrap();
+        assert!(gone.ready && gone.cost == 0.0, "{gone:?}");
+        std::fs::write(&other, line("o1", 1)).unwrap();
+        assert!(b.kept_spend(&other, now).is_none(), "not priced yet");
     }
 
     // What one run read is saved, and the next run starts from it.

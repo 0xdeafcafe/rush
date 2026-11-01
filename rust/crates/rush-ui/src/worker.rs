@@ -422,6 +422,18 @@ pub fn spawn_discovery_with(
         .name("rush-discovery".into())
         .spawn(move || {
             let mut d = Discovery::new();
+            // The spend caches read beside the first reading, which shows
+            // their costs (Loader::spend_of) before the first pricing.
+            let reg = d.reg.clone();
+            let _ = std::thread::Builder::new()
+                .name("rush-spend-cache".into())
+                .spawn(move || {
+                    for r in reg.all().iter() {
+                        if let Some(s) = r.spend_reader() {
+                            s.spend_scanner().prepare();
+                        }
+                    }
+                });
             let again = ctl.map(|give| {
                 let handle = d.loader.handle();
                 handle.skip_past(skip_past);
