@@ -116,6 +116,20 @@ pub fn decisions_card(c: &Conn, i: &HostInfo, pending: usize) -> Option<Question
 /// (rushmode.go:5601 syncDecisionsShown).
 pub fn sync_decisions_shown(m: &mut Model, key: &str) {
     let mut c = take(m, key);
+    // The view has read its whole conversation since, its turns numbered
+    // afresh and its Open with them (SessionView::take_whole): the block
+    // the card is up for is the one its Open says now.
+    if let Some(v) = m.session.as_ref().filter(|v| v.key == key)
+        && !c.dec_shown.is_empty()
+        && !v.o.open.contains_key(&c.dec_shown)
+    {
+        c.dec_shown =
+            v.o.open
+                .keys()
+                .find(|k| k.ends_with(":dec:card"))
+                .cloned()
+                .unwrap_or_default();
+    }
     let card = info_any(m, key).and_then(|i| decisions_card(&c, &i, pending(m, key).len()));
     let (mut want, mut id) = (String::new(), String::new());
     if let Some(d) = card {
@@ -124,7 +138,14 @@ pub fn sync_decisions_shown(m: &mut Model, key: &str) {
             want = c.dec_shown.clone();
         } else if c.q_again.is_some() {
             want = rush_convo::render::decisions_on_card(&c.q_again_ref);
-        } else if let Some(t) = session(m, key).and_then(|s| s.turns.last()) {
+        } else if let Some(t) = session(m, key)
+            .and_then(|s| s.turns.last())
+            .filter(|t| ends_with_decisions(t))
+        {
+            // Only a turn whose answer ends with the block: a view still
+            // reading its conversation from the start has an earlier turn
+            // last for a moment, and pinning that one would leave the
+            // block drawn in full above its card.
             let r = rush_convo::render::decisions_ref(&format!("t{}", t.n));
             want = rush_convo::render::decisions_on_card(&r);
         }
@@ -149,6 +170,18 @@ pub fn sync_decisions_shown(m: &mut Model, key: &str) {
     }
     (c.dec_shown, c.dec_id) = (want, id);
     put(m, key, c);
+}
+
+/// Whether turn t's answer, its last text, ends with a decisions block.
+fn ends_with_decisions(t: &rush_convo::model::Turn) -> bool {
+    t.items
+        .iter()
+        .rev()
+        .find_map(|it| match it {
+            rush_convo::model::Item::Text { text, .. } => Some(text),
+            _ => None,
+        })
+        .is_some_and(|text| !rush_convo::decisions::decisions_in(text).1.is_empty())
 }
 
 /// The kind of card waiting: "question", "approval", "decisions" or ""

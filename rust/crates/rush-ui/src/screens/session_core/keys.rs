@@ -874,9 +874,9 @@ fn send_offline_as(
                         // Answers come back on their card, not in the box.
                         text.clear();
                         match r {
-                            Ok(_) => crate::screens::session_cards::question::answer_sent(
-                                m, &key, id,
-                            ),
+                            Ok(_) => {
+                                crate::screens::session_cards::question::answer_sent(m, &key, id)
+                            }
                             Err(_) => answer_failed(m, &key, id),
                         }
                     }
@@ -888,9 +888,7 @@ fn send_offline_as(
                         Ok(()) => {
                             m.flash(&format!("resumed {name}"));
                             if let Some(id) = &answer {
-                                crate::screens::session_cards::question::answer_sent(
-                                    m, &key, id,
-                                );
+                                crate::screens::session_cards::question::answer_sent(m, &key, id);
                             }
                         }
                         Err(e) => {
