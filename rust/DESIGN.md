@@ -1109,7 +1109,20 @@ is made. Everything below is in `rush_ui::frame`.
   `session::header` (the name cut to leave the low note room), then the
   bar's two lines, what the agent runs as and how it's reached, and
   keeps where the context and the permission mode landed; a click on
-  the mode is `session_cards::permissions::permission_command`. The
+  the mode is `session_cards::permissions::permission_command`. Not in
+  Go: `bar_line` keeps where each segment it drew landed (`Ctx::at`), and
+  the model, effort, account and billing segments take clicks too
+  (`agent::HeadAct`: /model's and /effort's lists, the switch sheet on
+  its Account row), lit under the pointer (`style::light_cells`); a click
+  on the agent label opens the switch sheet on the part clicked
+  (harness, account, model). The same for the boxes' edges:
+  `InputBox::edge_at` says where an edge's labels landed, cut or
+  dropped for room, `EdgeAt::place` puts a label's parts there and
+  `InputBox::lit` lights the one under the pointer. The Prompt's folder
+  opens ctrl+l's picker, its chip's name, model and effort the Start
+  sheet on that row (the other setups are picked, as in Go); a
+  Session's box takes clicks on its permission mode (as #perm) and its
+  send mode (as ctrl+t). The
   layout is the one being built in /statusline while its tab shows,
   else bars.json, read off the UI thread with the first list reading;
   what a line left out is kept by `which*10+line` for /statusline.

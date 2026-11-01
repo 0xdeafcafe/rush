@@ -995,3 +995,59 @@ fn hash_then_a_letter_is_a_command() {
         assert_eq!(m.flash.as_ref().unwrap().0, said);
     }
 }
+
+/// Where an edge's labels land, for clicks on their parts, at several
+/// widths: the right one beside the corner, gone with no room; the left
+/// one cut short with …, its parts cut to what shows (EdgeAt).
+#[test]
+fn an_edges_labels_are_where_they_are_drawn() {
+    let b = |w: usize| InputBox {
+        w,
+        top_l: line([sp("new agent in ", DIM), sp("checkout", TEXT)]),
+        top_r: line([sp("Opus", TEXT), sp(" ⌥2 Sonnet", DIM)]),
+        ..InputBox::default()
+    };
+    let left = [(13, 21, 'd')];
+    let right = [(0, 4, 'o'), (5, 14, 's')];
+    for w in [80, 60, 40, 36, 30, 24, 20] {
+        let bx = b(w);
+        let row = bx.lines()[0].plain();
+        let at = bx.edge_at(false);
+        let cells: Vec<char> = row.chars().collect();
+        let text = |f: usize, t: usize| cells[f..t].iter().collect::<String>();
+        for (f, t, what) in at
+            .place(false, &left)
+            .into_iter()
+            .chain(at.place(true, &right))
+        {
+            let s = text(f, t);
+            let whole = match what {
+                'd' => "checkout",
+                'o' => "Opus",
+                _ => "⌥2 Sonnet",
+            };
+            assert!(
+                !s.is_empty() && whole.starts_with(&s),
+                "w {w}: {what} at {f}..{t} is {s:?} in {row:?}"
+            );
+            assert!(!s.contains('…'), "w {w}: {s:?}");
+        }
+        // The right label only where it's drawn.
+        assert_eq!(at.right.is_some(), row.contains("Opus"), "w {w}: {row:?}");
+    }
+    // Too narrow for the folder: cut to what shows, or nothing to click.
+    let at = b(20).edge_at(false);
+    assert!(at.place(false, &left).iter().all(|p| p.1 <= 19));
+    // The part under the pointer is lit, the rest isn't.
+    let mut lit = b(80);
+    let (f, t, _) = lit.edge_at(false).place(true, &right)[0];
+    lit.lit = Some((false, f, t));
+    let row = &lit.lines()[0];
+    let mut x = 0;
+    for s in &row.spans {
+        let on = s.style.bg == crate::style::HOVER_BG;
+        assert_eq!(on, x >= f && x < t, "{s:?} at {x}");
+        x += s.width();
+    }
+    assert_eq!(row.plain(), b(80).lines()[0].plain());
+}

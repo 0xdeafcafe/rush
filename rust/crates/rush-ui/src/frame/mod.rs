@@ -43,7 +43,7 @@ pub use choice::ChoiceSheet;
 pub use confirm::Confirm;
 pub use editor::Editor;
 pub use ext::{Command, Ext};
-pub use inputbox::InputBox;
+pub use inputbox::{EdgeAt, InputBox};
 pub use picker::{Pick, Picker};
 pub use places::{Place, PlaceId};
 pub use sheet::Sheet;

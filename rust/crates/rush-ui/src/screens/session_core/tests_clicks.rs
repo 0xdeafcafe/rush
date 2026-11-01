@@ -164,3 +164,52 @@ fn the_pointer_crossing_moves_the_keys() {
     ev(&mut m, MouseKind::Moved, 5, 20);
     assert!(m.session.is_none(), "a real crossing does");
 }
+
+/// The permission mode on the Session's box takes a click where it's
+/// drawn, beside the list and alone, wide and narrow: lit under the
+/// pointer, a click opens what changes it (as #perm).
+#[test]
+fn the_mode_on_the_box_is_a_click_away() {
+    for (w, split_on) in [(120, false), (60, false), (130, true)] {
+        let (mut m, _fake) = super::tests::hosted("plain", Vec::new());
+        m.w = w;
+        if split_on {
+            m.full = false;
+            m.cfg.set_view("split");
+            m.rebuild();
+        }
+        conn(&mut m, KEY).info.permission_mode = "acceptEdits".into();
+        let rows = screen(&mut m);
+        let Some(y) = rows
+            .iter()
+            .rposition(|r| r.contains("╭") && r.contains(" acceptEdits ─╮"))
+        else {
+            panic!("w {w}: no mode on the box:\n{}", rows.join("\n"));
+        };
+        let x = width(&rows[y][..rows[y].rfind("acceptEdits").unwrap()]);
+        // The pointer over it lights it.
+        ev(&mut m, MouseKind::Moved, x + 2, y);
+        let lit = m.frame();
+        assert!(
+            lit[y]
+                .spans
+                .iter()
+                .any(|s| s.style.bg == crate::style::HOVER_BG),
+            "w {w}"
+        );
+        ev(&mut m, MouseKind::Moved, x - 3, y);
+        assert!(
+            !m.frame()[y]
+                .spans
+                .iter()
+                .any(|s| s.style.bg == crate::style::HOVER_BG),
+            "w {w}"
+        );
+        click(&mut m, x, y);
+        assert!(
+            m.sheet.is_some() || m.flash.is_some(),
+            "w {w}: nothing came of it"
+        );
+        assert!(open_key(&m).is_some());
+    }
+}

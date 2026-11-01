@@ -257,6 +257,83 @@ fn shelf_on_the_box() {
     assert!(narrow.width() > 1);
 }
 
+/// The box's top edge takes clicks where it's drawn, at every width: the
+/// folder, the chip's parts and the other setups; cut short or with no
+/// room, what doesn't show takes none. A click on the folder opens
+/// ctrl+l's picker, on the chip's model the Start sheet on its Model row.
+#[test]
+fn the_boxs_edge_takes_clicks() {
+    use super::prompt::{EdgeAct, edge_hits};
+    use crate::screens::accounts::startsheet::{ROW_MODEL, StartSheet};
+    for w in [200, 120, 80, 50, 30] {
+        let mut m = model_of(vec![agent("a1", "one", State::Idle, 1)], w, 40);
+        m.cfg.list_only = true;
+        let f = screen(&mut m);
+        let (y, hits) = edge_hits(&mut m);
+        let cells: Vec<char> = f[y].chars().collect();
+        assert!(f[y].starts_with("╭─ new agent in"), "w {w}: {:?}", f[y]);
+        for (x0, x1, act) in &hits {
+            let s: String = cells[*x0..*x1].iter().collect();
+            assert!(
+                !s.contains('─') && !s.contains('…') && !s.trim().is_empty(),
+                "w {w}: {act:?} {s:?} in {:?}",
+                f[y]
+            );
+            if let EdgeAct::Pick(_) = act {
+                assert!(s.starts_with('⌥'), "w {w}: {s:?}");
+            }
+        }
+        if w >= 120 {
+            assert!(
+                hits.iter()
+                    .any(|h| matches!(h.2, EdgeAct::Sheet(r) if r == ROW_MODEL)),
+                "w {w}: {hits:?}"
+            );
+        }
+        // Lit under the pointer.
+        if let Some((x0, _, _)) = hits.first() {
+            m.mouse_event(&crate::frame::Mouse {
+                kind: rush_draw::MouseKind::Moved,
+                x: *x0 as u16,
+                y: y as u16,
+                mods: rush_draw::KeyMods::NONE,
+            });
+            let lit = m.frame()[y].clone();
+            assert!(
+                lit.spans
+                    .iter()
+                    .any(|s| s.style.bg == crate::style::HOVER_BG),
+                "w {w}"
+            );
+        }
+        if let Some((x0, _, _)) = hits
+            .iter()
+            .find(|h| matches!(h.2, EdgeAct::Sheet(r) if r == ROW_MODEL))
+        {
+            m.mouse_event(&crate::frame::Mouse {
+                kind: rush_draw::MouseKind::Down(rush_draw::Button::Left),
+                x: *x0 as u16,
+                y: y as u16,
+                mods: rush_draw::KeyMods::NONE,
+            });
+            match m.sheet_as::<StartSheet>() {
+                Some(s) => assert_eq!(s.row, ROW_MODEL, "w {w}"),
+                None => assert!(m.flash.is_some(), "w {w}: nothing came of it"),
+            }
+            m.sheet = None;
+        }
+        if let Some((x0, _, _)) = hits.iter().find(|h| matches!(h.2, EdgeAct::Dir)) {
+            m.mouse_event(&crate::frame::Mouse {
+                kind: rush_draw::MouseKind::Down(rush_draw::Button::Left),
+                x: *x0 as u16,
+                y: y as u16,
+                mods: rush_draw::KeyMods::NONE,
+            });
+            assert!(m.sheet.is_some(), "w {w}: the folder picker");
+        }
+    }
+}
+
 /// The classic look: a heading per project with a dotted rule, a lone
 /// worktree's agent tagged with it under its project, what's left before
 /// Earlier has it at the row's end, the picked row marked ▍ (view.go
