@@ -673,7 +673,11 @@ impl<'a> Drawer<'a> {
             self.draw_items(0, items.len(), keep);
         }
         if t.live && !self.o.hide_activity {
-            self.live_line();
+            if self.o.dock_activity {
+                self.docked_live_line();
+            } else {
+                self.live_line();
+            }
         }
         if t.stopped {
             let l = self.spine().and_raw("   ").and(dim("⏹ stopped"));
@@ -1407,6 +1411,33 @@ impl<'a> Drawer<'a> {
     }
 
     // ---- live ----
+
+    /// The live line as the pane docks it under the conversation: a row
+    /// of room either side, not the turn's rail (Session.Activity strips
+    /// its leading rail rows, activity.go:24; rushPane wraps it in empty
+    /// rows, rushmode.go:2339-2346), so a card or the box's room under it
+    /// never runs flush against it.
+    fn docked_live_line(&mut self) {
+        let spine = self.spine_text().to_string();
+        while self.lines.len() > 1 {
+            let l = self.lines.last().unwrap();
+            if l.r#ref.is_empty() && trimmed_is(&l.line, &spine) {
+                self.lines.pop();
+            } else {
+                break;
+            }
+        }
+        self.add("", Color::Default, Txt::new(), Txt::new());
+        let at = self.lines.len();
+        self.live_line();
+        while at < self.lines.len()
+            && self.lines[at].r#ref.is_empty()
+            && trimmed_is(&self.lines[at].line, &spine)
+        {
+            self.lines.remove(at);
+        }
+        self.add("", Color::Default, Txt::new(), Txt::new());
+    }
 
     /// What the agent is doing right now, at the end of a running turn
     /// (render.go:1131).
