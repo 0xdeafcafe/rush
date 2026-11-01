@@ -1426,6 +1426,8 @@ impl Loader {
             j.detail = away_detail(aw, &info.detail, now);
         } else if !info.error.is_empty() && st == "done" {
             j.detail = "stopped mid-turn · your next message resumes it".into();
+        } else if info.lost && info.lost_idle {
+            j.detail = "its host went away · bringing it back".into();
         } else if info.lost {
             j.detail = "its host went away mid-turn · bringing it back".into();
         } else if info.stalled != 0 && info.state == "working" {

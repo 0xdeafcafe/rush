@@ -571,7 +571,12 @@ agent's wait for its answer waits on its folder rather than looking every
 half second. rush-fleet reads hosted sessions through its `Hosts` trait, which
 rush-host's `hosts::Sessions` implements over its `Lister` (the fleet
 can't depend on the host, which depends on it); it also revives a host
-lost mid-turn (Go's Revive), unless the rush follows (below).
+lost mid-turn (Go's Revive), unless the rush follows (below). Beyond Go,
+a host lost between turns, awake (it never said it stopped and didn't go
+to sleep: killed, or taken down with the app rush ran in), is revived
+too, told nothing, as a reload's restart leaves it; Go leaves it stopped
+until someone notices. Not into a folder that's gone, and at most once
+every ten minutes, as a mid-turn one.
 
 The TUI reaches hosts through rush-ui's `session_core::host::Hosts`,
 which the binary sets before the loop runs (`rush_ui::run_with`, the
