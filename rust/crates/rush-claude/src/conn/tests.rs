@@ -86,6 +86,8 @@ fn control() {
     let conn = Claude::new()
         .start(o, Arc::new(Tagged { key: 1u8, tx }))
         .unwrap();
+    // Go's KeepsQuota (conn.go:341): its readings are kept by the adapter.
+    assert!(conn.keeps_quota());
     let Event::Commands(c) = next(&rx) else {
         panic!("the first event isn't the commands")
     };
@@ -296,4 +298,20 @@ fn carries_another_agents_conversation() {
     assert_eq!(ls[1]["message"]["model"], "<synthetic>");
     assert_eq!(ls[1]["message"]["content"][0]["text"], "hello");
     assert_eq!(ls[0]["uuid"].as_str().unwrap().len(), 36);
+}
+
+// Go's shareUsage (conn.go:308-338): a reading goes once, as the login's,
+// and again only when it changed or half a minute passed.
+#[test]
+fn shares_usage_readings_once() {
+    let info = br#"{"status":"allowed","resetsAt":1790368200,"rateLimitType":"five_hour","unifiedWindows":{"five_hour":{"utilization":0.5,"resetsAt":1790368200},"seven_day":{"utilization":0.2,"resetsAt":1790521200}}}"#;
+    let live = Mutex::new(crate::usage::Usage::default());
+    let at = 1_000_000;
+    assert!(fresh_reading(&live, "", info, at).is_none(), "no login");
+    let u = fresh_reading(&live, "alex", info, at).expect("first reading");
+    assert_eq!(u.account_id, "alex");
+    assert!(fresh_reading(&live, "alex", info, at + 29_000).is_none());
+    assert!(fresh_reading(&live, "alex", info, at + 31_000).is_some());
+    let rejected = br#"{"status":"rejected","resetsAt":1790368200}"#;
+    assert!(fresh_reading(&live, "alex", rejected, at + 99_000).is_none());
 }

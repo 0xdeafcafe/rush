@@ -29,10 +29,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use rush_core::adapter::{
-    self, ContextWindower, Describer, Discoverer, FastPricer, Feature, Features, HistoryFollower,
-    HistoryReader, Homer, JobKeeper, Keyed, Kind, Level, LoginHinter, Made, Native, Previewer,
-    Pricer, Profile, Programmer, ProjectFolderer, RunFollower, Session, Speaker, SpendReader,
-    SpendScanner, SpendTarget, SubagentStats, Support, TranscriptLocator, Transcripts, Worded,
+    self, ContextWindower, CwdReader, Describer, Discoverer, FastPricer, Feature, Features,
+    HistoryFollower, HistoryReader, Homer, JobKeeper, Keyed, Kind, Level, LoginHinter, Made,
+    Native, Previewer, Pricer, Profile, Programmer, ProjectFolderer, RunFollower, Session, Speaker,
+    SpendReader, SpendScanner, SpendTarget, SubagentStats, Support, TranscriptLocator, Transcripts,
+    Worded,
 };
 use rush_core::agent::{Preview, Spend, TokenUsage};
 use rush_core::time::{Ms, now};
@@ -202,10 +203,16 @@ impl adapter::Adapter for Claude {
     fn warm(&self) -> bool {
         true
     }
+    /// A PostToolUse hook hands a running subagent what was sent it, at its
+    /// next tool call (Go's claude.go:186-188 TakesSubagentMessages).
+    fn takes_subagent_messages(&self) -> bool {
+        true
+    }
 
     rush_core::has!(
         homer: Homer,
         discoverer: Discoverer,
+        cwd_reader: CwdReader,
         job_keeper: JobKeeper,
         transcripts: Transcripts,
         transcript_locator: TranscriptLocator,
@@ -278,6 +285,20 @@ impl adapter::Adapter for Claude {
 impl Homer for Claude {
     fn home(&self) -> Profile {
         profile(&Account::home())
+    }
+}
+
+/// Where the session pid runs now, from the session file Claude Code keeps
+/// for it: entering a worktree moves it (Go's discover.go:244 SessionCwd).
+impl CwdReader for Claude {
+    fn session_cwd(&self, p: &Profile, pid: i32) -> Option<(String, String)> {
+        let acct = if p.dir.is_empty() {
+            Account::home()
+        } else {
+            account(p)
+        };
+        let s = crate::sessions::read_session(&acct.sessions_dir().join(format!("{pid}.json")))?;
+        Some((s.session_id, s.cwd))
     }
 }
 
@@ -665,6 +686,25 @@ mod tests {
         }
         assert_eq!(f.len(), 36, "{f:?}");
         assert_eq!(f[&Guide], Support::YES.with("at its next step"));
+    }
+
+    // Go's TakesSubagentMessages (claude.go:186) and SessionCwd
+    // (discover.go:244), the latter through a temp config dir.
+    #[test]
+    fn takes_messages_and_reads_where_it_moved() {
+        let c = super::Claude::new();
+        assert!(c.takes_subagent_messages());
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("sessions")).unwrap();
+        std::fs::write(
+            dir.path().join("sessions/42.json"),
+            r#"{"pid":42,"sessionId":"s-1","cwd":"/wt"}"#,
+        )
+        .unwrap();
+        let p = super::profile(&super::Account::at("t", dir.path()));
+        let r = Adapter::cwd_reader(&c).expect("Claude reads where it moved");
+        assert_eq!(r.session_cwd(&p, 42), Some(("s-1".into(), "/wt".into())));
+        assert_eq!(r.session_cwd(&p, 43), None);
     }
 
     // Go's SpawnCommand (claude.go:184): what a shell hands rush to host.

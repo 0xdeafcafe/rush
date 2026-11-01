@@ -212,6 +212,7 @@ impl Driver for Claude {
             sid: Mutex::new(o.session_id.clone()),
             asks: Mutex::new(HashMap::new()),
             waits: Mutex::new(HashMap::new()),
+            live: Mutex::new(crate::usage::Usage::default()),
             stale: AtomicBool::new(false),
             ended: AtomicBool::new(false),
         });
@@ -303,6 +304,30 @@ fn own_traffic(tools: &[ToolServer], l: &[u8]) -> bool {
         || (sub == "can_use_tool" && r.tool_name.is_some_and(|n| is_trusted(tools, &n)))
 }
 
+/// The reading in raw as the login's, when it is one and not the last one
+/// again inside half a minute; it is kept as the last then (conn.go:308-330).
+fn fresh_reading(
+    live: &Mutex<crate::usage::Usage>,
+    login: &str,
+    raw: &[u8],
+    at: Ms,
+) -> Option<crate::usage::Usage> {
+    let mut u = crate::usage::live_usage(raw, at)?;
+    if login.is_empty() {
+        return None;
+    }
+    let mut last = lock(live);
+    if u.five_hour == last.five_hour
+        && u.seven_day == last.seven_day
+        && u.fetched_at - last.fetched_at < 30_000
+    {
+        return None;
+    }
+    u.account_id = login.to_string();
+    *last = u.clone();
+    Some(u)
+}
+
 /// What a session's reader thread and its callers share.
 struct Inner {
     s: Arc<Session>,
@@ -328,6 +353,8 @@ struct Inner {
     asks: Mutex<HashMap<String, PermissionRequest>>,
     /// Control requests out, by id.
     waits: Mutex<HashMap<String, mpsc::Sender<ControlReply>>>,
+    /// The last plan usage reading it shared (Go's conn.live).
+    live: Mutex<crate::usage::Usage>,
     /// As stale last found it, to log when it flips.
     stale: AtomicBool,
     ended: AtomicBool,
@@ -408,9 +435,30 @@ impl Inner {
                 }
                 return true;
             }
+            HEvent::RateLimit(e) => self.share_usage(e),
             _ => {}
         }
         false
+    }
+
+    /// Passes the plan usage Claude Code reports with each request to every
+    /// rush, as a reading of the login it runs on: the header and switching
+    /// accounts then go by it, not by a fetch minutes old. A reading like
+    /// the last goes only every half minute (Go's conn.go:308-338
+    /// shareUsage).
+    fn share_usage(&self, ev: &crate::headless::event::RateLimit) {
+        let Some(raw) = ev.raw.as_ref() else { return };
+        let Some(u) = fresh_reading(&self.live, &self.login, raw.get().as_bytes(), now()) else {
+            return;
+        };
+        let acct = self.acct.clone();
+        // Off the reading thread. Recorded only while the folder is still
+        // signed in as it started: after a switch, the reading may be the
+        // new login's.
+        std::thread::spawn(move || {
+            let login = u.account_id.clone();
+            let _ = crate::accounts::record_live_usage(&acct, &login, u);
+        });
     }
 
     /// Sends a control request with send, and waits for its reply.
@@ -512,6 +560,12 @@ impl Conn for ClaudeConn {
     }
     fn hearer(&self) -> Option<&dyn Hearer> {
         Some(self)
+    }
+
+    /// Its readings go where Claude's usage is kept (Go's conn.go:341
+    /// KeepsQuota, an unconditional marker).
+    fn keeps_quota(&self) -> bool {
+        true
     }
 
     /// Whether the folder is signed in as another login than the one it
