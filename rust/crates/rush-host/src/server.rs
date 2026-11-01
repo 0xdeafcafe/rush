@@ -313,6 +313,8 @@ pub(crate) struct Shared {
     cv: Condvar,
     timers: Timers,
     tx: Mutex<Sender<Msg>>,
+    /// Reaches the approved plugins' MCP servers.
+    broker: Arc<rush_plugin::Broker>,
     me: Weak<Shared>,
 }
 
@@ -585,6 +587,7 @@ fn build(reg: Registry, hooks: Hooks, cfg: Config) -> (Host, Receiver<Msg>) {
         cv: Condvar::new(),
         timers: Timers::start(),
         tx: Mutex::new(tx),
+        broker: Arc::new(rush_plugin::Broker::new()),
         me: me.clone(),
     });
     (Host(sh), rx)
@@ -1272,10 +1275,20 @@ impl Host {
         } else {
             c.kind.clone()
         };
+        // Approved plugins add subagents and prompt text, and their tools,
+        // which ask like any other.
+        let pc = rush_plugin::for_session();
+        let plugin_agents = || {
+            pc.agents
+                .iter()
+                .filter_map(|(n, d)| RawJson::new(d.get()).ok().map(|d| (n.clone(), d)))
+        };
+        o.agents = plugin_agents().collect();
         let told = if self.reg.reads_as_claude(&kind) {
             // The agents it can hand work to are its own subagent types, by
-            // name.
+            // name; a plugin's of the same name is the plugin's.
             o.agents = crate::agents::agent_defs(&self.reg, &kind);
+            o.agents.extend(plugin_agents());
             crate::agents::AGENTS_NOTE.to_string()
         } else {
             // Claude Code's own prompt tells it of pastes, and it reads
@@ -1298,8 +1311,7 @@ impl Host {
         };
         // What rush draws (the task list, decisions cards, views) only
         // helps when someone watches it in rush: a headless run is read by
-        // the program that asked for it. Plugins' prompts and tools aren't
-        // ported yet.
+        // the program that asked for it.
         let (tasks, decisions, views) = if c.headless {
             ("", "", "")
         } else {
@@ -1318,6 +1330,7 @@ impl Host {
             &note,
             &told,
             feed,
+            &pc.prompt,
             &c.system_prompt,
         ] {
             let p = p.trim();
@@ -1326,20 +1339,24 @@ impl Host {
             }
         }
         // The same parts by name, so the next start can say what changed.
-        let parts = [
-            ("rush's task list", tasks),
-            ("rush's scratch folder", SCRATCH_PROMPT),
-            ("rush's decisions", decisions),
-            ("rush's views", views),
-            ("rush's agents and tools", told.as_str()),
-            ("community feed", feed),
-            ("this session's prompt", c.system_prompt.as_str()),
+        let mut parts: Vec<(String, &str)> = vec![
+            ("rush's task list".into(), tasks),
+            ("rush's scratch folder".into(), SCRATCH_PROMPT),
+            ("rush's decisions".into(), decisions),
+            ("rush's views".into(), views),
+            ("rush's agents and tools".into(), told.as_str()),
+            ("community feed".into(), feed),
         ];
+        // Each plugin's apart (the map is sorted by name).
+        for (n, t) in &pc.prompts {
+            parts.push((format!("plugin {n}"), t.as_str()));
+        }
+        parts.push(("this session's prompt".into(), c.system_prompt.as_str()));
         let sections = parts
             .iter()
             .filter(|(_, t)| !t.trim().is_empty())
             .map(|(n, t)| rush_core::usage::Section {
-                name: (*n).into(),
+                name: n.clone(),
                 tokens: rush_core::usage::estimate(t.trim()),
             })
             .collect();
@@ -1352,6 +1369,31 @@ impl Host {
         st.untold.clear();
         if !self.reg.supports(a.kind().as_str(), Feature::Prompt) && !o.resume && !o.fork {
             st.untold = o.prompt.clone(); // no system prompt to take it: it goes atop the first message
+        }
+        for srv in &pc.servers {
+            let Some(name) = rush_plugin::name_of(srv) else {
+                continue;
+            };
+            let (name, id) = (name.to_string(), c.id.clone());
+            let (broker, home, cache) =
+                (self.broker.clone(), self.home.clone(), self.cache.clone());
+            o.tools.push(adapter::ToolServer {
+                name: srv.clone(),
+                handle: Some(Arc::new(move |msg| {
+                    // Called from the agent's threads, which have no rush folder of their own.
+                    rush_state::set_thread_dir(Some(home.clone()));
+                    rush_state::set_thread_cache_dir(Some(cache.clone()));
+                    let out = broker.mcp(&name, &id, msg);
+                    RawJson::new(out.get())
+                        .unwrap_or_else(|_| RawJson::new("null").expect("null is JSON"))
+                })),
+                ..Default::default()
+            });
+        }
+        if !pc.servers.is_empty() {
+            self.go("broker", |_| {
+                let _ = rush_plugin::ensure_broker();
+            });
         }
         st.next_key += 1;
         let key = st.next_key;
