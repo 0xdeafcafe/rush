@@ -92,9 +92,8 @@ fn needing(key: &str) -> Agent {
 
 #[test]
 fn getting_started_lines_at_go_widths() {
-    let steps = active_steps(false);
-    assert_eq!(steps.len(), 8, "the ⌘ keys only in Terminal.app");
-    assert_eq!(active_steps(true).len(), STEPS.len());
+    let steps = active_steps();
+    assert_eq!(steps.len(), STEPS.len());
     let done = vec!["start".to_string()];
     let l: Vec<String> = started_lines(&done, &steps, 150)
         .iter()
@@ -1085,7 +1084,7 @@ fn sheets_draw_at_every_width() {
     }
     // Getting started at the list's foot, and its lines.
     for w in [0, 1, 3, 10, 40] {
-        let steps = active_steps(true);
+        let steps = active_steps();
         started_lines(&[], &steps, w);
     }
 }

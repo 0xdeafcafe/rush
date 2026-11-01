@@ -178,16 +178,6 @@ pub const FLEET_COMMANDS: &[(&str, &str, &str)] = &[
         "[harness@provider[:account]] [model] [effort]",
     ),
     (
-        "mackeys",
-        "send Terminal.app's ⌘← → ⌘⌫ ⌘⌦ ⌘Z on to rush through Hammerspoon, installed with brew if need be; alone says whether it's on",
-        "[on|off]",
-    ),
-    (
-        "ghostty",
-        "put Ghostty on LangWatch's light and dark themes, following the system; off puts its own colours back; alone says whether it's on",
-        "[on|off]",
-    ),
-    (
         "statusline",
         "build the top bar, the agent header and Claude Code's status line",
         "",

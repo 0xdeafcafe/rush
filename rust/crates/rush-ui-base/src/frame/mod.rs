@@ -15,7 +15,6 @@ pub mod everywhere;
 pub mod ext;
 pub mod framehold;
 pub mod framememo;
-pub mod ghostty;
 pub mod ground;
 pub mod headerwash;
 pub mod inputbox;
@@ -23,7 +22,6 @@ pub mod keepundo;
 pub mod keyname;
 pub mod keys;
 pub mod location;
-pub mod mackeys;
 pub mod messages;
 pub mod outside;
 pub mod overlayclick;
@@ -166,16 +164,6 @@ pub(crate) fn ext(register: fn(&mut Ext)) -> Ext {
         x.place(id, Box::new(places::Placeholder(id.name())));
     }
     x.agents_page(Box::new(places::Placeholder("Wall")));
-    x.command(
-        "ghostty",
-        "LangWatch's light and dark themes for Ghostty",
-        ghostty::command,
-    );
-    x.command(
-        "mackeys",
-        "⌘ keys for Terminal.app, through Hammerspoon",
-        mackeys::command,
-    );
     x.command(
         "log",
         "the last 50 things rush said: answers, what failed, and what it did on its own (clean-ups, worktrees kept, work landed)",
