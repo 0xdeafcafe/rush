@@ -103,8 +103,11 @@ pub struct HostInfo {
     /// The machine a session is really on, on rush remote attach's
     /// stand-in for it.
     pub remote: String,
-    /// The host went away mid-turn without saying so.
+    /// The host went away without saying so, mid-turn or between turns
+    /// awake: it's brought back.
     pub lost: bool,
+    /// Of a lost one, it went between turns: nothing was cut off.
+    pub lost_idle: bool,
     /// The agent it runs; Claude Code's kind when the host wrote none.
     pub kind: String,
     /// The profile it was started under.

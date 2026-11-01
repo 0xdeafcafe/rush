@@ -5,6 +5,12 @@
 //! Ported from internal/host/revive.go:11-77 (reviveNote, cutNote,
 //! cutAgentsNote, IsRushNote, midTurn, agentTask, lose, reviveText); the
 //! revive itself is hosts.rs.
+//!
+//! Beyond Go: a host gone between turns, awake (it never said it stopped,
+//! and didn't go to sleep), is lost too. Go leaves it stopped, so an idle
+//! agent whose host was taken down (with the app that ran rush, say) sits
+//! stopped until someone notices; here it's started again on the same
+//! conversation, told nothing, as a reload's restart leaves it.
 
 use crate::wire::{Info, Task, mid_turn};
 
@@ -39,8 +45,10 @@ pub fn agent_task(t: &Task) -> bool {
 
 /// What a reading makes of a session whose host has gone: stopped, unless
 /// it went to sleep, and with nothing running, as what it ran went with
-/// it. It's lost (to be brought back) when it went mid-turn, or when its
-/// turn had ended with background agents still at work (Info::cut_agents).
+/// it. It's lost (to be brought back) when it went mid-turn, when its
+/// turn had ended with background agents still at work (Info::cut_agents),
+/// or when it went between turns without a word (Info::cut_idle): a host
+/// that stops says so (its state is stopped), and one that sleeps too.
 pub fn lose(i: &mut Info) {
     i.claude_pid = 0;
     if !i.is_remote() {
@@ -51,7 +59,8 @@ pub fn lose(i: &mut Info) {
                 i.cut_agents.push(t.label.clone());
             }
         }
-        i.lost = i.lost || !i.cut_agents.is_empty();
+        i.cut_idle = !i.lost && i.cut_agents.is_empty() && !i.sleeping && i.state == "idle";
+        i.lost = i.lost || !i.cut_agents.is_empty() || i.cut_idle;
     }
     i.background = Vec::new();
     i.tasks = 0;
@@ -61,8 +70,12 @@ pub fn lose(i: &mut Info) {
 }
 
 /// What a revived session is told: to carry on its turn, or to start
-/// again the work of the background agents that went with it.
+/// again the work of the background agents that went with it. One whose
+/// host went between turns is told nothing: it was waiting for you.
 pub fn revive_text(i: &Info) -> String {
+    if i.cut_idle {
+        return String::new();
+    }
     if i.cut_agents.is_empty() {
         return REVIVE_NOTE.into();
     }
@@ -134,7 +147,10 @@ mod tests {
         );
         lose(&mut shells);
         assert!(
-            !shells.lost && shells.background.is_empty(),
+            shells.lost
+                && shells.cut_idle
+                && shells.cut_agents.is_empty()
+                && shells.background.is_empty(),
             "idle with only a shell and a monitor: {shells:?}"
         );
 
@@ -154,6 +170,44 @@ mod tests {
         remote.remote = "other".into();
         lose(&mut remote);
         assert!(!remote.lost, "another machine's: {remote:?}");
+    }
+
+    // Beyond Go: a host gone between turns without a word (b11e2380's,
+    // idle when the app that ran rush quit, 2026-11-01) is brought back,
+    // told nothing; one that stopped or went to sleep isn't.
+    #[test]
+    fn lose_between_turns() {
+        let mut idle = info("a", "idle", vec![]);
+        lose(&mut idle);
+        assert!(
+            idle.lost && idle.cut_idle && idle.state == "stopped",
+            "idle, awake: {idle:?}"
+        );
+        assert_eq!(revive_text(&idle), "", "it's told nothing");
+
+        let mut stopped = info("b", "stopped", vec![]);
+        lose(&mut stopped);
+        assert!(!stopped.lost && !stopped.cut_idle, "stopped: {stopped:?}");
+
+        let mut asleep = info("c", "idle", vec![]);
+        asleep.sleeping = true;
+        lose(&mut asleep);
+        assert!(!asleep.lost && asleep.state == "idle", "asleep: {asleep:?}");
+
+        let mut turn = info("d", "working", vec![]);
+        lose(&mut turn);
+        assert!(
+            turn.lost && !turn.cut_idle && revive_text(&turn) == REVIVE_NOTE,
+            "mid-turn: {turn:?}"
+        );
+
+        let mut remote = info("e", "idle", vec![]);
+        remote.remote = "other".into();
+        lose(&mut remote);
+        assert!(
+            !remote.lost && !remote.cut_idle,
+            "another machine's: {remote:?}"
+        );
     }
 
     #[test]

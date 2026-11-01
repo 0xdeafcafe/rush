@@ -531,14 +531,18 @@ pub struct Info {
     #[serde(rename = "remoteId", skip_serializing_if = "String::is_empty")]
     pub remote_id: String,
     /// Set on reading when the host went away without saying so (killed,
-    /// or taken down with the app that ran it) mid-turn, or with background
-    /// agents at work: see revive.rs.
+    /// or taken down with the app that ran it), mid-turn or between turns,
+    /// but not asleep: see revive.rs.
     #[serde(skip)]
     pub lost: bool,
     /// On a reading that's lost, the background agents still at work when
     /// its host went after its turn had ended: see revive.rs.
     #[serde(skip)]
     pub cut_agents: Vec<String>,
+    /// On a reading that's lost, its host went between turns, awake: it's
+    /// started again with nothing to say (see revive.rs).
+    #[serde(skip)]
+    pub cut_idle: bool,
     /// The agent it runs.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub kind: String,

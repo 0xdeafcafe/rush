@@ -591,6 +591,24 @@ fn new_hosted_agent_is_not_your_turn() {
     assert!(l.hosted(&test_profile(), &i, None, t).your_turn(t));
 }
 
+// A host gone without a word is being brought back: mid-turn it says so,
+// and one gone between turns (beyond Go) doesn't say it was cut off.
+#[test]
+fn a_lost_host_says_it_is_coming_back() {
+    let mut l = loader();
+    let t = now();
+    let d = tempfile::tempdir().unwrap();
+    let mut i = info("lost", "stopped", &s(d.path()), t);
+    i.lost = true;
+    let detail = |l: &mut Loader, i: &HostInfo| l.hosted(&test_profile(), i, None, t).job.detail;
+    assert_eq!(
+        detail(&mut l, &i),
+        "its host went away mid-turn · bringing it back"
+    );
+    i.lost_idle = true;
+    assert_eq!(detail(&mut l, &i), "its host went away · bringing it back");
+}
+
 // Idle while you're away, it's told to keep going at its check-in: not
 // your turn. Asking something, it still needs you.
 #[test]
