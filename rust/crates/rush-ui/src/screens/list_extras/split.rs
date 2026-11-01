@@ -632,10 +632,18 @@ pub fn follow(m: &mut Model) {
     }
     // The one beside the list until now kept for its tile when its agent
     // is pinned (gridPark); a tile's kept Session in at once (gridAdopt).
+    // The one kept as the list moved off it, taken before the one beside
+    // the list now is kept in its place.
+    let back = super::predict::back(m, &key);
     if let Some(v) = m.pane.take() {
-        super::grid::park(m, v);
+        if super::grid::grid(m).keys.contains(&v.key) {
+            super::grid::park(m, v);
+        } else {
+            // Kept for going back to it (list_extras/predict.rs).
+            super::predict::leave(m, v);
+        }
     }
-    if let Some(v) = super::grid::adopt(m, &key) {
+    if let Some(v) = super::grid::adopt(m, &key).or(back) {
         m.pane = Some(v);
         crate::screens::session_core::live::sync(m);
         return;

@@ -40,6 +40,22 @@ pub fn decoder(reg: &Registry, k: &str) -> Option<Decode> {
     }))
 }
 
+/// Applies events an adapter's history gave to sess: reset, the history
+/// was rewritten and it starts over. History events carry no times, so
+/// each is applied as of an unknown time (0).
+pub fn apply_events(sess: &mut Session, events: &[Event], reset: bool) {
+    if reset {
+        // What its host saved (its model, "opus 5.5 · 1M") isn't the
+        // history's to say: it stays, as take_whole keeps it.
+        let info = std::mem::take(&mut sess.info);
+        *sess = Session::new();
+        sess.info = info;
+    }
+    for ev in events {
+        sess.apply(ev, 0);
+    }
+}
+
 /// Where an open conversation is read from.
 #[derive(Clone)]
 pub enum Source {
@@ -401,16 +417,7 @@ impl SessionView {
     /// no times, so each is applied as of an unknown time (0).
     pub fn take_events(&mut self, events: Vec<Event>, reset: bool) {
         self.read = true;
-        if reset {
-            // What its host saved (its model, "opus 5.5 · 1M") isn't the
-            // history's to say: it stays, as take_whole keeps it.
-            let info = std::mem::take(&mut self.sess.info);
-            self.sess = Session::new();
-            self.sess.info = info;
-        }
-        for ev in &events {
-            self.sess.apply(ev, 0);
-        }
+        apply_events(&mut self.sess, &events, reset);
     }
 
     /// Who answers under your messages: its @handle, and what it is

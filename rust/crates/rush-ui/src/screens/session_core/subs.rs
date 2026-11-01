@@ -306,6 +306,9 @@ pub struct Detail {
 /// What a read of the run shown whole brought.
 enum DetailGot {
     Fresh(rush_convo::Fresh),
+    /// The whole of it as its numbers were read (Reader::tails), with
+    /// what was written since: its first reading.
+    Seeded(Box<Session>),
     Events(Vec<rush_core::event::Event>),
     Failed(String),
 }
@@ -638,6 +641,26 @@ fn read_history(reg: &rush_core::adapter::Registry, kind: &str, path: &str) -> O
     Some(s)
 }
 
+/// Rust-only: run id's conversation as its numbers' reading has it, for
+/// the run shown whole to show at once: taken over by the run shown
+/// whole (its tail goes on from there) when the reader isn't busy and
+/// nothing was written since; None otherwise, and it's read as before.
+pub(super) fn seed_detail(m: &mut Model, key: &str, id: &str, src: &DetailSrc) -> Option<Session> {
+    let DetailSrc::Transcript { path, .. } = src else {
+        return None;
+    };
+    let reader = conn(m, key).runs.reader.clone();
+    let mut r = reader.try_lock().ok()?;
+    let (t, _) = r.tails.get(id)?;
+    let len = std::fs::metadata(path).ok()?.len();
+    if t.path.to_string_lossy() != path.as_str() || t.size() != len {
+        return None;
+    }
+    let (t, s) = r.tails.remove(id)?;
+    r.detail = Some((id.to_string(), t));
+    Some(s)
+}
+
 /// Reads what the run shown whole has gained: a transcript's new lines,
 /// or another agent's session read again.
 fn read_detail(
@@ -653,6 +676,17 @@ fn read_detail(
                 return DetailGot::Failed("rush can't read this agent's transcripts".into());
             };
             if r.detail.as_ref().is_none_or(|(at, _)| at != id) {
+                // Rust-only: its numbers' reading has the whole of it
+                // already (every run's while the subagents view shows):
+                // taken over, topped up, rather than read again from the
+                // start. Its numbers read it afresh next time.
+                if let Some((mut t, mut s)) = r.tails.remove(id)
+                    && t.path.to_string_lossy() == path.as_str()
+                    && t.read(&mut s).is_ok()
+                {
+                    r.detail = Some((id.to_string(), t));
+                    return DetailGot::Seeded(Box::new(s));
+                }
                 let t = if *whole {
                     Tail::new(path, decode.clone())
                 } else {
@@ -1720,6 +1754,7 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
                 more = f.more;
                 det.view.take(f);
             }
+            DetailGot::Seeded(s) => det.view.seed(*s),
             DetailGot::Events(evs) => det.view.take_events(evs, true),
             DetailGot::Failed(e) => {
                 det.view.read = true;

@@ -468,6 +468,22 @@ impl Model {
                 worker::TailStart::From(h.tail, Some(h.sess))
             }
         });
+        // The same for a history read ahead, followed on from where it
+        // stopped.
+        let hist = match &v.source {
+            session::Source::History { .. } if self.tx.is_some() => {
+                crate::screens::list_extras::predict::take_history(self, &a.key).map(|h| {
+                    if h.fresh {
+                        v.seed(*h.sess);
+                        rush_draw::perf_note(|| format!("tail end gen={} ahead", self.r#gen));
+                        (h.follow, None)
+                    } else {
+                        (h.follow, Some(h.sess))
+                    }
+                })
+            }
+            _ => None,
+        };
         match &self.tx {
             Some(tx) => {
                 v.tail = match &v.source {
@@ -493,12 +509,17 @@ impl Model {
                             ),
                         }
                     }
-                    session::Source::History { adapter, session } => {
-                        // A stopped rush session's folder is its host's
-                        // to say, when the list doesn't (history.go:53).
-                        let host = if a.rush { a.job.id.as_str() } else { "" };
-                        worker::spawn_history(adapter, session, host, self.r#gen, tx.clone())
-                    }
+                    session::Source::History { adapter, session } => match hist {
+                        Some((f, seed)) => {
+                            worker::spawn_history_from(f, seed, self.r#gen, tx.clone())
+                        }
+                        None => {
+                            // A stopped rush session's folder is its host's
+                            // to say, when the list doesn't (history.go:53).
+                            let host = if a.rush { a.job.id.as_str() } else { "" };
+                            worker::spawn_history(adapter, session, host, self.r#gen, tx.clone())
+                        }
+                    },
                     session::Source::Hosted | session::Source::Room => None,
                 };
             }
@@ -517,6 +538,12 @@ impl Model {
             .into_iter()
             .flatten()
             .chain(self.tiles.values_mut())
+            .chain(
+                self.kept
+                    .get::<crate::screens::list_extras::predict::Predict>()
+                    .left
+                    .as_mut(),
+            )
             .find(|v| v.r#gen == r#gen)
     }
 
@@ -1668,8 +1695,18 @@ impl Model {
                 more,
             } => match self.view_of(r#gen) {
                 Some(v) => {
+                    let first = !v.read;
                     v.take_events(events, reset);
                     v.caught_up = !more;
+                    let ended = !more && !std::mem::replace(&mut v.ended, true);
+                    if ended {
+                        rush_draw::perf_note(|| format!("tail end gen={}", r#gen));
+                    }
+                    if first || ended {
+                        // As a transcript's: its placeholder goes, and its
+                        // first reading shows once all in, at once.
+                        self.hold.answer();
+                    }
                     self.follow_tail();
                     Step::Draw
                 }
@@ -1696,8 +1733,12 @@ impl Model {
             },
             Note::TailFailed { r#gen, err } => match self.view_of(r#gen) {
                 Some(v) => {
-                    v.read = true;
+                    let first = !std::mem::replace(&mut v.read, true);
                     v.err = err;
+                    if first {
+                        // Its placeholder goes now, for what went wrong.
+                        self.hold.answer();
+                    }
                     Step::Draw
                 }
                 _ => Step::Idle,
