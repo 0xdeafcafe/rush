@@ -1212,6 +1212,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "libc",
+ "memchr",
  "rush-testenv",
  "serde",
  "serde_json",

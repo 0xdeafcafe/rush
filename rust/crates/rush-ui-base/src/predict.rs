@@ -11,7 +11,9 @@ pub struct Hit {
     pub sess: Box<Session>,
 }
 
-/// A history read ahead, taken for a view.
+/// A history read ahead, taken for a view. A partial sess is only its end
+/// (worker::history_end), its follower still at the history's start; else
+/// sess is all of it, and follow where its read stopped.
 pub struct HistHit {
     pub fresh: bool,
     pub follow: Box<dyn Follow>,

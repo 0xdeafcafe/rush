@@ -257,26 +257,15 @@ pub(crate) fn read_tail(
     if most <= 0 || size <= most {
         return Ok((read_all(f, lines)?, false));
     }
-    f.seek(SeekFrom::Start((size - most - 1) as u64))
-        .map_err(io)?;
-    let mut r = BufReader::new(f.take(most as u64 + 1));
-    // Skip a first line cut short, without keeping its body.
-    loop {
-        let buf = r.fill_buf().map_err(io)?;
-        if buf.is_empty() {
-            break;
-        }
-        match memchr::memchr(b'\n', buf) {
-            Some(i) => {
-                r.consume(i + 1);
-                break;
-            }
-            None => {
-                let n = buf.len();
-                r.consume(n);
-            }
-        }
+    // Found from the end backwards: its whole lines only, a line still
+    // being written left for later.
+    let span = rush_core::tailread::tail_span(&mut f, size as u64, most as u64).map_err(io)?;
+    if !span.cut() {
+        f.seek(SeekFrom::Start(0)).map_err(io)?;
+        return Ok((read_all(f, lines)?, false));
     }
+    f.seek(SeekFrom::Start(span.start)).map_err(io)?;
+    let r = BufReader::new(f.take(span.len()));
     Ok((read_all(r, lines)?, true))
 }
 

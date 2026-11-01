@@ -803,8 +803,12 @@ pub fn read_preview(path: &Path, window: u64) -> Preview {
         return p;
     };
     let size = md.len();
-    let off = size.saturating_sub(window);
-    let mut b = vec![0u8; (size - off) as usize];
+    // Its last lines, found from the end backwards: whole ones only.
+    let (off, end) = match rush_core::tailread::tail_span(&f, size, window) {
+        Ok(s) if !s.is_empty() => (s.start, s.end),
+        _ => (size.saturating_sub(window), size),
+    };
+    let mut b = vec![0u8; (end - off) as usize];
     let n = read_at_full(&f, &mut b, off);
     if n.is_err() {
         return p;

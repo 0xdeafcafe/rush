@@ -525,7 +525,19 @@ on every frame. Go retains about 22 MiB for the same.
    refs renumbered so nothing on screen moves: Go's twopass.go; that
    worker also lays out the whole's last 400 rows as the view last drew
    and works out its edits, so the frame that swaps it in draws little:
-   Go's warmed, rushmode.go:2064). Each
+   Go's warmed, rushmode.go:2064). Another agent's history (Codex,
+   Antigravity, Kimi, Vibe: any adapter with a `TailReader`) opens the
+   same way, Rust-only: `worker::history_end` reads its last 2 MB through
+   the adapter, the view shows it ("reading earlier…" above), then the
+   whole is read through its follower and takes its place, and is
+   followed from there; read ahead (predict.rs), only the end is read
+   and kept. Every tail lands on a line's start found from the file's end
+   backwards (`rush_core::tailread`: whole lines only, a last line still
+   being written left out, the last line kept however long). A
+   50 MB Codex rollout (ctrl+k, enter): its end on screen 287-626 ms
+   after enter -> already there (its end read ahead in ~40 ms), memory
+   with it open 133-138 MB -> 77-81 MB, read ahead 85-115 MB -> 35-53
+   MB. Each
    watches files with `rush_sys::fswait::Watcher`
    (kqueue on macOS; the one file watcher in rush: `watch` before reading,
    `wait` blocks until a change, a `Stop` or a timeout; a path not there

@@ -10,8 +10,9 @@
 //! you (ctrl+n's), and with no Session beside the list the picked one
 //! (enter's). One read at
 //! a time, the end's 2 MB as the tail's worker reads it (worker.rs
-//! TAIL_END), parsed and taken into a conversation there. At most KEEP
-//! are kept, those the list has moved away from dropped, all of them
+//! TAIL_END; another agent's history's end through its TailReader,
+//! worker::history_end), parsed and taken into a conversation there. At
+//! most KEEP are kept, those the list has moved away from dropped, all of them
 //! when the machine's memory is short.
 //!
 //! Never stale: one is shown as read only while its file is as it was
@@ -485,9 +486,11 @@ type Followed = (
     Option<Vec<(PathBuf, Option<Stat>)>>,
 );
 
-/// A history read from its start as spawn_history's worker reads it, its
-/// slices applied in order, and its follower, to go on from there; with
-/// the files it waits on as they were before (None when it waits on
+/// A history read as spawn_history's worker reads it first: a long one's
+/// end only, through its adapter's TailReader, its follower left at its
+/// start for the whole to be read once it's opened; else from its start,
+/// its slices applied in order, and its follower, to go on from there.
+/// With the files it waits on as they were before (None when it waits on
 /// something else). None when stopped or it can't be read.
 fn read_history(
     ad: &AdapterRef,
@@ -500,6 +503,9 @@ fn read_history(
     let on = f.wait_on();
     let seen = (on.fd.is_none() && on.every.is_none() && !on.paths.is_empty())
         .then(|| on.paths.iter().map(|p| (p.clone(), stat(p))).collect());
+    if let Some(end) = crate::worker::history_end(ad, &s) {
+        return (!stop.load(Ordering::Relaxed)).then_some((f, end, seen));
+    }
     let mut sess = Session::new();
     loop {
         if stop.load(Ordering::Relaxed) {

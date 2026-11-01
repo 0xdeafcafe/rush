@@ -132,10 +132,16 @@ pub(crate) fn tail_before(
     if end <= most {
         return Ok((read_rollout(section(&f, 0, end), before)?, false));
     }
+    // The tail, found from the end backwards: its whole lines only, a
+    // line still being written left for the follower.
+    let span = rush_core::tailread::tail_span(&f, end as u64, most as u64)?;
+    if !span.cut() {
+        return Ok((read_rollout(section(&f, 0, end), before)?, false));
+    }
     // The first line, and the first turn_context, from before the tail.
     let mut head = Vec::new();
     let mut n = 0;
-    let mut hr = BufReader::with_capacity(64 << 10, section(&f, 0, end - most));
+    let mut hr = BufReader::with_capacity(64 << 10, section(&f, 0, span.start as i64));
     read_lines(&mut hr, |b, _| {
         n += 1;
         let context = n > 1
@@ -146,11 +152,7 @@ pub(crate) fn tail_before(
         }
         !context && n < 64
     })?;
-    // The tail, from the first whole line: the line before it ends with the
-    // byte before the tail's start.
-    let mut tail = BufReader::new(section(&f, end - most - 1, most + 1));
-    let mut skip = Vec::new();
-    tail.read_until(b'\n', &mut skip)?;
+    let tail = section(&f, span.start as i64, span.len() as i64);
     let evs = read_rollout(head.as_slice().chain(tail), before)?;
     Ok((evs, true))
 }

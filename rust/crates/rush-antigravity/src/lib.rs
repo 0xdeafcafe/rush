@@ -316,10 +316,12 @@ impl HistoryReader for Antigravity {
 impl TailReader for Antigravity {
     fn history_tail(&self, s: &Session, most: i64) -> adapter::Result<(Vec<Event>, bool)> {
         let path = path_of(s)?;
-        let size = std::fs::metadata(&path)?.len() as i64;
-        let offset = (size - most.max(1)).max(0);
+        // Where its last most bytes' whole lines start, found from the
+        // end backwards.
+        let (_, span) = rush_core::tailread::file_tail(&path, most.max(1) as u64)?;
+        let offset = span.start;
         let mut out = Vec::new();
-        history::read(&path, offset as u64, 0, adapter::SLICE, &mut |evs| {
+        history::read(&path, offset, 0, adapter::SLICE, &mut |evs| {
             out.extend(evs);
             true
         })?;

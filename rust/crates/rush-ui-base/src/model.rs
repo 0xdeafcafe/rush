@@ -479,14 +479,25 @@ impl Model {
         // stopped.
         let hist = match &v.source {
             session::Source::History { .. } if self.tx.is_some() => {
-                self.ext.calls.predict_take_history()(self, &a.key).map(|h| {
-                    if h.fresh {
+                self.ext.calls.predict_take_history()(self, &a.key).and_then(|h| {
+                    if h.sess.partial {
+                        // Only its end was read ahead, its follower still
+                        // at its start: shown now, the whole read after;
+                        // one written to since is read as if never read.
+                        if !h.fresh {
+                            return None;
+                        }
                         v.seed(*h.sess);
                         rush_draw::perf_note(|| format!("tail end gen={} ahead", self.r#gen));
-                        (h.follow, None)
-                    } else {
-                        (h.follow, Some(h.sess))
+                        return Some(Hist::Whole(h.follow));
                     }
+                    Some(if h.fresh {
+                        v.seed(*h.sess);
+                        rush_draw::perf_note(|| format!("tail end gen={} ahead", self.r#gen));
+                        Hist::From(h.follow, None)
+                    } else {
+                        Hist::From(h.follow, Some(h.sess))
+                    })
                 })
             }
             _ => None,
@@ -517,8 +528,11 @@ impl Model {
                         }
                     }
                     session::Source::History { adapter, session } => match hist {
-                        Some((f, seed)) => {
+                        Some(Hist::From(f, seed)) => {
                             worker::spawn_history_from(f, seed, self.r#gen, tx.clone())
+                        }
+                        Some(Hist::Whole(f)) => {
+                            worker::spawn_history_whole(f, self.r#gen, tx.clone())
                         }
                         None => {
                             // A stopped rush session's folder is its host's
@@ -1619,6 +1633,19 @@ fn local_tm(ms: Ms) -> Option<libc::tm> {
             Some(tm)
         }
     }
+}
+
+/// How a history read ahead is gone on with as its view opens.
+enum Hist {
+    /// Followed from where the read stopped, topped up first with what
+    /// was written since when the conversation read so far comes along.
+    From(
+        Box<dyn rush_core::adapter::Follow>,
+        Option<Box<rush_convo::Session>>,
+    ),
+    /// Only its end was read: the whole is read through the follower, from
+    /// its start, then followed.
+    Whole(Box<dyn rush_core::adapter::Follow>),
 }
 
 impl Model {

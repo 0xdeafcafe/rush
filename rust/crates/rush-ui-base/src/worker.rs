@@ -840,6 +840,53 @@ pub fn spawn_history(
         .name("rush-history".into())
         .spawn(move || {
             let s = history_session(s, &host);
+            // A long one's end first, read from the end through its
+            // adapter's TailReader, for it to show at once; the whole is
+            // read after, here, and put in its place, and followed from
+            // there (as a transcript's: spawn_tail).
+            if let Some(end) = history_end(&ad, &s) {
+                if !tx.send(Note::End {
+                    r#gen,
+                    sess: Box::new(end),
+                    warm: None,
+                }) {
+                    return;
+                }
+                if let Some(f) = ad.history_follower() {
+                    match f.follow_history(&s) {
+                        Ok(f) => whole_then_follow(f, r#gen, &tx, &wk),
+                        Err(e) => {
+                            tx.send(Note::TailFailed {
+                                r#gen,
+                                err: e.to_string(),
+                            });
+                        }
+                    }
+                } else if let Some(r) = ad.history_reader() {
+                    let mut whole = Session::new();
+                    let res = r.history(&s, 0, SLICE, &mut |evs| {
+                        crate::session::apply_events(&mut whole, &evs, false);
+                        !wk.is_closed()
+                    });
+                    match res {
+                        Ok(()) if !wk.is_closed() => {
+                            tx.send(Note::Whole {
+                                r#gen,
+                                sess: Box::new(whole),
+                                warm: None,
+                            });
+                        }
+                        Ok(()) => {}
+                        Err(e) => {
+                            tx.send(Note::TailFailed {
+                                r#gen,
+                                err: e.to_string(),
+                            });
+                        }
+                    }
+                }
+                return;
+            }
             let failed = |e: adapter::Error| {
                 tx.send(Note::TailFailed {
                     r#gen,
@@ -890,6 +937,91 @@ pub fn spawn_history(
                 }
             }
         })
+        .ok()?;
+    Some(TailHandle { stop, wake })
+}
+
+/// How much of a history's end is read first, before the whole of a long
+/// one: as much as a transcript's (TAIL_END).
+pub const HISTORY_END: i64 = TAIL_END as i64;
+
+/// A long history's end, read from the end through its adapter's
+/// TailReader, as the conversation so far, marked partial ("reading
+/// earlier…") for the whole to take its place. None when the adapter
+/// can't read just its end, or its end is all of it (read whole then).
+pub fn history_end(ad: &AdapterRef, s: &adapter::Session) -> Option<Session> {
+    let t = ad.tail_reader()?;
+    let (evs, cut) = t.history_tail(s, HISTORY_END).ok()?;
+    if !cut {
+        return None;
+    }
+    let mut sess = Session::new();
+    crate::session::apply_events(&mut sess, &evs, false);
+    sess.partial = true;
+    Some(sess)
+}
+
+/// Reads the whole of a history whose end the view shows, through f from
+/// its start, here; sends it to take the end's place (Note::Whole), then
+/// follows it from there. Stops when wk closes.
+fn whole_then_follow(mut f: Box<dyn adapter::Follow>, r#gen: u64, tx: &Sender<Note>, wk: &Stop) {
+    let failed = |e: adapter::Error| {
+        tx.send(Note::TailFailed {
+            r#gen,
+            err: e.to_string(),
+        })
+    };
+    let mut whole = Session::new();
+    loop {
+        if wk.is_closed() {
+            return;
+        }
+        match f.next(SLICE) {
+            Ok(sl) => {
+                crate::session::apply_events(&mut whole, &sl.events, sl.reset);
+                if !sl.more {
+                    break;
+                }
+            }
+            Err(e) => {
+                failed(e);
+                return;
+            }
+        }
+    }
+    if !tx.send(Note::Whole {
+        r#gen,
+        sess: Box::new(whole),
+        warm: None,
+    }) {
+        return;
+    }
+    rush_sys::fswait::follow(f.as_mut(), SLICE, wk, &mut |r| match r {
+        Ok(sl) => tx.send(Note::History {
+            r#gen,
+            events: sl.events,
+            reset: sl.reset,
+            more: sl.more,
+        }),
+        Err(e) => failed(e),
+    });
+}
+
+/// Follows a history whose end the view has already (read ahead through
+/// history_end, list_extras/predict.rs), with f still at its start: the
+/// whole is read and put in the end's place, then followed.
+pub fn spawn_history_whole(
+    f: Box<dyn adapter::Follow>,
+    r#gen: u64,
+    tx: Sender<Note>,
+) -> Option<TailHandle> {
+    let tx = tx.lane(1);
+    let wake = Arc::new(Stop::new().ok()?);
+    let stop = Arc::new(AtomicBool::new(false));
+    let wk = wake.clone();
+    std::thread::Builder::new()
+        .name("rush-history".into())
+        .spawn(move || whole_then_follow(f, r#gen, &tx, &wk))
         .ok()?;
     Some(TailHandle { stop, wake })
 }
@@ -1166,6 +1298,112 @@ mod tests {
             let mut app = Notes(Vec::new());
             lp.run_with(&mut app, |_| Ok(())).unwrap();
             assert_eq!(app.0, want, "fails={fails}");
+            drop(h);
+        }
+    }
+
+    /// A long history whose adapter reads its end alone shows that end
+    /// first (partial), then the whole takes its place; one whose end is
+    /// all of it is read as before.
+    #[test]
+    fn a_long_history_shows_its_end_first() {
+        use rush_core::adapter::{
+            Adapter, Features, HistoryReader, Kind, Level, Profile, TailReader,
+        };
+        use rush_core::event::{Message, Part, PartKind};
+        use rush_draw::{App, Canvas, Loop, Msg, Step};
+        fn prompt(t: &str) -> Event {
+            Event::Message(Message {
+                role: "user".into(),
+                parts: vec![Part {
+                    kind: PartKind::Text,
+                    text: t.into(),
+                    ..Part::default()
+                }],
+                ..Message::default()
+            })
+        }
+        struct Long(bool);
+        impl Adapter for Long {
+            fn kind(&self) -> Kind {
+                Kind::from("histlong")
+            }
+            fn name(&self) -> String {
+                "Long".into()
+            }
+            fn features(&self) -> Features {
+                Features::default()
+            }
+            fn level(&self) -> Level {
+                Level::default()
+            }
+            fn profiles(&self) -> Vec<Profile> {
+                Vec::new()
+            }
+            rush_core::has!(history_reader: HistoryReader, tail_reader: TailReader);
+        }
+        impl HistoryReader for Long {
+            fn history(
+                &self,
+                _: &adapter::Session,
+                _: Ms,
+                _: usize,
+                each: &mut dyn FnMut(Vec<Event>) -> bool,
+            ) -> adapter::Result<()> {
+                let done = || Event::TurnEnd(end_left_open());
+                each(vec![prompt("one"), done(), prompt("two"), done()]);
+                each(vec![prompt("three"), done()]);
+                Ok(())
+            }
+        }
+        impl TailReader for Long {
+            fn history_tail(
+                &self,
+                _: &adapter::Session,
+                most: i64,
+            ) -> adapter::Result<(Vec<Event>, bool)> {
+                assert_eq!(most, HISTORY_END);
+                Ok((
+                    vec![prompt("three"), Event::TurnEnd(end_left_open())],
+                    self.0,
+                ))
+            }
+        }
+        #[derive(Default)]
+        struct Notes(Vec<(&'static str, usize, bool)>);
+        impl App<Note> for Notes {
+            fn update(&mut self, m: Msg<Note>) -> Step {
+                match m {
+                    Msg::App(Note::End { sess, .. }) => {
+                        self.0.push(("end", sess.turns.len(), sess.partial));
+                    }
+                    Msg::App(Note::Whole { sess, .. }) => {
+                        self.0.push(("whole", sess.turns.len(), sess.partial));
+                        return Step::Quit;
+                    }
+                    Msg::App(Note::History { events, more, .. }) => {
+                        self.0.push(("history", events.len(), more));
+                        if !more {
+                            return Step::Quit;
+                        }
+                    }
+                    Msg::App(Note::TailFailed { .. }) => return Step::Quit,
+                    _ => {}
+                }
+                Step::Idle
+            }
+            fn draw(&mut self, _: &mut Canvas) {}
+        }
+        for (cut, want) in [
+            (true, vec![("end", 1, true), ("whole", 3, false)]),
+            (false, vec![("history", 4, true), ("history", 2, false)]),
+        ] {
+            let lp: Loop<Note> = Loop::new();
+            let ad: AdapterRef = Arc::new(Long(cut));
+            let h = spawn_history(&ad, &adapter::Session::default(), "", 1, lp.sender()).unwrap();
+            let mut app = Notes::default();
+            lp.run_with(&mut app, |_| Ok(())).unwrap();
+            assert_eq!(app.0, want, "cut={cut}");
             drop(h);
         }
     }

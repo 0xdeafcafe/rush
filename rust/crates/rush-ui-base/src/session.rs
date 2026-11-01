@@ -318,7 +318,8 @@ impl SessionView {
         self.read = true;
         self.caught_up = true;
         self.ended = true;
-        sess.info = std::mem::take(&mut self.sess.info);
+        let had = std::mem::take(&mut self.sess.info);
+        sess.info = self.info_after(std::mem::take(&mut sess.info), had);
         let (r, merged) = match warm {
             Some((r, x)) => (r, Arc::ptr_eq(&x, &self.exchanges)),
             None => (Renderer::new(), false),
@@ -327,6 +328,41 @@ impl SessionView {
         self.r = r;
         if !merged {
             self.restore_exchanges(Vec::new());
+        }
+    }
+
+    /// What the view knows of its session once it takes a reading whose
+    /// own events said `read`, over `had`: a transcript's is the list's
+    /// word alone (had); a history's events say it themselves, as when
+    /// applied to the view's session one by one (take_events), with had
+    /// where they said nothing.
+    fn info_after(&self, read: rush_convo::Info, had: rush_convo::Info) -> rush_convo::Info {
+        if !matches!(self.source, Source::History { .. }) {
+            return had;
+        }
+        fn or(a: String, b: String) -> String {
+            if a.is_empty() { b } else { a }
+        }
+        rush_convo::Info {
+            cwd: or(read.cwd, had.cwd),
+            cost: if read.cost != 0.0 {
+                read.cost
+            } else {
+                had.cost
+            },
+            model: or(read.model, had.model),
+            id: or(read.id, had.id),
+            kind: or(read.kind, had.kind),
+            effort: or(read.effort, had.effort),
+            permission_mode: or(read.permission_mode, had.permission_mode),
+            started_at: if read.started_at != 0 {
+                read.started_at
+            } else {
+                had.started_at
+            },
+            started_by: or(read.started_by, had.started_by),
+            spawned_by: or(read.spawned_by, had.spawned_by),
+            started_from: or(read.started_from, had.started_from),
         }
     }
 
@@ -383,7 +419,7 @@ impl SessionView {
                 shift = i as i64 - (n - 1);
             }
         }
-        whole.info = part.info.clone();
+        whole.info = self.info_after(std::mem::take(&mut whole.info), part.info.clone());
         self.sel = renumber(&self.sel, shift);
         self.o.open = std::mem::take(&mut self.o.open)
             .into_iter()
@@ -929,6 +965,34 @@ mod tests {
         };
         a.job.state = rush_core::agent::State::Idle;
         a
+    }
+
+    /// A history's end, then its whole, taken as read on a worker: what
+    /// their events said of it is kept, what the view knew fills the
+    /// rest, as when its events are taken one by one.
+    #[test]
+    fn a_history_taken_whole_keeps_what_its_events_said() {
+        let mut v = history_view();
+        v.sess.info.cost = 1.5;
+        v.sess.info.model = "from the list".into();
+        let mut end = Session::new();
+        end.partial = true;
+        end.info.model = "gpt-5".into();
+        end.info.effort = "high".into();
+        v.take_end(end, None);
+        assert_eq!(
+            (v.sess.info.model.as_str(), v.sess.info.effort.as_str()),
+            ("gpt-5", "high")
+        );
+        assert_eq!(v.sess.info.cost, 1.5);
+        let mut whole = Session::new();
+        whole.info.effort = "low".into();
+        v.take_whole(whole);
+        assert_eq!(
+            (v.sess.info.model.as_str(), v.sess.info.effort.as_str()),
+            ("gpt-5", "low")
+        );
+        assert!(!v.sess.partial);
     }
 
     /// The history read again from its start keeps what the host saved:
