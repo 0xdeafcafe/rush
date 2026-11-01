@@ -70,6 +70,24 @@ fn answered(s: &Session, ti: usize, ds: &[Decision]) -> bool {
     false
 }
 
+/// The decisions blocks not answered, newest first: each one's turn
+/// number and its decisions. A turn still under way has none yet; a
+/// block is answered as the conversation draws it ("not answered"
+/// otherwise), for the column beside a wide conversation.
+pub fn open_decisions(s: &Session) -> Vec<(u32, Vec<Decision>)> {
+    let mut out = Vec::new();
+    for (ti, t) in s.turns.iter().enumerate().rev() {
+        if t.live {
+            continue;
+        }
+        let ds = decisions_of(t);
+        if !ds.is_empty() && !answered(s, ti, &ds) {
+            out.push((t.n, ds));
+        }
+    }
+    out
+}
+
 impl Drawer<'_> {
     /// An answer, its decisions block drawn as a list (decisions.go:94).
     pub(crate) fn answer_item(&mut self, text: &str) {
