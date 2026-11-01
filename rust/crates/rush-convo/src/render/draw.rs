@@ -2883,7 +2883,8 @@ impl<'a> Drawer<'a> {
         let pad = self.sp(indent - 1);
         let edge = faint("▏");
         let cw = self.cw;
-        self.widen(&lines, indent + 2);
+        // Output wraps inside the conversation's column; it never widens
+        // past it, under the side column.
         let w = self.cw as isize - indent as isize - 2;
         let w = w.max(0) as usize;
         let most = if self.nowrap { 1 } else { 6 };
@@ -3080,7 +3081,15 @@ impl<'a> Drawer<'a> {
                 }
                 return;
             }
-            put(d, Txt::new(), paint(C_OUT, &l));
+            // A right-aligned number (wc's count) starts where output does.
+            let t = l.trim_start();
+            let shown =
+                if !t.is_empty() && t.chars().all(|c| c.is_ascii_digit() || ".,-+%".contains(c)) {
+                    t
+                } else {
+                    l.as_str()
+                };
+            put(d, Txt::new(), paint(C_OUT, shown));
         };
         let more = |d: &mut Self, n: usize, head: &mut String| {
             d.reset_hl();

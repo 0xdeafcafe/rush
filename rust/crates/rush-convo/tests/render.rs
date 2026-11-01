@@ -1059,3 +1059,55 @@ fn the_unit_memo_draws_real_transcripts_as_afresh() {
         }
     }
 }
+
+// An opened step keeps to the conversation's column: a long script line and
+// a long output line wrap (continuations marked alike, no new number), a
+// right-aligned number starts where output does (step-wrap).
+#[test]
+fn an_opened_step_wraps_inside_the_column() {
+    use rush_convo::render::ScriptView;
+    let long = format!("print({})", "'abcdefghij', ".repeat(30));
+    let cmd = format!("python3 -I -c \"\nimport os\n{long}\n\"");
+    let out_long = format!("{{{}}}", "'key': 'value', ".repeat(25));
+    let result = format!("{out_long}\n{out_long}\n      1\n     68");
+    for w in [120usize, 200] {
+        let mut s = Session::new();
+        s.feed(sent("go"), at(0));
+        s.feed(tool_use("a", "Bash", json!({ "command": cmd })), at(1));
+        s.feed(tool_result("a", &result, false, None), at(2));
+        let o = Options {
+            width: w,
+            now: at(10),
+            verbose: true,
+            scripts: [("a".to_string(), ScriptView::default())].into(),
+            ..Options::default()
+        };
+        let rows = Renderer::new().render(&s, &o);
+        let out = text(&rows);
+        let col = w.min(rush_convo::render::CAP_ROW);
+        for l in out.lines() {
+            assert!(
+                l.trim_end().chars().count() <= col,
+                "{w}: past the column ({col}):\n{out}"
+            );
+        }
+        assert!(
+            !out.lines()
+                .any(|l| l.contains('…') && !l.contains("joining")),
+            "{w}: clipped:\n{out}"
+        );
+        assert!(out.contains("'abcdefghij', ".trim()), "{w}:\n{out}");
+        // The long script line's continuation has no number of its own.
+        let nums = out.lines().filter(|l| l.contains(" 3   print(")).count();
+        assert_eq!(nums, 1, "{w}:\n{out}");
+        // Every wrapped output row is marked alike.
+        let tail = out.lines().filter(|l| l.contains("'key'")).count();
+        let marked = out.lines().filter(|l| l.contains('┊')).count();
+        assert!(tail >= 4 && marked >= 2, "{w}:\n{out}");
+        // The numbers start at the output's column.
+        assert!(
+            out.lines().any(|l| l.ends_with("▏1")) && out.lines().any(|l| l.ends_with("▏68")),
+            "{w}:\n{out}"
+        );
+    }
+}
