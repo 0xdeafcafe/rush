@@ -596,7 +596,7 @@ fn held_said_in_the_list_and_header() {
     let h = g::header_line(&m).unwrap().plain();
     assert_eq!(
         h,
-        "⏸ 1 held · past your pace on alex · 2.1× · alt+h in a session lets it through"
+        "‖ 1 held · past your pace on alex · 2.1× · alt+h in a session lets it through"
     );
     // The guard off: nothing said.
     cfg_mut(&mut m).guard.pace = false;

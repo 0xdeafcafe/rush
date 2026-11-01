@@ -465,7 +465,14 @@ fn spawns(dir: &std::path::Path, why: Option<&str>, now: Ms) {
 /// readings of each account's week are kept all the same, so a pace set
 /// later has the hours behind it).
 pub fn on_fleet(m: &mut Model) {
-    if m.sender().is_none() || !m.leads() || peek(m).hosted || peek(m).store.is_none() {
+    // Not before the accounts have been read once: with none read, none
+    // would be past its pace, and what was held would be let go.
+    if m.sender().is_none()
+        || !m.leads()
+        || peek(m).hosted
+        || peek(m).store.is_none()
+        || !peek(m).read_once
+    {
         return;
     }
     let now = m.clock.unwrap_or_else(rush_core::time::now);
@@ -777,7 +784,7 @@ pub fn header_line(m: &Model) -> Option<Line> {
         let say = first.hold.say(&|t| super::rows::clock(t, false));
         l.spans.push(sp(
             format!(
-                "⏸ {} held · {}",
+                "‖ {} held · {}",
                 st.held.len(),
                 say.trim_start_matches("held: ")
             ),
@@ -851,7 +858,7 @@ pub fn pace_chip(m: &Model, kind: &str, id: &str) -> Line {
     }
     match pace_of(m, kind, id) {
         Some(p) if p.level == Level::Over => {
-            line([plain("  "), sp(format!("⏸ {}", guard::times(p.ratio)), RED)])
+            line([plain("  "), sp(format!("‖ {}", guard::times(p.ratio)), RED)])
         }
         Some(p) if p.level == Level::Warn => line([plain("  "), sp(guard::times(p.ratio), YELLOW)]),
         _ => Line::new(),

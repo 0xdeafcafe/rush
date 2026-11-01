@@ -1509,7 +1509,7 @@ impl Model {
 
     /// Whether a row's summary earns its place.
     pub fn says_why(&self, a: &Agent) -> bool {
-        asks(a) || a.stuck(self.now)
+        asks(a) || a.stuck(self.now) || crate::screens::accounts::guard::row_note(self, a).is_some()
     }
 
     /// The latest thing an agent said or is doing, its colour, and whether
