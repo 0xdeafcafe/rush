@@ -795,7 +795,10 @@ UI thread, and does what it says.
 
 What trips never cuts a turn. A session's next turn is held with its
 host's queue hold (Op::HoldQueue, as alt+h): a message sent meanwhile
-queues, held. The guard only lets go of what it held; alt+h on it lets
+queues, held, idle or not (Rust-only: a host held while idle queues too;
+sent now, it goes). What the guard holds and has moved is kept in
+`guard-held.json`, so the next rush to lead lets go of its holds and
+not of yours; it looks only once the accounts have been read. The guard only lets go of what it held; alt+h on it lets
 the next turn through (it isn't held again until that turn has run),
 ctrl+enter sends one now. Held for the cap, sessions go again in the
 order held as room frees.
