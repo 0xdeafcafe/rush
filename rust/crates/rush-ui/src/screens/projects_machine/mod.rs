@@ -66,6 +66,11 @@ pub fn machine(m: &Model) -> &rush_fleet::Machine {
     &data::data(m).machine
 }
 
+/// Whether the machine's processes have been read yet.
+pub fn machine_read(m: &Model) -> bool {
+    data::data(m).machine_at != 0
+}
+
 /// Reads the machine now if it's due: `--render`, which has no loop to
 /// read it with each reading of the list.
 pub fn read_machine(m: &mut Model) {

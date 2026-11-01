@@ -1277,20 +1277,9 @@ impl Model {
         }
         self.row_keys.clear();
         let mut out = Vec::with_capacity(h);
-        // The list kept from last time, not read again yet: drawn quietly
-        // (listcache.rs).
-        let quiet = self.kept::<crate::listcache::Showing>().0;
         for r in &rows[self.scroll..end] {
             self.row_keys.push(r.key.clone());
-            let mut l = self.row_line(r, w, name_col, two);
-            if quiet {
-                for s in &mut l.spans {
-                    if s.style.fg != rush_core::text::Color::Default || !s.text.trim().is_empty() {
-                        s.style.fg = FAINT;
-                    }
-                }
-            }
-            out.push(l);
+            out.push(self.row_line(r, w, name_col, two));
         }
         if let Some(n) = more {
             self.row_keys.push(String::new());
@@ -1635,7 +1624,24 @@ impl Model {
         let [w_act, w_cpu, w_ram, w_tok, w_cost, w_time] = self.col_widths(list_w);
         let now = self.now;
         let live = a.job.live();
-        let marker = if a.checking {
+        // The list kept from last time, not read again yet (listcache.rs):
+        // what it said an agent was doing then may not be so now, so its
+        // mark is drawn neutral and still until the live reading lands.
+        let kept = crate::listcache::showing(self);
+        let marker = if kept && says_what_now(self, a, now) {
+            let g = if live || a.busy() {
+                "◌"
+            } else if a.halted() {
+                "✗"
+            } else if a.needs_you() || a.waiting() || wants_you(self, a) {
+                "?"
+            } else if a.your_turn(now) {
+                "◆"
+            } else {
+                "✓"
+            };
+            sp(g, FAINT)
+        } else if a.checking {
             sp("◔", SUB)
         } else if a.halted() {
             sp("✗", RED)
@@ -2130,6 +2136,21 @@ fn project_line(title: &str, w: usize) -> Line {
 
 /// A worktree's name, for its heading or beside its one agent's name
 /// (folders.go:319 treeTag).
+/// Whether a's mark says what it's doing now (working, waiting on you,
+/// just finished, halted): what the list kept from last time can't vouch
+/// for until it's read again.
+fn says_what_now(m: &Model, a: &Agent, now: rush_core::time::Ms) -> bool {
+    a.checking
+        || a.halted()
+        || wants_you(m, a)
+        || a.your_turn(now)
+        || a.just_finished(now)
+        || a.needs_you()
+        || a.waiting()
+        || a.job.live()
+        || a.busy()
+}
+
 fn tree_tag(tree: &str) -> Line {
     line([sp("↳ ", FAINT), sp(base(tree).to_string(), BLUE)])
 }

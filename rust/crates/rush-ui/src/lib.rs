@@ -124,8 +124,10 @@ fn run_model(
     // The list as last read, shown until the first reading lands
     // (listcache.rs).
     if hosted.is_none() {
-        listcache::load(&m);
+        listcache::load(&mut m);
     }
+    // Your top bar from the first frame, not the default's gauges first.
+    screens::bars::load_now(&mut m);
     let mut term = Term::new()?;
     m.keys_disambiguated = term.keys_disambiguated();
     // Made again now the terminal has said its colours, for Theme's
@@ -152,6 +154,8 @@ fn run_model(
         }
         Some(_) => None,
     };
+    // The list kept from last time in the first frame (listcache.rs).
+    listcache::wait_first(&mut m);
     let r = lp.run(&mut term, &mut m);
     // Given back before a reload's exec, which starts with SIGUSR1
     // unhandled (main.go:283).

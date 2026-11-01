@@ -161,7 +161,7 @@ impl Model {
         let left2 = if usage_shown {
             line([sp(tildify(&self.launch_dir), DIM)])
         } else {
-            let mut l = self.acct();
+            let mut l = crate::listcache::top_seg(self, crate::listcache::ACCOUNT, self.acct());
             l.spans
                 .push(sp(format!(" · {}", tildify(&self.launch_dir)), DIM));
             l
@@ -217,7 +217,9 @@ impl Model {
             }
             let mut out = (tb.rights)(self, &rooms, drops);
             out.resize(rooms.len(), Line::new());
-            if !self.loaded {
+            // Not while the list kept from last time stands in: its costs
+            // are drawn (listcache.rs).
+            if !self.loaded && !crate::listcache::showing(self) {
                 let mut l = line([sp("costing transcripts…   ", DIM)]);
                 join(&mut l, std::mem::take(&mut out[1]));
                 out[1] = l;

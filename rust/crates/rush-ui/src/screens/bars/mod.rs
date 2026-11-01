@@ -117,6 +117,16 @@ fn on_fleet(m: &mut Model) {
     }
 }
 
+/// Reads the bars now, before the first frame (Rust-only: Go reads them
+/// with the first reading of the list, so its top bar opens on the
+/// default gauges and then changes to yours). A small file.
+pub fn load_now(m: &mut Model) {
+    let st = m.kept::<State>();
+    if st.bars.is_none() {
+        st.bars = Some(sl::load_bars());
+    }
+}
+
 /// The launch folder as the kernel has it, put at the top of the
 /// checkout or worktree it's in, once, off the UI thread (model.go:495
 /// launchDir, which Init runs: --render's Frame never does, so a render
