@@ -15,7 +15,7 @@
 //! plugin_ui's views::beside).
 
 use rush_convo::render::OWNER_SEP;
-use rush_core::text::{Line, Span, Style};
+use rush_core::text::{Color, Line, Span, Style};
 use rush_draw::{Button, MouseKind};
 
 use super::minimap::{self, MINI_WIDTH};
@@ -178,13 +178,25 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
         b
     };
     out.truncate(rows);
-    // The column beside the text, at the foot of the transcript's rows on
-    // screen: where a card or the queue under it starts, else the body's
-    // (rushPane's foot, rushmode.go:2694).
+    // The column beside the text runs down to where a card, the queue or
+    // anything else under the transcript starts, the room before the box
+    // its own too; else down to the body's foot (rushPane's foot,
+    // rushmode.go:2694, past the transcript's blank rows).
     let foot = if v.read && !v.sess.turns.is_empty() {
         let t = v.r.count(&v.sess, &v.o).saturating_sub(v.start);
         let drawn = v.total().saturating_sub(v.start).min(n);
-        if t < drawn { t } else { rows }
+        if t < drawn {
+            let blank = |l: &Line| {
+                l.spans
+                    .iter()
+                    .all(|s| s.style.bg == Color::Default && s.text.trim().is_empty())
+            };
+            (t..rows)
+                .find(|&i| out.get(i).is_some_and(|l| !blank(l)))
+                .unwrap_or(rows)
+        } else {
+            rows
+        }
     } else {
         0
     };

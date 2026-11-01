@@ -33,7 +33,7 @@ use rush_core::time::Ms;
 pub use cards::ENTITY_REF;
 pub use code::{set_show_whitespace, show_whitespace};
 pub use codedoc::{code_rows, is_code};
-pub use decisions::{decisions_on_card, decisions_ref, decisions_sent};
+pub use decisions::{decisions_on_card, decisions_ref, decisions_sent, open_decisions};
 pub use draw::{OWNER_SEP, each_paste, image_label, paste_chip};
 pub use draw::{drawing, fold_pastes};
 pub use markdown::{answer_lines, link_target, markdown_lines};

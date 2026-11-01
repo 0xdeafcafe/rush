@@ -584,6 +584,61 @@ fn a_rendered_session_counts_its_hosted_agents_changes() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// A wide session keeps the conversation at its reading width and runs
+/// the column beside it from the top: the decisions not answered, the
+/// tool at work, what changed. Narrower, there's no column (the 120x40
+/// snapshot).
+#[test]
+fn a_wide_session_has_the_column_beside_it() {
+    let dir = std::env::temp_dir().join(format!("rush-ui-render-side-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("s.jsonl");
+    std::fs::write(
+        &path,
+        [
+            r#"{"type":"user","timestamp":"2026-10-28T12:00:00Z","cwd":"/src/checkout","message":{"role":"user","content":"fix the rounding"}}"#,
+            r#"{"type":"assistant","timestamp":"2026-10-28T12:00:02Z","message":{"id":"m1","model":"claude-opus-5-5","role":"assistant","content":[{"type":"tool_use","id":"e1","name":"Edit","input":{"file_path":"/src/checkout/tax/round.go","old_string":"a\n","new_string":"b\nc\n"}}],"usage":{"input_tokens":5,"output_tokens":3}}}"#,
+            r#"{"type":"user","timestamp":"2026-10-28T12:00:05Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e1","content":"ok","is_error":false}]}}"#,
+            r#"{"type":"assistant","timestamp":"2026-10-28T12:00:08Z","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"Rounded.\n\nDecisions:\n1. **Rounding mode:** banks differ. (a) half up: as the old code; (b) half even: as the spec.\nMy picks: 1b."}]}}"#,
+            r#"{"type":"system","subtype":"turn_duration","timestamp":"2026-10-28T12:00:09Z"}"#,
+            r#"{"type":"user","timestamp":"2026-10-28T12:00:20Z","message":{"role":"user","content":"run the tests meanwhile"}}"#,
+            r#"{"type":"assistant","timestamp":"2026-10-28T12:00:22Z","message":{"id":"m3","role":"assistant","content":[{"type":"tool_use","id":"b1","name":"Bash","input":{"command":"cargo test","description":"Run the tests"}}],"usage":{"input_tokens":5,"output_tokens":3}}}"#,
+        ]
+        .join("\n")
+            + "\n",
+    )
+    .unwrap();
+    let mut m = model();
+    let i = m.agents.iter().position(|a| a.job.id == "d4").unwrap();
+    m.agents[i].job.transcript_path = path.to_string_lossy().into_owned();
+    m.agents[i].job.state = State::Working;
+    m.sel = m.agents[i].key.clone();
+    let f = plain(&mut m, 260, 60, &[(Key::Enter, KeyMods::NONE)]);
+    snapshot("snap_session_side_260x60", &f);
+    let rows: Vec<&str> = f.lines().collect();
+    let at = |what: &str| {
+        rows.iter()
+            .position(|r| r.contains(what))
+            .unwrap_or_else(|| panic!("no {what:?} in\n{f}"))
+    };
+    let (dec, run, chg) = (
+        at("Decisions  not answered"),
+        at(" Running  1 step"),
+        at("▌ Changes"),
+    );
+    assert!(dec < run && run < chg, "{f}");
+    assert!(rows[dec + 1].contains("1. Rounding mode"), "{f}");
+    assert!(rows[run + 1].contains("Run the tests  cargo"), "{f}");
+    assert!(rows[chg + 1].contains("tax/round.go"), "{f}");
+    // The column starts on the conversation's second row, not at its foot.
+    let head = rows
+        .iter()
+        .position(|r| r.contains("Conversation"))
+        .unwrap();
+    assert!(dec <= head + 4, "{f}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 // ---- fixed-fixture snapshots for the crate split ----
 //
 // Every view below is drawn from the fixture fleet at three sizes, on a

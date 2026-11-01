@@ -263,7 +263,9 @@ fn folded_views_in_the_column() {
         .iter()
         .position(|r| r == "side:views:tests")
         .expect("Tests' row");
-    let (sx, sy) = (side.x, side.y + i - (side.rows.len() - side.shown));
+    // The column runs from the top: its rows are where they're drawn.
+    assert!(i < side.shown, "Tests' row shows");
+    let (sx, sy) = (side.x, side.y + i);
     click(&mut m, sx + 4, sy);
     let st = read::state_of(&m, KEY).expect("drawn");
     assert!(!st.shut && st.tab == "tests", "{} {:?}", st.shut, st.tab);

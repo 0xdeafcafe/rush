@@ -294,6 +294,10 @@ pub struct Conn {
     /// The running blocks the dock handed the column beside the
     /// conversation, for side::make.
     pub side_runs: Vec<running::Block>,
+    /// The decisions blocks not answered, newest first, as last worked
+    /// out for the column, and the session's serial and events applied
+    /// then: worked out again only when the conversation has changed.
+    pub side_dec: (u64, u64, Vec<(u32, Vec<rush_convo::decisions::Decision>)>),
     /// The run it watches, and how it got there (subview.rs).
     pub watch: subview::Watch,
     /// The brief its start added to its prompt, by its rush id, and the
