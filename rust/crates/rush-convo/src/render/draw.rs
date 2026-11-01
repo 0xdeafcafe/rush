@@ -49,6 +49,8 @@ use crate::transcript::pr_news_parts;
 use rush_core::event::{Exchange, Peer};
 use rush_core::tool::{Call, Kind, Output};
 
+pub(crate) mod presets;
+
 fn re(s: &str) -> Regex {
     Regex::new(s).expect("a valid pattern")
 }
@@ -74,23 +76,33 @@ pub(crate) struct Drawer<'a> {
     pub first: bool,
     /// A timer under FAST_UNDER was drawn.
     pub fast: bool,
-    named: bool,
-    rule: bool,
-    peek: bool,
+    pub(crate) named: bool,
+    pub(crate) rule: bool,
+    pub(crate) peek: bool,
     pub(crate) tool: i32,
-    helper: i32,
-    while_: bool,
-    worked: bool,
-    marks: HashSet<String>,
-    lg: Option<&'static Lang>,
-    by_path: bool,
-    hs: HlState,
-    hs_path: String,
-    hs_n: usize,
-    spans: Vec<OutSpan>,
-    view: &'static str,
-    nowrap: bool,
+    pub(crate) helper: i32,
+    pub(crate) while_: bool,
+    pub(crate) worked: bool,
+    pub(crate) marks: HashSet<String>,
+    pub(crate) lg: Option<&'static Lang>,
+    pub(crate) by_path: bool,
+    pub(crate) hs: HlState,
+    pub(crate) hs_path: String,
+    pub(crate) hs_n: usize,
+    pub(crate) spans: Vec<OutSpan>,
+    pub(crate) view: &'static str,
+    pub(crate) nowrap: bool,
     infos: std::cell::RefCell<HashMap<StepId, Rc<Info>>>,
+    /// An open turn's parts as last drawn, when it's drawn through the
+    /// unit memo, and what they all read besides their own items.
+    pub(crate) units: Option<&'a mut super::units::Units>,
+    pub(crate) ctx: Option<u64>,
+    /// The turn's index in the session, for another view (presets.rs).
+    pub(crate) ti: usize,
+    /// Steps show open unless folded by hand: code's edits.
+    pub(crate) force_open: bool,
+    /// The start hooks stay out: another view's turn.
+    pub(crate) no_hooks: bool,
 }
 
 impl<'a> Drawer<'a> {
@@ -133,6 +145,11 @@ impl<'a> Drawer<'a> {
             view: "",
             nowrap: false,
             infos: Default::default(),
+            units: None,
+            ctx: None,
+            ti: 0,
+            force_open: false,
+            no_hooks: false,
         }
     }
 
@@ -403,7 +420,12 @@ impl<'a> Drawer<'a> {
         self.add("", Color::Default, Txt::new(), Txt::new());
     }
 
-    fn is_blank(&self, i: usize) -> bool {
+    /// Row i holds only the spine, whatever its ref.
+    pub(crate) fn spine_only(&self, i: usize) -> bool {
+        trimmed_is(&self.lines[i].line, self.spine_text())
+    }
+
+    pub(crate) fn is_blank(&self, i: usize) -> bool {
         let l = &self.lines[i];
         l.r#ref.is_empty() && trimmed_is(&l.line, self.spine_text())
     }
@@ -573,7 +595,8 @@ impl<'a> Drawer<'a> {
         if yours {
             let ask = if multi { "" } else { t.prompt.trim() };
             let r = self.r.clone();
-            self.user_box(&r, ask, &imgs, multi);
+            let pics = sent_images(&t.pictures, &t.images);
+            self.user_box(&r, ask, &imgs, &pics, multi);
         } else {
             self.other_ask(&ask, noun, how, wake);
         }
@@ -585,7 +608,7 @@ impl<'a> Drawer<'a> {
 
     /// What start hooks said, at the top of the first turn (hooks.go:58).
     fn hooks(&mut self) {
-        if !self.first {
+        if !self.first || self.no_hooks {
             return;
         }
         for (i, h) in self.s.hooks.iter().enumerate() {
@@ -672,7 +695,11 @@ impl<'a> Drawer<'a> {
             self.draw_items(0, items.len(), keep);
         }
         if t.live && !self.o.hide_activity {
-            self.live_line();
+            if self.o.dock_activity {
+                self.docked_live_line();
+            } else {
+                self.live_line();
+            }
         }
         if t.stopped {
             let l = self.spine().and_raw("   ").and(dim("⏹ stopped"));
@@ -1060,29 +1087,33 @@ impl<'a> Drawer<'a> {
                 if j - i >= 2 || runs && j > i {
                     let ids: Vec<StepId> = (i..j).filter_map(step_of).collect();
                     let r = format!("{}:run:{i}", self.r);
-                    if !self.o.open.get(&r).copied().unwrap_or(false) {
-                        self.run(&r, &ids);
-                        // What the run did that you'd want to see stays
-                        // out, what's about one change as one card.
-                        self.run_cards(&ids, GUTTER + 2);
-                    } else {
-                        self.railed(GUTTER - 2, true, |d| {
-                            d.work(|d| {
-                                let l = d
-                                    .sp(GUTTER - 1)
-                                    .and(faint(&format!("▾ hide {}", plural(ids.len(), "step"))));
-                                d.add(&r, Color::Default, l, Txt::new());
+                    self.memoized(i, j, |d| {
+                        if !d.o.open.get(&r).copied().unwrap_or(false) {
+                            d.run(&r, &ids);
+                            // What the run did that you'd want to see
+                            // stays out, what's about one change as one
+                            // card.
+                            d.run_cards(&ids, GUTTER + 2);
+                        } else {
+                            d.railed(GUTTER - 2, true, |d| {
+                                d.work(|d| {
+                                    let l = d.sp(GUTTER - 1).and(faint(&format!(
+                                        "▾ hide {}",
+                                        plural(ids.len(), "step")
+                                    )));
+                                    d.add(&r, Color::Default, l, Txt::new());
+                                });
+                                for &id in &ids {
+                                    d.step(id, 1);
+                                }
                             });
-                            for &id in &ids {
-                                d.step(id, 1);
-                            }
-                        });
-                    }
+                        }
+                    });
                     i = j;
                     continue;
                 }
             }
-            self.item(i);
+            self.memoized(i, i + 1, |d| d.item(i));
             i += 1;
         }
     }
@@ -1167,7 +1198,8 @@ impl<'a> Drawer<'a> {
                 self.while_ = true;
                 let r = format!("{}:u:{i}", self.r);
                 let names = image_names(&x.images);
-                self.user_box(&r, x.text.trim(), &names, false);
+                let pics = sent_images(&x.pictures, &x.images);
+                self.user_box(&r, x.text.trim(), &names, &pics, false);
                 self.while_ = false;
             }
             Item::Step(id) => self.step(*id, 0),
@@ -1255,18 +1287,20 @@ impl<'a> Drawer<'a> {
 
     /// What you said: your edge, who said it and when, the words a column
     /// in, attachments as chips (userbox.go:70).
-    fn user_box(&mut self, r: &str, ask: &str, imgs: &[String], multi: bool) {
+    fn user_box(&mut self, r: &str, ask: &str, imgs: &[String], pics: &[String], multi: bool) {
         if !multi && let Some(parts) = queued_messages(ask) {
             for (i, part) in parts.iter().enumerate() {
                 if i > 0 {
                     // Each its own message, a row of the box between them.
                     self.add(r, Color::Default, paint(C_BLUE, "▍"), Txt::new());
                 }
-                self.user_box(r, part, &[], false);
+                self.user_box(r, part, &[], &[], false);
                 self.named = true; // one "you" for the lot
             }
-            if !imgs.is_empty() && !numbered_images_cover(ask, imgs.len()) {
-                self.user_box(r, "", imgs, false);
+            if (!imgs.is_empty() || !pics.is_empty())
+                && !numbered_images_cover(ask, imgs.len().max(pics.len()))
+            {
+                self.user_box(r, "", imgs, pics, false);
             }
             self.named = false;
             return;
@@ -1306,7 +1340,16 @@ impl<'a> Drawer<'a> {
                 href: format!("/image/{}", i + 1),
             });
         }
+        // Its images as thumbnails in place of their chips, once made
+        // (userbox.go:116).
+        let thumbs = crate::pictures::thumb_rows(r, pics, inner);
+        if thumbs.is_some() {
+            chips.retain(|c| !c.shown.starts_with("▣ "));
+        }
         rows.extend(chip_rows(r, &chips, inner));
+        if let Some(t) = thumbs {
+            rows.extend(t.into_iter().map(|l| Txt(l.spans)));
+        }
         let edge = if !r.is_empty() && r == self.o.selected {
             self.spine()
         } else {
@@ -1395,6 +1438,33 @@ impl<'a> Drawer<'a> {
 
     // ---- live ----
 
+    /// The live line as the pane docks it under the conversation: a row
+    /// of room either side, not the turn's rail (Session.Activity strips
+    /// its leading rail rows, activity.go:24; rushPane wraps it in empty
+    /// rows, rushmode.go:2339-2346), so a card or the box's room under it
+    /// never runs flush against it.
+    fn docked_live_line(&mut self) {
+        let spine = self.spine_text().to_string();
+        while self.lines.len() > 1 {
+            let l = self.lines.last().unwrap();
+            if l.r#ref.is_empty() && trimmed_is(&l.line, &spine) {
+                self.lines.pop();
+            } else {
+                break;
+            }
+        }
+        self.add("", Color::Default, Txt::new(), Txt::new());
+        let at = self.lines.len();
+        self.live_line();
+        while at < self.lines.len()
+            && self.lines[at].r#ref.is_empty()
+            && trimmed_is(&self.lines[at].line, &spine)
+        {
+            self.lines.remove(at);
+        }
+        self.add("", Color::Default, Txt::new(), Txt::new());
+    }
+
     /// What the agent is doing right now, at the end of a running turn
     /// (render.go:1131).
     fn live_line(&mut self) {
@@ -1405,6 +1475,7 @@ impl<'a> Drawer<'a> {
         }
         let (mut verb, mut since, mut waiting) =
             (pick(OPENINGS, t.start).to_string(), t.start, false);
+        let mut tool_active = false;
         if let Some(last) = t.items.last() {
             let n = t.items.len() - 1;
             match last {
@@ -1421,10 +1492,22 @@ impl<'a> Drawer<'a> {
                 }
                 Item::Step(id) => {
                     let st = self.s.step(*id);
-                    if st.status == Status::Running {
-                        return; // the step's own row is spinning
-                    }
-                    if st.end != 0 {
+                    let docked = self.o.dock_activity;
+                    if st.status == Status::Running || docked && st.status == Status::Waiting {
+                        if !docked {
+                            return; // the step's own row is spinning
+                        }
+                        // Docked under the conversation, the step's row may
+                        // be folded or scrolled away: name it, and the
+                        // turn's time beside it (render.go:1158).
+                        tool_active = true;
+                        verb = if st.status == Status::Waiting {
+                            "waiting for approval".into()
+                        } else {
+                            format!("running {}", one_line(&st.tool))
+                        };
+                        since = st.start;
+                    } else if st.end != 0 {
                         verb = pick(WAITINGS, st.end).into();
                         since = st.end;
                         waiting = true;
@@ -1463,7 +1546,15 @@ impl<'a> Drawer<'a> {
         self.add("", Color::Default, pad.clone().and(head), Txt::new());
         let heard = t.heard.max(t.start);
         let quiet = self.o.now - heard;
-        if t.start != 0 && quiet >= STALL_AFTER {
+        if let Some(r) = &t.retry {
+            // A request failed and is tried again: the model hasn't
+            // stalled, its API has (render.go:1202).
+            let l = pad.and_raw("  ").and(paint(
+                C_YELLOW,
+                &format!("↻ {}", retry_words(r, self.o.now - t.retry_at)),
+            ));
+            self.add("", Color::Default, l, Txt::new());
+        } else if !tool_active && t.start != 0 && quiet >= STALL_AFTER {
             let s = dur(quiet);
             let l = pad.and_raw("  ").and(paint(
                 C_YELLOW,
@@ -1729,7 +1820,9 @@ impl<'a> Drawer<'a> {
         if let Some(v) = self.o.open.get(r) {
             return *v;
         }
-        self.o.verbose || Some(id) == self.latest && self.step_cards(id).is_empty()
+        self.force_open
+            || self.o.verbose
+            || Some(id) == self.latest && self.step_cards(id).is_empty()
     }
 
     fn status_mark(&self, st: &Step) -> Txt {
@@ -2444,8 +2537,10 @@ impl<'a> Drawer<'a> {
         }
     }
 
-    /// The images a step read or was given back, as chips: rush-convo draws
-    /// no thumbnails (picture.go).
+    /// The images a step read or was given back, each a small thumbnail
+    /// once the UI has made it, its chip until then or when it can't be
+    /// (render.go:3176 pictures, thumb.go:55 thumbOf). It says whether
+    /// there were any.
     fn pictures(&mut self, id: StepId, indent: usize) -> bool {
         let st = self.s.step(id);
         let path = if st.kind == Kind::Read {
@@ -2453,21 +2548,53 @@ impl<'a> Drawer<'a> {
         } else {
             String::new()
         };
-        let n = if st.images.is_empty() && thumbable(&path) {
-            1
-        } else {
-            st.images.len()
-        };
-        for _ in 0..n {
-            let chip = if path.is_empty() {
-                paint(C_BLUE, "▣ ").and(paint(C_TEXT, "image"))
+        let srcs: Vec<String> = if st.images.is_empty() {
+            if thumbable(&path) {
+                vec![path.clone()]
             } else {
-                image_chip("", &path)
+                Vec::new()
+            }
+        } else {
+            st.images
+                .iter()
+                .map(|p| {
+                    if p.path.is_empty() {
+                        path.clone()
+                    } else {
+                        p.path.to_string()
+                    }
+                })
+                .collect()
+        };
+        let room = self.cw.saturating_sub(indent + 2);
+        for src in &srcs {
+            let thumb = crate::pictures::picture(
+                src,
+                crate::pictures::THUMB_W,
+                crate::pictures::THUMB_H,
+                crate::pictures::Look::Thumb,
+            )
+            .filter(|rows| rows[0].width() <= room);
+            let Some(rows) = thumb else {
+                let chip = if src.is_empty() {
+                    paint(C_BLUE, "▣ ").and(paint(C_TEXT, "image"))
+                } else {
+                    image_chip("", src)
+                };
+                let l = self.sp(indent - 1).and(chip);
+                self.add("", Color::Default, l, Txt::new());
+                continue;
             };
-            let l = self.sp(indent - 1).and(chip);
-            self.add("", Color::Default, l, Txt::new());
+            // Each opens its file when clicked, as its chip does
+            // (render.go:3200 fileLink).
+            for r in rows.iter() {
+                let l = self
+                    .sp(indent - 1)
+                    .and(self.file_link(src, Txt(r.spans.clone())));
+                self.add("", Color::Default, l, Txt::new());
+            }
         }
-        n > 0
+        !srcs.is_empty()
     }
 
     /// An opened shell step's command: on one line when it fits, else laid
@@ -2769,7 +2896,8 @@ impl<'a> Drawer<'a> {
         let pad = self.sp(indent - 1);
         let edge = faint("▏");
         let cw = self.cw;
-        self.widen(&lines, indent + 2);
+        // Output wraps inside the conversation's column; it never widens
+        // past it, under the side column.
         let w = self.cw as isize - indent as isize - 2;
         let w = w.max(0) as usize;
         let most = if self.nowrap { 1 } else { 6 };
@@ -2966,7 +3094,15 @@ impl<'a> Drawer<'a> {
                 }
                 return;
             }
-            put(d, Txt::new(), paint(C_OUT, &l));
+            // A right-aligned number (wc's count) starts where output does.
+            let t = l.trim_start();
+            let shown =
+                if !t.is_empty() && t.chars().all(|c| c.is_ascii_digit() || ".,-+%".contains(c)) {
+                    t
+                } else {
+                    l.as_str()
+                };
+            put(d, Txt::new(), paint(C_OUT, shown));
         };
         let more = |d: &mut Self, n: usize, head: &mut String| {
             d.reset_hl();
@@ -3250,7 +3386,13 @@ impl<'a> Drawer<'a> {
         pair: &str,
         paired: bool,
     ) {
-        let (body, other) = (expand_tabs(code), expand_tabs(pair));
+        // Marked, tabs are drawn as →, so they're kept (render.go:4003).
+        let marked = super::code::show_whitespace();
+        let (body, other) = if marked {
+            (code.to_string(), pair.to_string())
+        } else {
+            (expand_tabs(code), expand_tabs(pair))
+        };
         let (bg, hi, mark) = if sign == '-' {
             (BG_DEL, BG_DEL_HI, minus_sign())
         } else {
@@ -3260,7 +3402,7 @@ impl<'a> Drawer<'a> {
         if paired && let Some((from, to)) = rush_hl::code::changed(&body, &other) {
             em = Some(Emph { from, to, on: hi });
         }
-        let hl = highlight(lg, st, &body, C_TEXT, em);
+        let hl = super::code::paint_code(lg, st, &body, C_TEXT, em, marked);
         for (i, r) in self.code_rows(&hl, w, 6).into_iter().enumerate() {
             let t = if i == 0 {
                 pad.clone()
@@ -3393,6 +3535,28 @@ impl<'a> Drawer<'a> {
         }
         self.card("", indent, head, Txt::new(), rows, foot, room, C_WARN_Q);
     }
+}
+
+/// What a retried request says: why, which attempt of how many, and when
+/// the next is (render.go:1325 retryWords).
+pub(crate) fn retry_words(r: &rush_core::event::Retry, since: Ms) -> String {
+    let why = match r.status {
+        529 => "the API is overloaded".to_string(),
+        429 => "rate limited".to_string(),
+        0 => "no answer from the API".to_string(),
+        n if n >= 500 => format!("the API failed ({n})"),
+        n if r.err.is_empty() => format!("error {n}"),
+        _ => r.err.clone(),
+    };
+    let mut s = format!("retrying · {why} · attempt {}", r.attempt);
+    if r.max > 0 {
+        s.push_str(&format!(" of {}", r.max));
+    }
+    let left = r.delay.as_millis() as Ms - since;
+    if left > 1000 {
+        s.push_str(&format!(" · next in {}", dur((left + 500) / 1000 * 1000)));
+    }
+    s
 }
 
 /// Joins the refs in a row's owner.
@@ -4277,6 +4441,15 @@ pub fn paste_chip(n: usize, text: &str) -> String {
     format!("[pasted text #{n} · {lines} {unit}: {preview}]")
 }
 
+/// The images sent with a message, to draw: those it held, by where rush
+/// keeps each, else its files (SentImages, picture.go:172).
+fn sent_images(held: &[crate::model::Picture], paths: &[Box<str>]) -> Vec<String> {
+    if !held.is_empty() {
+        return held.iter().map(|p| p.path.to_string()).collect();
+    }
+    paths.iter().map(|p| p.to_string()).collect()
+}
+
 /// A turn's images by name: their files, or Image #1, #2.
 fn image_names(images: &[Box<str>]) -> Vec<String> {
     images
@@ -4317,7 +4490,11 @@ fn image_chip(alt: &str, src: &str) -> Txt {
     if name != alt {
         chip.push(paint(C_DIM, &format!(" {name}")));
     }
-    chip
+    // It opens the image when clicked (render.go:1999).
+    match super::markdown::link_target(src) {
+        Some(u) => super::markdown::linked(chip, &u),
+        None => chip,
+    }
 }
 
 /// What a turn no message started says in its place.

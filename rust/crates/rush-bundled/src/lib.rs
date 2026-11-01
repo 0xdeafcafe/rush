@@ -6,7 +6,8 @@
 //! `internal/agtools` and `internal/statusline`, and serve's own four
 //! from `internal/remote/plugins.go` (remote.rs). Each bundled plugin has
 //! the name, manifest and behaviour its Go one has, so Go and Rust rush
-//! share their switches, settings and data folders.
+//! share their switches, settings and data folders. apple_voice, rush's
+//! own push-to-talk switch, is new in the Rust port.
 //!
 //! A bundled plugin's code is rush's own: the broker starts it as `rush
 //! plugin run <name>`, speaking rush's protocol on fd 3 (see
@@ -21,6 +22,7 @@ use rush_plugin::{Bundle, Conn, Error};
 use serde::Serialize;
 
 pub mod agtools;
+pub mod apple_voice;
 pub mod clean;
 pub mod cleanup;
 pub mod drafts;
@@ -42,6 +44,7 @@ mod exec;
 /// Every plugin bundled with rush, by name.
 pub fn bundles() -> Vec<Bundle> {
     let mut out = vec![
+        apple_voice::bundle(),
         cleanup::bundle(),
         drafts::bundle(),
         drive::bundle(),
@@ -319,6 +322,7 @@ mod tests {
         assert_eq!(
             names,
             [
+                "apple-voice",
                 "cleanup",
                 "drafts",
                 "drive",

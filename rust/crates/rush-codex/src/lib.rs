@@ -24,6 +24,7 @@ mod models;
 mod quota;
 mod rollout;
 mod rpc;
+pub mod settings;
 
 pub use accounts::keep;
 pub use adapter::{Codex, key_flags};

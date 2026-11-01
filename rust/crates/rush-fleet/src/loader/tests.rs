@@ -353,6 +353,42 @@ fn hosted_cost_is_the_transcripts_once_priced() {
     }
 }
 
+/// Before the first scan, a row whose transcript it prices never shows its
+/// host's saved figure: an older host summed Claude Code's running total
+/// again on every restart. Rust-only (Go's fleet.go:1058 showed the
+/// host's until then). One no scan priced (put away) still takes it.
+#[test]
+fn hosted_cost_waits_for_a_transcript_that_is_priced() {
+    let d = tempfile::tempdir().unwrap();
+    let (reg, p) = claude_reg(d.path());
+    let tr = reg.transcript_path("claude", &p, "/work/app", "sid1");
+    std::fs::create_dir_all(Path::new(&tr).parent().unwrap()).unwrap();
+    std::fs::write(&tr, "{}\n").unwrap();
+    let mut l = Loader::new(reg);
+    let t = now();
+    let mut i = info("w", "stopped", "/work/app", t);
+    i.kind = "claude".into();
+    i.session_id = "sid1".into();
+    i.cost_usd = 506_066.56;
+    let a = l.hosted_agent(&p, &i, None, t);
+    assert_eq!(a.job.transcript_path, tr);
+    assert_eq!(a.spend.cost, 0.0, "the host's saved figure");
+    l.priced = true; // a scan that didn't price it
+    assert_eq!(l.hosted_agent(&p, &i, None, t).spend.cost, 506_066.56);
+    let key = a.key.clone();
+    l.spend.insert(
+        key,
+        Spend {
+            cost: 2106.0,
+            ready: true,
+            ..Spend::default()
+        },
+    );
+    assert_eq!(l.hosted_agent(&p, &i, None, t).spend.cost, 2106.0);
+    // An agent that leaves no transcript: the host's is all there is
+    // (hosted_cost_is_the_transcripts_once_priced).
+}
+
 #[test]
 fn hosted_location_follows_newer_transcript_cd() {
     let d = tempfile::tempdir().unwrap();
@@ -591,6 +627,24 @@ fn new_hosted_agent_is_not_your_turn() {
     assert!(l.hosted(&test_profile(), &i, None, t).your_turn(t));
 }
 
+// A host gone without a word is being brought back: mid-turn it says so,
+// and one gone between turns (beyond Go) doesn't say it was cut off.
+#[test]
+fn a_lost_host_says_it_is_coming_back() {
+    let mut l = loader();
+    let t = now();
+    let d = tempfile::tempdir().unwrap();
+    let mut i = info("lost", "stopped", &s(d.path()), t);
+    i.lost = true;
+    let detail = |l: &mut Loader, i: &HostInfo| l.hosted(&test_profile(), i, None, t).job.detail;
+    assert_eq!(
+        detail(&mut l, &i),
+        "its host went away mid-turn · bringing it back"
+    );
+    i.lost_idle = true;
+    assert_eq!(detail(&mut l, &i), "its host went away · bringing it back");
+}
+
 // Idle while you're away, it's told to keep going at its check-in: not
 // your turn. Asking something, it still needs you.
 #[test]
@@ -693,6 +747,51 @@ fn idle_rows_are_not_watched() {
         l.sub_watch.contains(&PathBuf::from(&tr)),
         "a working row's isn't"
     );
+}
+
+// Looked for all at once ahead of the rows (look_ahead), each rush
+// session's transcript is where transcript_of alone finds it: in the
+// folder it started in, in the project it moved to, or, nowhere, where it
+// would be, not looked for again until its wait is up.
+#[test]
+fn transcripts_looked_for_ahead_are_as_found_alone() {
+    let d = tempfile::tempdir().unwrap();
+    let (reg, p) = claude_reg(d.path());
+    let write = |cwd: &str, sid: &str| {
+        let tr = reg.transcript_path("claude", &p, cwd, sid);
+        std::fs::create_dir_all(Path::new(&tr).parent().unwrap()).unwrap();
+        std::fs::write(&tr, "{}\n").unwrap();
+        tr
+    };
+    let home = write("/work/app", "home");
+    let moved = write("/work/app/.claude/worktrees/x", "moved");
+    let t = now();
+    let hosted: Vec<HostInfo> = ["home", "moved", "gone"]
+        .into_iter()
+        .map(|sid| {
+            let mut i = info(sid, "stopped", "/work/app", t);
+            i.kind = "claude".into();
+            i.session_id = sid.into();
+            i
+        })
+        .collect();
+    let rows = |ahead: bool| {
+        let mut l = Loader::new(reg.clone());
+        if ahead {
+            l.look_ahead(&p, &hosted);
+        }
+        let got: Vec<String> = hosted
+            .iter()
+            .map(|i| l.hosted_base(&p, i, None, t).job.transcript_path)
+            .collect();
+        (got, l.unfound.contains_key("gone"))
+    };
+    let gone = reg.transcript_path("claude", &p, "/work/app", "gone");
+    assert_eq!(
+        rows(false),
+        (vec![home.clone(), moved.clone(), gone.clone()], true)
+    );
+    assert_eq!(rows(true), (vec![home, moved, gone], true));
 }
 
 /// A loader reading one fake agent with a past and a live session, home
@@ -967,6 +1066,53 @@ fn hosted_spawns() {
     );
 }
 
+// A run folded into the session that ran it is priced with the rows, its
+// transcript's figure counted with its session's rather than its host's
+// (Rust-only: Go never priced one).
+#[test]
+fn folded_runs_are_priced() {
+    let d = tempfile::tempdir().unwrap();
+    let (reg, p) = claude_reg(d.path());
+    let tr = reg.transcript_path("claude", &p, "/work/app", "kid");
+    std::fs::create_dir_all(Path::new(&tr).parent().unwrap()).unwrap();
+    std::fs::write(&tr, "{}\n").unwrap();
+    let mut l = Loader::new(reg);
+    let row = |key: &str, id: &str| {
+        let mut a = Agent {
+            key: key.into(),
+            rush: true,
+            ..Agent::default()
+        };
+        a.acct.kind = Kind::from("claude");
+        a.job.id = id.into();
+        a
+    };
+    let parent = row("claude/a:parent00", "parent00");
+    let mut kid = row("claude/a:kid00000", "kid00000");
+    kid.job.transcript_path = tr.clone();
+    kid.spend.cost = 506_066.56; // as its host saved it
+    let hosted = vec![
+        HostInfo {
+            id: "parent00".into(),
+            ..HostInfo::default()
+        },
+        HostInfo {
+            id: "kid00000".into(),
+            meta: HashMap::from([("spawnedBy".to_string(), "parent00".to_string())]),
+            ..HostInfo::default()
+        },
+    ];
+    let agents = vec![parent, kid];
+    let spawned = l.hosted_spawns(&hosted, &agents, Vec::new());
+    let got = l.fold_spawns(None, agents, spawned, &mut HashSet::new());
+    assert_eq!(got.len(), 1);
+    assert_eq!(l.folded.len(), 1);
+    assert_eq!(l.folded[0].1.path, tr);
+    assert_eq!(l.scan_targets(&[]), 1, "the folded run wasn't priced");
+    let sp = &l.spend["claude/a:kid00000"];
+    assert!(sp.ready && sp.cost == 0.0, "{sp:?}");
+}
+
 // A finished codex exec never seen running is found by its prompt in the
 // transcript of the session working when it began, written just before,
 // and folded from then on; one no session asked is looked for once.
@@ -1116,6 +1262,43 @@ fn fresh() {
     begin(&mut l, t);
     assert!(!l.fresh(&f, at), "fresh in a sweep");
     assert!(!l.fresh(&d.path().join("unwatched"), at));
+}
+
+// With its caller's watcher shared, the loader trusts only what the
+// caller tells: a path newly watched or told changed is looked at again,
+// one quiet since is trusted, and a sweep or a load told "can't tell"
+// trusts nothing.
+#[cfg(target_os = "macos")]
+#[test]
+fn fresh_shared() {
+    let d = tempfile::tempdir().unwrap();
+    let f = d.path().join("t.jsonl");
+    std::fs::write(&f, "a\n").unwrap();
+    let mut l = loader();
+    let w = std::sync::Arc::new(rush_sys::fswait::Watcher::new());
+    l.watch_shared(w.clone());
+    let t = now();
+    begin(&mut l, t); // the first sweeps
+    let at = l.checked();
+    w.watch(&[&f]);
+    l.told(Some(std::slice::from_ref(&f))); // newly watched: read before it was
+    begin(&mut l, t);
+    assert!(!l.fresh(&f, at), "trusted across being newly watched");
+    let at = l.checked();
+    begin(&mut l, t);
+    assert!(l.fresh(&f, at), "a quiet watched file isn't fresh");
+    l.told(Some(std::slice::from_ref(&f)));
+    begin(&mut l, t);
+    assert!(!l.fresh(&f, at), "trusted after being told it changed");
+    let at = l.checked();
+    begin(&mut l, t);
+    assert!(l.fresh(&f, at));
+    l.told(None);
+    begin(&mut l, t);
+    assert!(!l.fresh(&f, at), "trusted when the caller couldn't tell");
+    let at = l.checked();
+    begin(&mut l, t + 30_000);
+    assert!(!l.fresh(&f, at), "fresh in a sweep");
 }
 
 // A row with no subagents folder, rewound to a conversation that has one

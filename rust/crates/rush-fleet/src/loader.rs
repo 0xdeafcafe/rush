@@ -225,6 +225,19 @@ struct FileMemo {
     at: u64,
 }
 
+/// A row's subagent runs to count, with what they're counted under:
+/// a reading counts every row's side by side once its rows are made.
+struct PendingSubs {
+    key: String,
+    e: SubsEntry,
+    transcript: String,
+    gone: bool,
+    since: Ms,
+    now: Ms,
+    dir: Ms,
+    main: u64,
+}
+
 /// A past conversation's row as last made, and what it was made from.
 #[derive(PartialEq)]
 struct PastIn {
@@ -278,6 +291,12 @@ pub struct Loader {
     /// The login new sessions run as, by the logins agent's own word.
     using_login: Option<UsingLogin>,
     spend: HashMap<String, Spend>,
+    /// A scan has priced the rows: before one, spend_of takes the cache's.
+    priced: bool,
+    /// The transcripts of the runs the last reading folded into the
+    /// sessions that ran them (fold_spawns), priced with the rows': what
+    /// they cost is their session's.
+    pub(crate) folded: Vec<(String, SpendTarget)>,
     /// Counts each agent's spend updates, so an unchanged past row is
     /// reused.
     spend_ver: HashMap<String, u64>,
@@ -293,6 +312,9 @@ pub struct Loader {
     subs: HashMap<String, SubsEntry>,
     /// This load leaves out what can wait: see load_quick.
     quick: bool,
+    /// While a reading makes its rows, the subagent runs they're to count
+    /// (subagents leaves them here; finish_subs counts them).
+    pending_subs: Option<Vec<PendingSubs>>,
     fetched: HashMap<String, Reading>,
     /// Each login's last reading a minute or more old.
     burns: HashMap<String, Quota>,
@@ -315,7 +337,9 @@ pub struct Loader {
     envs: HashMap<Pid, (SystemTime, Vec<String>)>,
     pub temp: Arc<TempSizes>,
     past_rows: HashMap<String, (PastIn, Agent)>,
-    idle_rows: HashMap<String, IdleRow>,
+    /// Boxed: a row is a kilobyte and more, and the map is hundreds of
+    /// rows with room for as many again.
+    idle_rows: HashMap<String, Box<IdleRow>>,
     past_keys: HashMap<String, String>,
     /// Other agents' past sessions, by profile folder, as last listed.
     others: HashMap<String, (Ms, Vec<Session>)>,
@@ -353,6 +377,8 @@ impl Loader {
             },
             using_login: None,
             spend: HashMap::new(),
+            priced: false,
+            folded: Vec::new(),
             spend_ver: HashMap::new(),
             nudged: HashMap::new(),
             git: HashMap::new(),
@@ -362,6 +388,7 @@ impl Loader {
             print: HashMap::new(),
             subs: HashMap::new(),
             quick: false,
+            pending_subs: None,
             fetched: HashMap::new(),
             burns: HashMap::new(),
             usage_path: PathBuf::new(),
@@ -461,26 +488,47 @@ impl Loader {
     pub fn targets(agents: &[Agent]) -> Vec<(&Agent, SpendTarget)> {
         agents
             .iter()
-            .filter(|a| !a.job.transcript_path.is_empty())
-            .map(|a| {
-                let t = SpendTarget {
-                    key: a.key.clone(),
-                    path: a.job.transcript_path.clone(),
-                    live: a.job.live() || a.pid != 0,
-                    past: a.past,
-                };
-                (a, t)
-            })
+            .filter_map(|a| Some((a, Loader::target(a)?)))
             .collect()
+    }
+
+    /// What a row's transcripts are priced from, if it has one.
+    pub(crate) fn target(a: &Agent) -> Option<SpendTarget> {
+        (!a.job.transcript_path.is_empty()).then(|| SpendTarget {
+            key: a.key.clone(),
+            path: a.job.transcript_path.clone(),
+            live: a.job.live() || a.pid != 0,
+            past: a.past,
+        })
     }
 
     /// Prices the rows' transcripts, as far as they grew, each through its
     /// adapter's scanner; the next load shows it. Returns how many rows'
     /// spend changed.
     pub fn scan(&mut self, agents: &[Agent]) -> usize {
+        self.scan_targets(&Loader::kind_targets(agents))
+    }
+
+    /// The rows' transcripts to price, each with its agent's kind: what
+    /// scan_targets takes, kept between readings so the next scan needn't
+    /// keep the rows.
+    pub fn kind_targets(agents: &[Agent]) -> Vec<(String, SpendTarget)> {
+        Loader::targets(agents)
+            .into_iter()
+            .map(|(a, t)| (a.acct.kind.as_str().to_string(), t))
+            .collect()
+    }
+
+    /// scan, of targets kind_targets made, and the runs the last reading
+    /// folded into their sessions: their rows are gone from the list, but
+    /// what they cost is counted with the session's, priced as any row's
+    /// rather than as their hosts saved it. Rust-only: Go never priced a
+    /// folded run, taking its host's figure (fleet.go:1058), which a host
+    /// before Rust's could have far out (host agent.go:52, :572).
+    pub fn scan_targets(&mut self, targets: &[(String, SpendTarget)]) -> usize {
         let mut by_kind: HashMap<&str, Vec<SpendTarget>> = HashMap::new();
-        for (a, t) in Loader::targets(agents) {
-            by_kind.entry(a.acct.kind.as_str()).or_default().push(t);
+        for (k, t) in targets.iter().chain(&self.folded) {
+            by_kind.entry(k.as_str()).or_default().push(t.clone());
         }
         let mut got = HashMap::new();
         for (k, targets) in by_kind {
@@ -494,6 +542,7 @@ impl Loader {
             got.extend(sr.run(&targets));
         }
         let n = got.len();
+        self.priced = true;
         // Taken in at once: a scan is the loader's own.
         for (k, v) in got {
             self.spend.insert(k.clone(), v);
@@ -501,6 +550,25 @@ impl Loader {
         }
         self.changed_since();
         n
+    }
+
+    /// A row's spend as priced; before the first pricing, as its
+    /// adapter's spend cache last kept it, no transcript read, so the
+    /// first list's costs are close rather than nothing, or a rush
+    /// session's host's own figure (which can be far out). Rust-only: Go
+    /// shows the host's figure until the first scan (fleet.go:1058).
+    fn spend_of(&self, key: &str, kind: &str, transcript: &str) -> Spend {
+        if let Some(s) = self.spend.get(key) {
+            return s.clone();
+        }
+        if self.priced || transcript.is_empty() {
+            return Spend::default();
+        }
+        self.reg
+            .get(kind)
+            .and_then(|r| r.spend_reader().map(|s| s.spend_scanner()))
+            .and_then(|s| s.kept(transcript))
+            .unwrap_or_default()
     }
 
     /// Saves each adapter's spend cache, unless a scan is under way
@@ -662,6 +730,7 @@ impl Loader {
         let mut tab = sample.then(|| self.procs.snapshot());
 
         let mut seen: HashSet<String> = HashSet::new();
+        self.pending_subs = Some(Vec::new());
         let checked = self.checked();
         let hosted = {
             let w = self.watching.as_ref();
@@ -776,7 +845,7 @@ impl Loader {
                     // worktree on, for before the checkout exists to read.
                     a.branch.clone_from(&j.worktree_branch);
                 }
-                a.spend = self.spend.get(&key).cloned().unwrap_or_default();
+                a.spend = self.spend_of(&key, p.kind.as_str(), &j.transcript_path);
                 if !j.transcript_path.is_empty()
                     && (a.job.live() || a.pid != 0 || now - j.updated_at < 24 * HOUR)
                 {
@@ -880,7 +949,7 @@ impl Loader {
                     }
                 }
                 overlay(&self.store.overlay, &mut a, 0, false);
-                a.spend = self.spend.get(&key).cloned().unwrap_or_default();
+                a.spend = self.spend_of(&key, p.kind.as_str(), &a.job.transcript_path);
                 // ss.cwd is only ever where the session started; its own
                 // transcript's cwd says where it last actually worked.
                 let mut dir = ss.cwd.clone();
@@ -894,6 +963,10 @@ impl Loader {
                 self.sample(tab.as_mut(), &mut a);
                 count(&mut av, &a);
                 snap.agents.push(a);
+            }
+            if self.idle_rows.is_empty() {
+                // The first reading: every row made, none kept yet.
+                self.look_ahead(p, &hosted);
             }
             for info in hosted.iter().filter(|i| i.kind == p.kind.as_str()) {
                 let a = self.hosted_agent(p, info, tab.as_mut(), now);
@@ -932,6 +1005,7 @@ impl Loader {
             &mut read,
         );
         snap.agents.extend(others);
+        self.finish_subs(&mut snap.agents);
         self.read = read;
         // What each row's subagents were counted under is kept while the
         // row is read, folded into its parent's or not.
@@ -981,6 +1055,9 @@ impl Loader {
         self.compactions(&mut snap.agents, &hosted, now);
         self.subs.retain(|k, _| listed.contains(k)); // a row no longer listed: its runs' reader goes
         snap.agents.sort_by_key(|a| a.age(now));
+        // Grown a row at a time and held until the next reading: only
+        // what it uses.
+        snap.agents.shrink_to_fit();
         if sample {
             self.keep(&snap);
         }
@@ -1087,11 +1164,110 @@ impl Loader {
         if found.is_empty() { at } else { found }
     }
 
+    /// Looks for the transcripts transcript_of is about to look for
+    /// under every project, for p's rush sessions, all at once, and
+    /// leaves what it found where transcript_of takes it: one look at
+    /// each project folder for them all, not one per session (a list's
+    /// first reading looks for hundreds, those Claude Code has cleared
+    /// away). Rust-only: Go looks for each in turn.
+    fn look_ahead(&mut self, p: &Profile, hosted: &[HostInfo]) {
+        let t = clock_now();
+        let want: Vec<(&str, &str)> = hosted
+            .iter()
+            .filter(|i| i.kind == p.kind.as_str())
+            .map(|i| (i.cwd.as_str(), i.session_id.as_str()))
+            .filter(|(cwd, sid)| {
+                let k = FoundKey {
+                    kind: p.kind.0.clone(),
+                    name: p.name.clone(),
+                    dir: p.dir.clone(),
+                    cwd: cwd.to_string(),
+                    sid: sid.to_string(),
+                };
+                !self
+                    .found
+                    .get(&k)
+                    .is_some_and(|(path, at)| self.fresh(Path::new(path), *at))
+                    && !self.moved.contains_key(*sid)
+                    && self
+                        .unfound
+                        .get(*sid)
+                        .is_none_or(|&(next, _)| next == 0 || t >= next)
+            })
+            .collect();
+        if want.len() < 2 {
+            return;
+        }
+        let Some(tr) = self.reg.get(p.kind.as_str()) else {
+            return;
+        };
+        let Some(ts) = tr.transcripts() else {
+            return;
+        };
+        let found = ts.find_transcripts(p, &want);
+        for ((cwd, sid), found) in want.into_iter().zip(found) {
+            let at = self.reg.transcript_path(p.kind.as_str(), p, cwd, sid);
+            if found.is_empty() {
+                // As transcript_of takes one looked for and not found.
+                self.moved.remove(sid);
+                let (_, wait) = self.unfound.get(sid).copied().unwrap_or((0, 0));
+                let wait = (2 * wait).clamp(10 * SECOND, 10 * MINUTE);
+                self.unfound.insert(sid.to_string(), (t + wait, wait));
+            } else if found != at {
+                self.moved.insert(sid.to_string(), found);
+                self.unfound.remove(sid);
+            }
+        }
+    }
+
     /// Keeps path, just seen there, as k's transcript, watched from now.
     fn found_at(&mut self, k: FoundKey, path: &str) {
         let c = self.checked();
         self.found.insert(k, (path.to_string(), c));
         self.sub_watch.push(PathBuf::from(path));
+    }
+
+    /// Counts the subagent runs the reading's rows left pending, side by
+    /// side, each as subagents would have counted it, and gives each row
+    /// (and the finished row kept for it) what it counted. Rust-only: Go
+    /// counts each row's as it makes it.
+    fn finish_subs(&mut self, agents: &mut [Agent]) {
+        let Some(pending) = self.pending_subs.take() else {
+            return;
+        };
+        if pending.is_empty() {
+            return;
+        }
+        let done = rush_core::par::map_with(
+            pending,
+            || (),
+            |_, mut j| {
+                if let Some(runs) = &mut j.e.runs {
+                    runs.set_gone(j.gone);
+                    runs.set_since(j.since);
+                    j.e.st = runs.stats(&j.transcript, j.now);
+                    j.e.tiles = subagent_tiles(&j.transcript, &runs.running());
+                }
+                let e = &mut j.e;
+                (e.at, e.dir, e.main, e.gone, e.since) = (j.now, j.dir, j.main, j.gone, j.since);
+                j
+            },
+        );
+        let mut got: HashMap<String, (SubagentStats, Vec<SubagentTile>)> = HashMap::new();
+        for j in done {
+            got.insert(j.key.clone(), (j.e.st, j.e.tiles.clone()));
+            self.subs.insert(j.key, j.e);
+        }
+        for a in agents.iter_mut() {
+            if let Some((st, tiles)) = got.get(&a.key) {
+                (a.subs, a.subagents) = (*st, tiles.clone());
+            }
+        }
+        for r in self.idle_rows.values_mut() {
+            if let Some((st, tiles)) = got.get(&r.row.key) {
+                (r.row.subs, r.row.subagents) = (*st, tiles.clone());
+            }
+        }
     }
 
     /// Counts an agent's subagent runs, and those still working. Whether
@@ -1198,6 +1374,22 @@ impl Loader {
         if e.runs.is_none() {
             e.runs = f.subagent_runs();
         }
+        if e.runs.is_some()
+            && let Some(p) = self.pending_subs.as_mut()
+        {
+            // Counted with the reading's others, side by side (finish_subs).
+            p.push(PendingSubs {
+                key: key.to_string(),
+                e,
+                transcript: transcript.to_string(),
+                gone,
+                since,
+                now,
+                dir,
+                main,
+            });
+            return Default::default();
+        }
         match &mut e.runs {
             Some(runs) => {
                 runs.set_gone(gone);
@@ -1227,7 +1419,7 @@ impl Loader {
     ) -> Agent {
         let mut a = self.hosted_base(p, info, tab, now);
         overlay(&self.store.overlay, &mut a, info.updated_at, true);
-        a.spend = self.spend.get(&a.key).cloned().unwrap_or_default();
+        a.spend = self.spend_of(&a.key, a.kind.as_str(), &a.job.transcript_path);
         // The host follows its agent's own cwd, which a Bash cd never
         // moves; the transcript sees the cd. Whichever moved last wins
         // (fleet.go:1050-1057): a move with no time never does.
@@ -1242,11 +1434,29 @@ impl Loader {
             }
         }
         // A transcript is priced call by call; the host's own figure is
-        // only for agents that leave none.
-        if !a.spend.ready && a.spend.cost < info.cost_usd {
+        // only for agents that leave none, or a row no scan prices (one
+        // put away). Rust-only: Go took the host's until the first scan
+        // (fleet.go:1058), but a host before Rust's summed its agent's
+        // running total again on every restart (host agent.go:52, :572),
+        // so its saved figure can be far out ($506,066 of one session):
+        // before the first scan, a row it will price waits for it.
+        if !a.spend.ready
+            && a.spend.cost < info.cost_usd
+            && (self.priced || !self.prices(a.kind.as_str(), &a.job.transcript_path))
+        {
             a.spend.cost = info.cost_usd;
         }
         a
+    }
+
+    /// Whether a row's transcript is priced: it has one, and its agent's
+    /// adapter reads spend.
+    fn prices(&self, kind: &str, transcript: &str) -> bool {
+        !transcript.is_empty()
+            && self
+                .reg
+                .get(kind)
+                .is_some_and(|r| r.spend_reader().is_some())
     }
 
     /// Finished hosted rows are often hundreds: one is made again only
@@ -1303,7 +1513,7 @@ impl Loader {
         if idle && !self.quick {
             self.idle_rows.insert(
                 info.id.clone(),
-                IdleRow {
+                Box::new(IdleRow {
                     profile: p.clone(),
                     updated: info.updated_at,
                     at: now,
@@ -1312,7 +1522,7 @@ impl Loader {
                     state: info.state.clone(),
                     sleeping: info.sleeping,
                     row: a.clone(),
-                },
+                }),
             );
         } else {
             self.idle_rows.remove(&info.id);
@@ -1411,6 +1621,8 @@ impl Loader {
             j.detail = away_detail(aw, &info.detail, now);
         } else if !info.error.is_empty() && st == "done" {
             j.detail = "stopped mid-turn · your next message resumes it".into();
+        } else if info.lost && info.lost_idle {
+            j.detail = "its host went away · bringing it back".into();
         } else if info.lost {
             j.detail = "its host went away mid-turn · bringing it back".into();
         } else if info.stalled != 0 && info.state == "working" {
@@ -1477,6 +1689,37 @@ impl Loader {
     /// The conversations rush sessions left behind when rewound: each
     /// session shows them itself.
     fn branches(&mut self, hosted: &[HostInfo], claimed: &mut HashSet<String>) {
+        // The first reading reads them all side by side, as `config` would
+        // read each; later ones read only those that changed, or are new,
+        // one by one.
+        if self.files.is_empty() && !hosted.is_empty() {
+            let at = self.checked();
+            let ids: Vec<String> = hosted.iter().map(|i| i.id.clone()).collect();
+            let paths: Vec<PathBuf> = ids
+                .iter()
+                .map(|id| host_root().join(id).join("config.json"))
+                .collect();
+            let stats = rush_core::par::map_with(
+                paths.clone(),
+                || (),
+                |_, p| match std::fs::metadata(&p) {
+                    Ok(m) => (m.modified().ok(), m.len() as i64),
+                    Err(_) => (None, -1),
+                },
+            );
+            let configs = self.hosts.configs(&ids);
+            for ((path, (modified, size)), v) in paths.into_iter().zip(stats).zip(configs) {
+                self.files.insert(
+                    path,
+                    FileMemo {
+                        modified,
+                        size,
+                        v,
+                        at,
+                    },
+                );
+            }
+        }
         for info in hosted {
             if let Some(cfg) = self.config(info) {
                 claimed.extend(cfg.branches);
@@ -1627,7 +1870,7 @@ impl Loader {
             j.created_at = s.created_at;
             j.updated_at = s.updated_at;
             j.transcript_path.clone_from(&s.transcript);
-            a.spend = self.spend.get(&key).cloned().unwrap_or_default();
+            a.spend = self.spend_of(&key, a.kind.as_str(), &a.job.transcript_path);
             self.past_rows.insert(key, (inp, a.clone()));
             out.push(a);
         }
@@ -2141,6 +2384,17 @@ pub(crate) fn table(procs: Vec<Proc>) -> Table {
 impl Loader {
     pub(crate) fn quick_now(&self) -> bool {
         self.quick
+    }
+
+    /// The last reading's agents with their processes sampled again and
+    /// nothing else read (Go's Settle on its tick: nothing new on disk,
+    /// the last reading, processes sampled again).
+    pub fn resample(&mut self, agents: &mut [Agent]) {
+        let mut tab = self.snapshot_procs();
+        for a in agents.iter_mut() {
+            self.sample(Some(&mut tab), a);
+        }
+        self.set_prev_tab(Arc::new(tab));
     }
 
     pub(crate) fn snapshot_procs(&mut self) -> Table {

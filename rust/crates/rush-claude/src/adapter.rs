@@ -215,8 +215,8 @@ impl adapter::Adapter for Claude {
     fn warm(&self) -> bool {
         true
     }
-    /// A PostToolUse hook hands a running subagent what was sent it, at its
-    /// next tool call (Go's claude.go:186-188 TakesSubagentMessages).
+    /// A PostToolUse hook hands a running subagent what was sent it, at
+    /// its next tool call (claude.go:186 TakesSubagentMessages).
     fn takes_subagent_messages(&self) -> bool {
         true
     }
@@ -285,6 +285,7 @@ impl adapter::Adapter for Claude {
         status_liner: StatusLiner,
         status_line_profiler: StatusLineProfiler,
         settings_pager: SettingsPager,
+        harness_settings: HarnessSettings,
         builtin_def_namer: BuiltinDefNamer,
         definer: Definer,
         plugger: Plugger,
@@ -480,6 +481,13 @@ impl Transcripts for Claude {
         }
         String::new()
     }
+    fn find_transcripts(&self, p: &Profile, wants: &[(&str, &str)]) -> Vec<String> {
+        account(p)
+            .find_transcripts(wants)
+            .into_iter()
+            .map(|at| at.as_deref().map(path_str).unwrap_or_default())
+            .collect()
+    }
     fn transcripts_dir(&self, p: &Profile) -> String {
         path_str(&account(p).projects_dir())
     }
@@ -524,6 +532,15 @@ impl SpendScanner for ClaudeSpend {
         if let Ok(mut s) = self.0.try_lock() {
             s.save();
         }
+    }
+    fn kept(&self, path: &str) -> Option<Spend> {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .kept_spend(Path::new(path), now())
+    }
+    fn prepare(&self) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).load();
     }
 }
 
@@ -656,6 +673,13 @@ impl Worded for Claude {
 #[cfg(test)]
 mod tests {
     use rush_core::adapter::{Adapter, Feature, Support};
+
+    // claude.go:186: Claude Code's running subagents take messages, through
+    // the PostToolUse inbox hook.
+    #[test]
+    fn its_subagents_take_messages() {
+        assert!(super::Claude::new().takes_subagent_messages());
+    }
 
     // Claude Code says Yes to everything Go's says it does (claude.go:62),
     // nothing Planned: compacting, btw, cd and hand-offs included.

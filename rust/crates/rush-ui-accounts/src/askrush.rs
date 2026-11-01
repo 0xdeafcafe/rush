@@ -1,0 +1,135 @@
+//! #ask: an agent that answers questions about rush and changes its
+//! settings, working in rush's own folder with the guide in its system
+//! prompt; and taking in config.json when something other than this rush
+//! changed it. After Go's internal/ui/askrush.go (askRush :15,
+//! reloadConfig :38, onConfig :45) and model.go:1115 (looked at every
+//! third tick: here config.json is watched, so an idle rush notices at
+//! once and wakes for nothing else).
+
+use super::state::{accounts, peek};
+use crate::frame::Out;
+use crate::model::Model;
+
+/// rush's full guide (docs/guide.md), which the #ask agent answers from.
+pub const GUIDE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../docs/guide.md"
+));
+
+// What #ask starts is the base's (crate::accounts).
+pub use crate::accounts::{HostedStart, HostedStarter};
+
+/// What #ask starts for question, rush's folder being dir (askRush).
+pub fn ask_start(question: &str, dir: &str) -> HostedStart {
+    HostedStart {
+        task: question.to_string(),
+        dir: dir.to_string(),
+        name: if question.is_empty() {
+            "asking rush".into()
+        } else {
+            String::new()
+        },
+        own_worktree: false,
+        system_prompt: format!(
+            "The user is asking about rush itself: the terminal app you run inside, which runs and watches coding agents. \
+             Answer from rush's guide below, and say so when it doesn't cover something rather than guessing.\n\n\
+             You work in rush's own folder, {dir}. config.json there holds rush's settings; the other files are its records, so leave them alone. \
+             When the user wants a setting changed, first say whether one of rush's # commands does it (they type it in rush's box, e.g. #pin), or a page of Settings does. \
+             Otherwise edit config.json: change only what was asked, keep it valid JSON, and tell them what you changed. \
+             rush reads it again within a few seconds of the change.\n\n\
+             <rush-guide>\n{GUIDE}\n</rush-guide>"
+        ),
+    }
+}
+
+/// #ask [question].
+pub fn ask_rush(m: &mut Model, question: &str) -> Out {
+    let dir = rush_state::dir().to_string_lossy().into_owned();
+    let s = ask_start(question.trim(), &dir);
+    match peek(m).hosted_starter {
+        Some(f) => f(m, s),
+        None => {
+            m.flash_err("rush can't start sessions here yet");
+            Out::Draw
+        }
+    }
+}
+
+/// After each reading of the list, once rush's config is loaded: a
+/// worker watching config.json, which reads it when it changes and hands
+/// it over when something other than this rush (an #ask agent, another
+/// rush, an editor) changed it (reloadConfig). It waits on the file, with
+/// no timer.
+pub fn on_fleet(m: &mut Model) {
+    if peek(m).store.is_none() || peek(m).reloading {
+        return;
+    }
+    let Some(tx) = m.sender() else {
+        return;
+    };
+    accounts(m).reloading = true;
+    let tx = tx.lane(1);
+    let path = rush_state::dir().join("config.json");
+    let _ = std::thread::Builder::new()
+        .name("rush-config".into())
+        .spawn(move || {
+            let w = rush_sys::fswait::Watcher::new();
+            loop {
+                // Watched again each time: a save renames a new file
+                // over it.
+                w.watch(&[&path]);
+                if let Some(b) = rush_state::config_on_disk() {
+                    let apply: crate::frame::work::Apply = Box::new(move |m| on_config(m, &b));
+                    if !tx.send(crate::worker::Note::Apply(apply)) {
+                        return;
+                    }
+                }
+                w.wait(None, None);
+                let _ = w.changes();
+            }
+        });
+}
+
+/// Takes config.json b in place of the one loaded (onConfig): the one
+/// store Settings and the ctrl+k bar read too, and the list drawn from it
+/// again (m.refresh).
+pub fn on_config(m: &mut Model, b: &[u8]) -> Out {
+    let Some(store) = accounts(m).store.as_mut() else {
+        return Out::Idle;
+    };
+    let menu_bar = store.config.menu_bar;
+    let err = store.reload(b).err().map(|e| e.to_string());
+    if err.is_none() {
+        // A change of rush's own not written yet stays made.
+        crate::config::reapply_waiting(&mut store.config);
+    }
+    // Compared once this rush's own waiting change is back in: that one
+    // isn't a change from elsewhere.
+    let menu_bar = (store.config.menu_bar != menu_bar).then_some(store.config.menu_bar);
+    let mut f = serde_json::Map::new();
+    f.insert("why".into(), "config.json changed outside this rush".into());
+    f.insert("err".into(), err.clone().unwrap_or_default().into());
+    rush_events::log("config-reload", f);
+    match err {
+        Some(e) => m.news(
+            &format!("rush can't read config.json: it changed outside rush, {e}"),
+            "",
+        ),
+        None => {
+            rush_ui_settings::sync(m);
+            // The icon turned on or off in another rush, which leaves it to
+            // this one if it leads: started or stopped now, as the row
+            // does (settings_general.go:126-136). Beyond Go, whose onConfig
+            // (askrush.go:45-54) never does, so its icon waited for a
+            // restart. Only the leading, interactive rush (MenuBarOwner).
+            if let Some(on) = menu_bar {
+                rush_ui_settings::sheets::menu_bar_turned(m, on);
+            }
+            m.news(
+                "settings reloaded: config.json changed outside rush, and rush is using them",
+                "",
+            )
+        }
+    }
+    Out::Draw
+}

@@ -3,11 +3,11 @@
 //! internal/adapters/claude/claude/usagefetch.go (ownerErr at :31,
 //! accessToken at :118) and renew.go.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::Path;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex, RwLock};
 use std::time::Duration;
 
 use rush_core::time::{Ms, now};
@@ -124,6 +124,10 @@ struct OAuth {
     scopes: Vec<String>,
     #[serde(rename = "clientId", deserialize_with = "nd")]
     client_id: String,
+    /// The plan the sign-in is on, as Claude Code keeps it from the
+    /// profile's organization_type: "max", "pro", "team", "enterprise".
+    #[serde(rename = "subscriptionType", deserialize_with = "nd")]
+    subscription: String,
 }
 
 /// A sign-in's refresh token; None when it can't be read.
@@ -273,12 +277,21 @@ pub(crate) fn fetch_usage_with_at(base: &str, raw: &[u8]) -> Result<Usage, Oauth
     }
     let d: D = serde_json::from_slice(&body(&mut res)).map_err(|e| other(e.to_string()))?;
     Ok(Usage {
-        five_hour: window_of(d.five_hour),
+        plan: plan_of(raw),
+        five_hour: window_of(d.five_hour).five_hour(),
         seven_day: window_of(d.seven_day),
         fetched_at: now(),
         fetched: true,
         ..Usage::default()
     })
+}
+
+/// The plan a sign-in is on, as Claude Code saved it with the sign-in;
+/// "" when it didn't say. The usage endpoint doesn't name it.
+fn plan_of(raw: &[u8]) -> String {
+    serde_json::from_slice::<Creds>(raw)
+        .map(|c| c.oauth.subscription.trim().to_lowercase())
+        .unwrap_or_default()
 }
 
 /// When to ask again: what Retry-After says, but not before 15 minutes.
@@ -383,15 +396,31 @@ pub fn renew_kept(id: &str) -> Result<(), OauthError> {
 type Read<'a> = &'a dyn Fn() -> Result<Vec<u8>, OauthError>;
 type Write<'a> = &'a dyn Fn(&[u8]) -> Result<(), OauthError>;
 
+/// The refresh tokens Anthropic has called revoked, by their hash. Asking
+/// again with one only gets the same answer, so a sign-in is tried again
+/// once it holds another (signed in again, or refreshed by Claude Code),
+/// not every ten minutes for as long as rush runs. Not in Go.
+static REFUSED: LazyLock<Mutex<HashSet<[u8; 32]>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
+
 /// Refreshes the sign-in read gives at url and writes it back, unless it
-/// changed meanwhile (another refresh's is as good).
+/// changed meanwhile (another refresh's is as good). A refresh token
+/// Anthropic has refused already isn't sent again.
 pub(crate) fn renew_at(url: &str, read: Read, write: Write) -> Result<(), OauthError> {
+    use sha2::Digest;
     let cred = read().map_err(|_| OauthError::NotSignedIn)?;
     let c: Creds = serde_json::from_slice(&cred).map_err(|_| OauthError::NotSignedIn)?;
     if c.oauth.refresh.is_empty() {
         return Err(OauthError::NotSignedIn);
     }
+    let sum: [u8; 32] = sha2::Sha256::digest(c.oauth.refresh.as_bytes()).into();
+    let refused = || REFUSED.lock().unwrap_or_else(|e| e.into_inner());
+    if refused().contains(&sum) {
+        return Err(OauthError::Revoked);
+    }
     let next = refreshed(url, &cred, &c.oauth);
+    if next == Err(OauthError::Revoked) {
+        refused().insert(sum);
+    }
     if let Ok(now) = read()
         && refresh_token(&now).is_some_and(|r| r != c.oauth.refresh)
     {
@@ -502,28 +531,81 @@ fn with_tokens(
     serde_json::to_vec(&all).map_err(|e| other(e.to_string()))
 }
 
+/// When a sign-in was last tried, and what a reading says until the next
+/// try when it couldn't be refreshed (renew_says).
+type Tried = (Ms, Option<OauthError>);
+
 /// When each sign-in was last refreshed on its own, by key.
-static RENEWED_AT: LazyLock<Mutex<HashMap<String, Ms>>> =
+static RENEWED_AT: LazyLock<Mutex<HashMap<String, Tried>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// What a reading says when its expired sign-in couldn't be refreshed:
+/// revoked, or left to the Claude Code running on it, which refreshes it
+/// itself when it's next used. Either is said until the next try rather
+/// than "sign-in expired", which reads as a sign-in that needs you when
+/// one in use is fine. Anything else (the network) leaves it expired. Go
+/// said only revoked, and only on the try itself.
+fn renew_says(e: &OauthError) -> Option<OauthError> {
+    matches!(e, OauthError::Revoked | OauthError::InUse).then(|| e.clone())
+}
+
+fn always() -> bool {
+    true
+}
+
+/// Whether this rush may refresh an expired sign-in on its own, asked as
+/// each reading finds one: every process may unless told otherwise.
+static LEADS: RwLock<fn() -> bool> = RwLock::new(always);
+
+/// Makes refreshing an expired sign-in on its own wait on leads: only the
+/// rush that leads refreshes, as a refresh replaces the sign-in's tokens
+/// and the old ones stop working for whoever else holds them (a rush that
+/// follows reads beside the one that leads, on the same sign-ins). Asking
+/// for one (renew_login) isn't held back. Rust-only: Go's following view
+/// is the one over SSH, on the same Mac's keychain as the one it follows.
+pub fn renew_while(leads: fn() -> bool) {
+    *LEADS.write().unwrap_or_else(|e| e.into_inner()) = leads;
+}
+
+/// Whether a reading may refresh an expired sign-in now (renew_while).
+pub fn renews() -> bool {
+    (LEADS.read().unwrap_or_else(|e| e.into_inner()))()
+}
+
 /// fetch's reading; when its sign-in has expired it's refreshed first, at
-/// most once in ten minutes for key. Only a revoked sign-in shows as the
-/// refresh's own error.
+/// most once in ten minutes for key, by the rush that leads (renew_while)
+/// and not in a dry run. A revoked sign-in, or one a running Claude Code
+/// refreshes, shows as the refresh's own error (renew_says).
 pub fn or_renew(
     key: &str,
     fetch: impl Fn() -> Result<Usage, OauthError>,
     renew: impl FnOnce() -> Result<(), OauthError>,
 ) -> Result<Usage, OauthError> {
+    or_renew_if(renews(), key, fetch, renew)
+}
+
+/// or_renew, refreshing only when leads.
+pub fn or_renew_if(
+    leads: bool,
+    key: &str,
+    fetch: impl Fn() -> Result<Usage, OauthError>,
+    renew: impl FnOnce() -> Result<(), OauthError>,
+) -> Result<Usage, OauthError> {
     let got = fetch();
-    if got != Err(OauthError::Expired) {
+    if got != Err(OauthError::Expired) || !leads {
         return got;
     }
     {
         let mut at = RENEWED_AT.lock().unwrap_or_else(|e| e.into_inner());
-        if at.get(key).is_some_and(|&t| now() - t < 10 * 60_000) {
-            return got;
+        if let Some((t, said)) = at.get(key)
+            && now() - t < 10 * 60_000
+        {
+            return said.clone().map_or(got, Err);
         }
-        at.insert(key.to_string(), now());
+        at.insert(key.to_string(), (now(), None));
+    }
+    if rush_core::dryrun::would("renew sign-in", key, "its sign-in expired") {
+        return got;
     }
     let rerr = renew();
     let mut f = json!({"account": key, "why": "its sign-in expired"});
@@ -531,11 +613,18 @@ pub fn or_renew(
         f["err"] = json!(e.to_string());
     }
     rush_sys::events::log("signin-renewed", f);
-    match rerr {
-        Ok(()) => fetch(),
-        Err(OauthError::Revoked) => Err(OauthError::Revoked),
-        Err(_) => got,
+    let Err(e) = rerr else { return fetch() };
+    let Some(said) = renew_says(&e) else {
+        return got;
+    };
+    if let Some(at) = RENEWED_AT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_mut(key)
+    {
+        at.1 = Some(said.clone());
     }
+    Err(said)
 }
 
 /// fetch, the vault's sign-in for id refreshed first when it has expired:
@@ -652,21 +741,39 @@ pub(crate) mod tests {
         );
     }
 
-    // renew_test.go:87 (TestRenewRevoked)
+    // renew_test.go:87 (TestRenewRevoked); and a refresh token Anthropic
+    // refused isn't sent again, every ten minutes for as long as rush runs,
+    // until the sign-in holds another. (Its own token: the refusal is kept
+    // for the whole process.)
     #[test]
-    fn renew_revoked() {
-        let (url, _) = server(
+    fn renew_revoked_asks_once_per_refresh_token() {
+        let (url, asked) = server(
             400,
             r#"{"error":"invalid_grant","error_description":"Refresh token not found or invalid"}"#,
-            check_refresh,
+            |_, _, _| {},
         );
-        let store = mem(FAKE_CRED);
-        let err = renew_at(&url, &|| Ok(store.lock().unwrap().clone()), &|b| {
-            *store.lock().unwrap() = b.to_vec();
-            Ok(())
-        });
-        assert_eq!(err, Err(OauthError::Revoked));
-        assert_eq!(*store.lock().unwrap(), FAKE_CRED.as_bytes());
+        let cred = FAKE_CRED.replace("fake-refresh-1", "fake-refresh-refused");
+        let store = mem(&cred);
+        let renew = || {
+            renew_at(&url, &|| Ok(store.lock().unwrap().clone()), &|b| {
+                *store.lock().unwrap() = b.to_vec();
+                Ok(())
+            })
+        };
+        assert_eq!(renew(), Err(OauthError::Revoked));
+        assert_eq!(*store.lock().unwrap(), cred.as_bytes());
+        assert_eq!(renew(), Err(OauthError::Revoked));
+        assert_eq!(
+            asked.load(Ordering::SeqCst),
+            1,
+            "a refused refresh token was sent again"
+        );
+        // Signed in again: the new sign-in is tried.
+        *store.lock().unwrap() = cred
+            .replace("fake-refresh-refused", "fake-refresh-new")
+            .into_bytes();
+        assert_eq!(renew(), Err(OauthError::Revoked));
+        assert_eq!(asked.load(Ordering::SeqCst), 2);
     }
 
     // renew_test.go:96 (TestRenewRefusesFolderInUse): a Claude Code
@@ -693,6 +800,83 @@ pub(crate) mod tests {
             );
         }
         assert_eq!(renews.load(Ordering::SeqCst), 1);
+    }
+
+    // A sign-in that can't be refreshed says why until the next try, ten
+    // minutes on: revoked, or in use by a running Claude Code (which
+    // refreshes it itself), not "sign-in expired" on every reading but the
+    // try's. A failure that says nothing of the sign-in (the network)
+    // leaves it expired.
+    #[test]
+    fn or_renew_says_why_until_the_next_try() {
+        for (key, err, want) in [
+            (
+                "login:test-says-revoked",
+                OauthError::Revoked,
+                OauthError::Revoked,
+            ),
+            (
+                "login:test-says-in-use",
+                OauthError::InUse,
+                OauthError::InUse,
+            ),
+            (
+                "login:test-says-network",
+                other("refresh request failed"),
+                OauthError::Expired,
+            ),
+        ] {
+            let renews = AtomicUsize::new(0);
+            for n in 0..3 {
+                let got = or_renew_if(
+                    true,
+                    key,
+                    || Err(OauthError::Expired),
+                    || {
+                        renews.fetch_add(1, Ordering::SeqCst);
+                        Err(err.clone())
+                    },
+                );
+                assert_eq!(got, Err(want.clone()), "{key}: reading {n}");
+            }
+            assert_eq!(renews.load(Ordering::SeqCst), 1, "{key}");
+        }
+    }
+
+    // A rush that doesn't lead never refreshes a sign-in on its own, and a
+    // dry run only writes down that it would.
+    #[test]
+    fn or_renew_only_leading_and_not_dry() {
+        let renews = AtomicUsize::new(0);
+        let got = or_renew_if(
+            false,
+            "login:test-follows",
+            || Err(OauthError::Expired),
+            || {
+                renews.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+        );
+        assert_eq!(got, Err(OauthError::Expired));
+        let dir = tempfile::tempdir().unwrap();
+        rush_core::dryrun::set_thread(Some((true, Some(dir.path().join("dry.log")))));
+        let got = or_renew_if(
+            true,
+            "login:test-dry",
+            || Err(OauthError::Expired),
+            || {
+                renews.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+        );
+        rush_core::dryrun::set_thread(None);
+        assert_eq!(got, Err(OauthError::Expired));
+        assert_eq!(renews.load(Ordering::SeqCst), 0);
+        let log = std::fs::read_to_string(dir.path().join("dry.log")).unwrap();
+        assert!(
+            log.contains("renew sign-in") && log.contains("login:test-dry"),
+            "{log}"
+        );
     }
 
     #[test]
@@ -740,6 +924,57 @@ pub(crate) mod tests {
             Err(OauthError::Expired)
         );
         assert_eq!(fetch_usage_with_at(&url, b"{}"), Err(OauthError::NoToken));
+    }
+
+    // A plan without a 5-hour limit, as Anthropic's usage endpoint sends
+    // it: five_hour left out, null, or with no reset time. Each is no
+    // 5-hour limit, never one 0% used; the weekly stands as sent. The
+    // plan's name comes from the sign-in itself.
+    #[test]
+    fn usage_without_a_five_hour_limit() {
+        let cred = format!(
+            r#"{{"claudeAiOauth":{{"accessToken":"fake-no5h-token","expiresAt":{},"subscriptionType":"max"}}}}"#,
+            now() + 3_600_000
+        );
+        for (shape, body) in [
+            (
+                "absent",
+                r#"{"seven_day":{"utilization":66,"resets_at":"2026-11-01T15:00:00Z"}}"#,
+            ),
+            (
+                "null",
+                r#"{"five_hour":null,"seven_day":{"utilization":66,"resets_at":"2026-11-01T15:00:00Z"}}"#,
+            ),
+            (
+                "no reset",
+                r#"{"five_hour":{"utilization":0,"resets_at":null},"seven_day":{"utilization":66,"resets_at":"2026-11-01T15:00:00Z"}}"#,
+            ),
+        ] {
+            let (url, _) = server(200, body, |_, _, _| {});
+            let u = fetch_usage_with_at(&url, cred.as_bytes()).unwrap();
+            assert!(!u.five_hour.present, "{shape}: read as a 5-hour window");
+            assert_eq!(u.five_hour, crate::usage::Window::default(), "{shape}");
+            assert!(
+                u.seven_day.present && u.seven_day.percent == 66.0,
+                "{shape}"
+            );
+            assert_eq!(u.plan, "max", "{shape}");
+            let q = u.quota("login:x");
+            assert!(q.window("five_hour").is_none(), "{shape}");
+            assert_eq!(q.used(""), 66.0, "{shape}: the weekly decides");
+        }
+        // One with the limit keeps it.
+        let (url, _) = server(
+            200,
+            r#"{"five_hour":{"utilization":65,"resets_at":"2026-10-30T23:20:00Z"},"seven_day":{"utilization":100,"resets_at":"2026-10-31T16:00:00Z"}}"#,
+            |_, _, _| {},
+        );
+        let u = fetch_usage_with_at(&url, cred.as_bytes()).unwrap();
+        assert!(u.five_hour.present && u.five_hour.percent == 65.0);
+        // No plan saved with the sign-in: none guessed.
+        let bare = cred.replace(r#","subscriptionType":"max""#, "");
+        let (url, _) = server(200, r#"{"five_hour":null}"#, |_, _, _| {});
+        assert_eq!(fetch_usage_with_at(&url, bare.as_bytes()).unwrap().plan, "");
     }
 
     // renew_test.go:110 (TestAccessTokenMissing): a sign-in that lost its

@@ -1,0 +1,37 @@
+[package]
+name = "rush-ui-base"
+description = "rush's frame and model: what every screen builds on (the list, the session view's frame, the model, its config and workers)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-convo.workspace = true
+rush-fleet.workspace = true
+rush-draw.workspace = true
+rush-sys.workspace = true
+rush-state.workspace = true
+rush-events.workspace = true
+# The keymap in force (keybind.rs).
+rush-keymap.workspace = true
+rush-net.workspace = true
+# The finishing card's pull request (finish_card.rs).
+rush-gh.workspace = true
+# What is known of newer rushes (update.rs).
+rush-update.workspace = true
+# A workflow's files and a sign-in's renewal (lead.rs).
+rush-claude.workspace = true
+rush-plugin = { path = "../rush-plugin" }
+# Room summaries in the list (rooms.rs).
+rush-room = { path = "../rush-room" }
+# A session's exchanges and its host's config (model.rs, worker.rs).
+rush-host = { path = "../rush-host" }
+regex.workspace = true
+libc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }
+tempfile.workspace = true

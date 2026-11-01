@@ -10,6 +10,28 @@ rush-core.workspace = true
 rush-convo.workspace = true
 rush-fleet.workspace = true
 rush-draw.workspace = true
+# The frame, the model, the list and their workers, under every screen.
+rush-ui-base.workspace = true
+# The social group's screens (feed, rooms, broadcasts, updates).
+rush-ui-social.workspace = true
+# Settings and Harnesses, the screens under rush-ui.
+rush-ui-settings.workspace = true
+# The Projects place and the machine's care.
+rush-ui-projects-machine.workspace = true
+# Plugin sheets, approvals and an agent's views beside its conversation.
+rush-ui-plugin-ui.workspace = true
+# Accounts, sign-in and starting agents.
+rush-ui-accounts.workspace = true
+# The cards and sheets on a session.
+rush-ui-session-cards.workspace = true
+# The status lines: the top bar and the agent header.
+rush-ui-bars.workspace = true
+# More of the Agents list: the box, the filter, the Wall, the grid, the split.
+rush-ui-list-extras.workspace = true
+# ctrl+k, the keys guide, the keymap, the link menu, # commands and stopping.
+rush-ui-cmdbar.workspace = true
+# The session: its box, sending, queue, views and live state.
+rush-ui-session-core.workspace = true
 rush-sys.workspace = true
 rush-gh.workspace = true
 rush-gate = { path = "../rush-gate" }
@@ -25,8 +47,6 @@ rush-update.workspace = true
 rush-net.workspace = true
 rush-bundled = { path = "../rush-bundled" }
 ureq.workspace = true
-# The social group's (screens/social): efficiency's figures.
-rush-efficiency = { path = "../rush-efficiency" }
 regex.workspace = true
 libc.workspace = true
 # SIGUSR1 is `rush reload` (cmd/rush/main.go:270).
@@ -60,3 +80,7 @@ rush-host = { path = "../rush-host", features = ["fake"] }
 # A fake Ollama for Settings › Providers › Ollama.
 rush-ollama = { path = "../rush-ollama", features = ["fake"] }
 tempfile.workspace = true
+
+[[bench]]
+name = "frame"
+harness = false

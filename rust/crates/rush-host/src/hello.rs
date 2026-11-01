@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use rush_core::adapter::Neutral;
 
-use crate::lines::{Line, decode, event_line, is_claude_line, native_line, neutral};
+use crate::lines::{Line, decode, event_line, is_claude_line, is_host_line, native_line, neutral};
 use crate::op::Op;
 
 /// The first client protocol that reads Claude Code's sessions as rush's
@@ -63,6 +63,8 @@ impl Encoder {
     fn native_events(&mut self, l: &[u8]) -> Option<Vec<rush_core::event::Event>> {
         let ev = if is_claude_line(l) {
             native_line(l).ok()?
+        } else if is_host_line(l) {
+            return None; // passed on as it is: not taken apart
         } else {
             match decode(l).ok()? {
                 Line::Native(ev) => ev,
@@ -127,6 +129,29 @@ mod tests {
             (p, first.as_slice()),
             (0, b"{\"op\":\"send\",\"text\":\"hi\"}\n".as_slice())
         );
+    }
+
+    // The host's own lines are told by their type alone; anything else,
+    // or anything unsure, is taken apart as before.
+    #[test]
+    fn host_lines_are_told_by_their_type() {
+        let cases: [(&str, bool); 9] = [
+            (r#"{"info":{"state":"working"},"type":"agtop_info"}"#, true),
+            (r#"{"t":1,"type":"agtop_time"}"#, true),
+            (r#"{"ev":{"type":"text"},"type":"agtop_ev"}"#, true),
+            (
+                r#"{"agtop_sent":true,"message":{"content":"hi"},"type":"user"}"#,
+                true,
+            ),
+            (r#"{"type":"assistant","message":{}}"#, false),
+            (r#"{"subtype":"success","type":"result"}"#, false),
+            (r#"{"type":"agtop_unknown"}"#, false),
+            (r#"{"agtop_sent":"yes","type":"agtop_info"}"#, false),
+            ("not json", false),
+        ];
+        for (l, want) in cases {
+            assert_eq!(is_host_line(l.as_bytes()), want, "{l}");
+        }
     }
 
     // With no native agent registered, the host's own lines and other

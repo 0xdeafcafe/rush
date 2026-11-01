@@ -12,6 +12,7 @@ pub mod handles;
 pub mod linkinfo;
 pub mod model;
 pub mod peers;
+pub mod pictures;
 pub mod render;
 pub mod runname;
 pub mod search;
@@ -27,10 +28,10 @@ pub use model::{
     exchange_peer, peer_label,
 };
 pub use peers::set_peers;
-pub use render::{Depth, Options, RenderedLine, Renderer};
+pub use render::{Depth, Options, Preset, RenderedLine, Renderer};
 pub use runname::{other_harness, run_tag, set_peer_mark};
 pub use search::{Found, Hit, Library, WHO_AGENT, library};
-pub use shellwrites::{ShellWrite, shell_run, shell_writes};
+pub use shellwrites::{ShellWrite, shell_run, shell_run_kept, shell_writes};
 pub use subagents::{Subagent, Subagents, list_subagents};
 pub use transcript::{Decode, Fresh, Tail, decode, history, history_from, history_start, injected};
 

@@ -1,0 +1,24 @@
+    RUSH      rush   ● 1 needs you   ✻ 2 working                       default
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    Agents · Wall  [ ]
+────────────────────────────────────────────────────────────────────────────────
+
+    set up caching for CI   @set-up-caching  ·  idle                context 0%
+    checkout · main    Claude Code · open in a terminal · /rush copies it here
+    Conversation   Overview   Changes    [ ] views        esc back to the list
+───━━━━━━━━━━━━━━───────────────────────────────────────────────────────────────
+
+  ▍ You  12:00
+  ▍ fix the test
+
+  ▍ Claude  12:00 · @set-up-caching
+  │   ✓ cargo test                                                         7s
+  │       ▏ok
+  ▍
+  ▍ Fixed it.
+  ▍                                                              1 step   13s
+
+
+  ╭─ open in a terminal, so it can't take messages here ──────────────────────╮
+  │ ❯  a message for this agent                                               │
+  ╰───────────────────────────────────────────────────────────────────────────╯
+    ↑ steps  ·  f1 more  ·  esc back

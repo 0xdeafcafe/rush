@@ -15,6 +15,17 @@ rush-convo = { path = "crates/rush-convo" }
 rush-claude = { path = "crates/rush-claude" }
 rush-draw = { path = "crates/rush-draw" }
 rush-ui = { path = "crates/rush-ui" }
+rush-ui-base = { path = "crates/rush-ui-base" }
+rush-ui-social = { path = "crates/rush-ui-social" }
+rush-ui-settings = { path = "crates/rush-ui-settings" }
+rush-ui-projects-machine = { path = "crates/rush-ui-projects-machine" }
+rush-ui-plugin-ui = { path = "crates/rush-ui-plugin-ui" }
+rush-ui-accounts = { path = "crates/rush-ui-accounts" }
+rush-ui-session-cards = { path = "crates/rush-ui-session-cards" }
+rush-ui-bars = { path = "crates/rush-ui-bars" }
+rush-ui-list-extras = { path = "crates/rush-ui-list-extras" }
+rush-ui-cmdbar = { path = "crates/rush-ui-cmdbar" }
+rush-ui-session-core = { path = "crates/rush-ui-session-core" }
 rush-sys = { path = "crates/rush-sys" }
 rush-events = { path = "crates/rush-events" }
 rush-gh = { path = "crates/rush-gh" }
@@ -27,6 +38,7 @@ rush-fleet = { path = "crates/rush-fleet" }
 rush-watch = { path = "crates/rush-watch" }
 rush-prdrive = { path = "crates/rush-prdrive" }
 rush-memory = { path = "crates/rush-memory" }
+rush-voice = { path = "crates/rush-voice" }
 base64 = "0.23"
 flate2 = "1"
 memchr = "2"
@@ -36,8 +48,8 @@ unicode-segmentation = "1.10"
 ureq = "3"
 criterion = { version = "0.7", default-features = false }
 tempfile = "3"
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["raw_value"] }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = { version = "1", features = ["raw_value", "float_roundtrip"] }
 unicode-width = "0.2"
 libc = "0.2"
 ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }

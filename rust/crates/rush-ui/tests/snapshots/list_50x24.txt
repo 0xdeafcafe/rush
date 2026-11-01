@@ -1,5 +1,5 @@
-    RUSH     rush  ● 1 needs you [ctrl+n] next
-              ✻ default · /src/checkout
+    RUSH     rush  ● 1 needs  ✻ 2
+              ✻ default
                Agents   Projects   Harnesses  ›
                Agents · Wall  [ ]
 ──────────────────────────────────────────────────

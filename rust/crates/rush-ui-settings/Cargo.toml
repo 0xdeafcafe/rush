@@ -1,0 +1,37 @@
+[package]
+name = "rush-ui-settings"
+description = "rush's Settings and Harnesses places: every settings page, the form they share, and the sheets opened from them"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-convo.workspace = true
+rush-fleet.workspace = true
+rush-draw.workspace = true
+# The frame, the model, the list and their workers, under every screen.
+rush-ui-base.workspace = true
+rush-sys.workspace = true
+rush-events.workspace = true
+rush-keymap.workspace = true
+rush-state.workspace = true
+rush-harnessup.workspace = true
+rush-update.workspace = true
+rush-net.workspace = true
+rush-plugin = { path = "../rush-plugin" }
+rush-remote = { path = "../rush-remote" }
+# The bundled plugins Settings › Plugins offers.
+rush-bundled = { path = "../rush-bundled" }
+rush-claude.workspace = true
+rush-host = { path = "../rush-host" }
+# Settings › Providers › Ollama: its models' context and the decision
+# models #compact prunes with (settings_ollama_models.go).
+rush-ollama = { path = "../rush-ollama" }
+# Whether the menu bar app runs: it notifies in rush's place (model.go:2026).
+rush-menubar = { path = "../rush-menubar" }
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }

@@ -204,8 +204,28 @@ impl File {
 
     fn change(&mut self, path: &str, val: Option<String>) {
         let keys: Vec<String> = path.split('.').map(String::from).collect();
+        self.change_keys(keys, val);
+    }
+
+    fn change_keys(&mut self, keys: Vec<String>, val: Option<String>) {
+        if keys.is_empty() {
+            return;
+        }
         set_in(&mut self.raw, &keys, val.clone());
         self.changes.push(Change { keys, val });
+    }
+
+    /// set by the keys on the way rather than a dotted path, for a key
+    /// with a dot in it (a plugin's "name@market.place").
+    pub fn set_keys<T: Serialize + ?Sized>(&mut self, keys: &[&str], v: &T) -> io::Result<()> {
+        let val = encode(v).ok_or_else(|| io::Error::other("can't write that value"))?;
+        self.change_keys(keys.iter().map(|k| k.to_string()).collect(), Some(val));
+        Ok(())
+    }
+
+    /// delete by the keys on the way.
+    pub fn delete_keys(&mut self, keys: &[&str]) {
+        self.change_keys(keys.iter().map(|k| k.to_string()).collect(), None);
     }
 
     /// The settings' env block: variables every session starts with.
@@ -264,7 +284,7 @@ impl File {
         }
         let mode = fs::metadata(&path)
             .map(|m| m.permissions().mode() & 0o777)
-            .unwrap_or(0o644);
+            .unwrap_or(0o600);
         let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(mode));
         if let Err(e) = fs::rename(&tmp, &path) {
             let _ = fs::remove_file(&tmp);

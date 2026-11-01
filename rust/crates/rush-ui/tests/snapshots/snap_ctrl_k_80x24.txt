@@ -1,0 +1,24 @@
+    RUSH      rush   ● 1 needs you   ✻ 2 working                       default
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    Agents · Wall  [ ]
+────────────────────────────────────────────────────────────────────────────────
+  ╭─ ✻ Go anywhere ─────────────────────────────────────────────── ctrl+k ─╮IME
+┃ │ ❯ ▏an agent, words said in any conversation, or a place · # for comma… │
+▌ │ ────────────────────────────────────────────────────────────────────── │m ●
+▌ │ Needs you ───────────────────────────────────────────────────────────  │
+▌ │ ▍● fix the flaky tax rounding test  checkout · main          needs you │
+  │                                                                        │
+┃ │ Working ─────────────────────────────────────────────────────────────  │
+┃ │  ● move the design tokens to CSS …  checkout · main            working │21m
+┃ │  ● add Apple Pay to checkout        checkout · feat/apple-pay  working │
+  │                                                                        │
+  │ Idle ────────────────────────────────────────────────────────────────  │─╮
+  │  ○ set up caching for CI            checkout · main               idle │ │
+  │                                                                        │ │
+  │                                                                        │ │
+  │ ↑↓ choose  ·  enter go  ·  ctrl+f just Needs you  ·  esc close         │─┤
+  ╰────────────────────────────────────────────────────────────────────────╯ │
+  ╰──────────────────────────────────────────────────────────────────────────╯
+╭─ new agent in checkout ────────  ✻ Anthropic (Claude Code) · default model  ─╮
+│ ❯ describe a task                                                            │
+╰──────────────────────────────────────────────────────────────────────────────╯
+  enter open  ·  ctrl+o reply  ·  ctrl+n 1 needs you  ·  ? more

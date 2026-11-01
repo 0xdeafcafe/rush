@@ -143,11 +143,14 @@ impl Heads {
     /// are there), else its first prompt.
     pub fn past(&self, p: &Profile) -> Vec<Session> {
         let names = thread_names(&Path::new(&p.dir).join("session_index.jsonl"));
-        let mut out = Vec::new();
+        let mut paths = Vec::new();
         self.walk(&Path::new(&p.dir).join("sessions"), &mut |path| {
-            let Some(mut s) = self.past_session(path) else {
-                return;
-            };
+            paths.push(path.to_path_buf());
+        });
+        // Each head is a wait on the disk: read side by side.
+        let heads = rush_core::par::map_with(paths, || (), |_, path| self.past_session(&path));
+        let mut out = Vec::new();
+        for mut s in heads.into_iter().flatten() {
             s.kind = Kind::from(KIND);
             s.profile = p.clone();
             s.state = "done".into();
@@ -155,7 +158,7 @@ impl Heads {
                 s.name = one_line(n);
             }
             out.push(s);
-        });
+        }
         out.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
         out
     }

@@ -83,6 +83,93 @@ fn turn_cost_takes_the_rise_in_a_running_total() {
     );
 }
 
+#[test]
+fn turn_cost_ignores_no_total() {
+    let mut spent = 2.0;
+    assert_eq!(turn_cost(&mut spent, 0.0), 0.0);
+    assert_eq!(spent, 2.0, "a turn with no total forgot the last");
+    assert_eq!(turn_cost(&mut spent, 2.5), 0.5);
+}
+
+/// The host's cost after a turn whose agent's running total is total.
+fn cost_after(h: &Host, total: f64) -> f64 {
+    let conn: Arc<dyn Conn> = Arc::new(Kept::default());
+    with_conn(h, conn.clone());
+    let mut st = h.lock();
+    st.info.state = "working".into();
+    h.on_turn_end(
+        &mut st,
+        &conn,
+        event::TurnEnd {
+            reason: "done".into(),
+            cost: total,
+            ..Default::default()
+        },
+    );
+    st.info.cost_usd
+}
+
+// Rust-only (Go's agent.go:52 and :572 counted each start from zero): a
+// resumed agent says its conversation's whole total, which is counted
+// once however often the agent or its host starts again; a new
+// conversation in the same host adds its own; a total below the last is
+// a process counting from zero.
+#[test]
+fn a_conversations_cost_is_counted_once_across_restarts() {
+    let _home = Home::new();
+    let id = "costs001";
+    let h = host(Config {
+        id: id.into(),
+        kind: "fake".into(),
+        session_id: "s1".into(),
+        resume: true,
+        ..Config::default()
+    });
+    assert_eq!(cost_after(&h, 10.0), 10.0);
+    assert_eq!(cost_after(&h, 12.0), 12.0);
+    // The agent starts again (a wake, an account move) and carries on.
+    {
+        let mut st = h.lock();
+        h.detach(&mut st);
+        h.start_locked(&mut st).unwrap();
+        let c = h.detach(&mut st).unwrap();
+        drop(st);
+        stop_agent(&c);
+    }
+    assert_eq!(cost_after(&h, 12.0), 12.0, "a resume added its total again");
+    assert_eq!(cost_after(&h, 15.0), 15.0);
+
+    // This host stops asleep, and the next carries the conversation on.
+    let old = {
+        let mut st = h.lock();
+        st.info.sleeping = true;
+        st.info.clone()
+    };
+    let saved: Info = serde_json::from_slice(&old.to_json()).unwrap();
+    assert_eq!(saved.spent_usd, old.spent_usd, "not kept in info.json");
+    let h = host(h.lock().cfg.clone());
+    restore_sleeping_info(&mut h.lock(), &saved);
+    assert_eq!(cost_after(&h, 15.5), 15.5, "a woken host added it again");
+
+    // A new conversation in the same host (afresh, or a fork's own id)
+    // counts from zero, the one left still its branch.
+    {
+        let mut st = h.lock();
+        st.cfg.branches.push(Branch {
+            session_id: "s1".into(),
+            ..Branch::default()
+        });
+        st.info.session_id = "s2".into();
+    }
+    assert_eq!(cost_after(&h, 3.0), 18.5);
+    // A process that counts from zero says less than the last total.
+    assert_eq!(cost_after(&h, 1.0), 19.5);
+    assert_eq!(cost_after(&h, 0.0), 19.5, "no total costs nothing");
+    // Back to the first conversation: only what it spent since.
+    h.lock().info.session_id = "s1".into();
+    assert_eq!(cost_after(&h, 16.0), 20.0);
+}
+
 // host_test.go:272
 #[test]
 fn queue_edits() {
@@ -173,6 +260,61 @@ fn queued_images_go_with_their_message() {
     assert!(got[0].text.contains("look at this"));
     let st = h.lock();
     assert!(st.info.queue.is_empty() && st.info.queue_images.is_empty());
+}
+
+// A queued image whose smaller copy has gone from the session's scratch
+// goes as the image itself, not failing every try to send the queue.
+#[test]
+fn a_queued_image_whose_copy_is_gone_goes_as_itself() {
+    let _home = Home::new();
+    let d = tempfile::tempdir().unwrap();
+    let pic = d.path().join("shot.jpg").to_string_lossy().into_owned();
+    std::fs::write(&pic, "jpeg").unwrap();
+    let h = host(Config {
+        id: "qg".into(),
+        ..Config::default()
+    });
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    h.lock().info.state = "working".into();
+    h.send("look", std::slice::from_ref(&pic), false).unwrap();
+    let gone = d
+        .path()
+        .join("shot-gone.webp")
+        .to_string_lossy()
+        .into_owned();
+    h.lock().pics.insert(pic.clone(), gone);
+    h.send_queue(&mut h.lock());
+    let got = c.got.lock().unwrap();
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].images, vec![pic]);
+}
+
+// What the agent never took isn't drawn: the queue goes back and each try
+// adds no copy of your messages.
+#[test]
+fn a_send_the_agent_refuses_is_not_echoed() {
+    let _home = Home::new();
+    let h = host(Config {
+        id: "qr".into(),
+        ..Config::default()
+    });
+    with_conn(&h, Arc::new(Refuses));
+    h.lock().info.state = "working".into();
+    h.send("hello", &[], false).unwrap();
+    let before = h.lock().ring.len();
+    h.send_queue(&mut h.lock());
+    h.send_queue(&mut h.lock());
+    let st = h.lock();
+    assert_eq!(
+        st.info.queue,
+        vec!["hello".to_string()],
+        "back on the queue"
+    );
+    let echoed = st.ring[before..]
+        .iter()
+        .any(|l| String::from_utf8_lossy(l).contains("hello"));
+    assert!(!echoed, "not drawn");
 }
 
 // host_test.go:538
@@ -404,6 +546,35 @@ fn cut_in_keeps_images() {
         vec![vec![pic.clone()], vec![], vec![pic]]
     );
     assert_eq!(c.stops.load(Ordering::SeqCst), 2);
+}
+
+// Rust-only: idle with its queue held (the runaway guard's hold), a
+// message waits in the queue; let go, it's sent; sent now, it goes.
+#[test]
+fn held_idle_holds_the_next_turn() {
+    let _home = Home::new();
+    let h = host(Config {
+        id: "hi".into(),
+        kind: "claude".into(),
+        ..Config::default()
+    });
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    {
+        let mut st = h.lock();
+        st.info.state = "idle".into();
+        st.info.queue_held = true;
+    }
+    h.send("next", &[], false).unwrap();
+    assert_eq!(queue(&h), "next");
+    assert!(c.got.lock().unwrap().is_empty());
+    h.do_op(op("queue_hold", |o| o.now = false)).unwrap();
+    assert_eq!(queue(&h), "");
+    assert_eq!(c.got.lock().unwrap()[0].text, "next");
+    h.lock().info.state = "idle".into();
+    h.lock().info.queue_held = true;
+    h.send("go", &[], true).unwrap();
+    assert_eq!(c.got.lock().unwrap().last().unwrap().text, "go");
 }
 
 // host_test.go:732: a message sent while idle, with the queue still
@@ -1098,6 +1269,47 @@ fn exchange_guide_and_rejected_delivery() {
     );
 }
 
+// host.go:1907, :1916: an exchange the host takes goes on the feed while
+// it's on, in the two agents' thread.
+#[test]
+fn a_taken_exchange_goes_on_the_feed() {
+    let home = Home::new();
+    std::fs::write(home.path().join("config.json"), r#"{"twatter":true}"#).unwrap();
+    let mut e = exchange("fx", "please look at the cache", "codex");
+    e.direction = "received".into();
+    e.receiver = Peer {
+        session_id: "dest".into(),
+        kind: "claude".into(),
+        name: "Beta".into(),
+    };
+    let h = host(Config {
+        id: "dest".into(),
+        kind: "claude".into(),
+        ..Config::default()
+    });
+    h.do_op(op("exchange", |o| o.exchange = Some(Box::new(e.clone()))))
+        .unwrap();
+    let feed = rush_room::community::Feed::new();
+    let w = rush_sys::fswait::Watcher::new();
+    std::fs::create_dir_all(home.path().join("community")).unwrap();
+    w.watch(&[home.path().join("community")]);
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let rows = loop {
+        let rows = feed.list().unwrap_or_default();
+        let now = std::time::Instant::now();
+        if !rows.is_empty() || now >= deadline {
+            break rows;
+        }
+        w.wait(None, Some((deadline - now).min(Duration::from_millis(50))));
+    };
+    assert_eq!(rows.len(), 1, "not on the feed: {rows:?}");
+    let m = &rows[0].messages[0];
+    assert_eq!(m.author.session_id, "source");
+    assert_eq!(m.exchange, "fx");
+    assert_eq!(m.text, "please look at the cache");
+    assert_eq!(rows[0].to.as_ref().map(|a| a.name.as_str()), Some("Beta"));
+}
+
 // exchange_test.go:48
 #[test]
 fn exchange_queue_retains_attribution() {
@@ -1349,11 +1561,12 @@ fn a_failed_write_keeps_unread_ops() {
         .write_all(b"{\"op\":\"effort\",\"effort\":\"high\"}\n")
         .unwrap();
     drop(client); // sent and gone at once
-    let (tx, rx) = sync_channel::<Arc<[u8]>>(4);
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Arc<[u8]>>(4);
     drop(tx); // nothing more to write: it returns once the info has gone
     let ws = host_end.try_clone().unwrap();
     let info = br#"{"type":"agtop_info","info":{}}"#.repeat(4096);
-    write_client(ws, None, Vec::new(), Vec::new(), info, rx);
+    let queued = std::sync::atomic::AtomicUsize::new(0);
+    write_client(ws, None, Vec::new(), Vec::new(), info, rx, &queued);
     let mut got = String::new();
     (&host_end).read_to_string(&mut got).unwrap();
     assert_eq!(got, "{\"op\":\"effort\",\"effort\":\"high\"}\n");
@@ -1645,5 +1858,109 @@ fn plugin_prompt_tools_and_agents_reach_a_started_session() {
     assert!(
         names.contains(&"plugin ant".to_string()) && names.contains(&"plugin zed".to_string()),
         "sections {names:?}"
+    );
+}
+
+// A turn streaming hundreds of messages a second rewrites info.json for
+// what it's doing at most every INFO_EVERY, the latest always written; any
+// other change is written at once.
+#[test]
+fn info_is_written_at_once_for_a_change_readers_act_on() {
+    let _home = Home::new();
+    std::fs::create_dir_all(dir("iw")).unwrap();
+    let hooks = Hooks {
+        info_every: Duration::from_secs(3600),
+        ..Hooks::quiet()
+    };
+    let cfg = Config {
+        id: "iw".into(),
+        ..Config::default()
+    };
+    let (h, _rx) = build(registry(), hooks, cfg);
+    let file = || crate::client::read_info_file("iw").unwrap();
+    let mut st = h.lock();
+    st.info.state = "working".into();
+    st.info.detail = "one".into();
+    h.publish(&mut st);
+    assert_eq!(file().detail, "one");
+    st.info.detail = "two".into();
+    st.info.context_tokens = 5;
+    h.publish(&mut st);
+    assert_eq!(file().detail, "one", "what it's doing waits for INFO_EVERY");
+    st.info.state = "blocked".into();
+    st.info.needs = "permission".into();
+    h.publish(&mut st);
+    let f = file();
+    assert_eq!((f.state.as_str(), f.detail.as_str()), ("blocked", "two"));
+    st.info.detail = "three".into();
+    h.publish(&mut st);
+    assert_eq!(file().detail, "two");
+    let sent = st.info.to_json();
+    h.flush_info(&mut st);
+    assert_eq!(std::fs::read(dir("iw").join("info.json")).unwrap(), sent);
+    // Idle, every change is written at once.
+    st.info.state = "idle".into();
+    h.publish(&mut st);
+    st.info.detail = "four".into();
+    h.publish(&mut st);
+    assert_eq!(file().detail, "four");
+}
+
+// Rust-only: an image that's there but can't be read (a Mac screenshot's
+// preview, dropped from the corner of the screen, lives where only the
+// terminal may read it) is refused as it's sent, by name, not taken to
+// fail later.
+#[test]
+fn unreadable_image_is_refused_by_name() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = tempfile::tempdir().unwrap();
+    let pic = d.path().join("shot.jpg");
+    std::fs::write(&pic, "jpeg").unwrap();
+    std::fs::set_permissions(&pic, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::File::open(&pic).is_ok() {
+        return; // root reads anything
+    }
+    let err = read_image(&pic.to_string_lossy(), d.path()).unwrap_err();
+    assert!(err.starts_with("can't read shot.jpg: "), "{err}");
+}
+
+// Rust-only: a queued image that can't be read by the time the queue goes
+// is left off with a word about it; the messages still go, and nothing is
+// left on the queue to fail again.
+#[test]
+fn unreadable_queued_image_does_not_hold_the_queue() {
+    use std::os::unix::fs::PermissionsExt;
+    let _home = Home::new();
+    let d = tempfile::tempdir().unwrap();
+    let pic = d.path().join("shot.jpg");
+    std::fs::write(&pic, "jpeg").unwrap();
+    let pic_s = pic.to_string_lossy().into_owned();
+    let h = host(Config {
+        id: "qu".into(),
+        kind: "claude".into(),
+        ..Config::default()
+    });
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    h.lock().info.state = "working".into();
+    h.send("look", std::slice::from_ref(&pic_s), false).unwrap();
+    std::fs::set_permissions(&pic, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::File::open(&pic).is_ok() {
+        return; // root reads anything
+    }
+    h.lock().info.state = "idle".into();
+    h.do_op(op("queue_send", |o| {
+        o.index = 0;
+        o.was = "look".into();
+    }))
+    .unwrap();
+    assert!(h.lock().info.queue.is_empty());
+    let got = c.got.lock().unwrap();
+    let last = got.last().expect("sent");
+    assert!(last.images.is_empty(), "{:?}", last.images);
+    assert!(
+        last.text.contains("can't read shot.jpg") && last.text.contains("left off"),
+        "{}",
+        last.text
     );
 }

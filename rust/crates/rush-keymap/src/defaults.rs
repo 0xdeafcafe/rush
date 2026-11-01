@@ -1,6 +1,7 @@
 //! rush's own keys, as its key handling is written.
 //!
-//! Ported from internal/keymap/defaults.go:1-148 (list.land as of 2e4662ff; session.remember as of b2a1a0b3).
+//! Ported from internal/keymap/defaults.go:1-148 (list.land as of 2e4662ff; session.remember as of b2a1a0b3);
+//! voice.talk is new in the Rust port.
 
 use crate::{Action, Context};
 
@@ -36,6 +37,10 @@ const DEFAULTS: &[Row] = &[
     ("grid.unpin", G, "take the newest tile off the grid", &["ctrl+] k"], true),
     ("quick.ask", G, "the guide: ask rush what's next, where something is, or anything quick; again moves the keys", &["alt+/", "ctrl+] q"], true),
     ("profile.pick", G, "switch the default profile or provider", &["ctrl+] w", "alt+w"], false),
+    // Push-to-talk, while the apple voice plugin is on (new in the Rust
+    // port): its press and its letting go are handled in
+    // screens/social/dictation.rs, so it stands in for itself.
+    ("voice.talk", G, "push to talk (apple voice): hold to speak and let go, or tap to start and tap again to stop", &["ctrl+space"], false),
 
     ("list.up", L, "the agent above", &["up"], false),
     ("list.down", L, "the agent below", &["down"], false),
@@ -87,6 +92,10 @@ const DEFAULTS: &[Row] = &[
     ("page.next", Pg, "the next page", &["]", "tab"], false),
     ("page.go", Pg, "tell the agent to keep going", &["ctrl+b", "alt+g"], false),
     ("page.pr", Pg, "open the agent's pull request (Projects)", &["ctrl+y"], false),
+    // Settings' and Harnesses' rows (rush-only: Go's ← stepped a value back).
+    ("page.in", Pg, "Settings: go in, or open a row's choices to pick one", &["right", "enter"], false),
+    ("page.back", Pg, "Settings: back out, a column left on Config; never changes a value", &["left"], false),
+    ("page.switch", Pg, "Settings: switch an on/off row", &["space"], false),
 
     ("session.send", S, "send now, the queue first", &["ctrl+enter", "ctrl+s"], false),
     ("session.enter", S, "send the message from the composer", &["enter"], false),
@@ -122,6 +131,7 @@ const DEFAULTS: &[Row] = &[
     ("session.depth.2", S, "depth m2: as usual", &["ctrl+] 2"], true),
     ("session.depth.3", S, "depth m3: everything open", &["ctrl+] 3"], true),
     ("session.verbose", S, "more or less detail", &["ctrl+o"], false),
+    ("session.preset", S, "the conversation's view: normal, chat, code, catch-up, trail", &["ctrl+] g", "alt+s"], false),
     ("session.stop", S, "stop it; again puts it away in Earlier", &["ctrl+x"], false),
     ("session.close", S, "hide, stop, restart, switch or delete it", &["ctrl+] x"], true),
     ("session.carry", S, "move what's typed to another session: pick it in the list, enter puts it in its box, esc brings it back", &["ctrl+] up"], true),

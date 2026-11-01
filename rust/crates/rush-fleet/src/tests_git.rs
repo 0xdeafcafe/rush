@@ -93,7 +93,7 @@ fn worktree_safety() {
     run(&repo, &["worktree", "add", "-q", "-b", "feature", &s(&wt)]);
 
     let mut a = agent_in("k", &repo);
-    a.spend.dirs = vec![s(&wt.join("sub"))];
+    a.spend.dirs = vec![s(&wt.join("sub")).into()];
     let agents = vec![a];
     let find = || {
         let mut ws = find_worktrees(&agents, None);
@@ -174,6 +174,28 @@ fn worktree_force() {
     assert!(repo.join("a.txt").exists(), "the repository was touched");
     remove_worktree(&ws[0], true).unwrap();
     assert!(!wt.exists(), "still there");
+}
+
+// A worktree with no repository named is refused as the repository
+// itself, though its .git points into a relative .git/worktrees.
+#[test]
+fn worktree_without_a_repo() {
+    let (_d, root) = temp();
+    let wt = root.join("wt");
+    std::fs::create_dir_all(&wt).unwrap();
+    std::fs::write(wt.join(".git"), "gitdir: .git/worktrees/wt\n").unwrap();
+    let w = Worktree {
+        path: s(&wt),
+        repo: String::new(),
+        ..Worktree::default()
+    };
+    assert_eq!(
+        crate::worktree::linked_worktree(&w).unwrap_err(),
+        format!(
+            "{} is the repository itself, not a worktree; it's never removed",
+            s(&wt)
+        )
+    );
 }
 
 // A checkout something hollowed out loses nothing: the tidy-up removes

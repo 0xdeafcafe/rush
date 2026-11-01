@@ -16,6 +16,16 @@ speed or memory claim has a number behind it.
   (watchBinary every 30 s; in the rush that leads, settleLanded every
   minute and tidyDone every 10) wake the loop only at the second one is
   due, hand their work to a thread, and draw nothing (rush-ui chores.rs).
+  What Go redraws every second for the clock's sake is drawn when its
+  text changes: a label that moves with the clock (`style::age_since`,
+  `dur_since`, `dur_left`, plan's `roughly_left` and `note_resets`) notes
+  when it next turns, and the frame asks to be woken then; the list is
+  laid out again when an agent's group runs out of time (rebuild's
+  `group_turn`). Screens past the list (a Session, a place, a sheet) are
+  drawn again with the chores' wake, every 30 seconds, as before. The
+  battery and disk are read at the same wake while shown (IOKit, not
+  pmset) and drawn only when they'd show differently; the hosts' sweep
+  goes over the list's own listing, which its watcher keeps fresh.
 - **Small memory.** Measured as macOS *physical footprint*
   (`/usr/bin/footprint -p <pid>`), not RSS. Go rush sits at about 40 MB with
   a session open; opening one large transcript retains about 22 MB. Target:
@@ -28,7 +38,11 @@ speed or memory claim has a number behind it.
 - **Draw only what's visible.** Screens render only the rows in view;
   history is indexed so a frame's cost doesn't grow with the conversation
   (the Go version's remaining hot spot, see
-  `../docs/performance-review-2026-10-01.md`).
+  `../docs/performance-review-2026-10-01.md`). A frame whose rows are
+  those on screen is neither painted nor written (rush-draw
+  `Canvas::keep`), and what several parts of one frame each ask (the
+  accounts, which read folders on disk) is asked once a frame
+  (rush-ui `frame/framememo.rs`).
 - **Same look.** Screens copy the Go TUI exactly (`../docs/screenshots`,
   `internal/ui/style.go`, `internal/convo/style.go`). Same keys, same words.
 
@@ -46,7 +60,14 @@ speed or memory claim has a number behind it.
 | `rush-fleet`  | the list's rows from every adapter in the registry; what a row's state means | `internal/fleet`                           |
 | `rush-host`   | the host: the process a rush-mode session lives in (`rush host run <id>`), its socket protocol, the UI's client to it, its per-agent watching (sleep, away, stalls, hung shells, long tasks, answers spawned agents owe), spawn_agent's agents, and rush's own tools served to each session (agtools.rs: in process, or `rush mcp-tools` over stdio); `rush spawn` (a headless session standing in for claude -p or codex exec) is the binary's | `internal/host`, cmd/rush's host commands |
 | `rush-draw`   | the thin drawing layer; the only crate that knows ratatui     | (bubbletea / ultraviolet)                  |
-| `rush-ui`     | screens: the frame (places, routing, sheets, editing; "Screens"), agent list, session view, the screens under `screens/` | `internal/ui`                              |
+| `rush-ui-base` | what every screen builds on: the model, the frame (places, routing, sheets, editing, the `Ext` hooks and slots the screens fill; "Screens"), the agent list, config, the workers, and the data the screens share (a session's connection as every screen reads it, `sess::ConnCore`; the hosts; the accounts' state and rush's store; the keymap in force; where new sessions start) | `internal/ui` |
+| `rush-ui-social` | the social group's screens: the feed and its graph, rooms, broadcasts, updates and reloading; depends on rush-ui-base only (what it asks of other screens goes through `Ext::calls` and `Act`); its tests that need the whole UI are rush-ui's `screens_tests/social` | `internal/ui` |
+| `rush-ui`     | the screens under `screens/`, registered into a model (`new_model`); the entry points (`run`, `render`, `soak`); re-exports rush-ui-base's modules at their old paths | `internal/ui`                              |
+| `rush-ui-projects-machine` | the Projects place and the machine: projects, worktrees, folders, processes, clean-up, memory review and the machine's own care; depends on rush-ui-base only (slots and `Act` for the rest); its tests that need the whole UI are rush-ui's `screens_tests/projects_machine` | `internal/ui/projects*.go`, `machinecare.go`, `cleanup.go` |
+| `rush-ui-settings` | the Harnesses and Settings places: every settings page, the form they share and the sheets opened from them; reaches no other screen (slots and `Act` in rush-ui-base) | `internal/ui/settings*.go` |
+| `rush-ui-plugin-ui` | the plugin screens: plugin sheets, approvals, picks, the layout question, an agent's views beside its conversation, artifacts and the file editor; depends on rush-ui-base only (what it asks of session_core goes through `Ext::calls`, `Act` and its `PanelHost`, which session_core fills); its tests that need the whole UI are rush-ui's `screens_tests/plugin_ui` | `internal/ui` |
+| `rush-ui-accounts` | the account screens: each provider's look, accounts and their limits, what the next session starts as (#use, the New session and Start sheets), signing in, Getting started, #ask, the info sheet's tabs; depends on rush-ui-base and, by rank (settings < accounts, debt), rush-ui-settings; what it asks of other screens goes through `Ext::calls` and `Act`; its tests are rush-ui's `screens_tests/accounts` | `internal/ui` |
+| `rush-ui-session-cards` | the cards and sheets on a session: approvals, Claude's questions, limit and sign-in cards, /rewind, /fork, /compact, #slim, the message sheet, the quick ask, /btw, rooms on a session, handing over, pastes and pictures; depends on rush-ui-base and, by rank, plugin_ui, settings, accounts, projects_machine and social; reaches session_core only through `Ext::calls`, `Act` and its HOST fn table (`link`); its tests are rush-ui's `screens_tests/session_cards` | `internal/ui` |
 | `rush`        | the binary: same commands and flags as Go rush; registers the adapters | `cmd/rush`                                 |
 | `rush-ollama` | Ollama's models in Claude Code, Codex, Pi and Vibe: one `Local` per server (what each model reads, models found without loading one, context sizes), tuned per model, a local server started only when needed | `internal/adapters/ollama` |
 | `rush-copilot` | Copilot: the CLI run over ACP (rush-acp's `Agent`), its profile, gh's accounts, premium requests, the coding agent's sessions on GitHub and their logs | `internal/adapters/copilot` |
@@ -242,6 +263,22 @@ Claude, fleet, the other adapters) builds on these.
   (`convo::Info::{id, kind, effort, started_at, started_by, spawned_by,
   started_from}`) and its commands event `Session::commands`, which the
   first turn's opening card draws (render/opening.rs, in the turn's key).
+- **A host's lines in a burst.** A session streaming big tool results
+  makes tens of thousands of lines a second. Each end of a host's socket
+  asks for 4 MiB (rush-host `sys::widen`; macOS gives 8 KiB, so the
+  host's writer and the client took turns every 8 KiB), the client reads
+  256 KiB at a time, and the host lets a client go only once 32 MiB
+  (`CLIENT_BEHIND`, four rings) wait for it, never waiting on it itself
+  (Go: 4096 lines, passed in a tenth of a second, so the list's preview
+  was let go, replayed and let go again through a burst). The UI's
+  follower (session_core `live::follow`) never waits for the UI: what it
+  reads while the UI is busy gathers (`Gathered`), and one message takes
+  all of it, at most `TAKE_MAX` lines a turn. A host's writer passes its
+  own lines (info above all, sent on every step) on without taking them
+  apart (`lines::is_host_line`). Live bench, a session flooding (`flood
+  15000`, ~90,000 lines in 2-4 s) with the list's preview on it: let go
+  and dialled again 4-5 times a burst before, so 7-66 thousand of the
+  lines came and the rest as replays; none after, all 90,000 taken.
 - **Reading history.** `HistoryReader::history(session, before, most,
   each)` hands events to `each` a slice at a time, each slice read from
   at most `most` bytes of transcript (`SLICE` = 1 MiB by default); `each`
@@ -357,7 +394,14 @@ Claude, fleet, the other adapters) builds on these.
   `Claude::find_logins`, `refresh_login`, `renew_login`, `use_login`,
   `adopt_login`, `forget_login` are Go's state.LoginKeeper, and
   `Claude` is rush-state's `vault::LoginKeeper` through them (the binary
-  registers it with rush-ui's `accounts::logins::register_keeper`). efficiency.rs reads transcripts into a
+  registers it with rush-ui's `accounts::logins::register_keeper`).
+  Unlike Go, a refresh token Anthropic called revoked isn't sent again
+  by that process (only a new sign-in is tried); a reading whose
+  sign-in can't be refreshed says why (revoked, or in use by a running
+  Claude Code) until the next try, not "sign-in expired"; and a failed
+  reading's reason is kept beside the last one in usage.json, so the
+  rows say it rather than only "not read since" (oauth.rs, usage.rs).
+  efficiency.rs reads transcripts into a
   `Figures` trait, which the efficiency module's File will be. Its
   features are Go's (claude.go:62): Compact and btw through the host's
   control requests, cd and add-dir through its cd op, a hand-off in
@@ -490,20 +534,50 @@ on every frame. Go retains about 22 MiB for the same.
    memory view's and review's notes, settings' files, ctrl+g's draft)
    and a sign-in sent to the terminal. With no loop (tests) a program
    waits for `Model::run_outside`.
+   The kitty keyboard is asked for flags 1 and 2 (`\x1b[>3u`): keys
+   disambiguated, and their event types, so a held key's repeats come as
+   `Event::KeyRepeat` (handled as a press everywhere) and its letting go
+   as `Event::KeyUp` (ignored everywhere but push-to-talk,
+   rush-ui-social's `dictation.rs`, which the model reaches through
+   `Calls::dictation_released`). `Term::reports_releases` says whether
+   the terminal answered the kitty query; without it ctrl+space toggles.
+   Both dictations are told the words on screen (session, repo, branch
+   and file names, identifiers in the visible conversation, the open
+   session's first, at most 200: rush-ui-social's `screenwords.rs`): yap as
+   a `{"context":{"app":…,"words":[…]}}` line on its socket, re-read after
+   a frame at most once a second and only while yap is followed; rush's
+   helper in `Command::Start.context`, the first 100 set as the speech
+   request's contextualStrings.
 3. **Workers**: discovery (sessions/jobs files, process liveness), spend
    scanning (incremental from the last offset), previews, the open
    transcript's tail (its last 2 MB first; a longer one is then read
    whole on the same worker and takes the end's place, its turns'
-   refs renumbered so nothing on screen moves: Go's twopass.go). Each
+   refs renumbered so nothing on screen moves: Go's twopass.go; that
+   worker also lays out the whole's last 400 rows as the view last drew
+   and works out its edits, so the frame that swaps it in draws little:
+   Go's warmed, rushmode.go:2064). Each
    watches files with `rush_sys::fswait::Watcher`
    (kqueue on macOS; the one file watcher in rush: `watch` before reading,
    `wait` blocks until a change, a `Stop` or a timeout; a path not there
    yet, such as a jobs folder not made, waits on the nearest folder above
    it and is watched once it appears, with no timer) and sends only
-   changes. Each worker sends on a lane of its own (`rush_draw::Sender::
-   lane(cap)`) holding at most `cap` messages the UI hasn't handled yet; a
-   send waits while its lane is full, so a worker can't run ahead of the
-   UI (the transcript tail and discovery send on lanes of one: the next
+   changes. Discovery's (and the menu bar's) is a `Watcher::many`: where
+   eight or more watched paths share a folder (rush's sessions folder,
+   Claude's projects), one FSEvents stream on those entries serves the
+   quiet ones, instead of a kqueue descriptor each. One that appeared
+   since (a session just made) or was written in deep inside (a live
+   session's events, a transcript) within the hour keeps or gets a
+   descriptor and is told at once; writes inside it then cost nothing,
+   as the stream is made again without it. The stream's news is checked
+   against each entry's status, so it tells what kqueue would (entries
+   added, removed, renamed; a file written), 10-40 ms after the change
+   (a few hundred under heavy load; Go's list shows it at its next
+   one-second tick). A path moving onto the stream keeps its descriptor
+   until the next ask has read it, so nothing between is missed. Each
+   worker sends on a lane of its own (`rush_draw::Sender::lane(cap)`)
+   holding at most `cap` messages the UI hasn't handled yet; a send
+   waits while its lane is full, so a worker can't run ahead of the UI
+   (the transcript tail and discovery send on lanes of one: the next
    slice is read while the UI applies the last). A send fails once the
    loop has ended. A thread that must never wait (an agent's reader,
    through its Sink) uses `try_send`, which hands the message back when
@@ -519,9 +593,12 @@ on every frame. Go retains about 22 MiB for the same.
    once at start, when the network changes, and when a job fails on what
    looks like the network; on Go's timings (2 min steady, 30 s shaky, 5–30
    s down) only while something needs it: a holder of
-   `netwatch::want_checks()` (wave C's screens that show the network hold
-   one while drawn), the API down, or a job held for it. Rates are read
-   only while a `watch_rates()` guard lives. Idle, it doesn't wake.
+   `netwatch::want_checks()` (the TUI holds one for its whole life, as
+   Go's watchNet starts at Init: the top bar's "net steady / net shaky /
+   offline" needs it; a session's host and `--render` hold none), the API
+   down, or a job held for it. Rates are read only while a
+   `watch_rates()` guard lives (#network). A host's netwatch, unwanted,
+   doesn't wake.
 
 ## The host
 
@@ -538,7 +615,12 @@ agent's wait for its answer waits on its folder rather than looking every
 half second. rush-fleet reads hosted sessions through its `Hosts` trait, which
 rush-host's `hosts::Sessions` implements over its `Lister` (the fleet
 can't depend on the host, which depends on it); it also revives a host
-lost mid-turn (Go's Revive), unless the rush follows (below).
+lost mid-turn (Go's Revive), unless the rush follows (below). Beyond Go,
+a host lost between turns, awake (it never said it stopped and didn't go
+to sleep: killed, or taken down with the app rush ran in), is revived
+too, told nothing, as a reload's restart leaves it; Go leaves it stopped
+until someone notices. Not into a folder that's gone, and at most once
+every ten minutes, as a mid-turn one.
 
 The TUI reaches hosts through rush-ui's `session_core::host::Hosts`,
 which the binary sets before the loop runs (`rush_ui::run_with`, the
@@ -582,6 +664,32 @@ given back, and the binary runs the installed rush in its place
 (`rush_sys::selfexe::path`, exec), as Go's main.go:290-300. While a view
 runs it's listed for `rush reload` (`rush_state::instances`), whose
 SIGUSR1 is a #reload; a hosted view isn't listed.
+
+## The list kept between runs (Rust-only)
+
+rush opens on the list as it last read it (rush-ui `listcache.rs`): each
+priced reading is saved to rush's cache (`list-kept.json`, at most once a
+minute and on quitting), read on a thread as rush starts, and drawn in the
+first frame (it waits up to 50 ms for it) until the first live reading
+replaces it whole. Until then its rows are drawn as they were but for an
+agent's mark that says what it's doing now (working, waiting on you, just
+finished, halted), drawn neutral and still so a row that was working last
+time doesn't claim to be now; nothing acts on it: no host is dialled and
+no reading's hooks run. One from another version or older than a week
+isn't shown.
+
+The start is one frame that then only gains details: your top bar is read
+before the first frame (Go reads it with the first reading, so it opened
+on the default gauges), and the kept file has the top bar's segments as
+last drawn with their readings in (and the plan's rows, and the account
+beside the folder). Each stands in until its own reading is in, while
+the kept list shows and for at most 3 s after the first live reading: the machine's processes for cpu and ram, the
+battery and disk, the network, a priced reading for today's spend, the
+accounts read (and their limits fetched, for the plan). "costing
+transcripts…" isn't said over the kept list's costs.
+
+Measured on the bench copy (870 agents): the list on screen 31-36 ms
+after start, against 1.35 s for the first reading.
 
 ## Following (Rust-only)
 
@@ -629,6 +737,16 @@ so `leads()` is neither. What only the rush that leads does:
   verdict and settle (`projects_machine/tidydone.rs` `tidy_plan`,
   `settle_looks`; cleanup.go:236, :741), every 10 minutes and every
   minute at most, with readings of the list;
+  Beyond Go: a session whose branch has landed is put away at once, but
+  while its host still runs it (process alive, not stopped or asleep in
+  info.json; `tidydone.rs` `host_running`) its worktree and branch wait,
+  as Go would have removed them 49 s after an idle turn and left a
+  session sent more work running with its folder gone. A later minute's
+  look removes them, by the same rule, once it has stopped or gone to
+  sleep; a message before then (it brings the session back from put away)
+  keeps them. One `worktree-kept` event ("its session is still running")
+  is logged per session, and the 10-minute clean-up of done work passes
+  over a running session's worktree the same way;
 - restarts sessions' hosts on a new install with Restart on install, or
   while a reload has sessions to move (`settings/updates.rs`
   `watch_hosts`; settings_updates.go:143); enter on Sessions restarts
@@ -687,12 +805,100 @@ The actions, by the name the log gives them:
   memory guard);
 - `ask-turn-model` (`session_core/turnwants.rs`), `send-continue` (the
   API back, `social/services.rs`), `set-attribution`
-  (`frame/everywhere.rs`).
+  (`frame/everywhere.rs`);
+- `guard-hold`, `guard-move`, `guard-refuse-spawns`, and its
+  `switch-login`/`switch-account` (the runaway guard,
+  `accounts/guard.rs`).
 
 Rush's own files (its state, caches, the search index, the events log)
 are still written. To try a rush that leads without it touching anything,
 run it under a sandbox that denies writes outside a copy of rush's folder
 and signals to other processes as well (the sweep's `lead-trial.sb`).
+
+## The runaway guard (Rust-only)
+
+Three checks that keep a busy few hours from spending a week's limit,
+each off until set (config.json `guard`; Settings › General › Runaway
+guard). rush-core's `guard` decides from what it's handed; the accounts
+module's `guard.rs` runs it in the rush that leads, every 5 s, off the
+UI thread, and does what it says.
+
+- **Pace**, per account, any provider: the fair share is the room left
+  in its longest window (`Quota::weekly`: Claude's week, Codex's
+  secondary) over the time to its reset; the burn is what that window
+  gained over the last 2 hours. Each reading of each account's week is
+  kept in `weekuse.json` (3 hours of them, every rush's readings
+  merged), whether or not the guard is on, so turning it on has the
+  hours behind it. A reading of a new week counts from 0; one lower
+  than the most seen (an older cache) adds nothing. Under 30 minutes
+  read says nothing. Past `warn` (1.5×) it's said once; past `trip`
+  (2×) it trips, and stays tripped until under `release` (warn − 0.3,
+  1.2×). When it frees up is worked out from its use ageing out of
+  the 2 hours and its fair share growing as the reset nears. A provider
+  without readings has no pace: only the cap and away cover it, as its
+  row says.
+- **The cap**: agents working at once. A rush session's turn counts 1,
+  each subagent in it 1 (its host's tasks not in the background), each
+  background agent or workflow 1; background shells 0. Agents rush
+  doesn't run count (1 + their running subagents) but are never held.
+- **Away**: no key in rush (`Model::last_input`) nor anywhere on the
+  Mac (rush-sys `idle`: HIDIdleTime) for `awayMinutes` (20), or the
+  screen locked. A lower cap (2), no new subagents or workflows, and
+  each session's running turn finishes, then holds; one on #away
+  (keep working while I'm away) carries on.
+
+What trips never cuts a turn. A session's next turn is held with its
+host's queue hold (Op::HoldQueue, as alt+h): a message sent meanwhile
+queues, held, idle or not (Rust-only: a host held while idle queues too;
+sent now, it goes). What the guard holds and has moved is kept in
+`guard-held.json`, so the next rush to lead lets go of its holds and
+not of yours; it looks only once the accounts have been read. The guard only lets go of what it held; alt+h on it lets
+the next turn through (it isn't held again until that turn has run),
+ctrl+enter sends one now. Held for the cap, sessions go again in the
+order held as room frees.
+
+Moves: when the account in use trips, new sessions switch (new sessions
+only, as `n` does) to the account under `release` that the work it'd
+take on (the tripped one's burn) wouldn't trip, of those the one whose
+room would go unused soonest ((fair − burn) ÷ (1 + hours to reset ÷
+24)), so room that would be lost at a reset days away counts for less;
+the event says why ("bob resets in 4h with 38% left"). With none, work
+waits. Then each session on a tripped account: a new one (no turns)
+moves; one whose prompt cache is warm (`Info::cache_warm`) waits, as a
+move writes its whole context again at full price; a cold one moves
+(`relogin`), at most once in `moveHours` (6); one that moved already
+waits. rush's own switching (auto-switch, other agents' accounts) never
+moves to an account the guard has past its pace.
+
+A session on an account past its pace is also refused new subagents and
+workflows (`Plan::spawns_for`: the sessions on a tripped account, minus
+any you let through with alt+h, whose spawns go until that turn has run;
+released, under 1.2×, lifts it). The refusal says plainly that the
+user's runaway guard is pausing new agents because the account is past
+its pace, and to finish the current work without starting new ones. It
+goes through the same `guard.json` / `rush gate hook` path as away.
+
+Said: the list row and queue card ("pauses after this turn: past your
+pace on alex · 2.2× · frees at 20:52" while the session's turn runs, then
+"held: past your pace on alex · 2.1× · frees at 14:20" once the turn has
+finished and the next is waiting; `Hold::say_running`), the header's counts row, the queue card, the provider's
+`pace` line and a chip on each account's row; news when an account
+trips, warns, or you go away or come back; a desktop notification
+(unless Notify is off) when one trips or every account is past its
+pace. Events: `guard-tripped` (rush's own), and per session
+`guard-held`, `guard-moved` (with the context size and whether its cache
+was cold), `guard-released`, `guard-refused` (a spawn), so `rush why`
+tells them. New subagents and workflows are refused through
+`guard.json` in rush's folder, which `rush gate hook` reads (`refuse`:
+for every session, away and the cap; `sessions`: by rush id, for an
+account past its pace): Claude
+Code's PreToolUse hook matches Bash|Agent|Task|Workflow; it lapses 2
+minutes after the last look. A harness without that hook isn't
+refused spawns.
+
+Not yet: a session you start yourself isn't held (its first turn goes
+on the account picked); the menu bar shows a held session only as
+idle.
 
 ## A session's runs
 
@@ -894,6 +1100,20 @@ is made. Everything below is in `rush_ui::frame`.
   (`Summarizer::summary_exclusions`). A rewind's message put back in a
   session beside the list opens it, as Go's paneFocus gives its box the
   keys.
+  A decisions card stays on a session rush doesn't run now when its
+  answers would wake or resume it (`HostInfo::wakes`: asleep, as Go, or
+  stopped with no host running, beyond Go, whose card vanished there and
+  whose d said "can't take answers here"); `session_cards::card_info` is
+  what its card, keys and clicks read. Its answers are `Act::Answer`:
+  shown as sending, sent over the link, or waking or resuming it as a
+  typed message does (`keys::send_offline_as`); answers that don't go
+  bring the card back on its send page with them kept
+  (`question::answer_failed`) rather than leaving a block that reads as
+  answered. Set aside with no host, it's noted beside its info
+  (`Hosts::dismiss_asleep`). The block the card is up for is pinned only
+  once the last turn ends with one (a view reading from the start has
+  an earlier turn last for a moment), and follows its turn when the
+  view's turns are numbered afresh (`take_whole`).
 - **Moving agents** (`session_core::rushmove`, `session_core::moveto`;
   rushmode.go moveToRush, picker.go). /rush, #rush and a message to a
   past session move it to rush mode through `Hosts::adopt` (the new
@@ -973,8 +1193,13 @@ is made. Everything below is in `rush_ui::frame`.
   both run at once, so tests never sleep. A worker of your own takes
   `m.sender()`, gives itself a lane (`tx.lane(1)`) and sends
   `Note::Apply(Box::new(|m| …))`; never send from the UI thread. Work
-  from the background draws at most every 250 ms (`framehold.rs`); keys
-  and the mouse draw at once. Ask for a wake-up with
+  from the background draws at most every 250 ms (`framehold.rs`),
+  counted from the last frame background work drew, so a key's frame
+  doesn't hold back what the key asked for; keys and the mouse draw at
+  once. When what a key asked for lands (a placeholder such as "reading
+  the conversation…" filled), call `m.answered()` and it's drawn at
+  once. Show what's known at once and fill in the rest as it lands
+  (Projects shows git's word on the worktrees before their sizes). Ask for a wake-up with
   `m.ask_wake(instant)` or a Place's/Sheet's `wake_at`, only while
   something on screen moves.
 - **Keys and the command bar** (`screens/cmdbar`). Its `x.keys` hooks
@@ -991,7 +1216,7 @@ is made. Everything below is in `rush_ui::frame`.
   frame never reaches the pause. Each list reading indexes the
   conversations in the background (`config::dir()/search`).
 
-- **Settings.** `screens/settings` is both settings places: Harnesses
+- **Settings.** `screens/settings` (the crate `rush-ui-settings`, re-exported there; its full-UI tests are in rush-ui's `settings_tests/`) is both settings places: Harnesses
   (Providers, Harnesses, Config) and Settings (General, Keys, Plugins,
   Updates, Remote), one dialog between them as in Go, its tabs drawn
   through `Place::pages_line`; its `register` makes the bundled plugins
@@ -1013,6 +1238,35 @@ is made. Everything below is in `rush_ui::frame`.
   `open_skills`, `statusline::open_status_line`; `#network` and
   `#statusline` are registered commands; `sheets::start_view` is the
   first-run layout question.
+  Keys differ from Go's on purpose (rush-only): a value changes only by
+  a pick, a typed value or space. `form::form_key` opens a row's choices
+  in a `frame::picker::Picker` on enter or → (a typed row with choices
+  takes a value typed there; one without asks in the input line), space
+  switches a row of two values or on/off (and steps a row with a
+  preview), and ← and h are never a row's: an open provider, harness or
+  plugin backs out on them as on esc, Config moves a column left, a flat
+  form does nothing. Go's ← stepped the value back, except on an open
+  provider. The key lines say these (`form::change_keys`), and keymap's
+  `page.in`, `page.back`, `page.switch` describe them in the guide.
+  A harness's own settings go through rush-core's `HarnessSettings`
+  (rush-only): `own_settings(profile, env)` says each setting's key,
+  label, kind (`OwnKind`: choice, open choice, on/off, text, number,
+  tokens, a variable, a new variable, a plugin), value, where it comes
+  from (`ValueFrom`: env, the file's env block, the file, a state file,
+  default) and its choices; `check_setting` refuses a value before it's
+  written; `set_own_settings` writes edits by key. `settings::ownsettings`
+  draws whatever a harness offers as sections of its Harnesses page
+  (`Setting::source` after the value) and writes off the UI, reading
+  back before the row shows it; a harness with none shows nothing.
+  Claude Code's (`rush_claude::ownsettings` over `usersettings`) is
+  settings.json, its env block and enabledPlugins, written to every
+  distinct settings.json the accounts read (a home's link and its target
+  are one), the rest of each file and its links kept, mode 0600.
+  Codex's (`rush_codex::settings`) is config.toml's model, reasoning
+  effort, approvals and sandbox, each key's line rewritten alone and the
+  result read as TOML before it's written. files.rs's generic
+  settings-file section is left for an agent that offers only a
+  SettingsPage.
 
 - **Plugins on screen** (`screens/plugin_ui`). Everything plugins add
   goes through `rush_plugind::hooks::Client`, kept in `m.plugins()`
@@ -1057,13 +1311,35 @@ is made. Everything below is in `rush_ui::frame`.
   `session::header` (the name cut to leave the low note room), then the
   bar's two lines, what the agent runs as and how it's reached, and
   keeps where the context and the permission mode landed; a click on
-  the mode is `session_cards::permissions::permission_command`. The
+  the mode is `session_cards::permissions::permission_command`. Not in
+  Go: `bar_line` keeps where each segment it drew landed (`Ctx::at`), and
+  the model, effort, account and billing segments take clicks too
+  (`agent::HeadAct`: /model's and /effort's lists, the switch sheet on
+  its Account row), lit under the pointer (`style::light_cells`); a click
+  on the agent label opens the switch sheet on the part clicked
+  (harness, account, model). The same for the boxes' edges:
+  `InputBox::edge_at` says where an edge's labels landed, cut or
+  dropped for room, `EdgeAt::place` puts a label's parts there and
+  `InputBox::lit` lights the one under the pointer. The Prompt's folder
+  opens ctrl+l's picker, its chip's name, model and effort the Start
+  sheet on that row (the other setups are picked, as in Go); a
+  Session's box takes clicks on its permission mode (as #perm) and its
+  send mode (as ctrl+t). The
   layout is the one being built in /statusline while its tab shows,
   else bars.json, read off the UI thread with the first list reading;
   what a line left out is kept by `which*10+line` for /statusline.
   Account readings: logins' through the logins agent's `PlanReader`
   (`accounts::state::readings`), others' from quotas.json; `fetch.rs`
-  reads both again every `usage::EVERY` with a loop running. Not yet:
+  reads both again every `usage::EVERY` with a loop running. A Claude
+  plan without a 5-hour limit (Anthropic's top plan, since Go): its
+  5-hour window, absent, null or sent with no reset time, is read as
+  none (`rush_claude::usage::Window::five_hour`, also on usage.json
+  Go wrote, and on a session's live report), so the switching, the
+  order and the meters go by the weekly alone; a place drawn for the
+  5-hour meter (Settings' account table, the provider's rows, the
+  Usage tab, the limit card) says `usage::NO_FIVE_HOUR`
+  (`Quota::no_five_hour`). The plan's name is the sign-in's
+  subscriptionType. Not yet:
   the other logins' own refresh (fetchLoginUsage), a kept sign-in's of
   an agent reading any account's, a session's billing and its host's
   rush version (no Info for them), the name's @handle, headerGit, the
@@ -1075,10 +1351,17 @@ is made. Everything below is in `rush_ui::frame`.
   at second 8 of 15 working, 25 of 45 idle) rides the tick and never
   wakes rush itself. His mix uses `mul_add`, as Go's compiler fuses it on
   arm64, so every cell matches Go's (a hashed dump of every frame).
-- **Gaps.** Colours are still the dark ground's constants: `ground.rs`
-  (photon's theme), `headerwash.rs` and `scheme.rs` (the terminal's
-  colour and mode 2031 reports, parsed) are ported but the reports
-  aren't asked for, as rush-draw hands the UI keys, not raw replies.
+- **Gaps.** Colours are written as the dark ground's constants and
+  moved onto the ground picked as rush-draw paints (`ground.rs`,
+  photon's theme). For Theme "match terminal" rush-draw asks the
+  terminal's colours (OSC 10, 11, then DA1) as it takes the terminal,
+  before the input thread reads, waiting at most 50 ms for it to start
+  answering (Rust-only: Go's bubbletea applies them whenever they come).
+  Replies are kept in rush's cache by terminal (`term-colours.json`);
+  one that hasn't answered in time starts on what it said last time, and
+  the input thread takes its late replies in as colours (rush-draw
+  `reader.rs` LateOsc), which are applied then. They aren't asked again on focus or
+  a mode 2031 report, as rush-draw hands the UI keys, not raw replies.
   Handing the terminal to `$EDITOR` (Go's `editorCmd`) waits on
   rush-draw pausing its input reader: every $EDITOR use goes through
   `session_core::memedit::edit_then(m, path, done)`, which runs the
@@ -1140,6 +1423,41 @@ is made. Everything below is in `rush_ui::frame`.
   asking the terminal its cell size (Go's pictures.go) wait on rush-draw
   writing raw output; until then the cell is taken as Go's 10×20.
 
+## Conversation views (Rust-only)
+
+The Conversation tab has five views, one for every session, kept in
+config.json as `convoView` ("" is Normal): Normal (as always), Chat (what
+you and the agent said, and what it asked; each stretch of steps one quiet
+"n steps hidden" row that opens in place), Code (each edit open on its
+diff, each check or failed command one line, the agent's words cut to
+three lines), Catch-up (a card a turn: asked, said, changed, checks, open,
+time and cost) and Trail (a line a step). ⌥s (session.preset, also
+ctrl+] g) goes through them; the tab row names one other than Normal and a
+click on it opens a picker; enter or a click on a catch-up card or a
+trail's step opens it in Normal. Changing view keeps the picked row, else
+the turn at the top.
+
+They are `Options.preset` (rush_convo::Preset), part of the renderer's
+signature: the same parsed turns, drawn a turn at a time
+(render/draw/presets.rs), so only the turns in view are drawn whichever is
+picked. Checks are read from the command's words (cargo, go, npm/pnpm/
+yarn/bun scripts, make, pytest, eslint, ruff, tsc, …) and its exit code,
+never from one harness's own result shape.
+
+`cargo bench -p rush-convo --bench render`, 3000 turns at 120 wide
+(µs per frame, before → each view):
+
+| frame | Normal (main) | Normal | Chat | Code | Catch-up | Trail |
+|---|---|---|---|---|---|---|
+| cold, at the end | 6354* | 1813 | 546 | 528 | 184 | 186 |
+| warm, at the end | 4.4 | 9.6 | 4.8 | 46.5 | 44.8 | 3.7 |
+| warm, mid-way | 4.1 | 4.2 | 4.5 | 4.8 | 34.0 | 3.4 |
+
+*Cold frames swing with the machine's load: the same Normal frame measured
+790–1813 µs in the branch's own runs. Warm frames are the steady cost.
+Code and Catch-up redraw the bench's live last turn on every tick (no
+unit memo for them); still far under a millisecond.
+
 ## Panics
 
 Release builds unwind (`panic = "unwind"`), so one thread's panic ends
@@ -1173,7 +1491,43 @@ logins' own refresh and the fleet's accounts come with those modules.
 The binary raises its soft limit on open files to the most allowed
 (`kern.maxfilesperproc` on macOS) at startup, as Go's runtime does:
 launchd starts programs at 256, and each watched folder and transcript
-is a descriptor.
+is a descriptor. Discovery watches folders of many through FSEvents
+(Threads), so the list on a home of 1,200 sessions holds 42 open files,
+not 1,391.
+
+## Each rush home keeps its own sign-ins (Rust-only)
+
+rush keeps the sign-ins of logins not in use, and providers' API keys,
+in its vault (rush-state `vault.rs`): the login keychain on macOS, files
+under `<home>/logins` elsewhere. Every provider goes through it
+(`rush_state::vault()`), so the rule below holds for all of them.
+
+- The normal rush home, `~/.config/rush` (or `~/.config/agtop` while
+  that one is in use) of the user this runs as, keeps the keychain
+  service `rush-login`, as Go and every earlier rush did: nothing is
+  signed in again. A RUSH_HOME naming that same folder (a plugin, the
+  remote service, a link to it) is the normal home too: homes are
+  compared by canonical path. "The user" is the password file's home,
+  not HOME, as the keychain is the account's whatever HOME says.
+- Any other home has its own service, `rush-login-` and 8 hex of a
+  SHA-256 of its canonical path (`vault::service_for`), which starts
+  empty. Off macOS the files were per home already.
+- So a copy of the user's rush home (a test, a trial run) never reads,
+  renews or hands out the normal home's sign-ins: a login's home it
+  makes is filled only from its own store, and with nothing there it
+  says "rush has no sign-in for X; sign in to it again". Each login
+  home still has the keychain item Claude Code names for it
+  (`Claude Code-credentials-<hash>`), made by Claude Code's own rule.
+- Who sets RUSH_HOME for their real rush sees, there, the logins in its
+  config.json with no sign-ins behind them, and API keys rush kept
+  (keys in their variables still work): sign in again in Settings ›
+  Providers (`r` on a login signs in to it again, `l` adds another), and
+  put API keys in again there. There is no import from the normal home on purpose: a
+  sign-in copied to two stores is renewed by both, and the first renewal
+  ends the other copy, which is what this keeps from happening.
+- In a test (`rush_core::sandbox` active) `vault::keychain` is a map in
+  the process, so tests exercise the keychain path without the real
+  keychain.
 
 ## Tests never reach the real home
 
@@ -1195,9 +1549,11 @@ apart from each other; the sandbox keeps them all from the user's.
 To check, run the tests under `sandbox-exec` with `rust/tools/rush-tests.sb`
 (through `rust/tools/sbtest.sh cargo test -p <crate>`), a profile that denies
 writes to the real `~/.config`, `~/.claude`, `~/.codex`,
-`~/Library/Caches/{agtop,rush}`, unix-socket connects there, exec of the
-user's claude, codex and rush, and signals outside the sandbox: any
-denial shows in `log show --predicate 'sender == "Sandbox"'`. Under it,
+`~/Library/Caches/{agtop,rush}`, unix-socket connects there and to Claude
+Code's daemon for the real `~/.claude`, exec of the
+user's claude, codex and rush, the keychain, and signals outside the sandbox: any
+denial shows in `log show --predicate 'sender == "Sandbox"'`. The profile
+needs `-D CLAUDE_DAEMON` and `-D CLAUDE_DAEMON_REAL` (sbtest.sh passes them). Under it,
 these tests fail for the sandbox's own reasons (it won't run setuid `ps`
 nor set a setuid bit):
 
@@ -1228,6 +1584,30 @@ Go rush is gone from the tree; its last version is the `go-final` tag
 - `cargo bench -p rush-convo`: apply events, open a large transcript cold,
   warm frame of a 3,000-turn conversation, incremental tail.
 - `cargo bench -p rush-claude`: spend scan, preview read.
+- `cargo bench -p rush-convo --bench search` (RUSH_BENCH_TRANSCRIPT=<a
+  transcript>): an open conversation searched as the command bar does on
+  each key, letter by letter: Session::search's instructions per key and
+  a digest of its hits, then Session::search_top (the bar's This session
+  and This chat: only the hits a section shows, with a memo kept from key
+  to key and a vocabulary of the words typos are looked for among, made
+  on another thread as the bar opens) checked hit for hit against it.
+- `cargo bench -p rush-ui --bench frame` (under `tools/sbtest.sh`): a frame
+  of the Agents list, 300 agents at 160x48 — its rows, painted, and a key
+  then the frame — in µs, instructions, bytes and allocations per frame.
+  Then the same with ctrl+k's bar open over it. `-- profile` draws the
+  list for 20 s instead, for `sample`; `-- profile-bar` the bar.
+- A conversation keeps what's drawn, not what was sent: a step's
+  structured result only for the keys something reads
+  (`rush_convo::model::RESULT_KEYS`; no file contents, shell streams or
+  MCP screenshots), and a shell's streams once when its output is them
+  run together. The 125 MB "Scoping Trace Sharing" transcript read whole
+  retains 12.7 MiB (30.2 before, 2026-10-30); its open TUI's footprint
+  went 231-255 → 185-197 MB (the list and ctrl+k's held searches are
+  most of the rest). ctrl+k lets go of what it held on Go's two-minute
+  timer, not at the next search: 2-4 minutes after it, the live heap
+  falls 124 → 79 MiB and the footprint 180 → 125 MB. A long
+  conversation closed or replaced is freed on a thread of its own and
+  its pages given back (`rush_sys::mem::let_go`).
 - Footprint: `/usr/bin/footprint -p <pid>` idle on the list, and with the
   largest transcript under `~/.claude/projects` open; side by side with Go.
 - Idle: `top -l` CPU and wakeups over 60 s with nothing changing.
@@ -1239,9 +1619,12 @@ Go rush is gone from the tree; its last version is the `go-final` tag
   Run it against a throwaway HOME under `tools/sbtest.sh` when testing.
 - Timing log (Rust-only, off by default): `RUSH_PERF_LOG=<file>` writes the
   process's start time and one line per frame (what it handled, µs spent
-  handling and drawing, cells changed, and a key's latency from its
+  handling and drawing, the UI thread's own CPU µs for each (`ucpu`,
+  `dcpu`: steady on a busy machine), cells changed, and a key's latency from its
   arrival to the frame written); `RUSH_PERF_MARK=<text>` notes the first
-  frame showing that text (rush-draw `perf.rs`). The sweep bench
+  frame showing that text, and `RUSH_PERF_WATCH=<a|b|…>` each frame
+  each text shows in and leaves, to time a placeholder (rush-draw
+  `perf.rs`). The sweep bench
   (`~/.local/share/rush-sweep/perf/bench.sh`) reads it for startup, key
   and scroll latency.
 
@@ -1276,6 +1659,18 @@ left to strip. Where the memory goes, and what the host module does about it:
   stalled in `codex-code-mode-host`, not seen again). The commands Codex
   runs are kept from it (`shell_environment_policy.exclude`). No effect on
   Claude Code (Bun has its own allocator).
+- **The host itself.** rush starts every host with `MallocSpaceEfficient=1`
+  (the host takes it out of its environment, so its agent doesn't inherit
+  it; Rust-only): after `flood 15000` on the live bench a host's footprint
+  is 4.6 MB against 21 MB, idle fresh 4.2 against 5.5, for about 0.3 s more
+  CPU per 15,000 streamed steps and none idle. `malloc_zone_pressure_relief`
+  at a turn's end gives nothing back on macOS 27's malloc.
+- **A streaming turn's info.json.** The host writes what a turn is doing
+  (detail, context tokens, cache warmth, updatedAt) to info.json at most
+  every 250 ms, the latest always; any other change, and every change while
+  idle, at once, as Go does (Rust-only). Writing it on every message was
+  ~90% of a busy host's time and woke every watcher of the folder: `flood
+  15000`, host CPU 8.5 s → 1.9 s, folder writes 89,592 → 81.
 - **One Codex app-server can hold many threads.** rush starts one per
   session today (`internal/adapters/codex/conn.go`); one per Codex account
   saves a process per extra session, at the cost of one crash ending them

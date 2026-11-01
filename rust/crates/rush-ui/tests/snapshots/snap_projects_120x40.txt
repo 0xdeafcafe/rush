@@ -1,0 +1,40 @@
+    RUSH      rush   ● 1 needs you   ✻ 2 working                                                               default
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings                                  0% cpu · – · 37.0G free · 80%
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+                                                                                          ● 3 running · – ram · 0% cpu
+
+  ╭─ Projects ─────────────────────────────────────────────────────────────────────────────────────────────────── 1 ─╮
+  │ ┃ checkout  /src/checkout · asking git…                                                                          │
+  │ ┃ └─   main checkout                                 …                        keep                               │
+  │                                                                                                                  │
+  │ ⇡ Pull requests       asking GitHub…                                                                             │
+  │                                                                                                                  │
+  │ NO PROJECT'S ─────────────────────────────────────────────────────────────────────────────────────────────────── │
+  │ ◌ Temporary           –                                                                                          │
+  │ ⚙ System              0 processes                                                                                │
+  ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+  ╭─ ◆ checkout ──────────────────────────────────────────────────────────────── 2 working · 1 need you · 4 · $7.01 ─╮
+  │ /src/checkout                                                                                                    │
+  │ asking git…                                                                                                      │
+  │                                                                                                                  │
+  │ AGENTS  4 ────────────────────────────────────────────────────────────────────────────────────────────────────── │
+  │  WHERE                 AGENT                      DOING                                                          │
+  │  main checkout       ? fix the flaky tax roundin… asks: asks: Round half up, or half to even?                 2m │
+  │  main checkout       ✳ add Apple Pay to checkout  subagent: draft the rollout notes               ctx 14%     1m │
+  │  main checkout       ✳ move the design tokens to… working                                                    30s │
+  │  main checkout       ◦ set up caching for CI      idle                                                       10m │
+  ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back

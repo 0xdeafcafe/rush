@@ -294,6 +294,11 @@ pub(crate) fn live_quota(info: &str, at: Ms) -> Option<Quota> {
     for (id, label, name, span) in WINDOWS {
         let Some(Some(w)) = ws.get(id) else { continue };
         let Some(u) = w.utilization else { continue };
+        if id == "five_hour" && w.resets_at <= 0 {
+            // No reset time: a plan without a 5-hour limit, not one 0% used
+            // (see crate::usage::Window::five_hour).
+            continue;
+        }
         q.windows.push(usage::Window {
             id: id.into(),
             label: label.into(),
@@ -648,6 +653,21 @@ mod tests {
             (l.window.as_str(), l.resets_at),
             ("five_hour", 1_790_000_000_000)
         );
+    }
+
+    // A session on a plan without a 5-hour limit reports no 5-hour window,
+    // or one with no reset time: its quota has the weekly alone.
+    #[test]
+    fn live_quota_without_a_five_hour_limit() {
+        for info in [
+            r#"{"unifiedWindows":{"seven_day":{"utilization":0.66,"resetsAt":1790521200}}}"#,
+            r#"{"unifiedWindows":{"five_hour":null,"seven_day":{"utilization":0.66,"resetsAt":1790521200}}}"#,
+            r#"{"unifiedWindows":{"five_hour":{"utilization":0},"seven_day":{"utilization":0.66,"resetsAt":1790521200}}}"#,
+        ] {
+            let q = live_quota(info, 1).unwrap();
+            assert!(q.window("five_hour").is_none(), "{info}");
+            assert_eq!((q.used("") + 0.5) as i64, 66, "{info}");
+        }
     }
 
     #[test]

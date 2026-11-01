@@ -1,0 +1,41 @@
+[package]
+name = "rush-ui-session-core"
+description = "rush's session: an open conversation's message box, sending, the queue, interrupting, its views, the dock and the live state of a session rush hosts"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-convo.workspace = true
+rush-fleet.workspace = true
+rush-draw.workspace = true
+rush-sys.workspace = true
+rush-state.workspace = true
+rush-hl.workspace = true
+rush-memory.workspace = true
+# A workflow's files on disk, and the folder its run is in (workflow.go).
+rush-claude.workspace = true
+# A session's views beside its conversation: their files (host/views.go).
+rush-host = { path = "../rush-host" }
+# Whether the menu bar app runs: it notifies in rush's place (model.go:2026).
+rush-menubar = { path = "../rush-menubar" }
+# The frame and model under every screen.
+rush-ui-base.workspace = true
+# Every other screen group ranks below the session.
+rush-ui-settings.workspace = true
+rush-ui-accounts.workspace = true
+rush-ui-projects-machine.workspace = true
+rush-ui-plugin-ui.workspace = true
+rush-ui-social.workspace = true
+rush-ui-list-extras.workspace = true
+rush-ui-bars.workspace = true
+rush-ui-session-cards.workspace = true
+rush-ui-cmdbar.workspace = true
+regex.workspace = true
+libc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }

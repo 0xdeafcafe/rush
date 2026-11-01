@@ -11,7 +11,16 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use super::tree::{Group, Groups, Seen, Shared, Stream, is_wake};
 use super::{File, Stop, changed, poll};
+
+/// How many paths in one folder a [`Watcher::many`] watches through its
+/// FSEvents stream rather than a descriptor each.
+const MANY: usize = 8;
+/// In such a folder, a path new or written in within this long keeps a
+/// descriptor: a live session's folder is told at once, as before; the
+/// hundreds quiet for longer share the stream.
+const RECENT: Duration = Duration::from_secs(3600);
 
 const VNODE_FLAGS: u32 =
     libc::NOTE_WRITE | libc::NOTE_EXTEND | libc::NOTE_DELETE | libc::NOTE_RENAME;
@@ -37,7 +46,7 @@ fn open_evtonly(path: &Path) -> Option<OwnedFd> {
     (fd >= 0).then(|| unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
-fn kevent_of(ident: RawFd, filter: i16, flags: u16, fflags: u32) -> libc::kevent {
+pub(super) fn kevent_of(ident: RawFd, filter: i16, flags: u16, fflags: u32) -> libc::kevent {
     // SAFETY: kevent is plain data.
     let mut ev: libc::kevent = unsafe { std::mem::zeroed() };
     ev.ident = ident as usize;
@@ -169,7 +178,7 @@ pub struct Watcher {
 pub(crate) struct Inner {
     // Shared with a wait in progress, which runs without the lock.
     kq: Option<Arc<OwnedFd>>,
-    fds: HashMap<PathBuf, OwnedFd>,
+    pub(crate) fds: HashMap<PathBuf, OwnedFd>,
     /// fds' paths, to name what an event was on.
     paths: HashMap<RawFd, PathBuf>,
     /// Watched since the last ask: told as changed, once.
@@ -183,6 +192,22 @@ pub(crate) struct Inner {
     /// The stand-ins' fds by folder, and their folders by fd.
     standins: HashMap<PathBuf, OwnedFd>,
     standin_of: HashMap<RawFd, PathBuf>,
+    /// Watches folders with many paths in them through FSEvents.
+    many: bool,
+    /// What the stream tells, the stream, and the real paths it's on.
+    tree: Option<Arc<Shared>>,
+    pub(crate) stream: Option<Stream>,
+    pub(crate) streamed: Vec<PathBuf>,
+    /// The folders of many, as given, and their real paths.
+    reals: HashMap<PathBuf, PathBuf>,
+    /// A path in such a folder new or written in this lately keeps a
+    /// descriptor (kqueue tells at once; the stream a few ms later)...
+    pub(crate) recent: Duration,
+    /// ...from when each was last.
+    hot: HashMap<PathBuf, Instant>,
+    /// Moved to the stream, their descriptors kept till the next ask has
+    /// read what they told: nothing between is missed.
+    retire: HashSet<PathBuf>,
 }
 
 impl Inner {
@@ -194,6 +219,10 @@ impl Inner {
         let mut told = false;
         let mut retry = false;
         for ev in events {
+            if is_wake(ev) {
+                told |= self.take_tree();
+                continue;
+            }
             if ev.filter != libc::EVFILT_VNODE {
                 continue;
             }
@@ -207,6 +236,9 @@ impl Inner {
             };
             if ev.fflags & (libc::NOTE_DELETE | libc::NOTE_RENAME) != 0 {
                 self.drop_path(&p); // gone or replaced: watch whatever is there now
+            }
+            if p.parent().is_some_and(|d| self.reals.contains_key(d)) {
+                self.hot.insert(p.clone(), Instant::now()); // still changing
             }
             self.fresh.insert(p);
             told = true;
@@ -223,6 +255,173 @@ impl Inner {
             self.stand_in();
         }
         told
+    }
+
+    /// What the stream told since the last ask, kept as changed; whether
+    /// there was anything (FSEvents losing events counts, as all). Those
+    /// written in deep inside are given a descriptor and leave it.
+    fn take_tree(&mut self) -> bool {
+        let Some(t) = self.tree.clone() else {
+            return false;
+        };
+        let (told, busy, lost) = t.take();
+        if lost {
+            self.dirty = true;
+        }
+        let any = lost || !told.is_empty();
+        let now = Instant::now();
+        for p in &busy {
+            self.hot.insert(p.clone(), now);
+        }
+        self.fresh.extend(told);
+        if !busy.is_empty() {
+            // Watched by kqueue first, then let go by the stream: nothing
+            // between is missed.
+            for p in &busy {
+                let told = self.fresh.contains(p);
+                if !self.fds.contains_key(p) && self.open(p) && !told {
+                    self.fresh.remove(p); // nothing it would tell happened
+                }
+            }
+            let mut groups = t.groups();
+            for g in groups.values_mut() {
+                g.kids.retain(|name, _| !busy.contains(&g.given.join(name)));
+            }
+            if !self.restream(&t, groups) {
+                self.give_up();
+            }
+        }
+        any
+    }
+
+    /// Whether p is watched through the stream.
+    fn in_tree(&self, p: &Path) -> bool {
+        self.tree.as_ref().is_some_and(|t| t.watching(p))
+    }
+
+    /// Of want, the folders holding MANY or more, with the entries the
+    /// stream is to watch in each: those there, neither new nor written in
+    /// lately. The rest are left for kqueue.
+    fn group(&mut self, want: &HashSet<&Path>) -> Groups {
+        let mut by_dir: HashMap<&Path, Vec<&Path>> = HashMap::new();
+        for p in want {
+            if let (Some(d), Some(_)) = (p.parent(), p.file_name()) {
+                by_dir.entry(d).or_default().push(p);
+            }
+        }
+        by_dir.retain(|_, ps| ps.len() >= MANY);
+        self.reals.retain(|d, _| by_dir.contains_key(d.as_path()));
+        self.hot.retain(|_, t| t.elapsed() < self.recent);
+        let mut groups = Groups::new();
+        if by_dir.is_empty() {
+            return groups;
+        }
+        if self.tree.is_none() {
+            self.tree = self.kq.clone().and_then(Shared::new);
+        }
+        let Some(tree) = self.tree.clone() else {
+            return groups;
+        };
+        let now = Instant::now();
+        for (dir, ps) in by_dir {
+            // A folder first watched: its entries all start on the stream.
+            let first = !self.reals.contains_key(dir);
+            if first {
+                let Ok(real) = std::fs::canonicalize(dir) else {
+                    continue;
+                };
+                self.reals.insert(dir.to_path_buf(), real);
+            }
+            let real = &self.reals[dir];
+            let mut kids = HashMap::with_capacity(ps.len());
+            for p in ps {
+                let Some(name) = p.file_name() else { continue };
+                if self.hot.contains_key(p) {
+                    continue; // written in lately: kqueue's, told at once
+                }
+                if let Some(seen) = tree.seen(real, name) {
+                    kids.insert(name.to_os_string(), seen);
+                    continue;
+                }
+                if !first && !self.fds.contains_key(p) {
+                    // New since (a session just made): likely live, so
+                    // kqueue's for now, with no stream made again for it.
+                    self.hot.insert(p.to_path_buf(), now);
+                    continue;
+                }
+                // Not there: waits on its folder, as any missing path.
+                let seen = Seen::of(p);
+                if seen.there() {
+                    kids.insert(name.to_os_string(), seen);
+                }
+            }
+            groups.insert(
+                real.clone(),
+                Group {
+                    given: dir.to_path_buf(),
+                    kids,
+                },
+            );
+        }
+        groups
+    }
+
+    /// Has the stream watch groups' entries, started again only when they
+    /// differ: a new stream starts before the old stops. False when
+    /// FSEvents won't.
+    fn restream(&mut self, tree: &Arc<Shared>, groups: Groups) -> bool {
+        let mut paths: Vec<PathBuf> = groups
+            .iter()
+            .flat_map(|(real, g)| g.kids.keys().map(move |k| real.join(k)))
+            .collect();
+        paths.sort_unstable();
+        if paths == self.streamed {
+            tree.set(groups);
+            return true;
+        }
+        let new = if paths.is_empty() {
+            None
+        } else {
+            match Stream::start(tree, &paths) {
+                Some(s) => Some(s),
+                None => return false,
+            }
+        };
+        tree.set(groups);
+        self.stream = new; // the old stops here
+        self.streamed = paths;
+        true
+    }
+
+    /// FSEvents won't: every path gets a descriptor, as a plain watcher's.
+    fn give_up(&mut self) {
+        if let Some(t) = &self.tree {
+            for g in t.groups().into_values() {
+                for name in g.kids.keys() {
+                    let p = g.given.join(name);
+                    if !self.fds.contains_key(&p) {
+                        self.open(&p);
+                    }
+                }
+            }
+        }
+        self.many = false;
+        self.stream = None;
+        self.streamed.clear();
+        self.tree = None;
+        self.reals.clear();
+        self.retire.clear();
+        self.dirty = true;
+    }
+
+    /// Closes the descriptors of paths moved to the stream, once what
+    /// they told is read.
+    fn retired(&mut self) {
+        for p in std::mem::take(&mut self.retire) {
+            if self.in_tree(&p) {
+                self.drop_path(&p);
+            }
+        }
     }
 
     /// Watches p, told as changed at the next ask; false when it isn't
@@ -310,8 +509,26 @@ impl Watcher {
                 missing: HashSet::new(),
                 standins: HashMap::new(),
                 standin_of: HashMap::new(),
+                many: false,
+                tree: None,
+                stream: None,
+                streamed: Vec::new(),
+                reals: HashMap::new(),
+                recent: RECENT,
+                hot: HashMap::new(),
+                retire: HashSet::new(),
             }),
         }
+    }
+
+    /// A watcher of many paths: where MANY or more share a folder, one
+    /// FSEvents stream serves those of them quiet for a while, with no
+    /// descriptor each. What the stream tells arrives a moment after the
+    /// change (a wait wakes for it), and a path replaced stays watched.
+    pub fn many() -> Watcher {
+        let w = Watcher::new();
+        w.inner.lock().unwrap().many = true;
+        w
     }
 
     #[cfg(test)]
@@ -329,20 +546,55 @@ impl Watcher {
         if w.kq.is_none() {
             return;
         }
-        let want: HashSet<&Path> = paths.iter().map(|p| p.as_ref()).collect();
-        let gone: Vec<PathBuf> = w
+        let mut want: HashSet<&Path> = paths.iter().map(|p| p.as_ref()).collect();
+        let groups = if w.many {
+            w.group(&want)
+        } else {
+            Groups::new()
+        };
+        let streamed = |p: &Path| {
+            let (Some(d), Some(name)) = (p.parent(), p.file_name()) else {
+                return false;
+            };
+            w.reals
+                .get(d)
+                .and_then(|r| groups.get(r))
+                .is_some_and(|g| g.kids.contains_key(name))
+        };
+        let gone: Vec<(PathBuf, bool)> = w
             .fds
             .keys()
-            .filter(|p| !want.contains(p.as_path()))
-            .cloned()
+            .filter(|p| !want.contains(p.as_path()) || streamed(p))
+            .map(|p| (p.clone(), want.contains(p.as_path())))
             .collect();
-        for p in gone {
-            w.drop_path(&p);
+        want.retain(|p| !streamed(p));
+        for (p, to_stream) in gone {
+            if to_stream {
+                w.retire.insert(p); // closed once the next ask reads it
+            } else {
+                w.drop_path(&p);
+            }
         }
+        // Leaving the stream: watched by kqueue before the stream lets go.
         let mut missing = HashSet::new();
         for p in want {
             if !w.fds.contains_key(p) && !w.open(p) {
                 missing.insert(p.to_path_buf());
+            }
+        }
+        if let Some(t) = w.tree.clone() {
+            // Moving in, a path is told changed at the next ask, as any
+            // newly watched one.
+            for g in groups.values() {
+                for name in g.kids.keys() {
+                    let p = g.given.join(name);
+                    if !t.watching(&p) {
+                        w.fresh.insert(p);
+                    }
+                }
+            }
+            if !w.restream(&t, groups) {
+                w.give_up();
             }
         }
         if missing != w.missing {
@@ -353,7 +605,8 @@ impl Watcher {
 
     /// Whether path is watched: a change to it is told at an ask.
     pub fn watching(&self, path: impl AsRef<Path>) -> bool {
-        self.inner.lock().unwrap().fds.contains_key(path.as_ref())
+        let w = self.inner.lock().unwrap();
+        w.fds.contains_key(path.as_ref()) || w.in_tree(path.as_ref())
     }
 
     /// Whether anything watched changed since the last ask.
@@ -385,6 +638,10 @@ impl Watcher {
                 break all;
             }
         };
+        // Told by the stream with its wake still queued, or lost.
+        w.take_tree();
+        let res = res || std::mem::replace(&mut w.dirty, false);
+        w.retired();
         (std::mem::take(&mut w.fresh), res)
     }
 
@@ -440,8 +697,11 @@ impl Watcher {
             let told = self.inner.lock().unwrap().took(&events[..n]);
             let stopped = stop.is_some_and(|s| s.is_closed());
             // Only a stand-in's folder changed, and nothing appeared: sleep on.
-            let quiet =
-                n > 0 && !told && events[..n].iter().all(|e| e.filter == libc::EVFILT_VNODE);
+            let quiet = n > 0
+                && !told
+                && events[..n]
+                    .iter()
+                    .all(|e| e.filter == libc::EVFILT_VNODE || is_wake(e));
             if stopped || !quiet || left.is_some_and(|l| l.is_zero()) {
                 return !stopped;
             }
@@ -456,6 +716,11 @@ impl Watcher {
         w.missing.clear();
         w.standins.clear();
         w.standin_of.clear();
+        w.stream = None;
+        w.streamed.clear();
+        w.tree = None;
+        w.reals.clear();
+        w.retire.clear();
         w.kq = None;
     }
 }

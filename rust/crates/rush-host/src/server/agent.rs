@@ -952,7 +952,7 @@ impl Host {
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok());
         st.w.this_start = Some(usage::Start {
-            at: rush_core::time::now(),
+            at: rush_core::wire::Stamp::new(rush_state::Time::now().format()),
             sections,
             ..usage::Start::default()
         });

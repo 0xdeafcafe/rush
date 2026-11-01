@@ -9,6 +9,8 @@ pub mod agent;
 pub mod dryrun;
 pub mod event;
 pub mod failure;
+pub mod guard;
+pub mod par;
 pub mod sandbox;
 pub mod text;
 pub mod theme;

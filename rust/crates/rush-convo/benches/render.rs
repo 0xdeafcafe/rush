@@ -16,7 +16,7 @@ use std::time::Instant;
 mod common;
 
 use common::{Feed, at, bench_session, delta};
-use rush_convo::{Options, Renderer, Session};
+use rush_convo::{Options, Preset, Renderer, Session};
 
 struct Counting;
 
@@ -172,5 +172,48 @@ fn main() {
     }
     for (turns, w) in [(300, 120), (300, 250), (3000, 120)] {
         run(turns, w);
+    }
+    presets(3000, 120);
+}
+
+/// Each of the conversation's views on a long session: the cold frame at
+/// the end (a view just picked), the warm frame there, and mid-way.
+fn presets(turns: usize, w: usize) {
+    let s = bench_session(turns);
+    println!("— views, {turns} turns, w{w}");
+    for p in Preset::ALL {
+        let o = Options {
+            preset: p,
+            ..opts(w)
+        };
+        let name = p.name();
+        report(
+            &format!("{name}: cold frame at the end"),
+            measure(20, |_| {
+                let mut r = Renderer::new();
+                r.tail(&s, &o, 50);
+            }),
+        );
+        let mut r = Renderer::new();
+        r.tail(&s, &o, 50);
+        report(
+            &format!("{name}: warm frame at the end"),
+            measure(2000, |i| {
+                let mut o = o.clone();
+                o.tick = i;
+                r.tail(&s, &o, 50);
+            }),
+        );
+        let n = r.count(&s, &o);
+        let mut r = Renderer::new();
+        r.window(&s, &o, n / 2, n / 2 + 50);
+        report(
+            &format!("{name}: warm frame mid-way"),
+            measure(2000, |i| {
+                let mut o = o.clone();
+                o.tick = i;
+                r.window(&s, &o, n / 2, n / 2 + 50);
+            }),
+        );
     }
 }

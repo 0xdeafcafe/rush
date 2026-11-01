@@ -14,34 +14,111 @@ use std::fs;
 use std::io::{self, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
+
+use sha2::{Digest, Sha256};
 
 /// Where rush keeps sign-ins: the keychain on macOS, else files in Dir.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Keys {
     pub dir: PathBuf,
-    /// Whether it's the keychain: on macOS, unless made over files.
-    keychain: bool,
+    /// The keychain service its items are under: on macOS, unless made
+    /// over files.
+    service: Option<String>,
 }
 
-const VAULT_SERVICE: &str = "rush-login";
+/// The keychain service the normal rush home keeps its sign-ins under:
+/// the one every rush used before each home had its own, so the normal
+/// home's sign-ins carry on as they are.
+pub const DEFAULT_SERVICE: &str = "rush-login";
 
-/// Where rush keeps the sign-ins of the logins not in use.
+/// The keychain service the rush home at home keeps its sign-ins under.
+/// The normal home of the user whose home folder is user_home
+/// (~/.config/rush, or ~/.config/agtop while that one is in use) keeps
+/// [`DEFAULT_SERVICE`]; any other home (RUSH_HOME set elsewhere, a test
+/// copy) has its own, `rush-login-` and 8 hex of a SHA-256 of its
+/// canonical path, which starts empty. So a copy of the user's rush home
+/// never reads, renews or hands out the user's real sign-ins. Not in Go,
+/// where every home shared rush-login.
+pub fn service_for(home: &Path, user_home: &Path) -> String {
+    let home = canonical(home);
+    let config = user_home.join(".config");
+    if [config.join("rush"), config.join("agtop")]
+        .iter()
+        .any(|d| canonical(d) == home)
+    {
+        return DEFAULT_SERVICE.to_string();
+    }
+    let sum = Sha256::digest(home.as_os_str().as_encoded_bytes());
+    let hex: String = sum[..4].iter().map(|b| format!("{b:02x}")).collect();
+    format!("{DEFAULT_SERVICE}-{hex}")
+}
+
+/// p with its links resolved, or as it is when it isn't there yet.
+fn canonical(p: &Path) -> PathBuf {
+    p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// The home folder of the user this runs as, from the password file: the
+/// keychain is that user's whatever HOME says, so a rush run with another
+/// HOME isn't taken for the normal one.
+fn account_home() -> Option<PathBuf> {
+    // SAFETY: getpwuid returns static storage or null; read at once.
+    unsafe {
+        let pw = libc::getpwuid(libc::getuid());
+        if pw.is_null() || (*pw).pw_dir.is_null() {
+            return None;
+        }
+        let dir = std::ffi::CStr::from_ptr((*pw).pw_dir);
+        Some(PathBuf::from(dir.to_string_lossy().into_owned()))
+    }
+}
+
+/// service_for's last answer and the home it was for: the vault is asked
+/// for on every reading.
+static LAST_SERVICE: Mutex<Option<(PathBuf, String)>> = Mutex::new(None);
+
+/// The keychain service rush's folder keeps its sign-ins under.
+fn service_of(dir: &Path) -> String {
+    let mut last = LAST_SERVICE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((d, s)) = last.as_ref()
+        && d == dir
+    {
+        return s.clone();
+    }
+    // With no home to go by, it's taken for another home: never the
+    // normal one's sign-ins by mistake.
+    let s = match account_home() {
+        Some(h) => service_for(dir, &h),
+        None => service_for(dir, Path::new("/nonexistent")),
+    };
+    *last = Some((dir.to_path_buf(), s.clone()));
+    s
+}
+
+/// Where rush keeps the sign-ins of the logins not in use: this rush
+/// home's own (see [`service_for`]).
 pub fn vault() -> Keys {
+    let dir = crate::dir();
+    let service = cfg!(target_os = "macos").then(|| service_of(&dir));
     Keys {
-        dir: crate::dir().join("logins"),
-        keychain: cfg!(target_os = "macos"),
+        dir: dir.join("logins"),
+        service,
     }
 }
 
 impl Keys {
     /// A vault of files only you can read in dir, on any system.
     pub fn in_files(dir: PathBuf) -> Keys {
-        Keys {
-            dir,
-            keychain: false,
-        }
+        Keys { dir, service: None }
+    }
+
+    /// The keychain service its sign-ins are under; None when they're
+    /// files.
+    pub fn service(&self) -> Option<&str> {
+        self.service.as_deref()
     }
 
     fn file(&self, id: &str) -> PathBuf {
@@ -49,15 +126,15 @@ impl Keys {
     }
 
     pub fn get(&self, id: &str) -> io::Result<Vec<u8>> {
-        if self.keychain {
-            return keychain::read(VAULT_SERVICE, id);
+        if let Some(svc) = &self.service {
+            return keychain::read(svc, id);
         }
         fs::read(self.file(id))
     }
 
     pub fn put(&self, id: &str, cred: &[u8]) -> io::Result<()> {
-        if self.keychain {
-            return keychain::write(VAULT_SERVICE, id, cred);
+        if let Some(svc) = &self.service {
+            return keychain::write(svc, id, cred);
         }
         fs::DirBuilder::new()
             .recursive(true)
@@ -67,8 +144,8 @@ impl Keys {
     }
 
     pub fn forget(&self, id: &str) -> io::Result<()> {
-        if self.keychain {
-            return keychain::delete(VAULT_SERVICE, id);
+        if let Some(svc) = &self.service {
+            return keychain::delete(svc, id);
         }
         fs::remove_file(self.file(id))
     }
@@ -195,8 +272,33 @@ pub mod keychain {
         io::Error::new(io::ErrorKind::NotFound, "keychain: no such item")
     }
 
+    type Items = std::collections::BTreeMap<(String, String), Vec<u8>>;
+
+    /// In a test (rush_core::sandbox), the keychain is this process's map
+    /// of (service, account) to secret, empty at the start: a test never
+    /// reaches the real one. Never anything outside a test.
+    fn fake() -> Option<std::sync::MutexGuard<'static, Items>> {
+        static FAKE: Mutex<Items> = Mutex::new(Items::new());
+        rush_core::sandbox::active().then(|| FAKE.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    /// The fake's item for service and account; an empty account is any.
+    fn fake_find<'a>(
+        f: &'a Items,
+        service: &str,
+        account: &str,
+    ) -> Option<(&'a (String, String), &'a Vec<u8>)> {
+        f.iter()
+            .find(|((s, a), _)| s == service && (account.is_empty() || a == account))
+    }
+
     /// service's secret for account; an empty account is any.
     pub fn read(service: &str, account: &str) -> io::Result<Vec<u8>> {
+        if let Some(f) = fake() {
+            return fake_find(&f, service, account)
+                .map(|(_, v)| v.clone())
+                .ok_or_else(not_found);
+        }
         let mut args = vec!["find-generic-password", "-s", service, "-w"];
         if !account.is_empty() {
             args.extend(["-a", account]);
@@ -242,6 +344,9 @@ pub mod keychain {
     /// Whether service keeps an item for account, found without reading
     /// its secret.
     pub fn has(service: &str, account: &str) -> bool {
+        if let Some(f) = fake() {
+            return f.contains_key(&(service.to_string(), account.to_string()));
+        }
         Command::new(SECURITY)
             .args(["find-generic-password", "-s", service, "-a", account])
             .stdout(Stdio::null())
@@ -255,6 +360,10 @@ pub mod keychain {
     /// one goes as an argument, which only your own user can read.
     /// security's output echoes the secret back, so it's never passed on.
     pub fn write(service: &str, account: &str, secret: &[u8]) -> io::Result<()> {
+        if let Some(mut f) = fake() {
+            f.insert((service.to_string(), account.to_string()), secret.to_vec());
+            return Ok(());
+        }
         let hex = to_hex(secret);
         let line = format!(
             "add-generic-password -U -a {} -s {} -X {}\n",
@@ -305,6 +414,13 @@ pub mod keychain {
 
     /// Removes service's item for account; an empty account is any.
     pub fn delete(service: &str, account: &str) -> io::Result<()> {
+        if let Some(mut f) = fake() {
+            let k = fake_find(&f, service, account)
+                .map(|(k, _)| k.clone())
+                .ok_or_else(not_found)?;
+            f.remove(&k);
+            return Ok(());
+        }
         let mut args = vec!["delete-generic-password", "-s", service];
         if !account.is_empty() {
             args.extend(["-a", account]);
@@ -404,5 +520,72 @@ mod tests {
         let _again = v.lock().unwrap();
         v.forget("a").unwrap();
         assert!(v.get("a").is_err());
+    }
+
+    // The normal home keeps the old service, so its sign-ins carry on;
+    // any other home, test copies included, has one of its own.
+    #[test]
+    fn each_home_has_its_own_service() {
+        let t = tempfile::tempdir().unwrap();
+        let user = t.path().join("me");
+        let config = user.join(".config");
+        fs::create_dir_all(config.join("agtop")).unwrap();
+        fs::create_dir_all(t.path().join("copy")).unwrap();
+        std::os::unix::fs::symlink(config.join("agtop"), t.path().join("link")).unwrap();
+        for (home, default) in [
+            (config.join("rush"), true),
+            (config.join("agtop"), true),
+            (t.path().join("link"), true),
+            (t.path().join("copy"), false),
+            (t.path().join("other"), false),
+        ] {
+            let s = service_for(&home, &user);
+            assert_eq!(s == DEFAULT_SERVICE, default, "{}: {s}", home.display());
+            if !default {
+                assert!(
+                    s.starts_with("rush-login-") && s.len() == "rush-login-".len() + 8,
+                    "{s}"
+                );
+            }
+        }
+        assert_ne!(
+            service_for(&t.path().join("copy"), &user),
+            service_for(&t.path().join("other"), &user)
+        );
+        assert_eq!(
+            service_for(&t.path().join("copy"), &user),
+            service_for(&t.path().join("copy/../copy"), &user),
+            "named by its canonical path"
+        );
+    }
+
+    // Two rush homes never see each other's sign-ins, and a home other
+    // than the normal one doesn't read the normal one's (the fake
+    // keychain stands in for the real one in a test).
+    #[test]
+    fn homes_keep_their_own_sign_ins() {
+        let t = tempfile::tempdir().unwrap();
+        keychain::write(DEFAULT_SERVICE, "acct-1", b"the user's own").unwrap();
+        crate::set_thread_dir(Some(t.path().join("a")));
+        let a = vault();
+        assert!(a.get("acct-1").is_err(), "read the normal home's sign-in");
+        a.put("acct-1", b"a's").unwrap();
+        crate::set_thread_dir(Some(t.path().join("b")));
+        let b = vault();
+        assert_ne!(a, b);
+        assert!(b.get("acct-1").is_err(), "b saw a's sign-in");
+        b.put("acct-1", b"b's").unwrap();
+        b.forget("acct-1").unwrap();
+        crate::set_thread_dir(None);
+        assert_eq!(a.get("acct-1").unwrap(), b"a's");
+        assert_eq!(
+            keychain::read(DEFAULT_SERVICE, "acct-1").unwrap(),
+            b"the user's own",
+            "the normal home's sign-in was changed"
+        );
+        if cfg!(target_os = "macos") {
+            assert!(a.service().unwrap().starts_with("rush-login-"));
+            assert_ne!(a.service(), b.service());
+        }
     }
 }

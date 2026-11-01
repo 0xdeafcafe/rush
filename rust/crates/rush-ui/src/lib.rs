@@ -5,26 +5,51 @@
 //! with no terminal for a while, as `rush --soak` does
 //! (cmd/rush/profile.go:46).
 
-mod chores;
-mod clanker;
-pub mod config;
-pub mod frame;
-mod header;
+// The base's modules at their old paths (rush-ui-base), so crate::frame::..
+// and rush_ui::lead::.. read as they did. Each is the one module, not a
+// copy: its statics and kept types are the same ones.
+pub use rush_ui_base::{
+    accounts, agentry, attached, away, barfind, bridge, changes, config, finish, frame, host,
+    imagerefs, jobprocs, keybind, landing, lead, list, look, mention, meters, overlay, paint,
+    pastes, plan, predict, rooms, search, sess, shells, sidecol, spawns, split, startdir, style,
+    turnwants, update, worker,
+};
+use rush_ui_base::{chores, listcache, model, session};
+
 pub mod hosted;
-pub mod lead;
-pub mod list;
-mod model;
 pub mod screens;
-mod session;
-pub mod style;
-pub mod worker;
+#[cfg(test)]
+mod settings_tests;
+
+/// Helpers several screens' tests share (kit::model).
+#[doc(hidden)]
+pub mod kit;
+
+#[cfg(test)]
+mod base_tests;
+#[cfg(test)]
+mod screens_tests;
 
 use std::io;
 
 use rush_draw::{Headless, Key, KeyMods, Loop, Term};
 
+use crate::screens::social::rooms::ModelRooms;
+use crate::screens::social::services::ModelReload;
+
 pub use model::Model;
 pub use worker::{Fleet, Note};
+
+/// A model with no workers, every screen registered (screens::register):
+/// fed by hand (tests, rush --render). Model::bare is the base's.
+pub fn new_model(version: &str) -> Model {
+    Model::bare(version, screens::register)
+}
+
+/// A model whose workers send on tx, every screen registered.
+pub fn new_model_with_workers(version: &str, tx: rush_draw::Sender<Note>) -> Model {
+    Model::bare_with_workers(version, tx, screens::register)
+}
 
 /// Opens the TUI and runs it until quit.
 pub fn run(version: &str) -> io::Result<()> {
@@ -55,14 +80,19 @@ fn run_model(
     setup: impl FnOnce(&mut Model),
 ) -> io::Result<Option<String>> {
     let lp: Loop<Note> = Loop::new();
-    let mut m = Model::with_workers(version, lp.sender());
+    let mut m = crate::new_model_with_workers(version, lp.sender());
     m.cfg = config::Config::load();
     if let Some(id) = hosted {
         hosted::set(&mut m, id);
     }
+    lead::hold_renewals(&m);
     setup(&mut m);
+    // rush's colours for the Theme and Colours kept (applyColors).
+    screens::settings::apply_colors(&mut m);
     // Links rush knows the kind of say where they stand (model.go:448).
     screens::cmdbar::linkkinds::start(&m);
+    // The conversation's pictures, made off the UI (convo.Picture).
+    screens::session_cards::pictures::start(&m);
     // Anything holding the UI thread over 40 ms is noted in stalls.log.
     frame::uistall::watch_ui(config::dir().join("stalls.log"));
     // Hosted leaves past conversations out of each reading until its
@@ -73,7 +103,9 @@ fn run_model(
     let is_hosted = hosted.is_some();
     let give: Box<dyn FnOnce(worker::DiscoveryCtl) + Send> = Box::new(move |ctl| {
         let _ = tx.send(worker::Note::Apply(Box::new(move |m: &mut Model| {
-            m.kept::<worker::FleetIn>().0 = Some(ctl.handle());
+            let f = m.kept::<worker::FleetIn>();
+            f.0 = Some(ctl.handle());
+            f.1 = Some(ctl.again());
             if is_hosted {
                 hosted::set_discovery(m, ctl)
             } else {
@@ -82,6 +114,14 @@ fn run_model(
         })));
     });
     worker::spawn_discovery_with(lp.sender(), is_hosted, Some(give));
+    // The battery and disk, read again while shown, drawn when they show
+    // differently (screens/bars/top.rs).
+    let tx = lp.sender().lane(1);
+    rush_sys::sysinfo::on_read(move |was, now| {
+        if screens::bars::top::shows_differently(was, now) {
+            let _ = tx.try_send(worker::Note::Apply(Box::new(|_| frame::Out::Draw)));
+        }
+    });
     // As Go's Init (internal/ui/model.go:548): plugins connected
     // (startHooks, pluginui.go:36), and the layout kept, or asked for the
     // first time (startView, model.go:574).
@@ -97,10 +137,39 @@ fn run_model(
     // Hosted is only the one session: nothing about the app as a whole
     // (model.go:556 Init).
     if hosted.is_none() {
+        screens::settings::sheets::watch_net(&mut m);
+        // The icon is this rush's to start and stop (not a --soak copy's).
+        m.kept::<screens::settings::sheets::MenuBarOwner>().0 = true;
+        screens::settings::sheets::start_menu_bar(&mut m);
+        screens::settings::updates::start(&mut m);
         screens::settings::sheets::start_view(&mut m);
     }
+    // The list as last read, shown until the first reading lands
+    // (listcache.rs).
+    if hosted.is_none() {
+        listcache::load(&mut m);
+    }
+    // Your top bar from the first frame, not the default's gauges first.
+    screens::bars::load_now(&mut m);
     let mut term = Term::new()?;
     m.keys_disambiguated = term.keys_disambiguated();
+    // Made again now the terminal has said its colours, for Theme's
+    // "match terminal" (model.go:1219 BackgroundColorMsg, applyColors).
+    screens::settings::apply_colors(&mut m);
+    // A terminal slow to answer: its colours made again when they come.
+    let tx = lp.sender().lane(1);
+    rush_draw::on_late_colours(move || {
+        let _ = tx.send(worker::Note::Apply(Box::new(|m: &mut Model| {
+            screens::settings::apply_colors(m);
+            frame::Out::Draw
+        })));
+    });
+    // Push-to-talk hears through rush's own helper app (apple voice).
+    screens::social::dictation::use_engine(
+        &mut m,
+        std::sync::Arc::new(screens::social::pushtalk::AppleVoice),
+        term.reports_releases(),
+    );
     let (w, h) = term.size()?;
     m.w = w as usize;
     m.h = h as usize;
@@ -114,6 +183,8 @@ fn run_model(
         }
         Some(_) => None,
     };
+    // The list kept from last time in the first frame (listcache.rs).
+    listcache::wait_first(&mut m);
     let r = lp.run(&mut term, &mut m);
     // Given back before a reload's exec, which starts with SIGUSR1
     // unhandled (main.go:283).
@@ -125,6 +196,7 @@ fn run_model(
     // start it (resumeAll).
     screens::projects_machine::shells::resume_all();
     worker::flush_spend();
+    listcache::save_now(&mut m);
     r.map(|()| m.reload_env())
 }
 
@@ -151,7 +223,7 @@ pub fn soak(
 ) -> io::Result<Soaked> {
     use std::time::Duration;
     let lp: Loop<Note> = Loop::new();
-    let mut m = Model::with_workers(version, lp.sender());
+    let mut m = crate::new_model_with_workers(version, lp.sender());
     m.cfg = config::Config::load();
     m.w = w as usize;
     m.h = h as usize;
@@ -300,7 +372,7 @@ pub fn render(
     keys: &[(Key, KeyMods)],
     setup: impl FnOnce(&mut Model),
 ) -> String {
-    let mut m = Model::new(version);
+    let mut m = crate::new_model(version);
     m.cfg = config::Config::load();
     setup(&mut m);
     // Rust-only: RUSH_RENDER_HOSTED=<id> draws `rush open <id>`'s view,

@@ -67,3 +67,17 @@ fn decision_answer_drawn_as_choices() {
         "shorthand stays as written:\n{got}"
     );
 }
+
+/// A block is open until a message answers it, as the conversation says
+/// "not answered": the column beside a wide conversation lists it.
+#[test]
+fn open_decisions_until_answered() {
+    let mut s = decisions_session(LOADER_ANSWER);
+    let open = rush_convo::render::open_decisions(&s);
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].1[0].topic, "Committing the loader work");
+    answer(&mut s, "something else first");
+    assert_eq!(rush_convo::render::open_decisions(&s).len(), 1);
+    answer(&mut s, "1a. Committing the loader work: yes");
+    assert!(rush_convo::render::open_decisions(&s).is_empty());
+}

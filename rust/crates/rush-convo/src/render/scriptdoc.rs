@@ -151,6 +151,17 @@ impl Drawer<'_> {
             if n == v.at && (live || v.held) || n == v.failed_at {
                 code = paint(C_TEXT.bold(), l);
             }
+            // A long line wraps onto rows hung after the gutter, which carry
+            // no number of their own.
+            let gut = indent + num_w + 5;
+            let reserve = if right.is_empty() {
+                0
+            } else {
+                right.width() + 2
+            };
+            let room = self.cw.saturating_sub(gut + 1 + reserve).max(8);
+            let mut rows = self.code_rows(&code, room, 0).into_iter();
+            let first = rows.next().unwrap_or_default();
             let left = pad
                 .clone()
                 .and(dot)
@@ -158,8 +169,13 @@ impl Drawer<'_> {
                 .and(num)
                 .and_raw(" ")
                 .and(mark)
-                .and(code);
+                .and(first);
             self.add(&script_line_ref(&r, n), BG_WELL, left, right);
+            for r in rows {
+                let l = pad.clone().and(blanks(num_w + 5)).and(r);
+                self.add("", BG_WELL, l, Txt::new());
+                self.wrapped();
+            }
         }
     }
 }

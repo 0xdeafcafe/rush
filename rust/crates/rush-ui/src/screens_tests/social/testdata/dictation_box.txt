@@ -1,0 +1,11 @@
+╭─ new agent in rush ──────────────────────────────────────────╮
+│ ❯ deploy the staging service after the migration             │
+╰─────────────────── listening · let go to stop · AirPods Pro ─╯
+=====
+╭─ new agent in rush ──────────────────────────────────────────╮
+│ ❯ deploy the staging service after the migration             │
+╰───────────────────────────── listening · ctrl+space to stop ─╯
+=====
+╭─ new agent in rush ──────────────────────────────────────────╮
+│ ❯ deploy the staging service after the migration             │
+╰──────────────────────────────────── finishing · AirPods Pro ─╯

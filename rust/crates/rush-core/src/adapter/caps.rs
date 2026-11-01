@@ -283,6 +283,14 @@ pub trait SpendScanner: Send + Sync {
     fn run(&self, targets: &[SpendTarget]) -> HashMap<String, Spend>;
     /// Saves the cache, unless a run is under way.
     fn flush(&self);
+    /// A transcript's spend as the cache last kept it, reading no
+    /// transcript: what its row shows before the first run prices it.
+    fn kept(&self, _path: &str) -> Option<Spend> {
+        None
+    }
+    /// Reads the cache now, so the first kept or run needn't (it's called
+    /// on a thread of its own as discovery starts).
+    fn prepare(&self) {}
 }
 
 /// An agent whose transcripts rush prices itself.
@@ -349,6 +357,15 @@ pub trait Transcripts {
     /// Where session sid, started in cwd, keeps its conversation now:
     /// entering a worktree can move it.
     fn find_transcript(&self, p: &Profile, cwd: &str, sid: &str) -> String;
+    /// find_transcript for each (cwd, sid) of wants, in order: an agent
+    /// that can looks for them all at once (a list's first reading looks
+    /// for hundreds).
+    fn find_transcripts(&self, p: &Profile, wants: &[(&str, &str)]) -> Vec<String> {
+        wants
+            .iter()
+            .map(|(cwd, sid)| self.find_transcript(p, cwd, sid))
+            .collect()
+    }
     /// The folder they're all under.
     fn transcripts_dir(&self, p: &Profile) -> String;
 }
@@ -624,6 +641,21 @@ pub trait StatusLineProfiler {
 /// An agent with a SettingsPage.
 pub trait SettingsPager {
     fn settings_page(&self) -> SettingsPage;
+}
+
+/// A harness whose own settings rush shows and changes on its Harnesses
+/// page (rush-only): each with its value and where that comes from. The
+/// harness reads and writes its own files; rush draws what it offers and
+/// asks for changes by key. A harness without one shows none.
+pub trait HarnessSettings {
+    /// What p's settings are now, with env the environment rush runs in
+    /// (and so each session starts with). Reads files: never on the UI.
+    fn own_settings(&self, p: &Profile, env: &[(String, String)]) -> Result<OwnSettings>;
+    /// Whether value can be key's, before it's written: Err says why
+    /// not, in words to show. Reads nothing.
+    fn check_setting(&self, key: &str, value: &str) -> std::result::Result<(), String>;
+    /// Writes edits into p's settings, keeping everything else in them.
+    fn set_own_settings(&self, p: &Profile, edits: &[OwnEdit]) -> Result<()>;
 }
 
 /// An agent whose own agent, the one that runs when no definition is

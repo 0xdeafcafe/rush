@@ -113,6 +113,49 @@ pub fn spawn(cfg: Config) -> Result<Config> {
     spawn_on(cfg, None)
 }
 
+/// Moves a session whose folder has been removed (a worktree whose work
+/// landed and was tidied away) to one that's there, before its host
+/// starts in it: its worktree's repository, else the nearest folder above
+/// it that's still there. Its conversation stays where Claude Code keeps
+/// it: resuming finds it from any folder.
+pub(crate) fn leave_gone_folder(cfg: &mut Config) {
+    if cfg.cwd.is_empty() || Path::new(&cfg.cwd).is_dir() {
+        return;
+    }
+    let from = std::mem::take(&mut cfg.cwd);
+    let repo = cfg
+        .workspace
+        .as_ref()
+        .map(|w| w.repo.clone())
+        .filter(|r| !r.is_empty() && Path::new(r).is_dir());
+    let to = repo.unwrap_or_else(|| nearest_there(&from));
+    if cfg
+        .workspace
+        .as_ref()
+        .is_some_and(|w| w.path.is_empty() || !Path::new(&w.path).is_dir())
+    {
+        cfg.workspace = None;
+    }
+    log_event(&cfg.id, "folder-gone", json!({"path": from, "to": to}));
+    cfg.cwd = to;
+}
+
+/// The nearest folder at or above dir that's there, past a worktrees
+/// folder: the repository rather than the folder its worktrees sit in.
+fn nearest_there(dir: &str) -> String {
+    let mut p = Path::new(dir);
+    while let Some(up) = p.parent() {
+        p = up;
+        if p.ends_with(".claude/worktrees") || p.ends_with(".claude") {
+            continue;
+        }
+        if p.is_dir() {
+            return p.to_string_lossy().into_owned();
+        }
+    }
+    "/".into()
+}
+
 /// spawn on the rush at exe, this one when None. Given one, it also makes
 /// sure the host that answers was started from it, and ends a host that
 /// never came up rather than leave it: restart starts another.
@@ -132,6 +175,7 @@ pub(crate) fn spawn_on(mut cfg: Config, exe: Option<&Path>) -> Result<Config> {
             return Err(format!("{} is already running", cfg.id).into());
         }
     }
+    leave_gone_folder(&mut cfg);
     crate::json::write_private(&d.join("config.json"), &cfg.to_json_indent())?;
     let checked = exe.is_some();
     let exe: PathBuf = match exe {
@@ -161,6 +205,11 @@ pub(crate) fn spawn_on(mut cfg: Config, exe: Option<&Path>) -> Result<Config> {
     };
     if !cause.is_empty() {
         cmd.env("RUSH_CAUSE", &cause);
+    }
+    if cfg!(target_os = "macos") && std::env::var_os(crate::server::MALLOC_VAR).is_none() {
+        // See server::MALLOC_VAR; the host takes both out again.
+        cmd.env(crate::server::MALLOC_VAR, "1")
+            .env(crate::server::MALLOC_SET, "1");
     }
     // Its own session, so closing rush or its terminal leaves it running.
     // SAFETY: setsid is async-signal-safe and touches nothing of ours.
@@ -279,7 +328,13 @@ fn drop_dismissed(id: &str, info: &mut Info) {
 
 /// The config a session was started with, to restart it.
 pub fn read_config(id: &str) -> std::io::Result<Config> {
-    let b = std::fs::read(dir(id).join("config.json"))?;
+    let p = dir(id).join("config.json");
+    let b = std::fs::read(&p).map_err(|e| {
+        std::io::Error::new(
+            e.kind(),
+            format!("open {}: {}", p.display(), crate::reload::os_err(&e)),
+        )
+    })?;
     Config::parse(&b).map_err(std::io::Error::other)
 }
 
@@ -291,11 +346,17 @@ pub fn list() -> Vec<Info> {
 struct Listed {
     mod_: Option<SystemTime>,
     size: u64,
-    info: Option<Info>,
+    /// Shared with the listings it's in, so an unchanged session's info
+    /// is held once however many listings are kept; once its host is
+    /// found gone, as revive::lose made it (`lost`).
+    info: Option<Arc<Info>>,
     /// The listing that last looked at it (see Lister::trust).
     at: u64,
     /// Its host was found gone, as last listed.
     dead: bool,
+    /// `info` is the lost one: the file is read again if its host is
+    /// ever found alive.
+    lost: bool,
 }
 
 /// Says whether a path is unchanged since a listing numbered at looked
@@ -315,16 +376,19 @@ pub struct Lister {
     pub at: u64,
     ids: Option<Vec<String>>,
     ids_at: u64,
-    last: Option<Arc<Vec<Info>>>,
+    last: Option<Arc<Vec<Arc<Info>>>>,
+    /// Keeps and lists only sessions their info says are neither stopped
+    /// nor asleep: a sweep never looks at the rest, most of them.
+    awake: bool,
 }
 
 impl Lister {
     pub fn list(&mut self) -> Vec<Info> {
-        self.list_shared().as_ref().clone()
+        self.list_shared().iter().map(|i| Info::clone(i)).collect()
     }
 
     /// The listing, shared with the last when nothing changed.
-    pub fn list_shared(&mut self) -> Arc<Vec<Info>> {
+    pub fn list_shared(&mut self) -> Arc<Vec<Arc<Info>>> {
         let t = self.trust.take();
         let at = self.at;
         let out = self.list_trusting(
@@ -338,7 +402,11 @@ impl Lister {
     /// The listing numbered at, trusting what fresh says is unchanged
     /// since the listing that last looked at it; shared with the last
     /// when nothing changed.
-    pub fn list_trusting(&mut self, fresh: &dyn Fn(&Path, u64) -> bool, at: u64) -> Arc<Vec<Info>> {
+    pub fn list_trusting(
+        &mut self,
+        fresh: &dyn Fn(&Path, u64) -> bool,
+        at: u64,
+    ) -> Arc<Vec<Arc<Info>>> {
         self.at = at;
         let trust = |p: &Path, at: u64| fresh(p, at);
         let mut same = self.last.is_some();
@@ -358,32 +426,52 @@ impl Lister {
         let mut stand = Vec::new();
         let mut n = 0;
         let ids = self.ids.clone().unwrap_or_default();
-        for id in &ids {
+        let trusted: Vec<bool> = ids
+            .iter()
+            .map(|id| self.infos.get(id).is_some_and(|c| trust(&dir(id), c.at)))
+            .collect();
+        // The info files not trusted are looked at, and those changed read,
+        // side by side (all of them, the first time), then taken in order.
+        let look: Vec<&String> = ids
+            .iter()
+            .zip(&trusted)
+            .filter(|(_, t)| !**t)
+            .map(|(id, _)| id)
+            .collect();
+        let (infos, awake) = (&self.infos, self.awake);
+        let mut looked = rush_core::par::map_with(
+            look,
+            || (),
+            |_, id| {
+                let st = std::fs::metadata(dir(id).join("info.json")).ok()?;
+                let (m, size) = (st.modified().ok(), st.len());
+                let changed = infos.get(id).is_none_or(|c| c.mod_ != m || c.size != size);
+                let read = changed.then(|| read_kept(id, awake));
+                Some((m, size, read))
+            },
+        )
+        .into_iter();
+        for (id, trusted) in ids.iter().zip(trusted) {
             let known = self.infos.contains_key(id);
-            let trusted = self.infos.get(id).is_some_and(|c| trust(&dir(id), c.at));
             if !trusted {
-                let Ok(st) = std::fs::metadata(dir(id).join("info.json")) else {
+                let Some((m, size, read)) = looked.next().flatten() else {
                     if known {
                         self.infos.remove(id);
                         same = false;
                     }
                     continue;
                 };
-                let (m, size) = (st.modified().ok(), st.len());
-                let changed = self
-                    .infos
-                    .get(id)
-                    .is_none_or(|c| c.mod_ != m || c.size != size);
-                if changed {
+                if let Some(info) = read {
                     let dead = self.infos.get(id).is_some_and(|c| c.dead);
                     self.infos.insert(
                         id.clone(),
                         Listed {
                             mod_: m,
                             size,
-                            info: read_info_file(id).ok(),
+                            info,
                             at: 0,
                             dead,
+                            lost: false,
                         },
                     );
                     same = false;
@@ -395,10 +483,26 @@ impl Lister {
             let Some(c) = self.infos.get_mut(id) else {
                 continue;
             };
-            let Some(info) = &c.info else { continue };
-            let dead = info.state != "stopped" && !crate::alive(info.host_pid);
+            let Some(info) = c.info.clone() else { continue };
+            // A lost one wasn't stopped when it was lost.
+            let dead = (c.lost || info.state != "stopped") && !crate::alive(info.host_pid);
+            if c.lost && !dead {
+                c.info = read_kept(id, awake); // its host is back: as it is
+                c.lost = false;
+                if c.info.is_none() {
+                    // Not read (or not kept): looked at afresh next time.
+                    (c.mod_, c.at) = (None, 0);
+                }
+            }
             same = same && dead == c.dead;
             c.dead = dead;
+            if dead && !c.lost {
+                let mut lost = Info::clone(&info);
+                crate::revive::lose(&mut lost);
+                c.info = Some(Arc::new(lost));
+                c.lost = true;
+            }
+            let Some(info) = &c.info else { continue };
             if info.is_remote() {
                 stand.push(info.host_pid as i32);
             }
@@ -417,11 +521,7 @@ impl Lister {
                 continue;
             };
             let Some(info) = &c.info else { continue };
-            let mut info = info.clone();
-            if c.dead {
-                crate::revive::lose(&mut info);
-            }
-            out.push(info);
+            out.push(info.clone());
         }
         out.sort_by_key(|a| std::cmp::Reverse(a.updated_at));
         let out = Arc::new(out);
@@ -441,51 +541,105 @@ impl Lister {
         installed: BinStamp,
         restart_due: bool,
     ) -> (usize, usize, usize, usize) {
-        let (mut stale, mut restarted, mut failed, mut gone) = (0, 0, 0, 0);
-        for i in self.list() {
-            // A sleeping one wakes on the new binary anyway.
-            if i.state == "stopped" || i.sleeping || !i.stale(installed) {
-                continue;
-            }
-            let cfg = read_config(&i.id);
-            if let Ok(c) = &cfg
-                && !c.cwd.is_empty()
-                && std::fs::metadata(&c.cwd)
-                    .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
-            {
-                gone += 1;
-                continue;
-            }
-            stale += 1;
-            if !restart_due || !crate::wire::restart_due(&i, installed) {
-                continue;
-            }
-            match cfg {
-                Ok(c) if c.owner == 0 => {}
-                _ => continue, // a stand-in's host ends with the program that started it
-            }
-            // Read again: a message may have come since the list was read.
-            match read_info(&i.id) {
-                Ok(now) if crate::wire::restart_due(&now, installed) => {}
-                _ => continue,
-            }
-            if rush_core::dryrun::would(
-                "restart-host",
-                &i.id,
-                "its host runs an older rush than the one installed, and it's between turns",
-            ) {
-                continue;
-            }
-            if let Err(e) = restart(&i.id, |_| {}) {
-                failed += 1;
-                log_event(&i.id, "restart-failed", json!({"err": e.to_string()}));
-                continue;
-            }
-            restarted += 1;
-            stale -= 1;
-        }
-        (stale, restarted, failed, gone)
+        // Those stopped or asleep are passed over: a Lister that sweeps
+        // needn't keep them.
+        self.awake = true;
+        sweep_over(&self.list_shared(), false, installed, restart_due)
     }
+
+    /// [`Lister::sweep`] over the list's own last listing when there is
+    /// one (see [`listed`]): it reads again only what its watcher saw
+    /// change, where this would look at every session's info. A host
+    /// found gone since counts as lost, as a listing now would have it.
+    pub fn sweep_listed(
+        &mut self,
+        installed: BinStamp,
+        restart_due: bool,
+    ) -> (usize, usize, usize, usize) {
+        let last = LISTED.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        match last {
+            Some(infos) => sweep_over(&infos, true, installed, restart_due),
+            None => self.sweep(installed, restart_due),
+        }
+    }
+}
+
+/// The last listing the list made (hosts.rs's Sessions): kept as fresh as
+/// its watcher keeps the list, so a sweep needn't look at every session
+/// again.
+static LISTED: Mutex<Option<Arc<Vec<Arc<Info>>>>> = Mutex::new(None);
+
+/// Keeps infos as the last listing the list made.
+pub(crate) fn listed(infos: &Arc<Vec<Arc<Info>>>) {
+    let mut l = LISTED.lock().unwrap_or_else(|e| e.into_inner());
+    if !l.as_ref().is_some_and(|o| Arc::ptr_eq(o, infos)) {
+        *l = Some(infos.clone());
+    }
+}
+
+/// See [`Lister::sweep`]; with alive, a session whose host has gone since
+/// infos was listed counts as lost (stopped).
+fn sweep_over(
+    infos: &[Arc<Info>],
+    alive: bool,
+    installed: BinStamp,
+    restart_due: bool,
+) -> (usize, usize, usize, usize) {
+    let (mut stale, mut restarted, mut failed, mut gone) = (0, 0, 0, 0);
+    for i in infos {
+        // A sleeping one wakes on the new binary anyway.
+        if i.state == "stopped" || i.sleeping || !i.stale(installed) {
+            continue;
+        }
+        if alive && !crate::alive(i.host_pid) {
+            continue; // lost: listed again, it's stopped (revive::lose)
+        }
+        let cfg = read_config(&i.id);
+        if let Ok(c) = &cfg
+            && !c.cwd.is_empty()
+            && std::fs::metadata(&c.cwd).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+        {
+            gone += 1;
+            continue;
+        }
+        stale += 1;
+        if !restart_due || !crate::wire::restart_due(i, installed) {
+            continue;
+        }
+        match cfg {
+            Ok(c) if c.owner == 0 => {}
+            _ => continue, // a stand-in's host ends with the program that started it
+        }
+        // Read again: a message may have come since the list was read.
+        match read_info(&i.id) {
+            Ok(now) if crate::wire::restart_due(&now, installed) => {}
+            _ => continue,
+        }
+        if rush_core::dryrun::would(
+            "restart-host",
+            &i.id,
+            "its host runs an older rush than the one installed, and it's between turns",
+        ) {
+            continue;
+        }
+        if let Err(e) = restart(&i.id, |_| {}) {
+            failed += 1;
+            log_event(&i.id, "restart-failed", json!({"err": e.to_string()}));
+            continue;
+        }
+        restarted += 1;
+        stale -= 1;
+    }
+    (stale, restarted, failed, gone)
+}
+
+/// A session's info as its file says; with awake, only one neither
+/// stopped nor asleep (see Lister::awake).
+fn read_kept(id: &str, awake: bool) -> Option<Arc<Info>> {
+    read_info_file(id)
+        .ok()
+        .filter(|i| !awake || i.state != "stopped" && !i.sleeping)
+        .map(Arc::new)
 }
 
 /// A connection to one session's host.
@@ -516,12 +670,14 @@ impl Client {
         let sock = sock_path(id);
         rush_core::sandbox::guard("a host's socket", &sock);
         let c = UnixStream::connect(sock)?;
+        crate::sys::widen(&c);
         let r = c.try_clone()?;
         let (tx, rx) = sync_channel(1024);
         std::thread::Builder::new()
             .name("host-client".into())
             .spawn(move || {
-                let mut r = BufReader::with_capacity(64 << 10, r);
+                // Read in big slices: a burst comes in a few reads.
+                let mut r = BufReader::with_capacity(256 << 10, r);
                 let mut l = Vec::new();
                 loop {
                     l.clear();
@@ -1126,5 +1282,111 @@ fn stop_all_seen(id: &str, seen: &mut std::collections::HashSet<String>) -> Resu
         Ok(())
     } else {
         Err(errs.join("\n").into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::Home;
+
+    fn write(id: &str, state: &str, host_pid: i64) {
+        let d = dir(id);
+        std::fs::create_dir_all(&d).unwrap();
+        let info = Info {
+            id: id.into(),
+            state: state.into(),
+            host_pid,
+            ..Default::default()
+        };
+        std::fs::write(d.join("info.json"), serde_json::to_vec(&info).unwrap()).unwrap();
+    }
+
+    // A session whose host has gone is listed lost, stopped, listing after
+    // listing; one stopped or alive, as it is. A Lister that sweeps keeps
+    // only those neither stopped nor asleep.
+    #[test]
+    fn lists_gone_hosts_lost() {
+        let _h = Home::new();
+        write("a-working", "working", 0);
+        write("b-stopped", "stopped", 0);
+        write("c-alive", "idle", std::process::id() as i64);
+        let mut l = Lister::default();
+        for n in 0..2 {
+            let got = l.list();
+            assert_eq!(got.len(), 3, "listing {n}");
+            let a = got.iter().find(|i| i.id == "a-working").unwrap();
+            assert!(a.lost && a.state == "stopped", "listing {n}: {a:?}");
+            let c = got.iter().find(|i| i.id == "c-alive").unwrap();
+            assert!(!c.lost && c.state == "idle", "listing {n}: {c:?}");
+        }
+        let mut s = Lister {
+            awake: true,
+            ..Lister::default()
+        };
+        let mut ids: Vec<String> = s.list().into_iter().map(|i| i.id).collect();
+        ids.sort();
+        assert_eq!(ids, ["a-working", "c-alive"]);
+    }
+}
+
+#[cfg(test)]
+mod gone_folder_tests {
+    use super::*;
+    use crate::wire::Workspace;
+
+    fn s(p: &Path) -> String {
+        p.to_string_lossy().into_owned()
+    }
+
+    /// A session left in a worktree that's been tidied away starts in its
+    /// repository, its worktree let go, not in a folder that isn't there.
+    #[test]
+    fn a_removed_folder_moves_to_one_thats_there() {
+        let t = tempfile::tempdir().unwrap();
+        let repo = t.path().join("repo");
+        let trees = repo.join(".claude/worktrees");
+        std::fs::create_dir_all(&trees).unwrap();
+        let gone = s(&trees.join("merge-batch"));
+        let cases: Vec<(&str, Option<Workspace>, String, bool)> = vec![
+            (
+                "its worktree's repository",
+                Some(Workspace {
+                    path: s(&trees.join("e57fb8f4")),
+                    repo: s(&repo),
+                    ..Workspace::default()
+                }),
+                s(&repo),
+                false,
+            ),
+            ("past the worktrees folder", None, s(&repo), false),
+            (
+                "a worktree still there is kept",
+                Some(Workspace {
+                    path: s(&trees),
+                    repo: s(&repo),
+                    ..Workspace::default()
+                }),
+                s(&repo),
+                true,
+            ),
+        ];
+        for (name, ws, want, kept) in cases {
+            let mut cfg = Config {
+                id: "gone1".into(),
+                cwd: gone.clone(),
+                workspace: ws,
+                ..Config::default()
+            };
+            leave_gone_folder(&mut cfg);
+            assert_eq!(cfg.cwd, want, "{name}");
+            assert_eq!(cfg.workspace.is_some(), kept, "{name}");
+        }
+        let mut there = Config {
+            cwd: s(&repo),
+            ..Config::default()
+        };
+        leave_gone_folder(&mut there);
+        assert_eq!(there.cwd, s(&repo), "a folder that's there stays");
     }
 }

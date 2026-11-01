@@ -711,4 +711,36 @@ mod tests {
             rush_state::set_thread_dir(None);
         }
     }
+
+    // A rush home other than the normal one makes a login's home only
+    // from its own sign-ins: the normal home's, kept under rush-login,
+    // are never copied into it.
+    #[test]
+    fn another_rush_home_never_takes_the_normal_ones_sign_ins() {
+        crate::login::creds_in_files();
+        let t = tempfile::tempdir().unwrap();
+        rush_state::set_thread_dir(Some(t.path().join("rush")));
+        let id = "rush-default-store-test";
+        let cred = br#"{"claudeAiOauth":{"refreshToken":"the user's"}}"#;
+        rush_state::vault::keychain::write(rush_state::vault::DEFAULT_SERVICE, id, cred).unwrap();
+        let root = Account::at("", t.path().join(".claude"));
+        write(
+            &root.state_path(),
+            r#"{"oauthAccount":{"accountUuid":"other"}}"#,
+        );
+        let l = Login {
+            id: id.into(),
+            name: "work".into(),
+            ..Login::default()
+        };
+        let err = use_login_now(&root, &l).unwrap_err().to_string();
+        assert!(err.contains("rush has no sign-in for work"), "{err}");
+        assert!(
+            !has_home(&home_of(id)),
+            "the normal home's sign-in was copied in"
+        );
+        assert_eq!(using(), "");
+        let _ = rush_state::vault::keychain::delete(rush_state::vault::DEFAULT_SERVICE, id);
+        rush_state::set_thread_dir(None);
+    }
 }

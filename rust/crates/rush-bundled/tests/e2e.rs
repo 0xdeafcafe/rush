@@ -49,10 +49,10 @@ fn broker_runs_the_bundled_plugins() {
         .unwrap();
     rush_state::set_thread_dir(Some(home.path().canonicalize().unwrap()));
     rush_bundled::register();
-    // On until turned off: drafts, queue and yap; the rest wait to be
-    // turned on.
+    // On until turned off: drafts, queue, yap and apple-voice; the rest
+    // wait to be turned on.
     let on = rush_plugin::enabled();
-    for n in ["drafts", "queue", "yap"] {
+    for n in ["drafts", "queue", "yap", "apple-voice"] {
         assert!(on.contains_key(n), "{n} isn't on: {:?}", on.keys());
     }
     for n in [

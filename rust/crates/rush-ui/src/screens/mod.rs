@@ -4,18 +4,36 @@
 //! calls once as each model is made. Nothing here edits the frame: see
 //! frame/ext.rs and DESIGN.md "Screens".
 
-use crate::frame::Ext;
+use crate::chores::{Chore, always};
+use crate::frame::ext::{Act, Calls, Kept};
+use crate::frame::{Ext, Out};
+use crate::model::Model;
+use crate::screens::social::services::ModelReload;
+use crate::screens::social::stream::ModelStream;
+use crate::session::SessionView;
 
-pub mod accounts;
-pub mod bars;
-pub mod cmdbar;
-pub mod list_extras;
-pub mod plugin_ui;
-pub mod projects_machine;
-pub mod session_cards;
-pub mod session_core;
-pub mod settings;
-pub mod social;
+// More of the Agents list (the box, the filter, the Wall, the grid, the
+// split, the live mirror): rush-ui-list-extras, at the old path.
+pub use rush_ui_list_extras as list_extras;
+// The bars (top bar and agent header): rush-ui-bars, at the old path.
+pub use rush_ui_bars as bars;
+// The command bar, the keys guide, the keymap and the # commands: rush-ui-cmdbar,
+// at the old path.
+pub use rush_ui_cmdbar as cmdbar;
+// The cards and sheets on a session: rush-ui-session-cards, at the old path.
+pub use rush_ui_session_cards as session_cards;
+// The session itself: rush-ui-session-core, at the old path.
+pub use rush_ui_session_core as session_core;
+// Projects and the machine: rush-ui-projects-machine, at the old path.
+pub use rush_ui_projects_machine as projects_machine;
+// Settings and Harnesses: rush-ui-settings, at the old path.
+pub use rush_ui_settings as settings;
+// The plugin screens: rush-ui-plugin-ui, at the old path.
+pub use rush_ui_plugin_ui as plugin_ui;
+// Accounts, sign-in and starting agents: rush-ui-accounts, at the old path.
+pub use rush_ui_accounts as accounts;
+// The social group is a crate of its own (rush-ui-social); its old path stays.
+pub use rush_ui_social as social;
 
 /// Every group's screens, registered in this order.
 pub(crate) fn register(x: &mut Ext) {
@@ -26,9 +44,327 @@ pub(crate) fn register(x: &mut Ext) {
     projects_machine::register(x);
     settings::register(x);
     accounts::register(x);
+    // Settings › Plugins asks the broker through this window's hooks
+    // client (settings_plugins.go:192, :456); the views panel draws what a
+    // session runs through session_core.
+    settings::plugins::provide(settings::plugins::Broker {
+        running: plugin_ui::running,
+        set_setting: plugin_ui::set_plugin_setting,
+    });
+    plugin_ui::provide_panel(plugin_ui::PanelHost {
+        panel_subs: session_core::panelsubs::rows,
+    });
     plugin_ui::register(x);
     social::register(x);
     // After the Session's own: the agent header goes over its rows.
     bars::register(x);
     session_core::register_last(x);
+    x.calls = calls();
+    x.act = Some(act);
+    x.chores = chores();
+}
+
+/// What the frame asks of the screens by name (frame/ext.rs Calls).
+fn calls() -> Calls {
+    Calls {
+        bar_open: Some(cmdbar::bar::is_open),
+        key_help_open: Some(cmdbar::keyhelp::is_open),
+        is_hash_cmd: Some(cmdbar::fleetslash::is_hash_cmd),
+        legacy_command: Some(cmdbar::fleetslash::legacy_command),
+        alias_of: Some(cmdbar::fleetslash::alias_of),
+        grid_key: Some(list_extras::grid::key),
+        grid_mouse: Some(list_extras::grid::mouse),
+        grid_keys: Some(|m| list_extras::grid::grid(m).keys.clone()),
+        grid_park: Some(list_extras::grid::park),
+        grid_adopt: Some(list_extras::grid::adopt),
+        leave_pane: Some(list_extras::split::leave_pane),
+        preview: Some(list_extras::split::preview),
+        leave_chat: Some(list_extras::split::leave_chat),
+        renaming: Some(list_extras::rename::renaming),
+        sub_toggle: Some(list_extras::subs::toggle),
+        sub_rows: Some(list_extras::subs::rows),
+        sub_row_of: Some(list_extras::subs::row_of),
+        predict_moved: Some(list_extras::predict::moved),
+        summary_strip: Some(list_extras::live::summary_strip),
+        spin: Some(list_extras::wall::spin),
+        intervene_ready: Some(session_cards::discuss::intervene_ready),
+        dirty_path: Some(session_core::memedit::dirty_path),
+        prime_spawns: Some(session_core::subs::prime_spawns),
+        resized: Some(settings::resized),
+        sub_line_fade: Some(settings::interface::sub_line_fade),
+        pane_head: Some(social::rooms::pane_head),
+        room_line: Some(social::rooms::room_line),
+        room_member_line: Some(social::rooms::room_member_line),
+        row_note: Some(accounts::guard::row_note),
+        guard_state: Some(accounts::guard::header_state),
+        limits_fetched: Some(bars::fetch::fetched_once),
+        machine_read: Some(projects_machine::machine_read),
+        ask_close: Some(cmdbar::stops::ask_close),
+        open_pr: Some(list_extras::listkeys::open_pr),
+        work_agents: Some(list_extras::work::work_agents),
+        work_plan: Some(list_extras::work::work_plan),
+        next_start: Some(accounts::setup::next_start),
+        start_profile: Some(accounts::rows::start_profile),
+        plugin_status: Some(plugin_ui::hooks::plugin_status),
+        view_summary: Some(|m, a| {
+            plugin_ui::views::read::summary_of(m, a)
+                .map(|v| plugin_ui::views::view_summary_short(&v))
+        }),
+        emit_box: Some(plugin_ui::hooks::emit_box),
+        cleared: Some(plugin_ui::hooks::cleared),
+        pane_follow: Some(list_extras::split::follow),
+        pane_mirror: Some(list_extras::split::mirror),
+        pane_placeholder: Some(list_extras::split::placeholder),
+        join_split: Some(list_extras::split::join_split),
+        round_pane: Some(list_extras::grid::round_pane_dyn),
+        pointer_back: Some(list_extras::split::pointer_back),
+        edge_mouse: Some(list_extras::split::edge_mouse),
+        pointer_at: Some(list_extras::split::pointer_at),
+        focus_at: Some(list_extras::split::focus_at),
+        peeking: Some(list_extras::peek::peeking),
+        open_peeked: Some(list_extras::peek::open_peeked),
+        peek_back: Some(list_extras::peek::back),
+        predict_take: Some(list_extras::predict::take),
+        predict_take_history: Some(list_extras::predict::take_history),
+        predict_left: Some(predict_left),
+        filter_match: Some(list_extras::filter::has_match),
+        filter_snippet: Some(list_extras::filter::snippet),
+        prime_changes: Some(session_core::changes::prime),
+        conn: Some(|m, key| &mut session_core::conn(m, key).base),
+        peek_conn: Some(|m, key| {
+            m.kept
+                .peek::<session_core::Core>()
+                .and_then(|c| c.conns.get(key))
+                .map(|c| &c.base)
+        }),
+        conn_if: Some(|m, key| {
+            m.kept::<session_core::Core>()
+                .conns
+                .get_mut(key)
+                .map(|c| &mut c.base)
+        }),
+        start_install: Some(session_core::start::install),
+        plugin_key_actions: Some(plugin_ui::hooks::plugin_key_actions),
+        plugin_keys: Some(plugin_ui::hooks::plugin_keys),
+        group_modes: Some(|m| {
+            plugin_ui::sidebar::group_modes(
+                m.kept
+                    .peek::<plugin_ui::Plugins>()
+                    .map(|p| p.sidebars.as_slice())
+                    .unwrap_or_default(),
+            )
+        }),
+        pace_words: Some(accounts::guard::pace_words),
+        pace_chip: Some(accounts::guard::pace_chip),
+        edit_then: Some(session_core::memedit::edit_then),
+        reload: Some(|m, all| m.reload(all)),
+        feed_follows: Some(|m, on| m.feed_follows(on)),
+        dictation_released: Some(social::dictation::released),
+        dictation_repeated: Some(social::dictation::repeated),
+        dictation_sync: Some(social::dictation::sync),
+        dictation_after_frame: Some(social::dictation::after_frame),
+        dictation_read_mics: Some(social::dictation::read_mics),
+        dictation_mics: Some(|m| {
+            social::dictation::mics(m)
+                .into_iter()
+                .map(|d| (d.id, d.name))
+                .collect()
+        }),
+        dictation_set_mic: Some(social::dictation::set_mic),
+        bundled_on: Some(|m, name| {
+            m.kept
+                .peek::<plugin_ui::Plugins>()
+                .and_then(|p| p.bundled_on.get(name).copied())
+                .unwrap_or(false)
+        }),
+        hosted_id: Some(crate::hosted::id),
+        hosted_alone: Some(crate::hosted::alone),
+        all_agents: Some(crate::hosted::all_agents),
+        hosted_snap: Some(crate::hosted::snap),
+        hosted_pin: Some(crate::hosted::pin),
+        hosted_keeps_open: Some(crate::hosted::keeps_open),
+        hosted_set_away: Some(crate::hosted::set_away),
+        hosted_away: Some(crate::hosted::away),
+        neighbour: Some(list_extras::neighbour),
+        start_routes: Some(accounts::setup::start_routes),
+        start_defaults: Some(accounts::setup::start_defaults),
+        models: Some(accounts::setup::models),
+        load_models: Some(accounts::startsheet::load_models),
+        config_as: Some(session_core::start::config_as),
+        verdicts_back: Some(session_cards::discuss::verdicts_back),
+        view_name: Some(session_core::views::view_name),
+        running_any: Some(session_core::running::any),
+        clear_hover: Some(|m, key| {
+            let hover = &mut session_core::conn(m, key).vs.hover_ref;
+            let lit = !hover.is_empty();
+            hover.clear();
+            lit
+        }),
+        send_box: Some(session_core::keys::send),
+        session_start: Some(bars::agent::session_start),
+        next_account: Some(list_extras::plan::next_account),
+        rush_screen: Some(session_cards::claudescreen::rush_screen),
+        hash_arg: Some(session_core::rushcmd::hash_arg),
+        open_known_link: Some(cmdbar::linkkinds::open_known_link),
+        show_view: Some(session_core::views::show_view),
+        open_doc: Some(session_core::memedit::open_doc),
+        memory_known: Some(session_core::memory::memory_known),
+        wake_then: Some(|m, a, then| session_core::switch::wake_then(m, a, then)),
+        switch_then: Some(session_core::start::switch_then),
+        switch_session_message: Some(session_core::switch::switch_session_message),
+        hover_context: Some(|m, key| {
+            m.kept
+                .peek::<session_core::Core>()
+                .and_then(|c| c.conns.get(key))
+                .is_some_and(|c| c.vs.hover_context)
+        }),
+        set_context_at: Some(|m, key, at| session_core::conn(m, key).vs.context = at),
+        project_count: Some(session_core::changes::project_count),
+        project_count_of: Some(session_core::changes::project_count_of),
+        header_context: Some(session_core::views::header_context),
+        rush_cmd: Some(session_core::rushcmd::run),
+        permission_command: Some(session_cards::permissions::permission_command),
+        keep_going: Some(cmdbar::hashcmds::keep_going),
+        sync_host: Some(session_core::live::sync),
+        drop_link: Some(session_core::live::drop_link),
+        read_early: Some(session_core::live::read_early),
+        open_dir_picker: Some(session_core::moveto::open_dir_picker),
+        ask_enter: Some(session_cards::enter::ask_enter),
+        draft_image: Some(session_cards::message::draft_image),
+        float_mouse: Some(|m, e| {
+            for f in [
+                session_cards::quickask::quick_mouse,
+                session_cards::btw::btw_mouse,
+            ] {
+                let o = f(m, e);
+                if o.used() {
+                    return o;
+                }
+            }
+            Out::Pass
+        }),
+        clip_image: Some(session_cards::clipimage::clip_image),
+        core_action: Some(session_core::actions::run_action),
+        reply_to: Some(session_core::cards_host::reply_to),
+        views_of: Some(session_core::views::views),
+        adopt: Some(session_core::keys::adopt),
+        hosted_key: Some(crate::hosted::key),
+    }
+}
+
+/// The Session kept as the list moved off it (list_extras/predict.rs).
+fn predict_left(k: &mut Kept) -> Option<&mut SessionView> {
+    k.get::<list_extras::predict::Predict>().left.as_mut()
+}
+
+/// Does what the frame has a screen do (Model::act), at once.
+fn act(m: &mut Model, a: Act) {
+    match a {
+        Act::OpenKeyHelp => cmdbar::keyhelp::open(m),
+        Act::OpenRoom(key) => social::rooms::open_room(m, &key),
+        Act::PickInProjects(dir) => projects_machine::pick_in_projects(m, &dir),
+        Act::WatchHosts { rebuilt_said } => {
+            // Said already: the hosts' look doesn't say it again
+            // (model.go:1288).
+            if rebuilt_said {
+                m.kept::<settings::State>().updates.rebuilt_said = true;
+            }
+            settings::updates::watch_hosts(m, false, false);
+        }
+        Act::RefetchUsage => {
+            accounts::logins::fetch_usage(m);
+            accounts::logins::find_logins(m);
+            bars::fetch::fetch_now(m);
+        }
+        Act::ForgetMemory(key) => session_core::memory::forget(m, &key),
+        Act::ToggleDone(key) => cmdbar::stops::toggle_done(m, &key),
+        Act::RebuildKeys => settings::keys::rebuild(m),
+        Act::OpenRun { key, r } => {
+            let workflow = m
+                .session
+                .as_ref()
+                .is_some_and(|v| session_core::workflow::is_workflow_ref(&v.sess, &r));
+            if workflow {
+                session_core::subview::open_workflow(m, &key, &r);
+            } else if let Some(id) = r.strip_prefix("run:") {
+                let id = id.to_string();
+                session_core::subview::pick_run(m, &key, &id);
+            } else if r.starts_with("job:")
+                && let Some(v) = m.session.as_mut()
+            {
+                v.sel = r;
+            }
+        }
+        Act::SendAs { key, text } => session_core::keys::send_as(m, &key, &text),
+        Act::FetchNow => bars::fetch::fetch_now(m),
+        Act::GoAgent(key) => cmdbar::bar::go_agent(m, &key),
+        Act::OpenClaudeScreen { key, screen } => {
+            session_cards::claudescreen::open_screen(m, &key, &screen);
+        }
+    }
+}
+
+/// What rush does by itself on Go's tick (chores.rs), in the order run.
+fn chores() -> Vec<Chore> {
+    vec![
+        Chore {
+            at: 3,
+            every: 30,
+            lead_only: false,
+            when: always,
+            run: settings::updates::watch_binary,
+        },
+        // The battery and disk, while the last frame showed them.
+        Chore {
+            at: 3,
+            every: 30,
+            lead_only: false,
+            when: always,
+            run: crate::chores::read_sysinfo,
+        },
+        Chore {
+            at: 15,
+            every: 60,
+            lead_only: true,
+            when: always,
+            run: projects_machine::tidydone::settle_tick,
+        },
+        Chore {
+            at: 30,
+            every: 600,
+            lead_only: true,
+            when: always,
+            run: projects_machine::tidydone::tidy_tick,
+        },
+        Chore {
+            at: 20,
+            every: 30,
+            lead_only: true,
+            when: always,
+            run: list_extras::stuck::nudge_stuck_subs,
+        },
+        // The rooms, every second while one runs: Go reads them on each
+        // reading, which its tick makes every second (model.go:1089-1092,
+        // snapload.go:60), so a room's round and verdict show though no
+        // session changed. Read off the UI thread, drawn only when changed.
+        Chore {
+            at: 1,
+            every: 1,
+            lead_only: false,
+            when: social::rooms::any_running,
+            run: social::rooms::tick_rooms,
+        },
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    // Every slot the frame calls through is filled by register.
+    #[test]
+    fn every_call_registered() {
+        let m = crate::new_model("t");
+        assert_eq!(m.ext.calls.missing(), Vec::<&str>::new());
+        assert!(m.ext.act.is_some());
+        assert_eq!(m.ext.chores.len(), 6);
+    }
 }

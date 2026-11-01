@@ -154,7 +154,10 @@ impl Store {
             self.config = c;
             self.env = env;
         }
-        note_config(&config_path(), b);
+        // Taken in from outside: rush's own earlier versions no longer
+        // count, so going back to one of them is someone else's change
+        // too.
+        note_only_config(&config_path(), b);
         Ok(())
     }
 
@@ -326,17 +329,39 @@ pub(crate) fn create_temp(
 
 /// config.json as this rush last read or wrote it, so a change made by
 /// anything else shows. By path, as the writer's thread may not know
-/// which folder a save was for (one per test's thread).
-static SEEN_CONFIG: Mutex<BTreeMap<PathBuf, Vec<u8>>> = Mutex::new(BTreeMap::new());
+/// which folder a save was for (one per test's thread). The last few
+/// versions, not only the newest: a save is noted before its rename
+/// lands, so a watcher woken by one save can read it after the next is
+/// already noted, and the one it reads is still this rush's own.
+static SEEN_CONFIG: Mutex<BTreeMap<PathBuf, std::collections::VecDeque<Vec<u8>>>> =
+    Mutex::new(BTreeMap::new());
+
+/// How many of this rush's own versions of config.json are kept.
+const SEEN_KEPT: usize = 8;
 
 fn note_config(path: &Path, b: &[u8]) {
     if path.file_name().is_none_or(|n| n != "config.json") {
         return;
     }
-    SEEN_CONFIG
+    let mut seen = SEEN_CONFIG.lock().unwrap_or_else(|e| e.into_inner());
+    let kept = seen.entry(path.to_path_buf()).or_default();
+    kept.retain(|k| k.as_slice() != b);
+    kept.push_back(b.to_vec());
+    while kept.len() > SEEN_KEPT {
+        kept.pop_front();
+    }
+}
+
+/// Forgets every version noted of path but b.
+fn note_only_config(path: &Path, b: &[u8]) {
+    if let Some(kept) = SEEN_CONFIG
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .insert(path.to_path_buf(), b.to_vec());
+        .get_mut(path)
+    {
+        kept.clear();
+    }
+    note_config(path, b);
 }
 
 /// config.json when something other than this rush has changed it since
@@ -349,7 +374,10 @@ pub fn config_on_disk() -> Option<Vec<u8>> {
         return None;
     }
     let seen = SEEN_CONFIG.lock().unwrap_or_else(|e| e.into_inner());
-    (seen.get(&path) != Some(&b)).then_some(b)
+    let own = seen
+        .get(&path)
+        .is_some_and(|kept| kept.iter().any(|k| *k == b));
+    (!own).then_some(b)
 }
 
 #[cfg(test)]
@@ -398,6 +426,46 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
             .collect();
         assert!(tmps.is_empty(), "temp files left behind");
+    }
+
+    // Two saves close together: the watcher woken by the first reads it
+    // after the second is noted, and it's still this rush's own.
+    #[test]
+    fn config_on_disk_knows_its_own_recent_saves() {
+        let d = home();
+        let path = d.path().join("config.json");
+        let mut s = Store::load_with_env(&no_env);
+        s.config.dock_lines = 4;
+        s.save_config().unwrap();
+        crate::flush().unwrap();
+        let first = fs::read(&path).unwrap();
+        s.config.dock_lines = 5;
+        s.save_config().unwrap();
+        crate::flush().unwrap();
+        fs::write(&path, &first).unwrap(); // as the first rename lands late
+        assert!(config_on_disk().is_none(), "its own earlier save");
+        fs::write(&path, br#"{"dockLines": 9}"#).unwrap();
+        assert!(config_on_disk().is_some(), "someone else's");
+    }
+
+    // Saved A, an editor wrote B and rush took it in, then A by hand
+    // again: that's someone else's change, not rush's own A.
+    #[test]
+    fn going_back_after_an_outside_edit_is_an_outside_edit() {
+        let d = home();
+        let path = d.path().join("config.json");
+        let mut s = Store::load_with_env(&no_env);
+        s.config.dock_lines = 4;
+        s.save_config().unwrap();
+        crate::flush().unwrap();
+        let a = fs::read(&path).unwrap();
+        let b = br#"{"dockLines": 9}"#;
+        fs::write(&path, b).unwrap();
+        let got = config_on_disk().expect("the editor's");
+        s.reload(&got).unwrap();
+        assert!(config_on_disk().is_none(), "taken in");
+        fs::write(&path, &a).unwrap();
+        assert!(config_on_disk().is_some(), "back to A by hand");
     }
 
     #[test]

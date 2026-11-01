@@ -92,6 +92,9 @@ impl Default for Starts {
 pub struct RushHosts {
     reg: Registry,
     starts: Starts,
+    /// The sessions as last listed, kept so only the info files that
+    /// changed are read again (Go's conversation's hostList, spawns.go:165).
+    lister: std::sync::Mutex<rush_host::client::Lister>,
 }
 
 impl RushHosts {
@@ -102,7 +105,11 @@ impl RushHosts {
 
     /// Hosts started and woken by starts (tests: rush-host's fake host).
     pub fn with(reg: Registry, starts: Starts) -> RushHosts {
-        RushHosts { reg, starts }
+        RushHosts {
+            reg,
+            starts,
+            lister: std::sync::Mutex::default(),
+        }
     }
 
     fn dial_id(&self, id: &str) -> Result<Arc<dyn Link>, String> {
@@ -379,6 +386,14 @@ impl Hosts for RushHosts {
         rush_host::read_info(&a.job.id).is_ok_and(|i| i.sleeping)
     }
 
+    fn dismiss_asleep(&self, a: &Agent, dec_id: &str) -> Result<(), String> {
+        // dismissDecisions with no client (rushmode.go:5936).
+        rush_host::decisions::dismiss_asleep(&a.job.id, dec_id).map_err(|e| e.to_string())
+    }
+    fn running(&self, a: &Agent) -> bool {
+        rush_host::read_info(&a.job.id).is_ok_and(|i| !i.sleeping && rush_host::client::running(&i))
+    }
+
     fn saved(&self, a: &Agent) -> Option<Info> {
         // openSavedHost (sleep_host.go:172-190).
         rush_host::read_info(&a.job.id).ok().map(|i| info(&i))
@@ -461,7 +476,12 @@ impl Hosts for RushHosts {
     }
 
     fn spawned(&self, parent: &str) -> Vec<Spawned> {
-        hosted_runs(&self.reg, &rush_host::list(), parent)
+        let infos = self
+            .lister
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .list_shared();
+        hosted_runs(&self.reg, &infos, parent)
     }
 
     fn rewind(
@@ -768,9 +788,14 @@ fn clip_log(text: &str) -> String {
 /// The sessions rush hosted for rush session parent's shell or its
 /// spawn_agent calls, each with where its agent writes (spawns.go:215
 /// hostedRuns). One whose transcript can't be found is left out.
-fn hosted_runs(reg: &Registry, infos: &[rush_host::Info], parent: &str) -> Vec<Spawned> {
+fn hosted_runs<I: std::borrow::Borrow<rush_host::Info>>(
+    reg: &Registry,
+    infos: &[I],
+    parent: &str,
+) -> Vec<Spawned> {
     let mut out = Vec::new();
     for i in infos {
+        let i: &rush_host::Info = i.borrow();
         if i.meta.get("spawnedBy").map(String::as_str) != Some(parent) {
             continue;
         }
@@ -927,6 +952,14 @@ impl Link for HostLink {
             Op::Effort(e) => c.set_effort(&e),
             Op::ContinueAtReset(yes) => c.continue_at_reset(yes),
             Op::Away(a) => c.set_away(a.map(|a| wire_away(&a))),
+            Op::RestartAgent { id, pid, text } => {
+                let info = rush_host::wire::Info {
+                    id,
+                    claude_pid: pid,
+                    ..Default::default()
+                };
+                return rush_ui::screens::accounts::logins::restart_claude(&c, &info, &text);
+            }
         };
         r.map_err(|e| e.to_string())
     }
@@ -985,6 +1018,7 @@ fn said(d: &mut Decoder, l: &[u8], out: &mut Vec<Said>) {
             Line::Sent(s) => Said::Sent {
                 text: s.text,
                 images: s.images,
+                exchange: s.exchange,
             },
             Line::Stamp(t) => Said::Stamp(t.to_ms()),
             Line::Commands(list) => Said::Event(Event::Commands(Commands { list })),

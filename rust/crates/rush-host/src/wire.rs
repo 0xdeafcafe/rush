@@ -452,6 +452,13 @@ pub struct Info {
     pub permission_modes: Vec<PermissionMode>,
     #[serde(rename = "costUsd", skip_serializing_if = "zero", with = "float")]
     pub cost_usd: f64,
+    /// Each conversation's running total as its agent last said it, by
+    /// session id: a resumed agent carries its conversation's total on,
+    /// so a turn costs the rise since then, however often the agent or
+    /// this host started again (see turn_cost). Rust-only: Go kept the
+    /// total for one process only (internal/host/agent.go:52 and :572).
+    #[serde(rename = "spentUsd", skip_serializing_if = "BTreeMap::is_empty")]
+    pub spent_usd: BTreeMap<String, f64>,
     /// plan, overage or metered; empty until the agent says.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub billing: String,
@@ -531,14 +538,18 @@ pub struct Info {
     #[serde(rename = "remoteId", skip_serializing_if = "String::is_empty")]
     pub remote_id: String,
     /// Set on reading when the host went away without saying so (killed,
-    /// or taken down with the app that ran it) mid-turn, or with background
-    /// agents at work: see revive.rs.
+    /// or taken down with the app that ran it), mid-turn or between turns,
+    /// but not asleep: see revive.rs.
     #[serde(skip)]
     pub lost: bool,
     /// On a reading that's lost, the background agents still at work when
     /// its host went after its turn had ended: see revive.rs.
     #[serde(skip)]
     pub cut_agents: Vec<String>,
+    /// On a reading that's lost, its host went between turns, awake: it's
+    /// started again with nothing to say (see revive.rs).
+    #[serde(skip)]
+    pub cut_idle: bool,
     /// The agent it runs.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub kind: String,
@@ -752,7 +763,8 @@ impl BinStamp {
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .unwrap_or_default();
         BinStamp {
-            mod_: Time::from_unix(mt.as_secs() as i64, mt.subsec_nanos()),
+            // Local, as Go's ModTime is.
+            mod_: Time::from_unix(mt.as_secs() as i64, mt.subsec_nanos()).local(),
             size: m.len() as i64,
         }
     }
@@ -856,5 +868,32 @@ pub fn trim_images(q: Vec<Vec<String>>) -> Vec<Vec<String>> {
         q
     } else {
         Vec::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // S81: session --json writes info as Go does: a cost to Go's last
+    // digit, a context change's time and a binary's in the zone they were
+    // written in.
+    #[test]
+    fn info_writes_back_as_go_wrote_it() {
+        let go = r#"{"costUsd":1.8115424000000002,"contextChange":{"at":"2026-10-29T06:12:34.468226+01:00"},"exe":{"mod":"2026-10-30T09:28:47.19773404+01:00","size":7}}"#;
+        let info: Info = serde_json::from_str(go).unwrap();
+        let v = serde_json::to_value(&info).unwrap();
+        assert_eq!(v["costUsd"].to_string(), "1.8115424000000002");
+        assert_eq!(v["contextChange"]["at"], "2026-10-29T06:12:34.468226+01:00");
+        assert_eq!(v["exe"]["mod"], "2026-10-30T09:28:47.19773404+01:00");
+    }
+
+    // Go's ModTime is local time: a stamp says its zone.
+    #[test]
+    fn a_binarys_stamp_is_local() {
+        let f = tempfile::NamedTempFile::new().unwrap();
+        let s = BinStamp::of(f.path());
+        assert_eq!(s.mod_.format(), s.mod_.local().format());
+        assert!(!s.mod_.is_zero());
     }
 }

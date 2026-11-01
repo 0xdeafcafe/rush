@@ -30,9 +30,8 @@ use std::io::{BufRead, BufWriter, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 
-use std::sync::mpsc::{
-    Receiver, Sender, SyncSender, TryRecvError, TrySendError, channel, sync_channel,
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -58,8 +57,33 @@ mod agent;
 use agent::Watching;
 pub use agent::{ROOT_IDLE, SPAWNED_IDLE, STALL_AFTER};
 
+/// macOS's malloc in its space-efficient mode, set in a host's environment
+/// as it's started (malloc reads it as a process starts). A busy turn
+/// leaves the host's pages half used, freed lines among the replay's kept
+/// ones, and with malloc's defaults they stay the host's for as long as it
+/// runs: one host after `flood 15000` on the live bench, 22 MB against
+/// 4.5 MB space-efficient, for a quarter more CPU while it streams and
+/// none idle. Every session runs a host, so it counts once per session.
+/// Rust-only.
+pub const MALLOC_VAR: &str = "MallocSpaceEfficient";
+/// Says rush set MALLOC_VAR for the host, which takes both out again.
+pub const MALLOC_SET: &str = "RUSH_HOST_MALLOC";
+
 /// What bounds what a reconnecting client is replayed.
 pub const RING_MAX: usize = 8 << 20;
+
+/// How much a client's writer gathers before a write: a burst goes to
+/// the socket in big writes, not a line at a time.
+const WRITE_BUF: usize = 256 << 10;
+
+/// How often at most info.json is rewritten for a change only of what it
+/// says it's doing (detail, context, cache, updatedAt): a turn streaming
+/// hundreds of messages a second would else rewrite it on each, waking
+/// every rush, menu bar and list that watches it. Any other change (state,
+/// needs you, queue, tasks...) is written at once, as Go does; and the
+/// latest is always written within this, before any reader that ticks once
+/// a second would look.
+const INFO_EVERY: Duration = Duration::from_millis(250);
 
 /// How long the prompt cache lasts: Claude Code writes the one-hour cache.
 const CACHE_LIFE: Duration = Duration::from_secs(3600);
@@ -126,6 +150,9 @@ pub struct Hooks {
     pub health_answered: Arc<dyn Fn(&str) + Send + Sync>,
     /// A short title for a first message; empty when it can't.
     pub titler: Option<Titler>,
+    /// A summary of an agent's long message to another for the feed;
+    /// empty when it can't (feedSummer).
+    pub feed_summer: Option<Titler>,
     pub retry_base: Duration,
     pub online_every: Duration,
     pub queue_late: Duration,
@@ -138,6 +165,8 @@ pub struct Hooks {
     pub heard_wait: Duration,
     /// How long the folder the agent says must hold before it counts.
     pub cwd_settle: Duration,
+    /// How often at most info.json is rewritten for what it's doing.
+    pub info_every: Duration,
 }
 
 impl Hooks {
@@ -146,12 +175,13 @@ impl Hooks {
         Hooks {
             may_go: Arc::new(rush_net::netproof::may_go),
             net_fail: Arc::new(rush_net::netproof::fail),
-            net_answer: Arc::new(rush_net::netproof::answer),
+            net_answer: Arc::new(rush_net::netproof::answer_soon),
             health_failed: Arc::new(|k, said| {
                 rush_state::health::failed(k, said, Time::now());
             }),
             health_answered: Arc::new(|k| rush_state::health::answered(k, Time::now())),
             titler: Some(Arc::new(crate::title::title)),
+            feed_summer: Some(Arc::new(crate::feed::summary)),
             retry_base: Duration::from_secs(15),
             online_every: ONLINE_EVERY,
             queue_late: QUEUE_LATE,
@@ -159,6 +189,7 @@ impl Hooks {
             spawned_idle: SPAWNED_IDLE,
             heard_wait: Duration::from_secs(1),
             cwd_settle: Duration::from_secs(2),
+            info_every: INFO_EVERY,
         }
     }
 
@@ -171,6 +202,7 @@ impl Hooks {
             health_failed: Arc::new(|_, _| {}),
             health_answered: Arc::new(|_| {}),
             titler: None,
+            feed_summer: None,
             ..Hooks::real()
         }
     }
@@ -214,25 +246,38 @@ impl Sink for HostSink {
     }
 }
 
-/// One connected client: its lines go to its writer on a queue of 4096;
-/// one too far behind to catch up is let go, and reconnects for a replay.
+/// How far behind its writer a client may fall, in bytes queued for it,
+/// before it's let go to reconnect for a replay: that far behind, the
+/// replay (at most RING_MAX) is the quicker way back. Go lets one go at
+/// 4096 lines, which a burst of big tool results passes in a tenth of a
+/// second: the client was let go, replayed, let go again mid-replay, and
+/// fell further behind with each (Rust-only).
+const CLIENT_BEHIND: usize = 4 * RING_MAX;
+
+/// What a queued line counts for besides its bytes, so a flood of tiny
+/// lines is bounded too.
+const LINE_COST: usize = 64;
+
+/// One connected client: its lines go to its writer on a queue bounded
+/// by CLIENT_BEHIND; one too far behind to catch up is let go, and
+/// reconnects for a replay. The host never waits on it.
 struct ClientConn {
-    tx: SyncSender<Arc<[u8]>>,
+    tx: Sender<Arc<[u8]>>,
+    /// Bytes queued for its writer, as CLIENT_BEHIND counts them.
+    queued: Arc<AtomicUsize>,
     stream: UnixStream,
 }
 
 impl ClientConn {
     fn push(&self, line: &Arc<[u8]>) -> bool {
-        match self.tx.try_send(line.clone()) {
-            Ok(()) => true,
-            Err(TrySendError::Full(_)) => {
-                self.close();
-                false
-            }
-            // Its writer has stopped on a failed write and said so to the
-            // client: what the client sent is still read to its end.
-            Err(TrySendError::Disconnected(_)) => false,
+        let n = line.len() + LINE_COST;
+        if self.queued.fetch_add(n, Ordering::Relaxed) + n > CLIENT_BEHIND {
+            self.close();
+            return false;
         }
+        // An error: its writer has stopped on a failed write and said so
+        // to the client; what the client sent is still read to its end.
+        self.tx.send(line.clone()).is_ok()
     }
 
     fn close(&self) {
@@ -256,8 +301,6 @@ pub(crate) struct State {
     /// prompt.
     untold: String,
     start_cwd: String,
-    /// The running process's last cost total: see turn_cost.
-    spent: f64,
     ring: Vec<Arc<[u8]>>,
     ring_n: usize,
     clients: HashMap<u64, ClientConn>,
@@ -298,6 +341,11 @@ pub(crate) struct State {
     heard: Option<Instant>,
     turn_ends: Vec<Time>,
     quit: bool,
+    /// info.json as last written, but for what changes on every message
+    /// (see INFO_EVERY), when, and the latest info not written yet.
+    info_key: Vec<u8>,
+    info_at: Option<Instant>,
+    info_owed: Option<Vec<u8>>,
     /// What the host watches of its agent: see server/agent.rs.
     w: Watching,
 }
@@ -356,6 +404,14 @@ pub fn run(id: &str) -> Result<(), String> {
     let path = crate::shim::without_shims(&std::env::var("PATH").unwrap_or_default());
     // SAFETY: the host sets its environment before it starts any thread.
     unsafe { std::env::set_var("PATH", path) };
+    if std::env::var_os(MALLOC_SET).is_some() {
+        // malloc has read it: what the host starts doesn't inherit it.
+        // SAFETY: as above.
+        unsafe {
+            std::env::remove_var(MALLOC_SET);
+            std::env::remove_var(MALLOC_VAR);
+        }
+    }
     rush_events::set_process("host");
     let r = run_with(adapter::global().clone(), Hooks::real(), id);
     crate::events::flush();
@@ -365,7 +421,9 @@ pub fn run(id: &str) -> Result<(), String> {
 /// run, with the agents reg knows and hooks: tests run a host in their own
 /// process with a fake agent.
 pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
-    let b = std::fs::read(dir(id).join("config.json")).map_err(|e| e.to_string())?;
+    let p = dir(id).join("config.json");
+    let b = std::fs::read(&p)
+        .map_err(|e| format!("open {}: {}", p.display(), crate::reload::os_err(&e)))?;
     let cfg = Config::parse(&b).map_err(|e| e.to_string())?;
     // What started it led to its start and its first message, not to all
     // it does after: its agent's lines say their own causes.
@@ -440,12 +498,18 @@ pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
         }
         (c.prompt, c.images, c.prompt_exchange)
     };
+    let ex_posted = if prompt.is_empty() && images.is_empty() {
+        None
+    } else {
+        ex.clone()
+    };
     if (!prompt.is_empty() || !images.is_empty())
         && let Err(e) = h.send_exchange(&prompt, &images, false, ex, &started)
     {
         h.shutdown(ln);
         return Err(e);
     }
+    h.to_feed(ex_posted.as_deref());
     // Imported history must be accepted by the agent before the source
     // session can be retired, even when no new prompt was supplied.
     let carry = { sh.lock().cfg.carry.is_some() };
@@ -541,7 +605,6 @@ fn build(reg: Registry, hooks: Hooks, cfg: Config) -> (Host, Receiver<Msg>) {
         began,
         untold: String::new(),
         start_cwd: String::new(),
-        spent: 0.0,
         ring: Vec::new(),
         ring_n: 0,
         clients: HashMap::new(),
@@ -576,6 +639,9 @@ fn build(reg: Registry, hooks: Hooks, cfg: Config) -> (Host, Receiver<Msg>) {
         heard: None,
         turn_ends: Vec::new(),
         quit: false,
+        info_key: Vec::new(),
+        info_at: None,
+        info_owed: None,
         w: Watching::default(),
     };
     let sh = Arc::new_cyclic(|me| Shared {
@@ -653,8 +719,12 @@ fn end_strays(reg: &Registry, kind: &str, session_id: &str) -> Vec<i32> {
 
 /// What one turn cost. A process's results carry its running total, not
 /// the turn's, so it is the rise since the last total, spent; a total
-/// below that is a new process counting from zero.
+/// below that is a new process counting from zero. No total (0) says
+/// nothing, and leaves spent as it was.
 pub fn turn_cost(spent: &mut f64, total: f64) -> f64 {
+    if total <= 0.0 {
+        return 0.0;
+    }
     let mut d = total - *spent;
     if d < 0.0 {
         d = total;
@@ -832,6 +902,10 @@ pub fn read_image(path: &str, dir: &Path) -> Result<String, String> {
     };
     let st =
         std::fs::metadata(p).map_err(|e| format!("stat {path}: {}", crate::reload::os_err(&e)))?;
+    // Found isn't readable: a screenshot's preview dropped from the corner
+    // of a Mac's screen is in a folder only the terminal may read. Said now,
+    // as it's sent, not once it's queued and every later try fails.
+    unreadable(path)?;
     let (mut path, mut size) = (path.to_string(), st.len());
     if mt == "image/png"
         && let Some(w) = to_webp(&path)
@@ -858,6 +932,16 @@ pub fn read_image(path: &str, dir: &Path) -> Result<String, String> {
         ));
     }
     Ok(path)
+}
+
+/// Err saying why the image at path can't be read, naming it.
+fn unreadable(path: &str) -> Result<(), String> {
+    std::fs::File::open(path).map(drop).map_err(|e| {
+        let base = Path::new(path)
+            .file_name()
+            .map_or_else(|| path.to_string(), |b| b.to_string_lossy().into_owned());
+        format!("can't read {base}: {}", crate::reload::os_err(&e))
+    })
 }
 
 /// A PNG, most often a screenshot, as a far smaller WebP, or None when
@@ -913,6 +997,7 @@ fn restore_sleeping_info(st: &mut State, old: &Info) {
         st.info.permission_mode = old.permission_mode.clone();
     }
     st.info.cost_usd = old.cost_usd;
+    st.info.spent_usd = old.spent_usd.clone(); // as its cost: see turn_cost
     st.info.context_tokens = old.context_tokens;
     st.info.cache_warm = old.cache_warm;
     st.info.home = old.home.clone();
@@ -958,6 +1043,25 @@ fn restore_decisions(st: &mut State, old: &Info) {
     }
 }
 
+/// info's JSON without what changes on every message: two infos with the
+/// same key differ only in those.
+fn info_key(info: &mut Info) -> Vec<u8> {
+    let kept = (
+        std::mem::take(&mut info.updated_at),
+        std::mem::take(&mut info.detail),
+        std::mem::take(&mut info.context_tokens),
+        std::mem::take(&mut info.cache_warm),
+    );
+    let key = info.to_json();
+    (
+        info.updated_at,
+        info.detail,
+        info.context_tokens,
+        info.cache_warm,
+    ) = kept;
+    key
+}
+
 fn task_ended(status: &str) -> bool {
     matches!(
         status,
@@ -973,6 +1077,7 @@ impl Host {
         {
             let mut st = self.lock();
             st.quit = true;
+            self.flush_info(&mut st);
             for c in st.clients.values() {
                 c.close();
             }
@@ -1198,7 +1303,10 @@ impl Host {
         if st.conn.is_some() {
             return Ok(());
         }
-        st.spent = 0.0; // a new process counts from zero
+        // Its conversation's running total is kept on (info.spent_usd): a
+        // resumed agent carries it on. Rust-only: Go counted every start
+        // from zero (internal/host/agent.go:52), so each restart, wake
+        // or account move added the whole conversation's cost again.
         self.leave_gone_worktree(st);
         st.start_cwd = st.cfg.cwd.clone();
         let Some(a) = self.reg.get(&st.cfg.kind) else {
@@ -1559,9 +1667,41 @@ impl Host {
         }
         self.note_state(st);
         let b = st.info.to_json();
-        let _ = crate::json::write_atomic(&dir(&st.cfg.id).join("info.json"), &b);
         let line: Arc<[u8]> = lines::info_line(&b).into();
+        self.write_info(st, b);
         self.push_all(st, &line);
+    }
+
+    /// Writes info.json, at once unless only what changes on every message
+    /// changed since it was last written within INFO_EVERY: then the latest
+    /// is written once that has passed.
+    fn write_info(&self, st: &mut State, b: Vec<u8>) {
+        let key = info_key(&mut st.info);
+        let now = Instant::now();
+        let due = st.info_at.map_or(now, |t| t + self.hooks.info_every);
+        // Idle, a reader may act on its updatedAt (a compaction checks it).
+        if key != st.info_key || now >= due || st.info.state == "idle" {
+            st.info_key = key;
+            st.info_at = Some(now);
+            st.info_owed = None;
+            let _ = crate::json::write_atomic(&dir(&st.cfg.id).join("info.json"), &b);
+            return;
+        }
+        if st.info_owed.replace(b).is_none() {
+            let h = self.clone();
+            self.timers.after(due - now, move || {
+                let mut st = h.lock();
+                h.flush_info(&mut st);
+            });
+        }
+    }
+
+    /// Writes the info owed to info.json now, if any.
+    fn flush_info(&self, st: &mut State) {
+        if let Some(b) = st.info_owed.take() {
+            st.info_at = Some(Instant::now());
+            let _ = crate::json::write_atomic(&dir(&st.cfg.id).join("info.json"), &b);
+        }
     }
 
     /// Logs the session's state when it changed since last logged.
@@ -1640,7 +1780,10 @@ impl Host {
             st.after_ask = true;
         }
         let ex = exchange.as_deref();
-        if !now && busy {
+        // A held queue holds the next turn even while idle (Rust-only: the
+        // runaway guard holds a session's next turn this way); sent now,
+        // it goes all the same.
+        if !now && (busy || st.info.queue_held) {
             if st.info.queue.is_empty() {
                 st.queued_at = Some(Instant::now());
                 let h = self.clone();
@@ -1817,11 +1960,34 @@ impl Host {
         images: &[String],
         exchange: Option<Box<Exchange>>,
     ) -> Result<(), String> {
+        // The smaller copy made when it was queued, or the image itself
+        // when that copy has gone from the session's scratch: a missing
+        // copy would fail every try to send what's queued.
         let pics: Vec<String> = images
             .iter()
-            .map(|p| st.pics.get(p).cloned().unwrap_or_else(|| p.clone()))
+            .map(|p| {
+                st.pics
+                    .get(p)
+                    .filter(|c| std::fs::metadata(c).is_ok())
+                    .cloned()
+                    .unwrap_or_else(|| p.clone())
+            })
             .collect();
-        self.deliver_inline(st, text, images, &pics, exchange, "")?;
+        // One that can't be read now never will be: sent without it, and
+        // said so, rather than failing every try and holding back all that
+        // was queued behind it.
+        let mut text = text.to_string();
+        let mut kept = Vec::with_capacity(pics.len());
+        for p in pics {
+            match unreadable(&p) {
+                Ok(()) => kept.push(p),
+                Err(e) => {
+                    self.event(st, "image-dropped", json!({"path": p, "err": e}));
+                    text.push_str(&format!("\n\n({e}, so it was left off this message.)"));
+                }
+            }
+        }
+        self.deliver_inline(st, &text, images, &kept, exchange, "")?;
         for p in images {
             st.pics.remove(p);
         }
@@ -1967,31 +2133,40 @@ impl Host {
             self.record_event(st, Event::Exchange(Box::new(received.clone())));
             self.record(st, lines::echo_line(text, images, Some(&received)));
         } else {
-            // Echo it so every client shows the message before the agent
-            // answers.
+            let mut input = text.to_string();
+            if !st.untold.is_empty() {
+                input = format!(
+                    "<system-reminder>\n{}\n</system-reminder>\n\n{input}",
+                    st.untold
+                );
+            }
+            let input = Input {
+                text: input,
+                images: pics.to_vec(),
+            };
+            // Taken first, then echoed: one the agent never got isn't
+            // drawn, so a queue that goes back after a failed send and
+            // tries again doesn't show your messages once a try. Its
+            // reader waits on the lock, so the echo still comes before
+            // the agent answers.
+            if let Err(e) = conn.send(input.clone()) {
+                let e = e.to_string();
+                self.event(
+                    st,
+                    "deliver-failed",
+                    json!({"text": clip(text), "images": images.len(), "err": e, "ev": ev, "cause": cause}),
+                );
+                return Err(e);
+            }
+            st.untold.clear();
+            self.sent(st, &input);
             self.record(st, lines::echo_line(text, images, None));
         }
         st.info.state = "working".into();
         st.info.detail.clear();
         self.publish(st);
         st.waiting = Some(Instant::now());
-        if ex.is_some() {
-            return Ok(());
-        }
-        let mut text = text.to_string();
-        if !st.untold.is_empty() {
-            text = format!(
-                "<system-reminder>\n{}\n</system-reminder>\n\n{text}",
-                st.untold
-            );
-            st.untold.clear();
-        }
-        let input = Input {
-            text,
-            images: pics.to_vec(),
-        };
-        self.sent(st, &input);
-        conn.send(input).map_err(|e| e.to_string())
+        Ok(())
     }
 
     /// Asks the agent what fills the context window, unless it can't say
@@ -2015,6 +2190,30 @@ impl Host {
         });
     }
 
+    /// Posts exchange e, one agent's message to this session, to the
+    /// feed, on its own: the host doesn't wait on the board or the model
+    /// (feed.go toFeed).
+    fn to_feed(&self, e: Option<&Exchange>) {
+        let Some(e) = e else { return };
+        if !crate::feed::postable(e) {
+            return;
+        }
+        let e = e.clone();
+        let kind = self.lock().cfg.kind.clone();
+        self.go("feed", move |h| {
+            if !rush_room::community::on() {
+                return;
+            }
+            let summer = h.hooks.feed_summer.clone();
+            crate::feed::post_exchange(
+                &h.reg,
+                &e,
+                &kind,
+                summer.as_deref().map(|f| f as &crate::feed::Summer),
+            );
+        });
+    }
+
     // ---- Ops ----
 
     /// Carries out one op from a client.
@@ -2034,14 +2233,19 @@ impl Host {
             } else {
                 self.send_exchange(&o.text, &o.images, o.now, o.exchange.clone(), &o.cause)
             };
-            // Taken: one agent's message to this one goes on the feed too
-            // (part two: the feed).
+            if r.is_ok() {
+                // Taken: one agent's message to this one, on the feed too.
+                self.to_feed(o.exchange.as_deref());
+            }
             return r;
         }
         if o.op == "exchange" {
             let Some(e) = &o.exchange else {
                 return Err("missing exchange".into());
             };
+            if e.direction == "received" {
+                self.to_feed(Some(e));
+            }
             let mut st = self.lock();
             self.record_event(&mut st, Event::Exchange(e.clone()));
             return Ok(());
@@ -2814,9 +3018,8 @@ impl Host {
         self.follow_edits(st, m);
         if let Some(t) = &m.tokens {
             st.info.cache_warm = Time::now() + CACHE_LIFE;
-            let target = self.target(st);
-            let f = self.hooks.net_answer.clone();
-            std::thread::spawn(move || f(&target, SystemTime::now()));
+            // It returns at once: what it writes, it writes on a thread.
+            (self.hooks.net_answer)(&self.target(st), SystemTime::now());
             if m.parent.is_empty() {
                 st.info.context_tokens =
                     t.input + t.cache_read + t.cache_write_5m + t.cache_write_1h;
@@ -2869,9 +3072,21 @@ impl Host {
         if e.turns > 0 || !e.text.trim().is_empty() {
             st.w.unheard = None;
         }
-        let mut spent = st.spent;
-        st.info.cost_usd += turn_cost(&mut spent, e.cost);
-        st.spent = spent;
+        // The rise in this conversation's total, kept by session id across
+        // the agent's and this host's restarts: a resumed Claude Code says
+        // its whole conversation's total, which a new conversation (a new
+        // id, a fork's, one started afresh) begins again from zero.
+        // Rust-only: Go kept the total for one process only
+        // (internal/host/agent.go:52 and :572), so every restart added the
+        // whole total again (one host said $5,117 of a $2,106 transcript).
+        let sid = st.info.session_id.clone();
+        let d = turn_cost(st.info.spent_usd.entry(sid.clone()).or_default(), e.cost);
+        st.info.cost_usd += d;
+        // Only those it can still go back to: this one and its branches.
+        let branches = &st.cfg.branches;
+        st.info
+            .spent_usd
+            .retain(|k, _| *k == sid || branches.iter().any(|b| b.session_id == *k));
         if !e.text.trim().is_empty() {
             st.waiting = None; // it said something: ours was answered
         }
@@ -3555,12 +3770,14 @@ impl Host {
     // ---- Serving a client ----
 
     fn serve(&self, nc: UnixStream) {
+        crate::sys::widen(&nc);
         let Ok((proto, mut ops, first)) = hello(&nc) else {
             return;
         };
         let id = self.lock().cfg.id.clone();
         let archived = crate::exchange_journal::read_exchanges(&id);
-        let (tx, rx) = sync_channel::<Arc<[u8]>>(4096);
+        let (tx, rx) = channel::<Arc<[u8]>>();
+        let queued = Arc::new(AtomicUsize::new(0));
         let Ok(ws) = nc.try_clone() else { return };
         let (cid, replay, info) = {
             let mut st = self.lock();
@@ -3587,14 +3804,21 @@ impl Host {
             st.next_client += 1;
             let cid = st.next_client;
             let Ok(s) = nc.try_clone() else { return };
-            st.clients.insert(cid, ClientConn { tx, stream: s });
+            st.clients.insert(
+                cid,
+                ClientConn {
+                    tx,
+                    queued: queued.clone(),
+                    stream: s,
+                },
+            );
             (cid, replay, info)
         };
         let writer = {
             let enc = (proto >= EVENTS_FROM).then(Encoder::default);
             std::thread::Builder::new()
                 .name("host-writer".into())
-                .spawn(move || write_client(ws, enc, replay, archived, info, rx))
+                .spawn(move || write_client(ws, enc, replay, archived, info, rx, &queued))
         };
         let mut buf = first;
         loop {
@@ -3638,7 +3862,8 @@ impl Host {
 }
 
 /// The client's writer: the replay, the archived exchanges and the info,
-/// then every line as it comes, a batch at a time.
+/// then every line as it comes, a batch at a time; queued counts down
+/// what it takes off rx (ClientConn::push counts it up).
 fn write_client(
     ws: UnixStream,
     mut enc: Option<Encoder>,
@@ -3646,6 +3871,7 @@ fn write_client(
     archived: Vec<Exchange>,
     info: Vec<u8>,
     rx: Receiver<Arc<[u8]>>,
+    queued: &AtomicUsize,
 ) {
     // A failed write stops the writing only: ops the client sent before
     // it went, not read yet, are still read and done (a client that
@@ -3654,7 +3880,8 @@ fn write_client(
     let close = |w: &BufWriter<UnixStream>| {
         let _ = w.get_ref().shutdown(std::net::Shutdown::Write);
     };
-    let mut w = BufWriter::with_capacity(64 << 10, ws);
+    let mut w = BufWriter::with_capacity(WRITE_BUF, ws);
+    let took = |l: &[u8]| queued.fetch_sub(l.len() + LINE_COST, Ordering::Relaxed);
     let write = |w: &mut BufWriter<UnixStream>, enc: &mut Option<Encoder>, l: &[u8]| -> bool {
         match enc {
             Some(e) => e.encode(w, l).is_ok(),
@@ -3692,6 +3919,7 @@ fn write_client(
             return;
         }
         let Ok(l) = rx.recv() else { return };
+        took(&l);
         if !write(&mut w, &mut enc, &l) {
             close(&w);
             return;
@@ -3699,6 +3927,7 @@ fn write_client(
         loop {
             match rx.try_recv() {
                 Ok(l) => {
+                    took(&l);
                     write(&mut w, &mut enc, &l);
                 }
                 Err(TryRecvError::Empty) => break,

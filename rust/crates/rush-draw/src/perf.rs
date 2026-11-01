@@ -7,9 +7,12 @@
 //! - `frame`: one per frame written to the terminal: what was handled
 //!   for it (`keys`, `msgs`, `wake`), the time spent handling (`upd`) and
 //!   drawing and writing (`draw`) in µs, how many cells changed
-//!   (`cells`), and for frames that answer input, `lat`: µs from the
+//!   (`cells`), the UI thread's CPU µs for each (`ucpu`, `dcpu`), and for frames that answer input, `lat`: µs from the
 //!   oldest key's arrival in the loop's queue to the frame written.
 //! - `mark`: the first frame whose text holds `RUSH_PERF_MARK`.
+//! - `shown <text>` / `gone <text>`: for each of `RUSH_PERF_WATCH`'s
+//!   texts (split by `|`), the frames it appears in and leaves: how long
+//!   a placeholder such as "reading…" stayed on screen.
 //!
 //! Off, it costs one load of a OnceLock per frame and per key.
 
@@ -23,6 +26,8 @@ pub(crate) struct Perf {
     file: Mutex<File>,
     mark: Option<String>,
     marked: AtomicBool,
+    /// RUSH_PERF_WATCH's texts, each with whether the last frame held it.
+    watch: Vec<(String, AtomicBool)>,
     /// The last frame's changed cells, set by the terminal.
     cells: AtomicU64,
 }
@@ -44,6 +49,12 @@ pub(crate) fn on() -> Option<&'static Perf> {
                 .ok()
                 .filter(|m| !m.is_empty()),
             marked: AtomicBool::new(false),
+            watch: std::env::var("RUSH_PERF_WATCH")
+                .unwrap_or_default()
+                .split('|')
+                .filter(|w| !w.is_empty())
+                .map(|w| (w.to_string(), AtomicBool::new(false)))
+                .collect(),
             cells: AtomicU64::new(0),
         };
         p.line(&format!(
@@ -62,6 +73,20 @@ pub(crate) fn now_us() -> u128 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_micros())
         .unwrap_or(0)
+}
+
+/// The calling thread's CPU time in microseconds: what a frame cost the
+/// UI thread, unlike wall time, steady on a busy machine.
+pub(crate) fn thread_cpu_us() -> u64 {
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: ts is a valid timespec to write into.
+    if unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut ts) } != 0 {
+        return 0;
+    }
+    ts.tv_sec as u64 * 1_000_000 + ts.tv_nsec as u64 / 1_000
 }
 
 /// When this process started, from the kernel (macOS: kinfo_proc's
@@ -111,12 +136,24 @@ impl Perf {
     /// changed, and the frame's text when a mark is still looked for.
     pub(crate) fn drawn(&self, cells: usize, text: impl FnOnce() -> String) {
         self.cells.store(cells as u64, Ordering::Relaxed);
+        let want = self.mark.is_some() && !self.marked.load(Ordering::Relaxed);
+        if !want && self.watch.is_empty() {
+            return;
+        }
+        let text = text();
         if let Some(m) = &self.mark
-            && !self.marked.load(Ordering::Relaxed)
-            && text().contains(m.as_str())
+            && want
+            && text.contains(m.as_str())
         {
             self.marked.store(true, Ordering::Relaxed);
             self.line(&format!("{} mark", now_us()));
+        }
+        for (w, was) in &self.watch {
+            let is = text.contains(w.as_str());
+            if is != was.swap(is, Ordering::Relaxed) {
+                let what = if is { "shown" } else { "gone" };
+                self.line(&format!("{} {what} {w}", now_us()));
+            }
         }
     }
 

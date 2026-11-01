@@ -658,6 +658,32 @@ impl Drop for Say {
     }
 }
 
+/// Why the runaway guard refuses new subagents and workflows now, for
+/// session (a rush id, "" for none), as the leading rush last wrote it in
+/// home's guard.json: for every session, or for that one; None when it
+/// doesn't, or no rush has looked lately.
+pub fn spawns_refused(home: &Path, now: rush_core::time::Ms, session: &str) -> Option<String> {
+    #[derive(serde::Deserialize, Default)]
+    #[serde(default)]
+    struct G {
+        refuse: String,
+        sessions: std::collections::BTreeMap<String, String>,
+        until: i64,
+    }
+    let b = std::fs::read(home.join("guard.json")).ok()?;
+    let g: G = serde_json::from_slice(&b).ok()?;
+    if now >= g.until {
+        return None;
+    }
+    if !g.refuse.is_empty() {
+        return Some(g.refuse);
+    }
+    g.sessions
+        .get(session)
+        .filter(|_| !session.is_empty())
+        .cloned()
+}
+
 /// Answers Claude Code's PreToolUse hook: a Bash call that runs a gated
 /// program comes back with its command under rush gate run, and one of
 /// more than a few commands runs as a script rush can follow and stop; the
@@ -679,6 +705,29 @@ pub fn gate_hook(ctx: &Ctx, r: &mut dyn Read, w: &mut dyn Write) {
     let Ok(mut inp) = rush_state::json::from_slice::<In>(&b) else {
         return;
     };
+    if matches!(inp.tool_name.as_str(), "Agent" | "Task" | "Workflow") {
+        // A new subagent or workflow, while the runaway guard refuses them.
+        if let Some(why) = spawns_refused(&ctx.plugin.home, rush_core::time::now(), &ctx.session) {
+            let reason = format!(
+                "The user's runaway guard is pausing new agents: {why}. Finish your current work without starting any new agents; they're allowed again once that changes."
+            );
+            let f = fields(
+                json!({"why": clip_text(&why), "tool": inp.tool_name, "tool_use_id": inp.tool_use_id}),
+            );
+            if ctx.session.is_empty() {
+                ctx.host.log("guard-refused", f);
+            } else {
+                ctx.host.log_event(&ctx.session, "guard-refused", f);
+            }
+            let out = json!({"hookSpecificOutput": {
+                "hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}});
+            if let Ok(mut b) = rush_state::json::to_vec(&out) {
+                b.push(b'\n');
+                let _ = w.write_all(&b);
+            }
+        }
+        return;
+    }
     if inp.tool_name != "Bash" {
         return;
     }
@@ -1138,6 +1187,64 @@ mod tests {
             ),
             ""
         );
+    }
+
+    // The runaway guard: a new subagent or workflow is denied with why
+    // while guard.json says so and isn't stale; anything else goes on.
+    #[test]
+    fn hook_denies_spawns_the_guard_refuses() {
+        let home = tempfile::tempdir().unwrap();
+        let c = ctx(home.path(), None, Arc::new(Fake2::default()));
+        let spawn = r#"{"tool_name":"Agent","tool_input":{"description":"x"}}"#;
+        assert_eq!(hook(&c, spawn), "", "no guard.json: it goes");
+        let now = rush_core::time::now();
+        let write = |until: i64| {
+            std::fs::write(
+                home.path().join("guard.json"),
+                format!(r#"{{"refuse":"you're away","until":{until}}}"#),
+            )
+            .unwrap()
+        };
+        write(now + 60_000);
+        for tool in ["Agent", "Task", "Workflow"] {
+            let out = hook(&c, &spawn.replace("Agent", tool));
+            assert!(
+                out.contains(r#""permissionDecision":"deny""#),
+                "{tool}: {out}"
+            );
+            assert!(
+                out.contains("The user's runaway guard is pausing new agents: you're away."),
+                "{out}"
+            );
+        }
+        assert_eq!(hook(&c, r#"{"tool_name":"Read","tool_input":{}}"#), "");
+        write(now - 1);
+        assert_eq!(hook(&c, spawn), "", "stale: it goes");
+    }
+
+    // A tripped account refuses only its own sessions' new agents, and
+    // says so plainly.
+    #[test]
+    fn hook_denies_spawns_for_a_session_on_a_tripped_account() {
+        let home = tempfile::tempdir().unwrap();
+        let mut c = ctx(home.path(), None, Arc::new(Fake2::default()));
+        let spawn = r#"{"tool_name":"Agent","tool_input":{"description":"x"}}"#;
+        let until = rush_core::time::now() + 60_000;
+        std::fs::write(
+            home.path().join("guard.json"),
+            format!(
+                r#"{{"refuse":"","sessions":{{"s1":"the account (alex) is past its pace"}},"until":{until}}}"#
+            ),
+        )
+        .unwrap();
+        c.session = "s1".into();
+        let out = hook(&c, spawn);
+        assert!(out.contains(r#""permissionDecision":"deny""#), "{out}");
+        assert!(out.contains("without starting any new agents"), "{out}");
+        c.session = "s2".into();
+        assert_eq!(hook(&c, spawn), "", "another session goes");
+        c.session = String::new();
+        assert_eq!(hook(&c, spawn), "", "no session: only a refusal for all");
     }
 
     // searchguard_test.go: a refused search is denied, with why.

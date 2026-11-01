@@ -1,0 +1,35 @@
+[package]
+name = "rush-ui-social"
+description = "rush's social screens: the feed and its graph, rooms, broadcasts, updates and reloading"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-convo.workspace = true
+rush-fleet.workspace = true
+rush-draw.workspace = true
+rush-sys.workspace = true
+rush-state.workspace = true
+rush-events.workspace = true
+rush-net.workspace = true
+rush-claude.workspace = true
+rush-update.workspace = true
+# Rooms and the feed's posts (community.go).
+rush-room = { path = "../rush-room" }
+# The social group's: efficiency's figures.
+rush-efficiency = { path = "../rush-efficiency" }
+# Push-to-talk's switch (the apple voice plugin) and yap's socket
+# (dictation.rs).
+rush-bundled = { path = "../rush-bundled" }
+# Push-to-talk's engine: rush's own helper app hearing the microphone
+# (pushtalk.rs).
+rush-voice.workspace = true
+# The frame and model under every screen.
+rush-ui-base.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }

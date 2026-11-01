@@ -130,7 +130,25 @@ fn model() -> Model {
     // As the binary does: the list names each agent through the registry.
     static REGISTER: std::sync::Once = std::sync::Once::new();
     REGISTER.call_once(|| rush_core::adapter::global().register(rush_claude::Claude::new()));
-    let mut m = Model::new("0.1.0");
+    // Times are drawn in the local zone: the snapshots are UTC's, whatever
+    // the machine's. Before any test formats a time (every test starts here).
+    static ZONE: std::sync::Once = std::sync::Once::new();
+    // SAFETY: once, ahead of every other use of the environment in this binary.
+    ZONE.call_once(|| unsafe { std::env::set_var("TZ", "UTC") });
+    // The battery and disk as the snapshots show them, whatever the
+    // machine's.
+    rush_sys::sysinfo::pin(
+        rush_sys::sysinfo::Battery {
+            present: true,
+            percent: 80,
+            charging: false,
+        },
+        rush_sys::sysinfo::Disk {
+            free: 37 << 30,
+            total: 500 << 30,
+        },
+    );
+    let mut m = rush_ui::new_model("0.1.0");
     m.clock = Some(NOW);
     m.launch_dir = "/src/checkout".into();
     let agents = fixture();
@@ -140,6 +158,7 @@ fn model() -> Model {
         roots,
         previews: HashMap::new(),
         priced: true,
+        accounts: Vec::new(),
     });
     m
 }
@@ -168,13 +187,14 @@ fn list_at_120() {
     let f = plain(&mut m, 120, 40, &[]);
     snapshot("list_120x40", &f);
     let rows: Vec<&str> = f.lines().collect();
-    assert!(rows[0].contains("rush   ● 1 needs you [ctrl+n] next   ✻ 2 working   3 finished"));
-    assert!(rows[6].starts_with("  AGENTS▾"));
-    assert!(rows[6].ends_with("RUNNING   CPU    RAM TOKENS    COST   TIME"));
+    assert!(rows[0].contains("rush   ● 1 needs you   ✻ 2 working"));
+    assert!(!rows[0].contains("finished"));
+    assert!(rows[3].starts_with("  AGENTS▾"));
+    assert!(rows[3].ends_with("RUNNING   CPU    RAM TOKENS    COST   TIME"));
     // What needs you floats to the top, picked.
-    assert_eq!(rows[7].trim_end(), "┃ Needs you  1 · $0.19");
-    assert!(rows[8].starts_with("▌ └─ ? fix the flaky tax rounding test ✻ Claude Co…"));
-    assert!(rows[8].contains("asks: Round half up,…"));
+    assert_eq!(rows[4].trim_end(), "┃ Needs you  1 · $0.19");
+    assert!(rows[5].starts_with("▌ └─ ? fix the flaky tax rounding test ✻ Claude Co…"));
+    assert!(rows[5].contains("asks: Round half up,…"));
     assert!(f.contains("┃ Working  2 · $5.72"));
     assert!(f.contains(" ▸ Earlier  1 · $0.42"));
 }
@@ -184,7 +204,7 @@ fn narrow_lists_stack_and_drop_columns() {
     let mut m = model();
     let f = plain(&mut m, 70, 30, &[]);
     snapshot("list_70x30", &f);
-    let head = f.lines().nth(6).unwrap();
+    let head = f.lines().nth(3).unwrap();
     assert!(!head.contains("CPU") && !head.contains("TOKENS") && !head.contains("LATEST"));
     assert!(head.contains("RAM") && head.contains("COST") && head.contains("TIME"));
     // Stacked: the question hangs under its name.
@@ -576,4 +596,151 @@ fn a_rendered_session_counts_its_hosted_agents_changes() {
     let f = plain(&mut m, 120, 30, &[]);
     assert!(f.contains("round.go"), "{f}");
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A wide session keeps the conversation at its reading width and runs
+/// the column beside it from the top: the decisions not answered, the
+/// tool at work, what changed. Narrower, there's no column (the 120x40
+/// snapshot).
+#[test]
+fn a_wide_session_has_the_column_beside_it() {
+    let dir = std::env::temp_dir().join(format!("rush-ui-render-side-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("s.jsonl");
+    std::fs::write(
+        &path,
+        [
+            r#"{"type":"user","timestamp":"2026-10-28T12:00:00Z","cwd":"/src/checkout","message":{"role":"user","content":"fix the rounding"}}"#,
+            r#"{"type":"assistant","timestamp":"2026-10-28T12:00:02Z","message":{"id":"m1","model":"claude-opus-5-5","role":"assistant","content":[{"type":"tool_use","id":"e1","name":"Edit","input":{"file_path":"/src/checkout/tax/round.go","old_string":"a\n","new_string":"b\nc\n"}}],"usage":{"input_tokens":5,"output_tokens":3}}}"#,
+            r#"{"type":"user","timestamp":"2026-10-28T12:00:05Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e1","content":"ok","is_error":false}]}}"#,
+            r#"{"type":"assistant","timestamp":"2026-10-28T12:00:08Z","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"Rounded.\n\nDecisions:\n1. **Rounding mode:** banks differ. (a) half up: as the old code; (b) half even: as the spec.\nMy picks: 1b."}]}}"#,
+            r#"{"type":"system","subtype":"turn_duration","timestamp":"2026-10-28T12:00:09Z"}"#,
+            r#"{"type":"user","timestamp":"2026-10-28T12:00:20Z","message":{"role":"user","content":"run the tests meanwhile"}}"#,
+            r#"{"type":"assistant","timestamp":"2026-10-28T12:00:22Z","message":{"id":"m3","role":"assistant","content":[{"type":"tool_use","id":"b1","name":"Bash","input":{"command":"cargo test","description":"Run the tests"}}],"usage":{"input_tokens":5,"output_tokens":3}}}"#,
+        ]
+        .join("\n")
+            + "\n",
+    )
+    .unwrap();
+    let mut m = model();
+    let i = m.agents.iter().position(|a| a.job.id == "d4").unwrap();
+    m.agents[i].job.transcript_path = path.to_string_lossy().into_owned();
+    m.agents[i].job.state = State::Working;
+    m.sel = m.agents[i].key.clone();
+    let f = plain(&mut m, 260, 60, &[(Key::Enter, KeyMods::NONE)]);
+    snapshot("snap_session_side_260x60", &f);
+    let rows: Vec<&str> = f.lines().collect();
+    let at = |what: &str| {
+        rows.iter()
+            .position(|r| r.contains(what))
+            .unwrap_or_else(|| panic!("no {what:?} in\n{f}"))
+    };
+    let (dec, run, chg) = (
+        at("Decisions  not answered"),
+        at(" Running  1 step"),
+        at("▌ Changes"),
+    );
+    assert!(dec < run && run < chg, "{f}");
+    assert!(rows[dec + 1].contains("1. Rounding mode"), "{f}");
+    assert!(rows[run + 1].contains("Run the tests  cargo"), "{f}");
+    assert!(rows[chg + 1].contains("tax/round.go"), "{f}");
+    // The column starts on the conversation's second row, not at its foot.
+    let head = rows
+        .iter()
+        .position(|r| r.contains("Conversation"))
+        .unwrap();
+    assert!(dec <= head + 4, "{f}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// ---- fixed-fixture snapshots for the crate split ----
+//
+// Every view below is drawn from the fixture fleet at three sizes, on a
+// clock that stands still, in the throwaway home. They are the exact-match
+// check each step of splitting rush-ui into crates must pass unchanged;
+// UPDATE_SNAPSHOTS=1 writes them again.
+
+const SIZES: [(u16, u16); 3] = [(80, 24), (120, 40), (200, 50)];
+
+/// Draws one view at every size, each from a fresh model, as
+/// `name_WxH`.
+fn views(name: &str, setup: impl Fn(&mut Model), keys: &[(Key, KeyMods)]) {
+    for (w, h) in SIZES {
+        let mut m = model();
+        setup(&mut m);
+        let f = plain(&mut m, w, h, keys);
+        snapshot(&format!("{name}_{w}x{h}"), &f);
+    }
+}
+
+#[test]
+fn snapshot_list() {
+    views("snap_list", |_| {}, &[]);
+}
+
+#[test]
+fn snapshot_session() {
+    // The transcript's folder is never drawn; the name is fixed so the
+    // frame can't depend on the process.
+    let dir = std::env::temp_dir().join(format!("rush-ui-snap-session-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("s.jsonl");
+    std::fs::write(
+        &path,
+        [
+            r#"{"type":"user","timestamp":"2026-10-28T12:00:00Z","cwd":"/src/checkout","message":{"role":"user","content":"fix the test"}}"#,
+            r#"{"type":"assistant","timestamp":"2026-10-28T12:00:02Z","message":{"id":"m1","model":"claude-opus-5-5","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cargo test"}}],"usage":{"input_tokens":5,"output_tokens":3}}}"#,
+            r#"{"type":"user","timestamp":"2026-10-28T12:00:09Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok","is_error":false}]},"toolUseResult":{"stdout":"ok","stderr":""}}"#,
+            r#"{"type":"assistant","timestamp":"2026-10-28T12:00:12Z","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"Fixed it."}]}}"#,
+            r#"{"type":"system","subtype":"turn_duration","timestamp":"2026-10-28T12:00:13Z"}"#,
+        ]
+        .join("\n")
+            + "\n",
+    )
+    .unwrap();
+    let p = path.to_string_lossy().into_owned();
+    views(
+        "snap_session",
+        |m| {
+            let i = m.agents.iter().position(|a| a.job.id == "d4").unwrap();
+            m.agents[i].job.transcript_path = p.clone();
+            m.sel = m.agents[i].key.clone();
+        },
+        &[(Key::Enter, KeyMods::NONE)],
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn snapshot_projects() {
+    // "." goes to the next place.
+    views(
+        "snap_projects",
+        rush_ui::screens::projects_machine::freeze,
+        &[(Key::Char('.'), KeyMods::NONE)],
+    );
+}
+
+#[test]
+fn snapshot_settings_general() {
+    views(
+        "snap_settings_general",
+        |m| {
+            rush_ui::screens::settings::set_settings_page(
+                m,
+                rush_ui::screens::settings::PAGE_GENERAL,
+            )
+        },
+        &[],
+    );
+}
+
+#[test]
+fn snapshot_command_bar() {
+    views("snap_ctrl_k", |_| {}, &[(Key::Char('k'), KeyMods::CTRL)]);
+}
+
+#[test]
+fn snapshot_key_help() {
+    views("snap_key_help", |_| {}, &[(Key::Char('?'), KeyMods::NONE)]);
 }

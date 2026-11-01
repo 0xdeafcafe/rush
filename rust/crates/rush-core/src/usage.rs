@@ -86,6 +86,14 @@ pub const JOB: &str = "Other agents' limits";
 
 const HOUR_MS: f64 = 3_600_000.0;
 
+/// Claude's 5-hour and weekly windows, by Anthropic's names for them.
+pub const FIVE_HOUR: &str = "five_hour";
+pub const SEVEN_DAY: &str = "seven_day";
+
+/// What a screen says where a plan without a 5-hour limit would have its
+/// 5-hour meter.
+pub const NO_FIVE_HOUR: &str = "no 5-hour limit";
+
 /// One limit an account's plan puts on it: Claude's five hours or week,
 /// Codex's primary or secondary, Copilot's month of premium requests.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -342,9 +350,30 @@ impl Quota {
         self.tightest(model).map_or(0.0, |w| w.percent)
     }
 
+    /// Its longest window that limits every model: the one whose room has
+    /// to last, a week for most plans (Claude's seven_day, Codex's
+    /// secondary, Copilot's month). The runaway guard paces it.
+    pub fn weekly(&self) -> Option<&Window> {
+        let mut out: Option<&Window> = None;
+        for w in &self.windows {
+            if w.scope.models.is_empty() && out.is_none_or(|o| w.span > o.span) {
+                out = Some(w);
+            }
+        }
+        out
+    }
+
     /// The window called id, if the reading has it.
     pub fn window(&self, id: &str) -> Option<&Window> {
         self.windows.iter().find(|w| w.id == id)
+    }
+
+    /// Whether it's a Claude plan without a 5-hour limit, as Anthropic's
+    /// top plan is: its weekly window read and no 5-hour one. Rush's
+    /// decisions need nothing of it, as they go by the windows there are;
+    /// a screen that has a place for the 5-hour meter says NO_FIVE_HOUR.
+    pub fn no_five_hour(&self) -> bool {
+        self.window(FIVE_HOUR).is_none() && self.window(SEVEN_DAY).is_some()
     }
 
     /// Empties the windows that have reset since the reading was made:
@@ -715,8 +744,8 @@ pub struct ContextToolUses {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Start {
-    #[serde(with = "wire::time")]
-    pub at: Ms,
+    /// When it started, as written: Go's local time kept as it wrote it.
+    pub at: wire::Stamp,
     #[serde(skip_serializing_if = "Vec::is_empty", with = "wire::nullvec")]
     pub tools: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty", with = "wire::nullvec")]
@@ -774,8 +803,7 @@ pub fn parts_of(u: &Context) -> BTreeMap<String, i64> {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Change {
-    #[serde(with = "wire::time")]
-    pub at: Ms,
+    pub at: wire::Stamp,
     #[serde(
         rename = "toolsAdded",
         skip_serializing_if = "Vec::is_empty",
@@ -854,7 +882,7 @@ impl Change {
 pub fn diff(was: Option<&Start>, now: Option<&Start>) -> Option<Change> {
     let (was, now) = (was?, now?);
     let mut c = Change {
-        at: now.at,
+        at: now.at.clone(),
         ..Change::default()
     };
     if !was.tools.is_empty() && !now.tools.is_empty() {
@@ -1282,7 +1310,7 @@ mod tests {
             },
         )]);
         let start = Start {
-            at,
+            at: at.into(),
             parts: Some(BTreeMap::from([("b".to_string(), 1), ("a".to_string(), 2)])),
             ..Start::default()
         };

@@ -22,6 +22,7 @@ mod spawn;
 pub(crate) mod style;
 pub(crate) mod txt;
 mod udiff;
+mod units;
 
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -30,8 +31,10 @@ use rush_core::text::Line;
 use rush_core::time::Ms;
 
 pub use cards::ENTITY_REF;
+pub use code::{set_show_whitespace, show_whitespace};
 pub use codedoc::{code_rows, is_code};
-pub use decisions::{decisions_on_card, decisions_ref, decisions_sent};
+pub use decisions::{decisions_on_card, decisions_ref, decisions_sent, open_decisions};
+pub use draw::presets::check_names;
 pub use draw::{OWNER_SEP, each_paste, image_label, paste_chip};
 pub use draw::{drawing, fold_pastes};
 pub use markdown::{answer_lines, link_target, markdown_lines};
@@ -71,6 +74,24 @@ pub fn code_line(
     code::highlight(code::lang_for(name), st, s, base, None).into_line()
 }
 
+/// A line of a diff in the language of file name over base, its spaces
+/// and tabs marked as · and →, cut to w cells with a › (render.go:4115
+/// diffText, when showSpace is on).
+pub fn marked_code_line(
+    name: &str,
+    st: &mut rush_hl::State,
+    s: &str,
+    base: rush_core::text::Style,
+    w: usize,
+) -> Line {
+    let t = code::paint_code(code::lang_for(name), st, s, base, None, true);
+    let w = w.max(4);
+    if t.width() <= w {
+        return t.into_line();
+    }
+    t.take(w - 1).and(txt::Txt::styled("›", base)).into_line()
+}
+
 use crate::model::{Item, Session, StepId};
 use draw::{Drawer, message_tool, squeezed, waiting};
 pub(crate) use draw::{glyph_for, hidden};
@@ -98,6 +119,80 @@ pub enum Depth {
     Runs,
 }
 
+/// Which way the conversation is shown, one for every session (the
+/// config's convoView): Normal as it always was; Chat only what's said and
+/// asked; Code the edits as diffs and the checks a line each; CatchUp a
+/// card per turn; Trail the steps a line each. Each draws the same
+/// parsed turns, a turn at a time, so a long conversation costs what a
+/// screen of it does whichever is picked.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Preset {
+    #[default]
+    Normal,
+    Chat,
+    Code,
+    CatchUp,
+    Trail,
+}
+
+impl Preset {
+    /// Every one, in the order the key goes through them.
+    pub const ALL: [Preset; 5] = [
+        Preset::Normal,
+        Preset::Chat,
+        Preset::Code,
+        Preset::CatchUp,
+        Preset::Trail,
+    ];
+
+    /// Its name as the config keeps it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Preset::Normal => "normal",
+            Preset::Chat => "chat",
+            Preset::Code => "code",
+            Preset::CatchUp => "catch-up",
+            Preset::Trail => "trail",
+        }
+    }
+
+    /// Its name as the screen shows it.
+    pub fn title(self) -> &'static str {
+        match self {
+            Preset::Normal => "Normal",
+            Preset::Chat => "Chat",
+            Preset::Code => "Code",
+            Preset::CatchUp => "Catch-up",
+            Preset::Trail => "Trail",
+        }
+    }
+
+    /// What it shows, in a few words.
+    pub fn about(self) -> &'static str {
+        match self {
+            Preset::Normal => "everything, as usual",
+            Preset::Chat => "only what's said and asked",
+            Preset::Code => "the code written, and the checks",
+            Preset::CatchUp => "a card per turn",
+            Preset::Trail => "every step, a line each",
+        }
+    }
+
+    /// The one named s; Normal for "" or a name it doesn't know.
+    pub fn from_name(s: &str) -> Preset {
+        Preset::ALL
+            .into_iter()
+            .find(|p| p.name() == s)
+            .unwrap_or_default()
+    }
+
+    /// The one after it, back to Normal after the last.
+    pub fn next(self) -> Preset {
+        let i = Preset::ALL.iter().position(|p| *p == self).unwrap_or(0);
+        Preset::ALL[(i + 1) % Preset::ALL.len()]
+    }
+}
+
 /// How to draw.
 #[derive(Clone, Debug, Default)]
 pub struct Options {
@@ -113,6 +208,8 @@ pub struct Options {
     /// ctrl+o: open everything, trim nothing.
     pub verbose: bool,
     pub depth: Depth,
+    /// Which way the conversation is shown.
+    pub preset: Preset,
     pub selected: String,
     pub focused: bool,
     /// Rows may run the whole width, past CAP_ROW.
@@ -121,6 +218,10 @@ pub struct Options {
     pub history_open: bool,
     /// The live line is drawn elsewhere.
     pub hide_activity: bool,
+    /// The live line is the pane's docked one (activity.go:13): a running
+    /// or waiting step is named on it, with the turn's time, as its own
+    /// row may be folded or scrolled away.
+    pub dock_activity: bool,
     /// No rule in the gutter.
     pub no_rule: bool,
     /// Who answers under your messages, and what it is (its heading).
@@ -206,6 +307,7 @@ impl Options {
             self.zone_at,
         )
             .hash(&mut h);
+        (self.dock_activity, code::show_whitespace(), self.preset).hash(&mut h);
         let mut ran: Vec<_> = self.ran.iter().collect();
         ran.sort();
         ran.hash(&mut h);
@@ -261,6 +363,8 @@ struct Slot {
     /// Its rows estimated, open and gone past, for before it's drawn.
     est: (usize, usize),
     lines: Option<Vec<RenderedLine>>,
+    /// Its parts as last drawn, while it's drawn open (the unit memo).
+    units: units::Units,
     fast: bool,
     /// The window that last drew or showed it, for letting go of the
     /// longest unused first.
@@ -371,6 +475,10 @@ impl Renderer {
         if let Some(h) = slot.height {
             return h;
         }
+        // Another view draws each turn one way, whatever its folds.
+        if o.preset != Preset::Normal {
+            return slot.est.0;
+        }
         let t = &s.turns[i];
         let r = format!("t{}", t.n);
         let mut open = o.history_open
@@ -471,7 +579,15 @@ impl Renderer {
         let k = self.key(s, o, i, latest, folds);
         let slot = &self.slots[i];
         if slot.key.as_ref() != Some(&k) || slot.lines.is_none() {
-            let (lines, fast) = draw_turn(s, o, &self.places, i, k.latest, k.recent);
+            let (lines, fast) = draw_turn(
+                s,
+                o,
+                &self.places,
+                i,
+                k.latest,
+                k.recent,
+                &mut self.slots[i].units,
+            );
             let slot = &mut self.slots[i];
             self.kept = self.kept + lines.len() - slot.lines.as_ref().map_or(0, Vec::len);
             if slot.height != Some(lines.len()) {
@@ -507,6 +623,7 @@ impl Renderer {
                 break;
             }
             if let Some(ls) = self.slots[i].lines.take() {
+                self.slots[i].units.clear();
                 self.kept -= ls.len();
             }
         }
@@ -642,6 +759,7 @@ impl Renderer {
             if i < self.lo || i >= self.hi {
                 // Measuring keeps no rows.
                 if let Some(ls) = self.slots[i].lines.take() {
+                    self.slots[i].units.clear();
                     self.kept -= ls.len();
                 }
             }
@@ -732,6 +850,10 @@ impl RowIndex {
 /// gone past, a row a run of plain steps and one for each step that stays
 /// out of a run (Go's estimate, window.go).
 fn estimate(s: &Session, o: &Options, i: usize) -> (usize, usize) {
+    if o.preset != Preset::Normal {
+        let n = presets_estimate(s, o, i);
+        return (n, n);
+    }
     let t = &s.turns[i];
     let w = 20
         .max(o.width.min(o.prose_cap()).saturating_sub(GUTTER))
@@ -781,6 +903,37 @@ fn estimate(s: &Session, o: &Options, i: usize) -> (usize, usize) {
         }
     }
     (open, past)
+}
+
+/// How many rows turn i takes in another view, before it's drawn: a card
+/// for catch-up, a row a step for the trail, what's said for the rest.
+fn presets_estimate(s: &Session, o: &Options, i: usize) -> usize {
+    let t = &s.turns[i];
+    let w = 20
+        .max(o.width.min(o.prose_cap()).saturating_sub(GUTTER))
+        .max(1);
+    let lines = |x: &str| x.matches('\n').count() + x.len() / w;
+    let steps = || {
+        t.items
+            .iter()
+            .filter(|it| matches!(it, Item::Step(_)))
+            .count()
+    };
+    match o.preset {
+        Preset::CatchUp => 8,
+        Preset::Trail => 2 + steps(),
+        _ => {
+            let mut n = 4 + lines(&t.prompt);
+            for it in &t.items {
+                match it {
+                    Item::Text { text, .. } => n += 2 + lines(text).min(6),
+                    Item::Step(_) if o.preset == Preset::Code => n += 1,
+                    _ => {}
+                }
+            }
+            n
+        }
+    }
 }
 
 /// The fold and view overrides grouped by the turn they're in.
@@ -883,21 +1036,36 @@ fn draw_turn(
     i: usize,
     latest: Option<StepId>,
     recent: bool,
+    units: &mut units::Units,
 ) -> (Vec<RenderedLine>, bool) {
     let t = &s.turns[i];
     let mut d = Drawer::new(s, t, o, p);
     d.latest = latest;
     d.first = i == 0;
     let r = d.r.clone();
+    if o.preset != Preset::Normal {
+        d.ti = i;
+        d.preset(o.preset);
+        squeezed(&mut d.lines);
+        units.clear();
+        return (std::mem::take(&mut d.lines), d.fast);
+    }
     let mut open = recent || t.live || !t.err.is_empty() || waiting(s, t);
     if let Some(v) = o.open.get(&r) {
         open = *v;
     }
     if open {
+        // Drawn part by part through the unit memo: a turn on the clock
+        // redraws every frame, and only what runs in it is drawn anew
+        // (render.go:345).
+        d.ctx = Some(d.unit_ctx());
+        d.units = Some(units);
         d.open();
     } else if o.open.contains_key(&r) {
+        units.clear();
         d.folded();
     } else {
+        units.clear();
         d.settled();
     }
     squeezed(&mut d.lines);
