@@ -6,7 +6,9 @@
 //! clipimage.go (withMarks :127).
 
 use std::collections::HashMap;
-use std::sync::LazyLock;
+use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Once};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use regex::Regex;
 
@@ -36,10 +38,11 @@ pub struct ImageRefs {
 }
 
 impl ImageRefs {
-    /// Keeps an image file and returns the marker that stands for it.
+    /// Keeps an image file and returns the marker that stands for it. The
+    /// file is read right away, into rush's own copy (see keep).
     pub fn add(&mut self, path: &str) -> String {
         self.n += 1;
-        self.path.insert(self.n, path.to_string());
+        self.path.insert(self.n, keep(path));
         image_marker(self.n)
     }
 
@@ -143,6 +146,69 @@ impl ImageRefs {
     }
 }
 
+/// Where attached images are copied to as they're attached.
+pub fn attached_dir() -> PathBuf {
+    rush_state::dir().join("attached")
+}
+
+/// How long a copy is kept: long past any message it was for.
+const KEEP_FOR: Duration = Duration::from_secs(7 * 24 * 3600);
+
+/// path's image copied into rush's own folder, under its own name, as it's
+/// attached. What a terminal is handed may be readable only by it, and
+/// only for now: a screenshot's preview dropped from the corner of a Mac's
+/// screen lives in screencaptureui's private folder, which the session's
+/// host is refused (EPERM) and which goes once the preview is saved. A
+/// copy rush owns is there when the message goes, whoever sends it. One
+/// that can't be copied stays the file it was. A copy is a clone on APFS,
+/// so this costs nothing even for a big image.
+pub fn keep(path: &str) -> String {
+    keep_in(path, &attached_dir())
+}
+
+fn keep_in(path: &str, dir: &Path) -> String {
+    let src = Path::new(path);
+    if src.starts_with(dir) {
+        return path.to_string();
+    }
+    let (Some(name), Ok(meta)) = (src.file_name(), std::fs::metadata(src)) else {
+        return path.to_string();
+    };
+    if !meta.is_file() {
+        return path.to_string();
+    }
+    static PRUNED: Once = Once::new();
+    PRUNED.call_once(|| prune(dir));
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let to = dir.join(format!("{:x}-{}", stamp, std::process::id()));
+    let out = to.join(name);
+    if std::fs::create_dir_all(&to).is_err() || std::fs::copy(src, &out).is_err() {
+        let _ = std::fs::remove_dir_all(&to);
+        return path.to_string();
+    }
+    out.to_string_lossy().into_owned()
+}
+
+/// Takes away copies older than KEEP_FOR.
+fn prune(dir: &Path) {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in rd.flatten() {
+        let old = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > KEEP_FOR);
+        if old {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
+}
+
 /// An image's name in a box: its file's, cut short when long, with nothing
 /// in it that would end the chip early.
 pub fn chip_name(path: &str) -> String {
@@ -185,4 +251,28 @@ pub fn with_marks(buf: &[char], pos: usize, r: &mut ImageRefs, imgs: &[String]) 
 #[derive(Default)]
 pub struct ClipState {
     pub pasting: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::keep_in;
+
+    // Rust-only: an attached image is copied as it's attached, under its
+    // own name, so the message has it whatever happens to the original; one
+    // that can't be copied, or is already the copy, stays as it is.
+    #[test]
+    fn keep_copies_as_attached() {
+        let d = tempfile::tempdir().unwrap();
+        let to = d.path().join("attached");
+        let src = d.path().join("Screenshot 1.png");
+        std::fs::write(&src, "png").unwrap();
+        let got = keep_in(&src.to_string_lossy(), &to);
+        assert!(got.starts_with(&*to.to_string_lossy()), "{got}");
+        assert!(got.ends_with("/Screenshot 1.png"), "{got}");
+        std::fs::remove_file(&src).unwrap();
+        assert_eq!(std::fs::read(&got).unwrap(), b"png");
+        assert_eq!(keep_in(&got, &to), got);
+        let gone = d.path().join("gone.png").to_string_lossy().into_owned();
+        assert_eq!(keep_in(&gone, &to), gone);
+    }
 }

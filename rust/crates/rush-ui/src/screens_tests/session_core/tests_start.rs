@@ -464,7 +464,11 @@ fn images_dropped_on_the_box_start_with_the_session() {
     assert_eq!(typed(&mut m, " here"), Out::Draw);
     let s = fake.starts.lock().unwrap()[0].clone();
     assert_eq!(s.prompt, "what's [Image #1] [Image #2] here");
-    assert_eq!(s.images, vec![a, b]);
+    let _ = (a, b);
+    assert_eq!(
+        super::tests_drops::kept_names(&s.images),
+        ["Screen Shot 1.png", "b.jpg"]
+    );
     assert!(m.imgs.path.is_empty(), "the box lets its images go");
 }
 

@@ -3,12 +3,14 @@
 //! limit. No terminal or platform code: the UI hands in what it sees and
 //! does what [`plan`] says.
 //!
-//! - Pace, per account: its fair share is the weekly room left over the
-//!   time to the weekly reset; its burn is how much of the week it used
-//!   over the last few hours, from the plan's own readings (every machine
-//!   and session on the account, priced by Anthropic). Past `warn` times
-//!   its fair share it warns, past `trip` it trips, and it stays tripped
-//!   until it's back under `release`.
+//! - Pace, per account: its own share is the weekly room left over the
+//!   hours you'll work before the weekly reset (`PaceCfg::day` a day, not
+//!   round the clock); its fair share adds what the agent's other
+//!   accounts leave unused, as work can move there. Its burn is how much
+//!   of the week it used over the last few hours, from the plan's own
+//!   readings (every machine and session on the account). Past `warn`
+//!   times its fair share it warns, past `trip` it trips, and it stays
+//!   tripped until it's back under `release`.
 //! - The agent cap: at most so many agents working at once. A session's
 //!   turn counts 1, and each subagent and workflow run it has going 1
 //!   more; background shells don't count.
@@ -156,6 +158,9 @@ pub struct PaceCfg {
     pub window: Ms,
     /// Less than this much of it read says nothing yet.
     pub least: Ms,
+    /// How long a day you use the accounts: a week's room is spread over
+    /// these hours, not every hour to the reset.
+    pub day: Ms,
 }
 
 impl Default for PaceCfg {
@@ -166,6 +171,7 @@ impl Default for PaceCfg {
             release: 1.2,
             window: 2 * HOUR,
             least: 30 * MIN,
+            day: 24 * HOUR,
         }
     }
 }
@@ -187,6 +193,9 @@ pub struct Pace {
     /// How fast it's using its week, and how fast it may: percent an hour.
     pub burn: f64,
     pub fair: f64,
+    /// Its own share, from its room and reset alone; fair is this plus
+    /// what its agent's other accounts leave unused.
+    pub own: f64,
     /// burn over fair.
     pub ratio: f64,
     pub level: Level,
@@ -198,16 +207,70 @@ pub struct Pace {
     pub resets_at: Ms,
 }
 
+/// The hours you work in the next h hours, working day hours a day: today's
+/// run of up to a day first (you're working now), then that share of the
+/// rest.
+fn work_hours(h: f64, day: Ms) -> f64 {
+    let d = (day as f64 / HOUR as f64).clamp(1.0, 24.0);
+    (h * d / 24.0).max(h.min(d))
+}
+
 /// How fast a week used to week% may be used from at to its reset at
-/// resets_at, in percent an hour.
-fn fair(week: f64, resets_at: Ms, at: Ms) -> f64 {
-    let hours = ((resets_at - at) as f64 / HOUR as f64).max(0.25);
+/// resets_at, in percent a working hour.
+fn fair(week: f64, resets_at: Ms, at: Ms, day: Ms) -> f64 {
+    let hours = work_hours(((resets_at - at) as f64 / HOUR as f64).max(0.25), day);
     (100.0 - week).max(0.0) / hours
+}
+
+/// What one account lends the others of its agent: the share it leaves
+/// unused, at most a fresh week's (room about to reset only helps by
+/// moving work onto it, which is weighed apart).
+fn unused(p: &Pace, day: Ms) -> f64 {
+    let week = 100.0 / work_hours(7.0 * 24.0, day);
+    (p.own.min(week) - p.burn).max(0.0)
+}
+
+/// One account to pace with the others: its id (kind:login), readings,
+/// whether it had tripped, and whether its share counts for the others
+/// (not someone else's, not out of a real limit).
+pub struct ToPace<'a> {
+    pub id: &'a str,
+    pub v: &'a [Sample],
+    pub was_over: bool,
+    pub shares: bool,
+}
+
+/// Every account's pace at now, each one's fair share counting what the
+/// other accounts of its agent leave unused.
+pub fn pace_all(xs: &[ToPace], c: &PaceCfg, now: Ms) -> Vec<Pace> {
+    let alone: Vec<Pace> = xs.iter().map(|x| pace(x.v, c, x.was_over, now)).collect();
+    let kind = |id: &str| id.split(':').next().unwrap_or("").to_string();
+    xs.iter()
+        .enumerate()
+        .map(|(i, x)| {
+            let extra: f64 = xs
+                .iter()
+                .enumerate()
+                .filter(|(j, y)| *j != i && y.shares && kind(y.id) == kind(x.id))
+                .map(|(j, _)| unused(&alone[j], c.day))
+                .sum();
+            if extra > 0.0 {
+                pace_with(x.v, c, x.was_over, extra, now)
+            } else {
+                alone[i]
+            }
+        })
+        .collect()
 }
 
 /// An account's pace from its week's readings v, at now; was_over says it
 /// had tripped and not yet come back under release.
 pub fn pace(v: &[Sample], c: &PaceCfg, was_over: bool, now: Ms) -> Pace {
+    pace_with(v, c, was_over, 0.0, now)
+}
+
+/// pace, with extra percent an hour lent by the agent's other accounts.
+fn pace_with(v: &[Sample], c: &PaceCfg, was_over: bool, extra: f64, now: Ms) -> Pace {
     let Some(last) = v.iter().rev().find(|s| s.0 <= now) else {
         return Pace::default();
     };
@@ -219,7 +282,8 @@ pub fn pace(v: &[Sample], c: &PaceCfg, was_over: bool, now: Ms) -> Pace {
     if last.2 == 0 || last.2 <= now {
         return p; // a week rush doesn't know the end of, or one just over
     }
-    p.fair = fair(last.1, last.2, now);
+    p.own = fair(last.1, last.2, now, c.day);
+    p.fair = p.own + extra;
     let base = v.iter().rposition(|s| s.0 <= now - c.window).unwrap_or(0);
     let span = now - v[base].0;
     if span < c.least {
@@ -243,7 +307,7 @@ pub fn pace(v: &[Sample], c: &PaceCfg, was_over: bool, now: Ms) -> Pace {
         Level::Under
     };
     if p.level == Level::Over {
-        p.frees_at = frees_at(&us, used, &p, c);
+        p.frees_at = frees_at(&us, used, &p, extra, c);
     }
     p
 }
@@ -251,7 +315,7 @@ pub fn pace(v: &[Sample], c: &PaceCfg, was_over: bool, now: Ms) -> Pace {
 /// When an account over its pace is back under release, if it uses no
 /// more: as each use ages out of the window its burn drops, and as its
 /// reset nears its fair share grows. Its reset at the latest.
-fn frees_at(us: &[(Ms, f64)], used: f64, p: &Pace, c: &PaceCfg) -> Ms {
+fn frees_at(us: &[(Ms, f64)], used: f64, p: &Pace, extra: f64, c: &PaceCfg) -> Ms {
     let mut left = used;
     let hours = c.window as f64 / HOUR as f64;
     for (at, d) in us {
@@ -260,7 +324,7 @@ fn frees_at(us: &[(Ms, f64)], used: f64, p: &Pace, c: &PaceCfg) -> Ms {
         if t >= p.resets_at {
             return p.resets_at;
         }
-        if left / hours < c.release * fair(p.week, p.resets_at, t) {
+        if left / hours < c.release * (fair(p.week, p.resets_at, t, c.day) + extra) {
             return t;
         }
     }
@@ -273,7 +337,7 @@ fn frees_at(us: &[(Ms, f64)], used: f64, p: &Pace, c: &PaceCfg) -> Ms {
 /// lost if it isn't used; on one that resets in 6 days it has to last.
 fn spare(p: &Pace, now: Ms) -> f64 {
     let hours = ((p.resets_at - now) as f64 / HOUR as f64).max(0.25);
-    (p.fair - p.burn).max(0.0) / (1.0 + hours / 24.0)
+    (p.own - p.burn).max(0.0) / (1.0 + hours / 24.0)
 }
 
 /// An account's agent kind, from its id (kind:id).

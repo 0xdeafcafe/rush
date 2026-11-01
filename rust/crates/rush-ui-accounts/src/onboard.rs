@@ -14,7 +14,6 @@ use rush_core::text::Line;
 use rush_fleet::Predicates;
 
 use super::state::{accounts, cfg, cfg_mut, ensure_store, peek, save};
-use crate::frame::mackeys::in_apple_terminal;
 use crate::frame::{Out, Press};
 use crate::model::Model;
 use crate::style::*;
@@ -27,7 +26,7 @@ pub struct Step {
 }
 
 /// Getting started: each is ticked off when you do it (steps).
-pub const STEPS: [Step; 9] = [
+pub const STEPS: [Step; 8] = [
     Step {
         id: "start",
         what: "Start an agent",
@@ -68,24 +67,15 @@ pub const STEPS: [Step; 9] = [
         what: "See all the keys",
         key: "?",
     },
-    Step {
-        id: "mackeys",
-        what: "Give Terminal.app the ⌘ keys",
-        key: "#mackeys on",
-    },
 ];
 
-/// The steps that apply here: the ⌘ keys only in Terminal.app, which
-/// keeps them for itself (activeSteps).
-pub fn active_steps(apple_terminal: bool) -> Vec<&'static Step> {
-    STEPS
-        .iter()
-        .filter(|s| apple_terminal || s.id != "mackeys")
-        .collect()
+/// The steps that apply here (activeSteps).
+pub fn active_steps() -> Vec<&'static Step> {
+    STEPS.iter().collect()
 }
 
 fn active() -> Vec<&'static Step> {
-    active_steps(in_apple_terminal())
+    active_steps()
 }
 
 /// Getting started and the tips are on: not in a view another app hosts
@@ -247,11 +237,9 @@ pub fn saw_key(m: &mut Model, k: &Press) {
             };
             let mut words = cmd.split_whitespace();
             let name = words.next().unwrap_or("").to_lowercase();
-            let arg = words.next().unwrap_or("");
             did_step(m, "hash");
             match name.as_str() {
                 "pin" | "done" if m.focused().is_some() => did_step(m, &name),
-                "mackeys" if !arg.is_empty() => did_step(m, "mackeys"),
                 _ => {}
             }
         }

@@ -61,7 +61,7 @@ pub fn sections(m: &Model) -> Vec<Section> {
     let mut rows = vec![choice(
         "Pace guard",
         on_off(g.pace),
-        "Keeps each account's week from going in a few hours. An account's fair share is its weekly room left over the time to its weekly reset; its pace is how fast it used its week over the last 2 hours, from its plan's own readings, so every machine and session on it counts. Past the warning rush says so; past the hold, new turns go to the account with the most room against its pace, or wait when every account is past its own. A running turn always finishes. A session whose prompt cache is warm waits rather than move, as moving writes its whole context again; a cold one moves, at most once in the hours set. A provider that reports no limits has no pace: only the cap and away cover it.",
+        "Keeps each account's week from going in a few hours. An account's fair share is its weekly room left spread over the hours you work before its weekly reset, plus what the agent's other accounts leave unused (work can move there); its pace is how fast it used its week over the last 2 hours, from its plan's own readings, so every machine and session on it counts. Past the warning rush says so; past the hold, new turns go to the account with the most room against its pace, or wait when every account is past its own. A running turn always finishes. A session whose prompt cache is warm waits rather than move, as moving writes its whole context again; a cold one moves, at most once in the hours set. A provider that reports no limits has no pace: only the cap and away cover it.",
         &[
             ("off", "rush spends each account as it would."),
             (
@@ -90,6 +90,15 @@ pub fn sections(m: &Model) -> Vec<Section> {
             "2× its fair share",
             &times,
             |m, v| config_mut(m).guard.pace_trip = v,
+        ));
+        rows.push(numbers(
+            "  you work",
+            g.pace_hours as f64,
+            "How many hours a day you use the accounts. A week's room is spread over those hours to the reset, not round the clock, so a working day may spend more of it.",
+            &[0.0, 8.0, 16.0, 24.0],
+            "12 hours a day",
+            &|x| format!("{x:.0} hours a day"),
+            |m, v| config_mut(m).guard.pace_hours = v as i64,
         ));
         rows.push(numbers(
             "  moves",

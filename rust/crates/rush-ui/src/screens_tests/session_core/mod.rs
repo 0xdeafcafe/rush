@@ -9,7 +9,7 @@ mod tests_cards;
 mod tests_changes_inline;
 mod tests_clicks;
 mod tests_cold;
-mod tests_drops;
+pub(super) mod tests_drops;
 mod tests_exchange_inline;
 mod tests_finish_inline;
 mod tests_grid;

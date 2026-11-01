@@ -153,7 +153,11 @@ fn image_paths_inline() {
     );
     std::fs::remove_dir_all(&dir).unwrap();
     assert_eq!(got.as_deref(), Some("before [Image #1] after"));
-    assert_eq!(r.path[&1], p);
+    let _ = p;
+    assert_eq!(
+        crate::screens_tests::session_core::tests_drops::kept_names(&[r.path[&1].clone()]),
+        ["shot one.png"]
+    );
 }
 
 /// An image in the box is drawn by its name; each drawn place maps back

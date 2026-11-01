@@ -34,7 +34,7 @@ pub fn ask_start(question: &str, dir: &str) -> HostedStart {
             "The user is asking about rush itself: the terminal app you run inside, which runs and watches coding agents. \
              Answer from rush's guide below, and say so when it doesn't cover something rather than guessing.\n\n\
              You work in rush's own folder, {dir}. config.json there holds rush's settings; the other files are its records, so leave them alone. \
-             When the user wants a setting changed, first say whether one of rush's # commands does it (they type it in rush's box, e.g. #mackeys on), or a page of Settings does. \
+             When the user wants a setting changed, first say whether one of rush's # commands does it (they type it in rush's box, e.g. #pin), or a page of Settings does. \
              Otherwise edit config.json: change only what was asked, keep it valid JSON, and tell them what you changed. \
              rush reads it again within a few seconds of the change.\n\n\
              <rush-guide>\n{GUIDE}\n</rush-guide>"

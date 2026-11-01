@@ -945,6 +945,10 @@ pub fn read_image(path: &str, dir: &Path) -> Result<String, String> {
     };
     let st =
         std::fs::metadata(p).map_err(|e| format!("stat {path}: {}", crate::reload::os_err(&e)))?;
+    // Found isn't readable: a screenshot's preview dropped from the corner
+    // of a Mac's screen is in a folder only the terminal may read. Said now,
+    // as it's sent, not once it's queued and every later try fails.
+    unreadable(path)?;
     let (mut path, mut size) = (path.to_string(), st.len());
     if mt == "image/png"
         && let Some(w) = to_webp(&path)
@@ -971,6 +975,16 @@ pub fn read_image(path: &str, dir: &Path) -> Result<String, String> {
         ));
     }
     Ok(path)
+}
+
+/// Err saying why the image at path can't be read, naming it.
+fn unreadable(path: &str) -> Result<(), String> {
+    std::fs::File::open(path).map(drop).map_err(|e| {
+        let base = Path::new(path)
+            .file_name()
+            .map_or_else(|| path.to_string(), |b| b.to_string_lossy().into_owned());
+        format!("can't read {base}: {}", crate::reload::os_err(&e))
+    })
 }
 
 /// A PNG, most often a screenshot, as a far smaller WebP, or None when
@@ -2031,16 +2045,25 @@ impl Host {
         exchange: Option<Box<Exchange>>,
     ) -> Result<(), String> {
         // Read from the copy made when it was queued, else from where you
-        // put it; one gone from both is left out, so one lost file never
-        // keeps the whole queue from going.
+        // put it. One that can't be read from either (gone, or in a folder
+        // only the terminal may read) is left off and said so, rather than
+        // failing every try and holding back all that was queued behind it.
         let mut sent = Vec::new();
         let mut pics = Vec::new();
         let mut to = Vec::new(); // each image's number among those sent
+        let mut left = Vec::new();
         for p in images {
+            let mut why = None;
             let from = [st.pics.get(p).cloned(), Some(p.clone())]
                 .into_iter()
                 .flatten()
-                .find(|f| std::fs::metadata(f).is_ok());
+                .find(|f| match unreadable(f) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        why = Some(e);
+                        false
+                    }
+                });
             match from {
                 Some(f) => {
                     sent.push(p.clone());
@@ -2048,16 +2071,21 @@ impl Host {
                     to.push(Some(sent.len()));
                 }
                 None => {
-                    self.event(st, "image-gone", json!({"path": p}));
+                    let e = why.unwrap_or_else(|| "can't read it".into());
+                    self.event(st, "image-dropped", json!({"path": p, "err": e}));
+                    left.push(e);
                     to.push(None);
                 }
             }
         }
-        let text = if sent.len() == images.len() {
+        let mut text = if sent.len() == images.len() {
             text.to_string()
         } else {
             crate::name::renumber(text, |n| to.get(n.wrapping_sub(1)).copied().flatten())
         };
+        for e in left {
+            text.push_str(&format!("\n\n({e}, so it was left off this message.)"));
+        }
         self.deliver_inline(st, &text, &sent, &pics, exchange, "")?;
         for p in images {
             st.pics.remove(p);
