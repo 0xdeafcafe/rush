@@ -1,8 +1,5 @@
-     !        rush   ● 1 needs you [ctrl+n] next   ✻ 3 working   2 finished                                                                                                                                                                    – today · Anthropic
-    ▄▄▄▄      ✻ default · /src/checkout                                                                                                                                                                                                        0.0G RAM · 6 agents
-   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    ctrl+\ places
-    RUSH
-   ▀▀▀▀▀▀      Agents · Wall  [ ]
+    RUSH      rush   ● 1 needs you   ✻ 3 working                                                                                                                                                                                                           default
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    Agents · Wall  [ ]                                                                                                                                                        0% cpu · – · 37.0G free · 80%
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   AGENTS▾                                    RAM    COST   TIME │
 ┃ Needs you  1 · $0.19                                          │    set up caching for CI   @set-up-caching  ·  working                                                                                                                                context 0%
@@ -32,6 +29,9 @@
                                                                 │      ✳ Run the tests  cargo test                                                                        34m 34s since 12:00                                                           │
                                                                 │                                                                                                                                                                                       │
                                                                 │      · running Bash…  34m 34s  turn 34m 36s                                                                                                                                           │
+                                                                │                                                                                                                                                                                       │
+                                                                │                                                                                                                                                                                       │
+                                                                │                                                                                                                                                                                       │
                                                                 │                                                                                                                                                                                       │
                                                                 │                                                                                                                                                                                       │
                                                                 │                                                                                                                                                                                       │
