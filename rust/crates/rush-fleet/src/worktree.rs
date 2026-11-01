@@ -11,7 +11,7 @@ use std::io::Read;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rush_core::adapter::TempDir;
 use rush_core::agent::{Agent, PrStatus};
@@ -120,6 +120,53 @@ impl Worktree {
         self.look().2
     }
 
+    /// check_git for a scan: when HEAD, the index, the remotes' refs and
+    /// the main checkout's HEAD are as they were a moment ago (and the
+    /// last look is under CACHE_FOR old), what that look found is taken
+    /// as is and git isn't asked. Anything that removes a worktree looks
+    /// afresh with check_git instead: edits to a tracked file touch none
+    /// of what is compared.
+    pub fn check_git_cached(&mut self) -> bool {
+        let Some(sig) = signature(self) else {
+            return self.check_git();
+        };
+        let hit = LOOKS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&self.path)
+            .filter(|c| c.sig == sig && c.at.elapsed() < CACHE_FOR)
+            .cloned();
+        if let Some(c) = hit {
+            self.checked = now();
+            (self.changed, self.deleted, self.unpushed) = (c.changed, c.deleted, c.unpushed);
+            (self.off_remote, self.no_remote) = (c.off_remote, c.no_remote);
+            self.err = c.err;
+            (self.landed, self.in_pr, self.own_work, self.head) =
+                (c.landed, c.in_pr, c.own_work, c.head);
+            return c.ok;
+        }
+        let ok = self.check_git();
+        LOOKS.lock().unwrap_or_else(|e| e.into_inner()).insert(
+            self.path.clone(),
+            Looked {
+                sig,
+                at: Instant::now(),
+                changed: self.changed,
+                deleted: self.deleted,
+                unpushed: self.unpushed,
+                off_remote: self.off_remote,
+                no_remote: self.no_remote,
+                err: self.err.clone(),
+                landed: self.landed,
+                in_pr: self.in_pr,
+                own_work: self.own_work,
+                head: self.head.clone(),
+                ok,
+            },
+        );
+        ok
+    }
+
     /// The rest of check: how much disk it takes, walked at a background
     /// pace (a big checkout's build folders take minutes).
     pub fn measure(&mut self) {
@@ -179,6 +226,94 @@ impl Worktree {
             self.in_use = first_non_empty(&[&a.display_name, "a session"]).to_string();
         }
     }
+}
+
+/// How long a scan trusts its last look at a worktree.
+const CACHE_FOR: Duration = Duration::from_secs(120);
+
+/// What a look at a worktree found, and what it was looking at.
+#[derive(Clone)]
+struct Looked {
+    sig: String,
+    at: Instant,
+    changed: usize,
+    deleted: usize,
+    unpushed: usize,
+    off_remote: usize,
+    no_remote: bool,
+    err: String,
+    landed: bool,
+    in_pr: bool,
+    own_work: bool,
+    head: String,
+    ok: bool,
+}
+
+static LOOKS: Mutex<std::sync::LazyLock<HashMap<String, Looked>>> =
+    Mutex::new(std::sync::LazyLock::new(HashMap::new));
+
+fn mtime(p: &Path) -> u128 {
+    std::fs::metadata(p)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_nanos())
+}
+
+/// A checkout's git folder and the one it shares refs with, by stats and
+/// small reads, no git.
+fn git_dirs(path: &str) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+    let dot = Path::new(path).join(".git");
+    let dir = if std::fs::metadata(&dot).ok()?.is_dir() {
+        dot
+    } else {
+        let b = std::fs::read_to_string(&dot).ok()?;
+        let g = b.trim().strip_prefix("gitdir:")?.trim();
+        Path::new(path).join(g)
+    };
+    let common = match std::fs::read_to_string(dir.join("commondir")) {
+        Ok(c) => dir.join(c.trim()),
+        Err(_) => dir.clone(),
+    };
+    Some((dir, common))
+}
+
+/// What a look at the worktree depends on, as one string: its HEAD and
+/// the ref that names, its index, the remotes' refs, and the main
+/// checkout's HEAD (what its commits are compared with). None when it
+/// can't be read, and the look isn't kept.
+fn signature(w: &Worktree) -> Option<String> {
+    let (dir, common) = git_dirs(&w.path)?;
+    let head = std::fs::read_to_string(dir.join("HEAD")).ok()?;
+    let reff = |h: &str, common: &Path| match h.trim().strip_prefix("ref: ") {
+        Some(r) => format!("{}", mtime(&common.join(r))),
+        None => String::new(),
+    };
+    let mut remotes = 0;
+    if let Ok(rd) = std::fs::read_dir(common.join("refs/remotes")) {
+        for e in rd.flatten() {
+            remotes = remotes.max(mtime(&e.path()));
+        }
+    }
+    let (_, rcommon) = git_dirs(&w.repo)?;
+    let rhead = std::fs::read_to_string(rcommon.join("HEAD")).unwrap_or_default();
+    Some(format!(
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        head.trim(),
+        reff(&head, &common),
+        mtime(&dir.join("index")),
+        mtime(&common.join("packed-refs")),
+        remotes,
+        mtime(&common.join("refs/remotes")),
+        rhead.trim(),
+        reff(&rhead, &rcommon),
+        mtime(&common.join("config")),
+        w.locked,
+        w.target,
+        w.base,
+        w.pr.as_ref()
+            .map_or(String::new(), |p| format!("{}{}", p.merged(), p.head_oid)),
+    ))
 }
 
 pub(crate) fn plural(n: usize, what: &str) -> String {
