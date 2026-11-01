@@ -142,8 +142,8 @@ pub fn key(m: &mut Model, s: &str) -> Out {
     if dialog(m).inside {
         let secs = provider_form(m, &picked(m));
         if s == "left" || s == "h" {
-            // Back out, as esc: going back never changes a setting; → and
-            // space do.
+            // Back out, as esc: going back never changes a setting; enter
+            // and space do (as Go here).
             let d = dialog_mut(m);
             d.inside = false;
             d.cursor = d.pick;
@@ -270,8 +270,10 @@ pub fn body(m: &Model, geo: &mut Geometry, w: usize, _h: usize) -> Vec<Line> {
     let inside = d.inside;
     let cursor = d.cursor;
     let controls = if inside {
-        let mut k = row_at(&provider_form(m, &it), cursor).keys;
-        k.extend(["←→".to_string(), "change".to_string()]);
+        let row = row_at(&provider_form(m, &it), cursor);
+        let mut k = form::change_keys(&row);
+        k.extend(row.keys);
+        k.extend(["←".to_string(), "back".to_string()]);
         k
     } else {
         list_keys(&it)

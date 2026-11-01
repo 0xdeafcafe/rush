@@ -19,7 +19,6 @@ use super::paint::trunc;
 use super::workspace::{self, Geometry};
 use super::{Page, config, config_mut, dialog, dialog_mut, settings_height};
 use crate::frame::Out;
-use crate::frame::picker::round_move;
 use crate::frame::sheet::window;
 use crate::model::Model;
 use crate::style::*;
@@ -286,7 +285,7 @@ fn about(m: &Model, hs: &[String], ids: &[String], w: usize) -> Vec<Line> {
     if d.cursor >= hs.len() {
         title = "At a usage limit".into();
         what = "What rush does when the account a session runs on is nearly out. Moving on hands the conversation, with what it was doing, to the next provider set up here that has room, and new sessions start there until the first resets.".into();
-        keys = vec!["←→", "change"];
+        keys = vec!["enter", "change"];
     } else if d.config_col == 0 {
         let h = &hs[d.cursor];
         title = r.harness_label(h);
@@ -300,7 +299,14 @@ fn about(m: &Model, hs: &[String], ids: &[String], w: usize) -> Vec<Line> {
             w2.push_str(" It isn't installed here.");
         }
         what = w2;
-        keys = vec!["space", "on or off", "enter", "its settings", "→", "cells"];
+        keys = vec![
+            "space",
+            "on or off",
+            "enter",
+            "its settings",
+            "→",
+            "its cells",
+        ];
     } else {
         let h = &hs[d.cursor];
         let id = &ids[(d.config_col - 1).min(ids.len() - 1)];
@@ -343,6 +349,8 @@ fn about(m: &Model, hs: &[String], ids: &[String], w: usize) -> Vec<Line> {
                 "its default harness",
                 "enter",
                 "models",
+                "←→",
+                "cell",
             ];
         }
         what = w2;
@@ -359,6 +367,32 @@ fn about(m: &Model, hs: &[String], ids: &[String], w: usize) -> Vec<Line> {
     out
 }
 
+/// What rush does at a usage limit, as a row whose picker sets it.
+fn at_limit_setting(m: &Model) -> super::form::Setting {
+    let mut st = super::form::choice(
+        "At a usage limit",
+        &config(m).at_limit,
+        "What rush does when the account a session runs on is nearly out.",
+        &[
+            (AT_LIMIT_ACCOUNT, "another account of the same provider."),
+            (AT_LIMIT_WAIT, "wait for the reset."),
+            (AT_LIMIT_NEXT, "move on to the next provider with room."),
+        ],
+        super::form::set(|m, v| {
+            let cfg = config_mut(m);
+            cfg.at_limit = v.into();
+            cfg.sync_legacy();
+            (accounts().spill_to)(m);
+        }),
+    );
+    st.unset = "another account".into();
+    st.names
+        .insert(AT_LIMIT_WAIT.into(), "wait for the reset".into());
+    st.names
+        .insert(AT_LIMIT_NEXT.into(), "the next provider with room".into());
+    st
+}
+
 /// A key on the page (configKey).
 fn key(m: &mut Model, s: &str) -> Out {
     let (hs, ids) = (harnesses(m), providers(m));
@@ -372,18 +406,9 @@ fn key(m: &mut Model, s: &str) -> Out {
     let d = dialog(m);
     let (cursor, col) = (d.cursor.min(hs.len()), d.config_col.min(ids.len()));
     if cursor >= hs.len() {
-        let vals = [AT_LIMIT_ACCOUNT, AT_LIMIT_WAIT, AT_LIMIT_NEXT];
-        let dir = match s {
-            "right" | "l" | "enter" | "space" => 1,
-            "left" | "h" => -1,
-            _ => 0,
-        };
-        if dir != 0 {
-            let cfg = config_mut(m);
-            let at = vals.iter().position(|v| *v == cfg.at_limit).unwrap_or(0);
-            cfg.at_limit = vals[round_move(at, dir, vals.len())].into();
-            cfg.sync_legacy();
-            save(m);
+        // Its value changes in a picker; ← never changes it.
+        if matches!(s, "right" | "l" | "enter" | "space") {
+            super::form::pick_value(m, at_limit_setting(m));
             return Out::Draw;
         }
         return Out::Idle;

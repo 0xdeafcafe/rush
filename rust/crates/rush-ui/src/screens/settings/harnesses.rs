@@ -37,7 +37,9 @@ pub fn page() -> Page {
         name: "Harnesses",
         pre: Some(|m, s| {
             let d = dialog_mut(m);
-            if d.harness_inside && matches!(s, "esc" | "backspace") {
+            // ← goes back to the list as esc does, never changing the
+            // row it's on (Go's ← changed it).
+            if d.harness_inside && matches!(s, "esc" | "backspace" | "left" | "h") {
                 d.harness_inside = false;
                 d.cursor = d.harness_return;
                 d.catalog_scroll.set(0);
@@ -556,7 +558,7 @@ pub fn agent_sections(m: &Model, k: &str) -> Vec<Section> {
             ])
         })),
         key: Some(Rc::new(|m, s| {
-            if matches!(s, "enter" | "right" | "left" | "space") {
+            if matches!(s, "enter" | "right" | "space") {
                 let d = dialog_mut(m);
                 d.advanced = !d.advanced;
                 return Out::Draw;
@@ -590,7 +592,9 @@ pub fn agent_sections(m: &Model, k: &str) -> Vec<Section> {
 /// definitions its sessions can start as (claudeSections).
 fn claude_sections(m: &Model) -> Vec<Section> {
     let (run, tuning) = claude_run_sections(m);
-    let mut secs = vec![run, tuning];
+    let mut secs = vec![run];
+    secs.extend(super::claudecode::sections(m));
+    secs.push(tuning);
     if let Some(def) = super::files::definitions_section(m, LOGINS_KIND) {
         secs.push(def);
     }

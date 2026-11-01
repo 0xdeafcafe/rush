@@ -376,7 +376,9 @@ pub fn file_sections(m: &Model, k: &str) -> Vec<Section> {
     let Some(pg) = a.settings_pager() else {
         return Vec::new();
     };
-    if !reg().supports(k, rush_core::adapter::Feature::Settings) {
+    // Claude Code's are on its page whole, with where each comes from
+    // (claudecode.rs).
+    if k == LOGINS_KIND || !reg().supports(k, rush_core::adapter::Feature::Settings) {
         return Vec::new();
     }
     let Some(s) = dialog(m).settings.as_ref().filter(|l| l.kind == k) else {
