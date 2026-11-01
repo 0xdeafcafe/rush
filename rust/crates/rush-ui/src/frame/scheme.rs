@@ -7,7 +7,10 @@
 //!
 //! rush-draw asks for the colours as it takes the terminal, before its
 //! input thread reads, and keeps the replies (rush_draw::colour_replies);
-//! these read them. Not yet: asking again on focus or on a mode 2031
+//! these read them. Rust-only: the replies are kept in rush's cache, by
+//! terminal, so a terminal that's slow to answer starts on the colours
+//! it said last time rather than rush's own, and its answer, when it
+//! comes, changes nothing (term_colours). Not yet: asking again on focus or on a mode 2031
 //! report, so a terminal switched light or dark while rush runs keeps
 //! the colours it had (DESIGN.md "Screens", gaps).
 
@@ -20,6 +23,56 @@ pub const SET_MODE_LIGHT_DARK: &str = "\x1b[?2031h";
 /// Turns those reports off again as rush exits, so they don't land in
 /// the shell (StopSchemeReports).
 pub const RESET_MODE_LIGHT_DARK: &str = "\x1b[?2031l";
+
+/// The cache file the terminal's colours are kept in, by terminal.
+const KEPT_FILE: &str = "term-colours.json";
+
+/// Which terminal this is, for the colours kept: its program, else its
+/// kind.
+fn terminal_name() -> String {
+    ["TERM_PROGRAM", "TERM"]
+        .iter()
+        .find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
+        .unwrap_or_default()
+}
+
+fn kept_all() -> std::collections::BTreeMap<String, Vec<String>> {
+    std::fs::read(rush_state::cache_dir().join(KEPT_FILE))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+/// The terminal's OSC 10 and 11 replies to make rush's colours from: as
+/// it answered when rush took it; when it hadn't answered by the first
+/// frame, what it said last time with what has come since over it. What
+/// it said is kept for next time, when it differs.
+pub fn term_colours() -> Vec<String> {
+    let mut got = rush_draw::colour_replies();
+    let kept = kept_all();
+    let name = terminal_name();
+    let was = kept.get(&name).cloned().unwrap_or_default();
+    if rush_draw::colours_unanswered() {
+        for r in &was {
+            if !got.iter().any(|g| g.get(..5) == r.get(..5)) {
+                got.push(r.clone());
+            }
+        }
+        got.sort();
+    }
+    if !got.is_empty() && got != was {
+        let mut kept = kept;
+        kept.insert(name, got.clone());
+        if let Ok(b) = serde_json::to_vec(&kept) {
+            let p = rush_state::cache_dir().join(KEPT_FILE);
+            let tmp = p.with_extension("json.tmp");
+            if std::fs::write(&tmp, b).is_ok() {
+                let _ = std::fs::rename(&tmp, &p);
+            }
+        }
+    }
+    got
+}
 
 /// A colour report: OSC 10 (text) or 11 (background) with its colour,
 /// `\x1b]11;rgb:1111/1010/0e0e\x07` or ST-ended.

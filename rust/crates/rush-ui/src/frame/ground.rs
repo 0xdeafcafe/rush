@@ -94,13 +94,14 @@ pub fn set_painted(g: Ground) {
 
 /// The ground Settings › Theme picks (model.go:569 applyColors): rush's
 /// dark or light, or for "match terminal" the terminal's own background
-/// and text, as it answered OSC 10 and 11 when rush took it; rush's dark
-/// when it didn't say.
+/// and text, as it answered OSC 10 and 11 when rush took it (or, slow to
+/// answer, as it said last time until it does: scheme::term_colours);
+/// rush's dark when it didn't say.
 pub fn of_theme(theme: &str) -> Ground {
     match theme {
         "light" => LIGHT,
         "dark" => DARK,
-        _ => answered(rush_draw::colour_replies()),
+        _ => answered(super::scheme::term_colours()),
     }
 }
 

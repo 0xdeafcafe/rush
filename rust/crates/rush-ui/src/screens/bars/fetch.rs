@@ -80,6 +80,14 @@ pub fn on_fleet(m: &mut Model) {
     read_again(m, false);
 }
 
+/// Whether the plans' limits have been read once since rush started,
+/// none still out.
+pub fn fetched_once(m: &Model) -> bool {
+    m.kept
+        .peek::<Fetch>()
+        .is_some_and(|f| f.at != 0 && f.busy == 0)
+}
+
 /// Every agent's plan read again, when due or asked (r).
 fn read_again(m: &mut Model, asked: bool) {
     // Hosted never fetches usage or quotas (model.go:556, :1125).

@@ -146,7 +146,11 @@ pub fn bar_line(
         };
         let used: usize = parts.iter().map(|p| p.width() + sep_w).sum();
         x.room = w.saturating_sub(used);
-        let p = (s.draw)(x);
+        let mut p = (s.draw)(x);
+        if which == BAR_TOP {
+            // What it said last time, till its reading is in (listcache.rs).
+            p = crate::listcache::top_seg(m, s.id, p);
+        }
         if p.width() > 0 {
             parts.push(p);
             ids.push(s.id);

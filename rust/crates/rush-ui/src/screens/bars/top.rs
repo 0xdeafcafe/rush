@@ -743,9 +743,25 @@ pub fn top_rights(m: &Model, rooms: &[usize], drops: &mut Drops) -> Vec<Line> {
         }
         let spare = rooms.len() as isize - row as isize - (lines.len() - i - 1) as isize;
         if l.len() == 1 && l[0] == "plan" && spare > 1 {
+            // Its rows as last time, till the accounts are read
+            // (listcache.rs).
+            if let Some(kept) = crate::listcache::top_plan(m) {
+                let n = kept.len().min(spare as usize);
+                for (g, room) in kept.into_iter().take(n).zip(&rooms[row..]) {
+                    out[row] = if g.width() > *room {
+                        rush_draw::truncate_line(&g, *room, "")
+                    } else {
+                        g
+                    };
+                    row += 1;
+                }
+                drops.push((BAR_TOP * 10 + i, Vec::new()));
+                continue;
+            }
             let (queues, single) = acct_queues(m);
             if !queues.is_empty() {
                 let got = plan_rows(&queues, &single, now(m), &rooms[row..row + spare as usize]);
+                crate::listcache::drew_plan(m, &got);
                 for g in got {
                     out[row] = g;
                     row += 1;

@@ -142,9 +142,12 @@ fn run(r: &Reader, tty: &Tty, wake: &UnixStream, winch: &UnixStream, push: impl 
     // Times the terminal had something crossterm didn't take.
     let mut stuck = 0;
     let mut late =
-        LateOsc::armed(crate::term::LATE_OSC.swap(false, std::sync::atomic::Ordering::SeqCst));
+        LateOsc::armed(crate::term::LATE_OSC.swap(0, std::sync::atomic::Ordering::SeqCst));
     let mut push = |e: crossterm::event::Event| -> bool {
         if late.drops(&e) {
+            if let Some(body) = late.reply.take() {
+                crate::term::late_colour(&body);
+            }
             return true;
         }
         match translate(e) {
@@ -236,55 +239,71 @@ fn run(r: &Reader, tty: &Tty, wake: &UnixStream, winch: &UnixStream, push: impl 
     }
 }
 
-/// A colour reply the terminal sent after rush stopped waiting for it
-/// (term.rs ask_colours): crossterm reads `ESC ] 11 ; rgb:… ST` as alt+],
-/// its letters, then alt+\ (or ctrl+g for a BEL end). The first such run
-/// within a while of starting is dropped, not typed.
+/// The colour replies the terminal sent after rush stopped waiting for
+/// them (term.rs ask_colours): crossterm reads `ESC ] 11 ; rgb:… ST` as
+/// alt+], its letters, then alt+\ (or ctrl+g for a BEL end). As many as
+/// were owed, within a while of starting, are taken in as colours, not
+/// typed.
 pub(crate) struct LateOsc {
     until: Option<std::time::Instant>,
-    inside: bool,
+    /// Replies still owed.
+    owed: u8,
+    /// The reply being read, its body so far, once alt+] has come.
+    inside: Option<String>,
+    /// A reply read whole, between `ESC ]` and its end, to take.
+    pub(crate) reply: Option<String>,
 }
 
 /// How long after starting a late reply is looked for.
 const LATE_FOR: Duration = Duration::from_secs(10);
 
 impl LateOsc {
-    pub(crate) fn armed(on: bool) -> LateOsc {
+    pub(crate) fn armed(owed: u8) -> LateOsc {
         LateOsc {
-            until: on.then(|| std::time::Instant::now() + LATE_FOR),
-            inside: false,
+            until: (owed > 0).then(|| std::time::Instant::now() + LATE_FOR),
+            owed,
+            inside: None,
+            reply: None,
         }
     }
 
-    /// Whether e is part of the late reply, to drop.
+    /// Whether e is part of a late reply, to drop; a reply read whole is
+    /// left in reply.
     pub(crate) fn drops(&mut self, e: &crossterm::event::Event) -> bool {
         use crossterm::event::{Event as E, KeyCode, KeyEventKind, KeyModifiers};
         let Some(until) = self.until else {
             return false;
         };
         let E::Key(k) = e else {
-            return self.inside;
+            return self.inside.is_some();
         };
         if k.kind == KeyEventKind::Release {
-            return self.inside;
+            return self.inside.is_some();
         }
         let alt = k.modifiers.contains(KeyModifiers::ALT);
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
-        if !self.inside {
+        let Some(body) = self.inside.as_mut() else {
             if std::time::Instant::now() > until {
                 self.until = None;
                 return false;
             }
             if alt && k.code == KeyCode::Char(']') {
-                self.inside = true;
+                self.inside = Some(String::new());
                 return true;
             }
             return false;
-        }
-        // Its end: ST (alt+\) or BEL (ctrl+g); then nothing more is dropped.
+        };
+        // Its end: ST (alt+\) or BEL (ctrl+g).
         if alt && k.code == KeyCode::Char('\\') || ctrl && k.code == KeyCode::Char('g') {
-            self.until = None;
-            self.inside = false;
+            self.reply = self.inside.take();
+            self.owed -= 1;
+            if self.owed == 0 {
+                self.until = None;
+            }
+        } else if let KeyCode::Char(c) = k.code
+            && body.len() < 64
+        {
+            body.push(c);
         }
         true
     }
@@ -295,35 +314,41 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU32, Ordering};
 
-    /// A colour reply that came late is dropped, ST or BEL ended, once;
-    /// keys around it, and a second one, go through (LateOsc).
+    /// Colour replies that came late, ST or BEL ended, are taken in as
+    /// many as were owed; keys around them, and one more, go through
+    /// (LateOsc).
     #[test]
-    fn a_late_colour_reply_is_dropped_once() {
+    fn late_colour_replies_are_taken_in() {
         use crossterm::event::{Event as E, KeyCode, KeyEvent, KeyModifiers as M};
         let k = |c: char, m: M| E::Key(KeyEvent::new(KeyCode::Char(c), m));
-        let reply = |end: E| {
+        let reply = |body: &str, end: E| {
             let mut v = vec![k(']', M::ALT)];
-            v.extend("11;rgb:1111/1010/0e0e".chars().map(|c| k(c, M::NONE)));
+            v.extend(body.chars().map(|c| k(c, M::NONE)));
             v.push(end);
             v
         };
-        let mut l = LateOsc::armed(true);
+        let take = |l: &mut LateOsc, evs: Vec<E>| {
+            for e in evs {
+                assert!(l.drops(&e), "{e:?}");
+            }
+            l.reply.take()
+        };
+        let mut l = LateOsc::armed(1);
         assert!(!l.drops(&k('r', M::NONE)), "a key before it goes through");
-        for e in reply(k('\\', M::ALT)) {
-            assert!(l.drops(&e), "{e:?}");
-        }
+        let got = take(&mut l, reply("11;rgb:1111/1010/0e0e", k('\\', M::ALT)));
+        assert_eq!(got.as_deref(), Some("11;rgb:1111/1010/0e0e"));
         assert!(!l.drops(&k('g', M::NONE)), "a key after it goes through");
-        assert!(!l.drops(&k(']', M::ALT)), "only one is dropped");
-        let mut l = LateOsc::armed(true);
-        for e in reply(k('g', M::CONTROL)) {
-            assert!(l.drops(&e), "{e:?}");
-        }
-        assert!(!l.drops(&k('x', M::NONE)));
-        let mut l = LateOsc::armed(false);
-        assert!(
-            !l.drops(&k(']', M::ALT)),
-            "nothing dropped when it answered"
+        assert!(!l.drops(&k(']', M::ALT)), "only as many as owed");
+        let mut l = LateOsc::armed(2);
+        let a = take(&mut l, reply("10;rgb:e2/dd/d3", k('g', M::CONTROL)));
+        let b = take(&mut l, reply("11;rgb:11/10/0e", k('\\', M::ALT)));
+        assert_eq!(
+            (a.as_deref(), b.as_deref()),
+            (Some("10;rgb:e2/dd/d3"), Some("11;rgb:11/10/0e"))
         );
+        assert!(!l.drops(&k('x', M::NONE)));
+        let mut l = LateOsc::armed(0);
+        assert!(!l.drops(&k(']', M::ALT)), "nothing taken when it answered");
     }
 
     /// pause returns once the thread has stopped, and it stays stopped

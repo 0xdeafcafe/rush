@@ -99,6 +99,9 @@ pub struct Accounts {
     pub hosted_starter: Option<super::askrush::HostedStarter>,
     /// config.json is watched for changes made elsewhere.
     pub(crate) reloading: bool,
+    /// The logins and limits have been read from disk once (Rust-only:
+    /// till then the top bar draws what it said last time, listcache.rs).
+    pub read_once: bool,
     /// Switches sessions: set by the screens that host them.
     pub switcher: Option<Switcher>,
     /// Hands a session's conversation over to a new one that starts as
@@ -169,6 +172,13 @@ pub fn accounts(m: &mut Model) -> &mut Accounts {
 /// Accounts' state, to read while drawing.
 pub fn peek(m: &Model) -> &Accounts {
     m.kept.peek::<Accounts>().unwrap_or(&EMPTY)
+}
+
+/// Whether the accounts have been read since rush started: the config
+/// loaded, the logins and limits read once.
+pub fn read_settled(m: &Model) -> bool {
+    let a = peek(m);
+    a.store.is_some() && a.read_once
 }
 
 /// rush's config as loaded; the defaults until it is.
@@ -313,6 +323,7 @@ pub fn read(m: &mut Model) {
         |m, r| {
             let a = accounts(m);
             a.reading = false;
+            a.read_once = true;
             let changed = a.logins != r.logins || a.quotas != r.quotas;
             a.logins = r.logins;
             a.quotas = r.quotas;

@@ -626,14 +626,26 @@ SIGUSR1 is a #reload; a hosted view isn't listed.
 rush opens on the list as it last read it (rush-ui `listcache.rs`): each
 priced reading is saved to rush's cache (`list-kept.json`, at most once a
 minute and on quitting), read on a thread as rush starts, and drawn in the
-first frames until the first live reading replaces it whole. Until then
-its rows are drawn faint, so a row that was working last time doesn't
-claim to be now, a top bar of #statusline lines still says "costing
-transcripts…" (the default gauges never do, as Go's view.go:255-262),
-and nothing acts on it: no host is dialled and no reading's hooks run. One
-from another version or older than a week isn't shown. Measured on the
-bench copy (872 agents): the list on screen 31-36 ms after start, against
-1.35 s for the first reading.
+first frame (it waits up to 50 ms for it) until the first live reading
+replaces it whole. Until then its rows are drawn as they were but for an
+agent's mark that says what it's doing now (working, waiting on you, just
+finished, halted), drawn neutral and still so a row that was working last
+time doesn't claim to be now; nothing acts on it: no host is dialled and
+no reading's hooks run. One from another version or older than a week
+isn't shown.
+
+The start is one frame that then only gains details: your top bar is read
+before the first frame (Go reads it with the first reading, so it opened
+on the default gauges), and the kept file has the top bar's segments as
+last drawn with their readings in (and the plan's rows, and the account
+beside the folder). Each stands in until its own reading is in, while
+the kept list shows and for at most 3 s after the first live reading: the machine's processes for cpu and ram, the
+battery and disk, the network, a priced reading for today's spend, the
+accounts read (and their limits fetched, for the plan). "costing
+transcripts…" isn't said over the kept list's costs.
+
+Measured on the bench copy (870 agents): the list on screen 31-36 ms
+after start, against 1.35 s for the first reading.
 
 ## Following (Rust-only)
 
@@ -1172,7 +1184,12 @@ is made. Everything below is in `rush_ui::frame`.
   moved onto the ground picked as rush-draw paints (`ground.rs`,
   photon's theme). For Theme "match terminal" rush-draw asks the
   terminal's colours (OSC 10, 11, then DA1) as it takes the terminal,
-  before the input thread reads; they aren't asked again on focus or
+  before the input thread reads, waiting at most 50 ms for it to start
+  answering (Rust-only: Go's bubbletea applies them whenever they come).
+  Replies are kept in rush's cache by terminal (`term-colours.json`);
+  one that hasn't answered in time starts on what it said last time, and
+  the input thread takes its late replies in as colours (rush-draw
+  `reader.rs` LateOsc), which are applied then. They aren't asked again on focus or
   a mode 2031 report, as rush-draw hands the UI keys, not raw replies.
   Handing the terminal to `$EDITOR` (Go's `editorCmd`) waits on
   rush-draw pausing its input reader: every $EDITOR use goes through

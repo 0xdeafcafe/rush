@@ -575,6 +575,44 @@ fn samples_are_the_builders_agent() {
     );
 }
 
+/// While the readings aren't in, the top bar draws what it said last
+/// time for them: the plan's rows and the machine's figures, where the
+/// live ones go; the version, which needs no reading, live (listcache.rs).
+#[test]
+fn a_kept_top_bar_stands_in_till_its_readings_are_in() {
+    let mut m = model(160);
+    with_bars(
+        &mut m,
+        lay(&[&["version"], &["plan"], &["ram", "version"]]),
+        default_agent(),
+    );
+    let l = |t: &str| crate::style::line([crate::style::sp(t, crate::style::DIM)]);
+    crate::listcache::stand_in(
+        &mut m,
+        &[("ram", l("3.3G ram")), ("version", l("rush old"))],
+        vec![l("✻ ▸ alex ▱▱▱▱▱▱  +2 ready"), l("◎◈◐ ▰▱▱▱")],
+    );
+    let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
+    assert!(rows[0].trim_end().ends_with("rush 0.1.0"), "{:?}", rows[0]);
+    assert!(
+        rows[1].trim_end().ends_with("✻ ▸ alex ▱▱▱▱▱▱  +2 ready"),
+        "{:?}",
+        rows[1]
+    );
+    assert_eq!(
+        rush_core::text::width(rows[1].trim_end()),
+        158,
+        "{:?}",
+        rows[1]
+    );
+    assert!(rows[2].trim_end().ends_with("◎◈◐ ▰▱▱▱"), "{:?}", rows[2]);
+    assert!(
+        rows[3].trim_end().ends_with("3.3G ram · rush 0.1.0"),
+        "{:?}",
+        rows[3]
+    );
+}
+
 /// The model, effort and account in an agent's header take clicks where
 /// they're drawn, at every width: lit under the pointer, those dropped
 /// for room leaving nothing to click; a click on the model opens
