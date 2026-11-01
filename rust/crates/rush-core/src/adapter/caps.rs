@@ -52,6 +52,20 @@ pub trait Driver {
     fn start(&self, o: StartOptions, sink: Arc<dyn Sink>) -> Result<Box<dyn Conn>>;
 }
 
+/// A Driver that takes up a session a host passed to itself across an
+/// exec onto a newer rush ([`super::Upgrade`]): the agent runs on as it
+/// was, nothing started or told it again. Rust-only.
+pub trait Adopter {
+    /// The session u describes, its options o as a start would have them
+    /// (the host's tools, tap, ...), what it says from now on to sink.
+    fn adopt(
+        &self,
+        o: StartOptions,
+        u: super::Upgrade,
+        sink: Arc<dyn Sink>,
+    ) -> Result<Box<dyn Conn>>;
+}
+
 /// A Driver that knows its own sessions' processes by their command line. A
 /// host that starts a session ends any process still running it for a host
 /// that's gone, so two never write one transcript.

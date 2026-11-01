@@ -31,6 +31,24 @@ pub fn host_cmd(
         let _ = writeln!(stdout, "{}", crate::reload::PREFLIGHT_OK);
         return 0;
     }
+    // Rust-only: `can-upgrade <id>`, a host moving onto this rush asking
+    // whether this rush can take its running agent up; `adopt <id>
+    // <state>`, what that host execs into (upgrade.rs).
+    if args.len() == 2 && args[0] == "can-upgrade" {
+        if let Err(e) = crate::upgrade::can_adopt_here(reg, &args[1]) {
+            let _ = writeln!(stderr, "rush: {e}");
+            return 1;
+        }
+        let _ = writeln!(stdout, "{}", crate::upgrade::ADOPT_OK);
+        return 0;
+    }
+    if args.len() == 3 && args[0] == "adopt" {
+        if let Err(e) = crate::server::adopt(&args[1], std::path::Path::new(&args[2])) {
+            let _ = writeln!(stderr, "rush: {e}");
+            return 1;
+        }
+        return 0;
+    }
     if args.len() < 2 || args[0] != "run" {
         let _ = writeln!(stderr, "rush: usage: rush host run <id>");
         return 1;
@@ -87,28 +105,32 @@ pub fn inbox_cmd(
 }
 
 /// `rush reload`: every listed rush view reloads, and every session's host
-/// on an older rush that's between turns is restarted on this one. One the
-/// installed rush can't run stays on the one it has, and is counted
-/// failed: exit status 1.
+/// on an older rush is moved onto this one in place, its agent running on:
+/// at once between turns, else once its turn ends. One that can't move
+/// stays on the one it has, and is counted failed: exit status 1.
 pub fn reload_cmd(stdout: &mut dyn Write) -> i32 {
     let n = rush_state::instances::reload(0);
     crate::events::log("reload-asked", serde_json::json!({"views": n}));
     let _ = writeln!(stdout, "reloaded {n} rush view(s)");
     let mut l = crate::client::Lister::default();
+    l.retry = true; // asked for: a move that failed is tried again
     let (mut stale, restarted, failed, gone) =
         crate::reload::reload_agents(&mut l, crate::wire::BinStamp::exe());
-    let _ = write!(stdout, "restarted {restarted} agent(s) on this rush");
+    let _ = write!(
+        stdout,
+        "moved {restarted} session(s) onto this rush, their agents running on"
+    );
     if failed > 0 {
         let _ = write!(
             stdout,
-            "; {failed} failed and carry on as they were: their events say why"
+            "; {failed} can't move in place and stay on the rush they run, their agents untouched: their events say why"
         );
         stale -= failed;
     }
     if stale > 0 {
         let _ = write!(
             stdout,
-            "; {stale} mid-turn or waiting on you, restarted once their turn ends"
+            "; {stale} mid-turn or waiting on you, moved once their turn ends"
         );
     }
     if gone > 0 {

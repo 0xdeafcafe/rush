@@ -60,7 +60,35 @@ impl Adapter for Fake {
     fn profiles(&self) -> Vec<Profile> {
         Vec::new()
     }
-    rush_core::has!(driver: Driver);
+    rush_core::has!(driver: Driver, adopter: Adopter);
+}
+
+/// The fake's sessions move onto a newer host in place (Rust-only): its
+/// conn, passed on, is taken up again by its state, counted in
+/// adopted.log beside its profile.
+impl adapter::Adopter for Fake {
+    fn adopt(
+        &self,
+        o: StartOptions,
+        u: adapter::Upgrade,
+        sink: Arc<dyn Sink>,
+    ) -> adapter::Result<Box<dyn Conn>> {
+        if u.state.get("fake").is_none() {
+            return Err("not the fake's".into());
+        }
+        if !o.profile.dir.is_empty() {
+            use std::io::Write as _;
+            let mut f = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(Path::new(&o.profile.dir).join("starts.log"))?;
+            writeln!(f, "adopt {}", String::from_utf8_lossy(&u.unread))?;
+        }
+        Ok(Box::new(FakeConn {
+            sink,
+            closed: AtomicUsize::new(0),
+        }))
+    }
 }
 
 impl Driver for Fake {
@@ -200,6 +228,20 @@ impl Conn for FakeConn {
         }
         Ok(())
     }
+    fn upgrader(&self) -> Option<&dyn adapter::Upgrader> {
+        Some(self)
+    }
+}
+
+impl adapter::Upgrader for FakeConn {
+    fn pass(&self) -> adapter::Result<adapter::Upgrade> {
+        Ok(adapter::Upgrade {
+            unread: b"half a line".to_vec(),
+            state: serde_json::json!({"fake": true}),
+            ..adapter::Upgrade::default()
+        })
+    }
+    fn keep(&self) {}
 }
 
 /// A registry with the fake agent, as kind fake, and as claude with what

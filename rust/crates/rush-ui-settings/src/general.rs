@@ -286,15 +286,15 @@ pub fn sections(m: &Model) -> Vec<Section> {
         } else {
             "ask"
         },
-        "What happens once a newer rush is installed (brew, cargo install, or an update): sessions keep running on the one they started with until they're restarted.",
+        "What happens once a newer rush is installed (brew, cargo install, or an update): sessions move to it by themselves once between turns, their agents running on; this says whether the view reloads too.",
         &[
             (
                 "ask",
-                "nothing restarts by itself: #reload runs it here, Settings › Updates restarts the idle sessions.",
+                "the view stays as it is: #reload runs the new rush here; sessions move to it anyway (#upgrade moves them now).",
             ),
             (
                 "restart",
-                "each session restarts on it once it's between turns, with nothing queued, asked or running in the background, and the view reloads.",
+                "the view reloads onto it, and each session moves to it once it's between turns, with nothing queued, asked or running in the background.",
             ),
         ],
         set(|m, v| config_mut(m).restart_on_install = v == "restart"),

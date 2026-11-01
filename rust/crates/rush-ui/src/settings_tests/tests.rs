@@ -690,14 +690,14 @@ fn updates_page() {
         "update available",
         "up to date",
         "unknown",
-        "2 sessions on an older rush",
+        "2 sessions on an old build",
     ] {
         assert!(b.contains(want), "Updates lacks {want:?}:\n{b}");
     }
     // A session whose folder is gone is something to close, not a failure.
     let row = updates::hosts_row(&m).line.unwrap()(200).plain();
     assert!(
-        row.ends_with("2 sessions on an older rush · enter restarts the idle ones · 1 session's folder is gone · close it"),
+        row.ends_with("2 sessions on an old build · enter moves them to the new one · 1 session's folder is gone · close it"),
         "{row}"
     );
     let l = updates::update_line(
@@ -742,10 +742,9 @@ fn fake_sweep(
     if restart { (1, 2, 1, 1) } else { (3, 0, 0, 1) }
 }
 
-// settings_updates.go:143-200: on its own, a look at the hosts restarts
+// settings_updates.go:143-200: on its own, a look at the hosts moves
 // nothing until the binary has settled, and then only in the rush that
-// leads; enter restarts the idle ones either way, and says so with the
-// gone note.
+// leads; enter moves them either way, and says so with the gone note.
 #[test]
 fn watch_hosts_restarts_only_when_leading_or_asked() {
     for follows in [true, false] {
@@ -764,8 +763,8 @@ fn watch_hosts_restarts_only_when_leading_or_asked() {
         } else {
             assert!(
                 m.said.iter().any(|l| l.text
-                    == "restarted 2 sessions on the installed rush: 1 failed, still on the old one · 0 still busy · 1 session's folder is gone · close it"),
-                "news of what it restarted on its own"
+                    == "moved 2 sessions to the new build · 1 can't move while their agent runs, so stay on the old one · 0 still busy · 1 session's folder is gone · close it"),
+                "news of what it moved on its own"
             );
         }
         // Asked: restarted whether it leads or not, as an answer.

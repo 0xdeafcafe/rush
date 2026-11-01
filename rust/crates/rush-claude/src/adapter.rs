@@ -232,6 +232,7 @@ impl adapter::Adapter for Claude {
         speaker: Speaker,
         worded: Worded,
         driver: Driver,
+        adopter: Adopter,
         orphans: Orphans,
         native_stream: NativeStream,
         spawn_finder: SpawnFinder,

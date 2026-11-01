@@ -912,7 +912,7 @@ fn workspace_found_from_git() {
 }
 
 /// Reads c's lines until one decodes to something want takes.
-fn next(c: &Client, mut want: impl FnMut(&Line) -> bool) -> Line {
+pub(super) fn next(c: &Client, mut want: impl FnMut(&Line) -> bool) -> Line {
     loop {
         let l = c
             .lines
@@ -926,7 +926,7 @@ fn next(c: &Client, mut want: impl FnMut(&Line) -> bool) -> Line {
     }
 }
 
-fn in_state(s: &'static str) -> impl FnMut(&Line) -> bool {
+pub(super) fn in_state(s: &'static str) -> impl FnMut(&Line) -> bool {
     move |l| matches!(l, Line::Info(i) if i.state == s)
 }
 

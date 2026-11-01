@@ -264,6 +264,14 @@ struct WireQuestion {
     asks: Option<Vec<WireAsk>>,
 }
 
+/// The rush a host runs (host.BinStamp): when it was written.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct WireExe {
+    #[serde(rename = "mod")]
+    mod_: Option<String>,
+}
+
 /// info.json as a host writes it: the fields the list reads.
 #[derive(Deserialize, Default)]
 #[serde(default)]
@@ -298,6 +306,7 @@ struct WireInfo {
     stalled: Option<String>,
     proto: i64,
     sleeping: bool,
+    exe: Option<WireExe>,
     remote: String,
     kind: String,
     profile: String,
@@ -392,6 +401,7 @@ pub(crate) fn read_info(dir: &Path) -> Option<HostInfo> {
         stalled: time(&w.stalled),
         proto: w.proto,
         sleeping: w.sleeping,
+        exe_mod: w.exe.as_ref().map_or(0, |e| time(&e.mod_)),
         remote: w.remote,
         lost: false,
         lost_idle: false,

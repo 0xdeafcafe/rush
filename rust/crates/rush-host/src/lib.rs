@@ -57,6 +57,7 @@ pub mod timer;
 pub mod title;
 pub mod tmp;
 pub mod trim;
+pub mod upgrade;
 pub mod viewacts;
 pub mod views;
 pub mod viewwords;

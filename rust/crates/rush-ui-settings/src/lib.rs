@@ -723,6 +723,14 @@ pub fn register(x: &mut Ext) {
         },
     );
     x.command(
+        "upgrade",
+        "move every session to the new build now, its agent running on: one in a turn moves once it ends",
+        |m, _| {
+            updates::watch_hosts(m, true, true);
+            Out::Draw
+        },
+    );
+    x.command(
         "statusline",
         "build the top bar, the agent header and Claude Code's status line",
         |m, _| statusline::open_top_bar(m),
