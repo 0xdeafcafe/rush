@@ -110,6 +110,7 @@ pub fn pages() -> Vec<Page> {
             form: Some(|m| {
                 let mut s = general::sections(m);
                 s.extend(guard::sections(m));
+                s.extend(guard::cache_sections(m));
                 s.extend(interface::sections(m));
                 s
             }),

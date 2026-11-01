@@ -91,6 +91,16 @@ const INFO_EVERY: Duration = Duration::from_millis(250);
 /// How long the prompt cache lasts: Claude Code writes the one-hour cache.
 const CACHE_LIFE: Duration = Duration::from_secs(3600);
 
+/// How long the prompt cache lives after a request: as the agent's last
+/// write said, else an hour (Claude Code's own, signed in).
+fn cache_life(i: &Info) -> Duration {
+    if i.cache_ttl > 0 {
+        Duration::from_secs(i.cache_ttl as u64)
+    } else {
+        CACHE_LIFE
+    }
+}
+
 /// Begins the error of a session whose turn stopped because it was signed
 /// out; what follows is what the agent said.
 pub const AUTH_STOPPED: &str = "log in to continue: ";
@@ -339,6 +349,8 @@ pub(crate) struct State {
     starting: String,
     inited: [String; 5],
     asking: i64,
+    /// A keep_warm request is out.
+    keeping: bool,
     context: Option<Arc<[u8]>>,
     stamped: Option<Instant>,
     limited: Option<event::Limited>,
@@ -661,6 +673,7 @@ fn build(reg: Registry, hooks: Hooks, cfg: Config) -> (Host, Receiver<Msg>) {
         starting: String::new(),
         inited: Default::default(),
         asking: 0,
+        keeping: false,
         context: None,
         stamped: None,
         limited: None,
@@ -1051,6 +1064,7 @@ fn restore_sleeping_info(st: &mut State, old: &Info) {
     st.info.spent_usd = old.spent_usd.clone(); // as its cost: see turn_cost
     st.info.context_tokens = old.context_tokens;
     st.info.cache_warm = old.cache_warm;
+    st.info.cache_ttl = old.cache_ttl;
     st.info.home = old.home.clone();
     st.info.home_at = old.home_at;
     st.info.login = old.login.clone();
@@ -2311,6 +2325,81 @@ impl Host {
         Ok(())
     }
 
+    /// Keeps the idle session's prompt cache warm, as the leading rush's
+    /// look (rush_core::cachekeep) decided: one request through its
+    /// CacheKeeper that reads the whole cached context and adds nothing to
+    /// the conversation. It isn't use: the idle wait to sleep goes on, and
+    /// no turn, message or notice comes of it. Once back, the cache's new
+    /// life is in the info, and a cache-kept event says what it cost.
+    fn keep_warm(&self, mut st: MutexGuard<'_, State>) -> Result<(), String> {
+        let Some(c) = st.conn.clone() else {
+            return Err("it isn't running".into());
+        };
+        if c.cache_keeper().is_none() {
+            return Err("keep_warm isn't something this agent can do".into());
+        }
+        if st.info.state != "idle" || !st.info.queue.is_empty() || st.keeping {
+            return Err("it isn't idle".into());
+        }
+        let now = Time::now();
+        if !self.warm_at(&st, now) {
+            // Its whole context would be written again: what a bump is
+            // there to save.
+            return Err("its cache has lapsed".into());
+        }
+        st.keeping = true;
+        st.asking += 1; // the agent is busy with it: no sleep under it
+        let model = st.info.model.clone();
+        let kind = st.cfg.kind.clone();
+        let context = st.info.context_tokens;
+        let idle_for = if st.info.idle_since.is_zero() {
+            0
+        } else {
+            now.to_ms() - st.info.idle_since.to_ms()
+        };
+        drop(st);
+        let h = self.clone();
+        self.go("keep-warm", move |_| {
+            let r = c.cache_keeper().map(|k| k.keep_warm());
+            let mut st = h.lock();
+            st.keeping = false;
+            st.asking -= 1;
+            match r {
+                Some(Ok(())) => {
+                    st.info.cache_warm = Time::now() + cache_life(&st.info);
+                    let ttl = st.info.cache_ttl * 1000;
+                    let price = |u: rush_core::agent::TokenUsage| {
+                        h.reg.price(&kind, &model, &u).unwrap_or(0.0)
+                    };
+                    let (read, lapse) = rush_core::cachekeep::worth(ttl, context);
+                    let read_usd = price(rush_core::agent::TokenUsage {
+                        cache_read: read as i64,
+                        ..Default::default()
+                    });
+                    let saves_usd = price(rush_core::agent::TokenUsage {
+                        input: lapse as i64,
+                        ..Default::default()
+                    });
+                    let f = json!({
+                        "context": context,
+                        "ttl": st.info.cache_ttl,
+                        "idleFor": idle_for / 1000,
+                        "warmUntil": st.info.cache_warm.format(),
+                        "costUsd": read_usd,
+                        "savesUsd": saves_usd,
+                    });
+                    h.event(&st, "cache-kept", f);
+                    h.publish(&mut st);
+                }
+                Some(Err(e)) => {
+                    h.event(&st, "cache-keep-failed", json!({"err": e.to_string()}));
+                }
+                None => {}
+            }
+        });
+        Ok(())
+    }
+
     /// A message the agent didn't take (an image it couldn't read, its
     /// input closed): said in the events and on the session, and a turn
     /// it was to start isn't left "working" with nothing running, where
@@ -2427,6 +2516,9 @@ impl Host {
         let conn = st.conn.clone();
         let (mut was_cfg, mut was_info) = (String::new(), String::new());
         match o.op.as_str() {
+            "keep_warm" => {
+                return self.keep_warm(st);
+            }
             "ask" => {
                 // Asleep, it wakes to answer.
                 let (mut st, r) = self.start(st);
@@ -3193,7 +3285,16 @@ impl Host {
         self.note_left(st, m);
         self.follow_edits(st, m);
         if let Some(t) = &m.tokens {
-            st.info.cache_warm = Time::now() + CACHE_LIFE;
+            // How long the cache lives, by what this request wrote: the
+            // newest part of the context lapses first, so any 5-minute
+            // write makes it 5 minutes. A request that wrote nothing
+            // leaves it as the last one that did said.
+            if t.cache_write_5m > 0 {
+                st.info.cache_ttl = 300;
+            } else if t.cache_write_1h > 0 {
+                st.info.cache_ttl = 3600;
+            }
+            st.info.cache_warm = Time::now() + cache_life(&st.info);
             // It returns at once: what it writes, it writes on a thread.
             (self.hooks.net_answer)(&self.target(st), SystemTime::now());
             if m.parent.is_empty() {

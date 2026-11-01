@@ -68,6 +68,10 @@ impl HostOps for Hosts {
     fn idle(&self) -> (Option<Ms>, Option<bool>) {
         (self.idle, Some(self.locked))
     }
+    fn keep_warm(&self, id: &str) -> Result<(), String> {
+        self.said.lock().unwrap().push(format!("keep {id}"));
+        Ok(())
+    }
 }
 
 impl Hosts {
@@ -135,6 +139,8 @@ fn input(dir: &std::path::Path, s: Settings, accts: Vec<(Acct, Option<Sample>)>,
         moved_at: HashMap::new(),
         over: Default::default(),
         let_through: HashMap::new(),
+        keep: None,
+        stretches: HashMap::new(),
     }
 }
 
@@ -651,4 +657,125 @@ fn held_said_in_the_list_and_header() {
     // The guard off: nothing said.
     cfg_mut(&mut m).guard.pace = false;
     assert!(g::header_line(&m).is_none());
+}
+
+/// An idle Claude Code session whose 5-minute cache lapses in 30 seconds,
+/// idle for idle_for.
+fn lapsing(id: &str, idle_for: Ms, now: Ms) -> Info {
+    let mut i = warm(info(id, "a"), now + 30_000);
+    i.proto = rush_host::PROTO;
+    i.cache_ttl = 300;
+    i.context_tokens = 120_000;
+    i.idle_since = Time::from_ms(now - idle_for);
+    i
+}
+
+// Rust-only: an idle session about to lapse is bumped while it went idle
+// lately (its harness can, and it's set to); once a stretch has had its
+// bumps, or it has been idle past the time kept, it lapses. Never one
+// done, working, held, on an account past its pace, or while you're away;
+// none while it's off.
+#[test]
+fn caches_kept_warm_while_it_pays() {
+    let d = tempfile::tempdir().unwrap();
+    let hosts = Hosts::default();
+    let keep = |ids: &[&str]| g::KeepIn {
+        settings: rush_core::cachekeep::Settings::default(),
+        ids: ids.iter().map(|s| s.to_string()).collect(),
+    };
+    let look =
+        |infos: Vec<Info>, k: Option<g::KeepIn>, now: Ms, st: &HashMap<String, g::Stretch>| {
+            *hosts.infos.lock().unwrap() = infos;
+            let mut i = input(d.path(), Settings::default(), vec![], now);
+            i.keep = k;
+            i.stretches = st.clone();
+            g::tick(i, &hosts)
+        };
+    let none = HashMap::new();
+    // Off: nothing.
+    look(vec![lapsing("s1", 4 * MIN, NOW)], None, NOW, &none);
+    assert!(hosts.said().is_empty());
+    // On: s1 is kept; s2 (not one it may keep: done, or a harness that
+    // can't) isn't; s3 has 4 minutes left; s4 is working; s5 is held.
+    let mut s5 = lapsing("s5", 4 * MIN, NOW);
+    s5.queue_held = true;
+    let mut s3 = lapsing("s3", MIN, NOW);
+    s3.cache_warm = Time::from_ms(NOW + 4 * MIN);
+    let o = look(
+        vec![
+            lapsing("s1", 4 * MIN, NOW),
+            lapsing("s2", 4 * MIN, NOW),
+            s3,
+            working(lapsing("s4", 4 * MIN, NOW)),
+            s5,
+        ],
+        Some(keep(&["s1", "s3", "s4", "s5"])),
+        NOW,
+        &none,
+    );
+    assert_eq!(hosts.said(), ["keep s1"]);
+    assert_eq!(o.stretches["s1"].bumps, 1);
+    // Looked at again within RETRY: not bumped twice.
+    let o = look(
+        vec![lapsing("s1", 4 * MIN + 5_000, NOW + 5_000)],
+        Some(keep(&["s1"])),
+        NOW + 5_000,
+        &o.stretches,
+    );
+    assert_eq!(hosts.said(), ["keep s1"]);
+    // Idle 15 minutes: it lapses.
+    let late = NOW + 11 * MIN;
+    let o = look(
+        vec![lapsing("s1", 15 * MIN, late)],
+        Some(keep(&["s1"])),
+        late,
+        &o.stretches,
+    );
+    assert_eq!(hosts.said(), ["keep s1"]);
+    assert!(o.stretches.contains_key("s1"));
+    // You're away: none kept.
+    let away = Hosts {
+        locked: true,
+        ..Hosts::default()
+    };
+    *away.infos.lock().unwrap() = vec![lapsing("s1", 4 * MIN, NOW)];
+    let mut i = input(
+        d.path(),
+        Settings {
+            away: Some(rush_core::guard::AwayCfg {
+                after: 20 * MIN,
+                cap: 2,
+            }),
+            ..Settings::default()
+        },
+        vec![],
+        NOW,
+    );
+    i.keep = Some(keep(&["s1"]));
+    g::tick(i, &away);
+    assert!(
+        !away.said().iter().any(|s| s.starts_with("keep")),
+        "{:?}",
+        away.said()
+    );
+}
+
+#[test]
+fn cache_keep_is_set_per_harness() {
+    let mut c = rush_state::config::CacheKeep::default();
+    assert!(!c.on_for("claude") && !c.on_for("codex"), "off by default");
+    assert_eq!(c.settings().keep_for, 15 * MIN);
+    c.harnesses.insert("claude".into(), true);
+    assert!(c.on_for("claude") && !c.on_for("pi"));
+    c.on = true;
+    c.harnesses.insert("codex".into(), false);
+    assert!(c.on_for("claude") && c.on_for("pi") && !c.on_for("codex"));
+    let mut cfg = Config::default();
+    assert!(!serde_json::to_string(&cfg).unwrap().contains("cacheKeep"));
+    cfg.cache_keep.minutes = 30;
+    assert!(
+        serde_json::to_string(&cfg)
+            .unwrap()
+            .contains(r#""cacheKeep":{"minutes":30}"#)
+    );
 }

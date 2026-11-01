@@ -1009,6 +1009,12 @@ impl Client {
             "ask",
         )
     }
+    /// Keeps the idle session's prompt cache warm with a request that adds
+    /// nothing to the conversation (host proto 12). It errs at once when
+    /// the session can't: busy, asleep, lapsed, or an agent with no way to.
+    pub fn keep_warm(&self) -> Result<()> {
+        self.op(|_| {}, "keep_warm")
+    }
     /// Asks for a fresh count of what fills the context window; it arrives
     /// on lines as a Context.
     pub fn ask_context(&self) -> Result<()> {

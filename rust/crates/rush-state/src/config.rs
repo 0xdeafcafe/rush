@@ -233,6 +233,14 @@ pub struct Config {
         skip_serializing_if = "is_default"
     )]
     pub guard: Guard,
+    /// Keeping idle sessions' prompt caches warm (Rust-only): off until
+    /// turned on.
+    #[serde(
+        rename = "cacheKeep",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_default"
+    )]
+    pub cache_keep: CacheKeep,
     /// The harness each provider runs in, by provider, where it isn't its
     /// usual one: "ollama": "pi" runs Ollama in Pi.
     #[serde(
@@ -941,6 +949,54 @@ impl Guard {
                 cap: self.cap_away().max(1) as usize,
             }),
             move_gap: self.move_gap_hours() * 60 * MIN,
+        }
+    }
+}
+
+/// Keeping idle sessions' prompt caches warm, as set (Rust-only): off
+/// until turned on, for every harness that can or for some. A number
+/// left 0 is its default. See rush_core::cachekeep.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CacheKeep {
+    #[serde(
+        rename = "on",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_false"
+    )]
+    pub on: bool,
+    /// Kept this many minutes after a session goes idle: 0 is 15.
+    #[serde(
+        rename = "minutes",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_zero_i64"
+    )]
+    pub minutes: i64,
+    /// A harness set apart from the rest, by kind: true keeps its caches
+    /// warm, false never does.
+    #[serde(
+        rename = "harnesses",
+        deserialize_with = "lenient",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    pub harnesses: BTreeMap<String, bool>,
+}
+
+impl CacheKeep {
+    pub fn keep_minutes(&self) -> i64 {
+        if self.minutes > 0 { self.minutes } else { 15 }
+    }
+
+    /// Whether sessions of harness kind have their caches kept.
+    pub fn on_for(&self, kind: &str) -> bool {
+        self.harnesses.get(kind).copied().unwrap_or(self.on)
+    }
+
+    /// As rush-core's decide takes it.
+    pub fn settings(&self) -> rush_core::cachekeep::Settings {
+        rush_core::cachekeep::Settings {
+            keep_for: self.keep_minutes() * 60_000,
+            ..rush_core::cachekeep::Settings::default()
         }
     }
 }
