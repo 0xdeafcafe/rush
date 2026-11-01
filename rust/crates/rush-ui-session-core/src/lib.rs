@@ -95,6 +95,13 @@ use subqueue::SubNote;
 
 /// Adds the Session's keys, dock, paste, mouse and live state to x.
 pub fn register(x: &mut Ext) {
+    // A jump to a pinned prompt lands just below the pins that will show.
+    let _ = crate::session::TOP_PINS.set(|v, start, h| {
+        conversation::pin_plan(v, start, h)
+            .iter()
+            .filter(|p| p.0 < 2)
+            .count()
+    });
     // ctrl+b backgrounds what the turn waits on before /btw has it
     // (paneKey :4003).
     x.session_keys.insert(0, jobkeys::ctrl_b);

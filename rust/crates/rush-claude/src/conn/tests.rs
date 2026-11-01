@@ -86,6 +86,8 @@ fn control() {
     let conn = Claude::new()
         .start(o, Arc::new(Tagged { key: 1u8, tx }))
         .unwrap();
+    // Go's KeepsQuota (conn.go:341): its readings are kept by the adapter.
+    assert!(conn.keeps_quota());
     let Event::Commands(c) = next(&rx) else {
         panic!("the first event isn't the commands")
     };
@@ -296,4 +298,67 @@ fn carries_another_agents_conversation() {
     assert_eq!(ls[1]["message"]["model"], "<synthetic>");
     assert_eq!(ls[1]["message"]["content"][0]["text"], "hello");
     assert_eq!(ls[0]["uuid"].as_str().unwrap().len(), 36);
+}
+
+// Go's shareUsage (conn.go:308-338): a reading goes once, as the login's,
+// and again only when it changed or half a minute passed.
+#[test]
+fn shares_usage_readings_once() {
+    let info = br#"{"status":"allowed","resetsAt":1790368200,"rateLimitType":"five_hour","unifiedWindows":{"five_hour":{"utilization":0.5,"resetsAt":1790368200},"seven_day":{"utilization":0.2,"resetsAt":1790521200}}}"#;
+    let live = Mutex::new(crate::usage::Usage::default());
+    let at = 1_000_000;
+    assert!(fresh_reading(&live, "", info, at).is_none(), "no login");
+    let u = fresh_reading(&live, "alex", info, at).expect("first reading");
+    assert_eq!(u.account_id, "alex");
+    assert!(fresh_reading(&live, "alex", info, at + 29_000).is_none());
+    assert!(fresh_reading(&live, "alex", info, at + 31_000).is_some());
+    let rejected = br#"{"status":"rejected","resetsAt":1790368200}"#;
+    assert!(fresh_reading(&live, "alex", rejected, at + 99_000).is_none());
+}
+
+fn signed_in(dir: &std::path::Path) -> Account {
+    crate::login::creds_in_files();
+    let a = Account::at("", dir);
+    std::fs::create_dir_all(dir).unwrap();
+    crate::login::write_creds(&a, br#"{"claudeAiOauth":{"refreshToken":"r"}}"#).unwrap();
+    a
+}
+
+// conn.go:33-37: a session starts in the home it last ran in when that
+// home still has a sign-in, else as the login in use.
+#[test]
+fn start_account_picks_the_home_that_is_warm() {
+    let t = tempfile::tempdir().unwrap();
+    let run = Account::at("run", t.path().join("run"));
+    let warm = signed_in(&t.path().join("warm"));
+    let cold = t.path().join("cold");
+    std::fs::create_dir_all(&cold).unwrap();
+    let home = |p: &std::path::Path| p.display().to_string();
+    assert_eq!(
+        start_account(run.clone(), &home(&warm.config_dir)).config_dir,
+        warm.config_dir
+    );
+    for (name, h) in [
+        ("none", String::new()),
+        ("no sign-in", home(&cold)),
+        ("the login in use", home(&run.config_dir)),
+    ] {
+        assert_eq!(
+            start_account(run.clone(), &h).config_dir,
+            run.config_dir,
+            "{name}"
+        );
+    }
+}
+
+// conn.go:365-367: moved once the login in use runs elsewhere; never for a
+// session on a profile of its own.
+#[test]
+fn moved_after_the_login_in_use_changes() {
+    let t = tempfile::tempdir().unwrap();
+    let a = Account::at("a", t.path().join("a"));
+    let b = Account::at("b", t.path().join("b"));
+    assert!(!moved_off(true, &a, &a));
+    assert!(moved_off(true, &b, &a));
+    assert!(!moved_off(false, &b, &a));
 }

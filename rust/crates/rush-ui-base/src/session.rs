@@ -155,6 +155,12 @@ pub enum Pos {
     },
 }
 
+/// How many prompts the conversation pins over the top of the body with
+/// it starting at row start, rows tall: the conversation's to say, so a
+/// jump lands just below them (set by rush-ui-session-core).
+pub static TOP_PINS: std::sync::OnceLock<fn(&SessionView, usize, usize) -> usize> =
+    std::sync::OnceLock::new();
+
 pub struct SessionView {
     pub key: String,
     /// Where its conversation is read from.
@@ -167,6 +173,9 @@ pub struct SessionView {
     /// The row picked, by ref; "" for none.
     pub sel: String,
     pub pos: Pos,
+    /// `pos` is a jump to a pinned prompt: the turn lands just below the
+    /// top pins that show there, not under them. Cleared once placed.
+    pub land: bool,
     pub verbose: bool,
     pub r#gen: u64,
     pub tail: Option<TailHandle>,
@@ -238,6 +247,7 @@ impl SessionView {
             o: Options::default(),
             sel: String::new(),
             pos: Pos::End,
+            land: false,
             verbose: false,
             r#gen,
             tail: None,
@@ -515,6 +525,16 @@ impl SessionView {
         match self.pos {
             Pos::End => max,
             Pos::At { n, off } => match turn_index(&self.sess, n) {
+                Some(i) if self.land => {
+                    // Just below the top pins that will show with the view
+                    // there: the fewest rows up that hold that many.
+                    let row = self.r.turn_row(i);
+                    let tops = |s: usize| TOP_PINS.get().map_or(0, |f| f(self, s, rows));
+                    let k = (0..=2)
+                        .find(|&k| tops(row.saturating_sub(k)) <= k)
+                        .unwrap_or(2);
+                    (row.saturating_sub(k) + off).min(max)
+                }
                 Some(i) => (self.r.turn_row(i) + off).min(max),
                 None => max,
             },
@@ -523,6 +543,7 @@ impl SessionView {
 
     /// Puts the view's top at row start: following the end once it's there.
     fn set_start(&mut self, start: usize, total: usize, rows: usize) {
+        self.land = false;
         if start >= total.saturating_sub(rows) || self.sess.turns.is_empty() {
             self.pos = Pos::End;
             return;

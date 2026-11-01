@@ -11,6 +11,7 @@ pub mod decisions;
 pub mod handles;
 pub mod linkinfo;
 pub mod model;
+pub mod peers;
 pub mod pictures;
 pub mod render;
 pub mod runname;
@@ -26,6 +27,7 @@ pub use model::{
     Request, RunningPart, Session, Shell, ShellProc, Status, Step, StepId, Task, ToolStat, Turn,
     exchange_peer, peer_label,
 };
+pub use peers::set_peers;
 pub use render::{Depth, Options, Preset, RenderedLine, Renderer};
 pub use runname::{other_harness, run_tag, set_peer_mark};
 pub use search::{Found, Hit, Library, WHO_AGENT, library};

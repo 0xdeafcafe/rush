@@ -1425,6 +1425,7 @@ dependencies = [
  "rush-fleet",
  "rush-gate",
  "rush-net",
+ "rush-plugin",
  "rush-remind",
  "rush-room",
  "rush-state",

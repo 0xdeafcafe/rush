@@ -18,7 +18,7 @@ use rush_core::adapter::{
 
 use crate::account::{Account, path_str};
 use crate::adapter::{Claude, KIND, account};
-use rush_core::adapter::Chooser;
+use rush_core::adapter::{Chooser, Spawnable};
 
 fn boxed(e: impl std::fmt::Display) -> adapter::Error {
     e.to_string().into()
@@ -29,6 +29,14 @@ fn choice(id: &str, note: &str) -> Choice {
         id: id.into(),
         note: note.into(),
         context: 0,
+    }
+}
+
+// go-final internal/adapters/claude/claude.go:184 (SpawnCommand).
+impl Spawnable for Claude {
+    /// A run of Claude Code a shell can hand rush to host.
+    fn spawn_command(&self) -> (String, String) {
+        (r#"claude -p "<task>""#.into(), "--model".into())
     }
 }
 

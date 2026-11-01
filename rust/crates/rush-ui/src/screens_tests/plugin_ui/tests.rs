@@ -3,7 +3,7 @@
 //! trimmed, sets split by "=====", written by a throwaway Go test at the
 //! widths below. Then the keys, through a fake disk.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use rush_core::adapter::{Marketplace, Plugin as AgentPlugin, PluginParts};
@@ -749,6 +749,73 @@ fn sidebar_places() {
     assert_eq!(sidebar::group_label(&sbs, "plugin:haven"), "Haven");
     let names = sidebar::agent_names(&sb, std::slice::from_ref(&a), &Default::default());
     assert_eq!(names.get("k1").map(String::as_str), Some("fixer"));
+}
+
+/// The list follows the arrangement's names: it names an agent, a rename in
+/// rush wins, dropping the arrangement gives the old name back, and the
+/// peers' names follow the list's.
+#[test]
+fn sidebar_names_agents() {
+    use rush_plugin::{Sidebar, SidebarAgent};
+    let agent = |key: &str, sid: &str, name: &str| {
+        let mut a = rush_core::agent::Agent {
+            key: key.into(),
+            display_name: name.into(),
+            ..Default::default()
+        };
+        a.job.session_id = sid.into();
+        a
+    };
+    let mut m = model();
+    m.agents = vec![agent("k1", "s1", "first"), agent("k2", "s2", "second")];
+    m.roots = vec![String::new(); 2];
+    let place = |name: &str| SidebarAgent {
+        name: name.into(),
+        ..SidebarAgent::default()
+    };
+    let sb = Sidebar {
+        plugin: "haven".into(),
+        agents: Some(BTreeMap::from([
+            ("s1".to_string(), place("fixer")),
+            ("s2".to_string(), place("builder")),
+        ])),
+        ..Sidebar::default()
+    };
+    let names =
+        |m: &Model| -> Vec<String> { m.agents.iter().map(|a| a.display_name.clone()).collect() };
+    // Not grouped by it: nothing changes.
+    m.plugins().sidebars = vec![sb];
+    m.rebuild();
+    assert_eq!(names(&m), ["first", "second"]);
+    // Grouped by it, the arrangement names them; a rebuild again changes
+    // nothing more; a name you gave in rush stays.
+    m.cfg.group_by = "plugin:haven".into();
+    m.rebuild();
+    m.rebuild();
+    assert_eq!(names(&m), ["fixer", "builder"]);
+    let codes: HashMap<String, String> = [("s1", "rush-1"), ("s2", "rush-2")]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    assert_eq!(
+        sidebar::peer_names(&codes, &m.agents)
+            .get("rush-1")
+            .map(String::as_str),
+        Some("fixer")
+    );
+    crate::screens::list_extras::rename::save(&mut m, "k2", "mine");
+    m.rebuild();
+    assert_eq!(names(&m), ["fixer", "mine"]);
+    // The arrangement dropped, the name it took over comes back.
+    m.cfg.group_by = "status".into();
+    m.rebuild();
+    assert_eq!(names(&m), ["first", "mine"]);
+    assert_eq!(
+        sidebar::peer_names(&codes, &m.agents)
+            .get("rush-1")
+            .map(String::as_str),
+        Some("first")
+    );
 }
 
 #[test]

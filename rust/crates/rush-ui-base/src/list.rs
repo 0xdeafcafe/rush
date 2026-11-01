@@ -465,6 +465,10 @@ impl Model {
     /// chat (model.go:2251, :2459; roomrows.go:50 roomize).
     pub fn rebuild(&mut self) {
         let now = self.now;
+        // nameAgents (model.go:2231), which ends with namePeers.
+        for f in self.ext.on_rebuild.clone() {
+            f(self);
+        }
         let rooms = match self.kept.peek::<RoomRows>() {
             Some(rr) => grouped(&rr.list, &self.agents, &rr.hidden),
             None => grouped(&[], &self.agents, &Default::default()),
