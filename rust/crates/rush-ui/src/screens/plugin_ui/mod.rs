@@ -116,6 +116,11 @@ pub trait Disk: Send + Sync {
         let v = v.to_string();
         let _ = crate::config::keep(move |c| c.set_view(&v));
     }
+    /// The names you gave agents in rush (store.Overlay.Names), read for
+    /// nameAgents.
+    fn rush_names(&self) -> BTreeMap<String, String> {
+        rush_state::Store::load().overlay.names
+    }
     /// The plugins' arrangements of the list (sidebarFiles.Load).
     fn sidebars(&self, files: &mut rush_plugin::Sidebars) -> Vec<Sidebar> {
         files.load()
@@ -156,6 +161,12 @@ pub struct Plugins {
     /// The plugins' arrangements of the list.
     pub sidebars: Vec<Sidebar>,
     pub sidebar_files: rush_plugin::Sidebars,
+    /// The names you gave agents in rush, by key, as last read: they win
+    /// over an arrangement's (Overlay.Names).
+    pub rush_names: BTreeMap<String, String>,
+    /// The names an arrangement took over, by agent key: (the name it had,
+    /// the name the arrangement gave), to give back (Go's m.renamed).
+    pub renamed: BTreeMap<String, (String, String)>,
 }
 
 impl Default for Plugins {
@@ -175,6 +186,8 @@ impl Default for Plugins {
             pending: Vec::new(),
             sidebars: Vec::new(),
             sidebar_files: rush_plugin::Sidebars::default(),
+            rush_names: BTreeMap::new(),
+            renamed: BTreeMap::new(),
         }
     }
 }

@@ -75,6 +75,15 @@ pub fn save(m: &mut Model, key: &str, name: &str) {
         a.display_name = name.to_string();
     }
     let (key, name) = (key.to_string(), name.to_string());
+    // A name you gave wins over a sidebar's: the list knows at once, before
+    // rush's state is written and read again.
+    let p = m.plugins();
+    p.renamed.remove(&key);
+    if reset {
+        p.rush_names.remove(&key);
+    } else {
+        p.rush_names.insert(key.clone(), name.clone());
+    }
     m.later(
         move || {
             let mut s = rush_state::Store::load();
