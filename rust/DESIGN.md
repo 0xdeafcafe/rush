@@ -63,6 +63,7 @@ speed or memory claim has a number behind it.
 | `rush-ui-base` | what every screen builds on: the model, the frame (places, routing, sheets, editing, the `Ext` hooks and slots the screens fill; "Screens"), the agent list, config, the workers, and the data the screens share (a session's connection as every screen reads it, `sess::ConnCore`; the hosts; the accounts' state and rush's store; the keymap in force; where new sessions start) | `internal/ui` |
 | `rush-ui-social` | the social group's screens: the feed and its graph, rooms, broadcasts, updates and reloading; depends on rush-ui-base only (what it asks of other screens goes through `Ext::calls` and `Act`); its tests that need the whole UI are rush-ui's `screens_tests/social` | `internal/ui` |
 | `rush-ui`     | the screens under `screens/`, registered into a model (`new_model`); the entry points (`run`, `render`, `soak`); re-exports rush-ui-base's modules at their old paths | `internal/ui`                              |
+| `rush-ui-settings` | the Harnesses and Settings places: every settings page, the form they share and the sheets opened from them; reaches no other screen (slots and `Act` in rush-ui-base) | `internal/ui/settings*.go` |
 | `rush`        | the binary: same commands and flags as Go rush; registers the adapters | `cmd/rush`                                 |
 | `rush-ollama` | Ollama's models in Claude Code, Codex, Pi and Vibe: one `Local` per server (what each model reads, models found without loading one, context sizes), tuned per model, a local server started only when needed | `internal/adapters/ollama` |
 | `rush-copilot` | Copilot: the CLI run over ACP (rush-acp's `Agent`), its profile, gh's accounts, premium requests, the coding agent's sessions on GitHub and their logs | `internal/adapters/copilot` |
@@ -1169,7 +1170,7 @@ is made. Everything below is in `rush_ui::frame`.
   frame never reaches the pause. Each list reading indexes the
   conversations in the background (`config::dir()/search`).
 
-- **Settings.** `screens/settings` is both settings places: Harnesses
+- **Settings.** `screens/settings` (the crate `rush-ui-settings`, re-exported there; its full-UI tests are in rush-ui's `settings_tests/`) is both settings places: Harnesses
   (Providers, Harnesses, Config) and Settings (General, Keys, Plugins,
   Updates, Remote), one dialog between them as in Go, its tabs drawn
   through `Place::pages_line`; its `register` makes the bundled plugins

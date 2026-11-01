@@ -14,6 +14,8 @@ rush-draw.workspace = true
 rush-ui-base.workspace = true
 # The social group's screens (feed, rooms, broadcasts, updates).
 rush-ui-social.workspace = true
+# Settings and Harnesses, the screens under rush-ui.
+rush-ui-settings.workspace = true
 rush-sys.workspace = true
 rush-gh.workspace = true
 rush-gate = { path = "../rush-gate" }

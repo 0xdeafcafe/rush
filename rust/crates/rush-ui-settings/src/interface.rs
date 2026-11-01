@@ -218,12 +218,7 @@ pub fn sections(m: &Model) -> Vec<Section> {
     );
     // Plugins arrange the list too: one choice for each that does
     // (groupModes), as ctrl+s cycles them.
-    let sidebars = m
-        .kept
-        .peek::<crate::screens::plugin_ui::Plugins>()
-        .map(|p| p.sidebars.as_slice())
-        .unwrap_or_default();
-    group.choices = crate::screens::plugin_ui::sidebar::group_modes(sidebars);
+    group.choices = (m.ext.calls.group_modes())(m);
     let split = choice(
         "Split by project",
         if split_projects(c) { "on" } else { "off" },

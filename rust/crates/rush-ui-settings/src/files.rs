@@ -41,7 +41,7 @@ pub struct Loaded {
 pub struct Reads {
     pub defs: HashMap<String, Vec<AgentDef>>,
     /// When each agent's things were last asked for.
-    pub(crate) asked: HashMap<String, Instant>,
+    pub asked: HashMap<String, Instant>,
 }
 
 /// The profile k's page is about: the one its sessions run in
@@ -54,7 +54,7 @@ pub fn agent_profile(m: &Model, k: &str) -> Option<Profile> {
 /// Opens path in $VISUAL or $EDITOR, vi without either, and reads what
 /// the page shows again once it's closed (dialog.go:64 editFile).
 pub fn edit_file(m: &mut Model, path: &str) -> Out {
-    crate::screens::session_core::memedit::edit_then(m, path, Box::new(dialog_reload))
+    (m.ext.calls.edit_then())(m, path, Box::new(dialog_reload))
 }
 
 /// Back from the editor: the page open reads its files again, the open
@@ -74,7 +74,7 @@ pub fn dialog_reload(m: &mut Model, r: Result<(), String>) -> Out {
         super::prep(m);
     }
     if let Some(key) = crate::sess::open_key(m) {
-        crate::screens::session_core::memory::forget(m, &key);
+        m.act(crate::frame::ext::Act::ForgetMemory(key));
     }
     if let Err(e) = r {
         m.fail(&e);

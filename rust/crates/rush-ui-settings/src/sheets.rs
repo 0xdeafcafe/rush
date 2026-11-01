@@ -41,7 +41,7 @@ use crate::style::*;
 /// type S. With no loop (tests, `--render`) it lands at once, while the
 /// sheet that asked is still out of the model taking its key: then it's
 /// handed back to the caller instead.
-pub(crate) fn later_to<S: Sheet, T: Send + 'static>(
+pub fn later_to<S: Sheet, T: Send + 'static>(
     m: &mut Model,
     work: impl FnOnce() -> T + Send + 'static,
     adopt: fn(&mut S, T),
@@ -460,9 +460,7 @@ pub fn on_net(m: &mut Model) -> Out {
     f.insert("refetch".into(), (!down).into());
     rush_events::log("network-changed", f);
     if !down {
-        crate::screens::accounts::logins::fetch_usage(m);
-        crate::screens::accounts::logins::find_logins(m);
-        crate::screens::bars::fetch::fetch_now(m);
+        m.act(crate::frame::ext::Act::RefetchUsage);
     }
     Out::Draw
 }

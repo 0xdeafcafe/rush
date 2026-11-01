@@ -39,8 +39,9 @@ pub struct Summ {
 /// Ollama's kind, whose decision models prune (ollama.Kind).
 const OLLAMA: &str = "ollama";
 
-/// CompactKind for a default that prunes with PruneModel (prunerKind).
-pub const PRUNER_KIND: &str = "ollama-prune";
+/// CompactKind for a default that prunes with PruneModel (prunerKind): the
+/// base's, which Settings shows too.
+pub use crate::config::PRUNER_KIND;
 
 /// The decision model's pruner (pruner).
 pub fn pruner(model: &str) -> Summ {

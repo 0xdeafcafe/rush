@@ -8,6 +8,8 @@ use crate::chores::{Chore, always};
 use crate::frame::Ext;
 use crate::frame::ext::{Act, Calls, Kept};
 use crate::model::Model;
+use crate::screens::social::services::ModelReload;
+use crate::screens::social::stream::ModelStream;
 use crate::session::SessionView;
 
 pub mod accounts;
@@ -18,7 +20,8 @@ pub mod plugin_ui;
 pub mod projects_machine;
 pub mod session_cards;
 pub mod session_core;
-pub mod settings;
+// Settings and Harnesses: rush-ui-settings, at the old path.
+pub use rush_ui_settings as settings;
 // The social group is a crate of its own (rush-ui-social); its old path stays.
 pub use rush_ui_social as social;
 
@@ -117,6 +120,19 @@ fn calls() -> Calls {
         start_install: Some(session_core::start::install),
         plugin_key_actions: Some(plugin_ui::hooks::plugin_key_actions),
         plugin_keys: Some(plugin_ui::hooks::plugin_keys),
+        group_modes: Some(|m| {
+            plugin_ui::sidebar::group_modes(
+                m.kept
+                    .peek::<plugin_ui::Plugins>()
+                    .map(|p| p.sidebars.as_slice())
+                    .unwrap_or_default(),
+            )
+        }),
+        pace_words: Some(accounts::guard::pace_words),
+        pace_chip: Some(accounts::guard::pace_chip),
+        edit_then: Some(session_core::memedit::edit_then),
+        reload: Some(|m, all| m.reload(all)),
+        feed_follows: Some(|m, on| m.feed_follows(on)),
         hosted_id: Some(crate::hosted::id),
         hosted_alone: Some(crate::hosted::alone),
         all_agents: Some(crate::hosted::all_agents),
@@ -153,6 +169,12 @@ fn act(m: &mut Model, a: Act) {
             }
             settings::updates::watch_hosts(m, false, false);
         }
+        Act::RefetchUsage => {
+            accounts::logins::fetch_usage(m);
+            accounts::logins::find_logins(m);
+            bars::fetch::fetch_now(m);
+        }
+        Act::ForgetMemory(key) => session_core::memory::forget(m, &key),
     }
 }
 

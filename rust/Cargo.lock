@@ -1600,7 +1600,6 @@ dependencies = [
  "rush-convo",
  "rush-core",
  "rush-draw",
- "rush-efficiency",
  "rush-events",
  "rush-fleet",
  "rush-gate",
@@ -1622,6 +1621,7 @@ dependencies = [
  "rush-sys",
  "rush-testenv",
  "rush-ui-base",
+ "rush-ui-settings",
  "rush-ui-social",
  "rush-update",
  "serde",
@@ -1651,6 +1651,35 @@ dependencies = [
  "rush-state",
  "rush-sys",
  "rush-testenv",
+ "rush-update",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rush-ui-settings"
+version = "0.1.0"
+dependencies = [
+ "rush-bundled",
+ "rush-claude",
+ "rush-convo",
+ "rush-core",
+ "rush-draw",
+ "rush-events",
+ "rush-fleet",
+ "rush-harnessup",
+ "rush-host",
+ "rush-keymap",
+ "rush-menubar",
+ "rush-net",
+ "rush-ollama",
+ "rush-plugin",
+ "rush-remote",
+ "rush-state",
+ "rush-sys",
+ "rush-testenv",
+ "rush-ui-base",
+ "rush-update",
  "serde",
  "serde_json",
 ]

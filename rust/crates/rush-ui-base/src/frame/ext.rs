@@ -229,6 +229,13 @@ pub enum Act {
     /// The hosts are watched again after an update (settings/updates.rs
     /// watch_hosts); with rebuilt_said, an installed one counts as said.
     WatchHosts { rebuilt_said: bool },
+    /// The limits of every account asked for again, and the logins looked
+    /// for (accounts logins::fetch_usage and find_logins, bars
+    /// fetch::fetch_now).
+    RefetchUsage,
+    /// An open session's memory read again, by its key
+    /// (session_core/memory.rs forget).
+    ForgetMemory(String),
 }
 
 impl Model {
@@ -423,6 +430,23 @@ calls! {
     plugin_key_actions("plugin_ui"): fn(&Model) -> Vec<rush_keymap::Action>,
     /// The keys plugins suggest for their actions (hooks.rs plugin_keys).
     plugin_keys("plugin_ui"): fn(&Model) -> std::collections::BTreeMap<String, Vec<String>>,
+    /// The group-by modes on offer: rush's own and one for each plugin that
+    /// arranges the list (plugin_ui/sidebar.rs group_modes).
+    group_modes("plugin_ui"): fn(&Model) -> Vec<String>,
+    /// How the guard sees an account's pace, in words; none while the pace
+    /// guard is off (accounts/guard.rs pace_words).
+    pace_words("accounts"): fn(&Model, &str, &str) -> Option<Line>,
+    /// An account row's pace past the warning, as a chip (guard.rs
+    /// pace_chip).
+    pace_chip("accounts"): fn(&Model, &str, &str) -> Line,
+    /// Opens a file in $EDITOR, then runs done (session_core/memedit.rs
+    /// edit_then).
+    edit_then("session_core"): fn(&mut Model, &str, super::outside::Done) -> Out,
+    /// #reload (social/services.rs reload).
+    reload("social"): fn(&mut Model, bool) -> Out,
+    /// Whether the feed follows is now config's (social/stream.rs
+    /// feed_follows).
+    feed_follows("social"): fn(&mut Model, bool),
     /// The id of the one session a hosted view shows (hosted.rs id).
     hosted_id("hosted"): fn(&Model) -> Option<&str>,
     /// A hosted view showing its one session, the list hidden (hosted.rs
