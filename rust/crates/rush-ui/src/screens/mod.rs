@@ -12,7 +12,6 @@ use crate::screens::social::services::ModelReload;
 use crate::screens::social::stream::ModelStream;
 use crate::session::SessionView;
 
-pub mod accounts;
 pub mod bars;
 pub mod cmdbar;
 pub mod list_extras;
@@ -23,6 +22,8 @@ pub mod session_core;
 pub use rush_ui_settings as settings;
 // The plugin screens: rush-ui-plugin-ui, at the old path.
 pub use rush_ui_plugin_ui as plugin_ui;
+// Accounts, sign-in and starting agents: rush-ui-accounts, at the old path.
+pub use rush_ui_accounts as accounts;
 // The social group is a crate of its own (rush-ui-social); its old path stays.
 pub use rush_ui_social as social;
 
@@ -167,6 +168,10 @@ fn calls() -> Calls {
             lit
         }),
         send_box: Some(session_core::keys::send),
+        session_start: Some(bars::agent::session_start),
+        next_account: Some(list_extras::plan::next_account),
+        rush_screen: Some(session_cards::claudescreen::rush_screen),
+        hash_arg: Some(session_core::rushcmd::hash_arg),
     }
 }
 
@@ -213,6 +218,10 @@ fn act(m: &mut Model, a: Act) {
             }
         }
         Act::SendAs { key, text } => session_core::keys::send_as(m, &key, &text),
+        Act::FetchNow => bars::fetch::fetch_now(m),
+        Act::OpenClaudeScreen { key, screen } => {
+            session_cards::claudescreen::open_screen(m, &key, &screen);
+        }
     }
 }
 

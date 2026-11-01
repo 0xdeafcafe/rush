@@ -13,7 +13,7 @@ use rush_core::text::{Color, Line, Span};
 use rush_core::time::Ms;
 use rush_core::usage::{Change, Context, ContextPart, Delta};
 
-use super::paint::{dim, faint, fit_to, plural, text, tokens};
+use crate::paint::{dim, faint, fit_to, plural, text, tokens};
 use crate::style::*;
 
 /// Each category's colour, its own hue so neighbours in the bar stay

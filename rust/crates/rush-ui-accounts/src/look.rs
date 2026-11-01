@@ -1,12 +1,12 @@
 //! What the header says new sessions start on (providers.go:179
 //! startTag). How each provider is called and looks is the frame's
-//! (crate::look).
+//! (rush_ui_base::look).
 
 use rush_core::text::Line;
 
-pub use crate::look::*;
 use crate::model::Model;
 use crate::style::*;
+pub use rush_ui_base::look::*;
 
 /// What the header says new sessions start on: the provider's glyph, the
 /// account, and the profile when there's more than one or #preset picked

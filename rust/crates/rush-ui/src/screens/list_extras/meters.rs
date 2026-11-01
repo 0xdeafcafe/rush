@@ -20,21 +20,8 @@ pub const LOW_AT: f64 = 80.0;
 pub const FRESH: Ms = 15 * 60_000;
 const HOUR: Ms = 3_600_000;
 
-/// An account as a meter shows it (acctRow, the parts read here).
-#[derive(Clone, Debug, Default)]
-pub struct MeterRow {
-    /// The provider's mark and its colour (lookOf).
-    pub glyph: String,
-    pub colour: Option<Color>,
-    /// harness:account, as rush names it (acctRow.label).
-    pub label: String,
-    pub q: Quota,
-    /// The agent it signs in (acctRow.kind), its own name (acctRow.name)
-    /// and whether it is the one in use (acctRow.current).
-    pub kind: String,
-    pub name: String,
-    pub current: bool,
-}
+// An account as a meter shows it is the base's: the accounts read it too.
+pub use crate::accounts::MeterRow;
 
 /// Green, yellow from 60%, red from 85% (usageColor).
 pub fn usage_color(p: f64) -> Color {

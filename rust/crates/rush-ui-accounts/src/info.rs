@@ -34,7 +34,7 @@ use super::look::{LOGINS_KIND, harness_name};
 use super::rows::{clock, current_login_name, login_name, roughly};
 use super::state::{LoginView, peek};
 use crate::frame::sheet::{Sheet, sheet_row, sheet_tabs, sheet_title};
-use crate::frame::{Out, Press};
+use crate::frame::{Out, Press, ext::Act};
 use crate::model::Model;
 use crate::style::*;
 
@@ -93,7 +93,7 @@ const WHY_WINDOW: Ms = 60 * 60 * 1000;
 
 /// The rush id of the session key and the one that started it, when rush
 /// hosts it or did (Info.ID, Meta spawnedBy).
-pub(crate) fn rush_id(m: &Model, key: &str) -> (String, String) {
+pub fn rush_id(m: &Model, key: &str) -> (String, String) {
     crate::sess::peek_conn(m, key)
         .map(|c| (c.info.began.id.clone(), c.info.began.spawned_by.clone()))
         .unwrap_or_default()
@@ -106,12 +106,12 @@ pub struct InfoSheet {
     pub tab: usize,
     scroll: [usize; TABS],
     /// The Settings tab's row.
-    pub(super) cur: usize,
+    pub cur: usize,
     /// The tabs the agent has.
     pub shown: Vec<usize>,
-    pub(super) read: InfoRead,
-    pub(super) settings: Vec<SettingsLink>,
-    pub(super) loaded: bool,
+    pub read: InfoRead,
+    pub settings: Vec<SettingsLink>,
+    pub loaded: bool,
 }
 
 /// The agent the open conversation is, its kind and the profile it runs
@@ -371,7 +371,10 @@ impl Sheet for InfoSheet {
                     // to it (infotabs.go:333).
                     let key = self.key.clone();
                     if l.claude && l.screen == "mcp" {
-                        crate::screens::session_cards::claudescreen::open_screen(m, &key, "mcp");
+                        m.act(Act::OpenClaudeScreen {
+                            key,
+                            screen: "mcp".into(),
+                        });
                         return Out::Close;
                     }
                     // Each opens its sheet, as its / command does; the
@@ -383,8 +386,7 @@ impl Sheet for InfoSheet {
                         l.screen
                     };
                     let name = l.name.clone();
-                    match crate::screens::session_cards::claudescreen::rush_screen(m, &key, screen)
-                    {
+                    match (m.ext.calls.rush_screen())(m, &key, screen) {
                         Out::Pass => m.flash_err(&format!("{name} isn't in this rush yet")),
                         _ => return Out::Close,
                     }
@@ -668,7 +670,7 @@ fn status_lines(
 /// beside it, then what's inside each part; without the host's count of
 /// it, how full it is and why there's no breakdown (contextLines).
 fn context_lines(m: &Model, a: &Agent, s: &rush_convo::Session, w: usize) -> Vec<Line> {
-    use crate::screens::session_core::context as cx;
+    use crate::context as cx;
     let k = a.kind.as_str();
     let c = crate::sess::peek_conn(m, &a.key);
     let Some(u) = c.and_then(|c| c.context.as_deref()).filter(|u| u.max > 0) else {
@@ -773,7 +775,7 @@ fn context_since(
     c: Option<&crate::sess::ConnCore>,
     w: usize,
 ) -> Vec<Line> {
-    use crate::screens::session_core::context as cx;
+    use crate::context as cx;
     let mut out = Vec::new();
     let change = c.and_then(|c| c.info.began.context_change.as_deref());
     for ls in [

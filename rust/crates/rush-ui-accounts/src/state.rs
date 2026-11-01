@@ -28,7 +28,7 @@ pub fn load_read_only(m: &mut Model) {
 /// After each reading of the list: the store loaded off the UI thread the
 /// first time, and the accounts' readings read again. Only with a loop:
 /// tests and `--render` load what they need when asked.
-pub(crate) fn on_fleet(m: &mut Model) {
+pub fn on_fleet(m: &mut Model) {
     // The header names the account new sessions start on from the first
     // frame: state's list knows Claude Code's home.
     crate::bridge::sync(m);

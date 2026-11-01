@@ -24,7 +24,8 @@ pub mod actions;
 pub mod cards_host;
 pub mod carry;
 pub mod changes;
-pub mod context;
+// What fills a session's context window, drawn, is the base's (the accounts' info sheet draws it too).
+pub use rush_ui_base::context;
 pub mod conversation;
 pub mod dock;
 pub mod exchange;

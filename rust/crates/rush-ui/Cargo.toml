@@ -18,6 +18,8 @@ rush-ui-social.workspace = true
 rush-ui-settings.workspace = true
 # Plugin sheets, approvals and an agent's views beside its conversation.
 rush-ui-plugin-ui.workspace = true
+# Accounts, sign-in and starting agents.
+rush-ui-accounts.workspace = true
 rush-sys.workspace = true
 rush-gh.workspace = true
 rush-gate = { path = "../rush-gate" }

@@ -12,6 +12,7 @@ pub mod changes;
 pub mod chores;
 pub mod clanker;
 pub mod config;
+pub mod context;
 pub mod finish;
 pub mod frame;
 pub mod header;

@@ -36,7 +36,7 @@ pub fn hand_off_stopped(m: &mut Model) -> Out {
 
 /// hand_off_stopped given what room each provider has, and the profile
 /// each session runs under (sessionProfile).
-pub(crate) fn hand_off_stopped_in(
+pub fn hand_off_stopped_in(
     m: &mut Model,
     r: &Room,
     profile: impl Fn(&Model, &Agent) -> Profile,

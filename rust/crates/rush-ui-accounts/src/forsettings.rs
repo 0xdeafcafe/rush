@@ -11,9 +11,9 @@
 //! agentquota.go:26) and u spending an earned reset (useReset,
 //! settings_providers.go:946) are accounts' too.
 
-use crate::frame::Out;
+use crate::frame::{Out, ext::Act};
 use crate::model::Model;
-use crate::screens::settings::acct::{self as sacct, AcctRow as SRow};
+use rush_ui_settings::acct::{self as sacct, AcctRow as SRow};
 
 use super::keys;
 use super::rows::{self, AcctRow};
@@ -81,7 +81,7 @@ pub fn provide() {
 fn fetch(m: &mut Model) {
     super::logins::fetch_usage(m);
     keys::find_sign_ins(m);
-    crate::screens::bars::fetch::fetch_now(m);
+    m.act(Act::FetchNow);
 }
 
 /// The order rush spends Claude Code's logins in, each with its week's
@@ -222,14 +222,14 @@ fn use_reset(m: &mut Model, r: &AcctRow) -> Out {
 
 /// How long spending a reset, and reading the limits after it, may take
 /// together (useReset's context).
-pub(crate) const RESET_WITHIN: std::time::Duration = std::time::Duration::from_secs(30);
+pub const RESET_WITHIN: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// What a reset that took too long fails with.
 const TIMED_OUT: &str = "it took longer than 30 seconds";
 
 /// f's answer, run on a thread of its own, if it comes by by; None when it
 /// doesn't (the thread is left to finish on its own).
-pub(crate) fn within<T: Send + 'static>(
+pub fn within<T: Send + 'static>(
     by: std::time::Instant,
     f: impl FnOnce() -> T + Send + 'static,
 ) -> Option<T> {

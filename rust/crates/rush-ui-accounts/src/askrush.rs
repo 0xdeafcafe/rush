@@ -116,14 +116,14 @@ pub fn on_config(m: &mut Model, b: &[u8]) -> Out {
             "",
         ),
         None => {
-            crate::screens::settings::sync(m);
+            rush_ui_settings::sync(m);
             // The icon turned on or off in another rush, which leaves it to
             // this one if it leads: started or stopped now, as the row
             // does (settings_general.go:126-136). Beyond Go, whose onConfig
             // (askrush.go:45-54) never does, so its icon waited for a
             // restart. Only the leading, interactive rush (MenuBarOwner).
             if let Some(on) = menu_bar {
-                crate::screens::settings::sheets::menu_bar_turned(m, on);
+                rush_ui_settings::sheets::menu_bar_turned(m, on);
             }
             m.news(
                 "settings reloaded: config.json changed outside rush, and rush is using them",

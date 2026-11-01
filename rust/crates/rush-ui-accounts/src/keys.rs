@@ -430,7 +430,7 @@ pub fn native_sign_in(m: &mut Model, k: &str) -> Out {
     let Some(ad) = m.reg.get(k) else {
         return Out::Idle;
     };
-    crate::screens::settings::harnesses::native_sign_in_with(m, ad, k)
+    rush_ui_settings::harnesses::native_sign_in_with(m, ad, k)
 }
 
 /// An account just signed in to (acctAddedMsg.applyTo).
@@ -763,9 +763,9 @@ pub fn ask_text(
 ) {
     // On a Settings page it's the page's own line at the foot, the rows
     // left in view (settings_providers.go addAccount, ask()).
-    if crate::screens::settings::dialog_open(m) {
+    if rush_ui_settings::dialog_open(m) {
         let then = std::cell::RefCell::new(Some(then));
-        crate::screens::settings::ask(
+        rush_ui_settings::ask(
             m,
             what,
             value,

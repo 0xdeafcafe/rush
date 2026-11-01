@@ -228,18 +228,8 @@ fn read_all(jobs: &[Job]) -> Got {
     got
 }
 
-/// Where a reading r of profile p's account is kept: by the login it's
-/// signed in as, else by its folder (fleet.ReadingKey).
-pub fn reading_key(p: &Profile, r: &Reading) -> String {
-    if r.account_id.is_empty() {
-        return p.dir.clone();
-    }
-    Login {
-        id: r.account_id.clone(),
-        ..Login::default()
-    }
-    .usage_key()
-}
+// Where a reading is kept is the base's (the accounts read it too).
+pub use crate::accounts::reading_key;
 
 #[cfg(test)]
 mod tests {

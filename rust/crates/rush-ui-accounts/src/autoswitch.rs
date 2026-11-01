@@ -248,7 +248,7 @@ pub fn kind_limit_stopped(m: &Model, k: &str) -> bool {
 /// out, and why: the one with the most room, unless that's nearly out
 /// too (nextAccount over k's rows, agentquota.go:121).
 pub fn next_account(m: &Model, accts: &[AcctRow], now: Ms) -> Option<(AcctRow, String)> {
-    use crate::screens::list_extras::meters::MeterRow;
+    use crate::accounts::MeterRow;
     let meters: Vec<MeterRow> = accts
         .iter()
         .enumerate()
@@ -261,7 +261,7 @@ pub fn next_account(m: &Model, accts: &[AcctRow], now: Ms) -> Option<(AcctRow, S
             ..MeterRow::default()
         })
         .collect();
-    let (to, why) = crate::screens::list_extras::plan::next_account(&meters, now)?;
+    let (to, why) = (m.ext.calls.next_account())(&meters, now)?;
     let i: usize = to.label.parse().ok()?;
     Some((accts.get(i)?.clone(), why))
 }

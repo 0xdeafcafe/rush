@@ -13,7 +13,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-use rush_core::adapter::{Account, AccountSummary, Choice, Registry};
+use rush_core::adapter::{Account, AccountSummary, Choice, Profile, Registry};
+use rush_core::text::Color;
 use rush_core::time::Ms;
 use rush_core::usage::{self, Quota, Reading};
 use rush_state::profiles::BILLING_KEY;
@@ -555,4 +556,37 @@ pub fn config_mut(m: &mut Model) -> &mut Config {
 /// Puts a store in place of the one on disk (tests).
 pub fn use_store(m: &mut Model, s: Store) {
     set_store(m, s);
+}
+
+/// The account to move on to, and why, from the meters of an agent's
+/// accounts (list_extras/plan.rs next_account).
+pub type NextAccount = fn(&[MeterRow], Ms) -> Option<(MeterRow, String)>;
+
+/// An account as a meter shows it (acctRow, the parts read here).
+#[derive(Clone, Debug, Default)]
+pub struct MeterRow {
+    /// The provider's mark and its colour (lookOf).
+    pub glyph: String,
+    pub colour: Option<Color>,
+    /// harness:account, as rush names it (acctRow.label).
+    pub label: String,
+    pub q: Quota,
+    /// The agent it signs in (acctRow.kind), its own name (acctRow.name)
+    /// and whether it is the one in use (acctRow.current).
+    pub kind: String,
+    pub name: String,
+    pub current: bool,
+}
+
+/// Where a reading r of profile p's account is kept: by the login it's
+/// signed in as, else by its folder (fleet.ReadingKey).
+pub fn reading_key(p: &Profile, r: &Reading) -> String {
+    if r.account_id.is_empty() {
+        return p.dir.clone();
+    }
+    Login {
+        id: r.account_id.clone(),
+        ..Login::default()
+    }
+    .usage_key()
 }

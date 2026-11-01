@@ -8,7 +8,7 @@ use crate::model::Model;
 
 /// After each reading of the list: its agents newest first, by key, so
 /// a frame doesn't sort them again.
-pub(crate) fn on_fleet(m: &mut Model) {
+pub fn on_fleet(m: &mut Model) {
     let mut idx: Vec<usize> = (0..m.agents.len()).collect();
     idx.sort_by_key(|i| std::cmp::Reverse(m.agents[*i].job.created_at));
     let keys = idx.iter().map(|&i| m.agents[i].key.clone()).collect();

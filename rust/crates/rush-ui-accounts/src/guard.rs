@@ -556,7 +556,7 @@ fn input(m: &mut Model, now: Ms) -> Input {
 
 /// What a look found, kept; what's newly past its pace said; new sessions
 /// switched to the account the plan picked, then the sessions moved.
-pub(crate) fn applied(m: &mut Model, o: Output, ops: Arc<dyn HostOps>, now: Ms) -> Out {
+pub fn applied(m: &mut Model, o: Output, ops: Arc<dyn HostOps>, now: Ms) -> Out {
     let quiet = cfg(m).quiet;
     let was_over = state(m).over.clone();
     let was_all = state(m).plan.all_paced.is_some();

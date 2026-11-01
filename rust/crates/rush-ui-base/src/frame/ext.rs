@@ -245,6 +245,12 @@ pub enum Act {
     /// The agent sent text as if typed, in a session rush runs
     /// (session_core/keys.rs send_as).
     SendAs { key: String, text: String },
+    /// Every provider's limits read again, off the UI thread, without the
+    /// logins looked for (bars/fetch.rs fetch_now).
+    FetchNow,
+    /// Claude Code's own screen for a session, with the terminal handed to
+    /// it (session_cards/claudescreen.rs open_screen).
+    OpenClaudeScreen { key: String, screen: String },
 }
 
 impl Model {
@@ -505,6 +511,18 @@ calls! {
     /// What's in a session's box sent, or held for plugins to answer
     /// first (session_core/keys.rs send).
     send_box("session_core"): fn(&mut Model, &str, bool) -> Out,
+    /// What a session is running as, to switch it (bars/agent.rs
+    /// session_start).
+    session_start("bars"): fn(&Model, &str) -> Option<crate::accounts::StartOver>,
+    /// The account to switch to when the one in use is nearly out, and
+    /// why (list_extras/plan.rs next_account).
+    next_account("list_extras"): crate::accounts::NextAccount,
+    /// One of an agent's own screens in place of rush's sheet; Pass for
+    /// the ones it has none of (session_cards/claudescreen.rs rush_screen).
+    rush_screen("session_cards"): fn(&mut Model, &str, &str) -> Out,
+    /// #model and #effort with the agent's session open: its /model and
+    /// /effort; None when it isn't (session_core/rushcmd.rs hash_arg).
+    hash_arg("session_core"): fn(&mut Model, &str, &str) -> Option<Out>,
 }
 
 /// State screens keep between calls, one value per type, made on first

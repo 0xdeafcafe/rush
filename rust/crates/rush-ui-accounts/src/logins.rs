@@ -205,7 +205,7 @@ pub fn on_logins(m: &mut Model, f: FoundLogins) -> Out {
 
 /// Settings, if it's open, reads its page again (loadDialog).
 pub fn reload_settings(m: &mut Model) {
-    crate::screens::settings::reload_dialog(m);
+    rush_ui_settings::reload_dialog(m);
 }
 
 /// Every login's plan read again now, then the readings taken in: the
@@ -224,7 +224,7 @@ pub fn fetch_usage(m: &mut Model) {
             let pr = ad.plan_reader()?;
             let path = rush_state::dir().join("usage.json");
             let u = pr.refresh_plan(&path.to_string_lossy(), &p, false);
-            Some((crate::screens::bars::fetch::reading_key(&p, &u), u))
+            Some((crate::accounts::reading_key(&p, &u), u))
         },
         |m, got| {
             if let Some((key, u)) = got {
@@ -316,7 +316,7 @@ pub fn switch_login_then(
     to: Login,
     why: &str,
     mv: bool,
-    then: crate::screens::accounts::keys::AfterSwitch,
+    then: crate::keys::AfterSwitch,
 ) -> Out {
     switch_login_and(m, to, why, mv, Some(then))
 }
@@ -326,7 +326,7 @@ fn switch_login_and(
     to: Login,
     why: &str,
     mv: bool,
-    then: Option<crate::screens::accounts::keys::AfterSwitch>,
+    then: Option<crate::keys::AfterSwitch>,
 ) -> Out {
     let Some(k) = keeper(m) else {
         return then.map_or(Out::Idle, |f| f(m));

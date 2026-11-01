@@ -18,7 +18,7 @@
 pub mod askrush;
 pub mod autoswitch;
 pub mod bits;
-pub use crate::bridge;
+pub use rush_ui_base::bridge;
 pub mod choices;
 pub mod forsettings;
 pub mod guard;
@@ -39,18 +39,15 @@ pub mod signin;
 pub mod startsheet;
 pub mod state;
 
+// The base's modules, so crate::frame::.. and the like read as they did
+// in rush-ui. Each is the one module, not a copy.
+use rush_ui_base::{
+    accounts, config, context, frame, model, paint, rooms, sess, startdir, style, worker,
+};
+
+// Every test runs in a throwaway home (rush-testenv).
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
-mod tests_guard;
-#[cfg(test)]
-mod tests_logins;
-#[cfg(test)]
-mod tests_newcmd;
-#[cfg(test)]
-mod tests_no5h;
-#[cfg(test)]
-mod tests_settings;
+rush_testenv::sandboxed!();
 
 use crate::frame::{Ext, Out, Press};
 use crate::model::Model;
@@ -79,14 +76,13 @@ pub fn register(x: &mut Ext) {
     // In the session open, #model and #effort are its /model and /effort
     // (keys.go:956-967); else the start sheet's rows.
     x.command("model", "choose the current session’s model", |m, arg| {
-        crate::screens::session_core::rushcmd::hash_arg(m, "model", arg)
-            .unwrap_or_else(|| startsheet::open_on(m, 4, arg))
+        (m.ext.calls.hash_arg())(m, "model", arg).unwrap_or_else(|| startsheet::open_on(m, 4, arg))
     });
     x.command(
         "effort",
         "choose the current session’s reasoning effort",
         |m, arg| {
-            crate::screens::session_core::rushcmd::hash_arg(m, "effort", arg)
+            (m.ext.calls.hash_arg())(m, "effort", arg)
                 .unwrap_or_else(|| startsheet::open_on(m, 5, arg))
         },
     );

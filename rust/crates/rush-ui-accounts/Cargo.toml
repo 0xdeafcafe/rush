@@ -1,0 +1,29 @@
+[package]
+name = "rush-ui-accounts"
+description = "rush's account screens: providers' look, accounts and their limits, what new sessions start as, signing in, Getting started, #ask and the info sheet"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core.workspace = true
+rush-convo.workspace = true
+rush-fleet.workspace = true
+rush-draw.workspace = true
+rush-sys.workspace = true
+rush-state.workspace = true
+rush-events.workspace = true
+rush-claude.workspace = true
+# A session's host: what it can start and switch (host/*.go).
+rush-host = { path = "../rush-host" }
+# The frame and model under every screen.
+rush-ui-base.workspace = true
+# Settings › Providers draws the account rows; the one screen group #ask and
+# signing in reach below (rank: settings < accounts).
+rush-ui-settings.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+libc.workspace = true
+
+[dev-dependencies]
+rush-testenv = { path = "../rush-testenv" }

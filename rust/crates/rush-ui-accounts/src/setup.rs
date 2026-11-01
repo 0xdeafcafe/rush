@@ -363,7 +363,7 @@ pub fn setup_args(m: &Model, text: &str, now: &StartOver) -> Vec<rush_core::even
     if q.contains([' ', '\n']) {
         return Vec::new();
     }
-    if crate::screens::cmdbar::fleetslash::alias_of(name) != "use" {
+    if (m.ext.calls.alias_of())(name) != "use" {
         return Vec::new();
     }
     let q = q.to_lowercase();
@@ -406,7 +406,7 @@ pub fn setup_args(m: &Model, text: &str, now: &StartOver) -> Vec<rush_core::even
 /// (hashStart).
 pub fn hash_start(m: &Model) -> StartOver {
     if let Some(key) = m.session.as_ref().map(|v| v.key.clone())
-        && let Some(o) = crate::screens::bars::agent::session_start(m, &key)
+        && let Some(o) = (m.ext.calls.session_start())(m, &key)
     {
         return o;
     }
@@ -609,7 +609,7 @@ pub fn start_in(m: &mut Model, o: &StartOver, msg: &str, dir: &str) -> Out {
 pub fn use_setup(m: &mut Model, key: Option<&str>, arg: &str, msg: &str) -> Out {
     if arg.is_empty() {
         if let Some(key) = key {
-            return match crate::screens::bars::agent::session_start(m, key) {
+            return match (m.ext.calls.session_start())(m, key) {
                 Some(o) => super::startsheet::open_switch_sheet(m, key, o),
                 None => Out::Idle,
             };
