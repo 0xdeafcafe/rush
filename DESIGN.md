@@ -730,10 +730,12 @@ reads stderr in the same poll; stdin is written by a thread that lives
 only while something is queued, and the process group's guard
 (`rush_sys::pgguard`) has none: it's reaped as it's released. Idle
 between turns, a Claude Code host ran 11 threads (`ps -M`, 2026-11-02),
-now 5; `rush-host/tests/threads.rs` counts an idle host's own, 6 → 3, and
+now 5; `rush-host/tests/threads.rs` counts an idle host's own, 7 → 4, and
 `rush-claude/tests/threads.rs` a waiting session's, 4 → 1, each file its
 own process. It wakes for its tmp look and its idle timer only, not
-every 30 s. A connected client adds two (its reader and writer). rush-fleet reads hosted sessions through its `Hosts` trait, which
+every 30 s. A connected client adds two (its reader and writer).
+
+rush-fleet reads hosted sessions through its `Hosts` trait, which
 rush-host's `hosts::Sessions` implements over its `Lister` (the fleet
 can't depend on the host, which depends on it); it also revives a host
 lost mid-turn (Go's Revive), unless the rush follows (below). Beyond Go,

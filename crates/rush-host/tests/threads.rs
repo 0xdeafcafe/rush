@@ -8,9 +8,10 @@ use rush_host::fake;
 use rush_host::wire::Config;
 
 /// The threads an idle host adds: the one serving it (the process's main
-/// in `rush host run`), its timers and its agents' queue. Before its wait
-/// held the socket, its folder and the tmp looks, 6.
-const IDLE_HOST: usize = 3;
+/// in `rush host run`), the events log's writer, its timers and its
+/// agents' queue. Before its wait held the socket, its folder and the tmp
+/// looks, 7.
+const IDLE_HOST: usize = 4;
 
 /// This process's thread count once it has fallen to at most n, or after
 /// a while: what a start leaves for a moment (a client's reader, a look at

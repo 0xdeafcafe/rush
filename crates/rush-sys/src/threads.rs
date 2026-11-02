@@ -234,12 +234,15 @@ mod tests {
         // count is had, and that a small stack runs what a helper does.
         assert!(count() >= 1);
         let (tx, rx) = mpsc::channel::<()>();
+        let (up_tx, up) = mpsc::channel::<()>();
         let t = spawn_small("rush-test", move || {
+            let _ = up_tx.send(()); // named by now: a thread names itself as it starts
             let v: serde_json::Value = serde_json::from_str(r#"{"a":[1,2,{"b":"c"}]}"#).unwrap();
             let _ = rx.recv();
             v.to_string()
         })
         .unwrap();
+        up.recv().unwrap();
         assert!(count() >= 2);
         assert!(names().iter().any(|n| n == "rush-test"), "{:?}", names());
         drop(tx);
