@@ -7,13 +7,25 @@ use super::stepkeys_tests::add_fetch;
 use super::*;
 use crate::screens::plugin_ui::views::read;
 
+/// The ref of a row drawn closed (showing ▸), nothing picked after;
+/// panics with the screen when none is.
+fn closed_row(m: &mut Model) -> String {
+    let shown = screen(m).join("\n");
+    let v = m.session.as_mut().unwrap();
+    v.sel.clear();
+    v.r.rows()
+        .iter()
+        .find(|l| !l.r#ref.is_empty() && l.line.plain().contains('▸'))
+        .map(|l| l.r#ref.clone())
+        .unwrap_or_else(|| panic!("no closed row:\n{shown}"))
+}
+
 /// A session 120 wide (no column) with a step in it, nothing picked.
 fn plain() -> (Model, String) {
     let fake = Fake::new();
     let mut m = open(agent("steer", State::Idle), &fake, 120, 40);
-    let r = add_fetch(&mut m);
-    m.session.as_mut().unwrap().sel.clear();
-    screen(&mut m);
+    add_fetch(&mut m);
+    let r = closed_row(&mut m);
     (m, r)
 }
 
@@ -22,9 +34,8 @@ fn plain() -> (Model, String) {
 fn with_column(id: &str) -> (Model, String) {
     let mut m = rush_open(id, 220, 50, vec![view("tests", "Tests", "")]);
     read::state(&mut m, KEY).shut = true;
-    let r = add_fetch(&mut m);
-    m.session.as_mut().unwrap().sel.clear();
-    screen(&mut m);
+    add_fetch(&mut m);
+    let r = closed_row(&mut m);
     assert!(
         crate::screens::session_core::side::has_items(&mut m, KEY),
         "the column has something to pick"
