@@ -162,12 +162,19 @@ enum Msg {
     Deaf,
 }
 
+/// What [`on_change`] keeps: told under the watcher's lock, so it must
+/// neither wait nor call back into netwatch.
+type Hook = Box<dyn Fn() -> bool + Send>;
+
 #[derive(Default)]
 struct Inner {
     s: State,
     jobs: BTreeMap<String, Job>,
     started: bool,
     subs: Vec<Sender<()>>,
+    /// Told on the watcher's own thread each time; one returning false
+    /// is dropped.
+    hooks: Vec<Hook>,
     /// Each interface's bytes in and out, as last read.
     count: HashMap<u32, [u64; 2]>,
     at: Option<Instant>,
@@ -196,6 +203,7 @@ impl Inner {
         for c in self.subs.drain(..) {
             let _ = c.send(());
         }
+        self.hooks.retain(|h| h());
     }
 
     /// Judges the network over the window.
@@ -306,6 +314,15 @@ impl Watcher {
         let (tx, rx) = mpsc::channel();
         self.lock().subs.push(tx);
         rx
+    }
+
+    /// Calls f each time the API goes from down to up or the machine
+    /// joins another network, until it returns false: what [`changes`]
+    /// tells, with no thread of the caller's waiting on a receiver. f runs
+    /// on the watcher's thread under its lock: it must hand on (a
+    /// try_send), not wait, nor call netwatch.
+    pub fn on_change(&self, f: impl Fn() -> bool + Send + 'static) {
+        self.lock().hooks.push(Box::new(f));
     }
 
     /// Whether a check has said the API can't be reached.
@@ -645,6 +662,11 @@ pub fn changes() -> Receiver<()> {
     W.changes()
 }
 
+/// See [`Watcher::on_change`].
+pub fn on_change(f: impl Fn() -> bool + Send + 'static) {
+    W.on_change(f)
+}
+
 /// See [`Watcher::down`].
 pub fn down() -> bool {
     W.down()
@@ -929,8 +951,18 @@ mod tests {
         let j = &w.now().jobs[0];
         assert!(j.paused && j.skipped == 1, "job {j:?}");
         let ch = w.changes();
+        // A hook is told too, and kept while it says so.
+        let told = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let t = told.clone();
+        w.on_change(move || {
+            t.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            true
+        });
+        w.on_change(|| false);
         w.took(up(ms(1)), Instant::now());
         assert!(ch.try_recv().is_ok(), "coming back up didn't say so");
+        assert_eq!(told.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(w.lock().hooks.len(), 1, "one said it's done");
         assert!(!w.now().jobs[0].paused, "still paused once up");
         assert!(w.run("usage"));
     }

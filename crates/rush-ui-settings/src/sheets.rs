@@ -424,21 +424,17 @@ pub fn watch_net(m: &mut Model) {
     }
     netwatch::start();
     m.kept::<NetWatched>().0 = Some(netwatch::want_checks());
+    // Told on netwatch's own thread, not one of ours waiting on it (it
+    // was rush-net): a change while the last is still to be handled is
+    // the same news, as on_net reads the network as it is then.
     let tx = tx.lane(1);
-    let _ = std::thread::Builder::new()
-        .name("rush-net".into())
-        .spawn(move || {
-            loop {
-                let rx = netwatch::changes();
-                if rx.recv().is_err() {
-                    return;
-                }
-                let apply: crate::frame::work::Apply = Box::new(on_net);
-                if !tx.send(crate::worker::Note::Apply(apply)) {
-                    return;
-                }
-            }
-        });
+    netwatch::on_change(move || {
+        let apply: crate::frame::work::Apply = Box::new(on_net);
+        !matches!(
+            tx.try_send(crate::worker::Note::Apply(apply)),
+            Err(rush_draw::TrySend::Closed(_))
+        )
+    });
 }
 
 /// Whether this rush watches the network (a TUI, after watch_net).
