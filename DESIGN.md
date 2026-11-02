@@ -2273,6 +2273,32 @@ Go rush is gone from the tree; its last version is the `go-final` tag
   falls 124 → 79 MiB and the footprint 180 → 125 MB. A long
   conversation closed or replaced is freed on a thread of its own and
   its pages given back (`rush_sys::mem::let_go`).
+- The open bench also counts allocations made and still held, splits the
+  retained heap (steps, calls, raw input, output, turns, requests), prints
+  the hot types' sizes, and reads the transcript's subagent runs whole as
+  the session view's subagents reader does. Measured 2026-11-02, before →
+  after the data-layout changes: Item 56 → 40 B; the 119 MiB transcript
+  makes 244,187 → 235,155 allocations and keeps 44,628 → 41,487 of them
+  (12.7 → 12.6 MiB); the 19.5 MiB one 61,608 → 59,801 and 11,428 → 10,821.
+  Its subagent runs are the bigger part: 45 runs retain 20.4 MiB, another
+  session's 221 runs 82 MiB, so the reader lets go of a run once its numbers
+  aren't followed (rush-ui-session-core `subs.rs`).
+- `cargo bench -p rush-host --bench list` (`RUSH_REAL=1` for this home,
+  read only; its lister follows, never reviving a host): the list's
+  loader and a reading of it, the rows' and the loader's retained heap
+  and allocations, and the row types' sizes. `RUSH_BENCH_PAUSE=1` holds
+  it open for `heap` and `malloc_history`. Measured 2026-11-02 on a home
+  of 774 rows, the loader alone retains 23.2 MiB in 175,376 allocations
+  before, 16.6 MiB in 127,607 after: Agent 1616 → 1280 B (its PR and
+  workspace boxed), Totals 480 → 448 B and Spend 320 → 304 B with their
+  model and folder names shared (`rush_core::name::Name`: 16 bytes, a
+  static str for the tool, role, level and media-type words known ahead,
+  one shared copy for the rest) 23.2 → 21.0 MiB; the host lister keeping
+  each session not awake as its HostInfo only, not its Info as well,
+  21.0 → 18.0 MiB and 156,080 → 132,197 allocations; a Name in 16 bytes
+  rather than 24, 18.0 → 17.8 MiB; the spend scanner holding each
+  transcript's path once, 17.8 → 16.6 MiB and 132,091 → 127,607
+  allocations.
 - Footprint: `/usr/bin/footprint -p <pid>` idle on the list, and with the
   largest transcript under `~/.claude/projects` open; side by side with Go.
 - Idle: `top -l` CPU and wakeups over 60 s with nothing changing.
