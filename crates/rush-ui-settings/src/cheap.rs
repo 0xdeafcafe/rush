@@ -1,6 +1,6 @@
 //! Settings › Usage's "Cheaper model for routine subagents" (Rust-only):
-//! off until turned on. What it does is rush_host::cheap's; it moves to
-//! the Usage page whole, it has no other ties to this page.
+//! off until turned on. What it does is rush_host::cheap's; it sits on
+//! Settings › Usage, after the context guard.
 
 use rush_core::adapter::Feature;
 use rush_state::config::{CHEAP_MODE_ALL, CHEAP_MODE_ON};

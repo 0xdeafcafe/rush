@@ -1533,8 +1533,8 @@ minute.
 
 ### Cheaper model for routine subagents (Rust-only)
 
-Opt-in, off by default (Settings, in its own section beside Prompt cache
-until the Usage page lands; `rush-ui-settings/src/cheap.rs`). Routine
+Opt-in, off by default (Settings › Usage, its own section after Context
+guard; `rush-ui-settings/src/cheap.rs`). Routine
 subagent work (a described edit, a lookup, a search, running and reading
 tests, a mechanical refactor) doesn't need the strongest model. rush calls
 no model to decide; it only tells the agent and, optionally, sets one
