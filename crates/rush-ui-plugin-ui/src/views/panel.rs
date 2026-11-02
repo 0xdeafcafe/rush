@@ -1034,7 +1034,7 @@ impl ViewsState {
 
     /// Whether the cursor's first row is in sight in bh rows.
     fn cursor_shows(&self, bh: usize) -> bool {
-        self.cursor >= self.scroll && self.cursor < self.scroll + bh
+        (self.scroll..self.scroll + bh).contains(&self.cursor)
     }
 
     /// The cursor kept on a thing a click does, and in sight in bh rows.
@@ -1092,9 +1092,14 @@ impl ViewsState {
                 } else {
                     (self.scroll + page).min(self.most)
                 };
-                let (top, end) = (self.scroll, self.scroll + bh);
-                let first = self.items.iter().find(|(f, _)| *f >= top && *f < end);
-                if let Some(&(from, _)) = first.filter(|_| self.cursor < top || self.cursor >= end)
+                let sight = self.scroll..self.scroll + bh;
+                let first = self
+                    .items
+                    .iter()
+                    .map(|&(f, _)| f)
+                    .find(|f| sight.contains(f));
+                if let Some(from) = first
+                    && !sight.contains(&self.cursor)
                 {
                     self.cursor = from;
                     self.btn = 0;

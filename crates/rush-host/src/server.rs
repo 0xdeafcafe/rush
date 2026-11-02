@@ -1862,7 +1862,8 @@ impl Host {
             changes: std::mem::take(&mut st.turn_changes),
         };
         let id = st.cfg.id.clone();
-        self.go("views", move |h| {
+        let h = self.clone();
+        self.go("views", move |_| {
             if crate::views::views_changed(&id).is_none()
                 || rush_state::Store::load().config.views_off
             {

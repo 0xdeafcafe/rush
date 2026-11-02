@@ -123,7 +123,7 @@ fn keys_move_through_rows_open_them_and_press_their_buttons() {
     // pgdn scrolls a page and brings the cursor into sight.
     st.key("pgdown");
     draw(&mut st);
-    assert!(st.scroll > 0 && st.cursor >= st.scroll && st.cursor < st.scroll + 10);
+    assert!(st.scroll > 0 && (st.scroll..st.scroll + 10).contains(&st.cursor));
     // ← off the buttons, then ← again gives the keys back; so does any
     // key that isn't the panel's.
     st.key("left");
