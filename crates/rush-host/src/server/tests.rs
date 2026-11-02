@@ -2143,3 +2143,45 @@ fn system_prompt_is_word_for_word_stable() {
     }
     assert!(!all.contains("\n\n\n"), "{all}");
 }
+
+/// A view rush greyed is named at the end of the message that starts the
+/// agent's next turn, in viewstale's one line, after what you wrote; a
+/// message with none greyed goes as it was.
+#[test]
+fn greyed_views_are_named_at_the_end_of_the_next_message() {
+    let _home = Home::new();
+    let h = host(Config {
+        id: "vn".into(),
+        ..Config::default()
+    });
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    h.send("first", &[], false).unwrap();
+    crate::views::save_view(
+        "vn",
+        crate::views::View {
+            name: "ci".into(),
+            title: "CI".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    // The turn after it was set left it alone.
+    let later = crate::viewstale::Turn {
+        start: Time::now().to_ms() + 1000,
+        ..Default::default()
+    };
+    crate::views::turn_ended("vn", &later);
+    h.lock().info.state = "idle".into();
+    h.send("next", &[], false).unwrap();
+    let got = c.got.lock().unwrap();
+    assert_eq!(got[0].text, "first");
+    assert_eq!(
+        got[1].text,
+        format!(
+            "next\n\n<system-reminder>{}</system-reminder>",
+            crate::viewstale::note(&["ci".into()])
+        )
+    );
+    assert_eq!(rush_convo::transcript::clean_prompt(&got[1].text), "next");
+}

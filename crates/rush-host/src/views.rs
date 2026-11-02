@@ -18,16 +18,10 @@ use crate::wire::zero_time;
 
 /// Tells every agent it can keep a view: kept short, as every session
 /// carries it.
-pub const VIEWS_PROMPT: &str = "Your `view` tool (or `rush view set <name>`, JSON on stdin) draws live state in a panel beside the chat: a test run or build and its numbers, benchmarks, progress through a list, PRs and their checks, a migration, services you started. Start one unasked when such work starts, set it again (same name) on each change, clear it when done. When the user asks for status, stats or how work is going, answer there with stats, bars, a board or a table, and keep your reply to a line or two pointing at it, not tables in the chat. Never repeat your reply in it, or it in your reply; not for plans or summaries; rush shows subagents itself. About 46 columns: row text under 30, meta under 20, tables of 2 or 3 short columns. Untouched for 10 min or a turn it greys; for 45 min or 3 turns it's put away. `rush view guide` has the styles.";
+pub const VIEWS_PROMPT: &str = "Your `view` tool (or `rush view set <name>`, JSON on stdin) draws live state in a panel beside the chat: a test run or build and its numbers, benchmarks, progress through a list, PRs and their checks, a migration, services you started. Start one unasked when such work starts, set it again (same name) on each change, clear it when done. When the user asks for status, stats or how work is going, answer there with stats, bars, a board or a table, and keep your reply to a line or two pointing at it, not tables in the chat. Never repeat your reply in it, or it in your reply; not for plans or summaries; rush shows subagents itself. About 46 columns: row text under 30, meta under 20, tables of 2 or 3 short columns. It greys when all done, out of date after a push, or untouched for a turn or 10 min; 2 turns later it's put away. Give rows the user's next step as actions. `rush view guide` has the styles.";
 
-/// A view the agent hasn't touched for this long greys (and the agent is
-/// told once, while it works): long enough that a benchmark or a build
-/// between two updates doesn't, short enough that a long turn can't keep a
-/// dead view looking live.
-pub const STALE_MS: i64 = 10 * 60_000;
-/// One untouched this long is put away, working or not: the user can
-/// bring it back from the past views.
-pub const AWAY_MS: i64 = 45 * 60_000;
+pub use crate::viewstale::{AWAY_MS, STALE_MS};
+use crate::viewstale::{Verdict, at_turn_end, by_clock};
 
 /// Numbers as Go writes a float64: 9, not 9.0.
 pub(crate) mod floats {
@@ -65,6 +59,10 @@ pub(crate) mod floats {
 
 fn nullv<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Vec<T>, D::Error> {
     rush_core::wire::nullvec::deserialize(d)
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 fn floats_de<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<f64>, D::Error> {
@@ -113,6 +111,13 @@ pub struct View {
     #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "nullv")]
     pub yours: Vec<Yours>,
     pub updated: Time,
+    /// Why rush greyed it (viewstale's WHY_*), "" while it's live: the
+    /// agent setting it again makes it live.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub greyed: String,
+    /// Turns ended since it greyed, untouched.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub grey_turns: u32,
     /// When it was put away, for a past view.
     #[serde(skip_serializing_if = "zero_time")]
     pub gone: Time,
@@ -382,6 +387,8 @@ pub fn save_view(id: &str, mut v: View) -> Result<(), String> {
     v.yours = keep_yours(&mut v, yours);
     v.updated = Time::now();
     v.gone = Time::default();
+    v.greyed.clear(); // set again: live
+    v.grey_turns = 0;
     let b = crate::json::line(&v);
     crate::json::write_atomic(&d.join(&mine), &b).map_err(|e| e.to_string())
 }
@@ -680,15 +687,57 @@ pub fn bring_back(id: &str, file: &str) -> Result<(), String> {
     std::fs::remove_file(&from).map_err(|e| e.to_string())
 }
 
-/// Puts away the session's views the agent hasn't touched since since:
-/// the start of its third turn back. Pinned ones stay.
-pub fn put_away_stale(id: &str, since: Time) {
-    let (vs, _) = views(id);
-    for v in vs {
-        if !v.pinned && v.by.is_empty() && v.updated.before(since) {
-            let _ = drop_view(id, &v.name);
+/// What a look at a session's views changed: those greyed, and why, and
+/// those put away (turn_ended, sweep), for the host's events.
+#[derive(Debug, Default, PartialEq)]
+pub struct Greyed {
+    pub greyed: Vec<(String, &'static str)>,
+    pub away: Vec<String>,
+}
+
+/// Greys and puts away the session's views as an ended turn t leaves them
+/// (viewstale::at_turn_end): the reason written into each view's file,
+/// its time left as the agent last set it.
+pub fn turn_ended(id: &str, t: &crate::viewstale::Turn) -> Greyed {
+    let mut out = Greyed::default();
+    for v in views(id).0 {
+        match at_turn_end(&v, t) {
+            Verdict::Keep => {}
+            Verdict::Grey(why) => {
+                mark(id, &v.name, why, 0);
+                out.greyed.push((v.name, why));
+            }
+            Verdict::Greyed(n) => mark(id, &v.name, &v.greyed, n),
+            Verdict::Away => {
+                let _ = drop_view(id, &v.name);
+                out.away.push(v.name);
+            }
         }
     }
+    out
+}
+
+/// Writes why the view of name greyed into its file, and the turns since,
+/// leaving the rest as it was.
+fn mark(id: &str, name: &str, why: &str, turns: u32) {
+    let p = views_dir(id).join(format!("{name}.json"));
+    let Ok(b) = std::fs::read(&p) else { return };
+    let Ok(mut v) = serde_json::from_slice::<View>(&b) else {
+        return;
+    };
+    v.greyed = why.to_string();
+    v.grey_turns = turns;
+    let _ = crate::json::write_atomic(&p, &crate::json::line(&v));
+}
+
+/// The names of the agent's views rush has greyed, to tell it of.
+pub fn greyed_names(id: &str) -> Vec<String> {
+    views(id)
+        .0
+        .into_iter()
+        .filter(|v| !v.greyed.is_empty() && v.by.is_empty() && !v.pinned)
+        .map(|v| v.name)
+        .collect()
 }
 
 /// What one look at a session's views at now finds (sweep).
@@ -698,12 +747,15 @@ pub struct Swept {
     pub stale: Vec<String>,
     /// Whether the agent's views are left to look at again later.
     pub more: bool,
+    /// Those it greyed and put away by the clock.
+    pub changed: Greyed,
 }
 
 /// Puts away the agent's views untouched for AWAY_MS (pinned ones stay),
-/// and says which others have been untouched for STALE_MS while the
-/// session works and the agent wasn't told yet: told maps a view's name to
-/// the update it was told of, so each stale period is told once.
+/// greys those untouched for STALE_MS, and says which have been untouched
+/// for STALE_MS while the session works and the agent wasn't told yet:
+/// told maps a view's name to the update it was told of, so each stale
+/// period is told once.
 pub fn sweep(
     id: &str,
     now: Time,
@@ -719,10 +771,18 @@ pub fn sweep(
             continue;
         }
         let (up, age) = (v.updated.to_ms(), now - v.updated.to_ms());
-        if age >= AWAY_MS {
-            let _ = drop_view(id, &v.name);
-            told.remove(&v.name);
-            continue;
+        match by_clock(&v, now) {
+            Verdict::Away => {
+                let _ = drop_view(id, &v.name);
+                told.remove(&v.name);
+                out.changed.away.push(v.name);
+                continue;
+            }
+            Verdict::Grey(why) => {
+                mark(id, &v.name, why, v.grey_turns);
+                out.changed.greyed.push((v.name.clone(), why));
+            }
+            _ => {}
         }
         out.more = true;
         if working && age >= STALE_MS && told.get(&v.name) != Some(&up) {
@@ -733,14 +793,9 @@ pub fn sweep(
     out
 }
 
-/// The line the agent is told when its views go stale: short, as every
-/// word is a token on its next turn.
+/// The line the agent is told of views gone stale (viewstale::note).
 pub fn stale_note(names: &[String]) -> String {
-    format!(
-        "Views not updated in {} min: {}. Set again or clear.",
-        STALE_MS / 60_000,
-        names.join(", ")
-    )
+    crate::viewstale::note(names)
 }
 
 /// The session's views, the one updated last first, and when its folder
@@ -922,7 +977,18 @@ mod tests {
             "a block of no kind was taken"
         );
         assert_eq!(super::views("s1").0.len(), 1);
-        put_away_stale("s1", since);
+        // A turn that began after its last set greys it, a second keeps it
+        // grey, and a third puts it away.
+        let t = crate::viewstale::Turn {
+            start: since.to_ms(),
+            ..Default::default()
+        };
+        let g = turn_ended("s1", &t);
+        assert_eq!(g.greyed, [("old".to_string(), crate::viewstale::WHY_TURN)]);
+        assert_eq!(greyed_names("s1"), ["old"]);
+        assert_eq!(super::views("s1").0[0].updated, ov.updated, "its time kept");
+        assert_eq!(turn_ended("s1", &t), Greyed::default());
+        assert_eq!(turn_ended("s1", &t).away, ["old"]);
         let (vs, _) = super::views("s1");
         let past = super::past_views("s1");
         assert!(
@@ -933,8 +999,18 @@ mod tests {
         let (vs, _) = super::views("s1");
         assert!(vs.len() == 1 && vs[0].pinned);
         assert!(super::past_views("s1").is_empty());
-        put_away_stale("s1", Time::now().add_nanos(1_000_000_000));
-        assert_eq!(super::views("s1").0.len(), 1, "a pinned view was put away");
+        let later = crate::viewstale::Turn {
+            start: Time::now().to_ms() + 1000,
+            ..Default::default()
+        };
+        for _ in 0..3 {
+            turn_ended("s1", &later);
+        }
+        let (vs, _) = super::views("s1");
+        assert!(
+            vs.len() == 1 && vs[0].greyed.is_empty(),
+            "a pinned view greyed or went"
+        );
     }
 
     // A view untouched for STALE_MS is told of once while the session
@@ -967,6 +1043,8 @@ mod tests {
             let p = views_dir("s1").join(format!("{name}.json"));
             let mut v: View = serde_json::from_slice(&std::fs::read(&p).unwrap()).unwrap();
             v.updated = at;
+            v.greyed.clear(); // as save_view does
+            v.grey_turns = 0;
             std::fs::write(&p, crate::json::line(&v)).unwrap();
         };
         touch("fresh", min(9));
@@ -979,10 +1057,11 @@ mod tests {
         touch("old", min(13)); // the agent set it again
         let r = sweep("s1", min(25), true, &mut told);
         assert_eq!(r.stale, ["old", "fresh"], "{r:?}");
+        assert_eq!(greyed_names("s1"), ["old", "fresh"], "greyed by the clock");
         let r = sweep("s1", min(60), true, &mut told);
         assert!(!r.more && super::views("s1").0.is_empty(), "{r:?}");
+        assert_eq!(r.changed.away, ["old", "fresh"]);
         assert_eq!(past_views("s1").len(), 2);
-        assert!(stale_note(&["a".into(), "b".into()]).len() < 60);
     }
 
     #[test]

@@ -63,6 +63,7 @@ pub mod upgrade;
 pub mod viewacts;
 pub mod viewparse;
 pub mod views;
+pub mod viewstale;
 pub mod viewwords;
 pub mod wire;
 pub mod workspace;

@@ -391,7 +391,11 @@ pub(crate) struct State {
     woke: bool,
     last_step: String,
     heard: Option<Instant>,
-    turn_ends: Vec<Time>,
+    /// When the turn under way began, and the changes it made that a view
+    /// might show (a push, a merge): what greys a view at its end
+    /// (viewstale::at_turn_end).
+    turn_began: Time,
+    turn_changes: Vec<crate::viewstale::Change>,
     /// Whether a look at the views is due, and the update of each view
     /// the agent was told is stale (views::sweep).
     views_armed: bool,
@@ -715,7 +719,8 @@ fn build(reg: Registry, hooks: Hooks, cfg: Config) -> (Host, Receiver<Msg>) {
         woke: false,
         last_step: String::new(),
         heard: None,
-        turn_ends: Vec::new(),
+        turn_began: Time::default(),
+        turn_changes: Vec::new(),
         views_armed: false,
         views_told: HashMap::new(),
         quit: false,
@@ -944,6 +949,15 @@ fn ask_text(q: &event::Question) -> String {
         .collect();
     let t = lines.join("\n");
     if t.is_empty() { q.title.clone() } else { t }
+}
+
+/// input with the line on stale views (viewstale::note) at its end, none
+/// when note is "".
+pub(crate) fn with_views_note(input: String, note: &str) -> String {
+    if note.is_empty() {
+        return input;
+    }
+    format!("{input}\n\n<system-reminder>{note}</system-reminder>")
 }
 
 /// The session, a message's sender and the exchange's id, which its
@@ -1811,6 +1825,7 @@ impl Host {
         let mut told = std::mem::take(&mut st.views_told);
         let swept = crate::views::sweep(&id, Time::now(), working, &mut told);
         st.views_told = told;
+        self.views_events(&st, &swept.changed, "the clock");
         if !swept.stale.is_empty() && st.info.inbox {
             let _ = crate::inbox::tell(
                 &id,
@@ -1821,6 +1836,54 @@ impl Host {
         if swept.more || working {
             self.arm_views_always(&mut st);
         }
+    }
+
+    /// An event for each view greyed or put away, for `rush why`: by says
+    /// what looked ("the clock", "turn end").
+    fn views_events(&self, st: &State, g: &crate::views::Greyed, by: &str) {
+        for (name, why) in &g.greyed {
+            self.event(
+                st,
+                "view-greyed",
+                json!({"name": name, "why": why, "by": by}),
+            );
+        }
+        for name in &g.away {
+            self.event(st, "view-put-away", json!({"name": name, "by": by}));
+        }
+    }
+
+    /// Looks at the session's views as the turn that just ended left them,
+    /// off the main thread: greys those it made stale and puts away those
+    /// grey for too long (views::turn_ended).
+    fn views_at_turn_end(&self, st: &mut State) {
+        let t = crate::viewstale::Turn {
+            start: st.turn_began.to_ms(),
+            changes: std::mem::take(&mut st.turn_changes),
+        };
+        let id = st.cfg.id.clone();
+        self.go("views", move |h| {
+            if crate::views::views_changed(&id).is_none()
+                || rush_state::Store::load().config.views_off
+            {
+                return;
+            }
+            let g = crate::views::turn_ended(&id, &t);
+            if g != crate::views::Greyed::default() {
+                let st = h.lock();
+                h.views_events(&st, &g, "turn end");
+            }
+        });
+    }
+
+    /// The line on the stale views put at the end of the agent's next
+    /// message, "" for none: it names each greyed view still there.
+    fn views_note(&self, st: &State) -> String {
+        let names = crate::views::greyed_names(&st.cfg.id);
+        if names.is_empty() || rush_state::Store::load().config.views_off {
+            return String::new();
+        }
+        crate::viewstale::note(&names)
     }
 
     fn arm_views_always(&self, st: &mut State) {
@@ -2294,7 +2357,17 @@ impl Host {
             st.turn += 1;
             st.info.turn = st.turn;
             st.turn_ev = ev.clone();
+            st.turn_began = Time::now();
+            st.turn_changes.clear();
         }
+        // The views rush greyed, named at the end of the message that
+        // starts the agent's turn: never in the system prompt, which stays
+        // the same for the cache.
+        let views_note = if turn {
+            self.views_note(st)
+        } else {
+            String::new()
+        };
         let f = sent_by(
             json!({"text": clip(text), "images": images.len(), "ev": ev, "cause": cause, "turn": st.turn}),
             ex,
@@ -2320,6 +2393,7 @@ impl Host {
                     st.untold
                 );
             }
+            input = with_views_note(input, &views_note);
             if let Err(e) = conn.send(Input {
                 text: input,
                 images: pics.to_vec(),
@@ -2347,6 +2421,7 @@ impl Host {
                     st.untold
                 );
             }
+            input = with_views_note(input, &views_note);
             let input = Input {
                 text: input,
                 images: pics.to_vec(),
@@ -3361,6 +3436,8 @@ impl Host {
             // It picked up on its own (a background task finished).
             st.info.state = "working".into();
             st.woke = true;
+            st.turn_began = Time::now();
+            st.turn_changes.clear();
         }
         for p in &m.parts {
             match p.kind {
@@ -3369,6 +3446,12 @@ impl Host {
                         st.info.detail = self.reg.doing(&st.cfg.kind, c);
                         let name = if c.name.is_empty() { "a tool" } else { &c.name };
                         st.last_step = format!("{name} ({})", st.info.detail);
+                        if let Some(words) = crate::viewstale::change_of(&c.input.command) {
+                            st.turn_changes.push(crate::viewstale::Change {
+                                at: Time::now().to_ms(),
+                                words,
+                            });
+                        }
                     }
                 }
                 event::PartKind::Text => {
@@ -3446,15 +3529,7 @@ impl Host {
         if st.pending.is_empty() {
             st.info.state = "idle".into();
             st.info.needs.clear();
-            let n = st.turn_ends.len();
-            if n >= 4 {
-                st.turn_ends.drain(..n - 3);
-            }
-            st.turn_ends.push(Time::now());
-            if st.turn_ends.len() == 4 {
-                let (id, since) = (st.cfg.id.clone(), st.turn_ends[0]);
-                self.go("views", move |_| crate::views::put_away_stale(&id, since));
-            }
+            self.views_at_turn_end(st);
             let t = e.text.trim();
             if !t.is_empty() {
                 st.info.detail = first_line(t);
