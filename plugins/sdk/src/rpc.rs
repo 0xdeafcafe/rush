@@ -249,7 +249,9 @@ impl<R: Read + Send> ReadMsg for LineReader<R> {
     fn read_msg(&mut self) -> io::Result<Vec<u8>> {
         loop {
             let mut line = Vec::new();
-            let n = (&mut self.0)
+            let n = self
+                .0
+                .by_ref()
                 .take(MAX_FRAME as u64 + 1)
                 .read_until(b'\n', &mut line)?;
             if n == 0 {
@@ -308,15 +310,19 @@ impl Conn {
     /// The connection rush gave the plugin, on fd 3. An error when fd 3
     /// isn't a socket, as when it's run from a shell.
     pub fn fd3(h: Handler) -> io::Result<Conn> {
-        // Looked at before it's taken: taking an fd that isn't open would
-        // close someone else's later.
-        let md = std::fs::metadata(format!("/dev/fd/{IPC_FD}"))?;
+        use std::os::fd::FromRawFd;
+        // Looked at (fstat: no path the sandbox could refuse) before it's
+        // taken: taking an fd that isn't open would close someone else's
+        // later. The File is never dropped, so never closes it.
+        // SAFETY: IPC_FD isn't -1, and the File only asks fstat about it.
+        let probe = std::mem::ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(IPC_FD) });
+        let md = probe.metadata()?;
         if !md.file_type().is_socket() {
             return Err(io::Error::other("fd 3 is not a socket"));
         }
         // SAFETY: rush hands the plugin fd 3, a socket, for it to own;
         // nothing else in the process uses it.
-        let stream = unsafe { <UnixStream as std::os::fd::FromRawFd>::from_raw_fd(IPC_FD) };
+        let stream = unsafe { UnixStream::from_raw_fd(IPC_FD) };
         Conn::new(stream, Some(h))
     }
 
