@@ -481,10 +481,12 @@ fn earlier_tries_fold_under_the_new_one() {
 fn a_runs_branch_is_where_it_worked() {
     let d = tempfile::tempdir().unwrap();
     let mut m = model(&d);
-    let r = &mut conn(&mut m, KEY).runs;
-    r.stats.get_mut("x").unwrap().worktree = "perf-memlist".into();
     views::show_view(&mut m, KEY, "subagents");
     m.session.as_mut().unwrap().sel = "sub:x".into();
+    // Picking it reads its transcript afresh; where it worked is set after.
+    let _ = views::body(&mut m, 170, 20);
+    let r = &mut conn(&mut m, KEY).runs;
+    r.stats.get_mut("x").unwrap().worktree = "perf-memlist".into();
     let got = text(&views::body(&mut m, 170, 20).unwrap());
     assert!(got.contains("⎇ perf-memlist"), "{got}");
     // A subagent's transcript says only its parent's folder: rush doesn't
@@ -989,7 +991,7 @@ fn working_view(wf: &str, hm: &str) -> String {
 }
 
 /// The subagents view 90 wide, w picked and working: a short list, then
-/// w under it with the line under its conversation (filled in from a run).
+/// w under it with the line under its conversation.
 fn working_narrow(wf: &str, hm: &str) -> String {
     [
         "  1 agent and 1 workflow running · 4 runs in all  ·  click one to see it below",
