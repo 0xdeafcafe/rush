@@ -77,7 +77,7 @@ pub fn manifest() -> Manifest {
 }
 
 pub(crate) fn bundle() -> Bundle {
-    crate::bundle_of(manifest(), false, run)
+    crate::bundle_inside(manifest(), false, start)
 }
 
 /// How long it waits after the last change to write.
@@ -102,23 +102,36 @@ struct App {
     saving: Mutex<()>,
 }
 
-/// The plugin, on its connection to the broker.
-fn run(s: UnixStream) -> Result<(), String> {
+/// The plugin, on its connection to the broker: once that has closed,
+/// what's waiting to be saved is.
+fn start(s: UnixStream) -> Result<rush_plugin::Started, String> {
     let a = Arc::new(App::default());
     let saver = {
         let a = a.clone();
         std::thread::spawn(move || a.saver())
     };
     let h = a.clone();
-    let res = crate::serve(
+    let started = crate::start_serving(
         s,
         Arc::new(move |conn, _, method, params| h.handle(conn, method, params)),
     );
-    a.lock().done = true;
-    a.wake.notify_all();
-    let _ = saver.join();
-    a.save();
-    res
+    let after = move || {
+        a.lock().done = true;
+        a.wake.notify_all();
+        let _ = saver.join();
+        a.save();
+        Ok(())
+    };
+    match started {
+        Ok(st) => Ok(rush_plugin::Started {
+            conn: st.conn,
+            after: Box::new(after),
+        }),
+        Err(e) => {
+            let _ = after();
+            Err(e)
+        }
+    }
 }
 
 /// What an event leaves to do off the reading thread.
@@ -666,7 +679,7 @@ mod tests {
     #[test]
     fn plugin_over_its_connection() {
         let data = tempfile::tempdir().unwrap();
-        let br = Broker::start(run, None);
+        let br = Broker::start(|s| start(s)?.wait(), None);
         br.call("initialize", json!({ "dataDir": data.path() }))
             .unwrap();
         let s1 = UiSession {

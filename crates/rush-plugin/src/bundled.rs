@@ -7,6 +7,14 @@
 //! other. What it may do in rush's screen is still its manifest's, checked
 //! by the broker as for any plugin. Each is on until you turn it off,
 //! unless it's optional.
+//!
+//! One that has a [`StartFn`] runs inside the broker instead (Rust-only):
+//! the same protocol on a socket pair, its handlers on the broker's
+//! threads, with no process, no thread of its own while it's quiet, and
+//! no memory limit (it has no footprint of its own to measure). Only a
+//! plugin that reads nothing of its process's own (its environment, its
+//! folder, its stdio) and starts no programs has one, so it does the same
+//! wherever it runs. `rush plugin run <name>` runs it as before.
 
 use std::collections::BTreeMap;
 use std::os::fd::FromRawFd;
@@ -19,6 +27,33 @@ use crate::plugin::{Approval, approvals};
 
 /// Its main, given its end of the connection to the broker.
 pub type RunFn = Arc<dyn Fn(UnixStream) -> Result<(), String> + Send + Sync>;
+/// Starts it serving its end of the connection to the broker, inside the
+/// broker, and returns at once.
+pub type StartFn = Arc<dyn Fn(UnixStream) -> Result<Started, String> + Send + Sync>;
+
+/// A bundled plugin started by its [`StartFn`]: its connection, being
+/// served, and what's left to do once that has closed (what its main does
+/// after its connection ends), which says how it ended.
+pub struct Started {
+    pub conn: crate::Conn,
+    pub after: Box<dyn FnOnce() -> Result<(), String> + Send>,
+}
+
+impl Started {
+    /// Serving, with nothing to do after.
+    pub fn serving(conn: crate::Conn) -> Started {
+        Started {
+            conn,
+            after: Box::new(|| Ok(())),
+        }
+    }
+
+    /// As its main: until the connection closes, then what's after.
+    pub fn wait(self) -> Result<(), String> {
+        self.conn.wait();
+        (self.after)()
+    }
+}
 /// Run in the process that turns it on or off, after the switch is
 /// written: what it keeps running outside the broker (a service, say)
 /// starts or stops with it. An error puts the switch back as it was.
@@ -31,6 +66,8 @@ pub struct Bundle {
     /// Off until you turn it on.
     pub optional: bool,
     pub run: Option<RunFn>,
+    /// Set for one that runs inside the broker; see the module's notes.
+    pub start: Option<StartFn>,
     pub switched: Option<SwitchedFn>,
 }
 
@@ -254,6 +291,7 @@ mod tests {
             manifest: manifest(name, "rush"),
             optional: false,
             run: Some(Arc::new(|_| Ok(()))),
+            start: None,
             switched: None,
         }
     }

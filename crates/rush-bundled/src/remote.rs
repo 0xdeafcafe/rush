@@ -88,6 +88,7 @@ pub fn bundles() -> Vec<Bundle> {
             },
             optional: true,
             run: Some(Arc::new(crate::run_switch)),
+            start: Some(Arc::new(crate::start_switch)),
             switched: switched.then(|| {
                 Arc::new(switch_remote) as Arc<dyn Fn(bool) -> Result<(), String> + Send + Sync>
             }),

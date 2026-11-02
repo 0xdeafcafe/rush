@@ -12,14 +12,15 @@
 //!
 //! A bundled plugin's code is rush's own: the broker starts it as `rush
 //! plugin run <name>`, speaking rush's protocol on fd 3 (see
-//! rush_plugin::bundled). Go registers each from its package's init; here
+//! rush_plugin::bundled), or, for one made by [`bundle_inside`]
+//! (Rust-only), inside the broker itself. Go registers each from its package's init; here
 //! [`register`] does it, once, as rush starts.
 
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Once};
 
 use rush_plugin::rpc::{Handler, Raw, no_method, to_raw};
-use rush_plugin::{Bundle, Conn, Error};
+use rush_plugin::{Bundle, Conn, Error, Started};
 use serde::Serialize;
 
 pub mod agtools;
@@ -98,16 +99,22 @@ pub(crate) fn no_tools() -> Result<Option<Raw>, Error> {
 /// Runs a plugin's handler on its connection to the broker until the
 /// broker hangs up.
 pub(crate) fn serve(s: UnixStream, h: Handler) -> Result<(), String> {
-    let conn = Conn::new(s, Some(h)).map_err(|e| e.to_string())?;
-    conn.wait();
-    Ok(())
+    start_serving(s, h)?.wait()
 }
 
-/// The Run of a plugin that has nothing to do but be on: rush does its
+/// Starts a plugin's handler on its connection to the broker, and
+/// returns at once.
+pub(crate) fn start_serving(s: UnixStream, h: Handler) -> Result<Started, String> {
+    Conn::new(s, Some(h))
+        .map(Started::serving)
+        .map_err(|e| e.to_string())
+}
+
+/// The start of a plugin that has nothing to do but be on: rush does its
 /// work, and asks whether it's on. After the Run of Go's hexview, drive,
 /// prwatch, cleanup, searchguard and yap.
-pub(crate) fn run_switch(s: UnixStream) -> Result<(), String> {
-    serve(
+pub(crate) fn start_switch(s: UnixStream) -> Result<Started, String> {
+    start_serving(
         s,
         Arc::new(|_, _, method, _| match method {
             "initialize" => empty(),
@@ -115,6 +122,11 @@ pub(crate) fn run_switch(s: UnixStream) -> Result<(), String> {
             _ => Err(no_method(method)),
         }),
     )
+}
+
+/// start_switch, as a main.
+pub(crate) fn run_switch(s: UnixStream) -> Result<(), String> {
+    start_switch(s)?.wait()
 }
 
 /// A plugin's manifest with what every bundled one has: rush as its
@@ -145,6 +157,24 @@ pub(crate) fn bundle_of(
         manifest: m,
         optional,
         run: Some(Arc::new(run)),
+        start: None,
+        switched: None,
+    }
+}
+
+/// A bundle of m that runs inside the broker, started by start (and run by
+/// it as a main by `rush plugin run`). Only for a plugin that reads
+/// nothing of its process's own: see rush_plugin::bundled.
+pub(crate) fn bundle_inside(
+    m: rush_plugin::Manifest,
+    optional: bool,
+    start: fn(UnixStream) -> Result<Started, String>,
+) -> Bundle {
+    Bundle {
+        manifest: m,
+        optional,
+        run: Some(Arc::new(move |s| start(s)?.wait())),
+        start: Some(Arc::new(start)),
         switched: None,
     }
 }

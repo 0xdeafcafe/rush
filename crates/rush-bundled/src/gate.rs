@@ -91,7 +91,7 @@ pub fn manifest() -> Manifest {
 }
 
 pub(crate) fn bundle() -> Bundle {
-    crate::bundle_of(manifest(), true, run)
+    crate::bundle_inside(manifest(), true, start)
 }
 
 fn env_rules() -> Option<String> {
@@ -316,7 +316,7 @@ pub fn hook_command() -> String {
 
 /// The plugin, on its connection to the broker: it keeps the shims in step
 /// with the settings, and runs the guard while the floor is set.
-fn run(s: UnixStream) -> Result<(), String> {
+fn start(s: UnixStream) -> Result<rush_plugin::Started, String> {
     let stop_guard: Arc<Mutex<Option<Cancel>>> = Arc::new(Mutex::new(None));
     let sg = stop_guard.clone();
     let guard = move || {
@@ -343,7 +343,7 @@ fn run(s: UnixStream) -> Result<(), String> {
         };
         std::thread::spawn(move || rt.guard(guard, ctx));
     };
-    let res = crate::serve(
+    let started = crate::start_serving(
         s,
         Arc::new(move |_, _, method, _| match method {
             "initialize" | "ui.settings" => {
@@ -355,10 +355,22 @@ fn run(s: UnixStream) -> Result<(), String> {
             _ => Err(no_method(method)),
         }),
     );
-    if let Some(c) = stop_guard.lock().unwrap_or_else(|e| e.into_inner()).take() {
-        c.cancel();
+    let after = move || {
+        if let Some(c) = stop_guard.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            c.cancel();
+        }
+        Ok(())
+    };
+    match started {
+        Ok(st) => Ok(rush_plugin::Started {
+            conn: st.conn,
+            after: Box::new(after),
+        }),
+        Err(e) => {
+            let _ = after();
+            Err(e)
+        }
     }
-    res
 }
 
 #[cfg(test)]

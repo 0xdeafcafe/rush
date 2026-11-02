@@ -48,8 +48,8 @@ pub mod ui;
 pub mod uisettings;
 
 pub use bundled::{
-    Bundle, Registered, bundle_named, bundled_on, bundles, bundles_on, enabled, mark_bundled,
-    register_bundle, run_bundled, set_bundled,
+    Bundle, Registered, StartFn, Started, bundle_named, bundled_on, bundles, bundles_on, enabled,
+    mark_bundled, register_bundle, run_bundled, set_bundled,
 };
 pub use cli::{CLI_TIMEOUT, CliResult, CliRun, CliSpec, MAX_CLI_OUTPUT, cli_plugins, run_cli};
 pub use client::{
@@ -125,7 +125,7 @@ pub(crate) fn write_atomic(path: &std::path::Path, b: &[u8]) -> Result<(), Strin
 }
 
 /// os.MkdirAll(dir, 0o700).
-pub(crate) fn mkdir_all(dir: &std::path::Path) -> Result<(), String> {
+pub fn mkdir_all(dir: &std::path::Path) -> Result<(), String> {
     use std::os::unix::fs::DirBuilderExt;
     std::fs::DirBuilder::new()
         .recursive(true)

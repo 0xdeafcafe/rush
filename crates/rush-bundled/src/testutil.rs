@@ -49,7 +49,7 @@ pub(crate) type Answer = Arc<dyn Fn(&str, &Value) -> Result<Value, Error> + Send
 impl Broker {
     /// Starts run on one end of a socket pair, the broker on the other.
     pub(crate) fn start(
-        run: fn(UnixStream) -> Result<(), String>,
+        run: impl FnOnce(UnixStream) -> Result<(), String> + Send + 'static,
         answer: Option<Answer>,
     ) -> Broker {
         let (mine, theirs) = UnixStream::pair().unwrap();

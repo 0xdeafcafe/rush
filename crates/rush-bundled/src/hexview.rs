@@ -17,5 +17,5 @@ pub fn manifest() -> Manifest {
 }
 
 pub(crate) fn bundle() -> Bundle {
-    crate::bundle_of(manifest(), true, crate::run_switch)
+    crate::bundle_inside(manifest(), true, crate::start_switch)
 }

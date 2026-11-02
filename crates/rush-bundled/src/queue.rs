@@ -39,12 +39,12 @@ pub fn manifest() -> Manifest {
 }
 
 pub(crate) fn bundle() -> Bundle {
-    crate::bundle_of(manifest(), false, run)
+    crate::bundle_inside(manifest(), false, start)
 }
 
 /// The plugin, on its connection to the broker.
-fn run(s: UnixStream) -> Result<(), String> {
-    crate::serve(
+fn start(s: UnixStream) -> Result<rush_plugin::Started, String> {
+    crate::start_serving(
         s,
         Arc::new(|conn, ctx, method, params| match method {
             "initialize" => crate::empty(),
@@ -203,7 +203,7 @@ mod tests {
     #[test]
     fn cli_run() {
         let b = Broker::start(
-            run,
+            |s| start(s)?.wait(),
             Some(Arc::new(|_, p| {
                 if p.to_string().contains(r#""gone""#) {
                     return Err(Error::new(CODE_INVALID_PARAMS, "no session gone"));

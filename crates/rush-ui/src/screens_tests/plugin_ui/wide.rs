@@ -803,6 +803,7 @@ fn optional_found() {
         },
         optional,
         run: None,
+        start: None,
         switched: None,
     };
     let bundles = vec![
