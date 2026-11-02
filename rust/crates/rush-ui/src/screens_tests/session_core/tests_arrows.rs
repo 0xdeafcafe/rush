@@ -167,11 +167,11 @@ fn right_at_the_end_of_a_draft_opens_the_pick() {
 /// → with nothing to open and no column does nothing.
 #[test]
 fn right_with_nowhere_to_go_does_nothing() {
-    let (mut m, _) = plain();
+    let (mut m, r) = plain();
     press(&mut m, "right");
     assert_eq!(side_pick(&mut m), None);
     assert!(sel(&m).is_empty());
-    assert!(m.session.as_ref().unwrap().o.open.is_empty());
+    assert_eq!(m.session.as_ref().unwrap().o.open.get(&r), Some(&false));
     typed(&mut m, "hi");
     press(&mut m, "right");
     assert_eq!(side_pick(&mut m), None);
