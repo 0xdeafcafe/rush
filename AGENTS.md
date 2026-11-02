@@ -15,3 +15,9 @@
   `/usr/bin/footprint -p <pid>` for memory (not RSS).
 - Tests go through public APIs, are table-driven for encodings, and never
   sleep; filesystem tests use temp dirs and never touch `~/.claude`.
+- Builds and tests run on GitHub CI, not locally. Push your branch, then
+  wait with `rush watch run <branch>` (as a background command): it
+  shares one watcher with every other agent and keeps to GitHub's rate
+  limit. If the installed rush has no `watch run`, use
+  `gh run watch <id> --exit-status --interval 120`, never faster.
+- Land work on main by rebasing onto origin/main; no pull requests.
