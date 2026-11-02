@@ -1,0 +1,9 @@
+t1            | ── turn 1 · "make the change" ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────  1 file  +2 −2 ──
+t1:file:0     |  ╭─ crates/rush-update/src/lib.rs ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── +2 −2 ─╮
+              |  │ 44   pub const FORMULA: &str = "0xdeafcafe/tap/rush";                                 │ 44   pub const FORMULA: &str = "0xdeafcafe/tap/rush";                                 │
+              |  │ 45                                                                                    │ 45                                                                                    │
+              |  │ 46 − /// without a token GitHub allows 60 calls an hour, far more than this.          │ 46 + /// without a token GitHub allows 60 calls an hour, once an hour.                │
+              |  │ 47 − pub const EVERY: Duration = Duration::from_secs(6 * 60 * 60);                    │ 47 + pub const EVERY: Duration = Duration::from_secs(60 * 60);                        │
+              |  │ 48                                                                                    │ 48                                                                                    │
+              |  │ 49   pub fn check() {}                                                                │ 49   pub fn check() {}                                                                │
+              |  ╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

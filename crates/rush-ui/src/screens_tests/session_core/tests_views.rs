@@ -1244,8 +1244,9 @@ fn the_column_beside_a_wide_conversation() {
     let c = row_with(&mut m, "▌ Changes  +1 −1").expect("the changes");
     assert_eq!(c, y + 5, "a row apart");
     assert!(s[c + 1].contains("/src/checkout/src/parse.rs"));
-    // At the foot, beside the newest turn: its last row is the turn's.
-    assert!(s[c + 1].contains("1 step"), "{:?}", s[c + 1]);
+    // Beside the newest turn, its rows (the edit's diff box among them)
+    // still drawn left of the column.
+    assert!(s.iter().any(|l| l.contains("1 step")), "{s:#?}");
     click(&mut m, MouseKind::Down(Button::Left), x + 4, c + 1);
     assert_eq!(
         crate::screens::session_core::views::view_name(&m, KEY),

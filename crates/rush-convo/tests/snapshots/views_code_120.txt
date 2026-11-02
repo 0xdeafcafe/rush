@@ -1,24 +1,31 @@
 t1            | ── turn 1 · "the decision card still overlaps on long options" ────────────────────────────────────  2 files  +9 −5 ──
-t1:file:0     |  src/dock.rs                                                                                                    +2 −1
-              |     212       let room = pane.width
-              |     213 −         ;
-              |     213 +         .saturating_sub(side.width)
-              |     214 +         .saturating_sub(views.width);
-              |     215
-t1:file:1     |  src/question.rs                                                                                                +7 −4
-              |      40   fn label_rows(opts: &[Opt], w: usize) -> Vec<Row> {
-              |      41 −     opts.iter().map(|o| Row::one(&o.label)).collect()
-              |      41 +     opts.iter()
-              |      42 +         .flat_map(|o| wrap(&o.label, w))
-              |      43 +         .map(Row::one)
-              |      44 +         .collect()
-              |      45   }
-              |      46   fn a() {}
-              |      47   fn b() {}
-              |      45 − fn c() {}
-              |      48 + fn c() { b() }
-              |      49   fn d() {}
-t1:file:1     |     … 6 more lines  (enter opens the whole diff)
+t1:file:0     |  ╭─ src/dock.rs ───────────────────────────────────────────────────────────────────────────────────────────── +2 −1 ─╮
+              |  │ 212  212       let room = pane.width                                                                              │
+              |  │ 213      −         ;                                                                                              │
+              |  │      213 +         .saturating_sub(side.width)                                                                    │
+              |  │      214 +         .saturating_sub(views.width);                                                                  │
+              |  │ 214  215                                                                                                          │
+              |  ╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+t1:file:1     |  ╭─ src/question.rs ───────────────────────────────────────────────────────────────────────────────────────── +7 −4 ─╮
+              |  │ 40  40   fn label_rows(opts: &[Opt], w: usize) -> Vec<Row> {                                                      │
+              |  │ 41     −     opts.iter().map(|o| Row::one(&o.label)).collect()                                                    │
+              |  │     41 +     opts.iter()                                                                                          │
+              |  │     42 +         .flat_map(|o| wrap(&o.label, w))                                                                 │
+              |  │     43 +         .map(Row::one)                                                                                   │
+              |  │     44 +         .collect()                                                                                       │
+              |  │ 42  45   }                                                                                                        │
+              |  │ 43  46   fn a() {}                                                                                                │
+              |  │ 44  47   fn b() {}                                                                                                │
+              |  │ 45     − fn c() {}                                                                                                │
+              |  │     48 + fn c() { b() }                                                                                           │
+              |  │ 46  49   fn d() {}                                                                                                │
+              |  │ 47     − fn e() {}                                                                                                │
+              |  │     50 + fn e() { d() }                                                                                           │
+              |  │   ⋯                                                                                                               │
+              |  │ 41     −     opts.iter()                                                                                          │
+              |  │     41 +     opts.iter() // w wraps each option                                                                   │
+              |  │ 42  42                                                                                                            │
+              |  ╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 t1:s:b1       |  ✗ cargo clippy -p rush-ui-session-cards -- -D warnings   exit 101                                             4m 10s
 t1:s:b2       |  ✓ cargo test -p rush-ui-session-cards   108 passed                                                           11m 00s
               |
