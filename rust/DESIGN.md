@@ -1464,6 +1464,11 @@ is made. Everything below is in `rush_ui::frame`.
   line and Trail's step line say the place too, Chat's bubble foot and
   Catch-up's "Still going" name it; Code shows the keys, Trail once the
   step is picked.
+  A pipeline is one command of the chain (one place, one time; k and p
+  act on all its stages together) but drawn split by pipe
+  (`shell::pipeline_stages`): the stage doing the work on the command's
+  line, the filters under it behind a faint `│`, in the opened call and in
+  a shell box's command list. The row's "2/3" names the first stage only.
   How a call's shell is found (`chainrun::runs_call`): Claude Code runs
   each Bash call as `zsh -c "source <snapshot> … && eval '<command>' <
   /dev/null && pwd -P >| <cwd file>"`, a quote in the command written
