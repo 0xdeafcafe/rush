@@ -639,6 +639,111 @@ fn the_pointer_lights_an_item() {
     assert!(!lit(&f[y - 2]), "not the turn's heading");
 }
 
+/// A live turn of n shell steps, each with output long enough to fold.
+fn folding(m: &mut Model, n: usize) {
+    let now = m.now;
+    let s = sess(m);
+    s.sent("go".into(), Vec::new(), now - 60_000);
+    for i in 0..n {
+        let id = format!("f{i}");
+        let at = now - 50_000 + i as Ms * 2_000;
+        let call = Call {
+            id: id.clone(),
+            name: "Bash".into(),
+            kind: ToolKind::Shell,
+            input: Input {
+                command: "seq 1 99".into(),
+                ..Input::default()
+            },
+            ..Call::default()
+        };
+        s.apply(
+            &Event::Message(Message {
+                role: "assistant".into(),
+                id: format!("m{i}"),
+                parts: vec![Part {
+                    kind: PartKind::ToolCall,
+                    call: Some(Box::new(call)),
+                    ..Part::default()
+                }],
+                ..Message::default()
+            }),
+            at,
+        );
+        let text: Vec<String> = (1..=40 + i * 7).map(|k| format!("line {k}")).collect();
+        s.apply(
+            &Event::Message(Message {
+                role: "user".into(),
+                id: format!("r{i}"),
+                parts: vec![Part {
+                    kind: PartKind::ToolResult,
+                    output: Some(Box::new(Output {
+                        call_id: id,
+                        text: text.join("\n"),
+                        ..Output::default()
+                    })),
+                    ..Part::default()
+                }],
+                ..Message::default()
+            }),
+            at + 1_000,
+        );
+    }
+    let o = &mut m.session.as_mut().unwrap().o;
+    for i in 0..n {
+        o.open.insert(format!("t1:s:f{i}"), true);
+    }
+}
+
+/// The pointer over a "… N lines · ctrl+o shows all" row lights that row
+/// alone, and stays on it, the same, as the live turn redraws and grows
+/// while the pointer sits still.
+#[test]
+fn the_pointer_lights_one_fold_row_and_holds() {
+    let mut m = opened(100, 60);
+    m.session.as_mut().unwrap().sess = rush_convo::Session::new();
+    folding(&mut m, 2);
+    let s = screen(&mut m);
+    let folds: Vec<usize> = (0..s.len())
+        .filter(|&y| s[y].contains("ctrl+o shows all"))
+        .collect();
+    assert!(folds.len() >= 2, "two folds on screen:\n{}", s.join("\n"));
+    let lit = |m: &mut Model| -> Vec<usize> {
+        let f = m.frame();
+        (0..f.len())
+            .filter(|&y| {
+                f[y].spans
+                    .iter()
+                    .any(|s| s.style.bg == crate::style::HOVER_BG)
+            })
+            .collect()
+    };
+    let x = col_of(&s[folds[0]], "ctrl+o");
+    click(&mut m, MouseKind::Moved, x, folds[0]);
+    let first = lit(&mut m);
+    assert_eq!(first, vec![folds[0]], "only the one under the pointer");
+    for i in 0..5 {
+        click(&mut m, MouseKind::Moved, x, folds[0]);
+        // The live turn goes on: another line lands, a redraw.
+        let now = m.now;
+        sess(&mut m).apply(
+            &Event::Message(Message {
+                role: "assistant".into(),
+                id: format!("live{i}"),
+                parts: vec![Part {
+                    kind: PartKind::Text,
+                    text: format!("more {i}"),
+                    ..Part::default()
+                }],
+                ..Message::default()
+            }),
+            now,
+        );
+        screen(&mut m);
+        assert_eq!(lit(&mut m), first, "redraw {i}");
+    }
+}
+
 /// An agent that says what it reads: two files, one not written yet.
 struct Memo;
 

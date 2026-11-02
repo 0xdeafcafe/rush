@@ -227,6 +227,17 @@ impl<'a> Drawer<'a> {
         });
     }
 
+    /// A "… N lines · ctrl+o shows all" row. They all click the same (one
+    /// ref), but each is its own thing to hover: its owner is unique, so
+    /// pointing at one never lights another.
+    pub(crate) fn add_show_all(&mut self, left: Txt) {
+        let at = self.lines.len();
+        self.add(SHOW_ALL_REF, BG_WELL, left, Txt::new());
+        if let Some(l) = self.lines.last_mut() {
+            l.owner = format!("{SHOW_ALL_REF}#{at}");
+        }
+    }
+
     /// A row that may use the pane's whole width.
     fn add_wide(&mut self, r: &str, left: Txt) {
         let mut left = left;
@@ -2936,7 +2947,7 @@ impl<'a> Drawer<'a> {
                         .and(lead)
                         .and(blanks(num_w + 2))
                         .and(folded(hid));
-                    self.add(SHOW_ALL_REF, BG_WELL, left, Txt::new());
+                    self.add_show_all(left);
                 }
                 continue;
             }
@@ -3379,7 +3390,7 @@ impl<'a> Drawer<'a> {
             d.reset_hl();
             head.clear();
             let l = pad.clone().and(edge.clone()).and(folded(n));
-            d.add(SHOW_ALL_REF, BG_WELL, l, Txt::new());
+            d.add_show_all(l);
         };
         // A shell step's output: the problems it lists as a table, the
         // rest as printed, and what's left out said once, at the end.
@@ -5304,7 +5315,7 @@ impl<'a> Drawer<'a> {
                 .and_raw(" ")
                 .and(paint(C_ORANGE.bold(), "ctrl+o"))
                 .and(dim(" shows all"));
-            self.add(super::SHOW_ALL_REF, BG_WELL, l, Txt::new());
+            self.add_show_all(l);
         }
     }
 

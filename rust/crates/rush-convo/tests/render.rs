@@ -1529,3 +1529,39 @@ fn a_search_steps_code_is_coloured() {
         assert!(fold > code, "{cmd}:\n{all}");
     }
 }
+
+// Every "… N lines · ctrl+o shows all" row clicks the same, but each is
+// its own thing under the pointer: none shares an owner with another, so
+// hovering one never lights a second.
+#[test]
+fn each_fold_row_is_its_own_to_hover() {
+    let mut s = Session::new();
+    s.feed(sent("go"), at(0));
+    for (i, id) in ["a", "b", "c"].into_iter().enumerate() {
+        let k = i as i64 * 2;
+        s.feed(
+            tool_use(id, "Bash", json!({ "command": "seq 1 99" })),
+            at(1 + k),
+        );
+        let body: Vec<String> = (1..=30 + i * 10).map(|n| format!("line {n}")).collect();
+        s.feed(tool_result(id, &body.join("\n"), false, None), at(2 + k));
+    }
+    let mut o = opts(100, at(20));
+    for id in ["a", "b", "c"] {
+        o.open.insert(format!("t1:s:{id}"), true);
+    }
+    let rows = Renderer::new().render(&s, &o);
+    let folds: Vec<_> = rows
+        .iter()
+        .filter(|r| r.line.plain().contains("ctrl+o shows all"))
+        .collect();
+    assert_eq!(folds.len(), 3, "{}", text(&rows));
+    for f in &folds {
+        assert_eq!(f.r#ref, rush_convo::render::SHOW_ALL_REF);
+        assert!(!f.owner.is_empty());
+    }
+    let mut owners: Vec<&str> = folds.iter().map(|r| r.owner.as_str()).collect();
+    owners.sort();
+    owners.dedup();
+    assert_eq!(owners.len(), 3, "owners shared: {owners:?}");
+}
