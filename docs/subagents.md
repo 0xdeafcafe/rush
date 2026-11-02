@@ -34,7 +34,7 @@ cost and stream, and the UI draws it under the call that started it.
 | Tool | Input | Returns |
 |---|---|---|
 | `spawn_agent` | `agent` (a name its description lists: `astra`, `haiku`, `kimi-code-k3`; or a model, harness or provider by its own name: `gpt-6.1-sol`, `sol 6.1`, `codex`, `codex astra`), `prompt`, optional `model`, `effort`, `background` | the answer, or the child's id when `background` |
-| `start_agent` | `agent`, `prompt`, optional `model`, `effort`, as `spawn_agent` | the new session's id, at once |
+| `start_agent` | `agent`, `prompt`, optional `model`, `effort`, as `spawn_agent`, and `cwd` | the new session's id, at once |
 | `agent_result` | `id` (a child's or a sibling's), `wait_seconds` (≤600) | the answer once done, else how it stands |
 | `agent_send` | `id`, `prompt`, `background` | a follow-up's answer; the child keeps its conversation |
 
@@ -81,13 +81,19 @@ models, or passed to its harness as written.
 
 `start_agent` starts an agent as a session of its own beside the caller,
 not its child: what you'd get had you started it yourself, in the
-caller's folder. A separate tool rather than a flag on `spawn_agent`,
+caller's folder unless `cwd` names another (absolute, `~/…`, or relative
+to the caller's; one that's no folder is refused with why). It starts
+every agent `spawn_agent` does and also those no stand-in hosts from a
+shell, which rush runs only as sessions (`host.session_picks`): Claude
+Code above all, so "claude" or "opus" starts a Claude Code session rather
+than another harness's model with claude in its name. Those are listed in
+its own description, under spawn_agent's. A separate tool rather than a flag on `spawn_agent`,
 because almost nothing of `spawn_agent` holds for it: there's no answer to
 wait for, nothing to background, no step to draw it under, and a call the
 UI takes for a spawn (`agtools.IsSpawn`) would look for a child under it.
 
 ```
- caller ── start_agent {agent, prompt, model?, effort?}
+ caller ── start_agent {agent, prompt, model?, effort?, cwd?}
    │  host.Spawn(Config{Meta{startedFrom: caller},
    │                    PromptExchange: caller → sibling})
    │  events: spawned {by: start_agent, from: caller}

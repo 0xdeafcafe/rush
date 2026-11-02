@@ -285,6 +285,40 @@ mod tests {
         }
     }
 
+    /// "claude" is Claude Code, which start_agent starts as a session,
+    /// not a model of another harness's with claude in its name; its
+    /// models by their own names.
+    #[test]
+    fn claude_is_claude_code() {
+        let reg = Registry::new();
+        let mut taken = HashSet::new();
+        let mut ps = Vec::new();
+        for r in [
+            runner("antigravity", &["claude-sonnet-4-6", "gemini-3.8-flash"]),
+            runner("claude", &["opus", "sonnet", "haiku"]),
+        ] {
+            for c in &r.models {
+                let n = def_name(&r, &c.id, &taken);
+                taken.insert(n.clone());
+                ps.push(Pick {
+                    name: n,
+                    desc: String::new(),
+                    r: r.clone(),
+                    model: c.id.clone(),
+                });
+            }
+        }
+        for (agent, kind, model) in [
+            ("claude", "claude", ""),
+            ("opus", "claude", "opus"),
+            ("sonnet", "claude", "sonnet"),
+            ("claude-sonnet-4-6", "antigravity", "claude-sonnet-4-6"),
+        ] {
+            let (p, _) = find(&reg, &ps, agent, "").unwrap();
+            assert_eq!((p.r.k.as_str(), p.model.as_str()), (kind, model), "{agent}");
+        }
+    }
+
     // agentmatch_test.go:68: nothing fits, and the error names them all.
     #[test]
     fn find_agent_none() {

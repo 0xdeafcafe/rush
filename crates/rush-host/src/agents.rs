@@ -43,6 +43,18 @@ pub struct Runner {
 /// Config is read on each call, so a change in Settings reaches a session
 /// already running.
 pub fn runners(reg: &Registry, leader: &str) -> Vec<Runner> {
+    runners_of(reg, leader, false)
+}
+
+/// The agents start_agent can start as sessions of their own: runners,
+/// and with them the agents no stand-in hosts from a shell, which rush
+/// still runs as a session (Claude Code), with no command. Not in Go,
+/// whose start_agent took spawn_agent's list.
+pub fn session_runners(reg: &Registry, leader: &str) -> Vec<Runner> {
+    runners_of(reg, leader, true)
+}
+
+fn runners_of(reg: &Registry, leader: &str, sessions: bool) -> Vec<Runner> {
     let cfg = rush_state::Store::load().config;
     let mut out = Vec::new();
     for a in installed(reg) {
@@ -61,9 +73,10 @@ pub fn runners(reg: &Registry, leader: &str) -> Vec<Runner> {
             },
             None => a.clone(),
         };
-        let Some(sp) = base.spawnable() else {
+        let sp = base.spawnable();
+        if sp.is_none() && !sessions {
             continue; // no stand-in hosts it
-        };
+        }
         let mut r = new_runner(reg, &a, &base, sp, &k, &prov);
         if !cell.is_empty() {
             let h = reg.harness_of(&k);
@@ -75,13 +88,14 @@ pub fn runners(reg: &Registry, leader: &str) -> Vec<Runner> {
     out
 }
 
-/// Agent a as a runner: base its harness, sp the stand-in that hosts it,
-/// and the models it offers, its own first.
+/// Agent a as a runner: base its harness, sp the stand-in that hosts it
+/// (none for one run only as a session), and the models it offers, its
+/// own first.
 fn new_runner(
     reg: &Registry,
     a: &AdapterRef,
     base: &AdapterRef,
-    sp: &dyn Spawnable,
+    sp: Option<&dyn Spawnable>,
     k: &str,
     prov: &str,
 ) -> Runner {
@@ -97,9 +111,11 @@ fn new_runner(
     } else {
         r.ready = signed_in(reg, base) && has_key(reg, a);
     }
-    (r.cmd, r.flag) = sp.spawn_command();
-    if k != base.kind().as_str() {
-        r.cmd = format!("RUSH_AGENT={k} {}", r.cmd);
+    if let Some(sp) = sp {
+        (r.cmd, r.flag) = sp.spawn_command();
+        if k != base.kind().as_str() {
+            r.cmd = format!("RUSH_AGENT={k} {}", r.cmd);
+        }
     }
     if snap.is_none() {
         r.models = reg.choices_of(k).map(|c| c.models).unwrap_or_default();
@@ -285,6 +301,24 @@ pub struct Pick {
 /// with no leader, every provider's.
 pub fn picks(reg: &Registry, leader: &str) -> Vec<Pick> {
     picks_of(&runners(reg, leader))
+}
+
+/// The agents start_agent can start, each named once: picks, and the
+/// agents run only as sessions (session_runners).
+pub fn session_picks(reg: &Registry, leader: &str) -> Vec<Pick> {
+    picks_of(&session_runners(reg, leader))
+}
+
+/// The agents of all (session_picks) that spawn_agent's list (picks)
+/// hasn't, a line each as catalogue_of writes them, for start_agent's
+/// description; "" when there are none.
+pub fn start_catalogue_of(reg: &Registry, all: Vec<Pick>, spawned: &[Pick]) -> String {
+    let kinds: HashSet<&str> = spawned.iter().map(|p| p.r.k.as_str()).collect();
+    let rest: Vec<Pick> = all
+        .into_iter()
+        .filter(|p| !kinds.contains(p.r.k.as_str()))
+        .collect();
+    catalogue_of(reg, rest, &|_| false)
 }
 
 /// picks of the runners rs.
@@ -511,6 +545,21 @@ mod tests {
             ]
         );
         assert!(own_def(&ps[0], "claude") && !own_def(&ps[2], "codex"));
+    }
+
+    /// start_agent lists the agents spawn_agent's list leaves out (Claude
+    /// Code, run only as a session), and only those.
+    #[test]
+    fn start_catalogue_adds_session_agents() {
+        let reg = Registry::new();
+        let claude = r("claude", &[("opus", "The deepest thinker.")], true);
+        let codex = r("codex", &[("gpt-6-astra", "")], true);
+        let all = picks_of(&[codex.clone(), claude]);
+        let spawned = picks_of(&[codex]);
+        let got = start_catalogue_of(&reg, all, &spawned);
+        assert!(got.starts_with("- opus: The deepest thinker."), "{got}");
+        assert!(!got.contains("astra"), "{got}");
+        assert_eq!(start_catalogue_of(&reg, spawned.clone(), &spawned), "");
     }
 
     /// What goes into a cached prompt or tool list is the same word for

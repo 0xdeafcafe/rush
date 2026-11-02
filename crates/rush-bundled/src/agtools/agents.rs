@@ -55,6 +55,9 @@ pub struct StartInput {
     pub model: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub effort: String,
+    /// The folder it works in; the caller's when empty.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub cwd: String,
 }
 
 /// What a session sends agent_result.
@@ -86,6 +89,11 @@ pub trait Viewer: Send + Sync {
 pub trait Agents: Send + Sync {
     /// The agents spawn_agent can start, a line each.
     fn catalogue(&self) -> String;
+    /// The agents start_agent starts that catalogue leaves out (Claude
+    /// Code, run only as a session), a line each; "" when none.
+    fn start_catalogue(&self) -> String {
+        String::new()
+    }
     fn spawn(&self, input: SpawnInput) -> Result<String, String>;
     fn start(&self, input: StartInput) -> Result<String, String>;
     fn result(&self, input: ResultInput) -> Result<String, String>;
@@ -171,15 +179,16 @@ session of its own in the user's list, not your subagent, use start_agent."
 started it: not your subagent. It isn't stopped with you and its answer isn't sent to you. Use it when the \
 user asks for a new session, or for work that should carry on apart from yours; for work you want back, use \
 spawn_agent. Returns its id at once: agent_send messages it, agent_result asks how it stands. Any agent \
-spawn_agent lists, named the same way, with model and effort as there. Give it the whole task: it can't see \
-your conversation."
+spawn_agent lists, named the same way, with model and effort as there, and those listed below. It works in \
+your folder unless cwd names another. Give it the whole task: it can't see your conversation."
                 .into(),
             input_schema: schema(
                 serde_json::json!({
-                    "agent": prop("string", "Which agent: a name spawn_agent lists, or a model, harness or provider by its name (\"sol 6.1\", \"codex\")."),
+                    "agent": prop("string", "Which agent: a name spawn_agent or this tool lists, or a model, harness or provider by its name (\"sol 6.1\", \"codex\", \"claude\")."),
                     "prompt": prop("string", "The task, in full."),
                     "model": prop("string", "A model of that agent's other than the one its name picks. Rarely needed."),
                     "effort": prop("string", "Reasoning effort, for a model that takes one: low, medium, high."),
+                    "cwd": prop("string", "The folder it works in: an absolute path, or ~/…. Yours when left out."),
                 }),
                 &["agent", "prompt"],
             ),
@@ -226,6 +235,14 @@ pub(crate) fn agent_list(ag: &dyn Agents) -> Vec<Tool> {
     if !c.is_empty() {
         out[0].description.push_str("\n\nAgents:\n");
         out[0].description.push_str(c);
+    }
+    let s = ag.start_catalogue();
+    let s = s.trim();
+    if !s.is_empty() {
+        out[1]
+            .description
+            .push_str("\n\nBesides spawn_agent's, it starts:\n");
+        out[1].description.push_str(s);
     }
     out
 }

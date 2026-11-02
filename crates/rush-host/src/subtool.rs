@@ -24,7 +24,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::agentmatch::{find, no_agent};
-use crate::agents::{Pick, WORK_PROMPT, catalogue_of, own_def, picks};
+use crate::agents::{
+    Pick, WORK_PROMPT, catalogue_of, own_def, picks, session_picks, start_catalogue_of,
+};
 use crate::client::{deliver, read_config, read_info, spawn};
 use crate::events::{clip, log_event};
 use crate::paths::dir;
@@ -34,6 +36,18 @@ use crate::wire::{Config, Info};
 /// How long a waited call waits for its agent; past it, the agent works
 /// on and agent_result asks again.
 pub const FOREGROUND: Duration = Duration::from_secs(50 * 60);
+
+/// The folder asked names, as start_agent's cwd: ~ is the home folder, and
+/// one that's relative is in from, the caller's. An error says why when
+/// it's no folder on this machine.
+pub fn folder(asked: &str, from: &str) -> Result<String, String> {
+    let path = PathBuf::from(from).join(rush_state::expand_home(asked.trim()));
+    match std::fs::metadata(&path) {
+        Ok(m) if m.is_dir() => Ok(path.to_string_lossy().into_owned()),
+        Ok(_) => Err(format!("{} isn't a folder", path.display())),
+        Err(_) => Err(format!("there's no folder {}", path.display())),
+    }
+}
 
 /// What spawn_agent is asked.
 #[derive(Clone, Debug, Default)]
@@ -54,6 +68,9 @@ pub struct StartInput {
     pub model: String,
     pub effort: String,
     pub prompt: String,
+    /// The folder it works in: absolute, ~/…, or the caller's own folder's
+    /// when relative; the caller's own when empty.
+    pub cwd: String,
 }
 
 /// What agent_result is asked.
@@ -144,13 +161,26 @@ impl SubAgents {
         })
     }
 
+    /// The agents start_agent starts that spawn_agent doesn't list (Claude
+    /// Code, which no stand-in hosts from a shell), a line each; "" when
+    /// none.
+    pub fn start_catalogue(&self) -> String {
+        let leader = self.leader();
+        start_catalogue_of(
+            &self.reg,
+            session_picks(&self.reg, &leader),
+            &picks(&self.reg, &leader),
+        )
+    }
+
     /// Starts an agent on in.prompt, and waits for its answer unless it
     /// goes in the background.
     pub fn spawn(&self, input: &SpawnInput) -> Result<String, String> {
         if input.prompt.trim().is_empty() {
             return Err("spawn_agent needs a prompt: the whole task".into());
         }
-        let (p, model) = self.choose(&input.agent, &input.model)?;
+        let ps = picks(&self.reg, &self.leader());
+        let (p, model) = self.choose(&ps, &input.agent, &input.model)?;
         let mut cfg = self.config(&p, &model, &input.prompt, &input.effort, false);
         if !input.step.is_empty() {
             cfg.meta.insert("spawnStep".into(), input.step.clone()); // the call that asked: the UI draws it there
@@ -197,8 +227,12 @@ impl SubAgents {
         if input.prompt.trim().is_empty() {
             return Err("start_agent needs a prompt: the whole task".into());
         }
-        let (p, model) = self.choose(&input.agent, &input.model)?;
+        let ps = session_picks(&self.reg, &self.leader());
+        let (p, model) = self.choose(&ps, &input.agent, &input.model)?;
         let mut cfg = self.config(&p, &model, &input.prompt, &input.effort, true);
+        if !input.cwd.trim().is_empty() {
+            cfg.cwd = folder(&input.cwd, &cfg.cwd)?;
+        }
         self.use_agent(&mut cfg, &p.r.k)?;
         self.start_beside(cfg, &p.name)
     }
@@ -235,10 +269,9 @@ impl SubAgents {
 
     /// The agent a call names, on the model it runs, once it may take
     /// work.
-    fn choose(&self, name: &str, model: &str) -> Result<(Pick, String), String> {
-        let ps = picks(&self.reg, &self.leader());
-        let Some((p, model)) = find(&self.reg, &ps, name, model) else {
-            return Err(no_agent(&self.reg, name, model, &ps));
+    fn choose(&self, ps: &[Pick], name: &str, model: &str) -> Result<(Pick, String), String> {
+        let Some((p, model)) = find(&self.reg, ps, name, model) else {
+            return Err(no_agent(&self.reg, name, model, ps));
         };
         let st = rush_state::Store::load().config;
         if !model.is_empty()
@@ -815,6 +848,23 @@ mod tests {
                 .unwrap_err()
                 .contains("start_agent needs a prompt")
         );
+    }
+
+    /// start_agent's cwd: absolute, relative to the caller's folder, or
+    /// refused with why when it's no folder.
+    #[test]
+    fn start_agent_folder() {
+        let home = Home::new();
+        let from = home.path();
+        std::fs::create_dir_all(from.join("rush")).unwrap();
+        std::fs::write(from.join("notes.txt"), "").unwrap();
+        let f = |asked: &str| folder(asked, &from.to_string_lossy());
+        let want = from.join("rush").to_string_lossy().into_owned();
+        assert_eq!(f(&want).unwrap(), want);
+        assert_eq!(f("rush").unwrap(), want);
+        assert_eq!(f(" rush ").unwrap(), want);
+        assert!(f("notes.txt").unwrap_err().contains("isn't a folder"));
+        assert!(f("nowhere").unwrap_err().contains("there's no folder"));
     }
 
     // subtool_test.go:191 (TestSpawnedIsAChild): spawn_agent's agent is

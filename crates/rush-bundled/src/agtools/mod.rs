@@ -571,13 +571,14 @@ mod tests {
     fn start_agent_starts_a_sibling() {
         let f = Arc::new(Fake::default());
         handler(Some(f.clone()))(
-            br#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"start_agent","arguments":{"agent":"a","prompt":"p","effort":"low"}}}"#,
+            br#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"start_agent","arguments":{"agent":"a","prompt":"p","effort":"low","cwd":"~/src"}}}"#,
         );
         let started = f.started.lock().unwrap().clone().unwrap_or_default();
         assert!(
             started.agent == "a"
                 && started.prompt == "p"
                 && started.effort == "low"
+                && started.cwd == "~/src"
                 && f.spawned.lock().unwrap().is_none(),
             "started {started:?}"
         );

@@ -46,8 +46,13 @@ impl Agents for SubAgents {
                 model: input.model,
                 effort: input.effort,
                 prompt: input.prompt,
+                cwd: input.cwd,
             },
         )
+    }
+
+    fn start_catalogue(&self) -> String {
+        SubAgents::start_catalogue(self)
     }
 
     fn result(&self, input: agtools::ResultInput) -> Result<String, String> {
