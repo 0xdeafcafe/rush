@@ -213,6 +213,8 @@ pub struct Loop<T> {
     shared: Arc<Shared<T>>,
     /// The terminal's reader, once started.
     reader: Mutex<Option<Arc<Reader>>>,
+    /// The signals its reader hears ([`Loop::on_signal`]), until it starts.
+    signals: Mutex<Vec<reader::Signal>>,
 }
 
 impl<T: Send + 'static> Default for Loop<T> {
@@ -248,6 +250,7 @@ impl<T: Send + 'static> Loop<T> {
                 room: Condvar::new(),
             }),
             reader: Mutex::new(None),
+            signals: Mutex::new(Vec::new()),
         }
     }
 
@@ -268,8 +271,30 @@ impl<T: Send + 'static> Loop<T> {
     /// once the loop is gone and the next event arrives.
     pub fn read_input(&self) -> io::Result<()> {
         let shared = self.shared.clone();
-        let r = reader::start(move |e| push_input(&shared, e))?;
+        let signals = std::mem::take(&mut *self.signals.lock().unwrap_or_else(|e| e.into_inner()));
+        let r = reader::start(move |e| push_input(&shared, e), signals)?;
         *self.reader.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
+        Ok(())
+    }
+
+    /// Each signal sig sends make()'s message, heard in the terminal
+    /// reader's own wait ([`Loop::read_input`], so asked before it): no
+    /// thread waits on it alone. One not handled yet stands for the next.
+    pub fn on_signal(
+        &self,
+        sig: libc::c_int,
+        make: impl Fn() -> T + Send + 'static,
+    ) -> io::Result<()> {
+        let (r, w) = std::os::unix::net::UnixStream::pair()?;
+        r.set_nonblocking(true)?;
+        w.set_nonblocking(true)?;
+        signal_hook::low_level::pipe::register(sig, w)?;
+        let tx = self.sender().lane(1);
+        let heard = move || !matches!(tx.try_send(make()), Err(TrySend::Closed(_)));
+        self.signals
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push((r, Box::new(heard)));
         Ok(())
     }
 

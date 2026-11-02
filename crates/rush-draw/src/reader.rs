@@ -5,8 +5,10 @@
 //! releaseTerminal, :1353 RestoreTerminal); this is the same: paused, the
 //! thread reads nothing, so every key goes to the program.
 //!
-//! It waits in one poll() on the terminal, a pipe SIGWINCH writes to and a
-//! pipe that wakes it to pause: idle, it costs nothing. crossterm parses
+//! It waits in one poll() on the terminal, a pipe SIGWINCH writes to, a
+//! pipe that wakes it to pause, and a pipe for each signal the app hears
+//! ([`crate::Loop::on_signal`]: `rush reload`'s SIGUSR1, with no thread of
+//! its own): idle, it costs nothing. crossterm parses
 //! what the terminal sent, asked only once there's something to read, and
 //! drained before the thread waits again, so nothing it holds is left
 //! behind when it pauses.
@@ -108,6 +110,10 @@ impl Tty {
     }
 }
 
+/// A signal the app hears: the pipe it writes to, and what to do, which
+/// says false once nobody wants it.
+pub(crate) type Signal = (UnixStream, Box<dyn Fn() -> bool + Send>);
+
 /// Reads what's waiting in a non-blocking pipe and drops it.
 fn drain(s: &UnixStream) {
     let mut b = [0u8; 64];
@@ -116,7 +122,10 @@ fn drain(s: &UnixStream) {
 
 /// Starts the thread; push takes each event and says false once nobody
 /// wants them, which ends the thread.
-pub(crate) fn start(push: impl Fn(Event) -> bool + Send + 'static) -> io::Result<Arc<Reader>> {
+pub(crate) fn start(
+    push: impl Fn(Event) -> bool + Send + 'static,
+    signals: Vec<Signal>,
+) -> io::Result<Arc<Reader>> {
     let tty = Tty::open()?;
     let (wake_r, wake_w) = UnixStream::pair()?;
     wake_r.set_nonblocking(true)?;
@@ -136,12 +145,19 @@ pub(crate) fn start(push: impl Fn(Event) -> bool + Send + 'static) -> io::Result
         .name("rush-input".into())
         .spawn(move || {
             crate::qos::interactive();
-            run(&me, &tty, &wake_r, &winch_r, push)
+            run(&me, &tty, &wake_r, &winch_r, &signals, push)
         })?;
     Ok(r)
 }
 
-fn run(r: &Reader, tty: &Tty, wake: &UnixStream, winch: &UnixStream, push: impl Fn(Event) -> bool) {
+fn run(
+    r: &Reader,
+    tty: &Tty,
+    wake: &UnixStream,
+    winch: &UnixStream,
+    signals: &[Signal],
+    push: impl Fn(Event) -> bool,
+) {
     // Times the terminal had something crossterm didn't take.
     let mut stuck = 0;
     let mut late =
@@ -170,24 +186,17 @@ fn run(r: &Reader, tty: &Tty, wake: &UnixStream, winch: &UnixStream, push: impl 
     };
     loop {
         r.park();
-        let mut fds = [
-            libc::pollfd {
-                fd: tty.fd(),
-                events: libc::POLLIN,
-                revents: 0,
-            },
-            libc::pollfd {
-                fd: wake.as_raw_fd(),
-                events: libc::POLLIN,
-                revents: 0,
-            },
-            libc::pollfd {
-                fd: winch.as_raw_fd(),
-                events: libc::POLLIN,
-                revents: 0,
-            },
-        ];
-        // SAFETY: fds is three valid pollfds for the call's length.
+        let pfd = |fd: RawFd| libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let mut fds: Vec<libc::pollfd> = [tty.fd(), wake.as_raw_fd(), winch.as_raw_fd()]
+            .into_iter()
+            .chain(signals.iter().map(|(p, _)| p.as_raw_fd()))
+            .map(pfd)
+            .collect();
+        // SAFETY: fds is valid pollfds for the call's length.
         let n = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, -1) };
         if n < 0 {
             if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
@@ -198,6 +207,12 @@ fn run(r: &Reader, tty: &Tty, wake: &UnixStream, winch: &UnixStream, push: impl 
         if fds[1].revents != 0 {
             drain(wake);
             continue; // to park, or read on if resumed already
+        }
+        for ((p, heard), f) in signals.iter().zip(&fds[3..]) {
+            if f.revents != 0 {
+                drain(p);
+                heard();
+            }
         }
         let resized = fds[2].revents != 0;
         if resized {

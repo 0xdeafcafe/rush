@@ -119,16 +119,16 @@ fn run_model(
     let (w, h) = term.size()?;
     m.w = w as usize;
     m.h = h as usize;
-    lp.read_input()?;
-    // SIGUSR1 is `rush reload`: #reload, asked for from outside. Only a
+    // SIGUSR1 is `rush reload`: #reload, asked for from outside (Go's
+    // ReloadMsg, reload.go:83), heard by the terminal's reader. Only a
     // view that's listed is signalled, and it's listed once this is set.
-    let listed = match hosted {
-        None => {
-            reload_on_signal(&lp);
-            Some(rush_state::instances::register())
-        }
-        Some(_) => None,
-    };
+    if hosted.is_none() {
+        let _ = lp.on_signal(libc::SIGUSR1, || {
+            Note::Apply(Box::new(|m: &mut Model| m.reload(false)))
+        });
+    }
+    lp.read_input()?;
+    let listed = hosted.is_none().then(rush_state::instances::register);
     // The list kept from last time in the first frame (listcache.rs).
     listcache::wait_first(&mut m);
     let r = lp.run(&mut term, &mut m);
@@ -309,29 +309,6 @@ pub fn soak(
     })?;
     worker::flush_spend();
     Ok(out)
-}
-
-/// Each SIGUSR1 is #reload (Go's ReloadMsg, reload.go:83): a thread
-/// blocks on a pipe the signal writes to, so it costs nothing until then.
-fn reload_on_signal(lp: &Loop<Note>) {
-    use std::io::Read;
-    let Ok((mut r, w)) = std::os::unix::net::UnixStream::pair() else {
-        return;
-    };
-    if signal_hook::low_level::pipe::register(libc::SIGUSR1, w).is_err() {
-        return;
-    }
-    let tx = lp.sender().lane(1);
-    let _ = std::thread::Builder::new()
-        .name("rush-reload".into())
-        .spawn(move || {
-            let mut b = [0u8; 16];
-            while matches!(r.read(&mut b), Ok(n) if n > 0) {
-                if !tx.send(Note::Apply(Box::new(|m: &mut Model| m.reload(false)))) {
-                    return;
-                }
-            }
-        });
 }
 
 /// A key as `rush --render` takes it: tab, down, enter, ?, text=…,
