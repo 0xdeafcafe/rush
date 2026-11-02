@@ -302,7 +302,7 @@ impl Runner {
                 }
             };
             let began = Instant::now();
-            match self.start(p) {
+            match self.launch(p) {
                 Ok(run) => {
                     self.hand_off(run, began, backoff);
                     return;
@@ -314,7 +314,7 @@ impl Runner {
 
     /// Starts the plugin and says hello: Ok once it's running, else why
     /// not (with what it started undone).
-    fn start(self: &Arc<Self>, p: Plugin) -> Result<Running, String> {
+    fn launch(self: &Arc<Self>, p: Plugin) -> Result<Running, String> {
         self.lock().p = p.clone();
         self.set_state("starting", "");
 
@@ -323,7 +323,7 @@ impl Runner {
         } else {
             Some(Proxy::listen(&p.network, Some(self.log.as_proxy_log()))?)
         };
-        match self.start_with(&p, proxy.as_ref().map_or(0, Proxy::port)) {
+        match self.launch_with(&p, proxy.as_ref().map_or(0, Proxy::port)) {
             Ok(mut run) => {
                 run.proxy = proxy;
                 Ok(run)
@@ -337,7 +337,7 @@ impl Runner {
         }
     }
 
-    fn start_with(self: &Arc<Self>, p: &Plugin, proxy_port: u16) -> Result<Running, String> {
+    fn launch_with(self: &Arc<Self>, p: &Plugin, proxy_port: u16) -> Result<Running, String> {
         let mut cmd = Launch {
             plugin: p.clone(),
             proxy_port,
@@ -470,11 +470,11 @@ impl Runner {
                 return;
             };
             let r = me.clone();
-            r.scope
-                .spawn_sized("plugin-supervise", rush_sys::threads::MEDIUM, move || {
-                    let res = r.end(run);
-                    r.supervise_from(backoff, Some((began, res)));
-                });
+            let scope = r.scope.clone();
+            scope.spawn_sized("plugin-supervise", rush_sys::threads::MEDIUM, move || {
+                let res = r.end(run);
+                r.supervise_from(backoff, Some((began, res)));
+            });
         });
         // If it has run already, this goes with the next run's: harmless.
         self.lock().watching.push(next);
