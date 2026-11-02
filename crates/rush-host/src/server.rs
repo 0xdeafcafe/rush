@@ -1459,13 +1459,13 @@ impl Host {
         // switches as each hook runs.
         o.tool_hook = o.bash_hook.clone();
         // Its subagents' caches kept while they wait on long calls, as
-        // Settings › General › Prompt cache says, where its agent can.
+        // Settings › Usage › Prompt cache says, where its agent can.
         let keep = rush_state::Store::load().config.cache_keep;
-        st.sk.on = keep.on_for(a.kind().as_str())
+        st.sk.on = keep.subagents_on_for(a.kind().as_str())
             && self
                 .reg
                 .supports(a.kind().as_str(), Feature::SubagentKeepWarm);
-        st.sk.min_context = keep.settings().min_context;
+        st.sk.settings = keep.settings();
         st.sk.project = c.cwd.clone();
         // The hook reads its commands' past times by the same folder.
         o.env

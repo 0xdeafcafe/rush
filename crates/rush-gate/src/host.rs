@@ -61,7 +61,7 @@ pub trait Host: Send + Sync {
     /// For a subagent's command that took longer than its prompt cache
     /// lives the last time it ran in this project: how long it took, and
     /// the cache's life, in milliseconds; None for any other, or while
-    /// keeping caches warm is off (rush_core::subkeep::ahead).
+    /// starting them in the background is off (rush_core::subkeep::ahead).
     fn long_ahead(&self, command: &str) -> Option<(i64, i64)> {
         let project = std::env::var(crate::cli::PROJECT_ENV)
             .ok()
@@ -71,11 +71,12 @@ pub trait Host: Send + Sync {
         if !rush_core::subkeep::ahead(took, ttl) {
             return None;
         }
-        // Claude Code's hook: its own setting.
+        // Claude Code's hook: its own setting (Settings › Usage ›
+        // Prompt cache, start known-slow commands in the background).
         rush_state::Store::load()
             .config
             .cache_keep
-            .on_for("claude")
+            .ahead_for("claude")
             .then_some((took, ttl))
     }
 }
