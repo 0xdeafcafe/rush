@@ -400,7 +400,7 @@ fn three_turned_down_in_a_row_stop_it() {
     presets::set(&mut m, Preset::Trail);
     assert_eq!(viewsuggest::count(&mut m, "back:chat").streak, 1);
     look_away(&mut m);
-    talk(&mut m, NOW + 60_000);
+    talk(&mut m, NOW + 50_000);
     frame_at(&mut m, NOW + 61_000);
     let s = shown(&mut m).unwrap();
     assert_eq!(s.kind, "back:catch-up");
