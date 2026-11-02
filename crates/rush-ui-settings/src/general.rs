@@ -478,8 +478,8 @@ pub fn sections(m: &Model) -> Vec<Section> {
     );
     high_ram.unset = "15m".into();
     // Rush-only rows from here to Stalls: config.json had these with no
-    // row (trimRunningTmp, ownWorktrees, onboarding.hidden, advisor,
-    // compactKind).
+    // row (trimRunningTmp, ownWorktrees, onboarding.hidden, compactKind;
+    // the advisor's is on Usage).
     let trim = choice(
         "Trim a running session's temp files",
         on_off(c.trim_running_tmp),
@@ -515,20 +515,8 @@ pub fn sections(m: &Model) -> Vec<Section> {
         ],
         set(|m, v| config_mut(m).onboarding.hidden = v == "off"),
     );
-    let advisor = choice(
-        "Advisor",
-        on_off(c.advisor),
-        "Watches how you use your agents and says what would cut tokens or time. A cheap model (Haiku) reads a digest rush works out itself, at most every 3 hours, and an expensive one (Opus) checks the suggestions worth money against the transcripts before they reach you. It spends on your account; RUSH_ADVISOR decides it for one run.",
-        &[
-            ("off", "nothing runs."),
-            ("on", "it looks over your agents' figures now and then."),
-        ],
-        set(|m, v| config_mut(m).advisor = v == "on"),
-    );
-    secs.push(Section::new(
-        "Help and advice",
-        vec![tips, advisor, compact_row(m)],
-    ));
+    // The advisor is Settings › Usage's now.
+    secs.push(Section::new("Help", vec![tips, compact_row(m)]));
 
     // What keeps a turn from hanging on a stream that went silent: shown,
     // as it's always on.

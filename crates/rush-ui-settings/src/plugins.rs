@@ -20,7 +20,9 @@ use rush_plugin::{CATEGORIES, Manifest, Requires, SettingSpec, UiPlugin};
 
 use super::form::{Section, Setting};
 use super::paint::{first_non_empty, trunc};
-use super::{PAGE_KEYS, PAGE_PLUGINS, Page, State, dialog, dialog_mut, set_settings_page};
+use super::{
+    PAGE_KEYS, PAGE_PLUGINS, PAGE_USAGE, Page, State, dialog, dialog_mut, set_settings_page,
+};
 use crate::frame::Out;
 use crate::model::Model;
 use crate::style::*;
@@ -607,8 +609,32 @@ fn plugin_page(m: &Model, name: &str) -> Section {
         }
         _ => {}
     }
-    for spec in &up.settings {
-        sec.rows.push(plugin_setting(&up, spec));
+    if name == rush_bundled::contextguard::NAME {
+        // Its rules are set with rush's other usage rules, not twice.
+        sec.rows.push(Setting {
+            label: "rules".into(),
+            line: Some(Rc::new(|_| {
+                line([
+                    plain(fit_str("Its rules", 32)),
+                    sp("Settings › Usage › Context guard", TEXT),
+                    sp("  enter goes there", FAINT),
+                ])
+            })),
+            what: "Which of its rules are on, and their numbers, are set in Settings › Usage › Context guard, beside the prompt cache and the runaway guard. Turning it off here turns every rule off.".into(),
+            key: Some(Rc::new(|m, s| {
+                if s != "enter" {
+                    return Out::Pass;
+                }
+                set_settings_page(m, PAGE_USAGE);
+                Out::Draw
+            })),
+            keys: vec!["enter".into(), "go there".into()],
+            ..Setting::default()
+        });
+    } else {
+        for spec in &up.settings {
+            sec.rows.push(plugin_setting(&up, spec));
+        }
     }
     let km = super::keys::key_map(m);
     for c in &up.commands {

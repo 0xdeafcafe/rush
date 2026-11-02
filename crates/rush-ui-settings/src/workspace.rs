@@ -12,7 +12,7 @@ use rush_draw::MouseKind;
 use super::form::{self, Section, Setting, flat, row_at};
 use super::{
     PAGE_CONFIG, PAGE_GENERAL, PAGE_HARNESSES, PAGE_KEYS, PAGE_PLUGINS, PAGE_PROVIDERS,
-    PAGE_REMOTE, PAGE_UPDATES, cur_page, dialog, dialog_len, dialog_mut, place_pages,
+    PAGE_REMOTE, PAGE_UPDATES, PAGE_USAGE, cur_page, dialog, dialog_len, dialog_mut, place_pages,
 };
 use crate::frame::overlayclick::MouseEv;
 use crate::frame::sheet::window;
@@ -55,6 +55,9 @@ pub fn heading(m: &Model, w: usize) -> Vec<Line> {
             "Which harnesses are on, which models each may call, and what happens at a limit."
         }
         PAGE_GENERAL => "Sessions, notifications, background work, and how the workspace looks.",
+        PAGE_USAGE => {
+            "What rush does on its own to save tokens and money, and to keep agents in check."
+        }
         PAGE_KEYS => "Find, practice and customize your shortcuts.",
         PAGE_PLUGINS => "Manage extensions and the access they need.",
         PAGE_UPDATES => "Keep rush and your installed tools up to date.",

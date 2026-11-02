@@ -817,6 +817,34 @@ fn snapshot_settings_general() {
     );
 }
 
+/// Settings › Usage: the prompt cache's rows first. Every size that
+/// differs is shown whole, as drawn, before the check.
+#[test]
+fn snapshot_settings_usage() {
+    let mut differ = Vec::new();
+    for (w, h) in SIZES {
+        let mut m = model();
+        rush_ui::screens::settings::set_settings_page(
+            &mut m,
+            rush_ui::screens::settings::PAGE_USAGE,
+        );
+        let f = plain(&mut m, w, h, &[]);
+        let name = format!("snap_settings_usage_{w}x{h}");
+        let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("snapshots")
+            .join(format!("{name}.txt"));
+        if std::fs::read_to_string(&p).is_ok_and(|want| want != f)
+            && std::env::var_os("UPDATE_SNAPSHOTS").is_none()
+        {
+            differ.push(format!("{name}:\n{f}"));
+        } else {
+            snapshot(&name, &f);
+        }
+    }
+    assert!(differ.is_empty(), "drawn now:\n{}", differ.join("\n\n"));
+}
+
 /// Every place's pages on a row of their own under the places, drawn
 /// alike: the header alone, at 120×40, one per place with pages.
 #[test]

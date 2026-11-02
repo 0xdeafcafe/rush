@@ -1,7 +1,7 @@
      !
     ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working                       default
    ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings             0% cpu · –
-    RUSH      General   Keys   Plugins   Updates   Remote   [ ]
+    RUSH      General   Usage   Keys   Plugins   Updates   Remote   [ ]
    ▀▀▀▀▀▀
 ────────────────────────────────────────────────────────────────────────────────
   Sessions, notifications, background work, and how the workspace looks.
@@ -18,6 +18,6 @@
 
   A finished agent's process stays in memory (often 300–800 MB) until it is
   off: finished agents stay in memory until you stop them (ctrl+x).
-    1 of 52 ───────────────────────────────────────────────────────────────
+    1 of 46 ───────────────────────────────────────────────────────────────
   enter choose  ·  ? details  ·  ctrl+↑↓ section  ·  [ ] page  ·  esc back
 ────────────────────────────────────────────────────────────────────────────────

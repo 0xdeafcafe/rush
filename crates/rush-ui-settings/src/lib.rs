@@ -43,6 +43,7 @@ pub mod sample;
 pub mod sheets;
 pub mod statusline;
 pub mod updates;
+pub mod usage;
 pub mod workspace;
 
 use std::cell::Cell;
@@ -63,10 +64,12 @@ pub const PAGE_PROVIDERS: usize = 0;
 pub const PAGE_HARNESSES: usize = 1;
 pub const PAGE_CONFIG: usize = 2;
 pub const PAGE_GENERAL: usize = 3;
-pub const PAGE_KEYS: usize = 4;
-pub const PAGE_PLUGINS: usize = 5;
-pub const PAGE_UPDATES: usize = 6;
-pub const PAGE_REMOTE: usize = 7;
+/// The rules rush keeps on its own to save tokens and money (Rust-only).
+pub const PAGE_USAGE: usize = 4;
+pub const PAGE_KEYS: usize = 5;
+pub const PAGE_PLUGINS: usize = 6;
+pub const PAGE_UPDATES: usize = 7;
+pub const PAGE_REMOTE: usize = 8;
 
 /// A page's own drawing, when it isn't a form: w wide, h tall, its
 /// geometry noted for the mouse.
@@ -109,12 +112,15 @@ pub fn pages() -> Vec<Page> {
             name: "General",
             form: Some(|m| {
                 let mut s = general::sections(m);
-                s.extend(guard::sections(m));
-                s.extend(guard::cache_sections(m));
                 s.extend(interface::sections(m));
                 s
             }),
             prep: Some(general::prep),
+            ..Page::default()
+        },
+        Page {
+            name: "Usage",
+            form: Some(usage::sections),
             ..Page::default()
         },
         Page {
@@ -175,6 +181,8 @@ pub struct Dialog {
     pub projects: Vec<String>,
     /// The harness showing's own settings, as last read.
     pub own: Option<ownsettings::Read>,
+    /// The context guard's settings, as Usage last read them.
+    pub guard: Option<usage::GuardRead>,
 }
 
 /// The settings group's state: the dialog while a settings place shows,
@@ -286,6 +294,7 @@ pub fn open_dialog(m: &mut Model, p: usize) {
     match p {
         // Microphones plugged in since show at once.
         PAGE_GENERAL => (m.ext.calls.dictation_read_mics())(m),
+        PAGE_USAGE => usage::read(m),
         PAGE_PLUGINS => plugins::read(m),
         PAGE_UPDATES => updates::recheck_after(m),
         PAGE_REMOTE => remote::want(m),
@@ -322,6 +331,9 @@ pub fn reload_dialog(m: &mut Model) {
     }
     if page == PAGE_PLUGINS {
         plugins::read(m);
+    }
+    if page == PAGE_USAGE {
+        usage::read(m);
     }
     prep(m);
 }
