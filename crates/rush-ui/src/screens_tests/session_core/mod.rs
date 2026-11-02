@@ -15,6 +15,7 @@ mod tests_filementions;
 mod tests_finish_inline;
 mod tests_grid;
 mod tests_header;
+mod tests_hold;
 mod tests_jobs;
 mod tests_move;
 mod tests_next;

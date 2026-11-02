@@ -599,9 +599,13 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
     // Any of the words above that took the label's place took the send
     // mode's with it.
     let send_part = send_part.filter(|_| top.plain() == send_top);
+    // A decision held off the box while you type, or what you typed set
+    // aside while you answer one (hold.rs).
+    let foot_l = rush_ui_session_cards::hold::notice(m, key);
     let c = conn(m, key);
     let mut b = InputBox {
         w,
+        foot_l,
         foot_r,
         focused: typing,
         top_l: top,

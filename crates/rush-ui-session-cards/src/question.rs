@@ -98,7 +98,15 @@ impl Conn {
 /// there's a host to take the answers or they'd wake or resume one
 /// (decisionsCard; Go's asleep only, here a stopped rush session too,
 /// whose answers resume it as a message does).
+/// One that came while you were typing waits, held off the box, until
+/// you stop or ask for it (hold.rs).
 pub fn decisions_card(c: &Conn, i: &HostInfo, pending: usize) -> Option<Question> {
+    decisions_waiting(c, i, pending).filter(|d| !c.hold.ids.contains(&d.id))
+}
+
+/// The decisions block waiting on you, held or not: [`decisions_card`]
+/// before the hold.
+pub fn decisions_waiting(c: &Conn, i: &HostInfo, pending: usize) -> Option<Question> {
     if i.cold && !i.wakes {
         return None;
     }

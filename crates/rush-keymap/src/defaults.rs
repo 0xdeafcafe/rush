@@ -151,6 +151,8 @@ const DEFAULTS: &[Row] = &[
     ("session.allow", S, "answer the card yes: allow it, or continue at the reset", &["ctrl+] y", "alt+y"], false),
     ("session.always", S, "allow it, and don't ask again", &["ctrl+] a", "alt+a"], false),
     ("session.deny", S, "answer the card no", &["ctrl+] n", "alt+n"], false),
+    ("session.decide", S, "a decision that came while you typed: open it now, what's typed left in the box", &["alt+j", "ctrl+] D"], false),
+    ("session.decide.stash", S, "a decision that came while you typed: set what's typed aside and open it; it comes back once you've answered", &["alt+shift+j", "alt+J", "ctrl+] S"], false),
     ("session.look", S, "the picked step's output as text, pretty or hex", &["v"], false),
     ("session.link", S, "what to do with the picked step's file or link", &["o"], false),
     ("session.folder", S, "choose where the agent works", &["ctrl+l"], false),

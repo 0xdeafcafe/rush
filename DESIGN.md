@@ -1431,6 +1431,14 @@ is made. Everything below is in `rush_ui::frame`.
   (`Summarizer::summary_exclusions`). A rewind's message put back in a
   session beside the list opens it, as Go's paneFocus gives its box the
   keys.
+  A decisions card that comes while you're typing (text in the box, a
+  key within `hold::HOLD_MS`, 3 s) is held off the box
+  (`session_cards::hold`, beyond Go): `decisions_card` skips it and the
+  box's bottom edge counts what waits. It shows once the box is empty
+  and 3 s pass without a key; with text left it waits for alt+j (open,
+  text kept: the card sits above the box) or alt+shift+j (the box's
+  `Editor` set aside whole and put back once the card is answered or
+  set aside). The list's needs-you marks don't read the hold.
   A decisions card stays on a session rush doesn't run now when its
   answers would wake or resume it (`HostInfo::wakes`: asleep, as Go, or
   stopped with no host running, beyond Go, whose card vanished there and

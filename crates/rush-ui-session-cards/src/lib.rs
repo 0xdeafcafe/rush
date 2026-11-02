@@ -46,6 +46,7 @@ pub mod finishcard;
 pub mod fork;
 pub mod handles;
 pub mod handoff;
+pub mod hold;
 pub use rush_ui_base::imagerefs;
 pub mod limit;
 pub mod memcard;
@@ -385,6 +386,9 @@ pub struct Conn {
     pub stop_note: Option<stopnote::StopNote>,
     /// The usage the limit card read again by hand (c.limitUsage).
     pub limit_usage: limit::LimitUsage,
+    /// Decisions that came while you were typing, held off the box, and
+    /// what you were typing set aside while you answer one.
+    pub hold: hold::Hold,
 }
 
 /// Model's side of this module: Model is rush-ui-base's, so its
@@ -566,6 +570,7 @@ pub fn register(x: &mut Ext) {
     x.keys.push(note_key);
     x.keys.push(quickask::quick_key_hook);
     x.session_keys.push(btw::btw_key_hook);
+    x.session_keys.push(hold::hold_key_hook);
     x.session_keys.push(question::card_key_hook);
     x.session_keys.push(question::decide_key_hook);
     x.session_keys.push(clipimage::clip_key_hook);
@@ -728,6 +733,7 @@ pub fn dock_parts(m: &mut Model, w: usize) -> (Vec<Line>, Vec<Line>) {
     let Some(key) = open_key(m) else {
         return (Vec::new(), Vec::new());
     };
+    hold::sync(m, &key);
     question::sync_decisions_shown(m, &key);
     let Some(inf) = card_info(m, &key) else {
         return (Vec::new(), Vec::new());
