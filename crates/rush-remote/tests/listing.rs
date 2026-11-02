@@ -4,6 +4,8 @@
 //! over a home of 1,244 sessions, as many as the home measured for
 //! DESIGN.md "Background processes' memory". Run without the test harness,
 //! so the number prints: `cargo test -p rush-remote --test listing`.
+//! RUSH_BENCH_OUT=<file> also writes it there, for CI's footprint job
+//! (tools/footprint).
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::AtomicUsize;
@@ -44,6 +46,22 @@ static A: Counting = Counting;
 
 const SESSIONS: usize = 1_244;
 
+/// Appends a number to $RUSH_BENCH_OUT as `name<TAB>kind<TAB>value`, for
+/// CI's footprint job (tools/footprint/measure.py reads it).
+fn record(name: &str, kind: &str, v: usize) {
+    use std::io::Write;
+    let Some(p) = std::env::var_os("RUSH_BENCH_OUT") else {
+        return;
+    };
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(p)
+    {
+        let _ = writeln!(f, "{name}\t{kind}\t{v}");
+    }
+}
+
 fn main() {
     rush_testenv::assert_sandboxed();
     for i in 0..SESSIONS {
@@ -74,6 +92,7 @@ fn main() {
         listing.len(),
         held / listing.len().max(1)
     );
+    record("serve: a listing, retained", "heap", held);
     assert_eq!(listing.len(), SESSIONS);
     assert!(held > 1 << 20, "{held} B");
 }
