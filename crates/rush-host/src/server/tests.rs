@@ -2076,3 +2076,47 @@ fn unreadable_queued_image_does_not_hold_the_queue() {
         last.text
     );
 }
+
+/// The system prompt reads no clock and no state: built twice it's the
+/// same word for word, and what a setting or a move can change (views,
+/// the feed, the worktree) comes after every part that never changes, so
+/// turning one on or off keeps the rest of the prompt as it was cached.
+#[test]
+fn system_prompt_is_word_for_word_stable() {
+    let build = |views: &str, feed: &str, note: &str| {
+        system_prompt(&[
+            TASKS_PROMPT,
+            SCRATCH_PROMPT,
+            crate::decisions::DECISIONS_PROMPT,
+            SHELL_PROMPT,
+            crate::agents::AGENTS_NOTE,
+            "  this session's own prompt\n",
+            views,
+            feed,
+            note,
+        ])
+    };
+    let w = crate::wire::Workspace {
+        path: "/r/.claude/worktrees/abc".into(),
+        branch: "rush/abc".into(),
+        own: true,
+        ..Default::default()
+    };
+    let note = crate::workspace::workspace_note(Some(&w));
+    let all = build(crate::views::VIEWS_PROMPT, COMMUNITY_PROMPT, &note);
+    assert_eq!(
+        all,
+        build(crate::views::VIEWS_PROMPT, COMMUNITY_PROMPT, &note)
+    );
+    let bare = build("", "", "");
+    assert!(bare.ends_with("\n\nthis session's own prompt"), "{bare}");
+    for (what, p) in [
+        ("views on", build(crate::views::VIEWS_PROMPT, "", "")),
+        ("feed on", build("", COMMUNITY_PROMPT, "")),
+        ("in a worktree", build("", "", &note)),
+        ("all", all.clone()),
+    ] {
+        assert!(p.starts_with(&bare), "{what}: the stable part moved");
+    }
+    assert!(!all.contains("\n\n\n"), "{all}");
+}
