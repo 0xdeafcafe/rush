@@ -1,1 +1,49 @@
-pending
+     !
+    ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working                                                                                                                                               default
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings                                                                                                                  0% cpu · – · 37.0G free · 80%
+    RUSH      General   Usage   Keys   Plugins   Updates   Remote   [ ]
+   ▀▀▀▀▀▀
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  What rush does on its own to save tokens and money, and to keep agents in check.
+
+  ▸ Prompt cache           │                                                                                                            │ Keep idle conversations warm
+    Context guard          │ Prompt cache · on unless you turn it off; Claude Code for now                                              │
+    Runaway guard          │ ▍ Keep idle conversations warm   ‹ on           ›                                                          │ A provider keeps a session's prompt cached for a while
+    Advisor                │     for                          ‹ 15 minutes   ›                                                          │ after its last request (Claude: 5 minutes, or an hour),
+                           │     compact long waits           ‹ off          ›                                                          │ and a message after that pays to write the whole context
+                           │   Keep waiting subagents' cache  ‹ on           ›                                                          │ again: 1.25× the input price for a 5-minute cache, 2× for
+                           │     slow commands in background  ‹ on           ›                                                          │ an hour's. Just before an idle session's cache lapses,
+                           │   Claude Code subagents' cache   ‹ automatic    ›                                                          │ rush sends one small request that reads the whole cached
+                           │   Smallest worth keeping         ‹ 20k tokens   ›                                                          │ context, a tenth of the price, and its life starts over.
+                           │   Most refreshes per wait        ‹ auto         ›                                                          │ It isn't a message: nothing is added to the conversation,
+                           │                                                                                                            │ no turn runs, nothing notifies. It only does this for a
+                           │ Context guard · on unless you turn it off; Claude Code for now                                             │ session that went idle within the time below, with a
+                           │   Don't re-read unchanged files  ‹ on           ›                                                          │ context worth it; never one asleep, done, held, or on an
+                           │     smallest file it applies to  ‹ 2 KB         ›                                                          │ account past its pace, nor while you're away. Each is in
+                           │   Don't read huge files whole    ‹ on           ›                                                          │ the session's events as cache-kept, with its cost.
+                           │     huge means over              ‹ 1,000 lines  ›                                                          │
+                           │   Stop repeated failures         ‹ on           ›                                                          │ on: idle sessions' caches are kept for the time below,
+                           │     after                        ‹ 3 in a row   ›                                                          │ then lapse.
+                           │   Trim command output            ‹ on           ›                                                          │
+                           │     longer than                  ‹ 600 lines    ›                                                          │
+                           │                                                                                                            │
+                           │ Runaway guard · each part off until you turn it on                                                         │
+                           │   Pace guard                     ‹ off          ›                                                          │
+                           │   Agents at once                 ‹ no cap       ›                                                          │
+                           │   When you're away               ‹ off          ›                                                          │
+                           │                                                                                                            │
+                           │ Advisor                                                                                                    │
+                           │   Advisor                        ‹ off          ›                                                          │
+                           │                                                                                                            │
+                           │                                                                                                            │
+                           │                                                                                                            │
+                           │                                                                                                            │
+                           │                                                                                                            │
+                           │                                                                                                            │
+                           │                                                                                                            │
+                           │                                                                                                            │
+                           │                                                                                                            │
+                           │                                                                                                            │
+    1 of 20 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  space switch  ·  enter choose  ·  ? details  ·  ctrl+↑↓ section  ·  [ ] page  ·  esc back
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
