@@ -1,7 +1,7 @@
      !
     ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working                                                               default
    ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings                                  0% cpu · – · 37.0G free · 80%
-    RUSH      General   Keys   Plugins   Updates   Remote   [ ]
+    RUSH      General   Usage   Keys   Plugins   Updates   Remote   [ ]
    ▀▀▀▀▀▀
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   Sessions, notifications, background work, and how the workspace looks.
@@ -34,6 +34,6 @@
 
 
 
-    1 of 52 ───────────────────────────────────────────────────────────────────────────────────────────────────────
+    1 of 46 ───────────────────────────────────────────────────────────────────────────────────────────────────────
   enter choose  ·  ? details  ·  ctrl+↑↓ section  ·  [ ] page  ·  esc back
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

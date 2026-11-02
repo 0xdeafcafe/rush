@@ -1771,3 +1771,106 @@ fn projects_lists_every_project() {
         ["/src/alpha", "/src/app", "/src/beta", "/src/zeta"]
     );
 }
+
+/// Settings › Usage gathers what rush does on its own to save tokens and
+/// money: the prompt cache, the context guard, the runaway guard and the
+/// advisor, each at today's values, and none of them left on General. A
+/// change is kept where its rule reads it: config.json for the cache, the
+/// context guard's own settings for its rules (what its hook reads at
+/// every call).
+#[test]
+fn usage_gathers_the_rules() {
+    let (mut m, _d) = model(140, 50);
+    set_settings_page(&mut m, PAGE_USAGE);
+    // The harnesses' own subagents' cache rows depend on the registry.
+    let rows = |m: &Model| -> Vec<(String, String)> {
+        flat(&usage::sections(m))
+            .iter()
+            .filter(|r| !r.label.starts_with("Subagents' cache life"))
+            .map(|r| (r.label.clone(), r.shown()))
+            .collect()
+    };
+    let want: Vec<(String, String)> = [
+        ("Keep idle conversations warm", "on"),
+        ("  for", "15 minutes"),
+        ("  compact long waits", "off"),
+        ("Keep waiting subagents' cache", "on"),
+        ("  start known-slow commands in background", "on"),
+        ("Smallest conversation worth keeping", "20k tokens"),
+        ("Most refreshes per wait", "auto: half a rewrite"),
+        ("Don't re-read unchanged files", "on"),
+        ("  smallest file it applies to", "2 KB"),
+        ("Don't read huge files whole", "on"),
+        ("  huge means over", "1,000 lines or 48 KB"),
+        ("Stop repeated failures", "on"),
+        ("  after", "3 in a row"),
+        ("Trim command output", "on"),
+        ("  longer than", "600 lines: keeps first and last 200"),
+        ("Pace guard", "off"),
+        ("Agents at once", "no cap"),
+        ("When you're away", "off"),
+        ("Advisor", "off"),
+    ]
+    .iter()
+    .map(|(a, b)| (a.to_string(), b.to_string()))
+    .collect();
+    assert_eq!(rows(&m), want);
+    let general = (pages()[PAGE_GENERAL].form.unwrap())(&m);
+    for gone in ["Pace guard", "Keep it warm", "Advisor"] {
+        assert!(
+            flat(&general).iter().all(|r| r.label != gone),
+            "{gone} is on Usage now"
+        );
+    }
+    let at = |m: &Model, label: &str| -> (usize, Setting) {
+        let all = flat(&usage::sections(m));
+        let i = all
+            .iter()
+            .position(|r| r.label == label)
+            .unwrap_or_else(|| panic!("no row {label}"));
+        (i, all[i].clone())
+    };
+    // space switches the subagents' cache off, and the row under it goes.
+    let (i, _) = at(&m, "Keep waiting subagents' cache");
+    dialog_mut(&mut m).cursor = i;
+    let secs = usage::sections(&m);
+    form_key(&mut m, &secs, "space");
+    let k = &config(&m).cache_keep;
+    assert!(!k.subagents && !k.subagents_on_for("claude") && k.on_for("claude"));
+    assert!(
+        rows(&m).iter().all(|(l, _)| !l.contains("known-slow")),
+        "{:?}",
+        rows(&m)
+    );
+    // The numbers reach what decide is given.
+    for (label, v) in [
+        ("Smallest conversation worth keeping", "50000"),
+        ("Most refreshes per wait", "3"),
+        ("  compact long waits", "60"),
+    ] {
+        let (_, r) = at(&m, label);
+        (r.set.unwrap())(&mut m, v);
+    }
+    let s = config(&m).cache_keep.settings();
+    assert_eq!(
+        (s.min_context, s.max_bumps, s.compact_after),
+        (50_000, 3, 60 * 60_000)
+    );
+    assert_eq!(at(&m, "  compact long waits").1.shown(), "after 1 hour");
+    // The context guard's: kept in its own settings, read at its next
+    // hook.
+    let (_, r) = at(&m, "  after");
+    (r.run.unwrap())(&mut m, "5");
+    let (i, _) = at(&m, "Trim command output");
+    dialog_mut(&mut m).cursor = i;
+    let secs = usage::sections(&m);
+    form_key(&mut m, &secs, "space");
+    let g = rush_bundled::contextguard::rules();
+    assert_eq!((g.repeats, g.squeeze, g.repeat), (5, false, true));
+    assert_eq!(at(&m, "  after").1.shown(), "5 in a row");
+    // Read again as the page opens.
+    set_settings_page(&mut m, PAGE_GENERAL);
+    set_settings_page(&mut m, PAGE_USAGE);
+    assert_eq!(at(&m, "  after").1.shown(), "5 in a row");
+    assert!(rows(&m).iter().all(|(l, _)| l != "  longer than"));
+}

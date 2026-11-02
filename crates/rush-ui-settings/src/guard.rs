@@ -1,4 +1,4 @@
-//! Settings › General's Runaway guard (Rust-only): the pace guard, the
+//! Settings › Usage's Runaway guard (Rust-only): the pace guard, the
 //! cap on agents working at once and what's stricter while you're away,
 //! each off until you turn it on. What they do is the accounts module's
 //! (screens/accounts/guard.rs) and rush_core::guard's.
@@ -22,7 +22,7 @@ fn pick(n: f64) -> String {
 }
 
 /// A row of numbers to choose from, each named by name; "" is unset.
-fn numbers(
+pub(crate) fn numbers(
     label: &str,
     value: f64,
     what: &str,
@@ -157,47 +157,6 @@ pub fn sections(m: &Model) -> Vec<Section> {
     }]
 }
 
-/// Settings › General's Prompt cache (Rust-only): keeping idle sessions'
-/// prompt caches warm, on until turned off. What it does is the accounts
-/// module's (guard.rs keep_warm) and rush_core::cachekeep's; each harness
-/// can be set apart on its own page.
-pub fn cache_sections(m: &Model) -> Vec<Section> {
-    let k = config(m).cache_keep.clone();
-    let mut rows = vec![choice(
-        "Keep it warm",
-        on_off(k.on),
-        "A provider keeps a session's prompt cached for a while after its last request (Claude: 5 minutes, or an hour), and a message after that pays to write the whole context again: 1.25× the input price for a 5-minute cache, 2× for an hour's. Just before an idle session's cache lapses, rush sends one small request that reads the whole cached context, a tenth of the price, and its life starts over. It isn't a message: nothing is added to the conversation, no turn runs, nothing notifies. It only does this for a session that went idle within the time below, with a context worth it; never one asleep, done, held, or on an account past its pace, nor while you're away. Each is in the session's events as cache-kept, with its cost.",
-        &[
-            (
-                "on",
-                "idle sessions' caches are kept for the time below, then lapse.",
-            ),
-            (
-                "off",
-                "caches lapse 5 minutes (or an hour) after the last request.",
-            ),
-        ],
-        set(|m, v| config_mut(m).cache_keep.on = v == "on"),
-    )];
-    if k.on {
-        rows.push(numbers(
-            "  for",
-            k.minutes as f64,
-            "How long after a session goes idle its cache is kept. A 5-minute cache kept 15 minutes takes 3 small requests, about 30% of the context's price, to save a rewrite of 125% of it; an hour's cache is left alone unless this is longer than an hour.",
-            &[0.0, 5.0, 30.0, 60.0, 120.0],
-            "15 minutes",
-            &|x| format!("{x:.0} minutes"),
-            |m, v| config_mut(m).cache_keep.minutes = v as i64,
-        ));
-    }
-    vec![Section {
-        title: "Prompt cache".into(),
-        note: "on unless you turn it off; Claude Code for now".into(),
-        rows,
-        ..Section::default()
-    }]
-}
-
 /// A harness's own row for it, on its page, where it can.
 pub fn cache_harness_section(m: &Model, kind: &str) -> Option<Section> {
     if !m.reg.supports(kind, rush_core::adapter::Feature::KeepWarm) {
@@ -212,11 +171,11 @@ pub fn cache_harness_section(m: &Model, kind: &str) -> Option<Section> {
     let mut row = choice(
         "Keep its cache warm",
         v,
-        "Whether this harness's idle sessions have their prompt cache kept warm, apart from Settings › General's Prompt cache.",
+        "Whether this harness's idle sessions, and its waiting subagents, have their prompt cache kept warm, apart from Settings › Usage › Prompt cache.",
         &[
-            ("", "as Settings › General says."),
-            ("on", "kept, whatever General says."),
-            ("off", "never kept."),
+            ("", "as Settings › Usage says."),
+            ("on", "kept, whatever Usage says."),
+            ("off", "never kept, nor its subagents'."),
         ],
         set(move |m, v| {
             let h = &mut config_mut(m).cache_keep.harnesses;
@@ -228,25 +187,31 @@ pub fn cache_harness_section(m: &Model, kind: &str) -> Option<Section> {
         }),
     );
     row.unset = if ck.on {
-        "as General: on"
+        "as Usage: on"
     } else {
-        "as General: off"
+        "as Usage: off"
     }
     .into();
     Some(Section::new("Prompt cache", vec![row]))
 }
 
-/// A harness's "Subagents' cache" row, on its page, where it can say how
-/// long its subagents' prompt cache lives (Feature::SubagentCache). The
-/// host reads it as a session starts, so a change reaches sessions
-/// started or moved onto a new build after it.
-pub fn subagent_cache_section(m: &Model, kind: &str) -> Option<Section> {
-    if !m
-        .reg
-        .supports(kind, rush_core::adapter::Feature::SubagentCache)
-    {
-        return None;
-    }
+/// The harnesses that can say how long their subagents' prompt cache
+/// lives (Feature::SubagentCache), by kind.
+pub fn subagent_cache_kinds(m: &Model) -> Vec<String> {
+    super::harnesses::catalog_harnesses()
+        .into_iter()
+        .filter(|k| {
+            m.reg
+                .supports(k, rush_core::adapter::Feature::SubagentCache)
+        })
+        .collect()
+}
+
+/// How long harness kind's subagents' prompt cache lives, as a row
+/// labelled label: on its own page, and on Usage. One stored value
+/// (config.subagentCache); the host reads it as a session starts, so a
+/// change reaches sessions started or moved onto a new build after it.
+pub fn subagent_cache_row(m: &Model, kind: &str, label: &str) -> Setting {
     let v = config(m)
         .subagent_cache
         .get(kind)
@@ -254,7 +219,7 @@ pub fn subagent_cache_section(m: &Model, kind: &str) -> Option<Section> {
         .to_string();
     let k = kind.to_string();
     let mut row = choice(
-        "Subagents' cache",
+        label,
         &v,
         "How long the prompt cache lives for everything outside the main conversation: subagents, workflows, background and helper requests. A request after it lapses pays to write the whole context again (1.25× the input price against 0.1× for a read); a 1-hour cache costs more to write (2×) but lapses less. The Overview's Cache section and the Projects list show what lapses cost and what an hour would have cost or saved. Applies to sessions started, or moved onto a new build, after the change; one running keeps what it started with. Sets CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL where rush starts Claude Code (2.1.316 or later).",
         &[
@@ -271,5 +236,20 @@ pub fn subagent_cache_section(m: &Model, kind: &str) -> Option<Section> {
         }),
     );
     row.unset = "automatic".into();
-    Some(Section::new("Subagents' cache", vec![row]))
+    row
+}
+
+/// A harness's "Subagents' cache" row, on its page, where it can say how
+/// long its subagents' prompt cache lives (Feature::SubagentCache).
+pub fn subagent_cache_section(m: &Model, kind: &str) -> Option<Section> {
+    if !m
+        .reg
+        .supports(kind, rush_core::adapter::Feature::SubagentCache)
+    {
+        return None;
+    }
+    Some(Section::new(
+        "Subagents' cache",
+        vec![subagent_cache_row(m, kind, "Subagents' cache")],
+    ))
 }
