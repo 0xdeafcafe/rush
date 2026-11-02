@@ -55,6 +55,9 @@ pub struct State {
     pub locked: bool,
     /// the bundle id of the app it'll paste into
     pub app: String,
+    /// you stopped it (esc): nothing's coming, and a message waiting for
+    /// it isn't sent. An older yap never says so.
+    pub cancelled: bool,
 }
 
 impl State {

@@ -26,9 +26,10 @@
 //! talking, or you let go and its words aren't in yet) doesn't send at
 //! once: the message waits for the words, the box's hint saying so, and
 //! goes with them as soon as they're in. enter again sends it now as it
-//! is; esc stops it waiting and keeps the text. A dictation that ends
-//! with nothing, or a yap that goes away, sends what's there once nothing
-//! more has come for [`WAIT_GRACE`].
+//! is; esc stops it waiting and keeps the text, and so does yap saying
+//! you stopped the dictation (esc while it listens, which yap keeps). A
+//! dictation that ends with nothing, or a yap that goes away, sends
+//! what's there once nothing more has come for [`WAIT_GRACE`].
 //!
 //! Both are told the words on the window's screen (screenwords.rs) so
 //! names come out spelled as written: yap on its socket whenever they
@@ -240,6 +241,7 @@ pub fn sync(m: &mut Model) {
                     level: s.level,
                     locked: s.locked,
                     app: s.app,
+                    cancelled: s.cancelled,
                 };
                 // The window's behind: it'll have the next.
                 let _ = tx.try_send(Note::Apply(Box::new(move |m: &mut Model| on_yap(m, s))));
@@ -349,6 +351,11 @@ fn words_now(m: &mut Model) -> Vec<String> {
 /// have put it, and yap is told it was taken; the look ends in the same
 /// step, so no frame shows the words twice.
 pub fn on_yap(m: &mut Model, s: YapState) -> Out {
+    // You stopped the dictation in yap (esc, which yap keeps): the message
+    // waiting for it stays, unsent, as esc in the box leaves it.
+    if s.cancelled {
+        state(m).waiting = None;
+    }
     let o = take_yap(m, s);
     if state(m).waiting.is_none() {
         return o;

@@ -149,6 +149,27 @@ fn esc_stops_it_waiting() {
     assert_eq!(m.input.string(), "check the migration replays ");
 }
 
+// esc while yap listens is yap's: it says the dictation was stopped, and
+// the message stays, unsent, its text kept.
+#[test]
+fn a_dictation_stopped_in_yap_leaves_it_unsent() {
+    let (mut m, _d) = window();
+    m.input.set("check the ");
+    let _ = on_yap(&mut m, yap("listening", "migration"));
+    let _ = press(&mut m, "enter");
+    let stopped = |phase: &str| YapState {
+        cancelled: true,
+        ..yap(phase, "")
+    };
+    let _ = on_yap(&mut m, stopped("finishing"));
+    let _ = on_yap(&mut m, stopped("hidden"));
+    m.clock = Some(10_000 + 10 * WAIT_GRACE);
+    let _ = settle(&mut m);
+    assert_eq!(sent(&mut m), Vec::<String>::new());
+    assert_eq!(m.input.string(), "check the ");
+    assert!(look(&mut m).is_none(), "still waiting");
+}
+
 // A dictation that ends with nothing, fails, or a yap that goes: what's
 // in the box is sent once nothing more has come for WAIT_GRACE.
 #[test]

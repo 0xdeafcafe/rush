@@ -340,6 +340,8 @@ pub struct YapState {
     pub locked: bool,
     /// The app the dictation goes to.
     pub app: String,
+    /// You stopped it (esc in yap).
+    pub cancelled: bool,
 }
 
 impl YapState {
