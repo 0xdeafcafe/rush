@@ -65,6 +65,8 @@ Past the gate, a guard stops the largest program under any agent, or named as a 
 
 **apple voice** (`apple-voice`, on until you turn it off) is rush's own push-to-talk, for when yap isn't there. Hold ctrl+space and speak, let go and the words go into the message box at the cursor, as typed; nothing is sent until you send it. A quick tap instead keeps it listening hands-free until you press ctrl+space again, and esc drops what it heard. In a terminal that can't tell rush when a key is let go, each press starts or stops it. It hears the microphone you pick in Settings › General › Microphone (the Mac's input unless you choose one) with Apple's on-device speech model, through a small helper app of rush's own that macOS asks you to allow the microphone and speech recognition for; nothing leaves your Mac. While it listens the box shows it the way it shows a yap dictation. Needs macOS 26. With both on, fn is yap's and ctrl+space is rush's; the box shows whichever is listening.
 
+**apple intelligence** (`apple-intelligence`, off until you turn it on) answers rush's small jobs with Apple Intelligence's on-device model: naming sessions, summing up messages for the feed, and quick ask. It's free, private and works offline; rush asks it first, and Claude's cheapest model or Ollama's only when it can't answer or a message is too big for it (it holds 4096 tokens, so rush cuts long messages to fit). It runs `fm`, the command macOS 27 ships for the model. Turned on, it says whether the model can be used and, if not, how to fix it: macOS 27 or later; Apple's terms agreed, by running `fm license` in a terminal; and Apple Intelligence on, in System Settings › Apple Intelligence & Siri, which its page in Settings › Plugins opens. Until then it stays out of the way.
+
 **search-guard** (off until you turn it on) refuses an agent's wasteful searches in Claude Code sessions rush starts, through the same Bash hook as the gate, and tells the agent the cheaper command: a recursive `grep -r` (use `rg` or `git grep`, which skip nested worktrees and ignored files), a `git grep` or `rg` pattern with more than 15 alternatives, and a loop or script that runs one whole-tree `git grep` per name (write the words to a file and run one `rg -F -w -f words.txt` pass). Turn it on with `rush plugin on search-guard`.
 
 **hex** (off until you turn it on) adds a hex view of what agents' steps print and read: `v` on a step cycles to its bytes, coloured by kind, with an ASCII column, and binary output opens in it. With it off, `v` still switches between text, pretty and image.
@@ -84,7 +86,7 @@ A plugin can do anything its manifest allows, so rush doesn't go by what it can 
 | `views` | Views: how rush shows what agents do | hex |
 | `memory` | Memory across sessions | memory |
 | `integrations` | Other tools: other apps and services | kanban |
-| `other` | Other | |
+| `other` | Other | apple-intelligence |
 
 ## What a plugin can't do
 
@@ -94,7 +96,6 @@ A plugin can do anything its manifest allows, so rush doesn't go by what it can 
 - **Your environment.** It gets a clean one: none of your tokens or Claude Code settings.
 - **Your agents.** It may list and watch them, and see their folder, branch, state, cost and context use, never what was said. It may message, follow and stop only agents it started. Those run in folders you approved (in a new worktree, if it asks), never in a mode that skips asking you, with at most 4 at once and 30 an hour. With `queue` it may also queue a message, marked as its own, to other agents in those folders that still ask you before acting, and with `queued` send now, or drop, a message you queued in one, by its place, without seeing it.
 - **Your agent list.** With `sidebar` it may arrange it: its own sections, and a name for each agent it knows by Claude Code session id. The list offers that as a group-by mode, and your own renames win. It sees nothing more by it.
-- **Your system's services.** Its sandbox reaches none beyond what every program needs to start, unless its manifest names a group of them under `system`, which approval spells out. rush knows one so far: `apple-intelligence`, Apple Intelligence's on-device model.
 - **Your machine's time.** It runs at utility QoS, and is ended if it grows past its memory limit (256 MB by default).
 
 The full list is in [the sandbox reference](skills/write-rush-plugin/references/sandbox.md), and how each rule is enforced is in [ARCHITECTURE.md](ARCHITECTURE.md#the-boundaries).
@@ -119,7 +120,7 @@ A plugin needs no capability to have the *agent* keep a view: its `prompt` can t
 
 A plugin with `"models": true` offers language models for rush's own small jobs: naming sessions, summing up messages for the feed, quick ask, and memory notes. rush asks a plugin's model first for these, and Claude's cheapest model, then Ollama's, only when it can't answer: it isn't running, it's unavailable, or what it's given is too big for it. The sidekick, which wants a stronger model, never asks one. `#compact` lists them among the models it can sum up with. They are never agents: nothing starts a session with one, and none shows under accounts or profiles.
 
-`apple-intelligence` is one: a Swift plugin that answers with Apple Intelligence's on-device model, with `"system": ["apple-intelligence"]` so its sandbox can reach it.
+The bundled `apple-intelligence` is one: Apple Intelligence's on-device model.
 
 None of it can slow rush down. rush hands the broker events without waiting, draws what plugins added from a copy it already holds, and a plugin that falls behind only loses its own oldest events. What a plugin added goes when it stops.
 

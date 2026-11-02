@@ -14,10 +14,6 @@ Each plugin runs as `taskpolicy -c utility sandbox-exec -p <profile> <program>`:
 - **Write:** its data folder, the paths in `write`, and `/dev/null`.
 - **Connect:** `127.0.0.1:<its proxy's port>`, and only when it has `network`.
 - A little more: sysctl reads, and the one system service libSystem looks up at start.
-- **System services named in `system`**, a group at a time, each spelled out at approval:
-  - `apple-intelligence`, Apple Intelligence's on-device model (FoundationModels): shared memory (`ipc-posix-shm*`); the model manager and the preferences daemons (`com.apple.modelmanager`, `com.apple.cfprefsd.agent`, `com.apple.cfprefsd.daemon`); and reading `/private/var/db/eligibilityd` and the user's per-machine global preferences (`~/Library/Preferences/ByHost/.GlobalPreferences.*`). Nothing else under the user's home.
-
-  A name rush doesn't know is a manifest error.
 
 ## Denied
 
@@ -27,8 +23,7 @@ Everything else, including:
 - reading the user's files or listing their folders;
 - writing outside the data folder and `write` paths, including the plugin's own folder;
 - any other socket: the internet directly, other localhost ports, unix sockets (rush's included), DNS;
-- the user's environment;
-- system services beyond the groups named in `system`.
+- the user's environment.
 
 ## The proxy
 

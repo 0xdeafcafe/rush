@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
-use crate::bundled::{bundle_named, bundled_on, bundles, run_bundled, set_bundled};
+use crate::bundled::{bundle_check, bundle_named, bundled_on, bundles, run_bundled, set_bundled};
 use crate::cli::{CLI_TIMEOUT, CliRun, cli_plugins, run_cli};
 use crate::client::{Status, ask_status, broker_log, reload};
 use crate::ctx::Ctx;
@@ -50,6 +50,16 @@ Plugins you install live in %s/<name>, each with a plugin.json.
 Bundled plugins come with rush. Most are on until you turn them off; some,
 like the clean-up ones, are off until you turn them on.
 "#;
+
+/// What rush plugin on says of a bundled plugin that checks what it
+/// needs here: its line, and how to open the fix when there is one.
+fn said_ready(r: &crate::bundled::Readiness) -> String {
+    let mut out = format!("{}\n", r.message);
+    if let Some(a) = &r.action {
+        out += &format!("To {}: open {}\n", a.label, a.url);
+    }
+    out
+}
 
 fn usage() -> String {
     PLUGIN_USAGE.replace("%s", &crate::root().display().to_string())
@@ -96,6 +106,13 @@ pub fn plugin_cmd(args: &[String], io: &mut Io<'_>) -> Result<(), String> {
             }
             set_bundled(&args[1], sub == "on")?;
             out!(io, "{} is {sub}.\n", args[1]);
+            // One that checks what it needs here says whether it has it,
+            // and how to fix what's missing.
+            if sub == "on"
+                && let Some(r) = bundle_check(&args[1])
+            {
+                out!(io, "{}", said_ready(&r));
+            }
             reload()
         }
         "check" => {
@@ -540,6 +557,29 @@ mod tests {
                 "p wasn't installed from a repository: development mode rebuilds it from one"
                     .into()
             )
+        );
+    }
+
+    #[test]
+    fn says_whether_ready() {
+        use crate::bundled::{FixAction, Readiness};
+        let ready = Readiness {
+            ready: true,
+            message: "Titles now use it".into(),
+            action: None,
+        };
+        assert_eq!(said_ready(&ready), "Titles now use it\n");
+        let fix = Readiness {
+            ready: false,
+            message: "It can't be used yet".into(),
+            action: Some(FixAction {
+                label: "open System Settings".into(),
+                url: "x-apple.systempreferences:a".into(),
+            }),
+        };
+        assert_eq!(
+            said_ready(&fix),
+            "It can't be used yet\nTo open System Settings: open x-apple.systempreferences:a\n"
         );
     }
 

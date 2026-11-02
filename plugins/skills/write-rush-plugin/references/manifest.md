@@ -30,7 +30,6 @@ The manifest lives at `<plugins>/<name>/plugin.json`. Unknown fields are an erro
 | `provides` | string array | | Services it answers for other plugins and rush, dotted lowercase names like `cleanup.report`: rush calls its `service.call` when one is asked for (protocol.md). A rush-protocol plugin only. |
 | `uses` | string array | | Services it may ask other plugins for with `services.ask`. It's asking whoever provides them, not named plugins. |
 | `models` | bool | false | It offers language models for rush's own small jobs: session titles, feed summaries, quick ask and memory notes. rush calls its `models.list` and `models.ask` (protocol.md) and tries its models before Claude's and Ollama's. Not for `mcp` plugins. |
-| `system` | string[] | | Named groups of macOS system services its sandbox may reach, on top of what every plugin gets (sandbox.md). Only names rush knows: `apple-intelligence` (Apple Intelligence's on-device model, through FoundationModels). Approval says what each allows. |
 
 Agents, prompt text and tools reach sessions **as approved**. Editing `plugin.json` changes nothing until the user approves again, and until then the plugin doesn't run.
 

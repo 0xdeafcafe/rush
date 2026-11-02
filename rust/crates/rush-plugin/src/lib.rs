@@ -49,8 +49,8 @@ pub mod ui;
 pub mod uisettings;
 
 pub use bundled::{
-    Bundle, Registered, bundle_named, bundled_on, bundles, bundles_on, enabled, mark_bundled,
-    register_bundle, run_bundled, set_bundled,
+    Bundle, CheckFn, FixAction, Readiness, Registered, bundle_check, bundle_named, bundled_on,
+    bundles, bundles_on, enabled, mark_bundled, register_bundle, run_bundled, set_bundled,
 };
 pub use cli::{CLI_TIMEOUT, CliResult, CliRun, CliSpec, MAX_CLI_OUTPUT, cli_plugins, run_cli};
 pub use client::{
