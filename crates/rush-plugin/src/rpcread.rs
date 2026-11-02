@@ -54,7 +54,8 @@ impl Framer {
     fn compact(&mut self) {
         if self.start > 0 {
             self.buf.drain(..self.start);
-            self.scanned -= self.start;
+            // Frames never scan: it stays 0.
+            self.scanned = self.scanned.saturating_sub(self.start);
             self.start = 0;
         }
         if self.buf.is_empty() && self.buf.capacity() > CHUNK {
@@ -486,6 +487,23 @@ mod tests {
                 Framing::Frames,
                 vec![vec![0, 0], vec![0, 3, b'a'], vec![b'b', b'c']],
                 vec!["abc"],
+                "EOF".into(),
+            ),
+            Case(
+                "a whole frame and part of the next, then its rest",
+                Framing::Frames,
+                vec![
+                    [frame(b"{}"), vec![0, 0, 0, 3, b'a']].concat(),
+                    b"bc".to_vec(),
+                ],
+                vec!["{}", "abc"],
+                "EOF".into(),
+            ),
+            Case(
+                "a whole line and part of the next, then its rest",
+                Framing::Lines,
+                vec![b"[1]\n[2".to_vec(), b"]\n".to_vec()],
+                vec!["[1]\n", "[2]\n"],
                 "EOF".into(),
             ),
             Case(
