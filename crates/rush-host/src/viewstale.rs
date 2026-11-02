@@ -105,10 +105,13 @@ pub fn by_clock(v: &View, now: i64) -> Verdict {
 
 /// The line the agent is told of its stale views, at the end of its next
 /// message: the same words every time but the names, as every word is a
-/// token.
+/// token. It says it's rush's in plain words, never in a harness's own
+/// tags; the conversation leaves it out of your message
+/// (rush_convo::transcript::STALE_VIEWS_LEAD).
 pub fn note(names: &[String]) -> String {
     format!(
-        "Stale views: {}. Set each again with what's current, or clear it.",
+        "{}{}. Set each again with what's current, or clear it.",
+        rush_convo::transcript::STALE_VIEWS_LEAD.trim_start(),
         names.join(", ")
     )
 }
@@ -631,8 +634,8 @@ mod tests {
         let n = note(&["prs".into(), "tests".into()]);
         assert_eq!(
             n,
-            "Stale views: prs, tests. Set each again with what's current, or clear it."
+            "rush: stale views: prs, tests. Set each again with what's current, or clear it."
         );
-        assert!(!n.contains('\n') && n.len() < 90);
+        assert!(!n.contains('\n') && !n.contains('<') && n.len() < 90);
     }
 }

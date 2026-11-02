@@ -833,8 +833,18 @@ pub fn clean_prompt(s: &str) -> String {
             s = Cow::Owned(format!("{}{}", &s[..i], &s[j + close.len()..]));
         }
     }
+    // rush's own line on stale views, at a message's end: rush's, not yours.
+    if let Some(i) = s.rfind(STALE_VIEWS_LEAD)
+        && !s[i + 2..].contains("\n\n")
+    {
+        s = Cow::Owned(s[..i].to_owned());
+    }
     s.trim().to_owned()
 }
+
+/// How rush's line on the agent's stale views starts, after a blank line
+/// at the end of the message that starts its turn (rush_host::viewstale).
+pub const STALE_VIEWS_LEAD: &str = "\n\nrush: stale views: ";
 
 /// What Claude Code writes after a ! command: its stdout and stderr.
 fn shell_output(s: &str) -> Option<(&str, &str)> {

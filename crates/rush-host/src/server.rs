@@ -957,7 +957,7 @@ pub(crate) fn with_views_note(input: String, note: &str) -> String {
     if note.is_empty() {
         return input;
     }
-    format!("{input}\n\n<system-reminder>{note}</system-reminder>")
+    format!("{input}\n\n{note}")
 }
 
 /// The session, a message's sender and the exchange's id, which its

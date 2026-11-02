@@ -2178,10 +2178,13 @@ fn greyed_views_are_named_at_the_end_of_the_next_message() {
     assert_eq!(got[0].text, "first");
     assert_eq!(
         got[1].text,
-        format!(
-            "next\n\n<system-reminder>{}</system-reminder>",
-            crate::viewstale::note(&["ci".into()])
-        )
+        "next\n\nrush: stale views: ci. Set each again with what's current, or clear it."
     );
-    assert_eq!(rush_convo::transcript::clean_prompt(&got[1].text), "next");
+    assert!(!got[1].text.contains('<'), "no harness's tags");
+    // The conversation shows what you wrote, not rush's line; a message
+    // of yours that only mentions it keeps it.
+    let clean = rush_convo::transcript::clean_prompt;
+    assert_eq!(clean(&got[1].text), "next");
+    let yours = "rush: stale views: are they?\n\nmore";
+    assert_eq!(clean(yours), yours);
 }

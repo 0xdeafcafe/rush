@@ -2082,12 +2082,15 @@ is made. Everything below is in `rush_ui::frame`.
   ("not updated"). Each grey and put-away is a `view-greyed` or
   `view-put-away` event (with what looked: "turn end" or "the clock") for
   `rush why`. The message that starts the agent's next turn ends with one
-  line naming the grey views, the same words but the names:
-  `<system-reminder>Stale views: prs, tests. Set each again with what's
-  current, or clear it.</system-reminder>` (about 20 tokens; never in the
-  system prompt, which stays the same for the cache; the conversation
-  drops it as it drops every system-reminder). The agent's set clears
-  the grey. **Views off** (Settings, Agent views;
+  line naming the grey views after a blank line, the same words but the
+  names: `rush: stale views: prs, tests. Set each again with what's
+  current, or clear it.` (about 20 tokens). It says it is rush's in plain
+  words and never wears a harness's own tags (`<system-reminder>` is
+  Claude Code's: an agent rightly distrusts a look-alike in a user's
+  message). Never in the system prompt, which stays the same for the
+  cache; the conversation leaves it out of your message
+  (`transcript::STALE_VIEWS_LEAD`, only as the message's last
+  paragraph). The agent's set clears the grey. **Views off** (Settings, Agent views;
   config `viewsOff`, on by default): the panel and list lines hide, the
   prompt part and the `view` MCP tool aren't given to agents started
   afterwards, a call is refused and no sweep or notice runs. The agent's
