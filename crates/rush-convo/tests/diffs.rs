@@ -219,9 +219,12 @@ fn snapshot(name: &str, got: &str) {
     );
 }
 
+/// A session's changes, by name.
+type Case = (&'static str, fn() -> Vec<Ev>);
+
 #[test]
 fn diffs_at_both_widths() {
-    let cases: [(&str, fn() -> Vec<Ev>); 5] = [
+    let cases: [Case; 5] = [
         ("small", small_edit),
         ("new", new_file),
         ("deleted", deleted_file),
