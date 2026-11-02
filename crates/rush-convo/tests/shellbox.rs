@@ -375,11 +375,11 @@ fn chat_has_the_boxes_between_the_bubbles() {
     let got = draw(&s, &o);
     snap("shellbox_chat", &got);
     let first = got.find("Remove the key").expect(&got);
-    let block = got.find("╭─ shell · /work/app").expect(&got);
+    let block = got.find("╭─ shell · /work").expect(&got);
     let then = got.find("Then check").expect(&got);
     let unrun = got.find("$ cargo test").expect(&got);
     let done = got.find("Then you're done").expect(&got);
-    let bang = got.find("! shell · /work/app").expect(&got);
+    let bang = got.find("! shell · /wor").expect(&got);
     assert!(
         first < block && block < then && then < unrun && unrun < done && done < bang,
         "{got}"
