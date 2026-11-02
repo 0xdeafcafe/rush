@@ -306,7 +306,7 @@ fn hosted_location_ignores_stale_transcript_cwd() {
     l.spend.insert(
         "test/a:test".into(),
         Spend {
-            dir: s(&old),
+            dir: s(&old).into(),
             ..Spend::default()
         },
     );
@@ -409,7 +409,7 @@ fn hosted_location_follows_newer_transcript_cd() {
     l.spend.insert(
         "test/a:test".into(),
         Spend {
-            dir: s(&moved),
+            dir: s(&moved).into(),
             dir_at: t,
             ..Spend::default()
         },
@@ -1799,7 +1799,7 @@ fn stopped_session_folder_is_where_it_last_worked() {
     l.spend.insert(
         "test/a:test".into(),
         Spend {
-            dir: s(&sub),
+            dir: s(&sub).into(),
             dir_at: t - 9 * 24 * 60 * MINUTE,
             ..Spend::default()
         },

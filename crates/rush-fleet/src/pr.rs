@@ -35,11 +35,11 @@ pub fn find_pr(a: &mut Agent, gh: Option<&Gh>) {
     {
         let p = from_status(p);
         a.prs = vec![as_linked(&p)];
-        a.pr = Some(p);
+        a.pr = Some(Box::new(p));
         return;
     }
     if let Some(l) = a.prs.first() {
-        a.pr = Some(from_linked(l));
+        a.pr = Some(Box::new(from_linked(l)));
     }
 }
 

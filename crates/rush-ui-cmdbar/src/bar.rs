@@ -1089,7 +1089,7 @@ pub fn bar_agent_groups(m: &Model, q: &str, sort: &str) -> Vec<(String, Vec<Item
                 if a.spend.model.is_empty() {
                     "model unknown".into()
                 } else {
-                    a.spend.model.clone()
+                    a.spend.model.to_string()
                 }
             }
             "harness" => harness_name(&m.reg, &a.kind),

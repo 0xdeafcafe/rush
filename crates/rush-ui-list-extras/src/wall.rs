@@ -956,7 +956,7 @@ impl Wall {
         let iw = w - 4;
 
         // The top edge: the name and, on the right, the model and age.
-        let model_id = if p.model.is_empty() {
+        let model_id: &str = if p.model.is_empty() {
             &a.spend.model
         } else {
             &p.model

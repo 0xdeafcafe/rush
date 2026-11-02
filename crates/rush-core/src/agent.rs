@@ -155,7 +155,9 @@ pub struct Halt {
 pub struct Spend {
     pub cost: f64,
     pub usage: TokenUsage,
-    pub model: String,
+    /// The model it last used, and where its own transcript last worked:
+    /// each shared with every other row saying the same (rush_core::name).
+    pub model: crate::name::Name,
     pub first: Ms,
     pub last: Ms,
     pub today: f64,
@@ -164,7 +166,7 @@ pub struct Spend {
     pub context: i64,
     pub compacts: u32,
     /// Where its own transcript last worked.
-    pub dir: String,
+    pub dir: crate::name::Name,
     /// When `dir` last changed.
     pub dir_at: Ms,
     /// Folders it worked in, subagents included: shared with the spend
@@ -276,11 +278,13 @@ pub struct Agent {
     pub root: String,
     /// The pull requests its agent linked to it.
     pub prs: Vec<crate::adapter::Pr>,
-    /// The worktree a rush session works in, and its branch.
-    pub workspace: Option<Workspace>,
+    /// The worktree a rush session works in, and its branch. Boxed, as
+    /// the pull request below: most rows have neither, and every row is
+    /// kept several times over (the list, the loader's memo of it).
+    pub workspace: Option<Box<Workspace>>,
     /// The pull request for its branch, as GitHub last said, else the
     /// first its agent linked; None when none is known.
-    pub pr: Option<PrStatus>,
+    pub pr: Option<Box<PrStatus>>,
     /// rush's own advisor at work, not yours.
     pub advisor: bool,
     /// Its subagent runs still working, each for a tile of its own.

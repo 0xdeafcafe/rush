@@ -53,14 +53,14 @@ pub fn recent_setups(m: &Model, cur: &StartOver) -> Vec<StartOver> {
         let o = match st.session_start.and_then(|f| f(m, key)) {
             Some(o) => o,
             None => {
-                let km = (k.to_string(), a.spend.model.clone());
+                let km = (k.to_string(), a.spend.model.to_string());
                 if tried.contains(&km) {
                     continue;
                 }
                 tried.push(km);
                 let mut o = start_defaults(m, k);
                 if !a.spend.model.is_empty() {
-                    o.model = a.spend.model.clone();
+                    o.model = a.spend.model.to_string();
                 }
                 o
             }

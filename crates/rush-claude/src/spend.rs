@@ -220,6 +220,12 @@ impl Scanner {
             let dirs = &mut self.dirs;
             for tot in self.cache.files.values_mut() {
                 intern(dirs, &mut tot.dirs);
+                // Read from JSON, each list has room to grow it won't use
+                // until its transcript grows.
+                tot.by_model.shrink_to_fit();
+                tot.dirs.shrink_to_fit();
+                tot.days.shrink_to_fit();
+                tot.prs.shrink_to_fit();
             }
         }
     }
@@ -368,7 +374,7 @@ fn add(sp: &mut Spend, tot: &Totals, main: bool, ours: bool, today: u32) {
         sp.sub_cache.add(&tot.sub_cache());
     }
     if main {
-        sp.model.clone_from(&tot.last_model);
+        sp.model = tot.last_model.clone();
         sp.first = tot.first;
         sp.last = tot.last;
         sp.halt.clone_from(&tot.halt);
@@ -376,7 +382,7 @@ fn add(sp: &mut Spend, tot: &Totals, main: bool, ours: bool, today: u32) {
         sp.progress_at = tot.progress_at;
         sp.context = tot.context();
         sp.compacts = tot.compacts;
-        sp.dir.clone_from(&tot.dir);
+        sp.dir = tot.dir.clone();
         sp.dir_at = tot.dir_at;
     }
     if ours && tot.last > sp.last {

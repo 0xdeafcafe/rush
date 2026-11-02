@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rush_core::agent::{Halt, Preview, PreviewLine, SubagentStats, TokenUsage};
+use rush_core::name::Name;
 use rush_core::subcache::{SubCache, Tracker};
 use rush_core::time::Ms;
 use serde::{Deserialize, Serialize};
@@ -29,12 +30,14 @@ use crate::tools::doing;
 pub struct Totals {
     pub offset: u64,
     pub size: u64,
-    pub by_model: Vec<(String, TokenUsage)>,
+    /// Each model's tokens; a model's name is shared by every transcript
+    /// that used it (rush_core::name), as are the folders below.
+    pub by_model: Vec<(Name, TokenUsage)>,
     pub cost: f64,
     pub first: Ms,
     pub last: Ms,
     pub prs: Vec<String>,
-    pub last_model: String,
+    pub last_model: Name,
     /// Spend by local day (yyyymmdd).
     pub days: Vec<(u32, f64)>,
     /// The folders the session worked in (the line's cwd), which says
@@ -43,17 +46,17 @@ pub struct Totals {
     /// Where the session works now: where it last wrote a file, or, before
     /// it has, its newest cwd or where it last cd'd. Once it writes, only
     /// another write or entering a worktree moves it.
-    pub dir: String,
+    pub dir: Name,
     /// `dir` is where it last wrote.
     pub wrote: bool,
     /// When `dir` last changed.
     pub dir_at: Ms,
     /// The newest line's cwd, so only a real move of it overrides `dir`.
-    pub cwd: String,
+    pub cwd: Name,
     /// The newest assistant message; its usage can still change while more
     /// content blocks of the same message are appended.
     pub pending_id: String,
-    pub pending_model: String,
+    pub pending_model: Name,
     pub pending_use: TokenUsage,
     pub pending_fast: bool,
     pub pending_at: Ms,
@@ -187,8 +190,8 @@ impl Totals {
     }
 
     fn set_dir(&mut self, d: &str, at: Ms) {
-        if d != self.dir {
-            self.dir = d.to_string();
+        if *d != *self.dir {
+            self.dir = Name::new(d);
             self.dir_at = at;
         }
     }
@@ -342,7 +345,7 @@ pub fn consume(t: &mut Totals, b: &[u8]) {
         if let Ok(r) = serde_json::from_slice::<R>(b)
             && !r.cwd.is_empty()
         {
-            t.cwd = r.cwd.to_string();
+            t.cwd = Name::new(&r.cwd);
             t.wrote = false;
             t.set_dir(&r.cwd, ms(&r.timestamp));
         }
@@ -360,7 +363,7 @@ pub fn consume(t: &mut Totals, b: &[u8]) {
     let ts = ms(&l.timestamp);
     if !l.cwd.is_empty() {
         if *l.cwd != *t.cwd {
-            t.cwd = l.cwd.to_string();
+            t.cwd = Name::new(&l.cwd);
             if !t.wrote {
                 t.set_dir(&l.cwd, ts);
             }
@@ -433,13 +436,13 @@ pub fn consume(t: &mut Totals, b: &[u8]) {
         t.pending_start = ts;
     }
     if *m.model != *t.pending_model {
-        t.pending_model = m.model.to_string();
+        t.pending_model = Name::new(&m.model);
     }
     t.pending_use = tu;
     t.pending_fast = &*u.speed == "fast";
     t.pending_at = ts;
     if *m.model != *t.last_model {
-        t.last_model = m.model.to_string();
+        t.last_model = Name::new(&m.model);
     }
 }
 

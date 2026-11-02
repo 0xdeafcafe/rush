@@ -998,8 +998,8 @@ impl Loader {
                 // ss.cwd is only ever where the session started; its own
                 // transcript's cwd says where it last actually worked.
                 let mut dir = ss.cwd.clone();
-                if !a.spend.dir.is_empty() && self.follows(&dir, &a.spend.dir.clone(), now) {
-                    dir.clone_from(&a.spend.dir);
+                if !a.spend.dir.is_empty() && self.follows(&dir, &a.spend.dir, now) {
+                    a.spend.dir.as_str().clone_into(&mut dir);
                 }
                 (a.repo, a.branch) = git_for(&mut self.git, &dir, now);
                 a.job.cwd = dir;
@@ -1552,7 +1552,7 @@ impl Loader {
         // moves; the transcript sees the cd. Whichever moved last wins
         // (fleet.go:1050-1057): a move with no time never does.
         if !a.spend.dir.is_empty() {
-            let d = a.spend.dir.clone();
+            let d = a.spend.dir.to_string();
             let cwd = a.job.cwd.clone();
             if cwd.is_empty()
                 || d != cwd && a.spend.dir_at > info.cwd_at && self.follows(&cwd, &d, now)
@@ -1807,7 +1807,7 @@ impl Loader {
         }
         if !info.is_remote() {
             // Another machine's: no folder or process here is its.
-            a.workspace.clone_from(&info.workspace);
+            a.workspace = info.workspace.clone().map(Box::new);
             (a.repo, a.branch) = git_for(&mut self.git, &info.cwd, now);
             a.left.clone_from(&info.left);
             self.sample(tab, &mut a);
@@ -1924,7 +1924,7 @@ impl Loader {
             let spend_dir = self
                 .spend
                 .get(&key)
-                .map(|s| s.dir.clone())
+                .map(|s| s.dir.to_string())
                 .unwrap_or_default();
             let dir = if spend_dir.is_empty() {
                 s.cwd.clone()

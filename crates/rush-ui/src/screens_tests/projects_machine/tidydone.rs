@@ -70,14 +70,14 @@ fn agent(key: &str) -> Agent {
             state: rush_core::agent::State::Done,
             ..Default::default()
         },
-        workspace: Some(rush_core::agent::Workspace {
+        workspace: Some(Box::new(rush_core::agent::Workspace {
             path: format!("/r/.claude/worktrees/{key}"),
             repo: "/r".into(),
             branch: format!("rush/{key}"),
             target: "main".into(),
             own: true,
             ..Default::default()
-        }),
+        })),
         ..Default::default()
     }
 }

@@ -315,14 +315,14 @@ fn merged_pr(repo: &Path, state: &str, head: &str) -> Gh {
 fn session(wt: &Path, repo: &Path, base: &str) -> Agent {
     let mut a = agent_in("s", wt);
     a.done = true;
-    a.workspace = Some(Workspace {
+    a.workspace = Some(Box::new(Workspace {
         path: s(wt),
         repo: s(repo),
         branch: "rush/abc".into(),
         base: base.into(),
         target: "main".into(),
         own: true,
-    });
+    }));
     a
 }
 
@@ -624,10 +624,10 @@ fn pr_matched_by_branch() {
     let mut a = Agent {
         root: r.clone(),
         repo: format!("{r}/.claude/worktrees/abc"),
-        workspace: Some(Workspace {
+        workspace: Some(Box::new(Workspace {
             branch: "rush/abc".into(),
             ..Workspace::default()
-        }),
+        })),
         prs: vec![linked(3, "OPEN", "")],
         ..Agent::default()
     };

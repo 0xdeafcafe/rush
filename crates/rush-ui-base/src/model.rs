@@ -1444,7 +1444,7 @@ impl Model {
         }
         let mut cells: Vec<Line> = Vec::new();
         if p.context > 0 {
-            let model = if p.model.is_empty() {
+            let model: &str = if p.model.is_empty() {
                 &a.spend.model
             } else {
                 &p.model

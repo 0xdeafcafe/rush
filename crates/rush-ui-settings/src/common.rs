@@ -299,7 +299,7 @@ pub fn agent_models(m: &Model, k: &str) -> Vec<Choice> {
             && !out.iter().any(|c| c.id == *model)
         {
             out.push(Choice {
-                id: model.clone(),
+                id: model.to_string(),
                 note: format!("one your {} sessions have run.", agent_name(k)),
                 context: 0,
             });

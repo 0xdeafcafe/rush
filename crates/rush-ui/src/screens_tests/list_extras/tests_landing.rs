@@ -17,7 +17,7 @@ fn land_model(st: Option<GitState>, pr: Option<PrStatus>) -> Model {
     a.interactive = false;
     a.root = "/src/checkout".into();
     a.repo = TREE.into();
-    a.pr = pr;
+    a.pr = pr.map(Box::new);
     a.seen = true; // looked at: Finished no longer has it
     a.job.updated_at = NOW - 20 * MIN;
     let mut m = model_of(vec![a], 120, 40);

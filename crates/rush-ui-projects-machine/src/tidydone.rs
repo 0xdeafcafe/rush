@@ -529,7 +529,7 @@ pub fn settle_looks(m: &mut Model, now: Ms) -> Option<Vec<Look>> {
         } else {
             continue;
         }
-        w.pr.clone_from(&a.pr);
+        w.pr = a.pr.as_deref().cloned();
         w.agents = vec![a.key.clone()];
         looks.push(Look {
             key: a.key.clone(),

@@ -523,7 +523,7 @@ impl SessionView {
         }
         i.cost = a.spend.cost;
         if i.model.is_empty() {
-            i.model.clone_from(&a.spend.model);
+            a.spend.model.as_str().clone_into(&mut i.model);
         }
         changed || *i != was
     }
@@ -968,7 +968,7 @@ pub fn header(
     if !a.branch.is_empty() {
         meta.push(a.branch.clone());
     }
-    let model = if v.sess.model.is_empty() {
+    let model: &str = if v.sess.model.is_empty() {
         &a.spend.model
     } else {
         &v.sess.model
