@@ -601,9 +601,12 @@ on every frame. Go retains about 22 MiB for the same.
    loop has ended. A thread that must never wait (an agent's reader,
    through its Sink) uses `try_send`, which hands the message back when
    the lane is full. Never send from the UI thread itself. Discovery sends a reading only when it differs from the
-   last one sent, and polls (every 2 s) only while an agent is working;
-   an idle terminal's own session file, watched, says when it starts
-   again. Discovery also reads what each live agent's processes use
+   last one sent, and polls (every second, Go's tick) only while an
+   agent works or has a process; an idle terminal's own session file,
+   watched, says when it starts again. A busy agent's files, changing on
+   and on, are read at most once a second (`GAP`): one wait its Stop
+   ends, not 50 ms naps (20 wakes a second while an agent worked).
+   Discovery also reads what each live agent's processes use
    (memory, CPU, how many): the loader lists the process table as Go does
    (one sysctl), which spawn folding and the machine's rows need, and
    fills memory and CPU only for the trees it shows. A reading while
@@ -641,7 +644,9 @@ shell) goes back to the default in its pre_exec (`rush_sys::qos::plain`).
    offline" needs it; a session's host and `--render` hold none), the API
    down, or a job held for it. Rates are read only while a
    `watch_rates()` guard lives (#network). A host's netwatch, unwanted,
-   doesn't wake.
+   doesn't wake. The TUI hears a change through `netwatch::on_change`,
+   called on netwatch's own thread (a try_send): no thread of the UI's
+   waits on it.
 5. **A host's** (`rush host run`, one per live session, so dozens): five
    with Claude Code running between turns, eleven before (2026-11-02);
    see The host.
@@ -704,6 +709,45 @@ processes, 27 threads, 42 MB, 2026-11-02). Now:
    round trip 60-64 → 44-53 µs; 1,000 notifications 1.04-1.31 →
    1.12-1.39 ms, no clear change (the queue's thread is started again
    each time a burst drains).
+
+### The TUI's threads (Rust-only)
+
+No thread waits for a time alone, or for one thing another thread
+already waits beside:
+
+- What only waits for a time waits on the UI thread's own deadline
+  (`Model::after`, frame/work.rs, in `App::wake_at`): the list's folder
+  asks, Projects' 2 s refresh, the plugin picks' first look, and the look
+  for updates, which wakes as its last look turns four hours old (it
+  woke each minute). Each was a thread asleep (rush-later, rush-updates).
+- `Model::later`'s work goes to a thread idle from the last piece, else
+  a new one (`rush_sys::threads::Pool`, rush-later, ended once idle 10
+  s): none waits behind another, and a reading of the list a second
+  apart no longer starts a thread for each piece it hands off.
+- `rush reload`'s SIGUSR1 is heard in the terminal reader's poll
+  (`Loop::on_signal`), not by a rush-reload thread.
+- yap's follower, with no yap running, waits on yap's folder (a socket
+  can't be opened to be watched) and looks again a minute on at the
+  latest; it looked every 2 s, 30 wakes a minute with its plugin on.
+
+Measured in `crates/rush-ui/tests/threads.rs` (alone in its file), on
+CI, 2026-11-02: the whole view started headless (`rush_ui::start`, as
+`run` starts it; no terminal, no agents, no plugin broker) keeps 15
+threads once the list is read, later's idle ones included (16 before:
+rush-updates, rush-net and a rush-later asleep among them; the live
+TUI adds the terminal reader, its host link and yap's). An idle minute
+on that quiet list, stepped through on the model's own deadlines
+(`Model::wake_on`, `Model::instant`): 6 wakes, the chores of Go's tick
+and the look for updates (before: 5 here, and rush-updates' minute
+besides), 5 frames (a chore draws again only a screen showing more than
+the list). The live UI the same day, mostly idle on screen while agents
+worked: 22 long-lived threads and many short ones (a thread per later
+piece; discovery's gap napping 50 ms), 5.9% CPU over 17 minutes; two
+thirds of the UI thread's busy time was the session's dock
+(`Session::job_kind` hashing every task's call id for each run, every
+frame; `agent_of` making every phase per run) and the Changes tab's
+count (copying every file's patches out each frame); see
+`cargo bench -p rush-convo --bench jobs`.
 
 ## The host
 
@@ -786,7 +830,8 @@ what the next rush starts with (`Model::reload_env`) once the terminal is
 given back, and the binary runs the installed rush in its place
 (`rush_sys::selfexe::path`, exec), as Go's main.go:290-300. While a view
 runs it's listed for `rush reload` (`rush_state::instances`), whose
-SIGUSR1 is a #reload; a hosted view isn't listed.
+SIGUSR1 is a #reload, heard in the terminal reader's poll; a hosted view
+isn't listed.
 
 ### Moving a host onto a new build (Rust-only)
 
@@ -2518,6 +2563,12 @@ Go rush is gone from the tree; its last version is the `go-final` tag
 - `cargo bench -p rush-convo`: apply events, open a large transcript cold,
   warm frame of a 3,000-turn conversation, incremental tail.
 - `cargo bench -p rush-claude`: spend scan, preview read.
+- `cargo bench -p rush-convo --bench jobs`: the dock's scan of a
+  session's tasks for each run it shows, each frame, with
+  `Session::job_kind` as it is and as it was (the call looked up for
+  every task).
+- `cargo test -p rush-ui --test threads`: the headless view's threads,
+  and an idle minute's wakes and frames ("Threads").
 - `cargo bench -p rush-convo --bench search` (RUSH_BENCH_TRANSCRIPT=<a
   transcript>): an open conversation searched as the command bar does on
   each key, letter by letter: Session::search's instructions per key and
