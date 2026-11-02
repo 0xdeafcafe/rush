@@ -438,7 +438,7 @@ mod tests {
         let (_, out, _) = run("", &["example"], "");
         assert!(
             out.starts_with(
-                "actions\nbars\nboard\ncallout\nchart\nchecklist\ncode\ncompare\ndeploy\n"
+                "actions\nbars\nbefore-after\nboard\nbranches\ncallout\nchart\nchecklist\ncode\ncompare\ndeploy\n"
             ),
             "{out}"
         );

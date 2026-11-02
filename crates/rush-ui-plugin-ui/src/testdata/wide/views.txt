@@ -29,10 +29,11 @@
 │ ───────────────────────────────────────── │
 │ ✓ core                          120  1.2s │
 │ ✗ ui                             88  3.4s │
-╰─ made by the agent · 1m ago ─ ↓ 129 more ─╯
+╰─ made by the agent · 1m ago ─ ↓ 130 more ─╯
 =====
 ╭─ ✦ Test run · Pull requests ──────── › × ─╮
-│   a-package-with-a-really-l…      7  0.1s │
+│   a-package-with-a-really-        7  0.1s │
+│   long-name                               │
 │                                           │
 │ ▾ Run  2                                  │
 │ branch  main                              │
@@ -61,8 +62,7 @@
 │    ┤        ▃▃▃ ███ ▃▃▃                   │
 │    ┤        ███ ███ ███                   │
 │    ┤    ▄▄▄ ███ ███ ███ ▄▄▄         ▁▁▁   │
-│  0 ┤▃▃▃ ███ ███ ███ ███ ███ ▃▃▃     ███   │
-╰─ 1m ago ─────────────── ↑ 30 · ↓ 99 more ─╯
+╰─ 1m ago ────────────── ↑ 30 · ↓ 100 more ─╯
 =====
 ╭─ ✦ Test run · Pull requests ─────────────────────────── › × ─╮
 │                                                              │
