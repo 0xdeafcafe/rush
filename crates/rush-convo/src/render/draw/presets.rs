@@ -1828,7 +1828,8 @@ impl Drawer<'_> {
         for it in &t.items {
             let Item::Step(id) = it else { continue };
             let st = self.s.step(*id);
-            if hidden(st) {
+            // A tool loaded before its call took time too: Trail keeps it.
+            if always_hidden(st) {
                 continue;
             }
             let (verb, name) = self.leg_of(*id);
@@ -1875,6 +1876,10 @@ impl Drawer<'_> {
         let info = self.info(id);
         let x = &info.call.input;
         let base = |p: &str| base_after_slash(p).to_string();
+        // rush's own tools by what they did, to which agent.
+        if let Some(w) = crate::model::runs::rush_words(self.s, st, st.status == Status::Running) {
+            return ("agent", w);
+        }
         match st.kind {
             Kind::Read => ("read", base(&x.path)),
             Kind::Search | Kind::Glob => {

@@ -929,7 +929,10 @@ impl Runs {
                 self.host_none.insert(h.id);
                 continue;
             }
-            links.extend(spawn_row(&h.profile, &h.session_id));
+            // One started beside it keeps its own row in the list.
+            if !h.beside {
+                links.extend(spawn_row(&h.profile, &h.session_id));
+            }
             self.spawns.insert(
                 h.id.clone(),
                 SpawnRun {

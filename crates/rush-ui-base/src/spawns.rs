@@ -77,13 +77,14 @@ pub fn spawn_subs<'a>(
     out
 }
 
-/// The shell steps' and spawn_agent calls' windows in s, in order; one
-/// still running (or its task) runs to now, and a grace after
-/// (Session.Windows).
+/// The shell steps' and spawn_agent and start_agent calls' windows in s,
+/// in order; one still running (or its task) runs to now, and a grace
+/// after (Session.Windows).
 pub fn windows(s: &rush_convo::Session, now: Ms, grace: Ms) -> Vec<Window> {
+    use rush_convo::model::runs::{SPAWN_AGENT, START_AGENT, rush_tool};
     let mut out = Vec::new();
     for st in s.steps() {
-        let spawn = rush_convo::model::runs::is_spawn(&st.tool);
+        let spawn = matches!(rush_tool(&st.tool), Some(SPAWN_AGENT | START_AGENT));
         if st.kind != rush_core::tool::Kind::Shell && !spawn || st.start == 0 {
             continue;
         }

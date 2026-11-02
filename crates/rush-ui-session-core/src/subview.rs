@@ -1326,21 +1326,25 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
 
 /// The run the conversation's step picked draws: a subagent's call, or
 /// one of the agents a command ran ("step/run" when it ran several, each
-/// a row of its own) (subOfStep).
+/// a row of its own), or the agent an agent_result or agent_send call is
+/// about, by the id it names (subOfStep).
 fn run_of_step(m: &mut Model, key: &str, picked: &str) -> Option<String> {
     let (_, id) = picked.split_once(":s:")?;
     let id = id.to_string();
-    let kids = m
-        .session
-        .as_ref()
-        .filter(|v| v.key == key)
+    let v = m.session.as_ref().filter(|v| v.key == key);
+    let kids = v
         .and_then(|v| v.o.kids.get(id.split('/').next().unwrap_or("")))
         .map_or(0, Vec::len);
+    let about = v
+        .and_then(|v| v.sess.step_by_call(&id).map(|at| v.sess.step(at)))
+        .and_then(rush_convo::model::runs::agent_id);
     let prefix = crate::spawns::SPAWN_PREFIX;
-    conn(m, key)
-        .runs
-        .subs
-        .iter()
+    let subs = &conn(m, key).runs.subs;
+    if let Some(about) = about {
+        let want = format!("{prefix}{about}");
+        return subs.iter().find(|sa| sa.id == want).map(|sa| sa.id.clone());
+    }
+    subs.iter()
         .find(|sa| {
             let run = sa.id.strip_prefix(prefix);
             match (id.split_once('/'), run) {

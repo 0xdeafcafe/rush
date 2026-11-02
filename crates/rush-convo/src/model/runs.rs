@@ -13,11 +13,139 @@ use crate::text::first_plain;
 /// Whether a tool is rush's spawn_agent, as whichever harness names it
 /// (agtools.IsSpawn).
 pub fn is_spawn(tool: &str) -> bool {
-    const S: &str = "spawn_agent";
-    tool == S
-        || tool.len() > S.len()
-            && tool.ends_with(S)
-            && b"_./".contains(&tool.as_bytes()[tool.len() - S.len() - 1])
+    named(tool, SPAWN_AGENT)
+}
+
+/// rush's agent tools, as its MCP server names them (agtools/agents.rs).
+pub const SPAWN_AGENT: &str = "spawn_agent";
+pub const START_AGENT: &str = "start_agent";
+pub const AGENT_RESULT: &str = "agent_result";
+pub const AGENT_SEND: &str = "agent_send";
+
+/// Whether tool is n as whichever harness names it: n, mcp__rush__n,
+/// rush.n, rush/n.
+fn named(tool: &str, n: &str) -> bool {
+    tool == n
+        || tool.len() > n.len()
+            && tool.ends_with(n)
+            && b"_./".contains(&tool.as_bytes()[tool.len() - n.len() - 1])
+}
+
+/// Which of rush's own tools a call is, by its plain name, as whichever
+/// harness names it: the agent tools by any name ending in theirs, the
+/// rest (show, view, remind, reminders) only under rush's server, as
+/// another server may have a tool of that name. None for any other tool.
+pub fn rush_tool(tool: &str) -> Option<&'static str> {
+    if let Some(n) = [SPAWN_AGENT, START_AGENT, AGENT_RESULT, AGENT_SEND]
+        .into_iter()
+        .find(|n| named(tool, n))
+    {
+        return Some(n);
+    }
+    let rest = ["mcp__rush__", "rush.", "rush/", "rush__"]
+        .iter()
+        .find_map(|p| tool.strip_prefix(p))?;
+    ["show", "view", "remind", "reminders"]
+        .into_iter()
+        .find(|n| *n == rest)
+}
+
+/// What a call sent under key, when it's a string; "" when it isn't.
+pub fn input_str(st: &Step, key: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(st.input_json())
+        .ok()
+        .and_then(|v| v.get(key).and_then(|x| x.as_str()).map(str::to_string))
+        .unwrap_or_default()
+}
+
+/// The agent an agent_result or agent_send call is about, by the id
+/// spawn_agent or start_agent gave it; None for any other step.
+pub fn agent_id(st: &Step) -> Option<String> {
+    let t = rush_tool(&st.tool)?;
+    if t != AGENT_RESULT && t != AGENT_SEND {
+        return None;
+    }
+    Some(input_str(st, "id")).filter(|id| !id.is_empty())
+}
+
+/// Whether id is in text as a word of its own, not part of a longer id.
+fn has_word(text: &str, id: &str) -> bool {
+    let word = |c: char| c.is_alphanumeric() || c == '-' || c == '_';
+    text.match_indices(id).any(|(i, _)| {
+        !text[..i].chars().next_back().is_some_and(word)
+            && !text[i + id.len()..].chars().next().is_some_and(word)
+    })
+}
+
+impl Session {
+    /// The agent rush started as id, by the name the session's spawn_agent
+    /// or start_agent call gave it ("astra"), once that call has said the
+    /// id; else the name an agent_result or agent_send about id was
+    /// answered with ("Codex (id) finished"); "" when nothing says.
+    pub fn agent_called(&self, id: &str) -> String {
+        if id.is_empty() {
+            return String::new();
+        }
+        for st in self.steps() {
+            let t = rush_tool(&st.tool);
+            if (t == Some(SPAWN_AGENT) || t == Some(START_AGENT)) && has_word(&st.output, id) {
+                let n = input_str(st, "agent");
+                if !n.is_empty() {
+                    return n;
+                }
+            }
+        }
+        let by = format!(" ({id}) ");
+        for st in self.steps() {
+            if agent_id(st).as_deref() == Some(id)
+                && let Some(i) = st.output.find(&by)
+            {
+                let n = st.output[..i].trim();
+                if !n.is_empty() && !n.contains('\n') {
+                    return n.to_string();
+                }
+            }
+        }
+        String::new()
+    }
+}
+
+/// What a call of one of rush's tools does, in a few plain words: while
+/// it runs (now), or once it's back. The agent it's about is named as the
+/// call or the session names it. None for any other tool.
+pub fn rush_words(s: &Session, st: &Step, now: bool) -> Option<String> {
+    let t = rush_tool(&st.tool)?;
+    let about = |n: String| {
+        if n.is_empty() {
+            "an agent".to_string()
+        } else {
+            n
+        }
+    };
+    let asked = || about(input_str(st, "agent"));
+    let called = || {
+        about(
+            agent_id(st)
+                .map(|id| s.agent_called(&id))
+                .unwrap_or_default(),
+        )
+    };
+    Some(match (t, now) {
+        (SPAWN_AGENT, true) => format!("asking {}", asked()),
+        (SPAWN_AGENT, false) => format!("asked {}", asked()),
+        (START_AGENT, true) => format!("starting {}", asked()),
+        (START_AGENT, false) => format!("started {}", asked()),
+        (AGENT_RESULT, true) => format!("waiting on {}", called()),
+        (AGENT_RESULT, false) => format!("heard from {}", called()),
+        (AGENT_SEND, true) => format!("telling {}", called()),
+        (AGENT_SEND, false) => format!("told {}", called()),
+        ("show", _) => "drawing".into(),
+        ("view", _) => "updating its view".into(),
+        ("remind", true) => "setting a reminder".into(),
+        ("remind", false) => "set a reminder".into(),
+        (_, true) => "reading its reminders".into(),
+        (_, false) => "read its reminders".into(),
+    })
 }
 
 /// The agent a spawn_agent call asked for, by the name it gave; None for
@@ -37,13 +165,9 @@ pub fn spawn_agent_name(st: &Step) -> Option<String> {
 
 /// A step as a run's line says what it does: "asking Codex" for one
 /// spawn_agent made, else its doing words, else its tool.
-fn step_words(st: &Step, asking: bool) -> String {
-    if let Some(name) = spawn_agent_name(st) {
-        return if asking {
-            format!("asking {name}")
-        } else {
-            format!("asked {name}")
-        };
+fn step_words(s: &Session, st: &Step, asking: bool) -> String {
+    if let Some(w) = rush_words(s, st, asking) {
+        return w;
     }
     let d = rush_core::tool::doing(st.call());
     if d.is_empty() { st.tool.to_string() } else { d }
@@ -100,7 +224,7 @@ impl Session {
     /// words, and since when; "" when none is out.
     pub fn doing(&self) -> (String, Ms) {
         match self.last_step(|st| st.status == Status::Running) {
-            Some(st) => (step_words(st, true), st.start),
+            Some(st) => (step_words(self, st, true), st.start),
             None => (String::new(), 0),
         }
     }
@@ -111,7 +235,7 @@ impl Session {
         let mut out = Vec::new();
         self.last_step(|st| {
             if st.status != Status::Running && st.status != Status::Waiting {
-                out.push(step_words(st, false));
+                out.push(step_words(self, st, false));
             }
             out.len() == 3
         });

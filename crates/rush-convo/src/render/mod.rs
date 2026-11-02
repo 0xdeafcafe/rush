@@ -688,6 +688,28 @@ impl Renderer {
                     }
                 }
             }
+            // An agent_result or agent_send call names the agent it's
+            // about, and says what it's doing, wherever it was started.
+            let about: Vec<String> = t
+                .items
+                .iter()
+                .filter_map(|it| match it {
+                    Item::Step(id) => crate::model::runs::agent_id(s.step(*id)),
+                    _ => None,
+                })
+                .collect();
+            if !about.is_empty() {
+                let mut all: Vec<&Child> = o
+                    .kids
+                    .values()
+                    .flatten()
+                    .filter(|c| about.contains(&c.id))
+                    .collect();
+                all.sort_by(|a, b| a.id.cmp(&b.id));
+                for c in all {
+                    c.print().hash(&mut h);
+                }
+            }
             k.kids = h.finish();
         }
         k

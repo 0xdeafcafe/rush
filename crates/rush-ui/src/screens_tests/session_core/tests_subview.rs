@@ -306,6 +306,89 @@ fn enter_on_a_subagents_step_picks_it() {
     }
 }
 
+/// enter on a call of rush's agent tools shows the agent it's about
+/// picked in the subagents view, whichever harness made the call: the one
+/// a spawn_agent call started, the one an agent_result or agent_send call
+/// names by its id.
+#[test]
+fn enter_on_an_agent_tools_step_picks_its_agent() {
+    use rush_core::event::{Event, Message, Part, PartKind};
+    use rush_core::tool::Call;
+    let call = |id: &str, name: &str, input: &str| {
+        let c = Call {
+            id: id.into(),
+            name: name.into(),
+            raw: Some(rush_core::wire::RawJson::new(input).unwrap()),
+            ..Call::default()
+        };
+        Event::Message(Message {
+            role: "assistant".into(),
+            id: format!("m-{id}"),
+            parts: vec![Part {
+                kind: PartKind::ToolCall,
+                call: Some(Box::new(c)),
+                ..Part::default()
+            }],
+            ..Message::default()
+        })
+    };
+    for step in ["a1", "a2", "a3"] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = model(&d);
+        let p = d.path().join("spawned.jsonl");
+        std::fs::write(
+            &p,
+            X_LINES
+                .join("\n")
+                .replace("\"isSidechain\":true", "\"isSidechain\":false")
+                + "\n",
+        )
+        .unwrap();
+        let s = &mut m.session.as_mut().unwrap().sess;
+        for (id, name, input) in [
+            (
+                "a1",
+                "mcp__rush__spawn_agent",
+                r#"{"agent":"astra","prompt":"review the diff","background":true}"#,
+            ),
+            (
+                "a2",
+                "mcp__rush__agent_result",
+                r#"{"id":"h9","wait_seconds":600}"#,
+            ),
+            (
+                "a3",
+                "mcp__rush__agent_send",
+                r#"{"id":"h9","prompt":"and the metrics"}"#,
+            ),
+        ] {
+            s.apply(&call(id, name, input), NOW - 5_000);
+        }
+        conn(&mut m, KEY).runs.spawns.insert(
+            "h9".into(),
+            crate::spawns::SpawnRun {
+                step: "a1".into(),
+                kind: "claude".into(),
+                name: "Claude Code".into(),
+                prompt: "review the diff".into(),
+                path: p.to_string_lossy().into_owned(),
+                hosted: "h9".into(),
+                live: true,
+                ..Default::default()
+            },
+        );
+        super::subs::kick(&mut m, KEY);
+        super::subs::refresh(&mut m, KEY);
+        let picked = format!("t9:s:{step}");
+        m.session.as_mut().unwrap().sel.clone_from(&picked);
+        press(&mut m, "enter");
+        assert_eq!(views::view_name(&m, KEY), "subagents", "{step}");
+        assert_eq!(sel(&m), "sub:spawn:h9", "{step}");
+        press(&mut m, "esc");
+        assert_eq!(sel(&m), picked, "{step}");
+    }
+}
+
 /// space on the dock's workflow shows the subagents view on it
 /// (openWorkflow).
 #[test]

@@ -784,8 +784,9 @@ fn clip_log(text: &str) -> String {
 }
 
 /// The sessions rush hosted for rush session parent's shell or its
-/// spawn_agent calls, each with where its agent writes (spawns.go:215
-/// hostedRuns). One whose transcript can't be found is left out.
+/// spawn_agent calls, and those its start_agent calls started beside it,
+/// each with where its agent writes (spawns.go:215 hostedRuns). One whose
+/// transcript can't be found is left out.
 fn hosted_runs<I: std::borrow::Borrow<rush_host::Info>>(
     reg: &Registry,
     infos: &[I],
@@ -794,7 +795,9 @@ fn hosted_runs<I: std::borrow::Borrow<rush_host::Info>>(
     let mut out = Vec::new();
     for i in infos {
         let i: &rush_host::Info = i.borrow();
-        if i.meta.get("spawnedBy").map(String::as_str) != Some(parent) {
+        let by = |k: &str| i.meta.get(k).map(String::as_str) == Some(parent);
+        let beside = !by("spawnedBy") && by("startedFrom");
+        if !by("spawnedBy") && !beside {
             continue;
         }
         let live = rush_ui::screens::list_extras::spawns::hosted_live(&i.state);
@@ -852,6 +855,7 @@ fn hosted_runs<I: std::borrow::Borrow<rush_host::Info>>(
             live,
             session_id: i.session_id.clone(),
             profile,
+            beside,
         });
     }
     out

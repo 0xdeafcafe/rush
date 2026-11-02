@@ -49,6 +49,7 @@ use crate::transcript::pr_news_parts;
 use rush_core::event::{Exchange, Peer};
 use rush_core::tool::{Call, Kind, Output};
 
+pub(crate) mod agtools;
 pub(crate) mod chain;
 pub(crate) mod diffbox;
 pub(crate) mod liveout;
@@ -577,7 +578,9 @@ impl<'a> Drawer<'a> {
         if st.kind == Kind::Read && thumbable(&self.p.abs(&self.info(id).call.input.path)) {
             return false;
         }
-        if matches!(glyph_for(st), "✎" | "⇉" | "◆" | "◇") || self.o.ran.contains_key(&*st.id)
+        if matches!(glyph_for(st), "✎" | "⇉" | "◆" | "◇")
+            || self.o.ran.contains_key(&*st.id)
+            || crate::model::runs::rush_tool(&st.tool).is_some()
         {
             return false;
         }
@@ -892,7 +895,10 @@ impl<'a> Drawer<'a> {
     /// Whether a finished turn's step folds into its batch.
     fn batched(&self, id: StepId) -> bool {
         let st = self.s.step(id);
-        if matches!(glyph_for(st), "⇉" | "◆" | "◇") || self.o.ran.contains_key(&*st.id) {
+        if matches!(glyph_for(st), "⇉" | "◆" | "◇")
+            || self.o.ran.contains_key(&*st.id)
+            || crate::model::runs::rush_tool(&st.tool).is_some()
+        {
             return false;
         }
         if matches!(
@@ -1588,7 +1594,7 @@ impl<'a> Drawer<'a> {
                         verb = if st.status == Status::Waiting {
                             "waiting for approval".into()
                         } else {
-                            format!("running {}", one_line(&st.tool))
+                            self.running_words(st)
                         };
                         since = st.start;
                     } else if st.end != 0 {
@@ -2025,6 +2031,7 @@ impl<'a> Drawer<'a> {
                 hint.push(faint(" · "));
             }
             self.add(r, Color::Default, left, hint.and(right));
+            self.agent_now(id, indent + 4);
         }
         if open {
             let opened = self.o.open.contains_key(r);
@@ -2136,6 +2143,11 @@ impl<'a> Drawer<'a> {
             C_DIM
         };
         let lbl = |s: &str| paint(base, s);
+        // rush's agent tools by what they do, to which agent, whichever
+        // harness called them: one start_agent started is found under it.
+        if let Some(l) = self.agent_tool_label(st, &lbl) {
+            return l;
+        }
         // An agent a command ran, once found, or a spawn_agent call: its
         // row as any subagent's (render.go:2603-2609).
         if let Some(sp) = self.o.ran.get(&*st.id) {
@@ -4030,7 +4042,22 @@ fn group_words(name: &str, n: usize) -> String {
     }
 }
 
+/// Whether a step is left out of the conversation: its plan (drawn as a
+/// card), and a harness loading a tool before it calls it (tool_load).
 pub(crate) fn hidden(st: &Step) -> bool {
+    always_hidden(st) || tool_load(st)
+}
+
+/// Claude Code loading a tool's schema, or looking one up, before it
+/// calls it (ToolSearch): noise beside the call that follows, so every
+/// view but Trail, which accounts for the time, leaves it out. One that
+/// failed shows.
+pub(crate) fn tool_load(st: &Step) -> bool {
+    &*st.tool == "ToolSearch" && st.status != Status::Failed
+}
+
+/// Whether a step is left out of every view, Trail's too.
+pub(crate) fn always_hidden(st: &Step) -> bool {
     st.kind == Kind::Todo
         || matches!(
             &*st.tool,

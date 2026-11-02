@@ -456,6 +456,9 @@ pub struct Spawned {
     /// in the list (followSpawn's LinkSpawn).
     pub session_id: String,
     pub profile: String,
+    /// Started beside the session as one of its own (start_agent, Meta
+    /// startedFrom), not its subagent: it keeps its own row in the list.
+    pub beside: bool,
 }
 
 /// Who the session's messages go to: rush's hosts, and the daemons of

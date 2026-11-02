@@ -310,6 +310,14 @@ fn hosted_runs_are_the_parents_own() {
     assert_eq!((s.model.as_str(), s.cwd.as_str()), ("opus", "/w"));
     assert!(s.live);
     assert!(s.transcript.ends_with("s-h1.jsonl"), "{}", s.transcript);
+    assert!(!s.beside);
+    // One its start_agent call started beside it is listed too, as such.
+    write("h4", "port the parser");
+    let mut sibling = info("h4", "", "working");
+    sibling.meta = [("startedFrom".to_string(), "p".to_string())].into();
+    let got = hosted_runs(&reg, &[sibling], "p");
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(got[0].beside && got[0].id == "h4", "{got:?}");
 }
 
 /// Reads session id's host info until want takes it; panics after ten
