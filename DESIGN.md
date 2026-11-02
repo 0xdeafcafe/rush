@@ -768,6 +768,26 @@ move are counted and said, never restarted. A row whose host's
 `exe` is older than the installed rush shows a faint `old` (`old build`
 in full) beside its badge.
 
+Restarting an agent restarts its host too (`client::restart_agent`): the
+agent is going down anyway, so there is no old host worth keeping. Every
+restart goes this one way: the close question's restart (session and
+list), the sign-in card's carry on (`Op::RestartAgent`), and a login
+switch's restart of a session still at its limit. The installed rush
+(`reload::installed_exe`: `selfexe::resolved`, a Homebrew rush by its opt
+link) is asked `host preflight` first, and one that can't run the session
+leaves it running, untouched. Then the host is stopped, its agent with
+it, and a new host started from the installed rush (the same build or a
+newer one, the same way) on the saved config: same id, folder, worktree,
+conversation (resumed once it has begun), model, effort and the rest,
+with the queue and decisions read back from its info. The text given
+(`continue` after a limit or a sign-in) is sent once it's up. Clients see
+the connection close and dial the new host. A start that fails is put on
+the rush before it (`roll_back`) and the error says why; the config is
+kept, so a message or another restart starts it again. It goes through
+the adapter interface only, so every agent restarts so. A host's own rest
+of its agent (a login moved, a `without` change) stays in that host: it
+isn't a restart asked for.
+
 ## The list kept between runs (Rust-only)
 
 rush opens on the list as it last read it (rush-ui `listcache.rs`): each

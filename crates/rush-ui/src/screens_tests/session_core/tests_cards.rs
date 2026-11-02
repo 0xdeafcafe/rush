@@ -961,7 +961,6 @@ fn the_signed_out_card() {
         ops(&fake),
         [Op::RestartAgent {
             id: "k1".into(),
-            pid: 4321,
             text: "continue".into()
         }]
     );

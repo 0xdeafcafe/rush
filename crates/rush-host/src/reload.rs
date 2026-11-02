@@ -30,12 +30,18 @@ pub fn set_installed_exe(exe: Option<PathBuf>) {
 }
 
 /// The rush a restart starts hosts on: the one installed where this one
-/// runs from.
+/// runs from, as its installer names it (selfexe::resolved: a Homebrew
+/// rush by its opt link, so the newest build installed, not this one's
+/// own folder, which an upgrade removes).
 pub fn installed_exe() -> std::io::Result<PathBuf> {
     if let Some(e) = INSTALLED.with(|i| i.borrow().clone()) {
         return Ok(e);
     }
-    rush_sys::selfexe::path() // waits out an install putting it in place
+    let exe = rush_sys::selfexe::resolved()
+        .ok_or_else(|| std::io::Error::other("can't find the installed rush"))?;
+    // Waits out an install putting it in place.
+    rush_sys::selfexe::wait(&exe, rush_sys::selfexe::SETTLE)?;
+    Ok(exe)
 }
 
 /// Whether this rush can run session id's host: its config reads, its
@@ -128,7 +134,8 @@ pub fn prev_exe(exe: &Path) -> PathBuf {
 /// Starts session cfg's host again on the rush installed before exe, whose
 /// host didn't come up (failed says how), and logs what that host last
 /// wrote. The restart still failed: the session is on the old rush.
-pub fn roll_back(cfg: &Config, exe: &Path, failed: &str) -> String {
+/// spawn starts a host on a given rush (client::spawn_on, or a test's).
+pub fn roll_back(cfg: &Config, exe: &Path, failed: &str, spawn: crate::client::SpawnOn) -> String {
     let prev = prev_exe(exe);
     let mut f = json!({
         "exe": exe.to_string_lossy(),
@@ -136,7 +143,7 @@ pub fn roll_back(cfg: &Config, exe: &Path, failed: &str) -> String {
         "err": failed,
         "log": log_tail(&cfg.id, 2 << 10),
     });
-    if let Err(e) = crate::client::spawn_on(cfg.clone(), Some(&prev)) {
+    if let Err(e) = spawn(cfg.clone(), &prev) {
         f["prevErr"] = e.to_string().into();
         log_event(&cfg.id, "reload-failed", f);
         return format!("{failed}, and the rush before it didn't start it either: {e}");

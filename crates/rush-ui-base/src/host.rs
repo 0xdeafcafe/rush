@@ -130,12 +130,12 @@ pub enum Op {
     /// Carries on at the usage limit's reset, or waits (client.go
     /// ContinueAtReset).
     ContinueAtReset(bool),
-    /// Stops its agent's process (pid) and sends text, which starts a
-    /// fresh one resuming the conversation, signed in as whoever its home
-    /// is now; id is the session's, for its log (restartClaude).
+    /// Restarts its agent and its host, the host on the installed rush,
+    /// and sends text, which starts a fresh agent resuming the
+    /// conversation, signed in as whoever its home is now; id is the
+    /// session's (restartClaude; rush_host::client::restart_agent).
     RestartAgent {
         id: String,
-        pid: i64,
         text: String,
     },
     /// Leaves it to carry on while you're gone, or loops it; None ends
@@ -561,7 +561,8 @@ pub trait Hosts: Send + Sync {
     }
     /// Starts rush session id's agent program again, resuming its
     /// conversation, signed in as whoever is in use now and with the
-    /// settings as they are now; text, when there is any, is sent so it
+    /// settings as they are now, its host started again with it on the
+    /// newest rush installed; text, when there is any, is sent so it
     /// starts at once, else it starts with the next message. One not
     /// running says so (restart's run, restartClaude). Waits.
     fn restart(&self, _id: &str, _name: &str, _text: &str) -> Result<(), String> {

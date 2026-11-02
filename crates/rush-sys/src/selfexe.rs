@@ -33,8 +33,9 @@ pub fn resolved() -> Option<PathBuf> {
 /// each version in a folder of its own, <prefix>/Cellar/<name>/<version>,
 /// and removes it once a newer one is in, so a hook naming that folder
 /// stops working at the next upgrade; <prefix>/opt/<name> always links
-/// the installed version. Anything else, or an opt link that isn't this
-/// rush, is exe itself.
+/// the installed version. A version an upgrade has since removed is
+/// named by the opt link too: that is what's installed now. Anything
+/// else, or an opt link to another version still there, is exe itself.
 pub fn installed(exe: &Path) -> PathBuf {
     let s = exe.to_string_lossy();
     if let Some(i) = s.rfind("/Cellar/") {
@@ -44,7 +45,7 @@ pub fn installed(exe: &Path) -> PathBuf {
             (parts.next(), parts.next(), parts.next())
         {
             let opt = PathBuf::from(format!("{prefix}/opt/{name}/{inside}"));
-            if std::fs::canonicalize(&opt).is_ok_and(|p| p == exe) {
+            if std::fs::canonicalize(&opt).is_ok_and(|p| p == exe || !exe.exists()) {
                 return opt;
             }
         }
@@ -110,6 +111,10 @@ mod tests {
         std::fs::create_dir_all(&old).unwrap();
         std::fs::write(old.join("rush"), "rush").unwrap();
         assert_eq!(installed(&old.join("rush")), old.join("rush"));
+
+        // A version the upgrade removed: what's installed now is the opt link.
+        let gone = prefix.join("Cellar/rush/1.2.1/bin/rush");
+        assert_eq!(installed(&gone), prefix.join("opt/rush/bin/rush"));
 
         // Not Homebrew's.
         let cargo = prefix.join("cargo/bin/rush");

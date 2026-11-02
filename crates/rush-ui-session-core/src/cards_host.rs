@@ -204,14 +204,13 @@ fn act(m: &mut Model, key: &str, a: Act) -> Out {
         Act::ContinueAtReset(yes) => send_op(m, key, Op::ContinueAtReset(yes)),
         Act::RestartAgent(text) => {
             let id = agent(m, key).map(|a| a.job.id.clone()).unwrap_or_default();
-            let pid = conn(m, key).info.agent_pid;
             let Some(link) = conn(m, key).link.clone() else {
                 m.flash_err("this session can't take answers here");
                 return Out::Draw;
             };
             // Said once it's restarted, not before (signedout.go:182-186).
             m.later(
-                move || link.op(Op::RestartAgent { id, pid, text }),
+                move || link.op(Op::RestartAgent { id, text }),
                 |m, r| {
                     match r {
                         Ok(()) => m.flash("carrying on as the login in use"),

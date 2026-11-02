@@ -67,13 +67,15 @@ pub mod workspace;
 #[cfg(test)]
 mod gofiles;
 #[cfg(test)]
+mod restart_tests;
+#[cfg(test)]
 pub(crate) mod testing;
 
 use std::time::Duration;
 
 pub use client::{
-    Client, ClientError, Lister, deliver, ensure, list, read_config, read_info, restart, running,
-    spawn,
+    Client, ClientError, Lister, deliver, ensure, list, read_config, read_info, restart,
+    restart_agent, running, spawn,
 };
 pub use lines::{Decoder, Line, Sent, decode};
 pub use op::Op;

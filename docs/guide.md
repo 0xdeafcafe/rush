@@ -241,7 +241,7 @@ When a turn ends and nothing is left running, Claude Code is stopped a few secon
 
 ## Projects
 
-The place next to Agents (`ctrl+\`, or `>` with nothing typed) lists each project agents worked in: its main checkout and every worktree, with its branch and changes and whether removing it would lose anything, then Pull requests, Temporary (agents' temp work) and System (every agent's processes). `enter` goes into a project: where it is and where it pushes, its git state, its memory, its agents and what they're doing, their scratch and its recent commits. `c` opens Clean up. `x` on an agent asks first whether to hide it, stop it and keep it, restart it or delete it for good.
+The place next to Agents (`ctrl+\`, or `>` with nothing typed) lists each project agents worked in: its main checkout and every worktree, with its branch and changes and whether removing it would lose anything, then Pull requests, Temporary (agents' temp work) and System (every agent's processes). `enter` goes into a project: where it is and where it pushes, its git state, its memory, its agents and what they're doing, their scratch and its recent commits. `c` opens Clean up. `x` on an agent asks first whether to hide it, stop it and keep it, restart it or delete it for good. A restart starts its host again too, on the newest rush installed, carrying on the same conversation with its queue and settings.
 
 **Wall** is Agents' second page: every agent at once, streaming. A tile whose agent ended with decisions shows them; `enter` or a click opens their card on the tile, answered with the session card's keys (`↑↓` choose, `1`–`9` or `enter` pick, `←→` between them, `a` takes its picks, `s` or `esc` sends nothing) and sent as the card sends them; `o` opens its session.
 

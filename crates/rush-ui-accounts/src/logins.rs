@@ -665,8 +665,11 @@ pub fn relogin_hosts(
         let mut err = cl.relogin().err().map(|e| e.to_string());
         let mut how = "relogin";
         if err.is_none() && info.limit.is_some() && still_limited(&info.id) {
-            how = "relogin, then restart its Claude Code";
-            err = restart_claude(&cl, &info, rush_host::server::LIMIT_CONTINUE).err();
+            how = "relogin, then restart its agent and host";
+            cl.close();
+            err = rush_host::client::restart_agent(&info.id, rush_host::server::LIMIT_CONTINUE)
+                .err()
+                .map(|e| e.to_string());
         }
         log_event(
             &info.id,
@@ -696,49 +699,6 @@ fn still_limited(id: &str) -> bool {
         }
     }
     true
-}
-
-/// Stops a session's Claude Code and sends text, which starts a fresh one
-/// resuming the conversation, signed in as whoever its home is now
-/// (restartClaude). Restarting an agent from the close question uses it
-/// too (logins.go:715 restart).
-pub fn restart_claude(
-    cl: &rush_host::client::Client,
-    info: &rush_host::wire::Info,
-    text: &str,
-) -> Result<(), String> {
-    let pid = info.claude_pid as i32;
-    let r = (|| {
-        // pid 1 or below is never a session's Claude Code; and only the
-        // process asked to stop is made to (the same start), not one that
-        // took its pid since: stricter than Go's logins.go:675.
-        let start = (pid > 1).then(|| rush_sys::proc::started(pid)).flatten();
-        if let Some(start) = start {
-            let _ = rush_sys::proc::kill(pid, libc::SIGTERM);
-            let mut gone = false;
-            for _ in 0..50 {
-                if rush_sys::proc::started(pid) != Some(start) {
-                    gone = true;
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(100));
-            }
-            if !gone {
-                let _ = rush_sys::proc::kill(pid, libc::SIGKILL);
-                std::thread::sleep(Duration::from_millis(200));
-            }
-        }
-        if text.is_empty() {
-            return Ok(());
-        }
-        cl.send(text).map_err(|e| e.to_string())
-    })();
-    rush_host::events::log_event(
-        &info.id,
-        "claude-restart",
-        json!({"claudePid": info.claude_pid, "text": rush_host::events::clip(text), "err": r.clone().err().unwrap_or_default()}),
-    );
-    r
 }
 
 /// A JSON object's fields, for the events log.

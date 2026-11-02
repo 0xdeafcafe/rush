@@ -404,15 +404,13 @@ impl Hosts for RushHosts {
     }
 
     fn restart(&self, id: &str, name: &str, text: &str) -> Result<(), String> {
-        // restart's run (logins.go:715-736).
+        // restart's run (logins.go:715-736); its host restarts too, on the
+        // installed rush (client::restart_agent).
         let info = rush_host::list().into_iter().rfind(|i| i.id == id);
-        let Some(info) = info.filter(|i| i.state != "stopped") else {
+        if info.is_none_or(|i| i.state == "stopped") {
             return Err(format!("{name} isn't running; a message starts it"));
-        };
-        let c = Client::dial(id).map_err(|e| e.to_string())?;
-        let r = rush_ui::screens::accounts::logins::restart_claude(&c, &info, text);
-        c.close();
-        r
+        }
+        rush_host::client::restart_agent(id, text).map_err(|e| e.to_string())
     }
 
     fn stop(&self, id: &str) -> Result<(), String> {
@@ -953,13 +951,11 @@ impl Link for HostLink {
             Op::Effort(e) => c.set_effort(&e),
             Op::ContinueAtReset(yes) => c.continue_at_reset(yes),
             Op::Away(a) => c.set_away(a.map(|a| wire_away(&a))),
-            Op::RestartAgent { id, pid, text } => {
-                let info = rush_host::wire::Info {
-                    id,
-                    claude_pid: pid,
-                    ..Default::default()
-                };
-                return rush_ui::screens::accounts::logins::restart_claude(&c, &info, &text);
+            Op::RestartAgent { id, text } => {
+                // Its host goes too: this connection closes, and the link
+                // dials the new one as after an upgrade.
+                drop(c);
+                return rush_host::client::restart_agent(&id, &text).map_err(|e| e.to_string());
             }
         };
         r.map_err(|e| e.to_string())

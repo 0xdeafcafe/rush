@@ -1232,9 +1232,94 @@ fn flock_until(f: &std::fs::File, deadline: Instant) -> Result<()> {
 /// new host that then doesn't come up is replaced by one on the rush
 /// installed before it (roll_back).
 pub fn restart(id: &str, change: impl FnOnce(&mut Config)) -> Result<()> {
-    let mut cfg = read_config(id)?;
     let exe = crate::reload::installed_exe()?;
-    if let Err(e) = crate::reload::preflight(&exe, id) {
+    restart_on(id, &exe, &installed_spawn, change)
+}
+
+/// Starts a host for a config on the rush at the path given, returning
+/// once it listens: [`spawn_on`]'s, or a test's in-process host.
+pub type SpawnOn<'a> = &'a (dyn Fn(Config, &Path) -> Result<()> + Sync);
+
+/// spawn_on, as a [`SpawnOn`].
+fn installed_spawn(cfg: Config, exe: &Path) -> Result<()> {
+    spawn_on(cfg, Some(exe)).map(|_| ())
+}
+
+/// Restarts session id's agent, the one way every restart of it goes
+/// (the close question's, #restart, a sign-in's or an account change's):
+/// its host stops, the agent with it, and a fresh host starts from the
+/// installed rush (newest build, or the same one), resuming the same
+/// conversation in the same folder with what it had queued, its model,
+/// effort and the rest of its config. text, when given, is then sent to
+/// it. Clients see their connection close and dial again. Through the
+/// adapter interface only: any agent rush runs restarts so.
+pub fn restart_agent(id: &str, text: &str) -> Result<()> {
+    let exe = crate::reload::installed_exe()?;
+    restart_agent_on(id, text, &exe, &installed_spawn)
+}
+
+/// restart_agent onto the rush at exe, its host started by spawn.
+pub fn restart_agent_on(id: &str, text: &str, exe: &Path, spawn: SpawnOn) -> Result<()> {
+    let info = read_info(id).unwrap_or_default();
+    // A conversation begun carries on, as after a sleep.
+    let begun = info.turn > 0 || matches!(info.state.as_str(), "working" | "blocked" | "starting");
+    let r = restart_on(id, exe, spawn, |cfg| {
+        cfg.resume = cfg.resume || (begun && !cfg.session_id.is_empty());
+    })
+    .and_then(|()| {
+        if text.is_empty() {
+            return Ok(());
+        }
+        let c = Client::dial(id)?;
+        let r = c.send(text);
+        c.close();
+        r
+    });
+    log_event(
+        id,
+        "agent-restart",
+        json!({
+            "exe": exe.to_string_lossy(),
+            "agentPid": info.claude_pid,
+            "text": crate::events::clip(text),
+            "err": r.as_ref().err().map(|e| e.to_string()).unwrap_or_default(),
+        }),
+    );
+    r
+}
+
+/// Whether session id's host, pid, has gone, waiting up to timeout. One
+/// run in this very process (a test's) has gone once its socket no
+/// longer answers.
+fn host_gone(id: &str, pid: i64, timeout: Duration) -> bool {
+    if pid != std::process::id() as i64 {
+        return crate::sys::wait_exit(pid, timeout);
+    }
+    let w = rush_sys::fswait::Watcher::new();
+    w.watch(&[dir(id)]);
+    let deadline = Instant::now() + timeout;
+    loop {
+        match Client::dial(id) {
+            Err(_) => return true,
+            Ok(c) => c.close(),
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return false;
+        }
+        w.wait(None, Some((deadline - now).min(Duration::from_millis(50))));
+    }
+}
+
+/// restart onto the rush at exe, its host started by spawn.
+pub fn restart_on(
+    id: &str,
+    exe: &Path,
+    spawn: SpawnOn,
+    change: impl FnOnce(&mut Config),
+) -> Result<()> {
+    read_config(id)?;
+    if let Err(e) = crate::reload::preflight(exe, id) {
         log_event(
             id,
             "reload-refused",
@@ -1253,15 +1338,18 @@ pub fn restart(id: &str, change: impl FnOnce(&mut Config)) -> Result<()> {
         let _ = c.stop();
         c.close();
     }
-    if !crate::sys::wait_exit(info.host_pid, Duration::from_secs(15)) {
+    if !host_gone(id, info.host_pid, Duration::from_secs(15)) {
         return Err(format!("the host for {id} didn't stop").into());
     }
+    // Read once it has gone: what it saved as it stopped is in.
+    let mut cfg = read_config(id)?;
     change(&mut cfg);
     cfg.prompt.clear();
     cfg.images.clear();
+    cfg.prompt_exchange = None;
     cfg.cause = ev;
-    if let Err(e) = spawn_on(cfg.clone(), Some(&exe)) {
-        return Err(crate::reload::roll_back(&cfg, &exe, &e.to_string()).into());
+    if let Err(e) = spawn(cfg.clone(), exe) {
+        return Err(crate::reload::roll_back(&cfg, exe, &e.to_string(), spawn).into());
     }
     Ok(())
 }

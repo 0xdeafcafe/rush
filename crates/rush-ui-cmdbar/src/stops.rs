@@ -416,7 +416,8 @@ pub fn ask_close(m: &mut Model, a: Option<Agent>) -> Out {
 }
 
 /// #restart: the agent's program starts again, so it picks up the
-/// account in use and settings changed since. A rush agent keeps its
+/// account in use and settings changed since; its host restarts with it,
+/// on the newest rush installed (Hosts::restart). A rush agent keeps its
 /// place; any other is relaunched on its account. One stopped by a limit
 /// or an error is told to continue; one mid-turn asks first (restart).
 pub fn restart(m: &mut Model, a: Agent, text: String) -> Out {
