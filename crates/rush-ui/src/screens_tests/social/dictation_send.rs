@@ -193,7 +193,11 @@ fn nothing_coming_sends_after_the_wait() {
         m.clock = Some(10_000 + WAIT_GRACE);
         let _ = settle(&mut m);
         assert_eq!(sent(&mut m), ["ship it"], "{phase}");
-        assert!(look(&mut m).is_none(), "{phase}: still waiting");
+        // yap's own look may stay till it says hidden; the wait's gone.
+        assert!(
+            look(&mut m).is_none_or(|l| l.hint != WAITING_HINT),
+            "{phase}: still waiting"
+        );
     }
 }
 
