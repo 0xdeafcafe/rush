@@ -115,7 +115,7 @@ pub fn cache_sections(m: &Model) -> Vec<Section> {
     ));
     if k.subagents {
         rows.push(choice(
-            "  start known-slow commands in background",
+            "  slow commands in background",
             on_off(k.ahead),
             "A subagent's shell command that took its cache's life less a minute or more the last time it ran in the project starts in the background, and the subagent is told to check on it in short waits. Each is in the session's events as subagent-cache-ahead. Read at every command.",
             &[
@@ -133,13 +133,13 @@ pub fn cache_sections(m: &Model) -> Vec<Section> {
     }
     for kind in super::guard::subagent_cache_kinds(m) {
         let label = format!(
-            "Subagents' cache life ({})",
+            "{} subagents' cache",
             super::common::reg().harness_label(&kind)
         );
         rows.push(super::guard::subagent_cache_row(m, &kind, &label));
     }
     rows.push(numbers(
-        "Smallest conversation worth keeping",
+        "Smallest worth keeping",
         k.min_tokens as f64,
         "No small request for an idle conversation, nor a move for a waiting subagent, when its context is smaller than this: its rewrite costs cents ($0.13 at 20k tokens on Opus at $5/M), and the agent's own instructions and tools are most of it.",
         &[0.0, 10_000.0, 50_000.0, 100_000.0],
@@ -152,7 +152,7 @@ pub fn cache_sections(m: &Model) -> Vec<Section> {
         k.refreshes as f64,
         "The most small requests one idle stretch may take, or moves one waiting subagent may have. Auto keeps them under half the rewrite they save: 5 for a 5-minute cache, 9 for an hour's. Either way none goes once they'd cost more than the rewrite.",
         &[0.0, 2.0, 3.0, 5.0, 9.0],
-        "auto: half a rewrite",
+        "auto",
         &|x| format!("{x:.0}"),
         |m, v| config_mut(m).cache_keep.refreshes = v as i64,
     ));
@@ -292,9 +292,9 @@ pub fn context_guard_section(m: &Model) -> Section {
             &g,
             cg::BIG_LINES,
             "  huge means over",
-            "How big a file is too big to read whole without a word first: its lines, or its size.",
+            "How big a file is too big to read whole without a word first: over this many lines, or 48 KB for every 1,000 (24, 48 or 96 KB).",
             cg::BIG_LINES_CHOICES,
-            &|n| format!("{} lines or {} KB", thousands(n), n * 48 / 1000),
+            &|n| format!("{} lines", thousands(n)),
         ));
     }
     rows.push(guard_switch(
@@ -328,9 +328,9 @@ pub fn context_guard_section(m: &Model) -> Section {
             &g,
             cg::SQUEEZE_LINES,
             "  longer than",
-            "Output longer than this keeps its first and last third of it; the rest is left out, kept whole in a file.",
+            "Output longer than this many lines keeps its first and last third (200 each of 600); the rest is left out, kept whole in a file the agent is pointed to.",
             cg::SQUEEZE_LINES_CHOICES,
-            &|n| format!("{} lines: keeps first and last {}", thousands(n), n / 3),
+            &|n| format!("{} lines", thousands(n)),
         ));
     }
     let note = if g.on {

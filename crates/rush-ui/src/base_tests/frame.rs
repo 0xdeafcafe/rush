@@ -254,7 +254,7 @@ fn page_tabs_look_alike_and_click() {
     assert_eq!(m.place, PlaceId::Settings);
     let f = screen(&mut m);
     assert!(
-        f[3].contains("RUSH      General   Keys   Plugins   Updates   Remote   [ ]"),
+        f[3].contains("RUSH      General   Usage   Keys   Plugins   Updates   Remote   [ ]"),
         "{f:?}"
     );
     assert!(under(&mut m, "General"));
@@ -266,14 +266,14 @@ fn page_tabs_look_alike_and_click() {
         y: 3,
         mods: KeyMods::NONE,
     });
-    assert_eq!(m.top_hover, Some((1, true)));
+    assert_eq!(m.top_hover, Some((2, true)));
     assert_eq!(click(&mut m, x, 3), Out::Draw);
-    assert_eq!(m.page_tabs().map(|t| t.cur), Some(1), "Keys picked");
+    assert_eq!(m.page_tabs().map(|t| t.cur), Some(2), "Keys picked");
     assert!(under(&mut m, "Keys"));
     assert!(!under(&mut m, "General"));
     // ] goes on from there.
     press(&mut m, "]");
-    assert_eq!(m.page_tabs().map(|t| t.cur), Some(2));
+    assert_eq!(m.page_tabs().map(|t| t.cur), Some(3));
     // Harnesses' pages are drawn the same.
     let f = screen(&mut m);
     let x = at(&f, 2, " Harnesses ") + 1;

@@ -166,7 +166,7 @@ fn tabs_name_the_place_pages() {
     set_settings_page(&mut m, PAGE_GENERAL);
     let tabs = workspace::tabs(&m, PlaceId::Settings, 140).plain();
     assert!(
-        tabs.starts_with("General   Keys   Plugins   Updates   Remote"),
+        tabs.starts_with("General   Usage   Keys   Plugins   Updates   Remote"),
         "{tabs}"
     );
     assert!(tabs.trim_end().ends_with("[ ]"), "{tabs}");
@@ -1786,7 +1786,7 @@ fn usage_gathers_the_rules() {
     let rows = |m: &Model| -> Vec<(String, String)> {
         flat(&usage::sections(m))
             .iter()
-            .filter(|r| !r.label.starts_with("Subagents' cache life"))
+            .filter(|r| r.label.starts_with("Keep") || !r.label.ends_with(" subagents' cache"))
             .map(|r| (r.label.clone(), r.shown()))
             .collect()
     };
@@ -1795,17 +1795,17 @@ fn usage_gathers_the_rules() {
         ("  for", "15 minutes"),
         ("  compact long waits", "off"),
         ("Keep waiting subagents' cache", "on"),
-        ("  start known-slow commands in background", "on"),
-        ("Smallest conversation worth keeping", "20k tokens"),
-        ("Most refreshes per wait", "auto: half a rewrite"),
+        ("  slow commands in background", "on"),
+        ("Smallest worth keeping", "20k tokens"),
+        ("Most refreshes per wait", "auto"),
         ("Don't re-read unchanged files", "on"),
         ("  smallest file it applies to", "2 KB"),
         ("Don't read huge files whole", "on"),
-        ("  huge means over", "1,000 lines or 48 KB"),
+        ("  huge means over", "1,000 lines"),
         ("Stop repeated failures", "on"),
         ("  after", "3 in a row"),
         ("Trim command output", "on"),
-        ("  longer than", "600 lines: keeps first and last 200"),
+        ("  longer than", "600 lines"),
         ("Pace guard", "off"),
         ("Agents at once", "no cap"),
         ("When you're away", "off"),
@@ -1838,13 +1838,13 @@ fn usage_gathers_the_rules() {
     let k = &config(&m).cache_keep;
     assert!(!k.subagents && !k.subagents_on_for("claude") && k.on_for("claude"));
     assert!(
-        rows(&m).iter().all(|(l, _)| !l.contains("known-slow")),
+        rows(&m).iter().all(|(l, _)| !l.contains("slow commands")),
         "{:?}",
         rows(&m)
     );
     // The numbers reach what decide is given.
     for (label, v) in [
-        ("Smallest conversation worth keeping", "50000"),
+        ("Smallest worth keeping", "50000"),
         ("Most refreshes per wait", "3"),
         ("  compact long waits", "60"),
     ] {
