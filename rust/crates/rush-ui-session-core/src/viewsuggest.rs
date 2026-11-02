@@ -298,7 +298,7 @@ pub fn look(m: &mut Model, key: &str) {
 
 /// Works out what fits at moment mo in session key: the rules, else the
 /// quick model.
-fn resolve(m: &mut Model, key: &str, mo: Moment, mode: Mode) {
+fn resolve(m: &mut Model, key: &str, mo: Moment, set: Mode) {
     let now = m.now;
     let p = m
         .kept::<Suggestions>()
@@ -308,7 +308,7 @@ fn resolve(m: &mut Model, key: &str, mo: Moment, mode: Mode) {
     p.pending = None;
     let (seen, id, asked) = (p.seen, p.moment, p.asked);
     // Switching is only for coming back.
-    if mode == Mode::Switch && mo == Moment::Ended {
+    if set == Mode::Switch && mo == Moment::Ended {
         return;
     }
     let Some(d) = m
