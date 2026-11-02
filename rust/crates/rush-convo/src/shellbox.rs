@@ -491,7 +491,10 @@ pub fn sgr_spans(s: &str) -> Vec<(String, Sgr)> {
 mod tests {
     use super::*;
 
-    fn blocks(s: &str) -> Vec<(bool, Vec<(bool, String)>, String)> {
+    /// Each block: whether it's a console's, its rows, its script.
+    type Found = (bool, Vec<(bool, String)>, String);
+
+    fn blocks(s: &str) -> Vec<Found> {
         shell_blocks(s)
             .into_iter()
             .map(|b| (b.console, b.rows(), b.script()))
