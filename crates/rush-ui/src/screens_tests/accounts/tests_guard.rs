@@ -72,6 +72,10 @@ impl HostOps for Hosts {
         self.said.lock().unwrap().push(format!("keep {id}"));
         Ok(())
     }
+    fn compact(&self, id: &str) -> Result<(), String> {
+        self.said.lock().unwrap().push(format!("compact {id}"));
+        Ok(())
+    }
 }
 
 impl Hosts {
@@ -682,6 +686,7 @@ fn caches_kept_warm_while_it_pays() {
     let keep = |ids: &[&str]| g::KeepIn {
         settings: rush_core::cachekeep::Settings::default(),
         ids: ids.iter().map(|s| s.to_string()).collect(),
+        ..g::KeepIn::default()
     };
     let look =
         |infos: Vec<Info>, k: Option<g::KeepIn>, now: Ms, st: &HashMap<String, g::Stretch>| {
@@ -758,6 +763,67 @@ fn caches_kept_warm_while_it_pays() {
         "{:?}",
         away.said()
     );
+}
+
+// Rust-only: set to compact long waits, a main conversation whose
+// hour's cache would lapse at an hour idle is compacted once while it's
+// still warm, its event says why; never one with a decision waiting or
+// something in its background, nor again before a turn of its own.
+#[test]
+fn long_waits_compacted_once() {
+    let d = tempfile::tempdir().unwrap();
+    let hosts = Hosts::default();
+    let keep = || g::KeepIn {
+        settings: rush_core::cachekeep::Settings {
+            compact_after: HOUR,
+            ..rush_core::cachekeep::Settings::default()
+        },
+        ids: ["s1", "s2", "s3", "s4"].map(String::from).into(),
+        compact: ["s1", "s2", "s3"].map(String::from).into(),
+    };
+    // An hour's cache, idle 59 minutes, 30 seconds left.
+    let long = |id: &str, now: Ms| {
+        let mut i = lapsing(id, 59 * MIN, now);
+        i.cache_ttl = 3600;
+        i
+    };
+    let look = |infos: Vec<Info>, now: Ms, st: &HashMap<String, g::Stretch>| {
+        *hosts.infos.lock().unwrap() = infos;
+        let mut i = input(d.path(), Settings::default(), vec![], now);
+        i.keep = Some(keep());
+        i.stretches = st.clone();
+        g::tick(i, &hosts)
+    };
+    // s2 has a decision waiting, s3 a task in its background, s4's agent
+    // can't compact.
+    let mut s2 = long("s2", NOW);
+    s2.needs = "a question".into();
+    let mut s3 = long("s3", NOW);
+    s3.tasks = 1;
+    let o = look(
+        vec![long("s1", NOW), s2, s3, long("s4", NOW)],
+        NOW,
+        &HashMap::new(),
+    );
+    assert_eq!(hosts.said(), ["compact s1"]);
+    let ev = hosts.events("cache-compacted");
+    assert_eq!(ev.len(), 1);
+    assert_eq!(ev[0].0, "s1");
+    assert_eq!(ev[0].1["context"], 120_000);
+    assert_eq!(ev[0].1["after"], 60);
+    // The compaction's own turn ended, and an hour on it's about to lapse
+    // again: not compacted twice.
+    let later = NOW + 2 * HOUR;
+    let mut again = long("s1", later);
+    again.turn = 5;
+    let o = look(vec![again.clone()], later, &o.stretches);
+    assert_eq!(hosts.said(), ["compact s1"]);
+    // After a turn of its own, it may be.
+    let next = later + 2 * HOUR;
+    let mut again = long("s1", next);
+    again.turn = 6;
+    look(vec![again], next, &o.stretches);
+    assert_eq!(hosts.said(), ["compact s1", "compact s1"]);
 }
 
 #[test]
