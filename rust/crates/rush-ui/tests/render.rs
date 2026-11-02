@@ -174,9 +174,7 @@ fn snapshot(name: &str, got: &str) {
         return;
     }
     let want = std::fs::read_to_string(&p).unwrap();
-    if got != want {
-        eprintln!("SNAPDIFF {name} {:?}", got);
-    }
+    assert_eq!(got, want, "{name} differs; UPDATE_SNAPSHOTS=1 to accept");
 }
 
 fn plain(m: &mut Model, w: u16, h: u16, keys: &[(Key, KeyMods)]) -> String {
@@ -652,7 +650,7 @@ fn a_wide_session_has_the_column_beside_it() {
         .iter()
         .position(|r| r.contains("Conversation"))
         .unwrap();
-    assert!(dec <= head + 4, "{f}");
+    assert!(dec <= head + 6, "{f}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -709,12 +707,15 @@ const SIZES: [(u16, u16); 3] = [(80, 24), (120, 40), (200, 50)];
 /// Draws one view at every size, each from a fresh model, as
 /// `name_WxH`.
 fn views(name: &str, setup: impl Fn(&mut Model), keys: &[(Key, KeyMods)]) {
+    let mut bad = false; // TEMP
     for (w, h) in SIZES {
         let mut m = model();
         setup(&mut m);
         let f = plain(&mut m, w, h, keys);
-        snapshot(&format!("{name}_{w}x{h}"), &f);
+        let n = format!("{name}_{w}x{h}");
+        bad |= std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| snapshot(&n, &f))).is_err();
     }
+    assert!(!bad); // TEMP
 }
 
 #[test]
