@@ -13,7 +13,7 @@ Plugins you install run on macOS only for now. Elsewhere rush won't run them rat
 | [Taking part in rush's screen](#taking-part-in-rushes-screen) | events, overview sections, commands, settings, intercepts |
 | [Writing one](#writing-one) | with Claude and the skill, or by hand |
 | [What plugins do](#what-plugins-do) | the kinds rush lists them under |
-| [Examples](examples) | `neighbours`, `kanban`, `delegate`, `memory`, and `autodrafts` and `reconnect` (UI hooks) |
+| [Examples](examples) | `neighbours`, `kanban`, `delegate`, `memory`, and `autodrafts` and `reconnect` (UI hooks), in Rust on [`rush-plugin-sdk`](sdk) |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | the processes, the boundaries, why it's built this way |
 | [Protocol](skills/write-rush-plugin/references/protocol.md) · [Manifest](skills/write-rush-plugin/references/manifest.md) · [Sandbox](skills/write-rush-plugin/references/sandbox.md) | the reference |
 
@@ -120,7 +120,7 @@ None of it can slow rush down. rush hands the broker events without waiting, dra
 
 ### With Claude
 
-The [`write-rush-plugin`](skills/write-rush-plugin) skill teaches Claude to write, test and debug plugins. It knows the protocol, the manifest and the sandbox, starts from a template in Go, Python or Node that's tested in the real sandbox, checks its work with `rush plugin check`, and tests the tools with its `call.py`. Approving stays with you.
+The [`write-rush-plugin`](skills/write-rush-plugin) skill teaches Claude to write, test and debug plugins. It knows the protocol, the manifest and the sandbox, starts from a template in Rust, Python or Node, checks its work with `rush plugin check`, and tests the tools with its `call.py`. Approving stays with you.
 
 ```
 /plugin marketplace add 0xdeafcafe/rush
@@ -131,7 +131,7 @@ Then ask: *"write me a rush plugin that …"*.
 
 ### By hand
 
-1. Copy a template: [`go`](skills/write-rush-plugin/templates/go) (a static binary, the sturdiest), [`python`](skills/write-rush-plugin/templates/python) or [`node`](skills/write-rush-plugin/templates/node). Each is one file with no dependencies, and offers three tools: two keep notes in the data folder, and one calls rush back to list agents.
+1. Copy a template: [`rust`](skills/write-rush-plugin/templates/rust) (one binary, the sturdiest), [`python`](skills/write-rush-plugin/templates/python) or [`node`](skills/write-rush-plugin/templates/node). Each offers three tools: two keep notes in the data folder, and one calls rush back to list agents. The Python and Node ones are one file with no dependencies; the Rust one is a small crate on [`rush-plugin-sdk`](sdk), rush's crate for plugins. Any other language works too: it only has to speak the protocol below.
 2. Rename it, change its tools, and keep the plumbing.
 3. Put it in `~/.config/rush/plugins/<name>/`, run `rush plugin check <name>`, then `rush plugin approve <name>`.
 4. Call its tools without a session: `python3 skills/write-rush-plugin/scripts/call.py <name> list`, then `… call <tool> '{"arg": "value"}'`.
@@ -157,14 +157,14 @@ Every method and event: [protocol](skills/write-rush-plugin/references/protocol.
 
 ## Examples
 
-On Apple Silicon, build with `GOARCH=arm64` if `go env GOARCH` says `amd64`: an x86_64 plugin can't start in the sandbox, which blocks Rosetta.
+The examples are Rust, built on [`rush-plugin-sdk`](sdk) (`plugins/sdk`): rush's crate for writing plugins, with the connection on fd 3, the protocol's shapes, `plugin.json` and the check rush makes of a `sidebar.set`. It needs nothing of rush's own crates. The examples and the crate are in rush's Cargo workspace, so CI formats, lints and tests them with the rest, and rush's own tests run `neighbours`, `reconnect`, `delegate` and `kanban` in the real sandbox. Build them from the top of rush's repository. On Apple Silicon, build for arm64 (`--target aarch64-apple-darwin` if `rustc -vV` says x86_64): an x86_64 plugin can't start in the sandbox, which blocks Rosetta.
 
-- [`neighbours`](examples/neighbours) is the smallest useful plugin, and the one to read first: one tool that tells Claude which other agents are working in the same repository, and on which branch, so it doesn't trip over them. About 100 lines of Go, with only the `list` capability.
+- [`neighbours`](examples/neighbours) is the smallest useful plugin, and the one to read first: one tool that tells Claude which other agents are working in the same repository, and on which branch, so it doesn't trip over them. About 100 lines of Rust, with only the `list` capability.
 
   ```sh
+  cargo build --release -p neighbours
   mkdir -p ~/.config/rush/plugins/neighbours
-  (cd plugins/examples && go build -o ~/.config/rush/plugins/neighbours/neighbours ./neighbours)
-  cp plugins/examples/neighbours/plugin.json ~/.config/rush/plugins/neighbours/
+  cp target/release/neighbours plugins/examples/neighbours/plugin.json ~/.config/rush/plugins/neighbours/
   rush plugin approve neighbours
   ```
 
@@ -177,18 +177,18 @@ On Apple Silicon, build with `GOARCH=arm64` if `go env GOARCH` says `amd64`: an 
   It needs kanban-code's app running for the link, and its CLI at `~/.local/bin/kanban`, where the app installs it. Change `workspaces` in `plugin.json` to where your projects are.
 
   ```sh
+  cargo build --release -p kanban
   mkdir -p ~/.config/rush/plugins/kanban
-  (cd plugins/examples && go build -o ~/.config/rush/plugins/kanban/kanban ./kanban)
-  cp plugins/examples/kanban/plugin.json ~/.config/rush/plugins/kanban/
+  cp target/release/kanban plugins/examples/kanban/plugin.json ~/.config/rush/plugins/kanban/
   rush plugin approve kanban
   ```
 
-- [`delegate`](examples/delegate) lets Claude hand work to agents of its own, follow them and message them. It's written in Go, uses every session capability, and brings a `reviewer` subagent.
+- [`delegate`](examples/delegate) lets Claude hand work to agents of its own, follow them and message them. It uses every session capability, and brings a `reviewer` subagent.
 
   ```sh
+  cargo build --release -p delegate
   mkdir -p ~/.config/rush/plugins/delegate
-  (cd plugins/examples && go build -o ~/.config/rush/plugins/delegate/delegate ./delegate)
-  cp plugins/examples/delegate/plugin.json ~/.config/rush/plugins/delegate/
+  cp target/release/delegate plugins/examples/delegate/plugin.json ~/.config/rush/plugins/delegate/
   rush plugin approve delegate
   ```
 
@@ -201,4 +201,4 @@ On Apple Silicon, build with `GOARCH=arm64` if `go env GOARCH` says `amd64`: an 
   rush plugin approve memory
   ```
 
-- [`autodrafts`](examples/autodrafts) and [`reconnect`](examples/reconnect) rebuild two of rush's own features with the UI hooks, to show they're enough: `autodrafts` keeps what you typed and didn't send and puts it back (`ui: events, input, notify`; it sees everything you type), and `reconnect` sends `continue` to a session an outage stopped once the network is back, with backoff (`ui: events, send, notify`). rush's built-in drafts and retry stay as they are. Each has its own `go.mod`, uses only the standard library, and says how to install it in its README.
+- [`autodrafts`](examples/autodrafts) and [`reconnect`](examples/reconnect) rebuild two of rush's own features with the UI hooks, to show they're enough: `autodrafts` keeps what you typed and didn't send and puts it back (`ui: events, input, notify`; it sees everything you type), and `reconnect` sends `continue` to a session an outage stopped once the network is back, with backoff (`ui: events, send, notify`). rush's built-in drafts and retry stay as they are. Each says how to install it in its README.

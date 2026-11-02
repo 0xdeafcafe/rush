@@ -17,23 +17,22 @@ It keeps nothing on disk, has no network, and can't start programs.
 
 ## Install
 
-Change `workspaces` in `plugin.json` to where your projects are: it's `~/Source` here. It has its own `go.mod` and uses only the standard library.
+Change `workspaces` in `plugin.json` to where your projects are: it's `~/Source` here. It's a Rust crate in rush's workspace, on rush's plugin crate (`plugins/sdk`), and needs nothing else of rush's. From the top of rush's repository:
 
 ```sh
-cd plugins/examples/reconnect
+cargo build --release -p reconnect   # on Apple Silicon, for arm64: an x86_64 plugin can't start in the sandbox
 mkdir -p ~/.config/rush/plugins/reconnect
-go build -o ~/.config/rush/plugins/reconnect/reconnect .   # GOARCH=arm64 on Apple Silicon if go env GOARCH says amd64
-cp plugin.json ~/.config/rush/plugins/reconnect/
+cp target/release/reconnect plugins/examples/reconnect/plugin.json ~/.config/rush/plugins/reconnect/
 rush plugin check reconnect     # valid, and what approving it allows
 rush plugin approve reconnect
 ```
 
 ## Reading it
 
-- `retry.go` is the state machine, with no I/O and no clock: `Retrier` takes `Stopped`, `Started`, `Down` and `Up`, and `Due` says which sessions to continue or give up on now. `Config.Backoff` is the backoff. `retry_test.go` tests it.
-- `main.go` maps `ui.event`s onto it, and a loop sends `ui.send` and `ui.notify` when something's due.
-- `rpc.go` is the protocol: length-prefixed JSON-RPC on fd 3.
+- `src/retry.rs` is the state machine, with no I/O and no clock: `Retrier` takes `stopped`, `started`, `down` and `up`, and `due` says which sessions to continue or give up on now. `Config::backoff` is the backoff. Its tests are beside it.
+- `src/main.rs` maps `ui.event`s onto it, and a loop sends `ui.send` and `ui.notify` when something's due.
+- The protocol, length-prefixed JSON-RPC on fd 3, is `rush-plugin-sdk`'s.
 
 ```sh
-go test ./...
+cargo test -p reconnect
 ```

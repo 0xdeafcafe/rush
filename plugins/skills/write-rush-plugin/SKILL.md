@@ -20,7 +20,7 @@ Read the reference that fits the task before writing code:
 - `references/manifest.md` — every `plugin.json` field and its limits.
 - `references/sandbox.md` — what the sandbox allows, and what each failure looks like and how to fix it.
 
-Working templates, each tested in the real sandbox: `templates/go`, `templates/python`, `templates/node`. `scripts/call.py` calls a running plugin's tools the way a session would.
+Working templates: `templates/rust`, `templates/python`, `templates/node`. A plugin can be written in any language that can read and write fd 3; these three are ready to copy. `scripts/call.py` calls a running plugin's tools the way a session would.
 
 ## 1. Choose the shape
 
@@ -30,7 +30,7 @@ Working templates, each tested in the real sandbox: `templates/go`, `templates/p
 | Tools of their own, or anything touching agents (list, start, follow, message) | an **rush plugin** (the default protocol): start from a template. |
 | Only prompt text or subagents | Say that a Claude Code plugin or CLAUDE.md may suit better: a rush plugin always runs a program. If they want it in rush anyway, use a template with its tools removed and `"tools": false`. |
 
-Language: Go gives a single static binary that needs nothing else in the sandbox, the most robust choice. Python and Node work through Homebrew's interpreters (see `references/sandbox.md` for others).
+Language: Rust gives one binary that needs nothing else in the sandbox, the most robust choice, and the template is built on rush's own plugin crate (`rush-plugin-sdk`, in rush's repository at `plugins/sdk`): the connection on fd 3, the protocol's shapes, `plugin.json` and the check rush makes of a `sidebar.set`. Python and Node work through Homebrew's interpreters (see `references/sandbox.md` for others). Any other language works too: the protocol is length-prefixed JSON-RPC, nothing more.
 
 ## 2. Ask for as little as possible
 
@@ -51,8 +51,8 @@ Every capability is shown to the user at approval. List only the ones the plugin
 
 ## 3. Scaffold
 
-1. Copy the template for the language into a working folder and rename `notes` to the plugin's name everywhere, including `"name"` in `plugin.json`. The name is lowercase letters, digits and dashes, and must match the folder. Keep the plugin name plus the longest tool name under 51 characters (Claude's 64-character tool-name limit, less `mcp__rush-` and `__`).
-2. Replace the example tools. Keep everything under `--- plumbing: keep as is ---`.
+1. Copy the template for the language into a working folder and rename `notes` to the plugin's name everywhere, including `"name"` in `plugin.json` (and, for Rust, `name` in `Cargo.toml`). The name is lowercase letters, digits and dashes, and must match the folder. Keep the plugin name plus the longest tool name under 51 characters (Claude's 64-character tool-name limit, less `mcp__rush-` and `__`).
+2. Replace the example tools. Keep everything under `--- plumbing: keep as is ---`. For Rust, point the `rush-plugin-sdk` dependency in `Cargo.toml` at GitHub, as its comment says, unless the plugin lives in rush's repository.
 3. Write tool descriptions for Claude: say when to use the tool, not only what it does. Keep results short and textual; errors go back as `isError: true` results Claude can read, not as protocol errors.
 4. Set `"category"` to what it's for, so rush lists it with plugins like it: `messages`, `voice`, `agents`, `code`, `pull-requests`, `machine`, `views`, `memory` or `integrations` (`other` if none fits).
 5. Store state under `$RUSH_PLUGIN_DATA`, which is also `$HOME` and `$TMPDIR`'s parent. It's the only writable place, and it survives updates and re-approvals.
@@ -63,11 +63,13 @@ For an MCP plugin, write only `plugin.json`: see the memory example in `referenc
 
 ```sh
 mkdir -p ~/.config/rush/plugins/<name>
-# Go:     go build -o ~/.config/rush/plugins/<name>/<name> .
+# Rust:   cargo build --release && cp target/release/<name> ~/.config/rush/plugins/<name>/
 # Others: copy the script files
 cp plugin.json ~/.config/rush/plugins/<name>/
 rush plugin check <name>
 ```
+
+On Apple Silicon, build for arm64 (`--target aarch64-apple-darwin` if `rustc -vV` says x86_64): an x86_64 program can't start in the sandbox, which blocks Rosetta.
 
 `rush plugin check` validates the manifest, confirms the program exists, and prints exactly what approval would allow. Fix everything it reports. Read its output back to the user: that's what they'll be agreeing to.
 

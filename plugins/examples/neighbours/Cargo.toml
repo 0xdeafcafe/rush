@@ -1,0 +1,11 @@
+[package]
+name = "neighbours"
+description = "an example rush plugin: tells Claude which other agents are working in the same repository"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rush-plugin-sdk = { path = "../../sdk" }
+serde_json = "1"

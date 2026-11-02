@@ -19,23 +19,22 @@ It keeps what you typed only in its data folder, `~/.config/rush/plugin-data/aut
 
 ## Install
 
-It has its own `go.mod` and uses only the standard library.
+It's a Rust crate in rush's workspace, on rush's plugin crate (`plugins/sdk`), and needs nothing else of rush's. From the top of rush's repository:
 
 ```sh
-cd plugins/examples/autodrafts
+cargo build --release -p autodrafts   # on Apple Silicon, for arm64: an x86_64 plugin can't start in the sandbox
 mkdir -p ~/.config/rush/plugins/autodrafts
-go build -o ~/.config/rush/plugins/autodrafts/autodrafts .   # GOARCH=arm64 on Apple Silicon if go env GOARCH says amd64
-cp plugin.json ~/.config/rush/plugins/autodrafts/
+cp target/release/autodrafts plugins/examples/autodrafts/plugin.json ~/.config/rush/plugins/autodrafts/
 rush plugin check autodrafts     # valid, and what approving it allows
 rush plugin approve autodrafts
 ```
 
 ## Reading it
 
-- `drafts.go` is the logic, with no I/O and no clock: `Book` debounces a box's changes into its autosave (`Changed`, `Settle`), keeps drafts capped per box (`Keep`, `SetKeep`), forgets what was sent (`Sent`), and walks back through them (`Restore`). `drafts_test.go` tests it.
-- `main.go` maps `ui.event`s onto it, answers `ui.command` with `ui.input.set` and `ui.notify`, and writes the file off the goroutine that reads events.
-- `rpc.go` is the protocol: length-prefixed JSON-RPC on fd 3.
+- `src/drafts.rs` is the logic, with no I/O and no clock: `Book` debounces a box's changes into its autosave (`changed`, `settle`), keeps drafts capped per box (`keep`, `set_keep`), forgets what was sent (`sent`), and walks back through them (`restore`). Its tests are beside it.
+- `src/main.rs` maps `ui.event`s onto it, answers `ui.command` with `ui.input.set` and `ui.notify`, and writes the file off the thread that reads events.
+- The protocol, length-prefixed JSON-RPC on fd 3, is `rush-plugin-sdk`'s.
 
 ```sh
-go test ./...
+cargo test -p autodrafts
 ```

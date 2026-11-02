@@ -49,7 +49,7 @@ These values are fixed; the manifest can't change them:
 
 ## Examples
 
-**A rush plugin in Go** (a static binary; the most robust choice):
+**A rush plugin in Rust** (one binary, built on rush's `rush-plugin-sdk` crate; the most robust choice):
 
 ```json
 {

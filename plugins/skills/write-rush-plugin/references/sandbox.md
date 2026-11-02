@@ -29,7 +29,7 @@ Everything else, including:
 
 With `network`, `HTTPS_PROXY` and friends point at an HTTP CONNECT proxy the broker runs for this plugin alone. It tunnels only to the exact `host:port` pairs approved. It resolves the name itself and refuses loopback, private, link-local and CGNAT addresses, so an approved name can't be pointed at the user's machine or network. Plain-HTTP proxying isn't offered; use HTTPS.
 
-Most HTTP clients honour `HTTPS_PROXY`: Go's `net/http`, Python's `urllib` and `requests`, `curl`-based libraries. So does Node 24+ with `NODE_USE_ENV_PROXY=1`, which rush sets; that covers `fetch` and `https`. A client that ignores proxy variables can't connect at all, which is the right failure.
+Most HTTP clients honour `HTTPS_PROXY`: Rust's `reqwest`, Go's `net/http`, Python's `urllib` and `requests`, `curl`-based libraries. So does Node 24+ with `NODE_USE_ENV_PROXY=1`, which rush sets; that covers `fetch` and `https`. A client that ignores proxy variables can't connect at all, which is the right failure.
 
 ## Troubleshooting
 
