@@ -226,6 +226,7 @@ fn suggests_as_you_open_and_the_key_takes_it() {
     );
     assert!(hint.contains("take it"), "{hint}");
     assert!(f.contains("tab: Chat fits"), "{f}");
+    assert!(f.contains("✦ Chat"), "the tab is marked: {f}");
     assert!(quick.asked().is_empty(), "the rules knew");
     press(&mut m, "alt+t");
     assert_eq!(presets::current(&m), Preset::Chat);
