@@ -286,14 +286,14 @@ fn from_the_dock() {
 /// subOfStep, closeSub).
 #[test]
 fn enter_on_a_subagents_step_picks_it() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = model(&d);
-    for sa in conn(&mut m, KEY).runs.subs.iter_mut() {
-        if sa.id == "x" {
-            sa.tool_use_id = "toolu_x".into();
-        }
-    }
     for k in ["enter", "right"] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = model(&d);
+        for sa in conn(&mut m, KEY).runs.subs.iter_mut() {
+            if sa.id == "x" {
+                sa.tool_use_id = "toolu_x".into();
+            }
+        }
         m.session.as_mut().unwrap().sel = "t2:s:toolu_x".into();
         press(&mut m, k);
         assert_eq!(views::view_name(&m, KEY), "subagents", "{k}");
@@ -483,13 +483,9 @@ fn a_runs_branch_is_where_it_worked() {
     let mut m = model(&d);
     let r = &mut conn(&mut m, KEY).runs;
     r.stats.get_mut("x").unwrap().worktree = "perf-memlist".into();
+    views::show_view(&mut m, KEY, "subagents");
     m.session.as_mut().unwrap().sel = "sub:x".into();
-    let got = text(
-        &subview::list(&mut m, KEY, 120, false)
-            .into_iter()
-            .map(|(l, _)| l)
-            .collect::<Vec<_>>(),
-    );
+    let got = text(&views::body(&mut m, 170, 20).unwrap());
     assert!(got.contains("⎇ perf-memlist"), "{got}");
     // A subagent's transcript says only its parent's folder: rush doesn't
     // ask it for one.
@@ -593,6 +589,7 @@ fn a_live_subagent_takes_the_box() {
         conn(&mut m, KEY).watch.msg_focus,
         "tab didn't give the box the keys"
     );
+    let _ = m.frame();
     let hint = crate::sess::state(&mut m).hint.clone().unwrap().plain();
     assert!(hint.starts_with("enter send to the subagent"), "{hint}");
     typed(&mut m, "check the tests too");
@@ -994,6 +991,39 @@ fn working_view(wf: &str, hm: &str) -> String {
 /// The subagents view 90 wide, w picked and working: a short list, then
 /// w under it with the line under its conversation (filled in from a run).
 fn working_narrow(wf: &str, hm: &str) -> String {
-    let _ = (wf, hm);
-    String::new()
+    [
+        "  1 agent and 1 workflow running · 4 runs in all  ·  click one to see it below",
+        "",
+        "  Running  2",
+        "  · ⋔ Port rush to Rust · {wf}   · Port 1/3  ›  · Check      running                 5m",
+        "    · Port  1 of 3 done",
+        "      ✓ port:hl                                               done",
+        "        ▸ 1 earlier try · click to show",
+        "      ✢ port:claude                                           · working…",
+        "      ◌ port:draw    waiting to start",
+        "    · Check  not started",
+        "▍ · check the port's tests                                    · run the tests…       57s",
+        "",
+        "──────────────────────────────────────────────────────────────────────────────────────────",
+        " · check the port's tests                                                     running  57s",
+        "   claude-opus-4-1 · 1 step · $0.02",
+        "──────────────────────────────────────────────────────────────────────────────────────────",
+        "",
+        "▍ You  {hm}",
+        "▍ check the port's tests",
+        "",
+        "▍ Agent  {hm}",
+        "│   ✳ run the tests  cargo test                                          36s since {hm}",
+        "",
+        "▍   · running Bash…  36s  turn 56s",
+        "",
+        "",
+        "",
+        "╭─ to check the port's tests ────────────────────────────────────────────────────────────╮",
+        "│ ❯ the session isn't running in rush · resume it to send                                │",
+        "╰────────────────────────────────────────────────────────────────────────────────────────╯",
+    ]
+    .join("\n")
+    .replace("{wf}", wf)
+    .replace("{hm}", hm)
 }
