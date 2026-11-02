@@ -311,10 +311,16 @@ fn run(args: &[String]) -> i32 {
         // no view holds it, asked every 2 seconds (main.go:252-260).
         rush_ui::lead::follow_while_led(rush_state::instances::led);
     }
+    // rush opened on something (`claude agents <arg>`) doesn't reopen the
+    // agent you were last in: what you asked for wins.
+    let explicit = !args.is_empty();
     // Sessions start, and are sent to, through rush's hosts.
     let setup = |m: &mut rush_ui::Model| {
         let h = hosted::RushHosts::new(reg.clone());
         rush_ui::screens::session_core::host::set_hosts(m, std::sync::Arc::new(h));
+        if explicit {
+            rush_ui::screens::session_core::reopen::opened_explicitly(m);
+        }
     };
     match rush_ui::run_with(&version(), setup) {
         Err(e) => {

@@ -12,12 +12,12 @@
     Keep stopped agents in Active … ‹ 5m           ›
     Keep agents in Just left for    ‹ 120m         ›
     Just left holds at most         ‹ 10           ›
+    Reopen the last agent if close… ‹ 30m          ›
     Clean up done work after        ‹ 3h           ›
-    Orphaned processes              ‹ end          ›
   Hibernate finished agents
 
   A finished agent's process stays in memory (often 300–800 MB) until it is
   off: finished agents stay in memory until you stop them (ctrl+x).
-    1 of 50 ───────────────────────────────────────────────────────────────
+    1 of 51 ───────────────────────────────────────────────────────────────
   enter choose  ·  ? details  ·  ctrl+↑↓ section  ·  [ ] page  ·  esc back
 ────────────────────────────────────────────────────────────────────────────────

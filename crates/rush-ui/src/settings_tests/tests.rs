@@ -622,7 +622,7 @@ fn help_and_section_navigation() {
     press(&mut m, "ctrl+down");
     assert_eq!(
         dialog(&m).cursor,
-        7,
+        8,
         "ctrl+↓ to the second section's first row"
     );
     press(&mut m, "ctrl+up");

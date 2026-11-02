@@ -266,6 +266,37 @@ pub fn sections(m: &Model) -> Vec<Section> {
     );
     just_left_n.unset = "10".into();
 
+    let mut reopen = choice(
+        "Reopen the last agent if closed within",
+        &active_value(c.reopen_minutes),
+        "When rush starts, it opens the agent you were in when you last closed it, if that was this recent and the agent is still in Active or Just left. Opening rush on a session (rush open) wins over this, and a reload or update always comes back where you were.",
+        &[
+            (
+                "",
+                "the agent you were in opens again if rush closed less than half an hour ago.",
+            ),
+            (
+                "5m",
+                "the agent you were in opens again if rush closed less than 5 minutes ago.",
+            ),
+            (
+                "10m",
+                "the agent you were in opens again if rush closed less than 10 minutes ago.",
+            ),
+            (
+                "60m",
+                "the agent you were in opens again if rush closed less than an hour ago.",
+            ),
+            (
+                "240m",
+                "the agent you were in opens again if rush closed less than four hours ago.",
+            ),
+            ("off", "rush always starts on the list."),
+        ],
+        set(|m, v| config_mut(m).reopen_minutes = minutes(v)),
+    );
+    reopen.unset = "30m".into();
+
     let mut cleanup = choice(
         "Clean up done work after",
         &cleanup_value(c.cleanup_hours),
@@ -343,6 +374,7 @@ pub fn sections(m: &Model) -> Vec<Section> {
             active,
             just_left,
             just_left_n,
+            reopen,
             cleanup,
             orphans,
             on_install,

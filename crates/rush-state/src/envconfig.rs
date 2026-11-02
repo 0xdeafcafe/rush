@@ -88,6 +88,7 @@ static FIELDS: &[Field] = fields![
     "activeMinutes" => Int: active_minutes,
     "justLeftMinutes" => Int: just_left_minutes,
     "justLeftCount" => Int: just_left_count,
+    "reopenMinutes" => Int: reopen_minutes,
     "cleanupHours" => Int: cleanup_hours,
     "keepOrphans" => Bool: keep_orphans,
     "restartOnInstall" => Bool: restart_on_install,

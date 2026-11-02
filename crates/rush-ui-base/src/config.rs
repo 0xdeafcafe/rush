@@ -21,6 +21,9 @@ pub struct Config {
     pub active_minutes: i32,
     pub just_left_minutes: i32,
     pub just_left_count: i32,
+    /// Reopen the last agent if rush closed within this many minutes: 0
+    /// is the default (30), negative off.
+    pub reopen_minutes: i32,
     /// No map beside the conversation (state.go:77 HideMinimap).
     pub hide_minimap: bool,
     /// "project" splits the list's sections by project (state.go SplitBy).
@@ -150,6 +153,16 @@ impl Config {
         match self.just_left_minutes {
             n if n < 0 => 0,
             0 => 2 * 3_600_000,
+            n => n as Ms * 60_000,
+        }
+    }
+
+    /// How recently rush must have closed for the next one to open the
+    /// agent it had open again; 0 is off.
+    pub fn reopen_for(&self) -> Ms {
+        match self.reopen_minutes {
+            n if n < 0 => 0,
+            0 => 30 * 60_000,
             n => n as Ms * 60_000,
         }
     }

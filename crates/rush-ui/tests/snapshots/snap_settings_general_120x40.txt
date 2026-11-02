@@ -12,6 +12,7 @@
     Keep stopped agents in Active for        ‹ 5m              ›
     Keep agents in Just left for             ‹ 120m            ›
     Just left holds at most                  ‹ 10              ›
+    Reopen the last agent if closed within   ‹ 30m             ›
     Clean up done work after                 ‹ 3h              ›
     Orphaned processes                       ‹ end             ›
     When rush is installed again             ‹ ask             ›
@@ -33,7 +34,6 @@
 
 
 
-
-    1 of 50 ───────────────────────────────────────────────────────────────────────────────────────────────────────
+    1 of 51 ───────────────────────────────────────────────────────────────────────────────────────────────────────
   enter choose  ·  ? details  ·  ctrl+↑↓ section  ·  [ ] page  ·  esc back
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

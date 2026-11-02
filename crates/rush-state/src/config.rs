@@ -425,6 +425,15 @@ pub struct Config {
         skip_serializing_if = "is_zero_i64"
     )]
     pub just_left_count: i64,
+    /// How recently rush must have closed for the next one to open the
+    /// agent session it had open again; 0 is the default (30), negative
+    /// off.
+    #[serde(
+        rename = "reopenMinutes",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_zero_i64"
+    )]
+    pub reopen_minutes: i64,
     /// How long an agent must have been done and untouched before its
     /// worktree and temp work are removed; 0 is the default, negative off.
     #[serde(

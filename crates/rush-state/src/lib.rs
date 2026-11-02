@@ -22,6 +22,7 @@ pub use rush_core::failure;
 pub mod health;
 pub mod instances;
 pub mod json;
+pub mod lastview;
 pub mod profiles;
 pub mod settingsfile;
 pub mod setup;

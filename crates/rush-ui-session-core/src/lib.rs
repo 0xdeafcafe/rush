@@ -48,6 +48,7 @@ pub use rush_ui_base::paint;
 pub mod livestep;
 pub mod queue;
 pub mod relay;
+pub mod reopen;
 pub mod running;
 pub mod rushcmd;
 pub mod rushmove;
@@ -156,6 +157,8 @@ pub fn register(x: &mut Ext) {
     moveto::register(x);
     x.on_fleet.push(turnwants::on_fleet);
     x.on_fleet.push(finish::on_fleet);
+    // The agent you were in when rush last closed, opened again.
+    reopen::register(x);
     x.status.push(dock::status);
     // Every key and turn of the wheel, first and passed on: a view's
     // suggestion waits while you type or scroll (viewsuggest.rs).

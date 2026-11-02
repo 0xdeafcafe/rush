@@ -190,6 +190,9 @@ fn run_model(
     // unhandled (main.go:283).
     drop(term);
     drop(listed);
+    // Where the view was, for the next rush to open again (not when a
+    // reload is replacing it: that hands its place on itself).
+    screens::session_core::reopen::save_on_close(&mut m);
     // Quitting saves the spend read so far, so the next start needn't
     // read it all again (internal/ui/keys.go:644 quit: sc.Flush()); any
     // command paused goes on, so none is left stopped with nobody to
@@ -228,6 +231,7 @@ pub fn soak(
     m.w = w as usize;
     m.h = h as usize;
     setup(&mut m);
+    screens::session_core::reopen::leave_alone(&mut m);
     worker::spawn_discovery(lp.sender());
     let want = std::env::var("RUSH_RENDER_SELECT").unwrap_or_default();
     let keys = std::env::var("RUSH_RENDER_KEYS").unwrap_or_default();
