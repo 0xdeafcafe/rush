@@ -42,6 +42,11 @@ pub struct ViewState {
     pub view: usize,
     /// The first row in sight of a view drawn whole.
     pub top: usize,
+    /// The pick the wheel (or the page keys) scrolled a view drawn whole
+    /// away from: while it's still the pick, the view stays where it was
+    /// put, the pick out of sight if need be, as the conversation does;
+    /// ↑↓ then pick from the rows in sight.
+    pub free: Option<String>,
     /// The rows of the body as last drawn: how many, and the ref on each.
     pub rows: usize,
     pub refs: Vec<String>,
@@ -122,6 +127,7 @@ pub fn show_view(m: &mut Model, key: &str, name: &str) -> bool {
     let c = conn(m, key);
     c.vs.view = i;
     c.vs.top = 0;
+    c.vs.free = None;
     true
 }
 
@@ -423,6 +429,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
                 (c.vs.view % n + 1) % n
             };
             c.vs.top = 0;
+            c.vs.free = None;
             return Out::Draw;
         }
         "pgup" | "pgdown" => {
@@ -436,7 +443,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
                     v.home(rows);
                 }
             } else {
-                conn(m, &key).vs.top = 0;
+                scroll(m, &key, name, isize::MAX / 2, rows);
             }
             return Out::Draw;
         }
@@ -447,7 +454,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
                     v.sel.clear();
                 }
             } else {
-                conn(m, &key).vs.top = usize::MAX / 2;
+                scroll(m, &key, name, -(isize::MAX / 2), rows);
             }
             return Out::Draw;
         }
@@ -496,42 +503,69 @@ fn scroll(m: &mut Model, key: &str, name: &str, d: isize, rows: usize) {
         }
         return;
     }
+    let sel = picked_ref(m);
     let c = conn(m, key);
-    c.vs.top = (c.vs.top as isize - d).max(0) as usize;
+    let most = c.vs.all_refs.len().saturating_sub(rows);
+    c.vs.top = (c.vs.top as isize).saturating_sub(d).clamp(0, most as isize) as usize;
+    c.vs.free = Some(sel);
+}
+
+/// The row picked in the open Session, "" for none.
+fn picked_ref(m: &Model) -> String {
+    m.session
+        .as_ref()
+        .map(|v| v.sel.clone())
+        .unwrap_or_default()
 }
 
 /// The next row up (d < 0) or down with a ref of its own, in a view
-/// drawn whole (moveSel over bodyRefs).
+/// drawn whole (moveSel over bodyRefs, rushmode.go:4732). With nothing
+/// picked, or the pick scrolled out of sight, ↑ picks the lowest row in
+/// sight, the one by the box, as the conversation does (not the view's
+/// last row, however far below that is); ↓ picks the highest in sight,
+/// or with nothing picked stays in the box.
 fn move_sel(m: &mut Model, key: &str, d: isize) {
-    let refs = conn(m, key).vs.all_refs.clone();
+    let vs = &conn(m, key).vs;
+    let refs = vs.all_refs.clone();
+    let rows = vs.rows.max(1);
+    let top = vs.top.min(refs.len());
     let Some(v) = m.session.as_mut() else {
         return;
     };
+    // A picked run's line of facts goes with its row.
+    fn own(r: &str) -> bool {
+        !r.is_empty() && !r.starts_with(super::subview::OPEN_REF)
+    }
     let mut seen: Vec<&String> = Vec::new();
     for r in &refs {
-        // A picked run's line of facts goes with its row.
-        let facts = r.starts_with(super::subview::OPEN_REF);
-        if !r.is_empty() && !facts && seen.last() != Some(&r) && !seen.contains(&r) {
+        if own(r) && seen.last() != Some(&r) && !seen.contains(&r) {
             seen.push(r);
         }
     }
     if seen.is_empty() {
         return;
     }
-    let at = seen.iter().position(|r| **r == v.sel);
-    // moveSel (rushmode.go:4732): ↓ with nothing picked stays in the box,
-    // ↑ picks the last row, the first row stays the first.
+    let sight = &refs[top..(top + rows).min(refs.len())];
+    let in_sight = !v.sel.is_empty() && sight.contains(&v.sel);
+    let at = seen.iter().position(|r| **r == v.sel).filter(|_| in_sight);
     let next = match (at, d < 0) {
-        (None, true) => seen.len() - 1,
-        (None, false) => return,
-        (Some(i), true) => i.saturating_sub(1),
-        (Some(i), false) if i + 1 < seen.len() => i + 1,
-        (Some(_), false) => {
-            v.sel.clear(); // past the last row: back to the box
-            return;
-        }
+        (None, true) => match sight.iter().rev().find(|r| own(r)) {
+            Some(r) => r.clone(),
+            None => seen[seen.len() - 1].clone(),
+        },
+        (None, false) if v.sel.is_empty() => return,
+        (None, false) => match sight.iter().find(|r| own(r)) {
+            Some(r) => r.clone(),
+            None => return,
+        },
+        (Some(i), true) => seen[i.saturating_sub(1)].clone(),
+        (Some(i), false) if i + 1 < seen.len() => seen[i + 1].clone(),
+        // Past the last row: back to the box.
+        (Some(_), false) => String::new(),
     };
-    v.sel = seen[next].clone();
+    v.sel = next;
+    // The keys moved the pick: the view follows it again.
+    conn(m, key).vs.free = None;
 }
 
 /// Opens url in the browser and says so (browse); with no loop (tests,
@@ -712,10 +746,13 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
         .unwrap_or_default();
     let c = conn(m, &key);
     c.vs.all_refs = all.iter().map(|(_, r)| r.clone()).collect();
-    // The row picked stays in sight, a row of what's above it with it.
+    // The row picked stays in sight, a row of what's above it with it;
+    // not while the wheel has scrolled the view away from it, so rows
+    // coming and going don't pull the view back.
     let n = all.len();
     let most = n.saturating_sub(rows);
-    if let Some(i) = all.iter().position(|(_, r)| !sel.is_empty() && *r == sel) {
+    let free = c.vs.free.as_deref() == Some(sel.as_str());
+    if !free && let Some(i) = all.iter().position(|(_, r)| !sel.is_empty() && *r == sel) {
         if i < c.vs.top {
             c.vs.top = i.saturating_sub(1);
         } else if i >= c.vs.top + rows {
@@ -801,6 +838,9 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
                 scroll(m, &key, name, if up { 3 } else { -3 }, rows);
                 return Out::Draw;
             }
+            // The view moves and the pick stays, out of sight if need be,
+            // as the conversation's wheel leaves its pick.
+            let sel = picked_ref(m);
             let c = conn(m, &key);
             let most = c.vs.all_refs.len().saturating_sub(rows);
             let was = c.vs.top;
@@ -812,6 +852,7 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
             if c.vs.top == was {
                 return Out::Idle;
             }
+            c.vs.free = Some(sel);
             Out::Draw
         }
         // Right-clicking a link in a view drawn whole, as a file on
@@ -854,6 +895,7 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
             let c = conn(m, &key);
             c.vs.view = i;
             c.vs.top = 0;
+            c.vs.free = None;
             Out::Draw
         }
         MouseKind::Moved => {

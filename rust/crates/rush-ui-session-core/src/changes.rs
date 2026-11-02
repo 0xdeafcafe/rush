@@ -575,7 +575,11 @@ pub fn full_key(m: &mut Model, k: &crate::frame::Press) -> Out {
     let empty = conn(m, &key).input.is_empty();
     match s {
         "esc" if empty => {
-            conn(m, &key).vs.full.clear();
+            let c = conn(m, &key);
+            c.vs.full.clear();
+            // Back in the list, the file picked comes into sight however
+            // the full file was scrolled.
+            c.vs.free = None;
             Out::Draw
         }
         "up" | "down" if empty || !sel.is_empty() => {

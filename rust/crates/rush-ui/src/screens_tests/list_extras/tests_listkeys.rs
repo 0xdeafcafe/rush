@@ -211,3 +211,63 @@ fn prompt_edge_has_plugin_notes() {
         "{edge}"
     );
 }
+
+/// The wheel over the list moves its rows and leaves the pick where it
+/// is, out of sight if need be, as the conversation's wheel does; the
+/// list reloading doesn't pull it back to the pick; ↓ brings the list
+/// back to the pick and moves it on.
+#[test]
+fn the_wheel_scrolls_the_list_not_the_pick() {
+    use crate::frame::Mouse;
+    use rush_draw::MouseKind;
+    let agents = (0..40)
+        .map(|i| {
+            agent(
+                &format!("w{i:02}"),
+                &format!("working on part {i}"),
+                State::Working,
+                300 + i,
+            )
+        })
+        .collect();
+    let mut m = model_of(agents, 120, 20);
+    let first = m
+        .items()
+        .into_iter()
+        .find(|k| !k.starts_with('§'))
+        .expect("an agent's row");
+    m.sel = first.clone();
+    screen(&mut m);
+    assert_eq!(m.scroll, 0);
+    assert!(m.scroll_most > 10, "the list fits: {}", m.scroll_most);
+    assert!(!m.wheel(true), "at the top the wheel moves nothing");
+    let wheel = |m: &mut Model, kind: MouseKind| {
+        let y = (m.list_top + 2) as u16;
+        m.mouse_event(&Mouse {
+            kind,
+            x: 4,
+            y,
+            mods: Default::default(),
+        });
+    };
+    for _ in 0..4 {
+        wheel(&mut m, MouseKind::ScrollDown);
+    }
+    screen(&mut m);
+    assert_eq!(m.sel, first, "the wheel moved the pick");
+    let at = m.scroll;
+    assert!(at >= 11, "the wheel didn't move the rows: {at}");
+    assert!(!m.row_keys.contains(&first), "the list came back to the pick");
+    // A reload keeps the rows where the wheel put them.
+    m.rebuild();
+    screen(&mut m);
+    assert_eq!(m.scroll, at, "the reload pulled the list back");
+    wheel(&mut m, MouseKind::ScrollUp);
+    screen(&mut m);
+    assert!(m.scroll < at && m.scroll > 0, "{}", m.scroll);
+    // ↓ moves the pick on, and the list comes back to it.
+    press(&mut m, "down");
+    screen(&mut m);
+    assert_ne!(m.sel, first);
+    assert!(m.row_keys.contains(&m.sel), "the pick is out of sight");
+}
