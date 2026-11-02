@@ -78,6 +78,9 @@ pub struct Model {
     pub version: String,
     /// A fixed clock, for tests; None reads the real one.
     pub clock: Option<Ms>,
+    /// The same for the loop's deadlines: when a frame is drawn, for a
+    /// test stepping through time (Model::wake_on); None is now.
+    pub instant: Option<Instant>,
     /// What rush last said on the line under the box, when, and whether
     /// it was a failure, which stays till a key (frame/messages.rs).
     pub flash: Option<(String, Ms, bool)>,
@@ -215,6 +218,7 @@ impl Model {
             launch_dir: std::env::var("PWD").unwrap_or_default(),
             version: version.to_string(),
             clock: None,
+            instant: None,
             flash: None,
             said: Vec::new(),
             quit_armed: 0,
@@ -1849,7 +1853,7 @@ impl App<Note> for Model {
             f(self);
         }
         self.title = self.make_title();
-        let drawn = Instant::now();
+        let drawn = self.instant.unwrap_or_else(Instant::now);
         self.hold.drew(drawn);
         // A few ms past the turn, so the clock has passed it.
         self.turn = crate::style::take_turn()
@@ -1919,6 +1923,21 @@ impl Model {
             };
         }
         self.wake_draw(now_i)
+    }
+
+    /// What each of the loop's deadlines is (App::wake_at's parts), by
+    /// name, and whether a spinner turns: for a test to say what wakes.
+    #[doc(hidden)]
+    pub fn deadlines(&self) -> Vec<(&'static str, Option<Instant>)> {
+        vec![
+            ("draw", self.draw_at()),
+            ("turn", self.turn),
+            ("regroup", self.regroup),
+            ("timer", self.timer_due()),
+            ("chore", crate::chores::due_at(self)),
+            ("spinner", self.spinning.then_some(self.ticked)),
+            ("asked", self.wake),
+        ]
     }
 
     /// What a key asked for is in, landed from the background: its frame

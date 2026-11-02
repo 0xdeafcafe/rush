@@ -52,21 +52,37 @@ fn an_idle_view_keeps_few_threads_and_sleeps() {
     let threads = rush_sys::threads::count().saturating_sub(before);
 
     // An idle minute: the loop woken only at the deadlines the model
-    // asks for, each run as the loop runs it.
+    // asks for, each run as the loop runs it, both clocks the model
+    // reads moved to the deadline's time.
     let from = Instant::now();
+    let wall = rush_core::time::now();
     let until = from + Duration::from_secs(60);
     let (mut wakes, mut frames) = (0, 0);
+    let mut why: Vec<&str> = Vec::new();
     while let Some(at) = App::<Note>::wake_at(&m) {
         if at > until || wakes > 1000 {
             break;
         }
+        let at = at.max(from);
         wakes += 1;
-        if m.wake_on(at.max(from)) == Step::Draw {
+        if let Some((name, _)) = m
+            .deadlines()
+            .into_iter()
+            .find(|(_, t)| t.is_some_and(|t| t.max(from) <= at))
+        {
+            why.push(name);
+        }
+        m.instant = Some(at);
+        m.clock = Some(wall + at.duration_since(from).as_millis() as i64);
+        if m.wake_on(at) == Step::Draw {
             frames += 1;
             hd.draw(|c| App::<Note>::draw(&mut m, c));
         }
     }
-    let said = format!("threads {threads}, an idle minute: {wakes} wakes, {frames} frames");
+    let said = format!(
+        "threads {threads}, an idle minute: {wakes} wakes ({why:?}), {frames} frames\n{}",
+        hd.plain()
+    );
     assert!(threads <= THREADS, "{said}");
     assert!(wakes <= WAKES, "{said}");
     assert_eq!(frames, 0, "{said}");
