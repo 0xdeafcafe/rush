@@ -41,7 +41,7 @@ use rush_convo::{Decode, Session, history_from, history_start};
 use rush_core::adapter::{self, AdapterRef, Profile, Registry, migrated};
 use rush_core::time::Ms;
 
-use super::host::{Link, Said, hosts};
+use super::host::{Link, Said, Unreached, hosts};
 use super::{Core, agent, conn, core, open_key, queue};
 use crate::frame::Out;
 use crate::model::Model;
@@ -116,7 +116,7 @@ pub fn sync(m: &mut Model) {
             if let Some(i) = h.saved(&a).filter(|i| i.sleeping) {
                 return Err(Dial::Asleep(Box::new(i)));
             }
-            let link = h.dial(&a).map_err(Dial::Failed)?;
+            let link = h.open(&a).map_err(Dial::Unreached)?;
             rush_draw::perf_note(|| "live dialled".into());
             // Read once it's reached: what came before its replay.
             let mut pre = read_pre(&reg, &a, rush_core::time::now());
@@ -129,7 +129,31 @@ pub fn sync(m: &mut Model) {
         },
         move |m, r: Result<Dialed, Dial>| match r {
             Ok((l, pre)) => opened_with(m, &key, Ok(l), pre),
-            Err(Dial::Failed(e)) => opened_with(m, &key, Err(e), None),
+            Err(Dial::Unreached(Unreached::Stopped(info))) => {
+                // Its host had gone, its socket left behind: a stopped
+                // session, shown as read_saved shows one. Not dialled
+                // again until another process runs it.
+                let c = conn(m, &key);
+                c.dialing = false;
+                if c.link.is_some() {
+                    return Out::Idle;
+                }
+                c.unreached.clear();
+                let Some(info) = info else {
+                    return Out::Draw;
+                };
+                c.sleeping = info.sleeping;
+                if let Some(v) = view_of(m, &key) {
+                    take_info(&mut v.sess.info, &info);
+                }
+                conn(m, &key).info = *info;
+                Out::Draw
+            }
+            Err(Dial::Unreached(Unreached::Silent(e))) => {
+                conn(m, &key).dialing = false;
+                unreached(m, &key, "not-answering", &e)
+            }
+            Err(Dial::Unreached(Unreached::Failed(e))) => opened_with(m, &key, Err(e), None),
             Err(Dial::Asleep(info)) => {
                 let c = conn(m, &key);
                 c.dialing = false;
@@ -349,14 +373,9 @@ fn open_link(
     conn(m, key).dialing = false;
     let link = match r {
         Ok(l) => l,
-        Err(e) => {
-            // Dialled again at the next reading, as Go's syncHost does
-            // once onHostOpen has cleared hostOpening.
-            conn(m, key).dialed_pid = 0;
-            m.fail(&format!("couldn't open the session: {e}"));
-            return Out::Draw;
-        }
+        Err(e) => return unreached(m, key, "failed", &e),
     };
+    conn(m, key).unreached.clear();
     // Woken, it's the same connection (carryHostView keeps backShown);
     // dialled afresh, an away that ended opens its back sheet again.
     let c = conn(m, key);
@@ -437,6 +456,45 @@ fn open_link(
         );
     }
     Out::Draw
+}
+
+/// Session key's host couldn't be opened, for reason (a word) with raw
+/// error err: said in plain words where the session is, the raw error
+/// logged (session-open-failed) for `rush why`. Dialled again at the
+/// next reading, as Go's syncHost does once onHostOpen has cleared
+/// hostOpening; said and logged once until it's reached or fails some
+/// other way. Rust-only: Go said "couldn't open the session: <error>"
+/// on the line under the box, whatever was open.
+fn unreached(m: &mut Model, key: &str, reason: &str, err: &str) -> Out {
+    conn(m, key).dialed_pid = 0;
+    let Some(a) = agent(m, key).cloned() else {
+        return Out::Draw;
+    };
+    let say = unreached_words(&crate::style::one_line(&a.display_name), &a.job.id, reason);
+    let c = conn(m, key);
+    if c.unreached == say {
+        return Out::Draw;
+    }
+    c.unreached = say.clone();
+    hosts(m).open_failed(&a, reason, err);
+    // On the line under the box only when it's this session's box;
+    // otherwise on the session itself (the pane says it) and in #log.
+    if open_key(m).as_deref() == Some(key) {
+        m.fail(&say);
+    } else {
+        m.noted(&say);
+    }
+    Out::Draw
+}
+
+/// What's said when agent name's host (session id) couldn't be opened,
+/// for reason.
+pub fn unreached_words(name: &str, id: &str, reason: &str) -> String {
+    if reason == "not-answering" {
+        format!("couldn't reach {name}: its host is running but not answering. rush keeps trying")
+    } else {
+        format!("couldn't reach {name}'s host. rush why {id} has the error")
+    }
 }
 
 /// Reads the paths session key's rewinds left, off the UI thread, for
@@ -531,7 +589,7 @@ fn apply_said(s: &mut Session, said: Said, now: &mut Ms, model: &mut String) {
 /// Why a host wasn't reached: asleep (its saved info), or the dial failed.
 enum Dial {
     Asleep(Box<super::host::Info>),
-    Failed(String),
+    Unreached(Unreached),
 }
 
 /// A host reached, and what its conversation held before its replay.

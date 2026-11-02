@@ -805,7 +805,21 @@ through `Hosts::start` off the UI thread; once the list has it, it's
 picked and opened. A session rush hosts with nothing on disk yet opens
 as `Source::Hosted` and its host's link fills it. A host that sleeps
 lets its socket go, the conversation stays, and a message wakes it
-(`Hosts::wake`); a stopped one resumes. A send without a view
+(`Hosts::wake`); a stopped one resumes. Showing a live session opens
+its host through `Hosts::open` (rush-host's `open::open`, Rust-only): a
+refused or missing socket is read against the host's info first. A host
+that has gone (stopped, asleep, or ended without tidying, its socket
+left behind and refusing every dial) is a stopped session, shown from
+its transcript with nothing said; its leftover socket is removed
+(`host-socket-removed`) unless a start holds its wake lock. A host still
+starting is waited for up to 5 s, its folder and its exit watched. Only
+a host that runs and doesn't answer, or a dial failing some other way,
+is a failure: said once, in plain words, where the session is (under
+its own box when it's open; on the pane beside the list, and in #log,
+when the list has the keys), and logged as `session-open-failed` with
+its reason and the raw error, so `rush why` shows it. Go said
+"couldn't open the session: <error>" under whatever box had the keys,
+again at every reading. A send without a view
 (`Hosts::send_to`: a spawned agent from its parent's view) waits for its
 echo before letting the connection go. The host keeps a gone client's
 unread ops either way: a writer whose write fails shuts its own side only,

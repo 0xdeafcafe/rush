@@ -465,6 +465,18 @@ pub struct Spawned {
     pub beside: bool,
 }
 
+/// Why a session's host couldn't be opened (Hosts::open).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Unreached {
+    /// Its host has gone: a stopped session, shown from its transcript,
+    /// its info as the host left it.
+    Stopped(Option<Box<Info>>),
+    /// Its host runs but didn't answer: the raw error.
+    Silent(String),
+    /// The dial failed some other way: the raw error.
+    Failed(String),
+}
+
 /// Who the session's messages go to: rush's hosts, and the daemons of
 /// agents rush doesn't run.
 pub trait Hosts: Send + Sync {
@@ -472,6 +484,15 @@ pub trait Hosts: Send + Sync {
     fn hosts(&self, a: &Agent) -> bool;
     /// A connection to a's host. Waits: run off the UI thread.
     fn dial(&self, a: &Agent) -> Result<Arc<dyn Link>, String>;
+    /// Opens a's host to show its session: dial, with a host that has
+    /// gone told apart from one that failed to answer (Unreached). Waits:
+    /// run off the UI thread.
+    fn open(&self, a: &Agent) -> Result<Arc<dyn Link>, Unreached> {
+        self.dial(a).map_err(Unreached::Failed)
+    }
+    /// Logs that opening a's host failed (session-open-failed): why, in
+    /// a word, and the raw error, for `rush why`. Never waits.
+    fn open_failed(&self, _a: &Agent, _reason: &str, _err: &str) {}
     /// Sends text to a session rush doesn't run, through its agent's own
     /// daemon (replyOutside). Waits.
     fn reply(&self, a: &Agent, text: &str) -> Result<(), SendErr>;
@@ -804,6 +825,13 @@ pub struct Fake {
     pub dials: Mutex<usize>,
     /// Its host is down: dialling it fails.
     pub down: Mutex<bool>,
+    /// Opening finds its host gone, its socket left behind: a stopped
+    /// session.
+    pub stale: Mutex<bool>,
+    /// Opening finds its host running but not answering, with this error.
+    pub silent: Mutex<Option<String>>,
+    /// Opens that failed, as logged: (key, reason, error).
+    pub open_failures: Mutex<Vec<(String, String, String)>>,
     /// Sessions started, in order; each is started as fake-<n>.
     pub starts: Mutex<Vec<Start>>,
     /// Agents by key whose host sleeps.
@@ -910,6 +938,25 @@ impl Hosts for Arc<Fake> {
             return Err(e);
         }
         Ok(Arc::new(FakeLink(self.clone())))
+    }
+    fn open(&self, a: &Agent) -> Result<Arc<dyn Link>, Unreached> {
+        if *self.stale.lock().unwrap() {
+            *self.dials.lock().unwrap() += 1;
+            let saved = self.saved.lock().unwrap();
+            let i = saved.iter().find(|(k, _)| *k == a.key).map(|(_, i)| i);
+            return Err(Unreached::Stopped(i.cloned().map(Box::new)));
+        }
+        if let Some(e) = self.silent.lock().unwrap().clone() {
+            *self.dials.lock().unwrap() += 1;
+            return Err(Unreached::Silent(e));
+        }
+        self.dial(a).map_err(Unreached::Failed)
+    }
+    fn open_failed(&self, a: &Agent, reason: &str, err: &str) {
+        self.open_failures
+            .lock()
+            .unwrap()
+            .push((a.key.clone(), reason.into(), err.into()));
     }
     fn reply(&self, a: &Agent, text: &str) -> Result<(), SendErr> {
         if std::mem::take(&mut *self.gone.lock().unwrap()) {

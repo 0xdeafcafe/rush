@@ -49,6 +49,9 @@ pub struct ConnCore {
     /// The process last dialled: a host gone is dialled again only once
     /// another runs it.
     pub dialed_pid: i32,
+    /// Why its host couldn't be opened, in plain words, shown where the
+    /// session is; "" once reached (live.rs unreached).
+    pub unreached: String,
     /// The host's queue and state.
     pub info: Info,
     /// The message box.

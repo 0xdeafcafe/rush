@@ -504,17 +504,32 @@ fn connecting(m: &mut Model, v: &session::SessionView, w: usize, rows: usize) ->
     }
     let a = m.agents.iter().find(|a| a.key == v.key)?;
     let name = one_line(&a.display_name);
-    let say = if a.pid == 0 {
-        format!("  {name} isn't running, and has no conversation to show yet")
-    } else {
-        format!("  connecting to {name}…")
-    };
+    let pid = a.pid;
     let c = crate::sess::conn(m, &v.key);
     if c.link.is_some() {
         return None;
     }
+    // Dialled and found gone (its socket left behind), it's a stopped
+    // one; one that failed to open says so here, where it's looked at.
+    let gone = !c.dialing && c.dialed_pid == pid;
+    let (say, bad) = if !c.unreached.is_empty() {
+        (c.unreached.clone(), true)
+    } else if pid == 0 || gone {
+        (
+            format!("{name} isn't running, and has no conversation to show yet"),
+            false,
+        )
+    } else {
+        (format!("connecting to {name}…"), false)
+    };
     let inner = w.saturating_sub(3);
-    let body = [Line::new(), line([sp(say, DIM)])];
+    let mut body = vec![Line::new()];
+    let (said, tone) = if bad {
+        (wrap(&say, inner.saturating_sub(2)), RED)
+    } else {
+        (vec![say], DIM)
+    };
+    body.extend(said.into_iter().map(|l| line([sp(format!("  {l}"), tone)])));
     let mut out = Vec::with_capacity(rows);
     for i in 0..rows {
         let mid = fit(body.get(i).cloned().unwrap_or_default(), inner);
