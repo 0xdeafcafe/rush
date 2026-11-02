@@ -52,6 +52,7 @@ fn ctx<'a>(s: &'a Session, r: &'a Runs, reg: &'a Registry, sel: &'a str) -> Ctx<
         now: NOW,
         idle_box: true,
         queued: &|_| 0,
+        cache_kept: &|_| None,
     }
 }
 
@@ -111,6 +112,49 @@ fn subagent_dock() {
     // Picked, space shows it in Subagents.
     let (out, _) = preview(&s, &mut r, "run:a1", 100);
     assert!(out.contains("space see it in Subagents"), "{out}");
+}
+
+/// A subagent whose long call rush moved to keep its prompt cache says so
+/// on its row, quietly, after what it did; another says nothing of it.
+#[test]
+fn subagent_dock_says_its_cache_was_kept() {
+    let s = Session::new();
+    let sub = |id: &str, call: &str| Subagent {
+        id: id.into(),
+        typ: "Explore".into(),
+        description: format!("run {id}"),
+        tool_use_id: call.into(),
+        path: format!("/x/agent-{id}.jsonl"),
+        modified: NOW,
+        ..Subagent::default()
+    };
+    let mut r = Runs {
+        subs: vec![sub("a1", "tu-a1"), sub("a2", "tu-a2")],
+        follow: follower(),
+        ..Runs::default()
+    };
+    r.stats.insert("a1".into(), stat_of(&DOCK_LINES, &[]));
+    r.stats.insert("a2".into(), stat_of(&DOCK_LINES, &[]));
+    let running = r.running(&s, NOW);
+    let dock = r.dock_subs(&s, &running, NOW);
+    let reg = Registry::new();
+    let kept =
+        |call: &str| (call == "tu-a1").then(|| "moved to background to keep its cache".to_string());
+    let mut c = ctx(&s, &r, &reg, "");
+    c.cache_kept = &kept;
+    let (rows, _) = running_preview(&c, &dock, &[], &[], 0, 160);
+    let rows: Vec<String> = rows.iter().map(|l| l.plain()).collect();
+    let row = |id: &str| {
+        rows.iter()
+            .find(|l| l.contains(&format!("run {id}")))
+            .cloned()
+            .unwrap_or_else(|| panic!("no row for {id} in {rows:?}"))
+    };
+    assert!(
+        row("a1").contains("‹ moved to background to keep its cache"),
+        "{rows:?}"
+    );
+    assert!(!row("a2").contains("keep its cache"), "{rows:?}");
 }
 
 /// Runs show newest first, five at a time, and the pick stays put as

@@ -229,6 +229,10 @@ pub struct Info {
     /// When the prompt cache its last request wrote expires; 0 unknown
     /// (Info.CacheWarm).
     pub cache_warm: Ms,
+    /// What rush did to keep a working subagent's prompt cache, by the
+    /// call that started the subagent, while it runs (Info.SubKept,
+    /// Rust-only): its row says so.
+    pub sub_kept: std::collections::BTreeMap<String, String>,
     /// Set while it's away or looping, or an away has just ended
     /// (Info.Away).
     pub away: Option<Box<crate::away::Away>>,

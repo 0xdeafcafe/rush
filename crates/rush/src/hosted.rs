@@ -1080,6 +1080,7 @@ fn info(i: &rush_host::Info) -> Info {
             proof: r.proof,
         }),
         cache_warm: ms(i.cache_warm),
+        sub_kept: i.sub_kept.clone(),
         now: Box::new(Now {
             effort: i.effort.clone(),
             without: i.without.clone(),

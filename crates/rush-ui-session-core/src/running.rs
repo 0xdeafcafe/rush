@@ -134,6 +134,9 @@ pub struct Ctx<'a> {
     pub idle_box: bool,
     /// How many messages wait for each run, by its id.
     pub queued: &'a dyn Fn(&str) -> usize,
+    /// What rush did to keep a subagent's prompt cache, by the call that
+    /// started it, as its host says (Info.sub_kept).
+    pub cache_kept: &'a dyn Fn(&str) -> Option<String>,
 }
 
 impl Ctx<'_> {
@@ -272,6 +275,9 @@ pub fn running_preview(
                 if trail.spans.is_empty() && !st.last_words.is_empty() {
                     trail.spans.push(dim(format!("  ‹ {}", st.last_words)));
                 }
+                if let Some(k) = kept_note(c, sa) {
+                    trail.spans.push(dim(format!("  ‹ {k}")));
+                }
                 if st.steps > 0 {
                     facts.push(plural(st.steps, "step"));
                 }
@@ -399,6 +405,14 @@ pub struct Block {
     pub refs: Vec<String>,
 }
 
+/// What rush did to keep subagent sa's prompt cache, as its host says.
+fn kept_note(c: &Ctx, sa: &Subagent) -> Option<String> {
+    if sa.tool_use_id.is_empty() {
+        return None;
+    }
+    (c.cache_kept)(&sa.tool_use_id)
+}
+
 /// The dock's running blocks for session key, rows w wide: the
 /// subagents' (blue-violet edge) and the loose tasks' (orange), unless
 /// they show at the top of the views panel (paneDock :3488-3494).
@@ -435,6 +449,8 @@ pub fn blocks(m: &mut Model, key: &str, w: usize, in_panel: bool) -> Vec<Block> 
         })
         .collect();
     let queued = |id: &str| qs.get(id).copied().unwrap_or(0);
+    let sub_kept = conn(m, key).info.sub_kept.clone();
+    let cache_kept = |call: &str| sub_kept.get(call).cloned();
     let Model { session, kept, .. } = m;
     let Some(v) = session.as_ref().filter(|v| v.key == key) else {
         return Vec::new();
@@ -456,6 +472,7 @@ pub fn blocks(m: &mut Model, key: &str, w: usize, in_panel: bool) -> Vec<Block> 
         now,
         idle_box,
         queued: &queued,
+        cache_kept: &cache_kept,
     };
     let mut out = Vec::new();
     if shown.runs() {
@@ -559,6 +576,7 @@ pub fn background_lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String
         .or_default()
         .runs;
     let no_queue = |_: &str| 0;
+    let no_kept = |_: &str| None;
     let ctx = Ctx {
         s: &v.sess,
         r,
@@ -570,6 +588,7 @@ pub fn background_lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String
         now,
         idle_box: false,
         queued: &no_queue,
+        cache_kept: &no_kept,
     };
     let is_open = |r: &str| open.get(r).copied().unwrap_or(false);
     let spawned = |j: &Job| spawn_job(r, j);
