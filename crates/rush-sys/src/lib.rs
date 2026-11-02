@@ -10,7 +10,8 @@
 //! build in place, files kept open across the exec (`reexec`). Which agent programs have
 //! a newer version out is rush-harnessup's, so that users of these don't
 //! build a TLS stack. How many threads this process runs, and starting
-//! one with a stack sized to its work (`threads`).
+//! one with a stack sized to its work (`threads`); waiting for many
+//! children on one thread (`reap`).
 //!
 //! Ported from the Go packages of the same names under `internal/`.
 
@@ -24,6 +25,7 @@ pub mod mem;
 pub mod pgguard;
 pub mod proc;
 pub mod qos;
+pub mod reap;
 pub mod reexec;
 pub mod script;
 pub mod selfexe;
