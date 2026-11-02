@@ -18,8 +18,15 @@ use super::blocks::{BlockCtx, view_block};
 use super::*;
 
 /// How wide the panel is beside a conversation w wide, 0 when the
-/// conversation would be left too narrow (viewsWidth).
+/// conversation would be left too narrow (viewsWidth). Where rush's own
+/// column stands beside the conversation (side_width), the panel is
+/// exactly as wide, so the text doesn't move when one gives way to the
+/// other; narrower, where there's no column, it is 3/8 of the room.
 pub fn views_width(w: usize) -> usize {
+    let col = crate::sidecol::side_width(w);
+    if col > 0 {
+        return col;
+    }
     let side = 64.min(42.max(w * 3 / 8));
     if w < side + 72 {
         return 0;

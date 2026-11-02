@@ -35,6 +35,10 @@ pub fn subs_in_panel(any: bool, st: &ViewsState, side: usize, width: usize) -> b
     any
 }
 
+/// The cells between the conversation's text and the column, or the panel
+/// standing in its place, and past it on the right (the column's x).
+const VIEWS_GAP: usize = 2;
+
 /// The session's views and past views shown beside a conversation w
 /// wide, and how much of w they take: 0 when there are none or no room,
 /// a slim strip when they're folded or only past (viewsBeside). It
@@ -53,6 +57,9 @@ pub fn views_beside(m: &mut Model, key: &str, w: usize) -> (Vec<View>, Vec<View>
         return (side, past, 0);
     }
     let mut width = views_width(w);
+    if width > VIEWS_STRIP && side_width(w) > 0 {
+        width += VIEWS_GAP; // the room the column leaves right of its text
+    }
     if width > 0 && read::state(m, key).folded(&side) {
         width = VIEWS_STRIP;
         if side_width(w) > 0 {
@@ -80,6 +87,14 @@ pub fn paste(
     top: usize,
 ) {
     let now = m.now;
+    // Beside a wide conversation the panel stands where the column does,
+    // as wide, the same gap left of it: the column's two spare cells go
+    // blank on its right.
+    let w = if w > VIEWS_STRIP && side_width(cw + w) > 0 {
+        w - VIEWS_GAP
+    } else {
+        w
+    };
     let mut st = std::mem::take(read::state(m, key));
     st.w = w;
     st.live.clear();

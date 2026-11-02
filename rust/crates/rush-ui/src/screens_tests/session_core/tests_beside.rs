@@ -325,3 +325,28 @@ fn list_says_the_views_summary() {
         "the second line: {l:?}"
     );
 }
+
+/// Rush's own column and the agent's views stand in the same place and
+/// are as wide, so the conversation doesn't move when one gives way to
+/// the other.
+#[test]
+fn the_column_and_the_views_are_one_width() {
+    for (i, w) in [200usize, 240, 300].into_iter().enumerate() {
+        let mut m = rush_open(&format!("vb-same-a{i}"), w, 40, Vec::new());
+        screen(&mut m);
+        let col = {
+            let side = &conn(&mut m, KEY).side;
+            (side.x, side.w)
+        };
+        assert!(col.1 > 0, "{w}: no column");
+        let mut m = rush_open(
+            &format!("vb-same-b{i}"),
+            w,
+            40,
+            vec![view("prs", "Pull requests", "3 ready")],
+        );
+        screen(&mut m);
+        let (x, _, pw, _) = panel(&m);
+        assert_eq!((x, pw), col, "{w}: the views stand where the column does");
+    }
+}
