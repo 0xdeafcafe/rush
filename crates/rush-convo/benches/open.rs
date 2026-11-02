@@ -5,7 +5,8 @@
 //! allocated, about 22 MiB retained.
 //!
 //! `cargo bench -p rush-convo --bench open`; RUSH_BENCH_TRANSCRIPT=<file>
-//! picks the transcript.
+//! picks the transcript. RUSH_BENCH_OUT=<file> also writes the counts
+//! there, a line each, for CI's footprint job (tools/footprint).
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::path::{Path, PathBuf};
@@ -184,6 +185,22 @@ impl std::fmt::Display for Parts {
     }
 }
 
+/// Appends a number to $RUSH_BENCH_OUT as `name<TAB>kind<TAB>value`, for
+/// CI's footprint job (tools/footprint/measure.py reads it).
+fn record(name: &str, kind: &str, v: usize) {
+    use std::io::Write;
+    let Some(p) = std::env::var_os("RUSH_BENCH_OUT") else {
+        return;
+    };
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(p)
+    {
+        let _ = writeln!(f, "{name}\t{kind}\t{v}");
+    }
+}
+
 fn report(name: &str, runs: &[Run]) {
     let mut ms: Vec<f64> = runs.iter().map(|r| r.ms).collect();
     ms.sort_by(f64::total_cmp);
@@ -198,6 +215,12 @@ fn report(name: &str, runs: &[Run]) {
         r.retained as f64 / MIB,
         r.live,
     );
+    let name = name.trim_end_matches(", read");
+    record(&format!("open {name}: allocated"), "bytes", r.total);
+    record(&format!("open {name}: allocations made"), "allocs", r.made);
+    record(&format!("open {name}: peak"), "heap", r.peak);
+    record(&format!("open {name}: retained"), "heap", r.retained);
+    record(&format!("open {name}: allocations kept"), "allocs", r.live);
 }
 
 fn main() {
@@ -350,6 +373,7 @@ fn main() {
             held as f64 / MIB,
         );
         drop(read);
+        record("open: its subagent runs, retained", "heap", held);
         // As the reader follows them now (rush-ui-session-core subs.rs
         // follow_run): each read whole, one at a time, and let go once
         // quiet, keeping its numbers (here its words, near enough) and
@@ -397,16 +421,34 @@ fn main() {
                 Box::new((t.size(), words, Box::<[u64]>::from(ids)))
             })
             .collect();
+        let (held, live, peak, made) = (
+            NOW.load(Relaxed).saturating_sub(base),
+            LIVE.load(Relaxed).saturating_sub(live0),
+            PEAK.load(Relaxed).saturating_sub(base),
+            MADE.load(Relaxed) - made0,
+        );
         println!(
             "followed as the reader keeps them: {} of {} read on, retain {:.2} MiB in {} allocations (peak {:.1} MiB, {} allocations made)",
             on,
             kept.len(),
-            NOW.load(Relaxed).saturating_sub(base) as f64 / MIB,
-            LIVE.load(Relaxed).saturating_sub(live0),
-            PEAK.load(Relaxed).saturating_sub(base) as f64 / MIB,
-            MADE.load(Relaxed) - made0,
+            held as f64 / MIB,
+            live,
+            peak as f64 / MIB,
+            made,
         );
         drop(kept);
+        record("open: subagent runs followed, retained", "heap", held);
+        record(
+            "open: subagent runs followed, allocations kept",
+            "allocs",
+            live,
+        );
+        record("open: subagent runs followed, peak", "heap", peak);
+        record(
+            "open: subagent runs followed, allocations made",
+            "allocs",
+            made,
+        );
     }
     // A reader that keeps a session read on copies it when the UI still
     // holds the last one (Arc::make_mut), rather than reading it again.

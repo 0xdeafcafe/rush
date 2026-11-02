@@ -6,7 +6,9 @@
 //! in view. Time per frame, bytes allocated per frame by a counting
 //! allocator, and the rows kept in memory.
 //!
-//! `cargo bench -p rush-convo --bench render`
+//! `cargo bench -p rush-convo --bench render`; RUSH_BENCH_OUT=<file> also
+//! writes the bytes and allocations per frame there, a line each, for CI's
+//! footprint job (tools/footprint).
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
@@ -73,6 +75,38 @@ fn report(name: &str, (us, bytes, allocs): (f64, usize, usize)) {
         "{name:<34} {us:>10.1} µs {:>10.1} KiB/op {allocs:>8} allocs/op",
         bytes as f64 / 1024.0
     );
+    let at = WHAT.with(|w| w.borrow().clone());
+    record(&format!("render {at}: {name}, bytes"), "bytes", bytes);
+    record(
+        &format!("render {at}: {name}, allocations"),
+        "allocs",
+        allocs,
+    );
+}
+
+thread_local! {
+    /// What's being drawn, for the names RUSH_BENCH_OUT gets.
+    static WHAT: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+fn drawing(what: String) {
+    WHAT.with(|w| *w.borrow_mut() = what);
+}
+
+/// Appends a number to $RUSH_BENCH_OUT as `name<TAB>kind<TAB>value`, for
+/// CI's footprint job (tools/footprint/measure.py reads it).
+fn record(name: &str, kind: &str, v: usize) {
+    use std::io::Write;
+    let Some(p) = std::env::var_os("RUSH_BENCH_OUT") else {
+        return;
+    };
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(p)
+    {
+        let _ = writeln!(f, "{name}\t{kind}\t{v}");
+    }
 }
 
 fn opts(w: usize) -> Options {
@@ -87,6 +121,7 @@ fn run(turns: usize, w: usize) {
     let s = bench_session(turns);
     let o = opts(w);
     println!("— {turns} turns, w{w}");
+    drawing(format!("{turns} turns w{w}"));
     // Cold: every turn laid out once, as a first scroll to the top needs.
     let mut n = 0;
     report(
@@ -201,6 +236,7 @@ fn presets(turns: usize, w: usize) {
             ..opts(w)
         };
         let name = p.name();
+        drawing(format!("{turns} turns w{w}"));
         report(
             &format!("{name}: cold frame at the end"),
             measure(20, |_| {
