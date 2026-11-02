@@ -177,7 +177,11 @@ pub(crate) fn late_colour(body: &str) {
 /// doesn't know OSC 10 and 11 costs no wait. Read before the input
 /// thread starts, so the replies never reach it as keys. A terminal that
 /// hasn't started answering within ASK_WAIT isn't waited for.
-fn ask_colours() {
+///
+/// With pictures asked about too (kitty::QUERY, before DA1), what it
+/// said of them: Some(true) for Kitty graphics, None when it didn't say
+/// before DA1 (it doesn't take them) or didn't answer in time.
+fn ask_colours(pictures: bool) -> Option<bool> {
     use std::os::fd::AsRawFd;
     let tty;
     // SAFETY: isatty only asks.
@@ -189,16 +193,17 @@ fn ask_colours() {
                 tty = f;
                 tty.as_raw_fd()
             }
-            Err(_) => return,
+            Err(_) => return None,
         }
     };
+    let mut ask = b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\".to_vec();
+    if pictures {
+        ask.extend_from_slice(crate::kitty::QUERY.as_bytes());
+    }
+    ask.extend_from_slice(b"\x1b[c");
     let mut out = io::stdout().lock();
-    if out
-        .write_all(b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\\x1b[c")
-        .and_then(|_| out.flush())
-        .is_err()
-    {
-        return;
+    if out.write_all(&ask).and_then(|_| out.flush()).is_err() {
+        return None;
     }
     drop(out);
     let start = std::time::Instant::now();
@@ -244,13 +249,18 @@ fn ask_colours() {
         }
     }
     let replies = osc_replies(&String::from_utf8_lossy(&got));
+    let said = crate::kitty::reply(&got);
     if !da1_answered(&got) {
-        LATE_OSC.store(2 - replies.len().min(2) as u8, Ordering::SeqCst);
+        // Its pictures' answer, owed too, is taken in and dropped:
+        // pictures that late stay blocks.
+        let owed = 2 - replies.len().min(2) as u8 + u8::from(pictures && said.is_none());
+        LATE_OSC.store(owed, Ordering::SeqCst);
         UNANSWERED.store(got.is_empty(), Ordering::SeqCst);
     }
     if let Ok(mut r) = COLOUR_REPLIES.lock() {
         *r = replies;
     }
+    said
 }
 
 /// Whether b holds the terminal's answer to DA1: CSI ? … c.
@@ -330,8 +340,12 @@ impl Term {
         // with the kitty keyboard answers the query for its flags.
         let disambiguated = crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
         // Its text and background, which rush's colours are made from
-        // when Theme matches the terminal (Go's askColours, model.go:565).
-        ask_colours();
+        // when Theme matches the terminal (Go's askColours, model.go:565),
+        // and whether it takes Kitty graphics (Go's termimg.Detect, here
+        // asked of the terminal itself).
+        let env = |k: &str| std::env::var(k).ok();
+        let said = ask_colours(crate::kitty::worth_asking(env));
+        crate::kitty::set_on(crate::kitty::choose(env, said));
         // One write per frame: ratatui flushes once it has drawn.
         let out = BufWriter::with_capacity(1 << 16, io::stdout());
         let (w, h) = match crossterm::terminal::size() {
@@ -450,7 +464,7 @@ impl Term {
                 b.content.iter().map(|c| c.symbol()).collect()
             });
         }
-        write_updates(&mut self.out, &updates)?;
+        write_frame(&mut self.out, &updates)?;
         match cursor {
             None => self.out.hide_cursor()?,
             Some((x, y)) => {
@@ -510,6 +524,8 @@ impl Term {
     /// frame is written whole.
     pub fn resume(&mut self) -> io::Result<()> {
         enter()?;
+        // Leaving the alternate screen let its pictures go.
+        crate::kitty::screen_lost();
         if !self.title.is_empty() {
             write!(self.out, "\x1b]2;{}\x07", self.title)?;
         }
@@ -601,6 +617,11 @@ pub(crate) fn links_ok(tty: bool, env: impl Fn(&str) -> Option<String>) -> bool 
     !set("NO_COLOR") && set("CLICOLOR_FORCE")
 }
 
+/// The link a cell is written with: none for a quiet one, rush's alone.
+pub(crate) fn written(l: Link) -> Link {
+    if l.is_quiet() { Link::NONE } else { l }
+}
+
 /// The cells of next to write over prev: ratatui's Buffer::diff, with a
 /// cell whose link alone changed written again too.
 pub(crate) fn diff<'a>(
@@ -616,7 +637,7 @@ pub(crate) fn diff<'a>(
     let mut to_skip = 0usize;
     for (i, (c, p)) in next.content.iter().zip(&prev.content).enumerate() {
         let (l, pl) = if linked {
-            (next_links[i], prev_links[i])
+            (written(next_links[i]), written(prev_links[i]))
         } else {
             (Link::NONE, Link::NONE)
         };
@@ -629,6 +650,19 @@ pub(crate) fn diff<'a>(
         invalidated = cw.max(pw).max(invalidated).saturating_sub(1);
     }
     out
+}
+
+/// Writes a frame's cells: first the pictures among them the terminal
+/// hasn't been sent (kitty.rs), then the cells themselves.
+pub(crate) fn write_frame<W: Write>(
+    out: &mut CrosstermBackend<W>,
+    ups: &[Update],
+) -> io::Result<()> {
+    let pics = crate::kitty::before_frame(ups.iter().map(|u| u.2));
+    if !pics.is_empty() {
+        out.write_all(&pics)?;
+    }
+    write_updates(out, ups)
 }
 
 /// Writes the cells, a run of one link at a time between its OSC 8s; a
@@ -653,7 +687,7 @@ fn write_updates<W: Write>(out: &mut CrosstermBackend<W>, ups: &[Update]) -> io:
 }
 
 /// Standard base64 with padding.
-fn base64(b: &[u8]) -> String {
+pub(crate) fn base64(b: &[u8]) -> String {
     const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(b.len().div_ceil(3) * 4);
     for c in b.chunks(3) {

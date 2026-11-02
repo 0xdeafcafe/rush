@@ -83,12 +83,15 @@ impl Headless {
             let end = row
                 .iter()
                 .zip(links)
-                .rposition(|(c, l)| !(c.symbol() == " " && plain_cell(c) && l.is_none()))
+                .rposition(|(c, &l)| {
+                    !(c.symbol() == " " && plain_cell(c) && crate::term::written(l).is_none())
+                })
                 .map_or(0, |i| i + 1);
             let mut cur: Option<(RColor, RColor, Modifier)> = None;
             let mut link = Link::NONE;
             let mut skip = 0;
             for (c, &l) in row[..end].iter().zip(links) {
+                let l = crate::term::written(l);
                 if skip > 0 {
                     skip -= 1;
                     continue;

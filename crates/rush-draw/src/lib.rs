@@ -7,6 +7,7 @@ mod canvas;
 mod fit;
 mod headless;
 mod input;
+pub mod kitty;
 mod perf;
 mod qos;
 mod reader;

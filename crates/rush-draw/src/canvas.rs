@@ -203,6 +203,9 @@ impl<'a> Canvas<'a> {
 
     // Writes graphemes from x up to (not past) end; returns where it stopped.
     fn put(&mut self, mut x: u16, y: u16, s: &str, style: Style, end: u16) -> u16 {
+        if crate::kitty::is_placeholder(s) {
+            return self.put_picture(x, y, s, style, end);
+        }
         let (fg, bg, m) = (
             recolour(style.fg, false),
             recolour(style.bg, true),
@@ -247,6 +250,38 @@ impl<'a> Canvas<'a> {
             (g, w)
         });
         self.put_graphemes(x, y, gs, style, end)
+    }
+
+    /// Writes a picture's cells (kitty.rs), a cell each: its colour is its
+    /// id, written as it is, never moved onto the ground; in a colour
+    /// that isn't a picture rush has (faded or recoloured since) they're
+    /// blank, as Go blanks a faded screen's pictures (termimg.Blank).
+    fn put_picture(&mut self, mut x: u16, y: u16, s: &str, style: Style, end: u16) -> u16 {
+        let shown = crate::kitty::known(style.fg);
+        let fg = if shown {
+            color(style.fg)
+        } else {
+            RColor::Reset
+        };
+        let bg = recolour(style.bg, true);
+        for g in s.graphemes(true) {
+            if x >= end {
+                break;
+            }
+            self.unsplit(x, y);
+            self.set_link(x, y, style.link);
+            let c = self.cell(x, y);
+            c.set_symbol(if shown && crate::kitty::is_placeholder(g) {
+                g
+            } else {
+                " "
+            });
+            c.fg = fg;
+            c.bg = bg;
+            c.modifier = Modifier::empty();
+            x += 1;
+        }
+        x
     }
 
     /// Writes graphemes, each with the cells it takes, from x up to (not

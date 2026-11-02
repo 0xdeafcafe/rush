@@ -325,6 +325,12 @@ impl LateOsc {
                 self.inside = Some(String::new());
                 return true;
             }
+            // ESC _: the answer about pictures (kitty.rs QUERY), taken in
+            // and dropped (late_colour takes no `_` body as a colour).
+            if alt && k.code == KeyCode::Char('_') {
+                self.inside = Some("_".into());
+                return true;
+            }
             return false;
         };
         // Its end: ST (alt+\) or BEL (ctrl+g).
@@ -381,6 +387,14 @@ mod tests {
             (Some("10;rgb:e2/dd/d3"), Some("11;rgb:11/10/0e"))
         );
         assert!(!l.drops(&k('x', M::NONE)));
+        // A late answer about pictures (ESC _ G … ST) is taken in too,
+        // never typed; it's no colour.
+        let mut l = LateOsc::armed(1);
+        let mut evs = vec![k('_', M::ALT)];
+        evs.extend("Gi=31;OK".chars().map(|c| k(c, M::NONE)));
+        evs.push(k('\\', M::ALT));
+        assert_eq!(take(&mut l, evs).as_deref(), Some("_Gi=31;OK"));
+        assert!(!l.drops(&k('x', M::NONE)), "a key after it goes through");
         let mut l = LateOsc::armed(0);
         assert!(!l.drops(&k(']', M::ALT)), "nothing taken when it answered");
         // Asked again (focus, the system going light or dark): its
