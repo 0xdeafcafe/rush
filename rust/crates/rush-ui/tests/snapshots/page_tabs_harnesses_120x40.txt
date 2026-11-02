@@ -1,6 +1,6 @@
      !
     ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working                                                               default
-   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings                                  0% cpu · – · 37.0G free · 80%
     RUSH      Providers   Harnesses   Config   [ ]
    ▀▀▀▀▀▀
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
