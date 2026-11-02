@@ -1,104 +1,208 @@
 //! The conversation's views: Normal, Chat, Code, Catch-up and Trail
 //! (rush_convo::Preset), one for every session, kept in rush's config
-//! (convoView) until changed. The key that goes through them, the picker
-//! the header's label opens, and enter or a click on a turn or a step in
-//! any of them (a chat bubble's foot, a code heading or check, the
-//! catch-up card or a turn before it, a trail's row) opening it in
-//! Normal. Changing view keeps the view on the message it was on. New in
-//! the Rust port: Go rush had no such views.
+//! (convoView) until changed. The dropdown under the Conversation tab
+//! that picks one (a click on the tab while it shows, or the views' key),
+//! and enter or a click on a turn or a step in any of them (a chat
+//! bubble's foot, a code heading or check, the catch-up card or a turn
+//! before it, a trail's row) opening it in Normal. Changing view keeps
+//! the view on the message it was on. New in the Rust port: Go rush had
+//! no such views.
 
 use rush_convo::Preset;
-use rush_core::text::{Color, Line, Span, Style};
+use rush_core::text::{Line, Span};
+use rush_draw::{Button, MouseKind};
 
-use super::paint::spread;
 use super::{conn, open_key, views};
-use crate::frame::{Out, Pick, Picker, Press};
+use crate::frame::{Mouse, Out, Press};
 use crate::model::Model;
 use crate::style::*;
 
-/// The key that goes through the views (session.preset's own).
+/// The key that opens the views' dropdown (session.preset's own).
 pub const KEY: &str = "alt+s";
 
-/// The fewest rows the conversation has for its tabs to be drawn above it.
-pub const TABS_MIN_ROWS: usize = 6;
+/// What the dropdown says under its rows.
+pub const MENU_HOW: &str = "↑↓ · enter shows it · esc closes";
 
-/// The views' tab row and the rule under it, `w` wide: the view showing
-/// lit with a heavy rule under it (lit: its colour), the others dim, the
-/// key right-aligned and faint. A view a small model suggests (suggested)
-/// has a `✦` in orange before its name. Names shorten, then the key goes,
-/// when `w` is narrow; never wraps. With the cells each tab takes (from and
-/// to, in the row) and the view it is.
-pub fn tabs(
+/// The views' dropdown under the Conversation tab, `w` wide at most: a
+/// row for each view, the one showing marked `●`, the one suggested with
+/// `✦` and why, and what each is for; its keys under them. Row sel is
+/// picked. Drawn as the @ picker's rows are: on the chrome's ground, the
+/// one picked on the selection's with `▸`.
+pub fn menu_rows(
     cur: Preset,
-    suggested: Option<Preset>,
-    key: &str,
+    suggested: Option<(Preset, String)>,
+    sel: usize,
     w: usize,
-    lit: Color,
-) -> (Vec<Line>, Vec<(usize, usize, Preset)>) {
-    let name = |p: Preset, short: bool| -> &'static str {
-        match (p, short) {
-            (Preset::CatchUp, true) => "Catch",
-            (Preset::Normal, true) => "Norm",
-            _ => p.title(),
-        }
-    };
-    let width_of = |short: bool| -> usize {
-        Preset::ALL
-            .iter()
-            .map(|p| {
-                let star = if suggested == Some(*p) { 2 } else { 0 };
-                name(*p, short).chars().count() + 2 + star
-            })
-            .sum::<usize>()
-            + 1
-    };
-    let short = width_of(false) > w;
-    let mut top = Line::new();
-    let mut rule = Line::new();
-    let mut at = Vec::new();
-    // One cell in, as the names' own gap.
-    top.spans.push(plain(" "));
-    rule.spans.push(sp("─", FAINT));
-    for p in Preset::ALL {
-        let star = suggested == Some(p);
-        let label = name(p, short);
-        let on = p == cur;
-        let x = top.width();
-        let tw = label.chars().count() + 2 + if star { 2 } else { 0 };
-        // ` ✦ Name ` (the mark before the name) or ` Name `.
-        let style = if on {
-            bold(BRIGHT).on(TAB_ON_BG)
+) -> Vec<Line> {
+    let body = |p: Preset| -> Line {
+        let mark = if p == cur {
+            sp("● ", ORANGE)
         } else {
-            Style::fg(SUB)
+            plain("  ")
         };
-        top.spans.push(Span::new(" ", style));
-        if star {
-            top.spans.push(Span::new(
-                "✦ ",
-                if on {
-                    Style::fg(ORANGE).on(TAB_ON_BG)
-                } else {
-                    Style::fg(ORANGE)
-                },
-            ));
+        let mut l = line([
+            mark,
+            Span::new(format!("{:<9}", p.title()), bold(BRIGHT)),
+            plain("  "),
+            sp(p.about(), DIM),
+        ]);
+        if let Some((s, why)) = &suggested
+            && *s == p
+        {
+            l.spans.push(plain("  "));
+            l.spans.push(sp("✦", ORANGE));
+            if !why.is_empty() {
+                l.spans.push(sp(format!(" {why}"), DIM));
+            }
         }
-        top.spans.push(Span::new(label, style));
-        top.spans.push(Span::new(" ", style));
-        at.push((x, x + tw, p));
-        let (glyph, c) = if on { ("━", lit) } else { ("─", FAINT) };
-        rule.spans.push(sp(glyph.repeat(tw), c));
-    }
-    let used = top.width();
-    // The key, when there's room for it a cell apart.
-    let k = line([sp(key, FAINT)]);
-    let top = if used + 2 + k.width() < w {
-        spread(top, k, w - 1)
-    } else {
-        top
+        l
     };
-    let fill = w.saturating_sub(rule.width());
-    rule.spans.push(sp("─".repeat(fill), FAINT));
-    (vec![fit(top, w), fit(rule, w)], at)
+    let foot = line([plain("   "), sp(MENU_HOW, DIM)]);
+    let bodies: Vec<Line> = Preset::ALL.iter().map(|p| body(*p)).collect();
+    let want = bodies
+        .iter()
+        .map(|l| l.width() + 4)
+        .chain(std::iter::once(foot.width() + 1))
+        .max()
+        .unwrap_or(0);
+    let mw = want.min(w);
+    let mut out: Vec<Line> = bodies
+        .into_iter()
+        .enumerate()
+        .map(|(i, b)| {
+            if i == sel {
+                let mut l = line([sp(" ▸ ", ORANGE)]);
+                join(&mut l, b);
+                on_ground(l, mw, SEL_BG)
+            } else {
+                let mut l = line([plain("   ")]);
+                join(&mut l, b);
+                on_ground(l, mw, CHROME_BG)
+            }
+        })
+        .collect();
+    out.push(on_ground(foot, mw, CHROME_BG));
+    out
+}
+
+/// Whether session key's views dropdown is open.
+pub fn menu_open(m: &mut Model, key: &str) -> bool {
+    conn(m, key).vs.menu.is_some()
+}
+
+/// Opens session key's views dropdown, the view showing picked.
+pub fn open_menu(m: &mut Model, key: &str) {
+    let cur = current(m);
+    let i = Preset::ALL.iter().position(|p| *p == cur).unwrap_or(0);
+    conn(m, key).vs.menu = Some(i);
+}
+
+/// Lays the dropdown, when it's open, over the conversation's first rows
+/// (out, `w` wide), under the Conversation tab; where it landed is kept
+/// for the mouse.
+pub fn draw_menu(m: &mut Model, key: &str, out: &mut [Line], w: usize) {
+    let Some(sel) = conn(m, key).vs.menu else {
+        conn(m, key).vs.menu_at = (0, 0, 0);
+        return;
+    };
+    let cur = current(m);
+    let sug = super::viewsuggest::shown(m, key)
+        .filter(|s| s.from.is_none())
+        .map(|s| (s.view, s.reason));
+    // Under the tab: Conversation is the first, a cell in.
+    let left = conn(m, key)
+        .vs
+        .tabs
+        .first()
+        .map_or(1, |t| t.0)
+        .min(w.saturating_sub(1));
+    let rows = menu_rows(cur, sug, sel, w.saturating_sub(left));
+    let n = rows.len().min(out.len());
+    let mw = rows.first().map_or(0, |l| l.width());
+    crate::frame::dialog::paste_at(out, &rows[..n], 0, left);
+    conn(m, key).vs.menu_at = (left, mw, n);
+}
+
+/// The dropdown's keys while it's open: ↑↓ choose, enter shows the one
+/// chosen, esc or the views' key closes it. Any other key closes it and
+/// goes on to do what it does.
+pub fn menu_key(m: &mut Model, k: &Press) -> Out {
+    let Some(key) = open_key(m) else {
+        return Out::Pass;
+    };
+    if m.confirm.is_some() || m.sheet.is_some() {
+        return Out::Pass;
+    }
+    let Some(sel) = conn(m, &key).vs.menu else {
+        return Out::Pass;
+    };
+    if views::view_name(m, &key) != "conversation" {
+        conn(m, &key).vs.menu = None;
+        return Out::Pass;
+    }
+    let n = Preset::ALL.len();
+    let s = k.s.as_str();
+    match s {
+        "up" => conn(m, &key).vs.menu = Some((sel + n - 1) % n),
+        "down" => conn(m, &key).vs.menu = Some((sel + 1) % n),
+        "enter" => {
+            conn(m, &key).vs.menu = None;
+            set(m, Preset::ALL[sel % n]);
+        }
+        "esc" => conn(m, &key).vs.menu = None,
+        _ if s == KEY => conn(m, &key).vs.menu = None,
+        _ => {
+            conn(m, &key).vs.menu = None;
+            return Out::Pass;
+        }
+    }
+    Out::Draw
+}
+
+/// The pointer while the dropdown is open: over a view's row it picks
+/// that row, a click on one shows that view, and a click anywhere else
+/// (the Conversation tab's too) closes it.
+pub fn menu_mouse(m: &mut Model, e: &Mouse) -> Out {
+    if m.session.is_none() || m.confirm.is_some() || m.sheet.is_some() || m.on_place() {
+        return Out::Pass;
+    }
+    let Some(key) = open_key(m) else {
+        return Out::Pass;
+    };
+    let Some(sel) = conn(m, &key).vs.menu else {
+        return Out::Pass;
+    };
+    let (left, mw, n) = conn(m, &key).vs.menu_at;
+    let top = m.session.as_ref().map_or(0, |v| v.top);
+    let (x, y) = (e.x as usize, e.y as usize);
+    // The dropdown's row under the pointer: a view's, or its keys' last.
+    let row = if y >= top && y < top + n && x >= 2 + left && x < 2 + left + mw {
+        Some(y - top)
+    } else {
+        None
+    };
+    match e.kind {
+        MouseKind::Moved => match row {
+            Some(r) if r < Preset::ALL.len() && r != sel => {
+                conn(m, &key).vs.menu = Some(r);
+                Out::Draw
+            }
+            _ => Out::Pass,
+        },
+        MouseKind::Down(Button::Left) => match row {
+            Some(r) if r < Preset::ALL.len() => {
+                conn(m, &key).vs.menu = None;
+                set(m, Preset::ALL[r]);
+                Out::Draw
+            }
+            Some(_) => Out::Idle,
+            None => {
+                conn(m, &key).vs.menu = None;
+                Out::Draw
+            }
+        },
+        _ => Out::Pass,
+    }
 }
 
 /// The view every session's conversation shows.
@@ -238,20 +342,27 @@ pub fn turn_or_step(r: &str) -> bool {
         && (t.len() == r.len() || r[t.len()..].starts_with(":s:"))
 }
 
-/// The views' keys in the conversation: the key through them; enter, space
-/// or → on a turn or a step in another view opens it in Normal.
+/// The views' keys in the conversation: the key opens the dropdown under
+/// the Conversation tab (from any of the session's views, showing the
+/// conversation); enter, space or → on a turn or a step in another view
+/// opens it in Normal.
 pub fn key(m: &mut Model, k: &Press) -> Out {
     let Some(key) = open_key(m) else {
         return Out::Pass;
     };
-    if m.confirm.is_some() || m.sheet.is_some() || views::view_name(m, &key) != "conversation" {
+    if m.confirm.is_some() || m.sheet.is_some() {
         return Out::Pass;
     }
     let s = k.s.as_str();
     if s == KEY {
-        let p = current(m).next();
-        set(m, p);
+        if views::view_name(m, &key) != "conversation" {
+            views::show_view(m, &key, "conversation");
+        }
+        open_menu(m, &key);
         return Out::Draw;
+    }
+    if views::view_name(m, &key) != "conversation" {
+        return Out::Pass;
     }
     if current(m) == Preset::Normal || !matches!(s, "enter" | "space" | " " | "right") {
         return Out::Pass;
@@ -278,42 +389,4 @@ pub fn click(m: &mut Model, r: &str) -> Option<Out> {
         return None; // picked first, as any step
     }
     Some(open_in_normal(m, r))
-}
-
-/// The views to pick from, the one showing first under the cursor.
-pub fn open_picker(m: &mut Model) {
-    let cur = current(m);
-    let rows: Vec<Pick> = Preset::ALL
-        .iter()
-        .map(|p| {
-            let mark = if *p == cur { "● " } else { "  " };
-            let mut pick = Pick::new(p.title());
-            pick.label = line([
-                sp(mark, ORANGE),
-                sp(format!("{:<10}", p.title()), TEXT),
-                sp(p.about(), DIM),
-            ]);
-            pick.value = p.name().to_string();
-            pick
-        })
-        .collect();
-    let mut picker = Picker::new(
-        "Conversation view",
-        rows,
-        Box::new(|m, pick, _| {
-            let Some(p) = pick else {
-                return Out::Idle;
-            };
-            let p = Preset::from_name(&p.value);
-            set(m, p);
-            Out::Draw
-        }),
-    );
-    picker.cursor = Preset::ALL.iter().position(|p| *p == cur).unwrap_or(0);
-    picker.keys = vec![
-        ("↑↓".into(), "choose".into()),
-        ("enter".into(), "show it".into()),
-        ("esc".into(), "close".into()),
-    ];
-    m.open_sheet(Box::new(picker));
 }

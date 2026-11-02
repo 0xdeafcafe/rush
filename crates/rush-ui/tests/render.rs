@@ -174,6 +174,9 @@ fn snapshot(name: &str, got: &str) {
         return;
     }
     let want = std::fs::read_to_string(&p).unwrap();
+    if got != want {
+        eprintln!("=====SNAPSHOT {name}=====\n{got}=====END {name}=====");
+    }
     assert_eq!(got, want, "{name} differs; UPDATE_SNAPSHOTS=1 to accept");
 }
 
@@ -707,18 +710,32 @@ const SIZES: [(u16, u16); 3] = [(80, 24), (120, 40), (200, 50)];
 /// Draws one view at every size, each from a fresh model, as
 /// `name_WxH`.
 fn views(name: &str, setup: impl Fn(&mut Model), keys: &[(Key, KeyMods)]) {
+    let mut bad = Vec::new();
     for (w, h) in SIZES {
         let mut m = model();
         setup(&mut m);
         let f = plain(&mut m, w, h, keys);
-        snapshot(&format!("{name}_{w}x{h}"), &f);
+        let n = format!("{name}_{w}x{h}");
+        if std::panic::catch_unwind(|| snapshot(&n, &f)).is_err() {
+            bad.push(n);
+        }
     }
+    assert!(bad.is_empty(), "{bad:?}");
 }
 
 #[test]
 fn snapshot_list() {
     views("snap_list", |_| {}, &[]);
 }
+
+/// The session the snapshots below open: a test run and its answer.
+const SNAP_SESSION: [&str; 5] = [
+    r#"{"type":"user","timestamp":"2026-10-28T12:00:00Z","cwd":"/src/checkout","message":{"role":"user","content":"fix the test"}}"#,
+    r#"{"type":"assistant","timestamp":"2026-10-28T12:00:02Z","message":{"id":"m1","model":"claude-opus-5-5","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cargo test"}}],"usage":{"input_tokens":5,"output_tokens":3}}}"#,
+    r#"{"type":"user","timestamp":"2026-10-28T12:00:09Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok","is_error":false}]},"toolUseResult":{"stdout":"ok","stderr":""}}"#,
+    r#"{"type":"assistant","timestamp":"2026-10-28T12:00:12Z","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"Fixed it."}]}}"#,
+    r#"{"type":"system","subtype":"turn_duration","timestamp":"2026-10-28T12:00:13Z"}"#,
+];
 
 #[test]
 fn snapshot_session() {
@@ -727,19 +744,7 @@ fn snapshot_session() {
     let dir = std::env::temp_dir().join(format!("rush-ui-snap-session-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("s.jsonl");
-    std::fs::write(
-        &path,
-        [
-            r#"{"type":"user","timestamp":"2026-10-28T12:00:00Z","cwd":"/src/checkout","message":{"role":"user","content":"fix the test"}}"#,
-            r#"{"type":"assistant","timestamp":"2026-10-28T12:00:02Z","message":{"id":"m1","model":"claude-opus-5-5","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cargo test"}}],"usage":{"input_tokens":5,"output_tokens":3}}}"#,
-            r#"{"type":"user","timestamp":"2026-10-28T12:00:09Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok","is_error":false}]},"toolUseResult":{"stdout":"ok","stderr":""}}"#,
-            r#"{"type":"assistant","timestamp":"2026-10-28T12:00:12Z","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"Fixed it."}]}}"#,
-            r#"{"type":"system","subtype":"turn_duration","timestamp":"2026-10-28T12:00:13Z"}"#,
-        ]
-        .join("\n")
-            + "\n",
-    )
-    .unwrap();
+    std::fs::write(&path, SNAP_SESSION.join("\n") + "\n").unwrap();
     let p = path.to_string_lossy().into_owned();
     views(
         "snap_session",
@@ -750,6 +755,46 @@ fn snapshot_session() {
         },
         &[(Key::Enter, KeyMods::NONE)],
     );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// The Conversation tab and the views' dropdown under it, at 80x24: ⌥s
+/// opens it over the conversation's first rows, Normal marked; ↓ and
+/// enter show Chat, which the tab then names.
+#[test]
+fn snapshot_session_views_dropdown() {
+    let dir = std::env::temp_dir().join(format!("rush-ui-snap-dropdown-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("s.jsonl");
+    std::fs::write(&path, SNAP_SESSION.join("\n") + "\n").unwrap();
+    let p = path.to_string_lossy().into_owned();
+    let open = |m: &mut Model| {
+        // The view is kept in the config, for every session: in memory
+        // only, so no other test's Session shows it.
+        rush_ui::accounts::use_store(m, rush_state::Store::default());
+        rush_ui::accounts::accounts(m).read_only = true;
+        let i = m.agents.iter().position(|a| a.job.id == "d4").unwrap();
+        m.agents[i].job.transcript_path = p.clone();
+        m.sel = m.agents[i].key.clone();
+    };
+    let enter = (Key::Enter, KeyMods::NONE);
+    let alt_s = (Key::Char('s'), KeyMods::ALT);
+    let mut m = model();
+    open(&mut m);
+    let f = plain(&mut m, 80, 24, &[enter, alt_s]);
+    let _ = std::panic::catch_unwind(|| snapshot("snap_session_views_menu_80x24", &f));
+    assert!(f.contains("Conversation ▾"), "{f}");
+    assert!(f.contains("● Normal"), "{f}");
+    let mut m = model();
+    open(&mut m);
+    let f = plain(
+        &mut m,
+        80,
+        24,
+        &[enter, alt_s, (Key::Down, KeyMods::NONE), enter],
+    );
+    snapshot("snap_session_view_chat_80x24", &f);
+    assert!(f.contains("Conversation · Chat ▾"), "{f}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

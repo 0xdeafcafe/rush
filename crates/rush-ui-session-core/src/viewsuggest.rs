@@ -7,7 +7,7 @@
 //! pick first; when they can't tell, the session's harness's quick model is
 //! asked through the advisor's Ask (its adapter's Querier, headless), off
 //! the UI thread, at most once per session every 10 minutes, with counts
-//! only. Suggest marks the view's tab with ✦ and says why under the box,
+//! only. Suggest marks the Conversation tab with ✦ and says why under the box,
 //! with a key to take it; switch changes the view as you come back, says
 //! so, with the same key to undo, and never while you're in the session.
 //! What you take and turn down is kept per moment and view in rush's
@@ -232,7 +232,7 @@ pub fn shown(m: &mut Model, key: &str) -> Option<Shown> {
         .and_then(|p| p.shown.clone())
 }
 
-/// The view session key's tabs mark with ✦: the one suggested, not one
+/// The view the Conversation tab marks with ✦: the one suggested, not one
 /// rush switched to.
 pub fn suggested(m: &mut Model, key: &str) -> Option<Preset> {
     shown(m, key).filter(|s| s.from.is_none()).map(|s| s.view)

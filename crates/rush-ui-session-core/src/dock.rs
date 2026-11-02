@@ -735,7 +735,14 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     // key to the next view is said while one other than Normal shows.
     let preset = super::presets::current(m);
     let preset_key = super::presets::key_hint(m);
-    let next_view = format!("view: {}", preset.next().title().to_lowercase());
+    let next_view = "views";
+    // The views' dropdown under the Conversation tab has the keys.
+    if view == "conversation" && super::presets::menu_open(m, key) {
+        return fit_keys(
+            w,
+            &[("↑↓", "choose"), ("enter", "show it"), ("esc", "close")],
+        );
+    }
     let other_view = view == "conversation" && preset != rush_convo::Preset::Normal;
     // A view rush suggests, or switched to, and the key that takes it.
     if view == "conversation"
@@ -750,7 +757,7 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
             &[
                 ("enter", "open in Normal"),
                 ("↑↓", "pick"),
-                (preset_key.as_str(), next_view.as_str()),
+                (preset_key.as_str(), next_view),
                 ("esc", "back to message"),
             ],
         );
@@ -1001,7 +1008,7 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
         vec![("f1", "more"), ("esc", "back")]
     };
     if other_view {
-        back.insert(0, (preset_key.as_str(), next_view.as_str()));
+        back.insert(0, (preset_key.as_str(), next_view));
     }
     few_keys(w, 3, &pairs, &back)
 }

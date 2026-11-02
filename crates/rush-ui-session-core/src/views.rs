@@ -64,12 +64,12 @@ pub struct ViewState {
     pub tabs: Vec<(usize, usize, usize)>,
     /// The context label on the name's row: from and width, in the pane.
     pub context: (usize, usize),
-    /// The conversation view's label on the tabs row, from and to, cells
-    /// into the pane; (0, 0) when it isn't drawn (Normal shows none).
-    pub preset_at: (usize, usize),
-    /// The conversation's view tabs as last drawn: from and to, cells
-    /// into the pane, and the view each is; empty when they aren't drawn.
-    pub view_tabs: Vec<(usize, usize, rush_convo::Preset)>,
+    /// The conversation's views dropdown under its tab, when open: the
+    /// row picked in it (presets.rs).
+    pub menu: Option<usize>,
+    /// Where the dropdown was last drawn: its first cell into the
+    /// conversation's rows, its width and how many rows it took.
+    pub menu_at: (usize, usize, usize),
     /// What the pointer is over: a tab (+1), the context label, a row's
     /// item.
     pub hover_tab: usize,
@@ -282,12 +282,19 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     let views = views(m, &key);
     let cur = conn(m, &key).vs.view % views.len();
     let hover = conn(m, &key).vs.hover_tab;
+    // The Conversation tab names the view it shows, but Normal, and opens
+    // the views' dropdown (▾); the view rush suggests puts its ✦ there.
+    let preset = super::presets::current(m);
+    let suggested = super::viewsuggest::suggested(m, &key).is_some();
     // The tabs: " Label stat " each, one apart, from a cell in.
     let mut strip = line([plain(" ")]);
     let mut tabs = Vec::new();
     let (mut on_x, mut on_w) = (0, 0);
     for (i, v) in views.iter().enumerate() {
         let mut stat = tab_stat(m, &key, v);
+        if *v == "conversation" && suggested {
+            stat = line([sp("✦", ORANGE)]);
+        }
         if stat.width() > 0 {
             stat.spans.push(plain(" "));
         }
@@ -295,7 +302,13 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
             strip.spans.push(plain(" "));
         }
         let x = strip.width();
-        let label = format!(" {} ", tab_label(v));
+        let label = match *v {
+            "conversation" if preset != rush_convo::Preset::Normal => {
+                format!(" {} · {} ▾ ", tab_label(v), preset.title())
+            }
+            "conversation" => format!(" {} ▾ ", tab_label(v)),
+            _ => format!(" {} ", tab_label(v)),
+        };
         let tw = width(&label) + stat.width();
         tabs.push((x, (x + tw).min(hw), i));
         if i == cur {
@@ -312,17 +325,8 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
             join(&mut strip, t);
         }
     }
-    // The conversation's view, when it isn't Normal: a click picks another.
-    let preset = super::presets::current(m);
-    let preset_chip = (views[cur] == "conversation" && preset != rush_convo::Preset::Normal)
-        .then(|| line([sp("view ", DIM), sp(preset.title(), ORANGE), sp(" ▾", DIM)]));
     let v = m.session.as_ref();
     let mut chips = Line::new();
-    let preset_w = preset_chip.as_ref().map_or(0, |c| c.width());
-    if let Some(c) = preset_chip {
-        join(&mut chips, c);
-        chips.spans.push(plain("  "));
-    }
     match v.map(|v| (v.verbose, v.o.depth)) {
         Some((true, _)) => chips.spans.push(sp("m3 all shown", ORANGE)),
         Some((_, rush_convo::Depth::Prose)) => chips.spans.push(sp("m0 prose only", ORANGE)),
@@ -348,13 +352,6 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     for t in &mut tabs {
         t.1 = t.1.min(sw);
     }
-    let fits = hw as isize - strip.width() as isize - chips.width() as isize >= 2;
-    let preset_at = if preset_w > 0 && fits {
-        let x = hw - chips.width();
-        (x, x + preset_w)
-    } else {
-        (0, 0)
-    };
     let row3 = spread(strip, chips, hw);
     rows[3] = chrome(row3, hw);
     // A rule closes the chrome off in the harness's grey, lit under the
@@ -391,7 +388,6 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     let c = conn(m, &key);
     c.vs.tabs = tabs;
     c.vs.context = at;
-    c.vs.preset_at = preset_at;
 }
 
 /// A header row: two cells in, on the chrome's ground, a cell after.
@@ -654,7 +650,9 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
         return None;
     }
     conn(m, &key).vs.rows = rows;
-    conn(m, &key).vs.view_tabs.clear();
+    if name != "conversation" {
+        conn(m, &key).vs.menu = None;
+    }
     if let Some(v) = m.session.as_mut() {
         v.top_off = 0;
     }
@@ -894,23 +892,6 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
             }
         }
         MouseKind::Down(Button::Left) => {
-            if off > 0 && top.checked_sub(off) == Some(y) && x >= 2 {
-                let hit = conn(m, &key)
-                    .vs
-                    .view_tabs
-                    .iter()
-                    .find(|t| x - 2 >= t.0 && x - 2 < t.1)
-                    .map(|t| t.2);
-                if let Some(p) = hit {
-                    super::presets::set(m, p);
-                    return Out::Draw;
-                }
-            }
-            let (px0, px1) = conn(m, &key).vs.preset_at;
-            if Some(y) == tabs_y && px1 > px0 && x >= 2 + px0 && x < 2 + px1 {
-                super::presets::open_picker(m);
-                return Out::Draw;
-            }
             let Some(i) = tab_at(m) else {
                 if name != "conversation" && y >= top && y < top + rows {
                     let r = conn(m, &key).vs.refs.get(y - top).cloned();
@@ -926,6 +907,11 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
                 }
                 return Out::Pass;
             };
+            // The Conversation tab while it shows opens the views' dropdown.
+            if name == "conversation" && views(m, &key).get(i) == Some(&"conversation") {
+                super::presets::open_menu(m, &key);
+                return Out::Draw;
+            }
             let c = conn(m, &key);
             c.vs.view = i;
             c.vs.top = 0;

@@ -224,7 +224,7 @@ pub struct SessionView {
     pub shown: Vec<String>,
     pub top: usize,
     /// Rows at the body's top that aren't the header's nor the transcript's
-    /// (the conversation's view tabs): top is that far below the header.
+    /// (none drawn now): top is that far below the header.
     pub top_off: usize,
     /// Columns kept at the right of the conversation for what's drawn
     /// beside it (the map): the conversation is drawn that much narrower.

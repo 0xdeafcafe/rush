@@ -226,7 +226,30 @@ fn suggests_as_you_open_and_the_key_takes_it() {
     );
     assert!(hint.contains("take it"), "{hint}");
     assert!(f.contains("tab: Chat fits"), "{f}");
-    assert!(f.contains("✦ Chat"), "the tab is marked: {f}");
+    // The Conversation tab has the ✦, and the views' dropdown says which
+    // and why.
+    let tabs = f
+        .lines()
+        .find(|l| l.contains("Conversation") && l.contains("Overview"))
+        .unwrap_or_else(|| panic!("no tab row: {f}"));
+    assert!(
+        tabs.trim_start()
+            .starts_with("Conversation ▾ ✦   Overview   Changes"),
+        "the tab is marked: {tabs}"
+    );
+    press(&mut m, "alt+s");
+    let d = frame_at(&mut m, NOW + 200);
+    let chat = d
+        .lines()
+        .find(|l| l.contains("what did we say?"))
+        .unwrap_or_else(|| panic!("no dropdown: {d}"));
+    assert!(
+        chat.contains("Chat") && chat.contains("✦ mostly talk, no steps"),
+        "{chat}"
+    );
+    assert!(d.contains("● Normal"), "{d}");
+    press(&mut m, "esc");
+    assert!(!presets::menu_open(&mut m, KEY));
     assert!(quick.asked().is_empty(), "the rules knew");
     press(&mut m, "alt+t");
     assert_eq!(presets::current(&m), Preset::Chat);

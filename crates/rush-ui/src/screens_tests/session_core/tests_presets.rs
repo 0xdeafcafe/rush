@@ -1,6 +1,7 @@
-//! The conversation's views (presets.rs): the key through them, the
-//! config remembering the one picked for every session, its label on the
-//! tabs row, and enter on a catch-up card opening its turn in Normal.
+//! The conversation's views (presets.rs): the Conversation tab naming the
+//! view, the dropdown under it that picks one (by key and by click), the
+//! config remembering the one picked for every session, and enter on a
+//! catch-up card opening its turn in Normal.
 
 use rush_convo::Preset;
 use rush_core::agent::State;
@@ -10,7 +11,7 @@ use rush_core::time::Ms;
 use rush_draw::{Button, KeyMods, MouseKind};
 
 use super::host::Fake;
-use super::tests::{agent, flash, open, press, screen, sess};
+use super::tests::{KEY, agent, flash, open, press, screen, sess};
 use crate::frame::Mouse;
 use crate::model::Model;
 
@@ -56,45 +57,180 @@ fn kept(m: &Model) -> String {
         .unwrap_or_default()
 }
 
-/// ⌥s goes through the five views and round to Normal, saying each; the
-/// config keeps the one picked, for every session, Normal as nothing.
-#[test]
-fn the_key_goes_through_the_views_and_the_config_keeps_it() {
-    let mut m = talked(3);
-    assert_eq!(super::presets::current(&m), Preset::Normal);
-    for want in [
-        Preset::Chat,
-        Preset::Code,
-        Preset::CatchUp,
-        Preset::Trail,
-        Preset::Normal,
-    ] {
-        press(&mut m, "alt+s");
-        assert_eq!(super::presets::current(&m), want);
-        assert_eq!(flash(&m), format!("{} · {}", want.title(), want.about()));
-        let name = if want == Preset::Normal {
-            ""
-        } else {
-            want.name()
-        };
-        assert_eq!(kept(&m), name);
-        assert_eq!(m.cfg.convo_view, name);
-        let _ = screen(&mut m);
-        assert_eq!(m.session.as_ref().unwrap().o.preset, want, "drawn so");
-    }
+/// The session's tab row and the screen.
+fn tab_row(m: &mut Model) -> (usize, Vec<String>) {
+    let s = screen(m);
+    let i = s
+        .iter()
+        .position(|l| l.contains("Conversation") && l.contains("Overview"))
+        .unwrap_or_else(|| panic!("no tab row:\n{}", s.join("\n")));
+    (i, s)
 }
 
-/// Another view than Normal is named on the tabs row; Normal's rows are
-/// as they were.
+/// The dropdown's rows on the screen: from its Normal row to its keys.
+fn menu_rows(s: &[String]) -> Vec<String> {
+    let from = s
+        .iter()
+        .position(|l| l.contains("Normal") && l.contains("everything, as usual"))
+        .unwrap_or_else(|| panic!("no dropdown:\n{}", s.join("\n")));
+    s[from..=from + 5]
+        .iter()
+        .map(|l| l.trim_end().to_string())
+        .collect()
+}
+
+fn menu_open(m: &mut Model) -> bool {
+    super::presets::menu_open(m, KEY)
+}
+
+/// A left click at x, y.
+fn click(m: &mut Model, x: usize, y: usize) {
+    m.mouse_event(&Mouse {
+        kind: MouseKind::Down(Button::Left),
+        x: x as u16,
+        y: y as u16,
+        mods: KeyMods::NONE,
+    });
+}
+
+/// The cell `what` starts at in row l.
+fn col(l: &str, what: &str) -> usize {
+    let at = l.find(what).unwrap_or_else(|| panic!("no {what:?} in {l}"));
+    rush_core::text::width(&l[..at])
+}
+
+/// Normal: the Conversation tab says so with its ▾ alone, and no row of
+/// views sits under the tabs.
 #[test]
-fn the_view_is_named_on_the_tabs_row() {
+fn the_tab_bar_in_normal() {
     let mut m = talked(3);
-    let normal = screen(&mut m).join("\n");
-    assert!(!normal.contains("view Normal"), "{normal}");
+    let (i, s) = tab_row(&mut m);
+    assert!(
+        s[i].trim_start()
+            .starts_with("Conversation ▾   Overview   Changes"),
+        "{}",
+        s[i]
+    );
+    assert!(
+        !s.iter()
+            .any(|l| l.contains("Catch-up") || l.contains("alt+s")),
+        "{}",
+        s.join("\n")
+    );
+}
+
+/// Another view than Normal is named on the Conversation tab.
+#[test]
+fn the_tab_bar_names_the_view() {
+    let mut m = talked(3);
+    super::presets::set(&mut m, Preset::Chat);
+    let (i, s) = tab_row(&mut m);
+    assert!(
+        s[i].trim_start()
+            .starts_with("Conversation · Chat ▾   Overview   Changes"),
+        "{}",
+        s[i]
+    );
+    assert!(s.join("\n").contains("answer 2"));
+}
+
+/// The conversation starts right under the tabs' rule: the row the views
+/// had is its own again.
+#[test]
+fn the_conversation_has_the_row_back() {
+    let mut m = talked(3);
+    let (i, _) = tab_row(&mut m);
+    let v = m.session.as_ref().unwrap();
+    assert_eq!(v.top, i + 2, "the body starts under the rule");
+    assert_eq!(v.top_off, 0);
+}
+
+/// ⌥s opens the dropdown under the tab: the five views, what each is for,
+/// the one showing marked; ↓ and enter show the next, which the config
+/// keeps for every session, and the dropdown closes.
+#[test]
+fn the_key_opens_the_dropdown_and_picks() {
+    let mut m = talked(3);
+    assert_eq!(super::presets::current(&m), Preset::Normal);
+    press(&mut m, "alt+s");
+    assert!(menu_open(&mut m));
+    let (i, s) = tab_row(&mut m);
+    let rows = menu_rows(&s);
+    let at = s
+        .iter()
+        .position(|l| l.contains("everything, as usual"))
+        .unwrap();
+    assert_eq!(at, i + 2, "right under the tab's rule");
+    assert!(rows[0].contains("▸ ● Normal"), "{rows:?}");
+    for (r, p) in rows.iter().zip(Preset::ALL) {
+        assert!(r.contains(p.title()) && r.contains(p.about()), "{r}");
+    }
+    assert!(rows[5].contains(super::presets::MENU_HOW), "{rows:?}");
+    // Under the tab, a cell in.
+    assert_eq!(col(&s[at], "▸"), col(&s[i], "Conversation"));
+    press(&mut m, "down");
+    let (_, s) = tab_row(&mut m);
+    assert!(menu_rows(&s)[1].contains("▸   Chat"), "{:?}", menu_rows(&s));
+    press(&mut m, "enter");
+    assert!(!menu_open(&mut m));
+    assert_eq!(super::presets::current(&m), Preset::Chat);
+    assert_eq!(flash(&m), "Chat · what did we say?");
+    assert_eq!(kept(&m), "chat");
+    assert_eq!(m.cfg.convo_view, "chat");
+    let (i, s) = tab_row(&mut m);
+    assert!(s[i].contains("Conversation · Chat ▾"), "{}", s[i]);
+    assert!(!s.join("\n").contains(super::presets::MENU_HOW));
+    assert_eq!(
+        m.session.as_ref().unwrap().o.preset,
+        Preset::Chat,
+        "drawn so"
+    );
+    // Opened again, Chat is the one marked and picked; ↑ goes round the
+    // top to Trail.
+    press(&mut m, "alt+s");
+    let (_, s) = tab_row(&mut m);
+    assert!(menu_rows(&s)[1].contains("▸ ● Chat"), "{:?}", menu_rows(&s));
+    press(&mut m, "up");
+    press(&mut m, "up");
+    press(&mut m, "enter");
+    assert_eq!(super::presets::current(&m), Preset::Trail);
+    assert_eq!(kept(&m), "trail");
+    press(&mut m, "alt+s");
+    press(&mut m, "down");
+    press(&mut m, "enter");
+    assert_eq!(super::presets::current(&m), Preset::Normal);
+    assert_eq!(kept(&m), "");
+}
+
+/// esc closes the dropdown and changes nothing; so does its key again.
+#[test]
+fn esc_closes_the_dropdown() {
+    let mut m = talked(3);
+    press(&mut m, "alt+s");
+    let _ = screen(&mut m);
+    press(&mut m, "down");
+    press(&mut m, "esc");
+    assert!(!menu_open(&mut m));
+    assert_eq!(super::presets::current(&m), Preset::Normal);
+    let f = screen(&mut m).join("\n");
+    assert!(!f.contains(super::presets::MENU_HOW), "{f}");
+    assert!(f.contains("answer 2"), "{f}");
+    press(&mut m, "alt+s");
+    assert!(menu_open(&mut m));
+    press(&mut m, "alt+s");
+    assert!(!menu_open(&mut m));
+}
+
+/// The dropdown says its keys under the box while it's open.
+#[test]
+fn the_dropdown_says_its_keys() {
+    let mut m = talked(3);
     press(&mut m, "alt+s");
     let f = screen(&mut m).join("\n");
-    assert!(f.contains("view Chat ▾"), "{f}");
-    assert!(f.contains("answer 2"), "{f}");
+    assert!(
+        f.contains("↑↓ choose") && f.contains("enter show it"),
+        "{f}"
+    );
 }
 
 /// Enter on the catch-up card opens the first turn it covers in Normal,
@@ -131,83 +267,103 @@ fn enter_on_a_bubble_opens_its_turn_in_normal() {
     assert_eq!(m.session.as_ref().unwrap().sel, "t2");
 }
 
-/// The row the view tabs are on, and the screen.
-fn tab_rows(m: &mut Model) -> (usize, Vec<String>) {
-    let s = screen(m);
-    let i = s
+/// A click on the Conversation tab while it shows opens the dropdown; a
+/// click on one of its rows shows that view and closes it.
+#[test]
+fn a_click_on_the_tab_opens_the_dropdown_and_a_row_picks() {
+    let mut m = talked(3);
+    let (i, s) = tab_row(&mut m);
+    click(&mut m, col(&s[i], "Conversation"), i);
+    assert!(menu_open(&mut m));
+    let (_, s) = tab_row(&mut m);
+    let y = s
         .iter()
-        .position(|l| l.contains("Normal") && l.contains("Chat") && l.contains("Trail"))
-        .unwrap_or_else(|| panic!("no tab row:\n{}", s.join("\n")));
-    (i, s)
-}
-
-/// The conversation has a row of the five views with a rule under it, the
-/// one showing lit; the key moves the lit one on.
-#[test]
-fn the_views_are_tabs_above_the_conversation() {
-    let mut m = talked(3);
-    let (i, s) = tab_rows(&mut m);
-    assert!(
-        s[i].contains("Catch-up") && s[i].contains("alt+s"),
-        "{}",
-        s[i]
-    );
-    let before = s[i + 1]
-        .find('\u{2501}')
-        .unwrap_or_else(|| panic!("{}", s[i + 1]));
-    press(&mut m, "alt+s");
-    let (i, s) = tab_rows(&mut m);
-    let after = s[i + 1].find('\u{2501}').unwrap();
-    assert!(after > before, "the lit tab moved on: {}", s[i + 1]);
-    assert!(s.join("\n").contains("answer 2"));
-}
-
-/// A click on a tab shows that view, as the key would.
-#[test]
-fn a_click_on_a_tab_switches_the_view() {
-    let mut m = talked(3);
-    let (i, s) = tab_rows(&mut m);
-    let x = rush_core::text::width(&s[i][..s[i].find("Code").unwrap()]);
-    m.mouse_event(&Mouse {
-        kind: MouseKind::Down(Button::Left),
-        x: x as u16,
-        y: i as u16,
-        mods: KeyMods::NONE,
-    });
+        .position(|l| l.contains("what did it change?"))
+        .unwrap_or_else(|| panic!("no dropdown:\n{}", s.join("\n")));
+    click(&mut m, col(&s[y], "Code"), y);
+    assert!(!menu_open(&mut m));
     assert_eq!(super::presets::current(&m), Preset::Code);
-    let (_, s) = tab_rows(&mut m);
-    assert!(s.join("\n").contains("view Code"));
+    assert_eq!(kept(&m), "code");
+    let (i, s) = tab_row(&mut m);
+    assert!(s[i].contains("Conversation · Code ▾"), "{}", s[i]);
 }
 
-/// Narrow, the names shorten and the key goes; the row never wraps.
+/// A click outside the dropdown closes it and changes nothing; a click on
+/// the Conversation tab while it's open closes it too.
 #[test]
-fn the_tabs_shorten_when_narrow() {
-    let c = rush_core::text::Color::Default;
-    let (rows, _) = super::presets::tabs(Preset::Normal, None, "alt+s", 60, c);
-    assert!(rows[0].plain().contains("Catch-up") && rows[0].plain().contains("alt+s"));
-    let (rows, _) = super::presets::tabs(Preset::Normal, None, "alt+s", 34, c);
-    assert!(rows[0].plain().contains("Catch ") && !rows[0].plain().contains("alt+s"));
-    assert!(rows.iter().all(|l| l.width() <= 34));
+fn a_click_outside_closes_the_dropdown() {
+    let mut m = talked(3);
+    press(&mut m, "alt+s");
+    let (i, _) = tab_row(&mut m);
+    click(&mut m, 100, i + 3);
+    assert!(!menu_open(&mut m));
+    assert_eq!(super::presets::current(&m), Preset::Normal);
+    press(&mut m, "alt+s");
+    let (i, s) = tab_row(&mut m);
+    click(&mut m, col(&s[i], "Conversation"), i);
+    assert!(!menu_open(&mut m));
+    let f = screen(&mut m).join("\n");
+    assert!(!f.contains(super::presets::MENU_HOW), "{f}");
 }
 
-/// A suggested view has a star before its name, in orange; none without one.
+/// From another of the session's tabs, a click on Conversation shows the
+/// conversation, as it did, without the dropdown; ⌥s there shows the
+/// conversation with the dropdown open.
 #[test]
-fn a_suggested_tab_has_a_star() {
+fn the_tab_from_another_view_shows_the_conversation() {
+    let mut m = talked(3);
+    let (i, s) = tab_row(&mut m);
+    click(&mut m, col(&s[i], "Overview"), i);
+    assert_eq!(super::views::view_name(&m, KEY), "overview");
+    let (i, s) = tab_row(&mut m);
+    click(&mut m, col(&s[i], "Conversation"), i);
+    assert_eq!(super::views::view_name(&m, KEY), "conversation");
+    assert!(!menu_open(&mut m));
+    let (i, s) = tab_row(&mut m);
+    click(&mut m, col(&s[i], "Overview"), i);
+    press(&mut m, "alt+s");
+    assert_eq!(super::views::view_name(&m, KEY), "conversation");
+    assert!(menu_open(&mut m));
+}
+
+/// The dropdown's rows: the view showing marked ●, the one picked on ▸,
+/// the one suggested with ✦ (in orange) and why, and its keys.
+#[test]
+fn the_dropdown_marks_the_suggested_view() {
     use crate::style::ORANGE;
-    let c = rush_core::text::Color::Default;
-    let (plain, _) = super::presets::tabs(Preset::Normal, None, "alt+s", 80, c);
-    assert!(!plain[0].plain().contains('\u{2726}'));
-    let (rows, at) = super::presets::tabs(Preset::Normal, Some(Preset::Trail), "alt+s", 80, c);
-    let t = rows[0].plain();
-    assert!(
-        t.contains("\u{2726} Trail") && t.matches('\u{2726}').count() == 1,
-        "{t}"
+    let why = "long turns, many steps".to_string();
+    let rows = super::presets::menu_rows(Preset::Normal, Some((Preset::Trail, why)), 0, 120);
+    let plain: Vec<String> = rows
+        .iter()
+        .map(|l| l.plain().trim_end().to_string())
+        .collect();
+    assert_eq!(
+        plain,
+        [
+            " ▸ ● Normal     everything, as usual",
+            "     Chat       what did we say?",
+            "     Code       what did it change?",
+            "     Catch-up   what happened while I was away?",
+            "     Trail      where did the time go?  ✦ long turns, many steps",
+            "   ↑↓ · enter shows it · esc closes",
+        ]
     );
+    assert!(rows.iter().all(|l| l.width() == rows[0].width()));
     assert!(
-        rows[0]
+        rows[4]
             .spans
             .iter()
-            .any(|s| s.text == "\u{2726} " && s.style.fg == ORANGE)
+            .any(|s| s.text == "✦" && s.style.fg == ORANGE)
     );
-    assert_eq!(at.len(), 5);
+    // None suggested: no ✦; narrow, the rows are cut to fit.
+    let rows = super::presets::menu_rows(Preset::Code, None, 2, 30);
+    assert!(
+        rows.iter()
+            .all(|l| !l.plain().contains('✦') && l.width() <= 30)
+    );
+    assert!(
+        rows[2].plain().starts_with(" ▸ ● Code"),
+        "{}",
+        rows[2].plain()
+    );
 }

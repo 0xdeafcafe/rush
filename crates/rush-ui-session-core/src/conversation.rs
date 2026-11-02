@@ -117,24 +117,10 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     // A view that fits, at the moments it's worth saying (off: nothing).
     super::viewsuggest::look(m, key);
 
-    // The views' tabs sit above the first line, when there's room for them
-    // and the transcript still.
-    if rows < super::presets::TABS_MIN_ROWS {
-        return text(m, key, w, rows);
-    }
-    let cur = super::presets::current(m);
-    let hint = super::presets::key_hint(m);
-    let lit = if m.pane_idle { SUB } else { ORANGE };
-    // The view rush suggests has its ✦.
-    let sug = super::viewsuggest::suggested(m, key);
-    let (mut out, at) = super::presets::tabs(cur, sug, &hint, w, lit);
-    conn(m, key).vs.view_tabs = at;
-    if let Some(v) = m.session.as_mut() {
-        v.top += out.len();
-        v.top_off = out.len();
-    }
-    let n = rows - out.len();
-    out.extend(text(m, key, w, n));
+    // The views' dropdown, when open, hangs over its first rows under the
+    // Conversation tab.
+    let mut out = text(m, key, w, rows);
+    super::presets::draw_menu(m, key, &mut out, w);
     out
 }
 
