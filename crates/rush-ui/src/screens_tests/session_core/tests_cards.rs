@@ -750,11 +750,8 @@ My picks: 1a 2b.";
     press(&mut m, "enter");
     let c = cards(&mut m);
     assert_eq!((c.q_idx, c.q_cursor), (1, 1), "on to the next, at its pick");
+    assert!(ops(&fake).is_empty(), "nothing sent before the last pick");
     press(&mut m, "up");
-    press(&mut m, "enter");
-    let s = screen(&mut m).join("\n");
-    assert!(s.contains("sends your answers"), "the last page:\n{s}");
-    assert!(ops(&fake).is_empty(), "nothing sent before enter");
     press(&mut m, "enter");
     let sent: Vec<String> = ops(&fake)
         .into_iter()

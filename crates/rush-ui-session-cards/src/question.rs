@@ -296,6 +296,7 @@ pub fn card_rows(m: &mut Model, key: &str, i: &HostInfo, w: usize, max_h: usize)
     c.btns.clear();
     c.q_rows.clear();
     c.q_hit.clear();
+    c.q_edit_key = Some(crate::keybind::bound_key(m, EDIT_ANSWER));
     // A usage limit to decide on first, then what else waits under it
     // (cardRows, rushmode.go:3103).
     let mut out = Vec::new();
@@ -417,6 +418,19 @@ pub fn question_card(
     }
     c.q_rows = out.clone();
     out
+}
+
+/// The keymap's action for putting a decisions card's answers in the box
+/// to edit, not sending them.
+pub const EDIT_ANSWER: &str = "session.decide.edit";
+
+/// The key the decisions card's hint names for [`EDIT_ANSWER`]; empty
+/// when none is bound.
+fn edit_key(c: &Conn) -> String {
+    match c.q_edit_key.as_deref() {
+        None | Some("shift+enter") => "⇧enter".into(),
+        Some(k) => k.to_string(),
+    }
 }
 
 /// One option row of the list, and what a click on it presses.
@@ -584,24 +598,31 @@ pub fn draw_question(
         cl(&mut out, line([plain("  "), Span::new(send, face)]));
         cl(&mut out, Line::new());
         let ww = w.saturating_sub(6);
+        let edit = if c.q_on_tile {
+            String::new()
+        } else {
+            edit_key(c)
+        };
         let hint = if c.card_focus && c.q_decide && qs.len() == 1 {
-            keys_fit(
-                ww,
-                &[
-                    ("enter", "sends it"),
-                    (&change, "changes it"),
-                    ("s · esc", "sends nothing"),
-                ],
-            )
+            let mut p = vec![
+                ("enter", "sends it"),
+                (&change, "changes it"),
+                ("s · esc", "sends nothing"),
+            ];
+            if !edit.is_empty() {
+                p.insert(1, (&edit, "edit"));
+            }
+            keys_fit(ww, &p)
         } else if c.card_focus && c.q_decide {
-            keys_fit(
-                ww,
-                &[
-                    ("enter", "sends your answers"),
-                    (&change, "changes one"),
-                    ("s · esc", "sends nothing"),
-                ],
-            )
+            let mut p = vec![
+                ("enter", "sends your answers"),
+                (&change, "changes one"),
+                ("s · esc", "sends nothing"),
+            ];
+            if !edit.is_empty() {
+                p.insert(1, (&edit, "edit"));
+            }
+            keys_fit(ww, &p)
         } else if c.card_focus {
             keys_fit(
                 ww,
@@ -946,11 +967,23 @@ pub fn draw_question(
     let ww = w.saturating_sub(6);
     if c.card_focus {
         let range = format!("1–{n_opts}");
+        // A decision's last pick sends; the other key puts the answers in
+        // the box to edit instead.
+        let sends = c.q_decide && !c.q_on_tile && !q.multi;
+        let enter = if sends && qs.len() == 1 {
+            "sends"
+        } else {
+            "picks"
+        };
+        let edit = if sends { edit_key(c) } else { String::new() };
         let mut pairs: Vec<(&str, &str)> = if q.multi {
             vec![("↑↓", "choose"), ("enter", "ticks"), (&range, "tick one")]
         } else {
-            vec![("↑↓", "choose"), ("enter", "picks"), (&range, "pick one")]
+            vec![("↑↓", "choose"), ("enter", enter), (&range, "pick one")]
         };
+        if !edit.is_empty() {
+            pairs.insert(2, (&edit, "edit"));
+        }
         if qs.len() > 1 {
             pairs.push(("←→", "questions"));
         }
@@ -1341,6 +1374,11 @@ fn answer_question(
     if qs.len() == 1 && !c.q_decide {
         return send_answers(c, req);
     }
+    // A decisions card sends (or, on shift+enter, fills the box) with the
+    // pick that answers the last of them: no review in between.
+    if c.q_decide && qs.iter().all(|q| c.q_answer.contains_key(&q.question)) {
+        return send_answers(c, req);
+    }
     let mut next = qs.len();
     for k in 1..qs.len() {
         let j = (c.q_idx + k) % qs.len();
@@ -1359,6 +1397,16 @@ fn send_answers(c: &mut Conn, req: &Question) -> Res {
     if c.q_decide {
         let text = decision_answer(req, &c.q_answer);
         let again = c.q_again.as_ref().is_some_and(|q| q.id == req.id);
+        if c.q_edit && !text.is_empty() {
+            // Into the box to edit and send as any message: the card is
+            // done with, nothing goes to the host.
+            c.q_gone = req.id.clone();
+            c.q_for.clear();
+            c.q_own = false;
+            c.q_again = None;
+            c.q_answer.clear();
+            return Res::Do(Act::Edit(text));
+        }
         if !text.is_empty() {
             c.dec_answered = req.id.clone();
         }
@@ -2045,7 +2093,18 @@ fn keyed(
     empty: bool,
 ) -> Res {
     let mut input = i.input.clone();
+    // A key that fills the box instead of sending: shift+enter, alt+enter
+    // (for a terminal that can't tell shift+enter), or any pick made while
+    // text waits in the box, which isn't sent over (or taken as the
+    // answer: only "your own words" does that).
+    c.sync_question(req, i.decisions.as_ref());
+    let edit = c.q_decide && (s == "shift+enter" || s == "alt+enter");
+    let s = if edit { "enter" } else { s };
+    let boxed = c.q_decide && !c.q_own && !i.input.trim().is_empty();
+    let empty = empty || boxed && s == "enter";
+    c.q_edit = edit || boxed;
     let r = question_key(c, req, i.decisions.as_ref(), s, empty, &mut input);
+    c.q_edit = false;
     if input != i.input {
         set_input(m, key, &input);
     }

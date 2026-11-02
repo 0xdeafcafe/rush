@@ -4,7 +4,7 @@
     RUSH      Agents   Wall   [ ]
    ▀▀▀▀▀▀
 ───────╭─ ⌨ Keys ──────────────────────────────────────────────────────────────────────────────────────── f1 ─╮─────────
-  AGENT│ ❯ ▏find a key by its keys or what it does                                                   140 keys │T   TIME
+  AGENT│ ❯ ▏find a key by its keys or what it does                                                   141 keys │T   TIME
 ┃ Needs│ ──────────────────────────────────────────────────────────────────────────────────────────────────── │
 ▌ └─ ? │ Here · Agents and the Prompt ──────────────────────────────────────────────────────────────────────  │9   2m ●
 ▌      │ ▍ ↑                     the agent above                                                              │

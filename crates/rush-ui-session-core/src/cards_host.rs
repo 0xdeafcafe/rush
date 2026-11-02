@@ -199,6 +199,14 @@ fn act(m: &mut Model, key: &str, a: Act) -> Out {
             Out::Draw
         }
         Act::Answer { id, text } => answer(m, key, id, text),
+        Act::Edit(text) => {
+            // After what's typed, a blank line between.
+            let input = &mut conn(m, key).input;
+            let kept = input.string();
+            let sep = if kept.trim().is_empty() { "" } else { "\n\n" };
+            input.set(&format!("{}{sep}{text}", kept.trim_end()));
+            Out::Draw
+        }
         Act::DismissDecisions(id) if !conn(m, key).hosted() => dismiss_cold(m, key, id),
         Act::DismissDecisions(id) => send_op(m, key, Op::DismissDecisions(id)),
         Act::ContinueAtReset(yes) => send_op(m, key, Op::ContinueAtReset(yes)),

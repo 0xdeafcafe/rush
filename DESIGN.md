@@ -1790,6 +1790,17 @@ is made. Everything below is in `rush_ui::frame`.
   text kept: the card sits above the box) or alt+shift+j (the box's
   `Editor` set aside whole and put back once the card is answered or
   set aside). The list's needs-you marks don't read the hold.
+  Enter on a decisions card's pick sends (beyond Go, which asked "Send
+  these answers?" first): with several decisions it picks and moves on,
+  and the pick that leaves none unanswered sends them all together
+  (`answer_question` → `send_answers`, the combined `decision_answer`
+  text). ⇧enter (`session.decide.edit`; alt+enter too, where the terminal
+  can't tell it from enter, as ctrl+enter, the kitty keyboard in
+  rush-draw) puts the answers in the box instead (`Act::Edit`, after any
+  text there, a blank line between); enter, or a click, with text in the
+  box does the same, so nothing typed is sent over or lost. The review
+  page stays for ← and a digit to reach. The hint names the keys from the
+  keymap (`Conn::q_edit_key`).
   A decisions card stays on a session rush doesn't run now when its
   answers would wake or resume it (`HostInfo::wakes`: asleep, as Go, or
   stopped with no host running, beyond Go, whose card vanished there and

@@ -994,8 +994,8 @@ fn loader_model(msg: &str, open: bool) -> Model {
     m
 }
 
-/// Choosing the other option asks to send it, even as the only decision;
-/// enter then sends it in the answer format (TestDecisionsCardChooseAnother).
+/// Enter on the other option, the only decision, sends it at once in the
+/// answer format (TestDecisionsCardChooseAnother).
 #[test]
 fn decisions_card_choose_another() {
     let mut m = loader_model(LOADER_MSG, true);
@@ -1003,14 +1003,76 @@ fn decisions_card_choose_another() {
     card_key(&mut m, "k", &i, "up", true);
     card_key(&mut m, "k", &i, "down", true); // from its pick to "no"
     card_key(&mut m, "k", &i, "enter", true);
+    assert_eq!(answered(&mut m), vec!["1b. Committing the loader work: no"]);
+}
+
+/// With several decisions, enter picks and moves on; the enter that
+/// answers the last sends them all together.
+#[test]
+fn decisions_card_sends_when_all_answered() {
+    let mut m = decisions_model(DECISIONS_MSG);
+    let i = info(&m, "k").unwrap();
+    card_key(&mut m, "k", &i, "up", true);
+    card_key(&mut m, "k", &i, "enter", true);
+    assert!(acts(&mut m).is_empty(), "one of two is not all");
+    assert_eq!(m.cards().conns["k"].q_idx, 1);
+    card_key(&mut m, "k", &i, "enter", true);
+    assert_eq!(
+        answered(&mut m),
+        vec!["1a. Scope: the full recommendation\n\n2b. Answer format: keep Q:/A:"]
+    );
+}
+
+/// The edit hint is on the card, from the keymap.
+#[test]
+fn decisions_card_hint_names_the_edit_key() {
+    let mut m = loader_model(LOADER_MSG, true);
+    let i = info(&m, "k").unwrap();
+    card_key(&mut m, "k", &i, "up", true);
     let card = text(&rows(&mut m, 100, 0));
-    assert!(acts(&mut m).is_empty(), "a pick went without asking");
     assert!(
-        card.contains("Send this answer?") && card.contains("✓ no"),
+        card.contains("enter  sends") || card.contains("enter sends"),
         "{card}"
     );
-    card_key(&mut m, "k", &i, "enter", true);
-    assert_eq!(answered(&mut m), vec!["1b. Committing the loader work: no"]);
+    assert!(card.contains("⇧enter") && card.contains("edit"), "{card}");
+}
+
+/// shift+enter and alt+enter put the answer in the box to edit, sending
+/// nothing; the decision's card is done with.
+#[test]
+fn decisions_card_shift_and_alt_enter_fill_the_box() {
+    for k in ["shift+enter", "alt+enter"] {
+        let mut m = loader_model(LOADER_MSG, true);
+        let i = info(&m, "k").unwrap();
+        card_key(&mut m, "k", &i, "up", true);
+        card_key(&mut m, "k", &i, "down", true);
+        card_key(&mut m, "k", &i, k, true);
+        assert!(answered(&mut m).is_empty(), "{k} sent it");
+        assert_eq!(
+            acts(&mut m),
+            vec![Act::Edit("1b. Committing the loader work: no".into())],
+            "{k}"
+        );
+        let c = m.cards().conns["k"].clone();
+        assert_eq!(card_kind(&m, "k", &c, &i), "", "{k}: the card is done");
+    }
+}
+
+/// Text already in the box is not sent over: a pick puts the answer into
+/// the box after it.
+#[test]
+fn decisions_card_pick_keeps_typed_text() {
+    let mut m = loader_model(LOADER_MSG, true);
+    set_info(&mut m, |i| i.input = "and one more thing".into());
+    let i = info(&m, "k").unwrap();
+    card_key(&mut m, "k", &i, "up", true);
+    m.cards().conns.get_mut("k").unwrap().card_focus = true;
+    card_key(&mut m, "k", &i, "enter", false);
+    assert!(answered(&mut m).is_empty());
+    assert_eq!(
+        acts(&mut m),
+        vec![Act::Edit("1a. Committing the loader work: yes".into())]
+    );
 }
 
 /// Words of your own go as "1: their words" (TestDecisionsCardOwnWords).

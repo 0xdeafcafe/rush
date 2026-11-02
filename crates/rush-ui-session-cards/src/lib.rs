@@ -202,6 +202,9 @@ pub enum Act {
     DismissDecisions(String),
     /// Sends text as your next message.
     Send(String),
+    /// Puts text in the box to edit, after what's typed there, sending
+    /// nothing: a decisions card's answers on shift+enter.
+    Edit(String),
     /// Sends text, the answers to decisions card id, as your next message:
     /// waking or resuming a session rush doesn't run now, and bringing
     /// the card back with its answers when it doesn't go
@@ -347,6 +350,13 @@ pub struct Conn {
     pub q_own: bool,
     /// It's a decisions block, not a question of the agent's.
     pub q_decide: bool,
+    /// The key being pressed puts a decisions card's answers in the box to
+    /// edit (shift+enter, alt+enter, or enter with text in the box)
+    /// instead of sending them.
+    pub q_edit: bool,
+    /// The key the card's hint names for that, as the keymap has it; None
+    /// is the default, Some("") is none bound.
+    pub q_edit_key: Option<String>,
     /// It's drawn on a Wall tile, where there's no box to type in: your
     /// own words are typed in its session.
     pub q_on_tile: bool,
