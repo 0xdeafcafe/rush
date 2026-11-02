@@ -39,6 +39,7 @@ pub mod plugin;
 pub mod project;
 pub mod proxy;
 pub mod rpc;
+mod rpcread;
 pub mod sandbox;
 pub mod services;
 pub mod sidebar;

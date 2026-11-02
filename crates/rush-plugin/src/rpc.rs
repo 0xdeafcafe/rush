@@ -5,14 +5,22 @@
 //! to calls by id; notifications are taken in order.
 //! Ported from internal/plugin/rpc.go.
 //!
-//! Each connection has one thread reading it, blocked on the socket until
-//! a message comes; each request it's sent is answered on a thread of its
-//! own, as Go answers each in a goroutine.
+//! One thread reads every connection made on a descriptor (rpcread.rs,
+//! Rust-only): it hands a reply straight to its call and a request to a
+//! thread of its own, as Go answers each in a goroutine. A notification,
+//! and whatever comes after one before it's been taken, waits in the
+//! connection's queue, which a thread of its own works through while it
+//! has anything, so notifications are taken in order and a reply or a
+//! request never overtakes one. A connection on a reader with no
+//! descriptor (Conn::framed, Conn::lines) has a thread of its own reading
+//! it that takes each message itself, as before.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Read, Write};
+use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex};
@@ -22,6 +30,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::value::RawValue;
 
 use crate::ctx::{Ctx, CtxErr};
+use crate::rpcread::{self, Framing, Reader, Why};
 
 /// Bounds one message. A tool result bigger than this is a bug, and
 /// refusing it keeps a plugin from making rush allocate without limit.
@@ -183,7 +192,7 @@ fn drop_nulls(v: &mut serde_json::Value) -> bool {
 
 /// One message, either way.
 #[derive(Serialize, Deserialize, Default)]
-struct Message {
+pub(crate) struct Message {
     #[serde(default)]
     jsonrpc: String,
     #[serde(
@@ -213,6 +222,44 @@ struct Message {
 /// A member that's there, even as null, is Some: as a jsontext.Value is.
 fn present<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Raw>, D::Error> {
     Raw::deserialize(d).map(Some)
+}
+
+/// What a connection is handed, in the order it came.
+pub(crate) enum Item {
+    /// A message read.
+    Msg(Message),
+    /// An answer to write: a parse error, or a request refused.
+    Send(Message),
+    /// It ended, and why.
+    Finish(String),
+}
+
+/// What b says, or a parse error to answer it with.
+pub(crate) fn item_of(b: &[u8]) -> Item {
+    match parse_message(b) {
+        Some(m) => Item::Msg(m),
+        None => Item::Send(Message {
+            error: Some(Error::new(CODE_PARSE, "parse error")),
+            ..Default::default()
+        }),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Request,
+    Notification,
+    Response,
+    Neither,
+}
+
+fn kind(m: &Message) -> Kind {
+    match (m.method.is_empty(), m.id.is_some()) {
+        (false, true) => Kind::Request,
+        (false, false) => Kind::Notification,
+        (true, true) => Kind::Response,
+        (true, false) => Kind::Neither,
+    }
 }
 
 fn parse_message(b: &[u8]) -> Option<Message> {
@@ -355,6 +402,16 @@ struct Done {
     err: String,
 }
 
+/// What waits to be taken, in order; running while a thread is taking it.
+#[derive(Default)]
+struct Queue {
+    items: VecDeque<Item>,
+    running: bool,
+}
+
+/// A thread's rush folders (rush_state::thread_dirs).
+type Dirs = (Option<PathBuf>, Option<PathBuf>);
+
 struct Inner {
     writer: Mutex<Option<Box<dyn WriteMsg>>>,
     closer: Box<dyn Fn() + Send + Sync>,
@@ -367,6 +424,10 @@ struct Inner {
     done_cv: Condvar,
     ctx: Ctx,
     cancel: crate::ctx::Cancel,
+    queue: Mutex<Queue>,
+    /// The rush folders of the thread that made it, which every thread
+    /// it runs a handler on takes on.
+    dirs: Dirs,
 }
 
 /// A JSON-RPC 2.0 connection. Either side may call the other; calls run
@@ -378,21 +439,40 @@ pub struct Conn(Arc<Inner>);
 impl Conn {
     /// Speaks framed JSON-RPC over a socket: fd 3's socket pair, or the
     /// broker's. h may be None: every request then gets "method not found".
+    /// The process's one reader reads it.
     pub fn new(stream: UnixStream, h: Option<Handler>) -> io::Result<Conn> {
         let r = stream.try_clone()?;
         let closer = stream.try_clone()?;
-        Ok(Conn::framed(
-            r,
-            stream,
-            move || {
+        let Some(reader) = Reader::get() else {
+            return Ok(Conn::framed(r, stream, shutdown(closer), h));
+        };
+        let token = reader.token();
+        let conn = Conn::build(
+            Box::new(FramedWriter(stream)),
+            Box::new(move || {
                 let _ = closer.shutdown(std::net::Shutdown::Both);
-            },
-            h,
-        ))
+                rpcread::end(token, Why::Eof);
+            }),
+            h.clone(),
+        );
+        match reader.add(token, OwnedFd::from(r), conn.clone(), Framing::Frames) {
+            Ok(()) => Ok(conn),
+            Err(fd) => {
+                let r = UnixStream::from(fd);
+                let closer = r.try_clone()?;
+                Ok(Conn::start(
+                    Box::new(FramedReader(BufReader::with_capacity(64 << 10, r))),
+                    conn.take_writer(),
+                    Box::new(shutdown(closer)),
+                    h,
+                ))
+            }
+        }
     }
 
     /// Speaks framed JSON-RPC, reading r and writing w; closer ends both,
-    /// and must make a blocked read of r return.
+    /// and must make a blocked read of r return. A thread of its own reads
+    /// r.
     pub fn framed(
         r: impl Read + Send + 'static,
         w: impl Write + Send + 'static,
@@ -409,7 +489,8 @@ impl Conn {
 
     /// Speaks newline-delimited JSON-RPC (MCP's stdio transport), reading r
     /// and writing w. closer must make a blocked read of r return (see
-    /// sys::wakeable); closing also drops w, which closes it.
+    /// sys::wakeable); closing also drops w, which closes it. A thread of
+    /// its own reads r: [`Conn::lines_fd`] needs none.
     pub fn lines(
         r: impl Read + Send + 'static,
         w: impl Write + Send + 'static,
@@ -424,14 +505,48 @@ impl Conn {
         )
     }
 
-    fn start(
-        mut reader: Box<dyn ReadMsg>,
+    /// Speaks newline-delimited JSON-RPC reading r, an MCP server's stdout
+    /// pipe, and writing w, its stdin; the process's one reader reads r.
+    /// Closing it stops the reading ("file already closed", as
+    /// sys::wakeable's closer has it) and drops w, which closes it.
+    pub fn lines_fd(
+        r: OwnedFd,
+        w: impl Write + Send + 'static,
+        h: Option<Handler>,
+    ) -> io::Result<Conn> {
+        let mut r = r;
+        let mut writer: Box<dyn WriteMsg> = Box::new(LineWriter(w));
+        if let Some(reader) = Reader::get() {
+            let token = reader.token();
+            let conn = Conn::build(
+                writer,
+                Box::new(move || rpcread::end(token, Why::Closed)),
+                h.clone(),
+            );
+            match reader.add(token, r, conn.clone(), Framing::Lines) {
+                Ok(()) => return Ok(conn),
+                Err(fd) => {
+                    r = fd;
+                    writer = conn.take_writer();
+                }
+            }
+        }
+        let (rd, closer) = crate::sys::wakeable(r)?;
+        Ok(Conn::start(
+            Box::new(LineReader(BufReader::with_capacity(64 << 10, rd))),
+            writer,
+            Box::new(move || closer.close()),
+            h,
+        ))
+    }
+
+    fn build(
         writer: Box<dyn WriteMsg>,
         closer: Box<dyn Fn() + Send + Sync>,
         h: Option<Handler>,
     ) -> Conn {
         let (ctx, cancel) = Ctx::background().with_cancel();
-        let conn = Conn(Arc::new(Inner {
+        Conn(Arc::new(Inner {
             writer: Mutex::new(Some(writer)),
             closer,
             handler: h,
@@ -448,12 +563,33 @@ impl Conn {
             done_cv: Condvar::new(),
             ctx,
             cancel,
-        }));
+            queue: Mutex::new(Queue::default()),
+            dirs: rush_state::thread_dirs(),
+        }))
+    }
+
+    /// The writer of a connection never started, for one started another
+    /// way.
+    fn take_writer(&self) -> Box<dyn WriteMsg> {
+        lock(&self.0.writer)
+            .take()
+            .expect("a connection never started")
+    }
+
+    /// Reads with a thread of its own, which takes each message itself.
+    fn start(
+        mut reader: Box<dyn ReadMsg>,
+        writer: Box<dyn WriteMsg>,
+        closer: Box<dyn Fn() + Send + Sync>,
+        h: Option<Handler>,
+    ) -> Conn {
+        let conn = Conn::build(writer, closer, h);
         let c = conn.clone();
-        std::thread::Builder::new()
-            .name("plugin-rpc".into())
-            .spawn(move || c.read_loop(&mut *reader))
-            .expect("starting a thread");
+        rush_sys::threads::spawn_sized("plugin-rpc", rush_sys::threads::MEDIUM, move || {
+            rush_state::set_thread_dirs(c.0.dirs.clone());
+            c.read_loop(&mut *reader)
+        })
+        .expect("starting a thread");
         conn
     }
 
@@ -490,43 +626,117 @@ impl Conn {
     }
 
     fn read_loop(&self, reader: &mut dyn ReadMsg) {
-        let err = loop {
-            let b = match reader.read_msg() {
-                Ok(b) => b,
-                Err(e) => {
-                    self.close();
-                    break e.to_string();
+        loop {
+            match reader.read_msg() {
+                Ok(b) => self.take(item_of(&b)),
+                Err(e) => return self.finish(e.to_string()),
+            }
+        }
+    }
+
+    /// Takes what the shared reader read, in order: a reply or a request
+    /// at once while nothing waits (neither blocks: a request is answered
+    /// on a thread of its own), anything else after what waits, on a
+    /// thread that runs only while something does.
+    pub(crate) fn deliver(&self, item: Item) {
+        let mut q = lock(&self.0.queue);
+        let item = match item {
+            Item::Msg(m) if !q.running && q.items.is_empty() && kind(&m) != Kind::Notification => {
+                drop(q);
+                match kind(&m) {
+                    Kind::Response => self.reply(m),
+                    Kind::Request => {
+                        if let Some(no) = self.serve_async(m) {
+                            // Writing may block: the queue's thread writes.
+                            self.deliver(Item::Send(no));
+                        }
+                    }
+                    Kind::Notification | Kind::Neither => {}
+                }
+                return;
+            }
+            item => item,
+        };
+        q.items.push_back(item);
+        if q.running {
+            return;
+        }
+        q.running = true;
+        drop(q);
+        let c = self.clone();
+        let started = rush_sys::threads::spawn_sized(
+            "plugin-rpc-queue",
+            rush_sys::threads::MEDIUM,
+            move || {
+                rush_state::set_thread_dirs(c.0.dirs.clone());
+                c.drain();
+            },
+        );
+        if started.is_err() {
+            // Tried again when the next message comes.
+            lock(&self.0.queue).running = false;
+        }
+    }
+
+    /// Takes what waits until nothing does.
+    fn drain(&self) {
+        loop {
+            let item = {
+                let mut q = lock(&self.0.queue);
+                match q.items.pop_front() {
+                    Some(i) => i,
+                    None => {
+                        q.running = false;
+                        return;
+                    }
                 }
             };
-            let Some(m) = parse_message(&b) else {
-                let _ = self.send(Message {
-                    error: Some(Error::new(CODE_PARSE, "parse error")),
-                    ..Default::default()
-                });
-                continue;
-            };
-            match (m.method.is_empty(), m.id.is_some()) {
-                (false, true) => self.serve_async(m),
-                (false, false) => {
+            self.take(item);
+        }
+    }
+
+    /// Takes one thing it was handed, on a thread that may block.
+    fn take(&self, item: Item) {
+        match item {
+            Item::Msg(m) => match kind(&m) {
+                Kind::Request => {
+                    if let Some(no) = self.serve_async(m) {
+                        let _ = self.send(no);
+                    }
+                }
+                Kind::Notification => {
                     // Notifications are taken in order, so a stream of
                     // events arrives as it was sent.
                     if let Some(h) = &self.0.handler {
                         let _ = h(self, &self.0.ctx, &m.method, m.params.as_deref());
                     }
                 }
-                (true, true) => {
-                    let id =
-                        m.id.as_ref()
-                            .map(|i| i.get().to_string())
-                            .unwrap_or_default();
-                    let ch = lock(&self.0.pending).map.remove(&id);
-                    if let Some(ch) = ch {
-                        let _ = ch.send(Reply::Msg(m));
-                    }
-                }
-                (true, false) => {}
+                Kind::Response => self.reply(m),
+                Kind::Neither => {}
+            },
+            Item::Send(m) => {
+                let _ = self.send(m);
             }
-        };
+            Item::Finish(err) => self.finish(err),
+        }
+    }
+
+    /// Hands a reply to the call waiting for it.
+    fn reply(&self, m: Message) {
+        let id =
+            m.id.as_ref()
+                .map(|i| i.get().to_string())
+                .unwrap_or_default();
+        let ch = lock(&self.0.pending).map.remove(&id);
+        if let Some(ch) = ch {
+            let _ = ch.send(Reply::Msg(m));
+        }
+    }
+
+    /// Ends the connection for err: its Ctx first, then the calls waiting,
+    /// then whoever waits for it to close.
+    fn finish(&self, err: String) {
+        self.close();
         self.0.cancel.cancel();
         let waiting = {
             let mut p = lock(&self.0.pending);
@@ -542,9 +752,9 @@ impl Conn {
         self.0.done_cv.notify_all();
     }
 
-    /// Answers m on a thread of its own, or refuses it when too many are
-    /// being answered already or no thread can be had.
-    fn serve_async(&self, m: Message) {
+    /// Answers m on a thread of its own; when too many are being answered
+    /// already or no thread can be had, the refusal to send.
+    fn serve_async(&self, m: Message) -> Option<Message> {
         let busy = self
             .0
             .serving
@@ -553,32 +763,29 @@ impl Conn {
             })
             .is_err();
         if busy {
-            self.refuse(m.id, limited("requests at once"));
-            return;
+            return Some(refusal(m.id, limited("requests at once")));
         }
         let c = self.clone();
         let id = m.id.clone();
-        let spawned = std::thread::Builder::new()
-            .name("plugin-rpc-call".into())
-            .spawn(move || {
+        let spawned = rush_sys::threads::spawn_sized(
+            "plugin-rpc-call",
+            rush_sys::threads::MEDIUM,
+            move || {
+                rush_state::set_thread_dirs(c.0.dirs.clone());
                 let out = c.answer(m);
                 // Its place is free before its answer goes, so whoever
                 // has the answer may ask again.
                 c.0.serving.fetch_sub(1, Ordering::SeqCst);
                 let _ = c.send(out);
-            });
-        if let Err(e) = spawned {
-            self.0.serving.fetch_sub(1, Ordering::SeqCst);
-            self.refuse(id, Error::server(e));
+            },
+        );
+        match spawned {
+            Ok(_) => None,
+            Err(e) => {
+                self.0.serving.fetch_sub(1, Ordering::SeqCst);
+                Some(refusal(id, Error::server(e)))
+            }
         }
-    }
-
-    fn refuse(&self, id: Option<Raw>, e: Error) {
-        let _ = self.send(Message {
-            id,
-            error: Some(e),
-            ..Default::default()
-        });
     }
 
     fn answer(&self, m: Message) -> Message {
@@ -682,6 +889,22 @@ impl Conn {
             params,
             ..Default::default()
         })
+    }
+}
+
+fn refusal(id: Option<Raw>, e: Error) -> Message {
+    Message {
+        id,
+        error: Some(e),
+        ..Default::default()
+    }
+}
+
+/// A closer that shuts the socket down, which makes a blocked read of it
+/// return.
+fn shutdown(s: UnixStream) -> impl Fn() + Send + Sync + 'static {
+    move || {
+        let _ = s.shutdown(std::net::Shutdown::Both);
     }
 }
 
@@ -979,5 +1202,103 @@ mod tests {
         assert_eq!(got["method"], long);
         server.close();
         client.close();
+    }
+
+    #[test]
+    fn line_conn_reads_a_pipe_with_the_shared_reader() {
+        let (s_in, c_out) = std::io::pipe().unwrap();
+        let (c_in, s_out) = std::io::pipe().unwrap();
+        let h: Handler = Arc::new(|_, _, m, _| to_raw(&HashMap::from([("method", m)])).map(Some));
+        let server = Conn::lines_fd(OwnedFd::from(s_in), s_out, Some(h)).unwrap();
+        let client = Conn::lines_fd(OwnedFd::from(c_in), c_out, None).unwrap();
+        let got: HashMap<String, String> =
+            client.call(&Ctx::background(), "tools/list", &()).unwrap();
+        assert_eq!(got["method"], "tools/list");
+        let long = "x".repeat(300 << 10);
+        let got: HashMap<String, String> = client.call(&Ctx::background(), &long, &()).unwrap();
+        assert_eq!(got["method"], long);
+        // Closed, it stops reading as a closed wakeable reader does, and its
+        // stdin closing is the other side's end.
+        server.close();
+        assert_eq!(server.err(), "file already closed");
+        assert_eq!(client.err(), "EOF");
+        assert_eq!(
+            client.call::<_, serde_json::Value>(&Ctx::background(), "x", &()),
+            Err(CallError::Closed)
+        );
+    }
+
+    /// Each round, b answers a's call only after telling a something, and
+    /// a takes a while over what it's told.
+    #[test]
+    fn a_reply_never_overtakes_a_notification() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let l = log.clone();
+        let on_a: Handler = Arc::new(move |_, _, _, _| {
+            for _ in 0..200 {
+                std::thread::yield_now();
+            }
+            l.lock().unwrap().push("told");
+            Ok(None)
+        });
+        let on_b: Handler = Arc::new(|conn, _, _, _| {
+            conn.notify("told", &()).map_err(Error::server)?;
+            Ok(None)
+        });
+        let (a, _b) = pair(Some(on_a), Some(on_b));
+        for _ in 0..50 {
+            a.call::<_, serde_json::Value>(&Ctx::background(), "ask", &())
+                .unwrap();
+            log.lock().unwrap().push("answered");
+        }
+        assert_eq!(*log.lock().unwrap(), ["told", "answered"].repeat(50));
+    }
+
+    /// A request sent after a notification is answered only once the
+    /// notification has been taken.
+    #[test]
+    fn a_request_never_overtakes_a_notification() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let l = log.clone();
+        let on_a: Handler = Arc::new(move |_, _, method, _| {
+            if method == "told" {
+                for _ in 0..200 {
+                    std::thread::yield_now();
+                }
+            }
+            l.lock()
+                .unwrap()
+                .push(if method == "told" { "told" } else { "asked" });
+            Ok(None)
+        });
+        let (a, b) = pair(Some(on_a), None);
+        for _ in 0..50 {
+            b.notify("told", &()).unwrap();
+            b.call::<_, serde_json::Value>(&Ctx::background(), "ask", &())
+                .unwrap();
+        }
+        assert_eq!(*log.lock().unwrap(), ["told", "asked"].repeat(50));
+        a.close();
+    }
+
+    #[test]
+    fn handlers_see_the_rush_folder_of_the_thread_that_made_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        rush_state::set_thread_dir(Some(tmp.path().to_path_buf()));
+        let (tx, rx) = mpsc::channel();
+        let tx = Mutex::new(tx);
+        let h: Handler = Arc::new(move |_, _, _, _| {
+            let d = rush_state::dir();
+            tx.lock().unwrap().send(d.clone()).unwrap();
+            to_raw(&d).map(Some)
+        });
+        let (a, b) = pair(Some(h), None);
+        rush_state::set_thread_dir(None);
+        let got: std::path::PathBuf = b.call(&Ctx::background(), "ask", &()).unwrap();
+        assert_eq!(got, tmp.path(), "a request");
+        assert_eq!(rx.recv().unwrap(), tmp.path());
+        b.notify("told", &()).unwrap();
+        assert_eq!(rx.recv().unwrap(), tmp.path(), "a notification");
+        a.close();
     }
 }
