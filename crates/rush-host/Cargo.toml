@@ -30,4 +30,9 @@ fake = []
 
 [dev-dependencies]
 rush-testenv = { path = "../rush-testenv" }
+rush-claude.workspace = true
 tempfile.workspace = true
+
+[[bench]]
+name = "list"
+harness = false

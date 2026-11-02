@@ -1473,6 +1473,7 @@ dependencies = [
  "libc",
  "regex",
  "rush-bundled",
+ "rush-claude",
  "rush-convo",
  "rush-core",
  "rush-events",

@@ -22,6 +22,8 @@ struct Counting;
 
 static NOW: AtomicUsize = AtomicUsize::new(0);
 static TOTAL: AtomicUsize = AtomicUsize::new(0);
+/// Allocations made.
+static MADE: AtomicUsize = AtomicUsize::new(0);
 
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, l: Layout) -> *mut u8 {
@@ -29,6 +31,7 @@ unsafe impl GlobalAlloc for Counting {
         if !p.is_null() {
             TOTAL.fetch_add(l.size(), Relaxed);
             NOW.fetch_add(l.size(), Relaxed);
+            MADE.fetch_add(1, Relaxed);
         }
         p
     }
@@ -50,20 +53,24 @@ unsafe impl GlobalAlloc for Counting {
 #[global_allocator]
 static A: Counting = Counting;
 
-/// Runs f n times: microseconds and bytes allocated per run.
-fn measure(n: usize, mut f: impl FnMut(usize)) -> (f64, usize) {
-    let total = TOTAL.load(Relaxed);
+/// Runs f n times: microseconds, bytes allocated and allocations per run.
+fn measure(n: usize, mut f: impl FnMut(usize)) -> (f64, usize, usize) {
+    let (total, made) = (TOTAL.load(Relaxed), MADE.load(Relaxed));
     let t = Instant::now();
     for i in 0..n {
         f(i);
     }
     let us = t.elapsed().as_secs_f64() * 1e6 / n as f64;
-    (us, (TOTAL.load(Relaxed) - total) / n)
+    (
+        us,
+        (TOTAL.load(Relaxed) - total) / n,
+        (MADE.load(Relaxed) - made) / n,
+    )
 }
 
-fn report(name: &str, (us, bytes): (f64, usize)) {
+fn report(name: &str, (us, bytes, allocs): (f64, usize, usize)) {
     println!(
-        "{name:<34} {us:>10.1} µs {:>10.1} KiB/op",
+        "{name:<34} {us:>10.1} µs {:>10.1} KiB/op {allocs:>8} allocs/op",
         bytes as f64 / 1024.0
     );
 }

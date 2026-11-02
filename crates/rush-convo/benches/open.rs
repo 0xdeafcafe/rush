@@ -19,18 +19,24 @@ struct Counting;
 static NOW: AtomicUsize = AtomicUsize::new(0);
 static PEAK: AtomicUsize = AtomicUsize::new(0);
 static TOTAL: AtomicUsize = AtomicUsize::new(0);
+/// Allocations made in all, and live.
+static MADE: AtomicUsize = AtomicUsize::new(0);
+static LIVE: AtomicUsize = AtomicUsize::new(0);
 
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, l: Layout) -> *mut u8 {
         let p = unsafe { System.alloc(l) };
         if !p.is_null() {
             grow(l.size());
+            MADE.fetch_add(1, Relaxed);
+            LIVE.fetch_add(1, Relaxed);
         }
         p
     }
     unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
         unsafe { System.dealloc(p, l) };
         NOW.fetch_sub(l.size(), Relaxed);
+        LIVE.fetch_sub(1, Relaxed);
     }
     unsafe fn realloc(&self, p: *mut u8, l: Layout, new: usize) -> *mut u8 {
         let q = unsafe { System.realloc(p, l, new) };
@@ -78,12 +84,16 @@ struct Run {
     total: usize,
     peak: usize,
     retained: usize,
+    /// Allocations made, and those still live after.
+    made: usize,
+    live: usize,
 }
 
 fn measure(f: impl FnOnce() -> Session) -> (Run, Session) {
     let base = NOW.load(Relaxed);
     PEAK.store(base, Relaxed);
     let total0 = TOTAL.load(Relaxed);
+    let (made0, live0) = (MADE.load(Relaxed), LIVE.load(Relaxed));
     let t = Instant::now();
     let s = f();
     let ms = t.elapsed().as_secs_f64() * 1e3;
@@ -92,8 +102,86 @@ fn measure(f: impl FnOnce() -> Session) -> (Run, Session) {
         total: TOTAL.load(Relaxed) - total0,
         peak: PEAK.load(Relaxed) - base,
         retained: NOW.load(Relaxed) - base,
+        made: MADE.load(Relaxed) - made0,
+        live: LIVE.load(Relaxed).saturating_sub(live0),
     };
     (run, s)
+}
+
+/// The heap a copy of t holds: what t itself holds, near enough (a copy's
+/// buffers are no bigger than they need be).
+fn heap_of<T: Clone>(t: &T) -> usize {
+    let base = NOW.load(Relaxed);
+    let c = t.clone();
+    let n = NOW.load(Relaxed).saturating_sub(base);
+    drop(c);
+    n
+}
+
+/// Where a session's retained heap is: each part copied, as a copy holds
+/// what the original does.
+#[derive(Default)]
+struct Parts {
+    steps: usize,
+    calls: usize,
+    raw: usize,
+    output: usize,
+    turns: usize,
+    text: usize,
+    requests: usize,
+}
+
+impl Parts {
+    fn of(s: &Session) -> Parts {
+        Parts {
+            steps: heap_of(&s.steps().to_vec()),
+            calls: s.steps().iter().map(|st| heap_of(st.call())).sum(),
+            raw: s
+                .steps()
+                .iter()
+                .map(|st| st.call().raw.as_ref().map_or(0, |r| r.get().len()))
+                .sum(),
+            output: s.steps().iter().map(|st| st.output.len()).sum(),
+            turns: heap_of(&s.turns),
+            text: s
+                .turns
+                .iter()
+                .flat_map(|t| &t.items)
+                .map(|it| match it {
+                    Item::Text { text, .. } | Item::Thinking(text) => text.len(),
+                    _ => 0,
+                })
+                .sum(),
+            requests: heap_of(&s.requests),
+        }
+    }
+
+    fn add(&mut self, o: &Parts) {
+        self.steps += o.steps;
+        self.calls += o.calls;
+        self.raw += o.raw;
+        self.output += o.output;
+        self.turns += o.turns;
+        self.text += o.text;
+        self.requests += o.requests;
+    }
+}
+
+impl std::fmt::Display for Parts {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let m = |n: usize| n as f64 / MIB;
+        write!(
+            f,
+            "steps {:.1} MiB (calls {:.1}, their raw input {:.1}, output {:.1}), turns {:.1} MiB (text {:.1}), requests {:.1} MiB",
+            m(self.steps),
+            m(self.calls),
+            m(self.raw),
+            m(self.output),
+            m(self.turns),
+            m(self.text),
+            m(self.requests),
+        )
+    }
 }
 
 fn report(name: &str, runs: &[Run]) {
@@ -101,12 +189,14 @@ fn report(name: &str, runs: &[Run]) {
     ms.sort_by(f64::total_cmp);
     let r = &runs[0];
     println!(
-        "{name:<26} {:>7.1} ms (min {:.1})  allocated {:>6.1} MiB  peak {:>5.1} MiB  retained {:>5.1} MiB",
+        "{name:<26} {:>7.1} ms (min {:.1})  allocated {:>6.1} MiB in {} allocations  peak {:>5.1} MiB  retained {:>5.1} MiB in {} allocations",
         ms[ms.len() / 2],
         ms[0],
         r.total as f64 / MIB,
+        r.made,
         r.peak as f64 / MIB,
         r.retained as f64 / MIB,
+        r.live,
     );
 }
 
@@ -217,12 +307,50 @@ fn main() {
         images as f64 / MIB,
     );
     println!(
-        "sizes: Step {} B, Turn {} B, Item {} B, Request {} B",
+        "sizes: Step {} B, Turn {} B, Item {} B, Request {} B, Call {} B, Output {} B",
         size_of::<Step>(),
         size_of::<Turn>(),
         size_of::<Item>(),
         size_of::<Request>(),
+        size_of::<rush_core::tool::Call>(),
+        size_of::<rush_core::tool::Output>(),
     );
+    println!("heap: {}", Parts::of(&s));
+    // Its subagent runs, each read whole as the subagents view reads them
+    // for their numbers: what the session's reader holds while that view
+    // is open (and, before rush let go of runs no longer followed, after).
+    let subs = path.with_extension("").join("subagents");
+    let runs: Vec<PathBuf> = std::fs::read_dir(&subs)
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
+                .collect()
+        })
+        .unwrap_or_default();
+    if !runs.is_empty() {
+        let base = NOW.load(Relaxed);
+        let read: Vec<(Tail, Session)> = runs
+            .iter()
+            .map(|p| {
+                let mut t = Tail::subagent(p, rush_convo::decode(rush_claude::messages));
+                let mut s = Session::new();
+                let _ = t.read(&mut s);
+                (t, s)
+            })
+            .collect();
+        let held = NOW.load(Relaxed).saturating_sub(base);
+        let mut parts = Parts::default();
+        for (_, s) in &read {
+            parts.add(&Parts::of(s));
+        }
+        println!(
+            "its {} subagent runs read whole retain {:.1} MiB: {parts}",
+            read.len(),
+            held as f64 / MIB,
+        );
+        drop(read);
+    }
     // A reader that keeps a session read on copies it when the UI still
     // holds the last one (Arc::make_mut), rather than reading it again.
     let (copied, c) = measure(|| s.clone());
