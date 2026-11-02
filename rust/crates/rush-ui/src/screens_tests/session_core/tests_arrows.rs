@@ -7,25 +7,35 @@ use super::stepkeys_tests::add_fetch;
 use super::*;
 use crate::screens::plugin_ui::views::read;
 
-/// The ref of a row drawn closed (showing ▸), nothing picked after;
-/// panics with the screen when none is.
-fn closed_row(m: &mut Model) -> String {
+/// Folds the fetch step r (it is drawn open by default), nothing picked.
+/// Panics with the screen when it does not show closed.
+fn closed_row(m: &mut Model, r: &str) -> String {
+    m.session
+        .as_mut()
+        .unwrap()
+        .o
+        .open
+        .insert(r.to_string(), false);
     let shown = screen(m).join("\n");
     let v = m.session.as_mut().unwrap();
     v.sel.clear();
-    v.r.rows()
+    if !v
+        .r
+        .rows()
         .iter()
-        .find(|l| !l.r#ref.is_empty() && l.line.plain().contains('▸'))
-        .map(|l| l.r#ref.clone())
-        .unwrap_or_else(|| panic!("no closed row:\n{shown}"))
+        .any(|l| l.r#ref == r && l.line.plain().contains('▸'))
+    {
+        panic!("{r} not drawn closed:\n{shown}");
+    }
+    r.to_string()
 }
 
 /// A session 120 wide (no column) with a step in it, nothing picked.
 fn plain() -> (Model, String) {
     let fake = Fake::new();
     let mut m = open(agent("steer", State::Idle), &fake, 120, 40);
-    add_fetch(&mut m);
-    let r = closed_row(&mut m);
+    let r = add_fetch(&mut m);
+    let r = closed_row(&mut m, &r);
     (m, r)
 }
 
@@ -34,8 +44,8 @@ fn plain() -> (Model, String) {
 fn with_column(id: &str) -> (Model, String) {
     let mut m = rush_open(id, 220, 50, vec![view("tests", "Tests", "")]);
     read::state(&mut m, KEY).shut = true;
-    add_fetch(&mut m);
-    let r = closed_row(&mut m);
+    let r = add_fetch(&mut m);
+    let r = closed_row(&mut m, &r);
     assert!(
         crate::screens::session_core::side::has_items(&mut m, KEY),
         "the column has something to pick"
