@@ -1017,6 +1017,46 @@ pub struct CacheKeep {
         skip_serializing_if = "BTreeMap::is_empty"
     )]
     pub harnesses: BTreeMap<String, bool>,
+    /// No bump, nor step-in for a subagent, for a context smaller than
+    /// this many tokens: 0 is 20,000.
+    #[serde(
+        rename = "minTokens",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_zero_i64"
+    )]
+    pub min_tokens: i64,
+    /// The most bumps (or a subagent's step-ins) one wait may take: 0 is
+    /// auto, half a rewrite (5 for a 5-minute cache, 9 for an hour's).
+    #[serde(
+        rename = "refreshes",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_zero_i64"
+    )]
+    pub refreshes: i64,
+    /// Waiting subagents' caches kept too, apart from idle sessions': on
+    /// unless turned off (only false is written).
+    #[serde(
+        rename = "subagents",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_true"
+    )]
+    pub subagents: bool,
+    /// A subagent's command that took longer than its cache lives, last
+    /// time, starts in the background: on unless turned off.
+    #[serde(
+        rename = "ahead",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_true"
+    )]
+    pub ahead: bool,
+    /// A main conversation whose cache would lapse once it has been idle
+    /// this many minutes is compacted instead: 0 never.
+    #[serde(
+        rename = "compactAfter",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_zero_i64"
+    )]
+    pub compact_after: i64,
 }
 
 impl Default for CacheKeep {
@@ -1025,6 +1065,11 @@ impl Default for CacheKeep {
             on: true,
             minutes: 0,
             harnesses: BTreeMap::new(),
+            min_tokens: 0,
+            refreshes: 0,
+            subagents: true,
+            ahead: true,
+            compact_after: 0,
         }
     }
 }
@@ -1038,16 +1083,40 @@ impl CacheKeep {
         if self.minutes > 0 { self.minutes } else { 15 }
     }
 
+    /// The smallest context worth keeping, in tokens.
+    pub fn min_context(&self) -> i64 {
+        if self.min_tokens > 0 {
+            self.min_tokens
+        } else {
+            20_000
+        }
+    }
+
     /// Whether sessions of harness kind have their caches kept.
     pub fn on_for(&self, kind: &str) -> bool {
         self.harnesses.get(kind).copied().unwrap_or(self.on)
+    }
+
+    /// Whether sessions of harness kind have their waiting subagents'
+    /// caches kept: their own switch, and never where the harness's own
+    /// says off.
+    pub fn subagents_on_for(&self, kind: &str) -> bool {
+        self.subagents && self.harnesses.get(kind).copied().unwrap_or(true)
+    }
+
+    /// Whether a subagent's known-slow command, in a session of harness
+    /// kind, starts in the background.
+    pub fn ahead_for(&self, kind: &str) -> bool {
+        self.ahead && self.subagents_on_for(kind)
     }
 
     /// As rush-core's decide takes it.
     pub fn settings(&self) -> rush_core::cachekeep::Settings {
         rush_core::cachekeep::Settings {
             keep_for: self.keep_minutes() * 60_000,
-            ..rush_core::cachekeep::Settings::default()
+            min_context: self.min_context(),
+            max_bumps: self.refreshes.clamp(0, 99) as u32,
+            compact_after: self.compact_after.max(0) * 60_000,
         }
     }
 }
@@ -1407,6 +1476,61 @@ mod tests {
         assert!(s.contains(r#""convoView":"catch-up""#), "{s}");
         let back: Config = crate::json::from_slice(&b).unwrap();
         assert_eq!(back.convo_view, "catch-up");
+    }
+
+    #[test]
+    fn the_cache_and_its_knobs_as_set() {
+        use rush_core::cachekeep::Settings;
+        // A config that says nothing is today's rule.
+        let c: Config = serde_json::from_str("{}").unwrap();
+        assert_eq!(c.cache_keep.settings(), Settings::default());
+        assert!(c.cache_keep.subagents_on_for("claude"));
+        assert!(c.cache_keep.ahead_for("claude"));
+        let j = serde_json::to_string(&c).unwrap();
+        assert!(!j.contains("cacheKeep"), "{j}");
+        // config.json's cacheKeep: what decide gets, and the subagents'
+        // switches for claude.
+        let cases: &[(&str, Settings, bool, bool)] = &[
+            (
+                r#"{"minTokens":50000,"refreshes":3}"#,
+                Settings {
+                    min_context: 50_000,
+                    max_bumps: 3,
+                    ..Settings::default()
+                },
+                true,
+                true,
+            ),
+            (
+                r#"{"minutes":120,"compactAfter":60}"#,
+                Settings {
+                    keep_for: 120 * 60_000,
+                    compact_after: 60 * 60_000,
+                    ..Settings::default()
+                },
+                true,
+                true,
+            ),
+            (r#"{"subagents":false}"#, Settings::default(), false, false),
+            (r#"{"ahead":false}"#, Settings::default(), true, false),
+            (
+                r#"{"on":false,"harnesses":{"claude":false}}"#,
+                Settings::default(),
+                false,
+                false,
+            ),
+            (r#"{"on":false}"#, Settings::default(), true, true),
+        ];
+        for (j, want, subs, ahead) in cases {
+            let k: CacheKeep = serde_json::from_str(j).unwrap();
+            assert_eq!(&k.settings(), want, "{j}");
+            assert_eq!(k.subagents_on_for("claude"), *subs, "{j}");
+            assert_eq!(k.ahead_for("claude"), *ahead, "{j}");
+            // Written back, it reads the same.
+            let back: CacheKeep =
+                serde_json::from_str(&serde_json::to_string(&k).unwrap()).unwrap();
+            assert_eq!(back, k, "{j}");
+        }
     }
 
     #[test]
