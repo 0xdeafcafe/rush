@@ -123,10 +123,14 @@ fn dg(f: impl FnOnce(&mut Digest)) -> Digest {
     d
 }
 
+/// A rules case: its name, the digest, the moment and the view and reason
+/// wanted.
+type Case = (&'static str, Digest, Moment, Option<(Preset, &'static str)>);
+
 /// Each rule, in order, and when none can tell.
 #[test]
 fn the_rules_table() {
-    let cases: Vec<(&str, Digest, Moment, Option<(Preset, &str)>)> = vec![
+    let cases: Vec<Case> = vec![
         (
             "back to finished turns",
             dg(|d| {
