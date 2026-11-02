@@ -2,7 +2,8 @@
 //! commands, the Claude Code screens rush draws or opens, the session's
 //! commands, the custom commands and skills on disk, and claude: ones,
 //! for the /word at the cursor; a command's values after a space (/model
-//! so); rush's # commands; and @ mentions. ↑↓ choose, tab completes, enter
+//! so); rush's # commands; and @ mentions, agents then the session's
+//! files (mentionfiles.rs). ↑↓ choose, tab completes, enter
 //! runs (or completes, mid-message).
 //!
 //! After Go's internal/ui/sessionviews.go:465-473 (claudeCloudPicks),
@@ -31,7 +32,9 @@ use rush_ui_session_cards::claudescreen::{
     ALIASES, CLAUDE_CLOUD, CLAUDE_SCREENS, RUSH_COMMANDS, RUSH_SCREENS, acct_of, claude_cloud_name,
     claude_screen, kind_of, local_commands, off_command,
 };
-use rush_ui_session_cards::mention::{complete_mention, mention_matches, mention_rows};
+use rush_ui_session_cards::mention::{
+    complete_mention, mention_picks, pick_rows, pick_token, session_dir,
+};
 
 /// How long the commands on disk are kept before they're read again.
 const LOCAL_FOR: i64 = 30_000;
@@ -358,12 +361,13 @@ pub fn slash_lines(m: &mut Model, key: &str, w: usize) -> Vec<Line> {
             "rush's, for this agent · ↑↓ · tab completes · enter runs",
         );
     }
-    let n = mention_matches(m, &input, back).len();
-    if n > 0 {
+    let dir = session_dir(m, key);
+    let picks = mention_picks(m, &dir, &input, back);
+    if !picks.is_empty() {
         let c = conn(m, key);
-        c.slash_sel = c.slash_sel.min(n - 1);
+        c.slash_sel = c.slash_sel.min(picks.len() - 1);
         let sel = c.slash_sel;
-        return mention_rows(m, &input, back, sel, w);
+        return pick_rows(m, &picks, sel, w);
     }
     let mut cmds = pane_args(m, key);
     if cmds.is_empty() {
@@ -501,8 +505,13 @@ fn hash_key(m: &mut Model, key: &str, s: &str) -> Out {
     let back = input.len() - pos.min(input.len());
     let hash = hash_matches(m, &input, back, &[]);
     let (cmds, lead) = if hash.is_empty() {
-        let names = mention_matches(m, &input, back);
-        let cmds: Vec<Command> = names.iter().map(|n| cmd(n, "", "")).collect();
+        let dir = session_dir(m, key);
+        let picks = mention_picks(m, &dir, &input, back);
+        let seen: &Model = m;
+        let cmds: Vec<Command> = picks
+            .iter()
+            .map(|p| cmd(&pick_token(seen, p), "", ""))
+            .collect();
         (cmds, "@")
     } else {
         (hash, "#")

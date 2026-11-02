@@ -50,6 +50,7 @@ pub use rush_ui_base::imagerefs;
 pub mod limit;
 pub mod memcard;
 pub mod mention;
+pub mod mentionfiles;
 pub mod message;
 pub mod misdirect;
 pub mod pastes;

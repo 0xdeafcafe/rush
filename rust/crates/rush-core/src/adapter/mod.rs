@@ -211,6 +211,13 @@ pub trait Adapter: Send + Sync {
     fn reads_any_account(&self) -> bool {
         false
     }
+    /// Its sessions read `@path` in a message as that file (Claude
+    /// Code's file mentions, `@"a b.rs"` for a path with spaces), so a file
+    /// tagged in rush's box goes to it as typed; any other is sent the
+    /// plain path.
+    fn reads_at_paths(&self) -> bool {
+        false
+    }
 
     parts! {
         /// A home of its own (Go's Homer).

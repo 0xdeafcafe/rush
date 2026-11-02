@@ -244,6 +244,31 @@ fn row(f: &[String], want: impl Fn(&str) -> bool) -> usize {
         .unwrap_or_else(|| panic!("no such row in\n{}", f.join("\n")))
 }
 
+/// @ in the Agents box offers the files of the folder a new session
+/// starts in, under their heading; tab puts the one picked in the box.
+#[test]
+fn the_agents_box_offers_files() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(d.path().join("src/render")).unwrap();
+    std::fs::write(d.path().join("src/render/draw.rs"), "").unwrap();
+    let mut m = list();
+    for a in &mut m.agents {
+        a.job.cwd.clear();
+    }
+    let p = m.kept::<rush_ui_base::startdir::StartPick>();
+    p.dir = d.path().to_string_lossy().into_owned();
+    typed(&mut m, "@draw.");
+    let f = screen(&mut m);
+    let head = row(&f, |l| l.starts_with(" files"));
+    assert!(
+        f[head + 1].starts_with(" ▸ src/render/draw.rs"),
+        "{}",
+        f.join("\n")
+    );
+    press(&mut m, "tab");
+    assert_eq!(m.input.string(), "@src/render/draw.rs ");
+}
+
 /// enter on a pick that needs nothing more runs it; one that needs a
 /// value is completed with a space to type it after.
 #[test]

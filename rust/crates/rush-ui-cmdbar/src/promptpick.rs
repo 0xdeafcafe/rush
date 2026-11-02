@@ -14,7 +14,7 @@ use rush_core::text::Line;
 use super::fleetslash::{completed, hash_matches, needs_arg, picker_move, picker_rows};
 use crate::frame::{Out, Press};
 use crate::model::Model;
-use rush_ui_session_cards::mention::{complete_mention, mention_matches, mention_rows};
+use rush_ui_session_cards::mention::{complete_mention, mention_picks, pick_rows, pick_token};
 
 /// The picker's row, and what was typed when it was last looked at: the
 /// row goes back to the first as the text changes.
@@ -43,8 +43,9 @@ fn open(m: &Model) -> bool {
 }
 
 /// What the picker offers and the prefix its picks take: # for rush's
-/// commands, @ for an agent (promptPicker).
-fn picker(m: &Model) -> (Vec<Command>, &'static str) {
+/// commands, @ for an agent or a file of the folder a new session starts
+/// in (promptPicker).
+fn picker(m: &mut Model) -> (Vec<Command>, &'static str) {
     if !open(m) {
         return (Vec::new(), "");
     }
@@ -54,12 +55,15 @@ fn picker(m: &Model) -> (Vec<Command>, &'static str) {
     if !cmds.is_empty() {
         return (cmds, "#");
     }
-    let names = mention_matches(m, input, back);
-    if !names.is_empty() {
-        let cmds = names
-            .into_iter()
-            .map(|name| Command {
-                name,
+    let input = input.clone();
+    let dir = rush_ui_base::startdir::start_dir(m);
+    let picks = mention_picks(m, &dir, &input, back);
+    if !picks.is_empty() {
+        let seen: &Model = m;
+        let cmds = picks
+            .iter()
+            .map(|p| Command {
+                name: pick_token(seen, p),
                 ..Command::default()
             })
             .collect();
@@ -91,7 +95,9 @@ fn lines(m: &mut Model, w: usize) -> Vec<Line> {
     if lead == "@" {
         let input = m.input.text.clone();
         let back = input.len() - m.input.pos.min(input.len());
-        return mention_rows(m, &input, back, sel, w);
+        let dir = rush_ui_base::startdir::start_dir(m);
+        let picks = mention_picks(m, &dir, &input, back);
+        return pick_rows(m, &picks, sel, w);
     }
     picker_rows(
         &cmds,

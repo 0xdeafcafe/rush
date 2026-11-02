@@ -8,7 +8,9 @@
 //! mentionsIn :138, withMentions :165, mentionAgents :195, mentionMatches
 //! :212, mentionRows :222), stream.go (handleTint :232) and
 //! sessionviews.go (pickerRows :753). Sending to the agent tagged
-//! (replyTo) is the session's: [`Act::ReplyTo`].
+//! (replyTo) is the session's: [`Act::ReplyTo`]. The same picker offers
+//! the session folder's files after its agents ([`mention_picks`],
+//! mentionfiles.rs).
 
 use rush_core::agent::Agent;
 use rush_core::text::{Line, Span};
@@ -236,28 +238,183 @@ pub fn mention_matches(m: &Model, input: &[char], back: usize) -> Vec<String> {
 /// What the mention picker says under its rows (mentionHow).
 pub const MENTION_HOW: &str = "↑↓ · tab or enter tags · first, the message goes to them; later, the agent here is told how to reach them";
 
+/// An agent as the picker shows it: its name, its section and branch,
+/// and the handle its tag puts in the message.
+fn agent_row(m: &Model, i: usize) -> (String, String, String) {
+    let a = &m.agents[i];
+    let mut d = Vec::new();
+    if let Some(g) = m.group_of.get(&a.key).filter(|g| !g.is_empty()) {
+        d.push(g.clone());
+    }
+    if !a.branch.is_empty() {
+        d.push(a.branch.clone());
+    }
+    let id = super::handles::host_id(a);
+    let name = {
+        let n = one_line(&a.display_name);
+        if n.is_empty() { mention_name(a, id) } else { n }
+    };
+    (name, d.join(" · "), format!("@{}", mention_name(a, id)))
+}
+
 /// The picker: each agent by its name, with its section, branch and the
 /// handle its tag puts in the message (mentionRows).
 pub fn mention_rows(m: &Model, input: &[char], back: usize, sel: usize, w: usize) -> Vec<Line> {
-    let mut rows = Vec::new();
-    for i in mention_agents(m, input, back) {
-        let a = &m.agents[i];
-        let mut d = Vec::new();
-        if let Some(g) = m.group_of.get(&a.key).filter(|g| !g.is_empty()) {
-            d.push(g.clone());
-        }
-        if !a.branch.is_empty() {
-            d.push(a.branch.clone());
-        }
-        let id = super::handles::host_id(a);
-        let name = {
-            let n = one_line(&a.display_name);
-            if n.is_empty() { mention_name(a, id) } else { n }
-        };
-        let handle = format!("@{}", mention_name(a, id));
-        rows.push((name, d.join(" · "), handle));
-    }
+    let rows: Vec<_> = mention_agents(m, input, back)
+        .into_iter()
+        .map(|i| agent_row(m, i))
+        .collect();
     picker_rows(&rows, sel, w, "", MENTION_HOW)
+}
+
+/// One of the @ picker's rows: an agent to message, or a file of the
+/// session's folder, by its path from there.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Pick {
+    Agent(usize),
+    File(String),
+}
+
+/// What the mention picker says under its rows with a file picked.
+pub const FILE_HOW: &str = "↑↓ · tab or enter puts the file's path in the message";
+
+/// What @ offers at the cursor, in a box whose session works in dir ("" for
+/// none): the agents as [`mention_agents`] has them, then dir's files
+/// that match, best first. Only files once what's typed has a / or a .,
+/// as no handle does.
+pub fn mention_picks(m: &mut Model, dir: &str, input: &[char], back: usize) -> Vec<Pick> {
+    let Some((_, _, q)) = at_token(input, back) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    if !q.contains(['/', '.']) {
+        out.extend(mention_agents(m, input, back).into_iter().map(Pick::Agent));
+    }
+    let files = crate::mentionfiles::files_for(m, dir, &q);
+    out.extend(files.iter().cloned().map(Pick::File));
+    out
+}
+
+/// What a pick puts after the @: an agent's handle, or a file's path,
+/// quoted when it has a space.
+pub fn pick_token(m: &Model, p: &Pick) -> String {
+    match p {
+        Pick::Agent(i) => mention_name(&m.agents[*i], super::handles::host_id(&m.agents[*i])),
+        Pick::File(f) => crate::mentionfiles::file_token(f),
+    }
+}
+
+/// The folder session key works in: where its agent is now, else where
+/// it began.
+pub fn session_dir(m: &mut Model, key: &str) -> String {
+    if let Some(a) = crate::sess::agent(m, key).filter(|a| !a.job.cwd.is_empty()) {
+        return a.job.cwd.clone();
+    }
+    crate::sess::conn(m, key).info.began.cwd.clone()
+}
+
+/// The @ picker's rows, w wide, sel picked: agents as [`mention_rows`]
+/// draws them, files by their path; with files among them, each kind
+/// under a dim heading, "agents" then "files".
+pub fn pick_rows(m: &Model, picks: &[Pick], sel: usize, w: usize) -> Vec<Line> {
+    let headed = picks.iter().any(|p| matches!(p, Pick::File(_)));
+    let start = sel.saturating_sub(5);
+    let end = picks.len().min(start + 6);
+    let agents: Vec<Option<(String, String, String)>> = picks[start..end]
+        .iter()
+        .map(|p| match p {
+            Pick::Agent(i) => Some(agent_row(m, *i)),
+            Pick::File(_) => None,
+        })
+        .collect();
+    let name_w = agents
+        .iter()
+        .flatten()
+        .map(|r| r.0.chars().count() + 1)
+        .max()
+        .unwrap_or(0)
+        .min(28);
+    let mut out = Vec::new();
+    for (i, p) in picks.iter().enumerate().take(end).skip(start) {
+        let file = matches!(p, Pick::File(_));
+        if headed && (i == start || file != matches!(picks[i - 1], Pick::File(_))) {
+            let word = if file { "files" } else { "agents" };
+            out.push(on_ground(line([plain(" "), sp(word, DIM)]), w, CHROME_BG));
+        }
+        let row = match (p, &agents[i - start]) {
+            (Pick::File(f), _) => {
+                let room = w.saturating_sub(6).max(10);
+                let fw = rush_core::text::width(f);
+                let shown = if fw > room {
+                    crate::frame::sheet::truncate_left(f, fw - room + 1, "…")
+                } else {
+                    f.clone()
+                };
+                line([Span::new(shown, bold(BRIGHT))])
+            }
+            (_, Some((name, desc, tag))) => row_line(name, desc, tag, name_w, w, ""),
+            _ => Line::new(),
+        };
+        out.push(framed(row, i == sel, w));
+    }
+    let how = match picks.get(sel) {
+        Some(Pick::File(_)) => FILE_HOW,
+        _ => MENTION_HOW,
+    };
+    out.push(foot(sel, picks.len(), end - start, how, w));
+    out
+}
+
+/// A picker row's name, what it is and its tag at the right, w wide.
+fn row_line(name: &str, desc: &str, tag: &str, name_w: usize, w: usize, lead: &str) -> Line {
+    let t = if tag.is_empty() {
+        String::new()
+    } else {
+        format!("  {tag}")
+    };
+    let room =
+        10.max(w as isize - name_w as isize - 7 - rush_core::text::width(&t) as isize) as usize;
+    let mut row = line([
+        Span::new(fit_str(&format!("{lead}{name}"), name_w + 1), bold(BRIGHT)),
+        plain("  "),
+        sp(
+            rush_draw::truncate(&rush_convo::render::key_word(&one_line(desc)), room, "…")
+                .into_owned(),
+            DIM,
+        ),
+    ]);
+    if !t.is_empty() {
+        row.spans.push(sp(t, DIM));
+    }
+    row
+}
+
+/// A picker row on its ground: the one picked on the selection's with ▸.
+fn framed(row: Line, picked: bool, w: usize) -> Line {
+    if picked {
+        let mut l = line([sp(" ▸ ", ORANGE)]);
+        join(&mut l, row);
+        on_ground(l, w, SEL_BG)
+    } else {
+        let mut l = line([plain("   ")]);
+        join(&mut l, row);
+        on_ground(l, w, CHROME_BG)
+    }
+}
+
+/// The line under a picker's rows: where the pick is when not all are
+/// shown, and how.
+fn foot(sel: usize, n: usize, shown: usize, how: &str, w: usize) -> Line {
+    let more = if n > shown {
+        format!("{} of {} · ", sel + 1, n)
+    } else {
+        String::new()
+    };
+    on_ground(
+        line([plain("   "), sp(format!("{more}{how}"), DIM)]),
+        w,
+        CHROME_BG,
+    )
 }
 
 /// A picker's rows over the box: name, what it is, a tag at the right;
@@ -279,44 +436,12 @@ pub fn picker_rows(
         .min(28);
     let mut out = Vec::new();
     for (i, (name, desc, tag)) in rows.iter().enumerate().take(end).skip(start) {
-        let t = if tag.is_empty() {
-            String::new()
-        } else {
-            format!("  {tag}")
-        };
-        let room =
-            10.max(w as isize - name_w as isize - 7 - rush_core::text::width(&t) as isize) as usize;
-        let mut row = line([
-            Span::new(fit_str(&format!("{lead}{name}"), name_w + 1), bold(BRIGHT)),
-            plain("  "),
-            sp(
-                rush_draw::truncate(&rush_convo::render::key_word(&one_line(desc)), room, "…")
-                    .into_owned(),
-                DIM,
-            ),
-        ]);
-        if !t.is_empty() {
-            row.spans.push(sp(t, DIM));
-        }
-        if i == sel {
-            let mut l = line([sp(" ▸ ", ORANGE)]);
-            join(&mut l, row);
-            out.push(on_ground(l, w, SEL_BG));
-        } else {
-            let mut l = line([plain("   ")]);
-            join(&mut l, row);
-            out.push(on_ground(l, w, CHROME_BG));
-        }
+        out.push(framed(
+            row_line(name, desc, tag, name_w, w, lead),
+            i == sel,
+            w,
+        ));
     }
-    let more = if rows.len() > end - start {
-        format!("{} of {} · ", sel + 1, rows.len())
-    } else {
-        String::new()
-    };
-    out.push(on_ground(
-        line([plain("   "), sp(format!("{more}{how}"), DIM)]),
-        w,
-        CHROME_BG,
-    ));
+    out.push(foot(sel, rows.len(), end - start, how, w));
     out
 }

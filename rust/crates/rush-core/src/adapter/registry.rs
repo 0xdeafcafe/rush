@@ -308,6 +308,16 @@ impl Registry {
         self.get(k).is_some_and(|a| a.claude_transcripts())
     }
 
+    /// Whether agent k reads `@path` in a message as that file: k itself,
+    /// or the harness it rides (an Ollama model in Claude Code does).
+    pub fn reads_at_paths(&self, k: &str) -> bool {
+        if self.get(k).is_some_and(|a| a.reads_at_paths()) {
+            return true;
+        }
+        let h = self.harness_of(k);
+        h.as_str() != k && self.get(h.as_str()).is_some_and(|a| a.reads_at_paths())
+    }
+
     /// Whether agent k's models stay warm in the cloud.
     pub fn stays_warm(&self, k: &str) -> bool {
         self.get(k).is_some_and(|a| a.warm())
@@ -1268,6 +1278,7 @@ mod tests {
         provider: Option<&'static str>,
         on_plan: bool,
         sign_in: bool,
+        reads_at: bool,
     }
 
     impl Adapter for Agent {
@@ -1304,6 +1315,9 @@ mod tests {
         }
         fn plan_rider(&self) -> Option<&dyn PlanRider> {
             self.rides.map(|_| self as &dyn PlanRider)
+        }
+        fn reads_at_paths(&self) -> bool {
+            self.reads_at
         }
     }
 
@@ -1373,6 +1387,30 @@ mod tests {
             ..Agent::default()
         });
         r
+    }
+
+    // A file tagged in the box goes as @path to a harness that reads it,
+    // and to a model riding that harness; the rest get the plain path.
+    #[test]
+    fn reads_at_paths_follows_the_harness() {
+        let r = fleet();
+        r.register(Agent {
+            kind: "claude",
+            name: "Claude Code",
+            reads_at: true,
+            ..Agent::default()
+        });
+        r.register(Agent {
+            kind: "ollama",
+            name: "Ollama",
+            rides: Some("claude"),
+            ..Agent::default()
+        });
+        assert!(r.reads_at_paths("claude"));
+        assert!(r.reads_at_paths("ollama"), "it rides Claude Code");
+        assert!(!r.reads_at_paths("pi"));
+        assert!(!r.reads_at_paths("claude-pi"), "it rides Pi");
+        assert!(!r.reads_at_paths("nobody"));
     }
 
     #[test]

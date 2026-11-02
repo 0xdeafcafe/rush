@@ -108,6 +108,9 @@ pub fn start_hosted(m: &mut Model, text: &str, dir: &str, ask: Option<HostedStar
     // Each agent starts with what its own Settings page says, or what the
     // start sheet picked for this one session.
     let next = next_start(m, dir);
+    // A file tagged with @ goes as its plain path to a harness that
+    // doesn't read @path.
+    let text = rush_ui_session_cards::mentionfiles::send_files(&m.reg, &next.kind, dir, &text);
     let why = m.reg.unreadable(&next.kind, &next.model, &images);
     if !why.is_empty() {
         m.flash_err(&why);

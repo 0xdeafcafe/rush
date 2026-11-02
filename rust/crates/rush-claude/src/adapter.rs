@@ -216,6 +216,11 @@ impl adapter::Adapter for Claude {
     fn takes_subagent_messages(&self) -> bool {
         true
     }
+    /// Claude Code reads `@path` (and `@"a b.rs"`) in a prompt as that
+    /// file.
+    fn reads_at_paths(&self) -> bool {
+        true
+    }
 
     rush_core::has!(
         homer: Homer,
@@ -672,6 +677,12 @@ mod tests {
     #[test]
     fn its_subagents_take_messages() {
         assert!(super::Claude::new().takes_subagent_messages());
+    }
+
+    // A file tagged in rush's box goes to Claude Code as @path.
+    #[test]
+    fn it_reads_at_paths() {
+        assert!(super::Claude::new().reads_at_paths());
     }
 
     // Claude Code says Yes to everything Go's says it does (claude.go:62),

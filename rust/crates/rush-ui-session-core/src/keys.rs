@@ -723,6 +723,11 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
     let (text, mut images) = c.imgs.resolve(&text);
     let (text, typed) = extract_images(&text, &look_disk);
     images.extend(typed);
+    // A file tagged with @ goes as its plain path to a harness that
+    // doesn't read @path.
+    let kind = rush_ui_session_cards::claudescreen::kind_of(m, key);
+    let dir = rush_ui_session_cards::mention::session_dir(m, key);
+    let text = rush_ui_session_cards::mentionfiles::send_files(&m.reg, &kind, &dir, &text);
     let t = m.now;
     let c = conn(m, key);
     c.input.clear_sent();

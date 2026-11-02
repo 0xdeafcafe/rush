@@ -1925,6 +1925,7 @@ dependencies = [
  "rush-ui-settings",
  "rush-ui-social",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
