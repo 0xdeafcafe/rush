@@ -1,0 +1,60 @@
+[33mf4de2c0[m [33m([1;36mHEAD -> [1;32mmain[33m)[m test(convo): tests never sleep
+[33mf47aebd[m test(ui): a session moves with its account
+[33m1a26f88[m fix(convo): a session moves with its account
+[33m5675f6a[m fix(convo): faster startup
+[33mfc39472[m refactor(ui): rush why says what rush did
+[33me8c1474[m test(ui): the list keeps its place
+[33me8e7278[m docs(core): rush why says what rush did
+[33me39639b[m fix(convo): tests never sleep
+[33m16353d0[m docs(convo): rush why says what rush did
+[33mbe4c5ce[m feat(core): a session moves with its account
+[33mfe3c9c8[m fix(ui): a session moves with its account
+[33m973f798[m docs(core): faster startup
+[33md39630d[m refactor(convo): tests never sleep
+[33m27e9e06[m refactor(core): the list keeps its place
+[33m03a56cc[m feat(core): rush why says what rush did
+[33mfc8e80b[m fix(core): the list keeps its place
+[33m40783f0[m fix(host): faster startup
+[33m3d93fd4[m refactor(host): tests never sleep
+[33m8b5ab3e[m docs(core): the list keeps its place
+[33me8f6e0b[m test(convo): faster startup
+[33md0a6ec1[m refactor(convo): faster startup
+[33m2179b37[m refactor(core): faster startup
+[33m82b3359[m feat(convo): a session moves with its account
+[33m9bca3cb[m feat(core): a session moves with its account
+[33m243d357[m docs(ui): faster startup
+[33m0fcf31c[m test(convo): the list keeps its place
+[33me21b37c[m refactor(ui): a session moves with its account
+[33m30f9705[m test(ui): the list keeps its place
+[33m81f98b5[m docs(ui): the list keeps its place
+[33m7178ba0[m test(core): tests never sleep
+[33m73ccef0[m refactor(convo): faster startup
+[33mf10637c[m fix(host): faster startup
+[33me48b966[m fix(convo): a session moves with its account
+[33m6aa8b9e[m feat(convo): rush why says what rush did
+[33m50e40d5[m feat(core): rush why says what rush did
+[33m12b80ae[m fix(host): the list keeps its place
+[33me5a3863[m fix(host): a session moves with its account
+[33m40cbacd[m fix(convo): a session moves with its account
+[33mbf268ea[m feat(convo): rush why says what rush did
+[33m29acf1a[m fix(core): rush why says what rush did
+[33mfe7b8ae[m refactor(convo): tests never sleep
+[33m6bd8c67[m fix(host): tests never sleep
+[33m179a071[m test(ui): tests never sleep
+[33m8dd63cb[m docs(convo): the list keeps its place
+[33m626467b[m test(host): faster startup
+[33mf5f554e[m feat(ui): a session moves with its account
+[33mf8c110f[m feat(ui): tests never sleep
+[33m459c945[m feat(core): tests never sleep
+[33mc17a926[m fix(convo): tests never sleep
+[33m67ec326[m fix(convo): tests never sleep
+[33m16e6fec[m test(ui): a session moves with its account
+[33m6ce193c[m feat(host): the list keeps its place
+[33ma26aa0a[m feat(host): the list keeps its place
+[33m9bb183e[m fix(ui): tests never sleep
+[33mdcded20[m feat(convo): the list keeps its place
+[33m56d2a68[m refactor(convo): tests never sleep
+[33m9f27f52[m fix(ui): faster startup
+[33mb5a432c[m fix(ui): a session moves with its account
+[33m430b91e[m feat(core): a session moves with its account
+[33meea7bb6[m test(host): faster startup

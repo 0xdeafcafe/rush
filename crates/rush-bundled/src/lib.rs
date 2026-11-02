@@ -7,7 +7,8 @@
 //! from `internal/remote/plugins.go` (remote.rs). Each bundled plugin has
 //! the name, manifest and behaviour its Go one has, so Go and Rust rush
 //! share their switches, settings and data folders. apple_voice, rush's
-//! own push-to-talk switch, is new in the Rust port.
+//! own push-to-talk switch, and contextguard, which keeps agents'
+//! context lean from their tool calls' hooks, are new in the Rust port.
 //!
 //! A bundled plugin's code is rush's own: the broker starts it as `rush
 //! plugin run <name>`, speaking rush's protocol on fd 3 (see
@@ -25,6 +26,7 @@ pub mod agtools;
 pub mod apple_voice;
 pub mod clean;
 pub mod cleanup;
+pub mod contextguard;
 pub mod drafts;
 pub mod drive;
 pub mod gate;
@@ -46,6 +48,7 @@ pub fn bundles() -> Vec<Bundle> {
     let mut out = vec![
         apple_voice::bundle(),
         cleanup::bundle(),
+        contextguard::bundle(),
         drafts::bundle(),
         drive::bundle(),
         gate::bundle(),
@@ -324,6 +327,7 @@ mod tests {
             [
                 "apple-voice",
                 "cleanup",
+                "context-guard",
                 "drafts",
                 "drive",
                 "gate",
