@@ -132,7 +132,6 @@ fn repo_plugins_load() {
 /// neighbours, built from the Go source with Go rush's own plugin package,
 /// answers rush's calls and calls rush back, sandboxed.
 #[test]
-#[cfg(target_os = "macos")]
 fn neighbours_speaks_the_protocol() {
     let _h = Home::new();
     let Some(dir) = install_example(
@@ -184,7 +183,6 @@ fn neighbours_speaks_the_protocol() {
 /// reconnect, built from its own module with an RPC of its own written to
 /// the protocol's description, speaks it with Rust rush too.
 #[test]
-#[cfg(target_os = "macos")]
 fn reconnect_speaks_the_protocol() {
     let _h = Home::new();
     let src = repo().join("plugins/examples/reconnect");
@@ -220,7 +218,6 @@ fn reconnect_speaks_the_protocol() {
 /// your files, write outside its data folder, start a program, reach the
 /// internet, localhost or rush's own sockets.
 #[test]
-#[cfg(target_os = "macos")]
 fn sandbox_holds() {
     let home = Home::new();
     let dir = rush_plugin::root().join("probe");

@@ -1029,7 +1029,6 @@ mod tests {
         fs::create_dir_all(dir).unwrap();
         let p = dir.join(name);
         fs::write(&p, "#!/bin/sh\n").unwrap();
-        #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();

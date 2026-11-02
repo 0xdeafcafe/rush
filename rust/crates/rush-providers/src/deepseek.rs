@@ -458,7 +458,6 @@ mod tests {
 
         let dsh = bin.path().join("dsh");
         std::fs::write(&dsh, "#!/bin/sh\n").unwrap();
-        #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&dsh, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -498,7 +497,6 @@ mod tests {
     /// A program at dir/name that checks it was run with args, then answers
     /// each request it's sent with the next line of fixture, keeping the
     /// requests in log (Go's fakeProgram).
-    #[cfg(unix)]
     fn fake_program(dir: &Path, name: &str, args: &str, fixture: &Path, log: &Path) -> String {
         use std::os::unix::fs::PermissionsExt;
         let script = format!(
@@ -535,7 +533,6 @@ cat > /dev/null
     // deepseek_test.go: TestStart: a session starts over ACP with dsh's acp
     // profile, in the model asked for; a mode, which dsh hasn't, is left
     // alone.
-    #[cfg(unix)]
     #[test]
     fn start() {
         let bin = tempfile::tempdir().unwrap();

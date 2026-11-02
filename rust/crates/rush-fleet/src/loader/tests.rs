@@ -1206,7 +1206,6 @@ fn begin(l: &mut Loader, t: Ms) {
 
 // A cache that looked at a watched file is trusted until the file
 // changes, a sweep is due, or a load can't tell what changed.
-#[cfg(target_os = "macos")]
 #[test]
 fn fresh() {
     let d = tempfile::tempdir().unwrap();
@@ -1268,7 +1267,6 @@ fn fresh() {
 // caller tells: a path newly watched or told changed is looked at again,
 // one quiet since is trusted, and a sweep or a load told "can't tell"
 // trusts nothing.
-#[cfg(target_os = "macos")]
 #[test]
 fn fresh_shared() {
     let d = tempfile::tempdir().unwrap();
@@ -1303,7 +1301,6 @@ fn fresh_shared() {
 
 // A row with no subagents folder, rewound to a conversation that has one
 // in the same quiet project, counts the new one's runs.
-#[cfg(target_os = "macos")]
 #[test]
 fn subagents_follow_rewind() {
     let d = tempfile::tempdir().unwrap();
@@ -1343,7 +1340,6 @@ fn subagents_follow_rewind() {
 
 // A transcript found is trusted while it's watched and quiet; removed, it
 // isn't found there again.
-#[cfg(target_os = "macos")]
 #[test]
 fn transcript_of_trusted() {
     let d = tempfile::tempdir().unwrap();

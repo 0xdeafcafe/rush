@@ -36,7 +36,6 @@ const QUERIES: [&str; 8] = [
 
 /// Instructions this process has retired (macOS), else 0.
 fn instructions() -> u64 {
-    #[cfg(target_os = "macos")]
     {
         let mut ri: libc::rusage_info_v4 = unsafe { std::mem::zeroed() };
         // SAFETY: ri is a rusage_info_v4 to write into.

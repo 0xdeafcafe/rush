@@ -61,7 +61,6 @@ fn write_lean_preload() -> Option<PathBuf> {
         return Some(path);
     }
     fs::create_dir_all(&d).ok()?;
-    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(&d, fs::Permissions::from_mode(0o700));
@@ -71,7 +70,6 @@ fn write_lean_preload() -> Option<PathBuf> {
     let tmp = PathBuf::from(tmp);
     let mut o = fs::OpenOptions::new();
     o.write(true).create(true).truncate(true);
-    #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
         o.mode(0o600);

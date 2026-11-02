@@ -141,7 +141,6 @@ pub fn pi_config(models: &[Model], base: &str) -> Value {
 pub(crate) fn make_private_dir(dir: &Path) -> std::io::Result<()> {
     let mut b = std::fs::DirBuilder::new();
     b.recursive(true);
-    #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;
         b.mode(0o700);
@@ -157,7 +156,6 @@ pub(crate) fn write_private(dir: &Path, name: &str, b: &[u8]) -> std::io::Result
         use std::io::Write;
         let mut opts = std::fs::OpenOptions::new();
         opts.write(true).create(true).truncate(true);
-        #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
             opts.mode(0o600);
@@ -439,7 +437,6 @@ mod tests {
         assert_eq!(small["reasoning"], false);
         assert!(small.get("contextWindow").is_none());
         assert!(!small["input"].as_array().unwrap().contains(&json!("image")));
-        #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(

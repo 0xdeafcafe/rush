@@ -754,15 +754,7 @@ pub(crate) fn cache_dir(name: &str) -> String {
     if home.is_empty() {
         return String::new();
     }
-    let base = if cfg!(target_os = "macos") {
-        format!("{home}/Library/Caches")
-    } else {
-        std::env::var("XDG_CACHE_HOME")
-            .ok()
-            .filter(|d| d.starts_with('/'))
-            .unwrap_or_else(|| format!("{home}/.cache"))
-    };
-    format!("{base}/{name}")
+    format!("{home}/Library/Caches/{name}")
 }
 
 /// The linked worktrees of every repo sessions were seen in, and which a

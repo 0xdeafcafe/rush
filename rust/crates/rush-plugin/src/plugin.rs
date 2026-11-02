@@ -534,7 +534,7 @@ pub(crate) mod tests {
         std::fs::set_permissions(dir.join("sub"), std::fs::Permissions::from_mode(0o700)).unwrap();
         file("sub/a b\"c\té", "x", 0o600);
         file("Z", "zz", 0o4711);
-        if cfg!(target_os = "macos") {
+        {
             assert_eq!(
                 digest(&dir).unwrap(),
                 "2a6a77cd77b7eaf7696e6bc703d78817848009aff4a3ce42993da493a92c3524"

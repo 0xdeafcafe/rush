@@ -79,7 +79,6 @@ impl Ollama {
             found.sort();
             for d in found {
                 if let Some(name) = d.file_name() {
-                    #[cfg(unix)]
                     let _ = std::os::unix::fs::symlink(&d, skills.join(name));
                 }
             }

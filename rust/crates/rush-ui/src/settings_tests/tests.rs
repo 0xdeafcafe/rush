@@ -1108,7 +1108,7 @@ fn view_sheet_keeps_the_layout() {
     press(&mut m, "down");
     press(&mut m, "enter");
     assert_eq!(config(&m).view, "agent");
-    if cfg!(target_os = "macos") {
+    {
         assert!(
             m.sheet_as::<sheets::MenuBarSheet>().is_some(),
             "the menu bar is offered"

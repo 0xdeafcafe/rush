@@ -101,32 +101,13 @@ fn walk(dir: &Path, f: &mut dyn FnMut(&Path)) {
     }
 }
 
-#[cfg(target_os = "macos")]
 pub use darwin::{compressed, encode, file};
 
-#[cfg(target_os = "macos")]
 fn disk_use(info: &Metadata) -> i64 {
     use std::os::unix::fs::MetadataExt;
     info.blocks() as i64 * 512
 }
 
-#[cfg(not(target_os = "macos"))]
-pub fn compressed(_: &Metadata) -> bool {
-    false
-}
-
-#[cfg(not(target_os = "macos"))]
-fn disk_use(info: &Metadata) -> i64 {
-    info.len() as i64
-}
-
-/// Only macOS stores files compressed.
-#[cfg(not(target_os = "macos"))]
-pub fn file(_: &Path) -> Result<(), String> {
-    Err("only on macOS".into())
-}
-
-#[cfg(target_os = "macos")]
 mod darwin {
     use std::ffi::CString;
     use std::fs::Metadata;
@@ -286,7 +267,7 @@ mod darwin {
     }
 }
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;

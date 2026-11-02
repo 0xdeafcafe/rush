@@ -537,11 +537,7 @@ impl Manifest {
 }
 
 /// The OS rush runs on, as Go's runtime.GOOS names it.
-pub const GOOS: &str = if cfg!(target_os = "macos") {
-    "darwin"
-} else {
-    std::env::consts::OS
-};
+pub const GOOS: &str = "darwin";
 
 /// The architecture rush runs on, as Go's runtime.GOARCH names it.
 pub const GOARCH: &str = match std::env::consts::ARCH.as_bytes() {

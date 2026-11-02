@@ -81,9 +81,6 @@ pub fn plist(exe: &str) -> String {
 /// which takes its tailnet mapping down). Off leaves remote.json's choices
 /// as they were, for the next time.
 pub fn set_remote(on: bool, exe: &str) -> Result<(), String> {
-    if !cfg!(target_os = "macos") {
-        return Err("remote mode keeps serve running on macOS; here, run rush serve as a service of your own".into());
-    }
     rush_core::sandbox::guard("serve's LaunchAgent", &service_plist());
     if rush_core::sandbox::active() {
         // A test never reaches the user's launchd.

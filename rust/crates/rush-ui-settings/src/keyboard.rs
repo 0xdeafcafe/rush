@@ -59,11 +59,7 @@ static KB_ROWS: LazyLock<Vec<Vec<KbKey>>> = LazyLock::new(|| {
             })
             .collect()
     };
-    let (alt, sup) = if cfg!(target_os = "macos") {
-        ("⌥", "⌘")
-    } else {
-        ("alt", "super")
-    };
+    let (alt, sup) = ("⌥", "⌘");
     let k = |name, label, w| KbKey { name, label, w };
     let cat = |parts: Vec<Vec<KbKey>>| parts.into_iter().flatten().collect::<Vec<_>>();
     vec![

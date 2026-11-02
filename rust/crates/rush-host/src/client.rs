@@ -206,7 +206,7 @@ pub(crate) fn spawn_on(mut cfg: Config, exe: Option<&Path>) -> Result<Config> {
     if !cause.is_empty() {
         cmd.env("RUSH_CAUSE", &cause);
     }
-    if cfg!(target_os = "macos") && std::env::var_os(crate::server::MALLOC_VAR).is_none() {
+    if std::env::var_os(crate::server::MALLOC_VAR).is_none() {
         // See server::MALLOC_VAR; the host takes both out again.
         cmd.env(crate::server::MALLOC_VAR, "1")
             .env(crate::server::MALLOC_SET, "1");

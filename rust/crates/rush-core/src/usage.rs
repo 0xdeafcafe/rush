@@ -522,7 +522,6 @@ pub fn record(path: &Path, key: &str, q: &Quota) -> io::Result<()> {
     ));
     let mut o = OpenOptions::new();
     o.write(true).create_new(true);
-    #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
     let written = o.open(&tmp).and_then(|mut f| f.write_all(&b));
     if let Err(e) = written {
@@ -585,7 +584,6 @@ fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
 fn mkdir_private(dir: &Path) -> io::Result<()> {
     let mut b = fs::DirBuilder::new();
     b.recursive(true);
-    #[cfg(unix)]
     std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
     b.create(dir)
 }
@@ -596,7 +594,6 @@ fn lock(path: &Path) -> Option<File> {
     mkdir_private(path.parent()?).ok()?;
     let mut o = OpenOptions::new();
     o.create(true).truncate(false).read(true).write(true);
-    #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
     let f = o.open(path).ok()?;
     let _ = f.lock();
@@ -1147,7 +1144,6 @@ mod tests {
         old.fetched_at = time::now() - HOUR;
         record(&path, "codex:a", &old).unwrap();
         assert_ne!(load(&path)["codex:a"].fetched_at, old.fetched_at);
-        #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
             let mode = fs::metadata(&path).unwrap().permissions().mode();

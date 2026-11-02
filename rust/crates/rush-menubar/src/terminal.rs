@@ -55,7 +55,7 @@ pub fn here() -> Here {
 
 /// Marks this rush as open in the terminal of bundle ID id.
 fn here_in(id: &str) -> Here {
-    if !cfg!(target_os = "macos") || id.is_empty() {
+    if id.is_empty() {
         return Here(None);
     }
     let p = open_dir().join(std::process::id().to_string());
@@ -186,9 +186,6 @@ mod tests {
     /// (terminal_test.go TestHere).
     #[test]
     fn here() {
-        if !cfg!(target_os = "macos") {
-            return;
-        }
         let d = tempfile::tempdir().unwrap();
         rush_state::set_thread_dir(Some(d.path().to_path_buf()));
         let gone = open_dir().join("999999"); // a pid that isn't running

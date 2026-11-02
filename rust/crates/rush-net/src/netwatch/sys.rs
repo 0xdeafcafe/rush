@@ -1,9 +1,8 @@
 //! What netwatch reads from the machine: each interface's byte counters
-//! (Go internal/netwatch/counters_darwin.go, counters_linux.go,
-//! counters_other.go), which network it's on (netwatch.go:441 network), and
-//! a wakeup when its addresses or links change, so a new network is
-//! noticed at once without polling: a routing socket on macOS, a netlink
-//! socket on Linux. Go noticed it on its 5s sample instead.
+//! (Go internal/netwatch/counters_darwin.go), which network it's on
+//! (netwatch.go:441 network), and a wakeup when its addresses or links
+//! change, so a new network is noticed at once without polling: a routing
+//! socket. Go noticed it on its 5s sample instead.
 
 use std::collections::HashMap;
 use std::ffi::CStr;
@@ -121,40 +120,10 @@ pub(crate) fn network_of(addrs: &[(String, IpAddr)]) -> (String, String) {
     (parts.join(","), label)
 }
 
-/// Each interface's bytes in and out, by its place in /proc/net/dev.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-pub(crate) fn parse_proc_net_dev(text: &str) -> Counters {
-    let mut out = Counters::new();
-    for (i, l) in text.split('\n').enumerate() {
-        let Some((name, rest)) = l.split_once(':') else {
-            continue;
-        };
-        if tunnel(name.trim()) {
-            continue;
-        }
-        let f: Vec<&str> = rest.split_whitespace().collect();
-        if f.len() < 9 {
-            continue;
-        }
-        let r = f[0].parse().unwrap_or(0);
-        let t = f[8].parse().unwrap_or(0);
-        out.insert(i as u32 + 1, [r, t]);
-    }
-    out
-}
-
-#[cfg(target_os = "linux")]
-pub(crate) fn counters() -> Option<Counters> {
-    std::fs::read_to_string("/proc/net/dev")
-        .ok()
-        .map(|t| parse_proc_net_dev(&t))
-}
-
 /// The bytes in and out of each of the machine's own interfaces, by index,
 /// read from the routing table's interface list: no process run. macOS
 /// hands them to a process that isn't root cut to 32 bits, so they wrap
 /// every 4G; rates allow for that.
-#[cfg(target_os = "macos")]
 pub(crate) fn counters() -> Option<Counters> {
     let mut mib = [libc::CTL_NET, libc::PF_ROUTE, 0, 0, libc::NET_RT_IFLIST2, 0];
     let mut len: libc::size_t = 0;
@@ -208,17 +177,11 @@ pub(crate) fn counters() -> Option<Counters> {
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-pub(crate) fn counters() -> Option<Counters> {
-    None
-}
-
 /// Calls changed(true) each time the machine's addresses or links change,
 /// from a thread that sleeps in the kernel between, and changed(false) if
 /// it stops being able to hear of them; false where there's no way to hear
 /// of it at all (the caller then looks on its sample instead). The thread
 /// ends when changed returns false.
-#[cfg(target_os = "macos")]
 pub(crate) fn on_change(changed: impl FnMut(bool) -> bool + Send + 'static) -> bool {
     // SAFETY: a plain socket, kept from the processes rush starts (macOS
     // has no SOCK_CLOEXEC); closed when the thread ends.
@@ -238,45 +201,8 @@ pub(crate) fn on_change(changed: impl FnMut(bool) -> bool + Send + 'static) -> b
     })
 }
 
-#[cfg(target_os = "linux")]
-pub(crate) fn on_change(changed: impl FnMut(bool) -> bool + Send + 'static) -> bool {
-    // SAFETY: a netlink socket bound to the link and address groups.
-    let fd = unsafe {
-        libc::socket(
-            libc::AF_NETLINK,
-            libc::SOCK_RAW | libc::SOCK_CLOEXEC,
-            libc::NETLINK_ROUTE,
-        )
-    };
-    if fd < 0 {
-        return false;
-    }
-    let ok = unsafe {
-        let mut sa: libc::sockaddr_nl = std::mem::zeroed();
-        sa.nl_family = libc::AF_NETLINK as libc::sa_family_t;
-        sa.nl_groups =
-            (libc::RTMGRP_LINK | libc::RTMGRP_IPV4_IFADDR | libc::RTMGRP_IPV6_IFADDR) as u32;
-        libc::bind(
-            fd,
-            (&sa as *const libc::sockaddr_nl).cast(),
-            std::mem::size_of::<libc::sockaddr_nl>() as libc::socklen_t,
-        ) == 0
-    };
-    if !ok {
-        unsafe { libc::close(fd) };
-        return false;
-    }
-    listen(fd, changed, |m| !m.is_empty())
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-pub(crate) fn on_change(_: impl FnMut(bool) -> bool + Send + 'static) -> bool {
-    false
-}
-
 /// Reads fd's messages on a thread of its own, calling changed for each
 /// that matters.
-#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn listen(
     fd: libc::c_int,
     mut changed: impl FnMut(bool) -> bool + Send + 'static,
@@ -370,17 +296,5 @@ mod tests {
         for (addrs, key, label) in cases {
             assert_eq!(network_of(&addrs), (key.to_string(), label.to_string()));
         }
-    }
-
-    #[test]
-    fn proc_net_dev() {
-        let text = "Inter-|   Receive                                                |  Transmit
- face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
-    lo: 100 1 0 0 0 0 0 0 100 1 0 0 0 0 0 0
-  eth0: 5000 40 0 0 0 0 0 0 7000 50 0 0 0 0 0 0
-docker0: 9 1 0 0 0 0 0 0 9 1 0 0 0 0 0 0
-";
-        let c = parse_proc_net_dev(text);
-        assert_eq!(c, Counters::from([(4, [5000, 7000])]));
     }
 }

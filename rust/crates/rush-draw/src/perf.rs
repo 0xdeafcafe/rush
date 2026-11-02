@@ -92,7 +92,6 @@ pub(crate) fn thread_cpu_us() -> u64 {
 /// When this process started, from the kernel (macOS: kinfo_proc's
 /// p_starttime); now where that can't be read.
 fn started_us() -> u128 {
-    #[cfg(target_os = "macos")]
     {
         let mut mib = [
             libc::CTL_KERN,

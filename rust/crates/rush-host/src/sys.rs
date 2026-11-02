@@ -8,7 +8,6 @@ pub fn wait_exit(pid: i64, timeout: Duration) -> bool {
     if !crate::alive(pid) {
         return true;
     }
-    #[cfg(target_os = "macos")]
     if let Some(gone) = kq_wait(pid as i32, Some(timeout)) {
         return gone || !crate::alive(pid);
     }
@@ -24,7 +23,6 @@ pub fn wait_exit(pid: i64, timeout: Duration) -> bool {
 
 /// Waits until pid exits, for as long as it takes.
 pub fn wait_exit_forever(pid: i64) {
-    #[cfg(target_os = "macos")]
     if kq_wait(pid as i32, None).is_some() {
         return;
     }
@@ -35,7 +33,6 @@ pub fn wait_exit_forever(pid: i64) {
 
 /// Waits on kqueue for pid's exit: Some(true) when it did, Some(false) at
 /// the timeout, None when it can't wait so (no kqueue, or no such pid).
-#[cfg(target_os = "macos")]
 fn kq_wait(pid: i32, timeout: Option<Duration>) -> Option<bool> {
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
     // SAFETY: kqueue takes nothing; a non-negative result is ours.

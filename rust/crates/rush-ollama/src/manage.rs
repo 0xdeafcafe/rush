@@ -79,7 +79,6 @@ impl Local {
             .stderr(Stdio::null());
         // The shared local server must outlive the session that first
         // needs it.
-        #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;
             // SAFETY: setsid is async-signal-safe and touches nothing of
@@ -434,7 +433,6 @@ mod tests {
     }
 
     // A server that ends before it answers says how it ended.
-    #[cfg(unix)]
     #[test]
     fn a_server_that_exits_says_so() {
         use std::os::unix::fs::PermissionsExt;

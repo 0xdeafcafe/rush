@@ -574,14 +574,13 @@ fn keys_guide_frame_width() {
 
 #[test]
 fn pretty_keys() {
-    let mac = cfg!(target_os = "macos");
     for (k, want) in [
         ("super+k", "⌘k"),
         ("ctrl+up", "ctrl+↑"),
         ("ctrl+x h", "ctrl+x h"),
         ("shift+down", "shift+↓"),
         ("+", "+"),
-        ("alt+m", if mac { "⌥m" } else { "alt+m" }),
+        ("alt+m", "⌥m"),
     ] {
         assert_eq!(pretty_key(k), want, "{k}");
     }

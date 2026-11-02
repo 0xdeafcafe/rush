@@ -243,7 +243,6 @@ pub(crate) fn write_private(dir: &Path, name: &str, v: &Value) -> std::io::Resul
     // folder already there is left as it is.
     let mut d = std::fs::DirBuilder::new();
     d.recursive(true);
-    #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;
         d.mode(0o700);
@@ -256,7 +255,6 @@ pub(crate) fn write_private(dir: &Path, name: &str, v: &Value) -> std::io::Resul
         use std::io::Write;
         let mut opts = std::fs::OpenOptions::new();
         opts.write(true).create(true).truncate(true);
-        #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
             opts.mode(0o600);
@@ -501,7 +499,6 @@ mod tests {
             b.contains("\"rush-deepseek\"") && b.contains("sk-d") && b.contains("deepseek-chat"),
             "models.json: {b}"
         );
-        #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let mode = std::fs::metadata(&f).unwrap().permissions().mode() & 0o777;

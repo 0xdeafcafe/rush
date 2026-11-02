@@ -912,9 +912,7 @@ mod tests {
     fn counters_and_network() {
         let (key, label) = sys::network();
         assert!(!key.is_empty() && !label.is_empty(), "no network key");
-        if cfg!(any(target_os = "macos", target_os = "linux")) {
-            assert!(sys::counters().is_some());
-        }
+        assert!(sys::counters().is_some());
     }
 
     #[test]
@@ -1061,12 +1059,10 @@ mod tests {
         let s = w.now();
         assert!(s.rated && s.rx_rate == 1000.0 && s.tx_rate == 0.0, "{s:?}");
         // The machine's own counters read as well.
-        if cfg!(any(target_os = "macos", target_os = "linux")) {
-            let w = Watcher::default();
-            w.sample_net(t0);
-            w.sample_net(t0 + ms(100));
-            assert!(w.now().rated, "no reading");
-        }
+        let w = Watcher::default();
+        w.sample_net(t0);
+        w.sample_net(t0 + ms(100));
+        assert!(w.now().rated, "no reading");
     }
 
     // Go's TestRates: the real watcher, started, has both a check and the
@@ -1083,13 +1079,12 @@ mod tests {
         w.start();
         w.start(); // safe twice
         let until = Instant::now() + Duration::from_secs(10);
-        let want_rated = cfg!(any(target_os = "macos", target_os = "linux"));
         let mut s = w.now();
-        while !(s.known && (s.rated || !want_rated)) && Instant::now() < until {
+        while !(s.known && s.rated) && Instant::now() < until {
             std::thread::sleep(ms(20));
             s = w.now();
         }
-        assert!(s.known && (s.rated || !want_rated), "no reading: {s:?}");
+        assert!(s.known && s.rated, "no reading: {s:?}");
         assert!(!s.network.is_empty() && s.checks >= 1, "{s:?}");
     }
 

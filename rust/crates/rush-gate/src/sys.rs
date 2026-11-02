@@ -69,14 +69,7 @@ pub fn parse_vm_stat(s: &str) -> Option<u64> {
 fn clear_errno() {
     // SAFETY: errno is this thread's own.
     unsafe {
-        #[cfg(target_os = "macos")]
-        {
-            *libc::__error() = 0;
-        }
-        #[cfg(target_os = "linux")]
-        {
-            *libc::__errno_location() = 0;
-        }
+        *libc::__error() = 0;
     }
 }
 
@@ -96,7 +89,6 @@ fn priority(pid: i32) -> Option<i32> {
     Some(p)
 }
 
-#[cfg(target_os = "macos")]
 mod os {
     use std::ffi::CString;
 
@@ -168,80 +160,6 @@ mod os {
     }
 }
 
-#[cfg(target_os = "linux")]
-mod os {
-    /// What the machine has, available and in all, in bytes, as
-    /// /proc/meminfo says; 0, 0 when it can't be read.
-    pub fn memory() -> (u64, u64) {
-        let Ok(b) = std::fs::read_to_string("/proc/meminfo") else {
-            return (0, 0);
-        };
-        let (mut avail, mut total) = (0, 0);
-        for l in b.split('\n') {
-            let f: Vec<&str> = l.split_whitespace().collect();
-            if f.len() < 2 {
-                continue;
-            }
-            let n: u64 = f[1].parse().unwrap_or(0);
-            match f[0] {
-                "MemAvailable:" => avail = n << 10,
-                "MemTotal:" => total = n << 10,
-                _ => {}
-            }
-        }
-        (avail, total)
-    }
-
-    /// MemAvailable as a share of MemTotal, 0 to 100; -1 when it can't be
-    /// read.
-    pub fn mem_level() -> i32 {
-        let (avail, total) = memory();
-        if total == 0 {
-            return -1;
-        }
-        (avail * 100 / total) as i32
-    }
-
-    /// Unknown here: no run is paused for it.
-    pub fn pressure() -> i32 {
-        0
-    }
-
-    /// Lowers each of pid's threads to nice n, never raising one: Linux
-    /// keeps a nice a thread.
-    pub fn renice(pid: i32, n: i32) {
-        let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) else {
-            return;
-        };
-        for t in tasks.flatten() {
-            let Ok(tid) = t.file_name().to_string_lossy().parse::<i32>() else {
-                continue;
-            };
-            if super::priority(tid).is_some_and(|cur| cur >= n) {
-                continue;
-            }
-            // SAFETY: setpriority takes plain integers.
-            unsafe {
-                libc::setpriority(libc::PRIO_PROCESS, tid as libc::id_t, n);
-            }
-        }
-    }
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-mod os {
-    pub fn memory() -> (u64, u64) {
-        (0, 0)
-    }
-    pub fn pressure() -> i32 {
-        0
-    }
-    pub fn mem_level() -> i32 {
-        -1
-    }
-    pub fn renice(_: i32, _: i32) {}
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,9 +178,7 @@ mod tests {
     #[test]
     fn reads_this_machine() {
         let (avail, total) = Real.memory();
-        if cfg!(any(target_os = "macos", target_os = "linux")) {
-            assert!(total > 0 && avail <= total, "{avail} of {total}");
-            assert!((-1..=100).contains(&Real.memory_level()));
-        }
+        assert!(total > 0 && avail <= total, "{avail} of {total}");
+        assert!((-1..=100).contains(&Real.memory_level()));
     }
 }

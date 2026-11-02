@@ -18,9 +18,6 @@ const MARK: &str = "RUSH_MALLOC_SET";
 /// already is; returns only when it is, or it can't be. Call it first in
 /// main, before any thread starts.
 pub fn space_efficient() {
-    if !cfg!(target_os = "macos") {
-        return;
-    }
     if std::env::var_os(MARK).is_some() {
         // SAFETY: no other thread runs yet (the caller's promise), so none
         // reads the environment while it changes.

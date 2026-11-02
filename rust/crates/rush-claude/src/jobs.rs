@@ -228,11 +228,9 @@ pub fn project_slug(dir: &str) -> String {
 /// /etc are links into /private. Only the system's own links, as it takes
 /// no disk reads.
 fn real_dir(dir: &str) -> String {
-    if cfg!(target_os = "macos") {
-        for p in ["/tmp", "/var", "/etc"] {
-            if dir == p || (dir.starts_with(p) && dir.as_bytes().get(p.len()) == Some(&b'/')) {
-                return format!("/private{dir}");
-            }
+    for p in ["/tmp", "/var", "/etc"] {
+        if dir == p || (dir.starts_with(p) && dir.as_bytes().get(p.len()) == Some(&b'/')) {
+            return format!("/private{dir}");
         }
     }
     dir.to_string()
@@ -258,9 +256,7 @@ mod tests {
     // Claude Code files a session begun in /tmp under its real path.
     #[test]
     fn project_slug_real_dir() {
-        if cfg!(target_os = "macos") {
-            assert_eq!(project_slug("/tmp/spawnprobe"), "-private-tmp-spawnprobe");
-        }
+        assert_eq!(project_slug("/tmp/spawnprobe"), "-private-tmp-spawnprobe");
         assert_eq!(project_slug("/Users/me/x"), "-Users-me-x");
         assert_eq!(project_slug("/tmpx/a"), "-tmpx-a");
     }

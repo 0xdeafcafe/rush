@@ -70,7 +70,7 @@ fn end_tree_returns_once_the_tree_has_gone() {
     )
     .unwrap();
     assert_eq!(n, pids.len());
-    if cfg!(target_os = "macos") {
+    {
         assert!(
             began.elapsed() < Duration::from_secs(30),
             "waited out the grace: {:?}",

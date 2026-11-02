@@ -499,7 +499,6 @@ fn heavy_store(dir: &str, stamp: i128, total: i64) {
 /// system has it: each call hands back a folder's worth of entries' names,
 /// types and allocated sizes.
 fn dir_usage(dir: &str, pace: &mut Option<Pacer>) -> i64 {
-    #[cfg(target_os = "macos")]
     {
         let mut buf = vec![0u8; 128 << 10];
         if let Some(n) = bulk::usage(libc::AT_FDCWD, dir, dir, &mut buf, pace) {
@@ -509,7 +508,6 @@ fn dir_usage(dir: &str, pace: &mut Option<Pacer>) -> i64 {
     stat_usage(dir, pace) // a file system without it
 }
 
-#[cfg(target_os = "macos")]
 mod bulk {
     use super::*;
 

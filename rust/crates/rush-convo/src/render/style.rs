@@ -248,11 +248,7 @@ pub(crate) fn clock(t: Ms, zone: i64) -> String {
 /// A key's name as your keyboard says it: a Mac has no alt key, so alt+
 /// is ⌥ there (style.go:404).
 pub fn key_word(s: &str) -> String {
-    if cfg!(target_os = "macos") {
-        s.replace("alt+", "⌥")
-    } else {
-        s.to_string()
-    }
+    s.replace("alt+", "⌥")
 }
 
 #[cfg(test)]

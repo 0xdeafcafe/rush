@@ -23,9 +23,7 @@ pub mod bundle;
 mod client;
 mod words;
 
-#[cfg(target_os = "macos")]
 mod audio;
-#[cfg(target_os = "macos")]
 mod helper;
 
 pub use bundle::{app_path, build_app};
@@ -142,38 +140,29 @@ pub fn start(
     context: Vec<String>,
     out: impl FnMut(Live) + Send + 'static,
 ) -> Result<Dictation, String> {
-    if !cfg!(target_os = "macos") {
-        return Err("push-to-talk needs macOS".into());
-    }
     client::start(device, context, out).map(|inner| Dictation { inner })
 }
 
 /// The Mac's microphones, the input first. Asked in this process (listing
-/// them needs no permission); empty off macOS.
+/// them needs no permission).
 pub fn devices() -> Vec<Device> {
-    #[cfg(target_os = "macos")]
-    {
-        audio::devices()
-    }
-    #[cfg(not(target_os = "macos"))]
-    Vec::new()
+    audio::devices()
 }
 
 /// Whether push-to-talk can work here at all: macOS 26 or later, where the
 /// on-device speech model is.
 pub fn available() -> bool {
     static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    cfg!(target_os = "macos")
-        && *AVAILABLE.get_or_init(|| {
-            // sw_vers, not NSProcessInfo: a binary built against an older
-            // SDK is told an older version than the Mac runs.
-            let out = std::process::Command::new("/usr/bin/sw_vers")
-                .arg("-productVersion")
-                .output()
-                .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-                .unwrap_or_default();
-            bundle::major(&out) >= 26
-        })
+    *AVAILABLE.get_or_init(|| {
+        // sw_vers, not NSProcessInfo: a binary built against an older
+        // SDK is told an older version than the Mac runs.
+        let out = std::process::Command::new("/usr/bin/sw_vers")
+            .arg("-productVersion")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default();
+        bundle::major(&out) >= 26
+    })
 }
 
 /// The helper's socket, in rush's folder.
@@ -197,10 +186,5 @@ pub fn is_bundle_program(p: &std::path::Path) -> bool {
 /// Runs the helper until it quits; on the main thread, as the bundle's
 /// program.
 pub fn helper_main() -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        helper::run()
-    }
-    #[cfg(not(target_os = "macos"))]
-    Err("push-to-talk needs macOS".into())
+    helper::run()
 }

@@ -112,18 +112,10 @@ fn resolve_cache_dir() -> PathBuf {
     }
 }
 
-/// os.UserCacheDir: ~/Library/Caches on macOS, else $XDG_CACHE_HOME or
-/// ~/.cache.
+/// os.UserCacheDir: ~/Library/Caches.
 fn user_cache_dir() -> Option<PathBuf> {
-    if cfg!(target_os = "macos") {
-        let h = home_dir();
-        return (!h.as_os_str().is_empty()).then(|| h.join("Library").join("Caches"));
-    }
-    if let Some(x) = std::env::var_os("XDG_CACHE_HOME").filter(|x| !x.is_empty()) {
-        return Some(PathBuf::from(x));
-    }
     let h = home_dir();
-    (!h.as_os_str().is_empty()).then(|| h.join(".cache"))
+    (!h.as_os_str().is_empty()).then(|| h.join("Library").join("Caches"))
 }
 
 /// A file in rush's cache folder.
