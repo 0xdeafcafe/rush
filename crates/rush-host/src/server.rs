@@ -57,7 +57,9 @@ mod agent;
 mod upgrade;
 use agent::Watching;
 mod memallow;
+mod subkeep;
 pub use agent::{ROOT_IDLE, SPAWNED_IDLE, STALL_AFTER};
+use subkeep::SubWatch;
 pub use upgrade::{Exec, adopt, adopt_with};
 
 /// macOS's malloc in its space-efficient mode, set in a host's environment
@@ -385,6 +387,8 @@ pub(crate) struct State {
     info_owed: Option<Vec<u8>>,
     /// What the host watches of its agent: see server/agent.rs.
     w: Watching,
+    /// Its subagents, for their prompt caches: see server/subkeep.rs.
+    sk: SubWatch,
     /// Asked to move onto a newer rush once between turns, and a move
     /// being tried (server/upgrade.rs).
     upgrade_due: bool,
@@ -701,6 +705,7 @@ fn build(reg: Registry, hooks: Hooks, cfg: Config) -> (Host, Receiver<Msg>) {
         info_at: None,
         info_owed: None,
         w: Watching::default(),
+        sk: SubWatch::default(),
         upgrade_due: false,
         upgrading: false,
         listen_fd: -1,
@@ -1315,6 +1320,11 @@ impl Host {
         st.conn = None;
         st.info.claude_pid = 0;
         st.w.waits_on.clear();
+        st.sk.clear();
+        st.info.sub_kept.clear();
+        if let Some(t) = st.sk.timer.take() {
+            self.timers.cancel(t);
+        }
         st.info.background.clear();
         st.info.waking = Time::default();
         st.info.tasks = 0;
@@ -1448,6 +1458,18 @@ impl Host {
             o.inbox = crate::inbox::inbox_hook(&c.id);
         }
         o.bash_hook = rush_gate::plugin::hook_command(); // gates, and runs long calls as scripts
+        // Its subagents' caches kept while they wait on long calls, as
+        // Settings › General › Prompt cache says, where its agent can.
+        let keep = rush_state::Store::load().config.cache_keep;
+        st.sk.on = keep.on_for(a.kind().as_str())
+            && self
+                .reg
+                .supports(a.kind().as_str(), Feature::SubagentKeepWarm);
+        st.sk.min_context = keep.settings().min_context;
+        st.sk.project = c.cwd.clone();
+        // The hook reads its commands' past times by the same folder.
+        o.env
+            .push(format!("{}={}", rush_gate::cli::PROJECT_ENV, c.cwd));
         if c.billing == "key" {
             let p = self.reg.provider_of(a.kind().as_str());
             o.api_key = rush_state::api_key(&p);
@@ -3154,6 +3176,7 @@ impl Host {
                     st.w.unheard = None;
                 }
                 self.shell_calls(st, &m);
+                self.sub_message(st, &m);
                 self.on_message(st, &m);
             }
             Event::Approval(a) => {
@@ -3181,6 +3204,7 @@ impl Host {
             | Event::TaskUpdated(_)
             | Event::TaskDone(_)
             | Event::Background(_)) => {
+                self.sub_task(st, &ev);
                 if !self.on_task(st, &ev) {
                     return;
                 }

@@ -512,6 +512,11 @@ pub struct Info {
     /// until one has.
     #[serde(rename = "cacheTtl", skip_serializing_if = "zero")]
     pub cache_ttl: i64,
+    /// What rush did to keep a working subagent's prompt cache, by the
+    /// call that started the subagent, while it runs: its row says it
+    /// (Rust-only; server/subkeep.rs).
+    #[serde(rename = "subKept", skip_serializing_if = "BTreeMap::is_empty")]
+    pub sub_kept: BTreeMap<String, String>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub error: String,
     #[serde(rename = "startedAt")]
