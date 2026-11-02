@@ -1235,8 +1235,9 @@ fn the_column_beside_a_wide_conversation() {
     );
     let y = row_with(&mut m, "▌ Tasks  1 of 3  ▰▰▱").expect("the column");
     let x = col_of(&s[y], "▌ Tasks");
-    // The text is 185 wide, the column 58 from a cell short of 126.
-    assert_eq!(x, 2 + 125, "{:?}", s[y]);
+    // The text is 185 wide, the room right of it 58, the column its least,
+    // 44, from a cell short of 140.
+    assert_eq!(x, 2 + 139, "{:?}", s[y]);
     assert!(s[y + 1].contains("✓ Read the parser"));
     assert!(s[y + 2].contains("■ Fixing the bug"));
     assert!(s[y + 3].contains("☐ Run the tests"));
