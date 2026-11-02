@@ -6,8 +6,7 @@
 //! cache's lock; here get_mut borrows the cache, which its owner guards.
 //!
 //! load_from and save_to keep a cache in a file of the caller's, under a
-//! version of its own: the Rust rush keeps its own file beside Go's, so
-//! the two never write each other's.
+//! version of its own.
 
 use crate::json;
 use serde::de::DeserializeOwned;

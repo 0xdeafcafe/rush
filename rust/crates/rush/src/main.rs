@@ -302,7 +302,7 @@ fn run(args: &[String]) -> i32 {
         None => {}
     }
     let ssh = std::env::var("RUSH_VIA").as_deref() == Ok("ssh");
-    if let Err(e) = lead_lock(rush_ui::lead::follow_env(), ssh) {
+    if let Err(e) = lead_lock(ssh) {
         eprintln!("{e}");
         return 1;
     }
@@ -329,11 +329,10 @@ fn run(args: &[String]) -> i32 {
 
 /// One rush leads at a time on a folder, as it switches logins and
 /// restarts sessions for all of them: the one that leads holds the lock
-/// (main.go:239-248, instances.Lock). One that follows (RUSH_FOLLOW, so
-/// it runs beside the Go rush, which leads) or runs over SSH (rush
+/// (main.go:239-248, instances.Lock). One that runs over SSH (rush
 /// serve's) never takes it. Err is what's said when another holds it.
-fn lead_lock(follows: bool, ssh: bool) -> Result<(), String> {
-    if follows || ssh {
+fn lead_lock(ssh: bool) -> Result<(), String> {
+    if ssh {
         return Ok(());
     }
     rush_state::instances::lock().map(|_| ()).map_err(|pid| {
@@ -566,15 +565,12 @@ fn register() {
     rush_bundled::remote::on_switch(rush_remote::plugins::switch_remote);
     rush_bundled::register();
     // The list reads rush's own sessions through the host module.
-    // A rush that follows (RUSH_FOLLOW) never starts a lost session's host
-    // again: the rush that leads does.
+    // Over SSH a rush follows while another view holds the lock, and then
+    // never starts a lost session's host again: the rush that leads does.
     rush_fleet::use_hosts(|| {
-        Box::new(if rush_ui::lead::follow_env() {
-            rush_host::hosts::Sessions::following()
-        } else {
-            // Over SSH it follows while another view holds the lock.
-            rush_host::hosts::Sessions::following_while(rush_ui::lead::others_lead)
-        })
+        Box::new(rush_host::hosts::Sessions::following_while(
+            rush_ui::lead::others_lead,
+        ))
     });
 }
 
@@ -1226,7 +1222,7 @@ mod tests {
             .unwrap();
         assert_eq!(held, "held\n");
         std::fs::write(&p, "4242").unwrap();
-        let err = lead_lock(false, false).unwrap_err();
+        let err = lead_lock(false).unwrap_err();
         assert_eq!(
             err,
             format!(
@@ -1234,18 +1230,13 @@ mod tests {
                 rush_state::dir().display()
             )
         );
-        assert_eq!(
-            lead_lock(true, false),
-            Ok(()),
-            "a rush that follows runs beside it"
-        );
-        assert_eq!(lead_lock(false, true), Ok(()), "over SSH it follows too");
+        assert_eq!(lead_lock(true), Ok(()), "over SSH it follows too");
         // Let go, the rush that leads takes it and writes its pid.
         let mut stdin = other.stdin.take().unwrap();
         stdin.flush().unwrap();
         drop(stdin);
         assert!(other.wait().unwrap().success());
-        assert_eq!(lead_lock(false, false), Ok(()));
+        assert_eq!(lead_lock(false), Ok(()));
         assert_eq!(
             std::fs::read_to_string(&p).unwrap(),
             std::process::id().to_string()

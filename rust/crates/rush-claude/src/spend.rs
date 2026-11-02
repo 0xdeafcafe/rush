@@ -3,9 +3,8 @@
 //! agent/spend.go:33 (SpendTarget).
 //!
 //! What was read of each transcript (its Totals) is kept between runs, as
-//! Go's state.CostCache keeps it, but in a file of the Rust rush's own:
-//! CACHE_FILE in rush's cache folder, never Go's costs.json, which Go
-//! still reads and writes in a format of its own. It's read at the first
+//! Go's state.CostCache kept it: CACHE_FILE in rush's cache folder. A
+//! file of another version or format is dropped and rebuilt. It's read at the first
 //! run, on the spend worker, and written after a run that read something
 //! new, at most every SAVE_EVERY, and on flush (spend.go:83-190); written
 //! beside, then renamed over, so a reader never sees half of one. A
@@ -35,13 +34,15 @@ use crate::transcript::{Totals, scan, subagent_transcripts, subagents_dir};
 /// folder: one folder per run.
 const WORKFLOWS: &str = "workflows";
 
-/// The Rust rush's spend cache, in rush's cache folder.
-pub const CACHE_FILE: &str = "costs-rs.json";
+/// The spend cache, in rush's cache folder.
+pub const CACHE_FILE: &str = "costs.json";
 /// The spend cache's format: a file of another starts over. Bump it when
 /// Totals changes what it keeps.
 /// 1: Totals as transcript.rs has it.
 /// 2: and how the prompt cache lapsed (Totals::track).
-pub const CACHE_VERSION: i64 = 2;
+/// 6: past the version of the Go rush's own costs.json, which was in
+///    another format and is rebuilt.
+pub const CACHE_VERSION: i64 = 6;
 /// How often a run that read something saves the cache (spend.go:176).
 pub const SAVE_EVERY: Ms = 30_000;
 
@@ -212,6 +213,8 @@ impl Scanner {
     pub fn load(&mut self) {
         if self.kept && self.file.is_none() {
             let f = rush_state::cache_path(CACHE_FILE);
+            // The file this cache had while the Go rush ran beside it.
+            let _ = std::fs::remove_file(rush_state::cache_path("costs-rs.json"));
             self.cache = CostCache::load_from(&f, CACHE_VERSION);
             self.file = Some(f);
             let dirs = &mut self.dirs;
@@ -741,17 +744,18 @@ mod tests {
         }
     }
 
-    // Go's costs.json, beside it, is never read or written.
+    // A costs.json the Go rush left, of the version it had, is discarded
+    // and rebuilt: it never stands for a transcript.
     #[test]
-    fn leaves_gos_costs_json_alone() {
+    fn rebuilds_gos_old_costs_json() {
         let d = TempDir::new("gos");
         let (main, cache, t) = kept(&d);
         std::fs::create_dir_all(&cache).unwrap();
-        let gos = cache.join("costs.json");
+        let gos = cache.join(CACHE_FILE);
         let size = std::fs::metadata(&main).unwrap().len();
         // Were it read, this would stand for the transcript.
         let theirs = format!(
-            r#"{{"version":{CACHE_VERSION},"files":{{"{}":{{"offset":{size},"size":{size},"cost":1000.0}}}}}}"#,
+            r#"{{"version":5,"files":{{"{}":{{"offset":{size},"size":{size},"cost":1000.0}}}}}}"#,
             main.display()
         );
         std::fs::write(&gos, &theirs).unwrap();
@@ -760,13 +764,9 @@ mod tests {
         std::fs::write(&main, line("m1", 1) + &line("m2", 4)).unwrap();
         assert_eq!(output(&mut s, &t), 7);
         s.save();
-        assert_eq!(std::fs::read_to_string(&gos).unwrap(), theirs);
-        let mut names: Vec<String> = std::fs::read_dir(&cache)
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        names.sort();
-        assert_eq!(names, ["costs-rs.json", "costs.json"]);
+        let back: CostCache<Totals> = CostCache::load_from(&gos, CACHE_VERSION);
+        assert_eq!(back.version, CACHE_VERSION);
+        assert_ne!(std::fs::read_to_string(&gos).unwrap(), theirs);
     }
 
     /// An assistant line that spent out output tokens, said a pull

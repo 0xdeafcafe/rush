@@ -40,8 +40,6 @@ rush update     # fresh bottle
 
 `?` has the keys, and `#ask <question>` asks rush about itself (it can change its own settings for you too).
 
-coming from the go rush (`go install`, in `~/go/bin`)? install this one, then run `rush on` again so the `claude agents` hook names it, and delete `~/go/bin/rush` so nothing reaches the old one by your path. sessions already running carry on under the old rush until they're restarted: settings › updates lists them, and `#reload` moves them. if remote mode is on, turn it off and on again so its launch agent names this rush.
-
 ## what it does
 
 - **the list**: all your agents, what each one's doing in words ("running pnpm test") and what it's costing you in tokens, dollars, cpu and ram. anything that's died, hit a limit or is sat waiting on a question floats to the top, `ctrl+b` tells it to crack on, and `ctrl+x` (or esc twice in a session) asks whether to close it, restart it, switch its harness or model, or delete it for good.

@@ -21,9 +21,9 @@
 
 ; No running the user's own rush or agents.
 (deny process-exec
-  (literal (string-append (param "HOME") "/go/bin/rush"))
-  (literal (string-append (param "HOME") "/.local/share/rush-rs/rush"))
-  ; agtop is an old name of the Go rush; it leads and acts on the real machine.
+  (literal (string-append (param "HOME") "/.local/bin/rush"))
+  (literal (string-append (param "HOME") "/.local/share/rush/rush.prev"))
+  ; agtop is an old name of rush; it acts on the real machine.
   (literal (string-append (param "HOME") "/go/bin/agtop"))
   (regex #"/agtop[^/]*$")
   (literal "/opt/homebrew/bin/claude")

@@ -473,9 +473,10 @@ grown, 6.0 ms (Go 5.7); a load after one watched file changed 8–14 ms (Go
 11.8 ms (Go 10.1). `rush --dump` lists the same rows, accounts and
 processes as Go's (other agents' rows come with their adapters).
 
-Claude's spend cache is kept between runs in `costs-rs.json` in rush's
-cache folder (version `spend::CACHE_VERSION`), never in Go's `costs.json`,
-which Go still writes in its own format. Measured 2026-10-29, ~860 rows:
+Claude's spend cache is kept between runs in `costs.json` in rush's
+cache folder (version `spend::CACHE_VERSION`). A `costs.json` the Go rush
+left is of another format and version, so it is dropped and rebuilt; the
+old `costs.json` is removed at the first load. Measured 2026-10-29, ~860 rows:
 `rush --dump`'s scan 5.1 s with no cache (every transcript read), 0.14–0.19
 s with it (Go about 0.2 s), every row's cost the same either way.
 
@@ -799,9 +800,7 @@ A rush leads or follows (rush-ui's `lead.rs`, after Go's hosted.go:70-77
 `Follow`, `following`, `leads`). The one that leads does what rush does
 for every session on its own; one that follows shows the same machine and
 does what you ask of it, and leaves the rest to the one that leads. Go
-follows when the app that embeds its view says so; the Rust rush follows
-when `RUSH_FOLLOW` is set to anything, so it can run beside the Go rush on
-the same home while the Go one leads. Over SSH (`RUSH_VIA=ssh`) it takes
+follows when the app that embeds its view says so. Over SSH (`RUSH_VIA=ssh`) it takes
 no lock and follows while a view on the Mac holds it, read every 2
 seconds, as Go's main.go:252-260 does (`lead::follow_while_led`). A hosted view (`rush open <id>`,
 rush-ui's `hosted.rs`, Go's NewHosted: one session at the whole width,
