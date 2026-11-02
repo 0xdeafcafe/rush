@@ -9,7 +9,8 @@
 //! file to start again, waiting out an install (`selfexe`); becoming a newer
 //! build in place, files kept open across the exec (`reexec`). Which agent programs have
 //! a newer version out is rush-harnessup's, so that users of these don't
-//! build a TLS stack.
+//! build a TLS stack. How many threads this process runs, and starting
+//! one with a stack sized to its work (`threads`).
 //!
 //! Ported from the Go packages of the same names under `internal/`.
 
@@ -29,6 +30,7 @@ pub mod selfexe;
 pub mod shellwords;
 pub mod squeeze;
 pub mod sysinfo;
+pub mod threads;
 pub mod timefmt;
 
 #[cfg(test)]

@@ -919,7 +919,7 @@ fn soak(reg: &rush_core::adapter::Registry, args: &[String]) {
             out.bytes as f64 / 1024.0,
             out.writes
         )?;
-        writeln!(o, "  threads    {}", threads())?;
+        writeln!(o, "  threads    {}", rush_sys::threads::count())?;
         if !session.trim().is_empty() {
             writeln!(o, "  session    {:?}", session.trim())?;
         }
@@ -934,28 +934,6 @@ fn rusage() -> libc::rusage {
     // SAFETY: a valid out-pointer.
     unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut r) };
     r
-}
-
-/// How many threads this process runs.
-fn threads() -> usize {
-    // SAFETY: zeroed is a valid proc_taskinfo; proc_pidinfo fills it.
-    let mut ti: libc::proc_taskinfo = unsafe { std::mem::zeroed() };
-    let size = std::mem::size_of::<libc::proc_taskinfo>() as libc::c_int;
-    // SAFETY: an out-buffer of the size given.
-    let n = unsafe {
-        libc::proc_pidinfo(
-            std::process::id() as libc::c_int,
-            libc::PROC_PIDTASKINFO,
-            0,
-            (&mut ti as *mut libc::proc_taskinfo).cast(),
-            size,
-        )
-    };
-    if n == size {
-        ti.pti_threadnum as usize
-    } else {
-        0
-    }
 }
 
 /// Seconds as Go prints a duration rounded to the millisecond: 30.002s,
