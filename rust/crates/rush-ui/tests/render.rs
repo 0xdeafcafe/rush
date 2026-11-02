@@ -707,15 +707,12 @@ const SIZES: [(u16, u16); 3] = [(80, 24), (120, 40), (200, 50)];
 /// Draws one view at every size, each from a fresh model, as
 /// `name_WxH`.
 fn views(name: &str, setup: impl Fn(&mut Model), keys: &[(Key, KeyMods)]) {
-    let mut bad = false; // TEMP
     for (w, h) in SIZES {
         let mut m = model();
         setup(&mut m);
         let f = plain(&mut m, w, h, keys);
-        let n = format!("{name}_{w}x{h}");
-        bad |= std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| snapshot(&n, &f))).is_err();
+        snapshot(&format!("{name}_{w}x{h}"), &f);
     }
-    assert!(!bad); // TEMP
 }
 
 #[test]

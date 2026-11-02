@@ -9,9 +9,9 @@
 ▌ └─ ? fix the flaky tax rounding test ✻   $│ ────────────────────────────────────────────────────────────────────────────────────────────────────────── │ · open in a terminal · /rush copies it here
 ▌      checkout · main                      │ Needs you ───────────────────────────────────────────────────────────────────────────────────────────────  │
 ▌        ╰ asks: Round half up, or half to e│ ▍● fix the flaky tax rounding test                  checkout · main                              needs you │──────────────────────────────────────────────
-                                            │                                                                                                            │                                  ▌
-┃ Working  2 · $5.72                        │ Working ─────────────────────────────────────────────────────────────────────────────────────────────────  │                                  │
-┃ ├─ ✳ add Apple Pay to checkout ✻ ↳1      $│  ● move the design tokens to CSS variables          checkout · main                                working │                                  │
+                                            │                                                                                                            │                                       alt+s
+┃ Working  2 · $5.72                        │ Working ─────────────────────────────────────────────────────────────────────────────────────────────────  │─────────────────────────────────────────────
+┃ ├─ ✳ add Apple Pay to checkout ✻ ↳1      $│  ● move the design tokens to CSS variables          checkout · main                                working │                                  ▌
 ┃ │    checkout · feat/apple-pay            │  ● add Apple Pay to checkout                        checkout · feat/apple-pay                      working │                                  │
 ┃ └─ ✳ move the design tokens to CSS … ✻   $│                                                                                                            │                                  │
 ┃      checkout · main                      │ Idle ────────────────────────────────────────────────────────────────────────────────────────────────────  │                                  │

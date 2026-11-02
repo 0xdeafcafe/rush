@@ -9,8 +9,8 @@
     checkout · main    Claude Code · open in a terminal · /rush copies it here
     Conversation   Overview   Changes    [ ] views        esc back to the list
 ───━━━━━━━━━━━━━━───────────────────────────────────────────────────────────────
-
-  ▍ Claude  12:00 · @set-up-caching
+    Normal  Chat  Code  Catch-up  Trail                                  alt+s
+  ─━━━━━━━━────────────────────────────────────────────────────────────────────
   │   ✓ cargo test                                                         7s
   │       │ ok
   ▍
