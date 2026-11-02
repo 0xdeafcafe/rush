@@ -118,6 +118,9 @@ impl Server {
             for n in seen.look(&lists) {
                 push.send(&n);
             }
+            // Not kept while it sleeps: every session's info, a thousand
+            // and more, 2-3 MB (tests/listing.rs).
+            drop(lists);
             // Polls lists; a host-pushed feed if 4s is too slow.
             if !ctx.sleep(Duration::from_secs(4)) {
                 return;

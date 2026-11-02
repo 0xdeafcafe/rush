@@ -25,3 +25,7 @@ ring = "0.17"
 [dev-dependencies]
 rush-testenv = { path = "../rush-testenv" }
 tempfile.workspace = true
+
+[[test]]
+name = "listing"
+harness = false
