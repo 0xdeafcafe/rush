@@ -1,6 +1,6 @@
 {
- "commit": "0a3a33b42471c0952c2c07173c92d89733f96d9b",
- "at": "2026-11-02T11:02:45Z",
+ "commit": "6dbcbfd35afff3d0c37c115fce07ac5dd7bf7310",
+ "at": "2026-11-02T11:27:04Z",
  "metrics": {
   "binary: rush, release": {
    "kind": "binary",
@@ -733,5 +733,7 @@
    "commit": "9df70072d538cf062bd62d6d87f31b6102a0691c"
   }
  },
- "flagged": []
+ "flagged": [
+  "ui: footprint"
+ ]
 }
