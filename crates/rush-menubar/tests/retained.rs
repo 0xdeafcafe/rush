@@ -3,7 +3,8 @@
 //! on you (`source::live_rows`). A home like the one measured for DESIGN.md
 //! "Background processes' memory": 900 rows, 720 past conversations, 175
 //! finished, 5 working. Run without the test harness, so the numbers
-//! print: `cargo test -p rush-menubar --test retained`.
+//! print: `cargo test -p rush-menubar --test retained`. RUSH_BENCH_OUT=<file>
+//! also writes the numbers there, for CI's footprint job (tools/footprint).
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::AtomicUsize;
@@ -72,6 +73,22 @@ fn retained(f: impl FnOnce() -> Vec<Row>) -> (usize, Vec<Row>) {
     (NOW.load(Relaxed).saturating_sub(base), rows)
 }
 
+/// Appends a number to $RUSH_BENCH_OUT as `name<TAB>kind<TAB>value`, for
+/// CI's footprint job (tools/footprint/measure.py reads it).
+fn record(name: &str, kind: &str, v: usize) {
+    use std::io::Write;
+    let Some(p) = std::env::var_os("RUSH_BENCH_OUT") else {
+        return;
+    };
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(p)
+    {
+        let _ = writeln!(f, "{name}\t{kind}\t{v}");
+    }
+}
+
 fn main() {
     rush_testenv::assert_sandboxed();
     let agents: Vec<Agent> = (0..900)
@@ -91,6 +108,8 @@ fn main() {
         all.len(),
         rows.len()
     );
+    record("menu bar feed: every row, retained", "heap", every);
+    record("menu bar feed: rows kept, retained", "heap", live);
     assert_eq!(rows.len(), 5);
     assert!(rows.iter().all(Row::live));
     // Only the live rows were left out: what's kept is what was.
