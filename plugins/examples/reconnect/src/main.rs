@@ -15,6 +15,8 @@
 //! cp target/release/reconnect plugins/examples/reconnect/plugin.json ~/.config/rush/plugins/reconnect/
 //! rush plugin check reconnect && rush plugin approve reconnect
 //! ```
+//!
+//! Ported from plugins/examples/reconnect/main.go.
 
 mod retry;
 

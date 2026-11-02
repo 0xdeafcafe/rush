@@ -6,6 +6,7 @@
 //! [`Sidebar`] is what `sidebar.set` sends. rush's broker checks it and
 //! refuses it whole if anything is out of bounds; [`Sidebar::check`] makes
 //! the same check, so a plugin's tests can tell what rush will take.
+//! Ported from plugins/examples/plugin/sidebar.go, the Go example plugins' shared package.
 
 use std::collections::{BTreeMap, HashSet};
 

@@ -8,6 +8,7 @@
 //! so a stream of events arrives as it was sent. A handler taking a
 //! notification must not wait on a call to rush: the answer comes on the
 //! thread it is holding up. Start a thread for that.
+//! Ported from plugins/examples/plugin/rpc.go, the Go example plugins' shared package.
 
 use std::collections::HashMap;
 use std::fmt;

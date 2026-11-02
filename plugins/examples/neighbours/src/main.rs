@@ -10,6 +10,8 @@
 //! cp target/release/neighbours plugins/examples/neighbours/plugin.json ~/.config/rush/plugins/neighbours/
 //! rush plugin approve neighbours
 //! ```
+//!
+//! Ported from plugins/examples/neighbours/main.go.
 
 use rush_plugin_sdk::proto::{Session, ToolCall};
 use rush_plugin_sdk::{Conn, Error, params, tool};

@@ -14,6 +14,8 @@
 //! cp target/release/autodrafts plugins/examples/autodrafts/plugin.json ~/.config/rush/plugins/autodrafts/
 //! rush plugin check autodrafts && rush plugin approve autodrafts
 //! ```
+//!
+//! Ported from plugins/examples/autodrafts/main.go.
 
 mod drafts;
 

@@ -11,6 +11,8 @@
 //! cp target/release/delegate plugins/examples/delegate/plugin.json ~/.config/rush/plugins/delegate/
 //! rush plugin approve delegate
 //! ```
+//!
+//! Ported from plugins/examples/delegate/main.go.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

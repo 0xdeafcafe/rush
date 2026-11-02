@@ -24,6 +24,8 @@
 //! cp target/release/kanban plugins/examples/kanban/plugin.json ~/.config/rush/plugins/kanban/
 //! rush plugin approve kanban
 //! ```
+//!
+//! Ported from plugins/examples/kanban/main.go.
 
 mod cards;
 mod sidebar;
