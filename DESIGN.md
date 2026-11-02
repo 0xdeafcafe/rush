@@ -2257,6 +2257,55 @@ bytes / 4):
 | pytest (412 tests, coloured) | 1,755 | 1,397 | 439 | 350 | 20% |
 | a download's progress bar (curl -#) | 80,081 | 80 | 20,021 | 20 | 99.9% |
 
+### What rush adds to an agent's context, word for word (Rust-only)
+
+A provider caches the prompt in order: tools, system prompt, then the
+conversation. A part that changes makes everything after it be written
+again (1.25× or 2× the input price, against 0.1× for a read). The cached
+parts are built as an agent's program starts (a new session, a wake from
+sleep, a move to another account or build, a retry), so they must come
+out the same word for word every time for the same session. Text added at
+the end of the conversation (a tool's result, a hook's context, a
+message) can't change what came before it, so times and counts there are
+fine.
+
+The cached parts, and what's done to keep them stable:
+
+- **The system prompt rush adds** (`server::system_prompt`): constants
+  (the task list, scratch folder, decisions, shell boxes, the agents
+  note), then the session's own prompt, then the parts a setting or a
+  move changes, last: views (Settings), the feed (Settings), the
+  worktree note (`workspace_note`). It reads no clock and no state;
+  `system_prompt_is_word_for_word_stable` builds it twice and with each
+  changing part on and off and checks the rest stays put.
+- **spawn_agent's list of agents** (its tool description, always loaded)
+  and **Pi's list of agents in its prompt** (`agents_prompt`): no longer
+  say whether each is signed in ("Not available right now", "availability
+  unverified, so don't run it"). Sign-ins come and go between starts;
+  spawn_agent says "needs its account checked" when it's called, in the
+  turn. `cached_parts_ignore_sign_ins` builds each with every agent
+  signed in and with none, byte for byte the same.
+- **The session's own subagent types** (`--agents`, `own_def`): no
+  longer left out while signed out; the session runs them on its own
+  sign-in.
+- Still able to change between starts, by what you do: which agents and
+  models Settings › Config allows, programs installed or removed, a
+  model list a harness keeps (Codex's cache, `ollama list`, an
+  Antigravity snapshot older than a day), turning views or the feed on
+  or off, a session moved to another worktree. JSON maps are written in
+  key order (serde_json without `preserve_order`; `agent_defs` is a
+  BTreeMap), so no part depends on a hash map's order.
+
+At the end of the conversation (fine as they are): the inbox's
+messages and rush's notices (`inbox.rs` `TELL_NOTE`, `NOTICE_NOTE`: a
+view clicked, views gone stale, a stuck command stopped, the gate
+stopping or pausing a run), reminders (their id and times), the away
+check-in, long background tasks, a child agent's answer, revive, retry
+and limit messages, pull request news, room turns, rush's own tools'
+results (show, view, spawn_agent, agent_result, remind), the gate's
+waiting line in a command's output, and the hooks' refusals (runaway
+guard, search guard, watch, context guard) and squeezed output.
+
 ## Panics
 
 Release builds unwind (`panic = "unwind"`), so one thread's panic ends
