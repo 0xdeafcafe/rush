@@ -8,7 +8,9 @@
 //! second; writes ten a second here).
 //!
 //! `cargo bench -p rush-convo --bench follow`; RUSH_BENCH_TRANSCRIPT=<file>
-//! picks the run (else a made-up one of 2,000 lines).
+//! picks the run (else a made-up one of 2,000 lines). RUSH_BENCH_OUT=<file>
+//! also writes the counts there, a line each, for CI's footprint job
+//! (tools/footprint).
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::io::Write;
@@ -107,6 +109,31 @@ fn report(name: &str, c: &Cost, reads: usize) {
         c.made,
         c.bytes as f64 / MIB,
     );
+    record(
+        &format!("follow a run: {name}, allocations made"),
+        "allocs",
+        c.made,
+    );
+    record(
+        &format!("follow a run: {name}, allocated"),
+        "bytes",
+        c.bytes,
+    );
+}
+
+/// Appends a number to $RUSH_BENCH_OUT as `name<TAB>kind<TAB>value`, for
+/// CI's footprint job (tools/footprint/measure.py reads it).
+fn record(name: &str, kind: &str, v: usize) {
+    let Some(p) = std::env::var_os("RUSH_BENCH_OUT") else {
+        return;
+    };
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(p)
+    {
+        let _ = writeln!(f, "{name}\t{kind}\t{v}");
+    }
 }
 
 fn main() {
