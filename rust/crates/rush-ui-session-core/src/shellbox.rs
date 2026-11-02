@@ -351,7 +351,8 @@ fn read_tail(p: &std::path::Path) -> Option<(String, usize, u64)> {
     let mut buf = [0u8; 64 * 1024];
     let mut left = skip;
     while left > 0 {
-        let n = f.read(&mut buf[..(left as usize).min(buf.len())]).ok()?;
+        let want = (left as usize).min(buf.len());
+        let n = f.read(&mut buf[..want]).ok()?;
         if n == 0 {
             break;
         }
