@@ -57,6 +57,7 @@ mod agent;
 mod upgrade;
 use agent::Watching;
 mod memallow;
+mod serve;
 mod subkeep;
 pub use agent::{ROOT_IDLE, SPAWNED_IDLE, STALL_AFTER};
 use subkeep::SubWatch;
@@ -422,6 +423,8 @@ pub(crate) struct Shared {
     /// Signalled when an agent being stopped has gone, and when the host
     /// quits.
     cv: Condvar,
+    /// Wakes the host's wait (server/serve.rs) as it quits.
+    wake: Option<serve::Wake>,
     timers: Timers,
     tx: Mutex<Sender<Msg>>,
     me: Weak<Shared>,
@@ -606,24 +609,23 @@ fn serve_on(h: &Host, ln: UnixListener, sock: PathBuf) -> Result<(), String> {
     let sh = &h.0;
     let id = sh.lock().cfg.id.clone();
     let id = id.as_str();
-    let lc = ln.try_clone().map_err(|e| e.to_string())?;
-    {
+    let owner = sh.lock().cfg.owner;
+    // SAFETY: getppid can't fail.
+    let owner = (owner > 0 && owner == unsafe { libc::getppid() } as i64).then_some(owner);
+    h.arm_trim();
+    // One wait on this thread for all of it (server/serve.rs); where that
+    // can't be, a thread for each, and this one waits for the stop.
+    if !h.serve_kq(&ln, &sock, owner) {
+        let lc = ln.try_clone().map_err(|e| e.to_string())?;
         let h2 = h.clone();
         sh.go("accept", move |_| h2.accept(lc));
         let h2 = h.clone();
         let s2 = sock.clone();
         sh.go("sock", move |_| h2.watch_sock(&s2));
-        let owner = sh.lock().cfg.owner;
-        // SAFETY: getppid can't fail.
-        if owner > 0 && owner == unsafe { libc::getppid() } as i64 {
+        if let Some(owner) = owner {
             let h2 = h.clone();
             sh.go("owner", move |_| h2.watch_owner(owner));
         }
-        let h2 = h.clone();
-        sh.go("trim", move |_| h2.trim_loop());
-    }
-    // Waits for stop.
-    {
         let mut st = sh.lock();
         while !st.quit {
             st = sh.cv.wait(st).unwrap_or_else(|e| e.into_inner());
@@ -733,6 +735,7 @@ fn build(reg: Registry, hooks: Hooks, cfg: Config) -> (Host, Receiver<Msg>) {
         cache: rush_state::cache_dir(),
         st: Mutex::new(st),
         cv: Condvar::new(),
+        wake: serve::Wake::new(),
         timers: Timers::start(),
         tx: Mutex::new(tx),
         me: me.clone(),
@@ -1175,6 +1178,9 @@ impl Host {
             }
         }
         self.cv.notify_all();
+        if let Some(w) = &self.wake {
+            w.ring();
+        }
         self.timers.stop();
         let _ = self
             .tx
@@ -1190,8 +1196,13 @@ impl Host {
     fn quit(&self, st: &mut State) {
         st.quit = true;
         self.cv.notify_all();
+        if let Some(w) = &self.wake {
+            w.ring();
+        }
     }
 
+    /// Serves ln's clients, a thread each, until the host quits: where the
+    /// host's wait can't be made (server/serve.rs).
     fn accept(&self, ln: UnixListener) {
         for c in ln.incoming() {
             if self.lock().quit {
@@ -1206,6 +1217,7 @@ impl Host {
     /// Stops the host once its socket is gone, as when its folder was
     /// deleted: no client can reach it again, so it would only linger. Its
     /// folder is watched (kqueue), not looked at every 30s as Go does.
+    /// Where the host's wait can't watch it (server/serve.rs).
     fn watch_sock(&self, sock: &Path) {
         let w = rush_sys::fswait::Watcher::new();
         let d = sock.parent().map(Path::to_path_buf).unwrap_or_default();
@@ -1245,37 +1257,6 @@ impl Host {
         );
         drop(st);
         let _ = self.do_op(Op::named("stop"));
-    }
-
-    /// Checks now and then whether to trim the session's tmp.
-    fn trim_loop(&self) {
-        loop {
-            {
-                let st = self.lock();
-                let (st, _) = self
-                    .cv
-                    .wait_timeout_while(st, crate::trim::TRIM_EVERY, |s| !s.quit)
-                    .unwrap_or_else(|e| e.into_inner());
-                if st.quit {
-                    return;
-                }
-            }
-            if !rush_state::Store::load().config.trim_running_tmp {
-                continue;
-            }
-            let id = self.lock().cfg.id.clone();
-            let tmp = crate::tmp::temp_dir(&id);
-            if !crate::trim::disk_low(&tmp) {
-                continue;
-            }
-            let Some(held) = crate::trim::held_under(&tmp) else {
-                continue; // without knowing what's open, nothing is safe to remove
-            };
-            let n = crate::trim::trim_tmp(&tmp, SystemTime::now(), &held);
-            if n > 0 {
-                log_event(&id, "tmp-trimmed", json!({"removed": n}));
-            }
-        }
     }
 
     // ---- The agents' queue ----
