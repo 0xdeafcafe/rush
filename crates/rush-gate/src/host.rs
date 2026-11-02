@@ -39,6 +39,13 @@ pub trait Host: Send + Sync {
     fn search_refusal(&self, _command: &str) -> String {
         String::new()
     }
+    /// What the context guard, while it's on, makes of an agent's hook
+    /// input (before a file read or a shell call, after a read, an edit
+    /// or a shell call, at a compaction): the hook's answer and what to
+    /// log of it; None to say nothing (contextguard.step, Rust-only).
+    fn context_step(&self, _input: &[u8]) -> Option<ContextStep> {
+        None
+    }
     /// What the watch plugin, while it's on, makes of a Bash call: the
     /// command to run in its place, or why it's refused; both "" to let it
     /// go (prwatch.On, watch.Redirect).
@@ -88,6 +95,15 @@ pub fn subagent_ttl(env: &dyn Fn(&str) -> Option<String>) -> i64 {
     } else {
         rush_core::subcache::SHORT
     }
+}
+
+/// The context guard's word on a hook: what the hook prints, and the
+/// event rush logs of it (kind "" for none).
+#[derive(Debug, Default, PartialEq)]
+pub struct ContextStep {
+    pub out: Value,
+    pub kind: String,
+    pub fields: Fields,
 }
 
 /// The sessions as their files have them, under rush's folder.

@@ -716,6 +716,7 @@ pub fn gate_hook(ctx: &Ctx, r: &mut dyn Read, w: &mut dyn Write) {
     #[derive(serde::Deserialize, Default)]
     #[serde(default)]
     struct In {
+        hook_event_name: String,
         tool_name: String,
         tool_input: Option<std::collections::BTreeMap<String, rush_state::json::RawJson>>,
         cwd: String,
@@ -730,6 +731,36 @@ pub fn gate_hook(ctx: &Ctx, r: &mut dyn Read, w: &mut dyn Write) {
     let Ok(mut inp) = rush_state::json::from_slice::<In>(&b) else {
         return;
     };
+    // The context guard has its word first: a refused read or command, a
+    // command's output squeezed. Its hooks after a call and at a
+    // compaction are its alone. After a Bash call it's told the command
+    // the agent asked for, not what the gate ran in its place.
+    let pre = matches!(inp.hook_event_name.as_str(), "" | "PreToolUse");
+    let asked = if !pre && inp.tool_name == "Bash" {
+        as_asked(&b).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let given = if asked.is_empty() { &b } else { &asked };
+    if let Some(step) = ctx.host.context_step(given) {
+        if !step.kind.is_empty() {
+            if ctx.session.is_empty() {
+                ctx.host.log(&step.kind, step.fields);
+            } else {
+                ctx.host.log_event(&ctx.session, &step.kind, step.fields);
+            }
+        }
+        if !step.out.is_null()
+            && let Ok(mut b) = rush_state::json::to_vec(&step.out)
+        {
+            b.push(b'\n');
+            let _ = w.write_all(&b);
+        }
+        return;
+    }
+    if !pre {
+        return;
+    }
     if matches!(inp.tool_name.as_str(), "Agent" | "Task" | "Workflow") {
         // A new subagent or workflow, while the runaway guard refuses them.
         if let Some(why) = spawns_refused(&ctx.plugin.home, rush_core::time::now(), &ctx.session) {
@@ -891,6 +922,20 @@ pub fn gate_hook(ctx: &Ctx, r: &mut dyn Read, w: &mut dyn Write) {
         b.push(b'\n');
         let _ = w.write_all(&b);
     }
+}
+
+/// A hook input with its Bash command as the agent asked it
+/// (hook::original); None when it has none or it's the same.
+fn as_asked(b: &[u8]) -> Option<Vec<u8>> {
+    let mut v: Value = serde_json::from_slice(b).ok()?;
+    let c = v.get_mut("tool_input")?.get_mut("command")?;
+    let ran = c.as_str()?;
+    let asked = hook::original(ran);
+    if asked == ran {
+        return None;
+    }
+    *c = Value::String(asked);
+    serde_json::to_vec(&v).ok()
 }
 
 /// Writes the gate's rules, then each run going and each waiter in the
@@ -1125,6 +1170,8 @@ mod tests {
     pub(crate) struct Fake2 {
         pub logged: Mutex<Vec<(String, String, Fields)>>,
         pub refuse: String,
+        /// The context guard's answer to every hook, and what it logs.
+        pub context: Option<(Value, &'static str)>,
     }
 
     impl Host for Fake2 {
@@ -1157,6 +1204,14 @@ mod tests {
         }
         fn long_ahead(&self, command: &str) -> Option<(i64, i64)> {
             (command == "cargo bench").then_some((7 * 60_000, 5 * 60_000))
+        }
+        fn context_step(&self, _: &[u8]) -> Option<crate::host::ContextStep> {
+            let (out, kind) = self.context.clone()?;
+            Some(crate::host::ContextStep {
+                out,
+                kind: kind.into(),
+                fields: fields(json!({"why": "it said so"})),
+            })
         }
     }
 
@@ -1373,6 +1428,55 @@ mod tests {
                 .to_string()
                 + "\n"
         );
+    }
+
+    // The context guard answers first, and its log says why; a hook after
+    // a call is never the gate's to rewrite.
+    #[test]
+    fn hook_asks_the_context_guard_first() {
+        let home = tempfile::tempdir().unwrap();
+        let deny = json!({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                          "permissionDecisionReason": "read it already"}});
+        let host = Arc::new(Fake2 {
+            context: Some((deny, "hook-denied")),
+            ..Fake2::default()
+        });
+        let c = ctx(home.path(), Some("tsc"), host.clone());
+        assert_eq!(
+            hook(
+                &c,
+                r#"{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"/w/a"}}"#
+            ),
+            r#"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"read it already"}}"#
+                .to_string()
+                + "\n"
+        );
+        {
+            let logged = host.logged.lock().unwrap();
+            assert_eq!(logged.len(), 1);
+            assert_eq!(logged[0].1, "hook-denied");
+            assert_eq!(logged[0].2["why"], json!("it said so"));
+        }
+        // Saying nothing, it leaves the call to the gate, before the call
+        // only.
+        let c = ctx(home.path(), Some("tsc"), Arc::new(Fake2::default()));
+        let post = r#"{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"tsc -b"},"tool_response":{"stdout":""}}"#;
+        assert_eq!(hook(&c, post), "");
+        assert!(
+            hook(&c, &post.replace("PostToolUse", "PreToolUse")).contains("gate run --name 'tsc'"),
+            "the gate still wraps before the call"
+        );
+        // An answer with nothing to print or log: nothing.
+        let silent = Arc::new(Fake2 {
+            context: Some((Value::Null, "")),
+            ..Fake2::default()
+        });
+        let c = ctx(home.path(), Some("tsc"), silent.clone());
+        assert_eq!(
+            hook(&c, &post.replace("PostToolUse", "PostToolUseFailure")),
+            ""
+        );
+        assert!(silent.logged.lock().unwrap().is_empty());
     }
 
     // scripthook_test.go TestScriptHook: a Bash call of more than three

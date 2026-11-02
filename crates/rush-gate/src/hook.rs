@@ -97,6 +97,26 @@ pub fn unwrap(command: &str) -> String {
     s
 }
 
+/// The command the agent asked for, from what ran in its place: the
+/// gate's [`wrap`] undone, and a script run's command read back from its
+/// script (rush_sys::script's wrap). Command as it is otherwise.
+/// Rust-only: the context guard compares what the agent asked.
+pub fn original(command: &str) -> String {
+    const SCRIPT: &str = " rush-script '";
+    if let Some(i) = command.rfind(SCRIPT) {
+        let q = &command[i + SCRIPT.len() - 1..];
+        if q.len() >= 2 && q.ends_with('\'') {
+            let path = q[1..q.len() - 1].replace(r"'\''", "'");
+            if quote(&path) == q
+                && let Ok(s) = std::fs::read_to_string(&path)
+            {
+                return s.strip_suffix('\n').unwrap_or(&s).to_string();
+            }
+        }
+    }
+    unwrap(command)
+}
+
 /// s as one word to sh.
 pub fn quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
@@ -255,6 +275,33 @@ mod tests {
         assert_eq!(unwrap("ls"), "ls");
         let doc = "cat > m.txt <<'EOF'\nfix\nEOF\ngo test ./...";
         assert_eq!(unwrap(&wrap("/r", "go", "/x", doc)), doc);
+    }
+
+    // The command asked for, through either wrapper.
+    #[test]
+    fn original_gives_back_the_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("it's.sh");
+        let long = "a && b\nc && d\ne";
+        std::fs::write(&script, format!("{long}\n")).unwrap();
+        let cases: Vec<(String, &str)> = vec![
+            (wrap("/opt/rush", "tsc", "/x", "tsc -b"), "tsc -b"),
+            (
+                format!(
+                    "'/bin/bash' --noprofile --norc -c 'runner' rush-script {}",
+                    quote(&script.to_string_lossy())
+                ),
+                long,
+            ),
+            ("ls -la".into(), "ls -la"),
+            (
+                "bash -c x rush-script '/no/such/file.sh'".into(),
+                "bash -c x rush-script '/no/such/file.sh'",
+            ),
+        ];
+        for (ran, want) in cases {
+            assert_eq!(original(&ran), want, "{ran}");
+        }
     }
 
     // gate_test.go TestHereDoc
