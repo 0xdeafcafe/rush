@@ -174,9 +174,6 @@ fn snapshot(name: &str, got: &str) {
         return;
     }
     let want = std::fs::read_to_string(&p).unwrap();
-    if got != want {
-        eprintln!("=====SNAPSHOT {name}=====\n{got}=====END {name}=====");
-    }
     assert_eq!(got, want, "{name} differs; UPDATE_SNAPSHOTS=1 to accept");
 }
 
@@ -710,17 +707,12 @@ const SIZES: [(u16, u16); 3] = [(80, 24), (120, 40), (200, 50)];
 /// Draws one view at every size, each from a fresh model, as
 /// `name_WxH`.
 fn views(name: &str, setup: impl Fn(&mut Model), keys: &[(Key, KeyMods)]) {
-    let mut bad = Vec::new();
     for (w, h) in SIZES {
         let mut m = model();
         setup(&mut m);
         let f = plain(&mut m, w, h, keys);
-        let n = format!("{name}_{w}x{h}");
-        if std::panic::catch_unwind(|| snapshot(&n, &f)).is_err() {
-            bad.push(n);
-        }
+        snapshot(&format!("{name}_{w}x{h}"), &f);
     }
-    assert!(bad.is_empty(), "{bad:?}");
 }
 
 #[test]
@@ -785,7 +777,7 @@ fn snapshot_session_views_dropdown() {
     let mut m = model();
     open(&mut m);
     let f = plain(&mut m, 80, 24, &[enter, alt_s]);
-    let _ = std::panic::catch_unwind(|| snapshot("snap_session_views_menu_80x24", &f));
+    snapshot("snap_session_views_menu_80x24", &f);
     assert!(f.contains("Conversation ▾"), "{f}");
     assert!(f.contains("● Normal"), "{f}");
     let mut m = model();

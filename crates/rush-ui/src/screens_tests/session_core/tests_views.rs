@@ -197,9 +197,9 @@ fn tabs_and_the_rule_under_them() {
         let n = cs.iter().filter(|c| **c == '━').count();
         (from, n)
     };
-    assert_eq!(lit(&mut m), (3, " Conversation ".len()));
+    assert_eq!(lit(&mut m), (3, " Conversation ▾ ".chars().count()));
     press(&mut m, "]");
-    assert_eq!(lit(&mut m), (18, " Overview ".len()));
+    assert_eq!(lit(&mut m), (20, " Overview ".len()));
     press(&mut m, "[");
     press(&mut m, "[");
     let col = col_of(&s[tabs], "Tasks");
@@ -1141,16 +1141,16 @@ fn prompt_pins() {
         "{:?}",
         s[top]
     );
-    assert_eq!(m.session.as_ref().unwrap().shown[0], "pin:t27");
+    assert_eq!(m.session.as_ref().unwrap().shown[0], "pin:t26");
     click(&mut m, MouseKind::Down(Button::Left), 10, top);
     click(&mut m, MouseKind::Up(Button::Left), 10, top);
     let v = m.session.as_ref().unwrap();
-    assert_eq!(v.sel, "t27");
+    assert_eq!(v.sel, "t26");
     let s = screen(&mut m);
     // Its turn from the top: the blank above its heading under the pin
     // of the one before, as Go's.
     assert!(s[top + 1].contains("▏ You"), "picked: {:?}", s[top + 1]);
-    assert!(s[top + 2].contains("question 26"), "{:?}", s[top + 2]);
+    assert!(s[top + 2].contains("question 25"), "{:?}", s[top + 2]);
 }
 
 /// In a read conversation what's stacked on the box (the queue, a row of

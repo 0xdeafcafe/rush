@@ -1,1 +1,24 @@
-pending
+     !
+    ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working                       default
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings             0% cpu · –
+    RUSH      Agents   Wall   [ ]
+   ▀▀▀▀▀▀
+────────────────────────────────────────────────────────────────────────────────
+
+    set up caching for CI   @set-up-caching-for-ci  ·  idle         context 0%
+    checkout · main    Claude Code · open in a terminal · /rush copies it here
+    Conversation ▾   Overview   Changes    [ ] views      esc back to the list
+───━━━━━━━━━━━━━━━━─────────────────────────────────────────────────────────────
+    ▸ ● Normal     everything, as usual
+  ▍     Chat       what did we say?
+  │     Code       what did it change?                                     7s
+  │     Catch-up   what happened while I was away?
+  ▍     Trail      where did the time go?
+  ▍   ↑↓ · enter shows it · esc closes
+  ▍                                                              1 step   13s
+
+
+  ╭─ open in a terminal, so it can't take messages here ──────────────────────╮
+  │ ❯  a message for this agent                                               │
+  ╰───────────────────────────────────────────────────────────────────────────╯
+    ↑↓ choose  ·  enter show it  ·  esc close
