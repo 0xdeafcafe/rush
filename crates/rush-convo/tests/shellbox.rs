@@ -69,20 +69,6 @@ fn the_box(all: &str) -> String {
     out
 }
 
-fn snapshot(name: &str, got: &str) {
-    let p = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("snapshots")
-        .join(format!("{name}.txt"));
-    if std::env::var_os("UPDATE_SNAPSHOTS").is_some() || !p.exists() {
-        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        std::fs::write(&p, got).unwrap();
-        return;
-    }
-    let want = std::fs::read_to_string(&p).unwrap();
-    assert_eq!(got, want, "{name} differs; UPDATE_SNAPSHOTS=1 to accept");
-}
-
 fn finished(cmd: &str, out: &str, exit: i32) -> ShellRun {
     let mut r = ShellRun::new(cmd, "/work/app", at(10));
     r.push(out);
@@ -103,11 +89,97 @@ fn a_block_before_and_after_its_run() {
     got.push_str("run\n");
     let run = finished("rm ~/Desktop/DeveloperIDApplication.p12", "removed\n", 0);
     got.push_str(&the_box(&draw(&s, &opts("", &[(&r, run)], at(20)))));
-    snapshot("shellbox_block", &got);
-    assert!(got.contains("▶ run  ⧉ copy"), "{got}");
-    assert!(got.contains("enter runs it · c copies it"), "{got}");
+    snap("shellbox_block", &got);
+    assert!(got.contains("▶ run  ✎ edit  ⧉ copy"), "{got}");
+    assert!(
+        got.contains("enter runs it · e edits it · c copies it"),
+        "{got}"
+    );
     assert!(got.contains("✓ exit 0 · 0.1s"), "{got}");
-    assert!(got.contains("→ send to agent  ↻ again  ✕"), "{got}");
+    assert!(got.contains("→ send  ✎ draft  ≈ summary  ↻  ✕"), "{got}");
+}
+
+/// A finished run's foot as each of its buttons was used: sent to the
+/// agent, drafted in your message, summed up (and summing), a summary
+/// that failed saying why; and the words it has at each width.
+#[test]
+fn the_foot_as_its_buttons_are_used() {
+    let s = session(REPLY);
+    let r = block_ref(1, 0, 0);
+    let base = finished("rm ~/Desktop/DeveloperIDApplication.p12", "removed\n", 0);
+    let mut got = String::new();
+    let mut each = |name: &str, f: &dyn Fn(&mut ShellRun), width: usize| {
+        let mut run = base.clone();
+        f(&mut run);
+        let mut o = opts("", &[(&r, run)], at(20));
+        o.width = width;
+        got.push_str(name);
+        got.push('\n');
+        got.push_str(&the_box(&draw(&s, &o)));
+    };
+    each("wide", &|_| {}, 90);
+    each("sent", &|x| x.told = true, 64);
+    each("drafted", &|x| x.sent = true, 64);
+    each("summing", &|x| x.summing = true, 64);
+    each(
+        "summary sent",
+        &|x| (x.told, x.told_summary) = (true, true),
+        64,
+    );
+    each(
+        "summary failed",
+        &|x| x.note = "couldn't sum it up: timed out".into(),
+        64,
+    );
+    each("narrow", &|_| {}, 40);
+    snap("shellbox_foot", &got);
+    assert!(
+        got.contains("→ send to agent  ✎ draft  ≈ summary  ↻ again  ✕"),
+        "{got}"
+    );
+    assert!(got.contains("✓ sent"), "{got}");
+    assert!(got.contains("✓ in box"), "{got}");
+    assert!(got.contains("≈ summing…"), "{got}");
+    assert!(got.contains("✓ summary"), "{got}");
+    assert!(got.contains("✗ couldn't sum it up: timed out"), "{got}");
+}
+
+/// A block's commands being edited: the editor in the box, its cursor
+/// and keys; once run, the box runs and shows what was edited, marked.
+#[test]
+fn a_block_edited_before_its_run() {
+    let s = session(REPLY);
+    let r = block_ref(1, 0, 0);
+    let mut o = opts(&r, &[], at(5));
+    o.shell_edit = Some(rush_convo::shellbox::ShellEdit {
+        r: r.clone(),
+        text: "rm -i ~/Desktop/DeveloperIDApplication.p12\nls ~/Desktop".into(),
+        cursor: 5,
+    });
+    let mut got = String::from("editing\n");
+    got.push_str(&the_box(&draw(&s, &o)));
+    assert!(got.contains("shell · editing"), "{got}");
+    assert!(got.contains("$ rm -i ~/Desktop"), "{got}");
+    assert!(got.contains("$ ls ~/Desktop"), "{got}");
+    assert!(got.contains("enter runs it"), "{got}");
+    assert!(got.contains("esc as it was"), "{got}");
+    // Run as edited: the edited commands, marked, not the agent's.
+    let mut run = finished(
+        "rm -i ~/Desktop/DeveloperIDApplication.p12\nls ~/Desktop",
+        "removed\n",
+        0,
+    );
+    run.edited = true;
+    got.push_str("edited\n");
+    let ran = the_box(&draw(&s, &opts("", &[(&r, run)], at(20))));
+    got.push_str(&ran);
+    snap("shellbox_edited", &got);
+    assert!(ran.contains("shell · edited"), "{ran}");
+    assert!(ran.contains("rm -i ~/Desktop"), "{ran}");
+    assert!(ran.contains("✓ exit 0"), "{ran}");
+    // The agent's words are as they were, above the box.
+    let all = draw(&s, &opts("", &[], at(20)));
+    assert!(all.contains("$ rm ~/Desktop"), "{all}");
 }
 
 /// The buttons are links a click follows.
@@ -352,7 +424,7 @@ fn code_has_your_runs_as_check_lines() {
     o.open.insert("t1:sh:0:0".into(), true);
     let got = draw(&s, &o);
     assert!(got.contains("removed"), "{got}");
-    assert!(got.contains("→ send to agent"), "{got}");
+    assert!(got.contains("→ send"), "{got}");
 }
 
 /// Catch-up: what you ran a line each; one running still is still going.

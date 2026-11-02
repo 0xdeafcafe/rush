@@ -206,6 +206,11 @@ pub fn use_asker(m: &mut Model, ask: Arc<dyn Ask + Send + Sync>) {
     m.kept::<Suggestions>().asker = Some(ask);
 }
 
+/// The Ask set by use_asker, if one is (else the harness is asked).
+pub fn asker(m: &mut Model) -> Option<Arc<dyn Ask + Send + Sync>> {
+    m.kept::<Suggestions>().asker.clone()
+}
+
 /// How one kind of suggestion has fared.
 pub fn count(m: &mut Model, kind: &str) -> Count {
     learned(m).kinds.get(kind).copied().unwrap_or_default()
@@ -384,7 +389,7 @@ fn resolve(m: &mut Model, key: &str, mo: Moment, set: Mode) {
 }
 
 /// The profile session a runs as, for its harness's quick model.
-fn profile(reg: &Registry, a: &Agent) -> Profile {
+pub(crate) fn profile(reg: &Registry, a: &Agent) -> Profile {
     let fallback = || Profile {
         kind: a.kind.clone(),
         ..Profile::default()

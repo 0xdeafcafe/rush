@@ -1061,7 +1061,10 @@ impl Drawer<'_> {
             for (k, b) in crate::shellbox::shell_blocks(text).into_iter().enumerate() {
                 let r = format!("{}:sh:{i}:{k}", self.r);
                 let o = self.o;
-                if o.shells.get(&r).is_some_and(|x| x.command == b.script()) {
+                if o.shells
+                    .get(&r)
+                    .is_some_and(|x| x.command == b.script() || x.edited)
+                {
                     continue;
                 }
                 self.block_box(i, k, &b);
@@ -1294,7 +1297,7 @@ impl Drawer<'_> {
 
     /// Run r's box under its line in another view, while it's opened.
     fn box_under(&mut self, r: &str, run: &ShellRun) {
-        if !self.box_open(r) {
+        if !self.box_open(r) && self.o.shell_edit.as_ref().is_none_or(|e| e.r != r) {
             return;
         }
         self.box_under_row = true;

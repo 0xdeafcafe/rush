@@ -12,7 +12,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 use super::*;
 use crate::render::Preset;
-use crate::shellbox::{OUT_SHOWN, Sgr, ShellBlock, ShellRun, sgr_spans};
+use crate::shellbox::{OUT_SHOWN, Sgr, ShellBlock, ShellEdit, ShellRun, sgr_spans};
 
 /// How wide a box's inside may get.
 const BOX_MOST: usize = 96;
@@ -34,7 +34,11 @@ pub(crate) fn turn_sig(o: &Options, prefix: &str) -> u64 {
     let mut running = false;
     for (k, r) in runs {
         (k, r.ver, r.end, r.exit, r.stopped, r.paused, r.sent).hash(&mut h);
-        running |= r.running();
+        (r.told, r.told_summary, r.edited, r.summing, &r.note).hash(&mut h);
+        running |= r.running() || r.summing;
+    }
+    if let Some(e) = o.shell_edit.as_ref().filter(|e| e.r.starts_with(prefix)) {
+        e.hash(&mut h);
     }
     if running {
         // Its clock and spinner.
@@ -52,11 +56,16 @@ impl Drawer<'_> {
 
     /// Item i of the turn is a reply with a run of one of its blocks.
     pub(crate) fn has_runs(&self, i: usize) -> bool {
-        if self.o.shells.is_empty() {
+        if self.o.shells.is_empty() && self.o.shell_edit.is_none() {
             return false;
         }
         let p = format!("{}:sh:{i}:", self.r);
         self.o.shells.keys().any(|k| k.starts_with(&p))
+            || self
+                .o
+                .shell_edit
+                .as_ref()
+                .is_some_and(|e| e.r.starts_with(&p))
     }
 
     /// The fence tagged tag holding body as a shell block, when it's one
@@ -83,13 +92,17 @@ impl Drawer<'_> {
         let r = format!("{}:sh:{i}:{k}", self.r);
         let script = b.script();
         let o = self.o;
-        // A run is the block's only while it ran what the block says.
+        // A run is the block's only while it ran what the block says, or
+        // what you edited it to.
         let run = o
             .shells
             .get(&r)
-            .filter(|run| run.command == script)
+            .filter(|run| run.command == script || run.edited)
             .map(|r| &**r);
-        self.shell_box(&r, &b.rows(), &script, run);
+        match run {
+            Some(x) if x.edited => self.run_box(&r, x),
+            _ => self.shell_box(&r, &b.rows(), &script, run),
+        }
     }
 
     /// The `!` runs of the turn anchored at or before item i, in the
@@ -200,13 +213,29 @@ impl Drawer<'_> {
             Txt::new()
         };
         label.push(dim("shell · "));
+        let o = self.o;
+        if let Some(e) = o.shell_edit.as_ref().filter(|e| e.r == r) {
+            label.push(paint(C_ORANGE, "editing"));
+            label.push(dim(" · "));
+            label.push(sub(&self.p.short_abs(cwd)));
+            self.edit_box(r, e, indent, inner, label, from);
+            return;
+        }
+        if run.is_some_and(|x| x.edited) {
+            label.push(paint(C_YELLOW, "edited"));
+            label.push(dim(" · "));
+        }
         label.push(sub(&self.p.short_abs(cwd)));
         let copy = button(sub("⧉ copy"), "copy", r);
+        let edit = button(sub("✎ edit"), "edit", r);
         let top_r = match run {
             None => button(paint(C_ORANGE, "▶ run"), "run", r)
                 .and_raw("  ")
+                .and(edit)
+                .and_raw("  ")
                 .and(copy),
-            Some(_) => copy,
+            Some(x) if x.running() => copy,
+            Some(_) => edit.and_raw("  ").and(copy),
         };
         let l = self
             .sp(indent - 1)
@@ -359,6 +388,10 @@ impl Drawer<'_> {
                     body.push(dim("enter folds it"));
                 }
             }
+            // A summary that couldn't be made says why.
+            if !x.note.is_empty() {
+                body.push(paint(C_RED, &format!("✗ {}", x.note)));
+            }
         }
         for (j, row) in body.into_iter().enumerate() {
             if j == mid {
@@ -388,6 +421,8 @@ impl Drawer<'_> {
         let (foot_l, foot_r) = match run {
             None if picked => (
                 key_hint("enter", "runs it")
+                    .and(faint(" · "))
+                    .and(key_hint("e", "edits it"))
                     .and(faint(" · "))
                     .and(key_hint("c", "copies it")),
                 Txt::new(),
@@ -421,30 +456,13 @@ impl Drawer<'_> {
                     }
                 };
                 let l = how.and(dim(&format!(" · {took}")));
-                let send = if x.sent {
-                    dim("✓ in your message")
-                } else {
-                    button(paint(C_BLUE, "→ send to agent"), "send", r)
-                };
-                let again = button(sub("↻ again"), "again", r);
-                let gone = button(sub("✕"), "clear", r);
-                let mut rt = send
-                    .and_raw("  ")
-                    .and(again)
-                    .and_raw("  ")
-                    .and(gone.clone());
-                if l.width() + rt.width() + 8 > inner {
-                    // Short of room: the short words.
-                    let send = if x.sent {
-                        dim("✓ sent")
-                    } else {
-                        button(paint(C_BLUE, "→ send"), "send", r)
-                    };
-                    rt = send
-                        .and_raw("  ")
-                        .and(button(sub("↻"), "again", r))
-                        .and_raw("  ")
-                        .and(gone);
+                // The longest words that fit, else shorter, else marks.
+                let mut rt = Txt::new();
+                for tier in 0..3 {
+                    rt = foot_buttons(x, r, tier);
+                    if l.width() + rt.width() + 8 <= inner {
+                        break;
+                    }
                 }
                 (l, rt)
             }
@@ -455,6 +473,114 @@ impl Drawer<'_> {
         self.add("", Color::Default, l, Txt::new());
         self.own(r, from);
     }
+}
+
+impl Drawer<'_> {
+    /// A box whose commands are being edited (✎ edit): its frame lit,
+    /// "editing" on its top edge, the text as it stands with the cursor
+    /// on it, and on its foot what enter, a new line and esc do.
+    fn edit_box(
+        &mut self,
+        r: &str,
+        e: &ShellEdit,
+        indent: usize,
+        inner: usize,
+        label: Txt,
+        from: usize,
+    ) {
+        let frame = C_ORANGE;
+        let l = self
+            .sp(indent - 1)
+            .and(edge(frame, "╭", "╮", inner, label, Txt::new()));
+        let top = if self.box_under_row { "" } else { r };
+        self.add(top, Color::Default, l, Txt::new());
+        let cur = Style {
+            mods: rush_core::text::Mods::REVERSE,
+            ..C_TEXT
+        };
+        let mut at = 0usize;
+        for line in e.text.split('\n') {
+            let n = line.chars().count();
+            let mut row = faint("$ ");
+            if (at..=at + n).contains(&e.cursor) {
+                let c = e.cursor - at;
+                let before: String = line.chars().take(c).collect();
+                let under: String = line.chars().nth(c).map_or(" ".into(), String::from);
+                let after: String = line.chars().skip(c + 1).collect();
+                row = row
+                    .and(text(&expand_tabs(&before)))
+                    .and(paint(cur, &under))
+                    .and(text(&expand_tabs(&after)));
+            } else {
+                row = row.and(text(&expand_tabs(line)));
+            }
+            let row = if row.width() > inner {
+                row.take(inner - 1).and(faint("…"))
+            } else {
+                row
+            };
+            let w = row.width();
+            let l = self
+                .sp(indent - 1)
+                .and(paint(frame, "│"))
+                .and_raw(" ")
+                .and(row)
+                .and(blanks(inner - w))
+                .and_raw(" ")
+                .and(paint(frame, "│"));
+            self.add("", Color::Default, l, Txt::new());
+            at += n + 1;
+        }
+        let keys = key_hint("enter", "runs it")
+            .and(faint(" · "))
+            .and(key_hint("⇧enter", "new line"))
+            .and(faint(" · "))
+            .and(key_hint("esc", "as it was"));
+        let l = self
+            .sp(indent - 1)
+            .and(edge(frame, "╰", "╯", inner, keys, Txt::new()));
+        self.add("", Color::Default, l, Txt::new());
+        self.own(r, from);
+    }
+}
+
+/// A finished run's buttons on its foot, in words as long as tier says
+/// (0 the longest, 2 marks alone): → send it to the agent, ✎ draft it in
+/// your message first, ≈ send a summary, ↻ run it again, ✕ let it go.
+/// One done says so in their place; a summary being made, that it is.
+fn foot_buttons(x: &ShellRun, r: &str, tier: usize) -> Txt {
+    let pick = |w: [&'static str; 3]| w[tier.min(2)];
+    let send = if x.told && !x.told_summary {
+        dim(pick(["✓ sent to agent", "✓ sent", "✓"]))
+    } else {
+        button(
+            paint(C_BLUE, pick(["→ send to agent", "→ send", "→"])),
+            "send",
+            r,
+        )
+    };
+    let draft = if x.sent {
+        dim(pick(["✓ in your message", "✓ in box", "✓"]))
+    } else {
+        button(sub(pick(["✎ draft", "✎ draft", "✎"])), "draft", r)
+    };
+    let summary = if x.summing {
+        paint(C_ORANGE, pick(["≈ summing up…", "≈ summing…", "≈…"]))
+    } else if x.told_summary {
+        dim(pick(["✓ summary sent", "✓ summary", "✓"]))
+    } else {
+        button(sub(pick(["≈ summary", "≈ summary", "≈"])), "summary", r)
+    };
+    let again = button(sub(pick(["↻ again", "↻", "↻"])), "again", r);
+    let gone = button(sub("✕"), "clear", r);
+    let mut out = Txt::new();
+    for (i, b) in [send, draft, summary, again, gone].into_iter().enumerate() {
+        if i > 0 {
+            out = out.and_raw("  ");
+        }
+        out = out.and(b);
+    }
+    out
 }
 
 /// t opening rush:shell/<act>/<r> when clicked.

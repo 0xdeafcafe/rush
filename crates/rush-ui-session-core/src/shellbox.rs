@@ -83,6 +83,9 @@ pub struct Kept {
     /// Bumped as the runs change; the view takes them again when it moves.
     r#gen: u64,
     shown: u64,
+    /// The box whose commands are being edited (✎ edit), by its ref, and
+    /// the text as it stands, edited as the message box is.
+    editing: Option<(String, crate::frame::editor::Editor)>,
 }
 
 /// Every session's runs, by its key.
@@ -491,6 +494,8 @@ pub fn start(m: &mut Model, key: &str, r: &str, script: &str, bang: Option<(u32,
     if let Some((turn, after)) = bang {
         (run.bang, run.turn, run.after) = (true, turn, after);
     }
+    // A block run as you edited it, not as the agent wrote it.
+    run.edited = bang.is_none() && block_script(m, r).is_some_and(|b| b.trim() != script);
     let proc_ = match fake {
         Some(f) => {
             RAN.with(|x| x.borrow_mut().push((script.to_string(), cwd.clone())));
@@ -643,6 +648,19 @@ fn show(m: &mut Model, key: &str) {
     {
         v.o.shell_cwd = dir;
     }
+    let edit = kept(m, key)
+        .editing
+        .as_ref()
+        .map(|(r, e)| rush_convo::shellbox::ShellEdit {
+            r: r.clone(),
+            text: e.string(),
+            cursor: e.pos.min(e.text.len()),
+        });
+    if let Some(v) = m.session.as_mut().filter(|v| v.key == key)
+        && v.o.shell_edit != edit
+    {
+        v.o.shell_edit = edit;
+    }
     let k = kept(m, key);
     let (r#gen, n, shown) = (k.r#gen, k.runs.len(), k.shown);
     let Some(v) = m.session.as_ref().filter(|v| v.key == key) else {
@@ -708,8 +726,224 @@ pub fn again(m: &mut Model, key: &str, r: &str) -> Out {
         return Out::Idle;
     };
     let bang = run.bang.then_some((run.turn, run.after));
-    let script = block_script(m, r).unwrap_or_else(|| run.command.clone());
+    let script = match block_script(m, r) {
+        Some(s) if !run.edited => s,
+        _ => run.command.clone(),
+    };
     start(m, key, r, &script, bang)
+}
+
+/// What box r's editor starts with: what it last ran, or its block's
+/// commands as the agent wrote them.
+fn command_now(m: &mut Model, key: &str, r: &str) -> Option<String> {
+    match run_of(m, key, r) {
+        Some(x) => Some(x.command.clone()),
+        None => block_script(m, r),
+    }
+}
+
+/// ✎ edit (e): box r's commands become an editor in place, to change
+/// before they run (again).
+pub fn edit(m: &mut Model, key: &str, r: &str) -> Out {
+    if kept(m, key).procs.contains_key(r) {
+        m.flash_err("it's still running · ✕ or x stops it first");
+        return Out::Draw;
+    }
+    let Some(cmd) = command_now(m, key, r) else {
+        return Out::Idle;
+    };
+    let mut e = crate::frame::editor::Editor::default();
+    e.set(&cmd);
+    kept(m, key).editing = Some((r.to_string(), e));
+    if let Some(v) = m.session.as_mut() {
+        v.sel = r.to_string();
+    }
+    show(m, key);
+    Out::Draw
+}
+
+/// Whether a box of session key is being edited.
+pub fn editing(m: &mut Model, key: &str) -> bool {
+    kept(m, key).editing.is_some()
+}
+
+/// A key while box r's commands are edited: enter runs them as they
+/// stand, esc (or ctrl+c) leaves them as they were; ↑↓ go between their
+/// lines, and the rest edit as in the message box (a new line, undo).
+fn edit_key(m: &mut Model, key: &str, k: &Press) -> Out {
+    let Some((r, mut e)) = kept(m, key).editing.take() else {
+        return Out::Pass;
+    };
+    match k.s.as_str() {
+        "enter" => {
+            let script = e.string();
+            if script.trim().is_empty() {
+                kept(m, key).editing = Some((r, e));
+                m.flash_err("there's nothing to run");
+                return Out::Draw;
+            }
+            show(m, key);
+            let bang = run_of(m, key, &r)
+                .filter(|x| x.bang)
+                .map(|x| (x.turn, x.after));
+            return start(m, key, &r, &script, bang);
+        }
+        "esc" | "ctrl+c" => {
+            show(m, key);
+            return Out::Draw;
+        }
+        "up" | "down" => {
+            let up = k.s == "up";
+            e.pos = line_move(&e.text, e.pos, up);
+            e.anchor = None;
+        }
+        _ => {
+            if let Some(copied) = e.key(k)
+                && !copied.is_empty()
+            {
+                m.copy_text(copied);
+            }
+        }
+    }
+    kept(m, key).editing = Some((r, e));
+    show(m, key);
+    Out::Draw
+}
+
+/// The cursor at pos moved a line up or down, to the same column or the
+/// line's end; at the first (last) line, to its start (end).
+fn line_move(text: &[char], pos: usize, up: bool) -> usize {
+    use crate::frame::editor::{line_end, line_start};
+    let pos = pos.min(text.len());
+    let start = line_start(text, pos);
+    let col = pos - start;
+    if up {
+        if start == 0 {
+            return 0;
+        }
+        let prev = line_start(text, start - 1);
+        (prev + col).min(start - 1)
+    } else {
+        let end = line_end(text, pos);
+        if end >= text.len() {
+            return text.len();
+        }
+        let next = end + 1;
+        (next + col).min(line_end(text, next))
+    }
+}
+
+/// How long the quick model has to sum a run up.
+const SUM_TIME: Duration = Duration::from_secs(45);
+const SUM_BUDGET: f64 = 0.05;
+
+/// Sends text to session key's agent as if typed and sent with enter: at
+/// once, or queued while it works, as the box would; what's typed in the
+/// box is left as it was.
+fn send_as_typed(m: &mut Model, key: &str, text: &str) -> Out {
+    let c = conn(m, key);
+    let was = c.input.string();
+    let imgs = std::mem::take(&mut c.imgs);
+    let bang = std::mem::take(&mut c.bang);
+    c.input.set(text);
+    let o = super::keys::send(m, key, false);
+    let c = conn(m, key);
+    if c.input.is_empty() {
+        // Sent (or queued): what you were typing comes back.
+        c.input.set(&was);
+        c.imgs = imgs;
+        c.bang = bang;
+    }
+    o
+}
+
+/// → send (s): run r's command, code and the end of its output go to the
+/// agent at once, as a message you sent.
+pub fn send(m: &mut Model, key: &str, r: &str) -> Out {
+    let Some(run) = run_of(m, key, r) else {
+        return Out::Idle;
+    };
+    if run.running() {
+        m.flash_err("it's still running · send it once it's done");
+        return Out::Draw;
+    }
+    let o = send_as_typed(m, key, &run.send_text());
+    change(m, key, r, |x| x.told = true);
+    save(m, key);
+    o
+}
+
+/// ≈ summary (m): a quick model sums run r up, off the UI thread, and the
+/// summary goes to the agent at once; when it can't, the box says why
+/// and nothing is sent.
+pub fn summary(m: &mut Model, key: &str, r: &str) -> Out {
+    let Some(run) = run_of(m, key, r) else {
+        return Out::Idle;
+    };
+    if run.running() {
+        m.flash_err("it's still running · send it once it's done");
+        return Out::Draw;
+    }
+    if run.summing {
+        return Out::Idle;
+    }
+    let Some(a) = agent(m, key).cloned() else {
+        change(m, key, r, |x| {
+            x.note = "couldn't sum it up: no agent here".into()
+        });
+        return Out::Draw;
+    };
+    change(m, key, r, |x| (x.summing, x.note) = (true, String::new()));
+    let prompt = run.summary_prompt();
+    let reg = m.reg.clone();
+    let asker = super::viewsuggest::asker(m);
+    let (key, r) = (key.to_string(), r.to_string());
+    m.later(
+        move || -> Result<String, String> {
+            use super::viewsuggest::{Ask, Call};
+            let ask: Arc<dyn Ask + Send + Sync> =
+                asker.unwrap_or_else(|| Arc::new(rush_efficiency::advisor::Cli::new(reg.clone())));
+            let prof = super::viewsuggest::profile(&reg, &a);
+            let (quick, _) = ask.models(&prof);
+            if quick.is_empty() {
+                return Err("this harness has no quick model".into());
+            }
+            let call = Call {
+                model: quick,
+                budget: SUM_BUDGET,
+                timeout: SUM_TIME,
+                dirs: Vec::new(),
+                system: rush_convo::shellbox::SUMMARY_SYSTEM,
+                prompt,
+                schema: rush_convo::shellbox::SUMMARY_SCHEMA.into(),
+            };
+            let (_, got) = ask.ask(&prof, &call);
+            let b = got?;
+            rush_convo::shellbox::summary_answer(&b).ok_or_else(|| "its answer was empty".into())
+        },
+        move |m, got| {
+            let Some(run) = run_of(m, &key, &r) else {
+                return Out::Idle;
+            };
+            match got {
+                Ok(s) => {
+                    change(m, &key, &r, |x| x.summing = false);
+                    let o = send_as_typed(m, &key, &run.summary_text(&s));
+                    change(m, &key, &r, |x| (x.told, x.told_summary) = (true, true));
+                    save(m, &key);
+                    o
+                }
+                Err(e) => {
+                    let e = e.split_whitespace().collect::<Vec<_>>().join(" ");
+                    change(m, &key, &r, |x| {
+                        (x.summing, x.note) = (false, format!("couldn't sum it up: {e}"));
+                    });
+                    Out::Draw
+                }
+            }
+        },
+    );
+    Out::Draw
 }
 
 /// Lets go of a finished run: a block's box is as before it ran, a `!`
@@ -735,8 +969,8 @@ pub fn clear(m: &mut Model, key: &str, r: &str) -> Out {
 }
 
 /// Puts run r's command and the end of its output in the message box,
-/// after what's typed there: yours to send, or not.
-pub fn send(m: &mut Model, key: &str, r: &str) -> Out {
+/// after what's typed there: yours to change and send, or not (✎ draft).
+pub fn draft(m: &mut Model, key: &str, r: &str) -> Out {
     let Some(run) = run_of(m, key, r) else {
         return Out::Idle;
     };
@@ -865,6 +1099,9 @@ fn enter(m: &mut Model, key: &str, r: &str) -> Out {
 
 /// The command of box r, to copy.
 fn command_of(m: &mut Model, key: &str, r: &str) -> Option<String> {
+    if let Some(x) = run_of(m, key, r).filter(|x| x.edited) {
+        return Some(x.command.clone());
+    }
     block_script(m, r).or_else(|| run_of(m, key, r).map(|x| x.command.clone()))
 }
 
@@ -882,15 +1119,19 @@ fn copy(m: &mut Model, key: &str, r: &str) -> Out {
 /// turns it to running commands, and there enter runs one, esc and a
 /// backspace at its start turn it back; on a box picked in the
 /// conversation, enter runs it (or opens all it wrote), c copies it, r
-/// runs it again, s puts it in your message, x stops it (or clears it
+/// runs it again, e edits it first, s sends it to the agent, d puts it
+/// in your message, m sends a summary of it, x stops it (or clears it
 /// once it's done), k and p skip or pause the command of its chain
-/// running now.
+/// running now. While a box is edited every key is its editor's.
 pub fn key(m: &mut Model, k: &Press) -> Out {
     let Some(key) = open_key(m) else {
         return Out::Pass;
     };
     if m.confirm.is_some() || m.sheet.is_some() || m.on_place() {
         return Out::Pass;
+    }
+    if editing(m, &key) {
+        return edit_key(m, &key, k);
     }
     let s = k.s.as_str();
     if conn(m, &key).bang {
@@ -917,8 +1158,11 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     match s {
         "enter" => enter(m, &key, &r),
         "c" => copy(m, &key, &r),
+        "e" if !running => edit(m, &key, &r),
         "r" if done => again(m, &key, &r),
         "s" if done => send(m, &key, &r),
+        "d" if done => draft(m, &key, &r),
+        "m" if done => summary(m, &key, &r),
         "x" if running => stop(m, &key, &r),
         "x" if done => clear(m, &key, &r),
         "k" if running => skip(m, &key, &r),
@@ -977,6 +1221,9 @@ pub fn click(m: &mut Model, key: &str, url: &str) -> Option<Out> {
         "stop" => stop(m, key, r),
         "again" => again(m, key, r),
         "send" => send(m, key, r),
+        "draft" => draft(m, key, r),
+        "summary" => summary(m, key, r),
+        "edit" => edit(m, key, r),
         "clear" => clear(m, key, r),
         _ => Out::Pass,
     })
@@ -995,6 +1242,17 @@ pub fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Option<Line> {
             ],
         ));
     }
+    if editing(m, key) {
+        return Some(fit_keys(
+            w,
+            &[
+                ("enter", "run it"),
+                ("⇧enter", "new line"),
+                ("ctrl+z", "undo"),
+                ("esc", "as it was"),
+            ],
+        ));
+    }
     BoxRef::parse(picked)?;
     let running = kept(m, key).procs.contains_key(picked);
     let done = !running && run_of(m, key, picked).is_some();
@@ -1010,7 +1268,10 @@ pub fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Option<Line> {
     } else if done {
         &[
             ("s", "send to agent"),
+            ("d", "draft it first"),
+            ("m", "summarise and send"),
             ("r", "run again"),
+            ("e", "edit and run"),
             ("enter", "all it wrote"),
             ("c", "copy"),
             ("x", "clear"),
@@ -1019,6 +1280,7 @@ pub fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Option<Line> {
     } else {
         &[
             ("enter", "run it here"),
+            ("e", "edit it first"),
             ("c", "copy"),
             ("↑↓", "pick"),
             ("esc", "back to message"),

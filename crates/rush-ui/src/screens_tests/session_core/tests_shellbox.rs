@@ -1,22 +1,26 @@
 //! Shell commands rush runs itself (shellbox.rs): a shell block of a
 //! reply run by a click on ▶ run or enter on it picked, c copying it, x
-//! stopping it, r running it again, → send to agent putting the command
-//! and its output in the message box (and nothing going to the agent by
-//! itself); `!` in the empty box turning it to running commands, esc
+//! stopping it, r running it again, ✎ edit changing it before it runs;
+//! → send sending the command and its output to the agent, ✎ draft
+//! putting them in the message box, ≈ summary sending what the quick
+//! model made of them (and nothing going to the agent by itself); `!`
+//! in the empty box turning it to running commands, esc
 //! and a backspace at its start turning it back, enter running one in
 //! the session's folder, drawn in the conversation; and the runs kept on
 //! disk for the session opened again. Nothing runs: a fake stands in for
 //! the shell.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
+use rush_core::adapter::Profile;
 use rush_core::agent::State;
 use rush_core::event::{Event, Message, Part, PartKind, TurnEnd};
 use rush_core::text::width;
 use rush_draw::{Button, KeyMods, MouseKind};
 
-use super::host::Fake;
+use super::host::{Fake, Op};
 use super::tests::{KEY, agent, open, press, screen, sess, typed};
+use super::viewsuggest::{self, Ask, Call};
 use super::{conn, core, shellbox};
 use crate::frame::Mouse;
 use crate::model::Model;
@@ -40,9 +44,22 @@ fn replied(fake: &Arc<Fake>) -> Model {
 
 /// The same, its runs kept on disk when keep.
 fn replied_keeping(fake: &Arc<Fake>, keep: bool) -> Model {
+    replied_as(fake, keep, "plain")
+}
+
+/// The same in a session rush hosts, what's sent to it a Send to fake.
+fn replied_hosted(fake: &Arc<Fake>) -> Model {
+    fake.host(KEY);
+    let mut m = replied_as(fake, false, "steer");
+    super::live::sync(&mut m);
+    assert!(conn(&mut m, KEY).hosted(), "the link is open");
+    m
+}
+
+fn replied_as(fake: &Arc<Fake>, keep: bool, kind: &str) -> Model {
     shellbox::set_fake(Some(printed));
     shellbox::set_keep(keep);
-    let mut m = open(agent("plain", State::Idle), fake, 120, 40);
+    let mut m = open(agent(kind, State::Idle), fake, 120, 40);
     crate::accounts::use_store(&mut m, rush_state::Store::default());
     crate::accounts::accounts(&mut m).read_only = true;
     core(&mut m).hide_map = true;
@@ -124,7 +141,7 @@ fn a_click_on_run_runs_the_block() {
     let mut m = replied(&fake);
     let s = shown(&mut m);
     assert!(s.contains("shell · /src/checkout"), "{s}");
-    assert!(s.contains("▶ run  ⧉ copy"), "{s}");
+    assert!(s.contains("▶ run  ✎ edit  ⧉ copy"), "{s}");
     assert!(s.contains("$ rm ~/x.p12"), "{s}");
     assert!(shellbox::ran().is_empty(), "nothing runs by itself");
     let (x, y) = cell_of(&mut m, "▶ run");
@@ -136,7 +153,7 @@ fn a_click_on_run_runs_the_block() {
     let s = shown(&mut m);
     assert!(s.contains("ran rm ~/x.p12 in /src/checkout"), "{s}");
     assert!(s.contains("✓ exit 0"), "{s}");
-    assert!(s.contains("→ send to agent"), "{s}");
+    assert!(s.contains("→ send"), "{s}");
     assert!(!s.contains("▶ run"), "{s}");
     assert!(fake.ops().is_empty(), "nothing went to the agent");
     assert!(conn(&mut m, KEY).input.is_empty());
@@ -161,7 +178,10 @@ fn keys_on_the_picked_block() {
     let mut m = replied(&fake);
     pick_the_box(&mut m);
     let s = shown(&mut m);
-    assert!(s.contains("enter runs it · c copies it"), "{s}");
+    assert!(
+        s.contains("enter runs it · e edits it · c copies it"),
+        "{s}"
+    );
     press(&mut m, "c");
     assert_eq!(m.pending_copy.as_deref(), Some("rm ~/x.p12"));
     assert!(shellbox::ran().is_empty(), "c doesn't run it");
@@ -200,24 +220,264 @@ fn x_stops_a_run() {
     assert!(shown(&mut m).contains("✕ stopped"));
 }
 
-/// → send to agent puts the command and its output in the message box,
-/// for you to send; nothing is sent until you do.
+const SENT: &str = "I ran `rm ~/x.p12` (exit 0):\n```\nran rm ~/x.p12 in /src/checkout\n```";
+
+/// What was sent to the agent, in order.
+fn sends(fake: &Fake) -> Vec<String> {
+    fake.ops()
+        .into_iter()
+        .filter_map(|o| match o {
+            Op::Send { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The finished box's foot: → send, ✎ draft, ≈ summary, ↻, ✕.
 #[test]
-fn send_to_agent_fills_the_box() {
+fn a_finished_box_has_three_ways_to_send() {
     let fake = Fake::new();
     let mut m = replied(&fake);
     pick_the_box(&mut m);
     press(&mut m, "enter");
-    let (x, y) = cell_of(&mut m, "→ send to agent");
+    let s = shown(&mut m);
+    let foot = s
+        .lines()
+        .find(|l| l.contains("✓ exit 0"))
+        .expect(&s)
+        .to_string();
+    assert!(foot.contains("→ send"), "{foot}");
+    assert!(foot.contains("✎ draft"), "{foot}");
+    assert!(foot.contains("≈ summary"), "{foot}");
+    assert!(foot.contains('↻') && foot.contains('✕'), "{foot}");
+    // Its keys are on the bottom row.
+    assert!(s.contains("send to agent"), "{s}");
+    assert!(s.contains("draft it first"), "{s}");
+    assert!(s.contains("summarise and send"), "{s}");
+}
+
+/// → send sends the command and its output to the agent at once, as a
+/// message you typed; what you were typing stays in the box.
+#[test]
+fn send_sends_it_to_the_agent() {
+    let fake = Fake::new();
+    let mut m = replied_hosted(&fake);
+    pick_the_box(&mut m);
+    press(&mut m, "enter");
+    let _ = fake.ops();
+    conn(&mut m, KEY).input.set("half a thought");
+    let (x, y) = cell_of(&mut m, "→ send");
     click(&mut m, x + 2, y);
-    let text = conn(&mut m, KEY).input.string();
-    assert_eq!(
-        text,
-        "I ran `rm ~/x.p12` (exit 0):\n```\nran rm ~/x.p12 in /src/checkout\n```"
-    );
+    assert_eq!(sends(&fake), [SENT]);
+    assert_eq!(conn(&mut m, KEY).input.string(), "half a thought");
+    let run = shellbox::run_of(&mut m, KEY, BOX).unwrap();
+    assert!(run.told && !run.sent);
+    assert!(shown(&mut m).contains("✓ sent"));
+}
+
+/// s on the picked box sends it too.
+#[test]
+fn s_sends_it_to_the_agent() {
+    let fake = Fake::new();
+    let mut m = replied_hosted(&fake);
+    pick_the_box(&mut m);
+    press(&mut m, "enter");
+    let _ = fake.ops();
+    press(&mut m, "s");
+    assert_eq!(sends(&fake), [SENT]);
+    assert!(conn(&mut m, KEY).input.is_empty());
+}
+
+/// ✎ draft (d) puts the command and its output in the message box, for
+/// you to change and send; nothing is sent until you do.
+#[test]
+fn draft_fills_the_box() {
+    let fake = Fake::new();
+    let mut m = replied(&fake);
+    pick_the_box(&mut m);
+    press(&mut m, "enter");
+    let (x, y) = cell_of(&mut m, "✎ draft");
+    click(&mut m, x + 2, y);
+    assert_eq!(conn(&mut m, KEY).input.string(), SENT);
     assert!(fake.ops().is_empty(), "nothing sent");
     assert!(fake.replies.lock().unwrap().is_empty());
-    assert!(shown(&mut m).contains("✓ in your message"));
+    assert!(shown(&mut m).contains("✓ in"));
+    // d does the same.
+    let mut m = replied(&fake);
+    pick_the_box(&mut m);
+    press(&mut m, "enter");
+    press(&mut m, "d");
+    assert_eq!(conn(&mut m, KEY).input.string(), SENT);
+    assert!(fake.ops().is_empty(), "nothing sent");
+}
+
+/// The quick model, answering the same each time and keeping what it was
+/// asked.
+struct Quick {
+    answer: Result<String, String>,
+    asked: Mutex<Vec<String>>,
+}
+
+impl Ask for Quick {
+    fn models(&self, _: &Profile) -> (String, String) {
+        ("quick".into(), "careful".into())
+    }
+    fn ask(&self, _: &Profile, c: &Call) -> (f64, Result<Vec<u8>, String>) {
+        assert_eq!(c.model, "quick");
+        self.asked.lock().unwrap().push(c.prompt.clone());
+        (0.0, self.answer.clone().map(String::into_bytes))
+    }
+}
+
+fn quick(m: &mut Model, answer: Result<&str, &str>) -> Arc<Quick> {
+    let q = Arc::new(Quick {
+        answer: answer.map(str::to_string).map_err(str::to_string),
+        asked: Mutex::new(Vec::new()),
+    });
+    viewsuggest::use_asker(m, q.clone());
+    q
+}
+
+/// ≈ summary (m): the quick model sums the run up, and its summary goes
+/// to the agent at once under a line saying it's one.
+#[test]
+fn summary_sends_what_the_quick_model_made_of_it() {
+    let fake = Fake::new();
+    let mut m = replied_hosted(&fake);
+    let q = quick(&mut m, Ok(r#"{"summary":"removed it; no errors"}"#));
+    pick_the_box(&mut m);
+    press(&mut m, "enter");
+    let _ = fake.ops();
+    press(&mut m, "m");
+    let asked = q.asked.lock().unwrap().clone();
+    assert_eq!(asked.len(), 1);
+    assert!(
+        asked[0].starts_with("This command was run `rm ~/x.p12` (exit 0):"),
+        "{}",
+        asked[0]
+    );
+    assert!(asked[0].contains("ran rm ~/x.p12 in /src/checkout"));
+    assert_eq!(
+        sends(&fake),
+        ["A summary of a command I ran, `rm ~/x.p12` (exit 0):\nremoved it; no errors"]
+    );
+    let run = shellbox::run_of(&mut m, KEY, BOX).unwrap();
+    assert!(run.told_summary && !run.summing && run.note.is_empty());
+    assert!(shown(&mut m).contains("✓ summary"));
+}
+
+/// A summary that fails sends nothing: the box says why, and ≈ summary
+/// is there to try again.
+#[test]
+fn a_failed_summary_sends_nothing() {
+    let fake = Fake::new();
+    let mut m = replied_hosted(&fake);
+    quick(&mut m, Err("timed out"));
+    pick_the_box(&mut m);
+    press(&mut m, "enter");
+    let _ = fake.ops();
+    let (x, y) = cell_of(&mut m, "≈ summary");
+    click(&mut m, x + 2, y);
+    assert!(sends(&fake).is_empty(), "nothing sent");
+    assert!(conn(&mut m, KEY).input.is_empty());
+    let run = shellbox::run_of(&mut m, KEY, BOX).unwrap();
+    assert!(!run.told && !run.summing, "{run:?}");
+    assert_eq!(run.note, "couldn't sum it up: timed out");
+    let s = shown(&mut m);
+    assert!(s.contains("✗ couldn't sum it up: timed out"), "{s}");
+    assert!(s.contains("≈ summary"), "{s}");
+}
+
+// ---- editing a block's commands before they run ----
+
+/// ✎ edit (e) turns the box to an editor of its commands: what's typed
+/// changes them, ⇧enter (ctrl+j) adds a line, enter runs them as
+/// edited. The box shows and sends the edited commands, marked edited;
+/// the agent's reply is as it was.
+#[test]
+fn edit_then_run_runs_the_edited_commands() {
+    let fake = Fake::new();
+    let mut m = replied(&fake);
+    let (x, y) = cell_of(&mut m, "✎ edit");
+    click(&mut m, x + 2, y);
+    assert!(shellbox::editing(&mut m, KEY));
+    let s = shown(&mut m);
+    assert!(s.contains("shell · editing"), "{s}");
+    assert!(s.contains("enter runs it"), "{s}");
+    assert!(s.contains("esc as it was"), "{s}");
+    typed(&mut m, " -f");
+    press(&mut m, "ctrl+j");
+    typed(&mut m, "ls");
+    assert!(shellbox::ran().is_empty(), "nothing runs while it's edited");
+    assert!(
+        conn(&mut m, KEY).input.is_empty(),
+        "nothing typed in the box"
+    );
+    let s = shown(&mut m);
+    assert!(s.contains("$ rm ~/x.p12 -f"), "{s}");
+    assert!(s.contains("$ ls"), "{s}");
+    press(&mut m, "enter");
+    assert!(!shellbox::editing(&mut m, KEY));
+    assert_eq!(
+        shellbox::ran(),
+        [("rm ~/x.p12 -f\nls".to_string(), "/src/checkout".to_string())]
+    );
+    let run = shellbox::run_of(&mut m, KEY, BOX).unwrap();
+    assert!(run.edited);
+    let text = run.send_text();
+    assert!(
+        text.starts_with("I ran this (exit 0):\n```sh\nrm ~/x.p12 -f\nls\n```"),
+        "{text}"
+    );
+    let s = shown(&mut m);
+    assert!(s.contains("shell · edited"), "{s}");
+    assert!(s.contains("✓ exit 0"), "{s}");
+    assert!(s.contains("$ rm ~/x.p12 -f"), "{s}");
+}
+
+/// esc leaves the commands as they were: nothing runs, and enter then
+/// runs the agent's.
+#[test]
+fn esc_keeps_the_commands_as_they_were() {
+    let fake = Fake::new();
+    let mut m = replied(&fake);
+    pick_the_box(&mut m);
+    press(&mut m, "e");
+    assert!(shellbox::editing(&mut m, KEY));
+    typed(&mut m, " -f");
+    press(&mut m, "esc");
+    assert!(!shellbox::editing(&mut m, KEY));
+    assert!(shellbox::ran().is_empty());
+    let s = shown(&mut m);
+    assert!(!s.contains("editing"), "{s}");
+    assert!(!s.contains("-f"), "{s}");
+    press(&mut m, "enter");
+    assert_eq!(
+        shellbox::ran(),
+        [("rm ~/x.p12".to_string(), "/src/checkout".to_string())]
+    );
+    assert!(!shellbox::run_of(&mut m, KEY, BOX).unwrap().edited);
+}
+
+/// ✎ edit on a finished box: enter runs it again as edited, and ↻ after
+/// that runs the edited commands too.
+#[test]
+fn edit_on_a_finished_box_runs_it_again_edited() {
+    let fake = Fake::new();
+    let mut m = replied(&fake);
+    pick_the_box(&mut m);
+    press(&mut m, "enter");
+    assert_eq!(shellbox::ran().len(), 1);
+    press(&mut m, "e");
+    assert!(shellbox::editing(&mut m, KEY));
+    typed(&mut m, " -f");
+    press(&mut m, "enter");
+    let ran = shellbox::ran();
+    assert_eq!(ran.len(), 2);
+    assert_eq!(ran[1].0, "rm ~/x.p12 -f");
+    assert!(shown(&mut m).contains("shell · edited"));
+    press(&mut m, "r");
+    assert_eq!(shellbox::ran()[2].0, "rm ~/x.p12 -f", "↻ keeps the edit");
 }
 
 /// `!` into the empty box turns it to running commands: its edge says
@@ -252,7 +512,7 @@ fn bang_mode_in_and_out() {
 
 /// enter runs what's typed after ! in the session's folder, drawn as a
 /// box after the turn's reply; the box is back to messages, and nothing
-/// went to the agent. Its → send to agent fills the box as a block's.
+/// went to the agent. Its ✎ draft fills the box as a block's.
 #[test]
 fn bang_enter_runs_it_here() {
     let fake = Fake::new();
@@ -272,7 +532,7 @@ fn bang_enter_runs_it_here() {
     assert!(ran > reply, "after the reply:\n{s}");
     assert!(s.contains("ran git status in /src/checkout"), "{s}");
     assert!(fake.ops().is_empty(), "nothing went to the agent");
-    let (x, y) = cell_of(&mut m, "→ send to agent");
+    let (x, y) = cell_of(&mut m, "✎ draft");
     click(&mut m, x + 2, y);
     assert!(
         conn(&mut m, KEY)
@@ -328,7 +588,7 @@ fn bang_in_a_session_with_no_turn() {
     assert!(!s.contains("nothing yet"), "{s}");
     assert!(s.contains("$ git status"), "{s}");
     assert!(s.contains("ran git status in /src/checkout"), "{s}");
-    assert!(s.contains("→ send to agent"), "{s}");
+    assert!(s.contains("→ send"), "{s}");
     let r = m
         .session
         .as_ref()

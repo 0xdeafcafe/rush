@@ -220,6 +220,15 @@ impl BoxRef {
     }
 }
 
+/// A box's commands being edited before they run (✎ edit): its ref, the
+/// text as it stands, and the cursor, as a character index.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct ShellEdit {
+    pub r: String,
+    pub text: String,
+    pub cursor: usize,
+}
+
 /// A command rush ran itself, and what came of it so far.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -257,6 +266,18 @@ pub struct ShellRun {
     pub log: String,
     /// It ended while rush was closed, how isn't known.
     pub lost: bool,
+    /// It was sent to the agent as a message: whole, or summed up.
+    pub told: bool,
+    pub told_summary: bool,
+    /// What ran is a block's command as you edited it, not as the agent
+    /// wrote it.
+    pub edited: bool,
+    /// The quick model is summing it up to send.
+    #[serde(skip)]
+    pub summing: bool,
+    /// Something to say on its box: why a summary couldn't be made.
+    #[serde(skip)]
+    pub note: String,
     /// Its command running now is paused (p).
     #[serde(skip)]
     pub paused: bool,
@@ -398,17 +419,34 @@ impl ShellRun {
     /// you to send the agent: its last SEND_LINES lines, at most
     /// SEND_CHARS characters, colours taken out.
     pub fn send_text(&self) -> String {
+        let mut s = self.head("I ran");
+        s.push_str(&self.tail(SEND_LINES, SEND_CHARS));
+        s
+    }
+
+    /// "<said> `cmd` (exit 0):", or the command as a block when it's
+    /// several lines or holds a backtick.
+    fn head(&self, said: &str) -> String {
         let cmd = self.command.trim();
-        let mut s = if cmd.contains('\n') || cmd.contains('`') {
-            format!("I ran this ({}):\n```sh\n{cmd}\n```\n", self.outcome())
+        if cmd.contains('\n') || cmd.contains('`') {
+            format!("{said} this ({}):\n```sh\n{cmd}\n```\n", self.outcome())
         } else {
-            format!("I ran `{cmd}` ({}):\n", self.outcome())
-        };
+            format!("{said} `{cmd}` ({}):\n", self.outcome())
+        }
+    }
+
+    /// Its output's last lines, at most lines of them and chars
+    /// characters, colours taken out, as a fenced block saying how many
+    /// earlier lines were left out; "(no output)" when it wrote none.
+    fn tail(&self, lines_most: usize, chars_most: usize) -> String {
         let lines: Vec<String> = self.lines().iter().map(|l| plain_text(l)).collect();
+        if lines.iter().all(|l| l.trim().is_empty()) {
+            return "(no output)".into();
+        }
         let mut kept: Vec<&str> = Vec::new();
         let mut chars = 0;
         for l in lines.iter().rev() {
-            if kept.len() == SEND_LINES || chars + l.len() + 1 > SEND_CHARS {
+            if kept.len() == lines_most || chars + l.len() + 1 > chars_most {
                 break;
             }
             chars += l.len() + 1;
@@ -416,11 +454,7 @@ impl ShellRun {
         }
         kept.reverse();
         let left = self.dropped + lines.len() - kept.len();
-        if lines.iter().all(|l| l.trim().is_empty()) {
-            s.push_str("(no output)");
-            return s;
-        }
-        s.push_str("```\n");
+        let mut s = String::from("```\n");
         if left > 0 {
             s.push_str(&format!("… {left} earlier lines left out\n"));
         }
@@ -428,6 +462,42 @@ impl ShellRun {
         s.push_str("\n```");
         s
     }
+
+    /// What the quick model is asked to sum up: the command, how it
+    /// ended, and the end of its output (more of it than is sent whole).
+    pub fn summary_prompt(&self) -> String {
+        let mut s = self.head("This command was run");
+        s.push_str(&self.tail(SUMMARY_LINES, SUMMARY_CHARS));
+        s.push_str("\n\nSum it up for the coding agent.");
+        s
+    }
+
+    /// The message a summary goes to the agent as: a header saying it's
+    /// a summary of the run, the command and its code, then the summary.
+    pub fn summary_text(&self, summary: &str) -> String {
+        let mut s = self.head("A summary of a command I ran,");
+        s.push('\n');
+        s.push_str(summary.trim());
+        s
+    }
+}
+
+/// How much of a run's output the quick model is given to sum up.
+pub const SUMMARY_LINES: usize = 600;
+pub const SUMMARY_CHARS: usize = 40_000;
+
+/// What the quick model is told when it sums a run up for the agent.
+pub const SUMMARY_SYSTEM: &str = "You sum up the output of a shell command for the coding agent working in this folder, who will read your summary instead of the output. Keep what matters to it: whether the command passed or failed, each error and failing test or line with its file path and line number as written, and counts (tests passed and failed, warnings, files). Leave out progress lines, timings and anything that worked. Plain text, at most 15 short lines; no greeting, no advice.";
+
+/// The shape of the summary's answer.
+pub const SUMMARY_SCHEMA: &str =
+    r#"{"type":"object","properties":{"summary":{"type":"string"}},"required":["summary"]}"#;
+
+/// The summary in the quick model's answer; None when there's none.
+pub fn summary_answer(b: &[u8]) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_slice(b).ok()?;
+    let s = v.get("summary")?.as_str()?.trim();
+    (!s.is_empty()).then(|| s.to_string())
 }
 
 /// s without its escape sequences.
@@ -681,6 +751,33 @@ mod tests {
         assert_eq!(
             r.send_text(),
             "I ran this (stopped):\n```sh\na\nb\n```\n(no output)"
+        );
+    }
+
+    /// What the quick model is given to sum up, its answer read, and the
+    /// message the summary goes as.
+    #[test]
+    fn a_summary_and_its_message() {
+        let mut r = ShellRun::new("cargo test", "/tmp", 1);
+        for i in 1..=700 {
+            r.push(&format!("line {i}\n"));
+        }
+        r.finish(Some(101), 2);
+        let p = r.summary_prompt();
+        assert!(
+            p.starts_with("This command was run `cargo test` (exit 101):\n```\n… 100 earlier"),
+            "{p}"
+        );
+        assert!(p.contains("line 700\n```"), "{p}");
+        assert_eq!(
+            summary_answer(br#"{"summary":" 2 tests failed: a.rs:3 \n"}"#).as_deref(),
+            Some("2 tests failed: a.rs:3")
+        );
+        assert_eq!(summary_answer(br#"{"summary":"  "}"#), None);
+        assert_eq!(summary_answer(b"nope"), None);
+        assert_eq!(
+            r.summary_text("2 failed\nsrc/a.rs:3: boom"),
+            "A summary of a command I ran, `cargo test` (exit 101):\n2 failed\nsrc/a.rs:3: boom"
         );
     }
 }

@@ -1905,7 +1905,7 @@ Two ways in, both only on your click or key, never by themselves:
 
 - **A shell block in a reply** (```sh, bash, zsh, shell, console, or
   one whose first line is a `$ ` prompt) is drawn as a terminal box
-  (rush-convo `render/draw/shellbox.rs`): `shell · <folder>` and ▶ run,
+  (rush-convo `render/draw/shellbox.rs`): `shell · <folder>` and ▶ run, ✎ edit,
   ⧉ copy on its top edge, the commands inside with a faint `$` (one the
   agent wrote is taken off; in a console block only the `$` lines are
   commands, the rest is example output and doesn't run). Its ref is
@@ -1951,7 +1951,7 @@ the process is gone, and each frame's dock takes in what it has. Its box shows
 the newest 12 rows of what it wrote, colours kept (SGR read into
 spans), "… N more lines" above them; enter opens all of it. The foot says
 how long it has run (✕ stop ends the group: TERM, KILL 3s on), then ✓ or
-✗ and its code and time, with → send to agent, ↻ again and ✕ (let go of
+✗ and its code and time, with → send, ✎ draft, ≈ summary, ↻ again and ✕ (let go of
 it). A block of several commands is a chain: its processes are read every
 500 ms (`jobprocs::kids`) and fed to the same `Chain` an agent's Bash
 calls use (chainrun.rs, now a type of its own), so each command says how
@@ -1959,11 +1959,34 @@ long it ran, the one running now is marked, and k (skip it) and p (pause
 it, kept with the other paused commands that rush lets go on as it quits)
 work as on an agent's.
 
-What it printed stays on your screen: nothing goes to the agent. → send to
-agent puts "I ran `cmd` (exit 0):" and its last 80 lines (6000
-characters at most) in the message box, as text you send or don't,
-through the session's own harness like any message. The runs are kept
-in rush's folder, `shell-runs/<session key>.json` (the newest 50), as
+What it printed stays on your screen: nothing goes to the agent until
+you pick one of the three on a finished box's foot (their words shorten
+as the box narrows: `→ send to agent`, `→ send`, `→`):
+
+- **→ send** (s) sends "I ran `cmd` (exit 0):" and its last 80 lines
+  (6000 characters at most) to the agent at once, as if typed and sent
+  with enter: queued while it works, as the send mode says; what you
+  were typing stays in the box. The foot then says `✓ sent`.
+- **✎ draft** (d) puts the same text in the message box, after what's
+  typed there, to change and send or not (`✓ in your message`).
+- **≈ summary** (m) has the harness's quick model (the advisor's `Ask`,
+  as view suggestions use, off the UI thread, 45 s at most) sum up its
+  last 600 lines: whether it passed, each error and failing line with
+  its path, counts (`SUMMARY_SYSTEM`). The summary goes to the agent at
+  once under "A summary of a command I ran, `cmd` (exit 1):". While it
+  runs the button says `≈ summing up…`; when it fails the box says why
+  in red and nothing is sent.
+
+Each goes through the session's own harness like any message.
+
+**✎ edit** (e), on a box's top edge before it's run and after, turns the
+box into an editor of its commands (`Options::shell_edit`, drawn by
+`edit_box`): the message box's editing keys and undo, ⇧enter (alt+enter,
+ctrl+j) a new line, ↑↓ between lines; enter runs the commands as they
+stand, esc leaves them as they were. A run of edited commands is marked
+(`ShellRun::edited`, `shell · edited` on its edge): the box shows, sends
+and runs again (↻) what was edited; the agent's reply keeps what it
+wrote. The runs are kept in rush's folder, `shell-runs/<session key>.json` (the newest 50), as
 each starts and ends: a running one with its process (the runner's pid
 and start time) and its file, not its output. Read back when the
 session is opened again (`pick_up`), one that was running as rush went

@@ -287,6 +287,9 @@ pub struct Options {
     /// Where those commands run: the session's folder as the agent list
     /// has it ("" for the conversation's own).
     pub shell_cwd: String,
+    /// A box whose commands are being edited before they run, and the
+    /// text as it stands (shellbox.rs).
+    pub shell_edit: Option<crate::shellbox::ShellEdit>,
 }
 
 /// What a running shell step is doing now: a line from its processes, and
@@ -633,7 +636,7 @@ impl Renderer {
             });
             k.scripts = scriptdoc::scripts_sig(&o.scripts, ids);
         }
-        if !o.shells.is_empty() {
+        if !o.shells.is_empty() || o.shell_edit.is_some() {
             k.shells = draw::shellbox::turn_sig(o, &format!("t{}:", t.n));
         }
         if o.preset == Preset::CatchUp {
