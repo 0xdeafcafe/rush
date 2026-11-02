@@ -7,8 +7,11 @@ use rush_core::agent::State;
 use rush_core::event::{Event, Message, Part, PartKind, TurnEnd};
 use rush_core::time::Ms;
 
+use rush_draw::{Button, KeyMods, MouseKind};
+
 use super::host::Fake;
 use super::tests::{agent, flash, open, press, screen, sess};
+use crate::frame::Mouse;
 use crate::model::Model;
 
 /// A session of n turns, each a question and its answer, whose config is
@@ -126,4 +129,85 @@ fn enter_on_a_bubble_opens_its_turn_in_normal() {
     press(&mut m, "enter");
     assert_eq!(super::presets::current(&m), Preset::Normal);
     assert_eq!(m.session.as_ref().unwrap().sel, "t2");
+}
+
+/// The row the view tabs are on, and the screen.
+fn tab_rows(m: &mut Model) -> (usize, Vec<String>) {
+    let s = screen(m);
+    let i = s
+        .iter()
+        .position(|l| l.contains("Normal") && l.contains("Chat") && l.contains("Trail"))
+        .unwrap_or_else(|| panic!("no tab row:\n{}", s.join("\n")));
+    (i, s)
+}
+
+/// The conversation has a row of the five views with a rule under it, the
+/// one showing lit; the key moves the lit one on.
+#[test]
+fn the_views_are_tabs_above_the_conversation() {
+    let mut m = talked(3);
+    let (i, s) = tab_rows(&mut m);
+    assert!(
+        s[i].contains("Catch-up") && s[i].contains("alt+s"),
+        "{}",
+        s[i]
+    );
+    let before = s[i + 1]
+        .find('\u{2501}')
+        .unwrap_or_else(|| panic!("{}", s[i + 1]));
+    press(&mut m, "alt+s");
+    let (i, s) = tab_rows(&mut m);
+    let after = s[i + 1].find('\u{2501}').unwrap();
+    assert!(after > before, "the lit tab moved on: {}", s[i + 1]);
+    assert!(s.join("\n").contains("answer 2"));
+}
+
+/// A click on a tab shows that view, as the key would.
+#[test]
+fn a_click_on_a_tab_switches_the_view() {
+    let mut m = talked(3);
+    let (i, s) = tab_rows(&mut m);
+    let x = rush_core::text::width(&s[i][..s[i].find("Code").unwrap()]);
+    m.mouse_event(&Mouse {
+        kind: MouseKind::Down(Button::Left),
+        x: x as u16,
+        y: i as u16,
+        mods: KeyMods::NONE,
+    });
+    assert_eq!(super::presets::current(&m), Preset::Code);
+    let (_, s) = tab_rows(&mut m);
+    assert!(s.join("\n").contains("view Code"));
+}
+
+/// Narrow, the names shorten and the key goes; the row never wraps.
+#[test]
+fn the_tabs_shorten_when_narrow() {
+    let c = rush_core::text::Color::Default;
+    let (rows, _) = super::presets::tabs(Preset::Normal, None, "alt+s", 60, c);
+    assert!(rows[0].plain().contains("Catch-up") && rows[0].plain().contains("alt+s"));
+    let (rows, _) = super::presets::tabs(Preset::Normal, None, "alt+s", 40, c);
+    assert!(rows[0].plain().contains("Catch ") && !rows[0].plain().contains("alt+s"));
+    assert!(rows.iter().all(|l| l.width() <= 40));
+}
+
+/// A suggested view has a star before its name, in orange; none without one.
+#[test]
+fn a_suggested_tab_has_a_star() {
+    use crate::style::ORANGE;
+    let c = rush_core::text::Color::Default;
+    let (plain, _) = super::presets::tabs(Preset::Normal, None, "alt+s", 80, c);
+    assert!(!plain[0].plain().contains('\u{2726}'));
+    let (rows, at) = super::presets::tabs(Preset::Normal, Some(Preset::Trail), "alt+s", 80, c);
+    let t = rows[0].plain();
+    assert!(
+        t.contains("\u{2726} Trail") && t.matches('\u{2726}').count() == 1,
+        "{t}"
+    );
+    assert!(
+        rows[0]
+            .spans
+            .iter()
+            .any(|s| s.text == "\u{2726} " && s.style.fg == ORANGE)
+    );
+    assert_eq!(at.len(), 5);
 }

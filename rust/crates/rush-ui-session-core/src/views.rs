@@ -67,6 +67,9 @@ pub struct ViewState {
     /// The conversation view's label on the tabs row, from and to, cells
     /// into the pane; (0, 0) when it isn't drawn (Normal shows none).
     pub preset_at: (usize, usize),
+    /// The conversation's view tabs as last drawn: from and to, cells
+    /// into the pane, and the view each is; empty when they aren't drawn.
+    pub view_tabs: Vec<(usize, usize, rush_convo::Preset)>,
     /// What the pointer is over: a tab (+1), the context label, a row's
     /// item.
     pub hover_tab: usize,
@@ -655,6 +658,10 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
         return None;
     }
     conn(m, &key).vs.rows = rows;
+    conn(m, &key).vs.view_tabs.clear();
+    if let Some(v) = m.session.as_mut() {
+        v.top_off = 0;
+    }
     if conn(m, &key).vs.drawn != name {
         conn(m, &key).vs.drawn = name;
         super::textsel::drop(m, &key);
@@ -811,8 +818,9 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     };
     let name = view_name(m, &key);
     let rows = conn(m, &key).vs.rows.max(1);
-    let tabs_y = top.checked_sub(HEAD_H - 3);
-    let name_y = top.checked_sub(HEAD_H - 1);
+    let off = m.session.as_ref().map_or(0, |v| v.top_off);
+    let tabs_y = top.checked_sub(HEAD_H - 3 + off);
+    let name_y = top.checked_sub(HEAD_H - 1 + off);
     let tab_at = |m: &mut Model| -> Option<usize> {
         if Some(y) != tabs_y || x < 2 {
             return None;
@@ -874,6 +882,18 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
             }
         }
         MouseKind::Down(Button::Left) => {
+            if off > 0 && top.checked_sub(off) == Some(y) && x >= 2 {
+                let hit = conn(m, &key)
+                    .vs
+                    .view_tabs
+                    .iter()
+                    .find(|t| x - 2 >= t.0 && x - 2 < t.1)
+                    .map(|t| t.2);
+                if let Some(p) = hit {
+                    super::presets::set(m, p);
+                    return Out::Draw;
+                }
+            }
             let (px0, px1) = conn(m, &key).vs.preset_at;
             if Some(y) == tabs_y && px1 > px0 && x >= 2 + px0 && x < 2 + px1 {
                 super::presets::open_picker(m);

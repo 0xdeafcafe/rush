@@ -223,6 +223,9 @@ pub struct SessionView {
     /// The ref on each screen row last drawn, and where they start.
     pub shown: Vec<String>,
     pub top: usize,
+    /// Rows at the body's top that aren't the header's nor the transcript's
+    /// (the conversation's view tabs): top is that far below the header.
+    pub top_off: usize,
     /// Columns kept at the right of the conversation for what's drawn
     /// beside it (the map): the conversation is drawn that much narrower.
     pub side: usize,
@@ -287,6 +290,7 @@ impl SessionView {
             read: false,
             shown: Vec::new(),
             top: 0,
+            top_off: 0,
             side: 0,
             beside: false,
             idle: false,

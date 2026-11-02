@@ -8,7 +8,9 @@
 //! the Rust port: Go rush had no such views.
 
 use rush_convo::Preset;
+use rush_core::text::{Color, Line, Span, Style};
 
+use super::paint::spread;
 use super::{conn, open_key, views};
 use crate::frame::{Out, Pick, Picker, Press};
 use crate::model::Model;
@@ -16,6 +18,88 @@ use crate::style::*;
 
 /// The key that goes through the views (session.preset's own).
 pub const KEY: &str = "alt+s";
+
+/// The fewest rows the conversation has for its tabs to be drawn above it.
+pub const TABS_MIN_ROWS: usize = 6;
+
+/// The views' tab row and the rule under it, `w` wide: the view showing
+/// lit with a heavy rule under it (lit: its colour), the others dim, the
+/// key right-aligned and faint. A view a small model suggests (suggested)
+/// has a `✦` in orange before its name. Names shorten, then the key goes,
+/// when `w` is narrow; never wraps. With the cells each tab takes (from and
+/// to, in the row) and the view it is.
+pub fn tabs(
+    cur: Preset,
+    suggested: Option<Preset>,
+    key: &str,
+    w: usize,
+    lit: Color,
+) -> (Vec<Line>, Vec<(usize, usize, Preset)>) {
+    let name = |p: Preset, short: bool| -> &'static str {
+        match (p, short) {
+            (Preset::CatchUp, true) => "Catch",
+            (Preset::Normal, true) => "Norm",
+            _ => p.title(),
+        }
+    };
+    let width_of = |short: bool| -> usize {
+        Preset::ALL
+            .iter()
+            .map(|p| {
+                let star = if suggested == Some(*p) { 2 } else { 0 };
+                name(*p, short).chars().count() + 2 + star
+            })
+            .sum::<usize>()
+            + 1
+    };
+    let short = width_of(false) > w;
+    let mut top = Line::new();
+    let mut rule = Line::new();
+    let mut at = Vec::new();
+    // One cell in, as the names' own gap.
+    top.spans.push(plain(" "));
+    rule.spans.push(sp("─", FAINT));
+    for p in Preset::ALL {
+        let star = suggested == Some(p);
+        let label = name(p, short);
+        let on = p == cur;
+        let x = top.width();
+        let tw = label.chars().count() + 2 + if star { 2 } else { 0 };
+        // ` ✦ Name ` (the mark before the name) or ` Name `.
+        let style = if on {
+            bold(BRIGHT).on(TAB_ON_BG)
+        } else {
+            Style::fg(SUB)
+        };
+        top.spans.push(Span::new(" ", style));
+        if star {
+            top.spans.push(Span::new(
+                "✦ ",
+                if on {
+                    Style::fg(ORANGE).on(TAB_ON_BG)
+                } else {
+                    Style::fg(ORANGE)
+                },
+            ));
+        }
+        top.spans.push(Span::new(label, style));
+        top.spans.push(Span::new(" ", style));
+        at.push((x, x + tw, p));
+        let (glyph, c) = if on { ("━", lit) } else { ("─", FAINT) };
+        rule.spans.push(sp(glyph.repeat(tw), c));
+    }
+    let used = top.width();
+    // The key, when there's room for it a cell apart.
+    let k = line([sp(key, FAINT)]);
+    let top = if used + 2 + k.width() < w {
+        spread(top, k, w - 1)
+    } else {
+        top
+    };
+    let fill = w.saturating_sub(rule.width());
+    rule.spans.push(sp("─".repeat(fill), FAINT));
+    (vec![fit(top, w), fit(rule, w)], at)
+}
 
 /// The view every session's conversation shows.
 pub fn current(m: &Model) -> Preset {

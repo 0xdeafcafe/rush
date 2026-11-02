@@ -114,6 +114,28 @@ pub fn looked_since(m: &mut Model, key: &str) -> rush_core::time::Ms {
 /// The conversation's rows, `rows` tall and `w` wide, with the map in its
 /// last MINI_WIDTH cells when it's on.
 pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
+    // The views' tabs sit above the first line, when there's room for them
+    // and the transcript still.
+    if rows < super::presets::TABS_MIN_ROWS {
+        return text(m, key, w, rows);
+    }
+    let cur = super::presets::current(m);
+    let hint = super::presets::key_hint(m);
+    let lit = if m.pane_idle { SUB } else { ORANGE };
+    let (mut out, at) = super::presets::tabs(cur, None, &hint, w, lit);
+    conn(m, key).vs.view_tabs = at;
+    if let Some(v) = m.session.as_mut() {
+        v.top += out.len();
+        v.top_off = out.len();
+    }
+    let n = rows - out.len();
+    out.extend(text(m, key, w, n));
+    out
+}
+
+/// The conversation's text, `rows` tall (see body).
+fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
+    conn(m, key).vs.rows = rows;
     // Its last answer ends with what that turn wants of you.
     super::turnwants::sync_needs(m);
     let map_on = map_on(m, key, w);
