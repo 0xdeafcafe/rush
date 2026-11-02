@@ -1,0 +1,6 @@
+t1            | ── turn 1 · "how do I clean up?" ─────────  no code changes ──
+t1:sh:0:0     |  ✓ $ rm ~/Desktop/DeveloperIDApplication.p12   exit 0    0.1s
+t1:bang:1790200812000|  ✓ $ git status   exit 0                                 0.3s
+t1:sh:0:1     |  ╭─ shell · /work/app ─────────────────────── ▶ run  ⧉ copy ─╮
+              |  │ $ cargo test                                              │
+              |  ╰───────────────────────────────────────────────────────────╯

@@ -1979,7 +1979,7 @@ impl Drawer<'_> {
         if g.verb == "shell" {
             return text(&g.names[0]);
         }
-        let n = g.ids.len();
+        let n = if g.run.is_some() { 1 } else { g.ids.len() };
         let what = if n == 1 {
             g.names[0].clone()
         } else {
