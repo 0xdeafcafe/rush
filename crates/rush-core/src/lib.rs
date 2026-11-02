@@ -14,6 +14,7 @@ pub mod guard;
 pub mod par;
 pub mod sandbox;
 pub mod subcache;
+pub mod subkeep;
 pub mod tailread;
 pub mod text;
 pub mod theme;
