@@ -700,9 +700,10 @@ processes, 27 threads, 42 MB, 2026-11-02). Now:
    add 1 thread, not 40 (`tests/rpc_threads.rs`). `Conn::framed` and
    `Conn::lines` on a reader with no descriptor keep a thread each.
    `cargo bench -p rush-plugin --bench rpc` (CI's M1, 3 cores, against
-   the same socket read by a thread of its own): a call's round trip
-   64 → 53 µs; 1,000 notifications 1.04 → 1.39 ms (the queue's thread
-   is started again each time a burst drains).
+   the same socket read by a thread of its own; two runs): a call's
+   round trip 60-64 → 44-53 µs; 1,000 notifications 1.04-1.31 →
+   1.12-1.39 ms, no clear change (the queue's thread is started again
+   each time a burst drains).
 
 ## The host
 
