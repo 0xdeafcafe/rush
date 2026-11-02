@@ -173,8 +173,7 @@ impl Session {
             let st = self.step(id);
             let cmd = st.call().input.command.clone();
             let call = st.id.to_string();
-            let found =
-                (0..shells.len()).find(|&i| !used[i] && runs_call(&shells[i], &cmd, &call));
+            let found = (0..shells.len()).find(|&i| !used[i] && runs_call(&shells[i], &cmd, &call));
             match found {
                 Some(i) => {
                     used[i] = true;
@@ -1051,11 +1050,7 @@ mod tests {
         let cmd = "rg -n 'fn main' src && cargo test --workspace";
         let mut s = session(cmd);
         let other = eval_shell("npm run dev", 1_100, vec![proc_(7, "node vite", 1_100)]);
-        let mine = eval_shell(
-            cmd,
-            1_300,
-            vec![proc_(12, "cargo test --workspace", 1_500)],
-        );
+        let mine = eval_shell(cmd, 1_300, vec![proc_(12, "cargo test --workspace", 1_500)]);
         s.watch_shells(&[other, mine], 2_000);
         let rp = s.running_part("b1").expect("found in its own shell");
         assert_eq!(
@@ -1095,9 +1090,15 @@ mod tests {
         let mut s = session(cmd);
         let id = s.step_by_call("b1").unwrap();
         let sh = |kids| eval_shell(cmd, 1_000, kids);
-        s.watch_shells(&[sh(vec![proc_(30, "cargo test -p rush-core", 1_100)])], 2_000);
+        s.watch_shells(
+            &[sh(vec![proc_(30, "cargo test -p rush-core", 1_100)])],
+            2_000,
+        );
         assert_eq!(s.running_label(id), "cargo test");
-        s.watch_shells(&[sh(vec![proc_(31, "cargo test -p rush-convo", 5_000)])], 6_000);
+        s.watch_shells(
+            &[sh(vec![proc_(31, "cargo test -p rush-convo", 5_000)])],
+            6_000,
+        );
         assert_eq!(s.running_label(id), "cargo test · run 2");
         let rp = s.running_part("b1").expect("running");
         assert_eq!(
@@ -1168,10 +1169,7 @@ mod tests {
                 5_200,
             )],
         };
-        s.watch_shells(
-            &[eval_shell(cmd, 1_000, vec![script(vec![fork])])],
-            6_000,
-        );
+        s.watch_shells(&[eval_shell(cmd, 1_000, vec![script(vec![fork])])], 6_000);
         assert_eq!(s.running_label(id), "now cargo test");
         assert_eq!(
             s.script_runs(id, 9_000, false),
@@ -1230,7 +1228,10 @@ mod tests {
             ("while ! curl -s x; do", Some("curl -s x")),
             ("(cd rust", Some("cd rust")),
             ("cargo test)", Some("cargo test")),
-            ("cargo test \\\n  --workspace", Some("cargo test    --workspace")),
+            (
+                "cargo test \\\n  --workspace",
+                Some("cargo test    --workspace"),
+            ),
             ("cargo test # all of it", Some("cargo test")),
             ("# a comment", None),
             ("for p in a b", None),
