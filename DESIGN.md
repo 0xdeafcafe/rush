@@ -651,35 +651,7 @@ shell) goes back to the default in its pre_exec (`rush_sys::qos::plain`).
    with Claude Code running between turns, eleven before (2026-11-02);
    see The host.
 
-### The plugin service's threads (Rust-only)
-
-`rush plugind` keeps no thread per plugin while it runs. Go's has a
-goroutine each to supervise, wait, read and write; the port first had a
-thread each (65 threads idle with 13 bundled plugins and one other, each
-bundled one a `rush plugin run` process of 2-3 threads and ~3.2 MB: 13
-processes, 27 threads, 42 MB, 2026-11-02). Now:
-
-- Supervising: a thread starts a plugin and says hello, then ends. Its
-  exit, its connection closing or the broker's stop starts what comes
-  next on a fresh one (`Runner::hand_off`); only a backoff after a crash
-  holds one.
-- Waiting for exits: one thread, `rush-reap`, on one kqueue
-  (`rush_sys::reap`, EVFILT_PROC), for every plugin process.
-- Writing: an outbox has its thread only while something waits to go.
-- The memory and files watch looks every 5 s only while a plugin runs as a
-  process; the development-mode watch every 2 s only while a plugin is in
-  development mode. Otherwise both wait for a reload or a plugin starting.
-- Bundled plugins that read nothing of their process's own (environment,
-  folder, stdio) and start no programs run inside the broker
-  (`rush_plugin::bundled::StartFn`): the same protocol on a socket pair,
-  no process, no memory limit (no footprint of their own to measure),
-  what they'd print on the way out in their log, a panic as they start
-  caught and restarted as a crash would be. That's all thirteen of the
-  ones above; the cleaners, ts and haven keep their process.
-- The broker's own threads get 1 MB stacks, outboxes 256 KB
-  (`rush_sys::threads`).
-
-5. **Plugin connections** (rush-plugin `rpc.rs`, `rpcread.rs`;
+6. **Plugin connections** (rush-plugin `rpc.rs`, `rpcread.rs`;
    Rust-only: Go reads each in a goroutine). One `plugin-rpc` thread per
    process reads every JSON-RPC connection made on a descriptor
    (`Conn::new`'s socket, `Conn::lines_fd`'s MCP stdout pipe): it waits
@@ -709,6 +681,37 @@ processes, 27 threads, 42 MB, 2026-11-02). Now:
    round trip 60-64 → 44-53 µs; 1,000 notifications 1.04-1.31 →
    1.12-1.39 ms, no clear change (the queue's thread is started again
    each time a burst drains).
+
+### The plugin service's threads (Rust-only)
+
+`rush plugind` keeps no thread per plugin while it runs. Go's has a
+goroutine each to supervise, wait, read and write; the port first had a
+thread each (65 threads idle with 13 bundled plugins and one other, each
+bundled one a `rush plugin run` process of 2-3 threads and ~3.2 MB: 13
+processes, 27 threads, 42 MB, 2026-11-02). Now:
+
+- Supervising: a thread starts a plugin and says hello, then ends. Its
+  exit, its connection closing or the broker's stop starts what comes
+  next on a fresh one (`Runner::hand_off`); only a backoff after a crash
+  holds one.
+- Waiting for exits: one thread, `rush-reap`, on one kqueue
+  (`rush_sys::reap`, EVFILT_PROC), for every plugin process.
+- Writing: an outbox has its thread only while something waits to go.
+- The memory and files watch looks every 5 s only while a plugin runs as a
+  process; the development-mode watch every 2 s only while a plugin is in
+  development mode. Otherwise both wait for a reload or a plugin starting.
+- Bundled plugins that read nothing of their process's own (environment,
+  folder, stdio) and start no programs run inside the broker
+  (`rush_plugin::bundled::StartFn`): the same protocol on a socket pair,
+  no process, no memory limit (no footprint of their own to measure),
+  what they'd print on the way out in their log, a panic as they start
+  caught and restarted as a crash would be. That's all thirteen of the
+  ones above; the cleaners, ts and haven keep their process.
+- The broker's own threads get 1 MB stacks, outboxes 256 KB
+  (`rush_sys::threads`).
+- Reading: the process's one shared reader (item 6). A handler that
+  panics, in any connection, answers its call with a server error
+  ("panicked: …") rather than leave it to its deadline.
 
 ### The TUI's threads (Rust-only)
 
