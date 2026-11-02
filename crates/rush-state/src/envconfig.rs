@@ -77,6 +77,7 @@ static FIELDS: &[Field] = fields![
     "quiet" => Bool: quiet,
     "dockLines" => Int: dock_lines,
     "sideWidth" => Float: side_width,
+    "columnWidth" => Int: column_width,
     "view" => Str: view,
     "listOnly" => Bool: list_only,
     "chatFull" => Bool: chat_full,

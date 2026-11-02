@@ -1497,7 +1497,11 @@ fn dock_frames() {
             "{w}: {f:?}"
         );
         assert!(f[n - 2].starts_with("  ╰"), "{w}: {f:?}");
-        assert_eq!(f[n - 1].trim_end(), "    f1 more  ·  esc back", "{w}");
+        assert_eq!(
+            f[n - 1].trim_end(),
+            "    f1 more  ·  ⌥s conversation view  ·  esc back",
+            "{w}"
+        );
     }
 }
 

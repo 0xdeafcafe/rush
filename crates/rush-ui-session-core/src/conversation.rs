@@ -138,6 +138,7 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     let (vs, past, vw) = views::beside::views_beside(m, key, w.saturating_sub(map_w));
     let side = map_w + vw;
     let (now, tick) = (m.now, m.tick);
+    let pref = m.cfg.column_width;
     let txt = conn(m, key).txt;
     let hover = conn(m, key).vs.hover_ref.clone();
     let hover_tag = conn(m, key).vs.hover_tag.clone();
@@ -208,7 +209,7 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
             rush_ui_session_cards::handles::underline_link(l, u);
         }
         textsel::paint(&mut b, v.start, &txt, cw);
-        pin_prompt(v, &mut b, cw);
+        pin_prompt(v, &mut b, cw, pref);
         if v.pos != Pos::End {
             let total = v.total();
             let below = total.saturating_sub(v.start + b.len());
@@ -296,7 +297,7 @@ fn your_prompt(t: &rush_convo::Turn) -> bool {
 /// row while it's scrolled off it: scrolled up, the current one; at the
 /// end, the latest. Only with a body to spare (pinPrompts,
 /// promptpins.go:31).
-fn pin_prompt(v: &mut crate::session::SessionView, b: &mut [Line], w: usize) {
+fn pin_prompt(v: &mut crate::session::SessionView, b: &mut [Line], w: usize, pref: i64) {
     let (start, end) = (v.start, v.start + b.len());
     let turns = &v.sess.turns;
     let Some(first) = turns.iter().position(your_prompt) else {
@@ -337,7 +338,7 @@ fn pin_prompt(v: &mut crate::session::SessionView, b: &mut [Line], w: usize) {
     ]);
     // With a column beside the text, the pin stops where it starts, as
     // the text does, rather than running across a wide Session.
-    let sw = super::side::side_width(w);
+    let sw = super::side::side_width_with(w, pref);
     let pw = if sw > 0 { w - sw - 2 } else { w };
     b[0] = on_ground(fit(row, pw), pw, CHROME_BG);
     let r = format!("{PIN_REF}t{}", t.n);

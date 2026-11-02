@@ -679,3 +679,18 @@ fn draft_to_prompt_from_the_whole_screen() {
         assert_eq!(split::widths(&m).0, 0, "{w}: the Session alone");
     }
 }
+
+/// In the list, alt+← and alt+→ still move the list's edge, as shift
+/// does; in a Session they don't (they are the side column's).
+#[test]
+fn alt_arrows_in_the_list_resize_it() {
+    let mut m = opened(200, 50, "split");
+    m.session = None;
+    m.pane = None;
+    let first = split::widths(&m).0;
+    press(&mut m, "alt+right");
+    assert_eq!(split::widths(&m).0, first + 2);
+    press(&mut m, "alt+left");
+    press(&mut m, "alt+left");
+    assert_eq!(split::widths(&m).0, first - 2);
+}

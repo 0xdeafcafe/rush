@@ -317,8 +317,16 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
             return Out::Draw;
         }
         // shift+← → move the list's edge, as in the list (stepSplit).
-        "shift+left" | "shift+right" | "alt+left" | "alt+right" if empty => {
+        "shift+left" | "shift+right" if empty => {
             let o = rush_ui_list_extras::split::key(m, k);
+            if o.used() {
+                return o;
+            }
+        }
+        // alt+← → make the column beside the conversation narrower or
+        // wider; typing, they jump a word as ever.
+        "alt+left" | "alt+right" if empty => {
+            let o = super::side::resize_key(m, &key, k);
             if o.used() {
                 return o;
             }

@@ -21,4 +21,4 @@
   ╭─ open in a terminal, so it can't take messages here ──────────────────────╮
   │ ❯  a message for this agent                                               │
   ╰───────────────────────────────────────────────────────────────────────────╯
-    ↑ steps  ·  f1 more  ·  esc back
+    ↑ steps  ·  f1 more  ·  ⌥s conversation view  ·  esc back

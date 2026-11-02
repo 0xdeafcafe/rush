@@ -350,3 +350,96 @@ fn the_column_and_the_views_are_one_width() {
         assert_eq!((x, pw), col, "{w}: the views stand where the column does");
     }
 }
+
+/// The column's width as last drawn.
+fn column_w(m: &mut Model) -> usize {
+    screen(m);
+    conn(m, KEY).side.w
+}
+
+/// alt+← and alt+→ with nothing typed make the column beside the
+/// conversation two columns narrower or wider, between 44 and all the
+/// room left of the text, and the width is kept in the config.
+#[test]
+fn alt_arrows_resize_the_column() {
+    let mut m = rush_open("ak-column", 240, 40, Vec::new());
+    let first = column_w(&mut m);
+    let room = conn(&mut m, KEY).side.room;
+    assert!(room > 44, "room for a column: {room}");
+    assert_eq!(
+        first,
+        room * 3 / 4,
+        "rush's own: three quarters of the room"
+    );
+    press(&mut m, "alt+right");
+    assert_eq!(column_w(&mut m), first + 2);
+    assert_eq!(m.cfg.column_width, first as i64 + 2, "kept");
+    press(&mut m, "alt+left");
+    press(&mut m, "alt+left");
+    assert_eq!(column_w(&mut m), first - 2);
+    // The most: all the room left of the text.
+    for _ in 0..100 {
+        press(&mut m, "alt+right");
+    }
+    assert_eq!(column_w(&mut m), room);
+    press(&mut m, "alt+right");
+    assert_eq!(column_w(&mut m), room);
+    assert_eq!(m.cfg.column_width, room as i64);
+    // The least: 44.
+    for _ in 0..100 {
+        press(&mut m, "alt+left");
+    }
+    assert_eq!(column_w(&mut m), 44);
+    press(&mut m, "alt+left");
+    assert_eq!(column_w(&mut m), 44);
+    assert_eq!(m.cfg.column_width, 44);
+    // The width kept is the width drawn next time.
+    let mut again = rush_open("ak-column-again", 240, 40, Vec::new());
+    again.cfg.column_width = 60;
+    assert_eq!(column_w(&mut again), 60);
+}
+
+/// shift+← and shift+→ in a Session still move the list's edge, not the
+/// column.
+#[test]
+fn shift_arrows_leave_the_column() {
+    let mut m = rush_open("ak-shift", 240, 40, Vec::new());
+    let first = column_w(&mut m);
+    press(&mut m, "shift+left");
+    assert_eq!(column_w(&mut m), first);
+    assert_eq!(m.cfg.column_width, 0);
+}
+
+/// With something typed, alt+← and alt+→ jump a word and leave the column.
+#[test]
+fn alt_arrows_with_text_jump_a_word() {
+    let mut m = rush_open("ak-word", 240, 40, Vec::new());
+    let first = column_w(&mut m);
+    typed(&mut m, "one two");
+    press(&mut m, "alt+left");
+    typed(&mut m, "X");
+    assert_eq!(conn(&mut m, KEY).input.string(), "one Xtwo");
+    press(&mut m, "alt+right");
+    typed(&mut m, "Y");
+    assert_eq!(conn(&mut m, KEY).input.string(), "one XtwoY");
+    assert_eq!(column_w(&mut m), first);
+    assert_eq!(m.cfg.column_width, 0);
+}
+
+/// Under the box, the hint names the key to the conversation's view, and
+/// it is the first to go when the row is too narrow.
+#[test]
+fn the_box_hints_the_conversation_view_key() {
+    let mut m = rush_open("ak-hint", 120, 40, Vec::new());
+    let f = screen(&mut m);
+    let last = f[f.len() - 1].clone();
+    assert!(
+        last.contains("⌥s conversation view  ·  esc back"),
+        "{last:?}"
+    );
+    let mut m = rush_open("ak-hint-narrow", 60, 24, Vec::new());
+    let f = screen(&mut m);
+    let last = f[f.len() - 1].clone();
+    assert!(!last.contains("conversation view"), "{last:?}");
+    assert!(last.contains("esc back"), "{last:?}");
+}

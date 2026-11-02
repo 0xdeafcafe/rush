@@ -39,6 +39,8 @@ pub struct Config {
     pub list_only: bool,
     /// The list's share of a split screen; 0 is rush's own (SideWidth).
     pub side_width: f64,
+    /// The column right of the conversation's width; 0 is rush's own.
+    pub column_width: i64,
     /// A Session opened from the list alone has the screen (ChatFull).
     pub chat_full: bool,
     /// The agents pinned as tiles beside the Session, and which sit under

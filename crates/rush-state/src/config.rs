@@ -342,6 +342,14 @@ pub struct Config {
         skip_serializing_if = "is_zero_f64"
     )]
     pub side_width: f64,
+    /// The column right of the conversation's width in columns; zero
+    /// means rush's own choice (never under 44).
+    #[serde(
+        rename = "columnWidth",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_zero_i64"
+    )]
+    pub column_width: i64,
     /// The layout you picked: "split", "agent" or "list". Empty asks, the
     /// first time rush opens.
     #[serde(

@@ -16,14 +16,14 @@
 use rush_draw::{Button, MouseKind};
 
 use super::model::{Action, View};
-use super::panel::{Click, VIEWS_STRIP, ViewsState, pane_views_side, views_width};
+use super::panel::{Click, VIEWS_STRIP, ViewsState, pane_views_side, views_width_with};
 use super::read::{self, id_of, past_views_of, views_of};
 use crate::frame::ext::Act;
 use crate::frame::{Mouse, Out};
 use crate::model::Model;
 use crate::panel_host;
 use crate::sess::open_key;
-use crate::sidecol::{side_width, text_width};
+use crate::sidecol::{side_width_with, text_width};
 
 /// Whether what's running shows at the top of the session's panel: it's
 /// open on one of the agent's views, and there are tasks to show; the
@@ -56,13 +56,14 @@ pub fn views_beside(m: &mut Model, key: &str, w: usize) -> (Vec<View>, Vec<View>
     if side.is_empty() && past.is_empty() {
         return (side, past, 0);
     }
-    let mut width = views_width(w);
-    if width > VIEWS_STRIP && side_width(w) > 0 {
+    let pref = m.cfg.column_width;
+    let mut width = views_width_with(w, pref);
+    if width > VIEWS_STRIP && side_width_with(w, pref) > 0 {
         width += VIEWS_GAP; // the room the column leaves right of its text
     }
     if width > 0 && read::state(m, key).folded(&side) {
         width = VIEWS_STRIP;
-        if side_width(w) > 0 {
+        if side_width_with(w, pref) > 0 {
             width = 0; // a part of the column beside the conversation instead
         }
     }
@@ -90,7 +91,7 @@ pub fn paste(
     // Beside a wide conversation the panel stands where the column does,
     // as wide, the same gap left of it: the column's two spare cells go
     // blank on its right.
-    let w = if w > VIEWS_STRIP && side_width(cw + w) > 0 {
+    let w = if w > VIEWS_STRIP && side_width_with(cw + w, m.cfg.column_width) > 0 {
         w - VIEWS_GAP
     } else {
         w

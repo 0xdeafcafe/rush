@@ -25,11 +25,29 @@ pub fn side_head(name: &str, rest: Line) -> Line {
 /// blank between the text and the column, which keeps to the right edge.
 /// The agent's views beside the conversation take this same width.
 pub fn side_width(w: usize) -> usize {
+    side_width_with(w, 0)
+}
+
+/// The column's least width, in columns.
+pub const SIDE_MIN: usize = 44;
+
+/// The column's width as side_width, but at the width you set (pref,
+/// columns; 0 is rush's own): kept between 44 and all the room left of
+/// the conversation's widest row, so the text stays as wide as ever.
+pub fn side_width_with(w: usize, pref: i64) -> usize {
     const TEXT: usize = 124; // convo's capRow: its rows never run further right
     match w.checked_sub(TEXT + 3) {
-        Some(room) if room >= 44 => (room * 3 / 4).max(44),
+        Some(room) if room >= SIDE_MIN => match pref {
+            p if p > 0 => (p as usize).clamp(SIDE_MIN, room),
+            _ => (room * 3 / 4).max(SIDE_MIN),
+        },
         _ => 0,
     }
+}
+
+/// The most the column can be, w wide in all; 0 when it isn't showing.
+pub fn side_room(w: usize) -> usize {
+    w.checked_sub(127).filter(|&r| r >= SIDE_MIN).unwrap_or(0)
 }
 
 /// How wide the rows inside the column, sw wide, are laid out: the

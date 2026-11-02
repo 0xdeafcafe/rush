@@ -2030,7 +2030,18 @@ is made. Everything below is in `rush_ui::frame`.
   wider than its text needs keeps the text at 124 columns; the column
   beside the conversation (`session_core/side.rs`: tasks, changes, what
   runs, folded views) takes the rest, its card's ground filling it and
-  its rows laid out 79 wide at most (`side::text_width`). An opened Session (`Model::session`, with the
+  its rows laid out 79 wide at most (`side::text_width`). Its width is
+  rush's own (three quarters of that room, 44 at least) until you set one:
+  alt+←/→ in a Session, with nothing typed, make it two columns narrower
+  or wider, between 44 and all the room left of the text, and keep it as
+  `columnWidth` in config.json (`Config::column_width`, saved as the
+  list's width is; `sidecol::side_width_with`); they do nothing while the
+  column isn't showing, and jump a word while the box has text. shift+←/→
+  move the list's edge, in a Session as in the list; alt+←/→ in the list
+  move it too. The conversation's view stays on alt+s, and the hint under
+  the box says so ("alt+s conversation view", from the key the keymap has
+  for session.preset), the first of the hint's keys to go when the row is
+  too narrow. An opened Session (`Model::session`, with the
   keys) stands beside the list wherever there's room, as Go's focusPane
   does; it has the screen only when there isn't, or when the Session
   alone is your layout. esc, ←, { } and tab give the list the keys back

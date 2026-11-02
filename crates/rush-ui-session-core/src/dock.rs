@@ -1009,6 +1009,10 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     };
     if other_view {
         back.insert(0, (preset_key.as_str(), next_view));
+    } else if view == "conversation" {
+        // Said last of all but the way back, so it's the first to go when
+        // the row is too narrow.
+        back.insert(back.len() - 1, (preset_key.as_str(), "conversation view"));
     }
     few_keys(w, 3, &pairs, &back)
 }

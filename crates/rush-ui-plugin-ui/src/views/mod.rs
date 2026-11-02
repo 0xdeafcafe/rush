@@ -26,7 +26,7 @@ use crate::style::*;
 
 pub use acts::{Btn, ViewAct, ViewLine};
 pub use model::*;
-pub use panel::{Click, ViewsState, views_panel, views_width};
+pub use panel::{Click, ViewsState, views_panel, views_width, views_width_with};
 
 /// Whether the plugin runs with views in its ui (agentviews.go:68
 /// pluginDrawsViews).

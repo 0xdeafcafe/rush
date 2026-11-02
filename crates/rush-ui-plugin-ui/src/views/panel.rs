@@ -23,7 +23,12 @@ use super::*;
 /// exactly as wide, so the text doesn't move when one gives way to the
 /// other; narrower, where there's no column, it is 3/8 of the room.
 pub fn views_width(w: usize) -> usize {
-    let col = crate::sidecol::side_width(w);
+    views_width_with(w, 0)
+}
+
+/// views_width, the column at the width you set (pref; 0 is rush's own).
+pub fn views_width_with(w: usize, pref: i64) -> usize {
+    let col = crate::sidecol::side_width_with(w, pref);
     if col > 0 {
         return col;
     }

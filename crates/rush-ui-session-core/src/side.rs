@@ -37,7 +37,7 @@ use super::paint::{cut, dim, faint, plural};
 use super::{conn, open_key};
 use crate::frame::{Out, Press};
 use crate::model::Model;
-pub use crate::sidecol::{VIEWS_REF, side_head, side_width, text_width};
+pub use crate::sidecol::{VIEWS_REF, side_head, side_width, side_width_with, text_width};
 use crate::style::*;
 
 /// A click on a task row in the column opens the Tasks view.
@@ -350,6 +350,8 @@ pub struct Side {
     pub rows: Vec<Line>,
     pub refs: Vec<String>,
     pub w: usize,
+    /// The most it could be at this width; 0 when it isn't showing.
+    pub room: usize,
     /// Its first screen row and column as drawn, and how many rows showed.
     pub y: usize,
     pub x: usize,
@@ -363,7 +365,37 @@ pub fn column_width(m: &mut Model, key: &str, w: usize) -> usize {
         return 0;
     }
     let views = rush_ui_plugin_ui::views::beside::views_beside(m, key, w).2;
-    side_width(w - views)
+    side_width_with(w - views, m.cfg.column_width)
+}
+
+/// alt+← and alt+→ in a Session (the box empty) make the column beside
+/// the conversation two columns narrower or wider, between its least,
+/// 44, and all the room left of the text, and keep the width. Nothing
+/// when the column isn't showing.
+pub fn resize_key(m: &mut Model, key: &str, k: &Press) -> Out {
+    let grow = match k.s.as_str() {
+        "alt+right" => true,
+        "alt+left" => false,
+        _ => return Out::Pass,
+    };
+    let (cur, room) = {
+        let s = &conn(m, key).side;
+        (s.w, s.room)
+    };
+    if cur == 0 {
+        return Out::Pass;
+    }
+    let to = if grow {
+        (cur + 2).min(room)
+    } else {
+        cur.saturating_sub(2).max(crate::sidecol::SIDE_MIN)
+    };
+    m.cfg.column_width = to as i64;
+    rush_ui_base::config::save(m, "couldn't keep the side column's width", move |c| {
+        c.column_width = to as i64;
+    });
+    m.flash(&format!("side column {to} columns"));
+    Out::Draw
 }
 
 /// The column for session key, text w wide, its parts a row apart, top
@@ -375,9 +407,10 @@ pub fn column_width(m: &mut Model, key: &str, w: usize) -> usize {
 pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
     // The room is right of the text, left of any views beside it.
     let views = rush_ui_plugin_ui::views::beside::views_beside(m, key, w).2;
-    let sw = side_width(w - views);
+    let sw = side_width_with(w - views, m.cfg.column_width);
     let mut side = Side {
         w: sw,
+        room: crate::sidecol::side_room(w - views),
         ..Side::default()
     };
     let runs = std::mem::take(&mut conn(m, key).side_runs);
