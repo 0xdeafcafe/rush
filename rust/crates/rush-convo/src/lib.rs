@@ -16,6 +16,7 @@ pub mod reading;
 pub mod render;
 pub mod runname;
 pub mod search;
+pub mod shellbox;
 pub mod shellwrites;
 pub mod subagents;
 pub mod text;
@@ -30,6 +31,7 @@ pub use model::{
 pub use render::{Depth, Options, Preset, RenderedLine, Renderer};
 pub use runname::{other_harness, run_tag, set_peer_mark};
 pub use search::{Found, Hit, Library, WHO_AGENT, library};
+pub use shellbox::{ShellBlock, ShellRun, shell_blocks};
 pub use shellwrites::{ShellWrite, shell_run, shell_run_kept, shell_writes};
 pub use subagents::{Subagent, Subagents, list_subagents};
 pub use transcript::{Decode, Fresh, Tail, decode, history, history_from, history_start, injected};

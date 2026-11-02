@@ -206,13 +206,18 @@ impl Drawer<'_> {
     /// (unitPrint).
     fn unit_print(&self, lo: usize, hi: usize) -> Option<u64> {
         let mut h = Fnv(14_695_981_039_346_656_037);
-        for it in &self.t.items[lo..hi] {
+        for (j, it) in self.t.items[lo..hi].iter().enumerate() {
             match it {
                 Item::Step(id) => {
                     h.mix(1);
                     self.step_print(*id, &mut h)?;
                 }
                 Item::Text { text, answer } => {
+                    // Its shell blocks' runs change as they run: drawn
+                    // every time while it has any.
+                    if self.has_runs(lo + j) {
+                        return None;
+                    }
                     h.mix(2);
                     h.text(text);
                     h.mix(u64::from(*answer));

@@ -384,7 +384,13 @@ impl Drawer<'_> {
                     end += 1;
                 }
                 let body = &lines[li + 1..end.min(lines.len())];
-                self.code(body, tag.trim(), pad.clone());
+                // A block of shell in a reply is a terminal box rush can
+                // run it in (shellbox.rs).
+                if let Some(b) = self.boxed_shell(tag.trim(), body) {
+                    self.shell_block(&b);
+                } else {
+                    self.code(body, tag.trim(), pad.clone());
+                }
                 li = end + 1;
                 continue;
             }

@@ -339,6 +339,10 @@ fn tag(name: &str, start: usize, skills: &std::collections::HashSet<String>) -> 
 /// a command's values, else the / commands (slashLines). Nothing when
 /// nothing's being typed that it offers.
 pub fn slash_lines(m: &mut Model, key: &str, w: usize) -> Vec<Line> {
+    // A shell command after ! is no command of rush's or the agent's.
+    if conn(m, key).bang {
+        return Vec::new();
+    }
     let (input, pos) = typed(m, key);
     let back = input.len() - pos.min(input.len());
     let cmds = hash_matches(m, &input, back, &[]);
@@ -403,7 +407,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     let Some(key) = open_key(m) else {
         return Out::Pass;
     };
-    if rush_ui_session_cards::conn(m, &key).card_focus {
+    if rush_ui_session_cards::conn(m, &key).card_focus || conn(m, &key).bang {
         return Out::Pass;
     }
     let o = hash_key(m, &key, s);

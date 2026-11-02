@@ -279,6 +279,11 @@ pub struct Options {
     /// its processes and the files it writes: one dim line under its
     /// command while it runs. Set by whoever finds it.
     pub live: HashMap<String, StepLive>,
+    /// The commands rush ran itself, by their box's ref: a shell block of
+    /// a reply run (`t3:sh:<item>:<k>`) or a command typed after `!`
+    /// (`t3:bang:<start>`, drawn after the items its turn had then). Set
+    /// by whoever runs them (shellbox.rs).
+    pub shells: HashMap<String, std::sync::Arc<crate::shellbox::ShellRun>>,
 }
 
 /// What a running shell step is doing now: a line from its processes, and
@@ -380,6 +385,8 @@ struct TurnKey {
     /// Catch-up, whether the card covers it, and the background tasks the
     /// last turn's card says are still going.
     view: u64,
+    /// The commands rush ran itself in it, as they stand (shellbox.rs).
+    shells: u64,
 }
 
 /// How many rows of drawn turns are kept for drawing again cheaply: several
@@ -607,6 +614,9 @@ impl Renderer {
                 _ => None,
             });
             k.scripts = scriptdoc::scripts_sig(&o.scripts, ids);
+        }
+        if !o.shells.is_empty() {
+            k.shells = draw::shellbox::turn_sig(o, &format!("t{}:", t.n));
         }
         if o.preset == Preset::CatchUp {
             let last = i + 1 == s.turns.len();

@@ -56,6 +56,9 @@ pub struct InputBox {
     /// What drawing live sets: where its words are, the frame its light
     /// is at, the cursor's ground. Leave it unset: lines() fills it in.
     pub look: Option<Look>,
+    /// The edge's colour whether or not it has the keys: a box in a mode
+    /// of its own (a message box running a shell command after `!`).
+    pub edge: Option<Color>,
 }
 
 /// Where an edge's labels landed, cells from the box's left edge: the
@@ -135,7 +138,11 @@ impl InputBox {
     /// round it.
     fn run(&self, x: usize, y: usize, h: usize, s: &str) -> Line {
         let w = 20.max(self.w);
-        let edge = if self.focused { ORANGE } else { EDGE };
+        let edge = match self.edge {
+            Some(c) => c,
+            None if self.focused => ORANGE,
+            None => EDGE,
+        };
         let Some(frame) = self.look.as_ref().map(|k| k.frame).filter(|_| h > 0) else {
             return line([sp(s.to_string(), edge)]);
         };

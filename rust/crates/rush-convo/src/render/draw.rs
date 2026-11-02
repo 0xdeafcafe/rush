@@ -51,6 +51,7 @@ use rush_core::tool::{Call, Kind, Output};
 
 pub(crate) mod chain;
 pub(crate) mod presets;
+pub(crate) mod shellbox;
 
 fn re(s: &str) -> Regex {
     Regex::new(s).expect("a valid pattern")
@@ -112,6 +113,13 @@ pub(crate) struct Drawer<'a> {
     pub(crate) force_open: bool,
     /// The start hooks stay out: another view's turn.
     pub(crate) no_hooks: bool,
+    /// The reply being drawn, by its index in the turn, and how many of
+    /// its shell blocks were drawn so far: each is a box of its own
+    /// (shellbox.rs).
+    pub(crate) text_item: Option<usize>,
+    pub(crate) shell_k: usize,
+    /// The `!` runs of the turn drawn so far.
+    pub(crate) bangs_done: HashSet<String>,
 }
 
 impl<'a> Drawer<'a> {
@@ -162,6 +170,9 @@ impl<'a> Drawer<'a> {
             ti: 0,
             force_open: false,
             no_hooks: false,
+            text_item: None,
+            shell_k: 0,
+            bangs_done: HashSet::new(),
         }
     }
 
@@ -808,6 +819,9 @@ impl<'a> Drawer<'a> {
         let mut run: Vec<usize> = Vec::new();
         let mut at = 0;
         for (i, it) in items.iter().enumerate() {
+            if run.is_empty() {
+                self.bangs_upto(i);
+            }
             match it {
                 Item::Step(id) if self.batched(*id) => {
                     if run.is_empty() {
@@ -820,6 +834,7 @@ impl<'a> Drawer<'a> {
                 _ => {}
             }
             self.flush_story(&mut run, at);
+            self.bangs_upto(i);
             self.item(i);
             if let Item::Step(id) = it
                 && self.doc(*id)
@@ -828,6 +843,7 @@ impl<'a> Drawer<'a> {
             }
         }
         self.flush_story(&mut run, at);
+        self.bangs_upto(usize::MAX);
     }
 
     fn flush_story(&mut self, run: &mut Vec<usize>, at: usize) {
@@ -1073,6 +1089,7 @@ impl<'a> Drawer<'a> {
         };
         let mut i = lo;
         while i < hi {
+            self.bangs_upto(i);
             if let Some(id) = step_of(i)
                 && shown(self.s.step(id))
             {
@@ -1154,12 +1171,16 @@ impl<'a> Drawer<'a> {
             self.memoized(i, i + 1, |d| d.item(i));
             i += 1;
         }
+        if hi == items.len() {
+            self.bangs_upto(usize::MAX);
+        }
     }
 
     /// One thing in an open turn.
     fn item(&mut self, i: usize) {
         match &self.t.items[i] {
             Item::Text { text, answer } => {
+                (self.text_item, self.shell_k) = (Some(i), 0);
                 if *answer {
                     self.answer_item(text);
                 } else {
@@ -1167,6 +1188,7 @@ impl<'a> Drawer<'a> {
                     self.prose(text, 2, C_SUB);
                     self.gap();
                 }
+                self.text_item = None;
             }
             Item::Thinking(text) => {
                 if self.o.verbose {

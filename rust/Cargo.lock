@@ -1957,6 +1957,7 @@ dependencies = [
  "rush-ui-social",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

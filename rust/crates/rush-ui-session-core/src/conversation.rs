@@ -480,6 +480,11 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
                 // sent or an @agent, before the text's selection
                 // (clickMessage).
                 if let Some(u) = link_under(m, &key, x, y) {
+                    // A shell box's buttons: run, copy, stop, again, send
+                    // to the agent, clear.
+                    if let Some(o) = super::shellbox::click(m, &key, &u) {
+                        return o;
+                    }
                     let o = rush_ui_session_cards::message::message_link(m, &key, &u);
                     if o.used() {
                         return o;

@@ -1862,6 +1862,50 @@ the steady cost. Catch-up's window holds ~50 turns of one row each before
 the card, so its warm frame checks 50 turns' keys: still far under a
 millisecond.
 
+## Shell commands rush runs for you (Rust-only)
+
+Two ways in, both only on your click or key, never by themselves:
+
+- **A shell block in a reply** (```sh, bash, zsh, shell, console, or
+  one whose first line is a `$ ` prompt) is drawn as a terminal box
+  (rush-convo `render/draw/shellbox.rs`): `shell · <folder>` and ▶ run,
+  ⧉ copy on its top edge, the commands inside with a faint `$` (one the
+  agent wrote is taken off; in a console block only the `$` lines are
+  commands, the rest is example output and doesn't run). Its ref is
+  `t<n>:sh:<item>:<k>` (the k-th shell block of item i of turn n,
+  `shellbox::shell_blocks` finding them as the markdown does); picked,
+  enter runs it, c copies it.
+- **`!` typed into the empty message box** turns it to running commands
+  (`Conn::bang`): its edge orange, `! shell · <folder>` and `enter runs ·
+  esc back` on it; esc, or backspace at its start, turns it back. enter
+  runs what's typed without waiting for the agent or interrupting it; its
+  box (`t<n>:bang:<start>`) is drawn after the items its turn had then.
+
+A run (`rush_convo::ShellRun`, kept by the UI in session_core's
+`shellbox.rs` and handed to the view as `Options::shells`) is the
+session's folder, `$SHELL -lc`, stdin closed, stdout and stderr into one
+pipe, in a process group of its own; a thread reads its output and one
+waits on it, and each frame's dock takes in what they have. Its box shows
+the newest 12 rows of what it wrote, colours kept (SGR read into
+spans), "… N more lines" above them; enter opens all of it. The foot says
+how long it has run (✕ stop ends the group: TERM, KILL 3s on), then ✓ or
+✗ and its code and time, with → send to agent, ↻ again and ✕ (let go of
+it). A block of several commands is a chain: its processes are read every
+500 ms (`jobprocs::kids`) and fed to the same `Chain` an agent's Bash
+calls use (chainrun.rs, now a type of its own), so each command says how
+long it ran, the one running now is marked, and k (skip it) and p (pause
+it, kept with the other paused commands that rush lets go on as it quits)
+work as on an agent's.
+
+What it printed stays on your screen: nothing goes to the agent. → send to
+agent puts "I ran `cmd` (exit 0):" and its last 80 lines (6000
+characters at most) in the message box, as text you send or don't,
+through the session's own harness like any message. The finished runs
+are kept in rush's folder, `shell-runs/<session key>.json` (the newest
+50), and read back when the session is opened again; one that was
+running as rush went shows as stopped. Tests stand a fake in for the
+shell (`shellbox::set_fake`), which also keeps nothing on disk.
+
 ## Panics
 
 Release builds unwind (`panic = "unwind"`), so one thread's panic ends

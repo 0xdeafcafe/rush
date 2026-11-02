@@ -59,7 +59,7 @@ struct PartRun {
 /// What's known of a step's chain as it runs: each command seen, and the
 /// furthest one seen (st.parts, st.at).
 #[derive(Clone, Debug, Default)]
-pub(super) struct Chain {
+pub struct Chain {
     parts: BTreeMap<usize, PartRun>,
     at: usize,
     /// A script file's commands (bash build.sh), which the call's text
@@ -202,16 +202,119 @@ impl Session {
 
     /// Notes which commands of step id's chain sh has running now (watch).
     fn watch(&mut self, id: StepId, sh: &Shell, now: Ms) {
-        let segs = segments(&self.step(id).call().input.command);
+        let cmd = self.step(id).call().input.command.clone();
+        let segs = segments(&cmd);
+        if segs.len() < 2 && !script_call(&segs) {
+            return;
+        }
+        self.chains.entry(id).or_default().watch(&cmd, sh, now);
+    }
+
+    /// Whether a call's command still runs: the call itself, or the task
+    /// it went on as in the background (live).
+    pub(crate) fn call_live(&self, id: StepId) -> bool {
+        let st = self.step(id);
+        st.status == Status::Running || self.job_running(&st.id)
+    }
+
+    /// How step id's call stands, for its chain's marks.
+    fn chain_ends(&self, id: StepId) -> ChainEnds {
+        let st = self.step(id);
+        ChainEnds {
+            live: self.call_live(id),
+            start: st.start,
+            end: st.end,
+            ok: st.status == Status::Ok,
+            failed: st.status == Status::Failed,
+        }
+    }
+
+    /// The commands seen run under script call id, oldest first, each
+    /// with how long it ran or runs; empty for a call that isn't a script
+    /// or none seen. paused: rush has the one running now stopped.
+    pub(crate) fn script_runs(&self, id: StepId, now: Ms, paused: bool) -> Vec<ScriptRun> {
+        match self.chains.get(&id) {
+            Some(ch) => ch.script_runs(now, paused, self.chain_ends(id)),
+            None => Vec::new(),
+        }
+    }
+
+    /// The command of step id's chain that runs now, as its place and its
+    /// first words: "2/4 go test"; a loop's one command, "cargo test · run
+    /// 2"; a script's, "now cargo test"; "" when none is known
+    /// (runningPart).
+    pub(crate) fn running_label(&self, id: StepId) -> String {
+        match self.chains.get(&id).filter(|_| self.call_live(id)) {
+            Some(ch) => ch.label(&self.step(id).call().input.command),
+            None => String::new(),
+        }
+    }
+
+    /// The command of step id's chain that runs now: its place ("2/4",
+    /// "now" for a script's, "" when it's the chain's only command) and
+    /// its first words, with a loop's round ("go test · run 2").
+    pub(crate) fn running_now(&self, id: StepId) -> Option<(String, String)> {
+        let ch = self.chains.get(&id).filter(|_| self.call_live(id))?;
+        ch.running_now(&self.step(id).call().input.command)
+    }
+
+    /// The command of step id's chain running now, while the call is: the
+    /// one an opened call draws brighter.
+    pub(crate) fn part_now(&self, id: StepId) -> Option<usize> {
+        self.chains.get(&id)?.part_now(self.call_live(id))
+    }
+
+    /// What the opened call says of each of the n commands of step id's
+    /// chain: how long it ran, or runs; empty when none was seen to
+    /// (partMarks). paused: rush has its command running now stopped.
+    pub(crate) fn part_marks(&self, id: StepId, n: usize, now: Ms, paused: bool) -> Vec<PartMark> {
+        let Some(ch) = self.chains.get(&id) else {
+            return Vec::new();
+        };
+        let cmd = &self.step(id).call().input.command;
+        ch.marks(cmd, n, now, paused, self.chain_ends(id))
+    }
+
+    /// What the Bash call with this tool call id runs now, if it's a chain
+    /// seen running (RunningPart).
+    pub fn running_part(&self, call_id: &str) -> Option<RunningPart> {
+        let id = self.step_by_call(call_id)?;
+        if !self.call_live(id) || tool_run(self.step(id)).is_some() {
+            return None;
+        }
+        self.chains
+            .get(&id)?
+            .running(&self.step(id).call().input.command)
+    }
+}
+
+/// How the run a chain is part of stands, for its marks: whether it still
+/// runs, when it started and ended, and how it came out.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ChainEnds {
+    pub live: bool,
+    pub start: Ms,
+    pub end: Ms,
+    pub ok: bool,
+    pub failed: bool,
+}
+
+impl Chain {
+    /// Notes which commands of cmd's chain sh has running now (watch); for
+    /// a script file run alone, the commands seen under it. A command
+    /// alone is no chain: nothing is noted. Used for an agent's Bash calls
+    /// and for the commands rush runs itself (shellbox.rs).
+    pub fn watch(&mut self, cmd: &str, sh: &Shell, now: Ms) {
+        let segs = segments(cmd);
         if segs.len() < 2 {
             // A script file's commands aren't in the call's text: the
             // processes under it say which runs.
             if script_call(&segs) {
-                self.watch_script(id, &segs, sh, now);
+                self.watch_script(&segs, sh, now);
             }
             return;
         }
-        let ch = self.chains.entry(id).or_default();
+        let ch = self;
         // A process that is one of the chain's commands stands for all it
         // starts: make's git is make's, not the chain's git status.
         let mut seen: HashMap<usize, Ms> = HashMap::new();
@@ -273,10 +376,10 @@ impl Session {
         }
     }
 
-    /// Notes which commands the script step id runs (bash build.sh,
-    /// ./build.sh, source env.sh) sh has running under it now: the
-    /// processes right under the script's own, through its subshells.
-    fn watch_script(&mut self, id: StepId, segs: &[Segment], sh: &Shell, now: Ms) {
+    /// Notes which commands the script (bash build.sh, ./build.sh, source
+    /// env.sh) sh has running under it now: the processes right under the
+    /// script's own, through its subshells.
+    fn watch_script(&mut self, segs: &[Segment], sh: &Shell, now: Ms) {
         fn find<'a>(ps: &'a [ShellProc], segs: &[Segment]) -> Option<&'a ShellProc> {
             for p in ps {
                 if part_of(segs, &p.args, 0) == Some(0) {
@@ -322,7 +425,7 @@ impl Session {
             }
             cmds(&p.kids, &p.args.join(" "), &mut seen);
         }
-        let ch = self.chains.entry(id).or_default();
+        let ch = self;
         for (words, pp) in &seen {
             if !ch.inner.iter().any(|r| r.proc_ == *pp) {
                 ch.inner.push(InnerRun {
@@ -352,24 +455,12 @@ impl Session {
         }
     }
 
-    /// Whether a call's command still runs: the call itself, or the task
-    /// it went on as in the background (live).
-    pub(crate) fn call_live(&self, id: StepId) -> bool {
-        let st = self.step(id);
-        st.status == Status::Running || self.job_running(&st.id)
-    }
-
-    /// The commands seen run under script call id, oldest first, each
-    /// with how long it ran or runs; empty for a call that isn't a script
-    /// or none seen. paused: rush has the one running now stopped.
-    pub(crate) fn script_runs(&self, id: StepId, now: Ms, paused: bool) -> Vec<ScriptRun> {
-        let Some(ch) = self.chains.get(&id) else {
-            return Vec::new();
-        };
-        let st = self.step(id);
-        let live = self.call_live(id);
-        let end = if live || st.end == 0 { now } else { st.end };
-        ch.inner
+    /// The commands seen run under the script, oldest first, each with how
+    /// long it ran or runs. paused: rush has the one running now stopped.
+    pub(crate) fn script_runs(&self, now: Ms, paused: bool, ends: ChainEnds) -> Vec<ScriptRun> {
+        let live = ends.live;
+        let end = if live || ends.end == 0 { now } else { ends.end };
+        self.inner
             .iter()
             .map(|r| {
                 let mark = match r.end {
@@ -392,28 +483,26 @@ impl Session {
             .collect()
     }
 
-    /// The command of step id's chain that runs now, as its place and its
-    /// first words: "2/4 go test"; a loop's one command, "cargo test · run
-    /// 2"; a script's, "now cargo test"; "" when none is known
-    /// (runningPart).
-    pub(crate) fn running_label(&self, id: StepId) -> String {
-        match self.running_now(id) {
+    /// The command of cmd's chain that runs now, as its place and its
+    /// first words ("2/4 go test"); "" when none is known. The caller
+    /// knows it still runs.
+    pub fn label(&self, cmd: &str) -> String {
+        match self.running_now(cmd) {
             Some((p, w)) if p.is_empty() => w,
             Some((p, w)) => format!("{p} {w}"),
             None => String::new(),
         }
     }
 
-    /// The command of step id's chain that runs now: its place ("2/4",
-    /// "now" for a script's, "" when it's the chain's only command) and
-    /// its first words, with a loop's round ("go test · run 2").
-    pub(crate) fn running_now(&self, id: StepId) -> Option<(String, String)> {
-        let ch = self.chains.get(&id).filter(|_| self.call_live(id))?;
+    /// The command of cmd's chain that runs now: its place and its first
+    /// words. The caller knows it still runs.
+    pub(crate) fn running_now(&self, cmd: &str) -> Option<(String, String)> {
+        let ch = self;
         if let Some(r) = ch.inner.iter().rfind(|r| r.end == 0) {
             return Some(("now".into(), r.words.clone()));
         }
         let (&k, r) = ch.parts.iter().rfind(|(_, r)| r.end == 0)?;
-        let segs = segments(&self.step(id).call().input.command);
+        let segs = segments(cmd);
         let sg = segs.get(k)?;
         let w = bare(&fields_of(
             &run_text(&sg.text).unwrap_or_else(|| sg.text.clone()),
@@ -431,27 +520,30 @@ impl Session {
         Some((p, out))
     }
 
-    /// The command of step id's chain running now, while the call is: the
-    /// one an opened call draws brighter.
-    pub(crate) fn part_now(&self, id: StepId) -> Option<usize> {
-        let ch = self.chains.get(&id)?;
-        let r = ch.parts.get(&ch.at)?;
-        (r.end == 0 && self.call_live(id)).then_some(ch.at)
+    /// The command of the chain running now, while live: the one drawn
+    /// brighter.
+    pub fn part_now(&self, live: bool) -> Option<usize> {
+        let r = self.parts.get(&self.at)?;
+        (r.end == 0 && live).then_some(self.at)
     }
 
-    /// What the opened call says of each of the n commands of step id's
-    /// chain: how long it ran, or runs; empty when none was seen to
-    /// (partMarks). paused: rush has its command running now stopped.
-    pub(crate) fn part_marks(&self, id: StepId, n: usize, now: Ms, paused: bool) -> Vec<PartMark> {
-        let Some(ch) = self.chains.get(&id).filter(|c| !c.parts.is_empty()) else {
-            return Vec::new();
-        };
-        if n < 2 {
+    /// What's said of each of the n commands of cmd's chain: how long it
+    /// ran, or runs; empty when none was seen to. paused: rush has its
+    /// command running now stopped.
+    pub(crate) fn marks(
+        &self,
+        cmd: &str,
+        n: usize,
+        now: Ms,
+        paused: bool,
+        ends: ChainEnds,
+    ) -> Vec<PartMark> {
+        let ch = self;
+        if ch.parts.is_empty() || n < 2 {
             return Vec::new();
         }
-        let st = self.step(id);
-        let live = self.call_live(id);
-        let end = if live || st.end == 0 { now } else { st.end };
+        let live = ends.live;
+        let end = if live || ends.end == 0 { now } else { ends.end };
         let mut marks = vec![PartMark::Unknown; n];
         for (&k, r) in ch.parts.iter().filter(|(k, _)| **k < n) {
             let mut stop = r.end;
@@ -472,25 +564,21 @@ impl Session {
             marks[k] = PartMark::Ran {
                 took: (stop - r.start).max(0),
                 runs: r.runs,
-                failed: st.status == Status::Failed && k == ch.at,
+                failed: ends.failed && k == ch.at,
             };
         }
         // Commands that came and went between looks, before one that was
         // seen, ran; so did those after the last when the whole chain did.
         // They ran in the gap between the ones seen either side: all of it
         // when alone there, a share of it when not.
-        let last = if st.status == Status::Ok {
-            n - 1
-        } else {
-            ch.at
-        };
+        let last = if ends.ok { n - 1 } else { ch.at };
         let mut k = 0;
         while k <= last && k < n {
             if marks[k] != PartMark::Unknown {
                 k += 1;
                 continue;
             }
-            let (mut from, mut to, mut gap) = (st.start, end, k);
+            let (mut from, mut to, mut gap) = (ends.start, end, k);
             if let Some((_, r)) = ch.parts.range(..k).next_back() {
                 from = r.end;
             }
@@ -510,7 +598,7 @@ impl Session {
             k = gap + 1;
         }
         // A comment, a loop's head or its done runs nothing: no time.
-        let segs = segments(&st.call().input.command);
+        let segs = segments(cmd);
         if segs.len() == n {
             for (m, sg) in marks.iter_mut().zip(&segs) {
                 if run_text(&sg.text).is_none() {
@@ -521,14 +609,10 @@ impl Session {
         marks
     }
 
-    /// What the Bash call with this tool call id runs now, if it's a chain
-    /// seen running (RunningPart).
-    pub fn running_part(&self, call_id: &str) -> Option<RunningPart> {
-        let id = self.step_by_call(call_id)?;
-        if !self.call_live(id) || tool_run(self.step(id)).is_some() {
-            return None;
-        }
-        let ch = self.chains.get(&id)?;
+    /// What cmd's chain runs now, if it was seen running (RunningPart).
+    /// The caller knows it still runs.
+    pub fn running(&self, cmd: &str) -> Option<RunningPart> {
+        let ch = self;
         // A script's command running now: killed, the script goes on as
         // it would after it failed.
         if let Some(r) = ch.inner.iter().rfind(|r| r.end == 0) {
@@ -549,7 +633,6 @@ impl Session {
             .parts
             .iter()
             .rfind(|(_, r)| r.end == 0 && !r.procs.is_empty())?;
-        let cmd = &self.step(id).call().input.command;
         let segs = segments(cmd);
         let sg = segs.get(k)?;
         let (at, of) = place(&segs, k);

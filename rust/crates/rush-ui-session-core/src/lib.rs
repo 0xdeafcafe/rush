@@ -54,6 +54,7 @@ pub mod rushmove;
 pub mod scripts;
 pub mod sending;
 pub mod sendmode;
+pub mod shellbox;
 pub mod side;
 pub mod slash;
 pub mod spawned;
@@ -109,6 +110,9 @@ pub fn register(x: &mut Ext) {
     // enter and esc while a draft is carried from a Session, before the
     // Prompt's own (keys.go:279 carryKey).
     x.list_keys.insert(0, actions::carry_key);
+    // A shell block picked in the conversation, and the box's ! mode,
+    // before esc twice and the box's own keys (shellbox.rs).
+    x.session_keys.push(shellbox::key);
     x.session_keys.push(keys::esc_twice);
     // The conversation's views: the key through them, and enter on a
     // catch-up card or a trail's step, before a picked row's own keys.
@@ -355,6 +359,9 @@ pub struct Conn {
     /// for the agent's own default (c.picked): put back when the host
     /// refuses it.
     pub picked: HashMap<String, String>,
+    /// The box runs what's typed as a shell command (`!` typed into it
+    /// empty): enter runs it in the session's folder (shellbox.rs).
+    pub bang: bool,
 }
 
 impl std::ops::Deref for Conn {

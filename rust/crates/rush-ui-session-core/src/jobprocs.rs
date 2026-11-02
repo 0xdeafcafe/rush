@@ -196,7 +196,7 @@ fn shells_under(t: &Table, pid: Pid, depth: usize, out: &mut Vec<Shell>) {
 }
 
 /// The process tree under pid, with each process's words (shellKids).
-fn kids(t: &Table, pid: Pid, depth: usize) -> Vec<ShellProc> {
+pub(crate) fn kids(t: &Table, pid: Pid, depth: usize) -> Vec<ShellProc> {
     if depth > 6 {
         return Vec::new();
     }

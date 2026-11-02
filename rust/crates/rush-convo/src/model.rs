@@ -38,8 +38,8 @@ mod exchange;
 mod jobs;
 pub mod runs;
 
-pub(crate) use chainrun::PartMark;
-pub use chainrun::{PartProc, RunningPart, Shell, ShellProc};
+pub use chainrun::{Chain, PartProc, RunningPart, Shell, ShellProc};
+pub(crate) use chainrun::{ChainEnds, PartMark};
 pub use exchange::{ExchangeItem, exchange_peer, peer_label};
 pub use jobs::Job;
 

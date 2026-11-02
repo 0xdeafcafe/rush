@@ -93,6 +93,8 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     // What its running Bash calls are doing now, from their processes
     // and the files they write.
     super::livestep::sync(m, &key);
+    // The commands rush runs itself: their output so far, how they ended.
+    super::shellbox::sync(m, &key);
     // Go's pane is the screen less 3, from column 2 (view.go:1210); the
     // box gives the map its width from 96 wide (rushmode.go:3224).
     let w = w.saturating_sub(INDENT + 1).max(20);
@@ -667,13 +669,28 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
     if typing && m.sheet.is_none() && m.confirm.is_none() {
         b.live = rush_ui_social::dictation::look(m);
     }
+    // After `!`, what's typed is a shell command rush runs here: the box
+    // says so in orange (shellbox.rs).
+    let bang = conn(m, key).bang;
+    if bang {
+        let dir = crate::style::tildify(&super::shellbox::folder(m, key));
+        b.top_l = line([sp("! shell", ORANGE), sp(format!(" · {dir}"), TEXT)]);
+        b.top_r = line([sp("enter runs · esc back", DIM)]);
+        b.lead = line([sp("! ", ORANGE)]);
+        b.holder = "a command to run in this folder".into();
+        b.edge = Some(ORANGE);
+    }
     b = b.scrolled();
     // What a click takes on the top edge, where the edge drew it: the
     // permission mode on its right opens what changes it (as #perm),
     // the send mode on its left goes round (as ctrl+t).
     let at = b.edge_at(false);
-    let mut hits = at.place(true, &[(0, b.top_r.width(), EdgeAct::Mode)]);
-    if let Some((f, t)) = send_part {
+    let mut hits = if bang {
+        Vec::new()
+    } else {
+        at.place(true, &[(0, b.top_r.width(), EdgeAct::Mode)])
+    };
+    if let Some((f, t)) = send_part.filter(|_| !bang) {
         hits.extend(at.place(false, &[(f, t, EdgeAct::SendMode)]));
     }
     let c = conn(m, key);
@@ -790,6 +807,9 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
                 ("esc", "back to message"),
             ],
         );
+    }
+    if let Some(h) = super::shellbox::hint(m, key, w, picked) {
+        return h;
     }
     if !picked.is_empty() {
         // The picked row's keys (paneDock's hint, rushmode.go:3792-3830).

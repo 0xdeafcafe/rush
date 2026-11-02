@@ -16,6 +16,13 @@ impl Drawer<'_> {
         let st = self.s.step(id);
         let paused = !st.id.is_empty() && self.o.paused.contains(&*st.id);
         let marks = self.s.part_marks(id, n, self.o.now, paused);
+        self.marks_txt(marks)
+    }
+
+    /// The marks of a chain's commands as drawn beside them. An agent's
+    /// Bash call and a command rush runs itself (shellbox.rs) both draw
+    /// theirs so.
+    pub(crate) fn marks_txt(&mut self, marks: Vec<PartMark>) -> Vec<Txt> {
         let mut out = Vec::with_capacity(marks.len());
         for m in marks {
             out.push(self.mark_txt(m));

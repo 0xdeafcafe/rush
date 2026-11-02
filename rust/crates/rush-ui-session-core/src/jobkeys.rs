@@ -237,7 +237,7 @@ fn waits_on_command(m: &mut Model, key: &str) -> bool {
 /// The processes still running a command of a chain, each with its start
 /// as the system has it (the conversation keeps it to the millisecond):
 /// one gone, or its pid reused, is left out.
-fn live_parts(procs: &[PartProc]) -> Vec<crate::shells::PartProc> {
+pub(crate) fn live_parts(procs: &[PartProc]) -> Vec<crate::shells::PartProc> {
     procs
         .iter()
         .filter_map(|p| {
