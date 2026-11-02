@@ -5,7 +5,7 @@ rush_testenv::sandboxed!();
 // internal/convo/highlight_test.go (TestChanged, TestLangFor, TestCodePrefix,
 // TestHighlightMarkdown's classes).
 
-use rush_hl::code::{changed, code_prefix, line_no};
+use rush_hl::code::{changed, changed_words, code_prefix, line_no};
 use rush_hl::{Class, Lang, State};
 
 type Run = (String, Class);
@@ -343,6 +343,39 @@ fn changed_spans() {
     for &(a, b, want) in cases {
         assert_eq!(changed(a, b), want, "changed({a:?}, {b:?})");
     }
+}
+
+#[test]
+fn changed_words_spans() {
+    let at = |s: &str, sp: &[(usize, usize)]| -> Vec<String> {
+        sp.iter().map(|&(i, j)| s[i..j].to_string()).collect()
+    };
+    let (a, b) = (
+        "pub const EVERY: Duration = from_secs(6 * 60 * 60);",
+        "pub const EVERY: Duration = from_secs(60 * 60);",
+    );
+    let (x, y) = changed_words(a, b).unwrap();
+    assert_eq!(at(a, &x), ["6 * "], "{x:?}");
+    assert!(y.is_empty(), "{y:?}");
+    // Two words apart, each its own span; spaces between joined.
+    let (a, b) = ("let a = one(x, y);", "let b = one(x, z);");
+    let (x, y) = changed_words(a, b).unwrap();
+    assert_eq!(at(a, &x), ["a", "y"]);
+    assert_eq!(at(b, &y), ["b", "z"]);
+    let (a, b) = ("/// far more than this.", "/// once an hour.");
+    let (x, y) = changed_words(a, b).unwrap();
+    assert_eq!(at(a, &x), ["far more than this"]);
+    assert_eq!(at(b, &y), ["once an hour"]);
+    // Nothing in common, or the same: nothing to point out.
+    assert_eq!(changed_words("abc def", "xyz uvw"), None);
+    assert_eq!(changed_words("same", "same"), None);
+    // On character boundaries.
+    let (a, b) = ("héllo wörld", "héllo world");
+    let (x, y) = changed_words(a, b).unwrap();
+    assert_eq!(
+        (at(a, &x), at(b, &y)),
+        (vec!["wörld".to_string()], vec!["world".to_string()])
+    );
 }
 
 #[test]

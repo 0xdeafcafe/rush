@@ -12,6 +12,7 @@ mod cards;
 mod code;
 mod codedoc;
 mod decisions;
+mod diffbox;
 mod draw;
 mod markdown;
 mod needs;
@@ -101,6 +102,7 @@ pub fn marked_code_line(
 }
 
 use crate::model::{Item, Session, StepId};
+pub use draw::diffbox::SIDE_BY_SIDE;
 use draw::{Drawer, message_tool, squeezed, waiting};
 pub(crate) use draw::{glyph_for, hidden};
 pub use shell::Places;

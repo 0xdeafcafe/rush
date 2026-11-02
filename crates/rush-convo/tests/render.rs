@@ -517,10 +517,10 @@ fn edits_draw_as_diffs() {
     let out = text(&Renderer::new().render(&s, &o));
     for want in [
         "✓ ✎ internal/convo/render.go  · +2 −1",
-        "   60       for _, t := range s.Turns {",
-        "   61 −         out = append(out, s.turn(t, o)...)",
-        "   61 +         ls := s.turn(t, o)",
-        "   62 +         out = append(out, ls...)",
+        "60  60       for _, t := range s.Turns {",
+        "61     −         out = append(out, s.turn(t, o)...)",
+        "    61 +         ls := s.turn(t, o)",
+        "    62 +         out = append(out, ls...)",
     ] {
         assert!(out.contains(want), "missing {want:?} in:\n{out}");
     }

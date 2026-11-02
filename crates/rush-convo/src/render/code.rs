@@ -78,6 +78,23 @@ pub(crate) fn paint_code(
     em: Option<Emph>,
     marked: bool,
 ) -> Txt {
+    match em {
+        Some(e) => paint_words(l, st, s, base, &[(e.from, e.to)], e.on, marked),
+        None => paint_words(l, st, s, base, &[], Color::Default, marked),
+    }
+}
+
+/// paint_code with any number of spans (byte offsets, in order) drawn on
+/// ground on: a diff line's changed words.
+pub(crate) fn paint_words(
+    l: Option<&Lang>,
+    st: &mut HlState,
+    s: &str,
+    base: Style,
+    ems: &[(usize, usize)],
+    on: Color,
+    marked: bool,
+) -> Txt {
     let mut out = Txt::new();
     if s.is_empty() {
         return out;
@@ -88,16 +105,15 @@ pub(crate) fn paint_code(
         while i < j {
             let mut k = j;
             let mut sty = style;
-            if let Some(e) = em {
-                let on = i >= e.from && i < e.to;
-                if on {
-                    sty.bg = e.on;
+            for &(from, to) in ems {
+                if i >= from && i < to {
+                    sty.bg = on;
                 }
-                if i < e.from && e.from < k {
-                    k = e.from;
+                if i < from && from < k {
+                    k = from;
                 }
-                if i < e.to && e.to < k {
-                    k = e.to;
+                if i < to && to < k {
+                    k = to;
                 }
             }
             if marked {

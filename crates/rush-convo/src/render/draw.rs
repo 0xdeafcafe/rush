@@ -50,8 +50,12 @@ use rush_core::event::{Exchange, Peer};
 use rush_core::tool::{Call, Kind, Output};
 
 pub(crate) mod chain;
+pub(crate) mod diffbox;
 pub(crate) mod presets;
 pub(crate) mod shellbox;
+
+/// Rows of lines an edit's diff shows in Normal until opened.
+const DIFF_CAP: usize = 30;
 
 fn re(s: &str) -> Regex {
     Regex::new(s).expect("a valid pattern")
@@ -3617,142 +3621,23 @@ impl<'a> Drawer<'a> {
         rest.join("\n")
     }
 
-    /// An edit's change as a diff: line numbers, each side highlighted, the
-    /// words that changed in a pair picked out (render.go:3916).
+    /// An edit's change in its box (draw/diffbox.rs): a long one shows its
+    /// first rows until opened, whole in verbose or opened by hand.
     fn diff(&mut self, id: StepId, indent: usize) -> bool {
-        let info = self.info(id);
-        let o = &info.out;
-        let lg = lang_for(&info.call.input.path);
-        let pad = self.sp(indent - 1);
-        let w = (self.cw as isize - indent as isize - 9).max(0) as usize;
-        let verbose = self.o.verbose || self.force_open;
-        if o.created {
-            let mut hs = HlState::default();
-            let content = info.call.input.content.trim_end_matches('\n');
-            let lines: Vec<&str> = content.split('\n').collect();
-            for (i, l) in lines.iter().enumerate() {
-                if i >= 30 && !verbose {
-                    let t = pad.clone().and(faint(&format!(
-                        "  … {} more lines · ctrl+o shows the rest",
-                        lines.len() - i
-                    )));
-                    self.add("", BG_WELL, t, Txt::new());
-                    break;
-                }
-                self.diff_line(pad.clone(), w, lg, &mut hs, '+', i + 1, l, "", false);
-            }
-            return true;
-        }
-        if o.patches.is_empty() {
-            return false;
-        }
-        let mut shown = 0;
-        let rest = |d: &mut Self| {
-            let t = pad.clone().and(faint("  … ctrl+o shows the rest"));
-            d.add("", BG_WELL, t, Txt::new());
-        };
-        for (pi, p) in o.patches.iter().enumerate() {
-            if pi > 0 {
-                let t = pad.clone().and(faint("  ⋯"));
-                self.add("", BG_WELL, t, Txt::new());
-            }
-            let (mut old_st, mut new_st) = (HlState::default(), HlState::default());
-            let (mut old_n, mut new_n) = (p.old_start.max(0) as usize, p.new_start.max(0) as usize);
-            let ls = &p.lines;
-            let mut i = 0;
-            while i < ls.len() {
-                if ls[i].starts_with('-') {
-                    let mut j = i;
-                    while j < ls.len() && ls[j].starts_with('-') {
-                        j += 1;
-                    }
-                    let mut k = j;
-                    while k < ls.len() && ls[k].starts_with('+') {
-                        k += 1;
-                    }
-                    let (dels, adds) = (&ls[i..j], &ls[j..k]);
-                    for (n, l) in dels.iter().enumerate() {
-                        if shown >= 30 && !verbose {
-                            rest(self);
-                            return true;
-                        }
-                        shown += 1;
-                        let pair = adds.get(n).map_or("", |a| &a[1..]);
-                        self.diff_line(
-                            pad.clone(),
-                            w,
-                            lg,
-                            &mut old_st,
-                            '-',
-                            old_n,
-                            &l[1..],
-                            pair,
-                            n < adds.len(),
-                        );
-                        old_n += 1;
-                    }
-                    for (n, l) in adds.iter().enumerate() {
-                        if shown >= 30 && !verbose {
-                            rest(self);
-                            return true;
-                        }
-                        shown += 1;
-                        let pair = dels.get(n).map_or("", |a| &a[1..]);
-                        self.diff_line(
-                            pad.clone(),
-                            w,
-                            lg,
-                            &mut new_st,
-                            '+',
-                            new_n,
-                            &l[1..],
-                            pair,
-                            n < dels.len(),
-                        );
-                        new_n += 1;
-                    }
-                    i = k;
-                    continue;
-                }
-                if shown >= 30 && !verbose {
-                    rest(self);
-                    return true;
-                }
-                shown += 1;
-                let l = if ls[i].is_empty() {
-                    " "
-                } else {
-                    ls[i].as_str()
-                };
-                if let Some(code) = l.strip_prefix('+') {
-                    self.diff_line(pad.clone(), w, lg, &mut new_st, '+', new_n, code, "", false);
-                    new_n += 1;
-                    i += 1;
-                    continue;
-                }
-                let code = &l[l.chars().next().map_or(0, char::len_utf8)..];
-                let hl = highlight(lg, &mut new_st, &expand_tabs(code), C_SUB, None);
-                for (k, r) in self.code_rows(&hl, w, 6).into_iter().enumerate() {
-                    let t = if k == 0 {
-                        pad.clone()
-                            .and(faint(&format!("{new_n:>5} ")))
-                            .and_raw("  ")
-                            .and(r)
-                    } else {
-                        pad.clone().and(blanks(8)).and(r)
-                    };
-                    self.add("", BG_WELL, t, Txt::new());
-                    if k > 0 {
-                        self.wrapped();
-                    }
-                }
-                old_st = new_st;
-                old_n += 1;
-                new_n += 1;
-                i += 1;
-            }
-        }
-        true
+        let r = self.step_ref(self.s.step(id));
+        let all = format!("{r}:all");
+        self.diff_box(&diffbox::BoxSpec {
+            ids: &[id],
+            indent,
+            head_ref: "",
+            fold_ref: &r,
+            all_ref: &all,
+            bare: false,
+            note: "",
+            counts: None,
+            cap: DIFF_CAP,
+            whole: self.o.verbose || self.force_open,
+        })
     }
 
     /// One added or removed line at number n, the words that changed from

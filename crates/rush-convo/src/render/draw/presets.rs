@@ -26,8 +26,8 @@ use super::*;
 use crate::decisions::decisions_in;
 use crate::shellbox::{BoxRef, Piece, ShellBlock, ShellRun, pieces};
 
-/// Diff rows a file shows in Code before "enter opens the whole diff".
-const CODE_CAP: usize = 12;
+/// Rows of lines a file's diff shows in Code until opened.
+const CODE_CAP: usize = 40;
 /// The width of a catch-up card's labels ("Said to you ").
 const LABEL_W: usize = 14;
 /// The most turns a catch-up card covers.
@@ -1089,95 +1089,27 @@ impl Drawer<'_> {
         }
     }
 
-    /// A file's row and its diff: CODE_CAP rows of it until opened (its
-    /// row's ref), whole once it is.
+    /// A file's diff in its box, the box's top edge its row: CODE_CAP rows
+    /// of lines until opened (its row's ref, or "▸ show all"), whole once
+    /// it is.
     fn code_file(&mut self, k: usize, f: &FileEdits) {
         let r = format!("{}:file:{k}", self.r);
         let open = self.o.open.get(&r).copied().unwrap_or(false);
-        let name = self.file_link(&f.path, text(&self.p.rel(&f.path)));
-        let right = if f.note.is_empty() {
-            Self::add_del(f.add, f.del).and_raw("  ")
-        } else {
-            dim(f.note).and_raw("  ")
-        };
-        let l = self.sp(1).and(name);
-        let room = self.cw.saturating_sub(right.width() + 3);
-        let l = l.truncate(room, &faint("…"));
+        let all = format!("{r}:all");
         let from = self.lines.len();
-        self.add(&r, Color::Default, l, right);
-        if !f.note.is_empty() && f.note != "notebook" {
-            return;
-        }
-        let rows_at = self.lines.len();
-        self.force_open = open;
-        for (j, &id) in f.ids.iter().enumerate() {
-            if j > 0 {
-                let t = self.sp(2).and(faint("  ⋯"));
-                self.add("", BG_WELL, t, Txt::new());
-            }
-            if !self.diff(id, 3) {
-                self.bare_edit(id);
-            }
-        }
-        self.force_open = false;
-        let n = self.lines.len() - rows_at;
-        if n > CODE_CAP && !open {
-            self.lines.truncate(rows_at + CODE_CAP);
-            let l = self
-                .sp(2)
-                .and(faint(&format!(
-                    "  … {} more line{}",
-                    n - CODE_CAP,
-                    if n - CODE_CAP == 1 { "" } else { "s" }
-                )))
-                .and(dim("  (enter opens the whole diff)"));
-            self.add(&r, Color::Default, l, Txt::new());
-        } else if open && n > CODE_CAP {
-            let l = self.sp(2).and(faint("  ▴ enter folds it"));
-            self.add(&r, Color::Default, l, Txt::new());
-        }
+        self.diff_box(&super::diffbox::BoxSpec {
+            ids: &f.ids,
+            indent: 2,
+            head_ref: &r,
+            fold_ref: &r,
+            all_ref: &all,
+            bare: true,
+            note: f.note,
+            counts: Some((f.add, f.del)),
+            cap: CODE_CAP,
+            whole: open,
+        });
         self.own(&r, from);
-    }
-
-    /// An edit with no patch to show: what it replaced, old over new.
-    fn bare_edit(&mut self, id: StepId) {
-        let info = self.info(id);
-        let lg = lang_for(&info.call.input.path);
-        let pad = self.sp(2);
-        let w = self.cw.saturating_sub(12);
-        let put = |d: &mut Self, sign: char, s: &str| {
-            let (bg, mark) = if sign == '-' {
-                (BG_DEL, minus_sign())
-            } else {
-                (BG_ADD, plus_sign())
-            };
-            let mut hs = HlState::default();
-            for l in s.trim_end_matches('\n').split('\n') {
-                let hl = super::super::code::paint_code(
-                    lg,
-                    &mut hs,
-                    &expand_tabs(l),
-                    C_TEXT,
-                    None,
-                    false,
-                );
-                let row = hl.truncate(w, &faint("›"));
-                let t = pad
-                    .clone()
-                    .and(blanks(6))
-                    .and(mark.clone())
-                    .and_raw(" ")
-                    .and(row);
-                d.add("", bg, t, Txt::new());
-            }
-        };
-        for e in &info.call.input.edits {
-            put(self, '-', &e.old);
-            put(self, '+', &e.new);
-        }
-        if info.call.input.edits.is_empty() && !info.call.input.content.is_empty() {
-            put(self, '+', &info.call.input.content);
-        }
     }
 
     /// A check as one line: how it came out, its command, what it said

@@ -236,7 +236,10 @@ fn snapshot(name: &str, got: &str) {
         return;
     }
     let want = std::fs::read_to_string(&p).unwrap();
-    assert_eq!(got, want, "{name} differs; UPDATE_SNAPSHOTS=1 to accept");
+    assert!(
+        got == want,
+        "{name} differs; UPDATE_SNAPSHOTS=1 to accept\n=== {name} drawn ===\n{got}=== end {name} ==="
+    );
 }
 
 #[test]
@@ -362,16 +365,15 @@ fn code_shows_each_turns_diffs_and_checks() {
         "the diff: {got}"
     );
     assert!(got.contains("src/question.rs"), "{got}");
-    // A long diff is cut, and opens whole.
-    let cap = got
+    // A file's box: its top edge the file's row, its edits in it.
+    let top = got
         .lines()
-        .find(|l| l.contains("enter opens the whole diff"))
+        .find(|l| l.contains("╭─ src/question.rs"))
         .expect(got.as_str());
-    let r = cap.split('|').next().unwrap().trim();
-    assert_eq!(r, "t1:file:1");
-    assert!(!got.contains("fn e() { d() }"), "{got}");
-    let open = draw(&s, Preset::Code, &[r]);
-    assert!(open.contains("fn e() { d() }"), "{open}");
+    assert_eq!(top.split('|').next().unwrap().trim(), "t1:file:1");
+    assert!(top.contains("+7 −4"), "{top}");
+    assert!(got.contains("fn e() { d() }"), "{got}");
+    assert!(got.contains("// w wraps each option"), "{got}");
     // A check a line: how it came out, what it said, how long it took.
     let clippy = got.lines().find(|l| l.contains("cargo clippy")).unwrap();
     assert!(
