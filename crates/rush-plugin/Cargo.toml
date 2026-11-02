@@ -17,3 +17,8 @@ libc = "0.2"
 [dev-dependencies]
 rush-testenv = { path = "../rush-testenv" }
 tempfile = "3"
+criterion.workspace = true
+
+[[bench]]
+name = "rpc"
+harness = false
