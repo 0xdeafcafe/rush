@@ -16,13 +16,13 @@
     Clean up done work after                 ‹ 3h              ›
     Orphaned processes                       ‹ end             ›
     When rush is installed again             ‹ ask             ›
-
   Hibernate finished agents
 
   A finished agent's process stays in memory (often 300–800 MB) until it is stopped. Hibernating stops it; the
   conversation is kept and enter resumes it.
 
   off: finished agents stay in memory until you stop them (ctrl+x).
+
 
 
 
