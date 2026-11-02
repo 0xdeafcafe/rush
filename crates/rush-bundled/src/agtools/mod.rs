@@ -6,7 +6,8 @@
 //! at a time (remind.rs). An agent that only runs MCP servers as processes
 //! runs `rush mcp-tools`: serve.
 //! Ported from internal/agtools/agtools.go:1-320 (the view tool's words
-//! as of 66b8fb4e).
+//! as of 66b8fb4e, since given the rules agents missed most: the chat
+//! and the room).
 
 mod agents;
 mod remind;
@@ -85,7 +86,7 @@ The drawing is shown as-is: plain text, no markdown, no fences."
 fn view_tool() -> Tool {
     Tool {
         name: "view".into(),
-        description: "Keep a live view of your work in rush's panel beside the chat: state that changes while you work (test or build runs and their numbers, benchmarks, progress through a list, PRs and checks, migrations, services, incidents). Not for plans, summaries or what your reply says; rush shows subagents itself. Make one when such work starts, set it again (same name) on each change, clear it when done. Left alone 10 min it greys; after 45 min or 3 turns it is put away. Rows take click actions that message you. `rush view guide` has every field; `rush view example <name>` samples."
+        description: "Keep a live view of your work in rush's panel beside the chat: state that changes while you work (test or build runs and their numbers, benchmarks, progress through a list, PRs and checks, migrations, services, incidents). Not for plans, summaries or what your reply says; rush shows subagents itself. Make one when such work starts, set it again (same name) on each change, clear it when done. Asked for status or stats, answer here and keep the chat to a line pointing at it, never the same table in both. About 46 columns: row text under 30, meta under 20, tables of 2 or 3 short columns. Left alone 10 min it greys; after 45 min or 3 turns it is put away. Rows take click actions that message you. `rush view guide` has every field; `rush view example <name>` samples (branches, before-after, test-run, prs)."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -93,7 +94,7 @@ fn view_tool() -> Tool {
                 "name": { "type": "string", "description": "The view's name, lowercase and dashes: prs, tests, search. The same name again replaces it." },
                 "view": { "type": "object", "description": concat!(
                     r#"{"title", "summary" (3-6 words for rush's list), "accent", "tone", "progress": {done, total, label}, "#,
-                    r#""stats": [{value, label, tone, trend}], "blocks": [{"kind", "title", "tone", "folded", ...}], "note"}. "#,
+                    r#""stats": [{value, label, tone, trend: [numbers, oldest first]}], "blocks": [{"kind", "title", "tone", "folded", ...}], "note"}. "#,
                     r#"Kinds: table {columns, items:[{cells}]}, kv, checklist {items:[{text, done}]}, log, list, bars, chart {values, style}, "#,
                     r#"heatmap, compare, steps, timeline, board, tree, hero, callout, code, text, stats, progress. Items: "#,
                     r#"{text, meta, tone, detail, actions}. Tones: good bad warn busy quiet. Fields per kind: `rush view guide`."#,
