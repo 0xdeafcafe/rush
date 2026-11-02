@@ -16,6 +16,11 @@ use crate::frame::Out;
 use crate::model::Model;
 use crate::worker::Note;
 
+/// The least time between two readings a followed run's writes bring
+/// about: one streaming writes many times a second, and each reading
+/// looks at every run.
+const GAP: std::time::Duration = std::time::Duration::from_millis(150);
+
 /// The run followed: its id, the file waited on, and what ends the wait
 /// (closed when this goes). No wait with no loop (tests): woken by hand.
 pub struct Follow {
@@ -97,6 +102,11 @@ fn start(tx: Option<rush_draw::Sender<Note>>, key: &str, id: String, path: Strin
                 let _ = w.changes();
                 let (k, i) = (k.clone(), i.clone());
                 if !tx.send(Note::Apply(Box::new(move |m: &mut Model| woke(m, &k, &i)))) {
+                    return;
+                }
+                // Rust-only: what it writes in the next GAP is taken in one
+                // reading (the watch holds it), not a reading a write.
+                if st.wait(GAP) {
                     return;
                 }
             }

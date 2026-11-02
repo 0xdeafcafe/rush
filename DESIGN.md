@@ -2582,6 +2582,21 @@ Go rush is gone from the tree; its last version is the `go-final` tag
   and This chat: only the hits a section shows, with a memo kept from key
   to key and a vocabulary of the words typos are looked for among, made
   on another thread as the bar opens) checked hit for hit against it.
+- A run followed while it writes (Rust-only): the Subagents tab's picked
+  run woke a reading of every run on each write, many a second
+  (rush-ui-session-core `subfollow.rs`); now what it writes in the next
+  150 ms comes in one reading. A run read whole for the UI (an agent
+  rush hosted for the session, or every run while Changes is open) was
+  read again on every write, and as the UI holds the last reading each
+  one copied the whole conversation first; it's now read again once a
+  second at most (`subs.rs` FULL_EVERY). A transcript's tail reads into
+  a buffer the size of what it gained rather than 64 KB a time, a list
+  of runs no longer copies each run's meta twice to list it, and the
+  pages of runs let go are given back to the system. `cargo bench -p
+  rush-convo --bench follow` (a run of 2,642 lines, 18 MiB, written ten
+  a second, 2026-11-02): read on each write 233 → 84 MiB allocated in
+  36,866 allocations; read whole and shared each write 6,280,862
+  allocations and 2,011 MiB, once a second 661,372 and 303 MiB.
 - A drawn run's text (`rush_core::text::Span::text`) is a
   `CompactString` (Rust-only): up to 24 bytes held in place, so a glyph,
   a word or a time is made and copied without the heap, and a turn's

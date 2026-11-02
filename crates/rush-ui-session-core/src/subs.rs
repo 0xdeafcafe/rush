@@ -167,6 +167,9 @@ pub const DOCK_RUNS_SHOWN: usize = 5;
 const READ_EVERY: Ms = 1000;
 /// How often a workflow's files are read while it runs.
 const FLOW_EVERY: Ms = 2000;
+/// How often a run read whole (an agent rush hosted for the session, or
+/// every run while Changes is open) is read again as it grows.
+const FULL_EVERY: Ms = 1000;
 
 /// What a run's transcript says, for its row (Go's light SubagentStats
 /// session): what it's doing and since when, what it did last, its last
@@ -408,7 +411,8 @@ pub struct Reader {
     /// Each run read whole for Changes, by id: how big its transcript
     /// was when read (fullSubs), and, one in Claude Code's format, its
     /// tail and the session it's read on into, shared with the UI.
-    full: HashMap<String, (u64, Option<ReadOn>)>,
+    /// When it was last read, too (FULL_EVERY).
+    full: HashMap<String, (u64, Ms, Option<ReadOn>)>,
     /// The process table last read, for CPU; let go when nothing's open.
     table: Option<rush_sys::proc::Table>,
 }
@@ -661,8 +665,10 @@ impl Ask {
             // subagents view closed, a finished run off the dock) isn't
             // kept read: each is a whole conversation, and a session can
             // have hundreds. Its numbers stay; it's read again if asked.
+            let before = r.tails.len();
             r.tails
                 .retain(|id, _| self.stats.iter().any(|(want, _)| want == id));
+            let mut let_go = r.tails.len() != before;
             for (id, path) in &self.stats {
                 let kind = self
                     .kinds
@@ -675,12 +681,23 @@ impl Ask {
                     now: self.now,
                     calls: &self.calls,
                 };
-                let (f, st) =
-                    follow_run(r.tails.remove(id), path, self.whole.contains(id), &how, &ag);
+                let was = r.tails.remove(id);
+                let was_let = match &was {
+                    Some(Followed::Let { size, .. }) => Some(*size),
+                    _ => None,
+                };
+                let (f, st) = follow_run(was, path, self.whole.contains(id), &how, &ag);
+                // A conversation read whole, or read on, and let go.
+                let_go |= matches!(&f, Followed::Let { size, .. } if Some(*size) != was_let);
                 r.tails.insert(id.clone(), f);
                 if let Some(st) = st {
                     got.stats.insert(id.clone(), st);
                 }
+            }
+            if let_go {
+                // What those held goes back to the system, not kept by the
+                // allocator for the next (Rust-only).
+                rush_sys::mem::give_back();
             }
         }
         // The runs read whole, again only once each grew: one in Claude
@@ -692,10 +709,16 @@ impl Ask {
             .retain(|id, _| self.full.iter().any(|(want, ..)| want == id));
         for (id, path, whole, kind) in &self.full {
             let size = std::fs::metadata(path).map_or(0, |m| m.len());
-            if r.full.get(id).is_some_and(|(at, _)| *at == size) {
+            // Rust-only: one that grew is read again FULL_EVERY at most,
+            // not on every write: the UI holds what it read, so each
+            // reading copies it whole first.
+            if r.full
+                .get(id)
+                .is_some_and(|(at, when, _)| *at == size || self.now - *when < FULL_EVERY)
+            {
                 continue;
             }
-            let kept = r.full.remove(id).and_then(|(_, k)| k);
+            let kept = r.full.remove(id).and_then(|(_, _, k)| k);
             let mut tailed = None;
             let s = if !kind.is_empty() {
                 read_history(reg, kind, path).map(Arc::new)
@@ -718,7 +741,7 @@ impl Ask {
             } else {
                 None
             };
-            r.full.insert(id.clone(), (size, tailed));
+            r.full.insert(id.clone(), (size, self.now, tailed));
             // One that can't be read isn't asked again until it grows.
             got.full.insert(id.clone(), s.unwrap_or_default());
         }
