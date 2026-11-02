@@ -1,0 +1,5 @@
+  00:00  You        ask astra
+  00:00  ├ tool     ToolSearch                                       ████████████    1.0s
+  00:00  ├ agent    heard from Codex                                 ████████████    1.0s
+  00:00  └ reply    "astra is done."
+         turn 6s · thinking 4.0s · tools 2.0s · waiting on you 0

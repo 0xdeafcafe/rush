@@ -1,0 +1,9 @@
+
+▍ You  00:00
+▍ start sol on the parser
+
+▍ Agent  00:00
+│   ✳ ⧉ starting sol as its own session  Port the parser                                      3.0s
+
+▍   · starting sol…  3.0s  turn 4.0s
+

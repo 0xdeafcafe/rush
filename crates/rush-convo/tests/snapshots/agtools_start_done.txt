@@ -1,0 +1,13 @@
+
+▍ You  00:00
+▍ start sol on the parser
+
+▍ Agent  00:00
+│   ✓ ⧉ started sol as its own session  Port the parser                                       1.0s
+│       ▏sol started as session s9, beside yours in the user's list. Its answer isn't sent to
+│       ┊  you: agent_send with this id messages it, agent_result asks how it stands.
+▍
+▍ Started sol on the parser.
+
+▍   · waiting for the agent…  4.0s
+

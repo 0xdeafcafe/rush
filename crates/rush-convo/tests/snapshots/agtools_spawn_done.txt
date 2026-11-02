@@ -1,0 +1,12 @@
+
+▍ You  00:00
+▍ ask astra to review it
+
+▍ Agent  00:00
+▍   ✓ ⇉ astra  · 1 step                                                                     2m 50s
+▍       ▏No races found.
+▍       ▏One nit in view.rs.
+▍   ╰ ✓ ◧ /work/rush/src/view.rs                                                              1.0s
+
+▍   · working out what's next…  1.0s  turn 2m 52s
+

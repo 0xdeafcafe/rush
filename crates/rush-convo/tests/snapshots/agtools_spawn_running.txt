@@ -1,0 +1,10 @@
+
+▍ You  00:00
+▍ ask astra to review it
+
+▍ Agent  00:00
+▍   ✳ ⇉ astra  · 1 step                                                         2m 09s since 00:00
+▍   ╰ ✳ ◧ /work/rush/src/view.rs                                                2m 08s since 00:00
+
+▍   · asking astra (Codex)…  2m 09s  turn 2m 10s
+

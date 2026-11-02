@@ -1,0 +1,13 @@
+
+▍ You  00:00
+▍ ask astra to review it
+
+▍ Agent  00:00
+▍   ✳ ⇉ Review the diff for races Repo: here. · astra  · 1 step                 2m 09s since 00:00
+▍   ╰ ✳ ◧ src/view.rs                                                           2m 08s since 00:00
+│   ✓ → astra  Look at view.rs too                                                            1.0s
+│   ✳ ◌ waiting on astra                                                        2m 05s since 00:00
+│       now · reading view.rs
+
+▍   · waiting on astra (Codex)…  2m 05s  turn 2m 10s
+
