@@ -49,15 +49,20 @@ impl Unreached {
 pub fn open(id: &str, wait: Duration) -> Result<Client, Unreached> {
     let deadline = Instant::now() + wait;
     let mut watch: Option<Watch> = None;
+    let mut cut_once = false;
     loop {
         let err = match Client::dial(id) {
             Ok(c) => return Ok(c),
             Err(e) => e,
         };
-        let refused = match &err {
+        use std::io::ErrorKind as K;
+        let (refused, cut) = match &err {
             ClientError::Io(e) => match e.kind() {
-                std::io::ErrorKind::ConnectionRefused => true,
-                std::io::ErrorKind::NotFound => false,
+                K::ConnectionRefused => (true, false),
+                K::NotFound => (false, false),
+                // Taken, then let go before its hello: a host coming up
+                // or going.
+                K::BrokenPipe | K::ConnectionReset => (false, true),
                 _ => return Err(Unreached::Failed(err)),
             },
             _ => return Err(Unreached::Failed(err)),
@@ -69,6 +74,12 @@ pub fn open(id: &str, wait: Duration) -> Result<Client, Unreached> {
             }
             return Err(Unreached::Stopped(info.map(gone)));
         };
+        // A host that's up and cut the hello off is dialled again once at
+        // once: its folder may not change again to wake a wait.
+        if cut && !cut_once {
+            cut_once = true;
+            continue;
+        }
         let now = Instant::now();
         if now >= deadline {
             return Err(Unreached::Silent(err));
@@ -183,9 +194,32 @@ mod tests {
 
     /// A socket file with nothing listening: what a host that ended
     /// without tidying leaves.
+    /// Bound but never listened on: a listener bound and dropped here
+    /// can live on for a moment in a process another test forks (before
+    /// its exec closes it), and take a dial meant to be refused.
     fn left_socket(id: &str) {
-        drop(UnixListener::bind(sock_path(id)).unwrap());
-        assert!(sock_path(id).exists());
+        use std::os::unix::ffi::OsStrExt;
+        let path = sock_path(id);
+        // SAFETY: a new socket of ours, bound to a path that fits
+        // sun_path (checked), then closed.
+        unsafe {
+            let fd = libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0);
+            assert!(fd >= 0, "{}", std::io::Error::last_os_error());
+            libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
+            let mut addr: libc::sockaddr_un = std::mem::zeroed();
+            addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
+            let b = path.as_os_str().as_bytes();
+            assert!(b.len() < addr.sun_path.len(), "{}", path.display());
+            for (d, s) in addr.sun_path.iter_mut().zip(b) {
+                *d = *s as libc::c_char;
+            }
+            let len = std::mem::size_of::<libc::sockaddr_un>() as libc::socklen_t;
+            let r = libc::bind(fd, (&raw const addr).cast(), len);
+            let e = std::io::Error::last_os_error();
+            libc::close(fd);
+            assert_eq!(r, 0, "{e}");
+        }
+        assert!(path.exists());
     }
 
     /// A process of this test's that runs until killed: a host's pid.
