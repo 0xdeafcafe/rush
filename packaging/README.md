@@ -1,7 +1,7 @@
 # Packaging
 
-`.github/workflows/release.yml` builds rush for macOS (Apple silicon and
-Intel) and Linux (x86_64 and arm64). Every night main changed it replaces
+`.github/workflows/release.yml` builds rush for Macs with Apple silicon
+only. Every night main changed it replaces
 the `nightly` prerelease; a `v*` tag makes a release and updates the
 Homebrew formula.
 

@@ -19,7 +19,7 @@
 brew install 0xdeafcafe/tap/rush
 ```
 
-use the full name: homebrew/core has a different `rush` (gnu's restricted shell), and plain `brew install rush` gets that one. builds are there for macos (apple silicon and intel) and linux (x86_64 and arm64).
+use the full name: homebrew/core has a different `rush` (gnu's restricted shell), and plain `brew install rush` gets that one. it runs on macs with apple silicon only.
 
 or build it from source, with rust (stable) and cargo:
 
