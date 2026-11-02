@@ -2123,6 +2123,140 @@ process group as before. A finished run's output is kept in the JSON
 and its files go once that's written. Tests stand a fake in for the
 shell (`shellbox::set_fake`), which also keeps nothing on disk.
 
+## The context guard (Rust-only)
+
+A bundled plugin, `context-guard` (rush-bundled `contextguard/`), on by
+default, that steps into an agent's tool calls through its hooks to keep
+what goes into its context lean. Four rules, each its own setting
+(Settings › Plugins › context-guard, all on by default). Each step-in is
+logged in the session's events (`hook-denied` with `rule`, `why`,
+`tool`, `path` or `command`; `hook-squeezed` with `before`, `after`,
+`cut`), so `rush why <session>` and `rush events -k hook-denied` show
+what rush did and why.
+
+```
+  agent ── Read ──▶ PreToolUse ─┐                     ┌─ deny + why
+  agent ── Bash ──▶ PreToolUse ─┼─▶ rush gate hook ───┤
+  (ran) ──────────▶ PostToolUse ┤   context guard     ├─ output squeezed
+  (failed) ───────▶ ...Failure ─┤   first, then the   └─ nothing
+  compact/clear ──▶ PreCompact, ┘   search guard, gate
+                    SessionStart
+```
+
+How. `StartOptions.tool_hook` (rush-core) is a command for rush's
+context guard; the host sets it to `rush gate hook`, the gate's own
+command. A harness with hooks installs it: Claude Code's
+`conn::context_hooks` adds PreToolUse `Read`, PostToolUse
+`Read|Bash|Edit|Write|MultiEdit|NotebookEdit`, PostToolUseFailure `Bash`,
+PreCompact `*` and SessionStart `compact|clear`, beside the inbox's
+hooks; before a Bash call the gate's own PreToolUse hook asks it.
+`gate_hook` hands every input to `Host::context_step` first; the guard's
+answer wins, and hooks after a call are never the gate's to rewrite.
+After a Bash call the guard is given the command the agent asked for
+(`hook::original`: the gate's wrap undone, a script run read back from
+its script), not what ran in its place. The rules are pure functions
+(`contextguard::rules`, `squeeze`); `contextguard::hook` reads the file
+and the session's state (`<rush home>/context-guard/<session>.json`,
+flock'd, as hooks for calls made at once run at once; let go after a week
+untouched). The guard reads its switches at every hook, so turning a rule
+off works at once, in running sessions too.
+
+What it keeps is per agent: the main conversation, or a subagent by its
+`agent_id`, as a subagent's context is its own.
+
+**1. No re-reading unchanged files** (`reread`). A Read of a file the
+same agent already read, the same lines or more (a whole read, or a
+same-or-larger offset+limit), with the file unchanged since (size and
+mtime, and an FNV-1a hash of its content when it's 256 KB or less), is
+refused: `context-guard: <path> is unchanged since you read it at
+14:03:12 (all of it). Use what that read gave you…`. Never for a file
+changed since, one the agent edited since (any Edit, Write, MultiEdit,
+NotebookEdit forgets the read), after a compaction (PreCompact forgets
+that agent's reads; SessionStart `compact` everyone's, `clear` all), for
+a file under 2 KB (refusing costs about what reading does), or for an
+image, PDF or notebook. A read is taken note of after it went through
+(PostToolUse), so one refused by anything else isn't counted. A read
+with no limit covers 2,000 lines (Claude Code's Read), the file's end
+when it has fewer.
+
+Data (1,500 recent Claude Code transcripts on the machine rush is worked
+on, 19,611 reads): 40% of what reads put in context was a whole file
+read again by the same transcript with no edit of it between (by
+the transcript alone: some of those files had changed on disk, which the
+rule checks); 39% of whole reads were of files under 2 KB. Claude Code
+2.1.316 itself already answers a read of exactly the same offset and
+limit of an unchanged file with a short "File unchanged" stub; the guard
+adds a smaller range inside one read before, works per subagent, and
+works for any harness that runs hooks.
+
+**2. No reading huge files whole** (`big-read`). A Read with no offset
+and no limit of a text file over **1,000 lines or 48 KB** is refused once
+per file per agent, steering to `rg -n <pattern> <path>` and
+offset/limit; asked again, the whole read goes through. Images, PDFs and
+notebooks (by name, or a NUL in the first 8 KB) are left alone. Data
+(the same transcripts): whole reads' p50 is 83 lines (2.9 KB), p95 611
+lines (20 KB), p99 853 lines (36 KB); reads over 1,000 lines are 0.5% of
+whole reads but 4.1% of all read text, over 50 KB 3.2%. Claude Code's own
+Read stops at 2,000 lines and refuses past 25k tokens, so the guard's
+line sits well under where the harness steps in.
+
+**3. Stopping repeat failures** (`repeat-fail`). Each agent's last shell
+command and how it ended: PostToolUse is a success, PostToolUseFailure a
+failure whose exit (`Exit code N`, else "error") and output's end (its
+last 12 non-blank lines, terminal codes out, digits as 0, spaces single,
+so timings and ids don't count) are kept. The same command (words
+single-spaced) failing the same way **3 times in a row**, with no edit in
+between, has its 4th run refused: `context-guard: this command failed
+the same way 3 times in a row (exit 1, the same output)… change something
+first`. Any edit, a success, another command, or another outcome starts
+over; an interrupt counts for nothing. Asked again straight after the
+refusal, it runs (something may have changed that rush can't see). Data:
+of 131,735 Bash calls, 7 were the 4th or later identical failure in a
+row: rare, but each is a turn spent for nothing.
+
+**4. Squeezing command output** (`squeeze`). Claude Code 2.1.316's
+PostToolUse hook may answer `updatedToolOutput`, which "replaces the tool
+output before it is sent to the model" for any tool, checked against the
+tool's output shape (a mismatch keeps the original). So a Bash call runs
+exactly as asked (its exit code, pipes and redirects untouched) and only
+what the agent reads changes: `stdout` and `stderr` replaced, every other
+field kept. A failed call (PostToolUseFailure) can't be replaced and is
+left as it is. What `squeeze` does, deterministic, and twice is the same
+as once:
+
+- terminal codes out (CSI colours and cursor moves, OSC titles, charset
+  switches);
+- a carriage-return redraw (progress bars, spinners) down to its last
+  state; CRLF to LF;
+- spaces at line ends out; runs of blank lines made one, none at the
+  start or end;
+- a line repeated in a row written once with ` (×N)`, where that's
+  shorter;
+- past **600 lines**, the first and last **200** kept around `… K lines
+  left out (the whole output: <path>) …`, the whole (squeezed) output in
+  `$TMPDIR/rush-output/<tool_use_id>.out.txt` (the session's scratch
+  folder), for the agent to read if it needs it.
+
+Never squeezed: output that's a file's own text or a patch, whose exact
+spaces an Edit needs (`cat`, `head`, `tail`, `sed`, `awk`, `nl`, `diff`,
+`jq`, `grep`/`rg`/`ag`, `cut`, `tr`, `printf`…, `git
+diff/show/blame/cat-file/grep`, `git log -p`, `git stash show`, anywhere
+in the command), an image, output Claude Code already kept in a file
+(`persistedOutputPath`), a background task's, and never a Read: Read
+results are never touched. A squeeze is logged when it saved 1 KB or cut.
+
+Measured (`squeeze::tests::measured_on_fixtures`, testdata/; tokens as
+bytes / 4):
+
+| output | bytes before | after | tokens before | after | saved |
+|---|---|---|---|---|---|
+| cargo build (105 crates, a progress bar, 12 warnings) | 16,168 | 5,542 | 4,042 | 1,386 | 66% |
+| cargo test (240 tests, 1 failing) | 11,815 | 9,618 | 2,954 | 2,405 | 19% |
+| npm install (spinner, deprecation warnings) | 34,414 | 325 | 8,604 | 82 | 99% |
+| git log --oneline --color (60 commits) | 3,153 | 2,646 | 789 | 662 | 16% |
+| pytest (412 tests, coloured) | 1,755 | 1,397 | 439 | 350 | 20% |
+| a download's progress bar (curl -#) | 80,081 | 80 | 20,021 | 20 | 99.9% |
+
 ## Panics
 
 Release builds unwind (`panic = "unwind"`), so one thread's panic ends
