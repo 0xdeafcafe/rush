@@ -1961,3 +1961,15 @@ fn readings_keep_what_did_not_change() {
     assert!(!l.load(t + 4_000 + partial::WHOLE_EVERY + 1_000).partial);
     rush_state::set_thread_dir(None);
 }
+
+// A whole reading's table of rush sessions asleep or stopped holds a
+// pointer for each, not the session: its spare room (987 sessions take
+// 2,048 slots) costs 32 bytes a slot, not the info and row's ~2.4 KB
+// (DESIGN.md "Background processes' memory").
+#[test]
+fn whole_reading_boxes_its_idle_rows() {
+    use std::mem::size_of;
+    assert_eq!(size_of::<(String, partial::IdleEntry)>(), 32);
+    let unboxed = size_of::<(String, (HostInfo, Agent))>();
+    assert!(unboxed >= 2_000, "an idle entry unboxed is {unboxed} bytes");
+}

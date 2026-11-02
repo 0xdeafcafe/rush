@@ -1101,7 +1101,7 @@ impl Loader {
                 .chain(a[whole.at_after..at_end].iter().zip(theirs));
             whole.idle = rows
                 .filter(|(_, i)| partial::idle(i))
-                .map(|(r, i)| (i.id.clone(), (i.clone(), r.clone())))
+                .map(|(r, i)| (i.id.clone(), Box::new((i.clone(), r.clone()))))
                 .collect();
             whole.claims = claims;
             whole.claimed = claimed;

@@ -44,7 +44,10 @@ pub(crate) struct Whole {
     /// rush's sessions.
     pub(super) hosted_ids: HashSet<String>,
     /// Those stopped or asleep, by id, with their info, as last made.
-    pub(super) idle: HashMap<String, (HostInfo, Agent)>,
+    /// Boxed, as Loader's idle_rows: an entry is over two kilobytes, and
+    /// the table, a thousand sessions and more, keeps room for as many
+    /// again (see [`IdleEntry`]).
+    pub(super) idle: HashMap<String, IdleEntry>,
     /// The keys of those the last reading took as they were.
     pub(super) reused: HashSet<String>,
     /// The conversations rush's sessions stand for (and left behind).
@@ -60,6 +63,10 @@ pub(crate) struct Whole {
     /// Headless runs those sessions' shells ran.
     pub(super) spawned: Vec<(String, Pid)>,
 }
+
+/// A rush session asleep or stopped, its info and its row, as a whole
+/// reading's `idle` keeps it.
+pub(crate) type IdleEntry = Box<(HostInfo, Agent)>;
 
 /// What a live session said of itself: one differing makes its row
 /// differ.
@@ -293,7 +300,7 @@ impl Loader {
         agents.extend(w.others.iter().cloned());
         self.finish_subs(&mut agents);
         for (id, info, i) in made {
-            w.idle.insert(id, (info, agents[i].clone()));
+            w.idle.insert(id, Box::new((info, agents[i].clone())));
         }
         let mut parents: HashSet<Pid> = HashSet::new();
         for i in hosted.iter() {
@@ -332,7 +339,7 @@ impl Loader {
     ) -> Agent {
         if idle(info)
             && !told.contains(&info.id)
-            && let Some((was, a)) = w.idle.get(&info.id)
+            && let Some((was, a)) = w.idle.get(&info.id).map(|e| &**e)
             && was == info
             && !self.spend_dirty.contains(&a.key)
         {
