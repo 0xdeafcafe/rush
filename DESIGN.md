@@ -1070,9 +1070,9 @@ idle.
 ## Keeping the prompt cache warm (Rust-only)
 
 A provider caches a session's prompt for a while after its last request.
-A message after it lapses pays to write the whole context again. Once
-turned on (it's off by default), just before an idle session's cache
-lapses, rush can send one small request
+A message after it lapses pays to write the whole context again. Unless
+turned off (it's on by default), just before an idle session's cache
+lapses, rush sends one small request
 that reads the whole cached context: the cache's life starts over at a
 tenth of the price. That request is called a bump below.
 
@@ -1171,12 +1171,14 @@ synthetic stand-in answer, is a failure, and `cacheWarm` stays. Other harnesses 
 OpenAI, Gemini and DeepSeek charge no extra to write the cache, so a
 lapse there costs 0.9 C at most and DeepSeek's cache lives for hours.
 
-Settings: General › Prompt cache: "Keep it warm" (off by default: a
-bump is a request rush makes on its own, and on a plan it counts against
-the account's limits, so it waits until you turn it on) and "for" (15
-minutes; 5, 30, 60, 120). Each harness that can has "Keep its cache warm"
-on its own page (as General says, on, off), kept in config.json's
-`cacheKeep` (`on`, `minutes`, `harnesses`).
+Settings: General › Prompt cache: "Keep it warm" (on by default: a bump
+is a request rush makes on its own, and on a plan it counts against the
+account's limits, but three bumps cost about a quarter of the rewrite
+they save; turn it off there) and "for" (15 minutes; 5, 30, 60, 120).
+Each harness that can has "Keep its cache warm" on its own page (as
+General says, on, off), kept in config.json's `cacheKeep` (`on`, written
+only as `false`, so a config that says nothing is on; `minutes`,
+`harnesses`).
 
 ### Subagents' cache (Rust-only)
 

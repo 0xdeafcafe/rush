@@ -233,8 +233,8 @@ pub struct Config {
         skip_serializing_if = "is_default"
     )]
     pub guard: Guard,
-    /// Keeping idle sessions' prompt caches warm (Rust-only): off until
-    /// turned on.
+    /// Keeping idle sessions' prompt caches warm (Rust-only): on until
+    /// turned off.
     #[serde(
         rename = "cacheKeep",
         deserialize_with = "lenient",
@@ -980,16 +980,18 @@ impl Guard {
     }
 }
 
-/// Keeping idle sessions' prompt caches warm, as set (Rust-only): off
-/// until turned on, for every harness that can or for some. A number
+/// Keeping idle sessions' prompt caches warm, as set (Rust-only): on
+/// until turned off, for every harness that can or for some. A number
 /// left 0 is its default. See rush_core::cachekeep.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CacheKeep {
+    /// On unless turned off: only "on": false is written. A config from
+    /// before it was on by default, which says nothing, is on now.
     #[serde(
         rename = "on",
         deserialize_with = "lenient",
-        skip_serializing_if = "is_false"
+        skip_serializing_if = "is_true"
     )]
     pub on: bool,
     /// Kept this many minutes after a session goes idle: 0 is 15.
@@ -1007,6 +1009,20 @@ pub struct CacheKeep {
         skip_serializing_if = "BTreeMap::is_empty"
     )]
     pub harnesses: BTreeMap<String, bool>,
+}
+
+impl Default for CacheKeep {
+    fn default() -> Self {
+        CacheKeep {
+            on: true,
+            minutes: 0,
+            harnesses: BTreeMap::new(),
+        }
+    }
+}
+
+fn is_true(b: &bool) -> bool {
+    *b
 }
 
 impl CacheKeep {

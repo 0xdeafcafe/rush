@@ -158,7 +158,7 @@ pub fn sections(m: &Model) -> Vec<Section> {
 }
 
 /// Settings › General's Prompt cache (Rust-only): keeping idle sessions'
-/// prompt caches warm, off until turned on. What it does is the accounts
+/// prompt caches warm, on until turned off. What it does is the accounts
 /// module's (guard.rs keep_warm) and rush_core::cachekeep's; each harness
 /// can be set apart on its own page.
 pub fn cache_sections(m: &Model) -> Vec<Section> {
@@ -192,7 +192,7 @@ pub fn cache_sections(m: &Model) -> Vec<Section> {
     }
     vec![Section {
         title: "Prompt cache".into(),
-        note: "off until you turn it on; Claude Code for now".into(),
+        note: "on unless you turn it off; Claude Code for now".into(),
         rows,
         ..Section::default()
     }]

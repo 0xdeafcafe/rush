@@ -763,8 +763,9 @@ fn caches_kept_warm_while_it_pays() {
 #[test]
 fn cache_keep_is_set_per_harness() {
     let mut c = rush_state::config::CacheKeep::default();
-    assert!(!c.on_for("claude") && !c.on_for("codex"), "off by default");
+    assert!(c.on_for("claude") && c.on_for("codex"), "on by default");
     assert_eq!(c.settings().keep_for, 15 * MIN);
+    c.on = false;
     c.harnesses.insert("claude".into(), true);
     assert!(c.on_for("claude") && !c.on_for("pi"));
     c.on = true;
@@ -778,4 +779,15 @@ fn cache_keep_is_set_per_harness() {
             .unwrap()
             .contains(r#""cacheKeep":{"minutes":30}"#)
     );
+    // Turned off, it says so; a config that says nothing is on.
+    cfg.cache_keep.on = false;
+    let s = serde_json::to_string(&cfg).unwrap();
+    assert!(
+        s.contains(r#""cacheKeep":{"on":false,"minutes":30}"#),
+        "{s}"
+    );
+    let back: Config = serde_json::from_str(r#"{"cacheKeep":{"minutes":5}}"#).unwrap();
+    assert!(back.cache_keep.on);
+    let back: Config = serde_json::from_str(r#"{"cacheKeep":{"on":false}}"#).unwrap();
+    assert!(!back.cache_keep.on);
 }
