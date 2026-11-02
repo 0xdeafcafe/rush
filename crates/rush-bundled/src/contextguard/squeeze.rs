@@ -123,23 +123,24 @@ pub fn squeeze(output: &str) -> String {
     out
 }
 
-/// output cut to its first and last KEEP_LINES lines when it has more
-/// than CAP_LINES, saying where the whole of it is kept; None when it's
-/// short enough.
-pub fn cap(output: &str, kept_at: &str) -> Option<String> {
+/// output cut to its first and last keep lines when it has more than
+/// over (as set: CAP_LINES and KEEP_LINES unless), saying where the whole
+/// of it is kept; None when it's short enough.
+pub fn cap(output: &str, kept_at: &str, over: usize, keep: usize) -> Option<String> {
     let lines: Vec<&str> = output.split_inclusive('\n').collect();
-    if lines.len() <= CAP_LINES {
+    if lines.len() <= over {
         return None;
     }
-    let left = lines.len() - 2 * KEEP_LINES;
-    let mut out: String = lines[..KEEP_LINES].concat();
+    let keep = keep.min(over / 2);
+    let left = lines.len() - 2 * keep;
+    let mut out: String = lines[..keep].concat();
     if !out.ends_with('\n') {
         out.push('\n');
     }
     out.push_str(&format!(
         "… {left} lines left out (the whole output: {kept_at}) …\n"
     ));
-    out.push_str(&lines[lines.len() - KEEP_LINES..].concat());
+    out.push_str(&lines[lines.len() - keep..].concat());
     Some(out)
 }
 
@@ -342,9 +343,9 @@ mod tests {
     #[test]
     fn caps_long_output() {
         let short: String = (0..CAP_LINES).map(|i| format!("{i}\n")).collect();
-        assert_eq!(cap(&short, "/tmp/x"), None);
+        assert_eq!(cap(&short, "/tmp/x", CAP_LINES, KEEP_LINES), None);
         let long: String = (0..1000).map(|i| format!("line {i}\n")).collect();
-        let got = cap(&long, "/tmp/out.txt").unwrap();
+        let got = cap(&long, "/tmp/out.txt", CAP_LINES, KEEP_LINES).unwrap();
         let lines: Vec<&str> = got.lines().collect();
         assert_eq!(lines.len(), 2 * KEEP_LINES + 1);
         assert_eq!(lines[0], "line 0");
@@ -355,6 +356,20 @@ mod tests {
         );
         assert_eq!(lines[KEEP_LINES + 1], "line 800");
         assert_eq!(lines.last(), Some(&"line 999"));
+        // As set: output of n lines, longer than, kept each end: the lines
+        // after the cut, or None.
+        let cases: &[(usize, usize, usize, Option<usize>)] = &[
+            (1000, 300, 100, Some(201)),
+            (1000, 1200, 400, None),
+            (1300, 1200, 400, Some(801)),
+            (300, 300, 100, None),
+            (301, 300, 100, Some(201)),
+        ];
+        for &(n, over, keep, want) in cases {
+            let out: String = (0..n).map(|i| format!("line {i}\n")).collect();
+            let got = cap(&out, "/tmp/o", over, keep).map(|c| c.lines().count());
+            assert_eq!(got, want, "{n} lines, over {over}, keep {keep}");
+        }
     }
 
     #[test]

@@ -23,22 +23,49 @@ pub const REPEATS: u32 = 3;
 /// failures were the same.
 const TAIL_LINES: usize = 12;
 
-/// Which rules are on.
+/// Which rules are on, and their numbers as set (Settings › Usage ›
+/// Context guard): each the constant above unless set otherwise.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Rules {
     pub reread: bool,
     pub big_read: bool,
     pub repeat: bool,
     pub squeeze: bool,
+    /// Below this many bytes a file is read again without a word.
+    pub small_file: u64,
+    /// A whole read past this many lines, or bytes, is refused once.
+    pub big_lines: u64,
+    pub big_bytes: u64,
+    /// Identical failures in a row before the next run is refused.
+    pub repeats: u32,
+    /// Output past this many lines is cut to its first and last
+    /// keep_lines (squeeze's CAP_LINES, KEEP_LINES).
+    pub cap_lines: usize,
+    pub keep_lines: usize,
 }
 
 impl Rules {
-    /// Every rule on.
+    /// Every rule on, at its usual numbers.
     pub const ALL: Rules = Rules {
         reread: true,
         big_read: true,
         repeat: true,
         squeeze: true,
+        small_file: SMALL_FILE,
+        big_lines: BIG_FILE_LINES,
+        big_bytes: BIG_FILE_BYTES,
+        repeats: REPEATS,
+        cap_lines: crate::contextguard::squeeze::CAP_LINES,
+        keep_lines: crate::contextguard::squeeze::KEEP_LINES,
+    };
+
+    /// Every rule off.
+    pub const NONE: Rules = Rules {
+        reread: false,
+        big_read: false,
+        repeat: false,
+        squeeze: false,
+        ..Rules::ALL
     };
 
     pub fn any(&self) -> bool {
@@ -187,7 +214,7 @@ pub fn read(
     }
     let whole = offset.is_none_or(|o| o <= 1) && limit.is_none_or(|l| l == 0);
     if rules.reread
-        && file.size >= SMALL_FILE
+        && file.size >= rules.small_file
         && let Some(seen) = agent.reads.get(path)
         && seen.file.same(file)
         && covers(
@@ -206,8 +233,8 @@ pub fn read(
         });
     }
     if rules.big_read && whole && !agent.warned.contains(path) {
-        let big_bytes = file.size > BIG_FILE_BYTES;
-        let big_lines = file.lines.is_some_and(|n| n > BIG_FILE_LINES);
+        let big_bytes = file.size > rules.big_bytes;
+        let big_lines = file.lines.is_some_and(|n| n > rules.big_lines);
         if big_bytes || big_lines {
             agent.warned.insert(path.to_string());
             let size = match file.lines {
@@ -283,7 +310,7 @@ pub fn bash(agent: &mut Agent, rules: Rules, command: &str) -> Option<Refusal> {
     }
     let cmd = normalise_command(command);
     let s = agent.bash.as_mut()?;
-    if s.command != cmd || s.count < REPEATS {
+    if s.command != cmd || s.count < rules.repeats {
         return None;
     }
     if s.refused {
@@ -816,5 +843,73 @@ mod tests {
             failure("Exit code 1\ntest result: FAILED. 3 passed; 1 failed; finished in 1.20s"),
             failure("Exit code 1\ntest result: FAILED. 3 passed; 1 failed; finished in 0.97s")
         );
+    }
+    #[test]
+    fn numbers_as_set() {
+        // The smallest file a re-read is refused for: size, the setting,
+        // refused.
+        let cases: &[(u64, u64, bool)] = &[
+            (2 * 1024, SMALL_FILE, true),
+            (2 * 1024 - 1, SMALL_FILE, false),
+            (1024, 1024, true),
+            (6 * 1024, 8 * 1024, false),
+        ];
+        for &(size, small_file, want) in cases {
+            let rules = Rules {
+                small_file,
+                ..Rules::ALL
+            };
+            let f = file(size, 1, Some(10));
+            let mut a = Agent::default();
+            read_done(&mut a, "/w/f.rs", None, None, f.clone(), "14:03:12");
+            let got = read(&mut a, rules, "/w/f.rs", None, None, &f);
+            assert_eq!(got.is_some(), want, "{size} under {small_file}: {got:?}");
+        }
+        // What counts as huge: the file's lines and bytes, the setting's.
+        let cases: &[(u64, u64, u64, u64, bool)] = &[
+            (1001, 4096, BIG_FILE_LINES, BIG_FILE_BYTES, true),
+            (1000, 4096, BIG_FILE_LINES, BIG_FILE_BYTES, false),
+            (600, 4096, 500, 24 * 1024, true),
+            (1500, 60 * 1024, 2000, 96 * 1024, false),
+            (100, 30 * 1024, 500, 24 * 1024, true),
+        ];
+        for &(lines, size, big_lines, big_bytes, want) in cases {
+            let rules = Rules {
+                big_lines,
+                big_bytes,
+                ..Rules::ALL
+            };
+            let mut a = Agent::default();
+            let got = read(
+                &mut a,
+                rules,
+                "/w/big.log",
+                None,
+                None,
+                &file(size, 1, Some(lines)),
+            );
+            assert_eq!(got.is_some(), want, "{lines} lines, {size} B: {got:?}");
+        }
+        // Failures in a row before the next run is refused: the setting,
+        // the failures, refused.
+        let cases: &[(u32, u32, bool)] = &[
+            (3, 3, true),
+            (3, 2, false),
+            (2, 2, true),
+            (5, 4, false),
+            (5, 5, true),
+        ];
+        for &(repeats, runs, want) in cases {
+            let rules = Rules {
+                repeats,
+                ..Rules::ALL
+            };
+            let mut a = Agent::default();
+            for _ in 0..runs {
+                bash_done(&mut a, "cargo test", failed("1", "boom"));
+            }
+            let got = bash(&mut a, rules, "cargo test");
+            assert_eq!(got.is_some(), want, "{repeats} set, {runs} failed: {got:?}");
+        }
     }
 }

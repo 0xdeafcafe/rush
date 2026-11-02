@@ -213,7 +213,7 @@ pub fn step(input: &[u8], env: &Env) -> Option<Answer> {
             if !env.rules.squeeze || !squeeze::squeezes(&command) {
                 return None;
             }
-            squeezed(&inp, &command, &env.tmp)
+            squeezed(&inp, &command, &env.tmp, env.rules)
         }
         ("PostToolUseFailure", "Bash") => {
             if !env.rules.repeat {
@@ -271,7 +271,7 @@ fn deny(r: Refusal, inp: &Input, extra: Value) -> Answer {
 
 /// A shell call's output squeezed, as the hook replaces it; None when
 /// squeezing changes nothing, or it isn't plain output.
-fn squeezed(inp: &Input, command: &str, tmp: &Path) -> Option<Answer> {
+fn squeezed(inp: &Input, command: &str, tmp: &Path, rules: Rules) -> Option<Answer> {
     let resp = inp.tool_response.as_object()?;
     let flag = |k: &str| resp.get(k).and_then(Value::as_bool).unwrap_or(false);
     if flag("isImage")
@@ -288,7 +288,7 @@ fn squeezed(inp: &Input, command: &str, tmp: &Path) -> Option<Answer> {
             continue;
         };
         let mut q = squeeze::squeeze(s);
-        if q.split_inclusive('\n').count() > squeeze::CAP_LINES {
+        if q.split_inclusive('\n').count() > rules.cap_lines {
             let id = if inp.tool_use_id.is_empty() || file_name(&inp.tool_use_id).is_empty() {
                 format!("{:016x}", fnv(q.as_bytes()))
             } else {
@@ -296,7 +296,12 @@ fn squeezed(inp: &Input, command: &str, tmp: &Path) -> Option<Answer> {
             };
             let kept = tmp.join("rush-output").join(format!("{id}.{suffix}.txt"));
             if keep(&kept, &q)
-                && let Some(c) = squeeze::cap(&q, &kept.to_string_lossy())
+                && let Some(c) = squeeze::cap(
+                    &q,
+                    &kept.to_string_lossy(),
+                    rules.cap_lines,
+                    rules.keep_lines,
+                )
             {
                 q = c;
                 cut = true;
