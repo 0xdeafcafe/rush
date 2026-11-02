@@ -422,6 +422,12 @@ pub fn sync(m: &mut Model, key: &str) {
 
 /// Hands the open view session key's runs, when they've changed since.
 fn show(m: &mut Model, key: &str) {
+    let dir = folder(m, key);
+    if let Some(v) = m.session.as_mut().filter(|v| v.key == key)
+        && v.o.shell_cwd != dir
+    {
+        v.o.shell_cwd = dir;
+    }
     let k = kept(m, key);
     let (r#gen, n, shown) = (k.r#gen, k.runs.len(), k.shown);
     let Some(v) = m.session.as_ref().filter(|v| v.key == key) else {

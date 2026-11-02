@@ -284,6 +284,9 @@ pub struct Options {
     /// (`t3:bang:<start>`, drawn after the items its turn had then). Set
     /// by whoever runs them (shellbox.rs).
     pub shells: HashMap<String, std::sync::Arc<crate::shellbox::ShellRun>>,
+    /// Where those commands run: the session's folder as the agent list
+    /// has it ("" for the conversation's own).
+    pub shell_cwd: String,
 }
 
 /// What a running shell step is doing now: a line from its processes, and
@@ -338,6 +341,7 @@ impl Options {
         )
             .hash(&mut h);
         (self.dock_activity, code::show_whitespace(), self.preset).hash(&mut h);
+        self.shell_cwd.hash(&mut h);
         if self.preset == Preset::CatchUp {
             self.since.hash(&mut h);
         }

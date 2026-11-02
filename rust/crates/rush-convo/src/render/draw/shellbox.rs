@@ -132,6 +132,7 @@ impl Drawer<'_> {
         // Its top edge: where it runs, and what can be done before it ends.
         let cwd = match run {
             Some(x) if !x.cwd.is_empty() => x.cwd.as_str(),
+            _ if !self.o.shell_cwd.is_empty() => self.o.shell_cwd.as_str(),
             _ if !self.p.cwd.is_empty() => self.p.cwd.as_str(),
             _ => self.s.cwd.as_str(),
         };
