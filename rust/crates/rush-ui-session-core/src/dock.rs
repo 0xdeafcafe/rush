@@ -797,6 +797,13 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     let preset_key = super::presets::key_hint(m);
     let next_view = format!("view: {}", preset.next().title().to_lowercase());
     let other_view = view == "conversation" && preset != rush_convo::Preset::Normal;
+    // A view rush suggests, or switched to, and the key that takes it.
+    if view == "conversation"
+        && picked.is_empty()
+        && let Some(l) = super::viewsuggest::hint(m, key, w)
+    {
+        return l;
+    }
     if other_view && super::presets::turn_or_step(picked) {
         return fit_keys(
             w,

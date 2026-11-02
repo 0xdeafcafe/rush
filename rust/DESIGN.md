@@ -1867,6 +1867,38 @@ the steady cost. Catch-up's window holds ~50 turns of one row each before
 the card, so its warm frame checks 50 turns' keys: still far under a
 millisecond.
 
+### Which view fits (Rust-only, off by default)
+
+Settings › Interface › "Suggest a conversation view" (config.json
+`viewSuggest`: "" off, "suggest", "switch" for "switch when I come
+back"). Off, nothing runs: no per-session record, no question, no file.
+On, rush looks only at two moments: you come back to a session (open it,
+or look again after 10 minutes away or with finished turns you haven't
+seen; a glance at the list and back isn't one), or a turn ends while it's
+open. A moment waits while a key or the wheel moved in the last 3 s.
+
+The rules (rush_convo::suggest, a pure function of a digest of counts
+from the last finished turn and the time away) pick first: back with
+unseen finished turns → Catch-up; files changed and checks run (the
+Code view's check detection) → Code; a turn of 2 minutes or more mostly
+in tools → Trail; mostly talk, two steps or fewer → Chat; a short turn
+that changed nothing → Normal; anything else is unclear. Only then is the
+session's harness's quick model asked, through the advisor's Ask (the
+adapter's Querier, headless), off the UI thread, at most once per session
+in 10 minutes, 30 s at most, with the digest's counts, the view in use
+and the last views chosen, never the conversation's words; an answer that
+fails or can't be read is no suggestion.
+
+Suggest marks the view's tab with an orange ✦ and the line under the box
+says `tab: Code fits · changed 4 files, ran tests  ⌥t take it`
+(session.take_view_suggestion, ⌥t or ctrl+] T). Switch changes the view
+only as you come back, never when a turn ends, and says so with ⌥t going
+back. A suggestion left showing until the next moment, or another view
+chosen, is turned down; per moment and view (`back:catch-up`) rush keeps
+how often each was taken and turned down in view-suggest.json in rush's
+folder, and after three turned down in a row it isn't made again (one
+taken starts the count over). session-core viewsuggest.rs.
+
 ## Shell commands rush runs for you (Rust-only)
 
 Two ways in, both only on your click or key, never by themselves:

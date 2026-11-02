@@ -31,3 +31,4 @@ mod tests_switch;
 mod tests_tasks;
 mod tests_turnwants_inline;
 mod tests_undo;
+mod tests_viewsuggest;

@@ -1937,6 +1937,7 @@ dependencies = [
  "rush-convo",
  "rush-core",
  "rush-draw",
+ "rush-efficiency",
  "rush-fleet",
  "rush-hl",
  "rush-host",

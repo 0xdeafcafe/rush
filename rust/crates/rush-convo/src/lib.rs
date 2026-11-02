@@ -19,6 +19,7 @@ pub mod search;
 pub mod shellbox;
 pub mod shellwrites;
 pub mod subagents;
+pub mod suggest;
 pub mod text;
 pub mod transcript;
 pub mod words;

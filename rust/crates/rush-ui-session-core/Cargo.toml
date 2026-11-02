@@ -32,6 +32,9 @@ rush-ui-list-extras.workspace = true
 rush-ui-bars.workspace = true
 rush-ui-session-cards.workspace = true
 rush-ui-cmdbar.workspace = true
+# The advisor's Ask: a harness's quick model, asked headless, which picks
+# a conversation view when the rules can't (viewsuggest.rs).
+rush-efficiency = { path = "../rush-efficiency" }
 regex.workspace = true
 libc.workspace = true
 serde.workspace = true

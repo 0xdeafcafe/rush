@@ -1,7 +1,7 @@
 //! rush's own keys, as its key handling is written.
 //!
 //! Ported from internal/keymap/defaults.go:1-148 (list.land as of 2e4662ff; session.remember as of b2a1a0b3);
-//! voice.talk is new in the Rust port.
+//! voice.talk and session.take_view_suggestion are new in the Rust port.
 
 use crate::{Action, Context};
 
@@ -132,6 +132,7 @@ const DEFAULTS: &[Row] = &[
     ("session.depth.3", S, "depth m3: everything open", &["ctrl+] 3"], true),
     ("session.verbose", S, "more or less detail", &["ctrl+o"], false),
     ("session.preset", S, "the conversation's view: normal, chat, code, catch-up, trail", &["ctrl+] g", "alt+s"], false),
+    ("session.take_view_suggestion", S, "take the conversation view rush suggests, or undo the one it switched to", &["ctrl+] T", "alt+t"], false),
     ("session.stop", S, "stop it; again puts it away in Earlier", &["ctrl+x"], false),
     ("session.close", S, "hide, stop, restart, switch or delete it", &["ctrl+] x"], true),
     ("session.carry", S, "move what's typed to another session: pick it in the list, enter puts it in its box, esc brings it back", &["ctrl+] up"], true),

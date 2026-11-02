@@ -144,9 +144,16 @@ fn rows(m: &mut Model) -> usize {
     }
 }
 
+/// You chose p: shown (see show), and a suggested view taken or turned
+/// down by it (viewsuggest.rs).
+pub fn set(m: &mut Model, p: Preset) {
+    show(m, p);
+    super::viewsuggest::chose(m, p);
+}
+
 /// Shows p in every session's conversation, the one open kept on the
 /// message it was on: the picked row's, else the turn at its top.
-pub fn set(m: &mut Model, p: Preset) {
+pub fn show(m: &mut Model, p: Preset) {
     keep(m, p);
     let rows = rows(m);
     if let Some(v) = m.session.as_mut() {
@@ -174,6 +181,7 @@ pub fn set(m: &mut Model, p: Preset) {
 /// view and picked.
 pub fn open_in_normal(m: &mut Model, r: &str) -> Out {
     keep(m, Preset::Normal);
+    super::viewsuggest::chose(m, Preset::Normal);
     let rows = rows(m);
     if let Some(v) = m.session.as_mut() {
         v.o.preset = Preset::Normal;

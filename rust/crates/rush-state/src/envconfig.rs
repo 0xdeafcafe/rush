@@ -107,6 +107,7 @@ static FIELDS: &[Field] = fields![
     "onboarding.hidden" => Bool: onboarding.hidden,
     "advisor" => Bool: advisor,
     "convoView" => Str: convo_view,
+    "viewSuggest" => Str: view_suggest,
 ];
 
 /// One setting the environment set.

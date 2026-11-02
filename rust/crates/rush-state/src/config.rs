@@ -555,6 +555,15 @@ pub struct Config {
         skip_serializing_if = "String::is_empty"
     )]
     pub convo_view: String,
+    /// Whether rush suggests the conversation view that fits when you come
+    /// back to a session or a turn ends: "" (off), "suggest", or "switch"
+    /// (switch when you come back). New in the Rust port.
+    #[serde(
+        rename = "viewSuggest",
+        deserialize_with = "lenient",
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub view_suggest: String,
 
     /// The microphone push-to-talk hears (the apple voice plugin), by
     /// CoreAudio's id for it; empty is the Mac's input. New in the Rust

@@ -70,6 +70,7 @@ pub mod told;
 pub mod turnwants;
 pub mod unused;
 pub mod views;
+pub mod viewsuggest;
 pub mod workflow;
 
 use std::collections::HashMap;
@@ -117,6 +118,7 @@ pub fn register(x: &mut Ext) {
     // The conversation's views: the key through them, and enter on a
     // catch-up card or a trail's step, before a picked row's own keys.
     x.session_keys.push(presets::key);
+    x.session_keys.push(viewsuggest::key);
     x.session_keys.push(textsel::key);
     x.session_keys.push(changes::full_key);
     x.session_keys.push(subview::key_first);
@@ -152,6 +154,10 @@ pub fn register(x: &mut Ext) {
     x.on_fleet.push(turnwants::on_fleet);
     x.on_fleet.push(finish::on_fleet);
     x.status.push(dock::status);
+    // Every key and turn of the wheel, first and passed on: a view's
+    // suggestion waits while you type or scroll (viewsuggest.rs).
+    x.session_keys.insert(0, viewsuggest::watch_key);
+    x.mouse.insert(0, viewsuggest::watch_mouse);
 }
 
 /// The views' keys (a row picked, ↑↓ through the conversation), after

@@ -601,8 +601,38 @@ pub fn sections(m: &Model) -> Vec<Section> {
         ],
         set(|m, v| config_mut(m).pixel_pictures = v == "pixelated"),
     );
+    // Which of the conversation's views fits: suggested, or switched to as
+    // you come back (session-core viewsuggest.rs). Rust-only.
+    let view_suggest = choice(
+        "Suggest a conversation view",
+        match c.view_suggest.as_str() {
+            "suggest" => "suggest",
+            "switch" => "switch when I come back",
+            _ => "off",
+        },
+        "When you come back to a session, or a turn ends while it's open, rush works out which conversation view fits (Normal, Chat, Code, Catch-up, Trail): Catch-up after turns you haven't seen, Code after changes and checks, Trail after a long turn mostly in tools, Chat after mostly talk. Simple rules decide first; only when they can't tell does it ask the session's harness's quick model, which sees counts (edits, steps, checks, times), never the conversation. It never changes the view while you type or scroll, and stops suggesting one you turn down three times in a row.",
+        &[
+            ("off", "no suggestions; rush does no work for them."),
+            (
+                "suggest",
+                "the view that fits gets ✦ on its tab and a line under the box says why, with a key to take it.",
+            ),
+            (
+                "switch when I come back",
+                "coming back to a session shows the view that fits and says so, with a key to undo; never while you're in it.",
+            ),
+        ],
+        set(|m, v| {
+            config_mut(m).view_suggest = match v {
+                "suggest" => "suggest".into(),
+                "switch when I come back" => "switch".into(),
+                _ => String::new(),
+            }
+        }),
+    );
     look_rows.push(minimap);
     look_rows.push(pictures);
+    look_rows.push(view_suggest);
     vec![
         Section::new("Look", look_rows),
         Section::new("Agents list", list_rows),
