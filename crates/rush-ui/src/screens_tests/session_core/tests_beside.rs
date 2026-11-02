@@ -442,6 +442,8 @@ fn the_box_hints_the_conversation_view_key() {
     let last = f[f.len() - 1].clone();
     assert!(!last.contains("conversation view"), "{last:?}");
     assert!(last.contains("esc back"), "{last:?}");
+}
+
 /// The pointer over the side column, level with a turn of the
 /// conversation, lights nothing in the conversation; over the turn's own
 /// text it lights it as before.
