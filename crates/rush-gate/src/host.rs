@@ -51,6 +51,43 @@ pub trait Host: Send + Sync {
     ) -> (String, String) {
         (String::new(), String::new())
     }
+    /// For a subagent's command that took longer than its prompt cache
+    /// lives the last time it ran in this project: how long it took, and
+    /// the cache's life, in milliseconds; None for any other, or while
+    /// keeping caches warm is off (rush_core::subkeep::ahead).
+    fn long_ahead(&self, command: &str) -> Option<(i64, i64)> {
+        let project = std::env::var(crate::cli::PROJECT_ENV)
+            .ok()
+            .filter(|p| !p.is_empty())?;
+        let took = rush_state::took::took(&rush_state::took::path(), &project, command)?;
+        let ttl = subagent_ttl(&|k| std::env::var(k).ok());
+        if !rush_core::subkeep::ahead(took, ttl) {
+            return None;
+        }
+        // Claude Code's hook: its own setting.
+        rush_state::Store::load()
+            .config
+            .cache_keep
+            .on_for("claude")
+            .then_some((took, ttl))
+    }
+}
+
+/// How long a Claude Code subagent's prompt cache lives, by the
+/// environment its hooks run in: CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL
+/// (rush-claude's SUBAGENT_CACHE_ENV, "5m" or "1h"), else an hour with
+/// ENABLE_PROMPT_CACHING_1H, else 5 minutes.
+pub fn subagent_ttl(env: &dyn Fn(&str) -> Option<String>) -> i64 {
+    match env("CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL").as_deref() {
+        Some("1h") => return rush_core::subcache::LONG,
+        Some("5m") => return rush_core::subcache::SHORT,
+        _ => {}
+    }
+    if env("ENABLE_PROMPT_CACHING_1H").is_some_and(|v| !v.is_empty() && v != "0") {
+        rush_core::subcache::LONG
+    } else {
+        rush_core::subcache::SHORT
+    }
 }
 
 /// The sessions as their files have them, under rush's folder.

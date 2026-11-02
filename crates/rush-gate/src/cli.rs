@@ -40,6 +40,29 @@ pub const GATE_USAGE: &str = r#"rush gate — share the machine between intensiv
 Turn it on with "rush plugin on gate"; its settings are in Settings, Plugins.
 "#;
 
+/// The folder a session's agent started in, set in its environment by its
+/// host: where took.json files its commands' times (rush_state::took).
+pub const PROJECT_ENV: &str = "RUSH_PROJECT_DIR";
+
+/// What a subagent is told of its command rush moved to the background
+/// from the start: it took `took` last time, past its cache's life `ttl`.
+pub fn ahead_note(took: i64, ttl: i64) -> String {
+    let mins = |ms: i64| {
+        let m = (ms + 30_000) / 60_000;
+        if m == 1 {
+            "1 minute".to_string()
+        } else {
+            format!("{m} minutes")
+        }
+    };
+    format!(
+        "rush runs this command in the background: it took {} the last time it ran here, longer than your prompt cache lives ({}), and a wait that long makes your next request pay to write your whole context again. It runs on, its output in the file its result names. Check on it at least every {}, waiting in steps shorter than that rather than one long wait, and don't give your final answer until it has finished: a background command stops when you answer.",
+        mins(took),
+        mins(ttl),
+        mins(rush_core::subkeep::check_back(ttl)),
+    )
+}
+
 /// Everything the gate's commands work with.
 pub struct Ctx {
     pub gate: Gate,
@@ -697,6 +720,8 @@ pub fn gate_hook(ctx: &Ctx, r: &mut dyn Read, w: &mut dyn Write) {
         tool_input: Option<std::collections::BTreeMap<String, rush_state::json::RawJson>>,
         cwd: String,
         tool_use_id: String,
+        /// Set for a subagent's call.
+        agent_id: String,
     }
     let mut b = Vec::new();
     if r.take(4 << 20).read_to_end(&mut b).is_err() {
@@ -808,18 +833,39 @@ pub fn gate_hook(ctx: &Ctx, r: &mut dyn Read, w: &mut dyn Write) {
             .unwrap_or_default();
         why = "it's long: run as a script rush can follow and stop".into();
     }
-    if wrapped.is_empty() {
+    // A subagent's command known to outlast its prompt cache runs in the
+    // background from the start, and it's told to check back in time.
+    let mut note = String::new();
+    if !background
+        && !inp.agent_id.is_empty()
+        && let Some((took, ttl)) = ctx.host.long_ahead(&command)
+    {
+        note = ahead_note(took, ttl);
+        hook_log(
+            "subagent-cache-ahead",
+            fields(json!({"agent": inp.agent_id, "tookS": took / 1000, "ttl": ttl / 1000})),
+        );
+    }
+    if wrapped.is_empty() && note.is_empty() {
         return;
     }
-    hook_log(
-        "hook-rewrote",
-        fields(json!({"to": clip_text(&wrapped), "why": why})),
-    );
-    let Ok(v) = rush_state::json::RawJson::from_value(&wrapped) else {
-        return;
-    };
     let mut input = inp.tool_input.take().unwrap_or_default();
-    input.insert("command".into(), v);
+    if !wrapped.is_empty() {
+        hook_log(
+            "hook-rewrote",
+            fields(json!({"to": clip_text(&wrapped), "why": why})),
+        );
+        let Ok(v) = rush_state::json::RawJson::from_value(&wrapped) else {
+            return;
+        };
+        input.insert("command".into(), v);
+    }
+    if !note.is_empty() {
+        let Ok(t) = rush_state::json::RawJson::from_value(&true) else {
+            return;
+        };
+        input.insert("run_in_background".into(), t);
+    }
     #[derive(serde::Serialize)]
     struct Out<'a> {
         #[serde(rename = "hookSpecificOutput")]
@@ -831,11 +877,14 @@ pub fn gate_hook(ctx: &Ctx, r: &mut dyn Read, w: &mut dyn Write) {
         event: &'a str,
         #[serde(rename = "updatedInput")]
         input: &'a std::collections::BTreeMap<String, rush_state::json::RawJson>,
+        #[serde(rename = "additionalContext", skip_serializing_if = "str::is_empty")]
+        context: &'a str,
     }
     let out = Out {
         hso: Hso {
             event: "PreToolUse",
             input: &input,
+            context: &note,
         },
     };
     if let Ok(mut b) = rush_state::json::to_vec(&out) {
@@ -1105,6 +1154,68 @@ mod tests {
         }
         fn search_refusal(&self, _: &str) -> String {
             self.refuse.clone()
+        }
+        fn long_ahead(&self, command: &str) -> Option<(i64, i64)> {
+            (command == "cargo bench").then_some((7 * 60_000, 5 * 60_000))
+        }
+    }
+
+    // A subagent's command known to outlast its cache runs in the
+    // background from the start, with a note; the main conversation's, a
+    // quick one, or one already in the background, as it was.
+    #[test]
+    fn hook_runs_known_long_subagent_calls_in_the_background() {
+        let home = tempfile::tempdir().unwrap();
+        let host = Arc::new(Fake2::default());
+        let c = ctx(home.path(), None, host.clone());
+        let out = hook(
+            &c,
+            r#"{"tool_name":"Bash","tool_use_id":"toolu_1","agent_id":"a1","tool_input":{"command":"cargo bench"}}"#,
+        );
+        let note = ahead_note(7 * 60_000, 5 * 60_000);
+        assert!(note.contains("it took 7 minutes"), "{note}");
+        assert!(note.contains("at least every 4 minutes"), "{note}");
+        assert!(out.ends_with('\n'), "{out}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&out).unwrap(),
+            json!({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                "updatedInput": {"command": "cargo bench", "run_in_background": true},
+                "additionalContext": note}})
+        );
+        assert_eq!(host.logged.lock().unwrap()[0].1, "subagent-cache-ahead");
+        for input in [
+            r#"{"tool_name":"Bash","tool_input":{"command":"cargo bench"}}"#,
+            r#"{"tool_name":"Bash","agent_id":"a1","tool_input":{"command":"cargo test"}}"#,
+            r#"{"tool_name":"Bash","agent_id":"a1","tool_input":{"command":"cargo bench","run_in_background":true}}"#,
+        ] {
+            assert_eq!(hook(&c, input), "", "{input}");
+        }
+    }
+
+    #[test]
+    fn subagent_ttl_by_env() {
+        let cases: &[(&[(&str, &str)], i64)] = &[
+            (&[], 5 * 60_000),
+            (
+                &[("CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL", "1h")],
+                3_600_000,
+            ),
+            (&[("ENABLE_PROMPT_CACHING_1H", "1")], 3_600_000),
+            (
+                &[
+                    ("CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL", "5m"),
+                    ("ENABLE_PROMPT_CACHING_1H", "1"),
+                ],
+                5 * 60_000,
+            ),
+        ];
+        for (env, want) in cases {
+            let get = |k: &str| {
+                env.iter()
+                    .find(|(n, _)| *n == k)
+                    .map(|(_, v)| v.to_string())
+            };
+            assert_eq!(crate::host::subagent_ttl(&get), *want, "{env:?}");
         }
     }
 
