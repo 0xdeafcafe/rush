@@ -1097,7 +1097,7 @@ MEMORY.md, is answered the same way without a card, and logged as
 ## The runaway guard (Rust-only)
 
 Three checks that keep a busy few hours from spending a week's limit,
-each off until set (config.json `guard`; Settings › General › Runaway
+each off until set (config.json `guard`; Settings › Usage › Runaway
 guard). rush-core's `guard` decides from what it's handed; the accounts
 module's `guard.rs` runs it in the rush that leads, every 5 s, off the
 UI thread, and does what it says.
@@ -1212,6 +1212,35 @@ Not yet: a session you start yourself isn't held (its first turn goes
 on the account picked); the menu bar shows a held session only as
 idle.
 
+## Settings › Usage (Rust-only)
+
+What rush does on its own to save tokens and money and to keep agents in
+check, on one page after General (`PAGE_USAGE`, rush-ui-settings
+`usage.rs`), in this order:
+
+- **Prompt cache**: keeping idle conversations warm, compacting long
+  waits, waiting subagents' caches and known-slow commands, each
+  harness's subagents' cache life, and the two numbers they share (the
+  table in "Keeping the prompt cache warm" below). config.json
+  `cacheKeep` and `subagentCache`.
+- **Context guard**: the bundled plugin's four rules and their numbers
+  (the table in "The context guard"). Its own settings, read as the page
+  opens (off the UI) and written as you change them, so its hook sees
+  them at the next call. While the plugin is off the section's note says
+  so and where to turn it on.
+- **Runaway guard**: pace, agents at once, away (moved from General;
+  config.json `guard`).
+- **Advisor**: on or off (moved from General's Help and advice, which is
+  now Help; config.json `advisor`). It has no other setting.
+
+Left where they were, on purpose: General's Hibernate, Disk and memory,
+Stalls (the machine and the list, not tokens), and "#compact starts on"
+(your own /compact's choice, not something rush does by itself); Config's
+"At a usage limit" (it's the order of that page's grid); Claude Code's
+"When a usage limit hits" and "Keep its cache warm" (that harness's own,
+on its page). The harness pages keep "Keep its cache warm" and
+"Subagents' cache" too, the latter the same value Usage shows.
+
 ## Keeping the prompt cache warm (Rust-only)
 
 A provider caches a session's prompt for a while after its last request.
@@ -1249,10 +1278,11 @@ the rule keeps the cache for a short while after the turn ends and then
 lets it go:
 
 - A bump goes when the cache has under a minute left (`LEAD`), the
-  session went idle less than **15 minutes** ago (Settings › General ›
-  Prompt cache › for), its context is at least 20k tokens, and the bumps
-  this idle stretch stay under half a rewrite (5 for a 5-minute cache, 9
-  for an hour's) and under the rewrite itself counting each bump's ~300
+  session went idle less than **15 minutes** ago (Settings › Usage ›
+  Prompt cache › for), its context is at least 20k tokens (Smallest
+  conversation worth keeping), and the bumps this idle stretch stay under
+  half a rewrite (5 for a 5-minute cache, 9 for an hour's; Most refreshes
+  per wait sets another number) and under the rewrite itself counting each bump's ~300
   tokens of question and answer.
 - A 5-minute cache kept 15 minutes takes 3 bumps (at about 4, 8 and 12
   minutes idle) and lapses at about 17 minutes: 0.3 C spent to save 1.15
@@ -1269,13 +1299,40 @@ lets it go:
 - A cache that has lapsed already is never bumped: that bump would be
   the full rewrite it's there to save.
 
-Never compacted instead. Compacting before the lapse costs a read of the
-context, a summary of a few thousand output tokens (5× the input price)
-and a write of the summary next time: about 0.3 C at 150k, paid whether
-you come back or not, against a 1.15 C rewrite paid only if you do. It
-also loses detail the agent then reads back from files, which costs
-turns. Claude Code already compacts itself when its window fills. So past
-the 15 minutes the cache just lapses.
+Not compacted instead, unless set. Compacting before the lapse costs a
+read of the context, a summary of a few thousand output tokens (5× the
+input price) and a write of the summary next time: about 0.3 C at 150k,
+paid whether you come back or not, against a 1.15 C rewrite paid only if
+you do. It also loses detail the agent then reads back from files, which
+costs turns. Claude Code already compacts itself when its window fills.
+So by default, past the 15 minutes the cache just lapses.
+
+Compacting long waits (Settings › Usage › Prompt cache › compact long
+waits: off, after 1 hour, after 2 hours; `cacheKeep.compactAfter` in
+minutes). Past an hour or two idle, coming back to the session soon is
+unlikely, so the 1.15–1.9 C rewrite is likely to be paid later anyway,
+and a compaction now (about 0.3 C) makes the next message write the
+summary instead. The rule, in `cachekeep::decide`: at the look a minute
+before the cache lapses, with the context at least the smallest worth
+keeping, a session whose cache would lapse once it has been idle about
+that long (`warm_until − idle_since + LEAD ≥ compact_after`: within the
+minute a bump goes early) is compacted (`Verdict::Compact`) rather than
+bumped or let go. Main conversations only (Claude Code can't compact a
+subagent from outside), and only an agent with `Feature::Compact`
+(`KeepIn.compact`). Never one working, with a decision waiting (`needs`,
+`decisions`), something running in its background (`tasks`,
+`background`), whose cache has lapsed already, nor again until it has
+had a turn of its own after the compaction's (`Stretch.compacted_turn`,
+carried from one idle stretch to the next: the compaction is a turn of
+its own, so the turn count must pass it by 2). An hour's cache (Claude
+Code signed in) lapses at an hour idle, so "after 1 hour" compacts it at
+about 59 minutes; set "for" to 2 hours as well and it's bumped once at 59
+minutes and compacted at about 119 with "after 2 hours". A 5-minute
+cache reaches an hour only if it's kept warm that long, which its bumps'
+cap (5) doesn't allow at auto. How: the guard's `HostOps::compact` sends
+`/compact` to the session's host, as the compact sheet's own compaction
+does, and logs `cache-compacted` (context, ttl, idleFor, warmUntil, after
+in minutes, why) for `rush why`; a failure logs `cache-compact-failed`.
 
 Never bumped: a session asleep (its program has exited; waking it costs
 more than the bump), done, working, with a queue, held by the runaway
@@ -1316,14 +1373,32 @@ synthetic stand-in answer, is a failure, and `cacheWarm` stays. Other harnesses 
 OpenAI, Gemini and DeepSeek charge no extra to write the cache, so a
 lapse there costs 0.9 C at most and DeepSeek's cache lives for hours.
 
-Settings: General › Prompt cache: "Keep it warm" (on by default: a bump
-is a request rush makes on its own, and on a plan it counts against the
-account's limits, but three bumps cost about a quarter of the rewrite
-they save; turn it off there) and "for" (15 minutes; 5, 30, 60, 120).
+Settings: Usage › Prompt cache (its own page beside General, with the
+context guard, the runaway guard and the advisor; see "Settings › Usage"
+above), kept in config.json's `cacheKeep`; a config that says nothing is
+today's rule (`CacheKeep::settings` gives `cachekeep::Settings::default`):
+
+| row | choices | default | `cacheKeep` | read by |
+|---|---|---|---|---|
+| Keep idle conversations warm | on, off | on | `on` (written only as false) | the guard's look |
+| ‧ for | 5, 15, 30, 60, 120 minutes | 15 | `minutes` | the guard's look |
+| ‧ compact long waits | off, after 1 hour, after 2 hours | off | `compactAfter` | the guard's look |
+| Keep waiting subagents' cache | on, off | on | `subagents` (written only as false) | the host, as a session starts |
+| ‧ start known-slow commands in background | on, off | on | `ahead` (written only as false) | the gate, every command |
+| Subagents' cache life (Claude Code) | automatic, 5 minutes, 1 hour | automatic | `subagentCache` (by harness) | the host, as a session starts |
+| Smallest conversation worth keeping | 10k, 20k, 50k, 100k tokens | 20k | `minTokens` | both |
+| Most refreshes per wait | auto (half a rewrite), 2, 3, 5, 9 | auto | `refreshes` | both |
+
+"Keep idle conversations warm" is on by default: a bump is a request
+rush makes on its own, and on a plan it counts against the account's
+limits, but three bumps cost about a quarter of the rewrite they save.
 Each harness that can has "Keep its cache warm" on its own page (as
-General says, on, off), kept in config.json's `cacheKeep` (`on`, written
-only as `false`, so a config that says nothing is on; `minutes`,
-`harnesses`).
+Usage says, on, off; `harnesses`): off there is off for its subagents
+too. "Subagents' cache life" is the same stored value as the harness
+page's "Subagents' cache"; only harnesses with `Feature::SubagentCache`
+show it, labelled with the harness's name. The numbers that stay
+constants: `LEAD` (a minute), `RETRY` (2 minutes), the prices, each
+bump's ~300 tokens and each step-in's ~1,000.
 
 ### Subagents' cache (Rust-only)
 
@@ -1366,8 +1441,9 @@ There is no `rush spend` command in the port, so none shows it.
 
 Set. `Feature::SubagentCache` ("subagentcache") is the capability: the
 harness lets rush say how long its subagents' cache lives; only Claude
-Code declares it. Settings › Harnesses › Claude Code › Subagents' cache is
-automatic (sets nothing, the default), 5 minutes or 1 hour, kept in
+Code declares it. Settings › Harnesses › Claude Code › Subagents' cache
+(also on Settings › Usage › Prompt cache as "Subagents' cache life
+(Claude Code)", one stored value) is automatic (sets nothing, the default), 5 minutes or 1 hour, kept in
 `config.subagentCache` by harness kind. The host reads it as a session
 starts (its first start, a wake, or a move onto a new build), into
 `StartOptions.subagent_cache`, and the Claude adapter puts
@@ -1409,7 +1485,9 @@ The rule is `rush_core::subkeep::decide`, beside `cachekeep::decide`: a
 step-in goes when the subagent's cache has under a minute left (`LEAD`),
 it waits on calls its agent can move (all of them), its context is at
 least 20k tokens, and its step-ins stay under half a rewrite (5 for a
-5-minute cache, 9 for an hour's) and under the rewrite counting each
+5-minute cache, 9 for an hour's): the same two numbers as the idle
+sessions' (Usage › Prompt cache's smallest conversation worth keeping
+and most refreshes per wait; `decide` takes `cachekeep::Settings`) and under the rewrite counting each
 one's ~1,000 tokens beside its read (the call's new result, and the few
 words the subagent says before it checks back). A cache already lapsed,
 a subagent making its own request, one finished, or one idle (nothing
@@ -1433,8 +1511,10 @@ savesUsd the lapse), a move that found nothing `subagent-cache-keep-
 failed`, and a cache let go where rush looked `subagent-cache-let` with
 why, once a stretch. Its row in the dock says `‹ moved to background to
 keep its cache` (the host's `subKept`, by the subagent's call, until it
-ends). It's on with General › Prompt cache's "Keep it warm" (or the
-harness's own), read as the agent starts.
+ends). It's on with Usage › Prompt cache's "Keep waiting subagents'
+cache", its own switch apart from the idle sessions' (`cacheKeep.subagents`,
+`CacheKeep::subagents_on_for`: off where the harness's own "Keep its cache
+warm" is off), read as the agent starts.
 
 (c) a step earlier: the host notes how long each shell command took
 (`rush_state::took`, took.json under rush's folder, by the folder the
@@ -1447,7 +1527,11 @@ the life from `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL` or
 `ENABLE_PROMPT_CACHING_1H` in its environment, else 5 minutes), answers
 `run_in_background: true` with a note: it took that long, check on it at
 least every 4 minutes (`check_back`) in short waits, and don't answer
-before it ends. It's a `subagent-cache-ahead` event.
+before it ends. It's a `subagent-cache-ahead` event. Its switch is
+Usage › Prompt cache's "start known-slow commands in background"
+(`cacheKeep.ahead`, `ahead_for`: only while the subagents' cache is kept),
+read at every command; the threshold stays the cache's life less a
+minute.
 
 ## A session's runs
 
@@ -1835,8 +1919,8 @@ is made. Everything below is in `rush_ui::frame`.
   conversations in the background (`config::dir()/search`).
 
 - **Settings.** `screens/settings` (the crate `rush-ui-settings`, re-exported there; its full-UI tests are in rush-ui's `settings_tests/`) is both settings places: Harnesses
-  (Providers, Harnesses, Config) and Settings (General, Keys, Plugins,
-  Updates, Remote), one dialog between them as in Go, its tabs drawn
+  (Providers, Harnesses, Config) and Settings (General, Usage, Keys,
+  Plugins, Updates, Remote), one dialog between them as in Go, its tabs drawn
   through `Place::pages_line`; its `register` makes the bundled plugins
   known (`rush_bundled::register`, Go's init). Pages read and write rush's config through
   a rush-state `Store` kept in the group's state (`settings::use_store`
@@ -2289,8 +2373,10 @@ shell (`shellbox::set_fake`), which also keeps nothing on disk.
 
 A bundled plugin, `context-guard` (rush-bundled `contextguard/`), on by
 default, that steps into an agent's tool calls through its hooks to keep
-what goes into its context lean. Four rules, each its own setting
-(Settings › Plugins › context-guard, all on by default). Each step-in is
+what goes into its context lean. Four rules, each its own setting, all on
+by default, each with a number you can set (Settings › Usage › Context
+guard; Settings › Plugins › context-guard turns the plugin on or off and
+says where its rules are, not showing them twice). Each step-in is
 logged in the session's events (`hook-denied` with `rule`, `why`,
 `tool`, `path` or `command`; `hook-squeezed` with `before`, `after`,
 `cut`), so `rush why <session>` and `rush events -k hook-denied` show
@@ -2320,8 +2406,29 @@ its script), not what ran in its place. The rules are pure functions
 (`contextguard::rules`, `squeeze`); `contextguard::hook` reads the file
 and the session's state (`<rush home>/context-guard/<session>.json`,
 flock'd, as hooks for calls made at once run at once; let go after a week
-untouched). The guard reads its switches at every hook, so turning a rule
-off works at once, in running sessions too.
+untouched). The guard reads its switches and numbers at every hook, so a
+change works at once, in running sessions too.
+
+The settings are the plugin's own (`rush_plugin` settings.json, by its
+manifest's keys), so the hook needs nothing else; `contextguard::rules_of`
+turns them into `Rules`, which carries each rule's number to the pure
+functions (`rules::read`, `rules::bash`, `squeeze::cap`). Unset, or a
+value its choices don't allow, is today's number:
+
+| row | key | choices | default |
+|---|---|---|---|
+| Don't re-read unchanged files | `reread` | on, off | on |
+| ‧ smallest file it applies to | `reread-kb` | 1, 2, 4, 8 KB | 2 KB |
+| Don't read huge files whole | `big-read` | on, off | on |
+| ‧ huge means over | `big-read-lines` | 500, 1,000, 2,000 lines (24, 48, 96 KB) | 1,000 lines or 48 KB |
+| Stop repeated failures | `repeat-fail` | on, off | on |
+| ‧ after | `repeat-after` | 2, 3, 5 in a row | 3 |
+| Trim command output | `squeeze` | on, off | on |
+| ‧ longer than | `squeeze-lines` | 300, 600, 1,200 lines (a third kept at each end) | 600: first and last 200 |
+
+The numbers that stay constants: a read with no limit covers 2,000 lines
+(Claude Code's Read), a failure's last 12 lines say whether two were the
+same, a squeeze is logged once it saved 1 KB.
 
 What it keeps is per agent: the main conversation, or a subagent by its
 `agent_id`, as a subagent's context is its own.
