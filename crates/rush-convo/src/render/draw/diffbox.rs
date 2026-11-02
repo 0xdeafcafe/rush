@@ -132,9 +132,10 @@ impl Drawer<'_> {
                 .fold((0, 0), |(a, d), p| (a + p.add, d + p.del))
         });
         let pad = self.sp(b.indent.saturating_sub(1));
-        let side = self.o.width >= SIDE_BY_SIDE;
-        let room = if side { self.o.width } else { self.cw };
-        let w = room.saturating_sub(pad.width() + 1).max(24);
+        // Side by side when rows may run that wide: not while a column
+        // stands beside the conversation (rows kept to CAP_ROW then).
+        let side = self.cw >= SIDE_BY_SIDE;
+        let w = self.cw.saturating_sub(pad.width() + 1).max(24);
 
         // The top edge: the path, what happened to the file, the counts.
         let moved = b.note == "moved" && !to.is_empty();
@@ -332,9 +333,11 @@ impl Drawer<'_> {
             let say = if opened {
                 faint("▾ ").and(dim("show less"))
             } else {
-                faint("▸ ")
-                    .and(dim("show all"))
-                    .and(faint(&format!(" · {} more", plural(total - b.cap, "line"))))
+                faint("▸ ").and(dim("show all")).and(faint(&format!(
+                    " · {} more line{}",
+                    total - b.cap,
+                    if total - b.cap == 1 { "" } else { "s" }
+                )))
             };
             let l = pad
                 .clone()

@@ -185,6 +185,8 @@ fn opts(w: usize, open: &[&str]) -> Options {
         zone: ZONE,
         speaker: "Claude".into(),
         preset: Preset::Code,
+        // No column beside the conversation: rows run the whole width.
+        wide: true,
         ..Options::default()
     };
     for r in open {
@@ -203,20 +205,22 @@ fn draw(s: &Session, w: usize, open: &[&str]) -> String {
 
 /// got checked against tests/snapshots/<name>.txt; UPDATE_SNAPSHOTS=1
 /// writes it. A missing one fails, with what was drawn, so CI shows it.
-fn snapshot(name: &str, got: &str) {
+fn snapshot(name: &str, got: &str) -> bool {
     let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/snapshots")
         .join(format!("{name}.txt"));
     if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(&p, got).unwrap();
-        return;
+        return true;
     }
     let want = std::fs::read_to_string(&p).unwrap_or_default();
-    assert!(
-        got == want,
-        "{name} differs; UPDATE_SNAPSHOTS=1 to accept\n=== {name} drawn ===\n{got}=== end {name} ==="
-    );
+    if got != want {
+        eprintln!(
+            "{name} differs; UPDATE_SNAPSHOTS=1 to accept\n=== {name} drawn ===\n{got}=== end {name} ==="
+        );
+    }
+    got == want
 }
 
 /// A session's changes, by name.
@@ -231,11 +235,13 @@ fn diffs_at_both_widths() {
         ("big", big_change),
         ("long", long_file),
     ];
+    let mut same = true;
     for (name, evs) in cases {
         let s = session(evs());
-        snapshot(&format!("diff_{name}_narrow"), &draw(&s, NARROW, &[]));
-        snapshot(&format!("diff_{name}_wide"), &draw(&s, WIDE, &[]));
+        same &= snapshot(&format!("diff_{name}_narrow"), &draw(&s, NARROW, &[]));
+        same &= snapshot(&format!("diff_{name}_wide"), &draw(&s, WIDE, &[]));
     }
+    assert!(same, "a diff differs from its snapshot");
 }
 
 #[test]

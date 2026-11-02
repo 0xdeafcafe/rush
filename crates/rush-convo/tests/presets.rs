@@ -225,32 +225,37 @@ fn draw(s: &Session, p: Preset, open: &[&str]) -> String {
 }
 
 /// Each view's rows checked against tests/snapshots/views_<view>_<w>.txt;
-/// UPDATE_SNAPSHOTS=1 writes them again.
-fn snapshot(name: &str, got: &str) {
+/// UPDATE_SNAPSHOTS=1 writes them again. Whether it's the same; one that
+/// isn't is printed whole.
+fn snapshot(name: &str, got: &str) -> bool {
     let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/snapshots")
         .join(format!("{name}.txt"));
     if std::env::var_os("UPDATE_SNAPSHOTS").is_some() || !p.exists() {
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(&p, got).unwrap();
-        return;
+        return true;
     }
     let want = std::fs::read_to_string(&p).unwrap();
-    assert!(
-        got == want,
-        "{name} differs; UPDATE_SNAPSHOTS=1 to accept\n=== {name} drawn ===\n{got}=== end {name} ==="
-    );
+    if got != want {
+        eprintln!(
+            "{name} differs; UPDATE_SNAPSHOTS=1 to accept\n=== {name} drawn ===\n{got}=== end {name} ==="
+        );
+    }
+    got == want
 }
 
 #[test]
 fn every_view_at_every_width() {
     let s = session();
+    let mut same = true;
     for p in [Preset::Chat, Preset::Code, Preset::CatchUp, Preset::Trail] {
         for w in [80, 120, 200] {
             let got = plain(&Renderer::new().render(&s, &opts(p, w)));
-            snapshot(&format!("views_{}_{w}", p.name()), &got);
+            same &= snapshot(&format!("views_{}_{w}", p.name()), &got);
         }
     }
+    assert!(same, "a view differs from its snapshot");
 }
 
 #[test]
