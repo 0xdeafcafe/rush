@@ -640,18 +640,20 @@ fn urgent(paths: &HashSet<PathBuf>) -> bool {
 }
 
 /// Waits until GAP has passed since a reading began, unless stop closes
-/// first; whether it waited at all.
+/// first; whether it waited at all. One sleep, woken by stop's close (it
+/// napped 50 ms at a time: 20 wakes a second while an agent worked).
 fn gap(began: std::time::Instant, stop: Option<&Stop>) -> bool {
-    let until = began + GAP;
-    let mut waited = false;
-    loop {
-        let now = std::time::Instant::now();
-        if now >= until || stop.is_some_and(Stop::is_closed) {
-            return waited;
-        }
-        waited = true;
-        std::thread::sleep((until - now).min(Duration::from_millis(50)));
+    let left = (began + GAP).saturating_duration_since(std::time::Instant::now());
+    if left.is_zero() || stop.is_some_and(Stop::is_closed) {
+        return false;
     }
+    match stop {
+        Some(s) => {
+            s.wait(left);
+        }
+        None => std::thread::sleep(left),
+    }
+    true
 }
 
 /// Reads one agent's preview off the UI thread.
@@ -962,6 +964,22 @@ mod tests {
             adapter: ad,
             session: Box::default(),
         }
+    }
+
+    /// The gap between a busy agent's readings is one wait its stop
+    /// ends: closed before or while it waits, it returns then, not at
+    /// GAP's end; a gap already over doesn't wait.
+    #[test]
+    fn gap_ends_with_its_stop() {
+        let began = std::time::Instant::now();
+        let stop = Arc::new(Stop::new().unwrap());
+        let s2 = stop.clone();
+        let t = std::thread::spawn(move || s2.close());
+        gap(began, Some(&stop));
+        t.join().unwrap();
+        assert!(began.elapsed() < GAP, "{:?}", began.elapsed());
+        assert!(!gap(began, Some(&stop)), "closed: no wait");
+        assert!(!gap(began - GAP, None), "over: no wait");
     }
 
     /// A transcript in the form Claude Code writes.

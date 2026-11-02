@@ -64,8 +64,8 @@ impl Stop {
         self.closed.load(Ordering::SeqCst)
     }
 
-    /// Waits up to d for close; whether it closed.
-    fn wait(&self, d: Duration) -> bool {
+    /// Waits up to d for close, asleep until then; whether it closed.
+    pub fn wait(&self, d: Duration) -> bool {
         let g = self.lock.lock().unwrap();
         let (_g, _) = self
             .cv
