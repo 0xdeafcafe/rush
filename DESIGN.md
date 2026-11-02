@@ -38,12 +38,12 @@ speed or memory claim has a number behind it.
 - **Draw only what's visible.** Screens render only the rows in view;
   history is indexed so a frame's cost doesn't grow with the conversation
   (the Go version's remaining hot spot, see
-  `../docs/performance-review-2026-10-01.md`). A frame whose rows are
+  `docs/performance-review-2026-10-01.md`). A frame whose rows are
   those on screen is neither painted nor written (rush-draw
   `Canvas::keep`), and what several parts of one frame each ask (the
   accounts, which read folders on disk) is asked once a frame
   (rush-ui `frame/framememo.rs`).
-- **Same look.** Screens copy the Go TUI exactly (`../docs/screenshots`,
+- **Same look.** Screens copy the Go TUI exactly (`docs/screenshots`,
   `internal/ui/style.go`, `internal/convo/style.go`). Same keys, same words.
 
 ## Modules (Cargo workspace)
@@ -2063,8 +2063,8 @@ aren't looked for in `/opt/homebrew/bin`; `rush_sys::proc::kill` and
 not. A thread's own rush folder (`set_thread_dir`) still keeps tests
 apart from each other; the sandbox keeps them all from the user's.
 
-To check, run the tests under `sandbox-exec` with `rust/tools/rush-tests.sb`
-(through `rust/tools/sbtest.sh cargo test -p <crate>`), a profile that denies
+To check, run the tests under `sandbox-exec` with `tools/rush-tests.sb`
+(through `tools/sbtest.sh cargo test -p <crate>`), a profile that denies
 writes to the real `~/.config`, `~/.claude`, `~/.codex`,
 `~/Library/Caches/{agtop,rush}`, unix-socket connects there and to Claude
 Code's daemon for the real `~/.claude`, exec of the

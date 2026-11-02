@@ -5,7 +5,7 @@
 //! rush has.
 //!
 //! `cargo bench -p rush-ui --bench frame` (run it through
-//! rust/tools/sbtest.sh: the model is a real one, in a throwaway home);
+//! tools/sbtest.sh: the model is a real one, in a throwaway home);
 //! with `-- profile` it draws for 20 s instead, for `sample`.
 
 use std::alloc::{GlobalAlloc, Layout, System};

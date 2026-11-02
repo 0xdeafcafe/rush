@@ -1,6 +1,6 @@
 name: Release
 
-# Builds rush (rust/, the `rush` crate) for Macs with Apple silicon only, and
+# Builds rush (the `rush` crate) for Macs with Apple silicon only, and
 # publishes it: a rolling `nightly` prerelease every night main changed (or
 # by hand), and on a v* tag a GitHub release plus the Homebrew formula in
 # 0xdeafcafe/homebrew-tap (brew install 0xdeafcafe/tap/rush).
@@ -58,9 +58,9 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             version="${GITHUB_REF_NAME#v}"
           else
-            base=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' rust/Cargo.toml)
+            base=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
             if [[ -z "$base" ]]; then
-              echo "no version in rust/Cargo.toml's [workspace.package]" >&2
+              echo "no version in Cargo.toml's [workspace.package]" >&2
               exit 1
             fi
             version="${base}-nightly.$(date -u +%Y%m%d)"
@@ -100,15 +100,13 @@ jobs:
       - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust
           key: ${{ matrix.target }}
 
       - name: Build
-        working-directory: rust
         run: |
           cargo build --release --locked -p rush --target "$TARGET"
-          mkdir -p ../dist/stage
-          cp "target/$TARGET/release/rush" ../dist/stage/rush
+          mkdir -p dist/stage
+          cp "target/$TARGET/release/rush" dist/stage/rush
 
       - name: Import signing certificate
         id: cert

@@ -5,4 +5,4 @@
 .claude/settings.local.json
 .DS_Store
 /bin/
-/rust/target/
+/target/

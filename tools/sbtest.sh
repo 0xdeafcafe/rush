@@ -1,7 +1,7 @@
 #!/bin/sh
-# Runs a command (usually cargo test) under rust/tools/rush-tests.sb with a
+# Runs a command (usually cargo test) under tools/rush-tests.sb with a
 # clean environment, so tests can't reach the user's rush:
-#   rust/tools/sbtest.sh cargo test -p rush-ui
+#   tools/sbtest.sh cargo test -p rush-ui
 # CARGO_TARGET_DIR and SCRATCH (where builds and test homes may write;
 # default $TMPDIR) are passed through.
 here=$(cd "$(dirname "$0")" && pwd)

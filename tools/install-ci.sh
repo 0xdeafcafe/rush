@@ -1,7 +1,7 @@
 #!/bin/sh
 # Installs the rush CI built for a commit of main (default: origin/main's
 # newest), waiting for its run when it's still going:
-#   rust/tools/install-ci.sh [commit]
+#   tools/install-ci.sh [commit]
 # Installs to ~/.local/bin/rush (RUSH_INSTALL_DIR moves where); the rush it
 # replaces is kept as ~/.local/share/rush/rush.prev.
 set -eu

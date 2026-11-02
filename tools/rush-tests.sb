@@ -1,5 +1,5 @@
 ; rush's tests run under this: they may do anything except touch the user's
-; real rush, agents and sessions. Run through rust/tools/sbtest.sh, which
+; real rush, agents and sessions. Run through tools/sbtest.sh, which
 ; passes HOME. Any denial shows in: log show --predicate 'sender == "Sandbox"'
 (version 1)
 (allow default)

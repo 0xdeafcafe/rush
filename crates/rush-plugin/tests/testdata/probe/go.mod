@@ -7,4 +7,4 @@ require (
 	github.com/0xdeafcafe/rush/plugins/examples v0.0.0
 )
 
-replace github.com/0xdeafcafe/rush/plugins/examples => ../../../../../../plugins/examples
+replace github.com/0xdeafcafe/rush/plugins/examples => ../../../../../plugins/examples

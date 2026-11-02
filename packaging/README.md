@@ -38,5 +38,5 @@ gh secret set APPLE_APP_PASSWORD -R 0xdeafcafe/rush    # prompts for it
 git tag v0.2.0 && git push origin v0.2.0
 ```
 
-The tag must be `v` and the version; rust/Cargo.toml's workspace version
+The tag must be `v` and the version; Cargo.toml's workspace version
 should match it, since nightlies are named after that.

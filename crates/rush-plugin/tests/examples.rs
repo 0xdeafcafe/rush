@@ -22,7 +22,7 @@ use serde_json::{Value, json};
 
 fn repo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../..")
+        .join("../..")
         .canonicalize()
         .unwrap()
 }

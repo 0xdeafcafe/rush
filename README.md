@@ -25,7 +25,7 @@ or build it from source, with rust (stable) and cargo:
 
 ```sh
 git clone https://github.com/0xdeafcafe/rush
-cargo install --locked --path rush/rust/crates/rush
+cargo install --locked --path rush/crates/rush
 ```
 
 that puts `rush` in `~/.cargo/bin`, which needs to be on your path. a rush built this way doesn't update itself: pull and build it again.

@@ -30,7 +30,7 @@ use crate::style::*;
 /// rush's guide, as the quick ask reads it (rush.Guide).
 pub const GUIDE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../../docs/guide.md"
+    "/../../docs/guide.md"
 ));
 
 /// How many threads are kept, in memory only (quickKeep).

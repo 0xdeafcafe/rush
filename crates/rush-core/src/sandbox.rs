@@ -53,9 +53,9 @@ pub fn real_home() -> Option<&'static Path> {
 
 /// This checkout: tests may read their fixtures from it.
 fn source_tree() -> &'static Path {
-    // rust/crates/rush-core → the repository.
+    // crates/rush-core → the repository.
     let here = Path::new(env!("CARGO_MANIFEST_DIR"));
-    here.ancestors().nth(3).unwrap_or(here)
+    here.ancestors().nth(2).unwrap_or(here)
 }
 
 /// Whether path is somewhere a test must never reach: under the real

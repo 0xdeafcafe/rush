@@ -9,7 +9,7 @@
 //! does through `adapter::CacheKeeper`) starts the cache's life over for a
 //! tenth of the context's price. So while you're likely to come back, a
 //! few bumps cost less than the rewrite they save; past that, the cache is
-//! let go. The rule and its numbers are in rust/DESIGN.md, "Keeping the
+//! let go. The rule and its numbers are in DESIGN.md, "Keeping the
 //! prompt cache warm".
 //!
 //! Compacting instead is never done here: it costs a turn whether you come

@@ -13,7 +13,7 @@ use crate::model::Model;
 /// rush's full guide (docs/guide.md), which the #ask agent answers from.
 pub const GUIDE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../../docs/guide.md"
+    "/../../docs/guide.md"
 ));
 
 // What #ask starts is the base's (crate::accounts).

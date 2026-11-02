@@ -3,7 +3,7 @@ name: CI
 # Checks every push to main and to a rush/* branch: formatting, clippy and
 # the tests, on a Mac (rush's home). A push to main also builds rush for
 # Apple silicon and keeps it as the run's artifact, `rush-main`, which
-# rust/tools/install-ci.sh downloads and installs: the builds that would
+# tools/install-ci.sh downloads and installs: the builds that would
 # otherwise load the machine rush runs on.
 
 on:
@@ -46,19 +46,15 @@ jobs:
       - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust
           key: check
           # Branches start from main's; only main saves, so the cache isn't
           # filled with every branch's copy.
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Format
-        working-directory: rust
         run: cargo fmt --all --check
       - name: Clippy
-        working-directory: rust
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test
-        working-directory: rust
         # Left out: shimmers_on_his_second hangs on the hour it runs at (the
         # mascot sleeps after 23:00); stuck_shell_is_stopped and
         # compacts_only_the_conversation_expected fail now and then on
@@ -88,19 +84,17 @@ jobs:
       - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust
           # The release workflow's cache for the same target.
           key: aarch64-apple-darwin
       - name: Build
-        working-directory: rust
         # No RUSH_VERSION: a build of main isn't a release, so it never
         # updates itself; build.rs puts the commit in `rush --version`.
         run: |
           cargo build --release --locked -p rush --target "$TARGET"
-          mkdir -p ../dist
-          cp "target/$TARGET/release/rush" ../dist/rush
-          codesign --force --sign - ../dist/rush
-          ../dist/rush --version
+          mkdir -p dist
+          cp "target/$TARGET/release/rush" dist/rush
+          codesign --force --sign - dist/rush
+          dist/rush --version
       - name: Cache use
         if: always()
         run: sccache --show-stats
