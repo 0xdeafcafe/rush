@@ -162,7 +162,8 @@ impl std::error::Error for Ended {}
 
 /// Writes queue here and a thread feeds them to stdin, so a caller holding
 /// a lock never blocks on Claude Code (which may itself be blocked writing
-/// its output).
+/// its output). The thread runs only while there's something to write
+/// (Rust-only: Go's writer goroutine waits for the session's life).
 #[derive(Default)]
 struct WriteQueue {
     buf: Vec<Vec<u8>>,
@@ -170,7 +171,7 @@ struct WriteQueue {
     err: Option<String>,
     /// The process has gone: nothing more is written.
     gone: bool,
-    /// A batch is being written.
+    /// A writer runs: a batch is being written, or is about to be.
     inflight: bool,
     /// Held for an upgrade: nothing is written until it's let go.
     paused: bool,
@@ -213,6 +214,9 @@ pub struct Kept {
 struct Shared {
     w: Mutex<WriteQueue>,
     wsig: Condvar,
+    /// Claude Code's stdin, written only by the writer while it runs; None
+    /// once closed.
+    stdin: Mutex<Option<std::fs::File>>,
     /// Set once the process has exited and its output is read: why it
     /// ended, None when it ended well.
     done: Mutex<Option<Option<Ended>>>,
@@ -358,6 +362,7 @@ fn run(
     let sh = Arc::new(Shared {
         w: Mutex::new(WriteQueue::default()),
         wsig: Condvar::new(),
+        stdin: Mutex::new(Some(std::fs::File::from(stdin))),
         done: Mutex::new(None),
         dsig: Condvar::new(),
         stderr: Tail::default(),
@@ -367,11 +372,6 @@ fn run(
         wake_w,
         fds,
     });
-    let w = sh.clone();
-    let stdin = std::fs::File::from(stdin);
-    std::thread::Builder::new()
-        .name("claude-stdin".into())
-        .spawn(move || writer(&w, stdin))?;
     let mut err = std::fs::File::from(stderr);
     let e = sh.clone();
     let (stderr_tx, stderr_done) = mpsc::channel();
@@ -471,32 +471,72 @@ fn drain(fd: RawFd) {
     while unsafe { libc::read(fd, b.as_mut_ptr().cast(), b.len()) } > 0 {}
 }
 
-/// Feeds queued writes to stdin until the session stops.
-fn writer(sh: &Shared, mut stdin: std::fs::File) {
+/// Whether q has a batch to write now: held for an upgrade, only once the
+/// session stops or has gone.
+fn due(q: &WriteQueue) -> bool {
+    !q.buf.is_empty() && (!q.paused || q.closed || q.gone)
+}
+
+/// Starts a writer for what's queued unless one runs, which takes it; with
+/// nothing to write and the session stopped or gone, closes stdin. Called
+/// after each change to the queue.
+fn pump(sh: &Arc<Shared>) {
+    {
+        let mut q = lock(&sh.w);
+        if q.inflight {
+            return;
+        }
+        if !due(&q) {
+            if q.closed || q.gone {
+                lock(&sh.stdin).take();
+            }
+            return;
+        }
+        q.inflight = true;
+    }
+    let w = sh.clone();
+    if rush_sys::threads::spawn_small("claude-stdin", move || writer(&w)).is_err() {
+        writer(sh); // no thread to write on: written here
+    }
+}
+
+/// Feeds queued writes to stdin until there are none, closing it once the
+/// session stops (or has gone): a writer [`pump`] started.
+fn writer(sh: &Shared) {
     loop {
         let (batch, closed) = {
             let mut q = lock(&sh.w);
-            while (q.buf.is_empty() || q.paused) && !q.closed && !q.gone {
-                q = sh.wsig.wait(q).unwrap_or_else(|e| e.into_inner());
-            }
-            if q.gone && !q.closed && q.buf.is_empty() {
-                return;
-            }
-            q.inflight = true;
             (std::mem::take(&mut q.buf), q.closed)
         };
-        for b in batch {
-            if let Err(e) = stdin.write_all(&b) {
-                lock(&sh.w).err = Some(e.to_string());
-                break;
+        let mut failed = None;
+        {
+            let mut stdin = lock(&sh.stdin);
+            if let Some(f) = stdin.as_mut() {
+                for b in batch {
+                    if let Err(e) = f.write_all(&b) {
+                        failed = Some(e.to_string());
+                        break;
+                    }
+                }
+                let _ = f.flush();
+            }
+            if closed {
+                stdin.take(); // closes it
             }
         }
-        let _ = stdin.flush();
-        lock(&sh.w).inflight = false;
-        sh.wsig.notify_all();
-        if closed {
-            return; // stdin closes as it drops
+        let mut q = lock(&sh.w);
+        if let Some(e) = failed {
+            q.err = Some(e);
         }
+        if !closed && due(&q) {
+            continue;
+        }
+        if q.closed || q.gone {
+            lock(&sh.stdin).take();
+        }
+        q.inflight = false;
+        sh.wsig.notify_all();
+        return;
     }
 }
 
@@ -611,6 +651,7 @@ impl Reader {
             q.gone = true;
             self.sh.wsig.notify_all();
         }
+        pump(&self.sh);
         // What it said last, once its stderr has closed; a shell it left
         // running may hold that open, so not for long.
         let _ = self.stderr_done.recv_timeout(Duration::from_millis(200));
@@ -663,6 +704,7 @@ impl Reader {
             q.gone = true;
             self.sh.wsig.notify_all();
         }
+        pump(&self.sh);
         *lock(&self.sh.done) = Some(err);
         self.sh.dsig.notify_all();
     }
@@ -818,6 +860,7 @@ impl Session {
     fn unpause_writes(&self) {
         lock(&self.sh.w).paused = false;
         self.sh.wsig.notify_all();
+        pump(&self.sh);
     }
 
     /// Whether the process has exited and its output is read.
@@ -860,6 +903,8 @@ impl Session {
         }
         q.buf.push(b);
         self.sh.wsig.notify_all();
+        drop(q);
+        pump(&self.sh);
         Ok(())
     }
 
@@ -1051,6 +1096,7 @@ impl Session {
             q.closed = true;
             self.sh.wsig.notify_all();
         }
+        pump(&self.sh);
         if !self.wait_for(grace) {
             let _ = rush_sys::proc::kill_group(self.pid, libc::SIGTERM);
             if !self.wait_for(Duration::from_secs(2)) {
