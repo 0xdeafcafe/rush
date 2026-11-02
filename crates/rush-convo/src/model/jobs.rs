@@ -217,14 +217,18 @@ impl Session {
     /// Job::kind, knowing a Monitor tool's command from a Bash one: both are
     /// shell tasks to Claude Code. A task heard of only from its end is
     /// known by the tool call that started it.
+    /// Only the two words the call can change look the call up: the dock
+    /// asks it of every task for every run, each frame, and the lookup
+    /// (a hash of the call id) was most of a frame's dock.
     pub fn job_kind(&self, j: &Job) -> &'static str {
-        let tool = self
-            .by_id
-            .get(j.tool_use_id.as_str())
-            .map(|&sid| &*self.steps[sid as usize].tool);
-        match (j.kind_word.as_str(), tool) {
-            ("local_bash", Some("Monitor")) => "monitor",
-            ("", Some("Agent" | "Task")) => "subagent",
+        let tool = || {
+            self.by_id
+                .get(j.tool_use_id.as_str())
+                .map(|&sid| &*self.steps[sid as usize].tool)
+        };
+        match j.kind_word.as_str() {
+            "local_bash" if tool() == Some("Monitor") => "monitor",
+            "" if matches!(tool(), Some("Agent" | "Task")) => "subagent",
             _ => j.kind(),
         }
     }

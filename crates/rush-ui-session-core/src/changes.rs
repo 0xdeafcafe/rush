@@ -184,8 +184,10 @@ fn open_dir(s: &Session) -> String {
 
 /// What the open session added and deleted in its project: not its
 /// memory or plans, which are on their own tabs.
+/// Counted where they lie, not copied out: the Changes tab says it each
+/// frame, and copying every file's patches was a frame's memmove.
 pub fn stat(m: &mut Model) -> (i64, i64) {
-    change_stat(&project_changes(m).0)
+    project_count(m).0
 }
 
 /// The files session key edited outside its project, split: the memory

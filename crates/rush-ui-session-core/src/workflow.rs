@@ -129,6 +129,13 @@ pub fn phases_of(phases: &[String], agents: &[WorkflowAgent], ended: bool) -> Ve
 /// How workflow task j stands: its phases, each with its agents, as
 /// Claude Code last said, else as its files do (workflowOf).
 pub fn workflow_of(r: &Runs, j: &Job) -> Vec<Phase> {
+    let (phases, agents) = said_of(r, j);
+    phases_of(phases, agents, !j.running())
+}
+
+/// What workflow_of is made from: the phases and agents Claude Code last
+/// said, else its files'.
+fn said_of<'a>(r: &'a Runs, j: &'a Job) -> (&'a [String], &'a [WorkflowAgent]) {
     let f = r.flow_files(r.flow_dir(j));
     let mut phases = &j.phases;
     let mut agents = &j.agents;
@@ -140,7 +147,27 @@ pub fn workflow_of(r: &Runs, j: &Job) -> Vec<Phase> {
             agents = &f.agents;
         }
     }
-    phases_of(phases, agents, !j.running())
+    (phases.as_slice(), agents.as_slice())
+}
+
+/// Agent id of workflow task j as workflow_of has it, without making
+/// every phase and copying every agent: agent_of asks it for each run,
+/// each frame. Only an id said twice needs the phases' order.
+fn agent_in(r: &Runs, j: &Job, id: &str) -> Option<WorkflowAgent> {
+    let (_, agents) = said_of(r, j);
+    let mut said = agents.iter().filter(|a| a.id == id);
+    let first = said.next()?;
+    if said.next().is_some() {
+        return workflow_of(r, j)
+            .into_iter()
+            .flat_map(|p| p.agents)
+            .find(|a| a.id == id);
+    }
+    let mut a = first.clone();
+    if !j.running() && (a.state == "running" || a.state == "queued") {
+        a.state = "stopped".into();
+    }
+    Some(a)
 }
 
 /// The folder name of a run's directory.
@@ -164,10 +191,8 @@ pub fn workflow_job<'a>(r: &Runs, s: &'a Session, run: &str) -> Option<&'a Job> 
 /// finished. None when neither knows (workflowAgent).
 pub fn agent_of(r: &Runs, s: &Session, sa: &Subagent) -> Option<(WorkflowAgent, bool)> {
     if let Some(j) = workflow_job(r, s, &sa.workflow) {
-        for p in workflow_of(r, j) {
-            if let Some(a) = p.agents.into_iter().find(|a| a.id == sa.id) {
-                return Some((a, j.running()));
-            }
+        if let Some(a) = agent_in(r, j, &sa.id) {
+            return Some((a, j.running()));
         }
         // Not in what Claude Code says now: a try it made before.
     }
