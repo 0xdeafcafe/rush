@@ -6,14 +6,24 @@
 //! What only waits for a time ([`Model::after`]) waits on the UI thread's
 //! own deadline instead, with no thread asleep for it (Rust-only).
 
-use std::thread;
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use rush_draw::{Sender, Step};
+use rush_sys::threads::Pool;
 
 use super::Out;
 use crate::model::Model;
 use crate::worker::Note;
+
+/// later's threads: one idle from the last piece takes the next, so each
+/// reading of the list (a second apart while an agent works) doesn't
+/// start a thread for each piece it hands off; idle for KEEP, one ends.
+/// Never fewer than the pieces running: none waits for another.
+static LATER: LazyLock<Pool> = LazyLock::new(|| Pool::new("rush-later", 2 << 20, KEEP));
+
+/// How long a later thread waits idle for another piece.
+const KEEP: Duration = Duration::from_secs(10);
 
 /// What the UI thread runs with the model when a Note::Apply lands.
 pub type Apply = Box<dyn FnOnce(&mut Model) -> Out + Send>;
@@ -27,8 +37,8 @@ struct Timers(Vec<(Instant, Timed)>);
 type Timed = Box<dyn FnOnce(&mut Model) -> Out>;
 
 impl Model {
-    /// Runs work on a thread of its own, then apply with its result on the
-    /// UI thread (later). With no loop (tests, `rush --render`) both run
+    /// Runs work on a thread of its own (one of LATER's), then apply with
+    /// its result on the UI thread (later). With no loop (tests, `rush --render`) both run
     /// at once, as Go's Frame drains what a key started.
     pub fn later<T: Send + 'static>(
         &mut self,
@@ -41,12 +51,10 @@ impl Model {
             return;
         };
         let tx = tx.lane(1);
-        let spawned = thread::Builder::new()
-            .name("rush-later".into())
-            .spawn(move || {
-                let v = work();
-                tx.send(Note::Apply(Box::new(move |m: &mut Model| apply(m, v))));
-            });
+        let spawned = LATER.run(move || {
+            let v = work();
+            tx.send(Note::Apply(Box::new(move |m: &mut Model| apply(m, v))));
+        });
         if spawned.is_err() {
             self.fail("couldn't start a thread for that");
         }

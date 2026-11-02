@@ -9,8 +9,11 @@
 //! thread itself (its kernel side, its wake-ups), so the first aim is
 //! fewer of them.
 
+use std::collections::VecDeque;
 use std::io;
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 /// For a helper that waits on one thing and hands what it gets on: a
 /// reader of a pipe or socket, a waiter on a child, a timer. Big enough for
@@ -39,6 +42,110 @@ pub fn spawn_small<T: Send + 'static>(
     f: impl FnOnce() -> T + Send + 'static,
 ) -> io::Result<JoinHandle<T>> {
     spawn_sized(name, SMALL, f)
+}
+
+/// Threads for work handed off one piece at a time (the UI's `later`):
+/// a piece goes to a thread waiting idle, else to a new one, so none ever
+/// queues behind another, and a thread idle for `keep` ends. While an
+/// agent works the UI hands off a few pieces a second; each started a
+/// thread of its own.
+pub struct Pool {
+    inner: Arc<PoolInner>,
+}
+
+type Job = Box<dyn FnOnce() + Send>;
+
+struct PoolInner {
+    name: String,
+    stack: usize,
+    keep: Duration,
+    q: Mutex<PoolQ>,
+    cv: Condvar,
+}
+
+#[derive(Default)]
+struct PoolQ {
+    jobs: VecDeque<Job>,
+    /// Threads waiting for a piece.
+    idle: usize,
+    /// Threads started, for tests.
+    started: usize,
+}
+
+impl Pool {
+    /// A pool whose threads are called name, with stacks of stack bytes,
+    /// each ending once idle for keep.
+    pub fn new(name: &str, stack: usize, keep: Duration) -> Pool {
+        Pool {
+            inner: Arc::new(PoolInner {
+                name: name.into(),
+                stack,
+                keep,
+                q: Mutex::new(PoolQ::default()),
+                cv: Condvar::new(),
+            }),
+        }
+    }
+
+    /// Runs f on an idle thread, or a new one when none is idle.
+    pub fn run(&self, f: impl FnOnce() + Send + 'static) -> io::Result<()> {
+        let mut q = self.inner.lock();
+        if q.idle > q.jobs.len() {
+            q.jobs.push_back(Box::new(f));
+            self.inner.cv.notify_one();
+            return Ok(());
+        }
+        q.started += 1;
+        drop(q);
+        let inner = self.inner.clone();
+        let started = spawn_sized(&self.inner.name, self.inner.stack, move || {
+            f();
+            inner.serve();
+        });
+        if started.is_err() {
+            self.inner.lock().started -= 1;
+        }
+        started.map(|_| ())
+    }
+
+    /// How many threads it has started so far.
+    pub fn started(&self) -> usize {
+        self.inner.lock().started
+    }
+
+    /// How many of its threads wait idle now.
+    pub fn idle(&self) -> usize {
+        self.inner.lock().idle
+    }
+}
+
+impl PoolInner {
+    fn lock(&self) -> MutexGuard<'_, PoolQ> {
+        self.q.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Takes the pieces handed to it until it has been idle for keep.
+    fn serve(&self) {
+        let mut q = self.lock();
+        loop {
+            if let Some(job) = q.jobs.pop_front() {
+                drop(q);
+                job();
+                q = self.lock();
+                continue;
+            }
+            q.idle += 1;
+            q = self
+                .cv
+                .wait_timeout_while(q, self.keep, |q| q.jobs.is_empty())
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+            q.idle -= 1;
+            if q.jobs.is_empty() {
+                return;
+            }
+        }
+    }
 }
 
 /// How many threads this process runs now; 0 when it can't be told.
@@ -138,5 +245,54 @@ mod tests {
         drop(tx);
         assert_eq!(t.join().unwrap(), r#"{"a":[1,2,{"b":"c"}]}"#);
         assert_eq!(count_of(-1), 0);
+    }
+
+    /// A piece goes to the thread idle from the last; two at once each
+    /// get a thread, neither waiting for the other.
+    #[test]
+    fn a_pool_reuses_an_idle_thread() {
+        let p = Pool::new("rush-test-pool", SMALL, Duration::from_secs(600));
+        let idle = |p: &Pool| {
+            while p.idle() == 0 {
+                std::thread::yield_now();
+            }
+        };
+        let (tx, rx) = mpsc::channel();
+        let t = tx.clone();
+        p.run(move || t.send(std::thread::current().id()).unwrap())
+            .unwrap();
+        let first = rx.recv().unwrap();
+        idle(&p);
+        p.run(move || tx.send(std::thread::current().id()).unwrap())
+            .unwrap();
+        assert_eq!(rx.recv().unwrap(), first);
+        assert_eq!(p.started(), 1);
+        idle(&p);
+        let (go_tx, go) = mpsc::channel::<()>();
+        let (ran_tx, ran) = mpsc::channel();
+        let r = ran_tx.clone();
+        p.run(move || {
+            r.send(()).unwrap();
+            let _ = go.recv();
+        })
+        .unwrap();
+        ran.recv().unwrap();
+        p.run(move || ran_tx.send(()).unwrap()).unwrap();
+        ran.recv().unwrap();
+        assert_eq!(p.started(), 2);
+        drop(go_tx);
+    }
+
+    /// Its threads end once idle for their keep; pieces run all the same.
+    #[test]
+    fn a_pool_thread_ends_once_idle_for_its_keep() {
+        let p = Pool::new("rush-test-pool", SMALL, Duration::ZERO);
+        let (tx, rx) = mpsc::channel();
+        for _ in 0..3 {
+            let t = tx.clone();
+            p.run(move || t.send(()).unwrap()).unwrap();
+            rx.recv().unwrap();
+        }
+        assert!(p.started() >= 1);
     }
 }
