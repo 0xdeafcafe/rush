@@ -983,7 +983,11 @@ fn a_working_run_shows_its_working_line() {
     assert!(got.contains("· running Bash…"), "no working line:\n{got}");
     let done = row_of(&mut m, "x");
     assert!(done.contains("done"), "the finished run: {done}");
-    assert_eq!(got, WORKING_VIEW, "\n{got}");
+    let start = m.session.as_ref().unwrap().sess.jobs()[0].start;
+    let wf = subview::started(start, NOW);
+    let asked = crate::screens::settings::paint::civil(NOW - 56_789);
+    let hm = format!("{:02}:{:02}", asked.hour, asked.minute);
+    assert_eq!(got, working_view(&wf, &hm), "\n{got}");
     // Opened whole, the line is under its conversation too.
     subview::open_sub(&mut m, KEY, "w");
     let whole = text(&views::body(&mut m, 150, 30).unwrap());
@@ -1023,5 +1027,43 @@ fn row_of(m: &mut Model, id: &str) -> String {
         .unwrap_or_default()
 }
 
-/// The subagents view 150 wide, w picked and working.
-const WORKING_VIEW: &str = "";
+/// The subagents view 150 wide, w picked and working: the line under its
+/// conversation, its short form on its row; wf is when the workflow
+/// started and hm when w was asked, in local time.
+fn working_view(wf: &str, hm: &str) -> String {
+    [
+        "  1 agent and 1 workflow running · 4 runs in all  ·  click one to see it h… │  · check the port's tests                                   running  57s",
+        "                                                                            │    claude-opus-4-1 · 1 step · $0.02",
+        "  Running  2                                                                │ ────────────────────────────────────────────────────────────────────────",
+        "  · ⋔ Port rush t… · {wf}   · Port 1/3  ›  · C…  running              5m   │",
+        "    · Port  1 of 3 done                                                     │ ▍ You  {hm}",
+        "      ✓ port:hl                                   done                      │ ▍ check the port's tests",
+        "        ▸ 1 earlier try · click to show                                     │",
+        "      ✢ port:claude                               · working…                │ ▍ Agent  {hm}",
+        "      ◌ port:draw    waiting to start                                       │ │   ✳ run the tests  cargo test                        36s since {hm}",
+        "    · Check  not started                                                    │",
+        "▍ · check the port's tests                        · run the test…     57s   │ ▍   · running Bash…  36s  turn 56s",
+        "                                                                            │",
+        "  Finished  2                                                               │",
+        "  ✓ plan the next piece of the port with care     done                      │",
+        "  ✓ review the diff                               done                 9s   │",
+        "                                                                            │",
+        "                                                                            │",
+        "                                                                            │",
+        "                                                                            │",
+        "                                                                            │",
+        "                                                                            │",
+        "                                                                            │",
+        "                                                                            │",
+        "                                                                            │",
+        "                                                                            │",
+        "                                                                            │",
+        "                                                                            │",
+        "                                                                            │ ╭─ to check the port's tests ──────────────────────────────────────────╮",
+        "                                                                            │ │ ❯ the session isn't running in rush · resume it to send              │",
+        "                                                                            │ ╰──────────────────────────────────────────────────────────────────────╯",
+    ]
+    .join("\n")
+    .replace("{wf}", wf)
+    .replace("{hm}", hm)
+}
