@@ -87,7 +87,7 @@ pub fn sync(m: &mut Model, key: &str) {
         .take_if(|(id, _)| *id != waiting)
         .map(|(_, e)| e);
     if let Some(ms) = wake {
-        m.ask_wake(Instant::now() + Duration::from_millis(ms));
+        m.ask_wake(Instant::now() + Duration::from_millis(ms.max(0) as u64));
     }
     if let Some(e) = back {
         put_back(m, key, e);
