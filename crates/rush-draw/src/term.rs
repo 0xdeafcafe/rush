@@ -100,6 +100,31 @@ const ANSWER_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 /// in as colours (reader.rs LateOsc).
 pub(crate) static LATE_OSC: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
+/// Set to have the next frame ask the terminal for its colours again
+/// (see [`ask_colours_again`]).
+static ASK_AGAIN: AtomicBool = AtomicBool::new(false);
+
+/// What rush asks again: the terminal's text and background colours.
+const ASK_AGAIN_QUERY: &[u8] = b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\";
+
+/// Has the next frame ask the terminal for its text and background
+/// colours again, as the window comes back into focus or the system goes
+/// light or dark: a terminal that follows the system has new ones, and
+/// rush's colours are made from them. It's written by the frame, never
+/// between two parts of one; the answers come late, to the input thread
+/// (reader.rs LateOsc), and are applied as late colours are
+/// ([`on_late_colours`]). Nothing when the terminal never said its
+/// colours: a terminal that doesn't answer isn't asked again.
+///
+/// Rush can't take the terminal's own light or dark reports (mode 2031,
+/// `CSI ? 997 ; 1 n`): crossterm reads `CSI ?` until a `u` or `c`, so one
+/// would swallow what's typed after it.
+pub fn ask_colours_again() {
+    if COLOUR_REPLIES.lock().is_ok_and(|r| !r.is_empty()) {
+        ASK_AGAIN.store(true, Ordering::SeqCst);
+    }
+}
+
 /// Whether the terminal hadn't answered at all when the first frame was
 /// due: its colours may yet come (see [`on_late_colours`]).
 static UNANSWERED: AtomicBool = AtomicBool::new(false);
@@ -371,6 +396,15 @@ impl Term {
     /// Draws a frame: `f` paints the whole of it, and only the cells that
     /// differ from the last frame are written.
     pub fn draw(&mut self, f: impl FnOnce(&mut Canvas)) -> io::Result<()> {
+        if ASK_AGAIN.swap(false, Ordering::SeqCst) {
+            // Owed before it's asked, so the input thread is ready for
+            // the answers when they come.
+            let _ = LATE_OSC.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                Some(n.saturating_add(2))
+            });
+            self.out.write_all(ASK_AGAIN_QUERY)?;
+            Write::flush(&mut self.out)?;
+        }
         // A new size is drawn whole on a cleared screen (ratatui's
         // autoresize).
         let (w, h) = self.size()?;

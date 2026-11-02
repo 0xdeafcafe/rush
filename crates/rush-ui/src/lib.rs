@@ -16,6 +16,7 @@ pub use rush_ui_base::{
 };
 use rush_ui_base::{chores, listcache, model, session};
 
+mod appearance;
 pub mod hosted;
 pub mod screens;
 #[cfg(test)]
@@ -161,6 +162,14 @@ fn run_model(
     rush_draw::on_late_colours(move || {
         let _ = tx.send(worker::Note::Apply(Box::new(|m: &mut Model| {
             screens::settings::apply_colors(m);
+            frame::Out::Draw
+        })));
+    });
+    // The system going light or dark: the terminal's colours asked again
+    // (appearance.rs), its answers applied as late ones are above.
+    let tx = lp.sender().lane(1);
+    appearance::follow(move || {
+        let _ = tx.send(worker::Note::Apply(Box::new(|_: &mut Model| {
             frame::Out::Draw
         })));
     });

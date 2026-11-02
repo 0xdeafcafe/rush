@@ -10,9 +10,11 @@
 //! these read them. Rust-only: the replies are kept in rush's cache, by
 //! terminal, so a terminal that's slow to answer starts on the colours
 //! it said last time rather than rush's own, and its answer, when it
-//! comes, changes nothing (term_colours). Not yet: asking again on focus or on a mode 2031
-//! report, so a terminal switched light or dark while rush runs keeps
-//! the colours it had (DESIGN.md "Screens", gaps).
+//! comes, changes nothing (term_colours). They're asked again as the
+//! window comes back into focus and as macOS goes light or dark
+//! (rush_draw::ask_colours_again, rush-ui appearance.rs), so a terminal
+//! that switches its theme while rush runs gets rush's colours switched
+//! with it. Mode 2031 reports aren't taken: crossterm can't read them.
 
 use super::ground::Rgb;
 

@@ -147,6 +147,16 @@ fn run(r: &Reader, tty: &Tty, wake: &UnixStream, winch: &UnixStream, push: impl 
     let mut late =
         LateOsc::armed(crate::term::LATE_OSC.swap(0, std::sync::atomic::Ordering::SeqCst));
     let mut push = |e: crossterm::event::Event| -> bool {
+        // Colours asked again since (term.rs ask_colours_again).
+        let more = crate::term::LATE_OSC.swap(0, std::sync::atomic::Ordering::SeqCst);
+        if more > 0 {
+            late.arm(more);
+        }
+        // Back in focus: the terminal's colours may have changed while
+        // rush was away (its theme, or the system's light or dark).
+        if matches!(e, crossterm::event::Event::FocusGained) {
+            crate::term::ask_colours_again();
+        }
         if late.drops(&e) {
             if let Some(body) = late.reply.take() {
                 crate::term::late_colour(&body);
@@ -270,6 +280,12 @@ impl LateOsc {
         }
     }
 
+    /// Owes more replies, asked again: looked for a while from now.
+    pub(crate) fn arm(&mut self, more: u8) {
+        self.owed = self.owed.saturating_add(more);
+        self.until = Some(std::time::Instant::now() + LATE_FOR);
+    }
+
     /// Whether e is part of a late reply, to drop; a reply read whole is
     /// left in reply.
     pub(crate) fn drops(&mut self, e: &crossterm::event::Event) -> bool {
@@ -352,6 +368,17 @@ mod tests {
         assert!(!l.drops(&k('x', M::NONE)));
         let mut l = LateOsc::armed(0);
         assert!(!l.drops(&k(']', M::ALT)), "nothing taken when it answered");
+        // Asked again (focus, the system going light or dark): its
+        // answers are taken in too, then keys go through again.
+        l.arm(2);
+        assert!(!l.drops(&k('q', M::NONE)), "a key before them goes through");
+        let a = take(&mut l, reply("10;rgb:11/10/0e", k('\\', M::ALT)));
+        let b = take(&mut l, reply("11;rgb:ff/ff/ff", k('\\', M::ALT)));
+        assert_eq!(
+            (a.as_deref(), b.as_deref()),
+            (Some("10;rgb:11/10/0e"), Some("11;rgb:ff/ff/ff"))
+        );
+        assert!(!l.drops(&k(']', M::ALT)), "only as many as asked");
     }
 
     /// pause returns once the thread has stopped, and it stays stopped

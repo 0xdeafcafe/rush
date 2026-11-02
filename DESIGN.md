@@ -1859,8 +1859,14 @@ is made. Everything below is in `rush_ui::frame`.
   Replies are kept in rush's cache by terminal (`term-colours.json`);
   one that hasn't answered in time starts on what it said last time, and
   the input thread takes its late replies in as colours (rush-draw
-  `reader.rs` LateOsc), which are applied then. They aren't asked again on focus or
-  a mode 2031 report, as rush-draw hands the UI keys, not raw replies.
+  `reader.rs` LateOsc), which are applied then. They're asked again as the window comes back
+  into focus and, on macOS, as the system goes light or dark (the
+  global preferences file watched with kqueue, as the system's own
+  notice reaches only a main thread's run loop): the next frame writes
+  the query and the input thread takes the answers as late replies
+  (`rush_draw::ask_colours_again`, rush-ui `appearance.rs`). Mode 2031
+  reports aren't used: crossterm reads `CSI ?` until `u` or `c`, so one
+  would swallow the keys after it.
   Handing the terminal to `$EDITOR` (Go's `editorCmd`) waits on
   rush-draw pausing its input reader: every $EDITOR use goes through
   `session_core::memedit::edit_then(m, path, done)`, which runs the
