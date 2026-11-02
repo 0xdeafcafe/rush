@@ -424,11 +424,11 @@ pub fn question_card(
 /// to edit, not sending them.
 pub const EDIT_ANSWER: &str = "session.decide.edit";
 
-/// The key the decisions card's hint names for [`EDIT_ANSWER`]; empty
-/// when none is bound.
+/// The key the decisions card's hint names for [`EDIT_ANSWER`], shift+enter
+/// unless you moved it.
 fn edit_key(c: &Conn) -> String {
     match c.q_edit_key.as_deref() {
-        None | Some("shift+enter") => "⇧enter".into(),
+        None | Some("") | Some("shift+enter") => "⇧enter".into(),
         Some(k) => k.to_string(),
     }
 }

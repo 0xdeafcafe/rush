@@ -246,16 +246,11 @@ fn answers_decisions_from_the_wall() {
         !f.contains("type your own answer below"),
         "no box here:\n{f}"
     );
+    // The pick that answers the last decision sends them all.
     for k in ["down", "enter", "1"] {
         press(&mut m, k);
     }
-    assert!(
-        screen(&mut m).join("\n").contains("Send these answers?"),
-        "{}",
-        screen(&mut m).join("\n")
-    );
     assert_eq!(m.agents_page, 1, "still on the Wall");
-    press(&mut m, "enter");
     assert_eq!(
         *fake.replies.lock().unwrap(),
         [(
