@@ -1458,6 +1458,9 @@ impl Host {
             o.inbox = crate::inbox::inbox_hook(&c.id);
         }
         o.bash_hook = rush_gate::plugin::hook_command(); // gates, and runs long calls as scripts
+        // The same command answers for the context guard, which reads its
+        // switches as each hook runs.
+        o.tool_hook = o.bash_hook.clone();
         // Its subagents' caches kept while they wait on long calls, as
         // Settings › General › Prompt cache says, where its agent can.
         let keep = rush_state::Store::load().config.cache_keep;
