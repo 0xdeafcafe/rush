@@ -1029,7 +1029,7 @@ fn decisions_card_hint_names_the_edit_key() {
     let mut m = loader_model(LOADER_MSG, true);
     let i = info(&m, "k").unwrap();
     card_key(&mut m, "k", &i, "up", true);
-    let card = text(&rows(&mut m, 100, 0));
+    let card = text(&rows(&mut m, 160, 0));
     assert!(
         card.contains("enter  sends") || card.contains("enter sends"),
         "{card}"
