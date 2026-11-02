@@ -183,6 +183,34 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     }
 }
 
+/// Gives the open session's panel the keys (→ from the box, where the
+/// panel stands in place of the column): whether it took them.
+pub fn focus(m: &mut Model, key: &str) -> bool {
+    if open_panel(m).as_deref() != Some(key) {
+        return false;
+    }
+    read::state(m, key).take_focus()
+}
+
+/// The keys while the panel has them (ViewsState::key): before every
+/// other Session key. One that isn't the panel's gives the keys back and
+/// goes on to the box.
+pub fn focus_key(m: &mut Model, k: &crate::frame::Press) -> Out {
+    let Some(key) = open_panel(m) else {
+        // Not drawn: it can't have the keys when it shows again.
+        if let Some(key) = open_key(m)
+            && read::state_of(m, &key).is_some_and(|st| st.focus)
+        {
+            read::state(m, &key).focus = false;
+        }
+        return Out::Pass;
+    };
+    match read::state(m, &key).key(&k.s) {
+        None => Out::Pass,
+        Some(c) => on_click(m, &key, c),
+    }
+}
+
 /// Does what a click on the panel asked of the session (clickViews' host
 /// calls, viewAction, the runs at its top).
 pub fn on_click(m: &mut Model, key: &str, c: Click) -> Out {

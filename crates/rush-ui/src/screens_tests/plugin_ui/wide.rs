@@ -172,6 +172,22 @@ fn diffs(
             }
         }
     }
+    if !out.is_empty() {
+        // The whole of what's drawn, as the files would be, to copy in
+        // when the change is meant (Rust-only: the panel no longer
+        // matches Go's everywhere).
+        let file = |row: &dyn Fn(&Line) -> String| {
+            sets.iter()
+                .map(|set| set.iter().map(row).collect::<Vec<_>>().join("\n"))
+                .collect::<Vec<_>>()
+                .join("\n=====\n")
+        };
+        out.push(format!(
+            "--- {name}.txt as drawn ---\n{}\n--- {name}.sty as drawn ---\n{}\n--- end ---",
+            file(&|l: &Line| l.plain().trim_end_matches(' ').to_string()),
+            file(&runs)
+        ));
+    }
     out
 }
 

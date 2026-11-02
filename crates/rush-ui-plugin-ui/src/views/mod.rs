@@ -281,4 +281,6 @@ pub fn cw(s: &str) -> usize {
 }
 
 #[cfg(test)]
+mod live_tests;
+#[cfg(test)]
 mod tests;

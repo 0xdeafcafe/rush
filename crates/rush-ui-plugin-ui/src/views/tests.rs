@@ -27,21 +27,35 @@ fn state() -> ViewsState {
     st
 }
 
-fn same(got: Vec<String>, want: &str, what: &str) {
-    let want: Vec<&str> = want
+/// Where got differs from the golden want, and the whole of got as the
+/// file it would be, to copy in when the change is meant.
+pub(super) fn differs(got: Vec<String>, want: &str, what: &str) -> Option<String> {
+    let rows: Vec<&str> = want
         .strip_suffix('\n')
         .unwrap_or(want)
         .split('\n')
         .collect();
-    for (i, (g, w)) in got.iter().zip(&want).enumerate() {
-        assert_eq!(g, w, "{what}: row {i}\n got: {got:#?}");
-    }
-    assert_eq!(got.len(), want.len(), "{what}: rows\n{got:#?}");
+    let first = got
+        .iter()
+        .zip(&rows)
+        .position(|(g, w)| g != w)
+        .or((got.len() != rows.len()).then_some(got.len().min(rows.len())))?;
+    Some(format!(
+        "{what}: row {first} differs:\n got {:?}\nwant {:?}\n--- {what} as drawn ---\n{}\n--- end ---",
+        got.get(first),
+        rows.get(first),
+        got.join("\n")
+    ))
+}
+
+fn none_differ(bad: Vec<String>) {
+    assert!(bad.is_empty(), "{}", bad.join("\n\n"));
 }
 
 #[test]
 fn body_matches_go() {
     let v = all();
+    let mut bad = Vec::new();
     for (w, want) in [
         (44, include_str!("testdata/body_44.txt")),
         (60, include_str!("testdata/body_60.txt")),
@@ -51,8 +65,9 @@ fn body_matches_go() {
             .into_iter()
             .map(|l| l.s.plain())
             .collect();
-        same(got, want, &format!("body at {w}"));
+        bad.extend(differs(got, want, &format!("body at {w}")));
     }
+    none_differ(bad);
 }
 
 #[test]
@@ -75,6 +90,7 @@ fn panel_matches_go() {
     }];
     let now = v.updated.to_ms() + 90_000;
     let vs = vec![v, small];
+    let mut bad = Vec::new();
     for (w, want) in [
         (48, include_str!("testdata/panel_48.txt")),
         (64, include_str!("testdata/panel_64.txt")),
@@ -98,8 +114,9 @@ fn panel_matches_go() {
         st.past = false;
         st.shut = true;
         draw(&mut st, 6);
-        same(got, want, &format!("panel at {w}"));
+        bad.extend(differs(got, want, &format!("panel at {w}")));
     }
+    none_differ(bad);
 }
 
 /// A click on the panel: tabs, folding, opening, sorting, buttons, the

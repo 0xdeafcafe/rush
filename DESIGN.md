@@ -2053,17 +2053,41 @@ is made. Everything below is in `rush_ui::frame`.
   the agent should say) the panel greys it, its foot reading "made by the
   agent · not updated · 3h" with the "not updated" part in the warning
   tone, and its busy marks (◐ ◉) drawn as quiet dots, so it doesn't
-  pretend to be live; untouched `AWAY_MS` = 45 min (or 3 turns, as
-  before) the host puts it away among the past views, whether the session
-  works or not, pinned ones aside. The host looks every minute (`VIEWS_EVERY`)
+  pretend to be live; untouched `AWAY_MS` = 45 min the host puts it away
+  among the past views, whether the session works or not, pinned ones
+  aside. The host looks every minute (`VIEWS_EVERY`)
   only once a session works and while it keeps agent views, off the
   UI thread (`Host::sweep_views`, `views::sweep`). The first time a view
   is stale while the session works, the agent is told through rush's
   notice inbox (the hook output rush's other notices use, so only
-  harnesses with an inbox), one line, "Views not updated in 10 min: prs.
-  Set again or clear." (about 15 tokens, plus the notice's header), once
-  per view per untouched period (keyed by the view's last update), never
-  while idle or with views off. **Views off** (Settings, Agent views;
+  harnesses with an inbox), once per view per untouched period (keyed by
+  the view's last update), never while idle or with views off.
+  **Firmer at each turn's end** (2 Nov 2026, after "far too often the gen
+  ui is not updated or no longer relevant"; 12 of 51 views were set once
+  and never again): every limit and the rule live in
+  `rush_host::viewstale`, plain functions tested by a table
+  (`at_turn_end`, `by_clock`). When a turn ends the host
+  (`views_at_turn_end`, off its thread) greys each agent view whose rows
+  are all done ("all done": every row or item with a state good or
+  ticked, bars full, none busy, failing or waiting; a view of plain facts
+  isn't finished), one the whole turn left alone ("not updated for a
+  turn"), and one the turn changed under it ("out of date": a `git push`,
+  merge, rebase, commit or `gh pr merge` the host saw in the turn's shell
+  calls, `change_of`, after the view's last set, and the view is of
+  branches, PRs or CI or names what the command named). The reason is
+  written into the view's file (`View::greyed`, its time left as the
+  agent set it), which the panel's foot shows. A view still grey and
+  untouched `AWAY_TURNS` = 2 turns later is put away (3 untouched turns,
+  as before, counted from the grey). The clock greys the same way
+  ("not updated"). Each grey and put-away is a `view-greyed` or
+  `view-put-away` event (with what looked: "turn end" or "the clock") for
+  `rush why`. The message that starts the agent's next turn ends with one
+  line naming the grey views, the same words but the names:
+  `<system-reminder>Stale views: prs, tests. Set each again with what's
+  current, or clear it.</system-reminder>` (about 20 tokens; never in the
+  system prompt, which stays the same for the cache; the conversation
+  drops it as it drops every system-reminder). The agent's set clears
+  the grey. **Views off** (Settings, Agent views;
   config `viewsOff`, on by default): the panel and list lines hide, the
   prompt part and the `view` MCP tool aren't given to agents started
   afterwards, a call is refused and no sweep or notice runs. The agent's
@@ -2086,7 +2110,7 @@ is made. Everything below is in `rush_ui::frame`.
   views were set once and never again. The user's words: "far too often
   the gen ui is not updated or no longer relevant", "prose duplicated on
   sidebar and in main view, hard to know where to look". So: the prompt
-  part (829 characters, ~210 tokens) and the tool's description say the
+  part (908 characters with the stale and actions words, ~225 tokens) and the tool's description say the
   chat-or-view rule and the room (row text under 30, meta under 20,
   tables of 2 or 3 short columns); a view is read forgivingly
   (`viewparse::parse_view`: numbers as strings, words as numbers, one
@@ -2097,6 +2121,29 @@ is made. Everything below is in `rush_ui::frame`.
   right block of that kind; a table's word cell too wide for its column
   wraps to a second line before it is cut; `rush view example` has
   branches, before-after and test-run.
+  **Worked, not just read** (Rust-only, after "it's always a bit
+  crammed… You can't scroll, you can't click"). The wheel scrolls the
+  panel, and its bottom edge says "↑ n · ↓ n more" (the panel's own
+  marker, Go's). Set again by the agent, a view keeps where you scrolled
+  it; one that shrank keeps as much as it has, its end at the bottom.
+  → from the box with nothing typed gives the panel the keys where it
+  stands in place of the column (`beside::focus`, `ViewsState::take_focus`,
+  as the column takes them): ↑↓ move a cursor over what a click does (a
+  row, a heading, a row of buttons), drawn on the selection's ground as
+  a picked row is; pgup and pgdn scroll a page; enter, space or → do what
+  a click does (open a row: its detail and buttons; press a button);
+  on a row of buttons ← → pick one, lit as under the pointer; ← or esc
+  give the keys back, and any other key goes back to the box
+  (`ViewsState::key`, `beside::focus_key`). The tool's description and
+  `rush view guide` ask for each row's next step as an action (a branch:
+  land it; a failing test: show the log), and the branches, test-run and
+  before-after examples have them. A table narrower than it needs
+  (its columns' widest cells and two spaces between) gives up its last
+  column, then the next, down to two, before a cell is cut or wrapped;
+  the header ends in a quiet "+n" where there's room, and a row opened
+  shows every column's cell. The panel's goldens (`testdata/*.txt`,
+  `testdata/wide/views.*`) are Rust's since; a test that differs prints
+  the whole drawing to copy in.
   Its sheets, the editor, the panel and
   the artifacts view are checked against Go row by row, words and
   colours, at the widths 80, 120 and 200 column screens give them

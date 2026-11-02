@@ -109,6 +109,9 @@ pub fn register(x: &mut Ext) {
     // Focus in the column beside the conversation (→ from the box or the
     // conversation): its keys come before everything else's.
     x.session_keys.insert(0, side::focus_key);
+    // And in the views panel standing in its place.
+    x.session_keys
+        .insert(0, rush_ui_plugin_ui::views::beside::focus_key);
     // A memory file being edited has every key first.
     x.session_keys.push(memedit::key);
     x.session_keys.push(memedit::draft_key);

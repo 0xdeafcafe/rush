@@ -34,6 +34,10 @@ impl ViewsState {
         if !v.by.is_empty() || v.pinned {
             return String::new(); // a plugin's or one you brought back: theirs and yours
         }
+        if !v.greyed.is_empty() {
+            // The host greyed it, and says why (rush_host::viewstale).
+            return v.greyed.clone();
+        }
         let k = QuietKey {
             name: v.name.clone(),
             updated: v.updated.to_ms(),

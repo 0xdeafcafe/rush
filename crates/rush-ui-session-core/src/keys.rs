@@ -556,7 +556,7 @@ fn arrow_right(m: &mut Model, key: &str, empty: bool, picked: bool) -> Out {
             }
             return Out::Draw;
         }
-        if super::side::focus(m, key) {
+        if super::side::focus(m, key) || rush_ui_plugin_ui::views::beside::focus(m, key) {
             return Out::Draw;
         }
     }

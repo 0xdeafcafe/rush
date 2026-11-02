@@ -78,6 +78,17 @@ pub(super) fn table(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
             }
         }
     }
+    // Narrower than the table, its last columns go first, down to two,
+    // before any cell is cut: their cells show in the row opened (its
+    // detail), and a quiet +n on the header says how many went.
+    let all = n;
+    let need = |k: usize| widths[..k].iter().sum::<usize>() + gutter + 2 * (k - 1);
+    let mut n = n;
+    while n > 2 && need(n) > w {
+        n -= 1;
+    }
+    widths.truncate(n);
+    right.truncate(n);
     // Cut the widest until the row fits, two spaces between columns.
     let room = w as isize - gutter as isize - 2 * (n as isize - 1);
     while (widths.iter().sum::<usize>() as isize) > room {
@@ -135,6 +146,10 @@ pub(super) fn table(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
                 name = trunc(&name, widths[c].saturating_sub(1)) + arrow;
             }
             h.spans.push(bolded(col, cell(&name, c)));
+        }
+        let more = format!(" +{}", all - n);
+        if all > n && h.width() + cw(&more) <= w {
+            h.spans.push(faint(more));
         }
         out.push(ViewLine::with(
             line(h.spans),

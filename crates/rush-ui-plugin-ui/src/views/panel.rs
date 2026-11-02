@@ -94,6 +94,17 @@ pub struct ViewsState {
     pub quiet: String,
     pub quiet_key: super::quiet::QuietKey,
     pub quiet_memo: String,
+    /// The panel has the keys (→ from the box): ↑↓ move the cursor over
+    /// what a click does, enter does it, ← or esc gives them back
+    /// (Rust-only, as the column beside the conversation takes them).
+    pub focus: bool,
+    /// The first body row of the thing the cursor is on.
+    pub cursor: usize,
+    /// The button picked, on a row of buttons under the cursor.
+    pub btn: usize,
+    /// What a click does in the body as last drawn: each thing's first
+    /// and last row (a row drawn on two lines is one thing).
+    pub items: Vec<(usize, usize)>,
 }
 
 /// The view the tab names, else the newest (shownView).
@@ -131,9 +142,11 @@ pub fn views_panel(
     st.empty = vs.is_empty();
     st.has_past = !past.is_empty();
     if h == 0 || vs.is_empty() && past.is_empty() {
+        st.focus = false;
         return Vec::new();
     }
     if st.shut || st.empty && !st.past {
+        st.focus = false; // a strip has nothing to move through
         let mark = if st.empty {
             paint(SUB, "⟲") // only past ones: it opens them
         } else {
@@ -165,12 +178,33 @@ pub fn views_panel(
     st.h = h;
     let bh = h.saturating_sub(2);
     st.most = body.len().saturating_sub(bh);
+    // Set again by the agent, the view keeps where you scrolled it; one
+    // that shrank keeps as much as it still has, its end at the bottom.
     st.scroll = st.scroll.min(st.most);
+    st.items = items_of(&body);
+    if st.focus {
+        // On a thing a click does still; the wheel may scroll it out of
+        // sight, and the next key brings it back.
+        st.snap_cursor();
+    }
+    let cur = st.cursor_rows();
     let mut out = Vec::with_capacity(h);
     out.push(top);
     for i in 0..bh {
         let l = body.get(st.scroll + i).cloned().unwrap_or_default();
-        let mid = if st.hover != i + 1 || !l.act.ok() {
+        let mid = if cur.contains(&(st.scroll + i)) {
+            // The cursor: a button picked lit, else the row on the
+            // selection's ground, as a picked row is.
+            let btn = l.act.btns.get(st.btn).map(|b| b.from as i64);
+            match btn.and_then(|x| l.act.lit_line(x)) {
+                Some(lit) => cat([ln([plain(" ")]), fit(lit, inner), ln([plain(" ")])]),
+                None => on_ground(
+                    cat([ln([plain(" ")]), fit(l.s, inner), ln([plain(" ")])]),
+                    inner + 2,
+                    SEL_BG,
+                ),
+            }
+        } else if st.hover != i + 1 || !l.act.ok() {
             cat([ln([plain(" ")]), fit(l.s, inner), ln([plain(" ")])])
         } else if let Some(lit) = l.act.lit_line(st.hover_x) {
             cat([ln([plain(" ")]), fit(lit, inner), ln([plain(" ")])])
@@ -208,6 +242,24 @@ pub fn views_panel(
     }
     while out.len() < full {
         out.push(ln([plain(blanks(w))]));
+    }
+    out
+}
+
+/// The things a click does in body, each its first and last row: the
+/// lines in a run with the same click are one.
+fn items_of(body: &[ViewLine]) -> Vec<(usize, usize)> {
+    let mut out: Vec<(usize, usize)> = Vec::new();
+    for (i, l) in body.iter().enumerate() {
+        if !l.act.ok() {
+            continue;
+        }
+        match out.last_mut() {
+            Some((_, to)) if *to + 1 == i && body[*to].act == l.act && l.act.btns.is_empty() => {
+                *to = i;
+            }
+            _ => out.push((i, i)),
+        }
     }
     out
 }
@@ -854,6 +906,12 @@ impl ViewsState {
         let Some(a) = self.acts.get(ru - 1).cloned() else {
             return Click::Drew;
         };
+        self.act(a, cu)
+    }
+
+    /// What a click at column cu does on a body row whose click is a
+    /// (the rest of clickViews); enter does it at the cursor.
+    fn act(&mut self, a: ViewAct, cu: usize) -> Click {
         if !a.btns.is_empty() {
             return match a.btns.iter().find(|b: &&Btn| cu >= b.from && cu < b.to) {
                 Some(b) => Click::Act {
@@ -926,6 +984,139 @@ impl ViewsState {
         let s = self.scroll as i64 + if up { -3 } else { 3 };
         self.scroll = (s.max(0) as usize).min(self.most);
         true
+    }
+
+    /// Gives the panel the keys, the cursor on the first thing in sight a
+    /// click does. Whether there is one.
+    pub fn take_focus(&mut self) -> bool {
+        if self.w == 0 || self.shut || self.empty && !self.past {
+            return false;
+        }
+        let Some(&(from, _)) = self
+            .items
+            .iter()
+            .find(|(from, _)| *from >= self.scroll)
+            .or(self.items.first())
+        else {
+            return false;
+        };
+        self.focus = true;
+        self.cursor = from;
+        self.btn = 0;
+        true
+    }
+
+    /// The body rows under the cursor, none without the keys.
+    fn cursor_rows(&self) -> std::ops::RangeInclusive<usize> {
+        match self.items.get(self.at_item()) {
+            Some(&(from, to)) if self.focus => from..=to,
+            _ => 1..=0,
+        }
+    }
+
+    /// The cursor's thing among items: the one it starts, else the last
+    /// before it.
+    fn at_item(&self) -> usize {
+        self.items
+            .iter()
+            .rposition(|(from, _)| *from <= self.cursor)
+            .unwrap_or(0)
+    }
+
+    /// The cursor kept on a thing a click does, after the view changed;
+    /// none left, the keys go back.
+    fn snap_cursor(&mut self) {
+        match self.items.get(self.at_item()) {
+            Some(&(from, _)) => self.cursor = from,
+            None => self.focus = false,
+        }
+    }
+
+    /// Whether the cursor's first row is in sight in bh rows.
+    fn cursor_shows(&self, bh: usize) -> bool {
+        self.cursor >= self.scroll && self.cursor < self.scroll + bh
+    }
+
+    /// The cursor kept on a thing a click does, and in sight in bh rows.
+    fn settle_cursor(&mut self, bh: usize) {
+        self.snap_cursor();
+        let Some(&(from, to)) = self.items.get(self.at_item()) else {
+            return;
+        };
+        if from < self.scroll {
+            self.scroll = from;
+        } else if to >= self.scroll + bh {
+            self.scroll = (to + 1).saturating_sub(bh).min(from).min(self.most);
+        }
+    }
+
+    /// A key while the panel has the keys (k as rush names it): ↑↓ move
+    /// the cursor, pgup and pgdn scroll a page, enter, space or → do what
+    /// a click on it does (open a row, press a button), ← and → pick
+    /// among a row of buttons, ← or esc give the keys back. None for a key
+    /// that isn't the panel's: the keys go back, and it goes on.
+    pub fn key(&mut self, k: &str) -> Option<Click> {
+        if !self.focus {
+            return None;
+        }
+        let i = self.at_item();
+        let bh = self.h.saturating_sub(2).max(1);
+        let page = 1.max(bh.saturating_sub(1));
+        let row = self.cursor.saturating_sub(self.scroll);
+        let a = self.acts.get(row).cloned().unwrap_or_default();
+        let btns = a.btns.len();
+        if matches!(k, "enter" | "space" | "right") && !self.cursor_shows(bh) {
+            // Scrolled away by the wheel: back to it first.
+            self.settle_cursor(bh);
+            return Some(Click::Drew);
+        }
+        match k {
+            "up" | "down" => {
+                let j = if k == "up" {
+                    i.saturating_sub(1)
+                } else {
+                    (i + 1).min(self.items.len().saturating_sub(1))
+                };
+                if let Some(&(from, _)) = self.items.get(j) {
+                    self.cursor = from;
+                }
+                if k == "up" && i == 0 {
+                    self.scroll = 0; // the top: what's above the first too
+                }
+                self.btn = 0;
+                self.settle_cursor(bh);
+            }
+            "pgup" | "pgdown" => {
+                self.scroll = if k == "pgup" {
+                    self.scroll.saturating_sub(page)
+                } else {
+                    (self.scroll + page).min(self.most)
+                };
+                let (top, end) = (self.scroll, self.scroll + bh);
+                let first = self.items.iter().find(|(f, _)| *f >= top && *f < end);
+                if let Some(&(from, _)) = first.filter(|_| self.cursor < top || self.cursor >= end)
+                {
+                    self.cursor = from;
+                    self.btn = 0;
+                }
+            }
+            "left" if btns > 0 && self.btn > 0 => self.btn -= 1,
+            "right" if btns > 0 && self.btn + 1 < btns => self.btn += 1,
+            "right" if btns > 0 => {}
+            "left" | "esc" => self.focus = false,
+            "enter" | "space" | "right" => {
+                let cu = match a.btns.get(self.btn) {
+                    Some(b) => b.from,
+                    None => 4, // past a checklist's mark: it opens, not ticks
+                };
+                return Some(self.act(a, cu));
+            }
+            _ => {
+                self.focus = false;
+                return None;
+            }
+        }
+        Some(Click::Drew)
     }
 
     /// Lights the row under the pointer when a click on it does
