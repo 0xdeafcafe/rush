@@ -302,7 +302,7 @@ fn a_run_picked() {
     pick(&mut m, "run:x");
     let h = hint(&mut m, 160);
     assert!(
-        h.contains("watch this subagent") && h.contains("…and say why"),
+        h.contains("see it in Subagents") && h.contains("…and say why"),
         "{h}"
     );
     press(&mut m, "x");

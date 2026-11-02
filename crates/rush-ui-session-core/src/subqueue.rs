@@ -1,4 +1,4 @@
-//! A subagent you're watching has a queue of its own: what you send it
+//! A subagent you message from its box has a queue of its own: what you send it
 //! waits there, and one message goes into its inbox each time it finishes
 //! a step; a run that finished hands what it still had to the main
 //! session. After Go's internal/ui/subqueue.go (subQKey :21, queueSub :34,

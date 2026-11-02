@@ -177,13 +177,6 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         // The spinner turns, and a message waited on too long goes.
         m.ask_wake(Instant::now() + Duration::from_secs(1));
     }
-    // What was sent the watched run another way, or not yet read.
-    let notes = super::relay::note_lines(m, &key, w);
-    if !notes.is_empty() {
-        block(&mut out, &mut blocks);
-        out.extend(notes);
-    }
-
     // The queue and a waiting card sit last, just above the box; a room
     // running on the chat before them (paneDock :3513).
     // The views beside the conversation take their room of its width; the
@@ -420,7 +413,6 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
     let mem_edit = super::memedit::editing(m, key)
         .then(|| super::memedit::picked_path(m, key))
         .flatten();
-    let watching = super::subview::watching(m, key);
     // A room's pane is its row's, as Go's room rows are agents.
     let a = crate::rooms::row_agent(m, key).cloned();
     let c = conn(m, key);
@@ -443,42 +435,11 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         }
         None => (false, false, false),
     };
-    let relay = super::relay::relay_sub(m, key);
-    let inbox = conn(m, key).info.inbox;
     let mut top = Line::new();
     // Where the send mode is on the top edge's left label, while it's
     // the label's.
     let mut send_part: Option<(usize, usize)> = None;
     let mut send_top = String::new();
-    if let Some(sa) = relay.as_ref() {
-        top = line([
-            sp("to the subagent ", DIM),
-            sp(
-                rush_draw::truncate(&one_line(&sa.typ), 28, "…").into_owned(),
-                TEXT,
-            ),
-            sp(
-                if inbox {
-                    ", straight, after the step it's on"
-                } else {
-                    // The main session passes it on with SendMessage.
-                    ", passed on by the main session"
-                },
-                DIM,
-            ),
-        ]);
-    } else if watching {
-        // A finished subagent takes no messages; the main session does.
-        let name = a.as_ref().map(|a| a.display_name.as_str()).unwrap_or("");
-        top = line([
-            sp("to the main session, ", DIM),
-            sp(
-                rush_draw::truncate(&one_line(name), 28, "…").into_owned(),
-                TEXT,
-            ),
-            sp(", not the subagent", DIM),
-        ]);
-    }
     let add = |top: &mut Line, l: Line| {
         if !top.spans.is_empty() {
             top.spans.push(sp(" · ", DIM));
@@ -753,55 +714,18 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
             ],
         );
     }
-    // Watching a run: its keys, or its picked step's.
-    if super::subview::watching(m, key) {
-        let rk = super::row_key(m);
-        let c = conn(m, key);
-        let step = c
-            .runs
-            .detail
-            .as_ref()
-            .is_some_and(|d| !d.view.sel.is_empty());
-        if step {
-            return fit_keys(
-                w,
-                &[
-                    (rk.as_str(), "open or close"),
-                    ("↑↓", "pick a step"),
-                    ("esc", "back to message"),
-                    ("ctrl+o", "show all"),
-                ],
-            );
-        }
-        let back = if c.watch.back || (m.ext.calls.hosted_alone())(m) {
-            "back to the conversation"
-        } else {
-            "back to the list"
-        };
-        if super::relay::relay_sub(m, key).is_some() {
-            return fit_keys(
-                w,
-                &[
-                    ("enter", "send to the subagent"),
-                    ("esc · ←", back),
-                    ("shift+↑↓", "other runs"),
-                    ("↑", "pick a step"),
-                    ("ctrl+f", "find in chat"),
-                ],
-            );
-        }
+    // The picked run's box in the subagents view has the keys.
+    if conn(m, key).watch.msg_focus && super::views::view_name(m, key) == "subagents" {
         return fit_keys(
             w,
             &[
-                ("enter", "send to the main session"),
-                ("esc · ←", back),
-                ("shift+↑↓", "other runs"),
-                ("↑", "pick a step"),
-                ("ctrl+f", "find in chat"),
-                ("ctrl+o", "show all"),
+                ("enter", "send to the subagent"),
+                (send_now.as_str(), "send now"),
+                ("tab · esc", "back to the list"),
             ],
         );
     }
+
     let view = super::views::view_name(m, key);
     // The conversation's view: a turn or a step opens in Normal, and the
     // key to the next view is said while one other than Normal shows.
@@ -835,7 +759,7 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
         let turn = picked.split(':').next().is_some_and(|t| {
             t.len() > 1 && t.starts_with('t') && t[1..].bytes().all(|b| b.is_ascii_digit())
         });
-        // A run picked: watch it, or read what it did once it's done; a
+        // A run picked: see it in Subagents, or message it there; a
         // running command picked in the conversation: x stops it
         // (rushmode.go:3800-3813).
         let sub = (picked.starts_with("run:") || picked.starts_with("sub:"))
@@ -886,13 +810,13 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
             ]
         } else if picked.starts_with("run:") && sub.as_ref().is_some_and(|s| !s.1) {
             &[
-                ("space", "read what it did"),
+                ("space", "see it in Subagents"),
                 ("↑↓", "pick"),
                 ("esc", "back to message"),
             ]
         } else if picked.starts_with("run:") {
             &[
-                ("space", "watch this subagent"),
+                ("space", "see it in Subagents"),
                 ("x", "stop it"),
                 ("shift+x", "…and say why"),
                 ("↑↓", "pick"),
@@ -900,11 +824,17 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
             ]
         } else if picked.starts_with("sub:") && sub.as_ref().is_some_and(|s| s.1) {
             &[
-                ("space", "watch it"),
+                ("→ · tab", "message it"),
                 ("x", "stop it"),
                 ("shift+x", "…and say why"),
                 ("↑↓", "pick"),
-                ("esc", "back to message"),
+                ("shift+↑↓", "next run"),
+            ]
+        } else if picked.starts_with("sub:") {
+            &[
+                ("→ · tab", "message it"),
+                ("↑↓", "pick"),
+                ("shift+↑↓", "next run"),
             ]
         } else if let Some((kill, pause)) = &part {
             &[

@@ -221,7 +221,7 @@ pub fn running_preview(
     let mut hint = if picked && !on_run {
         keys(&[("space", "read what it did")])
     } else if picked {
-        keys(&[("space", "watch it")])
+        keys(&[("space", "see it in Subagents")])
     } else if let Some(j) = c.sel.strip_prefix("job:").and_then(|id| c.s.job(id)) {
         match c.r.job_owner(j) {
             Some(sa) if run.iter().any(|r| r.id == sa.id) => {
@@ -646,7 +646,7 @@ pub fn shown_path(p: &str, cwd: &str) -> String {
 /// A key on a row picked in the background view: on a task, space or →
 /// opens or closes its output (→ only opens) and d its launch script; on
 /// a workflow they show its agents in the subagents view; on one of a
-/// workflow's agents they watch it (jobKey, jobs.go:707-735; paneKey's
+/// workflow's agents they pick it there (jobKey, jobs.go:707-735; paneKey's
 /// run: rows, rushmode.go:4084).
 pub fn background_key(m: &mut Model, key: &str, s: &str) -> Out {
     let sel = m
@@ -657,7 +657,7 @@ pub fn background_key(m: &mut Model, key: &str, s: &str) -> Out {
     if let Some(id) = sel.strip_prefix("run:") {
         if matches!(s, "space" | " " | "right" | "enter") {
             let id = id.to_string();
-            super::subview::watch_run(m, key, &id);
+            super::subview::pick_from(m, key, &id, &sel);
             return Out::Draw;
         }
         return Out::Pass;
@@ -783,7 +783,7 @@ fn has_details(m: &mut Model, key: &str, id: &str) -> bool {
 }
 
 /// A click on the background view's row r: a workflow shows its agents,
-/// one of its agents is watched, a task opens or closes on the first
+/// one of its agents is picked there, a task opens or closes on the first
 /// click: its rows are one thing (clickRef, rushmode.go:5102-5122).
 pub fn background_click(m: &mut Model, key: &str, r: &str) -> Out {
     if let Some(v) = m.session.as_mut() {
@@ -799,7 +799,7 @@ pub fn background_click(m: &mut Model, key: &str, r: &str) -> Out {
     }
     if let Some(id) = r.strip_prefix("run:") {
         let id = id.to_string();
-        super::subview::watch_run(m, key, &id);
+        super::subview::pick_from(m, key, &id, r);
         return Out::Draw;
     }
     if r.starts_with("job:") {

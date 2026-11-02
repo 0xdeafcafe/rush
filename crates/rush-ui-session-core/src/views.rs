@@ -537,13 +537,9 @@ fn move_sel(m: &mut Model, key: &str, d: isize) {
     let Some(v) = m.session.as_mut() else {
         return;
     };
-    // A picked run's line of facts goes with its row.
-    fn own(r: &str) -> bool {
-        !r.is_empty() && !r.starts_with(super::subview::OPEN_REF)
-    }
     let mut seen: Vec<&String> = Vec::new();
     for r in &refs {
-        if own(r) && seen.last() != Some(&r) && !seen.contains(&r) {
+        if !r.is_empty() && seen.last() != Some(&r) && !seen.contains(&r) {
             seen.push(r);
         }
     }
@@ -685,12 +681,8 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
             super::subs::kick(m, &key);
         }
     }
-    let c = conn(m, &key);
-    if !subs && c.watch.open.is_empty() {
-        c.runs.detail = None;
-    }
-    if subs && let Some(out) = super::subview::body(m, &key, w, rows) {
-        return Some(out);
+    if !subs {
+        conn(m, &key).runs.detail = None;
     }
     if name == "conversation" {
         return Some(super::conversation::body(m, &key, w, rows));
@@ -738,7 +730,7 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
         "background" => super::running::background_lines(m, &key, w),
         "memory" => super::memory::lines(m, &key, w, rows),
         "subagents" => {
-            let wide = super::subview::wide(&conn(m, &key).watch.open, w, true);
+            let wide = super::subview::wide(w, true);
             let lw = if wide {
                 super::subview::list_width(w)
             } else {
@@ -753,24 +745,38 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
         .as_ref()
         .map(|v| v.sel.clone())
         .unwrap_or_default();
+    // Narrow, the subagents list takes a few rows at the top, scrolled,
+    // and the run picked the rest under it.
+    let list_rows = if subs && !super::subview::wide(w, true) {
+        super::subview::split_rows(all.len(), rows)
+    } else {
+        rows
+    };
+    let stacked = list_rows < rows;
     let c = conn(m, &key);
+    if subs {
+        c.watch.split = if stacked { list_rows } else { 0 };
+    }
+    if stacked {
+        c.vs.rows = list_rows;
+    }
     c.vs.all_refs = all.iter().map(|(_, r)| r.clone()).collect();
     // The row picked stays in sight, a row of what's above it with it;
     // not while the wheel has scrolled the view away from it, so rows
     // coming and going don't pull the view back.
     let n = all.len();
-    let most = n.saturating_sub(rows);
+    let most = n.saturating_sub(list_rows);
     let free = c.vs.free.as_deref() == Some(sel.as_str());
     if !free && let Some(i) = all.iter().position(|(_, r)| !sel.is_empty() && *r == sel) {
         if i < c.vs.top {
             c.vs.top = i.saturating_sub(1);
-        } else if i >= c.vs.top + rows {
-            c.vs.top = i + 1 - rows;
+        } else if i >= c.vs.top + list_rows {
+            c.vs.top = i + 1 - list_rows;
         }
     }
     c.vs.top = c.vs.top.min(most);
     let top = c.vs.top;
-    let shown = &all[top..(top + rows).min(n)];
+    let shown = &all[top..(top + list_rows).min(n)];
     c.vs.refs = shown.iter().map(|(_, r)| r.clone()).collect();
     let hover = c.vs.hover_ref.clone();
     let refs: Vec<String> = shown.iter().map(|(_, r)| r.clone()).collect();
@@ -789,14 +795,19 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
     if let Some(v) = m.session.as_mut() {
         v.shown = refs; // the frame's clicks
     }
-    out.truncate(rows);
+    out.truncate(list_rows);
     if subs {
-        // Wide, the run's conversation beside the list's rows in sight.
+        // The run picked: wide, beside the list's rows in sight; narrow,
+        // under them.
         let top = m.session.as_ref().map_or(0, |v| v.top);
         while out.len() < rows {
             out.push(Line::new());
         }
-        super::subview::beside(m, &key, &mut out, w, top);
+        if stacked {
+            super::subview::below(m, &key, &mut out, w, list_rows, top);
+        } else {
+            super::subview::beside(m, &key, &mut out, w, top);
+        }
     }
     conn(m, &key).vs.lines = out.clone();
     Some(out)

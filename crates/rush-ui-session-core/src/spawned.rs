@@ -9,9 +9,8 @@
 //! subqueue.go (viaSub :64, noteSub :90, onSubSent :101) and
 //! cmdbar.go:1756 (sendNowKey).
 //!
-//! Which spawned agent the parent's view is watching is the subagents
-//! view's (spawns.go's watchedHost); it calls [`send`] with the host's
-//! id once it routes the box there.
+//! Which spawned agent a message goes to is the subagents view's: the box
+//! under the run picked there routes it (relay.rs's send_to).
 
 use super::host::hosts;
 use super::subqueue::{self, SubNote};

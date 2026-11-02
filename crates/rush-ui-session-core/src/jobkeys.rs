@@ -81,18 +81,14 @@ pub fn picked_shell(m: &Model, key: &str) -> String {
     }
 }
 
-/// The run you're on: the one watched, or the one picked in the dock or
-/// the subagents view; and whether it still works (pickedSub).
+/// The run you're on: the one picked in the dock or the subagents view;
+/// and whether it still works (pickedSub).
 pub fn picked_sub(m: &Model, key: &str) -> Option<(Subagent, bool)> {
-    let watching = super::subview::watching(m, key);
     let sel = sel(m);
     let c = m.kept.peek::<super::Core>()?.conns.get(key)?;
-    let id = if watching {
-        c.watch.open.as_str()
-    } else {
-        sel.strip_prefix("run:")
-            .or_else(|| sel.strip_prefix("sub:"))?
-    };
+    let id = sel
+        .strip_prefix("run:")
+        .or_else(|| sel.strip_prefix("sub:"))?;
     let s = &m.session.as_ref().filter(|v| v.key == key)?.sess;
     let r = &c.runs;
     let now = m.now;
@@ -438,10 +434,9 @@ pub fn job_key(m: &mut Model, key: &str, s: &str, empty: bool) -> Out {
             _ => {}
         }
     }
-    // ctrl+x on a subagent, picked or watched, stops that one alone; x
-    // does too on its row.
-    let watching = super::subview::watching(m, key);
-    if (s == "ctrl+x" || s == "x" && empty && !watching)
+    // ctrl+x on a subagent picked stops that one alone; x does too on its
+    // row.
+    if (s == "ctrl+x" || s == "x" && empty)
         && let Some((sa, live)) = picked_sub(m, key)
         && (live || s == "x")
     {

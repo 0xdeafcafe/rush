@@ -266,16 +266,18 @@ fn its_tab_keys_and_clicks() {
     assert_eq!(m.session.as_ref().unwrap().sel, "job:w1");
 }
 
-/// A workflow's agent watched from the background view: esc comes back
-/// to the background view, on its row (watchRun, closeSub).
+/// A workflow's agent picked from the background view shows in the
+/// subagents view; esc comes back to the background view, on its row
+/// (watchRun, closeSub).
 #[test]
-fn watched_from_the_background_view() {
+fn picked_from_the_background_view() {
     let d = tempfile::tempdir().unwrap();
     let mut m = background(&d);
     views::show_view(&mut m, KEY, "background");
     pick(&mut m, "run:x");
     super::tests_subview::press(&mut m, "space");
-    assert!(subview::watching(&m, KEY), "space didn't watch it");
+    assert_eq!(views::view_name(&m, KEY), "subagents");
+    assert_eq!(m.session.as_ref().unwrap().sel, "sub:x");
     let w = &conn(&mut m, KEY).watch;
     assert_eq!(
         (w.from.as_str(), w.from_view.as_str()),
@@ -359,7 +361,6 @@ fn the_panels_runs_open_on_a_click() {
     // A run is picked in the subagents view, beside its list, not
     // opened across it.
     on_click(&mut m, KEY, Click::Run("run:x".into()));
-    assert!(!subview::watching(&m, KEY), "the run opened whole");
     assert_eq!(views::view_name(&m, KEY), "subagents");
     assert_eq!(m.session.as_ref().unwrap().sel, "sub:x");
     views::show_view(&mut m, KEY, "conversation");

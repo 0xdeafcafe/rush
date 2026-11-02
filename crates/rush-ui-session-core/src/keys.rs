@@ -64,13 +64,8 @@ pub fn esc_twice(m: &mut Model, k: &Press) -> Out {
     if !c.input.is_empty() || c.edit_q > 0 {
         return Out::Pass;
     }
-    // A picked row, the conversation's or a watched run's, is dropped.
-    let sub_picked = conn(m, &key)
-        .runs
-        .detail
-        .as_ref()
-        .is_some_and(|d| !d.view.sel.is_empty());
-    if !sel(m).is_empty() || sub_picked && super::subview::watching(m, &key) {
+    // A picked row is dropped.
+    if !sel(m).is_empty() {
         core(m).esc_at = 0;
         return Out::Pass;
     }

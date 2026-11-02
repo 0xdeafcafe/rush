@@ -108,9 +108,9 @@ fn subagent_dock() {
         assert!(out.contains(w), "missing {w:?} in\n{out}");
     }
     assert_eq!(refs, ["", "run:a1"]);
-    // Picked, space watches it.
+    // Picked, space shows it in Subagents.
     let (out, _) = preview(&s, &mut r, "run:a1", 100);
-    assert!(out.contains("space watch it"), "{out}");
+    assert!(out.contains("space see it in Subagents"), "{out}");
 }
 
 /// Runs show newest first, five at a time, and the pick stays put as
