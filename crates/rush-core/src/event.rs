@@ -693,7 +693,7 @@ impl From<serde_json::Error> for CodecError {
 }
 
 /// Every event's name on the wire, in Go's codec order. Retry has none.
-pub const NAMES: [&str; 27] = [
+pub const NAMES: [&str; 28] = [
     "exchange",
     "init",
     "message_start",
@@ -701,6 +701,7 @@ pub const NAMES: [&str; 27] = [
     "delta",
     "message",
     "call_updated",
+    "call_output",
     "approval",
     "approval_cancelled",
     "denied",

@@ -1,0 +1,27 @@
+              |
+t1            |▍ You  22:00
+t1            |▍ run the tests
+              |
+              |▍ Agent  22:00
+t1:s:b1       |│   ✳ cargo test --workspace                                                                   19s
+t1:s:b1:live  |│       ▾ fewer lines
+              |│       │ test t1 ... ok
+              |│       │ test t2 ... ok
+              |│       │ test t3 ... ok
+              |│       │ test t4 ... ok
+              |│       │ test t5 ... ok
+              |│       │ test t6 ... ok
+              |│       │ test t7 ... ok
+              |│       │ test t8 ... ok
+              |│       │ test t9 ... ok
+              |│       │ test t10 ... ok
+              |│       │ test t11 ... ok
+              |│       │ test t12 ... ok
+              |│       │ test t13 ... ok
+              |│       │ test t14 ... ok
+              |│       │ test t15 ... ok
+              |│       │ test t16 ... ok
+              |│       │ test t17 ... ok
+              |│       │ test t18 ... ok
+              |│       │ test t19 ... ok
+              |│       │ test t20 ... ok
