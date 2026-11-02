@@ -120,7 +120,7 @@ rush open <id> --hosted
 
 ## how it works
 
-rush reads claude code's files (job state, roster, transcripts) and only changes things through claude code itself, via its daemon socket or the cli. the one exception is switching accounts, which writes the sign-in into claude code's keychain item and `~/.claude.json`. other agents go through adapters (`rust/crates/rush-codex`, `rush-acp` and the like).
+rush reads claude code's files (job state, roster, transcripts) and only changes things through claude code itself, via its daemon socket or the cli. the one exception is switching accounts, which writes the sign-in into claude code's keychain item and `~/.claude.json`. other agents go through adapters (`crates/rush-codex`, `rush-acp` and the like).
 
 the socket and the files aren't documented and any claude code update can change the formula, so rush is checked against claude code v2.1.280. if an update moves things around, the affected column shows `–` and opening an agent falls back to `claude attach`.
 
