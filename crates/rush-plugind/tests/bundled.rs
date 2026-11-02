@@ -213,10 +213,10 @@ fn bundled_plugins_run_inside() {
     };
     let res = b.cli(&ctx, "bundle-in-0", run("echo", &["hi"])).unwrap();
     assert_eq!(res.stdout, "hi\n");
-    // A panic in it ends only the call, as in a process of its own: the
-    // broker and the others go on.
-    let short = Ctx::background().with_timeout(Duration::from_secs(1));
-    assert!(b.cli(&short, "bundle-in-1", run("boom", &[])).is_err());
+    // A panic in it answers the call with an error: the broker and the
+    // others go on.
+    let e = b.cli(&ctx, "bundle-in-1", run("boom", &[])).unwrap_err();
+    assert!(e.message.contains("panicked: asked to"), "{e:?}");
     let res = b.cli(&ctx, "bundle-in-2", run("echo", &["still"])).unwrap();
     assert_eq!(res.stdout, "still\n");
 

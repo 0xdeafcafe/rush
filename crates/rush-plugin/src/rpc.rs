@@ -707,8 +707,11 @@ impl Conn {
                 Kind::Notification => {
                     // Notifications are taken in order, so a stream of
                     // events arrives as it was sent.
+                    // One that panics ends only itself (Rust-only).
                     if let Some(h) = &self.0.handler {
-                        let _ = h(self, &self.0.ctx, &m.method, m.params.as_deref());
+                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            h(self, &self.0.ctx, &m.method, m.params.as_deref())
+                        }));
                     }
                 }
                 Kind::Response => self.reply(m),
@@ -795,9 +798,14 @@ impl Conn {
         };
         match &self.0.handler {
             None => out.error = Some(no_method(&m.method)),
-            Some(h) => match h(self, &self.0.ctx, &m.method, m.params.as_deref()) {
-                Ok(res) => out.result = Some(res.unwrap_or_else(null)),
-                Err(e) => out.error = Some(e),
+            // A handler that panics answers with a server error rather than
+            // leave the call to its deadline (Rust-only).
+            Some(h) => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                h(self, &self.0.ctx, &m.method, m.params.as_deref())
+            })) {
+                Ok(Ok(res)) => out.result = Some(res.unwrap_or_else(null)),
+                Ok(Err(e)) => out.error = Some(e),
+                Err(p) => out.error = Some(Error::server(format!("panicked: {}", panic_text(&*p)))),
             },
         }
         out
@@ -913,6 +921,14 @@ fn encode_params<P: Serialize + ?Sized>(params: &P) -> Result<Option<Raw>, CallE
     Ok((raw.get() != "null").then_some(raw))
 }
 
+/// What a panic said.
+fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
+    p.downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| p.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "Box<dyn Any>".into())
+}
+
 fn null() -> Raw {
     RawValue::from_string("null".into()).expect("null is JSON")
 }
@@ -938,6 +954,22 @@ mod tests {
             "boom" => Err(Error::server("broke")),
             _ => Err(no_method(method)),
         })
+    }
+
+    #[test]
+    fn a_handler_that_panics_answers_with_an_error() {
+        let h: Handler = Arc::new(|_, _, method, _| match method {
+            "boom" => panic!("asked to"),
+            _ => to_raw(&1).map(Some),
+        });
+        let (a, _b) = pair(None, Some(h));
+        let e = a
+            .call::<_, serde_json::Value>(&Ctx::background(), "boom", &())
+            .unwrap_err();
+        assert_eq!(e.rpc(), Some(&Error::server("panicked: asked to")));
+        // Its place is free again, and the connection still answers.
+        let n: i64 = a.call(&Ctx::background(), "one", &()).unwrap();
+        assert_eq!(n, 1);
     }
 
     #[test]
