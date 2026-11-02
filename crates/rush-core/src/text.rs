@@ -44,9 +44,15 @@ impl Mods {
 /// life of the process (links are few, and the same ones come again);
 /// [`Link::NONE`] for none. Go draws a link as an OSC 8 escape around its
 /// words (convo/render.go:1891 link); a row's links are read back by
-/// cell (ui/linkmenu.go:31 linkAt) with [`link_at`].
+/// cell (ui/linkmenu.go:31 linkAt) with [`link_at`]. A quiet link
+/// ([`Link::quiet`]) is rush's alone: read back for a click like any
+/// other, but never written to the terminal as OSC 8, so the terminal
+/// neither underlines it nor offers its own menu for it (a picture).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Link(pub u32);
+
+/// The bit a quiet link's number carries.
+const QUIET: u32 = 1 << 31;
 
 /// Every URL a Link has been made for, by its number less one.
 struct Links {
@@ -80,13 +86,28 @@ impl Link {
         Link(id)
     }
 
+    /// The link to url that only rush follows: clicked, it's read back
+    /// as any link is, but it's never written as OSC 8 (see [`Link`]).
+    pub fn quiet(url: &str) -> Link {
+        match Link::to(url) {
+            Link::NONE => Link::NONE,
+            Link(id) => Link(id | QUIET),
+        }
+    }
+
+    /// Whether it's rush's alone, never written to the terminal.
+    pub const fn is_quiet(self) -> bool {
+        self.0 & QUIET != 0
+    }
+
     /// The URL it links to; None for NONE.
     pub fn url(self) -> Option<Arc<str>> {
-        if self.0 == 0 {
+        let id = self.0 & !QUIET;
+        if id == 0 {
             return None;
         }
         let l = LINKS.lock().unwrap_or_else(|e| e.into_inner());
-        l.urls.get(self.0 as usize - 1).cloned()
+        l.urls.get(id as usize - 1).cloned()
     }
 
     pub const fn is_none(self) -> bool {
@@ -238,6 +259,30 @@ pub fn width(s: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A quiet link reads back as its URL, as a click does, and is told
+    /// apart from the same URL's loud one.
+    #[test]
+    fn quiet_links_read_back() {
+        let url = "rush:message/t1/image/1";
+        let (loud, quiet) = (Link::to(url), Link::quiet(url));
+        assert_ne!(loud, quiet);
+        assert!(quiet.is_quiet() && !loud.is_quiet());
+        assert_eq!(quiet.url(), loud.url());
+        assert_eq!(Link::quiet(""), Link::NONE);
+        let l = Line::from_spans(vec![
+            Span::new("ab", Style::PLAIN),
+            Span::new(
+                "cd",
+                Style {
+                    link: quiet,
+                    ..Style::PLAIN
+                },
+            ),
+        ]);
+        assert_eq!(link_at(&l, 2).as_deref(), Some(url));
+        assert_eq!(link_at(&l, 1), None);
+    }
 
     /// Drawn rows are kept by the thousand (a conversation's renderer keeps
     /// up to 20,000): (type, its size, the most it may be).
