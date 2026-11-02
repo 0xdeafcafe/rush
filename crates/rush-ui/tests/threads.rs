@@ -13,13 +13,21 @@ use std::time::{Duration, Instant};
 use rush_draw::{App, Headless, Key, KeyMods, Loop, Step, TrySend};
 use rush_ui::{Note, frame};
 
-/// At most this many threads once the list is read: the UI's own, its
-/// workers and watchers, and those the plugins' client and the network's
-/// watch run. 2026-11-02: 18 (21 before the timers and the yap watch).
-const THREADS: usize = 18;
-/// At most this many wakes of the loop in an idle minute on a quiet list,
-/// and no frame: the chores Go's tick runs at its seconds.
+/// At most this many threads once the list is read, later's idle ones
+/// left out: the UI's own, its workers and watchers, and those the
+/// plugins' client and the network's watch run. 2026-11-02 on CI: 15 with
+/// later's idle ones (16 before the timers, netwatch's hook and the
+/// pool; rush-updates, rush-net and a rush-later asleep among them).
+const THREADS: usize = 15;
+/// At most this many wakes of the loop in an idle minute on a quiet
+/// list: the chores Go's tick runs at its seconds (5) and the look for
+/// updates' minute, here never having looked (in a rush that has, its
+/// fourth hour). 2026-11-02: 6; before, 5 seen here and the rush-updates
+/// thread's minute besides.
 const WAKES: usize = 6;
+/// Frames among them: a chore draws the screen again only when it shows
+/// more than the list (here the tips beside it), as Go's tick does.
+const FRAMES: usize = 5;
 
 #[test]
 fn an_idle_view_keeps_few_threads_and_sleeps() {
@@ -49,7 +57,11 @@ fn an_idle_view_keeps_few_threads_and_sleeps() {
         Ok(())
     })
     .unwrap();
-    let threads = rush_sys::threads::count().saturating_sub(before);
+    // later's idle threads end 10 s on: not counted as kept.
+    let idle = frame::work::later_idle();
+    let threads = rush_sys::threads::count()
+        .saturating_sub(before)
+        .saturating_sub(idle);
 
     // The first start's layout sheet put away as you would (esc: side
     // by side), so the list alone shows.
@@ -91,10 +103,10 @@ fn an_idle_view_keeps_few_threads_and_sleeps() {
         }
     }
     let said = format!(
-        "threads {threads}, an idle minute: {wakes} wakes ({why:?}), {frames} frames\n{}",
+        "threads {threads} (and {idle} of later's, idle), an idle minute: {wakes} wakes ({why:?}), {frames} frames\n{}",
         hd.plain()
     );
     assert!(threads <= THREADS, "{said}");
     assert!(wakes <= WAKES, "{said}");
-    assert_eq!(frames, 0, "{said}");
+    assert!(frames <= FRAMES, "{said}");
 }

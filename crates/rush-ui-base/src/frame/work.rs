@@ -22,6 +22,12 @@ use crate::worker::Note;
 /// Never fewer than the pieces running: none waits for another.
 static LATER: LazyLock<Pool> = LazyLock::new(|| Pool::new("rush-later", 2 << 20, KEEP));
 
+/// How many of later's threads wait idle now, each to end KEEP after its
+/// last piece (tests/threads.rs counts the rest).
+pub fn later_idle() -> usize {
+    LATER.idle()
+}
+
 /// How long a later thread waits idle for another piece.
 const KEEP: Duration = Duration::from_secs(10);
 
