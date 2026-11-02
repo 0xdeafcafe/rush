@@ -407,7 +407,9 @@ mod tests {
 
     #[test]
     fn spans() {
-        let cases: &[(Option<u64>, Option<u64>, Option<u64>, Span)] = &[
+        // offset, limit, the file's lines; the lines read.
+        type Case = (Option<u64>, Option<u64>, Option<u64>, Span);
+        let cases: &[Case] = &[
             (None, None, Some(100), (1, None)),
             (None, None, Some(5000), (1, Some(2001))),
             (None, None, None, (1, Some(2001))),
