@@ -428,6 +428,9 @@ struct Inner {
     /// The rush folders of the thread that made it, which every thread
     /// it runs a handler on takes on.
     dirs: Dirs,
+    /// What the shared reader knows it by; None when it has a thread of
+    /// its own.
+    token: Option<u64>,
 }
 
 /// A JSON-RPC 2.0 connection. Either side may call the other; calls run
@@ -454,6 +457,7 @@ impl Conn {
                 rpcread::end(token, Why::Eof);
             }),
             h.clone(),
+            Some(token),
         );
         match reader.add(token, OwnedFd::from(r), conn.clone(), Framing::Frames) {
             Ok(()) => Ok(conn),
@@ -522,6 +526,7 @@ impl Conn {
                 writer,
                 Box::new(move || rpcread::end(token, Why::Closed)),
                 h.clone(),
+                Some(token),
             );
             match reader.add(token, r, conn.clone(), Framing::Lines) {
                 Ok(()) => return Ok(conn),
@@ -544,6 +549,7 @@ impl Conn {
         writer: Box<dyn WriteMsg>,
         closer: Box<dyn Fn() + Send + Sync>,
         h: Option<Handler>,
+        token: Option<u64>,
     ) -> Conn {
         let (ctx, cancel) = Ctx::background().with_cancel();
         Conn(Arc::new(Inner {
@@ -565,6 +571,7 @@ impl Conn {
             cancel,
             queue: Mutex::new(Queue::default()),
             dirs: rush_state::thread_dirs(),
+            token,
         }))
     }
 
@@ -583,7 +590,7 @@ impl Conn {
         closer: Box<dyn Fn() + Send + Sync>,
         h: Option<Handler>,
     ) -> Conn {
-        let conn = Conn::build(writer, closer, h);
+        let conn = Conn::build(writer, closer, h, None);
         let c = conn.clone();
         rush_sys::threads::spawn_sized("plugin-rpc", rush_sys::threads::MEDIUM, move || {
             rush_state::set_thread_dirs(c.0.dirs.clone());
@@ -678,6 +685,12 @@ impl Conn {
         }
     }
 
+    /// Whether its queue has work: the shared reader then stops reading
+    /// it until the queue's thread has done it.
+    pub(crate) fn queued(&self) -> bool {
+        lock(&self.0.queue).running
+    }
+
     /// Takes what waits until nothing does.
     fn drain(&self) {
         loop {
@@ -687,6 +700,10 @@ impl Conn {
                     Some(i) => i,
                     None => {
                         q.running = false;
+                        drop(q);
+                        if let Some(t) = self.0.token {
+                            rpcread::resume(t);
+                        }
                         return;
                     }
                 }

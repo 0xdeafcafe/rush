@@ -192,6 +192,11 @@ struct State {
     framer: Framer,
     /// No more is read: the connection is told of its end once.
     ended: bool,
+    /// Not read while its connection's queue has work, as a blocking
+    /// reader reads nothing while it runs a handler: a peer that sends
+    /// faster than it's taken is held up by the socket filling, not let
+    /// grow the queue without end.
+    paused: bool,
 }
 
 /// The process's one reader.
@@ -273,6 +278,7 @@ impl Reader {
             state: Mutex::new(State {
                 framer: Framer::new(framing),
                 ended: false,
+                paused: false,
             }),
         });
         lock(&self.conns).insert(token, e);
@@ -361,16 +367,25 @@ impl Reader {
                 let err = st.framer.eof();
                 self.end_locked(e, &mut st, err);
             }
-            Ok(_) => loop {
-                match st.framer.next() {
-                    Ok(Some(r)) => e.conn.deliver(crate::rpc::item_of(&st.framer.buf[r])),
-                    Ok(None) => break,
-                    Err(err) => {
-                        self.end_locked(e, &mut st, err);
-                        break;
+            Ok(_) => {
+                loop {
+                    match st.framer.next() {
+                        Ok(Some(r)) => e.conn.deliver(crate::rpc::item_of(&st.framer.buf[r])),
+                        Ok(None) => break,
+                        Err(err) => {
+                            self.end_locked(e, &mut st, err);
+                            break;
+                        }
                     }
                 }
-            },
+                // Its queue's thread reads it again once it's drained
+                // (resume): it holds e's state for that, so it can't be
+                // between seeing the queue empty and this.
+                if !st.ended && e.conn.queued() {
+                    st.paused = true;
+                    let _ = self.ctl(e.fd.as_raw_fd(), libc::EV_DISABLE, e.token);
+                }
+            }
             Err(err)
                 if matches!(
                     err.kind(),
@@ -400,6 +415,22 @@ impl Reader {
         for e in all {
             self.end_locked(&e, &mut lock(&e.state), err.to_string());
         }
+    }
+}
+
+/// Reads the connection added as token again, once what it was handed has
+/// been taken.
+pub(crate) fn resume(token: u64) {
+    let Some(Some(r)) = READER.get() else {
+        return;
+    };
+    let Some(e) = lock(&r.conns).get(&token).cloned() else {
+        return;
+    };
+    let mut st = lock(&e.state);
+    if st.paused && !st.ended {
+        st.paused = false;
+        let _ = r.ctl(e.fd.as_raw_fd(), libc::EV_ENABLE, e.token);
     }
 }
 

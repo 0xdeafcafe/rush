@@ -689,7 +689,11 @@ processes, 27 threads, 42 MB, 2026-11-02). Now:
    queue, which a `plugin-rpc-queue` thread works through and leaves
    once it's empty, so notifications are taken in order and finished
    before a later reply or request is taken, as when the reader ran
-   them itself. Every thread it starts takes on the rush folders
+   them itself. While the queue has work the connection isn't read (its
+   descriptor disabled in the kqueue until the queue's thread has done
+   it), as a reader running a handler read nothing: a plugin slow to
+   take events fills its socket and the broker's bounded queue for it
+   drops the rest, rather than this queue growing. Every thread it starts takes on the rush folders
    (`rush_state::thread_dirs`) of the thread that made the connection.
    An idle connection has no thread: plugind with 14 plugins and a
    window had 15+ reader threads, now 1; 20 idle pairs in a test process
