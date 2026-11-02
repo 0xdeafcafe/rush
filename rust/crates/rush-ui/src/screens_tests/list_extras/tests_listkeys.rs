@@ -257,7 +257,10 @@ fn the_wheel_scrolls_the_list_not_the_pick() {
     assert_eq!(m.sel, first, "the wheel moved the pick");
     let at = m.scroll;
     assert!(at >= 11, "the wheel didn't move the rows: {at}");
-    assert!(!m.row_keys.contains(&first), "the list came back to the pick");
+    assert!(
+        !m.row_keys.contains(&first),
+        "the list came back to the pick"
+    );
     // A reload keeps the rows where the wheel put them.
     m.rebuild();
     screen(&mut m);

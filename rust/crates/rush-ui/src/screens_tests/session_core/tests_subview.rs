@@ -890,7 +890,10 @@ fn the_wheel_leaves_the_pick() {
     m.session.as_mut().unwrap().sel = "sub:x".into();
     views::body(&mut m, 120, 8).unwrap();
     let x = "sub:x".to_string();
-    assert!(conn(&mut m, KEY).vs.top > 0, "the pick isn't brought in sight");
+    assert!(
+        conn(&mut m, KEY).vs.top > 0,
+        "the pick isn't brought in sight"
+    );
     assert!(conn(&mut m, KEY).vs.refs.contains(&x));
     let wheel = |m: &mut Model, kind: MouseKind| {
         views::mouse(

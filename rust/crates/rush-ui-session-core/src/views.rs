@@ -506,7 +506,9 @@ fn scroll(m: &mut Model, key: &str, name: &str, d: isize, rows: usize) {
     let sel = picked_ref(m);
     let c = conn(m, key);
     let most = c.vs.all_refs.len().saturating_sub(rows);
-    c.vs.top = (c.vs.top as isize).saturating_sub(d).clamp(0, most as isize) as usize;
+    c.vs.top = (c.vs.top as isize)
+        .saturating_sub(d)
+        .clamp(0, most as isize) as usize;
     c.vs.free = Some(sel);
 }
 
