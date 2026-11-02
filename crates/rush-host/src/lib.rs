@@ -42,6 +42,7 @@ pub mod lines;
 pub mod longtask;
 pub mod name;
 pub mod op;
+pub mod open;
 pub mod pack;
 pub mod paths;
 pub mod reload;
