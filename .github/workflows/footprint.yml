@@ -79,6 +79,8 @@ jobs:
           bench env RUSH_BENCH_TRANSCRIPT="$(cat "$ROOT/big.jsonl")" \
             cargo bench --locked -p rush-convo --bench open
           bench cargo bench --locked -p rush-convo --bench render
+          # A run followed while it writes, on its made-up run.
+          bench cargo bench --locked -p rush-convo --bench follow
           bench cargo bench --locked -p rush-ui --bench frame
           bench cargo test --release --locked -p rush-menubar --test retained
           bench cargo test --release --locked -p rush-remote --test listing

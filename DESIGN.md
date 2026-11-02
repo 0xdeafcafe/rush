@@ -3055,7 +3055,10 @@ and 400 stopped rush sessions; RUSH_REAL's real home is never read in CI):
   change: the benches and tests above write theirs to `RUSH_BENCH_OUT`
   (a line each: name, kind, value). rush-host `--bench list` on that home
   (retained heap, allocations made and kept), rush-convo `--bench open` on
-  its largest transcript and `--bench render`, rush-ui `--bench frame`
+  its largest transcript (its subagent runs read whole and as the reader
+  follows them), `--bench render` and `--bench follow` (its made-up run),
+  rush-host's list again with past conversations left out (the menu bar
+  feed's reading), rush-ui `--bench frame`
   (bytes and allocations per frame), rush-menubar `tests/retained.rs` and
   rush-remote `tests/listing.rs`.
 - **Each long-lived process, idle** (`measure.py`), started in that home
