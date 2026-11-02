@@ -191,8 +191,15 @@ impl FleetSource {
 
     /// Rows as rush lists them: its state on them, its own sessions among
     /// them (fleet.Load).
+    /// Past conversations are left out of its readings (the loader's
+    /// skip_past, Rust-only): the menu shows what works or waits on you,
+    /// and reading every one held some thousand rows to show a few. So a
+    /// headless run linked to a closed conversation is a row of its own,
+    /// not folded into that conversation's, and Copilot's cloud sessions,
+    /// listed among the past ones, don't count as live.
     pub fn from_state(reg: Registry) -> FleetSource {
         let loader = rush_fleet::Loader::from_state(reg.clone());
+        loader.handle().skip_past(true);
         let config = loader.store().config.clone();
         FleetSource::with_loader(reg, loader, config, true)
     }

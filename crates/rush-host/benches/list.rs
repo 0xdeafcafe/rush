@@ -152,6 +152,25 @@ fn main() {
         (NOW.load(Relaxed) - base) as f64 / MIB,
         LIVE.load(Relaxed) - live,
     );
+    // As the menu bar's feed reads: past conversations left out.
+    let (base, live) = (NOW.load(Relaxed), LIVE.load(Relaxed));
+    let reg = Registry::new();
+    reg.register(rush_claude::Claude::at(rush_claude::Account::home()));
+    let mut f = Loader::from_state(reg);
+    f.handle().skip_past(true);
+    let first = f.load_unsampled(now());
+    f.scan(&first.agents);
+    let rows = first.agents.len();
+    drop(first);
+    let snap = f.load_unsampled(now());
+    f.scan(&snap.agents);
+    drop(snap);
+    println!(
+        "past conversations left out (the feed's): {rows} rows; the loader alone retains {:.1} MiB in {} allocations",
+        (NOW.load(Relaxed) - base) as f64 / MIB,
+        LIVE.load(Relaxed) - live,
+    );
+    drop(f);
     if let Some(secs) = std::env::var("RUSH_BENCH_PAUSE")
         .ok()
         .and_then(|s| s.parse().ok())

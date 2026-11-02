@@ -2792,16 +2792,21 @@ What changed, each with its number:
   (rush-remote `watch.rs`): every session's info, read every 4 seconds,
   was held through the sleep: 1,244 sessions, 2,378,662 B
   (`tests/listing.rs`).
+- **The feed leaves past conversations out** (rush-menubar
+  `FleetSource::from_state`, the loader's skip_past), decided
+  2026-11-02: a headless run linked to a closed conversation is a working
+  row of its own rather than folded into that conversation's, and
+  Copilot's cloud sessions, listed among the past ones, no longer count
+  as live. The list bench's loader read as the feed reads, on a home of
+  774 rows nearly all rush's own sessions: 13.7 → 13.0 MiB retained,
+  117,209 → 112,921 allocations; a home with more past conversations
+  outside rush saves more.
 
 Found, not done:
 
-- The feed needs only the rows working or waiting, yet reads every row as
-  the list does. The loader's skip_past would cut most of it, but changes
-  the menu: a headless run linked to a closed conversation is folded into
-  that conversation's row today and would show as working, and Copilot's
-  cloud sessions, listed among the past ones, would stop counting as
-  live. A reading of rush's sessions that are awake alone wants that
-  decided first.
+- A reading of rush's sessions that are awake alone: the feed still
+  reads every rush session's info, asleep or stopped, to show the few
+  working.
 - Each rush session's info is held twice, as rush-host's `Info` and the
   fleet's `HostInfo` (4.5 MB here); `HostInfo` could share `Info`.
 - serve's watch reads all 1,244 info files every 4 seconds; a kept Lister
