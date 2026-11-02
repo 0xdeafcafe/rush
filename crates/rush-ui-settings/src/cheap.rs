@@ -34,13 +34,15 @@ pub fn sections(m: &Model) -> Vec<Section> {
             "every subagent that names no model of its own starts on it; design and debugging included.",
         ));
     }
-    let mut rows = vec![choice(
+    let mut mode_row = choice(
         "Cheaper model for routine subagents",
         &mode,
         "A subagent that searches, reads, runs tests or makes a described edit doesn't need your strongest model, and on a cheaper one it costs a fraction. On: rush adds a few words to the agent's instructions, telling it to start a subagent on the cheaper model for routine, well-specified work (a described edit, a lookup, a search, running and reading tests, a mechanical refactor) and to keep the strong model for design, debugging a cause it doesn't know yet, reviews and anything vague. The agent decides each time; rush calls no model for it. Applies to sessions started, or moved onto a new build, after the change. The Efficiency place shows how much work went to the cheaper model and about what it saved.",
         &modes,
         set(|m, v| config_mut(m).cheap_subagents.mode = v.to_string()),
-    )];
+    );
+    mode_row.unset = "off".into();
+    let mut rows = vec![mode_row];
     if !mode.is_empty() {
         for a in m.reg.all().iter() {
             let kind = a.kind().as_str().to_string();
