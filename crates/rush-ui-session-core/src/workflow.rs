@@ -190,11 +190,12 @@ pub fn workflow_job<'a>(r: &Runs, s: &'a Session, run: &str) -> Option<&'a Job> 
 /// whether that still runs; else from its files, once they say it
 /// finished. None when neither knows (workflowAgent).
 pub fn agent_of(r: &Runs, s: &Session, sa: &Subagent) -> Option<(WorkflowAgent, bool)> {
-    if let Some(j) = workflow_job(r, s, &sa.workflow) {
-        if let Some(a) = agent_in(r, j, &sa.id) {
-            return Some((a, j.running()));
-        }
-        // Not in what Claude Code says now: a try it made before.
+    // Not in what Claude Code says now: a try it made before, read from
+    // its files below.
+    if let Some(j) = workflow_job(r, s, &sa.workflow)
+        && let Some(a) = agent_in(r, j, &sa.id)
+    {
+        return Some((a, j.running()));
     }
     let dir = Path::new(&sa.path)
         .parent()
