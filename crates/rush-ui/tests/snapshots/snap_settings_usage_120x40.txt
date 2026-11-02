@@ -27,13 +27,13 @@
     Trim command output            ‹ on           ›                         │ it; never one asleep, done, held, or
       longer than                  ‹ 600 lines    ›                         │ on an account past its pace, nor while
                                                                             │ you're away. Each is in the session's
-  Runaway guard · each part off until you turn it on                        │ events as cache-kept, with its cost.
+  Cheaper subagents · off until you turn it on                              │ events as cache-kept, with its cost.
+    Cheaper model for routine sub… ‹ off          ›                         │
+                                                                            │ on: idle sessions' caches are kept for
+  Runaway guard · each part off until you turn it on                        │ the time below, then lapse.
     Pace guard                     ‹ off          ›                         │
-    Agents at once                 ‹ no cap       ›                         │ on: idle sessions' caches are kept for
-    When you're away               ‹ off          ›                         │ the time below, then lapse.
-                                                                            │
-  Advisor                                                                   │
-    Advisor                        ‹ off          ›                         │
+    Agents at once                 ‹ no cap       ›                         │
+    When you're away               ‹ off          ›                         │
     1 of 21 ───────────────────────────────────────────────────────────────────────────────────────────────────────
   space switch  ·  enter choose  ·  ? details  ·  ctrl+↑↓ section  ·  [ ] page  ·  esc back
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

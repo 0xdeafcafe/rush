@@ -8,12 +8,12 @@
 
 
   Prompt cache · on unless you turn it off; Claude Code for now
-  ▍ Keep idle conversations warm   ‹ on           ›
-      for                          ‹ 15 minutes   ›
-      compact long waits           ‹ off          ›
-    Keep waiting subagents' cache  ‹ on           ›
-      slow commands in background  ‹ on           ›
-    Claude Code subagents' cache   ‹ automatic    ›
+  ▍ Keep idle conversations warm    ‹ on           ›
+      for                           ‹ 15 minutes   ›
+      compact long waits            ‹ off          ›
+    Keep waiting subagents' cache   ‹ on           ›
+      slow commands in background   ‹ on           ›
+    Claude Code subagents' cache    ‹ automatic    ›
   Keep idle conversations warm
 
   A provider keeps a session's prompt cached for a while after its last
