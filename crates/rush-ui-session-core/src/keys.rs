@@ -325,7 +325,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         }
         // alt+← → make the column beside the conversation narrower or
         // wider; typing, they jump a word as ever.
-        "alt+left" | "alt+right" if empty => {
+        "alt+left" | "alt+right" | "ctrl+left" | "ctrl+right" if empty => {
             let o = super::side::resize_key(m, &key, k);
             if o.used() {
                 return o;

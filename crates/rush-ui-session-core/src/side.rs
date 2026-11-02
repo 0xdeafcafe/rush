@@ -368,23 +368,29 @@ pub fn column_width(m: &mut Model, key: &str, w: usize) -> usize {
     side_width_with(w - views, m.cfg.column_width)
 }
 
-/// alt+← and alt+→ in a Session (the box empty) make the column beside
+/// alt+← and alt+→ (or ctrl, where ⌥ is no key) in a Session (the box empty) make the column beside
 /// the conversation two columns narrower or wider, between its least,
 /// 44, and all the room left of the text, and keep the width. Nothing
 /// when the column isn't showing.
 pub fn resize_key(m: &mut Model, key: &str, k: &Press) -> Out {
     let grow = match k.s.as_str() {
-        "alt+right" => true,
-        "alt+left" => false,
+        "alt+right" | "ctrl+right" => true,
+        "alt+left" | "ctrl+left" => false,
         _ => return Out::Pass,
     };
-    let (cur, room) = {
+    let (shown, room) = {
         let s = &conn(m, key).side;
         (s.w, s.room)
     };
-    if cur == 0 {
+    if shown == 0 {
         return Out::Pass;
     }
+    // From the width you set, else from the one drawn: the frame may not
+    // have been drawn again since the last press.
+    let cur = match m.cfg.column_width {
+        p if p > 0 => (p as usize).clamp(crate::sidecol::SIDE_MIN, room),
+        _ => shown,
+    };
     let to = if grow {
         (cur + 2).min(room)
     } else {

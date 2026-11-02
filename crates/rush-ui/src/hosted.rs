@@ -394,7 +394,9 @@ mod tests {
         }
         let out = crate::frame(&mut m, 120, 40, &[], false);
         assert!(
-            out.contains("f1 more  ·  ctrl+6 Agents  ·  esc leave the box"),
+            out.contains(
+                "f1 more  ·  ctrl+6 Agents  ·  ⌥s conversation view  ·  esc leave the box"
+            ),
             "{out}"
         );
     }
