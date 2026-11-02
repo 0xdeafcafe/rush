@@ -599,7 +599,10 @@ pub fn sections(m: &Model) -> Vec<Section> {
             ("sharp", "full detail where the terminal can show it."),
             ("pixelated", "coloured blocks, softer and quieter."),
         ],
-        set(|m, v| config_mut(m).pixel_pictures = v == "pixelated"),
+        set(|m, v| {
+            config_mut(m).pixel_pictures = v == "pixelated";
+            rush_convo::pictures::set_pixelated(v == "pixelated");
+        }),
     );
     // Which of the conversation's views fits: suggested, or switched to as
     // you come back (session-core viewsuggest.rs). Rust-only.

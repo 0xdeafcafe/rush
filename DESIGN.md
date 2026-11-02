@@ -2190,9 +2190,32 @@ is made. Everything below is in `rush_ui::frame`.
   to a box of cells in quarter blocks (Go's convo/picture.go and thumb.go
   where Kitty isn't there), each image and size made once on a thread of
   its own, two at a time, the frame after it's made having it; the image
-  crate decodes PNG, JPEG, GIF and WebP, as Go does. Kitty pictures and
-  asking the terminal its cell size (Go's pictures.go) wait on rush-draw
-  writing raw output; until then the cell is taken as Go's 10×20.
+  crate decodes PNG, JPEG, GIF and WebP, as Go does. Where the terminal
+  takes Kitty graphics, your messages' pictures and the message sheet's
+  are sharp (Go's termimg): the image scaled to the cells it takes, kept
+  as a PNG in rush-draw (`kitty.rs`), and drawn as Unicode placeholders
+  (U+10EEEE, row and column diacritics, the image's id its colour), so
+  the rows cache, scroll, clip and diff as text does. rush-draw sends an
+  image (`a=T,U=1`, PNG, chunked, quiet) the first frame one of its cells
+  is written and never again: a warm frame with a picture on screen
+  writes 0 bytes more than the same frame without it (kitty/tests.rs
+  `a_picture_is_sent_once`). Sent again only after another program had
+  the terminal; past 64 MB kept the oldest are let go and deleted
+  (`a=d,d=I`). A placeholder whose colour isn't a picture rush has
+  (faded behind a box or beside the list) is drawn blank, as Go's
+  termimg.Blank. Whether the terminal takes them is asked as it's
+  taken, with the colours: `ESC _G i=31,s=1,v=1,a=q,t=d,f=24;AAAA ST`
+  before DA1, an `OK` before DA1's answer a yes. Not asked inside tmux
+  or screen; an answer after the 50 ms wait (a slow, remote link) is
+  taken in by the input thread and dropped, pictures staying blocks;
+  `RUSH_GRAPHICS=kitty|blocks` says outright. The Pictures setting
+  (pixelated) and a step's thumbnail are blocks always; the message
+  sheet's s flips the one shown. A picture's cells link with a quiet
+  link (`Link::quiet`): a click on one is rush's (it opens), never
+  written as OSC 8, so the terminal neither underlines it nor offers
+  its own menu; a right click on one does nothing. The cell is still
+  taken as Go's 10×20 (Go asked CSI 16t; the terminal keeps the image's
+  shape within its cells either way).
 
 ## Conversation views (Rust-only)
 

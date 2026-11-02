@@ -1,4 +1,5 @@
-//! Pictures in coloured quarter blocks: an image fitted to a box of cells,
+//! Pictures sharp, as Kitty graphics where the terminal takes them
+//! (rush_draw::kitty), else in coloured quarter blocks: an image fitted to a box of cells,
 //! its shape kept by the cell's size, each made once off the UI thread
 //! and read without decoding after. After Go's convo/picture.go (Picture
 //! :51, PictureDrawn :58, drawPicture :124, Tile :222), convo/thumb.go
@@ -10,9 +11,14 @@
 //! step's thumbnail and your message's images, every turn drawn again
 //! as one's made (picture.go:76 lookupsGen).
 //!
-//! Gap (pictures.go): Kitty pictures, and asking the terminal its cell
-//! size, wait on rush-draw writing raw output; every terminal gets the
-//! blocks Go draws where Kitty isn't there, on Go's 10×20 cell.
+//! A sharp one is the image scaled to the cells it takes and kept as a
+//! PNG for rush-draw to send once, its rows placeholders the terminal
+//! draws it in (drawPicture's Kitty side); the Pictures setting
+//! (pixelated) and a terminal without Kitty graphics have blocks.
+//!
+//! Gap (pictures.go): asking the terminal its cell size; Go's 10×20 cell
+//! is taken, so a picture's cells keep its shape only roughly (the
+//! terminal keeps its shape within them).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
@@ -44,6 +50,8 @@ struct Key {
     w: usize,
     h: usize,
     look: Look,
+    /// As Kitty graphics, not blocks.
+    sharp: bool,
 }
 
 /// None while it's being made; Some(empty) when it can't be read.
@@ -85,13 +93,28 @@ pub fn start(m: &Model) {
     if let Some(tx) = m.sender() {
         *WAKE.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx.lane(1));
     }
+    rush_convo::pictures::set_pixelated(rush_ui_base::accounts::config(m).pixel_pictures);
     rush_convo::pictures::set_maker(make_for_convo);
 }
 
-/// The conversation's maker: as picture, on the loop it was started with.
+/// Whether pictures are drawn sharp: the terminal takes Kitty graphics
+/// and the Pictures setting isn't pixelated (termimg.Drawn).
+pub fn sharp() -> bool {
+    rush_draw::kitty::on() && !rush_convo::pictures::pixelated()
+}
+
+/// Whether the terminal could draw pictures sharp at all, whatever the
+/// Pictures setting (termimg.Current == Kitty).
+pub fn can_be_sharp() -> bool {
+    rush_draw::kitty::on()
+}
+
+/// The conversation's maker: as picture, on the loop it was started with;
+/// your message's pictures sharp where they can be, a step's thumbnail in
+/// half blocks always (thumbOf).
 fn make_for_convo(path: &str, w: usize, h: usize, look: Look) -> Option<Arc<Vec<Line>>> {
     let tx = WAKE.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    make(tx, path, w, h, look)
+    make(tx, path, w, h, look, look == Look::Fit && sharp())
 }
 
 /// The image at path fitted to w cells by h rows: its rows once made
@@ -99,17 +122,31 @@ fn make_for_convo(path: &str, w: usize, h: usize, look: Look) -> Option<Arc<Vec<
 /// the UI thread: the first ask starts the making, and the frame after
 /// it's made has it. With no loop (tests, --render) it's made at once.
 pub fn picture(m: &Model, path: &str, w: usize, h: usize) -> Option<Arc<Vec<Line>>> {
-    make(m.sender(), path, w, h, Look::Fit)
+    make(m.sender(), path, w, h, Look::Fit, sharp())
+}
+
+/// picture, sharp or in blocks as asked rather than as the Pictures
+/// setting says; in blocks whatever's asked where the terminal can't
+/// show them sharp (PictureDrawn).
+pub fn picture_drawn(
+    m: &Model,
+    path: &str,
+    w: usize,
+    h: usize,
+    sharp: bool,
+) -> Option<Arc<Vec<Line>>> {
+    make(m.sender(), path, w, h, Look::Fit, sharp && can_be_sharp())
 }
 
 /// The picture look asks for: fitted in quarter blocks (Picture), or a
 /// step's thumbnail in half blocks (thumbOf).
-fn make(tx: Option<Sender<Note>>, path: &str, w: usize, h: usize, look: Look) -> Slot {
+fn make(tx: Option<Sender<Note>>, path: &str, w: usize, h: usize, look: Look, sharp: bool) -> Slot {
     let k = Key {
         path: path.to_string(),
         w,
         h,
         look,
+        sharp,
     };
     {
         let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
@@ -124,6 +161,7 @@ fn make(tx: Option<Sender<Note>>, path: &str, w: usize, h: usize, look: Look) ->
         c.insert(k.clone(), None);
     }
     let draw = move |p: &str| match look {
+        Look::Fit if sharp => draw_sharp(p, w, h),
         Look::Fit => draw_picture(p, w, h),
         Look::Thumb => preview(p, w, h, false),
     };
@@ -211,6 +249,58 @@ fn draw_picture(path: &str, w: usize, h: usize) -> Vec<Line> {
         .resize_exact((2 * cols) as u32, (4 * rows) as u32, FilterType::CatmullRom)
         .to_rgb8();
     quadrants(&px)
+}
+
+/// The image at path drawn to fit w cells by h rows, empty when it can't
+/// Reads, decodes and scales a picture for the terminal to draw sharp:
+/// for off the UI thread (drawPicture, as Kitty graphics). The image is
+/// shrunk to the pixels its cells hold, never blown up, and kept as a
+/// PNG rush-draw sends the first time it's on screen; its rows are the
+/// placeholders that show it.
+fn draw_sharp(path: &str, w: usize, h: usize) -> Vec<Line> {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return Vec::new();
+    };
+    if meta.len() > MOST_BYTES {
+        return Vec::new();
+    }
+    let Ok(data) = std::fs::read(path) else {
+        return Vec::new();
+    };
+    let Ok((pw, ph)) = image::ImageReader::new(std::io::Cursor::new(&data))
+        .with_guessed_format()
+        .map_err(|_| ())
+        .and_then(|r| r.into_dimensions().map_err(|_| ()))
+    else {
+        return Vec::new();
+    };
+    if u64::from(pw) * u64::from(ph) > MOST_PIXELS {
+        return Vec::new();
+    }
+    let Ok(src) = image::load_from_memory(&data) else {
+        return Vec::new();
+    };
+    let (cols, rows) = fit(pw as usize, ph as usize, w, h);
+    if cols == 0 {
+        return Vec::new();
+    }
+    let (cw, ch) = CELL;
+    let (sw, sh) = ((pw as usize).min(cols * cw), (ph as usize).min(rows * ch));
+    let px = if (sw, sh) == (pw as usize, ph as usize) {
+        src.to_rgba8()
+    } else {
+        src.resize_exact(sw as u32, sh as u32, FilterType::CatmullRom)
+            .to_rgba8()
+    };
+    let mut png = Vec::new();
+    if image::DynamicImage::ImageRgba8(px)
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .is_err()
+    {
+        return Vec::new();
+    }
+    let id = rush_draw::kitty::id(&data, cols, rows);
+    rush_draw::kitty::picture(id, png.into(), cols, rows)
 }
 
 /// The image at path drawn to fit w cells by h rows, empty when it can't
@@ -555,6 +645,29 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Sharp, a picture is the cells it takes in blocks, each a Kitty
+    /// placeholder in its id's colour, the same picture the same id.
+    #[test]
+    fn a_sharp_picture_is_placeholders() {
+        let dir = std::env::temp_dir().join(format!("rush-pic-sharp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("a.png");
+        image::RgbImage::from_pixel(100, 50, image::Rgb([10, 200, 30]))
+            .save(&p)
+            .unwrap();
+        let path = p.to_str().unwrap();
+        let rows = draw_sharp(path, 20, 20);
+        assert_eq!(rows.len(), 3, "the cells blocks take: 10 by 3");
+        for l in &rows {
+            assert_eq!(l.width(), 10);
+            assert!(l.plain().starts_with(rush_draw::kitty::PLACEHOLDER));
+        }
+        assert_eq!(rows[0].spans[0].style.fg, rows[2].spans[0].style.fg);
+        assert_eq!(draw_sharp(path, 20, 20), rows, "the same id again");
+        assert!(draw_sharp("/nonexistent/x.png", 20, 20).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -423,6 +423,13 @@ pub fn owner_at(m: &Model, i: usize) -> String {
 /// any: only over the conversation's own rows, not the header, the dock
 /// or the map (linkAt over textCell).
 pub fn link_under(m: &mut Model, key: &str, x: usize, y: usize) -> Option<String> {
+    let l = cell_link(m, key, x, y)?;
+    l.url().map(|u| u.to_string())
+}
+
+/// The link carried by the conversation's cell at (x, y): a quiet one
+/// is a picture's, rush's alone (rush_core::text::Link::quiet).
+fn cell_link(m: &mut Model, key: &str, x: usize, y: usize) -> Option<rush_core::text::Link> {
     if super::views::view_name(m, key) != "conversation" {
         return None;
     }
@@ -435,7 +442,15 @@ pub fn link_under(m: &mut Model, key: &str, x: usize, y: usize) -> Option<String
     }
     let at = textsel::text_cell(m, x, y)?;
     let row = textsel::drawn_row(m, at.row)?;
-    rush_core::text::link_at(&row.line, at.col).map(|u| u.to_string())
+    let mut col = 0;
+    for s in &row.line.spans {
+        let w = s.width();
+        if at.col < col + w {
+            return Some(s.style.link).filter(|l| !l.is_none());
+        }
+        col += w;
+    }
+    None
 }
 
 /// Whether a link is an image's file, one Preview opens.
@@ -483,8 +498,12 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
         return Out::Draw;
     }
     // Right-clicking a link asks what to do with it: open it, in Preview,
-    // Quick Look, reveal or copy it (model.go:1720, linkMenu).
+    // Quick Look, reveal or copy it (model.go:1720, linkMenu); on a
+    // picture, nothing: a click opens it.
     if e.kind == MouseKind::Down(Button::Right) {
+        if cell_link(m, &key, x, y).is_some_and(|l| l.is_quiet()) {
+            return Out::Pass;
+        }
         return match link_under(m, &key, x, y) {
             Some(u) if rush_ui_cmdbar::linkmenu::open_link_menu(m, &u) => Out::Draw,
             _ => Out::Pass,

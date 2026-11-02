@@ -25,9 +25,9 @@
 //! session's / commands reach the sheets through [`slash`], the
 //! keymap's chords through [`run_action`].
 //!
-//! Pictures are drawn in quarter blocks (pictures.rs), made off the UI
-//! thread. Gaps: Kitty pictures and the terminal's cell size
-//! (pictures.go) wait on rush-draw writing raw output; recall's column
+//! Pictures are drawn sharp as Kitty graphics where the terminal takes
+//! them, else in quarter blocks (pictures.rs), made off the UI thread.
+//! Gaps: the terminal's cell size (pictures.go askCell); recall's column
 //! waits on the list beside an open chat (sidekick.rs); the #compact
 //! sheet's list of Ollama decision models waits on an Ollama adapter.
 //! Rewinding, forking, compacting (pruning too) and handing off on the

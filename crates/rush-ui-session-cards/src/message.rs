@@ -5,9 +5,10 @@
 //! opens itself first, :335-337), openImage :358,
 //! messageTabs :387, draftImage :401) and convo/usermessages.go
 //! (UserMessage :130, UserMessages :150, ExpandedMessage :166). An
-//! image's tab draws it in quarter blocks (pictures.rs; prepare :58,
-//! stripRow :100), with a strip of them all under it when there are
-//! several. Gap: no Kitty pictures, so no s to flip one sharp.
+//! image's tab draws it sharp where the terminal takes Kitty graphics,
+//! else in quarter blocks (pictures.rs; sharp :34, prepare :58, stripRow
+//! :100), with a strip of them all under it when there are several; s
+//! flips the one shown the other way from the Pictures setting (:187).
 
 use rush_convo::{Item, Session};
 use rush_core::text::Line;
@@ -89,6 +90,8 @@ pub struct MessageSheet {
     strip_y: usize,
     /// Each thumbnail's left edge, and the tab it shows.
     strip_at: Vec<(usize, usize)>,
+    /// The picture drawn the other way from the Pictures setting.
+    pub flip: bool,
 }
 
 /// What a message of several images gives its strip under the picture: a
@@ -106,6 +109,27 @@ impl MessageSheet {
 
     fn images(&self) -> &[String] {
         &self.messages[self.at].images
+    }
+
+    /// Whether the picture shown is drawn sharp: as the Pictures setting
+    /// says, unless s flipped it (sharp).
+    pub fn sharp(&self) -> bool {
+        pictures::can_be_sharp() && pictures::sharp() != self.flip
+    }
+
+    /// The keys an image's tab offers: s to flip it where it can be
+    /// sharp, o to open the original (imageKeys).
+    fn image_keys(&self) -> String {
+        let open = "o open original";
+        if !pictures::can_be_sharp() {
+            return open.into();
+        }
+        let s = if self.sharp() {
+            "s pixelated"
+        } else {
+            "s sharp"
+        };
+        format!("{s} · {open}")
     }
 
     /// Fits the image shown to w by h cells, as pictures makes it off the
@@ -127,7 +151,7 @@ impl MessageSheet {
             h = h.saturating_sub(STRIP_ROOM);
             self.strip_row(m, &pics, w);
         }
-        match pictures::picture(m, &pics[self.tab - 1], w.max(8), h.max(4)) {
+        match pictures::picture_drawn(m, &pics[self.tab - 1], w.max(8), h.max(4), self.sharp()) {
             None => {}
             Some(rows) if rows.is_empty() => {
                 self.picture = vec![line([sp(
@@ -293,8 +317,10 @@ impl Sheet for MessageSheet {
             message_tabs(&tab_names(n), self.tab, w),
             Line::new(),
         ];
+        let image_keys = self.image_keys();
         let mut hint =
-            "↑↓ scroll · pgup/pgdown · [ ] messages · tab attachments · c copy · esc close";
+            "↑↓ scroll · pgup/pgdown · [ ] messages · tab attachments · c copy · esc close"
+                .to_string();
         let rows: Vec<Line> = if self.tab == 0 {
             let key = format!("{}/{w}", self.at);
             if key != self.text_key {
@@ -306,8 +332,9 @@ impl Sheet for MessageSheet {
             }
             self.rows.iter().map(|r| line([plain(r.clone())])).collect()
         } else {
-            hint =
-                "↑↓ scroll · [ ] messages · tab attachments · o open original · c copy · esc close";
+            hint = format!(
+                "↑↓ scroll · [ ] messages · tab attachments · {image_keys} · c copy · esc close"
+            );
             if self.picture.is_empty() {
                 vec![line([sp("Loading image…", DIM)])]
             } else {
@@ -333,7 +360,9 @@ impl Sheet for MessageSheet {
             ]));
             self.strip_y = out.len();
             out.extend(self.strip.iter().cloned());
-            hint = "←→ images · click one to show it · [ ] messages · tab text · o open original · esc close";
+            hint = format!(
+                "←→ images · click one to show it · [ ] messages · tab text · {image_keys} · esc close"
+            );
         }
         out.push(Line::new());
         out.push(line([sp(hint, DIM)]));
@@ -345,6 +374,11 @@ impl Sheet for MessageSheet {
         match k.s.as_str() {
             "esc" => return Out::Close,
             "c" => m.copy_text(expanded_message(&self.messages[self.at].text)),
+            "s" => {
+                if self.tab > 0 && pictures::can_be_sharp() {
+                    self.flip = !self.flip;
+                }
+            }
             "o" => {
                 if self.tab > 0 && self.tab <= n {
                     let p = self.images()[self.tab - 1].clone();

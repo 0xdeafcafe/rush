@@ -240,3 +240,44 @@ fn a_click_on_an_image_in_the_box_opens_it() {
     assert!(m.sheet.is_none());
     assert_eq!(conn(&mut m, KEY).input.pos, text.chars().count() - 4);
 }
+
+/// A single click on a picture you sent opens it, on its image, as its
+/// chip does; a right click does nothing. Its cells carry rush's own
+/// link, never written as OSC 8, so the terminal neither underlines it
+/// nor answers a click with a menu of its own.
+#[test]
+fn a_click_on_a_picture_opens_it() {
+    use std::sync::Arc;
+
+    use rush_convo::pictures::Look;
+    use rush_core::text::{Line, Span};
+
+    // Only this test's own file is made: the maker stays set for the
+    // whole test process, so every other test's images stay chips.
+    fn maker(path: &str, _w: usize, _h: usize, _look: Look) -> Option<Arc<Vec<Line>>> {
+        let row = Line::from_spans(vec![Span::plain("████")]);
+        Some(Arc::new(if path == "/pics-click-test/shot.png" {
+            vec![row; 2]
+        } else {
+            Vec::new()
+        }))
+    }
+    rush_convo::pictures::set_maker(maker);
+    let mut m = split_open(200, 50);
+    let (lw, _) = split::widths(&m);
+    m.session.as_mut().unwrap().sess.sent(
+        "look at this".into(),
+        vec!["/pics-click-test/shot.png".into()],
+        1_000,
+    );
+    let (x, y) = cell_of(&mut m, "│████│", lw + 1);
+    ev(&mut m, MouseKind::Down(Button::Right), x + 2, y);
+    ev(&mut m, MouseKind::Up(Button::Right), x + 2, y);
+    assert!(m.sheet.is_none(), "a right click does nothing");
+    click(&mut m, x + 2, y);
+    let s = m
+        .sheet_as::<crate::screens::session_cards::message::MessageSheet>()
+        .expect("the picture opened");
+    assert_eq!(s.tab, 1);
+    assert_eq!(s.messages[s.at].images, ["/pics-click-test/shot.png"]);
+}
