@@ -1,1 +1,23 @@
-pending
+     !
+    ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working                       default
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings             0% cpu · –
+    RUSH      General   Usage   Keys   Plugins   Updates   Remote   [ ]
+   ▀▀▀▀▀▀
+────────────────────────────────────────────────────────────────────────────────
+  What rush does on its own to save tokens and money, and to keep agents in…
+
+
+  Prompt cache · on unless you turn it off; Claude Code for now
+  ▍ Keep idle conversations warm   ‹ on           ›
+      for                          ‹ 15 minutes   ›
+      compact long waits           ‹ off          ›
+    Keep waiting subagents' cache  ‹ on           ›
+      slow commands in background  ‹ on           ›
+    Claude Code subagents' cache   ‹ automatic    ›
+  Keep idle conversations warm
+
+  A provider keeps a session's prompt cached for a while after its last
+  on: idle sessions' caches are kept for the time below, then lapse.
+    1 of 20 ───────────────────────────────────────────────────────────────
+  space switch  ·  enter choose  ·  ? details  ·  esc back
+────────────────────────────────────────────────────────────────────────────────

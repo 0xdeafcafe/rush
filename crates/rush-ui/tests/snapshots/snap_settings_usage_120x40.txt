@@ -1,1 +1,39 @@
-pending
+     !
+    ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working                                                               default
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings                                  0% cpu · – · 37.0G free · 80%
+    RUSH      General   Usage   Keys   Plugins   Updates   Remote   [ ]
+   ▀▀▀▀▀▀
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  What rush does on its own to save tokens and money, and to keep agents in check.
+
+                                                                            │ Keep idle conversations warm
+  Prompt cache · on unless you turn it off; Claude Code for now             │
+  ▍ Keep idle conversations warm   ‹ on           ›                         │ A provider keeps a session's prompt
+      for                          ‹ 15 minutes   ›                         │ cached for a while after its last
+      compact long waits           ‹ off          ›                         │ request (Claude: 5 minutes, or an
+    Keep waiting subagents' cache  ‹ on           ›                         │ hour), and a message after that pays
+      slow commands in background  ‹ on           ›                         │ to write the whole context again:
+    Claude Code subagents' cache   ‹ automatic    ›                         │ 1.25× the input price for a 5-minute
+    Smallest worth keeping         ‹ 20k tokens   ›                         │ cache, 2× for an hour's. Just before
+    Most refreshes per wait        ‹ auto         ›                         │ an idle session's cache lapses, rush
+                                                                            │ sends one small request that reads the
+  Context guard · on unless you turn it off; Claude Code for now            │ whole cached context, a tenth of the
+    Don't re-read unchanged files  ‹ on           ›                         │ price, and its life starts over. It
+      smallest file it applies to  ‹ 2 KB         ›                         │ isn't a message: nothing is added to
+    Don't read huge files whole    ‹ on           ›                         │ the conversation, no turn runs,
+      huge means over              ‹ 1,000 lines  ›                         │ nothing notifies. It only does this
+    Stop repeated failures         ‹ on           ›                         │ for a session that went idle within
+      after                        ‹ 3 in a row   ›                         │ the time below, with a context worth
+    Trim command output            ‹ on           ›                         │ it; never one asleep, done, held, or
+      longer than                  ‹ 600 lines    ›                         │ on an account past its pace, nor while
+                                                                            │ you're away. Each is in the session's
+  Runaway guard · each part off until you turn it on                        │ events as cache-kept, with its cost.
+    Pace guard                     ‹ off          ›                         │
+    Agents at once                 ‹ no cap       ›                         │ on: idle sessions' caches are kept for
+    When you're away               ‹ off          ›                         │ the time below, then lapse.
+                                                                            │
+  Advisor                                                                   │
+    Advisor                        ‹ off          ›                         │
+    1 of 20 ───────────────────────────────────────────────────────────────────────────────────────────────────────
+  space switch  ·  enter choose  ·  ? details  ·  ctrl+↑↓ section  ·  [ ] page  ·  esc back
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
