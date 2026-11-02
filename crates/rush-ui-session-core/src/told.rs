@@ -84,7 +84,7 @@ pub fn prune_steps(s: &Session) -> (String, Vec<String>) {
                 steps.push(format!(
                     "{} {}\n→ {}",
                     st.tool,
-                    clip_text(st.input_json(), 400),
+                    clip_text(&st.input_json(), 400),
                     clip_text(&st.output, 700)
                 ));
             }
@@ -142,7 +142,7 @@ fn plain(s: &Session, mut clip: impl FnMut(usize) -> (usize, usize)) -> String {
                 Item::Step(id) => {
                     let st = s.step(*id);
                     let (inn, out_n) = clip(ti);
-                    b += &format!("- {} {}", st.tool, clip_text(st.input_json(), inn));
+                    b += &format!("- {} {}", st.tool, clip_text(&st.input_json(), inn));
                     let out = clip_text(&st.output, out_n);
                     if out_n > 0 && !out.is_empty() {
                         b += &format!("\n  → {}", out.replace('\n', "\n    "));

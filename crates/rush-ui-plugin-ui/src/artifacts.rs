@@ -49,7 +49,7 @@ pub fn artifacts(s: &Session) -> Vec<Artifact> {
             if &*st.tool != "Artifact" || st.status != Status::Ok {
                 continue;
             }
-            let inp: Input = serde_json::from_str(st.input_json()).unwrap_or_default();
+            let inp: Input = serde_json::from_str(&st.input_json()).unwrap_or_default();
             if !inp.action.is_empty() && inp.action != "publish" {
                 continue;
             }

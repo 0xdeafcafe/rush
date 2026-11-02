@@ -2615,6 +2615,18 @@ Go rush is gone from the tree; its last version is the `go-final` tag
   step holds. 2026-11-02: the 119 MiB transcript 12.6 → 12.3 MiB, its
   allocations kept 41,499 → 35,581 and made 235,169 → 229,251; the
   68 MiB one 9.7 → 9.5 MiB and 32,823 → 28,189 kept.
+- A Claude Code call's input is held once (Rust-only, rush-convo
+  `model/lean.rs`): its raw JSON says again what rush read from it (the
+  command, a file's contents, an edit's old and new text, the prompt),
+  so the step keeps the JSON with each such string cut out, a byte no
+  JSON text holds in its place naming the call's field that goes there,
+  and puts it back together when asked (`Step::input_json`, now a Cow;
+  `Step::input_len` for its length without it). A string is cut only
+  where the field written as serde_json writes it is the very bytes the
+  agent sent, so what's put back is the JSON as sent. 2026-11-02: the
+  119 MiB transcript 12.3 → 10.6 MiB (raw input held 1.9 → 0.0 MiB, the
+  allocations kept the same), reading it 196 → 205 ms and 229,251 →
+  237,647 allocations made; the 68 MiB one 9.5 → 8.0 MiB, 120 → 125 ms.
 - A followed run's numbers (Rust-only, rush-ui-session-core `subs.rs`
   `follow_run`): the reader reads a run's transcript whole, works out its
   numbers (the row's words, steps, times, tokens and cost), and keeps its

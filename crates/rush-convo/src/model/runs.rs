@@ -52,7 +52,7 @@ pub fn rush_tool(tool: &str) -> Option<&'static str> {
 
 /// What a call sent under key, when it's a string; "" when it isn't.
 pub fn input_str(st: &Step, key: &str) -> String {
-    serde_json::from_str::<serde_json::Value>(st.input_json())
+    serde_json::from_str::<serde_json::Value>(&st.input_json())
         .ok()
         .and_then(|v| v.get(key).and_then(|x| x.as_str()).map(str::to_string))
         .unwrap_or_default()
@@ -159,7 +159,7 @@ pub fn spawn_agent_name(st: &Step) -> Option<String> {
         #[serde(default)]
         agent: String,
     }
-    let i: In = serde_json::from_str(st.input_json()).ok()?;
+    let i: In = serde_json::from_str(&st.input_json()).ok()?;
     (!i.agent.is_empty()).then_some(i.agent)
 }
 

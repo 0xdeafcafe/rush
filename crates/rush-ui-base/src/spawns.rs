@@ -98,7 +98,7 @@ pub fn windows(s: &rush_convo::Session, now: Ms, grace: Ms) -> Vec<Window> {
             end = now;
         }
         let asked = if spawn {
-            serde_json::from_str::<serde_json::Value>(st.input_json())
+            serde_json::from_str::<serde_json::Value>(&st.input_json())
                 .ok()
                 .and_then(|v| v.get("prompt").and_then(|p| p.as_str()).map(str::to_string))
                 .unwrap_or_default()

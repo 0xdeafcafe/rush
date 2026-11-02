@@ -38,6 +38,7 @@ mod byid;
 mod chainrun;
 mod exchange;
 mod jobs;
+mod lean;
 mod liveout;
 pub mod runs;
 
@@ -99,8 +100,11 @@ pub struct Step {
     /// The call as its agent's adapter made it, with its input as sent.
     call: Box<Call>,
     /// The input in Claude Code's words, when the call isn't Claude Code's
-    /// own (whose words are the call's raw).
-    claude: Option<Box<RawValue>>,
+    /// own (whose words are the call's raw); when it is and `lean`, its
+    /// raw with what the call's fields hold cut out (lean.rs).
+    claude: Option<Box<str>>,
+    /// The call is Claude Code's own, its raw kept as `claude` says.
+    lean: bool,
     pub status: Status,
     /// The tool result as text.
     pub output: Box<str>,
@@ -150,11 +154,46 @@ pub struct Asking {
 
 impl Step {
     /// The input JSON in Claude Code's words, "" when it had none.
-    pub fn input_json(&self) -> &str {
+    pub fn input_json(&self) -> std::borrow::Cow<'_, str> {
         match &self.claude {
-            Some(c) => c.get(),
-            None => self.call.raw.as_ref().map_or("", RawJson::get),
+            Some(t) if self.lean => lean::rebuild(t, &self.call.input).into(),
+            Some(c) => (**c).into(),
+            None => self.call.raw.as_ref().map_or("", RawJson::get).into(),
         }
+    }
+
+    /// How long input_json is, without making it.
+    pub fn input_len(&self) -> usize {
+        match &self.claude {
+            Some(t) if self.lean => lean::len(t, &self.call.input),
+            Some(c) => c.len(),
+            None => self.call.raw.as_ref().map_or(0, |r| r.get().len()),
+        }
+    }
+
+    /// The call is Claude Code's own (words.rs claudes).
+    fn claudes(&self) -> bool {
+        self.lean || claudes(&self.call)
+    }
+
+    /// Sets its call, keeping its raw input once.
+    fn set_call(&mut self, c: &Call) {
+        let (tool, claude) = step_words(c);
+        let mut call = c.clone();
+        // Its id is the step's, held there once (Rust-only).
+        call.id = String::new();
+        self.tool = tool;
+        self.kind = c.kind;
+        self.lean = false;
+        self.claude = match claude {
+            Some(w) => Some(w),
+            None => {
+                let t = lean::lean(&mut call);
+                self.lean = t.is_some();
+                t
+            }
+        };
+        *self.call = call;
     }
 
     /// The structured result JSON, "" when there's none.
@@ -687,13 +726,7 @@ impl Session {
             }
             Event::CallUpdated(e) => {
                 if let Some(sid) = self.by_id.get(&self.steps, e.call.id.as_str()) {
-                    let (tool, claude) = step_words(&e.call);
-                    let st = &mut self.steps[sid as usize];
-                    st.tool = tool;
-                    st.claude = claude;
-                    st.kind = e.call.kind;
-                    *st.call = e.call.clone();
-                    st.call.id = String::new(); // the step's own id is it
+                    self.steps[sid as usize].set_call(&e.call);
                     self.touch_step(sid);
                 }
             }
@@ -1137,18 +1170,14 @@ impl Session {
             // end the main agent's words, or they'd be drawn twice.
             self.streaming = None;
         }
-        let (tool, claude) = step_words(c);
-        self.tools.entry(tool.clone()).or_default().calls += 1;
-        let mut call = Box::new(c.clone());
-        // Its id is the step's, held there once (Rust-only).
-        let id: Box<str> = std::mem::take(&mut call.id).into_boxed_str();
         let sid = self.steps.len() as StepId;
-        self.steps.push(Step {
-            id,
-            tool,
+        let mut st = Step {
+            id: c.id.as_str().into(),
+            tool: Name::default(),
             kind: c.kind,
-            call,
-            claude,
+            call: Box::default(),
+            claude: None,
+            lean: false,
             status: Status::Running,
             output: Box::default(),
             out: None,
@@ -1162,9 +1191,18 @@ impl Session {
             parent,
             turn: t.map(|x| x as u32),
             approval: None,
-        });
+        };
+        st.set_call(c);
+        self.tools.entry(st.tool.clone()).or_default().calls += 1;
+        self.steps.push(st);
         if !sub {
-            let input = self.steps[sid as usize].input_json();
+            // The call's own raw, rather than the step's put back together.
+            let st = &self.steps[sid as usize];
+            let input = match &c.raw {
+                Some(r) if st.lean => r.get().into(),
+                _ => st.input_json(),
+            };
+            let input = &*input;
             for w in worktrees_in(input) {
                 match self.wt_uses.iter_mut().find(|(n, _)| &**n == w) {
                     Some(u) => u.1 += 1,
@@ -1276,7 +1314,7 @@ impl Session {
         let kind = st.kind;
         // Claude Code's structured result is kept as it sent it; another
         // agent's is put as Claude's would be.
-        st.result = if claudes(&st.call) {
+        st.result = if st.claudes() {
             slim_result(o.raw.as_ref().map_or("", RawJson::get))
         } else {
             slim_result(&claude_result(o))
@@ -1413,7 +1451,7 @@ impl Session {
                     #[serde(default)]
                     todos: Vec<Todo>,
                 }
-                let Ok(inp) = serde_json::from_str::<In>(st.input_json()) else {
+                let Ok(inp) = serde_json::from_str::<In>(&st.input_json()) else {
                     return;
                 };
                 self.tasks = inp
@@ -1439,7 +1477,7 @@ impl Session {
                     #[serde(rename = "activeForm")]
                     active_form: String,
                 }
-                let Ok(inp) = serde_json::from_str::<In>(st.input_json()) else {
+                let Ok(inp) = serde_json::from_str::<In>(&st.input_json()) else {
                     return;
                 };
                 let Some(i) = self.tasks.iter().position(|t| t.id == inp.id) else {
@@ -1491,7 +1529,7 @@ impl Session {
             #[serde(rename = "activeForm")]
             active_form: String,
         }
-        let inp: In = serde_json::from_str(st.input_json()).unwrap_or_default();
+        let inp: In = serde_json::from_str(&st.input_json()).unwrap_or_default();
         let id = created_task_id(&st.output)
             .map(str::to_owned)
             .unwrap_or_else(|| (self.tasks.len() + 1).to_string());
@@ -1671,6 +1709,7 @@ impl Session {
             kind: Kind::Shell,
             call,
             claude: None,
+            lean: false,
             status: Status::Running,
             output: Box::default(),
             out: None,
@@ -1766,12 +1805,15 @@ impl Session {
 
 /// A call as a step keeps it in Claude Code's words: its tool, and its
 /// input when that isn't the call's own raw.
-fn step_words(c: &Call) -> (Name, Option<Box<RawValue>>) {
+fn step_words(c: &Call) -> (Name, Option<Box<str>>) {
     if claudes(c) {
         return (c.name.as_str().into(), None);
     }
     let (name, input) = step_tool(c);
-    (name.into(), RawValue::from_string(input).ok())
+    (
+        name.into(),
+        RawValue::from_string(input).ok().map(|r| r.get().into()),
+    )
 }
 
 /// What this turn cost, from the process's running total: a total lower
@@ -1806,7 +1848,7 @@ pub fn agent_name(st: &Step) -> String {
     {
         return r.agent_type;
     }
-    let inp: In = serde_json::from_str(st.input_json()).unwrap_or_default();
+    let inp: In = serde_json::from_str(&st.input_json()).unwrap_or_default();
     if inp.subagent_type.is_empty() {
         "subagent".into()
     } else {

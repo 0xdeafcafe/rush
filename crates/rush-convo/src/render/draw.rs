@@ -4204,7 +4204,7 @@ fn squeeze(s: &str) -> String {
 }
 
 fn input_value(st: &Step) -> serde_json::Value {
-    serde_json::from_str(st.input_json()).unwrap_or(serde_json::Value::Null)
+    serde_json::from_str(&st.input_json()).unwrap_or(serde_json::Value::Null)
 }
 
 fn str_of<'v>(v: &'v serde_json::Value, k: &str) -> &'v str {

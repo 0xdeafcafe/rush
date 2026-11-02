@@ -83,7 +83,7 @@ fn used(s: &Session) -> (HashSet<String>, HashSet<String>, HashSet<String>) {
         if st.kind == Kind::Subagent {
             agents.insert(rush_convo::model::agent_name(st));
         } else if &*st.tool == "Skill"
-            && let Ok(i) = serde_json::from_str::<In>(st.input_json())
+            && let Ok(i) = serde_json::from_str::<In>(&st.input_json())
         {
             let name = if i.skill.is_empty() {
                 i.command.trim_start_matches('/').to_string()

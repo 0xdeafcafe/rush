@@ -435,6 +435,7 @@ impl Session {
                 kind: Kind::Shell,
                 call,
                 claude: None,
+                lean: false,
                 status: Status::Ok,
                 output: Box::default(),
                 out: None,

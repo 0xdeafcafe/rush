@@ -260,7 +260,7 @@ impl Drawer<'_> {
             return None;
         }
         h.mix(st.status as u64);
-        h.mix(st.input_json().len() as u64);
+        h.mix(st.input_len() as u64);
         h.mix(st.output.len() as u64);
         h.mix(st.result_json().len() as u64);
         h.mix(st.exit as u64);

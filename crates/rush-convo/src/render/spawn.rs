@@ -600,7 +600,7 @@ pub fn tool_run(st: &Step) -> Option<Spawn> {
         #[serde(default)]
         model: String,
     }
-    let i: In = serde_json::from_str(st.input_json()).ok()?;
+    let i: In = serde_json::from_str(&st.input_json()).ok()?;
     (!i.agent.is_empty()).then(|| Spawn {
         name: i.agent,
         prompt: i.prompt,

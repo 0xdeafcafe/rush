@@ -1514,7 +1514,7 @@ pub fn refresh(m: &mut Model, key: &str) {
                         continue;
                     };
                     let st = s.step(*id);
-                    let sig = st.input_json().len();
+                    let sig = st.input_len();
                     let ran = match seen.get(id) {
                         Some(&(was, ran)) if was == sig => ran,
                         _ => {

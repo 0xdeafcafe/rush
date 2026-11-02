@@ -273,7 +273,7 @@ fn main() {
         })
         .sum();
     let out: usize = s.steps().iter().map(|st| st.output.len()).sum();
-    let input: usize = s.steps().iter().map(|st| st.input_json().len()).sum();
+    let input: usize = s.steps().iter().map(|st| st.input_len()).sum();
     let result: usize = s.steps().iter().map(|st| st.result_json().len()).sum();
     let images: usize = s
         .steps()

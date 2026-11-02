@@ -221,7 +221,7 @@ pub fn chat_turns_of(turns: &[Turn], s: &Session, steps: bool) -> Vec<String> {
                     b.push_str(&format!(
                         "Tool: {} {}\n",
                         st.tool,
-                        cut_runes(&one_line(st.input_json()), 200)
+                        cut_runes(&one_line(&st.input_json()), 200)
                     ));
                     if st.status == Status::Failed {
                         b.push_str(&format!(
