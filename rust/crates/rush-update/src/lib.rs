@@ -44,8 +44,8 @@ pub const API: &str = "https://api.github.com";
 pub const FORMULA: &str = "0xdeafcafe/tap/rush";
 
 /// How often rush asks GitHub; every rush shares the answer. Asking
-/// without a token is allowed 60 times an hour, far more than this.
-pub const EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+/// without a token is allowed 60 times an hour; rush asks once an hour.
+pub const EVERY: Duration = Duration::from_secs(60 * 60);
 
 /// What looking for a newer rush is called where rush shows what waits on
 /// the network.
