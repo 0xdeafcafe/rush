@@ -178,6 +178,9 @@ pub fn do_act(m: &mut Model, a: &LinkAct) -> Out {
                 move || {
                     Command::new("qlmanage")
                         .args(["-p", &p])
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
                         .spawn()
                         .map(|_| ())
                         .map_err(|e| e.to_string())

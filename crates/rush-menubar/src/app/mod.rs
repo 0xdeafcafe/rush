@@ -603,7 +603,12 @@ impl Delegate {
             });
             return;
         }
-        let _ = Command::new("/usr/bin/open").arg(&self.ivars().bin).spawn();
+        let _ = Command::new("/usr/bin/open")
+            .arg(&self.ivars().bin)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
     }
 
     // ---- notifications ----

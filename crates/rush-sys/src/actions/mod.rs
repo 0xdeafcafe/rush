@@ -237,6 +237,9 @@ pub fn notify(title: &str, body: &str) {
     );
     if let Ok(mut c) = std::process::Command::new("osascript")
         .args(["-e", &script])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .spawn()
     {
         std::thread::spawn(move || {

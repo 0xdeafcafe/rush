@@ -160,14 +160,21 @@ pub fn show(key: &str) -> Result<(), String> {
 }
 
 fn open_with(args: &[&str]) -> Result<(), String> {
-    let st = Command::new("/usr/bin/open")
+    let out = Command::new("/usr/bin/open")
         .args(args)
-        .status()
+        .stdin(std::process::Stdio::null())
+        .output()
         .map_err(|e| e.to_string())?;
-    if st.success() {
+    if out.status.success() {
         Ok(())
     } else {
-        Err(st.to_string())
+        let said = String::from_utf8_lossy(&out.stderr);
+        let said = said.trim();
+        if said.is_empty() {
+            Err(out.status.to_string())
+        } else {
+            Err(format!("open said: {said} ({})", out.status))
+        }
     }
 }
 

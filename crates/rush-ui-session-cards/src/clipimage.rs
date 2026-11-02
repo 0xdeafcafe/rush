@@ -104,6 +104,8 @@ pub fn pbcopy(m: &mut Model, text: String) {
             use std::io::Write;
             if let Ok(mut c) = Command::new("pbcopy")
                 .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
                 .spawn()
             {
                 if let Some(mut i) = c.stdin.take() {

@@ -454,9 +454,11 @@ pub fn browse(m: &mut Model, url: &str) {
             move || {
                 std::process::Command::new("open")
                     .arg(&url)
-                    .status()
+                    .stdin(std::process::Stdio::null())
+                    .output()
                     .map_err(|e| e.to_string())
-                    .and_then(|s| {
+                    .and_then(|o| {
+                        let s = o.status;
                         if s.success() {
                             Ok(())
                         } else {

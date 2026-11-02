@@ -279,9 +279,11 @@ pub fn open_image(m: &mut Model, path: &str) {
         move || {
             std::process::Command::new("open")
                 .arg(&p)
-                .status()
+                .stdin(std::process::Stdio::null())
+                .output()
                 .map_err(|e| e.to_string())
-                .and_then(|s| {
+                .and_then(|o| {
+                    let s = o.status;
                     if s.success() {
                         Ok(())
                     } else {

@@ -354,6 +354,7 @@ pub fn browse(url: &str) {
         .spawn(move || {
             let _ = Cmd::new("open")
                 .arg(url)
+                .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .status();

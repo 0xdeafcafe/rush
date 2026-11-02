@@ -11,7 +11,7 @@ use std::io::Write as _;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -138,10 +138,19 @@ pub fn start() -> Result<(), Error> {
         // Go waits up to five seconds for the old one to let go of the
         // feed's lock: the lock is waited on, not polled.
         wait_unlocked(std::time::Duration::from_secs(5));
+        // The lock goes when the feed does; the app itself may be a moment
+        // behind, and Launch Services refuses to open over it.
+        wait_gone(std::time::Duration::from_secs(5));
     } else if running() {
         return Ok(());
     }
-    let res = run("/usr/bin/open", &[app_path().as_os_str()]);
+    let mut res = run("/usr/bin/open", &[app_path().as_os_str()]);
+    if rebuilt && res.is_err() {
+        // Launch Services can refuse (-600, -10810) while the old app is
+        // still going away: once it's confirmed gone, open it once more.
+        wait_gone(std::time::Duration::from_secs(5));
+        res = run("/usr/bin/open", &[app_path().as_os_str()]);
+    }
     let mut f = Map::new();
     f.insert("rebuilt".into(), Value::Bool(rebuilt));
     if let Err(e) = &res {
@@ -166,6 +175,28 @@ fn wait_unlocked(d: std::time::Duration) {
     let _ = rx.recv_timeout(d);
 }
 
+/// Waits until no process runs the app's program, at most d.
+fn wait_gone(d: std::time::Duration) {
+    let prog = app_path().join("Contents").join("MacOS").join(EXECUTABLE);
+    let pat = quote_meta(&prog.to_string_lossy());
+    let end = std::time::Instant::now() + d;
+    while std::time::Instant::now() < end {
+        // pgrep exits 0 when something matches.
+        let up = Command::new("/usr/bin/pgrep")
+            .arg("-f")
+            .arg(&pat)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        if !up {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 /// Quits the app, every copy of it, and with it the feed.
 pub fn stop() {
     log("menubar-stop", Map::new());
@@ -183,7 +214,8 @@ pub fn stop() {
     let _ = Command::new("/usr/bin/pkill")
         .arg("-f")
         .arg(quote_meta(&prog.to_string_lossy()))
-        .status();
+        .stdin(Stdio::null())
+        .output();
 }
 
 /// Stops the app opening at login.
@@ -276,6 +308,7 @@ pub fn build_app() -> Result<bool, Error> {
     let out = Command::new("/usr/bin/codesign")
         .args(["--force", "--sign", "-"])
         .arg(&app)
+        .stdin(Stdio::null())
         .output()
         .map_err(|e| format!("signing the menu bar app: {e}"))?;
     if !out.status.success() {
@@ -289,7 +322,11 @@ pub fn build_app() -> Result<bool, Error> {
     // Launch Services and Notification Center keep an app's icon by its
     // path and version; a new version, registered again, has them take
     // this build's (an older build may have had none).
-    let _ = Command::new(LSREGISTER).arg("-f").arg(&app).status();
+    let _ = Command::new(LSREGISTER)
+        .arg("-f")
+        .arg(&app)
+        .stdin(Stdio::null())
+        .output();
     fs::write(&stamp_path, stamp).map_err(|e| e.to_string())?;
     Ok(true)
 }
@@ -297,7 +334,11 @@ pub fn build_app() -> Result<bool, Error> {
 /// Unregisters the app at path with Launch Services: for tests, whose
 /// app mustn't stand in for the real one.
 pub fn unregister(path: &Path) {
-    let _ = Command::new(LSREGISTER).arg("-u").arg(path).status();
+    let _ = Command::new(LSREGISTER)
+        .arg("-u")
+        .arg(path)
+        .stdin(Stdio::null())
+        .output();
 }
 
 /// Whether macOS draws app icons' tiles itself, as it does from 26 on;
@@ -320,15 +361,27 @@ pub(crate) fn major(v: &str) -> i32 {
         .unwrap_or(0)
 }
 
+/// Runs a program to its end with nothing of it on rush's terminal: its
+/// output is caught, and what it said on stderr goes in the error.
 fn run(prog: &str, args: &[&std::ffi::OsStr]) -> Result<(), Error> {
-    let st = Command::new(prog)
+    let out = Command::new(prog)
         .args(args)
-        .status()
+        .stdin(Stdio::null())
+        .output()
         .map_err(|e| e.to_string())?;
-    if st.success() {
-        Ok(())
+    if out.status.success() {
+        return Ok(());
+    }
+    let said = String::from_utf8_lossy(&out.stderr);
+    let said = said.trim();
+    let name = Path::new(prog)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if said.is_empty() {
+        Err(out.status.to_string())
     } else {
-        Err(st.to_string())
+        Err(format!("{name} said: {said} ({})", out.status))
     }
 }
 
@@ -389,6 +442,16 @@ pub(crate) fn log(kind: &str, f: Map<String, Value>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failing_programs_stderr_is_in_the_error() {
+        let args: [&std::ffi::OsStr; 2] = ["-c".as_ref(), "echo boom >&2; exit 1".as_ref()];
+        let e = run("/bin/sh", &args).unwrap_err();
+        assert!(e.contains("boom"), "{e}");
+        assert!(e.contains("sh said"), "{e}");
+        let ok: [&std::ffi::OsStr; 2] = ["-c".as_ref(), "echo noise >&2".as_ref()];
+        assert_eq!(run("/bin/sh", &ok), Ok(()));
+    }
 
     #[test]
     fn lock_is_held_while_the_feed_runs() {

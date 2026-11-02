@@ -102,22 +102,32 @@ pub fn build_app() -> Result<bool, String> {
             String::from_utf8_lossy(&out.stderr)
         ));
     }
-    let _ = Command::new(LSREGISTER).arg("-f").arg(&app).status();
+    let _ = Command::new(LSREGISTER)
+        .arg("-f")
+        .arg(&app)
+        .stdin(std::process::Stdio::null())
+        .output();
     fs::write(&stamp_path, stamp).map_err(|e| e.to_string())?;
     Ok(true)
 }
 
 /// Opens the helper in the background, without taking focus.
 pub(crate) fn launch() -> Result<(), String> {
-    let st = Command::new("/usr/bin/open")
+    let out = Command::new("/usr/bin/open")
         .args(["-g", "-j", "-a"])
         .arg(app_path())
-        .status()
+        .stdin(std::process::Stdio::null())
+        .output()
         .map_err(|e| format!("starting rush voice: {e}"))?;
-    if st.success() {
+    if out.status.success() {
         Ok(())
     } else {
-        Err(format!("starting rush voice: open said {st}"))
+        let said = String::from_utf8_lossy(&out.stderr);
+        Err(format!(
+            "starting rush voice: open said {} {}",
+            out.status,
+            said.trim()
+        ))
     }
 }
 
@@ -126,13 +136,18 @@ pub(crate) fn quit() {
     let _ = Command::new("/usr/bin/pkill")
         .arg("-f")
         .arg(quote_meta(&program().to_string_lossy()))
-        .status();
+        .stdin(std::process::Stdio::null())
+        .output();
 }
 
 /// Unregisters the helper at path with Launch Services: for tests, whose
 /// helper mustn't stand in for the real one.
 pub fn unregister(path: &Path) {
-    let _ = Command::new(LSREGISTER).arg("-u").arg(path).status();
+    let _ = Command::new(LSREGISTER)
+        .arg("-u")
+        .arg(path)
+        .stdin(std::process::Stdio::null())
+        .output();
 }
 
 /// The major version of a "26.1" product version.
