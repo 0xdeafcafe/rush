@@ -661,7 +661,8 @@ pub fn focus(m: &mut Model, key: &str) -> bool {
 
 /// Whether the column has the keys: the row picked is still an item.
 pub fn focused(m: &mut Model, key: &str) -> bool {
-    match conn(m, key).side_pick {
+    let at = conn(m, key).side_pick;
+    match at {
         Some(i) if items(m, key).contains(&i) => true,
         Some(_) => {
             conn(m, key).side_pick = None;
