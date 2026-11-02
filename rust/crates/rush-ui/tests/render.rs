@@ -777,6 +777,24 @@ fn snapshot_settings_general() {
     );
 }
 
+/// Every place's pages on a row of their own under the places, drawn
+/// alike: the header alone, at 120×40, one per place with pages.
+#[test]
+fn snapshot_page_tabs() {
+    use rush_ui::screens::settings::{PAGE_GENERAL, PAGE_PROVIDERS, set_settings_page};
+    let header = |name: &str, setup: &dyn Fn(&mut Model), keys: &[(Key, KeyMods)]| {
+        let mut m = model();
+        setup(&mut m);
+        let f = plain(&mut m, 120, 40, keys);
+        let head: String = f.lines().take(6).map(|l| format!("{l}\n")).collect();
+        snapshot(&format!("page_tabs_{name}_120x40"), &head);
+    };
+    header("agents", &|_| {}, &[]);
+    header("wall", &|_| {}, &[(Key::Char(']'), KeyMods::NONE)]);
+    header("harnesses", &|m| set_settings_page(m, PAGE_PROVIDERS), &[]);
+    header("settings", &|m| set_settings_page(m, PAGE_GENERAL), &[]);
+}
+
 #[test]
 fn snapshot_command_bar() {
     views("snap_ctrl_k", |_| {}, &[(Key::Char('k'), KeyMods::CTRL)]);

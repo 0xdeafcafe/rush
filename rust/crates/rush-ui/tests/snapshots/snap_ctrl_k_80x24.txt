@@ -1,6 +1,6 @@
      !
     ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working                       default
-   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    Agents · Wall  [ ]
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings             0% cpu · –
   ╭─ ✻ Go anywhere ─────────────────────────────────────────────── ctrl+k ─╮
   │ ❯ ▏an agent, words said in any conversation, or a place · # for comma… │
 ──│ ────────────────────────────────────────────────────────────────────── │────

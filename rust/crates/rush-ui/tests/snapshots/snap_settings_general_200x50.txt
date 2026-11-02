@@ -1,7 +1,7 @@
      !
     ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working                                                                                                                                               default
-   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    General   Keys   Plugins   Updates   Remote   [ ]
-    RUSH
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings
+    RUSH      General   Keys   Plugins   Updates   Remote   [ ]
    ▀▀▀▀▀▀
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   Sessions, notifications, background work, and how the workspace looks.

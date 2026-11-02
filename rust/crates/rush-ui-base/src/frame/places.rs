@@ -390,12 +390,13 @@ impl Model {
         l
     }
 
-    /// The pages row's words, as many as width has room for, the page
-    /// showing bright; nothing where there are no pages (pagesWidth). Leading blanks are the caller's.
+    /// The pages row, width wide at most, on a row of its own under the
+    /// places: every place's pages drawn the one way (page_tabs_line);
+    /// nothing where there are no pages. Leading blanks are the caller's.
     pub fn pages_line(&self, width: usize) -> Line {
         if self.place != PlaceId::Agents
             && let Some(Some(p)) = self.ext.places.get(self.place as usize)
-            && let Some(l) = p.pages_line(self, width.saturating_sub(3))
+            && let Some(l) = p.pages_line(self, width)
         {
             return l;
         }
@@ -405,30 +406,11 @@ impl Model {
         let Some(t) = self.page_tabs() else {
             return Line::new();
         };
-        let mut out = Line::new();
-        for (i, n) in t.names.iter().enumerate() {
-            if i > 0 {
-                out.spans.push(sp(" · ", DIM));
-            }
-            if i == t.cur {
-                out.spans.push(spb(n.clone(), TEXT));
-            } else if self.top_hover == Some((i, true)) {
-                join(&mut out, hover_line(line([sp(n.clone(), TEXT)]), n.len()));
-            } else {
-                out.spans.push(sp(n.clone(), DIM));
-            }
-        }
-        out.spans.push(sp("  [ ]", FAINT));
-        if out.width() + 3 > width {
-            let cur = t.names[t.cur.min(t.names.len() - 1)].clone();
-            return line([
-                sp("‹ ", FAINT),
-                spb(cur, TEXT),
-                sp(format!(" {}/{} › ", t.cur + 1, t.names.len()), FAINT),
-                sp("[ ]", FAINT),
-            ]);
-        }
-        out
+        let hover = match self.top_hover {
+            Some((i, true)) => Some(i),
+            _ => None,
+        };
+        page_tabs_line(&t.names, t.cur, hover, width)
     }
 
     /// The tab at (x, y) of the header as last drawn: (index, is a page)
@@ -449,13 +431,12 @@ impl Model {
             }
             None
         };
-        // Small screens give the pages a row under the places; otherwise
-        // both are along the header's second row.
+        // The pages have a row of their own under the places.
         let narrow = self.w < crate::header::NARROW;
         let (places_y, pages_y) = if narrow {
             (2, self.top_h() - 2)
         } else {
-            (self.text_at() + 1, self.text_at() + 1)
+            (self.text_at() + 1, self.text_at() + 2)
         };
         if y == pages_y
             && let Some(t) = self.page_tabs()
@@ -540,4 +521,63 @@ impl Model {
         join(&mut l, hint);
         fit(l, w)
     }
+}
+
+/// A place's pages as tabs, w wide at most, as every place draws them:
+/// the page showing orange and underlined, the rest plain, three apart,
+/// and [ ] after them where there's room. Too many for w keep the page
+/// showing and its neighbours, with ‹ › for the rest (settingsTabs).
+pub fn page_tabs_line(names: &[String], cur: usize, hover: Option<usize>, w: usize) -> Line {
+    use rush_core::text::{Mods, Span, width};
+    if names.is_empty() {
+        return Line::new();
+    }
+    let cur = cur.min(names.len() - 1);
+    let render = |from: usize, to: usize| {
+        let mut l = Line::new();
+        let mut first = true;
+        let mut sep = |l: &mut Line| {
+            if !first {
+                l.spans.push(plain("   "));
+            }
+            first = false;
+        };
+        if from > 0 {
+            sep(&mut l);
+            l.spans.push(sp("‹", DIM));
+        }
+        for (i, name) in names.iter().enumerate().take(to).skip(from) {
+            sep(&mut l);
+            if i == cur {
+                let mut st = bold(ORANGE);
+                st.mods = st.mods.with(Mods::UNDERLINE);
+                l.spans.push(Span::new(name.clone(), st));
+            } else if hover == Some(i) {
+                join(
+                    &mut l,
+                    hover_line(line([sp(name.clone(), TEXT)]), width(name)),
+                );
+            } else {
+                l.spans.push(sp(name.clone(), SUB));
+            }
+        }
+        if to < names.len() {
+            sep(&mut l);
+            l.spans.push(sp("›", DIM));
+        }
+        l
+    };
+    let (mut from, mut to) = (0, names.len());
+    while render(from, to).width() > w && to - from > 1 {
+        if cur - from > to - cur - 1 {
+            from += 1;
+        } else {
+            to -= 1;
+        }
+    }
+    let mut tabs = render(from, to);
+    if tabs.width() + 6 <= w {
+        tabs.spans.push(sp("   [ ]", DIM));
+    }
+    fit(tabs, w)
 }

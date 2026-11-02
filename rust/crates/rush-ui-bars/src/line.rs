@@ -223,7 +223,10 @@ pub fn sample(m: &Model, which: usize, key: &str, id: &str) -> Line {
 /// rows (statuslinesheet.go:678).
 pub fn preview(m: &Model, which: usize, key: &str, w: usize) -> Vec<Line> {
     if which == BAR_TOP {
-        return m.head_rows(w).0;
+        // The bar's two rows; the pages row under them isn't the bar's.
+        let mut rows = m.head_rows(w).0;
+        rows.truncate(2);
+        return rows;
     }
     let key = if key.is_empty() {
         sheet_agent(m)

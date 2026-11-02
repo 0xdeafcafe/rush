@@ -6,7 +6,7 @@
 //! settingsNavigation :203, settingsMouse :254, settingsWheel :297,
 //! settingHelpSheet :312, settingsTabs :356).
 
-use rush_core::text::{Line, width};
+use rush_core::text::Line;
 use rush_draw::MouseKind;
 
 use super::form::{self, Section, Setting, flat, row_at};
@@ -458,50 +458,11 @@ impl Sheet for HelpSheet {
 pub fn tabs(m: &Model, place: PlaceId, w: usize) -> Line {
     let (lo, hi) = place_pages(place);
     let all = super::pages();
-    let names: Vec<&str> = all[lo..hi].iter().map(|p| p.name).collect();
+    let names: Vec<String> = all[lo..hi].iter().map(|p| p.name.to_string()).collect();
     let cur = dialog(m).page.clamp(lo, hi - 1) - lo;
-    let render = |from: usize, to: usize| {
-        let mut l = Line::new();
-        let mut first = true;
-        let mut sep = |l: &mut Line| {
-            if !first {
-                l.spans.push(plain("   "));
-            }
-            first = false;
-        };
-        if from > 0 {
-            sep(&mut l);
-            l.spans.push(sp("‹", DIM));
-        }
-        for (i, name) in names.iter().enumerate().take(to).skip(from) {
-            sep(&mut l);
-            if i == cur {
-                let mut st = bold(ORANGE);
-                st.mods = st.mods.with(rush_core::text::Mods::UNDERLINE);
-                l.spans.push(rush_core::text::Span::new(*name, st));
-            } else if m.top_hover == Some((i, true)) {
-                join(&mut l, hover_line(line([sp(*name, TEXT)]), width(name)));
-            } else {
-                l.spans.push(sp(*name, SUB));
-            }
-        }
-        if to < names.len() {
-            sep(&mut l);
-            l.spans.push(sp("›", DIM));
-        }
-        l
+    let hover = match m.top_hover {
+        Some((i, true)) => Some(i),
+        _ => None,
     };
-    let (mut from, mut to) = (0, names.len());
-    while render(from, to).width() > w && to - from > 1 {
-        if cur - from > to - cur - 1 {
-            from += 1;
-        } else {
-            to -= 1;
-        }
-    }
-    let mut tabs = render(from, to);
-    if tabs.width() + 6 <= w {
-        tabs.spans.push(sp("   [ ]", DIM));
-    }
-    fit(tabs, w)
+    crate::frame::places::page_tabs_line(&names, cur, hover, w)
 }

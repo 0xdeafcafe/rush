@@ -1,7 +1,7 @@
     RUSH     rush  ● 1 needs  ✻ 2
               ✻ default
                Agents   Projects   Harnesses  ›
-               Agents · Wall  [ ]
+              Agents   Wall   [ ]
 ──────────────────────────────────────────────────
   AGENTS▾                             COST   TIME
 ┃ Needs you  1 · $0.19

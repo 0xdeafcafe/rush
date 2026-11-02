@@ -141,7 +141,9 @@ fn places_and_focus() {
 fn agents_pages() {
     let mut m = model(120, 40);
     let f = screen(&mut m);
-    assert!(f[2].contains("Agents · Wall  [ ]"), "{f:?}");
+    // The pages have a row of their own under the places, beside clanker.
+    assert!(!f[2].contains("Wall"), "{f:?}");
+    assert!(f[3].contains("RUSH      Agents   Wall   [ ]"), "{f:?}");
     press(&mut m, "]");
     assert_eq!(m.agents_page, 1);
     let f = screen(&mut m);
@@ -205,9 +207,139 @@ fn clicking_the_tabs() {
     click(&mut m, x, 2);
     assert_eq!(m.place, PlaceId::Agents);
     let f = screen(&mut m);
-    let x = rush_core::text::width(&f[2][..f[2].find("Wall").unwrap()]) + 1;
-    click(&mut m, x, 2);
+    // The pages have their own row, under the places'.
+    let x = rush_core::text::width(&f[3][..f[3].find("Wall").unwrap()]) + 1;
+    click(&mut m, x, 3);
     assert_eq!(m.agents_page, 1);
+    let x = rush_core::text::width(&f[3][..f[3].find("Agents").unwrap()]) + 1;
+    click(&mut m, x, 3);
+    assert_eq!(m.agents_page, 0);
+}
+
+/// Every place's pages are drawn alike on their row: the one showing
+/// orange and underlined, the others plain, three apart, no dots; a click
+/// on one there picks it, and the pointer over one lights it.
+#[test]
+fn page_tabs_look_alike_and_click() {
+    use rush_core::text::Mods;
+    let mut m = model(120, 40);
+    let under = |m: &mut Model, name: &str| {
+        let rows = m.frame();
+        let s = rows[3]
+            .spans
+            .iter()
+            .find(|s| s.text == name)
+            .unwrap_or_else(|| panic!("{name} on the pages row"))
+            .clone();
+        s.style.fg == ORANGE && s.style.mods.contains(Mods::UNDERLINE)
+    };
+    assert!(under(&mut m, "Agents"), "the page showing is lit");
+    assert!(!under(&mut m, "Wall"));
+    let f = screen(&mut m);
+    assert!(!f[3].contains('·'), "{f:?}");
+    let click = |m: &mut Model, x: usize, y: usize| {
+        m.mouse_event(&Mouse {
+            kind: MouseKind::Down(Button::Left),
+            x: x as u16,
+            y: y as u16,
+            mods: KeyMods::NONE,
+        })
+    };
+    let at = |f: &[String], y: usize, name: &str| {
+        rush_core::text::width(&f[y][..f[y].find(name).unwrap()]) + 1
+    };
+    // Settings: its pages under the places, Keys clicked.
+    let x = at(&f, 2, " Settings ") + 1;
+    click(&mut m, x, 2);
+    assert_eq!(m.place, PlaceId::Settings);
+    let f = screen(&mut m);
+    assert!(
+        f[3].contains("RUSH      General   Keys   Plugins   Updates   Remote   [ ]"),
+        "{f:?}"
+    );
+    assert!(under(&mut m, "General"));
+    let x = at(&f, 3, "Keys");
+    // The pointer over a page lights it.
+    m.mouse_event(&Mouse {
+        kind: MouseKind::Moved,
+        x: x as u16,
+        y: 3,
+        mods: KeyMods::NONE,
+    });
+    assert_eq!(m.top_hover, Some((1, true)));
+    assert_eq!(click(&mut m, x, 3), Out::Draw);
+    assert_eq!(m.page_tabs().map(|t| t.cur), Some(1), "Keys picked");
+    assert!(under(&mut m, "Keys"));
+    assert!(!under(&mut m, "General"));
+    // ] goes on from there.
+    press(&mut m, "]");
+    assert_eq!(m.page_tabs().map(|t| t.cur), Some(2));
+    // Harnesses' pages are drawn the same.
+    let f = screen(&mut m);
+    let x = at(&f, 2, " Harnesses ") + 1;
+    click(&mut m, x, 2);
+    assert_eq!(m.place, PlaceId::Harnesses);
+    let f = screen(&mut m);
+    assert!(
+        f[3].contains("RUSH      Providers   Harnesses   Config   [ ]"),
+        "{f:?}"
+    );
+    let x = at(&f, 3, "Config");
+    click(&mut m, x, 3);
+    assert_eq!(m.page_tabs().map(|t| t.cur), Some(2), "Config picked");
+}
+
+/// Without clanker the header is its three rows, the pages the third;
+/// on a small screen the pages are under the places, lined up with them,
+/// trimmed with ‹ › when they don't fit.
+#[test]
+fn page_tabs_without_clanker_and_narrow() {
+    let mut m = model(120, 40);
+    m.cfg.hide_logo = true;
+    let f = screen(&mut m);
+    assert_eq!(m.top_h(), 4);
+    assert!(f[1].contains(" Agents "), "{f:?}");
+    assert!(
+        f[2].trim_start().starts_with("Agents   Wall   [ ]"),
+        "{f:?}"
+    );
+    assert_eq!(
+        f[2].find("Agents").map(|i| i + 1),
+        f[1].find("Agents"),
+        "lined up with the places: {f:?}"
+    );
+    assert!(f[3].starts_with("────"), "{f:?}");
+    let x = rush_core::text::width(&f[2][..f[2].find("Wall").unwrap()]) + 1;
+    m.mouse_event(&Mouse {
+        kind: MouseKind::Down(Button::Left),
+        x: x as u16,
+        y: 2,
+        mods: KeyMods::NONE,
+    });
+    assert_eq!(m.agents_page, 1);
+
+    let mut m = model(50, 24);
+    let f = screen(&mut m);
+    let tabs = f[2].find("Agents").unwrap();
+    let pages = f[3].find("Agents").unwrap();
+    assert_eq!(pages + 1, tabs, "lined up with the places: {f:?}");
+    assert!(f[3].trim_end().ends_with("Agents   Wall   [ ]"), "{f:?}");
+    assert!(f[4].starts_with("────"), "{f:?}");
+    let x = rush_core::text::width(&f[3][..f[3].find("Wall").unwrap()]) + 1;
+    m.mouse_event(&Mouse {
+        kind: MouseKind::Down(Button::Left),
+        x: x as u16,
+        y: 3,
+        mods: KeyMods::NONE,
+    });
+    assert_eq!(m.agents_page, 1);
+    // Settings' five pages don't fit: the one showing and its
+    // neighbours, ‹ › for the rest.
+    m.set_place(PlaceId::Settings);
+    let f = screen(&mut m);
+    assert!(f[3].contains("General"), "{f:?}");
+    assert!(f[3].contains('›'), "{f:?}");
+    assert!(f[3].chars().count() <= 50, "{f:?}");
 }
 
 // ---- editor_test.go ----

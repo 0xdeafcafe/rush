@@ -1,7 +1,7 @@
      !
     ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working                                                               default
-   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    Agents · Wall  [ ]            0% cpu · – · 37.0G free · 80%
-    RUSH
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings                                  0% cpu · – · 37.0G free · 80%
+    RUSH      Agents   Wall   [ ]
    ▀▀▀▀▀▀
 ────╭─ ✻ Go anywhere ─────────────────────────────────────────────────────────────────────────────────── ctrl+k ─╮──────
   AG│ ❯ ▏an agent, words said in any conversation, or a place · # for commands                                   │ TIME

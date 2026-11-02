@@ -21,6 +21,9 @@ pub const NARROW: usize = 60;
 /// The row of clanker's head: the text's first row is level with it.
 pub const TEXT_AT: usize = 1;
 
+/// The header's rows of text: the counts, the places, the pages.
+pub const TEXT_ROWS: usize = 3;
+
 #[derive(Default, Clone, Copy)]
 pub struct Tally {
     pub blocked: usize,
@@ -69,14 +72,15 @@ impl Model {
     }
 
     /// The rows above the body: the header and a rule. With clanker the
-    /// header is as tall as he is and the two rows of text sit beside his
-    /// head and body (`TEXT_AT`); without him it is the two rows. The small
-    /// screens keep the taller one, its places and pages a row each.
+    /// header is as tall as he is and the three rows of text (the counts,
+    /// the places, the pages) sit beside him from his head down
+    /// (`TEXT_AT`); without him it is the three rows. The small screens
+    /// keep the taller one, its places and pages a row each.
     pub fn top_h(&self) -> usize {
         if self.w < NARROW {
             5
         } else if self.cfg.hide_logo {
-            3
+            TEXT_ROWS + 1
         } else {
             clanker::H + 1
         }
@@ -135,19 +139,19 @@ impl Model {
         line([sp("✻", ORANGE), plain(" "), sp(self.account.clone(), DIM)])
     }
 
-    /// The header's two rows, w wide: the counts and the account along the
-    /// first, the places, the pages and the machine along the second, with
-    /// clanker's face and feet down the left. Also the places' and the
-    /// pages' words as drawn, for clicks (blanks where the other is), and
-    /// what the top bar had no room for.
+    /// The header's three rows, w wide: the counts and the account along
+    /// the first, the places and the machine along the second, the pages
+    /// of the place you're in along the third, with clanker down the left.
+    /// Also the places' and the pages' rows as drawn, for clicks, and what
+    /// the top bar had no room for.
     pub fn head_rows(&self, w: usize) -> (Vec<Line>, [String; 2], Drops) {
         let t = self.tally();
         let md = self.mood(t);
         let (face, gap) = if self.cfg.hide_logo {
-            (vec![Line::new(); 2], "")
+            (vec![Line::new(); TEXT_ROWS], "")
         } else {
             let r = self.robot(md, t);
-            (vec![r[TEXT_AT].clone(), r[TEXT_AT + 1].clone()], "   ")
+            (r[TEXT_AT..TEXT_AT + TEXT_ROWS].to_vec(), "   ")
         };
         let lead = |i: usize| {
             let mut l = line([plain("  ")]);
@@ -171,28 +175,19 @@ impl Model {
             }
             l
         };
-        // The second row's left: the places, then the pages.
+        // The second row's left: the places.
         let mut tabs = lead(1);
-        let mut blank = tabs.width();
         for (i, tb) in self.tabs().into_iter().enumerate() {
             if i > 0 {
                 tabs.spans.push(plain(" "));
-                blank += 1;
             }
-            blank += tb.width();
             join(&mut tabs, tb);
         }
-        let tabs_w = tabs.width();
-        let pages_at = |room: usize| self.pages_line(room);
-        let full_pages = pages_at(1 << 16);
-        let side = |l: &Line, p: &Line| {
-            let mut l = l.clone();
-            if p.width() > 0 {
-                l.spans.push(plain("   "));
-                join(&mut l, p.clone());
-            }
-            l
-        };
+        // The third row: the pages, a row of their own under the places,
+        // as many as fit.
+        let mut pages = lead(2);
+        let room = w.saturating_sub(pages.width() + 2);
+        join(&mut pages, self.pages_line(room));
         let join_dots = |ps: &[Line]| {
             let mut out = Line::new();
             for p in ps.iter().filter(|p| p.width() > 0) {
@@ -244,7 +239,7 @@ impl Model {
         if custom {
             // A top bar of your own is drawn as you built it, a line each.
             let l0 = left0(false);
-            let l1 = side(&tabs, &full_pages);
+            let l1 = tabs.clone();
             // While transcripts are costed the second row says so first.
             let say = if tb.is_some() && costing { 23 } else { 0 };
             let rooms = [
@@ -282,41 +277,15 @@ impl Model {
                     join(&mut c, std::mem::take(r));
                     *r = c;
                 }
-                let l = side(&tabs, &full_pages);
-                if pick.is_none() && fits(&l, r) {
-                    pick = Some(place(l, r.clone()));
+                if pick.is_none() && fits(&tabs, r) {
+                    pick = Some(place(tabs.clone(), r.clone()));
                 }
             }
-            row1 = pick.unwrap_or_else(|| {
-                // The pages shorten once nothing of the right is left,
-                // and go when even that doesn't fit ([ ] still turn them).
-                let room = w.saturating_sub(tabs_w + 5);
-                let p = pages_at(room + 3);
-                let p = if p.width() > room { Line::new() } else { p };
-                fit(side(&tabs, &p), w)
-            });
+            row1 = pick.unwrap_or_else(|| fit(tabs.clone(), w));
         }
-        let plain1 = row1.plain();
-        // Where the pages' words are, the places' words are blanks.
-        let mut pages_text: String = plain1.chars().map(|_| ' ').take(0).collect();
-        let tab_cells = blank;
-        let mut cells = 0;
-        for ch in plain1.chars() {
-            let cw = width(&ch.to_string());
-            if cells < tab_cells {
-                for _ in 0..cw {
-                    pages_text.push(' ');
-                }
-            } else {
-                pages_text.push(ch);
-            }
-            cells += cw;
-        }
-        (
-            vec![fit(row0, w), fit(row1, w)],
-            [plain1, pages_text],
-            drops,
-        )
+        let (row1, row2) = (fit(row1, w), fit(pages, w));
+        let text = [row1.plain(), row2.plain()];
+        (vec![fit(row0, w), row1, row2], text, drops)
     }
 
     /// The header's rows and the rule under them; on a small screen the
@@ -336,7 +305,7 @@ impl Model {
             (tb.dropped)(self, drops);
         }
         self.header_text = text;
-        // clanker whole, his rows above and below the text's two.
+        // clanker whole, his rows above and below the text's three.
         let mut out = Vec::new();
         if self.cfg.hide_logo {
             out = text_rows;
@@ -345,7 +314,7 @@ impl Model {
             let robot = self.robot(self.mood(t), t);
             let mut rows = text_rows.into_iter();
             for (i, r) in robot.into_iter().enumerate() {
-                if (TEXT_AT..TEXT_AT + 2).contains(&i) {
+                if (TEXT_AT..TEXT_AT + TEXT_ROWS).contains(&i) {
                     out.extend(rows.next());
                 } else {
                     let mut l = line([plain("  ")]);
@@ -416,8 +385,9 @@ impl Model {
         }
         let r3 = fit(r3, w);
         self.header_text[0] = r3.plain();
-        let mut lead = line([plain(blanks(6 + clanker::W))]);
-        let pw = w.saturating_sub(lead.width()) + 3;
+        // The pages under the places, lined up with them.
+        let mut lead = line([plain(format!("  {indent}"))]);
+        let pw = w.saturating_sub(lead.width() + 2);
         join(&mut lead, self.pages_line(pw));
         let lead = fit(lead, w);
         self.header_text[1] = lead.plain();
