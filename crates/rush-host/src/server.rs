@@ -1404,6 +1404,12 @@ impl Host {
         // Its start is the cause of what its commands and hooks log.
         let ev = rush_events::id();
         let c = st.cfg.clone();
+        // Settings › Usage › Cheaper model for routine subagents, read now.
+        let cheap = crate::cheap::plan(
+            &self.reg,
+            &rush_state::Store::load().config.cheap_subagents,
+            &st.cfg.kind,
+        );
         let mut env = vec![
             format!("TMPDIR={}", tmp.to_string_lossy()),
             rush_events::env(&ev),
@@ -1442,6 +1448,7 @@ impl Host {
             } else {
                 String::new()
             },
+            subagent_model: cheap.all.clone(),
             lightly: true,
             // rush's own tools never ask: they draw, or start what the
             // Agent tool would.
@@ -1543,6 +1550,7 @@ impl Host {
             &c.system_prompt,
             views,
             feed,
+            &cheap.prompt,
             &note,
         ]);
         // The same parts by name, so the next start can say what changed.
@@ -1554,6 +1562,7 @@ impl Host {
             ("rush's views", views),
             ("rush's agents and tools", told.as_str()),
             ("community feed", feed),
+            ("cheaper subagent model", cheap.prompt.as_str()),
             ("this session's prompt", c.system_prompt.as_str()),
         ];
         let sections = parts
