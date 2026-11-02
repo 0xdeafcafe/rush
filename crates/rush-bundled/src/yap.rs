@@ -75,8 +75,14 @@ pub fn socket() -> PathBuf {
     home.join(".config").join("yap").join("live.sock")
 }
 
-/// How long follow waits between looks for yap.
+/// How long follow waits to look again once yap has ended a connection.
 const RETRY: Duration = Duration::from_secs(2);
+/// With no yap there, follow waits for its socket's folder to change (yap
+/// starting makes the socket), and looks again after this at the latest.
+/// It looked
+/// every RETRY: 30 wakes a minute with yap's plugin on and yap not
+/// running (Rust-only; Go's yap.go follow looks every 2 s).
+const LOOK_AGAIN: Duration = Duration::from_secs(60);
 /// How long a line to yap may take to go: a yap that doesn't read ends
 /// the connection, as one that doesn't answer would.
 const WRITE_LIMIT: Duration = Duration::from_secs(1);
@@ -208,9 +214,12 @@ fn follow_at(
     // by shutting the socket down. Both sides take the lock, so a socket
     // handed over is always seen by a stop that comes after.
     let (stopped_tx, stopped) = mpsc::channel::<()>();
+    // The same, for a wait on the socket's folder.
+    let wake = rush_sys::fswait::Stop::new().ok().map(std::sync::Arc::new);
     let current: Shared = Default::default();
     let cur = current.clone();
-    std::thread::spawn(move || {
+    let wake2 = wake.clone();
+    let _ = rush_sys::threads::spawn_small("rush-yap-stop", move || {
         let _ = stop.recv();
         let mut g = lock(&cur);
         g.stopped = true;
@@ -219,11 +228,14 @@ fn follow_at(
         }
         drop(g);
         let _ = stopped_tx.send(());
+        if let Some(w) = wake2 {
+            w.close();
+        }
     });
     // What's to be said is written on a thread of its own too, under the
     // same lock: a connection handed over is told the latest first.
     let cur = current.clone();
-    std::thread::spawn(move || {
+    let _ = rush_sys::threads::spawn_small("rush-yap-say", move || {
         for said in say {
             let (kept, mut line) = match said {
                 Say::Kept(l) => (true, l),
@@ -245,9 +257,19 @@ fn follow_at(
         }
     });
     loop {
+        // Watched before the look, so a yap starting meanwhile wakes the
+        // wait after it. Its folder, not the socket: a socket can't be
+        // opened to be watched, and its folder changes as it's made.
+        let w = wake.as_ref().zip(path.parent()).map(|(_, dir)| {
+            let w = rush_sys::fswait::Watcher::new();
+            w.watch(&[dir]);
+            w
+        });
+        let mut found = false;
         if let Ok(c) = UnixStream::connect(path)
             && let Ok(c2) = c.try_clone()
         {
+            found = true;
             let _ = c2.set_write_timeout(Some(WRITE_LIMIT));
             {
                 let mut g = lock(&current);
@@ -260,9 +282,18 @@ fn follow_at(
             read(c, &mut out);
             lock(&current).conn.take();
         }
-        match stopped.recv_timeout(RETRY) {
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            _ => return,
+        match (&w, &wake) {
+            (Some(w), Some(wake)) if !found => {
+                w.wait(Some(wake), Some(LOOK_AGAIN));
+                match stopped.try_recv() {
+                    Err(mpsc::TryRecvError::Empty) => {}
+                    _ => return,
+                }
+            }
+            _ => match stopped.recv_timeout(RETRY) {
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                _ => return,
+            },
         }
     }
 }
@@ -386,6 +417,43 @@ mod tests {
         }
         assert_eq!(took_line("say \"hi\""), "{\"took\":\"say \\\"hi\\\"\"}\n");
         assert_eq!(left_line("ship it"), "{\"left\":\"ship it\"}\n");
+    }
+
+    // With no yap there, follow waits on its socket's folder: a yap
+    // starting is found as its socket is made, long before LOOK_AGAIN,
+    // and a stop ends the wait.
+    #[test]
+    fn follow_finds_yap_as_it_starts() {
+        let home = tempfile::tempdir().unwrap();
+        let sock = home.path().join("yap").join("live.sock");
+        let (stop_tx, stop) = mpsc::channel();
+        let (say_tx, say) = mpsc::channel();
+        say_tx.send(Say::Kept("hello".into())).unwrap();
+        let s2 = sock.clone();
+        let t = std::thread::spawn(move || follow_at(&s2, stop, say, |_| {}));
+        std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
+        let l = UnixListener::bind(&sock).unwrap();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let Ok((c, _)) = l.accept() else { return };
+            let mut line = String::new();
+            let _ = BufReader::new(c).read_line(&mut line);
+            let _ = tx.send(line);
+        });
+        let got = rx
+            .recv_timeout(Duration::from_secs(20))
+            .expect("yap not found");
+        assert_eq!(got, "hello\n");
+        drop(stop_tx);
+        t.join().unwrap();
+
+        // Stopped while waiting for a yap that never comes.
+        let (stop_tx, stop) = mpsc::channel();
+        let (_say_tx, say) = mpsc::channel();
+        let gone = home.path().join("none").join("live.sock");
+        let t = std::thread::spawn(move || follow_at(&gone, stop, say, |_| {}));
+        drop(stop_tx);
+        t.join().unwrap();
     }
 
     // The latest kept line is said as yap is found, each new one as it
