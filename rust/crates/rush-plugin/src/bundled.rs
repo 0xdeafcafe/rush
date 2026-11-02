@@ -23,6 +23,31 @@ pub type RunFn = Arc<dyn Fn(UnixStream) -> Result<(), String> + Send + Sync>;
 /// written: what it keeps running outside the broker (a service, say)
 /// starts or stops with it. An error puts the switch back as it was.
 pub type SwitchedFn = Arc<dyn Fn(bool) -> Result<(), String> + Send + Sync>;
+/// Says whether what it needs on this machine is in place. It may run
+/// programs, so never on the UI thread.
+pub type CheckFn = Arc<dyn Fn() -> Readiness + Send + Sync>;
+
+/// Whether a bundled plugin can do its work here, said once it's turned
+/// on and on its page: what's missing and how to fix it, or that it's
+/// ready.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Readiness {
+    pub ready: bool,
+    /// One plain line: what it now does, or what's missing and how to
+    /// fix it.
+    pub message: String,
+    /// Something rush can open to fix it.
+    pub action: Option<FixAction>,
+}
+
+/// A place rush can open for the fix: System Settings' page, say.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FixAction {
+    /// What opening it does: "open System Settings".
+    pub label: String,
+    /// What `open` is given.
+    pub url: String,
+}
 
 /// A plugin that ships inside rush.
 #[derive(Clone)]
@@ -32,6 +57,9 @@ pub struct Bundle {
     pub optional: bool,
     pub run: Option<RunFn>,
     pub switched: Option<SwitchedFn>,
+    /// Says whether what it needs here is in place; None for one that
+    /// needs nothing more than its manifest's requires.
+    pub check: Option<CheckFn>,
 }
 
 /// Stands for a bundled plugin's files: they're rush's binary, which the
@@ -225,6 +253,12 @@ pub fn enabled() -> BTreeMap<String, Approval> {
     out
 }
 
+/// What the bundled plugin name says of whether it can work here, for
+/// one that checks. It may run programs: never on the UI thread.
+pub fn bundle_check(name: &str) -> Option<Readiness> {
+    bundle_named(name).and_then(|b| b.check).map(|c| c())
+}
+
 /// Runs the bundled plugin name on fd 3, as the broker starts it.
 pub fn run_bundled(name: &str) -> Result<(), String> {
     let Some(b) = bundle_named(name) else {
@@ -255,6 +289,7 @@ mod tests {
             optional: false,
             run: Some(Arc::new(|_| Ok(()))),
             switched: None,
+            check: None,
         }
     }
 

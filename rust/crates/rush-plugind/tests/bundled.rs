@@ -53,6 +53,7 @@ fn register_e2e() -> Registered {
             Ok(())
         })),
         switched: None,
+        check: None,
     })
 }
 

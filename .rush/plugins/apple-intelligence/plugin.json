@@ -1,9 +1,0 @@
-{
-  "name": "apple-intelligence",
-  "command": ["apple-intelligence"],
-  "category": "other",
-  "description": "Answers rush's small jobs (session titles, feed summaries, quick ask) with Apple Intelligence's on-device model: free, private and offline. macOS 26 or later, with Apple Intelligence on.",
-  "models": true,
-  "system": ["apple-intelligence"],
-  "memoryMB": 128
-}

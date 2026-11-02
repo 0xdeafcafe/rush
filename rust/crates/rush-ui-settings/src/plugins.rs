@@ -16,7 +16,7 @@ use std::rc::Rc;
 use std::sync::OnceLock;
 
 use rush_core::text::Line;
-use rush_plugin::{CATEGORIES, Manifest, Requires, SettingSpec, UiPlugin};
+use rush_plugin::{CATEGORIES, Manifest, Readiness, Requires, SettingSpec, UiPlugin};
 
 use super::form::{Section, Setting};
 use super::paint::{first_non_empty, trunc};
@@ -76,6 +76,9 @@ pub struct Row {
 pub struct Read {
     pub rows: Vec<Row>,
     pub bundled_on: BTreeMap<String, bool>,
+    /// What each bundled plugin that's on and checks what it needs here
+    /// says of it: apple-intelligence, whether Apple's model can be used.
+    pub ready: BTreeMap<String, Readiness>,
 }
 
 /// The page.
@@ -137,6 +140,7 @@ pub fn read(m: &mut Model) {
 pub fn read_plugins() -> Read {
     let mut out = Vec::new();
     let on = rush_plugin::bundles_on();
+    let mut ready = BTreeMap::new();
     for b in rush_plugin::bundles() {
         let mut r = Row {
             missing: not_on_path(&b.manifest.requires.bin),
@@ -154,6 +158,12 @@ pub fn read_plugins() -> Read {
         } else if !on.get(&b.manifest.name).copied().unwrap_or(false) {
             r.runs = false;
             r.status = "bundled, off".into();
+        } else if let Some(check) = &b.check {
+            let got = check();
+            if !got.ready {
+                r.status = "bundled, on, can't work here yet".into();
+            }
+            ready.insert(b.manifest.name.clone(), got);
         }
         out.push(r);
     }
@@ -209,6 +219,7 @@ pub fn read_plugins() -> Read {
     Read {
         rows: out,
         bundled_on: on,
+        ready,
     }
 }
 
@@ -513,6 +524,13 @@ fn plugin_page(m: &Model, name: &str) -> Section {
             run: Some(Rc::new(move |m, v| set_bundled(m, &n, v == "on"))),
             ..Setting::default()
         });
+        if on
+            && let Some(ready) = st
+                .and_then(|s| s.plugins.as_ref())
+                .and_then(|p| p.ready.get(name))
+        {
+            sec.rows.push(ready_row(ready));
+        }
     }
     if !r.from.is_empty() {
         let from = r.from.clone();
@@ -701,13 +719,26 @@ fn set_bundled(m: &mut Model, name: &str, on: bool) -> Out {
     m.later(
         move || {
             rush_plugin::set_bundled(&n, on)?;
-            rush_plugin::client::reload()
+            rush_plugin::client::reload()?;
+            // Turned on, one that checks what it needs here says whether
+            // it has it: run here, off the UI, as it may run programs.
+            Ok(if on {
+                rush_plugin::bundle_check(&n)
+            } else {
+                None
+            })
         },
         {
             let n = name.to_string();
-            move |m, r| {
-                if let Err(e) = r {
-                    m.fail(&format!("{n}: {e}"));
+            move |m, r: Result<Option<Readiness>, String>| {
+                match r {
+                    Err(e) => m.fail(&format!("{n}: {e}")),
+                    Ok(Some(ready)) if ready.ready => m.flash(&ready.message),
+                    Ok(Some(ready)) => m.flash_err(&match &ready.action {
+                        Some(a) => format!("{} · enter on Setup to {}", ready.message, a.label),
+                        None => ready.message.clone(),
+                    }),
+                    Ok(None) => {}
                 }
                 if dialog(m).page == PAGE_PLUGINS {
                     read(m);
@@ -717,6 +748,55 @@ fn set_bundled(m: &mut Model, name: &str, on: bool) -> Out {
         },
     );
     Out::Draw
+}
+
+/// Whether a bundled plugin that's on can work here: what it now does,
+/// or what's missing and how to fix it, enter opening the fix when rush
+/// can (System Settings, say).
+fn ready_row(r: &Readiness) -> Setting {
+    let (glyph, colour, words) = if r.ready {
+        ("✓ ", GREEN, TEXT)
+    } else {
+        ("! ", YELLOW, DIM)
+    };
+    let shown = line([sp(glyph, colour), sp(r.message.clone(), words)]);
+    let mut row = Setting {
+        label: "setup".into(),
+        line: Some(Rc::new(move |w| labelled("Setup", shown.clone(), w))),
+        what: r.message.clone(),
+        ..Setting::default()
+    };
+    if let Some(a) = &r.action {
+        row.what = format!("{}. enter: {}.", r.message, a.label);
+        row.keys = vec!["enter".into(), a.label.clone()];
+        let url = a.url.clone();
+        row.key = Some(Rc::new(move |m, s| {
+            if s != "enter" {
+                return Out::Pass;
+            }
+            open_url(&url);
+            m.flash("opening System Settings…");
+            Out::Draw
+        }));
+    }
+    row
+}
+
+/// Opens url with macOS's open, off the UI thread; nothing elsewhere.
+fn open_url(url: &str) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let url = url.to_string();
+    let _ = std::thread::Builder::new()
+        .name("rush-open-fix".into())
+        .spawn(move || {
+            let _ = std::process::Command::new("open")
+                .arg(url)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        });
 }
 
 /// Turns development mode on or off for an installed plugin

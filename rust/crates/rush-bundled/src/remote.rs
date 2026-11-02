@@ -91,6 +91,7 @@ pub fn bundles() -> Vec<Bundle> {
             switched: switched.then(|| {
                 Arc::new(switch_remote) as Arc<dyn Fn(bool) -> Result<(), String> + Send + Sync>
             }),
+            check: None,
         })
         .collect()
 }
