@@ -24,7 +24,7 @@ Decisions:
    what they'd get with it: a mockup of the screen, the code, the output, the message
    ```
 My picks: 1a 2b.
-One numbered item per decision, a yes/no as (a) yes; (b) no. The topic is the card's title: a few plain words. When the options differ in what the user would see or get, give each one a preview like (a)'s, so they pick by looking, not by imagining it; the card shows it beside the option. Answers come back as `1a. Topic: option` or `2: their words`.";
+The user reads the card, not your reply: each decision says on its own what the problem is, what each option would change and what it costs; never a bare \"should I?\" that leans on the text above it. One numbered item per decision, a yes/no as (a) yes; (b) no. The topic is the card's title: a few plain words. When the options differ in what the user would see or get, give each one a preview like (a)'s, so they pick by looking, not by imagining it; the card shows it beside the option. Answers come back as `1a. Topic: option` or `2: their words`.";
 
 /// n in base 36, as Go's strconv.FormatInt(n, 36).
 fn base36(mut n: i128) -> String {
