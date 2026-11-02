@@ -7,6 +7,10 @@ runs, foreground or background, through rush's own MCP server, or start
 one as a session of its own beside it (`start_agent`, below). The child is
 a rush-hosted session like any other, so it has its own transcript, steps,
 cost and stream, and the UI draws it under the call that started it.
+In the list it isn't a row of its own: while it works it's a row under
+the session that started it, as that session's own subagent runs are
+(what it was asked, and its agent), and once done it's counted with
+them.
 
 ```
  parent session (Claude / Codex / Kimi / Copilot / OpenCode …)

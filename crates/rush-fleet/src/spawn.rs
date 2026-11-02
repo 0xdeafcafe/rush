@@ -36,6 +36,29 @@ fn fold_target(a: &Agent) -> Option<(String, rush_core::adapter::SpendTarget)> {
     Some((a.acct.kind.as_str().to_string(), Loader::target(a)?))
 }
 
+/// A session another started (spawn_agent), working, as a row under the
+/// one that started it, as that one's own subagent runs are: what it was
+/// asked, and its agent. Its transcript is read for the Wall only when
+/// it's the parent's own agent's, which the Wall reads it as. Not in Go,
+/// whose list counted these runs but drew none.
+fn run_tile(a: &Agent, parent: &Agent) -> rush_core::agent::SubagentTile {
+    let same = a.kind == parent.kind;
+    rush_core::agent::SubagentTile {
+        id: a.job.id.clone(),
+        kind: a.kind.as_str().to_string(),
+        description: a.job.name.clone(),
+        path: if same {
+            a.job.transcript_path.clone()
+        } else {
+            String::new()
+        },
+        depth: 1,
+        mod_time: a.job.mod_time,
+        born: a.job.created_at,
+        ..Default::default()
+    }
+}
+
 /// Counts what a run it folds in cost with its own.
 fn add_spend(a: &mut Agent, cost: f64, today: f64) {
     a.spend.cost += cost;
@@ -143,9 +166,11 @@ impl Loader {
                 && !gone.contains_key(&agents[p].key)
             {
                 folded.extend(fold_target(a));
+                let tile = live.then(|| run_tile(a, &agents[p]));
                 agents[p].subs.spawned += 1;
-                if live {
+                if let Some(t) = tile {
                     agents[p].subs.direct += 1; // its parent is busy, not your turn, while it works
+                    agents[p].subagents.push(t); // a row under it, as its own harness's runs have
                 }
                 add_spend(&mut agents[p], cost, today);
                 keep[i] = false;

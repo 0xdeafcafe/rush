@@ -1113,6 +1113,78 @@ fn folded_runs_are_priced() {
     assert!(sp.ready && sp.cost == 0.0, "{sp:?}");
 }
 
+// A session another started (spawn_agent) in another harness, while it
+// works, is a row under the one that started it, as that one's own
+// subagent runs are; once done it's only counted. Its transcript isn't
+// handed to the Wall, which would read it as the parent's agent's.
+#[test]
+fn spawned_sessions_are_rows_under_their_parent() {
+    let d = tempfile::tempdir().unwrap();
+    let (reg, _) = claude_reg(d.path());
+    let mut l = Loader::new(reg);
+    let row = |key: &str, id: &str, kind: &str, state: State| {
+        let mut a = Agent {
+            key: key.into(),
+            kind: Kind::from(kind),
+            rush: true,
+            ..Agent::default()
+        };
+        a.acct.kind = Kind::from(kind);
+        a.job.id = id.into();
+        a.job.name = format!("{id}'s task");
+        a.job.state = state;
+        a.job.created_at = 1_000;
+        a.job.transcript_path = format!("/t/{id}.jsonl");
+        a
+    };
+    let hosted = |kids: &[&str]| {
+        let mut v = vec![HostInfo {
+            id: "parent00".into(),
+            ..HostInfo::default()
+        }];
+        for k in kids {
+            v.push(HostInfo {
+                id: (*k).into(),
+                meta: HashMap::from([("spawnedBy".to_string(), "parent00".to_string())]),
+                ..HostInfo::default()
+            });
+        }
+        v
+    };
+    let agents = vec![
+        row("claude/a:parent00", "parent00", "claude", State::Idle),
+        row("codex/a:kid00000", "kid00000", "codex", State::Working),
+        row("codex/a:kid00001", "kid00001", "codex", State::Idle),
+    ];
+    let hs = hosted(&["kid00000", "kid00001"]);
+    let spawned = l.hosted_spawns(&hs, &agents, Vec::new());
+    let got = l.fold_spawns(None, agents, spawned, &mut HashSet::new());
+    assert_eq!(got.len(), 1);
+    let p = &got[0];
+    assert_eq!((p.subs.spawned, p.subs.direct), (2, 1));
+    assert_eq!(
+        p.subagents,
+        vec![SubagentTile {
+            id: "kid00000".into(),
+            kind: "codex".into(),
+            description: "kid00000's task".into(),
+            depth: 1,
+            born: 1_000,
+            ..SubagentTile::default()
+        }]
+    );
+
+    // One of the parent's own agent: the Wall may read its transcript.
+    let agents = vec![
+        row("claude/a:parent00", "parent00", "claude", State::Idle),
+        row("claude/a:kid00002", "kid00002", "claude", State::Working),
+    ];
+    let hs = hosted(&["kid00002"]);
+    let spawned = l.hosted_spawns(&hs, &agents, Vec::new());
+    let got = l.fold_spawns(None, agents, spawned, &mut HashSet::new());
+    assert_eq!(got[0].subagents[0].path, "/t/kid00002.jsonl");
+}
+
 // A finished codex exec never seen running is found by its prompt in the
 // transcript of the session working when it began, written just before,
 // and folded from then on; one no session asked is looked for once.
