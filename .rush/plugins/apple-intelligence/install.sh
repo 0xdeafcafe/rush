@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds the plugin into $RUSH_PLUGIN_DIR (by hand: $(rush plugin dir)/apple-intelligence).
+# Builds the plugin (macOS 26+, needs the macOS 26 SDK) into $RUSH_PLUGIN_DIR (by hand: $(rush plugin dir)/apple-intelligence).
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 dest="${RUSH_PLUGIN_DIR:-$(rush plugin dir)/apple-intelligence}"
