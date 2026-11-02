@@ -16,6 +16,7 @@ serde_json.workspace = true
 unicode-width.workspace = true
 flate2.workspace = true
 memchr.workspace = true
+hashbrown.workspace = true
 sha2.workspace = true
 
 [dev-dependencies]

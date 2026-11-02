@@ -2609,6 +2609,12 @@ Go rush is gone from the tree; its last version is the `go-final` tag
   Its subagent runs are the bigger part: 45 runs retain 20.4 MiB, another
   session's 221 runs 82 MiB, so the reader lets go of a run once its numbers
   aren't followed (rush-ui-session-core `subs.rs`).
+- A step's call id is held once, in the step (Rust-only, rush-convo
+  `model/byid.rs`): its call's copy is taken into it, and the index of
+  steps by id holds each step's number only, finding it by the id the
+  step holds. 2026-11-02: the 119 MiB transcript 12.6 → 12.3 MiB, its
+  allocations kept 41,499 → 35,581 and made 235,169 → 229,251; the
+  68 MiB one 9.7 → 9.5 MiB and 32,823 → 28,189 kept.
 - A followed run's numbers (Rust-only, rush-ui-session-core `subs.rs`
   `follow_run`): the reader reads a run's transcript whole, works out its
   numbers (the row's words, steps, times, tokens and cost), and keeps its

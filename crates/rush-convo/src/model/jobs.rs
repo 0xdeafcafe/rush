@@ -166,8 +166,8 @@ impl Session {
     /// it; empty when that call isn't in the conversation.
     pub fn job_command(&self, j: &Job) -> String {
         self.by_id
-            .get(j.tool_use_id.as_str())
-            .map(|&sid| {
+            .get(&self.steps, j.tool_use_id.as_str())
+            .map(|sid| {
                 self.steps[sid as usize]
                     .call
                     .input
@@ -223,8 +223,8 @@ impl Session {
     pub fn job_kind(&self, j: &Job) -> &'static str {
         let tool = || {
             self.by_id
-                .get(j.tool_use_id.as_str())
-                .map(|&sid| &*self.steps[sid as usize].tool)
+                .get(&self.steps, j.tool_use_id.as_str())
+                .map(|sid| &*self.steps[sid as usize].tool)
         };
         match j.kind_word.as_str() {
             "local_bash" if tool() == Some("Monitor") => "monitor",
@@ -403,7 +403,7 @@ impl Session {
         for i in 0..self.jobs.len() {
             let j = &self.jobs[i];
             if j.kind_word != "local_bash"
-                || self.by_id.contains_key(j.tool_use_id.as_str())
+                || self.by_id.contains(&self.steps, j.tool_use_id.as_str())
                 || !looks_like_command(&j.label)
             {
                 continue;
@@ -418,7 +418,6 @@ impl Session {
                 .map(RawJson);
             let id: Box<str> = j.tool_use_id.as_str().into();
             let call = Box::new(Call {
-                id: j.tool_use_id.clone(),
                 name: "Bash".into(),
                 kind: Kind::Shell,
                 input: Input {
@@ -431,7 +430,7 @@ impl Session {
             let start = if j.start != 0 { j.start } else { now };
             let sid = self.steps.len() as StepId;
             self.steps.push(Step {
-                id: id.clone(),
+                id,
                 tool: "Bash".into(),
                 kind: Kind::Shell,
                 call,
@@ -450,7 +449,7 @@ impl Session {
                 turn: None,
                 approval: None,
             });
-            self.by_id.insert(id, sid);
+            self.by_id.insert(&self.steps, sid);
             self.step_ver += 1;
         }
     }
@@ -515,7 +514,7 @@ impl Session {
             if j.running() && !j.background {
                 j.status = "completed".into();
                 j.end = now;
-                if let Some(&sid) = self.by_id.get(j.tool_use_id.as_str())
+                if let Some(sid) = self.by_id.get(&self.steps, j.tool_use_id.as_str())
                     && self.steps[sid as usize].status == Status::Failed
                 {
                     j.status = "failed".into();

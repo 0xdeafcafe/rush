@@ -70,7 +70,7 @@ impl Session {
     /// all of it so far (whole), or what follows what came before.
     /// Nothing for a call that isn't running.
     pub fn call_output(&mut self, call: &str, text: &str, whole: bool) {
-        let Some(&sid) = self.by_id.get(call) else {
+        let Some(sid) = self.by_id.get(&self.steps, call) else {
             return;
         };
         if self.step(sid).status != Status::Running {

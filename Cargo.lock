@@ -1311,6 +1311,7 @@ name = "rush-convo"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "hashbrown 0.17.1",
  "libc",
  "memchr",
  "regex",

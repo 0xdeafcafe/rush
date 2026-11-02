@@ -141,7 +141,7 @@ impl Session {
         }
         // A call sent to the background has returned; its shell runs on.
         for j in &self.jobs {
-            if let Some(&id) = self.by_id.get(j.tool_use_id.as_str()) {
+            if let Some(id) = self.by_id.get(&self.steps, j.tool_use_id.as_str()) {
                 let st = self.step(id);
                 if j.running() && st.status != Status::Running && st.kind == Kind::Shell {
                     steps.push(id);

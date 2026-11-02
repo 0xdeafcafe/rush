@@ -34,6 +34,7 @@ use crate::text::{
 };
 use crate::words::{claude_result, claudes, result_text, step_tool};
 
+mod byid;
 mod chainrun;
 mod exchange;
 mod jobs;
@@ -456,7 +457,7 @@ pub struct Session {
     pub partial: bool,
 
     steps: Vec<Step>,
-    by_id: HashMap<Box<str>, StepId>,
+    by_id: byid::ById,
     /// The steps asked for approval and maybe still waiting.
     asked: Vec<StepId>,
     /// The text item streaming in: (turn, item).
@@ -517,12 +518,12 @@ impl Session {
 
     /// The step of tool call id, if it's one this session made.
     pub fn step_by_call(&self, call_id: &str) -> Option<StepId> {
-        self.by_id.get(call_id).copied()
+        self.by_id.get(&self.steps, call_id)
     }
 
     /// Whether the session made the call with this id.
     pub fn made_call(&self, call_id: &str) -> bool {
-        self.by_id.contains_key(call_id)
+        self.by_id.contains(&self.steps, call_id)
     }
 
     /// The turn in progress, if any.
@@ -685,13 +686,14 @@ impl Session {
                 self.message(m, now);
             }
             Event::CallUpdated(e) => {
-                if let Some(&sid) = self.by_id.get(e.call.id.as_str()) {
+                if let Some(sid) = self.by_id.get(&self.steps, e.call.id.as_str()) {
                     let (tool, claude) = step_words(&e.call);
                     let st = &mut self.steps[sid as usize];
                     st.tool = tool;
                     st.claude = claude;
                     st.kind = e.call.kind;
                     *st.call = e.call.clone();
+                    st.call.id = String::new(); // the step's own id is it
                     self.touch_step(sid);
                 }
             }
@@ -732,7 +734,7 @@ impl Session {
             }
             Event::ApprovalCancelled(e) => self.settle(&e.id),
             Event::Denied(e) => {
-                if let Some(&sid) = self.by_id.get(e.call_id.as_str()) {
+                if let Some(sid) = self.by_id.get(&self.steps, e.call_id.as_str()) {
                     let st = &mut self.steps[sid as usize];
                     st.status = Status::Denied;
                     st.output = e.reason.as_str().into();
@@ -829,7 +831,7 @@ impl Session {
     /// Makes a step of a call an approval or question is about, when the
     /// agent asks before it says it's making the call (neutral.go:195).
     fn ensure_step(&mut self, c: &Call, now: Ms) {
-        if c.id.is_empty() || self.by_id.contains_key(c.id.as_str()) {
+        if c.id.is_empty() || self.by_id.contains(&self.steps, c.id.as_str()) {
             return;
         }
         self.message(
@@ -848,7 +850,7 @@ impl Session {
 
     /// Marks the step of call id as waiting on you (model.go:541).
     fn ask(&mut self, call: &str, a: Asking) {
-        let Some(&sid) = self.by_id.get(call) else {
+        let Some(sid) = self.by_id.get(&self.steps, call) else {
             return;
         };
         if !self.asked.contains(&sid) {
@@ -1056,7 +1058,7 @@ impl Session {
             self.results(m, now);
             return;
         }
-        let parent = self.by_id.get(m.parent.as_str()).copied();
+        let parent = self.by_id.get(&self.steps, m.parent.as_str());
         // A subagent's message whose run we never saw start still isn't the
         // main agent's: it mustn't land in the turn or its numbers.
         let sub = !m.parent.is_empty();
@@ -1137,11 +1139,12 @@ impl Session {
         }
         let (tool, claude) = step_words(c);
         self.tools.entry(tool.clone()).or_default().calls += 1;
-        let call = Box::new(c.clone());
-        let id: Box<str> = c.id.as_str().into();
+        let mut call = Box::new(c.clone());
+        // Its id is the step's, held there once (Rust-only).
+        let id: Box<str> = std::mem::take(&mut call.id).into_boxed_str();
         let sid = self.steps.len() as StepId;
         self.steps.push(Step {
-            id: id.clone(),
+            id,
             tool,
             kind: c.kind,
             call,
@@ -1173,7 +1176,7 @@ impl Session {
                 self.worktree = wt.to_owned();
             }
         }
-        self.by_id.insert(id, sid);
+        self.by_id.insert(&self.steps, sid);
         if let Some(ti) = t {
             self.turns[ti].steps.push(sid);
         }
@@ -1248,7 +1251,7 @@ impl Session {
                 PartKind::ToolResult => {
                     if let Some(o) = &p.output {
                         self.result(o, now);
-                        last = self.by_id.get(o.call_id.as_str()).copied();
+                        last = self.by_id.get(&self.steps, o.call_id.as_str());
                     }
                 }
                 PartKind::Image => {
@@ -1265,7 +1268,7 @@ impl Session {
 
     /// Takes in how a call came out.
     fn result(&mut self, o: &Output, now: Ms) {
-        let Some(&sid) = self.by_id.get(o.call_id.as_str()) else {
+        let Some(sid) = self.by_id.get(&self.steps, o.call_id.as_str()) else {
             return;
         };
         let text = result_text(o);
@@ -1651,7 +1654,6 @@ impl Session {
         .and_then(|s| RawValue::from_string(s).ok())
         .map(RawJson);
         let call = Box::new(Call {
-            id: id.to_string(),
             name: "Bash".into(),
             kind: Kind::Shell,
             input: Input {
@@ -1664,7 +1666,7 @@ impl Session {
         });
         let sid = self.steps.len() as StepId;
         self.steps.push(Step {
-            id: id.clone(),
+            id,
             tool: "Bash".into(),
             kind: Kind::Shell,
             call,
@@ -1683,7 +1685,7 @@ impl Session {
             turn: Some(ti as u32),
             approval: None,
         });
-        self.by_id.insert(id, sid);
+        self.by_id.insert(&self.steps, sid);
         self.step_ver += 1;
         let t = &mut self.turns[ti];
         t.steps.push(sid);
@@ -1694,7 +1696,7 @@ impl Session {
     /// What a command you ran with ! printed, on its step; the turn ends.
     pub(crate) fn shell_result(&mut self, ti: usize, stdout: &str, stderr: &str, at: Ms) {
         let id = format!("you-{}", self.turns[ti].n);
-        let Some(&sid) = self.by_id.get(id.as_str()) else {
+        let Some(sid) = self.by_id.get(&self.steps, id.as_str()) else {
             return;
         };
         let stdout = if stdout == "(Bash completed with no output)" {
