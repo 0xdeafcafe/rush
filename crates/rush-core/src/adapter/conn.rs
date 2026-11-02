@@ -100,6 +100,11 @@ pub trait Conn: Send + Sync {
     fn cache_keeper(&self) -> Option<&dyn CacheKeeper> {
         None
     }
+    /// Keeps a working subagent's prompt cache from lapsing: see
+    /// [`SubagentKeeper`]. Rust-only.
+    fn subagent_keeper(&self) -> Option<&dyn SubagentKeeper> {
+        None
+    }
     /// It can be passed, running, to the same host process exec'd onto a
     /// newer rush: see [`Upgrader`]. Rust-only.
     fn upgrader(&self) -> Option<&dyn Upgrader> {
@@ -193,6 +198,16 @@ pub trait Hearer {
 /// crate::cachekeep for when.
 pub trait CacheKeeper {
     fn keep_warm(&self) -> Result<()>;
+}
+
+/// Keeps a working subagent's prompt cache from lapsing while it waits on
+/// a long call: moves that call (by its id, a call the subagent made) to
+/// the background, so the call goes on and the subagent gets its turn back
+/// now, its next request reading its cache while it's still warm. Says
+/// whether the call was found still waiting and moved. See
+/// crate::subkeep for when.
+pub trait SubagentKeeper {
+    fn move_call(&self, call_id: &str) -> Result<bool>;
 }
 
 /// A running agent as its host passes it to itself, exec'd onto a newer

@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use rush_core::adapter::{
     self, Adopter, Answerer, Asker, Backgrounder, CacheKeeper, Conn, ContextReader, Driver, Hearer,
-    Homed, Input, Orphans, Responder, Sink, StartOptions, TaskStopper, ToolServer,
+    Homed, Input, Orphans, Responder, Sink, StartOptions, SubagentKeeper, TaskStopper, ToolServer,
 };
 use rush_core::agent::PreviewLine;
 use rush_core::event::{self, Event};
@@ -671,6 +671,9 @@ impl Conn for ClaudeConn {
     fn cache_keeper(&self) -> Option<&dyn CacheKeeper> {
         Some(self)
     }
+    fn subagent_keeper(&self) -> Option<&dyn SubagentKeeper> {
+        Some(self)
+    }
     fn upgrader(&self) -> Option<&dyn adapter::Upgrader> {
         Some(self)
     }
@@ -803,6 +806,33 @@ fn bumped(body: Option<&str>) -> adapter::Result<()> {
         return Err(err("the request didn't answer"));
     }
     Ok(())
+}
+
+/// A subagent's long call moved to the background, by its tool_use_id:
+/// Claude Code's `background_tasks` control request (ctrl+b's), which
+/// finds the call among every foreground task, a subagent's too (a Bash
+/// call is one once it has run 2 seconds), and answers whether it moved
+/// it. The call carries on and tells the subagent when it ends; the
+/// subagent's turn goes on at once, so its next request reads its cache
+/// while it's warm. Claude Code 2.1.316 has no request that reads a
+/// subagent's cache outside its turn: side_question reads only the main
+/// conversation's.
+impl SubagentKeeper for ClaudeConn {
+    fn move_call(&self, call_id: &str) -> adapter::Result<bool> {
+        if call_id.is_empty() {
+            return Err(err("no call to move"));
+        }
+        let req = json!({"subtype": "background_tasks", "tool_use_id": call_id});
+        let r = self.0.wait_on(|| self.0.s.ask(&req.to_string()))?;
+        Ok(moved(r.body.as_ref().map(|b| b.get())))
+    }
+}
+
+/// Whether a background_tasks reply says the call was found and moved.
+fn moved(body: Option<&str>) -> bool {
+    body.and_then(|b| serde_json::from_str::<Value>(b).ok())
+        .and_then(|v| v.get("backgrounded").and_then(Value::as_bool))
+        .unwrap_or(false)
 }
 
 impl ContextReader for ClaudeConn {

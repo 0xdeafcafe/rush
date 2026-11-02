@@ -89,11 +89,14 @@ pub enum Feature {
     /// Lets rush say how long its subagents' prompt cache lives (5 minutes
     /// or an hour), where it starts the agent.
     SubagentCache,
+    /// Keeps a working subagent's prompt cache from lapsing while it waits
+    /// on a long call, without a request of rush's own: a SubagentKeeper.
+    SubagentKeepWarm,
 }
 
 /// Every feature, its word, and what it's called, in the order they're
 /// shown.
-const ALL: [(Feature, &str, &str); 39] = [
+const ALL: [(Feature, &str, &str); 40] = [
     (Feature::Run, "run", "Run in rush mode"),
     (Feature::Resume, "resume", "Resume"),
     (Feature::Fork, "fork", "Fork"),
@@ -136,6 +139,11 @@ const ALL: [(Feature, &str, &str); 39] = [
         Feature::SubagentCache,
         "subagentcache",
         "Subagents' cache life",
+    ),
+    (
+        Feature::SubagentKeepWarm,
+        "subagentkeep",
+        "Keeps subagents' cache warm",
     ),
 ];
 
@@ -273,7 +281,7 @@ mod tests {
             assert_eq!(Feature::from_word(w), Some(f));
             assert_eq!(f.label(), l);
         }
-        assert_eq!(all_features().len(), 39);
+        assert_eq!(all_features().len(), 40);
         assert_eq!(Support::YES.with("view only").note, "view only");
         assert_eq!(Has::Planned.to_string(), "planned");
         assert_eq!(Level::Tested.to_string(), "tested");

@@ -22,6 +22,11 @@ while read -r line; do
   [ -n "$id" ] || continue
   case "$sub" in
   get_context_usage) echo '{"type":"control_response","response":{"subtype":"success","request_id":"'$id'","response":{"totalTokens":1200,"maxTokens":200000}}}' ;;
+  background_tasks)
+    case "$line" in
+    *'"tu-sub"'*) echo '{"type":"control_response","response":{"subtype":"success","request_id":"'$id'","response":{"backgrounded":true}}}' ;;
+    *) echo '{"type":"control_response","response":{"subtype":"success","request_id":"'$id'","response":{"backgrounded":false}}}' ;;
+    esac ;;
   *) echo '{"type":"control_response","response":{"subtype":"success","request_id":"'$id'","response":{"did":"'$sub'"}}}' ;;
   esac
 done
@@ -119,6 +124,11 @@ fn control() {
     assert_ne!(u.at, 0);
     conn.task_stopper().unwrap().stop_task("b1").unwrap();
     conn.backgrounder().unwrap().background("tu-1").unwrap();
+    // A subagent's long call, moved to keep its cache: found, then not.
+    let k = conn.subagent_keeper().unwrap();
+    assert!(k.move_call("tu-sub").unwrap());
+    assert!(!k.move_call("tu-gone").unwrap());
+    assert!(k.move_call("").is_err());
     conn.responder()
         .unwrap()
         .deny("p-2", "not now", true)
@@ -144,6 +154,7 @@ fn control() {
             r#""subtype":"stop_task""#,
             r#""task_id":"b1""#,
             r#""tool_use_id":"tu-1""#,
+            r#"{"subtype":"background_tasks","tool_use_id":"tu-sub"}"#,
             r#""message":"not now""#,
             r#""interrupt":true"#,
         ],

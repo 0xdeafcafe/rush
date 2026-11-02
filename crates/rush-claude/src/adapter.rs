@@ -186,6 +186,12 @@ fn features() -> Features {
         SubagentCache,
         Support::YES.with("5 minutes or 1 hour, from Claude Code 2.1.316"),
     );
+    // background_tasks by a subagent's call: no request reads a
+    // subagent's cache from outside, so its long call is moved instead.
+    f.insert(
+        SubagentKeepWarm,
+        Support::YES.with("by moving its long shell call to the background"),
+    );
     f
 }
 
@@ -732,7 +738,7 @@ mod tests {
             let s = f.get(&k).unwrap_or_else(|| panic!("{k:?} missing"));
             assert_eq!(s.is, rush_core::adapter::Has::Yes, "{k:?} is {s:?}");
         }
-        assert_eq!(f.len(), 38, "{f:?}");
+        assert_eq!(f.len(), 39, "{f:?}");
         assert_eq!(f[&Guide], Support::YES.with("at its next step"));
         // Rust-only: it keeps an idle session's prompt cache warm.
         assert_eq!(f[&KeepWarm], Support::YES.with("through a side question"));
