@@ -201,6 +201,17 @@ impl Drawer<'_> {
             } else {
                 faint("$ ")
             };
+            // A pipeline of a running chain: its filters under it, each
+            // behind a faint bar.
+            let mut stages = if k == 1 && !marks.is_empty() {
+                super::super::shell::pipeline_stages(&t)
+            } else {
+                vec![t.clone()]
+            };
+            if stages.is_empty() {
+                stages.push(t.clone());
+            }
+            let t = stages.remove(0);
             let tint = if now {
                 paint(C_TEXT.bold(), &t)
             } else {
@@ -217,6 +228,24 @@ impl Drawer<'_> {
                     row = row.and(blanks(pad)).and(mark.clone());
                 }
                 body.push(row);
+            }
+            for st in &stages {
+                let tint = if now {
+                    paint(C_TEXT.bold(), st)
+                } else {
+                    quiet_tint(st)
+                };
+                for (j, w) in wrap(&tint, fit.saturating_sub(2).max(8))
+                    .into_iter()
+                    .enumerate()
+                {
+                    let bar = if j == 0 {
+                        faint("│ ")
+                    } else {
+                        Txt::raw("  ")
+                    };
+                    body.push(Txt::raw("  ").and(bar).and(w));
+                }
             }
         }
         // A chain running: which command, and the keys that act on it.

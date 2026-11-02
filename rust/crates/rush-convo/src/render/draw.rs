@@ -2760,6 +2760,9 @@ impl<'a> Drawer<'a> {
             _ => Vec::new(),
         };
         let now_part = step.and_then(|id| self.s.part_now(id));
+        // A chain seen running draws a pipeline split by pipe: the stage
+        // doing the work on the command's line, the filters under it.
+        let split = !script && (!marks.is_empty() || now_part.is_some());
         if !marks.is_empty() {
             room -= 12;
         }
@@ -2793,6 +2796,7 @@ impl<'a> Drawer<'a> {
         for l in raw {
             if let Some(last) = lines.last_mut()
                 && l.text.starts_with("| ")
+                && !split
                 && !last.verbatim
                 && width(&last.text) + 1 + width(&l.text) + last.depth * 2 <= room
             {
@@ -2916,7 +2920,11 @@ impl<'a> Drawer<'a> {
                 lead = paint(C_ORANGE, &op[..2]).and_raw(" ");
                 textv = l.text[3..].to_string();
             }
-            if now && matches!(lead.plain().trim(), "" | "$") {
+            let stage = split && !l.verbatim && l.depth > 0 && l.text.starts_with("| ");
+            if stage {
+                textv = l.text[2..].to_string();
+            }
+            if now && !stage && matches!(lead.plain().trim(), "" | "$") {
                 lead = paint(C_ORANGE, "▸").and_raw(&blank[1..]);
             }
             if !l.verbatim && l.text.contains("<<") {
@@ -2963,7 +2971,9 @@ impl<'a> Drawer<'a> {
                     colored = faint(&textv);
                 }
             }
-            let fit = (room as isize - hang.len() as isize - num.width() as isize).max(0) as usize;
+            let bar = if stage { 2 } else { 0 };
+            let fit =
+                (room as isize - hang.len() as isize - num.width() as isize - bar).max(0) as usize;
             let (mut fold_ref, mut fold_say) = (String::new(), Txt::new());
             let rows = if !script && !l.verbatim {
                 let mut toks = quiet_tokens(&expand_tabs(&textv));
@@ -3017,7 +3027,11 @@ impl<'a> Drawer<'a> {
                     // The steps' time column.
                     right = mark.clone().and_raw("  ");
                 }
-                let body = lead.and(num).and_raw(&hang).and(r);
+                let mut body = lead.and(num).and_raw(&hang);
+                if stage && j == 0 {
+                    body = body.and(faint("│ "));
+                }
+                let body = body.and(r);
                 widest = widest.max(body.width());
                 let left = pad.clone().and(body);
                 if j == 0 && !fold_ref.is_empty() {

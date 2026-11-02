@@ -299,7 +299,7 @@ pub(crate) fn shell_lines(cmd: &str) -> Vec<ShLine> {
             put!(i);
             i += 1;
             put!(i);
-        } else if c == b'\'' || c == b'"' {
+        } else if c == b'\'' || c == b'"' || c == b'`' {
             quote = c;
             put!(i);
         } else if c == b'(' {
@@ -360,6 +360,10 @@ pub(crate) fn shell_lines(cmd: &str) -> Vec<ShLine> {
         } else if c == b'|' && !(i > 0 && b[i - 1] == b'>') {
             emit!(1);
             cur.extend_from_slice(b"| ");
+            // |& pipes stderr too: the same stage break.
+            if b.get(i + 1) == Some(&b'&') && b.get(i + 2) != Some(&b'&') {
+                i += 1;
+            }
             i = skip_spaces(b, i);
         } else {
             put!(i);
@@ -1010,6 +1014,28 @@ pub(crate) fn segments(cmd: &str) -> Vec<Segment> {
                 text: t.trim().to_string(),
                 ..Segment::default()
             });
+        }
+    }
+    out
+}
+
+/// A simple command's pipeline stages, one text each: `cargo test 2>&1 |
+/// grep ok | head` is three. Split only at real pipe operators (not inside
+/// quotes, `||`, `$(…)`, backticks or a heredoc); the first stage is the
+/// one doing the work. A command with no pipe is its one stage.
+pub(crate) fn pipeline_stages(cmd: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for l in shell_lines(cmd) {
+        if l.verbatim {
+            continue;
+        }
+        if l.depth > 0 && !out.is_empty() {
+            let t = l.text.strip_prefix('|').unwrap_or(&l.text).trim();
+            out.push(t.to_string());
+        } else if out.is_empty() {
+            out.push(l.text);
+        } else {
+            break;
         }
     }
     out
@@ -2431,6 +2457,29 @@ mod tests {
         let s = shell_shape(&p, "grep -rn foo internal");
         assert_eq!((s.kind, s.what.as_str()), ("search", "foo in internal"));
         assert_eq!(program("cd /x && go test ./... | tail"), "go test …");
+    }
+
+    #[test]
+    fn pipeline_stages_split_on_real_pipes_only() {
+        let w = |xs: &[&str]| xs.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        for (cmd, want) in [
+            ("cargo test", w(&["cargo test"])),
+            (
+                "cargo test 2>&1 | grep -E \"a|b\" | head",
+                w(&["cargo test 2>&1", "grep -E \"a|b\"", "head"]),
+            ),
+            ("a 'x | y' | b", w(&["a 'x | y'", "b"])),
+            ("a || b", w(&["a"])),
+            (
+                "echo $(ls | wc -l) | cat",
+                w(&["echo $(ls | wc -l)", "cat"]),
+            ),
+            ("echo `ls | wc -l` | cat", w(&["echo `ls | wc -l`", "cat"])),
+            ("cargo test |& tail -5", w(&["cargo test", "tail -5"])),
+            ("cat <<EOF | sort\na | b\nEOF", w(&["cat <<EOF", "sort"])),
+        ] {
+            assert_eq!(pipeline_stages(cmd), want, "{cmd:?}");
+        }
     }
 
     #[test]
