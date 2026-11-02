@@ -71,6 +71,8 @@ def fmt(kind, v):
         return f"{v:.3f} s/min"
     if kind == "wakeups":
         return f"{v:.0f}/min"
+    if kind == "info" and isinstance(v, float):
+        return f"{v:g}"
     return f"{v:,.0f}"
 
 

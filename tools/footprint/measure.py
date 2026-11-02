@@ -355,7 +355,7 @@ def processes(rush, root, window, logs):
                 metrics[f"{n}: threads"] = {"kind": "threads", "value": min(counts[n])}
             metrics[f"{n}: idle CPU"] = {"kind": "cpu", "value": round(cpu, 4)}
             metrics[f"{n}: idle wake-ups"] = {"kind": "wakeups", "value": round(wakes, 1)}
-            metrics[f"{n}: CPU to start"] = {"kind": "info", "value": round(first[n][0], 3)}
+            metrics[f"{n}: CPU to start, s"] = {"kind": "info", "value": round(first[n][0], 3)}
             p1 = ps_cpu(p)
             notes[n] = {
                 "threads seen": sorted(set(counts[n])),
@@ -376,7 +376,12 @@ def benches(path):
             parts = line.rstrip("\n").split("\t")
             if len(parts) == 3:
                 name, kind, v = parts
-                out[name] = {"kind": kind, "value": float(v) if "." in v else int(v)}
+                v = float(v) if "." in v else int(v)
+                # Instructions read 0 where the machine won't count them
+                # (GitHub's macOS runners are VMs).
+                if kind == "info" and v == 0:
+                    continue
+                out[name] = {"kind": kind, "value": v}
     return out
 
 
