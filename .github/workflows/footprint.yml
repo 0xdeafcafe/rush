@@ -1,0 +1,189 @@
+name: Footprint
+
+# Measures rush's memory, threads, idle CPU and size after each push to
+# main, nightly (drift from outside: the runner, macOS) and by hand, and
+# compares them with the last main commit measured and with the baseline
+# (DESIGN.md "Footprint watch"). A report, not a gate: it never fails a
+# build for a number. On main, a number past its threshold opens an issue
+# labelled `performance` (or comments on the one open), and the run that
+# finds them all back under closes it. Its numbers are kept on the
+# `perf-history` branch. A run on another branch compares with main's
+# numbers and writes only its summary.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "30 4 * * *"
+  workflow_dispatch:
+    inputs:
+      accept:
+        description: "Take this run's numbers as the new baseline (main only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # One measurement at a time per branch, never one cut short: a push
+  # waits for the run before it. (GitHub keeps one waiting; a later push
+  # takes its place, and the comparison names the commits it spans.)
+  group: footprint-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: sccache
+
+jobs:
+  measure:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ON_MAIN: ${{ github.ref == 'refs/heads/main' }}
+    steps:
+      - uses: actions/checkout@v4
+      # ci.yml's toolchain pin: move them together.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: footprint
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build
+        run: |
+          echo "ROOT=$RUNNER_TEMP/footprint" >> "$GITHUB_ENV"
+          cargo build --release --locked -p rush
+          ls -l target/release/rush
+      - name: Fixture
+        run: python3 -I tools/footprint/fixture.py "$ROOT"
+      - name: Benches
+        # Each bench writes its counts to RUSH_BENCH_OUT; one that fails
+        # leaves its numbers out (the summary shows them gone).
+        run: |
+          export RUSH_BENCH_OUT="$ROOT/bench.tsv"
+          export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}" RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+          bench() { "$@" || echo "::warning::footprint: '$*' failed"; }
+          # The list's loader on the made-up home, as RUSH_REAL reads one.
+          bench env RUSH_REAL=1 HOME="$ROOT/home" RUSH_HOME="$ROOT/home/.config/rush" \
+            cargo bench --locked -p rush-host --bench list
+          bench env RUSH_BENCH_TRANSCRIPT="$(cat "$ROOT/big.jsonl")" \
+            cargo bench --locked -p rush-convo --bench open
+          bench cargo bench --locked -p rush-convo --bench render
+          bench cargo bench --locked -p rush-ui --bench frame
+          bench cargo test --release --locked -p rush-menubar --test retained
+          bench cargo test --release --locked -p rush-remote --test listing
+          echo "--- $RUSH_BENCH_OUT"
+          cat "$RUSH_BENCH_OUT" || true
+      - name: Processes
+        run: |
+          python3 -I tools/footprint/measure.py --rush target/release/rush \
+            --root "$ROOT" --bench-out "$ROOT/bench.tsv" --out "$ROOT/perf.json" --window 60
+          cat "$ROOT/perf.json"
+      - name: Last numbers
+        # main's last run and the baseline, from perf-history.
+        run: |
+          if git fetch --depth=1 origin perf-history:refs/remotes/origin/perf-history; then
+            git show origin/perf-history:latest.json > "$ROOT/latest.json" || true
+            git show origin/perf-history:baseline.json > "$ROOT/baseline.json" || true
+          else
+            echo "no perf-history yet: this run starts it"
+          fi
+      - name: Compare
+        run: |
+          accept=
+          if [[ "$ON_MAIN" == true ]]; then
+            if [[ "${{ inputs.accept }}" == true ]]; then
+              accept=--accept
+            fi
+            # Flagged last time with no issue open: someone closed it by
+            # hand, which accepts the numbers.
+            flagged=$(jq '.flagged // [] | length' "$ROOT/baseline.json" 2>/dev/null || echo 0)
+            open=$(gh issue list --label performance --state open --limit 50 --json number,body \
+              --jq '[.[] | select(.body | contains("rush-footprint-watch"))][0].number // empty' || true)
+            echo "OPEN_ISSUE=$open" >> "$GITHUB_ENV"
+            if [[ "${flagged:-0}" -gt 0 && -z "$open" ]]; then
+              accept=--accept
+            fi
+          fi
+          python3 -I tools/footprint/compare.py --new "$ROOT/perf.json" \
+            --latest "$ROOT/latest.json" --baseline "$ROOT/baseline.json" $accept --out "$ROOT/out"
+          cat "$ROOT/out/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$ON_MAIN" != true ]]; then
+            printf '\nA run on %s: compared with main, no issue filed, nothing kept.\n' \
+              "$GITHUB_REF_NAME" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: footprint
+          path: |
+            ${{ runner.temp }}/footprint/perf.json
+            ${{ runner.temp }}/footprint/bench.tsv
+            ${{ runner.temp }}/footprint/out
+            ${{ runner.temp }}/footprint/logs
+          retention-days: 30
+          if-no-files-found: ignore
+      - name: Issue
+        if: env.ON_MAIN == 'true'
+        run: |
+          out="$ROOT/out"
+          regressed=$(jq '.regressed | length' "$out/result.json")
+          if [[ "$regressed" -gt 0 ]]; then
+            if [[ -n "$OPEN_ISSUE" ]]; then
+              gh issue comment "$OPEN_ISSUE" --body-file "$out/comment.md"
+              gh issue edit "$OPEN_ISSUE" --title "$(cat "$out/title.txt")" --body-file "$out/issue.md"
+            else
+              gh label create performance --color d93f0b \
+                --description "rush's footprint went up (footprint.yml)" 2>/dev/null || true
+              gh issue create --title "$(cat "$out/title.txt")" --label performance \
+                --body-file "$out/issue.md"
+            fi
+          elif [[ -n "$OPEN_ISSUE" ]]; then
+            gh issue comment "$OPEN_ISSUE" --body-file "$out/closed.md"
+            gh issue close "$OPEN_ISSUE"
+          fi
+      - name: Keep the numbers
+        if: env.ON_MAIN == 'true'
+        run: |
+          dir="$RUNNER_TEMP/perf-history"
+          if git rev-parse -q --verify refs/remotes/origin/perf-history >/dev/null; then
+            git worktree add -B perf-history "$dir" origin/perf-history
+          else
+            git worktree add --detach "$dir"
+            git -C "$dir" checkout --orphan perf-history
+            git -C "$dir" rm -rfq .
+            cat > "$dir/README.md" <<'EOF'
+          # rush's footprint, run by run
+
+          Written by .github/workflows/footprint.yml on main (DESIGN.md
+          "Footprint watch"): `runs/` holds every run's numbers,
+          `latest.json` the last run's, `baseline.json` what the next run
+          is held to.
+          EOF
+          fi
+          sha=$(git rev-parse --short=12 HEAD)
+          day=$(date -u +%Y-%m-%dT%H%M)
+          mkdir -p "$dir/runs"
+          cp "$ROOT/perf.json" "$dir/runs/$day-$sha.json"
+          cp "$ROOT/perf.json" "$dir/latest.json"
+          cp "$ROOT/out/baseline.json" "$dir/baseline.json"
+          cd "$dir"
+          git add -A
+          git -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -qm "chore(ci): footprint of $sha"
+          for i in 1 2 3; do
+            git push origin perf-history && exit 0
+            git fetch origin perf-history && git rebase origin/perf-history
+          done
+          exit 1

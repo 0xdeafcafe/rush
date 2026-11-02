@@ -3039,6 +3039,68 @@ Found, not done:
   trim sleeps on a thread of its own that a timer could replace (left to
   the work on threads).
 
+## Footprint watch (Rust-only)
+
+`.github/workflows/footprint.yml` measures rush after every push to main,
+nightly (what changes outside rush: the runner, macOS) and by hand, so
+memory and CPU creeping up as features land is seen the day it lands. A
+report, not a gate: no number fails a build. Its scripts are in
+`tools/footprint`.
+
+What it measures, on a made-up home (`fixture.py`, a fixed seed: 241
+Claude Code transcripts in 12 projects, one of 10 MB with 6 subagent runs,
+and 400 stopped rush sessions; RUSH_REAL's real home is never read in CI):
+
+- **Counts from the counting allocator**, which a busy runner doesn't
+  change: the benches and tests above write theirs to `RUSH_BENCH_OUT`
+  (a line each: name, kind, value). rush-host `--bench list` on that home
+  (retained heap, allocations made and kept), rush-convo `--bench open` on
+  its largest transcript and `--bench render`, rush-ui `--bench frame`
+  (bytes and allocations per frame), rush-menubar `tests/retained.rs` and
+  rush-remote `tests/listing.rs`.
+- **Each long-lived process, idle** (`measure.py`), started in that home
+  with nothing of the runner's (no RUSH_*/CLAUDE_* variables or tokens,
+  PATH the system's and a fake `claude` that answers stream-json): the
+  plugin broker (ready when its socket answers), `rush serve` (when it
+  says where it listens), a host whose agent is the fake claude (when its
+  first turn has ended: `rush session watch --until-idle`), `rush menubar
+  feed` (its first reading) and the view with no terminal (`rush --soak`).
+  Once each has used under 20 ms of CPU a second for 3 seconds running,
+  60 seconds idle give its CPU (user and system, proc_pid_rusage) and its
+  wake-ups (package idle and interrupt), each per minute; then its
+  physical footprint (`/usr/bin/footprint`) and its threads (the fewest
+  proc_pidinfo saw, sampled every 5 seconds: the long-lived ones).
+- **The release binary's size.**
+
+All of it is one `perf.json` (with the commit), compared two ways: with the
+last main commit measured (the job summary's table, every run, before →
+after for every number) and with the **baseline**, the numbers held to. A
+number's baseline moves down when it gets better past its threshold, and
+never up by itself, so a creep of 2% a commit is caught when the sum
+passes the threshold. Thresholds, both parts needed:
+
+| kind                         | past it when it rises by |
+|------------------------------|--------------------------|
+| allocations                  | 5%                       |
+| bytes allocated (per frame)  | 5% and 1 KiB             |
+| retained heap                | 5% and 256 KiB           |
+| footprint                    | 10% and 1 MiB            |
+| threads                      | any                      |
+| idle CPU                     | 50% and 0.5 s a minute   |
+| idle wake-ups                | 50% and 60 a minute      |
+| binary size                  | 5%                       |
+
+On main, a number past its threshold opens an issue, "Footprint went up:
+…", labelled `performance`, or comments on the one this job has open and
+updates its body; the run that finds them all back under comments so and
+closes it. Closing it by hand (or running the workflow with `accept`)
+takes the current numbers as the baseline. Each run's numbers are kept on
+the `perf-history` branch: `runs/<time>-<commit>.json`, `latest.json`,
+`baseline.json`. A run on another branch compares with main's and writes
+only its summary. Runs on main wait for each other rather than cut one
+short; GitHub keeps one waiting, so two pushes close together are measured
+as one, and the comparison names the commits it spans.
+
 ## Milestones (full plan: PLAN.md)
 
 1. **Read-only Claude** (this): the agent list (header, rows, summaries,

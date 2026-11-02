@@ -1,0 +1,96 @@
+#!/usr/bin/python3 -I
+"""A stand-in for `claude -p --input-format stream-json` for CI's footprint
+job: it answers rush's control requests, and each message with one short
+turn (init, an answer, its result), then waits for the next. No network,
+no account."""
+
+import json
+import sys
+
+args = sys.argv[1:]
+sid = "00000000-0000-4000-8000-000000000000"
+for flag in ("--session-id", "--resume"):
+    if flag in args and args.index(flag) + 1 < len(args):
+        sid = args[args.index(flag) + 1]
+
+if "--version" in args:
+    print("2.1.306 (Claude Code)")
+    sys.exit(0)
+
+
+def send(d):
+    sys.stdout.write(json.dumps(d, separators=(",", ":")) + "\n")
+    sys.stdout.flush()
+
+
+MODEL = "claude-haiku-4-5-20251001"
+started = False
+n = 0
+for raw in sys.stdin:
+    try:
+        msg = json.loads(raw)
+    except ValueError:
+        continue
+    kind = msg.get("type")
+    if kind == "control_request":
+        req = msg.get("request") or {}
+        body = {}
+        if req.get("subtype") == "initialize":
+            body = {"commands": [], "models": [], "account": {}}
+        send(
+            {
+                "type": "control_response",
+                "response": {
+                    "subtype": "success",
+                    "request_id": msg.get("request_id", ""),
+                    "response": body,
+                },
+            }
+        )
+    elif kind == "user":
+        n += 1
+        if not started:
+            started = True
+            send(
+                {
+                    "type": "system",
+                    "subtype": "init",
+                    "cwd": ".",
+                    "session_id": sid,
+                    "tools": ["Bash", "Read"],
+                    "model": MODEL,
+                    "permissionMode": "default",
+                    "slash_commands": ["compact"],
+                    "claude_code_version": "2.1.306",
+                }
+            )
+        send(
+            {
+                "type": "assistant",
+                "message": {
+                    "model": MODEL,
+                    "id": f"msg_{n}",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "Done: nothing to change."}],
+                    "usage": {"input_tokens": 10, "output_tokens": 6},
+                },
+                "parent_tool_use_id": None,
+                "session_id": sid,
+                "uuid": f"u-{n}",
+            }
+        )
+        send(
+            {
+                "type": "result",
+                "subtype": "success",
+                "is_error": False,
+                "duration_ms": 900,
+                "num_turns": 1,
+                "result": "Done: nothing to change.",
+                "stop_reason": "end_turn",
+                "session_id": sid,
+                "total_cost_usd": 0.0001,
+                "usage": {"input_tokens": 10, "output_tokens": 6},
+            }
+        )
