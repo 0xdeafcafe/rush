@@ -811,7 +811,7 @@ fn share_bar() {
         views::spark(&[5.0, 5.0], 8, crate::style::GREEN).plain(),
         "▅▅"
     );
-    assert_eq!(views::views_width(200), 73);
+    assert_eq!(views::views_width(200), 54);
     assert_eq!(views::views_width(100), 0);
     assert_eq!(views::tone_mark("warn").0, "▲");
 }

@@ -235,7 +235,7 @@ fn numbers_read_short() {
     }
     assert_eq!(views_width(100), 0);
     assert_eq!(views_width(120), 45);
-    assert_eq!(views_width(200), 73);
+    assert_eq!(views_width(200), 54);
 }
 
 /// A plugin's view shows only while the plugin runs allowed to draw it,

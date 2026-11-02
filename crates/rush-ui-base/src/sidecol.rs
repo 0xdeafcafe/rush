@@ -18,15 +18,16 @@ pub fn side_head(name: &str, rest: Line) -> Line {
     l
 }
 
-/// The column's width right of text w wide: what's left past the
-/// conversation's widest row, 44 cells at least; 0 when there's no room
-/// (sideWidth). Not as Go, on purpose: Go stops it at 80, but a Session
-/// beside the list can now be far wider than its text, and the column
-/// takes all of that room rather than leaving it empty.
+/// The column's width right of text w wide: three quarters of the room
+/// left past the conversation's widest row, 44 cells at least; 0 when
+/// that room is under 44 (sideWidth). At 200 wide it is 54 (it was the
+/// whole room, 73), at 260 it is 99 (was 133); the rest of the room stays
+/// blank between the text and the column, which keeps to the right edge.
+/// The agent's views beside the conversation take this same width.
 pub fn side_width(w: usize) -> usize {
     const TEXT: usize = 124; // convo's capRow: its rows never run further right
     match w.checked_sub(TEXT + 3) {
-        Some(sw) if sw >= 44 => sw,
+        Some(room) if room >= 44 => (room * 3 / 4).max(44),
         _ => 0,
     }
 }
