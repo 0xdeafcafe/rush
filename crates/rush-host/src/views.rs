@@ -18,7 +18,7 @@ use crate::wire::zero_time;
 
 /// Tells every agent it can keep a view: kept short, as every session
 /// carries it.
-pub const VIEWS_PROMPT: &str = "Your `view` tool (or `rush view set <name>`, JSON on stdin) draws live state in a panel beside the chat: a test run or build and its numbers, benchmarks, progress through a list, PRs and their checks, a migration, services you started. Start one unasked when such work starts, set it again (same name) on each change, clear it when done. When the user asks for status, stats or how work is going, answer there with stats, bars, a board or a table, and keep your reply to a line or two pointing at it, not tables in the chat. Never repeat your reply in it; not for plans or summaries; rush shows subagents itself. rush greys a view left alone for 10 min or a turn and puts it away after 45 min or 3 turns. `rush view guide` has the styles.";
+pub const VIEWS_PROMPT: &str = "Your `view` tool (or `rush view set <name>`, JSON on stdin) draws live state in a panel beside the chat: a test run or build and its numbers, benchmarks, progress through a list, PRs and their checks, a migration, services you started. Start one unasked when such work starts, set it again (same name) on each change, clear it when done. When the user asks for status, stats or how work is going, answer there with stats, bars, a board or a table, and keep your reply to a line or two pointing at it, not tables in the chat. Never repeat your reply in it, or it in your reply; not for plans or summaries; rush shows subagents itself. About 46 columns: row text under 30, meta under 20, tables of 2 or 3 short columns. Untouched for 10 min or a turn it greys; for 45 min or 3 turns it's put away. `rush view guide` has the styles.";
 
 /// A view the agent hasn't touched for this long greys (and the agent is
 /// told once, while it works): long enough that a benchmark or a build
@@ -444,7 +444,7 @@ impl View {
         }
         self.blocks.truncate(BLOCKS_MOST);
         for (i, b) in self.blocks.iter_mut().enumerate() {
-            b.check().map_err(|e| format!("block {}: {e}", i + 1))?;
+            b.check().map_err(|e| format!("view.blocks[{i}]: {e}"))?;
         }
         if let Some(p) = &mut self.progress {
             clip(&mut p.label);
@@ -454,7 +454,10 @@ impl View {
             }
         }
         if self.title.is_empty() {
-            return Err(r#"a view needs a title: {"title": "Pull requests", …}"#.into());
+            return Err(format!(
+                "a view needs a title. Like: {}",
+                crate::viewparse::VIEW_LIKE
+            ));
         }
         self.stats.truncate(4);
         for s in &mut self.stats {
@@ -495,9 +498,10 @@ impl Block {
     fn check(&mut self) -> Result<(), String> {
         if !BLOCK_KINDS.contains(&self.kind.as_str()) {
             return Err(format!(
-                "kind {}: use one of {}",
+                "kind {} is none of rush's: use one of {}. Like: {}",
                 go_quote(&self.kind),
-                BLOCK_KINDS.join(", ")
+                BLOCK_KINDS.join(", "),
+                crate::viewparse::block_like("list")
             ));
         }
         clip(&mut self.title);

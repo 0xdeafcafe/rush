@@ -1,6 +1,7 @@
 //! The words of `rush view`: its usage, its style guide and its examples,
-//! copied from cmd/rush/view.go as they are (gen: the script in this
-//! crate's history copies them; edit Go's, then copy again).
+//! first copied from cmd/rush/view.go; rush's own since (the Go code is
+//! the reference no more for these): the room rules and the branches,
+//! before-after and test-run examples came from how agents used views.
 
 pub const VIEW_USAGE: &str = r##"rush view: a panel of your own, drawn by rush beside the conversation
 
@@ -9,7 +10,7 @@ pub const VIEW_USAGE: &str = r##"rush view: a panel of your own, drawn by rush b
   rush view list             the session's views
   rush view guide            the style guide: when to show one, and every style
   rush view example [<name>] an example view's JSON: one for each style (table, chart, board…)
-                             and for kinds of work (prs, tests, migration, search, deploy…)
+                             and for kinds of work (branches, before-after, test-run, prs…)
 
 It's the session's in $RUSH_SESSION; --session <id> names another. To see one drawn:
 
@@ -147,8 +148,19 @@ COLOUR MEANS SOMETHING
 
 ROOM
   About 46 columns inside. Short words: row text under 30, meta under 20, labels one word.
-  No emoji, markdown or ASCII art: rush draws the marks, rules and bars. Fold blocks that
-  matter less. Don't repeat a number in two styles.
+  A table has room for 2 or 3 short columns: a longer cell wraps to a second line, then is
+  cut; put the rest in the row's "detail", which a click opens. No emoji, markdown or ASCII
+  art: rush draws the marks, rules and bars. Fold blocks that matter less. Don't repeat a
+  number in two styles.
+
+NUMBERS ARE NUMBERS
+  trend, values: lists of numbers, oldest first ("trend": [2, 5, 8], never "up").
+  value on bars, progress on a row (0 to 1), done and total: numbers. A stat's or hero's value
+  is words ("412", "9m"). rush reads the usual slips as meant and says what it left out.
+
+AND NOT IN THE CHAT TOO
+  What the view shows stays out of your reply: asked for status or stats, answer in the view
+  and say a line in the chat pointing at it, not the same table twice.
 
 Start from an example: rush view example lists them; rush view example table | rush view set t"##;
 
@@ -229,6 +241,18 @@ pub const VIEW_EXAMPLES: &[(&str, &str)] = &[
     (
         "rollout",
         r#"{"title": "Apple Pay rollout", "accent": "green", "summary": "4 of 5 regions", "blocks": [{"kind": "hero", "value": "74%", "text": "conversion with Apple Pay, card is 61%", "tone": "good"}, {"kind": "steps", "items": [{"text": "gb", "tone": "good"}, {"text": "ie", "tone": "good"}, {"text": "fr", "tone": "good"}, {"text": "de", "tone": "good"}, {"text": "us", "tone": "bad"}]}, {"kind": "callout", "tone": "bad", "text": "us: no merchant id yet."}]}"#,
+    ),
+    (
+        "branches",
+        r#"{"title": "Branches", "summary": "3 green · 1 failing · 1 running", "accent": "blue", "stats": [{"value": "3", "label": "green", "tone": "good"}, {"value": "1", "label": "failing", "tone": "bad"}, {"value": "1", "label": "running", "tone": "busy"}], "blocks": [{"kind": "table", "columns": ["branch", "CI", "ahead"], "items": [{"cells": ["rush/views", "green", "3"], "tone": "good"}, {"cells": ["rush/perf", "failing", "5"], "tone": "bad", "detail": "clippy: an unused import in panel.rs"}, {"cells": ["rush/menubar", "running", "2"], "tone": "busy"}, {"cells": ["rush/docs", "green", "1"], "tone": "good"}, {"cells": ["rush/upgrade", "green", "4"], "tone": "good"}]}, {"kind": "callout", "tone": "warn", "text": "rush/perf needs a look before it lands."}]}"#,
+    ),
+    (
+        "before-after",
+        r#"{"title": "Memory after the fix", "summary": "UI 516 → 212 MB", "accent": "green", "stats": [{"value": "212 MB", "label": "memory", "tone": "good", "trend": [516, 498, 350, 260, 212]}, {"value": "9%", "label": "CPU", "tone": "good", "trend": [27, 22, 15, 9]}], "blocks": [{"kind": "compare", "items": [{"text": "memory", "from": "516 MB", "to": "212 MB", "tone": "good"}, {"text": "CPU idle", "from": "27%", "to": "9%", "tone": "good"}, {"text": "frame", "from": "6ms", "to": "4ms", "tone": "good"}, {"text": "startup", "from": "180ms", "to": "190ms", "tone": "warn"}]}]}"#,
+    ),
+    (
+        "test-run",
+        r#"{"title": "Test run", "summary": "415 of 460 · 3 failed", "accent": "green", "tone": "busy", "progress": {"done": 415, "total": 460, "label": "tests run", "tone": "busy"}, "stats": [{"value": "412", "label": "passed", "tone": "good", "trend": [120, 260, 380, 412]}, {"value": "3", "label": "failed", "tone": "bad"}, {"value": "45", "label": "to go", "tone": "quiet"}], "blocks": [{"kind": "list", "title": "Failed", "tone": "bad", "items": [{"text": "TestRetryBackoff", "meta": "timed out", "tone": "bad", "detail": "Waited 30s for the second retry."}, {"text": "TestExportCSV", "meta": "column 4", "tone": "bad"}, {"text": "TestReload", "meta": "flaky", "tone": "warn"}]}, {"kind": "bars", "title": "Slowest", "folded": true, "items": [{"text": "e2e", "value": 540, "meta": "9m"}, {"text": "ui", "value": 240, "meta": "4m"}, {"text": "host", "value": 90, "meta": "1m 30s"}]}]}"#,
     ),
     (
         "prs",

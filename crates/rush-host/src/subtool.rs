@@ -28,7 +28,7 @@ use crate::agents::{Pick, WORK_PROMPT, catalogue_of, own_def, picks};
 use crate::client::{deliver, read_config, read_info, spawn};
 use crate::events::{clip, log_event};
 use crate::paths::dir;
-use crate::views::{View, drop_view, save_view};
+use crate::views::{drop_view, save_view};
 use crate::wire::{Config, Info};
 
 /// How long a waited call waits for its agent; past it, the agent works
@@ -119,7 +119,7 @@ impl SubAgents {
 
     /// Shows the agent's view of name in rush's panel.
     pub fn set_view(&self, name: &str, raw: &str) -> Result<String, String> {
-        let mut v: View = serde_json::from_str(raw).map_err(|e| format!("its view: {e}"))?;
+        let (mut v, notes) = crate::viewparse::parse_view(raw.as_bytes())?;
         if name.contains("--") {
             return Err("a view's name has no -- in it: those are plugins'".into());
         }
@@ -127,7 +127,8 @@ impl SubAgents {
         v.by.clear();
         save_view(&self.parent, v)?;
         Ok(format!(
-            "Shown beside the conversation as {name}. Set it again as things change; clear it once it's no use."
+            "Shown beside the conversation as {name}. Set it again as things change; clear it once it's no use.{}",
+            crate::viewparse::notes_line(&notes)
         ))
     }
 

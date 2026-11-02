@@ -2021,6 +2021,34 @@ is made. Everything below is in `rush_ui::frame`.
   afterwards, a call is refused and no sweep or notice runs. The agent's
   instructions were trimmed: the system prompt part 1235 to 560
   characters, the tool's description and schema about 3.4k to 1.9k.
+  **What the history showed** (2 Nov 2026: 934 Claude Code and Codex
+  sessions that had the tool, read-only, by a throwaway script): 33 set
+  a view, 257 sets in all (7.8 a session, at most 71; 1.5 views a
+  session, at most 9). Kinds used: list 105, table 88, compare 44,
+  checklist 41, steps 38, bars 30, callout 24, kv 18, board 7, stats 2,
+  log 1; never chart, heatmap, timeline, tree, hero, code, text,
+  progress. Agents get the shape right: no unknown fields or tones, and
+  one failed call in all (`"trend": "up"`). What they miss: 29 of 33
+  never ran `rush view guide` (1 before its first view), so the tool's
+  description is the guide; 46 of 109 turns that set a view said 60% or
+  more of its words in the reply too, and 6 of the 7 status asks that
+  used the panel also put a table in the chat; 20% of row texts are over
+  30 and 20% of metas over 20; 73 of 112 tables (median 53 columns
+  wide) had a cell cut at 46 columns, 12 of them to under half; 12 of 51
+  views were set once and never again. The user's words: "far too often
+  the gen ui is not updated or no longer relevant", "prose duplicated on
+  sidebar and in main view, hard to know where to look". So: the prompt
+  part (829 characters, ~210 tokens) and the tool's description say the
+  chat-or-view rule and the room (row text under 30, meta under 20,
+  tables of 2 or 3 short columns); a view is read forgivingly
+  (`viewparse::parse_view`: numbers as strings, words as numbers, one
+  item for a list, tone and kind words like "success" or "stat", a
+  string of JSON; what can't be meant, like a trend of "up", is left out
+  and the agent told in the tool's answer), and what is still wrong
+  names its field (`view.blocks[2].items[0].value`) with the smallest
+  right block of that kind; a table's word cell too wide for its column
+  wraps to a second line before it is cut; `rush view example` has
+  branches, before-after and test-run.
   Its sheets, the editor, the panel and
   the artifacts view are checked against Go row by row, words and
   colours, at the widths 80, 120 and 200 column screens give them

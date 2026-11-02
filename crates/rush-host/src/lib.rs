@@ -60,6 +60,7 @@ pub mod tmp;
 pub mod trim;
 pub mod upgrade;
 pub mod viewacts;
+pub mod viewparse;
 pub mod views;
 pub mod viewwords;
 pub mod wire;

@@ -10,7 +10,7 @@ use std::io::{Read, Write};
 
 use rush_core::adapter::{Profile, Registry};
 
-use crate::views::{View, drop_view, save_view, views};
+use crate::views::{drop_view, save_view, views};
 use crate::viewwords::{VIEW_EXAMPLES, VIEW_GUIDE, VIEW_USAGE};
 
 /// What `rush host` does: `run <id>`, the detached process a rush-mode
@@ -212,9 +212,9 @@ pub fn view_cmd_in(
             if let Err(e) = stdin.take(1 << 20).read_to_end(&mut b) {
                 return fail(&e.to_string());
             }
-            let mut v: View = match serde_json::from_slice(&b) {
+            let (mut v, notes) = match crate::viewparse::parse_view(&b) {
                 Ok(v) => v,
-                Err(e) => return fail(&format!("its JSON: {e} (rush view help shows the shape)")),
+                Err(e) => return fail(&e),
             };
             if args[1].contains("--") {
                 return fail("a view's name has no -- in it: those are plugins'");
@@ -226,6 +226,9 @@ pub fn view_cmd_in(
                 return fail(&e);
             }
             let _ = writeln!(stdout, "shown: {name}");
+            for n in notes {
+                let _ = writeln!(stdout, "left out: {n}");
+            }
             0
         }
         ("clear", 2) => match drop_view(&id, &args[1]) {
