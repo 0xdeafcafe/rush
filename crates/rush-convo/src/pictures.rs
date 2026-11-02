@@ -41,6 +41,22 @@ pub fn made() {
     crate::linkinfo::redraw();
 }
 
+static PIXELATED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Has pictures drawn in coloured blocks even where the terminal could
+/// show them sharp (the Pictures setting), every turn drawn again
+/// (SetPixelPictures).
+pub fn set_pixelated(on: bool) {
+    if PIXELATED.swap(on, std::sync::atomic::Ordering::Relaxed) != on {
+        made();
+    }
+}
+
+/// Whether pictures are drawn in blocks whatever the terminal.
+pub fn pixelated() -> bool {
+    PIXELATED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// The image at path drawn as look says, w by h, when it's made and could
 /// be read.
 pub(crate) fn picture(path: &str, w: usize, h: usize, look: Look) -> Option<Arc<Vec<Line>>> {
@@ -65,7 +81,9 @@ pub(crate) fn thumb_rows(r: &str, paths: &[String], w: usize) -> Option<Vec<Line
         // chips they stand for: opened, an image shows whole.
         let rows = picture(p, 8.max(32.min(w.saturating_sub(2))), 3, Look::Fit)?;
         let mut pic = framed(&rows);
-        let link = rush_core::text::Link::to(&format!("rush:message/{r}/image/{}", i + 1));
+        // rush's click alone: no OSC 8 over a picture, for the terminal
+        // to underline or offer its own menu for.
+        let link = rush_core::text::Link::quiet(&format!("rush:message/{r}/image/{}", i + 1));
         for l in &mut pic {
             for s in &mut l.spans {
                 s.style.link = link;
@@ -279,6 +297,20 @@ mod tests {
             link_of(&ls, "│████│"),
             Some(format!("rush:message/{r}/image/1"))
         );
+        // rush's own: never written to the terminal as OSC 8, the
+        // pictures' links (the step's too) quiet, the chip's not.
+        let quiet = |text: &str| {
+            let l = ls.iter().find(|l| l.line.plain().contains(text)).unwrap();
+            let s = l
+                .line
+                .spans
+                .iter()
+                .find(|s| s.text.contains(&text[..3]))
+                .unwrap();
+            s.style.link.is_quiet()
+        };
+        assert!(quiet("████") && quiet("▀▀▀▀▀▀"));
+        assert!(!quiet("later.png"));
         assert_eq!(
             link_of(&ls, "▀▀▀▀▀▀").as_deref(),
             Some("file:///pics-test/read.png")

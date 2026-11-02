@@ -2761,11 +2761,19 @@ impl<'a> Drawer<'a> {
                 continue;
             };
             // Each opens its file when clicked, as its chip does
-            // (render.go:3200 fileLink).
+            // (render.go:3200 fileLink): rush's click alone, so no OSC 8
+            // over the picture, for the terminal to underline or offer
+            // its own menu for.
+            let quiet = super::markdown::link_target(&self.p.abs(src))
+                .map_or(rush_core::text::Link::NONE, |u| {
+                    rush_core::text::Link::quiet(&u)
+                });
             for r in rows.iter() {
-                let l = self
-                    .sp(indent - 1)
-                    .and(self.file_link(src, Txt(r.spans.clone())));
+                let mut t = Txt(r.spans.clone());
+                for s in &mut t.0 {
+                    s.style.link = quiet;
+                }
+                let l = self.sp(indent - 1).and(t);
                 self.add("", Color::Default, l, Txt::new());
             }
         }
