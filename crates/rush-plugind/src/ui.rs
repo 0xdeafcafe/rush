@@ -97,6 +97,7 @@ impl Outbox {
     }
 
     /// An outbox that sends nothing until it's started: for tests.
+    #[cfg(test)]
     pub(crate) fn bare(max: usize) -> Arc<Outbox> {
         Outbox::make(max, None)
     }
