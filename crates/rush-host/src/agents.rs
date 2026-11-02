@@ -212,16 +212,10 @@ pub fn agents_prompt(reg: &Registry, leader: &str) -> String {
     )
 }
 
-/// One runner's line of agents_prompt.
+/// One runner's line of agents_prompt. Whether it's signed in isn't
+/// said: the prompt is cached word for word, and sign-ins come and go
+/// between starts; a run of one that isn't says so itself.
 fn runner_line(reg: &Registry, r: &Runner) -> String {
-    let out = if r.ready {
-        String::new()
-    } else {
-        format!(
-            "; availability unverified, so don't run it: check or refresh its account in rush, Settings, {}",
-            r.name
-        )
-    };
     let ids: Vec<String> = r
         .models
         .iter()
@@ -259,7 +253,7 @@ fn runner_line(reg: &Registry, r: &Runner) -> String {
         }
     }
     format!(
-        "- {}: {}'s models in {}, `{}`{pick}{out}",
+        "- {}: {}'s models in {}, `{}`{pick}",
         r.prov,
         reg.provider_label(&r.prov),
         reg.harness_label(&r.k),
@@ -346,9 +340,44 @@ pub fn agent_defs(reg: &Registry, session: &str) -> BTreeMap<String, RawJson> {
     defs
 }
 
-/// Whether p is one of session's own subagent types.
+/// Whether p is one of session's own subagent types. Not whether it's
+/// signed in: the session runs them on its own sign-in, and the list is
+/// part of the prompt its provider caches word for word.
 pub(crate) fn own_def(p: &Pick, session: &str) -> bool {
-    p.r.k == session && p.r.prov == session && plain_model(&p.model) && p.r.ready
+    p.r.k == session && p.r.prov == session && plain_model(&p.model)
+}
+
+/// The agents spawn_agent can start, a line each, for its description:
+/// own (the session's own subagent types) named apart. Whether each is
+/// signed in isn't said: the description is cached word for word, and
+/// spawn_agent says so of one that isn't when it's asked for it.
+pub fn catalogue_of(reg: &Registry, picks: Vec<Pick>, own: &dyn Fn(&Pick) -> bool) -> String {
+    let mut lines = Vec::new();
+    let mut owned = Vec::new();
+    for p in picks {
+        if own(&p) {
+            owned.push(p.name);
+            continue;
+        }
+        let mut line = format!("- {}", p.name);
+        if !p.model.is_empty() && p.model != p.name {
+            line += &format!(" ({})", p.model);
+        }
+        line += &format!(
+            ": {} {} in {}.",
+            p.desc,
+            reg.provider_label(&p.r.prov),
+            reg.harness_label(&p.r.k)
+        );
+        lines.push(line);
+    }
+    if !owned.is_empty() {
+        lines.push(format!(
+            "Your own models ({}) aren't listed: they're your subagent types, for your Agent tool.",
+            owned.join(", ")
+        ));
+    }
+    lines.join("\n")
 }
 
 /// What an agent on model is called: the model's own short name (astra for
@@ -484,6 +513,49 @@ mod tests {
         assert!(own_def(&ps[0], "claude") && !own_def(&ps[2], "codex"));
     }
 
+    /// What goes into a cached prompt or tool list is the same word for
+    /// word however sign-ins stand when it's built: each part built twice,
+    /// once with every agent signed in and once with none.
+    #[test]
+    fn cached_parts_ignore_sign_ins() {
+        let reg = Registry::new();
+        let runners = |ready: bool| {
+            vec![
+                r(
+                    "claude",
+                    &[("opus", "The deepest thinker."), ("haiku", "")],
+                    ready,
+                ),
+                r(
+                    "codex",
+                    &[("gpt-6-astra", "Frontier."), ("gpt-6-sol", "")],
+                    ready,
+                ),
+                r("ollama", &[], ready),
+            ]
+        };
+        let lines = |ready: bool| -> Vec<String> {
+            runners(ready)
+                .iter()
+                .map(|x| runner_line(&reg, x))
+                .collect()
+        };
+        assert_eq!(lines(true), lines(false), "runner lines");
+        let own = |p: &Pick| own_def(p, "claude");
+        let cat = |ready: bool| catalogue_of(&reg, picks_of(&runners(ready)), &own);
+        assert_eq!(cat(true), cat(false), "spawn_agent's catalogue");
+        assert!(!cat(false).contains("Not available"), "{}", cat(false));
+        let defs = |ready: bool| -> Vec<String> {
+            picks_of(&runners(ready))
+                .into_iter()
+                .filter(|p| own_def(p, "claude"))
+                .map(|p| p.name)
+                .collect()
+        };
+        assert_eq!(defs(true), defs(false), "the session's own subagent types");
+        assert_eq!(defs(false), ["opus", "haiku"]);
+    }
+
     #[test]
     fn runner_lines_say_how_to_run_it() {
         let reg = Registry::new();
@@ -491,7 +563,7 @@ mod tests {
         v.flag = "VIBE_MODEL=".into();
         let l = runner_line(&reg, &v);
         assert!(
-            l.ends_with(", VIBE_MODEL=<model> before it, one of devstral (fast and cheap); availability unverified, so don't run it: check or refresh its account in rush, Settings, vibe"),
+            l.ends_with(", VIBE_MODEL=<model> before it, one of devstral (fast and cheap)"),
             "{l}"
         );
         let o = r("ollama", &[], true);

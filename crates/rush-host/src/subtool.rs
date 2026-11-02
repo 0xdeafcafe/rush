@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::agentmatch::{find, no_agent};
-use crate::agents::{Pick, WORK_PROMPT, own_def, picks};
+use crate::agents::{Pick, WORK_PROMPT, catalogue_of, own_def, picks};
 use crate::client::{deliver, read_config, read_info, spawn};
 use crate::events::{clip, log_event};
 use crate::paths::dir;
@@ -136,37 +136,11 @@ impl SubAgents {
         drop_view(&self.parent, name)
     }
 
-    /// The agents spawn_agent can start, a line each.
+    /// The agents spawn_agent can start, a line each (agents::catalogue_of).
     pub fn catalogue(&self) -> String {
-        let mut lines = Vec::new();
-        let mut own = Vec::new();
-        for p in picks(&self.reg, &self.leader()) {
-            if self.own(&p) {
-                own.push(p.name);
-                continue;
-            }
-            let mut line = format!("- {}", p.name);
-            if !p.model.is_empty() && p.model != p.name {
-                line += &format!(" ({})", p.model);
-            }
-            line += &format!(
-                ": {} {} in {}.",
-                p.desc,
-                self.reg.provider_label(&p.r.prov),
-                self.reg.harness_label(&p.r.k)
-            );
-            if !p.r.ready {
-                line += " Not available right now.";
-            }
-            lines.push(line);
-        }
-        if !own.is_empty() {
-            lines.push(format!(
-                "Your own models ({}) aren't listed: they're your subagent types, for your Agent tool.",
-                own.join(", ")
-            ));
-        }
-        lines.join("\n")
+        catalogue_of(&self.reg, picks(&self.reg, &self.leader()), &|p| {
+            self.own(p)
+        })
     }
 
     /// Starts an agent on in.prompt, and waits for its answer unless it
