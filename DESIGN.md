@@ -706,7 +706,10 @@ processes, 27 threads, 42 MB, 2026-11-02). Now:
   no process, no memory limit (no footprint of their own to measure),
   what they'd print on the way out in their log, a panic as they start
   caught and restarted as a crash would be. That's all thirteen of the
-  ones above; the cleaners, ts and haven keep their process.
+  ones above; the cleaners, ts and haven keep their process. Fourteen
+  such plugins started inside a broker, idle, add 2 threads and 1.1 MB
+  of footprint (`rush-plugind/tests/bundled.rs`, CI 2026-11-02), where
+  thirteen processes held 27 threads and 42 MB.
 - The broker's own threads get 1 MB stacks, outboxes 256 KB
   (`rush_sys::threads`).
 - Reading: the process's one shared reader (item 6). A handler that
