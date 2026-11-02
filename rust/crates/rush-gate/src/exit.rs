@@ -12,7 +12,6 @@ fn runs(pid: Pid) -> bool {
 
 /// Returns once pid has gone.
 pub fn wait_gone(pid: Pid) {
-    #[cfg(target_os = "macos")]
     if kq_wait(pid) {
         return;
     }
@@ -23,7 +22,6 @@ pub fn wait_gone(pid: Pid) {
 }
 
 /// Waits on kqueue for pid's exit; false when it can't, to look instead.
-#[cfg(target_os = "macos")]
 fn kq_wait(pid: Pid) -> bool {
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
     // SAFETY: kqueue takes nothing; a non-negative result is ours.

@@ -209,7 +209,7 @@ pub struct MenuBarSheet {
 /// to run the menu bar icon (askMenuBar).
 pub fn ask_menu_bar(m: &mut Model) {
     let c = config(m);
-    if !cfg!(target_os = "macos") || c.menu_bar || c.menu_bar_asked || m.sheet.is_some() {
+    if c.menu_bar || c.menu_bar_asked || m.sheet.is_some() {
         return;
     }
     m.open_sheet(Box::new(MenuBarSheet::default()));

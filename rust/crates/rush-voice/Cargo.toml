@@ -12,8 +12,6 @@ rush-sys.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 libc.workspace = true
-
-[target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", features = ["exception"] }
 block2 = "0.6"
 dispatch2 = "0.3"

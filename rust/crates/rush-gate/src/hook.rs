@@ -59,7 +59,7 @@ pub fn wrap(exe: &str, name: &str, dir: &str, command: &str) -> String {
 /// runs short: a longer one then never finishes writing, and the command
 /// hangs for good. macOS's own bash, 3.2, writes every one to a file.
 fn shell_for(command: &str) -> &'static str {
-    if cfg!(target_os = "macos") && here_doc(command) {
+    if here_doc(command) {
         return "/bin/bash";
     }
     "bash"
@@ -274,11 +274,7 @@ mod tests {
 
     #[test]
     fn wrap_as_go_writes_it() {
-        let shell = if cfg!(target_os = "macos") {
-            "/bin/bash"
-        } else {
-            "bash"
-        };
+        let shell = "/bin/bash";
         assert_eq!(
             wrap("/bin/rush", "go", "/x", "cat <<E\nE\ngo test"),
             format!(

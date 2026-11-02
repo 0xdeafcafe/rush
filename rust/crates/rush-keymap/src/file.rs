@@ -112,18 +112,12 @@ fn write_bytes(p: &Path, b: &[u8]) -> io::Result<()> {
     })
 }
 
-#[cfg(unix)]
 fn create_dir(dir: &Path) -> io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
         .create(dir)
-}
-
-#[cfg(not(unix))]
-fn create_dir(dir: &Path) -> io::Result<()> {
-    std::fs::create_dir_all(dir)
 }
 
 /// A new file named base.<n>.tmp in dir, as Go's os.CreateTemp makes one.
@@ -140,7 +134,6 @@ fn create_temp(dir: &Path, base: &str) -> io::Result<(PathBuf, std::fs::File)> {
         let tmp = dir.join(format!("{base}.{n}.tmp"));
         let mut o = std::fs::OpenOptions::new();
         o.write(true).create_new(true);
-        #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
             o.mode(0o600);

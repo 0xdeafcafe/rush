@@ -590,11 +590,9 @@ fn raise_open_files() {
     if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut r) } != 0 {
         return;
     }
-    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
     let mut want = r.rlim_max;
     // macOS refuses more than kern.maxfilesperproc, even under an
     // unlimited hard limit.
-    #[cfg(target_os = "macos")]
     {
         let mut n: libc::c_int = 0;
         let mut size = std::mem::size_of::<libc::c_int>();
@@ -889,11 +887,8 @@ fn soak(reg: &rush_core::adapter::Registry, args: &[String]) {
     let ru = rusage();
     let tv = |t: libc::timeval| t.tv_sec as f64 + t.tv_usec as f64 / 1e6;
     let cpu = tv(ru.ru_utime) + tv(ru.ru_stime) - tv(ru0.ru_utime) - tv(ru0.ru_stime);
-    // Bytes on macOS, KiB elsewhere.
-    let mut rss = ru.ru_maxrss as f64;
-    if !cfg!(target_os = "macos") {
-        rss *= 1024.0;
-    }
+    // Bytes on macOS.
+    let rss = ru.ru_maxrss as f64;
     let mb = |b: f64| b / (1 << 20) as f64;
     let session = std::env::var("RUSH_RENDER_SELECT").unwrap_or_default();
     print_quiet(|o| {
@@ -929,7 +924,6 @@ fn rusage() -> libc::rusage {
 }
 
 /// How many threads this process runs.
-#[cfg(target_os = "macos")]
 fn threads() -> usize {
     // SAFETY: zeroed is a valid proc_taskinfo; proc_pidinfo fills it.
     let mut ti: libc::proc_taskinfo = unsafe { std::mem::zeroed() };
@@ -949,11 +943,6 @@ fn threads() -> usize {
     } else {
         0
     }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn threads() -> usize {
-    std::fs::read_dir("/proc/self/task").map_or(0, |d| d.count())
 }
 
 /// Seconds as Go prints a duration rounded to the millisecond: 30.002s,

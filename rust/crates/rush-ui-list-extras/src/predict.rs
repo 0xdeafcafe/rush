@@ -167,7 +167,6 @@ fn stat_of(m: &std::fs::Metadata) -> Option<Stat> {
 /// Whether the machine is short of memory (the kernel's pressure level
 /// past normal): nothing is read ahead then.
 fn memory_short() -> bool {
-    #[cfg(target_os = "macos")]
     {
         let mut v: u32 = 0;
         let mut len = std::mem::size_of::<u32>();
@@ -184,8 +183,6 @@ fn memory_short() -> bool {
         };
         r == 0 && v > 1
     }
-    #[cfg(not(target_os = "macos"))]
-    false
 }
 
 /// Agent key's conversation read ahead, taken out: fresh when none of the

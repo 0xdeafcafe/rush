@@ -623,7 +623,6 @@ mod tests {
     }
 
     /// A gh that answers auth status and auth token from a script.
-    #[cfg(unix)]
     fn fake_gh(dir: &Path) -> String {
         use std::os::unix::fs::PermissionsExt;
         let p = dir.join("gh");
@@ -641,7 +640,6 @@ mod tests {
 
     // gh's sign-in is what Copilot runs on: its token goes to the CLI
     // unless the CLI or the caller has one, and accounts are gh's.
-    #[cfg(unix)]
     #[test]
     fn runs_on_ghs_sign_in() {
         let bin = tempfile::tempdir().unwrap();
@@ -703,7 +701,6 @@ mod tests {
 
     // A session starts over ACP: the CLI run with --acp, in the profile's
     // folder, on gh's sign-in.
-    #[cfg(unix)]
     #[test]
     fn starts_over_acp() {
         use std::os::unix::fs::PermissionsExt;
@@ -785,7 +782,6 @@ cat > /dev/null
             return; // copilot or gh is installed where every machine looks
         }
         assert!(reg.get(KIND).unwrap().profiles().is_empty());
-        #[cfg(unix)]
         {
             fake_gh(bin.path());
             reg.recheck();

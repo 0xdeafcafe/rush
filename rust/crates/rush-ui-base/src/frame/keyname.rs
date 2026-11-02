@@ -88,7 +88,7 @@ const OPTION_KEYS: &[(char, char)] = &[
 /// or not the terminal sends Option as Meta. US layout only, and those
 /// characters can't be typed into rush on a Mac, as in Go.
 pub fn mac_option(code: Key, mods: KeyMods) -> (Key, KeyMods) {
-    mac_option_on(cfg!(target_os = "macos"), code, mods)
+    mac_option_on(true, code, mods)
 }
 
 #[doc(hidden)]

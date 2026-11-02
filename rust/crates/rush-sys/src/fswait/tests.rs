@@ -56,7 +56,6 @@ fn grown() {
     assert!(!super::grown(&stop, &file(4)));
 }
 
-#[cfg(target_os = "macos")]
 #[test]
 fn grown_replaced_and_missing() {
     let d = tempfile::tempdir().unwrap();
@@ -89,7 +88,6 @@ fn grown_replaced_and_missing() {
     ));
 }
 
-#[cfg(target_os = "macos")]
 #[test]
 fn watcher() {
     let d = tempfile::tempdir().unwrap();
@@ -124,7 +122,6 @@ fn watcher() {
 }
 
 // changes names what changed: each of many files written, and only those.
-#[cfg(target_os = "macos")]
 #[test]
 fn watcher_changes() {
     let d = tempfile::tempdir().unwrap();
@@ -172,7 +169,6 @@ fn watcher_changes() {
 
 // A path that isn't there yet waits on the folder above it, and is watched
 // once it appears there, however deep: nothing is tried on a timer.
-#[cfg(target_os = "macos")]
 #[test]
 fn watcher_follows_missing_paths_in() {
     let d = tempfile::tempdir().unwrap();
@@ -203,7 +199,6 @@ fn watcher_follows_missing_paths_in() {
 
 // A folder's change that brings nothing asked for is slept through: the
 // wait runs to its timeout.
-#[cfg(target_os = "macos")]
 #[test]
 fn watcher_sleeps_through_a_stand_ins_noise() {
     let d = tempfile::tempdir().unwrap();
@@ -219,7 +214,6 @@ use std::collections::HashSet;
 
 // wait wakes for a write, even one made before it started, and for stop;
 // a file removed and written again is followed once watched again.
-#[cfg(target_os = "macos")]
 #[test]
 fn watcher_wait() {
     let d = tempfile::tempdir().unwrap();
@@ -304,7 +298,6 @@ fn status_texts(s: &rush_core::adapter::Slice) -> Vec<String> {
 /// A write landing after the last read and before the wait wakes the
 /// wait: the watch was registered before the read. And a file renamed
 /// over by a longer one is a rewrite, though it didn't shrink.
-#[cfg(target_os = "macos")]
 #[test]
 fn follow_misses_no_write() {
     let d = tempfile::tempdir().unwrap();
@@ -356,7 +349,6 @@ fn follow_misses_no_write() {
 // one FSEvents stream, with no descriptor each, and tells what kqueue
 // would: a folder's entries added, removed or renamed, a file written,
 // but not a file written deep inside a watched folder.
-#[cfg(target_os = "macos")]
 #[test]
 fn watcher_many() {
     let d = tempfile::tempdir().unwrap();

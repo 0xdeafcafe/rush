@@ -170,15 +170,9 @@ pub struct WaitOn {
 /// replaced (renamed over, atomically) from the one read before, whatever
 /// its size. None where the platform can't say.
 pub fn file_id(m: &std::fs::Metadata) -> Option<(u64, u64)> {
-    #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
         Some((m.dev(), m.ino()))
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = m;
-        None
     }
 }
 

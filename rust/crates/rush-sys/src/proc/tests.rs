@@ -1,4 +1,4 @@
-//! Ported from internal/proc/zombie_test.go and proc_linux_test.go, plus
+//! Ported from internal/proc/zombie_test.go, plus
 //! the tree arithmetic proc.go does.
 
 use super::*;
@@ -20,34 +20,6 @@ fn zombie_is_exited_unreaped() {
         "this running process read as a zombie"
     );
     c.wait().unwrap();
-}
-
-#[test]
-fn parse_stat_odd_comm() {
-    // A comm holding a space and parens, as a real one can.
-    let line = b"1234 (some (odd) prog) S 1 1234 1234 0 -1 4194304 100 0 0 0 55 20 0 0 20 0 4 0 987654 0 0 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 0 17 3 0 0 0 0 0 0 0 0 0 0 0 0 0";
-    let s = parse_stat(line).expect("parse_stat failed");
-    assert_eq!(s.comm, "some (odd) prog");
-    assert_eq!(s.ppid, 1);
-    assert_eq!(s.cpu, Duration::from_millis(750));
-    assert_eq!(s.start_ticks, 987654);
-}
-
-#[test]
-fn parse_stat_huge_times_saturate() {
-    // Nonsense times read as the longest there is, not an overflow.
-    let max = u64::MAX;
-    let line = format!("1 (x) S 1 1 1 0 -1 0 0 0 0 0 {max} {max} 0 0 20 0 1 0 {max} 0");
-    let s = parse_stat(line.as_bytes()).expect("parse_stat failed");
-    assert_eq!(s.cpu, Duration::from_nanos(u64::MAX));
-    assert_eq!(s.start_ticks, max);
-}
-
-#[test]
-fn parse_stat_short() {
-    for bad in [&b"1 (x) S 0"[..], b"no parens here", b"1 )x( S"] {
-        assert_eq!(parse_stat(bad), None, "{:?}", String::from_utf8_lossy(bad));
-    }
 }
 
 // list, args and fill read this test's own process.
@@ -76,7 +48,6 @@ fn list_and_args_self() {
     assert_eq!(started(999_999), None);
 }
 
-#[cfg(target_os = "macos")]
 #[test]
 fn procargs2() {
     let mut b = 2u32.to_le_bytes().to_vec();
@@ -249,7 +220,6 @@ fn a_process_its_own_parent_ends_the_walk() {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 fn comm_names_the_program() {
     let mut c = Command::new("sleep").arg("30").spawn().unwrap();

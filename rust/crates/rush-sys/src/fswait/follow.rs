@@ -106,7 +106,6 @@ pub fn follow_grows<G: Grows + ?Sized>(
 
 /// Waits for fd to turn readable, stop to close, or every to pass; false
 /// when stop closed.
-#[cfg(unix)]
 fn wait_fd(fd: i32, stop: &Stop, every: Option<Duration>) -> bool {
     use std::os::fd::AsRawFd;
     let ms = every.map_or(-1, |d| d.as_millis().min(i32::MAX as u128) as i32);
@@ -130,9 +129,4 @@ fn wait_fd(fd: i32, stop: &Stop, every: Option<Duration>) -> bool {
         }
         return !stop.is_closed();
     }
-}
-
-#[cfg(not(unix))]
-fn wait_fd(_: i32, stop: &Stop, every: Option<Duration>) -> bool {
-    !stop.wait(every.unwrap_or(Duration::from_secs(2)))
 }

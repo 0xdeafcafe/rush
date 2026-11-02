@@ -65,7 +65,7 @@ pub fn clip_image() -> Result<Option<String>, String> {
         super::clock::stamp(rush_core::time::now())
     ));
     let outs = out.to_string_lossy().into_owned();
-    if cfg!(target_os = "macos") {
+    {
         // Asked of NSPasteboard directly: AppleScript's «the clipboard»
         // converts every format it holds first, seconds for a screenshot.
         let o = Command::new("osascript")
@@ -84,21 +84,6 @@ pub fn clip_image() -> Result<Option<String>, String> {
         if res.is_empty() {
             return Ok(None);
         }
-    } else {
-        let o = if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-            Command::new("wl-paste")
-                .args(["--type", "image/png"])
-                .output()
-        } else {
-            Command::new("xclip")
-                .args(["-selection", "clipboard", "-t", "image/png", "-o"])
-                .output()
-        };
-        let Ok(o) = o else { return Ok(None) };
-        if !o.status.success() || o.stdout.is_empty() {
-            return Ok(None);
-        }
-        std::fs::write(&out, &o.stdout).map_err(|e| e.to_string())?;
     }
     if std::fs::metadata(&out).map_or(true, |m| m.len() == 0) {
         let _ = std::fs::remove_file(&out);
@@ -111,10 +96,7 @@ pub fn clip_image() -> Result<Option<String>, String> {
 /// Mac rush runs on: Terminal.app ignores OSC 52 (setClipboard). Runs off
 /// the UI thread; the terminal's copy is the frame's.
 pub fn pbcopy(m: &mut Model, text: String) {
-    if !cfg!(target_os = "macos")
-        || std::env::var_os("SSH_CONNECTION").is_some()
-        || std::env::var_os("SSH_TTY").is_some()
-    {
+    if std::env::var_os("SSH_CONNECTION").is_some() || std::env::var_os("SSH_TTY").is_some() {
         return;
     }
     m.later(

@@ -437,7 +437,6 @@ fn file_round_trip() {
         "{\n  \"bindings\": {\n    \"list.stop\": [],\n    \"session.send\": [\n      \"ctrl+x s\"\n    ]\n  }\n}"
     );
     assert_eq!(load_from(&p).unwrap(), f);
-    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let mode = std::fs::metadata(&p).unwrap().permissions().mode();

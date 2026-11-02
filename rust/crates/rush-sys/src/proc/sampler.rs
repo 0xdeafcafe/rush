@@ -94,7 +94,6 @@ impl Sampler {
 mod tests {
     use super::*;
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn a_tree_is_summed() {
         let me = std::process::id() as Pid;

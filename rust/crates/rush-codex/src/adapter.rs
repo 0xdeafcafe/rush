@@ -261,12 +261,10 @@ impl Driver for Codex {
             flags.append(&mut o.flags);
             o.flags = flags;
         }
-        if cfg!(target_os = "macos") {
-            o.env.push(format!("{SPACE_EFFICIENT}=1"));
-            let mut flags = space_flags(&o.profile.dir);
-            flags.append(&mut o.flags);
-            o.flags = flags;
-        }
+        o.env.push(format!("{SPACE_EFFICIENT}=1"));
+        let mut flags = space_flags(&o.profile.dir);
+        flags.append(&mut o.flags);
+        o.flags = flags;
         Ok(Box::new(conn::start(o, sink)?))
     }
 }

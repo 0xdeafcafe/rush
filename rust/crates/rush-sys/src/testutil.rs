@@ -35,7 +35,6 @@ pub fn wait_stopped(pid: i32, cont: bool) {
 
 /// Whether pid exits (or is gone already) within d: any process, not only
 /// our children. kqueue's EVFILT_PROC says so the moment it does.
-#[cfg(target_os = "macos")]
 pub fn gone_within(pid: i32, d: Duration) -> bool {
     // SAFETY: plain kqueue calls on a kqueue we own and close.
     unsafe {

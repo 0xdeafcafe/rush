@@ -155,22 +155,8 @@ impl Host for Quiet {}
 /// The target rush is released for on this machine, as the release's file
 /// names have it; None where there's no release built for it.
 pub const fn target() -> Option<&'static str> {
-    if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+    if cfg!(target_arch = "aarch64") {
         Some("aarch64-apple-darwin")
-    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
-        Some("x86_64-apple-darwin")
-    } else if cfg!(all(
-        target_os = "linux",
-        target_env = "gnu",
-        target_arch = "aarch64"
-    )) {
-        Some("aarch64-unknown-linux-gnu")
-    } else if cfg!(all(
-        target_os = "linux",
-        target_env = "gnu",
-        target_arch = "x86_64"
-    )) {
-        Some("x86_64-unknown-linux-gnu")
     } else {
         None
     }
@@ -496,7 +482,6 @@ fn exit_words(s: &std::process::ExitStatus) -> String {
     if let Some(code) = s.code() {
         return format!("exit status {code}");
     }
-    #[cfg(unix)]
     {
         use std::os::unix::process::ExitStatusExt;
         if let Some(sig) = s.signal() {
@@ -506,15 +491,9 @@ fn exit_words(s: &std::process::ExitStatus) -> String {
     s.to_string()
 }
 
-#[cfg(unix)]
 fn is_executable(p: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-}
-
-#[cfg(not(unix))]
-fn is_executable(p: &Path) -> bool {
-    p.is_file()
 }
 
 /// Where the rush installed at exe is kept when [`install`] puts a newer one
@@ -540,7 +519,6 @@ fn keep(exe: &Path) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(unix)]
 fn create_dir(dir: &Path) -> io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;
     std::fs::DirBuilder::new()
@@ -549,18 +527,12 @@ fn create_dir(dir: &Path) -> io::Result<()> {
         .create(dir)
 }
 
-#[cfg(not(unix))]
-fn create_dir(dir: &Path) -> io::Result<()> {
-    std::fs::create_dir_all(dir)
-}
-
-fn open_new(path: &Path, _mode: u32) -> io::Result<std::fs::File> {
+fn open_new(path: &Path, mode: u32) -> io::Result<std::fs::File> {
     let mut o = std::fs::OpenOptions::new();
     o.create(true).write(true).truncate(true);
-    #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        o.mode(_mode);
+        o.mode(mode);
     }
     o.open(path)
 }

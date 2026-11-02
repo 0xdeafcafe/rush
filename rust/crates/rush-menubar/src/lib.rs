@@ -19,7 +19,6 @@ pub mod source;
 pub mod terminal;
 pub mod wire;
 
-#[cfg(target_os = "macos")]
 pub mod app;
 
 use std::path::PathBuf;
@@ -48,13 +47,10 @@ fn is_bundle_program(p: &std::path::Path) -> bool {
 /// Runs the menu bar app until it quits; on the main thread, as the
 /// bundle's program.
 pub fn app_main() -> Result<(), String> {
-    #[cfg(target_os = "macos")]
     {
         app::run();
         Ok(())
     }
-    #[cfg(not(target_os = "macos"))]
-    Err("the menu bar icon is macOS only".into())
 }
 
 /// `rush menubar [off|feed]`: runs the menu bar icon, its feed (which the

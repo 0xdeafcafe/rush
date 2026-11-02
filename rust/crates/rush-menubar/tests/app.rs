@@ -5,11 +5,9 @@
 
 fn main() {
     rush_testenv::assert_sandboxed(); // every test in a throwaway home
-    #[cfg(target_os = "macos")]
     run();
 }
 
-#[cfg(target_os = "macos")]
 fn run() {
     use rush_menubar::wire::{Account, Line, Waiting, Window, Working};
     let state = Line {

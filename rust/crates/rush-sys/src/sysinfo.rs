@@ -156,14 +156,12 @@ pub fn read_disk() -> Disk {
 /// IOKit's power sources where pmset reads it, with no program started:
 /// present with an internal battery, its charge, and charging while the
 /// power comes from AC.
-#[cfg(target_os = "macos")]
 pub fn read_battery() -> Battery {
     ps::read().unwrap_or_default()
 }
 
 /// The battery, from `pmset -g batt`: what [`read_battery`] reads,
 /// the way Go does, to check it against.
-#[cfg(target_os = "macos")]
 pub fn read_battery_pmset() -> Battery {
     match crate::cmd::output_within(
         std::process::Command::new("/usr/bin/pmset").args(["-g", "batt"]),
@@ -175,7 +173,6 @@ pub fn read_battery_pmset() -> Battery {
 }
 
 /// IOKit's power sources (IOPowerSources.h), as pmset reads them.
-#[cfg(target_os = "macos")]
 mod ps {
     use std::ffi::{c_char, c_void};
 
@@ -277,34 +274,6 @@ mod ps {
 }
 
 /// The battery, from Linux's power supply class; elsewhere there's none.
-#[cfg(not(target_os = "macos"))]
-pub fn read_battery() -> Battery {
-    let Ok(rd) = std::fs::read_dir("/sys/class/power_supply") else {
-        return Battery::default();
-    };
-    let mut dirs: Vec<_> = rd
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| {
-            p.file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("BAT"))
-        })
-        .collect();
-    dirs.sort();
-    let Some(d) = dirs.first() else {
-        return Battery::default();
-    };
-    let Ok(c) = std::fs::read_to_string(d.join("capacity")) else {
-        return Battery::default();
-    };
-    let st = std::fs::read_to_string(d.join("status")).unwrap_or_default();
-    Battery {
-        present: true,
-        percent: c.trim().parse().unwrap_or(0),
-        charging: st.trim() != "Discharging",
-    }
-}
 
 /// Reads `pmset -g batt`: its first line says what power it's drawing
 /// from, the next the battery's charge.
@@ -339,7 +308,6 @@ mod tests {
     use super::*;
 
     // IOKit's reading is the one pmset prints (Go reads pmset).
-    #[cfg(target_os = "macos")]
     #[test]
     fn iokit_reads_as_pmset_does() {
         let (a, b) = (read_battery(), read_battery_pmset());

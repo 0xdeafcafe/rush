@@ -2,33 +2,18 @@
 //! them costs in memory and CPU.
 //!
 //! Ported from internal/proc/proc.go:1-159 and protect.go:1-37; the
-//! platform halves are in `darwin.rs` (proc_darwin.go), `linux.rs`
-//! (proc_linux.go) and `other.rs` (proc_other.go).
+//! platform half is in `darwin.rs` (proc_darwin.go).
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasher, BuildHasherDefault, Hasher};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-#[cfg(target_os = "macos")]
 mod darwin;
-#[cfg(target_os = "macos")]
 use darwin as os;
 
-#[cfg(target_os = "linux")]
-mod linux;
-#[cfg(target_os = "linux")]
-use linux as os;
-
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-mod other;
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-use other as os;
-
 mod sampler;
-mod stat;
 pub use sampler::{Sampler, Usage};
-pub use stat::{Stat, parse_stat};
 
 /// A process id.
 pub type Pid = i32;
@@ -276,8 +261,7 @@ pub fn zombie(pid: Pid) -> bool {
     os::zombie(pid)
 }
 
-/// When pid started; None when it isn't running (or, on Linux, the boot
-/// time is unknown).
+/// When pid started; None when it isn't running.
 pub fn started(pid: Pid) -> Option<SystemTime> {
     os::started(pid)
 }

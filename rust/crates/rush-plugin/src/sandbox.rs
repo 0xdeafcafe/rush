@@ -29,7 +29,7 @@ pub struct Launch {
 /// Says whether plugins can run here: only where they can be sandboxed,
 /// which so far is macOS.
 pub fn supported() -> Result<(), String> {
-    if cfg!(target_os = "macos") && std::fs::metadata(SANDBOX_EXEC).is_ok() {
+    if std::fs::metadata(SANDBOX_EXEC).is_ok() {
         return Ok(());
     }
     Err(ERR_NO_SANDBOX.into())
@@ -161,9 +161,6 @@ impl Launch {
     /// not start another program, open a socket anywhere else, or look up
     /// system services beyond the one libSystem needs at start.
     pub fn profile(&self) -> Result<String, String> {
-        if !cfg!(target_os = "macos") {
-            return Err(ERR_NO_SANDBOX.into());
-        }
         let prog = self.program()?;
         let name = &self.plugin.name;
         let mut b = String::from("(version 1)\n(deny default)\n");
@@ -421,7 +418,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_os = "macos")]
     fn profile_writes() {
         let h = Home::new();
         let other = gopath::s(&h.path().join("kanban"));

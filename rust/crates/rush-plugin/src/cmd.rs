@@ -515,7 +515,7 @@ mod tests {
         m.description = "Does a thing.".into();
         install_plugin(&m, &[("bin", "#!/bin/sh\n")]);
         let (r, _) = run(&["approve", "p"], false, "");
-        if cfg!(target_os = "macos") {
+        {
             assert_eq!(r, Err("approving needs you at a terminal".into()));
             let (r, out) = run(&["approve", "p"], true, "n\n");
             assert!(

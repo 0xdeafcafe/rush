@@ -102,7 +102,7 @@ fn service_of(dir: &Path) -> String {
 /// home's own (see [`service_for`]).
 pub fn vault() -> Keys {
     let dir = crate::dir();
-    let service = cfg!(target_os = "macos").then(|| service_of(&dir));
+    let service = Some(service_of(&dir));
     Keys {
         dir: dir.join("logins"),
         service,
@@ -583,7 +583,7 @@ mod tests {
             b"the user's own",
             "the normal home's sign-in was changed"
         );
-        if cfg!(target_os = "macos") {
+        {
             assert!(a.service().unwrap().starts_with("rush-login-"));
             assert_ne!(a.service(), b.service());
         }

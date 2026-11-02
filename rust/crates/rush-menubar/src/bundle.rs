@@ -114,9 +114,6 @@ pub type Error = String;
 /// one already running is left alone unless it was just rebuilt. rushes
 /// starting together take turns, so only the first builds and opens it.
 pub fn start() -> Result<(), Error> {
-    if !cfg!(target_os = "macos") {
-        return Err("the menu bar icon is macOS only".into());
-    }
     let _ = make_dir(&dir());
     // Held until start returns: rushes starting together take turns.
     let _turn = fs::OpenOptions::new()
@@ -439,7 +436,7 @@ mod tests {
     /// asked, as Go's TestBuildApp.
     #[test]
     fn build_app_when_asked() {
-        if std::env::var_os("RUSH_BUILD_APP").is_none() || !cfg!(target_os = "macos") {
+        if std::env::var_os("RUSH_BUILD_APP").is_none() {
             return;
         }
         let d = tempfile::tempdir().unwrap();

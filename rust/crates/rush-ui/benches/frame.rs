@@ -103,7 +103,6 @@ fn model(n: usize, w: usize, h: usize) -> Model {
 /// Instructions this process has retired (macOS), which a busy machine
 /// doesn't change as it does the time taken; 0 elsewhere.
 fn instructions() -> u64 {
-    #[cfg(target_os = "macos")]
     {
         // SAFETY: an all-zero rusage_info_v4 is valid, and
         // proc_pid_rusage fills the one it is given.

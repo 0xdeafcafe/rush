@@ -121,7 +121,6 @@ fn locked<T>(lock: &str, f: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
         .write(true)
         .open(lock)
         .map_err(|e| crate::screen::path_error("open", lock.as_ref(), e))?;
-    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(lock, fs::Permissions::from_mode(0o600));
@@ -178,7 +177,6 @@ fn write_text(path: &str, text: &str) -> io::Result<()> {
         return Err(e);
     }
     drop(f);
-    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let mode = fs::metadata(&path).map_or(0o644, |m| m.permissions().mode() & 0o777);

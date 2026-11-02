@@ -196,10 +196,6 @@ fn stamp_follows_the_rush_its_copied_from() {
 #[test]
 fn devices_input_first() {
     let ds = rush_voice::devices();
-    if !cfg!(target_os = "macos") {
-        assert!(ds.is_empty());
-        return;
-    }
     assert!(ds.iter().all(|d| !d.id.is_empty()));
     assert!(ds.iter().filter(|d| d.default).count() <= 1);
     if ds.iter().any(|d| d.default) {
@@ -217,7 +213,7 @@ fn devices_input_first() {
 /// asked, as the menu bar app's test does.
 #[test]
 fn build_app_when_asked() {
-    if std::env::var_os("RUSH_BUILD_APP").is_none() || !cfg!(target_os = "macos") {
+    if std::env::var_os("RUSH_BUILD_APP").is_none() {
         return;
     }
     let d = tempfile::tempdir().unwrap();

@@ -97,13 +97,8 @@ fn executable(p: &Path) -> bool {
     if m.is_dir() {
         return false;
     }
-    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         m.permissions().mode() & 0o111 != 0
-    }
-    #[cfg(not(unix))]
-    {
-        true
     }
 }

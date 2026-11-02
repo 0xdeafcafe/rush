@@ -30,11 +30,7 @@ pub const KB_WIDE: usize = 58;
 /// The keyboard's rows, each staggered as a real one's are (kbRows).
 pub fn kb_rows() -> Vec<Vec<KbKey>> {
     let plain = |ks: &'static str| ks.split(' ').map(|x| k(x, x, 3)).collect::<Vec<_>>();
-    let (alt, sup) = if cfg!(target_os = "macos") {
-        ("⌥", "⌘")
-    } else {
-        ("alt", "super")
-    };
+    let (alt, sup) = ("⌥", "⌘");
     let cat = |parts: Vec<Vec<KbKey>>| parts.into_iter().flatten().collect::<Vec<_>>();
     vec![
         vec![k("esc", "esc", 5)],

@@ -298,10 +298,6 @@ fn homebrew_is_found_by_its_cellar() {
             "/usr/local/Cellar/rush/0.2.0_1/bin/rush",
             Some("/usr/local/bin/brew"),
         ),
-        (
-            "/home/linuxbrew/.linuxbrew/Cellar/rush/0.2.0/bin/rush",
-            Some("/home/linuxbrew/.linuxbrew/bin/brew"),
-        ),
         ("/opt/homebrew/bin/rush", None),
         ("/Users/a/.cargo/bin/rush", None),
         ("/opt/homebrew/Cellar/other/1.0/bin/rush", None),
@@ -324,14 +320,12 @@ fn fake_brew(prefix: &Path, code: i32) {
         ),
     )
     .unwrap();
-    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&brew, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 }
 
-#[cfg(unix)]
 #[test]
 fn install_under_homebrew_runs_brew_upgrade() {
     let (url, _) = serving(Box::new(|p, base| {
@@ -408,7 +402,6 @@ fn names(dir: &Path) -> Vec<String> {
     v
 }
 
-#[cfg(unix)]
 #[test]
 fn install_replaces_the_running_rush() {
     let tgz = tar_gz(&[
@@ -450,7 +443,6 @@ fn install_replaces_the_running_rush() {
     assert_eq!(c.latest.version, "0.3.0");
 }
 
-#[cfg(unix)]
 #[test]
 fn install_refuses_what_wasnt_released() {
     let Some(target) = target() else { return };
@@ -521,7 +513,6 @@ fn install_refuses_what_wasnt_released() {
 /// A release that isn't newer than the rush running is never installed:
 /// the same one again, an older one, or the release a newer nightly is
 /// ahead of; a nightly's own release is newer than it.
-#[cfg(unix)]
 #[test]
 fn install_refuses_what_isnt_newer() {
     for cur in ["0.3.0", "0.4.0", "0.3.1-nightly.20261030"] {
@@ -557,7 +548,6 @@ fn install_refuses_what_isnt_newer() {
 
 // What tar itself makes reads too: a PAX header (here for a long name)
 // before a file is stepped over.
-#[cfg(unix)]
 #[test]
 fn archive_reads_what_tar_makes() {
     let Some(tar) = ["/usr/bin/tar", "/bin/tar"]

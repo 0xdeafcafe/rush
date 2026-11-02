@@ -61,10 +61,7 @@ pub fn end_tree(root: Pid, root_start: SystemTime, grace: Duration) -> Result<us
         .filter(|pid| !protected.contains(pid) && proc::kill(*pid, libc::SIGTERM).is_ok())
         .collect();
     let end = Instant::now() + grace;
-    #[cfg(target_os = "macos")]
     let left = exits::wait(&tab, &pids, end).unwrap_or_else(|| poll_exits(&tab, &pids, end));
-    #[cfg(not(target_os = "macos"))]
-    let left = poll_exits(&tab, &pids, end);
     for pid in left {
         // Signalled above, and still the same process (left checks its
         // start), though maybe init's child now.
@@ -98,7 +95,6 @@ fn poll_exits(tab: &Table, pids: &[Pid], end: Instant) -> Vec<Pid> {
 
 /// Waiting for processes to exit on kqueue: it returns the moment the last
 /// one goes, rather than at the next look.
-#[cfg(target_os = "macos")]
 mod exits {
     use std::collections::HashSet;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};

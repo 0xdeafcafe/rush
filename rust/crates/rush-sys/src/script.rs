@@ -39,7 +39,7 @@ pub fn key(id: &str, command: &str) -> String {
 /// isn't run as a script on macOS: the bash that can trace one hangs on a
 /// long here-document there (see the gate's Wrap).
 pub fn long(command: &str) -> bool {
-    if cfg!(target_os = "macos") && shellwords::here_doc(command) {
+    if shellwords::here_doc(command) {
         return false;
     }
     command.trim().contains('\n') && shellwords::commands(command).map_or(0, |c| c.len()) > MOST
@@ -76,10 +76,6 @@ pub fn bash() -> Option<PathBuf> {
         "/opt/homebrew/bin/bash".into(),
         "/usr/local/bin/bash".into(),
     ];
-    if !cfg!(target_os = "macos") {
-        cands.push("/bin/bash".into());
-        cands.push("/usr/bin/bash".into());
-    }
     if let Some(p) = look_path("bash")
         && p != Path::new("/bin/bash")
     {
@@ -287,10 +283,7 @@ mod tests {
             !long("cd x && go build && go vet && go test"),
             "a one-liner has no lines to stop at"
         );
-        assert_eq!(
-            long("cat <<EOF\nx\nEOF\na; b; c; d"),
-            !cfg!(target_os = "macos")
-        );
+        assert!(!long("cat <<EOF\nx\nEOF\na; b; c; d"));
     }
 
     #[test]

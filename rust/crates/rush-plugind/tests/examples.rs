@@ -135,7 +135,6 @@ fn text(r: &Value) -> String {
 /// Builds plugins/examples/delegate, approves it, and talks to it as a
 /// session host would.
 #[test]
-#[cfg(target_os = "macos")]
 fn broker_runs_the_example_plugin() {
     if rush_plugin::supported().is_err() {
         return;
@@ -239,7 +238,6 @@ fn broker_runs_the_example_plugin() {
 /// kanban-code link the card to the agent it started for it, and a message
 /// for the card reaches that agent.
 #[test]
-#[cfg(target_os = "macos")]
 fn broker_runs_the_kanban_example() {
     if rush_plugin::supported().is_err() {
         return;
@@ -374,7 +372,6 @@ fn broker_runs_the_kanban_example() {
 /// An MCP server runs as a plugin as it is: initialized as any MCP client
 /// would, its own guidance passed on, its tools called through.
 #[test]
-#[cfg(target_os = "macos")]
 fn broker_runs_an_mcp_plugin() {
     if rush_plugin::supported().is_err() {
         return;

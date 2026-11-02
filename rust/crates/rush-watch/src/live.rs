@@ -143,7 +143,6 @@ pub fn task_of(path: &str) -> String {
 }
 
 /// The file stdout writes to, as fcntl's F_GETPATH says.
-#[cfg(target_os = "macos")]
 fn stdout_path() -> String {
     let mut buf = [0u8; libc::PATH_MAX as usize];
     // SAFETY: F_GETPATH writes at most MAXPATHLEN bytes into buf.
@@ -155,12 +154,6 @@ fn stdout_path() -> String {
 }
 
 /// The file stdout writes to, as /proc says.
-#[cfg(not(target_os = "macos"))]
-fn stdout_path() -> String {
-    std::fs::read_link("/proc/self/fd/1")
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_default()
-}
 
 /// Keeps l for its task, replacing what was there whole.
 pub fn save_live(l: &Live) {
