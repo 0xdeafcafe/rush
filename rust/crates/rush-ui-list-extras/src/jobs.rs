@@ -1161,7 +1161,15 @@ fn job_block(
         fact(
             &mut facts,
             vec![
-                sp(format!("▸ {}/{}", rp.at, rp.of), ORANGE),
+                // A script's command has no place in the call's text.
+                sp(
+                    if rp.of == 0 {
+                        "▸ now".to_string()
+                    } else {
+                        format!("▸ {}/{}", rp.at, rp.of)
+                    },
+                    ORANGE,
+                ),
                 sp(" ", SUB),
                 sp(one_line(&rp.command), TEXT),
             ],

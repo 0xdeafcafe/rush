@@ -68,8 +68,15 @@ pub fn picked_shell(m: &Model, key: &str) -> String {
     let Some(s) = m.session.as_ref().map(|v| &v.sess) else {
         return String::new();
     };
+    // Any agent's shell tool (Claude Code's Bash, Codex's shell…), still
+    // running, or returned with its command running on in the background.
     match s.step_by_call(id).map(|i| s.step(i)) {
-        Some(st) if st.status == Status::Running && &*st.tool == "Bash" => id.to_string(),
+        Some(st)
+            if st.kind == rush_core::tool::Kind::Shell
+                && (st.status == Status::Running || s.job_running(id)) =>
+        {
+            id.to_string()
+        }
         _ => String::new(),
     }
 }
@@ -280,6 +287,7 @@ pub fn kill_part(m: &mut Model, key: &str, id: &str) -> Out {
         "stops" => "the chain stops there (&&) and Claude hears it failed",
         "carries on" => "the chain carries on with the next command",
         "ends" => "it was the last command, so the call ends",
+        "script" => "the script goes on as it would after it failed",
         _ => "",
     };
     m.flash(&format!("killing {what} · {then}"));

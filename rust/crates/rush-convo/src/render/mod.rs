@@ -105,7 +105,7 @@ use draw::{Drawer, message_tool, squeezed, waiting};
 pub(crate) use draw::{glyph_for, hidden};
 pub use shell::Places;
 pub(crate) use shell::clean as clean_path;
-pub(crate) use shell::{Segment, fields_of, segments, shell_lines, unquote};
+pub(crate) use shell::{Segment, fields_of, run_text, segments, shell_lines, unquote};
 pub(crate) use style::one_line;
 
 /// Numbers never drift further right than this.
@@ -574,7 +574,19 @@ impl Renderer {
                 k.sel = o.selected.clone();
             }
         }
-        if t.live || waiting(s, t) {
+        // A call of a turn gone past whose command runs on in the
+        // background says which of its commands runs, and for how long.
+        let runs_on = || {
+            s.running_jobs().any(|j| {
+                s.step_by_call(&j.tool_use_id).is_some_and(|id| {
+                    !s.running_label(id).is_empty()
+                        && t.items
+                            .iter()
+                            .any(|it| matches!(it, Item::Step(x) if *x == id))
+                })
+            })
+        };
+        if t.live || waiting(s, t) || runs_on() {
             let fast = self.slots.get(i).is_some_and(|x| x.fast);
             k.clock = Some((o.tick, if fast { o.now / 100 } else { o.now / 1000 }));
             k.paused = o.paused.len();

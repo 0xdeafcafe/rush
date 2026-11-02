@@ -143,3 +143,142 @@ fn a_finished_chain_has_no_keys() {
     assert!(!got.contains("2/3"), "{got}");
     assert!(!got.contains("k skip"), "{got}");
 }
+
+/// The shell Claude Code runs a Bash call in, as rush reads it off the
+/// process: its command eval'd inside a wrapper (a quote written
+/// '"'"'), so its own -c command isn't the call's and is left empty.
+fn claude_shell(cmd: &str, start: i64, kids: Vec<ShellProc>) -> Shell {
+    Shell {
+        cmd: format!(
+            "/bin/zsh -c source /Users/me/.claude/shell-snapshots/snapshot-zsh-1.sh 2>/dev/null || true && eval '{}' < /dev/null && pwd -P >| /tmp/claude-1a2b-cwd",
+            cmd.replace('\'', r#"'"'"'"#)
+        ),
+        command: String::new(),
+        start,
+        kids,
+    }
+}
+
+fn proc_(pid: i32, args: &str, start: i64, kids: Vec<ShellProc>) -> ShellProc {
+    ShellProc {
+        pid,
+        args: args.split_whitespace().map(str::to_string).collect(),
+        start,
+        kids,
+    }
+}
+
+/// A running chain that isn't the turn's newest step (the agent ran a
+/// Read beside it) still shows its commands, each one's time and the
+/// keys, without being opened by hand.
+#[test]
+fn a_chain_beside_another_call_stays_open() {
+    let mut s = running();
+    s.feed(
+        tool_use("r1", "Read", json!({"file_path": "/work/app/src/main.rs"})),
+        at(7),
+    );
+    let got = draw(&s, Preset::Normal, "");
+    let build = got
+        .lines()
+        .find(|l| l.contains("$ cargo build"))
+        .unwrap_or_else(|| panic!("the chain's commands are shown:\n{got}"));
+    assert!(build.contains("✓ 4"), "{build}");
+    assert!(got.contains("k skip cargo test"), "{got}");
+}
+
+/// A Bash call with a quote in it, in Claude Code's real wrapper, with a
+/// shell of a background task started just before: its own shell is
+/// found, so its row says where it is.
+#[test]
+fn a_quoted_chain_in_claude_codes_wrapper() {
+    let cmd = "rg -n 'TODO' src; cargo test --workspace";
+    let mut s = Session::new();
+    s.cwd = "/work/app".into();
+    s.feed(sent("check it"), at(0));
+    s.feed(tool_use("b1", "Bash", json!({"command": cmd})), at(1));
+    let dev = claude_shell(
+        "npm run dev",
+        at(1) + 100,
+        vec![proc_(70, "node vite", at(1) + 100, Vec::new())],
+    );
+    let mine = claude_shell(
+        cmd,
+        at(1) + 300,
+        vec![proc_(71, "cargo test --workspace", at(2), Vec::new())],
+    );
+    s.watch_shells(&[dev, mine], at(3));
+    let got = draw(&s, Preset::Normal, "");
+    assert!(
+        got.lines()
+            .any(|l| l.starts_with("t1:s:b1") && l.contains("2/2 cargo test")),
+        "{got}"
+    );
+    assert!(got.contains("k skip cargo test"), "{got}");
+}
+
+/// A loop: its command running now is marked, with how long it has run
+/// and the loop's round, on the line it's written on.
+#[test]
+fn a_loops_command_is_marked() {
+    let cmd = "for p in rush-core rush-convo; do\n  cargo test -p $p\ndone";
+    let mut s = Session::new();
+    s.cwd = "/work/app".into();
+    s.feed(sent("test them"), at(0));
+    s.feed(tool_use("b1", "Bash", json!({"command": cmd})), at(1));
+    let look = |s: &mut Session, krate: &str, from: i64, now: i64| {
+        let p = proc_(80, &format!("cargo test -p {krate}"), from, Vec::new());
+        s.watch_shells(&[claude_shell(cmd, at(1), vec![p])], now);
+    };
+    look(&mut s, "rush-core", at(1), at(2));
+    look(&mut s, "rush-convo", at(8), at(9));
+    let got = draw(&s, Preset::Normal, "");
+    let line = got
+        .lines()
+        .find(|l| l.contains("cargo test -p $p"))
+        .unwrap_or_else(|| panic!("{got}"));
+    assert!(line.contains('▸') && line.contains("run 2"), "{line}");
+    assert!(
+        got.lines()
+            .any(|l| l.starts_with("t1:s:b1") && l.contains("cargo test · run 2")),
+        "{got}"
+    );
+}
+
+/// A script file: the commands seen run under it, each with its time,
+/// the one running now marked, and the keys for it.
+#[test]
+fn a_script_files_commands_are_shown() {
+    let cmd = "bash scripts/check.sh";
+    let mut s = Session::new();
+    s.cwd = "/work/app".into();
+    s.feed(sent("check"), at(0));
+    s.feed(tool_use("b1", "Bash", json!({"command": cmd})), at(1));
+    let look = |s: &mut Session, kid: ShellProc, now: i64| {
+        let script = proc_(90, "/bin/bash scripts/check.sh", at(1), vec![kid]);
+        s.watch_shells(&[claude_shell(cmd, at(1), vec![script])], now);
+    };
+    look(&mut s, proc_(91, "cargo build", at(1), Vec::new()), at(2));
+    look(
+        &mut s,
+        proc_(92, "cargo test --workspace", at(5), Vec::new()),
+        at(6),
+    );
+    let got = draw(&s, Preset::Normal, "");
+    assert!(
+        got.lines()
+            .any(|l| l.starts_with("t1:s:b1") && l.contains("now cargo test")),
+        "{got}"
+    );
+    let build = got
+        .lines()
+        .find(|l| l.contains("cargo build"))
+        .unwrap_or_else(|| panic!("{got}"));
+    assert!(build.contains("✓ 4"), "{build}");
+    let test = got
+        .lines()
+        .find(|l| l.contains("▸ cargo test"))
+        .unwrap_or_else(|| panic!("{got}"));
+    assert!(test.contains("15"), "the tests run 15s now: {test}");
+    assert!(got.contains("k skip cargo test"), "{got}");
+}
