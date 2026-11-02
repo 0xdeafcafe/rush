@@ -65,9 +65,10 @@ WHAT IT'S FOR: LIVE STATE ONLY
   your running subagents at the panel's top, so don't list them yourself.
 
   Clear it once it's no use: it goes among the past views, where the user can bring it back.
-  rush greys a view you left alone for a whole turn or 10 minutes, and one that says what
-  your reply says; it puts away one you haven't touched in 3 turns or 45 minutes by itself. One the user brought back stays
-  until they close it.
+  rush greys a view whose rows are all done, one a push or merge left out of date, one you
+  left alone for a whole turn or 10 minutes, and one that says what your reply says; your
+  next message names the grey ones. It puts away one still grey 2 turns later, or untouched
+  for 45 minutes. One the user brought back stays until they close it.
 
 PICK THE STYLE THAT FITS THE DATA
   A view is a title, an optional summary (your line in rush's list, 3 to 6 words), an accent
@@ -133,6 +134,9 @@ WORKING IT: rows that open, buttons that do things
   send    a message to you, as if the user typed it: say all you'll need, it's sent at once
   open    a web link        copy    words to the clipboard
   set     changes that row at once, no turn of yours: done, tone, meta
+  Give each row the next step the user would take on it: a branch "land it", a failing test
+  "show the log", a finding "fix it". The user clicks a row, or moves to it with the arrow
+  keys and presses enter.
   The view's own "actions" sit at its foot: "review all", "post the findings". A label is a
   word or two; up to 6 buttons a row. What the user changes (a tick, a set) stays over what
   you send until you change that field yourself, and you hear of it at your next step: set
@@ -244,15 +248,15 @@ pub const VIEW_EXAMPLES: &[(&str, &str)] = &[
     ),
     (
         "branches",
-        r#"{"title": "Branches", "summary": "3 green · 1 failing · 1 running", "accent": "blue", "stats": [{"value": "3", "label": "green", "tone": "good"}, {"value": "1", "label": "failing", "tone": "bad"}, {"value": "1", "label": "running", "tone": "busy"}], "blocks": [{"kind": "table", "columns": ["branch", "CI", "ahead"], "items": [{"cells": ["rush/views", "green", "3"], "tone": "good"}, {"cells": ["rush/perf", "failing", "5"], "tone": "bad", "detail": "clippy: an unused import in panel.rs"}, {"cells": ["rush/menubar", "running", "2"], "tone": "busy"}, {"cells": ["rush/docs", "green", "1"], "tone": "good"}, {"cells": ["rush/upgrade", "green", "4"], "tone": "good"}]}, {"kind": "callout", "tone": "warn", "text": "rush/perf needs a look before it lands."}]}"#,
+        r#"{"title": "Branches", "summary": "3 green · 1 failing · 1 running", "accent": "blue", "stats": [{"value": "3", "label": "green", "tone": "good"}, {"value": "1", "label": "failing", "tone": "bad"}, {"value": "1", "label": "running", "tone": "busy"}], "blocks": [{"kind": "table", "columns": ["branch", "CI", "ahead"], "items": [{"cells": ["rush/views", "green", "3"], "tone": "good", "actions": [{"label": "land it", "send": "Land rush/views on main"}]}, {"cells": ["rush/perf", "failing", "5"], "tone": "bad", "detail": "clippy: an unused import in panel.rs", "actions": [{"label": "show the log", "send": "Show me rush/perf's failing CI log"}, {"label": "fix it", "send": "Fix rush/perf's CI failure and push"}]}, {"cells": ["rush/menubar", "running", "2"], "tone": "busy", "actions": [{"label": "tell me when done", "send": "Tell me when rush/menubar's CI finishes"}]}, {"cells": ["rush/docs", "green", "1"], "tone": "good", "actions": [{"label": "land it", "send": "Land rush/docs on main"}]}, {"cells": ["rush/upgrade", "green", "4"], "tone": "good", "actions": [{"label": "land it", "send": "Land rush/upgrade on main"}]}]}, {"kind": "callout", "tone": "warn", "text": "rush/perf needs a look before it lands."}]}"#,
     ),
     (
         "before-after",
-        r#"{"title": "Memory after the fix", "summary": "UI 516 → 212 MB", "accent": "green", "stats": [{"value": "212 MB", "label": "memory", "tone": "good", "trend": [516, 498, 350, 260, 212]}, {"value": "9%", "label": "CPU", "tone": "good", "trend": [27, 22, 15, 9]}], "blocks": [{"kind": "compare", "items": [{"text": "memory", "from": "516 MB", "to": "212 MB", "tone": "good"}, {"text": "CPU idle", "from": "27%", "to": "9%", "tone": "good"}, {"text": "frame", "from": "6ms", "to": "4ms", "tone": "good"}, {"text": "startup", "from": "180ms", "to": "190ms", "tone": "warn"}]}]}"#,
+        r#"{"title": "Memory after the fix", "summary": "UI 516 → 212 MB", "accent": "green", "stats": [{"value": "212 MB", "label": "memory", "tone": "good", "trend": [516, 498, 350, 260, 212]}, {"value": "9%", "label": "CPU", "tone": "good", "trend": [27, 22, 15, 9]}], "blocks": [{"kind": "compare", "items": [{"text": "memory", "from": "516 MB", "to": "212 MB", "tone": "good"}, {"text": "CPU idle", "from": "27%", "to": "9%", "tone": "good"}, {"text": "frame", "from": "6ms", "to": "4ms", "tone": "good"}, {"text": "startup", "from": "180ms", "to": "190ms", "tone": "warn", "detail": "The new cache is read at start.", "actions": [{"label": "look into it", "send": "Find why startup got 10ms slower"}]}]}], "actions": [{"label": "commit it", "send": "Commit the memory fix and push"}]}"#,
     ),
     (
         "test-run",
-        r#"{"title": "Test run", "summary": "415 of 460 · 3 failed", "accent": "green", "tone": "busy", "progress": {"done": 415, "total": 460, "label": "tests run", "tone": "busy"}, "stats": [{"value": "412", "label": "passed", "tone": "good", "trend": [120, 260, 380, 412]}, {"value": "3", "label": "failed", "tone": "bad"}, {"value": "45", "label": "to go", "tone": "quiet"}], "blocks": [{"kind": "list", "title": "Failed", "tone": "bad", "items": [{"text": "TestRetryBackoff", "meta": "timed out", "tone": "bad", "detail": "Waited 30s for the second retry."}, {"text": "TestExportCSV", "meta": "column 4", "tone": "bad"}, {"text": "TestReload", "meta": "flaky", "tone": "warn"}]}, {"kind": "bars", "title": "Slowest", "folded": true, "items": [{"text": "e2e", "value": 540, "meta": "9m"}, {"text": "ui", "value": 240, "meta": "4m"}, {"text": "host", "value": 90, "meta": "1m 30s"}]}]}"#,
+        r#"{"title": "Test run", "summary": "415 of 460 · 3 failed", "accent": "green", "tone": "busy", "progress": {"done": 415, "total": 460, "label": "tests run", "tone": "busy"}, "stats": [{"value": "412", "label": "passed", "tone": "good", "trend": [120, 260, 380, 412]}, {"value": "3", "label": "failed", "tone": "bad"}, {"value": "45", "label": "to go", "tone": "quiet"}], "blocks": [{"kind": "list", "title": "Failed", "tone": "bad", "items": [{"text": "TestRetryBackoff", "meta": "timed out", "tone": "bad", "detail": "Waited 30s for the second retry.", "actions": [{"label": "show the log", "send": "Show me TestRetryBackoff's log"}, {"label": "fix it", "send": "Fix TestRetryBackoff"}]}, {"text": "TestExportCSV", "meta": "column 4", "tone": "bad", "actions": [{"label": "show the log", "send": "Show me TestExportCSV's log"}]}, {"text": "TestReload", "meta": "flaky", "tone": "warn", "actions": [{"label": "run it 20×", "send": "Run TestReload 20 times and tell me how often it fails"}]}]}, {"kind": "bars", "title": "Slowest", "folded": true, "items": [{"text": "e2e", "value": 540, "meta": "9m"}, {"text": "ui", "value": 240, "meta": "4m"}, {"text": "host", "value": 90, "meta": "1m 30s"}]}], "actions": [{"label": "rerun failed", "send": "Rerun the 3 failed tests"}]}"#,
     ),
     (
         "prs",
