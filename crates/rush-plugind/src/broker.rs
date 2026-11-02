@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::os::fd::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use rush_plugin::rpc::{CODE_NO_METHOD, Handler};
@@ -53,12 +53,49 @@ pub(crate) struct Inner {
     stop: rush_plugin::Cancel,
     /// Numbers each connection on broker.sock, for the UI it may be.
     conns: AtomicU64,
+    /// Told of a reload, a plugin started and the broker's stop: what the
+    /// watch and develop wait for while they have nothing to look at.
+    pub(crate) changed: Arc<Changes>,
+    _quit_wakes: rush_plugin::ctx::Registration,
+}
+
+/// A count of changes, to wait for the next by.
+#[derive(Default)]
+pub(crate) struct Changes {
+    n: Mutex<u64>,
+    cv: Condvar,
+}
+
+impl Changes {
+    pub(crate) fn now(&self) -> u64 {
+        *lock(&self.n)
+    }
+
+    pub(crate) fn bump(&self) {
+        *lock(&self.n) += 1;
+        self.cv.notify_all();
+    }
+
+    /// Waits until there has been a change since seen: false once quit is
+    /// done instead.
+    pub(crate) fn wait_past(&self, seen: u64, quit: &Ctx) -> bool {
+        let mut n = lock(&self.n);
+        while *n == seen && quit.err().is_none() {
+            n = self.cv.wait(n).unwrap_or_else(|e| e.into_inner());
+        }
+        quit.err().is_none()
+    }
 }
 
 impl Broker {
     /// A broker that runs nothing yet, reaching sessions through hosts.
     pub fn new(hosts: Arc<dyn Hosts>, log: Log, scope: Scope) -> Broker {
         let (quit, stop) = Ctx::background().with_cancel();
+        let changed = Arc::new(Changes::default());
+        let quit_wakes = quit.on_cancel({
+            let c = changed.clone();
+            move || c.bump()
+        });
         Broker(Arc::new_cyclic(|me| Inner {
             log,
             scope,
@@ -68,6 +105,8 @@ impl Broker {
             quit,
             stop,
             conns: AtomicU64::new(0),
+            changed,
+            _quit_wakes: quit_wakes,
         }))
     }
 
@@ -151,6 +190,7 @@ impl Broker {
             );
             r.shutdown();
         }
+        self.0.changed.bump();
         if empty {
             self.0.log.print("no plugins to run");
             self.0.scope.log(
@@ -185,10 +225,22 @@ impl Broker {
     }
 
     /// Checks every few seconds that each plugin is within its memory
-    /// limit and its files are as approved, until the broker stops.
+    /// limit and its files are as approved, until the broker stops. Only a
+    /// plugin running as a process has either to look at: while none does,
+    /// it waits for one to start rather than look (Rust-only).
     fn watch(&self) {
         let mut tick = 0u64;
-        while self.0.quit.sleep(WATCH_EVERY) {
+        loop {
+            let at = self.0.changed.now();
+            if !self.0.runners().iter().any(|r| r.pid_now() > 0) {
+                if !self.0.changed.wait_past(at, &self.0.quit) {
+                    return;
+                }
+                continue;
+            }
+            if !self.0.quit.sleep(WATCH_EVERY) {
+                return;
+            }
             let rs = self.0.runners();
             let pids: Vec<i32> = rs.iter().map(|r| r.pid_now()).filter(|&p| p > 0).collect();
             if !pids.is_empty() {
@@ -234,7 +286,22 @@ impl Broker {
     fn develop(&self) {
         let mut seen: BTreeMap<String, String> = BTreeMap::new();
         let mut failed: BTreeMap<String, String> = BTreeMap::new();
-        while self.0.quit.sleep(DEVELOP_EVERY) {
+        loop {
+            // With no plugin in development mode it waits for a reload
+            // (turning it on reloads) rather than look (Rust-only).
+            let at = self.0.changed.now();
+            if !rush_plugin::origins()
+                .values()
+                .any(|o| o.dev && !o.project.is_empty())
+            {
+                if !self.0.changed.wait_past(at, &self.0.quit) {
+                    return;
+                }
+                continue;
+            }
+            if !self.0.quit.sleep(DEVELOP_EVERY) {
+                return;
+            }
             let changed = rush_plugin::dev_changed();
             for (name, h) in &changed {
                 if seen.get(name) != Some(h) || failed.get(name) == Some(h) {

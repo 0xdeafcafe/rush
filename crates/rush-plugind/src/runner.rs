@@ -14,6 +14,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 
+use rush_plugin::ctx::Registration;
 use rush_plugin::rpc::{CODE_NO_METHOD, CODE_PARSE, Handler};
 use rush_plugin::{Cancel, Conn, Ctx, CtxErr, Error, Launch, Plugin, Proxy, Raw};
 use serde::{Deserialize, Serialize};
@@ -65,6 +66,23 @@ pub(crate) struct RunState {
     pub(crate) out: Option<Arc<Outbox>>,
     /// When it last started sessions, to cap how fast it can.
     pub(crate) starts: Vec<Instant>,
+    /// What tells the running plugin's end to its supervisor.
+    watching: Vec<Registration>,
+}
+
+/// A plugin started and said hello to.
+struct Running {
+    conn: Conn,
+    pid: i32,
+    exited: Ctx,
+    wait_err: Arc<Mutex<String>>,
+    proxy: Option<Proxy>,
+}
+
+/// How a process that exited ended: Ok for a clean exit.
+fn exit_res(wait_err: &Mutex<String>) -> Result<(), String> {
+    let e = wait_err.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if e.is_empty() { Ok(()) } else { Err(e) }
 }
 
 /// One followed session: cancel ends the following.
@@ -123,6 +141,7 @@ impl Runner {
                 unwatch: None,
                 out: None,
                 starts: Vec::new(),
+                watching: Vec::new(),
             }),
             cv: Condvar::new(),
             execs: AtomicUsize::new(0),
@@ -216,10 +235,50 @@ impl Runner {
     }
 
     /// Starts the plugin and starts it again whenever it ends, until it is
-    /// shut down or refused.
+    /// shut down or refused. Only starting and restarting take a thread:
+    /// while it runs, nothing waits on one for it (Rust-only; Go has a
+    /// goroutine each): its end, the end of its connection or the broker's
+    /// stop starts what comes next on a fresh one.
     pub(crate) fn supervise(self: Arc<Self>) {
-        let mut backoff = Duration::from_secs(1);
+        self.supervise_from(Duration::from_secs(1), None);
+    }
+
+    /// supervise, from a run that ended (when it began, and how it ended)
+    /// with backoff the wait before the next.
+    fn supervise_from(
+        self: Arc<Self>,
+        mut backoff: Duration,
+        mut ended: Option<(Instant, Result<(), String>)>,
+    ) {
         loop {
+            if let Some((began, res)) = ended.take() {
+                if self.quit.err().is_some() {
+                    return;
+                }
+                if began.elapsed() > Duration::from_secs(60) {
+                    backoff = Duration::from_secs(1);
+                }
+                let msg = match res {
+                    Ok(()) => "exited".to_string(),
+                    Err(e) => e,
+                };
+                let wait = crate::go_secs(backoff);
+                self.log.print(&format!("{msg}; starting again in {wait}"));
+                self.scope.log(
+                    "plugin-restart",
+                    fields(&[
+                        ("plugin", json!(self.name)),
+                        ("why", json!(msg)),
+                        ("wait", json!(wait)),
+                    ]),
+                );
+                self.lock().restarts += 1;
+                self.set_state("waiting", &msg);
+                if !self.quit.sleep(backoff) {
+                    return;
+                }
+                backoff = (backoff * 2).min(Duration::from_secs(60));
+            }
             if self.quit.err().is_some() {
                 return;
             }
@@ -243,39 +302,19 @@ impl Runner {
                 }
             };
             let began = Instant::now();
-            let res = self.run(p);
-            if self.quit.err().is_some() {
-                return;
+            match self.start(p) {
+                Ok(run) => {
+                    self.hand_off(run, began, backoff);
+                    return;
+                }
+                Err(e) => ended = Some((began, Err(e))),
             }
-            if began.elapsed() > Duration::from_secs(60) {
-                backoff = Duration::from_secs(1);
-            }
-            let msg = match res {
-                Ok(()) => "exited".to_string(),
-                Err(e) => e,
-            };
-            let wait = crate::go_secs(backoff);
-            self.log.print(&format!("{msg}; starting again in {wait}"));
-            self.scope.log(
-                "plugin-restart",
-                fields(&[
-                    ("plugin", json!(self.name)),
-                    ("why", json!(msg)),
-                    ("wait", json!(wait)),
-                ]),
-            );
-            self.lock().restarts += 1;
-            self.set_state("waiting", &msg);
-            if !self.quit.sleep(backoff) {
-                return;
-            }
-            backoff = (backoff * 2).min(Duration::from_secs(60));
         }
     }
 
-    /// Starts the plugin, and returns when it has exited: Ok when it exited
-    /// as it should, else why not.
-    fn run(self: &Arc<Self>, p: Plugin) -> Result<(), String> {
+    /// Starts the plugin and says hello: Ok once it's running, else why
+    /// not (with what it started undone).
+    fn start(self: &Arc<Self>, p: Plugin) -> Result<Running, String> {
         self.lock().p = p.clone();
         self.set_state("starting", "");
 
@@ -284,14 +323,21 @@ impl Runner {
         } else {
             Some(Proxy::listen(&p.network, Some(self.log.as_proxy_log()))?)
         };
-        let res = self.run_with(&p, proxy.as_ref().map_or(0, Proxy::port));
-        if let Some(px) = proxy {
-            px.close();
+        match self.start_with(&p, proxy.as_ref().map_or(0, Proxy::port)) {
+            Ok(mut run) => {
+                run.proxy = proxy;
+                Ok(run)
+            }
+            Err(e) => {
+                if let Some(px) = proxy {
+                    px.close();
+                }
+                Err(e)
+            }
         }
-        res
     }
 
-    fn run_with(self: &Arc<Self>, p: &Plugin, proxy_port: u16) -> Result<(), String> {
+    fn start_with(self: &Arc<Self>, p: &Plugin, proxy_port: u16) -> Result<Running, String> {
         let mut cmd = Launch {
             plugin: p.clone(),
             proxy_port,
@@ -328,15 +374,7 @@ impl Runner {
             let child = cmd.spawn();
             drop(theirs);
             let child = child.map_err(|e| spawn_err(&cmd, &e))?;
-            let me = Arc::downgrade(self);
-            let h: Handler = Arc::new(move |_, ctx, method, params| match me.upgrade() {
-                Some(r) => {
-                    r.scope.enter();
-                    r.answer_plugin(ctx, method, params)
-                }
-                None => Err(crate::server("the plugin has stopped")),
-            });
-            match Conn::new(mine, Some(h)) {
+            match Conn::new(mine, Some(self.plugin_handler())) {
                 Ok(c) => (child, c),
                 Err(e) => {
                     let mut child = child;
@@ -348,69 +386,118 @@ impl Runner {
         };
 
         let pid = child.id() as i32;
-        let (exited, wait_err) = wait_for(child, &self.scope);
-        {
-            let mut s = self.lock();
-            s.pid = pid;
-            s.exited = Some(exited.clone());
-        }
-        self.cv.notify_all();
-        let res = self.serve(p, &conn, pid, &exited, &wait_err);
-        self.down(&conn);
-        res
+        let (exited, wait_err) = wait_for(child);
+        self.started(
+            p,
+            Running {
+                conn,
+                pid,
+                exited,
+                wait_err,
+                proxy: None,
+            },
+        )
     }
 
-    /// Says hello and waits for the plugin to end, once it's running.
-    fn serve(
-        &self,
-        p: &Plugin,
-        conn: &Conn,
-        pid: i32,
-        exited: &Ctx,
-        wait_err: &Arc<Mutex<String>>,
-    ) -> Result<(), String> {
-        if let Err(e) = self.handshake(p, conn) {
-            kill(pid, exited);
+    /// Says hello to a plugin just started, and once it has answered,
+    /// takes it as running.
+    fn started(&self, p: &Plugin, run: Running) -> Result<Running, String> {
+        {
+            let mut s = self.lock();
+            s.pid = run.pid;
+            s.exited = Some(run.exited.clone());
+        }
+        self.cv.notify_all();
+        if let Err(e) = self.handshake(p, &run.conn) {
+            kill(run.pid, &run.exited);
+            self.down(&run.conn);
             return Err(format!("did not start: {e}"));
         }
         {
             let mut s = self.lock();
-            s.conn = Some(conn.clone());
+            s.conn = Some(run.conn.clone());
             if p.proto() == rush_plugin::PROTO_RUSH {
-                s.out = Some(Outbox::new(conn.clone(), PLUGIN_QUEUE, &self.scope));
+                s.out = Some(Outbox::new(run.conn.clone(), PLUGIN_QUEUE, &self.scope));
             }
         }
         self.cv.notify_all();
         self.set_state("running", "");
         if let Some(b) = self.broker() {
             b.0.ui.changed();
+            b.0.changed.bump();
         }
-        self.log.print(&format!("running, pid {pid}"));
+        self.log.print(&format!("running, pid {}", run.pid));
+        Ok(run)
+    }
 
-        // Whichever comes first: it exits, it closes its end of the
-        // channel (it's no use without it), or it's shut down.
+    /// What a rush plugin asks of the broker goes to answer_plugin, while
+    /// this runner is.
+    fn plugin_handler(self: &Arc<Self>) -> Handler {
+        let me = Arc::downgrade(self);
+        Arc::new(move |_, ctx, method, params| match me.upgrade() {
+            Some(r) => {
+                r.scope.enter();
+                r.answer_plugin(ctx, method, params)
+            }
+            None => Err(crate::server("the plugin has stopped")),
+        })
+    }
+
+    /// Leaves a running plugin to itself: whichever comes first, it exits,
+    /// it closes its end of the channel (it's no use without it), or it's
+    /// shut down, what comes next starts on a thread of its own.
+    fn hand_off(self: &Arc<Self>, run: Running, began: Instant, backoff: Duration) {
         let (any, wake) = Ctx::background().with_cancel();
-        let regs = [
-            exited.on_cancel({
+        let regs = vec![
+            run.exited.on_cancel({
                 let w = wake.clone();
                 move || w.cancel()
             }),
-            conn.ctx().on_cancel({
+            run.conn.ctx().on_cancel({
                 let w = wake.clone();
                 move || w.cancel()
             }),
             self.quit.on_cancel(move || wake.cancel()),
         ];
-        any.wait();
-        drop(regs);
-        if exited.err().is_none() {
-            kill(pid, exited);
+        // Kept while it runs (dropping them would forget them), and let go
+        // when the next run's take their place. In place before what comes
+        // next is, so the next run's can't be overwritten by these.
+        self.lock().watching = regs;
+        let me = self.clone();
+        let run = Mutex::new(Some(run));
+        let next = any.on_cancel(move || {
+            let Some(run) = run.lock().unwrap_or_else(|e| e.into_inner()).take() else {
+                return;
+            };
+            let r = me.clone();
+            r.scope
+                .spawn_sized("plugin-supervise", rush_sys::threads::MEDIUM, move || {
+                    let res = r.end(run);
+                    r.supervise_from(backoff, Some((began, res)));
+                });
+        });
+        // If it has run already, this goes with the next run's: harmless.
+        self.lock().watching.push(next);
+    }
+
+    /// Ends what's left of a run whose plugin exited, closed its channel
+    /// or was stopped: Ok when it exited as it should, else why not.
+    fn end(&self, run: Running) -> Result<(), String> {
+        let res = if run.exited.err().is_none() {
+            kill(run.pid, &run.exited);
             if self.quit.err().is_some() {
-                return Err("stopped".into());
+                Err("stopped".to_string())
+            } else {
+                exit_res(&run.wait_err)
             }
+        } else {
+            exit_res(&run.wait_err)
+        };
+        self.down(&run.conn);
+        if let Some(px) = run.proxy {
+            px.close();
         }
-        let e = wait_err.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        if e.is_empty() { Ok(()) } else { Err(e) }
+        res
     }
 
     /// Forgets a run that ended: its connection, what it followed, and
@@ -743,15 +830,16 @@ fn spawn_err(cmd: &std::process::Command, e: &std::io::Error) -> String {
     )
 }
 
-/// Waits for child on a thread of its own: the Ctx returned is done when
-/// it has exited, and the string then says how, as Go's cmd.Wait does
-/// ("" when it exited 0).
-fn wait_for(mut child: Child, scope: &Scope) -> (Ctx, Arc<Mutex<String>>) {
+/// Waits for child on the one thread that waits for every plugin
+/// (rush_sys::reap, Rust-only: Go's cmd.Wait has a goroutine each): the
+/// Ctx returned is done when it has exited, and the string then says how,
+/// as Go's cmd.Wait does ("" when it exited 0).
+fn wait_for(child: Child) -> (Ctx, Arc<Mutex<String>>) {
     let (exited, done) = Ctx::background().with_cancel();
     let err = Arc::new(Mutex::new(String::new()));
     let e = err.clone();
-    scope.spawn("plugin-wait", move || {
-        let msg = match child.wait() {
+    rush_sys::reap::on_exit(child, move |st| {
+        let msg = match st {
             Ok(st) => exit_text(st),
             Err(err) => err.to_string(),
         };

@@ -120,9 +120,8 @@ pub fn on_exit(child: Child, then: impl FnOnce(io::Result<ExitStatus>) + Send + 
         };
         match child.try_wait() {
             Ok(Some(st)) => {
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-                    then(Ok(st))
-                }));
+                let _ =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || then(Ok(st))));
             }
             _ => wait_on_thread(child, then),
         }

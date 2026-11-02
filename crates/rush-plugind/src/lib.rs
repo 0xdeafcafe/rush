@@ -81,15 +81,20 @@ impl Scope {
         }
     }
 
-    /// Starts a thread that sees what this one does.
+    /// Starts a thread that sees what this one does, with a stack of
+    /// rush_sys::threads::MEDIUM: the broker's threads parse, answer and
+    /// log, but none recurses deeply.
     pub(crate) fn spawn(&self, name: &str, f: impl FnOnce() + Send + 'static) {
+        self.spawn_sized(name, rush_sys::threads::MEDIUM, f);
+    }
+
+    /// spawn, with a stack of stack bytes.
+    pub(crate) fn spawn_sized(&self, name: &str, stack: usize, f: impl FnOnce() + Send + 'static) {
         let s = self.clone();
-        let _ = std::thread::Builder::new()
-            .name(name.into())
-            .spawn(move || {
-                s.enter();
-                f()
-            });
+        let _ = rush_sys::threads::spawn_sized(name, stack, move || {
+            s.enter();
+            f()
+        });
     }
 }
 
