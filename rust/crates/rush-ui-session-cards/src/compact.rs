@@ -113,7 +113,8 @@ pub fn open_compact(m: &mut Model, key: &str) -> Out {
         return Out::Draw;
     }
     m.open_sheet(Box::new(s));
-    let all = m.reg.installed_all();
+    // Plugins' models too: they sum up what fits them.
+    let all = m.reg.installed_with_helpers();
     let h = crate::host::hosts(m);
     let k = key.to_string();
     m.later(

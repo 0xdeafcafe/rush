@@ -141,6 +141,14 @@ Plugins are asked in name order, each seeing the text as the ones before left it
 
 `{"service": "cleanup.report"}`: rush or another plugin asked for a service in your `provides`. Answer within 45 seconds with the service's shape. `cleanup.report` is `{"title": "Haven", "report": "what you found, as text for an agent", "rules": "- what an agent may do with it, and must never do"}`; rush's cleanup agent reads every answer. A service you don't answer, answer with `-32601`.
 
+### `models.list` (request) — for a plugin with `models`
+
+`{}`: what models you offer for rush's small jobs (session titles, feed summaries, quick ask, memory notes). Answer `{"models": [{"name": "on-device", "label": "Apple on-device model", "contextTokens": 4096, "available": true, "why": ""}]}` within 3 seconds, or you're left out of the list this time. `name` is what `models.ask` calls it; `label` is what rush shows; `contextTokens` is how much it holds, prompt and answer together. A model that can't answer now is `"available": false`, with `why` saying why in a few plain words ("Apple Intelligence is off"): rush doesn't ask it, and `#compact` shows the reason. rush keeps the list for a minute.
+
+### `models.ask` (request) — for a plugin with `models`
+
+`{"model": "on-device", "system": "You name coding sessions. …", "prompt": "<message>\n…\n</message>"}`: answer `{"text": "…"}` within 60 seconds. Fail with an error when you can't; when the prompt is too big for the model, say so with a message containing `too small` (`"the input is too big: the model's context is too small"`). Any failure is no harm: rush asks Claude's cheapest model, or Ollama's, instead.
+
 ## plugin → rush
 
 Each call is checked against the approved manifest. A refused call gets error **`-32001`** with a message saying why. Session ids are short strings like `a1b2c3d4`.

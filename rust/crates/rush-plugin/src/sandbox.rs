@@ -10,7 +10,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::gopath;
-use crate::manifest::{PROTO_RUSH, eval_symlinks, expand_home};
+use crate::manifest::{PROTO_RUSH, SYSTEM_APPLE_INTELLIGENCE, eval_symlinks, expand_home};
 use crate::plugin::Plugin;
 
 const ERR_NO_SANDBOX: &str =
@@ -218,6 +218,9 @@ impl Launch {
                 quote(&format!("localhost:{}", self.proxy_port))
             );
         }
+        // Its HOME is its data folder: the preferences the system's
+        // services read are under yours, rush's own HOME.
+        b += &system_rules(&self.plugin.system, &resolved(&expand_home("~")));
         Ok(b)
     }
 
@@ -341,6 +344,40 @@ fn python_app(prog: &str) -> Option<String> {
     std::fs::metadata(&app).is_ok().then_some(app)
 }
 
+/// The sandbox rules for the groups of system services a manifest names
+/// (see manifest::SYSTEMS), home being your real home. A name rush
+/// doesn't know adds nothing: the manifest was refused for it already.
+pub(crate) fn system_rules(system: &[String], home: &str) -> String {
+    let mut b = String::new();
+    for s in system {
+        if s == SYSTEM_APPLE_INTELLIGENCE {
+            // What FoundationModels needs to say it's available and
+            // answer: its model manager, the preferences daemons, and the
+            // eligibility and per-machine preferences they read (found
+            // with sandbox-exec on macOS 27).
+            b += "(allow ipc-posix-shm*)\n";
+            b += "(allow mach-lookup (global-name \"com.apple.modelmanager\") (global-name \"com.apple.cfprefsd.agent\") (global-name \"com.apple.cfprefsd.daemon\"))\n";
+            b += &format!(
+                "(allow file-read* (subpath \"/private/var/db/eligibilityd\") (regex #\"^{}/Library/Preferences/ByHost/\\.GlobalPreferences\\.\"))\n",
+                regex_escape(home)
+            );
+        }
+    }
+    b
+}
+
+/// s matched literally in a sandbox regex.
+fn regex_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if "\\.^$|?*+()[]{}".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// s as a sandbox profile string.
 pub(crate) fn quote(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
@@ -413,6 +450,53 @@ mod tests {
             libc::close(fds[1]);
         }
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "closed");
+    }
+
+    #[test]
+    fn apple_intelligence_rules() {
+        let got = system_rules(&[SYSTEM_APPLE_INTELLIGENCE.to_string()], "/Users/a.b (me)");
+        let want = r##"(allow ipc-posix-shm*)
+(allow mach-lookup (global-name "com.apple.modelmanager") (global-name "com.apple.cfprefsd.agent") (global-name "com.apple.cfprefsd.daemon"))
+(allow file-read* (subpath "/private/var/db/eligibilityd") (regex #"^/Users/a\.b \(me\)/Library/Preferences/ByHost/\.GlobalPreferences\."))
+"##;
+        assert_eq!(got, want);
+        assert_eq!(
+            system_rules(&[], "/Users/me"),
+            "",
+            "nothing asked, nothing added"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn profile_reaches_apple_intelligence_only_when_asked() {
+        let _h = Home::new();
+        let mut m = manifest("ai", "/bin/sh");
+        let plain = load(&install_plugin(&m, &[])).unwrap();
+        let prof = Launch {
+            plugin: plain,
+            proxy_port: 0,
+        }
+        .profile()
+        .unwrap();
+        assert!(!prof.contains("com.apple.modelmanager"), "{prof}");
+        m = manifest("ai2", "/bin/sh");
+        m.system = vec![SYSTEM_APPLE_INTELLIGENCE.into()];
+        let p = load(&install_plugin(&m, &[])).unwrap();
+        let prof = Launch {
+            plugin: p,
+            proxy_port: 0,
+        }
+        .profile()
+        .unwrap();
+        assert!(
+            prof.contains("(global-name \"com.apple.modelmanager\")"),
+            "{prof}"
+        );
+        assert!(
+            prof.contains("/Library/Preferences/ByHost/\\.GlobalPreferences\\."),
+            "{prof}"
+        );
     }
 
     #[test]

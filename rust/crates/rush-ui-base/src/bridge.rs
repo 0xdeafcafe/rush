@@ -27,6 +27,11 @@ pub fn sync(m: &mut Model) {
 /// Registers every adapter of reg with state's list.
 pub fn tell(reg: &Registry) {
     for a in reg.all().iter() {
+        // A helper for rush's small jobs isn't an agent: no profile names
+        // it, nor falls back to it.
+        if a.helper() {
+            continue;
+        }
         let k = a.kind();
         let ks = k.as_str();
         let choices = a.chooser().map(|c| {

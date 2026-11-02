@@ -146,6 +146,15 @@ pub struct Manifest {
     /// The services it may ask other plugins for.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub uses: Vec<String>,
+    /// It offers language models for rush's own small jobs (session
+    /// titles, feed summaries, quick ask, memory), answering models.list
+    /// and models.ask.
+    #[serde(skip_serializing_if = "is_false")]
+    pub models: bool,
+    /// Named groups of the system's services its sandbox may reach: see
+    /// SYSTEMS.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub system: Vec<String>,
 }
 
 /// Requires gates whether a plugin can run here. Empty fields don't
@@ -269,6 +278,8 @@ pub(crate) const MANIFEST_SHAPE: Shape = Shape::Struct(
         ("builtFrom", ANY),
         ("provides", ANY),
         ("uses", ANY),
+        ("models", ANY),
+        ("system", ANY),
     ],
 );
 
@@ -488,6 +499,12 @@ impl Manifest {
         self.validate_category()?;
         self.requires.validate()?;
         self.validate_services()?;
+        self.validate_system()?;
+        if self.models && self.proto() != PROTO_RUSH {
+            return Err(
+                "an MCP plugin cannot offer models: it has no way to answer for them".into(),
+            );
+        }
         if self.prompt.len() > MAX_PROMPT {
             return Err(format!("prompt is over {MAX_PROMPT} bytes"));
         }
@@ -523,6 +540,20 @@ impl Manifest {
         Ok(())
     }
 
+    fn validate_system(&self) -> Result<(), String> {
+        for s in &self.system {
+            if system_named(s).is_none() {
+                let names: Vec<&str> = SYSTEMS.iter().map(|x| x.name).collect();
+                return Err(format!(
+                    "system {}: use one of {}",
+                    go_q(s),
+                    names.join(", ")
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn validate_category(&self) -> Result<(), String> {
         if self.category.is_empty() || CATEGORIES.iter().any(|c| c.id == self.category) {
             return Ok(());
@@ -534,6 +565,30 @@ impl Manifest {
             ids.join(", ")
         ))
     }
+}
+
+/// A named group of the system's services a plugin's sandbox may reach,
+/// on top of what every plugin gets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct System {
+    /// What plugin.json's "system" calls it.
+    pub name: &'static str,
+    /// What reaching it allows, in plain words, for the approval text.
+    pub allows: &'static str,
+}
+
+/// Apple Intelligence's on-device model (FoundationModels), on macOS.
+pub const SYSTEM_APPLE_INTELLIGENCE: &str = "apple-intelligence";
+
+/// Every group of system services a manifest may name.
+pub const SYSTEMS: [System; 1] = [System {
+    name: SYSTEM_APPLE_INTELLIGENCE,
+    allows: "uses Apple Intelligence's on-device model",
+}];
+
+/// The group of system services called name, if rush knows it.
+pub fn system_named(name: &str) -> Option<&'static System> {
+    SYSTEMS.iter().find(|s| s.name == name)
 }
 
 /// The OS rush runs on, as Go's runtime.GOOS names it.
@@ -784,6 +839,25 @@ mod tests {
         type Edit = fn(&mut Manifest);
         let cases: Vec<(&str, Edit, &str)> = vec![
             ("minimal", |_| {}, ""),
+            ("models", |m| m.models = true, ""),
+            (
+                "mcp with models",
+                |m| {
+                    m.protocol = PROTO_MCP.into();
+                    m.models = true;
+                },
+                "cannot offer models",
+            ),
+            (
+                "known system",
+                |m| m.system = vec![SYSTEM_APPLE_INTELLIGENCE.into()],
+                "",
+            ),
+            (
+                "unknown system",
+                |m| m.system = vec!["camera".into()],
+                r#"system "camera": use one of apple-intelligence"#,
+            ),
             ("bad name", |m| m.name = "P!".into(), "name"),
             ("no command", |m| m.command = vec![], "command is empty"),
             (

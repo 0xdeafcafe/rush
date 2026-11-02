@@ -170,27 +170,9 @@ pub fn ask_cheap(
     prompt: &str,
     prefer: &str,
 ) -> Result<(String, String), String> {
-    for k in ["claude", "ollama"] {
-        let Some(a) = reg.get(k) else { continue };
-        let Some(sm) = a.summarizer() else { continue };
-        if !reg.installed(k) {
-            continue;
-        }
-        let Ok(ms) = sm.summary_models() else {
-            continue;
-        };
-        let Some(first) = ms.first() else { continue };
-        let pick = ms
-            .iter()
-            .find(|x| !prefer.is_empty() && x.contains(prefer))
-            .unwrap_or(first)
-            .clone();
-        let out = sm
-            .summarize(&pick, system, prompt)
-            .map_err(|e| e.to_string())?;
-        return Ok((pick, out));
-    }
-    Err("no model to ask: it runs on Claude Code or Ollama".into())
+    // A plugin's model first (not for Sonnet), then Claude's, then
+    // Ollama's, each failure handing on to the next.
+    rush_core::adapter::ask_cheap(reg, system, prompt, prefer).map_err(|e| e.to_string())
 }
 
 /// The guide's answer to prompt: with the guide, else, for a local model
