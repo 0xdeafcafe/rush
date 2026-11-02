@@ -40,7 +40,18 @@ struct SessionRead {
 struct PastListing {
     at: Ms,
     files: Vec<PastFile>,
+    /// Counts the listings that found something new, gone or changed.
+    ver: u64,
+    /// The last that found a conversation gone.
+    gone_at: u64,
+    /// When each file was last found new or changed, by ver, in files'
+    /// order.
+    vers: Vec<u64>,
 }
+
+/// A transcript to read: its path, time and size, and whether it was a
+/// conversation when last read.
+type Unread = (PathBuf, Ms, u64, bool);
 
 /// One transcript in a projects folder, read again only when it changes.
 #[derive(Clone, Debug)]
@@ -169,21 +180,26 @@ impl Discovery {
             .is_some_and(|ls| now - ls.at < PAST_EVERY);
         if !fresh {
             let prev = self.past.remove(&root).unwrap_or_default();
-            let mut old: HashMap<PathBuf, PastFile> = prev
+            let ver = prev.ver + 1;
+            let mut old: HashMap<PathBuf, (PastFile, u64)> = prev
                 .files
                 .into_iter()
-                .map(|f| (f.path.clone(), f))
+                .zip(prev.vers)
+                .map(|(f, v)| (f.path.clone(), (f, v)))
                 .collect();
             let mut next = PastListing {
                 at: now,
                 files: Vec::with_capacity(old.len()),
+                ver,
+                gone_at: prev.gone_at,
+                vers: Vec::with_capacity(old.len()),
             };
             let mut projects: Vec<_> = std::fs::read_dir(&root)
                 .map(|r| r.flatten().collect())
                 .unwrap_or_default();
             projects.sort_by_key(|e| e.file_name());
             // Each transcript changed is read after, side by side.
-            let mut found: Vec<Result<PastFile, (PathBuf, Ms, u64)>> = Vec::new();
+            let mut found: Vec<Result<(PastFile, u64), Unread>> = Vec::new();
             for pd in projects {
                 if !pd.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                     continue;
@@ -205,20 +221,34 @@ impl Discovery {
                     let path = e.path();
                     let modified = m.modified().map(ms_of).unwrap_or(0);
                     found.push(match old.remove(&path) {
-                        Some(f) if f.modified == modified && f.size == m.len() => Ok(f),
-                        _ => Err((path, modified, m.len())),
+                        Some((f, v)) if f.modified == modified && f.size == m.len() => Ok((f, v)),
+                        was => Err((
+                            path,
+                            modified,
+                            m.len(),
+                            was.is_some_and(|(f, _)| f.convo.is_some()),
+                        )),
                     });
                 }
             }
-            next.files = rush_core::par::map_with(found, Vec::new, |buf, f| match f {
+            let read = rush_core::par::map_with(found, Vec::new, |buf, f| match f {
                 Ok(f) => f,
-                Err((path, modified, size)) => PastFile {
-                    convo: read_convo(&path, buf),
-                    path,
-                    modified,
-                    size,
-                },
+                Err((path, modified, size, was)) => {
+                    let f = PastFile {
+                        convo: read_convo(&path, buf),
+                        path,
+                        modified,
+                        size,
+                    };
+                    // Only a conversation, or one that was, is a row.
+                    let v = if was || f.convo.is_some() { ver } else { 0 };
+                    (f, v)
+                }
             });
+            (next.files, next.vers) = read.into_iter().unzip();
+            if old.values().any(|(f, _)| f.convo.is_some()) {
+                next.gone_at = ver;
+            }
             self.past.insert(root.clone(), next);
         }
         self.past
@@ -226,6 +256,38 @@ impl Discovery {
             .into_iter()
             .flat_map(|ls| ls.files.iter())
             .filter(|f| f.convo.is_some())
+    }
+
+    /// The listing's number now, listing again when `past` would, with the
+    /// conversations it lists differently since the listing numbered since
+    /// (new, or written to); those None when one has gone since, or since
+    /// is no listing it made.
+    pub fn past_changes(
+        &mut self,
+        acct: &Account,
+        now: Ms,
+        since: u64,
+    ) -> Option<(u64, Option<Vec<String>>)> {
+        let _ = self.past(acct, now).next();
+        let ls = self.past.get(&acct.projects_dir())?;
+        if ls.gone_at > since || since > ls.ver {
+            return Some((ls.ver, None));
+        }
+        let ids = ls
+            .files
+            .iter()
+            .zip(&ls.vers)
+            .filter(|&(_, &v)| v > since)
+            .map(|(f, _)| match &f.convo {
+                Some(c) => c.session_id.clone(),
+                None => f
+                    .path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            })
+            .collect();
+        Some((ls.ver, Some(ids)))
     }
 }
 
@@ -296,5 +358,51 @@ mod tests {
         std::fs::remove_dir_all(&jd).unwrap();
         assert!(disc.jobs(&acct, now + 2).is_empty());
         assert!(disc.jobs.is_empty());
+    }
+
+    // A listing says which conversations are new or written to since an
+    // earlier one; with one gone since, it can't.
+    #[test]
+    fn past_changes_since_a_listing() {
+        let d = TempDir::new("pastchanges");
+        let acct = Account::at("claude", &d.0);
+        let proj = d.0.join("projects").join("-r");
+        std::fs::create_dir_all(&proj).unwrap();
+        let line = r#"{"type":"user","cwd":"/r","timestamp":"2026-09-29T10:00:00Z","uuid":"u1","message":{"role":"user","content":"fix the build"}}"#;
+        let write = |sid: &str, n: usize| {
+            std::fs::write(
+                proj.join(format!("{sid}.jsonl")),
+                format!("{line}\n").repeat(n),
+            )
+            .unwrap()
+        };
+        write("aaaaaaaa-one", 1);
+        write("bbbbbbbb-two", 1);
+        let mut disc = Discovery::new();
+        let now = rush_core::time::now();
+        let (v, ids) = disc.past_changes(&acct, now, 0).unwrap();
+        let mut ids = ids.unwrap();
+        ids.sort();
+        assert_eq!(ids, ["aaaaaaaa-one", "bbbbbbbb-two"]);
+        // Nothing since: none.
+        assert_eq!(
+            disc.past_changes(&acct, now + 1, v),
+            Some((v, Some(vec![])))
+        );
+        // One written to, listed again: that one.
+        write("bbbbbbbb-two", 2);
+        disc.expire_past(&acct);
+        let (v2, ids) = disc.past_changes(&acct, now + 2, v).unwrap();
+        assert_eq!(ids.unwrap(), ["bbbbbbbb-two"]);
+        assert!(v2 > v);
+        // Listed again with nothing new: nothing since v2.
+        disc.expire_past(&acct);
+        let (v3, ids) = disc.past_changes(&acct, now + 3, v2).unwrap();
+        assert_eq!(ids.unwrap(), Vec::<String>::new());
+        // One gone: it can't say which.
+        std::fs::remove_file(proj.join("aaaaaaaa-one.jsonl")).unwrap();
+        disc.expire_past(&acct);
+        let (v4, ids) = disc.past_changes(&acct, now + 4, v3).unwrap();
+        assert!(v4 > v3 && ids.is_none());
     }
 }

@@ -42,6 +42,16 @@ pub trait Discoverer {
     /// the adapter keeps from earlier readings of those paths is read again
     /// at the next, however lately it was read.
     fn changed(&self, _p: &Profile, _paths: Option<&[std::path::PathBuf]>) {}
+    /// The number of `past(p)`'s listing now (it lists again when `past`
+    /// would), with the ids of the sessions it lists differently since
+    /// the listing numbered since: new, or written to. A list that reads
+    /// again only the sessions whose files changed keeps the other past
+    /// ones while none of theirs is among them. The ids are None when it
+    /// can't say (one has gone since); the whole is None when it can't
+    /// number its listings. Rust-only.
+    fn past_changes(&self, _p: &Profile, _since: u64) -> Option<(u64, Option<Vec<String>>)> {
+        None
+    }
 }
 
 /// Runs a session headless, for rush to draw.

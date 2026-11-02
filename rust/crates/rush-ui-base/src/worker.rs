@@ -153,9 +153,18 @@ pub struct Discovery {
     hosted: Arc<Vec<HostInfo>>,
     /// The transcripts the last reading's rows price from, with each
     /// one's kind: the next priced reading scans these before it loads,
-    /// as Go scans the last snapshot's (model.go:627 scan).
-    targets: Option<Vec<(String, rush_core::adapter::SpendTarget)>>,
+    /// as Go scans the last snapshot's (model.go:627 scan). Those of the
+    /// rows a reading of rush's sessions alone keeps, and the rest.
+    targets: Option<(Targets, Targets)>,
+    /// Each live row's preview, with its transcript's size and time when
+    /// read: read again only when those change.
+    previews: HashMap<String, (String, u64, std::time::SystemTime, Preview)>,
+    /// The last reading read only rush's sessions: nothing new to watch.
+    partial: bool,
 }
+
+/// Transcripts to price, each with its agent's kind.
+type Targets = Vec<(String, rush_core::adapter::SpendTarget)>;
 
 impl Default for Discovery {
     fn default() -> Self {
@@ -175,6 +184,8 @@ impl Discovery {
             roots: HashMap::new(),
             hosted: Arc::default(),
             targets: None,
+            previews: HashMap::new(),
+            partial: false,
         }
     }
 
@@ -185,6 +196,8 @@ impl Discovery {
             roots: HashMap::new(),
             hosted: Arc::default(),
             targets: None,
+            previews: HashMap::new(),
+            partial: false,
         }
     }
 
@@ -192,23 +205,37 @@ impl Discovery {
     /// reading had are scanned before one load; only rows new to this one
     /// (or changed) are scanned after it, and read again if their spend
     /// moved: one load a reading, not two, every row as priced as before.
+    /// A reading that keeps the rows that don't run (Loader::incremental)
+    /// prices only the others first: a kept row's transcript written to
+    /// makes the reading a whole one, which prices them all.
     pub fn load(&mut self, now: Ms, price: bool) -> Fleet {
         let prev = self.targets.take().filter(|_| price);
-        if let Some(t) = &prev {
-            self.loader.scan_targets(t);
+        let keeping = self.loader.keeping(now);
+        if let Some((kept, rest)) = &prev {
+            if !keeping {
+                self.loader.scan_targets(kept);
+            }
+            self.loader.scan_targets(rest);
         }
         let mut snap = self.loader.load(now);
+        if keeping
+            && !snap.partial
+            && let Some((kept, _)) = &prev
+            && self.loader.scan_targets(kept) > 0
+        {
+            snap = self.loader.load(now);
+        }
         if price {
-            let mut fresh = Loader::kind_targets(&snap.agents);
-            if let Some(t) = &prev {
-                let had: HashSet<&(String, rush_core::adapter::SpendTarget)> = t.iter().collect();
-                fresh.retain(|x| !had.contains(x));
-            }
-            if !fresh.is_empty() && self.loader.scan_targets(&fresh) > 0 {
+            let (all, fresh) = self.targets_of(&snap, prev);
+            let reread = !fresh.is_empty() && self.loader.scan_targets(&fresh) > 0;
+            self.targets = Some(all);
+            if reread {
                 snap = self.loader.load(now);
+                let (all, _) = self.targets_of(&snap, None);
+                self.targets = Some(all);
             }
         }
-        self.targets = Some(Loader::kind_targets(&snap.agents));
+        self.partial = snap.partial;
         let agents = snap.agents;
         self.hosted = snap.hosted;
         let roots = agents
@@ -226,16 +253,29 @@ impl Discovery {
                     .clone()
             })
             .collect();
-        let previews = agents
+        let mut previews = HashMap::new();
+        for a in agents
             .iter()
             .filter(|a| a.job.live() && !a.job.transcript_path.is_empty())
-            .map(|a| {
-                let p = self
-                    .reg
-                    .read_preview(a.kind.as_str(), &a.job.transcript_path, LIVE_WINDOW);
-                (a.key.clone(), p)
-            })
-            .collect();
+        {
+            let path = &a.job.transcript_path;
+            let (len, at) = std::fs::metadata(path)
+                .map(|m| (m.len(), m.modified().unwrap_or(std::time::UNIX_EPOCH)))
+                .unwrap_or((0, std::time::UNIX_EPOCH));
+            let p = match self.previews.get(&a.key) {
+                Some((p0, l0, t0, p)) if p0 == path && *l0 == len && *t0 == at && len > 0 => {
+                    p.clone()
+                }
+                _ => {
+                    let p = self.reg.read_preview(a.kind.as_str(), path, LIVE_WINDOW);
+                    self.previews
+                        .insert(a.key.clone(), (path.clone(), len, at, p.clone()));
+                    p
+                }
+            };
+            previews.insert(a.key.clone(), p);
+        }
+        self.previews.retain(|k, _| previews.contains_key(k));
         Fleet {
             agents,
             roots,
@@ -243,6 +283,47 @@ impl Discovery {
             priced: price,
             accounts: snap.accounts,
         }
+    }
+
+    /// What snap's rows price from, as the rows a reading of rush's
+    /// sessions alone keeps and the rest; and those prev (the last
+    /// reading's) hadn't. A reading that kept rows takes theirs from prev.
+    fn targets_of(
+        &self,
+        snap: &rush_fleet::Snapshot,
+        prev: Option<(Targets, Targets)>,
+    ) -> ((Targets, Targets), Targets) {
+        let kept = |a: &Agent| self.loader.kept(&a.key);
+        let had_of = |t: &Targets| -> HashSet<(String, rush_core::adapter::SpendTarget)> {
+            t.iter().cloned().collect()
+        };
+        if snap.partial
+            && let Some((pk, pr)) = prev
+        {
+            // The rows kept are priced as the whole reading's were.
+            let rest = Loader::kind_targets_of(snap.agents.iter().filter(|a| !kept(a)));
+            let had: HashSet<&(String, rush_core::adapter::SpendTarget)> = pr.iter().collect();
+            let fresh = rest.iter().filter(|x| !had.contains(x)).cloned().collect();
+            return ((pk, rest), fresh);
+        }
+        let (k, r): (Vec<&Agent>, Vec<&Agent>) = snap.agents.iter().partition(|a| kept(a));
+        let (k, r) = (
+            Loader::kind_targets_of(k.into_iter()),
+            Loader::kind_targets_of(r.into_iter()),
+        );
+        let fresh = match &prev {
+            Some((pk, pr)) => {
+                let had = had_of(pk);
+                let had_r = had_of(pr);
+                k.iter()
+                    .chain(&r)
+                    .filter(|x| !had.contains(*x) && !had_r.contains(*x))
+                    .cloned()
+                    .collect()
+            }
+            None => k.iter().chain(&r).cloned().collect(),
+        };
+        ((k, r), fresh)
     }
 
     /// The folders and files whose changes mean a new reading (what the
@@ -260,9 +341,20 @@ impl Discovery {
     /// Has w watch what the last reading read. What it didn't watch yet
     /// may have changed since it was read: the next load looks again.
     fn watch(&mut self, w: &Watcher) {
+        if self.partial {
+            return; // no session, job or folder new since the last
+        }
         let paths = self.watched();
-        let new: Vec<PathBuf> = paths.iter().filter(|p| !w.watching(p)).cloned().collect();
+        let was: Vec<bool> = paths.iter().map(|p| w.watching(p)).collect();
         w.watch(&paths);
+        // Watched only now: read before it was. One not there isn't
+        // watched yet; it's told once it appears.
+        let new: Vec<PathBuf> = paths
+            .iter()
+            .zip(was)
+            .filter(|(p, was)| !was && w.watching(p))
+            .map(|(p, _)| p.clone())
+            .collect();
         self.loader.told(Some(&new));
     }
 
@@ -454,6 +546,9 @@ pub fn spawn_discovery_with(
             // at again.
             let w = Arc::new(Watcher::many());
             d.loader.watch_shared(w.clone());
+            // A reading while agents work makes rush's sessions again and
+            // keeps the rest, while nothing else changed.
+            d.loader.incremental(true);
             let first = d.load(now(), false);
             // Watched before each reading after, so a change during it
             // still wakes; the first says what there is to watch.

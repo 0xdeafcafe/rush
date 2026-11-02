@@ -356,6 +356,7 @@ pub fn run(
     read_ops(input, asked.clone(), hosts.clone(), tx.clone());
     // Many: every session's folder, through one stream on their folder.
     let watcher = Arc::new(Watcher::many());
+    source.share(watcher.clone());
     let stop = Arc::new(Stop::new()?);
     watch_files(watcher.clone(), stop.clone(), tx.clone());
     let end = EndWatch(stop.clone());
@@ -553,7 +554,7 @@ impl Source for Fixed {
     fn snapshot(&mut self, _: rush_core::time::Ms) -> Snapshot {
         self.0.clone()
     }
-    fn watched(&self) -> Vec<PathBuf> {
+    fn watched(&mut self) -> Vec<PathBuf> {
         vec![]
     }
     fn changed(&mut self, _: Option<&[PathBuf]>) {}

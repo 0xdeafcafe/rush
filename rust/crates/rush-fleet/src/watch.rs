@@ -23,11 +23,11 @@ pub(crate) struct Watching {
     /// The watcher is its caller's (watch_shared): the caller watches,
     /// waits and drains it, and tells the loader what changed (told);
     /// the loader only trusts what it says.
-    shared: bool,
+    pub(crate) shared: bool,
     /// What the caller told changed since the last load, and whether it
     /// couldn't tell.
-    told: HashSet<PathBuf>,
-    told_all: bool,
+    pub(crate) told: HashSet<PathBuf>,
+    pub(crate) told_all: bool,
     /// A full reading at least this often.
     every: Ms,
     /// The next load may reuse.
@@ -41,9 +41,9 @@ pub(crate) struct Watching {
     /// seq): a file watched and not changed since a cache looked at it
     /// needn't be looked at again.
     seq: u64,
-    chg: HashSet<PathBuf>,
+    pub(crate) chg: HashSet<PathBuf>,
     /// It can't tell what changed: look at everything.
-    all: bool,
+    pub(crate) all: bool,
     /// The load each path was last told changed in.
     touched: HashMap<PathBuf, u64>,
     /// The last load that couldn't tell.

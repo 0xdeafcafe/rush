@@ -1860,3 +1860,108 @@ fn subagent_tiles_order_to_the_nanosecond() {
     ];
     assert_eq!(ids(&runs), ["a", "b"]);
 }
+
+/// A Claude Code home with conversations in /work/app, each a line long.
+fn convo(reg: &Registry, p: &Profile, sid: &str, text: &str) -> String {
+    let tr = reg.transcript_path("claude", p, "/work/app", sid);
+    std::fs::create_dir_all(Path::new(&tr).parent().unwrap()).unwrap();
+    std::fs::write(
+        &tr,
+        format!(
+            "{{\"type\":\"user\",\"cwd\":\"/work/app\",\"timestamp\":\"2026-09-29T10:00:00Z\",\"uuid\":\"u1\",\"message\":{{\"role\":\"user\",\"content\":\"{text}\"}}}}\n"
+        ),
+    )
+    .unwrap();
+    tr
+}
+
+// While only rush's sessions change, a reading makes them again and keeps
+// every other row as the last whole reading made it: the same rows a
+// whole reading makes. A conversation no session has written to, a
+// session new, or a minute passing reads everything again.
+#[test]
+fn readings_keep_what_did_not_change() {
+    let d = tempfile::tempdir().unwrap();
+    let home = d.path().join("rush");
+    std::fs::create_dir_all(&home).unwrap();
+    rush_state::set_thread_dir(Some(home.canonicalize().unwrap()));
+    let (reg, p) = claude_reg(&d.path().join("claude"));
+    let past: Vec<String> = ["aaaaaaaa-1", "bbbbbbbb-2", "cccccccc-3"]
+        .iter()
+        .map(|sid| convo(&reg, &p, sid, &format!("past {sid}")))
+        .collect();
+    convo(&reg, &p, "dddddddd-live", "the session's");
+    let t = now();
+    let mut w = info("w1", "working", "/work/app", t);
+    w.kind = "claude".into();
+    w.session_id = "dddddddd-live".into();
+    let hosts = FakeHosts::default();
+    hosts.0.lock().unwrap().push(w.clone());
+    let mut l = Loader::new(reg.clone());
+    l.set_procs(Box::new(FakeProcs(Vec::new())));
+    l.set_hosts(Box::new(hosts.clone()));
+    l.watch_shared(Arc::new(rush_sys::fswait::Watcher::new()));
+    l.incremental(true);
+    let whole = l.load(t);
+    assert!(!whole.partial, "the first reading is a whole one");
+    assert_eq!(whole.agents.iter().filter(|a| a.past).count(), 3);
+    let folder = host_root().join("w1");
+
+    // The session's info rewritten: it's made again, the rest kept.
+    hosts.0.lock().unwrap()[0].detail = "reading files".into();
+    l.told(Some(std::slice::from_ref(&folder)));
+    let part = l.load(t + 1_000);
+    assert!(part.partial, "only a session changed: kept the rest");
+    let alone = {
+        let mut m = Loader::new(reg.clone());
+        m.set_procs(Box::new(FakeProcs(Vec::new())));
+        m.set_hosts(Box::new(hosts.clone()));
+        m.load(t + 1_000)
+    };
+    assert_eq!(
+        part.agents, alone.agents,
+        "a kept row isn't the whole reading's"
+    );
+    assert_eq!(part.accounts, alone.accounts);
+    let row = part.agents.iter().find(|a| a.rush).unwrap();
+    assert_eq!(row.job.detail, "reading files");
+
+    // The session's own conversation written to: still only it.
+    let live = reg.transcript_path("claude", &p, "/work/app", "dddddddd-live");
+    std::fs::write(&live, "{}\n{}\n").unwrap();
+    l.changed(Some(&[PathBuf::from(&live)]));
+    l.told(Some(std::slice::from_ref(&folder)));
+    assert!(
+        l.load(t + 2_000).partial,
+        "its own conversation isn't a past one"
+    );
+
+    // A past conversation written to: everything is read again.
+    std::fs::write(&past[1], "{}\n").unwrap();
+    let projects = Path::new(&past[1]).parent().unwrap().to_path_buf();
+    l.changed(Some(std::slice::from_ref(&projects)));
+    l.told(Some(std::slice::from_ref(&folder)));
+    assert!(!l.load(t + 3_000).partial, "a past conversation changed");
+
+    // A session new: everything.
+    let mut n = w.clone();
+    n.id = "w2".into();
+    n.session_id = "eeeeeeee-new".into();
+    hosts.0.lock().unwrap().push(n);
+    l.told(Some(&[host_root().join("w2")]));
+    let snap = l.load(t + 4_000);
+    assert!(!snap.partial, "a session new");
+    assert_eq!(snap.agents.iter().filter(|a| a.rush).count(), 2);
+
+    // Nothing but a minute: everything.
+    assert!(l.load(t + 5_000).partial);
+    assert!(
+        !l.load(t + 4_000 + partial::WHOLE_EVERY).partial,
+        "a minute passed"
+    );
+
+    // rush's state changed: everything.
+    l.told(Some(&[rush_state::dir()]));
+    assert!(!l.load(t + 4_000 + partial::WHOLE_EVERY + 1_000).partial);
+    rush_state::set_thread_dir(None);
+}

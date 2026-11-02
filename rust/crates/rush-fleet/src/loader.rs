@@ -106,6 +106,9 @@ pub struct Snapshot {
     pub table: Option<Arc<Table>>,
     /// Every rush session's info as this reading listed it.
     pub hosted: Arc<Vec<HostInfo>>,
+    /// Only rush's sessions were read again; every other row is the last
+    /// whole reading's (Loader::incremental).
+    pub partial: bool,
 }
 
 /// What was handed in since the last load began.
@@ -358,6 +361,18 @@ pub struct Loader {
     /// Each transcripts folder's subfolders, as listed when it was last
     /// modified.
     dirs: RefCell<HashMap<PathBuf, (SystemTime, Vec<PathBuf>)>>,
+    /// Readings after a whole one read only rush's sessions again while
+    /// nothing else changed (see partial.rs).
+    incremental: bool,
+    /// What the last whole reading left for those.
+    whole: Option<Box<partial::Whole>>,
+    /// The home profile's past listing the last whole reading saw, by its
+    /// number.
+    whole_past: Option<(String, u64)>,
+    /// The rows whose spend changed since the last reading.
+    spend_dirty: HashSet<String>,
+    /// What each adapter's live sessions were, as this reading read them.
+    live_read: Vec<Vec<partial::LiveSig>>,
 }
 
 impl Loader {
@@ -414,6 +429,11 @@ impl Loader {
             ask_inline: false,
             read: Vec::new(),
             dirs: RefCell::new(HashMap::new()),
+            incremental: false,
+            whole: None,
+            whole_past: None,
+            spend_dirty: HashSet::new(),
+            live_read: Vec::new(),
         }
     }
 
@@ -433,6 +453,7 @@ impl Loader {
 
     /// Reads rush's config and overlay from s from now on (LoadFrom).
     pub fn set_store(&mut self, s: Store) {
+        self.whole = None;
         self.store = s;
     }
 
@@ -513,9 +534,15 @@ impl Loader {
     /// scan_targets takes, kept between readings so the next scan needn't
     /// keep the rows.
     pub fn kind_targets(agents: &[Agent]) -> Vec<(String, SpendTarget)> {
-        Loader::targets(agents)
-            .into_iter()
-            .map(|(a, t)| (a.acct.kind.as_str().to_string(), t))
+        Loader::kind_targets_of(agents.iter())
+    }
+
+    /// kind_targets, of some rows.
+    pub fn kind_targets_of<'a>(
+        agents: impl Iterator<Item = &'a Agent>,
+    ) -> Vec<(String, SpendTarget)> {
+        agents
+            .filter_map(|a| Some((a.acct.kind.as_str().to_string(), Loader::target(a)?)))
             .collect()
     }
 
@@ -546,6 +573,7 @@ impl Loader {
         // Taken in at once: a scan is the loader's own.
         for (k, v) in got {
             self.spend.insert(k.clone(), v);
+            self.spend_dirty.insert(k.clone());
             *self.spend_ver.entry(k).or_default() += 1;
         }
         self.changed_since();
@@ -609,7 +637,11 @@ impl Loader {
         let inb = std::mem::take(&mut *self.handle.inbox.lock().unwrap_or_else(|e| e.into_inner()));
         for (k, v) in inb.spend {
             *self.spend_ver.entry(k.clone()).or_default() += 1;
+            self.spend_dirty.insert(k.clone());
             self.spend.insert(k, v);
+        }
+        if !inb.nudged.is_empty() {
+            self.whole = None; // a job row shows it: read them all
         }
         self.nudged.extend(inb.nudged);
         for (k, u) in inb.fetched {
@@ -721,6 +753,15 @@ impl Loader {
         if sample && let Some(snap) = self.reuse(now) {
             return snap;
         }
+        let whole = self.whole.take();
+        if sample
+            && let Some(w) = whole.filter(|_| !self.quick)
+            && let Some(snap) = self.load_part(now, w)
+        {
+            return snap;
+        }
+        self.spend_dirty.clear();
+        self.live_read.clear();
         self.began(now);
         let skip_past = self.handle.skip_past.load(Ordering::Relaxed);
         let mut snap = Snapshot {
@@ -764,6 +805,8 @@ impl Loader {
         // Conversations a row already stands for: the rest are past ones.
         let mut claimed: HashSet<String> = ours.clone();
         self.branches(&hosted, &mut claimed);
+        let claims = claimed.clone();
+        let mut whole = partial::Whole::default();
         self.sync_usage();
         let mut read = Vec::new();
         let home = self.home_profile();
@@ -789,10 +832,12 @@ impl Loader {
             // Its sessions, as its adapter finds them: background jobs,
             // then every session whose process is alive.
             let live = ad.discoverer().map(|d| d.live(p)).unwrap_or_default();
+            self.live_read.push(partial::sigs(&live));
             let (jobs, sessions): (Vec<Session>, Vec<Session>) =
                 live.into_iter().partition(|s| s.job.is_some());
             for ss in &sessions {
                 parents.insert(ss.pid);
+                whole.sess_pids.push(ss.pid);
             }
             let mut by_job: HashMap<&str, &Session> = HashMap::new();
             for ss in &sessions {
@@ -968,12 +1013,16 @@ impl Loader {
                 // The first reading: every row made, none kept yet.
                 self.look_ahead(p, &hosted);
             }
+            whole.at_hosted = snap.agents.len();
+            whole.av = Some(av.clone());
+            whole.profile = Some(p.clone());
             for info in hosted.iter().filter(|i| i.kind == p.kind.as_str()) {
                 let a = self.hosted_agent(p, info, tab.as_mut(), now);
                 count(&mut av, &a);
                 snap.agents.push(a);
             }
             read.push((ad.clone(), p.clone(), ids));
+            whole.at_past = snap.agents.len();
             if !skip_past {
                 // Past rows are kept from one reading to the next.
                 for a in self.past_agents(ad, p, &claimed, &mut seen, now) {
@@ -982,7 +1031,20 @@ impl Loader {
                     av.today += a.spend.today;
                     snap.agents.push(a);
                 }
+                let since = self
+                    .whole_past
+                    .as_ref()
+                    .filter(|(d, _)| *d == p.dir)
+                    .map_or(0, |(_, v)| *v);
+                whole.past_ver = ad
+                    .discoverer()
+                    .and_then(|d| d.past_changes(p, since))
+                    .map(|(v, _)| v);
+                if let Some(v) = whole.past_ver {
+                    self.whole_past = Some((p.dir.clone(), v));
+                }
             }
+            whole.at_after = snap.agents.len();
             snap.accounts.push(av);
         }
         // Other agents' rush sessions belong to no home folder: they're
@@ -1004,9 +1066,74 @@ impl Loader {
             skip_past,
             &mut read,
         );
+        let at_end = snap.agents.len();
         snap.agents.extend(others);
         self.finish_subs(&mut snap.agents);
         self.read = read;
+        if self.incremental && sample && !self.quick && home.is_some() {
+            // Kept as they are now, for the readings after that read only
+            // rush's sessions again (they're between).
+            let a = &snap.agents;
+            whole.before = a[..whole.at_hosted].to_vec();
+            whole.past = a[whole.at_past..whole.at_after].to_vec();
+            whole.others = a[at_end..].to_vec();
+            whole.ok = a[..whole.at_hosted]
+                .iter()
+                .chain(&a[whole.at_past..whole.at_after])
+                .chain(&a[at_end..])
+                .all(partial::keeps);
+            whole.at = now;
+            whole.skip_past = skip_past;
+            whole.priced = self.priced;
+            whole.hosted_ids = hosted.iter().map(|i| i.id.clone()).collect();
+            // rush's sessions asleep or stopped, as made: kept while their
+            // info holds.
+            let home_kind = whole
+                .profile
+                .as_ref()
+                .map(|p| p.kind.as_str())
+                .unwrap_or("");
+            let ours = hosted.iter().filter(|i| i.kind == home_kind);
+            let theirs = hosted.iter().filter(|i| i.kind != home_kind);
+            let rows = a[whole.at_hosted..whole.at_past]
+                .iter()
+                .zip(ours)
+                .chain(a[whole.at_after..at_end].iter().zip(theirs));
+            whole.idle = rows
+                .filter(|(_, i)| partial::idle(i))
+                .map(|(r, i)| (i.id.clone(), (i.clone(), r.clone())))
+                .collect();
+            whole.claims = claims;
+            whole.claimed = claimed;
+            whole.spawned = spawned.clone();
+            whole.live = std::mem::take(&mut self.live_read);
+            whole.kept = whole
+                .before
+                .iter()
+                .chain(&whole.past)
+                .chain(&whole.others)
+                .map(|a| a.key.clone())
+                .collect();
+            self.whole = Some(Box::new(whole));
+        }
+        self.tail(snap, tab, hosted, spawned, parents, now, sample)
+    }
+
+    /// What every reading does with its rows once they're made: those
+    /// sessions' shells ran folded into them, those hidden left out, the
+    /// logins and machine, each row's scratch, checkout, pull request and
+    /// compaction, newest first.
+    #[allow(clippy::too_many_arguments)]
+    fn tail(
+        &mut self,
+        mut snap: Snapshot,
+        mut tab: Option<Table>,
+        hosted: Arc<Vec<HostInfo>>,
+        spawned: Vec<(String, Pid)>,
+        mut parents: HashSet<Pid>,
+        now: Ms,
+        sample: bool,
+    ) -> Snapshot {
         // What each row's subagents were counted under is kept while the
         // row is read, folded into its parent's or not.
         let listed: HashSet<String> = snap.agents.iter().map(|a| a.key.clone()).collect();
@@ -1054,7 +1181,8 @@ impl Loader {
         }
         self.compactions(&mut snap.agents, &hosted, now);
         self.subs.retain(|k, _| listed.contains(k)); // a row no longer listed: its runs' reader goes
-        snap.agents.sort_by_key(|a| a.age(now));
+        // Each row's age worked out once, and the rows moved once.
+        snap.agents.sort_by_cached_key(|a| a.age(now));
         // Grown a row at a time and held until the next reading: only
         // what it uses.
         snap.agents.shrink_to_fit();
@@ -1932,7 +2060,9 @@ impl Loader {
                 continue;
             }
             for p in a.profiles() {
-                for s in d.live(&p) {
+                let live = d.live(&p);
+                self.live_read.push(partial::sigs(&live));
+                for s in live {
                     if s.id.len() < 8 || !s.id.is_char_boundary(8) || claimed.contains(&s.id) {
                         continue;
                     }
@@ -2447,6 +2577,8 @@ impl Loader {
         }
     }
 }
+
+mod partial;
 
 #[cfg(test)]
 mod tests;
