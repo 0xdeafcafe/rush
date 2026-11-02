@@ -22,7 +22,7 @@
 //! background from the start. The numbers are in DESIGN.md, "Subagents'
 //! cache".
 
-use crate::cachekeep::{LEAD, READ, max_bumps, penalty};
+use crate::cachekeep::{LEAD, READ, Settings, most_bumps, penalty};
 use crate::time::Ms;
 
 /// What one step-in costs beside the subagent's read of its context: its
@@ -71,9 +71,11 @@ pub enum Step {
     Let(&'static str),
 }
 
-/// Whether to step in for subagent x's cache at now. min_context is the
-/// smallest context worth it (cachekeep's Settings: 20k tokens).
-pub fn decide(min_context: i64, x: &Sub, now: Ms) -> Step {
+/// Whether to step in for subagent x's cache at now, as s says: its
+/// min_context, the smallest context worth it (20k tokens), and its
+/// max_bumps, the most step-ins (0: half a rewrite). Its other settings
+/// are the idle sessions'.
+pub fn decide(s: &Settings, x: &Sub, now: Ms) -> Step {
     if x.doing == Doing::Finished {
         return Step::Let("it has finished");
     }
@@ -96,10 +98,10 @@ pub fn decide(min_context: i64, x: &Sub, now: Ms) -> Step {
         Doing::Calling { call, .. } => call,
         Doing::Finished => unreachable!(),
     };
-    if x.context < min_context {
+    if x.context < s.min_context {
         return Step::Let("its context is too small to be worth it");
     }
-    if x.steps >= max_bumps(x.ttl) {
+    if x.steps >= most_bumps(s.max_bumps, x.ttl) {
         return Step::Let("its step-ins would cost more than half the rewrite");
     }
     let (step, lapse) = worth(x.ttl, x.context);
@@ -227,7 +229,47 @@ mod tests {
             ),
         ];
         for (name, x, want) in cases {
-            assert_eq!(&decide(20_000, x, T0), want, "{name}");
+            assert_eq!(&decide(&Settings::default(), x, T0), want, "{name}");
+        }
+    }
+
+    #[test]
+    fn as_set() {
+        let mv = Step::Move("tu1".into());
+        // min_context, max_bumps, the subagent: the step.
+        let cases: &[(i64, u32, Sub, Step)] = &[
+            (
+                10_000,
+                0,
+                sub(4 * MIN + 30_000, FIVE, 15_000, calling(true), 0),
+                mv.clone(),
+            ),
+            (
+                50_000,
+                0,
+                sub(4 * MIN + 30_000, FIVE, 40_000, calling(true), 0),
+                Step::Let("its context is too small to be worth it"),
+            ),
+            (
+                20_000,
+                2,
+                sub(4 * MIN + 30_000, FIVE, 100_000, calling(true), 2),
+                Step::Let("its step-ins would cost more than half the rewrite"),
+            ),
+            (
+                20_000,
+                9,
+                sub(4 * MIN + 30_000, FIVE, 100_000, calling(true), 5),
+                mv.clone(),
+            ),
+        ];
+        for (min, max, x, want) in cases {
+            let s = Settings {
+                min_context: *min,
+                max_bumps: *max,
+                ..Settings::default()
+            };
+            assert_eq!(&decide(&s, x, T0), want, "min {min}, max {max}");
         }
     }
 
@@ -239,7 +281,14 @@ mod tests {
         assert_eq!((step, lapse.round()), (11_000.0, 115_000.0));
         // A context so small the step-in's own words outweigh it.
         assert_eq!(
-            decide(0, &sub(4 * MIN + 30_000, FIVE, 800, calling(true), 0), T0),
+            decide(
+                &Settings {
+                    min_context: 0,
+                    ..Settings::default()
+                },
+                &sub(4 * MIN + 30_000, FIVE, 800, calling(true), 0),
+                T0
+            ),
             Step::Let("its step-ins would cost more than the rewrite")
         );
     }
