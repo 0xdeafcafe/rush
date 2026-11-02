@@ -425,7 +425,15 @@ pub fn check(m: &mut Model, force: bool) {
             if newer && u.newer.version.is_empty() {
                 u.newer = latest.clone();
             }
-            u.rush_new = latest;
+            u.rush_new = latest.clone();
+            // The header's notice reads the base's: what's found here
+            // shows there too.
+            if newer {
+                let b = m.kept::<crate::update::Update>();
+                if !b.updating && !b.rebuilt {
+                    b.newer = Some(latest);
+                }
+            }
             let n = count(m);
             let u = &mut m.kept::<State>().updates;
             if n > 0 && !u.said {

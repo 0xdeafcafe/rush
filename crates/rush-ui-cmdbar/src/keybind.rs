@@ -157,6 +157,9 @@ pub fn run_action(m: &mut Model, id: &str) -> Out {
             Out::Draw
         }
         "prompt.append" | "prompt.replace" => prompt_to_agent(m, id == "prompt.replace"),
+        // The header's notice of a newer rush: #update, which installs it
+        // and reloads onto it.
+        rush_ui_base::update::ACTION => rush_ui_base::update::run(m),
         // ctrl+] f: the list's filter, as alt+f opens it (keys.go:513,
         // listfilter.go:13); Go's runAction has no case for it yet.
         "list.filter" => {

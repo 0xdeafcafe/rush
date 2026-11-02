@@ -52,9 +52,11 @@ pub fn register(x: &mut Ext) {
         "one message to several agents: all, @a @b, or click to pick",
         broadcast::command,
     );
-    x.command("update", "the newest rush over this one", |m, _| {
-        m.install_update()
-    });
+    x.command(
+        "update",
+        "the newest rush over this one, then restart onto it",
+        |m, _| m.install_update(),
+    );
     x.command(
         "reload",
         "run the installed rush in this one's place · all for every window",

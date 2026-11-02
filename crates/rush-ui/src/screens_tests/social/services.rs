@@ -221,3 +221,110 @@ fn version_tags() {
             .ends_with("older than installed · #reload")
     );
 }
+
+/// The header's row with the notice of a newer rush on it, as text.
+fn notice_row(m: &mut Model) -> String {
+    m.header()
+        .iter()
+        .map(|l| l.plain())
+        .find(|t| t.contains("↑ "))
+        .unwrap_or_default()
+        .trim_end()
+        .to_string()
+}
+
+fn beta5() -> Release {
+    Release {
+        version: "0.1.0-beta.5".into(),
+        ..Release::default()
+    }
+}
+
+/// An install that runs rush-update's fake brew in prefix, as an update
+/// to beta.5 under Homebrew does.
+fn brew_install(prefix: &std::path::Path) -> rush_ui_base::update::InstallFn {
+    let brew = prefix.join("bin/brew");
+    std::sync::Arc::new(
+        move |h: &dyn rush_update::Host| -> Result<Release, rush_update::Error> {
+            rush_update::brew_upgrade(&brew, "0.1.0-beta.5", h)?;
+            Ok(beta5())
+        },
+    )
+}
+
+// A newer rush out shows in the header, with the key that updates; one
+// installed and not running, with the key that restarts onto it; a click
+// on it does what its key does.
+#[test]
+fn header_says_a_newer_rush() {
+    let mut m = crate::kit::model(120, 30);
+    assert_eq!(notice_row(&mut m), "", "nothing to say");
+    m.kept::<Update>().newer = Some(beta5());
+    let row = notice_row(&mut m);
+    assert!(
+        row.ends_with("↑ v0.1.0-beta.5 ready · alt+u update"),
+        "{row:?}"
+    );
+    {
+        let u = m.kept::<Update>();
+        u.rebuilt = true;
+        u.installed_version = "0.1.0-beta.5".into();
+    }
+    let row = notice_row(&mut m);
+    assert!(
+        row.ends_with("↑ v0.1.0-beta.5 installed · alt+u restart"),
+        "{row:?}"
+    );
+    m.kept::<Reload>().installed = Some(|| Ok(()));
+    let (y, from, to) = m.kept::<Update>().notice_at.expect("drawn");
+    assert!(!m.click_update(from - 1, y), "beside it");
+    assert!(m.reload_env().is_none());
+    assert!(m.click_update(to - 1, y));
+    assert!(m.reload_env().is_some(), "restarted onto it");
+}
+
+// The key runs brew (rush-update's fake one: its tap fetched, then the
+// upgrade), then this rush reloads onto what it installed.
+#[test]
+fn update_key_runs_brew_then_reloads() {
+    let mut m = crate::kit::model(120, 30);
+    let prefix = tempfile::tempdir().unwrap();
+    rush_update::testing::fake_brew(prefix.path(), 0, Some("0.1.0-beta.5"));
+    m.kept::<Update>().newer = Some(beta5());
+    m.kept::<Update>().install = Some(brew_install(prefix.path()));
+    m.kept::<Reload>().installed = Some(|| Ok(()));
+    m.press_key(&crate::frame::Press::of("alt+u").unwrap());
+    assert_eq!(
+        std::fs::read_to_string(prefix.path().join("ran")).unwrap(),
+        "update --quiet noauto=\nupgrade 0xdeafcafe/tap/rush noauto=1\n"
+    );
+    let u = m.kept::<Update>();
+    assert!(!u.updating && u.failed.is_empty(), "{}", u.failed);
+    assert!(u.rebuilt && u.newer.is_none());
+    assert!(m.reload_env().is_some(), "reloaded onto it");
+}
+
+// brew failing shows brew's error, under the box and in the header, and
+// changes nothing: no reload, the newer rush still offered.
+#[test]
+fn brew_failing_changes_nothing() {
+    let mut m = crate::kit::model(120, 30);
+    let prefix = tempfile::tempdir().unwrap();
+    rush_update::testing::fake_brew(prefix.path(), 1, None);
+    m.kept::<Update>().newer = Some(beta5());
+    m.kept::<Update>().install = Some(brew_install(prefix.path()));
+    m.kept::<Reload>().installed = Some(|| Ok(()));
+    m.press_key(&crate::frame::Press::of("alt+u").unwrap());
+    let (said, _, err) = m.flash.clone().unwrap();
+    assert!(err, "{said}");
+    assert_eq!(said, "update failed, nothing changed: Error: no bottle");
+    let u = m.kept::<Update>();
+    assert!(!u.updating && !u.rebuilt);
+    assert_eq!(u.newer, Some(beta5()));
+    assert!(m.reload_env().is_none(), "reloaded");
+    let row = notice_row(&mut m);
+    assert!(
+        row.ends_with("↑ update failed: Error: no bottle · alt+u again"),
+        "{row:?}"
+    );
+}

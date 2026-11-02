@@ -492,6 +492,7 @@ impl Model {
                     self.top_hover = h;
                     return Out::Draw;
                 }
+                MouseKind::Down(Button::Left) if self.click_update(x, y) => return Out::Draw,
                 MouseKind::Down(Button::Left) if self.click_tab(x, y) => return Out::Draw,
                 _ => {}
             }

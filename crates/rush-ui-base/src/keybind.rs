@@ -215,7 +215,7 @@ pub const FLEET_COMMANDS: &[(&str, &str, &str)] = &[
     ("help", "a short guide to rush", ""),
     (
         "update",
-        "install the newest rush (brew, or its GitHub release); #reload runs it",
+        "install the newest rush (brew, or its GitHub release), then restart onto it; sessions move to it in place (alt+u, or click the header's ↑)",
         "",
     ),
     (

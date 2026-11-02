@@ -71,7 +71,7 @@ rush menubar    # put rush in the macOS menu bar (`rush menubar off` takes it ou
 rush update     # install the newest rush
 ```
 
-rush checks for a newer version now and then and says so at the foot of the list. `#update` installs it from inside, the same as `rush update`; reopen rush to use it.
+rush checks for a newer version as it starts and every hour after, and says so in the header, on the right of the pages row: `↑ v0.1.0-beta.5 ready · alt+u update`. alt+u (or a click on it, or `#update`) installs it, with `brew update` then `brew upgrade` when Homebrew installed rush, showing brew's progress there; then rush restarts onto it, where you were. If brew fails, its error shows there and nothing changes. A newer rush installed some other way shows as `↑ … installed · alt+u restart`.
 
 Your sessions move to the new build by themselves, without stopping their agents. Each session runs in a small host process of its own, which keeps its agent (Claude Code, say) running; once a new rush is installed, each host moves onto it as soon as its agent is between turns: same agent process, same conversation, nothing lost. One in a turn moves when the turn ends. The view drops its connection for a moment and picks up where it was. `#upgrade` moves them all now, as does enter on Settings › Updates › Sessions. A row whose host still runs the old build shows a dim `old`. A host from before this feature, one on another machine, or one whose agent can't be handed over that way (today only Claude Code's can) stays on the build it runs, its agent untouched; Settings › Updates says how many.
 

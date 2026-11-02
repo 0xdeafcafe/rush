@@ -184,10 +184,23 @@ impl Model {
             join(&mut tabs, tb);
         }
         // The third row: the pages, a row of their own under the places,
-        // as many as fit.
+        // as many as fit; down its right, a newer rush, which keeps its
+        // room before the pages.
         let mut pages = lead(2);
-        let room = w.saturating_sub(pages.width() + 2);
+        let notice = self.update_notice().map(|n| {
+            let room = w.saturating_sub(pages.width() + 6);
+            if n.width() > room {
+                rush_draw::truncate_line(&n, room, "…")
+            } else {
+                n
+            }
+        });
+        let taken = notice.as_ref().map_or(0, |n| n.width() + 4);
+        let room = w.saturating_sub(pages.width() + 2 + taken);
         join(&mut pages, self.pages_line(room));
+        if let Some(n) = notice.filter(|n| n.width() > 0) {
+            pages = spread(pages, n, w);
+        }
         let join_dots = |ps: &[Line]| {
             let mut out = Line::new();
             for p in ps.iter().filter(|p| p.width() > 0) {
@@ -298,6 +311,12 @@ impl Model {
             let md = self.mood(t);
             let mut counts = self.counts(t, true);
             counts.extend(self.news_badge());
+            // A newer rush, its key alone: there's no room for more.
+            if let Some(n) = self.update_notice() {
+                let c = n.spans.first().map_or(ORANGE, |s| s.style.fg);
+                counts.insert(0, line([sp(format!("↑ {}", self.update_key()), c)]));
+            }
+            self.note_update_notice(0, "");
             return self.narrow_header(md, counts);
         }
         let (text_rows, text, drops) = self.head_rows(w);
@@ -305,6 +324,9 @@ impl Model {
             (tb.dropped)(self, drops);
         }
         self.header_text = text;
+        let pages_y = self.text_at() + 2;
+        let row = self.header_text[1].clone();
+        self.note_update_notice(pages_y, &row);
         // clanker whole, his rows above and below the text's three.
         let mut out = Vec::new();
         if self.cfg.hide_logo {

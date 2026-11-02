@@ -37,6 +37,10 @@ const DEFAULTS: &[Row] = &[
     ("grid.unpin", G, "take the newest tile off the grid", &["ctrl+] k"], true),
     ("quick.ask", G, "the guide: ask rush what's next, where something is, or anything quick; again moves the keys", &["alt+/", "ctrl+] q"], true),
     ("profile.pick", G, "switch the default profile or provider", &["ctrl+] w", "alt+w"], false),
+    // The header's notice of a newer rush (Rust-only): installs it, with
+    // brew when brew installed rush, then reloads onto it, the sessions
+    // moving to it in place; with one installed already, the reload alone.
+    ("rush.update", G, "update rush: install the newer rush, then restart onto it; sessions carry on", &["alt+u", "ctrl+] U"], true),
     // Push-to-talk, while the apple voice plugin is on (new in the Rust
     // port): its press and its letting go are handled in
     // screens/social/dictation.rs, so it stands in for itself.

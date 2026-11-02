@@ -7,7 +7,8 @@
 //! place one of two ways:
 //!
 //! - installed with Homebrew (the running rush is under a Cellar), by
-//!   `brew upgrade 0xdeafcafe/tap/rush`, so brew keeps track of it;
+//!   `brew update` then `brew upgrade 0xdeafcafe/tap/rush`, so brew keeps
+//!   track of it, and checked to have put the new version in its Cellar;
 //! - otherwise by downloading this machine's tar.gz from the release,
 //!   checking its sha256, and renaming the rush in it over the running one.
 //!
@@ -145,6 +146,9 @@ pub trait Host {
     }
     /// Go's netwatch.Done(job, err).
     fn net_done(&self, _job: &str, _err: Option<&str>) {}
+    /// What an install is doing now, to show while it runs: a step of its
+    /// own, or the last line brew printed. Rust-only.
+    fn step(&self, _what: &str) {}
 }
 
 /// A host that logs nothing and always asks.
@@ -362,6 +366,7 @@ fn install_at(
     dir: &Path,
     host: &dyn Host,
 ) -> Result<Release, Error> {
+    host.step("asking GitHub for the newest rush…");
     let l = fetch(api)?;
     if !newer(cur, &l.version) {
         return Err(Error(format!(
@@ -370,8 +375,11 @@ fn install_at(
         )));
     }
     match homebrew(exe) {
-        Some(brew) => brew_upgrade(&brew)?,
-        None => replace(exe, &l, host)?,
+        Some(brew) => brew_upgrade(&brew, &l.version, host)?,
+        None => {
+            host.step(&format!("downloading {}…", l.short()));
+            replace(exe, &l, host)?
+        }
     }
     save(
         dir,
@@ -383,34 +391,125 @@ fn install_at(
     Ok(l)
 }
 
-/// `brew upgrade 0xdeafcafe/tap/rush`, with the tap brought up to date
-/// first even when brew updated itself within the day.
-fn brew_upgrade(brew: &Path) -> Result<(), Error> {
+/// `brew update`, then `brew upgrade 0xdeafcafe/tap/rush`, then a look in
+/// brew's Cellar for version: brew answers an upgrade it has nothing new
+/// for with a warning and success, so success alone isn't trusted.
+///
+/// The update is run by name rather than left to the upgrade's own
+/// (HOMEBREW_AUTO_UPDATE_SECS=0, as before): that one is skipped without a
+/// word when the environment rush started in has HOMEBREW_NO_AUTO_UPDATE,
+/// and it hides why a tap couldn't be fetched. brew has no update of one
+/// tap; `brew update` fetches every tap that's a clone, as this one is, and
+/// only reads homebrew/core's API. Each line brew prints is a step.
+pub fn brew_upgrade(brew: &Path, version: &str, host: &dyn Host) -> Result<(), Error> {
     if !is_executable(brew) {
         return Err(Error(format!(
             "rush was installed with Homebrew, but there's no brew at {}",
             brew.display()
         )));
     }
-    let out = std::process::Command::new(brew)
-        .args(["upgrade", FORMULA])
-        .env("HOMEBREW_AUTO_UPDATE_SECS", "0")
-        .env("HOMEBREW_NO_ENV_HINTS", "1")
-        .stdin(std::process::Stdio::null())
-        .output()
-        .map_err(|e| Error(format!("brew upgrade: {e}")))?;
-    if out.status.success() {
+    host.step("brew update: fetching the tap…");
+    let updated = run_brew(brew, &["update", "--quiet"], &[], host)
+        .map_err(|e| Error(format!("brew update: {e}")))?;
+    let update_failed = (!updated.0.success()).then(|| words(&updated));
+    host.step(&format!("brew upgrade {FORMULA}…"));
+    // Updated just now: not again.
+    let out = run_brew(
+        brew,
+        &["upgrade", FORMULA],
+        &[("HOMEBREW_NO_AUTO_UPDATE", "1")],
+        host,
+    )
+    .map_err(|e| Error(format!("brew upgrade: {e}")))?;
+    if !out.0.success() {
+        return Err(Error(format!("brew upgrade: {}", words(&out))));
+    }
+    if in_cellar(brew, version) {
         return Ok(());
     }
-    let mut both = out.stdout;
-    both.extend_from_slice(&out.stderr);
-    let said = String::from_utf8_lossy(&both).trim().to_string();
-    let why = if said.is_empty() {
-        exit_words(&out.status)
+    let mut why = format!("brew upgrade left rush as it was: brew's tap has no v{version} yet");
+    if let Some(u) = update_failed {
+        why.push_str(&format!(" (brew update: {u})"));
+    }
+    if !out.1.is_empty() {
+        why.push_str(&format!(" · brew said: {}", out.1));
+    }
+    Err(Error(why))
+}
+
+/// What brew said, or how it ended when it said nothing.
+fn words(out: &(std::process::ExitStatus, String)) -> String {
+    if out.1.is_empty() {
+        exit_words(&out.0)
     } else {
-        said
+        out.1.clone()
+    }
+}
+
+/// Runs brew with args, its hints off and env set, each line it prints to
+/// stdout a step as it comes: how it ended and all it said, stdout then
+/// stderr.
+fn run_brew(
+    brew: &Path,
+    args: &[&str],
+    env: &[(&str, &str)],
+    host: &dyn Host,
+) -> io::Result<(std::process::ExitStatus, String)> {
+    use std::io::{BufRead, Read};
+    use std::process::{Command, Stdio};
+    let mut cmd = Command::new(brew);
+    cmd.args(args)
+        .env("HOMEBREW_NO_ENV_HINTS", "1")
+        .env_remove("HOMEBREW_NO_AUTO_UPDATE")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let mut child = cmd.spawn()?;
+    let err = child.stderr.take().map(|mut e| {
+        std::thread::spawn(move || {
+            let mut b = Vec::new();
+            let _ = e.read_to_end(&mut b);
+            b
+        })
+    });
+    let mut said = Vec::new();
+    if let Some(o) = child.stdout.take() {
+        for l in io::BufReader::new(o).split(b'\n') {
+            let Ok(l) = l else { break };
+            let t = String::from_utf8_lossy(&l);
+            let t = t.trim();
+            if !t.is_empty() {
+                host.step(t);
+            }
+            said.extend_from_slice(&l);
+            said.push(b'\n');
+        }
+    }
+    let status = child.wait()?;
+    said.extend(err.and_then(|h| h.join().ok()).unwrap_or_default());
+    Ok((status, String::from_utf8_lossy(&said).trim().to_string()))
+}
+
+/// Whether the Homebrew this brew is of has rush version in its Cellar:
+/// <prefix>/Cellar/rush/<version>, or <version>_<revision>.
+fn in_cellar(brew: &Path, version: &str) -> bool {
+    let Some(prefix) = brew.parent().and_then(Path::parent) else {
+        return false;
     };
-    Err(Error(format!("brew upgrade: {why}")))
+    let Ok(rd) = std::fs::read_dir(prefix.join("Cellar").join("rush")) else {
+        return false;
+    };
+    rd.flatten().any(|e| {
+        let n = e.file_name();
+        let n = n.to_string_lossy();
+        n == version
+            || n.strip_prefix(version)
+                .and_then(|r| r.strip_prefix('_'))
+                .is_some_and(|r| !r.is_empty() && r.bytes().all(|c| c.is_ascii_digit()))
+    })
 }
 
 /// Downloads l's tar.gz for this machine, checks it against its .sha256,
@@ -541,6 +640,46 @@ fn open_new(path: &Path, mode: u32) -> io::Result<std::fs::File> {
 fn write_file(path: &Path, b: &[u8], mode: u32) -> io::Result<()> {
     use std::io::Write;
     open_new(path, mode)?.write_all(b)
+}
+
+/// A stand-in brew, for the tests here and the screens': nothing reaches
+/// the real one.
+#[doc(hidden)]
+pub mod testing {
+    use std::path::Path;
+
+    /// A brew in prefix/bin that notes each run in prefix/ran (its args and
+    /// HOMEBREW_NO_AUTO_UPDATE), answers `update` at once, and on an
+    /// upgrade prints a line and exits with code: one that exits 0 puts
+    /// installs in prefix/Cellar/rush, as brew would; one that fails says
+    /// "Error: no bottle".
+    pub fn fake_brew(prefix: &Path, code: i32, installs: Option<&str>) {
+        let bin = prefix.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let brew = bin.join("brew");
+        let put = match installs {
+            Some(v) if code == 0 => format!(
+                "mkdir -p '{}'\n",
+                prefix.join("Cellar/rush").join(v).display()
+            ),
+            _ => String::new(),
+        };
+        let fail = if code == 0 {
+            ""
+        } else {
+            "echo 'Error: no bottle' >&2\n"
+        };
+        std::fs::write(
+            &brew,
+            format!(
+                "#!/bin/sh\necho \"$* noauto=$HOMEBREW_NO_AUTO_UPDATE\" >> '{}'\n[ \"$1\" = update ] && exit 0\necho '==> Upgrading 0xdeafcafe/tap/rush'\n{put}{fail}exit {code}\n",
+                prefix.join("ran").display()
+            ),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&brew, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
 }
 
 #[cfg(test)]

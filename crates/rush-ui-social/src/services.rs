@@ -52,68 +52,158 @@ impl rush_update::Host for Host {
     }
 }
 
+/// How often this rush looks again at whether a newer one is out: the
+/// answer every rush shares is read, and GitHub asked only once it's
+/// rush_update::EVERY old. Go asked only as it started.
+pub const LOOK_EVERY: Duration = Duration::from_secs(5 * 60);
+
+/// An update's host that also shows its steps in the header as they
+/// come: the step brew is on, its last line.
+struct Steps(Option<rush_draw::Sender<crate::worker::Note>>);
+
+impl rush_update::Host for Steps {
+    fn log(&self, kind: &str, f: Value) {
+        rush_update::Host::log(&Host, kind, f);
+    }
+    fn net_run(&self, job: &str) -> bool {
+        rush_update::Host::net_run(&Host, job)
+    }
+    fn net_done(&self, job: &str, err: Option<&str>) {
+        rush_update::Host::net_done(&Host, job, err);
+    }
+    fn step(&self, what: &str) {
+        let Some(tx) = &self.0 else {
+            return;
+        };
+        let what = what.to_string();
+        // A step the screen hasn't taken yet gives way: never waited on.
+        let _ = tx.try_send(crate::worker::Note::Apply(Box::new(
+            move |m: &mut Model| {
+                let u = m.kept::<Update>();
+                if !u.updating {
+                    return Out::Idle;
+                }
+                u.step = what;
+                Out::Draw
+            },
+        )));
+    }
+}
+
 /// Model's side of this module: Model is rush-ui-base's, so its
 /// methods here are a trait's.
 pub trait ModelUpdates {
     fn check_update(&mut self);
     fn install_update(&mut self) -> Out;
+    fn restart_installed(&mut self) -> Out;
     fn version_tag(&self) -> Line;
 }
 
 impl ModelUpdates for Model {
-    /// Asks, in the background, whether a newer rush is out (checkUpdate).
+    /// Asks, in the background, whether a newer rush is out (checkUpdate):
+    /// as rush starts, then every LOOK_EVERY, so a rush left open learns
+    /// of a release within the hour. News says each newer one once; the
+    /// header says it till it's installed.
     fn check_update(&mut self) {
         let u = self.kept::<Update>();
-        if u.checked {
+        if u.checked || u.looked.is_some_and(|t| t.elapsed() < LOOK_EVERY) {
             return;
         }
         u.checked = true;
         self.later(
             || rush_update::check(&Host),
             |m, (l, newer)| {
+                let u = m.kept::<Update>();
+                u.checked = false;
+                u.looked = Some(Instant::now());
                 if !newer {
                     return Out::Idle;
                 }
-                rush_events::log("update-available", fields(json!({"version": l.version})));
-                m.news(
-                    &format!("rush {} is out: #update installs it", l.short()),
-                    "",
-                );
-                m.kept::<Update>().newer = Some(l);
-                Out::Draw
+                let said = u.said == l.version;
+                let same = u.newer.as_ref() == Some(&l);
+                u.said = l.version.clone();
+                u.newer = Some(l.clone());
+                if !said {
+                    rush_events::log("update-available", fields(json!({"version": l.version})));
+                    let key = m.update_key();
+                    m.news(
+                        &format!(
+                            "rush {} is out: {key} installs it and restarts onto it",
+                            l.short()
+                        ),
+                        "",
+                    );
+                }
+                if said && same { Out::Idle } else { Out::Draw }
             },
         );
     }
 
-    /// #update: the newest rush over this one (installUpdate).
+    /// #update, the header's notice and its key: the newest rush over this
+    /// one, with brew when brew installed it, its steps shown in the header
+    /// as they come; then this rush restarts onto it and the sessions move
+    /// to it in place (installUpdate, then #reload). What fails is said in
+    /// brew's words and nothing changes. With a newer rush installed
+    /// already, it's the restart alone.
     fn install_update(&mut self) -> Out {
-        if self.kept::<Update>().updating {
+        let u = self.kept::<Update>();
+        if u.updating {
             self.flash("already updating…");
             return Out::Draw;
         }
-        self.kept::<Update>().updating = true;
+        if u.rebuilt {
+            return self.restart_installed();
+        }
+        u.updating = true;
+        u.failed.clear();
+        u.step.clear();
+        let install = u.install.clone();
         self.flash("updating rush…");
+        let steps = Steps(self.sender().map(|tx| tx.lane(4)));
         self.later(
-            || rush_update::install(&Host),
+            move || match install {
+                Some(f) => f(&steps),
+                None => rush_update::install(&steps),
+            },
             |m, res| {
                 let u = m.kept::<Update>();
                 u.updating = false;
-                let mut said = false;
+                u.step.clear();
                 match res {
-                    Err(e) => m.fail(&format!("update: {e}")),
+                    Err(e) => {
+                        u.failed = e.0.clone();
+                        m.fail(&format!(
+                            "update failed, nothing changed: {}",
+                            rush_ui_base::update::first_error(&e.0)
+                        ));
+                        Out::Draw
+                    }
                     Ok(to) => {
                         u.newer = None;
                         u.rebuilt = true;
+                        u.installed_version = to.version.clone();
+                        m.act(crate::frame::ext::Act::WatchHosts { rebuilt_said: true });
                         m.flash(&format!(
-                            "rush {} installed · #reload runs it, sessions carry on",
+                            "rush {} installed · restarting onto it, sessions carry on",
                             to.short()
                         ));
-                        said = true;
+                        m.restart_installed()
                     }
                 }
-                m.act(crate::frame::ext::Act::WatchHosts { rebuilt_said: said });
-                Out::Draw
             },
+        );
+        Out::Draw
+    }
+
+    /// This rush restarts onto the installed one, as #reload does, having
+    /// asked first for every session to move to it in place, each between
+    /// turns (rush reload's note, which the rush that leads acts on).
+    fn restart_installed(&mut self) -> Out {
+        self.later(
+            || {
+                rush_ui_base::update::want_moves();
+            },
+            |m, ()| m.reload(false),
         );
         Out::Draw
     }

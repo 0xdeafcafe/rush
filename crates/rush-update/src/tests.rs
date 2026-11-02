@@ -4,6 +4,7 @@
 //! real home or the real brew.
 
 use super::*;
+use crate::testing::fake_brew;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -124,6 +125,12 @@ fn newer_than() {
         ("0.2.0", "0.3.0-nightly.20261101", true),
         ("0.2.0-nightly.20261029", "0.2.0-nightly.20261030", true),
         ("0.2.0-nightly.9", "0.2.0-nightly.10", true),
+        // The betas, by number: beta.10 after beta.9, a release after both.
+        ("0.1.0-beta.3", "0.1.0-beta.4", true),
+        ("0.1.0-beta.9", "0.1.0-beta.10", true),
+        ("0.1.0-beta.10", "0.1.0-beta.9", false),
+        ("0.1.0-beta.10", "0.1.0", true),
+        ("v0.1.0-beta.4", "0.1.0-beta.4", false),
         ("0.2.0-alpha.1", "0.2.0-alpha", false),
         ("0.2.0+abc", "0.2.0", false),
         // What isn't semver is never newer: no answer, no nag.
@@ -306,23 +313,13 @@ fn homebrew_is_found_by_its_cellar() {
     }
 }
 
-/// A brew in prefix/bin that notes how it was run in prefix/ran, and
-/// exits with code.
-fn fake_brew(prefix: &Path, code: i32) {
-    let bin = prefix.join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
-    let brew = bin.join("brew");
-    std::fs::write(
-        &brew,
-        format!(
-            "#!/bin/sh\necho \"$@ secs=$HOMEBREW_AUTO_UPDATE_SECS\" > '{}'\necho 'Error: no bottle' >&2\nexit {code}\n",
-            prefix.join("ran").display()
-        ),
-    )
-    .unwrap();
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&brew, std::fs::Permissions::from_mode(0o755)).unwrap();
+/// A host that keeps the steps it's shown.
+#[derive(Default)]
+struct Steps(Mutex<Vec<String>>);
+
+impl Host for Steps {
+    fn step(&self, what: &str) {
+        self.0.lock().unwrap().push(what.to_string());
     }
 }
 
@@ -336,6 +333,7 @@ fn install_under_homebrew_runs_brew_upgrade() {
     let exe = prefix.path().join("Cellar/rush/0.2.0/bin/rush");
     std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
     std::fs::write(&exe, "old").unwrap();
+    let ran = prefix.path().join("ran");
 
     // No brew where it should be.
     assert_eq!(
@@ -348,25 +346,59 @@ fn install_under_homebrew_runs_brew_upgrade() {
         )
     );
 
-    fake_brew(prefix.path(), 0);
-    let l = install_at(&url, "0.2.0", &exe, state.path(), &Quiet).unwrap();
+    // brew's tap is fetched by name first, then the upgrade doesn't fetch
+    // it again; each line brew prints is a step shown.
+    fake_brew(prefix.path(), 0, Some("0.3.0"));
+    let steps = Steps::default();
+    let l = install_at(&url, "0.2.0", &exe, state.path(), &steps).unwrap();
     assert_eq!(l.version, "0.3.0");
     assert_eq!(
-        std::fs::read_to_string(prefix.path().join("ran")).unwrap(),
-        "upgrade 0xdeafcafe/tap/rush secs=0\n"
+        std::fs::read_to_string(&ran).unwrap(),
+        "update --quiet noauto=\nupgrade 0xdeafcafe/tap/rush noauto=1\n"
+    );
+    assert_eq!(
+        *steps.0.lock().unwrap(),
+        [
+            "asking GitHub for the newest rush…",
+            "brew update: fetching the tap…",
+            "brew upgrade 0xdeafcafe/tap/rush…",
+            "==> Upgrading 0xdeafcafe/tap/rush",
+        ]
     );
     // brew put it in place: the rush in the Cellar isn't touched here.
     assert_eq!(std::fs::read_to_string(&exe).unwrap(), "old");
     assert!(!prev(&exe).exists());
     assert!(state.path().join(CACHE).exists());
 
-    fake_brew(prefix.path(), 1);
+    // brew failing is brew's words, and nothing is kept.
+    let state = tempfile::tempdir().unwrap();
+    std::fs::remove_file(&ran).unwrap();
+    fake_brew(prefix.path(), 1, None);
     assert_eq!(
         install_at(&url, "0.2.0", &exe, state.path(), &Quiet)
             .unwrap_err()
             .0,
-        "brew upgrade: Error: no bottle"
+        "brew upgrade: ==> Upgrading 0xdeafcafe/tap/rush\nError: no bottle"
     );
+    assert!(!state.path().join(CACHE).exists());
+}
+
+// A brew whose tap is behind answers the upgrade with success and installs
+// nothing: that's said, not taken for an update.
+#[test]
+fn brew_that_installs_nothing_is_no_update() {
+    let prefix = tempfile::tempdir().unwrap();
+    let brew = prefix.path().join("bin/brew");
+    fake_brew(prefix.path(), 0, None);
+    let e = brew_upgrade(&brew, "0.1.0-beta.4", &Quiet).unwrap_err().0;
+    assert_eq!(
+        e,
+        "brew upgrade left rush as it was: brew's tap has no v0.1.0-beta.4 yet · brew said: ==> Upgrading 0xdeafcafe/tap/rush"
+    );
+    // The version brew installed, with a revision or without.
+    std::fs::create_dir_all(prefix.path().join("Cellar/rush/0.1.0-beta.4_1")).unwrap();
+    assert!(brew_upgrade(&brew, "0.1.0-beta.4", &Quiet).is_ok());
+    assert!(brew_upgrade(&brew, "0.1.0-beta.40", &Quiet).is_err());
 }
 
 /// A GitHub serving release v0.3.0 with tgz as this machine's tar.gz and
@@ -539,7 +571,7 @@ fn install_refuses_what_isnt_newer() {
     let exe = prefix.path().join("Cellar/rush/0.3.0/bin/rush");
     std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
     std::fs::write(&exe, "old").unwrap();
-    fake_brew(prefix.path(), 0);
+    fake_brew(prefix.path(), 0, Some("0.3.0"));
     assert!(install_at(&url, "0.3.0", &exe, prefix.path(), &Quiet).is_err());
     assert!(!prefix.path().join("ran").exists(), "brew ran");
     // The nightly before a release goes on to it.
