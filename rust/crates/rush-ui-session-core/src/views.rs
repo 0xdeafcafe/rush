@@ -904,9 +904,20 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
             let tab = tab_at(m).map_or(0, |i| i + 1);
             let (cx, cw) = conn(m, &key).vs.context;
             let ctx = Some(y) == name_y && cw > 0 && x >= 2 + cx && x < 2 + cx + cw;
+            let text_w = m.session.as_ref().map_or(0, |v| v.o.width);
             let item = if y >= top && y < top + rows && x >= 2 {
                 if name == "conversation" {
-                    super::conversation::owner_at(m, y - top)
+                    // Only the text's own columns: not the map or the
+                    // column beside it, at the same height.
+                    if x < 2 + text_w {
+                        super::conversation::owner_at(m, y - top)
+                    } else {
+                        String::new()
+                    }
+                } else if name == "subagents" {
+                    // The list's own mouse (subview.rs) decides which row
+                    // is lit, by column too; this keeps its answer.
+                    conn(m, &key).vs.hover_ref.clone()
                 } else {
                     conn(m, &key)
                         .vs

@@ -314,6 +314,40 @@ fn the_wide_list_lights_only_its_own_rows() {
     assert_eq!(over(&mut m, (2 + lw + 1) as u16), "");
 }
 
+/// The pointer moving again inside the column beside the list still lights
+/// no row of it, and a click there picks none.
+#[test]
+fn the_column_beside_the_list_hovers_and_picks_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = background(&d);
+    m.w = 180;
+    views::show_view(&mut m, KEY, "subagents");
+    let frame = m.frame();
+    let y = frame
+        .iter()
+        .position(|l| l.plain().contains("review the diff"))
+        .expect("its row on screen") as u16;
+    let lw = subview::list_width(conn(&mut m, KEY).watch.pane_w);
+    let at = |m: &mut Model, kind: MouseKind, x: u16| {
+        m.mouse_event(&Mouse {
+            kind,
+            x,
+            y,
+            mods: Default::default(),
+        });
+        conn(m, KEY).vs.hover_ref.clone()
+    };
+    assert_eq!(at(&mut m, MouseKind::Moved, 10), "sub:x");
+    let right = (2 + lw + 6) as u16;
+    for dx in 0..3 {
+        assert_eq!(at(&mut m, MouseKind::Moved, right + dx), "", "move {dx}");
+    }
+    let sel = m.session.as_ref().unwrap().sel.clone();
+    at(&mut m, MouseKind::Down(Button::Left), right);
+    assert_eq!(m.session.as_ref().unwrap().sel, sel, "a click picked a row");
+    assert_eq!(at(&mut m, MouseKind::Moved, 10), "sub:x");
+}
+
 /// In the views panel beside the conversation, a run's row picks it
 /// and a workflow's shows its agents (agentviews.go:908-916, d0df4ab4).
 #[test]
