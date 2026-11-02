@@ -830,6 +830,8 @@ impl Model {
         }
         self.sel = items[i].clone();
         self.hover.clear();
+        // Keys bring the list back to the pick the wheel left.
+        self.scrolled_from = None;
     }
 
     /// The agent picked, if a row is.
@@ -1251,8 +1253,11 @@ impl Model {
             rows.push(Row::drawn(line([sp(msg, DIM)]), String::new(), false));
         }
         // Scrolling up shows the whole row above; down, a row cut in half
-        // at the top gives up its second line instead.
-        if let Some(top) = sel_top {
+        // at the top gives up its second line instead. Not while the wheel
+        // has moved the rows away from the pick: rows coming and going
+        // don't pull the list back to it.
+        let free = self.scrolled_from.as_deref() == Some(self.sel.as_str());
+        if !free && let Some(top) = sel_top {
             if top < self.scroll + 1 {
                 self.scroll = top.saturating_sub(1);
                 if self.scroll > 0 && rows[self.scroll].cont {
@@ -1263,8 +1268,9 @@ impl Model {
                 self.scroll = (sel_bottom + 2).saturating_sub(h);
             }
         }
-        if self.scroll > rows.len().saturating_sub(h) {
-            self.scroll = rows.len().saturating_sub(h);
+        self.scroll_most = rows.len().saturating_sub(h);
+        if self.scroll > self.scroll_most {
+            self.scroll = self.scroll_most;
         }
         if self.scroll < rows.len() && rows[self.scroll].cont {
             self.scroll += 1;

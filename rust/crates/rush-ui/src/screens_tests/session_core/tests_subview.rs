@@ -838,3 +838,87 @@ fn a_phase_counts_an_agent_once_however_often_it_was_tried() {
     assert_eq!(earlier, ["l1", "l3"]);
     assert!(workflow_strip(&[p], 0).plain().contains("Port 2/3"));
 }
+
+/// The lowest row with a ref in sight, as the view was last drawn.
+fn by_the_box(m: &mut Model) -> String {
+    conn(m, KEY)
+        .vs
+        .refs
+        .iter()
+        .rev()
+        .find(|r| !r.is_empty())
+        .cloned()
+        .expect("a row in sight")
+}
+
+/// ↑ from the box picks the row in sight by the box, as the
+/// conversation's ↑ does, not the list's last row (the oldest run
+/// finished), however far below that is.
+#[test]
+fn up_from_the_box_picks_the_row_by_it() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = model(&d);
+    views::show_view(&mut m, KEY, "subagents");
+    views::body(&mut m, 120, 8).unwrap();
+    assert_eq!(conn(&mut m, KEY).vs.top, 0);
+    let by_box = by_the_box(&mut m);
+    let last = conn(&mut m, KEY)
+        .vs
+        .all_refs
+        .iter()
+        .rev()
+        .find(|r| !r.is_empty())
+        .cloned()
+        .unwrap();
+    assert_ne!(by_box, last, "the whole list is in sight");
+    press(&mut m, "up");
+    assert_eq!(sel(&m), by_box);
+    views::body(&mut m, 120, 8).unwrap();
+    assert_eq!(conn(&mut m, KEY).vs.top, 0, "the view jumped");
+}
+
+/// The wheel moves the subagents view and leaves the pick where it is,
+/// out of sight, as the conversation's wheel does; drawn again (the runs
+/// read again) it stays put; ↑ then picks the row in sight by the box.
+#[test]
+fn the_wheel_leaves_the_pick() {
+    use crate::frame::{Mouse, Out};
+    use rush_draw::MouseKind;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = model(&d);
+    views::show_view(&mut m, KEY, "subagents");
+    m.session.as_mut().unwrap().sel = "sub:x".into();
+    views::body(&mut m, 120, 8).unwrap();
+    let x = "sub:x".to_string();
+    assert!(
+        conn(&mut m, KEY).vs.top > 0,
+        "the pick isn't brought in sight"
+    );
+    assert!(conn(&mut m, KEY).vs.refs.contains(&x));
+    let wheel = |m: &mut Model, kind: MouseKind| {
+        views::mouse(
+            m,
+            &Mouse {
+                kind,
+                x: 4,
+                y: 10,
+                mods: Default::default(),
+            },
+        )
+    };
+    for _ in 0..4 {
+        wheel(&mut m, MouseKind::ScrollUp);
+    }
+    assert_eq!(wheel(&mut m, MouseKind::ScrollUp), Out::Idle, "at the top");
+    for _ in 0..2 {
+        views::body(&mut m, 120, 8).unwrap();
+        assert_eq!(conn(&mut m, KEY).vs.top, 0, "the pick pulled it back");
+        assert!(!conn(&mut m, KEY).vs.refs.contains(&x));
+        assert_eq!(sel(&m), x, "the wheel moved the pick");
+    }
+    let by_box = by_the_box(&mut m);
+    press(&mut m, "up");
+    assert_eq!(sel(&m), by_box);
+    views::body(&mut m, 120, 8).unwrap();
+    assert_eq!(conn(&mut m, KEY).vs.top, 0, "the view jumped");
+}

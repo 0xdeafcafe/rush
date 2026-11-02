@@ -59,6 +59,13 @@ pub struct Model {
     pub shown: String,
     pub hover: String,
     pub scroll: usize,
+    /// The pick the wheel scrolled the list away from: while it's still
+    /// the pick, the list leaves its rows where the wheel put them (it may
+    /// be out of sight) rather than bringing it back, as the conversation
+    /// does; keys that move the pick bring it back.
+    pub scrolled_from: Option<String>,
+    /// The furthest the list's rows scroll, as last drawn.
+    pub scroll_most: usize,
     pub row_keys: Vec<String>,
     pub list_top: usize,
     pub folds: HashMap<String, bool>,
@@ -193,6 +200,8 @@ impl Model {
             shown: String::new(),
             hover: String::new(),
             scroll: 0,
+            scrolled_from: None,
+            scroll_most: 0,
             row_keys: Vec::new(),
             list_top: 0,
             folds: HashMap::new(),
@@ -726,6 +735,27 @@ impl Model {
         self.ext.calls.predict_moved()(self, d);
     }
 
+    /// The wheel over the list moves its rows three a turn and leaves the
+    /// pick where it is, out of sight if need be, as the conversation's
+    /// wheel does. Whether anything moved: a trackpad's momentum at either
+    /// end moves nothing, so draws nothing.
+    pub fn wheel(&mut self, up: bool) -> bool {
+        let was = self.scroll;
+        self.scroll = if up {
+            self.scroll.saturating_sub(3)
+        } else {
+            (self.scroll + 3).min(self.scroll_most.max(self.scroll))
+        };
+        if self.scroll == was {
+            return false;
+        }
+        self.scrolled_from = Some(self.sel.clone());
+        // The row under the pointer is another now; it lights again as
+        // the pointer moves.
+        self.hover.clear();
+        true
+    }
+
     fn session_rows(&self) -> usize {
         self.h
             .saturating_sub(self.top_h() + session::HEAD_H + 1)
@@ -824,8 +854,11 @@ impl Model {
             .cloned()
             .unwrap_or_default();
         match kind {
-            MouseKind::ScrollUp => self.step(-1),
-            MouseKind::ScrollDown => self.step(1),
+            MouseKind::ScrollUp | MouseKind::ScrollDown => {
+                if !self.wheel(kind == MouseKind::ScrollUp) {
+                    return Step::Idle;
+                }
+            }
             MouseKind::Moved => {
                 if at == self.hover {
                     return Step::Idle;
