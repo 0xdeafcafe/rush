@@ -7,6 +7,9 @@
 //! `cargo bench -p rush-ui --bench frame` (run it through
 //! tools/sbtest.sh: the model is a real one, in a throwaway home);
 //! with `-- profile` it draws for 20 s instead, for `sample`.
+//! RUSH_BENCH_OUT=<file> also writes the bytes, allocations and
+//! instructions per frame there, a line each, for CI's footprint job
+//! (tools/footprint).
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::collections::HashMap;
@@ -152,6 +155,39 @@ fn report(name: &str, c: Cost) {
         c.bytes as f64 / 1024.0,
         c.allocs
     );
+    let at = WHAT.with(|w| w.get());
+    record(&format!("frame, {at}: {name}, bytes"), "bytes", c.bytes);
+    record(
+        &format!("frame, {at}: {name}, allocations"),
+        "allocs",
+        c.allocs,
+    );
+    record(
+        &format!("frame, {at}: {name}, instructions"),
+        "info",
+        c.instr as usize,
+    );
+}
+
+thread_local! {
+    /// What's on screen, for the names RUSH_BENCH_OUT gets.
+    static WHAT: std::cell::Cell<&'static str> = const { std::cell::Cell::new("") };
+}
+
+/// Appends a number to $RUSH_BENCH_OUT as `name<TAB>kind<TAB>value`, for
+/// CI's footprint job (tools/footprint/measure.py reads it).
+fn record(name: &str, kind: &str, v: usize) {
+    use std::io::Write;
+    let Some(p) = std::env::var_os("RUSH_BENCH_OUT") else {
+        return;
+    };
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(p)
+    {
+        let _ = writeln!(f, "{name}\t{kind}\t{v}");
+    }
 }
 
 /// ctrl+k over the list, a word typed that most agents have.
@@ -191,6 +227,7 @@ fn main() {
         return;
     }
     println!("— Agents list, 300 agents, {w}x{h}");
+    WHAT.with(|a| a.set("the list"));
     report(
         "rows (Model::frame)",
         measure(300, |_| {
@@ -216,6 +253,7 @@ fn main() {
     open_bar(&mut m);
     hd.draw(|c| App::<Note>::draw(&mut m, c));
     println!("— ctrl+k open on it, \"fix\"");
+    WHAT.with(|a| a.set("ctrl+k open"));
     report(
         "frame drawn (rows + cells)",
         measure(300, |_| hd.draw(|c| App::<Note>::draw(&mut m, c))),
