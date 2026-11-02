@@ -48,6 +48,7 @@ pub fn read(m: &mut Model) {
 pub fn sections(m: &Model) -> Vec<Section> {
     let mut s = cache_sections(m);
     s.push(context_guard_section(m));
+    s.extend(super::cheap::sections(m));
     s.extend(super::guard::sections(m));
     s.push(advisor_section(m));
     s
