@@ -128,7 +128,11 @@ fn a_restart_starts_a_new_host_from_the_installed_rush() {
 
     let sp = Spawner::new();
     restart_agent_on("ra1", "", &exe, &|c: Config, e: &Path| sp.spawn(c, e)).unwrap();
-    assert_eq!(sp.exes(), [exe.clone()], "started from the installed rush");
+    assert_eq!(
+        sp.exes(),
+        std::slice::from_ref(&exe),
+        "started from the installed rush"
+    );
 
     // Nothing was sent with it: the agent starts again for the queue.
     assert!(
