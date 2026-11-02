@@ -800,7 +800,10 @@ A rush leads or follows (rush-ui's `lead.rs`, after Go's hosted.go:70-77
 `Follow`, `following`, `leads`). The one that leads does what rush does
 for every session on its own; one that follows shows the same machine and
 does what you ask of it, and leaves the rest to the one that leads. Go
-follows when the app that embeds its view says so. Over SSH (`RUSH_VIA=ssh`) it takes
+follows when the app that embeds its view says so; the Rust rush follows
+when `RUSH_FOLLOW` is set to anything: a rush that must never lead, e.g. a
+benchmark or test on a copied home, doing no housekeeping and never
+starting a lost session's host. Over SSH (`RUSH_VIA=ssh`) it takes
 no lock and follows while a view on the Mac holds it, read every 2
 seconds, as Go's main.go:252-260 does (`lead::follow_while_led`). A hosted view (`rush open <id>`,
 rush-ui's `hosted.rs`, Go's NewHosted: one session at the whole width,

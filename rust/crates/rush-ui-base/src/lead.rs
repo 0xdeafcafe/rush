@@ -6,8 +6,11 @@
 //! leads) and model.go:1096 (the "lead" event): neither a hosted view
 //! (hosted.rs) nor one that follows leads.
 //!
-//! Over SSH (RUSH_VIA=ssh) a rush follows while another view holds the
-//! lock (main.go:252-260); see DESIGN.md "Following".
+//! RUSH_FOLLOW, set to anything, makes the whole run follow: a rush that
+//! must never lead, e.g. a benchmark or test on a copied home, so it does
+//! no housekeeping and never starts a lost session's host (DESIGN.md
+//! "Following"). Over SSH (RUSH_VIA=ssh) a rush follows while another
+//! view holds the lock (main.go:252-260).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -35,6 +38,14 @@ pub fn follow_while_led(led: fn() -> bool) {
 /// Whether another view leads this one now: only ever over SSH.
 pub fn others_lead() -> bool {
     SSH.load(Ordering::Relaxed) && LED.load(Ordering::Relaxed)
+}
+
+/// The variable that makes a rush follow.
+pub const FOLLOW_ENV: &str = "RUSH_FOLLOW";
+
+/// Whether RUSH_FOLLOW is set to anything.
+pub fn follow_env() -> bool {
+    std::env::var_os(FOLLOW_ENV).is_some_and(|v| !v.is_empty())
 }
 
 impl Model {
