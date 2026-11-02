@@ -309,6 +309,46 @@ fn carries_another_agents_conversation() {
     assert_eq!(ls[0]["uuid"].as_str().unwrap().len(), 36);
 }
 
+/// The context guard's hooks go beside the inbox's, each event once.
+#[test]
+fn context_hooks_go_beside_the_others() {
+    let inbox = json!([{"matcher": "*", "hooks": [{"type": "command", "command": "inbox", "timeout": 10}]}]);
+    let mut hooks = Map::new();
+    hooks.insert("PostToolUse".into(), inbox.clone());
+    super::context_hooks(&mut hooks, "rush gate hook");
+    let matchers = |event: &str| -> Vec<String> {
+        hooks[event]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|h| {
+                format!(
+                    "{} {}",
+                    h["matcher"].as_str().unwrap(),
+                    h["hooks"][0]["command"].as_str().unwrap()
+                )
+            })
+            .collect()
+    };
+    let cases: &[(&str, &[&str])] = &[
+        ("PreToolUse", &["Read rush gate hook"]),
+        (
+            "PostToolUse",
+            &[
+                "* inbox",
+                "Read|Bash|Edit|Write|MultiEdit|NotebookEdit rush gate hook",
+            ],
+        ),
+        ("PostToolUseFailure", &["Bash rush gate hook"]),
+        ("PreCompact", &["* rush gate hook"]),
+        ("SessionStart", &["compact|clear rush gate hook"]),
+    ];
+    for (event, want) in cases {
+        assert_eq!(matchers(event), *want, "{event}");
+    }
+    assert_eq!(hooks.len(), cases.len());
+}
+
 /// The subagents' cache life is set in the environment only when chosen.
 #[test]
 fn subagent_cache_env_is_set_only_when_chosen() {

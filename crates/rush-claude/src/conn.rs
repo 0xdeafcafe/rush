@@ -47,6 +47,27 @@ pub fn subagent_cache_env(choice: &str) -> Option<String> {
     matches!(choice, "5m" | "1h").then(|| format!("{SUBAGENT_CACHE_ENV}={choice}"))
 }
 
+/// Puts rush's context guard (command) into Claude Code's hooks: before
+/// each Read (Bash's is the gate's, which asks it); after each Read, edit
+/// and Bash call, failed Bash calls too; before a compaction, and as a
+/// compacted or cleared session starts again. Added beside hooks already
+/// there for the same events (Rust-only).
+pub fn context_hooks(hooks: &mut Map<String, Value>, command: &str) {
+    let h = |matcher: &str| json!({"matcher": matcher, "hooks": [{"type": "command", "command": command, "timeout": 10}]});
+    for (event, matcher) in [
+        ("PreToolUse", "Read"),
+        ("PostToolUse", "Read|Bash|Edit|Write|MultiEdit|NotebookEdit"),
+        ("PostToolUseFailure", "Bash"),
+        ("PreCompact", "*"),
+        ("SessionStart", "compact|clear"),
+    ] {
+        let list = hooks.entry(event).or_insert_with(|| json!([]));
+        if let Value::Array(a) = list {
+            a.push(h(matcher));
+        }
+    }
+}
+
 /// How long a control request is waited on: Go's callers give it a minute
 /// at most (host.go:1723).
 const ASK_WITHIN: Duration = Duration::from_secs(60);
@@ -119,6 +140,9 @@ impl Driver for Claude {
                 "PreToolUse".into(),
                 json!([{"matcher": "Bash|Agent|Task|Workflow", "hooks": [{"type": "command", "command": o.bash_hook, "timeout": 10}]}]),
             );
+        }
+        if !o.tool_hook.is_empty() {
+            context_hooks(&mut hooks, &o.tool_hook);
         }
         if !hooks.is_empty() {
             ho.flags.extend([
