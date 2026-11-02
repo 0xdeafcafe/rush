@@ -674,6 +674,32 @@ processes, 27 threads, 42 MB, 2026-11-02). Now:
 - The broker's own threads get 1 MB stacks, outboxes 256 KB
   (`rush_sys::threads`).
 
+5. **Plugin connections** (rush-plugin `rpc.rs`, `rpcread.rs`;
+   Rust-only: Go reads each in a goroutine). One `plugin-rpc` thread per
+   process reads every JSON-RPC connection made on a descriptor
+   (`Conn::new`'s socket, `Conn::lines_fd`'s MCP stdout pipe): it waits
+   in one kqueue on all of them, reads what's ready without blocking
+   (recv with MSG_DONTWAIT on a socket, whose descriptor the blocking
+   writer shares; a pipe set non-blocking) and cuts it into frames or
+   lines with the same limits and words as the blocking readers. No
+   handler runs on it. While a connection's queue is empty, a reply goes
+   straight to its call and a request to a `plugin-rpc-call` thread
+   (1 MB stack); a notification, a parse error's answer, a refusal, the
+   end, and anything after one of these not yet taken, wait in the
+   queue, which a `plugin-rpc-queue` thread works through and leaves
+   once it's empty, so notifications are taken in order and finished
+   before a later reply or request is taken, as when the reader ran
+   them itself. Every thread it starts takes on the rush folders
+   (`rush_state::thread_dirs`) of the thread that made the connection.
+   An idle connection has no thread: plugind with 14 plugins and a
+   window had 15+ reader threads, now 1; 20 idle pairs in a test process
+   add 1 thread, not 40 (`tests/rpc_threads.rs`). `Conn::framed` and
+   `Conn::lines` on a reader with no descriptor keep a thread each.
+   `cargo bench -p rush-plugin --bench rpc` (CI's M1, 3 cores, against
+   the same socket read by a thread of its own): a call's round trip
+   64 → 53 µs; 1,000 notifications 1.04 → 1.39 ms (the queue's thread
+   is started again each time a burst drains).
+
 ## The host
 
 `rush host run <id>` serves one session (rush-host). Its files
