@@ -20,4 +20,5 @@
   shares one watcher with every other agent and keeps to GitHub's rate
   limit. If the installed rush has no `watch run`, use
   `gh run watch <id> --exit-status --interval 120`, never faster.
-- Land work on main by rebasing onto origin/main; no pull requests.
+- No pull requests: keep your branch rebased onto origin/main and green;
+  the lead session puts it on main.
