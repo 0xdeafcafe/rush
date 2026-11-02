@@ -131,6 +131,11 @@ fn features() -> Features {
         (Pricing, Support::PLANNED),
         (Memory, Support::PLANNED.with("its AGENTS.md files")),
         (
+            SubagentModel,
+            Support::PLANNED
+                .with("rush's spawn_agent takes a model; none is priced, so none is offered yet"),
+        ),
+        (
             Settings,
             yes("config.toml: model, reasoning effort, approvals, sandbox"),
         ),

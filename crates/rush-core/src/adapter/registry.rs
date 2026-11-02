@@ -415,6 +415,38 @@ impl Registry {
         pr.cost(&a.default_modeler()?.default_model(), u)
     }
 
+    /// The models of agent k's own list that cost less than the one it runs
+    /// when none is picked, dearest first (so the first is the nearest
+    /// step down): what a routine subagent can go to. Priced by a million
+    /// tokens each way at k's own prices. Empty when k isn't known, can't
+    /// say its default model, or prices no cheaper one: not offered.
+    /// Rust-only.
+    pub fn cheaper_models(&self, k: &str) -> Vec<Choice> {
+        let Some(a) = self.get(k) else {
+            return Vec::new();
+        };
+        let (Some(pr), Some(d), Some(ch)) = (a.pricer(), a.default_modeler(), a.chooser()) else {
+            return Vec::new();
+        };
+        let per_million = TokenUsage {
+            input: 1_000_000,
+            output: 1_000_000,
+            ..TokenUsage::default()
+        };
+        let price = |m: &str| pr.cost(m, &per_million);
+        let Some(top) = price(&d.default_model()) else {
+            return Vec::new();
+        };
+        let mut out: Vec<(f64, Choice)> = ch
+            .choices()
+            .models
+            .into_iter()
+            .filter_map(|c| price(&c.id).filter(|p| *p < top).map(|p| (p, c)))
+            .collect();
+        out.sort_by(|a, b| b.0.total_cmp(&a.0));
+        out.into_iter().map(|(_, c)| c).collect()
+    }
+
     /// model's context window as agent k knows it, else DEFAULT_WINDOW. An
     /// empty k is the one an older record meant.
     pub fn context_window(&self, k: &str, model: &str) -> i64 {
