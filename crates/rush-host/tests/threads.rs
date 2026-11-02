@@ -52,7 +52,7 @@ fn an_idle_host_runs_few_threads() {
     let before = rush_sys::threads::count();
     assert!(before > 0, "no thread count");
     let c = fake::spawn(fake::registry(), cfg).unwrap();
-    let added = settled(before + IDLE_HOST) - before;
+    let added = settled(before + IDLE_HOST).saturating_sub(before);
     assert_eq!(added, IDLE_HOST, "an idle host's threads");
     rush_host::Client::dial(&c.id).unwrap().stop().unwrap();
 }
