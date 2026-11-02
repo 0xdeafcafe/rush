@@ -788,7 +788,14 @@ mod tests {
 
     #[test]
     fn room_beside_the_text() {
-        for (w, want) in [(120, 0), (170, 0), (171, 44), (185, 44), (200, 54), (260, 99)] {
+        for (w, want) in [
+            (120, 0),
+            (170, 0),
+            (171, 44),
+            (185, 44),
+            (200, 54),
+            (260, 99),
+        ] {
             assert_eq!(side_width(w), want, "{w}");
         }
     }
