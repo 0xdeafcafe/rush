@@ -428,10 +428,16 @@ impl Runner {
             let (Some(stdin), Some(stdout)) = (stdin, stdout) else {
                 return Err("no pipes to the plugin".into());
             };
-            let (r, closer) =
-                rush_plugin::sys::wakeable(OwnedFd::from(stdout)).map_err(|e| e.to_string())?;
+            // Read by the process's one shared reader, as every connection.
             let h: Handler = Arc::new(from_mcp_server);
-            let conn = Conn::lines(r, stdin, move || closer.close(), Some(h));
+            let conn = match Conn::lines_fd(OwnedFd::from(stdout), stdin, Some(h)) {
+                Ok(c) => c,
+                Err(e) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(e.to_string());
+                }
+            };
             (child, conn)
         } else {
             cmd.stdin(Stdio::null()).stdout(Stdio::from(logf));

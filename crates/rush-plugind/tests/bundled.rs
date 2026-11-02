@@ -230,11 +230,12 @@ fn bundled_plugins_run_inside() {
     // One that panics as it starts is caught, written to its log as its
     // process's stderr would have it, and started again.
     let first = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let answers = h.clone();
     let start: rush_plugin::StartFn = Arc::new(move |s| {
         if first.swap(false, std::sync::atomic::Ordering::SeqCst) {
             panic!("at start");
         }
-        let conn = Conn::new(s, None).map_err(|e| e.to_string())?;
+        let conn = Conn::new(s, Some(answers.clone())).map_err(|e| e.to_string())?;
         Ok(rush_plugin::Started::serving(conn))
     });
     let panics = rush_plugin::register_bundle(Bundle {
