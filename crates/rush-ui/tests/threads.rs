@@ -10,7 +10,7 @@ rush_testenv::sandboxed!();
 
 use std::time::{Duration, Instant};
 
-use rush_draw::{App, Headless, Loop, Step, TrySend};
+use rush_draw::{App, Headless, Key, KeyMods, Loop, Step, TrySend};
 use rush_ui::{Note, frame};
 
 /// At most this many threads once the list is read: the UI's own, its
@@ -51,31 +51,42 @@ fn an_idle_view_keeps_few_threads_and_sleeps() {
     .unwrap();
     let threads = rush_sys::threads::count().saturating_sub(before);
 
-    // An idle minute: the loop woken only at the deadlines the model
-    // asks for, each run as the loop runs it, both clocks the model
-    // reads moved to the deadline's time.
+    // The first start's layout sheet put away as you would (esc: side
+    // by side), so the list alone shows.
+    m.key(Key::Esc, KeyMods::NONE);
+    hd.draw(|c| App::<Note>::draw(&mut m, c));
+
+    // Idle minutes: the loop woken only at the deadlines the model asks
+    // for, each run as the loop runs it, both clocks the model reads
+    // moved to the deadline's time. The first minute has the start's
+    // one-off looks; the second is counted.
     let from = Instant::now();
     let wall = rush_core::time::now();
-    let until = from + Duration::from_secs(60);
-    let (mut wakes, mut frames) = (0, 0);
+    let counted = from + Duration::from_secs(60);
+    let until = from + Duration::from_secs(120);
+    let (mut wakes, mut frames, mut steps) = (0, 0, 0);
     let mut why: Vec<&str> = Vec::new();
     while let Some(at) = App::<Note>::wake_at(&m) {
-        if at > until || wakes > 1000 {
+        if at > until || steps > 2000 {
             break;
         }
+        steps += 1;
         let at = at.max(from);
-        wakes += 1;
-        if let Some((name, _)) = m
-            .deadlines()
-            .into_iter()
-            .find(|(_, t)| t.is_some_and(|t| t.max(from) <= at))
-        {
-            why.push(name);
+        let counts = at > counted;
+        if counts {
+            wakes += 1;
+            if let Some((name, _)) = m
+                .deadlines()
+                .into_iter()
+                .find(|(_, t)| t.is_some_and(|t| t.max(from) <= at))
+            {
+                why.push(name);
+            }
         }
         m.instant = Some(at);
         m.clock = Some(wall + at.duration_since(from).as_millis() as i64);
         if m.wake_on(at) == Step::Draw {
-            frames += 1;
+            frames += counts as usize;
             hd.draw(|c| App::<Note>::draw(&mut m, c));
         }
     }
