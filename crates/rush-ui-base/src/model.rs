@@ -1796,6 +1796,11 @@ impl App<Note> for Model {
                 Event::FocusLost => {
                     self.term_focused = false;
                     self.ext.calls.pointer_back()(self);
+                    // No frame follows: yap is told now that the window
+                    // no longer shows a dictation itself.
+                    if let Some(f) = self.ext.calls.dictation_after_frame {
+                        f(self);
+                    }
                     Step::Idle
                 }
                 Event::Paste(t) => self.paste(&t).step(),

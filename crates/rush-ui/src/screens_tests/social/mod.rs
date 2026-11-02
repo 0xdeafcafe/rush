@@ -2,6 +2,7 @@
 
 mod broadcast;
 mod dictation;
+mod dictation_send;
 mod dock;
 mod feed;
 mod register;

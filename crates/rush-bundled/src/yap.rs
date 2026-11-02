@@ -9,7 +9,10 @@
 //! that socket ([`context_line`]), so yap spells them as they're written,
 //! and answers each finished dictation: it put it in its box itself
 //! ([`took_line`]), so a yap that waits for that skips its paste, or it
-//! left it ([`left_line`]), so yap pastes without waiting longer.
+//! left it ([`left_line`]), so yap pastes without waiting longer. While
+//! the window is in front with a box taking the words, its context says
+//! it `shows` the dictation itself, so a yap that knows shows nothing of
+//! its own.
 
 use std::io::{BufRead, BufReader, Write as _};
 use std::os::unix::net::UnixStream;
@@ -89,19 +92,27 @@ struct Context<'a> {
     /// itself ([`took_line`]) or left it ([`left_line`]); a yap that
     /// knows waits a moment for the answers before it pastes.
     takes: bool,
+    /// The window is in front with a box that takes the dictation, and
+    /// draws it there: a yap that knows shows nothing of its own while
+    /// this app is in front. Left out when it isn't, so the line is as
+    /// before.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    shows: bool,
 }
 
 /// The line that tells yap the words on the window's screen, most wanted
 /// first, the app it is (its bundle id, empty when unknown), and that it
 /// takes a finished dictation itself:
 /// `{"context":{"app":"…","words":["Redis","rushd"],"takes":true}}` and a
-/// newline.
-pub fn context_line(app: &str, words: &[String]) -> String {
+/// newline. shows: the window is in front with a box taking the words,
+/// and shows the dictation itself; the line then ends `"shows":true}}`.
+pub fn context_line(app: &str, words: &[String], shows: bool) -> String {
     let mut s = serde_json::to_string(&Hello {
         context: Context {
             app,
             words,
             takes: true,
+            shows,
         },
     })
     .unwrap_or_default();
@@ -333,26 +344,42 @@ mod tests {
 
     #[test]
     fn context_lines() {
-        let cases: &[(&str, &[&str], &str)] = &[
+        let cases: &[(&str, &[&str], bool, &str)] = &[
             (
                 "com.mitchellh.ghostty",
                 &["Redis", "rushd"],
+                false,
                 "{\"context\":{\"app\":\"com.mitchellh.ghostty\",\"words\":[\"Redis\",\"rushd\"],\"takes\":true}}\n",
+            ),
+            (
+                "com.mitchellh.ghostty",
+                &["Redis"],
+                true,
+                "{\"context\":{\"app\":\"com.mitchellh.ghostty\",\"words\":[\"Redis\"],\"takes\":true,\"shows\":true}}\n",
             ),
             (
                 "",
                 &[],
+                false,
                 "{\"context\":{\"app\":\"\",\"words\":[],\"takes\":true}}\n",
             ),
             (
                 "",
                 &["say \"hi\""],
+                false,
                 "{\"context\":{\"app\":\"\",\"words\":[\"say \\\"hi\\\"\"],\"takes\":true}}\n",
             ),
         ];
-        for (app, words, want) in cases {
+        for (app, words, shows, want) in cases {
             let words: Vec<String> = words.iter().map(|w| w.to_string()).collect();
-            assert_eq!(context_line(app, &words), *want, "{app} {words:?}");
+            assert_eq!(
+                context_line(app, &words, *shows),
+                *want,
+                "{app} {words:?} {shows}"
+            );
+            // Read back as yap reads it: shows there only when said.
+            let v: serde_json::Value = serde_json::from_str(want).unwrap();
+            assert_eq!(v["context"]["shows"].as_bool().unwrap_or(false), *shows);
         }
         assert_eq!(took_line("say \"hi\""), "{\"took\":\"say \\\"hi\\\"\"}\n");
         assert_eq!(left_line("ship it"), "{\"left\":\"ship it\"}\n");
@@ -388,7 +415,7 @@ mod tests {
         let (stop_tx, stop) = mpsc::channel();
         let (say_tx, say) = mpsc::channel();
         say_tx
-            .send(Say::Kept(context_line("", &["Redis".into()])))
+            .send(Say::Kept(context_line("", &["Redis".into()], false)))
             .unwrap();
         let t = std::thread::spawn(move || follow_at(&sock, stop, say, |_| {}));
         let next = || {
@@ -396,17 +423,19 @@ mod tests {
                 .recv_timeout(Duration::from_secs(10))
                 .expect("nothing came")
         };
-        assert_eq!(next(), (0, context_line("", &["Redis".into()])));
+        assert_eq!(next(), (0, context_line("", &["Redis".into()], false)));
         // Said without its newline: one is put on.
         say_tx
             .send(Say::Kept(
-                context_line("", &["rushd".into()]).trim_end().to_string(),
+                context_line("", &["rushd".into()], false)
+                    .trim_end()
+                    .to_string(),
             ))
             .unwrap();
-        assert_eq!(next(), (0, context_line("", &["rushd".into()])));
+        assert_eq!(next(), (0, context_line("", &["rushd".into()], false)));
         say_tx.send(Say::Once(took_line("ship it"))).unwrap();
         assert_eq!(next(), (0, took_line("ship it")));
-        assert_eq!(next(), (1, context_line("", &["rushd".into()])));
+        assert_eq!(next(), (1, context_line("", &["rushd".into()], false)));
         drop(stop_tx);
         t.join().unwrap();
     }

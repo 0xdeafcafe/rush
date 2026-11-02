@@ -16,6 +16,20 @@
 //! typed when it's done. Both on, fn is yap's and ctrl+space is rush's;
 //! the box shows whichever is under way.
 //!
+//! While the window is in front with a box taking the words, yap is told
+//! it shows the dictation itself (`shows` in its context line), so a yap
+//! that knows shows nothing of its own and only rush draws it. It's said
+//! again whenever that changes: the terminal tab losing or getting back
+//! focus, or the box going (a sheet or question over it, another place).
+//!
+//! enter while a yap dictation is still coming into the box (you're
+//! talking, or you let go and its words aren't in yet) doesn't send at
+//! once: the message waits for the words, the box's hint saying so, and
+//! goes with them as soon as they're in. enter again sends it now as it
+//! is; esc stops it waiting and keeps the text. A dictation that ends
+//! with nothing, or a yap that goes away, sends what's there once nothing
+//! more has come for [`WAIT_GRACE`].
+//!
 //! Both are told the words on the window's screen (screenwords.rs) so
 //! names come out spelled as written: yap on its socket whenever they
 //! change while it's followed (read after a frame, at most once a second),
@@ -34,7 +48,7 @@ use std::time::{Duration, Instant};
 
 use rush_draw::{Key, KeyMods, Step};
 
-use super::parts::{LiveText, YapState, is_dictation, yap_shown};
+use super::parts::{LiveText, YAP_PASTE_WAIT, YapState, is_dictation, yap_shown};
 use super::pushtalk::{Do, Engine, Heard, Listening, Mic, Talk};
 use super::screenwords;
 use crate::frame::{Editor, Out, Press};
@@ -53,6 +67,21 @@ pub const TALK_KEY: &str = "ctrl+space";
 /// The look's animation, a step each (yapEvery).
 const EVERY: Duration = Duration::from_millis(50);
 
+/// A message waiting for a yap dictation goes once nothing more has come
+/// for this long, in ms: the dictation ended with nothing, or yap went.
+pub const WAIT_GRACE: rush_core::time::Ms = 1_000;
+
+/// The box's hint while its message waits for the dictation.
+pub const WAITING_HINT: &str = "↵ sends when yap finishes";
+
+/// enter pressed while a yap dictation was coming into a box.
+struct Waiting {
+    /// The box: the open Session's key, or "" for Agents'.
+    into: String,
+    /// When it was first seen that nothing more is coming.
+    quiet_at: Option<rush_core::time::Ms>,
+}
+
 /// The window's view of its dictations (yapLive, and push-to-talk's).
 #[derive(Default)]
 pub struct Dictation {
@@ -63,6 +92,13 @@ pub struct Dictation {
     /// Lines for yap while it's followed: the words on screen, and that a
     /// dictation was taken.
     yap_say: Option<mpsc::Sender<Say>>,
+    /// What yap was last told: the window's in front with a box taking
+    /// the words, and shows the dictation itself.
+    shows: bool,
+    /// The message to send once the dictation's words are in its box.
+    waiting: Option<Waiting>,
+    /// The window's own enter for a waiting message, past key.
+    sending: bool,
     /// The words on screen as last read, when, what they were read from,
     /// and whether a wake is asked to read them again.
     words: Vec<String>,
@@ -173,6 +209,8 @@ pub fn sync(m: &mut Model) {
         d.yap_final.clear();
         d.yap_took = None;
         d.yap_early = None;
+        d.waiting = None;
+        d.shows = false;
         return;
     }
     if state(m).yap_stop.is_some() {
@@ -188,6 +226,7 @@ pub fn sync(m: &mut Model) {
     d.yap_say = Some(say_tx);
     // yap hears the words on screen as it's found.
     read_words(m, Instant::now());
+    state(m).shows = shows_now(m);
     say_words(m);
     let tx = tx.lane(64);
     let _ = std::thread::Builder::new()
@@ -212,13 +251,24 @@ pub fn sync(m: &mut Model) {
 /// again once the last reading is a second old, and yap told when they
 /// changed. A frame sooner asks for a wake at that second, so the last
 /// change before the screen goes still isn't missed.
+/// Also called as the terminal loses focus, when no frame follows: yap is
+/// told at once whether the window shows the dictation itself.
 pub fn after_frame(m: &mut Model) {
+    let followed = m
+        .kept
+        .peek::<Dictation>()
+        .is_some_and(|d| d.yap_say.is_some());
+    if !followed {
+        return;
+    }
+    let shows = shows_now(m);
+    if shows != state(m).shows {
+        state(m).shows = shows;
+        say_words(m);
+    }
     let Some(d) = m.kept.peek::<Dictation>() else {
         return;
     };
-    if d.yap_say.is_none() {
-        return;
-    }
     let now = Instant::now();
     if let Some(t) = d.words_at
         && now.duration_since(t) < screenwords::EVERY
@@ -253,15 +303,32 @@ fn read_words(m: &mut Model, now: Instant) -> bool {
     true
 }
 
-/// Tells yap the words on screen, while it's followed.
+/// Tells yap the words on screen, and whether the window shows the
+/// dictation itself, while it's followed.
 fn say_words(m: &mut Model) {
     let d = state(m);
     if let Some(tx) = &d.yap_say {
         let _ = tx.send(Say::Kept(rush_bundled::yap::context_line(
             this_app(),
             &d.words,
+            d.shows,
         )));
     }
+}
+
+/// Whether the window shows a yap dictation itself now: its terminal tab
+/// is in front and a box takes the words.
+fn shows_now(m: &mut Model) -> bool {
+    m.term_focused && target(m).is_some()
+}
+
+/// Lines for yap go to tx, as while it's followed, and the words on
+/// screen are said at once (tests).
+pub fn tell_yap(m: &mut Model, tx: mpsc::Sender<Say>) {
+    state(m).yap_say = Some(tx);
+    read_words(m, Instant::now());
+    state(m).shows = shows_now(m);
+    say_words(m);
 }
 
 /// The words on screen for a dictation starting now: as last read, read
@@ -282,6 +349,15 @@ fn words_now(m: &mut Model) -> Vec<String> {
 /// have put it, and yap is told it was taken; the look ends in the same
 /// step, so no frame shows the words twice.
 pub fn on_yap(m: &mut Model, s: YapState) -> Out {
+    let o = take_yap(m, s);
+    if state(m).waiting.is_none() {
+        return o;
+    }
+    let _ = settle(m);
+    Out::Draw
+}
+
+fn take_yap(m: &mut Model, s: YapState) -> Out {
     let now = m.clock.unwrap_or_else(rush_core::time::now);
     if s.phase != "done" {
         let d = state(m);
@@ -333,6 +409,8 @@ pub fn on_yap(m: &mut Model, s: YapState) -> Out {
         d.yap_final.clear();
         d.yap_handled = true;
         d.yap = hidden;
+        // A message waiting for these words goes with them.
+        let _ = send_waiting(m);
         return Out::Draw;
     }
     let d = state(m);
@@ -369,8 +447,12 @@ fn talk_key(m: &mut Model) -> String {
 pub fn look(m: &mut Model) -> Option<LiveText> {
     let focused = m.term_focused;
     let own = state(m).talk.on();
-    let shown = own || yap_shown(&state(m).yap, focused, this_app());
-    if !shown {
+    let yap = yap_shown(&state(m).yap, focused, this_app());
+    // A message waiting for the words shows it waits in its box, the
+    // dictation's look or not.
+    let into = state(m).waiting.as_ref().map(|w| w.into.clone());
+    let waiting = !own && into.is_some() && target_id(m) == into;
+    if !own && !yap && !waiting {
         return None;
     }
     let key = if own { talk_key(m) } else { String::new() };
@@ -399,7 +481,18 @@ pub fn look(m: &mut Model) -> Option<LiveText> {
             hint,
         }
     } else {
-        d.yap.look(frame)
+        let mut l = if yap {
+            d.yap.look(frame)
+        } else {
+            LiveText {
+                frame,
+                ..LiveText::default()
+            }
+        };
+        if waiting {
+            l.hint = WAITING_HINT.into();
+        }
+        l
     };
     if !pinned {
         m.ask_wake(Instant::now() + EVERY);
@@ -444,6 +537,9 @@ pub fn set_mic(m: &mut Model, id: &str) {
 /// A key, before anything else has it: push-to-talk's key, and esc while
 /// it listens. Everything else, and its key with its plugin off, goes on.
 pub fn key(m: &mut Model, k: &Press) -> Out {
+    if let Some(o) = waiting_key(m, k) {
+        return o;
+    }
     if !talk_on(m) {
         return Out::Pass;
     }
@@ -478,6 +574,100 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         Do::Cancel | Do::Nothing => {}
     }
     Out::Draw
+}
+
+/// enter while a yap dictation is coming into the box with the keys: the
+/// message waits for its words. enter again sends it now, as it is; esc
+/// stops it waiting and keeps the text. None leaves the key to the rest.
+fn waiting_key(m: &mut Model, k: &Press) -> Option<Out> {
+    if state(m).sending {
+        return None;
+    }
+    match k.s.as_str() {
+        "esc" if state(m).waiting.is_some() => {
+            state(m).waiting = None;
+            Some(Out::Draw)
+        }
+        "enter" => {
+            if state(m).waiting.take().is_some() {
+                return None;
+            }
+            let now = m.clock.unwrap_or_else(rush_core::time::now);
+            let d = m.kept.peek::<Dictation>()?;
+            if !(coming(d, now) && yap_shown(&d.yap, m.term_focused, this_app())) {
+                return None;
+            }
+            let into = target_id(m)?;
+            state(m).waiting = Some(Waiting {
+                into,
+                quiet_at: None,
+            });
+            let _ = settle(m);
+            Some(Out::Draw)
+        }
+        _ => None,
+    }
+}
+
+/// Whether more of yap's dictation is coming: it's listening or tidying,
+/// or it's done and its paste is still to come.
+fn coming(d: &Dictation, now: rush_core::time::Ms) -> bool {
+    match d.yap.phase.as_str() {
+        "listening" | "finishing" => true,
+        "done" => !d.yap_final.is_empty() && now - d.yap_final_at < YAP_PASTE_WAIT,
+        _ => false,
+    }
+}
+
+/// A waiting message, looked at again: it goes once nothing more has come
+/// for [`WAIT_GRACE`]. The window looks again by itself after that long;
+/// tests call it with the clock moved on.
+pub fn settle(m: &mut Model) -> Out {
+    let now = m.clock.unwrap_or_else(rush_core::time::now);
+    let more = m.kept.peek::<Dictation>().is_some_and(|d| coming(d, now));
+    let Some(w) = state(m).waiting.as_mut() else {
+        return Out::Idle;
+    };
+    if more {
+        w.quiet_at = None;
+        return Out::Draw;
+    }
+    let quiet = w.quiet_at;
+    match quiet {
+        None => {
+            w.quiet_at = Some(now);
+            if let Some(tx) = m.sender() {
+                let tx = tx.lane(1);
+                let _ = std::thread::Builder::new()
+                    .name("rush-yap-wait".into())
+                    .spawn(move || {
+                        std::thread::sleep(Duration::from_millis(WAIT_GRACE as u64 + 10));
+                        let _ = tx.send(Note::Apply(Box::new(settle)));
+                    });
+            }
+            Out::Draw
+        }
+        Some(t) if now - t >= WAIT_GRACE => send_waiting(m),
+        Some(_) => Out::Idle,
+    }
+}
+
+/// Sends the waiting message, as enter in its box does, if that box still
+/// has the keys.
+fn send_waiting(m: &mut Model) -> Out {
+    let Some(w) = state(m).waiting.take() else {
+        return Out::Idle;
+    };
+    if target_id(m).as_deref() != Some(w.into.as_str()) {
+        return Out::Draw;
+    }
+    let Some(enter) = Press::of("enter") else {
+        return Out::Draw;
+    };
+    state(m).sending = true;
+    let o = m.press_key(&enter);
+    state(m).sending = false;
+    if o.used() { o } else { Out::Draw }
 }
 
 /// A held key said again: a press as ever, push-to-talk told it's held.
@@ -679,6 +869,8 @@ pub fn paste(m: &mut Model, text: &str) -> Out {
     match target(m) {
         Some(ed) => {
             ed.insert_str(&text);
+            // A message waiting for these words goes with them.
+            let _ = send_waiting(m);
             Out::Draw
         }
         None => Out::Pass,
