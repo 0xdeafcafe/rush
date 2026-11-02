@@ -2657,7 +2657,11 @@ Go rush is gone from the tree; its last version is the `go-final` tag
   prices are never dropped. The bench's figures with a second scan timed
   (the list makes one each reading): loader 14.5 → 13.7 MiB and 120,449
   → 117,121 allocations kept; the first scan 45 → 40 ms, a scan again
-  7.8 → 5.9 ms.
+  7.8 → 5.9 ms. The loader's memo of idle rush sessions' rows (rush-fleet
+  `IdleRow`) checking what a row was made from by a fingerprint of it,
+  not by its profile, session, folder and state held again beside the
+  row: 13.7 → 13.4 MiB and 117,209 → 110,184 allocations kept. The rows
+  themselves are the rest of it (about 2.3 KiB a row).
 - Footprint: `/usr/bin/footprint -p <pid>` idle on the list, and with the
   largest transcript under `~/.claude/projects` open; side by side with Go.
 - Idle: `top -l` CPU and wakeups over 60 s with nothing changing.

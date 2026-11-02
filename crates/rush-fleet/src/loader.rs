@@ -262,14 +262,27 @@ struct PastIn {
 
 /// A finished hosted row, kept while nothing about it changes.
 struct IdleRow {
-    profile: Profile,
-    updated: Ms,
+    /// What it was made from (idle_print): its profile and what its host
+    /// said of it, hashed rather than held again beside the row
+    /// (Rust-only).
+    print: u64,
     at: Ms,
-    sid: String,
-    cwd: String,
-    state: String,
-    sleeping: bool,
     row: Agent,
+}
+
+/// A fingerprint of what an idle hosted row is made from: its profile,
+/// and its host's word on when it last changed, its session, folder,
+/// state and whether it sleeps.
+fn idle_print(p: &Profile, info: &HostInfo) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::hash::DefaultHasher::new();
+    p.hash(&mut h);
+    info.updated_at.hash(&mut h);
+    info.session_id.hash(&mut h);
+    info.cwd.hash(&mut h);
+    info.state.hash(&mut h);
+    info.sleeping.hash(&mut h);
+    h.finish()
 }
 
 /// Where transcript_of last found a session's transcript, and the load it
@@ -1600,12 +1613,7 @@ impl Loader {
         if idle
             && !self.quick
             && let Some(e) = self.idle_rows.get(&info.id)
-            && e.profile == *p
-            && e.updated == info.updated_at
-            && e.sid == info.session_id
-            && e.cwd == info.cwd
-            && e.state == info.state
-            && e.sleeping == info.sleeping
+            && e.print == idle_print(p, info)
             && now - e.at < PAST_EVERY
         {
             return e.row.clone();
@@ -1642,13 +1650,8 @@ impl Loader {
             self.idle_rows.insert(
                 info.id.clone(),
                 Box::new(IdleRow {
-                    profile: p.clone(),
-                    updated: info.updated_at,
+                    print: idle_print(p, info),
                     at: now,
-                    sid: info.session_id.clone(),
-                    cwd: info.cwd.clone(),
-                    state: info.state.clone(),
-                    sleeping: info.sleeping,
                     row: a.clone(),
                 }),
             );
