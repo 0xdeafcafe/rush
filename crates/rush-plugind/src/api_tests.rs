@@ -500,3 +500,71 @@ fn follow_tells_what_happens() {
     assert_eq!(got[1], json!({"type": "delta", "text": "On"}));
     assert_eq!(got.len(), 8, "{got:?}");
 }
+
+// models.list gathers the models of the plugins that offer them, by
+// plugin; models.ask reaches the one named and passes back its error as
+// it gave it; a plugin that offers none isn't asked.
+#[test]
+fn models_list_and_ask() {
+    use rush_plugin::rpc::Handler;
+    let home = Home::new();
+    let (b, _) = crate::testutil::test_broker(&home);
+    let h: Handler = std::sync::Arc::new(|_, _, method, p| match method {
+        "models.list" => Ok(Some(raw(
+            r#"{"models":[{"name":"on-device","label":"Apple on-device model","contextTokens":4096,"available":true,"why":""}]}"#,
+        ))),
+        "models.ask" => {
+            let q: Value = serde_json::from_str(p.unwrap().get()).unwrap();
+            assert!(
+                q.get("plugin").is_none(),
+                "the plugin is sent its own name: {q}"
+            );
+            if q["prompt"] == "huge" {
+                return Err(rush_plugin::Error::server("the context is too small"));
+            }
+            Ok(Some(raw(&json!({"text": format!("{}: {}", q["model"].as_str().unwrap(), q["prompt"].as_str().unwrap())}).to_string())))
+        }
+        _ => Ok(None),
+    });
+    let mut m = crate::testutil::manifest("ai");
+    m.models = true;
+    let _ai = crate::testutil::add_plugin(&b, m, Some(h));
+    let _plain = crate::testutil::add_plugin(&b, crate::testutil::manifest("plain"), None);
+
+    let ctx = Ctx::background();
+    let got = b.models(&ctx);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(
+        (
+            got[0].plugin.as_str(),
+            got[0].model.name.as_str(),
+            got[0].model.context_tokens
+        ),
+        ("ai", "on-device", 4096)
+    );
+    let ask = |plugin: &str, prompt: &str| {
+        b.ask_model(
+            &ctx,
+            rush_plugin::models::Ask {
+                plugin: plugin.into(),
+                model: "on-device".into(),
+                system: "s".into(),
+                prompt: prompt.into(),
+            },
+        )
+    };
+    assert_eq!(ask("ai", "hi").unwrap(), "on-device: hi");
+    assert!(ask("ai", "huge").unwrap_err().message.contains("too small"));
+    assert!(
+        ask("plain", "hi")
+            .unwrap_err()
+            .message
+            .contains("offers no models")
+    );
+    assert!(
+        ask("gone", "hi")
+            .unwrap_err()
+            .message
+            .contains("not running")
+    );
+}

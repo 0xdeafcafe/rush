@@ -821,6 +821,7 @@ fn optional_found() {
         run: None,
         start: None,
         switched: None,
+        check: None,
     };
     let bundles = vec![
         b("always", false, &[]),

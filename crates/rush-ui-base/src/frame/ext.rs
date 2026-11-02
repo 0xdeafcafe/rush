@@ -183,6 +183,9 @@ pub struct Ext {
     pub session_dock: Vec<Dock>,
     pub overlays: Vec<Overlay>,
     pub on_fleet: Vec<FleetHook>,
+    /// Called at the start of each rebuild of the list, before its rows are
+    /// made: the sidebar's names (nameAgents, model.go:2231).
+    pub on_rebuild: Vec<FleetHook>,
     pub status: Vec<StatusHook>,
     pub session_body: Vec<SessionBody>,
     pub session_head: Vec<SessionHead>,

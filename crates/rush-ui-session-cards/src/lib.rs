@@ -794,14 +794,15 @@ pub fn card_top(m: &Model, key: &str) -> (isize, usize, usize) {
     };
     match m.session.as_ref().filter(|v| v.key == key) {
         Some(v) if c.card_in_panels => {
-            let pinned = v
-                .shown
-                .first()
-                .is_some_and(|r| r.starts_with(crate::sess::PIN_REF));
+            // The prompts pinned over the body's top rows and its last one
+            // aren't the card's to take clicks on.
+            let pin = |r: &String| r.starts_with(crate::sess::PIN_REF);
+            let tops = v.shown.iter().take_while(|r| pin(r)).count();
+            let foot = v.shown.len() > tops && v.shown.last().is_some_and(pin);
             (
                 v.top as isize + v.panels_at + c.card_off as isize,
-                v.top + usize::from(pinned),
-                v.top + v.shown.len(),
+                v.top + tops,
+                v.top + v.shown.len() - usize::from(foot),
             )
         }
         _ => ((m.session_dock_top + c.card_off) as isize, 0, usize::MAX),

@@ -29,6 +29,7 @@ The manifest lives at `<plugins>/<name>/plugin.json`. Unknown fields are an erro
 | `requires` | object | | `{"os"?, "arch"?, "bin"?}`, each a string array. `os` (`runtime.GOOS` values, e.g. `"darwin"`) and `arch` (`runtime.GOARCH`) gate by platform; `bin` names programs that must be on `PATH` (bare names, not paths). Any value within a field is enough; every field given must be met. Unmet, the plugin never runs, bundled or installed — no error, just left out of `rush plugin list` as off, with the reason. |
 | `provides` | string array | | Services it answers for other plugins and rush, dotted lowercase names like `cleanup.report`: rush calls its `service.call` when one is asked for (protocol.md). A rush-protocol plugin only. |
 | `uses` | string array | | Services it may ask other plugins for with `services.ask`. It's asking whoever provides them, not named plugins. |
+| `models` | bool | false | It offers language models for rush's own small jobs: session titles, feed summaries, quick ask and memory notes. rush calls its `models.list` and `models.ask` (protocol.md) and tries its models before Claude's and Ollama's. Not for `mcp` plugins. |
 
 Agents, prompt text and tools reach sessions **as approved**. Editing `plugin.json` changes nothing until the user approves again, and until then the plugin doesn't run.
 

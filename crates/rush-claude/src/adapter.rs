@@ -29,11 +29,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use rush_core::adapter::{
-    self, ContextWindower, Describer, Discoverer, FastPricer, Feature, Features, HistoryFollower,
-    HistoryReader, Homer, JobKeeper, Keyed, Kind, Level, LoginHinter, Made, Native, Previewer,
-    Pricer, Profile, Programmer, ProjectFolderer, RunFollower, Session, Speaker, SpendReader,
-    SpendScanner, SpendTarget, SubagentStats, Support, TailReader, TranscriptLocator, Transcripts,
-    Worded,
+    self, Codenamer, ContextWindower, CwdReader, Describer, Discoverer, FastPricer, Feature,
+    Features, HistoryFollower, HistoryReader, Homer, JobKeeper, Keyed, Kind, Level, LoginHinter,
+    Made, Native, Previewer, Pricer, Profile, Programmer, ProjectFolderer, RunFollower, Session,
+    Speaker, SpendReader, SpendScanner, SpendTarget, SubagentStats, Support, TailReader,
+    TranscriptLocator, Transcripts, Worded,
 };
 use rush_core::agent::{Preview, Spend, TokenUsage};
 use rush_core::time::{Ms, now};
@@ -106,17 +106,29 @@ impl Claude {
     /// The folder a session started for ~/.claude runs in: the home of the
     /// login in use, ready, or ~/.claude when it can't be readied.
     pub fn run_as(&self) -> Account {
-        let cfg = self.config();
-        let acct = crate::home::run_account(&cfg);
-        if acct.is_default() {
-            return acct;
-        }
-        let root = crate::home::active(&cfg);
-        if crate::home::link_home(&acct, &root).is_err() || !crate::home::has_home(&acct) {
-            return root;
-        }
-        acct
+        run_as_in(&self.config())
     }
+
+    /// Where rush's config comes from, to read it again later.
+    pub(crate) fn config_source(&self) -> ConfigFn {
+        match &self.config {
+            Some(f) => f.clone(),
+            None => Arc::new(|| rush_state::Store::load().config),
+        }
+    }
+}
+
+/// [`Claude::run_as`] for a config already read.
+pub(crate) fn run_as_in(cfg: &rush_state::Config) -> Account {
+    let acct = crate::home::run_account(cfg);
+    if acct.is_default() {
+        return acct;
+    }
+    let root = crate::home::active(cfg);
+    if crate::home::link_home(&acct, &root).is_err() || !crate::home::has_home(&acct) {
+        return root;
+    }
+    acct
 }
 
 /// A Claude config folder as a profile of rush's.
@@ -241,10 +253,12 @@ impl adapter::Adapter for Claude {
     rush_core::has!(
         homer: Homer,
         discoverer: Discoverer,
+        cwd_reader: CwdReader,
         job_keeper: JobKeeper,
         transcripts: Transcripts,
         transcript_locator: TranscriptLocator,
         previewer: Previewer,
+        codenamer: Codenamer,
         spend_reader: SpendReader,
         run_follower: RunFollower,
         pricer: Pricer,
@@ -287,6 +301,7 @@ impl adapter::Adapter for Claude {
         default_modeler: DefaultModeler,
         commander: Commander,
         chooser: Chooser,
+        spawnable: Spawnable,
         skill_rooter: SkillRooter,
         brancher: Brancher,
         model_namer: ModelNamer,
@@ -312,9 +327,30 @@ impl adapter::Adapter for Claude {
     );
 }
 
+/// Each session's codename, by session id (discover.go:137 Codenames).
+impl Codenamer for Claude {
+    fn codenames(&self) -> std::collections::HashMap<String, String> {
+        crate::sessions::codenames()
+    }
+}
+
 impl Homer for Claude {
     fn home(&self) -> Profile {
         profile(&Account::home())
+    }
+}
+
+/// Where the session pid runs now, from the session file Claude Code keeps
+/// for it: entering a worktree moves it (Go's discover.go:244 SessionCwd).
+impl CwdReader for Claude {
+    fn session_cwd(&self, p: &Profile, pid: i32) -> Option<(String, String)> {
+        let acct = if p.dir.is_empty() {
+            Account::home()
+        } else {
+            account(p)
+        };
+        let s = crate::sessions::read_session(&acct.sessions_dir().join(format!("{pid}.json")))?;
+        Some((s.session_id, s.cwd))
     }
 }
 
@@ -772,5 +808,35 @@ mod tests {
             .collect();
         assert_eq!(ids, ["sonnet", "haiku"]);
         assert!(reg.cheaper_models("nope").is_empty());
+    }
+
+    // Go's TakesSubagentMessages (claude.go:186) and SessionCwd
+    // (discover.go:244), the latter through a temp config dir.
+    #[test]
+    fn takes_messages_and_reads_where_it_moved() {
+        let c = super::Claude::new();
+        assert!(c.takes_subagent_messages());
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("sessions")).unwrap();
+        std::fs::write(
+            dir.path().join("sessions/42.json"),
+            r#"{"pid":42,"sessionId":"s-1","cwd":"/wt"}"#,
+        )
+        .unwrap();
+        let p = super::profile(&super::Account::at("t", dir.path()));
+        let r = Adapter::cwd_reader(&c).expect("Claude reads where it moved");
+        assert_eq!(r.session_cwd(&p, 42), Some(("s-1".into(), "/wt".into())));
+        assert_eq!(r.session_cwd(&p, 43), None);
+    }
+
+    // Go's SpawnCommand (claude.go:184): what a shell hands rush to host.
+    #[test]
+    fn spawns_claude_code() {
+        let c = super::Claude::new();
+        let sp = Adapter::spawnable(&c).expect("Claude is spawnable");
+        assert_eq!(
+            sp.spawn_command(),
+            (r#"claude -p "<task>""#.to_string(), "--model".to_string())
+        );
     }
 }

@@ -5,7 +5,7 @@
 //! (groupModes :25, groupLabel :34, activeSidebar :47, loadSidebars :62,
 //! nameAgents :73, namePeers :98, sidebarPlace :124).
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use rush_core::agent::Agent;
 use rush_plugin::Sidebar;
@@ -57,32 +57,33 @@ pub fn load(m: &mut Model) {
     m.later(
         move || {
             let s = disk.sidebars(&mut files);
-            (files, s)
+            (files, s, disk.rush_names())
         },
-        |m, (files, s)| {
+        |m, (files, s, names)| {
             let p = m.plugins();
             p.sidebar_files = files;
-            if p.sidebars == s {
+            if p.sidebars == s && p.rush_names == names {
                 return Out::Idle;
             }
             p.sidebars = s;
+            p.rush_names = names;
             Out::Draw
         },
     );
 }
 
 /// The names the arrangement gives agents, by key, except where you
-/// renamed one in rush (nameAgents): `renamed` holds rush's own names.
+/// renamed one in rush (nameAgents): `renamed` holds the names you gave in rush, by key.
 pub fn agent_names(
     sb: &Sidebar,
     agents: &[Agent],
-    renamed: &HashMap<String, String>,
+    renamed: &BTreeMap<String, String>,
 ) -> HashMap<String, String> {
     let mut out = HashMap::new();
     let Some(placed) = &sb.agents else { return out };
     for a in agents {
         let sid = &a.job.session_id;
-        if sid.is_empty() || renamed.contains_key(&a.key) {
+        if sid.is_empty() || renamed.get(&a.key).is_some_and(|n| !n.is_empty()) {
             continue;
         }
         if let Some(p) = placed.get(sid)
@@ -92,6 +93,44 @@ pub fn agent_names(
         }
     }
     out
+}
+
+/// Gives the agents the names the arrangement in use places, except where
+/// you renamed one in rush, and gives back the names it took over from an
+/// arrangement no longer in use; then tells the conversation view the
+/// peers' names, as the list now has them (nameAgents, sidebar.go:73-95,
+/// its deferred namePeers run last). Agents are replaced by each reading
+/// of the fleet, so a name is given back only where the agent still has
+/// the name the arrangement gave it.
+pub fn name_agents(m: &mut Model) {
+    let sb = if (m.ext.calls.hosted_alone())(m) {
+        None // hosted alone shows one session and is never arranged
+    } else {
+        let by = m.cfg.group_by.clone();
+        active(&m.plugins().sidebars, &by).cloned()
+    };
+    let p = m.plugins();
+    let old = std::mem::take(&mut p.renamed);
+    let names = p.rush_names.clone();
+    for a in m.agents.iter_mut() {
+        if let Some((was, gave)) = old.get(&a.key)
+            && a.display_name == *gave
+        {
+            a.display_name.clone_from(was);
+        }
+    }
+    let mut renamed = BTreeMap::new();
+    if let Some(sb) = &sb {
+        let given = agent_names(sb, &m.agents, &names);
+        for a in m.agents.iter_mut() {
+            if let Some(n) = given.get(&a.key) {
+                renamed.insert(a.key.clone(), (a.display_name.clone(), n.clone()));
+                a.display_name.clone_from(n);
+            }
+        }
+    }
+    m.plugins().renamed = renamed;
+    name_peers(&m.agents);
 }
 
 /// The session each codename is, by the list's names, so a message sent
@@ -111,6 +150,19 @@ pub fn peer_names(codes: &HashMap<String, String>, agents: &[Agent]) -> HashMap<
     names
 }
 
+/// Tells the conversation view which session each codename is, from every
+/// adapter's codenames and the list as it stands (sidebar.go:98 namePeers,
+/// run at the end of nameAgents).
+pub fn name_peers(agents: &[Agent]) {
+    let mut codes: HashMap<String, String> = HashMap::new();
+    for r in rush_core::adapter::global().all().iter() {
+        if let Some(c) = r.codenamer() {
+            codes.extend(c.codenames()); // sidebar.go:101-110
+        }
+    }
+    rush_convo::set_peers(peer_names(&codes, agents));
+}
+
 /// The section an agent goes in under the arrangement, how high that
 /// section ranks, and the agent's place in it (sidebarPlace).
 pub fn place(sb: &Sidebar, a: &Agent) -> (String, usize, i64) {
@@ -122,4 +174,31 @@ pub fn place(sb: &Sidebar, a: &Agent) -> (String, usize, i64) {
         return (sb.sections[i].title.clone(), i, p.order);
     }
     (OTHER_SECTION.to_string(), sb.sections.len(), 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn agent(sid: &str, pid: i32, name: &str) -> Agent {
+        let mut a = Agent::default();
+        a.job.session_id = sid.into();
+        a.pid = pid;
+        a.display_name = name.into();
+        a
+    }
+
+    /// A codename used again goes to the session that has it now
+    /// (sidebar.go:98 namePeers).
+    #[test]
+    fn sidebar_peer_names_a_live_session_wins_a_reused_codename() {
+        let codes: HashMap<String, String> = [("old", "rush-8a"), ("new", "rush-8a")]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        let got = peer_names(&codes, &[agent("new", 42, "Live"), agent("old", 0, "Gone")]);
+        assert_eq!(got.get("rush-8a").map(String::as_str), Some("Live"));
+        let got = peer_names(&codes, &[agent("old", 0, "Gone"), agent("new", 42, "Live")]);
+        assert_eq!(got.get("rush-8a").map(String::as_str), Some("Live"));
+    }
 }

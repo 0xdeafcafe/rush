@@ -1123,9 +1123,10 @@ fn ours_through_a_symlink() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// Scrolled into a long conversation, the prompt you're reading under is
-/// pinned over the top row once it's scrolled off; at the end nothing is;
-/// a click on the pin goes to its turn (promptpins_test.go).
+/// Scrolled into a long conversation, the first prompt is pinned at the
+/// top, the one before what you're reading under it, and the next one over
+/// the bottom row; the rows are the conversation's own when the pane is
+/// short; a click on any of them goes to its turn.
 #[test]
 fn prompt_pins() {
     let fake = Fake::new();
@@ -1136,21 +1137,266 @@ fn prompt_pins() {
     press(&mut m, "pgup");
     let s = screen(&mut m);
     let top = m.session.as_ref().unwrap().top;
+    assert!(s[top].starts_with("  ▍ first   question 0"), "{:?}", s[top]);
     assert!(
-        s[top].starts_with("  ▍ current question 25"),
+        s[top + 1].starts_with("  ▍ current question 25"),
         "{:?}",
-        s[top]
+        s[top + 1]
     );
-    assert_eq!(m.session.as_ref().unwrap().shown[0], "pin:t26");
-    click(&mut m, MouseKind::Down(Button::Left), 10, top);
-    click(&mut m, MouseKind::Up(Button::Left), 10, top);
+    assert_eq!(m.session.as_ref().unwrap().shown[0], "pin:t1");
+    assert_eq!(m.session.as_ref().unwrap().shown[1], "pin:t26");
+    click(&mut m, MouseKind::Down(Button::Left), 10, top + 1);
+    click(&mut m, MouseKind::Up(Button::Left), 10, top + 1);
     let v = m.session.as_ref().unwrap();
     assert_eq!(v.sel, "t26");
     let s = screen(&mut m);
-    // Its turn from the top: the blank above its heading under the pin
-    // of the one before, as Go's.
-    assert!(s[top + 1].contains("▏ You"), "picked: {:?}", s[top + 1]);
-    assert!(s[top + 2].contains("question 25"), "{:?}", s[top + 2]);
+    // Its turn from the top: its blank first row, then its "You" heading,
+    // right under the two pins (the one over it is the question before).
+    assert!(
+        s[top + 1].starts_with("  ▍ current question 24"),
+        "{:#?}",
+        &s[top..top + 6]
+    );
+    assert!(s[top + 2].trim().is_empty() || s[top + 2].trim().starts_with('│'));
+    assert!(s[top + 3].contains("You"), "{:#?}", &s[top..top + 6]);
+    assert!(
+        s[top + 4].contains("question 25"),
+        "{:#?}",
+        &s[top..top + 6]
+    );
+}
+
+/// The pane height that leaves `body` rows for the conversation, measured
+/// from a frame rather than assumed, so a layout change moves the heights
+/// with it.
+fn pane_for(body: usize) -> usize {
+    let fake = Fake::new();
+    let mut m = open(agent("steer", State::Idle), &fake, 123, 36);
+    long(&mut m, 30);
+    screen(&mut m);
+    m.session.as_mut().unwrap().pos = crate::session::Pos::At { n: 14, off: 0 };
+    screen(&mut m);
+    let rows = m.session.as_ref().unwrap().shown.len();
+    assert!(rows > 0 && rows <= 36, "body rows {rows}");
+    let h = 36 - rows + body;
+    let mut m = open(agent("steer", State::Idle), &fake, 123, h);
+    long(&mut m, 30);
+    screen(&mut m);
+    m.session.as_mut().unwrap().pos = crate::session::Pos::At { n: 14, off: 0 };
+    screen(&mut m);
+    assert_eq!(m.session.as_ref().unwrap().shown.len(), body, "pane {h}");
+    h
+}
+
+/// A jump to a pinned prompt lands the turn's first row just below the top
+/// pins that show there: none, one or two. Each case: the pane's height, the
+/// turn jumped to, how many pins sit over it, and the question it shows.
+#[test]
+fn prompt_jump_lands_below_the_pins() {
+    let cases: [(&str, usize, u32, usize, &str); 5] = [
+        ("the first turn: no pins over it", 36, 1, 0, "question 0"),
+        ("the second: only the first pin", 36, 2, 1, "question 1"),
+        ("a later one: two pins", 36, 14, 2, "question 13"),
+        ("a short pane: one pin", pane_for(9), 14, 1, "question 13"),
+        ("a shorter one: none", pane_for(6), 14, 0, "question 13"),
+    ];
+    for (name, h, n, pins, want) in cases {
+        let fake = Fake::new();
+        let mut m = open(agent("steer", State::Idle), &fake, 123, h);
+        long(&mut m, 30);
+        screen(&mut m);
+        let v = m.session.as_mut().unwrap();
+        assert!(crate::screens::session_core::conversation::click_pin(
+            v,
+            &format!("pin:t{n}")
+        ));
+        let s = screen(&mut m);
+        let top = m.session.as_ref().unwrap().top;
+        for y in 0..pins {
+            assert!(
+                s[top + y].starts_with("  ▍ "),
+                "{name}: pin {y}: {:?}",
+                s[top + y]
+            );
+        }
+        let rows = &s[top..top + 6];
+        assert!(!s[top + pins].starts_with("  ▍ "), "{name}: {rows:#?}");
+        assert!(s[top + pins + 1].contains("You"), "{name}: {rows:#?}");
+        assert!(s[top + pins + 2].contains(want), "{name}: {rows:#?}");
+    }
+}
+
+/// Which pins show where the conversation is scrolled to, and how a pane
+/// that is short keeps its rows. Each case: the pane's height, where it's
+/// scrolled (a turn, or the end), then what the top row, the one under it
+/// and the bottom row start with ("" for none of them).
+#[test]
+fn prompt_pins_by_place() {
+    // (name, height, scrolled to turn n or None for the end, row 0, row 1, last)
+    #[allow(clippy::type_complexity)]
+    let cases: [(&str, usize, Option<u32>, &str, &str, &str); 8] = [
+        (
+            "middle: first, before and next",
+            36,
+            Some(14),
+            "  ▍ first   question 0",
+            "  ▍ current question 12",
+            "  ▍ next    question",
+        ),
+        (
+            "the end: first and latest, no next",
+            36,
+            None,
+            "  ▍ first   question 0",
+            "  ▍ latest  question 30",
+            "",
+        ),
+        (
+            "the top: no top pins, next shown",
+            36,
+            Some(1),
+            "",
+            "",
+            "  ▍ next    question",
+        ),
+        (
+            "the first is the current one: one top row",
+            36,
+            Some(2),
+            "  ▍ first   question 0",
+            "",
+            "  ▍ next    question",
+        ),
+        ("6 body rows: no pins", pane_for(6), Some(14), "", "", ""),
+        (
+            "7 body rows: the before pin and the next",
+            pane_for(7),
+            Some(14),
+            "  ▍ current question 12",
+            "",
+            "  ▍ next    question",
+        ),
+        (
+            "9 body rows: one top pin, the before one wins",
+            pane_for(9),
+            Some(14),
+            "  ▍ current question 12",
+            "",
+            "  ▍ next    question",
+        ),
+        (
+            "10 body rows: both top pins",
+            pane_for(10),
+            Some(14),
+            "  ▍ first   question 0",
+            "  ▍ current question 12",
+            "  ▍ next    question",
+        ),
+    ];
+    for (name, h, at, r0, r1, last) in cases {
+        let fake = Fake::new();
+        let mut m = open(agent("steer", State::Idle), &fake, 123, h);
+        long(&mut m, 30);
+        // A last answer long enough to scroll its own question off.
+        let now = m.now;
+        sess(&mut m).sent("question 30".into(), Vec::new(), now);
+        sess(&mut m).apply(
+            &Event::Message(Message {
+                role: "assistant".into(),
+                id: "long".into(),
+                parts: vec![Part {
+                    kind: PartKind::Text,
+                    text: "a line\n\n".repeat(60),
+                    ..Part::default()
+                }],
+                ..Message::default()
+            }),
+            now + 1000,
+        );
+        screen(&mut m);
+        if let Some(n) = at {
+            m.session.as_mut().unwrap().pos = crate::session::Pos::At { n, off: 0 };
+        }
+        let s = screen(&mut m);
+        let v = m.session.as_ref().unwrap();
+        let top = v.top;
+        let bottom = top + v.shown.len() - 1;
+        for (y, want) in [(top, r0), (top + 1, r1), (bottom, last)] {
+            if want.is_empty() {
+                assert!(
+                    !(s[y].starts_with("  ▍ first")
+                        || s[y].starts_with("  ▍ current")
+                        || s[y].starts_with("  ▍ latest")
+                        || s[y].starts_with("  ▍ next")),
+                    "{name}: row {y} pinned: {:?}",
+                    s[y]
+                );
+            } else {
+                assert!(s[y].starts_with(want), "{name}: row {y}: {:?}", s[y]);
+            }
+        }
+        // Each pin says the question of the turn its own ref names.
+        let v = m.session.as_ref().unwrap();
+        for (i, r) in v.shown.iter().enumerate() {
+            let Some(t) = r.strip_prefix("pin:t") else {
+                continue;
+            };
+            let t: u32 = t.parse().unwrap();
+            let q = format!("question {}", t - 1);
+            let row = &s[top + i];
+            let text = row.find("question").map_or("", |k| &row[k..]);
+            let text = text.split(' ').take(2).collect::<Vec<_>>().join(" ");
+            assert_eq!(text, q, "{name}: {row:?}");
+            if s[top + i].starts_with("  ▍ next") {
+                let at = at.unwrap_or(0);
+                assert!(t > at, "{name}: next t{t} is not after t{at}");
+            }
+        }
+    }
+}
+
+/// A click on the first, the one before and the next pin each goes to its
+/// own turn, picked.
+#[test]
+fn prompt_pins_click() {
+    // (row from the top or None for the last, the turn it goes to)
+    let cases: [(Option<usize>, &str); 3] = [(Some(0), "t1"), (Some(1), "t13"), (None, "next")];
+    for (row, want) in cases {
+        let fake = Fake::new();
+        let mut m = open(agent("steer", State::Idle), &fake, 123, 36);
+        long(&mut m, 30);
+        screen(&mut m);
+        m.session.as_mut().unwrap().pos = crate::session::Pos::At { n: 14, off: 0 };
+        screen(&mut m);
+        let v = m.session.as_ref().unwrap();
+        let y = v.top + row.unwrap_or(v.shown.len() - 1);
+        assert!(
+            v.shown[y - v.top].starts_with("pin:"),
+            "{want}: {:?}",
+            v.shown
+        );
+        // The next pin's own ref says the turn it goes to: past the one
+        // scrolled to.
+        let want = if want == "next" {
+            let t: u32 = v.shown[y - v.top][5..].parse().unwrap();
+            assert!(t > 14, "next t{t}");
+            format!("t{t}")
+        } else {
+            want.to_string()
+        };
+        let want = want.as_str();
+        click(&mut m, MouseKind::Down(Button::Left), 10, y);
+        click(&mut m, MouseKind::Up(Button::Left), 10, y);
+        let v = m.session.as_ref().unwrap();
+        assert_eq!(v.sel, want);
+        assert_eq!(
+            v.pos,
+            crate::session::Pos::At {
+                n: want[1..].parse().unwrap(),
+                off: 0
+            }
+        );
+    }
 }
 
 /// In a read conversation what's stacked on the box (the queue, a row of

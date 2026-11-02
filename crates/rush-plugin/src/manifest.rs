@@ -146,6 +146,11 @@ pub struct Manifest {
     /// The services it may ask other plugins for.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub uses: Vec<String>,
+    /// It offers language models for rush's own small jobs (session
+    /// titles, feed summaries, quick ask, memory), answering models.list
+    /// and models.ask.
+    #[serde(skip_serializing_if = "is_false")]
+    pub models: bool,
 }
 
 /// Requires gates whether a plugin can run here. Empty fields don't
@@ -269,6 +274,7 @@ pub(crate) const MANIFEST_SHAPE: Shape = Shape::Struct(
         ("builtFrom", ANY),
         ("provides", ANY),
         ("uses", ANY),
+        ("models", ANY),
     ],
 );
 
@@ -488,6 +494,11 @@ impl Manifest {
         self.validate_category()?;
         self.requires.validate()?;
         self.validate_services()?;
+        if self.models && self.proto() != PROTO_RUSH {
+            return Err(
+                "an MCP plugin cannot offer models: it has no way to answer for them".into(),
+            );
+        }
         if self.prompt.len() > MAX_PROMPT {
             return Err(format!("prompt is over {MAX_PROMPT} bytes"));
         }
@@ -780,6 +791,15 @@ mod tests {
         type Edit = fn(&mut Manifest);
         let cases: Vec<(&str, Edit, &str)> = vec![
             ("minimal", |_| {}, ""),
+            ("models", |m| m.models = true, ""),
+            (
+                "mcp with models",
+                |m| {
+                    m.protocol = PROTO_MCP.into();
+                    m.models = true;
+                },
+                "cannot offer models",
+            ),
             ("bad name", |m| m.name = "P!".into(), "name"),
             ("no command", |m| m.command = vec![], "command is empty"),
             (

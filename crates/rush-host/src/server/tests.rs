@@ -1653,6 +1653,217 @@ fn join_within<T: Send + 'static>(h: std::thread::JoinHandle<T>, d: Duration) ->
     }
 }
 
+/// A conn that takes a new effort live, or refuses it.
+struct LiveEffort {
+    ok: bool,
+    got: Mutex<Vec<String>>,
+}
+
+impl rush_core::adapter::EffortSetter for LiveEffort {
+    fn set_effort(&self, effort: &str) -> adapter::Result<()> {
+        self.got.lock().unwrap().push(effort.into());
+        if self.ok { Ok(()) } else { Err("no".into()) }
+    }
+}
+
+impl Conn for LiveEffort {
+    fn send(&self, _: Input) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn answer(&self, _: &str, _: &str) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn interrupt(&self) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn set_model(&self, _: &str) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn set_mode(&self, _: &str) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn close(&self) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn effort_setter(&self) -> Option<&dyn rush_core::adapter::EffortSetter> {
+        Some(self)
+    }
+}
+
+// host.go:2089-2100: an agent that takes effort live keeps running; one
+// that doesn't, or refuses, restarts when idle.
+#[test]
+fn effort_applies_live_or_restarts() {
+    let _home = Home::new();
+    let live = Arc::new(LiveEffort {
+        ok: true,
+        got: Mutex::new(Vec::new()),
+    });
+    let refuses = Arc::new(LiveEffort {
+        ok: false,
+        got: Mutex::new(Vec::new()),
+    });
+    let conns: [(&str, Arc<dyn Conn>, bool); 3] = [
+        ("effort-live", live.clone(), true),
+        ("effort-refused", refuses.clone(), false),
+        ("effort-plain", Arc::new(Kept::default()), false),
+    ];
+    for (id, conn, keeps) in conns {
+        let h = host(Config {
+            id: id.into(),
+            kind: "claude".into(),
+            ..Config::default()
+        });
+        with_conn(&h, conn);
+        h.lock().info.state = "idle".into();
+        h.do_op(op("effort", |o| o.effort = "high".into())).unwrap();
+        let st = h.lock();
+        assert_eq!(st.conn.is_some(), keeps, "{id}: running after");
+        assert_eq!(
+            (st.cfg.effort.as_str(), st.info.effort.as_str()),
+            ("high", "high"),
+            "{id}"
+        );
+    }
+    assert_eq!(*live.got.lock().unwrap(), ["high"]);
+    assert_eq!(*refuses.got.lock().unwrap(), ["high"]);
+}
+
+// ---- plugins' prompts, tools and subagents reach the session ----
+
+use adapter::Driver;
+
+/// The fake agent as Claude Code, keeping the options of each start.
+struct Spy {
+    fake: Fake,
+    seen: Arc<Mutex<Vec<adapter::StartOptions>>>,
+}
+
+impl adapter::Adapter for Spy {
+    fn kind(&self) -> Kind {
+        self.fake.kind()
+    }
+    fn name(&self) -> String {
+        self.fake.name()
+    }
+    fn features(&self) -> adapter::Features {
+        self.fake.features()
+    }
+    fn level(&self) -> adapter::Level {
+        self.fake.level()
+    }
+    fn profiles(&self) -> Vec<Profile> {
+        Vec::new()
+    }
+    rush_core::has!(driver: Driver);
+}
+
+impl Driver for Spy {
+    fn start(
+        &self,
+        o: adapter::StartOptions,
+        sink: Arc<dyn Sink>,
+    ) -> adapter::Result<Box<dyn Conn>> {
+        self.seen.lock().unwrap().push(o.clone());
+        Driver::start(&self.fake, o, sink)
+    }
+}
+
+/// Approves a plugin in the test's rush folder: it has a prompt, a
+/// subagent and tools.
+fn approve_plugin(name: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = rush_plugin::root().join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("plugin.json"),
+        format!(
+            r#"{{"name":"{name}","command":["bin"],"tools":true,"prompt":"Obey {name}.","agents":{{"scout":{{"description":"looks","prompt":"look"}}}}}}"#
+        ),
+    )
+    .unwrap();
+    std::fs::write(dir.join("bin"), "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(dir.join("bin"), std::fs::Permissions::from_mode(0o700)).unwrap();
+    rush_plugin::approve(&rush_plugin::load(&dir).unwrap()).unwrap();
+}
+
+#[test]
+fn plugin_prompt_tools_and_agents_reach_a_started_session() {
+    let _home = Home::new();
+    approve_plugin("zed");
+    approve_plugin("ant");
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let reg = Registry::new();
+    reg.register(Spy {
+        fake: Fake {
+            kind: "claude",
+            features: vec![Feature::Run, Feature::Prompt],
+        },
+        seen: seen.clone(),
+    });
+    std::fs::create_dir_all(dir("pl")).unwrap();
+    let (h, _rx) = build(
+        reg,
+        Hooks::quiet(),
+        Config {
+            id: "pl".into(),
+            kind: "claude".into(),
+            system_prompt: "mine".into(),
+            ..Config::default()
+        },
+    );
+    let (g, r) = h.start(h.lock());
+    drop(g);
+    r.unwrap();
+
+    let seen = seen.lock().unwrap();
+    let o = seen.last().expect("the agent was started");
+    let (ant, zed, own) = (
+        o.prompt
+            .find("# From the rush plugin ant")
+            .expect("ant's prompt"),
+        o.prompt
+            .find("# From the rush plugin zed")
+            .expect("zed's prompt"),
+        o.prompt.find("mine").expect("the session's prompt"),
+    );
+    assert!(ant < zed && zed < own, "order: {}", o.prompt);
+    // rush's views, feed and cheaper-model notes come after it since the prompt order changed.
+    let tools: Vec<&str> = o.tools.iter().map(|t| t.name.as_str()).collect();
+    for p in ["ant", "zed"] {
+        let want = rush_plugin::Manifest {
+            name: p.into(),
+            ..Default::default()
+        }
+        .server();
+        assert!(tools.contains(&want.as_str()), "{p}: tools {tools:?}");
+        assert!(
+            o.agents.contains_key(&format!("{p}:scout")),
+            "agents {:?}",
+            o.agents.keys().collect::<Vec<_>>()
+        );
+    }
+    assert!(
+        o.tools
+            .iter()
+            .filter(|t| t.name != rush_bundled::agtools::SERVER)
+            .all(|t| t.handle.is_some())
+    );
+    drop(seen);
+
+    let names: Vec<String> = h
+        .lock()
+        .w
+        .this_start
+        .as_ref()
+        .map(|s| s.sections.iter().map(|x| x.name.clone()).collect())
+        .unwrap_or_default();
+    assert!(
+        names.contains(&"plugin ant".to_string()) && names.contains(&"plugin zed".to_string()),
+        "sections {names:?}"
+    );
+}
+
 // A turn streaming hundreds of messages a second rewrites info.json for
 // what it's doing at most every INFO_EVERY, the latest always written; any
 // other change is written at once.

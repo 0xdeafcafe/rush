@@ -12,6 +12,7 @@ use rush_core::text::Line;
 use crate::frame::{Out, Press};
 use crate::model::Model;
 use crate::style::*;
+use rush_ui_plugin_ui::ModelPlugins;
 
 /// The agent being renamed, by key; empty while the box starts agents
 /// (Go's inKind == inRename and promptFor).
@@ -75,6 +76,15 @@ pub fn save(m: &mut Model, key: &str, name: &str) {
         a.display_name = name.to_string();
     }
     let (key, name) = (key.to_string(), name.to_string());
+    // A name you gave wins over a sidebar's: the list knows at once, before
+    // rush's state is written and read again.
+    let p = m.plugins();
+    p.renamed.remove(&key);
+    if reset {
+        p.rush_names.remove(&key);
+    } else {
+        p.rush_names.insert(key.clone(), name.clone());
+    }
     crate::overlay::save(
         m,
         move |o| {

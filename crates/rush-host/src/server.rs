@@ -431,6 +431,8 @@ pub(crate) struct Shared {
     wake: Option<serve::Wake>,
     timers: Timers,
     tx: Mutex<Sender<Msg>>,
+    /// Reaches the approved plugins' MCP servers.
+    broker: Arc<rush_plugin::Broker>,
     me: Weak<Shared>,
 }
 
@@ -743,6 +745,7 @@ fn build(reg: Registry, hooks: Hooks, cfg: Config) -> (Host, Receiver<Msg>) {
         wake: serve::Wake::new(),
         timers: Timers::start(),
         tx: Mutex::new(tx),
+        broker: Arc::new(rush_plugin::Broker::new()),
         me: me.clone(),
     });
     (Host(sh), rx)
@@ -1511,10 +1514,20 @@ impl Host {
         } else {
             c.kind.clone()
         };
+        // Approved plugins add subagents and prompt text, and their tools,
+        // which ask like any other.
+        let pc = rush_plugin::for_session();
+        let plugin_agents = || {
+            pc.agents
+                .iter()
+                .filter_map(|(n, d)| RawJson::new(d.get()).ok().map(|d| (n.clone(), d)))
+        };
+        o.agents = plugin_agents().collect();
         let told = if self.reg.reads_as_claude(&kind) {
             // The agents it can hand work to are its own subagent types, by
-            // name.
+            // name; a plugin's of the same name is the plugin's.
             o.agents = crate::agents::agent_defs(&self.reg, &kind);
+            o.agents.extend(plugin_agents());
             crate::agents::AGENTS_NOTE.to_string()
         } else {
             // Claude Code's own prompt tells it of pastes, and it reads
@@ -1537,8 +1550,7 @@ impl Host {
         };
         // What rush draws (the task list, decisions cards, views) only
         // helps when someone watches it in rush: a headless run is read by
-        // the program that asked for it. Plugins' prompts and tools aren't
-        // ported yet.
+        // the program that asked for it.
         let views_off = rush_state::Store::load().config.views_off;
         let (tasks, decisions, views, shell) = if c.headless {
             ("", "", "", "")
@@ -1561,6 +1573,7 @@ impl Host {
             decisions,
             shell,
             &told,
+            &pc.prompt,
             &c.system_prompt,
             views,
             feed,
@@ -1568,22 +1581,26 @@ impl Host {
             &note,
         ]);
         // The same parts by name, so the next start can say what changed.
-        let parts = [
-            ("rush's task list", tasks),
-            ("rush's scratch folder", SCRATCH_PROMPT),
-            ("rush's decisions", decisions),
-            ("rush's shell boxes", shell),
-            ("rush's views", views),
-            ("rush's agents and tools", told.as_str()),
-            ("community feed", feed),
-            ("cheaper subagent model", cheap.prompt.as_str()),
-            ("this session's prompt", c.system_prompt.as_str()),
+        let mut parts: Vec<(String, &str)> = vec![
+            ("rush's task list".into(), tasks),
+            ("rush's scratch folder".into(), SCRATCH_PROMPT),
+            ("rush's decisions".into(), decisions),
+            ("rush's shell boxes".into(), shell),
+            ("rush's views".into(), views),
+            ("rush's agents and tools".into(), told.as_str()),
+            ("community feed".into(), feed),
+            ("cheaper subagent model".into(), cheap.prompt.as_str()),
         ];
+        // Each plugin's apart (the map is sorted by name).
+        for (n, t) in &pc.prompts {
+            parts.push((format!("plugin {n}"), t.as_str()));
+        }
+        parts.push(("this session's prompt".into(), c.system_prompt.as_str()));
         let sections = parts
             .iter()
             .filter(|(_, t)| !t.trim().is_empty())
             .map(|(n, t)| rush_core::usage::Section {
-                name: (*n).into(),
+                name: n.clone(),
                 tokens: rush_core::usage::estimate(t.trim()),
             })
             .collect();
@@ -1596,6 +1613,31 @@ impl Host {
         st.untold.clear();
         if !self.reg.supports(a.kind().as_str(), Feature::Prompt) && !o.resume && !o.fork {
             st.untold = o.prompt.clone(); // no system prompt to take it: it goes atop the first message
+        }
+        for srv in &pc.servers {
+            let Some(name) = rush_plugin::name_of(srv) else {
+                continue;
+            };
+            let (name, id) = (name.to_string(), c.id.clone());
+            let (broker, home, cache) =
+                (self.broker.clone(), self.home.clone(), self.cache.clone());
+            o.tools.push(adapter::ToolServer {
+                name: srv.clone(),
+                handle: Some(Arc::new(move |msg| {
+                    // Called from the agent's threads, which have no rush folder of their own.
+                    rush_state::set_thread_dir(Some(home.clone()));
+                    rush_state::set_thread_cache_dir(Some(cache.clone()));
+                    let out = broker.mcp(&name, &id, msg);
+                    RawJson::new(out.get())
+                        .unwrap_or_else(|_| RawJson::new("null").expect("null is JSON"))
+                })),
+                ..Default::default()
+            });
+        }
+        if !pc.servers.is_empty() {
+            self.go("broker", |_| {
+                let _ = rush_plugin::ensure_broker();
+            });
         }
         let (key, sink) = self.agent_sink(st, &mut o);
         let conn = match d.start(o, sink) {
@@ -2847,7 +2889,25 @@ impl Host {
             "effort" => {
                 // Effort is fixed for an agent's process, so it takes hold
                 // the next time one starts: right away when idle, else
-                // after this turn.
+                // after this turn. One that takes it live (ACP's thinking
+                // option) keeps running (host.go:2089-2100).
+                if let Some(c) = &conn
+                    && c.effort_setter().is_some()
+                    && !o.effort.is_empty()
+                {
+                    drop(st);
+                    let r = c
+                        .effort_setter()
+                        .map_or(Ok(()), |es| es.set_effort(&o.effort));
+                    st = self.lock();
+                    if r.is_ok() && same_conn(&st.conn, &conn) {
+                        st.cfg.effort = o.effort.clone();
+                        st.info.effort = o.effort.clone();
+                        self.save_config(&st);
+                        self.publish(&mut st);
+                        return Ok(());
+                    }
+                }
                 st.cfg.effort = o.effort.clone();
                 st.info.effort = o.effort.clone();
                 self.publish(&mut st);

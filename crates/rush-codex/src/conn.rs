@@ -1401,12 +1401,22 @@ impl ConnTrait for Conn {
         Some(self)
     }
 
+    fn effort_setter(&self) -> Option<&dyn rush_core::adapter::EffortSetter> {
+        Some(self)
+    }
+
     fn task_stopper(&self) -> Option<&dyn TaskStopper> {
         Some(self)
     }
 
     fn pid(&self) -> Option<i32> {
         self.rpc.pid()
+    }
+}
+
+impl rush_core::adapter::EffortSetter for Conn {
+    fn set_effort(&self, effort: &str) -> adapter::Result<()> {
+        Conn::set_effort(self, effort)
     }
 }
 

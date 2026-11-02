@@ -1191,6 +1191,7 @@ dependencies = [
  "rush-ollama",
  "rush-pi",
  "rush-plugin",
+ "rush-plugin-models",
  "rush-plugind",
  "rush-prdrive",
  "rush-providers",
@@ -1482,6 +1483,7 @@ dependencies = [
  "rush-fleet",
  "rush-gate",
  "rush-net",
+ "rush-plugin",
  "rush-remind",
  "rush-room",
  "rush-state",
@@ -1594,6 +1596,14 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+]
+
+[[package]]
+name = "rush-plugin-models"
+version = "0.1.0"
+dependencies = [
+ "rush-core",
+ "rush-plugin",
 ]
 
 [[package]]

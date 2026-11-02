@@ -378,7 +378,7 @@ impl<'a> Drawer<'a> {
         match &*st.tool {
             "SendMessage" => {
                 let to = first_non_empty(&[str_of(&v, "to"), str_of(&v, "recipient")]);
-                let to = recipient_kept(self.s, st, to);
+                let to = sent_to(&recipient_kept(self.s, st, to));
                 head = head
                     .and(paint(mark, "→"))
                     .and_raw(" ")
@@ -5024,6 +5024,21 @@ fn recipient_kept(s: &Session, st: &Step, to: &str) -> Rc<str> {
         m.insert(k, v.clone());
     });
     v
+}
+
+/// A session named as the list names it with its codename after
+/// (messages.go:80 sentTo); until named, the codename alone.
+fn sent_to(to: &str) -> String {
+    if let Some(n) = crate::peers::name_of(to) {
+        let n = crate::render::style::one_line(&n);
+        if !n.is_empty() && n != to {
+            // ponytail (messages.go:77): a session renamed after it was
+            // named stays so until redrawn.
+            let t = Txt::raw(&n).truncate(32, &Txt::raw("…")).plain();
+            return format!("{t} ({to})");
+        }
+    }
+    to.to_string()
 }
 
 /// Who a message went to: an agent's id shortened, else the name it was

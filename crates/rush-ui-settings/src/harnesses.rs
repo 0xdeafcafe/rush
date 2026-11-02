@@ -174,7 +174,7 @@ pub fn catalog_harnesses() -> Vec<String> {
     let mut seen = Vec::new();
     for a in r.all().iter() {
         let k = a.kind();
-        if r.current_kind(k.as_str()) != k {
+        if r.current_kind(k.as_str()) != k || a.helper() {
             continue;
         }
         let h = r.harness_of(k.as_str());

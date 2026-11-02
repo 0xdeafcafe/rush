@@ -53,6 +53,17 @@ pub(crate) fn run_with_stdin(
         .unwrap_or_default()
 }
 
+/// Runs cmd to its end with input on its stdin, keeping stdout and
+/// stderr apart. Err only when it couldn't start.
+pub(crate) fn run_input(
+    cmd: Command,
+    input: Vec<u8>,
+    ctx: &Ctx,
+    limit: Option<Duration>,
+) -> std::io::Result<Out> {
+    run_fed(cmd, Some(input), ctx, limit, false)
+}
+
 fn run_fed(
     mut cmd: Command,
     input: Option<Vec<u8>>,

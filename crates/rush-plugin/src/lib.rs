@@ -34,6 +34,7 @@ pub mod describe;
 pub mod gopath;
 mod jsonshape;
 pub mod manifest;
+pub mod models;
 pub mod origin;
 pub mod plugin;
 pub mod project;
@@ -49,8 +50,9 @@ pub mod ui;
 pub mod uisettings;
 
 pub use bundled::{
-    Bundle, Registered, StartFn, Started, bundle_named, bundled_on, bundles, bundles_on, enabled,
-    mark_bundled, register_bundle, run_bundled, set_bundled,
+    Bundle, CheckFn, FixAction, Readiness, Registered, StartFn, Started, bundle_check,
+    bundle_named, bundled_on, bundles, bundles_on, enabled, mark_bundled, register_bundle,
+    run_bundled, set_bundled,
 };
 pub use cli::{CLI_TIMEOUT, CliResult, CliRun, CliSpec, MAX_CLI_OUTPUT, cli_plugins, run_cli};
 pub use client::{

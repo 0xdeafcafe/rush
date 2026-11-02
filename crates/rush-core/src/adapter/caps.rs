@@ -629,6 +629,12 @@ pub trait Summarizer {
     fn summary_exclusions(&self) -> Vec<String> {
         Vec::new()
     }
+    /// How many tokens model holds, question and answer together, when
+    /// it's small enough that what's sent must be cut to fit; None when
+    /// it isn't known or doesn't matter.
+    fn context_tokens(&self, _model: &str) -> Option<usize> {
+        None
+    }
 }
 
 /// An agent that keeps a record of a profile's use.

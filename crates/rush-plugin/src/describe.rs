@@ -198,6 +198,12 @@ pub fn describe(p: &Plugin) -> String {
             p.uses.join(", ")
         ));
     }
+    if p.models {
+        grants.push(
+            "answers rush's small jobs with its own models: session titles, feed summaries, quick ask and memory notes (what's sent to them goes to the plugin)"
+                .into(),
+        );
+    }
     let needs = p.requires.needs();
     if !needs.is_empty() {
         let _ = writeln!(b, "\nIt runs only with {needs}.");
@@ -249,5 +255,24 @@ It runs neighbours, sandboxed:\n  • reads its folder, /p/neighbours, and the s
             data.display()
         );
         assert_eq!(got, want);
+    }
+
+    #[test]
+    fn describes_models() {
+        let _h = Home::new();
+        let p = Plugin {
+            manifest: Manifest {
+                name: "local-models".into(),
+                command: vec!["lm".into()],
+                models: true,
+                ..Default::default()
+            },
+            dir: "/p/local-models".into(),
+            ..Default::default()
+        };
+        let got = describe(&p);
+        let want = "\nIt:\n  \
+• answers rush's small jobs with its own models: session titles, feed summaries, quick ask and memory notes (what's sent to them goes to the plugin)\n";
+        assert!(got.ends_with(want), "got {got}");
     }
 }

@@ -2,7 +2,9 @@
 //! and the daemon's roster of background workers. Port of
 //! internal/adapters/claude/claude/sessions.go and roster.go:12-70.
 
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::{LazyLock, Mutex, PoisonError};
 
 use rush_core::time::Ms;
 use serde::Deserialize;
@@ -62,6 +64,31 @@ pub fn read_session(path: &Path) -> Option<Session> {
     (s.pid > 0).then_some(s)
 }
 
+/// Each session's name for the others (rush-8a, as ListAgents lists it)
+/// by session id, kept apart from any listing so the UI can read it
+/// without waiting on one. A session that ended keeps its name: messages
+/// sent to it earlier still name it (Go's discover.go:133 codenames).
+static CODENAMES: LazyLock<Mutex<HashMap<String, String>>> = LazyLock::new(Default::default);
+
+/// What the sessions read so far are named (discover.go:137 Codenames).
+pub fn codenames() -> HashMap<String, String> {
+    CODENAMES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+}
+
+/// Keeps s's name, if it has one (discover.go:151 noteCodename).
+fn note_codename(s: &Session) {
+    if s.name.is_empty() {
+        return;
+    }
+    let mut m = CODENAMES.lock().unwrap_or_else(PoisonError::into_inner);
+    if m.get(&s.session_id) != Some(&s.name) {
+        m.insert(s.session_id.clone(), s.name.clone());
+    }
+}
+
 /// The account's sessions whose process is still alive.
 pub fn read_sessions(a: &Account) -> Vec<Session> {
     let Ok(ents) = std::fs::read_dir(a.sessions_dir()) else {
@@ -73,10 +100,11 @@ pub fn read_sessions(a: &Account) -> Vec<Session> {
         if !name.to_string_lossy().ends_with(".json") {
             continue;
         }
-        if let Some(s) = read_session(&e.path())
-            && session_alive(&s)
-        {
-            out.push(s);
+        if let Some(s) = read_session(&e.path()) {
+            note_codename(&s); // discover.go:187
+            if session_alive(&s) {
+                out.push(s);
+            }
         }
     }
     out
@@ -225,5 +253,31 @@ mod tests {
             "a session an hour older"
         );
         assert!(!session_alive(&Session::default()));
+    }
+
+    /// A session's name is kept, and kept once its process is gone
+    /// (discover.go:133).
+    #[test]
+    fn codenames_are_kept_after_a_session_ends() {
+        let dir = std::env::temp_dir().join(format!("rush-claude-code-{}", std::process::id()));
+        let sd = dir.join("sessions");
+        std::fs::create_dir_all(&sd).unwrap();
+        let me = std::process::id();
+        std::fs::write(
+            sd.join("1.json"),
+            format!(r#"{{"pid":{me},"sessionId":"s-named","name":"rush-8a"}}"#),
+        )
+        .unwrap();
+        std::fs::write(
+            sd.join("2.json"),
+            r#"{"pid":2147483000,"sessionId":"s-ended","name":"rush-9b"}"#,
+        )
+        .unwrap();
+        let got = read_sessions(&Account::at("t", &dir));
+        assert_eq!(got.len(), 1);
+        let names = codenames();
+        assert_eq!(names.get("s-named").map(String::as_str), Some("rush-8a"));
+        assert_eq!(names.get("s-ended").map(String::as_str), Some("rush-9b"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -24,7 +24,7 @@ mod types;
 mod window;
 
 pub use caps::*;
-pub use cheap::ask_cheap;
+pub use cheap::{PLUGIN_MODELS, ask_cheap, ask_plugin_models, message_room};
 pub use conn::*;
 pub use feature::*;
 pub use handoff::*;
@@ -217,6 +217,21 @@ pub trait Adapter: Send + Sync {
     /// plain path.
     fn reads_at_paths(&self) -> bool {
         false
+    }
+    /// It isn't an agent but a helper for rush's own small jobs (session
+    /// titles, feed summaries, quick ask): it's never offered to start a
+    /// session with, and has no accounts, profiles, provider or harness
+    /// of its own. Only rush's small jobs, and #compact's list of
+    /// summarisers, use it.
+    fn helper(&self) -> bool {
+        false
+    }
+    /// Whether it's here, for an adapter with no program to look for
+    /// (one with a Programmer is here when its program is). Asked with
+    /// the programs, away from rush's UI thread, so it may read the disk
+    /// but must not wait long.
+    fn here(&self) -> bool {
+        true
     }
 
     parts! {

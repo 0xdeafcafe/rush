@@ -512,8 +512,17 @@ impl Registry {
             .unwrap_or_else(|| Kind::from(k))
     }
 
+    /// Whether k is an agent of its own, not one replaced by another nor
+    /// a helper for rush's small jobs: what lists of providers and
+    /// harnesses hold.
     fn is_current(&self, k: &Kind) -> bool {
-        self.current_kind(k.as_str()) == *k
+        self.current_kind(k.as_str()) == *k && !self.is_helper(k.as_str())
+    }
+
+    /// Whether k is a helper for rush's own small jobs, not an agent (see
+    /// Adapter::helper).
+    pub fn is_helper(&self, k: &str) -> bool {
+        self.get(k).is_some_and(|a| a.helper())
     }
 
     /// Every provider an adapter runs, by name, each once.
@@ -880,7 +889,9 @@ impl Registry {
         let mut paths: HashMap<Kind, String> = HashMap::new();
         for a in all.iter() {
             let Some(p) = a.programmer() else {
-                paths.insert(a.kind(), "-".into()); // nothing to look for: taken as there
+                // Nothing to look for: taken as there, unless it says not.
+                let here = if a.here() { "-" } else { "" };
+                paths.insert(a.kind(), here.into());
                 continue;
             };
             let (name, dirs) = p.program();
@@ -976,8 +987,19 @@ impl Registry {
         p
     }
 
-    /// Every registered agent whose program is here, by kind.
+    /// Every registered agent whose program is here, by kind. Helpers for
+    /// rush's small jobs aren't agents and aren't among them: see
+    /// installed_with_helpers.
     pub fn installed_all(&self) -> Vec<AdapterRef> {
+        self.installed_with_helpers()
+            .into_iter()
+            .filter(|a| !a.helper())
+            .collect()
+    }
+
+    /// Every registered adapter that's here, agents and helpers for rush's
+    /// small jobs alike: for what any summariser can do, as #compact.
+    pub fn installed_with_helpers(&self) -> Vec<AdapterRef> {
         let paths = self.look();
         self.all()
             .iter()

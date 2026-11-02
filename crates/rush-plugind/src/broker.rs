@@ -11,6 +11,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+use rush_plugin::models::{
+    Answer as ModelAnswer, Ask, MODELS_ASK_TIMEOUT, MODELS_LIST_TIMEOUT, Model, ModelList,
+    PluginModel, PluginModels,
+};
 use rush_plugin::rpc::{CODE_NO_METHOD, Handler};
 use rush_plugin::{Answer, CliResult, CliRun, Conn, Ctx, Error, Raw};
 use serde::Deserialize;
@@ -395,6 +399,14 @@ impl Broker {
                 Ok(empty())
             }
             "status" => Ok(Some(to_raw(&self.status()))),
+            "models.list" => Ok(Some(to_raw(&PluginModels {
+                models: self.models(ctx),
+            }))),
+            "models.ask" => {
+                let q: Ask = params(p)?;
+                let text = self.ask_model(ctx, q)?;
+                Ok(Some(to_raw(&ModelAnswer { text })))
+            }
             _ => Err(Error::new(
                 CODE_NO_METHOD,
                 format!("method not found: {method}"),
@@ -436,6 +448,67 @@ impl Broker {
         let mut out = out.into_inner().unwrap_or_else(|e| e.into_inner());
         out.sort_by(|a, b| a.plugin.cmp(&b.plugin));
         out
+    }
+
+    /// Every model the running plugins that offer models say they have,
+    /// asked at once, by plugin. One that fails, or doesn't answer within
+    /// MODELS_LIST_TIMEOUT, is left out.
+    pub fn models(&self, ctx: &Ctx) -> Vec<PluginModel> {
+        let rs = self.0.runners();
+        let out: Mutex<Vec<(String, Vec<Model>)>> = Mutex::new(Vec::new());
+        std::thread::scope(|s| {
+            for r in &rs {
+                let (p, conn) = r.live();
+                let Some(conn) = conn else { continue };
+                if !p.models {
+                    continue;
+                }
+                let out = &out;
+                let scope = &self.0.scope;
+                s.spawn(move || {
+                    scope.enter();
+                    let ctx = ctx.with_timeout(MODELS_LIST_TIMEOUT);
+                    let got: Result<ModelList, _> = conn.call(&ctx, "models.list", &json!({}));
+                    match got {
+                        Ok(l) => lock(out).push((r.name.clone(), l.models)),
+                        Err(e) => scope.log(
+                            "plugin-models",
+                            fields(&[("plugin", json!(r.name)), ("error", json!(e.to_string()))]),
+                        ),
+                    }
+                });
+            }
+        });
+        let mut got = out.into_inner().unwrap_or_else(|e| e.into_inner());
+        got.sort_by(|a, b| a.0.cmp(&b.0));
+        got.into_iter()
+            .flat_map(|(plugin, ms)| {
+                ms.into_iter().map(move |model| PluginModel {
+                    plugin: plugin.clone(),
+                    model,
+                })
+            })
+            .collect()
+    }
+
+    /// Asks q.plugin's model q.model, and gives its answer. The plugin's
+    /// own error goes back as it gave it: "too small" for a prompt it
+    /// can't hold, say.
+    pub fn ask_model(&self, ctx: &Ctx, q: Ask) -> Result<String, Error> {
+        let r = self
+            .runner(&q.plugin)
+            .ok_or_else(|| server(format!("{} is not running", q.plugin)))?;
+        if !r.live().0.models {
+            return Err(server(format!("{} offers no models", q.plugin)));
+        }
+        let ctx = ctx.with_timeout(MODELS_ASK_TIMEOUT);
+        let conn = r.wait(&ctx).map_err(server)?;
+        let q = Ask {
+            plugin: String::new(),
+            ..q
+        };
+        let a: ModelAnswer = conn.call(&ctx, "models.ask", &q).map_err(call_err)?;
+        Ok(a.text)
     }
 
     /// Runs one of a plugin's CLI commands, for `rush <plugin> <command>`.

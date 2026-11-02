@@ -7,8 +7,9 @@
 //! from `internal/remote/plugins.go` (remote.rs). Each bundled plugin has
 //! the name, manifest and behaviour its Go one has, so Go and Rust rush
 //! share their switches, settings and data folders. apple_voice, rush's
-//! own push-to-talk switch, and contextguard, which keeps agents'
-//! context lean from their tool calls' hooks, are new in the Rust port.
+//! own push-to-talk switch, contextguard, which keeps agents'
+//! context lean from their tool calls' hooks, and apple_intelligence,
+//! Apple's on-device model for rush's small jobs, are new in the Rust port.
 //!
 //! A bundled plugin's code is rush's own: the broker starts it as `rush
 //! plugin run <name>`, speaking rush's protocol on fd 3 (see
@@ -24,6 +25,7 @@ use rush_plugin::{Bundle, Conn, Error, Started};
 use serde::Serialize;
 
 pub mod agtools;
+pub mod apple_intelligence;
 pub mod apple_voice;
 pub mod clean;
 pub mod cleanup;
@@ -47,6 +49,7 @@ mod exec;
 /// Every plugin bundled with rush, by name.
 pub fn bundles() -> Vec<Bundle> {
     let mut out = vec![
+        apple_intelligence::bundle(),
         apple_voice::bundle(),
         cleanup::bundle(),
         contextguard::bundle(),
@@ -159,6 +162,7 @@ pub(crate) fn bundle_of(
         run: Some(Arc::new(run)),
         start: None,
         switched: None,
+        check: None,
     }
 }
 
@@ -176,6 +180,7 @@ pub(crate) fn bundle_inside(
         run: Some(Arc::new(move |s| start(s)?.wait())),
         start: Some(Arc::new(start)),
         switched: None,
+        check: None,
     }
 }
 
@@ -355,6 +360,7 @@ mod tests {
         assert_eq!(
             names,
             [
+                "apple-intelligence",
                 "apple-voice",
                 "cleanup",
                 "context-guard",

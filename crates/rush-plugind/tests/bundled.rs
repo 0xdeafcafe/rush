@@ -55,6 +55,7 @@ fn register_e2e() -> Registered {
         })),
         start: None,
         switched: None,
+        check: None,
     })
 }
 
@@ -160,6 +161,7 @@ fn bundled_plugins_run_inside() {
                 run: None,
                 start: Some(start),
                 switched: None,
+                check: None,
             })
         })
         .collect();
@@ -248,6 +250,7 @@ fn bundled_plugins_run_inside() {
         run: None,
         start: Some(start),
         switched: None,
+        check: None,
     });
     b.reload();
     let st = b

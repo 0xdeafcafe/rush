@@ -13,7 +13,12 @@ impl Config {
     /// find installed. An account already set is kept.
     pub fn use_agent(&mut self, reg: &Registry, kind: &str) -> Result<(), String> {
         let Some(a) = reg.get(kind) else {
-            let kinds: Vec<String> = reg.all().iter().map(|a| a.kind().0).collect();
+            let kinds: Vec<String> = reg
+                .all()
+                .iter()
+                .filter(|a| !a.helper())
+                .map(|a| a.kind().0)
+                .collect();
             return Err(format!(
                 "rush doesn't know the agent {}: it knows {}",
                 crate::reload::go_quote(kind),
