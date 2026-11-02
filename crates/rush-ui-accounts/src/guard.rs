@@ -85,6 +85,11 @@ pub trait HostOps: Send + Sync {
     fn keep_warm(&self, _id: &str) -> Result<(), String> {
         Err("keep_warm isn't something this rush can do".into())
     }
+    /// Compacts session id's conversation with its agent's own compaction
+    /// (/compact, as the compact sheet sends it).
+    fn compact(&self, _id: &str) -> Result<(), String> {
+        Err("compacting isn't something this rush can do".into())
+    }
 }
 
 /// rush's own hosts and the machine.
@@ -131,6 +136,11 @@ impl HostOps for Real {
     fn keep_warm(&self, id: &str) -> Result<(), String> {
         rush_host::Client::dial(id)
             .and_then(|c| c.keep_warm())
+            .map_err(|e| e.to_string())
+    }
+    fn compact(&self, id: &str) -> Result<(), String> {
+        rush_host::Client::dial(id)
+            .and_then(|c| c.send("/compact"))
             .map_err(|e| e.to_string())
     }
 }
@@ -202,14 +212,19 @@ pub struct Stretch {
     pub idle_since: Ms,
     pub bumps: u32,
     pub tried: Ms,
+    /// Its turns when rush last compacted it, carried from stretch to
+    /// stretch: not again until a turn of its own after the compaction's.
+    pub compacted_turn: i64,
 }
 
-/// What keeping caches warm starts from: how it's set, and the sessions
-/// it may keep (their harness can and is set to, and they aren't done).
+/// What keeping caches warm starts from: how it's set, the sessions it
+/// may keep (their harness can and is set to, and they aren't done), and
+/// those of them whose agent can compact them.
 #[derive(Clone, Debug, Default)]
 pub struct KeepIn {
     pub settings: rush_core::cachekeep::Settings,
     pub ids: HashSet<String>,
+    pub compact: HashSet<String>,
 }
 
 /// What a look starts from: the accounts, the guard as set, and what it
@@ -567,7 +582,9 @@ pub fn tick(mut i: Input, ops: &dyn HostOps) -> Output {
 /// rush_core::cachekeep says, and returns each one's stretch. Never one
 /// asleep (none is in infos), done, held by the guard or by you, working
 /// or with a queue, on an account past its pace, nor while you're away:
-/// each bump is in its events (cache-kept, from its host).
+/// each bump is in its events (cache-kept, from its host). Set to compact
+/// long waits, one whose cache would lapse that far into its wait is
+/// compacted instead, once (cache-compacted, logged here).
 #[allow(clippy::too_many_arguments)]
 fn keep_warm(
     keep: Option<&KeepIn>,
@@ -587,14 +604,16 @@ fn keep_warm(
         if x.state != "idle" || idle_since == 0 {
             continue; // a stretch is one idle: working ends it
         }
-        let mut st = stretches
-            .get(&x.id)
-            .copied()
-            .filter(|s| s.idle_since == idle_since)
-            .unwrap_or(Stretch {
+        let was = stretches.get(&x.id).copied().unwrap_or_default();
+        let mut st = if was.idle_since == idle_since {
+            was
+        } else {
+            Stretch {
                 idle_since,
+                compacted_turn: was.compacted_turn,
                 ..Stretch::default()
-            });
+            }
+        };
         let login = seats
             .iter()
             .find(|s| s.id == x.id)
@@ -610,21 +629,64 @@ fn keep_warm(
             || out.over.contains(login)
             || now - st.tried < RETRY;
         if !barred {
+            // Never compacted with a decision waiting on you, something
+            // running in its background, or again before a turn of its own.
+            let can_compact = k.compact.contains(&x.id)
+                && x.decisions.is_none()
+                && x.needs.is_empty()
+                && x.tasks <= 0
+                && x.background.is_empty()
+                && (st.compacted_turn == 0 || x.turn > st.compacted_turn + 1);
             let seat = KSeat {
                 idle_since,
                 warm_until: ms(x.cache_warm),
                 ttl: x.cache_ttl * 1000,
                 context: x.context_tokens,
                 bumps: st.bumps,
+                can_compact,
             };
-            if decide(&k.settings, &seat, now) == Verdict::Keep
-                && !rush_core::dryrun::would("cache-keep", &x.id, "its cache is about to lapse")
-            {
-                st.tried = now;
-                match ops.keep_warm(&x.id) {
-                    Ok(()) => st.bumps += 1,
-                    Err(e) => ops.log(&x.id, "cache-keep-failed", json!({"err": e})),
+            match decide(&k.settings, &seat, now) {
+                Verdict::Keep
+                    if !rush_core::dryrun::would(
+                        "cache-keep",
+                        &x.id,
+                        "its cache is about to lapse",
+                    ) =>
+                {
+                    st.tried = now;
+                    match ops.keep_warm(&x.id) {
+                        Ok(()) => st.bumps += 1,
+                        Err(e) => ops.log(&x.id, "cache-keep-failed", json!({"err": e})),
+                    }
                 }
+                Verdict::Compact
+                    if !rush_core::dryrun::would(
+                        "cache-compact",
+                        &x.id,
+                        "a long wait: compacted while its cache is warm",
+                    ) =>
+                {
+                    st.tried = now;
+                    match ops.compact(&x.id) {
+                        Ok(()) => {
+                            st.compacted_turn = x.turn;
+                            ops.log(
+                                &x.id,
+                                "cache-compacted",
+                                json!({
+                                    "context": x.context_tokens,
+                                    "ttl": x.cache_ttl,
+                                    "idleFor": (now - idle_since) / 1000,
+                                    "warmUntil": ms(x.cache_warm),
+                                    "after": k.settings.compact_after / 60_000,
+                                    "why": "idle so long its cache would lapse: compacted while it's warm, so the next message writes the summary, not the whole context",
+                                }),
+                            );
+                        }
+                        Err(e) => ops.log(&x.id, "cache-compact-failed", json!({"err": e})),
+                    }
+                }
+                _ => {}
             }
         }
         kept.insert(x.id.clone(), st);
@@ -759,7 +821,7 @@ fn keep_in(m: &Model) -> Option<KeepIn> {
     if !ck.on && !ck.harnesses.values().any(|on| *on) {
         return None;
     }
-    let ids = m
+    let ids: HashSet<String> = m
         .agents
         .iter()
         .filter(|a| {
@@ -771,9 +833,24 @@ fn keep_in(m: &Model) -> Option<KeepIn> {
         })
         .map(|a| a.job.id.clone())
         .collect();
+    // Main conversations their agent compacts itself, once it's set to.
+    let compact = if ck.compact_after > 0 {
+        m.agents
+            .iter()
+            .filter(|a| {
+                ids.contains(&a.job.id)
+                    && m.reg
+                        .supports(a.kind.as_str(), rush_core::adapter::Feature::Compact)
+            })
+            .map(|a| a.job.id.clone())
+            .collect()
+    } else {
+        HashSet::new()
+    };
     Some(KeepIn {
         settings: ck.settings(),
         ids,
+        compact,
     })
 }
 
