@@ -14,7 +14,6 @@
 use std::io::PipeWriter;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
 
 const SCRIPT: &str = r#"read -r _
 kill -s TERM -- "-$1" 2>/dev/null || exit 0
@@ -27,17 +26,21 @@ exit 0"#;
 
 /// A guard on one process group. Dropped without [`Guard::release`], its
 /// pipe closes and it ends the group, as this process exiting would.
+///
+/// No thread waits on the guard's shell (Rust-only; Go's goroutine cost
+/// nothing): it ends only once its pipe closes or it's killed, so it's
+/// reaped then, as it's released or dropped. Until then it's this
+/// process's child, unreaped, so its pid is never another's.
 pub struct Guard {
     pub(crate) pid: i32,
     w: Option<PipeWriter>,
-    reaped: Arc<Mutex<bool>>,
 }
 
 /// Guards the process group led by pgid. With no shell to run there is no
 /// guard, and None is returned.
 pub fn watch(pgid: i32) -> Option<Guard> {
     let (r, w) = std::io::pipe().ok()?;
-    let mut child = Command::new("/bin/sh")
+    let child = Command::new("/bin/sh")
         .args(["-c", SCRIPT, "rush-guard", &pgid.to_string()])
         .stdin(r)
         .stdout(Stdio::null())
@@ -45,19 +48,11 @@ pub fn watch(pgid: i32) -> Option<Guard> {
         .process_group(0)
         .spawn()
         .ok()?; // w closes as it drops
-    let pid = child.id() as i32;
-    let reaped = Arc::new(Mutex::new(false));
-    let r2 = reaped.clone();
-    std::thread::spawn(move || {
-        crate::cmd::wait_exit(pid);
-        let mut g = r2.lock().unwrap();
-        let _ = child.wait();
-        *g = true;
-    });
+    // Reaped by its pid as the guard ends; the Child, dropped, leaves the
+    // process be.
     Some(Guard {
-        pid,
+        pid: child.id() as i32,
         w: Some(w),
-        reaped,
     })
 }
 
@@ -71,19 +66,7 @@ pub fn adopt(pid: i32, fd: std::os::fd::RawFd) -> Guard {
     // SAFETY: fd is the guard's pipe, handed over open and owned by no one
     // else in this process.
     let w = PipeWriter::from(unsafe { OwnedFd::from_raw_fd(fd) });
-    let reaped = Arc::new(Mutex::new(false));
-    let r2 = reaped.clone();
-    std::thread::spawn(move || {
-        crate::cmd::wait_exit(pid);
-        let mut g = r2.lock().unwrap();
-        let _ = crate::reexec::reap(pid);
-        *g = true;
-    });
-    Guard {
-        pid,
-        w: Some(w),
-        reaped,
-    }
+    Guard { pid, w: Some(w) }
 }
 
 impl Guard {
@@ -97,15 +80,26 @@ impl Guard {
 
     /// Lets the guard go once the group has ended on its own. It's killed
     /// before its pipe closes, so it never signals a group id that's gone
-    /// and may be another's.
+    /// and may be another's; killed, it goes at once, and is reaped.
     pub fn release(mut self) {
-        let g = self.reaped.lock().unwrap();
-        if !*g {
-            // pid is our child, not yet reaped.
-            let _ = crate::proc::kill(self.pid, libc::SIGKILL);
-        }
-        drop(g);
+        // pid is our child, not yet reaped (see Guard).
+        let _ = crate::proc::kill(self.pid, libc::SIGKILL);
+        let _ = crate::reexec::reap(self.pid);
         self.w.take();
+    }
+}
+
+impl Drop for Guard {
+    /// Not released, its pipe closes: it ends the group and goes, reaped
+    /// by a thread for just that while.
+    fn drop(&mut self) {
+        if self.w.take().is_none() {
+            return; // released
+        }
+        let pid = self.pid;
+        let _ = crate::threads::spawn_small("rush-guard", move || {
+            let _ = crate::reexec::reap(pid);
+        });
     }
 }
 
