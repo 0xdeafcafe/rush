@@ -115,6 +115,13 @@ pub struct StartOptions {
     /// without hooks go without. A harness that can also runs it before
     /// each new subagent or workflow, so the runaway guard can refuse one.
     pub bash_hook: String,
+    /// A command for rush's context guard, the hook input on its stdin:
+    /// run before each file read, after each read, edit and shell call
+    /// (failed ones too), and when the agent's context is compacted or
+    /// cleared. What it prints may refuse the read, or replace a shell
+    /// call's output. Before a shell call bash_hook asks it. A harness
+    /// with hooks runs it; others go without.
+    pub tool_hook: String,
     /// When set, pays for the session per token with the provider's API key
     /// rather than out of the subscription signed in.
     pub api_key: String,
