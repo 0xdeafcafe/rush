@@ -12,30 +12,16 @@
 //! the session folder's files after its agents ([`mention_picks`],
 //! mentionfiles.rs).
 
-use rush_core::agent::Agent;
 use rush_core::text::{Line, Span};
 
 use super::{Act, act, info};
 use crate::model::Model;
 use crate::style::*;
 
-// An agent's handle and its nickname are the frame's (crate::mention).
+// An agent's handle, and what tags it, are the frame's (crate::mention).
 pub use rush_ui_base::mention::{
-    ROOM_KEY_PREFIX, handle_tint, mention_name, mentionable, nickname, title_tag,
+    ROOM_KEY_PREFIX, handle_tint, keep, mention_name, mentionable, tags,
 };
-
-/// Whether tag names agent a: its handle, its nickname or its title
-/// (tags).
-pub fn tags(a: &Agent, host_id: Option<&str>, tag: &str) -> bool {
-    let eq = |s: &str| s.eq_ignore_ascii_case(tag);
-    eq(&mention_name(a, host_id))
-        || eq(&nickname(&a.key))
-        || eq(&title_tag(&a.display_name))
-        || eq(&one_line(&a.display_name)
-            .split(' ')
-            .collect::<Vec<_>>()
-            .join("-"))
-}
 
 /// The list's agents in its order, each with its host's id when rush
 /// runs it.
@@ -88,8 +74,8 @@ pub fn send_mentioned(m: &mut Model, from: &str, text: &str, tagged: &str) -> Ou
         from,
         Act::ReplyTo {
             to: a.key,
-            text: rest,
-            tagged,
+            text: keep(&rest),
+            tagged: keep(&tagged),
         },
     )
 }
@@ -173,11 +159,19 @@ pub fn with_mentions(m: &Model, text: &str, self_key: &str) -> String {
         }
         let host = info(m, &a.key);
         let id = super::handles::host_id(a).map(str::to_string);
-        let mut n = format!(
-            "@{} is {}, another agent rush runs",
-            mention_name(a, id.as_deref()),
-            one_line(&a.display_name)
-        );
+        let name = format!("@{}", mention_name(a, id.as_deref()));
+        let title = one_line(&a.display_name);
+        // What the message keeps for it is its id: say which agent that is.
+        let mut n = match id
+            .as_deref()
+            .filter(|id| rush_room::handle::known().knows(id))
+        {
+            Some(id) => format!(
+                "{} is {name}, {title}, another agent rush runs",
+                rush_room::handle::stored(id)
+            ),
+            None => format!("{name} is {title}, another agent rush runs"),
+        };
         if !a.job.cwd.is_empty() {
             n.push_str(&format!(", in {}", a.job.cwd));
         }
@@ -197,8 +191,9 @@ pub fn with_mentions(m: &Model, text: &str, self_key: &str) -> String {
         }
         notes.push(n);
     }
+    let text = keep(text);
     if notes.is_empty() {
-        return text.to_string();
+        return text;
     }
     format!(
         "{text}\n\n<system-reminder>\n{}\n</system-reminder>",
@@ -254,7 +249,8 @@ fn agent_row(m: &Model, i: usize) -> (String, String, String) {
         let n = one_line(&a.display_name);
         if n.is_empty() { mention_name(a, id) } else { n }
     };
-    (name, d.join(" · "), format!("@{}", mention_name(a, id)))
+    let handle = rush_ui_base::mention::trim(&format!("@{}", mention_name(a, id)));
+    (name, d.join(" · "), handle)
 }
 
 /// The picker: each agent by its name, with its section, branch and the

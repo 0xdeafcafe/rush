@@ -271,7 +271,7 @@ fn a_rooms_pane_has_an_agents_header() {
         .collect::<Vec<_>>()
         .join("\n");
     for want in [
-        "tabs or spaces   @tabs-spaces  ·  working",
+        "tabs or spaces   @tabs-or-spaces  ·  working",
         "◇ room",
         "between turns · 2 agents",
         "Conversation   Overview   Changes",
@@ -289,7 +289,7 @@ fn a_rooms_pane_has_an_agents_header() {
         .map(|l| l.plain())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(f.contains("tabs or spaces @tabs-spaces"), "{f}");
+    assert!(f.contains("tabs or spaces @tabs-or-spaces"), "{f}");
     assert!(
         !f.contains("settle tabs or spaces"),
         "the log under Overview:\n{f}"

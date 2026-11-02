@@ -133,10 +133,14 @@ pub fn hashtag_re() -> &'static Regex {
     )
 }
 
-/// Matches @usernames as username writes them.
+/// Matches @usernames as username writes them: a session kept by its
+/// id, @{id} (see handle), or a handle typed, letters and digits dashed.
 pub fn mention_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    re(&R, r"@[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*")
+    re(
+        &R,
+        r"@(?:\{[A-Za-z0-9._-]+\}|[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*)",
+    )
 }
 
 /// ponytail: catches schemes and www. only; bare domains like example.com
@@ -282,7 +286,7 @@ pub fn tag(title: &str) -> String {
 }
 
 /// s's words: its runs of letters and digits, lowercase.
-fn words(s: &str) -> Vec<String> {
+pub(crate) fn words(s: &str) -> Vec<String> {
     static R: OnceLock<Regex> = OnceLock::new();
     re(&R, r"[^\p{L}\p{Nd}]+")
         .split(&go_lower(s))
@@ -312,11 +316,12 @@ const TAG_FILLER: &[&str] = &[
 ];
 
 impl Author {
-    /// The author's @handle: an agent's fixed animal name (see name), else
-    /// the tag of the name it posted under.
+    /// Who the author is, as a mention of them is kept: an agent by its
+    /// session's id, @{id}, which handle::Names draws as its title now;
+    /// anyone else by the tag of the name they posted under.
     pub fn username(&self) -> String {
         if !self.session_id.is_empty() {
-            return format!("@{}", name(&self.session_id));
+            return crate::handle::stored(&self.session_id);
         }
         if !self.handle.is_empty() {
             return format!("@{}", self.handle);
@@ -333,56 +338,22 @@ impl Author {
     }
 }
 
-/// Whether text names username (an @handle), case-insensitively.
+/// Whether text names username (an @handle), case-insensitively. A
+/// session's (@{id}) is named too by the animal handle text from before
+/// gave it.
 pub fn mentions(text: &str, username: &str) -> bool {
-    let want = fold(username);
+    let mut want = vec![fold(username)];
+    if let Some(id) = crate::handle::stored_id(username) {
+        want.push(fold(&format!("@{}", crate::handle::legacy_name(id))));
+    }
     mention_re()
         .find_iter(text)
-        .any(|m| fold(m.as_str()) == want)
+        .any(|m| want.contains(&fold(m.as_str())))
 }
 
 /// s folded for comparing as Go's strings.EqualFold does.
 fn fold(s: &str) -> String {
     s.chars().flat_map(char::to_lowercase).collect()
-}
-
-const DOGS: &[&str] = &[
-    "biscuit", "rex", "bean", "pickle", "waffle", "noodle", "rufus", "bramble", "pepper", "scout",
-    "toffee", "barley", "ziggy", "mochi", "nugget", "pudding", "buster", "clover", "dumpling",
-    "fudge", "gizmo", "juniper", "kipper", "marmite", "otis", "pippin", "rolo", "sprout", "turnip",
-    "wombat", "custard", "boris",
-];
-const CATS: &[&str] = &[
-    "moss", "tabby", "whiskers", "socks", "mittens", "smudge", "tigger", "luna", "salem",
-    "pumpkin", "inky", "soot", "marzipan", "purrcy", "cleo", "figaro",
-];
-const BIRDS: &[&str] = &[
-    "heron", "wren", "puffin", "robin", "finch", "magpie", "plover", "starling", "kestrel", "dodo",
-    "lark", "pelican", "toucan", "sparrow", "gannet", "curlew",
-];
-
-/// The agent's feed name, without the @: a dog's name and then a dog's,
-/// cat's or bird's, picked from its stable session id, so it never
-/// changes: biscuit-heron. An empty id is the person at the keyboard.
-pub fn name(id: &str) -> String {
-    if id.is_empty() {
-        return "you".into();
-    }
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325; // FNV-1a, 64 bits
-    for b in id.bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    let seconds = DOGS.len() + CATS.len() + BIRDS.len();
-    let i = ((h / DOGS.len() as u64) % seconds as u64) as usize;
-    let second = DOGS
-        .iter()
-        .chain(CATS)
-        .chain(BIRDS)
-        .nth(i)
-        .copied()
-        .unwrap_or("heron");
-    format!("{}-{second}", DOGS[(h % DOGS.len() as u64) as usize])
 }
 
 /// What the feed can fail with: its words are Go's, since `rush feed`
@@ -1136,8 +1107,12 @@ mod tests {
         let rows = f.list().unwrap();
         let got = followed(&bean, &rows);
         assert!(got.len() == 1 && got[0].to.is_some(), "{got:?}");
-        f.reply(&other.id, &bean, &format!("ack @{}", name("s-cod")))
-            .unwrap(); // anyone may answer anywhere
+        f.reply(
+            &other.id,
+            &bean,
+            &format!("ack @{}", crate::handle::legacy_name("s-cod")),
+        )
+        .unwrap(); // anyone may answer anywhere
         f.ask(&bean, "Me too", "#build here too").unwrap();
         let rows = f.list().unwrap();
         assert_eq!(follows(&bean, &rows), ["#haven", "#build"]);
@@ -1238,38 +1213,24 @@ mod tests {
         assert!(!rows.iter().any(|t| t.to.is_some() || t.title == "chirp 0"));
     }
 
-    // names_test.go TestNameIsFixedAndIsTheUsername
+    // A session is kept by its id, never by the name it had then; the
+    // animal handle text from before gave it still names it.
     #[test]
-    fn name_is_fixed_and_is_the_username() {
-        assert_eq!(name("s1"), name("s1"));
-        assert!(name("s1").contains('-'));
+    fn a_session_is_kept_by_its_id() {
         let a = Author {
             session_id: "s1".into(),
             name: "Investigator".into(),
             handle: "inv".into(),
             ..Author::default()
         };
-        assert_eq!(a.username(), format!("@{}", name("s1")));
-        assert_eq!(name(""), "you");
+        assert_eq!(a.username(), "@{s1}");
+        assert!(mentions("ask @{s1} now", &a.username()));
+        assert!(mentions(
+            &format!("ask @{} now", crate::handle::legacy_name("s1")),
+            &a.username()
+        ));
+        assert!(!mentions("ask @{s2} now", &a.username()));
     }
-
-    // The names Go gives: FNV-1a of the id, the same animals.
-    #[test]
-    fn names_as_go_gives_them() {
-        // From Go: community.Name for each id.
-        for (id, want) in GO_NAMES {
-            assert_eq!(name(id), *want, "{id}");
-        }
-    }
-
-    pub(crate) const GO_NAMES: &[(&str, &str)] = &[
-        ("s1", "scout-toffee"),
-        ("s-cod", "clover-robin"),
-        ("verified", "noodle-heron"),
-        ("a1b2c3d4-0000-4000-8000-000000000000", "wombat-waffle"),
-        ("x", "bramble-kestrel"),
-        ("界", "boris-kipper"),
-    ];
 
     // The board as Go writes it reads back and writes the same.
     #[test]

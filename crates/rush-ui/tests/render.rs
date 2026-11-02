@@ -258,7 +258,7 @@ fn opens_a_session_read_only() {
     assert!(m.session.is_some());
     // The name, its @handle, then its state (rushmode.go:2924).
     assert!(
-        f.contains("set up caching for CI   @set-up-caching  ·  idle"),
+        f.contains("set up caching for CI   @set-up-caching-for-ci  ·  idle"),
         "{f}"
     );
     assert!(f.contains("esc back to the list"), "{f}");

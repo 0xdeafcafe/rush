@@ -39,7 +39,8 @@ pub struct Post {
     /// When the post a reply answers was made; the sheet sets it.
     pub root_at: Ms,
     pub reply: bool,
-    /// The agent an agent's message is to, its @handle; "" for a chirp.
+    /// The agent an agent's message is to, as it's kept (@{id}); "" for
+    /// a chirp.
     pub to: String,
     /// The whole of that message, when text sums it up.
     pub full: String,
@@ -49,21 +50,35 @@ pub struct Post {
 
 impl Post {
     /// What the post says: a reply's text, or a post's title; an agent's
-    /// message to another says who to.
+    /// message to another says who to. Each session it names shows as its
+    /// handle now, cut to WIDTH.
     pub fn said(&self) -> String {
-        if !self.to.is_empty() {
-            return format!("→ {} {}", self.to, self.text);
-        }
-        if self.reply {
-            return self.text.clone();
-        }
-        self.title.clone()
+        self.said_as(false)
     }
 
-    /// The author as @name, whatever username already carries
-    /// (streamHandle).
+    /// What the post says, as said does; whole, its handles uncut.
+    pub fn said_as(&self, whole: bool) -> String {
+        let n = rush_room::handle::known();
+        let show = |s: &str| {
+            if whole { n.show(s) } else { n.show_short(s) }
+        };
+        if !self.to.is_empty() {
+            return format!("→ {} {}", show(&self.to), show(&self.text));
+        }
+        if self.reply {
+            return show(&self.text);
+        }
+        show(&self.title)
+    }
+
+    /// The author as @name, cut to WIDTH (streamHandle).
     pub fn handle(&self) -> String {
-        let u = clean_text(&self.author.username());
+        rush_room::handle::trim(&self.whole_handle())
+    }
+
+    /// The author as @name, whole: an agent by its session's title now.
+    pub fn whole_handle(&self) -> String {
+        let u = clean_text(&rush_room::handle::known().who(&self.author));
         format!("@{}", u.strip_prefix('@').unwrap_or(&u))
     }
 
@@ -172,7 +187,7 @@ pub trait ModelStream {
     fn load_stream(&mut self);
     fn reload_stream(&mut self);
     fn stream_name(&self, p: &Post) -> String;
-    fn stream_who(&self, p: &Post, col: Color, w: usize) -> Line;
+    fn stream_who(&self, p: &Post, col: Color, w: usize, whole: bool) -> Line;
 }
 
 impl ModelStream for Model {
@@ -242,10 +257,11 @@ impl ModelStream for Model {
         one_line(&clean_text(&p.author.name))
     }
 
-    /// A post's author in w cells: its @handle in col, kept whole, then
-    /// its name, dim, cut to fit (streamWho).
-    fn stream_who(&self, p: &Post, col: Color, w: usize) -> Line {
-        let h = p.handle();
+    /// A post's author in w cells: its @handle in col, cut to WIDTH
+    /// unless whole (hovered), then its name, dim, cut to fit
+    /// (streamWho).
+    fn stream_who(&self, p: &Post, col: Color, w: usize, whole: bool) -> Line {
+        let h = if whole { p.whole_handle() } else { p.handle() };
         let mut who = line([spb(h.clone(), col)]);
         let n = self.stream_name(p);
         let room = w as isize - cells(&h) as isize - 3;
@@ -374,7 +390,7 @@ mod tests {
             "an agent's message is to the other"
         );
         assert_eq!(ps[3].to, hub.username());
-        assert!(ps[1].said().starts_with("→ @"));
+        assert_eq!(ps[1].said(), "→ @session-spep run the tests");
         assert_eq!(ps[2].said(), "reply");
         assert_eq!(ps[0].said(), "first");
         assert_eq!(ps[2].handle(), "@you");

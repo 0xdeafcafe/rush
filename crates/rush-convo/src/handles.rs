@@ -80,14 +80,21 @@ pub fn agent_link(h: &Handle) -> String {
     format!("rush:agent/{}", h.name)
 }
 
-/// tag, as written, in its agent's colour and linked to it.
+/// tag in its agent's colour and linked to it: as written, but a kept
+/// mention (@{id}) as the agent's handle now.
 pub(crate) fn agent_tag(h: &Handle, tag: &str) -> Txt {
-    Txt::styled(tag, Style::fg(h.tint).bold().linked(&agent_link(h)))
+    let style = Style::fg(h.tint).bold().linked(&agent_link(h));
+    if tag.starts_with("@{") {
+        return Txt::styled(&format!("@{}", h.name), style);
+    }
+    Txt::styled(tag, style)
 }
 
-/// @usernames as community.MentionRE writes them.
-static MENTION: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"@[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*").expect("mention"));
+/// @usernames as community.mention_re writes them: a session kept by its
+/// id, @{id}, or a handle.
+static MENTION: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"@(?:\{[A-Za-z0-9._-]+\}|[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*)").expect("mention")
+});
 
 /// Each @tag in t that names an agent drawn as agent_tag does. A tag
 /// starts a word (or a run styled apart from the one before): the @ in an
@@ -170,14 +177,14 @@ mod tests {
 
     fn with_ann() {
         let mut hs = HashMap::new();
-        hs.insert(
-            "ann".to_string(),
-            Handle {
-                name: "ann".into(),
-                tint: Color::Indexed(2),
-                title: "Ann".into(),
-            },
-        );
+        let ann = Handle {
+            name: "ann".into(),
+            tint: Color::Indexed(2),
+            title: "Ann".into(),
+        };
+        hs.insert("ann".to_string(), ann.clone());
+        // Kept by its session's id, it's drawn by its handle.
+        hs.insert("{a1b2c3d4}".to_string(), ann);
         set_handles(hs);
     }
 
@@ -201,6 +208,11 @@ mod tests {
             ),
             ("(@ann)", &[("(", false), ("@ann", true), (")", false)]),
             ("@bob", &[("@bob", false)]),
+            (
+                "ask @{a1b2c3d4} now",
+                &[("ask ", false), ("@ann", true), (" now", false)],
+            ),
+            ("@{ffff0000}", &[("@{ffff0000}", false)]),
         ];
         for (s, want) in cases {
             let got = agent_links(paint(C_TEXT, s));

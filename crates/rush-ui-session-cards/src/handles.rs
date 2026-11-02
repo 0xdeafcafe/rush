@@ -10,9 +10,12 @@ use rush_convo::handles::{Handle, set_handles};
 use rush_core::agent::Agent;
 use rush_core::text::{Line, Link, Mods};
 
-use super::mention::{handle_tint, mention_name, mentionable, nickname, tags, title_tag};
+use rush_room::handle::Names;
+
+use super::mention::{ROOM_KEY_PREFIX, handle_tint, mention_name, mentionable, tags};
 use crate::model::Model;
 use crate::style::one_line;
+use rush_ui_base::mention::{handle_key, kebab};
 
 /// What an agent's tags are worked out from (handleKey).
 #[derive(Clone, PartialEq, Eq)]
@@ -32,9 +35,17 @@ struct HandlesFor(Option<Vec<HandleKey>>);
 // An agent's host id (the frame's, crate::mention) gives it its handle.
 pub use rush_ui_base::mention::host_id;
 
-/// Tells the conversation which agent each tag names: its handle first,
-/// then its nickname and title where nothing else does. Only when what
-/// they're worked out from changed (setHandles, sameHandles).
+/// The id a mention of a keeps, when rush runs it (not a room).
+fn kept(a: &Agent) -> Option<&str> {
+    host_id(a).filter(|id| !id.is_empty() && !a.key.starts_with(ROOM_KEY_PREFIX))
+}
+
+/// Tells rush_room::handle every session rush runs, by its title now, so
+/// whatever draws a handle draws the same one; and tells the conversation
+/// which agent each tag names: its handle and a kept @{id} first, then
+/// its title and the animal handle it had before where nothing else
+/// does. Only when what they're worked out from changed (setHandles,
+/// sameHandles).
 pub fn sync(m: &mut Model) {
     let now: Vec<HandleKey> = m
         .order
@@ -55,6 +66,10 @@ pub fn sync(m: &mut Model) {
         return;
     }
     m.kept::<HandlesFor>().0 = Some(now);
+    rush_room::handle::set_known(Names::new(m.order.iter().filter_map(|&i| {
+        let a = &m.agents[i];
+        kept(a).map(|id| (id.to_string(), one_line(&a.display_name)))
+    })));
     let mut hs: HashMap<String, Handle> = HashMap::with_capacity(4 * m.order.len());
     let mut add = |tag: &str, h: &Handle| {
         let k = tag.to_lowercase();
@@ -70,23 +85,21 @@ pub fn sync(m: &mut Model) {
             }
             let name = mention_name(a, host_id(a));
             let h = Handle {
-                tint: handle_tint(&format!("@{name}")),
+                tint: handle_tint(&handle_key(a)),
                 title: one_line(&a.display_name),
                 name: name.clone(),
             };
             if pass == 0 {
                 add(&name, &h);
+                if let Some(id) = kept(a) {
+                    add(&format!("{{{id}}}"), &h);
+                }
                 continue;
             }
-            add(&nickname(&a.key), &h);
-            add(&title_tag(&a.display_name), &h);
-            add(
-                &one_line(&a.display_name)
-                    .split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join("-"),
-                &h,
-            );
+            add(&kebab(&one_line(&a.display_name)), &h);
+            if let Some(id) = kept(a) {
+                add(&rush_room::handle::legacy_name(id), &h);
+            }
         }
     }
     set_handles(hs);
@@ -148,6 +161,12 @@ mod tests {
         assert_eq!(h.name, name);
         let h2 = rush_convo::handles::handle_of("Docs-Site").expect("its title tags it");
         assert_eq!(h2.name, name);
+        assert_eq!(name, "docs-site", "its title, kebab-cased");
+        let h3 = rush_convo::handles::handle_of("@{b1b2c3d4}").expect("its kept id tags it");
+        assert_eq!(h3.name, name);
+        let old = format!("@{}", rush_room::handle::legacy_name("b1b2c3d4"));
+        let h4 = rush_convo::handles::handle_of(&old).expect("its old animal handle tags it");
+        assert_eq!(h4.name, name);
         let u = rush_convo::handles::agent_link(&h);
         assert_eq!(linked_agent(&m, &u), Some(0));
         assert_eq!(linked_agent(&m, "rush:agent/nobody"), None);

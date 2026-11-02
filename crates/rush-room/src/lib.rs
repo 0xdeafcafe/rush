@@ -14,6 +14,7 @@ pub mod community;
 pub mod doing;
 pub mod driver;
 pub mod feed;
+pub mod handle;
 pub mod room;
 
 pub use cli::{MemberConfig, ROOM_USAGE, RoomCtx, room_cmd, room_line};

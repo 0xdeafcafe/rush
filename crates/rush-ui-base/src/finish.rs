@@ -12,7 +12,7 @@ use rush_core::agent::Agent;
 use rush_core::time::Ms;
 
 use crate::clanker::Reaction;
-use crate::mention::mention_name;
+use crate::mention::drawn_handle;
 use crate::model::Model;
 use crate::style::one_line;
 
@@ -41,8 +41,7 @@ pub struct Finish {
 
 /// An agent's @handle (agentHandle).
 fn handle(a: &Agent) -> String {
-    let host = a.rush.then_some(a.job.id.as_str());
-    format!("@{}", mention_name(a, host))
+    drawn_handle(a)
 }
 
 /// Adds a line from your agents for agent a, keeping the last 30

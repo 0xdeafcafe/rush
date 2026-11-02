@@ -20,7 +20,7 @@ use rush_core::time::Ms;
 use rush_fleet::Predicates;
 
 use crate::look::kind_name;
-use crate::mention::{ROOM_KEY_PREFIX, mention_name};
+use crate::mention::{ROOM_KEY_PREFIX, drawn_handle};
 use crate::style::*;
 use crate::worker::TailHandle;
 
@@ -483,8 +483,7 @@ impl SessionView {
         if a.key.starts_with(ROOM_KEY_PREFIX) {
             return false;
         }
-        let host = a.rush.then_some(a.job.id.as_str());
-        let handle = format!("@{}", mention_name(a, host));
+        let handle = drawn_handle(a);
         let kind = migrated(a.kind.as_str());
         let speaker = kind_name(rush_core::adapter::global(), kind.as_str());
         if self.o.agent == handle && self.o.speaker == speaker {

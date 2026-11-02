@@ -5,7 +5,7 @@
    ▀▀▀▀▀▀
 ────────────────────────────────────────────────────────────────────────────────
 
-    set up caching for CI   @set-up-caching  ·  idle                context 0%
+    set up caching for CI   @set-up-caching-for-ci  ·  idle         context 0%
     checkout · main    Claude Code · open in a terminal · /rush copies it here
     Conversation   Overview   Changes    [ ] views        esc back to the list
 ───━━━━━━━━━━━━━━───────────────────────────────────────────────────────────────

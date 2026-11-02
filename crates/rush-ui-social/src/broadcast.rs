@@ -3,9 +3,9 @@
 //! message, rush waits while you click agents in the list to pick them,
 //! then the box's next message goes to every one picked. Esc gives up.
 //! Port of Go's broadcast.go, with the tags it reads agents by from
-//! mention.go:30-71 (mentionName, titleTag, tags, nickname, mentionable,
-//! mentionsIn) and the sending of localqueue.go:61 and outside.go:42
-//! (reply, replyOutside) for agents rush doesn't run.
+//! mention.go:30-71 (mentionName, tags, mentionable, mentionsIn) and the
+//! sending of localqueue.go:61 and outside.go:42 (reply, replyOutside) for
+//! agents rush doesn't run.
 
 use std::collections::HashSet;
 
@@ -14,7 +14,6 @@ use rush_core::agent::Agent;
 
 use crate::frame::{Mouse, Out, Press};
 use crate::model::Model;
-use crate::style::one_line;
 
 /// Who's being picked; None while not broadcasting.
 #[derive(Default)]
@@ -22,50 +21,16 @@ pub struct Broadcast {
     pub picked: Option<HashSet<String>>,
 }
 
-#[doc(hidden)]
-pub const NICK_WORDS: &str = "brave quick sleepy muddy lucky fuzzy jolly tiny grumpy sunny dizzy bold calm cheeky clever cosy daring eager fancy gentle happy humble keen lively loyal merry nimble plucky proud quiet rusty scruffy shy silly snappy speedy spry sturdy swift wily witty zesty";
-#[doc(hidden)]
-pub const NICK_NAMES: &str = "biscuit pickle waffles noodle pepper bean maple ziggy rocket bonnie mochi pudding scout banjo tofu nugget juniper dottie fudge pip heron robin wren finch puffin magpie kestrel plover osprey lark sparrow starling swift tern ibis egret pelican toucan kiwi dodo condor";
-
-/// key's nickname: the same key always gets the same one (nickname).
-pub fn nickname(key: &str) -> String {
-    let mut h: u32 = 0x811c9dc5;
-    for b in key.bytes() {
-        h ^= b as u32;
-        h = h.wrapping_mul(0x01000193);
-    }
-    let words: Vec<&str> = NICK_WORDS.split(' ').collect();
-    let names: Vec<&str> = NICK_NAMES.split(' ').collect();
-    format!(
-        "{}-{}",
-        words[(h % words.len() as u32) as usize],
-        names[(h / words.len() as u32 % names.len() as u32) as usize]
-    )
-}
-
-/// title's first three words that aren't filler, lowercase, dashed: the
-/// same tag the board shows as its @username (titleTag).
-pub fn title_tag(title: &str) -> String {
-    rush_room::community::tag(&one_line(title))
-}
-
-/// An agent's handle, how it's tagged: a session rush runs has its feed
-/// name, any other its title's tag, with no title yet a nickname from its
-/// key (mentionName).
+/// An agent's handle, how it's tagged: its title now, kebab-cased (see
+/// crate::mention::mention_name).
 pub fn mention_name(a: &Agent) -> String {
     crate::mention::mention_name(a, crate::mention::host_id(a))
 }
 
-/// Whether tag names agent a: its tag, its nickname or its title (tags).
+/// Whether tag names agent a: its handle, its title, its kept id or the
+/// start of its handle when it's the only one (tags).
 pub fn tags(a: &Agent, tag: &str) -> bool {
-    let eq = |s: &str| s.eq_ignore_ascii_case(tag) || s.to_lowercase() == tag.to_lowercase();
-    eq(&mention_name(a))
-        || eq(&nickname(&a.key))
-        || eq(&title_tag(&a.display_name))
-        || eq(&one_line(&a.display_name)
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join("-"))
+    crate::mention::tags(a, crate::mention::host_id(a), tag)
 }
 
 /// Whether a message can reach it from here (mentionable).
@@ -199,6 +164,8 @@ impl ModelBroadcast for Model {
     /// Sends text to each of to, once each (broadcastTo).
     fn broadcast_to(&mut self, to: &[usize], text: &str) -> Out {
         self.kept::<Broadcast>().picked = None;
+        // Each agent it names is kept by its session's id.
+        let text = &crate::mention::keep(text);
         let mut seen = HashSet::new();
         for &i in to {
             let a = self.agents[i].clone();

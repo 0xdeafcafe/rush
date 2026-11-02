@@ -728,6 +728,14 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
     let kind = rush_ui_session_cards::claudescreen::kind_of(m, key);
     let dir = rush_ui_session_cards::mention::session_dir(m, key);
     let text = rush_ui_session_cards::mentionfiles::send_files(&m.reg, &kind, &dir, &text);
+    // Each agent it names is kept by its session's id, so the message
+    // keeps pointing at it when its title changes; drawn, it shows the
+    // title it has then.
+    let text = if conn(m, key).hosted() {
+        rush_ui_session_cards::mention::keep(&text)
+    } else {
+        text
+    };
     let t = m.now;
     let c = conn(m, key);
     c.input.clear_sent();

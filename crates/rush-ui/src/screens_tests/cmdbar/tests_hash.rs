@@ -621,7 +621,9 @@ fn intervene_from_the_list() {
     );
     m.command("#intervene @nobody-here it loops");
     assert_eq!(flash(&m), "no agent called @nobody-here");
-    let tag = rush_room::community::name("c2");
+    // Its handle is its title; the animal handle it had before names it
+    // still.
+    let tag = rush_room::handle::legacy_name("c2");
     m.command(&format!("#intervene @{tag} it loops"));
     assert_eq!(
         m.session.as_ref().map(|v| v.key.as_str()),
@@ -667,8 +669,8 @@ fn hash_args_from_the_model() {
         names,
         [
             "broadcast all".to_string(),
-            format!("broadcast @{}", rush_room::community::name("c1")),
-            format!("broadcast @{}", rush_room::community::name("c2")),
+            "broadcast @tidy-the-parser".to_string(),
+            "broadcast @fix-the-build".to_string(),
         ]
     );
 }

@@ -980,10 +980,8 @@ pub fn state_words(o: &Of, now: Ms) -> Line {
 /// An agent's @handle painted to go after its name (mention.go:47
 /// nameHandle).
 pub fn name_handle(a: &Agent) -> rush_core::text::Span {
-    use crate::mention::{handle_tint, mention_name};
-    let h = format!("@{}", mention_name(a, a.rush.then_some(a.job.id.as_str())));
-    let c = handle_tint(&h);
-    sp(h, c)
+    use crate::mention::{drawn_handle, handle_key, handle_tint};
+    sp(drawn_handle(a), handle_tint(&handle_key(a)))
 }
 
 /// While a limit or an API error holds it, whether its prompt cache is

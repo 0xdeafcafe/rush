@@ -55,7 +55,7 @@ pub fn kind(needs: &str) -> &'static str {
 fn title(a: &Agent) -> String {
     let t = one_line(&a.display_name);
     if t.is_empty() {
-        format!("@{}", a.job.id)
+        format!("@{}", rush_ui_base::mention::plain(&a.job.id))
     } else {
         t
     }

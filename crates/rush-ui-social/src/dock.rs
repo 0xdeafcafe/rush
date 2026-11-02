@@ -113,6 +113,8 @@ impl ModelDock for Model {
             }
             // A run of one author's posts signs once, in a colour not the
             // run above's.
+            let key = format!("{KEY_PREFIX}{}", p.key);
+            let hovered = hover == key;
             let mut who = Line::new();
             if i == 0 || kept[i - 1].username() != p.username() {
                 let t = tint_beside(
@@ -121,9 +123,11 @@ impl ModelDock for Model {
                     next_tint(&kept[i + 1..], &p.username()),
                 );
                 tint = Some(t);
-                who = self.stream_who(p, t, cols.handle);
+                who = self.stream_who(p, t, cols.handle, hovered);
+            } else if hovered {
+                // Hovered, a post in a run says whose it is too, whole.
+                who = self.stream_who(p, tint.unwrap_or(TEXT), cols.handle, true);
             }
-            let key = format!("{KEY_PREFIX}{}", p.key);
             let step = (since.as_millis() / TICKER_EVERY.as_millis()) as i64 - TICKER_PAUSE;
             let (row, m) = stream_row(p, cols, who, now, (hover == key).then_some(step));
             more |= m;
@@ -176,16 +180,22 @@ impl ModelDock for Model {
 }
 
 /// One post on one row: who signed it, if anyone, the text cut with … or,
-/// hovered (step given), scrolling across, and its age; and whether it
-/// has further to scroll (streamRow).
-fn stream_row(p: &Post, c: Cols, who: Line, now: Ms, step: Option<i64>) -> (Line, bool) {
+/// hovered (step given), scrolling across with its handles whole, and its
+/// age; and whether it has further to scroll (streamRow). A hovered
+/// row's handle takes the room it needs from its text.
+fn stream_row(p: &Post, mut c: Cols, who: Line, now: Ms, step: Option<i64>) -> (Line, bool) {
+    let whole = step.is_some();
+    if whole && who.width() > c.handle {
+        c.text = (c.text + c.handle).saturating_sub(who.width()).max(8);
+        c.handle = who.width();
+    }
     let ago = age(now - p.at);
     let when = if now - p.at < FRESH {
         sp(ago.clone(), ORANGE)
     } else {
         sp(ago.clone(), DIM)
     };
-    let mut text = fields(&clean_text(&p.said()));
+    let mut text = fields(&clean_text(&p.said_as(whole)));
     let mut more = false;
     if let Some(step) = step
         && cells(&text) > c.text

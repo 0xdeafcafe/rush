@@ -49,6 +49,33 @@ fn lines() {
     assert!(rows(&mut m, 60, 10).is_empty());
 }
 
+// An agent goes by its session's title: a long one cut with … until the
+// pointer is on its post, which shows it whole; renamed, its posts show
+// the new title.
+#[test]
+fn long_handles_cut_until_hovered() {
+    use rush_room::handle::{Names, set_known};
+    let mut m = feed_model();
+    m.now = m.clock.unwrap();
+    set_known(Names::new([(
+        "s1",
+        "Terminal Decline: Shell Autocomplete Ideas",
+    )]));
+    let full = "@terminal-decline-shell-autocomplete-ideas";
+    let cut = "@terminal-decline-shell…";
+    let last = |m: &mut Model| rows(m, 120, 8).last().unwrap().clone();
+    let quiet = last(&mut m);
+    assert!(quiet.contains(cut) && !quiet.contains(full), "{quiet}");
+    m.hover = format!("{KEY_PREFIX}a/1");
+    let hovered = last(&mut m);
+    assert!(hovered.contains(full), "{hovered}");
+    m.hover.clear();
+    set_known(Names::new([("s1", "Build cache")]));
+    let renamed = last(&mut m);
+    assert!(renamed.contains("@build-cache "), "{renamed}");
+    set_known(Names::default());
+}
+
 // Quiet, it's faded; a new post or the pointer lights it.
 #[test]
 fn fades_when_quiet() {

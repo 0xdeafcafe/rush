@@ -57,12 +57,18 @@ fn picks() {
 }
 
 #[test]
-fn nicknames_are_go_s() {
-    // The same key always gets the same nickname, from Go's lists.
-    let n = nickname("claude:default:abc");
-    let (w, name) = n.split_once('-').unwrap();
-    assert!(NICK_WORDS.split(' ').any(|x| x == w) && NICK_NAMES.split(' ').any(|x| x == name));
-    assert_eq!(n, nickname("claude:default:abc"));
-    let a = agent("k", "Fix the login bug");
-    assert!(tags(&a, &mention_name(&a)) && tags(&a, "Fix-the-login-bug"));
+fn handles_are_titles() {
+    // An agent goes by its title, kebab-cased; with none yet, by a plain
+    // name from its id, never an animal's.
+    let a = agent("k", "Fix the login bug!");
+    assert_eq!(mention_name(&a), "fix-the-login-bug");
+    assert!(
+        tags(&a, &mention_name(&a))
+            && tags(&a, "Fix-the-login-bug")
+            && tags(&a, "@fix-the-login-bug")
+    );
+    assert!(!tags(&a, "fix-the-login"));
+    let mut b = agent("claude:default:abc", "");
+    b.job.id = "abcd1234".into();
+    assert_eq!(mention_name(&b), "session-abcd1234");
 }

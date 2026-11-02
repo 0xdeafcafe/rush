@@ -413,14 +413,17 @@ impl ModelCommunity for Model {
         } else {
             sp(right(&ago, age_w), DIM)
         };
-        let mut said = p.said();
+        // Picked, a post's handles show whole.
+        let names = rush_room::handle::known();
+        let mut said = p.said_as(p.whole);
         let mut more: Vec<String> = Vec::new();
         if p.whole && !p.full.is_empty() {
             // Picked, an agent's message shows whole.
-            let full = clean_text(&p.full);
+            let full = clean_text(&names.show(&p.full));
             let mut paras = full.split('\n').map(str::to_string);
             let first = paras.next().unwrap_or_default();
-            said = format!("{}{first}", said.strip_suffix(&p.text).unwrap_or(&said));
+            let text = names.show(&p.text);
+            said = format!("{}{first}", said.strip_suffix(&text).unwrap_or(&said));
             more = paras.collect();
         } else if !p.full.is_empty() && !said.ends_with('…') {
             said.push_str(" …"); // there's more: picked, it shows
@@ -428,7 +431,11 @@ impl ModelCommunity for Model {
         let mut text = fields(&clean_text(&said));
         let mut room = w as isize - age_w as isize - 2;
         let mut gap = "  ";
-        let h = p.handle();
+        let h = if p.whole {
+            p.whole_handle()
+        } else {
+            p.handle()
+        };
         let mut sign = String::new();
         if p.reply {
             room -= 3;
@@ -639,7 +646,7 @@ impl FeedSheet {
                 join(
                     &mut head,
                     spread(
-                        m.stream_who(p, e, room),
+                        m.stream_who(p, e, room, false),
                         line([sp(proj, DIM)]),
                         w.saturating_sub(2),
                     ),
@@ -726,6 +733,8 @@ impl FeedSheet {
             project: self.project_of(posts(m), &self.tag),
             ..Author::default()
         };
+        // Each agent it names is kept by its session's id.
+        let text = rush_room::handle::known().store(&text);
         let id = self.reply_to.clone();
         self.busy = true;
         m.later(

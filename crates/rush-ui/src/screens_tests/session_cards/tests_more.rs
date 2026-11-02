@@ -321,14 +321,17 @@ fn mentions_tag_agents() {
         (m.agents[i].key.as_str(), rest.as_str()),
         ("a", "try again\nplease")
     );
-    let (i, rest) = mentioned(&m, &format!("@{} hi", nickname("a"))).unwrap();
+    let (i, rest) = mentioned(&m, "@fix-login-bug hi").unwrap();
     assert_eq!((m.agents[i].key.as_str(), rest.as_str()), ("a", "hi"));
-    assert!(nickname("a").contains('-'));
+    // Every word of the title, kebab-cased; no title, plain from its id.
     assert_eq!(
-        title_tag("Can you fix the flaky login test, please?"),
-        "fix-flaky-login"
+        rush_room::handle::kebab("Can you fix the flaky login test, please?"),
+        "can-you-fix-the-flaky-login-test-please"
     );
-    assert_eq!(title_tag(""), "");
+    assert_eq!(rush_room::handle::kebab(""), "");
+    let mut untitled = agent("u", "");
+    untitled.job.id = "u1u2u3u4".into();
+    assert_eq!(mention_name(&untitled, None), "session-u1u2u3u4");
     assert!(mentioned(&m, "@src/main.go explain").is_none());
 }
 
@@ -342,6 +345,7 @@ fn mentions_mid_message() {
     docs.job.id = "b1b2c3d4".into();
     m.agents = vec![docs, agent("p", "old run")];
     m.order = vec![0, 1];
+    crate::screens::session_cards::handles::sync(&mut m);
     m.kept::<Fake>().info.insert(
         "b".into(),
         HostInfo {
@@ -354,13 +358,22 @@ fn mentions_mid_message() {
     let back = " and tell me".len();
     let got = mention_matches(&m, &input, back);
     assert_eq!(got.len(), 1);
-    assert_eq!(got[0], rush_room::community::name("b1b2c3d4"));
+    assert_eq!(got[0], "docs");
     assert!(tags(&m.agents[0], Some("b1b2c3d4"), "docs"));
-    // A rush agent with no host connected goes by its feed name too, from
-    // its own id (mentionName's a.Rush && a.ID).
+    assert!(tags(&m.agents[0], Some("b1b2c3d4"), "@{b1b2c3d4}"));
+    assert!(
+        tags(
+            &m.agents[0],
+            Some("b1b2c3d4"),
+            &rush_room::handle::legacy_name("b1b2c3d4")
+        ),
+        "the animal handle it had before"
+    );
+    // A rush agent with no host connected goes by its title too, its own
+    // id kept (mentionName's a.Rush && a.ID).
     m.kept::<Fake>().info.clear();
     let got = mention_matches(&m, &input, back);
-    assert_eq!(got, vec![rush_room::community::name("b1b2c3d4")]);
+    assert_eq!(got, vec!["docs".to_string()]);
     m.kept::<Fake>().info.insert(
         "b".into(),
         HostInfo {
@@ -376,9 +389,14 @@ fn mentions_mid_message() {
         mention_matches(&m, &chars("mail me@do"), 0).is_empty(),
         "an email isn't a tag"
     );
+    // What's sent keeps the rush agent by its id, and says who that is.
     let sent = with_mentions(&m, "ask @docs and @old-run what changed.", "self");
     assert!(
-        sent.starts_with("ask @docs and @old-run what changed.\n\n<system-reminder>\n"),
+        sent.starts_with("ask @{b1b2c3d4} and @old-run what changed.\n\n<system-reminder>\n"),
+        "{sent}"
+    );
+    assert!(
+        sent.contains("@{b1b2c3d4} is @docs, docs, another agent rush runs"),
         "{sent}"
     );
     assert!(sent.ends_with("\n</system-reminder>"));
@@ -390,8 +408,11 @@ fn mentions_mid_message() {
         sent.contains("@old-run is old run, another agent rush runs; it isn't a rush session"),
         "{sent}"
     );
-    assert_eq!(with_mentions(&m, "@docs first", "self"), "@docs first");
-    assert_eq!(with_mentions(&m, "me, @docs", "b"), "me, @docs");
+    assert_eq!(
+        with_mentions(&m, "@docs first", "self"),
+        "@{b1b2c3d4} first"
+    );
+    assert_eq!(with_mentions(&m, "me, @docs", "b"), "me, @{b1b2c3d4}");
     // Sending to a tag from the box.
     assert_eq!(send_mentioned(&mut m, "k", "hello", "hello"), Out::Pass);
     send_mentioned(&mut m, "k", "@docs look", "@docs look");

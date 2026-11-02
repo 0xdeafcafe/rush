@@ -5,7 +5,7 @@
    ▀▀▀▀▀▀
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   AGENTS▾                                   COST   TIME │
-┃ Needs you  1 · $0.19                                  │    fix the flaky tax rounding test   @fix-flaky-tax  ·  needs you
+┃ Needs you  1 · $0.19                                  │    fix the flaky tax rounding test   @fix-the-flaky-tax-roun…  ·  needs you
 ▌ └─ ? fix the flaky tax rounding test ✻   $0.19   2m ● │    checkout · main                                                   ✻ Claude Code   Claude Code · open in a terminal · /rush copies it here
 ▌      checkout · main                                  │    Conversation   Overview   Changes    [ ] views
 ▌        ╰ asks: Round half up, or half to even?        │───━━━━━━━━━━━━━━──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

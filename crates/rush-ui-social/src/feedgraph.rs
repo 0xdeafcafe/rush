@@ -60,6 +60,13 @@ pub fn feed_graph(posts: &[Post]) -> (Vec<String>, Vec<Edge>) {
         }
     }
     nodes.sort_by(|x, y| sent[y].cmp(&sent[x]));
+    // Drawn, each agent goes by its session's handle now.
+    let names = rush_room::handle::known();
+    let nodes = nodes.iter().map(|h| names.show(h)).collect();
+    for e in &mut edges {
+        e.a = names.show(&e.a);
+        e.b = names.show(&e.b);
+    }
     (nodes, edges)
 }
 
