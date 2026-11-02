@@ -475,7 +475,7 @@ impl rush_prdrive::cli::Host for PrHost {
 
 /// What the gate asks of the rest of rush: the sessions' files, and the
 /// search guard and the watch plugin's word on a Bash call while they're
-/// on (gate.go:425).
+/// on (gate.go:425), and the context guard's on any of an agent's hooks.
 #[derive(Default)]
 struct GateHost(rush_gate::FileHost);
 
@@ -500,6 +500,13 @@ impl rush_gate::Host for GateHost {
             return String::new();
         }
         rush_bundled::searchguard::refusal(command).to_string()
+    }
+    fn context_step(&self, input: &[u8]) -> Option<rush_gate::host::ContextStep> {
+        rush_bundled::contextguard::step(input).map(|a| rush_gate::host::ContextStep {
+            out: a.out,
+            kind: a.kind.into(),
+            fields: a.fields,
+        })
     }
     fn watch_redirect(
         &self,
