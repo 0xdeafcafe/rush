@@ -9,7 +9,7 @@
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::mpsc;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 
 use rush_plugin::rpc::{CODE_INVALID_PARAMS, CODE_NO_METHOD, denied, limited};
@@ -46,13 +46,20 @@ const MAX_SESSION_KEY: usize = 256;
 /// How many pastes or images a box set by a plugin may hold.
 const MAX_CHIPS: usize = 64;
 
-/// Sends notifications on one connection from its own thread, so a peer
-/// that stops reading holds up nothing but itself. When it's full the
-/// oldest is dropped; a message with a key replaces the one waiting with
-/// the same key, and goes last.
+/// Sends notifications on one connection from a thread of its own, so a
+/// peer that stops reading holds up nothing but itself. The thread is
+/// there only while something waits to go (Rust-only: Go's outbox keeps a
+/// goroutine for its life), so a quiet plugin or window costs none. When
+/// it's full the oldest is dropped; a message with a key replaces the one
+/// waiting with the same key, and goes last.
 pub(crate) struct Outbox {
     st: Mutex<OutState>,
-    cv: Condvar,
+    me: Weak<Outbox>,
+    /// What it sends on, and the threads it sends from see: None until
+    /// it's started (tests).
+    to: Option<(Conn, Scope)>,
+    /// Closes it when its connection closes.
+    reg: Mutex<Option<rush_plugin::ctx::Registration>>,
 }
 
 pub(crate) struct OutState {
@@ -60,6 +67,10 @@ pub(crate) struct OutState {
     max: usize,
     pub(crate) dropped: usize,
     done: bool,
+    /// A thread is sending.
+    sending: bool,
+    /// A send failed: nothing more goes, as the sender has given up.
+    failed: bool,
 }
 
 pub(crate) struct OutMsg {
@@ -69,33 +80,37 @@ pub(crate) struct OutMsg {
 }
 
 impl Outbox {
-    /// An outbox that sends nothing until it's started: for tests.
-    pub(crate) fn bare(max: usize) -> Arc<Outbox> {
-        Arc::new(Outbox {
+    fn make(max: usize, to: Option<(Conn, Scope)>) -> Arc<Outbox> {
+        Arc::new_cyclic(|me| Outbox {
             st: Mutex::new(OutState {
                 q: VecDeque::new(),
                 max,
                 dropped: 0,
                 done: false,
+                sending: false,
+                failed: false,
             }),
-            cv: Condvar::new(),
+            me: me.clone(),
+            to,
+            reg: Mutex::new(None),
         })
+    }
+
+    /// An outbox that sends nothing until it's started: for tests.
+    pub(crate) fn bare(max: usize) -> Arc<Outbox> {
+        Outbox::make(max, None)
     }
 
     /// An outbox sending on conn, until it's closed or conn is.
     pub(crate) fn new(conn: Conn, max: usize, scope: &Scope) -> Arc<Outbox> {
-        let o = Outbox::bare(max);
+        let o = Outbox::make(max, Some((conn.clone(), scope.clone())));
         let w = Arc::downgrade(&o);
         let reg = conn.ctx().on_cancel(move || {
             if let Some(o) = w.upgrade() {
                 o.close();
             }
         });
-        let me = o.clone();
-        scope.spawn("plugind-outbox", move || {
-            let _reg = reg;
-            me.run(&conn);
-        });
+        *o.reg.lock().unwrap_or_else(|e| e.into_inner()) = Some(reg);
         o
     }
 
@@ -120,25 +135,46 @@ impl Outbox {
             params: p,
             key: key.into(),
         });
+        let Some((_, scope)) = &self.to else {
+            return;
+        };
+        if s.sending || s.done || s.failed {
+            return;
+        }
+        let Some(me) = self.me.upgrade() else {
+            return;
+        };
+        s.sending = true;
         drop(s);
-        self.cv.notify_one();
+        scope.spawn_sized("plugind-outbox", rush_sys::threads::SMALL, move || {
+            me.send_all()
+        });
     }
 
-    fn run(&self, conn: &Conn) {
+    /// Sends what waits, in order, until nothing does.
+    fn send_all(&self) {
+        let Some((conn, _)) = &self.to else {
+            return;
+        };
         loop {
             let m = {
                 let mut s = self.lock();
-                loop {
-                    if s.done {
+                if s.done {
+                    s.sending = false;
+                    return;
+                }
+                match s.q.pop_front() {
+                    Some(m) => m,
+                    None => {
+                        s.sending = false;
                         return;
                     }
-                    if let Some(m) = s.q.pop_front() {
-                        break m;
-                    }
-                    s = self.cv.wait(s).unwrap_or_else(|e| e.into_inner());
                 }
             };
             if conn.notify_raw(&m.method, Some(m.params)).is_err() {
+                let mut s = self.lock();
+                s.failed = true;
+                s.sending = false;
                 return;
             }
         }
@@ -146,7 +182,8 @@ impl Outbox {
 
     pub(crate) fn close(&self) {
         self.lock().done = true;
-        self.cv.notify_all();
+        // Not waited on: a send in flight ends with its write.
+        drop(self.reg.lock().unwrap_or_else(|e| e.into_inner()).take());
     }
 }
 
