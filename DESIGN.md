@@ -1230,6 +1230,80 @@ starts (its first start, a wake, or a move onto a new build), into
 Claude Code in; automatic sets nothing. A running session keeps what it
 started with.
 
+### Keeping a working subagent's cache (Rust-only)
+
+A subagent waiting on a long command (a test run, a build) past its
+cache's life pays to write its whole context again when the command
+returns. Its next request is certain, so there's no bet on whether it
+comes back: the only question is whether stepping in costs less than the
+rewrite. rush steps in, with no request of its own and no LLM call.
+
+What Claude Code 2.1.316 lets an outside process do, read from its
+binary (the stream-json control protocol and the hooks):
+
+- (a) A request against a subagent's own cache: none. `side_question`
+  (the main keep-warm's bump) answers from `getLastCacheSafeParams`, the
+  main conversation's last request, and takes no agent; nothing else
+  reads a subagent's context from outside its turn. `send_task_message`
+  is refused in print mode (only a remote host has it).
+- (b) Moving its running call to the background: yes. The
+  `background_tasks` control request with a `tool_use_id` (ctrl+b's)
+  looks through every foreground task, a subagent's included (a Bash or
+  PowerShell call becomes one after 2 seconds, with its `agentId`), moves
+  it and answers `{"backgrounded": true|false}`. The command runs on; the
+  subagent's call returns at once ("Command was manually backgrounded by
+  user with ID: …. Output is being written to: …"), it makes its next
+  request while the cache is warm, and the command's end reaches it as a
+  notification. A subagent's background command stops when it gives its
+  final answer, and Claude Code tells it so.
+- (c) Before a call: the PreToolUse hook's answer may set `updatedInput`
+  (`run_in_background: true`) and `additionalContext`, and its input has
+  `agent_id` for a subagent's call.
+
+The rule is `rush_core::subkeep::decide`, beside `cachekeep::decide`: a
+step-in goes when the subagent's cache has under a minute left (`LEAD`),
+it waits on calls its agent can move (all of them), its context is at
+least 20k tokens, and its step-ins stay under half a rewrite (5 for a
+5-minute cache, 9 for an hour's) and under the rewrite counting each
+one's ~1,000 tokens beside its read (the call's new result, and the few
+words the subagent says before it checks back). A cache already lapsed,
+a subagent making its own request, one finished, or one idle (nothing
+can refresh it) is let be. For 150k tokens on a 5-minute cache: a
+step-in costs 0.1 C + 1k ≈ 16k tokens' worth, a lapse 1.15 C ≈ 172k;
+at Opus's $5/M input, $0.08 against $0.86.
+
+The host follows each subagent from its agent's own events
+(server/subkeep.rs `SubWatch`): its messages carry the call that started
+it as their parent, so it knows when its last request was, how long its
+cache lives (by what that request wrote, as for the main conversation),
+its context, the calls it waits on, and which of those its agent has
+made a foreground task of (`TaskStarted`, not in the background). A
+timer goes a minute before the soonest cache of a subagent waiting on a
+call lapses; the look runs on a thread of its own, and the moves go
+through the Conn's `SubagentKeeper` (`Feature::SubagentKeepWarm`, Claude
+Code's "by moving its long shell call to the background") off the
+host's lock. Each move is a `subagent-cache-kept` event (agent, calls,
+command, context, ttl, sinceRequest, steps, costUsd the extra request,
+savesUsd the lapse), a move that found nothing `subagent-cache-keep-
+failed`, and a cache let go where rush looked `subagent-cache-let` with
+why, once a stretch. Its row in the dock says `‹ moved to background to
+keep its cache` (the host's `subKept`, by the subagent's call, until it
+ends). It's on with General › Prompt cache's "Keep it warm" (or the
+harness's own), read as the agent starts.
+
+(c) a step earlier: the host notes how long each shell command took
+(`rush_state::took`, took.json under rush's folder, by the folder the
+session started in, only those of 30 seconds or more, the newest 200 a
+project), and puts that folder in its agent's environment as
+`RUSH_PROJECT_DIR`. rush-gate's PreToolUse hook, for a subagent's Bash
+call (`agent_id` set) not already in the background whose command took
+at least its cache's life less a minute last time (`subkeep::ahead`;
+the life from `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL` or
+`ENABLE_PROMPT_CACHING_1H` in its environment, else 5 minutes), answers
+`run_in_background: true` with a note: it took that long, check on it at
+least every 4 minutes (`check_back`) in short waits, and don't answer
+before it ends. It's a `subagent-cache-ahead` event.
+
 ## A session's runs
 
 The Session follows the runs its session started (session_core's
