@@ -41,7 +41,7 @@ pub fn now(m: &Model) -> Ms {
     m.clock.unwrap_or_else(rush_core::time::now)
 }
 
-fn dim(s: impl Into<String>) -> Span {
+fn dim(s: impl Into<rush_core::text::CompactString>) -> Span {
     sp(s, DIM)
 }
 
@@ -490,7 +490,7 @@ fn trim_lead(mut l: Line) -> Line {
             l.spans.remove(0);
             continue;
         }
-        first.text = t.to_string();
+        first.text = t.into();
         break;
     }
     l

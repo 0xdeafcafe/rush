@@ -381,7 +381,7 @@ pub fn choice(what: &str, about: &str) -> Line {
 }
 
 /// A string's text in colour c, bold.
-pub fn bright(c: Color, s: impl Into<String>) -> Span {
+pub fn bright(c: Color, s: impl Into<rush_core::text::CompactString>) -> Span {
     spb(s, c)
 }
 

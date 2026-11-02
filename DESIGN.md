@@ -2582,6 +2582,18 @@ Go rush is gone from the tree; its last version is the `go-final` tag
   and This chat: only the hits a section shows, with a memo kept from key
   to key and a vocabulary of the words typos are looked for among, made
   on another thread as the bar opens) checked hit for hit against it.
+- A drawn run's text (`rush_core::text::Span::text`) is a
+  `CompactString` (Rust-only): up to 24 bytes held in place, so a glyph,
+  a word or a time is made and copied without the heap, and a turn's
+  memoized rows copied into a frame copy only their longer runs.
+  2026-11-02, the render bench (300 turns, w120): a warm frame 116 → 75
+  allocations, a cold frame at the end 1,775 → 1,396, laying out all
+  turns 249,038 → 203,859 (3,000 turns 3.39 → 2.94 million), time and
+  rows kept the same; the frame bench's Agents list 3,321 → 2,522
+  allocations a frame, a key then the frame 3,702 → 2,897, with ctrl+k's
+  bar open 5,504 → 3,814. What a warm frame still makes is the live
+  turn drawn again for its clock: each new line's list of runs, the
+  memoized rows' lists, and the times it formats.
 - `cargo bench -p rush-ui --bench frame` (under `tools/sbtest.sh`): a frame
   of the Agents list, 300 agents at 160x48 — its rows, painted, and a key
   then the frame — in µs, instructions, bytes and allocations per frame.

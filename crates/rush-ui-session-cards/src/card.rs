@@ -35,7 +35,7 @@ pub const TAB_OFF: Style = Style {
 };
 
 /// s in colour c on ground bg.
-pub fn on(s: impl Into<String>, c: Color, bg: Color) -> Span {
+pub fn on(s: impl Into<rush_core::text::CompactString>, c: Color, bg: Color) -> Span {
     Span::new(s, Style::fg(c).on(bg))
 }
 

@@ -78,15 +78,15 @@ pub fn bar(frac: f64, w: usize, c: Color) -> Line {
 }
 
 /// A span in the text colour.
-pub fn text(s: impl Into<String>) -> Span {
+pub fn text(s: impl Into<rush_core::text::CompactString>) -> Span {
     sp(s, TEXT)
 }
 
-pub fn dim(s: impl Into<String>) -> Span {
+pub fn dim(s: impl Into<rush_core::text::CompactString>) -> Span {
     sp(s, DIM)
 }
 
-pub fn faint(s: impl Into<String>) -> Span {
+pub fn faint(s: impl Into<rush_core::text::CompactString>) -> Span {
     sp(s, FAINT)
 }
 

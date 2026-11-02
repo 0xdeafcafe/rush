@@ -46,13 +46,13 @@ pub fn bold(c: Color) -> Style {
     Style::fg(c).bold()
 }
 
-pub fn sp(text: impl Into<String>, c: Color) -> Span {
+pub fn sp(text: impl Into<rush_core::text::CompactString>, c: Color) -> Span {
     Span::new(text, Style::fg(c))
 }
-pub fn spb(text: impl Into<String>, c: Color) -> Span {
+pub fn spb(text: impl Into<rush_core::text::CompactString>, c: Color) -> Span {
     Span::new(text, Style::fg(c).bold())
 }
-pub fn plain(text: impl Into<String>) -> Span {
+pub fn plain(text: impl Into<rush_core::text::CompactString>) -> Span {
     Span::plain(text)
 }
 
@@ -503,7 +503,7 @@ pub const NONE: Mods = Mods::NONE;
 // wrap :360, highlight :387) and view.go:1801 (hoverLine). ----
 
 /// A CPU figure coloured by how busy it is.
-pub fn cpu_color(p: f64, s: impl Into<String>) -> Span {
+pub fn cpu_color(p: f64, s: impl Into<rush_core::text::CompactString>) -> Span {
     if p >= 50.0 {
         sp(s, YELLOW)
     } else if p >= 1.0 {
@@ -514,7 +514,7 @@ pub fn cpu_color(p: f64, s: impl Into<String>) -> Span {
 }
 
 /// A memory figure, yellow past a gigabyte.
-pub fn mem_color(b: u64, s: impl Into<String>) -> Span {
+pub fn mem_color(b: u64, s: impl Into<rush_core::text::CompactString>) -> Span {
     if b >= 1 << 30 {
         sp(s, YELLOW)
     } else {

@@ -149,7 +149,7 @@ fn of<'a>(x: &'a Ctx) -> &'a Of<'a> {
     x.a.expect("the agent header is drawn of an agent")
 }
 
-fn dim(s: impl Into<String>) -> rush_core::text::Span {
+fn dim(s: impl Into<rush_core::text::CompactString>) -> rush_core::text::Span {
     sp(s, DIM)
 }
 

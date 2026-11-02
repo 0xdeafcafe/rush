@@ -327,7 +327,7 @@ fn cut_first(mut l: Line) -> Line {
     if let Some(s) = l.spans.iter_mut().find(|s| !s.text.is_empty()) {
         let mut cs = s.text.chars();
         cs.next();
-        s.text = cs.as_str().to_string();
+        s.text = cs.as_str().into();
     }
     l
 }
@@ -1094,7 +1094,9 @@ fn job_block(
             tokens: j.tokens,
             end: j.end,
             tail: tail.len(),
-            age: tail_when(out, b.now).map(|s| s.text).unwrap_or_default(),
+            age: tail_when(out, b.now)
+                .map(|s| s.text.to_string())
+                .unwrap_or_default(),
         };
         if let Some(memo) = b.memo
             && let Some(e) = memo.lock().unwrap_or_else(|e| e.into_inner()).get(&j.id)

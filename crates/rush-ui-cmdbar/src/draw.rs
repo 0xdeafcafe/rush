@@ -223,7 +223,7 @@ pub fn bar_box(m: &mut Model, w: usize, h: usize) -> Vec<Line> {
     out
 }
 
-fn sp_line(s: impl Into<String>, c: Color) -> Line {
+fn sp_line(s: impl Into<rush_core::text::CompactString>, c: Color) -> Line {
     line([sp(s, c)])
 }
 

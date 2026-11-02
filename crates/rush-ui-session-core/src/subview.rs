@@ -737,7 +737,7 @@ fn cut_lead(mut l: Line, mut n: usize) -> Line {
         }
         let blank = s.text.len() - s.text.trim_start_matches(' ').len();
         let k = blank.min(n);
-        s.text.drain(..k);
+        s.text.replace_range(..k, "");
         n -= k;
         if !s.text.is_empty() {
             break;

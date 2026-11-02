@@ -1350,6 +1350,7 @@ name = "rush-core"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "compact_str",
  "libc",
  "memchr",
  "rush-testenv",

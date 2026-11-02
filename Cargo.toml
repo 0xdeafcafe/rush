@@ -55,6 +55,7 @@ base64 = "0.23"
 flate2 = "1"
 memchr = "2"
 hashbrown = { version = "0.17", default-features = false }
+compact_str = "0.8"
 regex = "1"
 sha2 = "0.10"
 unicode-segmentation = "1.10"

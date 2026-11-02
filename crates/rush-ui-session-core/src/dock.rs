@@ -371,7 +371,7 @@ fn queue_rows(
             if right.spans.is_empty() {
                 right = when.clone();
                 if let Some(s) = right.spans.first_mut() {
-                    s.text = s.text.replacen(" · ", "", 1);
+                    s.text = s.text.replacen(" · ", "", 1).into();
                 }
                 right.spans.push(plain("  "));
             }

@@ -320,15 +320,15 @@ pub fn info_head(s: &str) -> Line {
     line([spb(format!("  {s}"), SUB)])
 }
 
-fn dim(s: impl Into<String>) -> Line {
+fn dim(s: impl Into<rush_core::text::CompactString>) -> Line {
     line([sp(s, DIM)])
 }
 
-fn faint(s: impl Into<String>) -> Line {
+fn faint(s: impl Into<rush_core::text::CompactString>) -> Line {
     line([sp(s, FAINT)])
 }
 
-fn text(s: impl Into<String>) -> Line {
+fn text(s: impl Into<rush_core::text::CompactString>) -> Line {
     line([sp(s, TEXT)])
 }
 

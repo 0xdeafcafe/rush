@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
+pub use compact_str::{CompactString, format_compact};
 use unicode_width::UnicodeWidthStr;
 
 /// A colour: the terminal's own default, 24-bit RGB, or a palette index.
@@ -152,18 +153,21 @@ impl Style {
 /// A run of text in one style.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Span {
-    pub text: String,
+    /// Its text: up to 24 bytes held in place, so most of what a frame
+    /// draws (a glyph, a word, a time) is made and copied without the
+    /// heap (Rust-only).
+    pub text: CompactString,
     pub style: Style,
 }
 
 impl Span {
-    pub fn new(text: impl Into<String>, style: Style) -> Span {
+    pub fn new(text: impl Into<CompactString>, style: Style) -> Span {
         Span {
             text: text.into(),
             style,
         }
     }
-    pub fn plain(text: impl Into<String>) -> Span {
+    pub fn plain(text: impl Into<CompactString>) -> Span {
         Span {
             text: text.into(),
             style: Style::default(),
@@ -192,7 +196,7 @@ impl Line {
             bg: Color::Default,
         }
     }
-    pub fn push(&mut self, text: impl Into<String>, style: Style) -> &mut Line {
+    pub fn push(&mut self, text: impl Into<CompactString>, style: Style) -> &mut Line {
         self.spans.push(Span::new(text, style));
         self
     }

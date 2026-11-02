@@ -38,7 +38,7 @@ fn links(ls: &[RenderedLine]) -> Vec<(String, String)> {
             };
             match out.last_mut() {
                 Some((t, _)) if prev == Some(s.style.link) => t.push_str(&s.text),
-                _ => out.push((s.text.clone(), u.to_string())),
+                _ => out.push((s.text.to_string(), u.to_string())),
             }
             prev = Some(s.style.link);
         }

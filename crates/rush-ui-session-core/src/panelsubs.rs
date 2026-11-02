@@ -434,9 +434,9 @@ fn trimmed(mut l: Line) -> Option<Line> {
         l.spans.pop();
     }
     let last = l.spans.last_mut()?;
-    last.text = last.text.trim_end().to_string();
+    last.text = last.text.trim_end().into();
     let first = l.spans.first_mut()?;
-    first.text = first.text.trim_start().to_string();
+    first.text = first.text.trim_start().into();
     Some(l)
 }
 

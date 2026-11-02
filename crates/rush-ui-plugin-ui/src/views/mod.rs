@@ -163,17 +163,17 @@ pub fn trunc(s: &str, w: usize) -> String {
 }
 
 /// A span of s in c.
-pub fn paint(c: Color, s: impl Into<String>) -> Span {
+pub fn paint(c: Color, s: impl Into<rush_core::text::CompactString>) -> Span {
     sp(s, c)
 }
 
 /// s in the quiet colour.
-pub fn dim(s: impl Into<String>) -> Span {
+pub fn dim(s: impl Into<rush_core::text::CompactString>) -> Span {
     sp(s, DIM)
 }
 
 /// s in the faintest colour.
-pub fn faint(s: impl Into<String>) -> Span {
+pub fn faint(s: impl Into<rush_core::text::CompactString>) -> Span {
     sp(s, FAINT)
 }
 
@@ -271,7 +271,7 @@ pub fn share_bar(ss: &[Stat], w: usize) -> Line {
 }
 
 /// A styled bold span.
-pub fn bolded(c: Color, s: impl Into<String>) -> Span {
+pub fn bolded(c: Color, s: impl Into<rush_core::text::CompactString>) -> Span {
     Span::new(s, Style::fg(c).bold())
 }
 

@@ -83,7 +83,7 @@ impl KeptLine {
                 .map(|s| {
                     let st = s.style;
                     (
-                        s.text.clone(),
+                        s.text.to_string(),
                         KeptColor::of(st.fg),
                         KeptColor::of(st.bg),
                         st.mods.0,

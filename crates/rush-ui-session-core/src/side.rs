@@ -774,7 +774,7 @@ mod tests {
         let runs: Vec<(String, _)> = bar
             .spans
             .iter()
-            .map(|s| (s.text.clone(), s.style.fg))
+            .map(|s| (s.text.to_string(), s.style.fg))
             .collect();
         assert_eq!(
             runs,
