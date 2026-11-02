@@ -135,6 +135,15 @@ pub fn digest(input: &Input) -> String {
         );
     }
 
+    if v.sub_cheap > 0 {
+        p!(
+            "{} subagents ran on Sonnet or Haiku, costing {}; on the default model the same tokens would have cost about {} more.",
+            v.sub_cheap,
+            money(v.sub_cheap_cost),
+            money(v.sub_cheap_saved)
+        );
+    }
+
     let status = |id: &str| input.found.get(id).map_or(Status::Off, |f| f.status);
     let mut on = Vec::new();
     let mut half = Vec::new();

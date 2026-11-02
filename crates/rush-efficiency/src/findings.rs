@@ -149,6 +149,21 @@ pub fn findings(v: &View, found: &HashMap<String, Found>) -> Vec<Finding> {
             ..Finding::default()
         });
     }
+    if v.sub_cheap > 0 && v.sub_cheap_saved > 0.0 {
+        out.push(Finding {
+            title: format!(
+                "{} subagents ran on a cheaper model, saving about {}",
+                v.sub_cheap,
+                money(v.sub_cheap_saved)
+            ),
+            detail: format!(
+                "they cost {} on Sonnet or Haiku; the same tokens on the default model cost more (Settings › Usage › Cheaper model for routine subagents)",
+                money(v.sub_cheap_cost)
+            ),
+            rank: 9,
+            ..Finding::default()
+        });
+    }
     if v.big > 10 && status("bash-output") == Status::Off {
         out.push(Finding {
             title: format!(

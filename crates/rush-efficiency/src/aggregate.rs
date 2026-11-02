@@ -7,7 +7,7 @@ use rush_state::Time;
 
 use crate::catalog::CATALOG;
 use crate::compare::SideAcc;
-use crate::price::cache_read_price;
+use crate::price::{cache_read_price, saved_against_default};
 use crate::scan::{Bucket, File, N_TOOLS, TOOL_NAMES, Use};
 use crate::store::Store;
 use crate::when::{DAY, HOUR, add_secs, at_secs, hour_of, local_day_start, next_local_day, secs};
@@ -152,6 +152,13 @@ pub struct View {
     /// Subagents' spend, and how much of it ran on Opus or Fable.
     pub sub_cost: f64,
     pub sub_big_cost: f64,
+    /// Subagents that ran on a cheaper model (Sonnet or Haiku), what they
+    /// cost, and about what that saved against the default model: the
+    /// same tokens at its prices (Settings › Usage › Cheaper model for
+    /// routine subagents).
+    pub sub_cheap: i64,
+    pub sub_cheap_cost: f64,
+    pub sub_cheap_saved: f64,
     /// What each tool's output cost to keep in context: every token of it
     /// is read again by the requests after it.
     pub carry: [f64; N_TOOLS],
@@ -284,6 +291,10 @@ impl Store {
                 let m = &f.model;
                 if m.contains("opus") || m.contains("fable") || m.contains("mythos") {
                     v.sub_big_cost += file_b.cost();
+                } else if m.contains("sonnet") || m.contains("haiku") {
+                    v.sub_cheap += 1;
+                    v.sub_cheap_cost += file_b.cost();
+                    v.sub_cheap_saved += saved_against_default(m, &file_b);
                 }
             } else if f.first >= q.from && file_b.req > 0 {
                 v.sessions += 1;
