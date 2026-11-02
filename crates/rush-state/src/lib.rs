@@ -28,6 +28,7 @@ pub mod settingsfile;
 pub mod setup;
 pub mod store;
 pub mod time;
+pub mod took;
 pub mod vault;
 pub mod writebehind;
 
