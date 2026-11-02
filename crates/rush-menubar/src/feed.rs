@@ -384,6 +384,8 @@ pub fn run(
             &mut asked.lock().unwrap_or_else(|e| e.into_inner()),
             &*hosts,
         );
+        // Nothing of the reading is kept while the feed waits.
+        drop(snap);
         let b = serde_json::to_string(&s).map_err(std::io::Error::other)?;
         if b != last {
             out.write_all(b.as_bytes())?;

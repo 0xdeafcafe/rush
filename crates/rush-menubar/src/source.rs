@@ -80,6 +80,19 @@ impl From<&rush_core::agent::Agent> for Row {
     }
 }
 
+/// The rows of agents the menu can show: those working or waiting on you
+/// (Row::live). The menu reads nothing else of a row, so the hundreds of
+/// stopped and finished ones are left out (tests/retained.rs counts what
+/// that saves; DESIGN.md "Background processes' memory"). Go's feed kept
+/// every row (feed.go:239).
+pub fn live_rows(agents: &[rush_core::agent::Agent]) -> Vec<Row> {
+    agents
+        .iter()
+        .filter(|a| matches!(a.job.state, State::Working | State::Blocked))
+        .map(Row::from)
+        .collect()
+}
+
 /// A login ~/.claude can be signed in as (Go's fleet.LoginView).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Login {
@@ -112,6 +125,8 @@ pub struct Other {
 /// One reading of everything the menu shows.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Snapshot {
+    /// The rows the menu can show: FleetSource's are those working or
+    /// waiting on you ([`live_rows`]).
     pub agents: Vec<Row>,
     pub logins: Vec<Login>,
     pub accounts: Vec<Account>,
@@ -241,7 +256,8 @@ impl Source for FleetSource {
             self.loader.scan(&loaded.agents);
         }
         self.hosted = loaded.hosted.clone();
-        let rows: Vec<Row> = loaded.agents.iter().map(Row::from).collect();
+        let rows = live_rows(&loaded.agents);
+        drop(loaded);
         let st = &self.config;
         let mut snap = Snapshot {
             agents: rows,

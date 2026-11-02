@@ -29,3 +29,7 @@ tempfile.workspace = true
 [[test]]
 name = "app"
 harness = false
+
+[[test]]
+name = "retained"
+harness = false
