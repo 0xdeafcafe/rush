@@ -253,7 +253,9 @@ pub struct Reader {
     tap: Option<Tap>,
     skip: Option<Skip>,
     guard: Option<rush_sys::pgguard::Guard>,
-    stderr_done: mpsc::Receiver<()>,
+    /// Its stderr, read beside its output (its last few KB say why it
+    /// failed).
+    stderr: Option<std::fs::File>,
     /// Set once its output has been read to the end and the session's end
     /// told.
     finished: bool,
@@ -372,21 +374,6 @@ fn run(
         wake_w,
         fds,
     });
-    let mut err = std::fs::File::from(stderr);
-    let e = sh.clone();
-    let (stderr_tx, stderr_done) = mpsc::channel();
-    std::thread::Builder::new()
-        .name("claude-stderr".into())
-        .spawn(move || {
-            let mut buf = [0u8; 4096];
-            while let Ok(n) = err.read(&mut buf) {
-                if n == 0 {
-                    break;
-                }
-                e.stderr.write(&buf[..n]);
-            }
-            let _ = stderr_tx.send(());
-        })?;
     Ok((
         Arc::new(Session {
             pid,
@@ -401,7 +388,7 @@ fn run(
             tap: o.tap.clone(),
             skip: o.skip.clone(),
             guard,
-            stderr_done,
+            stderr: Some(std::fs::File::from(stderr)),
             finished: false,
         },
     ))
@@ -426,10 +413,64 @@ impl Proc {
 }
 
 /// The session's output, read only once the reader isn't asked to hold:
-/// asked, a read says WouldBlock, between two reads.
+/// asked, a read says WouldBlock, between two reads. Its stderr is read in
+/// the same wait, into its tail, until it closes (Rust-only: Go reads it
+/// on a goroutine of its own).
 struct Polled {
     f: std::fs::File,
     wake: RawFd,
+    err: Option<std::fs::File>,
+    sh: Arc<Shared>,
+}
+
+/// What a poll says can be read now, ended included.
+const READABLE: libc::c_short = libc::POLLIN | libc::POLLHUP | libc::POLLERR;
+
+impl Polled {
+    /// Reads what stderr has into the tail; once it has ended, lets it go.
+    fn read_err(&mut self) {
+        let Some(f) = self.err.as_mut() else { return };
+        let mut buf = [0u8; 4096];
+        match f.read(&mut buf) {
+            Ok(0) => self.err = None,
+            Ok(n) => self.sh.stderr.write(&buf[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(_) => self.err = None,
+        }
+    }
+
+    /// Once the output has ended: stderr read to its end if it ends now,
+    /// else on a thread of its own until it does (a shell Claude Code left
+    /// running may hold it open). What that thread says as it's done.
+    fn finish_err(mut self) -> Option<mpsc::Receiver<()>> {
+        while let Some(f) = &self.err {
+            let mut p = libc::pollfd {
+                fd: f.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            // SAFETY: poll on one descriptor we hold, not waiting.
+            let n = unsafe { libc::poll(&mut p, 1, 0) };
+            if n <= 0 || p.revents & READABLE == 0 {
+                break;
+            }
+            self.read_err();
+        }
+        let mut f = self.err.take()?;
+        let sh = self.sh.clone();
+        let (tx, rx) = mpsc::channel();
+        let drained = rush_sys::threads::spawn_small("claude-stderr", move || {
+            let mut buf = [0u8; 4096];
+            while let Ok(n) = f.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                sh.stderr.write(&buf[..n]);
+            }
+            let _ = tx.send(());
+        });
+        drained.ok().map(|_| rx)
+    }
 }
 
 impl Read for Polled {
@@ -446,9 +487,15 @@ impl Read for Polled {
                     events: libc::POLLIN,
                     revents: 0,
                 },
+                libc::pollfd {
+                    // poll passes over a negative descriptor.
+                    fd: self.err.as_ref().map_or(-1, AsRawFd::as_raw_fd),
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
             ];
-            // SAFETY: poll on two descriptors we hold, into our array.
-            let n = unsafe { libc::poll(fds.as_mut_ptr(), 2, -1) };
+            // SAFETY: poll on descriptors we hold, into our array.
+            let n = unsafe { libc::poll(fds.as_mut_ptr(), 3, -1) };
             if n < 0 {
                 let e = std::io::Error::last_os_error();
                 if e.kind() == std::io::ErrorKind::Interrupted {
@@ -459,7 +506,12 @@ impl Read for Polled {
             if fds[1].revents & libc::POLLIN != 0 {
                 return Err(std::io::ErrorKind::WouldBlock.into());
             }
-            return self.f.read(buf);
+            if fds[2].revents & READABLE != 0 {
+                self.read_err();
+            }
+            if fds[0].revents != 0 {
+                return self.f.read(buf);
+            }
         }
     }
 }
@@ -571,6 +623,8 @@ impl Reader {
         let src = Polled {
             f: std::fs::File::from(stdout),
             wake: self.sh.wake_r.as_raw_fd(),
+            err: self.stderr.take(),
+            sh: self.sh.clone(),
         };
         let unread = std::mem::take(&mut self.unread);
         let mut r = BufReader::with_capacity(64 << 10, Cursor::new(unread).chain(src));
@@ -631,7 +685,9 @@ impl Reader {
             }
             on(ev);
         }
-        drop(r);
+        // Its stderr is read on until it closes, as the output was.
+        let (_, src) = r.into_inner().into_inner();
+        let stderr_done = src.finish_err();
         if read_err.is_some() {
             // Nobody reads its output any more, so it would block forever:
             // end it, and say why.
@@ -654,7 +710,9 @@ impl Reader {
         pump(&self.sh);
         // What it said last, once its stderr has closed; a shell it left
         // running may hold that open, so not for long.
-        let _ = self.stderr_done.recv_timeout(Duration::from_millis(200));
+        if let Some(done) = stderr_done {
+            let _ = done.recv_timeout(Duration::from_millis(200));
+        }
         let mut err = match (read_err, status) {
             (Some(e), _) => Some(Ended {
                 exited: false,
