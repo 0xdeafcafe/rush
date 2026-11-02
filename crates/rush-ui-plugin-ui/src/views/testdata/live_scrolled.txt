@@ -1,0 +1,12 @@
+╭─ ✦ Branches ─────────────────────────── › × ─╮
+│ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │
+│                                              │
+│   branch        CI       ahead               │
+│ ──────────────────────────────               │
+│ ✓ rush/views    green        3               │
+│ ✗ rush/perf     failing      5               │
+│ ◐ rush/menubar  running      2               │
+│ ✓ rush/docs     green        1               │
+│ ✓ rush/upgrade  green        4               │
+│                                              │
+╰─ by the agent · 1m ago ───── ↑ 3 · ↓ 2 more ─╯

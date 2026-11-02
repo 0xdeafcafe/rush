@@ -25,15 +25,15 @@
 │ ▸ Folded  1                               │
 │                                           │
 │ ▾ Packages  3                             │
-│   name                        tests  time │
+│   name                              tests │
 │ ───────────────────────────────────────── │
-│ ✓ core                          120  1.2s │
-│ ✗ ui                             88  3.4s │
+│ ✓ core                                120 │
+│ ✗ ui                                   88 │
 ╰─ made by the agent · 1m ago ─ ↓ 130 more ─╯
 =====
 ╭─ ✦ Test run · Pull requests ──────── › × ─╮
-│   a-package-with-a-really-        7  0.1s │
-│   long-name                               │
+│   a-package-with-a-really-long-         7 │
+│   name                                    │
 │                                           │
 │ ▾ Run  2                                  │
 │ branch  main                              │

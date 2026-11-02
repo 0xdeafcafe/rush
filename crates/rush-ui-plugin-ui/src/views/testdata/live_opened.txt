@@ -1,0 +1,12 @@
+╭─ ✦ Branches ─────────────────────────── › × ─╮
+│                                              │
+│   branch        CI       ahead               │
+│ ──────────────────────────────               │
+│ ✓ rush/views    green        3               │
+│ ✗ rush/perf     failing      5               │
+│ │ branch  rush/perf                          │
+│ │ CI      failing                            │
+│ │ ahead   5                                  │
+│ │ clippy: an unused import in panel.rs       │
+│ │  show the log   fix it   copy              │
+╰─ by the agent · 1m ago ───── ↑ 4 · ↓ 6 more ─╯

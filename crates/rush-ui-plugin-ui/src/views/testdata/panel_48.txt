@@ -21,15 +21,14 @@
 │ ▾ Slowest  3                                 │
 │ • db    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 212ms │
 │ • cache ━━━━━━────────────────────────    40 │
-╰─ made by the agent · 1m ago ──── ↓ 144 more ─╯
+╰─ made by the agent · 1m ago ──── ↓ 143 more ─╯
 ╭─ ✦ Test run · Pull requests ───────── ⟲ › × ─╮
 │ │ name   core                                │
 │ │ tests  120                                 │
 │ │ time   1.2s                                │
 │ │  copy                                      │
-│ ✗ ui                                88  3.4s │
-│   a-package-with-a-really-long-      7  0.1s │
-│   name                                       │
+│ ✗ ui                                    88   │
+│   a-package-with-a-really-long-name      7   │
 │                                              │
 │ ▾ Run  2                                     │
 │ branch  main                                 │
@@ -45,7 +44,8 @@
 │                                              │
 │ ▾ Output  3                                  │
 │ 12:01 starting                               │
-╰─ by the agent · 1m ago ── ↑ 30 · ↓ 114 more ─╯
+│ 12:02 FAIL TestExpired                       │
+╰─ by the agent · 1m ago ── ↑ 30 · ↓ 113 more ─╯
 ╭─ ✦ Test run · Pull requests ───────── ⟲ › × ─╮
 │                                              │
 │ ◆ 2 open                                     │

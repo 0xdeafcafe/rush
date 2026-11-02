@@ -27,16 +27,16 @@ these broke after the merge
 ▸ Folded  1
 
 ▾ Packages  3
-  name             tes…↓  time
+  name                   tes…↓
 ──────────────────────────────
-✓ core               120  1.2s
+✓ core                     120
 │ name   core
 │ tests  120
 │ time   1.2s
 │  copy 
-✗ ui                  88  3.4s
-  a-package-with-      7  0.1s
-  a-really-long-…             
+✗ ui                        88
+  a-package-with-a-          7
+  really-long-name            
 
 ▾ Run  2
 branch  main

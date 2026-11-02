@@ -269,9 +269,10 @@ fn branches_scrolled_and_opened() {
         rows = draw(&mut st);
     }
     assert_eq!(st.key("enter"), Some(Click::Drew));
-    let opened = plain(&draw(&mut st));
-    st.key("down");
     draw(&mut st);
+    // ↓ onto its buttons: scrolled so they show.
+    st.key("down");
+    let opened = plain(&draw(&mut st));
     match st.key("enter") {
         Some(Click::Act { a, .. }) => assert_eq!(a.send, "Show me rush/perf's failing CI log"),
         c => panic!("enter on its first button: {c:?}"),
