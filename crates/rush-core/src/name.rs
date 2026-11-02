@@ -6,26 +6,37 @@
 //! any other is shared through one process-wide table, so each distinct
 //! value is allocated once however many hold it. Only values from a small
 //! set belong in a Name: the table keeps every one it was handed.
+//!
+//! It is as small as a `Box<str>`, 16 bytes (a String is 24): the str's
+//! pointer and length, the length's top bit saying the pointer is an
+//! `Arc<str>`'s (Arc::into_raw) rather than a static's.
 
 use std::borrow::Borrow;
 use std::collections::HashSet;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
+use std::ptr::NonNull;
 use std::sync::{Arc, LazyLock, Mutex};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A string from a small set of values: cheap to copy, compared and
 /// hashed as the str it is.
-#[derive(Clone)]
-pub struct Name(Repr);
-
-#[derive(Clone)]
-enum Repr {
-    Static(&'static str),
-    Shared(Arc<str>),
+pub struct Name {
+    ptr: NonNull<u8>,
+    /// The str's length; SHARED set when ptr is an Arc<str>'s.
+    len: usize,
 }
+
+/// The length's bit saying the str is an Arc's.
+const SHARED: usize = 1 << (usize::BITS - 1);
+
+// SAFETY: a Name is an immutable str, either 'static or held by an
+// Arc<str>, both of which are Send and Sync.
+unsafe impl Send for Name {}
+// SAFETY: as above.
+unsafe impl Sync for Name {}
 
 /// The values known ahead: the tools Claude Code calls, the levels a
 /// notice comes at, the media types of the images it sends, the roles of
@@ -80,42 +91,90 @@ const KNOWN: &[&str] = &[
 ];
 
 /// Every Name not known ahead, by its value.
-static SHARED: LazyLock<Mutex<HashSet<Arc<str>>>> = LazyLock::new(Default::default);
+static TABLE: LazyLock<Mutex<HashSet<Arc<str>>>> = LazyLock::new(Default::default);
 
 impl Name {
     /// The empty name.
-    pub const EMPTY: Name = Name(Repr::Static(""));
+    pub const EMPTY: Name = Name::known("");
 
     /// A name known ahead, allocating nothing.
     pub const fn known(s: &'static str) -> Name {
-        Name(Repr::Static(s))
+        Name {
+            // SAFETY: a str's pointer is never null, even an empty one's.
+            ptr: unsafe { NonNull::new_unchecked(s.as_ptr() as *mut u8) },
+            len: s.len(),
+        }
+    }
+
+    /// The Name holding a, sharing it.
+    fn shared(a: Arc<str>) -> Name {
+        let len = a.len();
+        let p = Arc::into_raw(a) as *const u8 as *mut u8;
+        Name {
+            // SAFETY: Arc::into_raw never gives null.
+            ptr: unsafe { NonNull::new_unchecked(p) },
+            len: len | SHARED,
+        }
+    }
+
+    /// The Arc<str> this Name holds, as Arc::into_raw gave it.
+    fn raw(&self) -> *const str {
+        std::ptr::slice_from_raw_parts(self.ptr.as_ptr() as *const u8, self.len & !SHARED)
+            as *const str
     }
 
     /// The Name for s: its static copy when it's known ahead, else the one
     /// copy every holder of the same value shares.
     pub fn new(s: &str) -> Name {
         if let Some(k) = KNOWN.iter().find(|k| **k == s) {
-            return Name(Repr::Static(k));
+            return Name::known(k);
         }
-        let mut t = SHARED.lock().unwrap_or_else(|e| e.into_inner());
+        let mut t = TABLE.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(a) = t.get(s) {
-            return Name(Repr::Shared(a.clone()));
+            return Name::shared(a.clone());
         }
         let a: Arc<str> = Arc::from(s);
         t.insert(a.clone());
-        Name(Repr::Shared(a))
+        Name::shared(a)
     }
 
     pub fn as_str(&self) -> &str {
-        match &self.0 {
-            Repr::Static(s) => s,
-            Repr::Shared(a) => a,
+        // SAFETY: ptr and len are a str's, kept alive by 'static or by the
+        // Arc this Name holds a count of.
+        unsafe {
+            std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                self.ptr.as_ptr(),
+                self.len & !SHARED,
+            ))
         }
     }
 
     /// Whether it allocates nothing of its own (known ahead).
     pub fn is_static(&self) -> bool {
-        matches!(self.0, Repr::Static(_))
+        self.len & SHARED == 0
+    }
+}
+
+impl Clone for Name {
+    fn clone(&self) -> Name {
+        if !self.is_static() {
+            // SAFETY: raw is an Arc<str>'s from into_raw, alive while self is.
+            unsafe { Arc::increment_strong_count(self.raw()) };
+        }
+        Name {
+            ptr: self.ptr,
+            len: self.len,
+        }
+    }
+}
+
+impl Drop for Name {
+    fn drop(&mut self) {
+        if !self.is_static() {
+            // SAFETY: raw is an Arc<str>'s from into_raw; this Name holds
+            // one of its counts, given back here once.
+            unsafe { Arc::decrement_strong_count(self.raw()) };
+        }
     }
 }
 
@@ -287,14 +346,16 @@ mod tests {
             assert_eq!(a, b);
             assert_eq!(a.as_str(), s);
             assert_eq!(a.is_static(), known, "{s}");
-            if let (Repr::Shared(x), Repr::Shared(y)) = (&a.0, &b.0) {
-                assert!(Arc::ptr_eq(x, y), "{s} is shared");
-            }
-            let j = serde_json::to_string(&a).unwrap();
+            assert_eq!(a.as_str().as_ptr(), b.as_str().as_ptr(), "{s} is shared");
+            let c = a.clone();
+            drop(a);
+            assert_eq!(c.as_str(), s);
+            let j = serde_json::to_string(&c).unwrap();
             assert_eq!(j, serde_json::to_string(s).unwrap());
-            assert_eq!(serde_json::from_str::<Name>(&j).unwrap(), a);
+            assert_eq!(serde_json::from_str::<Name>(&j).unwrap(), c);
         }
         assert_eq!(serde_json::from_str::<Name>("null").unwrap(), Name::EMPTY);
-        assert_eq!(size_of::<Name>(), 24);
+        assert_eq!(size_of::<Name>(), 16);
+        assert_eq!(size_of::<Option<Name>>(), 16);
     }
 }
