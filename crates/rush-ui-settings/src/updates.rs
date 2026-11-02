@@ -391,6 +391,11 @@ fn recheck_later(m: &mut Model) {
 /// Looks for newer harnesses and rush, in the background; force asks the
 /// registries again rather than trusting what was kept (checkHarnesses).
 pub fn check(m: &mut Model, force: bool) {
+    // A whole view started in a test (tests/threads.rs) never asks the
+    // registries.
+    if m.sender().is_some() && rush_core::sandbox::active() {
+        return;
+    }
     let u = &mut m.kept::<State>().updates;
     if u.checking {
         return;

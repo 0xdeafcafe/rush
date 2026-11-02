@@ -1868,7 +1868,27 @@ impl App<Note> for Model {
     }
 
     fn wake(&mut self) -> Step {
-        let now_i = Instant::now();
+        self.wake_on(Instant::now())
+    }
+
+    fn title(&self) -> Option<&str> {
+        Some(&self.title)
+    }
+
+    fn clipboard(&mut self) -> Option<String> {
+        self.pending_copy.take()
+    }
+
+    fn outside(&mut self) -> Option<rush_draw::Outside<Note>> {
+        self.take_outside()
+    }
+}
+
+impl Model {
+    /// App::wake as at now_i: what the loop's deadline runs when it
+    /// passes, for a test to step through an idle minute without waiting
+    /// it (tests/threads.rs).
+    pub fn wake_on(&mut self, now_i: Instant) -> Step {
         // Chores alone draw nothing: what they do lands as its own note.
         // A frame showing more than the list is drawn again with them.
         let chores = crate::chores::run_due(self, now_i);
@@ -1901,20 +1921,6 @@ impl App<Note> for Model {
         self.wake_draw(now_i)
     }
 
-    fn title(&self) -> Option<&str> {
-        Some(&self.title)
-    }
-
-    fn clipboard(&mut self) -> Option<String> {
-        self.pending_copy.take()
-    }
-
-    fn outside(&mut self) -> Option<rush_draw::Outside<Note>> {
-        self.take_outside()
-    }
-}
-
-impl Model {
     /// What a key asked for is in, landed from the background: its frame
     /// is drawn at once, not held for the quarter second background work
     /// waits between frames (frame/framehold.rs).
@@ -1969,7 +1975,7 @@ impl Model {
     }
 
     fn wake_draw(&mut self, now_i: Instant) -> Step {
-        if self.ticked.elapsed() >= Duration::from_millis(950) {
+        if now_i.saturating_duration_since(self.ticked) >= Duration::from_millis(950) {
             self.tick += 1;
             self.ticked = now_i;
             crate::clanker::beat(self);

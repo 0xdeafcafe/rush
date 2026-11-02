@@ -88,70 +88,7 @@ fn run_model(
     }
     lead::hold_renewals(&m);
     setup(&mut m);
-    // rush's colours for the Theme and Colours kept (applyColors).
-    screens::settings::apply_colors(&mut m);
-    // Links rush knows the kind of say where they stand (model.go:448).
-    screens::cmdbar::linkkinds::start(&m);
-    // The conversation's pictures, made off the UI (convo.Picture).
-    screens::session_cards::pictures::start(&m);
-    // Anything holding the UI thread over 40 ms is noted in stalls.log.
-    frame::uistall::watch_ui(config::dir().join("stalls.log"));
-    // Hosted leaves past conversations out of each reading until its
-    // list is shown (NewHosted's loader.SkipPast(true)). Either way the
-    // UI keeps the loader's handle, to link what a session spawned
-    // (followSpawn's LinkSpawn).
-    let tx = lp.sender().lane(1);
-    let is_hosted = hosted.is_some();
-    let give: Box<dyn FnOnce(worker::DiscoveryCtl) + Send> = Box::new(move |ctl| {
-        let _ = tx.send(worker::Note::Apply(Box::new(move |m: &mut Model| {
-            let f = m.kept::<worker::FleetIn>();
-            f.0 = Some(ctl.handle());
-            f.1 = Some(ctl.again());
-            if is_hosted {
-                hosted::set_discovery(m, ctl)
-            } else {
-                frame::Out::Idle
-            }
-        })));
-    });
-    worker::spawn_discovery_with(lp.sender(), is_hosted, Some(give));
-    // The battery and disk, read again while shown, drawn when they show
-    // differently (screens/bars/top.rs).
-    let tx = lp.sender().lane(1);
-    rush_sys::sysinfo::on_read(move |was, now| {
-        if screens::bars::top::shows_differently(was, now) {
-            let _ = tx.try_send(worker::Note::Apply(Box::new(|_| frame::Out::Draw)));
-        }
-    });
-    // As Go's Init (internal/ui/model.go:548): plugins connected
-    // (startHooks, pluginui.go:36), and the layout kept, or asked for the
-    // first time (startView, model.go:574).
-    // A rush that follows only talks to a broker already running: the
-    // rush that leads starts it (lead.rs).
-    let hooks = if m.following() {
-        rush_plugind::hooks::Client::with_dial(Box::new(rush_plugind::hooks::dial_running))
-    } else {
-        rush_plugind::hooks::Client::new()
-    };
-    lead::log_lead(&m);
-    screens::plugin_ui::start(&mut m, hooks);
-    // Hosted is only the one session: nothing about the app as a whole
-    // (model.go:556 Init).
-    if hosted.is_none() {
-        screens::settings::sheets::watch_net(&mut m);
-        // The icon is this rush's to start and stop (not a --soak copy's).
-        m.kept::<screens::settings::sheets::MenuBarOwner>().0 = true;
-        screens::settings::sheets::start_menu_bar(&mut m);
-        screens::settings::updates::start(&mut m);
-        screens::settings::sheets::start_view(&mut m);
-    }
-    // The list as last read, shown until the first reading lands
-    // (listcache.rs).
-    if hosted.is_none() {
-        listcache::load(&mut m);
-    }
-    // Your top bar from the first frame, not the default's gauges first.
-    screens::bars::load_now(&mut m);
+    start(&lp, &mut m, hosted, None);
     let mut term = Term::new()?;
     m.keys_disambiguated = term.keys_disambiguated();
     // Made again now the terminal has said its colours, for Theme's
@@ -210,6 +147,85 @@ fn run_model(
     worker::flush_spend();
     listcache::save_now(&mut m);
     r.map(|()| m.reload_env())
+}
+
+/// What the TUI starts before it takes the terminal (Go's Init): its
+/// workers, discovery, the plugins' broker client (hooks; None: the one a
+/// rush that leads or follows talks to), the network's watch and the
+/// rest, sending on lp's lanes. Public so a test can start the whole view
+/// headless and count what it runs (tests/threads.rs).
+pub fn start(
+    lp: &Loop<Note>,
+    m: &mut Model,
+    hosted: Option<&str>,
+    hooks: Option<std::sync::Arc<rush_plugind::hooks::Client>>,
+) {
+    // rush's colours for the Theme and Colours kept (applyColors).
+    screens::settings::apply_colors(m);
+    // Links rush knows the kind of say where they stand (model.go:448).
+    screens::cmdbar::linkkinds::start(m);
+    // The conversation's pictures, made off the UI (convo.Picture).
+    screens::session_cards::pictures::start(m);
+    // Anything holding the UI thread over 40 ms is noted in stalls.log.
+    frame::uistall::watch_ui(config::dir().join("stalls.log"));
+    // Hosted leaves past conversations out of each reading until its
+    // list is shown (NewHosted's loader.SkipPast(true)). Either way the
+    // UI keeps the loader's handle, to link what a session spawned
+    // (followSpawn's LinkSpawn).
+    let tx = lp.sender().lane(1);
+    let is_hosted = hosted.is_some();
+    let give: Box<dyn FnOnce(worker::DiscoveryCtl) + Send> = Box::new(move |ctl| {
+        let _ = tx.send(worker::Note::Apply(Box::new(move |m: &mut Model| {
+            let f = m.kept::<worker::FleetIn>();
+            f.0 = Some(ctl.handle());
+            f.1 = Some(ctl.again());
+            if is_hosted {
+                hosted::set_discovery(m, ctl)
+            } else {
+                frame::Out::Idle
+            }
+        })));
+    });
+    worker::spawn_discovery_with(lp.sender(), is_hosted, Some(give));
+    // The battery and disk, read again while shown, drawn when they show
+    // differently (screens/bars/top.rs).
+    let tx = lp.sender().lane(1);
+    rush_sys::sysinfo::on_read(move |was, now| {
+        if screens::bars::top::shows_differently(was, now) {
+            let _ = tx.try_send(worker::Note::Apply(Box::new(|_| frame::Out::Draw)));
+        }
+    });
+    // As Go's Init (internal/ui/model.go:548): plugins connected
+    // (startHooks, pluginui.go:36), and the layout kept, or asked for the
+    // first time (startView, model.go:574).
+    // A rush that follows only talks to a broker already running: the
+    // rush that leads starts it (lead.rs).
+    let hooks = hooks.unwrap_or_else(|| {
+        if m.following() {
+            rush_plugind::hooks::Client::with_dial(Box::new(rush_plugind::hooks::dial_running))
+        } else {
+            rush_plugind::hooks::Client::new()
+        }
+    });
+    lead::log_lead(m);
+    screens::plugin_ui::start(m, hooks);
+    // Hosted is only the one session: nothing about the app as a whole
+    // (model.go:556 Init).
+    if hosted.is_none() {
+        screens::settings::sheets::watch_net(m);
+        // The icon is this rush's to start and stop (not a --soak copy's).
+        m.kept::<screens::settings::sheets::MenuBarOwner>().0 = true;
+        screens::settings::sheets::start_menu_bar(m);
+        screens::settings::updates::start(m);
+        screens::settings::sheets::start_view(m);
+    }
+    // The list as last read, shown until the first reading lands
+    // (listcache.rs).
+    if hosted.is_none() {
+        listcache::load(m);
+    }
+    // Your top bar from the first frame, not the default's gauges first.
+    screens::bars::load_now(m);
 }
 
 /// What `rush --soak` measured of the view's frames: how many reached the
