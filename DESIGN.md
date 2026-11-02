@@ -1279,8 +1279,7 @@ lets it go:
 
 - A bump goes when the cache has under a minute left (`LEAD`), the
   session went idle less than **15 minutes** ago (Settings › Usage ›
-  Prompt cache › for), its context is at least 20k tokens (Smallest
-  conversation worth keeping), and the bumps this idle stretch stay under
+  Prompt cache › for), its context is at least 20k tokens (Smallest worth keeping), and the bumps this idle stretch stay under
   half a rewrite (5 for a 5-minute cache, 9 for an hour's; Most refreshes
   per wait sets another number) and under the rewrite itself counting each bump's ~300
   tokens of question and answer.
@@ -1384,9 +1383,9 @@ today's rule (`CacheKeep::settings` gives `cachekeep::Settings::default`):
 | ‧ for | 5, 15, 30, 60, 120 minutes | 15 | `minutes` | the guard's look |
 | ‧ compact long waits | off, after 1 hour, after 2 hours | off | `compactAfter` | the guard's look |
 | Keep waiting subagents' cache | on, off | on | `subagents` (written only as false) | the host, as a session starts |
-| ‧ start known-slow commands in background | on, off | on | `ahead` (written only as false) | the gate, every command |
-| Subagents' cache life (Claude Code) | automatic, 5 minutes, 1 hour | automatic | `subagentCache` (by harness) | the host, as a session starts |
-| Smallest conversation worth keeping | 10k, 20k, 50k, 100k tokens | 20k | `minTokens` | both |
+| ‧ slow commands in background | on, off | on | `ahead` (written only as false) | the gate, every command |
+| Claude Code subagents' cache | automatic, 5 minutes, 1 hour | automatic | `subagentCache` (by harness) | the host, as a session starts |
+| Smallest worth keeping | 10k, 20k, 50k, 100k tokens | 20k | `minTokens` | both |
 | Most refreshes per wait | auto (half a rewrite), 2, 3, 5, 9 | auto | `refreshes` | both |
 
 "Keep idle conversations warm" is on by default: a bump is a request
@@ -1394,7 +1393,7 @@ rush makes on its own, and on a plan it counts against the account's
 limits, but three bumps cost about a quarter of the rewrite they save.
 Each harness that can has "Keep its cache warm" on its own page (as
 Usage says, on, off; `harnesses`): off there is off for its subagents
-too. "Subagents' cache life" is the same stored value as the harness
+too. "Claude Code subagents' cache" is the same stored value as the harness
 page's "Subagents' cache"; only harnesses with `Feature::SubagentCache`
 show it, labelled with the harness's name. The numbers that stay
 constants: `LEAD` (a minute), `RETRY` (2 minutes), the prices, each
@@ -1442,8 +1441,7 @@ There is no `rush spend` command in the port, so none shows it.
 Set. `Feature::SubagentCache` ("subagentcache") is the capability: the
 harness lets rush say how long its subagents' cache lives; only Claude
 Code declares it. Settings › Harnesses › Claude Code › Subagents' cache
-(also on Settings › Usage › Prompt cache as "Subagents' cache life
-(Claude Code)", one stored value) is automatic (sets nothing, the default), 5 minutes or 1 hour, kept in
+(also on Settings › Usage › Prompt cache as "Claude Code subagents' cache", one stored value) is automatic (sets nothing, the default), 5 minutes or 1 hour, kept in
 `config.subagentCache` by harness kind. The host reads it as a session
 starts (its first start, a wake, or a move onto a new build), into
 `StartOptions.subagent_cache`, and the Claude adapter puts
@@ -1486,7 +1484,7 @@ step-in goes when the subagent's cache has under a minute left (`LEAD`),
 it waits on calls its agent can move (all of them), its context is at
 least 20k tokens, and its step-ins stay under half a rewrite (5 for a
 5-minute cache, 9 for an hour's): the same two numbers as the idle
-sessions' (Usage › Prompt cache's smallest conversation worth keeping
+sessions' (Usage › Prompt cache's smallest worth keeping
 and most refreshes per wait; `decide` takes `cachekeep::Settings`) and under the rewrite counting each
 one's ~1,000 tokens beside its read (the call's new result, and the few
 words the subagent says before it checks back). A cache already lapsed,
@@ -1528,7 +1526,7 @@ the life from `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL` or
 `run_in_background: true` with a note: it took that long, check on it at
 least every 4 minutes (`check_back`) in short waits, and don't answer
 before it ends. It's a `subagent-cache-ahead` event. Its switch is
-Usage › Prompt cache's "start known-slow commands in background"
+Usage › Prompt cache's "slow commands in background"
 (`cacheKeep.ahead`, `ahead_for`: only while the subagents' cache is kept),
 read at every command; the threshold stays the cache's life less a
 minute.
