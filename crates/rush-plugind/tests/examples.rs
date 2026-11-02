@@ -1,7 +1,7 @@
 //! The broker running the example plugins in the repository, built from
-//! their Go source (skipped without a Go toolchain) and sandboxed, talked
-//! to as a session host would: Claude Code's MCP messages in, the
-//! plugin's replies out.
+//! their Rust source with cargo and sandboxed (and an MCP server built
+//! from Go source, skipped without a Go toolchain), talked to as a session
+//! host would: Claude Code's MCP messages in, the plugin's replies out.
 //! Ported from internal/plugind/plugind_test.go and kanban_test.go.
 
 // Every test runs in a throwaway home (rush-testenv).
@@ -66,6 +66,53 @@ fn go_build(pkg: &Path, out: &Path) -> bool {
             false
         }
     }
+}
+
+/// Builds the example plugin pkg, as cargo builds it, and copies its
+/// program to out. It builds into a target folder of its own: the cargo
+/// running the tests holds the workspace's.
+fn cargo_build(pkg: &str, out: &Path) {
+    let cargo = PathBuf::from(env!("CARGO"));
+    let target = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugins");
+    let mut cmd = Command::new(&cargo);
+    cmd.args([
+        "build",
+        "--quiet",
+        "--locked",
+        "--offline",
+        "-p",
+        pkg,
+        "--bin",
+        pkg,
+    ])
+    .env("CARGO_TARGET_DIR", &target)
+    .env_remove("RUSTC_WRAPPER")
+    .current_dir(repo());
+    // rush-testenv moved HOME and PATH away: cargo finds its own again.
+    if let Some(real) = std::env::var_os("RUSH_TEST_REAL_HOME") {
+        for (var, dir) in [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")] {
+            if std::env::var_os(var).is_none() {
+                cmd.env(var, Path::new(&real).join(dir));
+            }
+        }
+    }
+    if let Some(bin_dir) = cargo.parent() {
+        let path = std::env::var("PATH").unwrap_or_default();
+        cmd.env("PATH", format!("{}:{path}", bin_dir.display()));
+        let rustc = bin_dir.join("rustc");
+        if rustc.exists() && std::env::var_os("RUSTC").is_none() {
+            cmd.env("RUSTC", rustc);
+        }
+    }
+    let o = cmd
+        .output()
+        .unwrap_or_else(|e| panic!("running cargo: {e}"));
+    assert!(
+        o.status.success(),
+        "cargo build -p {pkg}: {}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    std::fs::copy(target.join("debug").join(pkg), out).unwrap();
 }
 
 /// Runs a broker in home until nothing is approved; the broker, once it
@@ -143,9 +190,7 @@ fn broker_runs_the_example_plugin() {
     let dir = rush_plugin::root().join("delegate");
     std::fs::create_dir_all(&dir).unwrap();
     let src = repo().join("plugins/examples/delegate");
-    if !go_build(&src, &dir.join("delegate")) {
-        return;
-    }
+    cargo_build("delegate", &dir.join("delegate"));
     std::fs::copy(src.join("plugin.json"), dir.join("plugin.json")).unwrap();
     let p = rush_plugin::load(&dir).unwrap();
     rush_plugin::approve(&p).unwrap();
@@ -291,9 +336,7 @@ fn broker_runs_the_kanban_example() {
 
     let dir = rush_plugin::root().join("kanban");
     std::fs::create_dir_all(&dir).unwrap();
-    if !go_build(&repo().join("plugins/examples/kanban"), &dir.join("kanban")) {
-        return;
-    }
+    cargo_build("kanban", &dir.join("kanban"));
     let m = Manifest {
         name: "kanban".into(),
         command: vec!["kanban".into()],

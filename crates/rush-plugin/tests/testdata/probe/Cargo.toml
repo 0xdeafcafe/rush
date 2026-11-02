@@ -1,0 +1,15 @@
+[package]
+name = "rush-plugin-probe"
+description = "a plugin that tries to get out of rush's sandbox, for the sandbox tests"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "probe"
+path = "src/main.rs"
+
+[dependencies]
+rush-plugin-sdk = { path = "../../../../../plugins/sdk" }
+serde_json = "1"

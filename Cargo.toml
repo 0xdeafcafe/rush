@@ -1,6 +1,18 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = [
+    "crates/*",
+    "crates/rush-plugin/tests/testdata/probe",
+    # Plugins written in Rust: the crate for writing them, the examples,
+    # and the skill's template, checked with the rest.
+    "plugins/sdk",
+    "plugins/examples/autodrafts",
+    "plugins/examples/delegate",
+    "plugins/examples/kanban",
+    "plugins/examples/neighbours",
+    "plugins/examples/reconnect",
+    "plugins/skills/write-rush-plugin/templates/rust",
+]
 
 [workspace.package]
 edition = "2024"

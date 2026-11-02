@@ -687,23 +687,32 @@ mod tests {
         assert_eq!(got, (0..50).collect::<Vec<_>>());
     }
 
-    /// rush, answering nothing for a while.
-    fn slow() -> Handler {
-        Arc::new(|_, _, _| {
-            std::thread::sleep(Duration::from_secs(1));
+    /// rush, holding each request it's sent until the test lets it go: it
+    /// says on the first channel that one came, and the second, dropped,
+    /// lets them all go.
+    fn holding() -> (Handler, mpsc::Receiver<()>, mpsc::Sender<()>) {
+        let (came_tx, came) = mpsc::channel();
+        let (release, release_rx) = mpsc::channel::<()>();
+        let came_tx = Mutex::new(came_tx);
+        let release_rx = Mutex::new(release_rx);
+        let h: Handler = Arc::new(move |_, _, _| {
+            let _ = lock(&came_tx).send(());
+            let _ = lock(&release_rx).recv();
             Ok(Value::Null)
-        })
+        });
+        (h, came, release)
     }
 
     #[test]
     fn a_closed_connection_fails_its_calls() {
-        let (rush, plugin) = pair(Some(slow()), None);
+        let (h, came, _release) = holding();
+        let (rush, plugin) = pair(Some(h), None);
         let waiting = std::thread::spawn({
             let plugin = plugin.clone();
             move || plugin.call::<_, Value>("sessions.watch", &())
         });
-        // rush doesn't answer, and goes.
-        std::thread::sleep(Duration::from_millis(50));
+        // rush has it, doesn't answer, and goes.
+        came.recv_timeout(Duration::from_secs(5)).unwrap();
         rush.close();
         assert_eq!(waiting.join().unwrap().unwrap_err(), CallError::Closed);
         assert!(plugin.wait_timeout(Duration::from_secs(5)));
@@ -715,7 +724,8 @@ mod tests {
 
     #[test]
     fn a_call_can_time_out() {
-        let (_rush, plugin) = pair(Some(slow()), None);
+        let (h, _came, _release) = holding();
+        let (_rush, plugin) = pair(Some(h), None);
         let e = plugin
             .call_timeout::<_, Value>("ui.send", &(), Duration::from_millis(50))
             .unwrap_err();

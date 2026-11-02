@@ -1,7 +1,7 @@
 //! rush-plugin against the plugins in the repository: their manifests
-//! load as Go rush loads them, and the Go programs (built here with the Go
-//! toolchain, skipped without one) talk to Rust rush over the wire
-//! protocol, from inside the sandbox Rust rush puts them in.
+//! load as Go rush loads them, and their programs, written in Rust on
+//! rush-plugin-sdk and built here with cargo, talk to rush over the wire
+//! protocol, from inside the sandbox rush puts them in.
 //! Ported from internal/plugin/category_test.go:24-37 (TestRepoPluginsLoad)
 //! and sandbox_darwin_test.go:14-110 (TestSandboxHolds).
 
@@ -48,29 +48,56 @@ impl Drop for Home {
     }
 }
 
-/// Builds a Go program: go build -o out pkg, in dir. False (and says why)
-/// when there's no Go to build it with.
-fn go_build(dir: &Path, pkg: &str, out: &Path) -> bool {
-    match Command::new("go")
-        .arg("build")
-        .arg("-o")
-        .arg(out)
-        .arg(pkg)
-        .current_dir(dir)
-        .output()
-    {
-        Ok(o) if o.status.success() => true,
-        Ok(o) => panic!("go build {pkg}: {}", String::from_utf8_lossy(&o.stderr)),
-        Err(e) => {
-            eprintln!("skipped: no Go toolchain to build {pkg} ({e})");
-            false
+/// Builds the program bin of the workspace's package pkg, as cargo builds
+/// it, and copies it to out. It builds into a target folder of its own:
+/// the cargo running the tests holds the workspace's.
+fn cargo_build(pkg: &str, bin: &str, out: &Path) {
+    let cargo = PathBuf::from(env!("CARGO"));
+    let target = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugins");
+    let mut cmd = Command::new(&cargo);
+    cmd.args([
+        "build",
+        "--quiet",
+        "--locked",
+        "--offline",
+        "-p",
+        pkg,
+        "--bin",
+        bin,
+    ])
+    .env("CARGO_TARGET_DIR", &target)
+    .env_remove("RUSTC_WRAPPER")
+    .current_dir(repo());
+    // rush-testenv moved HOME and PATH away: cargo finds its own again.
+    if let Some(real) = std::env::var_os("RUSH_TEST_REAL_HOME") {
+        for (var, dir) in [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")] {
+            if std::env::var_os(var).is_none() {
+                cmd.env(var, Path::new(&real).join(dir));
+            }
         }
     }
+    if let Some(bin_dir) = cargo.parent() {
+        let path = std::env::var("PATH").unwrap_or_default();
+        cmd.env("PATH", format!("{}:{path}", bin_dir.display()));
+        let rustc = bin_dir.join("rustc");
+        if rustc.exists() && std::env::var_os("RUSTC").is_none() {
+            cmd.env("RUSTC", rustc);
+        }
+    }
+    let o = cmd
+        .output()
+        .unwrap_or_else(|e| panic!("running cargo: {e}"));
+    assert!(
+        o.status.success(),
+        "cargo build -p {pkg}: {}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    std::fs::copy(target.join("debug").join(bin), out).unwrap();
 }
 
 /// Installs the example plugin name into the test's rush folder: its
 /// manifest, and its program built from source.
-fn install_example(name: &str, build_in: &Path, pkg: &str) -> Option<PathBuf> {
+fn install_example(name: &str) -> PathBuf {
     let dir = rush_plugin::root().join(name);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::copy(
@@ -81,7 +108,8 @@ fn install_example(name: &str, build_in: &Path, pkg: &str) -> Option<PathBuf> {
         dir.join("plugin.json"),
     )
     .unwrap();
-    go_build(build_in, pkg, &dir.join(name)).then_some(dir)
+    cargo_build(name, name, &dir.join(name));
+    dir
 }
 
 /// Starts the plugin in dir as the broker does, sandboxed, with conn on
@@ -129,18 +157,15 @@ fn repo_plugins_load() {
     assert!(n >= 6, "found {n} example plugins");
 }
 
-/// neighbours, built from the Go source with Go rush's own plugin package,
-/// answers rush's calls and calls rush back, sandboxed.
+/// neighbours, built from its source on rush-plugin-sdk, answers rush's
+/// calls and calls rush back, sandboxed.
 #[test]
 fn neighbours_speaks_the_protocol() {
-    let _h = Home::new();
-    let Some(dir) = install_example(
-        "neighbours",
-        &repo().join("plugins/examples"),
-        "./neighbours",
-    ) else {
+    if rush_plugin::supported().is_err() {
         return;
-    };
+    }
+    let _h = Home::new();
+    let dir = install_example("neighbours");
     let h: Handler = Arc::new(|_, _, method, _| match method {
         "sessions.list" => to_raw(&json!([
             {"id": "me", "name": "Me", "repo": "/r", "state": "running"},
@@ -180,15 +205,15 @@ fn neighbours_speaks_the_protocol() {
     stop(child, conn);
 }
 
-/// reconnect, built from its own module with an RPC of its own written to
-/// the protocol's description, speaks it with Rust rush too.
+/// reconnect, the UI hooks' example, speaks the protocol with rush too:
+/// settings, events and commands.
 #[test]
 fn reconnect_speaks_the_protocol() {
-    let _h = Home::new();
-    let src = repo().join("plugins/examples/reconnect");
-    let Some(dir) = install_example("reconnect", &src, ".") else {
+    if rush_plugin::supported().is_err() {
         return;
-    };
+    }
+    let _h = Home::new();
+    let dir = install_example("reconnect");
     let h: Handler = Arc::new(|_, _, m, _| Err(no_method(m)));
     let (child, conn) = start(&dir, 0, h);
     let ctx = Ctx::background().with_timeout(Duration::from_secs(20));
@@ -219,6 +244,9 @@ fn reconnect_speaks_the_protocol() {
 /// internet, localhost or rush's own sockets.
 #[test]
 fn sandbox_holds() {
+    if rush_plugin::supported().is_err() {
+        return;
+    }
     let home = Home::new();
     let dir = rush_plugin::root().join("probe");
     std::fs::create_dir_all(&dir).unwrap();
@@ -227,10 +255,7 @@ fn sandbox_holds() {
         r#"{"name":"probe","command":["probe"],"network":["example.com:443"]}"#,
     )
     .unwrap();
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/probe");
-    if !go_build(&src, ".", &dir.join("probe")) {
-        return;
-    }
+    cargo_build("rush-plugin-probe", "probe", &dir.join("probe"));
     let p = load(&dir).unwrap();
     let secret_dir = home.path().join("secrets");
     std::fs::create_dir_all(&secret_dir).unwrap();
