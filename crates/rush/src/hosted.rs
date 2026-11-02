@@ -44,12 +44,15 @@ use rush_ui::screens::session_cards::fork::Fork;
 use rush_ui::screens::session_cards::rewind::Branch;
 use rush_ui::screens::session_core::host::{
     Began, HandOver, HandedOver, Hosts, Info, Limit, Link, Now, Op, Retry, Said, SendErr, Spawned,
-    Start, Started,
+    Start, Started, Unreached,
 };
 use serde_json::json;
 
 /// How many lines a batch holds at most (rushmode.go next's 4096).
 const BATCH: usize = 4096;
+
+/// How long opening a session waits for a host that's still starting.
+const OPEN_WAIT: Duration = Duration::from_secs(5);
 
 /// What starting and waking a host does: rush-host's own (a detached
 /// `rush host run`), or a test's fake host in its own process.
@@ -143,6 +146,20 @@ impl Hosts for RushHosts {
 
     fn dial(&self, a: &Agent) -> Result<Arc<dyn Link>, String> {
         self.dial_id(&a.job.id)
+    }
+
+    fn open(&self, a: &Agent) -> Result<Arc<dyn Link>, Unreached> {
+        use rush_host::open::Unreached as U;
+        match rush_host::open::open(&a.job.id, OPEN_WAIT) {
+            Ok(c) => Ok(Arc::new(HostLink::new(c))),
+            Err(U::Stopped(i)) => Err(Unreached::Stopped(i.map(|i| Box::new(info(&i))))),
+            Err(U::Silent(e)) => Err(Unreached::Silent(e.to_string())),
+            Err(U::Failed(e)) => Err(Unreached::Failed(e.to_string())),
+        }
+    }
+
+    fn open_failed(&self, a: &Agent, reason: &str, err: &str) {
+        rush_host::open::note_failed(&a.job.id, reason, err);
     }
 
     fn reply(&self, a: &Agent, text: &str) -> Result<(), SendErr> {
