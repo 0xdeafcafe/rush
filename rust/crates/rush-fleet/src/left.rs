@@ -202,7 +202,7 @@ pub fn remove_left(it: &LeftItem) -> Result<i64, String> {
 /// the file system keeps it).
 pub(crate) fn born(p: &str) -> Option<std::time::SystemTime> {
     let m = std::fs::symlink_metadata(p).ok()?;
-    { m.created().ok() }
+    m.created().ok()
 }
 
 // ---- The top of /tmp (scratch.go) ----
