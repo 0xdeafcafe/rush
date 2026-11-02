@@ -66,7 +66,12 @@ fn a_waiting_session_holds_one_thread() {
     let wait = Duration::from_secs(10);
     assert_eq!(heard.recv_timeout(wait).unwrap(), br#"{"type":"heard"}"#);
     let added = settled(before + WAITING_SESSION).saturating_sub(before);
-    assert_eq!(added, WAITING_SESSION, "a waiting session's threads");
+    assert_eq!(
+        added,
+        WAITING_SESSION,
+        "a waiting session's threads: {:?}",
+        rush_sys::threads::names()
+    );
 
     // Written to again, it answers again; stopped, it leaves none.
     s.send("again").unwrap();
@@ -76,6 +81,7 @@ fn a_waiting_session_holds_one_thread() {
     assert_eq!(
         settled(before).saturating_sub(before),
         0,
-        "a stopped session's threads"
+        "a stopped session's threads: {:?}",
+        rush_sys::threads::names()
     );
 }

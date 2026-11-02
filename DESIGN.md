@@ -642,6 +642,9 @@ shell) goes back to the default in its pre_exec (`rush_sys::qos::plain`).
    down, or a job held for it. Rates are read only while a
    `watch_rates()` guard lives (#network). A host's netwatch, unwanted,
    doesn't wake.
+5. **A host's** (`rush host run`, one per live session, so dozens): five
+   with Claude Code running between turns, eleven before (2026-11-02);
+   see The host.
 
 ### The plugin service's threads (Rust-only)
 
@@ -683,7 +686,23 @@ for the host's whole life (idle sleep, away check-ins, a stalled turn,
 hung shells, long background tasks) is a timer here, armed only while
 there's something to watch: an idle host wakes for nothing. A spawned
 agent's wait for its answer waits on its folder rather than looking every
-half second. rush-fleet reads hosted sessions through its `Hosts` trait, which
+half second.
+
+A host runs few threads (Rust-only). Its main thread waits in one kqueue
+(`server/serve.rs`) for its socket's clients, its folder (it stops once
+the socket is gone), the process that started it and its quitting, where
+Go has a goroutine each and the port had a thread each, the folder's
+waking every 30 s. The look at its tmp every 10 minutes is a job on its
+timers' thread. With them run its agents' queue and the events log's
+writer. Claude Code's session holds one more, its output's reader, which
+reads stderr in the same poll; stdin is written by a thread that lives
+only while something is queued, and the process group's guard
+(`rush_sys::pgguard`) has none: it's reaped as it's released. Idle
+between turns, a Claude Code host ran 11 threads (`ps -M`, 2026-11-02),
+now 5; `rush-host/tests/threads.rs` counts an idle host's own, 6 → 3, and
+`rush-claude/tests/threads.rs` a waiting session's, 4 → 1, each file its
+own process. It wakes for its tmp look and its idle timer only, not
+every 30 s. A connected client adds two (its reader and writer). rush-fleet reads hosted sessions through its `Hosts` trait, which
 rush-host's `hosts::Sessions` implements over its `Lister` (the fleet
 can't depend on the host, which depends on it); it also revives a host
 lost mid-turn (Go's Revive), unless the rush follows (below). Beyond Go,

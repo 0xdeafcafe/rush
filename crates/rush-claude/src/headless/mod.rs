@@ -469,7 +469,7 @@ impl Polled {
             }
             let _ = tx.send(());
         });
-        drained.ok().map(|_| rx)
+        drained.is_ok().then_some(rx)
     }
 }
 

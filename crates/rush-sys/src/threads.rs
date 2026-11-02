@@ -68,6 +68,54 @@ pub fn count_of(pid: i32) -> usize {
     }
 }
 
+/// proc_pidinfo's list of a process's threads (sys/proc_info.h), which
+/// libc doesn't name.
+const PROC_PIDLISTTHREADS: libc::c_int = 6;
+
+/// The names of this process's threads now, an unnamed one as ""; empty
+/// when they can't be told. For a test to say which it didn't expect.
+pub fn names() -> Vec<String> {
+    let pid = std::process::id() as i32;
+    let mut ids = vec![0u64; count() + 16];
+    // SAFETY: an out-buffer of the size given.
+    let n = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            PROC_PIDLISTTHREADS,
+            0,
+            ids.as_mut_ptr().cast(),
+            (ids.len() * 8) as libc::c_int,
+        )
+    };
+    if n <= 0 {
+        return Vec::new();
+    }
+    ids.truncate(n as usize / 8);
+    let size = std::mem::size_of::<libc::proc_threadinfo>() as libc::c_int;
+    ids.iter()
+        .filter_map(|&t| {
+            // SAFETY: zeroed is a valid proc_threadinfo; proc_pidinfo fills it.
+            let mut ti: libc::proc_threadinfo = unsafe { std::mem::zeroed() };
+            // SAFETY: an out-buffer of the size given.
+            let r = unsafe {
+                libc::proc_pidinfo(
+                    pid,
+                    libc::PROC_PIDTHREADINFO,
+                    t,
+                    (&mut ti as *mut libc::proc_threadinfo).cast(),
+                    size,
+                )
+            };
+            // SAFETY: pth_name is NUL-terminated within its array.
+            (r == size).then(|| {
+                unsafe { std::ffi::CStr::from_ptr(ti.pth_name.as_ptr()) }
+                    .to_string_lossy()
+                    .into_owned()
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -86,6 +134,7 @@ mod tests {
         })
         .unwrap();
         assert!(count() >= 2);
+        assert!(names().iter().any(|n| n == "rush-test"), "{:?}", names());
         drop(tx);
         assert_eq!(t.join().unwrap(), r#"{"a":[1,2,{"b":"c"}]}"#);
         assert_eq!(count_of(-1), 0);
