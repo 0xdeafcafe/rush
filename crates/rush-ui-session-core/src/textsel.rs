@@ -326,6 +326,9 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
             if y < v.top || y >= v.top + n || x >= 2 + cw {
                 return Out::Pass; // the header, the dock, the map
             }
+            if super::side::over(m, &key, x, y) {
+                return Out::Pass; // the side column
+            }
             let Some(at) = text_cell(m, x, y) else {
                 return Out::Pass;
             };

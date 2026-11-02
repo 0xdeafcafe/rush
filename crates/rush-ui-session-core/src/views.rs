@@ -932,7 +932,7 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
                 if name == "conversation" {
                     // Only the text's own columns: not the map or the
                     // column beside it, at the same height.
-                    if x < 2 + text_w {
+                    if x < 2 + text_w && !super::side::over(m, &key, x, y) {
                         super::conversation::owner_at(m, y - top)
                     } else {
                         String::new()

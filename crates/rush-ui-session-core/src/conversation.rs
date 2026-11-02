@@ -430,6 +430,9 @@ pub fn link_under(m: &mut Model, key: &str, x: usize, y: usize) -> Option<String
     if y < v.top || y >= v.top + v.shown.len() || x < 2 || x >= 2 + v.o.width {
         return None;
     }
+    if super::side::over(m, key, x, y) {
+        return None; // the side column's, not the text's
+    }
     let at = textsel::text_cell(m, x, y)?;
     let row = textsel::drawn_row(m, at.row)?;
     rush_core::text::link_at(&row.line, at.col).map(|u| u.to_string())

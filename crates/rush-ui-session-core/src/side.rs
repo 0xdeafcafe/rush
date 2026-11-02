@@ -637,6 +637,14 @@ pub fn click(m: &mut Model, x: usize, y: usize) -> bool {
     act(m, &key, &r)
 }
 
+/// Whether screen cell (x, y) is in the column's own rectangle, drawn
+/// over the right of the conversation's rows: the text there is cut off,
+/// so the pointer isn't over the conversation.
+pub fn over(m: &mut Model, key: &str, x: usize, y: usize) -> bool {
+    let side = &conn(m, key).side;
+    side.shown > 0 && y >= side.y && x >= side.x
+}
+
 /// What a click, or enter or → on a picked row, does with the row's ref
 /// r. Whether it was one that does anything.
 fn act(m: &mut Model, key: &str, r: &str) -> bool {

@@ -442,4 +442,44 @@ fn the_box_hints_the_conversation_view_key() {
     let last = f[f.len() - 1].clone();
     assert!(!last.contains("conversation view"), "{last:?}");
     assert!(last.contains("esc back"), "{last:?}");
+/// The pointer over the side column, level with a turn of the
+/// conversation, lights nothing in the conversation; over the turn's own
+/// text it lights it as before.
+#[test]
+fn hover_stays_out_of_the_side_column() {
+    let mut m = rush_open("vb-hover", 220, 50, Vec::new());
+    let f = screen(&mut m);
+    let (sx, sy, shown) = {
+        let side = &conn(&mut m, KEY).side;
+        (side.x, side.y, side.shown)
+    };
+    assert!(shown > 0, "220 wide has the side column:\n{}", f.join("\n"));
+    let y = f
+        .iter()
+        .enumerate()
+        .skip(sy)
+        .find(|(_, l)| l.contains("fix the parser"))
+        .map(|(y, _)| y)
+        .expect("the turn's row");
+    let moved = |m: &mut Model, x: usize, y: usize| {
+        m.mouse_event(&Mouse {
+            kind: MouseKind::Moved,
+            x: x as u16,
+            y: y as u16,
+            mods: KeyMods::NONE,
+        });
+    };
+    moved(&mut m, 6, y);
+    assert!(
+        !conn(&mut m, KEY).vs.hover_ref.is_empty(),
+        "over the turn's text: it lights"
+    );
+    moved(&mut m, sx + 2, y);
+    assert_eq!(
+        conn(&mut m, KEY).vs.hover_ref,
+        "",
+        "over the side column: the conversation isn't lit"
+    );
+    moved(&mut m, 6, y);
+    assert!(!conn(&mut m, KEY).vs.hover_ref.is_empty(), "and back");
 }
