@@ -12,8 +12,11 @@
 //! let go. The rule and its numbers are in DESIGN.md, "Keeping the
 //! prompt cache warm".
 //!
-//! Compacting instead is never done here: it costs a turn whether you come
-//! back or not, and it loses detail the agent then reads again.
+//! Compacting instead is off unless set (`Settings::compact_after`): it
+//! costs a turn whether you come back or not, and it loses detail the
+//! agent then reads again. Set, a main conversation whose cache would
+//! lapse once it has sat idle that long is compacted once, while its cache
+//! is still warm, rather than let go.
 
 use crate::time::Ms;
 
@@ -55,6 +58,12 @@ pub fn max_bumps(ttl: Ms) -> u32 {
     (penalty(ttl) / READ / 2.0).floor() as u32
 }
 
+/// The most bumps one idle stretch may take as set: max, or [`max_bumps`]
+/// for the cache's life when max is 0 (auto).
+pub fn most_bumps(max: u32, ttl: Ms) -> u32 {
+    if max > 0 { max } else { max_bumps(ttl) }
+}
+
 /// How it's set.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Settings {
@@ -64,6 +73,12 @@ pub struct Settings {
     pub keep_for: Ms,
     /// No bump for a context smaller than this: its rewrite costs cents.
     pub min_context: i64,
+    /// The most bumps one idle stretch may take; 0 is auto, half a
+    /// rewrite ([`max_bumps`]).
+    pub max_bumps: u32,
+    /// Compact instead of keeping warm, for a cache that would lapse once
+    /// its session has sat idle this long; 0 never compacts.
+    pub compact_after: Ms,
 }
 
 impl Default for Settings {
@@ -71,6 +86,8 @@ impl Default for Settings {
         Settings {
             keep_for: 15 * MIN,
             min_context: 20_000,
+            max_bumps: 0,
+            compact_after: 0,
         }
     }
 }
@@ -88,6 +105,10 @@ pub struct Seat {
     pub context: i64,
     /// Bumps it has had since it went idle.
     pub bumps: u32,
+    /// It may be compacted: its agent can compact a main conversation,
+    /// nothing waits on you or runs in its background, and it hasn't been
+    /// compacted since its last turn of its own.
+    pub can_compact: bool,
 }
 
 /// What to do with a session's cache now.
@@ -95,6 +116,8 @@ pub struct Seat {
 pub enum Verdict {
     /// Bump it now.
     Keep,
+    /// Compact it now, while its cache is warm: a long wait is likely.
+    Compact,
     /// Not yet: it isn't about to lapse.
     Wait,
     /// It lapses, and why.
@@ -115,10 +138,16 @@ pub fn decide(s: &Settings, x: &Seat, now: Ms) -> Verdict {
     if x.context < s.min_context {
         return Verdict::Let("its context is too small to be worth it");
     }
+    // Left alone, it lapses about compact_after into the wait (within the
+    // minute a bump goes ahead of the lapse): a long wait.
+    if s.compact_after > 0 && x.can_compact && x.warm_until - x.idle_since + LEAD >= s.compact_after
+    {
+        return Verdict::Compact;
+    }
     if now - x.idle_since >= s.keep_for {
         return Verdict::Let("idle longer than the cache is kept for");
     }
-    if x.bumps >= max_bumps(x.ttl) {
+    if x.bumps >= most_bumps(s.max_bumps, x.ttl) {
         return Verdict::Let("its bumps would cost more than half the rewrite");
     }
     let c = x.context as f64;
@@ -149,6 +178,7 @@ mod tests {
             ttl,
             context,
             bumps,
+            can_compact: false,
         }
     }
 
@@ -216,6 +246,170 @@ mod tests {
             decide(&long, &seat(59 * MIN, 30_000, hour, 100_000, 0), T0),
             Verdict::Keep
         );
+    }
+
+    #[test]
+    fn most_refreshes() {
+        let five = 5 * MIN;
+        // max, bumps had: the verdict.
+        let cases: &[(u32, u32, Verdict)] = &[
+            (0, 4, Verdict::Keep),
+            (
+                0,
+                5,
+                Verdict::Let("its bumps would cost more than half the rewrite"),
+            ),
+            (
+                2,
+                2,
+                Verdict::Let("its bumps would cost more than half the rewrite"),
+            ),
+            (2, 1, Verdict::Keep),
+            (9, 6, Verdict::Keep),
+        ];
+        for (max, bumps, want) in cases {
+            let s = Settings {
+                keep_for: 120 * MIN,
+                max_bumps: *max,
+                ..Settings::default()
+            };
+            assert_eq!(
+                &decide(&s, &seat(MIN, 30_000, five, 100_000, *bumps), T0),
+                want,
+                "max {max}, bumps {bumps}"
+            );
+        }
+        assert_eq!(most_bumps(0, 60 * MIN), 9);
+        assert_eq!(most_bumps(3, 60 * MIN), 3);
+    }
+
+    #[test]
+    fn smallest_worth_keeping() {
+        // min_context, the context: kept or let go.
+        let cases: &[(i64, i64, bool)] = &[
+            (20_000, 19_999, false),
+            (20_000, 20_000, true),
+            (10_000, 15_000, true),
+            (50_000, 40_000, false),
+            (100_000, 100_000, true),
+        ];
+        for (min, context, kept) in cases {
+            let s = Settings {
+                min_context: *min,
+                ..Settings::default()
+            };
+            let v = decide(&s, &seat(4 * MIN, 30_000, 5 * MIN, *context, 0), T0);
+            assert_eq!(
+                v == Verdict::Keep,
+                *kept,
+                "min {min}, context {context}: {v:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn compacting_long_waits() {
+        let five = 5 * MIN;
+        let hour = 60 * MIN;
+        let can = |mut x: Seat| {
+            x.can_compact = true;
+            x
+        };
+        // compact_after, keep_for, the session: the verdict.
+        let cases: &[(&str, Ms, Ms, Seat, Verdict)] = &[
+            (
+                "off: an hour's cache lapses at an hour",
+                0,
+                15 * MIN,
+                can(seat(59 * MIN, 30_000, hour, 100_000, 0)),
+                Verdict::Let("idle longer than the cache is kept for"),
+            ),
+            (
+                "after 1h: an hour's cache is compacted before it lapses",
+                hour,
+                15 * MIN,
+                can(seat(59 * MIN, 30_000, hour, 100_000, 0)),
+                Verdict::Compact,
+            ),
+            (
+                "after 1h: the last request a few seconds before the turn ended",
+                hour,
+                15 * MIN,
+                can(Seat {
+                    idle_since: T0 - 59 * MIN,
+                    warm_until: T0 + 50_000,
+                    ttl: hour,
+                    context: 100_000,
+                    bumps: 0,
+                    can_compact: true,
+                }),
+                Verdict::Compact,
+            ),
+            (
+                "after 1h: a 5-minute cache kept 15 minutes lapses first",
+                hour,
+                15 * MIN,
+                can(seat(15 * MIN, 30_000, five, 100_000, 3)),
+                Verdict::Let("idle longer than the cache is kept for"),
+            ),
+            (
+                "after 1h, kept 2h: a 5-minute cache is bumped early on",
+                hour,
+                120 * MIN,
+                can(seat(4 * MIN, 30_000, five, 100_000, 0)),
+                Verdict::Keep,
+            ),
+            (
+                "after 2h, kept 2h: bumped at 59 minutes",
+                120 * MIN,
+                120 * MIN,
+                can(seat(59 * MIN, 30_000, hour, 100_000, 0)),
+                Verdict::Keep,
+            ),
+            (
+                "after 2h, kept 2h: compacted at 119 minutes",
+                120 * MIN,
+                120 * MIN,
+                can(seat(119 * MIN, 30_000, hour, 100_000, 1)),
+                Verdict::Compact,
+            ),
+            (
+                "not if it can't be (busy, a decision waiting, compacted already)",
+                hour,
+                15 * MIN,
+                seat(59 * MIN, 30_000, hour, 100_000, 0),
+                Verdict::Let("idle longer than the cache is kept for"),
+            ),
+            (
+                "not once its cache has lapsed",
+                hour,
+                15 * MIN,
+                can(seat(61 * MIN, -1, hour, 100_000, 0)),
+                Verdict::Let("its cache has lapsed already"),
+            ),
+            (
+                "not a small context",
+                hour,
+                15 * MIN,
+                can(seat(59 * MIN, 30_000, hour, 19_999, 0)),
+                Verdict::Let("its context is too small to be worth it"),
+            ),
+            (
+                "not before it's about to lapse",
+                hour,
+                15 * MIN,
+                can(seat(50 * MIN, 10 * MIN, hour, 100_000, 0)),
+                Verdict::Wait,
+            ),
+        ];
+        for (name, after, keep_for, x, want) in cases {
+            let s = Settings {
+                keep_for: *keep_for,
+                compact_after: *after,
+                ..Settings::default()
+            };
+            assert_eq!(&decide(&s, x, T0), want, "{name}");
+        }
     }
 
     #[test]
