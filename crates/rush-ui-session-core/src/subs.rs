@@ -270,12 +270,137 @@ pub struct FlowSeen {
 /// A run's transcript read on: its tail, and the session it's read into.
 type ReadOn = (Tail, Arc<Session>);
 
+/// How long after its transcript was last written a run's conversation is
+/// kept read on for its numbers (Rust-only). Past it, with no call of its
+/// out, only its numbers are kept: a finished run is a whole conversation
+/// for a few words, and a session can have hundreds.
+const KEEP_READ: Ms = 90_000;
+
+/// A run's numbers as the reader follows them (Rust-only).
+enum Followed {
+    /// Its conversation, read on as its transcript grows: it works, or did
+    /// lately.
+    Read(Tail, Box<Session>),
+    /// Read whole and let go: how big its transcript was then, its numbers
+    /// as they were (made filled in again when the tasks asked about
+    /// change), and its calls' ids, hashed and in order, for that.
+    Let {
+        size: u64,
+        stat: Box<RunStat>,
+        calls: Box<[u64]>,
+    },
+}
+
+/// How follow_run reads: with what, whether every run's numbers are due
+/// again (the tasks asked about changed), when, and those tasks' calls.
+#[derive(Clone, Copy)]
+struct Follow<'a> {
+    decode: &'a Decode,
+    again: bool,
+    now: Ms,
+    calls: &'a [String],
+}
+
+/// A call id hashed, for Followed::Let's calls.
+fn call_hash(id: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::hash::DefaultHasher::new();
+    id.hash(&mut h);
+    h.finish()
+}
+
+/// Run id's numbers, from its transcript at path: read on from where it
+/// got to while it works, else read whole only when it has grown since,
+/// and let go once it's quiet. Its numbers when they're new or changed
+/// (or again is set: the tasks asked about changed).
+fn follow_run(
+    f: Option<Followed>,
+    path: &str,
+    whole: bool,
+    how: &Follow,
+    ag: &super::overview::Agentry,
+) -> (Followed, Option<RunStat>) {
+    let Follow {
+        decode,
+        again,
+        now,
+        calls,
+    } = *how;
+    let meta = std::fs::metadata(path).ok();
+    let size = meta.as_ref().map_or(0, |m| m.len());
+    let (mut t, mut s, new) = match f {
+        Some(Followed::Read(t, s)) => (t, s, false),
+        Some(Followed::Let {
+            size: was,
+            mut stat,
+            calls: ids,
+        }) if was == size => {
+            if !again {
+                return (
+                    Followed::Let {
+                        size,
+                        stat,
+                        calls: ids,
+                    },
+                    None,
+                );
+            }
+            stat.made = calls
+                .iter()
+                .filter(|c| ids.binary_search(&call_hash(c)).is_ok())
+                .cloned()
+                .collect();
+            let st = (*stat).clone();
+            return (
+                Followed::Let {
+                    size,
+                    stat,
+                    calls: ids,
+                },
+                Some(st),
+            );
+        }
+        // Not read yet, or grown since it was let go: read whole.
+        _ => {
+            let t = if whole {
+                Tail::new(path, decode.clone())
+            } else {
+                Tail::subagent(path, decode.clone())
+            };
+            (t, Box::default(), true)
+        }
+    };
+    let grew = t.read(&mut s).unwrap_or(false);
+    let stat = (new || grew || again).then(|| RunStat::of(&s, calls).priced(&s, ag));
+    let quiet = meta
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .is_none_or(|d| now - d.as_millis() as Ms >= KEEP_READ);
+    let out = s
+        .steps()
+        .iter()
+        .any(|st| matches!(st.status, Status::Running | Status::Waiting));
+    if !quiet || out {
+        return (Followed::Read(t, s), stat);
+    }
+    let stat = stat.unwrap_or_else(|| RunStat::of(&s, calls).priced(&s, ag));
+    let mut ids: Vec<u64> = s.steps().iter().map(|st| call_hash(&st.id)).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let held = Followed::Let {
+        size: t.size(),
+        stat: Box::new(stat.clone()),
+        calls: ids.into(),
+    };
+    (held, Some(stat))
+}
+
 /// The reader's side: what stays with the transcripts, never the UI's.
 #[derive(Default)]
 pub struct Reader {
     list: Subagents,
     follow: Option<Box<dyn SubagentRuns>>,
-    tails: HashMap<String, (Tail, Session)>,
+    tails: HashMap<String, Followed>,
     /// The tasks' calls the numbers were last worked out for.
     calls: Vec<String>,
     /// The run shown whole, and its tail.
@@ -539,26 +664,22 @@ impl Ask {
             r.tails
                 .retain(|id, _| self.stats.iter().any(|(want, _)| want == id));
             for (id, path) in &self.stats {
-                let whole = self.whole.contains(id);
-                let mut new = false;
-                let (t, s) = r.tails.entry(id.clone()).or_insert_with(|| {
-                    new = true;
-                    let t = if whole {
-                        Tail::new(path, decode.clone())
-                    } else {
-                        Tail::subagent(path, decode.clone())
-                    };
-                    (t, Session::new())
-                });
-                let grew = t.read(s).unwrap_or(false);
-                if new || grew || again {
-                    let kind = self
-                        .kinds
-                        .get(id)
-                        .map_or(self.kind.as_str(), String::as_str);
-                    let ag = super::overview::Agentry { reg, kind };
-                    got.stats
-                        .insert(id.clone(), RunStat::of(s, &self.calls).priced(s, &ag));
+                let kind = self
+                    .kinds
+                    .get(id)
+                    .map_or(self.kind.as_str(), String::as_str);
+                let ag = super::overview::Agentry { reg, kind };
+                let how = Follow {
+                    decode,
+                    again,
+                    now: self.now,
+                    calls: &self.calls,
+                };
+                let (f, st) =
+                    follow_run(r.tails.remove(id), path, self.whole.contains(id), &how, &ag);
+                r.tails.insert(id.clone(), f);
+                if let Some(st) = st {
+                    got.stats.insert(id.clone(), st);
                 }
             }
         }
@@ -601,11 +722,15 @@ impl Ask {
             // One that can't be read isn't asked again until it grows.
             got.full.insert(id.clone(), s.unwrap_or_default());
         }
-        if let Some((id, src)) = &self.detail {
-            got.detail = Some((
-                id.clone(),
-                read_detail(&mut r, id, src, self.decode.as_ref(), reg),
-            ));
+        match &self.detail {
+            Some((id, src)) => {
+                got.detail = Some((
+                    id.clone(),
+                    read_detail(&mut r, id, src, self.decode.as_ref(), reg),
+                ));
+            }
+            // Rust-only: nothing's shown whole: its tail goes too.
+            None => r.detail = None,
         }
         match &self.procs {
             Some(a) => got.procs = Some(super::jobprocs::read(&mut r.table, a)),
@@ -664,14 +789,18 @@ pub fn seed_detail(m: &mut Model, key: &str, id: &str, src: &DetailSrc) -> Optio
     };
     let reader = conn(m, key).runs.reader.clone();
     let mut r = reader.try_lock().ok()?;
-    let (t, _) = r.tails.get(id)?;
+    let Some(Followed::Read(t, _)) = r.tails.get(id) else {
+        return None;
+    };
     let len = std::fs::metadata(path).ok()?.len();
     if t.path.to_string_lossy() != path.as_str() || t.size() != len {
         return None;
     }
-    let (t, s) = r.tails.remove(id)?;
+    let Some(Followed::Read(t, s)) = r.tails.remove(id) else {
+        return None;
+    };
     r.detail = Some((id.to_string(), t));
-    Some(s)
+    Some(*s)
 }
 
 /// Reads what the run shown whole has gained: a transcript's new lines,
@@ -693,12 +822,13 @@ fn read_detail(
                 // already (every run's while the subagents view shows):
                 // taken over, topped up, rather than read again from the
                 // start. Its numbers read it afresh next time.
-                if let Some((mut t, mut s)) = r.tails.remove(id)
+                if matches!(r.tails.get(id), Some(Followed::Read(..)))
+                    && let Some(Followed::Read(mut t, mut s)) = r.tails.remove(id)
                     && t.path.to_string_lossy() == path.as_str()
                     && t.read(&mut s).is_ok()
                 {
                     r.detail = Some((id.to_string(), t));
-                    return DetailGot::Seeded(Box::new(s));
+                    return DetailGot::Seeded(s);
                 }
                 let t = if *whole {
                     Tail::new(path, decode.clone())
@@ -1903,4 +2033,72 @@ pub fn set_helpers(m: &mut Model, key: &str) {
 /// A run's name as a Changes row says it, short (helperName).
 pub fn helper_name(s: &str) -> String {
     rush_draw::truncate(&crate::style::one_line(s), 24, "…").into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LINES: [&str; 3] = [
+        r#"{"type":"user","isSidechain":true,"timestamp":"2026-09-23T20:00:00Z","message":{"role":"user","content":"merge main"}}"#,
+        r#"{"type":"assistant","isSidechain":true,"timestamp":"2026-09-23T20:00:01Z","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"t9","name":"Bash","input":{"command":"ls -la"}}]}}"#,
+        r#"{"type":"user","isSidechain":true,"timestamp":"2026-09-23T20:00:02Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t9","content":"total 0"}]}}"#,
+    ];
+
+    fn aged(p: &Path, ago: std::time::Duration) {
+        std::fs::File::options()
+            .write(true)
+            .open(p)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - ago)
+            .unwrap();
+    }
+
+    /// A quiet run's conversation is let go once its numbers are read; they
+    /// are what it read whole, its calls still say which tasks it made, and
+    /// it's read again whole once it grows.
+    #[test]
+    fn a_quiet_run_keeps_its_numbers_only() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("agent-a1.jsonl");
+        std::fs::write(&p, LINES.join("\n") + "\n").unwrap();
+        aged(&p, std::time::Duration::from_secs(3600));
+        let path = p.to_string_lossy();
+        let decode = rush_convo::decode(rush_claude::messages);
+        let reg = rush_core::adapter::Registry::new();
+        let ag = super::super::overview::Agentry {
+            reg: &reg,
+            kind: "claude",
+        };
+        let now = rush_core::time::now();
+        let mut s = Session::new();
+        Tail::subagent(&*p, decode.clone()).read(&mut s).unwrap();
+        let whole = RunStat::of(&s, &[]).priced(&s, &ag);
+
+        let how = |again, calls| Follow {
+            decode: &decode,
+            again,
+            now,
+            calls,
+        };
+        let (f, st) = follow_run(None, &path, false, &how(false, &[]), &ag);
+        assert_eq!(st.as_ref(), Some(&whole));
+        assert!(matches!(f, Followed::Let { .. }), "a quiet run kept read");
+        let (f, st) = follow_run(Some(f), &path, false, &how(false, &[]), &ag);
+        assert_eq!(st, None, "unchanged, its numbers again");
+        let calls = ["t1".to_string(), "t9".to_string()];
+        let (f, st) = follow_run(Some(f), &path, false, &how(true, &calls), &ag);
+        assert_eq!(st.map(|st| st.made), Some(vec!["t9".to_string()]));
+        assert!(matches!(f, Followed::Let { .. }));
+
+        // It writes again: read whole, and kept read on while it works.
+        let more = r#"{"type":"assistant","isSidechain":true,"timestamp":"2026-09-23T20:00:03Z","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"done"}]}}"#;
+        std::fs::write(&p, LINES.join("\n") + "\n" + more + "\n").unwrap();
+        let (f, st) = follow_run(Some(f), &path, false, &how(false, &[]), &ag);
+        assert_eq!(st.map(|st| st.last_words), Some("done".to_string()));
+        assert!(
+            matches!(f, Followed::Read(..)),
+            "a run written lately let go"
+        );
+    }
 }

@@ -350,6 +350,63 @@ fn main() {
             held as f64 / MIB,
         );
         drop(read);
+        // As the reader follows them now (rush-ui-session-core subs.rs
+        // follow_run): each read whole, one at a time, and let go once
+        // quiet, keeping its numbers (here its words, near enough) and
+        // its calls' ids hashed; one written lately, or with a call out,
+        // is kept read on.
+        let base = NOW.load(Relaxed);
+        PEAK.store(base, Relaxed);
+        let (made0, live0) = (MADE.load(Relaxed), LIVE.load(Relaxed));
+        let now = std::time::SystemTime::now();
+        let mut on = 0;
+        let kept: Vec<Box<dyn std::any::Any>> = runs
+            .iter()
+            .map(|p| -> Box<dyn std::any::Any> {
+                let mut t = Tail::subagent(p, rush_convo::decode(rush_claude::messages));
+                let mut s = Session::new();
+                let _ = t.read(&mut s);
+                let lately = std::fs::metadata(p)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|m| now.duration_since(m).ok())
+                    .is_some_and(|d| d.as_secs() < 90);
+                let out = s.steps().iter().any(|st| {
+                    matches!(
+                        st.status,
+                        rush_convo::Status::Running | rush_convo::Status::Waiting
+                    )
+                });
+                if lately || out {
+                    on += 1;
+                    return Box::new((t, s));
+                }
+                let mut ids: Vec<u64> = s
+                    .steps()
+                    .iter()
+                    .map(|st| {
+                        use std::hash::{Hash, Hasher};
+                        let mut h = std::hash::DefaultHasher::new();
+                        st.id.hash(&mut h);
+                        h.finish()
+                    })
+                    .collect();
+                ids.sort_unstable();
+                ids.dedup();
+                let words = (s.doing().0, s.did(), s.last_words(), s.model.clone());
+                Box::new((t.size(), words, Box::<[u64]>::from(ids)))
+            })
+            .collect();
+        println!(
+            "followed as the reader keeps them: {} of {} read on, retain {:.2} MiB in {} allocations (peak {:.1} MiB, {} allocations made)",
+            on,
+            kept.len(),
+            NOW.load(Relaxed).saturating_sub(base) as f64 / MIB,
+            LIVE.load(Relaxed).saturating_sub(live0),
+            PEAK.load(Relaxed).saturating_sub(base) as f64 / MIB,
+            MADE.load(Relaxed) - made0,
+        );
+        drop(kept);
     }
     // A reader that keeps a session read on copies it when the UI still
     // holds the last one (Arc::make_mut), rather than reading it again.

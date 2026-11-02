@@ -2609,6 +2609,19 @@ Go rush is gone from the tree; its last version is the `go-final` tag
   Its subagent runs are the bigger part: 45 runs retain 20.4 MiB, another
   session's 221 runs 82 MiB, so the reader lets go of a run once its numbers
   aren't followed (rush-ui-session-core `subs.rs`).
+- A followed run's numbers (Rust-only, rush-ui-session-core `subs.rs`
+  `follow_run`): the reader reads a run's transcript whole, works out its
+  numbers (the row's words, steps, times, tokens and cost), and keeps its
+  conversation read on only while the run works (written in the last
+  90 s, or a call of its out). A quiet one keeps its numbers, its
+  transcript's size and its calls' ids hashed (for which background
+  tasks it started); it's read whole again only once it grows. The run
+  picked in the Subagents tab is read whole on its own, and let go when
+  unpicked. The open bench's "followed as the reader keeps them", with
+  every run followed (the Subagents tab open), 2026-11-02: the 119 MiB
+  transcript's 45 runs 20.4 → 0.43 MiB (one written lately, kept read
+  on), 1,103 allocations kept; the 221 runs 82.0 → 0.19 MiB in 1,527,
+  a peak of 2.7 MiB while reading.
 - `cargo bench -p rush-host --bench list` (`RUSH_REAL=1` for this home,
   read only; its lister follows, never reviving a host): the list's
   loader and a reading of it, the rows' and the loader's retained heap
@@ -2624,7 +2637,12 @@ Go rush is gone from the tree; its last version is the `go-final` tag
   21.0 → 18.0 MiB and 156,080 → 132,197 allocations; a Name in 16 bytes
   rather than 24, 18.0 → 17.8 MiB; the spend scanner holding each
   transcript's path once, 17.8 → 16.6 MiB and 132,091 → 127,607
-  allocations.
+  allocations. The subagent runs' follower (rush-claude `subruns.rs`)
+  keeping each run once, in its meta files' order, by its id (the meta
+  file's path made from it when it's read, not held beside it as its
+  key and in the list), and no longer copying the list on every look:
+  16.6 → 14.5 MiB and 127,680 → 120,318 allocations kept; a reading
+  makes 78,768 → 60,326.
 - Footprint: `/usr/bin/footprint -p <pid>` idle on the list, and with the
   largest transcript under `~/.claude/projects` open; side by side with Go.
 - Idle: `top -l` CPU and wakeups over 60 s with nothing changing.
