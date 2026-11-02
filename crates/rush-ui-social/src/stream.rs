@@ -8,6 +8,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use rush_core::text::{Color, Line};
 use rush_core::time::Ms;
@@ -187,7 +188,7 @@ pub trait ModelStream {
     fn load_stream(&mut self);
     fn reload_stream(&mut self);
     fn stream_name(&self, p: &Post) -> String;
-    fn stream_who(&self, p: &Post, col: Color, w: usize, whole: bool) -> Line;
+    fn stream_who(&self, p: &Post, col: Color, w: usize, hovered: Option<Duration>) -> Line;
 }
 
 impl ModelStream for Model {
@@ -257,11 +258,15 @@ impl ModelStream for Model {
         one_line(&clean_text(&p.author.name))
     }
 
-    /// A post's author in w cells: its @handle in col, cut to WIDTH
-    /// unless whole (hovered), then its name, dim, cut to fit
-    /// (streamWho).
-    fn stream_who(&self, p: &Post, col: Color, w: usize, whole: bool) -> Line {
-        let h = if whole { p.whole_handle() } else { p.handle() };
+    /// A post's author in w cells: its @handle in col, cut to WIDTH, then
+    /// its name, dim, cut to fit (streamWho). Hovered this long, a handle
+    /// that's cut scrolls in its own room (see marquee); it never takes
+    /// more.
+    fn stream_who(&self, p: &Post, col: Color, w: usize, hovered: Option<Duration>) -> Line {
+        let mut h = p.handle();
+        if let Some(t) = hovered {
+            h = marquee(&p.whole_handle(), name_room(p, w), t).0;
+        }
         let mut who = line([spb(h.clone(), col)]);
         let n = self.stream_name(p);
         let room = w as isize - cells(&h) as isize - 3;
@@ -272,6 +277,56 @@ impl ModelStream for Model {
         }
         who
     }
+}
+
+/// A hovered handle rests this long at its start and at its end.
+pub const MARQUEE_PAUSE: Duration = Duration::from_millis(1000);
+/// …and moves a character this often between: about nine a second.
+pub const MARQUEE_STEP: Duration = Duration::from_millis(110);
+
+/// The cells p's handle is drawn in when its author signs a row w wide:
+/// what it has cut to WIDTH, no more than the row has. A hovered handle
+/// scrolls in just this room.
+pub fn name_room(p: &Post, w: usize) -> usize {
+    cells(&p.handle()).min(w)
+}
+
+/// name in w cells, hovered for t: cut with … for the first pause, then
+/// scrolling left a character a step until its end shows, resting there
+/// for a pause, then back to the start, over and over. With it, how long
+/// until it next changes; none for a name that fits, which never moves.
+pub fn marquee(name: &str, w: usize, t: Duration) -> (String, Option<Duration>) {
+    let chars: Vec<char> = name.chars().collect();
+    if cells(name) <= w || w < 2 {
+        return (rush_room::handle::cut(name, w), None);
+    }
+    // The furthest along it goes: its last w cells in view.
+    let mut far = chars.len();
+    let mut used = 0;
+    while far > 0 {
+        let cw = cells(&chars[far - 1].to_string());
+        if used + cw > w {
+            break;
+        }
+        used += cw;
+        far -= 1;
+    }
+    let (pause, step) = (MARQUEE_PAUSE.as_millis(), MARQUEE_STEP.as_millis());
+    let scroll = far as u128 * step;
+    let cycle = pause + scroll + pause;
+    let at = t.as_millis() % cycle;
+    let ms = |n: u128| Duration::from_millis(n as u64);
+    if at < pause {
+        return (rush_room::handle::cut(name, w), Some(ms(pause - at)));
+    }
+    let (off, next) = if at < pause + scroll {
+        let s = at - pause;
+        (((s / step) as usize + 1).min(far), ms(step - s % step))
+    } else {
+        (far, ms(cycle - at))
+    };
+    let shown: String = chars[off..].iter().collect();
+    (truncate(&shown, w, ""), Some(next))
 }
 
 /// Watches the board's folder, reading it again on each change and

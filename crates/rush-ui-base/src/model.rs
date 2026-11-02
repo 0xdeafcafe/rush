@@ -316,6 +316,12 @@ impl Model {
         self.wake = Some(self.wake.map_or(at, |w| w.min(at)));
     }
 
+    /// When the screens last asked to be woken, if they have and it's
+    /// still to come.
+    pub fn wake_asked(&self) -> Option<Instant> {
+        self.wake
+    }
+
     /// The open conversation, told what the list says of its agent: a
     /// live turn ended once the agent has stopped (Go's followTail).
     fn follow_tail(&mut self) -> bool {

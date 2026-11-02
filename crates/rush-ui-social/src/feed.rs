@@ -646,7 +646,7 @@ impl FeedSheet {
                 join(
                     &mut head,
                     spread(
-                        m.stream_who(p, e, room, false),
+                        m.stream_who(p, e, room, None),
                         line([sp(proj, DIM)]),
                         w.saturating_sub(2),
                     ),

@@ -1,10 +1,11 @@
 //! The feed docked at the very foot of the Agents list: every chirp and
 //! reply, newest at the bottom, one a row, the older ones pushed up and
 //! off as posts come in; faded until a post is new or the pointer is on
-//! it, and a hovered post too long for its row scrolls across it once. A
+//! it. A hovered post's @handle, when it's cut, scrolls in its own room
+//! like a marquee (stream.rs marquee); nothing else on the row moves. A
 //! click opens the feed at that post. Port of Go's stream.go:17-25 (the
-//! constants), :102-228 (streamDock, streamLines, streamColsOf, streamRow,
-//! tickerTick, ticker), view.go:2130 (fadeText), view.go:1159 (where it
+//! constants), :102-228 (streamDock, streamLines, streamColsOf,
+//! streamRow), view.go:2130 (fadeText), view.go:1159 (where it
 //! docks) and model.go:800 (the click); what rush did on its own under
 //! it (view.go:1163, messages.go:158 newsDock, model.go:812 its click).
 
@@ -14,8 +15,8 @@ use rush_core::text::{Color, Line};
 use rush_core::time::Ms;
 use rush_draw::{Button, MouseKind};
 
-use super::ink::{cells, clean_text, fields, tagged, tint_beside, truncate};
-use super::stream::{FRESH, Post, Stream, next_tint};
+use super::ink::{cells, clean_text, fields, tagged, tint_beside};
+use super::stream::{FRESH, Post, Stream, marquee, name_room, next_tint};
 use crate::feed::ModelFeed;
 use crate::frame::{Mouse, Out};
 use crate::model::Model;
@@ -28,13 +29,9 @@ pub const KEY_PREFIX: &str = "community:";
 const FADE: f64 = 0.55;
 /// The most posts the docked timeline shows.
 pub const DOCK_POSTS: usize = 6;
-/// A hovered post scrolls a cell this often…
-const TICKER_EVERY: Duration = Duration::from_millis(120);
-/// …after resting this many steps at the start, to be read.
-const TICKER_PAUSE: i64 = 8;
 
-/// Which row the pointer came onto, and when: where a hovered post's
-/// scrolling starts from.
+/// Which row the pointer came onto, and when: where a hovered handle's
+/// scrolling starts from. Another row, or none, starts it again.
 #[derive(Default)]
 struct Hovered {
     key: String,
@@ -105,7 +102,7 @@ impl ModelDock for Model {
         ));
         let mut tint: Option<Color> = None;
         let mut fresh_until: Option<Ms> = None;
-        let mut more = false;
+        let mut next: Option<Duration> = None;
         for (i, p) in kept.iter().enumerate() {
             if now - p.at < FRESH {
                 hot = true;
@@ -114,7 +111,7 @@ impl ModelDock for Model {
             // A run of one author's posts signs once, in a colour not the
             // run above's.
             let key = format!("{KEY_PREFIX}{}", p.key);
-            let hovered = hover == key;
+            let hovered = (hover == key).then_some(since);
             let mut who = Line::new();
             if i == 0 || kept[i - 1].username() != p.username() {
                 let t = tint_beside(
@@ -124,13 +121,17 @@ impl ModelDock for Model {
                 );
                 tint = Some(t);
                 who = self.stream_who(p, t, cols.handle, hovered);
-            } else if hovered {
-                // Hovered, a post in a run says whose it is too, whole.
-                who = self.stream_who(p, tint.unwrap_or(TEXT), cols.handle, true);
+            } else if hovered.is_some() {
+                // Hovered, a post in a run says whose it is too, in the
+                // room its run's name has.
+                who = self.stream_who(p, tint.unwrap_or(TEXT), cols.handle, hovered);
             }
-            let step = (since.as_millis() / TICKER_EVERY.as_millis()) as i64 - TICKER_PAUSE;
-            let (row, m) = stream_row(p, cols, who, now, (hover == key).then_some(step));
-            more |= m;
+            // A hovered handle that's cut scrolls: the next frame is due
+            // when it next moves, and only while the pointer is on it.
+            if let Some(t) = hovered {
+                next = marquee(&p.whole_handle(), name_room(p, cols.handle), t).1;
+            }
+            let row = stream_row(p, cols, who, now);
             let row = if hover == key {
                 hover_line(row, inner)
             } else {
@@ -143,10 +144,10 @@ impl ModelDock for Model {
                 fade_text(l, FADE);
             }
         }
-        // Only what moves asks for a wake: a hovered post scrolling, and a
-        // new post fading once it's no longer new.
-        if more {
-            self.ask_wake(Instant::now() + TICKER_EVERY);
+        // Only what moves asks for a wake: a hovered handle scrolling, and
+        // a new post fading once it's no longer new.
+        if let Some(d) = next {
+            self.ask_wake(Instant::now() + d);
         }
         if let Some(t) = fresh_until {
             self.ask_wake(Instant::now() + Duration::from_millis((t - now).max(0) as u64));
@@ -179,29 +180,17 @@ impl ModelDock for Model {
     }
 }
 
-/// One post on one row: who signed it, if anyone, the text cut with … or,
-/// hovered (step given), scrolling across with its handles whole, and its
-/// age; and whether it has further to scroll (streamRow). A hovered
-/// row's handle takes the room it needs from its text.
-fn stream_row(p: &Post, mut c: Cols, who: Line, now: Ms, step: Option<i64>) -> (Line, bool) {
-    let whole = step.is_some();
-    if whole && who.width() > c.handle {
-        c.text = (c.text + c.handle).saturating_sub(who.width()).max(8);
-        c.handle = who.width();
-    }
+/// One post on one row: who signed it, if anyone, the text cut with …,
+/// and its age (streamRow). Hovered or not, every column keeps its
+/// place.
+fn stream_row(p: &Post, c: Cols, who: Line, now: Ms) -> Line {
     let ago = age(now - p.at);
     let when = if now - p.at < FRESH {
         sp(ago.clone(), ORANGE)
     } else {
         sp(ago.clone(), DIM)
     };
-    let mut text = fields(&clean_text(&p.said_as(whole)));
-    let mut more = false;
-    if let Some(step) = step
-        && cells(&text) > c.text
-    {
-        (text, more) = ticker(&text, c.text, step);
-    }
+    let text = fields(&clean_text(&p.said()));
     let mut row = fit(who, c.handle);
     row.spans.push(plain("  "));
     row = join_to(row, fit(tagged(&text, SUB), c.text));
@@ -209,22 +198,7 @@ fn stream_row(p: &Post, mut c: Cols, who: Line, now: Ms, step: Option<i64>) -> (
     row.spans
         .push(plain(blanks(c.age.saturating_sub(cells(&ago)))));
     row.spans.push(when);
-    (row, more)
-}
-
-/// w cells of text scrolled step chars along, stopping once its end is in
-/// view (scrolling for ever pulls the eye), and whether it has further to
-/// go. Whole chars, so a wide one never overfills the row (ticker).
-pub fn ticker(text: &str, w: usize, step: i64) -> (String, bool) {
-    let mut s = text;
-    let mut i = 0;
-    while i < step && cells(s) > w {
-        let mut cs = s.chars();
-        cs.next();
-        s = cs.as_str();
-        i += 1;
-    }
-    (truncate(s, w, ""), cells(s) > w)
+    row
 }
 
 /// l's coloured text by of the way to the ground; plain text stays

@@ -49,11 +49,11 @@ fn lines() {
     assert!(rows(&mut m, 60, 10).is_empty());
 }
 
-// An agent goes by its session's title: a long one cut with … until the
-// pointer is on its post, which shows it whole; renamed, its posts show
-// the new title.
+// An agent goes by its session's title, a long one cut with …. Hovered,
+// the row keeps its layout: the name scrolls in its own room and the
+// text stays where it was. Renamed, its posts show the new title.
 #[test]
-fn long_handles_cut_until_hovered() {
+fn long_handles_cut_and_hover_keeps_the_row() {
     use rush_room::handle::{Names, set_known};
     let mut m = feed_model();
     m.now = m.clock.unwrap();
@@ -68,11 +68,85 @@ fn long_handles_cut_until_hovered() {
     assert!(quiet.contains(cut) && !quiet.contains(full), "{quiet}");
     m.hover = format!("{KEY_PREFIX}a/1");
     let hovered = last(&mut m);
-    assert!(hovered.contains(full), "{hovered}");
+    assert_eq!(cells(&hovered), cells(&quiet), "{hovered}");
+    assert_eq!(
+        hovered.find("-race"),
+        quiet.find("-race"),
+        "the text stays put:\n{quiet}\n{hovered}"
+    );
+    assert!(!hovered.contains(full), "{hovered}");
+    // The pointer leaves: cut again.
     m.hover.clear();
+    assert_eq!(last(&mut m), quiet);
     set_known(Names::new([("s1", "Build cache")]));
     let renamed = last(&mut m);
     assert!(renamed.contains("@build-cache "), "{renamed}");
+    set_known(Names::default());
+}
+
+// A hovered name too long for its room rests at its start, scrolls left
+// about nine characters a second until its end shows, rests, then starts
+// again; one that fits never moves.
+#[test]
+fn marquee_scrolls_a_cut_name() {
+    use rush_ui_social::stream::marquee;
+    use std::time::Duration;
+    let name = "@terminal-decline-shell-autocomplete-ideas";
+    let at = |ms: u64| marquee(name, 24, Duration::from_millis(ms));
+    let ms = |n: u64| Some(Duration::from_millis(n));
+    // The first second: cut, as it was.
+    assert_eq!(at(0), ("@terminal-decline-shell…".to_string(), ms(1000)));
+    assert_eq!(at(900), ("@terminal-decline-shell…".to_string(), ms(100)));
+    // Then a character every 110ms.
+    assert_eq!(at(1000), ("terminal-decline-shell-a".to_string(), ms(110)));
+    assert_eq!(at(1440), ("inal-decline-shell-autoc".to_string(), ms(110)));
+    // At its end, it rests: 18 steps take it there.
+    let end = 1000 + 18 * 110;
+    assert_eq!(at(end), ("shell-autocomplete-ideas".to_string(), ms(1000)));
+    assert_eq!(at(end + 500).0, "shell-autocomplete-ideas");
+    // Then back to the start, round again.
+    let cycle = end + 1000;
+    assert_eq!(at(cycle).0, "@terminal-decline-shell…");
+    assert_eq!(at(cycle + 1440).0, "inal-decline-shell-autoc");
+    // Never more than its room.
+    for t in (0..cycle).step_by(37) {
+        assert_eq!(cells(&at(t).0), 24, "{t}");
+    }
+    // A name that fits stays still and asks for no frame.
+    assert_eq!(
+        marquee("@docs", 24, Duration::from_millis(1440)),
+        ("@docs".to_string(), None)
+    );
+}
+
+// Nothing hovered and nothing new: the dock asks for no frame, so an idle
+// rush stays idle. A hovered cut name asks for the next one.
+#[test]
+fn no_tick_unless_a_cut_name_is_hovered() {
+    use rush_room::handle::{Names, set_known};
+    let mut m = feed_model();
+    let now = m.clock.unwrap();
+    for p in &mut m.kept::<Stream>().posts {
+        p.at = now - 3_600_000;
+    }
+    m.now = now;
+    set_known(Names::new([(
+        "s1",
+        "Terminal Decline: Shell Autocomplete Ideas",
+    )]));
+    let before = m.wake_asked();
+    m.stream_lines(120, 8);
+    assert_eq!(m.wake_asked(), before, "idle");
+    m.hover = format!("{KEY_PREFIX}a/0");
+    m.stream_lines(120, 8);
+    assert_eq!(m.wake_asked(), before, "a name that fits never moves");
+    m.hover = format!("{KEY_PREFIX}a/1");
+    m.stream_lines(120, 8);
+    assert!(m.wake_asked().is_some(), "a cut name scrolls");
+    if before.is_none() {
+        let due = m.wake_asked().unwrap() - std::time::Instant::now();
+        assert!(due <= std::time::Duration::from_millis(1000), "{due:?}");
+    }
     set_known(Names::default());
 }
 
@@ -96,25 +170,6 @@ fn fades_when_quiet() {
     m.hover.clear();
     m.kept::<Stream>().posts[2].at = now - 1000;
     assert_eq!(fg(&mut m), TEXT);
-}
-
-// The ticker stops once the end is in view, and never splits a wide
-// char (stream_test.go TestTicker).
-#[test]
-fn ticker_steps() {
-    let cases: &[(&str, usize, i64, &str, bool)] = &[
-        ("abcdefghij", 4, 0, "abcd", true),
-        ("abcdefghij", 4, 3, "defg", true),
-        ("abcdefghij", 4, 6, "ghij", false),
-        ("abcdefghij", 4, 60, "ghij", false),
-        ("日本語のテキスト", 5, 1, "本語", true),
-        ("short", 12, 5, "short", false),
-    ];
-    for &(text, w, step, want, more) in cases {
-        let (got, m) = ticker(text, w, step);
-        assert_eq!((got.as_str(), m), (want, more), "{text} {w} {step}");
-        assert!(cells(&got) <= w);
-    }
 }
 
 // Docked at the very foot of the list with the list behind it; a
