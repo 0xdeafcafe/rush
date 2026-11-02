@@ -272,6 +272,11 @@ pub fn get(path: &str, fresh: Duration) -> Result<(Vec<u8>, i64), Error> {
     {
         return Ok((body.clone(), c.remaining));
     }
+    // GitHub said the limit is spent: nobody asks until it resets.
+    if limited_until().is_some() {
+        LAST_REMAINING.store(0, Ordering::SeqCst);
+        return Err(Error::Limited);
+    }
     let tag = format!("If-None-Match: {}", c.etag);
     let args: Vec<&str> = if !c.etag.is_empty() && c.body.is_some() {
         vec!["-H", &tag, path]
@@ -299,8 +304,15 @@ pub fn get(path: &str, fresh: Duration) -> Result<(Vec<u8>, i64), Error> {
             }
         }
         403 | 429 => {
-            if h.get("x-ratelimit-remaining").map(String::as_str) == Some("0") || status == 429 {
+            // The hourly limit spent, or a secondary limit (too many at
+            // once), which says when to come back in Retry-After.
+            if h.get("x-ratelimit-remaining").map(String::as_str) == Some("0")
+                || status == 429
+                || h.contains_key("retry-after")
+                || contains(&b.to_ascii_lowercase(), b"rate limit")
+            {
                 LAST_REMAINING.store(0, Ordering::SeqCst);
+                set_limited(reset_at(&h, Time::now()));
                 return Err(Error::Limited);
             }
             return Err(gh_error(status, b, &out.stderr, out.err.as_ref()));
@@ -310,6 +322,10 @@ pub fn get(path: &str, fresh: Duration) -> Result<(Vec<u8>, i64), Error> {
     if c.remaining >= 0 {
         LAST_REMAINING.store(c.remaining, Ordering::SeqCst);
     }
+    if c.remaining == 0 {
+        // That was the last: the next waits for the reset.
+        set_limited(reset_at(&h, Time::now()));
+    }
     if let Ok(enc) = rush_state::json::to_vec(&c) {
         let tmp = with_ext(&file, ".tmp");
         if write_private(&tmp, &enc).is_ok() {
@@ -317,6 +333,65 @@ pub fn get(path: &str, fresh: Duration) -> Result<(Vec<u8>, i64), Error> {
         }
     }
     Ok((c.body.unwrap_or_default(), c.remaining))
+}
+
+/// Until when every watcher on this machine holds off asking GitHub, as
+/// the last one turned back was told: kept in watch/gh/limited.json.
+#[derive(Serialize, Deserialize, Default)]
+struct Limit {
+    #[serde(default, deserialize_with = "time_or_zero")]
+    until: Time,
+}
+
+fn limit_file() -> PathBuf {
+    root().join("gh").join("limited.json")
+}
+
+/// When GitHub's rate limit resets, if a watcher was told it is spent and
+/// it hasn't reset yet.
+pub fn limited_until() -> Option<Time> {
+    let l: Limit = std::fs::read(limit_file())
+        .ok()
+        .and_then(|b| rush_state::json::from_slice(&b).ok())
+        .unwrap_or_default();
+    (l.until > Time::now()).then_some(l.until)
+}
+
+/// Holds every watcher off until then.
+fn set_limited(until: Time) {
+    let file = limit_file();
+    if let Some(d) = file.parent() {
+        let _ = mkdir_all(d);
+    }
+    if let Ok(enc) = rush_state::json::to_vec(&Limit { until }) {
+        let tmp = with_ext(&file, ".tmp");
+        if write_private(&tmp, &enc).is_ok() {
+            let _ = std::fs::rename(&tmp, &file);
+        }
+    }
+}
+
+/// When to ask again after GitHub turned a call back: Retry-After's
+/// seconds, else the limit's reset, else a minute (GitHub's advice for a
+/// secondary limit that says neither); never more than an hour away.
+pub fn reset_at(h: &HashMap<String, String>, now: Time) -> Time {
+    let most = now + Duration::from_secs(3600);
+    if let Some(s) = h
+        .get("retry-after")
+        .and_then(|v| v.trim().parse::<u64>().ok())
+    {
+        return (now + Duration::from_secs(s.max(1))).min(most);
+    }
+    if let Some(r) = h
+        .get("x-ratelimit-reset")
+        .and_then(|v| v.trim().parse::<i64>().ok())
+    {
+        let t = Time::from_unix(r, 0);
+        if t > now {
+            return t.min(most);
+        }
+    }
+    now + Duration::from_secs(60)
 }
 
 /// path's body from GitHub, unshared and uncached: a job's log.

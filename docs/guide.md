@@ -296,6 +296,8 @@ rush plugin approve <name>  # read what it may do, and say yes
 
 Some come with rush, such as `gate`, which queues intensive programs, and `search-guard`, which refuses agents' recursive `grep -r`, giant `git grep` alternations and per-name `git grep` loops and tells them the cheaper `rg` command. Both are off until `rush plugin on <name>`; [Bundled plugins](../plugins/README.md#bundled-plugins) lists them all.
 
+`watch` has agents wait on GitHub through rush rather than poll it. `rush watch pr [<n>]` waits on a pull request's checks; `rush watch run [<branch> | <sha> | <run id> | owner/name@<ref>] [--workflow ci.yml]` waits on a GitHub Actions run when there's no pull request (with nothing, the newest run of each workflow on the checkout's commit; a fresh push gets up to 2 minutes for its run to start). Both take `--until done|fail|first|each` and `--timeout`, print once what happened (the failed jobs, the first lines of their logs, the run's link) and end 0 all passed, 1 failed, 2 timed out, 3 cancelled or GitHub couldn't be asked. Every agent on the machine watching the same thing shares one answer, kept under rush's folder with a lock so only one asks; asking again sends the last ETag, so an unchanged answer costs none of the rate limit; and when GitHub says the limit is spent (or to slow down), every watcher waits until it resets and says so once. In Claude Code sessions `gh run watch` becomes `rush watch run` and polling `gh run view`/`gh run list` is turned back.
+
 To have Claude write one, install the skill: `/plugin marketplace add 0xdeafcafe/rush`, then `/plugin install rush-plugin-dev@rush`.
 
 A plugin can also take part in rush's screen, as far as you approved:

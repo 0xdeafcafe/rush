@@ -20,19 +20,28 @@ you, cheaply, and says once, briefly, what happened.
 
   rush watch pr [<n> | owner/name#<n> | <url>] [--until U] [--timeout D]
                     a pull request's checks; with no PR, this branch's
+  rush watch run [<branch> | <sha> | <run id> | owner/name@<ref>]
+                 [--workflow ci.yml] [--until U] [--timeout D]
+                    a GitHub Actions run, no pull request needed: with
+                    nothing, the newest run of each workflow on this
+                    checkout's commit; a branch, those on its head commit
+                    (waiting up to 2m for a fresh push's to start); a sha,
+                    those on it; a run id, that run
 
   --until done      every check finished, or it merged or closed (the default)
           fail      the first check to fail, else as done
           first     the first check to finish, or a new commit
           each      a line as each check finishes, then as done: for a monitor
   --timeout 25m     give up then, saying how far it got (0: never)
+  --workflow F      run only: that workflow's runs (its file name or id)
 
 It ends with: 0 all passed (or merged), 1 a check failed, 2 timed out
-(run it again), 3 closed, or GitHub couldn't be asked.
+(run it again), 3 closed or cancelled, or GitHub couldn't be asked.
 
 It asks GitHub through gh, signed in as the user, every 15s at first and
-every minute after 15m; every agent watching the same PR shares one answer,
-and an answer that hasn't changed costs none of the user's rate limit.
+every minute after 15m; every agent watching the same PR or run shares one
+answer, an answer that hasn't changed costs none of the user's rate limit,
+and when GitHub says the limit is spent it waits for it to reset.
 Run it as a background command where your harness has them, so it wakes
 you when it ends, and spend nothing while it waits.
 ";
@@ -116,6 +125,9 @@ pub fn watch_cmd_in(
         );
         return EXIT_ERROR;
     }
+    if args[0] == "run" {
+        return watch_run_cmd(env, &args[1..], stdout, stderr);
+    }
     if args[0] != "pr" {
         let _ = write!(
             stderr,
@@ -197,4 +209,83 @@ pub fn watch_cmd_in(
         let _ = w.flush();
     }));
     watch_pr(&o)
+}
+
+/// rush watch run with its args (after "run"), run in env.
+fn watch_run_cmd(
+    env: &Env,
+    args: &[String],
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> i32 {
+    // What to watch may come before or after the flags.
+    let mut what = String::new();
+    let mut rest = args;
+    if let Some(first) = rest.first()
+        && !first.is_empty()
+        && !first.starts_with('-')
+    {
+        what = first.clone();
+        rest = &rest[1..];
+    }
+    let mut fs = FlagSet::new("rush watch run");
+    fs.add("until", Kind::String, Until::Done.as_str());
+    fs.add("timeout", Kind::Duration, "25m0s");
+    fs.add("workflow", Kind::String, "");
+    let Ok(left) = fs.parse(rest, stderr) else {
+        return EXIT_ERROR;
+    };
+    if !left.is_empty() && what.is_empty() {
+        what = left[0].clone();
+    }
+    let until_word = fs.get("until").to_string();
+    let Some(until) = Until::parse(&until_word) else {
+        let _ = writeln!(
+            stderr,
+            "rush watch: --until is done, fail, first or each, not {}",
+            quote(&until_word)
+        );
+        return EXIT_ERROR;
+    };
+    let workflow = fs.get("workflow").trim().to_string();
+    if let Err(e) = crate::run::parse_arg(&what) {
+        let _ = writeln!(stderr, "rush watch: {e}");
+        return EXIT_ERROR;
+    }
+    crate::stop::on_signals();
+    let session = env.session.clone();
+    let log = move |kind: &str, f: Map<String, Value>| {
+        if session.is_empty() {
+            rush_events::log(kind, f)
+        } else {
+            log_session_event(&session, kind, f)
+        }
+    };
+    let target = match crate::run::resolve_run(Path::new(&env.dir), &what, &workflow) {
+        Ok(t) => t,
+        Err(e) => {
+            let mut f = Map::new();
+            f.insert("what".into(), what.clone().into());
+            f.insert("err".into(), e.clone().into());
+            log("watch-run-failed", f);
+            let _ = writeln!(stderr, "rush watch: {e}");
+            return EXIT_ERROR;
+        }
+    };
+    // Say writes each line as it's said.
+    let out = std::cell::RefCell::new(stdout);
+    let o = crate::run::RunOptions {
+        target: Some(target),
+        until,
+        // A negative timeout is never, as watch pr's is.
+        timeout: Duration::from_nanos(fs.duration("timeout").max(0) as u64),
+        say: Some(Box::new(move |s: &str| {
+            let mut w = out.borrow_mut();
+            let _ = writeln!(w, "{s}");
+            let _ = w.flush();
+        })),
+        log: Some(Box::new(log)),
+        ..Default::default()
+    };
+    crate::run::watch_run(&o)
 }
