@@ -15,7 +15,7 @@
 //! without a pull request: 0 all passed, 1 a job failed, 2 timed out, 3
 //! cancelled, gone, or GitHub couldn't be asked. When GitHub says the
 //! rate limit is spent, every watcher holds off until it resets
-//! (watch/gh/limited.json).
+//! (watch/gh/ratelimit.json, which also keeps what each answer said was left, so all slow down together as it runs low).
 //!
 //! Ported from internal/watch and cmd/rush/watch.go; run.rs is new.
 
@@ -30,7 +30,7 @@ pub mod run;
 pub mod stop;
 
 pub use cli::{Env, WATCH_USAGE, bundled_on, watch_cmd, watch_cmd_in};
-pub use gh::{Error, get, limited_until, raw, remaining};
+pub use gh::{Error, get, limited_until, raw, remaining, shared_remaining};
 pub use hook::{PROMPT, redirect};
 pub use live::{Live, live_for, task_id};
 pub use pr::{

@@ -270,7 +270,7 @@ pub fn get(path: &str, fresh: Duration) -> Result<(Vec<u8>, i64), Error> {
     if let Some(body) = &c.body
         && Time::now().sub_nanos(c.at) < fresh.as_nanos() as i128
     {
-        return Ok((body.clone(), c.remaining));
+        return Ok((body.clone(), least(c.remaining)));
     }
     // GitHub said the limit is spent: nobody asks until it resets.
     if limited_until().is_some() {
@@ -312,7 +312,7 @@ pub fn get(path: &str, fresh: Duration) -> Result<(Vec<u8>, i64), Error> {
                 || contains(&b.to_ascii_lowercase(), b"rate limit")
             {
                 LAST_REMAINING.store(0, Ordering::SeqCst);
-                set_limited(reset_at(&h, Time::now()));
+                set_limited(reset_at(&h, Time::now()), &h);
                 return Err(Error::Limited);
             }
             return Err(gh_error(status, b, &out.stderr, out.err.as_ref()));
@@ -322,10 +322,7 @@ pub fn get(path: &str, fresh: Duration) -> Result<(Vec<u8>, i64), Error> {
     if c.remaining >= 0 {
         LAST_REMAINING.store(c.remaining, Ordering::SeqCst);
     }
-    if c.remaining == 0 {
-        // That was the last: the next waits for the reset.
-        set_limited(reset_at(&h, Time::now()));
-    }
+    note_budget(&h);
     if let Ok(enc) = rush_state::json::to_vec(&c) {
         let tmp = with_ext(&file, ".tmp");
         if write_private(&tmp, &enc).is_ok() {
@@ -335,40 +332,107 @@ pub fn get(path: &str, fresh: Duration) -> Result<(Vec<u8>, i64), Error> {
     Ok((c.body.unwrap_or_default(), c.remaining))
 }
 
-/// Until when every watcher on this machine holds off asking GitHub, as
-/// the last one turned back was told: kept in watch/gh/limited.json.
+/// The user's rate limit as GitHub last said it to any watcher on this
+/// machine, kept in watch/gh/ratelimit.json so every watcher sees it: what
+/// was left and when it resets (from each answer's X-RateLimit-Remaining
+/// and X-RateLimit-Reset), and until when nobody asks, once GitHub said
+/// it's spent or to slow down.
 #[derive(Serialize, Deserialize, Default)]
-struct Limit {
+struct Budget {
     #[serde(default, deserialize_with = "time_or_zero")]
     until: Time,
+    #[serde(default)]
+    remaining: Option<i64>,
+    #[serde(default, deserialize_with = "time_or_zero")]
+    reset: Time,
 }
 
-fn limit_file() -> PathBuf {
-    root().join("gh").join("limited.json")
+fn budget_file() -> PathBuf {
+    root().join("gh").join("ratelimit.json")
+}
+
+fn read_budget() -> Budget {
+    std::fs::read(budget_file())
+        .ok()
+        .and_then(|b| rush_state::json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+fn write_budget(b: &Budget) {
+    let file = budget_file();
+    if let Some(d) = file.parent() {
+        let _ = mkdir_all(d);
+    }
+    if let Ok(enc) = rush_state::json::to_vec(b) {
+        // A file of this process's own, then renamed: watchers in other
+        // processes write it too.
+        let tmp = with_ext(&file, &format!(".{}.tmp", std::process::id()));
+        if write_private(&tmp, &enc).is_ok() {
+            let _ = std::fs::rename(&tmp, &file);
+        }
+    }
 }
 
 /// When GitHub's rate limit resets, if a watcher was told it is spent and
 /// it hasn't reset yet.
 pub fn limited_until() -> Option<Time> {
-    let l: Limit = std::fs::read(limit_file())
-        .ok()
-        .and_then(|b| rush_state::json::from_slice(&b).ok())
-        .unwrap_or_default();
-    (l.until > Time::now()).then_some(l.until)
+    let b = read_budget();
+    (b.until > Time::now()).then_some(b.until)
+}
+
+/// What's left of the rate limit as GitHub last told any watcher, -1 when
+/// unknown or reset since.
+pub fn shared_remaining() -> i64 {
+    let b = read_budget();
+    match b.remaining {
+        Some(r) if b.reset > Time::now() => r,
+        _ => -1,
+    }
+}
+
+/// The lower of what one answer said was left and what the last answer to
+/// any watcher said, so every watcher slows down together.
+fn least(own: i64) -> i64 {
+    let shared = shared_remaining();
+    if shared >= 0 && (own < 0 || shared < own) {
+        shared
+    } else {
+        own
+    }
+}
+
+/// Keeps what an answer's headers said of the rate limit for every watcher.
+fn note_budget(h: &HashMap<String, String>) {
+    let Some(left) = h
+        .get("x-ratelimit-remaining")
+        .and_then(|v| v.trim().parse::<i64>().ok())
+    else {
+        return;
+    };
+    let mut b = read_budget();
+    b.remaining = Some(left);
+    if let Some(r) = h
+        .get("x-ratelimit-reset")
+        .and_then(|v| v.trim().parse::<i64>().ok())
+    {
+        b.reset = Time::from_unix(r, 0);
+    }
+    if left == 0 {
+        // That was the last: the next waits for the reset.
+        b.until = reset_at(h, Time::now());
+    }
+    write_budget(&b);
 }
 
 /// Holds every watcher off until then.
-fn set_limited(until: Time) {
-    let file = limit_file();
-    if let Some(d) = file.parent() {
-        let _ = mkdir_all(d);
+fn set_limited(until: Time, h: &HashMap<String, String>) {
+    let mut b = read_budget();
+    b.until = until;
+    if h.get("x-ratelimit-remaining").map(String::as_str) == Some("0") {
+        b.remaining = Some(0);
+        b.reset = until;
     }
-    if let Ok(enc) = rush_state::json::to_vec(&Limit { until }) {
-        let tmp = with_ext(&file, ".tmp");
-        if write_private(&tmp, &enc).is_ok() {
-            let _ = std::fs::rename(&tmp, &file);
-        }
-    }
+    write_budget(&b);
 }
 
 /// When to ask again after GitHub turned a call back: Retry-After's

@@ -327,6 +327,37 @@ fn the_last_of_the_limit_holds_off_until_its_reset() {
     set_thread_gh(None);
 }
 
+#[test]
+fn every_watcher_sees_the_lowest_budget_left() {
+    let _home = home();
+    let reset = Time::now() + Duration::from_secs(1800);
+    let reset_unix = (reset.unix_nanos() / 1_000_000_000) as i64;
+    fake_gh(move |args| {
+        let left = if args.last().unwrap().ends_with("/a") {
+            4000
+        } else {
+            40
+        };
+        GhOutput {
+            stdout: format!(
+                "HTTP/2.0 200 OK\r\nEtag: \"e\"\r\nX-Ratelimit-Remaining: {left}\r\nX-Ratelimit-Reset: {reset_unix}\r\n\r\n{{}}"
+            )
+            .into_bytes(),
+            ..Default::default()
+        }
+    });
+    let hour = Duration::from_secs(3600);
+    assert_eq!(get("repos/o/r/a", hour).unwrap().1, 4000);
+    // Another watcher's answer says the budget is nearly gone…
+    assert_eq!(get("repos/o/r/b", hour).unwrap().1, 40);
+    assert_eq!(shared_remaining(), 40);
+    // …so the first, reading its own kept answer, slows down too.
+    let (_, left) = get("repos/o/r/a", hour).unwrap();
+    assert_eq!(left, 40);
+    assert!(interval(Duration::ZERO, left) >= Duration::from_secs(300));
+    set_thread_gh(None);
+}
+
 fn wr(id: i64, status: &str, jobs: &[&str]) -> WorkflowRun {
     WorkflowRun {
         id,
