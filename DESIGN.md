@@ -2283,6 +2283,77 @@ left to strip. Where the memory goes, and what the host module does about it:
   entirely off won't start. A network proxy (`ANTHROPIC_BASE_URL`) gains
   visibility, not speed.
 
+## Background processes' memory (Rust-only)
+
+What rush keeps running beside the view, measured 2026-11-02 on the
+installed rush (0.1.0-beta.5; physical footprint, macOS 27, Apple
+silicon) on a home of 1,244 rush sessions (987 asleep or stopped) and
+about 900 rows in the list:
+
+| process                         | footprint | threads |
+|---------------------------------|-----------|---------|
+| `rush menubar feed`             | 31 MB     | 5       |
+| `rush serve`                    | 12 MB     | 11      |
+| `rush host run <id>`, each      | 5–6 MB    | 11–13   |
+| `rush watch run`                | 3 MB      | 2       |
+
+- **The floor.** Any rush process is about 3 MB (`rush watch run`): the
+  binary's own data and page tables. It links AppKit, AVFoundation,
+  Speech and the rest for the menu bar app and push-to-talk; a C program
+  linking the same frameworks sits at 1.9 MB idle against 1.7 MB with only
+  CoreFoundation, CoreServices and IOKit, so a separate small binary for
+  the background commands would save about 0.3 MB a process.
+- **Thread stacks** are not where the memory is: pages a thread never
+  touched aren't footprint. The feed's 5 stacks hold 128 KB, a host's 11
+  hold 400 KB.
+- **The feed** runs the list's own loader (rush-fleet), so it holds what
+  the list holds of every row. `MallocStackLogging=lite` and
+  `malloc_history -allBySize` on a second feed: ~40 MB live at its peak,
+  ~12 MB of it rows of rush's sessions (the loader's idle rows, the whole
+  reading's table of those asleep or stopped, and the rows made from
+  them), 4.5 MB their infos as listed (rush-host's `Info` and the fleet's
+  `HostInfo`, each session twice), 4.3 MB the spend scanner's state per
+  transcript, 3.7 MB subagent runs counted.
+
+What changed, each with its number:
+
+- **A whole reading's idle table is boxed** (rush-fleet `partial.rs`
+  `IdleEntry`): a slot held a session's info and row inline, 2,392 bytes,
+  and 987 sessions take 2,048 slots, a 4.9 MB table. Boxed, a slot is 32
+  bytes: 66 KB of table and 987 boxes, 2.6 MB; 2.3 MB less in the feed
+  and in the list (`whole_reading_boxes_its_idle_rows`).
+- **The feed keeps only the rows it can show** (rush-menubar
+  `source::live_rows`), those working or waiting on you, the only ones the
+  menu reads, and lets go of the reading before it waits: 900 rows, 5
+  working, held 496,690 B, now 3,494 B (`tests/retained.rs`, run without
+  the harness so it prints).
+- **serve's notification watch lets go of its listing before it sleeps**
+  (rush-remote `watch.rs`): every session's info, read every 4 seconds,
+  was held through the sleep: 1,244 sessions, 2,378,662 B
+  (`tests/listing.rs`).
+
+Found, not done:
+
+- The feed needs only the rows working or waiting, yet reads every row as
+  the list does. The loader's skip_past would cut most of it, but changes
+  the menu: a headless run linked to a closed conversation is folded into
+  that conversation's row today and would show as working, and Copilot's
+  cloud sessions, listed among the past ones, would stop counting as
+  live. A reading of rush's sessions that are awake alone wants that
+  decided first.
+- The feed prices every row's transcript; only a working row's repo
+  (where its transcript says it last worked) reaches the menu. Pricing
+  only rows with a process would drop the scanner's state for some 2,000
+  transcripts, but a row that starts working shows its host's folder for
+  its first reading (up to 2 s).
+- Each rush session's info is held twice, as rush-host's `Info` and the
+  fleet's `HostInfo` (4.5 MB here); `HostInfo` could share `Info`.
+- serve's watch reads all 1,244 info files every 4 seconds; a kept Lister
+  would read again only the changed ones (CPU), for ~2 MB of infos kept.
+- A host's heap is mostly its replay (`RING_MAX`, 8 MB at most); its tmp
+  trim sleeps on a thread of its own that a timer could replace (left to
+  the work on threads).
+
 ## Milestones (full plan: PLAN.md)
 
 1. **Read-only Claude** (this): the agent list (header, rows, summaries,
