@@ -8,6 +8,8 @@
 //! Reads ~/.claude and rush's state read only, as rush-fleet's load bench
 //! does; it brings back no lost session (a lister that follows).
 //! Without RUSH_REAL it prints the types' sizes and nothing more.
+//! RUSH_BENCH_OUT=<file> also writes the numbers there, a line each, for
+//! CI's footprint job, which runs it on a made-up home (tools/footprint).
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
@@ -68,6 +70,22 @@ fn heap_allocs<T: Clone>(t: &T) -> (usize, usize) {
     let a = LIVE.load(Relaxed).saturating_sub(live);
     drop(c);
     (n, a)
+}
+
+/// Appends a number to $RUSH_BENCH_OUT as `name<TAB>kind<TAB>value`, for
+/// CI's footprint job (tools/footprint/measure.py reads it).
+fn record(name: &str, kind: &str, v: usize) {
+    use std::io::Write;
+    let Some(p) = std::env::var_os("RUSH_BENCH_OUT") else {
+        return;
+    };
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(p)
+    {
+        let _ = writeln!(f, "{name}\t{kind}\t{v}");
+    }
 }
 
 fn main() {
@@ -139,6 +157,11 @@ fn main() {
         allocs / n,
     );
     println!("a reading made {made} allocations");
+    record("list: rows", "info", snap.agents.len());
+    record("list: loader and reading, retained", "heap", held);
+    record("list: rows, retained", "heap", rows);
+    record("list: rows, allocations kept", "allocs", allocs);
+    record("list: a reading, allocations made", "allocs", made);
     let jobs: usize = snap.agents.iter().map(|a| heap_of(&a.job)).sum();
     let spend: usize = snap.agents.iter().map(|a| heap_of(&a.spend)).sum();
     println!(
@@ -147,11 +170,14 @@ fn main() {
         spend as f64 / MIB,
     );
     drop(snap);
+    let (alone, kept) = (NOW.load(Relaxed) - base, LIVE.load(Relaxed) - live);
     println!(
         "the loader alone retains {:.1} MiB in {} allocations",
-        (NOW.load(Relaxed) - base) as f64 / MIB,
-        LIVE.load(Relaxed) - live,
+        alone as f64 / MIB,
+        kept,
     );
+    record("list: loader alone, retained", "heap", alone);
+    record("list: loader alone, allocations kept", "allocs", kept);
     // As the menu bar's feed reads: past conversations left out.
     let (base, live) = (NOW.load(Relaxed), LIVE.load(Relaxed));
     let reg = Registry::new();
@@ -165,12 +191,24 @@ fn main() {
     let snap = f.load_unsampled(now());
     f.scan(&snap.agents);
     drop(snap);
+    let (alone, kept) = (NOW.load(Relaxed) - base, LIVE.load(Relaxed) - live);
     println!(
         "past conversations left out (the feed's): {rows} rows; the loader alone retains {:.1} MiB in {} allocations",
-        (NOW.load(Relaxed) - base) as f64 / MIB,
-        LIVE.load(Relaxed) - live,
+        alone as f64 / MIB,
+        kept,
     );
     drop(f);
+    record("list, past left out (the feed's): rows", "info", rows);
+    record(
+        "list, past left out (the feed's): loader alone, retained",
+        "heap",
+        alone,
+    );
+    record(
+        "list, past left out (the feed's): loader alone, allocations kept",
+        "allocs",
+        kept,
+    );
     if let Some(secs) = std::env::var("RUSH_BENCH_PAUSE")
         .ok()
         .and_then(|s| s.parse().ok())
