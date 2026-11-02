@@ -69,11 +69,10 @@ pub struct SubagentRuns {
     seq: u64,
     /// Calls still without their result: only then are results looked at.
     unmet: usize,
-    /// By meta file.
-    metas: HashMap<PathBuf, RunMeta>,
     dir_mod: Option<std::time::SystemTime>,
-    /// The meta files as of dir_mod.
-    names: Vec<PathBuf>,
+    /// The runs, by their meta files as of dir_mod, in their order: each
+    /// file's path is its id's, not kept.
+    metas: Vec<RunMeta>,
     listed: Ms,
     /// Quiet runs' transcripts last looked at.
     quiet_at: Ms,
@@ -221,6 +220,13 @@ impl SubagentRuns {
         }
     }
 
+    /// What's known of the run with this meta file.
+    #[cfg(test)]
+    fn meta(&self, p: &Path) -> &RunMeta {
+        let id = meta_id(p);
+        self.metas.iter().find(|m| m.id == id).expect("listed")
+    }
+
     fn dir(&self) -> PathBuf {
         crate::transcript::subagents_dir(Path::new(&self.path))
     }
@@ -233,7 +239,7 @@ impl SubagentRuns {
     fn list(&mut self, lazy: bool, now: Ms) -> (Vec<SubagentRun>, bool) {
         let dir = self.dir();
         let Ok(st) = std::fs::metadata(&dir) else {
-            self.names.clear();
+            self.metas.clear();
             return (Vec::new(), false);
         };
         // Runs work in their session's process: once it's gone, none
@@ -244,7 +250,22 @@ impl SubagentRuns {
         let dir_mod = st.modified().ok();
         let fresh = dir_mod == self.dir_mod && (still || now - self.listed <= LOOK_AGAIN);
         if !fresh {
-            self.names = meta_files(&dir);
+            // What was known of each run still listed stays.
+            let mut was: HashMap<String, RunMeta> = std::mem::take(&mut self.metas)
+                .into_iter()
+                .map(|m| (m.id.clone(), m))
+                .collect();
+            self.metas = meta_files(&dir)
+                .iter()
+                .map(|p| {
+                    let id = meta_id(p);
+                    was.remove(&id).unwrap_or(RunMeta {
+                        depth: 1,
+                        id,
+                        ..RunMeta::default()
+                    })
+                })
+                .collect();
             self.dir_mod = dir_mod;
             self.listed = now;
         }
@@ -255,14 +276,9 @@ impl SubagentRuns {
             self.quiet_at = now;
         }
         quiet = quiet || self.gone && !still;
-        let mut out = Vec::with_capacity(self.names.len());
+        let mut out = Vec::with_capacity(self.metas.len());
         let mut unread = false;
-        for p in self.names.clone() {
-            let mut m = self.metas.get(&p).cloned().unwrap_or_else(|| RunMeta {
-                depth: 1,
-                id: meta_id(&p),
-                ..RunMeta::default()
-            });
+        for m in &mut self.metas {
             let run_path = dir.join(format!("agent-{}.jsonl", m.id));
             // A run quiet past RUN_STALE is looked at again only every
             // 10s: a session can have hundreds, and each stat on every
@@ -280,12 +296,12 @@ impl SubagentRuns {
                     mod_time: m.run_mod,
                     ..SubagentRun::default()
                 });
-                self.metas.insert(p, m);
                 continue;
             }
             // A meta file is written once, as its run starts: one read
             // whole isn't looked at again.
             if !m.read || m.tool_use.is_empty() {
+                let p = dir.join(format!("agent-{}.meta.json", m.id));
                 let Ok(fi) = std::fs::metadata(&p) else {
                     continue;
                 };
@@ -316,7 +332,6 @@ impl SubagentRuns {
                 path: run_path.to_string_lossy().into_owned(),
                 mod_time: m.run_mod,
             });
-            self.metas.insert(p, m);
         }
         (out, unread)
     }
@@ -1093,13 +1108,14 @@ mod tests {
             r.files.as_ref().unwrap().get(&main).is_none(),
             "the transcript was read"
         );
-        assert!(!r.metas[&meta].read, "a quiet run's meta file was read");
+        assert!(!r.meta(&meta).read, "a quiet run's meta file was read");
         let n = SystemTime::now();
         set_mtime(&run, n);
         r.quiet_at = 0; // quiet runs' 10s are up
         assert_eq!(r.stats(&m, ms(n)).direct, 1, "written again");
         assert_eq!(
-            r.metas[&meta].tool_use, "t1",
+            r.meta(&meta).tool_use,
+            "t1",
             "written again, its meta file is unread"
         );
     }
@@ -1132,17 +1148,17 @@ mod tests {
         r.gone = true;
         r.stats(&m, ms(n));
         assert_eq!(
-            r.metas[&meta].run_mod,
+            r.meta(&meta).run_mod,
             ms(last),
             "gone: not looked at once more"
         );
         set_mtime(&p, n);
         r.quiet_at = 0;
         r.stats(&m, ms(n));
-        assert_eq!(r.metas[&meta].run_mod, ms(last), "gone: looked at again");
+        assert_eq!(r.meta(&meta).run_mod, ms(last), "gone: looked at again");
         r.gone = false;
         r.stats(&m, ms(n));
-        assert_eq!(r.metas[&meta].run_mod, ms(n), "back: not looked at");
+        assert_eq!(r.meta(&meta).run_mod, ms(n), "back: not looked at");
     }
 
     // subruns_test.go:191 (TestMayHaveStarted)
