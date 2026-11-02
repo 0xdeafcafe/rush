@@ -25,6 +25,7 @@ use crate::lines::{Line, decode};
 use crate::op::Op;
 use crate::paths::{dir, new_session_id, root, short_id, sock_path};
 use crate::wire::{Away, BinStamp, Branch, Config, Info};
+use rush_fleet::HostInfo;
 
 /// What a client's calls fail with: its text is Go's.
 #[derive(Debug)]
@@ -346,8 +347,9 @@ pub fn list() -> Vec<Info> {
     Lister::default().list()
 }
 
-/// The sessions as the list last listed them, kept as fresh as its
-/// watcher keeps the list, so nothing is read for them; every session's
+/// The sessions awake (neither stopped, asleep nor lost) as the list last
+/// listed them, kept as fresh as its watcher keeps the list, so nothing is
+/// read for them; every session's
 /// info read now, as [`list`] does, where no list has listed them. For
 /// what asks every few seconds: list reads all of them, a thousand files
 /// and more, each time.
@@ -373,6 +375,11 @@ struct Listed {
     /// `info` is the lost one: the file is read again if its host is
     /// ever found alive.
     lost: bool,
+    /// Listed for the list (Lister::list_hosts) and not awake: `info` is
+    /// let go, and the session is its HostInfo in the last such listing.
+    hosted: bool,
+    /// When its info says it was last updated, for the listing's order.
+    updated: Time,
 }
 
 /// Says whether a path is unchanged since a listing numbered at looked
@@ -399,6 +406,11 @@ pub struct Lister {
     /// A sweep asks again a host whose last move failed: you asked.
     /// Rust-only.
     pub retry: bool,
+    /// The last listing for the list (list_hosts): every session as a
+    /// HostInfo, where each is by id, and the Infos of those awake.
+    hosts: Option<Arc<Vec<HostInfo>>>,
+    host_at: HashMap<String, usize>,
+    awake_last: Option<Arc<Vec<Arc<Info>>>>,
 }
 
 impl Lister {
@@ -487,10 +499,12 @@ impl Lister {
                         Listed {
                             mod_: m,
                             size,
+                            updated: info.as_ref().map_or(Time::default(), |i| i.updated_at),
                             info,
                             at: 0,
                             dead,
                             lost: false,
+                            hosted: false,
                         },
                     );
                     same = false;
@@ -548,6 +562,192 @@ impl Lister {
         out
     }
 
+    /// The listing as the list reads it (hosts.rs's Sessions), as
+    /// list_trusting makes it: every session as a HostInfo, made from its
+    /// info by conv, and the Infos of those awake (neither stopped, asleep
+    /// nor lost), which are all a sweep or the guard look at. Rust-only: a
+    /// session not awake keeps only its HostInfo, the Info it was made from
+    /// let go, so each is held once, not twice (most of a home's sessions,
+    /// 987 of 1,244 here); one found gone is read again to be lost.
+    pub(crate) fn list_hosts(
+        &mut self,
+        fresh: &dyn Fn(&Path, u64) -> bool,
+        at: u64,
+        conv: fn(&Info) -> HostInfo,
+    ) -> (Arc<Vec<Arc<Info>>>, Arc<Vec<HostInfo>>) {
+        self.at = at;
+        let trust = |p: &Path, at: u64| fresh(p, at);
+        let mut same = self.hosts.is_some();
+        if self.ids.is_none() || !trust(&root(), self.ids_at) {
+            let mut ids: Vec<String> = std::fs::read_dir(root())
+                .map(|es| {
+                    es.flatten()
+                        .map(|e| e.file_name().to_string_lossy().into_owned())
+                        .collect()
+                })
+                .unwrap_or_default();
+            ids.sort();
+            same = same && self.ids.as_ref() == Some(&ids);
+            self.ids = Some(ids);
+            self.ids_at = self.at;
+        }
+        let mut stand = Vec::new();
+        let mut n = 0;
+        let ids = self.ids.clone().unwrap_or_default();
+        let trusted: Vec<bool> = ids
+            .iter()
+            .map(|id| self.infos.get(id).is_some_and(|c| trust(&dir(id), c.at)))
+            .collect();
+        let look: Vec<&String> = ids
+            .iter()
+            .zip(&trusted)
+            .filter(|(_, t)| !**t)
+            .map(|(id, _)| id)
+            .collect();
+        let (infos, awake) = (&self.infos, self.awake);
+        let mut looked = rush_core::par::map_with(
+            look,
+            || (),
+            |_, id| {
+                let st = std::fs::metadata(dir(id).join("info.json")).ok()?;
+                let (m, size) = (st.modified().ok(), st.len());
+                let changed = infos.get(id).is_none_or(|c| c.mod_ != m || c.size != size);
+                let read = changed.then(|| read_kept(id, awake));
+                Some((m, size, read))
+            },
+        )
+        .into_iter();
+        let prev = self.hosts.clone().unwrap_or_default();
+        for (id, trusted) in ids.iter().zip(trusted) {
+            let known = self.infos.contains_key(id);
+            if !trusted {
+                let Some((m, size, read)) = looked.next().flatten() else {
+                    if known {
+                        self.infos.remove(id);
+                        same = false;
+                    }
+                    continue;
+                };
+                if let Some(info) = read {
+                    let dead = self.infos.get(id).is_some_and(|c| c.dead);
+                    self.infos.insert(
+                        id.clone(),
+                        Listed {
+                            mod_: m,
+                            size,
+                            updated: info.as_ref().map_or(Time::default(), |i| i.updated_at),
+                            info,
+                            at: 0,
+                            dead,
+                            lost: false,
+                            hosted: false,
+                        },
+                    );
+                    same = false;
+                }
+                if let Some(c) = self.infos.get_mut(id) {
+                    c.at = self.at;
+                }
+            }
+            let Some(c) = self.infos.get_mut(id) else {
+                continue;
+            };
+            // What's asked of it: its Info's, else its HostInfo's.
+            let kept = self.host_at.get(id).and_then(|&i| prev.get(i));
+            let (stopped, pid, remote) = match (&c.info, c.hosted.then_some(kept).flatten()) {
+                (Some(i), _) => (i.state == "stopped", i.host_pid, i.is_remote()),
+                (None, Some(h)) => (h.state == "stopped", i64::from(h.host_pid), h.is_remote()),
+                (None, None) => continue,
+            };
+            // A lost one wasn't stopped when it was lost.
+            let dead = (c.lost || !stopped) && !crate::alive(pid);
+            if c.lost && !dead {
+                c.info = read_kept(id, awake); // its host is back: as it is
+                c.hosted = false;
+                c.lost = false;
+                if let Some(i) = &c.info {
+                    c.updated = i.updated_at;
+                } else {
+                    // Not read (or not kept): looked at afresh next time.
+                    (c.mod_, c.at) = (None, 0);
+                }
+            }
+            same = same && dead == c.dead;
+            c.dead = dead;
+            if dead && !c.lost {
+                // Its info, read again when only its HostInfo was kept:
+                // the file is as it was when that was made.
+                let info = match &c.info {
+                    Some(i) => Some(i.clone()),
+                    None => read_kept(id, awake),
+                };
+                if let Some(info) = info {
+                    let mut lost = Info::clone(&info);
+                    crate::revive::lose(&mut lost);
+                    c.updated = lost.updated_at;
+                    c.info = Some(Arc::new(lost));
+                    c.hosted = false;
+                    c.lost = true;
+                }
+            }
+            if c.info.is_none() && !c.hosted {
+                continue;
+            }
+            if remote {
+                stand.push(pid as i32);
+            }
+            n += 1;
+        }
+        rush_sys::proc::protect(&stand); // the attach process behind them is no agent's to signal
+        if same
+            && n == prev.len()
+            && let Some(awake) = &self.awake_last
+        {
+            return (awake.clone(), prev);
+        }
+        let mut out: Vec<(Time, &String, HostInfo, Option<Arc<Info>>)> = Vec::with_capacity(n);
+        for id in &ids {
+            let Some(c) = self.infos.get_mut(id) else {
+                continue;
+            };
+            let h = match &c.info {
+                Some(i) => conv(i),
+                None if c.hosted => match self.host_at.get(id).and_then(|&i| prev.get(i)) {
+                    Some(h) => h.clone(),
+                    None => continue,
+                },
+                None => continue,
+            };
+            // One awake stays an Info too; the rest is its HostInfo only.
+            let awake = match c.info.take() {
+                Some(i) if i.state != "stopped" && !i.sleeping && !c.lost => {
+                    c.info = Some(i.clone());
+                    Some(i)
+                }
+                Some(_) | None => {
+                    c.hosted = true;
+                    None
+                }
+            };
+            out.push((c.updated, id, h, awake));
+        }
+        out.sort_by_key(|(at, ..)| std::cmp::Reverse(*at));
+        self.host_at = out
+            .iter()
+            .enumerate()
+            .map(|(i, (_, id, ..))| ((*id).clone(), i))
+            .collect();
+        let (mut hosts, mut awake) = (Vec::with_capacity(out.len()), Vec::new());
+        for (_, _, h, a) in out {
+            hosts.push(h);
+            awake.extend(a);
+        }
+        let (hosts, awake) = (Arc::new(hosts), Arc::new(awake));
+        self.hosts = Some(hosts.clone());
+        self.awake_last = Some(awake.clone());
+        (awake, hosts)
+    }
+
     /// How many live sessions' hosts are on an older rush than the one
     /// installed, how many of those it moved onto it (when restart_due is
     /// set) because they were between turns, and how many can't be moved:
@@ -588,9 +788,10 @@ impl Lister {
     }
 }
 
-/// The last listing the list made (hosts.rs's Sessions): kept as fresh as
-/// its watcher keeps the list, so a sweep needn't look at every session
-/// again.
+/// The last listing the list made (hosts.rs's Sessions), of the sessions
+/// awake (neither stopped, asleep nor lost: all a sweep or the guard look
+/// at): kept as fresh as its watcher keeps the list, so a sweep needn't
+/// look at every session again.
 static LISTED: Mutex<Option<Arc<Vec<Arc<Info>>>>> = Mutex::new(None);
 
 /// Keeps infos as the last listing the list made.

@@ -28,16 +28,12 @@ const REVIVE_WITHIN: Ms = 24 * 60 * 60 * 1000;
 /// bringing back.
 const REVIVE_LOOK: Ms = 30 * 1000;
 
-/// A listing, and what it was made into for the list.
-type Made = (Arc<Vec<Arc<Info>>>, Arc<Vec<HostInfo>>);
-
 /// rush's sessions, as the list reads them.
 #[derive(Default)]
 pub struct Sessions {
+    /// Reads the sessions' infos, keeping each as its HostInfo (and as an
+    /// Info only while awake): Lister::list_hosts.
     lister: Lister,
-    /// The last listing and what it was made into, shared again while the
-    /// listing is.
-    last: Option<Made>,
     /// Whether the list is a rush's that follows another, asked each time:
     /// it brings back no lost session then, leaving that to the rush that
     /// leads (rush-ui's lead.rs). None: it never follows.
@@ -70,16 +66,9 @@ impl Sessions {
 
 impl Hosts for Sessions {
     fn list(&mut self, fresh: &dyn Fn(&Path, u64) -> bool, at: u64) -> Arc<Vec<HostInfo>> {
-        let infos = self.lister.list_trusting(fresh, at);
-        crate::client::listed(&infos);
-        if let Some((src, out)) = &self.last
-            && Arc::ptr_eq(src, &infos)
-        {
-            return out.clone();
-        }
-        let out = Arc::new(infos.iter().map(|i| host_info(i)).collect::<Vec<_>>());
-        self.last = Some((infos, out.clone()));
-        out
+        let (awake, hosts) = self.lister.list_hosts(fresh, at, host_info);
+        crate::client::listed(&awake);
+        hosts
     }
 
     fn config(&self, id: &str) -> Option<HostConfig> {
@@ -327,6 +316,44 @@ mod tests {
         let again = s.list(&|_, _| true, 2);
         assert!(Arc::ptr_eq(&got, &again));
         assert!(s.config("gone").is_none());
+    }
+
+    // A session not awake is listed from its HostInfo alone once read:
+    // listed again, it's as it was; its file changed, it's read again.
+    #[test]
+    fn keeps_each_session_once() {
+        let _h = Home::new();
+        let write = |id: &str, state: &str, name: &str, pid: i64, at: i64| {
+            std::fs::create_dir_all(dir(id)).unwrap();
+            let info = Info {
+                id: id.into(),
+                kind: "claude".into(),
+                state: state.into(),
+                name: name.into(),
+                host_pid: pid,
+                updated_at: rush_state::Time::from_ms(at),
+                ..Info::default()
+            };
+            std::fs::write(dir(id).join("info.json"), info.to_json()).unwrap();
+        };
+        let me = std::process::id() as i64;
+        write("done1", "stopped", "Done", 0, 1_000);
+        write("live1", "working", "Live", me, 2_000);
+        let mut s = Sessions::new();
+        let first = s.list(&|_, _| false, 1);
+        let names: Vec<&str> = first.iter().map(|h| h.name.as_str()).collect();
+        assert_eq!(names, ["Live", "Done"]);
+        // Looked at again, nothing changed: the same rows.
+        let again = s.list(&|_, _| false, 2);
+        assert_eq!(*again, *first);
+        // Its file changed: read again.
+        write("done1", "stopped", "Done again", 0, 3_000);
+        let names: Vec<String> = s
+            .list(&|_, _| false, 3)
+            .iter()
+            .map(|h| h.name.clone())
+            .collect();
+        assert_eq!(names, ["Done again", "Live"]);
     }
 
     /// A pid no process has: a child that has been waited for.
