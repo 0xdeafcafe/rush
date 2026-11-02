@@ -476,7 +476,6 @@ impl ShellRun {
     /// a summary of the run, the command and its code, then the summary.
     pub fn summary_text(&self, summary: &str) -> String {
         let mut s = self.head("A summary of a command I ran,");
-        s.push('\n');
         s.push_str(summary.trim());
         s
     }

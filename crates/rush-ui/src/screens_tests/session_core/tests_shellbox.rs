@@ -44,22 +44,29 @@ fn replied(fake: &Arc<Fake>) -> Model {
 
 /// The same, its runs kept on disk when keep.
 fn replied_keeping(fake: &Arc<Fake>, keep: bool) -> Model {
-    replied_as(fake, keep, "plain")
+    replied_as(fake, keep, false)
 }
 
 /// The same in a session rush hosts, what's sent to it a Send to fake.
 fn replied_hosted(fake: &Arc<Fake>) -> Model {
-    fake.host(KEY);
-    let mut m = replied_as(fake, false, "steer");
-    super::live::sync(&mut m);
+    let mut m = replied_as(fake, false, true);
     assert!(conn(&mut m, KEY).hosted(), "the link is open");
     m
 }
 
-fn replied_as(fake: &Arc<Fake>, keep: bool, kind: &str) -> Model {
+fn replied_as(fake: &Arc<Fake>, keep: bool, host: bool) -> Model {
     shellbox::set_fake(Some(printed));
     shellbox::set_keep(keep);
+    let kind = if host { "steer" } else { "plain" };
+    if host {
+        fake.host(KEY);
+    }
     let mut m = open(agent(kind, State::Idle), fake, 120, 40);
+    if host {
+        // The link open first: it takes the conversation as its host has
+        // it (nothing), and this turn goes in after.
+        super::live::sync(&mut m);
+    }
     crate::accounts::use_store(&mut m, rush_state::Store::default());
     crate::accounts::accounts(&mut m).read_only = true;
     core(&mut m).hide_map = true;
@@ -85,6 +92,7 @@ fn replied_as(fake: &Arc<Fake>, keep: bool, kind: &str) -> Model {
         }),
         now - 58_000,
     );
+    m.session.as_mut().unwrap().read = true;
     let _ = screen(&mut m);
     m
 }

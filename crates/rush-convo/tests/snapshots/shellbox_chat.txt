@@ -1,0 +1,27 @@
+              |                                         ╭────────────────────╮
+              |                                         │ how do I clean up? │
+              |                                         ╰────────────── 22:00╯
+              | ╭─────────────────╮
+              | │ Remove the key: │
+              | ╰ Agent ──────────╯
+t1:sh:0:0     | ╭─ shell · /work/… ─ ✎ edit  ⧉ copy ─╮
+              | │ $ rm                               │
+              | │   ~/Desktop/DeveloperIDApplication │
+              | │   .p12                             │
+              | ├────────────────────────────────────┤
+              | │ removed                            │
+              | ╰─ ✓ exit 0 · 0.1s ── →  ✎  ≈  ↻  ✕ ─╯
+              | ╭─────────────╮
+              | │ Then check: │
+              | ╰ Agent ──────╯
+t1:sh:0:1     | ╭─ shell ·… ─ ▶ run  ✎ edit  ⧉ copy ─╮
+              | │ $ cargo test                       │
+              | ╰────────────────────────────────────╯
+              | ╭───────────────────╮
+              | │ Then you're done. │
+t1            | ╰ Agent · 22:00 ────╯
+t1:bang:1790200812000|                         ╭─ ! shell · /wor… ─ ✎ edit  ⧉ copy ─╮
+              |                         │ $ git status                       │
+              |                         ├────────────────────────────────────┤
+              |                         │ clean                              │
+              |                         ╰─ ✓ exit 0 · 0.3s ── →  ✎  ≈  ↻  ✕ ─╯

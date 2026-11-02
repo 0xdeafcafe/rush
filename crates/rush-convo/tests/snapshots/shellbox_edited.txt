@@ -1,0 +1,12 @@
+editing
+t1:sh:0:0     |▏ ╭─ shell · editing · /work/app ─────────────────────────────╮
+              |▍ │ $ rm -i ~/Desktop/DeveloperIDApplication.p12              │
+              |▍ │ $ ls ~/Desktop                                            │
+              |▍ ╰─ enter runs it · ⇧enter new line · esc as it was ─────────╯
+edited
+t1:sh:0:0     |▍ ╭─ shell · edited · /work/app ───────────── ✎ edit  ⧉ copy ─╮
+              |▍ │ $ rm -i ~/Desktop/DeveloperIDApplication.p12              │
+              |▍ │ $ ls ~/Desktop                                            │
+              |▍ ├───────────────────────────────────────────────────────────┤
+              |▍ │ removed                                                   │
+              |▍ ╰─ ✓ exit 0 · 0.1s ────── → send  ✎ draft  ≈ summary  ↻  ✕ ─╯

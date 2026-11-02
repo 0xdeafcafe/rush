@@ -1,0 +1,14 @@
+before
+t1:sh:0:0     |▍ ╭─ shell · /work/app ─────────────── ▶ run  ✎ edit  ⧉ copy ─╮
+              |▍ │ $ rm ~/Desktop/DeveloperIDApplication.p12                 │
+              |▍ ╰───────────────────────────────────────────────────────────╯
+picked
+t1:sh:0:0     |▏ ╭─ shell · /work/app ─────────────── ▶ run  ✎ edit  ⧉ copy ─╮
+              |▍ │ $ rm ~/Desktop/DeveloperIDApplication.p12                 │
+              |▍ ╰─ enter runs it · e edits it · c copies it ────────────────╯
+run
+t1:sh:0:0     |▍ ╭─ shell · /work/app ────────────────────── ✎ edit  ⧉ copy ─╮
+              |▍ │ $ rm ~/Desktop/DeveloperIDApplication.p12                 │
+              |▍ ├───────────────────────────────────────────────────────────┤
+              |▍ │ removed                                                   │
+              |▍ ╰─ ✓ exit 0 · 0.1s ────── → send  ✎ draft  ≈ summary  ↻  ✕ ─╯

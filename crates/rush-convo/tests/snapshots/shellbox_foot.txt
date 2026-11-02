@@ -1,0 +1,45 @@
+wide
+t1:sh:0:0     |▍ ╭─ shell · /work/app ──────────────────────────────────────────────── ✎ edit  ⧉ copy ─╮
+              |▍ │ $ rm ~/Desktop/DeveloperIDApplication.p12                                           │
+              |▍ ├─────────────────────────────────────────────────────────────────────────────────────┤
+              |▍ │ removed                                                                             │
+              |▍ ╰─ ✓ exit 0 · 0.1s ───────────────── → send to agent  ✎ draft  ≈ summary  ↻ again  ✕ ─╯
+sent
+t1:sh:0:0     |▍ ╭─ shell · /work/app ────────────────────── ✎ edit  ⧉ copy ─╮
+              |▍ │ $ rm ~/Desktop/DeveloperIDApplication.p12                 │
+              |▍ ├───────────────────────────────────────────────────────────┤
+              |▍ │ removed                                                   │
+              |▍ ╰─ ✓ exit 0 · 0.1s ────── ✓ sent  ✎ draft  ≈ summary  ↻  ✕ ─╯
+drafted
+t1:sh:0:0     |▍ ╭─ shell · /work/app ────────────────────── ✎ edit  ⧉ copy ─╮
+              |▍ │ $ rm ~/Desktop/DeveloperIDApplication.p12                 │
+              |▍ ├───────────────────────────────────────────────────────────┤
+              |▍ │ removed                                                   │
+              |▍ ╰─ ✓ exit 0 · 0.1s ───── → send  ✓ in box  ≈ summary  ↻  ✕ ─╯
+summing
+t1:sh:0:0     |▍ ╭─ shell · /work/app ────────────────────── ✎ edit  ⧉ copy ─╮
+              |▍ │ $ rm ~/Desktop/DeveloperIDApplication.p12                 │
+              |▍ ├───────────────────────────────────────────────────────────┤
+              |▍ │ removed                                                   │
+              |▍ ╰─ ✓ exit 0 · 0.1s ───── → send  ✎ draft  ≈ summing…  ↻  ✕ ─╯
+summary sent
+t1:sh:0:0     |▍ ╭─ shell · /work/app ────────────────────── ✎ edit  ⧉ copy ─╮
+              |▍ │ $ rm ~/Desktop/DeveloperIDApplication.p12                 │
+              |▍ ├───────────────────────────────────────────────────────────┤
+              |▍ │ removed                                                   │
+              |▍ ╰─ ✓ exit 0 · 0.1s ────── → send  ✎ draft  ✓ summary  ↻  ✕ ─╯
+summary failed
+t1:sh:0:0     |▍ ╭─ shell · /work/app ────────────────────── ✎ edit  ⧉ copy ─╮
+              |▍ │ $ rm ~/Desktop/DeveloperIDApplication.p12                 │
+              |▍ ├───────────────────────────────────────────────────────────┤
+              |▍ │ removed                                                   │
+              |▍ │ ✗ couldn't sum it up: timed out                           │
+              |▍ ╰─ ✓ exit 0 · 0.1s ────── → send  ✎ draft  ≈ summary  ↻  ✕ ─╯
+narrow
+t1:sh:0:0     |▍ ╭─ shell · /work… ─ ✎ edit  ⧉ copy ─╮
+              |▍ │ $ rm                              │
+              |▍ │   ~/Desktop/DeveloperIDApplicatio │
+              |▍ │   n.p12                           │
+              |▍ ├───────────────────────────────────┤
+              |▍ │ removed                           │
+              |▍ ╰─ ✓ exit 0 · 0.1s ─ →  ✎  ≈  ↻  ✕ ─╯
