@@ -354,7 +354,8 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         return Out::Pass;
     }
     let s = k.s.as_str();
-    if s == KEY {
+    // A room's conversation is its log: no views.
+    if s == KEY && m.agents.iter().any(|a| a.key == key) {
         if views::view_name(m, &key) != "conversation" {
             views::show_view(m, &key, "conversation");
         }

@@ -771,7 +771,10 @@ fn snapshot_session_views_dropdown() {
     let open = |m: &mut Model| {
         // The view is kept in the config, for every session: in memory
         // only, so no other test's Session shows it.
-        rush_ui::accounts::use_store(m, rush_state::Store::default());
+        // Enter opens a session, as it's been answered.
+        let mut store = rush_state::Store::default();
+        store.config.enter_on = "open".into();
+        rush_ui::accounts::use_store(m, store);
         rush_ui::accounts::accounts(m).read_only = true;
         let i = m.agents.iter().position(|a| a.job.id == "d4").unwrap();
         m.agents[i].job.transcript_path = p.clone();

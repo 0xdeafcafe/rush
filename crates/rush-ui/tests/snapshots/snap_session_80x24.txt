@@ -7,10 +7,10 @@
 
     set up caching for CI   @set-up-caching-for-ci  ·  idle         context 0%
     checkout · main    Claude Code · open in a terminal · /rush copies it here
-    Conversation   Overview   Changes    [ ] views        esc back to the list
-───━━━━━━━━━━━━━━───────────────────────────────────────────────────────────────
-    Normal  Chat  Code  Catch-up  Trail                                  alt+s
-  ─━━━━━━━━────────────────────────────────────────────────────────────────────
+    Conversation ▾   Overview   Changes    [ ] views      esc back to the list
+───━━━━━━━━━━━━━━━━─────────────────────────────────────────────────────────────
+
+  ▍ Claude  12:00 · @set-up-caching-for-ci
   │   ✓ cargo test                                                         7s
   │       │ ok
   ▍

@@ -9,9 +9,9 @@
 ▌ └─ ? fix the flaky tax rounding test ✻   $0.1│ ──────────────────────────────────────────────────────────────────────────────────────────────────── │ode · open in a terminal · /rush copies it here
 ▌      checkout · main                         │ Here · Agents and the Prompt ──────────────────────────────────────────────────────────────────────  │
 ▌        ╰ asks: Round half up, or half to even│ ▍ ↑                     the agent above                                                              │─────────────────────────────────────────────────
-                                               │   ↓                     the agent below                                                              │                                          alt+s
-┃ Working  2 · $5.72                           │   pgup                  ten agents up                                                                │────────────────────────────────────────────────
-┃ ├─ ✳ add Apple Pay to checkout ✻ ↳1      $2.6│   pgdown                ten agents down                                                              │                                     ▌
+                                               │   ↓                     the agent below                                                              │                                     ▌
+┃ Working  2 · $5.72                           │   pgup                  ten agents up                                                                │                                     │
+┃ ├─ ✳ add Apple Pay to checkout ✻ ↳1      $2.6│   pgdown                ten agents down                                                              │                                     │
 ┃ │    checkout · feat/apple-pay               │   home · shift+↑        the first agent                                                              │                                     │
 ┃ └─ ✳ move the design tokens to CSS … ✻   $3.1│   end · shift+↓         the last agent                                                               │                                     │
 ┃      checkout · main                         │   enter                 open or rename the agent, or send what's typed                               │                                     │

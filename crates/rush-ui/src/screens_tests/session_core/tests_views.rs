@@ -188,7 +188,7 @@ fn tabs_and_the_rule_under_them() {
     let tabs = row_with(&mut m, "Conversation").expect("a tabs row");
     assert_eq!(
         s[tabs].trim_end(),
-        "    Conversation   Overview   Changes +1 −1   Tasks 1 of 3    [ ] views                           esc back to the list"
+        "    Conversation ▾   Overview   Changes +1 −1   Tasks 1 of 3    [ ] views                         esc back to the list"
     );
     let lit = |m: &mut Model| -> (usize, usize) {
         let r = screen(m)[tabs + 1].clone();
@@ -457,7 +457,7 @@ fn paging_and_the_pill() {
     press(&mut m, "pgup");
     let s = screen(&mut m);
     // The pill takes a row: the view starts a row higher than ten up.
-    assert_eq!(start(&m), end - 8);
+    assert_eq!(start(&m), end - 9);
     let pill = s
         .iter()
         .find(|l| l.contains("more · end follows"))
@@ -1137,7 +1137,7 @@ fn prompt_pins() {
     let s = screen(&mut m);
     let top = m.session.as_ref().unwrap().top;
     assert!(
-        s[top].starts_with("  ▍ current question 26"),
+        s[top].starts_with("  ▍ current question 25"),
         "{:?}",
         s[top]
     );

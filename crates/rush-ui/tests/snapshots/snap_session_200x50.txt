@@ -7,20 +7,20 @@
   AGENTS▾                                   COST   TIME │
 ┃ Needs you  1 · $0.19                                  │    set up caching for CI   @set-up-caching-for-ci  ·  idle                                                                        context 0%
 ┃ └─ ? fix the flaky tax rounding test ✻   $0.19   2m ● │    checkout · main                                                   ✻ Claude Code   Claude Code · open in a terminal · /rush copies it here
-┃      checkout · main                                  │    Conversation   Overview   Changes    [ ] views
-┃        ╰ asks: Round half up, or half to even?        │───━━━━━━━━━━━━━━──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-                                                        │    Normal  Chat  Code  Catch-up  Trail                                                                                                 alt+s
-┃ Working  2 · $5.72                                    │  ─━━━━━━━━───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-┃ ├─ ✳ add Apple Pay to checkout ✻ ↳1      $2.62    21m │                                                                                                                                   ▌⠶⠄
-┃ │    checkout · feat/apple-pay                        │  ▍ You  12:00                                                                                                                     ▌⠻⠋⠉⠁     ⠐
-┃ └─ ✳ move the design tokens to CSS … ✻   $3.10    20m │  ▍ fix the test                                                                                                                   ▌⠉       ⠰⠶
-┃      checkout · main                                  │                                                                                                                                   │
-                                                        │    Claude  12:00 · @set-up-caching-for-ci                                                                                         │
-┃ Idle  1 · $1.10 · 120M idle ram                       │      ✓ cargo test                                                                                                            7s   │
-▌ └─ ◦ set up caching for CI ✻             $1.10    10m │          │ ok                                                                                                                     │
-▌      checkout · main                                  │                                                                                                                                   │
-                                                        │    Fixed it.                                                                                                                      │
-┃ Today  1 · $1.71                                      │                                                                                                                    1 step   13s   │
+┃      checkout · main                                  │    Conversation ▾   Overview   Changes    [ ] views
+┃        ╰ asks: Round half up, or half to even?        │───━━━━━━━━━━━━━━━━────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+                                                        │                                                                                                                                   ▌⠶⠄
+┃ Working  2 · $5.72                                    │  ▍ You  12:00                                                                                                                     ▌⠻⠋⠉⠁     ⠐
+┃ ├─ ✳ add Apple Pay to checkout ✻ ↳1      $2.62    21m │  ▍ fix the test                                                                                                                   ▌⠉       ⠰⠶
+┃ │    checkout · feat/apple-pay                        │                                                                                                                                   │
+┃ └─ ✳ move the design tokens to CSS … ✻   $3.10    20m │    Claude  12:00 · @set-up-caching-for-ci                                                                                         │
+┃      checkout · main                                  │      ✓ cargo test                                                                                                            7s   │
+                                                        │          │ ok                                                                                                                     │
+┃ Idle  1 · $1.10 · 120M idle ram                       │                                                                                                                                   │
+▌ └─ ◦ set up caching for CI ✻             $1.10    10m │    Fixed it.                                                                                                                      │
+▌      checkout · main                                  │                                                                                                                    1 step   13s   │
+                                                        │                                                                                                                                   │
+┃ Today  1 · $1.71                                      │                                                                                                                                   │
 ┃ └─ · why does the ledger import tim… ✻   $1.71     3h │                                                                                                                                   │
 ┃      checkout · main                                  │                                                                                                                                   │
                                                         │                                                                                                                                   │

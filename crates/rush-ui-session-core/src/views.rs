@@ -284,8 +284,10 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     let hover = conn(m, &key).vs.hover_tab;
     // The Conversation tab names the view it shows, but Normal, and opens
     // the views' dropdown (▾); the view rush suggests puts its ✦ there.
+    // A room's conversation is its log: no views.
+    let own = m.agents.iter().any(|a| a.key == key);
     let preset = super::presets::current(m);
-    let suggested = super::viewsuggest::suggested(m, &key).is_some();
+    let suggested = own && super::viewsuggest::suggested(m, &key).is_some();
     // The tabs: " Label stat " each, one apart, from a cell in.
     let mut strip = line([plain(" ")]);
     let mut tabs = Vec::new();
@@ -303,10 +305,10 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
         }
         let x = strip.width();
         let label = match *v {
-            "conversation" if preset != rush_convo::Preset::Normal => {
+            "conversation" if own && preset != rush_convo::Preset::Normal => {
                 format!(" {} · {} ▾ ", tab_label(v), preset.title())
             }
-            "conversation" => format!(" {} ▾ ", tab_label(v)),
+            "conversation" if own => format!(" {} ▾ ", tab_label(v)),
             _ => format!(" {} ", tab_label(v)),
         };
         let tw = width(&label) + stat.width();
@@ -908,7 +910,10 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
                 return Out::Pass;
             };
             // The Conversation tab while it shows opens the views' dropdown.
-            if name == "conversation" && views(m, &key).get(i) == Some(&"conversation") {
+            if name == "conversation"
+                && views(m, &key).get(i) == Some(&"conversation")
+                && m.agents.iter().any(|a| a.key == key)
+            {
                 super::presets::open_menu(m, &key);
                 return Out::Draw;
             }
