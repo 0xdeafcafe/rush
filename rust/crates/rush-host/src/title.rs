@@ -10,8 +10,10 @@ const TITLE_SYSTEM: &str = "You name coding sessions. You're given the first mes
 /// one offers it and gives a title, else Claude's cheapest model when it's
 /// here, else the agent kind's own; empty when none can.
 pub fn title(reg: &Registry, kind: &str, text: &str) -> String {
-    let prompt = format!("<message>\n{}\n</message>", fit_tokens(text, 2000));
-    if let Ok((_, out)) = ask_plugin_models(reg, TITLE_SYSTEM, &prompt) {
+    let wrap = |n: usize| format!("<message>\n{}\n</message>", fit_tokens(text, n));
+    let prompt = wrap(2000);
+    let fitted = |room: Option<usize>| wrap(room.map_or(2000, |r| r.min(2000)));
+    if let Ok((_, out)) = ask_plugin_models(reg, TITLE_SYSTEM, &fitted) {
         let t = clean_title(&out);
         if !t.is_empty() {
             return t;

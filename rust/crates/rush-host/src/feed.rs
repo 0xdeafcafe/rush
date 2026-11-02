@@ -65,8 +65,10 @@ fn author(reg: &Registry, p: &Peer) -> Author {
 /// offers it and it fits, else Claude's cheapest model when it's here, else
 /// the agent kind's own; empty when none can (feedSummer).
 pub fn summary(reg: &Registry, kind: &str, text: &str) -> String {
-    let prompt = format!("<message>\n{}\n</message>", fit_tokens(text, 8000));
-    if let Ok((_, out)) = ask_plugin_models(reg, FEED_SUMMARY_SYSTEM, &prompt)
+    let wrap = |n: usize| format!("<message>\n{}\n</message>", fit_tokens(text, n));
+    let prompt = wrap(8000);
+    let fitted = |room: Option<usize>| wrap(room.map_or(8000, |r| r.min(8000)));
+    if let Ok((_, out)) = ask_plugin_models(reg, FEED_SUMMARY_SYSTEM, &fitted)
         && !out.trim().is_empty()
         && !crate::title::asked_back(&out)
     {

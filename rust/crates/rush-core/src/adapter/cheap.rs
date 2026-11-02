@@ -29,7 +29,7 @@ pub fn ask_cheap(
 ) -> Result<(String, String)> {
     let mut last = None;
     if !wants_strong(prefer) {
-        match ask_plugin_models(reg, system, prompt) {
+        match ask_plugin_models(reg, system, &|_| prompt.to_string()) {
             Ok(r) => return Ok(r),
             Err(e) => last = e,
         }
@@ -60,13 +60,27 @@ pub fn ask_cheap(
     }))
 }
 
+/// Tokens kept free of a small model's context: the plugin's room for the
+/// answer (apple-intelligence keeps 512) and the prompt's wrapping.
+const ANSWER_ROOM: usize = 640;
+
+/// How many tokens of a message fit a model holding context tokens, with
+/// system's instructions beside it: none when they leave no room.
+pub fn message_room(context: usize, system: &str) -> usize {
+    // Over-counting the instructions (3 characters a token) keeps it
+    // inside, as fit_tokens under-counts the message.
+    context.saturating_sub(ANSWER_ROOM + system.len().div_ceil(3))
+}
+
 /// Asks the models plugins offer, each in turn, until one answers:
-/// (model, answer). Err(None) when there are none to ask, else the last
-/// one's failure ("too small" for a prompt it can't hold, say).
+/// (model, answer). prompt makes what's sent from the tokens of message a
+/// model has room for, None when it doesn't say its size. Err(None) when
+/// there are none to ask, else the last one's failure ("too small" for a
+/// prompt it can't hold, say).
 pub fn ask_plugin_models(
     reg: &Registry,
     system: &str,
-    prompt: &str,
+    prompt: &dyn Fn(Option<usize>) -> String,
 ) -> std::result::Result<(String, String), Option<super::Error>> {
     let Some(a) = reg.get(PLUGIN_MODELS) else {
         return Err(None);
@@ -80,7 +94,12 @@ pub fn ask_plugin_models(
     let ms = sm.summary_models().map_err(Some)?;
     let mut last = None;
     for m in &ms {
-        match sm.summarize(m, system, prompt) {
+        let room = sm.context_tokens(m).map(|n| message_room(n, system));
+        if room == Some(0) {
+            last = Some(format!("{m} is too small for these instructions").into());
+            continue;
+        }
+        match sm.summarize(m, system, &prompt(room)) {
             Ok(out) => return Ok((m.clone(), out)),
             Err(e) => last = Some(e),
         }
@@ -207,5 +226,69 @@ mod tests {
             ask_cheap(&r, "s", "p", "").unwrap_err().to_string(),
             "context too small"
         );
+    }
+
+    /// A plugin model holding 4096 tokens that answers with how long the
+    /// prompt it was sent is.
+    struct Small;
+
+    impl Adapter for Small {
+        fn kind(&self) -> Kind {
+            Kind::from(PLUGIN_MODELS)
+        }
+        fn name(&self) -> String {
+            "small".into()
+        }
+        fn features(&self) -> Features {
+            Features::default()
+        }
+        fn level(&self) -> Level {
+            Level::Preview
+        }
+        fn profiles(&self) -> Vec<Profile> {
+            Vec::new()
+        }
+        fn helper(&self) -> bool {
+            true
+        }
+        fn summarizer(&self) -> Option<&dyn Summarizer> {
+            Some(self)
+        }
+    }
+
+    impl Summarizer for Small {
+        fn summary_models(&self) -> Result<Vec<String>> {
+            Ok(vec!["ai/on-device".into()])
+        }
+        fn summarize(&self, _: &str, _: &str, text: &str) -> Result<String> {
+            Ok(text.len().to_string())
+        }
+        fn context_tokens(&self, _: &str) -> Option<usize> {
+            Some(4096)
+        }
+    }
+
+    // A small model is sent the message cut to the room its size leaves
+    // beside the instructions; one whose instructions fill it isn't asked.
+    #[test]
+    fn plugin_models_are_sent_what_fits() {
+        let r = Registry::new();
+        r.register(Small);
+        let system = "s".repeat(300);
+        let room = message_room(4096, &system);
+        assert_eq!(room, 4096 - 640 - 100);
+        let long = "word ".repeat(20_000);
+        let (_, n) = ask_plugin_models(&r, &system, &|room| {
+            crate::adapter::fit_tokens(&long, room.unwrap_or(8000))
+        })
+        .unwrap();
+        // fit_tokens keeps about 3 characters a token, plus its note.
+        let n: usize = n.parse().unwrap();
+        assert!(n <= room * 3 + 80, "{n} characters for {room} tokens");
+        assert!(n > room * 2, "{n} characters is cut too far");
+
+        let full = "s".repeat(4096 * 3);
+        let e = ask_plugin_models(&r, &full, &|_| "p".into()).unwrap_err();
+        assert!(e.unwrap().to_string().contains("too small"));
     }
 }

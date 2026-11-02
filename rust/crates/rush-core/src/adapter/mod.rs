@@ -23,7 +23,7 @@ mod types;
 mod window;
 
 pub use caps::*;
-pub use cheap::{PLUGIN_MODELS, ask_cheap, ask_plugin_models};
+pub use cheap::{PLUGIN_MODELS, ask_cheap, ask_plugin_models, message_room};
 pub use conn::*;
 pub use feature::*;
 pub use handoff::*;

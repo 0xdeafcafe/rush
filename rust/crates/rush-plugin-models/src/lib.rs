@@ -129,6 +129,15 @@ impl Summarizer for PluginModels {
             })
             .collect()
     }
+
+    /// The size its plugin says it holds.
+    fn context_tokens(&self, model: &str) -> Option<usize> {
+        self.last()
+            .iter()
+            .find(|m| full_name(m) == model)
+            .and_then(|m| usize::try_from(m.model.context_tokens).ok())
+            .filter(|&n| n > 0)
+    }
 }
 
 /// Registers the plugins' models with reg.
