@@ -282,3 +282,69 @@ fn a_script_files_commands_are_shown() {
     assert!(test.contains("15"), "the tests run 15s now: {test}");
     assert!(got.contains("k skip cargo test"), "{got}");
 }
+
+const PIPE: &str =
+    "cargo build && cargo test --workspace 2>&1 | grep -E \"result|FAILED\" | head; cargo clippy";
+
+/// A chain whose second command is a pipeline: its stages run at once.
+fn piping() -> Session {
+    let mut s = Session::new();
+    s.cwd = "/work/app".into();
+    s.feed(sent("check it all"), at(0));
+    s.feed(tool_use("b1", "Bash", json!({"command": PIPE})), at(1));
+    let sh = |kids| claude_shell(PIPE, at(1), kids);
+    s.watch_shells(
+        &[sh(vec![proc_(10, "cargo build", at(1), Vec::new())])],
+        at(2),
+    );
+    s.watch_shells(
+        &[sh(vec![
+            proc_(11, "cargo test --workspace", at(5), Vec::new()),
+            proc_(12, "grep -E result|FAILED", at(5), Vec::new()),
+            proc_(13, "head", at(5), Vec::new()),
+        ])],
+        at(6),
+    );
+    s
+}
+
+/// A pipeline is one command of the chain (one place, one time) drawn a
+/// stage a line: the first behind the marker and time, the filters under
+/// it behind a faint bar.
+#[test]
+fn a_pipeline_is_drawn_a_stage_a_line() {
+    let s = piping();
+    let got = draw(&s, Preset::Normal, "");
+    let rows: Vec<&str> = got.lines().collect();
+    let at_test = rows
+        .iter()
+        .position(|l| l.contains("▸ cargo test --workspace 2>&1"))
+        .unwrap_or_else(|| panic!("{got}"));
+    assert!(rows[at_test].contains("15"), "the time: {}", rows[at_test]);
+    assert!(
+        rows[at_test + 1].contains("│ grep -E \"result|FAILED\""),
+        "{got}"
+    );
+    assert!(rows[at_test + 2].contains("│ head"), "{got}");
+    assert!(!rows[at_test + 1].contains('▸'), "{got}");
+    assert!(
+        rows.iter().any(|l| l.contains("$ cargo clippy")),
+        "the next command follows the stages: {got}"
+    );
+    let row = rows
+        .iter()
+        .find(|l| l.starts_with("t1:s:b1") && l.contains("2/3"))
+        .unwrap_or_else(|| panic!("{got}"));
+    assert!(row.contains("2/3 cargo test"), "{row}");
+    assert!(!row.contains("grep"), "only the first stage: {row}");
+}
+
+/// k on a pipeline ends all its stages together; they're one command.
+#[test]
+fn skipping_a_pipeline_ends_every_stage() {
+    let s = piping();
+    let rp = s.running_part("b1").expect("running");
+    assert_eq!((rp.at, rp.of), (2, 3));
+    let pids: Vec<i32> = rp.procs.iter().map(|p| p.pid).collect();
+    assert_eq!(pids, [11, 12, 13]);
+}
