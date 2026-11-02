@@ -76,8 +76,11 @@ struct Seen {
     sub_dirs: Vec<Ms>,
     /// Its subagents' transcripts, and its workflows' agents'
     /// (workflow_transcripts): each path held once, shared with `sizes`.
+    /// Kept only while it's live (Rust-only): one that isn't is listed
+    /// again when it changes, and holds its stored totals alone.
     subs: Vec<Arc<Path>>,
     flows: Vec<Arc<Path>>,
+    listed: bool,
     /// Some quiet subagents weren't looked at: the scan after isn't skipped
     /// for nothing having changed until they are.
     deferred: bool,
@@ -172,7 +175,7 @@ impl Scanner {
             Some(p) if !t.live && p.main == main && p.sub_dirs == sub_dirs && !p.deferred => {
                 return Look::Same;
             }
-            Some(p) if p.sub_dirs == sub_dirs => (p.subs.clone(), p.flows.clone()),
+            Some(p) if p.listed && p.sub_dirs == sub_dirs => (p.subs.clone(), p.flows.clone()),
             _ => (
                 shared(subagent_transcripts(&t.path)),
                 shared(workflow_transcripts(&t.path)),
@@ -199,7 +202,17 @@ impl Scanner {
                 continue;
             };
             sizes.push(Some(m.len()));
-            grew[i] = self.sizes.get(f).map_or(0, |s| s.0) != m.len();
+            // One not live is held as its stored totals alone: they say
+            // how big each file was when last read.
+            let was = if t.live {
+                self.sizes.get(f).map_or(0, |s| s.0)
+            } else {
+                self.cache
+                    .files
+                    .get(&*f.to_string_lossy())
+                    .map_or(0, |tot| tot.size)
+            };
+            grew[i] = was != m.len();
         }
         Look::Files {
             seen: Seen {
@@ -207,6 +220,7 @@ impl Scanner {
                 sub_dirs,
                 subs,
                 flows,
+                listed: true,
                 deferred,
                 at: now,
             },
@@ -301,7 +315,7 @@ impl Scanner {
             |_, t| self.look(t, now, quiet),
         );
         for (t, look) in targets.iter().zip(looks) {
-            let (seen, sizes, grew) = match look {
+            let (mut seen, sizes, grew) = match look {
                 Look::Skip => continue,
                 Look::Same => {
                     if let Some(p) = self.seen.get_mut(t.path.as_path()) {
@@ -321,14 +335,21 @@ impl Scanner {
             files.extend(seen.subs.iter().cloned());
             let own = files.len();
             files.extend(seen.flows.iter().cloned());
-            self.seen.insert(main, seen);
+            if !t.live {
+                // Its files aren't followed between scans: its stored
+                // totals say all that's needed of them.
+                (seen.subs, seen.flows, seen.listed) = (Vec::new(), Vec::new(), false);
+            }
+            let before = self.seen.insert(main, seen).is_some();
             let mut changed = false;
             for (f, _) in files.iter().zip(&grew).filter(|(_, g)| **g) {
                 changed = true;
                 // Its size is set as it's read, below.
-                self.sizes.entry(f.clone()).or_default().1 = now;
+                if t.live {
+                    self.sizes.entry(f.clone()).or_default().1 = now;
+                }
             }
-            if !changed && !self.sizes.is_empty() && self.sizes.contains_key(t.path.as_path()) {
+            if !changed && before {
                 continue;
             }
             let mut sp = Spend::default();
@@ -345,10 +366,14 @@ impl Scanner {
                         intern(&mut self.dirs, &mut tot.dirs);
                     }
                 }
-                match self.sizes.get_mut(f) {
-                    Some(s) => s.0 = tot.size,
-                    None => {
-                        self.sizes.insert(f.clone(), (tot.size, 0));
+                if !t.live {
+                    self.sizes.remove(f);
+                } else {
+                    match self.sizes.get_mut(f) {
+                        Some(s) => s.0 = tot.size,
+                        None => {
+                            self.sizes.insert(f.clone(), (tot.size, 0));
+                        }
                     }
                 }
                 // A workflow's agent: what it spent, nothing more.
@@ -567,10 +592,21 @@ mod tests {
         }];
         s.run(&idle, t0 + 2);
         assert_eq!(
-            s.sizes[sub.as_path()].0,
-            size(&sub),
+            s.totals(&sub).map(|t| t.size),
+            Some(size(&sub)),
             "the deferred write was never read"
         );
+        // Not live, it keeps its stored totals alone: nothing of its files
+        // is followed between scans.
+        assert!(s.sizes.is_empty(), "its files' sizes are still followed");
+        assert!(!s.seen[main.as_path()].listed, "its files are still listed");
+        // It grows: priced again from its stored totals, as far as it grew.
+        grow(&sub);
+        s.seen.get_mut(main.as_path()).unwrap().at = 0;
+        std::fs::write(&main, "{}\n{}\n").unwrap();
+        let got = s.run(&idle, t0 + 3);
+        assert!(got.contains_key("k"), "a grown session wasn't priced");
+        assert_eq!(s.totals(&sub).map(|t| t.size), Some(size(&sub)));
     }
 
     #[test]

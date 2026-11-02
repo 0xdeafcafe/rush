@@ -102,10 +102,24 @@ fn main() {
         "after a first reading: {:.1} MiB",
         (NOW.load(Relaxed) - base) as f64 / MIB
     );
+    let t = std::time::Instant::now();
+    l.scan(&first.agents);
+    let first_scan = t.elapsed();
+    println!(
+        "after its scan: {:.1} MiB ({:.0} ms)",
+        (NOW.load(Relaxed) - base) as f64 / MIB,
+        first_scan.as_secs_f64() * 1e3,
+    );
+    // The next scan, as the list makes one each reading: most transcripts
+    // haven't changed.
+    let (held, kept) = (NOW.load(Relaxed), LIVE.load(Relaxed));
+    let t = std::time::Instant::now();
     l.scan(&first.agents);
     println!(
-        "after its scan: {:.1} MiB",
-        (NOW.load(Relaxed) - base) as f64 / MIB
+        "a scan again: {:.1} ms, {:+.2} MiB in {:+} allocations kept",
+        t.elapsed().as_secs_f64() * 1e3,
+        (NOW.load(Relaxed) as f64 - held as f64) / MIB,
+        LIVE.load(Relaxed) as i64 - kept as i64,
     );
     drop(first);
     // A second reading, priced, as the list shows after its first scan.

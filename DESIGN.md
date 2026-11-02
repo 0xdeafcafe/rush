@@ -2648,7 +2648,16 @@ Go rush is gone from the tree; its last version is the `go-final` tag
   file's path made from it when it's read, not held beside it as its
   key and in the list), and no longer copying the list on every look:
   16.6 → 14.5 MiB and 127,680 → 120,318 allocations kept; a reading
-  makes 78,768 → 60,326.
+  makes 78,768 → 60,326. The spend scanner keeping, of a transcript
+  whose session isn't live, its stored price alone (the cost cache's
+  totals: what it cost, and how far it was read and how big it was then),
+  not its files' list and sizes as well: a scan looks at its files only
+  when its transcript or its subagents' folders changed, then each whose
+  size isn't the one stored is read on from where it was, and the stored
+  prices are never dropped. The bench's figures with a second scan timed
+  (the list makes one each reading): loader 14.5 → 13.7 MiB and 120,449
+  → 117,121 allocations kept; the first scan 45 → 40 ms, a scan again
+  7.8 → 5.9 ms.
 - Footprint: `/usr/bin/footprint -p <pid>` idle on the list, and with the
   largest transcript under `~/.claude/projects` open; side by side with Go.
 - Idle: `top -l` CPU and wakeups over 60 s with nothing changing.
@@ -2793,11 +2802,6 @@ Found, not done:
   cloud sessions, listed among the past ones, would stop counting as
   live. A reading of rush's sessions that are awake alone wants that
   decided first.
-- The feed prices every row's transcript; only a working row's repo
-  (where its transcript says it last worked) reaches the menu. Pricing
-  only rows with a process would drop the scanner's state for some 2,000
-  transcripts, but a row that starts working shows its host's folder for
-  its first reading (up to 2 s).
 - Each rush session's info is held twice, as rush-host's `Info` and the
   fleet's `HostInfo` (4.5 MB here); `HostInfo` could share `Info`.
 - serve's watch reads all 1,244 info files every 4 seconds; a kept Lister
