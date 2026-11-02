@@ -3,8 +3,10 @@
 //! picked) and a command typed after `!` in the message box (enter runs
 //! it; it doesn't wait for the agent nor interrupt it). Each runs in the
 //! session's folder with your login shell (`$SHELL -lc`), stdin closed,
-//! in a process group of its own, so ✕ ends it and all it started; its
-//! output streams into its box (rush_convo's render/draw/shellbox.rs).
+//! in a session (and process group) of its own, so ✕ ends it and all it
+//! started, and rush quitting doesn't: its output goes to a file under
+//! shell-runs/ that streams into its box (rush_convo's
+//! render/draw/shellbox.rs), its code to a file beside it as it ends.
 //! What it printed stays on your screen: → send to agent puts the
 //! command and the end of its output in the message box, for you to
 //! send as any message, through whichever harness the session has.
@@ -15,8 +17,11 @@
 //! running now and p pauses it, as on an agent's (jobkeys.rs).
 //!
 //! The runs are kept per session while rush runs, by their box's ref,
-//! and the finished ones in rush's folder (shell-runs/<session>.json), so
-//! they're there when the session is opened again. Rust-only.
+//! and in rush's folder (shell-runs/<session>.json), so they're there
+//! when the session is opened again: one running then, its process the
+//! same one still (pid and start time), runs on in its box; one whose
+//! code was written is done; one with neither ended while rush was
+//! closed. Rust-only.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
@@ -26,7 +31,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use rush_convo::model::Item;
-use rush_convo::shellbox::{BoxRef, ShellRun, bang_ref, shell_blocks};
+use rush_convo::shellbox::{BoxRef, OUT_KEEP, ShellRun, bang_ref, shell_blocks};
 use rush_convo::{Shell, ShellProc};
 use rush_core::text::Line;
 use rush_core::time::Ms;
@@ -145,66 +150,261 @@ fn pause_id(key: &str, r: &str) -> String {
     format!("shellbox:{key}:{r}")
 }
 
+/// What runs a command for rush, as `/bin/sh -c RUNNER <shell> <script>
+/// <exit file>`: the login shell ($0) runs the script ($1), its output
+/// going to the file rush gave this one's; then its code is written to
+/// the exit file ($2), by way of a .part file so it's never read half
+/// written, and is this one's code too. TERM, INT and HUP wait for the
+/// command (it gets them too, as its group does), so ✕ still has its code
+/// written.
+const RUNNER: &str = r#"trap : TERM INT HUP; "$0" -lc "$1"; c=$?; echo "$c" > "$2.part" && mv -f "$2.part" "$2"; exit "$c""#;
+
+/// How often a run's output file is read for what's new, and whether it
+/// has ended.
+const FOLLOW_EVERY: Duration = Duration::from_millis(50);
+
+/// The file a run's code is written to as it ends, beside its output's.
+pub fn exit_of(log: &std::path::Path) -> PathBuf {
+    log.with_extension("exit")
+}
+
+/// The code written to an exit file; None until it's there.
+fn read_exit(p: &std::path::Path) -> Option<i32> {
+    std::fs::read_to_string(p).ok()?.trim().parse().ok()
+}
+
+/// When pid started, in ms; 0 when it isn't running.
+pub fn started_ms(pid: i32) -> Ms {
+    rush_sys::proc::started(pid)
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_millis() as Ms)
+}
+
+/// Whether the process that ran a command is still the one running:
+/// pid is there and started when it did (within a second; a pid used
+/// again started later).
+pub fn still_running(pid: i32, start: Ms) -> bool {
+    if pid <= 0 || start <= 0 {
+        return false;
+    }
+    let now = started_ms(pid);
+    now != 0 && (now - start).abs() < 1000
+}
+
 /// Starts script in cwd with shell -lc, stdin closed, stdout and stderr
-/// into one pipe, in a process group of its own; a thread reads what it
-/// writes into the Shared it returns, and its exit.
-pub fn spawn(script: &str, cwd: &str, shell: &str) -> std::io::Result<(i32, Arc<Mutex<Shared>>)> {
+/// into the file log, in a session (and process group) of its own, so
+/// it carries on when rush quits; its code is written beside it as it
+/// ends (exit_of). A thread follows the file into the Shared it returns.
+/// Returns its process (the runner's, the group's leader) and when that
+/// started.
+pub fn spawn(
+    script: &str,
+    cwd: &str,
+    shell: &str,
+    log: &std::path::Path,
+) -> std::io::Result<(i32, Ms, Arc<Mutex<Shared>>)> {
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
-    let (mut r, w) = std::io::pipe()?;
-    let w2 = w.try_clone()?;
-    let mut cmd = Command::new(shell);
-    cmd.arg("-lc")
+    if let Some(d) = log.parent() {
+        std::fs::create_dir_all(d)?;
+    }
+    let out = std::fs::File::create(log)?;
+    let err = out.try_clone()?;
+    let exit = exit_of(log);
+    let _ = std::fs::remove_file(&exit);
+    let mut cmd = Command::new("/bin/sh");
+    cmd.arg("-c")
+        .arg(RUNNER)
+        .arg(shell)
         .arg(script)
+        .arg(&exit)
         .current_dir(cwd)
         .stdin(Stdio::null())
-        .stdout(w)
-        .stderr(w2)
-        .process_group(0);
+        .stdout(out)
+        .stderr(err);
+    // SAFETY: setsid is async-signal-safe, all that runs between fork
+    // and exec here.
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setsid() < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
     let mut child = cmd.spawn()?;
-    // The pipe's writing ends are the child's alone now: its output ends
-    // when it and all it started are done with them.
     drop(cmd);
     let pid = child.id() as i32;
-    let shared = Arc::new(Mutex::new(Shared::default()));
-    let (out, done) = (shared.clone(), shared.clone());
-    std::thread::Builder::new()
-        .name("rush-shell-out".into())
-        .spawn(move || {
-            let mut buf = [0u8; 16 * 1024];
-            let mut held: Vec<u8> = Vec::new();
-            loop {
-                let n = match r.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => n,
-                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(_) => break,
-                };
-                held.extend_from_slice(&buf[..n]);
-                // A character cut by the read's end waits for the next.
-                let upto = match std::str::from_utf8(&held) {
-                    Ok(_) => held.len(),
-                    Err(e) if e.error_len().is_none() => e.valid_up_to(),
-                    Err(_) => held.len(),
-                };
-                let s = String::from_utf8_lossy(&held[..upto]).into_owned();
-                held.drain(..upto);
-                out.lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .out
-                    .push_str(&s);
-            }
-            let mut sh = out.lock().unwrap_or_else(|e| e.into_inner());
-            sh.out.push_str(&String::from_utf8_lossy(&held));
-            sh.eof = true;
-        })?;
+    // Read before it's waited for, while it can't be gone.
+    let start = started_ms(pid);
+    let gone = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let g = gone.clone();
     std::thread::Builder::new()
         .name("rush-shell-wait".into())
         .spawn(move || {
-            let code = child.wait().ok().map(|s| s.code());
-            done.lock().unwrap_or_else(|e| e.into_inner()).exit = Some(code.flatten());
+            let _ = child.wait();
+            g.store(true, std::sync::atomic::Ordering::SeqCst);
         })?;
-    Ok((pid, shared))
+    let shared = follow(
+        log.to_path_buf(),
+        0,
+        Box::new(move || !gone.load(std::sync::atomic::Ordering::SeqCst)),
+    )?;
+    Ok((pid, start, shared))
+}
+
+/// Follows a run's output file from byte from into the Shared it
+/// returns, until it has ended (its exit file is there, or alive says its
+/// process is gone) and all it wrote is read; or until no one reads the
+/// Shared.
+pub fn follow(
+    log: PathBuf,
+    from: u64,
+    alive: Box<dyn Fn() -> bool + Send>,
+) -> std::io::Result<Arc<Mutex<Shared>>> {
+    use std::io::{Seek, SeekFrom};
+    let shared = Arc::new(Mutex::new(Shared::default()));
+    let out = shared.clone();
+    std::thread::Builder::new()
+        .name("rush-shell-out".into())
+        .spawn(move || {
+            let exit = exit_of(&log);
+            let open = || {
+                let mut f = std::fs::File::open(&log).ok()?;
+                f.seek(SeekFrom::Start(from)).ok()?;
+                Some(f)
+            };
+            let mut f = open();
+            let mut held: Vec<u8> = Vec::new();
+            let put = |s: String| {
+                if !s.is_empty() {
+                    out.lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .out
+                        .push_str(&s);
+                }
+            };
+            loop {
+                if Arc::strong_count(&out) == 1 {
+                    return; // let go of
+                }
+                let ended = exit.exists() || !alive();
+                if f.is_none() {
+                    f = open();
+                }
+                if let Some(f) = f.as_mut() {
+                    loop {
+                        let s = read_new(f, &mut held, ended);
+                        let more = !s.is_empty() && ended;
+                        put(s);
+                        if !more {
+                            break;
+                        }
+                    }
+                }
+                if ended {
+                    let mut sh = out.lock().unwrap_or_else(|e| e.into_inner());
+                    sh.exit = Some(read_exit(&exit));
+                    sh.eof = true;
+                    return;
+                }
+                std::thread::sleep(FOLLOW_EVERY);
+            }
+        })?;
+    Ok(shared)
+}
+
+/// What's new in f as text, at most a MiB of it: a character cut by the
+/// read's end waits in held for the next, unless this is the last read.
+fn read_new(f: &mut std::fs::File, held: &mut Vec<u8>, last: bool) -> String {
+    let mut buf = [0u8; 16 * 1024];
+    let mut got = 0;
+    while got < 1 << 20 {
+        match f.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                held.extend_from_slice(&buf[..n]);
+                got += n;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        }
+    }
+    let upto = match std::str::from_utf8(held) {
+        Ok(_) => held.len(),
+        Err(e) if e.error_len().is_none() && !last => e.valid_up_to(),
+        Err(_) => held.len(),
+    };
+    let s = String::from_utf8_lossy(&held[..upto]).into_owned();
+    held.drain(..upto);
+    s
+}
+
+/// The last OUT_KEEP bytes of a run's output file from its first whole
+/// line, how many lines came before them, and how long the file is.
+fn read_tail(p: &std::path::Path) -> Option<(String, usize, u64)> {
+    use std::io::{Seek, SeekFrom};
+    let mut f = std::fs::File::open(p).ok()?;
+    let len = f.metadata().ok()?.len();
+    let skip = len.saturating_sub(OUT_KEEP as u64);
+    let mut dropped = 0;
+    let mut buf = [0u8; 64 * 1024];
+    let mut left = skip;
+    while left > 0 {
+        let n = f.read(&mut buf[..(left as usize).min(buf.len())]).ok()?;
+        if n == 0 {
+            break;
+        }
+        dropped += buf[..n].iter().filter(|&&b| b == b'\n').count();
+        left -= n as u64;
+    }
+    f.seek(SeekFrom::Start(skip)).ok()?;
+    let mut rest = Vec::new();
+    f.take(len - skip).read_to_end(&mut rest).ok()?;
+    if skip > 0
+        && let Some(nl) = rest.iter().position(|&b| b == b'\n')
+    {
+        // A line cut at the front is let go of whole.
+        rest.drain(..=nl);
+        dropped += 1;
+    }
+    Some((String::from_utf8_lossy(&rest).into_owned(), dropped, len))
+}
+
+/// What a run whose record says it was running as rush went is now:
+/// still running (its process is, the same one), its output followed
+/// again from the byte it returns; done, its code in its exit file; or
+/// ended while rush was closed, how not known. Its output is read back
+/// from its file. Reads the disk: off the UI thread.
+pub fn pick_up(run: &mut ShellRun, now: Ms) -> Option<u64> {
+    let log = PathBuf::from(&run.log);
+    let mtime = |p: &std::path::Path| {
+        std::fs::metadata(p)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as Ms)
+    };
+    let exit = exit_of(&log);
+    let code = (!run.log.is_empty()).then(|| read_exit(&exit)).flatten();
+    let mut at = 0;
+    if !run.log.is_empty()
+        && let Some((out, dropped, len)) = read_tail(&log)
+    {
+        (run.out, run.dropped, at) = (out, dropped, len);
+        run.ver += 1;
+    }
+    if code.is_none() && !run.log.is_empty() && still_running(run.pid, run.pid_start) {
+        return Some(at);
+    }
+    match code {
+        Some(c) => run.finish(Some(c), mtime(&exit).unwrap_or(now)),
+        None => {
+            run.lost = true;
+            run.finish(None, mtime(&log).unwrap_or(run.start));
+        }
+    }
+    None
 }
 
 /// The shell running a command and what runs under it, read from the
@@ -212,6 +412,17 @@ pub fn spawn(script: &str, cwd: &str, shell: &str) -> std::io::Result<(i32, Arc<
 /// system: off the UI thread.
 fn read_shell(pid: i32, command: &str) -> Option<Shell> {
     let t = rush_sys::proc::snapshot();
+    // The runner's one child is the login shell that runs the command.
+    let pid = match super::jobprocs::kids(&t, pid, 0).as_slice() {
+        [k] if t
+            .procs
+            .get(&k.pid)
+            .is_some_and(|p| super::jobprocs::shell_comm(&p.comm)) =>
+        {
+            k.pid
+        }
+        _ => pid,
+    };
     let p = t.procs.get(&pid)?;
     let start = super::jobprocs::ms(p);
     let kids = super::jobprocs::kids(&t, pid, 0);
@@ -291,15 +502,21 @@ pub fn start(m: &mut Model, key: &str, r: &str, script: &str, bang: Option<(u32,
                 None => Some((0, Arc::new(Mutex::new(Shared::default())))),
             }
         }
-        None => match spawn(script, &cwd, &login_shell()) {
-            Ok(p) => Some(p),
-            Err(e) => {
-                m.fail(&format!("couldn't run it: {e}"));
-                return Out::Draw;
+        None => {
+            let log = log_of(key, r, now);
+            match spawn(script, &cwd, &login_shell(), &log) {
+                Ok((pid, pid_start, shared)) => {
+                    (run.pid, run.pid_start) = (pid, pid_start);
+                    run.log = log.to_string_lossy().into_owned();
+                    Some((pid, shared))
+                }
+                Err(e) => {
+                    m.fail(&format!("couldn't run it: {e}"));
+                    return Out::Draw;
+                }
             }
-        },
+        }
     };
-    let done = proc_.is_none();
     let k = kept(m, key);
     if let Some((pid, shared)) = proc_ {
         k.procs.insert(
@@ -315,16 +532,16 @@ pub fn start(m: &mut Model, key: &str, r: &str, script: &str, bang: Option<(u32,
     }
     k.runs.insert(r.to_string(), Arc::new(run));
     k.r#gen += 1;
-    if done {
-        save(m, key);
-    }
+    // Kept at once, running or not: rush opened again picks it up.
+    save(m, key);
     show(m, key);
     m.ask_wake(Instant::now() + Duration::from_millis(100));
     Out::Draw
 }
 
 /// Runs what's typed after `!` in session key's box, drawn after what
-/// its latest turn has now.
+/// its latest turn has now; in a session with no turn yet, as turn 0's,
+/// above the turns to come.
 pub fn run_typed(m: &mut Model, key: &str) -> Out {
     let script = conn(m, key).input.string();
     if script.trim().is_empty() {
@@ -333,12 +550,9 @@ pub fn run_typed(m: &mut Model, key: &str) -> Out {
     let (turn, after) = m
         .session
         .as_ref()
+        .filter(|v| v.key == key)
         .and_then(|v| v.sess.turns.last())
         .map_or((0, 0), |t| (t.n, t.items.len()));
-    if turn == 0 {
-        m.flash_err("there's no conversation here yet to put it in");
-        return Out::Draw;
-    }
     let c = conn(m, key);
     c.input.clear();
     c.bang = false;
@@ -821,10 +1035,9 @@ struct File {
     runs: BTreeMap<String, ShellRun>,
 }
 
-/// Where session key's finished runs are kept.
-pub fn file_of(key: &str) -> PathBuf {
-    let name: String = key
-        .chars()
+/// key as a file's name: what isn't a letter, digit, - or . as _.
+fn safe_name(key: &str) -> String {
+    key.chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '-' || c == '.' {
                 c
@@ -832,13 +1045,28 @@ pub fn file_of(key: &str) -> PathBuf {
                 '_'
             }
         })
-        .collect();
-    rush_state::dir()
-        .join("shell-runs")
-        .join(format!("{name}.json"))
+        .collect()
 }
 
-/// Reads session key's kept runs, once, off the UI thread.
+/// Where session key's runs are kept.
+pub fn file_of(key: &str) -> PathBuf {
+    rush_state::dir()
+        .join("shell-runs")
+        .join(format!("{}.json", safe_name(key)))
+}
+
+/// Where run r of session key, started at start, writes its output while
+/// it runs: shell-runs/<session>/<start>-<ref>.log, its code beside it.
+pub fn log_of(key: &str, r: &str, start: Ms) -> PathBuf {
+    rush_state::dir()
+        .join("shell-runs")
+        .join(safe_name(key))
+        .join(format!("{start}-{}.log", safe_name(r)))
+}
+
+/// Reads session key's kept runs, once, off the UI thread. One that was
+/// running as rush went is picked up (pick_up): still running, it's
+/// followed again.
 fn load(m: &mut Model, key: &str) {
     let k = kept(m, key);
     if k.loaded {
@@ -850,47 +1078,104 @@ fn load(m: &mut Model, key: &str) {
     }
     let path = file_of(key);
     let key = key.to_string();
+    let now = m.now;
+    // The runs, those still running and what follows each, and whether
+    // any that was running has ended.
+    type Got = (File, Vec<(String, Arc<Mutex<Shared>>)>, bool);
     m.later(
-        move || {
+        move || -> Option<Got> {
             let b = std::fs::read(&path).ok()?;
-            serde_json::from_slice::<File>(&b).ok()
+            let mut f = serde_json::from_slice::<File>(&b).ok()?;
+            let mut live = Vec::new();
+            let mut ended = false;
+            for (r, run) in f.runs.iter_mut() {
+                if run.end != 0 {
+                    continue;
+                }
+                let Some(at) = pick_up(run, now) else {
+                    ended = true;
+                    continue;
+                };
+                let (pid, start) = (run.pid, run.pid_start);
+                let alive = Box::new(move || still_running(pid, start));
+                match follow(PathBuf::from(&run.log), at, alive) {
+                    Ok(shared) => live.push((r.clone(), shared)),
+                    Err(_) => {
+                        run.lost = true;
+                        run.finish(None, now);
+                        ended = true;
+                    }
+                }
+            }
+            Some((f, live, ended))
         },
-        move |m, f| {
-            let Some(f) = f else { return Out::Idle };
+        move |m, got| {
+            let Some((f, live, ended)) = got else {
+                return Out::Idle;
+            };
+            let now = m.now;
             let k = kept(m, &key);
             for (r, mut run) in f.runs {
                 if k.runs.contains_key(&r) {
                     continue;
                 }
-                if run.end == 0 {
-                    // rush went while it ran.
-                    (run.end, run.stopped) = (run.start, true);
-                }
                 run.ver = 1;
                 k.runs.insert(r, Arc::new(run));
             }
+            for (r, shared) in live {
+                let Some(pid) = k.runs.get(&r).map(|x| x.pid) else {
+                    continue;
+                };
+                if k.procs.contains_key(&r) {
+                    continue;
+                }
+                k.procs.insert(
+                    r,
+                    Proc {
+                        pid,
+                        shared,
+                        exited: None,
+                        reading: false,
+                        looked: now,
+                    },
+                );
+            }
             k.r#gen += 1;
+            if ended {
+                save(m, &key);
+            }
             show(m, &key);
+            m.ask_wake(Instant::now() + Duration::from_millis(100));
             Out::Draw
         },
     );
 }
 
-/// Writes session key's finished runs, the newest KEEP_RUNS, off the UI
-/// thread.
+/// Writes session key's runs, the newest KEEP_RUNS: those running with
+/// their process and output file, not their output (read back from the
+/// file); off the UI thread. A finished run's output file goes once its
+/// output is kept here.
 fn save(m: &mut Model, key: &str) {
     if !KEEP.with(Cell::get) {
         return;
     }
     let k = kept(m, key);
-    let mut done: Vec<(&String, &Arc<ShellRun>)> =
-        k.runs.iter().filter(|(_, r)| !r.running()).collect();
-    done.sort_by_key(|(_, r)| std::cmp::Reverse(r.start));
-    done.truncate(KEEP_RUNS);
+    let mut all: Vec<(&String, &Arc<ShellRun>)> = k.runs.iter().collect();
+    all.sort_by_key(|(_, r)| std::cmp::Reverse(r.start));
+    all.truncate(KEEP_RUNS);
+    let mut gone: Vec<PathBuf> = Vec::new();
     let f = File {
-        runs: done
+        runs: all
             .into_iter()
-            .map(|(r, x)| (r.clone(), (**x).clone()))
+            .map(|(r, x)| {
+                let mut x = (**x).clone();
+                if x.running() {
+                    (x.out, x.dropped) = (String::new(), 0);
+                } else if !x.log.is_empty() {
+                    gone.push(PathBuf::from(std::mem::take(&mut x.log)));
+                }
+                (r.clone(), x)
+            })
             .collect(),
     };
     let path = file_of(key);
@@ -899,7 +1184,12 @@ fn save(m: &mut Model, key: &str) {
             if let Some(d) = path.parent() {
                 std::fs::create_dir_all(d)?;
             }
-            rush_state::store::write_json(&path, &f)
+            rush_state::store::write_json(&path, &f)?;
+            for log in gone {
+                let _ = std::fs::remove_file(exit_of(&log));
+                let _ = std::fs::remove_file(log);
+            }
+            Ok(())
         },
         |m, r: std::io::Result<()>| match r {
             Ok(()) => Out::Idle,
@@ -916,18 +1206,22 @@ mod tests {
     use super::*;
 
     /// A real shell in a temp folder: its output, stdout and stderr
-    /// together, and its exit code; then the pipe's end.
+    /// together, in its file and followed from there, and its exit code,
+    /// written beside it for a rush opened later.
     #[test]
     fn spawn_runs_in_the_folder() {
         let dir = tempfile::tempdir().unwrap();
-        let (pid, shared) = spawn(
+        let log = dir.path().join("runs").join("1-t1_sh_0_0.log");
+        let (pid, start, shared) = spawn(
             "echo out; echo err >&2; pwd; exit 3",
             dir.path().to_str().unwrap(),
             "/bin/sh",
+            &log,
         )
         .expect("started");
         assert!(pid > 1);
-        // Wait for both threads without sleeping: they finish as the
+        assert!(start > 0, "when it started is known");
+        // Wait for the threads without sleeping: they finish as the
         // shell does.
         loop {
             let s = shared.lock().unwrap();
@@ -950,5 +1244,68 @@ mod tests {
             "{}",
             s.out
         );
+        let file = std::fs::read_to_string(&log).unwrap();
+        assert!(file.contains("out\n") && file.contains("err\n"), "{file}");
+        assert_eq!(read_exit(&exit_of(&log)), Some(3));
+    }
+
+    /// A run that was running as rush went, read back: its process still
+    /// the same one, it runs on, its output so far read from its file;
+    /// its code written, it's done with that code; neither, it ended
+    /// while rush was closed. What it wrote is kept each time.
+    #[test]
+    fn a_run_rush_went_away_from_is_picked_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("9-t0_bang_9.log");
+        std::fs::write(&log, "compiling\nhalf done\n").unwrap();
+        let me = std::process::id() as i32;
+        let my_start = started_ms(me);
+        assert!(my_start > 0);
+        let was = |pid: i32, pid_start: Ms| {
+            let mut r = ShellRun::new("make", dir.path().to_str().unwrap(), 9);
+            (r.pid, r.pid_start) = (pid, pid_start);
+            r.log = log.to_string_lossy().into_owned();
+            r
+        };
+        // Still running: this test's own process stands in for it.
+        let mut r = was(me, my_start);
+        let at = pick_up(&mut r, 50_000);
+        assert_eq!(at, Some(20), "followed on from the file's end");
+        assert!(r.running());
+        assert_eq!(r.lines(), ["compiling", "half done"]);
+        // A pid used again by another process isn't it.
+        let mut r = was(me, my_start - 60_000);
+        assert_eq!(pick_up(&mut r, 50_000), None);
+        assert!(r.lost && !r.running(), "{r:?}");
+        assert_eq!(r.outcome(), "ended while rush was closed");
+        assert_eq!(r.lines(), ["compiling", "half done"]);
+        // Its code written as it ended.
+        std::fs::write(exit_of(&log), "2\n").unwrap();
+        let mut r = was(me, my_start - 60_000);
+        assert_eq!(pick_up(&mut r, 50_000), None);
+        assert!(!r.running() && !r.lost);
+        assert_eq!(r.exit, Some(2));
+        assert_eq!(r.outcome(), "exit 2");
+        assert_eq!(r.lines(), ["compiling", "half done"]);
+        // Even while its process is still there (writing its code was
+        // its last act).
+        let mut r = was(me, my_start);
+        assert_eq!(pick_up(&mut r, 50_000), None);
+        assert_eq!(r.exit, Some(2));
+    }
+
+    /// A long output file is read back from its last OUT_KEEP bytes, the
+    /// lines before counted.
+    #[test]
+    fn a_long_output_file_is_read_from_its_end() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("x.log");
+        let line = "y".repeat(1023) + "\n";
+        std::fs::write(&log, line.repeat(300)).unwrap();
+        let (out, dropped, len) = read_tail(&log).unwrap();
+        assert_eq!(len, 300 * 1024);
+        assert!(out.len() <= OUT_KEEP);
+        assert_eq!(dropped + out.lines().count(), 300);
+        assert!(out.starts_with('y'));
     }
 }

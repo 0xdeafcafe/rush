@@ -180,7 +180,7 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     let mut out = if !v.read {
         v.note_drawn();
         vec![fit(line([sp("reading the conversation…", DIM)]), cw)]
-    } else if v.sess.turns.is_empty() {
+    } else if v.sess.turns.is_empty() && !rush_convo::shellbox::unturned(&v.o.shells) {
         let first = if v.err.is_empty() {
             line([sp("  nothing yet · type below to start", DIM)])
         } else {
@@ -247,24 +247,25 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     // anything else under the transcript starts, the room before the box
     // its own too; else down to the body's foot (rushPane's foot,
     // rushmode.go:2694, past the transcript's blank rows).
-    let foot = if v.read && !v.sess.turns.is_empty() {
-        let t = v.r.count(&v.sess, &v.o).saturating_sub(v.start);
-        let drawn = v.total().saturating_sub(v.start).min(n);
-        if t < drawn {
-            let blank = |l: &Line| {
-                l.spans
-                    .iter()
-                    .all(|s| s.style.bg == Color::Default && s.text.trim().is_empty())
-            };
-            (t..rows)
-                .find(|&i| out.get(i).is_some_and(|l| !blank(l)))
-                .unwrap_or(rows)
+    let foot =
+        if v.read && (!v.sess.turns.is_empty() || rush_convo::shellbox::unturned(&v.o.shells)) {
+            let t = v.r.count(&v.sess, &v.o).saturating_sub(v.start);
+            let drawn = v.total().saturating_sub(v.start).min(n);
+            if t < drawn {
+                let blank = |l: &Line| {
+                    l.spans
+                        .iter()
+                        .all(|s| s.style.bg == Color::Default && s.text.trim().is_empty())
+                };
+                (t..rows)
+                    .find(|&i| out.get(i).is_some_and(|l| !blank(l)))
+                    .unwrap_or(rows)
+            } else {
+                rows
+            }
         } else {
-            rows
-        }
-    } else {
-        0
-    };
+            0
+        };
     let top = v.top;
     super::side::paste(m, key, &mut out, foot, cw, top);
     views::beside::paste(m, key, &mut out, rows, cw, vw, &vs, &past, top);

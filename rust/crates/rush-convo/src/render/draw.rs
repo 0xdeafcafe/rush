@@ -120,6 +120,12 @@ pub(crate) struct Drawer<'a> {
     pub(crate) shell_k: usize,
     /// The `!` runs of the turn drawn so far.
     pub(crate) bangs_done: HashSet<String>,
+    /// Where a shell box sits in another view: its inside this wide, on
+    /// the right (your side of a chat) or the left; None as in Normal.
+    pub(crate) box_place: Option<(usize, bool)>,
+    /// A box drawn under a row of its own (a run's line in another
+    /// view): that row carries its ref, not the box's top edge.
+    pub(crate) box_under_row: bool,
 }
 
 impl<'a> Drawer<'a> {
@@ -173,6 +179,8 @@ impl<'a> Drawer<'a> {
             text_item: None,
             shell_k: 0,
             bangs_done: HashSet::new(),
+            box_place: None,
+            box_under_row: false,
         }
     }
 

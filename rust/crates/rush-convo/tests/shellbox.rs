@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use rush_convo::render::plain;
 use rush_convo::shellbox::{BoxRef, ShellRun, bang_ref, block_ref, shell_blocks};
-use rush_convo::{Options, Renderer, Session, Shell, ShellProc};
+use rush_convo::{Options, Preset, Renderer, Session, Shell, ShellProc};
 
 mod common;
 
@@ -245,4 +245,179 @@ fn blocks_are_found_as_drawn() {
     let b = shell_blocks(REPLY);
     assert_eq!(b.len(), 1);
     assert_eq!(b[0].script(), "rm ~/Desktop/DeveloperIDApplication.p12");
+}
+
+// ---- the boxes in the other views ----
+
+const TWO: &str = "Remove the key:\n\n```sh\n$ rm ~/Desktop/DeveloperIDApplication.p12\n```\n\nThen check:\n\n```bash\ncargo test\n```\n\nThen you're done.";
+
+/// A snapshot that must be there: a missing one fails, showing what it
+/// would hold, to be checked and written by hand.
+fn snap(name: &str, got: &str) {
+    let p = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("snapshots")
+        .join(format!("{name}.txt"));
+    if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
+        std::fs::write(&p, got).unwrap();
+        return;
+    }
+    let Ok(want) = std::fs::read_to_string(&p) else {
+        panic!("no snapshot {name}; it would be:\n{got}<<end>>");
+    };
+    assert!(
+        got == want,
+        "{name} differs; UPDATE_SNAPSHOTS=1 to accept. got:\n{got}<<end>>"
+    );
+}
+
+fn in_view(preset: Preset, mut o: Options) -> Options {
+    o.preset = preset;
+    o
+}
+
+/// The first block run, a `!` run after the reply, the second block not
+/// run: what each view is given.
+fn ran_some() -> (Session, Vec<(String, ShellRun)>) {
+    let s = session(TWO);
+    let block = finished("rm ~/Desktop/DeveloperIDApplication.p12", "removed\n", 0);
+    let mut bang = finished("git status", "clean\n", 0);
+    bang.start = at(12);
+    bang.end = at(12) + 300;
+    (bang.bang, bang.turn, bang.after) = (true, 1, 1);
+    let runs = vec![(block_ref(1, 0, 0), block), (bang_ref(1, bang.start), bang)];
+    (s, runs)
+}
+
+fn opts_of(runs: &[(String, ShellRun)], selected: &str, now: i64) -> Options {
+    let rs: Vec<(&str, ShellRun)> = runs.iter().map(|(k, r)| (k.as_str(), r.clone())).collect();
+    opts(selected, &rs, now)
+}
+
+/// Chat: a reply's shell block is a box in its place between its
+/// bubbles; a `!` run a box on your side, after the reply it followed.
+#[test]
+fn chat_has_the_boxes_between_the_bubbles() {
+    let (s, runs) = ran_some();
+    let o = in_view(Preset::Chat, opts_of(&runs, "", at(20)));
+    let got = draw(&s, &o);
+    snap("shellbox_chat", &got);
+    let first = got.find("Remove the key").expect(&got);
+    let block = got.find("╭─ shell · /work/app").expect(&got);
+    let then = got.find("Then check").expect(&got);
+    let unrun = got.find("$ cargo test").expect(&got);
+    let done = got.find("Then you're done").expect(&got);
+    let bang = got.find("! shell · /work/app").expect(&got);
+    assert!(
+        first < block && block < then && then < unrun && unrun < done && done < bang,
+        "{got}"
+    );
+    assert!(got.contains("✓ exit 0"), "{got}");
+    // Yours on the right: its box starts further in than the reply's.
+    let col = |needle: &str| {
+        let l = got.lines().find(|l| l.contains(needle)).unwrap();
+        let t = l.split_once('|').unwrap().1;
+        t[..t.find('╭').unwrap()].chars().count()
+    };
+    assert!(col("! shell") > col("╭─ shell"), "{got}");
+    // The rows carry the boxes' refs, for enter and the buttons.
+    let ls = Renderer::new().render(&s, &o);
+    for r in ["t1:sh:0:0", "t1:sh:0:1", runs[1].0.as_str()] {
+        assert!(ls.iter().any(|l| l.r#ref == r), "{r}:\n{got}");
+    }
+}
+
+/// Code: the commands you ran as check lines, enter opening one's box
+/// under it; a block not run as its box, ▶ run on it.
+#[test]
+fn code_has_your_runs_as_check_lines() {
+    let (s, runs) = ran_some();
+    let got = draw(&s, &in_view(Preset::Code, opts_of(&runs, "", at(20))));
+    snap("shellbox_code", &got);
+    let row = got
+        .lines()
+        .find(|l| l.starts_with("t1:sh:0:0") && l.contains("rm ~/Desktop"))
+        .expect(&got);
+    assert!(
+        row.contains("✓ $ rm ~/Desktop/DeveloperIDApplication.p12"),
+        "{row}"
+    );
+    assert!(row.contains("exit 0"), "{row}");
+    assert!(got.contains("✓ $ git status"), "{got}");
+    assert!(got.contains("▶ run"), "the block not run:\n{got}");
+    assert!(got.contains("$ cargo test"), "{got}");
+    assert!(!got.contains("removed"), "closed, no output:\n{got}");
+    // Opened, its box under it.
+    let mut o = in_view(Preset::Code, opts_of(&runs, "t1:sh:0:0", at(20)));
+    o.open.insert("t1:sh:0:0".into(), true);
+    let got = draw(&s, &o);
+    assert!(got.contains("removed"), "{got}");
+    assert!(got.contains("→ send to agent"), "{got}");
+}
+
+/// Catch-up: what you ran a line each; one running still is still going.
+#[test]
+fn catch_up_says_what_you_ran() {
+    let (s, mut runs) = ran_some();
+    let mut going = ShellRun::new("cargo test", "/work/app", at(14));
+    going.push("running 3 tests\n");
+    runs.push((block_ref(1, 0, 1), going));
+    let got = draw(&s, &in_view(Preset::CatchUp, opts_of(&runs, "", at(20))));
+    let ran = got.lines().find(|l| l.contains("You ran")).expect(&got);
+    assert!(ran.contains("✓ $ rm ~/Desktop"), "{got}");
+    assert!(got.contains("✓ $ git status"), "{got}");
+    let still = got.lines().find(|l| l.contains("Still going")).expect(&got);
+    assert!(still.contains("cargo test · 6s"), "{still}");
+}
+
+/// Trail: a run as a line with its time bar, where it started.
+#[test]
+fn trail_has_your_runs() {
+    let (s, runs) = ran_some();
+    let got = draw(&s, &in_view(Preset::Trail, opts_of(&runs, "", at(20))));
+    let row = got
+        .lines()
+        .find(|l| l.contains("you ran  git status"))
+        .expect(&got);
+    assert!(row.contains('█') || row.contains('▏'), "{row}");
+    assert!(row.contains("0.3s"), "{row}");
+    assert!(row.starts_with(runs[1].0.as_str()), "{row}");
+    assert!(got.contains("you ran  rm ~/Desktop"), "{got}");
+}
+
+/// A `!` run in a session with no turn: its box is all there is, in
+/// every view, as a window draws it too; with a turn after, it stays
+/// above it.
+#[test]
+fn a_bang_run_before_any_turn() {
+    let mut s = Session::new();
+    s.cwd = "/work/app".into();
+    let mut run = finished("ls", "a.txt\n", 0);
+    run.bang = true;
+    let r = bang_ref(0, run.start);
+    assert!(r.starts_with("t0:bang:"));
+    for p in [
+        Preset::Normal,
+        Preset::Chat,
+        Preset::Code,
+        Preset::CatchUp,
+        Preset::Trail,
+    ] {
+        let o = in_view(p, opts("", &[(&r, run.clone())], at(20)));
+        let got = draw(&s, &o);
+        assert!(got.contains("! shell · /work/app"), "{p:?}:\n{got}");
+        assert!(got.contains("a.txt"), "{p:?}:\n{got}");
+        let mut rd = Renderer::new();
+        let n = rd.count(&s, &o);
+        assert!(n >= 5, "{p:?}: {n}");
+        rd.window(&s, &o, 0, n);
+        let rows = rd.rows();
+        assert_eq!(rows.len(), n, "{p:?}");
+        assert!(rows.iter().any(|l| l.r#ref == r), "{p:?}");
+    }
+    s.feed(sent("now the real work"), at(30));
+    let got = draw(&s, &opts("", &[(&r, run)], at(40)));
+    let bx = got.find("a.txt").expect(&got);
+    let asked = got.find("now the real work").expect(&got);
+    assert!(bx < asked, "{got}");
 }

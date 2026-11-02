@@ -303,3 +303,117 @@ fn runs_are_kept_for_the_session() {
     assert!(s.contains("ran rm ~/x.p12 in /src/checkout"), "{s}");
     rush_state::set_thread_dir(None);
 }
+
+/// `!` in a session that has had no turn yet: enter runs it, and its box
+/// is the conversation, in place of "nothing yet".
+#[test]
+fn bang_in_a_session_with_no_turn() {
+    shellbox::set_fake(Some(printed));
+    shellbox::set_keep(false);
+    let fake = Fake::new();
+    let mut m = open(agent("plain", State::Idle), &fake, 120, 40);
+    crate::accounts::use_store(&mut m, rush_state::Store::default());
+    crate::accounts::accounts(&mut m).read_only = true;
+    core(&mut m).hide_map = true;
+    assert!(shown(&mut m).contains("nothing yet"));
+    typed(&mut m, "!");
+    assert!(conn(&mut m, KEY).bang);
+    typed(&mut m, "git status");
+    press(&mut m, "enter");
+    assert_eq!(
+        shellbox::ran(),
+        [("git status".to_string(), "/src/checkout".to_string())]
+    );
+    let s = shown(&mut m);
+    assert!(!s.contains("nothing yet"), "{s}");
+    assert!(s.contains("$ git status"), "{s}");
+    assert!(s.contains("ran git status in /src/checkout"), "{s}");
+    assert!(s.contains("→ send to agent"), "{s}");
+    let r = m
+        .session
+        .as_ref()
+        .unwrap()
+        .o
+        .shells
+        .keys()
+        .next()
+        .cloned()
+        .expect("kept");
+    assert!(r.starts_with("t0:bang:"), "{r}");
+    assert!(fake.ops().is_empty(), "nothing went to the agent");
+}
+
+/// Runs rush was closed on, read back as the session opens: one whose
+/// process is still the same one runs on in its box with what it wrote
+/// so far; one whose code was written is done with it; one with
+/// neither ended while rush was closed. The records are written as rush
+/// writes them; this test's own process stands in for the one still
+/// running (and is never stopped).
+#[test]
+fn runs_rush_was_closed_on_are_picked_up() {
+    let home = tempfile::tempdir().unwrap();
+    rush_state::set_thread_dir(Some(home.path().to_path_buf()));
+    let fake = Fake::new();
+    let now = replied_keeping(&fake, false).now;
+    let me = std::process::id() as i32;
+    let my_start = shellbox::started_ms(me);
+    let log = |r: &str, at: i64, text: &str| {
+        let p = shellbox::log_of(KEY, r, at);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, text).unwrap();
+        p.to_string_lossy().into_owned()
+    };
+    let (a, b, c) = (now - 30_000, now - 20_000, now - 10_000);
+    let (ra, rb, rc) = (
+        BOX.to_string(),
+        format!("t1:bang:{b}"),
+        format!("t1:bang:{c}"),
+    );
+    let done = log(&rb, b, "built\n");
+    std::fs::write(shellbox::exit_of(std::path::Path::new(&done)), "4\n").unwrap();
+    let mut runs = serde_json::Map::new();
+    runs.insert(
+        ra.clone(),
+        serde_json::json!({
+            "command": "rm ~/x.p12", "cwd": "/src/checkout", "start": a,
+            "pid": me, "pid_start": my_start, "log": log(&ra, a, "removing…\n"),
+        }),
+    );
+    runs.insert(
+        rb.clone(),
+        serde_json::json!({
+            "command": "make", "cwd": "/src/checkout", "bang": true, "turn": 1,
+            "after": 1, "start": b, "pid": me, "pid_start": my_start - 60_000,
+            "log": done,
+        }),
+    );
+    runs.insert(
+        rc.clone(),
+        serde_json::json!({
+            "command": "sleep 100", "cwd": "/src/checkout", "bang": true, "turn": 1,
+            "after": 1, "start": c, "pid": me, "pid_start": my_start - 60_000,
+            "log": log(&rc, c, "zzz\n"),
+        }),
+    );
+    let file = serde_json::json!({ "runs": runs });
+    let path = shellbox::file_of(KEY);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, serde_json::to_vec(&file).unwrap()).unwrap();
+
+    let mut m = replied_keeping(&fake, true);
+    let s = shown(&mut m);
+    let run = shellbox::run_of(&mut m, KEY, &ra).expect("read back");
+    assert!(run.running(), "{run:?}");
+    assert!(s.contains("removing…"), "{s}");
+    assert!(s.contains("✕ stop"), "{s}");
+    let run = shellbox::run_of(&mut m, KEY, &rb).expect("read back");
+    assert_eq!((run.running(), run.exit), (false, Some(4)));
+    assert!(s.contains("✗ exit 4"), "{s}");
+    assert!(s.contains("built"), "{s}");
+    let run = shellbox::run_of(&mut m, KEY, &rc).expect("read back");
+    assert!(run.lost && !run.running(), "{run:?}");
+    assert!(s.contains("ended while rush was closed"), "{s}");
+    assert!(s.contains("zzz"), "{s}");
+    drop(m);
+    rush_state::set_thread_dir(None);
+}

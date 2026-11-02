@@ -71,8 +71,16 @@ impl Drawer<'_> {
     /// The next shell block of the reply being drawn, as its box.
     pub(crate) fn shell_block(&mut self, b: &ShellBlock) {
         let Some(i) = self.text_item else { return };
-        let r = format!("{}:sh:{i}:{}", self.r, self.shell_k);
+        let k = self.shell_k;
         self.shell_k += 1;
+        self.gap();
+        self.block_box(i, k, b);
+        self.gap();
+    }
+
+    /// The box of b, the k-th shell block of item i of the turn.
+    pub(crate) fn block_box(&mut self, i: usize, k: usize, b: &ShellBlock) {
+        let r = format!("{}:sh:{i}:{k}", self.r);
         let script = b.script();
         let o = self.o;
         // A run is the block's only while it ran what the block says.
@@ -81,39 +89,79 @@ impl Drawer<'_> {
             .get(&r)
             .filter(|run| run.command == script)
             .map(|r| &**r);
-        self.gap();
         self.shell_box(&r, &b.rows(), &script, run);
-        self.gap();
     }
 
     /// The `!` runs of the turn anchored at or before item i, in the
-    /// order they ran, not yet drawn.
+    /// order they ran, not yet drawn: in Normal, where its items are.
     pub(crate) fn bangs_upto(&mut self, i: usize) {
-        let o = self.o;
-        if o.shells.is_empty() || o.preset != Preset::Normal {
+        if self.o.preset != Preset::Normal {
             return;
         }
+        for (k, run) in self.take_bangs(i) {
+            self.gap();
+            self.run_box(&k, run);
+            self.gap();
+        }
+    }
+
+    /// The box of run r, a `!` run's or a block's, drawn from what it
+    /// ran: the commands, and what came of them.
+    pub(crate) fn run_box(&mut self, r: &str, run: &ShellRun) {
+        let rows: Vec<(bool, String)> =
+            run.command.lines().map(|l| (true, l.to_string())).collect();
+        self.shell_box(r, &rows, &run.command, Some(run));
+    }
+
+    /// Whether box r is opened (enter): all its output shows.
+    pub(crate) fn box_open(&self, r: &str) -> bool {
+        self.o.open.get(r).copied().unwrap_or(false)
+    }
+}
+
+impl<'a> Drawer<'a> {
+    /// The `!` runs of the turn anchored at or before item i, in the
+    /// order they ran, not yet drawn; noted as drawn.
+    pub(crate) fn take_bangs(&mut self, i: usize) -> Vec<(String, &'a ShellRun)> {
+        let o: &'a Options = self.o;
+        if o.shells.is_empty() {
+            return Vec::new();
+        }
         let p = format!("{}:bang:", self.r);
-        let mut due: Vec<(&String, &ShellRun)> = o
+        let mut due: Vec<(String, &'a ShellRun)> = o
             .shells
             .iter()
             .filter(|(k, r)| k.starts_with(&p) && r.bang && r.after <= i)
             .filter(|(k, _)| !self.bangs_done.contains(*k))
-            .map(|(k, r)| (k, &**r))
+            .map(|(k, r)| (k.clone(), &**r))
             .collect();
         due.sort_by_key(|(_, r)| (r.after, r.start));
-        for (k, run) in due {
+        for (k, _) in &due {
             self.bangs_done.insert(k.clone());
-            let rows: Vec<(bool, String)> =
-                run.command.lines().map(|l| (true, l.to_string())).collect();
-            self.gap();
-            self.shell_box(k, &rows, &run.command, Some(run));
-            self.gap();
         }
+        due
     }
 
+    /// The commands you ran in the turn, a block's (▶ run) or after `!`,
+    /// in the order they started.
+    pub(crate) fn turn_runs(&self) -> Vec<(String, &'a ShellRun)> {
+        let o: &'a Options = self.o;
+        let p = format!("{}:", self.r);
+        let mut out: Vec<(String, &'a ShellRun)> = o
+            .shells
+            .iter()
+            .filter(|(k, _)| k.starts_with(&p))
+            .map(|(k, r)| (k.clone(), &**r))
+            .collect();
+        out.sort_by(|a, b| (a.1.start, &a.0).cmp(&(b.1.start, &b.0)));
+        out
+    }
+}
+
+impl Drawer<'_> {
     /// The box itself: the folder and buttons on its top edge, the
     /// commands, under a rule what it wrote, and how it stands on its foot.
+    /// Where it sits is box_place's (a view's own), else as in Normal.
     fn shell_box(
         &mut self,
         r: &str,
@@ -121,8 +169,18 @@ impl Drawer<'_> {
         script: &str,
         run: Option<&ShellRun>,
     ) {
-        let indent = 2;
-        let inner = self.cw.saturating_sub(indent + 5).clamp(20, BOX_MOST);
+        let (indent, inner) = match self.box_place {
+            Some((room, right)) => {
+                let inner = room.min(BOX_MOST).min(self.cw.saturating_sub(6)).max(20);
+                let indent = if right {
+                    self.cw.saturating_sub(inner + 5).max(1)
+                } else {
+                    1
+                };
+                (indent, inner)
+            }
+            None => (2, self.cw.saturating_sub(7).clamp(20, BOX_MOST)),
+        };
         let picked = self.o.selected == r;
         let bang = run.is_some_and(|x| x.bang);
         let frame = if picked { C_ORANGE } else { C_FAINT };
@@ -153,7 +211,10 @@ impl Drawer<'_> {
         let l = self
             .sp(indent - 1)
             .and(edge(frame, "╭", "╮", inner, label, top_r));
-        self.add(r, Color::Default, l, Txt::new());
+        // Under a row of its own (another view's), that row is the one
+        // picked.
+        let top = if self.box_under_row { "" } else { r };
+        self.add(top, Color::Default, l, Txt::new());
 
         // The commands, each with how long it ran when it's a chain.
         let running = run.is_some_and(ShellRun::running);
@@ -350,6 +411,8 @@ impl Drawer<'_> {
                 let took = dur((x.end - x.start).max(0));
                 let how = if x.stopped {
                     paint(C_YELLOW, "✕ stopped")
+                } else if x.lost {
+                    paint(C_YELLOW, "✕ ended while rush was closed")
                 } else {
                     match x.exit {
                         Some(0) => paint(C_GREEN, "✓ exit 0"),

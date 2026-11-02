@@ -1917,12 +1917,37 @@ Two ways in, both only on your click or key, never by themselves:
   esc back` on it; esc, or backspace at its start, turns it back. enter
   runs what's typed without waiting for the agent or interrupting it; its
   box (`t<n>:bang:<start>`) is drawn after the items its turn had then.
+  In a session with no turn yet it's turn 0's (`t0:bang:<start>`): the
+  Renderer draws those boxes above the first turn (`pre`, counted with
+  the header rows), so it's the whole conversation until a turn comes.
+
+The boxes are in every view (presets.rs), the same box and keys:
+
+- **Chat**: a reply is cut at its shell blocks (`shellbox::pieces`), each
+  block a box in its place between its bubbles (the bubble before it
+  ends there, as a shown drawing's does); a `!` run is a box on your
+  side, right-aligned, where it ran. The last bubble of words carries
+  the turn's foot.
+- **Code**: the commands you ran in the turn (▶ run or `!`) are lines
+  with a check's look (✓/✗/✕/✱, `$ command`, its code, its time);
+  enter opens its box under its line. A block not run is its box, with
+  ▶ run, under the turn's changes.
+- **Catch-up**: "You ran" lines for what you ran since you last looked
+  (the newest 4), enter opening one's box under the card; one running
+  is under "Still going".
+- **Trail**: a run is a `you ran` line with its time bar, where it
+  started among the steps (never the "slow" one).
 
 A run (`rush_convo::ShellRun`, kept by the UI in session_core's
 `shellbox.rs` and handed to the view as `Options::shells`) is the
-session's folder, `$SHELL -lc`, stdin closed, stdout and stderr into one
-pipe, in a process group of its own; a thread reads its output and one
-waits on it, and each frame's dock takes in what they have. Its box shows
+session's folder, `$SHELL -lc`, stdin closed, run by a small `/bin/sh`
+runner (`RUNNER`) in a session of its own (setsid), so rush quitting
+doesn't end it. stdout and stderr go to one file,
+`shell-runs/<session>/<start>-<ref>.log`; as the command ends the runner
+writes its code beside it (`.exit`, by way of a `.part` file), and
+traps TERM, INT and HUP until then so ✕ still has the code written. A
+thread follows the file (every 50 ms) until the exit file is there or
+the process is gone, and each frame's dock takes in what it has. Its box shows
 the newest 12 rows of what it wrote, colours kept (SGR read into
 spans), "… N more lines" above them; enter opens all of it. The foot says
 how long it has run (✕ stop ends the group: TERM, KILL 3s on), then ✓ or
@@ -1937,10 +1962,17 @@ work as on an agent's.
 What it printed stays on your screen: nothing goes to the agent. → send to
 agent puts "I ran `cmd` (exit 0):" and its last 80 lines (6000
 characters at most) in the message box, as text you send or don't,
-through the session's own harness like any message. The finished runs
-are kept in rush's folder, `shell-runs/<session key>.json` (the newest
-50), and read back when the session is opened again; one that was
-running as rush went shows as stopped. Tests stand a fake in for the
+through the session's own harness like any message. The runs are kept
+in rush's folder, `shell-runs/<session key>.json` (the newest 50), as
+each starts and ends: a running one with its process (the runner's pid
+and start time) and its file, not its output. Read back when the
+session is opened again (`pick_up`), one that was running as rush went
+is: still running when that pid is there with that start time (within
+a second), its output read from the end of its file (the last 256 KiB,
+the lines before counted) and followed on; done when its exit file is
+there, with that code; else "ended while rush was closed". ✕ ends its
+process group as before. A finished run's output is kept in the JSON
+and its files go once that's written. Tests stand a fake in for the
 shell (`shellbox::set_fake`), which also keeps nothing on disk.
 
 ## Panics

@@ -24,6 +24,7 @@ use super::super::Preset;
 use super::super::decisions::{decisions_of, open_list};
 use super::*;
 use crate::decisions::decisions_in;
+use crate::shellbox::{BoxRef, Piece, ShellBlock, ShellRun, pieces};
 
 /// Diff rows a file shows in Code before "enter opens the whole diff".
 const CODE_CAP: usize = 12;
@@ -33,6 +34,8 @@ const LABEL_W: usize = 14;
 const CATCH_MOST: usize = 200;
 /// The turns a catch-up card covers when you've not looked before.
 const CATCH_FIRST: usize = 4;
+/// The most commands you ran a catch-up card names, the newest.
+const RAN_SHOWN: usize = 4;
 /// A step quicker than this merges with the steps of its kind beside it
 /// on the trail.
 const QUICK: Ms = 10_000;
@@ -314,6 +317,45 @@ fn took(ms: Ms) -> String {
     if ms <= 0 { "0".into() } else { dur(ms) }
 }
 
+/// How a command you ran stands, as a check's mark: ✱ running, ✓ exit 0,
+/// ✕ stopped or ended while rush was closed, ✗ failed.
+fn run_mark(run: &ShellRun) -> Txt {
+    if run.running() {
+        paint(C_ORANGE, "✱")
+    } else if run.stopped || run.lost {
+        paint(C_YELLOW, "✕")
+    } else if run.exit == Some(0) {
+        paint(C_GREEN, "✓")
+    } else {
+        paint(C_RED, "✗")
+    }
+}
+
+/// What came of a command you ran, in a few words: running, exit 0,
+/// stopped, ended while rush was closed, exit 2.
+fn run_came(run: &ShellRun) -> Txt {
+    let w = run.outcome();
+    if run.running() || run.stopped || run.lost || run.exit == Some(0) {
+        dim(&w)
+    } else {
+        paint(C_RED, &w)
+    }
+}
+
+/// A command you ran on one line, room wide at most: a faint $ before
+/// it, as in its box, and how many more lines it has.
+fn run_words(run: &ShellRun, room: usize) -> Txt {
+    let n = run.command.trim().lines().count();
+    let mut t = faint("$ ").and(text(&one_line(first_line(run.command.trim()))));
+    if n > 1 {
+        t.push(faint(&format!(" +{} more", n - 1)));
+    }
+    if t.width() > room {
+        t = t.truncate(room, &faint("…"));
+    }
+    t
+}
+
 /// How a check came out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Came {
@@ -332,6 +374,20 @@ struct FileEdits {
     note: &'static str,
 }
 
+/// What a chat shows of a turn after your message, in order.
+enum ChatSeg {
+    /// The agent's words, a bubble.
+    Said(Vec<(String, bool)>),
+    /// A message you sent while it worked, and its images.
+    You(String, Vec<String>),
+    /// A drawing shown with rush's show tool.
+    Shown(StepId),
+    /// The k-th shell block of item i, as its box.
+    Block(usize, usize, ShellBlock),
+    /// A command you ran after `!`, by its box's ref.
+    Bang(String),
+}
+
 /// A row of the trail: one step, or quick steps of a kind side by side.
 struct Leg {
     ids: Vec<StepId>,
@@ -342,6 +398,8 @@ struct Leg {
     running: bool,
     waiting: bool,
     bad: bool,
+    /// A command you ran, by its box's ref, not a step.
+    run: Option<String>,
 }
 
 impl Drawer<'_> {
@@ -574,35 +632,95 @@ impl Drawer<'_> {
             self.add(&r, Color::Default, l, Txt::new());
         }
         // The agent's words, a bubble for each stretch between messages
-        // you sent while it worked.
-        let mut said: Vec<(&str, bool)> = Vec::new();
-        for it in &t.items {
+        // you sent while it worked, the drawings it showed and the shell
+        // blocks of its replies, and the commands you ran after `!` where
+        // you ran them.
+        let mut segs: Vec<ChatSeg> = Vec::new();
+        let mut said: Vec<(String, bool)> = Vec::new();
+        let flush = |segs: &mut Vec<ChatSeg>, said: &mut Vec<(String, bool)>| {
+            if !said.is_empty() {
+                segs.push(ChatSeg::Said(std::mem::take(said)));
+            }
+        };
+        for (i, it) in t.items.iter().enumerate() {
+            let due = self.take_bangs(i);
+            if !due.is_empty() {
+                flush(&mut segs, &mut said);
+                segs.extend(due.into_iter().map(|(k, _)| ChatSeg::Bang(k)));
+            }
             match it {
                 Item::Text { text, answer } if !text.trim().is_empty() => {
-                    said.push((text.as_str(), *answer));
+                    for p in pieces(text) {
+                        match p {
+                            Piece::Words(w) => said.push((w, *answer)),
+                            // A shell block is a box in its place.
+                            Piece::Block(k, b) => {
+                                flush(&mut segs, &mut said);
+                                segs.push(ChatSeg::Block(i, k, b));
+                            }
+                        }
+                    }
                 }
                 Item::Interject(x) => {
-                    if !said.is_empty() {
-                        self.agent_bubble(&said, false);
-                        said.clear();
-                    }
-                    let imgs = image_names(&x.images);
-                    self.you_bubble(x.text.trim(), &imgs, "while it worked");
+                    flush(&mut segs, &mut said);
+                    segs.push(ChatSeg::You(
+                        x.text.trim().to_string(),
+                        image_names(&x.images),
+                    ));
                 }
                 // A drawing shown with rush's show tool is part of what it
                 // said: drawn in its place between the bubbles.
                 Item::Step(id) if shown(self.s.step(*id)) => {
-                    if !said.is_empty() {
-                        self.agent_bubble(&said, false);
-                        said.clear();
-                    }
-                    self.step(*id, 0);
+                    flush(&mut segs, &mut said);
+                    segs.push(ChatSeg::Shown(*id));
                 }
                 _ => {}
             }
         }
-        if !said.is_empty() || t.live || self.steps_counted() > 0 || self.needs_here() {
-            self.agent_bubble(&said, true);
+        flush(&mut segs, &mut said);
+        let in_turn = segs.len();
+        let after = self.take_bangs(usize::MAX);
+        segs.extend(after.into_iter().map(|(k, _)| ChatSeg::Bang(k)));
+        // The last of its words carry the turn's foot, unless you said
+        // something after them; else an empty bubble does, when there's
+        // something to say on it.
+        let last = segs[..in_turn]
+            .iter()
+            .rposition(|s| matches!(s, ChatSeg::Said(_)))
+            .filter(|&j| {
+                !segs[j + 1..in_turn]
+                    .iter()
+                    .any(|s| matches!(s, ChatSeg::You(..)))
+            });
+        let foot_alone =
+            last.is_none() && (t.live || self.steps_counted() > 0 || self.needs_here());
+        let room = self.bubble_room();
+        let total = segs.len();
+        for (j, seg) in segs.into_iter().enumerate() {
+            if j == in_turn && foot_alone {
+                self.agent_bubble(&[], true);
+            }
+            match seg {
+                ChatSeg::Said(said) => self.agent_bubble(&said, last == Some(j)),
+                ChatSeg::You(text, imgs) => self.you_bubble(&text, &imgs, "while it worked"),
+                ChatSeg::Shown(id) => self.step(id, 0),
+                ChatSeg::Block(i, k, b) => {
+                    self.box_place = Some((room, false));
+                    self.block_box(i, k, &b);
+                    self.box_place = None;
+                }
+                ChatSeg::Bang(k) => {
+                    let o = self.o;
+                    if let Some(run) = o.shells.get(&k) {
+                        self.box_place = Some((room, true));
+                        self.run_box(&k, run);
+                        self.box_place = None;
+                    }
+                }
+            }
+        }
+        if foot_alone && in_turn == total {
+            self.agent_bubble(&[], true);
         }
     }
 
@@ -653,7 +771,7 @@ impl Drawer<'_> {
     /// The agent's words as a bubble on the left; the last of the turn
     /// carries what it asks of you and, on its foot, who said it, when,
     /// and the steps it took (enter opens the turn in Normal).
-    fn agent_bubble(&mut self, said: &[(&str, bool)], last: bool) {
+    fn agent_bubble(&mut self, said: &[(String, bool)], last: bool) {
         let t = self.t;
         let room = self.bubble_room();
         let mut rows: Vec<Txt> = Vec::new();
@@ -930,6 +1048,25 @@ impl Drawer<'_> {
         for id in &checks {
             self.check_row(*id, &checks);
         }
+        // The commands you ran in it (▶ run or `!`), a check's line each;
+        // enter opens one's box under it.
+        for (r, run) in self.turn_runs() {
+            self.run_row(&r, run);
+        }
+        // Its replies' shell blocks not run, as their boxes.
+        for (i, it) in t.items.iter().enumerate() {
+            let Item::Text { text, .. } = it else {
+                continue;
+            };
+            for (k, b) in crate::shellbox::shell_blocks(text).into_iter().enumerate() {
+                let r = format!("{}:sh:{i}:{k}", self.r);
+                let o = self.o;
+                if o.shells.get(&r).is_some_and(|x| x.command == b.script()) {
+                    continue;
+                }
+                self.block_box(i, k, &b);
+            }
+        }
         // A drawing shown with rush's show tool is part of the reply, never
         // left out: under the turn's changes.
         for it in &t.items {
@@ -1121,6 +1258,50 @@ impl Drawer<'_> {
         }
     }
 
+    /// A command you ran, as a check's line: how it came out, its
+    /// command, its code, and how long it took. Opened (enter), its box
+    /// under it.
+    fn run_row(&mut self, r: &str, run: &ShellRun) {
+        let lead = self.sp(1).and(run_mark(run)).and_raw(" ");
+        let mut detail = run_came(run);
+        if run.running() {
+            let label = run.label();
+            if !label.is_empty() {
+                detail.push(faint(" · "));
+                detail.push(paint(C_SUB, &label));
+            }
+        }
+        let right = if run.running() {
+            let s = self.since(run.start);
+            dim(&s).and_raw("  ")
+        } else if run.end - run.start >= 100 {
+            dim(&dur(run.end - run.start)).and_raw("  ")
+        } else {
+            Txt::new()
+        };
+        let room = self.cw as isize
+            - lead.width() as isize
+            - detail.width() as isize
+            - right.width() as isize
+            - 6;
+        let words = run_words(run, room.max(12) as usize);
+        let l = lead.and(words).and(blanks(3)).and(detail);
+        let from = self.lines.len();
+        self.add(r, Color::Default, l, right);
+        self.box_under(r, run);
+        self.own(r, from);
+    }
+
+    /// Run r's box under its line in another view, while it's opened.
+    fn box_under(&mut self, r: &str, run: &ShellRun) {
+        if !self.box_open(r) {
+            return;
+        }
+        self.box_under_row = true;
+        self.run_box(r, run);
+        self.box_under_row = false;
+    }
+
     // ---- Catch-up ----
 
     /// One card for every turn since you last looked, drawn with the last
@@ -1303,6 +1484,29 @@ impl Drawer<'_> {
             };
             going.push(format!("{}{at}", one_line(&j.label)));
         }
+        // What you ran since you last looked: a line each once done, and
+        // those still running with what's still going.
+        let o: &Options = self.o;
+        let mut ran: Vec<(&String, &ShellRun)> = o
+            .shells
+            .iter()
+            .filter(|(k, r)| {
+                let n = BoxRef::parse(k).map_or(0, |b| b.turn());
+                (n == 0 || turns.iter().any(|t| t.n == n))
+                    && (since <= 0 || r.start > since || r.running())
+            })
+            .map(|(k, r)| (k, &**r))
+            .collect();
+        ran.sort_by(|a, b| (a.1.start, a.0).cmp(&(b.1.start, b.0)));
+        for (_, run) in ran.iter().filter(|(_, r)| r.running()) {
+            let mut w = one_line(first_line(run.command.trim()));
+            let part = run.label();
+            if !part.is_empty() {
+                w = part;
+            }
+            going.push(format!("{w} · {}", self.since(run.start)));
+        }
+        ran.retain(|(_, r)| !r.running());
         if going.is_empty() && last.live {
             let at = if last.start != 0 {
                 format!(" · {}", self.since(last.start))
@@ -1398,6 +1602,31 @@ impl Drawer<'_> {
             }
             rows.push((l.truncate(inner, &faint("…")), String::new()));
         }
+        // What you ran, the newest RAN_SHOWN, a line each to pick and open.
+        let more = ran.len().saturating_sub(RAN_SHOWN);
+        for (j, (r, run)) in ran.iter().skip(more).enumerate() {
+            let lead = if j == 0 {
+                label("You ran", C_SUB)
+            } else {
+                blanks(LABEL_W)
+            };
+            let mut came = run_came(run);
+            if run.end - run.start >= 100 {
+                came.push(dim(&format!(" · {}", dur(run.end - run.start))));
+            }
+            let room = room.saturating_sub(came.width() + 3);
+            let l = lead
+                .and(run_mark(run))
+                .and_raw(" ")
+                .and(run_words(run, room.max(8)))
+                .and_raw("   ")
+                .and(came);
+            rows.push((l, (*r).clone()));
+        }
+        if more > 0 {
+            let l = blanks(LABEL_W).and(dim(&format!("and {more} before them")));
+            rows.push((l, String::new()));
+        }
         if !said.is_empty() {
             let q = format!("\"{said}\"");
             let l = label("Said to you", C_SUB).and(sub(&q).truncate(room, &faint("…\"")));
@@ -1423,6 +1652,11 @@ impl Drawer<'_> {
             self.add(&r, Color::Default, l, Txt::new());
         }
         self.own(&first_r, from_row);
+        // A command you ran opened (enter on its line): its box under the
+        // card.
+        for (r, run) in ran.iter().skip(more) {
+            self.box_under(r, run);
+        }
     }
 
     // ---- Trail ----
@@ -1455,8 +1689,27 @@ impl Drawer<'_> {
         let room = self.cw.saturating_sub(l.width() + 3);
         l.push(text(&Self::asked_line(t)).truncate(room.max(8), &faint("…")));
         self.add(&r, Color::Default, l, Txt::new());
-        // Its steps.
-        let legs = self.legs();
+        // Its steps, and the commands you ran in it where they started.
+        let mut legs = self.legs();
+        for (r, run) in self.turn_runs() {
+            let running = run.running();
+            let g = Leg {
+                ids: Vec::new(),
+                verb: "you ran",
+                names: vec![one_line(first_line(run.command.trim()))],
+                start: run.start,
+                end: if running { run.start } else { run.end },
+                running,
+                waiting: false,
+                bad: !running && !run.stopped && !run.lost && run.exit != Some(0),
+                run: Some(r),
+            };
+            let at = legs
+                .iter()
+                .position(|x| x.start > g.start)
+                .unwrap_or(legs.len());
+            legs.insert(at, g);
+        }
         let now = self.o.now;
         let len = |g: &Leg| {
             let d = if g.running || g.waiting {
@@ -1471,6 +1724,7 @@ impl Drawer<'_> {
         let slow = legs
             .iter()
             .enumerate()
+            .filter(|(_, g)| g.run.is_none())
             .max_by_key(|&(_, g)| len(g))
             .filter(|&(_, g)| len(g) >= QUICK && len(g) * 10 >= total.max(1) * 3)
             .map(|(i, _)| i);
@@ -1523,15 +1777,30 @@ impl Drawer<'_> {
                 .and(dim(&when(self, g.start)))
                 .and_raw("  ")
                 .and(faint(tree));
-            let first = g.ids[0];
+            let o: &Options = self.o;
+            let run = g
+                .run
+                .as_ref()
+                .and_then(|r| o.shells.get(r).map(|x| (r, &**x)));
+            let (sr, part) = match run {
+                Some((r, x)) => (r.clone(), x.label()),
+                None => {
+                    let st = self.s.step(g.ids[0]);
+                    (self.step_ref(st), self.s.running_label(g.ids[0]))
+                }
+            };
             let mut tail = Txt::new();
             if g.bad {
                 tail.push(paint(C_RED, " ✗"));
             }
+            if let Some((_, x)) = run
+                && (x.stopped || x.lost)
+            {
+                tail.push(paint(C_YELLOW, &format!(" ✕ {}", x.outcome())));
+            }
             if g.waiting {
                 tail.push(paint(C_YELLOW, " · waiting on you"));
             }
-            let part = self.s.running_label(first);
             if g.running && !part.is_empty() {
                 tail.push(faint(" · "));
                 tail.push(paint(C_SUB, &part));
@@ -1543,12 +1812,18 @@ impl Drawer<'_> {
                 .leg_words(g)
                 .truncate(room.max(8), &faint("…"))
                 .and(tail);
-            let sr = self.step_ref(self.s.step(first));
             let picked = self.o.selected == sr;
+            let from = self.lines.len();
             self.add(&sr, Color::Default, lead.and(what), right);
-            // Picked, a running chain's keys under it.
-            if picked && g.running {
-                self.chain_keys(first, 12);
+            match run {
+                // Opened (enter), its box under it.
+                Some((r, x)) => {
+                    self.box_under(r, x);
+                    self.own(r, from);
+                }
+                // Picked, a running chain's keys under it.
+                None if picked && g.running => self.chain_keys(g.ids[0], 12),
+                None => {}
             }
         }
         // How it ended.
@@ -1652,6 +1927,7 @@ impl Drawer<'_> {
                 running,
                 waiting,
                 bad,
+                run: None,
             });
         }
         out

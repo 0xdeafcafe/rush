@@ -114,6 +114,41 @@ fn strip_prompt(l: &str) -> Option<&str> {
 /// draws them: the k-th is the one whose box is `<turn>:sh:<item>:<k>`.
 /// Fences are found as rush's markdown finds them (render/markdown.rs).
 pub fn shell_blocks(text: &str) -> Vec<ShellBlock> {
+    scan(text).into_iter().map(|(_, _, b)| b).collect()
+}
+
+/// A part of a reply's text cut at its shell blocks: the words before,
+/// between or after them, or a block with its number among the reply's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Piece {
+    Words(String),
+    Block(usize, ShellBlock),
+}
+
+/// text as its words and shell blocks, in order; words that are only
+/// blank lines are left out.
+pub fn pieces(text: &str) -> Vec<Piece> {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let words = |out: &mut Vec<Piece>, a: usize, b: usize| {
+        let w = lines[a.min(lines.len())..b.min(lines.len())].join("\n");
+        if !w.trim().is_empty() {
+            out.push(Piece::Words(w));
+        }
+    };
+    let mut out = Vec::new();
+    let mut from = 0;
+    for (k, (start, end, b)) in scan(text).into_iter().enumerate() {
+        words(&mut out, from, start);
+        out.push(Piece::Block(k, b));
+        from = end + 1;
+    }
+    words(&mut out, from, lines.len());
+    out
+}
+
+/// The shell blocks of text with the lines they take: their opening
+/// fence's and their closing one's (the last line when it's unclosed).
+fn scan(text: &str) -> Vec<(usize, usize, ShellBlock)> {
     let lines: Vec<&str> = text.split('\n').collect();
     let mut out = Vec::new();
     let mut i = 0;
@@ -126,7 +161,7 @@ pub fn shell_blocks(text: &str) -> Vec<ShellBlock> {
             }
             if let Some(b) = ShellBlock::from_fence(tag.trim(), &lines[i + 1..end.min(lines.len())])
             {
-                out.push(b);
+                out.push((i, end.min(lines.len() - 1), b));
             }
             i = end + 1;
             continue;
@@ -134,6 +169,12 @@ pub fn shell_blocks(text: &str) -> Vec<ShellBlock> {
         i += 1;
     }
     out
+}
+
+/// Whether any of runs is a `!` run made before the session had a turn
+/// (`t0:bang:<start>`): drawn above the turns, or alone.
+pub fn unturned<V>(runs: &std::collections::HashMap<String, V>) -> bool {
+    runs.keys().any(|k| k.starts_with("t0:"))
 }
 
 /// The ref of the box of the k-th shell block of item i of turn n.
@@ -170,6 +211,13 @@ impl BoxRef {
         let start = rest.strip_prefix("bang:")?.parse().ok()?;
         Some(BoxRef::Bang { turn, start })
     }
+
+    /// The turn it's in, by number: 0 for a `!` run before any.
+    pub fn turn(&self) -> u32 {
+        match *self {
+            BoxRef::Block { turn, .. } | BoxRef::Bang { turn, .. } => turn,
+        }
+    }
 }
 
 /// A command rush ran itself, and what came of it so far.
@@ -200,6 +248,15 @@ pub struct ShellRun {
     pub dropped: usize,
     /// Its output was put in the message box for the agent.
     pub sent: bool,
+    /// The process running it, and when that started, to know it again
+    /// when rush is opened while it still runs (0 for none).
+    pub pid: i32,
+    pub pid_start: Ms,
+    /// The file its output is written to as it runs, read back from
+    /// there; "" when it isn't written to one.
+    pub log: String,
+    /// It ended while rush was closed, how isn't known.
+    pub lost: bool,
     /// Its command running now is paused (p).
     #[serde(skip)]
     pub paused: bool,
@@ -327,6 +384,9 @@ impl ShellRun {
         }
         if self.stopped {
             return "stopped".into();
+        }
+        if self.lost {
+            return "ended while rush was closed".into();
         }
         match self.exit {
             Some(c) => format!("exit {c}"),
@@ -522,6 +582,27 @@ mod tests {
         assert_eq!(got[1].2, "ls\necho hi");
         assert_eq!(got[2].2, "make test");
         assert_eq!(got[3].2, "cargo build\ncargo test");
+    }
+
+    /// A reply cut at its shell blocks: the words around them kept, each
+    /// block numbered as shell_blocks numbers it.
+    #[test]
+    fn pieces_cut_at_the_blocks() {
+        let text =
+            "Try:\n\n```sh\nls\n```\n\n```rust\nlet x = 1;\n```\n\nthen\n\n```bash\nmake\n```";
+        let got = pieces(text);
+        assert_eq!(got.len(), 4, "{got:?}");
+        assert_eq!(got[0], Piece::Words("Try:\n".into()));
+        assert!(matches!(&got[1], Piece::Block(0, b) if b.script() == "ls"));
+        assert!(
+            matches!(&got[2], Piece::Words(w) if w.contains("```rust") && w.contains("then")),
+            "{got:?}"
+        );
+        assert!(matches!(&got[3], Piece::Block(1, b) if b.script() == "make"));
+        assert_eq!(
+            pieces("no shell here"),
+            [Piece::Words("no shell here".into())]
+        );
     }
 
     #[test]

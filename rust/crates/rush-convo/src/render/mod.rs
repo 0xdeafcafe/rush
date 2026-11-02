@@ -431,6 +431,11 @@ pub struct Renderer {
     places_for: String,
     index: RowIndex,
     partial: Option<RenderedLine>,
+    /// The commands you ran after `!` before the session had a turn, as
+    /// their boxes, above the first turn (or alone); and what they were
+    /// drawn from.
+    pre: Vec<RenderedLine>,
+    pre_key: Option<u64>,
     fast: bool,
     /// The turns the last window drew, [lo, hi).
     lo: usize,
@@ -518,6 +523,14 @@ impl Renderer {
             line: style::dim("  reading earlier…").into_line(),
             ..RenderedLine::default()
         });
+        let pre_key = unturned_key(s, o, sig);
+        if pre_key != self.pre_key {
+            self.pre = match pre_key {
+                Some(_) => draw_unturned(s, o, &self.places),
+                None => Vec::new(),
+            };
+            self.pre_key = pre_key;
+        }
         self.fast = false;
     }
 
@@ -552,9 +565,10 @@ impl Renderer {
         }
     }
 
-    /// The rows above the first turn: "reading earlier…".
+    /// The rows above the first turn: "reading earlier…", and the
+    /// commands you ran before there was one.
     fn hdr(&self) -> usize {
-        usize::from(self.partial.is_some())
+        usize::from(self.partial.is_some()) + self.pre.len()
     }
 
     /// The key turn i is drawn under now.
@@ -634,6 +648,21 @@ impl Renderer {
                 }
                 if going {
                     (o.now / 1000).hash(&mut h);
+                }
+                // The commands you ran, any turn's: the card names them,
+                // and opens the one picked.
+                if !o.shells.is_empty() {
+                    draw::shellbox::turn_sig(o, "t").hash(&mut h);
+                    if crate::shellbox::BoxRef::parse(&o.selected).is_some() {
+                        o.selected.hash(&mut h);
+                    }
+                    let mut opened: Vec<_> = o
+                        .open
+                        .iter()
+                        .filter(|(k, _)| crate::shellbox::BoxRef::parse(k).is_some())
+                        .collect();
+                    opened.sort();
+                    opened.hash(&mut h);
                 }
             }
             k.view = h.finish();
@@ -729,6 +758,7 @@ impl Renderer {
         if let Some(p) = &self.partial {
             out.push(p.clone());
         }
+        out.extend(self.pre.iter().cloned());
         for i in 0..s.turns.len() {
             out.extend(self.turn(s, o, i, latest, &folds).iter().cloned());
         }
@@ -784,11 +814,12 @@ impl Renderer {
     /// earlier…" first when they start at the top.
     pub fn rows(&self) -> Vec<&RenderedLine> {
         let mut out = Vec::new();
-        if self.lo == 0
-            && self.hi > 0
-            && let Some(p) = &self.partial
-        {
-            out.push(p);
+        // At the top: the window starts there, or there are no turns.
+        if self.lo == 0 && (self.hi > 0 || self.slots.is_empty()) {
+            if let Some(p) = &self.partial {
+                out.push(p);
+            }
+            out.extend(self.pre.iter());
         }
         for s in &self.slots[self.lo..self.hi.min(self.slots.len())] {
             if let Some(ls) = &s.lines {
@@ -1181,6 +1212,40 @@ fn draw_turn(
     }
     squeezed(&mut d.lines);
     (std::mem::take(&mut d.lines), d.fast)
+}
+
+/// What the commands you ran before the session had a turn are drawn
+/// from (`t0:bang:<start>`); None when there are none.
+fn unturned_key(s: &Session, o: &Options, sig: u64) -> Option<u64> {
+    if !crate::shellbox::unturned(&o.shells) {
+        return None;
+    }
+    let mut h = DefaultHasher::new();
+    (sig, draw::shellbox::turn_sig(o, "t0:"), &s.cwd).hash(&mut h);
+    if o.selected.starts_with("t0:") {
+        o.selected.hash(&mut h);
+    }
+    let mut opened: Vec<_> = o
+        .open
+        .iter()
+        .filter(|(k, _)| k.starts_with("t0:"))
+        .collect();
+    opened.sort();
+    opened.hash(&mut h);
+    Some(h.finish())
+}
+
+/// The boxes of the commands you ran before the session had a turn, in
+/// the order they ran: drawn alike in every view.
+fn draw_unturned(s: &Session, o: &Options, p: &Places) -> Vec<RenderedLine> {
+    let t = crate::model::Turn::default();
+    let mut d = Drawer::new(s, &t, o, p);
+    for (k, run) in d.take_bangs(usize::MAX) {
+        d.gap();
+        d.run_box(&k, run);
+        d.blank();
+    }
+    std::mem::take(&mut d.lines)
 }
 
 /// Every row as plain text, a row a line as `ref|text`, the text's
