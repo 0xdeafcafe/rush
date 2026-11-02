@@ -1289,8 +1289,11 @@ pub fn restart_agent_on(id: &str, text: &str, exe: &Path, spawn: SpawnOn) -> Res
 }
 
 /// Whether session id's host, pid, has gone, waiting up to timeout. One
-/// run in this very process (a test's) has gone once its socket no
-/// longer answers.
+/// run in this very process (a test's) has gone once its socket file is:
+/// removing it is the last of its shutdown. A dial that fails isn't
+/// enough: a host that has stopped accepting still holds its listener
+/// (a dial after connects again) until its shutdown removes the file,
+/// which would take a new host's socket with it.
 fn host_gone(id: &str, pid: i64, timeout: Duration) -> bool {
     if pid != std::process::id() as i64 {
         return crate::sys::wait_exit(pid, timeout);
@@ -1299,9 +1302,8 @@ fn host_gone(id: &str, pid: i64, timeout: Duration) -> bool {
     w.watch(&[dir(id)]);
     let deadline = Instant::now() + timeout;
     loop {
-        match Client::dial(id) {
-            Err(_) => return true,
-            Ok(c) => c.close(),
+        if std::fs::symlink_metadata(sock_path(id)).is_err() {
+            return true;
         }
         let now = Instant::now();
         if now >= deadline {
