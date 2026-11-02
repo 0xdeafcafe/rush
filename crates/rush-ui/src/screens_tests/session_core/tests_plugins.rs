@@ -289,7 +289,7 @@ fn haven() -> UiState {
             commands: vec![CommandSpec {
                 name: "open".into(),
                 description: "open the haven".into(),
-                key: "alt+u".into(),
+                key: "alt+x".into(),
             }],
             ..Default::default()
         }],
@@ -313,7 +313,7 @@ fn plugin_commands_on_keys() {
     assert_eq!(a.title, "open the haven");
     assert_eq!(a.source, "haven");
     assert_eq!(a.context, rush_keymap::Context::Any);
-    assert_eq!(km.key_text("plugin:haven.open"), "alt+u");
+    assert_eq!(km.key_text("plugin:haven.open"), "alt+x");
 }
 
 /// A plugin's suggested key runs its command, on the agent in view
@@ -323,7 +323,7 @@ fn plugin_key_runs_its_command() {
     let (mut m, _) = hosted("steer", Vec::new());
     with(&mut m, haven());
     hooks::rebuild_keys(&mut m);
-    press(&mut m, "alt+u");
+    press(&mut m, "alt+x");
     let (said, _, bad) = m.flash.clone().unwrap();
     // No broker in a test: the command says so.
     assert!(said.starts_with("haven open: ") && bad, "{said}");
