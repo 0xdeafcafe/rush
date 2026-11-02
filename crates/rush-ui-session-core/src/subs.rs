@@ -532,6 +532,12 @@ impl Ask {
             if again {
                 r.calls.clone_from(&self.calls);
             }
+            // Rust-only: a run whose numbers are no longer followed (the
+            // subagents view closed, a finished run off the dock) isn't
+            // kept read: each is a whole conversation, and a session can
+            // have hundreds. Its numbers stay; it's read again if asked.
+            r.tails
+                .retain(|id, _| self.stats.iter().any(|(want, _)| want == id));
             for (id, path) in &self.stats {
                 let whole = self.whole.contains(id);
                 let mut new = false;
