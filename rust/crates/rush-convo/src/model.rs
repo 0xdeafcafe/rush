@@ -38,7 +38,7 @@ mod exchange;
 mod jobs;
 pub mod runs;
 
-pub(crate) use chainrun::{PartMark, ScriptRun};
+pub(crate) use chainrun::PartMark;
 pub use chainrun::{PartProc, RunningPart, Shell, ShellProc};
 pub use exchange::{ExchangeItem, exchange_peer, peer_label};
 pub use jobs::Job;
