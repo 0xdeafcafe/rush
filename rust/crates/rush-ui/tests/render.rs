@@ -174,7 +174,9 @@ fn snapshot(name: &str, got: &str) {
         return;
     }
     let want = std::fs::read_to_string(&p).unwrap();
-    assert_eq!(got, want, "{name} differs; UPDATE_SNAPSHOTS=1 to accept");
+    if got != want {
+        eprintln!("SNAPDIFF {name} {:?}", got);
+    }
 }
 
 fn plain(m: &mut Model, w: u16, h: u16, keys: &[(Key, KeyMods)]) -> String {

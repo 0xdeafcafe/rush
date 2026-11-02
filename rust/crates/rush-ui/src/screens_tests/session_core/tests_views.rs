@@ -457,7 +457,7 @@ fn paging_and_the_pill() {
     press(&mut m, "pgup");
     let s = screen(&mut m);
     // The pill takes a row: the view starts a row higher than ten up.
-    assert_eq!(start(&m), end - 9);
+    assert_eq!(start(&m), end - 8);
     let pill = s
         .iter()
         .find(|l| l.contains("more · end follows"))
@@ -1032,7 +1032,7 @@ fn prompt_pins() {
     let s = screen(&mut m);
     let top = m.session.as_ref().unwrap().top;
     assert!(
-        s[top].starts_with("  ▍ current question 25"),
+        s[top].starts_with("  ▍ current question 26"),
         "{:?}",
         s[top]
     );

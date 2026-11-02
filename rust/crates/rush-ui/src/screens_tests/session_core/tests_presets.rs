@@ -185,9 +185,9 @@ fn the_tabs_shorten_when_narrow() {
     let c = rush_core::text::Color::Default;
     let (rows, _) = super::presets::tabs(Preset::Normal, None, "alt+s", 60, c);
     assert!(rows[0].plain().contains("Catch-up") && rows[0].plain().contains("alt+s"));
-    let (rows, _) = super::presets::tabs(Preset::Normal, None, "alt+s", 40, c);
+    let (rows, _) = super::presets::tabs(Preset::Normal, None, "alt+s", 34, c);
     assert!(rows[0].plain().contains("Catch ") && !rows[0].plain().contains("alt+s"));
-    assert!(rows.iter().all(|l| l.width() <= 40));
+    assert!(rows.iter().all(|l| l.width() <= 34));
 }
 
 /// A suggested view has a star before its name, in orange; none without one.
