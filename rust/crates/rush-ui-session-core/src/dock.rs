@@ -979,12 +979,12 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
         // → opens the row picked, or moves on into the column beside.
         let mut pairs = pairs.to_vec();
         if view == "conversation" && !pairs.iter().any(|p| p.0.contains('→')) {
-            let rows = conn(m, key).vs.rows.max(1);
-            if m.session.as_mut().is_some_and(|v| v.can_open(rows)) {
-                pairs.insert(1.min(pairs.len()), ("→", "open"));
-            } else if super::side::has_items(m, key) {
-                pairs.insert(1.min(pairs.len()), ("→", "the side"));
-            }
+            let says = if super::side::has_items(m, key) {
+                "open · the side"
+            } else {
+                "open"
+            };
+            pairs.insert(1.min(pairs.len()), ("→", says));
         }
         return fit_keys(w, &pairs);
     }

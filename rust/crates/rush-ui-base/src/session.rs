@@ -759,17 +759,37 @@ impl SessionView {
         seen
     }
 
-    /// Whether the row picked can open and is not open: it shows ▸.
+    /// Whether the row picked can open and is not open: it shows ▸, or
+    /// opening it would add rows (a folded step has no glyph). Tries it,
+    /// then puts it back as it was, so only for a key, not every frame.
     pub fn can_open(&mut self, rows: usize) -> bool {
-        if self.sel.is_empty() || self.o.open.get(&self.sel).copied().unwrap_or(false) {
+        if self.sel.is_empty() {
+            return false;
+        }
+        let sel = self.sel.clone();
+        let was = self.o.open.get(&sel).copied();
+        if was == Some(true) {
             return false;
         }
         self.layout(rows);
-        let sel = self.sel.clone();
-        self.r
+        if self
+            .r
             .rows()
             .iter()
             .any(|l| l.r#ref == sel && l.line.plain().contains('▸'))
+        {
+            return true;
+        }
+        let before = self.r.rows().len();
+        self.o.open.insert(sel.clone(), true);
+        self.layout(rows);
+        let after = self.r.rows().len();
+        match was {
+            Some(v) => self.o.open.insert(sel, v),
+            None => self.o.open.remove(&sel),
+        };
+        self.layout(rows);
+        after > before
     }
 
     /// Opens or closes the row picked.

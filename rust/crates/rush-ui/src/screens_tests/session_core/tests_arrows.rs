@@ -18,15 +18,11 @@ fn closed_row(m: &mut Model, r: &str) -> String {
         .insert(r.to_string(), false);
     let shown = screen(m).join("\n");
     let v = m.session.as_mut().unwrap();
-    v.sel.clear();
-    if !v
-        .r
-        .rows()
-        .iter()
-        .any(|l| l.r#ref == r && l.line.plain().contains('▸'))
-    {
-        panic!("{r} not drawn closed:\n{shown}");
+    v.sel = r.to_string();
+    if !v.can_open(20) {
+        panic!("{r} cannot open:\n{shown}");
     }
+    v.sel.clear();
     r.to_string()
 }
 
