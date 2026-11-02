@@ -36,3 +36,9 @@ tempfile.workspace = true
 [[bench]]
 name = "list"
 harness = false
+
+# How many threads an idle host runs: its own process, run with the fake
+# agent (the workspace's tests turn `fake` on).
+[[test]]
+name = "threads"
+required-features = ["fake"]
