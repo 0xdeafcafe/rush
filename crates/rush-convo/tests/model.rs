@@ -575,3 +575,35 @@ fn search() {
     assert_eq!(s.parent_ref("t2:s:a1g"), "t2:s:a1");
     assert_eq!(s.parent_ref("t2:s:b2"), "");
 }
+
+/// A long session holds thousands of each: what makes one bigger is a
+/// choice. (type, its size, the most it may be)
+#[test]
+fn parts_stay_small() {
+    use rush_convo::{RenderedLine, Request, Step, Turn};
+    let cases = [
+        ("Step", size_of::<Step>(), 200),
+        ("Turn", size_of::<Turn>(), 328),
+        ("Item", size_of::<Item>(), 40),
+        ("Request", size_of::<Request>(), 120),
+        ("RenderedLine", size_of::<RenderedLine>(), 88),
+    ];
+    for (name, size, most) in cases {
+        assert!(size <= most, "{name} is {size} B, more than {most}");
+    }
+}
+
+// A step's tool, the same in every session, is held once, not copied for
+// each step.
+#[test]
+fn steps_share_their_tool() {
+    let mut a = Session::new();
+    let mut b = Session::new();
+    for s in [&mut a, &mut b] {
+        s.feed(sent("look it up"), at(1));
+        s.feed(tool_use("c1", "mcp__linear__get_issue", json!({})), at(2));
+    }
+    let (x, y) = (&a.steps()[0].tool, &b.steps()[0].tool);
+    assert_eq!(x, "mcp__linear__get_issue");
+    assert_eq!(x.as_str().as_ptr(), y.as_str().as_ptr());
+}

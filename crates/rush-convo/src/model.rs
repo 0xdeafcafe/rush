@@ -21,6 +21,7 @@ use std::sync::Arc;
 
 use rush_core::agent::TokenUsage;
 use rush_core::event::{self, Event, ImageData, OptionKind, PartKind};
+use rush_core::name::Name;
 use rush_core::time::Ms;
 use rush_core::tool::{Call, Input, Kind, Output, TodoItem};
 use rush_core::wire::RawJson;
@@ -68,7 +69,7 @@ pub type StepId = u32;
 /// session of screenshots would otherwise hold all of.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Picture {
-    pub media_type: Box<str>,
+    pub media_type: Name,
     /// How many bytes the image is.
     pub bytes: usize,
     /// Where rush keeps a copy, when it does.
@@ -91,7 +92,7 @@ pub struct Step {
     pub id: Box<str>,
     /// The tool, in Claude Code's words: "Bash", "Read", "mcp__x__y"; the
     /// Claude tool of its kind when another agent made it (words.rs).
-    pub tool: Box<str>,
+    pub tool: Name,
     /// What the call does.
     pub kind: Kind,
     /// The call as its agent's adapter made it, with its input as sent.
@@ -228,9 +229,9 @@ pub enum Item {
     Step(StepId),
     Interject(Box<Interject>),
     /// The conversation was compacted here; summary is what it left, once
-    /// it's read.
+    /// it's read. Boxed: it's rare, and the largest of an Item's kinds.
     Compact {
-        compact: Compacted,
+        compact: Box<Compacted>,
         summary: String,
     },
     /// A message between agents (exchange.go): who to whom and what.
@@ -239,7 +240,7 @@ pub enum Item {
     /// error or ok.
     Notice {
         text: Box<str>,
-        level: Box<str>,
+        level: Name,
     },
 }
 
@@ -443,7 +444,7 @@ pub struct Session {
     pub limit: String,
     pub requests: Vec<Request>,
     /// Each tool's calls, by its name.
-    pub tools: HashMap<Box<str>, ToolStat>,
+    pub tools: HashMap<Name, ToolStat>,
     /// What the agent last said about each background task (completed,
     /// stopped, …), by task id.
     pub task_status: HashMap<Box<str>, Box<str>>,
@@ -1596,7 +1597,7 @@ impl Session {
         }
         let t = &mut self.turns[ti];
         t.items.push(Item::Compact {
-            compact: c,
+            compact: Box::new(c),
             summary: String::new(),
         });
         t.touch();
@@ -1763,7 +1764,7 @@ impl Session {
 
 /// A call as a step keeps it in Claude Code's words: its tool, and its
 /// input when that isn't the call's own raw.
-fn step_words(c: &Call) -> (Box<str>, Option<Box<RawValue>>) {
+fn step_words(c: &Call) -> (Name, Option<Box<RawValue>>) {
     if claudes(c) {
         return (c.name.as_str().into(), None);
     }
@@ -1857,11 +1858,11 @@ fn compact_ask(t: &mut Turn) {
     };
     let summary = rest.split_once(COMPACTED_TAIL).map_or(rest, |(s, _)| s);
     t.items.push(Item::Compact {
-        compact: Compacted {
+        compact: Box::new(Compacted {
             trigger: format!("by {by}").into(),
             before: 0,
             after: 0,
-        },
+        }),
         summary: summary.to_owned(),
     });
     t.cause = "carried on from a summary".into();
