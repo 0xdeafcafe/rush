@@ -192,7 +192,7 @@ pub fn views_panel(
     out.push(top);
     for i in 0..bh {
         let l = body.get(st.scroll + i).cloned().unwrap_or_default();
-        let mid = if cur.contains(&(st.scroll + i)) {
+        let mid = if cur.as_ref().is_some_and(|c| c.contains(&(st.scroll + i))) {
             // The cursor: a button picked lit, else the row on the
             // selection's ground, as a picked row is.
             let btn = l.act.btns.get(st.btn).map(|b| b.from as i64);
@@ -1007,10 +1007,10 @@ impl ViewsState {
     }
 
     /// The body rows under the cursor, none without the keys.
-    fn cursor_rows(&self) -> std::ops::RangeInclusive<usize> {
+    fn cursor_rows(&self) -> Option<std::ops::RangeInclusive<usize>> {
         match self.items.get(self.at_item()) {
-            Some(&(from, to)) if self.focus => from..=to,
-            _ => 1..=0,
+            Some(&(from, to)) if self.focus => Some(from..=to),
+            _ => None,
         }
     }
 
