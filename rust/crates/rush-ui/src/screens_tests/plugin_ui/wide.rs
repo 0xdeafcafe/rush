@@ -477,7 +477,9 @@ fn views_wide() {
     let vs = vec![v, small];
     let mut sets = Vec::new();
     for (sw, sh) in [(120, 40), (200, 50)] {
-        let w = views_width(sw);
+        // Go's panel width: the golden is of the panel at that width,
+        // whatever column width rush gives it beside a conversation.
+        let w = 64.min(42.max(sw * 3 / 8));
         let mut st = ViewsState::default();
         sets.push(views_panel(&vs, &[], w, sh - 8, now, &mut st));
         st.scroll = 30;
