@@ -2,7 +2,7 @@
     ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working                       default
    ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings    Agents · Wall  [ ]
   ╭─ ⌨ Keys ────────────────────────────────────────────────────────── f1 ─╮
-  │ ❯ ▏find a key by its keys or what it does                     134 keys │
+  │ ❯ ▏find a key by its keys or what it does                     135 keys │
 ──│ ────────────────────────────────────────────────────────────────────── │────
   │ Here · Agents and the Prompt ────────────────────────────────────────  │IME
 ┃ │ ▍ ↑                  the agent above                                   │
