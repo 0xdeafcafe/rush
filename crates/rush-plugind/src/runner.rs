@@ -9,6 +9,7 @@ use std::fs::OpenOptions;
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixStream;
+use std::panic::AssertUnwindSafe;
 use std::process::{Child, ExitStatus, Stdio};
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
@@ -16,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use rush_plugin::ctx::Registration;
 use rush_plugin::rpc::{CODE_NO_METHOD, CODE_PARSE, Handler};
-use rush_plugin::{Cancel, Conn, Ctx, CtxErr, Error, Launch, Plugin, Proxy, Raw};
+use rush_plugin::{Cancel, Conn, Ctx, CtxErr, Error, Launch, Plugin, Proxy, Raw, StartFn, Started};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::value::RawValue;
@@ -68,6 +69,8 @@ pub(crate) struct RunState {
     pub(crate) starts: Vec<Instant>,
     /// What tells the running plugin's end to its supervisor.
     watching: Vec<Registration>,
+    /// It runs inside the broker, not as a process.
+    inside: bool,
 }
 
 /// A plugin started and said hello to.
@@ -77,6 +80,58 @@ struct Running {
     exited: Ctx,
     wait_err: Arc<Mutex<String>>,
     proxy: Option<Proxy>,
+    /// Set for a bundled plugin running inside the broker.
+    inside: Option<Inside>,
+}
+
+/// A bundled plugin's side of its connection, inside the broker, and what
+/// runs its after once that closes.
+struct Inside {
+    own: Conn,
+    _ends: Registration,
+}
+
+impl Running {
+    /// Ends it: its process group, politely then not; one inside the
+    /// broker by closing its connection, both sides, waiting a little for
+    /// its after (a thread can't be killed).
+    fn stop(&self) {
+        match &self.inside {
+            None => kill(self.pid, &self.exited),
+            Some(i) => {
+                self.conn.close();
+                i.own.close();
+                self.exited.with_timeout(Duration::from_secs(2)).wait();
+            }
+        }
+    }
+}
+
+/// How a bundled plugin inside the broker ended, as its process's exit
+/// would say it ("" for a clean one), with what it would have printed on
+/// its way out written to its log.
+fn ended_as(res: std::thread::Result<Result<(), String>>, logp: &std::path::Path) -> String {
+    let (line, status) = match res {
+        Ok(Ok(())) => return String::new(),
+        Ok(Err(e)) => (format!("rush: {e}"), "exit status 1"),
+        Err(panic) => {
+            let msg = panic
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| panic.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "Box<dyn Any>".into());
+            (format!("panicked: {msg}"), "exit status 101")
+        }
+    };
+    if let Ok(mut f) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o600)
+        .open(logp)
+    {
+        let _ = std::io::Write::write_all(&mut f, format!("{line}\n").as_bytes());
+    }
+    status.to_string()
 }
 
 /// How a process that exited ended: Ok for a clean exit.
@@ -142,6 +197,7 @@ impl Runner {
                 out: None,
                 starts: Vec::new(),
                 watching: Vec::new(),
+                inside: false,
             }),
             cv: Condvar::new(),
             execs: AtomicUsize::new(0),
@@ -167,7 +223,12 @@ impl Runner {
         Status {
             name: self.name.clone(),
             state: s.state.clone(),
-            pid: s.pid as i64,
+            // One inside the broker is the broker's process.
+            pid: if s.inside {
+                std::process::id() as i64
+            } else {
+                s.pid as i64
+            },
             since: s.since,
             restarts: s.restarts,
             error: s.last_err.clone(),
@@ -317,6 +378,11 @@ impl Runner {
     fn launch(self: &Arc<Self>, p: Plugin) -> Result<Running, String> {
         self.lock().p = p.clone();
         self.set_state("starting", "");
+        if p.bundled
+            && let Some(start) = rush_plugin::bundle_named(&p.name).and_then(|b| b.start)
+        {
+            return self.launch_inside(&p, start);
+        }
 
         let proxy = if p.network.is_empty() {
             None
@@ -395,6 +461,63 @@ impl Runner {
                 exited,
                 wait_err,
                 proxy: None,
+                inside: None,
+            },
+        )
+    }
+
+    /// Starts a bundled plugin that has a start inside the broker
+    /// (Rust-only, see rush_plugin::bundled): the same protocol on a socket
+    /// pair, its start on this thread, and no thread of its own after.
+    /// Its end is its connection closing and what it does after, which
+    /// runs on a thread then. What it would have said on its way out goes
+    /// to its log, as its process's stderr did: an error as `rush plugin
+    /// run` prints one, ending as exit status 1; a panic, caught, as
+    /// exit status 101.
+    fn launch_inside(self: &Arc<Self>, p: &Plugin, start: StartFn) -> Result<Running, String> {
+        // Its process's folders, made as for a process (it runs in none).
+        rush_plugin::mkdir_all(&rush_plugin::data_dir(&p.name).join("tmp"))?;
+        let logp = rush_plugin::log_path(&p.name);
+        if let Some(d) = logp.parent() {
+            let _ = std::fs::create_dir_all(d);
+        }
+        let (mine, theirs) = UnixStream::pair().map_err(|e| e.to_string())?;
+        let conn = Conn::new(mine, Some(self.plugin_handler())).map_err(|e| e.to_string())?;
+        let started = match std::panic::catch_unwind(AssertUnwindSafe(|| start(theirs))) {
+            Ok(Ok(st)) => st,
+            Ok(Err(e)) => {
+                conn.close();
+                return Err(ended_as(Ok(Err(e)), &logp));
+            }
+            Err(panic) => {
+                conn.close();
+                return Err(ended_as(Err(panic), &logp));
+            }
+        };
+        let Started { conn: own, after } = started;
+        let (exited, done) = Ctx::background().with_cancel();
+        let wait_err = Arc::new(Mutex::new(String::new()));
+        let after = Mutex::new(Some(after));
+        let (e, scope) = (wait_err.clone(), self.scope.clone());
+        let ends = own.ctx().on_cancel(move || {
+            let Some(after) = after.lock().unwrap_or_else(|e| e.into_inner()).take() else {
+                return;
+            };
+            scope.spawn_sized("plugin-after", rush_sys::threads::MEDIUM, move || {
+                let res = std::panic::catch_unwind(AssertUnwindSafe(after));
+                *e.lock().unwrap_or_else(|e| e.into_inner()) = ended_as(res, &logp);
+                done.cancel();
+            });
+        });
+        self.started(
+            p,
+            Running {
+                conn,
+                pid: 0,
+                exited,
+                wait_err,
+                proxy: None,
+                inside: Some(Inside { own, _ends: ends }),
             },
         )
     }
@@ -405,11 +528,12 @@ impl Runner {
         {
             let mut s = self.lock();
             s.pid = run.pid;
+            s.inside = run.inside.is_some();
             s.exited = Some(run.exited.clone());
         }
         self.cv.notify_all();
         if let Err(e) = self.handshake(p, &run.conn) {
-            kill(run.pid, &run.exited);
+            run.stop();
             self.down(&run.conn);
             return Err(format!("did not start: {e}"));
         }
@@ -426,7 +550,11 @@ impl Runner {
             b.0.ui.changed();
             b.0.changed.bump();
         }
-        self.log.print(&format!("running, pid {}", run.pid));
+        if run.inside.is_some() {
+            self.log.print("running, inside the broker");
+        } else {
+            self.log.print(&format!("running, pid {}", run.pid));
+        }
         Ok(run)
     }
 
@@ -484,7 +612,7 @@ impl Runner {
     /// or was stopped: Ok when it exited as it should, else why not.
     fn end(&self, run: Running) -> Result<(), String> {
         let res = if run.exited.err().is_none() {
-            kill(run.pid, &run.exited);
+            run.stop();
             if self.quit.err().is_some() {
                 Err("stopped".to_string())
             } else {
@@ -508,6 +636,7 @@ impl Runner {
             let mut s = self.lock();
             s.conn = None;
             s.pid = 0;
+            s.inside = false;
             s.mcp_init = None;
             (std::mem::take(&mut s.subs), s.unwatch.take(), s.out.take())
         };
@@ -591,9 +720,17 @@ impl Runner {
     /// Stops it for good.
     pub(crate) fn shutdown(&self) {
         self.stop.cancel();
-        let exited = self.lock().exited.clone();
+        let (exited, inside) = {
+            let s = self.lock();
+            (s.exited.clone(), s.inside)
+        };
         if let Some(e) = exited {
-            e.wait();
+            if inside {
+                // What it does after may not end: it can't be killed.
+                e.with_timeout(Duration::from_secs(5)).wait();
+            } else {
+                e.wait();
+            }
         }
     }
 

@@ -2,7 +2,8 @@
 //! and stops when it's turned off. This test's own binary stands in for
 //! rush: the broker starts a bundled plugin as `<exe> plugin run <name>`,
 //! which main here answers by running it.
-//! Ported from internal/plugind/bundled_test.go.
+//! Ported from internal/plugind/bundled_test.go; the plugins inside the
+//! broker are Rust-only.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -52,6 +53,7 @@ fn register_e2e() -> Registered {
             conn.wait();
             Ok(())
         })),
+        start: None,
         switched: None,
     })
 }
@@ -69,10 +71,188 @@ fn main() {
     }
     if args.iter().skip(1).any(|a| a == "--list") {
         println!("bundled_plugin_runs: test");
+        println!("bundled_plugins_run_inside: test");
         return;
     }
     bundled_plugin_runs();
     println!("test bundled_plugin_runs ... ok");
+    bundled_plugins_run_inside();
+    println!("test bundled_plugins_run_inside ... ok");
+}
+
+/// How many of this process's children are alive.
+fn children() -> usize {
+    let me = std::process::id() as i32;
+    rush_sys::proc::snapshot()
+        .procs
+        .values()
+        .filter(|p| p.ppid == me)
+        .count()
+}
+
+/// A bundled plugin with a start runs inside the broker: no process, and
+/// no thread of its own while it's quiet; it answers as one in a process
+/// does; one that panics is caught and started again, the broker
+/// unharmed.
+fn bundled_plugins_run_inside() {
+    const N: usize = 14;
+    let home = tempfile::Builder::new()
+        .prefix("rpi-")
+        .tempdir_in("/tmp")
+        .unwrap();
+    rush_state::set_thread_dir(Some(home.path().canonicalize().unwrap()));
+    let h: Handler = Arc::new(|_, _, method, params| match method {
+        "cli.run" => {
+            let r: CliRun = from_raw(params).map_err(rush_plugin::Error::server)?;
+            if r.command == "boom" {
+                panic!("asked to");
+            }
+            to_raw(&CliResult {
+                stdout: format!("{}\n", r.args.join(" ")),
+                ..Default::default()
+            })
+            .map(Some)
+        }
+        _ => to_raw(&serde_json::json!({})).map(Some),
+    });
+    let afters = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let regs: Vec<Registered> = (0..N)
+        .map(|i| {
+            let (h, afters) = (h.clone(), afters.clone());
+            let start: rush_plugin::StartFn = Arc::new(move |s| {
+                let conn = Conn::new(s, Some(h.clone())).map_err(|e| e.to_string())?;
+                let afters = afters.clone();
+                Ok(rush_plugin::Started {
+                    conn,
+                    after: Box::new(move || {
+                        afters.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        Ok(())
+                    }),
+                })
+            });
+            rush_plugin::register_bundle(Bundle {
+                manifest: Manifest {
+                    name: format!("bundle-in-{i}"),
+                    command: vec!["rush".into()],
+                    cli: vec![
+                        CliSpec {
+                            name: "echo".into(),
+                            usage: "[words]".into(),
+                            description: "says them back".into(),
+                        },
+                        CliSpec {
+                            name: "boom".into(),
+                            usage: "".into(),
+                            description: "panics".into(),
+                        },
+                    ],
+                    ..Default::default()
+                },
+                optional: false,
+                run: None,
+                start: Some(start),
+                switched: None,
+            })
+        })
+        .collect();
+    let logger = Arc::new(rush_events::Logger::new(Some(
+        home.path().join("events.jsonl"),
+    )));
+    let threads_before = rush_sys::threads::count();
+    let b = Broker::new(
+        Arc::new(FileHosts::logging_to(logger.clone())),
+        Log::discard(),
+        Scope::with_events(logger),
+    );
+    b.reload();
+    for i in 0..N {
+        let st = b
+            .wait_status(&format!("bundle-in-{i}"), Duration::from_secs(10), |s| {
+                s.state == "running"
+            })
+            .unwrap_or_else(|| panic!("not running: {:?}", b.status()));
+        assert_eq!(
+            st.pid,
+            std::process::id() as i64,
+            "inside, its pid is the broker's"
+        );
+    }
+    assert_eq!(children(), 0, "inside the broker, it has no process");
+    // Quiet, they hold no thread each: at most a handful (the shared
+    // reader, the reaper), whatever N is. The threads that started them
+    // end just after they're running, so it waits for those to go.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let added = loop {
+        let added = rush_sys::threads::count().saturating_sub(threads_before);
+        if added <= 4 || std::time::Instant::now() > deadline {
+            break added;
+        }
+        std::thread::yield_now();
+    };
+    println!("{N} bundled plugins inside the broker: {added} threads added");
+    assert!(added <= 4, "{N} quiet plugins inside added {added} threads");
+
+    // It answers as one in a process does.
+    let ctx = Ctx::background().with_timeout(Duration::from_secs(10));
+    let run = |command: &str, args: &[&str]| CliRun {
+        command: command.into(),
+        args: args.iter().map(|s| s.to_string()).collect(),
+        ..Default::default()
+    };
+    let res = b.cli(&ctx, "bundle-in-0", run("echo", &["hi"])).unwrap();
+    assert_eq!(res.stdout, "hi\n");
+    // A panic in it ends only the call, as in a process of its own: the
+    // broker and the others go on.
+    let short = Ctx::background().with_timeout(Duration::from_secs(1));
+    assert!(b.cli(&short, "bundle-in-1", run("boom", &[])).is_err());
+    let res = b.cli(&ctx, "bundle-in-2", run("echo", &["still"])).unwrap();
+    assert_eq!(res.stdout, "still\n");
+
+    // Turned off, it stops: its connection closes and what it does after
+    // runs.
+    rush_plugin::set_bundled("bundle-in-0", false).unwrap();
+    b.reload();
+    assert!(b.status().iter().all(|s| s.name != "bundle-in-0"));
+    assert_eq!(afters.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    // One that panics as it starts is caught, written to its log as its
+    // process's stderr would have it, and started again.
+    let first = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let start: rush_plugin::StartFn = Arc::new(move |s| {
+        if first.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            panic!("at start");
+        }
+        let conn = Conn::new(s, None).map_err(|e| e.to_string())?;
+        Ok(rush_plugin::Started::serving(conn))
+    });
+    let panics = rush_plugin::register_bundle(Bundle {
+        manifest: Manifest {
+            name: "bundle-in-panics".into(),
+            command: vec!["rush".into()],
+            ..Default::default()
+        },
+        optional: false,
+        run: None,
+        start: Some(start),
+        switched: None,
+    });
+    b.reload();
+    let st = b
+        .wait_status("bundle-in-panics", Duration::from_secs(10), |s| {
+            s.state == "running"
+        })
+        .unwrap_or_else(|| panic!("not started again: {:?}", b.status()));
+    assert_eq!(st.restarts, 1, "{st:?}");
+    let log =
+        std::fs::read_to_string(rush_plugin::log_path("bundle-in-panics")).unwrap_or_default();
+    assert!(log.contains("panicked: at start"), "log: {log:?}");
+    assert_eq!(children(), 0);
+    b.stop();
+    panics.forget();
+    for r in regs {
+        r.forget();
+    }
+    rush_state::set_thread_dir(None);
 }
 
 fn bundled_plugin_runs() {
