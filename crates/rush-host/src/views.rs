@@ -18,7 +18,7 @@ use crate::wire::zero_time;
 
 /// Tells every agent it can keep a view: kept short, as every session
 /// carries it.
-pub const VIEWS_PROMPT: &str = "Your `view` tool (or `rush view set <name>`, JSON on stdin) draws live state in a panel beside the chat: a test run or build and its numbers, benchmarks, progress through a list, PRs and their checks, a migration, services you started. Start one unasked when such work starts, set it again (same name) on each change, clear it when done. Never repeat your reply in it; not for plans or summaries; rush shows subagents itself. rush greys a view left alone for 10 min or a turn and puts it away after 45 min or 3 turns. `rush view guide` has the styles.";
+pub const VIEWS_PROMPT: &str = "Your `view` tool (or `rush view set <name>`, JSON on stdin) draws live state in a panel beside the chat: a test run or build and its numbers, benchmarks, progress through a list, PRs and their checks, a migration, services you started. Start one unasked when such work starts, set it again (same name) on each change, clear it when done. When the user asks for status, stats or how work is going, answer there with stats, bars, a board or a table, and keep your reply to a line or two pointing at it, not tables in the chat. Never repeat your reply in it; not for plans or summaries; rush shows subagents itself. rush greys a view left alone for 10 min or a turn and puts it away after 45 min or 3 turns. `rush view guide` has the styles.";
 
 /// A view the agent hasn't touched for this long greys (and the agent is
 /// told once, while it works): long enough that a benchmark or a build
