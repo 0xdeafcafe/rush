@@ -550,12 +550,12 @@ fn move_sel(m: &mut Model, key: &str, d: isize) {
     let in_sight = !v.sel.is_empty() && sight.contains(&v.sel);
     let at = seen.iter().position(|r| **r == v.sel).filter(|_| in_sight);
     let next = match (at, d < 0) {
-        (None, true) => match sight.iter().rev().find(|r| own(r)) {
+        (None, true) => match sight.iter().rev().find(|r| !r.is_empty()) {
             Some(r) => r.clone(),
             None => seen[seen.len() - 1].clone(),
         },
         (None, false) if v.sel.is_empty() => return,
-        (None, false) => match sight.iter().find(|r| own(r)) {
+        (None, false) => match sight.iter().find(|r| !r.is_empty()) {
             Some(r) => r.clone(),
             None => return,
         },
