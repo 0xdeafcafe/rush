@@ -759,6 +759,19 @@ impl SessionView {
         seen
     }
 
+    /// Whether the row picked can open and is not open: it shows ▸.
+    pub fn can_open(&mut self, rows: usize) -> bool {
+        if self.sel.is_empty() || self.o.open.get(&self.sel).copied().unwrap_or(false) {
+            return false;
+        }
+        self.layout(rows);
+        let sel = self.sel.clone();
+        self.r
+            .rows()
+            .iter()
+            .any(|l| l.r#ref == sel && l.line.plain().contains('▸'))
+    }
+
     /// Opens or closes the row picked.
     pub fn toggle(&mut self, rows: usize) {
         if self.sel.is_empty() {

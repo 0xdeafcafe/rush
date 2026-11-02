@@ -12,8 +12,14 @@ use super::*;
 fn fetched() -> (Model, String) {
     let fake = Fake::new();
     let mut m = open(agent("steer", State::Idle), &fake, 120, 40);
+    let r = add_fetch(&mut m);
+    (m, r)
+}
+
+/// Adds a turn with a fetch to m's session, the fetch picked; its ref.
+pub(super) fn add_fetch(m: &mut Model) -> String {
     let now = m.now;
-    sess(&mut m).sent("what's in it?".into(), Vec::new(), now - 60_000);
+    sess(m).sent("what's in it?".into(), Vec::new(), now - 60_000);
     let call = Call {
         id: "f1".into(),
         name: "WebFetch".into(),
@@ -32,7 +38,7 @@ fn fetched() -> (Model, String) {
             ..Message::default()
         })
     };
-    let s = sess(&mut m);
+    let s = sess(m);
     s.apply(
         &msg(
             "assistant",
@@ -59,10 +65,10 @@ fn fetched() -> (Model, String) {
         ),
         now - 40_000,
     );
-    let n = sess(&mut m).turns.last().unwrap().n;
+    let n = sess(m).turns.last().unwrap().n;
     let r = format!("t{n}:s:f1");
     m.session.as_mut().unwrap().sel = r.clone();
-    (m, r)
+    r
 }
 
 #[test]

@@ -1667,6 +1667,9 @@ mod close_tests;
 #[path = "tests_stepkeys.rs"]
 mod stepkeys_tests;
 
+#[path = "tests_arrows.rs"]
+mod arrows_tests;
+
 #[path = "tests_full.rs"]
 mod full_tests;
 

@@ -35,6 +35,7 @@ use super::changes::FileChange;
 use super::dock::{dock_card, spread};
 use super::paint::{cut, dim, faint, plural};
 use super::{conn, open_key};
+use crate::frame::{Out, Press};
 use crate::model::Model;
 pub use crate::sidecol::{VIEWS_REF, side_head, side_width, text_width};
 use crate::style::*;
@@ -538,7 +539,9 @@ fn open_decisions(m: &mut Model, key: &str) -> Vec<(u32, Vec<Decision>)> {
 /// as the views' panel is as tall as what's in it (rushPane's paste,
 /// laid from the top rather than at the foot).
 pub fn paste(m: &mut Model, key: &str, out: &mut Vec<Line>, foot: usize, cw: usize, top: usize) {
-    let side = &mut conn(m, key).side;
+    let c = conn(m, key);
+    let at = c.side_pick;
+    let side = &mut c.side;
     side.shown = 0;
     if side.rows.is_empty() || side.w == 0 || cw < side.w + 2 {
         return;
@@ -552,10 +555,20 @@ pub fn paste(m: &mut Model, key: &str, out: &mut Vec<Line>, foot: usize, cw: usi
     }
     let n = side.rows.len().min(foot.saturating_sub(first)); // and clicks only what shows
     let y = first;
+    // The item the arrow keys picked, lit as a picked row is.
+    let lit = picked_rows(side, at);
     for (i, l) in out.iter_mut().enumerate().take(foot).skip(first) {
         let mut r = fit(cut(l, 0, x), x);
         if (y..y + n).contains(&i) {
-            join(&mut r, side.rows[i - y].clone());
+            let row = side.rows[i - y].clone();
+            join(
+                &mut r,
+                if lit.contains(&(i - y)) {
+                    super::dock::picked1(row, side.w, true)
+                } else {
+                    row
+                },
+            );
         }
         *l = fit(r, cw);
     }
@@ -582,6 +595,13 @@ pub fn click(m: &mut Model, x: usize, y: usize) -> bool {
         return false;
     }
     let r = side.refs.get(y - side.y).cloned().unwrap_or_default();
+    act(m, &key, &r)
+}
+
+/// What a click, or enter or → on a picked row, does with the row's ref
+/// r. Whether it was one that does anything.
+fn act(m: &mut Model, key: &str, r: &str) -> bool {
+    let key = key.to_string();
     if r == TASKS_REF {
         super::views::show_view(m, &key, "tasks");
         return true;
@@ -602,7 +622,7 @@ pub fn click(m: &mut Model, x: usize, y: usize) -> bool {
         rush_ui_plugin_ui::views::beside::open_from_side(m, &key, rest);
         return true;
     }
-    if super::subview::click_ref(m, &key, &r) {
+    if super::subview::click_ref(m, &key, r) {
         return true;
     }
     if let Some(rest) = r.strip_prefix(CHANGES_REF) {
@@ -615,6 +635,90 @@ pub fn click(m: &mut Model, x: usize, y: usize) -> bool {
         return true;
     }
     false
+}
+
+/// The column's items that can be picked: the first row of each run of
+/// rows with one ref, as drawn.
+fn items(m: &mut Model, key: &str) -> Vec<usize> {
+    let side = &conn(m, key).side;
+    let n = side.shown.min(side.refs.len());
+    (0..n)
+        .filter(|&i| !side.refs[i].is_empty() && (i == 0 || side.refs[i - 1] != side.refs[i]))
+        .collect()
+}
+
+/// Whether a column shows with something in it to pick.
+pub fn has_items(m: &mut Model, key: &str) -> bool {
+    !items(m, key).is_empty()
+}
+
+/// Gives the column the keys, its first item picked. Whether it has one.
+pub fn focus(m: &mut Model, key: &str) -> bool {
+    let first = items(m, key).first().copied();
+    conn(m, key).side_pick = first;
+    first.is_some()
+}
+
+/// Whether the column has the keys: the row picked is still an item.
+pub fn focused(m: &mut Model, key: &str) -> bool {
+    match conn(m, key).side_pick {
+        Some(i) if items(m, key).contains(&i) => true,
+        Some(_) => {
+            conn(m, key).side_pick = None;
+            false
+        }
+        None => false,
+    }
+}
+
+/// The rows of the item picked in the column.
+fn picked_rows(side: &Side, at: Option<usize>) -> std::ops::Range<usize> {
+    let Some(i) = at else {
+        return 0..0;
+    };
+    let Some(r) = side.refs.get(i).filter(|r| !r.is_empty()) else {
+        return 0..0;
+    };
+    let end = side.shown.min(side.refs.len());
+    let mut to = i;
+    while to < end && side.refs[to] == *r {
+        to += 1;
+    }
+    i..to
+}
+
+/// The keys while the column has them: ↑↓ through its items, enter, space
+/// or → opens one, ← or esc goes back to where the keys came from (the
+/// conversation's pick, or the box). Any other key goes back too, and is
+/// the box's or the conversation's.
+pub fn focus_key(m: &mut Model, k: &Press) -> Out {
+    let Some(key) = open_key(m) else {
+        return Out::Pass;
+    };
+    if m.session.is_none() || m.confirm.is_some() || m.sheet.is_some() || m.on_place() {
+        return Out::Pass;
+    }
+    if !focused(m, &key) {
+        return Out::Pass;
+    }
+    let all = items(m, &key);
+    let at = conn(m, &key).side_pick.unwrap_or(0);
+    let i = all.iter().position(|&r| r == at).unwrap_or(0);
+    match k.s.as_str() {
+        "up" => conn(m, &key).side_pick = Some(all[i.saturating_sub(1)]),
+        "down" => conn(m, &key).side_pick = Some(all[(i + 1).min(all.len() - 1)]),
+        "enter" | "space" | "right" => {
+            let r = conn(m, &key).side.refs[at].clone();
+            conn(m, &key).side_pick = None;
+            act(m, &key, &r);
+        }
+        "left" | "esc" => conn(m, &key).side_pick = None,
+        _ => {
+            conn(m, &key).side_pick = None;
+            return Out::Pass;
+        }
+    }
+    Out::Draw
 }
 
 #[cfg(test)]

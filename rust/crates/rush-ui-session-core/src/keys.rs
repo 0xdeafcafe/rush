@@ -167,6 +167,15 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     if o.used() {
         return o;
     }
+    // → from the box with nothing typed, or the cursor at the end of what
+    // is: open the picked item, else into the column beside the
+    // conversation.
+    if s == "right" && (empty || conn(m, &key).input.pos >= conn(m, &key).input.text.len()) {
+        let o = arrow_right(m, &key, empty, !picked.is_empty());
+        if o.used() {
+            return o;
+        }
+    }
     match s {
         "esc" => {
             if !empty {
@@ -239,6 +248,11 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         "up" | "down" => {
             if empty || !picked.is_empty() {
                 return Out::Pass; // the conversation's rows
+            }
+            // ↑ on the box's first line leaves it for the conversation;
+            // below that it moves the cursor up.
+            if s == "up" && on_first_row(m, &key) && leave_box(m, &key) {
+                return Out::Draw;
             }
             box_vert(m, &key, if s == "up" { -1 } else { 1 }, false);
             return Out::Draw;
@@ -519,6 +533,72 @@ fn end_queue_edit(m: &mut Model, key: &str) {
     }
     c.edit_held = false;
     queue::hold(m, key, false);
+}
+
+/// → from the box (empty, or its cursor at the end of the text): opens the
+/// row picked in the conversation when it can open and is not open, else
+/// moves into the column beside the conversation, its first item picked.
+/// Pass when the conversation's own keys should have it (an empty box with
+/// a pick and no column), Idle when there is nowhere to go.
+fn arrow_right(m: &mut Model, key: &str, empty: bool, picked: bool) -> Out {
+    if view_is_conversation(m, key) {
+        let rows = conn(m, key).vs.rows.max(1);
+        if picked && m.session.as_mut().is_some_and(|v| v.can_open(rows)) {
+            if empty {
+                return Out::Pass; // the conversation opens it
+            }
+            if let Some(v) = m.session.as_mut() {
+                let sel = v.sel.clone();
+                v.o.open.insert(sel, true);
+            }
+            return Out::Draw;
+        }
+        if super::side::focus(m, key) {
+            return Out::Draw;
+        }
+    }
+    if picked && empty {
+        return Out::Pass; // as before: what that row does with →
+    }
+    Out::Idle
+}
+
+fn view_is_conversation(m: &mut Model, key: &str) -> bool {
+    super::views::view_name(m, key) == "conversation"
+}
+
+/// Whether the box's cursor is on its first line, as wrapped.
+fn on_first_row(m: &mut Model, key: &str) -> bool {
+    let c = conn(m, key);
+    let mut b = c.drawn.clone();
+    b.text = c.input.text.clone();
+    let segs = b.segs();
+    let pos = c.input.pos.min(c.input.text.len());
+    segs.iter()
+        .position(|sg| pos >= sg.from && pos <= sg.to)
+        .is_none_or(|row| row == 0)
+}
+
+/// ↑ out of the box into the conversation: the row nearest the box picked
+/// (the queue's last message when one waits). What's typed stays in the
+/// box. Whether it moved; the conversation not showing, or nothing to
+/// pick, leaves the cursor to move instead.
+fn leave_box(m: &mut Model, key: &str) -> bool {
+    if !view_is_conversation(m, key) {
+        return false;
+    }
+    let n = queue_of(m, key).items.len();
+    if n > 0 {
+        set_sel(m, format!("q:{}", n - 1));
+        return true;
+    }
+    let rows = conn(m, key).vs.rows.max(1);
+    let Some(v) = m.session.as_mut() else {
+        return false;
+    };
+    v.sel.clear();
+    v.move_sel(-1, rows);
+    !v.sel.is_empty()
 }
 
 /// Moves the box's cursor a row up or down through its text as wrapped,

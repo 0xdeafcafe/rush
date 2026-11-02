@@ -14,7 +14,7 @@ use crate::frame::Mouse;
 use crate::screens::plugin_ui::views::read;
 
 /// A rush session of host id, its views folder made, open w×h.
-fn rush_open(id: &str, w: usize, h: usize, views: Vec<View>) -> Model {
+pub(super) fn rush_open(id: &str, w: usize, h: usize, views: Vec<View>) -> Model {
     std::fs::create_dir_all(rush_host::paths::dir(id)).expect("the session's folder");
     for v in views {
         rush_host::views::save_view(id, v).expect("saved");
@@ -29,7 +29,7 @@ fn rush_open(id: &str, w: usize, h: usize, views: Vec<View>) -> Model {
     m
 }
 
-fn view(name: &str, title: &str, summary: &str) -> View {
+pub(super) fn view(name: &str, title: &str, summary: &str) -> View {
     View {
         name: name.into(),
         title: title.into(),

@@ -104,6 +104,9 @@ pub fn register(x: &mut Ext) {
     // The box under a run beside the subagents list, while it has the
     // keys, has them all.
     x.session_keys.insert(0, subview::box_key);
+    // Focus in the column beside the conversation (→ from the box or the
+    // conversation): its keys come before everything else's.
+    x.session_keys.insert(0, side::focus_key);
     // A memory file being edited has every key first.
     x.session_keys.push(memedit::key);
     x.session_keys.push(memedit::draft_key);
@@ -288,6 +291,9 @@ pub struct Conn {
     pub box_y: Option<usize>,
     /// The column beside a wide conversation, as the dock last made it.
     pub side: side::Side,
+    /// The column's row the arrow keys have picked (the first row of the
+    /// item), while focus is in the column; None when it is not.
+    pub side_pick: Option<usize>,
     pub q_shown: (usize, usize),
     pub out: Outbox,
     /// When the box was last wiped: its hints say how to bring it back.

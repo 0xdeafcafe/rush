@@ -741,6 +741,18 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     if queue::sel(picked, q.items.len()).is_some() {
         return queue::hint(&q, w);
     }
+    // The column beside the conversation has the keys.
+    if super::side::focused(m, key) {
+        return fit_keys(
+            w,
+            &[
+                ("↑↓", "pick"),
+                ("enter · →", "open"),
+                ("←", "back"),
+                ("esc", "back"),
+            ],
+        );
+    }
     // Watching a run: its keys, or its picked step's.
     if super::subview::watching(m, key) {
         let rk = super::row_key(m);
@@ -964,7 +976,17 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
                 ("ctrl+o", "show all"),
             ]
         };
-        return fit_keys(w, pairs);
+        // → opens the row picked, or moves on into the column beside.
+        let mut pairs = pairs.to_vec();
+        if view == "conversation" && !pairs.iter().any(|p| p.0.contains('→')) {
+            let rows = conn(m, key).vs.rows.max(1);
+            if m.session.as_mut().is_some_and(|v| v.can_open(rows)) {
+                pairs.insert(1.min(pairs.len()), ("→", "open"));
+            } else if super::side::has_items(m, key) {
+                pairs.insert(1.min(pairs.len()), ("→", "the side"));
+            }
+        }
+        return fit_keys(w, &pairs);
     }
     if view == "memory" && conn(m, key).input.is_empty() {
         return fit_keys(
@@ -992,6 +1014,7 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     let (aside, history) = rush_ui_plugin_ui::hooks::stash_keys(m);
     let your_stash = format!("your {} back", words.noun);
     let history_says = format!("{} · sent · cleared", words.tab.to_lowercase());
+    let side_items = view == "conversation" && super::side::has_items(m, key);
     let c = conn(m, key);
     let live = c.hosted() && live_turn;
     let st = BoxState {
@@ -1018,6 +1041,9 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     }
     if stash_on {
         pairs.push((history.as_str(), history_says.as_str()));
+    }
+    if side_items {
+        pairs.push(("→", "the side"));
     }
     if turns {
         pairs.push((
