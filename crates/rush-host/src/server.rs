@@ -2391,8 +2391,11 @@ impl Host {
                         h.reg.price(&kind, &model, &u).unwrap_or(0.0)
                     };
                     let (read, lapse) = rush_core::cachekeep::worth(ttl, context);
+                    // worth gives the read in the context's input tokens'
+                    // worth already (a tenth): priced as input, not again
+                    // as a cache read.
                     let read_usd = price(rush_core::agent::TokenUsage {
-                        cache_read: read as i64,
+                        input: read as i64,
                         ..Default::default()
                     });
                     let saves_usd = price(rush_core::agent::TokenUsage {
