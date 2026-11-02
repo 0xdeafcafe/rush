@@ -80,6 +80,14 @@ fn main() {
     println!("test bundled_plugins_run_inside ... ok");
 }
 
+/// This process's footprint, in bytes.
+fn footprint() -> u64 {
+    let me = std::process::id() as i32;
+    let mut t = rush_sys::proc::snapshot();
+    t.fill(None, &[me]);
+    t.procs.get(&me).map_or(0, |p| p.footprint)
+}
+
 /// How many of this process's children are alive.
 fn children() -> usize {
     let me = std::process::id() as i32;
@@ -159,6 +167,7 @@ fn bundled_plugins_run_inside() {
         home.path().join("events.jsonl"),
     )));
     let threads_before = rush_sys::threads::count();
+    let footprint_before = footprint();
     let b = Broker::new(
         Arc::new(FileHosts::logging_to(logger.clone())),
         Log::discard(),
@@ -189,7 +198,10 @@ fn bundled_plugins_run_inside() {
         }
         std::thread::yield_now();
     };
-    println!("{N} bundled plugins inside the broker: {added} threads added");
+    println!(
+        "{N} bundled plugins inside the broker: {added} threads, {} KB footprint added",
+        footprint().saturating_sub(footprint_before) >> 10
+    );
     assert!(added <= 4, "{N} quiet plugins inside added {added} threads");
 
     // It answers as one in a process does.
