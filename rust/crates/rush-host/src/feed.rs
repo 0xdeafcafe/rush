@@ -6,7 +6,7 @@
 //! feedAuthor, feedSummer); the server's calls are host.go:619, :1907,
 //! :1916.
 
-use rush_core::adapter::{LEGACY_KIND, Registry, fit_tokens};
+use rush_core::adapter::{LEGACY_KIND, Registry, ask_plugin_models, fit_tokens};
 use rush_core::event::{Exchange, Peer};
 use rush_room::community::{self, Author, Feed};
 
@@ -61,10 +61,17 @@ fn author(reg: &Registry, p: &Peer) -> Author {
     }
 }
 
-/// An agent's message summed up for the feed by Claude's cheapest model
-/// when it's here, else the agent kind's own; empty when neither can
-/// (feedSummer).
+/// An agent's message summed up for the feed by a plugin's model when one
+/// offers it and it fits, else Claude's cheapest model when it's here, else
+/// the agent kind's own; empty when none can (feedSummer).
 pub fn summary(reg: &Registry, kind: &str, text: &str) -> String {
+    let prompt = format!("<message>\n{}\n</message>", fit_tokens(text, 8000));
+    if let Ok((_, out)) = ask_plugin_models(reg, FEED_SUMMARY_SYSTEM, &prompt)
+        && !out.trim().is_empty()
+        && !crate::title::asked_back(&out)
+    {
+        return out;
+    }
     for k in [LEGACY_KIND, kind] {
         let Some(a) = reg.get(k) else { continue };
         if !reg.installed(k) {
@@ -77,11 +84,7 @@ pub fn summary(reg: &Registry, kind: &str, text: &str) -> String {
         let Some(m) = models.first() else {
             return String::new();
         };
-        let Ok(out) = sm.summarize(
-            m,
-            FEED_SUMMARY_SYSTEM,
-            &format!("<message>\n{}\n</message>", fit_tokens(text, 8000)),
-        ) else {
+        let Ok(out) = sm.summarize(m, FEED_SUMMARY_SYSTEM, &prompt) else {
             return String::new();
         };
         if crate::title::asked_back(&out) {

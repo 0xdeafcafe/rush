@@ -27,6 +27,7 @@ rush-prdrive.workspace = true
 libc.workspace = true
 rush-copilot = { path = "../rush-copilot" }
 rush-ollama = { path = "../rush-ollama" }
+rush-plugin-models = { path = "../rush-plugin-models" }
 rush-providers = { path = "../rush-providers" }
 rush-acp = { path = "../rush-acp" }
 rush-menubar = { path = "../rush-menubar" }

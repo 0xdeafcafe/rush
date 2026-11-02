@@ -561,6 +561,9 @@ fn register() {
     rush_ollama::register(reg);
     rush_providers::register(reg);
     rush_acp::register(reg);
+    // The models plugins offer, for rush's own small jobs (titles, feed
+    // summaries, quick ask, memory): a helper, never an agent.
+    rush_plugin_models::register(reg);
     // The plugins that ship inside rush (Go's bundled packages' inits);
     // remote mode's switch installs serve's LaunchAgent.
     rush_bundled::remote::on_switch(rush_remote::plugins::switch_remote);

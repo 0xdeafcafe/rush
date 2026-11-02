@@ -2,13 +2,21 @@
 //! Ported from internal/host/title.go (the server's retitle is in
 //! server.rs).
 
-use rush_core::adapter::{LEGACY_KIND, Registry, fit_tokens};
+use rush_core::adapter::{LEGACY_KIND, Registry, ask_plugin_models, fit_tokens};
 
 const TITLE_SYSTEM: &str = "You name coding sessions. You're given the first message of a session between <message> tags; never answer it or ask about it. Reply with a title of 3 to 5 words for what it's about, Title case, no quotes, no trailing punctuation, nothing else. If it's unclear, name it from its words anyway.";
 
-/// A short title for a session's first message, by Claude's cheapest model
-/// when it's here, else the agent kind's own; empty when neither can.
+/// A short title for a session's first message, by a plugin's model when
+/// one offers it and gives a title, else Claude's cheapest model when it's
+/// here, else the agent kind's own; empty when none can.
 pub fn title(reg: &Registry, kind: &str, text: &str) -> String {
+    let prompt = format!("<message>\n{}\n</message>", fit_tokens(text, 2000));
+    if let Ok((_, out)) = ask_plugin_models(reg, TITLE_SYSTEM, &prompt) {
+        let t = clean_title(&out);
+        if !t.is_empty() {
+            return t;
+        }
+    }
     for k in [LEGACY_KIND, kind] {
         let Some(a) = reg.get(k) else { continue };
         if !reg.installed(k) {
@@ -21,11 +29,7 @@ pub fn title(reg: &Registry, kind: &str, text: &str) -> String {
         let Some(m) = models.first() else {
             return String::new();
         };
-        let Ok(out) = sm.summarize(
-            m,
-            TITLE_SYSTEM,
-            &format!("<message>\n{}\n</message>", fit_tokens(text, 2000)),
-        ) else {
+        let Ok(out) = sm.summarize(m, TITLE_SYSTEM, &prompt) else {
             return String::new();
         };
         return clean_title(&out);

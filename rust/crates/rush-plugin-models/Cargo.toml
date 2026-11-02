@@ -1,0 +1,10 @@
+[package]
+name = "rush-plugin-models"
+description = "the language models plugins offer, as a helper adapter for rush's own small jobs (titles, feed summaries, quick ask, memory)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rush-core = { path = "../rush-core" }
+rush-plugin = { path = "../rush-plugin" }

@@ -94,6 +94,7 @@ A plugin can do anything its manifest allows, so rush doesn't go by what it can 
 - **Your environment.** It gets a clean one: none of your tokens or Claude Code settings.
 - **Your agents.** It may list and watch them, and see their folder, branch, state, cost and context use, never what was said. It may message, follow and stop only agents it started. Those run in folders you approved (in a new worktree, if it asks), never in a mode that skips asking you, with at most 4 at once and 30 an hour. With `queue` it may also queue a message, marked as its own, to other agents in those folders that still ask you before acting, and with `queued` send now, or drop, a message you queued in one, by its place, without seeing it.
 - **Your agent list.** With `sidebar` it may arrange it: its own sections, and a name for each agent it knows by Claude Code session id. The list offers that as a group-by mode, and your own renames win. It sees nothing more by it.
+- **Your system's services.** Its sandbox reaches none beyond what every program needs to start, unless its manifest names a group of them under `system`, which approval spells out. rush knows one so far: `apple-intelligence`, Apple Intelligence's on-device model.
 - **Your machine's time.** It runs at utility QoS, and is ended if it grows past its memory limit (256 MB by default).
 
 The full list is in [the sandbox reference](skills/write-rush-plugin/references/sandbox.md), and how each rule is enforced is in [ARCHITECTURE.md](ARCHITECTURE.md#the-boundaries).
@@ -113,6 +114,12 @@ A plugin can also take part in rush's own window, as far as its manifest's `ui` 
 A plugin needs no capability to have the *agent* keep a view: its `prompt` can tell the agent what to track and how (`rush view guide` says what makes a good one). `views` is for a plugin that knows something the agent doesn't, such as a CI dashboard, and draws it itself.
 
 `commands` adds commands to the `#` commands, the command bar and the keymap, as `plugin:<name>.<command>`. `settings` adds settings under Settings, Plugins; rush keeps their values where the plugin can't write, and tells it when you change one. `cli` adds commands to rush's CLI, as `rush <plugin> <command>`: the plugin runs them, with what it may do, and rush prints what it answers; `rush help` lists them.
+
+### Models for rush's small jobs
+
+A plugin with `"models": true` offers language models for rush's own small jobs: naming sessions, summing up messages for the feed, quick ask, and memory notes. rush asks a plugin's model first for these, and Claude's cheapest model, then Ollama's, only when it can't answer: it isn't running, it's unavailable, or what it's given is too big for it. The sidekick, which wants a stronger model, never asks one. `#compact` lists them among the models it can sum up with. They are never agents: nothing starts a session with one, and none shows under accounts or profiles.
+
+`apple-intelligence` is one: a Swift plugin that answers with Apple Intelligence's on-device model, with `"system": ["apple-intelligence"]` so its sandbox can reach it.
 
 None of it can slow rush down. rush hands the broker events without waiting, draws what plugins added from a copy it already holds, and a plugin that falls behind only loses its own oldest events. What a plugin added goes when it stops.
 

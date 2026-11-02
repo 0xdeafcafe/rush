@@ -5,6 +5,7 @@ use std::fmt::Write;
 
 use crate::manifest::{
     CAP_CONTROL, CAP_LIST, CAP_QUEUE, CAP_QUEUED, CAP_READ, CAP_SEND, CAP_START, PROTO_MCP,
+    system_named,
 };
 use crate::plugin::Plugin;
 use crate::text::{clip, printable};
@@ -198,6 +199,17 @@ pub fn describe(p: &Plugin) -> String {
             p.uses.join(", ")
         ));
     }
+    if p.models {
+        grants.push(
+            "answers rush's small jobs with its own models: session titles, feed summaries, quick ask and memory notes (what's sent to them goes to the plugin)"
+                .into(),
+        );
+    }
+    for name in &p.system {
+        if let Some(sys) = system_named(name) {
+            grants.push(sys.allows.to_string());
+        }
+    }
     let needs = p.requires.needs();
     if !needs.is_empty() {
         let _ = writeln!(b, "\nIt runs only with {needs}.");
@@ -249,5 +261,26 @@ It runs neighbours, sandboxed:\n  • reads its folder, /p/neighbours, and the s
             data.display()
         );
         assert_eq!(got, want);
+    }
+
+    #[test]
+    fn describes_models_and_system_services() {
+        let _h = Home::new();
+        let p = Plugin {
+            manifest: Manifest {
+                name: "apple-intelligence".into(),
+                command: vec!["ai".into()],
+                models: true,
+                system: vec![crate::manifest::SYSTEM_APPLE_INTELLIGENCE.into()],
+                ..Default::default()
+            },
+            dir: "/p/apple-intelligence".into(),
+            ..Default::default()
+        };
+        let got = describe(&p);
+        let want = "\nIt:\n  \
+• answers rush's small jobs with its own models: session titles, feed summaries, quick ask and memory notes (what's sent to them goes to the plugin)\n  \
+• uses Apple Intelligence's on-device model\n";
+        assert!(got.ends_with(want), "got {got}");
     }
 }

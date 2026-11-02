@@ -34,6 +34,7 @@ pub mod describe;
 pub mod gopath;
 mod jsonshape;
 pub mod manifest;
+pub mod models;
 pub mod origin;
 pub mod plugin;
 pub mod project;
