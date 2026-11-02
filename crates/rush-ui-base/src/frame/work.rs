@@ -66,7 +66,7 @@ impl Model {
     /// work had one asleep for each). With no loop nothing wakes it:
     /// [`Model::run_timers`] runs what's due.
     pub fn after(&mut self, d: Duration, apply: impl FnOnce(&mut Model) -> Out + 'static) {
-        let at = Instant::now() + d;
+        let at = self.instant.unwrap_or_else(Instant::now) + d;
         self.kept::<Timers>().0.push((at, Box::new(apply)));
     }
 
