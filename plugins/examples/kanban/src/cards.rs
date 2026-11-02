@@ -105,8 +105,6 @@ pub struct CheckRun {
     #[serde(deserialize_with = "nullable")]
     pub name: String,
     #[serde(deserialize_with = "nullable")]
-    pub status: String,
-    #[serde(deserialize_with = "nullable")]
     pub conclusion: String,
 }
 

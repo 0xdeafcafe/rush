@@ -224,6 +224,7 @@ impl Retrier {
     }
 
     /// How many sessions wait to be continued.
+    #[cfg(test)]
     pub fn waiting(&self) -> usize {
         self.wait.len()
     }
