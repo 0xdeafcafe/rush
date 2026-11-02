@@ -277,9 +277,9 @@ pub fn start(m: &mut Model, client: Arc<Client>) {
     // Go looks for optional plugins on its fifth tick: one look a few
     // seconds on, not a timer, and only with a loop to wait in.
     if m.sender().is_some() {
-        m.later(
-            || std::thread::sleep(std::time::Duration::from_millis(picks::LOOK_AFTER as u64)),
-            |m, ()| {
+        m.after(
+            std::time::Duration::from_millis(picks::LOOK_AFTER as u64),
+            |m| {
                 picks::check(m);
                 Out::Draw
             },

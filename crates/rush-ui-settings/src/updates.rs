@@ -361,29 +361,31 @@ fn harnesses() -> Vec<Harness> {
 /// some are found without Settings › Updates being opened. Only with a
 /// loop: a test or `--render` never asks the registries.
 pub fn start(m: &mut Model) {
-    let Some(tx) = m.sender() else {
+    if m.sender().is_none() {
         return;
-    };
+    }
     check(m, false);
-    let tx = tx.lane(1);
-    let _ = std::thread::Builder::new()
-        .name("rush-updates".into())
-        .spawn(move || {
-            loop {
-                // Woken often and recheck_after decides, as Go asks it
-                // every tick: sleeping EVERY itself would land just
-                // before the last look turns EVERY old, and wait EVERY
-                // again.
-                std::thread::sleep(RECHECK_WAKE);
-                let apply: crate::frame::work::Apply = Box::new(|m| {
-                    recheck_after(m);
-                    Out::Idle
-                });
-                if !tx.send(crate::worker::Note::Apply(apply)) {
-                    return;
-                }
-            }
+    recheck_later(m);
+}
+
+/// Wakes when the last look turns EVERY old (RECHECK_WAKE at the least)
+/// and recheck_after decides, as Go asks it every tick, then waits again:
+/// on the UI thread's own deadline (Model::after), not a thread asleep
+/// and woken each RECHECK_WAKE. A wake that looks at nothing draws
+/// nothing.
+fn recheck_later(m: &mut Model) {
+    let left = upd(m)
+        .and_then(|u| u.checked_at)
+        .map_or(RECHECK_WAKE, |at| {
+            (at + rush_harnessup::EVERY)
+                .saturating_duration_since(Instant::now())
+                .max(RECHECK_WAKE)
         });
+    m.after(left, |m| {
+        recheck_after(m);
+        recheck_later(m);
+        Out::Idle
+    });
 }
 
 /// Looks for newer harnesses and rush, in the background; force asks the

@@ -105,9 +105,9 @@ fn arm(m: &mut Model) {
         return;
     }
     st.armed = true;
-    m.later(
-        || std::thread::sleep(std::time::Duration::from_millis(MACHINE_EVERY as u64)),
-        |m, ()| {
+    m.after(
+        std::time::Duration::from_millis(MACHINE_EVERY as u64),
+        |m| {
             d(m).armed = false;
             refresh(m);
             let st = data(m);

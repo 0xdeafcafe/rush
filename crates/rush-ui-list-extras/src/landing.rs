@@ -193,14 +193,11 @@ fn wake_at(m: &mut Model, left: Ms) {
     }
     m.kept::<ListFolders>().due = true;
     let left = std::time::Duration::from_millis(left.clamp(0, FOLDER_EVERY) as u64);
-    m.later(
-        move || std::thread::sleep(left),
-        |m, ()| {
-            m.kept::<ListFolders>().due = false;
-            ask_folders(m);
-            Out::Idle
-        },
-    );
+    m.after(left, |m| {
+        m.kept::<ListFolders>().due = false;
+        ask_folders(m);
+        Out::Idle
+    });
 }
 
 /// Keeps the stream on the checkouts git is asked about: each root, and

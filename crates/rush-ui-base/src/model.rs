@@ -1857,7 +1857,7 @@ impl App<Note> for Model {
     }
 
     fn wake_at(&self) -> Option<Instant> {
-        let at = [self.draw_at(), self.turn, self.regroup]
+        let at = [self.draw_at(), self.turn, self.regroup, self.timer_due()]
             .into_iter()
             .flatten()
             .min();
@@ -1872,6 +1872,11 @@ impl App<Note> for Model {
         // Chores alone draw nothing: what they do lands as its own note.
         // A frame showing more than the list is drawn again with them.
         let chores = crate::chores::run_due(self, now_i);
+        // What waited for its time (Model::after) draws when it says so.
+        let timed = self.run_timers(now_i);
+        if timed == Step::Quit {
+            return Step::Quit;
+        }
         let due = |t: Option<Instant>| t.is_some_and(|t| t <= now_i);
         // A label's or a group's time alone neither moves the spinners'
         // tick nor runs what moves with it.
@@ -1887,7 +1892,11 @@ impl App<Note> for Model {
             self.rebuild();
         }
         if !due(self.draw_at()) {
-            return if clock { Step::Draw } else { Step::Idle };
+            return if clock || timed == Step::Draw {
+                Step::Draw
+            } else {
+                Step::Idle
+            };
         }
         self.wake_draw(now_i)
     }
