@@ -47,6 +47,16 @@ pub fn subagent_cache_env(choice: &str) -> Option<String> {
     matches!(choice, "5m" | "1h").then(|| format!("{SUBAGENT_CACHE_ENV}={choice}"))
 }
 
+/// The model every subagent that names none starts on (Claude Code's own
+/// variable; a subagent that names its own, or whose definition does,
+/// keeps it).
+pub const SUBAGENT_MODEL_ENV: &str = "CLAUDE_CODE_SUBAGENT_MODEL";
+
+/// The environment entry that sets it, when a model is chosen.
+pub fn subagent_model_env(model: &str) -> Option<String> {
+    (!model.trim().is_empty()).then(|| format!("{SUBAGENT_MODEL_ENV}={}", model.trim()))
+}
+
 /// Puts rush's context guard (command) into Claude Code's hooks: before
 /// each Read (Bash's is the gate's, which asks it); after each Read, edit
 /// and Bash call, failed Bash calls too; before a compaction, and as a
@@ -201,6 +211,7 @@ impl Driver for Claude {
             ho.env.push(format!("{SUBAGENT_CAP_ENV}={}", o.subagents));
         }
         ho.env.extend(subagent_cache_env(&o.subagent_cache));
+        ho.env.extend(subagent_model_env(&o.subagent_model));
         // Checkpoints, as Claude Code keeps them in a terminal, so a rewind
         // can put the files back too. The session's own environment goes
         // last, to have the last word.

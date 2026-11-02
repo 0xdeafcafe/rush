@@ -92,11 +92,18 @@ pub enum Feature {
     /// Keeps a working subagent's prompt cache from lapsing while it waits
     /// on a long call, without a request of rush's own: a SubagentKeeper.
     SubagentKeepWarm,
+    /// Takes a cheaper model for routine subagent work, by rush's word in
+    /// its system prompt: the model comes from its model list (see
+    /// Registry::cheaper_models).
+    SubagentModel,
+    /// Lets rush say the one model every subagent starts on, where it
+    /// starts the agent; a subagent that names its own keeps it.
+    SubagentModelAll,
 }
 
 /// Every feature, its word, and what it's called, in the order they're
 /// shown.
-const ALL: [(Feature, &str, &str); 40] = [
+const ALL: [(Feature, &str, &str); 42] = [
     (Feature::Run, "run", "Run in rush mode"),
     (Feature::Resume, "resume", "Resume"),
     (Feature::Fork, "fork", "Fork"),
@@ -144,6 +151,16 @@ const ALL: [(Feature, &str, &str); 40] = [
         Feature::SubagentKeepWarm,
         "subagentkeep",
         "Keeps subagents' cache warm",
+    ),
+    (
+        Feature::SubagentModel,
+        "subagentmodel",
+        "Cheaper model for routine subagents",
+    ),
+    (
+        Feature::SubagentModelAll,
+        "subagentmodelall",
+        "One model for all subagents",
     ),
 ];
 
@@ -281,7 +298,7 @@ mod tests {
             assert_eq!(Feature::from_word(w), Some(f));
             assert_eq!(f.label(), l);
         }
-        assert_eq!(all_features().len(), 40);
+        assert_eq!(all_features().len(), 42);
         assert_eq!(Support::YES.with("view only").note, "view only");
         assert_eq!(Has::Planned.to_string(), "planned");
         assert_eq!(Level::Tested.to_string(), "tested");

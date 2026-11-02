@@ -250,6 +250,14 @@ pub struct Config {
         skip_serializing_if = "BTreeMap::is_empty"
     )]
     pub subagent_cache: BTreeMap<String, String>,
+    /// Handing routine subagent work to a cheaper model (Rust-only):
+    /// off until turned on. See [`CheapSubagents`].
+    #[serde(
+        rename = "cheapSubagents",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_default"
+    )]
+    pub cheap_subagents: CheapSubagents,
     /// The harness each provider runs in, by provider, where it isn't its
     /// usual one: "ollama": "pi" runs Ollama in Pi.
     #[serde(
@@ -1078,6 +1086,52 @@ fn is_true(b: &bool) -> bool {
     *b
 }
 
+/// Settings › Usage › Cheaper model for routine subagents. Off until
+/// turned on; then rush's system prompt tells the agent to pass the cheaper
+/// model when it starts a subagent for routine work ("on"), or, where the
+/// harness lets rush, every subagent that names no model of its own starts
+/// on it ("all"). Rust-only.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CheapSubagents {
+    /// "" is off; MODE_ON or MODE_ALL.
+    #[serde(
+        rename = "mode",
+        deserialize_with = "lenient",
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub mode: String,
+    /// The model chosen for a harness kind; absent is the first its
+    /// cheaper models list offers (Registry::cheaper_models).
+    #[serde(
+        rename = "models",
+        deserialize_with = "lenient",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    pub models: BTreeMap<String, String>,
+}
+
+/// Routine subagent work goes to the cheaper model, by the agent's choice.
+pub const CHEAP_MODE_ON: &str = "on";
+/// Every subagent that names no model of its own starts on it.
+pub const CHEAP_MODE_ALL: &str = "all";
+
+impl CheapSubagents {
+    /// The model for harness kind, given the ones it offers (cheapest
+    /// step down first): the one chosen if it is still offered, else the
+    /// first; None when it offers none or the setting is off.
+    pub fn model_for(&self, kind: &str, offered: &[String]) -> Option<String> {
+        if self.mode.is_empty() {
+            return None;
+        }
+        self.models
+            .get(kind)
+            .filter(|m| offered.contains(m))
+            .or(offered.first())
+            .cloned()
+    }
+}
+
 impl CacheKeep {
     pub fn keep_minutes(&self) -> i64 {
         if self.minutes > 0 { self.minutes } else { 15 }
@@ -1460,6 +1514,36 @@ fn key_in_own(id: &str, k: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Cheaper subagents are off until turned on, and a config that never
+    // set them says nothing; the model is the chosen one while it is
+    // offered, else the first offered.
+    #[test]
+    fn cheap_subagents_are_kept_and_off_by_default() {
+        let j = serde_json::to_string(&Config::default()).unwrap();
+        assert!(!j.contains("cheapSubagents"), "{j}");
+        let mut c = Config::default();
+        c.cheap_subagents.mode = CHEAP_MODE_ON.into();
+        c.cheap_subagents
+            .models
+            .insert("claude".into(), "haiku".into());
+        let j = serde_json::to_string(&c).unwrap();
+        assert!(
+            j.contains(r#""cheapSubagents":{"mode":"on","models":{"claude":"haiku"}}"#),
+            "{j}"
+        );
+        let back: Config = serde_json::from_str(&j).unwrap();
+        assert_eq!(back, c);
+        let offered = ["sonnet".to_string(), "haiku".to_string()];
+        let s = &c.cheap_subagents;
+        assert_eq!(s.model_for("claude", &offered).as_deref(), Some("haiku"));
+        assert_eq!(s.model_for("codex", &offered).as_deref(), Some("sonnet"));
+        assert_eq!(s.model_for("claude", &[]), None);
+        assert_eq!(
+            CheapSubagents::default().model_for("claude", &offered),
+            None
+        );
+    }
 
     // The conversation's view is kept as convoView, and left out while it's
     // Normal (""), so a config that never changed it reads as before.

@@ -349,6 +349,18 @@ fn context_hooks_go_beside_the_others() {
     assert_eq!(hooks.len(), cases.len());
 }
 
+/// The model every subagent starts on is set in the environment only when
+/// one is chosen.
+#[test]
+fn subagent_model_env_is_set_only_when_chosen() {
+    assert_eq!(super::subagent_model_env(""), None);
+    assert_eq!(super::subagent_model_env("  "), None);
+    assert_eq!(
+        super::subagent_model_env("sonnet").as_deref(),
+        Some("CLAUDE_CODE_SUBAGENT_MODEL=sonnet")
+    );
+}
+
 /// The subagents' cache life is set in the environment only when chosen.
 #[test]
 fn subagent_cache_env_is_set_only_when_chosen() {

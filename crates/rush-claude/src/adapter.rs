@@ -192,6 +192,16 @@ fn features() -> Features {
         SubagentKeepWarm,
         Support::YES.with("by moving its long shell call to the background"),
     );
+    // The Agent tool's model parameter, which rush's system prompt says to
+    // pass; CLAUDE_CODE_SUBAGENT_MODEL for every subagent that names none.
+    f.insert(
+        SubagentModel,
+        Support::YES.with("the Agent tool's model, for routine work"),
+    );
+    f.insert(
+        SubagentModelAll,
+        Support::YES.with("CLAUDE_CODE_SUBAGENT_MODEL, where rush starts it"),
+    );
     f
 }
 
@@ -738,9 +748,29 @@ mod tests {
             let s = f.get(&k).unwrap_or_else(|| panic!("{k:?} missing"));
             assert_eq!(s.is, rush_core::adapter::Has::Yes, "{k:?} is {s:?}");
         }
-        assert_eq!(f.len(), 39, "{f:?}");
+        assert_eq!(f.len(), 41, "{f:?}");
         assert_eq!(f[&Guide], Support::YES.with("at its next step"));
         // Rust-only: it keeps an idle session's prompt cache warm.
         assert_eq!(f[&KeepWarm], Support::YES.with("through a side question"));
+        // Rust-only: routine subagents on a cheaper model, by the Agent
+        // tool's model; every subagent, by CLAUDE_CODE_SUBAGENT_MODEL.
+        assert_eq!(f[&SubagentModel].is, rush_core::adapter::Has::Yes);
+        assert_eq!(f[&SubagentModelAll].is, rush_core::adapter::Has::Yes);
+    }
+
+    // The models Claude Code offers as cheaper than the Opus it runs by
+    // default: Sonnet first (the nearest step down), then Haiku; not Opus,
+    // its 1M variant or Fable.
+    #[test]
+    fn cheaper_models_are_sonnet_then_haiku() {
+        let reg = rush_core::adapter::Registry::new();
+        reg.register(super::Claude::new());
+        let ids: Vec<String> = reg
+            .cheaper_models(super::KIND)
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        assert_eq!(ids, ["sonnet", "haiku"]);
+        assert!(reg.cheaper_models("nope").is_empty());
     }
 }
