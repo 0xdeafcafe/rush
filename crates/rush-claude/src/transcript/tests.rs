@@ -324,3 +324,23 @@ fn stuck_subs_running_a_command() {
     write(&[call("a"), result("a")]);
     assert!(!ends_in_tool(&path));
 }
+
+// Every transcript's totals are held for the list's whole life (thousands,
+// subagents' included): two scanned with the same model share its name,
+// and the totals stay small.
+#[test]
+fn totals_share_their_model_and_stay_small() {
+    let d = TempDir::new("share");
+    let (a, b) = (d.0.join("a.jsonl"), d.0.join("b.jsonl"));
+    std::fs::write(&a, format!("{BLOCK1}\n")).unwrap();
+    std::fs::write(&b, format!("{NEXT}\n")).unwrap();
+    let (mut ta, mut tb) = (Totals::default(), Totals::default());
+    scan(&a, &mut ta, &mut Vec::new()).unwrap();
+    scan(&b, &mut tb, &mut Vec::new()).unwrap();
+    assert_eq!(ta.last_model, "claude-opus-5-5");
+    assert_eq!(
+        ta.last_model.as_str().as_ptr(),
+        tb.last_model.as_str().as_ptr()
+    );
+    assert!(size_of::<Totals>() <= 448, "{} B", size_of::<Totals>());
+}

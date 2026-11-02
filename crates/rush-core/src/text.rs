@@ -235,6 +235,21 @@ pub fn width(s: &str) -> usize {
 mod tests {
     use super::*;
 
+    /// Drawn rows are kept by the thousand (a conversation's renderer keeps
+    /// up to 20,000): (type, its size, the most it may be).
+    #[test]
+    fn spans_stay_small() {
+        let cases = [
+            ("Style", size_of::<Style>(), 16),
+            ("Span", size_of::<Span>(), 40),
+            ("Line", size_of::<Line>(), 32),
+            ("Color", size_of::<Color>(), 4),
+        ];
+        for (name, size, most) in cases {
+            assert!(size <= most, "{name} is {size} B, more than {most}");
+        }
+    }
+
     // linkmenu_test.go TestLinkAt: the link drawn at a cell, none before
     // or after it; the same URL is the same link.
     #[test]

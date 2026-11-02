@@ -402,3 +402,28 @@ pub struct SubagentTile {
 fn is_zero_ms(v: &Ms) -> bool {
     *v == 0
 }
+
+#[cfg(test)]
+mod sizes {
+    use super::*;
+
+    /// A row is kept once per row in the list and again in the loader's
+    /// memo of it: what makes one bigger is a choice. (type, its size, the
+    /// most it may be)
+    #[test]
+    fn rows_stay_small() {
+        let cases = [
+            ("Agent", size_of::<Agent>(), 1280),
+            ("Job", size_of::<Job>(), 384),
+            ("Spend", size_of::<Spend>(), 304),
+            (
+                "Option<Box<PrStatus>>",
+                size_of::<Option<Box<PrStatus>>>(),
+                8,
+            ),
+        ];
+        for (name, size, most) in cases {
+            assert!(size <= most, "{name} is {size} B, more than {most}");
+        }
+    }
+}

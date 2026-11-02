@@ -177,6 +177,13 @@ fn main() {
         }
         return;
     }
+    println!(
+        "sizes: RenderedLine {} B, Line {} B, Span {} B, Style {} B",
+        size_of::<rush_convo::RenderedLine>(),
+        size_of::<rush_core::text::Line>(),
+        size_of::<rush_core::text::Span>(),
+        size_of::<rush_core::text::Style>(),
+    );
     for (turns, w) in [(300, 120), (300, 250), (3000, 120)] {
         run(turns, w);
     }
