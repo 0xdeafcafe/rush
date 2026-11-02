@@ -273,8 +273,6 @@ mod ps {
     }
 }
 
-/// The battery, from Linux's power supply class; elsewhere there's none.
-
 /// Reads `pmset -g batt`: its first line says what power it's drawing
 /// from, the next the battery's charge.
 pub fn parse_pmset(out: &str) -> Battery {

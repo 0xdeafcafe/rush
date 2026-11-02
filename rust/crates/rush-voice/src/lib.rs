@@ -146,7 +146,7 @@ pub fn start(
 /// The Mac's microphones, the input first. Asked in this process (listing
 /// them needs no permission).
 pub fn devices() -> Vec<Device> {
-    { audio::devices() }
+    audio::devices()
 }
 
 /// Whether push-to-talk can work here at all: macOS 26 or later, where the
@@ -186,5 +186,5 @@ pub fn is_bundle_program(p: &std::path::Path) -> bool {
 /// Runs the helper until it quits; on the main thread, as the bundle's
 /// program.
 pub fn helper_main() -> Result<(), String> {
-    { helper::run() }
+    helper::run()
 }

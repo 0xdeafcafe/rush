@@ -47,10 +47,8 @@ fn is_bundle_program(p: &std::path::Path) -> bool {
 /// Runs the menu bar app until it quits; on the main thread, as the
 /// bundle's program.
 pub fn app_main() -> Result<(), String> {
-    {
-        app::run();
-        Ok(())
-    }
+    app::run();
+    Ok(())
 }
 
 /// `rush menubar [off|feed]`: runs the menu bar icon, its feed (which the

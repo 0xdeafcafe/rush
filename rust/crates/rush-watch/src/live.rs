@@ -153,8 +153,6 @@ fn stdout_path() -> String {
     String::from_utf8_lossy(&buf[..end]).into_owned()
 }
 
-/// The file stdout writes to, as /proc says.
-
 /// Keeps l for its task, replacing what was there whole.
 pub fn save_live(l: &Live) {
     if l.task.is_empty() || mkdir_all(&live_dir()).is_err() {

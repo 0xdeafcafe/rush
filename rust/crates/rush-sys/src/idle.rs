@@ -7,12 +7,12 @@ use std::time::Duration;
 
 /// How long since the last key or mouse anywhere on the machine.
 pub fn since_input() -> Option<Duration> {
-    { mac::hid_idle() }
+    mac::hid_idle()
 }
 
 /// Whether the screen is locked.
 pub fn screen_locked() -> Option<bool> {
-    { Some(mac::locked()) }
+    Some(mac::locked())
 }
 
 mod mac {

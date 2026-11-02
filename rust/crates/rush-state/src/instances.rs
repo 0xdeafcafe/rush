@@ -145,7 +145,7 @@ pub fn lock() -> Result<u32, i32> {
 /// A process's arguments; empty when they can't be read (another user's
 /// process, or none at pid).
 pub fn proc_args(pid: i32) -> Vec<Vec<u8>> {
-    { darwin_args(pid) }
+    darwin_args(pid)
 }
 
 /// kern.procargs2: argc, the executable's path, padding, then argv.

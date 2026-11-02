@@ -108,8 +108,6 @@ fn disk_use(info: &Metadata) -> i64 {
     info.blocks() as i64 * 512
 }
 
-/// Only macOS stores files compressed.
-
 mod darwin {
     use std::ffi::CString;
     use std::fs::Metadata;

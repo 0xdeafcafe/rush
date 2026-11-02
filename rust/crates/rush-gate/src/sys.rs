@@ -69,9 +69,7 @@ pub fn parse_vm_stat(s: &str) -> Option<u64> {
 fn clear_errno() {
     // SAFETY: errno is this thread's own.
     unsafe {
-        {
-            *libc::__error() = 0;
-        }
+        *libc::__error() = 0;
     }
 }
 
