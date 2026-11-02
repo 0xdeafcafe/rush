@@ -24,6 +24,7 @@ pub mod agentmatch;
 pub mod agents;
 pub mod agtools;
 pub mod away;
+pub mod cheap;
 pub mod cli;
 pub mod client;
 pub mod decisions;

@@ -2077,6 +2077,29 @@ fn unreadable_queued_image_does_not_hold_the_queue() {
     );
 }
 
+/// Settings › Usage › Cheaper model for routine subagents: its part is
+/// in the prompt only while it is on, comes before the worktree's note,
+/// and is the same word for word each time; off, the prompt is as it was.
+#[test]
+fn cheaper_subagent_part_is_only_there_when_on_and_stable() {
+    let build = |cheap: &str| {
+        system_prompt(&[
+            TASKS_PROMPT,
+            SCRATCH_PROMPT,
+            COMMUNITY_PROMPT,
+            cheap,
+            "the worktree note",
+        ])
+    };
+    let off = build("");
+    let on = build(&crate::cheap::prompt("sonnet"));
+    assert_eq!(on, build(&crate::cheap::prompt("sonnet")));
+    assert!(!off.contains("pass the cheaper model"), "{off}");
+    assert!(on.contains("model: \"sonnet\""), "{on}");
+    assert!(on.ends_with("\n\nthe worktree note"), "{on}");
+    assert!(on.starts_with(off.strip_suffix("\n\nthe worktree note").unwrap()));
+}
+
 /// The system prompt reads no clock and no state: built twice it's the
 /// same word for word, and what a setting or a move can change (views,
 /// the feed, the worktree) comes after every part that never changes, so
