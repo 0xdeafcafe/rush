@@ -457,7 +457,7 @@ fn paging_and_the_pill() {
     press(&mut m, "pgup");
     let s = screen(&mut m);
     // The pill takes a row: the view starts a row higher than ten up.
-    assert_eq!(start(&m), end - 9);
+    assert_eq!(start(&m), end - 8);
     let pill = s
         .iter()
         .find(|l| l.contains("more · end follows"))
@@ -1032,20 +1032,20 @@ fn prompt_pins() {
     let s = screen(&mut m);
     let top = m.session.as_ref().unwrap().top;
     assert!(
-        s[top].starts_with("  ▍ current question 25"),
+        s[top].starts_with("  ▍ current question 26"),
         "{:?}",
         s[top]
     );
-    assert_eq!(m.session.as_ref().unwrap().shown[0], "pin:t26");
+    assert_eq!(m.session.as_ref().unwrap().shown[0], "pin:t27");
     click(&mut m, MouseKind::Down(Button::Left), 10, top);
     click(&mut m, MouseKind::Up(Button::Left), 10, top);
     let v = m.session.as_ref().unwrap();
-    assert_eq!(v.sel, "t26");
+    assert_eq!(v.sel, "t27");
     let s = screen(&mut m);
     // Its turn from the top: the blank above its heading under the pin
     // of the one before, as Go's.
     assert!(s[top + 1].contains("▏ You"), "picked: {:?}", s[top + 1]);
-    assert!(s[top + 2].contains("question 25"), "{:?}", s[top + 2]);
+    assert!(s[top + 2].contains("question 26"), "{:?}", s[top + 2]);
 }
 
 /// In a read conversation what's stacked on the box (the queue, a row of

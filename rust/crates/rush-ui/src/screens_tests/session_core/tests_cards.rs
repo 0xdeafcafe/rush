@@ -786,7 +786,7 @@ fn a_decisions_card_leaves_the_box_on_a_small_screen() {
     let (mut m, _fake) = super::tests::hosted("steer", Vec::new());
     m.cards().host = Some(super::cards_host::host());
     m.w = 100;
-    m.h = 30;
+    m.h = 32; // two rows for the conversation's view tabs
     let now = m.now;
     // The first prompt is what the session is for: only a later one pins
     // (promptpins.go:37).

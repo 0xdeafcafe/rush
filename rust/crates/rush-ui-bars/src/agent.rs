@@ -1092,7 +1092,8 @@ pub fn mouse(m: &mut Model, e: &crate::frame::Mouse) -> Out {
         .map(|s| s.mode_at)
         .unwrap_or_default();
     // The header's rows end where the body starts.
-    let head_top = top.checked_sub(crate::session::HEAD_H);
+    let off = m.session.as_ref().map_or(0, |v| v.top_off);
+    let head_top = top.checked_sub(crate::session::HEAD_H + off);
     let on = mw > 0 && head_top.is_some_and(|t| y == t + row) && x >= 2 + at && x < 2 + at + mw;
     // The agent label, on the row under the name (setup.go:570 clickLabel).
     let (lx, lw) = m

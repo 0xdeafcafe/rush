@@ -650,7 +650,7 @@ fn a_wide_session_has_the_column_beside_it() {
         .iter()
         .position(|r| r.contains("Conversation"))
         .unwrap();
-    assert!(dec <= head + 4, "{f}");
+    assert!(dec <= head + 6, "{f}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

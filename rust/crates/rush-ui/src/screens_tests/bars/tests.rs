@@ -288,7 +288,7 @@ fn the_permission_mode_is_a_click_away() {
     let mut m = opened("plan");
     let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
     let top = m.session.as_ref().unwrap().top;
-    let head = top - crate::session::HEAD_H;
+    let head = top - crate::session::HEAD_H - m.session.as_ref().unwrap().top_off;
     let name = &rows[head + 1];
     assert!(name.contains("tidy the parser"), "{name:?}");
     assert!(name.trim_end().ends_with("plan"), "{name:?}");
@@ -511,7 +511,8 @@ fn the_handle_after_the_name() {
     let mut m = opened("default");
     let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
     let top = m.session.as_ref().unwrap().top;
-    let name = &rows[top - crate::session::HEAD_H + 1];
+    let off = m.session.as_ref().unwrap().top_off;
+    let name = &rows[top - crate::session::HEAD_H - off + 1];
     let a = m.agents[0].clone();
     let h = super::agent::name_handle(&a).text;
     assert!(h.starts_with('@'), "{h:?}");
@@ -633,7 +634,7 @@ fn the_header_segments_are_a_click_away() {
         );
         let rows: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
         let top = m.session.as_ref().unwrap().top;
-        let head = top - crate::session::HEAD_H;
+        let head = top - crate::session::HEAD_H - m.session.as_ref().unwrap().top_off;
         let hits = m.kept::<State>().hits.clone();
         for &(row, f, t, act) in &hits.segs {
             let cells: Vec<char> = rows[head + row].chars().collect();
