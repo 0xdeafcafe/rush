@@ -151,7 +151,7 @@ fn home_kind(m: &Model, key: &str) -> String {
 
 /// Where run id's conversation is read from; None for one known only by
 /// its task (spawnRunFor, openSub).
-fn src_of(m: &Model, key: &str, id: &str) -> Option<DetailSrc> {
+pub fn src_of(m: &Model, key: &str, id: &str) -> Option<DetailSrc> {
     let r = runs_of(m, key)?;
     if let Some(step) = id.strip_prefix(SPAWN_PREFIX) {
         let s = r.spawns.get(step).filter(|s| !s.path.is_empty())?;
@@ -929,7 +929,7 @@ fn peek_head(m: &mut Model, key: &str, id: &str, w: usize) -> Vec<Line> {
 
 /// Whether run id works now, as the list says: its conversation's working
 /// line shows under it only then, and goes once it's finished.
-fn run_live(m: &Model, key: &str, id: &str) -> bool {
+pub fn run_live(m: &Model, key: &str, id: &str) -> bool {
     let Some(v) = m.session.as_ref().filter(|v| v.key == key) else {
         return false;
     };
@@ -1136,6 +1136,8 @@ fn peek(m: &mut Model, key: &str, id: &str, right: &mut [Line], pw: usize, (x, y
     if let Some(src) = src_of(m, key, id) {
         show_detail(m, key, id, src);
     }
+    // Followed as it grows while it runs and shows (subfollow).
+    super::subfollow::sync(m, key);
     let head = peek_head(m, key, id, pw);
     let mut bx = super::relay::note_lines(m, key, id, pw);
     bx.extend(msg_box(m, key, id, pw));

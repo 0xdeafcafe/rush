@@ -1029,3 +1029,83 @@ fn working_narrow(wf: &str, hm: &str) -> String {
     .replace("{wf}", wf)
     .replace("{hm}", hm)
 }
+
+/// What the picked run follows, by id: None when nothing is.
+fn followed(m: &mut Model) -> Option<String> {
+    conn(m, KEY).runs.live.as_ref().map(|f| f.id.clone())
+}
+
+/// w picked in the Subagents tab, shown 150 wide.
+fn picked_working(d: &tempfile::TempDir) -> Model {
+    let mut m = working(d);
+    m.w = 150;
+    subview::pick_run(&mut m, KEY, "w");
+    let _ = views::body(&mut m, 150, 30);
+    m
+}
+
+/// A running subagent picked is followed: what its transcript gains shows
+/// after one wake of its watch, its conversation's new step and its row's
+/// short working form, with no wait for the next refresh.
+#[test]
+fn a_picked_running_subagent_is_followed() {
+    use std::io::Write;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = picked_working(&d);
+    assert_eq!(followed(&mut m).as_deref(), Some("w"));
+    let p = d.path().join("agent-w.jsonl");
+    let mut f = std::fs::OpenOptions::new().append(true).open(&p).unwrap();
+    for l in [
+        r#"{"type":"user","isSidechain":true,"timestamp":"2026-10-28T12:34:30Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"b1","content":"ok"}]}}"#,
+        r#"{"type":"assistant","isSidechain":true,"timestamp":"2026-10-28T12:34:31Z","message":{"id":"m2","model":"claude-opus-4-1","role":"assistant","usage":{"input_tokens":950,"output_tokens":40},"content":[{"type":"tool_use","id":"b2","name":"Bash","input":{"command":"cargo clippy","description":"lint it"}}]}}"#,
+    ] {
+        writeln!(f, "{l}").unwrap();
+    }
+    drop(f);
+    // One wake, as the watch on its file gives when it grows.
+    let _ = super::subfollow::woke(&mut m, KEY, "w");
+    let got = text(&views::body(&mut m, 150, 30).unwrap());
+    assert!(got.contains("lint it"), "its new step:\n{got}");
+    let row = row_of(&mut m, "w");
+    assert!(row.contains("lint it"), "its row: {row}");
+}
+
+/// The tab not showing, nothing is followed; a wake from a follow left
+/// over lets it go.
+#[test]
+fn a_hidden_tab_follows_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = picked_working(&d);
+    assert_eq!(followed(&mut m).as_deref(), Some("w"));
+    views::show_view(&mut m, KEY, "conversation");
+    let _ = super::subfollow::woke(&mut m, KEY, "w");
+    assert_eq!(followed(&mut m), None);
+    super::subs::refresh(&mut m, KEY);
+    assert_eq!(followed(&mut m), None);
+}
+
+/// A finished subagent isn't followed: picked once done, or let go as it
+/// finishes.
+#[test]
+fn a_finished_subagent_is_not_followed() {
+    use rush_core::event::{Event, TaskDone};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = picked_working(&d);
+    subview::pick_run(&mut m, KEY, "x");
+    let _ = views::body(&mut m, 150, 30);
+    assert_eq!(followed(&mut m), None, "x is done");
+    subview::pick_run(&mut m, KEY, "w");
+    let _ = views::body(&mut m, 150, 30);
+    assert_eq!(followed(&mut m).as_deref(), Some("w"));
+    m.session.as_mut().unwrap().sess.apply(
+        &Event::TaskDone(TaskDone {
+            id: "w".into(),
+            call_id: "tw".into(),
+            status: "completed".into(),
+            ..TaskDone::default()
+        }),
+        NOW,
+    );
+    let _ = views::body(&mut m, 150, 30);
+    assert_eq!(followed(&mut m), None, "w finished");
+}

@@ -60,6 +60,7 @@ pub mod side;
 pub mod slash;
 pub mod spawned;
 pub mod start;
+pub mod subfollow;
 pub mod subname;
 pub mod subqueue;
 pub mod subs;

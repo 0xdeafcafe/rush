@@ -387,6 +387,9 @@ pub struct Runs {
     pub follow_all: bool,
     /// The run shown whole, when one is.
     pub detail: Option<Detail>,
+    /// The running run picked in the Subagents tab, its transcript
+    /// waited on so each write is read at once (subfollow).
+    pub live: Option<super::subfollow::Follow>,
     /// Changes is open: every run's conversation is read whole, for its
     /// edits (rushmode.go:99-118).
     pub full_want: bool,
@@ -1259,6 +1262,7 @@ pub fn refresh(m: &mut Model, key: &str) {
     let Some(a) = agent(m, key).cloned() else {
         return;
     };
+    super::subfollow::sync(m, key);
     let kind = a.kind.as_str().to_string();
     let reg = m.reg.clone();
     let claude = reg.reads_as_claude(&kind);
@@ -1781,7 +1785,8 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
             end_detail_turn(s, &r.subs, det, got.now);
         }
     }
-    let fresh = fresh || more || found_new; // a run found is read at once
+    // Kicked while it read (its picked run's transcript grew): read again.
+    let fresh = fresh || more || found_new || r.kick; // a run found is read at once
     // The conversation draws the steps that ran them as the agents, with
     // their steps and replies under them.
     if let Some(ran) = ran
