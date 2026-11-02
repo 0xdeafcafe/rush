@@ -39,6 +39,21 @@ pub(crate) fn git_for(
     (repo, branch)
 }
 
+/// Reads again, as git_for would, each folder's checkout read 30s or more
+/// ago; whether any moved (a branch switched, a checkout made or gone).
+pub(crate) fn git_moved(cache: &mut HashMap<String, GitInfo>, now: Ms) -> bool {
+    let mut moved = false;
+    for (dir, g) in cache.iter_mut() {
+        if now - g.at < 30_000 {
+            continue;
+        }
+        let (repo, branch) = git_at(dir);
+        moved |= repo != g.repo || branch != g.branch;
+        (g.repo, g.branch, g.at) = (repo, branch, now);
+    }
+    moved
+}
+
 /// The checkout dir is in, and its branch, read directly.
 pub fn git_at(dir: &str) -> (String, String) {
     let mut d = Path::new(dir);

@@ -385,6 +385,14 @@ impl Discoverer for Claude {
             .collect()
     }
 
+    /// The conversations listed differently since listing since, and the
+    /// listing's number now.
+    fn past_changes(&self, p: &Profile, since: u64) -> Option<(u64, Option<Vec<String>>)> {
+        let acct = account(p);
+        let mut d = self.found.lock().unwrap_or_else(|e| e.into_inner());
+        d.past_changes(&acct, now(), since)
+    }
+
     /// A change under the projects folder (or one it can't place) lists
     /// it again at once, rather than when PAST_EVERY is up.
     fn changed(&self, p: &Profile, paths: Option<&[PathBuf]>) {

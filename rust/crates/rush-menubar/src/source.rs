@@ -11,11 +11,13 @@
 //! readings, and other agents' limits from quotas.json.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use rush_core::adapter::{Profile, Registry};
 use rush_core::agent::State;
 use rush_core::time::Ms;
 use rush_core::usage::{Quota, Reading};
+use rush_sys::fswait::Watcher;
 
 /// One row of the list, as much as the menu needs of it (Go's
 /// fleet.Agent).
@@ -127,7 +129,11 @@ pub trait Source: Send {
     fn snapshot(&mut self, now: Ms) -> Snapshot;
     /// What to watch for the next reading: a change to any of them is a
     /// reason to read again.
-    fn watched(&self) -> Vec<PathBuf>;
+    fn watched(&mut self) -> Vec<PathBuf>;
+    /// The watcher the feed watches what it says with, waits on and
+    /// drains: what it reads it may trust while that says nothing
+    /// changed.
+    fn share(&mut self, _w: Arc<Watcher>) {}
     /// What a watch saw change; None when it can't tell what.
     fn changed(&mut self, paths: Option<&[PathBuf]>);
     /// Asks of each account's provider how much of its limits it has
@@ -144,6 +150,15 @@ pub struct FleetSource {
     reg: Registry,
     loader: rush_fleet::Loader,
     fetched: std::collections::HashMap<String, Reading>,
+    /// rush's config, read again when it changes, not every reading.
+    config: rush_state::Config,
+    /// The loader reads rush's state, which it reads again on a change.
+    state: bool,
+    /// The feed's watcher, once shared.
+    watcher: Option<Arc<Watcher>>,
+    /// rush's sessions as the last reading listed them: their folders are
+    /// watched.
+    hosted: Arc<Vec<rush_fleet::HostInfo>>,
 }
 
 /// The kind of the agent whose accounts are the logins.
@@ -155,20 +170,32 @@ impl FleetSource {
     /// Rows from reg's adapters alone: no state of rush's, no rush
     /// sessions (what tests want).
     pub fn new(reg: Registry) -> FleetSource {
-        FleetSource::with_loader(reg.clone(), rush_fleet::Loader::new(reg))
+        let config = rush_state::Store::load().config;
+        FleetSource::with_loader(reg.clone(), rush_fleet::Loader::new(reg), config, false)
     }
 
     /// Rows as rush lists them: its state on them, its own sessions among
     /// them (fleet.Load).
     pub fn from_state(reg: Registry) -> FleetSource {
-        FleetSource::with_loader(reg.clone(), rush_fleet::Loader::from_state(reg))
+        let loader = rush_fleet::Loader::from_state(reg.clone());
+        let config = loader.store().config.clone();
+        FleetSource::with_loader(reg, loader, config, true)
     }
 
-    fn with_loader(reg: Registry, loader: rush_fleet::Loader) -> FleetSource {
+    fn with_loader(
+        reg: Registry,
+        loader: rush_fleet::Loader,
+        config: rush_state::Config,
+        state: bool,
+    ) -> FleetSource {
         FleetSource {
             loader,
             reg,
             fetched: Default::default(),
+            config,
+            state,
+            watcher: None,
+            hosted: Arc::default(),
         }
     }
 
@@ -203,9 +230,19 @@ pub fn reading_key(p: &Profile, r: &Reading) -> String {
 impl Source for FleetSource {
     fn snapshot(&mut self, now: Ms) -> Snapshot {
         let loaded = self.loader.load(now);
-        self.loader.scan(&loaded.agents);
+        if loaded.partial {
+            // The rows it kept are priced as they were: only the rest can
+            // have grown.
+            let t = rush_fleet::Loader::kind_targets_of(
+                loaded.agents.iter().filter(|a| !self.loader.kept(&a.key)),
+            );
+            self.loader.scan_targets(&t);
+        } else {
+            self.loader.scan(&loaded.agents);
+        }
+        self.hosted = loaded.hosted.clone();
         let rows: Vec<Row> = loaded.agents.iter().map(Row::from).collect();
-        let st = rush_state::Store::load();
+        let st = &self.config;
         let mut snap = Snapshot {
             agents: rows,
             ..Snapshot::default()
@@ -217,7 +254,7 @@ impl Source for FleetSource {
         if let Some(a) = &plans
             && let Some(pr) = a.plan_reader()
         {
-            let p = Self::active_profile(&st.config);
+            let p = Self::active_profile(st);
             root = pr.plan(&p);
             let key = reading_key(&p, &root);
             if let Some(f) = self.fetched.get(&key)
@@ -253,7 +290,7 @@ impl Source for FleetSource {
             }
         }
         // The saved logins (logins.go:25).
-        for lg in &st.config.logins {
+        for lg in &st.logins {
             let key = lg.usage_key();
             let f = self.fetched.get(&key);
             // ~/.claude's own reading is this login's when it's signed in
@@ -314,16 +351,56 @@ impl Source for FleetSource {
         snap
     }
 
-    fn watched(&self) -> Vec<PathBuf> {
+    fn watched(&mut self) -> Vec<PathBuf> {
         let mut w = self.loader.watched();
+        // rush's state and sessions: one started, renamed or put away.
+        w.extend(self.loader.rush_watched(&self.hosted));
         w.push(rush_state::dir().join("config.json"));
         w.push(Self::usage_path());
         w.push(Self::quotas_path());
+        w.sort();
+        w.dedup();
+        // What wasn't watched may have changed since it was read: the
+        // next reading looks again. One not there isn't watched yet; it's
+        // told once it appears.
+        if let Some(wt) = &self.watcher {
+            let was: Vec<bool> = w.iter().map(|p| wt.watching(p)).collect();
+            wt.watch(&w);
+            let new: Vec<PathBuf> = w
+                .iter()
+                .zip(was)
+                .filter(|(p, was)| !was && wt.watching(p))
+                .map(|(p, _)| p.clone())
+                .collect();
+            self.loader.told(Some(&new));
+        }
         w
+    }
+
+    fn share(&mut self, w: Arc<Watcher>) {
+        self.loader.watch_shared(w.clone());
+        self.loader.incremental(true);
+        self.watcher = Some(w);
     }
 
     fn changed(&mut self, paths: Option<&[PathBuf]>) {
         self.loader.changed(paths);
+        self.loader.told(paths);
+        // rush's config or state changed: read once here, not each reading.
+        let dir = rush_state::dir();
+        let ours = |p: &PathBuf| {
+            *p == dir
+                || p.parent() == Some(dir.as_path())
+                    && p.file_name()
+                        .is_some_and(|n| n == "state.json" || n == "config.json")
+        };
+        if paths.is_none_or(|ps| ps.iter().any(ours)) {
+            let st = rush_state::Store::load();
+            self.config = st.config.clone();
+            if self.state {
+                self.loader.set_store(st);
+            }
+        }
     }
 
     fn refresh(&mut self) -> Vec<Fetch> {
@@ -333,7 +410,7 @@ impl Source for FleetSource {
         if a.plan_reader().is_none() {
             return vec![];
         }
-        let p = Self::active_profile(&rush_state::Store::load().config);
+        let p = Self::active_profile(&self.config);
         let path = Self::usage_path().to_string_lossy().into_owned();
         vec![Box::new(move || {
             let Some(pr) = a.plan_reader() else {

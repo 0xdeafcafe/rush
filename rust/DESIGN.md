@@ -605,7 +605,22 @@ on every frame. Go retains about 22 MiB for the same.
    again. Discovery also reads what each live agent's processes use
    (memory, CPU, how many): the loader lists the process table as Go does
    (one sysctl), which spawn folding and the machine's rows need, and
-   fills memory and CPU only for the trees it shows.
+   fills memory and CPU only for the trees it shows. A reading while
+   agents work makes rush's sessions again and keeps every other row
+   (past conversations, finished jobs, other agents' past sessions) as
+   the last whole reading made it (`Loader::incremental`,
+   rush-fleet loader/partial.rs), so it costs what the sessions do, not
+   the hundreds of rows: a whole reading comes when the watch tells of
+   anything but a session's own folder (rush's state, the sessions
+   folder, a projects folder, a job, a terminal session), when a
+   session is new or gone, an adapter's live sessions differ, a past
+   conversation no session has was written to (`Discoverer::past_changes`
+   numbers each listing), a checkout's branch moved, a kept row's spend
+   moved, and at least once a minute. Only the remaining rows' transcripts
+   are priced before it, and a live row's preview is read again only
+   when its transcript's size or time moved. The menu bar's feed shares
+   its watcher with its loader the same way, and reads rush's config and
+   state only when they change.
 
 On macOS the UI and terminal reader threads run in the user-interactive
 class (rush-draw `qos`), as an app's main thread does: a CLI's threads
