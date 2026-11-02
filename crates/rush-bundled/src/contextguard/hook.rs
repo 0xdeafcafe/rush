@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use super::rules::{self, Agent, FileStat, Outcome, Refusal, Rules, State};
+use super::rules::{self, FileStat, Outcome, Refusal, Rules, State};
 use super::squeeze;
 
 /// Files up to this size are read for their lines and a hash.
