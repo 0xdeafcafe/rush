@@ -163,17 +163,16 @@ impl Subagents {
         let workflows = dir.join("workflows");
         let mut out = Vec::with_capacity(self.names.len());
         for meta in &self.names {
-            let seen = self.metas.get(meta).cloned();
-            let mut m = seen.clone().unwrap_or_default();
-            if seen.is_none() || !fresh || !m.ok {
+            let seen = self.metas.get(meta);
+            if seen.is_none_or(|m| !fresh || !m.ok) {
                 let Ok(st) = std::fs::metadata(meta) else {
                     continue;
                 };
                 let modified = st.modified().ok();
-                if seen.is_none() || m.modified != modified || m.size != st.len() {
+                if seen.is_none_or(|m| m.modified != modified || m.size != st.len()) {
                     // A rewrite doesn't make it any younger.
-                    let (born, born_ns) = (m.sa.born, m.sa.born_ns);
-                    m = SubMeta {
+                    let (born, born_ns) = seen.map_or((0, 0), |m| (m.sa.born, m.sa.born_ns));
+                    let mut m = SubMeta {
                         modified,
                         size: st.len(),
                         ..SubMeta::default()
@@ -214,13 +213,14 @@ impl Subagents {
                         }
                     }
                     // A half-written one changes size, and is read again.
-                    self.metas.insert(meta.clone(), m.clone());
+                    self.metas.insert(meta.clone(), m);
                 }
             }
-            if !m.ok {
+            // Its run, copied from what was read of it only as it goes out.
+            let Some(m) = self.metas.get(meta).filter(|m| m.ok) else {
                 continue;
-            }
-            let mut sa = m.sa;
+            };
+            let mut sa = m.sa.clone();
             if let Ok(st) = std::fs::metadata(&sa.path) {
                 sa.modified = st.modified().map_or(0, ms);
                 sa.size = st.len();

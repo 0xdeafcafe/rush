@@ -40,3 +40,7 @@ harness = false
 [[bench]]
 name = "jobs"
 harness = false
+
+[[bench]]
+name = "follow"
+harness = false

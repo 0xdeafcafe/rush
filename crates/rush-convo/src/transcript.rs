@@ -217,7 +217,10 @@ impl Tail {
         }
         let mut f = File::open(&self.path)?;
         f.seek(SeekFrom::Start(self.off))?;
-        let mut buf = vec![0u8; READ_BUF];
+        // Sized to what it gained, a few lines a wake as a run writes,
+        // rather than READ_BUF each time (Rust-only).
+        let gained = usize::try_from(size.saturating_sub(self.off)).unwrap_or(READ_BUF);
+        let mut buf = vec![0u8; gained.clamp(4 << 10, READ_BUF)];
         let mut changed = false;
         loop {
             let n = match f.read(&mut buf) {
