@@ -67,10 +67,10 @@ pub(crate) struct Decided {
 #[derive(Debug, Default)]
 pub(crate) struct SubWatch {
     /// Whether the session keeps its subagents' caches: Settings ›
-    /// General › Prompt cache, read as its agent starts, and its agent
-    /// can.
+    /// Usage › Prompt cache, read as its agent starts, and its agent can.
     pub on: bool,
-    pub min_context: i64,
+    /// The smallest context worth it and the most step-ins, as set.
+    pub settings: rush_core::cachekeep::Settings,
     /// Where its commands' times are noted: the session's folder as its
     /// agent started.
     pub project: String,
@@ -246,7 +246,7 @@ impl SubWatch {
                 doing,
                 steps: f.steps,
             };
-            let step = subkeep::decide(self.min_context, &seen, now);
+            let step = subkeep::decide(&self.settings, &seen, now);
             match &step {
                 Step::Wait => continue,
                 Step::Let(_) if f.let_said => continue,
@@ -521,7 +521,6 @@ mod tests {
     fn watch() -> SubWatch {
         SubWatch {
             on: true,
-            min_context: 20_000,
             ..Default::default()
         }
     }
