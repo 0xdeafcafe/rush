@@ -38,6 +38,9 @@ pub(crate) struct CallState {
     pub task: String,
     /// And that task has ended.
     pub ended: bool,
+    /// Its input came as its text content (Kimi's): that text is no
+    /// output.
+    pub input_text: bool,
 }
 
 impl Inner {
@@ -327,6 +330,7 @@ impl Inner {
                     // the input.
                     if let Some(raw) = tc.content.as_deref().and_then(input_text) {
                         c.c.raw = Some(raw);
+                        c.input_text = true;
                     }
                 }
             }
@@ -373,6 +377,21 @@ impl Inner {
                     ..event::Part::default()
                 }],
                 ..event::Message::default()
+            }));
+        }
+        // What a running command has printed so far, as its content
+        // says: shown under its step until its result comes.
+        if c.c.kind == Kind::Shell
+            && c.c.raw.is_some()
+            && !c.input_text
+            && !c.done
+            && !matches!(status.as_str(), "pending" | "completed" | "failed")
+            && let Some(text) = tc.content.as_deref().and_then(printed)
+        {
+            self.emit(Event::CallOutput(event::CallOutput {
+                id: c.c.id.clone(),
+                text,
+                whole: true,
             }));
         }
         // A subagent the turn waits on is a task from when its prompt is
@@ -592,6 +611,18 @@ fn merge_raw(old: Option<&RawJson>, nw: &RawValue) -> RawJson {
         a.insert(k, v);
     }
     RawJson::new(&Value::Object(a).to_string()).unwrap_or_else(|_| fresh())
+}
+
+/// What a running call's content says it printed: its text, None when
+/// it has none.
+fn printed(content: &[ToolContent]) -> Option<String> {
+    let texts: Vec<&str> = content
+        .iter()
+        .filter(|c| c.kind == "content" && c.content.kind == "text")
+        .map(|c| c.content.text.as_str())
+        .collect();
+    let text = texts.join("\n");
+    (!text.trim().is_empty()).then_some(text)
 }
 
 /// A call's input carried as its text content, as Kimi streams it: one

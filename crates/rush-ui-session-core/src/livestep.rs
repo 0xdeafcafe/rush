@@ -2,15 +2,21 @@
 //! help: Claude Code and others put a foreground command's output in the
 //! transcript only when it ends. So rush looks itself, at the processes
 //! under the step's shell (the busiest one, its CPU) and at the file the
-//! command writes (`> f`, `>> f`, `&> f`, `| tee f`), its last lines. Read
-//! off the UI thread every LIVE_EVERY while the step runs and the
-//! conversation is open; gone when the step ends. New in the Rust port.
+//! command writes (`> f`, `>> f`, `&> f`, `| tee f`), its last lines. And
+//! when the shell's own stdout is a file (Claude Code sends a command's
+//! output to one and reads it at the end), what it has printed so far,
+//! read on from where the last look left off; a pipe is never read, as
+//! that would take the output from the agent. Read off the UI thread
+//! every LIVE_EVERY while the step runs and the conversation is open;
+//! gone when the step ends. New in the Rust port.
 
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rush_convo::Status;
+use rush_convo::model::{LIVE_KEPT, LiveOut};
 use rush_convo::render::StepLive;
 use rush_core::time::Ms;
 use rush_sys::proc::{self, Pid, Table};
@@ -45,7 +51,92 @@ pub struct Seen {
     cpu: Duration,
     procs: usize,
     still: Ms,
+    /// The file its shell's stdout is, as far as it was read.
+    pub out: Option<OutFile>,
     pub view: StepLive,
+}
+
+/// A running call's output file as last read: where it is, how far into
+/// it was read, and the last of what it held.
+#[derive(Clone, Debug, Default)]
+pub struct OutFile {
+    pub path: PathBuf,
+    pub at: u64,
+    pub live: Arc<LiveOut>,
+}
+
+/// Reads on in the output file at path from where was left off (from its
+/// start for another file, or one that shrank), keeping its last
+/// LIVE_KEPT bytes; more than that since the last look is only counted.
+/// A character cut at the end waits for the rest. None when it can't be
+/// read. Blocks on the disk: off the UI thread.
+pub fn read_out(path: &Path, was: Option<&OutFile>) -> Option<OutFile> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).ok()?;
+    let size = f.metadata().ok()?.len();
+    let mut o = match was {
+        Some(w) if w.path == path && w.at <= size => w.clone(),
+        _ => OutFile {
+            path: path.to_path_buf(),
+            ..OutFile::default()
+        },
+    };
+    if size == o.at {
+        return Some(o);
+    }
+    let mut live = (*o.live).clone();
+    let mut skipped = false;
+    if size - o.at > LIVE_KEPT as u64 {
+        let to = size - LIVE_KEPT as u64;
+        let n = newlines_between(&mut f, o.at, to);
+        live = LiveOut {
+            out: String::new(),
+            dropped: live.line_count() + n,
+        };
+        (o.at, skipped) = (to, true);
+    }
+    f.seek(SeekFrom::Start(o.at)).ok()?;
+    let mut buf = Vec::with_capacity((size - o.at) as usize);
+    (&mut f).take(size - o.at).read_to_end(&mut buf).ok()?;
+    let good = match std::str::from_utf8(&buf) {
+        Err(e) if e.error_len().is_none() => e.valid_up_to(),
+        _ => buf.len(),
+    };
+    let text = String::from_utf8_lossy(&buf[..good]);
+    // Cut mid-line after a skip: the line starts at the next one.
+    let text = match text.find('\n') {
+        Some(i) if skipped => {
+            live.dropped += 1;
+            &text[i + 1..]
+        }
+        _ => &text[..],
+    };
+    live.push(text);
+    o.at += good as u64;
+    o.live = Arc::new(live);
+    Some(o)
+}
+
+/// The line ends in f between from and to.
+fn newlines_between(f: &mut std::fs::File, from: u64, to: u64) -> usize {
+    use std::io::{Read, Seek, SeekFrom};
+    if to <= from || f.seek(SeekFrom::Start(from)).is_err() {
+        return 0;
+    }
+    let mut buf = vec![0u8; 64 << 10];
+    let (mut left, mut n) = (to - from, 0);
+    while left > 0 {
+        let want = (left as usize).min(buf.len());
+        let Ok(k) = f.read(&mut buf[..want]) else {
+            break;
+        };
+        if k == 0 {
+            break;
+        }
+        n += buf[..k].iter().filter(|&&b| b == b'\n').count();
+        left -= k as u64;
+    }
+    n
 }
 
 /// The running Bash calls of the latest turn: id, command, start.
@@ -62,7 +153,11 @@ fn calls(m: &Model, key: &str) -> Vec<(String, String, Ms)> {
             rush_convo::model::Item::Step(sid) => Some(v.sess.step(*sid)),
             _ => None,
         })
-        .filter(|st| &*st.tool == "Bash" && st.status == Status::Running && !st.id.is_empty())
+        .filter(|st| {
+            st.kind == rush_core::tool::Kind::Shell
+                && st.status == Status::Running
+                && !st.id.is_empty()
+        })
         .map(|st| {
             (
                 st.id.to_string(),
@@ -79,6 +174,7 @@ struct Found {
     cpu: Duration,
     procs: usize,
     tails: Vec<Option<Tailed>>,
+    out: Option<OutFile>,
 }
 
 /// Looks again at the session's running Bash calls where due, and hands
@@ -133,9 +229,15 @@ pub fn sync(m: &mut Model, key: &str) {
                 s.cpu = f.cpu;
                 s.procs = f.procs;
                 s.tails = f.tails;
+                s.out = f.out;
                 let view = StepLive {
                     now: f.now,
                     tail: tail_of(&s.tails),
+                    out: s
+                        .out
+                        .as_ref()
+                        .filter(|o| !o.live.out.is_empty())
+                        .map(|o| o.live.clone()),
                 };
                 if s.view == view {
                     return Out::Idle;
@@ -148,7 +250,7 @@ pub fn sync(m: &mut Model, key: &str) {
     let views: HashMap<String, StepLive> = conn(m, key)
         .lives
         .iter()
-        .filter(|(_, s)| !s.view.now.is_empty() || !s.view.tail.is_empty())
+        .filter(|(_, s)| !s.view.now.is_empty() || !s.view.tail.is_empty() || s.view.out.is_some())
         .map(|(id, s)| (id.clone(), s.view.clone()))
         .collect();
     if let Some(v) = m.session.as_mut().filter(|v| v.key == key)
@@ -187,11 +289,15 @@ fn look(s: &Seen, agent: Pid, command: &str, start: Ms, files: &[String], now: M
         });
     }
     let (mut text, mut cpu, mut procs) = (String::new(), s.cpu, s.procs);
+    let mut out = None;
     if agent > 0 {
         let mut t = proc::snapshot();
         let mut prev = s.table.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(sh) = shell_of(&t, agent, command, start) {
             t.fill(prev.as_ref(), &[sh]);
+            // What it printed so far, when its stdout is a file (never a
+            // pipe: only the kernel's word on the descriptor is asked).
+            out = proc::fd_file(sh, 1).and_then(|p| read_out(&p, s.out.as_ref()));
             let (c, n, d) = describe(&t, sh);
             (cpu, procs) = (c, n);
             let still = s.still != 0 && s.cpu == c && s.procs == n;
@@ -212,6 +318,7 @@ fn look(s: &Seen, agent: Pid, command: &str, start: Ms, files: &[String], now: M
         cpu,
         procs,
         tails,
+        out,
     }
 }
 
@@ -368,5 +475,51 @@ mod tests {
         let b = read_tail(&p, Some(&a)).unwrap();
         assert_eq!(tail_of(&[Some(b)]), ["two", "three", "four"]);
         std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// A command's output file is read on from where the last look left
+    /// off: what came since is added, a character cut at the end waits for
+    /// the rest, and another file starts over.
+    #[test]
+    fn an_output_file_read_as_it_grows() {
+        use std::io::Write;
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("b1.output");
+        let mut f = std::fs::File::create(&p).unwrap();
+        f.write_all(b"compiling a\n").unwrap();
+        let a = read_out(&p, None).unwrap();
+        assert_eq!(a.live.lines(), ["compiling a"]);
+        let same = read_out(&p, Some(&a)).unwrap();
+        assert!(
+            Arc::ptr_eq(&a.live, &same.live),
+            "nothing new: kept as it was"
+        );
+        // "é" is two bytes: its first comes alone.
+        f.write_all(b"compiling b\ncaf\xc3").unwrap();
+        let b = read_out(&p, Some(&a)).unwrap();
+        assert_eq!(b.live.lines(), ["compiling a", "compiling b", "caf"]);
+        f.write_all(b"\xa9 done\n").unwrap();
+        let c = read_out(&p, Some(&b)).unwrap();
+        assert_eq!(c.live.lines(), ["compiling a", "compiling b", "café done"]);
+        assert_eq!(c.at, std::fs::metadata(&p).unwrap().len());
+        let q = d.path().join("other.output");
+        std::fs::write(&q, "x\n").unwrap();
+        assert_eq!(read_out(&q, Some(&c)).unwrap().live.lines(), ["x"]);
+        assert!(read_out(&d.path().join("gone"), None).is_none());
+    }
+
+    /// More than is kept since the last look: the last of it is kept, and
+    /// what was skipped is counted, not read whole.
+    #[test]
+    fn an_output_file_past_what_is_kept() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("big.output");
+        let line = format!("{}\n", "y".repeat(99));
+        let n = LIVE_KEPT / 100 * 3;
+        std::fs::write(&p, line.repeat(n)).unwrap();
+        let o = read_out(&p, None).unwrap();
+        assert!(o.live.out.len() <= LIVE_KEPT);
+        assert_eq!(o.live.line_count(), n);
+        assert!(o.live.lines().iter().all(|l| l.len() == 99));
     }
 }

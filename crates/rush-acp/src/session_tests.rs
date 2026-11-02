@@ -811,6 +811,31 @@ fn shell_call() {
     );
 }
 
+/// What a running command has printed so far, as the agent sends it in
+/// the call's content, is its output so far; its result is the result.
+#[test]
+fn shell_output_as_it_comes() {
+    let (_s, mut f, h) = start();
+    next!(h, Init);
+    f.update(json!({"sessionUpdate": "tool_call", "toolCallId": "c1", "title": "Bash", "kind": "execute", "status": "in_progress",
+        "rawInput": {"command": "go test ./..."}}));
+    next!(h, Message);
+    let content = |t: &str| json!([{"type": "content", "content": {"type": "text", "text": t}}]);
+    f.update(json!({"sessionUpdate": "tool_call_update", "toolCallId": "c1", "status": "in_progress", "content": content("ok  ./a\n")}));
+    next!(h, CallUpdated);
+    assert_eq!(
+        next!(h, CallOutput),
+        event::CallOutput {
+            id: "c1".into(),
+            text: "ok  ./a\n".into(),
+            whole: true,
+        }
+    );
+    f.update(json!({"sessionUpdate": "tool_call_update", "toolCallId": "c1", "status": "completed", "content": content("ok  ./a\nok  ./b\n")}));
+    next!(h, CallUpdated);
+    assert!(output_of(&next!(h, Message)).text.contains("ok  ./b"));
+}
+
 // tasks_test.go: TestSubagentCall: Copilot's subagent, kind other, a
 // prompt and an agent type. It's a task until its call ends.
 #[test]

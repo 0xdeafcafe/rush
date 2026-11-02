@@ -250,6 +250,17 @@ pub fn comm(pid: Pid) -> Option<String> {
     os::comm(pid)
 }
 
+/// The regular file a process's descriptor fd writes to (1 for its
+/// stdout), when it is one: a running command's output, readable as it
+/// grows. None for a pipe, a terminal or anything else, which mustn't be
+/// read (its reader would lose what was taken); nothing is read here.
+pub fn fd_file(pid: Pid, fd: i32) -> Option<std::path::PathBuf> {
+    if demo().is_some() || pid <= 0 {
+        return None;
+    }
+    os::fd_file(pid, fd)
+}
+
 /// A process's arguments, joined by spaces.
 pub fn command_line(pid: Pid) -> String {
     args(pid).join(" ")

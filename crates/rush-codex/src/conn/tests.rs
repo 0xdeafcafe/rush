@@ -844,6 +844,35 @@ fn root() -> State {
     }
 }
 
+/// What a running command prints comes as it prints it, as the call's
+/// output so far; one with no item says nothing new.
+#[test]
+fn command_output_as_it_comes() {
+    let mut st = root();
+    let got = note(
+        &mut st,
+        "item/commandExecution/outputDelta",
+        json!({"threadId": "root", "turnId": "t1", "itemId": "exec-1", "delta": "ok 1\n"}),
+    );
+    assert_eq!(
+        got,
+        [Event::CallOutput(CallOutput {
+            id: "exec-1".into(),
+            text: "ok 1\n".into(),
+            whole: false,
+        })]
+    );
+    let none = note(
+        &mut st,
+        "item/commandExecution/outputDelta",
+        json!({"threadId": "root", "delta": "x"}),
+    );
+    assert!(
+        !none.iter().any(|e| matches!(e, Event::CallOutput(_))),
+        "{none:?}"
+    );
+}
+
 // kids_test.go:TestSpawnedThreadIsATask: a spawned thread is a task from
 // its spawn until its turn ends, and again while a message it was given
 // runs; the agent tools around it draw as Claude Code's of the same use.

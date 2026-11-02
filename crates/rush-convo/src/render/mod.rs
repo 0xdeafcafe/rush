@@ -300,6 +300,10 @@ pub struct Options {
 pub struct StepLive {
     pub now: String,
     pub tail: Vec<String>,
+    /// What it has printed so far, read from the file its shell writes
+    /// to, for a harness that doesn't stream it (Claude Code's): its last
+    /// lines are drawn under it (liveout.rs).
+    pub out: Option<std::sync::Arc<crate::model::LiveOut>>,
 }
 
 impl Options {

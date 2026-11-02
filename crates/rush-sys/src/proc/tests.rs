@@ -229,3 +229,37 @@ fn comm_names_the_program() {
     assert_eq!(comm(c.id() as Pid), None);
     assert_eq!(comm(0), None);
 }
+
+/// A process writing to a file is read as writing to it, by its path; one
+/// writing to a pipe or /dev/null isn't: a pipe's output can't be read
+/// without taking it from whoever reads the pipe.
+#[test]
+fn fd_file_is_a_regular_file_only() {
+    let d = tempfile::tempdir().unwrap();
+    let out = d.path().join("out.log");
+    let f = std::fs::File::create(&out).unwrap();
+    let mut c = Command::new("/bin/cat")
+        .stdin(Stdio::piped())
+        .stdout(f)
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let pid = c.id() as Pid;
+    let got = fd_file(pid, 1).map(|p| p.canonicalize().unwrap());
+    assert_eq!(got, Some(out.canonicalize().unwrap()));
+    assert_eq!(fd_file(pid, 2), None, "/dev/null is no regular file");
+    assert_eq!(fd_file(pid, 0), None, "a pipe");
+    assert_eq!(fd_file(pid, 77), None, "no such descriptor");
+    drop(c.stdin.take());
+    c.wait().unwrap();
+
+    let mut p = Command::new("/bin/cat")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    assert_eq!(fd_file(p.id() as Pid, 1), None, "a pipe's never read");
+    drop(p.stdin.take());
+    p.wait().unwrap();
+    assert_eq!(fd_file(0, 1), None);
+}

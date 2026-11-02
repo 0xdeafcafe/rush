@@ -51,6 +51,7 @@ use rush_core::tool::{Call, Kind, Output};
 
 pub(crate) mod chain;
 pub(crate) mod diffbox;
+pub(crate) mod liveout;
 pub(crate) mod presets;
 pub(crate) mod shellbox;
 
@@ -1907,6 +1908,8 @@ impl<'a> Drawer<'a> {
             // calls run side by side, or one sent to the background with
             // more steps after it, are newest no longer.
             || !self.s.running_label(id).is_empty()
+            // A command printing as it runs shows the last of it.
+            || self.live_out_of(id).is_some()
     }
 
     fn status_mark(&self, st: &Step) -> Txt {
@@ -2485,13 +2488,15 @@ impl<'a> Drawer<'a> {
 
     /// What a step ran and did, under its row (render.go:3030).
     /// While a shell step runs: dim rows of what it's doing now (its
-    /// processes) and the tail of the file it writes. Gone when it ends.
+    /// processes), the tail of the file it writes, and the last of what it
+    /// has printed (liveout.rs). Gone when it ends.
     fn live_rows(&mut self, id: StepId, indent: usize) {
         let st = self.s.step(id);
         if st.status != Status::Running || st.id.is_empty() {
             return;
         }
         let Some(l) = self.o.live.get(&*st.id) else {
+            self.live_out_rows(id, indent);
             return;
         };
         let room = (self.cw as isize - indent as isize - 4).max(8) as usize;
@@ -2504,6 +2509,7 @@ impl<'a> Drawer<'a> {
             let l = self.sp(indent - 1).and(dim(&truncate_cells(&r, room)));
             self.add("", Color::Default, l, Txt::new());
         }
+        self.live_out_rows(id, indent);
     }
 
     fn body(&mut self, id: StepId, indent: usize) {

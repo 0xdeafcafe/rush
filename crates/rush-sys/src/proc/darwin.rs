@@ -338,3 +338,69 @@ pub(super) fn children(pid: Pid, out: &mut Vec<Pid>) {
         cap *= 4;
     }
 }
+
+/// `struct proc_fileinfo` from <sys/proc_info.h>; only its size counts.
+#[repr(C)]
+#[allow(dead_code)]
+struct ProcFileInfo {
+    fi_openflags: u32,
+    fi_status: u32,
+    fi_offset: libc::off_t,
+    fi_type: i32,
+    fi_guardflags: u32,
+}
+
+/// `struct vnode_fdinfowithpath`: a descriptor's file and its path.
+#[repr(C)]
+struct VnodeFdInfoWithPath {
+    _pfi: ProcFileInfo,
+    pvip: libc::vnode_info_path,
+}
+
+/// PROC_PIDFDVNODEPATHINFO: what proc_pidfdinfo says of a vnode.
+const PROC_PIDFDVNODEPATHINFO: libc::c_int = 2;
+/// VREG of enum vtype: a regular file.
+const VREG: libc::c_int = 1;
+
+/// The regular file pid's descriptor fd is open on, by its path; None for
+/// anything else (a pipe, a socket or a terminal is no vnode with a path,
+/// /dev/null no regular file) or a process not ours to read. Only asks
+/// the kernel about the descriptor: nothing is read from it.
+pub(super) fn fd_file(pid: Pid, fd: i32) -> Option<std::path::PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    // SAFETY: plain data; zero is a valid value.
+    let mut info: VnodeFdInfoWithPath = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<VnodeFdInfoWithPath>() as libc::c_int;
+    // SAFETY: info is a vnode_fdinfowithpath, the flavour asked for, and
+    // size its size.
+    let n = unsafe {
+        libc::proc_pidfdinfo(
+            pid,
+            fd,
+            PROC_PIDFDVNODEPATHINFO,
+            (&mut info as *mut VnodeFdInfoWithPath).cast(),
+            size,
+        )
+    };
+    if n != size {
+        return None;
+    }
+    let vi = &info.pvip.vip_vi;
+    if vi.vi_type != VREG || vi.vi_stat.vst_mode & libc::S_IFMT != libc::S_IFREG {
+        return None;
+    }
+    // SAFETY: vip_path is MAXPATHLEN bytes, held as 32 rows of 32.
+    let raw: &[u8] = unsafe {
+        std::slice::from_raw_parts(
+            info.pvip.vip_path.as_ptr().cast::<u8>(),
+            std::mem::size_of_val(&info.pvip.vip_path),
+        )
+    };
+    let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
+    if end == 0 {
+        return None;
+    }
+    Some(std::path::PathBuf::from(std::ffi::OsStr::from_bytes(
+        &raw[..end],
+    )))
+}

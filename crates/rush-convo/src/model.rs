@@ -36,12 +36,14 @@ use crate::words::{claude_result, claudes, result_text, step_tool};
 mod chainrun;
 mod exchange;
 mod jobs;
+mod liveout;
 pub mod runs;
 
 pub use chainrun::{Chain, PartProc, RunningPart, Shell, ShellProc};
 pub(crate) use chainrun::{ChainEnds, PartMark};
 pub use exchange::{ExchangeItem, exchange_peer, peer_label};
 pub use jobs::Job;
+pub use liveout::{LIVE_KEPT, LiveOut};
 
 /// Where a step is.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -491,6 +493,9 @@ pub struct Session {
     /// What's known of each running chain's commands, by its step
     /// (chainrun.rs).
     chains: HashMap<StepId, chainrun::Chain>,
+    /// What each running step has printed so far, as its harness streams
+    /// it (liveout.rs).
+    live_out: HashMap<StepId, LiveOut>,
 }
 
 impl Session {
@@ -773,8 +778,14 @@ impl Session {
                 self.command_list = c.list.clone();
             }
             // Only the host reads these, as Go's applyNeutral leaves them.
+            Event::CallOutput(e) => {
+                self.call_output(&e.id, &e.text, e.whole);
+                return;
+            }
             Event::MessageStart(_) | Event::Quota(_) | Event::Billing(_) | Event::Other(_) => {}
         }
+        // A step that ended shows its result: what it printed as it ran goes.
+        self.drop_live_out();
     }
 
     /// You sent text, as the host tells it: a new turn, or said mid-turn

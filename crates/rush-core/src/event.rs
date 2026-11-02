@@ -26,6 +26,7 @@ pub enum Event {
     Delta(Delta),
     Message(Message),
     CallUpdated(Box<CallUpdated>),
+    CallOutput(CallOutput),
     Approval(Box<Approval>),
     ApprovalCancelled(ApprovalCancelled),
     Denied(Denied),
@@ -196,6 +197,20 @@ pub struct ImageData {
 #[serde(default, rename_all = "PascalCase")]
 pub struct CallUpdated {
     pub call: tool::Call,
+}
+
+/// What a running tool call has printed so far, from a harness that
+/// streams it (Codex's command output, an ACP agent's tool content), for
+/// the conversation to show until the call's result comes. Whole: text is
+/// all of it so far; else it follows what came before. New in the Rust
+/// port.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "PascalCase")]
+pub struct CallOutput {
+    #[serde(rename = "ID")]
+    pub id: String,
+    pub text: String,
+    pub whole: bool,
 }
 
 /// Asks whether a tool call may run. Options are the answers the agent
@@ -719,6 +734,7 @@ impl Event {
             Event::Delta(_) => "delta",
             Event::Message(_) => "message",
             Event::CallUpdated(_) => "call_updated",
+            Event::CallOutput(_) => "call_output",
             Event::Approval(_) => "approval",
             Event::ApprovalCancelled(_) => "approval_cancelled",
             Event::Denied(_) => "denied",
@@ -780,6 +796,7 @@ pub fn marshal(ev: &Event) -> Result<String, CodecError> {
         Event::Delta(e) => serde_json::to_string(e),
         Event::Message(e) => serde_json::to_string(e),
         Event::CallUpdated(e) => serde_json::to_string(e),
+        Event::CallOutput(e) => serde_json::to_string(e),
         Event::Approval(e) => serde_json::to_string(e),
         Event::ApprovalCancelled(e) => serde_json::to_string(e),
         Event::Denied(e) => serde_json::to_string(e),
@@ -821,6 +838,7 @@ pub fn unmarshal(b: &[u8]) -> Result<Event, CodecError> {
         "delta" => Event::Delta(read(e)?),
         "message" => Event::Message(read(e)?),
         "call_updated" => Event::CallUpdated(read(e)?),
+        "call_output" => Event::CallOutput(read(e)?),
         "approval" => Event::Approval(read(e)?),
         "approval_cancelled" => Event::ApprovalCancelled(read(e)?),
         "denied" => Event::Denied(read(e)?),
@@ -1093,6 +1111,14 @@ mod tests {
                     }],
                 }),
                 r#"{"t":"background","e":{"Tasks":[{"ID":"b","Kind":1,"Type":"","Label":"","Parent":""}]}}"#,
+            ),
+            (
+                Event::CallOutput(CallOutput {
+                    id: s("c1"),
+                    text: s("ok\n"),
+                    whole: false,
+                }),
+                r#"{"t":"call_output","e":{"ID":"c1","Text":"ok\n","Whole":false}}"#,
             ),
             (
                 Event::Context(Context {

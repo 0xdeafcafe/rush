@@ -21,9 +21,9 @@ use rush_core::adapter::{
 use rush_core::agent::PreviewLine;
 use rush_core::event::{
     Approval, ApprovalCancelled, ApprovalOption, Ask, Background, BackgroundTask, Billing,
-    CallUpdated, Choice, Compacted, Context, Delta, Event, Init, Limited, Message, MessageStart,
-    OptionKind, Other, PartKind, PartStart, Plan, Question, Status, TaskDone, TaskKind,
-    TaskProgress, TaskStarted, TurnEnd,
+    CallOutput, CallUpdated, Choice, Compacted, Context, Delta, Event, Init, Limited, Message,
+    MessageStart, OptionKind, Other, PartKind, PartStart, Plan, Question, Status, TaskDone,
+    TaskKind, TaskProgress, TaskStarted, TurnEnd,
 };
 use rush_core::tool::{Call, Kind, TodoItem};
 use rush_core::usage::TokenUsage;
@@ -576,6 +576,15 @@ impl State {
             }
             "item/reasoning/textDelta" | "item/reasoning/summaryTextDelta" => {
                 return self.delta(s(&p, "itemId"), PartKind::Thinking, st(&p, "delta"));
+            }
+            // What a running command prints, as it prints it: shown under
+            // its step until its result comes.
+            "item/commandExecution/outputDelta" if !s(&p, "itemId").is_empty() => {
+                return vec![Event::CallOutput(CallOutput {
+                    id: st(&p, "itemId"),
+                    text: st(&p, "delta"),
+                    whole: false,
+                })];
             }
             "turn/plan/updated" => {
                 let todos = arr(&p, "plan")

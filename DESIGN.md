@@ -1519,6 +1519,27 @@ is made. Everything below is in `rush_ui::frame`.
   it, or sent to the background with steps after it), not only as the
   newest step. k, p, x and b act on any harness's shell call
   (`Kind::Shell`), and on one returned whose command runs on.
+- **A running command's output, live** (`convo::model::liveout`,
+  `render::draw::liveout`, `session_core::livestep`; new in the Rust
+  port). The agent sees a command's output only when it ends; rush shows
+  it as it comes, under the running shell step: its last 8 lines, dim,
+  colours dropped, `▸ N more lines` above them (enter on it opens up to
+  400, `▾ fewer lines` folds them), and the real result in their place
+  once the step ends. One generic model, filled however the harness
+  allows: `Event::CallOutput` (a call's output so far, or what follows)
+  kept on the session per running step, the last 256 KiB
+  (`LIVE_KEPT`), dropped as the step ends; Codex sends
+  `item/commandExecution/outputDelta`, an ACP agent its running execute
+  call's text content (not Kimi's, whose content is the input). For a
+  harness that streams nothing, rush looks itself: Claude Code sends a
+  foreground Bash call's stdout and stderr to a file it reads at the end
+  (`…/tasks/<id>.output`), so the call's shell's fd 1, asked of the
+  kernel (`rush_sys::proc::fd_file`, proc_pidfdinfo
+  PROC_PIDFDVNODEPATHINFO), is a regular file read on from where the last
+  look left off (`livestep::read_out`, every LIVE_EVERY with the "now ·"
+  line). A pipe, a terminal or /dev/null is never read: taking from a
+  pipe would take the output from the agent. No wrapper around the
+  command is needed, so the agent sees exactly what it would have.
 - **Scripts** (`session_core::scripts`, scripts.go). A session's
   latest calls run as scripts are read off the UI thread every 300 ms
   while they run; each read's view goes to the open conversation's
