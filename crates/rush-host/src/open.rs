@@ -276,13 +276,18 @@ mod tests {
         write_info("starting", "starting", p.id() as i64);
         left_socket("starting");
         let home = h.path();
+        // The host holds the connection until the open is done, so the
+        // open's hello never meets a closed pipe.
+        let (done, held) = std::sync::mpsc::channel::<()>();
         let t = std::thread::spawn(move || {
             Home::enter(&home);
             let _ = std::fs::remove_file(sock_path("starting"));
             let ln = UnixListener::bind(sock_path("starting")).unwrap();
-            ln.accept().map(|_| ()).unwrap();
+            let (_conn, _) = ln.accept().unwrap();
+            let _ = held.recv();
         });
         let r = open("starting", Duration::from_secs(10));
+        let _ = done.send(());
         assert!(r.is_ok(), "{:?}", r.err());
         t.join().unwrap();
         p.kill().unwrap();
