@@ -35,7 +35,8 @@ these broke after the merge
 │ time   1.2s
 │  copy 
 ✗ ui                  88  3.4s
-  a-package-with…      7  0.1s
+  a-package-with-      7  0.1s
+  a-really-long-…             
 
 ▾ Run  2
 branch  main

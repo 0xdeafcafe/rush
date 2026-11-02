@@ -148,26 +148,50 @@ pub(super) fn table(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
             "─".repeat(w.min(at.saturating_sub(4))),
         )])));
     }
-    for it in rows {
-        let mut r = Line::new();
-        if gutter > 0 {
-            let (mut mark, col) = tone_mark(&it.tone);
-            if it.tone.is_empty() {
-                mark = " ";
-            }
-            r.spans.push(paint(col, mark));
-            r.spans.push(plain(" "));
+    // A word cell too wide for its column wraps to a second line, cut
+    // only there: agents' tables are mostly wider than the panel, and a
+    // cut first line lost what told their rows apart. Numbers and narrow
+    // columns are cut as before.
+    let cell_lines = |s: &str, c: usize| -> Vec<String> {
+        if cw(s) <= widths[c] || right[c] || widths[c] < 8 {
+            return vec![cell(s, c)];
         }
-        for c in 0..n {
-            if c > 0 {
-                r.spans.push(plain("  "));
+        let first = wrap(s, widths[c]).into_iter().next().unwrap_or_default();
+        let rest = s.get(first.len()..).unwrap_or("").trim_start();
+        if rest.is_empty() {
+            return vec![cell(&first, c)];
+        }
+        vec![cell(&first, c), cell(rest, c)]
+    };
+    for it in rows {
+        let cols: Vec<Vec<String>> = (0..n)
+            .map(|c| cell_lines(cell_at(&it.cells, c), c))
+            .collect();
+        let h = cols.iter().map(Vec::len).max().unwrap_or(1);
+        let mut lines = Vec::with_capacity(h);
+        for j in 0..h {
+            let mut r = Line::new();
+            if gutter > 0 {
+                let (mut mark, col) = tone_mark(&it.tone);
+                if it.tone.is_empty() || j > 0 {
+                    mark = " ";
+                }
+                r.spans.push(paint(col, mark));
+                r.spans.push(plain(" "));
             }
-            let col = if c == 0 { TEXT } else { SUB };
-            r.spans.push(paint(col, cell(cell_at(&it.cells, c), c)));
+            for (c, ls) in cols.iter().enumerate() {
+                if c > 0 {
+                    r.spans.push(plain("  "));
+                }
+                let col = if c == 0 { TEXT } else { SUB };
+                let s = ls.get(j).cloned().unwrap_or_else(|| blanks(widths[c]));
+                r.spans.push(paint(col, s));
+            }
+            lines.push(line(r.spans));
         }
         let mut o = open_row(&cx.prefix, it);
         o.cols = b.columns.clone();
-        out.extend(cx.row_lines(o, w, vec![line(r.spans)]));
+        out.extend(cx.row_lines(o, w, lines));
     }
     out
 }

@@ -33,7 +33,8 @@ these broke after the merge
 │ time   1.2s
 │  copy 
 ✗ ui                                88  3.4s
-  a-package-with-a-really-long…      7  0.1s
+  a-package-with-a-really-long-      7  0.1s
+  name                                      
 
 ▾ Run  2
 branch  main
