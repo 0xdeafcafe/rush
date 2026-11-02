@@ -38,6 +38,7 @@ const KEEP: &[&str] = &[
     "RUSH_PARITY",
     "RUSH_BENCH_TRANSCRIPT",
     "RUSH_BENCH_COLD",
+    "RUSH_BENCH_OUT",
 ];
 
 /// Prefixes of variables that name a live session, host, socket, plugin
