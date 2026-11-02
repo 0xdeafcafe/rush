@@ -384,6 +384,17 @@ pub fn tail(output: &str) -> String {
 mod tests {
     use super::*;
 
+    /// Lines a read covers: its first, and the one after its last.
+    type Span = (u64, Option<u64>);
+    /// A big-read case: what, the file, offset, limit, the rule refusing.
+    type BigCase = (
+        &'static str,
+        FileStat,
+        Option<u64>,
+        Option<u64>,
+        Option<&'static str>,
+    );
+
     fn file(size: u64, mtime: i128, lines: Option<u64>) -> FileStat {
         FileStat {
             size,
@@ -396,7 +407,7 @@ mod tests {
 
     #[test]
     fn spans() {
-        let cases: &[(Option<u64>, Option<u64>, Option<u64>, (u64, Option<u64>))] = &[
+        let cases: &[(Option<u64>, Option<u64>, Option<u64>, Span)] = &[
             (None, None, Some(100), (1, None)),
             (None, None, Some(5000), (1, Some(2001))),
             (None, None, None, (1, Some(2001))),
@@ -412,7 +423,7 @@ mod tests {
 
     #[test]
     fn coverage() {
-        let cases: &[((u64, Option<u64>), (u64, Option<u64>), bool)] = &[
+        let cases: &[(Span, Span, bool)] = &[
             ((1, None), (1, None), true),
             ((1, None), (50, Some(60)), true),
             ((1, Some(100)), (1, Some(100)), true),
@@ -605,7 +616,7 @@ mod tests {
 
     #[test]
     fn big_reads() {
-        let cases: Vec<(&str, FileStat, Option<u64>, Option<u64>, Option<&str>)> = vec![
+        let cases: Vec<BigCase> = vec![
             (
                 "many lines",
                 file(40_000, 1, Some(1500)),
