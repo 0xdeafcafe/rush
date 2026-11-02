@@ -1806,6 +1806,7 @@ fn usage_gathers_the_rules() {
         ("  after", "3 in a row"),
         ("Trim command output", "on"),
         ("  longer than", "600 lines"),
+        ("Cheaper model for routine subagents", "off"),
         ("Pace guard", "off"),
         ("Agents at once", "no cap"),
         ("When you're away", "off"),
