@@ -1531,6 +1531,54 @@ Usage › Prompt cache's "slow commands in background"
 read at every command; the threshold stays the cache's life less a
 minute.
 
+### Cheaper model for routine subagents (Rust-only)
+
+Opt-in, off by default (Settings, in its own section beside Prompt cache
+until the Usage page lands; `rush-ui-settings/src/cheap.rs`). Routine
+subagent work (a described edit, a lookup, a search, running and reading
+tests, a mechanical refactor) doesn't need the strongest model. rush calls
+no model to decide; it only tells the agent and, optionally, sets one
+environment variable.
+
+What Claude Code really offers (read from 2.1.316's binary, and
+`rush-efficiency`'s catalog already knew the variable):
+
+- The Agent tool's `model` parameter: `sonnet`, `opus` or `haiku`.
+  Per call, and it wins over everything below. This is the lever for
+  "on".
+- A subagent definition's `model:` frontmatter, under the call's.
+- `CLAUDE_CODE_SUBAGENT_MODEL`: the default for every subagent that names
+  none; `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` overrides even a named one
+  (rush never sets that). It would downgrade design and debugging too, so
+  it is only the separate "all subagents" choice, never what "on" does.
+
+Setting `config.cheapSubagents`: `mode` ("" off, `on`, `all`; "all" is
+offered only while some harness has `Feature::SubagentModelAll`) and
+`models` (harness kind to model). Each harness's choices come from
+`Registry::cheaper_models`: the models in its own list that its pricer
+prices below its default model, dearest first, so Claude Code offers
+Sonnet (the default choice) then Haiku; a harness with none says "not
+offered". Features: `SubagentModel` (the agent takes the model from
+rush's words: Claude Code yes; Codex planned, its models aren't priced)
+and `SubagentModelAll` (rush sets the one model for all: Claude Code,
+through `StartOptions.subagent_model`, which the Claude adapter turns
+into `CLAUDE_CODE_SUBAGENT_MODEL`).
+
+"On" adds one part to the system prompt (`rush-host/src/cheap.rs`,
+`prompt(model)`), word for word the same for the same model, after the
+feed and before the worktree note (the parts a setting can change come
+last, so the rest stays cached); off, nothing is added. rush's own
+`spawn_agent` takes a model, so the same words cover it. The host reads
+the setting as a session starts, like the subagents' cache.
+
+The Efficiency place counts subagents whose model is Sonnet or Haiku
+(`View.sub_cheap`, `sub_cheap_cost`) and the saving: the same tokens
+priced at the agent's default model less what they cost
+(`price::saved_against_default`, from the existing price tables). It is
+an estimate: the strong model might have taken more or fewer turns. It
+shows as a finding, and in the advisor's digest. Subagent rows in
+sessions already show their model, read from the subagent's transcript.
+
 ## A session's runs
 
 The Session follows the runs its session started (session_core's
