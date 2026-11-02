@@ -172,7 +172,7 @@ pub fn squeezes(command: &str) -> bool {
         let Some(prog) = w.first() else {
             continue;
         };
-        let prog = prog.rsplit('/').next().unwrap_or(prog);
+        let prog = prog.rsplit('/').next().unwrap_or(prog.as_str());
         if matches!(
             prog,
             "cat"
