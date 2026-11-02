@@ -26,6 +26,10 @@ env:
   CARGO_INCREMENTAL: "0"
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
   CARGO_PROFILE_TEST_DEBUG: line-tables-only
+  # rust-cache keeps the dependencies built; sccache keeps rush's own crates
+  # too, in GitHub's cache, so a push rebuilds only the crates it changed.
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: sccache
 
 jobs:
   check:
@@ -39,10 +43,13 @@ jobs:
         with:
           toolchain: "1.98.1"
           components: rustfmt, clippy
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
           key: check
+          # Branches start from main's; only main saves, so the cache isn't
+          # filled with every branch's copy.
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Format
         working-directory: rust
@@ -61,6 +68,9 @@ jobs:
             --skip shimmers_on_his_second \
             --skip stuck_shell_is_stopped \
             --skip compacts_only_the_conversation_expected
+      - name: Cache use
+        if: always()
+        run: sccache --show-stats
 
   build:
     # Main's build for Apple silicon, for install-ci.sh.
@@ -75,6 +85,7 @@ jobs:
         with:
           toolchain: "1.98.1"
           targets: aarch64-apple-darwin
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
@@ -90,6 +101,9 @@ jobs:
           cp "target/$TARGET/release/rush" ../dist/rush
           codesign --force --sign - ../dist/rush
           ../dist/rush --version
+      - name: Cache use
+        if: always()
+        run: sccache --show-stats
       - uses: actions/upload-artifact@v4
         with:
           name: rush-main

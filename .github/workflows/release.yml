@@ -27,6 +27,9 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # rush's own crates kept between runs in GitHub's cache (ci.yml says more).
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: sccache
 
 jobs:
   meta:
@@ -100,6 +103,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
