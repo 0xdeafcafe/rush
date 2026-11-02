@@ -1462,6 +1462,28 @@ is made. Everything below is in `rush_ui::frame`.
   line and Trail's step line say the place too, Chat's bubble foot and
   Catch-up's "Still going" name it; Code shows the keys, Trail once the
   step is picked.
+  How a call's shell is found (`chainrun::runs_call`): Claude Code runs
+  each Bash call as `zsh -c "source <snapshot> … && eval '<command>' <
+  /dev/null && pwd -P >| <cwd file>"`, a quote in the command written
+  `'"'"'`; the eval's word is unquoted (`eval_arg`) and compared whole. A
+  call rush's gate ran as a script is found by its `rush-script
+  …/<call id>.sh`; one another hook rewrote goes to the eval shell that
+  started soonest after it. Shells are looked for right under the agent's
+  process and under a sandbox there (bwrap, Codex's), for any harness.
+  What a line runs (`render::shell::run_text`) is past do/then/if/while/!
+  and brackets, its `\` lines joined and comment gone; a comment, a loop's
+  head, done or fi runs nothing, and has no place ("2/3" counts only those
+  that run) and no time. A comment's quote opens nothing. A loop or an if
+  is laid out as written, each line given its command's time by what it
+  runs. A call that runs one script file (bash build.sh, ./build.sh,
+  source env.sh) has its commands read off the processes right under the
+  script's (through its own subshells): the row says "now cargo test",
+  the opened call lists the latest six with their times, and k kills the
+  one running now ("then": "script"). A chain or script seen running is
+  drawn opened in Normal wherever it is in the turn (another call beside
+  it, or sent to the background with steps after it), not only as the
+  newest step. k, p, x and b act on any harness's shell call
+  (`Kind::Shell`), and on one returned whose command runs on.
 - **Scripts** (`session_core::scripts`, scripts.go). A session's
   latest calls run as scripts are read off the UI thread every 300 ms
   while they run; each read's view goes to the open conversation's

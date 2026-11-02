@@ -310,6 +310,14 @@ pub(crate) fn shell_lines(cmd: &str) -> Vec<ShLine> {
             put!(i);
         } else if parens > 0 {
             put!(i);
+        } else if c == b'#' && (i == 0 || matches!(b[i - 1], b' ' | b'\t' | b'\n' | b';')) {
+            // A comment runs to the line's end: a quote in it ("# don't")
+            // opens nothing, and its ; && | split nothing.
+            while i < b.len() && b[i] != b'\n' {
+                put!(i);
+                i += 1;
+            }
+            continue;
         } else if c == b'<' && cmd[i..].starts_with("<<") && !cmd[i..].starts_with("<<<") {
             let rest = cmd[i + 2..].strip_prefix('-').unwrap_or(&cmd[i + 2..]);
             let rest = rest.trim_start_matches(' ');
@@ -1005,6 +1013,87 @@ pub(crate) fn segments(cmd: &str) -> Vec<Segment> {
         }
     }
     out
+}
+
+/// s up to a comment that starts a word outside quotes: `cargo test # all`
+/// is `cargo test `.
+fn strip_comment(s: &str) -> &str {
+    let b = s.as_bytes();
+    let mut q = 0u8;
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if q != 0 {
+            if c == b'\\' && q == b'"' {
+                i += 1;
+            } else if c == q {
+                q = 0;
+            }
+        } else if c == b'\\' {
+            i += 1;
+        } else if c == b'\'' || c == b'"' {
+            q = c;
+        } else if c == b'#' && (i == 0 || matches!(b[i - 1], b' ' | b'\t' | b'\n' | b';')) {
+            return &s[..i];
+        }
+        i += 1;
+    }
+    s
+}
+
+/// What one line of a chain runs, as its process would show it: past the
+/// words that only shape a script around it (do, then, else, if, while,
+/// until, !, a bracket), its continued lines joined and its comment gone.
+/// None for a line that runs nothing of its own: a comment, a loop's or
+/// a case's head, done, fi, esac, a closing brace, a function's head.
+pub(crate) fn run_text(text: &str) -> Option<String> {
+    let joined = text.replace("\\\n", " ");
+    let mut t = strip_comment(&joined).trim();
+    loop {
+        let before = t;
+        t = t.trim_start_matches(['(', '{']).trim_start();
+        let (w, rest) = t.split_once([' ', '\t', '\n']).unwrap_or((t, ""));
+        if matches!(
+            w,
+            "do" | "then" | "else" | "if" | "elif" | "while" | "until" | "!" | "time"
+        ) {
+            t = rest.trim_start();
+        }
+        if t == before {
+            break;
+        }
+    }
+    // A script laid out as written ends its head with what opens the body.
+    loop {
+        let before = t;
+        for end in ["; do", "; then", ";", " {"] {
+            if let Some(x) = t.strip_suffix(end) {
+                t = x.trim_end();
+            }
+        }
+        if t == before {
+            break;
+        }
+    }
+    // The last command of a group: (a; b) or { a; b; }.
+    while (t.ends_with(')') && t.matches(')').count() > t.matches('(').count())
+        || (t.ends_with('}') && t.matches('}').count() > t.matches('{').count())
+    {
+        t = t[..t.len() - 1].trim_end();
+    }
+    let w = t.split([' ', '\t', '\n']).next().unwrap_or("");
+    if t.is_empty()
+        || t.starts_with('#')
+        || matches!(
+            w,
+            "for" | "select" | "case" | "done" | "fi" | "esac" | ";;" | "function" | "in"
+        )
+        || w.ends_with("()")
+        || (w.ends_with(')') && !w.contains('('))
+    {
+        return None;
+    }
+    Some(t.to_string())
 }
 
 /// One command of a chain in words.

@@ -152,9 +152,27 @@ pub(crate) fn shell_command(args: &[String]) -> String {
 /// and their words (watchShells' read).
 fn shells(t: &Table, agent: Pid) -> Vec<Shell> {
     let mut out = Vec::new();
-    for &k in t.children.get(&agent).into_iter().flatten() {
+    shells_under(t, agent, 0, &mut out);
+    out
+}
+
+/// Whether a program is a sandbox a harness runs its shells in, which
+/// stays their parent (Codex's on Linux, bubblewrap).
+fn sandbox_comm(c: &str) -> bool {
+    matches!(
+        base(c),
+        "sandbox-exec" | "bwrap" | "codex-linux-sandbox" | "firejail" | "nsjail"
+    )
+}
+
+/// The shells under pid, and under the sandboxes right under it.
+fn shells_under(t: &Table, pid: Pid, depth: usize, out: &mut Vec<Shell>) {
+    for &k in t.children.get(&pid).into_iter().flatten() {
         let Some(p) = t.procs.get(&k) else { continue };
         if !shell_comm(&p.comm) {
+            if depth < 2 && sandbox_comm(&p.comm) {
+                shells_under(t, k, depth + 1, out);
+            }
             continue;
         }
         let args = proc::args(k);
@@ -163,7 +181,8 @@ fn shells(t: &Table, agent: Pid) -> Vec<Shell> {
         if command.is_empty() {
             continue;
         }
-        // An eval wrapper's call is matched as its hook rewrote it.
+        // An eval wrapper's call (Claude Code's) is matched by what its eval
+        // runs, or as its hook rewrote it (rush_convo's runs_call).
         if cmd.contains(" eval ") {
             command.clear();
         }
@@ -174,7 +193,6 @@ fn shells(t: &Table, agent: Pid) -> Vec<Shell> {
             kids: kids(t, k, 0),
         });
     }
-    out
 }
 
 /// The process tree under pid, with each process's words (shellKids).

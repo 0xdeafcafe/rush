@@ -534,6 +534,11 @@ impl<'a> Drawer<'a> {
         if st.status != Status::Ok || hidden(st) || shown(st) || !st.images.is_empty() {
             return false;
         }
+        // Returned, but its chain runs on in the background: where it is
+        // stays in sight.
+        if !self.s.running_label(id).is_empty() {
+            return false;
+        }
         if st.kind == Kind::Read && thumbable(&self.p.abs(&self.info(id).call.input.path)) {
             return false;
         }
@@ -1856,6 +1861,11 @@ impl<'a> Drawer<'a> {
         self.force_open
             || self.o.verbose
             || Some(id) == self.latest && self.step_cards(id).is_empty()
+            // A chain or script seen running shows where it is, each
+            // command's time and the keys, wherever it is in the turn:
+            // calls run side by side, or one sent to the background with
+            // more steps after it, are newest no longer.
+            || !self.s.running_label(id).is_empty()
     }
 
     fn status_mark(&self, st: &Step) -> Txt {
@@ -2552,6 +2562,7 @@ impl<'a> Drawer<'a> {
                 {
                     drawn = self.shell_body(Some(id), cmd, indent);
                     self.marks = echo_marks(cmd);
+                    self.script_rows(id, indent);
                     self.chain_keys(id, indent);
                 }
                 self.live_rows(id, indent);
@@ -2717,14 +2728,16 @@ impl<'a> Drawer<'a> {
         let pad = self.sp(indent - 1);
         let mut room = self.cw as isize - indent as isize - 4;
         let mut raw = shell_lines(cmd);
-        // A script (a loop, an if, a group) reads as one: its statements
-        // aren't a chain's commands, with a time and a running marker each.
+        // A script (a loop, an if, a group) is laid out as written; its
+        // commands still have a time each and the one running now its
+        // marker, found by what each line runs.
         let script = compound(&raw);
+        let segs = segments(cmd);
         let marks = match step {
-            Some(id) if !script => self.chain_marks(id, segments(cmd).len()),
+            Some(id) => self.chain_marks(id, segs.len()),
             _ => Vec::new(),
         };
-        let now_part = step.and_then(|id| self.s.part_now(id)).filter(|_| !script);
+        let now_part = step.and_then(|id| self.s.part_now(id));
         if !marks.is_empty() {
             room -= 12;
         }
@@ -2817,12 +2830,47 @@ impl<'a> Drawer<'a> {
         let mut widest = 0;
         let mut lg: Option<&'static Lang> = None;
         let mut hs = HlState::default();
+        // A script's lines aren't the chain's commands one for one: each
+        // is the next command running the program and first word it does.
+        fn line_key(t: &str) -> Option<(String, String)> {
+            let t = super::shell::run_text(t)?;
+            let mut w = t
+                .split_whitespace()
+                .filter(|x| x.starts_with('-') || !x.contains('='));
+            let base = |s: &str| s.rsplit('/').next().unwrap_or(s).to_string();
+            let a = w.next()?;
+            Some((base(a), base(w.next().unwrap_or(""))))
+        }
+        let script_part: Vec<Option<usize>> = if script && (!marks.is_empty() || now_part.is_some())
+        {
+            let keys: Vec<_> = segs.iter().map(|s| line_key(&s.text)).collect();
+            let mut next = 0;
+            lines
+                .iter()
+                .map(|l| {
+                    if l.verbatim {
+                        return None;
+                    }
+                    let k = line_key(&l.text)?;
+                    let q = (next..keys.len()).find(|&q| keys[q].as_ref() == Some(&k))?;
+                    next = q + 1;
+                    Some(q)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         // Which command of the chain each line is, for its time.
         let mut part: Option<usize> = None;
         for i in 0..lines.len() {
             let l = &lines[i];
             let mut mark = Txt::new();
-            if !l.verbatim && l.depth == 0 && !l.text.starts_with("| ") {
+            if script {
+                part = script_part.get(i).copied().flatten();
+                if let Some(m) = part.and_then(|k| marks.get(k)) {
+                    mark = m.clone();
+                }
+            } else if !l.verbatim && l.depth == 0 && !l.text.starts_with("| ") {
                 let k = part.map_or(0, |p| p + 1);
                 part = Some(k);
                 if let Some(m) = marks.get(k) {

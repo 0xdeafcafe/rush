@@ -247,6 +247,8 @@ impl Drawer<'_> {
             || st.approval.is_some()
             || st.kind == rush_core::tool::Kind::Subagent
             || self.o.paused.contains(&*st.id)
+            // Returned, its command runs on: which part runs changes.
+            || self.s.job_running(&st.id)
             || self.o.scripts.contains_key(&*st.id)
             || self.o.ran.contains_key(&*st.id)
         {
