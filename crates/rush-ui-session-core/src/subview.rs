@@ -495,20 +495,25 @@ pub fn started(at: Ms, now: Ms) -> String {
     hm
 }
 
-/// What a run is doing or how it ended, short: its step under way while it
-/// works, else done, failed or stopped.
-fn short_status(r: &Row, w: usize) -> Span {
-    if r.live {
-        let doing =
-            r.st.map(|t| one_line(&t.doing))
-                .filter(|d| !d.is_empty())
-                .unwrap_or_default();
-        if doing.is_empty() {
-            return sp("running", ORANGE);
-        }
-        return sp(rush_draw::truncate(&doing, w, "…").into_owned(), SUB);
+/// What a run is doing or how it ended, short, w wide: while it works,
+/// the session's working line with its step under way (the spinner at
+/// tick); waiting on an answer, that; else done, failed or stopped.
+fn short_status(r: &Row, w: usize, tick: usize) -> Line {
+    if r.live && r.st.is_some_and(|t| t.waiting) {
+        let s = rush_draw::truncate("waiting on you", w, "…").into_owned();
+        return line([sp(s, YELLOW)]);
     }
-    sub_word(&r.status, false)
+    if r.live {
+        let doing = r.st.map(|t| one_line(&t.doing)).unwrap_or_default();
+        let verb = if doing.is_empty() {
+            "working"
+        } else {
+            doing.as_str()
+        };
+        let head = rush_convo::render::live_head(tick, verb, None);
+        return rush_draw::truncate_line(&head, w, "…");
+    }
+    line([sub_word(&r.status, false)])
 }
 
 /// The run's facts: what runs it, where it works, its steps, what it
@@ -567,9 +572,10 @@ impl List<'_> {
         let kind = kind_of(self.r, self.home, &sa.id);
         let mark = sub_mark(self.reg, &kind, &r.status, r.live, self.tick + i);
         let status_w = (w / 5).clamp(10, 20);
-        let status = short_status(r, status_w);
-        let pad = status_w.saturating_sub(status.text.chars().count());
-        let mut right = line([status, plain(blanks(pad)), plain("  ")]);
+        let status = short_status(r, status_w, self.tick);
+        let pad = status_w.saturating_sub(status.width());
+        let mut right = status;
+        right.spans.extend([plain(blanks(pad)), plain("  ")]);
         right.spans.push(dim(format!("{took:>6}")));
         right.spans.push(plain("  "));
         let room = (w as isize - right.width() as isize - 6 - indent.len() as isize).max(12);
@@ -1141,6 +1147,8 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Option<Vec<Line>
     out.truncate(rows);
     let (now, tick) = (m.now, m.tick);
     let n = rows.saturating_sub(out.len() + 1);
+    let open = conn(m, key).watch.open.clone();
+    let live = run_live(m, key, &open);
     let r = &mut conn(m, key).runs;
     let Some(d) = r.detail.as_mut() else {
         return Some(out);
@@ -1151,6 +1159,8 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Option<Vec<Line>
         refs.push(String::new());
     }
     v.sync(w, now, tick);
+    // Its working line docked under its conversation while it works.
+    v.o.hide_activity = !live;
     if !v.read {
         out.push(fit(line([sp("reading its conversation…", DIM)]), w));
         refs.push(String::new());
@@ -1252,14 +1262,24 @@ fn peek_head(m: &mut Model, key: &str, id: &str, w: usize) -> Vec<Line> {
         w,
         "…",
     ));
-    if live && let Some(d) = st.map(|t| one_line(&t.doing)).filter(|d| !d.is_empty()) {
-        out.push(rush_draw::truncate_line(
-            &line([plain("   "), sp("› ", ORANGE), sp(d, SUB)]),
-            w,
-            "…",
-        ));
-    }
     out
+}
+
+/// Whether run id works now, as the list says: its conversation's working
+/// line shows under it only then, and goes once it's finished.
+fn run_live(m: &Model, key: &str, id: &str) -> bool {
+    let Some(v) = m.session.as_ref().filter(|v| v.key == key) else {
+        return false;
+    };
+    let s = &v.sess;
+    let Some(r) = runs_of(m, key) else {
+        return false;
+    };
+    let jobs = s.subagent_jobs();
+    r.subs
+        .iter()
+        .find(|sa| sa.id == id)
+        .is_some_and(|sa| r.state(s, sa, &jobs, m.now).1)
 }
 
 /// The column beside the list for a workflow picked: when it started,
@@ -1436,6 +1456,7 @@ fn peek(
     }
     let head = peek_head(m, key, id, pw);
     let bx = msg_box(m, key, id, pw);
+    let live = run_live(m, key, id);
     let (now, tick) = (m.now, m.tick);
     let c = conn(m, key);
     if c.watch.peek.id != id {
@@ -1470,7 +1491,9 @@ fn peek(
         v.sync(pw, now, tick);
         v.o.selected.clear();
         v.o.focused = false;
-        v.o.hide_activity = true;
+        // Its working line under its conversation, as the session's, while
+        // it works; finished or waiting, how it stands says instead.
+        v.o.hide_activity = !live;
         if !v.read {
             right[at] = line([dim(" reading its conversation…")]);
         } else if rows > 0 {

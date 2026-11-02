@@ -176,6 +176,9 @@ const FLOW_EVERY: Ms = 2000;
 pub struct RunStat {
     pub doing: String,
     pub since: Ms,
+    /// A call of its waits on an answer (an approval, a question): it
+    /// isn't working, whatever its task says.
+    pub waiting: bool,
     pub did: Vec<String>,
     pub last_words: String,
     pub first: Ms,
@@ -208,6 +211,7 @@ impl RunStat {
         RunStat {
             doing,
             since,
+            waiting: s.steps().iter().any(|st| st.status == Status::Waiting),
             did: s.did(),
             last_words: s.last_words(),
             first: s.first,

@@ -39,7 +39,7 @@ pub use codedoc::{code_rows, is_code};
 pub use decisions::{decisions_on_card, decisions_ref, decisions_sent, open_decisions};
 pub use draw::presets::check_names;
 pub use draw::{OWNER_SEP, each_paste, image_label, paste_chip};
-pub use draw::{drawing, fold_pastes};
+pub use draw::{drawing, fold_pastes, live_head};
 pub use markdown::{answer_lines, link_target, markdown_lines};
 pub use needs::{
     NEEDS_ALL, NEEDS_KINDS, Needs, NeedsItem, has_quote, needs_of, needs_ref, without_chrome,

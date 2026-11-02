@@ -180,7 +180,7 @@ fn the_list() {
         "    · Port  1 of 3 done".into(),
         "      ✓ port:hl                                                                           done".into(),
         "        ▸ 1 earlier try · click to show".into(),
-        "      ✢ port:claude                                                                       running".into(),
+        "      ✢ port:claude                                                                       · working…".into(),
         "      ◌ port:draw    waiting to start".into(),
         "    · Check  not started".into(),
         "".into(),
@@ -922,3 +922,106 @@ fn the_wheel_leaves_the_pick() {
     views::body(&mut m, 120, 8).unwrap();
     assert_eq!(conn(&mut m, KEY).vs.top, 0, "the view jumped");
 }
+
+/// A working run's transcript: asked, it ran a command it hasn't heard
+/// back from, NOW less 36.789s.
+const W_LINES: [&str; 2] = [
+    r#"{"type":"user","isSidechain":true,"timestamp":"2026-10-28T12:34:00Z","message":{"role":"user","content":"check the port's tests"}}"#,
+    r#"{"type":"assistant","isSidechain":true,"timestamp":"2026-10-28T12:34:20Z","message":{"id":"m1","model":"claude-opus-4-1","role":"assistant","usage":{"input_tokens":900,"output_tokens":60},"content":[{"type":"tool_use","id":"b1","name":"Bash","input":{"command":"cargo test","description":"run the tests"}}]}}"#,
+];
+
+/// model's runs and one more, w, working: its task running, its
+/// transcript at a command still going.
+fn working(d: &tempfile::TempDir) -> Model {
+    use rush_core::event::{Event, TaskKind, TaskStarted};
+    let mut m = model(d);
+    let p = d.path().join("agent-w.jsonl");
+    std::fs::write(&p, W_LINES.join("\n") + "\n").unwrap();
+    m.session.as_mut().unwrap().sess.apply(
+        &Event::TaskStarted(TaskStarted {
+            id: "w".into(),
+            call_id: "tw".into(),
+            kind: TaskKind::Subagent,
+            label: "check the port's tests".into(),
+            background: true,
+            ..TaskStarted::default()
+        }),
+        NOW - 60_000,
+    );
+    let sa = Subagent {
+        id: "w".into(),
+        typ: "general-purpose".into(),
+        description: "check the port's tests".into(),
+        tool_use_id: "tw".into(),
+        path: p.to_string_lossy().into_owned(),
+        born: 5,
+        ..Subagent::default()
+    };
+    let r = &mut conn(&mut m, KEY).runs;
+    r.listed.push(sa.clone());
+    r.subs.push(sa);
+    super::subs::kick(&mut m, KEY);
+    super::subs::refresh(&mut m, KEY);
+    m
+}
+
+/// While a run works, the subagents view shows the session's working line:
+/// docked under its conversation beside the list and opened whole, and,
+/// short, on its row (the spinner and its step); a finished run shows how
+/// it ended. Once it finishes, the line goes and its row says done.
+#[test]
+fn a_working_run_shows_its_working_line() {
+    use rush_core::event::{Event, TaskDone};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = working(&d);
+    m.w = 150;
+    views::show_view(&mut m, KEY, "subagents");
+    m.session.as_mut().unwrap().sel = "sub:w".into();
+    let got = text(&views::body(&mut m, 150, 30).unwrap());
+    let row = row_of(&mut m, "w");
+    assert!(row.contains("· run the tests…"), "its row: {row}");
+    assert!(got.contains("· running Bash…"), "no working line:\n{got}");
+    let done = row_of(&mut m, "x");
+    assert!(done.contains("done"), "the finished run: {done}");
+    assert_eq!(got, WORKING_VIEW, "\n{got}");
+    // Opened whole, the line is under its conversation too.
+    subview::open_sub(&mut m, KEY, "w");
+    let whole = text(&views::body(&mut m, 150, 30).unwrap());
+    assert!(whole.contains("· running Bash…"), "opened:\n{whole}");
+    // It finishes: the line goes, and its row says how it ended.
+    m.session.as_mut().unwrap().sess.apply(
+        &Event::TaskDone(TaskDone {
+            id: "w".into(),
+            call_id: "tw".into(),
+            status: "completed".into(),
+            ..TaskDone::default()
+        }),
+        NOW,
+    );
+    let whole = text(&views::body(&mut m, 150, 30).unwrap());
+    assert!(
+        !whole.contains("running Bash"),
+        "opened, finished:\n{whole}"
+    );
+    subview::close_sub(&mut m, KEY);
+    assert!(!subview::watching(&m, KEY));
+    m.session.as_mut().unwrap().sel = "sub:w".into();
+    let got = text(&views::body(&mut m, 150, 30).unwrap());
+    assert!(!got.contains("running Bash"), "finished:\n{got}");
+    let row = row_of(&mut m, "w");
+    assert!(!row.contains("run the tests"), "its row, finished: {row}");
+    assert!(row.contains("done"), "its row, finished: {row}");
+}
+
+/// Run id's row in the list, 120 wide.
+fn row_of(m: &mut Model, id: &str) -> String {
+    let rf = format!("sub:{id}");
+    subview::list(m, KEY, 120, false)
+        .into_iter()
+        .find(|(_, r)| *r == rf)
+        .map(|(l, _)| l.plain())
+        .unwrap_or_default()
+}
+
+/// The subagents view 150 wide, w picked and working.
+const WORKING_VIEW: &str = "";

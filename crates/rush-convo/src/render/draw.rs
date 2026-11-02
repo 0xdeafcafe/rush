@@ -1597,12 +1597,8 @@ impl<'a> Drawer<'a> {
         }
         let pad = self.spine().and_raw("   ");
         self.air();
-        let mut head = paint(C_ORANGE.bold(), &format!("{} {verb}…", spin(self.o.tick)));
-        if since != 0 {
-            let s = self.since(since);
-            head.push_str("  ", Style::default());
-            head.push(paint(C_ORANGE, &s));
-        }
+        let took = (since != 0).then(|| self.since(since));
+        let mut head = live_head_txt(self.o.tick, &verb, took.as_deref());
         let mut facts = Vec::new();
         if t.start != 0 && since != t.start {
             facts.push(format!("turn {}", self.since(t.start)));
@@ -4776,6 +4772,23 @@ fn agent_tag_in(x: &str) -> Option<(Txt, &str)> {
     }
     let h = crate::handles::handle_of(tag)?;
     Some((crate::handles::agent_tag(&h, tag), &x[tag.len()..]))
+}
+
+/// The working line's head: the spinner at tick, what the agent is doing
+/// and, when known, how long it's been at it (render.go:1131).
+fn live_head_txt(tick: usize, verb: &str, took: Option<&str>) -> Txt {
+    let mut head = paint(C_ORANGE.bold(), &format!("{} {verb}…", spin(tick)));
+    if let Some(s) = took {
+        head.push_str("  ", Style::default());
+        head.push(paint(C_ORANGE, s));
+    }
+    head
+}
+
+/// The working line's head as a session's conversation draws it under a
+/// running turn: the one look a list row's short form takes too.
+pub fn live_head(tick: usize, verb: &str, took: Option<&str>) -> Line {
+    live_head_txt(tick, verb, took).into_line()
 }
 
 /// Each paste in a message as the chip it was in the box.
