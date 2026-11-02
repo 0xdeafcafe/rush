@@ -24,6 +24,19 @@ pub fn set_thread_cache_dir(dir: Option<PathBuf>) {
     THREAD_DIRS.with(|d| d.borrow_mut().1 = dir);
 }
 
+/// This thread's rush folder and cache folder as set (None where unset),
+/// for a thread started on its behalf to set the same: what
+/// [`set_thread_dirs`] takes.
+pub fn thread_dirs() -> (Option<PathBuf>, Option<PathBuf>) {
+    THREAD_DIRS.with(|d| d.borrow().clone())
+}
+
+/// Sets this thread's rush folder and cache folder at once, as
+/// [`thread_dirs`] gave them.
+pub fn set_thread_dirs(dirs: (Option<PathBuf>, Option<PathBuf>)) {
+    THREAD_DIRS.with(|d| *d.borrow_mut() = dirs);
+}
+
 /// Dir's last answer and the home it was for: it's asked for on every
 /// reading, and which folder is in use changes only when it's copied over,
 /// between runs.
@@ -218,6 +231,28 @@ mod tests {
         // A thread with no folder of its own is in the throwaway home.
         assert!(!reached(dir) && !reached(cache_dir));
         assert!(dir().starts_with(rush_core::sandbox::root().unwrap()));
+    }
+
+    // A thread started on another's behalf takes on its folders whole.
+    #[test]
+    fn thread_dirs_carry_over() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (a, b) = (tmp.path().join("a"), tmp.path().join("b"));
+        let got = std::thread::spawn(move || {
+            set_thread_dir(Some(a));
+            set_thread_cache_dir(Some(b));
+            let dirs = thread_dirs();
+            std::thread::spawn(move || {
+                set_thread_dirs(dirs);
+                (dir(), cache_dir())
+            })
+            .join()
+            .unwrap()
+        })
+        .join()
+        .unwrap();
+        assert_eq!(got, (tmp.path().join("a"), tmp.path().join("b")));
+        assert_eq!(thread_dirs(), (None, None));
     }
 
     // As Go's filepath.Join(home, …) cleans what it makes.

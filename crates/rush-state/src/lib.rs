@@ -34,7 +34,10 @@ pub mod writebehind;
 
 pub use config::{Config, Dispatch, Folder, Login, SignIn, Start};
 pub use costcache::CostCache;
-pub use dir::{cache_dir, cache_path, dir, expand_home, key, set_thread_cache_dir, set_thread_dir};
+pub use dir::{
+    cache_dir, cache_path, dir, expand_home, key, set_thread_cache_dir, set_thread_dir,
+    set_thread_dirs, thread_dirs,
+};
 pub use envconfig::{env_bool, env_name};
 pub use profiles::{LOGINS_KIND, Pick, Profile, Room, Seat, ids};
 pub use store::{
