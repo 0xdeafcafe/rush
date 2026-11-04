@@ -545,8 +545,7 @@ pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
         h.publish(&mut st);
     }
     let sock = sock_path(id);
-    let _ = std::fs::remove_file(&sock);
-    let ln = UnixListener::bind(&sock).map_err(|e| e.to_string())?;
+    let ln = listen_at(&sock).map_err(|e| e.to_string())?;
     sh.lock().listen_fd = std::os::fd::AsRawFd::as_raw_fd(&ln);
     // The agents' queue: one thread takes what every start says, in order.
     {
@@ -613,6 +612,24 @@ pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
         }
     }
     serve_on(&h, ln, sock)
+}
+
+/// A listener at sock that is there only once it takes connections:
+/// bound beside it and moved into place after listen. A starting rush
+/// waits for the socket to appear in the session's folder (client::spawn)
+/// and nothing else there changes after it: bound in place, the socket
+/// appears a moment before it listens, and a connect then is refused with
+/// no change left to wake the wait until its deadline.
+pub(crate) fn listen_at(sock: &Path) -> std::io::Result<UnixListener> {
+    // Shorter than the socket's own name: a socket's path has a length limit.
+    let tmp = sock.with_file_name("host.new");
+    let _ = std::fs::remove_file(&tmp);
+    let ln = UnixListener::bind(&tmp)?;
+    if let Err(e) = std::fs::rename(&tmp, sock) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    Ok(ln)
 }
 
 /// Serves h's clients on ln, sock's listener, and watches what stops it,

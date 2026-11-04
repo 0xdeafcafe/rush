@@ -2399,3 +2399,38 @@ fn greyed_views_are_named_at_the_end_of_the_next_message() {
     let yours = "rush: stale views: are they?\n\nmore";
     assert_eq!(clean(yours), yours);
 }
+
+/// A host's socket is there only once it listens: a starting rush that
+/// waits on the session's folder (client::spawn) and connects as soon as
+/// the socket appears is answered at once, never refused and left
+/// waiting for a change that doesn't come.
+#[test]
+fn the_socket_appears_once_it_listens() {
+    for _ in 0..40 {
+        let d = tempfile::tempdir().unwrap();
+        let sock = d.path().join("host.sock");
+        let w = rush_sys::fswait::Watcher::new();
+        w.watch(&[d.path()]);
+        let at = sock.clone();
+        let host = std::thread::spawn(move || listen_at(&at).unwrap());
+        // Each change wakes the wait at once: one that runs out was left
+        // with nothing to wake it.
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        let up = loop {
+            if std::os::unix::net::UnixStream::connect(&sock).is_ok() {
+                break true;
+            }
+            let now = std::time::Instant::now();
+            if now >= deadline {
+                break false;
+            }
+            // As client::spawn waits: on the folder, with no polling.
+            w.wait(None, Some(deadline - now));
+            if std::time::Instant::now() >= deadline {
+                break false;
+            }
+        };
+        drop(host.join().unwrap());
+        assert!(up, "a connect was refused and nothing woke the wait");
+    }
+}
