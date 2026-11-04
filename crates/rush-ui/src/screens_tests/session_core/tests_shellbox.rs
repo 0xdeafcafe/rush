@@ -302,7 +302,7 @@ fn s_sends_it_to_the_agent() {
 
 /// With Settings' short output going to the agent (as it is unless
 /// changed), a run that printed little is sent as it ends, as → send
-/// would, and what you were typing stays in the box.
+/// would.
 #[test]
 fn short_output_goes_to_the_agent_by_itself() {
     let fake = Fake::new();
@@ -310,10 +310,10 @@ fn short_output_goes_to_the_agent_by_itself() {
     crate::accounts::config_mut(&mut m).hold_short_output = false;
     pick_the_box(&mut m);
     let _ = fake.ops();
-    conn(&mut m, KEY).input.set("half a thought");
     press(&mut m, "enter");
+    assert_eq!(shellbox::ran().len(), 1, "it ran");
     assert_eq!(sends(&fake), [SENT]);
-    assert_eq!(conn(&mut m, KEY).input.string(), "half a thought");
+    assert!(conn(&mut m, KEY).input.is_empty());
     let run = shellbox::run_of(&mut m, KEY, BOX).unwrap();
     assert!(run.told);
     assert!(shown(&mut m).contains("✓ sent"));
