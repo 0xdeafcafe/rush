@@ -103,6 +103,7 @@ static FIELDS: &[Field] = fields![
     "copyOnSelect" => OptBool: copy_on_select,
     "searchTranscriptsOnKey" => Bool: search_transcripts_on_key,
     "enterSendsCommand" => Bool: enter_sends_command,
+    "holdShortOutput" => Bool: hold_short_output,
     "rowKey" => Str: row_key,
     "menuBar" => Bool: menu_bar,
     "menuBarAsked" => Bool: menu_bar_asked,

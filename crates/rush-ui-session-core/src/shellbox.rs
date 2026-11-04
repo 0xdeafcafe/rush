@@ -9,7 +9,9 @@
 //! render/draw/shellbox.rs), its code to a file beside it as it ends.
 //! What it printed stays on your screen: → send to agent puts the
 //! command and the end of its output in the message box, for you to
-//! send as any message, through whichever harness the session has.
+//! send as any message, through whichever harness the session has. A
+//! block's run whose output is short (ShellRun::sends_itself) is sent so
+//! by itself as it ends, unless Settings has short output wait for you.
 //!
 //! A chain (a block of several commands) says which command runs now and
 //! how long each took, read from its processes every WATCH_EVERY with
@@ -536,13 +538,35 @@ pub fn start(m: &mut Model, key: &str, r: &str, script: &str, bang: Option<(u32,
             },
         );
     }
+    let ended = !run.running();
     k.runs.insert(r.to_string(), Arc::new(run));
     k.r#gen += 1;
     // Kept at once, running or not: rush opened again picks it up.
     save(m, key);
     show(m, key);
     m.ask_wake(Instant::now() + Duration::from_millis(100));
+    if ended {
+        return send_itself(m, key, r).unwrap_or(Out::Draw);
+    }
     Out::Draw
+}
+
+/// Sends run r of session key to the agent as it ends, when its output is
+/// short enough to (ShellRun::sends_itself); None when it isn't sent.
+fn send_itself(m: &mut Model, key: &str, r: &str) -> Option<Out> {
+    let run = run_of(m, key, r)?;
+    if !run.sends_itself() || crate::accounts::store(m).config.hold_short_output {
+        return None;
+    }
+    // As s would: a send that asks first (a cold cache, another agent's
+    // words) asks, the text in the box.
+    let (o, sent) = send_as_typed(m, key, &run.send_text());
+    change(m, key, r, |x| x.told = true);
+    save(m, key);
+    if sent {
+        m.flash("its output was short · sent to the agent");
+    }
+    Some(o)
 }
 
 /// Runs what's typed after `!` in session key's box, drawn after what
@@ -572,7 +596,7 @@ pub fn run_typed(m: &mut Model, key: &str) -> Out {
 pub fn sync(m: &mut Model, key: &str) {
     load(m, key);
     let now = m.now;
-    let (mut ended, mut running) = (false, false);
+    let (mut ended, mut running) = (Vec::new(), false);
     let mut looks: Vec<(String, i32, String)> = Vec::new();
     let k = kept(m, key);
     let refs: Vec<String> = k.procs.keys().cloned().collect();
@@ -598,7 +622,7 @@ pub fn sync(m: &mut Model, key: &str) {
                 Arc::make_mut(run).finish(code, now);
                 k.procs.remove(&r);
                 k.r#gen += 1;
-                ended = true;
+                ended.push(r);
                 continue;
             }
         }
@@ -631,8 +655,11 @@ pub fn sync(m: &mut Model, key: &str) {
             },
         );
     }
-    if ended {
+    if !ended.is_empty() {
         save(m, key);
+    }
+    for r in &ended {
+        let _ = send_itself(m, key, r);
     }
     if running {
         m.ask_wake(Instant::now() + Duration::from_millis(100));
@@ -839,8 +866,8 @@ const SUM_BUDGET: f64 = 0.05;
 
 /// Sends text to session key's agent as if typed and sent with enter: at
 /// once, or queued while it works, as the box would; what's typed in the
-/// box is left as it was.
-fn send_as_typed(m: &mut Model, key: &str, text: &str) -> Out {
+/// box is left as it was. Says too whether it was sent (or queued).
+fn send_as_typed(m: &mut Model, key: &str, text: &str) -> (Out, bool) {
     let c = conn(m, key);
     let was = c.input.string();
     let imgs = std::mem::take(&mut c.imgs);
@@ -848,13 +875,14 @@ fn send_as_typed(m: &mut Model, key: &str, text: &str) -> Out {
     c.input.set(text);
     let o = super::keys::send(m, key, false);
     let c = conn(m, key);
-    if c.input.is_empty() {
+    let sent = c.input.is_empty();
+    if sent {
         // Sent (or queued): what you were typing comes back.
         c.input.set(&was);
         c.imgs = imgs;
         c.bang = bang;
     }
-    o
+    (o, sent)
 }
 
 /// → send (s): run r's command, code and the end of its output go to the
@@ -867,7 +895,7 @@ pub fn send(m: &mut Model, key: &str, r: &str) -> Out {
         m.flash_err("it's still running · send it once it's done");
         return Out::Draw;
     }
-    let o = send_as_typed(m, key, &run.send_text());
+    let (o, _) = send_as_typed(m, key, &run.send_text());
     change(m, key, r, |x| x.told = true);
     save(m, key);
     o
@@ -928,7 +956,7 @@ pub fn summary(m: &mut Model, key: &str, r: &str) -> Out {
             match got {
                 Ok(s) => {
                     change(m, &key, &r, |x| x.summing = false);
-                    let o = send_as_typed(m, &key, &run.summary_text(&s));
+                    let (o, _) = send_as_typed(m, &key, &run.summary_text(&s));
                     change(m, &key, &r, |x| (x.told, x.told_summary) = (true, true));
                     save(m, &key);
                     o

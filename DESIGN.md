@@ -2497,9 +2497,15 @@ long it ran, the one running now is marked, and k (skip it) and p (pause
 it, kept with the other paused commands that rush lets go on as it quits)
 work as on an agent's.
 
-What it printed stays on your screen: nothing goes to the agent until
-you pick one of the three on a finished box's foot (their words shorten
-as the box narrows: `→ send to agent`, `→ send`, `→`):
+What it printed stays on your screen. A block's run whose output is
+short (`ShellRun::sends_itself`: 20 lines and 2000 characters at most,
+none let go) and that ended by itself (not stopped, nor while rush was
+closed) goes to the agent as it ends, as → send would, with a flash
+saying so; Settings › Message box › "Short output of a command you run"
+(`holdShortOutput`) has it wait instead. A `!` run never goes by
+itself. Otherwise nothing goes to the agent until you pick one of the
+three on a finished box's foot (their words shorten as the box narrows:
+`→ send to agent`, `→ send`, `→`):
 
 - **→ send** (s) sends "I ran `cmd` (exit 0):" and its last 80 lines
   (6000 characters at most) to the agent at once, as if typed and sent

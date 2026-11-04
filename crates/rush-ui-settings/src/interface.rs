@@ -489,6 +489,26 @@ pub fn sections(m: &Model) -> Vec<Section> {
         ],
         set(|m, v| config_mut(m).enter_sends_command = v == "sends"),
     );
+    let short_output = choice(
+        "Short output of a command you run",
+        if c.hold_short_output {
+            "waits for you"
+        } else {
+            "is sent"
+        },
+        "What becomes of a shell block from a reply you run with ▶ run, when what it printed is short (20 lines at most).",
+        &[
+            (
+                "is sent",
+                "the command, its exit code and its output are sent to the agent by itself as it ends.",
+            ),
+            (
+                "waits for you",
+                "it stays in its box until you send it (→ send), draft it or sum it up.",
+            ),
+        ],
+        set(|m, v| config_mut(m).hold_short_output = v == "waits for you"),
+    );
     let row_key = choice(
         "Open a picked row with",
         first_non_empty(&[&c.row_key, "enter and space"]),
@@ -645,6 +665,6 @@ pub fn sections(m: &Model) -> Vec<Section> {
             rows: cols,
             advanced: false,
         },
-        Section::new("Message box", vec![command, row_key, copying]),
+        Section::new("Message box", vec![command, row_key, copying, short_output]),
     ]
 }
