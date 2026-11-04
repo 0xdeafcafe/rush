@@ -28,6 +28,11 @@ pub const OUT_SHOWN: usize = 12;
 pub const SEND_LINES: usize = 80;
 pub const SEND_CHARS: usize = 6000;
 
+/// A block's run whose output is at most this many lines and characters
+/// goes to the agent by itself as it ends (ShellRun::sends_itself).
+pub const AUTO_LINES: usize = 20;
+pub const AUTO_CHARS: usize = 2000;
+
 /// A fenced block of shell in a reply.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ShellBlock {
@@ -424,6 +429,22 @@ impl ShellRun {
         s
     }
 
+    /// Whether it goes to the agent by itself now it's ended: a block of
+    /// a reply (not typed after `!`) that ended by itself (not stopped,
+    /// nor while rush was closed), not sent yet, whose output is short
+    /// enough to send whole: AUTO_LINES lines, AUTO_CHARS characters.
+    pub fn sends_itself(&self) -> bool {
+        if self.running() || self.bang || self.stopped || self.lost {
+            return false;
+        }
+        if self.told || self.told_summary || self.summing || self.dropped > 0 {
+            return false;
+        }
+        let lines = self.lines();
+        let chars: usize = lines.iter().map(|l| plain_text(l).len() + 1).sum();
+        lines.len() <= AUTO_LINES && chars <= AUTO_CHARS
+    }
+
     /// "<said> `cmd` (exit 0):", or the command as a block when it's
     /// several lines or holds a backtick.
     fn head(&self, said: &str) -> String {
@@ -704,6 +725,40 @@ mod tests {
         assert_eq!(r.line_count(), 300);
         assert!(r.dropped > 0);
         assert!(r.out.starts_with('y'));
+    }
+
+    /// A block's run with short output, ended by itself, sends itself;
+    /// one too long, stopped, typed after `!`, still running or already
+    /// sent doesn't.
+    #[test]
+    fn short_output_sends_itself() {
+        let ran = |out: &str, f: fn(&mut ShellRun)| {
+            let mut r = ShellRun::new("ls", "/tmp", 1);
+            r.push(out);
+            r.finish(Some(0), 2);
+            f(&mut r);
+            r.sends_itself()
+        };
+        let lines = |n: usize| "a line\n".repeat(n);
+        let cases: [(&str, String, fn(&mut ShellRun), bool); 9] = [
+            ("short", lines(3), |_| {}, true),
+            ("no output", String::new(), |_| {}, true),
+            ("at the line limit", lines(AUTO_LINES), |_| {}, true),
+            ("a line too many", lines(AUTO_LINES + 1), |_| {}, false),
+            (
+                "too many characters",
+                "x".repeat(AUTO_CHARS + 1),
+                |_| {},
+                false,
+            ),
+            ("stopped", lines(1), |r| r.stopped = true, false),
+            ("typed after !", lines(1), |r| r.bang = true, false),
+            ("still running", lines(1), |r| r.end = 0, false),
+            ("already sent", lines(1), |r| r.told = true, false),
+        ];
+        for (name, out, f, want) in cases {
+            assert_eq!(ran(&out, f), want, "{name}");
+        }
     }
 
     #[test]

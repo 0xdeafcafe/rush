@@ -3,7 +3,8 @@
 //! stopping it, r running it again, ✎ edit changing it before it runs;
 //! → send sending the command and its output to the agent, ✎ draft
 //! putting them in the message box, ≈ summary sending what the quick
-//! model made of them (and nothing going to the agent by itself); `!`
+//! model made of them; a run whose output is short going to the agent
+//! by itself as it ends, unless Settings holds it (a `!` run never); `!`
 //! in the empty box turning it to running commands, esc
 //! and a backspace at its start turning it back, enter running one in
 //! the session's folder, drawn in the conversation; and the runs kept on
@@ -69,6 +70,9 @@ fn replied_as(fake: &Arc<Fake>, keep: bool, host: bool) -> Model {
     }
     crate::accounts::use_store(&mut m, rush_state::Store::default());
     crate::accounts::accounts(&mut m).read_only = true;
+    // Its runs wait for you, as the ways to send them are what's tested;
+    // short_output_goes_to_the_agent_by_itself turns this off.
+    crate::accounts::config_mut(&mut m).hold_short_output = true;
     core(&mut m).hide_map = true;
     let now = m.now;
     sess(&mut m).sent("how do I clean up?".into(), Vec::new(), now - 60_000);
@@ -294,6 +298,53 @@ fn s_sends_it_to_the_agent() {
     press(&mut m, "s");
     assert_eq!(sends(&fake), [SENT]);
     assert!(conn(&mut m, KEY).input.is_empty());
+}
+
+/// With Settings' short output going to the agent (as it is unless
+/// changed), a run that printed little is sent as it ends, as → send
+/// would, and what you were typing stays in the box.
+#[test]
+fn short_output_goes_to_the_agent_by_itself() {
+    let fake = Fake::new();
+    let mut m = replied_hosted(&fake);
+    crate::accounts::config_mut(&mut m).hold_short_output = false;
+    pick_the_box(&mut m);
+    let _ = fake.ops();
+    conn(&mut m, KEY).input.set("half a thought");
+    press(&mut m, "enter");
+    assert_eq!(sends(&fake), [SENT]);
+    assert_eq!(conn(&mut m, KEY).input.string(), "half a thought");
+    let run = shellbox::run_of(&mut m, KEY, BOX).unwrap();
+    assert!(run.told);
+    assert!(shown(&mut m).contains("✓ sent"));
+}
+
+fn printed_long(_: &str, _: &str) -> Option<(String, i32)> {
+    Some(("a line\n".repeat(rush_convo::shellbox::AUTO_LINES + 1), 0))
+}
+
+/// A run that printed more than a few lines waits for you, and so does a
+/// short one with Settings holding it.
+#[test]
+fn long_or_held_output_waits_for_you() {
+    let fake = Fake::new();
+    let mut m = replied_hosted(&fake);
+    crate::accounts::config_mut(&mut m).hold_short_output = false;
+    shellbox::set_fake(Some(printed_long));
+    pick_the_box(&mut m);
+    let _ = fake.ops();
+    press(&mut m, "enter");
+    assert!(sends(&fake).is_empty(), "long output isn't sent");
+    assert!(!shellbox::run_of(&mut m, KEY, BOX).unwrap().told);
+    assert!(shown(&mut m).contains("→ send"));
+
+    let fake = Fake::new();
+    let mut m = replied_hosted(&fake);
+    pick_the_box(&mut m);
+    let _ = fake.ops();
+    press(&mut m, "enter");
+    assert!(sends(&fake).is_empty(), "held output isn't sent");
+    assert!(!shellbox::run_of(&mut m, KEY, BOX).unwrap().told);
 }
 
 /// ✎ draft (d) puts the command and its output in the message box, for
