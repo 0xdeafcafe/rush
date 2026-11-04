@@ -444,6 +444,10 @@ pub fn fetch(t: &Target, fresh: Duration) -> (Result<Runs, Error>, i64) {
 pub type FetchRunsFn<'a> = Box<dyn Fn(Duration) -> (Result<Runs, Error>, i64) + 'a>;
 /// When GitHub's spent rate limit resets, if it is spent.
 pub type LimitFn<'a> = Box<dyn Fn() -> Option<Time> + 'a>;
+/// Where a branch is on GitHub now (repo, branch, the commit watched): the
+/// commit it heads, and whether that has the one watched in its history
+/// (None when GitHub couldn't say); None when it can't say at all.
+pub type HeadFn<'a> = Box<dyn Fn(&str, &str, &str) -> Option<(String, Option<bool>)> + 'a>;
 
 /// What a run watch waits for. Say is told each line to print; fetch,
 /// sleep, logs, now and limited are GitHub and the clock, which tests set;
@@ -462,6 +466,7 @@ pub struct RunOptions<'a> {
     pub log: Option<LogFn<'a>>,
     pub stopped: Option<StoppedFn<'a>>,
     pub limited: Option<LimitFn<'a>>,
+    pub head: Option<HeadFn<'a>>,
 }
 
 impl RunOptions<'_> {
@@ -474,14 +479,25 @@ impl RunOptions<'_> {
     }
 
     fn repo(&self) -> String {
-        self.target
-            .as_ref()
-            .map(|t| t.repo.clone())
-            .unwrap_or_default()
+        self.target().repo
     }
 
     fn label(&self) -> String {
-        self.target.as_ref().map(Target::label).unwrap_or_default()
+        if self.target.is_none() {
+            return String::new();
+        }
+        self.target().label()
+    }
+
+    fn head(&self, repo: &str, branch: &str, sha: &str) -> Option<(String, Option<bool>)> {
+        match &self.head {
+            Some(f) => f(repo, branch, sha),
+            None => {
+                let new = head_of(repo, branch).ok()?;
+                let has = (new != sha).then(|| has_commit(repo, sha, &new)).flatten();
+                Some((new, has))
+            }
+        }
     }
 
     fn say(&self, s: &str) {
@@ -715,6 +731,64 @@ fn watching(o: &RunOptions, start: Time, st: &mut State) -> i32 {
     }
 }
 
+/// A branch's runs cancelled, none failed, and the branch on GitHub at
+/// another commit: most likely a push replaced them (a workflow's
+/// concurrency cancels the old run). Says where the branch is and whether
+/// that commit has the one watched, so whoever watches can decide whether
+/// to wait on it; the watch still ends as cancelled.
+fn replaced(o: &RunOptions, rs: &Runs) -> Option<String> {
+    let (_, failed, cancelled, _, _) = rs.counts();
+    if failed > 0 || cancelled == 0 {
+        return None;
+    }
+    let t = o.target();
+    let What::Sha { sha, branch } = &t.what else {
+        return None;
+    };
+    if branch.is_empty() {
+        return None;
+    }
+    let (new, has) = o
+        .head(&t.repo, branch, sha)
+        .filter(|(n, _)| !n.is_empty() && n != sha)?;
+    let what = match has {
+        Some(true) => format!("a newer push, on top of {}", short(sha)),
+        Some(false) => format!(
+            "a push without {} (rebased or force-pushed?): what you pushed may not be in it",
+            short(sha)
+        ),
+        None => "another push".to_string(),
+    };
+    o.log(
+        "watch-run-replaced",
+        fields(json!({"repo": t.repo, "from": sha, "to": new, "branch": branch, "has": has})),
+    );
+    Some(format!(
+        "replaced: {branch} is at {} now, {what}; to wait on it: rush watch run {branch}",
+        short(&new)
+    ))
+}
+
+/// Whether commit new has commit old in its history, as GitHub compares
+/// them; None when it couldn't say.
+fn has_commit(repo: &str, old: &str, new: &str) -> Option<bool> {
+    #[derive(Deserialize)]
+    struct Compare {
+        #[serde(default, deserialize_with = "nd")]
+        status: String,
+    }
+    let (b, _) = gh::get(
+        &format!("repos/{repo}/compare/{old}...{new}?per_page=1"),
+        Duration::from_secs(60),
+    )
+    .ok()?;
+    match decode::<Compare>(&b).ok()?.status.as_str() {
+        "ahead" | "identical" => Some(true),
+        "behind" | "diverged" => Some(false),
+        _ => None,
+    }
+}
+
 /// A job's key across looks.
 fn key(r: &WorkflowRun, j: &Check) -> (i64, i64, String) {
     (r.id, j.id, j.name.clone())
@@ -768,7 +842,12 @@ fn step(
     let (_, failed, cancelled, _, _) = rs.counts();
     let done = rs.done();
     if o.until == Until::Fail && failed > 0 || done {
-        o.say(&summary(o, rs, since));
+        let mut said = summary(o, rs, since);
+        if done && let Some(r) = replaced(o, rs) {
+            said += "\n";
+            said += &r;
+        }
+        o.say(&said);
         return Some(if failed > 0 {
             EXIT_FAILED
         } else if cancelled > 0 {

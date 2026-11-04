@@ -181,6 +181,24 @@ fn prompt_words() {
         prompt::short_dir("~/src/github.com/langwatch/.worktrees/go-ports", 30),
         "~/…/.worktrees/go-ports"
     );
+    // Slimmer still: the start goes, then the name's own start.
+    for (p, n, want) in [
+        (
+            "~/Source/github.com/0xdeafcafe/rush",
+            35,
+            "~/Source/github.com/0xdeafcafe/rush",
+        ),
+        (
+            "~/Source/github.com/0xdeafcafe/rush",
+            25,
+            "~/…/0xdeafcafe/rush",
+        ),
+        ("~/Source/github.com/0xdeafcafe/rush", 8, "~/…/rush"),
+        ("~/Source/github.com/0xdeafcafe/rush", 7, "…/rush"),
+        ("~/a/go-ports", 5, "…orts"),
+    ] {
+        assert_eq!(prompt::short_dir(p, n), want, "{p} in {n}");
+    }
 }
 
 // ---- listfilter_test.go: TestListFilterByName ----

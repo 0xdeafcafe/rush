@@ -158,6 +158,33 @@ pub fn focus_at(m: &mut Model, x: usize) -> bool {
     false
 }
 
+/// Files dropped onto the terminal (a paste of nothing but their paths)
+/// go to the side the pointer was last over, keys or not: a drag from
+/// another window doesn't give the keys on its way in, as the terminal
+/// isn't focused. Past Go. The paste then goes on to whoever has the keys.
+pub fn drop_paste(m: &mut Model, text: &str) -> Out {
+    let Some(x) = m.kept::<Pointer>().x else {
+        return Out::Pass;
+    };
+    if !crate::frame::editor::is_drop(text, &crate::frame::editor::look_disk) {
+        return Out::Pass;
+    }
+    let (lw, pw) = widths(m);
+    if pw > 0
+        && x > lw + 1
+        && m.session.is_none()
+        && m.sheet.is_none()
+        && m.confirm.is_none()
+        && super::live::can_embed(m)
+    {
+        // A screen beside the list: the drop goes to it, as typing does.
+        m.kept::<super::live::LiveState>().embedded = true;
+    } else {
+        focus_at(m, x);
+    }
+    Out::Pass
+}
+
 /// The pointer at column x. Moving onto the Session or the list gives it
 /// the keys, once as it crosses: tab to the other holds while the
 /// pointer stays put; back from another window it doesn't

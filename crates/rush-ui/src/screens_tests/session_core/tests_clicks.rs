@@ -165,6 +165,36 @@ fn the_pointer_crossing_moves_the_keys() {
     assert!(m.session.is_none(), "a real crossing does");
 }
 
+/// Files dropped from another window land on the side under the pointer,
+/// though the terminal isn't focused and so the pointer didn't move the
+/// keys on its way.
+#[test]
+fn a_drop_goes_where_the_pointer_is() {
+    let d = tempfile::tempdir().unwrap();
+    let img = d.path().join("shot.png");
+    std::fs::write(&img, "x").unwrap();
+    let img = img.to_string_lossy().into_owned();
+    let mut m = split_open(200, 50);
+    let (lw, _) = split::widths(&m);
+    assert!(m.session.is_some(), "the Session has the keys");
+    let _ = m.update(Msg::Input(Event::FocusLost));
+    ev(&mut m, MouseKind::Moved, 5, 20);
+    assert!(m.session.is_some(), "unfocused, the pointer moves nothing");
+    m.paste(&img);
+    assert!(m.session.is_none(), "dropped on the list: it has the keys");
+    assert_eq!(m.input.string(), "[Image #1]");
+    ev(&mut m, MouseKind::Moved, lw + 20, 20);
+    assert!(m.session.is_none());
+    m.paste(&img);
+    assert!(m.session.is_some(), "dropped on the Session");
+    let key = open_key(&m).unwrap();
+    assert_eq!(conn(&mut m, &key).input.string(), "[Image #1]");
+    // Text pasted, not files, goes where the keys are.
+    ev(&mut m, MouseKind::Moved, 5, 20);
+    m.paste("hello");
+    assert!(m.session.is_some(), "a paste of text doesn't move the keys");
+}
+
 /// The permission mode on the Session's box takes a click where it's
 /// drawn, beside the list and alone, wide and narrow: lit under the
 /// pointer, a click opens what changes it (as #perm).

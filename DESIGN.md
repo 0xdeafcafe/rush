@@ -73,7 +73,7 @@ speed or memory claim has a number behind it.
 | `rush-copilot` | Copilot: the CLI run over ACP (rush-acp's `Agent`), its profile, gh's accounts, premium requests, the coding agent's sessions on GitHub and their logs | `internal/adapters/copilot` |
 | `rush-providers` | DeepSeek's dsh (run over ACP by rush-acp's `Agent`; its balance), and one provider's models in another's harness (DeepSeek and GLM in Claude Code; Anthropic, OpenAI, DeepSeek and GLM in Pi) | `internal/adapters/deepseek`, `cross` |
 | `rush-sys`, `rush-state`, `rush-events`, `rush-gh`, `rush-net`, `rush-keymap`, `rush-update`, `rush-harnessup` | wave A: the machine (processes, file watching), state, the events log, GitHub, the network, keys, updates, agent program updates | `internal/proc`, `fswait`, `state`, … |
-| `rush-watch`  | `rush watch pr`: waiting on a PR's checks for an agent (exit 0/1/2/3 as Go); `rush watch run` (run.rs, new in the port): the same for a GitHub Actions run with no PR (a branch's or commit's newest run per workflow, or a run id), through the Actions REST API; the gh answers every watcher shares (ETag, flock, `watch/gh`) and the rate limit every watcher sees (`watch/gh/ratelimit.json`: each answer's X-RateLimit-Remaining and Reset, so all slow down together as it runs low, and once it's spent or GitHub says slow down, the time nobody asks before: Retry-After, else the reset, else 1 min, at most 1 h); a PR watch's live record; the hook that turns polling (`gh pr checks --watch`, `gh run watch`, sleep loops) into them | `internal/watch`, `cmd/rush/watch.go` |
+| `rush-watch`  | `rush watch pr`: waiting on a PR's checks for an agent (exit 0/1/2/3 as Go); `rush watch run` (run.rs, new in the port): the same for a GitHub Actions run with no PR (a branch's or commit's newest run per workflow, or a run id), through the Actions REST API; a branch's runs cancelled with the branch at another commit end as cancelled, saying where the branch is and whether that commit has the one watched (GitHub's compare), so the agent decides whether to wait on it; the gh answers every watcher shares (ETag, flock, `watch/gh`) and the rate limit every watcher sees (`watch/gh/ratelimit.json`: each answer's X-RateLimit-Remaining and Reset, so all slow down together as it runs low, and once it's spent or GitHub says slow down, the time nobody asks before: Retry-After, else the reset, else 1 min, at most 1 h); a PR watch's live record; the hook that turns polling (`gh pr checks --watch`, `gh run watch`, sleep loops) into them | `internal/watch`, `cmd/rush/watch.go` |
 | `rush-prdrive`| `rush pr`: what's left before merge in order, trusted reviewers, reply/resolve guards, the detached follower that wakes a session only with news | `internal/prdrive`, `cmd/rush/pr.go`, `prfollow.go` |
 | `rush-remind` | reminders agents set: a file each under rush's folder, a detached waiter (`rush remind run`) that sleeps until due and sends it through the session's host, waking it; `when` read as a wait, a time of day or a date | `internal/remind`, `cmd/rush/remind.go` |
 | `rush-memory` | rush's side of an agent's memory notes: a note drafted from a few words by a cheap model the caller hands in, which notes are worth a look, those kept as they are (`memory-kept.json`), `rush memory add`'s flags, and `Keeper`, the agent's side of writing and tidying them: rush-claude's `keeper::NoteKeeper`, which the binary registers for the UI (`memreview::register_keeper`) and `rush memory` (in the binary) uses through the adapter's MemoryKeeper | `internal/memory`, `cmd/rush/memory.go` |
@@ -1824,7 +1824,16 @@ is made. Everything below is in `rush_ui::frame`.
   # command typed where the agent moves; #cd moves it by name. A rush
   session is told mid-turn, then `Hosts::cd` has its host list it there
   and name it afresh. What's on disk for the pickers is read off the UI
-  thread as they open and as what's typed changes.
+  thread as they open and as what's typed changes. Their text opens on
+  the folder you're in, to edit (`Picker::path`, past Go): ↑↓ put the
+  row chosen in it while the rows stay as last typed, tab completes as
+  a shell does (a chosen row whole with a /, else what the rows under
+  it share), and enter takes the text when it's been edited past the
+  row. The send bar's folder fits the room the own worktree chip and
+  the model leave it, its middle then its start going first. Files
+  dropped onto the terminal go to the side the pointer was last over
+  (`split::drop_paste`, past Go): a drag from another window leaves the
+  terminal unfocused, so the pointer crossing hadn't moved the keys.
 - **A session's / commands and picker** (`session_core::rushcmd`,
   `session_core::slash`; sessionviews.go). A / command sent from the box
   goes through `rushcmd::run`: claudescreen's head (aliases, what's left

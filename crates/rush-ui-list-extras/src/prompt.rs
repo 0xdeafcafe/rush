@@ -121,32 +121,59 @@ pub fn set_start_dir(m: &mut Model, dir: &str) {
 }
 
 /// A path in at most n cells, its middle left out, so the folder's own
-/// name always shows: ~/…/langwatch/.worktrees/go-ports (shortDir).
+/// name always shows: ~/…/langwatch/.worktrees/go-ports (shortDir). Still
+/// too wide, its start goes too (…/go-ports), then the name's own start
+/// (…ports).
 pub fn short_dir(p: &str, n: usize) -> String {
-    if rush_core::text::width(p) <= n {
+    use rush_core::text::width;
+    if width(p) <= n {
         return p.to_string();
     }
     let parts: Vec<&str> = p.split('/').collect();
     let mut tail = parts[parts.len() - 1].to_string();
     for i in (1..parts.len().saturating_sub(1)).rev() {
         let next = format!("{}/{tail}", parts[i]);
-        if rush_core::text::width(&format!("{}/…/{next}", parts[0])) > n {
+        if width(&format!("{}/…/{next}", parts[0])) > n {
             break;
         }
         tail = next;
     }
-    rush_draw::truncate(&format!("{}/…/{tail}", parts[0]), n, "…").into_owned()
+    let s = format!("{}/…/{tail}", parts[0]);
+    if width(&s) <= n {
+        return s;
+    }
+    let s = format!("…/{tail}");
+    if width(&s) <= n {
+        return s;
+    }
+    // Keep the end of the name: what's left of it after "…".
+    let mut out = String::new();
+    let mut w = 0;
+    for c in tail.chars().rev() {
+        let cw = width(c.encode_utf8(&mut [0; 4]));
+        if w + cw + 1 > n {
+            break;
+        }
+        w += cw;
+        out.insert(0, c);
+    }
+    if n == 0 {
+        String::new()
+    } else {
+        format!("…{out}")
+    }
 }
 
 /// A folder named by its repository, not a branch: the agent decides at
-/// the start whether it works there or in a new worktree (dirLabel).
-pub fn dir_label(m: &Model, dir: &str) -> String {
+/// the start whether it works there or in a new worktree (dirLabel), in
+/// at most n cells.
+pub fn dir_label(m: &Model, dir: &str, n: usize) -> String {
     for a in &m.agents {
         if a.job.cwd == dir && a.repo == dir {
             return a.repo.rsplit('/').next().unwrap_or(&a.repo).to_string();
         }
     }
-    short_dir(&tildify(dir), 48)
+    short_dir(&tildify(dir), n.min(48))
 }
 
 /// The box's edge labels, left and right, what it says while empty, and
@@ -168,16 +195,25 @@ fn labels(m: &mut Model, text: &str, w: usize) -> (Line, Line, String, Parts, Pa
     }
     let dir = start_dir(m);
     let lead = "new agent in ";
-    let mut top_l = line([sp(lead, DIM), sp(dir_label(m, &dir), TEXT)]);
-    // The folder: a click picks another, as ctrl+l does.
-    let mut left = vec![(width(lead), top_l.width(), EdgeAct::Dir)];
     // In a repository, whether it gets a worktree of its own: a click
     // switches it for the project.
     let (project, repo) = super::gitlink::box_project(m);
-    if repo {
+    let chip = repo.then(|| worktree_chip(m, &project));
+    // The folder gives way first, so the worktree chip and what it starts
+    // as still show: its width is what's left after them (the shelf with
+    // no room keeps only the chosen chip).
+    let keep = width(lead)
+        + chip.as_ref().map_or(0, |c| c.width() + 1)
+        + super::shelf::shelf_line(m, &dir, 0).0.width()
+        + 12;
+    let n = w.saturating_sub(keep).max(12);
+    let mut top_l = line([sp(lead, DIM), sp(dir_label(m, &dir, n), TEXT)]);
+    // The folder: a click picks another, as ctrl+l does.
+    let mut left = vec![(width(lead), top_l.width(), EdgeAct::Dir)];
+    if let Some(chip) = chip {
         top_l.spans.push(plain(" "));
         let from = top_l.width();
-        join(&mut top_l, worktree_chip(m, &project));
+        join(&mut top_l, chip);
         left.push((from, top_l.width(), EdgeAct::Worktree(project)));
     }
     // What it starts as, so a model or profile is never a surprise,

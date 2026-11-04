@@ -424,6 +424,8 @@ fn script(
         log: Some(Box::new(|_, _| {})),
         stopped: Some(Box::new(|| false)),
         limited: Some(Box::new(|| limited_for.map(|d| Time::from_unix(0, 0) + d))),
+        // The branch stays where it was.
+        head: Some(Box::new(|_, _, _| None)),
     };
     let code = watch_run(&o);
     drop(o);
@@ -449,6 +451,72 @@ fn done_waits_for_the_run_to_complete_and_says_once() {
         said,
         vec!["main @ abcdef1 run finished after 30s: 2 passed · CI"]
     );
+}
+
+/// A branch's run cancelled with the branch at another commit since: the
+/// watch ends as cancelled, and says where the branch is and whether that
+/// commit has the one watched, for the agent to decide.
+#[test]
+fn a_run_a_push_replaced_says_where_the_branch_went() {
+    for (has, want) in [
+        (
+            Some(true),
+            "replaced: main is at fedcba9 now, a newer push, on top of abcdef1; to wait on it: rush watch run main",
+        ),
+        (
+            Some(false),
+            "replaced: main is at fedcba9 now, a push without abcdef1 (rebased or force-pushed?): what you pushed may not be in it; to wait on it: rush watch run main",
+        ),
+        (
+            None,
+            "replaced: main is at fedcba9 now, another push; to wait on it: rush watch run main",
+        ),
+    ] {
+        let said = RefCell::new(Vec::new());
+        let now = Cell::new(Time::from_unix(0, 0));
+        let o = RunOptions {
+            target: Some(main_target()),
+            until: Until::Done,
+            timeout: HOUR,
+            say: Some(Box::new(|s| said.borrow_mut().push(s.to_string()))),
+            fetch: Some(Box::new(|_| {
+                (
+                    runs(vec![wr(1, "completed", &["check=cancelled"])])
+                        .map_err(|_| Error::Limited),
+                    4000,
+                )
+            })),
+            sleep: Some(Box::new(|d| {
+                now.set(now.get() + d);
+                true
+            })),
+            now: Some(Box::new(|| now.get())),
+            log: Some(Box::new(|_, _| {})),
+            stopped: Some(Box::new(|| false)),
+            limited: Some(Box::new(|| None)),
+            head: Some(Box::new(move |repo, branch, sha| {
+                assert_eq!((repo, branch, sha), ("o/r", "main", "abcdef1234567890"));
+                Some(("fedcba9876543210".into(), has))
+            })),
+            ..Default::default()
+        };
+        let code = watch_run(&o);
+        drop(o);
+        let said = said.into_inner();
+        assert_eq!(code, EXIT_ERROR, "{said:?}");
+        assert_eq!(said.len(), 1);
+        assert_eq!(said[0].lines().last(), Some(want), "{said:?}");
+    }
+
+    // The branch where it was: no word of a push.
+    let (code, said, _, _) = script(
+        Until::Done,
+        HOUR,
+        vec![runs(vec![wr(1, "completed", &["check=cancelled"])])],
+        None,
+    );
+    assert_eq!(code, EXIT_ERROR);
+    assert!(!said[0].contains("replaced"), "{said:?}");
 }
 
 #[test]

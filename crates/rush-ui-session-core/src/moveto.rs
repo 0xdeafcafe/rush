@@ -97,9 +97,7 @@ fn list_key(m: &mut Model, k: &Press) -> Out {
 pub fn open_dir_picker(m: &mut Model) -> Out {
     let start = start_dir(m);
     let (mut p, f) = folder_picker(m, "Start new sessions in", "start new sessions here");
-    if let Some(i) = p.shown().iter().position(|r| r.value == start) {
-        p.cursor = i;
-    }
+    on(&mut p, &start);
     p.on_pick = Box::new(|m, pick, _| {
         let Some(dir) = pick.map(|p| p.value.clone()) else {
             return Out::Idle;
@@ -121,6 +119,7 @@ pub fn open_move_picker(m: &mut Model, a: &Agent) -> Out {
         "tell it to work here",
     );
     p.note = format!("now in {}", tildify(agent_dir(a)));
+    on(&mut p, agent_dir(a));
     let key = a.key.clone();
     p.on_pick = Box::new(move |m, pick, _| {
         let Some(dir) = pick.map(|p| p.value.clone()) else {
@@ -132,6 +131,15 @@ pub fn open_move_picker(m: &mut Model, a: &Agent) -> Out {
         }
     });
     open(m, p, f)
+}
+
+/// The picker open on dir: its text the folder, to edit, and its row
+/// chosen when listed.
+fn on(p: &mut Picker, dir: &str) {
+    if let Some(i) = p.shown().iter().position(|r| r.value == dir) {
+        p.cursor = i;
+    }
+    p.start_at(&tildify(dir));
 }
 
 /// What the folder pickers know besides their rows: the projects
@@ -272,14 +280,18 @@ fn folder_picker(m: &Model, title: &str, enter: &str) -> (Picker, Shared) {
         let f = f.clone();
         move |q| {
             (q.starts_with('/') || q.starts_with('~')).then(|| {
-                let d = expand(q);
+                // A folder completed ends in /; the folder's itself.
+                let t = q.trim_end_matches('/');
+                let d = expand(if t.is_empty() { "/" } else { t });
                 row(&d, lock(&f).section(&d))
             })
         }
     }));
     p.closes = vec!["ctrl+l".into()];
+    p.path = true;
     p.keys = vec![
         ("type".into(), "filter or a path".into()),
+        ("tab".into(), "complete".into()),
         ("↑↓".into(), "choose".into()),
         ("enter".into(), enter.into()),
         ("esc".into(), "close".into()),
@@ -361,12 +373,7 @@ fn scan(m: &mut Model, f: &Shared, title: &str, q: &str) {
             let Some(p) = m.picker().filter(|p| p.title == title) else {
                 return Out::Idle;
             };
-            let typed: String = p
-                .query
-                .as_ref()
-                .map(|(_, q)| q.iter().collect())
-                .unwrap_or_default();
-            if typed.trim() != q {
+            if p.narrowed_by().trim() != q {
                 return Out::Idle;
             }
             fresh.disk = disk;
