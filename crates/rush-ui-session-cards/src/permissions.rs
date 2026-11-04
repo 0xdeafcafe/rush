@@ -1,5 +1,6 @@
 //! A session's permission modes: those its harness says it has, the
-//! don't-ask one the approval card's o and #yolo switch to, and changing
+//! don't-ask one the approval card's o and #yolo switch to, the auto one its
+//! u does, and changing
 //! it. After Go's internal/ui/permissions.go (permissionChoices :12,
 //! permissionKnown :31, bypassMode :42, setPermission :51,
 //! permissionCommand :79). How much a mode trusts (choices.go Trust,
@@ -51,9 +52,20 @@ pub fn permission_known(m: &Model, kind: &str, c: Option<&HostInfo>, mode: &str)
 /// The harness's don't-ask-again mode, when it has one: #yolo's, and the
 /// approval card's o (bypassMode).
 pub fn bypass_mode(m: &Model, kind: &str, c: Option<&HostInfo>) -> String {
+    mode_trusting(m, kind, c, 3)
+}
+
+/// The harness's classifier-approves mode, when it has one: Claude's auto,
+/// the approval card's u. Not yolo: it still asks about what's risky.
+pub fn auto_mode(m: &Model, kind: &str, c: Option<&HostInfo>) -> String {
+    mode_trusting(m, kind, c, 2)
+}
+
+/// The first mode on offer that trusts exactly t (adapter::trust).
+fn mode_trusting(m: &Model, kind: &str, c: Option<&HostInfo>, t: i32) -> String {
     permission_choices(m, kind, c)
         .into_iter()
-        .find(|v| trust(&v.id) == 3)
+        .find(|v| trust(&v.id) == t)
         .map(|v| v.id)
         .unwrap_or_default()
 }

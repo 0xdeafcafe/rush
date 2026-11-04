@@ -86,13 +86,14 @@ pub struct CardBtn {
 pub type Btn = [String; 3];
 
 /// A button's colour, by what its key does: yes green, no red, for good
-/// blue, don't-ask yellow, edit first purple (btnTone).
+/// blue, auto yellow, don't-ask orange, edit first purple (btnTone).
 pub fn btn_tone(key: &str) -> Color {
     match key {
         "y" | "enter" => GREEN,
         "n" => RED,
         "a" => BLUE,
-        "o" => YELLOW,
+        "u" => YELLOW,
+        "o" => ORANGE,
         "e" => QUEUE,
         _ => ORANGE,
     }
