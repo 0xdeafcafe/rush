@@ -1,13 +1,13 @@
 {
- "commit": "2c03a0ee572c4c4e3f0cf86ea2c48cd72b7e2318",
+ "commit": "c5d6835f26fbbc6aa8c403063f6a4866c62625d2",
  "ref": "main",
- "run": "41895993026",
- "at": "2026-11-04T20:11:03Z",
+ "run": "41916415108",
+ "at": "2026-11-04T21:58:18Z",
  "window_s": 60,
  "metrics": {
   "binary: rush, release": {
    "kind": "binary",
-   "value": 59549352
+   "value": 59610328
   },
   "follow a run: read on, each write, allocated": {
    "kind": "bytes",
@@ -75,15 +75,15 @@
   },
   "host: CPU to start, s": {
    "kind": "info",
-   "value": 0.058
+   "value": 0.122
   },
   "host: footprint": {
    "kind": "footprint",
-   "value": 3867968
+   "value": 3786048
   },
   "host: idle CPU": {
    "kind": "cpu",
-   "value": 0.0009
+   "value": 0.0011
   },
   "host: idle wake-ups": {
    "kind": "wakeups",
@@ -143,11 +143,11 @@
   },
   "menubar feed: CPU to start, s": {
    "kind": "info",
-   "value": 0.09
+   "value": 0.15
   },
   "menubar feed: footprint": {
    "kind": "footprint",
-   "value": 12862784
+   "value": 12862848
   },
   "menubar feed: idle CPU": {
    "kind": "cpu",
@@ -263,19 +263,19 @@
   },
   "plugind: CPU to start, s": {
    "kind": "info",
-   "value": 0.034
+   "value": 0.053
   },
   "plugind: footprint": {
    "kind": "footprint",
-   "value": 4719936
+   "value": 4801984
   },
   "plugind: idle CPU": {
    "kind": "cpu",
-   "value": 0.0122
+   "value": 0.0131
   },
   "plugind: idle wake-ups": {
    "kind": "wakeups",
-   "value": 17.8
+   "value": 20.7
   },
   "plugind: threads": {
    "kind": "threads",
@@ -287,7 +287,7 @@
   },
   "render 300 turns w120: cold frame at the end, bytes": {
    "kind": "bytes",
-   "value": 479468
+   "value": 487628
   },
   "render 300 turns w120: cold jump to the top (window), allocations": {
    "kind": "allocs",
@@ -295,7 +295,7 @@
   },
   "render 300 turns w120: cold jump to the top (window), bytes": {
    "kind": "bytes",
-   "value": 891442
+   "value": 899602
   },
   "render 300 turns w120: cold layout (all turns), allocations": {
    "kind": "allocs",
@@ -303,7 +303,7 @@
   },
   "render 300 turns w120: cold layout (all turns), bytes": {
    "kind": "bytes",
-   "value": 29983121
+   "value": 29991281
   },
   "render 300 turns w120: stream: delta, then a frame, allocations": {
    "kind": "allocs",
@@ -335,7 +335,7 @@
   },
   "render 300 turns w250: cold frame at the end, bytes": {
    "kind": "bytes",
-   "value": 479525
+   "value": 487685
   },
   "render 300 turns w250: cold jump to the top (window), allocations": {
    "kind": "allocs",
@@ -343,7 +343,7 @@
   },
   "render 300 turns w250: cold jump to the top (window), bytes": {
    "kind": "bytes",
-   "value": 891595
+   "value": 899755
   },
   "render 300 turns w250: cold layout (all turns), allocations": {
    "kind": "allocs",
@@ -351,7 +351,7 @@
   },
   "render 300 turns w250: cold layout (all turns), bytes": {
    "kind": "bytes",
-   "value": 20044859
+   "value": 20053019
   },
   "render 300 turns w250: stream: delta, then a frame, allocations": {
    "kind": "allocs",
@@ -383,7 +383,7 @@
   },
   "render 3000 turns w120: catch-up: cold frame at the end, bytes": {
    "kind": "bytes",
-   "value": 2857405
+   "value": 2922909
   },
   "render 3000 turns w120: catch-up: warm frame at the end, allocations": {
    "kind": "allocs",
@@ -407,7 +407,7 @@
   },
   "render 3000 turns w120: chat: cold frame at the end, bytes": {
    "kind": "bytes",
-   "value": 2861697
+   "value": 2927201
   },
   "render 3000 turns w120: chat: warm frame at the end, allocations": {
    "kind": "allocs",
@@ -431,7 +431,7 @@
   },
   "render 3000 turns w120: code: cold frame at the end, bytes": {
    "kind": "bytes",
-   "value": 2932556
+   "value": 2998060
   },
   "render 3000 turns w120: code: warm frame at the end, allocations": {
    "kind": "allocs",
@@ -455,7 +455,7 @@
   },
   "render 3000 turns w120: cold frame at the end, bytes": {
    "kind": "bytes",
-   "value": 2800212
+   "value": 2865716
   },
   "render 3000 turns w120: cold jump to the top (window), allocations": {
    "kind": "allocs",
@@ -463,7 +463,7 @@
   },
   "render 3000 turns w120: cold jump to the top (window), bytes": {
    "kind": "bytes",
-   "value": 3220225
+   "value": 3285729
   },
   "render 3000 turns w120: cold layout (all turns), allocations": {
    "kind": "allocs",
@@ -471,7 +471,7 @@
   },
   "render 3000 turns w120: cold layout (all turns), bytes": {
    "kind": "bytes",
-   "value": 277224539
+   "value": 277290043
   },
   "render 3000 turns w120: normal: cold frame at the end, allocations": {
    "kind": "allocs",
@@ -479,7 +479,7 @@
   },
   "render 3000 turns w120: normal: cold frame at the end, bytes": {
    "kind": "bytes",
-   "value": 2800212
+   "value": 2865716
   },
   "render 3000 turns w120: normal: warm frame at the end, allocations": {
    "kind": "allocs",
@@ -511,7 +511,7 @@
   },
   "render 3000 turns w120: trail: cold frame at the end, bytes": {
    "kind": "bytes",
-   "value": 2776524
+   "value": 2842028
   },
   "render 3000 turns w120: trail: warm frame at the end, allocations": {
    "kind": "allocs",
@@ -547,7 +547,7 @@
   },
   "serve: CPU to start, s": {
    "kind": "info",
-   "value": 0.298
+   "value": 0.354
   },
   "serve: a listing, retained": {
    "kind": "heap",
@@ -555,15 +555,15 @@
   },
   "serve: footprint": {
    "kind": "footprint",
-   "value": 6325504
+   "value": 6325632
   },
   "serve: idle CPU": {
    "kind": "cpu",
-   "value": 0.4116
+   "value": 0.4194
   },
   "serve: idle wake-ups": {
    "kind": "wakeups",
-   "value": 67.2
+   "value": 85.6
   },
   "serve: threads": {
    "kind": "threads",
@@ -571,19 +571,19 @@
   },
   "ui: CPU to start, s": {
    "kind": "info",
-   "value": 1.564
+   "value": 2.067
   },
   "ui: footprint": {
    "kind": "footprint",
-   "value": 28280320
+   "value": 28657280
   },
   "ui: idle CPU": {
    "kind": "cpu",
-   "value": 0.2199
+   "value": 0.2464
   },
   "ui: idle wake-ups": {
    "kind": "wakeups",
-   "value": 187.6
+   "value": 257.7
   },
   "ui: threads": {
    "kind": "threads",
@@ -602,7 +602,7 @@
    "threads seen": [
     7
    ],
-   "ps cpu over the window": 0.41
+   "ps cpu over the window": 0.43
   },
   "host": {
    "threads seen": [
@@ -623,7 +623,7 @@
     10,
     14
    ],
-   "ps cpu over the window": 0.23
+   "ps cpu over the window": 0.25
   }
  }
 }
