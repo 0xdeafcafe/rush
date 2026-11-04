@@ -426,7 +426,6 @@ fn script(
         limited: Some(Box::new(|| limited_for.map(|d| Time::from_unix(0, 0) + d))),
         // The branch stays where it was.
         head: Some(Box::new(|_, _, _| None)),
-        ..Default::default()
     };
     let code = watch_run(&o);
     drop(o);
