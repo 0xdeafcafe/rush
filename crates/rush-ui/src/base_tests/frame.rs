@@ -975,6 +975,69 @@ fn a_picker_narrows_as_you_type() {
 }
 
 #[test]
+fn a_folder_picker_edits_the_path_chosen() {
+    let mut m = model(120, 40);
+    let got = Rc::new(RefCell::new(String::new()));
+    let g = got.clone();
+    let rows = [
+        "/x/src/rush",
+        "/x/src/photon",
+        "/x/src/photon-two",
+        "/x/notes",
+    ]
+    .iter()
+    .map(|d| Pick::new(*d).under("Projects"))
+    .collect();
+    let mut p = Picker::new(
+        "Start new sessions in",
+        rows,
+        Box::new(move |_, pick, _| {
+            *g.borrow_mut() = pick.map(|p| p.value.clone()).unwrap_or_default();
+            Out::Draw
+        }),
+    );
+    p.query = Some(("Folder ❯ ".into(), Vec::new()));
+    p.typed = Some(Box::new(|q: &str| {
+        q.starts_with('/')
+            .then(|| Pick::new(q.trim_end_matches('/')).under("Path"))
+    }));
+    p.path = true;
+    p.start_at("/x/src/rush");
+    m.open_sheet(Box::new(p));
+    let text = |m: &mut Model| {
+        m.picker()
+            .unwrap()
+            .query
+            .as_ref()
+            .unwrap()
+            .1
+            .iter()
+            .collect::<String>()
+    };
+    // It opens on the folder you're in, every row still shown.
+    assert_eq!(text(&mut m), "/x/src/rush");
+    assert_eq!(m.picker().unwrap().shown().len(), 4);
+    // ↓ puts the row chosen in the text; the rows stay as they were.
+    press(&mut m, "down");
+    assert_eq!(text(&mut m), "/x/src/photon");
+    assert_eq!(m.picker().unwrap().shown().len(), 4);
+    // Typing goes on from it, and narrows to it.
+    for c in "-t".chars() {
+        m.press_key(&Press::new(Key::Char(c), KeyMods::NONE));
+    }
+    assert_eq!(text(&mut m), "/x/src/photon-t");
+    // Tab completes the one row under it, ending in /.
+    press(&mut m, "tab");
+    assert_eq!(text(&mut m), "/x/src/photon-two/");
+    // Typed further than any row, enter takes the path as typed.
+    for c in "app".chars() {
+        m.press_key(&Press::new(Key::Char(c), KeyMods::NONE));
+    }
+    press(&mut m, "enter");
+    assert_eq!(*got.borrow(), "/x/src/photon-two/app");
+}
+
+#[test]
 fn a_choice_sheet_marks_whats_running() {
     let mut m = model(120, 40);
     let got = Rc::new(RefCell::new(String::new()));

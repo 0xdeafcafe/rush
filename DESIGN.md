@@ -1824,7 +1824,13 @@ is made. Everything below is in `rush_ui::frame`.
   # command typed where the agent moves; #cd moves it by name. A rush
   session is told mid-turn, then `Hosts::cd` has its host list it there
   and name it afresh. What's on disk for the pickers is read off the UI
-  thread as they open and as what's typed changes.
+  thread as they open and as what's typed changes. Their text opens on
+  the folder you're in, to edit (`Picker::path`, past Go): ↑↓ put the
+  row chosen in it while the rows stay as last typed, tab completes as
+  a shell does (a chosen row whole with a /, else what the rows under
+  it share), and enter takes the text when it's been edited past the
+  row. The send bar's folder fits the room the own worktree chip and
+  the model leave it, its middle then its start going first.
 - **A session's / commands and picker** (`session_core::rushcmd`,
   `session_core::slash`; sessionviews.go). A / command sent from the box
   goes through `rushcmd::run`: claudescreen's head (aliases, what's left
