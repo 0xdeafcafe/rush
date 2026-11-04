@@ -21,6 +21,10 @@ const MANY: usize = 8;
 /// descriptor: a live session's folder is told at once, as before; the
 /// hundreds quiet for longer share the stream.
 const RECENT: Duration = Duration::from_secs(3600);
+/// Just moved onto the stream, a path isn't taken off it again for being
+/// written in: FSEvents can bring news of writes from before the move a
+/// moment after it (a callback already queued, or IDs handed out late).
+const SETTLE: Duration = Duration::from_secs(1);
 
 const VNODE_FLAGS: u32 =
     libc::NOTE_WRITE | libc::NOTE_EXTEND | libc::NOTE_DELETE | libc::NOTE_RENAME;
@@ -208,6 +212,8 @@ pub(crate) struct Inner {
     /// Moved to the stream, their descriptors kept till the next ask has
     /// read what they told: nothing between is missed.
     retire: HashSet<PathBuf>,
+    /// When each path last moved from its descriptor onto the stream.
+    joined: HashMap<PathBuf, Instant>,
 }
 
 impl Inner {
@@ -264,7 +270,10 @@ impl Inner {
         let Some(t) = self.tree.clone() else {
             return false;
         };
-        let (told, busy, lost) = t.take();
+        let (told, mut busy, lost) = t.take();
+        // Written in before it moved onto the stream: old news.
+        self.joined.retain(|_, at| at.elapsed() < SETTLE);
+        busy.retain(|p| !self.joined.contains_key(p));
         if lost {
             self.dirty = true;
         }
@@ -410,6 +419,7 @@ impl Inner {
         self.streamed.clear();
         self.tree = None;
         self.reals.clear();
+        self.joined.clear();
         self.retire.clear();
         self.dirty = true;
     }
@@ -517,6 +527,7 @@ impl Watcher {
                 recent: RECENT,
                 hot: HashMap::new(),
                 retire: HashSet::new(),
+                joined: HashMap::new(),
             }),
         }
     }
@@ -570,6 +581,7 @@ impl Watcher {
         want.retain(|p| !streamed(p));
         for (p, to_stream) in gone {
             if to_stream {
+                w.joined.insert(p.clone(), Instant::now());
                 w.retire.insert(p); // closed once the next ask reads it
             } else {
                 w.drop_path(&p);
@@ -721,6 +733,7 @@ impl Watcher {
         w.tree = None;
         w.reals.clear();
         w.retire.clear();
+        w.joined.clear();
         w.kq = None;
     }
 }
