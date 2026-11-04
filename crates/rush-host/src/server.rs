@@ -380,6 +380,11 @@ pub(crate) struct State {
     wake: Option<TimerId>,
     generation: u64,
     waiting: Option<Instant>,
+    /// When the turn under way began: sent, or taken up by the agent on
+    /// its own. A reply answers what was waiting only if its turn began
+    /// after it: a task's notice that comes in mid-turn is taken up in a
+    /// turn of its own once this one ends.
+    turn_from: Option<Instant>,
     move_now: bool,
     /// Set while an agent being stopped hasn't gone; a new one waits for
     /// it, so two never run the same conversation.
@@ -735,6 +740,7 @@ fn build(reg: Registry, hooks: Hooks, cfg: Config) -> (Host, Receiver<Msg>) {
         wake: None,
         generation: 0,
         waiting: None,
+        turn_from: None,
         move_now: false,
         stopping: false,
         quiet_wait: false,
@@ -1195,6 +1201,18 @@ fn info_key(info: &mut Info) -> Vec<u8> {
         info.cache_warm,
     ) = kept;
     key
+}
+
+/// Whether what the agent says now answers what was waiting: only a turn
+/// that began after it does. A task that ends mid-turn has its notice
+/// taken up in a turn of its own after this one, so this turn's reply
+/// leaves the agent up for it.
+fn turn_answers(st: &State) -> bool {
+    match (st.waiting, st.turn_from) {
+        (None, _) => true,
+        (Some(w), Some(t)) => t >= w,
+        (Some(_), None) => false,
+    }
 }
 
 fn task_ended(status: &str) -> bool {
@@ -2507,7 +2525,11 @@ impl Host {
         st.info.state = "working".into();
         st.info.detail.clear();
         self.publish(st);
-        st.waiting = Some(Instant::now());
+        let now = Instant::now();
+        st.waiting = Some(now);
+        if turn {
+            st.turn_from = Some(now);
+        }
         Ok(())
     }
 
@@ -3333,8 +3355,14 @@ impl Host {
             }
             Event::Message(m) => {
                 if m.role == "assistant" && m.parent.is_empty() {
-                    // Its own, not a subagent's: it began on what it was sent.
-                    st.waiting = None;
+                    if st.info.state == "idle" {
+                        st.turn_from = Some(Instant::now()); // it picked up on its own
+                    }
+                    // Its own, not a subagent's: it began on what it was
+                    // sent, when its turn began after that.
+                    if turn_answers(st) {
+                        st.waiting = None;
+                    }
                     st.info.waking = Time::default();
                     st.w.unheard = None;
                 }
@@ -3455,11 +3483,12 @@ impl Host {
                 st.not_asked.insert(e.id.clone());
                 st.info.tasks = st.task_start.len() as i64;
                 self.unread(st, &e.id);
-                // Its notice starts a turn the agent hasn't begun answering:
-                // until it says more it may not be restarted.
+                // Its notice starts a turn the agent hasn't begun answering,
+                // after this one when one is under way: until it says more
+                // it may not be restarted.
                 st.info.waking = Time::now();
+                st.waiting = Some(Instant::now());
                 if st.info.state == "idle" {
-                    st.waiting = Some(Instant::now());
                     self.arm_idle(st);
                     return true;
                 }
@@ -3467,6 +3496,11 @@ impl Host {
             }
             Event::Background(b) => {
                 let had = !st.info.background.is_empty();
+                if b.tasks.len() < st.info.background.len() {
+                    // A task that ends is told to the agent, which takes it
+                    // up in a turn of its own: it isn't done till it has.
+                    st.waiting = Some(Instant::now());
+                }
                 st.info.background =
                     background(&st.info.background, &b.tasks, &st.task_start, Time::now());
                 if st.info.background.is_empty()
@@ -3581,7 +3615,7 @@ impl Host {
         st.info
             .spent_usd
             .retain(|k, _| *k == sid || branches.iter().any(|b| b.session_id == *k));
-        if !e.text.trim().is_empty() {
+        if !e.text.trim().is_empty() && turn_answers(st) {
             st.waiting = None; // it said something: ours was answered
         }
         self.ask_context(st);
