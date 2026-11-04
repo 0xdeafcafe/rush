@@ -20,6 +20,7 @@
 //! Ported from internal/watch and cmd/rush/watch.go; run.rs is new.
 
 pub mod cli;
+pub mod eta;
 pub mod gh;
 pub mod go;
 pub mod goflag;

@@ -426,6 +426,7 @@ fn script(
         limited: Some(Box::new(|| limited_for.map(|d| Time::from_unix(0, 0) + d))),
         // The branch stays where it was.
         head: Some(Box::new(|_, _, _| None)),
+        ..Default::default()
     };
     let code = watch_run(&o);
     drop(o);
@@ -643,4 +644,73 @@ fn a_spent_limit_is_waited_out_and_said_once() {
     // Until the reset, then (it having passed) a few seconds.
     assert_eq!(slept[0], Duration::from_secs(90));
     assert_eq!(slept[1], Duration::from_secs(5));
+}
+
+/// A run watch in a background task keeps a Live for it while it runs,
+/// its jobs counted and named, its runs' label, and when they should be
+/// done (asked once for the runs it waits on); gone once it ends.
+#[test]
+fn a_run_watch_keeps_its_task_live_until_it_ends() {
+    let _home = home();
+    let now = Cell::new(Time::from_unix(1000, 0));
+    let seen = RefCell::new(Vec::new());
+    let asked_eta = Cell::new(0usize);
+    let started = Time::from_unix(900, 0);
+    let with_start = |mut r: WorkflowRun| {
+        (r.workflow, r.started) = (5, started);
+        r
+    };
+    let looks = [
+        with_start(wr(1, "in_progress", &["lint=passed", "test=pending"])),
+        with_start(wr(1, "completed", &["lint=passed", "test=passed"])),
+    ];
+    let n = Cell::new(0usize);
+    let o = RunOptions {
+        target: Some(main_target()),
+        until: Until::Done,
+        timeout: Duration::from_secs(3600),
+        task: "rt1".into(),
+        expect: Some(Box::new(|s| {
+            asked_eta.set(asked_eta.get() + 1);
+            assert_eq!(
+                s,
+                [eta::Started {
+                    workflow: 5,
+                    at: started,
+                    done: false
+                }]
+            );
+            eta::expected_end(s, |_| Some(Duration::from_secs(600)))
+        })),
+        fetch: Some(Box::new(|_| {
+            let r = looks[n.get().min(1)].clone();
+            n.set(n.get() + 1);
+            (Ok(Runs { runs: vec![r] }), 4000)
+        })),
+        sleep: Some(Box::new(|d| {
+            if let Some(l) = live_for("rt1", now.get()) {
+                seen.borrow_mut().push(l);
+            }
+            now.set(now.get() + d);
+            true
+        })),
+        now: Some(Box::new(|| now.get())),
+        log: Some(Box::new(|_, _| {})),
+        stopped: Some(Box::new(|| false)),
+        head: Some(Box::new(|_, _, _| None)),
+        ..Default::default()
+    };
+    let code = watch_run(&o);
+    drop(o);
+    let seen = seen.into_inner();
+    assert_eq!((code, seen.len(), asked_eta.get()), (EXIT_PASSED, 1, 1));
+    let l = &seen[0];
+    assert_eq!(l.what, "main @ abcdef1");
+    assert_eq!((l.passed, l.failed, l.pending), (1, 0, 1));
+    assert_eq!(l.running, ["test"]);
+    assert_eq!(l.expect, Time::from_unix(1500, 0));
+    assert!(
+        live_for("rt1", now.get()).is_none(),
+        "the record outlived the watch"
+    );
 }
