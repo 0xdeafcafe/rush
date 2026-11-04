@@ -532,16 +532,16 @@ impl Model {
             let fresh = !stale(a, now);
             let at = a.job.updated_at;
             let fk = folder_key(a, root(&it));
-            if a.done {
+            // What needs you is never Earlier, put away or a day old: its
+            // row says so, and Earlier is folded out of sight.
+            if asks(a) || wants_you(self, a) {
+                // A question, or its last message hands you a step, offers
+                // one, asks or says it couldn't.
+                add(&mut groups, NEEDS, 0, it, at);
+            } else if a.done {
                 // Put away stays put away: what it left running doesn't
                 // bring it back, a message does.
                 add(&mut groups, EARLIER, 9, it, at);
-            } else if asks(a) {
-                add(&mut groups, NEEDS, 0, it, at);
-            } else if fresh && wants_you(self, a) {
-                // Its last message hands you a step, offers one, asks or
-                // says it couldn't.
-                add(&mut groups, NEEDS, 0, it, at);
             } else if fk == SCRATCH {
                 // Temp-folder runs finish on their own, not on your turn.
                 add(&mut groups, SCRATCH_SECTION, 10, it, at);

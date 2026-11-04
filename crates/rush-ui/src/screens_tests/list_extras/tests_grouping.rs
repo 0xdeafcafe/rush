@@ -11,7 +11,7 @@ use rush_core::text::Line;
 use super::split;
 use super::tests::{HOUR, MIN, NOW, agent, model_of};
 use crate::frame::Press;
-use crate::list::{EARLIER, ListLine, PINNED, pr_short, started_by, status_short};
+use crate::list::{EARLIER, ListLine, NEEDS, PINNED, pr_short, started_by, status_short};
 use crate::model::Model;
 
 fn sections(m: &Model) -> Vec<String> {
@@ -61,6 +61,19 @@ fn put_away_and_pinned() {
         f.contains(" ▸ Earlier  2   put away this morning, left a week ago"),
         "{f}"
     );
+}
+
+/// What needs you is never in Earlier: not when it's put away, not when
+/// its question is a week old.
+#[test]
+fn needs_you_never_earlier() {
+    let mut away = agent("a1", "put away but asking", State::Blocked, 42);
+    away.done = true;
+    let mut old = agent("b2", "asked a week ago", State::Blocked, 0);
+    old.decides = true;
+    old.job.updated_at = NOW - 7 * 24 * HOUR;
+    let m = model_of(vec![away, old], 120, 40);
+    assert_eq!(sections(&m), vec![NEEDS]);
 }
 
 /// Split by project, each section's rows sit under their repository's

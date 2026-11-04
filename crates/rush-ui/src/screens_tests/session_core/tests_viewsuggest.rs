@@ -221,11 +221,11 @@ fn suggests_as_you_open_and_the_key_takes_it() {
     assert_eq!(presets::current(&m), Preset::Normal, "never switched");
     let hint = viewsuggest::hint(&mut m, KEY, 120).unwrap().plain();
     assert!(
-        hint.starts_with("tab: Chat fits · mostly talk, no steps"),
+        hint.starts_with("Chat view fits · mostly talk, no steps"),
         "{hint}"
     );
     assert!(hint.contains("take it"), "{hint}");
-    assert!(f.contains("tab: Chat fits"), "{f}");
+    assert!(f.contains("Chat view fits"), "{f}");
     // The Conversation tab has the ✦, and the views' dropdown says which
     // and why.
     let tabs = f
