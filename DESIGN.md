@@ -401,6 +401,12 @@ Claude, fleet, the other adapters) builds on these.
   Claude Code) until the next try, not "sign-in expired"; and a failed
   reading's reason is kept beside the last one in usage.json, so the
   rows say it rather than only "not read since" (oauth.rs, usage.rs).
+  A claude process whose environment the kernel won't give (another
+  user's, or one exited and not yet reaped) runs on no folder, where Go
+  counted it as in use on every folder: that kept an idle login's
+  expired sign-in from being refreshed, so its usage went unread and it
+  stopped being a switch target (`oauth::runs_on`,
+  `rush_sys::proc::readable_env`).
   efficiency.rs reads transcripts into a
   `Figures` trait, which the efficiency module's File will be. Its
   features are Go's (claude.go:62): Compact and btw through the host's

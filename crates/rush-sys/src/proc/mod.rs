@@ -234,6 +234,16 @@ pub fn env(pid: Pid) -> Vec<String> {
     os::env(pid)
 }
 
+/// A process's environment when the kernel gives it, which may be empty;
+/// None when it can't be read: another user's process, a zombie, or one
+/// gone. A process of this user that's still running always has one.
+pub fn readable_env(pid: Pid) -> Option<Vec<String>> {
+    if demo().is_some() {
+        return None;
+    }
+    os::readable_env(pid)
+}
+
 /// The name a process runs as (its comm: the program's file name, cut to
 /// 16 bytes on macOS); None when it isn't running. What tells a pid that's
 /// still the agent's program from one reused by another.

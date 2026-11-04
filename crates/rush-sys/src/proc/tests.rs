@@ -48,6 +48,28 @@ fn list_and_args_self() {
     assert_eq!(started(999_999), None);
 }
 
+// readable_env tells an empty environment from one the kernel won't
+// give: this process's is read; another user's (launchd, root's), a
+// zombie's and a gone process's aren't.
+#[test]
+fn readable_env_only_when_the_kernel_gives_it() {
+    let me = std::process::id() as Pid;
+    assert!(
+        readable_env(me).is_some_and(|e| e.iter().any(|kv| kv.contains('='))),
+        "readable_env(self)"
+    );
+    // SAFETY: geteuid has no preconditions.
+    if unsafe { libc::geteuid() } != 0 {
+        assert_eq!(readable_env(1), None, "launchd's, root's");
+    }
+    let mut child = Command::new("true").spawn().unwrap();
+    let pid = child.id() as Pid;
+    wait_exited_unreaped(pid);
+    assert_eq!(readable_env(pid), None, "a zombie's");
+    child.wait().unwrap();
+    assert_eq!(readable_env(pid), None, "a gone process's");
+}
+
 #[test]
 fn procargs2() {
     let mut b = 2u32.to_le_bytes().to_vec();

@@ -307,20 +307,33 @@ fn retry_after(v: &str) -> Ms {
 
 // ---- Refreshing a sign-in (renew.go) ----
 
-/// Whether a Claude Code running now has a's folder as its config; one
-/// whose environment can't be read might, so it counts.
+/// Whether a Claude Code running now has a's folder as its config.
 pub fn in_use(a: &Account) -> bool {
-    let want = crate::files::clean(&a.config_dir.to_string_lossy());
-    rush_sys::proc::snapshot().procs.values().any(|p| {
-        if Path::new(&*p.comm)
-            .file_name()
-            .is_none_or(|n| n != "claude")
-        {
-            return false;
-        }
-        let env = rush_sys::proc::env(p.pid);
-        env.is_empty() || crate::files::clean(&config_dir_in(&env)) == want
-    })
+    let snap = rush_sys::proc::snapshot();
+    runs_on(
+        &a.config_dir,
+        snap.procs
+            .values()
+            .filter(|p| {
+                Path::new(&*p.comm)
+                    .file_name()
+                    .is_some_and(|n| n == "claude")
+            })
+            .map(|p| rush_sys::proc::readable_env(p.pid)),
+    )
+}
+
+/// Whether any of the Claude Codes with these environments runs on dir.
+/// One whose environment the kernel won't give (None) doesn't: that's
+/// another user's process, or one that has exited (a zombie), and neither
+/// refreshes this user's sign-in in dir. Go counted it (renew.go InUse),
+/// which left an idle login's expired sign-in unrefreshed, and its usage
+/// unread, for as long as such a process was around.
+fn runs_on(dir: &Path, envs: impl IntoIterator<Item = Option<Vec<String>>>) -> bool {
+    let want = crate::files::clean(&dir.to_string_lossy());
+    envs.into_iter()
+        .flatten()
+        .any(|e| crate::files::clean(&config_dir_in(&e)) == want)
 }
 
 /// The folder a Claude Code with env runs in.
@@ -783,6 +796,63 @@ pub(crate) mod tests {
         let dir = tempfile::tempdir().unwrap();
         let a = Account::at("", dir.path());
         assert_eq!(renew_unless(&a, &|_| true), Err(OauthError::InUse));
+    }
+
+    // Which Claude Codes run on a folder: one naming it, or naming none
+    // when it's ~/.claude. One whose environment can't be read (another
+    // user's, an exited one) runs on none, so it never keeps an idle
+    // login's expired sign-in from being refreshed.
+    #[test]
+    fn runs_on_only_a_readable_environment_naming_the_folder() {
+        let home = Account::home().config_dir;
+        let other = std::path::PathBuf::from("/x/rush/homes/abc/.claude");
+        let named = |d: &str| Some(vec![format!("CLAUDE_CONFIG_DIR={d}"), "A=1".into()]);
+        for (what, dir, envs, want) in [
+            ("unreadable", &other, vec![None], false),
+            ("unreadable, home", &home, vec![None], false),
+            (
+                "names it",
+                &other,
+                vec![None, named("/x/rush/homes/abc/.claude/")],
+                true,
+            ),
+            ("names another", &other, vec![named("/x/elsewhere")], false),
+            (
+                "names none, home",
+                &home,
+                vec![Some(vec!["A=1".into()])],
+                true,
+            ),
+            ("empty, home", &home, vec![Some(vec![])], true),
+            ("names none, not home", &other, vec![Some(vec![])], false),
+            ("none running", &other, vec![], false),
+        ] {
+            assert_eq!(runs_on(dir, envs), want, "{what}");
+        }
+    }
+
+    // An exited Claude Code its parent hasn't reaped yet still lists as
+    // claude, but runs on no folder.
+    #[test]
+    fn an_exited_claude_is_not_in_use() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("claude");
+        // A copy, not a link: the listed name is the file run, not the link.
+        std::fs::copy("/usr/bin/true", &bin).unwrap();
+        let mut child = std::process::Command::new(&bin).spawn().unwrap();
+        let pid = child.id() as i32;
+        while !rush_sys::proc::zombie(pid) {
+            std::thread::yield_now();
+        }
+        let a = Account::at("", dir.path());
+        let listed = rush_sys::proc::snapshot()
+            .procs
+            .values()
+            .any(|p| p.pid == pid && &*p.comm == "claude");
+        let busy = in_use(&a);
+        child.wait().unwrap();
+        assert!(listed, "the exited claude isn't listed");
+        assert!(!busy, "an exited claude counted as running on the folder");
     }
 
     // renew_test.go:107 (TestOrRenewOnceInTenMinutes)
