@@ -1,8 +1,8 @@
 //! A tool call waiting for your yes gets a framed card: what it asks in
 //! the top edge, with where it runs and how many wait; the command, the
 //! file's change or the address in the middle; and buttons to allow it
-//! once, always, switch the session to don't-ask, or deny it. y, a, o and
-//! n press them; ←→ pick one and enter presses it; a click presses the
+//! once, always, switch the session to auto or don't-ask, or deny it. y,
+//! a, u, o and n press them; ←→ pick one and enter presses it; a click presses the
 //! one under it. After Go's internal/ui/permcard.go (permBtns :20,
 //! alwaysLabel :47, permTitle :53, permissionCard :67, shellLines :140)
 //! and rushmode.go (approvalBody :3706, approvalRows :3704, alwaysWords
@@ -13,10 +13,11 @@ use rush_core::text::{Color, Line, width};
 use rush_core::tool::Kind;
 
 use super::card::*;
-use super::permissions::bypass_mode;
+use super::permissions::{auto_mode, bypass_mode};
 use super::{Conn, HostInfo};
 use crate::model::Model;
 use crate::style::*;
+use rush_core::adapter::trust;
 
 /// As much of a command as a permission card shows (approvalRows).
 pub const APPROVAL_ROWS: usize = 10;
@@ -30,8 +31,15 @@ pub fn perm_btns(m: &Model, c: &HostInfo, st: &Step, w: usize) -> Vec<Btn> {
     {
         bs.push(b("a", "a", &always_label(&a.always_as)));
     }
+    // Auto (a classifier approves what's safe) and yolo (never asks) are
+    // different modes: each shows while the session trusts less than it.
+    let now = trust(&c.permission_mode);
+    let auto = auto_mode(m, &c.kind, Some(c));
+    if !auto.is_empty() && now < trust(&auto) {
+        bs.push(b("u", "u", "Auto"));
+    }
     let mode = bypass_mode(m, &c.kind, Some(c));
-    if !mode.is_empty() && c.permission_mode != mode {
+    if !mode.is_empty() && now < trust(&mode) {
         bs.push(b("o", "o", "Yolo"));
     }
     bs.push(b("n", "n", "Deny"));

@@ -9,7 +9,7 @@
     checkout · main    Claude Code · open in a terminal · /rush copies it here
     Conversation ▾   Overview   Changes    [ ] views      esc back to the list
 ───━━━━━━━━━━━━━━━━─────────────────────────────────────────────────────────────
-    ▸ ● Normal     everything, as usual
+  ▍ ▸ ● Normal     everything, as usual
   ▍     Chat       what did we say?
   │     Code       what did it change?                                     7s
   │     Catch-up   what happened while I was away?

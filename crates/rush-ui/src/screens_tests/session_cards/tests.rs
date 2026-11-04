@@ -386,6 +386,55 @@ fn card_buttons_and_yolo() {
     assert!(!out.contains("o Yolo"), "{out}");
 }
 
+/// Auto isn't yolo: a harness with both (Claude's auto and
+/// bypassPermissions) gets a button for each, u switching to auto, and
+/// auto's session still offers yolo but not auto again.
+#[test]
+fn card_auto_is_not_yolo() {
+    let mut m = hosted(120, 50);
+    set_info(&mut m, |i| {
+        i.permission_modes = ["default", "auto", "bypassPermissions"]
+            .into_iter()
+            .map(|id| Mode {
+                id: id.into(),
+                ..Mode::default()
+            })
+            .collect();
+        i.permission_mode = "default".into();
+    });
+    ask(
+        &mut m,
+        "Bash",
+        Kind::Shell,
+        Input {
+            command: "curl x".into(),
+            ..Input::default()
+        },
+        true,
+    );
+    let out = text(&rows(&mut m, 120, 40));
+    assert!(out.contains("u Auto"), "{out}");
+    assert!(out.contains("o Yolo"), "{out}");
+    let i = info(&m, "k").unwrap();
+    card_key(&mut m, "k", &i, "up", true);
+    card_key(&mut m, "k", &i, "u", true);
+    assert_eq!(
+        acts(&mut m),
+        vec![
+            Act::Allow {
+                id: "r1".into(),
+                input: None,
+                always: false
+            },
+            Act::Permission("auto".into())
+        ]
+    );
+    set_info(&mut m, |i| i.permission_mode = "auto".into());
+    let out = text(&rows(&mut m, 120, 40));
+    assert!(!out.contains("u Auto"), "{out}");
+    assert!(out.contains("o Yolo"), "{out}");
+}
+
 #[test]
 fn always_words() {
     use super::permcard::{always_label, always_words};

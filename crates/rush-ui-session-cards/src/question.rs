@@ -19,7 +19,7 @@ use serde_json::{Map, Value, json};
 
 use super::card::*;
 use super::permcard::{perm_btns, permission_card};
-use super::permissions::{bypass_mode, set_permission};
+use super::permissions::{auto_mode, bypass_mode, set_permission};
 use super::{Act, Conn, HostInfo, act, info_any, open_key, pending, session, set_input};
 use crate::ModelCards;
 use crate::frame::overlayclick::hint_key;
@@ -1820,12 +1820,16 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
                     }],
                 );
             }
-            if c.card_focus && s == "o" && note.is_none() {
+            if c.card_focus && (s == "o" || s == "u") && note.is_none() {
                 // Only focused: a typed "okay…" must never switch the session.
-                let mode = bypass_mode(m, &i.kind, Some(i));
+                let (mode, what) = if s == "o" {
+                    (bypass_mode(m, &i.kind, Some(i)), "don't-ask")
+                } else {
+                    (auto_mode(m, &i.kind, Some(i)), "auto")
+                };
                 if mode.is_empty() {
                     let name = m.reg.harness_label(&i.kind);
-                    m.flash_err(&format!("{name} advertises no don't-ask mode"));
+                    m.flash_err(&format!("{name} advertises no {what} mode"));
                     return Out::Draw;
                 }
                 let out = done(
