@@ -36,7 +36,9 @@ you, cheaply, and says once, briefly, what happened.
   --workflow F      run only: that workflow's runs (its file name or id)
 
 It ends with: 0 all passed (or merged), 1 a check failed, 2 timed out
-(run it again), 3 closed or cancelled, or GitHub couldn't be asked.
+(run it again), 3 closed or cancelled, or GitHub couldn't be asked. A
+branch's run cancelled because a newer push replaced it isn't the end:
+it says so and watches the branch's new commit.
 
 It asks GitHub through gh, signed in as the user, every 15s at first and
 every minute after 15m; every agent watching the same PR or run shares one

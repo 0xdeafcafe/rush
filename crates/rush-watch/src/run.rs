@@ -444,6 +444,8 @@ pub fn fetch(t: &Target, fresh: Duration) -> (Result<Runs, Error>, i64) {
 pub type FetchRunsFn<'a> = Box<dyn Fn(Duration) -> (Result<Runs, Error>, i64) + 'a>;
 /// When GitHub's spent rate limit resets, if it is spent.
 pub type LimitFn<'a> = Box<dyn Fn() -> Option<Time> + 'a>;
+/// The commit a branch heads on GitHub now (repo, branch), if it can say.
+pub type HeadFn<'a> = Box<dyn Fn(&str, &str) -> Option<String> + 'a>;
 
 /// What a run watch waits for. Say is told each line to print; fetch,
 /// sleep, logs, now and limited are GitHub and the clock, which tests set;
@@ -462,10 +464,17 @@ pub struct RunOptions<'a> {
     pub log: Option<LogFn<'a>>,
     pub stopped: Option<StoppedFn<'a>>,
     pub limited: Option<LimitFn<'a>>,
+    pub head: Option<HeadFn<'a>>,
+    /// The newer commit a branch's watch went on to when a push replaced
+    /// the run it watched; set by the watch.
+    pub followed: std::cell::RefCell<Option<Target>>,
 }
 
 impl RunOptions<'_> {
     fn target(&self) -> Target {
+        if let Some(t) = self.followed.borrow().clone() {
+            return t;
+        }
         self.target.clone().unwrap_or_else(|| Target {
             repo: String::new(),
             what: What::Run(0),
@@ -474,14 +483,21 @@ impl RunOptions<'_> {
     }
 
     fn repo(&self) -> String {
-        self.target
-            .as_ref()
-            .map(|t| t.repo.clone())
-            .unwrap_or_default()
+        self.target().repo
     }
 
     fn label(&self) -> String {
-        self.target.as_ref().map(Target::label).unwrap_or_default()
+        if self.target.is_none() {
+            return String::new();
+        }
+        self.target().label()
+    }
+
+    fn head(&self, repo: &str, branch: &str) -> Option<String> {
+        match &self.head {
+            Some(f) => f(repo, branch),
+            None => head_of(repo, branch).ok(),
+        }
     }
 
     fn say(&self, s: &str) {
@@ -619,6 +635,9 @@ fn watching(o: &RunOptions, start: Time, st: &mut State) -> i32 {
     let mut limited = false;
     let mut said_limited = false;
     let mut said_waiting = false;
+    // Since the commit watched was taken up: the watch's start, or when a
+    // newer push replaced its run.
+    let mut from = start;
     loop {
         let (res, r) = o.fetch(Duration::from_secs(10));
         if r >= 0 {
@@ -667,16 +686,24 @@ fn watching(o: &RunOptions, start: Time, st: &mut State) -> i32 {
                 fails = 0;
                 limited = false;
                 st.last = Some(rs.clone());
-                if let Some(code) = step(
+                if follow(o, &rs, since(o.now(), from)) {
+                    // A newer push replaced it: that commit's runs, from
+                    // the start, at the next look.
+                    prev = None;
+                    said_waiting = false;
+                    from = o.now();
+                    st.last = None;
+                } else if let Some(code) = step(
                     o,
                     prev.as_ref(),
                     &rs,
-                    since(o.now(), start),
+                    since(o.now(), from),
                     &mut said_waiting,
                 ) {
                     return code;
+                } else {
+                    prev = Some(rs);
                 }
-                prev = Some(rs);
             }
         }
         let gone = since(o.now(), start);
@@ -696,7 +723,7 @@ fn watching(o: &RunOptions, start: Time, st: &mut State) -> i32 {
                         o,
                         prev.as_ref(),
                         &rs,
-                        since(o.now(), start),
+                        since(o.now(), from),
                         &mut said_waiting,
                     ) {
                         return code;
@@ -713,6 +740,49 @@ fn watching(o: &RunOptions, start: Time, st: &mut State) -> i32 {
             return EXIT_ERROR;
         }
     }
+}
+
+/// A branch's runs all cancelled, none failed, and the branch on GitHub
+/// at a newer commit: a push replaced them (a workflow's concurrency
+/// cancels the old run). Says so, and the watch goes on to the newer
+/// commit. Whether it did.
+fn follow(o: &RunOptions, rs: &Runs, since: Duration) -> bool {
+    let (_, failed, cancelled, _, _) = rs.counts();
+    if !rs.done() || failed > 0 || cancelled == 0 {
+        return false;
+    }
+    let t = o.target();
+    let What::Sha { sha, branch } = &t.what else {
+        return false;
+    };
+    if branch.is_empty() {
+        return false;
+    }
+    let Some(new) = o
+        .head(&t.repo, branch)
+        .filter(|n| !n.is_empty() && n != sha)
+    else {
+        return false;
+    };
+    let next = Target {
+        what: What::Sha {
+            sha: new.clone(),
+            branch: branch.clone(),
+        },
+        ..t.clone()
+    };
+    o.say(&format!(
+        "{} cancelled after {}: a newer push replaced it; watching {} now",
+        t.label(),
+        round(since),
+        next.label()
+    ));
+    o.log(
+        "watch-run-followed",
+        fields(json!({"repo": t.repo, "from": sha, "to": new, "branch": branch})),
+    );
+    *o.followed.borrow_mut() = Some(next);
+    true
 }
 
 /// A job's key across looks.
