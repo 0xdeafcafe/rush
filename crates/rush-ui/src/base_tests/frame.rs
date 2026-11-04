@@ -1017,6 +1017,15 @@ fn a_folder_picker_edits_the_path_chosen() {
     // It opens on the folder you're in, every row still shown.
     assert_eq!(text(&mut m), "/x/src/rush");
     assert_eq!(m.picker().unwrap().shown().len(), 4);
+    // Typed at once, it's replaced, as in an address bar.
+    m.press_key(&Press::new(Key::Char('n'), KeyMods::NONE));
+    assert_eq!(text(&mut m), "n");
+    press(&mut m, "backspace");
+    m.picker().unwrap().start_at("/x/src/rush");
+    // Backspace edits it instead.
+    press(&mut m, "backspace");
+    assert_eq!(text(&mut m), "/x/src/rus");
+    m.picker().unwrap().start_at("/x/src/rush");
     // ↓ puts the row chosen in the text; the rows stay as they were.
     press(&mut m, "down");
     assert_eq!(text(&mut m), "/x/src/photon");

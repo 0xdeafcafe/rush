@@ -90,8 +90,12 @@ pub struct Picker {
     /// the rows keep to what was last typed until you type again.
     pub path: bool,
     /// What the rows are narrowed by while the text is a row chosen, not
-    /// typed (None: by the text).
-    filter: Option<String>,
+    /// typed, with the text that was put there: once the text is anything
+    /// else, they're narrowed by it.
+    filter: Option<(String, String)>,
+    /// The text is the folder it opened on, as a whole: typing replaces
+    /// it, as in an address bar; backspace or tab edits it.
+    fresh: bool,
 }
 
 impl Picker {
@@ -116,6 +120,7 @@ impl Picker {
             wide: false,
             path: false,
             filter: None,
+            fresh: false,
         }
     }
 
@@ -124,13 +129,23 @@ impl Picker {
     pub fn start_at(&mut self, t: &str) {
         if let Some((_, q)) = self.query.as_mut() {
             *q = t.chars().collect();
-            self.filter = Some(String::new());
+            self.filter = Some((String::new(), t.to_string()));
+            self.fresh = true;
         }
     }
 
     /// What the rows are narrowed by: what was last typed.
     pub fn narrowed_by(&self) -> String {
-        self.filter.clone().unwrap_or_else(|| self.typed_text())
+        let text = self.typed_text();
+        match &self.filter {
+            Some((by, put)) if *put == text => by.clone(),
+            _ => text,
+        }
+    }
+
+    /// The text still the folder it opened on, untouched.
+    fn is_fresh(&self) -> bool {
+        self.fresh && matches!(&self.filter, Some((_, put)) if *put == self.typed_text())
     }
 
     /// The text set to t, as if typed: the rows narrow to it.
@@ -139,6 +154,7 @@ impl Picker {
             *q = t.chars().collect();
         }
         self.filter = None;
+        self.fresh = false;
         self.cursor = 0;
         self.queried(m);
     }
@@ -148,8 +164,9 @@ impl Picker {
         let shown = self.shown();
         self.cursor = round_move(self.cursor, d, shown.len());
         if let Some(r) = shown.get(self.cursor) {
-            self.filter = Some(self.narrowed_by());
             let t = tildify(&r.value);
+            self.filter = Some((self.narrowed_by(), t.clone()));
+            self.fresh = false;
             if let Some((_, q)) = self.query.as_mut() {
                 *q = t.chars().collect();
             }
@@ -164,7 +181,7 @@ impl Picker {
         let text = self.typed_text();
         let chosen = shown
             .get(self.cursor)
-            .filter(|_| self.cursor > 0 || self.filter.is_some())
+            .filter(|_| self.cursor > 0 || self.narrowed_by() != text)
             .map(|r| tildify(&r.value));
         let t = if let Some(c) = chosen {
             dir_slash(&c)
@@ -336,12 +353,14 @@ impl Sheet for Picker {
                     return Out::Idle;
                 }
                 self.filter = None;
+                self.fresh = false;
                 self.cursor = 0;
                 self.queried(m);
             }
             "ctrl+u" | "super+backspace" if filtering => {
                 self.query.as_mut().expect("filtering").1.clear();
                 self.filter = None;
+                self.fresh = false;
                 self.cursor = 0;
                 self.queried(m);
             }
@@ -349,6 +368,10 @@ impl Sheet for Picker {
                 let Some(c) = k.text().filter(|_| filtering) else {
                     return Out::Idle;
                 };
+                if self.is_fresh() {
+                    self.query.as_mut().expect("filtering").1.clear();
+                }
+                self.fresh = false;
                 self.query.as_mut().expect("filtering").1.push(c);
                 self.filter = None;
                 self.cursor = 0;
@@ -371,11 +394,12 @@ impl Sheet for Picker {
             out.push(Line::new());
         }
         if let Some((label, q)) = &self.query {
-            out.push(line([
-                sp(label.clone(), DIM),
-                plain(q.iter().collect::<String>()),
-                sp("▏", ORANGE),
-            ]));
+            let mut t = plain(q.iter().collect::<String>());
+            if self.is_fresh() {
+                // Typing replaces it: drawn as a selection.
+                t.style.bg = SEL_BG;
+            }
+            out.push(line([sp(label.clone(), DIM), t, sp("▏", ORANGE)]));
             out.push(Line::new());
         }
         let shown = self.shown();
