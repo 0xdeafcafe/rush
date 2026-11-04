@@ -1830,7 +1830,10 @@ is made. Everything below is in `rush_ui::frame`.
   a shell does (a chosen row whole with a /, else what the rows under
   it share), and enter takes the text when it's been edited past the
   row. The send bar's folder fits the room the own worktree chip and
-  the model leave it, its middle then its start going first.
+  the model leave it, its middle then its start going first. Files
+  dropped onto the terminal go to the side the pointer was last over
+  (`split::drop_paste`, past Go): a drag from another window leaves the
+  terminal unfocused, so the pointer crossing hadn't moved the keys.
 - **A session's / commands and picker** (`session_core::rushcmd`,
   `session_core::slash`; sessionviews.go). A / command sent from the box
   goes through `rushcmd::run`: claudescreen's head (aliases, what's left

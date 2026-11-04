@@ -143,6 +143,9 @@ pub fn register(x: &mut Ext) {
     x.list_keys.insert(0, live::enter_key);
     x.mouse.insert(0, live::mouse);
     x.paste.insert(0, live::paste);
+    // Files dropped: to the side under the pointer, before the paste
+    // goes to whoever has the keys.
+    x.paste.insert(0, split::drop_paste);
     // The Wall: every open agent, a tile each.
     x.agents_page(Box::new(wall::Wall::default()));
     x.on_fleet.push(wall::on_fleet);
