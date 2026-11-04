@@ -484,6 +484,15 @@ pub struct Config {
         skip_serializing_if = "is_false"
     )]
     pub trim_running_tmp: bool,
+    /// Picks the lines of a failed CI job that say why with linetag's
+    /// hand-weighted net instead of keywords (rush watch, rush pr
+    /// follow). Rush-only; off by default.
+    #[serde(
+        rename = "linetagPicks",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_false"
+    )]
+    pub linetag_picks: bool,
     #[serde(
         rename = "keepTranscriptsPlain",
         deserialize_with = "lenient",

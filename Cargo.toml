@@ -57,6 +57,8 @@ memchr = "2"
 hashbrown = { version = "0.17", default-features = false }
 compact_str = "0.8"
 regex = "1"
+# The hand-weighted log tagger behind the linetagPicks setting.
+linetag = { git = "https://github.com/0xdeafcafe/linetag", rev = "c092657debf7b92ddd22892d31ad56acddee24dc" }
 sha2 = "0.10"
 unicode-segmentation = "1.10"
 ureq = "3"
