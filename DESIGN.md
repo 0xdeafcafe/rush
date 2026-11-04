@@ -73,7 +73,7 @@ speed or memory claim has a number behind it.
 | `rush-copilot` | Copilot: the CLI run over ACP (rush-acp's `Agent`), its profile, gh's accounts, premium requests, the coding agent's sessions on GitHub and their logs | `internal/adapters/copilot` |
 | `rush-providers` | DeepSeek's dsh (run over ACP by rush-acp's `Agent`; its balance), and one provider's models in another's harness (DeepSeek and GLM in Claude Code; Anthropic, OpenAI, DeepSeek and GLM in Pi) | `internal/adapters/deepseek`, `cross` |
 | `rush-sys`, `rush-state`, `rush-events`, `rush-gh`, `rush-net`, `rush-keymap`, `rush-update`, `rush-harnessup` | wave A: the machine (processes, file watching), state, the events log, GitHub, the network, keys, updates, agent program updates | `internal/proc`, `fswait`, `state`, … |
-| `rush-watch`  | `rush watch pr`: waiting on a PR's checks for an agent (exit 0/1/2/3 as Go); `rush watch run` (run.rs, new in the port): the same for a GitHub Actions run with no PR (a branch's or commit's newest run per workflow, or a run id), through the Actions REST API; a branch's runs cancelled with the branch at another commit end as cancelled, saying where the branch is and whether that commit has the one watched (GitHub's compare), so the agent decides whether to wait on it; the gh answers every watcher shares (ETag, flock, `watch/gh`) and the rate limit every watcher sees (`watch/gh/ratelimit.json`: each answer's X-RateLimit-Remaining and Reset, so all slow down together as it runs low, and once it's spent or GitHub says slow down, the time nobody asks before: Retry-After, else the reset, else 1 min, at most 1 h); a PR watch's live record; the hook that turns polling (`gh pr checks --watch`, `gh run watch`, sleep loops) into them | `internal/watch`, `cmd/rush/watch.go` |
+| `rush-watch`  | `rush watch pr`: waiting on a PR's checks for an agent (exit 0/1/2/3 as Go); `rush watch run` (run.rs, new in the port): the same for a GitHub Actions run with no PR (a branch's or commit's newest run per workflow, or a run id), through the Actions REST API; a branch's runs cancelled with the branch at another commit end as cancelled, saying where the branch is and whether that commit has the one watched (GitHub's compare), so the agent decides whether to wait on it; the gh answers every watcher shares (ETag, flock, `watch/gh`) and the rate limit every watcher sees (`watch/gh/ratelimit.json`: each answer's X-RateLimit-Remaining and Reset, so all slow down together as it runs low, and once it's spent or GitHub says slow down, the time nobody asks before: Retry-After, else the reset, else 1 min, at most 1 h); a watch's live record (`watch/live/<task>.json`, kept by a pr or run watch run as a background task; Rust adds `what`, a run watch's runs, and `expectEnd`: when what it waits on should be done, from the median of its workflows' last 10 successful runs (eta.rs), asked once for the runs it waits on and shared for an hour); the hook that turns polling (`gh pr checks --watch`, `gh run watch`, sleep loops) into them | `internal/watch`, `cmd/rush/watch.go` |
 | `rush-prdrive`| `rush pr`: what's left before merge in order, trusted reviewers, reply/resolve guards, the detached follower that wakes a session only with news | `internal/prdrive`, `cmd/rush/pr.go`, `prfollow.go` |
 | `rush-remind` | reminders agents set: a file each under rush's folder, a detached waiter (`rush remind run`) that sleeps until due and sends it through the session's host, waking it; `when` read as a wait, a time of day or a date | `internal/remind`, `cmd/rush/remind.go` |
 | `rush-memory` | rush's side of an agent's memory notes: a note drafted from a few words by a cheap model the caller hands in, which notes are worth a look, those kept as they are (`memory-kept.json`), `rush memory add`'s flags, and `Keeper`, the agent's side of writing and tidying them: rush-claude's `keeper::NoteKeeper`, which the binary registers for the UI (`memreview::register_keeper`) and `rush memory` (in the binary) uses through the adapter's MemoryKeeper | `internal/memory`, `cmd/rush/memory.go` |
@@ -2522,6 +2522,18 @@ three on a finished box's foot (their words shorten as the box narrows:
   in red and nothing is sent.
 
 Each goes through the session's own harness like any message.
+
+**A rush watch in the background** (Rust-only): an agent's Bash call
+that put `rush watch pr|run` in the background draws, in the
+conversation, the watch's card in place of `↳ running in the background
+· <id>` and its output file (`Options::tasks`, set once a frame by
+session-core's taskcards.rs from the dock's card, `jobs::job_card_line`;
+part of each turn's key, so the turn is drawn again as it moves): its
+pull request or runs, a bar and ✓/✗/◌ counts, what it waits on, then
+`~4m left` (or `2m over the usual`) from the record's `expectEnd`, and
+how long it's waited. While a card shows, the conversation is drawn again
+each second. The agent is told none of it: the watch says once, briefly,
+how it ended.
 
 **✎ edit** (e), on a box's top edge before it's run and after, turns the
 box into an editor of its commands (`Options::shell_edit`, drawn by
