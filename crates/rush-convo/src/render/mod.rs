@@ -292,6 +292,12 @@ pub struct Options {
     /// A box whose commands are being edited before they run, and the
     /// text as it stands (shellbox.rs).
     pub shell_edit: Option<crate::shellbox::ShellEdit>,
+    /// Background tasks rush can say more of than that they run, by task
+    /// id: a row drawn in place of the call's "running in the background"
+    /// note while the task runs (a rush watch's card: what it waits on,
+    /// how far it's got, the time left). Set by whoever reads them.
+    /// Rust-only.
+    pub tasks: HashMap<String, Line>,
 }
 
 /// What a running shell step is doing now: a line from its processes, and
@@ -400,6 +406,31 @@ struct TurnKey {
     view: u64,
     /// The commands rush ran itself in it, as they stand (shellbox.rs).
     shells: u64,
+    /// The rows of its calls' background tasks, as they stand (tasks).
+    tasks: u64,
+}
+
+/// What turn t's calls' background tasks draw as now: their rows in
+/// o.tasks, for the turn's key.
+fn tasks_sig(s: &Session, t: &crate::model::Turn, o: &Options) -> u64 {
+    let mut h = DefaultHasher::new();
+    for j in s.running_jobs() {
+        let Some(row) = o.tasks.get(&j.id) else {
+            continue;
+        };
+        let ours = s.step_by_call(&j.tool_use_id).is_some_and(|id| {
+            t.items
+                .iter()
+                .any(|it| matches!(it, Item::Step(x) if *x == id))
+        });
+        if ours {
+            j.id.hash(&mut h);
+            for sp in &row.spans {
+                (sp.text.as_str(), sp.style).hash(&mut h);
+            }
+        }
+    }
+    h.finish()
 }
 
 /// How many rows of drawn turns are kept for drawing again cheaply: several
@@ -644,6 +675,9 @@ impl Renderer {
         }
         if !o.shells.is_empty() || o.shell_edit.is_some() {
             k.shells = draw::shellbox::turn_sig(o, &format!("t{}:", t.n));
+        }
+        if !o.tasks.is_empty() {
+            k.tasks = tasks_sig(s, t, o);
         }
         if o.preset == Preset::CatchUp {
             let last = i + 1 == s.turns.len();
