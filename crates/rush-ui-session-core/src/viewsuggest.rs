@@ -522,18 +522,14 @@ fn key_hint(m: &mut Model) -> String {
     rush_convo::render::key_word(&k)
 }
 
-/// The line under the box while a suggestion shows, w wide: "tab: Code
+/// The line under the box while a suggestion shows, w wide: "Code view
 /// fits · changed 4 files, ran tests  ⌥t take it", or what rush switched to
 /// and the key back.
 pub fn hint(m: &mut Model, key: &str, w: usize) -> Option<Line> {
     let s = shown(m, key)?;
     let k = key_hint(m);
     let mut l = match s.from {
-        None => line([
-            sp("tab: ", DIM),
-            sp(s.view.title(), ORANGE),
-            sp(" fits", TEXT),
-        ]),
+        None => line([sp(s.view.title(), ORANGE), sp(" view fits", TEXT)]),
         Some(_) => line([sp("switched to ", DIM), sp(s.view.title(), ORANGE)]),
     };
     if !s.reason.is_empty() {

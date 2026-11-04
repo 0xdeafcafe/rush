@@ -2428,7 +2428,7 @@ and the last views chosen, never the conversation's words; an answer that
 fails or can't be read is no suggestion.
 
 Suggest marks the view's tab with an orange ✦ and the line under the box
-says `tab: Code fits · changed 4 files, ran tests  ⌥t take it`
+says `Code view fits · changed 4 files, ran tests  ⌥t take it`
 (session.take_view_suggestion, ⌥t or ctrl+] T). Switch changes the view
 only as you come back, never when a turn ends, and says so with ⌥t going
 back. A suggestion left showing until the next moment, or another view
