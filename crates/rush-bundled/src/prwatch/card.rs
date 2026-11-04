@@ -136,7 +136,12 @@ pub(crate) fn card(l: &Live, now: Time) -> JobCard {
         kind: "watch".into(),
         ..Default::default()
     };
-    c.body.push(seg(format!("#{}", l.number), Tone::Text));
+    if l.what.is_empty() {
+        c.body.push(seg(format!("#{}", l.number), Tone::Text));
+    } else {
+        // A run watch's: its runs, and their workflows as its title.
+        c.body.push(seg(l.what.clone(), Tone::Text));
+    }
     if !l.title.is_empty() {
         c.body
             .push(seg(format!(" {}", clip(&l.title, 36)), Tone::Sub));
@@ -184,6 +189,10 @@ pub(crate) fn card(l: &Live, now: Time) -> JobCard {
         c.body.push(seg("all finished", Tone::Good));
     }
     let waited = round(now.sub_nanos(l.start));
+    let left = left(l, now);
+    if !left.is_empty() {
+        c.right.push(seg(format!("{left} · "), Tone::Info));
+    }
     c.right.push(seg(waited, Tone::Sub));
     if l.timeout > 0 {
         c.right
@@ -200,6 +209,22 @@ pub(crate) fn card(l: &Live, now: Time) -> JobCard {
     }
     c.detail = detail(l, now);
     c
+}
+
+/// What l's expected end says at now: "~4m left", or how far past it
+/// what it waits on has run ("2m over the usual"); "" when there's none,
+/// or nothing is left to wait on.
+pub fn left(l: &Live, now: Time) -> String {
+    if l.expect.is_zero() || l.pending == 0 && !l.asked.is_zero() {
+        return String::new();
+    }
+    let n = l.expect.sub_nanos(now);
+    if n >= 0 {
+        // Under a minute reads as one: the estimate isn't finer.
+        format!("~{} left", round(n.max(60 * 1_000_000_000)))
+    } else {
+        format!("{} over the usual", round(-n))
+    }
 }
 
 /// The checks as cells, n wide at most: passed, failed, running.
@@ -344,6 +369,66 @@ mod tests {
             d.contains("--until done") && d.contains("in 44m at its timeout"),
             "ends line {d:?}"
         );
+    }
+
+    /// A watch that knows when its runs should be done says how long is
+    /// left, or how far past the usual they've run; once nothing is left
+    /// to wait on, nothing. Rust-only.
+    #[test]
+    fn the_card_says_the_time_left() {
+        let now = Time::from_unix(10_000, 0);
+        let at = |m: i64| now.add_nanos(m * MIN);
+        let cases: [(&str, Time, i64, &str); 5] = [
+            ("not known", Time::default(), 3, ""),
+            ("minutes left", at(4), 3, "~4m left"),
+            (
+                "under a minute",
+                now.add_nanos(20_000_000_000),
+                3,
+                "~1m left",
+            ),
+            ("past it", at(-2), 3, "2m over the usual"),
+            ("nothing left to wait on", at(4), 0, ""),
+        ];
+        for (name, expect, pending, want) in cases {
+            let l = Live {
+                number: 7,
+                start: at(-1),
+                asked: now,
+                pending,
+                expect,
+                ..Default::default()
+            };
+            assert_eq!(left(&l, now), want, "{name}");
+            let right = text(&card(&l, now).right);
+            if want.is_empty() {
+                assert_eq!(right, "1m", "{name}");
+            } else {
+                assert_eq!(right, format!("{want} · 1m"), "{name}");
+            }
+        }
+    }
+
+    /// A run watch's card names its runs, not a pull request. Rust-only.
+    #[test]
+    fn a_run_watchs_card_names_its_runs() {
+        let now = Time::from_unix(10_000, 0);
+        let c = card(
+            &Live {
+                what: "main @ abc1234".into(),
+                title: "CI".into(),
+                start: now,
+                asked: now,
+                passed: 2,
+                pending: 1,
+                running: vec!["test".into()],
+                ..Default::default()
+            },
+            now,
+        );
+        let body = text(&c.body);
+        assert!(body.starts_with("main @ abc1234 CI"), "{body}");
+        assert!(!body.contains('#'), "{body}");
     }
 
     // card_test.go TestTheCardWaitsWhenNothingHasFailed

@@ -185,6 +185,13 @@ pub fn watch_cmd_in(
     if let Some(set) = &env.options {
         set(&mut o);
     }
+    if !o.task.is_empty() && o.expect.is_none() {
+        // A background task's card says when its checks should be done.
+        o.expect = Some(Box::new(|repo: &str, head: &str| {
+            let started = crate::eta::started_on(repo, head);
+            crate::eta::expected_end(&started, |w| crate::eta::usual(repo, w))
+        }));
+    }
     let log: crate::pr::LogFn<'_> = match o.log.take() {
         Some(l) => l,
         None => Box::new(log),
@@ -274,6 +281,7 @@ fn watch_run_cmd(
             return EXIT_ERROR;
         }
     };
+    let repo = target.repo.clone();
     // Say writes each line as it's said.
     let out = std::cell::RefCell::new(stdout);
     let o = crate::run::RunOptions {
@@ -287,6 +295,13 @@ fn watch_run_cmd(
             let _ = w.flush();
         })),
         log: Some(Box::new(log)),
+        task: env.task.clone(),
+        expect: (!env.task.is_empty()).then(|| {
+            // A background task's card says when its runs should be done.
+            Box::new(move |started: &[crate::eta::Started]| {
+                crate::eta::expected_end(started, |w| crate::eta::usual(&repo, w))
+            }) as crate::run::ExpectFn<'_>
+        }),
         ..Default::default()
     };
     crate::run::watch_run(&o)

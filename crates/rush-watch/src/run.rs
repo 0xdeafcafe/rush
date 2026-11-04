@@ -248,6 +248,10 @@ pub struct WorkflowRun {
     pub conclusion: String,
     pub head: String,
     pub branch: String,
+    /// Its workflow's id, and when it started (zero before it has): what
+    /// how long it should take is worked out from (eta.rs).
+    pub workflow: i64,
+    pub started: Time,
     /// Its jobs, as checks: passed, failed, cancelled, skipped or pending.
     pub jobs: Vec<Check>,
 }
@@ -332,6 +336,8 @@ struct RunJson {
     head_branch: String,
     #[serde(default, deserialize_with = "nd")]
     workflow_id: i64,
+    #[serde(default, deserialize_with = "crate::gh::time_or_zero")]
+    run_started_at: Time,
 }
 
 /// The runs t names as GitHub says now, or as another watcher heard within
@@ -407,6 +413,8 @@ pub fn fetch(t: &Target, fresh: Duration) -> (Result<Runs, Error>, i64) {
             conclusion: r.conclusion,
             head: r.head_sha,
             branch: r.head_branch,
+            workflow: r.workflow_id,
+            started: r.run_started_at,
             jobs: Vec::new(),
         };
         for j in jobs.jobs {
@@ -449,6 +457,9 @@ pub type LimitFn<'a> = Box<dyn Fn() -> Option<Time> + 'a>;
 /// (None when GitHub couldn't say); None when it can't say at all.
 pub type HeadFn<'a> = Box<dyn Fn(&str, &str, &str) -> Option<(String, Option<bool>)> + 'a>;
 
+/// When runs started this way should be done (eta::expected_end), or None.
+pub type ExpectFn<'a> = Box<dyn Fn(&[crate::eta::Started]) -> Option<Time> + 'a>;
+
 /// What a run watch waits for. Say is told each line to print; fetch,
 /// sleep, logs, now and limited are GitHub and the clock, which tests set;
 /// log records what it did.
@@ -458,6 +469,11 @@ pub struct RunOptions<'a> {
     pub until: Until,
     /// Zero: never.
     pub timeout: Duration,
+    /// The background task the watch runs as, if it is one: it keeps a
+    /// Live for it while it runs, for rush to draw.
+    pub task: String,
+    /// When its runs should be done; unset, nothing is expected.
+    pub expect: Option<ExpectFn<'a>>,
     pub say: Option<SayFn<'a>>,
     pub fetch: Option<FetchRunsFn<'a>>,
     pub sleep: Option<SleepFn<'a>>,
@@ -504,6 +520,22 @@ impl RunOptions<'_> {
         if let Some(f) = &self.say {
             f(s)
         }
+    }
+
+    fn expect(&self, rs: &Runs) -> Time {
+        let Some(f) = &self.expect else {
+            return Time::default();
+        };
+        let started: Vec<crate::eta::Started> = rs
+            .runs
+            .iter()
+            .map(|r| crate::eta::Started {
+                workflow: r.workflow,
+                at: r.started,
+                done: r.status == "completed",
+            })
+            .collect();
+        f(&started).unwrap_or_default()
     }
 
     fn fetch(&self, fresh: Duration) -> (Result<Runs, Error>, i64) {
@@ -626,11 +658,62 @@ pub fn watch_run(o: &RunOptions) -> i32 {
         }
     }
     o.log("watch-run-end", f);
+    crate::live::drop_live(&o.task);
     code
+}
+
+/// The Live a run watch keeps while it runs: its runs as last seen (None
+/// before GitHub has said), when it last asked and will ask next, and
+/// when the runs should be done.
+pub fn live(o: &RunOptions, start: Time, at: &Looked) -> crate::live::Live {
+    let mut l = crate::live::Live {
+        task: o.task.clone(),
+        pid: std::process::id() as i64,
+        repo: o.repo(),
+        what: o.label(),
+        until: o.until,
+        timeout: o.timeout,
+        start,
+        asked: at.asked,
+        next: at.next,
+        limited: at.limited,
+        expect: at.expect,
+        ..Default::default()
+    };
+    let Some(rs) = &at.runs else {
+        return l;
+    };
+    let names = rs.names();
+    if !names.is_empty() {
+        l.title = names;
+    }
+    let (passed, failed, cancelled, pending, skipped) = rs.counts();
+    (l.passed, l.failed, l.pending, l.skipped) = (passed, failed + cancelled, pending, skipped);
+    for (_, j) in rs.jobs() {
+        match j.state.as_str() {
+            "failed" | "cancelled" => l.failed_checks.push(j.name.clone()),
+            "pending" => l.running.push(j.name.clone()),
+            _ => {}
+        }
+    }
+    l
+}
+
+/// Where a run watch stands between looks, for its Live.
+#[derive(Debug, Clone, Default)]
+pub struct Looked {
+    pub runs: Option<Runs>,
+    pub asked: Time,
+    pub next: Time,
+    pub limited: bool,
+    pub expect: Time,
 }
 
 fn watching(o: &RunOptions, start: Time, st: &mut State) -> i32 {
     let mut prev: Option<Runs> = None;
+    let mut looked = Looked::default();
+    // The runs the expected end was worked out for: again when they change.
+    let mut expected_for: Vec<i64> = Vec::new();
     let mut fails = 0;
     let mut limited = false;
     let mut said_limited = false;
@@ -683,6 +766,12 @@ fn watching(o: &RunOptions, start: Time, st: &mut State) -> i32 {
                 fails = 0;
                 limited = false;
                 st.last = Some(rs.clone());
+                looked.asked = o.now();
+                let ids: Vec<i64> = rs.runs.iter().map(|r| r.id).collect();
+                if !ids.is_empty() && ids != expected_for && !rs.done() {
+                    looked.expect = o.expect(&rs);
+                    expected_for = ids;
+                }
                 if let Some(code) = step(
                     o,
                     prev.as_ref(),
@@ -700,6 +789,12 @@ fn watching(o: &RunOptions, start: Time, st: &mut State) -> i32 {
         if let Some(u) = until {
             // Not before it resets, and not long after.
             wait = since(u, o.now()).max(Duration::from_secs(5));
+        }
+        if !o.task.is_empty() {
+            looked.runs = prev.clone();
+            looked.limited = limited;
+            looked.next = o.now().add_nanos(wait.as_nanos() as i64);
+            crate::live::save_live(&live(o, start, &looked));
         }
         if !o.timeout.is_zero() && gone + wait > o.timeout {
             if let Some(left) = o.timeout.checked_sub(gone).filter(|l| !l.is_zero())

@@ -3621,6 +3621,15 @@ impl<'a> Drawer<'a> {
             let t = l.trim();
             if let Some(after) = t.strip_prefix(BG) {
                 let (id, after) = after.split_once('.').unwrap_or((after, ""));
+                if let Some(row) = self.o.tasks.get(id) {
+                    // What rush knows of it as it runs, in place of the
+                    // note and its file.
+                    let w = self.cw.saturating_sub(indent + 1);
+                    let row = Txt(row.spans.clone()).truncate(w, &Txt::raw("…"));
+                    let pl = self.sp(indent - 1).and(dim("↳ ")).and(row);
+                    self.add("", Color::Default, pl, Txt::new());
+                    continue;
+                }
                 let pl = self
                     .sp(indent - 1)
                     .and(dim(&format!("↳ running in the background · {id}")));

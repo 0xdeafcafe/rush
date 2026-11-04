@@ -66,6 +66,7 @@ pub mod subqueue;
 pub mod subs;
 pub mod subview;
 pub mod switch;
+pub mod taskcards;
 pub mod tasks;
 pub mod textsel;
 pub mod told;

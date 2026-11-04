@@ -284,6 +284,8 @@ pub type NowFn<'a> = Box<dyn Fn() -> Time + 'a>;
 /// Says whether to stop.
 pub type StoppedFn<'a> = Box<dyn Fn() -> bool + 'a>;
 pub type LogFn<'a> = Box<dyn Fn(&str, Map<String, Value>) + 'a>;
+/// When the runs on a head commit should be done (eta.rs), or None.
+pub type HeadExpectFn<'a> = Box<dyn Fn(&str, &str) -> Option<Time> + 'a>;
 
 /// What a watch waits for. Say is told each line to print; fetch, sleep,
 /// logs and now are GitHub and the clock, which tests set; log records
@@ -299,6 +301,9 @@ pub struct Options<'a> {
     /// The background task the watch runs as, if it is one: it keeps a
     /// Live for it while it runs.
     pub task: String,
+    /// When its checks' runs should be done, given the repository and the
+    /// head commit; unset, nothing is expected.
+    pub expect: Option<HeadExpectFn<'a>>,
     pub say: Option<SayFn<'a>>,
     pub fetch: Option<FetchFn<'a>>,
     pub sleep: Option<SleepFn<'a>>,
@@ -451,6 +456,8 @@ fn watching(o: &Options, start: Time, run: &mut Run) -> i32 {
     let mut fails = 0;
     let mut limited = false;
     let mut asked = Time::default();
+    // When its checks should be done, and the head commit that was for.
+    let (mut expect, mut expected_for) = (Time::default(), String::new());
     loop {
         let (res, r) = o.fetch(Duration::from_secs(10));
         if r >= 0 {
@@ -486,6 +493,14 @@ fn watching(o: &Options, start: Time, run: &mut Run) -> i32 {
                 limited = false;
                 asked = o.now();
                 run.last = Some(p.clone());
+                if let Some(f) = &o.expect
+                    && !p.head.is_empty()
+                    && p.head != expected_for
+                    && p.counts().2 > 0
+                {
+                    expect = f(&o.repo, &p.head).unwrap_or_default();
+                    expected_for = p.head.clone();
+                }
                 if let Some(code) = step(o, prev.as_ref(), &p, since(o.now(), start)) {
                     return code;
                 }
@@ -494,7 +509,7 @@ fn watching(o: &Options, start: Time, run: &mut Run) -> i32 {
         }
         let gone = since(o.now(), start);
         let wait = interval(gone, run.remaining);
-        live::save_live(&live::live(
+        let mut l = live::live(
             o,
             &o.task,
             start,
@@ -502,7 +517,9 @@ fn watching(o: &Options, start: Time, run: &mut Run) -> i32 {
             asked,
             o.now() + wait,
             limited,
-        ));
+        );
+        l.expect = expect;
+        live::save_live(&l);
         if !o.timeout.is_zero() && gone + wait > o.timeout {
             if let Some(left) = o.timeout.checked_sub(gone).filter(|l| !l.is_zero())
                 && o.sleep(left)

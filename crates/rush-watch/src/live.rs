@@ -75,6 +75,19 @@ pub struct Live {
         deserialize_with = "crate::gh::nd"
     )]
     pub running: Vec<String>,
+    /// A run watch's runs ("main @ abc1234"); "" for a pull request's.
+    /// Rust-only, as is expect.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub what: String,
+    /// When what it waits on should be done, from how long its workflows
+    /// usually take (eta.rs); zero when not known.
+    #[serde(
+        default,
+        rename = "expectEnd",
+        deserialize_with = "time_or_zero",
+        skip_serializing_if = "is_zero_time"
+    )]
+    pub expect: Time,
 }
 
 impl Live {

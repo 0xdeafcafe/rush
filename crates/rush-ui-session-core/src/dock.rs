@@ -95,6 +95,9 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     super::livestep::sync(m, &key);
     // The commands rush runs itself: their output so far, how they ended.
     super::shellbox::sync(m, &key);
+    // Its background tasks a plugin has a card for (a rush watch): drawn
+    // in the conversation as they stand.
+    super::taskcards::sync(m, &key);
     // Go's pane is the screen less 3, from column 2 (view.go:1210); the
     // box gives the map its width from 96 wide (rushmode.go:3224).
     let w = w.saturating_sub(INDENT + 1).max(20);

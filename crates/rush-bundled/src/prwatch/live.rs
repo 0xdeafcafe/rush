@@ -56,6 +56,13 @@ pub struct Live {
     pub failed_checks: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub running: Vec<String>,
+    /// A run watch's runs ("main @ abc1234"); "" for a pull request's.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub what: String,
+    /// When what it waits on should be done, from how long its workflows
+    /// usually take; zero when not known.
+    #[serde(rename = "expectEnd", skip_serializing_if = "zero")]
+    pub expect: Time,
 }
 
 fn zero(t: &Time) -> bool {

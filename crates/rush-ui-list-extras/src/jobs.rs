@@ -559,6 +559,25 @@ pub fn segs(ss: &[Seg]) -> Line {
     )
 }
 
+/// Running task j's card as one row, for the conversation: its mark (not
+/// turning: the conversation isn't drawn each tick), its kind, what it
+/// says, then its right end; None when no plugin has a card for it.
+pub fn job_card_line(j: &Job, now: Ms) -> Option<Line> {
+    let c = job_card_of(j, now)?;
+    let mut l = Line::from_spans(vec![
+        sp(c.mark.clone(), tone_colour(c.tone)),
+        plain(" "),
+        sp(c.kind.clone(), SUB),
+        plain(" "),
+    ]);
+    l.spans.extend(segs(&c.body).spans);
+    if !c.right.is_empty() {
+        l.spans.push(plain("  "));
+        l.spans.extend(segs(&c.right).spans);
+    }
+    Some(l)
+}
+
 /// A card's mark: the spinner, turning, while it waits.
 fn card_mark(c: &JobCard, tick: usize) -> Span {
     if c.spin {
