@@ -430,6 +430,68 @@ pub fn compat(id: &str, h: &str) -> (String, String, String) {
     (k, warn, why)
 }
 
+/// Registers every adapter of reg with this list, as it answers now: its
+/// providers, harnesses, keys, choices and whether its program was found.
+/// Each process that reads profiles or routes tells it its registry: the
+/// UI once it has found the programs, a host before it starts an agent.
+pub fn tell(reg: &rush_core::adapter::Registry) {
+    use rush_core::adapter::Feature;
+    for a in reg.all().iter() {
+        // A helper for rush's small jobs isn't an agent: no profile names
+        // it, nor falls back to it.
+        if a.helper() {
+            continue;
+        }
+        let k = a.kind();
+        let ks = k.as_str();
+        let choices = a.chooser().map(|c| {
+            let ch = c.choices();
+            let conv = |v: Vec<rush_core::adapter::Choice>| {
+                v.into_iter()
+                    .map(|c| Choice {
+                        id: c.id,
+                        note: c.note,
+                        context: c.context,
+                    })
+                    .collect()
+            };
+            Choices {
+                models: conv(ch.models),
+                efforts: conv(ch.efforts),
+                modes: conv(ch.modes),
+            }
+        });
+        let program = if a.programmer().is_none() {
+            Program::None
+        } else if reg.runs(ks) {
+            Program::Found
+        } else if reg.installed(ks) {
+            Program::Lesser { hint: reg.hint(ks) }
+        } else {
+            Program::Missing
+        };
+        register(Adapter {
+            kind: ks.to_string(),
+            name: a.name(),
+            provider: a.provided().map(|p| p.provider()),
+            maker: a.made().map(|p| p.maker()),
+            rides: a.rider().map(|r| r.rides().0),
+            key_env: a.keyed().map(|p| p.key_env()),
+            sign_in: reg.supports(ks, Feature::SignIn),
+            on_plan: a.plan_rider().is_some_and(|p| p.on_plan()),
+            speaks: a.speaker().map(|s| s.speaks()),
+            replacement: a.replaced().map(|r| r.replacement().0),
+            builtin_def: a.builtin_def_namer().map(|b| b.builtin_def()),
+            home: a.homer().map(|h| {
+                let p = h.home();
+                (p.name, p.dir)
+            }),
+            choices,
+            program,
+        });
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod fake {
     //! The agents state's tests run against, as Go's tests register them.

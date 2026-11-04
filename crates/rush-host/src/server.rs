@@ -483,7 +483,13 @@ pub fn run(id: &str) -> Result<(), String> {
         }
     }
     rush_events::set_process("host");
-    let r = run_with(adapter::global().clone(), Hooks::real(), id);
+    let reg = adapter::global().clone();
+    // Settings' routes (which harness runs a provider, the sign-in a
+    // limited session moves to) read state's list of agents: told once the
+    // programs are found, as the UI tells it.
+    crate::kind::installed(&reg);
+    crate::kind::tell_state(&reg);
+    let r = run_with(reg, Hooks::real(), id);
     crate::events::flush();
     r
 }
