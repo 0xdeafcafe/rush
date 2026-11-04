@@ -58,7 +58,7 @@ fn the_last_run_going_says_when_its_done() {
         ),
         (
             "an unknown workflow is left out",
-            vec![run(3, 100, false), run(2, 0, false)],
+            vec![run(3, 100, false)],
             None,
         ),
         (
