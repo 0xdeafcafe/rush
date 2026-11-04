@@ -494,12 +494,12 @@ pub fn sections(m: &Model) -> Vec<Section> {
         if c.hold_short_output {
             "waits for you"
         } else {
-            "goes to the agent"
+            "is sent"
         },
         "What becomes of a shell block from a reply you run with ▶ run, when what it printed is short (20 lines at most).",
         &[
             (
-                "goes to the agent",
+                "is sent",
                 "the command, its exit code and its output are sent to the agent by itself as it ends.",
             ),
             (
