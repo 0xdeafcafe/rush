@@ -740,7 +740,8 @@ mod tests {
             r.sends_itself()
         };
         let lines = |n: usize| "a line\n".repeat(n);
-        let cases: [(&str, String, fn(&mut ShellRun), bool); 9] = [
+        type Then = fn(&mut ShellRun);
+        let cases: [(&str, String, Then, bool); 9] = [
             ("short", lines(3), |_| {}, true),
             ("no output", String::new(), |_| {}, true),
             ("at the line limit", lines(AUTO_LINES), |_| {}, true),
