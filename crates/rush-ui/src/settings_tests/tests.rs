@@ -1385,6 +1385,175 @@ fn the_rush_row_follows_update() {
     assert!(b.contains("installed · enter reloads it"), "{b}");
 }
 
+/// While a look runs (at the start, each hour, r), every row says
+/// "checking…" in place of its last answer, rush's keeping the newest
+/// version known; once it's in, the Harnesses section says when.
+/// Rust-only.
+#[test]
+fn updates_say_when_they_are_checking() {
+    let (mut m, _d) = model(140, 50);
+    set_settings_page(&mut m, PAGE_UPDATES);
+    {
+        let u = &mut m.kept::<State>().updates;
+        u.checked = true;
+        u.rows = vec![Status {
+            kind: "codex".into(),
+            name: "Codex".into(),
+            installed: "0.155.1".into(),
+            latest: "0.159.2".into(),
+            ..Status::default()
+        }];
+        let beta8 = rush_update::Release {
+            version: "0.1.0-beta.8".into(),
+            ..Default::default()
+        };
+        u.rush_new = beta8.clone();
+        u.newer = beta8;
+        u.checking = true;
+    }
+    let b = body(&m, 130);
+    assert!(b.contains("installed → latest · checking…"), "{b}");
+    assert!(!b.contains("update available"), "{b}");
+    let rows: Vec<&str> = b.lines().filter(|l| l.contains("checking…")).collect();
+    assert!(
+        rows.iter().any(|l| l.contains("v0.1.0-beta.8")),
+        "rush keeps the newest known:\n{b}"
+    );
+    assert!(rows.iter().any(|l| l.contains("0.159.2")), "{b}");
+
+    let now = m.now;
+    {
+        let u = &mut m.kept::<State>().updates;
+        u.checking = false;
+        u.checked_ms = now - 4 * 60_000 - 5_000;
+    }
+    let b = body(&m, 130);
+    assert!(b.contains("installed → latest · checked 4m ago"), "{b}");
+    assert!(!b.contains("checking…"), "{b}");
+    let rows: Vec<&str> = b
+        .lines()
+        .filter(|l| l.contains("update available"))
+        .collect();
+    assert!(rows.iter().any(|l| l.contains("v0.1.0-beta.8")), "{b}");
+    assert!(rows.iter().any(|l| l.contains("0.159.2")), "{b}");
+    assert_eq!(
+        updates::harnesses_note(&m),
+        "installed → latest · checked 4m ago"
+    );
+    // Before any look, the columns alone.
+    m.kept::<State>().updates.checked_ms = 0;
+    assert_eq!(updates::harnesses_note(&m), "installed → latest");
+}
+
+/// A view started on a newer rush than the last one ran says so once, as
+/// news; the first, the same again or an older one say nothing.
+/// Rust-only.
+#[test]
+fn a_newer_rush_says_whats_new_once() {
+    let (mut m, _d) = model(140, 50);
+    let news = |m: &Model| {
+        m.said
+            .iter()
+            .filter(|l| l.text.starts_with("rush updated to"))
+            .map(|l| l.text.clone())
+            .collect::<Vec<_>>()
+    };
+    updates::note_version(&mut m, None);
+    updates::note_version(&mut m, Some("0.1.0-beta.7".into()));
+    assert!(news(&m).is_empty(), "the first rush to keep one");
+    assert_eq!(m.kept::<State>().updates.updated_from, None);
+    updates::note_version(&mut m, Some("0.1.0-beta.8".into()));
+    assert_eq!(
+        news(&m),
+        ["rush updated to v0.1.0-beta.8: what's new in Settings › Updates"]
+    );
+    assert_eq!(
+        m.kept::<State>().updates.updated_from.as_deref(),
+        Some("0.1.0-beta.7")
+    );
+    updates::note_version(&mut m, Some("0.1.0-beta.8".into()));
+    updates::note_version(&mut m, Some("0.1.0-beta.6".into()));
+    assert_eq!(news(&m).len(), 1, "said once");
+    assert_eq!(
+        rush_state::ranversion::load().as_deref(),
+        Some("0.1.0-beta.6")
+    );
+}
+
+/// GitHub's notes, standing in: an error for 0.0.1, else beta.8's, and
+/// beta.7's too when asked since beta.6.
+fn fake_notes(from: Option<&str>, to: &str) -> Result<Vec<rush_update::Notes>, String> {
+    if to == "0.0.1" {
+        return Err("GitHub said 500".into());
+    }
+    if to == "0.0.2" {
+        return Ok(Vec::new());
+    }
+    let n = |v: &str, body: &str| rush_update::Notes {
+        version: v.into(),
+        tag: format!("v{v}"),
+        body: body.into(),
+        url: format!("https://github.com/0xdeafcafe/rush/releases/tag/v{v}"),
+    };
+    let mut out = vec![n(
+        "0.1.0-beta.8",
+        "## Since v0.1.0-beta.7\n\n- merge: the Updates page says when it's checking\n\n**Full Changelog**: https://github.com/0xdeafcafe/rush/compare/v0.1.0-beta.7...v0.1.0-beta.8",
+    )];
+    if from == Some("0.1.0-beta.6") {
+        out.push(n("0.1.0-beta.7", "- merge: seven"));
+    }
+    Ok(out)
+}
+
+/// What's new opens over the page: each release since the rush updated
+/// from, its changes as bullets, the boilerplate left out, and its page;
+/// or the one running alone; or why there's nothing. Rust-only.
+#[test]
+fn whats_new_shows_the_release_notes() {
+    let (mut m, _d) = model(140, 50);
+    set_settings_page(&mut m, PAGE_UPDATES);
+    m.kept::<State>().updates.notes = Some(fake_notes);
+    updates::whats_new(
+        &mut m,
+        Some("0.1.0-beta.6".into()),
+        Some("0.1.0-beta.8".into()),
+    );
+    let f = screen(&mut m).join("\n");
+    for want in [
+        "What's new  since v0.1.0-beta.6 · from rush's GitHub releases",
+        "v0.1.0-beta.8",
+        "  Since v0.1.0-beta.7",
+        "  · the Updates page says when it's checking",
+        "  https://github.com/0xdeafcafe/rush/releases/tag/v0.1.0-beta.8",
+        "v0.1.0-beta.7",
+        "  · seven",
+        "↑↓ scroll",
+    ] {
+        assert!(f.contains(want), "lacks {want:?}:\n{f}");
+    }
+    assert!(!f.contains("Full Changelog"), "{f}");
+    assert!(!f.contains("merge:"), "{f}");
+    press(&mut m, "esc");
+    assert!(m.sheet.is_none());
+
+    for (to, want) in [
+        (
+            "0.1.0-beta.8",
+            "What's new  in v0.1.0-beta.8 · from its GitHub release",
+        ),
+        ("0.0.1", "can't get what's new: GitHub said 500"),
+        ("0.0.2", "GitHub has no notes for v0.0.2"),
+    ] {
+        updates::whats_new(&mut m, None, Some(to.into()));
+        let f = screen(&mut m).join("\n");
+        assert!(f.contains(want), "{to}: lacks {want:?}:\n{f}");
+        press(&mut m, "esc");
+    }
+    // A rush built from source has no release to read.
+    updates::whats_new(&mut m, None, None);
+    assert!(m.sheet.is_none());
+}
+
 /// Updates are looked for again once EVERY has passed since the last
 /// look, within a wake of it, not EVERY after the wake that missed it
 /// (recheckAfter on every tick).

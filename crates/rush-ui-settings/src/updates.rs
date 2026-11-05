@@ -16,6 +16,14 @@
 //! the new rush has settled. A move is in place: the host execs the new
 //! rush, its agent running on (rush-host upgrade.rs, Rust-only); one in a
 //! turn moves once it ends, and none is restarted.
+//!
+//! New in the port (no Go source): while a look runs, its rows say
+//! "checking…" and keep the last newest version known, and r asks GitHub
+//! again whatever rush kept; the Harnesses section says when the last look
+//! ended; a view started on a newer rush than the last one ran says so
+//! once as news (rush-state ranversion.rs); and the rush row shows what's
+//! new, from its GitHub releases (rush-update notes.rs), in a sheet drawn
+//! as the settings' HelpSheet is: a column of text that scrolls.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -27,14 +35,17 @@ use rush_host::client::Lister;
 use rush_host::wire::BinStamp;
 
 use rush_core::text::Line;
+use rush_core::time::Ms;
 use rush_harnessup::{Harness, State as Up, Status};
-use rush_update::Release;
+use rush_update::{Item, Notes, Release};
 
 use super::common::reg;
 use super::form::{Section, Setting};
 use super::paint::{first_non_empty, trunc};
 use super::{Page, State};
-use crate::frame::Out;
+use crate::frame::overlayclick::MouseEv;
+use crate::frame::sheet::sheet_title;
+use crate::frame::{Out, Press, Sheet};
 use crate::model::Model;
 use crate::style::*;
 
@@ -59,6 +70,14 @@ pub struct Updates {
     /// Sessions on an older rush whose folder is gone.
     pub gone: usize,
     pub checked_at: Option<Instant>,
+    /// When the last look ended, by the clock (Unix ms; 0 before one), for
+    /// "checked 4m ago". Rust-only.
+    pub checked_ms: Ms,
+    /// The rush the last view ran, when this one is newer: what's new is
+    /// what came since. Rust-only.
+    pub updated_from: Option<String>,
+    /// Stands in for GitHub's release notes, in tests.
+    pub notes: Option<NotesFn>,
     /// A look at the hosts is out, and the installed rush as the last one
     /// found it.
     pub sweeping: bool,
@@ -72,6 +91,10 @@ pub struct Updates {
     /// Stands in for the sweep and the installed rush's stamp, in tests.
     pub sweep: Option<SweepFn>,
 }
+
+/// The notes of the releases after from up to to (versions without their
+/// v), newest first; with no from, to's alone.
+pub type NotesFn = fn(Option<&str>, &str) -> Result<Vec<Notes>, String>;
 
 /// Counts the sessions on an older rush than installed, restarting the
 /// idle ones when told to: (stale, restarted, failed, gone)
@@ -366,6 +389,33 @@ pub fn start(m: &mut Model) {
     }
     check(m, false);
     recheck_later(m);
+    note_version(m, rush_update::current());
+}
+
+/// Keeps cur (without its v) as the rush that last ran, and when the one
+/// kept before is older, says once, as news, that rush was updated and
+/// where what's new is. Off the UI. Rust-only.
+pub fn note_version(m: &mut Model, cur: Option<String>) {
+    let Some(cur) = cur else {
+        return;
+    };
+    let v = cur.clone();
+    m.later(
+        move || rush_state::ranversion::swap(&v).ok().flatten(),
+        move |m, was| {
+            let Some(was) = was.filter(|w| rush_update::newer(w, &cur)) else {
+                return Out::Idle;
+            };
+            m.kept::<State>().updates.updated_from = Some(was);
+            m.news(&updated_news(&cur), "");
+            Out::Draw
+        },
+    );
+}
+
+/// The news that rush was updated to version (without its v).
+pub fn updated_news(version: &str) -> String {
+    format!("rush updated to v{version}: what's new in Settings › Updates")
 }
 
 /// Wakes when the last look turns EVERY old (RECHECK_WAKE at the least)
@@ -384,7 +434,12 @@ fn recheck_later(m: &mut Model) {
     m.after(left, |m| {
         recheck_after(m);
         recheck_later(m);
-        Out::Idle
+        // A look under way says so on the page.
+        if upd(m).is_some_and(|u| u.checking) {
+            Out::Draw
+        } else {
+            Out::Idle
+        }
     });
 }
 
@@ -405,7 +460,7 @@ pub fn check(m: &mut Model, force: bool) {
         move || {
             let hs = harnesses();
             let rows = rush_harnessup::check(&rush_state::dir(), &hs, force, &|n| find(n));
-            let (latest, newer) = rush_update::check(&rush_update::Quiet);
+            let (latest, newer) = rush_update::check(&rush_update::Quiet, force);
             let mut avail: Vec<String> = rows
                 .iter()
                 .filter(|r| r.state() == Up::Available)
@@ -424,11 +479,13 @@ pub fn check(m: &mut Model, force: bool) {
             (rows, latest, newer)
         },
         move |m, (rows, latest, newer)| {
+            let ended = m.clock.unwrap_or_else(rush_core::time::now);
             let u = &mut m.kept::<State>().updates;
             u.rows = rows;
             u.checked = true;
             u.checking = false;
             u.checked_at = Some(Instant::now());
+            u.checked_ms = ended;
             if newer && u.newer.version.is_empty() {
                 u.newer = latest.clone();
             }
@@ -531,7 +588,7 @@ fn sections(m: &Model) -> Vec<Section> {
     let rush = Section::new("rush", vec![rush_row(m)]);
     let mut hs = Section {
         title: "Harnesses".into(),
-        note: "installed → latest".into(),
+        note: harnesses_note(m),
         ..Section::default()
     };
     let (checked, rows) = upd(m).map_or((false, Vec::new()), |u| (u.checked, u.rows.clone()));
@@ -558,6 +615,33 @@ fn sections(m: &Model) -> Vec<Section> {
         ..Section::default()
     };
     vec![rush, hs, hosts]
+}
+
+/// The Harnesses section's note: the columns, then that a look is under
+/// way or when the last one ended. Rust-only.
+pub fn harnesses_note(m: &Model) -> String {
+    match checked_words(m) {
+        w if w.is_empty() => "installed → latest".into(),
+        w => format!("installed → latest · {w}"),
+    }
+}
+
+/// "checking…" while a look runs, else "checked 4m ago" from the last
+/// one ended; "" before any.
+fn checked_words(m: &Model) -> String {
+    match upd(m) {
+        Some(u) if u.checking => "checking…".into(),
+        Some(u) if u.checked_ms > 0 => {
+            format!("checked {} ago", age_since((m.now - u.checked_ms).max(0)))
+        }
+        _ => String::new(),
+    }
+}
+
+/// What a row says while a look runs: its last answer may be about to
+/// change.
+fn checking_state() -> Line {
+    line([sp("checking…", DIM)])
 }
 
 /// A row's keys: enter does what the row does, r looks again (updateKey).
@@ -614,20 +698,34 @@ fn rush_row(m: &Model) -> Setting {
     } else {
         rush_new.short()
     };
+    let has_newer = !newer.version.is_empty();
+    if has_newer {
+        // While a look runs too: the newest known stays till it answers.
+        latest = newer.short();
+    }
+    let checking = upd(m).is_some_and(|u| u.checking);
     let state = if updating {
         line([sp("updating…", YELLOW)])
-    } else if !newer.version.is_empty() {
-        latest = newer.short();
-        line([sp("update available", YELLOW)])
-    } else if rebuilt {
+    } else if rebuilt && !has_newer {
         line([sp("installed · enter reloads it", YELLOW)])
+    } else if checking {
+        checking_state()
+    } else if has_newer {
+        line([sp("update available", YELLOW)])
     } else if have == "dev build" || rush_new.version.is_empty() {
         line([sp("unknown", DIM)])
     } else {
         line([sp("up to date", GREEN)])
     };
     let (h1, l1, s1) = (have.clone(), latest.clone(), state.clone());
-    let has_newer = !newer.version.is_empty();
+    let checked = checked_words(m);
+    let now = if checked.is_empty() || checking {
+        state.plain()
+    } else {
+        format!("{} · {checked}", state.plain())
+    };
+    let from = upd(m).and_then(|u| u.updated_from.clone());
+    let cur = rush_update::current();
     Setting {
         label: "rush".into(),
         line: Some(Rc::new(move |w| {
@@ -637,31 +735,218 @@ fn rush_row(m: &Model) -> Setting {
             (
                 "rush".into(),
                 format!(
-                    "rush updates from its GitHub release, or with brew when brew installed it. Enter installs the newest (#update), then reloads it (#reload): your sessions carry on. Installed: {have}; latest: {latest}."
+                    "rush updates from its GitHub release, or with brew when brew installed it. Enter installs the newest (#update), then reloads it (#reload): your sessions carry on. n shows what's new. Installed: {have}; latest: {latest}."
                 ),
-                state.plain(),
+                now.clone(),
             )
         })),
-        key: Some(update_key(move |m| {
-            if has_newer {
-                return run_command(m, "update");
-            }
-            if rebuilt {
-                return run_command(m, "reload");
-            }
-            m.flash("rush is up to date");
-            Out::Draw
-        })),
-        keys: vec!["enter".into(), "update".into()],
+        key: Some(rush_key(has_newer, rebuilt, from, cur)),
+        keys: match (has_newer, rebuilt) {
+            (true, _) => vec!["enter", "update", "n", "what's new"],
+            (false, true) => vec!["enter", "reload", "n", "what's new"],
+            (false, false) => vec!["enter", "what's new"],
+        }
+        .into_iter()
+        .map(String::from)
+        .collect(),
         ..Setting::default()
+    }
+}
+
+/// The rush row's keys: enter installs a newer rush, or reloads one
+/// installed, else shows what's new in this one, as n always does; r
+/// looks again.
+fn rush_key(
+    has_newer: bool,
+    rebuilt: bool,
+    from: Option<String>,
+    cur: Option<String>,
+) -> super::form::KeyFn {
+    let (f2, c2) = (from.clone(), cur.clone());
+    let enter = update_key(move |m| {
+        if has_newer {
+            return run_command(m, "update");
+        }
+        if rebuilt {
+            return run_command(m, "reload");
+        }
+        whats_new(m, f2.clone(), c2.clone())
+    });
+    Rc::new(move |m, s| match s {
+        "n" => whats_new(m, from.clone(), cur.clone()),
+        _ => enter(m, s),
+    })
+}
+
+/// Opens what's new in cur, the rush running (without its v): since from
+/// when it was updated from it, else in cur alone. A rush built from
+/// source has no release to read.
+pub fn whats_new(m: &mut Model, from: Option<String>, cur: Option<String>) -> Out {
+    let Some(to) = cur else {
+        m.flash("a rush built from source has no release notes");
+        return Out::Draw;
+    };
+    open_notes(m, from, to);
+    Out::Draw
+}
+
+/// Opens the notes of the releases after from up to to (without their
+/// v), asking GitHub off the UI (rush-update keeps the answer an hour).
+pub fn open_notes(m: &mut Model, from: Option<String>, to: String) {
+    let stand_in = upd(m).and_then(|u| u.notes);
+    let (f, t) = (from.clone(), to.clone());
+    let work = move || match stand_in {
+        Some(get) => get(f.as_deref(), &t),
+        // A test never asks GitHub.
+        None if rush_core::sandbox::active() => Err("GitHub isn't asked in a test".into()),
+        None => match &f {
+            Some(f) => rush_update::between(f, &t, &rush_update::Quiet),
+            None => rush_update::of(&t, &rush_update::Quiet).map(|n| n.into_iter().collect()),
+        }
+        .map_err(|e| e.0),
+    };
+    let mut s = NotesSheet {
+        from,
+        to,
+        ..NotesSheet::default()
+    };
+    if let Some(got) = super::sheets::later_to::<NotesSheet, _>(m, work, |s, got| s.got = Some(got))
+    {
+        s.got = Some(got);
+    }
+    m.open_sheet(Box::new(s));
+}
+
+/// What's new in rush: the notes of its releases since the rush that ran
+/// before, or of the one running, scrolled as HelpSheet scrolls a
+/// setting's whole explanation. Rust-only.
+#[derive(Default)]
+pub struct NotesSheet {
+    /// The version updated from, without its v; None for to's alone.
+    pub from: Option<String>,
+    pub to: String,
+    /// GitHub's answer, once it's in.
+    pub got: Option<Result<Vec<Notes>, String>>,
+    pub scroll: usize,
+    height: usize,
+    count: usize,
+}
+
+impl NotesSheet {
+    /// The notes as rows w wide: each release's version, what's new in it,
+    /// and its page on GitHub.
+    pub fn rows(&self, w: usize) -> Vec<Line> {
+        let w = w.max(8);
+        let mut out = Vec::new();
+        let notes = match &self.got {
+            None => return vec![line([sp("asking GitHub…", DIM)])],
+            Some(Err(e)) => {
+                return wrap(&format!("can't get what's new: {e}"), w)
+                    .into_iter()
+                    .map(|l| line([sp(l, RED)]))
+                    .collect();
+            }
+            Some(Ok(n)) if n.is_empty() => {
+                return vec![line([sp(
+                    format!("GitHub has no notes for v{}", self.to),
+                    DIM,
+                )])];
+            }
+            Some(Ok(n)) => n,
+        };
+        for (i, n) in notes.iter().enumerate() {
+            if i > 0 {
+                out.push(Line::new());
+            }
+            out.push(line([spb(n.short(), TEXT)]));
+            let items = n.items();
+            if items.is_empty() {
+                out.push(line([sp("  nothing written down for it", DIM)]));
+            }
+            for it in items {
+                match it {
+                    Item::Heading(h) => {
+                        for l in wrap(&h, w - 2) {
+                            out.push(line([plain("  "), sp(l, SUB)]));
+                        }
+                    }
+                    Item::Bullet(b) => {
+                        for (j, l) in wrap(&b, w - 4).into_iter().enumerate() {
+                            let mark = if j == 0 { "  · " } else { "    " };
+                            out.push(line([sp(mark, DIM), sp(l, TEXT)]));
+                        }
+                    }
+                    Item::Text(t) => {
+                        for l in wrap(&t, w - 2) {
+                            out.push(line([plain("  "), sp(l, SUB)]));
+                        }
+                    }
+                }
+            }
+            if !n.url.is_empty() {
+                out.push(line([plain("  "), sp(fit_str(&n.url, w - 2), FAINT)]));
+            }
+        }
+        out
+    }
+}
+
+impl Sheet for NotesSheet {
+    fn width(&self, _m: &Model) -> usize {
+        92
+    }
+
+    fn body(&mut self, _m: &Model, w: usize, h: usize) -> Vec<Line> {
+        let about = match &self.from {
+            Some(f) => format!("since v{f} · from rush's GitHub releases"),
+            None => format!("in v{} · from its GitHub release", self.to),
+        };
+        let rows = self.rows(w);
+        self.height = h.saturating_sub(4).max(1);
+        self.count = rows.len();
+        self.scroll = self.scroll.min(rows.len().saturating_sub(self.height));
+        let to = rows.len().min(self.scroll + self.height);
+        let mut out = vec![sheet_title("What's new", &about, w), Line::new()];
+        out.extend_from_slice(&rows[self.scroll..to]);
+        out.push(Line::new());
+        out.push(keys_fit(w, &[("↑↓", "scroll"), ("esc", "back")]));
+        out
+    }
+
+    fn key(&mut self, _m: &mut Model, k: &Press) -> Out {
+        let mut s = self.scroll as isize;
+        let h = self.height as isize;
+        match k.s.as_str() {
+            "esc" | "q" | "n" | "enter" => return Out::Close,
+            "up" | "k" => s -= 1,
+            "down" | "j" => s += 1,
+            "pgup" => s -= h,
+            "pgdown" | "space" => s += h,
+            "home" => s = 0,
+            "end" => s = self.count as isize,
+            _ => {}
+        }
+        self.scroll = s.clamp(0, (self.count as isize - h).max(0)) as usize;
+        Out::Draw
+    }
+
+    fn mouse(&mut self, m: &mut Model, ev: MouseEv, _x: i32, _y: i32) -> Out {
+        match ev {
+            MouseEv::WheelDown => self.key(m, &Press::of("down").expect("down")),
+            MouseEv::WheelUp => self.key(m, &Press::of("up").expect("up")),
+            _ => Out::Idle,
+        }
     }
 }
 
 /// One harness's row (harnessRow).
 fn harness_row(m: &Model, r: Status) -> Setting {
     let running = upd(m).is_some_and(|u| u.running.contains(&r.kind));
+    let checking = upd(m).is_some_and(|u| u.checking);
     let state = if running {
         line([sp("updating…", YELLOW)])
+    } else if checking {
+        checking_state()
     } else {
         match r.state() {
             Up::Available => line([sp("update available", YELLOW)]),
@@ -700,6 +985,10 @@ fn harness_row(m: &Model, r: Status) -> Setting {
         })),
         key: Some(update_key(move |m| {
             if r.state() != Up::Available {
+                if checking {
+                    m.flash("still checking…");
+                    return Out::Draw;
+                }
                 m.flash(&format!("{n3} is {}", s3.plain().to_lowercase()));
                 return Out::Draw;
             }
