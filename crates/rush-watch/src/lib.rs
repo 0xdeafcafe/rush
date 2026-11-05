@@ -19,6 +19,7 @@
 //!
 //! Ported from internal/watch and cmd/rush/watch.go; run.rs is new.
 
+pub mod causes;
 pub mod cli;
 pub mod eta;
 pub mod gh;
@@ -30,6 +31,7 @@ pub mod pr;
 pub mod run;
 pub mod stop;
 
+pub use causes::{log_causes, log_lines};
 pub use cli::{Env, WATCH_USAGE, bundled_on, watch_cmd, watch_cmd_in};
 pub use gh::{Error, get, limited_until, raw, remaining, shared_remaining};
 pub use hook::{PROMPT, redirect};

@@ -13,6 +13,7 @@ rush-gh.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 regex.workspace = true
+linetag.workspace = true
 sha2.workspace = true
 base64.workspace = true
 libc.workspace = true

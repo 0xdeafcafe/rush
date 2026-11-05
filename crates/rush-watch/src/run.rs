@@ -22,7 +22,7 @@ use crate::gh::{self, Error, nd};
 use crate::go::{duration, quote, round, round_to, short};
 use crate::pr::{
     Check, EXIT_ERROR, EXIT_FAILED, EXIT_PASSED, EXIT_TIMED_OUT, LogFn, LogsFn, NowFn, SayFn,
-    SleepFn, StoppedFn, Until, interval, log_errors,
+    SleepFn, StoppedFn, Until, interval,
 };
 
 /// What rush watch run was given to watch, before asking anyone.
@@ -1053,7 +1053,7 @@ fn error_lines(o: &RunOptions, j: &Check) -> Vec<String> {
         && j.id != 0
         && let Ok(b) = o.logs(j.id)
     {
-        lines = log_errors(&String::from_utf8_lossy(&b), 8);
+        lines = crate::causes::log_lines(&String::from_utf8_lossy(&b), 8);
     }
     if lines.is_empty() && !j.note.is_empty() {
         lines = vec![j.note.clone()];

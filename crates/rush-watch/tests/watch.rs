@@ -229,6 +229,49 @@ fn log_errors_say_why_each_step_failed() {
 }
 
 #[test]
+fn log_causes_show_what_the_net_reads_as_the_cause() {
+    use rush_watch::log_causes;
+    let ts = "2026-10-14T10:00:00.1Z ";
+    let log = [
+        "##[group]Run actions/checkout@v4\n",
+        "with: x\n",
+        "##[endgroup]\n",
+        " * [new branch]  fix/an-error-banner -> origin/fix/an-error-banner\n",
+        "##[group]Run go test ./...\n",
+        "go test ./...\n",
+        "##[endgroup]\n",
+        "ok  \tpkg/a\t0.1s\n",
+        "\x1b[31m--- FAIL: TestX (0.00s)\x1b[0m\n",
+        "    x_test.go:9: got 1, want 2\n",
+        "FAIL\tpkg/b\t0.2s\n",
+        "##[error]Process completed with exit code 1.\n",
+        "##[group]Run pnpm format:check\n",
+        "pnpm format:check\n",
+        "##[endgroup]\n",
+        "a.ts (0ms)\n",
+        "Format issues found in above 1 files.\n",
+        "[ELIFECYCLE] Command failed with exit code 1.\n",
+        "##[error]Process completed with exit code 1.\n",
+        "Post job cleanup. error noise\n",
+    ]
+    .iter()
+    .map(|l| format!("{ts}{l}"))
+    .collect::<String>();
+    // The go step: just the line that says why. The format step: nothing
+    // the net knows, so what log_errors shows.
+    let got = log_causes(&log, 8).join("\n");
+    let want = "step: go test ./...\nx_test.go:9: got 1, want 2\nstep: pnpm format:check\na.ts (0ms)\nFormat issues found in above 1 files.";
+    assert_eq!(got, want);
+    let got = log_causes(
+        &format!("{ts}make: *** [all] 2\n{ts}##[error]Process completed with exit code 2.\n"),
+        3,
+    );
+    assert_eq!(got, vec!["make: *** [all] 2"]);
+    // Off by default: log_lines is log_errors.
+    assert_eq!(rush_watch::log_lines(&log, 8), log_errors(&log, 8));
+}
+
+#[test]
 fn pick_keeps_errors_and_the_tail() {
     let lines: Vec<String> = ["a", "error: one", "b", "c", "d", "e", "f"]
         .iter()

@@ -536,6 +536,24 @@ pub fn sections(m: &Model) -> Vec<Section> {
         ..Setting::default()
     };
     secs.push(Section::new("Stalls", vec![stalls]));
+    // Rush-only: which lines of a failed check rush shows agents.
+    let picks = choice(
+        "Pick a failed check's lines with a net",
+        on_off(c.linetag_picks),
+        "When a check fails, rush watch and rush pr follow show the agent the lines of its log that say why. With this on, linetag's small hand-weighted net picks them: it scores every line for how likely it is to be the cause and shows those with the couple of lines after each, usually 3 to 5 lines instead of about 11. Where it recognises nothing, it shows what the keywords would too.",
+        &[
+            (
+                "off",
+                "the last error-like lines of each failed step and the last it wrote.",
+            ),
+            (
+                "on",
+                "the lines the net reads as the cause, and what follows them.",
+            ),
+        ],
+        set(|m, v| config_mut(m).linetag_picks = v == "on"),
+    );
+    secs.push(Section::new("Failed checks", vec![picks]));
     secs
 }
 

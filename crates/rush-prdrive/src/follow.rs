@@ -295,7 +295,7 @@ impl Options<'_> {
                 "repos/{}/actions/jobs/{job}/logs",
                 self.entry.repo
             ))
-            .map(|b| rush_watch::log_errors(&String::from_utf8_lossy(&b), 12))
+            .map(|b| rush_watch::log_lines(&String::from_utf8_lossy(&b), 12))
             .unwrap_or_default(),
         }
     }

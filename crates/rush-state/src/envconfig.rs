@@ -94,6 +94,7 @@ static FIELDS: &[Field] = fields![
     "keepOrphans" => Bool: keep_orphans,
     "restartOnInstall" => Bool: restart_on_install,
     "trimRunningTmp" => Bool: trim_running_tmp,
+    "linetagPicks" => Bool: linetag_picks,
     "keepTranscriptsPlain" => Bool: keep_transcripts_plain,
     "subLine" => Str: sub_line,
     "hideLogo" => Bool: hide_logo,

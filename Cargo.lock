@@ -611,6 +611,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
+name = "linetag"
+version = "0.0.1"
+source = "git+https://github.com/0xdeafcafe/linetag?rev=c092657debf7b92ddd22892d31ad56acddee24dc#c092657debf7b92ddd22892d31ad56acddee24dc"
+dependencies = [
+ "regex",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2136,6 +2144,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "libc",
+ "linetag",
  "regex",
  "rush-events",
  "rush-gh",

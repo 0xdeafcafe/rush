@@ -686,7 +686,7 @@ fn error_lines(o: &Options, c: &Check) -> Vec<String> {
         && c.id != 0
         && let Ok(b) = o.logs(c.id)
     {
-        lines = log_errors(&String::from_utf8_lossy(&b), 12);
+        lines = crate::causes::log_lines(&String::from_utf8_lossy(&b), 12);
     }
     if lines.is_empty() && !c.note.is_empty() {
         lines = vec![c.note.clone()];
