@@ -16,11 +16,15 @@
 //! update.json: both rushes share the folder while Go's is still in use,
 //! and their versions don't compare.
 //!
+//! What's new between two versions comes from the releases' notes
+//! (notes.rs, new in the port), kept in rust-notes.json the same way.
+//!
 //! The events log and the network watch (Go's events.Log, netwatch.Run and
 //! netwatch.Done) are reached through [`Host`], until those modules are
 //! ported.
 
 mod archive;
+mod notes;
 mod semver;
 
 use std::io;
@@ -32,6 +36,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+pub use notes::{Item, NOTES_CACHE, NOTES_JOB, Notes, between, of, text, tidy};
 pub use semver::newer;
 
 /// Where rush is released.
@@ -274,21 +279,29 @@ pub fn cache_path() -> PathBuf {
 }
 
 /// The newest rush that's out, and whether it's newer than this one, asking
-/// GitHub only when no rush has in the last [`EVERY`].
-pub fn check(host: &dyn Host) -> (Release, bool) {
+/// GitHub only when no rush has in the last [`EVERY`]; forced (you asked:
+/// r on Settings › Updates), asking it now whatever was kept.
+pub fn check(host: &dyn Host, force: bool) -> (Release, bool) {
     let Some(cur) = current() else {
         return (Release::default(), false);
     };
-    check_in(&state_dir(), API, &cur, host, now())
+    check_in(&state_dir(), API, &cur, host, now(), force)
 }
 
-fn check_in(dir: &Path, api: &str, cur: &str, host: &dyn Host, now: Ms) -> (Release, bool) {
+fn check_in(
+    dir: &Path,
+    api: &str,
+    cur: &str,
+    host: &dyn Host,
+    now: Ms,
+    force: bool,
+) -> (Release, bool) {
     let path = dir.join(CACHE);
     let mut c: Cache = std::fs::read(&path)
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default();
-    if now - c.checked > EVERY.as_millis() as Ms || c.latest.version.is_empty() {
+    if force || now - c.checked > EVERY.as_millis() as Ms || c.latest.version.is_empty() {
         if !host.net_run(JOB) {
             return (Release::default(), false);
         }

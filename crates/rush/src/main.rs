@@ -6,7 +6,8 @@
 //! After Go's cmd/rush/main.go (usage :46, main :71-200, dump :441, render
 //! :478), `open` (session.go:795 openHosted), #reload's restart (:290-300)
 //! and the lock the rush that leads holds (:239-248, instances.Lock).
-//! `on`, `off`, `status` and `update` are install.rs's; `why` (main.go:141,
+//! `on`, `off`, `status`, `update` and `changelog` (new in the port)
+//! are install.rs's; `why` (main.go:141,
 //! events.go:93 whyCmd, :137 linkedSessions) and `--soak` (main.go:99,
 //! profile.go:46 soak) are here.
 
@@ -56,6 +57,7 @@ const USAGE: &str = "rush — a lighter agents view for Claude Code
   rush off         give \"claude agents\" back to Claude Code (instant, no shell reload)
   rush status      show whether it is on
   rush update      install the newest rush (brew, or its GitHub release)
+  rush changelog   what's new in this rush, or in [version], from its GitHub release
   rush reload      reload every running rush view in place, as #reload does, and
                    restart every agent on an older rush, each once it's between turns
   rush menubar     put rush in the menu bar: usage, what's working, and
@@ -189,6 +191,7 @@ fn run(args: &[String]) -> i32 {
             );
         }
         Some("update") => return exit_if(install::self_update(&mut stdout)),
+        Some("changelog") => return exit_if(install::changelog(&args[1..], &mut stdout)),
         Some("on") => return exit_if(install::Setup::process().turn_on(&mut stdout)),
         Some("off") => return exit_if(install::Setup::process().turn_off(&mut stdout)),
         Some("status") => {

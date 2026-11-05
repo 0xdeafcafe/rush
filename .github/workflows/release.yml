@@ -199,11 +199,53 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # History and tags, for the commits since the last nightly.
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           pattern: rush-*
           merge-multiple: true
           path: dist
+      - name: Write the nightly's notes
+        # What's new since the last nightly: where the moving nightly tag
+        # points before it moves, else the newest v* tag. Main's merges are
+        # "merge: …" commits that say what changed in plain words, so its
+        # first-parent subjects are the changelog rush shows after an
+        # update (crates/rush-update/src/notes.rs). A run on the commit the
+        # last nightly was built from keeps that nightly's notes.
+        run: |
+          notes="$RUNNER_TEMP/notes.md"
+          prev=$(git rev-parse --quiet --verify 'refs/tags/nightly^{commit}' || true)
+          since="the last nightly"
+          if [[ -z "$prev" ]]; then
+            prev=$(git describe --tags --abbrev=0 --match 'v*' "$GITHUB_SHA" 2>/dev/null || true)
+            since="$prev"
+          fi
+          if [[ -n "$prev" && "$(git rev-parse "$prev^{commit}")" == "$GITHUB_SHA" ]] \
+            && gh release view nightly --json body --jq .body > "$notes" 2>/dev/null \
+            && [[ -s "$notes" ]]; then
+            echo "built from the same commit as the last nightly: its notes are kept"
+          else
+            {
+              echo "Automated nightly build of ${GITHUB_SHA}. macOS binaries are ad-hoc or Developer ID signed depending on repository secrets. Not for production use."
+              if [[ -n "$prev" ]]; then
+                echo
+                echo "## Since ${since}"
+                echo
+                count=$(git rev-list --first-parent --count "${prev}..${GITHUB_SHA}" || echo 0)
+                if [[ "$count" -eq 0 ]]; then
+                  echo "Nothing new since then."
+                else
+                  git log --first-parent --format='- %s' --max-count=200 "${prev}..${GITHUB_SHA}" || true
+                  if [[ "$count" -gt 200 ]]; then
+                    echo "- … and $((count - 200)) more"
+                  fi
+                fi
+              fi
+            } > "$notes"
+          fi
+          cat "$notes"
       - name: Publish rolling nightly prerelease
         run: |
           gh release delete nightly --cleanup-tag --yes || true
@@ -211,7 +253,7 @@ jobs:
             --prerelease \
             --target "$GITHUB_SHA" \
             --title "Nightly (${{ needs.meta.outputs.version }})" \
-            --notes "Automated nightly build of ${GITHUB_SHA}. macOS binaries are ad-hoc or Developer ID signed depending on repository secrets. Not for production use."
+            --notes-file "$RUNNER_TEMP/notes.md"
 
   release:
     needs: [meta, build]
@@ -225,6 +267,9 @@ jobs:
       VERSION: ${{ needs.meta.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # History and tags, for the commits since the last release.
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           pattern: rush-*
@@ -232,8 +277,18 @@ jobs:
           path: dist
 
       - name: Create GitHub release
+        # Main's first-parent subjects since the last v* tag first, as the
+        # nightly's are: there are no pull requests for --generate-notes to
+        # list.
         run: |
+          prev=$(git describe --tags --abbrev=0 --match 'v*' "${GITHUB_SHA}^" 2>/dev/null || true)
           {
+            if [[ -n "$prev" ]]; then
+              echo "## Since ${prev}"
+              echo
+              git log --first-parent --format='- %s' --max-count=200 "${prev}..${GITHUB_SHA}" || true
+              echo
+            fi
             echo "Install with Homebrew: \`brew install 0xdeafcafe/tap/rush\`"
             echo
             echo "SHA-256:"

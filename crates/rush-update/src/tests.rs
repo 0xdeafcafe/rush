@@ -236,7 +236,7 @@ fn check_asks_once_per_every() {
     let t0 = at("2026-10-01T00:00:00Z");
     let notes = Notes::default();
 
-    let (l, newer) = check_in(dir.path(), &url, "0.2.0", &notes, t0);
+    let (l, newer) = check_in(dir.path(), &url, "0.2.0", &notes, t0, false);
     assert_eq!(l.version, "0.3.0");
     assert!(newer);
     assert_eq!(asked.load(Ordering::SeqCst), 1);
@@ -258,7 +258,7 @@ fn check_asks_once_per_every() {
     );
 
     // Within Every, the answer kept is the answer.
-    let (l2, newer2) = check_in(dir.path(), &url, "0.3.0", &notes, t0 + 60_000);
+    let (l2, newer2) = check_in(dir.path(), &url, "0.3.0", &notes, t0 + 60_000, false);
     assert_eq!(l2, l);
     assert!(!newer2);
     assert_eq!(asked.load(Ordering::SeqCst), 1, "asked again within Every");
@@ -270,11 +270,42 @@ fn check_asks_once_per_every() {
     };
     let later = t0 + EVERY.as_millis() as Ms + 1;
     assert_eq!(
-        check_in(dir.path(), &url, "0.2.0", &down, later),
+        check_in(dir.path(), &url, "0.2.0", &down, later, false),
         (Release::default(), false)
     );
     assert_eq!(asked.load(Ordering::SeqCst), 1);
-    check_in(dir.path(), &url, "0.2.0", &notes, later);
+    check_in(dir.path(), &url, "0.2.0", &notes, later, false);
+    assert_eq!(asked.load(Ordering::SeqCst), 2);
+}
+
+/// Asked for (r on Settings › Updates), GitHub is asked again within the
+/// hour: a release out since the last look is seen at once, and kept.
+#[test]
+fn forced_check_asks_again() {
+    let tag = Arc::new(Mutex::new("v0.1.0-beta.7".to_string()));
+    let t = tag.clone();
+    let (url, asked) = serving(Box::new(move |p, base| {
+        (p == LATEST).then(|| release_json(base, &t.lock().unwrap(), &[]))
+    }));
+    let dir = tempfile::tempdir().unwrap();
+    let t0 = at("2026-11-05T10:00:00Z");
+    let cur = "0.1.0-beta.7";
+    let (l, newer) = check_in(dir.path(), &url, cur, &Quiet, t0, false);
+    assert_eq!((l.version.as_str(), newer), ("0.1.0-beta.7", false));
+    *tag.lock().unwrap() = "v0.1.0-beta.8".into();
+    let (l, newer) = check_in(dir.path(), &url, cur, &Quiet, t0 + 60_000, false);
+    assert_eq!((l.version.as_str(), newer), ("0.1.0-beta.7", false), "kept");
+    assert_eq!(asked.load(Ordering::SeqCst), 1);
+    let (l, newer) = check_in(dir.path(), &url, cur, &Quiet, t0 + 120_000, true);
+    assert_eq!(
+        (l.version.as_str(), newer),
+        ("0.1.0-beta.8", true),
+        "forced"
+    );
+    assert_eq!(asked.load(Ordering::SeqCst), 2);
+    // What it found is kept for the next look that isn't forced.
+    let (l, _) = check_in(dir.path(), &url, cur, &Quiet, t0 + 180_000, false);
+    assert_eq!(l.version, "0.1.0-beta.8");
     assert_eq!(asked.load(Ordering::SeqCst), 2);
 }
 
@@ -284,7 +315,7 @@ fn check_failure_is_logged_not_kept() {
     let dir = tempfile::tempdir().unwrap();
     let notes = Notes::default();
     assert_eq!(
-        check_in(dir.path(), &url, "0.2.0", &notes, 1),
+        check_in(dir.path(), &url, "0.2.0", &notes, 1, false),
         (Release::default(), false)
     );
     assert_eq!(
@@ -617,4 +648,276 @@ fn archive_is_bounded() {
         archive::find(&tgz, "./rush", 1 << 20).unwrap_err(),
         "no ./rush in it"
     );
+}
+
+// ---- notes.rs: what's new between two versions (new in the port) ----
+
+const RELEASES: &str = "/repos/0xdeafcafe/rush/releases?per_page=30";
+
+const NIGHTLY_BODY: &str = "Automated nightly build of c5d6835f. macOS binaries are ad-hoc or Developer ID signed depending on repository secrets. Not for production use.
+
+## Since the last nightly
+
+- merge: a failed check's lines picked by linetag's net
+- merge: rush watch run keeps a live record
+";
+
+const BETA8_BODY: &str = "## Since v0.1.0-beta.7
+
+- merge: the Updates page says when it's checking
+
+Install with Homebrew: `brew install 0xdeafcafe/tap/rush`
+
+SHA-256:
+```
+a4d8cee0  rush-0.1.0-beta.8-aarch64-apple-darwin.tar.gz
+```
+
+<!-- Release notes generated using configuration in .github/release.yml -->
+## What's Changed
+* Add **bold** `code` by @alex in https://github.com/0xdeafcafe/rush/pull/12
+
+## New Contributors
+* @bob made their first contribution in https://github.com/0xdeafcafe/rush/pull/13
+
+**Full Changelog**: https://github.com/0xdeafcafe/rush/compare/v0.1.0-beta.7...v0.1.0-beta.8";
+
+/// GitHub's list of the newest releases: a nightly, three betas, a draft
+/// and a tag that isn't a version.
+fn releases_json() -> Vec<u8> {
+    let r = |tag: &str, name: &str, body: &str, draft: bool| {
+        json!({
+            "tag_name": tag, "name": name, "body": body, "draft": draft,
+            "html_url": format!("https://github.com/0xdeafcafe/rush/releases/tag/{tag}"),
+            "assets": [],
+        })
+    };
+    serde_json::to_vec(&json!([
+        r(
+            "nightly",
+            "Nightly (0.1.0-nightly.20261105)",
+            NIGHTLY_BODY,
+            false
+        ),
+        r("v0.2.0", "rush 0.2.0", "not out yet", true),
+        r("v0.1.0-beta.8", "rush 0.1.0-beta.8", BETA8_BODY, false),
+        r(
+            "v0.1.0-beta.7",
+            "rush 0.1.0-beta.7",
+            "- merge: seven",
+            false
+        ),
+        r("v0.1.0-beta.6", "rush 0.1.0-beta.6", "- merge: six", false),
+        r("odd", "odd", "- not a version", false),
+    ]))
+    .unwrap()
+}
+
+fn serving_releases() -> (String, Arc<AtomicUsize>) {
+    serving(Box::new(|p, _| (p == RELEASES).then(releases_json)))
+}
+
+fn versions(ns: &[crate::Notes]) -> Vec<&str> {
+    ns.iter().map(|n| n.version.as_str()).collect()
+}
+
+/// The releases after old up to new, newest first, by semver's order: a
+/// nightly sorts before its release, so between betas there's none, and
+/// a draft is never among them.
+#[test]
+fn notes_between_two_versions() {
+    let (url, _) = serving_releases();
+    for (old, new, want) in [
+        (
+            "0.1.0-beta.6",
+            "0.1.0-beta.8",
+            vec!["0.1.0-beta.8", "0.1.0-beta.7"],
+        ),
+        ("v0.1.0-beta.7", "v0.1.0-beta.8", vec!["0.1.0-beta.8"]),
+        ("0.1.0-beta.5", "0.1.0-beta.6", vec!["0.1.0-beta.6"]),
+        (
+            "0.1.0-nightly.20261104",
+            "0.1.0-nightly.20261105",
+            vec!["0.1.0-nightly.20261105"],
+        ),
+        ("0.1.0-beta.8", "0.1.0-beta.8", vec![]),
+        ("0.1.0-beta.8", "0.1.0-beta.7", vec![]),
+        ("0.1.0", "0.2.0", vec![]),
+        ("garbage", "0.1.0-beta.8", vec![]),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let got = notes::between_in(dir.path(), &url, old, new, &Quiet, 1).unwrap();
+        assert_eq!(versions(&got), want, "between({old}, {new})");
+    }
+}
+
+/// One release's notes by version, v or not, or the nightly by its tag.
+#[test]
+fn notes_of_one_release() {
+    let (url, _) = serving_releases();
+    let dir = tempfile::tempdir().unwrap();
+    for (v, want) in [
+        ("0.1.0-beta.7", Some("0.1.0-beta.7")),
+        ("v0.1.0-beta.7", Some("0.1.0-beta.7")),
+        ("nightly", Some("0.1.0-nightly.20261105")),
+        ("0.1.0-nightly.20261105", Some("0.1.0-nightly.20261105")),
+        ("0.1.0-nightly.20261101", None),
+        ("0.2.0", None),
+    ] {
+        let got = notes::of_in(dir.path(), &url, v, &Quiet, 1).unwrap();
+        assert_eq!(got.as_ref().map(|n| n.version.as_str()), want, "{v}");
+    }
+    let n = notes::of_in(dir.path(), &url, "0.1.0-beta.8", &Quiet, 1)
+        .unwrap()
+        .unwrap();
+    assert_eq!(n.tag, "v0.1.0-beta.8");
+    assert_eq!(
+        n.url,
+        "https://github.com/0xdeafcafe/rush/releases/tag/v0.1.0-beta.8"
+    );
+}
+
+/// GitHub is asked once for an hour while it has the version wanted; for
+/// one it didn't have, again after five minutes, not at every look.
+#[test]
+fn notes_are_kept() {
+    let (url, asked) = serving_releases();
+    let dir = tempfile::tempdir().unwrap();
+    let t0 = at("2026-11-05T10:00:00Z");
+    let n = |old, new, t| notes::between_in(dir.path(), &url, old, new, &Quiet, t).unwrap();
+    assert_eq!(n("0.1.0-beta.7", "0.1.0-beta.8", t0).len(), 1);
+    assert_eq!(asked.load(Ordering::SeqCst), 1);
+    assert!(dir.path().join(NOTES_CACHE).exists());
+    assert_eq!(n("0.1.0-beta.6", "0.1.0-beta.8", t0 + 30 * 60_000).len(), 2);
+    assert_eq!(asked.load(Ordering::SeqCst), 1, "kept for an hour");
+    // A nightly GitHub no longer has: not asked again straight away.
+    assert!(n("0.1.0-nightly.1", "0.1.0-nightly.2", t0 + 60_000).is_empty());
+    assert_eq!(asked.load(Ordering::SeqCst), 1);
+    assert!(n("0.1.0-nightly.1", "0.1.0-nightly.2", t0 + 6 * 60_000).is_empty());
+    assert_eq!(asked.load(Ordering::SeqCst), 2, "after five minutes");
+    // Two hours on, asked again.
+    n("0.1.0-beta.7", "0.1.0-beta.8", t0 + 2 * 60 * 60_000);
+    assert_eq!(asked.load(Ordering::SeqCst), 3);
+}
+
+/// A host whose network is down.
+struct Offline;
+
+impl Host for Offline {
+    fn net_run(&self, _job: &str) -> bool {
+        false
+    }
+}
+
+/// With the network down and nothing kept, it says so; what was kept
+/// stands in for an answer it can't get.
+#[test]
+fn notes_without_the_network() {
+    let dir = tempfile::tempdir().unwrap();
+    let nowhere = "http://127.0.0.1:9";
+    assert_eq!(
+        notes::between_in(dir.path(), nowhere, "0.1.0", "0.2.0", &Offline, 1)
+            .unwrap_err()
+            .0,
+        "the network is down"
+    );
+    let (url, _) = serving_releases();
+    notes::between_in(dir.path(), &url, "0.1.0-beta.7", "0.1.0-beta.8", &Quiet, 1).unwrap();
+    let later = 3 * 60 * 60_000;
+    for host in [&Quiet as &dyn Host, &Offline] {
+        let got = notes::between_in(
+            dir.path(),
+            nowhere,
+            "0.1.0-beta.7",
+            "0.1.0-beta.8",
+            host,
+            later,
+        )
+        .unwrap();
+        assert_eq!(versions(&got), ["0.1.0-beta.8"], "kept, GitHub unreachable");
+    }
+}
+
+/// What notes say, the boilerplate left out.
+#[test]
+fn tidy_keeps_what_changed() {
+    use crate::Item::{Bullet, Heading, Text};
+    let b = |s: &str| Bullet(s.into());
+    let h = |s: &str| Heading(s.into());
+    for (body, want) in [
+        (
+            NIGHTLY_BODY,
+            vec![
+                h("Since the last nightly"),
+                b("a failed check's lines picked by linetag's net"),
+                b("rush watch run keeps a live record"),
+            ],
+        ),
+        (
+            BETA8_BODY,
+            vec![
+                h("Since v0.1.0-beta.7"),
+                b("the Updates page says when it's checking"),
+                b("Add bold code (#12)"),
+            ],
+        ),
+        // Only GitHub's own lines: nothing.
+        (
+            "Install with Homebrew: `brew install 0xdeafcafe/tap/rush`\n\nSHA-256:\n```\nabc  x.tar.gz\n```\n\n\n**Full Changelog**: https://github.com/0xdeafcafe/rush/compare/v0.1.0-beta.6...v0.1.0-beta.7",
+            vec![],
+        ),
+        ("", vec![]),
+        (
+            "Some words.\r\n* one\r\n+ two\r\n-   \r\n# Empty\r\n## Kept\r\n- three",
+            vec![
+                Text("Some words.".into()),
+                b("one"),
+                b("two"),
+                h("Kept"),
+                b("three"),
+            ],
+        ),
+        // A bullet "in" something that isn't a PR keeps its words.
+        (
+            "- runs in https://example.com/x",
+            vec![b("runs in https://example.com/x")],
+        ),
+    ] {
+        assert_eq!(tidy(body), want, "{body:?}");
+    }
+}
+
+/// For a terminal: each release, what's new in it up to most lines in
+/// all, how many more, and its page.
+#[test]
+fn notes_as_text() {
+    let n = |v: &str, body: &str| crate::Notes {
+        version: v.into(),
+        tag: format!("v{v}"),
+        body: body.into(),
+        url: format!("https://github.com/0xdeafcafe/rush/releases/tag/v{v}"),
+    };
+    let ns = [
+        n("0.1.0-beta.8", "- one\n- two\n- three"),
+        n("0.1.0-beta.7", "- four"),
+        n("0.1.0-beta.6", "**Full Changelog**: x"),
+    ];
+    assert_eq!(
+        text(&ns, 2),
+        "what's new in v0.1.0-beta.8
+  - one
+  - two
+  … and 1 more
+  https://github.com/0xdeafcafe/rush/releases/tag/v0.1.0-beta.8
+
+what's new in v0.1.0-beta.7
+  … and 1 more
+  https://github.com/0xdeafcafe/rush/releases/tag/v0.1.0-beta.7
+
+what's new in v0.1.0-beta.6
+  nothing written down for it
+  https://github.com/0xdeafcafe/rush/releases/tag/v0.1.0-beta.6
+"
+    );
+    assert_eq!(text(&[], 10), "");
 }

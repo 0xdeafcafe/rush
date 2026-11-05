@@ -24,6 +24,7 @@ pub mod instances;
 pub mod json;
 pub mod lastview;
 pub mod profiles;
+pub mod ranversion;
 pub mod settingsfile;
 pub mod setup;
 pub mod store;
