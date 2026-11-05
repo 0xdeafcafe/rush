@@ -111,7 +111,7 @@ impl ModelUpdates for Model {
         }
         u.checked = true;
         self.later(
-            || rush_update::check(&Host),
+            || rush_update::check(&Host, false),
             |m, (l, newer)| {
                 let u = m.kept::<Update>();
                 u.checked = false;

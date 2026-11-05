@@ -13,6 +13,11 @@ pub fn newer(cur: &str, latest: &str) -> bool {
     }
 }
 
+/// a against b by semver's order; None when either isn't semver.
+pub fn order(a: &str, b: &str) -> Option<Ordering> {
+    Some(Version::parse(a)?.cmp(&Version::parse(b)?))
+}
+
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 enum Ident {
     // Numbers come before words, as semver orders them.
