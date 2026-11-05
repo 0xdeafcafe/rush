@@ -1,6 +1,6 @@
 {
- "commit": "c5d6835f26fbbc6aa8c403063f6a4866c62625d2",
- "at": "2026-11-05T04:39:20Z",
+ "commit": "fc7feb84e9561f9895539b2e714ce2081d79a355",
+ "at": "2026-11-05T12:04:53Z",
  "metrics": {
   "binary: rush, release": {
    "kind": "binary",
@@ -735,10 +735,6 @@
  },
  "flagged": [
   "frame, the list: frame drawn (rows + cells), allocations",
-  "frame, the list: rows (Model::frame), allocations",
-  "open: subagent runs followed, allocations kept",
-  "open: subagent runs followed, peak",
-  "open: subagent runs followed, retained",
-  "ui: threads"
+  "frame, the list: rows (Model::frame), allocations"
  ]
 }
