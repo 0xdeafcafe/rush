@@ -2,7 +2,9 @@
 //! open rush (a line in the shell's rc that reads a hook rush writes),
 //! `rush off` gives it back to Claude Code at once (a flag the hook reads
 //! on each call), `rush status` says which, and `rush update` installs
-//! the newest rush. After Go's cmd/rush/main.go (on :209 turnOn :391, off
+//! the newest rush and prints what's new since this one. `rush changelog`
+//! prints a release's notes (new in the port, like the notes after an
+//! update). After Go's cmd/rush/main.go (on :209 turnOn :391, off
 //! :212, status :218, offFlag :349, isOn :351, hookPath :360, hookLine
 //! :361, rcFile :363, hook :373, selfUpdate :578).
 
@@ -249,7 +251,49 @@ pub fn self_update(out: &mut dyn Write) -> Result<(), String> {
     };
     log1("updated", &[("to", to.short())]);
     let _ = writeln!(out, "rush {} installed · reopen rush to use it", to.short());
+    // What came since this rush, trimmed: each release's page has the rest
+    // (new in the port). Notes that can't be had leave the install as it
+    // was.
+    if let Some(cur) = rush_update::current()
+        && let Ok(notes) = rush_update::between(&cur, &to.version, &UpdateHost)
+        && !notes.is_empty()
+    {
+        let _ = write!(out, "\n{}", rush_update::text(&notes, UPDATE_NOTES));
+    }
     Ok(())
+}
+
+/// The most lines of what's new `rush update` prints.
+const UPDATE_NOTES: usize = 20;
+
+/// rush changelog [version]: what's new in this rush, or in version (v or
+/// not; nightly for the newest nightly), from its GitHub release. New in
+/// the port: there's no Go source.
+pub fn changelog(args: &[String], out: &mut dyn Write) -> Result<(), String> {
+    let v = match args.first().map(String::as_str) {
+        Some("-h" | "--help" | "help") => {
+            let _ = writeln!(
+                out,
+                "usage: rush changelog [version]\n\nwhat's new in this rush, or in version (0.1.0-beta.8, or nightly for the newest nightly), from its GitHub release"
+            );
+            return Ok(());
+        }
+        Some(v) => v.to_string(),
+        None => rush_update::current().ok_or(
+            "this rush was built from source: name a version, as in rush changelog 0.1.0-beta.8",
+        )?,
+    };
+    match rush_update::of(&v, &UpdateHost).map_err(|e| e.0)? {
+        Some(n) => {
+            let _ = write!(out, "{}", rush_update::text(&[n], usize::MAX));
+            Ok(())
+        }
+        None if v == "nightly" => Err("GitHub has no nightly of rush".into()),
+        None => Err(format!(
+            "GitHub has no notes for v{} (a nightly's are kept only until the next one)",
+            v.trim_start_matches('v')
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -260,6 +304,25 @@ mod tests {
         Setup {
             dir: t.path().join("rush"),
             rc: t.path().join(".zshrc"),
+        }
+    }
+
+    /// rush changelog says how it's used, and a rush built from source,
+    /// with no release of its own, has to name one (new in the port).
+    #[test]
+    fn changelog_without_a_release() {
+        let mut out = Vec::new();
+        changelog(&["--help".into()], &mut out).unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert!(
+            out.starts_with("usage: rush changelog [version]\n"),
+            "{out}"
+        );
+        if rush_update::current().is_none() {
+            assert_eq!(
+                changelog(&[], &mut Vec::new()).unwrap_err(),
+                "this rush was built from source: name a version, as in rush changelog 0.1.0-beta.8"
+            );
         }
     }
 
