@@ -1,6 +1,6 @@
 {
- "commit": "96626c8bf24b9c0e5a23c148ed6e41b1f393c6aa",
- "at": "2026-11-06T09:48:08Z",
+ "commit": "5ece2c4be00e7599f6c8f8cc9c002b3298a2e869",
+ "at": "2026-11-06T10:09:08Z",
  "metrics": {
   "binary: rush, release": {
    "kind": "binary",
@@ -733,8 +733,5 @@
    "commit": "9df70072d538cf062bd62d6d87f31b6102a0691c"
   }
  },
- "flagged": [
-  "frame, the list: frame drawn (rows + cells), allocations",
-  "frame, the list: rows (Model::frame), allocations"
- ]
+ "flagged": []
 }
