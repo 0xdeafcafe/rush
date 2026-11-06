@@ -878,9 +878,8 @@ fn snapshot_key_help() {
 /// under the column's room, where its row's end would be cut.
 #[test]
 fn a_hosted_session_with_the_column_wraps_left_of_it() {
-    let dir = std::env::temp_dir().join(format!("rush-ui-render-hosted-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("s.jsonl");
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("s.jsonl");
     let said = "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike \
                 november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee \
                 zulu one two three four five six seven eight nine ten eleven twelve thirteen \
@@ -915,5 +914,4 @@ fn a_hosted_session_with_the_column_wraps_left_of_it() {
             "{word:?} is cut:\n{f}"
         );
     }
-    std::fs::remove_dir_all(&dir).unwrap();
 }
