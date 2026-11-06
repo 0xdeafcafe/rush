@@ -2434,3 +2434,101 @@ fn the_socket_appears_once_it_listens() {
         assert!(up, "a connect was refused and nothing woke the wait");
     }
 }
+
+/// A conn on ~/.claude's login home, moved off it or not.
+struct Homed {
+    kept: Kept,
+    moved: bool,
+}
+
+impl Conn for Homed {
+    fn send(&self, input: Input) -> adapter::Result<()> {
+        self.kept.send(input)
+    }
+    fn answer(&self, _: &str, _: &str) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn interrupt(&self) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn set_model(&self, _: &str) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn set_mode(&self, _: &str) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn close(&self) -> adapter::Result<()> {
+        Ok(())
+    }
+    fn homed(&self) -> Option<&dyn adapter::Homed> {
+        Some(self)
+    }
+}
+
+impl adapter::Homed for Homed {
+    fn home(&self) -> String {
+        "/old/home".into()
+    }
+    fn moved(&self) -> bool {
+        self.moved
+    }
+    fn login(&self) -> String {
+        "old".into()
+    }
+}
+
+// Rust-only (STAY_CAP): a warm session new sessions moved off its login
+// stays on it at first, as its cache would be written again; once it has
+// stayed STAY_CAP it moves at its next turn end all the same. One not
+// moved off never counts.
+#[test]
+fn a_warm_session_left_on_an_old_login_moves_after_the_cap() {
+    let _home = Home::new();
+    let hour = STAY_CAP.as_millis() as i64;
+    // moved, how long since it was first seen moved (None: not yet),
+    // whether it moves now, whether it's counting after.
+    let cases: [(&str, bool, Option<i64>, bool, bool); 4] = [
+        ("not moved", false, None, false, false),
+        ("just moved", true, None, false, true),
+        (
+            "moved, under the cap",
+            true,
+            Some(hour - 60_000),
+            false,
+            true,
+        ),
+        ("moved, past the cap", true, Some(hour + 60_000), true, true),
+    ];
+    for (i, (what, moved, ago, moves, counting)) in cases.into_iter().enumerate() {
+        let h = host(Config {
+            id: format!("cap{i}"),
+            kind: "fake".into(),
+            ..Config::default()
+        });
+        let conn: Arc<dyn Conn> = Arc::new(Homed {
+            kept: Kept::default(),
+            moved,
+        });
+        with_conn(&h, conn.clone());
+        let mut st = h.lock();
+        st.info.state = "working".into();
+        st.info.home = "/old/home".into();
+        st.info.home_at = Time::now();
+        st.info.cache_warm = Time::now() + Duration::from_secs(1800);
+        st.stayed_since = ago.map(|a| Time::from_ms(Time::now().to_ms() - a));
+        h.on_turn_end(
+            &mut st,
+            &conn,
+            event::TurnEnd {
+                reason: "done".into(),
+                ..Default::default()
+            },
+        );
+        assert_eq!(st.info.relogin, moves, "{what}: relogin");
+        assert_eq!(st.move_now, moves, "{what}: move_now");
+        assert_eq!(st.stayed_since.is_some(), counting, "{what}: counting");
+        if !moves {
+            assert!(!h.leaves(&st, &conn), "{what}: a warm one left");
+        }
+    }
+}

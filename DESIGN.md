@@ -1204,6 +1204,15 @@ move writes its whole context again at full price; a cold one moves
 waits. rush's own switching (auto-switch, other agents' accounts) never
 moves to an account the guard has past its pace.
 
+After an early switch (new sessions only), a ~/.claude session left on
+the old login stays while its cache is warm, but only for `STAY_CAP`
+(an hour, counted from the first turn end its host saw the move). One
+busy for hours never cools, so without the cap it spent the old login's
+room while the new one's went unused toward its reset. Past the cap it
+moves at its next turn end (`account-move-capped`, then the usual
+`relogin`: it rests once quiet and its next message starts on the new
+login), writing its cache once there. Rust-only.
+
 A session on an account past its pace is also refused new subagents and
 workflows (`Plan::spawns_for`: the sessions on a tripped account, minus
 any you let through with alt+h, whose spawns go while you keep it busy;

@@ -94,6 +94,13 @@ const INFO_EVERY: Duration = Duration::from_millis(250);
 /// How long the prompt cache lasts: Claude Code writes the one-hour cache.
 const CACHE_LIFE: Duration = Duration::from_secs(3600);
 
+/// How long a session may stay on a login new sessions have moved off
+/// while its cache is warm. One busy for hours never lets its cache cool,
+/// so it would spend the old login's room while the new one's is lost at
+/// its reset; past this it moves at its next turn end, writing its cache
+/// once on the new login. Rust-only.
+const STAY_CAP: Duration = Duration::from_secs(3600);
+
 /// How long the prompt cache lives after a request: as the agent's last
 /// write said, else an hour (Claude Code's own, signed in).
 fn cache_life(i: &Info) -> Duration {
@@ -386,6 +393,9 @@ pub(crate) struct State {
     /// turn of its own once this one ends.
     turn_from: Option<Instant>,
     move_now: bool,
+    /// When this host first saw new sessions run on another login than
+    /// its own (STAY_CAP); None while they run on its own.
+    stayed_since: Option<Time>,
     /// Set while an agent being stopped hasn't gone; a new one waits for
     /// it, so two never run the same conversation.
     stopping: bool,
@@ -742,6 +752,7 @@ fn build(reg: Registry, hooks: Hooks, cfg: Config) -> (Host, Receiver<Msg>) {
         waiting: None,
         turn_from: None,
         move_now: false,
+        stayed_since: None,
         stopping: false,
         quiet_wait: false,
         quiet_since: None,
@@ -3671,6 +3682,13 @@ impl Host {
             if st.info.away.as_ref().is_some_and(|a| a.on()) && crate::away::away_done(&e.text) {
                 self.end_away(st); // nothing left to keep it going on
             }
+            if self.overstays(st, conn) && !st.info.relogin {
+                // Warm, but kept on the old login too long: it moves.
+                st.move_now = true;
+                st.info.relogin = true;
+                let f = json!({"account": st.info.home, "stayedMins": STAY_CAP.as_secs() / 60});
+                self.event(st, "account-move-capped", f);
+            }
             if st.info.relogin || conn.stale() {
                 // Signed in as another account since it started: it rests
                 // now, and what's queued goes to a fresh one.
@@ -4044,6 +4062,18 @@ impl Host {
             None => true,
             Some(m) => m.moved() && !self.stays(st),
         }
+    }
+
+    /// Whether it has stayed on a login new sessions moved off for
+    /// STAY_CAP, counted from the first turn end that saw the move.
+    fn overstays(&self, st: &mut State, conn: &Arc<dyn Conn>) -> bool {
+        if !conn.homed().is_some_and(|m| m.moved()) {
+            st.stayed_since = None;
+            return false;
+        }
+        let now = Time::now();
+        let since = *st.stayed_since.get_or_insert(now);
+        now.sub_nanos(since) >= STAY_CAP.as_nanos() as i128
     }
 
     /// Whether its next start stays on info.home: its cache is warm, and
