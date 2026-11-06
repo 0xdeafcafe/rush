@@ -940,6 +940,21 @@ the adapter interface only, so every agent restarts so. A host's own rest
 of its agent (a login moved, a `without` change) stays in that host: it
 isn't a restart asked for.
 
+Three host behaviours differ from Go (Rust-only, found benchmarking
+against go-final). A host binds its socket as `host.new` and renames it
+to `host.sock` once it listens (`server::listen_at`): bound in place, a
+starting rush watching the folder could connect between bind and listen,
+be refused, and wait out its 10 s deadline with no change left to wake
+it. A turn's reply clears what was waiting on the agent only when the
+turn began at or after it (`State::turn_from`, `turn_answers`): a task
+that ends mid-turn, by its own end or the background list shrinking,
+keeps the agent up until the turn that takes its notice up, so the idle
+rest doesn't stop that turn (still bounded by `UNANSWERED_FOR`). And
+the empty turn Claude Code runs on resume for a stale task's notice
+(result `origin.kind` "task-notification", no turns, no text, no error)
+ends no turn (`neutral::noop_notice`), so it isn't read as the answer to
+the message just sent.
+
 ## The list kept between runs (Rust-only)
 
 rush opens on the list as it last read it (rush-ui `listcache.rs`): each
