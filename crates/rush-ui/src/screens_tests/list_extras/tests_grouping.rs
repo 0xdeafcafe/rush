@@ -268,6 +268,11 @@ fn shelf_on_the_box() {
     let (narrow, kept) = super::shelf::shelf_line(&m, "/src/checkout", 1);
     assert_eq!(kept.len(), 1, "too narrow, the chosen one stays");
     assert!(narrow.width() > 1);
+    // What the box measures it by each frame without drawing the shelf.
+    assert_eq!(
+        super::shelf::chip_width(&m, "/src/checkout"),
+        super::shelf::shelf_line(&m, "/src/checkout", 0).0.width()
+    );
 }
 
 /// The box's top edge takes clicks where it's drawn, at every width: the

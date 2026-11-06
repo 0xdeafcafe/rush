@@ -81,6 +81,13 @@ pub fn shelf_word(m: &Model, o: &StartOver) -> String {
     word
 }
 
+/// What shelf_line is with no room, the chosen chip alone, in cells:
+/// the box measures it every frame, so it isn't drawn with the whole
+/// shelf (footprint watch, issue #21).
+pub fn chip_width(m: &Model, dir: &str) -> usize {
+    setup_chip(m, &next_start(m, dir)).width()
+}
+
 /// The shelf as the box's edge shows it, at most w wide: the next
 /// session's setup as a chip, the others numbered; its hits from the
 /// line's left edge (shelfLine).

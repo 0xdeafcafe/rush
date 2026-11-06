@@ -204,7 +204,7 @@ fn labels(m: &mut Model, text: &str, w: usize) -> (Line, Line, String, Parts, Pa
     // no room keeps only the chosen chip).
     let keep = width(lead)
         + chip.as_ref().map_or(0, |c| c.width() + 1)
-        + super::shelf::shelf_line(m, &dir, 0).0.width()
+        + super::shelf::chip_width(m, &dir)
         + 12;
     let n = w.saturating_sub(keep).max(12);
     let mut top_l = line([sp(lead, DIM), sp(dir_label(m, &dir, n), TEXT)]);
