@@ -166,9 +166,9 @@ fn only_the_lead_switches_logins() {
     assert_eq!(peek(&m).login_switched_at, 0);
     m.follows = false;
     auto_switch(&mut m);
-    // Then every login's usage read again but the one in use's
+    // Then every login's usage read again, the one in use's too
     // (onSwitched's fetchUsage).
-    assert_eq!(k.asked(), ["use b", "refresh b"]);
+    assert_eq!(k.asked(), ["use b", "refresh a", "refresh b"]);
     assert!(!peek(&m).switching, "the switch is over");
     assert_eq!(peek(&m).login_switched_at, NOW, "onSwitched's switchedAt");
     assert_eq!(
@@ -180,7 +180,7 @@ fn only_the_lead_switches_logins() {
     );
     // Not again until the readings catch up (switchGap).
     auto_switch(&mut m);
-    assert_eq!(k.asked(), ["use b", "refresh b"]);
+    assert_eq!(k.asked(), ["use b", "refresh a", "refresh b"]);
 }
 
 /// A switch you pick is an answer, not news; one that fails says so;
@@ -191,14 +191,18 @@ fn switching_a_login_you_picked() {
     nearly_out(&mut m);
     let ops = login_ops(&m).expect("the vault's operations");
     (ops.switch)(&mut m, login("b"), "", false);
-    assert_eq!(k.asked(), ["use b", "refresh b"]);
+    assert_eq!(k.asked(), ["use b", "refresh a", "refresh b"]);
     assert_eq!(
         flash(&m),
         "new sessions run on b · running ones follow once their cache cools"
     );
     accounts(&mut m).switching = true;
     switch_login(&mut m, login("a"), "", true);
-    assert_eq!(k.asked(), ["use b", "refresh b"], "one at a time");
+    assert_eq!(
+        k.asked(),
+        ["use b", "refresh a", "refresh b"],
+        "one at a time"
+    );
 
     let (mut m, _k, _d) = model(Fake {
         fail: Some("no keychain".into()),
@@ -934,4 +938,21 @@ fn only_the_lead_hands_off_and_once() {
     waits.on_limit = rush_state::profiles::LIMIT_WAIT.into();
     hand_off_stopped_in(&mut m, &room, move |_, _| waits.clone());
     assert!(m.kept::<Moved>().0.is_empty(), "its profile waits");
+}
+
+// Rust-only (Go's fetchLoginUsage left it out): the login in use is read
+// with the others, as after a switch ~/.claude can stay signed in as
+// another, which would leave the one in use never read.
+#[test]
+fn the_login_in_use_is_read_too() {
+    let (mut m, k, _d) = model(Fake::default());
+    nearly_out(&mut m);
+    super::logins::fetch_usage(&mut m);
+    let asked = k.asked();
+    for id in ["a", "b"] {
+        assert!(
+            asked.contains(&format!("refresh {id}")),
+            "{id} not read: {asked:?}"
+        );
+    }
 }

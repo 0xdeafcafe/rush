@@ -213,8 +213,8 @@ fn r_reads_every_limit_again() {
     (sacct::accounts().fetch)(&mut m);
     assert_eq!(
         *v.0.lock().unwrap(),
-        ["refresh b"],
-        "all but the one in use"
+        ["refresh a", "refresh b"],
+        "every login, the one in use too"
     );
     assert!(
         m.said.iter().all(|s| s.kind != SayKind::Refused),

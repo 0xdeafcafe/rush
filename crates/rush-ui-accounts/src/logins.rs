@@ -264,17 +264,17 @@ fn home_name(m: &Model) -> String {
         .unwrap_or_default()
 }
 
-/// Every saved login's plan read again but the one in use's, then the
-/// readings taken in (fetchLoginUsage).
+/// Every saved login's plan read again, then the readings taken in
+/// (fetchLoginUsage). Go left out the one in use, read through ~/.claude;
+/// but after a switch new sessions run on a login in its own home while
+/// ~/.claude stays signed in as the old one, so the login in use was never
+/// read and its row said "not read since". Each login is asked at most
+/// once per USAGE_EVERY whichever way it's read, so reading it here too
+/// costs nothing. Rust-only.
 fn refresh_logins(m: &mut Model) {
     let Some(k) = keeper(m) else { return };
     let c = cfg(m).clone();
-    let logins: Vec<Login> = c
-        .logins
-        .iter()
-        .filter(|lg| !peek(m).logins.iter().any(|l| l.id == lg.id && l.current))
-        .cloned()
-        .collect();
+    let logins: Vec<Login> = c.logins.clone();
     if logins.is_empty() {
         return;
     }
