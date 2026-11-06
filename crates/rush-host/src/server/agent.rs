@@ -809,7 +809,9 @@ impl Host {
             }
             st.info.state = "working".into();
             st.info.detail.clear();
-            st.waiting = Some(Instant::now());
+            let now = Instant::now();
+            st.waiting = Some(now);
+            st.turn_from = Some(now);
             h.publish(&mut st);
         });
     }

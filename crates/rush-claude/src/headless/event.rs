@@ -162,6 +162,9 @@ pub struct TurnResult {
     pub duration_ms: i64,
     pub num_turns: i64,
     pub usage: Usage,
+    /// What the turn was run for, when not a message sent to it:
+    /// "task-notification" for a background task's notice.
+    pub origin: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -433,6 +436,14 @@ fn decode_line(line: &str) -> Result<Event, DecodeError> {
                 num_turns: i64,
                 #[serde(deserialize_with = "nd")]
                 usage: RawUsage,
+                #[serde(deserialize_with = "nd")]
+                origin: Origin,
+            }
+            #[derive(Deserialize, Default)]
+            #[serde(default)]
+            struct Origin {
+                #[serde(deserialize_with = "nd")]
+                kind: String,
             }
             let r: R = serde_json::from_str(line)?;
             Ok(Event::Result(TurnResult {
@@ -445,6 +456,7 @@ fn decode_line(line: &str) -> Result<Event, DecodeError> {
                 duration_ms: r.duration_ms,
                 num_turns: r.num_turns,
                 usage: tokens(&r.usage),
+                origin: r.origin.kind,
             }))
         }
         "rate_limit_event" => {

@@ -751,3 +751,106 @@ fn detach_forgets_the_shells_waited_on() {
         "still waits on a detached agent's shell"
     );
 }
+
+/// A host with a Kept conn whose message was just sent: a turn under way.
+fn turn_under_way(id: &str) -> (Host, Arc<dyn Conn>) {
+    let mut c = cfg(id);
+    c.kind = "fake".into();
+    std::fs::create_dir_all(dir(id)).unwrap();
+    let (h, _rx) = super::super::build(super::super::tests::registry(), Hooks::quiet(), c);
+    let conn: Arc<dyn Conn> = Arc::new(Kept::default());
+    with_conn(&h, conn.clone());
+    h.send("watch the build", &[], false).unwrap();
+    (h, conn)
+}
+
+fn reply(text: &str) -> Event {
+    Event::Message(said(text))
+}
+
+fn turn_end(text: &str) -> Event {
+    Event::TurnEnd(event::TurnEnd {
+        reason: "done".into(),
+        text: text.into(),
+        turns: 1,
+        ..Default::default()
+    })
+}
+
+fn monitor(id: &str) -> event::BackgroundTask {
+    event::BackgroundTask {
+        id: id.into(),
+        kind_word: "monitor".into(),
+        label: "watch the build".into(),
+        ..Default::default()
+    }
+}
+
+/// A background task that ends inside a turn has its notice taken up by
+/// the agent in a turn of its own, after this one ends: this turn's reply
+/// doesn't answer it, so the idle rest leaves the agent up until that turn
+/// begins, and rests it once that turn is done. Told by the list of tasks
+/// shrinking, or by the task's own end.
+#[test]
+fn a_task_ending_mid_turn_keeps_the_agent_up_for_its_notice() {
+    let _home = Home::new();
+    type Ends = fn() -> Vec<Event>;
+    let cases: Vec<(&str, Ends)> = vec![
+        ("the list shrinks", || {
+            vec![
+                Event::Background(event::Background {
+                    tasks: vec![monitor("mon1")],
+                }),
+                Event::Background(event::Background { tasks: vec![] }),
+            ]
+        }),
+        ("the task ends", || {
+            vec![
+                Event::TaskStarted(event::TaskStarted {
+                    id: "mon1".into(),
+                    ..Default::default()
+                }),
+                Event::TaskDone(event::TaskDone {
+                    id: "mon1".into(),
+                    status: "completed".into(),
+                    ..Default::default()
+                }),
+            ]
+        }),
+    ];
+    for (name, ends) in cases {
+        let (h, conn) = turn_under_way(&format!("notice-{}", name.len()));
+        {
+            let mut st = h.lock();
+            for ev in ends() {
+                h.on_agent_event(&mut st, &conn, ev);
+            }
+            h.on_agent_event(&mut st, &conn, reply("Watching the build."));
+            h.on_agent_event(&mut st, &conn, turn_end("Watching the build."));
+            assert_eq!(st.info.state, "idle", "{name}");
+            assert!(
+                !h.runtime_idle_safe(&st),
+                "{name}: rested before the agent took up the notice"
+            );
+            // The agent takes the notice up on its own, and is done.
+            h.on_agent_event(&mut st, &conn, reply("The build passed."));
+            h.on_agent_event(&mut st, &conn, turn_end("The build passed."));
+            assert!(
+                h.runtime_idle_safe(&st),
+                "{name}: kept up after the notice's turn"
+            );
+        }
+    }
+}
+
+/// A turn whose message is answered with nothing ending meanwhile rests as
+/// before.
+#[test]
+fn an_answered_turn_rests() {
+    let _home = Home::new();
+    let (h, conn) = turn_under_way("answered");
+    let mut st = h.lock();
+    h.on_agent_event(&mut st, &conn, reply("Done."));
+    h.on_agent_event(&mut st, &conn, turn_end("Done."));
+    assert!(h.runtime_idle_safe(&st));
+}

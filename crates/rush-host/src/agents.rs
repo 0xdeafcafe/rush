@@ -55,9 +55,11 @@ pub fn session_runners(reg: &Registry, leader: &str) -> Vec<Runner> {
 }
 
 fn runners_of(reg: &Registry, leader: &str, sessions: bool) -> Vec<Runner> {
+    let all = installed(reg);
+    crate::kind::tell_state(reg); // the routes below read it
     let cfg = rush_state::Store::load().config;
     let mut out = Vec::new();
-    for a in installed(reg) {
+    for a in all {
         let k = a.kind().as_str().to_string();
         let prov = reg.provider_of(&k);
         if reg.key_only(&k) && !cfg.has_api_key(&prov) {
@@ -622,5 +624,23 @@ mod tests {
             "{}",
             runner_line(&reg, &o)
         );
+    }
+
+    /// A Claude Code session on a fresh config is told its own models as
+    /// its subagent types (agent_defs), as Go's was: with none, a model
+    /// the user names by its kind (a Haiku subagent) falls back to
+    /// general-purpose.
+    #[test]
+    fn a_claude_session_on_a_fresh_config_has_its_own_models() {
+        use std::os::unix::fs::PermissionsExt;
+        let _home = crate::testing::Home::new();
+        let bin = rush_testenv::root().join("bin").join("claude");
+        std::fs::write(&bin, "#!/bin/sh\necho 2.1.0\n").unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let reg = Registry::new();
+        reg.register(rush_claude::Claude::at(rush_claude::Account::home()));
+        let defs = agent_defs(&reg, "claude");
+        let names: Vec<&str> = defs.keys().map(String::as_str).collect();
+        assert_eq!(names, ["fable", "haiku", "opus", "sonnet"]);
     }
 }

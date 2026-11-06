@@ -98,6 +98,7 @@ impl Neutral {
                 before: e.pre_tokens,
                 after: e.post_tokens,
             })],
+            h::Event::Result(e) if noop_notice(&e) => Vec::new(),
             h::Event::Result(e) => {
                 let mut end = event::TurnEnd {
                     reason: turn_reason(&e.subtype),
@@ -446,6 +447,14 @@ fn part_kind(t: &str) -> PartKind {
         "tool_use" => PartKind::ToolCall,
         _ => PartKind::Text,
     }
+}
+
+/// Whether a turn's end is a background task's notice taken up with
+/// nothing run and nothing said: Claude Code, resumed with a task its last
+/// process left running, takes the notice up so on the next message,
+/// before the message's own turn. Not a turn anyone waits on.
+fn noop_notice(e: &h::TurnResult) -> bool {
+    e.origin == "task-notification" && e.num_turns == 0 && !e.is_error && e.text.trim().is_empty()
 }
 
 /// How a turn of Claude Code's subtype ended: done, or what went wrong in
@@ -875,5 +884,25 @@ mod tests {
             ("done", "ported", 300, Duration::from_secs(5)),
             "one done"
         );
+    }
+
+    /// Resumed with a background task its last process left running,
+    /// Claude Code takes up the task's notice first, on the next message,
+    /// in a turn of its own that runs nothing and says nothing: no turn's
+    /// end, or the message sent would read as answered, with nothing said.
+    /// A notice's turn that does run something ends as any other.
+    #[test]
+    fn a_notice_taken_up_with_nothing_run_ends_no_turn() {
+        let mut nt = Neutral::new();
+        let noop = r#"{"type":"result","subtype":"success","is_error":false,"duration_ms":1354,"num_turns":0,"result":"","stop_reason":null,"session_id":"s-1","total_cost_usd":0,"usage":{"input_tokens":0,"output_tokens":0},"origin":{"kind":"task-notification"}}"#;
+        assert!(n(&mut nt, noop).is_empty(), "{:?}", n(&mut nt, noop));
+        let ran = r#"{"type":"result","subtype":"success","is_error":false,"duration_ms":2100,"num_turns":1,"result":"The build passed.","session_id":"s-1","total_cost_usd":0.01,"usage":{"input_tokens":5,"output_tokens":4},"origin":{"kind":"task-notification"}}"#;
+        let Event::TurnEnd(e) = &n(&mut nt, ran)[0] else {
+            panic!()
+        };
+        assert_eq!(e.text, "The build passed.");
+        // Ours, with nothing said, still ends its turn.
+        let ours = r#"{"type":"result","subtype":"success","is_error":false,"duration_ms":20,"num_turns":0,"result":"","session_id":"s-1","total_cost_usd":0,"usage":{"input_tokens":0,"output_tokens":0}}"#;
+        assert!(matches!(n(&mut nt, ours)[..], [Event::TurnEnd(_)]));
     }
 }

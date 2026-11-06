@@ -147,8 +147,10 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     let preset = super::presets::current(m);
     let since = looked_since(m, key);
     // Rows run the whole width while no column stands right of them
-    // (rushmode.go:2366 Wide: len(c.side) == 0); hosted alone, always.
-    let wide = conn(m, key).side.rows.is_empty() || (m.ext.calls.hosted_alone())(m);
+    // (rushmode.go:2366 Wide: len(c.side) == 0), hosted alone or not: the
+    // column is drawn over the room past the reading width, so rows wrapped
+    // for the whole width would lose their ends under it.
+    let wide = conn(m, key).side.rows.is_empty();
     let Some(v) = m.session.as_mut() else {
         return Vec::new();
     };

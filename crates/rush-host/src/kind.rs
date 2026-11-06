@@ -68,6 +68,24 @@ impl Config {
     }
 }
 
+/// Tells state's list of agents (rush_state::agents, which Settings'
+/// routes read: which harness runs a provider, whether a cell is on) about
+/// reg's, again each time reg finds the programs. The UI tells it its own;
+/// a host has to as well, or every route reads as off and a session is
+/// told of no agent of its own to hand work to.
+pub fn tell_state(reg: &Registry) {
+    static TOLD: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+    let Some(at) = reg.found_at() else {
+        return; // not found yet: told once it is
+    };
+    let mut told = TOLD.lock().unwrap_or_else(|e| e.into_inner());
+    if *told == Some(at) {
+        return;
+    }
+    *told = Some(at);
+    rush_state::agents::tell(reg);
+}
+
 /// The agents rush can run here: their program is on the machine.
 pub fn installed(reg: &Registry) -> Vec<AdapterRef> {
     reg.installed_all()

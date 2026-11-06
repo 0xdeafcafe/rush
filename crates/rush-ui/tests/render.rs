@@ -872,3 +872,48 @@ fn snapshot_command_bar() {
 fn snapshot_key_help() {
     views("snap_key_help", |_| {}, &[(Key::Char('?'), KeyMods::NONE)]);
 }
+
+/// Hosted alone with the column beside it, a long message keeps every
+/// word: it wraps at the reading width left of the column, not past it
+/// under the column's room, where its row's end would be cut.
+#[test]
+fn a_hosted_session_with_the_column_wraps_left_of_it() {
+    let dir = std::env::temp_dir().join(format!("rush-ui-render-hosted-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("s.jsonl");
+    let said = "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike \
+                november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee \
+                zulu one two three four five six seven eight nine ten eleven twelve thirteen \
+                fourteen fifteen sixteen seventeen eighteen nineteen twenty";
+    std::fs::write(
+        &path,
+        [
+            format!(
+                r#"{{"type":"user","timestamp":"2026-10-28T12:00:00Z","cwd":"/src/checkout","message":{{"role":"user","content":"{said}"}}}}"#
+            ),
+            r#"{"type":"assistant","timestamp":"2026-10-28T12:00:02Z","message":{"id":"m1","model":"claude-opus-5-5","role":"assistant","content":[{"type":"tool_use","id":"e1","name":"Edit","input":{"file_path":"/src/checkout/tax/round.go","old_string":"a\n","new_string":"b\nc\n"}}],"usage":{"input_tokens":5,"output_tokens":3}}}"#.to_string(),
+            r#"{"type":"user","timestamp":"2026-10-28T12:00:05Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e1","content":"ok","is_error":false}]}}"#.to_string(),
+            r#"{"type":"assistant","timestamp":"2026-10-28T12:00:08Z","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"Rounded."}]}}"#.to_string(),
+            r#"{"type":"system","subtype":"turn_duration","timestamp":"2026-10-28T12:00:09Z"}"#.to_string(),
+        ]
+        .join("\n")
+            + "\n",
+    )
+    .unwrap();
+    let mut m = model();
+    let i = m.agents.iter().position(|a| a.job.id == "d4").unwrap();
+    m.agents[i].job.transcript_path = path.to_string_lossy().into_owned();
+    m.sel = m.agents[i].key.clone();
+    plain(&mut m, 200, 50, &[(Key::Enter, KeyMods::NONE)]);
+    rush_ui::hosted::set(&mut m, "d4");
+    assert!(rush_ui::hosted::alone(&m));
+    let f = plain(&mut m, 200, 50, &[]);
+    assert!(f.contains("▌ Changes"), "the column shows:\n{f}");
+    for word in said.split(' ') {
+        assert!(
+            f.split_whitespace().any(|w| w == word),
+            "{word:?} is cut:\n{f}"
+        );
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}

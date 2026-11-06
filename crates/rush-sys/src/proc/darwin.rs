@@ -179,16 +179,21 @@ pub(super) fn fill_usage(p: &mut Proc) {
 }
 
 pub(super) fn args(pid: Pid) -> Vec<String> {
-    args_env(pid).0
+    args_env(pid).unwrap_or_default().0
 }
 
 pub(super) fn env(pid: Pid) -> Vec<String> {
-    args_env(pid).1
+    args_env(pid).unwrap_or_default().1
+}
+
+pub(super) fn readable_env(pid: Pid) -> Option<Vec<String>> {
+    args_env(pid).map(|(_, e)| e)
 }
 
 /// A process's argv and, after it, its environment, through
-/// kern.procargs2.
-fn args_env(pid: Pid) -> (Vec<String>, Vec<String>) {
+/// kern.procargs2; None when the kernel won't give them (another user's
+/// process, a zombie, one gone).
+fn args_env(pid: Pid) -> Option<(Vec<String>, Vec<String>)> {
     let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
     let mut n = 0usize;
     // SAFETY: a null buffer asks only for the size.
@@ -203,7 +208,7 @@ fn args_env(pid: Pid) -> (Vec<String>, Vec<String>) {
         )
     };
     if r != 0 || n == 0 {
-        return (Vec::new(), Vec::new());
+        return None;
     }
     let mut b = vec![0u8; n];
     // SAFETY: b holds n bytes.
@@ -218,10 +223,10 @@ fn args_env(pid: Pid) -> (Vec<String>, Vec<String>) {
         )
     };
     if r != 0 {
-        return (Vec::new(), Vec::new());
+        return None;
     }
     b.truncate(n);
-    parse_procargs2(&b)
+    Some(parse_procargs2(&b))
 }
 
 /// Splits kern.procargs2's bytes: argc, the executable's path, padding,
