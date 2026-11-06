@@ -188,6 +188,45 @@ pub fn parse_turn_wants(s: &str) -> Option<TurnWants> {
     Some(t)
 }
 
+/// The labels TURN_WANTS_SYSTEM gives as examples: a reading that says
+/// one the message doesn't is the prompt echoed, not the message read.
+const EXAMPLE_LINES: [&str; 5] = [
+    "new-agent startup fix merged into main",
+    "approve PR #41, the login fix",
+    "check the theme picker in rush",
+    "which theme to keep",
+    "tests fail on main",
+];
+
+/// What the model said of text, kept to what text holds. A quote it
+/// doesn't hold is dropped, as is a command, value or link it doesn't
+/// have. Then a reading that asks something of you with nothing left to
+/// show for it (no quote, no rows), or whose label is one of the prompt's
+/// examples the message never says, is made up: the turn is done. Without
+/// that, a card such as "! Needs you · tests fail on main" showed under a
+/// message that said nothing of the kind, with nothing to act on.
+/// Rust-only: Go kept such a reading.
+pub fn ground(text: &str, mut t: TurnWants) -> TurnWants {
+    if !has_quote(text, &t.quote) {
+        t.quote.clear(); // a quote the message doesn't hold says nothing
+    }
+    t.ui.retain(|it| {
+        let v = it.text.split(" — ").next().unwrap_or("");
+        !matches!(it.kind.as_str(), "run" | "link" | "copy") || text.contains(v)
+    });
+    let echoed = EXAMPLE_LINES
+        .iter()
+        .any(|e| t.line.eq_ignore_ascii_case(e) && !has_quote(text, e));
+    if t.wants != WANTS_DONE && (echoed || (t.quote.is_empty() && t.ui.is_empty())) {
+        return TurnWants {
+            wants: WANTS_DONE.into(),
+            at: t.at,
+            ..TurnWants::default()
+        };
+    }
+    t
+}
+
 #[doc(hidden)]
 pub fn state(m: &mut Model) -> &mut TurnState {
     m.kept::<TurnState>()
@@ -326,17 +365,8 @@ pub fn read_turn(m: &mut Model) {
                 save_turn(&k, &t);
                 return Some(t);
             }
-            let mut t = wanter(&reg, &text, &p.last_user)?;
+            let mut t = ground(&text, wanter(&reg, &text, &p.last_user)?);
             t.at = at;
-            if !has_quote(&text, &t.quote) {
-                t.quote.clear(); // a quote the message doesn't hold says nothing
-            }
-            // A command, value or link the message doesn't have is made
-            // up: dropped.
-            t.ui.retain(|it| {
-                let v = it.text.split(" — ").next().unwrap_or("");
-                !matches!(it.kind.as_str(), "run" | "link" | "copy") || text.contains(v)
-            });
             save_turn(&k, &t);
             Some(t)
         },

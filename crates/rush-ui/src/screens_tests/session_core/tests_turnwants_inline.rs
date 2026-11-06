@@ -231,3 +231,63 @@ fn cache_reads_as_go_writes_it() {
     );
     assert!(!back.contains("quote"), "{back}");
 }
+
+// Rust-only: a reading is kept to what the message holds. One asking
+// something of you with no quote or row the message backs, or whose label
+// is the prompt's own example, is the turn done, so no bare
+// "! Needs you · tests fail on main" card shows under it.
+#[test]
+fn a_reading_the_message_doesnt_back_is_done() {
+    let msg = "CI passed on main. I haven't pushed the docs: say if you want them.";
+    let done = tw("done", "", "", &[]);
+    let cases = [
+        (
+            "the prompt's example echoed",
+            tw("problem", "tests fail on main", "", &[]),
+            done.clone(),
+        ),
+        (
+            "an example echoed, a real quote beside it",
+            tw(
+                "problem",
+                "Tests fail on main",
+                "I haven't pushed the docs",
+                &[],
+            ),
+            done.clone(),
+        ),
+        (
+            "a quote the message doesn't hold, no rows",
+            tw("you", "push the docs", "push them now please", &[]),
+            done.clone(),
+        ),
+        (
+            "a made-up command, the only row",
+            tw(
+                "you",
+                "push the docs",
+                "",
+                &[("run", "git push origin docs")],
+            ),
+            done.clone(),
+        ),
+        (
+            "a quote the message holds",
+            tw("offer", "push the docs", "I haven't pushed the docs", &[]),
+            tw("offer", "push the docs", "I haven't pushed the docs", &[]),
+        ),
+        (
+            "no quote, a reply to send",
+            tw("offer", "push the docs", "", &[("reply", "yes, push them")]),
+            tw("offer", "push the docs", "", &[("reply", "yes, push them")]),
+        ),
+        ("done stays done", done.clone(), done.clone()),
+    ];
+    for (what, got, want) in cases {
+        assert_eq!(ground(msg, got), want, "{what}");
+    }
+    // An example the message itself says is the message read.
+    let said = "The run failed: tests fail on main, in rush-host.";
+    let t = tw("problem", "tests fail on main", "tests fail on main", &[]);
+    assert_eq!(ground(said, t.clone()), t);
+}
