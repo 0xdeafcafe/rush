@@ -50,6 +50,11 @@ pub use view::gh_pr_line;
 pub fn register(x: &mut Ext) {
     x.place(PlaceId::Projects, Box::new(place::Projects::default()));
     x.on_fleet.push(on_fleet);
+    x.command(
+        "cleanup",
+        "start a cleanup agent now; it can look further than rush knows",
+        |m, _| care::ask_care(m),
+    );
 }
 
 /// Each reading of the list: what's due asked again while Projects shows

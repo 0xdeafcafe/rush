@@ -146,6 +146,7 @@ fn starts_as_rush_s_own() {
         "9.0G free on disk",
         &[],
         &[],
+        false,
     );
     let starts = h.starts.lock().unwrap().clone();
     assert_eq!(starts.len(), 1);
@@ -174,7 +175,13 @@ fn prompt_has_rules_known_and_reports() {
         report: " 3 stacks idle \n".into(),
         rules: "Stop only idle stacks.".into(),
     };
-    let p = care_prompt("the disk is low", &["Disk: 1G free of 2G.".into()], &[r]);
+    let p = care_prompt(
+        "the disk is low",
+        &["Disk: 1G free of 2G.".into()],
+        &[r],
+        false,
+    );
+    assert!(!p.contains("Look further"));
     assert!(p.starts_with("Free disk space and memory on this machine, then report and stop. rush started you because the disk is low. "));
     assert!(p.contains("\nHaven, as its plugin says:\nStop only idle stacks.\n"));
     assert!(p.contains("What rush knows:\nDisk: 1G free of 2G.\n"));
@@ -182,15 +189,58 @@ fn prompt_has_rules_known_and_reports() {
 }
 
 fn sheet(off: bool) -> CareSheet {
-    CareSheet {
+    let s = CareSheet {
         why: "the disk has 10.0G free, under the 20G you set".into(),
         short: "10G free on disk".into(),
-        cur: 1,
+        cur: 0,
         busy: false,
         looking: false,
         off,
         from: vec!["Haven".into(), "go-clean".into()],
+        asked: false,
+    };
+    CareSheet {
+        cur: s.not_now(),
+        ..s
     }
+}
+
+#[test]
+fn prompt_looks_further_when_told() {
+    let p = care_prompt("you asked for one", &[], &[], true);
+    assert!(p.contains("\nLook further, too:"), "{p}");
+    assert!(p.contains("never its volumes or containers"), "{p}");
+    assert!(p.contains("com.google.Chrome.code_sign_clone"), "{p}");
+    assert!(p.contains("the biggest things you found but left"), "{p}");
+}
+
+#[test]
+fn asked_sheet_starts_on_start_and_snoozes_nothing() {
+    let m = crate::new_model("t");
+    let mut s = CareSheet {
+        why: "you asked for one, with 3.0G free on disk".into(),
+        asked: true,
+        cur: 0,
+        ..sheet(false)
+    };
+    let t = text(&s.body(&m, 100, 30));
+    assert!(t.starts_with("Cleanup  you asked for one"), "{t}");
+    assert!(!t.contains("rush noticed"), "{t}");
+    assert!(t.contains("▍ Start a cleanup agent"), "{t}");
+    assert!(
+        t.contains("Start one that looks further  also hunts caches"),
+        "{t}"
+    );
+    assert!(t.contains("Not now  starts nothing"), "{t}");
+}
+
+#[test]
+fn cleanup_command_is_registered() {
+    let m = crate::new_model("t");
+    assert!(
+        m.ext.commands.iter().any(|c| c.name == "cleanup"),
+        "no #cleanup"
+    );
 }
 
 fn text(l: &[Line]) -> String {
@@ -209,10 +259,12 @@ fn sheet_says_what_it_reads() {
         "{t}"
     );
     assert!(t.contains("Start a cleanup agent  in auto mode"));
+    assert!(t.contains("Start one that looks further"));
     assert!(t.contains("▍ Not now  asks again in 6 hours if it's still so"));
     assert!(t.contains("↑↓ choose"));
     let t = text(&sheet(true).body(&m, 100, 30));
     assert!(t.contains("Turn on the cleanup plugin  recommended"));
+    assert!(!t.contains("looks further"), "{t}");
     assert!(
         t.replace("\n  ", " ")
             .contains("The cleanup plugin is off, and recommended now")
@@ -223,15 +275,21 @@ fn sheet_says_what_it_reads() {
 fn sheet_keys() {
     let mut m = crate::new_model("t");
     let mut s = sheet(false);
-    for (k, cur) in [("down", 0), ("tab", 1), ("up", 0), ("shift+tab", 1)] {
+    assert_eq!(s.cur, 2);
+    for (k, cur) in [("down", 0), ("tab", 1), ("up", 0), ("shift+tab", 2)] {
         assert_eq!(s.key(&mut m, &Press::of(k).unwrap()), Out::Draw);
         assert_eq!(s.cur, cur, "{k}");
     }
+    let mut s = sheet(true);
+    assert_eq!(s.cur, 1);
+    assert_eq!(s.key(&mut m, &Press::of("down").unwrap()), Out::Draw);
+    assert_eq!(s.cur, 0);
+    assert_eq!(s.key(&mut m, &Press::of("f").unwrap()), Out::Idle);
     for k in ["n", "esc", "ctrl+c"] {
         let mut s = sheet(false);
         s.cur = 0;
         assert_eq!(s.key(&mut m, &Press::of(k).unwrap()), Out::Close, "{k}");
-        assert_eq!(s.cur, 1);
+        assert_eq!(s.cur, 2);
     }
     let mut s = sheet(false);
     s.busy = true;

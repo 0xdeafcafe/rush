@@ -1003,6 +1003,13 @@ so `leads()` is neither. What only the rush that leads does:
   snapload.go:84 reap);
 - watches disk and memory and offers the cleanup agent, which tidies
   worktrees (`projects_machine/care.rs` `watch_machine`; model.go:1100);
+  Beyond Go: `#cleanup` (`care::ask_care`) opens the same sheet when you
+  ask, in any rush and whatever the disk and memory say, with the cursor
+  on Start and nothing snoozed by Not now; it says so when a cleanup agent
+  is already at work. With the plugin on, the sheet offers Start, Start
+  one that looks further (`CareChoice::Further`, f: the prompt adds
+  `CARE_FURTHER`, which lets it free caches across the disk and asks it
+  to list the big things it leaves) and Not now;
 - switches logins and other agents' accounts (`accounts/autoswitch.rs`
   `auto_switch`, `check_limits`; model.go:1100 autoSwitch, agentquota.go:90
   checkLimits) and looks for logins to keep, which can switch ~/.claude

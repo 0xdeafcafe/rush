@@ -343,14 +343,19 @@ fn offer(m: &mut Model, why: String, short: String) {
                     "Turn on the cleanup plugin? rush is asking in its view.",
                 )
             };
-            m.open_sheet(Box::new(CareSheet {
+            let sheet = CareSheet {
                 why,
                 short,
-                cur: 1,
+                cur: 0,
                 busy: false,
                 looking: false,
                 off: !on,
                 from,
+                asked: false,
+            };
+            m.open_sheet(Box::new(CareSheet {
+                cur: sheet.not_now(),
+                ..sheet
             }));
             m.later(
                 move || rush_sys::actions::notify(&title, body),
@@ -380,9 +385,38 @@ pub struct CareSheet {
     pub off: bool,
     /// The plugins that report to the cleanup agent.
     pub from: Vec<String>,
+    /// You asked for it (#cleanup), not rush: nothing is snoozed by Not
+    /// now, and the cursor starts on Start. Beyond Go.
+    pub asked: bool,
+}
+
+/// What each choice on the cleanup sheet does.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CareChoice {
+    TurnOn,
+    Start,
+    /// Start one that also looks at the rest of the disk (Beyond Go).
+    Further,
+    NotNow,
 }
 
 impl CareSheet {
+    /// The choices, top to bottom: Turn on and Not now while the plugin is
+    /// off, else Start, Start and look further, and Not now.
+    pub fn choices(&self) -> &'static [CareChoice] {
+        use CareChoice::*;
+        if self.off {
+            &[TurnOn, NotNow]
+        } else {
+            &[Start, Further, NotNow]
+        }
+    }
+
+    /// Where Not now is: the last choice.
+    pub fn not_now(&self) -> usize {
+        self.choices().len() - 1
+    }
+
     /// What the cleanup agent reads, in words.
     fn reads(&self) -> String {
         let what = "your worktrees, what agents left in /tmp".to_string();
@@ -394,10 +428,16 @@ impl CareSheet {
 
     fn pick(&mut self, m: &mut Model) -> Out {
         let hours = CARE_SNOOZE / 3_600_000;
-        if self.cur == 1 {
-            m.flash(&format!("no cleanup · asks again in {hours} hours"));
+        let choice = self.choices()[self.cur.min(self.not_now())];
+        if choice == CareChoice::NotNow {
+            if self.asked {
+                m.flash("no cleanup");
+            } else {
+                m.flash(&format!("no cleanup · asks again in {hours} hours"));
+            }
             return Out::Close;
         }
+        let further = choice == CareChoice::Further;
         self.busy = true;
         if self.off {
             m.later(
@@ -415,7 +455,10 @@ impl CareSheet {
                         m.fail(&format!("couldn't turn on the cleanup plugin: {e}"));
                         return Out::Draw;
                     }
-                    (s.off, s.cur) = (false, 1);
+                    s.off = false;
+                    // Unasked, the cursor stays off Start, so an enter
+                    // meant for something else starts nothing.
+                    s.cur = if s.asked { 0 } else { s.not_now() };
                     m.flash("cleanup plugin on");
                     Out::Draw
                 },
@@ -457,7 +500,7 @@ impl CareSheet {
                     super::scan::on_worktrees(m, f);
                 }
                 let known = care_known(m);
-                start_care(m, &why, &short, &known, &st.reports)
+                start_care(m, &why, &short, &known, &st.reports, further)
             },
         );
         Out::Draw
@@ -529,9 +572,10 @@ pub fn start_care(
     short: &str,
     known: &[String],
     reports: &[CleanupReport],
+    further: bool,
 ) -> Out {
     let start = CareStart {
-        prompt: care_prompt(why, known, reports),
+        prompt: care_prompt(why, known, reports, further),
         cwd: std::env::var("HOME").unwrap_or_default(),
         name: "Cleanup".into(),
         auto: true,
@@ -614,12 +658,17 @@ impl Sheet for CareSheet {
                 ),
             )
         } else {
+            let noticed = if self.asked {
+                String::new()
+            } else {
+                format!("rush noticed that {}. ", self.why)
+            };
             (
                 format!(
-                    "rush noticed that {}. A cleanup agent can look at {reads}, \
+                    "{noticed}A cleanup agent can look at {reads}, \
                      remove what can go without losing work (a worktree only once it's committed and pushed), stop what's holding memory that nobody works in, \
-                     and tell you what it did. It's marked done when it finishes, which stops it.",
-                    self.why
+                     and tell you what it did. Told to look further, it also hunts the rest of the disk for caches that rebuild themselves, \
+                     and lists the big things it leaves for you. It's marked done when it finishes, which stops it.",
                 ),
                 (
                     "Start a cleanup agent",
@@ -631,13 +680,24 @@ impl Sheet for CareSheet {
             out.push(ln([plain(format!("  {l}"))]));
         }
         out.push(Line::new());
-        let later = format!(
-            "asks again in {} hours if it's still so",
-            CARE_SNOOZE / 3_600_000
-        );
-        let choices = [first, ("Not now", later.as_str())];
-        for (i, (what, about)) in choices.iter().enumerate() {
-            let l = ln([spb(*what, TEXT), plain("  "), sp(*about, DIM)]);
+        let later = if self.asked {
+            "starts nothing".to_string()
+        } else {
+            format!(
+                "asks again in {} hours if it's still so",
+                CARE_SNOOZE / 3_600_000
+            )
+        };
+        for (i, c) in self.choices().iter().enumerate() {
+            let (what, about) = match c {
+                CareChoice::TurnOn | CareChoice::Start => first,
+                CareChoice::Further => (
+                    "Start one that looks further",
+                    "also hunts caches across the disk, and lists what's big",
+                ),
+                CareChoice::NotNow => ("Not now", later.as_str()),
+            };
+            let l = ln([spb(what, TEXT), plain("  "), sp(about, DIM)]);
             out.push(sheet_row(l, i == self.cur, w));
         }
         let k = match self.busy {
@@ -669,17 +729,26 @@ impl Sheet for CareSheet {
         if self.busy {
             return Out::Idle;
         }
+        let n = self.choices().len();
         match k.s.as_str() {
-            "up" | "shift+tab" | "down" | "tab" => {
-                self.cur = 1 - self.cur;
+            "down" | "tab" => {
+                self.cur = (self.cur + 1) % n;
+                Out::Draw
+            }
+            "up" | "shift+tab" => {
+                self.cur = (self.cur + n - 1) % n;
                 Out::Draw
             }
             "y" => {
                 self.cur = 0;
                 self.pick(m)
             }
-            "n" | "esc" | "ctrl+c" => {
+            "f" if !self.off => {
                 self.cur = 1;
+                self.pick(m)
+            }
+            "n" | "esc" | "ctrl+c" => {
+                self.cur = n - 1;
                 self.pick(m)
             }
             "enter" => self.pick(m),
@@ -793,7 +862,12 @@ fn care_reports() -> Vec<CleanupReport> {
 }
 
 /// The cleanup agent's task.
-pub fn care_prompt(why: &str, known: &[String], reports: &[CleanupReport]) -> String {
+pub fn care_prompt(
+    why: &str,
+    known: &[String],
+    reports: &[CleanupReport],
+    further: bool,
+) -> String {
     let mut b = String::new();
     b += &format!(
         "Free disk space and memory on this machine, then report and stop. rush started you because {why}. "
@@ -806,16 +880,79 @@ pub fn care_prompt(why: &str, known: &[String], reports: &[CleanupReport]) -> St
 - pnpm's node_modules are mostly hard links into its shared store, so removing them frees little until pnpm store prune runs; run it once after.
 - Never delete databases, ~/.claude, transcripts, anything in a project that isn't a cache or a worktree, or anything you're unsure of.
 ";
+    if further {
+        b += CARE_FURTHER;
+    }
     for r in reports {
         if !r.rules.is_empty() {
             b += &format!("\n{}, as its plugin says:\n{}\n", r.title, r.rules.trim());
         }
     }
     b += "\nDo the biggest wins first. Wait on a long command by running it in the foreground with a long timeout, or in the background until its notice comes; never sleep to wait.\n";
-    b += "\nEnd with a short report, under 10 lines: what you removed or stopped, how much it freed as df measures it before and after, and what you left and why.\n\n";
+    if further {
+        b += "\nEnd with a short report, under 15 lines: what you removed or stopped, how much it freed as df measures it before and after, what you left and why, and the biggest things you found but left for the person to decide on, each with its path and size.\n\n";
+    } else {
+        b += "\nEnd with a short report, under 10 lines: what you removed or stopped, how much it freed as df measures it before and after, and what you left and why.\n\n";
+    }
     b += &format!("What rush knows:\n{}\n", known.join("\n"));
     for r in reports {
         b += &format!("\nWhat {} reports:\n{}\n", r.title, r.report.trim());
     }
     b
+}
+
+/// What a cleanup agent told to look further may also do (Beyond Go).
+const CARE_FURTHER: &str = "
+Look further, too: past what rush knows, find what takes the most space on this disk (du -xhd1 on the home folder, ~/Library, ~/Library/Caches, ~/Library/Developer, ~/.cache and the package managers' folders) and free what rebuilds itself or is fetched again:
+- applications' caches in ~/Library/Caches and ~/.cache;
+- Xcode's DerivedData, device support for OS versions no device here runs, and unavailable simulators (xcrun simctl delete unavailable);
+- package managers' caches through their own commands (brew cleanup, npm cache clean --force, pnpm store prune, pip cache purge, cargo's registry cache), and build caches (target, node_modules, .next) in projects untouched for weeks;
+- Docker's dangling images and build cache (docker image prune, docker builder prune), never its volumes or containers;
+- the copies of Chrome each launch leaves in $(getconf DARWIN_USER_TEMP_DIR)/../X/com.google.Chrome.code_sign_clone, except those a running Chrome has open (lsof): they share most of their blocks with Chrome, so du overstates them; say what df shows they freed.
+Never remove documents, Downloads, Desktop, photos, music, mail, messages, or anything in ~/Library/Containers, ~/Library/Application Support or ~/Library/Group Containers: list the biggest of these in your report for the person to decide on.
+";
+
+/// Opens the cleanup sheet because you asked (#cleanup): whatever the
+/// disk and memory say, and in any rush. Beyond Go, which only offered it.
+pub fn ask_care(m: &mut Model) -> Out {
+    let at_work = m.agents.iter().any(|a| {
+        a.rush
+            && a.started_by == CARE_PLUGIN
+            && !a.done
+            && a.job.state != rush_core::agent::State::Done
+    });
+    if at_work {
+        m.flash_err("a cleanup agent is already at work");
+        return Out::Draw;
+    }
+    m.later(
+        || {
+            (
+                rush_plugin::bundled_on(CARE_PLUGIN),
+                rush_plugin::providers(SERVICE_CLEANUP_REPORT),
+                rush_sys::sysinfo::read_disk(),
+            )
+        },
+        |m, (on, from, d)| {
+            if m.sheet.is_some() || m.confirm.is_some() {
+                return Out::Idle;
+            }
+            let free = disk(d.free as i64);
+            m.open_sheet(Box::new(CareSheet {
+                why: format!("you asked for one, with {free} free on disk"),
+                short: format!("asked, {free} free on disk"),
+                cur: 0,
+                busy: false,
+                looking: false,
+                off: !on,
+                from,
+                asked: true,
+            }));
+            if m.now - data(m).checked > 30 * 60_000 {
+                super::scan::scan_worktrees(m);
+            }
+            Out::Draw
+        },
+    );
+    Out::Draw
 }
