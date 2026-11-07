@@ -975,6 +975,32 @@ fn needs_call(c: &tool::Call) -> String {
     format!("{} {}", c.name, tool_summary(c.raw.as_ref()))
 }
 
+/// A call asked about, whole, for a parent to judge (Info.asking): the
+/// tool and its command, every line of it, or the input it was sent.
+fn call_text(c: &tool::Call) -> String {
+    const MAX: usize = 4000;
+    let i = &c.input;
+    let what = [&i.command, &i.path, &i.url, &i.query, &i.pattern]
+        .into_iter()
+        .find(|v| !v.is_empty())
+        .cloned()
+        .or_else(|| c.raw.as_ref().map(|r| r.get().to_string()))
+        .unwrap_or_default();
+    let mut out = format!("{}: {}", c.name, what.trim());
+    if !i.cwd.is_empty() {
+        out += &format!(" (in {})", i.cwd);
+    }
+    if out.len() > MAX {
+        let mut end = MAX;
+        while !out.is_char_boundary(end) {
+            end -= 1;
+        }
+        out.truncate(end);
+        out += "…";
+    }
+    out
+}
+
 /// What a question asks, in words for the list.
 fn needs_question(q: &event::Question) -> String {
     match q.asks.first() {
@@ -3250,6 +3276,7 @@ impl Host {
             return;
         }
         self.record(st, lines::answered_line(id));
+        st.info.asking.retain(|a| a.id != id);
         if st.pending.is_empty() && st.info.state == "blocked" {
             st.info.state = "working".into();
             st.info.needs.clear();
@@ -3302,6 +3329,7 @@ impl Host {
         st.info.error.clear();
         st.info.retry = None;
         st.info.needs.clear();
+        st.info.asking.clear();
         st.info.decisions = None;
         if !resume {
             // A new conversation has no cache of its own yet.
@@ -3402,6 +3430,11 @@ impl Host {
                 if !self.answer_as_memory(st, &a) && !self.hold(st, &a.id, "permission", &needs) {
                     st.info.state = "blocked".into();
                     st.info.needs = needs;
+                    st.info.asking.push(crate::wire::Asking {
+                        id: a.id.clone(),
+                        call: call_text(&a.call),
+                        reason: a.reason.clone(),
+                    });
                 }
             }
             Event::Question(q) => {
@@ -3673,6 +3706,7 @@ impl Host {
         if st.pending.is_empty() {
             st.info.state = "idle".into();
             st.info.needs.clear();
+            st.info.asking.clear();
             self.views_at_turn_end(st);
             let t = e.text.trim();
             if !t.is_empty() {

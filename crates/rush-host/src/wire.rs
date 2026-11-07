@@ -431,6 +431,13 @@ pub struct Info {
     pub detail: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub needs: String,
+    /// The permissions it waits on, each in full: what a parent that
+    /// answers for it reads (answer_agent). Rust-only.
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "nullvec::deserialize"
+    )]
+    pub asking: Vec<Asking>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub model: String,
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -849,6 +856,19 @@ pub struct Held {
     pub kind: String,
     pub text: String,
     pub at: Time,
+}
+
+/// A permission a session waits on (Info.asking).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Asking {
+    /// The approval's id, as allow and deny take it.
+    pub id: String,
+    /// The tool and what it would do, whole: a command every line of it.
+    pub call: String,
+    /// Why the agent asks, when it says.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub reason: String,
 }
 
 /// A place a session wrote outside its project and scratch.

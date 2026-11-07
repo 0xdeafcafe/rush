@@ -76,6 +76,18 @@ impl Agents for SubAgents {
         )
     }
 
+    fn answer(&self, input: agtools::AnswerInput) -> Result<String, String> {
+        SubAgents::answer(
+            self,
+            &subtool::AnswerInput {
+                id: input.id,
+                request: input.request,
+                allow: input.allow,
+                reason: input.reason,
+            },
+        )
+    }
+
     fn viewer(&self) -> Option<&dyn Viewer> {
         // Views off: the tool isn't listed and a call is refused.
         (!rush_state::Store::load().config.views_off).then_some(self as &dyn Viewer)
