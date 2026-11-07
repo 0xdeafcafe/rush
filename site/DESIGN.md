@@ -46,52 +46,79 @@ Tokens are in `src/styles/site.css` (terminal evidence) and `label.css` (the lab
 | `--mono` | Menlo, Consolas, monospace: real terminal text, source ID and commands. No downloaded fonts. |
 | Type | Small 14 px, body 18 px, lead 24 px, heading 36–56 px, band 64–128 px. Mobile body 16, lead 22, small print 12 and band 56. Warning 40/32. SVG scales independently. |
 | Leading | Prose 1.6, warning caps 1.35, captions 1.45, headings 1.04. Terminal 1.2 at a container-relative 11–13 px. |
-| Spacing | 8 px base: 16, 24, 32, 40, 48, 56, 64, 80. Sheet maximum 1440 px, gutter 24–80 px. Optical letter offsets and terminal cell crop coordinates are deliberate exceptions. |
+| Spacing | Label plate: 780 × 820, max-width 780, container-unit scaling; outside the plate, 8 px base: 16, 24, 32, 40, 48, 56, 64, 80. Sheet maximum 1440 px, gutter 24–80 px. Optical letter offsets and terminal cell crop coordinates are deliberate exceptions. |
 | Rules | 1 px fine rules, 2 px divisions, 3 px warning and live-view box, 8 px feed and install bars. |
 | Radius / shadow | Zero radius and no UI shadow. The physical bottle has a generated soft contact shadow. |
 | `--ease`, `--move` | `cubic-bezier(.2,0,.2,1)`, 400 ms row movement after a 220 ms question beat. Chirps fade up 8 px over 250 ms. |
 
 ## The same label throughout
 
-On load, `bottle.ts` serialises `Label.tsx`'s rendered DOM into an SVG
-foreignObject, including the already-loaded same-origin CSS and resolved theme
-tokens. It waits for fonts. Rasterisation is at the current viewport dimensions;
-there is no second canvas layout, hard-coded font positions or bottle-only copy.
-The resulting 2–4k texture is used from the first curved frame through the unwrap.
-A native-pixel resolution level from the same SVG avoids text resampling in the
-last flat frames. The final plane uses an unlit, untone-mapped material so colours
-match CSS exactly. No downloaded texture or HDRI is needed.
+The printing plate is **780 × 820**, regardless of viewport shape. `.label-frame`
+is centred, at most 780 px wide; container units scale the composition uniformly
+on narrow screens. The surrounding yellow/amber landing fills at least one
+`dvh`. Large or tall windows add stock around the label instead of shrinking
+its contents onto the bottle. The band has one complete slogan; the trailing
+“EVERY LAST AGENT.” no longer runs round an invisible side.
 
-A 160 × 60 subdivision mesh moves from a curve following the bottle profile to
-a plane exactly filling the camera frustum. The last 12% of travel holds that
-flat plane. At the end, WebGL visibility and HTML visibility swap in one frame.
-There is **no crossfade, opacity ramp, text replacement or page translation**.
-The actual HTML begins at that same scroll coordinate. The opening label is at
-least one viewport tall, so later sections cannot leak into its rasterisation.
-Resize remeasures the frustum, regenerates the texture and preserves progress.
-Theme changes regenerate the same label with the current resolved tokens.
+`label-canvas.ts` waits for `document.fonts.ready`, measures a hidden clone of
+`Label.tsx` at the real label width, then paints directly to 2D canvas. DOM
+Ranges supply line breaks and glyph positions, a baseline probe supplies the
+font baseline, computed CSS supplies colours/borders/tracking, and Path2D draws
+the existing SVG paths. A glyph-position path handles older Canvas engines
+without `letterSpacing`. There is no foreignObject, SVG image decode or image
+readback to taint WebKit's texture. This painter supports the label's actual
+boxes, text and paths, not arbitrary future HTML/CSS.
+
+The normal curved texture is 1560 × 1640 (including on large/tall screens).
+A lower-detail tier uses 780 × 820. A second texture is measured from the same
+layout at up to DPR 2 for the flat plane. The final frustum rectangle matches
+the centred HTML frame's width, height and vertical offset. The last 12% of
+travel holds that image; visibility swaps atomically at the end, without a
+crossfade or page translation. Layout and glyph positions match; Canvas/GPU
+and DOM antialiasing are not byte-identical, particularly on DPR 3 phones with
+the requested GPU DPR cap. `MOBILE-REVIEW.md` records measured differences.
 
 ## Bottle and native scroll
 
-The squat body and shoulder use a spline lathe with 128 angular segments. The
-cap has a cylinder, two lips and 64 instanced ridges. Yellow plastic uses
+The body and shoulder use a spline lathe: 64 profile samples / 64 angular
+segments on mobile or modest reported hardware, 120 / 96 on larger devices.
+The cap has a cylinder, two lips and 64 instanced ridges. Yellow plastic uses
 MeshPhysicalMaterial, clearcoat 1, roughness .21 (cap .35), metalness .02, IOR 1.48.
-RoomEnvironment is PMREM filtered for reflections. ACES exposure .72, environment
-intensity .65, white key 1.65, warm rim .8 and hemisphere .3 are object lighting,
-not extra UI colours. A generated 256 px radial alpha texture supplies contact.
+The **label uses those same body profile samples and angular vertices**, bounded
+from y = −1.46 near the base to y = .30 below the shoulder. Radius is the body's
+piecewise interpolation × 1.002, with polygonOffset −1/−1. There is no separate
+radius approximation or floating sleeve. Label roughness .32 / clearcoat .45
+shares the room's reflections. Its lighting gradually becomes plain printing
+ink during flattening, with an unlit shader branch at fully flat geometry.
 
-A sticky stage has 2.5 heights of travel on desktop, 1.75 on mobile. Scroll turns
-the bottle, dollies in from .18–.64 and unwraps from .54–.88. Native wheel, touch,
-keyboard and anchors retain their normal behaviour. Rendering is requested only
-by scroll, resize, theme or visibility changes, never an idle animation loop.
-DPR is capped at 1.75 desktop and 1.5 mobile while curved. The flat plane uses
-the actual display DPR so Retina text matches the DOM. Rendering stops below
-the opening.
+RoomEnvironment uses PMREM at 128 px on mobile / 256 desktop. Half-float colour
+buffer support is checked first; without it, direct lighting preserves the
+bottle and unwrap. Label and shadow textures are ordinary unsigned-byte canvas
+textures. WebGL2 requests only alpha and antialiasing, without a powerPreference
+or failIfMajorPerformanceCaveat veto. ACES exposure .72, environment intensity
+.65, white key 1.65, warm rim .8 and hemisphere .3 remain object lighting. The
+256 px radial alpha texture is a soft contact shadow.
 
-The first screen contains `brew install 0xdeafcafe/tap/rush`, selectable plain
-text beneath “Every coding agent. Under one cap.” The GNU restricted-shell warning
-is alongside it and repeated in the label warning. Skip to label focuses the HTML.
-Hidden HTML is inert until the swap, then becomes normal selectable, accessible DOM.
+Native scroll has 2.5 stage heights of travel on desktop, 1.75 on mobile.
+Travel is rounded to an integer CSS pixel so fractional mobile heights cannot
+leave the final frame just short of the HTML swap. The stage follows `100dvh`
+(with `svh` fallback); toolbar height changes re-fit the camera and HTML landing
+without changing travel or calling scrollTo. Width changes/rotation preserve
+progress and regenerate the measured texture. Touch/wheel events are untouched.
+
+Shader compilation, texture uploads and two hidden renders precede reveal.
+DPR is at most 2, initially 1.5 on mobile/modest hardware, then 1 if sustained
+steady-state frames cost too much. Uploads, resize and a one-second/30-frame
+warm-up do not count. Thirty expensive steady-state samples lower detail before
+any fallback; the final exit needs over 90 expensive samples at the lowest tier
+and a frame over 100 ms. This measures CPU submission cost, not GPU profiling.
+Rendering is requested by scroll/resize/theme/visibility, never an idle loop.
+
+The first screen's tap command remains plain selectable text beside the GNU
+restricted-shell note. Skip to label focuses its HTML. Hidden HTML stays inert
+until the swap. A reader who has already reached the label before loading
+finishes keeps the static page; small early scrolls within the bottle no longer
+cancel enhancement.
 
 ## Motion below the label
 
@@ -106,16 +133,24 @@ Hidden HTML is inert until the swap, then becomes normal selectable, accessible 
 
 ## Fallbacks and limits
 
-Reduced motion, Data Saver, reported memory ≤2 GB, ≤2 hardware threads, failed
-WebGL, major rendering caveats, import/texture failures and context loss use the
-still and normal-flow HTML. Sustained expensive CPU frames also exit the scene.
-There is no portable OS Low Power Mode API; capability detection is a heuristic.
-The visitor can choose **Use still image** at any time during the opening.
-A live preference change releases GPU resources and preserves the reading position.
+Reduced motion and Data Saver deliberately use the still. Reported memory ≤2 GB
+or ≤2 hardware threads now select lower detail, never exclude a device. Missing
+WebGL, import/texture failure, context loss or sustained bad performance after
+quality reduction still leave a usable still and normal HTML. The visitor can
+choose **Use still image**; live preference changes release GPU resources and
+preserve the reading position.
 
-The still and all copy are useful before three.js loads. If someone scrolls or
-follows an anchor before loading completes, enhancement does not take over.
-No-JS retains the selectable command, links and all product evidence.
+Every fallback sets `#bottle-intro.dataset.fallback` and logs one
+`console.info('[rush bottle] fallback: …')` per page. `dataset.failure` retains
+an available exception message. `dataset.mode`, `quality`, `painter`, `texture`
+and `reflections` identify the active rendering path. No-JS retains the command,
+links and terminal evidence. Low-power detection remains a quality heuristic,
+not a portable OS Low Power Mode API.
+
+Playwright WebKit/iPhone 15 and Chromium/Pixel 8 emulation are checked in
+`checks/bottle.mjs`, including both colour schemes, all requested desktop sizes,
+the two-core case, missing half-float support, fallbacks, toolbar resize and
+handoff differences. This is not a physical iPhone/Android GPU certification.
 
 ## Claims and review
 
@@ -125,7 +160,8 @@ The memory note uses the README's 72 MB observation after five hours and 300-odd
 sessions, with separate ~7 MB hosts. The older 40 MB claim described Go and was
 removed. Fictional projects, chirps, simulated deploy and the example PR number are labelled.
 
-`SLOP-REVIEW.md` records the built-site screenshots, handoff image diffs, download
+`SLOP-REVIEW.md` records the initial port; `MOBILE-REVIEW.md` supersedes its
+bottle measurements with mobile checks, handoff image diffs, download
 weight, observed frame cadence and remaining limitations. Browser measurements
 are not Rust performance claims and do not imply phone measurements.
 
