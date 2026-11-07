@@ -947,7 +947,7 @@ pub fn header(
             line([sp("─".repeat(w), FAINT)]),
         ];
     };
-    let state = if a.needs_you() {
+    let state = if a.needs_you() && !a.at_work {
         spb("needs you", YELLOW)
     } else if a.halted() {
         spb("stopped mid-turn", RED)

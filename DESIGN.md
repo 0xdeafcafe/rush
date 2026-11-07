@@ -1998,6 +1998,14 @@ is made. Everything below is in `rush_ui::frame`.
   (`session_core/turnwants.rs`: what a turn wants of you puts it under
   Needs you, and ends its session's last answer with a Needs-you
   section).
+- **A card left open on a working agent.** News or a check-in can wake
+  an agent whose turn ended with decisions: that isn't your answer, so
+  the host keeps the card. The fleet reads it as blocked with
+  `Agent::at_work` set (Go read only a finished turn's card, leaving it
+  in Working): Needs you, `ctrl+n`, the tally and notifications all
+  follow from blocked; the row keeps its spinner and running time, says
+  what it's doing after what it asks, and can still go stuck. A stuck
+  queue or a limit asking says so instead.
   A model drawn once is handed both through `m.kept`.
 - **State.** A group keeps its own state as a type of its own:
   `m.kept::<MyState>()` (made on first use) — no field on Model.

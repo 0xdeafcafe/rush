@@ -1185,10 +1185,9 @@ impl Model {
         out.extend(docks);
         // Only a live agent on screen moves with the clock.
         let shown: HashSet<&str> = self.row_keys.iter().map(String::as_str).collect();
-        let live = self
-            .agents
-            .iter()
-            .any(|a| a.job.live() && !a.needs_you() && shown.contains(a.key.as_str()));
+        let live = self.agents.iter().any(|a| {
+            a.job.live() && (a.at_work || !a.needs_you()) && shown.contains(a.key.as_str())
+        });
         self.spinning = live;
     }
 

@@ -265,6 +265,10 @@ pub struct Agent {
     /// asks, by its headings.
     pub decides: bool,
     pub decisions_key: String,
+    /// Waiting on you with that card still open, but at work too: something
+    /// that isn't your answer woke it. It's listed as asking you and drawn
+    /// as working.
+    pub at_work: bool,
     /// When a hosted agent at work last said anything, set once its turn
     /// has heard nothing for a while with no tool running; 0 otherwise.
     pub stalled: Ms,
