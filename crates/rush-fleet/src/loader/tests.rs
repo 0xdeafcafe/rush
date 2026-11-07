@@ -728,7 +728,7 @@ fn open_card_on_a_working_agent_needs_you() {
         ask: true,
     });
     let table = [
-        ("plain", 0, None, true, "1 decision"),
+        ("plain", 0, None, true, "decide: Apple TV icon"),
         ("stuck", t, None, false, STUCK_NEEDS),
         ("limit", 0, ask, false, "continue when the limit resets?"),
     ];

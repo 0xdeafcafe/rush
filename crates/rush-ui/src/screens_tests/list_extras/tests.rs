@@ -300,11 +300,11 @@ fn working_behind_an_open_card_is_under_needs_you() {
     let mut a = agent("x1", "card", State::Blocked, 1);
     a.decides = true;
     a.at_work = true;
-    a.job.needs = "1 decision".into();
+    a.job.needs = "decide: Apple TV icon".into();
     a.job.detail = "running Bash".into();
     let m = model_of(vec![a], 120, 40);
     assert_eq!(m.group_of["default/x1"], crate::list::NEEDS);
-    assert_eq!(m.row_summary(0).0, "1 decision · running Bash");
+    assert_eq!(m.row_summary(0).0, "decide: Apple TV icon · running Bash");
 }
 
 // ---- wall_test.go ----
