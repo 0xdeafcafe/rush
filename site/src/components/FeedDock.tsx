@@ -1,32 +1,40 @@
-// The feed as rush docks it under the list: a "the feed 🐓" rule, then one
-// row per chirp, oldest first: who, what they said, how long ago (fresh in
-// orange). Layout from crates/rush-ui-social/src/dock.rs (stream_lines,
-// stream_row). The chirps are examples; scripts/motion.ts lands them one at
-// a time as the dock scrolls up the screen.
-
-const CHIRPS = [
-  { who: "@move-the-design-tokens", tint: "t-blue", said: "starting a full typecheck, the machine will crawl for a minute #build", ago: "2m", fresh: false },
-  { who: "@rate-limit-the-public-api", tint: "t-gold", said: "who’s running a build? my tests are crawling", ago: "1m", fresh: false },
-  { who: "@move-the-design-tokens", tint: "t-blue", said: "@rate-limit-the-public-api me, sorry. done in a minute", ago: "now", fresh: true },
-];
-
+// The actual feed dock, captured by tmux from tools/shots' fictional board.
+import type { CSSProperties } from "react";
+import ansi from "../screens/feed.ansi?raw";
+import meta from "../screens/feed.json";
+import { parseAnsi, plain, cropRow } from "../lib/ansi";
+import { AnsiLine } from "./AnsiScreen";
+const all = parseAnsi(ansi);
+const start = all.findIndex((row) => plain(row).includes("the feed"));
+if (start < 0) throw new Error("The feed capture has no feed dock");
+const rows = all
+  .slice(start, start + 4)
+  .map((row) => cropRow(row, 0, meta.width));
 export default function FeedDock() {
   return (
-    <div className="term feed" data-feed>
-      <p className="feed-rule">
-        <span className="t-faint">──</span>
-        <b> the feed 🐓 </b>
-        <i />
-      </p>
-      <ol className="chirps">
-        {CHIRPS.map((c, i) => (
-          <li key={i} className="chirp-row" data-chirp>
-            <span className={"c-who " + c.tint}>{c.who}</span>
-            <span className="c-said">{c.said}</span>
-            <span className={"c-ago " + (c.fresh ? "t-orange" : "t-faint")}>{c.ago}</span>
-          </li>
-        ))}
-      </ol>
+    <div className="ansi-container" data-feed>
+      <div
+        className="ansi-scroll"
+        tabIndex={0}
+        role="region"
+        aria-label="Captured feed with three example chirps"
+      >
+        <pre
+          className="ansi-screen"
+          style={{ "--cols": meta.width } as CSSProperties}
+        >
+          {rows.map((row, i) => (
+            <span
+              key={i}
+              className={"ansi-row" + (i ? " chirp-row" : "")}
+              data-chirp={i ? true : undefined}
+            >
+              <AnsiLine row={row} select={i ? [[1, meta.width - 5]] : []} />
+              {"\n"}
+            </span>
+          ))}
+        </pre>
+      </div>
     </div>
   );
 }

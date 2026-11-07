@@ -1,0 +1,648 @@
+/* The printed label and its physical opening. Tokens: site/DESIGN.md. */
+:root {
+  color-scheme: light dark;
+  --yellow: #ffe600;
+  --red: #c21e16;
+  --ground: var(--yellow);
+  --print: var(--red);
+  --ink: #21170a;
+  --band: var(--red);
+  --band-type: var(--yellow);
+  --terminal: #111110;
+  --sans: "Helvetica Neue", Helvetica, sans-serif;
+  --condensed: Impact, "Arial Narrow", sans-serif;
+  --mono: Menlo, Consolas, monospace;
+  --small: 0.875rem;
+  --body: 1.125rem;
+  --lead: 1.5rem;
+  --heading: clamp(2.25rem, 3.9vw, 3.5rem);
+  --gutter: clamp(24px, 5.55vw, 80px);
+  --space: 8px;
+  --ease: cubic-bezier(0.2, 0, 0.2, 1);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #291508;
+    --print: #ff412c;
+    --ink: #ffe600;
+    --band: #c21e16;
+  }
+}
+* {
+  box-sizing: border-box;
+}
+html {
+  scroll-padding-top: 24px;
+}
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--print);
+  font: 400 var(--body) / 1.6 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+h1,
+h2,
+h3,
+p,
+figure,
+blockquote,
+dl,
+dd {
+  margin: 0;
+}
+h2 {
+  font-size: var(--heading);
+  line-height: 1.04;
+  letter-spacing: -0.035em;
+  font-weight: 800;
+}
+h3 {
+  font-size: var(--lead);
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+p {
+  max-width: 60ch;
+}
+a {
+  text-decoration-line: underline;
+  color: inherit;
+  text-underline-offset: 0.22em;
+  text-decoration-thickness: 1px;
+}
+a:hover {
+  text-decoration-thickness: 3px;
+}
+a:focus-visible,
+button:focus-visible {
+  outline: 3px solid currentColor;
+  outline-offset: 5px;
+}
+button {
+  font: inherit;
+  cursor: pointer;
+}
+code {
+  font: 0.9em/1.6 var(--mono);
+}
+::selection {
+  background: var(--print);
+  color: var(--ground);
+}
+.skip {
+  position: absolute;
+  z-index: 5;
+  top: 8px;
+  left: 8px;
+  padding: 8px 16px;
+  background: var(--ground);
+  transform: translateY(-150%);
+}
+.skip:focus {
+  transform: none;
+}
+.sheet {
+  max-width: 1440px;
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+.fine {
+  font-size: var(--small);
+  line-height: 1.45;
+}
+.cap-band {
+  overflow: hidden;
+  background: var(--band);
+  color: var(--band-type);
+  padding: 24px 0 16px;
+}
+.band-run {
+  width: max-content;
+  padding-left: var(--gutter);
+  transform: translateX(var(--wrap, 0px)) skewX(-12deg);
+  transform-origin: left center;
+}
+.band-run p {
+  white-space: nowrap;
+  max-width: none;
+  font: 400 clamp(64px, 8.3vw, 128px) / 1 var(--condensed);
+  letter-spacing: -0.035em;
+}
+.band-tail {
+  margin-left: 64px;
+}
+.cap-band .band-note {
+  display: block;
+  padding: 8px var(--gutter) 0;
+  text-align: right;
+  font-size: var(--small);
+  font-weight: 700;
+}
+.nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  padding-block: 16px;
+  border-bottom: 2px solid;
+  font-size: var(--small);
+  font-weight: 700;
+}
+.nav a {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+}
+.nav-links {
+  display: flex;
+  gap: 32px;
+}
+.front {
+  padding-top: 40px;
+}
+.front-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 296px;
+  column-gap: 64px;
+  align-items: start;
+}
+.identity {
+  min-width: 0;
+}
+.batch {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: var(--small);
+  line-height: 1.3;
+}
+.batch a {
+  font-family: var(--mono);
+}
+.label-wordmark {
+  position: relative;
+  margin: 24px -4px 0 -12px;
+}
+.label-wordmark svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  fill: currentColor;
+}
+.product-type {
+  font-size: clamp(18px, 2vw, 24px);
+  font-weight: 700;
+  line-height: 1.2;
+  margin-top: 8px;
+}
+.front-copy {
+  margin-top: 32px;
+}
+.front-copy h2 {
+  max-width: 18ch;
+}
+.front-copy p {
+  margin-top: 16px;
+  color: var(--ink);
+  max-width: 46ch;
+}
+.caution {
+  border: 3px solid;
+  padding: 8px;
+}
+.caution-inner {
+  border: 1px solid;
+  padding: 16px;
+}
+.caution h2 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font: 400 40px/1 var(--condensed);
+  letter-spacing: 0;
+}
+.hazard {
+  width: 34px;
+  height: 32px;
+  flex: 0 0 auto;
+}
+.caution p {
+  font-size: 16px;
+  line-height: 1.35;
+  font-weight: 700;
+  text-transform: uppercase;
+  margin-top: 16px;
+}
+.caution p + p {
+  border-top: 1px solid;
+  padding-top: 12px;
+}
+.aside-install {
+  display: block;
+  margin-top: 24px;
+  padding-block: 16px;
+  border-block: 3px solid;
+  font-size: var(--lead);
+  font-weight: 700;
+  text-decoration: none;
+}
+.aside-install span {
+  float: right;
+}
+.aside-note {
+  margin-top: 8px;
+}
+.contents-line {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 24px;
+  margin-top: 40px;
+  padding: 12px 0;
+  border-block: 2px solid;
+  font-size: var(--small);
+  font-weight: 700;
+}
+/* The bottle is progressive enhancement. Without it, the still and label stay in normal flow. */
+.bottle-intro {
+  position: relative;
+  height: min(900px, 100svh);
+  min-height: 560px;
+}
+.bottle-stage {
+  position: sticky;
+  top: 0;
+  height: 100svh;
+  min-height: 560px;
+  overflow: hidden;
+  background: var(--ground);
+}
+.bottle-still {
+  display: block;
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.bottle-canvas {
+  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+}
+.bottle-nav {
+  position: absolute;
+  z-index: 2;
+  inset: 24px var(--gutter) auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  font-size: 16px;
+}
+.bottle-nav strong {
+  font: italic 36px/1 var(--condensed);
+}
+.bottle-caption {
+  position: absolute;
+  z-index: 2;
+  left: var(--gutter);
+  bottom: 56px;
+  max-width: 24ch;
+  font-size: clamp(20px, 2.5vw, 32px);
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.bottle-controls {
+  position: absolute;
+  z-index: 2;
+  right: var(--gutter);
+  bottom: 56px;
+  display: grid;
+  gap: 12px;
+  justify-items: end;
+  font-size: 14px;
+}
+.bottle-controls button {
+  padding: 8px 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font-size: 14px;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+.bottle-cue {
+  display: none;
+  font-weight: 700;
+}
+.bottle-active .bottle-intro {
+  height: calc(var(--bottle-travel) + var(--bottle-height, 100svh));
+}
+.bottle-active .bottle-canvas {
+  opacity: 1;
+}
+.bottle-active .bottle-still {
+  visibility: hidden;
+}
+.bottle-active .bottle-cue {
+  display: block;
+}
+.bottle-active .caution {
+  animation: none !important;
+}
+.bottle-active #label-page {
+  margin-top: calc(-1 * var(--bottle-height, 100svh));
+  position: relative;
+  z-index: 3;
+}
+#label-page {
+  background: var(--ground);
+}
+#label-page:focus {
+  outline: none;
+}
+@media (max-width: 700px) {
+  .bottle-intro,
+  .bottle-stage {
+    min-height: 540px;
+  }
+  .bottle-nav {
+    top: 20px;
+    font-size: 14px;
+  }
+  .bottle-still {
+    object-fit: cover;
+    height: 86%;
+    top: 7%;
+  }
+  .bottle-caption {
+    bottom: 80px;
+    max-width: 22ch;
+    font-size: 20px;
+  }
+  .bottle-controls {
+    bottom: 24px;
+    left: var(--gutter);
+    right: var(--gutter);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bottle-intro {
+    height: min(680px, 80svh);
+    min-height: 480px;
+  }
+  .bottle-stage {
+    position: relative;
+    height: 100%;
+    min-height: 480px;
+  }
+  .bottle-still {
+    height: 86%;
+    top: 7%;
+  }
+}
+
+:root {
+  --label: var(--yellow);
+  --text: var(--ink);
+  --muted: var(--ink);
+  --rule: var(--print);
+  --gap: var(--gutter);
+  --small: 0.875rem;
+}
+.display {
+  font-size: var(--heading);
+  font-family: var(--sans);
+  font-stretch: normal;
+  font-weight: 800;
+  line-height: 1.04;
+  letter-spacing: -0.035em;
+  color: var(--print);
+}
+.section {
+  border-color: var(--print);
+}
+.feed-sec {
+  border-top-width: 8px;
+}
+.views {
+  border: 3px solid var(--print);
+  padding: 40px;
+  margin-block: 32px;
+}
+.more {
+  border-top: 0;
+}
+.pull {
+  font-size: clamp(28px, 3.9vw, 56px);
+  color: var(--print);
+}
+.back {
+  background: var(--ground);
+  color: var(--ink);
+  border-top: 8px solid var(--print);
+}
+.back .display,
+.foot {
+  color: var(--print);
+}
+.foot {
+  border-color: var(--print);
+}
+.back .install {
+  background: none;
+  color: var(--ink);
+  padding: 20px 0;
+  border-block: 2px solid var(--print);
+}
+.bottle-caption {
+  max-width: none;
+}
+.bottle-caption p {
+  font: inherit;
+}
+.hero-install {
+  display: block;
+  font: 400 16px/1.5 var(--mono);
+  margin-top: 20px;
+  user-select: all;
+  color: var(--ink);
+}
+.hero-note {
+  display: block;
+  font: 400 14px/1.5 var(--sans);
+  margin-top: 8px;
+  max-width: 52ch;
+  color: var(--ink);
+}
+.bottle-active .bottle-stage {
+  isolation: isolate;
+}
+@media (min-width: 1600px) {
+  .cap-band .band-run {
+    padding-left: calc((100vw - 1440px) / 2 + 80px);
+  }
+}
+@media (max-width: 1100px) {
+  .front-grid {
+    grid-template-columns: minmax(0, 1fr) 256px;
+    gap: 32px;
+  }
+  .caution-inner {
+    padding: 12px;
+  }
+  .caution h2 {
+    font-size: 32px;
+  }
+}
+@media (max-width: 700px) {
+  :root {
+    --body: 1rem;
+    --lead: 1.375rem;
+  }
+  .cap-band {
+    padding-block: 16px 12px;
+  }
+  .band-run p {
+    font-size: 56px;
+  }
+  .band-tail {
+    margin-left: 32px;
+  }
+  .cap-band .band-note {
+    text-align: left;
+    font-size: 12px;
+  }
+  .nav {
+    padding-block: 8px;
+    gap: 16px;
+  }
+  .nav-links {
+    gap: 20px;
+  }
+  .front {
+    padding-top: 24px;
+  }
+  .front-grid {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+  .batch {
+    font-size: 12px;
+    gap: 8px;
+  }
+  .label-wordmark {
+    margin: 24px -4px 0 -6px;
+  }
+  .front-copy {
+    margin-top: 24px;
+  }
+  .front-copy h2 {
+    max-width: 17ch;
+  }
+  .front-copy p {
+    margin-top: 12px;
+  }
+  .caution-inner {
+    padding: 16px;
+  }
+  .caution p {
+    font-size: 14px;
+    line-height: 1.35;
+    margin-top: 12px;
+  }
+  .caution p + p {
+    padding-top: 8px;
+  }
+  .aside-install {
+    margin-top: 16px;
+    padding-block: 12px;
+  }
+  .contents-line {
+    margin-top: 32px;
+    font-size: 12px;
+  }
+  .views {
+    padding: 24px 20px;
+  }
+  .bottle-caption {
+    bottom: 88px;
+    left: 24px;
+    right: 24px;
+    font-size: 20px;
+  }
+  .hero-install {
+    font-size: 14px;
+    margin-top: 12px;
+    letter-spacing: -0.035em;
+  }
+  .hero-note {
+    font-size: 12px;
+    max-width: 44ch;
+  }
+  .bottle-still {
+    height: 72%;
+    top: 1%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+[data-label-face] {
+  min-height: 100svh;
+}
+/* The missing-page route uses the same ink and amber/yellow stock. */
+.cover {
+  background: var(--ground);
+  color: var(--ink);
+}
+.mast {
+  border-color: var(--print);
+  color: var(--print);
+}
+.lost .wordmark {
+  color: var(--print);
+  font-family: var(--condensed);
+  font-style: italic;
+}
+
+.feed-sec {
+  position: relative;
+}
+.label-slash {
+  position: absolute;
+  top: -48px;
+  right: 16px;
+  width: 96px;
+  height: 96px;
+  padding: 8px;
+  background: var(--ground);
+  fill: var(--print);
+}
+
+.more {
+  grid-template-columns: 3fr 2fr;
+}
+@media (max-width: 1100px) {
+  .more {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) and (max-height: 700px) {
+  .bottle-still { height: 54%; top: 8%; }
+}

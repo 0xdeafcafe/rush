@@ -5,7 +5,7 @@
 // that reach each screen, and draws what tmux shows as a picture in a
 // macOS window.
 //
-//	go -C tools/shots run . [-only name] [../../docs/screenshots]
+//	go -C tools/shots run . [-only name] [-ansi-out DIR] [-ansi-only] [../../docs/screenshots]
 //
 // It needs tmux and Claude Code installed (rush lists Claude Code's
 // sessions only when it is; it's never run), and writes WebP with cwebp
@@ -13,9 +13,11 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"image/png"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,6 +28,10 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--fixture-worker" {
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		return
+	}
 	only := flag.String("only", "", "take only the shots whose names contain this")
 	rush := flag.String("rush", "", "the rush to run (default: the one on PATH)")
 	root := flag.String("root", filepath.Join(os.TempDir(), "rush-shots"), "where the world is built, afresh for each shot")
@@ -33,17 +39,31 @@ func main() {
 	keepPNG := flag.Bool("png", false, "write PNG even when cwebp is installed")
 	keep := flag.Bool("keep", false, "leave rush running in tmux after the last shot, to look around: tmux -L rush-shots attach")
 	ansiFile := flag.String("ansi", "", "draw this file of ANSI text as a picture beside it, and nothing else")
+	ansiOut := flag.String("ansi-out", "", "write captured ANSI and width/height JSON into this directory")
+	ansiOnly := flag.Bool("ansi-only", false, "export ANSI without rasterising (requires -ansi-out)")
 	flag.Parse()
-	if err := run(*only, *rush, *root, *scale, *keepPNG, *keep, *ansiFile); err != nil {
+	if err := run(*only, *rush, *root, *scale, *keepPNG, *keep, *ansiFile, *ansiOut, *ansiOnly); err != nil {
 		fmt.Fprintln(os.Stderr, "shots:", err)
 		os.Exit(1)
 	}
 }
 
-func run(only, rush, root string, scale float64, keepPNG, keep bool, ansiFile string) error {
-	fs, err := loadFonts(13 * scale)
-	if err != nil {
-		return err
+func run(only, rush, root string, scale float64, keepPNG, keep bool, ansiFile, ansiOut string, ansiOnly bool) error {
+	if ansiOnly && (ansiOut == "" || ansiFile != "") {
+		return fmt.Errorf("-ansi-only requires -ansi-out and cannot be combined with -ansi")
+	}
+	var fs *fonts
+	var err error
+	if !ansiOnly {
+		fs, err = loadFonts(13 * scale)
+		if err != nil {
+			return err
+		}
+	}
+	if ansiOut != "" {
+		if err := os.MkdirAll(ansiOut, 0o755); err != nil {
+			return err
+		}
 	}
 	if ansiFile != "" {
 		b, err := os.ReadFile(ansiFile)
@@ -73,6 +93,7 @@ func run(only, rush, root string, scale float64, keepPNG, keep bool, ansiFile st
 	if _, err := exec.LookPath("cwebp"); err == nil && !keepPNG {
 		webp = true
 	}
+	version, _ := exec.Command(rush, "--version").Output()
 	for _, s := range shots {
 		if only != "" && !strings.Contains(s.name, only) {
 			continue
@@ -83,12 +104,39 @@ func run(only, rush, root string, scale float64, keepPNG, keep bool, ansiFile st
 			return fmt.Errorf("%s: %w", s.name, err)
 		}
 		_ = os.WriteFile(filepath.Join(root, s.name+".ans"), []byte(frame), 0o644)
-		if err := save(fs, scale, frame, s.w, s.h, filepath.Join(out, s.name), !webp); err != nil {
-			return fmt.Errorf("%s: %w", s.name, err)
+		if ansiOut != "" {
+			if err := exportANSI(ansiOut, s, frame, strings.TrimSpace(string(version))); err != nil {
+				return fmt.Errorf("%s: %w", s.name, err)
+			}
+		}
+		if !ansiOnly {
+			if err := save(fs, scale, frame, s.w, s.h, filepath.Join(out, s.name), !webp); err != nil {
+				return fmt.Errorf("%s: %w", s.name, err)
+			}
 		}
 		fmt.Printf("%-20s %s\n", s.name, time.Since(start).Round(100*time.Millisecond))
 	}
 	return nil
+}
+
+// exportANSI keeps the actual capture bytes untouched. Dimensions and provenance
+// live beside them rather than being prepended as invented terminal output.
+func exportANSI(dir string, s shot, frame, version string) error {
+	if err := os.WriteFile(filepath.Join(dir, s.name+".ansi"), []byte(frame), 0o644); err != nil {
+		return err
+	}
+	meta := struct {
+		Width    int    `json:"width"`
+		Height   int    `json:"height"`
+		Rush     string `json:"rush"`
+		Captured string `json:"captured"`
+		World    string `json:"world"`
+	}{s.w, s.h, version, time.Now().UTC().Format(time.RFC3339), "Sam's fictional repositories; tools/shots"}
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, s.name+".json"), append(data, '\n'), 0o644)
 }
 
 // take builds the world, runs rush in it, goes through the shot's steps
@@ -98,6 +146,12 @@ func take(s shot, rush, root string, keep bool) (string, error) {
 	w, err := build(root)
 	if err != nil {
 		return "", err
+	}
+	defer w.stopWebsite()
+	if strings.HasPrefix(s.name, "agents") || s.name == "feed" {
+		if err := w.website(s.name != "agents-before"); err != nil {
+			return "", err
+		}
 	}
 	program, err := w.script(rush)
 	if err != nil {

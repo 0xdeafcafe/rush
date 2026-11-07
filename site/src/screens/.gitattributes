@@ -1,0 +1,2 @@
+# Capture-pane preserves terminal cells, including significant trailing spaces.
+*.ansi -whitespace

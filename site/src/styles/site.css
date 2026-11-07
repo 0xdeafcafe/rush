@@ -67,16 +67,6 @@ figcaption { margin-top: 0.6rem; }
 .cover-bottle { grid-column: 2; grid-row: 1 / span 2; align-self: center; justify-self: center; }
 .cover-bottle figcaption { font-size: var(--small); font-weight: 700; text-align: center; }
 
-/* the drawn bottle: a 320 x 560 drawing, scaled as a whole */
-.bottle { --bottle-scale: 0.95; position: relative; width: calc(320px * var(--bottle-scale)); height: calc(560px * var(--bottle-scale)); }
-.bottle-stage { position: absolute; left: 50%; top: 50%; width: 320px; height: 560px; margin: -280px 0 0 -160px; transform-origin: 50% 55%; }
-.bottle-glass { position: absolute; inset: 0; width: 320px; height: 560px; overflow: visible; }
-.bottle-faces { position: absolute; left: 160px; top: 360px; width: 0; height: 0; }
-.bottle-face { position: absolute; top: -88px; height: 176px; background-image: var(--art); background-repeat: no-repeat; background-size: var(--lw) var(--lh); }
-.motion .bottle-face { will-change: transform; }
-.bottle-shade { position: absolute; left: 40px; top: 272px; width: 240px; height: 176px; pointer-events: none;
-  background: linear-gradient(90deg, rgb(0 0 0 / 0.55), rgb(0 0 0 / 0.1) 18%, rgb(255 255 255 / 0.2) 40%, rgb(0 0 0 / 0) 60%, rgb(0 0 0 / 0.25) 85%, rgb(0 0 0 / 0.6)); }
-
 /* ---------- sections ---------- */
 .section { padding: clamp(3.5rem, 8vw, 7.5rem) 0; border-top: 2px solid var(--rule); }
 .section:first-of-type { border-top: 0; }
@@ -106,81 +96,40 @@ figcaption { margin-top: 0.6rem; }
 .foot { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem 1.5rem; border-top: 2px solid var(--ink); padding: 1rem 0 1.5rem; font-size: var(--small); font-weight: 700; }
 .foot span:last-child { display: flex; gap: 1.5rem; }
 
-/* ---------- screenshots: one rectangle of the original ---------- */
-.crop { --cx: var(--x); --cy: var(--y); --cw: var(--w); --ch: var(--h); overflow: hidden; aspect-ratio: var(--cw) / var(--ch); background: var(--screen); }
-.crop img { display: block; max-width: none; height: auto; width: calc(100% * var(--n) / var(--cw)); margin-left: calc(-100% * var(--cx) / var(--cw)); margin-top: calc(-100% * var(--cy) / var(--cw)); }
-
-/* ---------- rush's screens, as text ---------- */
-.term { --row: 20px; background: var(--screen); color: var(--t-text); font: 400 13px / var(--row) var(--mono); font-variant-numeric: tabular-nums; padding: 16px 20px 20px; overflow: hidden; }
-.term b { font-weight: 700; }
-.t-sub { color: var(--t-sub); }
-.t-faint { color: var(--t-faint); }
-.t-orange { color: var(--t-orange); }
-.t-gold { color: var(--t-gold); }
-.t-green { color: var(--t-green); }
-.t-blue { color: var(--t-blue); }
-.p-copilot { color: #b3a6f2; }
-.p-codex { color: #6cc7b0; }
-.p-gemini { color: #7ea6f0; }
-.p-plain { color: var(--t-text); }
-.term-top { white-space: pre; padding-bottom: 12px; margin-bottom: 8px; border-bottom: 1px solid var(--t-line); }
-.l-head, .l-agent { display: grid; grid-template-columns: minmax(0, 48ch) minmax(0, 1fr) 7ch 5ch 5ch 6ch 6ch 6ch; column-gap: 1.2ch; }
-.l-head { color: var(--t-sub); }
-.l-head span:nth-child(n + 3), .a-m { text-align: right; }
-.a-m { color: var(--t-sub); }
-.a-name, .a-latest { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.a-name b { font-weight: 400; }
-.a-latest { color: var(--t-sub); }
-.l-needs .a-name b { font-weight: 700; }
-.l-done .a-name b { font-weight: 700; color: var(--t-green); }
-.lines { position: relative; height: calc(var(--rows) * var(--row)); padding: 0; list-style: none; }
-.l { position: absolute; left: 0; right: 0; top: 0; height: var(--row); white-space: nowrap; transform: translateY(calc(var(--now) * var(--row))); }
-.l-group, .l-project { display: flex; gap: 1ch; align-items: center; }
-.l-group i, .l-project i, .feed-rule i { flex: 1; border-bottom: 1px solid var(--t-line); }
-.l-project i { border-bottom-style: dotted; }
-.l-worktree { padding-left: 2ch; }
-.l-group { color: var(--t-text); }
-.was { display: none; }
-/* before the question: the list as it was; .arrived is set by the script */
-.motion [data-list]:not(.arrived) .was { display: inline; }
-.motion [data-list]:not(.arrived) .now { display: none; }
-.motion [data-list]:not(.arrived) .l { transform: translateY(calc(var(--was) * var(--row))); }
-.motion [data-list]:not(.arrived) .l-needs.moves .a-name b { font-weight: 400; }
-.motion .l.moves { transition: transform var(--move) var(--ease) 220ms; }
-.l-needs.moves { z-index: 1; background: var(--screen); }
-
-.feed-rule { display: flex; align-items: center; white-space: pre; }
-.chirps { padding: 4px 0 0; list-style: none; }
-.chirp-row { display: grid; grid-template-columns: 27ch minmax(0, 1fr) 3ch; column-gap: 2ch; }
-.c-who, .c-said { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.c-said { color: var(--t-sub); }
-.c-ago { text-align: right; }
-.motion .chirp-row { transition: opacity 250ms var(--ease), transform 250ms var(--ease); }
-.motion .chirp-row:not(.landed) { opacity: 0; transform: translateY(8px); }
-
-@media (prefers-color-scheme: dark) {
-  .term, .crop { box-shadow: inset 0 0 0 1px var(--t-line); }
-}
-
 /* ---------- narrow ---------- */
 @media (max-width: 760px) {
   .mast nav { gap: 1rem; }
   .cover-body, .list-head, .feed-grid, .views, .more, .back-body { grid-template-columns: 1fr; }
   .wordmark { font-size: 44vw; }
   .cover-bottle { grid-column: 1; grid-row: auto; margin-top: 2.5rem; }
-  .bottle { --bottle-scale: 0.62; }
   .list-fig { margin-left: calc(-1 * var(--gap)); }
   .list-fig figcaption { padding: 0 var(--gap); }
-  .term { --row: 18px; font-size: 11.5px; padding: 12px 14px 14px; }
-  .l-head, .l-agent { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
-  .l-head span:nth-child(n + 3), .a-m { display: none; }
-  .term-top span:last-child { display: none; }
-  .chirp-row { grid-template-columns: minmax(0, 1fr) 3ch; }
-  .c-said { grid-column: 1 / -1; grid-row: 2; white-space: normal; padding-left: 2ch; }
-  .c-who { grid-row: 1; }
-  .crop-narrow { --cx: var(--nx, var(--x)); --cy: var(--ny, var(--y)); --cw: var(--nw, var(--w)); --ch: var(--nh, var(--h)); }
   .sub-shot { width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* Real terminal cells, raster-free. Scale with their container until 11px,
+   then keep that readable cell size and allow only this region to scroll. */
+.ansi-container { container-type: inline-size; min-width: 0; }
+.ansi-scroll { overflow-x: auto; padding: 16px; background: #111; overscroll-behavior-x: contain; }
+.ansi-scroll:focus-visible { outline: 3px solid var(--print); outline-offset: 4px; }
+.ansi-screen { --cell-line: 1.2em; color: #f0ece6; background: #111; font: 400 clamp(11px, calc((100cqw - 32px) / (var(--cols) * .602)), 13px)/1.2 "SFMono-Regular", Menlo, Consolas, monospace; font-variant-ligatures: none; font-kerning: none; letter-spacing: 0; margin: 0; width: calc(var(--cols) * 1ch); user-select: none; -webkit-user-select: none; }
+.ansi-row { display: block; height: var(--cell-line); white-space: pre; }
+.ansi-row span[style] { display: inline-block; }
+.ansi-content { user-select: text; -webkit-user-select: text; }
+.ansi-moving { position: relative; height: calc(var(--rows) * var(--cell-line)); }
+.ansi-moving .ansi-row { position: absolute; left: 0; top: 0; transform: translateY(calc(var(--now) * var(--cell-line))); }
+.was { display: none; }
+.motion [data-list]:not(.arrived) .was { display: inline; }
+.motion [data-list]:not(.arrived) .now { display: none; }
+.motion [data-list]:not(.arrived) .ansi-row { transform: translateY(calc(var(--was) * var(--cell-line))); }
+.motion [data-list]:not(.arrived) .ansi-new { opacity: 0; }
+.motion .ansi-moving .ansi-row { transition: transform var(--move) var(--ease) 220ms; background: #111; }
+.motion .chirp-row { transition: opacity 250ms var(--ease), transform 250ms var(--ease); }
+.motion .chirp-row:not(.landed) { opacity: 0; transform: translateY(8px); }
+@media (prefers-reduced-motion: reduce) { .ansi-row { transition: none !important; } }
+
+.motion .ansi-moving .ansi-new { transition: opacity 150ms var(--ease) 400ms; }
+.motion [data-list]:not(.arrived) .ansi-new { transition-delay: 0ms; }

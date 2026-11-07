@@ -5,18 +5,22 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro check && astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "test": "node --test src/lib/ansi.test.ts"
   },
   "dependencies": {
     "@astrojs/react": "^7.1.4",
     "astro": "^7.4.7",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "three": "0.180.0"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.12",
+    "@types/node": "24.10.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/three": "0.180.0",
     "typescript": "^6.0.3"
   }
 }

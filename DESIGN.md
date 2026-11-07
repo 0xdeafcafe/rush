@@ -3304,3 +3304,14 @@ as one, and the comparison names the commits it spans.
 3. Other adapters.
 4. Remaining screens, plugins, pr, remote, menubar, update; then the Go
    version retires.
+
+## Website captures
+
+`tools/shots` can export the installed rush's `tmux capture-pane -e` output with
+`-ansi-out DIR`, plus adjacent JSON terminal dimensions, rush version and capture
+time. `-ansi-only` skips rasterisation and font loading. The website renders those
+captures as selectable, styled terminal cells at build time. Its Agents before/
+after and feed fixtures use Sam's isolated world and copies of the capture tool
+named `claude` as inert workers, blocked on stdin. They never invoke a model or
+read the real home; cleanup closes and reaps the fixture workers. The original
+raster screenshot route remains available for the README.

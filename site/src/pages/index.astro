@@ -1,28 +1,29 @@
 ---
-// rush.forbes.red: the zine. Screenshots go through astro:assets, which
-// makes the webp srcset; everything else is the Zine component, rendered
-// to HTML here with no React in the browser.
-import { getImage } from "astro:assets";
+// Bottle, printed label and live terminal evidence, with no client React.
+import { Image } from "astro:assets";
+import bottleStill from "../assets/bottle-still.png";
 import Base from "../layouts/Base.astro";
 import Zine from "../components/Zine";
-import subagentsSrc from "../assets/subagents.webp";
-import commandRunSrc from "../assets/command-run.webp";
-
-async function img(src: ImageMetadata) {
-  const out = await getImage({ src, widths: [1600, src.width], format: "webp" });
-  return { src: out.src, srcSet: out.srcSet.attribute, width: src.width, height: src.height };
-}
-const subagents = await img(subagentsSrc);
-const commandRun = await img(commandRunSrc);
 ---
 
 <Base
   title="rush: every coding agent you run, in one terminal"
   description="rush puts Claude Code, Codex, Copilot, Kimi, Ollama and the rest in one list, in one terminal, on your Mac. Written in Rust."
 >
-  <Zine subagents={subagents} commandRun={commandRun} />
+  <a class="skip" href="#label-page">Skip to the label</a>
+  <section class="bottle-intro" id="bottle-intro" aria-label="The rush bottle">
+    <div class="bottle-stage">
+      <Image class="bottle-still" src={bottleStill} format="png" alt="A glossy yellow rush bottle wrapped in the same red label as this page." loading="eager" fetchpriority="high" />
+      <canvas class="bottle-canvas" aria-hidden="true"></canvas>
+      <div class="bottle-nav"><strong>rush</strong><a href="#label-page">Skip to label</a></div>
+      <div class="bottle-caption"><p>Every coding agent.<br />Under one cap.</p><code class="hero-install">brew install 0xdeafcafe/tap/rush</code><span class="hero-note">Plain <code>brew install rush</code> gets GNU’s restricted shell.</span></div>
+      <div class="bottle-controls"><span class="bottle-cue">Scroll to unwrap ↓</span><button type="button" hidden>Use still image</button></div>
+    </div>
+  </section>
+  <div id="label-page" tabindex="-1"><Zine /></div>
 </Base>
 
 <script>
   import "../scripts/motion";
+  import "../scripts/bottle";
 </script>

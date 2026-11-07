@@ -1,25 +1,97 @@
 <!doctype html>
-<!-- The social card, public/og.png. Render at 1280x640:
-     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --hide-scrollbars \
-       --window-size=1280,640 --screenshot=public/og.png "file://$PWD/og/og.html"
-     Same tokens as the site (DESIGN.md): label yellow, label red, cap black. -->
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-  * { box-sizing: border-box; margin: 0; }
-  html, body { width: 1280px; height: 640px; overflow: hidden; }
-  body { background: #ffe600; color: #111010; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; padding: 40px 64px; display: flex; flex-direction: column; }
-  .mast { display: flex; justify-content: space-between; border-bottom: 3px solid #111010; padding-bottom: 14px; font-size: 22px; font-weight: 700; }
-  .word { font-stretch: condensed; font-weight: 900; color: #e8231f; font-size: 300px; line-height: .74; letter-spacing: -.02em; margin: 44px 0 0 -10px; }
-  h1 { font-stretch: condensed; font-weight: 900; font-size: 64px; line-height: .95; margin-top: 30px; max-width: 18ch; }
-  code { position: absolute; right: 64px; bottom: 56px; background: #111010; color: #ffe600; font: 500 24px/1 ui-monospace, "SF Mono", Menlo, monospace; padding: 18px 22px; }
-</style>
-</head>
-<body>
-  <div class="mast"><span>For Macs with Apple silicon</span><span>rush.forbes.red</span></div>
-  <div class="word">rush</div>
-  <h1>Every coding agent you run, in one terminal.</h1>
-  <code>brew install 0xdeafcafe/tap/rush</code>
-</body>
+<!-- Render from site/: Google Chrome --headless=new --hide-scrollbars --window-size=1280,640 --screenshot=public/og.png file://$PWD/og/og.html -->
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <title>rush social card</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+      }
+      html,
+      body {
+        width: 1280px;
+        height: 640px;
+        overflow: hidden;
+      }
+      body {
+        background: #ffe600;
+        color: #c21e16;
+        font-family: "Helvetica Neue", Helvetica, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .band {
+        background: #c21e16;
+        color: #ffe600;
+        padding: 18px 56px 14px;
+        overflow: hidden;
+      }
+      .band p {
+        font:
+          76px/1 Impact,
+          "Arial Narrow",
+          sans-serif;
+        transform: skewX(-12deg);
+        white-space: nowrap;
+        letter-spacing: -0.035em;
+      }
+      .band span {
+        margin-left: 64px;
+      }
+      .body {
+        padding: 48px 64px;
+        position: relative;
+        height: 532px;
+      }
+      h1 {
+        font-size: 68px;
+        line-height: 1.02;
+        letter-spacing: -0.035em;
+        max-width: 12ch;
+        font-weight: 800;
+      }
+      code {
+        display: block;
+        color: #21170a;
+        font:
+          20px/1.5 Menlo,
+          monospace;
+        margin-top: 32px;
+      }
+      .small {
+        position: absolute;
+        bottom: 32px;
+        left: 64px;
+        font-size: 16px;
+        font-weight: 700;
+      }
+      img {
+        position: absolute;
+        width: 850px;
+        height: auto;
+        right: -140px;
+        top: -8px;
+      }
+      .url {
+        position: absolute;
+        right: 64px;
+        bottom: 32px;
+        font-size: 16px;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="band">
+      <p>GET THEM ALL IN.<span>EVERY LAST AGENT.</span></p>
+    </div>
+    <div class="body">
+      <img src="../src/assets/bottle-still.png" alt="The yellow rush bottle" />
+      <h1>Every coding agent.<br />Under one cap.</h1>
+      <code>brew install 0xdeafcafe/tap/rush</code>
+      <p class="small">AI HARNESS POLISHER<br />NOT FOR AGENT CONSUMPTION</p>
+      <p class="url">rush.forbes.red</p>
+    </div>
+  </body>
 </html>

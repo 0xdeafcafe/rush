@@ -20,6 +20,10 @@ var featuredSession = open("Add Apple Pay to checkout")
 
 // shots are the README's screenshots, each showing one thing rush does.
 var shots = []shot{
+	// The actual initial Agents list, before opening a session.
+	{name: "agents", w: 180, h: 46},
+	{name: "agents-before", w: 180, h: 46},
+	{name: "feed", w: 120, h: 40},
 	// The conversation: what was asked, what it did, what it said.
 	{name: "session", w: 180, h: 50, steps: featuredSession},
 	// A failed step opened: its script and the error.

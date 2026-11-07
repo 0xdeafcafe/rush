@@ -3,6 +3,7 @@ package main
 import (
 	"cmp"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,10 +15,12 @@ import (
 // transcripts of the agents that worked in them, and rush's settings, all
 // under one folder that belongs to nobody.
 type world struct {
-	root string // everything is under here
-	home string // $HOME
-	bin  string // the fake programs, first on PATH
-	now  time.Time
+	root         string // everything is under here
+	home         string // $HOME
+	bin          string // the fake programs, first on PATH
+	now          time.Time
+	fixtures     []*exec.Cmd
+	fixtureInput []io.WriteCloser
 }
 
 func (w *world) ago(d time.Duration) time.Time { return w.now.Add(-d) }
