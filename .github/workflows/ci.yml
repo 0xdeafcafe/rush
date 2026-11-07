@@ -9,7 +9,10 @@ name: CI
 on:
   push:
     branches: [main, "rush/**"]
+    # The website builds in pages.yml; it doesn't need rush's tests.
+    paths-ignore: ["site/**", ".github/workflows/pages.yml"]
   pull_request:
+    paths-ignore: ["site/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:

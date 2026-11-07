@@ -1,0 +1,28 @@
+---
+// rush.forbes.red: the zine. Screenshots go through astro:assets, which
+// makes the webp srcset; everything else is the Zine component, rendered
+// to HTML here with no React in the browser.
+import { getImage } from "astro:assets";
+import Base from "../layouts/Base.astro";
+import Zine from "../components/Zine";
+import subagentsSrc from "../assets/subagents.webp";
+import commandRunSrc from "../assets/command-run.webp";
+
+async function img(src: ImageMetadata) {
+  const out = await getImage({ src, widths: [1600, src.width], format: "webp" });
+  return { src: out.src, srcSet: out.srcSet.attribute, width: src.width, height: src.height };
+}
+const subagents = await img(subagentsSrc);
+const commandRun = await img(commandRunSrc);
+---
+
+<Base
+  title="rush: every coding agent you run, in one terminal"
+  description="rush puts Claude Code, Codex, Copilot, Kimi, Ollama and the rest in one list, in one terminal, on your Mac. Written in Rust."
+>
+  <Zine subagents={subagents} commandRun={commandRun} />
+</Base>
+
+<script>
+  import "../scripts/motion";
+</script>

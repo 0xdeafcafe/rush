@@ -1,0 +1,26 @@
+---
+// The page GitHub Pages serves for anything that isn't there.
+import Base from "../layouts/Base.astro";
+---
+
+<Base title="Not found: rush" description="There's no page here. rush runs every coding agent you've got in one terminal.">
+  <header class="cover lost">
+    <div class="wrap">
+      <div class="mast">
+        <a href="/">rush</a>
+        <nav aria-label="Sections"><a href="https://github.com/0xdeafcafe/rush">GitHub</a></nav>
+      </div>
+      <div class="lost-body">
+        <p class="wordmark" aria-hidden="true">404</p>
+        <h1 class="display">That’s not in the bottle.</h1>
+        <p class="deck">There’s no page at this address. <a href="/">The front page</a> has the rest of rush.</p>
+      </div>
+    </div>
+  </header>
+</Base>
+
+<style>
+  .lost { min-height: 100svh; }
+  .lost-body { padding: clamp(2rem, 5vw, 4rem) 0; }
+  .lost h1 { max-width: 14ch; margin-bottom: 1.5rem; }
+</style>
