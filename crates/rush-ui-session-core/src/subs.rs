@@ -590,6 +590,52 @@ struct Got {
     full: HashMap<String, Arc<Session>>,
 }
 
+impl Got {
+    /// A read that brought nothing yet.
+    fn empty(now: Ms, path: String) -> Got {
+        Got {
+            now,
+            path,
+            subs: None,
+            follow: None,
+            stats: HashMap::new(),
+            outs: HashMap::new(),
+            flows: HashMap::new(),
+            task_dir: None,
+            procs: None,
+            spawned: None,
+            found: HashMap::new(),
+            wt: HashMap::new(),
+            detail: None,
+            full: HashMap::new(),
+        }
+    }
+}
+
+/// Rush-only: reads what's asked, and should the reading panic, comes
+/// back all the same, saying so for the run shown whole: a reading that
+/// never came back left `reading` set, and nothing was read again (every
+/// run stayed "reading its conversation…"). What the reader held may be
+/// half-written: it starts afresh.
+fn read_guarded(ask: Ask, reader: &Mutex<Reader>, reg: &rush_core::adapter::Registry) -> Got {
+    let (now, path) = (ask.now, ask.path.clone());
+    let shown = ask.detail.as_ref().map(|(id, _)| id.clone());
+    let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ask.read(reader, reg)));
+    let p = match read {
+        Ok(got) => return got,
+        Err(p) => p,
+    };
+    *reader.lock().unwrap_or_else(|e| e.into_inner()) = Reader::default();
+    let why = p
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| p.downcast_ref::<String>().cloned())
+        .unwrap_or_default();
+    let mut got = Got::empty(now, path);
+    got.detail = shown.map(|id| (id, DetailGot::Failed(format!("rush panicked: {why}"))));
+    got
+}
+
 impl Ask {
     /// When the session's agent last (re)started: its host's start, or its
     /// agent's process's if later; 0 unknown.
@@ -605,22 +651,7 @@ impl Ask {
     /// Reads what's asked; blocks on the disk.
     fn read(self, reader: &Mutex<Reader>, reg: &rush_core::adapter::Registry) -> Got {
         let mut r = reader.lock().unwrap_or_else(|e| e.into_inner());
-        let mut got = Got {
-            now: self.now,
-            path: self.path.clone(),
-            subs: None,
-            follow: None,
-            stats: HashMap::new(),
-            outs: HashMap::new(),
-            flows: HashMap::new(),
-            task_dir: None,
-            procs: None,
-            spawned: None,
-            found: HashMap::new(),
-            wt: HashMap::new(),
-            detail: None,
-            full: HashMap::new(),
-        };
+        let mut got = Got::empty(self.now, self.path.clone());
         if let Some((h, parent)) = &self.spawned {
             got.spawned = Some(h.spawned(parent));
         }
@@ -1822,7 +1853,7 @@ pub fn refresh(m: &mut Model, key: &str) {
     let reader = r.reader.clone();
     let key = key.to_string();
     m.later(
-        move || ask.read(&reader, &reg),
+        move || read_guarded(ask, &reader, &reg),
         move |m, got| took(m, &key, got),
     );
 }
