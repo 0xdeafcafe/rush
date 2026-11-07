@@ -1,6 +1,6 @@
 {
- "commit": "804369ce9ba0184764e6b39688a24f74e620afe4",
- "at": "2026-11-07T04:49:26Z",
+ "commit": "6987a4a3f32ad22ecce92b5150c485c9c6af3390",
+ "at": "2026-11-07T08:44:21Z",
  "metrics": {
   "binary: rush, release": {
    "kind": "binary",
@@ -733,9 +733,5 @@
    "commit": "9df70072d538cf062bd62d6d87f31b6102a0691c"
   }
  },
- "flagged": [
-  "open: subagent runs followed, allocations kept",
-  "open: subagent runs followed, peak",
-  "open: subagent runs followed, retained"
- ]
+ "flagged": []
 }
