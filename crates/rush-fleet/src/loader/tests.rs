@@ -18,7 +18,7 @@ use rush_core::time::{Ms, now};
 use rush_sys::proc::{Pid, Proc};
 
 use super::*;
-use crate::hosted::{Away, HostInfo, Hosts};
+use crate::hosted::{Away, HostInfo, Hosts, Limit};
 use crate::{Predicates, shell_cmd};
 
 const MINUTE: Ms = 60_000;
@@ -714,6 +714,58 @@ fn decisions_need_you() {
         "{a:?}"
     );
     assert_eq!(a.decisions_key, "Scope\x1fGo\x1f");
+}
+
+// Woken by something that isn't your answer, a turn leaves its card open:
+// it asks you all the same, and is still working. What you sent stuck
+// behind that turn, or a limit it asks about, says so instead.
+#[test]
+fn open_card_on_a_working_agent_needs_you() {
+    let t = now();
+    let d = tempfile::tempdir().unwrap();
+    let ask = Some(Limit {
+        resets_at: 0,
+        ask: true,
+    });
+    let table = [
+        ("plain", 0, None, true, "decide: Apple TV icon"),
+        ("stuck", t, None, false, STUCK_NEEDS),
+        ("limit", 0, ask, false, "continue when the limit resets?"),
+    ];
+    for (name, queue_stuck, limit, at_work, needs) in table {
+        let mut l = loader();
+        let mut i = info("wc", "working", &s(d.path()), t);
+        i.started_at = t;
+        i.decisions = Some(vec!["Apple TV icon".into()]);
+        i.queue_stuck = queue_stuck;
+        i.limit = limit;
+        let a = l.hosted(&test_profile(), &i, None, t);
+        assert_eq!(a.job.state, State::Blocked, "{name}");
+        assert_eq!(a.at_work, at_work, "{name}");
+        assert_eq!(a.job.needs, needs, "{name}");
+        assert!(a.decides && a.needs_you(), "{name}: {a:?}");
+    }
+
+    // No card, or a turn over: not at work behind anything.
+    let mut l = loader();
+    let i = info("wn", "working", &s(d.path()), t);
+    let a = l.hosted(&test_profile(), &i, None, t);
+    assert!(!a.at_work && a.job.state == State::Working);
+    let mut i = info("wd", "idle", &s(d.path()), t);
+    i.decisions = Some(vec!["Go".into()]);
+    let a = l.hosted(&test_profile(), &i, None, t);
+    assert!(!a.at_work && a.needs_you());
+
+    // Quiet long enough, it's stuck like any agent at work.
+    let mut a = Agent {
+        at_work: true,
+        ..Agent::default()
+    };
+    a.job.state = State::Blocked;
+    a.job.updated_at = t - crate::STUCK_AFTER;
+    assert!(a.stuck(t));
+    a.at_work = false;
+    assert!(!a.stuck(t));
 }
 
 fn claude_reg(dir: &Path) -> (Registry, Profile) {

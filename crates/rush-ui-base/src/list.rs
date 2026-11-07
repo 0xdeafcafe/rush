@@ -391,7 +391,7 @@ fn cache_wheel(quiet: Ms) -> (&'static str, Color) {
 fn group_turn(a: &Agent, now: Ms, active_for: Ms, just_left_for: Ms) -> Ms {
     let up = a.job.updated_at;
     let base = now - a.age(now);
-    let stuck = (a.job.state == State::Working || a.busy())
+    let stuck = (a.job.state == State::Working || a.at_work || a.busy())
         .then(|| now - a.quiet(now) + rush_fleet::STUCK_AFTER);
     [
         up + 2 * MINUTE,
@@ -1553,6 +1553,9 @@ impl Model {
             col = YELLOW;
             if summary.is_empty() {
                 summary = one_line(&a.job.detail);
+            } else if a.at_work && !a.job.detail.is_empty() {
+                // Still at work behind the card: what it's doing too.
+                summary = format!("{summary} · {}", one_line(&a.job.detail));
             }
         } else if a.job.live() {
             summary = one_line(&a.job.detail);
@@ -1664,9 +1667,9 @@ impl Model {
             sp("◆", GREEN)
         } else if a.just_finished(now) {
             sp("✓", GREEN)
-        } else if a.needs_you() {
+        } else if a.needs_you() && !a.at_work {
             spb("?", YELLOW) // a question: what to look at first
-        } else if a.waiting() {
+        } else if a.waiting() && !a.at_work {
             sp("?", YELLOW)
         } else if live {
             // Its harness's own spinner (convo.Spin).
@@ -1769,7 +1772,7 @@ impl Model {
             rt.spans
                 .push(sp(right(&age_since(a.quiet(now)), w_time), YELLOW));
             rt.spans.push(plain(" "));
-        } else if live && !a.needs_you() {
+        } else if live && (a.at_work || !a.needs_you()) {
             rt.spans
                 .push(sp(right(&dur_since(self.run_for(a)), w_time), DIM));
             rt.spans.push(plain(" "));

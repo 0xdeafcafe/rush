@@ -187,7 +187,7 @@ impl Predicates for Agent {
         if self.past
             || self.done
             || self.checking
-            || !(self.job.state == State::Working || self.busy())
+            || !(self.job.state == State::Working || self.at_work || self.busy())
         {
             return false;
         }

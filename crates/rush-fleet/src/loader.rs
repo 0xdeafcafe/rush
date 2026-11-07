@@ -1691,11 +1691,14 @@ impl Loader {
         if info.idle_since != 0 {
             j.updated_at = info.idle_since; // a restart while it waits isn't a finish
         }
+        // What you sent stuck behind a turn says so instead (below).
+        let mut at_work = st == "working" && info.queue_stuck == 0 && info.decisions.is_some();
         if let Some(d) = &info.decisions
-            && st == "done"
+            && (st == "done" || at_work)
         {
             // Its turn ended asking you to decide: it waits on you, as a
-            // question would.
+            // question would. Go only asked this of a finished turn, so an
+            // agent woken by news left the card open and sat in Working.
             st = "blocked";
             if j.needs.is_empty() {
                 j.needs = needs_decisions(d);
@@ -1739,6 +1742,7 @@ impl Loader {
             }
             if l.ask {
                 st = "blocked";
+                at_work = false;
                 j.needs = "continue when the limit resets?".into();
             }
         } else if let Some(r) = info.retry.as_ref().filter(|r| r.gave_up) {
@@ -1780,6 +1784,7 @@ impl Loader {
             why: info.meta.get("why").cloned().unwrap_or_default(),
             peer: info.remote.clone(),
             decides: blocked && info.decisions.is_some(),
+            at_work,
             job: j,
             ..Agent::default()
         };
