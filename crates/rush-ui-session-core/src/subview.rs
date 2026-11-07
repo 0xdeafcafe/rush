@@ -66,10 +66,10 @@ pub struct Watch {
     /// The folds opened in the list: a run's earlier tries
     /// ("tries:<id>"), a finished workflow run (its ref).
     pub open_folds: HashSet<String>,
-    /// The box under the run beside the list: what's typed, the cursor,
-    /// whether it has the keys, and where it was drawn (x, y, w, h).
-    pub msg: Vec<char>,
-    pub msg_pos: usize,
+    /// The box under the run beside the list: what's typed for each run
+    /// (subbox.rs), whether it has the keys, and where it was drawn (x,
+    /// y, w, h).
+    pub drafts: super::subbox::Drafts,
     pub msg_focus: bool,
     pub msg_at: [usize; 4],
 }
@@ -1013,49 +1013,6 @@ fn group_lines(m: &mut Model, key: &str, rf: &str, w: usize) -> Vec<Line> {
     out
 }
 
-/// The box under the run beside the list: where a message to it goes,
-/// typed into it once it's clicked or → gives it the keys.
-fn msg_box(m: &mut Model, key: &str, id: &str, w: usize) -> Vec<Line> {
-    let rt = super::relay::route(m, key, id);
-    let name = runs_of(m, key)
-        .and_then(|r| r.subs.iter().find(|sa| sa.id == id))
-        .map(sub_task)
-        .unwrap_or_default();
-    let hint = match &rt {
-        Ok(rt) => rt.hint(m),
-        Err(e) => e.clone(),
-    };
-    let wt = &conn(m, key).watch;
-    let focused = wt.msg_focus && rt.is_ok();
-    let b = crate::frame::inputbox::InputBox {
-        w,
-        focused,
-        top_l: line([dim(format!(
-            "to {}",
-            rush_draw::truncate(&name, w.saturating_sub(16).max(8), "…")
-        ))]),
-        foot_l: if rt.is_ok() {
-            line([faint(
-                rush_draw::truncate(&hint, w.saturating_sub(6), "…").into_owned(),
-            )])
-        } else {
-            Line::new()
-        },
-        text: wt.msg.clone(),
-        cursor: wt.msg_pos,
-        holder: match (&rt, focused) {
-            (Err(_), _) => rush_draw::truncate(&hint, w.saturating_sub(8), "…").into_owned(),
-            (Ok(_), true) => "a message for it · enter sends · esc leaves the box".into(),
-            (Ok(_), false) => "click here or press → to message it".into(),
-        },
-        lead: line([sp("❯ ", if focused { ORANGE } else { FAINT })]),
-        max_rows: 3,
-        idle: !focused,
-        ..Default::default()
-    };
-    b.lines()
-}
-
 /// Lays the picked run beside the wide list, over the rows after the
 /// view's first top: how it stands and its facts, its conversation's
 /// latest, and a box to message it; a workflow picked, its phases;
@@ -1140,7 +1097,7 @@ fn peek(m: &mut Model, key: &str, id: &str, right: &mut [Line], pw: usize, (x, y
     super::subfollow::sync(m, key);
     let head = peek_head(m, key, id, pw);
     let mut bx = super::relay::note_lines(m, key, id, pw);
-    bx.extend(msg_box(m, key, id, pw));
+    bx.extend(super::subbox::lines(m, key, id, pw));
     let live = run_live(m, key, id);
     let (now, tick) = (m.now, m.tick);
     let c = conn(m, key);
@@ -1464,21 +1421,8 @@ fn is_fold(m: &Model, key: &str, rf: &str) -> bool {
         .any(|g| g.r#ref() == rf && !g.live)
 }
 
-/// What's typed in the box under the run beside the list, given back
-/// when it couldn't be sent, ahead of anything typed since.
-pub fn give_back(m: &mut Model, key: &str, text: &str) {
-    let w = &mut conn(m, key).watch;
-    let mut t: Vec<char> = text.chars().collect();
-    if !w.msg.is_empty() {
-        t.push('\n');
-        t.extend(w.msg.iter());
-    }
-    w.msg_pos = t.len();
-    w.msg = t;
-}
-
 /// The run the box beside the list is for, while it shows.
-fn box_run(m: &Model, key: &str) -> Option<String> {
+pub fn box_run(m: &Model, key: &str) -> Option<String> {
     let c = m.kept.peek::<super::Core>()?.conns.get(key)?;
     if !c.watch.peek.visible || c.watch.msg_at[2] == 0 {
         return None;
@@ -1497,78 +1441,6 @@ fn focus_box(m: &mut Model, key: &str) -> bool {
     }
     conn(m, key).watch.msg_focus = true;
     true
-}
-
-/// Keys while the box under the run beside the list has them: enter
-/// sends (ctrl+enter at once), esc gives the keys back, the rest edit.
-pub fn box_key(m: &mut Model, k: &Press) -> Out {
-    let Some(key) = open_key(m) else {
-        return Out::Pass;
-    };
-    if m.confirm.is_some() || m.sheet.is_some() || m.on_place() {
-        return Out::Pass;
-    }
-    if !conn(m, &key).watch.msg_focus {
-        return Out::Pass;
-    }
-    let Some(id) = box_run(m, &key).filter(|_| super::views::view_name(m, &key) == "subagents")
-    else {
-        conn(m, &key).watch.msg_focus = false;
-        return Out::Pass;
-    };
-    let s = k.s.as_str();
-    match s {
-        // esc and tab give the keys back to the list.
-        "esc" | "tab" => {
-            conn(m, &key).watch.msg_focus = false;
-            Out::Draw
-        }
-        // ← from an empty box goes back to the list.
-        "left" if conn(m, &key).watch.msg.is_empty() => {
-            conn(m, &key).watch.msg_focus = false;
-            Out::Draw
-        }
-        "enter" | "ctrl+enter" | "ctrl+s" => {
-            let w = &mut conn(m, &key).watch;
-            let text: String = w.msg.iter().collect();
-            let text = text.trim().to_string();
-            if text.is_empty() {
-                return Out::Idle;
-            }
-            w.msg.clear();
-            w.msg_pos = 0;
-            super::relay::send_to(m, &key, &id, text, s != "enter")
-        }
-        _ => {
-            let w = &mut conn(m, &key).watch;
-            match crate::frame::editor::edit(&w.msg, w.msg_pos, k) {
-                Some((buf, pos)) => {
-                    w.msg = buf;
-                    w.msg_pos = pos;
-                    Out::Draw
-                }
-                // Not an editing key: kept from the rest while it types.
-                None if s.starts_with("ctrl+c") => Out::Pass,
-                None => Out::Idle,
-            }
-        }
-    }
-}
-
-/// A paste while the box beside the list has the keys goes into it.
-pub fn paste(m: &mut Model, text: &str) -> Out {
-    let Some(key) = open_key(m) else {
-        return Out::Pass;
-    };
-    if !conn(m, &key).watch.msg_focus || box_run(m, &key).is_none() {
-        return Out::Pass;
-    }
-    let t = crate::frame::editor::clean_paste(text);
-    let w = &mut conn(m, &key).watch;
-    let r: Vec<char> = t.chars().collect();
-    w.msg = crate::frame::editor::insert(&w.msg, w.msg_pos, &r);
-    w.msg_pos += r.len();
-    Out::Draw
 }
 
 /// The pointer over the subagents view: in the list a click picks a run,

@@ -148,6 +148,7 @@ pub(super) fn press(m: &mut Model, k: &str) {
         "enter" => Key::Enter,
         "esc" => Key::Esc,
         "tab" => Key::Tab,
+        "backspace" => Key::Backspace,
         "space" => Key::Char(' '),
         c => Key::Char(c.chars().next().unwrap()),
     };
@@ -706,6 +707,69 @@ fn a_live_subagent_takes_the_box() {
         !conn(&mut m, KEY).watch.msg_focus,
         "tab didn't give the keys back"
     );
+}
+
+/// The subagent's box keeps a Session's queue: what's queued shows above
+/// it; ↑ picks it, [ ] move, ⌫ drops, space edits it in the box (the
+/// queue held meanwhile) and enter saves it back, s sends it now.
+#[test]
+fn a_subagents_queue_shows_and_edits_like_a_sessions() {
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = picked_beside(&d, &fake, true);
+    press(&mut m, "tab");
+    for w in ["one", "two", "three"] {
+        typed(&mut m, w);
+        press(&mut m, "enter");
+    }
+    let items = |m: &mut Model| super::subbox::queue_of(m, KEY, "x").items;
+    assert_eq!(items(&mut m), ["one", "two", "three"]);
+    let all = text(&m.frame());
+    assert!(all.contains("queue ·3"), "{all}");
+    assert!(fake.ops().is_empty(), "sent before its step ended");
+    // ↑ picks the last; [ moves it up, the pick with it; ⌫ drops it,
+    // and the pick goes to the one after.
+    press(&mut m, "up");
+    press(&mut m, "[");
+    assert_eq!(items(&mut m), ["one", "three", "two"]);
+    press(&mut m, "backspace");
+    assert_eq!(items(&mut m), ["one", "two"]);
+    // space edits it in the box; the queue holds till enter saves it.
+    press(&mut m, "space");
+    assert!(super::subbox::queue_of(&mut m, KEY, "x").held);
+    typed(&mut m, "!");
+    press(&mut m, "enter");
+    assert_eq!(items(&mut m), ["one", "two!"]);
+    assert!(!super::subbox::queue_of(&mut m, KEY, "x").held);
+    // s sends the picked one now, ahead of the rest.
+    press(&mut m, "up");
+    press(&mut m, "up");
+    press(&mut m, "s");
+    assert_eq!(
+        fake.ops(),
+        [super::host::Op::Tell {
+            sub: "x".into(),
+            text: "one".into()
+        }]
+    );
+    assert_eq!(items(&mut m), ["two!"]);
+}
+
+/// Each run keeps what's typed for it; one that didn't go comes back to
+/// its own box.
+#[test]
+fn each_run_keeps_its_own_draft() {
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = picked_beside(&d, &fake, true);
+    press(&mut m, "tab");
+    typed(&mut m, "half done");
+    let draft = |m: &mut Model, id: &str| super::subbox::draft(m, KEY, id).input.string();
+    assert_eq!(draft(&mut m, "x"), "half done");
+    assert_eq!(draft(&mut m, "y"), "");
+    super::subbox::give_back(&mut m, KEY, "y", "lost");
+    assert_eq!(draft(&mut m, "y"), "lost");
+    assert_eq!(draft(&mut m, "x"), "half done");
 }
 
 /// Session key's run x working in the background, in a session rush runs

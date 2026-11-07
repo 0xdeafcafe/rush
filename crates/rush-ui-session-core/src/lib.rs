@@ -60,6 +60,7 @@ pub mod side;
 pub mod slash;
 pub mod spawned;
 pub mod start;
+pub mod subbox;
 pub mod subfollow;
 pub mod subname;
 pub mod subqueue;
@@ -113,7 +114,7 @@ pub fn register(x: &mut Ext) {
     x.session_keys.insert(0, jobkeys::ctrl_b);
     // The box under a run beside the subagents list, while it has the
     // keys, has them all.
-    x.session_keys.insert(0, subview::box_key);
+    x.session_keys.insert(0, subbox::key);
     // Focus in the column beside the conversation (→ from the box or the
     // conversation): its keys come before everything else's.
     x.session_keys.insert(0, side::focus_key);
@@ -151,7 +152,7 @@ pub fn register(x: &mut Ext) {
     x.session_dock.push(dock::dock);
     x.session_body.push(views::body);
     x.session_head.push(views::head);
-    x.paste.push(subview::paste);
+    x.paste.push(subbox::paste);
     x.paste.push(keys::paste);
     // The views beside the conversation have the pointer over them first.
     x.mouse.push(rush_ui_plugin_ui::views::beside::mouse);

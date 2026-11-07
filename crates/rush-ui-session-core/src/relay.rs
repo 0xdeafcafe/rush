@@ -82,7 +82,7 @@ fn via_from(
 ) {
     let Some(link) = conn(m, key).link.clone() else {
         if side {
-            super::subview::give_back(m, key, &text);
+            super::subbox::give_back(m, key, &sa.id, &text);
             m.fail("couldn't send: the session isn't running in rush · back in its box");
         }
         return;
@@ -162,7 +162,7 @@ fn sent(m: &mut Model, s: Sent, r: Result<(), String>) -> Out {
                 }
             };
             if s.side && !s.told {
-                super::subview::give_back(m, s.key, &s.text);
+                super::subbox::give_back(m, s.key, s.sub, &s.text);
                 say(m, &format!("{why} · back in its box"));
             } else if s.told {
                 let q = core(m)
@@ -294,7 +294,7 @@ pub fn send_to(m: &mut Model, key: &str, id: &str, text: String, now: bool) -> O
     let rt = match route(m, key, id) {
         Ok(rt) => rt,
         Err(e) => {
-            super::subview::give_back(m, key, &text);
+            super::subbox::give_back(m, key, id, &text);
             m.fail(&e);
             return Out::Draw;
         }
@@ -360,6 +360,25 @@ pub fn send_to(m: &mut Model, key: &str, id: &str, text: String, now: bool) -> O
         Route::Spawned { .. } => {}
     }
     Out::Draw
+}
+
+/// Puts one message from run id's queue in its inbox now, ahead of the
+/// rest (the queue's s).
+pub fn tell_now(m: &mut Model, key: &str, id: &str, text: String) {
+    let Some(sa) = conn(m, key)
+        .runs
+        .subs
+        .iter()
+        .find(|sa| sa.id == id)
+        .cloned()
+    else {
+        return;
+    };
+    let (steps, at) = (steps(m, key, id), m.now);
+    let q = core(m).local_q.entry(subqueue::key(key, id)).or_default();
+    q.sent_at = at;
+    q.at = steps;
+    tell(m, key, &sa, text, false);
 }
 
 /// Sends each of session key's runs the next message it has waiting, once

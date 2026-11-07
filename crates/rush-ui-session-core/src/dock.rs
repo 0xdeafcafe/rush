@@ -303,7 +303,10 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
 
 /// The queue card's rows, w wide, and the message on each (the queue's
 /// part of paneDock).
-fn queue_rows(
+/// The queue card's rows, w wide: its title and when it goes, three of
+/// its messages at a time, the picked one lit; and which message each
+/// row is (the subagent box's card is this too).
+pub fn queue_rows(
     q: &Queued,
     when: Line,
     picked: &str,
@@ -722,15 +725,11 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
         );
     }
     // The picked run's box in the subagents view has the keys.
-    if conn(m, key).watch.msg_focus && super::views::view_name(m, key) == "subagents" {
-        return fit_keys(
-            w,
-            &[
-                ("enter", "send to the subagent"),
-                (send_now.as_str(), "send now"),
-                ("tab · esc", "back to the list"),
-            ],
-        );
+    if conn(m, key).watch.msg_focus
+        && super::views::view_name(m, key) == "subagents"
+        && let Some(id) = super::subview::box_run(m, key)
+    {
+        return super::subbox::hint(m, key, &id, w);
     }
 
     let view = super::views::view_name(m, key);

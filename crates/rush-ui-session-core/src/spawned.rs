@@ -88,7 +88,7 @@ fn sent(
 ) -> Out {
     const NAME: &str = "the spawned agent";
     if side && let Err(e) = &r {
-        super::subview::give_back(m, key, &text);
+        super::subbox::give_back(m, key, sub, &text);
         m.fail(&format!("couldn't send to {NAME}: {e} · back in its box"));
         return Out::Draw;
     }
