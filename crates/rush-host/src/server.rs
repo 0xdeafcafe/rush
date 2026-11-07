@@ -57,6 +57,7 @@ mod agent;
 mod upgrade;
 use agent::Watching;
 mod memallow;
+mod openasks;
 mod serve;
 mod subkeep;
 pub use agent::{ROOT_IDLE, SPAWNED_IDLE, STALL_AFTER};
@@ -355,6 +356,9 @@ pub(crate) struct State {
     clients: HashMap<u64, ClientConn>,
     next_client: u64,
     pending: HashMap<String, Asked>,
+    /// Each ask's line, to say again while it's open (openasks).
+    open_asks: HashMap<String, openasks::OpenAsk>,
+    ask_seq: u64,
     /// The call each pending approval asks about.
     calls: HashMap<String, tool::Call>,
     /// How the user last answered a write into the memory folder: the
@@ -728,6 +732,8 @@ fn build(reg: Registry, hooks: Hooks, cfg: Config) -> (Host, Receiver<Msg>) {
         clients: HashMap::new(),
         next_client: 0,
         pending: HashMap::new(),
+        open_asks: HashMap::new(),
+        ask_seq: 0,
         calls: HashMap::new(),
         mem_answer: None,
         after_ask: false,
@@ -1397,6 +1403,7 @@ impl Host {
         st.task_start.clear();
         st.info.relogin = false; // the next one starts on the account signed in now
         st.pending.clear();
+        st.open_asks.clear();
         st.calls.clear();
         st.mem_answer = None;
         if matches!(st.info.state.as_str(), "working" | "blocked" | "starting") {
@@ -1745,6 +1752,7 @@ impl Host {
         st.not_asked.clear();
         st.info.relogin = false;
         st.pending.clear();
+        st.open_asks.clear();
         st.calls.clear();
         st.mem_answer = None;
         c
@@ -1832,6 +1840,7 @@ impl Host {
             }
             n -= line_len(&st.ring[i]);
         }
+        let inside = cut.is_none();
         let cut = match cut {
             Some(c) => c,
             None => {
@@ -1840,10 +1849,12 @@ impl Host {
                 fallback.unwrap_or(st.ring.len() - 1)
             }
         };
+        let kept = self.asks_cut(st, cut, inside);
         for l in &st.ring[..cut] {
             st.ring_n -= line_len(l);
         }
         st.ring.drain(..cut);
+        Self::put_back(st, kept);
         st.ring.shrink_to_fit();
         if from != st.info.replay_from {
             st.info.replay_from = from;
@@ -3234,6 +3245,7 @@ impl Host {
     /// Forgets a permission request and tells clients it is settled.
     fn answered(&self, st: &mut State, id: &str) {
         st.calls.remove(id);
+        st.open_asks.remove(id);
         if st.pending.remove(id).is_none() {
             return;
         }
@@ -3382,6 +3394,7 @@ impl Host {
                 self.on_message(st, &m);
             }
             Event::Approval(a) => {
+                self.note_ask(st, &a.id, &Event::Approval(a.clone()));
                 st.options.insert(a.id.clone(), a.options.clone());
                 st.pending.insert(a.id.clone(), Asked::default());
                 st.calls.insert(a.id.clone(), a.call.clone());
@@ -3392,6 +3405,7 @@ impl Host {
                 }
             }
             Event::Question(q) => {
+                self.note_ask(st, &q.id, &Event::Question(q.clone()));
                 st.pending.insert(q.id.clone(), Asked { question: true });
                 if !self.hold(st, &q.id, "question", &ask_text(&q)) {
                     st.info.state = "blocked".into();
@@ -3455,6 +3469,7 @@ impl Host {
                 st.w.waits_on.clear();
                 st.mem_answer = None; // a memory's writes are its turn's
                 self.on_turn_end(st, conn, e);
+                self.reask(st);
                 return;
             }
             _ => return,

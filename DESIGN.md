@@ -264,6 +264,14 @@ Claude, fleet, the other adapters) builds on these.
   (`convo::Info::{id, kind, effort, started_at, started_by, spawned_by,
   started_from}`) and its commands event `Session::commands`, which the
   first turn's opening card draws (render/opening.rs, in the turn's key).
+- **An ask stays shown till it's answered.** A client lets the main
+  agent's asks go when its turn ends, and the ring trims old turns
+  whole; an ask that outlives its turn (Claude Code asks whether to turn
+  on the mods it writes outside any turn) was gone from the view while
+  the host still held the session blocked on it, every message queued
+  behind it. The host says each ask still open again after every turn's
+  end, and a trim puts the latest line of each open ask back at the
+  ring's end (rush-host `server/openasks.rs`; Go let both go).
 - **A host's lines in a burst.** A session streaming big tool results
   makes tens of thousands of lines a second. Each end of a host's socket
   asks for 4 MiB (rush-host `sys::widen`; macOS gives 8 KiB, so the
