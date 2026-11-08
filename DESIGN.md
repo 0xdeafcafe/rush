@@ -549,9 +549,14 @@ on every frame. Go retains about 22 MiB for the same.
    rush-ui-social's `dictation.rs`, which the model reaches through
    `Calls::dictation_released`). `Term::reports_releases` says whether
    the terminal answered the kitty query; without it ctrl+space toggles.
-   Both dictations are told the words on screen (session, repo, branch
-   and file names, identifiers in the visible conversation, the open
-   session's first, at most 200: rush-ui-social's `screenwords.rs`): yap as
+   Both dictations are told the words on screen, most wanted first, at
+   most 200 (rush-ui-social's `screenwords.rs`): the open session's
+   names; the agents, models, providers and harnesses rush's registry
+   knows (Claude, Opus, Fable, Codex, Sol and Sol 6.1 for gpt-6.1-sol…,
+   at most 100, read off the UI thread every 5 minutes), on screen or
+   not; every session's title and @handle; the @handles and #hashtags
+   on screen; then file names and identifiers in the visible
+   conversation, and the other sessions' repos and branches: yap as
    a `{"context":{"app":…,"words":[…]}}` line on its socket, re-read after
    a frame at most once a second and only while yap is followed; rush's
    helper in `Command::Start.context`, the first 100 set as the speech
