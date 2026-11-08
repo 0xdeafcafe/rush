@@ -7,11 +7,13 @@
 //! started, and rush quitting doesn't: its output goes to a file under
 //! shell-runs/ that streams into its box (rush_convo's
 //! render/draw/shellbox.rs), its code to a file beside it as it ends.
-//! What it printed stays on your screen: → send to agent puts the
-//! command and the end of its output in the message box, for you to
-//! send as any message, through whichever harness the session has. A
-//! block's run whose output is short (ShellRun::sends_itself) is sent so
-//! by itself as it ends, unless Settings has short output wait for you.
+//! What it printed stays on your screen: → send to agent sends the
+//! command and the end of its output as a message you sent, through
+//! whichever harness the session has, the message box left as it is. A
+//! run of a block whose output the agent asked for (```sh send), short
+//! enough (ShellRun::sends_itself), is sent so by itself as it ends, to
+//! an agent rush runs now and never interrupting it, unless Settings has
+//! it wait for you; any other's output waits for you.
 //!
 //! A chain (a block of several commands) says which command runs now and
 //! how long each took, read from its processes every WATCH_EVERY with
@@ -33,7 +35,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use rush_convo::model::Item;
-use rush_convo::shellbox::{BoxRef, OUT_KEEP, ShellRun, bang_ref, shell_blocks};
+use rush_convo::shellbox::{BoxRef, OUT_KEEP, ShellBlock, ShellRun, bang_ref, shell_blocks};
 use rush_convo::{Shell, ShellProc};
 use rush_core::text::Line;
 use rush_core::time::Ms;
@@ -56,13 +58,20 @@ const KEEP_RUNS: usize = 50;
 
 /// What a running command's reader has for the UI: output not yet taken,
 /// and how its shell exited (Some once it has: the code, or None for a
-/// signal), and whether its output has ended.
+/// signal), and whether its output has ended, and when the reader saw it
+/// end (0 for not known).
 #[derive(Debug, Default)]
 pub struct Shared {
     pub out: String,
     pub exit: Option<Option<i32>>,
     pub eof: bool,
+    pub at: Ms,
 }
+
+/// How long after a run of a block the agent asked for ended its output
+/// still goes to the agent by itself: one that ended longer ago, while
+/// its session wasn't open, waits for → send.
+pub const LATE: Ms = 60_000;
 
 /// A command running: its shell's pid (also its process group's), what
 /// its reader has, when its shell was seen to exit, and when its
@@ -88,6 +97,9 @@ pub struct Kept {
     /// The box whose commands are being edited (✎ edit), by its ref, and
     /// the text as it stands, edited as the message box is.
     editing: Option<(String, crate::frame::editor::Editor)>,
+    /// The boxes whose runs went to the agent, by their ref, while rush
+    /// runs: one let go of (✕) and run again still doesn't send itself.
+    told: std::collections::HashSet<String>,
 }
 
 /// Every session's runs, by its key.
@@ -120,6 +132,16 @@ pub fn set_fake(f: Option<Fake>) {
 /// For tests: whether runs are kept on disk.
 pub fn set_keep(on: bool) {
     KEEP.with(|c| c.set(on));
+}
+
+/// For tests: ends run r of session key, one the fake left running, as
+/// its reader would: what it printed, its code, and when it ended.
+pub fn end_fake(m: &mut Model, key: &str, r: &str, out: &str, code: i32, at: Ms) {
+    if let Some(p) = kept(m, key).procs.get(r) {
+        let mut s = p.shared.lock().unwrap_or_else(|e| e.into_inner());
+        s.out.push_str(out);
+        (s.exit, s.eof, s.at) = (Some(Some(code)), true, at);
+    }
 }
 
 /// For tests: the scripts the fake was given, and their folders.
@@ -311,6 +333,7 @@ pub fn follow(
                     let mut sh = out.lock().unwrap_or_else(|e| e.into_inner());
                     sh.exit = Some(read_exit(&exit));
                     sh.eof = true;
+                    sh.at = rush_core::time::now();
                     return;
                 }
                 std::thread::sleep(FOLLOW_EVERY);
@@ -451,9 +474,9 @@ fn read_shell(pid: i32, command: &str) -> Option<Shell> {
     })
 }
 
-/// The script of the shell block box r stands for, as the open
-/// conversation has it now.
-pub fn block_script(m: &Model, r: &str) -> Option<String> {
+/// The shell block box r stands for, as the open conversation has it
+/// now.
+fn block_of(m: &Model, r: &str) -> Option<ShellBlock> {
     let BoxRef::Block { turn, item, k } = BoxRef::parse(r)? else {
         return None;
     };
@@ -462,7 +485,13 @@ pub fn block_script(m: &Model, r: &str) -> Option<String> {
     let Item::Text { text, .. } = t.items.get(item)? else {
         return None;
     };
-    Some(shell_blocks(text).get(k)?.script())
+    shell_blocks(text).into_iter().nth(k)
+}
+
+/// The script of the shell block box r stands for, as the open
+/// conversation has it now.
+pub fn block_script(m: &Model, r: &str) -> Option<String> {
+    Some(block_of(m, r)?.script())
 }
 
 /// The run of box r, if it was run.
@@ -496,8 +525,14 @@ pub fn start(m: &mut Model, key: &str, r: &str, script: &str, bang: Option<(u32,
     if let Some((turn, after)) = bang {
         (run.bang, run.turn, run.after) = (true, turn, after);
     }
-    // A block run as you edited it, not as the agent wrote it.
-    run.edited = bang.is_none() && block_script(m, r).is_some_and(|b| b.trim() != script);
+    // A block run as you edited it, not as the agent wrote it; one whose
+    // output the agent asked for (```sh send); and whether an earlier run
+    // of its box went to the agent: what it asked for goes once.
+    let block = bang.is_none().then(|| block_of(m, r)).flatten();
+    run.edited = block.as_ref().is_some_and(|b| b.script().trim() != script);
+    run.asked = block.is_some_and(|b| b.send);
+    run.told_before = kept(m, key).told.contains(r)
+        || run_of(m, key, r).is_some_and(|x| x.told_before || x.told || x.told_summary);
     let proc_ = match fake {
         Some(f) => {
             RAN.with(|x| x.borrow_mut().push((script.to_string(), cwd.clone())));
@@ -546,26 +581,52 @@ pub fn start(m: &mut Model, key: &str, r: &str, script: &str, bang: Option<(u32,
     show(m, key);
     m.ask_wake(Instant::now() + Duration::from_millis(100));
     if ended {
-        return send_itself(m, key, r).unwrap_or(Out::Draw);
+        return send_itself(m, key, r, now).unwrap_or(Out::Draw);
     }
     Out::Draw
 }
 
-/// Sends run r of session key to the agent as it ends, when its output is
-/// short enough to (ShellRun::sends_itself); None when it isn't sent.
-fn send_itself(m: &mut Model, key: &str, r: &str) -> Option<Out> {
+/// What becomes of run r of session key as it ends, at: a block's whose
+/// output the agent asked for (ShellRun::sends_itself) goes to it by
+/// itself, unless Settings has it wait, it ended over LATE ago, or rush
+/// isn't running the agent now (it's never woken, resumed nor
+/// interrupted for it: it waits for → send). Any other block's says
+/// how to send it. None when nothing was sent.
+fn send_itself(m: &mut Model, key: &str, r: &str, at: Ms) -> Option<Out> {
     let run = run_of(m, key, r)?;
-    if !run.sends_itself() || crate::accounts::store(m).config.hold_short_output {
+    if run.bang || run.stopped || run.lost {
         return None;
     }
-    // As s would: a send that asks first (a cold cache, another agent's
-    // words) asks, the text in the box.
-    let (o, sent) = send_as_typed(m, key, &run.send_text());
-    change(m, key, r, |x| x.told = true);
-    save(m, key);
-    if sent {
-        m.flash("its output was short · sent to the agent");
+    let open = m.session.as_ref().is_some_and(|v| v.key == key);
+    let late = m.now - at > LATE;
+    if !run.sends_itself() || late {
+        if open && !late {
+            let why = if run.asked && !run.edited && !run.told_before && !run.short_enough() {
+                "its output is long · s sends its end, m a summary"
+            } else {
+                "done · s sends it to the agent"
+            };
+            m.flash(why);
+        }
+        return None;
     }
+    if crate::accounts::store(m).config.hold_asked_output {
+        if open {
+            m.flash("the agent asked for it · s sends it");
+        }
+        return None;
+    }
+    let (o, went) = super::keys::send_out(m, key, &run.send_text(), None);
+    if !went {
+        if open {
+            m.flash("the agent asked for it · s sends it (it isn't running now)");
+        }
+        return None;
+    }
+    change(m, key, r, |x| x.told = true);
+    kept(m, key).told.insert(r.to_string());
+    save(m, key);
+    m.flash("sent to the agent, which asked for it");
     Some(o)
 }
 
@@ -596,7 +657,7 @@ pub fn run_typed(m: &mut Model, key: &str) -> Out {
 pub fn sync(m: &mut Model, key: &str) {
     load(m, key);
     let now = m.now;
-    let (mut ended, mut running) = (Vec::new(), false);
+    let (mut ended, mut running): (Vec<(String, Ms)>, bool) = (Vec::new(), false);
     let mut looks: Vec<(String, i32, String)> = Vec::new();
     let k = kept(m, key);
     let refs: Vec<String> = k.procs.keys().cloned().collect();
@@ -608,9 +669,9 @@ pub fn sync(m: &mut Model, key: &str) {
         let Some(p) = k.procs.get_mut(&r) else {
             continue;
         };
-        let (out, exit, eof) = {
+        let (out, exit, eof, seen) = {
             let mut s = p.shared.lock().unwrap_or_else(|e| e.into_inner());
-            (std::mem::take(&mut s.out), s.exit, s.eof)
+            (std::mem::take(&mut s.out), s.exit, s.eof, s.at)
         };
         if !out.is_empty() {
             Arc::make_mut(run).push(&out);
@@ -622,7 +683,9 @@ pub fn sync(m: &mut Model, key: &str) {
                 Arc::make_mut(run).finish(code, now);
                 k.procs.remove(&r);
                 k.r#gen += 1;
-                ended.push(r);
+                // When it ended, as its reader saw: it may have been
+                // while its session wasn't open.
+                ended.push((r, if seen > 0 { seen.min(now) } else { now }));
                 continue;
             }
         }
@@ -658,8 +721,8 @@ pub fn sync(m: &mut Model, key: &str) {
     if !ended.is_empty() {
         save(m, key);
     }
-    for r in &ended {
-        let _ = send_itself(m, key, r);
+    for (r, at) in &ended {
+        let _ = send_itself(m, key, r, *at);
     }
     if running {
         m.ask_wake(Instant::now() + Duration::from_millis(100));
@@ -864,25 +927,23 @@ fn line_move(text: &[char], pos: usize, up: bool) -> usize {
 const SUM_TIME: Duration = Duration::from_secs(45);
 const SUM_BUDGET: f64 = 0.05;
 
-/// Sends text to session key's agent as if typed and sent with enter: at
-/// once, or queued while it works, as the box would; what's typed in the
-/// box is left as it was. Says too whether it was sent (or queued).
-fn send_as_typed(m: &mut Model, key: &str, text: &str) -> (Out, bool) {
-    let c = conn(m, key);
-    let was = c.input.string();
-    let imgs = std::mem::take(&mut c.imgs);
-    let bang = std::mem::take(&mut c.bang);
-    c.input.set(text);
-    let o = super::keys::send(m, key, false);
-    let c = conn(m, key);
-    let sent = c.input.is_empty();
-    if sent {
-        // Sent (or queued): what you were typing comes back.
-        c.input.set(&was);
-        c.imgs = imgs;
-        c.bang = bang;
+/// Sends text, run r's, to session key's agent as → send does, as if
+/// typed and sent with enter (keys::send_out), the message box left as
+/// it is; summary is whether it's a summary of it. Marks it told once it
+/// went; a send that asks first (a cold cache) does this again on yes.
+fn tell(m: &mut Model, key: &str, r: &str, text: String, summary: bool) -> Out {
+    let (k, rr, t) = (key.to_string(), r.to_string(), text.clone());
+    let again: crate::frame::confirm::Then = Box::new(move |m| tell(m, &k, &rr, t, summary));
+    let (o, went) = super::keys::send_out(m, key, &text, Some(again));
+    if went {
+        change(m, key, r, |x| {
+            x.told = true;
+            x.told_summary |= summary;
+        });
+        kept(m, key).told.insert(r.to_string());
+        save(m, key);
     }
-    (o, sent)
+    o
 }
 
 /// → send (s): run r's command, code and the end of its output go to the
@@ -895,10 +956,7 @@ pub fn send(m: &mut Model, key: &str, r: &str) -> Out {
         m.flash_err("it's still running · send it once it's done");
         return Out::Draw;
     }
-    let (o, _) = send_as_typed(m, key, &run.send_text());
-    change(m, key, r, |x| x.told = true);
-    save(m, key);
-    o
+    tell(m, key, r, run.send_text(), false)
 }
 
 /// ≈ summary (m): a quick model sums run r up, off the UI thread, and the
@@ -956,10 +1014,7 @@ pub fn summary(m: &mut Model, key: &str, r: &str) -> Out {
             match got {
                 Ok(s) => {
                     change(m, &key, &r, |x| x.summing = false);
-                    let (o, _) = send_as_typed(m, &key, &run.summary_text(&s));
-                    change(m, &key, &r, |x| (x.told, x.told_summary) = (true, true));
-                    save(m, &key);
-                    o
+                    tell(m, &key, &r, run.summary_text(&s), true)
                 }
                 Err(e) => {
                     let e = e.split_whitespace().collect::<Vec<_>>().join(" ");

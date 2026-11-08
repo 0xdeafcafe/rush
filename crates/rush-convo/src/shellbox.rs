@@ -1,8 +1,11 @@
 //! Shell commands rush runs itself, on your click or key: a block of
 //! shell in an agent's reply (```sh, ```bash, ```zsh, ```shell,
 //! ```console, or one whose lines start with `$ `), and a command typed
-//! after `!` in the message box. What's here is the plain part: which
-//! blocks are shell and what of them runs, and a run as rush keeps it
+//! after `!` in the message box. A block whose fence says `send` after
+//! its language (```sh send) is one whose output the agent asked for:
+//! its run goes back to it by itself as it ends (ShellRun::sends_itself);
+//! any other block's output is yours to send. What's here is the plain
+//! part: which blocks are shell and what of them runs, and a run as rush keeps it
 //! (its output, how it ended, which command of its chain runs now, read
 //! with the chain machinery an agent's Bash calls use, chainrun.rs). The
 //! terminal box it's drawn as is render/draw/shellbox.rs; starting,
@@ -28,8 +31,13 @@ pub const OUT_SHOWN: usize = 12;
 pub const SEND_LINES: usize = 80;
 pub const SEND_CHARS: usize = 6000;
 
-/// A block's run whose output is at most this many lines and characters
-/// goes to the agent by itself as it ends (ShellRun::sends_itself).
+/// The word after a shell fence's language that says the agent wants the
+/// block's output back: ```sh send.
+pub const SEND_WORD: &str = "send";
+
+/// A run of a block the agent asked for whose output is at most this
+/// many lines and characters goes to it by itself as it ends
+/// (ShellRun::sends_itself).
 pub const AUTO_LINES: usize = 20;
 pub const AUTO_CHARS: usize = 2000;
 
@@ -41,14 +49,21 @@ pub struct ShellBlock {
     pub console: bool,
     /// Its lines as written, the fence's own left out.
     pub lines: Vec<String>,
+    /// The agent asked for its output: its fence says `send` after its
+    /// language (```sh send).
+    pub send: bool,
 }
 
 impl ShellBlock {
     /// The block a fence tagged tag holding body is, when it's shell:
     /// tagged so, or untagged (or tagged as something rush doesn't run)
-    /// with its first line a `$ ` prompt.
+    /// with its first line a `$ ` prompt. A shell fence with `send` after
+    /// its language (```sh send) asks for the output back.
     pub fn from_fence(tag: &str, body: &[&str]) -> Option<ShellBlock> {
-        let lang = tag.split_whitespace().next().unwrap_or("").to_lowercase();
+        let mut words = tag.split_whitespace();
+        let lang = words.next().unwrap_or("").to_lowercase();
+        let send =
+            SHELL_TAGS.contains(&lang.as_str()) && words.any(|w| w.eq_ignore_ascii_case(SEND_WORD));
         let first = body.iter().find(|l| !l.trim().is_empty())?;
         let prompt = first.trim_start().starts_with("$ ") || first.trim() == "$";
         let console = if SHELL_TAGS.contains(&lang.as_str()) {
@@ -59,7 +74,11 @@ impl ShellBlock {
             return None;
         };
         let lines: Vec<String> = body.iter().map(|l| l.trim_end().to_string()).collect();
-        let b = ShellBlock { console, lines };
+        let b = ShellBlock {
+            console,
+            lines,
+            send,
+        };
         (!b.script().trim().is_empty()).then_some(b)
     }
 
@@ -277,6 +296,11 @@ pub struct ShellRun {
     /// What ran is a block's command as you edited it, not as the agent
     /// wrote it.
     pub edited: bool,
+    /// Its block is one whose output the agent asked for (```sh send).
+    pub asked: bool,
+    /// An earlier run of its box was sent to the agent: what it asked
+    /// for went once, so this one waits for → send.
+    pub told_before: bool,
     /// The quick model is summing it up to send.
     #[serde(skip)]
     pub summing: bool,
@@ -429,15 +453,29 @@ impl ShellRun {
         s
     }
 
-    /// Whether it goes to the agent by itself now it's ended: a block of
-    /// a reply (not typed after `!`) that ended by itself (not stopped,
-    /// nor while rush was closed), not sent yet, whose output is short
-    /// enough to send whole: AUTO_LINES lines, AUTO_CHARS characters.
+    /// Whether it goes to the agent by itself now it's ended: a run of a
+    /// block whose output the agent asked for (```sh send; not typed
+    /// after `!`), as the agent wrote it (not edited), that ended by
+    /// itself (not stopped, nor while rush was closed), with nothing of
+    /// its box sent yet (this run or one before it), and whose output is
+    /// short enough to send whole (short_enough).
     pub fn sends_itself(&self) -> bool {
-        if self.running() || self.bang || self.stopped || self.lost {
+        if !self.asked || self.bang || self.edited || self.told_before {
             return false;
         }
-        if self.told || self.told_summary || self.summing || self.dropped > 0 {
+        if self.running() || self.stopped || self.lost {
+            return false;
+        }
+        if self.told || self.told_summary || self.summing {
+            return false;
+        }
+        self.short_enough()
+    }
+
+    /// Whether its output is short enough to go to the agent whole by
+    /// itself: AUTO_LINES lines, AUTO_CHARS characters, none let go.
+    pub fn short_enough(&self) -> bool {
+        if self.dropped > 0 {
             return false;
         }
         let lines = self.lines();
@@ -727,13 +765,15 @@ mod tests {
         assert!(r.out.starts_with('y'));
     }
 
-    /// A block's run with short output, ended by itself, sends itself;
-    /// one too long, stopped, typed after `!`, still running or already
-    /// sent doesn't.
+    /// A run of a block the agent asked for (```sh send) with short
+    /// output, ended by itself, sends itself, empty output too; one too
+    /// long, not asked for, edited, stopped, typed after `!`, still
+    /// running, already sent or whose box was sent before doesn't.
     #[test]
-    fn short_output_sends_itself() {
+    fn asked_for_short_output_sends_itself() {
         let ran = |out: &str, f: fn(&mut ShellRun)| {
             let mut r = ShellRun::new("ls", "/tmp", 1);
+            r.asked = true;
             r.push(out);
             r.finish(Some(0), 2);
             f(&mut r);
@@ -741,7 +781,7 @@ mod tests {
         };
         let lines = |n: usize| "a line\n".repeat(n);
         type Then = fn(&mut ShellRun);
-        let cases: [(&str, String, Then, bool); 9] = [
+        let cases: [(&str, String, Then, bool); 15] = [
             ("short", lines(3), |_| {}, true),
             ("no output", String::new(), |_| {}, true),
             ("at the line limit", lines(AUTO_LINES), |_| {}, true),
@@ -752,14 +792,49 @@ mod tests {
                 |_| {},
                 false,
             ),
+            ("lines let go", lines(1), |r| r.dropped = 3, false),
+            ("not asked for", lines(1), |r| r.asked = false, false),
+            ("edited", lines(1), |r| r.edited = true, false),
             ("stopped", lines(1), |r| r.stopped = true, false),
+            ("lost", lines(1), |r| r.lost = true, false),
             ("typed after !", lines(1), |r| r.bang = true, false),
             ("still running", lines(1), |r| r.end = 0, false),
             ("already sent", lines(1), |r| r.told = true, false),
+            ("summed up", lines(1), |r| r.told_summary = true, false),
+            ("sent before", lines(1), |r| r.told_before = true, false),
         ];
         for (name, out, f, want) in cases {
             assert_eq!(ran(&out, f), want, "{name}");
         }
+    }
+
+    /// Which fences ask for their output back: `send` after a shell
+    /// language, in any case, among other words; never after another
+    /// language, nor on a block found by its `$ ` prompt.
+    #[test]
+    fn send_fences_ask_for_the_output() {
+        let cases: [(&str, Option<bool>); 13] = [
+            ("sh", Some(false)),
+            ("sh send", Some(true)),
+            ("bash send", Some(true)),
+            ("zsh send", Some(true)),
+            ("shell send", Some(true)),
+            ("console send", Some(true)),
+            ("SH Send", Some(true)),
+            ("sh title=x send", Some(true)),
+            ("sh sender", Some(false)),
+            ("send", None),
+            ("", Some(false)),
+            ("text send", Some(false)),
+            ("python send", None),
+        ];
+        for (tag, want) in cases {
+            let got = ShellBlock::from_fence(tag, &["$ ls"]).map(|b| b.send);
+            assert_eq!(got, want, "{tag:?}");
+        }
+        let b = &shell_blocks("```sh send\nmake test\n```")[0];
+        assert!(b.send && !b.console);
+        assert_eq!(b.script(), "make test");
     }
 
     #[test]

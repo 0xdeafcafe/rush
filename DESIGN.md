@@ -2566,7 +2566,11 @@ Two ways in, both only on your click or key, never by themselves:
   commands, the rest is example output and doesn't run). Its ref is
   `t<n>:sh:<item>:<k>` (the k-th shell block of item i of turn n,
   `shellbox::shell_blocks` finding them as the markdown does); picked,
-  enter runs it, c copies it.
+  enter runs it, c copies it. The agent marks a block whose output it
+  needs back with `send` after the fence's language (```sh send, also
+  after bash, zsh, shell, console; `ShellBlock::send`, the word left out
+  of the language); the host's `SHELL_PROMPT` tells it to, and to leave
+  it plain otherwise.
 - **`!` typed into the empty message box** turns it to running commands
   (`Conn::bang`): its edge orange, `! shell · <folder>` and `enter runs ·
   esc back` on it; esc, or backspace at its start, turns it back. enter
@@ -2614,20 +2618,39 @@ long it ran, the one running now is marked, and k (skip it) and p (pause
 it, kept with the other paused commands that rush lets go on as it quits)
 work as on an agent's.
 
-What it printed stays on your screen. A block's run whose output is
-short (`ShellRun::sends_itself`: 20 lines and 2000 characters at most,
-none let go) and that ended by itself (not stopped, nor while rush was
-closed) goes to the agent as it ends, as → send would, with a flash
-saying so; Settings › Message box › "Short output of a command you run"
-(`holdShortOutput`) has it wait instead. A `!` run never goes by
-itself. Otherwise nothing goes to the agent until you pick one of the
-three on a finished box's foot (their words shorten as the box narrows:
-`→ send to agent`, `→ send`, `→`):
+What it printed stays on your screen. Only output the agent asked for
+goes back by itself: a run of a ```sh send block (`ShellRun::asked`)
+whose output is short (`ShellRun::sends_itself`: 20 lines and 2000
+characters at most, none let go, empty too: it goes as "(no output)"),
+that ran the block as the agent wrote it (not edited), ended by itself
+(not stopped, nor while rush was closed) and whose box hasn't been sent
+before (`told_before`: an earlier run's `told`, kept across ↻ and ✕
+while rush runs, so it goes once a box) is sent as it ends
+(`keys::send_out` without a press): only to an agent rush runs now
+(hosted, not asleep), as a plain `Op::Send` (now false) that the host
+queues while it works, never guiding or stopping it, and never waking,
+resuming or adopting an agent that isn't running: that one waits for
+→ send. A run that ended while its session wasn't open (the dock only
+syncs the open one) more than `LATE` (a minute) before it's seen, by
+the time its reader saw the end (`Shared::at`), waits too. A flash says
+which: "sent to the agent, which asked for it", or how to send it.
+Settings › Message box › "Output of a command the agent asked for"
+(`holdAskedOutput`; the old `holdShortOutput` is read as it) "waits for
+→ send" has it wait instead. Any other block's run, and a `!` run, never
+goes by itself: as it ends a flash says "done · s sends it to the
+agent", the box still picked. Otherwise nothing goes to the agent until
+you pick one of the three on a finished box's foot (their words shorten
+as the box narrows: `→ send to agent`, `→ send`, `→`):
 
 - **→ send** (s) sends "I ran `cmd` (exit 0):" and its last 80 lines
   (6000 characters at most) to the agent at once, as if typed and sent
-  with enter: queued while it works, as the send mode says; what you
-  were typing stays in the box. The foot then says `✓ sent`.
+  with enter (`keys::send_out` with a press): queued, guiding or
+  stopping it as the send mode says, waking or resuming an agent rush
+  isn't running, a cold cache asking first. It's built straight from
+  the run, never through the message box: what you were typing, its
+  pastes and images, and a queued message being edited there stay as
+  they were, and it isn't kept in the sent history. The foot then says
+  `✓ sent`, only once it went.
 - **✎ draft** (d) puts the same text in the message box, after what's
   typed there, to change and send or not (`✓ in your message`).
 - **≈ summary** (m) has the harness's quick model (the advisor's `Ask`,

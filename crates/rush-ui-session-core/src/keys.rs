@@ -814,6 +814,78 @@ pub fn send_as(m: &mut Model, key: &str, text: &str) {
     );
 }
 
+/// Sends text, not the box's, to session key's agent: a shell box's
+/// command and output (shellbox.rs). The box is left as it is (what's
+/// typed, its pastes and images, the queued message being edited there)
+/// and the text isn't kept as a message you sent. With again (→ send,
+/// ≈ summary: your press) it goes as enter would send it: queued,
+/// guiding or stopping the agent as the send mode says, waking or
+/// resuming an agent rush isn't running now, and a cold cache asking
+/// first, yes doing again. Without (what the agent asked for, going by
+/// itself) it only goes to an agent rush runs now, queued plainly while
+/// it works: never interrupting, waking or resuming it. Says too whether
+/// it went (sent, queued, or waking a host with it).
+pub fn send_out(
+    m: &mut Model,
+    key: &str,
+    text: &str,
+    again: Option<crate::frame::confirm::Then>,
+) -> (Out, bool) {
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return (Out::Idle, false);
+    }
+    let hosted = conn(m, key).hosted() && !conn(m, key).sleeping;
+    let Some(again) = again else {
+        if !hosted || conn(m, key).waking {
+            return (Out::Idle, false);
+        }
+        send_as(m, key, &text);
+        return (Out::Draw, true);
+    };
+    if conn(m, key).waking {
+        m.flash_err("it's waking · send it again once it's up");
+        return (Out::Draw, false);
+    }
+    if rush_ui_session_cards::compact::ask_cold(m, key, &text, again) {
+        return (Out::Draw, false);
+    }
+    let working = m
+        .session
+        .as_ref()
+        .filter(|v| v.key == key)
+        .is_some_and(|v| v.sess.live().is_some());
+    let mode = mode_of(m, key);
+    let now = working && mode == SendMode::Stop;
+    let guide = working && mode == SendMode::Guide;
+    if let Some(v) = m.session.as_mut().filter(|v| v.key == key) {
+        v.pos = Pos::End;
+    }
+    if now && !queue_of(m, key).items.is_empty() {
+        queue::send_now(m, key, &text);
+        return (Out::Draw, true);
+    }
+    if !conn(m, key).hosted() {
+        let Some(a) = agent(m, key).cloned() else {
+            return (Out::Idle, false);
+        };
+        let o = send_offline(m, key, text, Vec::new(), now);
+        // It went unless rush can't send to it, or couldn't start its
+        // host (each says why).
+        let went = !a.interactive && (a.past || !hosts(m).hosts(&a) || conn(m, key).waking);
+        return (o, went);
+    }
+    mark_sending(m, key, &text);
+    let images = Vec::new();
+    let op = if guide {
+        Op::Guide { text, images }
+    } else {
+        Op::Send { text, images, now }
+    };
+    sending_via(m, key, op);
+    (Out::Draw, true)
+}
+
 /// Sends a decisions card's answers to the session rush hosts, as
 /// send_as does; their card comes back if they don't go.
 pub fn send_answer(m: &mut Model, key: &str, text: String, id: String) {

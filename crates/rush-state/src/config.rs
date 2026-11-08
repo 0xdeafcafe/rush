@@ -551,14 +551,16 @@ pub struct Config {
         skip_serializing_if = "is_false"
     )]
     pub enter_sends_command: bool,
-    /// A shell block you run whose output is short waits for → send
-    /// instead of going to the agent by itself as it ends.
+    /// The output of a shell block the agent asked for (```sh send)
+    /// waits for → send instead of going to it by itself as it ends.
+    /// holdShortOutput, which held short output before, is read as it.
     #[serde(
-        rename = "holdShortOutput",
+        rename = "holdAskedOutput",
+        alias = "holdShortOutput",
         deserialize_with = "lenient",
         skip_serializing_if = "is_false"
     )]
-    pub hold_short_output: bool,
+    pub hold_asked_output: bool,
     /// The key that opens or closes a picked conversation row: "enter",
     /// "space", or empty for either.
     #[serde(

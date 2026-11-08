@@ -3,8 +3,10 @@
 //! stopping it, r running it again, ✎ edit changing it before it runs;
 //! → send sending the command and its output to the agent, ✎ draft
 //! putting them in the message box, ≈ summary sending what the quick
-//! model made of them; a run whose output is short going to the agent
-//! by itself as it ends, unless Settings holds it (a `!` run never); `!`
+//! model made of them, none of them touching what's in the message box;
+//! a run of a block the agent asked for (```sh send) going to it by
+//! itself as it ends, once, never interrupting or waking it, unless
+//! Settings holds it (any other block's, or a `!` run's, never); `!`
 //! in the empty box turning it to running commands, esc
 //! and a backspace at its start turning it back, enter running one in
 //! the session's folder, drawn in the conversation; and the runs kept on
@@ -27,6 +29,8 @@ use crate::frame::Mouse;
 use crate::model::Model;
 
 const REPLY: &str = "Remove the key:\n\n```sh\n$ rm ~/x.p12\n```\n\nThen you're done.";
+/// The same reply, its block one whose output the agent asked for.
+const ASKED: &str = "Remove the key:\n\n```sh send\n$ rm ~/x.p12\n```\n\nThen you're done.";
 const BOX: &str = "t1:sh:0:0";
 
 fn printed(cmd: &str, cwd: &str) -> Option<(String, i32)> {
@@ -45,17 +49,25 @@ fn replied(fake: &Arc<Fake>) -> Model {
 
 /// The same, its runs kept on disk when keep.
 fn replied_keeping(fake: &Arc<Fake>, keep: bool) -> Model {
-    replied_as(fake, keep, false)
+    replied_as(fake, keep, false, REPLY)
 }
 
 /// The same in a session rush hosts, what's sent to it a Send to fake.
 fn replied_hosted(fake: &Arc<Fake>) -> Model {
-    let mut m = replied_as(fake, false, true);
+    let mut m = replied_as(fake, false, true, REPLY);
     assert!(conn(&mut m, KEY).hosted(), "the link is open");
     m
 }
 
-fn replied_as(fake: &Arc<Fake>, keep: bool, host: bool) -> Model {
+/// The reply as the agent asking for its block's output (```sh send),
+/// in a session rush hosts when host.
+fn asked(fake: &Arc<Fake>, host: bool) -> Model {
+    let mut m = replied_as(fake, false, host, ASKED);
+    assert_eq!(conn(&mut m, KEY).hosted(), host);
+    m
+}
+
+fn replied_as(fake: &Arc<Fake>, keep: bool, host: bool, reply: &str) -> Model {
     shellbox::set_fake(Some(printed));
     shellbox::set_keep(keep);
     let kind = if host { "steer" } else { "plain" };
@@ -70,9 +82,6 @@ fn replied_as(fake: &Arc<Fake>, keep: bool, host: bool) -> Model {
     }
     crate::accounts::use_store(&mut m, rush_state::Store::default());
     crate::accounts::accounts(&mut m).read_only = true;
-    // Its runs wait for you, as the ways to send them are what's tested;
-    // short_output_goes_to_the_agent_by_itself turns this off.
-    crate::accounts::config_mut(&mut m).hold_short_output = true;
     core(&mut m).hide_map = true;
     let now = m.now;
     sess(&mut m).sent("how do I clean up?".into(), Vec::new(), now - 60_000);
@@ -82,7 +91,7 @@ fn replied_as(fake: &Arc<Fake>, keep: bool, host: bool) -> Model {
             id: "a1".into(),
             parts: vec![Part {
                 kind: PartKind::Text,
-                text: REPLY.into(),
+                text: reply.into(),
                 ..Part::default()
             }],
             ..Message::default()
@@ -262,7 +271,10 @@ fn a_finished_box_has_three_ways_to_send() {
     assert!(foot.contains("✎ draft"), "{foot}");
     assert!(foot.contains("≈ summary"), "{foot}");
     assert!(foot.contains('↻') && foot.contains('✕'), "{foot}");
-    // Its keys are on the bottom row.
+    // Its keys are on the bottom row, once the flash saying how to send
+    // it has gone.
+    m.flash = None;
+    let s = shown(&mut m);
     assert!(s.contains("send to agent"), "{s}");
     assert!(s.contains("draft it first"), "{s}");
     assert!(s.contains("summarise and send"), "{s}");
@@ -287,6 +299,41 @@ fn send_sends_it_to_the_agent() {
     assert!(shown(&mut m).contains("✓ sent"));
 }
 
+/// → send leaves the message box as it was: a queued message being
+/// edited there is neither saved over with the run nor let go of.
+#[test]
+fn send_leaves_a_queued_message_being_edited() {
+    let fake = Fake::new();
+    let mut m = replied_hosted(&fake);
+    pick_the_box(&mut m);
+    press(&mut m, "enter");
+    let _ = fake.ops();
+    {
+        let c = conn(&mut m, KEY);
+        c.input.set("the queued one, changed");
+        (c.edit_q, c.edit_was) = (1, "the queued one".into());
+    }
+    let (x, y) = cell_of(&mut m, "→ send");
+    click(&mut m, x + 2, y);
+    let ops = fake.ops();
+    assert!(
+        !ops.iter().any(|o| matches!(o, Op::EditQueued { .. })),
+        "{ops:?}"
+    );
+    let sent: Vec<&Op> = ops
+        .iter()
+        .filter(|o| matches!(o, Op::Send { .. }))
+        .collect();
+    assert!(
+        matches!(sent.as_slice(), [Op::Send { text, .. }] if text == SENT),
+        "{ops:?}"
+    );
+    let c = conn(&mut m, KEY);
+    assert_eq!(c.input.string(), "the queued one, changed");
+    assert_eq!((c.edit_q, c.edit_was.as_str()), (1, "the queued one"));
+    assert!(shellbox::run_of(&mut m, KEY, BOX).unwrap().told);
+}
+
 /// s on the picked box sends it too.
 #[test]
 fn s_sends_it_to_the_agent() {
@@ -300,51 +347,220 @@ fn s_sends_it_to_the_agent() {
     assert!(conn(&mut m, KEY).input.is_empty());
 }
 
-/// With Settings' short output going to the agent (as it is unless
-/// changed), a run that printed little is sent as it ends, as → send
-/// would.
-#[test]
-fn short_output_goes_to_the_agent_by_itself() {
-    let fake = Fake::new();
-    let mut m = replied_hosted(&fake);
-    crate::accounts::config_mut(&mut m).hold_short_output = false;
-    pick_the_box(&mut m);
-    let _ = fake.ops();
-    press(&mut m, "enter");
-    assert_eq!(shellbox::ran().len(), 1, "it ran");
-    assert_eq!(sends(&fake), [SENT]);
-    assert!(conn(&mut m, KEY).input.is_empty());
-    let run = shellbox::run_of(&mut m, KEY, BOX).unwrap();
-    assert!(run.told);
-    assert!(shown(&mut m).contains("✓ sent"));
+/// What a run of the block came to: what went to the agent, whether
+/// the run was told, and whether → send is still there for you.
+fn ran_it(m: &mut Model, fake: &Fake) -> (Vec<String>, bool, bool) {
+    pick_the_box(m);
+    let before = shellbox::ran().len();
+    press(m, "enter");
+    assert_eq!(shellbox::ran().len(), before + 1, "it ran");
+    let told = shellbox::run_of(m, KEY, BOX).unwrap().told;
+    let s = shown(m);
+    assert_eq!(s.contains("✓ sent"), told, "{s}");
+    (sends(fake), told, s.contains("→ send"))
+}
+
+fn printed_nothing(_: &str, _: &str) -> Option<(String, i32)> {
+    Some((String::new(), 0))
 }
 
 fn printed_long(_: &str, _: &str) -> Option<(String, i32)> {
     Some(("a line\n".repeat(rush_convo::shellbox::AUTO_LINES + 1), 0))
 }
 
-/// A run that printed more than a few lines waits for you, and so does a
-/// short one with Settings holding it.
+/// A block the agent asked for the output of (```sh send) sends it by
+/// itself as it ends, as → send would, empty output too, the box picked
+/// still and what you were typing kept; a plain block's waits for you,
+/// and says how to send it; so does one asked for that printed too
+/// much, or with Settings holding it.
 #[test]
-fn long_or_held_output_waits_for_you() {
+fn only_what_the_agent_asked_for_sends_itself() {
+    type Shell = fn(&str, &str) -> Option<(String, i32)>;
+    // Its name, the reply, what the shell printed, whether Settings holds
+    // it, what went to the agent, and what rush said.
+    type Case = (
+        &'static str,
+        &'static str,
+        Shell,
+        bool,
+        &'static [&'static str],
+        &'static str,
+    );
+    const NO_OUTPUT: &str = "I ran `rm ~/x.p12` (exit 0):\n(no output)";
+    const ASKED_SAID: &str = "sent to the agent, which asked for it";
+    let cases: [Case; 5] = [
+        ("asked", ASKED, printed, false, &[SENT], ASKED_SAID),
+        (
+            "asked, no output",
+            ASKED,
+            printed_nothing,
+            false,
+            &[NO_OUTPUT],
+            ASKED_SAID,
+        ),
+        (
+            "not asked",
+            REPLY,
+            printed,
+            false,
+            &[],
+            "done · s sends it to the agent",
+        ),
+        (
+            "asked, too long",
+            ASKED,
+            printed_long,
+            false,
+            &[],
+            "its output is long · s sends its end, m a summary",
+        ),
+        (
+            "asked, held",
+            ASKED,
+            printed,
+            true,
+            &[],
+            "the agent asked for it · s sends it",
+        ),
+    ];
+    for (name, reply, shell, hold, want, said) in cases {
+        let fake = Fake::new();
+        let mut m = replied_as(&fake, false, true, reply);
+        shellbox::set_fake(Some(shell));
+        crate::accounts::config_mut(&mut m).hold_asked_output = hold;
+        let (got, told, button) = ran_it(&mut m, &fake);
+        assert_eq!(got, want, "{name}");
+        assert_eq!(told, !want.is_empty(), "{name}");
+        assert_eq!(button, want.is_empty(), "{name}: → send there");
+        assert_eq!(super::tests::flash(&m), said, "{name}");
+        assert_eq!(m.session.as_ref().unwrap().sel, BOX, "{name}: picked");
+        assert!(conn(&mut m, KEY).input.is_empty(), "{name}: the box");
+    }
+}
+
+/// What's typed in the message box stays there as what the agent asked
+/// for goes by itself.
+#[test]
+fn what_was_asked_for_leaves_your_message() {
     let fake = Fake::new();
-    let mut m = replied_hosted(&fake);
-    crate::accounts::config_mut(&mut m).hold_short_output = false;
-    shellbox::set_fake(Some(printed_long));
+    let mut m = asked(&fake, true);
     pick_the_box(&mut m);
+    conn(&mut m, KEY).input.set("half a thought");
     let _ = fake.ops();
-    press(&mut m, "enter");
-    assert!(sends(&fake).is_empty(), "long output isn't sent");
-    assert!(!shellbox::run_of(&mut m, KEY, BOX).unwrap().told);
-    assert!(shown(&mut m).contains("→ send"));
+    // Clicked, as typing goes to the box.
+    let (x, y) = cell_of(&mut m, "▶ run");
+    click(&mut m, x + 1, y);
+    assert_eq!(sends(&fake), [SENT]);
+    assert_eq!(conn(&mut m, KEY).input.string(), "half a thought");
+}
+
+/// What the agent asked for goes once a box: run again (↻), or let go
+/// of and run again, it waits for → send; and a run you edited isn't
+/// what the agent asked for, so it waits too.
+#[test]
+fn what_was_asked_for_goes_once() {
+    let fake = Fake::new();
+    let mut m = asked(&fake, true);
+    let (got, _, _) = ran_it(&mut m, &fake);
+    assert_eq!(got, [SENT]);
+    for (name, keys) in [("↻", &["r"][..]), ("✕ then ▶", &["x", "enter"][..])] {
+        for k in keys {
+            // ✕ lets go of the pick too.
+            pick_the_box(&mut m);
+            press(&mut m, k);
+        }
+        let run = shellbox::run_of(&mut m, KEY, BOX).expect(name);
+        assert!(run.told_before && !run.told, "{name}: {run:?}");
+        assert_eq!(sends(&fake), [SENT], "{name}: not sent again");
+        assert!(shown(&mut m).contains("→ send"), "{name}");
+    }
+    // s still sends it.
+    press(&mut m, "s");
+    assert_eq!(sends(&fake), [SENT, SENT]);
 
     let fake = Fake::new();
-    let mut m = replied_hosted(&fake);
+    let mut m = asked(&fake, true);
     pick_the_box(&mut m);
+    press(&mut m, "e");
+    typed(&mut m, " -f");
     let _ = fake.ops();
     press(&mut m, "enter");
-    assert!(sends(&fake).is_empty(), "held output isn't sent");
-    assert!(!shellbox::run_of(&mut m, KEY, BOX).unwrap().told);
+    assert!(shellbox::run_of(&mut m, KEY, BOX).unwrap().edited);
+    assert!(sends(&fake).is_empty(), "an edited run waits");
+    assert!(shown(&mut m).contains("→ send"));
+}
+
+/// While the agent works, what it asked for is queued plainly, whatever
+/// enter's send mode: never guiding it nor stopping it to say it.
+#[test]
+fn what_was_asked_for_mid_turn_is_queued() {
+    use super::sendmode::SendMode;
+    for mode in [SendMode::Queue, SendMode::Guide, SendMode::Stop] {
+        let fake = Fake::new();
+        let mut m = asked(&fake, true);
+        core(&mut m).send_modes.insert(KEY.into(), mode);
+        let now = m.now;
+        sess(&mut m).sent("and the other one?".into(), Vec::new(), now);
+        assert!(m.session.as_ref().unwrap().sess.live().is_some());
+        pick_the_box(&mut m);
+        let _ = fake.ops();
+        press(&mut m, "enter");
+        let ops: Vec<Op> = fake
+            .ops()
+            .into_iter()
+            .filter(|o| matches!(o, Op::Send { .. } | Op::Guide { .. }))
+            .collect();
+        assert!(
+            matches!(ops.as_slice(), [Op::Send { text, now: false, .. }] if text == SENT),
+            "{mode:?}: {ops:?}"
+        );
+    }
+}
+
+/// An agent rush isn't running now (one it doesn't host, or asleep)
+/// isn't woken or resumed for what it asked for: it waits for → send.
+#[test]
+fn what_was_asked_for_never_wakes_the_agent() {
+    for asleep in [false, true] {
+        let fake = Fake::new();
+        let mut m = asked(&fake, false);
+        conn(&mut m, KEY).sleeping = asleep;
+        let (got, told, button) = ran_it(&mut m, &fake);
+        assert!(got.is_empty() && !told && button, "asleep {asleep}");
+        assert!(fake.replies.lock().unwrap().is_empty(), "asleep {asleep}");
+        assert!(fake.wakes.lock().unwrap().is_empty(), "asleep {asleep}");
+        assert!(fake.resumed.lock().unwrap().is_empty(), "asleep {asleep}");
+        assert!(!conn(&mut m, KEY).waking, "asleep {asleep}");
+        assert_eq!(
+            super::tests::flash(&m),
+            "the agent asked for it · s sends it (it isn't running now)"
+        );
+    }
+}
+
+/// A run that ended while its session wasn't open, longer ago than
+/// LATE, doesn't send itself as the session is seen again: it waits for
+/// → send; one that ended a moment ago does.
+#[test]
+fn what_was_asked_for_long_ago_waits() {
+    for (ago, sent) in [(shellbox::LATE + 1, false), (1_000, true)] {
+        let fake = Fake::new();
+        let mut m = asked(&fake, true);
+        shellbox::set_fake(Some(hangs));
+        pick_the_box(&mut m);
+        press(&mut m, "enter");
+        assert!(shellbox::run_of(&mut m, KEY, BOX).unwrap().running());
+        let _ = fake.ops();
+        let at = m.now - ago;
+        let out = "ran rm ~/x.p12 in /src/checkout\n";
+        shellbox::end_fake(&mut m, KEY, BOX, out, 0, at);
+        let _ = shown(&mut m);
+        let run = shellbox::run_of(&mut m, KEY, BOX).unwrap();
+        assert!(!run.running(), "{ago}");
+        assert_eq!(run.told, sent, "{ago}");
+        let want: &[&str] = if sent { &[SENT] } else { &[] };
+        assert_eq!(sends(&fake), want, "{ago}");
+    }
 }
 
 /// ✎ draft (d) puts the command and its output in the message box, for
