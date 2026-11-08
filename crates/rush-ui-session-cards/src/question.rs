@@ -10,8 +10,8 @@
 //! answerHost :4424, allowYolo :4434), modal.go:32 (cardModal's arrival),
 //! host/decisions.go (DecisionsOf :377, DecisionAnswer :400) and
 //! host/answer.go (AnswerInput). A subagent's question answered on this
-//! card in its parent's session ("subquestion", sub_question_key) is
-//! Rust-only, with no Go.
+//! card in its parent's session ("subquestion", sub_question_key), its
+//! decisions block too (sub_decisions_key), is Rust-only, with no Go.
 
 use std::collections::HashMap;
 
@@ -299,9 +299,14 @@ pub fn card_id(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> String {
 
 /// Whether a card of kind takes the keys only from ↑ or a click: a
 /// question's and decisions' letters and digits answer, so the start of a
-/// message would (upOnly).
+/// message would (upOnly). A subagent's ask is too (Rust-only): its y
+/// and n would answer for another agent, so only alt+y and alt+n do until
+/// it's given the keys.
 fn up_only(kind: &str) -> bool {
-    matches!(kind, "finish" | "question" | "subquestion" | "decisions")
+    matches!(
+        kind,
+        "finish" | "question" | "subquestion" | "subask" | "decisions"
+    )
 }
 
 /// The cards waiting on you, w wide and a question folded to fit max_h
@@ -378,7 +383,10 @@ pub fn card_rows(m: &mut Model, key: &str, i: &HostInfo, w: usize, max_h: usize)
             let a = &i.sub_asks[0];
             let req = a.asks().cloned().expect("a question");
             c.q_asker = a.who.clone();
-            let rows = question_card(&mut c, &req, None, w, max_h);
+            // A decisions block is drawn as one, its picks sent as a
+            // message to the subagent.
+            let dec = a.decisions.then_some(&req);
+            let rows = question_card(&mut c, &req, dec, w, max_h);
             c.q_asker.clear();
             rows
         }
@@ -2073,9 +2081,12 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
     Out::Pass
 }
 
-/// A subagent's ask's keys (subask.rs): as the permission card's, y
-/// allowing and n denying it, o opening the subagent; with the box typed
-/// in, enter denies it, telling it why. Pass for any other key.
+/// A subagent's ask's keys (subask.rs): alt+y allows it, alt+n denies it
+/// and alt+o opens the subagent, whatever the box holds; only with the
+/// keys on the card do y, n and o (and ←→ enter) press its buttons, a
+/// denial then saying why with the words typed in the box. Typed words
+/// and enter with the card left alone are a message to the session, as
+/// ever. Pass for any other key.
 #[allow(clippy::too_many_arguments)]
 fn sub_ask_key(
     m: &mut Model,
@@ -2088,6 +2099,12 @@ fn sub_ask_key(
     sel_empty: bool,
 ) -> Out {
     let mut s = s.to_string();
+    // ↑ from a box of one line gives the card the keys, words typed or
+    // not: a denial's why is what's in the box.
+    if !c.card_focus && !empty && s == "up" && sel_empty && a.answers() && !i.input.contains('\n') {
+        c.card_focus = true;
+        return Out::Draw;
+    }
     if c.card_focus {
         let bs = super::subask::btn_keys(a);
         c.btn_pick = c.btn_pick.min(bs.len() - 1);
@@ -2104,8 +2121,7 @@ fn sub_ask_key(
             s = bs[c.btn_pick].clone();
         }
     }
-    let direct = c.card_focus
-        || empty && sel_empty && !c.card_guarded(m.clock.unwrap_or_else(rush_core::time::now));
+    let direct = c.card_focus;
     let answer = |allow: bool, why: String| Act::AnswerSub {
         host: a.host.clone(),
         request: a.request.clone(),
@@ -2117,12 +2133,16 @@ fn sub_ask_key(
             return done(m, key, c, vec![answer(true, String::new())]);
         }
         if s == "alt+n" || direct && s == "n" {
-            return done(m, key, c, vec![answer(false, String::new())]);
-        }
-        if !empty && !c.card_focus && s == "enter" {
-            // What's typed is why not: it's denied, and the subagent told.
-            let why = i.input.trim().to_string();
-            set_input(m, key, "");
+            // With the card's keys, what's typed is why not, and the
+            // subagent's told.
+            let why = if direct {
+                i.input.trim().to_string()
+            } else {
+                String::new()
+            };
+            if !why.is_empty() {
+                set_input(m, key, "");
+            }
             return done(m, key, c, vec![answer(false, why)]);
         }
     }
@@ -2151,6 +2171,9 @@ fn sub_question_key(
     if s == "alt+o" {
         return done(m, key, c, vec![Act::OpenRun(a.run.clone())]);
     }
+    if a.decisions {
+        return sub_decisions_key(m, key, i, c, a, &req, s, empty);
+    }
     if c.card_focus && (s == "s" || s == "esc") && !c.q_full {
         let skip = Act::AnswerSub {
             host: a.host.clone(),
@@ -2173,6 +2196,61 @@ fn sub_question_key(
             }),
             r => r,
         };
+        if r.used() {
+            return finish(m, key, c, r);
+        }
+    }
+    Out::Pass
+}
+
+/// A subagent's decisions block's keys: the session's own decisions
+/// card's, its answers sent to the subagent as a message
+/// (Act::AnswerSubDecisions), s or esc setting it aside here, sending
+/// nothing. Pass for any other key.
+#[allow(clippy::too_many_arguments)]
+fn sub_decisions_key(
+    m: &mut Model,
+    key: &str,
+    i: &HostInfo,
+    c: &mut Conn,
+    a: &crate::SubAsk,
+    req: &Question,
+    s: &str,
+    empty: bool,
+) -> Out {
+    let mut di = i.clone();
+    di.decisions = Some(req.clone());
+    c.sync_question(req, di.decisions.as_ref());
+    let to_sub = |c: &mut Conn, r: Res| -> Res {
+        let text = match r {
+            // Into the box would be the session's message: it goes to
+            // the subagent as it is.
+            Res::Do(Act::Answer { text, .. } | Act::Edit(text)) => text,
+            Res::Do(Act::DismissDecisions(_)) => String::new(),
+            r => return r,
+        };
+        // Not the session's own: nothing of it waits to be sent there.
+        c.q_sent = None;
+        Res::Do(Act::AnswerSubDecisions {
+            host: a.host.clone(),
+            request: req.id.clone(),
+            text,
+        })
+    };
+    let aside = (s == "s" || s == "esc") && !c.q_full;
+    if c.card_focus && (aside || s == "a") {
+        let r = if aside {
+            decide_own_key(c, req, "s", true);
+            Res::Do(Act::DismissDecisions(req.id.clone()))
+        } else {
+            decide_own_key(c, req, "a", false)
+        };
+        let r = to_sub(c, r);
+        return finish(m, key, c, r);
+    }
+    if !empty && s == "enter" && c.q_own || c.card_focus {
+        let r = keyed(m, key, &di, c, req, s, empty);
+        let r = to_sub(c, r);
         if r.used() {
             return finish(m, key, c, r);
         }

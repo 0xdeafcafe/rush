@@ -1114,7 +1114,7 @@ fn a_subagents_ask_is_answered_on_its_host() {
         id: "call_1".into(),
         call: "Bash: kill -TERM 79335".into(),
         reason: "stop the helper".into(),
-        question: None,
+        ..SpawnAsk::default()
     };
     let spawns = &mut conn(&mut m, KEY).runs.spawns;
     spawns.insert("h9".into(), run("h9", true, vec![ask.clone()]));
@@ -1133,7 +1133,7 @@ fn a_subagents_ask_is_answered_on_its_host() {
             call: "Bash: kill -TERM 79335".into(),
             reason: "stop the helper".into(),
             needs: "Bash kill -TERM 79335".into(),
-            question: None,
+            ..SubAsk::default()
         }]
     );
 
@@ -1194,4 +1194,142 @@ fn a_subagents_ask_is_answered_on_its_host() {
         )]
     );
     assert_eq!(info(&m).sub_asks, Vec::new(), "the answered card is gone");
+
+    // Answered, an ask stays away while its host still lists it, and
+    // what it needs with it; once the host has moved past it, the same
+    // id asked again is asked (Rust-only).
+    let mut r = run("h9", true, Vec::new());
+    r.mark_answered("h9", "call_1");
+    r.take_asks("Bash kill -TERM 79335".into(), vec![ask.clone()]);
+    assert!(
+        r.asking.is_empty() && r.needs.is_empty(),
+        "came back: {r:?}"
+    );
+    r.take_asks(String::new(), Vec::new());
+    assert!(r.answered.is_empty(), "its host no longer asks it");
+    r.take_asks("Bash kill -TERM 79335".into(), vec![ask.clone()]);
+    assert_eq!(r.asking.len(), 1, "asked afresh");
+}
+
+/// Rust-only: what an agent a subagent started asks in turn is a card in
+/// the session on top, saying whose, answered on that agent's own host;
+/// a subagent's decisions block is a card too, done or not, its answers
+/// sent it as a message; and one waiting on what only its own session
+/// answers is opened there.
+#[test]
+fn a_subagents_own_agents_and_decisions_ask_here() {
+    use crate::host::SpawnAsk;
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = hosted(&d, &fake, 9);
+    let run = |live: bool, needs: &str, asking: Vec<SpawnAsk>| crate::spawns::SpawnRun {
+        step: "t9".into(),
+        kind: "codex".into(),
+        name: "Codex".into(),
+        prompt: "fix the flaky test".into(),
+        hosted: "h9".into(),
+        live,
+        needs: needs.into(),
+        asking,
+        born: NOW - 10_000,
+        ..Default::default()
+    };
+    let nested = SpawnAsk {
+        id: "call_7".into(),
+        call: "Bash: make".into(),
+        host: "g1".into(),
+        who: "Kimi · build it".into(),
+        needs: "Bash make".into(),
+        ..SpawnAsk::default()
+    };
+    conn(&mut m, KEY)
+        .runs
+        .spawns
+        .insert("h9".into(), run(true, "", vec![nested]));
+    let got = info(&m).sub_asks;
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(
+        (got[0].host.as_str(), got[0].request.as_str()),
+        ("g1", "call_7")
+    );
+    assert_eq!(got[0].who, "Codex · fix the flaky test ⇉ Kimi · build it");
+    assert_eq!(got[0].needs, "Bash make");
+    act(
+        &mut m,
+        Act::AnswerSub {
+            host: "g1".into(),
+            request: "call_7".into(),
+            allow: true,
+            why: String::new(),
+        },
+    );
+    assert_eq!(
+        *fake.spawn_answers.lock().unwrap(),
+        vec![("g1".into(), "call_7".into(), true, String::new())]
+    );
+    assert_eq!(info(&m).sub_asks, Vec::new(), "the answered card is gone");
+
+    // Its decisions block, its turn done: a card whose answers go to it.
+    let dec = Question {
+        id: "dec1".into(),
+        asks: vec![rush_core::event::Ask {
+            text: "Which branch?".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let decides = SpawnAsk {
+        id: "dec1".into(),
+        question: Some(dec.clone()),
+        decisions: true,
+        ..SpawnAsk::default()
+    };
+    conn(&mut m, KEY)
+        .runs
+        .spawns
+        .insert("h9".into(), run(false, "", vec![decides.clone()]));
+    let got = info(&m).sub_asks;
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(got[0].decisions && got[0].asks() == Some(&dec), "{got:?}");
+    act(
+        &mut m,
+        Act::AnswerSubDecisions {
+            host: "h9".into(),
+            request: "dec1".into(),
+            text: "Which branch? main".into(),
+        },
+    );
+    assert_eq!(
+        fake.sent_to.lock().unwrap().clone(),
+        [("h9".to_string(), "Which branch? main".to_string(), false)]
+    );
+    assert_eq!(info(&m).sub_asks, Vec::new(), "the answered card is gone");
+    // Set aside, nothing goes.
+    conn(&mut m, KEY)
+        .runs
+        .spawns
+        .insert("h9".into(), run(false, "", vec![decides]));
+    act(
+        &mut m,
+        Act::AnswerSubDecisions {
+            host: "h9".into(),
+            request: "dec1".into(),
+            text: String::new(),
+        },
+    );
+    assert_eq!(fake.sent_to.lock().unwrap().len(), 1, "set aside, sent");
+    assert_eq!(info(&m).sub_asks, Vec::new(), "set aside, still shown");
+
+    // Waiting on what only its own session answers: open opens that,
+    // made a row of its own first.
+    let loader = rush_fleet::Loader::new(m.reg.clone());
+    m.kept::<crate::worker::FleetIn>().0 = Some(loader.handle());
+    conn(&mut m, KEY)
+        .runs
+        .spawns
+        .insert("h9".into(), run(true, "Approve the plan?", Vec::new()));
+    assert_eq!(info(&m).sub_asks.len(), 1);
+    act(&mut m, Act::OpenRun("spawn:h9".into()));
+    assert_eq!(core(&mut m).open_on_load, "h9");
+    assert_ne!(super::views::view_name(&m, KEY), "subagents", "not its run");
 }

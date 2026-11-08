@@ -15,7 +15,7 @@ fn asking(request: &str, call: &str) -> SubAsk {
         call: call.into(),
         reason: "stop the stalled helper".into(),
         needs: "Bash kill -TERM 79335".into(),
-        question: None,
+        ..SubAsk::default()
     }
 }
 
@@ -29,8 +29,9 @@ fn answer(allow: bool, why: &str) -> Act {
 }
 
 /// The card says which subagent asks and what, a command a step to a
-/// line, with allow, deny and open; y allows it on the subagent's host,
-/// and ←→ enter press the buttons as the permission card's do.
+/// line, with allow, deny and open. It takes no keys as it comes: alt+y
+/// allows it on the subagent's host whatever's typed, and with the keys
+/// on it (↑) ←→ enter press the buttons as the permission card's do.
 #[test]
 fn a_subagents_ask_is_its_parents_card() {
     let mut m = hosted(120, 50);
@@ -53,6 +54,7 @@ fn a_subagents_ask_is_its_parents_card() {
         "y Allow once",
         "n Deny",
         "o Open it",
+        "alt+y allow · alt+n deny",
     ] {
         assert!(out.contains(w), "card missing {w:?}:\n{out}");
     }
@@ -61,8 +63,12 @@ fn a_subagents_ask_is_its_parents_card() {
     }
     let c = m.cards().conns["k"].clone();
     assert_eq!(card_kind(&m, "k", &c, &info(&m, "k").unwrap()), "subask");
+    assert!(!c.card_focus, "its letters are a message's until ↑");
 
-    press(&mut m, "y");
+    let i = info(&m, "k").unwrap();
+    assert_eq!(card_key(&mut m, "k", &i, "y", true), Out::Pass);
+    assert!(acts(&mut m).is_empty(), "a bare y is typed, not an answer");
+    press(&mut m, "alt+y");
     assert_eq!(acts(&mut m), vec![answer(true, "")]);
 
     // With the keys, left from Allow once goes round to Open it.
@@ -77,19 +83,30 @@ fn a_subagents_ask_is_its_parents_card() {
     assert!(!m.cards().conns["k"].card_focus);
 }
 
-/// What's typed is why not: enter denies it, telling the subagent, and
-/// the box is emptied.
+/// With words typed and the card left alone, enter is the session's
+/// message, as ever; only with the card's keys does a denial carry them
+/// as why not, the box then emptied.
 #[test]
-fn typed_words_deny_a_subagents_ask() {
+fn typed_words_deny_a_subagents_ask_only_from_the_card() {
     let mut m = hosted(120, 50);
     set_info(&mut m, |i| {
         i.sub_asks = vec![asking("call_1", "Bash: rm -rf build")];
         i.input = "use cargo clean".into();
     });
-    let out = text(&rows(&mut m, 100, 40));
-    assert!(out.contains("or type why not and enter"), "{out}");
+    rows(&mut m, 100, 40);
     let i = info(&m, "k").unwrap();
-    card_key(&mut m, "k", &i, "enter", false);
+    assert_eq!(card_key(&mut m, "k", &i, "enter", false), Out::Pass);
+    assert_eq!(card_key(&mut m, "k", &i, "n", false), Out::Pass);
+    assert!(acts(&mut m).is_empty(), "enter sends to the session");
+    assert_eq!(info(&m, "k").unwrap().input, "use cargo clean");
+
+    // ↑ gives the card the keys with the words still typed; n denies,
+    // telling it why.
+    card_key(&mut m, "k", &i, "up", false);
+    assert!(m.cards().conns["k"].card_focus);
+    let out = text(&rows(&mut m, 100, 40));
+    assert!(out.contains("n denies with what's typed as why"), "{out}");
+    card_key(&mut m, "k", &i, "n", false);
     assert_eq!(acts(&mut m), vec![answer(false, "use cargo clean")]);
     assert_eq!(info(&m, "k").unwrap().input, "");
 }
@@ -115,7 +132,8 @@ fn a_subagents_question_opens_it() {
     let i = info(&m, "k").unwrap();
     assert_eq!(card_key(&mut m, "k", &i, "y", true), Out::Pass);
     assert!(acts(&mut m).is_empty(), "nothing to allow");
-    card_key(&mut m, "k", &i, "o", true);
+    assert_eq!(card_key(&mut m, "k", &i, "o", true), Out::Pass);
+    card_key(&mut m, "k", &i, "alt+o", true);
     assert_eq!(acts(&mut m), vec![Act::OpenRun("spawn:h9".into())]);
 }
 

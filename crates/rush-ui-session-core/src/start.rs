@@ -196,6 +196,16 @@ pub fn started(m: &mut Model, r: Result<Started, String>) -> Out {
 /// After each reading of the list: the session just started, once it's
 /// in the list, picked and opened (selectOnLoad).
 pub fn pick_started(m: &mut Model) {
+    // A spawned agent opened as a session of its own, once it's a row
+    // (spawned::open_session; Rust-only).
+    let id = core(m).open_on_load.clone();
+    if !id.is_empty()
+        && let Some(a) = m.agents.iter().find(|a| a.rush && a.job.id == id)
+    {
+        let key = a.key.clone();
+        core(m).open_on_load.clear();
+        super::menubar_jump::jump_to(m, key);
+    }
     let key = core(m).select_on_load.clone();
     if key.is_empty() {
         return;

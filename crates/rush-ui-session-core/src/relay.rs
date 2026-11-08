@@ -3,8 +3,10 @@
 //! and its inbox a step at a time (or all of it now), or, where its host
 //! has no inbox, passed on by the main session; to a finished one, the
 //! main session resumes it. Each message waiting for a run goes into its inbox
-//! once it has taken a step since the last; one that finished first
-//! hands what it still had to the main session. After Go's
+//! once it has taken a step since the last; one that finished first has
+//! what it still had put back in its box, said under it, for you to send
+//! on (Rust-only: Go handed it to the main session as a turn of its own,
+//! and put one that didn't go in the session's box). After Go's
 //! internal/ui/rushmode.go (pickedSub :6229, relaySub :6252, sendPane's
 //! relay :4745-4790), subqueue.go (subQueue :25, queueSub :34, tellSub
 //! :55, onSubSent :101-127 (an automatic send noted, its failure news), subNoteLines :133, flushSubQueues :173,
@@ -22,6 +24,11 @@ use super::{conn, core};
 use crate::frame::Out;
 use crate::model::Model;
 use crate::spawns::SPAWN_PREFIX;
+
+/// What's said of messages queued for a run that ended before it took
+/// them.
+const ENDED_FIRST: &str =
+    "it ended first · not sent: back in its box · enter sends it on, its main session resuming it";
 
 /// Asks Claude to pass msg on to its running subagent sa word for word:
 /// Claude Code takes no message into a subagent but its own SendMessage
@@ -107,7 +114,6 @@ fn via_from(
                     how,
                     told,
                     auto,
-                    side,
                 },
                 r,
             )
@@ -124,12 +130,11 @@ struct Sent<'a> {
     how: String,
     told: bool,
     auto: bool,
-    /// From the box under the run in the subagents view's column.
-    side: bool,
 }
 
 /// Notes where a message went, or keeps one that didn't: back at the head
-/// of its queue, else in the box, else as a note saying why (onSubSent).
+/// of its queue, else in the run's own box (onSubSent; Go's put one back
+/// in the session's box).
 fn sent(m: &mut Model, s: Sent, r: Result<(), String>) -> Out {
     match r {
         Ok(()) => {
@@ -161,31 +166,19 @@ fn sent(m: &mut Model, s: Sent, r: Result<(), String>) -> Out {
                     m.fail(w);
                 }
             };
-            if s.side && !s.told {
-                super::subbox::give_back(m, s.key, s.sub, &s.text);
-                say(m, &format!("{why} · back in its box"));
-            } else if s.told {
+            if s.told {
                 let q = core(m)
                     .local_q
                     .entry(subqueue::key(s.key, s.sub))
                     .or_default();
                 q.items.insert(0, s.text);
                 say(m, &format!("{why} · back in its queue"));
-            } else if conn(m, s.key).input.is_empty() {
-                conn(m, s.key).input.insert_str(&s.text);
-                say(m, &format!("{why} · back in the box"));
             } else {
-                note(
-                    m,
-                    s.key,
-                    s.sub,
-                    SubNote {
-                        text: s.text,
-                        how: format!("✗ not sent: {e}"),
-                        told: false,
-                    },
-                );
-                say(m, &why);
+                // It was the run's: back in the run's own box, never the
+                // session's, where enter would make it a turn of the main
+                // session's (Rust-only).
+                super::subbox::give_back(m, s.key, s.sub, &s.text);
+                say(m, &format!("{why} · back in its box"));
             }
         }
     }
@@ -382,8 +375,8 @@ pub fn tell_now(m: &mut Model, key: &str, id: &str, text: String) {
 }
 
 /// Sends each of session key's runs the next message it has waiting, once
-/// it has taken a step since the last; a run that has finished hands what
-/// it still had to the main session (flushSubQueues).
+/// it has taken a step since the last; a run that has finished has what
+/// it still had put back in its box, said (flushSubQueues).
 pub fn flush(m: &mut Model, key: &str) {
     if !conn(m, key).hosted() {
         return;
@@ -417,20 +410,30 @@ pub fn flush(m: &mut Model, key: &str) {
     for (sa, d) in due {
         match d {
             Due::Tell(text) => tell(m, key, &sa, text, true),
-            Due::Main { mine, text } => {
+            // It ended first: what it still had goes back in its box, not
+            // to the main session on its own; the note under it says so,
+            // and enter there sends it on the way its box says (the main
+            // session resuming it, where it can). Rust-only: Go sent it to
+            // the main session as a turn of its own.
+            Due::Main { mine, .. } => {
                 core(m).local_q.remove(&subqueue::key(key, &sa.id));
-                via(
+                super::subbox::give_back(m, key, &sa.id, &mine);
+                note(
                     m,
                     key,
-                    &sa,
-                    mine,
-                    "it ended first · went to the main session",
-                    Op::Send {
-                        text,
-                        images: Vec::new(),
-                        now: false,
+                    &sa.id,
+                    SubNote {
+                        text: mine,
+                        how: ENDED_FIRST.into(),
+                        told: false,
                     },
-                    true,
+                );
+                m.news(
+                    &format!(
+                        "{} ended before it got your messages · back in its box",
+                        sa.typ
+                    ),
+                    "",
                 );
             }
             Due::Nothing => {}

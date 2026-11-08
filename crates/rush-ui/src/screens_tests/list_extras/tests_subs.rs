@@ -15,6 +15,7 @@ fn tile(id: &str, typ: &str, what: &str, born: i64) -> SubTile {
         typ: typ.into(),
         description: what.into(),
         born,
+        ..SubTile::default()
     }
 }
 
@@ -56,6 +57,26 @@ fn subagent_rows() {
     assert_eq!(rows_of(&m, 6), 4);
     assert!(wide(150, false, 1) && !wide(149, false, 1) && !wide(200, true, 1));
     assert_eq!((list_width(150), list_width(300)), (60, 72));
+}
+
+/// A run's row spins while it works; waiting on you, or just ended, it
+/// says so instead (Rust-only).
+#[test]
+fn a_subagent_row_says_how_it_stands() {
+    let mark = |waits: bool, ended: &str| {
+        let mut t = tile("s1", "Codex", "fix the flaky test", 0);
+        t.waits = waits;
+        t.ended = ended.into();
+        let row = line_of(&[t], false, 0, 80, 7, NOW, 0).plain();
+        row.chars().nth(2).unwrap()
+    };
+    assert_eq!(mark(true, ""), '●');
+    assert_eq!(mark(true, "done"), '●', "waiting on you wins");
+    assert_eq!(mark(false, "done"), '✓');
+    assert_eq!(mark(false, "failed"), '✗');
+    assert_eq!(mark(false, "stopped"), '⏹');
+    let spin = mark(false, "");
+    assert!(!"●✓✗⏹".contains(spin), "{spin}");
 }
 
 fn rows_of(m: &crate::model::Model, n: usize) -> usize {

@@ -65,14 +65,32 @@ were its own, one in default mode asks the user.
 A child waiting on you stays folded under the session that started it,
 as one at work is: the list marks the parent as needing you ("subagent
 <name> asks: <what>"), so it sits under Needs you, notifies, and the menu
-bar's row opens the parent (`Loader::fold_spawns`, `spawn.rs`). In the
-parent's session the ask is a card above the box, after the session's
-own asks (`session_cards::subask`): the subagent's name and task, the
-command a step to a line and why it asks, with **y** Allow once, **n**
-Deny (with the box typed in, enter denies it, telling it why) and **o**
-Open it; ←→ and enter, and clicks, work as on the session's own
-permission card. Allow and deny go to the child's host as `answer_agent`
-does (`Hosts::answer_spawn`), and the card goes at once.
+bar's row opens the parent (`Loader::fold_spawns`, `spawn.rs`). However
+deep the asker (a child's own child), its ask reaches the row on top,
+whatever order the list reads them in: where each folds is worked out
+before any does. In the parent's session the ask is a card above the
+box, after the session's own asks (`session_cards::subask`): the
+subagent's name and task, the command a step to a line and why it asks,
+with **alt+y** Allow once, **alt+n** Deny and **alt+o** Open it,
+whatever's typed. The card never takes the keys as it comes: ↑ gives
+them it (with the box of one line typed in too), and then **y**, **n**
+and **o**, ←→ and enter, and clicks, work as on the session's own
+permission card, a denial telling the subagent why with the words in the
+box. Typed words and enter with the card left alone are the parent's
+message, as ever. Allow and deny go to the child's host as
+`answer_agent` does (`Hosts::answer_spawn`), and the card goes at once;
+it stays away while the child's host still lists the request
+(`SpawnRun::mark_answered`, `take_asks`), so it doesn't come back while
+the answer's on its way, and an answer to one no longer asked (answered
+by the caller first) is no error.
+
+What the agents a child started ask in turn comes with the child's
+(`hosted_runs`' `nested_asks`): the card says whose (`⇉ from Codex · fix
+the flaky test ⇉ Kimi · build it`) and the answer goes to that agent's
+own host. The decisions block a child's last turn ended with
+(`Info.decisions`) is a card too, done or not: the session's own
+decisions card, its picks sent to the child as a message
+(`Act::AnswerSubDecisions`, `Hosts::send_to`), s setting it aside here.
 
 A question a child rush hosts asks (its options, multi-select or not,
 and your own words) is in its `Info.questions` whole, beside
@@ -86,10 +104,19 @@ alt+o opens the child (its plain letters are an answer's). The answers
 go to the child's host as the card's own go to its session
 (`Act::AnswerSubQuestion`, `Hosts::answer_spawn_question`).
 
-What rush can't answer (an agent rush doesn't host that waits on you in
-its transcript) has only Open it, which picks it in the subagents view.
-The parent's host is looked at for its agents every 2 s while it works or
-any of them does.
+What rush can't answer here has only Open it. A child rush hosts
+waiting on something only its own session answers (a plan to approve,
+say) opens that session: it's no longer folded into its parent's
+(`Handle::unfold`) and is opened once the list has it as a row
+(`spawned::open_session`). alt+o on a hosted run in the subagents view,
+or in the box under it, opens its session too. An agent rush doesn't
+host that waits on you in its transcript is picked in the subagents
+view. The parent's host is looked at for its agents every 2 s while it
+works or any of them does; one missing from two lookings in a row is
+taken for gone (not working, asking nothing), so the looking stops.
+
+Every place names a child the same way (`rush_core::agent::sub_name`):
+its agent and what it was asked, `Codex · fix the flaky test`.
 
 A parent whose live child asks needs you with its own host asleep too:
 it's the child that waits. `needs_you` reads `Agent::sub_asks()`, the
@@ -175,6 +202,11 @@ UI takes for a spawn (`agtools.IsSpawn`) would look for a child under it.
           sent to the caller only for an agent_send with background
 ```
 
+A sibling is never one of the caller's runs in the UI: its start_agent
+call claims nothing (`spawns::windows` has no window for it) and the
+caller's look for its agents passes it by, so it neither shows under
+the caller nor keeps the caller's 2 s look going.
+
 Its opening card says `by <caller>` (`convo.Options.StartedFrom`).
 
 ## How each harness gets the tool
@@ -206,4 +238,8 @@ as guidance mid-turn where the agent can take that.
   `ui.subName`): what it was asked, then its model, and its harness's mark
   and name only when that isn't the parent's (`Review PCI · ◎ Codex
   astra`). Marks are the same everywhere too: its harness's spinner while
-  it works, then ✓ done, ✗ failed, ⏹ stopped.
+  it works, then ✓ done, ✗ failed, ⏹ stopped. A hosted child's end is
+  its host's (`spawns::hosted_end`): failed on an error, stopped when its
+  host went without saying, else done. Its row under the parent in the
+  list is ● while it (or one it started) waits on you, and says how it
+  ended for a minute after.

@@ -72,6 +72,13 @@ pub struct Watch {
     pub drafts: super::subbox::Drafts,
     pub msg_focus: bool,
     pub msg_at: [usize; 4],
+    /// The run whose box has the keys, while one does: they stay its as
+    /// its run is drawn again, and go only when another's shown
+    /// (Rust-only).
+    pub msg_for: String,
+    /// The run picked from elsewhere whose box takes the keys once it's
+    /// drawn, if a message can reach it (Rust-only).
+    pub focus_next: String,
 }
 
 /// The run's conversation beside the wide list, as last drawn
@@ -227,6 +234,7 @@ pub fn pick_run(m: &mut Model, key: &str, id: &str) {
     w.from.clear();
     w.from_view.clear();
     w.msg_focus = false;
+    w.focus_next.clear();
     set_sel(m, format!("sub:{id}"));
 }
 
@@ -240,6 +248,9 @@ pub fn pick_from(m: &mut Model, key: &str, id: &str, from: &str) {
     w.back = true;
     w.from = from.to_string();
     w.from_view = view;
+    // Picked to look at it, its box has the keys once it shows, when a
+    // message can reach it: what's typed goes to it (Rust-only).
+    w.focus_next = id.to_string();
 }
 
 /// Back to where the run picked was picked from, when it was picked from
@@ -251,6 +262,7 @@ pub fn go_back(m: &mut Model, key: &str) -> bool {
     }
     w.back = false;
     w.msg_focus = false;
+    w.focus_next.clear();
     let from = std::mem::take(&mut w.from);
     let view = std::mem::take(&mut w.from_view);
     conn(m, key).runs.detail = None;
@@ -1095,6 +1107,21 @@ fn peek(m: &mut Model, key: &str, id: &str, right: &mut [Line], pw: usize, (x, y
     }
     // Followed as it grows while it runs and shows (subfollow).
     super::subfollow::sync(m, key);
+    // The keys stay with the box of the run they were given for, however
+    // often it's drawn; another run shown, they go back to the list. One
+    // just picked takes them, when a message can reach it (Rust-only).
+    let take = conn(m, key).watch.focus_next == id && super::relay::route(m, key, id).is_ok();
+    let w = &mut conn(m, key).watch;
+    if w.msg_for != id {
+        w.msg_focus = false;
+    }
+    if !w.focus_next.is_empty() {
+        w.focus_next.clear();
+        if take {
+            w.msg_focus = true;
+            w.msg_for = id.to_string();
+        }
+    }
     let head = peek_head(m, key, id, pw);
     let mut bx = super::relay::note_lines(m, key, id, pw);
     bx.extend(super::subbox::lines(m, key, id, pw));
@@ -1105,7 +1132,6 @@ fn peek(m: &mut Model, key: &str, id: &str, right: &mut [Line], pw: usize, (x, y
         c.watch.peek.id = id.to_string();
         c.watch.peek.scroll = 0;
         c.watch.peek.total = 0;
-        c.watch.msg_focus = false;
     }
     let mut at = 0;
     for l in head {
@@ -1184,7 +1210,9 @@ fn peek(m: &mut Model, key: &str, id: &str, right: &mut [Line], pw: usize, (x, y
 
 /// The subagents view's keys before the views': esc goes back where the
 /// run picked was picked from (closeSub); tab gives the picked run's box
-/// the keys, as → does, and tab in the box gives them back.
+/// the keys, as → does, and tab in the box gives them back; both
+/// whatever the session's own box holds. alt+o on a run rush hosts opens its
+/// own session (Rust-only).
 pub fn key_first(m: &mut Model, k: &Press) -> Out {
     let Some(key) = open_key(m) else {
         return Out::Pass;
@@ -1196,15 +1224,34 @@ pub fn key_first(m: &mut Model, k: &Press) -> Out {
         return Out::Pass;
     }
     let s = k.s.as_str();
-    let empty = conn(m, &key).input.is_empty();
+    // What's typed in the session's own box doesn't keep tab or esc
+    // here: they're the view's (Rust-only). A / command's picker keeps
+    // its tab.
+    let picker = conn(m, &key).input.string().starts_with('/');
     match s {
-        "esc" if empty && conn(m, &key).watch.back => {
+        "esc" if conn(m, &key).watch.back => {
             go_back(m, &key);
             Out::Draw
         }
-        "tab" if empty && box_run(m, &key).is_some_and(|id| sel(m) == format!("sub:{id}")) => {
+        "tab" if !picker && box_run(m, &key).is_some_and(|id| sel(m) == format!("sub:{id}")) => {
             focus_box(m, &key);
             Out::Draw
+        }
+        // A run rush hosts, picked in the list: its own session, where
+        // what it asks is answered (Rust-only).
+        "alt+o" => {
+            let picked = sel(m);
+            let host = picked
+                .strip_prefix("sub:")
+                .and_then(|id| conn(m, &key).runs.hosted_of(id))
+                .map(|x| x.hosted.clone());
+            match host {
+                Some(h) => {
+                    super::spawned::open_session(m, &h);
+                    Out::Draw
+                }
+                None => Out::Pass,
+            }
         }
         _ => Out::Pass,
     }
@@ -1439,7 +1486,9 @@ fn focus_box(m: &mut Model, key: &str) -> bool {
         m.flash(&e);
         return true;
     }
-    conn(m, key).watch.msg_focus = true;
+    let w = &mut conn(m, key).watch;
+    w.msg_focus = true;
+    w.msg_for = id;
     true
 }
 
@@ -1521,6 +1570,11 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
             }
             if is_fold(m, &key, &rf) {
                 toggle_fold(m, &key, &rf);
+            }
+            // A run clicked: its box has the keys once it shows, when a
+            // message can reach it (Rust-only).
+            if let Some(id) = rf.strip_prefix("sub:") {
+                conn(m, &key).watch.focus_next = id.to_string();
             }
             set_sel(m, rf);
             Out::Draw

@@ -127,6 +127,10 @@ pub struct SubAsk {
     /// The question it asks, whole, when it's one rather than a
     /// permission: request is its id.
     pub question: Option<Question>,
+    /// The question is the decisions block its last turn ended with:
+    /// answered as a message to it (Act::AnswerSubDecisions), not as a
+    /// tool's input.
+    pub decisions: bool,
 }
 
 impl SubAsk {
@@ -253,7 +257,16 @@ pub enum Act {
         request: String,
         input: String,
     },
-    /// Shows the session's run picked in its subagents view.
+    /// Answers the decisions block of the subagent rush hosts as host (a
+    /// SubAsk's), its id request, with text as a message to it; empty
+    /// text sets it aside here, sending nothing.
+    AnswerSubDecisions {
+        host: String,
+        request: String,
+        text: String,
+    },
+    /// Shows the session's run picked in its subagents view; a subagent
+    /// rush hosts waiting on you in its own session, that session.
     OpenRun(String),
     /// Switches the session to a permission mode.
     Permission(String),

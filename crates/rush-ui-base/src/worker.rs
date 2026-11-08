@@ -475,6 +475,19 @@ impl FleetIn {
             a.ask();
         }
     }
+
+    /// Lists the spawned agent rush hosts as session id as a row of its
+    /// own from the next reading, which is asked for now: opened as a
+    /// session, it's no longer folded into its parent's (Rust-only).
+    /// Whether there's a loader to tell.
+    pub fn unfold(&self, id: &str) -> bool {
+        let Some(h) = &self.0 else {
+            return false;
+        };
+        h.unfold(id);
+        self.refresh();
+        true
+    }
 }
 
 impl DiscoveryCtl {

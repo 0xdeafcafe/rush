@@ -410,6 +410,30 @@ pub struct SubagentTile {
     /// id: its ask is answered on that host (Agent::sub_asker). Rust-only.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub asking: bool,
+    /// It, or an agent it started, waits on you: its row says so rather
+    /// than spinning. Rust-only.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub waits: bool,
+    /// How it ended, a run just done kept a moment so its row says so:
+    /// "done", "failed" or "stopped"; "" while it works. Rust-only.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub ended: String,
+}
+
+/// What a subagent is called wherever rush names one that asks you
+/// something (its parent's row in the list, its card in the parent's
+/// session, the notes under its box): its agent's name and what it was
+/// asked, the first line of each, "Codex · fix the flaky test"; either
+/// alone when the other isn't known, "a subagent" when neither is.
+/// Rust-only.
+pub fn sub_name(agent: &str, task: &str) -> String {
+    let (a, t) = (crate::tool::one_line(agent), crate::tool::one_line(task));
+    match (a.is_empty(), t.is_empty()) {
+        (false, false) => format!("{a} · {t}"),
+        (false, true) => a.to_string(),
+        (true, false) => t.to_string(),
+        (true, true) => "a subagent".into(),
+    }
 }
 
 fn is_zero_u32(v: &u32) -> bool {

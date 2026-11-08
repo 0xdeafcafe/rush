@@ -1183,6 +1183,85 @@ fn hosted_spawns() {
     assert_eq!(got[0].job.needs, "Edit main.rs");
 }
 
+// What a spawn's own spawn asks reaches the row on top, whatever order
+// the rows are read in, its tile there saying whose host answers it; a
+// spawn opened as a session of its own (Handle::unfold) is a row again
+// (Rust-only).
+#[test]
+fn a_spawns_spawn_asks_through_the_row_on_top() {
+    let row = |key: &str, id: &str, state: State| {
+        let mut a = Agent {
+            key: key.into(),
+            rush: true,
+            pid: 7,
+            ..Agent::default()
+        };
+        a.job.id = id.into();
+        a.job.state = state;
+        a.job.name = format!("{id}'s task");
+        a
+    };
+    let parent = row("default/a:parent00", "parent00", State::Working);
+    let kid = row("codex/a:kid00000", "kid00000", State::Working);
+    let mut grand = row("codex/a:grand000", "grand000", State::Blocked);
+    grand.job.needs = "Bash rm -rf build".into();
+    grand.job.updated_at = now();
+    let meta = |by: &str| HashMap::from([("spawnedBy".to_string(), by.to_string())]);
+    let hosted = vec![
+        HostInfo {
+            id: "parent00".into(),
+            ..HostInfo::default()
+        },
+        HostInfo {
+            id: "kid00000".into(),
+            meta: meta("parent00"),
+            ..HostInfo::default()
+        },
+        HostInfo {
+            id: "grand000".into(),
+            meta: meta("kid00000"),
+            ..HostInfo::default()
+        },
+    ];
+    let orders = [
+        vec![parent.clone(), kid.clone(), grand.clone()],
+        vec![grand.clone(), kid.clone(), parent.clone()],
+        vec![kid.clone(), grand.clone(), parent.clone()],
+    ];
+    for agents in orders {
+        let mut l = loader();
+        l.ask_inline = true;
+        let spawned = l.hosted_spawns(&hosted, &agents, Vec::new());
+        let got = l.fold_spawns(None, agents, spawned, &mut HashSet::new());
+        assert_eq!(got.len(), 1, "{got:?}");
+        let p = &got[0];
+        assert_eq!(p.key, parent.key);
+        assert_eq!(p.job.state, State::Blocked);
+        assert_eq!(
+            p.job.needs,
+            "subagent grand000's task asks: Bash rm -rf build"
+        );
+        assert_eq!(p.sub_asker(), "grand000", "answered on its own host");
+        let kid_tile = p.subagents.iter().find(|t| t.id == "kid00000");
+        assert!(
+            kid_tile.is_some_and(|t| t.waits && !t.asking),
+            "the kid's row says it waits on you: {:?}",
+            p.subagents
+        );
+    }
+
+    let mut l = loader();
+    l.ask_inline = true;
+    l.handle().unfold("kid00000");
+    l.take_in();
+    let agents = vec![parent.clone(), kid.clone(), grand.clone()];
+    let spawned = l.hosted_spawns(&hosted, &agents, Vec::new());
+    let got = l.fold_spawns(None, agents, spawned, &mut HashSet::new());
+    let keys: Vec<&str> = got.iter().map(|a| a.key.as_str()).collect();
+    assert_eq!(keys, [parent.key.as_str(), kid.key.as_str()]);
+    assert_eq!(got[1].job.state, State::Blocked, "the kid asks for its own");
+}
+
 // A run folded into the session that ran it is priced with the rows, its
 // transcript's figure counted with its session's rather than its host's
 // (Rust-only: Go never priced one).

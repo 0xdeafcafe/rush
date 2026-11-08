@@ -1,9 +1,11 @@
 //! A subagent the session started waiting on you gets its card in the
 //! session's dock, as the session's own asks do, rather than a row of
 //! its own in the list: who asks, what (a command a step to a line), and
-//! buttons to allow it once, deny it, or open the subagent. y, n and o
-//! press them, ←→ pick one and enter presses it, a click presses the one
-//! under it; with the box typed in, enter denies it, telling it why.
+//! buttons to allow it once, deny it, or open the subagent. alt+y, alt+n
+//! and alt+o press them whatever's typed; with the keys on the card (↑),
+//! y, n and o do, ←→ pick one and enter presses it, and a denial tells
+//! the subagent why with what the box holds. A click presses the one
+//! under it. What's typed with the card left alone is the session's.
 //! What rush can't answer for it (a question, or an agent rush doesn't
 //! host) has only the button to open it.
 //!
@@ -205,12 +207,14 @@ pub fn card(k: &Conn, asks: &[SubAsk], w: usize, max_h: usize) -> (Vec<Line>, Ve
         row(&mut out, r);
     }
 
-    let hint = if k.card_focus {
+    let hint = if k.card_focus && a.answers() {
+        " ←→ pick · enter · n denies with what's typed as why · esc "
+    } else if k.card_focus {
         " ←→ pick · enter · esc back to typing "
     } else if a.answers() {
-        " ↑ to answer · or type why not and enter "
+        " ↑ to answer · alt+y allow · alt+n deny "
     } else {
-        " ↑ to open it "
+        " ↑ or alt+o to open it "
     };
     let n = (w as isize - 3 - width(hint) as isize).max(1) as usize;
     out.push(on_bg(

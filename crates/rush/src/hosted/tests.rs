@@ -318,6 +318,51 @@ fn hosted_runs_are_the_parents_own() {
     let got = hosted_runs(&reg, &[sibling], "p");
     assert_eq!(got.len(), 1, "{got:?}");
     assert!(got[0].beside && got[0].id == "h4", "{got:?}");
+
+    // How it ended, the block its last turn ended with, and what an agent
+    // it started asks in turn, saying whose and answered on its own host
+    // (Rust-only).
+    let mut failed = info("h1", "p", "idle");
+    failed.error = "API error: overloaded".into();
+    failed.decisions = Some(rush_core::event::Question {
+        id: "dec1".into(),
+        asks: vec![rush_core::event::Ask {
+            text: "Which branch?".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    let mut grand = info("g1", "h1", "blocked");
+    grand.kind = "claude".into();
+    grand.name = "fix the flaky test".into();
+    grand.needs = "Bash make".into();
+    grand.asking = vec![rush_host::wire::Asking {
+        id: "call_1".into(),
+        call: "Bash: make".into(),
+        ..Default::default()
+    }];
+    let got = hosted_runs(&reg, &[failed, grand], "p");
+    assert_eq!(got.len(), 1, "only its own: {got:?}");
+    let s = &got[0];
+    assert!(!s.live);
+    assert_eq!(s.ended, "failed");
+    let [dec, nested] = s.asking.as_slice() else {
+        panic!("{:?}", s.asking);
+    };
+    assert!(
+        dec.decisions && dec.id == "dec1" && dec.host.is_empty(),
+        "{dec:?}"
+    );
+    assert_eq!(
+        (
+            nested.host.as_str(),
+            nested.id.as_str(),
+            nested.call.as_str()
+        ),
+        ("g1", "call_1", "Bash: make")
+    );
+    assert!(nested.who.ends_with("fix the flaky test"), "{nested:?}");
+    assert_eq!(nested.needs, "Bash make");
 }
 
 /// Reads session id's host info until want takes it; panics after ten

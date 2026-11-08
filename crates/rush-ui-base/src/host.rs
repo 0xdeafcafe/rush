@@ -456,6 +456,9 @@ pub struct Spawned {
     pub born: Ms,
     /// Idle or stopped, it doesn't (hostedLive).
     pub live: bool,
+    /// How it ended, once it doesn't work: "failed", "stopped", or ""
+    /// for done (spawns::hosted_end). Rust-only.
+    pub ended: String,
     /// Its agent's session id and the profile it writes under: its row
     /// in the list (followSpawn's LinkSpawn).
     pub session_id: String,
@@ -465,7 +468,10 @@ pub struct Spawned {
     pub beside: bool,
     /// What it waits on you for, while it does (Info.needs); and the
     /// permissions among that, each whole, to answer from its parent's
-    /// session (Info.asking). Rust-only.
+    /// session (Info.asking), its questions (Info.questions), the
+    /// decisions block its last turn ended with (Info.decisions), and
+    /// what the agents it started in turn ask, each saying whose it is.
+    /// Rust-only.
     pub needs: String,
     pub asking: Vec<SpawnAsk>,
 }
@@ -484,6 +490,28 @@ pub struct SpawnAsk {
     /// The question, whole, when it's one: answered with its answers as
     /// the call's input (Hosts::answer_spawn_question).
     pub question: Option<rush_core::event::Question>,
+    /// The question is the decisions block its last turn ended with:
+    /// answered as a message to it (Hosts::send_to).
+    pub decisions: bool,
+    /// The rush session that asks it, when it's an agent the spawned one
+    /// started in turn, and its name (Ask's who); "" for the spawned
+    /// agent itself.
+    pub host: String,
+    pub who: String,
+    /// What it waits on you for, when it's one the spawned agent started
+    /// waiting on what rush can't answer here: id is then "".
+    pub needs: String,
+}
+
+impl SpawnAsk {
+    /// The rush session that answers it: its own asker's, else run's.
+    pub fn host_or<'a>(&'a self, run: &'a str) -> &'a str {
+        if self.host.is_empty() {
+            run
+        } else {
+            &self.host
+        }
+    }
 }
 
 /// Why a session's host couldn't be opened (Hosts::open).

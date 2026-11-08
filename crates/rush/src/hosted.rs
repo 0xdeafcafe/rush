@@ -43,8 +43,8 @@ use rush_ui::screens::session_cards::Mode;
 use rush_ui::screens::session_cards::fork::Fork;
 use rush_ui::screens::session_cards::rewind::Branch;
 use rush_ui::screens::session_core::host::{
-    Began, HandOver, HandedOver, Hosts, Info, Limit, Link, Now, Op, Retry, Said, SendErr, Spawned,
-    Start, Started, Unreached,
+    Began, HandOver, HandedOver, Hosts, Info, Limit, Link, Now, Op, Retry, Said, SendErr, SpawnAsk,
+    Spawned, Start, Started, Unreached,
 };
 use serde_json::json;
 
@@ -492,7 +492,12 @@ impl Hosts for RushHosts {
 
     fn answer_spawn(&self, id: &str, request: &str, allow: bool, why: &str) -> Result<(), String> {
         // As answer_agent does (rush_host::subtool::SubAgents::answer),
-        // for the user, from the parent's session.
+        // for the user, from the parent's session. One no longer asked
+        // was answered already, here or by its caller: whoever answers
+        // first wins, and there's nothing to say (Rust-only).
+        if !still_asks(id, request) {
+            return Ok(());
+        }
         let c = Client::dial(id).map_err(|e| e.to_string())?;
         let sent = if allow {
             c.allow(request, None, false)
@@ -507,6 +512,9 @@ impl Hosts for RushHosts {
         // As the question card answers its own session's (Op::Answer), on
         // the spawned agent's host. Rust-only.
         let input = rush_core::wire::RawJson::new(input).map_err(|e| e.to_string())?;
+        if !still_asks(id, request) {
+            return Ok(());
+        }
         let c = Client::dial(id).map_err(|e| e.to_string())?;
         let sent = c.allow(request, Some(input), false);
         c.close();
@@ -781,6 +789,18 @@ fn carry_line(l: &rush_core::agent::PreviewLine) -> rush_host::wire::CarryLine {
     }
 }
 
+/// Whether rush session id still waits on request, a permission or a
+/// question, as its info says; one whose info can't be read is taken to,
+/// and its host says. Rust-only.
+fn still_asks(id: &str, request: &str) -> bool {
+    match rush_host::read_info(id) {
+        Ok(i) => {
+            i.asking.iter().any(|a| a.id == request) || i.questions.iter().any(|q| q.id == request)
+        }
+        Err(_) => true,
+    }
+}
+
 fn info_real(id: &str) -> Result<rush_host::Info, String> {
     rush_host::read_info(id).map_err(|e| e.to_string())
 }
@@ -896,33 +916,96 @@ fn hosted_runs<I: std::borrow::Borrow<rush_host::Info>>(
             session_id: i.session_id.clone(),
             profile,
             beside,
+            ended: rush_ui::screens::list_extras::spawns::hosted_end(&i.state, &i.error, i.lost)
+                .to_string(),
             needs: if i.state == "blocked" {
                 i.needs.clone()
             } else {
                 String::new()
             },
-            asking: i
-                .asking
-                .iter()
-                .map(|a| rush_ui::screens::session_core::host::SpawnAsk {
-                    id: a.id.clone(),
-                    call: a.call.clone(),
-                    reason: a.reason.clone(),
-                    question: None,
-                })
-                .chain(
-                    i.questions
+            asking: {
+                let mut asks = own_asks(i);
+                // The block its last turn ended with, answered as a
+                // message to it (Rust-only).
+                asks.extend(
+                    i.decisions
                         .iter()
-                        .map(|q| rush_ui::screens::session_core::host::SpawnAsk {
-                            id: q.id.clone(),
-                            question: Some(q.clone()),
-                            ..Default::default()
+                        .filter(|d| !d.asks.is_empty())
+                        .map(|d| SpawnAsk {
+                            id: d.id.clone(),
+                            question: Some(d.clone()),
+                            decisions: true,
+                            ..SpawnAsk::default()
                         }),
-                )
-                .collect(),
+                );
+                nested_asks(reg, infos, &i.id, 0, &mut asks);
+                asks
+            },
         });
     }
     out
+}
+
+/// What hosted session i asks you, each whole: its permissions
+/// (Info.asking), then its questions (Info.questions). Rust-only.
+fn own_asks(i: &rush_host::Info) -> Vec<SpawnAsk> {
+    i.asking
+        .iter()
+        .map(|a| SpawnAsk {
+            id: a.id.clone(),
+            call: a.call.clone(),
+            reason: a.reason.clone(),
+            ..SpawnAsk::default()
+        })
+        .chain(i.questions.iter().map(|q| SpawnAsk {
+            id: q.id.clone(),
+            question: Some(q.clone()),
+            ..SpawnAsk::default()
+        }))
+        .collect()
+}
+
+/// What the agents rush session id started, and theirs in turn, ask you
+/// while they work, each saying whose it is and answered on its own
+/// host; one waiting on what rush can't answer here is there to be
+/// opened (its id ""). depth keeps a loop of them from going round.
+/// Rust-only.
+fn nested_asks<I: std::borrow::Borrow<rush_host::Info>>(
+    reg: &Registry,
+    infos: &[I],
+    id: &str,
+    depth: usize,
+    out: &mut Vec<SpawnAsk>,
+) {
+    if depth > 8 {
+        return;
+    }
+    for g in infos {
+        let g: &rush_host::Info = g.borrow();
+        if g.meta.get("spawnedBy").map(String::as_str) != Some(id) || g.id == id {
+            continue;
+        }
+        if rush_ui::screens::list_extras::spawns::hosted_live(&g.state) {
+            let agent = reg.get(&g.kind).map(|a| a.name()).unwrap_or_default();
+            let who = rush_core::agent::sub_name(&agent, &g.name);
+            let needs = if g.state == "blocked" {
+                g.needs.clone()
+            } else {
+                String::new()
+            };
+            let mut asks = own_asks(g);
+            if asks.is_empty() && !needs.is_empty() {
+                asks.push(SpawnAsk::default());
+            }
+            out.extend(asks.into_iter().map(|a| SpawnAsk {
+                host: g.id.clone(),
+                who: who.clone(),
+                needs: needs.clone(),
+                ..a
+            }));
+        }
+        nested_asks(reg, infos, &g.id, depth + 1, out);
+    }
 }
 
 /// Where a hosted run's agent writes session sid, and the profile it's

@@ -16,7 +16,11 @@
 //! compactions, forks and hand-offs (carry.rs).
 //!
 //! A subagent's ask answered from its parent's card (Act::AnswerSub, the
-//! subagents waiting in HostInfo::sub_asks) is Rust-only, with no Go.
+//! subagents waiting in HostInfo::sub_asks; its questions, its decisions
+//! block and what the agents it started ask in turn too), an answer
+//! kept from coming back while it's on its way, and one waiting on what
+//! only its own session answers opening that session, are Rust-only,
+//! with no Go.
 //!
 //! Renaming from enter's first answer is the list's startRename
 //! (list_extras::rename), a room set up from a chat the room screens'
@@ -134,8 +138,10 @@ fn info(m: &Model, key: &str) -> Option<HostInfo> {
 }
 
 /// The subagents session c started waiting on you, oldest first: each
-/// permission one rush hosts asks, else what it waits on; one rush
-/// doesn't host, at work and its transcript waiting (Rust-only).
+/// permission and question one rush hosts asks, the decisions block it
+/// ended its turn with, what the agents it started ask in turn, else
+/// what it waits on; one rush doesn't host, at work and its transcript
+/// waiting (Rust-only).
 fn sub_asks(m: &Model, c: &super::Conn, s: Option<&rush_convo::Session>) -> Vec<cards::SubAsk> {
     let r = &c.runs;
     let mut runs: Vec<_> = r.spawns.iter().collect();
@@ -144,46 +150,40 @@ fn sub_asks(m: &Model, c: &super::Conn, s: Option<&rush_convo::Session>) -> Vec<
     let mut running: Option<Vec<String>> = None;
     for (id, x) in runs {
         let run = format!("{}{id}", crate::spawns::SPAWN_PREFIX);
-        let ask = |request: &str, call: &str, reason: &str, needs: &str| {
-            let who = r
-                .subs
-                .iter()
-                .find(|sa| sa.id == run)
-                .map(|sa| {
-                    let d = crate::style::one_line(&sa.description);
-                    if d.is_empty() {
-                        sa.typ.clone()
-                    } else {
-                        format!("{} · {d}", sa.typ)
-                    }
-                })
-                .unwrap_or_else(|| x.name.clone());
-            cards::SubAsk {
+        let who = sub_who(r, &run, x);
+        let ask =
+            |host: &str, request: &str, call: &str, reason: &str, needs: &str| cards::SubAsk {
                 run: run.clone(),
-                host: x.hosted.clone(),
-                who: if who.is_empty() {
-                    "a subagent".into()
-                } else {
-                    who
-                },
+                host: host.into(),
+                who: who.clone(),
                 request: request.into(),
                 call: call.into(),
                 reason: reason.into(),
                 needs: needs.into(),
-                question: None,
-            }
-        };
+                ..cards::SubAsk::default()
+            };
         if !x.hosted.is_empty() {
-            if !x.live {
-                continue;
-            }
             for a in &x.asking {
-                let mut s = ask(&a.id, &a.call, &a.reason, &x.needs);
+                // Done, only the block its turn ended with is still asked.
+                if !x.live && !a.decisions {
+                    continue;
+                }
+                let needs = if a.needs.is_empty() {
+                    &x.needs
+                } else {
+                    &a.needs
+                };
+                let mut s = ask(a.host_or(&x.hosted), &a.id, &a.call, &a.reason, needs);
+                if !a.who.is_empty() {
+                    s.who = format!("{} ⇉ {}", s.who, a.who);
+                }
                 s.question = a.question.clone();
+                s.decisions = a.decisions;
                 out.push(s);
             }
-            if x.asking.is_empty() && !x.needs.is_empty() {
-                out.push(ask("", "", "", &x.needs));
+            let own = x.asking.iter().any(|a| a.host.is_empty() && !a.decisions);
+            if x.live && !own && !x.needs.is_empty() {
+                out.push(ask(&x.hosted, "", "", "", &x.needs));
             }
             continue;
         }
@@ -193,10 +193,20 @@ fn sub_asks(m: &Model, c: &super::Conn, s: Option<&rush_convo::Session>) -> Vec<
         let running = running
             .get_or_insert_with(|| r.running(s, m.now).into_iter().map(|sa| sa.id).collect());
         if running.contains(&run) {
-            out.push(ask("", "", "", "it waits on you in its own session"));
+            out.push(ask("", "", "", "", "it waits on you in its own session"));
         }
     }
     out
+}
+
+/// What spawned run x (run among r's) is called wherever it asks you:
+/// its agent and what it was asked (rush_core::agent::sub_name), as its
+/// row says it.
+pub fn sub_who(r: &super::subs::Runs, run: &str, x: &crate::spawns::SpawnRun) -> String {
+    match r.subs.iter().find(|sa| sa.id == run) {
+        Some(sa) => rush_core::agent::sub_name(&sa.typ, &crate::style::one_line(&sa.description)),
+        None => rush_core::agent::sub_name(&x.name, &crate::style::one_line(&x.prompt)),
+    }
 }
 
 /// Allows or denies what subagent host asks as request, off the UI
@@ -216,8 +226,9 @@ fn answer_sub(
 }
 
 /// Sends what answers subagent host's request with send, off the UI
-/// thread, its card going at once; a failure says why, and the card is
-/// back with the next look at its host.
+/// thread, its card going at once and kept away until its host no
+/// longer asks it (SpawnRun::mark_answered); a failure says why, and the
+/// card is back with the next look at its host.
 fn sent_sub(
     m: &mut Model,
     key: &str,
@@ -229,25 +240,61 @@ fn sent_sub(
         m.flash_err("this session can't take answers here");
         return Out::Draw;
     };
-    for x in conn(m, key).runs.spawns.values_mut() {
-        if x.hosted == host {
-            x.asking.retain(|a| a.id != request);
-            if x.asking.is_empty() {
-                x.needs.clear(); // on its way: not waiting on you now
-            }
-        }
-    }
+    mark_sub(m, key, &host, &request, true);
+    let key = key.to_string();
     m.later(
-        move || send(&*h, &host, &request),
-        |m, r| match r {
+        {
+            let (host, request) = (host.clone(), request.clone());
+            move || send(&*h, &host, &request)
+        },
+        move |m, r| match r {
             Ok(()) => Out::Idle,
             Err(e) => {
+                mark_sub(m, &key, &host, &request, false);
                 m.fail(&e);
                 Out::Draw
             }
         },
     );
     Out::Draw
+}
+
+/// Marks request, asked by subagent host, answered in session key's
+/// runs (or, when answered is false, not after all).
+fn mark_sub(m: &mut Model, key: &str, host: &str, request: &str, answered: bool) {
+    for x in conn(m, key).runs.spawns.values_mut() {
+        let asks = x.hosted == host || x.asking.iter().any(|a| a.host == host);
+        if !asks {
+            continue;
+        }
+        if answered {
+            x.mark_answered(host, request);
+        } else {
+            x.unmark_answered(host, request);
+        }
+    }
+}
+
+/// Opens the session of the subagent run picked to answer it there,
+/// when rush hosts it and it waits on what can't be answered here;
+/// whether it did.
+fn open_waiting(m: &mut Model, key: &str, run: &str) -> bool {
+    let Some(x) = conn(m, key).runs.hosted_of(run) else {
+        return false;
+    };
+    let there = x
+        .asking
+        .iter()
+        .find(|a| a.id.is_empty())
+        .map(|a| a.host_or(&x.hosted).to_string())
+        .or_else(|| {
+            let own = x.asking.iter().any(|a| a.host.is_empty() && !a.decisions);
+            (x.live && !own && !x.needs.is_empty()).then(|| x.hosted.clone())
+        });
+    match there {
+        Some(host) => super::spawned::open_session(m, &host),
+        None => false,
+    }
 }
 
 /// Sends op to session key's host off the UI thread; a failure says why.
@@ -296,7 +343,29 @@ fn act(m: &mut Model, key: &str, a: Act) -> Out {
         } => sent_sub(m, key, host, request, move |h, host, request| {
             h.answer_spawn_question(host, request, &input)
         }),
+        // Set aside: nothing goes, and the card stays away while its
+        // host lists it.
+        Act::AnswerSubDecisions {
+            host,
+            request,
+            text,
+        } if text.is_empty() => {
+            mark_sub(m, key, &host, &request, true);
+            Out::Draw
+        }
+        Act::AnswerSubDecisions {
+            host,
+            request,
+            text,
+        } => sent_sub(m, key, host, request, move |h, host, _| {
+            h.send_to(host, &text, false)
+        }),
         Act::OpenRun(run) => {
+            // One waiting on what's answered only in its own session:
+            // that session.
+            if open_waiting(m, key, &run) {
+                return Out::Draw;
+            }
             let from = m
                 .session
                 .as_ref()

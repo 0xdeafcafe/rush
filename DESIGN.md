@@ -279,11 +279,41 @@ Claude, fleet, the other adapters) builds on these.
   (`fleet::spawn`'s `Ask`). The parent's session shows the ask as a card
   above the box, after its own (`session_cards::subask`, fed by
   `HostInfo::sub_asks` from the spawned runs' `Spawned::{needs,
-  asking}`, the child's `Info.asking`); y and n answer it on the child's
-  host (`Hosts::answer_spawn`), o opens it. A child's question
+  asking}`, the child's `Info.asking`); alt+y and alt+n answer it on the
+  child's host (`Hosts::answer_spawn`) and alt+o opens it, whatever's
+  typed; bare y, n and o only once ↑ gives the card the keys (it never
+  takes them as it comes), a denial then telling the child why with
+  what the box holds. Typed words and enter are the parent's message,
+  as ever. A child's question
   (`Info.questions`, apart from the permissions in `Info.asking`) is the
   session's own question card there, saying whose it is, its answers
-  sent to the child's host (`Hosts::answer_spawn_question`). A parent
+  sent to the child's host (`Hosts::answer_spawn_question`); so is its
+  decisions block (`Info.decisions`, done or not), its answers sent it
+  as a message (`Act::AnswerSubDecisions`, `Hosts::send_to`). What the
+  agents a child started ask in turn comes with the child's
+  (`hosted_runs`' `nested_asks`, `SpawnAsk::{host, who}`), answered on
+  their own hosts, and the list's fold is worked out before anything
+  folds, so a grandchild's ask reaches the row on top whatever order
+  the rows are read in (`fold_spawns`' `up`, `top`). An answer sent is
+  kept off the card (`SpawnRun::{mark_answered, take_asks}`) until the
+  child's info no longer lists it, so the card doesn't come back while
+  it's on its way; an answer to a request no longer asked is no error
+  (`still_asks`). One waiting on what only its own session answers (a
+  plan, a question rush can't take here) opens that session on alt+o:
+  the fleet stops folding it (`Handle::unfold`) and it's opened once
+  it's a row (`spawned::open_session`, `Core::open_on_load`); alt+o on a
+  hosted run in the subagents view, or in its box, does too. A spawn
+  missing from `MISSED_GONE` (2) lookings in a row is taken for gone
+  (not live, asking nothing, ⏹ stopped), so its parent's 2 s look stops;
+  one that ended carries its host's end (`Spawned::ended`,
+  `spawns::hosted_end`: ✗ failed on an error, ⏹ stopped when its host
+  was lost, else ✓ done), as a Claude subagent's does. A sibling
+  start_agent started (`Spawned::beside`) is never a run of the caller's,
+  and a start_agent call has no window to claim one. One name for a
+  child everywhere it's told of (`rush_core::agent::sub_name`: "Codex ·
+  fix the flaky test"). A folded run's row under its parent says it
+  waits on you (●) or, a minute after, how it ended, not a spinner
+  (`SubagentTile::{waits, ended}`). A parent
   whose live child asks needs you with its own host asleep too
   (`Agent::sub_asks()`, a count in `subs.asking` that fits the stats'
   padding: rows stay 1280 B); the menu bar's notification for it opens
@@ -880,8 +910,17 @@ quiet; the source is then put away in Earlier. A usage limit's hand-on
 (`accounts/handoff.rs`, only where rush leads) uses `hand_over` directly, as
 Go's handOff calls handOverMessage. Not yet: carrying on sessions a limit
 stopped (`limit_stopped`/`relogin`). Watching a spawned agent rush hosts in
-the subagents view, the box goes to it (`subview::watched_host`, then
-`session_core::spawned::send`).
+the subagents view, the box under it goes to it (`relay::send_to`, then
+`session_core::spawned::send_text`). A run picked from elsewhere (its
+step, the dock, a card) or clicked gives that box the keys once it shows,
+when a message can reach it; they stay with that run's box however often
+it's drawn (`Watch::msg_for`), tab and esc are the view's whatever the
+parent's box holds, ↑↓ from an empty box go back through the list, and a
+box whose route goes lets the keys go. Messages queued for a Claude
+subagent that ended first go back in its box, said under it, never to
+the main session on their own; one that didn't go goes back in the run's
+box, never the parent's. Editing a queued one, ctrl+enter saves it in
+place as enter does, and only where it still is (`Draft::edit_was`).
 
 #reload restarts the view, not the sessions: `rush_ui::run_with` returns
 what the next rush starts with (`Model::reload_env`) once the terminal is

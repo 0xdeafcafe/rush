@@ -2,8 +2,10 @@
 //! that ran them rather than as rows of their own. Port of
 //! internal/fleet/fleet.go:1586-1797 (spawn, foldSpawns, hostedSpawns,
 //! addSpend, lookForAskers, promptNeedle, wrote). Folding a run that asks
-//! you something into its parent, the parent asking for it, is
-//! Rust-only: there's no Go for it.
+//! you something into its parent, the parent asking for it (the row on
+//! top, however deep the run), a run's row saying it waits on you or how
+//! it ended, and a spawn opened as a session of its own staying a row,
+//! are Rust-only: there's no Go for them.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader};
@@ -21,6 +23,10 @@ use crate::machine::{ran_by, spawn_of};
 /// have been written.
 const ASK_FOR: Ms = 30 * 24 * 3_600_000;
 const ASKED_BEFORE: Ms = 10 * 60_000;
+
+/// How long a run a rush session started stays a row under it once
+/// it's done, saying how it ended (Rust-only).
+const ENDED_SHOWN: Ms = 60_000;
 
 /// A headless run not seen running, and the sessions that may have run
 /// it: those working when it began, less other runs like it.
@@ -75,15 +81,18 @@ struct Ask {
 }
 
 impl Ask {
-    fn of(a: &Agent) -> Ask {
-        let name = [&a.display_name, &a.job.name]
-            .into_iter()
-            .map(|s| rush_core::tool::one_line(s))
-            .find(|s| !s.is_empty())
-            .unwrap_or_default();
+    /// a's ask, its agent's name agent: named as everywhere else
+    /// (rush_core::agent::sub_name).
+    fn of(a: &Agent, agent: &str) -> Ask {
+        let task = if a.job.name.trim().is_empty() {
+            &a.display_name
+        } else {
+            &a.job.name
+        };
+        let name = rush_core::agent::sub_name(agent, task);
         Ask {
-            who: if name.is_empty() {
-                "a subagent".into()
+            who: if agent.trim().is_empty() && task.trim().is_empty() {
+                name
             } else {
                 format!("subagent {name}")
             },
@@ -211,51 +220,129 @@ impl Loader {
         }
         let mut keep = vec![true; agents.len()];
         let mut folded = Vec::new();
-        for i in 0..agents.len() {
-            let a = &agents[i];
-            // One asking you something folds too, its parent asking for
-            // it: the parent's session shows the ask (Rust-only; Go kept
-            // it a row of its own).
-            let ask = (a.job.state == State::Blocked && !a.checking).then(|| Ask::of(a));
-            let (cost, today, live) = (a.spend.cost, a.spend.today, a.job.live());
-            if let Some(&p) = gone.get(&a.key) {
-                folded.extend(fold_target(a));
-                // Run from its shell, it has no tile; asking through p, it
-                // gets one, which says where its ask is answered.
-                let tile = ask.is_some().then(|| run_tile(a, &agents[p]));
-                add_spend(&mut agents[p], cost, today);
-                if let Some(ask) = ask
-                    && ask.through(&mut agents[p], &self.store().overlay)
-                    && let Some(mut t) = tile
-                {
-                    t.asking = true;
-                    agents[p].subagents.push(t);
+        // Where each folds, worked out before anything is: the session it
+        // ran under (by its process, or a link), and the row that's left
+        // at the top of that, so what a run its run started asks reaches
+        // the row you see whatever order they're read in (Rust-only; Go
+        // folded one level, in the list's order). One opened as a session
+        // of its own (Handle::unfold) stays a row.
+        let up: Vec<Option<(usize, bool)>> = (0..agents.len())
+            .map(|i| {
+                let a = &agents[i];
+                if a.rush && self.unfolded.contains(&a.job.id) {
+                    return None;
                 }
-                keep[i] = false;
+                if let Some(&p) = gone.get(&a.key) {
+                    return Some((p, true));
+                }
+                // ponytail: a spawn's own spawns fold into it, and out of
+                // sight once it has folded too; one under a run its shell
+                // ran stays a row. One a rush session started (spawnedBy)
+                // may still be at work.
+                match self.links.get(&a.key).and_then(|pk| by_key.get(pk)) {
+                    Some(&p) if p != i && !gone.contains_key(&agents[p].key) => Some((p, false)),
+                    _ => None,
+                }
+            })
+            .collect();
+        let top = |mut i: usize| {
+            for _ in 0..up.len() {
+                match up[i] {
+                    Some((p, _)) => i = p,
+                    None => break,
+                }
+            }
+            i
+        };
+        // What each asks you, as it was read: one asking you something
+        // folds too, the row it folds into asking for it (Rust-only; Go
+        // kept it a row of its own).
+        let names: Vec<String> = agents
+            .iter()
+            .map(|a| {
+                self.reg
+                    .get(a.kind.as_str())
+                    .map(|x| x.name())
+                    .unwrap_or_default()
+            })
+            .collect();
+        let asks: Vec<Option<Ask>> = agents
+            .iter()
+            .zip(&names)
+            .map(|(a, n)| (a.job.state == State::Blocked && !a.checking).then(|| Ask::of(a, n)))
+            .collect();
+        // The rows a run they started, or one it started, waits on you
+        // through: their tiles say so.
+        let mut waits = vec![false; agents.len()];
+        for (i, ask) in asks.iter().enumerate() {
+            if ask.is_none() {
                 continue;
             }
-            // ponytail: one level only; a spawn's own spawns fold into it,
-            // and out of sight once it has folded too. One a rush session
-            // started (spawnedBy) may still be at work.
-            if let Some(&p) = self.links.get(&a.key).and_then(|pk| by_key.get(pk))
-                && p != i
-                && !gone.contains_key(&agents[p].key)
-            {
-                folded.extend(fold_target(a));
-                let tile = live.then(|| run_tile(a, &agents[p]));
-                agents[p].subs.spawned += 1;
-                add_spend(&mut agents[p], cost, today);
-                // Its tile says where its ask is answered, when p's ask is
-                // now its (an asking run is live: it has one).
-                let answered_here =
-                    ask.is_some_and(|ask| ask.through(&mut agents[p], &self.store().overlay));
-                if let Some(mut t) = tile {
-                    t.asking = answered_here;
-                    agents[p].subs.direct += 1; // its parent is busy, not your turn, while it works
-                    agents[p].subagents.push(t); // a row under it, as its own harness's runs have
+            let mut j = i;
+            for _ in 0..up.len() {
+                waits[j] = true;
+                match up[j] {
+                    Some((p, _)) => j = p,
+                    None => break,
                 }
-                keep[i] = false;
             }
+        }
+        let at = now();
+        let mut asks = asks;
+        for i in 0..agents.len() {
+            let Some((p, by_proc)) = up[i] else {
+                continue;
+            };
+            let r = top(i);
+            let a = &agents[i];
+            let ask = asks[i].take();
+            let (cost, today, live) = (a.spend.cost, a.spend.today, a.job.live());
+            folded.extend(fold_target(a));
+            // Run from its shell, it has no tile but while it asks; one a
+            // rush session started has one while it works, and a moment
+            // after it's done, saying how it ended.
+            let ended = (!by_proc && !live && ask.is_none() && at - a.job.updated_at < ENDED_SHOWN)
+                .then(|| {
+                    if a.spend.halt.is_some() {
+                        "failed"
+                    } else {
+                        "done"
+                    }
+                });
+            let mut tile = (live || ask.is_some() || ended.is_some()).then(|| {
+                let mut tl = run_tile(a, &agents[p]);
+                tl.waits = waits[i];
+                tl.ended = ended.unwrap_or_default().to_string();
+                tl
+            });
+            add_spend(&mut agents[r], cost, today);
+            if !by_proc {
+                agents[p].subs.spawned += 1;
+            }
+            // The row on top asks for it; its tile says where its ask is
+            // answered, when that's now its (sub_asker).
+            let answered_here =
+                ask.is_some_and(|ask| ask.through(&mut agents[r], &self.store().overlay));
+            if by_proc || r != p {
+                // Its parent has no row of its own to show it under: the
+                // row on top gets its tile, while it's its ask to answer.
+                if answered_here && let Some(mut t) = tile.take() {
+                    t.asking = true;
+                    agents[r].subagents.push(t);
+                }
+                if by_proc {
+                    keep[i] = false;
+                    continue;
+                }
+            }
+            if let Some(mut t) = tile {
+                t.asking = answered_here && r == p;
+                if live {
+                    agents[p].subs.direct += 1; // its parent is busy, not your turn, while it works
+                }
+                agents[p].subagents.push(t); // a row under it, as its own harness's runs have
+            }
+            keep[i] = false;
         }
         let mut k = keep.into_iter();
         agents.retain(|_| k.next().unwrap_or(true));

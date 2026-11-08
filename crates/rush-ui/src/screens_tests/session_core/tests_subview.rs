@@ -630,16 +630,43 @@ fn a_spawned_agents_box_goes_to_its_host() {
     subview::pick_from(&mut m, KEY, "spawn:s1", "run:spawn:s1");
     assert_eq!(views::view_name(&m, KEY), "subagents");
     let _ = m.frame();
-    press(&mut m, "tab");
+    // Picked from elsewhere, its box has the keys as it shows, and keeps
+    // them as the run is drawn again (Rust-only).
     assert!(
         conn(&mut m, KEY).watch.msg_focus,
-        "tab didn't give the box the keys"
+        "picking it didn't give its box the keys"
+    );
+    let _ = m.frame();
+    assert!(
+        conn(&mut m, KEY).watch.msg_focus,
+        "lost as it was drawn again"
     );
     typed(&mut m, "and the metrics");
+    assert!(
+        conn(&mut m, KEY).input.is_empty(),
+        "it went to the main box"
+    );
     press(&mut m, "ctrl+enter");
     assert_eq!(
         fake.sent_to.lock().unwrap().clone(),
         [("h9".to_string(), "and the metrics".to_string(), true)]
+    );
+    // tab gives the keys back, and takes them again with the main box
+    // typed in.
+    press(&mut m, "tab");
+    assert!(!conn(&mut m, KEY).watch.msg_focus);
+    conn(&mut m, KEY).input.insert_str("for the parent");
+    press(&mut m, "tab");
+    assert!(
+        conn(&mut m, KEY).watch.msg_focus,
+        "tab with the main box typed in"
+    );
+    // Its run gone from what rush hosts, the box lets the keys go.
+    conn(&mut m, KEY).runs.spawns.clear();
+    press(&mut m, "x");
+    assert!(
+        !conn(&mut m, KEY).watch.msg_focus,
+        "a box with no route kept the keys"
     );
 }
 

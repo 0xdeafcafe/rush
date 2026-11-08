@@ -27,6 +27,11 @@ pub struct SubTile {
     pub description: String,
     /// When it began; 0 when unknown.
     pub born: Ms,
+    /// It, or one it started, waits on you (Rust-only).
+    pub waits: bool,
+    /// How it ended, a run just done: "done", "failed", "stopped"; ""
+    /// while it works (Rust-only).
+    pub ended: String,
 }
 
 /// The agents whose subagents ← tucked away (subsFolded).
@@ -89,7 +94,15 @@ pub fn line_of(
             plain(" "),
         ]);
     }
-    let glyph = sp(SPINNER[(tick + s.id.len()) % SPINNER.len()], ORANGE);
+    // Its spinner while it works; waiting on you, or done, it says so
+    // (Rust-only: Go's rows were only ever running ones).
+    let glyph = match (s.waits, s.ended.as_str()) {
+        (true, _) => spb("●", YELLOW),
+        (_, "failed") => sp("✗", RED),
+        (_, "stopped") => sp("⏹", DIM),
+        (_, "done") => sp("✓", GREEN),
+        _ => sp(SPINNER[(tick + s.id.len()) % SPINNER.len()], ORANGE),
+    };
     let typ = if s.typ.is_empty() { "subagent" } else { &s.typ };
     // What it was asked leads, as the run's label does everywhere else.
     let what = one_line(&s.description);
@@ -125,6 +138,8 @@ pub fn row_of(m: &Model, a: &rush_core::agent::Agent, i: usize, w: usize, list_w
             typ: t.kind.clone(),
             description: t.description.clone(),
             born: t.born,
+            waits: t.waits,
+            ended: t.ended.clone(),
         })
         .collect();
     let time_w = m.col_widths(list_w)[5];

@@ -121,6 +121,7 @@ struct Inbox {
     /// In the order they came.
     fetched: Vec<(String, Reading)>,
     links: HashMap<String, (String, &'static str)>,
+    unfold: Vec<String>,
 }
 
 /// What the UI hands a loader while it reads: never waits for a load.
@@ -167,6 +168,16 @@ impl Handle {
     /// from its shell: child is listed with it from then on.
     pub fn link_spawn(&self, child: &str, parent: &str) {
         self.link(child, parent, "opened");
+    }
+
+    /// The rush session id, a spawned agent, is opened as a session of
+    /// its own: from the next reading it's a row in the list, not folded
+    /// into the session that started it (Rust-only).
+    pub fn unfold(&self, id: &str) {
+        self.with(|i| {
+            i.unfold.push(id.to_string());
+            i.stale = true;
+        });
     }
 
     /// What looking for a run's asker found: its session, or "" for none.
@@ -298,7 +309,7 @@ struct FoundKey {
 
 /// Keeps the cheap caches between readings.
 pub struct Loader {
-    reg: Registry,
+    pub(crate) reg: Registry,
     store: Store,
     hosts: Box<dyn Hosts>,
     procs: Box<dyn ProcSource>,
@@ -365,6 +376,9 @@ pub struct Loader {
     pub(crate) links: HashMap<String, String>,
     pub(crate) links_dirty: bool,
     links_path: Option<PathBuf>,
+    /// The spawned agents opened as sessions of their own, by their rush
+    /// session's id: rows in the list, not folded (Handle::unfold).
+    pub(crate) unfolded: HashSet<String>,
     /// Headless runs looked for in transcripts.
     asked: HashSet<String>,
     /// Look for askers on this thread (tests), not in the background.
@@ -438,6 +452,7 @@ impl Loader {
             links: HashMap::new(),
             links_dirty: false,
             links_path: None,
+            unfolded: HashSet::new(),
             asked: HashSet::new(),
             ask_inline: false,
             read: Vec::new(),
@@ -663,6 +678,7 @@ impl Loader {
         for (k, (p, how)) in inb.links {
             self.link(&k, &p, how);
         }
+        self.unfolded.extend(inb.unfold);
         if inb.stale {
             self.changed_since();
         }
@@ -2408,7 +2424,7 @@ fn subagent_tiles(transcript: &str, runs: &[rush_core::adapter::SubagentRun]) ->
             mod_time: r.mod_time,
             born: r.born,
             born_ns: r.born_ns,
-            asking: false,
+            ..SubagentTile::default()
         })
         .collect();
     // Oldest first, as they began: a new one joins the end. To the

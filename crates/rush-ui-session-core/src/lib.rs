@@ -220,6 +220,10 @@ pub struct Core {
     /// The session just started, picked once a reading of the list has it
     /// (selectOnLoad).
     pub select_on_load: String,
+    /// The rush session of a spawned agent being opened as a session of
+    /// its own, opened once a reading of the list has it as a row
+    /// (spawned::open_session; Rust-only).
+    pub open_on_load: String,
     /// When esc last met an empty box in esc_key's Session: esc again
     /// within a second asks to close it (escAt, escKey).
     pub esc_at: Ms,

@@ -11,6 +11,10 @@
 //!
 //! Which spawned agent a message goes to is the subagents view's: the box
 //! under the run picked there routes it (relay.rs's send_to).
+//!
+//! Rust-only: the notes name the agent as wherever it asks you
+//! (cards_host::sub_who), and a spawned agent opens as a session of its
+//! own (open_session), its row no longer folded into its parent's.
 
 use super::host::hosts;
 use super::subqueue::{self, SubNote};
@@ -86,10 +90,10 @@ fn sent(
     side: bool,
     r: Result<(), String>,
 ) -> Out {
-    const NAME: &str = "the spawned agent";
+    let name = name_of(m, key, sub);
     if side && let Err(e) = &r {
         super::subbox::give_back(m, key, sub, &text);
-        m.fail(&format!("couldn't send to {NAME}: {e} · back in its box"));
+        m.fail(&format!("couldn't send to {name}: {e} · back in its box"));
         return Out::Draw;
     }
     let k = subqueue::key(key, sub);
@@ -104,10 +108,10 @@ fn sent(
                     told: false,
                 },
             );
-            m.flash(&format!("sent to {NAME} · {how}"));
+            m.flash(&format!("sent to {name} · {how}"));
         }
         Err(e) => {
-            let why = format!("couldn't send to {NAME}: {e}");
+            let why = format!("couldn't send to {name}: {e}");
             let c = conn(m, key);
             if c.input.is_empty() {
                 c.input.insert_str(&text);
@@ -127,4 +131,33 @@ fn sent(
         }
     }
     Out::Draw
+}
+
+/// What spawned run sub of session key is called, as wherever it asks
+/// you (cards_host::sub_who); "the spawned agent" while its run isn't
+/// known.
+fn name_of(m: &mut Model, key: &str, sub: &str) -> String {
+    let r = &conn(m, key).runs;
+    r.hosted_of(sub)
+        .map(|x| super::cards_host::sub_who(r, sub, x))
+        .unwrap_or_else(|| "the spawned agent".into())
+}
+
+/// Opens the spawned agent rush hosts as session id as a session of its
+/// own, where its own cards are: at once when it's a row in the list,
+/// else it's made one (it's folded into its parent's) and opened once a
+/// reading has it. Whether it could be. Rust-only.
+pub fn open_session(m: &mut Model, id: &str) -> bool {
+    if let Some(a) = m.agents.iter().find(|a| a.rush && a.job.id == id) {
+        let key = a.key.clone();
+        super::menubar_jump::jump_to(m, key);
+        return true;
+    }
+    if !m.kept::<crate::worker::FleetIn>().unfold(id) {
+        m.flash_err("its session can't be opened here");
+        return false;
+    }
+    core(m).open_on_load = id.to_string();
+    m.flash("opening its session…");
+    true
 }

@@ -35,6 +35,9 @@ pub struct Draft {
     pub edit_q: usize,
     /// The edit held the queue, and lets it go when it's done.
     pub edit_held: bool,
+    /// The queued message being edited as it was: saved over only where
+    /// it still is (keys.rs's edit_was).
+    pub edit_was: String,
 }
 
 /// The drafts, by run id.
@@ -189,6 +192,9 @@ pub fn hint(m: &mut Model, key: &str, id: &str, w: usize) -> Line {
     if !queue_of(m, key, id).items.is_empty() {
         pairs.push(("↑", "the queue"));
     }
+    if conn(m, key).runs.hosted_of(id).is_some() {
+        pairs.push(("alt+o", "its own session"));
+    }
     pairs.push(("ctrl+v", "image"));
     pairs.push(("tab · esc", "back to the list"));
     fit_keys(w, &pairs)
@@ -220,6 +226,12 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         conn(m, &key).watch.msg_focus = false;
         return Out::Pass;
     };
+    // A box no message can reach any more (its session stopped, its run
+    // not found) lets the keys go rather than keep them (Rust-only).
+    if super::relay::route(m, &key, &id).is_err() {
+        conn(m, &key).watch.msg_focus = false;
+        return Out::Pass;
+    }
     let s = k.s.as_str();
     if draft(m, &key, &id).pick.is_some() {
         return queue_key(m, &key, &id, s);
@@ -230,6 +242,12 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         "esc" if editing => {
             draft(m, &key, &id).input.clear();
             end_edit(m, &key, &id);
+            Out::Draw
+        }
+        // esc on an empty box of a run picked from elsewhere goes back
+        // there at once, as it would from the list (Rust-only).
+        "esc" if empty && conn(m, &key).watch.back => {
+            super::subview::go_back(m, &key);
             Out::Draw
         }
         // esc and tab give the keys back to the list; what's typed stays.
@@ -248,7 +266,23 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
             draft(m, &key, &id).pick = Some(n - 1);
             Out::Draw
         }
-        "enter" if editing => {
+        // ↑↓ from an empty box with nothing queued go back through the
+        // list (Rust-only).
+        "up" | "down" if empty && !editing => {
+            conn(m, &key).watch.msg_focus = false;
+            Out::Pass
+        }
+        // Its own session, where what it asks is answered (Rust-only).
+        "alt+o" => {
+            let host = conn(m, &key).runs.hosted_of(&id).map(|x| x.hosted.clone());
+            if let Some(h) = host {
+                super::spawned::open_session(m, &h);
+            }
+            Out::Draw
+        }
+        // Editing a queued message, any send saves it in place, as a
+        // Session's does: the old text never goes too (keys.rs send).
+        "enter" | "ctrl+enter" | "ctrl+s" if editing => {
             save_edit(m, &key, &id);
             Out::Draw
         }
@@ -315,6 +349,7 @@ fn queue_key(m: &mut Model, key: &str, id: &str, s: &str) -> Out {
             let held = queue_of(m, key, id).held;
             let d = draft(m, key, id);
             d.input.set(&text);
+            d.edit_was = text;
             d.edit_q = i + 1;
             d.edit_held = !held;
             d.pick = None;
@@ -385,20 +420,32 @@ fn hold(m: &mut Model, key: &str, id: &str) {
     });
 }
 
-/// Saves the box over the queued message being edited; emptied, it's
-/// dropped (queueEdit's save).
+/// Saves the box over the queued message being edited, where it still
+/// is (it may have moved, or gone); emptied, it's dropped (queueEdit's
+/// save, keys.rs save_edit). One sent meanwhile stays in the box, said.
 fn save_edit(m: &mut Model, key: &str, id: &str) {
     let d = draft(m, key, id);
     let i = d.edit_q - 1;
+    let was = std::mem::take(&mut d.edit_was);
     let text = take_text(d);
     d.input.clear_sent();
     d.imgs = ImageRefs::default();
     let q = local_q(m, key, id);
-    if i < q.items.len() {
-        if text.is_empty() {
+    let at = if q.items.get(i) == Some(&was) {
+        Some(i)
+    } else {
+        q.items.iter().position(|it| *it == was)
+    };
+    match at {
+        Some(i) if text.is_empty() => {
             q.items.remove(i);
-        } else {
-            q.items[i] = text;
+        }
+        Some(i) => q.items[i] = text,
+        None => {
+            end_edit(m, key, id);
+            give_back(m, key, id, &text);
+            m.flash_err("that message has already been sent · your edit is in the box");
+            return;
         }
     }
     end_edit(m, key, id);
@@ -410,6 +457,7 @@ fn end_edit(m: &mut Model, key: &str, id: &str) {
     let held = d.edit_held;
     d.edit_q = 0;
     d.edit_held = false;
+    d.edit_was.clear();
     if held {
         local_q(m, key, id).held = false;
     }

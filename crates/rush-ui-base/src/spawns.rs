@@ -43,11 +43,75 @@ pub struct SpawnRun {
     pub born: Ms,
     pub hosted: String,
     pub live: bool,
+    /// How a hosted one ended, once it has: "failed", "stopped", or ""
+    /// for done (Spawned's). Rust-only.
+    pub ended: String,
     /// What a hosted one waits on you for, and the permissions among it,
-    /// as its host last said (Spawned's). Rust-only.
+    /// as its host last said (Spawned's), less those answered here.
+    /// Rust-only.
     pub needs: String,
     pub asking: Vec<crate::host::SpawnAsk>,
+    /// The asks answered here (who answers each, and its id), left out
+    /// of asking until its host no longer lists them: an answer on its
+    /// way isn't asked again. Rust-only.
+    pub answered: Vec<(String, String)>,
+    /// How many lookings in a row haven't found a hosted one: at
+    /// MISSED_GONE it's taken for gone. Rust-only.
+    pub missed: u8,
+    /// Its row in the list, which opening its own session picks.
+    /// Rust-only.
+    pub row: String,
 }
+
+impl SpawnRun {
+    /// Takes in what its host says it waits on you for, and asks: those
+    /// answered here left out until it no longer lists them, so a card
+    /// answered doesn't come back while the answer's on its way; all of
+    /// its own answered, it doesn't wait on you either. Rust-only.
+    pub fn take_asks(&mut self, needs: String, asking: Vec<crate::host::SpawnAsk>) {
+        let me = self.hosted.clone();
+        let is = |a: &crate::host::SpawnAsk, (h, id): &(String, String)| {
+            a.host_or(&me) == h.as_str() && a.id == *id
+        };
+        self.answered
+            .retain(|done| asking.iter().any(|a| is(a, done)));
+        let own = asking.iter().filter(|a| a.host.is_empty()).count();
+        let answered = &self.answered;
+        self.asking = asking
+            .into_iter()
+            .filter(|a| !answered.iter().any(|done| is(a, done)))
+            .collect();
+        let own_left = self.asking.iter().filter(|a| a.host.is_empty()).count();
+        self.needs = if own > 0 && own_left == 0 {
+            String::new()
+        } else {
+            needs
+        };
+    }
+
+    /// Ask id, which host answers (its own, or an agent it started), was
+    /// answered here, or set aside: it's left out from now on, until its
+    /// host no longer lists it. Rust-only.
+    pub fn mark_answered(&mut self, host: &str, id: &str) {
+        let me = self.hosted.clone();
+        self.asking
+            .retain(|a| !(a.host_or(&me) == host && a.id == id));
+        if !self.asking.iter().any(|a| a.host.is_empty()) {
+            self.needs.clear(); // on its way: not waiting on you now
+        }
+        self.answered.push((host.to_string(), id.to_string()));
+    }
+
+    /// An answer that didn't go: its ask is asked again from the next
+    /// look at its host. Rust-only.
+    pub fn unmark_answered(&mut self, host: &str, id: &str) {
+        self.answered.retain(|(h, i)| !(h == host && i == id));
+    }
+}
+
+/// How many lookings in a row may miss a hosted spawned agent before
+/// it's taken for gone: no longer working, nor asking you anything.
+pub const MISSED_GONE: u8 = 2;
 
 /// The spawned agents found, as subagent runs, as they began
 /// (spawnSubs). title is what the call that ran a step says it's for.
@@ -81,14 +145,15 @@ pub fn spawn_subs<'a>(
     out
 }
 
-/// The shell steps' and spawn_agent and start_agent calls' windows in s,
-/// in order; one still running (or its task) runs to now, and a grace
-/// after (Session.Windows).
+/// The shell steps' and spawn_agent calls' windows in s, in order; one
+/// still running (or its task) runs to now, and a grace after
+/// (Session.Windows). A start_agent call's has none: what it starts is a
+/// session of its own, never a run of the caller's (Rust-only).
 pub fn windows(s: &rush_convo::Session, now: Ms, grace: Ms) -> Vec<Window> {
-    use rush_convo::model::runs::{SPAWN_AGENT, START_AGENT, rush_tool};
+    use rush_convo::model::runs::{SPAWN_AGENT, rush_tool};
     let mut out = Vec::new();
     for st in s.steps() {
-        let spawn = matches!(rush_tool(&st.tool), Some(SPAWN_AGENT | START_AGENT));
+        let spawn = rush_tool(&st.tool) == Some(SPAWN_AGENT);
         if st.kind != rush_core::tool::Kind::Shell && !spawn || st.start == 0 {
             continue;
         }
@@ -123,6 +188,22 @@ pub fn windows(s: &rush_convo::Session, now: Ms, grace: Ms) -> Vec<Window> {
 /// Whether a hosted run works on: idle, its turn is done (hostedLive).
 pub fn hosted_live(state: &str) -> bool {
     state != "stopped" && state != "idle"
+}
+
+/// How a hosted run that no longer works ended, in the words a Claude
+/// subagent's end gets: "failed" when its host says an error stopped
+/// it, "stopped" when its host went without saying so (lost), else ""
+/// for done; "" while it works. Rust-only.
+pub fn hosted_end(state: &str, error: &str, lost: bool) -> &'static str {
+    if hosted_live(state) && !lost {
+        ""
+    } else if !error.trim().is_empty() {
+        "failed"
+    } else if lost {
+        "stopped"
+    } else {
+        ""
+    }
 }
 
 /// Whether cmd has prog as a word of its own, a path to it too (names).

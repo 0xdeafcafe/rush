@@ -1090,6 +1090,10 @@ impl Runs {
     /// Takes in the sessions rush hosted for this one: each known one's
     /// state, and a new one under the step that started it, its harness
     /// said which, else the step whose window holds it (onSpawnFound).
+    /// One started beside it (start_agent) is a session of its own, never
+    /// a run of this one's. One missing from MISSED_GONE lookings in a row
+    /// is taken for gone, asking nothing, so it's no longer looked for
+    /// every two seconds (Rust-only).
     fn take_spawned(
         &mut self,
         s: &Session,
@@ -1098,16 +1102,31 @@ impl Runs {
     ) -> Vec<String> {
         let mut links = Vec::new();
         let mut wins = None;
-        for mut h in found {
-            // One started beside it asks you from its own row.
+        let seen: HashSet<String> = found.iter().map(|h| h.id.clone()).collect();
+        for (id, r) in &mut self.spawns {
+            if r.hosted.is_empty() || seen.contains(id) {
+                continue;
+            }
+            r.missed = r.missed.saturating_add(1);
+            if r.missed >= crate::spawns::MISSED_GONE {
+                if r.live && r.ended.is_empty() {
+                    r.ended = "stopped".into();
+                }
+                r.live = false;
+                r.needs.clear();
+                r.asking.clear();
+                r.answered.clear();
+            }
+        }
+        for h in found {
             if h.beside {
-                h.needs.clear();
-                h.asking.clear();
+                continue;
             }
             if let Some(r) = self.spawns.get_mut(&h.id) {
+                r.missed = 0;
                 r.live = h.live;
-                r.needs = h.needs;
-                r.asking = h.asking;
+                r.ended = h.ended;
+                r.take_asks(h.needs, h.asking);
                 continue;
             }
             if self.host_none.contains(&h.id) || h.transcript.is_empty() {
@@ -1126,10 +1145,8 @@ impl Runs {
                 self.host_none.insert(h.id);
                 continue;
             }
-            // One started beside it keeps its own row in the list.
-            if !h.beside {
-                links.extend(spawn_row(&h.profile, &h.session_id));
-            }
+            let row = spawn_row(&h.profile, &h.session_id);
+            links.extend(row.clone());
             self.spawns.insert(
                 h.id.clone(),
                 SpawnRun {
@@ -1142,8 +1159,11 @@ impl Runs {
                     born: h.born,
                     hosted: h.id,
                     live: h.live,
+                    ended: h.ended,
                     needs: h.needs,
                     asking: h.asking,
+                    row: row.unwrap_or_default(),
+                    ..SpawnRun::default()
                 },
             );
         }
@@ -1234,7 +1254,7 @@ impl Runs {
             // A hosted one as its host says; else as the command that ran
             // it, or its background shell (spawnState).
             return match self.spawns.get(step) {
-                Some(r) if !r.hosted.is_empty() => (String::new(), r.live),
+                Some(r) if !r.hosted.is_empty() => (r.ended.clone(), r.live),
                 _ => step_state(s, &sa.tool_use_id),
             };
         }
