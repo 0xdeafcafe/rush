@@ -72,11 +72,42 @@ command a step to a line and why it asks, with **y** Allow once, **n**
 Deny (with the box typed in, enter denies it, telling it why) and **o**
 Open it; ←→ and enter, and clicks, work as on the session's own
 permission card. Allow and deny go to the child's host as `answer_agent`
-does (`Hosts::answer_spawn`), and the card goes at once. What rush can't
-answer (a question, or an agent rush doesn't host that waits on you in
+does (`Hosts::answer_spawn`), and the card goes at once.
+
+A question a child rush hosts asks (its options, multi-select or not,
+and your own words) is in its `Info.questions` whole, beside
+`Info.asking`, which stays permissions only (so `answer_agent` and
+older readers read it as ever). In the parent's session it is the
+session's own question card, its heading saying whose it is (`? Branch
+⇉ from Codex · fix the flaky test`), with the same keys: ↑ gives it the
+keys, ↑↓ and digits choose, enter picks, typed words and enter answer in
+your own words, s skips it (the child is told you skipped it), and
+alt+o opens the child (its plain letters are an answer's). The answers
+go to the child's host as the card's own go to its session
+(`Act::AnswerSubQuestion`, `Hosts::answer_spawn_question`).
+
+What rush can't answer (an agent rush doesn't host that waits on you in
 its transcript) has only Open it, which picks it in the subagents view.
 The parent's host is looked at for its agents every 2 s while it works or
 any of them does.
+
+A parent whose live child asks needs you with its own host asleep too:
+it's the child that waits. `needs_you` reads `Agent::sub_asks()`, the
+count of its runs asking you in `subs.asking`, which fits the stats'
+padding, so a row stays 1280 B. An asleep parent with no child asking
+is as it was, not under Needs you.
+
+In the menu bar the parent's row is the one waiting, and a click on its
+notification opens the parent; but its buttons are the child's ask's:
+Allow and Deny for a permission, the options and a typed answer for a
+single-choice question, sent to the child's host, which the feed asks
+instead of the parent's. Which child that is, `Agent::sub_asker()`,
+is the id of the parent's subagent tile marked `asking` (a child run
+from the parent's shell, which has no tile of its own, gets one while
+it asks). The wait carries `via`, the child's session id, and so does
+each op from its buttons; an op is carried out only while the row
+still waits on that request of that same child. An app that doesn't
+know `via` reads and sends the rest as ever.
 
 The list of agents is `host.picks(leader)`: every installed provider on
 each of its models, named as the old agent types were (`defName`), with

@@ -15,6 +15,7 @@ fn asking(request: &str, call: &str) -> SubAsk {
         call: call.into(),
         reason: "stop the stalled helper".into(),
         needs: "Bash kill -TERM 79335".into(),
+        question: None,
     }
 }
 
@@ -158,4 +159,106 @@ fn the_sessions_own_ask_goes_first() {
     );
     let c = m.cards().conns.get("k").cloned().unwrap_or_default();
     assert_eq!(card_kind(&m, "k", &c, &info(&m, "k").unwrap()), "approval");
+}
+
+/// A subagent's question, whole, as rush hosts it.
+fn questioning(host: &str) -> SubAsk {
+    let choice = |l: &str| rush_core::event::Choice {
+        label: l.into(),
+        description: format!("work on {l}"),
+        ..Default::default()
+    };
+    SubAsk {
+        run: "spawn:h9".into(),
+        host: host.into(),
+        who: "Codex · fix the flaky test".into(),
+        request: "q_1".into(),
+        needs: "Which branch?".into(),
+        question: Some(rush_core::event::Question {
+            id: "q_1".into(),
+            asks: vec![rush_core::event::Ask {
+                header: "Branch".into(),
+                text: "Which branch?".into(),
+                options: vec![choice("main"), choice("next")],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..SubAsk::default()
+    }
+}
+
+/// A subagent's question rush hosts is the session's own question card,
+/// saying whose it is: picked, its answers go to the subagent's host as
+/// the card's own would go to the session's; skipped, the subagent is
+/// told so; alt+o opens it.
+#[test]
+fn a_subagents_question_is_answered_on_its_card() {
+    let mut m = hosted(120, 50);
+    set_info(&mut m, |i| i.sub_asks = vec![questioning("h9")]);
+    let out = text(&rows(&mut m, 100, 40));
+    for w in [
+        "? Branch",
+        "⇉ from Codex · fix the flaky test",
+        "Which branch?",
+        "main",
+        "work on next",
+    ] {
+        assert!(out.contains(w), "card missing {w:?}:\n{out}");
+    }
+    assert!(!out.contains("Claude asks"), "{out}");
+    let c = m.cards().conns["k"].clone();
+    assert_eq!(
+        card_kind(&m, "k", &c, &info(&m, "k").unwrap()),
+        "subquestion"
+    );
+    assert!(!c.card_focus, "its letters are a message's until ↑");
+
+    press(&mut m, "up");
+    press(&mut m, "down");
+    press(&mut m, "enter");
+    let got = acts(&mut m);
+    let [
+        Act::AnswerSubQuestion {
+            host,
+            request,
+            input,
+        },
+    ] = got.as_slice()
+    else {
+        panic!("not a subagent's answer: {got:?}");
+    };
+    assert_eq!((host.as_str(), request.as_str()), ("h9", "q_1"));
+    let v: serde_json::Value = serde_json::from_str(input).unwrap();
+    assert_eq!(v["answers"]["Which branch?"], "next", "{input}");
+
+    m.kept::<super::tests::Fake>().acts.clear();
+    rows(&mut m, 100, 40);
+    let i = info(&m, "k").unwrap();
+    card_key(&mut m, "k", &i, "alt+o", true);
+    assert_eq!(acts(&mut m), vec![Act::OpenRun("spawn:h9".into())]);
+
+    m.kept::<super::tests::Fake>().acts.clear();
+    press(&mut m, "up");
+    press(&mut m, "s");
+    let got = acts(&mut m);
+    assert!(
+        matches!(
+            got.as_slice(),
+            [Act::AnswerSub { host, request, allow: false, why }]
+                if host == "h9" && request == "q_1" && why.contains("skipped")
+        ),
+        "{got:?}"
+    );
+}
+
+/// A question of a subagent rush doesn't host stays one to open.
+#[test]
+fn an_unhosted_subagents_question_opens_it() {
+    let mut m = hosted(120, 50);
+    set_info(&mut m, |i| i.sub_asks = vec![questioning("")]);
+    let out = text(&rows(&mut m, 100, 40));
+    assert!(out.contains("open it to answer"), "{out}");
+    let c = m.cards().conns["k"].clone();
+    assert_eq!(card_kind(&m, "k", &c, &info(&m, "k").unwrap()), "subask");
 }

@@ -75,9 +75,27 @@ pub(crate) fn resets_in(at: Local, now: Local) -> String {
 }
 
 /// What a wait's notification is matched by: the request it's for, else
-/// what it needs.
-pub fn sig(w: &Waiting) -> &str {
-    if w.req.is_empty() { &w.needs } else { &w.req }
+/// what it needs; a subagent's request with whose it is (Rust-only).
+pub fn sig(w: &Waiting) -> String {
+    match (w.req.is_empty(), w.via.is_empty()) {
+        (true, _) => w.needs.clone(),
+        (false, true) => w.req.clone(),
+        (false, false) => format!("{}\u{1f}{}", w.via, w.req),
+    }
+}
+
+/// The wait a notification's button answers: row key's, only while it
+/// still asks request req of the same subagent (via, "" for its own).
+pub fn still_asks<'a>(
+    waiting: &'a [Waiting],
+    key: &str,
+    req: &str,
+    via: &str,
+) -> Option<&'a Waiting> {
+    waiting
+        .iter()
+        .find(|w| w.key == key)
+        .filter(|w| w.req == req && w.via == via)
 }
 
 /// The answers a wait takes from outside rush, as button titles and the op
@@ -87,6 +105,7 @@ pub fn actions(w: &Waiting) -> Vec<(String, Op)> {
         op: op.into(),
         key: w.key.clone(),
         req: w.req.clone(),
+        via: w.via.clone(),
         ..Op::default()
     };
     match w.kind.as_str() {
@@ -230,10 +249,7 @@ pub fn notices<'a>(
     waiting: &'a [Waiting],
     got: bool,
 ) -> Notices<'a> {
-    let now: HashMap<String, String> = waiting
-        .iter()
-        .map(|w| (w.key.clone(), sig(w).to_string()))
-        .collect();
+    let now: HashMap<String, String> = waiting.iter().map(|w| (w.key.clone(), sig(w))).collect();
     let mut gone: Vec<String> = notified
         .iter()
         .filter(|(k, v)| now.get(*k) != Some(*v))
@@ -242,7 +258,7 @@ pub fn notices<'a>(
     gone.sort();
     let post = waiting
         .iter()
-        .filter(|w| notified.get(&w.key).map(String::as_str) != Some(sig(w)))
+        .filter(|w| notified.get(&w.key) != Some(&sig(w)))
         .filter(|w| got && !w.seen)
         .collect();
     Notices { gone, post, now }
@@ -329,6 +345,64 @@ mod tests {
             "c.Allow\u{1f}Deny"
         );
         assert!(category(&wait("question"), &q).ends_with("o9.text"));
+    }
+
+    /// Rust-only: a subagent's ask, through its parent's row, takes the
+    /// same buttons, each op saying whose ask it answers; a button answers
+    /// only while the row asks that same request of that same subagent.
+    #[test]
+    fn a_subagents_ask_through_its_parent() {
+        let w = Waiting {
+            via: "kid00001".into(),
+            ..wait("permission")
+        };
+        let acts = actions(&w);
+        let got: Vec<(&str, &str, &str, &str)> = acts
+            .iter()
+            .map(|(l, o)| (l.as_str(), o.op.as_str(), o.key.as_str(), o.via.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("Allow", "allow", "k", "kid00001"),
+                ("Deny", "deny", "k", "kid00001")
+            ]
+        );
+        let q = Waiting {
+            via: "kid00001".into(),
+            ..wait("question")
+        };
+        assert!(actions(&q).iter().all(|(_, o)| o.via == "kid00001"));
+        assert!(
+            category(&q, &actions(&q)).ends_with(".text"),
+            "typed answers too"
+        );
+        assert_eq!(sig(&w), "kid00001\u{1f}r");
+
+        let own = wait("permission");
+        let other = Waiting {
+            via: "kid00002".into(),
+            ..wait("permission")
+        };
+        for (waiting, req, via, answers) in [
+            (vec![w.clone()], "r", "kid00001", true),
+            (vec![w.clone()], "r2", "kid00001", false),
+            (vec![other.clone()], "r", "kid00001", false),
+            (vec![own.clone()], "r", "kid00001", false),
+            (vec![own.clone()], "r", "", true),
+            (vec![w.clone()], "r", "", false),
+            (Vec::new(), "r", "kid00001", false),
+        ] {
+            assert_eq!(
+                still_asks(&waiting, "k", req, via).is_some(),
+                answers,
+                "{req} via {via:?} on {waiting:?}"
+            );
+        }
+        // Another subagent asking the same request is news.
+        let notified = notices(&HashMap::new(), std::slice::from_ref(&w), true).now;
+        let n = notices(&notified, std::slice::from_ref(&other), true);
+        assert_eq!((n.gone.len(), n.post.len()), (1, 1));
     }
 
     #[test]

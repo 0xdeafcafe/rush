@@ -68,6 +68,10 @@ struct Ask {
     needs: String,
     at: Ms,
     seen: bool,
+    /// It can be answered now: its host runs, or it waits on decisions.
+    live: bool,
+    /// The rush session it runs as, when rush hosts it and it runs.
+    host: String,
 }
 
 impl Ask {
@@ -86,15 +90,27 @@ impl Ask {
             needs: rush_core::tool::one_line(&a.job.needs).to_string(),
             at: a.job.updated_at,
             seen: a.seen,
+            live: a.pid != 0 || a.decides,
+            host: if a.rush && a.pid != 0 {
+                a.job.id.clone()
+            } else {
+                String::new()
+            },
         }
     }
 
     /// Marks parent p as asking you for it: blocked, saying who asks
     /// what, and seen only once you've looked at p since it asked. One
-    /// asking something of its own says that.
-    fn through(self, p: &mut Agent, ov: &rush_state::Overlay) {
+    /// asking something of its own says that. A live one asking makes p
+    /// need you with p's own host asleep too: it's the subagent that
+    /// waits (subs.asking). Says whether p's ask is now this one's to
+    /// answer on its own host: its tile is then marked so (sub_asker).
+    fn through(self, p: &mut Agent, ov: &rush_state::Overlay) -> bool {
+        if self.live {
+            p.subs.asking += 1;
+        }
         if p.job.state == State::Blocked && !p.checking {
-            return;
+            return false;
         }
         let looked = ov.seen.get(&p.key).is_some_and(|t| self.at <= t.to_ms());
         p.job.state = State::Blocked;
@@ -106,6 +122,7 @@ impl Ask {
         };
         p.job.updated_at = p.job.updated_at.max(self.at);
         p.seen = self.seen || looked;
+        !self.host.is_empty()
     }
 }
 
@@ -203,9 +220,16 @@ impl Loader {
             let (cost, today, live) = (a.spend.cost, a.spend.today, a.job.live());
             if let Some(&p) = gone.get(&a.key) {
                 folded.extend(fold_target(a));
+                // Run from its shell, it has no tile; asking through p, it
+                // gets one, which says where its ask is answered.
+                let tile = ask.is_some().then(|| run_tile(a, &agents[p]));
                 add_spend(&mut agents[p], cost, today);
-                if let Some(ask) = ask {
-                    ask.through(&mut agents[p], &self.store().overlay);
+                if let Some(ask) = ask
+                    && ask.through(&mut agents[p], &self.store().overlay)
+                    && let Some(mut t) = tile
+                {
+                    t.asking = true;
+                    agents[p].subagents.push(t);
                 }
                 keep[i] = false;
                 continue;
@@ -220,13 +244,15 @@ impl Loader {
                 folded.extend(fold_target(a));
                 let tile = live.then(|| run_tile(a, &agents[p]));
                 agents[p].subs.spawned += 1;
-                if let Some(t) = tile {
+                add_spend(&mut agents[p], cost, today);
+                // Its tile says where its ask is answered, when p's ask is
+                // now its (an asking run is live: it has one).
+                let answered_here =
+                    ask.is_some_and(|ask| ask.through(&mut agents[p], &self.store().overlay));
+                if let Some(mut t) = tile {
+                    t.asking = answered_here;
                     agents[p].subs.direct += 1; // its parent is busy, not your turn, while it works
                     agents[p].subagents.push(t); // a row under it, as its own harness's runs have
-                }
-                add_spend(&mut agents[p], cost, today);
-                if let Some(ask) = ask {
-                    ask.through(&mut agents[p], &self.store().overlay);
                 }
                 keep[i] = false;
             }

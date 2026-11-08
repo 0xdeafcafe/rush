@@ -438,6 +438,15 @@ pub struct Info {
         deserialize_with = "nullvec::deserialize"
     )]
     pub asking: Vec<Asking>,
+    /// The questions it waits on you to answer, each whole (its options,
+    /// multi-select or not): what its parent's session answers it from
+    /// (a subagent's ask, Rust-only). Kept apart from asking, which only
+    /// ever holds permissions, so what reads that reads it as ever.
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "nullvec::deserialize"
+    )]
+    pub questions: Vec<Question>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub model: String,
     #[serde(skip_serializing_if = "String::is_empty")]

@@ -468,6 +468,46 @@ fn away_holds() {
     assert!(st.info.state == "blocked" && st.info.away.as_ref().unwrap().held.len() == 2);
 }
 
+// Rust-only: a question asked is in the info whole, for a parent's
+// session to answer it from (Info.questions); asking stays permissions
+// only; answered, it's gone.
+#[test]
+fn an_open_question_is_in_the_info() {
+    let _home = Home::new();
+    let h = host(cfg("oq"));
+    let c = Arc::new(Kept::default());
+    let conn: Arc<dyn Conn> = c.clone();
+    with_conn(&h, conn.clone());
+    let mut st = h.lock();
+    st.info.state = "working".into();
+    let q = event::Question {
+        id: "q1".into(),
+        asks: vec![event::Ask {
+            text: "Which DB?".into(),
+            multi: true,
+            options: vec![event::Choice {
+                label: "pg".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    h.on_agent_event(&mut st, &conn, Event::Question(q.clone()));
+    assert_eq!(st.info.state, "blocked");
+    assert_eq!(st.info.questions, [q]);
+    assert!(st.info.asking.is_empty(), "{:?}", st.info.asking);
+    let back: crate::wire::Info =
+        serde_json::from_slice(&serde_json::to_vec(&st.info).unwrap()).unwrap();
+    assert_eq!(back.questions, st.info.questions, "written and read back");
+    h.on_agent_event(
+        &mut st,
+        &conn,
+        Event::ApprovalCancelled(event::ApprovalCancelled { id: "q1".into() }),
+    );
+    assert!(st.info.questions.is_empty());
+}
+
 // stall_test.go:14: a turn silent for STALL_AFTER with nothing running is
 // marked stalled and never stopped; a tool running, a question asked, or a
 // word from the agent keeps it from showing, and the next word clears it.

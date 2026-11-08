@@ -471,7 +471,8 @@ pub struct Spawned {
 }
 
 /// A permission a spawned agent waits on, as its host has it
-/// (rush_host::wire::Asking). Rust-only.
+/// (rush_host::wire::Asking), or a question it asks you (Info.questions).
+/// Rust-only.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SpawnAsk {
     /// The approval's id, as allow and deny take it.
@@ -480,6 +481,9 @@ pub struct SpawnAsk {
     pub call: String,
     /// Why the agent asks, when it says.
     pub reason: String,
+    /// The question, whole, when it's one: answered with its answers as
+    /// the call's input (Hosts::answer_spawn_question).
+    pub question: Option<rush_core::event::Question>,
 }
 
 /// Why a session's host couldn't be opened (Hosts::open).
@@ -604,6 +608,12 @@ pub trait Hosts: Send + Sync {
         _allow: bool,
         _why: &str,
     ) -> Result<(), String> {
+        Err(NOT_YET.into())
+    }
+    /// Answers question request of rush session id (a spawned agent),
+    /// from its parent's session: allows it with input, the answers as the
+    /// question card makes them. Rust-only. Waits.
+    fn answer_spawn_question(&self, _id: &str, _request: &str, _input: &str) -> Result<(), String> {
         Err(NOT_YET.into())
     }
     /// Stops rush session id's host with the agents it spawned, as ctrl+x
@@ -881,8 +891,10 @@ pub struct Fake {
     pub not_mid_turn: Mutex<Vec<String>>,
     /// The sessions rush hosted for a parent's shell.
     pub spawned: Mutex<Vec<Spawned>>,
-    /// What spawned agents were answered, as (id, request, allow, why).
+    /// What spawned agents were answered, as (id, request, allow, why);
+    /// and their questions, as (id, request, input).
     pub spawn_answers: Mutex<Vec<(String, String, bool, String)>>,
+    pub spawn_questions: Mutex<Vec<(String, String, String)>>,
     /// Sessions stopped with what they spawned, then those stopped alone,
     /// by id.
     pub stopped_all: Mutex<Vec<String>>,
@@ -1114,6 +1126,14 @@ impl Hosts for Arc<Fake> {
         }
         let a = (id.to_string(), request.to_string(), allow, why.to_string());
         self.spawn_answers.lock().unwrap().push(a);
+        Ok(())
+    }
+    fn answer_spawn_question(&self, id: &str, request: &str, input: &str) -> Result<(), String> {
+        if let Some(e) = self.failed() {
+            return Err(e);
+        }
+        let a = (id.to_string(), request.to_string(), input.to_string());
+        self.spawn_questions.lock().unwrap().push(a);
         Ok(())
     }
     fn takes_mid_turn(&self, kind: &str) -> bool {

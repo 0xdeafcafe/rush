@@ -2408,6 +2408,7 @@ fn subagent_tiles(transcript: &str, runs: &[rush_core::adapter::SubagentRun]) ->
             mod_time: r.mod_time,
             born: r.born,
             born_ns: r.born_ns,
+            asking: false,
         })
         .collect();
     // Oldest first, as they began: a new one joins the end. To the

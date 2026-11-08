@@ -191,6 +191,11 @@ pub struct SubagentStats {
     pub spawned: u32,
     pub direct: u32,
     pub nested: u32,
+    /// How many of the runs it started, folded under it, ask you something
+    /// live to answer: it needs you with its own host asleep too
+    /// (Agent::sub_asks). Rust-only.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub asking: u32,
     /// When the agents of a workflow still running last wrote: they work
     /// for the session as its subagents do, though none is counted here.
     pub workflow: Ms,
@@ -401,6 +406,30 @@ pub struct SubagentTile {
     /// When it began to the nanosecond, when known (0 when not), for the
     /// order runs begun in the same millisecond go in.
     pub born_ns: i64,
+    /// It's the run its row says asks you, and rush hosts it as session
+    /// id: its ask is answered on that host (Agent::sub_asker). Rust-only.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub asking: bool,
+}
+
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
+}
+
+impl Agent {
+    /// A live run it started asks you something through it (subs.asking).
+    pub fn sub_asks(&self) -> bool {
+        self.subs.asking > 0
+    }
+
+    /// The rush session of the run its row says asks, where that ask is
+    /// answered: its tile's id; "" for none, or one rush doesn't host.
+    pub fn sub_asker(&self) -> &str {
+        self.subagents
+            .iter()
+            .find(|t| t.asking)
+            .map_or("", |t| t.id.as_str())
+    }
 }
 
 fn is_zero_ms(v: &Ms) -> bool {

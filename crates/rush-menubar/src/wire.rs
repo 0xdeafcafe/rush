@@ -2,7 +2,9 @@
 //! the menu's state from the feed, ops from the app. Port of
 //! internal/menubar/feed.go:32-130 (State, Account, Window, Working,
 //! Waiting, Op), written as Go's jsonx writes them so either rush's app
-//! reads either rush's feed.
+//! reads either rush's feed. `via`, on a wait and an op, is Rust-only:
+//! a subagent's ask answered through its parent's row; a reader that
+//! doesn't know it reads the rest as ever.
 
 use rush_core::time::Ms;
 use rush_core::wire;
@@ -108,6 +110,11 @@ pub struct Waiting {
     pub options: Vec<String>,
     #[serde(with = "wire::time")]
     pub since: Ms,
+    /// The rush session of the subagent that asks for it, when it's one's
+    /// ask: req is that subagent's, and answers go to its host. Key is
+    /// still the row's, what a click opens. Rust-only.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub via: String,
 }
 
 /// Something the app asks the feed to do.
@@ -125,6 +132,10 @@ pub struct Op {
     /// limit: continue at the reset.
     #[serde(skip_serializing_if = "is_false")]
     pub yes: bool,
+    /// The wait's via: the op is for that subagent's ask, and goes nowhere
+    /// once the row's wait is another's. Rust-only; Go's app sends none.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub via: String,
 }
 
 /// One line from the feed as the app reads it: the menu's state, or an
@@ -207,6 +218,17 @@ mod tests {
                     req: "r".into(),
                     answer: "SQLite".into(),
                     yes: false,
+                    via: String::new(),
+                },
+            ),
+            (
+                r#"{"op":"allow","key":"k","req":"call_1","via":"kid00001"}"#,
+                Op {
+                    op: "allow".into(),
+                    key: "k".into(),
+                    req: "call_1".into(),
+                    via: "kid00001".into(),
+                    ..Op::default()
                 },
             ),
             (

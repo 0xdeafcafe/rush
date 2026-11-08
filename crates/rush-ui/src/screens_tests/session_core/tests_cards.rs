@@ -1114,6 +1114,7 @@ fn a_subagents_ask_is_answered_on_its_host() {
         id: "call_1".into(),
         call: "Bash: kill -TERM 79335".into(),
         reason: "stop the helper".into(),
+        question: None,
     };
     let spawns = &mut conn(&mut m, KEY).runs.spawns;
     spawns.insert("h9".into(), run("h9", true, vec![ask.clone()]));
@@ -1132,6 +1133,7 @@ fn a_subagents_ask_is_answered_on_its_host() {
             call: "Bash: kill -TERM 79335".into(),
             reason: "stop the helper".into(),
             needs: "Bash kill -TERM 79335".into(),
+            question: None,
         }]
     );
 
@@ -1153,4 +1155,43 @@ fn a_subagents_ask_is_answered_on_its_host() {
     act(&mut m, Act::OpenRun("spawn:h9".into()));
     assert_eq!(super::views::view_name(&m, KEY), "subagents");
     assert_eq!(m.session.as_ref().unwrap().sel, "sub:spawn:h9");
+
+    // A question it asks comes whole, and its answers go to its host.
+    let q = rush_core::event::Question {
+        id: "q_1".into(),
+        asks: vec![rush_core::event::Ask {
+            text: "Which branch?".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let asks = SpawnAsk {
+        id: "q_1".into(),
+        question: Some(q.clone()),
+        ..SpawnAsk::default()
+    };
+    let spawns = &mut conn(&mut m, KEY).runs.spawns;
+    spawns.insert("h9".into(), run("h9", true, vec![asks]));
+    let got = info(&m).sub_asks;
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].request, "q_1");
+    assert_eq!(got[0].question.as_ref(), Some(&q));
+    assert_eq!(got[0].asks(), Some(&q), "rush answers it");
+    act(
+        &mut m,
+        Act::AnswerSubQuestion {
+            host: "h9".into(),
+            request: "q_1".into(),
+            input: r#"{"answers":{"Which branch?":"main"}}"#.into(),
+        },
+    );
+    assert_eq!(
+        *fake.spawn_questions.lock().unwrap(),
+        vec![(
+            "h9".into(),
+            "q_1".into(),
+            r#"{"answers":{"Which branch?":"main"}}"#.into()
+        )]
+    );
+    assert_eq!(info(&m).sub_asks, Vec::new(), "the answered card is gone");
 }

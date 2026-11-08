@@ -40,6 +40,12 @@ pub struct Row {
     pub rush: bool,
     /// Asleep, a hosted session waiting on a decision.
     pub decides: bool,
+    /// A live subagent it started asks you something: it waits on you with
+    /// its own host asleep too (Agent::sub_asks()). Rust-only.
+    pub sub_asks: bool,
+    /// The rush session of the subagent that asks, when rush hosts it:
+    /// where the ask is answered (Agent::sub_asker()). Rust-only.
+    pub sub_asker: String,
     pub seen: bool,
     /// Its turn just ended and the agent hasn't said how yet.
     pub checking: bool,
@@ -69,9 +75,11 @@ impl From<&rush_core::agent::Agent> for Row {
             repo: a.repo.clone(),
             transcript_path: a.job.transcript_path.clone(),
             pid: a.pid,
-            rush: false,
-            decides: false,
-            seen: false,
+            rush: a.rush,
+            decides: a.decides,
+            sub_asks: a.sub_asks(),
+            sub_asker: a.sub_asker().to_string(),
+            seen: a.seen,
             checking: a.checking,
             interactive: a.interactive,
             created_at: a.job.created_at,

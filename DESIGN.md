@@ -280,8 +280,16 @@ Claude, fleet, the other adapters) builds on these.
   above the box, after its own (`session_cards::subask`, fed by
   `HostInfo::sub_asks` from the spawned runs' `Spawned::{needs,
   asking}`, the child's `Info.asking`); y and n answer it on the child's
-  host (`Hosts::answer_spawn`), o opens it. docs/subagents.md has it
-  whole.
+  host (`Hosts::answer_spawn`), o opens it. A child's question
+  (`Info.questions`, apart from the permissions in `Info.asking`) is the
+  session's own question card there, saying whose it is, its answers
+  sent to the child's host (`Hosts::answer_spawn_question`). A parent
+  whose live child asks needs you with its own host asleep too
+  (`Agent::sub_asks()`, a count in `subs.asking` that fits the stats'
+  padding: rows stay 1280 B); the menu bar's notification for it opens
+  the parent, its buttons answering the child on the child's host
+  (`Agent::sub_asker()`, the parent's subagent tile marked `asking`;
+  the wait's and op's `via`). docs/subagents.md has it whole.
 - **A host's lines in a burst.** A session streaming big tool results
   makes tens of thousands of lines a second. Each end of a host's socket
   asks for 4 MiB (rush-host `sys::widen`; macOS gives 8 KiB, so the

@@ -503,6 +503,16 @@ impl Hosts for RushHosts {
         sent.map_err(|e| e.to_string())
     }
 
+    fn answer_spawn_question(&self, id: &str, request: &str, input: &str) -> Result<(), String> {
+        // As the question card answers its own session's (Op::Answer), on
+        // the spawned agent's host. Rust-only.
+        let input = rush_core::wire::RawJson::new(input).map_err(|e| e.to_string())?;
+        let c = Client::dial(id).map_err(|e| e.to_string())?;
+        let sent = c.allow(request, Some(input), false);
+        c.close();
+        sent.map_err(|e| e.to_string())
+    }
+
     fn spawned(&self, parent: &str) -> Vec<Spawned> {
         let infos = self
             .lister
@@ -898,7 +908,17 @@ fn hosted_runs<I: std::borrow::Borrow<rush_host::Info>>(
                     id: a.id.clone(),
                     call: a.call.clone(),
                     reason: a.reason.clone(),
+                    question: None,
                 })
+                .chain(
+                    i.questions
+                        .iter()
+                        .map(|q| rush_ui::screens::session_core::host::SpawnAsk {
+                            id: q.id.clone(),
+                            question: Some(q.clone()),
+                            ..Default::default()
+                        }),
+                )
                 .collect(),
         });
     }

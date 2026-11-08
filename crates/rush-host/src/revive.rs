@@ -64,6 +64,7 @@ pub fn lose(i: &mut Info) {
     }
     i.background = Vec::new();
     i.asking = Vec::new(); // gone with its host: no one to answer
+    i.questions = Vec::new();
     i.tasks = 0;
     if !i.sleeping {
         i.state = "stopped".into();

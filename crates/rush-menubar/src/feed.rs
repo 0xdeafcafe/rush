@@ -1,7 +1,8 @@
 //! `rush menubar feed`: writes the menu's state as it changes and carries
 //! out the ops the app sends, one JSON object a line. Port of
 //! internal/menubar/feed.go:131-520 (Feed, build, doing, answerable, do,
-//! oneLine, windows).
+//! oneLine, windows). A subagent's ask answered through its parent's row
+//! (Row::sub_asker, Waiting::via) is Rust-only, with no Go.
 //!
 //! Go reads everything again every two seconds. This waits instead: on
 //! the files the reading came from (kqueue, rush-sys's fswait), on the
@@ -165,7 +166,7 @@ pub fn build(snap: &Snapshot, asked: &mut Asked, hosts: &dyn Hosts) -> State {
         if a.checking {
             continue;
         }
-        if a.state == Doing::Blocked && (a.pid != 0 || a.decides) {
+        if a.state == Doing::Blocked && (a.pid != 0 || a.decides || a.sub_asks) {
             live.insert(a.key.clone());
             let mut w = Waiting {
                 key: a.key.clone(),
@@ -179,9 +180,23 @@ pub fn build(snap: &Snapshot, asked: &mut Asked, hosts: &dyn Hosts) -> State {
             if w.needs.is_empty() {
                 w.needs = one_line(&a.detail);
             }
-            if a.rush && a.pid != 0 {
+            if !a.sub_asker.is_empty() {
+                // A subagent asks for it: the subagent's host is asked,
+                // and answers go there, a click still opening a
+                // (Rust-only).
+                answerable(&mut w, a, &a.sub_asker, asked, hosts);
+                w.via = a.sub_asker.clone();
+                if w.kind == "permission" {
+                    // Who asks what, then why.
+                    w.text = [w.needs.as_str(), w.text.as_str()]
+                        .into_iter()
+                        .filter(|t| !t.is_empty())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                }
+            } else if a.rush && a.pid != 0 {
                 // Asleep, it has nothing to ask its host.
-                answerable(&mut w, a, asked, hosts);
+                answerable(&mut w, a, &a.id, asked, hosts);
             }
             s.waiting.push(w);
         } else if a.state == Doing::Working && a.pid != 0 {
@@ -226,20 +241,23 @@ fn doing(a: &Row) -> String {
     "working…".into()
 }
 
-/// Fills in how a rush session's wait can be answered, asking its host
-/// what it's waiting on when that changed.
-fn answerable(w: &mut Waiting, a: &Row, asked: &mut Asked, hosts: &dyn Hosts) {
-    let fresh = asked.get(&a.key).is_none_or(|p| p.sig != a.needs);
+/// Fills in how a rush session's wait can be answered, asking host (its
+/// own, or a subagent's asking for it) what it's waiting on when that
+/// changed.
+fn answerable(w: &mut Waiting, a: &Row, host: &str, asked: &mut Asked, hosts: &dyn Hosts) {
+    let fresh = asked
+        .get(&a.key)
+        .is_none_or(|p| p.sig != a.needs || p.host != host);
     if fresh {
         let (req, info) = hosts
-            .dial(&a.id)
+            .dial(host)
             .map(|c| host::read_wait(&c))
             .unwrap_or_default();
         asked.insert(
             a.key.clone(),
             Pending {
                 sig: a.needs.clone(),
-                host: a.id.clone(),
+                host: host.to_string(),
                 req,
                 info,
             },
@@ -281,7 +299,8 @@ pub const GONE: &str = "that question has already been answered";
 
 /// Carries out an op on the session it names.
 pub fn do_op(o: &Op, p: Option<&Pending>, hosts: &dyn Hosts) -> Result<(), String> {
-    let Some(p) = p else {
+    // An op for a subagent's ask is for that subagent's still (Rust-only).
+    let Some(p) = p.filter(|p| o.via.is_empty() || o.via == p.host) else {
         return Err(GONE.into());
     };
     let c = hosts.dial(&p.host).map_err(|e| e.to_string())?;

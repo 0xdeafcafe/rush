@@ -124,13 +124,24 @@ pub struct SubAsk {
     pub reason: String,
     /// What it waits on you for, said briefly.
     pub needs: String,
+    /// The question it asks, whole, when it's one rather than a
+    /// permission: request is its id.
+    pub question: Option<Question>,
 }
 
 impl SubAsk {
-    /// Whether rush answers it here; else it's answered in its own
-    /// session.
+    /// Whether rush allows or denies it here, a permission; else it's a
+    /// question, or answered in its own session.
     pub fn answers(&self) -> bool {
-        !self.host.is_empty() && !self.request.is_empty()
+        !self.host.is_empty() && !self.request.is_empty() && self.question.is_none()
+    }
+
+    /// The question rush answers here, as the session's own question card
+    /// does; None for a permission, or one rush doesn't host.
+    pub fn asks(&self) -> Option<&Question> {
+        self.question
+            .as_ref()
+            .filter(|q| !self.host.is_empty() && !self.request.is_empty() && !q.asks.is_empty())
     }
 }
 
@@ -234,6 +245,13 @@ pub enum Act {
         request: String,
         allow: bool,
         why: String,
+    },
+    /// Answers question request of the subagent rush hosts as host (a
+    /// SubAsk's) with input, the answers as the question card makes them.
+    AnswerSubQuestion {
+        host: String,
+        request: String,
+        input: String,
     },
     /// Shows the session's run picked in its subagents view.
     OpenRun(String),
@@ -401,6 +419,10 @@ pub struct Conn {
     /// It's drawn on a Wall tile, where there's no box to type in: your
     /// own words are typed in its session.
     pub q_on_tile: bool,
+    /// Who asks, when it's a subagent's question drawn in its parent's
+    /// session ("Codex · fix the flaky test"); "" for the session's own.
+    /// Rust-only.
+    pub q_asker: String,
     /// The decisions card set aside, and one opened again.
     pub q_gone: String,
     pub q_again: Option<Question>,

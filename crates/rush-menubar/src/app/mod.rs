@@ -2,7 +2,9 @@
 //! it shows comes from `rush menubar feed`, which it runs and talks to one
 //! JSON object per line. Port of internal/menubar/app.swift:96-500
 //! (AppDelegate: the feed, the icon, the menu, notifications) and :690
-//! (Main).
+//! (Main). A notification for a subagent's ask, its buttons answering
+//! the subagent and its body opening the parent (userInfo's "via"), is
+//! Rust-only.
 //!
 //! Idle costs nothing: the feed's lines are read on a thread of their own
 //! that blocks on the pipe and hands each to the main thread; the only
@@ -680,6 +682,9 @@ impl Delegate {
         if !w.req.is_empty() {
             info.push(("req", w.req.as_str()));
         }
+        if !w.via.is_empty() {
+            info.push(("via", w.via.as_str()));
+        }
         let body = if w.text.is_empty() { &w.needs } else { &w.text };
         self.post(
             &w.key,
@@ -731,24 +736,19 @@ impl Delegate {
     }
 
     /// What a click on a notification, or one of its buttons, asks.
-    fn respond(&self, key: &str, req: &str, action: &str, text: Option<String>) {
+    fn respond(&self, key: &str, req: &str, via: &str, action: &str, text: Option<String>) {
         // SAFETY: UserNotifications' own constant.
         if action == unsafe { UNNotificationDefaultActionIdentifier }.to_string() {
             self.show(key);
             return;
         }
         // The buttons were made from the wait as it was; answer it only if
-        // it's still asking that.
+        // it's still asking that, of the same subagent when one asks.
         let w = {
             let s = self.ivars().state.borrow();
-            s.waiting
-                .as_deref()
-                .unwrap_or_default()
-                .iter()
-                .find(|w| w.key == key)
-                .cloned()
+            menu::still_asks(s.waiting.as_deref().unwrap_or_default(), key, req, via).cloned()
         };
-        let Some(w) = w.filter(|w| w.req == req) else {
+        let Some(w) = w else {
             return;
         };
         if action == "text" {
@@ -758,6 +758,7 @@ impl Delegate {
                     key: key.into(),
                     req: w.req.clone(),
                     answer: t,
+                    via: w.via.clone(),
                     ..Op::default()
                 });
             }
@@ -851,12 +852,12 @@ define_class!(
                     .map(|s| s.to_string())
                     .unwrap_or_default()
             };
-            let (key, req) = (get("key"), get("req"));
+            let (key, req, via) = (get("key"), get("req"), get("via"));
             let action = r.actionIdentifier().to_string();
             let text = r
                 .downcast_ref::<UNTextInputNotificationResponse>()
                 .map(|t| t.userText().to_string());
-            on_main(move |d| d.respond(&key, &req, &action, text));
+            on_main(move |d| d.respond(&key, &req, &via, &action, text));
             done.call(());
         }
     }

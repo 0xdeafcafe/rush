@@ -9,7 +9,9 @@
 //! cardKind :5718, cardID :5737, cardKey :5754, cardRows :2948,
 //! answerHost :4424, allowYolo :4434), modal.go:32 (cardModal's arrival),
 //! host/decisions.go (DecisionsOf :377, DecisionAnswer :400) and
-//! host/answer.go (AnswerInput).
+//! host/answer.go (AnswerInput). A subagent's question answered on this
+//! card in its parent's session ("subquestion", sub_question_key) is
+//! Rust-only, with no Go.
 
 use std::collections::HashMap;
 
@@ -223,9 +225,14 @@ fn card_under(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> &'static str {
         }
         return "approval";
     }
-    // A subagent's ask, after the session's own (Rust-only).
-    if !i.sub_asks.is_empty() {
-        return "subask";
+    // A subagent's ask, after the session's own (Rust-only): a question
+    // rush can answer is the question card, the rest subask.rs's.
+    if let Some(a) = i.sub_asks.first() {
+        return if a.asks().is_some() {
+            "subquestion"
+        } else {
+            "subask"
+        };
     }
     if decisions_card(c, i, 0).is_some() {
         return "decisions";
@@ -250,7 +257,7 @@ pub fn card_id(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> String {
                 .map(|a| a.id.clone())
                 .unwrap_or_default()
         }
-        "subask" => i
+        "subask" | "subquestion" => i
             .sub_asks
             .first()
             .map(|a| format!("subask:{}:{}", a.run, a.request))
@@ -270,7 +277,7 @@ pub fn card_id(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> String {
 /// question's and decisions' letters and digits answer, so the start of a
 /// message would (upOnly).
 fn up_only(kind: &str) -> bool {
-    matches!(kind, "finish" | "question" | "decisions")
+    matches!(kind, "finish" | "question" | "subquestion" | "decisions")
 }
 
 /// The cards waiting on you, w wide and a question folded to fit max_h
@@ -341,6 +348,14 @@ pub fn card_rows(m: &mut Model, key: &str, i: &HostInfo, w: usize, max_h: usize)
         "subask" => {
             let (rows, btns) = super::subask::card(&c, &i.sub_asks, w, max_h);
             c.btns = btns;
+            rows
+        }
+        "subquestion" => {
+            let a = &i.sub_asks[0];
+            let req = a.asks().cloned().expect("a question");
+            c.q_asker = a.who.clone();
+            let rows = question_card(&mut c, &req, None, w, max_h);
+            c.q_asker.clear();
             rows
         }
         "approval" => {
@@ -491,6 +506,18 @@ pub fn draw_question(
             plain("  "),
             sp(format!("{} decisions, yours to make", qs.len()), SUB),
         ]);
+    } else if !c.q_asker.is_empty() {
+        // A subagent's, in its parent's session (Rust-only).
+        let from = format!("⇉ from {}", one_line(&c.q_asker));
+        if qs.len() == 1 && !qs[0].header.is_empty() {
+            head.spans.extend([
+                chip(&format!("? {}", one_line(&qs[0].header))),
+                plain("  "),
+                sp(from, BLUE),
+            ]);
+        } else {
+            head.spans.extend([chip("?"), plain(" "), spb(from, BLUE)]);
+        }
     } else if qs.len() == 1 && !qs[0].header.is_empty() {
         head.spans.extend([
             chip(&format!("? {}", one_line(&qs[0].header))),
@@ -1873,6 +1900,13 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
                 return o;
             }
         }
+        "subquestion" => {
+            let a = i.sub_asks[0].clone();
+            let o = sub_question_key(m, key, i, c, &a, &s, empty);
+            if o.used() {
+                return o;
+            }
+        }
         "question" => {
             let sess = session(m, key).expect("open");
             let sid = sess.pending()[0];
@@ -1891,8 +1925,7 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
                     c,
                     vec![Act::Deny {
                         id: req.id.clone(),
-                        why: "The user skipped the question; carry on with your best judgement."
-                            .into(),
+                        why: SKIPPED.into(),
                     }],
                 );
             }
@@ -2042,6 +2075,57 @@ fn sub_ask_key(
     }
     Out::Pass
 }
+
+/// A subagent's question's keys: the session's own question card's,
+/// what it sends going to the subagent's host (Act::AnswerSubQuestion,
+/// a skip as AnswerSub's deny); alt+o opens the subagent, its letters
+/// being an answer's. Pass for any other key.
+fn sub_question_key(
+    m: &mut Model,
+    key: &str,
+    i: &HostInfo,
+    c: &mut Conn,
+    a: &crate::SubAsk,
+    s: &str,
+    empty: bool,
+) -> Out {
+    let Some(req) = a.asks().cloned() else {
+        return Out::Pass;
+    };
+    if s == "alt+o" {
+        return done(m, key, c, vec![Act::OpenRun(a.run.clone())]);
+    }
+    if c.card_focus && (s == "s" || s == "esc") && !c.q_full {
+        let skip = Act::AnswerSub {
+            host: a.host.clone(),
+            request: req.id.clone(),
+            allow: false,
+            why: SKIPPED.into(),
+        };
+        return done(m, key, c, vec![skip]);
+    }
+    if !empty && s == "enter" || c.card_focus {
+        let r = match keyed(m, key, i, c, &req, s, empty) {
+            Res::Do(Act::Allow {
+                id,
+                input: Some(input),
+                ..
+            }) => Res::Do(Act::AnswerSubQuestion {
+                host: a.host.clone(),
+                request: id,
+                input,
+            }),
+            r => r,
+        };
+        if r.used() {
+            return finish(m, key, c, r);
+        }
+    }
+    Out::Pass
+}
+
+/// What an agent whose question you skipped is told.
+const SKIPPED: &str = "The user skipped the question; carry on with your best judgement.";
 
 /// A decisions card's own keys, wherever it's drawn: s sets it aside,
 /// sending nothing (to the host too unless local, a card that isn't the

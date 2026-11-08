@@ -170,6 +170,7 @@ fn sub_asks(m: &Model, c: &super::Conn, s: Option<&rush_convo::Session>) -> Vec<
                 call: call.into(),
                 reason: reason.into(),
                 needs: needs.into(),
+                question: None,
             }
         };
         if !x.hosted.is_empty() {
@@ -177,7 +178,9 @@ fn sub_asks(m: &Model, c: &super::Conn, s: Option<&rush_convo::Session>) -> Vec<
                 continue;
             }
             for a in &x.asking {
-                out.push(ask(&a.id, &a.call, &a.reason, &x.needs));
+                let mut s = ask(&a.id, &a.call, &a.reason, &x.needs);
+                s.question = a.question.clone();
+                out.push(s);
             }
             if x.asking.is_empty() && !x.needs.is_empty() {
                 out.push(ask("", "", "", &x.needs));
@@ -207,6 +210,21 @@ fn answer_sub(
     allow: bool,
     why: String,
 ) -> Out {
+    sent_sub(m, key, host, request, move |h, host, request| {
+        h.answer_spawn(host, request, allow, &why)
+    })
+}
+
+/// Sends what answers subagent host's request with send, off the UI
+/// thread, its card going at once; a failure says why, and the card is
+/// back with the next look at its host.
+fn sent_sub(
+    m: &mut Model,
+    key: &str,
+    host: String,
+    request: String,
+    send: impl FnOnce(&dyn crate::host::Hosts, &str, &str) -> Result<(), String> + Send + 'static,
+) -> Out {
     let Some(h) = crate::host::hosts_of(m) else {
         m.flash_err("this session can't take answers here");
         return Out::Draw;
@@ -220,7 +238,7 @@ fn answer_sub(
         }
     }
     m.later(
-        move || h.answer_spawn(&host, &request, allow, &why),
+        move || send(&*h, &host, &request),
         |m, r| match r {
             Ok(()) => Out::Idle,
             Err(e) => {
@@ -271,6 +289,13 @@ fn act(m: &mut Model, key: &str, a: Act) -> Out {
             allow,
             why,
         } => answer_sub(m, key, host, request, allow, why),
+        Act::AnswerSubQuestion {
+            host,
+            request,
+            input,
+        } => sent_sub(m, key, host, request, move |h, host, request| {
+            h.answer_spawn_question(host, request, &input)
+        }),
         Act::OpenRun(run) => {
             let from = m
                 .session

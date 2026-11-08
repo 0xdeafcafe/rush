@@ -3277,6 +3277,7 @@ impl Host {
         }
         self.record(st, lines::answered_line(id));
         st.info.asking.retain(|a| a.id != id);
+        st.info.questions.retain(|q| q.id != id);
         if st.pending.is_empty() && st.info.state == "blocked" {
             st.info.state = "working".into();
             st.info.needs.clear();
@@ -3330,6 +3331,7 @@ impl Host {
         st.info.retry = None;
         st.info.needs.clear();
         st.info.asking.clear();
+        st.info.questions.clear();
         st.info.decisions = None;
         if !resume {
             // A new conversation has no cache of its own yet.
@@ -3443,6 +3445,8 @@ impl Host {
                 if !self.hold(st, &q.id, "question", &ask_text(&q)) {
                     st.info.state = "blocked".into();
                     st.info.needs = needs_question(&q);
+                    st.info.questions.retain(|o| o.id != q.id);
+                    st.info.questions.push(q);
                 }
             }
             Event::ApprovalCancelled(c) => {
@@ -3707,6 +3711,7 @@ impl Host {
             st.info.state = "idle".into();
             st.info.needs.clear();
             st.info.asking.clear();
+            st.info.questions.clear();
             self.views_at_turn_end(st);
             let t = e.text.trim();
             if !t.is_empty() {

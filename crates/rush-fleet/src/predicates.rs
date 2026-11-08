@@ -28,7 +28,8 @@ const LOGINS_KIND: &str = "claude";
 
 /// What a row's state means.
 pub trait Predicates {
-    /// A live agent asking something the user has not looked at yet.
+    /// A live agent asking something the user has not looked at yet; or
+    /// one whose live subagent asks, its own host asleep or not.
     fn needs_you(&self) -> bool;
     /// A question the user has seen and left for later.
     fn waiting(&self) -> bool;
@@ -82,14 +83,14 @@ impl Predicates for Agent {
     fn needs_you(&self) -> bool {
         self.job.state == State::Blocked
             && !self.checking
-            && (self.pid != 0 || self.decides)
+            && (self.pid != 0 || self.decides || self.sub_asks())
             && !self.seen
     }
 
     fn waiting(&self) -> bool {
         self.job.state == State::Blocked
             && !self.checking
-            && (self.pid != 0 || self.decides)
+            && (self.pid != 0 || self.decides || self.sub_asks())
             && self.seen
     }
 

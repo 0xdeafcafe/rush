@@ -73,7 +73,7 @@ fn op(op: &str, key: &str, req: &str, answer: &str) -> Op {
         key: key.into(),
         req: req.into(),
         answer: answer.into(),
-        yes: false,
+        ..Op::default()
     }
 }
 
@@ -225,6 +225,94 @@ fn permission_is_allowed_or_denied() {
     let got = ops.recv_timeout(Duration::from_secs(2)).unwrap();
     assert_eq!(got["op"], "allow");
     assert!(got.get("input").is_none(), "allow keeps the input asked");
+}
+
+/// Hosts that say which session each dial was for.
+struct Dialled {
+    h: FakeHost,
+    ids: std::sync::Mutex<Vec<String>>,
+}
+
+impl Hosts for Dialled {
+    fn dial(&self, id: &str) -> std::io::Result<Client> {
+        self.ids.lock().unwrap().push(id.to_string());
+        self.h.dial(id)
+    }
+    fn log(&self, _: &str, _: &str, _: serde_json::Map<String, serde_json::Value>) {}
+}
+
+/// Rust-only: a parent whose subagent asks, its own host asleep, waits on
+/// you with the subagent's ask: asked of the subagent's host, answered
+/// there, the row still the parent's; an op for another's ask goes
+/// nowhere.
+#[test]
+fn a_subagents_ask_is_answered_on_its_host() {
+    let ask = r#"{"type":"control_request","request_id":"call_1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"cargo test"},"decision_reason":"run the tests","tool_use_id":"toolu_k"}}"#;
+    let info = r#"{"type":"agtop_info","info":{"id":"kid00001","state":"blocked"}}"#;
+    let (h, ops) = fake_host(&[ask, info]);
+    let h = Dialled {
+        h,
+        ids: Default::default(),
+    };
+    let parent = Row {
+        id: "parent01".into(),
+        key: "acct/a:parent01".into(),
+        display_name: "fix ci".into(),
+        state: Doing::Blocked,
+        needs: "subagent tests asks: Bash cargo test".into(),
+        rush: true,
+        pid: 0,
+        sub_asks: true,
+        sub_asker: "kid00001".into(),
+        ..Row::default()
+    };
+    let mut asked = Asked::new();
+    let snap = Snapshot {
+        agents: vec![parent.clone()],
+        ..Snapshot::default()
+    };
+    let w = build(&snap, &mut asked, &h).waiting.remove(0);
+    assert_eq!(*h.ids.lock().unwrap(), ["kid00001"]);
+    assert_eq!(
+        (
+            w.key.as_str(),
+            w.kind.as_str(),
+            w.req.as_str(),
+            w.via.as_str()
+        ),
+        ("acct/a:parent01", "permission", "call_1", "kid00001")
+    );
+    assert_eq!(
+        w.text,
+        "subagent tests asks: Bash cargo test\nrun the tests"
+    );
+    let mut o = op("allow", &w.key, "call_1", "");
+    o.via = "kid00002".into();
+    assert_eq!(do_op(&o, asked.get(&w.key), &h), Err(GONE.to_string()));
+    o.via = "kid00001".into();
+    do_op(&o, asked.get(&w.key), &h).unwrap();
+    let got = ops.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert_eq!(
+        (got["op"].as_str(), got["id"].as_str()),
+        (Some("allow"), Some("call_1"))
+    );
+    assert_eq!(h.ids.lock().unwrap().last().unwrap(), "kid00001");
+
+    // Asleep with nothing asking through a subagent, it isn't waiting.
+    let alone = Row {
+        sub_asks: false,
+        sub_asker: String::new(),
+        ..parent
+    };
+    let s = build(
+        &Snapshot {
+            agents: vec![alone],
+            ..Snapshot::default()
+        },
+        &mut Asked::new(),
+        &h,
+    );
+    assert!(s.waiting.is_empty(), "{:?}", s.waiting);
 }
 
 #[test]

@@ -1116,6 +1116,7 @@ fn hosted_spawns() {
     k2.job.name = "fix the flaky test".into();
     k2.job.needs = "Bash kill -TERM 79335".into();
     k2.job.updated_at = t;
+    k2.pid = 41;
     let mut p3 = p2.clone();
     p3.pid = 40;
     let got = l.fold_spawns(
@@ -1133,6 +1134,32 @@ fn hosted_spawns() {
     );
     assert!(got[0].needs_you(), "the parent needs you for it");
     assert_eq!(got[0].subagents.len(), 1, "the spawn is a row under it");
+    assert_eq!(got[0].sub_asker(), "kid00000", "answered on the kid's host");
+
+    // Its host asleep, a parent whose live spawn asks still needs you
+    // (Rust-only): it's the spawn that waits. One whose spawn is asleep
+    // too doesn't, as an asleep row asking doesn't.
+    for (kid_pid, needs, asker) in [(41, true, "kid00000"), (0, false, "")] {
+        let mut k = k2.clone();
+        k.pid = kid_pid;
+        let got = l.fold_spawns(
+            Some(&empty),
+            vec![p2.clone(), k],
+            Vec::new(),
+            &mut HashSet::new(),
+        );
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].pid, 0, "the parent's host is asleep");
+        assert_eq!(got[0].job.state, State::Blocked);
+        assert_eq!(got[0].needs_you(), needs, "kid pid {kid_pid}");
+        assert_eq!(got[0].sub_asker(), asker, "kid pid {kid_pid}");
+    }
+    let mut asleep = p2.clone();
+    asleep.job.state = State::Blocked;
+    assert!(
+        !asleep.needs_you(),
+        "asleep, asking nothing through a spawn"
+    );
 
     // Looked at since it asked: waiting, not needing you.
     l.store
