@@ -34,4 +34,5 @@ mod tests_more;
 mod tests_narrow;
 mod tests_remember;
 mod tests_sheets;
+mod tests_subask;
 mod tests_wrap;

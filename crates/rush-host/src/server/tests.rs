@@ -1165,12 +1165,33 @@ fn needs_say_what_a_call_works_on() {
         ..Default::default()
     };
     assert_eq!(needs_call(&c), "Bash go test");
+    // A parent judging it reads it whole.
+    assert_eq!(call_text(&c), "Bash: go test\n./...");
+    let long = tool::Call {
+        name: "Bash".into(),
+        input: tool::Input {
+            command: "é".repeat(3000),
+            cwd: "/w".into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let t = call_text(&long);
+    assert!(
+        t.ends_with('…') && t.len() <= 4000 + '…'.len_utf8(),
+        "{}",
+        t.len()
+    );
     let c = tool::Call {
         name: "Ask".into(),
         raw: Some(RawJson::new(r#"{"questions":[{"question":"Which?"}]}"#).unwrap()),
         ..Default::default()
     };
     assert_eq!(needs_call(&c), "Ask Which?");
+    assert_eq!(
+        call_text(&c),
+        r#"Ask: {"questions":[{"question":"Which?"}]}"#
+    );
     assert_eq!(first_line(&"é".repeat(201)), "é".repeat(200) + "…");
     assert_eq!(first_line(&"é".repeat(200)), "é".repeat(200));
     assert!(retry_prompt("API Error: 529").starts_with(RETRY_PROMPT_START));

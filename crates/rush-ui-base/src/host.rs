@@ -463,6 +463,23 @@ pub struct Spawned {
     /// Started beside the session as one of its own (start_agent, Meta
     /// startedFrom), not its subagent: it keeps its own row in the list.
     pub beside: bool,
+    /// What it waits on you for, while it does (Info.needs); and the
+    /// permissions among that, each whole, to answer from its parent's
+    /// session (Info.asking). Rust-only.
+    pub needs: String,
+    pub asking: Vec<SpawnAsk>,
+}
+
+/// A permission a spawned agent waits on, as its host has it
+/// (rush_host::wire::Asking). Rust-only.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SpawnAsk {
+    /// The approval's id, as allow and deny take it.
+    pub id: String,
+    /// The tool and what it would do, whole: "Bash: cargo test".
+    pub call: String,
+    /// Why the agent asks, when it says.
+    pub reason: String,
 }
 
 /// Why a session's host couldn't be opened (Hosts::open).
@@ -576,6 +593,18 @@ pub trait Hosts: Send + Sync {
     /// spawn_agent calls (hostedRuns: Meta spawnedBy). Reads the disk.
     fn spawned(&self, _parent: &str) -> Vec<Spawned> {
         Vec::new()
+    }
+    /// Allows, or denies telling it why, what rush session id (a spawned
+    /// agent) asks as request, from its parent's session: as answer_agent
+    /// does (rush_host::subtool::SubAgents::answer). Rust-only. Waits.
+    fn answer_spawn(
+        &self,
+        _id: &str,
+        _request: &str,
+        _allow: bool,
+        _why: &str,
+    ) -> Result<(), String> {
+        Err(NOT_YET.into())
     }
     /// Stops rush session id's host with the agents it spawned, as ctrl+x
     /// does: none works on unseen (host.StopAll). Waits.
@@ -852,6 +881,8 @@ pub struct Fake {
     pub not_mid_turn: Mutex<Vec<String>>,
     /// The sessions rush hosted for a parent's shell.
     pub spawned: Mutex<Vec<Spawned>>,
+    /// What spawned agents were answered, as (id, request, allow, why).
+    pub spawn_answers: Mutex<Vec<(String, String, bool, String)>>,
     /// Sessions stopped with what they spawned, then those stopped alone,
     /// by id.
     pub stopped_all: Mutex<Vec<String>>,
@@ -1076,6 +1107,14 @@ impl Hosts for Arc<Fake> {
     }
     fn spawned(&self, _parent: &str) -> Vec<Spawned> {
         self.spawned.lock().unwrap().clone()
+    }
+    fn answer_spawn(&self, id: &str, request: &str, allow: bool, why: &str) -> Result<(), String> {
+        if let Some(e) = self.failed() {
+            return Err(e);
+        }
+        let a = (id.to_string(), request.to_string(), allow, why.to_string());
+        self.spawn_answers.lock().unwrap().push(a);
+        Ok(())
     }
     fn takes_mid_turn(&self, kind: &str) -> bool {
         !self.not_mid_turn.lock().unwrap().iter().any(|k| k == kind)

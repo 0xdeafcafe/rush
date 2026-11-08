@@ -490,6 +490,19 @@ impl Hosts for RushHosts {
         rush_host::inbox::takes_mid_turn(&self.reg, kind)
     }
 
+    fn answer_spawn(&self, id: &str, request: &str, allow: bool, why: &str) -> Result<(), String> {
+        // As answer_agent does (rush_host::subtool::SubAgents::answer),
+        // for the user, from the parent's session.
+        let c = Client::dial(id).map_err(|e| e.to_string())?;
+        let sent = if allow {
+            c.allow(request, None, false)
+        } else {
+            c.deny(request, why, false)
+        };
+        c.close();
+        sent.map_err(|e| e.to_string())
+    }
+
     fn spawned(&self, parent: &str) -> Vec<Spawned> {
         let infos = self
             .lister
@@ -873,6 +886,20 @@ fn hosted_runs<I: std::borrow::Borrow<rush_host::Info>>(
             session_id: i.session_id.clone(),
             profile,
             beside,
+            needs: if i.state == "blocked" {
+                i.needs.clone()
+            } else {
+                String::new()
+            },
+            asking: i
+                .asking
+                .iter()
+                .map(|a| rush_ui::screens::session_core::host::SpawnAsk {
+                    id: a.id.clone(),
+                    call: a.call.clone(),
+                    reason: a.reason.clone(),
+                })
+                .collect(),
         });
     }
     out

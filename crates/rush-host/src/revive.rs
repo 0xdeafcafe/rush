@@ -63,6 +63,7 @@ pub fn lose(i: &mut Info) {
         i.lost = i.lost || !i.cut_agents.is_empty() || i.cut_idle;
     }
     i.background = Vec::new();
+    i.asking = Vec::new(); // gone with its host: no one to answer
     i.tasks = 0;
     if !i.sleeping {
         i.state = "stopped".into();

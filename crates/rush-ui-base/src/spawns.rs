@@ -43,6 +43,10 @@ pub struct SpawnRun {
     pub born: Ms,
     pub hosted: String,
     pub live: bool,
+    /// What a hosted one waits on you for, and the permissions among it,
+    /// as its host last said (Spawned's). Rust-only.
+    pub needs: String,
+    pub asking: Vec<crate::host::SpawnAsk>,
 }
 
 /// The spawned agents found, as subagent runs, as they began

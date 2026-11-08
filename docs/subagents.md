@@ -41,6 +41,42 @@ them.
 | `start_agent` | `agent`, `prompt`, optional `model`, `effort`, as `spawn_agent`, and `cwd` | the new session's id, at once |
 | `agent_result` | `id` (a child's or a sibling's), `wait_seconds` (≤600) | the answer once done, else how it stands |
 | `agent_send` | `id`, `prompt`, `background` | a follow-up's answer; the child keeps its conversation |
+| `answer_agent` | `id`, `request`, `allow`, `reason` (when denied) | allows or denies what the agent asks, then waits as `agent_result` does |
+
+### The caller answers what its agent asks (Rust-only)
+
+A child that asks to be allowed something (Codex's sandbox escalations,
+a command its mode won't run unasked) is blocked: its host keeps each ask
+whole in `Info.asking` (the approval's id, the tool and its command,
+every line, cut at 4000 bytes, and why the agent asks). A waiting
+`spawn_agent`, `agent_send` or `agent_result` returns at once with them:
+`<agent> asks to be allowed to go on: request <id>: Bash: …`. The caller
+answers with `answer_agent`, which sends the child's host `allow` or
+`deny` (with the reason, or a default asking it to find another way) and
+goes on waiting past that request. The user can still answer the card in
+rush; whoever answers first wins, and `answer_agent` on a request no
+longer asked is refused. `answer_agent` is the one rush tool left off
+the trusted list, so the caller's own permissions judge it: a Claude
+session in auto mode has its classifier vet the child's command as if it
+were its own, one in default mode asks the user.
+
+### What a subagent asks you shows in its parent (Rust-only)
+
+A child waiting on you stays folded under the session that started it,
+as one at work is: the list marks the parent as needing you ("subagent
+<name> asks: <what>"), so it sits under Needs you, notifies, and the menu
+bar's row opens the parent (`Loader::fold_spawns`, `spawn.rs`). In the
+parent's session the ask is a card above the box, after the session's
+own asks (`session_cards::subask`): the subagent's name and task, the
+command a step to a line and why it asks, with **y** Allow once, **n**
+Deny (with the box typed in, enter denies it, telling it why) and **o**
+Open it; ←→ and enter, and clicks, work as on the session's own
+permission card. Allow and deny go to the child's host as `answer_agent`
+does (`Hosts::answer_spawn`), and the card goes at once. What rush can't
+answer (a question, or an agent rush doesn't host that waits on you in
+its transcript) has only Open it, which picks it in the subagents view.
+The parent's host is looked at for its agents every 2 s while it works or
+any of them does.
 
 The list of agents is `host.picks(leader)`: every installed provider on
 each of its models, named as the old agent types were (`defName`), with

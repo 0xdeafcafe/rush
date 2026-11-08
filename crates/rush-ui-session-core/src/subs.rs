@@ -1098,9 +1098,16 @@ impl Runs {
     ) -> Vec<String> {
         let mut links = Vec::new();
         let mut wins = None;
-        for h in found {
+        for mut h in found {
+            // One started beside it asks you from its own row.
+            if h.beside {
+                h.needs.clear();
+                h.asking.clear();
+            }
             if let Some(r) = self.spawns.get_mut(&h.id) {
                 r.live = h.live;
+                r.needs = h.needs;
+                r.asking = h.asking;
                 continue;
             }
             if self.host_none.contains(&h.id) || h.transcript.is_empty() {
@@ -1135,6 +1142,8 @@ impl Runs {
                     born: h.born,
                     hosted: h.id,
                     live: h.live,
+                    needs: h.needs,
+                    asking: h.asking,
                 },
             );
         }
@@ -1819,7 +1828,12 @@ pub fn refresh(m: &mut Model, key: &str) {
     }
     // The agents rush hosted for it, every two seconds while it works.
     let mut spawned = None;
-    if rush && !host_id.is_empty() && (r.hosted_at == 0 || busy && now - r.hosted_at >= SPAWN_EVERY)
+    // An agent it hosted still at work may come to ask you something
+    // with the session idle: its ask is the session's card (Rust-only).
+    let spawn_live = r.spawns.values().any(|x| x.live && !x.hosted.is_empty());
+    if rush
+        && !host_id.is_empty()
+        && (r.hosted_at == 0 || (busy || spawn_live) && now - r.hosted_at >= SPAWN_EVERY)
     {
         r.hosted_at = now;
         spawned = hosts.map(|h| (h, host_id.clone()));

@@ -15,6 +15,9 @@
 //! slimsheet.go:126-138 (#slim's SetWithout) and the session's rewinds,
 //! compactions, forks and hand-offs (carry.rs).
 //!
+//! A subagent's ask answered from its parent's card (Act::AnswerSub, the
+//! subagents waiting in HostInfo::sub_asks) is Rust-only, with no Go.
+//!
 //! Renaming from enter's first answer is the list's startRename
 //! (list_extras::rename), a room set up from a chat the room screens'
 //! sheet (social::roomsetup, room.go roomSetup).
@@ -108,6 +111,7 @@ fn info(m: &Model, key: &str) -> Option<HostInfo> {
                 description: sa.description.clone(),
             })
             .collect(),
+        sub_asks: sub_asks(m, c, v.map(|v| &v.sess)),
         decisions: c.info.now.decisions.clone(),
         effort: if c.info.now.effort.is_empty() {
             c.info.began.effort.clone()
@@ -127,6 +131,105 @@ fn info(m: &Model, key: &str) -> Option<HostInfo> {
             (all, msg.tool_results)
         }),
     })
+}
+
+/// The subagents session c started waiting on you, oldest first: each
+/// permission one rush hosts asks, else what it waits on; one rush
+/// doesn't host, at work and its transcript waiting (Rust-only).
+fn sub_asks(m: &Model, c: &super::Conn, s: Option<&rush_convo::Session>) -> Vec<cards::SubAsk> {
+    let r = &c.runs;
+    let mut runs: Vec<_> = r.spawns.iter().collect();
+    runs.sort_by(|a, b| (a.1.born, a.0).cmp(&(b.1.born, b.0)));
+    let mut out = Vec::new();
+    let mut running: Option<Vec<String>> = None;
+    for (id, x) in runs {
+        let run = format!("{}{id}", crate::spawns::SPAWN_PREFIX);
+        let ask = |request: &str, call: &str, reason: &str, needs: &str| {
+            let who = r
+                .subs
+                .iter()
+                .find(|sa| sa.id == run)
+                .map(|sa| {
+                    let d = crate::style::one_line(&sa.description);
+                    if d.is_empty() {
+                        sa.typ.clone()
+                    } else {
+                        format!("{} · {d}", sa.typ)
+                    }
+                })
+                .unwrap_or_else(|| x.name.clone());
+            cards::SubAsk {
+                run: run.clone(),
+                host: x.hosted.clone(),
+                who: if who.is_empty() {
+                    "a subagent".into()
+                } else {
+                    who
+                },
+                request: request.into(),
+                call: call.into(),
+                reason: reason.into(),
+                needs: needs.into(),
+            }
+        };
+        if !x.hosted.is_empty() {
+            if !x.live {
+                continue;
+            }
+            for a in &x.asking {
+                out.push(ask(&a.id, &a.call, &a.reason, &x.needs));
+            }
+            if x.asking.is_empty() && !x.needs.is_empty() {
+                out.push(ask("", "", "", &x.needs));
+            }
+            continue;
+        }
+        let Some(s) = s.filter(|_| r.stats.get(&run).is_some_and(|st| st.waiting)) else {
+            continue;
+        };
+        let running = running
+            .get_or_insert_with(|| r.running(s, m.now).into_iter().map(|sa| sa.id).collect());
+        if running.contains(&run) {
+            out.push(ask("", "", "", "it waits on you in its own session"));
+        }
+    }
+    out
+}
+
+/// Allows or denies what subagent host asks as request, off the UI
+/// thread, its card going at once; a failure says why, and the card is
+/// back with the next look at its host.
+fn answer_sub(
+    m: &mut Model,
+    key: &str,
+    host: String,
+    request: String,
+    allow: bool,
+    why: String,
+) -> Out {
+    let Some(h) = crate::host::hosts_of(m) else {
+        m.flash_err("this session can't take answers here");
+        return Out::Draw;
+    };
+    for x in conn(m, key).runs.spawns.values_mut() {
+        if x.hosted == host {
+            x.asking.retain(|a| a.id != request);
+            if x.asking.is_empty() {
+                x.needs.clear(); // on its way: not waiting on you now
+            }
+        }
+    }
+    m.later(
+        move || h.answer_spawn(&host, &request, allow, &why),
+        |m, r| match r {
+            Ok(()) => Out::Idle,
+            Err(e) => {
+                m.fail(&e);
+                Out::Draw
+            }
+        },
+    );
+    Out::Draw
 }
 
 /// Sends op to session key's host off the UI thread; a failure says why.
@@ -162,6 +265,22 @@ fn act(m: &mut Model, key: &str, a: Act) -> Out {
             always,
         } => send_op(m, key, Op::Answer { id, input, always }),
         Act::Deny { id, why } => send_op(m, key, Op::Deny { id, message: why }),
+        Act::AnswerSub {
+            host,
+            request,
+            allow,
+            why,
+        } => answer_sub(m, key, host, request, allow, why),
+        Act::OpenRun(run) => {
+            let from = m
+                .session
+                .as_ref()
+                .filter(|v| v.key == key)
+                .map(|v| v.sel.clone())
+                .unwrap_or_default();
+            super::subview::pick_from(m, key, &run, &from);
+            Out::Draw
+        }
         Act::Permission(mode) => send_op(m, key, Op::Permission(mode)),
         Act::Send(text) => send_op(
             m,

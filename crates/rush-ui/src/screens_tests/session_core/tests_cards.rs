@@ -1087,3 +1087,70 @@ fn clicks_miss_a_card_out_of_sight() {
     let c = &m.cards().conns[KEY];
     assert!(!c.card_focus && c.q_click == 0, "the box isn't the card");
 }
+
+/// Rust-only: a subagent rush hosts waiting on you is the session's card,
+/// each permission it asks whole; one rush doesn't host asks only to be
+/// opened. Answered, it goes to the subagent's host and the card goes at
+/// once; open picks it in the subagents view.
+#[test]
+fn a_subagents_ask_is_answered_on_its_host() {
+    use crate::host::SpawnAsk;
+    use crate::screens::session_cards::SubAsk;
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = hosted(&d, &fake, 9);
+    let run = |hosted: &str, live: bool, asking: Vec<SpawnAsk>| crate::spawns::SpawnRun {
+        step: "t9".into(),
+        kind: "codex".into(),
+        name: "Codex".into(),
+        hosted: hosted.into(),
+        live,
+        needs: "Bash kill -TERM 79335".into(),
+        asking,
+        born: NOW - 10_000,
+        ..Default::default()
+    };
+    let ask = SpawnAsk {
+        id: "call_1".into(),
+        call: "Bash: kill -TERM 79335".into(),
+        reason: "stop the helper".into(),
+    };
+    let spawns = &mut conn(&mut m, KEY).runs.spawns;
+    spawns.insert("h9".into(), run("h9", true, vec![ask.clone()]));
+    // Done, or asking nothing: no card.
+    spawns.insert("h8".into(), run("h8", false, vec![ask.clone()]));
+    let mut quiet = run("h7", true, Vec::new());
+    quiet.needs.clear();
+    spawns.insert("h7".into(), quiet);
+    assert_eq!(
+        info(&m).sub_asks,
+        vec![SubAsk {
+            run: "spawn:h9".into(),
+            host: "h9".into(),
+            who: "Codex".into(),
+            request: "call_1".into(),
+            call: "Bash: kill -TERM 79335".into(),
+            reason: "stop the helper".into(),
+            needs: "Bash kill -TERM 79335".into(),
+        }]
+    );
+
+    act(
+        &mut m,
+        Act::AnswerSub {
+            host: "h9".into(),
+            request: "call_1".into(),
+            allow: true,
+            why: String::new(),
+        },
+    );
+    assert_eq!(
+        *fake.spawn_answers.lock().unwrap(),
+        vec![("h9".into(), "call_1".into(), true, String::new())]
+    );
+    assert_eq!(info(&m).sub_asks, Vec::new(), "the answered card is gone");
+
+    act(&mut m, Act::OpenRun("spawn:h9".into()));
+    assert_eq!(super::views::view_name(&m, KEY), "subagents");
+    assert_eq!(m.session.as_ref().unwrap().sel, "sub:spawn:h9");
+}

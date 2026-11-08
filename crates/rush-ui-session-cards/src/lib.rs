@@ -1,5 +1,6 @@
 //! What waits in a Session's dock, and the sheets and side panels a
-//! Session opens: the permission card, Claude's questions, a decisions
+//! Session opens: the permission card, a subagent's ask (subask.rs,
+//! Rust-only), Claude's questions, a decisions
 //! block as a card, /rewind, /fork, /compact, #slim, the export sheet,
 //! the message sheet, enter's first-time question, the quick ask, /btw,
 //! the sidekick's notes, rooms on a session, mentions, misdirected
@@ -67,6 +68,7 @@ pub mod sidekick;
 pub mod signin;
 pub mod slim;
 pub mod stopnote;
+pub mod subask;
 pub mod util;
 
 use std::collections::HashMap;
@@ -105,6 +107,33 @@ pub struct Sub {
     pub description: String,
 }
 
+/// A subagent the session started waiting on you: what its card shows
+/// in the session's dock (subask.rs). Rust-only.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SubAsk {
+    /// Its run among the session's ("spawn:…"): what opening it picks.
+    pub run: String,
+    /// The rush session it runs as, "" when rush doesn't host it.
+    pub host: String,
+    /// Who it is: "Codex · fix the flaky test".
+    pub who: String,
+    /// The permission it waits on, when rush can answer it: its id, the
+    /// call whole, and why it asks.
+    pub request: String,
+    pub call: String,
+    pub reason: String,
+    /// What it waits on you for, said briefly.
+    pub needs: String,
+}
+
+impl SubAsk {
+    /// Whether rush answers it here; else it's answered in its own
+    /// session.
+    pub fn answers(&self) -> bool {
+        !self.host.is_empty() && !self.request.is_empty()
+    }
+}
+
 /// What the cards read of a hosted session (Go's hostConn and its
 /// sess.Info).
 #[derive(Clone, Debug, Default)]
@@ -130,8 +159,10 @@ pub struct HostInfo {
     /// stopped rush session with no host running. Its decisions card is
     /// still there to answer, and the answers wake or resume it.
     pub wakes: bool,
-    /// The subagents it runs.
+    /// The subagents it runs, and those of them waiting on you, oldest
+    /// first.
     pub subs: Vec<Sub>,
+    pub sub_asks: Vec<SubAsk>,
     /// The decisions block its last turn ended with, open (Info.Decisions).
     pub decisions: Option<Question>,
     /// What's typed in its message box.
@@ -196,6 +227,16 @@ pub enum Act {
     },
     /// Denies request id, telling the agent why when there's a why.
     Deny { id: String, why: String },
+    /// Allows, or denies telling it why, request of the subagent rush
+    /// hosts as host (a SubAsk's).
+    AnswerSub {
+        host: String,
+        request: String,
+        allow: bool,
+        why: String,
+    },
+    /// Shows the session's run picked in its subagents view.
+    OpenRun(String),
     /// Switches the session to a permission mode.
     Permission(String),
     /// Sets the decisions card id aside, sending nothing.

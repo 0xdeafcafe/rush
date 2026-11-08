@@ -1109,13 +1109,51 @@ fn hosted_spawns() {
         "parent with a working spawn"
     );
 
-    // A spawn asking you something stays listed, so its ask can be seen.
+    // A spawn asking you something folds under its parent too, the
+    // parent asking for it (Rust-only): the parent needs you, saying who
+    // asks what, until you've looked at it since.
     k2.job.state = State::Blocked;
-    assert_eq!(
-        l.fold_spawns(Some(&empty), vec![p2, k2], Vec::new(), &mut HashSet::new())
-            .len(),
-        2
+    k2.job.name = "fix the flaky test".into();
+    k2.job.needs = "Bash kill -TERM 79335".into();
+    k2.job.updated_at = t;
+    let mut p3 = p2.clone();
+    p3.pid = 40;
+    let got = l.fold_spawns(
+        Some(&empty),
+        vec![p3.clone(), k2.clone()],
+        Vec::new(),
+        &mut HashSet::new(),
     );
+    let keys: Vec<&str> = got.iter().map(|a| a.key.as_str()).collect();
+    assert_eq!(keys, [parent.key.as_str()], "the asking spawn is folded");
+    assert_eq!(got[0].job.state, State::Blocked);
+    assert_eq!(
+        got[0].job.needs,
+        "subagent fix the flaky test asks: Bash kill -TERM 79335"
+    );
+    assert!(got[0].needs_you(), "the parent needs you for it");
+    assert_eq!(got[0].subagents.len(), 1, "the spawn is a row under it");
+
+    // Looked at since it asked: waiting, not needing you.
+    l.store
+        .overlay
+        .seen
+        .insert(parent.key.clone(), rush_state::time::Time::from_ms(t + 1));
+    let got = l.fold_spawns(
+        Some(&empty),
+        vec![p3.clone(), k2.clone()],
+        Vec::new(),
+        &mut HashSet::new(),
+    );
+    assert!(got[0].waiting() && !got[0].needs_you(), "seen since");
+
+    // A parent asking something of its own says that.
+    let mut p4 = p3;
+    p4.job.state = State::Blocked;
+    p4.job.needs = "Edit main.rs".into();
+    let got = l.fold_spawns(Some(&empty), vec![p4, k2], Vec::new(), &mut HashSet::new());
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].job.needs, "Edit main.rs");
 }
 
 // A run folded into the session that ran it is priced with the rows, its

@@ -1,7 +1,9 @@
 //! Agents that sessions ran from their shells, listed with the session
 //! that ran them rather than as rows of their own. Port of
 //! internal/fleet/fleet.go:1586-1797 (spawn, foldSpawns, hostedSpawns,
-//! addSpend, lookForAskers, promptNeedle, wrote).
+//! addSpend, lookForAskers, promptNeedle, wrote). Folding a run that asks
+//! you something into its parent, the parent asking for it, is
+//! Rust-only: there's no Go for it.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader};
@@ -56,6 +58,54 @@ fn run_tile(a: &Agent, parent: &Agent) -> rush_core::agent::SubagentTile {
         mod_time: a.job.mod_time,
         born: a.job.created_at,
         ..Default::default()
+    }
+}
+
+/// What a run folded into its parent asks you (Rust-only: Go left an
+/// asking run a row of its own, beside its parent).
+struct Ask {
+    who: String,
+    needs: String,
+    at: Ms,
+    seen: bool,
+}
+
+impl Ask {
+    fn of(a: &Agent) -> Ask {
+        let name = [&a.display_name, &a.job.name]
+            .into_iter()
+            .map(|s| rush_core::tool::one_line(s))
+            .find(|s| !s.is_empty())
+            .unwrap_or_default();
+        Ask {
+            who: if name.is_empty() {
+                "a subagent".into()
+            } else {
+                format!("subagent {name}")
+            },
+            needs: rush_core::tool::one_line(&a.job.needs).to_string(),
+            at: a.job.updated_at,
+            seen: a.seen,
+        }
+    }
+
+    /// Marks parent p as asking you for it: blocked, saying who asks
+    /// what, and seen only once you've looked at p since it asked. One
+    /// asking something of its own says that.
+    fn through(self, p: &mut Agent, ov: &rush_state::Overlay) {
+        if p.job.state == State::Blocked && !p.checking {
+            return;
+        }
+        let looked = ov.seen.get(&p.key).is_some_and(|t| self.at <= t.to_ms());
+        p.job.state = State::Blocked;
+        p.checking = false;
+        p.job.needs = if self.needs.is_empty() {
+            format!("{} needs you", self.who)
+        } else {
+            format!("{} asks: {}", self.who, self.needs)
+        };
+        p.job.updated_at = p.job.updated_at.max(self.at);
+        p.seen = self.seen || looked;
     }
 }
 
@@ -146,15 +196,17 @@ impl Loader {
         let mut folded = Vec::new();
         for i in 0..agents.len() {
             let a = &agents[i];
-            // One asking you something is never folded out of sight:
-            // answering it is yours, and its parent is held until you do.
-            if a.job.state == State::Blocked && !a.checking {
-                continue;
-            }
+            // One asking you something folds too, its parent asking for
+            // it: the parent's session shows the ask (Rust-only; Go kept
+            // it a row of its own).
+            let ask = (a.job.state == State::Blocked && !a.checking).then(|| Ask::of(a));
             let (cost, today, live) = (a.spend.cost, a.spend.today, a.job.live());
             if let Some(&p) = gone.get(&a.key) {
                 folded.extend(fold_target(a));
                 add_spend(&mut agents[p], cost, today);
+                if let Some(ask) = ask {
+                    ask.through(&mut agents[p], &self.store().overlay);
+                }
                 keep[i] = false;
                 continue;
             }
@@ -173,6 +225,9 @@ impl Loader {
                     agents[p].subagents.push(t); // a row under it, as its own harness's runs have
                 }
                 add_spend(&mut agents[p], cost, today);
+                if let Some(ask) = ask {
+                    ask.through(&mut agents[p], &self.store().overlay);
+                }
                 keep[i] = false;
             }
         }

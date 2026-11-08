@@ -81,6 +81,20 @@ pub struct ResultInput {
     pub wait: i64,
 }
 
+/// What answer_agent is asked.
+#[derive(Clone, Debug, Default)]
+pub struct AnswerInput {
+    pub id: String,
+    /// The request's id (Info.asking's).
+    pub request: String,
+    pub allow: bool,
+    /// Why it's denied, for the agent.
+    pub reason: String,
+}
+
+/// What a denied agent is told when the caller gives no reason.
+const DENIED: &str = "The agent that started you denied this. Do the task another way, or say what you'd need and why.";
+
 /// What agent_send is asked.
 #[derive(Clone, Debug, Default)]
 pub struct SendInput {
@@ -363,18 +377,53 @@ impl SubAgents {
     /// answer.
     pub fn result(&self, input: &ResultInput) -> Result<String, String> {
         self.mine(&input.id)?;
+        let wait = Duration::from_secs(input.wait.clamp(0, 600) as u64);
+        self.follow(&input.id, wait, "")
+    }
+
+    /// Answers what agent in.id asks to be allowed, then waits for it as
+    /// spawn_agent does. Rust-only: the caller, whose own permissions
+    /// judge the call, answers for the agent it started, as the user can.
+    pub fn answer(&self, input: &AnswerInput) -> Result<String, String> {
+        self.mine(&input.id)?;
+        let info = read_info(&input.id).map_err(|e| format!("no agent {}: {e}", input.id))?;
+        let Some(ask) = info.asking.iter().find(|a| a.id == input.request) else {
+            return Err(format!(
+                "agent {} isn't asking {} now: it was answered, or it never asked it. agent_result says how it stands.",
+                input.id,
+                crate::reload::go_quote(&input.request)
+            ));
+        };
+        let c = crate::client::Client::dial(&input.id).map_err(|e| e.to_string())?;
+        let sent = if input.allow {
+            c.allow(&ask.id, None, false)
+        } else {
+            let why = input.reason.trim();
+            c.deny(&ask.id, if why.is_empty() { DENIED } else { why }, false)
+        };
+        sent.map_err(|e| e.to_string())?;
+        log_event(
+            &input.id,
+            "permission-auto",
+            json!({"reason": "parent", "answer": if input.allow { "allow" } else { "deny" }, "by": self.parent, "id": ask.id, "call": clip(&ask.call)}),
+        );
+        self.follow(&input.id, FOREGROUND, &ask.id)
+    }
+
+    /// Waits up to wait for agent id, past the request answered just now,
+    /// and says how it stands.
+    fn follow(&self, id: &str, wait: Duration, answered: &str) -> Result<String, String> {
         // Waited on here, its answer comes here: the message it would also
         // send is held back, and owed again only if this wait ends without
         // it.
-        let to = std::fs::read_to_string(report_path(&input.id)).unwrap_or_default();
+        let to = std::fs::read_to_string(report_path(id)).unwrap_or_default();
         let owed = to == self.parent;
         if owed {
-            let _ = report(&input.id, "");
+            let _ = report(id, "");
         }
-        let wait = Duration::from_secs(input.wait.clamp(0, 600) as u64);
-        let (out, done) = wait_for(&self.reg, &input.id, &self.parent, Time::default(), wait);
-        if owed && !done && !report_path(&input.id).exists() {
-            let _ = report(&input.id, &self.parent);
+        let (out, done) = wait_for(&self.reg, id, &self.parent, Time::default(), wait, answered);
+        if owed && !done && !report_path(id).exists() {
+            let _ = report(id, &self.parent);
         }
         out
     }
@@ -503,7 +552,7 @@ pub fn await_answer(
     since: Time,
     wait: Duration,
 ) -> Result<String, String> {
-    wait_for(reg, id, parent, since, wait).0
+    wait_for(reg, id, parent, since, wait, "").0
 }
 
 /// await_answer, saying too whether the turn's answer was given (Go's
@@ -516,6 +565,7 @@ fn wait_for(
     parent: &str,
     since: Time,
     wait: Duration,
+    answered: &str,
 ) -> (Result<String, String>, bool) {
     let name = match read_config(id) {
         Ok(c) => format!("{} ({id})", agent_name(reg, &migrated(&c.kind).0)),
@@ -563,7 +613,13 @@ fn wait_for(
                 false,
             );
         }
-        if info.state == "blocked" && !info.needs.is_empty() {
+        let asks: Vec<_> = info.asking.iter().filter(|a| a.id != answered).collect();
+        if !asks.is_empty() {
+            return (Ok(asking(&name, id, &asks)), false);
+        }
+        // Blocked on the one just answered: it's on its way to the agent.
+        let on_answered = !info.asking.is_empty();
+        if info.state == "blocked" && !info.needs.is_empty() && !on_answered {
             return (
                 Ok(format!(
                     "{name} is waiting for the user to allow {}. Ask again with agent_result and wait_seconds once they have.",
@@ -588,6 +644,21 @@ fn wait_for(
         }
         w.wait(None, Some((deadline - now).min(Duration::from_secs(5))));
     }
+}
+
+/// What agent id asks to be allowed, for the caller to answer.
+fn asking(name: &str, id: &str, asks: &[&crate::wire::Asking]) -> String {
+    let mut out = format!("{name} asks to be allowed to go on:\n");
+    for a in asks {
+        out += &format!("\nrequest {}: {}\n", a.id, a.call);
+        if !a.reason.is_empty() {
+            out += &format!("why: {}\n", a.reason);
+        }
+    }
+    out += &format!(
+        "\nAnswer it with answer_agent (id {id}, the request, allow true or false, and a reason when you deny it): judge it as you would the same step of your own. The user can answer it in rush too; it waits until one of you does."
+    );
+    out
 }
 
 /// t as the local clock's 15:04.
@@ -885,5 +956,84 @@ mod tests {
                 && cfg.system_prompt == WORK_PROMPT,
             "config {cfg:?}"
         );
+    }
+
+    /// Rust-only: what a spawned agent asks to be allowed reaches the
+    /// caller whole, with the request's id; once the caller answers it,
+    /// waiting goes on past it; a request no longer asked is refused.
+    #[test]
+    fn the_caller_reads_and_answers_what_its_agent_asks() {
+        let _home = Home::new();
+        let sa = SubAgents {
+            reg: Registry::new(),
+            parent: "caller01".into(),
+            kind: "echo".into(),
+            headless: false,
+        };
+        let id = "asker001";
+        std::fs::create_dir_all(dir(id)).unwrap();
+        std::fs::write(
+            dir(id).join("config.json"),
+            format!(r#"{{"id":"{id}","meta":{{"spawnedBy":"caller01"}}}}"#),
+        )
+        .unwrap();
+        let info = Info {
+            id: id.into(),
+            state: "blocked".into(),
+            needs: "Bash kill -TERM 79335;".into(),
+            host_pid: i64::from(std::process::id()),
+            asking: vec![crate::wire::Asking {
+                id: "call_1".into(),
+                call: "Bash: kill -TERM 79335;\npython3 helper.py".into(),
+                reason: "stop the stalled helper".into(),
+            }],
+            ..Info::default()
+        };
+        std::fs::write(
+            dir(id).join("info.json"),
+            serde_json::to_vec(&info).unwrap(),
+        )
+        .unwrap();
+
+        let got = sa
+            .result(&ResultInput {
+                id: id.into(),
+                wait: 0,
+            })
+            .unwrap();
+        for want in [
+            "asks to be allowed",
+            "request call_1: Bash: kill -TERM 79335;\npython3 helper.py",
+            "why: stop the stalled helper",
+            &format!("answer_agent (id {id}"),
+        ] {
+            assert!(got.contains(want), "{want:?} in {got}");
+        }
+        // Answered, it's on its way: no ask, and not the user's either.
+        let (got, done) = wait_for(
+            &sa.reg,
+            id,
+            "caller01",
+            Time::default(),
+            Duration::ZERO,
+            "call_1",
+        );
+        let got = got.unwrap();
+        assert!(!done && got.contains("still working"), "{got}");
+
+        let ask = |request: &str| AnswerInput {
+            id: id.into(),
+            request: request.into(),
+            allow: true,
+            reason: String::new(),
+        };
+        assert!(
+            sa.answer(&ask("call_9"))
+                .unwrap_err()
+                .contains("isn't asking")
+        );
+        let mut other = ask("call_1");
+        other.id = "nobody01".into();
+        assert!(sa.answer(&other).unwrap_err().contains("no agent"));
     }
 }

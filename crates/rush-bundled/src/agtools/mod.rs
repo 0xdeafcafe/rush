@@ -113,7 +113,12 @@ fn view_tool() -> Tool {
 /// would, and the reminder tools only message the session itself.
 pub fn names() -> Vec<String> {
     let mut out = vec![show_tool().name, view_tool().name];
-    out.extend(agent_tools().into_iter().map(|t| t.name));
+    out.extend(
+        agent_tools()
+            .into_iter()
+            .map(|t| t.name)
+            .filter(|n| n != ANSWER_AGENT), // the caller's permissions judge it
+    );
     out.extend(remind_tools().into_iter().map(|t| t.name));
     out
 }
@@ -722,6 +727,10 @@ mod tests {
             "remind is listed where no reminders are kept"
         );
         let n = names();
+        assert!(
+            !n.iter().any(|t| t == ANSWER_AGENT),
+            "answer_agent would go unjudged"
+        );
         assert!(
             n.iter().any(|t| t == "remind") && n.iter().any(|t| t == "reminders"),
             "reminder tools would ask"

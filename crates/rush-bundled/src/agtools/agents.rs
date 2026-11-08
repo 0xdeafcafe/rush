@@ -18,6 +18,9 @@ pub const SPAWN_AGENT: &str = "spawn_agent";
 pub const START_AGENT: &str = "start_agent";
 pub const AGENT_RESULT: &str = "agent_result";
 pub const AGENT_SEND: &str = "agent_send";
+/// Rust-only: the caller answers what its agent asks to be allowed. Not
+/// among the tools that never ask: the caller's own permissions judge it.
+pub const ANSWER_AGENT: &str = "answer_agent";
 
 fn is_false(b: &bool) -> bool {
     !*b
@@ -69,6 +72,19 @@ pub struct ResultInput {
     pub wait: i64,
 }
 
+/// What a session sends answer_agent.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AnswerInput {
+    pub id: String,
+    /// The request's id, as the agent's ask said it.
+    pub request: String,
+    pub allow: bool,
+    /// Why not, for the agent, when it's denied.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub reason: String,
+}
+
 /// What a session sends agent_send.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -98,6 +114,11 @@ pub trait Agents: Send + Sync {
     fn start(&self, input: StartInput) -> Result<String, String>;
     fn result(&self, input: ResultInput) -> Result<String, String>;
     fn send(&self, input: SendInput) -> Result<String, String>;
+    /// Answers what agent input.id asks to be allowed, and waits for it
+    /// as agent_result does.
+    fn answer(&self, _input: AnswerInput) -> Result<String, String> {
+        Err("answer_agent isn't offered here".into())
+    }
     /// Its views, when it keeps them (Go's Viewer, found by assertion).
     fn viewer(&self) -> Option<&dyn Viewer> {
         None
@@ -223,6 +244,25 @@ Waits for its answer unless background."
             ),
             meta: None,
         },
+        Tool {
+            name: ANSWER_AGENT.into(),
+            description: "Answer what an agent you started asks to be allowed to do (a command, a file change), when \
+spawn_agent, agent_send or agent_result says it asks: allow it, or deny it with the reason it's told. Judge it as \
+you would the same step of your own: allow what the task needs and you'd run yourself; deny what's destructive, \
+reaches past the task, or you can't tell. The user can still answer it in rush first. Then it waits for the \
+agent as agent_result does, and says how it stands."
+                .into(),
+            input_schema: schema(
+                serde_json::json!({
+                    "id": prop("string", "The agent's id."),
+                    "request": prop("string", "The request's id, as its ask said it."),
+                    "allow": prop("boolean", "true allows it this once; false denies it."),
+                    "reason": prop("string", "Why it's denied, for the agent: what to do instead."),
+                }),
+                &["id", "request", "allow"],
+            ),
+            meta: None,
+        },
     ]
 }
 
@@ -272,6 +312,9 @@ pub(crate) fn call_agent(
         AGENT_SEND => rush_state::json::from_slice::<SendInput>(raw)
             .map_err(|e| e.to_string())
             .and_then(|input| ag.send(input)),
+        ANSWER_AGENT => rush_state::json::from_slice::<AnswerInput>(raw)
+            .map_err(|e| e.to_string())
+            .and_then(|input| ag.answer(input)),
         _ => return None,
     };
     Some(match got {

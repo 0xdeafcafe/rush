@@ -223,6 +223,10 @@ fn card_under(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> &'static str {
         }
         return "approval";
     }
+    // A subagent's ask, after the session's own (Rust-only).
+    if !i.sub_asks.is_empty() {
+        return "subask";
+    }
     if decisions_card(c, i, 0).is_some() {
         return "decisions";
     }
@@ -246,6 +250,11 @@ pub fn card_id(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> String {
                 .map(|a| a.id.clone())
                 .unwrap_or_default()
         }
+        "subask" => i
+            .sub_asks
+            .first()
+            .map(|a| format!("subask:{}:{}", a.run, a.request))
+            .unwrap_or_default(),
         "decisions" => decisions_card(c, i, 0).map(|d| d.id).unwrap_or_default(),
         "finish" => c
             .finish
@@ -329,6 +338,11 @@ pub fn card_rows(m: &mut Model, key: &str, i: &HostInfo, w: usize, max_h: usize)
             None => Vec::new(),
         },
         "finish" => super::finishcard::rows(&mut c, w),
+        "subask" => {
+            let (rows, btns) = super::subask::card(&c, &i.sub_asks, w, max_h);
+            c.btns = btns;
+            rows
+        }
         "approval" => {
             let s = session(m, key).expect("open");
             let p = s.pending();
@@ -1852,6 +1866,13 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
                 return done(m, key, c, vec![Act::Deny { id: req_id, why }]);
             }
         }
+        "subask" => {
+            let a = i.sub_asks[0].clone();
+            let o = sub_ask_key(m, key, i, c, &a, &s, empty, sel_empty);
+            if o.used() {
+                return o;
+            }
+        }
         "question" => {
             let sess = session(m, key).expect("open");
             let sid = sess.pending()[0];
@@ -1959,6 +1980,65 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
     }
     if c.card_focus {
         c.card_focus = false; // anything else goes back to typing
+    }
+    Out::Pass
+}
+
+/// A subagent's ask's keys (subask.rs): as the permission card's, y
+/// allowing and n denying it, o opening the subagent; with the box typed
+/// in, enter denies it, telling it why. Pass for any other key.
+#[allow(clippy::too_many_arguments)]
+fn sub_ask_key(
+    m: &mut Model,
+    key: &str,
+    i: &HostInfo,
+    c: &mut Conn,
+    a: &crate::SubAsk,
+    s: &str,
+    empty: bool,
+    sel_empty: bool,
+) -> Out {
+    let mut s = s.to_string();
+    if c.card_focus {
+        let bs = super::subask::btn_keys(a);
+        c.btn_pick = c.btn_pick.min(bs.len() - 1);
+        let d: isize = match s.as_str() {
+            "left" | "shift+tab" | "h" => -1,
+            "right" | "tab" | "l" => 1,
+            _ => 0,
+        };
+        if d != 0 {
+            c.btn_pick = (c.btn_pick as isize + d).rem_euclid(bs.len() as isize) as usize;
+            return Out::Draw;
+        }
+        if s == "enter" {
+            s = bs[c.btn_pick].clone();
+        }
+    }
+    let direct = c.card_focus
+        || empty && sel_empty && !c.card_guarded(m.clock.unwrap_or_else(rush_core::time::now));
+    let answer = |allow: bool, why: String| Act::AnswerSub {
+        host: a.host.clone(),
+        request: a.request.clone(),
+        allow,
+        why,
+    };
+    if a.answers() {
+        if s == "alt+y" || direct && s == "y" {
+            return done(m, key, c, vec![answer(true, String::new())]);
+        }
+        if s == "alt+n" || direct && s == "n" {
+            return done(m, key, c, vec![answer(false, String::new())]);
+        }
+        if !empty && !c.card_focus && s == "enter" {
+            // What's typed is why not: it's denied, and the subagent told.
+            let why = i.input.trim().to_string();
+            set_input(m, key, "");
+            return done(m, key, c, vec![answer(false, why)]);
+        }
+    }
+    if s == "alt+o" || direct && s == "o" {
+        return done(m, key, c, vec![Act::OpenRun(a.run.clone())]);
     }
     Out::Pass
 }

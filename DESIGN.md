@@ -272,6 +272,16 @@ Claude, fleet, the other adapters) builds on these.
   behind it. The host says each ask still open again after every turn's
   end, and a trim puts the latest line of each open ask back at the
   ring's end (rush-host `server/openasks.rs`; Go let both go).
+- **A subagent's ask is its parent's.** A spawned agent waiting on you
+  is folded under its parent like one at work (Go kept it a row of its
+  own): the parent's row is blocked on it, saying who asks what, and
+  needs you until you've looked at the parent since it asked
+  (`fleet::spawn`'s `Ask`). The parent's session shows the ask as a card
+  above the box, after its own (`session_cards::subask`, fed by
+  `HostInfo::sub_asks` from the spawned runs' `Spawned::{needs,
+  asking}`, the child's `Info.asking`); y and n answer it on the child's
+  host (`Hosts::answer_spawn`), o opens it. docs/subagents.md has it
+  whole.
 - **A host's lines in a burst.** A session streaming big tool results
   makes tens of thousands of lines a second. Each end of a host's socket
   asks for 4 MiB (rush-host `sys::widen`; macOS gives 8 KiB, so the
