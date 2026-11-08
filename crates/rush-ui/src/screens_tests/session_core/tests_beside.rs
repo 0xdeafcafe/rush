@@ -485,3 +485,44 @@ fn hover_stays_out_of_the_side_column() {
     moved(&mut m, 6, y);
     assert!(!conn(&mut m, KEY).vs.hover_ref.is_empty(), "and back");
 }
+
+/// Two sessions drawn side by side (a grid's tiles) each keep their own
+/// follower, frame after frame: neither is let go and read again because
+/// the other was drawn between. One not drawn in the last frame is.
+#[test]
+fn each_session_drawn_keeps_its_follower() {
+    let mut m = rush_open("vb-grid-a", 160, 40, vec![view("a", "A", "first")]);
+    std::fs::create_dir_all(rush_host::paths::dir("vb-grid-b")).expect("b's folder");
+    rush_host::views::save_view("vb-grid-b", view("b", "B", "first")).expect("saved");
+    let summary = |m: &Model, id: &str| {
+        read::views_of(m, id)
+            .first()
+            .map(|v| v.summary.clone())
+            .unwrap_or_default()
+    };
+    for id in ["vb-grid-a", "vb-grid-b"] {
+        read::follow(&mut m, id);
+        assert_eq!(summary(&m, id), "first", "{id} read as it's followed");
+    }
+    // Changed on disk; with no loop a follower reads once, as it starts,
+    // so a reading now would be a follower started again.
+    rush_host::views::save_view("vb-grid-a", view("a", "A", "second")).expect("saved");
+    rush_host::views::save_view("vb-grid-b", view("b", "B", "second")).expect("saved");
+    for frame in 0..3 {
+        m.frames += 1;
+        for id in ["vb-grid-a", "vb-grid-b"] {
+            read::follow(&mut m, id);
+            assert_eq!(
+                summary(&m, id),
+                "first",
+                "frame {frame}: {id} followed again"
+            );
+        }
+    }
+    // b not drawn for a frame: let go, and read again when it's back.
+    m.frames += 2;
+    read::follow(&mut m, "vb-grid-a");
+    read::follow(&mut m, "vb-grid-b");
+    assert_eq!(summary(&m, "vb-grid-a"), "first", "a, drawn now, kept");
+    assert_eq!(summary(&m, "vb-grid-b"), "second", "b followed anew");
+}

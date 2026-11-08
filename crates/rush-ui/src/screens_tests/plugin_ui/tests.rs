@@ -818,6 +818,79 @@ fn sidebar_names_agents() {
     );
 }
 
+/// Grouped by a plugin's arrangement, the list's sections are the
+/// plugin's, its rows in the plugin's order; the agents it doesn't place
+/// go under Other, folded. Back to rush's own grouping, so are the
+/// sections (TestSidebarArrangesTheList, sidebar_test.go:42).
+#[test]
+fn sidebar_arranges_the_list() {
+    use crate::list::ListLine;
+    use rush_plugin::{Sidebar, SidebarAgent, SidebarSection};
+    let agent = |key: &str, sid: &str| {
+        let mut a = rush_core::agent::Agent {
+            key: key.into(),
+            display_name: format!("session {key}"),
+            ..Default::default()
+        };
+        a.job.session_id = sid.into();
+        a
+    };
+    let mut m = model();
+    m.agents = vec![
+        agent("a", "s1"),
+        agent("b", "s2"),
+        agent("c", "s3"),
+        agent("d", "s4"),
+    ];
+    m.roots = vec![String::new(); 4];
+    let at = |section: &str, order: i64| SidebarAgent {
+        section: section.into(),
+        order,
+        ..SidebarAgent::default()
+    };
+    m.plugins().sidebars = vec![Sidebar {
+        plugin: "kanban".into(),
+        title: "Kanban".into(),
+        sections: vec![
+            SidebarSection {
+                title: "In Progress".into(),
+            },
+            SidebarSection {
+                title: "Waiting".into(),
+            },
+        ],
+        agents: Some(BTreeMap::from([
+            ("s1".to_string(), at("Waiting", 1)),
+            ("s2".to_string(), at("Waiting", 0)),
+            ("s3".to_string(), at("In Progress", 0)),
+        ])),
+        ..Sidebar::default()
+    }];
+    let list = |m: &Model| -> Vec<String> {
+        m.lines
+            .iter()
+            .filter_map(|l| match l {
+                ListLine::Section { title, .. } => Some(format!("§{title}")),
+                ListLine::Agent(i) => Some(m.agents[*i].key.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    m.cfg.group_by = "plugin:kanban".into();
+    m.rebuild();
+    assert_eq!(
+        list(&m),
+        ["§In Progress", "c", "§Waiting", "b", "a", "§Other"],
+        "the plugin's sections, in its order"
+    );
+    assert!(m.folded("Other"), "Other starts folded");
+    assert_eq!(m.group_of.get("d").map(String::as_str), Some("Other"));
+    m.cfg.group_by = "status".into();
+    m.rebuild();
+    assert!(!list(&m).iter().any(|l| l == "§Waiting" || l == "§Other"));
+    assert!(!m.folded("Other"), "Other folds only in a plugin's mode");
+}
+
 #[test]
 fn doc_editing() {
     let dir = temp_dir("edit");

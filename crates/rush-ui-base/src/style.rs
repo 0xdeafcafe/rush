@@ -716,10 +716,10 @@ pub fn cut(l: &Line, from: usize, to: usize) -> Line {
     let mut col = 0;
     for s in &l.spans {
         let mut text = String::new();
-        for ch in s.text.chars() {
-            let cw = width(ch.encode_utf8(&mut [0; 4]));
+        // A grapheme at a time, at the width it's drawn ("⚠️" two).
+        for (_, ch, cw) in rush_core::text::graphemes(&s.text) {
             if col >= from && col + cw <= to {
-                text.push(ch);
+                text.push_str(ch);
             } else if col < to && col + cw > from {
                 text.push_str(&" ".repeat((col + cw).min(to) - col.max(from)));
             }
@@ -852,6 +852,40 @@ mod tests {
         assert_eq!(fit(l, 13).plain(), "hello world  ");
         assert_eq!(one_line(" a\n b\t c "), "a b c");
         assert_eq!(unmark("**bold** `x`"), "bold x");
+    }
+
+    /// cut and fit go by the cells a grapheme is drawn at: "⚠️" and "👍🏽"
+    /// are two, kept whole or blanked, never split.
+    #[test]
+    fn cuts_by_graphemes() {
+        let warn = "\u{26a0}\u{fe0f}";
+        let thumb = "\u{1f44d}\u{1f3fd}";
+        let s = format!("a{warn}b{thumb}c");
+        for (from, to, want) in [
+            (0, 7, s.clone()),
+            (0, 3, format!("a{warn}")),
+            (0, 2, "a ".to_string()),
+            (1, 3, warn.to_string()),
+            (2, 4, " b".to_string()),
+            (3, 6, format!("b{thumb}")),
+            (5, 7, " c".to_string()),
+        ] {
+            let got = cut(&line([sp(s.clone(), TEXT)]), from, to).plain();
+            assert_eq!(got, want, "[{from}, {to})");
+            assert_eq!(rush_core::text::graphemes_width(&got), to - from);
+        }
+        for (s, w, want) in [
+            (
+                format!("{warn}{warn}{warn}"),
+                6,
+                format!("{warn}{warn}{warn}"),
+            ),
+            (format!("{warn}{warn}{warn}"), 5, format!("{warn}{warn}…")),
+            (format!("ok {thumb}"), 7, format!("ok {thumb}  ")),
+        ] {
+            let got = fit(line([sp(s.clone(), TEXT)]), w).plain();
+            assert_eq!(got, want, "{s:?} at {w}");
+        }
     }
 
     #[test]

@@ -240,15 +240,9 @@ impl<'a> Canvas<'a> {
                 .map(|(i, c)| (&s[i..i + c.len_utf8()], c.width().unwrap_or(0)));
             return self.put_graphemes(x, y, chars, style, end);
         }
-        let gs = s.graphemes(true).map(|g| {
-            // Fast path for ASCII; controls (tabs, newlines) take no cell.
-            let w = match g.as_bytes() {
-                [b] if (0x20..0x7f).contains(b) => 1,
-                _ if g.chars().any(char::is_control) => 0,
-                _ => text::width(g),
-            };
-            (g, w)
-        });
+        // Controls (tabs, newlines) take no cell; layout counts the same
+        // (text::grapheme_width).
+        let gs = s.graphemes(true).map(|g| (g, text::grapheme_width(g)));
         self.put_graphemes(x, y, gs, style, end)
     }
 
@@ -426,18 +420,6 @@ pub(crate) fn mods(m: Mods) -> Modifier {
     o
 }
 
-/// Whether c is a grapheme of its own wherever it stands: it joins neither
-/// the char before it (marks, joiners) nor the one after (prepended
-/// signs), nor pairs (flags, Hangul, CR LF). These ranges hold none of
-/// those: printable ASCII; Latin-1, Latin Extended and the spacing
-/// modifiers (up to the combining marks at U+0300); general punctuation
-/// but the zero-width and direction marks; super- and subscripts and
-/// currency (up to the combining marks at U+20D0); letterlike symbols
-/// through arrows, maths, technical symbols, box drawing, blocks, shapes,
-/// dingbats and more arrows. Checked against the segmenter in tests.
-pub(crate) fn lone(c: char) -> bool {
-    matches!(
-        c as u32,
-        0x20..=0x7e | 0xa0..=0x2ff | 0x2010..=0x2027 | 0x2030..=0x205e | 0x2070..=0x20cf | 0x2100..=0x2bff
-    )
-}
+/// Whether c is a grapheme of its own wherever it stands (rush-core's,
+/// for layout to count as the canvas draws).
+pub(crate) use rush_core::text::lone;

@@ -120,14 +120,15 @@ pub fn word_at(cs: &[char], i: usize) -> (usize, usize) {
 /// The word in a drawn row around cell col, [from, to) in cells.
 pub fn word_cells(line: &str, col: usize) -> Option<(usize, usize)> {
     let cs: Vec<char> = line.chars().collect();
-    let mut at = vec![0; cs.len() + 1];
-    let mut i = None;
-    for (j, c) in cs.iter().enumerate() {
-        at[j + 1] = at[j] + rush_core::text::width(c.encode_utf8(&mut [0; 4]));
-        if i.is_none() && at[j + 1] > col {
-            i = Some(j);
-        }
+    // Each char's cells as drawn: a grapheme's on its first char.
+    let mut at = Vec::with_capacity(cs.len() + 1);
+    at.push(0);
+    for (_, g, w) in rush_core::text::graphemes(line) {
+        let x = at[at.len() - 1];
+        at.push(x + w);
+        at.extend(std::iter::repeat_n(x + w, g.chars().count() - 1));
     }
+    let i = (0..cs.len()).find(|&j| at[j + 1] > col);
     let (from, to) = word_at(&cs, i?);
     (from < to).then(|| (at[from], at[to]))
 }
@@ -494,6 +495,27 @@ mod tests {
         let (f, t) = word_cells(line, col).unwrap();
         assert_eq!(&line[f..t], "foo");
         assert_eq!(word_cells(line, 0), None);
+    }
+
+    /// A word's cells are where it's drawn, a grapheme at its whole
+    /// width: "⚠️" and "👍🏽" take two.
+    #[test]
+    fn words_by_the_cells_drawn() {
+        let line = "ok \u{26a0}\u{fe0f} go \u{1f44d}\u{1f3fd} done";
+        for (col, want) in [
+            (0, Some((0, 2))),
+            (3, Some((3, 5))),
+            (4, Some((3, 5))),
+            (5, None),
+            (6, Some((6, 8))),
+            (7, Some((6, 8))),
+            (9, Some((9, 11))),
+            (10, Some((9, 11))),
+            (12, Some((12, 16))),
+            (16, None),
+        ] {
+            assert_eq!(word_cells(line, col), want, "col {col}");
+        }
     }
 
     #[test]

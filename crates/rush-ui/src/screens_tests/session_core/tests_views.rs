@@ -474,6 +474,36 @@ fn paging_and_the_pill() {
     assert!(!s.iter().any(|l| l.contains("end follows")));
 }
 
+/// Scrolled up, the row picked by ↑ and ↓ is always one drawn, never
+/// the one under the "↓ N more" pill.
+#[test]
+fn the_picked_row_is_above_the_pill() {
+    let fake = Fake::new();
+    let mut m = open(agent("steer", State::Idle), &fake, 90, 40);
+    long(&mut m, 30);
+    screen(&mut m);
+    press(&mut m, "pgup");
+    press(&mut m, "pgup");
+    screen(&mut m);
+    let drawn = |m: &Model| {
+        let v = m.session.as_ref().unwrap();
+        (v.sel.clone(), v.shown.contains(&v.sel), v.pos)
+    };
+    press(&mut m, "up");
+    screen(&mut m);
+    let (sel, shown, _) = drawn(&m);
+    assert!(!sel.is_empty() && shown, "↑ picks a row in view: {sel:?}");
+    for i in 0..40 {
+        press(&mut m, "down");
+        screen(&mut m);
+        let (sel, shown, pos) = drawn(&m);
+        if sel.is_empty() {
+            break;
+        }
+        assert!(shown, "↓ {i}: {sel:?} isn't drawn ({pos:?})");
+    }
+}
+
 /// The wheel turns three rows; at the end it draws nothing (model.go
 /// :1772).
 #[test]

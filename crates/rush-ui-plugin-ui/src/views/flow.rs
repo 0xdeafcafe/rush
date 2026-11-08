@@ -90,7 +90,7 @@ pub(super) fn steps(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
         } else if !it.meta.is_empty() {
             lines[0] = spread(lines[0].clone(), ln([dim(it.meta.clone())]), w);
         }
-        out.extend(cx.row_lines(open_row(&cx.prefix, it), w, lines));
+        out.extend(cx.row_lines(open_row(&cx.prefix, its, i), w, lines));
         if i < its.len() - 1 {
             let edge = if it.tone == "good" {
                 paint(GREEN, "┃")
@@ -122,7 +122,7 @@ pub(super) fn timeline(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
             plain(" "),
             paint(TEXT, trunc(&it.text, room)),
         ]);
-        out.extend(cx.row_lines(open_row(&cx.prefix, it), w, vec![row]));
+        out.extend(cx.row_lines(open_row(&cx.prefix, &b.items, i), w, vec![row]));
         let last = i == n - 1;
         if !it.meta.is_empty() {
             let edge = if last { plain(" ") } else { faint("│") };
@@ -157,9 +157,9 @@ pub(super) fn board(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
                 out.push(ViewLine::default());
             }
             out.extend(board_head(col, w).into_iter().map(ViewLine::plain));
-            for card in &col.items {
+            for (j, card) in col.items.iter().enumerate() {
                 let ls: Vec<Line> = board_card(card, w).into_iter().map(|l| l.s).collect();
-                let mut o = open_row(&item_key(&cx.prefix, &col.id, &col.text, &[]), card);
+                let mut o = open_row(&item_key_at(&cx.prefix, &b.items, i), &col.items, j);
                 o.cut = wrap(&card.text, 8.max(w.saturating_sub(2))).len() > 2;
                 out.extend(cx.row_lines(o, w, ls));
             }
@@ -318,7 +318,7 @@ fn walk(
                 ..Default::default()
             };
         }
-        let o = open_row(prefix, it);
+        let o = open_row(prefix, items, i);
         let okey = o.key.clone();
         let meta = dim(it.meta.clone());
         let pre = ln([

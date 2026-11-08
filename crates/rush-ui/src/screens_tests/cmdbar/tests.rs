@@ -804,6 +804,30 @@ fn link_menu_acts() {
 }
 
 #[test]
+fn link_menu_unescapes_file_paths() {
+    // A % before a character of more than one byte is kept as it is,
+    // never sliced inside.
+    for (link, want) in [
+        ("file:///tmp/a%20b.md", "/tmp/a b.md"),
+        ("file:///tmp/100%€.md", "/tmp/100%€.md"),
+        ("file:///tmp/%€%€.md", "/tmp/%€%€.md"),
+        ("file:///tmp/a%2€.md", "/tmp/a%2€.md"),
+        ("file:///tmp/%E2%82%AC.md", "/tmp/€.md"),
+        ("file:///tmp/%e2%82%ac.md", "/tmp/€.md"),
+        ("file:///tmp/50%", "/tmp/50%"),
+        ("file:///tmp/50%4", "/tmp/50%4"),
+        ("file:///tmp/%zz", "/tmp/%zz"),
+        ("file:///tmp/%41", "/tmp/A"),
+    ] {
+        assert_eq!(
+            link_acts(link).first(),
+            Some(&LinkAct::Open(want.into())),
+            "{link}"
+        );
+    }
+}
+
+#[test]
 fn on_reads_its_argument() {
     let peers = ["studio", "laptop"];
     let (p, r) = on_start(&peers, "Studio ~/src agent=codex fix it").unwrap();

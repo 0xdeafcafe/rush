@@ -545,6 +545,13 @@ impl Model {
             .collect();
         // The soonest a group's time runs out for one listed.
         let mut regroup = Ms::MAX;
+        // A plugin's arrangement: its sections replace rush's, each row
+        // where it places it (model.go:2268 sidebarPlace).
+        let sb = self
+            .kept
+            .peek::<crate::arranged::Arranged>()
+            .and_then(|a| a.0.as_ref());
+        let mut placed: HashMap<String, i64> = HashMap::new();
         for it in laid {
             let a = of(&it);
             if !filters.iter().all(|f| f(self, a)) {
@@ -560,6 +567,12 @@ impl Model {
             let fresh = !stale(a, now);
             let at = a.job.updated_at;
             let fk = folder_key(a, root(&it));
+            if let Some(sb) = sb {
+                let (name, rank, order) = crate::arranged::place(sb, a);
+                placed.insert(a.key.clone(), order);
+                add(&mut groups, &name, rank.min(250) as u8, it, at);
+                continue;
+            }
             // What needs you is never Earlier, put away or a day old: its
             // row says so, and Earlier is folded out of sight.
             if asks(a) || wants_you(self, a) {
@@ -618,7 +631,8 @@ impl Model {
         }
         // Split by project, each section's rows sit together by the
         // repository they work in, its worktrees' after its own.
-        let split = self.cfg.split_projects();
+        let split = sb.is_none() && self.cfg.split_projects();
+        let sections = sb.map_or(0, |sb| sb.sections.len());
         let titles = folder_titles(
             groups
                 .iter()
@@ -670,7 +684,13 @@ impl Model {
                         .then(a.key.cmp(&b.key)),
                 }
             };
-            if split && !by_time(&g.name) {
+            if (g.rank as usize) < sections {
+                // The plugin's own sections: in its order.
+                g.items.sort_by(|x, y| {
+                    let at = |it: &Item| placed.get(&of(it).key).copied().unwrap_or(0);
+                    at(x).cmp(&at(y)).then_with(|| within(x, y))
+                });
+            } else if split && !by_time(&g.name) {
                 // What finished goes by time, its project a tag.
                 let title = |it: &Item| {
                     titles
@@ -857,10 +877,16 @@ impl Model {
     }
 
     pub fn folded(&self, title: &str) -> bool {
-        self.folds
-            .get(title)
-            .copied()
-            .unwrap_or_else(|| self.cfg.folded(title))
+        self.folds.get(title).copied().unwrap_or_else(|| {
+            // Other starts folded in a plugin's arrangement (model.go:2114).
+            self.cfg.folded(title)
+                || title == crate::arranged::OTHER_SECTION
+                    && !self.cfg.folds.contains_key(title)
+                    && self
+                        .kept
+                        .peek::<crate::arranged::Arranged>()
+                        .is_some_and(|a| a.0.is_some())
+        })
     }
 
     pub fn toggle_fold(&mut self, title: &str) {

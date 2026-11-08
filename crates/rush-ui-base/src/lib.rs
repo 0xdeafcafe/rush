@@ -7,6 +7,7 @@
 
 pub mod accounts;
 pub mod agentry;
+pub mod arranged;
 pub mod attached;
 pub mod away;
 pub mod barfind;

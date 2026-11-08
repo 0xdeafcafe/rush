@@ -117,10 +117,12 @@ pub struct RowOpen {
     pub cut: bool,
 }
 
-/// The row of an item under prefix (openRow).
-pub fn open_row(prefix: &str, it: &Item) -> RowOpen {
+/// The row of items[i] under prefix (openRow), keyed apart from its
+/// siblings of the same words.
+pub fn open_row(prefix: &str, items: &[Item], i: usize) -> RowOpen {
+    let it = &items[i];
     RowOpen {
-        key: item_key(prefix, &it.id, &it.text, &it.cells),
+        key: item_key_at(prefix, items, i),
         text: it.text.clone(),
         meta: it.meta.clone(),
         detail: it.detail.clone(),

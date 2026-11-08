@@ -697,13 +697,28 @@ impl SessionView {
         // The view's rows within the window.
         let vs = start.saturating_sub(base).min(n);
         let ve = (vs + rows).min(n);
+        // The rows of them drawn as they are, [lo, hi): pinned prompts
+        // cover the top rows and the bottom one, and scrolled up the
+        // "more below" pill takes the last (conversation.rs); a row under
+        // them isn't in view, to pick or to scroll to. As last drawn, when
+        // that was at this start; else all but the pill's.
+        let (lo, hi) = if self.shown.is_empty() || self.start != start {
+            let pill = usize::from(self.pos != Pos::End && rows > 1);
+            (vs, ve.saturating_sub(pill).max(vs))
+        } else {
+            let m = self.shown.len().min(ve - vs);
+            let same = |k: usize| self.shown[k] == refs[vs + k];
+            let top = (0..m).take_while(|&k| !same(k)).count();
+            let bot = (top..m).rev().take_while(|&k| !same(k)).count();
+            (vs + top, vs + m - bot)
+        };
         let at = refs[vs..ve]
             .iter()
             .position(|r| !self.sel.is_empty() && *r == self.sel)
             .map(|i| i + vs);
         let mut j: Option<usize> = None;
         match (at, d < 0) {
-            (None, true) => j = (vs..ve).rev().find(|&i| !refs[i].is_empty()),
+            (None, true) => j = (lo..hi).rev().find(|&i| !refs[i].is_empty()),
             // ↓ with nothing picked stays in the box (Go's moveSel).
             (None, false) => return,
             (Some(i), true) => {
@@ -737,10 +752,13 @@ impl SessionView {
             return;
         };
         self.sel = refs[j].clone();
-        if j < vs {
-            self.set_start(base + j, total, rows);
-        } else if j >= ve {
-            self.set_start(base + j + 1 - rows.min(j + 1), total, rows);
+        if j < lo {
+            // Its first row just under the pins over the top.
+            self.set_start((base + j).saturating_sub(lo - vs), total, rows);
+        } else if j >= hi {
+            // Its last row just over what covers the bottom.
+            let h = (hi - vs).max(1);
+            self.set_start((base + j + 1).saturating_sub(h), total, rows);
         }
     }
 

@@ -93,15 +93,15 @@ fn word_break(c: char) -> bool {
 /// The word in a row around cell col, [from, to) in cells (wordCells).
 pub fn word_cells(row: &str, col: usize) -> Option<(usize, usize)> {
     let rs: Vec<char> = row.chars().collect();
-    let mut at = vec![0usize; rs.len() + 1];
-    let mut i = None;
-    for (j, c) in rs.iter().enumerate() {
-        at[j + 1] = at[j] + rush_core::text::width(c.encode_utf8(&mut [0; 4]));
-        if i.is_none() && at[j + 1] > col {
-            i = Some(j);
-        }
+    // Each char's cells as drawn: a grapheme's on its first char.
+    let mut at = Vec::with_capacity(rs.len() + 1);
+    at.push(0usize);
+    for (_, g, w) in rush_core::text::graphemes(row) {
+        let x = at[at.len() - 1];
+        at.push(x + w);
+        at.extend(std::iter::repeat_n(x + w, g.chars().count() - 1));
     }
-    let i = i?;
+    let i = (0..rs.len()).find(|&j| at[j + 1] > col)?;
     if word_break(rs[i]) {
         return None;
     }

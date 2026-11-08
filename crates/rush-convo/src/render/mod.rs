@@ -909,6 +909,13 @@ impl Renderer {
         self.hdr() + self.index.prefix(i)
     }
 
+    /// The row turn i's own rows begin at: unlike turn_row, the first
+    /// turn's come after the rows above it ("reading earlier…", what
+    /// comes before the first turn), which a view at row 0 shows with it.
+    pub fn turn_top(&self, i: usize) -> usize {
+        self.hdr() + self.index.prefix(i)
+    }
+
     /// The turn at row r, the nearest when r is off either end.
     pub fn turn_at(&self, r: usize) -> usize {
         self.index.find(r.saturating_sub(self.hdr()))

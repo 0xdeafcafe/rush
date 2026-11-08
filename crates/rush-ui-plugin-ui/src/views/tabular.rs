@@ -39,6 +39,24 @@ pub(super) fn cell_num(s: &str) -> Option<f64> {
     s.replace(',', "").parse().ok()
 }
 
+/// How a sorted column orders two cells: numbers as Go's cmp.Compare
+/// (NaN before every other), words by their lower case, as Go's sort;
+/// and where Go's left it undefined, a number before a word, so the
+/// order is total and the sort can't panic.
+fn sort_cmp(a: &str, b: &str) -> Ordering {
+    match (cell_num(a), cell_num(b)) {
+        (Some(x), Some(y)) => match (x.is_nan(), y.is_nan()) {
+            (true, true) => Ordering::Equal,
+            (true, false) => Ordering::Less,
+            (false, true) => Ordering::Greater,
+            (false, false) => x.partial_cmp(&y).unwrap_or(Ordering::Equal),
+        },
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => a.to_lowercase().cmp(&b.to_lowercase()),
+    }
+}
+
 fn cell_at(cells: &[String], c: usize) -> &str {
     cells.get(c).map(String::as_str).unwrap_or("")
 }
@@ -114,19 +132,12 @@ pub(super) fn table(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
         *s = at;
         at += widths[c] + 2;
     }
-    let mut rows: Vec<&Item> = b.items.iter().collect();
+    let mut rows: Vec<(usize, &Item)> = b.items.iter().enumerate().collect();
     let sort_by = cx.st.sorts.get(&cx.key).copied().unwrap_or(0);
     if sort_by != 0 {
         let (c, desc) = (sort_by.unsigned_abs() as usize - 1, sort_by < 0);
-        rows.sort_by(|x, y| {
-            let (a, bb) = (cell_at(&x.cells, c), cell_at(&y.cells, c));
-            let r = match cell_num(a) {
-                Some(fa) => match cell_num(bb) {
-                    Some(fb) => fa.partial_cmp(&fb).unwrap_or(Ordering::Equal),
-                    None => Ordering::Equal,
-                },
-                None => a.to_lowercase().cmp(&bb.to_lowercase()),
-            };
+        rows.sort_by(|(_, x), (_, y)| {
+            let r = sort_cmp(cell_at(&x.cells, c), cell_at(&y.cells, c));
             if desc { r.reverse() } else { r }
         });
     }
@@ -178,7 +189,7 @@ pub(super) fn table(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
         }
         vec![cell(&first, c), cell(rest, c)]
     };
-    for it in rows {
+    for (i, it) in rows {
         let cols: Vec<Vec<String>> = (0..n)
             .map(|c| cell_lines(cell_at(&it.cells, c), c))
             .collect();
@@ -204,7 +215,7 @@ pub(super) fn table(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
             }
             lines.push(line(r.spans));
         }
-        let mut o = open_row(&cx.prefix, it);
+        let mut o = open_row(&cx.prefix, &b.items, i);
         o.cols = b.columns.clone();
         out.extend(cx.row_lines(o, w, lines));
     }
@@ -224,7 +235,7 @@ pub(super) fn kv(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
         .min(w / 2);
     let val_w = w.saturating_sub(key_w + 2);
     let mut out = Vec::new();
-    for it in &b.items {
+    for (i, it) in b.items.iter().enumerate() {
         let col = if it.tone.is_empty() {
             TEXT
         } else {
@@ -259,7 +270,7 @@ pub(super) fn kv(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
             };
             lines.push(cat([k, ln([plain("  ")]), v]));
         }
-        let mut o = open_row(&cx.prefix, it);
+        let mut o = open_row(&cx.prefix, &b.items, i);
         o.cut = cw(&it.text) > w;
         out.extend(cx.row_lines(o, w, lines));
     }
@@ -276,7 +287,7 @@ pub(super) fn checklist(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
         .items
         .iter()
         .any(|it| !it.meta.is_empty() && !meta_fits(&it.text, &it.meta, false, w));
-    for it in &b.items {
+    for (i, it) in b.items.iter().enumerate() {
         let done = it.done == Some(true);
         let text = trunc(&it.text, w.saturating_sub(2));
         let (mark, text) = if done {
@@ -294,7 +305,7 @@ pub(super) fn checklist(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
         } else if !it.meta.is_empty() {
             lines[0] = spread(lines[0].clone(), ln([dim(it.meta.clone())]), w);
         }
-        let mut o = open_row(&cx.prefix, it);
+        let mut o = open_row(&cx.prefix, &b.items, i);
         o.tick = Some(done);
         out.extend(cx.row_lines(o, w, lines));
     }
@@ -313,7 +324,7 @@ pub(super) fn checklist(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
 pub(super) fn log(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
     let tw = b.items.iter().map(|it| cw(&it.time)).max().unwrap_or(0);
     let mut out = Vec::new();
-    for it in &b.items {
+    for (i, it) in b.items.iter().enumerate() {
         let col = match it.tone.as_str() {
             "bad" | "warn" | "good" | "busy" => tone_edge(&it.tone),
             "" => TEXT,
@@ -328,7 +339,8 @@ pub(super) fn log(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
             (Line::new(), w)
         };
         row.spans.push(paint(col, trunc(&it.text, room)));
-        out.extend(cx.row_lines(open_row(&cx.prefix, it), w, vec![line(row.spans)]));
+        let o = open_row(&cx.prefix, &b.items, i);
+        out.extend(cx.row_lines(o, w, vec![line(row.spans)]));
     }
     out
 }
@@ -339,7 +351,7 @@ pub(super) fn compare(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
     let from_w = b.items.iter().map(|it| cw(&it.from)).max().unwrap_or(0);
     let to_w = b.items.iter().map(|it| cw(&it.to)).max().unwrap_or(0);
     let mut out = Vec::new();
-    for it in &b.items {
+    for (i, it) in b.items.iter().enumerate() {
         let col = if it.tone.is_empty() {
             BRIGHT
         } else {
@@ -356,7 +368,7 @@ pub(super) fn compare(b: &Block, w: usize, cx: &BlockCtx) -> Vec<ViewLine> {
             ln([plain(" ")]),
             right,
         ]);
-        out.extend(cx.row_lines(open_row(&cx.prefix, it), w, vec![row]));
+        out.extend(cx.row_lines(open_row(&cx.prefix, &b.items, i), w, vec![row]));
     }
     out
 }

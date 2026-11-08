@@ -228,6 +228,14 @@ Claude, fleet, the other adapters) builds on these.
   colour profile would be NoTTY (off a terminal, TERM unset or dumb,
   unless CLICOLOR_FORCE). `Headless::ansi` (`--render`) writes them too,
   as Go prints its view's escapes.
+- **Widths** (Rust-only). Text is laid out a grapheme at a time, at
+  the cells the canvas draws it in: `rush_core::text::grapheme_width`
+  and `graphemes` are the one measure, used by rush-draw's canvas, the
+  conversation's `Txt` (width, take, skip, wrap), ui-base's `cut` and
+  the word under a double-click. "⚠️" is two cells and "👍🏽" two, never
+  their chars' sum, and a cut or wrap never splits one. ASCII goes a
+  char at a time, and text of lone chars (`text::lone`: Latin,
+  punctuation, symbols, box drawing) without segmenting.
 - **Images.** Events carry an image's bytes (`event::ImageData`); the
   conversation keeps only `convo::Picture { media_type, bytes, path }`.
   Prompt images in a transcript are measured from their base64 without
@@ -2324,8 +2332,10 @@ is made. Everything below is in `rush_ui::frame`.
   `beside::paste`, called from session_core's conversation and side
   column), and has the pointer first (`beside::mouse`, pushed before the
   Session's own mouse hooks). Nothing reads view files on the UI thread:
-  `read::follow` keeps one thread waiting (kqueue) on the open session's
-  views folder, reading only when it changes, and the list's summaries
+  `read::follow` keeps one thread waiting (kqueue) on each drawn
+  session's views folder (a grid's tiles each their own, kept while the
+  session is drawn and let go a frame after it isn't; one handed from
+  tile to tile restarted every frame), reading only when it changes, and the list's summaries
   are read after each fleet reading, only for folders whose time
   changed; host calls a click makes (drop, bring back, change a row)
   go through `Model::later`. rush's rows over the view

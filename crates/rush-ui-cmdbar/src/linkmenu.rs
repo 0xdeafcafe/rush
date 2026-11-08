@@ -89,11 +89,13 @@ fn unescape(s: &str) -> String {
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
+        // Hex from the bytes: a % before a character of more than one
+        // byte must not slice inside it.
         if b[i] == b'%'
             && i + 2 < b.len()
-            && let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16)
+            && let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2]))
         {
-            out.push(v);
+            out.push((h << 4) | l);
             i += 3;
             continue;
         }
@@ -101,6 +103,10 @@ fn unescape(s: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex(c: u8) -> Option<u8> {
+    (c as char).to_digit(16).map(|d| d as u8)
 }
 
 /// What can be done with a link (linkActs); empty for one that isn't.

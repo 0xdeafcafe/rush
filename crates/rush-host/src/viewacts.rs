@@ -126,6 +126,53 @@ pub fn item_key(prefix: &str, id: &str, text: &str, cells: &[String]) -> String 
     }
 }
 
+/// What tells a row apart, as item_key has it: its id, else its text, else
+/// its first cell.
+fn ident<'a>(id: &'a str, text: &'a str, cells: &'a [String]) -> &'a str {
+    if !id.is_empty() {
+        id
+    } else if !text.is_empty() {
+        text
+    } else {
+        cells.first().map_or("", String::as_str)
+    }
+}
+
+/// item_key told apart from the rows before it with the same key, n of
+/// them: the second "retry" under b0 is "b0/retry\t2", so that a click on
+/// it changes it and not the first (Rust-only: Go's rows of the same words
+/// shared one key). A tab can't be in a row's words, clip having made
+/// their spaces single ones.
+fn nth_key(key: String, n: usize) -> String {
+    if n == 0 || key.is_empty() {
+        key
+    } else {
+        format!("{key}\t{}", n + 1)
+    }
+}
+
+/// The key of items[i] under prefix, its own among its siblings.
+pub fn item_key_at(prefix: &str, items: &[crate::views::Item], i: usize) -> String {
+    let it = &items[i];
+    let me = ident(&it.id, &it.text, &it.cells);
+    let n = items[..i]
+        .iter()
+        .filter(|o| ident(&o.id, &o.text, &o.cells) == me)
+        .count();
+    nth_key(item_key(prefix, &it.id, &it.text, &it.cells), n)
+}
+
+/// The key of group gi's rows[i], its own among the group's rows.
+pub fn group_row_key(gi: usize, rows: &[crate::views::Row], i: usize) -> String {
+    let r = &rows[i];
+    let me = ident(&r.id, &r.text, &[]);
+    let n = rows[..i]
+        .iter()
+        .filter(|o| ident(&o.id, &o.text, &[]) == me)
+        .count();
+    nth_key(item_key(&group_key(gi), &r.id, &r.text, &[]), n)
+}
+
 /// The prefix of block bi's rows.
 pub fn block_key(bi: usize) -> String {
     format!("b{bi}")
@@ -153,11 +200,11 @@ struct RowRef<'a> {
 }
 
 impl View {
-    /// Where the row of key is: the first of that key, groups first.
+    /// Where the row of key is, groups first.
     fn find(&self, key: &str) -> Option<Loc> {
         for (gi, g) in self.groups.iter().enumerate() {
-            for (i, r) in g.rows.iter().enumerate() {
-                let k = item_key(&group_key(gi), &r.id, &r.text, &[]);
+            for i in 0..g.rows.len() {
+                let k = group_row_key(gi, &g.rows, i);
                 if !k.is_empty() && k == key {
                     return Some(Loc::Group(gi, i));
                 }
@@ -170,7 +217,7 @@ impl View {
             path: &mut Vec<usize>,
         ) -> bool {
             for (i, it) in items.iter().enumerate() {
-                let k = item_key(prefix, &it.id, &it.text, &it.cells);
+                let k = item_key_at(prefix, items, i);
                 if k.is_empty() {
                     continue;
                 }
@@ -498,6 +545,67 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    /// Rows of the same words each have a key of their own, so a click on
+    /// the second ticks the second; a row of words of its own keeps
+    /// Go's key.
+    #[test]
+    fn rows_of_the_same_words_have_their_own_keys() {
+        let it = |id: &str, text: &str, cells: &[&str]| Item {
+            id: id.into(),
+            text: text.into(),
+            cells: cells.iter().map(|c| c.to_string()).collect(),
+            ..Item::default()
+        };
+        let items = [
+            it("", "retry", &[]),
+            it("", "retry", &[]),
+            it("", "other", &[]),
+            it("", "retry", &[]),
+            it("x", "retry", &[]),
+            it("", "", &["x"]),
+            it("", "", &[]),
+            it("", "", &[]),
+        ];
+        let want = [
+            "b0/retry",
+            "b0/retry\t2",
+            "b0/other",
+            "b0/retry\t3",
+            "b0/x",
+            "b0/x\t2",
+            "",
+            "",
+        ];
+        for (i, want) in want.iter().enumerate() {
+            assert_eq!(item_key_at("b0", &items, i), *want, "item {i}");
+        }
+
+        let _h = Home::new();
+        std::fs::create_dir_all(crate::paths::dir("s1")).unwrap();
+        let v = View {
+            name: "todo".into(),
+            title: "To do".into(),
+            blocks: vec![Block {
+                kind: "checklist".into(),
+                items: vec![it("", "retry", &[]), it("", "retry", &[])],
+                ..Block::default()
+            }],
+            ..View::default()
+        };
+        save_view("s1", v).unwrap();
+        let tick = Change {
+            done: Some(true),
+            ..Change::default()
+        };
+        change_row("s1", "todo", "b0/retry\t2", tick).unwrap();
+        let done: Vec<bool> = views("s1").0[0].blocks[0]
+            .items
+            .iter()
+            .map(|i| i.done == Some(true))
+            .collect();
+        assert_eq!(done, [false, true], "the second is ticked, not the first");
     }
 
     #[test]

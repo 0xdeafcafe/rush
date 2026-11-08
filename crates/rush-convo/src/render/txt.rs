@@ -6,18 +6,66 @@
 //! A run with no colour of its own takes the colour of whatever paints it,
 //! as text between Go's resets takes the colour around it.
 
-use rush_core::text::{Color, Line, Span, Style};
+use rush_core::text::{self, Color, Line, Span, Style};
 use unicode_width::UnicodeWidthChar;
 
 /// Styled text: runs in order.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Txt(pub Vec<Span>);
 
-pub(crate) fn cw(c: char) -> usize {
+/// An ASCII char's cells.
+fn ascii_w(c: char) -> usize {
     if c == '\t' {
         return 1; // as ansi counts a control: rush expands tabs first
     }
     UnicodeWidthChar::width(c).unwrap_or(0)
+}
+
+/// The graphemes of s, each with where it starts and the cells it takes
+/// as the screen draws it (text::graphemes: "⚠️" two, not the one its
+/// chars add up to), so that what is cut and wrapped here is what the
+/// canvas puts down. Two things are kept from ansi's counting: a tab
+/// takes a cell (rush expands tabs first), and CR LF goes as two.
+pub(crate) fn cells(s: &str) -> Cells<'_> {
+    if s.is_ascii() {
+        Cells::Ascii(s, s.char_indices())
+    } else {
+        Cells::Graphemes(text::graphemes(s), None)
+    }
+}
+
+/// What [`cells`] goes through: (byte offset, grapheme, cells).
+pub(crate) enum Cells<'a> {
+    Ascii(&'a str, std::str::CharIndices<'a>),
+    /// The graphemes, and the LF of a CR LF to come.
+    Graphemes(text::Graphemes<'a>, Option<usize>),
+}
+
+impl<'a> Iterator for Cells<'a> {
+    type Item = (usize, &'a str, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Cells::Ascii(s, cs) => {
+                let (i, c) = cs.next()?;
+                Some((i, &s[i..i + 1], ascii_w(c)))
+            }
+            Cells::Graphemes(gs, lf) => {
+                if let Some(i) = lf.take() {
+                    return Some((i, "\n", 0));
+                }
+                let (i, g, w) = gs.next()?;
+                match g {
+                    "\t" => Some((i, g, 1)),
+                    "\r\n" => {
+                        *lf = Some(i + 1);
+                        Some((i, "\r", 0))
+                    }
+                    _ => Some((i, g, w)),
+                }
+            }
+        }
+    }
 }
 
 /// Cells s takes.
@@ -25,7 +73,7 @@ pub(crate) fn width(s: &str) -> usize {
     if s.is_ascii() {
         return s.len();
     }
-    s.chars().map(cw).sum()
+    cells(s).map(|(_, _, w)| w).sum()
 }
 
 impl Txt {
@@ -144,13 +192,12 @@ impl Txt {
                 continue;
             }
             let mut cut = 0;
-            for (i, c) in s.text.char_indices() {
-                let k = cw(c);
+            for (i, g, k) in cells(&s.text) {
                 if n + k > w {
                     break;
                 }
                 n += k;
-                cut = i + c.len_utf8();
+                cut = i + g.len();
             }
             if cut > 0 {
                 out.push(Span::new(&s.text[..cut], s.style));
@@ -175,12 +222,12 @@ impl Txt {
                 continue;
             }
             let mut from = s.text.len();
-            for (i, c) in s.text.char_indices() {
+            for (i, _, k) in cells(&s.text) {
                 if n >= w {
                     from = i;
                     break;
                 }
-                n += cw(c);
+                n += k;
             }
             if from < s.text.len() {
                 out.push(Span::new(&s.text[from..], s.style));
@@ -249,21 +296,22 @@ pub(crate) fn wrap(t: &Txt, w: usize) -> Vec<Txt> {
     wrap_at(t, w.max(10), "")
 }
 
-/// A cell of styled text, for wrapping.
+/// A cell of styled text, for wrapping: a grapheme, so that one is never
+/// wrapped in two.
 #[derive(Clone, Copy)]
-struct Cell {
-    c: char,
+struct Cell<'a> {
+    g: &'a str,
     st: Style,
     w: usize,
 }
 
 /// Rows of cells, gathered into runs.
-struct Rows {
-    rows: Vec<Vec<Cell>>,
+struct Rows<'a> {
+    rows: Vec<Vec<Cell<'a>>>,
 }
 
-impl Rows {
-    fn cur(&mut self) -> &mut Vec<Cell> {
+impl<'a> Rows<'a> {
+    fn cur(&mut self) -> &mut Vec<Cell<'a>> {
         self.rows.last_mut().unwrap()
     }
 }
@@ -272,8 +320,8 @@ fn to_txt(cells: &[Cell]) -> Txt {
     let mut out: Vec<Span> = Vec::new();
     for c in cells {
         match out.last_mut() {
-            Some(s) if s.style == c.st => s.text.push(c.c),
-            _ => out.push(Span::new(c.c.to_string(), c.st)),
+            Some(s) if s.style == c.st => s.text.push_str(c.g),
+            _ => out.push(Span::new(c.g, c.st)),
         }
     }
     Txt(out)
@@ -321,12 +369,12 @@ pub(crate) fn wrap_at(t: &Txt, limit: usize, breakpoints: &str) -> Vec<Txt> {
     }
 
     for s in &t.0 {
-        for c in s.text.chars() {
-            let cell = Cell {
-                c,
-                st: s.style,
-                w: cw(c),
-            };
+        for (_, g, w) in cells(&s.text) {
+            // A grapheme goes by its first char; an ASCII one of more
+            // (a keycap, a letter and its accent) takes its own width.
+            let c = g.chars().next().unwrap_or(' ');
+            let one = if g.len() == 1 { 1 } else { w };
+            let cell = Cell { g, st: s.style, w };
             if !c.is_ascii() {
                 if c.is_whitespace() && c != '\u{a0}' {
                     add_word!();
@@ -379,20 +427,20 @@ pub(crate) fn wrap_at(t: &Txt, limit: usize, breakpoints: &str) -> Vec<Txt> {
                 _ if c == '-' || breakpoints.contains(c) => {
                     add_space!();
                     if cur_w + word_len >= limit {
-                        word.push(Cell { w: 1, ..cell });
-                        word_len += 1;
+                        word.push(Cell { w: one, ..cell });
+                        word_len += one;
                     } else {
                         add_word!();
-                        out.cur().push(Cell { w: 1, ..cell });
-                        cur_w += 1;
+                        out.cur().push(Cell { w: one, ..cell });
+                        cur_w += one;
                     }
                 }
                 _ => {
                     if cur_w == limit {
                         add_newline!();
                     }
-                    word.push(Cell { w: 1, ..cell });
-                    word_len += 1;
+                    word.push(Cell { w: one, ..cell });
+                    word_len += one;
                     if word_len == limit {
                         add_word!();
                     }
@@ -470,6 +518,64 @@ mod tests {
         let t = Txt::raw("hello world");
         assert_eq!(t.truncate(8, &Txt::raw("…")).plain(), "hello w…");
         assert_eq!(t.skip(6).plain(), "world");
+    }
+
+    /// Text is measured, cut and wrapped a grapheme at a time, as the
+    /// canvas draws it: "⚠️" and "👍🏽" are two cells, never split.
+    #[test]
+    fn graphemes_are_measured_whole() {
+        for (s, want) in [
+            ("ok", 2),
+            ("a\tb", 3),
+            ("café", 4),
+            ("e\u{301}", 1),
+            ("日本", 4),
+            ("⚠", 1),
+            ("⚠\u{fe0f}", 2),
+            ("👍🏽", 2),
+            ("1\u{fe0f}\u{20e3}", 2),
+            ("👨\u{200d}👩\u{200d}👧 hi", 5),
+        ] {
+            assert_eq!(width(s), want, "{s:?}");
+            assert_eq!(Txt::raw(s).width(), want, "{s:?}");
+        }
+        // (text, cells kept, what take keeps, what skip leaves)
+        for (s, w, take, skip) in [
+            ("⚠\u{fe0f}x", 1, "", "x"),
+            ("⚠\u{fe0f}x", 2, "⚠\u{fe0f}", "x"),
+            ("a👍🏽b", 2, "a", "b"),
+            ("a👍🏽b", 3, "a👍🏽", "b"),
+            ("ae\u{301}z", 2, "ae\u{301}", "z"),
+        ] {
+            let t = Txt::raw(s);
+            assert_eq!(t.take(w).plain(), take, "take {w} of {s:?}");
+            assert_eq!(t.skip(w).plain(), skip, "skip {w} of {s:?}");
+        }
+        // Wrapped, no row is wider than the limit as drawn, and no
+        // grapheme is split across rows.
+        for (s, limit) in [
+            ("⚠\u{fe0f}⚠\u{fe0f}⚠\u{fe0f}⚠\u{fe0f}⚠\u{fe0f}⚠\u{fe0f}", 5),
+            ("👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽👍🏽", 4),
+            (
+                "ab 1\u{fe0f}\u{20e3}1\u{fe0f}\u{20e3}1\u{fe0f}\u{20e3} cd",
+                4,
+            ),
+            ("well ⚠\u{fe0f} done 👍🏽 and more words here", 10),
+        ] {
+            let rows = wrap_at(&Txt::raw(s), limit, "");
+            for r in &rows {
+                let p = r.plain();
+                assert!(
+                    rush_core::text::graphemes_width(&p) <= limit,
+                    "{p:?} of {s:?} is wider than {limit}"
+                );
+                assert!(
+                    !p.starts_with(['\u{fe0f}', '\u{1f3fd}', '\u{20e3}']),
+                    "{p:?} of {s:?} starts in a grapheme"
+                );
+            }
+            assert_eq!(plain(&rows).concat().replace(' ', ""), s.replace(' ', ""));
+        }
     }
 
     #[test]

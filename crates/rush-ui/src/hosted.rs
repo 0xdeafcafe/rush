@@ -193,10 +193,10 @@ pub(crate) fn pin(m: &mut Model) -> bool {
         // not on every key.
         m.kept::<Hosted>().unread = !opened;
     }
-    // Its rows may run the whole width (Options.Wide: hostedAlone).
-    if let Some(v) = m.session.as_mut() {
-        v.o.wide = true;
-    }
+    // Whether its rows run the whole width is the draw's to say (wide
+    // while no column stands beside them, conversation.rs): set here
+    // after every message, it undid that between frames and laid the
+    // rows out twice, the scroll jumping.
     opened
 }
 
@@ -373,7 +373,6 @@ mod tests {
         assert_eq!(m.agents.len(), 1);
         assert_eq!(all_agents(&m).len(), 2);
         assert_eq!(open(&m), Some("claude:x:s1"));
-        assert!(m.session.as_ref().unwrap().o.wide);
         assert_eq!(m.sel, "claude:x:s1");
         assert!(alone(&m) && !m.leads());
         assert_eq!(id(&m), Some("s1"));

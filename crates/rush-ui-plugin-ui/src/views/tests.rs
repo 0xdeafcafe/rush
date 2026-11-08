@@ -697,3 +697,104 @@ fn view_summary_in_the_lists_words() {
     assert_eq!(l.plain(), "✓ all green · shipped");
     assert_eq!(l.spans[0].style.fg, GREEN);
 }
+
+/// A sorted table's order is total: numbers before words (NaN first among
+/// them, as Go's cmp.Compare), words by their lower case, equal cells kept
+/// in the order given; the other way round, all of it reversed.
+#[test]
+fn table_sorts_in_a_total_order() {
+    let v: View = serde_json::from_value(serde_json::json!({
+        "name": "t",
+        "blocks": [{"kind": "table", "columns": ["k", "v"], "items": [
+            {"cells": ["a", "b"]},
+            {"cells": ["b", "10"]},
+            {"cells": ["c", "NaN"]},
+            {"cells": ["d", "A"]},
+            {"cells": ["e", "2"]},
+            {"cells": ["f", "−3"]},
+            {"cells": ["g", "b"]},
+            {"cells": ["h", "2"]},
+            {"cells": ["i", ""]},
+        ]}],
+    }))
+    .expect("a view");
+    for (sort, want) in [(2, "cfehbidag"), (-2, "agdibehfc"), (1, "abcdefghi")] {
+        let st = ViewsState {
+            sorts: HashMap::from([("t/b0".to_string(), sort)]),
+            ..Default::default()
+        };
+        // Each row's key: the first word of a row, one letter a to i.
+        let got: String = view_body(&v, 40, &st)
+            .into_iter()
+            .filter_map(|l| {
+                let p = l.s.plain();
+                let k = p.split_whitespace().next()?.to_string();
+                (k.len() == 1 && "abcdefghi".contains(k.as_str())).then_some(k)
+            })
+            .collect();
+        assert_eq!(got, want, "sorted by {sort}");
+    }
+}
+
+/// Where a view was scrolled to and its cursor stay with it: another view
+/// shown starts at its top, however it came to show.
+#[test]
+fn another_view_starts_at_its_top() {
+    let a = all();
+    let b = View {
+        name: "b".into(),
+        ..a.clone()
+    };
+    let both = vec![a.clone(), b];
+    let one = vec![a];
+    let mut st = state();
+    views_panel(&both, &[], 48, 12, 0, &mut st);
+    assert_eq!(st.shown, "tests");
+    // (how, its tab, the views there are, the view that shows)
+    for (how, tab, vs, shows) in [
+        ("drawn again", "", &both, "tests"),
+        ("a tab picked", "b", &both, "b"),
+        ("drawn again", "b", &both, "b"),
+        ("the one shown gone", "b", &one, "tests"),
+    ] {
+        (st.scroll, st.cursor, st.btn) = (4, 6, 1);
+        let was = st.shown.clone();
+        st.tab = tab.into();
+        views_panel(vs, &[], 48, 12, 0, &mut st);
+        assert_eq!(st.shown, shows, "{how}");
+        let want = if was == shows { (4, 6, 1) } else { (0, 0, 0) };
+        assert_eq!((st.scroll, st.cursor, st.btn), want, "{how}");
+    }
+}
+
+/// Rows of the same words a click finds apart, in every kind of block
+/// that has rows: each its own key.
+#[test]
+fn rows_of_the_same_words_are_told_apart() {
+    for kind in [
+        "list",
+        "table",
+        "kv",
+        "checklist",
+        "log",
+        "compare",
+        "timeline",
+        "tree",
+    ] {
+        let v: View = serde_json::from_value(serde_json::json!({
+            "name": "t",
+            "blocks": [{"kind": kind, "items": [
+                {"text": "retry", "cells": ["retry"], "value": 1},
+                {"text": "retry", "cells": ["retry"], "value": 2},
+            ]}],
+        }))
+        .expect("a view");
+        let mut keys: Vec<String> = view_body(&v, 60, &ViewsState::default())
+            .into_iter()
+            .map(|l| l.act.row)
+            .filter(|k| !k.is_empty())
+            .collect();
+        keys.dedup();
+        assert_eq!(keys, ["b0/retry", "b0/retry\t2"], "{kind}");
+    }
+}

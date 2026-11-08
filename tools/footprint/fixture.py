@@ -191,9 +191,10 @@ def main():
     os.makedirs(subs, exist_ok=True)
     for j in range(SUBAGENTS):
         agent = "%016x" % r.getrandbits(64)
+        run = os.path.join(subs, f"agent-{agent}.jsonl")
         transcript(
             r,
-            os.path.join(subs, f"agent-{agent}.jsonl"),
+            run,
             cwd,
             sid,
             SUBAGENT_TURNS,
@@ -201,6 +202,10 @@ def main():
             sidechain=True,
             agent=agent,
         )
+        # Finished an hour ago, as the conversation was: written just now,
+        # a run counts as at work for 90 s, and the open bench reads it
+        # whole or not by how long the build before it took (#27).
+        os.utime(run, (now - 3600, now - 3600))
     os.utime(big, (now - 3600, now - 3600))
     with open(os.path.join(root, "big.jsonl"), "w") as f:
         f.write(big + "\n")

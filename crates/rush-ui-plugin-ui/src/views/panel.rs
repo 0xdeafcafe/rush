@@ -167,7 +167,15 @@ pub fn views_panel(
         (past_body(past, inner, now), past_top(w))
     } else {
         let v = shown_view(vs, &st.tab);
-        st.shown = v.name.clone();
+        if st.shown != v.name {
+            // Another view shows (a tab picked, the newest changed, the
+            // one shown gone): it starts at its top, the cursor on its
+            // first thing, not where the last one was left.
+            if !st.shown.is_empty() {
+                (st.scroll, st.cursor, st.btn) = (0, 0, 0);
+            }
+            st.shown = v.name.clone();
+        }
         let top = views_top(vs, v, w, st);
         (view_body(v, inner, st), top)
     };
@@ -527,9 +535,9 @@ pub fn view_body(v: &View, w: usize, st: &ViewsState) -> Vec<ViewLine> {
             view: v.name.clone(),
             prefix: String::new(),
         };
-        for r in &g.rows {
+        for (ri, r) in g.rows.iter().enumerate() {
             let o = RowOpen {
-                key: item_key(&group_key(gi), &r.id, &r.text, &[]),
+                key: group_row_key(gi, &g.rows, ri),
                 text: r.text.clone(),
                 meta: r.meta.clone(),
                 detail: r.detail.clone(),

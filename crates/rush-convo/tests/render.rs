@@ -623,6 +623,16 @@ fn a_window_is_the_same_rows_as_the_whole() {
     for i in [0, 3, 29] {
         let row = r.turn_row(i);
         assert_eq!(r.turn_at(row), i);
+        // Its own rows: the first turn's after any above it.
+        let top = r.turn_top(i);
+        assert!(top >= row && (i == 0 || top == row), "turn {i}'s top");
+        let t = format!("t{}", s.turns[i].n);
+        assert!(
+            !all[..top]
+                .iter()
+                .any(|l| l.r#ref == t || l.r#ref.starts_with(&format!("{t}:"))),
+            "turn {i} has rows above {top}"
+        );
         let t = format!("t{}", s.turns[i].n);
         let end = if i + 1 < s.turns.len() {
             r.turn_row(i + 1)

@@ -35,21 +35,37 @@ pub struct SessionViews {
     pub at: Option<SystemTime>,
 }
 
-/// The views rush has read, by session id, the session it follows, and
+/// The views rush has read, by session id, the sessions it follows, and
 /// how you've left each session's panel, by the session's key.
 #[derive(Default)]
 pub struct Views {
     pub by_id: HashMap<String, SessionViews>,
     pub states: HashMap<String, ViewsState>,
-    /// The session whose views folder is followed, and what stops it.
-    following: String,
+    /// The sessions whose views folders are followed, by id: what stops
+    /// each, and the frame it was last drawn in. A grid draws a session
+    /// a tile, each with its follower: one per session, kept while it's
+    /// drawn, not one handed from tile to tile each frame.
+    following: HashMap<String, Follower>,
+}
+
+struct Follower {
+    /// None with no loop, where it was read once.
     stop: Option<Arc<Stop>>,
+    frame: u64,
+}
+
+impl Follower {
+    fn close(&self) {
+        if let Some(s) = &self.stop {
+            s.close();
+        }
+    }
 }
 
 impl Drop for Views {
     fn drop(&mut self) {
-        if let Some(s) = self.stop.take() {
-            s.close();
+        for (_, f) in self.following.drain() {
+            f.close();
         }
     }
 }
@@ -122,32 +138,50 @@ fn took(m: &mut Model, id: &str, sv: SessionViews) -> bool {
     true
 }
 
-/// Follows session id's views folder, the open session's, reading them
-/// again whenever it changes; "" stops following. A thread waits on the
-/// folder, and reads only when it changed: nothing runs while nothing
-/// changes. With no loop it reads once, now.
+/// Follows session id's views folder, a session drawn's, reading them
+/// again whenever it changes; "" stops following every one. A thread
+/// waits on the folder, and reads only when it changed: nothing runs
+/// while nothing changes. Each session drawn has its own, kept while it's
+/// drawn: one not drawn in the frame before this one is let go. With no
+/// loop it reads once, now.
 pub fn follow(m: &mut Model, id: &str) {
+    let frame = m.frames;
     let v = m.kept::<Views>();
-    if v.following == id {
+    if id.is_empty() {
+        for (_, f) in v.following.drain() {
+            f.close();
+        }
         return;
     }
-    v.following = id.to_string();
-    if let Some(s) = v.stop.take() {
-        s.close();
-    }
-    if id.is_empty() {
+    v.following.retain(|k, f| {
+        let kept = k == id || f.frame + 1 >= frame;
+        if !kept {
+            f.close();
+        }
+        kept
+    });
+    if let Some(f) = v.following.get_mut(id) {
+        f.frame = frame;
         return;
     }
     let Some(tx) = m.sender() else {
         let sv = read(id);
         took(m, id, sv);
+        let f = Follower { stop: None, frame };
+        m.kept::<Views>().following.insert(id.to_string(), f);
         return;
     };
     let Ok(stop) = Stop::new() else {
         return;
     };
     let stop = Arc::new(stop);
-    m.kept::<Views>().stop = Some(stop.clone());
+    m.kept::<Views>().following.insert(
+        id.to_string(),
+        Follower {
+            stop: Some(stop.clone()),
+            frame,
+        },
+    );
     let tx = tx.lane(1);
     let id = id.to_string();
     let _ = std::thread::Builder::new()
@@ -202,14 +236,14 @@ pub fn refresh(m: &mut Model, id: &str) {
 
 /// After a reading of the fleet: the list's summaries, read again for
 /// each rush session whose views folder changed since last read, all in
-/// one go off the UI thread. The open session's are its follower's.
+/// one go off the UI thread. The sessions drawn are their followers'.
 pub fn on_fleet(m: &mut Model) {
-    let following = m.kept::<Views>().following.clone();
+    let following: Vec<String> = m.kept::<Views>().following.keys().cloned().collect();
     let known: Vec<(String, Option<SystemTime>)> = m
         .agents
         .iter()
         .map(id_of)
-        .filter(|id| !id.is_empty() && *id != following)
+        .filter(|id| !id.is_empty() && !following.iter().any(|f| f == id))
         .map(|id| {
             let at = m
                 .kept

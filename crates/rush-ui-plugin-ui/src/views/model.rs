@@ -5,5 +5,7 @@
 //! :103-117 (Action, Change, Yours, ItemKey, BlockKey, GroupKey) are the
 //! host's; the UI reads them off its thread (read.rs).
 
-pub use rush_host::viewacts::{Action, Change, Yours, block_key, group_key, item_key};
+pub use rush_host::viewacts::{
+    Action, Change, Yours, block_key, group_key, group_row_key, item_key, item_key_at,
+};
 pub use rush_host::views::{ACCENTS, BLOCK_KINDS, Block, Group, Item, Progress, Row, Stat, View};

@@ -14,8 +14,9 @@ use crate::ModelPlugins;
 use crate::frame::Out;
 use crate::model::Model;
 
+pub use rush_ui_base::arranged::{OTHER_SECTION, place};
+
 pub const PLUGIN_GROUP_PREFIX: &str = "plugin:";
-pub const OTHER_SECTION: &str = "Other";
 
 /// rush's own group-by modes (model.go:58 groupModes).
 pub const GROUP_MODES: [&str; 3] = ["status", "agent", "group"];
@@ -131,6 +132,8 @@ pub fn name_agents(m: &mut Model) {
     }
     m.plugins().renamed = renamed;
     name_peers(&m.agents);
+    // The list's sections are the arrangement's (rebuild's sidebarPlace).
+    m.kept::<rush_ui_base::arranged::Arranged>().0 = sb;
 }
 
 /// The session each codename is, by the list's names, so a message sent
@@ -161,19 +164,6 @@ pub fn name_peers(agents: &[Agent]) {
         }
     }
     rush_convo::set_peers(peer_names(&codes, agents));
-}
-
-/// The section an agent goes in under the arrangement, how high that
-/// section ranks, and the agent's place in it (sidebarPlace).
-pub fn place(sb: &Sidebar, a: &Agent) -> (String, usize, i64) {
-    let sid = &a.job.session_id;
-    if !sid.is_empty()
-        && let Some(p) = sb.agents.as_ref().and_then(|m| m.get(sid))
-        && let Some(i) = sb.sections.iter().position(|s| s.title == p.section)
-    {
-        return (sb.sections[i].title.clone(), i, p.order);
-    }
-    (OTHER_SECTION.to_string(), sb.sections.len(), 0)
 }
 
 #[cfg(test)]

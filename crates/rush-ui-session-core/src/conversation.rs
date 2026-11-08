@@ -317,7 +317,10 @@ pub fn pin_plan(
     let Some(first) = turns.iter().position(your_prompt) else {
         return Vec::new();
     };
-    let off = |i: usize| v.r.turn_row(i) < start;
+    // Where each prompt's own rows start: the first turn's after the rows
+    // above it, so a view scrolled into those doesn't pin a first prompt
+    // it still shows.
+    let off = |i: usize| v.r.turn_top(i) < start;
     let (mut latest, mut current) = (None, None);
     for i in (first..turns.len()).rev() {
         if !your_prompt(&turns[i]) {
@@ -332,12 +335,12 @@ pub fn pin_plan(
     let mut label = "current";
     if current.is_some() && current == latest {
         label = "latest ";
-    } else if latest.is_some_and(|l| v.r.turn_row(l) < end) {
+    } else if latest.is_some_and(|l| v.r.turn_top(l) < end) {
         current = None; // the latest is on screen: that's what it's on
     }
     let before = current.filter(|&i| i != first && off(i));
     let top_first = off(first).then_some(first);
-    let next = (first..turns.len()).find(|&i| your_prompt(&turns[i]) && v.r.turn_row(i) >= end);
+    let next = (first..turns.len()).find(|&i| your_prompt(&turns[i]) && v.r.turn_top(i) >= end);
     let mut pins: Vec<(usize, usize, &'static str)> = Vec::new();
     match (top_first, before) {
         (Some(f), Some(c)) if h >= 10 => {

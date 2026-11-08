@@ -8,7 +8,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
 pub use compact_str::{CompactString, format_compact};
-use unicode_width::UnicodeWidthStr;
+use unicode_segmentation::{GraphemeIndices, UnicodeSegmentation};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// A colour: the terminal's own default, 24-bit RGB, or a palette index.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -256,6 +257,79 @@ pub fn width(s: &str) -> usize {
     UnicodeWidthStr::width(s)
 }
 
+/// Cells one grapheme takes, as the screen draws it (rush-draw's canvas):
+/// a control takes none; "⚠️" and "👍🏽" take two, the whole grapheme
+/// measured, never its chars one by one. Layout that cuts or wraps text
+/// counts with this so that what it measures is what is drawn.
+pub fn grapheme_width(g: &str) -> usize {
+    match g.as_bytes() {
+        [b] if (0x20..0x7f).contains(b) => 1,
+        _ if g.chars().any(char::is_control) => 0,
+        _ => UnicodeWidthStr::width(g),
+    }
+}
+
+/// Whether c is a grapheme of its own wherever it stands: it joins neither
+/// the char before it (marks, joiners) nor the one after (prepended
+/// signs), nor pairs (flags, Hangul, CR LF). These ranges hold none of
+/// those: printable ASCII; Latin-1, Latin Extended and the spacing
+/// modifiers (up to the combining marks at U+0300); general punctuation
+/// but the zero-width and direction marks; super- and subscripts and
+/// currency (up to the combining marks at U+20D0); letterlike symbols
+/// through arrows, maths, technical symbols, box drawing, blocks, shapes,
+/// dingbats and more arrows. Checked against the segmenter in
+/// rush-draw's tests.
+pub fn lone(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x20..=0x7e | 0xa0..=0x2ff | 0x2010..=0x2027 | 0x2030..=0x205e | 0x2070..=0x20cf | 0x2100..=0x2bff
+    )
+}
+
+/// The graphemes of s with where each starts and the cells it takes
+/// ([`grapheme_width`]); text of lone chars is gone through a char at a
+/// time, with no segmenting.
+pub fn graphemes(s: &str) -> Graphemes<'_> {
+    if s.chars().all(lone) {
+        Graphemes::Lone(s, s.char_indices())
+    } else {
+        Graphemes::Segmented(s.grapheme_indices(true))
+    }
+}
+
+/// What [`graphemes`] goes through: (byte offset, grapheme, cells).
+pub enum Graphemes<'a> {
+    Lone(&'a str, std::str::CharIndices<'a>),
+    Segmented(GraphemeIndices<'a>),
+}
+
+impl<'a> Iterator for Graphemes<'a> {
+    type Item = (usize, &'a str, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Graphemes::Lone(s, cs) => {
+                let (i, c) = cs.next()?;
+                let w = UnicodeWidthChar::width(c).unwrap_or(0);
+                Some((i, &s[i..i + c.len_utf8()], w))
+            }
+            Graphemes::Segmented(gs) => {
+                let (i, g) = gs.next()?;
+                Some((i, g, grapheme_width(g)))
+            }
+        }
+    }
+}
+
+/// Cells s takes counted a grapheme at a time, as it's drawn: unlike
+/// [`width`], a control takes none.
+pub fn graphemes_width(s: &str) -> usize {
+    if s.bytes().all(|b| (0x20..0x7f).contains(&b)) {
+        return s.len();
+    }
+    graphemes(s).map(|(_, _, w)| w).sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,6 +397,43 @@ mod tests {
         assert_ne!(Link::to(u), Link::to("file:///tmp/x"));
         assert!(Link::to("").is_none());
         assert_eq!(Style::default(), Style::PLAIN);
+    }
+
+    // A grapheme's cells are the whole grapheme's, as the screen draws
+    // it, never the sum of its chars'.
+    #[test]
+    fn graphemes_take_their_whole_width() {
+        for (s, want) in [
+            ("", 0),
+            ("abc", 3),
+            ("héllo", 5),
+            ("e\u{301}", 1),
+            ("日本", 4),
+            ("⚠", 1),
+            ("⚠\u{fe0f}", 2),
+            ("👍", 2),
+            ("👍🏽", 2),
+            ("👨\u{200d}👩\u{200d}👧", 2),
+            ("🇬🇧", 2),
+            ("a\tb", 2),
+            ("→ ok", 4),
+            ("ok ⚠\u{fe0f} 👍🏽!", 9),
+        ] {
+            assert_eq!(graphemes_width(s), want, "{s:?}");
+            let gs: Vec<(usize, &str, usize)> = graphemes(s).collect();
+            assert_eq!(gs.iter().map(|g| g.2).sum::<usize>(), want, "{s:?}");
+            let back: String = gs.iter().map(|g| g.1).collect();
+            assert_eq!(back, s, "{s:?}: the graphemes are s");
+        }
+        for (g, want) in [
+            ("a", 1),
+            ("\t", 0),
+            ("\r\n", 0),
+            ("⚠\u{fe0f}", 2),
+            ("👍🏽", 2),
+        ] {
+            assert_eq!(grapheme_width(g), want, "{g:?}");
+        }
     }
 
     // The ASCII shortcut agrees with unicode-width.

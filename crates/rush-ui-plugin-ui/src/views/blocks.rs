@@ -64,8 +64,9 @@ pub fn view_block(v: &View, bi: usize, w: usize, st: &ViewsState, accent: Color)
         "list" => {
             let rows: Vec<Row> = b.items.iter().map(item_row).collect();
             let under = meta_under(&rows, w);
-            for (it, r) in b.items.iter().zip(&rows) {
-                out.extend(cx.row_lines(open_row(&cx.prefix, it), w, view_row(r, w, under)));
+            for (i, r) in rows.iter().enumerate() {
+                let o = open_row(&cx.prefix, &b.items, i);
+                out.extend(cx.row_lines(o, w, view_row(r, w, under)));
             }
         }
         "bars" => {
@@ -73,7 +74,7 @@ pub fn view_block(v: &View, bi: usize, w: usize, st: &ViewsState, accent: Color)
             let bars = view_bars(&rows, w, accent);
             for (i, r) in rows.iter().enumerate() {
                 if r.value.is_some() {
-                    out.extend(cx.row_lines(open_row(&cx.prefix, &b.items[i]), w, vec![bars(r)]));
+                    out.extend(cx.row_lines(open_row(&cx.prefix, &b.items, i), w, vec![bars(r)]));
                 }
             }
         }

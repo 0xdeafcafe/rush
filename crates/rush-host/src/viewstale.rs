@@ -123,7 +123,7 @@ pub fn finished(v: &View) -> bool {
     let mut n = Marks::default();
     n.tone(&v.tone);
     if let Some(p) = &v.progress {
-        n.full(p.done >= p.total);
+        n.full(full(p));
     }
     for g in &v.groups {
         for r in &g.rows {
@@ -137,6 +137,12 @@ pub fn finished(v: &View) -> bool {
         n.block(b);
     }
     n.done > 0 && n.open == 0
+}
+
+/// Whether a bar is full: 0 of 0 isn't, it says nothing has been
+/// counted yet (an empty bar), not that all of it is done.
+fn full(p: &crate::views::Progress) -> bool {
+    p.total > 0.0 && p.done >= p.total
 }
 
 #[derive(Default)]
@@ -164,7 +170,7 @@ impl Marks {
 
     fn block(&mut self, b: &Block) {
         if let Some(p) = &b.progress {
-            self.full(p.done >= p.total);
+            self.full(full(p));
         }
         match b.kind.as_str() {
             "checklist" => {
@@ -556,12 +562,15 @@ mod tests {
             done,
             ..Item::default()
         };
-        let mut part = block("list", vec![item("good", None)]);
-        part.progress = Some(Progress {
-            done: 3.0,
-            total: 5.0,
-            ..Progress::default()
-        });
+        let bar = |done: f64, total: f64| {
+            let mut v = block("list", vec![item("good", None)]);
+            v.progress = Some(Progress {
+                done,
+                total,
+                ..Progress::default()
+            });
+            v
+        };
         for (what, v, want) in [
             (
                 "list all good",
@@ -589,7 +598,9 @@ mod tests {
                 false,
             ),
             ("no states", block("table", vec![item("", None)]), false),
-            ("a bar not full", part, false),
+            ("a bar not full", bar(3.0, 5.0), false),
+            ("a bar full", bar(5.0, 5.0), true),
+            ("a bar of 0 of 0", bar(0.0, 0.0), false),
         ] {
             assert_eq!(finished(&v), want, "{what}");
         }
