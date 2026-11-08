@@ -156,6 +156,9 @@ pub fn register(x: &mut Ext) {
     x.paste.push(subbox::paste);
     x.paste.push(keys::paste);
     // The views beside the conversation have the pointer over them first.
+    // A click anywhere on it first drops the column's keys and the text
+    // dragged over, then goes on.
+    x.mouse.push(keys::click_drops);
     x.mouse.push(rush_ui_plugin_ui::views::beside::mouse);
     x.mouse.push(subview::mouse);
     x.mouse.push(keys::mouse);
@@ -165,6 +168,7 @@ pub fn register(x: &mut Ext) {
     history::register(x);
     x.overlays.push(dock::locate);
     x.overlays.push(conversation::over);
+    x.on_open.push(keys::on_open);
     x.on_fleet.push(live::on_fleet);
     x.on_fleet.push(start::pick_started);
     menubar_jump::register(x);

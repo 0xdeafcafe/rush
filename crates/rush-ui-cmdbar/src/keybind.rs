@@ -31,7 +31,14 @@ pub fn key_contexts(m: &Model) -> Vec<Context> {
     if on_pages(m) {
         return vec![Context::Pages];
     }
-    if keyhelp::is_open(m) || bar::is_open(m) || m.confirm.is_some() || m.sheet.is_some() {
+    // The memory file being edited has every key (keybind.go:68-75,
+    // editingDoc).
+    if keyhelp::is_open(m)
+        || bar::is_open(m)
+        || m.confirm.is_some()
+        || m.sheet.is_some()
+        || m.ext.calls.editing_doc()(m)
+    {
         return Vec::new();
     }
     if m.on_place() {
@@ -51,7 +58,7 @@ pub fn key_contexts(m: &Model) -> Vec<Context> {
 /// Whether a place's pages have the keys: another place or the Wall, with
 /// nothing over them and nothing being typed (onPages).
 pub fn on_pages(m: &Model) -> bool {
-    if bar::is_open(m) || m.confirm.is_some() || m.sheet.is_some() {
+    if bar::is_open(m) || m.confirm.is_some() || m.sheet.is_some() || m.ext.calls.editing_doc()(m) {
         return false;
     }
     m.on_place() && !m.place_asking()

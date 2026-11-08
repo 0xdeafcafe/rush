@@ -31,10 +31,24 @@ pub fn jump_to(m: &mut Model, key: String) {
     let Some(i) = m.agents.iter().position(|a| a.key == key) else {
         return;
     };
+    // On Agents' list, nothing over it, as the bar's goAgent goes
+    // (cmdbar/bar.rs go_agent): not behind Settings, Projects, the Wall
+    // or a sheet.
+    if m.place != crate::frame::places::PlaceId::Agents {
+        m.set_place(crate::frame::places::PlaceId::Agents);
+    } else {
+        m.sheet = None;
+        m.confirm = None;
+    }
+    m.agents_page = 0;
     if m.session.as_ref().is_some_and(|s| s.key == key) {
         return;
     }
-    m.session = None;
+    // The one it replaces is kept for its tile when that agent is pinned
+    // (gridPark).
+    if let Some(old) = m.session.take() {
+        m.ext.calls.grid_park()(m, old);
+    }
     m.select(key);
     m.open(i);
     super::live::sync(m); // its host's link, now it's showing

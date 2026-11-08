@@ -457,6 +457,16 @@ fn background_text(a: &Agent) -> String {
     s
 }
 
+/// Where the agent being typed to sat at the last rebuild: its section,
+/// the section's rank and its place in it (Go's m.hold, model.go:216).
+#[derive(Clone, Debug, Default)]
+pub struct RowHold {
+    key: String,
+    section: String,
+    rank: u8,
+    at: usize,
+}
+
 impl Model {
     /// Groups the agents into sections, what needs you first; what's put
     /// away, or finished more than a day ago, goes to Earlier
@@ -469,6 +479,18 @@ impl Model {
         for f in self.ext.on_rebuild.clone() {
             f(self);
         }
+        // The agent picked while a draft to it is in its Session's box: its
+        // row stays where it was till the draft's sent or cleared
+        // (typingIn, m.hold, model.go:2129, :2232).
+        let typing = match self.ext.calls.typing_in {
+            Some(f) => f(self),
+            None => String::new(),
+        };
+        let mut hold = std::mem::take(&mut self.row_hold);
+        if hold.key != typing {
+            hold.key.clear(); // a new draft, or none: nothing held yet
+        }
+        let mut held = RowHold::default();
         let rooms = match self.kept.peek::<RoomRows>() {
             Some(rr) => grouped(&rr.list, &self.agents, &rr.hidden),
             None => grouped(&[], &self.agents, &Default::default()),
@@ -529,6 +551,12 @@ impl Model {
                 continue;
             }
             regroup = regroup.min(group_turn(a, now, active_for, just_left_for));
+            if !hold.key.is_empty() && a.key == hold.key {
+                // A row doesn't leave from under a draft (model.go:2264).
+                let at = a.job.updated_at;
+                add(&mut groups, &hold.section, hold.rank, it, at);
+                continue;
+            }
             let fresh = !stale(a, now);
             let at = a.job.updated_at;
             let fk = folder_key(a, root(&it));
@@ -657,6 +685,33 @@ impl Model {
             } else {
                 g.items.sort_by(within);
             }
+            // The row being typed to goes back to its place, within its
+            // project's rows when they're split (model.go:2380-2393).
+            if let Some(i) = g
+                .items
+                .iter()
+                .position(|it| !hold.key.is_empty() && of(it).key == hold.key)
+            {
+                let it = g.items.remove(i);
+                let (mut lo, mut hi) = (0, g.items.len());
+                if split && !by_time(&g.name) {
+                    let fk = folder_key(of(&it), root(&it));
+                    let tree = tree_of(of(&it));
+                    let peer =
+                        |b: &Item| folder_key(of(b), root(b)) == fk && tree_of(of(b)) == tree;
+                    match g.items.iter().position(&peer) {
+                        None => (lo, hi) = (i, i),
+                        Some(p) => {
+                            lo = p;
+                            hi = p;
+                            while hi < g.items.len() && peer(&g.items[hi]) {
+                                hi += 1;
+                            }
+                        }
+                    }
+                }
+                g.items.insert(hold.at.max(lo).min(hi), it);
+            }
         }
         let mut lines = Vec::new();
         let mut order = Vec::new();
@@ -710,8 +765,16 @@ impl Model {
             let split = split && !by_time(&g.name);
             let mut project: Option<&str> = None;
             let mut tree: &str = "";
-            for it in &g.items {
+            for (n, it) in g.items.iter().enumerate() {
                 let a = of(it);
+                if !typing.is_empty() && a.key == typing {
+                    held = RowHold {
+                        key: a.key.clone(),
+                        section: g.name.clone(),
+                        rank: g.rank,
+                        at: n,
+                    };
+                }
                 if let Item::Agent(i) = it {
                     order.push(*i);
                 }
@@ -776,6 +839,7 @@ impl Model {
         self.regroup = (regroup != Ms::MAX).then(|| {
             std::time::Instant::now() + std::time::Duration::from_millis((regroup - now) as u64 + 5)
         });
+        self.row_hold = held;
         self.lines = lines;
         self.memo.forget_widest_name();
         self.order = order;

@@ -69,6 +69,9 @@ fn calls() -> Calls {
     Calls {
         bar_open: Some(cmdbar::bar::is_open),
         key_help_open: Some(cmdbar::keyhelp::is_open),
+        overlay_mouse: Some(cmdbar::overlay_mouse),
+        typing_in: Some(session_core::keys::typing_in),
+        editing_doc: Some(session_core::memedit::editing_doc),
         is_hash_cmd: Some(cmdbar::fleetslash::is_hash_cmd),
         legacy_command: Some(cmdbar::fleetslash::legacy_command),
         alias_of: Some(cmdbar::fleetslash::alias_of),

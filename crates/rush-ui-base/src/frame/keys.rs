@@ -398,6 +398,17 @@ impl Model {
     /// The mouse, the list's edge having passed (mouse_event).
     fn mouse_routed(&mut self, e: &Mouse) -> Out {
         let (x, y) = (e.x as usize, e.y as usize);
+        // The bar or the keys guide over the screen has the mouse, as it
+        // has the keys, before the grid, the split or a Session under it
+        // sees it, and where it is on screen (overlayClick, overlayWheel,
+        // model.go:1620, :1736). The pointer is still noted where it is.
+        if self.ext.calls.bar_open()(self) || self.ext.calls.key_help_open()(self) {
+            self.ext.calls.pointer_at()(self, x, e.kind == MouseKind::Moved);
+            return match self.ext.calls.overlay_mouse()(self, e) {
+                Out::Pass => Out::Idle,
+                o => o,
+            };
+        }
         // The grid's tiles and edge, where they are on screen, before the
         // Session beside the list takes the click at its own columns
         // (model.go:1496, :1589, :1640 gridDrag, gridClick).
@@ -440,6 +451,17 @@ impl Model {
                     ..*e
                 };
                 return split::in_pane(self, pw, |m| m.mouse_at(&at));
+            }
+            let wheel = matches!(e.kind, MouseKind::ScrollUp | MouseKind::ScrollDown);
+            if self.session.is_some() && lw > 0 && pw > 0 && x < lw && wheel {
+                // The wheel scrolls what's under the pointer: over the
+                // list, the list, though the Session beside it has the
+                // keys (model.go:1736-1795).
+                return if self.wheel(e.kind == MouseKind::ScrollUp) {
+                    Out::Draw
+                } else {
+                    Out::Idle
+                };
             }
         }
         self.mouse_at(e)

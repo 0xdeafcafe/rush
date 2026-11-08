@@ -694,3 +694,92 @@ fn alt_arrows_in_the_list_resize_it() {
     press(&mut m, "alt+left");
     assert_eq!(split::widths(&m).0, first - 2);
 }
+
+/// While a draft to the picked agent is in its Session's box beside the
+/// list, its row stays in its section, however its agent changes; once
+/// the box is empty it goes where it belongs (typingIn, m.hold,
+/// model.go:2129, :2232-2265).
+#[test]
+fn the_row_being_typed_to_stays_put() {
+    use super::tests::{KEY, typed};
+    let mut m = opened(200, 50, "split");
+    let _ = rows(&mut m);
+    let was = m.group_of[KEY].clone();
+    typed(&mut m, "hello");
+    m.rebuild(); // the row noted while there's a draft
+    m.agents[0].done = true; // put away: Earlier, but for the draft
+    m.rebuild();
+    assert_eq!(m.group_of[KEY], was, "the row stays under its draft");
+    super::conn(&mut m, KEY).input.clear();
+    m.rebuild();
+    assert_ne!(m.group_of[KEY], was, "the draft gone, the row moves");
+}
+
+/// A click on a notification, or the menu bar, opens its agent on Agents'
+/// list, not behind Settings or the Wall (goAgent).
+#[test]
+fn a_jump_from_the_menu_bar_comes_to_agents() {
+    use super::tests::KEY;
+    use crate::frame::places::PlaceId;
+    for (place, page) in [
+        (PlaceId::Settings, 0),
+        (PlaceId::Projects, 0),
+        (PlaceId::Agents, 1),
+    ] {
+        let mut m = opened(200, 50, "split");
+        m.pane = m.session.take(); // beside the list, the list with the keys
+        m.set_place(place);
+        m.agents_page = page;
+        super::menubar_jump::jump_to(&mut m, KEY.into());
+        assert_eq!(m.place, PlaceId::Agents, "from {place:?}");
+        assert_eq!(m.agents_page, 0, "from page {page}");
+        assert!(m.session.as_ref().is_some_and(|v| v.key == KEY));
+    }
+}
+
+/// ctrl+k over the split has the mouse wherever it is on screen: moving
+/// over the list doesn't give it the keys, a click on the bar where it
+/// sits over the Session is the bar's, not missed at the pane's columns,
+/// and the wheel moves its cursor, not the conversation (overlayClick,
+/// overlayWheel, model.go:1620, :1736).
+#[test]
+fn the_bar_over_the_split_has_the_mouse() {
+    use crate::frame::Mouse;
+    use crate::screens::cmdbar::bar;
+    use rush_draw::{Button, KeyMods, MouseKind};
+    let ev = |m: &mut Model, kind, x: usize, y: usize| {
+        m.mouse_event(&Mouse {
+            kind,
+            x: x as u16,
+            y: y as u16,
+            mods: KeyMods::NONE,
+        })
+    };
+    let mut m = opened(200, 50, "split");
+    let _ = rows(&mut m);
+    let (lw, _) = split::widths(&m);
+    ev(&mut m, MouseKind::Moved, lw + 40, 20);
+    press(&mut m, "ctrl+k");
+    assert!(bar::is_open(&m), "ctrl+k opens the bar");
+    let _ = rows(&mut m);
+    ev(&mut m, MouseKind::Moved, 5, 20);
+    assert!(
+        m.session.is_some(),
+        "the pointer over the list keeps the keys"
+    );
+    let o = m.over;
+    assert!(o.on && o.x1 > lw + 2, "the bar drawn over the Session");
+    let pos = m.session.as_ref().map(|s| s.pos);
+    ev(&mut m, MouseKind::ScrollUp, o.x1 - 2, o.y0 + 1);
+    assert_eq!(
+        m.session.as_ref().map(|s| s.pos),
+        pos,
+        "the wheel is the bar's"
+    );
+    ev(&mut m, MouseKind::Down(Button::Left), o.x1 - 2, o.y0);
+    assert!(bar::is_open(&m), "a click on its edge is the bar's");
+    let bottom = m.h - 1;
+    ev(&mut m, MouseKind::Down(Button::Left), 0, bottom);
+    assert!(!bar::is_open(&m), "a click outside puts it away");
+    assert!(m.session.is_some(), "and gives no keys");
+}

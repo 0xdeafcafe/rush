@@ -235,6 +235,21 @@ pub fn editing(m: &mut Model, key: &str) -> bool {
         .is_some_and(|e| e.editing)
 }
 
+/// Whether the open Session's memory file has the keys, its Memory view
+/// showing (editingDoc, memory.go:460): every key is the editor's, none
+/// the keymap's.
+pub fn editing_doc(m: &Model) -> bool {
+    let Some(key) = open_key(m) else {
+        return false;
+    };
+    let editing = m
+        .kept
+        .peek::<MemEdits>()
+        .and_then(|e| e.by_key.get(&key))
+        .is_some_and(|e| e.editing);
+    editing && super::views::view_name(m, &key) == "memory"
+}
+
 /// The open Session's memory file, when it has unsaved edits (ctrl+q asks
 /// first: keys.go:60 c.memEd.dirty()).
 pub fn dirty_path(m: &mut Model) -> Option<String> {

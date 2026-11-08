@@ -2421,6 +2421,22 @@ is made. Everything below is in `rush_ui::frame`.
   Session's box is found on the finished frame past the list and its
   divider, the picked agent's too while the list has the keys
   (`dock::locate`), so one click both moves the keys and the cursor.
+  ctrl+k and the keys guide have the mouse before the grid, the split
+  and any Session under them, at screen columns (`Calls::overlay_mouse`,
+  Go's overlayClick and overlayWheel); while they or a menu are open the
+  pointer moves no keys. The wheel scrolls what's under the pointer: over
+  the list, the list, though the Session beside it has the keys. A click
+  on the Session first takes the keys from the column beside its
+  conversation and drops an old selection (`keys::click_drops`, Go's
+  `txt.on = false`); another session opened lets every column's keys go
+  (`Ext::on_open`). The row of the agent a draft in its Session's box is
+  for stays in its section and place while the draft's there
+  (`Calls::typing_in`, `list::RowHold`; Go's typingIn and m.hold). A
+  notification's or the menu bar's jump goes to Agents' list first, the
+  Wall, a sheet or another place put away (`menubar_jump::jump_to`).
+  Past Go, ctrl+enter for a session rush can't send to at once (open in
+  a terminal, past, not connected) puts the text back in the box and
+  says why (`queue::cant_send_now`); Go's sendQueueNow said nothing.
 - **Pictures.** `screens/session_cards/pictures.rs` draws an image fitted
   to a box of cells in quarter blocks (Go's convo/picture.go and thumb.go
   where Kitty isn't there), each image and size made once on a thread of

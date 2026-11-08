@@ -490,12 +490,11 @@ pub fn send_now(m: &mut Model, key: &str, extra: &str) {
         return;
     }
     if !conn(m, key).hosted() {
-        let Some(a) = agent(m, key).cloned() else {
+        let a = agent(m, key).cloned();
+        let Some(a) = a.filter(|a| can_queue(m, a)) else {
+            cant_send_now(m, key, extra);
             return;
         };
-        if !can_queue(m, &a) {
-            return;
-        }
         let q = core(m).local_q.entry(key.to_string()).or_default();
         q.items = items;
         q.fails = 0;
@@ -534,6 +533,35 @@ pub fn send_now(m: &mut Model, key: &str, extra: &str) {
     });
     ops.push(Op::SendQueued { i: 0, was: text });
     run_all(m, key, ops);
+}
+
+/// send_now for a session rush can't send to straight away: what was in
+/// the box goes back there, and it says why. Past Go, whose sendQueueNow
+/// returned with nothing said, the box already emptied.
+fn cant_send_now(m: &mut Model, key: &str, extra: &str) {
+    if !extra.is_empty() {
+        let c = conn(m, key);
+        if c.input.is_empty() {
+            c.input.set(extra);
+        }
+    }
+    let why = match agent(m, key) {
+        None => "its agent has gone".to_string(),
+        Some(a) if a.interactive => format!(
+            "{} is {}; rush can't send to it",
+            a.display_name,
+            super::where_(a)
+        ),
+        Some(a) if a.past => format!(
+            "{} is a past session: enter brings it back with this",
+            a.display_name
+        ),
+        Some(a) => format!(
+            "{} isn't connected: enter wakes it with this",
+            a.display_name
+        ),
+    };
+    m.flash_err(&format!("can't send now: {why}"));
 }
 
 /// Asks the host of session key to do op, off the UI thread; a failure

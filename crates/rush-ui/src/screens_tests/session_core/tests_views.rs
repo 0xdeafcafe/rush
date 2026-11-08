@@ -505,6 +505,39 @@ fn the_wheel() {
     );
 }
 
+/// Beside the list, with the Session's keys, the wheel scrolls what's
+/// under the pointer: over the list it leaves the conversation where it
+/// is; over the Session it scrolls it (model.go:1736-1795).
+#[test]
+fn the_wheel_over_the_list_beside() {
+    use crate::screens::list_extras::split;
+    let fake = Fake::new();
+    let mut m = open(agent("steer", State::Idle), &fake, 200, 40);
+    m.full = false;
+    m.cfg.set_view("split");
+    m.roots = vec![String::new()];
+    m.rebuild();
+    long(&mut m, 30);
+    screen(&mut m);
+    let (lw, pw) = split::widths(&m);
+    assert!(lw > 0 && pw > 0, "{lw} {pw}");
+    let y = m.session.as_ref().unwrap().top + 2;
+    let start = m.session.as_ref().unwrap().start;
+    click(&mut m, MouseKind::ScrollUp, lw / 2, y);
+    screen(&mut m);
+    assert!(m.session.is_some(), "the Session stays beside the list");
+    assert_eq!(
+        m.session.as_ref().unwrap().start,
+        start,
+        "over the list the conversation stays put"
+    );
+    assert_eq!(
+        click(&mut m, MouseKind::ScrollUp, lw + 10, y),
+        Out::Draw,
+        "over the Session it scrolls"
+    );
+}
+
 /// The map shows from 96 wide, the conversation narrower by its width,
 /// lit where the view is; a click on it scrolls there (minimapEnabled,
 /// conversationWidth, pressMinimap).

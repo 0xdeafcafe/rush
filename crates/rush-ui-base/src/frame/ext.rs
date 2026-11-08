@@ -186,6 +186,9 @@ pub struct Ext {
     /// The terminal's window back in focus (a click in the menu bar
     /// brings it forward on an agent).
     pub on_focus: Vec<FleetHook>,
+    /// Another agent's Session opened, or one opened with none before
+    /// (Model::open): what's kept for the one it replaces lets go.
+    pub on_open: Vec<FleetHook>,
     /// Called at the start of each rebuild of the list, before its rows are
     /// made: the sidebar's names (nameAgents, model.go:2231).
     pub on_rebuild: Vec<FleetHook>,
@@ -351,6 +354,18 @@ calls! {
     bar_open("cmdbar"): fn(&Model) -> bool,
     /// The key guide is open (cmdbar/keyhelp.rs is_open).
     key_help_open("cmdbar"): fn(&Model) -> bool,
+    /// The open Session's memory file has the keys, being edited
+    /// (session_core memedit::editing_doc; editingDoc, memory.go:460):
+    /// the keymap gives it every key.
+    editing_doc("session_core"): fn(&Model) -> bool,
+    /// The picked agent's key while a draft to it is in its Session's
+    /// box, else "" (session_core keys::typing_in; typingIn,
+    /// model.go:2129): the list keeps its row in place meanwhile.
+    typing_in("session_core"): fn(&mut Model) -> String,
+    /// The mouse while the bar or the key guide is open, in screen
+    /// coordinates: theirs, wherever it is (cmdbar's mouse; Go's
+    /// overlayClick, overlayWheel, model.go:1620, :1736).
+    overlay_mouse("cmdbar"): fn(&mut Model, &Mouse) -> Out,
     /// `#` and a command's name, not a heading or an issue
     /// (cmdbar/fleetslash.rs is_hash_cmd).
     is_hash_cmd("cmdbar"): fn(&str) -> bool,

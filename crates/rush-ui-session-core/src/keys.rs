@@ -1263,6 +1263,47 @@ pub fn inline_typed(input: &mut crate::frame::Editor, imgs: &mut crate::imageref
     }
 }
 
+/// A click on the Session, before any of its parts has it, takes the keys
+/// off the column beside the conversation and drops the text dragged over
+/// before (model.go:1664-1668: txt.on = false); the press itself goes on
+/// to the box, the conversation or wherever it landed.
+pub fn click_drops(m: &mut Model, e: &Mouse) -> Out {
+    if !showing(m) || e.kind != MouseKind::Down(Button::Left) {
+        return Out::Pass;
+    }
+    let Some(key) = open_key(m) else {
+        return Out::Pass;
+    };
+    let c = conn(m, &key);
+    c.side_pick = None;
+    if !c.txt.drag {
+        c.txt.on = false;
+    }
+    Out::Pass
+}
+
+/// The picked agent's key while a draft to it is in its Session's box,
+/// opened or beside the list; else "" (typingIn, model.go:2129). The list
+/// keeps that row where it was meanwhile (Model::rebuild).
+pub fn typing_in(m: &mut Model) -> String {
+    let Some(key) = crate::sess::showing(m).filter(|k| *k == m.sel) else {
+        return String::new();
+    };
+    if core(m).conns.get(&key).is_some_and(|c| !c.input.is_empty()) {
+        key
+    } else {
+        String::new()
+    }
+}
+
+/// Another agent's Session opened: no column beside any conversation has
+/// the keys still, so coming back to one gives them its box again.
+pub fn on_open(m: &mut Model) {
+    for c in super::core(m).conns.values_mut() {
+        c.side_pick = None;
+    }
+}
+
 /// A click in the box puts the cursor there and gives it the keys, or
 /// opens the paste chip under it; a click on a queued message picks it
 /// (clickBox, queueHover). The pointer over a chip lights it (hoverChip).

@@ -177,3 +177,27 @@ fn right_with_nowhere_to_go_does_nothing() {
     assert_eq!(side_pick(&mut m), None);
     assert_eq!(input(&mut m), "hi");
 }
+
+/// A click in the box takes the keys back from the column, and drops the
+/// text dragged over before (model.go:1664-1668).
+#[test]
+fn a_click_in_the_box_takes_the_keys_from_the_column() {
+    use crate::frame::Mouse;
+    use rush_draw::{Button, KeyMods, MouseKind};
+    let (mut m, _) = with_column("arrows-click");
+    press(&mut m, "right");
+    assert!(side_pick(&mut m).is_some(), "in the column");
+    conn(&mut m, KEY).txt.on = true;
+    screen(&mut m);
+    let top = conn(&mut m, KEY).box_y.expect("the box drawn");
+    m.mouse_event(&Mouse {
+        kind: MouseKind::Down(Button::Left),
+        x: 6,
+        y: (top + 1) as u16,
+        mods: KeyMods::NONE,
+    });
+    assert_eq!(side_pick(&mut m), None, "the box has the keys");
+    assert!(!conn(&mut m, KEY).txt.on, "the old selection dropped");
+    typed(&mut m, "x");
+    assert_eq!(input(&mut m), "x", "typing goes to the box");
+}

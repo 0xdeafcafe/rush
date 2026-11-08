@@ -393,3 +393,18 @@ fn ctrl_q_asks_about_unsaved_memory() {
     assert_eq!(press(&mut m, "ctrl+q"), Out::Draw);
     assert_eq!(press(&mut m, "y"), Out::Quit);
 }
+
+/// While a memory file is edited every key is the editor's: shift+tab
+/// doesn't open the session's setup (keyContexts' editingDoc,
+/// keybind.go:68-75).
+#[test]
+fn the_memory_editor_keeps_shift_tab() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (mut m, _, _) = model(tmp.path());
+    super::remember::remember_command(&mut m, "I like tabs");
+    press(&mut m, "e");
+    assert!(crate::screens::session_core::memedit::editing(&mut m, "k"));
+    press(&mut m, "shift+tab");
+    assert!(m.sheet.is_none(), "no setup sheet over the editor");
+    assert!(crate::screens::session_core::memedit::editing(&mut m, "k"));
+}

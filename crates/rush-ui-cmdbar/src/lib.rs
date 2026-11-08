@@ -60,7 +60,6 @@ pub fn register(x: &mut Ext) {
     x.list_dock.insert(0, promptpick::dock);
     x.list_foot.insert(0, promptpick::foot);
     x.list_keys.insert(0, promptpick::key);
-    x.mouse.push(mouse);
     x.overlays.push(overlay);
     x.session_dock.push(jump_dock);
     x.on_fleet.push(index);
@@ -159,8 +158,9 @@ fn overlay(m: &mut Model, out: &mut Vec<Line>) {
 
 /// The mouse over the guide or the bar: a click on a row picks it, the
 /// wheel moves the cursor, a click outside puts it away (barMsg's mouse,
-/// overlayclick.go:42-44).
-fn mouse(m: &mut Model, e: &Mouse) -> Out {
+/// overlayclick.go:42-44). The frame hands it the mouse first, at screen
+/// coordinates, while either is open (Calls overlay_mouse).
+pub fn overlay_mouse(m: &mut Model, e: &Mouse) -> Out {
     let help = keyhelp::is_open(m);
     if !help && !bar::is_open(m) {
         return Out::Pass;

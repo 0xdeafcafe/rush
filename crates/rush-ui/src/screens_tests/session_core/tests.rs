@@ -1059,6 +1059,31 @@ fn interactive_sessions_cant_take_messages() {
     assert!(replies(&fake).is_empty());
 }
 
+/// ctrl+enter with messages waiting, for a session open in a terminal:
+/// what was typed goes back in the box and it says why, rather than
+/// going nowhere.
+#[test]
+fn send_now_to_a_terminal_session_keeps_the_text() {
+    let fake = Fake::new();
+    let mut a = agent("plain", State::Idle);
+    a.interactive = true;
+    let mut m = open(a, &fake, 120, 40);
+    core(&mut m)
+        .local_q
+        .entry(KEY.to_string())
+        .or_default()
+        .items
+        .push("waiting".into());
+    typed(&mut m, "hi");
+    press(&mut m, "ctrl+enter");
+    assert_eq!(input(&mut m), "hi", "back in the box");
+    assert_eq!(
+        flash(&m),
+        "can't send now: tidy the parser is open in a terminal; rush can't send to it"
+    );
+    assert!(replies(&fake).is_empty());
+}
+
 /// Idle and not run by rush: it's a reply through its agent's daemon; one
 /// the daemon let go moves to rush mode with it.
 #[test]

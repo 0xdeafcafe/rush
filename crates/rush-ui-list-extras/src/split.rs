@@ -130,9 +130,17 @@ pub fn pointer_back(m: &mut Model) {
 
 /// Gives the keys to the side at column x, as a click there does: the
 /// Session beside the list, or the list. Anywhere else leaves them where
-/// they are (focusAt, model.go:1928). Whether the keys moved.
+/// they are (focusAt, model.go:1928). A box over the screen (ctrl+k, the
+/// keys guide, a menu) keeps them, as it keeps the mouse (edge_mouse).
+/// Whether the keys moved.
 pub fn focus_at(m: &mut Model, x: usize) -> bool {
-    if m.on_place() || m.sheet.is_some() || m.confirm.is_some() {
+    if m.on_place()
+        || m.sheet.is_some()
+        || m.confirm.is_some()
+        || m.over.on
+        || m.ext.calls.key_help_open()(m)
+        || m.ext.calls.bar_open()(m)
+    {
         return false;
     }
     let (lw, pw) = widths(m);

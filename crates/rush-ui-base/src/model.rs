@@ -150,6 +150,9 @@ pub struct Model {
     pub pending_copy: Option<String>,
     /// Frames for background work, held a quarter second apart.
     hold: Hold,
+    /// Where the agent being typed to sat at the last rebuild: it stays
+    /// there while the draft is there (Go's m.hold, model.go:216).
+    pub(crate) row_hold: crate::list::RowHold,
     /// What a frame's parts each ask the same, asked once a frame.
     pub memo: std::rc::Rc<crate::frame::framememo::FrameMemo>,
     /// A wake-up a screen asked for (Model::wake_at).
@@ -250,6 +253,7 @@ impl Model {
             edge: EdgePush::default(),
             pending_copy: None,
             hold: Hold::default(),
+            row_hold: Default::default(),
             memo: Default::default(),
             wake: None,
             turn: None,
@@ -414,7 +418,14 @@ impl Model {
     /// agent's, is kept for its tile when that agent is pinned (gridPark).
     fn set_session(&mut self, v: SessionView) {
         let key = v.key.clone();
-        if let Some(old) = self.session.replace(v).filter(|o| o.key != key) {
+        let old = self.session.replace(v);
+        if old.as_ref().is_none_or(|o| o.key != key) {
+            for i in 0..self.ext.on_open.len() {
+                let f = self.ext.on_open[i];
+                f(self);
+            }
+        }
+        if let Some(old) = old.filter(|o| o.key != key) {
             self.ext.calls.grid_park()(self, old);
         }
         self.follow_tail();
