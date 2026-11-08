@@ -117,6 +117,38 @@ fn decisions() -> Vec<ApprovalOption> {
     .collect()
 }
 
+/// A command's answers, with the rule Codex offers to keep (commands
+/// starting so, or a website) as the first way to say always: rush's
+/// "always" is the first AllowAlways, and a rule Codex keeps outlives
+/// the session. Rust-only.
+fn command_decisions(amend: &[String], net: &[Value]) -> Vec<ApprovalOption> {
+    let mut d = decisions();
+    let mut always = Vec::new();
+    if !amend.is_empty() {
+        always.push(ApprovalOption {
+            id: AMEND.into(),
+            label: format!("Yes, and always allow `{}`", amend.join(" ")),
+            kind: OptionKind::AllowAlways,
+        });
+    }
+    for (i, n) in net.iter().enumerate() {
+        if st(n, "action") == "allow" && !st(n, "host").is_empty() {
+            always.push(ApprovalOption {
+                id: format!("{NET}{i}"),
+                label: format!("Yes, and always allow {}", st(n, "host")),
+                kind: OptionKind::AllowAlways,
+            });
+        }
+    }
+    d.splice(1..1, always);
+    d
+}
+
+/// The option that keeps Codex's proposed rule for commands.
+const AMEND: &str = "acceptWithExecpolicyAmendment";
+/// The options that keep a proposed network rule, by its index.
+const NET: &str = "applyNetworkPolicyAmendment.";
+
 /// How a request for more permissions can be answered.
 fn grants() -> Vec<ApprovalOption> {
     [
@@ -145,6 +177,14 @@ struct Pending {
     perms: serde_json::Map<String, Value>,
     /// A question's text → its id.
     qs: HashMap<String, String>,
+    /// The rule for commands Codex offers to keep.
+    amend: Vec<String>,
+    /// The network rules it offers to keep.
+    net: Vec<Value>,
+    /// The thread that asks, and what the ask is (grants::key), to keep a
+    /// yes for the session past a restart.
+    thread: String,
+    key: String,
 }
 
 /// A spawned thread: the call that spawned it, its task, and the turn it's
@@ -201,6 +241,8 @@ struct State {
     kids: BTreeMap<String, Kid>,
     /// Commands not yet completed, by item id.
     shells: BTreeMap<String, Shell>,
+    /// The yeses for a session rush keeps past a restart.
+    granted: crate::grants::Granted,
 }
 
 /// Where a connection is in its life, as its sink hears it.
@@ -307,11 +349,19 @@ impl Inner {
         let reason = st(&p, "reason");
         let mut state = self.st();
         let known = state.calls.get(&item).cloned();
+        let thread = match st(&p, "threadId") {
+            t if t.is_empty() => state.thread.clone(),
+            t => t,
+        };
         let mut a = Pending {
             id: raw_id,
             method: m.method.clone(),
             perms: serde_json::Map::new(),
             qs: HashMap::new(),
+            amend: Vec::new(),
+            net: Vec::new(),
+            thread,
+            key: String::new(),
         };
         let ev = match m.method.as_str() {
             REQ_COMMAND => {
@@ -324,8 +374,15 @@ impl Inner {
                 let cmd = s(&p, "command");
                 if !cmd.is_empty() {
                     (call.input.command, call.input.cwd) = (script(cmd), st_of(&p, "cwd"));
+                    a.key = crate::grants::key(REQ_COMMAND, &[cmd, s(&p, "cwd")]);
                 }
-                approval(id.clone(), call, reason, String::new(), decisions())
+                a.amend = arr(&p, "proposedExecpolicyAmendment")
+                    .iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect();
+                a.net = arr(&p, "proposedNetworkPolicyAmendments").to_vec();
+                let opts = command_decisions(&a.amend, &a.net);
+                approval(id.clone(), call, reason, String::new(), opts)
             }
             REQ_FILE_CHANGE => {
                 let call = known.unwrap_or_else(|| Call {
@@ -334,17 +391,19 @@ impl Inner {
                     kind: Kind::Edit,
                     ..Call::default()
                 });
-                approval(
-                    id.clone(),
-                    call,
-                    reason,
-                    st_of(&p, "grantRoot"),
-                    decisions(),
-                )
+                let root = st_of(&p, "grantRoot");
+                if !root.is_empty() {
+                    a.key = crate::grants::key(REQ_FILE_CHANGE, &[&root]);
+                }
+                approval(id.clone(), call, reason, root, decisions())
             }
             REQ_PERMISSIONS => {
                 if let Some(o) = p.get("permissions").and_then(Value::as_object) {
                     a.perms = o.clone();
+                    a.key = crate::grants::key(
+                        REQ_PERMISSIONS,
+                        &[&Value::Object(o.clone()).to_string()],
+                    );
                 }
                 let call = Call {
                     id: item.clone(),
@@ -399,10 +458,35 @@ impl Inner {
                 return;
             }
         };
+        // Said yes to for the session before rush last started it: yes
+        // again, unasked.
+        if state.granted.has(&a.thread, &a.key) {
+            drop(state);
+            let _ = rpc.reply(&a.id, session_yes(&a));
+            return;
+        }
         state.asks.insert(id, a);
         drop(state);
         self.emit(vec![ev]);
     }
+}
+
+/// The answer that says yes for the session to a.
+fn session_yes(a: &Pending) -> Value {
+    if a.method == REQ_PERMISSIONS {
+        json!({"permissions": granted_perms(a), "scope": "session"})
+    } else {
+        json!({"decision": "acceptForSession"})
+    }
+}
+
+/// The permissions asked for, without those left unset.
+fn granted_perms(a: &Pending) -> serde_json::Map<String, Value> {
+    a.perms
+        .iter()
+        .filter(|(_, v)| !v.is_null())
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
 }
 
 fn st_of(v: &Value, k: &str) -> String {
@@ -1160,12 +1244,21 @@ impl Conn {
     fn put(&self, id: &str, a: Pending) {
         self.inner.st().asks.insert(id.to_string(), a);
     }
+
+    /// Keeps a yes for the session to a, for when its thread starts again.
+    fn keep_yes(&self, a: &Pending) {
+        let g = self.inner.st().granted.clone();
+        g.add(&a.thread, &a.key);
+    }
 }
 
 fn new_inner(sink: Arc<dyn Sink>, phase: Phase) -> Arc<Inner> {
     Arc::new(Inner {
         sink,
-        st: Mutex::new(State::default()),
+        st: Mutex::new(State {
+            granted: crate::grants::Granted::here(),
+            ..State::default()
+        }),
         phase: Mutex::new(phase),
     })
 }
@@ -1206,6 +1299,7 @@ pub fn start(mut o: StartOptions, sink: Arc<dyn Sink>) -> adapter::Result<Conn> 
         // Codex's own, rather than not at all.
         o.mode.clear();
     }
+    crate::grants::write_rules(&o.profile.dir);
     let inner = new_inner(sink, starting());
     let rpc = spawn(
         &o.binary,
@@ -1318,17 +1412,34 @@ impl ConnTrait for Conn {
                     option_id,
                     "accept" | "acceptForSession" | "decline" | "cancel"
                 ) {
+                    if option_id == "acceptForSession" {
+                        self.keep_yes(&a);
+                    }
                     return self.rpc.reply(&a.id, json!({"decision": option_id}));
+                }
+                if option_id == AMEND && !a.amend.is_empty() {
+                    return self.rpc.reply(
+                        &a.id,
+                        json!({"decision": {AMEND: {"execpolicy_amendment": a.amend}}}),
+                    );
+                }
+                if let Some(n) = option_id
+                    .strip_prefix(NET)
+                    .and_then(|i| i.parse::<usize>().ok())
+                    .and_then(|i| a.net.get(i))
+                {
+                    return self.rpc.reply(
+                        &a.id,
+                        json!({"decision": {"applyNetworkPolicyAmendment": {"network_policy_amendment": n}}}),
+                    );
                 }
             }
             REQ_PERMISSIONS => match option_id {
                 "turn" | "session" => {
-                    let granted: serde_json::Map<String, Value> = a
-                        .perms
-                        .iter()
-                        .filter(|(_, v)| !v.is_null())
-                        .map(|(k, v)| (k.clone(), v.clone()))
-                        .collect();
+                    if option_id == "session" {
+                        self.keep_yes(&a);
+                    }
+                    let granted = granted_perms(&a);
                     return self
                         .rpc
                         .reply(&a.id, json!({"permissions": granted, "scope": option_id}));

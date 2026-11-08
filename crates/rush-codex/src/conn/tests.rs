@@ -108,6 +108,20 @@ fn connect() -> (Arc<Conn>, Fake, mpsc::Receiver<Said>) {
 /// A Conn and a fake, connected; starting: as start makes it, its sink
 /// told nothing until launch has begun the thread.
 fn connect_as(starting: bool) -> (Conn, Fake, mpsc::Receiver<Said>) {
+    // What a Conn keeps (yeses for a session) goes in a folder of the
+    // test's own, never the user's.
+    connect_in(tempfile::tempdir().unwrap().keep(), starting)
+}
+
+/// connect_as, keeping what the Conn keeps under the rush folder dir.
+fn connect_in(dir: std::path::PathBuf, starting: bool) -> (Conn, Fake, mpsc::Receiver<Said>) {
+    rush_state::set_thread_dir(Some(dir));
+    let c = connect_now(starting);
+    rush_state::set_thread_dir(None);
+    c
+}
+
+fn connect_now(starting: bool) -> (Conn, Fake, mpsc::Receiver<Said>) {
     let (cr, fw) = std::io::pipe().unwrap(); // fake → conn
     let (fr, cw) = std::io::pipe().unwrap(); // conn → fake
     let (tx, rx) = mpsc::channel();
@@ -1076,4 +1090,107 @@ fn carried_and_env_names() {
         env_names(&["A=1".into(), "B=2".into(), "A=3".into(), "=x".into()]),
         ["A", "B"]
     );
+}
+
+/// Codex's proposed rule is the first way to say always, and answering
+/// with it keeps the rule; a website's rule likewise (Rust-only).
+#[test]
+fn always_keeps_codex_rule() {
+    let (mut run, _) = start(StartOptions::default());
+    run.next();
+    run.f.request(
+        "r1".into(),
+        REQ_COMMAND,
+        json!({"threadId": "th1", "turnId": "tu1", "itemId": "c1", "startedAtMs": 1,
+            "command": "node check.mjs", "cwd": "/work",
+            "proposedExecpolicyAmendment": ["node"],
+            "proposedNetworkPolicyAmendments": [{"host": "example.com", "action": "allow"},
+                {"host": "bad.example", "action": "deny"}]}),
+    );
+    let Event::Approval(a) = run.next() else {
+        panic!("not an approval")
+    };
+    let got: Vec<(&str, OptionKind)> = a
+        .options
+        .iter()
+        .map(|o| (o.label.as_str(), o.kind))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("Yes", OptionKind::AllowOnce),
+            ("Yes, and always allow `node`", OptionKind::AllowAlways),
+            ("Yes, and always allow example.com", OptionKind::AllowAlways),
+            ("Yes, for this session", OptionKind::AllowAlways),
+            ("No", OptionKind::RejectOnce),
+            ("No, and stop", OptionKind::RejectAlways),
+        ]
+    );
+    let opt = a.options[1].id.clone();
+    let h = spawn_call(&run.c, move |c| c.answer("r1", &opt));
+    let reply = run.f.line();
+    assert_eq!(
+        reply["result"],
+        json!({"decision": {"acceptWithExecpolicyAmendment": {"execpolicy_amendment": ["node"]}}})
+    );
+    h.join().unwrap().unwrap();
+
+    run.f.request(
+        "r2".into(),
+        REQ_COMMAND,
+        json!({"threadId": "th1", "turnId": "tu1", "itemId": "c2", "startedAtMs": 1,
+            "command": "curl example.com", "cwd": "/work",
+            "proposedNetworkPolicyAmendments": [{"host": "example.com", "action": "allow"}]}),
+    );
+    let Event::Approval(a) = run.next() else {
+        panic!("not an approval")
+    };
+    let opt = a.options[1].id.clone();
+    let h = spawn_call(&run.c, move |c| c.answer("r2", &opt));
+    let reply = run.f.line();
+    assert_eq!(
+        reply["result"],
+        json!({"decision": {"applyNetworkPolicyAmendment": {"network_policy_amendment": {"host": "example.com", "action": "allow"}}}})
+    );
+    h.join().unwrap().unwrap();
+}
+
+/// A yes for the session outlives the app-server: the same ask, in the
+/// same thread, after rush starts it again, is answered yes unasked;
+/// another isn't (Rust-only).
+#[test]
+fn session_yes_outlives_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let ask = |f: &mut Fake, id: &str, cmd: &str| {
+        f.request(
+            id.into(),
+            REQ_COMMAND,
+            json!({"threadId": "th1", "turnId": "tu1", "itemId": id, "startedAtMs": 1,
+                "command": cmd, "cwd": "/work"}),
+        );
+    };
+    {
+        let (c, mut f, rx) = connect_in(dir.path().to_path_buf(), false);
+        let c = Arc::new(c);
+        ask(&mut f, "r1", "cargo test");
+        let Ok(Said::Event(Event::Approval(_))) = rx.recv_timeout(Duration::from_secs(5)) else {
+            panic!("not asked")
+        };
+        let h = spawn_call(&c, |c| c.answer("r1", "acceptForSession"));
+        assert_eq!(f.line()["result"]["decision"], "acceptForSession");
+        h.join().unwrap().unwrap();
+    }
+    let (c, mut f, rx) = connect_in(dir.path().to_path_buf(), false);
+    ask(&mut f, "r2", "cargo test");
+    let reply = f.line();
+    assert!(
+        reply["id"] == "r2" && reply["result"]["decision"] == "acceptForSession",
+        "{reply}"
+    );
+    ask(&mut f, "r3", "rm -rf build");
+    let Ok(Said::Event(Event::Approval(a))) = rx.recv_timeout(Duration::from_secs(5)) else {
+        panic!("a new ask isn't answered for you")
+    };
+    assert_eq!(a.id, "r3");
+    drop(c);
 }

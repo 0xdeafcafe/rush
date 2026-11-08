@@ -17,6 +17,7 @@ mod children;
 mod conn;
 mod diff;
 mod discover;
+mod grants;
 mod history;
 mod items;
 mod json;

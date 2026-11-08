@@ -2856,6 +2856,27 @@ other terminals, or a Decline that doesn't take the URL, are brought
 forward as an app (`open -b`), which shows their front window, not
 always the tab rush is in.
 
+## Codex's approvals (Rust-only)
+
+Codex asked about the same things again and again (87 asks in two
+weeks of the user's sessions). Three causes, three fixes, in
+`rush-codex` (`conn.rs`, `grants.rs`):
+
+- Rush offered only "Yes, for this session", which Codex matches to the
+  exact command, so a script piped in is new each time. When Codex
+  proposes a rule (`proposedExecpolicyAmendment`, or a website in
+  `proposedNetworkPolicyAmendments`) it's the first AllowAlways option,
+  so rush's "always" keeps it: Codex writes it to its rules and asks no
+  more, in any session.
+- Codex keeps a session's yeses in the app-server's memory, which a
+  session put to sleep and woken loses. Rush keeps them per thread in
+  `<rush>/codex/granted/<thread>.json` (the command and folder, the
+  folder to write to, or the permissions) and answers the same ask yes
+  again, unasked.
+- Rush's own commands (`rush feed`, `rush watch`, …) need its folders
+  and socket, outside Codex's sandbox: each start writes
+  `<CODEX_HOME>/rules/rush.rules`, a `prefix_rule` that allows `rush`.
+
 ## Open files
 
 The binary raises its soft limit on open files to the most allowed
