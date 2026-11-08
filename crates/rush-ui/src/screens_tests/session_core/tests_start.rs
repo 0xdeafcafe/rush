@@ -667,3 +667,43 @@ fn a_message_to_a_waiting_host_keeps_the_conversation() {
     assert!(fake.wakes.lock().unwrap().is_empty() && fake.resumed.lock().unwrap().is_empty());
     assert_eq!(prompts(&m), ["earlier words"]);
 }
+
+/// Where the menu bar app leaves the agent a click asked this rush to go
+/// to (rush-menubar's terminal.rs goto).
+fn ask_goto(dir: &std::path::Path, key: &str) {
+    let open = dir.join("menubar").join("open");
+    std::fs::create_dir_all(&open).unwrap();
+    std::fs::write(open.join(format!("{}.goto", std::process::id())), key).unwrap();
+}
+
+// A click on a notification opens its agent here, once it's in the list,
+// and the ask is taken once; asked again while the list is as it was, the
+// window coming back into focus opens it (snapload.go:41 msg.jump).
+#[test]
+fn a_click_in_the_menu_bar_opens_its_agent() {
+    use rush_draw::{App, Event, Msg};
+    let fake = Fake::new();
+    let (mut m, d) = model(&fake);
+    let (a, b) = ("default/a:fake-1", "default/a:fake-2");
+    fake.host(a);
+    fake.host(b);
+    let fleet = Fleet {
+        agents: vec![hosted_agent(a, "fake-1"), hosted_agent(b, "fake-2")],
+        roots: vec![String::new(); 2],
+        ..Fleet::default()
+    };
+    ask_goto(d.path(), b);
+    m.set_fleet(fleet.clone());
+    assert_eq!(m.sel, b);
+    assert_eq!(m.session.as_ref().map(|v| v.key.as_str()), Some(b));
+    m.session = None;
+    m.set_fleet(fleet);
+    assert!(m.session.is_none(), "asked once, opened once");
+    ask_goto(d.path(), a);
+    let _ = m.update(Msg::Input(Event::FocusGained));
+    assert_eq!(m.sel, a);
+    assert_eq!(m.session.as_ref().map(|v| v.key.as_str()), Some(a));
+    ask_goto(d.path(), "default/a:gone");
+    let _ = m.update(Msg::Input(Event::FocusGained));
+    assert_eq!(m.sel, a, "an agent not in the list isn't gone to");
+}

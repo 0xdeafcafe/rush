@@ -325,7 +325,13 @@ fn run(args: &[String]) -> i32 {
             rush_ui::screens::session_core::reopen::opened_explicitly(m);
         }
     };
-    match rush_ui::run_with(&version(), setup) {
+    // Open in this terminal while the view runs, so a click in the menu
+    // bar comes back here and not to a new rush; over SSH the menu bar
+    // app is the Mac's, not the phone's (main.go:279-283).
+    let here = (!ssh).then(rush_menubar::here);
+    let ran = rush_ui::run_with(&version(), setup);
+    drop(here); // before a reload's exec, which never returns to drop it
+    match ran {
         Err(e) => {
             eprintln!("rush: {e}");
             return 1;

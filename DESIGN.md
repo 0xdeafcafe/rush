@@ -2842,6 +2842,20 @@ The app's only timer is the icon's, while an agent works. It reads what
 it can of the fleet today (`source::FleetSource`); hosted sessions, the
 logins' own refresh and the fleet's accounts come with those modules.
 
+A click on a notification, or an agent in the menu, comes back to the
+rush already open: the view marks itself open in its terminal
+(`rush_menubar::here`, held by the binary's main for the view's life,
+not over SSH), the app leaves the agent's key in `open/<pid>.goto` and
+brings that terminal forward, and the view opens the agent
+(`session_core::menubar_jump`). Go read the key only with each reading
+of the list; ours reads only when the list changes, so the view reads
+the key again when its window comes back into focus. Each open rush also
+leaves its terminal device (`open/<pid>.tty`, Rust-only): Terminal
+Decline is asked for that tab with `decline://focus?tty=/dev/ttysN`;
+other terminals, or a Decline that doesn't take the URL, are brought
+forward as an app (`open -b`), which shows their front window, not
+always the tab rush is in.
+
 ## Open files
 
 The binary raises its soft limit on open files to the most allowed

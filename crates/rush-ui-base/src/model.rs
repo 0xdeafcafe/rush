@@ -1800,6 +1800,10 @@ impl App<Note> for Model {
                 Event::FocusGained => {
                     self.term_focused = true;
                     self.ext.calls.pointer_back()(self);
+                    for i in 0..self.ext.on_focus.len() {
+                        let f = self.ext.on_focus[i];
+                        f(self);
+                    }
                     Step::Draw
                 }
                 Event::FocusLost => {

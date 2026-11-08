@@ -46,6 +46,7 @@ pub mod panelsubs;
 pub mod presets;
 pub use rush_ui_base::paint;
 pub mod livestep;
+pub mod menubar_jump;
 pub mod queue;
 pub mod relay;
 pub mod reopen;
@@ -166,6 +167,7 @@ pub fn register(x: &mut Ext) {
     x.overlays.push(conversation::over);
     x.on_fleet.push(live::on_fleet);
     x.on_fleet.push(start::pick_started);
+    menubar_jump::register(x);
     x.on_fleet.push(rushmove::move_pending);
     moveto::register(x);
     x.on_fleet.push(turnwants::on_fleet);

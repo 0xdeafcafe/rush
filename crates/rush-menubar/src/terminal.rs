@@ -2,7 +2,10 @@
 //! the terminal it's open in (Warp, iTerm, Ghostty…), on that agent: each
 //! rush leaves its terminal's bundle ID under open/<pid> while it runs, and
 //! picks up an agent to go to from open/<pid>.goto. Port of
-//! internal/menubar/terminal.go:1-115.
+//! internal/menubar/terminal.go:1-115. Rust-only: each rush also leaves
+//! its terminal device under open/<pid>.tty, so a terminal that can be
+//! asked for one tab (Terminal Decline's decline://focus?tty=) shows the
+//! tab rush is in, not just its front window.
 
 use std::fs;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
@@ -40,6 +43,7 @@ impl Drop for Here {
         if let Some(p) = self.0.take() {
             let _ = fs::remove_file(&p);
             let _ = fs::remove_file(goto_of(&p));
+            let _ = fs::remove_file(tty_of(&p));
         }
     }
 }
@@ -48,13 +52,33 @@ fn goto_of(p: &Path) -> PathBuf {
     PathBuf::from(format!("{}.goto", p.display()))
 }
 
-/// Marks this rush as open in its terminal (terminal.go:22 Here).
-pub fn here() -> Here {
-    here_in(&terminal_id())
+fn tty_of(p: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.tty", p.display()))
 }
 
-/// Marks this rush as open in the terminal of bundle ID id.
-fn here_in(id: &str) -> Here {
+/// The terminal device rush's input is, as /dev/ttys004; "" when it
+/// isn't one.
+fn own_tty() -> String {
+    let mut b = [0 as libc::c_char; 128];
+    // SAFETY: b is writable for its length, which is passed; ttyname_r
+    // NUL-terminates what it writes on success.
+    if unsafe { libc::ttyname_r(0, b.as_mut_ptr(), b.len()) } != 0 {
+        return String::new();
+    }
+    // SAFETY: NUL-terminated within b on success, as above.
+    unsafe { std::ffi::CStr::from_ptr(b.as_ptr()) }
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// Marks this rush as open in its terminal (terminal.go:22 Here).
+pub fn here() -> Here {
+    here_in(&terminal_id(), &own_tty())
+}
+
+/// Marks this rush as open in the terminal of bundle ID id, on the
+/// terminal device tty ("" when unknown).
+fn here_in(id: &str, tty: &str) -> Here {
     if id.is_empty() {
         return Here(None);
     }
@@ -65,6 +89,9 @@ fn here_in(id: &str) -> Here {
         .create(open_dir());
     if made.is_err() || write_private(&p, id.as_bytes()).is_err() {
         return Here(None);
+    }
+    if !tty.is_empty() {
+        let _ = write_private(&tty_of(&p), tty.as_bytes());
     }
     let _ = write_private(&last_terminal(), id.as_bytes());
     Here(Some(p))
@@ -127,6 +154,7 @@ pub fn open() -> (i32, String) {
         if gone(n) {
             let _ = fs::remove_file(&p);
             let _ = fs::remove_file(goto_of(&p));
+            let _ = fs::remove_file(tty_of(&p));
             continue;
         }
         let modified = e.metadata().and_then(|m| m.modified());
@@ -149,6 +177,12 @@ pub fn show(key: &str) -> Result<(), String> {
         if !key.is_empty() {
             let _ = write_private(&open_dir().join(format!("{pid}.goto")), key.as_bytes());
         }
+        let tty = fs::read_to_string(open_dir().join(format!("{pid}.tty"))).unwrap_or_default();
+        if let Some(url) = focus_url(&id, tty.trim())
+            && open_with(&[&url]).is_ok()
+        {
+            return Ok(());
+        }
         return open_with(&["-b", &id]);
     }
     let bin = crate::exe().to_string_lossy().into_owned();
@@ -157,6 +191,24 @@ pub fn show(key: &str) -> Result<(), String> {
         return Ok(());
     }
     open_with(&[&bin])
+}
+
+/// The URL that brings forward the tab on terminal device tty, for a
+/// terminal that takes one: Terminal Decline's (and its dogfood builds').
+fn focus_url(id: &str, tty: &str) -> Option<String> {
+    if !id.starts_with("red.forbes.terminal-decline") || !tty.starts_with("/dev/") {
+        return None;
+    }
+    let mut q = String::new();
+    for b in tty.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                q.push(b as char)
+            }
+            _ => q.push_str(&format!("%{b:02X}")),
+        }
+    }
+    Some(format!("decline://focus?tty={q}"))
 }
 
 fn open_with(args: &[&str]) -> Result<(), String> {
@@ -196,7 +248,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         rush_state::set_thread_dir(Some(d.path().to_path_buf()));
         let gone = open_dir().join("999999"); // a pid that isn't running
-        let release = here_in("dev.warp.Warp-Stable");
+        let release = here_in("dev.warp.Warp-Stable", "/dev/ttys004");
         fs::write(&gone, "com.apple.Terminal").unwrap();
         let me = std::process::id() as i32;
         assert_eq!(open(), (me, "dev.warp.Warp-Stable".to_string()));
@@ -204,7 +256,10 @@ mod tests {
         fs::write(open_dir().join(format!("{me}.goto")), "acct/abc").unwrap();
         assert_eq!(goto(), "acct/abc");
         assert_eq!(goto(), "", "only once");
+        let tty = open_dir().join(format!("{me}.tty"));
+        assert_eq!(fs::read_to_string(&tty).unwrap(), "/dev/ttys004");
         drop(release);
+        assert!(!tty.exists(), "closed, its tty is forgotten");
         assert_eq!(open().0, 0, "closed, it isn't open");
         let last = fs::read_to_string(last_terminal()).unwrap();
         assert_eq!(last, "dev.warp.Warp-Stable");
@@ -238,6 +293,34 @@ mod tests {
                     .map_or(String::new(), |(_, v)| v.to_string())
             };
             assert_eq!(terminal_id_of(env), want, "{pairs:?}");
+        }
+    }
+
+    /// Only Decline is asked for a tab, and only for a real device.
+    #[test]
+    fn focus_urls() {
+        let decline = "red.forbes.terminal-decline";
+        for (id, tty, want) in [
+            (
+                decline,
+                "/dev/ttys004",
+                Some("decline://focus?tty=/dev/ttys004"),
+            ),
+            (
+                decline,
+                "/dev/odd tty",
+                Some("decline://focus?tty=/dev/odd%20tty"),
+            ),
+            (
+                "red.forbes.terminal-decline.dogfood",
+                "/dev/ttys1",
+                Some("decline://focus?tty=/dev/ttys1"),
+            ),
+            (decline, "", None),
+            (decline, "ttys004", None),
+            ("com.apple.Terminal", "/dev/ttys004", None),
+        ] {
+            assert_eq!(focus_url(id, tty).as_deref(), want, "{id} {tty}");
         }
     }
 
