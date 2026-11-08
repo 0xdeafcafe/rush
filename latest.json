@@ -1,13 +1,13 @@
 {
- "commit": "1537a16ddb3dd168fb28ca0e16610f95e34cf2d8",
+ "commit": "61bc0e898c2c4512e514d2d32226d79a760bedeb",
  "ref": "main",
- "run": "42447206353",
- "at": "2026-11-08T04:47:59Z",
+ "run": "42518656603",
+ "at": "2026-11-08T20:19:01Z",
  "window_s": 60,
  "metrics": {
   "binary: rush, release": {
    "kind": "binary",
-   "value": 59895976
+   "value": 60031288
   },
   "follow a run: read on, each write, allocated": {
    "kind": "bytes",
@@ -75,15 +75,15 @@
   },
   "host: CPU to start, s": {
    "kind": "info",
-   "value": 0.119
+   "value": 0.033
   },
   "host: footprint": {
    "kind": "footprint",
-   "value": 3868032
+   "value": 3998976
   },
   "host: idle CPU": {
    "kind": "cpu",
-   "value": 0.0014
+   "value": 0.0012
   },
   "host: idle wake-ups": {
    "kind": "wakeups",
@@ -99,7 +99,7 @@
   },
   "list, past left out (the feed's): loader alone, retained": {
    "kind": "heap",
-   "value": 2523190
+   "value": 2523206
   },
   "list, past left out (the feed's): rows": {
    "kind": "info",
@@ -107,7 +107,7 @@
   },
   "list: a reading, allocations made": {
    "kind": "allocs",
-   "value": 24603
+   "value": 24613
   },
   "list: loader alone, allocations kept": {
    "kind": "allocs",
@@ -143,11 +143,11 @@
   },
   "menubar feed: CPU to start, s": {
    "kind": "info",
-   "value": 0.198
+   "value": 0.098
   },
   "menubar feed: footprint": {
    "kind": "footprint",
-   "value": 12928384
+   "value": 13026560
   },
   "menubar feed: idle CPU": {
    "kind": "cpu",
@@ -247,35 +247,35 @@
   },
   "open: subagent runs followed, allocations kept": {
    "kind": "allocs",
-   "value": 43
+   "value": 6290
   },
   "open: subagent runs followed, allocations made": {
    "kind": "allocs",
-   "value": 30237
+   "value": 30189
   },
   "open: subagent runs followed, peak": {
    "kind": "heap",
-   "value": 377952
+   "value": 1809483
   },
   "open: subagent runs followed, retained": {
    "kind": "heap",
-   "value": 9499
+   "value": 1735216
   },
   "plugind: CPU to start, s": {
    "kind": "info",
-   "value": 0.058
+   "value": 0.032
   },
   "plugind: footprint": {
    "kind": "footprint",
-   "value": 4801920
+   "value": 4769088
   },
   "plugind: idle CPU": {
    "kind": "cpu",
-   "value": 0.0139
+   "value": 0.0238
   },
   "plugind: idle wake-ups": {
    "kind": "wakeups",
-   "value": 16.6
+   "value": 21.6
   },
   "plugind: threads": {
    "kind": "threads",
@@ -303,7 +303,7 @@
   },
   "render 300 turns w120: cold layout (all turns), bytes": {
    "kind": "bytes",
-   "value": 29991281
+   "value": 29992646
   },
   "render 300 turns w120: stream: delta, then a frame, allocations": {
    "kind": "allocs",
@@ -431,7 +431,7 @@
   },
   "render 3000 turns w120: code: cold frame at the end, bytes": {
    "kind": "bytes",
-   "value": 2998060
+   "value": 2998067
   },
   "render 3000 turns w120: code: warm frame at the end, allocations": {
    "kind": "allocs",
@@ -511,7 +511,7 @@
   },
   "render 3000 turns w120: trail: cold frame at the end, bytes": {
    "kind": "bytes",
-   "value": 2842028
+   "value": 2842034
   },
   "render 3000 turns w120: trail: warm frame at the end, allocations": {
    "kind": "allocs",
@@ -547,23 +547,23 @@
   },
   "serve: CPU to start, s": {
    "kind": "info",
-   "value": 0.276
+   "value": 0.266
   },
   "serve: a listing, retained": {
    "kind": "heap",
-   "value": 2408518
+   "value": 2438374
   },
   "serve: footprint": {
    "kind": "footprint",
-   "value": 6292736
+   "value": 6522048
   },
   "serve: idle CPU": {
    "kind": "cpu",
-   "value": 0.3406
+   "value": 0.5083
   },
   "serve: idle wake-ups": {
    "kind": "wakeups",
-   "value": 76.4
+   "value": 95.1
   },
   "serve: threads": {
    "kind": "threads",
@@ -571,19 +571,19 @@
   },
   "ui: CPU to start, s": {
    "kind": "info",
-   "value": 1.468
+   "value": 1.746
   },
   "ui: footprint": {
    "kind": "footprint",
-   "value": 30918208
+   "value": 29574720
   },
   "ui: idle CPU": {
    "kind": "cpu",
-   "value": 0.2296
+   "value": 0.4111
   },
   "ui: idle wake-ups": {
    "kind": "wakeups",
-   "value": 206.6
+   "value": 258.7
   },
   "ui: threads": {
    "kind": "threads",
@@ -596,13 +596,13 @@
    "threads seen": [
     9
    ],
-   "ps cpu over the window": 0.01
+   "ps cpu over the window": 0.03
   },
   "serve": {
    "threads seen": [
     7
    ],
-   "ps cpu over the window": 0.34
+   "ps cpu over the window": 0.51
   },
   "host": {
    "threads seen": [
@@ -620,10 +620,11 @@
    "threads seen": [
     8,
     9,
-    10,
-    12
+    12,
+    14,
+    15
    ],
-   "ps cpu over the window": 0.23
+   "ps cpu over the window": 0.42
   }
  }
 }
