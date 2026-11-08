@@ -5,7 +5,9 @@
 //! :46, ticked :125, body :151, group :182, tempsSize :193, itemLine :201,
 //! key :258, safe :285, confirm :297, nudgeClean :322). What agents left
 //! outside their projects (fleet.LeftItem) isn't read yet, so that group
-//! never shows.
+//! never shows. Rust-only: what's in rush's scratch root that no session
+//! owns (rush_fleet::find_temp_orphans), ticked once untouched for days
+//! and no running session's id starts its name.
 
 use rush_core::text::Line;
 use rush_fleet::{VerdictKind, Worktree};
@@ -51,6 +53,10 @@ pub struct CleanItem {
     /// Sessions' temp folders (key, name, bytes), all of one kind.
     pub temps: Vec<(String, String, i64)>,
     pub kind: Option<Temps>,
+    /// What's in rush's scratch root that no session owns, and whether
+    /// it's sat untouched for days (Rust-only).
+    pub orphan: Option<rush_fleet::TempOrphan>,
+    pub stale: bool,
 }
 
 impl CleanItem {
@@ -59,6 +65,8 @@ impl CleanItem {
             "Worktrees"
         } else if self.left.is_some() {
             "Left outside projects"
+        } else if self.orphan.is_some() {
+            "Rush's scratch no session owns"
         } else {
             "Temporary"
         }
@@ -74,6 +82,9 @@ impl CleanItem {
         }
         if let Some(l) = &self.left {
             return self.busy.is_empty() && l.safe();
+        }
+        if self.orphan.is_some() {
+            return self.busy.is_empty() && self.stale;
         }
         self.busy.is_empty()
             && self
@@ -183,6 +194,24 @@ pub fn open_clean_sheet(m: &mut Model) {
             ..CleanItem::default()
         });
     }
+    // Rush's scratch no session owns (a sibling a script left, a deleted
+    // session's folder): ticked once untouched for days, unless a running
+    // session's id starts its name; that one can't be ticked.
+    let live = running_ids(m);
+    for o in d.scratch_orphans.iter().filter(|o| !o.gone) {
+        let busy = o
+            .used_by(&live)
+            .map(|id| format!("{} is running", session_name(m, id)))
+            .unwrap_or_default();
+        let stale = o.idle(m.now);
+        items.push(CleanItem {
+            on: stale && busy.is_empty(),
+            busy,
+            orphan: Some(o.clone()),
+            stale,
+            ..CleanItem::default()
+        });
+    }
     if items.is_empty() {
         m.flash(
             "no worktrees, nothing left outside projects and nothing stale in /tmp · nothing to clean",
@@ -201,6 +230,10 @@ impl CleanSheet {
             n += 1;
             if let Some(l) = &it.left {
                 size += l.size;
+                continue;
+            }
+            if let Some(o) = &it.orphan {
+                size += o.size;
                 continue;
             }
             if it.kind.is_some() {
@@ -273,6 +306,33 @@ impl CleanSheet {
                 w,
             );
         }
+        if let Some(o) = &it.orphan {
+            let ago = untouched_for(m.now - o.newest);
+            let mut why = if !it.busy.is_empty() {
+                bx = sp("· ", FAINT);
+                ln([sp(it.busy.clone(), DIM)])
+            } else if it.stale {
+                ln([sp(format!("untouched for {ago}"), GREEN)])
+            } else {
+                ln([sp(format!("changed {ago} ago: may be in use"), YELLOW)])
+            };
+            if !o.session.is_empty() {
+                let from = format!("from {}'s · ", session_name(m, &o.session));
+                why.spans.insert(0, sp(from, DIM));
+            }
+            let path = rush_draw::truncate(&tildify(&o.path), 43, "…").into_owned();
+            return fit(
+                cat(
+                    ln([
+                        bx,
+                        sp(pad_to(&path, 44), TEXT),
+                        sp(format!("{:>7}  ", disk(o.size)), FAINT),
+                    ]),
+                    why,
+                ),
+                w,
+            );
+        }
         let Some(wt) = &it.wt else {
             let t = data(m).tmp.clone();
             return fit(
@@ -336,6 +396,13 @@ impl CleanSheet {
                 });
                 continue;
             }
+            if let Some(o) = &it.orphan {
+                picked.push(Doomed {
+                    orphan: Some(o.clone()),
+                    ..Doomed::default()
+                });
+                continue;
+            }
             if it.kind.is_some() {
                 picked.push(Doomed {
                     agents: it
@@ -359,6 +426,18 @@ impl CleanSheet {
         }
         open_delete(m, Some(Box::new(self.clone())), picked);
         Out::Draw
+    }
+}
+
+/// How long something has sat, as Clean up says it: "3 days", "5h", "20m".
+pub fn untouched_for(ms: rush_core::time::Ms) -> String {
+    let (m, h, d) = (ms / 60_000, ms / 3_600_000, ms / 86_400_000);
+    if d >= 1 {
+        format!("{d} day{}", plural(d as usize))
+    } else if h >= 1 {
+        format!("{h}h")
+    } else {
+        format!("{}m", m.max(0))
     }
 }
 

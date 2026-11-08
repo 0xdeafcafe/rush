@@ -33,8 +33,13 @@ pub struct Doomed {
     pub tmp: bool,
     /// What an agent left outside its project (agents is that agent).
     pub left: Option<rush_fleet::LeftItem>,
+    /// What's in rush's scratch root that no session owns, as Clean up
+    /// saw it (Rust-only).
+    pub orphan: Option<rush_fleet::TempOrphan>,
     // Looked at off the UI.
     pub looked: bool,
+    /// The orphan changed, or went, since Clean up saw it.
+    pub changed: bool,
     pub files: Vec<String>,
     pub commits: Vec<String>,
     pub dirs: Vec<TempDir>,
@@ -47,6 +52,25 @@ fn remove_left(m: &mut Model, it: rush_fleet::LeftItem) {
     let path = tildify(&it.path);
     m.later(
         move || rush_fleet::remove_left(&it),
+        move |m, r| {
+            match r {
+                Ok(_) => m.flash(&format!("deleted {path}")),
+                Err(e) => m.fail(&e),
+            }
+            super::scan::scan_worktrees(m);
+            Out::Draw
+        },
+    );
+}
+
+/// Deletes what's in rush's scratch root that no session owns, as Clean up
+/// saw it: refused when a running session's id starts its name or it
+/// changed since (rush_fleet::remove_temp_orphan). Rust-only.
+fn remove_orphan(m: &mut Model, o: rush_fleet::TempOrphan) {
+    let path = tildify(&o.path);
+    let live = running_ids(m);
+    m.later(
+        move || rush_fleet::remove_temp_orphan(&o, &live),
         move |m, r| {
             match r {
                 Ok(_) => m.flash(&format!("deleted {path}")),
@@ -100,6 +124,9 @@ pub fn open_delete(m: &mut Model, back: Option<Box<dyn Sheet>>, items: Vec<Doome
                     (d.files, d.commits) = w.doomed();
                 } else if let Some(l) = d.left.as_mut() {
                     *l = l.again();
+                } else if let Some(o) = &d.orphan {
+                    let n = o.again();
+                    d.changed = n.gone || n.newest != o.newest;
                 } else if d.tmp {
                     d.stale = stale_scratch(&own, "/tmp");
                 } else {
@@ -129,6 +156,9 @@ impl Doomed {
         if let Some(l) = &self.left {
             return l.size;
         }
+        if let Some(o) = &self.orphan {
+            return o.size;
+        }
         if self.tmp && !self.looked {
             return st.tmp.stale;
         }
@@ -157,6 +187,20 @@ impl Doomed {
             && !l.why().is_empty()
         {
             return l.why().to_string();
+        }
+        if let Some(o) = &self.orphan {
+            if let Some(id) = o.used_by(&running_ids(m)) {
+                return format!(
+                    "{} is running; its id starts the name, so it may use it",
+                    session_name(m, id)
+                );
+            }
+            if self.looked && self.changed {
+                return format!(
+                    "{} changed since Clean up looked; it stays",
+                    tildify(&o.path)
+                );
+            }
         }
         for (k, _) in &self.agents {
             if let Some(g) = agent_by_key(m, k)
@@ -223,6 +267,26 @@ impl Doomed {
                 ]),
             ];
         }
+        if let Some(o) = &self.orphan {
+            let what = if o.session.is_empty() {
+                "rush's scratch, no session's · deleted".to_string()
+            } else {
+                format!(
+                    "rush's scratch, from {}'s probably · deleted",
+                    session_name(m, &o.session)
+                )
+            };
+            return vec![
+                kind_line(Kind::Temp, &tildify(&o.path), &what, &disk(self.size(m)), w),
+                ln([
+                    plain("   "),
+                    sp(
+                        "no session owns it; looked at again first, and kept if it changed since",
+                        DIM,
+                    ),
+                ]),
+            ];
+        }
         if self.tmp {
             let n = if self.looked {
                 self.stale.len()
@@ -274,7 +338,7 @@ impl Doomed {
         if self.wt.is_some() {
             return self.worktree_loss(m, w);
         }
-        if self.left.is_some() {
+        if self.left.is_some() || self.orphan.is_some() {
             return Vec::new();
         }
         if self.tmp {
@@ -468,6 +532,8 @@ impl DeleteSheet {
                 remove_wt(m, w, force);
             } else if let Some(l) = d.left {
                 remove_left(m, l);
+            } else if let Some(o) = d.orphan {
+                remove_orphan(m, o);
             } else if d.tmp {
                 clear_tmp(m);
             } else {

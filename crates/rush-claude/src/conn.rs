@@ -196,7 +196,8 @@ impl Driver for Claude {
         // Its scratch goes in the session's own folder, so what it leaves
         // behind can be seen and cleaned up.
         if !o.temp_dir.is_empty() && crate::files::mkdir_private(Path::new(&o.temp_dir)).is_ok() {
-            let t = &o.temp_dir;
+            // Ending in "/", as macOS's own: "$TMPDIR$name" stays inside.
+            let t = rush_core::adapter::tmpdir_env(&o.temp_dir);
             ho.env.extend([
                 format!("TMPDIR={t}"),
                 format!("TMP={t}"),

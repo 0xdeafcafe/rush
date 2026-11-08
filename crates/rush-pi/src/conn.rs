@@ -261,7 +261,7 @@ pub(crate) fn start(o: &StartOptions, path: &str, sink: Arc<dyn Sink>) -> adapte
         c.env("PI_OFFLINE", "1");
     }
     if !o.temp_dir.is_empty() && mkdir_private(&o.temp_dir) {
-        c.env("TMPDIR", &o.temp_dir);
+        c.env("TMPDIR", adapter::tmpdir_env(&o.temp_dir));
     }
     for kv in &o.env {
         if let Some((k, v)) = kv.split_once('=') {

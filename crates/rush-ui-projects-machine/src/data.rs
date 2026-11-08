@@ -82,6 +82,10 @@ pub struct Cfg {
     pub cleanup_disk_gb: i64,
     #[serde(rename = "cleanupRAMMinutes")]
     pub cleanup_ram_minutes: i64,
+    /// The free disk, in GB, that's dire (super::dire): 0 the default, -1
+    /// never.
+    #[serde(rename = "cleanupDireGB")]
+    pub cleanup_dire_gb: i64,
     /// Settings › General's Hibernate after, in minutes: 0 never
     /// (Config.Hibernate.AfterMinutes).
     #[serde(skip)]
@@ -100,6 +104,7 @@ impl Cfg {
             cleanup_hours: c.cleanup_hours,
             cleanup_disk_gb: c.cleanup_disk_gb,
             cleanup_ram_minutes: c.cleanup_ram_minutes,
+            cleanup_dire_gb: c.cleanup_dire_gb,
             hibernate_minutes: c.hibernate.after_minutes,
         };
         let done = st
@@ -187,6 +192,9 @@ pub struct Data {
     /// What agents wrote outside their projects, as last looked at
     /// (cleanup.go:175 fleet.LookLeft).
     pub outside: Vec<rush_fleet::LeftItem>,
+    /// What's in rush's scratch root that no session owns, as last looked
+    /// at (Rust-only: rush_fleet::find_temp_orphans).
+    pub scratch_orphans: Vec<rush_fleet::TempOrphan>,
     /// Each agent's temp work, by key.
     pub temp: HashMap<String, TempWork>,
     /// What each agent's temp work measured last, kept across restarts.
@@ -416,6 +424,26 @@ pub fn own_commits(st: &rush_fleet::GitState) -> usize {
 /// The agent with key, and its root.
 pub fn agent_by_key<'a>(m: &'a Model, key: &str) -> Option<Ag<'a>> {
     agents(m).find(|g| g.a.key == key)
+}
+
+/// The ids of rush's sessions running now (a process, or at work): what's
+/// in rush's scratch root that no session owns stays while one's id
+/// prefixes its name. Rust-only.
+pub fn running_ids(m: &Model) -> Vec<String> {
+    agents(m)
+        .filter(|g| g.a.rush && !g.a.job.id.is_empty() && (g.a.pid != 0 || g.busy()))
+        .map(|g| g.a.job.id.clone())
+        .collect()
+}
+
+/// Rush's session id by its name as the list has it; the id when it isn't
+/// listed.
+pub fn session_name(m: &Model, id: &str) -> String {
+    agents(m)
+        .find(|g| g.a.rush && g.a.job.id == id)
+        .map(|g| crate::style::one_line(&g.a.display_name))
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| id.to_string())
 }
 
 /// The first agent in keys with a process.

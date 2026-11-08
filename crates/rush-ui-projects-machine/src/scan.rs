@@ -178,6 +178,8 @@ pub struct Found {
     agent_tmp: HashMap<String, i64>,
     peeks: HashMap<String, PathInfo>,
     outside: Vec<rush_fleet::LeftItem>,
+    /// What's in rush's scratch root that no session owns (Rust-only).
+    orphans: Vec<rush_fleet::TempOrphan>,
     /// The worktrees' sizes are walked; if not, they keep the sizes they had.
     measured: bool,
 }
@@ -244,6 +246,7 @@ pub fn worktree_scan(
             agent_tmp: HashMap::new(),
             peeks: HashMap::new(),
             outside: Vec::new(),
+            orphans: Vec::new(),
             measured: true,
         };
         // git first, each worktree measured after (Worktree::check).
@@ -267,6 +270,7 @@ pub fn worktree_scan(
             f.tmp = Some(find_scratch(&reg, "/tmp"));
         }
         f.outside = rush_fleet::look_left(&workers);
+        f.orphans = rush_fleet::find_temp_orphans();
         if measure {
             for (w, ok) in f.wts.iter_mut().zip(looked) {
                 if ok {
@@ -367,6 +371,7 @@ pub fn on_worktrees(m: &mut Model, f: Found) {
     st.wts = wts;
     st.agent_tmp = f.agent_tmp;
     st.outside = f.outside;
+    st.scratch_orphans = f.orphans;
     st.peeks.extend(f.peeks);
     if let Some(t) = f.tmp {
         st.tmp = t;
@@ -746,6 +751,7 @@ pub fn found_tmp(tmp: rush_fleet::Scratch) -> Found {
         agent_tmp: HashMap::new(),
         peeks: HashMap::new(),
         outside: Vec::new(),
+        orphans: Vec::new(),
         measured: true,
     }
 }

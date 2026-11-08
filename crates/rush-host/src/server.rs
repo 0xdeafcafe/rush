@@ -1514,7 +1514,11 @@ impl Host {
             &st.cfg.kind,
         );
         let mut env = vec![
-            format!("TMPDIR={}", tmp.to_string_lossy()),
+            // Ending in "/", as macOS's own: "$TMPDIR$name" stays inside.
+            format!(
+                "TMPDIR={}",
+                rush_core::adapter::tmpdir_env(&tmp.to_string_lossy())
+            ),
             rush_events::env(&ev),
         ];
         env.extend(crate::shim::shim_env(&self.reg, &c.id, &c.kind));

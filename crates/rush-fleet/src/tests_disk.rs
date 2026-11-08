@@ -343,3 +343,154 @@ fn heavy_folder_reused() {
 
 #[allow(dead_code)]
 fn unused(_: SystemTime) {}
+
+// Beyond Go: what's under rush's scratch root and no session owns is
+// found, each with the session its name starts with: a sibling a script
+// left, a deleted session's folder, a file in a project's folder, things
+// at the top. A session's own folder (TMPDIR's "/" or not), the project
+// folders and the root never are.
+#[test]
+fn temp_orphans_found() {
+    let _h = RushHome::new();
+    let root = temp_root();
+    let proj = root.join("app-1a2b3c4d");
+    for id in ["6a3b0b5d", "6a3b"] {
+        std::fs::create_dir_all(host_root().join(id)).unwrap();
+    }
+    let own = proj.join("6a3b0b5d");
+    let sib = proj.join("6a3b0b5dbrowsefix-dd");
+    for d in [
+        &own,
+        &sib,
+        &proj.join("deadbeef"),
+        &root.join("os27-builds"),
+    ] {
+        std::fs::create_dir_all(d.join("x")).unwrap();
+        std::fs::write(d.join("x").join("f"), "data").unwrap();
+    }
+    std::fs::create_dir_all(root.join("other-0000ffff")).unwrap(); // a project's, empty
+    std::fs::write(proj.join("share_links_patch.py"), "py").unwrap();
+    std::fs::write(root.join("notes.txt"), "n").unwrap();
+    let top = format!("{}/", s(&root));
+    let mut got: Vec<(String, String)> = find_temp_orphans()
+        .iter()
+        .map(|o| {
+            let p = o.path.strip_prefix(&top).unwrap_or(&o.path);
+            (p.to_string(), o.session.clone())
+        })
+        .collect();
+    got.sort();
+    let want: Vec<(String, String)> = [
+        ("app-1a2b3c4d/6a3b0b5dbrowsefix-dd", "6a3b0b5d"),
+        ("app-1a2b3c4d/deadbeef", ""),
+        ("app-1a2b3c4d/share_links_patch.py", ""),
+        ("notes.txt", ""),
+        ("os27-builds", ""),
+    ]
+    .iter()
+    .map(|(p, s)| (p.to_string(), s.to_string()))
+    .collect();
+    assert_eq!(got, want);
+    for o in find_temp_orphans() {
+        assert!(o.size > 0 && o.newest > 0 && !o.gone, "{o:?}");
+        assert!(!o.idle(now()), "{} is idle when just made", o.path);
+    }
+    // A session's own folder is one with TMPDIR's "/"; what's beside it isn't.
+    for (p, want) in [
+        (s(&own), true),
+        (rush_core::adapter::tmpdir_env(&s(&own)), true),
+        (s(&sib), false),
+        (s(&proj.join("deadbeef")), false),
+        (s(&proj), false),
+        (s(&root), false),
+        (rush_core::adapter::tmpdir_env(&s(&root)), false),
+    ] {
+        assert_eq!(is_temp_dir(&p), want, "is_temp_dir({p:?})");
+    }
+}
+
+// A build cache goes only when it's one (by name, at the top of a worktree
+// given as nobody's) and nothing in it changed since the time given.
+#[test]
+fn caches_removed_safely() {
+    let d = tempfile::tempdir().unwrap();
+    let wt = d.path().join("wt");
+    for n in ["target", "node_modules", "src"] {
+        std::fs::create_dir_all(wt.join(n).join("x")).unwrap();
+        std::fs::write(wt.join(n).join("x").join("f"), "data").unwrap();
+    }
+    let free = vec![s(&wt)];
+    let mut found = caches_in(&s(&wt));
+    found.sort();
+    assert_eq!(found, [s(&wt.join("node_modules")), s(&wt.join("target"))]);
+    let later = now() + 60_000;
+    let target = s(&wt.join("target"));
+    for (path, wts, since, why) in [
+        (s(&wt.join("src")), free.clone(), later, "not a cache"),
+        (
+            target.clone(),
+            Vec::new(),
+            later,
+            "not in a worktree nobody works in",
+        ),
+        (target.clone(), free.clone(), now() - HOUR, "changed since"),
+        (format!("{target}/"), free.clone(), later, "not clean"),
+    ] {
+        assert!(
+            remove_cache(&path, &wts, since, "test", None).is_err(),
+            "{why}"
+        );
+        assert!(wt.join("target").exists(), "removed one {why}");
+    }
+    let (size, _) = walk(&target);
+    assert_eq!(
+        remove_cache(&target, &free, later, "test", None).unwrap(),
+        size
+    );
+    assert!(!wt.join("target").exists() && wt.join("src").exists());
+}
+
+// An orphan goes only as it was looked at: not while a running session's
+// id prefixes it, not once it changed, and nothing a session owns, no
+// project folder and not the root.
+#[test]
+fn temp_orphans_removed_safely() {
+    let _h = RushHome::new();
+    let root = temp_root();
+    let proj = root.join("app-1a2b3c4d");
+    std::fs::create_dir_all(host_root().join("6a3b0b5d")).unwrap();
+    let own = proj.join("6a3b0b5d");
+    let sib = proj.join("6a3b0b5dbrowsefix-dd");
+    for d in [&own, &sib, &root.join("os27-builds")] {
+        std::fs::create_dir_all(d.join("x")).unwrap();
+        std::fs::write(d.join("x").join("f"), "data").unwrap();
+    }
+    let find = |p: &Path| {
+        find_temp_orphans()
+            .into_iter()
+            .find(|o| o.path == s(p))
+            .unwrap()
+    };
+    let o = find(&sib);
+    let running = vec!["6a3b0b5d".to_string()];
+    assert!(remove_temp_orphan(&o, &running).is_err());
+    assert!(sib.exists(), "removed what a running session may use");
+    touch(&sib.join("x").join("f"), o.newest + 60_000);
+    assert!(remove_temp_orphan(&o, &[]).is_err());
+    assert!(sib.exists(), "removed one changed since it was looked at");
+    let o = find(&sib);
+    assert_eq!(remove_temp_orphan(&o, &[]).unwrap(), o.size);
+    assert!(!sib.exists());
+    let top = find(&root.join("os27-builds"));
+    remove_temp_orphan(&top, &[]).unwrap();
+    assert!(!root.join("os27-builds").exists());
+    let up = format!("{}/../os27-x", s(&proj));
+    for p in [s(&own), s(&proj), s(&root), up] {
+        let fake = TempOrphan {
+            path: p.clone(),
+            ..TempOrphan::default()
+        };
+        assert!(remove_temp_orphan(&fake, &[]).is_err(), "{p:?}");
+    }
+    assert!(own.join("x").join("f").exists() && proj.exists() && root.exists());
+}

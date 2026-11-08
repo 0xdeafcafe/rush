@@ -50,6 +50,16 @@ pub struct Config {
         skip_serializing_if = "is_zero_i64"
     )]
     pub cleanup_ram_minutes: i64,
+    /// How little free disk, in GB, is dire: with a cleanup's plan
+    /// unanswered and you away for 30 minutes, rush itself removes what's
+    /// rebuilt and loses no work. 0 is the lower of 5G and 2% of the disk,
+    /// -1 never. Rust-only.
+    #[serde(
+        rename = "cleanupDireGB",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_zero_i64"
+    )]
+    pub cleanup_dire_gb: i64,
     /// Hides the conversation overview rail; narrow panes hide it automatically.
     #[serde(
         rename = "hideMinimap",

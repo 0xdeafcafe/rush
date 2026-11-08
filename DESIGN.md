@@ -522,7 +522,9 @@ Claude, fleet, the other adapters) builds on these.
   (the one clean-up rule), `landing`, `settle`, `remove_worktree`,
   `tidy_worktree`, `landed_branches`; `check_folder`; temp work
   (`temp_dirs`, `TempSizes`, `disk_usage`, paced in the background,
-  getattrlistbulk on macOS); `look_left`/`remove_left`; the top of /tmp
+  getattrlistbulk on macOS); `look_left`/`remove_left`; what's in rush's
+  scratch root no session owns (`find_temp_orphans`,
+  `remove_temp_orphan`, Rust-only); the top of /tmp
   (`find_scratch`, `clear_scratch`); `Reaper` for what agents leave
   running; `next_login` and `chain`. Claude's subagent runs are read by
   rush-claude's `subruns::SubagentRuns`, its `RunFollower::subagent_runs`.
@@ -1025,6 +1027,96 @@ the empty turn Claude Code runs on resume for a stale task's notice
 ends no turn (`neutral::noop_notice`), so it isn't read as the answer to
 the message just sent.
 
+## Sessions' scratch folders
+
+Each session's scratch is `tmp/<project-slug>/<id>` in rush's folder
+(rush-host's `tmp.rs`, Go's tmp.go), linked from `sessions/<id>/tmp`.
+Beyond Go:
+
+- The agent is given it ending in "/" (`TMPDIR`, and Claude Code's `TMP`,
+  `TEMP`, `CLAUDE_CODE_TMPDIR`), as macOS's own TMPDIR does
+  (`rush_core::adapter::tmpdir_env`; the host's env, rush-claude's and
+  rush-pi's conns; plugins' sandbox already did). A script writing
+  `"$TMPDIR$name"` had left `tmp/<project>/<id><name>` beside the
+  session's folder. Rush keeps the folder itself without the slash
+  (`StartOptions::temp_dir`, `Info.temp_dir`, the Overview's Scratch), and
+  whatever reads a path back cleans it first (`is_temp`, `is_temp_dir`).
+- `is_temp_dir` (rush-host and rush-fleet), the guard on every tidy-up
+  that empties a session's scratch, takes `tmp/<project>/<x>` as one only
+  when `sessions/<x>` exists, not anything two below the root.
+- What's in the scratch root that no session owns is catalogued
+  (rush-fleet's `orphans.rs` `find_temp_orphans`, in Clean up's scan off
+  the UI): siblings like the one above, files in `tmp/<project>/`, a
+  deleted session's folder, anything at the top that isn't a project's
+  folder (one named `<name>-<8 hex>`). Each has its size, its newest
+  change and the known session whose id starts its name. Clean up lists
+  them under "Rush's scratch no session owns", ticked once untouched for
+  `ORPHAN_IDLE` (3 days) and no running session's id starts the name (a
+  running one's can't be ticked). `remove_temp_orphan` looks again first
+  and refuses what changed since Clean up looked, what a running session
+  may use, and anything a session owns; the scratch root and the project
+  folders never go.
+- The cleanup agent's brief (`care.rs` `scratch_known`) lists sessions'
+  scratch folders of 100M or more (path · session · size ·
+  done/stopped/running · last touched) and the orphans; its rules: a done
+  session's may go, a stopped one's once untouched for days, a running
+  one's never, orphans once untouched for days and no running session
+  uses them.
+
+## The cleanup agent asks first (Rust-only)
+
+Go started the cleanup agent in auto mode ("nobody is watching") and it
+deleted as it went. Here it never deletes on its own:
+
+- `start_care` starts it with `auto: false`, and `start_with_hosts` then
+  sets the mode of its agent's that asks (`asking_mode`: "default", else
+  the first trust-0 mode but plan, else the agent's own ""), never the
+  mode new sessions start in, which may be auto or bypass.
+- `care_prompt` (`CARE_PHASES`) has two phases. Phase 1 is read-only: it
+  surveys and ends its turn with a plan of every path it would delete
+  (size, why it's safe, conservative: yes/no), each group's total and a
+  grand total, what it leaves and why, the same plan as
+  `$TMPDIR/cleanup-plan.tsv` (path, bytes, conservative, why), and a
+  decisions block: (a) all, (b) only some the user names, (c) none.
+  Phase 2 starts on the answer: exactly what was approved, as one script
+  (`$TMPDIR/cleanup.sh`, one `rm -rf` or `git worktree remove` per path,
+  then pnpm store prune if planned) run once, so you approve one command;
+  df before and after; what changed since the plan is skipped and said.
+- Its plan's turn ends on a decisions block, so the fleet makes it
+  Blocked (loader.rs, as any session's decisions): it sits under Needs
+  you, and the watch (`finished_care`) counts only Done as its end, so the
+  plan isn't taken for it; while it waits nothing more is offered.
+- The sheet, the cleanup plugin's description and Settings › Disk and
+  memory say it proposes a list for you to approve.
+
+When the disk is dire and you're away, rush itself (not the agent, which
+would need to run unattended) cleans the conservative set (`dire.rs`,
+from `watch_machine`'s disk read, in the rush that leads, at most every
+30 minutes):
+
+- dire: free disk under Settings › Disk and memory's "Clean up on its own
+  when disk is under" (`cleanupDireGB`: 0 the lower of 5G and 2% of the
+  disk, -1 never; `dire_level`);
+- away: no key, click or paste in rush (`Model::last_input`, else rush's
+  start) for 30 minutes, and the cleanup's plan (its agent Blocked) open
+  as long; with no plan yet, what rush knows is used (`dire_due`);
+- the set (`conservative_set`): done sessions' scratch untouched for 3
+  days, build caches (`rush_fleet::CACHE_NAMES`: target, node_modules,
+  .next, .turbo, dist) unchanged since the plan in worktrees nobody works
+  in and none would lose, then pnpm store prune after a node_modules.
+  Never a worktree, a stopped session's scratch, an orphan, or anything
+  changed since the plan. With a plan file, only what it marks
+  conservative and rush's own look agrees with. Biggest first, until free
+  is back over the level and 2G (`pick_dire`). Xcode's DerivedData isn't
+  in it: it isn't in a worktree, and rush can't tell Xcode's in use;
+- each goes through rush-fleet's checked removals (`clean_stale_temp`,
+  `remove_cache`: refused when changed or in use, dry-run aware as
+  `empty-stale-temp`, `remove-cache`, `pnpm-store-prune`, each logged:
+  `temp-cleaned`, `cache-removed` with the cleanup session, and one
+  `dire-clean` with what went), then the news and a flash say what went
+  and that the rest waits, and the cleanup session is sent a note
+  (queued) to ask the same decisions again for what's left.
+
 ## The list kept between runs (Rust-only)
 
 rush opens on the list as it last read it (rush-ui `listcache.rs`): each
@@ -1078,8 +1170,11 @@ so `leads()` is neither. What only the rush that leads does:
   on Start and nothing snoozed by Not now; it says so when a cleanup agent
   is already at work. With the plugin on, the sheet offers Start, Start
   one that looks further (`CareChoice::Further`, f: the prompt adds
-  `CARE_FURTHER`, which lets it free caches across the disk and asks it
-  to list the big things it leaves) and Not now;
+  `CARE_FURTHER`, which lets it propose caches across the disk and asks it
+  to list the big things it leaves) and Not now. Beyond Go, which started
+  it in auto mode to delete as it went, it approves first (see "The
+  cleanup agent asks first"); and with the disk dire and you away, rush
+  itself cleans only what's made again (`dire.rs`, same section);
 - switches logins and other agents' accounts (`accounts/autoswitch.rs`
   `auto_switch`, `check_limits`; model.go:1100 autoSwitch, agentquota.go:90
   checkLimits) and looks for logins to keep, which can switch ~/.claude
@@ -1158,7 +1253,9 @@ The actions, by the name the log gives them:
   done work tidied and landed work settled (rush-fleet's `worktree.rs`
   `remove`, `verdict.rs` `settle`, `fast_forward`; `tidydone.rs`);
 - `remove-temp`, `empty-stale-temp`: done agents' temp work
-  (rush-fleet's `temp.rs`); `trim-tmp`: a running session's tmp with the
+  (rush-fleet's `temp.rs`); `remove-cache`, `pnpm-store-prune`: the
+  dire clean's (`dire.rs`, rush-fleet's `caches.rs`); `remove-temp-orphan`: rush's scratch no
+  session owns, ticked in Clean up (`orphans.rs`); `trim-tmp`: a running session's tmp with the
   disk low (rush-host's `trim.rs`);
 - `compress-transcript` (rush-sys's `squeeze.rs`);
 - `hibernate` (`cmdbar/stops.rs`), `stop-cleanup-agent`

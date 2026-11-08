@@ -172,7 +172,8 @@ fn control() {
     want_in(
         &format!("{log}.env"),
         &[
-            &format!("CLAUDE_CODE_TMPDIR={tmp}"),
+            &format!("CLAUDE_CODE_TMPDIR={tmp}/\n"),
+            &format!("TMP={tmp}/\n"), // its TMPDIR, TMP and TEMP the same, ending in "/"
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
             "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING=1",
         ],

@@ -454,7 +454,7 @@ pub fn sections(m: &Model) -> Vec<Section> {
     let mut low_disk = choice(
         "Offer a cleanup when disk is under",
         &off_pick(c.cleanup_disk_gb, "G"),
-        "rush watches your free disk itself, without AI. When it's this low it asks whether to start a cleanup agent (with the cleanup plugin on; off, it recommends turning it on): one that reads your worktrees, what's left in /tmp and what plugins like Haven and go-clean report, removes what can go without losing work, says what it did and goes away. Nothing starts until you say yes.",
+        "rush watches your free disk itself, without AI. When it's this low it asks whether to start a cleanup agent (with the cleanup plugin on; off, it recommends turning it on): one that reads your worktrees, rush's scratch folders, what's left in /tmp and what plugins like Haven and go-clean report, and proposes a list of what can go without losing work for you to approve. It deletes only what you approve, then says what it freed. Nothing starts until you say yes.",
         &[
             ("", "it asks once there's less than 20G free."),
             ("10G", "it asks once there's less than 10G free."),
@@ -464,6 +464,20 @@ pub fn sections(m: &Model) -> Vec<Section> {
         set(|m, v| config_mut(m).cleanup_disk_gb = off_value(v)),
     );
     low_disk.unset = "20G".into();
+    // Rush-only: what rush removes itself when the disk is dire and you're away.
+    let mut dire_disk = choice(
+        "Clean up on its own when disk is under",
+        &off_pick(c.cleanup_dire_gb, "G"),
+        "When the disk is this low, a cleanup's list has waited 30 minutes for you and you haven't touched rush for as long, rush itself removes only what's made again and loses no work: done sessions' scratch folders untouched for days, build caches (target, node_modules, .next, .turbo, dist) in worktrees nobody works in, and pnpm's unused store. Never a worktree, a stopped session's scratch, or anything changed lately. Biggest first, only until there's room again; the rest of the list still waits for you.",
+        &[
+            ("", "under 5G free, or 2% of the disk if that's less."),
+            ("2G", "under 2G free."),
+            ("10G", "under 10G free."),
+            ("off", "rush never removes anything without you."),
+        ],
+        set(|m, v| config_mut(m).cleanup_dire_gb = off_value(v)),
+    );
+    dire_disk.unset = "5G".into();
     let mut high_ram = choice(
         "Offer a cleanup when memory is full for",
         &off_pick(c.cleanup_ram_minutes, "m"),
@@ -495,7 +509,7 @@ pub fn sections(m: &Model) -> Vec<Section> {
     );
     secs.push(Section::new(
         "Disk and memory",
-        vec![low_disk, high_ram, trim],
+        vec![low_disk, dire_disk, high_ram, trim],
     ));
 
     let mut projects = Section::new("Projects", project_rows(m));

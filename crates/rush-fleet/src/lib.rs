@@ -6,6 +6,7 @@
 //! binning it would lose anything; temp work and what agents left behind.
 //! Port of internal/fleet. See DESIGN.md "Contracts".
 
+mod caches;
 mod folder;
 mod git;
 mod hosted;
@@ -14,6 +15,7 @@ mod left;
 mod loader;
 mod logins;
 mod machine;
+mod orphans;
 mod pr;
 mod predicates;
 mod spawn;
@@ -22,6 +24,7 @@ mod verdict;
 mod watch;
 mod worktree;
 
+pub use caches::{CACHE_NAMES, caches_in, remove_cache, walk};
 pub use folder::{Commit, Folder, GitState, check_folder, folder_wants, git_state, short_remote};
 pub use git::git_at;
 pub use hosted::{
@@ -41,6 +44,7 @@ pub use logins::{
 pub use machine::{
     Leftover, Machine, ProcRow, Reaper, Role, machine_rows, orphan_label, shell_cmd,
 };
+pub use orphans::{ORPHAN_IDLE, TempOrphan, find_temp_orphans, remove_temp_orphan};
 pub use pr::{as_linked, find_pr, from_linked, from_status};
 pub use predicates::*;
 pub use temp::{

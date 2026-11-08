@@ -46,11 +46,19 @@ pub(crate) fn clean(p: &Path) -> PathBuf {
 }
 
 /// Whether p is a session's scratch folder as rush lays them out: the only
-/// folders its tidy-ups empty.
+/// folders its tidy-ups empty. Under the scratch root that's
+/// tmp/<project>/<id> of a session rush knows, not anything two below it
+/// (a sibling a script left, a deleted session's). A trailing "/", as
+/// TMPDIR has, is the same folder.
 pub fn is_temp_dir(p: &Path) -> bool {
     let p = clean(p);
+    let tr = temp_root();
+    if p == tr {
+        return false; // named tmp, but it holds every project's
+    }
     p.file_name().is_some_and(|n| n == "tmp")
-        || p.parent().and_then(Path::parent) == Some(temp_root().as_path())
+        || p.parent().and_then(Path::parent) == Some(tr.as_path())
+            && p.file_name().is_some_and(|n| root().join(n).is_dir())
 }
 
 thread_local! {
@@ -284,6 +292,32 @@ mod tests {
         ignore_system_temp(false);
     }
 
+    // Beyond Go: a session's scratch is the same folder as its TMPDIR,
+    // "/" and all; what a script left beside it, or a deleted session's
+    // folder, isn't one, nor are the folders above.
+    #[test]
+    fn is_temp_dir_table() {
+        let _h = Home::new();
+        std::fs::create_dir_all(dir("s1")).unwrap();
+        let proj = project_temp("/src/app");
+        let s = |x: &str| proj.join(x).to_string_lossy().into_owned();
+        let env = |p: &str| rush_core::adapter::tmpdir_env(p);
+        let old = dir("s1").join("tmp").to_string_lossy().into_owned();
+        for (p, want) in [
+            (s("s1"), true),
+            (env(&s("s1")), true),
+            (format!("{}//", s("s1")), true),
+            (s("s1browsefix-dd"), false),
+            (s("gone"), false),
+            (proj.to_string_lossy().into_owned(), false),
+            (temp_root().to_string_lossy().into_owned(), false),
+            (old.clone(), true),
+            (env(&old), true),
+        ] {
+            assert_eq!(is_temp_dir(Path::new(&p)), want, "{p:?}");
+        }
+    }
+
     // tmp_test.go:53
     #[test]
     fn is_temp_table() {
@@ -302,6 +336,8 @@ mod tests {
             (String::new(), false),
             (tr.clone(), true),
             (j(&temp_root(), &["a", "b"]), true),
+            (format!("{}/", j(&temp_root(), &["a", "b"])), true), // as TMPDIR has it
+            (format!("{}/", j(&r, &["s1", "tmp"])), true),
             (format!("{tr}x"), false),
             (j(&r, &["s1", "tmp"]), true),
             (j(&r, &["s1", "tmp", "x"]), true),

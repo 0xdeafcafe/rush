@@ -546,6 +546,71 @@ fn clean_up_hands_to_delete() {
     );
 }
 
+/// Rush's scratch no session owns is listed in Clean up (Rust-only): ticked
+/// once untouched for days, not while it changed lately, and never while a
+/// running session's id starts its name; enter hands what's ticked to
+/// Delete.
+#[test]
+fn clean_up_lists_scratch_no_session_owns() {
+    use rush_ui_projects_machine::clean::{CleanSheet, open_clean_sheet};
+    use rush_ui_projects_machine::delete::DeleteSheet;
+    let mut run = agent("6a3b0b5d", "browse fix", "/src/alpha", "/src/alpha", 1, 0);
+    run.0.rush = true;
+    let mut m = model(vec![run], 140, 50, classic());
+    let d = m.kept::<Data>();
+    d.checked = NOW;
+    let o = |p: &str, session: &str, ago: Ms| rush_fleet::TempOrphan {
+        path: format!("/cfg/tmp/{p}"),
+        size: 3 << 20,
+        newest: NOW - ago,
+        session: session.into(),
+        gone: false,
+    };
+    d.scratch_orphans = vec![
+        o("app-1a2b3c4d/6a3b0b5dbrowsefix-dd", "6a3b0b5d", 120 * HOUR),
+        o("os27-builds", "", 120 * HOUR),
+        o("app-1a2b3c4d/share_links_patch.py", "", HOUR),
+    ];
+    open_clean_sheet(&mut m);
+    let s = m.sheet_as::<CleanSheet>().expect("Clean up didn't open");
+    let on: Vec<(String, bool)> = s
+        .items
+        .iter()
+        .filter_map(|it| it.orphan.as_ref().map(|o| (o.path.clone(), it.on)))
+        .collect();
+    assert_eq!(
+        on,
+        [
+            (
+                "/cfg/tmp/app-1a2b3c4d/6a3b0b5dbrowsefix-dd".to_string(),
+                false
+            ),
+            ("/cfg/tmp/os27-builds".to_string(), true),
+            (
+                "/cfg/tmp/app-1a2b3c4d/share_links_patch.py".to_string(),
+                false
+            ),
+        ]
+    );
+    let page: String = m.frame().iter().map(|l| l.plain() + "\n").collect();
+    for want in [
+        "Rush's scratch no session owns",
+        "from browse fix's · browse fix is running",
+        "untouched for 5 days",
+        "changed 1h ago: may be in use",
+    ] {
+        assert!(page.contains(want), "Clean up lacks {want:?}:\n{page}");
+    }
+    press(&mut m, "enter");
+    let d = m.sheet_as::<DeleteSheet>().expect("enter opened Delete");
+    let paths: Vec<&str> = d
+        .items
+        .iter()
+        .filter_map(|d| d.orphan.as_ref().map(|o| o.path.as_str()))
+        .collect();
+    assert_eq!(paths, ["/cfg/tmp/os27-builds"]);
+}
+
 /// A rush session's temp work is the folder rush gives it first, then its
 /// agent's scratch (fleet/temp.go:27-40 TempDirs): Temporary counts it,
 /// worked out by rush_fleet's own TempDirs off the UI thread.

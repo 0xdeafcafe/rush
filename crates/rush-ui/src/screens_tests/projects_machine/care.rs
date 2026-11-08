@@ -156,7 +156,59 @@ fn starts_as_rush_s_own() {
         ("Cleanup", CARE_PLUGIN, "9.0G free on disk")
     );
     assert!(s.prompt.contains("the disk has 9G free"), "{}", s.prompt);
+    // Beyond Go: never auto or bypass, whatever new sessions start in.
+    assert_eq!(
+        rush_core::adapter::trust(&s.permission_mode),
+        0,
+        "{}",
+        s.permission_mode
+    );
     assert_eq!(m.kept::<Care>().agents[0].0, "fake-1");
+}
+
+// The cleanup agent's mode is one that asks: default where there is one,
+// else the first asking mode but plan, else the agent's own.
+#[test]
+fn asking_modes() {
+    let ms = |ids: &[&str]| -> Vec<rush_core::adapter::Choice> {
+        ids.iter()
+            .map(|id| rush_core::adapter::Choice {
+                id: (*id).into(),
+                ..Default::default()
+            })
+            .collect()
+    };
+    for (modes, want) in [
+        (
+            ms(&[
+                "default",
+                "acceptEdits",
+                "plan",
+                "auto",
+                "bypassPermissions",
+            ]),
+            "default",
+        ),
+        (ms(&["yolo", "plan", "suggest", "full-access"]), "suggest"),
+        (ms(&["auto", "yolo"]), ""),
+        (ms(&[]), ""),
+    ] {
+        assert_eq!(asking_mode(&modes), want, "{modes:?}");
+    }
+}
+
+// Its plan's turn ends on a decisions block: it waits on you (Blocked,
+// under Needs you), still at work for the watch, not finished.
+#[test]
+fn a_cleanup_agent_waiting_on_its_plan_isnt_finished() {
+    let mut m = crate::new_model("t");
+    m.agents = vec![cleanup_agent(rush_core::agent::State::Working)];
+    let (done, busy) = finished_care(&mut m, 1_000_000);
+    assert!(done.is_empty() && busy);
+    m.agents[0].job.state = rush_core::agent::State::Blocked;
+    let (done, busy) = finished_care(&mut m, 1_000_000 + 10 * CARE_SETTLE);
+    assert!(done.is_empty(), "the plan's turn taken as its end");
+    assert!(busy, "a cleanup waiting on you holds the offer");
 }
 
 #[test]
@@ -182,9 +234,37 @@ fn prompt_has_rules_known_and_reports() {
         false,
     );
     assert!(!p.contains("Look further"));
-    assert!(p.starts_with("Free disk space and memory on this machine, then report and stop. rush started you because the disk is low. "));
+    assert!(p.starts_with("Free disk space and memory on this machine, but only what the user approves. rush started you because the disk is low. "));
     assert!(p.contains("\nHaven, as its plugin says:\nStop only idle stacks.\n"));
     assert!(p.contains("What rush knows:\nDisk: 1G free of 2G.\n"));
+    assert!(!p.contains("Nobody is watching"), "{p}");
+    // Approve first (Rust-only): a read-only plan of every path with its
+    // size, why and whether it's conservative, totals, a decisions block of
+    // all, some or none; then only what's approved, in one script.
+    for want in [
+        "Never delete, remove or stop anything on your own",
+        "Phase 1, now, is read-only",
+        "delete, remove or stop nothing. End your turn with a plan",
+        "every path you would delete, each with its size and why it's safe to go",
+        "conservative: yes when it's only something made or fetched again",
+        "each group's total, and a grand total",
+        "what you'd leave, and why",
+        "$TMPDIR/cleanup-plan.tsv",
+        "(a) delete all of it; (b) only some, the user names which; (c) none.",
+        "Phase 2 starts only once the user answers. Delete exactly what they approved, nothing new",
+        "one script, $TMPDIR/cleanup.sh",
+        "run it once, so the user sees and approves one command",
+        "Run df -h before and after",
+        "one that changed since the plan (touched since, or now in use) stays out of the script, and you say so",
+        // Rush's own scratch, by whether its session is done, stopped or
+        // running, and what no session owns.
+        "- Rush's scratch folders (each session's $TMPDIR, listed below): a done session's; a stopped one's only once nothing has touched it for days",
+        "a running one's never.",
+        "no session's once nothing has touched it for days and no running session uses it",
+        "never the folders that hold them",
+    ] {
+        assert!(p.contains(want), "the rules lack {want:?}:\n{p}");
+    }
     assert!(p.ends_with("\nWhat Haven reports:\n3 stacks idle\n"));
 }
 
@@ -255,10 +335,15 @@ fn sheet_says_what_it_reads() {
     assert!(t.starts_with("Cleanup  the disk has 10.0G free"), "{t}");
     let flat = t.replace("\n  ", " ");
     assert!(
-        flat.contains("what agents left in /tmp and what Haven and go-clean report, remove"),
+        flat.contains("your worktrees, rush's scratch folders, what agents left in /tmp and what Haven and go-clean report, deleting nothing, and propose"),
         "{t}"
     );
-    assert!(t.contains("Start a cleanup agent  in auto mode"));
+    assert!(t.contains("Start a cleanup agent  asks before it deletes anything"));
+    assert!(
+        flat.contains("propose a list of what can go without losing work"),
+        "{t}"
+    );
+    assert!(!t.contains("auto mode"), "{t}");
     assert!(t.contains("Start one that looks further"));
     assert!(t.contains("▍ Not now  asks again in 6 hours if it's still so"));
     assert!(t.contains("↑↓ choose"));
@@ -362,6 +447,91 @@ fn start_goes_on_past_the_wait() {
     let late = st.late.expect("the scan lands later");
     go.send(()).unwrap();
     assert_eq!(late.recv().ok(), Some(7));
+}
+
+/// The brief names rush's own scratch (Rust-only): sessions' folders of
+/// 100M or more, biggest first, each done, stopped or running, and what's
+/// in rush's scratch root that no session owns, kept while a running
+/// session's id starts its name.
+#[test]
+fn known_lists_rush_scratch() {
+    use rush_core::agent::{Agent, State};
+    const DAY: Ms = 24 * 3_600_000;
+    let now: Ms = 1_793_190_896_789;
+    let mut m = crate::new_model("t");
+    m.now = now;
+    let ses = |id: &str, name: &str, pid: i32, ago: Ms| {
+        let mut a = Agent {
+            key: format!("default/{id}"),
+            display_name: name.into(),
+            rush: true,
+            pid,
+            ..Agent::default()
+        };
+        a.job.id = id.into();
+        a.job.state = if pid != 0 {
+            State::Working
+        } else {
+            State::Idle
+        };
+        a.job.updated_at = now - ago;
+        a
+    };
+    m.agents = vec![
+        ses("aaaa1111", "done work", 0, 2 * DAY),
+        ses("bbbb2222", "stopped work", 0, 3 * 3_600_000),
+        ses("cccc3333", "running work", 9, 0),
+        ses("dddd4444", "small work", 0, DAY),
+    ];
+    m.group_of
+        .insert("default/aaaa1111".into(), crate::list::FINISHED.into());
+    let d = m.kept::<Data>();
+    for (id, mb) in [
+        ("aaaa1111", 150),
+        ("bbbb2222", 300),
+        ("cccc3333", 200),
+        ("dddd4444", 10),
+    ] {
+        d.temp.insert(
+            format!("default/{id}"),
+            TempWork {
+                dirs: vec![rush_core::adapter::TempDir {
+                    path: format!("/cfg/tmp/app-1a2b3c4d/{id}"),
+                    keep: true,
+                }],
+                bytes: mb << 20,
+                known: true,
+            },
+        );
+    }
+    let o = |p: &str, session: &str, size: i64, ago: Ms| rush_fleet::TempOrphan {
+        path: format!("/cfg/tmp/{p}"),
+        size,
+        newest: now - ago,
+        session: session.into(),
+        gone: false,
+    };
+    d.scratch_orphans = vec![
+        o("os27-builds", "", 2 << 30, 5 * DAY),
+        o("app-1a2b3c4d/cccc3333browse", "cccc3333", 5 << 20, 4 * DAY),
+    ];
+    let mut out = Vec::new();
+    care_known_with(&m, &mut out, -1);
+    assert_eq!(
+        out[1..],
+        [
+            "",
+            "Sessions' scratch folders (their $TMPDIR) of 100M or more (path · session · size · done/stopped/running · last touched):",
+            "- /cfg/tmp/app-1a2b3c4d/bbbb2222 · stopped work · 300M · stopped · last touched 3h ago",
+            "- /cfg/tmp/app-1a2b3c4d/cccc3333 · running work · 200M · running · last touched just now",
+            "- /cfg/tmp/app-1a2b3c4d/aaaa1111 · done work · 150M · done · last touched 2 days ago",
+            "",
+            "In rush's scratch folders but no session's (path · size · last touched · the session it probably came from):",
+            "- /cfg/tmp/os27-builds · 2.0G · last touched 5 days ago",
+            "- /cfg/tmp/app-1a2b3c4d/cccc3333browse · 5M · last touched 4 days ago · from running work · running work is running: keep it",
+        ]
+    );
+    assert!(out[0].starts_with("Worktrees: rush hasn't looked yet"));
 }
 
 #[test]

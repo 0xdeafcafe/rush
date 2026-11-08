@@ -41,9 +41,9 @@ pub const CARE_EVERY: Ms = 5_000;
 /// The plugin rush recommends turning on (bundled/cleanup).
 pub const CARE_PLUGIN: &str = "cleanup";
 
-/// A cleanup agent to start: its task, where, and its name. It runs in
-/// auto mode where its agent has one: nobody is watching to answer its
-/// permission prompts.
+/// A cleanup agent to start: its task, where, and its name. auto runs it
+/// in its agent's auto mode where there is one (Go's, for nobody watching
+/// to answer its prompts); rush's own start leaves it off, so it asks.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CareStart {
     pub prompt: String,
@@ -263,9 +263,8 @@ pub fn watch_machine(m: &mut Model) {
     if st.started == 0 {
         st.started = now;
     }
-    if st.busy {
-        return;
-    }
+    // Read while a cleanup agent is at work too, for the dire watch (its
+    // plan may wait on you); the offer still holds off (below).
     if st.reading || now - st.read_at < CARE_EVERY || data(m).frozen || m.sender().is_none() {
         return;
     }
@@ -287,6 +286,8 @@ pub fn watch_machine(m: &mut Model) {
             } else if c.pressed_since == 0 {
                 c.pressed_since = now;
             }
+            super::dire::watch_dire(m, d.free, d.total);
+            let c = m.kept::<Care>();
             if c.busy
                 || now - c.started < CARE_WARMUP
                 || (c.asked > 0 && now - c.asked < CARE_SNOOZE)
@@ -419,7 +420,7 @@ impl CareSheet {
 
     /// What the cleanup agent reads, in words.
     fn reads(&self) -> String {
-        let what = "your worktrees, what agents left in /tmp".to_string();
+        let what = "your worktrees, rush's scratch folders, what agents left in /tmp".to_string();
         if self.from.is_empty() {
             return what;
         }
@@ -578,7 +579,9 @@ pub fn start_care(
         prompt: care_prompt(why, known, reports, further),
         cwd: std::env::var("HOME").unwrap_or_default(),
         name: "Cleanup".into(),
-        auto: true,
+        // Beyond Go, which started it in auto mode: it asks before every
+        // deletion, and deletes only what you approved.
+        auto: false,
         // rush's own: the list says so, and finds it again after a reload.
         started_by: CARE_PLUGIN.into(),
         why: short.into(),
@@ -603,11 +606,31 @@ pub fn care_started(m: &mut Model, r: Result<String, String>) -> Out {
     Out::Draw
 }
 
+/// The mode of an agent's modes that asks before it does anything it
+/// isn't sure of (rush_core's trust 0), for a cleanup agent that mustn't
+/// delete on its own: "default" where there is one, else the first that
+/// asks and isn't plan (which would keep it from running the removals
+/// you approve). "" (the agent's own default) only when none is listed.
+/// Rust-only.
+pub fn asking_mode(modes: &[rush_core::adapter::Choice]) -> String {
+    modes
+        .iter()
+        .find(|x| x.id == "default")
+        .or_else(|| {
+            modes.iter().find(|x| {
+                rush_core::adapter::trust(&x.id) == 0 && x.id != "plan" && !x.id.is_empty()
+            })
+        })
+        .map(|x| x.id.clone())
+        .unwrap_or_default()
+}
+
 /// The starter session_core sets once hosts can start sessions: the
 /// cleanup agent in c.cwd as the next session starts there, named
-/// Cleanup, as rush's own (StartedBy, Meta's why), in its agent's auto
-/// mode when it has one, since nobody is watching to answer its
-/// permission prompts (pick's startHosted :313-322, autoMode :360).
+/// Cleanup, as rush's own (StartedBy, Meta's why) (pick's startHosted
+/// :313-322, autoMode :360). Beyond Go: unless c.auto, in the mode of its
+/// agent's that asks (asking_mode), never the one new sessions start in,
+/// so nothing is deleted without you.
 pub fn start_with_hosts(m: &mut Model, c: CareStart) -> Out {
     use crate::host::hosts;
     let calls = &m.ext.calls;
@@ -624,12 +647,16 @@ pub fn start_with_hosts(m: &mut Model, c: CareStart) -> Out {
     } else {
         next.profile.clone()
     };
-    if c.auto
-        && m.reg
-            .choices_of(&s.kind)
-            .is_some_and(|ch| ch.modes.iter().any(|x| x.id == "auto"))
-    {
+    let modes = m
+        .reg
+        .choices_of(&s.kind)
+        .map(|ch| ch.modes)
+        .unwrap_or_default();
+    if c.auto && modes.iter().any(|x| x.id == "auto") {
         s.permission_mode = "auto".into();
+    } else if !c.auto {
+        // Never the mode new sessions start in, which may trust more.
+        s.permission_mode = asking_mode(&modes);
     }
     let h = hosts(m);
     m.later(move || h.start(&s).map(|st| st.id), care_started);
@@ -648,7 +675,7 @@ impl Sheet for CareSheet {
             (
                 format!(
                     "rush noticed that {}. The cleanup plugin is off, and recommended now: with it on, rush offers a cleanup agent \
-                     when this happens, which looks at {reads}, removes what can go without losing work and tells you what it did. \
+                     when this happens, which looks at {reads} and proposes a list of what can go without losing work for you to approve. \
                      Nothing starts until you say yes.",
                     self.why
                 ),
@@ -666,13 +693,15 @@ impl Sheet for CareSheet {
             (
                 format!(
                     "{noticed}A cleanup agent can look at {reads}, \
-                     remove what can go without losing work (a worktree only once it's committed and pushed), stop what's holding memory that nobody works in, \
-                     and tell you what it did. Told to look further, it also hunts the rest of the disk for caches that rebuild themselves, \
+                     deleting nothing, and propose a list of what can go without losing work (a worktree only once it's committed and pushed) \
+                     and what holds memory that nobody works in, with each path, its size and why, for you to approve: all, some or none. \
+                     It removes only what you approve, in one command you see first, and tells you what it freed. \
+                     Told to look further, it also hunts the rest of the disk for caches that rebuild themselves, \
                      and lists the big things it leaves for you. It's marked done when it finishes, which stops it.",
                 ),
                 (
                     "Start a cleanup agent",
-                    "in auto mode, with the agent and model new sessions start with",
+                    "asks before it deletes anything, with the agent and model new sessions start with",
                 ),
             )
         };
@@ -784,6 +813,7 @@ pub fn care_known_with(m: &Model, out: &mut Vec<String>, mem_level: i32) {
             "Worktrees: rush hasn't looked yet; find them with git worktree list in the repositories under ~/Source."
                 .into(),
         );
+        scratch_known(m, out);
         return;
     }
     out.push(String::new());
@@ -815,6 +845,93 @@ pub fn care_known_with(m: &Model, out: &mut Vec<String>, mem_level: i32) {
             st.tmp.stale_items,
             disk(st.tmp.stale)
         ));
+    }
+    scratch_known(m, out);
+}
+
+/// How long ago, in words, in days past one: "3h ago", "4 days ago".
+fn touched(d: Ms) -> String {
+    if d >= 24 * 3_600_000 {
+        format!("{} ago", super::clean::untouched_for(d))
+    } else {
+        ago(d)
+    }
+}
+
+/// A session's scratch folder this big or more is named in the cleanup
+/// agent's brief.
+pub const CARE_SCRATCH_SHOWN: i64 = 100 << 20;
+
+/// Rush's own scratch, for the cleanup agent (Rust-only): sessions'
+/// scratch folders of CARE_SCRATCH_SHOWN or more, biggest first, and
+/// what's in the scratch root that no session owns.
+fn scratch_known(m: &Model, out: &mut Vec<String>) {
+    let st = data(m);
+    let mut rows: Vec<(i64, String)> = Vec::new();
+    for g in agents(m).filter(|g| g.a.rush && !g.a.job.id.is_empty()) {
+        let size = st.temp_of(&g.a.key);
+        if size < CARE_SCRATCH_SHOWN {
+            continue;
+        }
+        let state = if g.a.pid != 0 || g.busy() {
+            "running"
+        } else if m.group_of.get(&g.a.key).map(String::as_str) == Some(crate::list::FINISHED) {
+            "done"
+        } else {
+            "stopped"
+        };
+        let name = one_line(&g.a.display_name);
+        // Rush's own folder is a session's first (rush_fleet::temp_dirs).
+        let path = st
+            .temp
+            .get(&g.a.key)
+            .and_then(|t| t.dirs.first())
+            .map(|d| d.path.clone())
+            .unwrap_or_else(|| rush_fleet::temp_dir(&g.a.job.id));
+        rows.push((
+            size,
+            format!(
+                "- {path} · {} · {} · {state} · last touched {}",
+                if name.is_empty() { &g.a.job.id } else { &name },
+                disk(size),
+                touched(untouched(st, &g, m.now)),
+            ),
+        ));
+    }
+    rows.sort_by_key(|r| std::cmp::Reverse(r.0));
+    if !rows.is_empty() {
+        out.push(String::new());
+        out.push(format!(
+            "Sessions' scratch folders (their $TMPDIR) of {} or more (path · session · size · done/stopped/running · last touched):",
+            disk(CARE_SCRATCH_SHOWN)
+        ));
+        out.extend(rows.into_iter().map(|r| r.1));
+    }
+    let live = running_ids(m);
+    let orphans: Vec<&rush_fleet::TempOrphan> =
+        st.scratch_orphans.iter().filter(|o| !o.gone).collect();
+    if orphans.is_empty() {
+        return;
+    }
+    out.push(String::new());
+    out.push(
+        "In rush's scratch folders but no session's (path · size · last touched · the session it probably came from):"
+            .into(),
+    );
+    for o in orphans {
+        let mut l = format!(
+            "- {} · {} · last touched {}",
+            o.path,
+            disk(o.size),
+            touched(m.now - o.newest)
+        );
+        if !o.session.is_empty() {
+            l += &format!(" · from {}", session_name(m, &o.session));
+        }
+        if let Some(id) = o.used_by(&live) {
+            l += &format!(" · {} is running: keep it", session_name(m, id));
+        }
+        out.push(l);
     }
 }
 
@@ -870,15 +987,17 @@ pub fn care_prompt(
 ) -> String {
     let mut b = String::new();
     b += &format!(
-        "Free disk space and memory on this machine, then report and stop. rush started you because {why}. "
+        "Free disk space and memory on this machine, but only what the user approves. rush started you because {why}. "
     );
-    b += "Nobody is watching, so don't ask questions: do only what loses no work, and leave the rest.\n\n";
-    b += "Rules:
-- Remove a worktree only when it's can-go below, or git shows nothing uncommitted, unpushed or unmerged in it. can-go is safe even when git calls its branch unmerged: rush found its pull request merged (a squash merge). Use git worktree remove and keep its branch. Never touch one an agent is working in, or a repository's main checkout.
-- Remove what agents left in /tmp or outside their projects only when it's marked safe, or nothing has touched it for days and nothing running uses it.
-- Build caches that rebuild themselves (node_modules, .next, .turbo, target, dist) may go from worktrees nobody works in.
-- pnpm's node_modules are mostly hard links into its shared store, so removing them frees little until pnpm store prune runs; run it once after.
-- Never delete databases, ~/.claude, transcripts, anything in a project that isn't a cache or a worktree, or anything you're unsure of.
+    b += "Never delete, remove or stop anything on your own: you work in two phases, and nothing goes before the user answers.\n\n";
+    b += CARE_PHASES;
+    b += "\nWhat may be in your plan:
+- A worktree only when it's can-go below, or git shows nothing uncommitted, unpushed or unmerged in it. can-go is safe even when git calls its branch unmerged: rush found its pull request merged (a squash merge). It goes with git worktree remove, its branch kept. Never one an agent is working in, or a repository's main checkout.
+- What agents left in /tmp or outside their projects only when it's marked safe, or nothing has touched it for days and nothing running uses it.
+- Rush's scratch folders (each session's $TMPDIR, listed below): a done session's; a stopped one's only once nothing has touched it for days, as it may be resumed; a running one's never. What's in rush's scratch folders but no session's once nothing has touched it for days and no running session uses it (none whose id starts its name). What's in them, never the folders that hold them: rush's tmp folder and each project's folder in it.
+- Build caches that rebuild themselves (node_modules, .next, .turbo, target, dist) from worktrees nobody works in.
+- pnpm's node_modules are mostly hard links into its shared store, so removing them frees little until pnpm store prune runs: when the plan has any, it ends with pnpm store prune, once.
+- Never databases, ~/.claude, transcripts, anything in a project that isn't a cache or a worktree, or anything you're unsure of: those go in the list you leave, with why.
 ";
     if further {
         b += CARE_FURTHER;
@@ -888,11 +1007,11 @@ pub fn care_prompt(
             b += &format!("\n{}, as its plugin says:\n{}\n", r.title, r.rules.trim());
         }
     }
-    b += "\nDo the biggest wins first. Wait on a long command by running it in the foreground with a long timeout, or in the background until its notice comes; never sleep to wait.\n";
+    b += "\nList the biggest wins first. Wait on a long command by running it in the foreground with a long timeout, or in the background until its notice comes; never sleep to wait.\n";
     if further {
-        b += "\nEnd with a short report, under 15 lines: what you removed or stopped, how much it freed as df measures it before and after, what you left and why, and the biggest things you found but left for the person to decide on, each with its path and size.\n\n";
+        b += "\nEnd phase 2 with a short report, under 15 lines: what you removed or stopped, how much it freed as df measures it before and after, what you skipped or left and why, and the biggest things you found but left for the user to decide on, each with its path and size.\n\n";
     } else {
-        b += "\nEnd with a short report, under 10 lines: what you removed or stopped, how much it freed as df measures it before and after, and what you left and why.\n\n";
+        b += "\nEnd phase 2 with a short report, under 10 lines: what you removed or stopped, how much it freed as df measures it before and after, and what you skipped or left and why.\n\n";
     }
     b += &format!("What rush knows:\n{}\n", known.join("\n"));
     for r in reports {
@@ -901,15 +1020,33 @@ pub fn care_prompt(
     b
 }
 
+/// The plan's file in the cleanup agent's $TMPDIR: rush reads it to pick
+/// what it may remove itself when the disk is dire and you're away
+/// (dire.rs). Rust-only.
+pub const CARE_PLAN_FILE: &str = "cleanup-plan.tsv";
+
+/// The cleanup agent's two phases: a read-only plan the user approves,
+/// then exactly what was approved, in one script (Rust-only: Go's ran in
+/// auto mode and deleted as it went).
+const CARE_PHASES: &str = "Phase 1, now, is read-only: survey (df -h, du, git status and git worktree list, the reports below) and delete, remove or stop nothing. End your turn with a plan:
+- every path you would delete, each with its size and why it's safe to go (a can-go worktree, a done session's scratch, a cache that rebuilds itself, …) and conservative: yes when it's only something made or fetched again that loses no work (a done session's scratch untouched for days, a build cache in a worktree nobody works in, pnpm store prune), else conservative: no;
+- each group's total, and a grand total of the space it frees;
+- what you'd leave, and why;
+- the same plan as $TMPDIR/cleanup-plan.tsv, one line per path: path, bytes, conservative (yes or no) and why, tab separated; it's the one file you write in phase 1;
+- then a decisions block with one decision: (a) delete all of it; (b) only some, the user names which; (c) none.
+Phase 2 starts only once the user answers. Delete exactly what they approved, nothing new: write the removals as one script, $TMPDIR/cleanup.sh, one line per approved path (rm -rf for a folder or file, git -C <repo> worktree remove for a worktree), then pnpm store prune if the plan has it, and run it once, so the user sees and approves one command. Run df -h before and after. Look at each path again first: one that changed since the plan (touched since, or now in use) stays out of the script, and you say so. With (c), delete nothing and say what you'd have freed.
+";
+
 /// What a cleanup agent told to look further may also do (Beyond Go).
 const CARE_FURTHER: &str = "
-Look further, too: past what rush knows, find what takes the most space on this disk (du -xhd1 on the home folder, ~/Library, ~/Library/Caches, ~/Library/Developer, ~/.cache and the package managers' folders) and free what rebuilds itself or is fetched again:
+Look further, too: past what rush knows, find what takes the most space on this disk (du -xhd1 on the home folder, ~/Library, ~/Library/Caches, ~/Library/Developer, ~/.cache and the package managers' folders) and put in your plan what rebuilds itself or is fetched again:
 - applications' caches in ~/Library/Caches and ~/.cache;
 - Xcode's DerivedData, device support for OS versions no device here runs, and unavailable simulators (xcrun simctl delete unavailable);
 - package managers' caches through their own commands (brew cleanup, npm cache clean --force, pnpm store prune, pip cache purge, cargo's registry cache), and build caches (target, node_modules, .next) in projects untouched for weeks;
 - Docker's dangling images and build cache (docker image prune, docker builder prune), never its volumes or containers;
 - the copies of Chrome each launch leaves in $(getconf DARWIN_USER_TEMP_DIR)/../X/com.google.Chrome.code_sign_clone, except those a running Chrome has open (lsof): they share most of their blocks with Chrome, so du overstates them; say what df shows they freed.
-Never remove documents, Downloads, Desktop, photos, music, mail, messages, or anything in ~/Library/Containers, ~/Library/Application Support or ~/Library/Group Containers: list the biggest of these in your report for the person to decide on.
+Commands that free space (brew cleanup, docker image prune, …) go in the plan, and in phase 2's script once approved, as paths do.
+Never propose documents, Downloads, Desktop, photos, music, mail, messages, or anything in ~/Library/Containers, ~/Library/Application Support or ~/Library/Group Containers: list the biggest of these in your plan's leave list for the user to decide on.
 ";
 
 /// Opens the cleanup sheet because you asked (#cleanup): whatever the

@@ -971,9 +971,35 @@ pub struct SpendTarget {
     pub past: bool,
 }
 
+/// A scratch folder as an agent is given it in TMPDIR (and TMP, TEMP,
+/// CLAUDE_CODE_TMPDIR): ending in one "/", as macOS's own TMPDIR does, so a
+/// script that writes "$TMPDIR$name" stays inside it rather than leaving a
+/// sibling beside it. Beyond Go, which gave it without. Rush keeps the
+/// folder itself (StartOptions::temp_dir, Info.TempDir) without the slash.
+pub fn tmpdir_env(dir: &str) -> String {
+    if dir.is_empty() {
+        return String::new();
+    }
+    format!("{}/", dir.trim_end_matches('/'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tmpdir_env_ends_in_one_slash() {
+        for (dir, want) in [
+            ("", ""),
+            ("/", "/"),
+            ("/a/tmp/p-1/s1", "/a/tmp/p-1/s1/"),
+            ("/a/tmp/p-1/s1/", "/a/tmp/p-1/s1/"),
+            ("/a/tmp/p-1/s1//", "/a/tmp/p-1/s1/"),
+            ("rel", "rel/"),
+        ] {
+            assert_eq!(tmpdir_env(dir), want, "tmpdir_env({dir:?})");
+        }
+    }
 
     // trust_test.go (TestTrustedAs).
     #[test]

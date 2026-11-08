@@ -44,6 +44,7 @@ static FIELDS: &[Field] = fields![
     "twatter" => Bool: feed,
     "cleanupDiskGB" => Int: cleanup_disk_gb,
     "cleanupRAMMinutes" => Int: cleanup_ram_minutes,
+    "cleanupDireGB" => Int: cleanup_dire_gb,
     "hideMinimap" => Bool: hide_minimap,
     "gridBelow" => Bool: grid_below,
     "gridShare" => Float: grid_share,
