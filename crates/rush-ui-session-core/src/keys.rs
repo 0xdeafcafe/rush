@@ -143,7 +143,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     if s == "?" && empty {
         return Out::Pass; // the keys' help
     }
-    if !picked.is_empty() && (s == "ctrl+enter" || s == "ctrl+s") {
+    if !picked.is_empty() && s == "ctrl+enter" {
         let rk = super::row_key(m);
         m.flash(&format!(
             "{rk} opens or closes the row · esc returns to your message"
@@ -230,7 +230,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
             let a = agent(m, &key).cloned();
             return rush_ui_cmdbar::stops::dismiss(m, a);
         }
-        "ctrl+enter" | "ctrl+s" => {
+        "ctrl+enter" => {
             if !empty {
                 return send(m, &key, true);
             }

@@ -348,10 +348,16 @@ fn the_ways_enter_sends() {
     assert_eq!(fake.ops(), [send("hello there", false)]);
 
     working(&mut m, "hello there");
+    // ctrl+s doesn't send now: a save by habit mid-turn would cut in.
+    fake.ops.lock().unwrap().clear();
+    typed(&mut m, "one");
+    press(&mut m, "ctrl+s");
+    assert!(fake.ops().is_empty(), "ctrl+s sent {:?}", fake.ops());
+    assert_eq!(input(&mut m), "one");
+    conn(&mut m, KEY).input.set("");
     let cases: &[(Option<&str>, &str, Op)] = &[
         (None, "enter", send("one", false)),
         (None, "ctrl+enter", send("one", true)),
-        (None, "ctrl+s", send("one", true)),
         (
             Some("ctrl+t"),
             "enter",

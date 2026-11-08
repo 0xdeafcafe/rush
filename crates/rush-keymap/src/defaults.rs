@@ -101,7 +101,7 @@ const DEFAULTS: &[Row] = &[
     ("page.back", Pg, "Settings: back out, a column left on Config; never changes a value", &["left"], false),
     ("page.switch", Pg, "Settings: switch an on/off row", &["space"], false),
 
-    ("session.send", S, "send now, the queue first", &["ctrl+enter", "ctrl+s"], false),
+    ("session.send", S, "send now, the queue first", &["ctrl+enter"], false),
     ("session.enter", S, "send the message from the composer", &["enter"], false),
     ("session.right", S, "open what's picked", &["right"], false),
     ("session.back", S, "back: off a row, to Agents", &["left"], false),
