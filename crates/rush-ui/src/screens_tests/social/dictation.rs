@@ -372,6 +372,11 @@ fn push_to_talk_expects_the_words_on_screen() {
         ..Default::default()
     }];
     m.sel = "a".into();
+    // The agents rush knows are expected too, on screen or not: Claude
+    // Code's models as its registry names them.
+    let reg = rush_core::adapter::Registry::new();
+    reg.register(rush_claude::Claude::new());
+    m.reg = reg;
     let _ = press(&mut m, "ctrl+space");
     assert_eq!(calls(&c), ["start "]);
     assert_eq!(
@@ -380,7 +385,15 @@ fn push_to_talk_expects_the_words_on_screen() {
             "LangWatch exporter",
             "LangWatch",
             "fix/rushd-restart",
-            "rushd-restart"
+            "rushd-restart",
+            "@langwatch-exporter",
+            "Anthropic",
+            "Claude Code",
+            "Claude",
+            "Opus",
+            "Sonnet",
+            "Haiku",
+            "Fable",
         ]
     );
 }

@@ -34,7 +34,11 @@
 //! Both are told the words on the window's screen (screenwords.rs) so
 //! names come out spelled as written: yap on its socket whenever they
 //! change while it's followed (read after a frame, at most once a second),
-//! push-to-talk as it starts. That has no Go original.
+//! push-to-talk as it starts. Ahead of the screen's own words go the
+//! names of the agents and models rush knows, read from its registry off
+//! the UI thread and again every [`NAMES_EVERY`], so "a Fable subagent"
+//! is heard as one whether or not Fable is on screen. That has no Go
+//! original.
 //!
 //! The yap side is ported from Go's internal/ui/yap.go (yapLive :23,
 //! yapSync :50, onYap :94, onYapTick :108, yapShown :124, yapPaste :131,
@@ -72,6 +76,10 @@ const EVERY: Duration = Duration::from_millis(50);
 /// for this long, in ms: the dictation ended with nothing, or yap went.
 pub const WAIT_GRACE: rush_core::time::Ms = 1_000;
 
+/// The agents' and models' names are read again at most this often:
+/// they change only as Settings or an account does.
+pub const NAMES_EVERY: Duration = Duration::from_secs(300);
+
 /// The box's hint while its message waits for the dictation.
 pub const WAITING_HINT: &str = "↵ sends when yap finishes";
 
@@ -106,6 +114,10 @@ pub struct Dictation {
     words_at: Option<Instant>,
     words_sig: Option<u64>,
     words_due: bool,
+    /// The agents' and models' names (screenwords::agent_names), and
+    /// when they were last asked for.
+    names: Vec<String>,
+    names_at: Option<Instant>,
     /// A finished yap dictation's text until its paste arrives, and when
     /// yap said it.
     yap_final: String,
@@ -225,6 +237,7 @@ pub fn sync(m: &mut Model) {
     let d = state(m);
     d.yap_stop = Some(stop_tx);
     d.yap_say = Some(say_tx);
+    read_names(m);
     // yap hears the words on screen as it's found.
     read_words(m, Instant::now());
     state(m).shows = shows_now(m);
@@ -263,6 +276,7 @@ pub fn after_frame(m: &mut Model) {
     if !followed {
         return;
     }
+    read_names(m);
     let shows = shows_now(m);
     if shows != state(m).shows {
         state(m).shows = shows;
@@ -296,13 +310,45 @@ fn read_words(m: &mut Model, now: Instant) -> bool {
         return false;
     }
     state(m).words_sig = Some(sig);
-    let words = screenwords::collect(m);
+    let names = std::mem::take(&mut state(m).names);
+    let words = screenwords::collect(m, &names);
+    state(m).names = names;
     let d = state(m);
     if words == d.words {
         return false;
     }
     d.words = words;
     true
+}
+
+/// Reads the agents' and models' names again, off the UI thread, unless
+/// they were asked for within [`NAMES_EVERY`]; when they've changed, the
+/// words are read again with them and yap told, while it's followed.
+fn read_names(m: &mut Model) {
+    let now = Instant::now();
+    let d = state(m);
+    if d.names_at
+        .is_some_and(|t| now.duration_since(t) < NAMES_EVERY)
+    {
+        return;
+    }
+    d.names_at = Some(now);
+    let reg = m.reg.clone();
+    m.later(
+        move || screenwords::agent_names(&reg),
+        |m, names| {
+            let d = state(m);
+            if names == d.names {
+                return Out::Idle;
+            }
+            d.names = names;
+            d.words_sig = None; // what they're read from changed
+            if d.yap_say.is_some() && read_words(m, Instant::now()) {
+                say_words(m);
+            }
+            Out::Idle
+        },
+    );
 }
 
 /// Tells yap the words on screen, and whether the window shows the
@@ -328,6 +374,7 @@ fn shows_now(m: &mut Model) -> bool {
 /// screen are said at once (tests).
 pub fn tell_yap(m: &mut Model, tx: mpsc::Sender<Say>) {
     state(m).yap_say = Some(tx);
+    read_names(m);
     read_words(m, Instant::now());
     state(m).shows = shows_now(m);
     say_words(m);
@@ -336,6 +383,7 @@ pub fn tell_yap(m: &mut Model, tx: mpsc::Sender<Say>) {
 /// The words on screen for a dictation starting now: as last read, read
 /// again when that's a second old.
 fn words_now(m: &mut Model) -> Vec<String> {
+    read_names(m);
     let now = Instant::now();
     let stale = state(m)
         .words_at
