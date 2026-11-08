@@ -38,6 +38,19 @@ pub fn disk_low(dir: &Path) -> bool {
 /// The entries of dir that a process has open, or works in: their names,
 /// as they are in dir. None when that can't be told.
 pub fn held_under(dir: &Path) -> Option<HashSet<String>> {
+    held_paths(dir, 1)
+}
+
+/// The folders two below dir that a process has open something in, or
+/// works in: their paths, as dir names them. None when that can't be told.
+pub fn held_under_tree(dir: &Path) -> Option<HashSet<std::path::PathBuf>> {
+    let held = held_paths(dir, 2)?;
+    Some(held.into_iter().map(|r| dir.join(r)).collect())
+}
+
+/// What a process has open, or works in, under dir: each cut to its first
+/// depth components below dir.
+fn held_paths(dir: &Path, depth: usize) -> Option<HashSet<String>> {
     // SAFETY: getuid can't fail.
     let uid = unsafe { libc::getuid() };
     let out = std::process::Command::new("lsof")
@@ -56,8 +69,8 @@ pub fn held_under(dir: &Path) -> Option<HashSet<String>> {
         let Some(rest) = line.strip_prefix(&prefix) else {
             continue;
         };
-        let name = rest.split('/').next().unwrap_or(rest);
-        held.insert(name.to_string());
+        let cut: Vec<&str> = rest.splitn(depth + 1, '/').take(depth).collect();
+        held.insert(cut.join("/"));
     }
     Some(held)
 }

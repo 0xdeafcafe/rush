@@ -38,6 +38,7 @@ pub mod hello;
 pub mod hosts;
 pub mod inbox;
 pub mod json;
+pub mod keep;
 pub mod kind;
 pub mod left;
 pub mod lines;

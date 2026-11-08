@@ -85,8 +85,8 @@ fn inside(root: &str, p: &str) -> bool {
     p.starts_with(root) && (p.len() == root.len() || p.as_bytes()[root.len()] == b'/')
 }
 
-/// Whether p is in a temp folder, a session's or the system's: somewhere
-/// work is scratch, never a project.
+/// Whether p is in a temp folder, a session's (its scratch or what it
+/// keeps) or the system's: somewhere work is scratch, never a project.
 pub fn is_temp(p: &str) -> bool {
     if p.is_empty() {
         return false;
@@ -94,7 +94,8 @@ pub fn is_temp(p: &str) -> bool {
     let p = clean(Path::new(p));
     let p = p.to_string_lossy();
     let tr = temp_root();
-    if inside(&tr.to_string_lossy(), &p) || system_temp(&p) {
+    let kr = crate::keep::keep_root();
+    if inside(&tr.to_string_lossy(), &p) || inside(&kr.to_string_lossy(), &p) || system_temp(&p) {
         return true;
     }
     let r = root();
@@ -371,6 +372,7 @@ mod tests {
             (format!("{}/", j(&temp_root(), &["a", "b"])), true), // as TMPDIR has it
             (format!("{}/", j(&r, &["s1", "tmp"])), true),
             (format!("{tr}x"), false),
+            (j(&crate::keep::keep_root(), &["a", "b", "c"]), true),
             (j(&r, &["s1", "tmp"]), true),
             (j(&r, &["s1", "tmp", "x"]), true),
             (j(&r, &["s1", "tmpx"]), false),

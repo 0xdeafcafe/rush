@@ -289,6 +289,21 @@ pub fn tidy(reg: &rush_core::adapter::Registry, p: TidyPlan) -> Tidied {
             }
         }
     }
+    // What sessions kept ($RUSH_KEEP): gone 30 days after it was last
+    // touched, or the oldest first with the disk nearly full, once the
+    // scratch above has gone. Never a running session's, nor one open.
+    let k = rush_host::keep::expire_kept(
+        std::time::SystemTime::now(),
+        &|id| host_running(id, 0),
+        &|| rush_sys::sysinfo::read_disk().free,
+        &|p| {
+            rush_fleet::disk_usage(&[rush_core::adapter::TempDir {
+                path: p.to_string_lossy().into_owned(),
+                keep: false,
+            }])
+        },
+    );
+    out.freed += k.bytes;
     out
 }
 
