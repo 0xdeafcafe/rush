@@ -859,7 +859,7 @@ impl Drawer<'_> {
     fn chat_asks(&mut self, room: usize) -> Vec<Txt> {
         let t = self.t;
         let mut out = Vec::new();
-        let open = open_list(self.s, self.ti);
+        let open = open_list(self.s, self.ti, &self.o.open);
         let all = decisions_of(t).len();
         if !open.is_empty() {
             let mut l = paint(
@@ -1317,7 +1317,7 @@ impl Drawer<'_> {
         // What needs you, each row with what it opens.
         let mut needs: Vec<(Txt, String)> = Vec::new();
         for (j, t) in turns.iter().enumerate() {
-            let ds = open_list(s, from + j);
+            let ds = open_list(s, from + j, &self.o.open);
             if let Some(d) = ds.first() {
                 let mut w = one_line(&d.topic);
                 if ds.len() > 1 {

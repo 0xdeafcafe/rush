@@ -157,8 +157,8 @@ fn stash_then_answer_puts_the_text_back() {
     assert!(s.contains("? decide"), "{s}");
     assert!(s.contains("stashed · comes back after the decision"), "{s}");
     golden("hold_stashed", &the_box(&mut m));
-    // a takes the agent's picks and sends them.
-    press(&mut m, "a");
+    // p takes the agent's picks and sends them.
+    press(&mut m, "p");
     screen(&mut m);
     assert_eq!(input(&mut m), ("half a thought".into(), 11), "back");
     let s = screen(&mut m).join("\n");

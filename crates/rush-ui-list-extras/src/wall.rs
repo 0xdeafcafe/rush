@@ -1572,8 +1572,9 @@ impl Place for Wall {
         let pairs: Vec<(&str, &str)> = if answering {
             vec![
                 ("enter", "picks"),
-                ("a", "takes its picks"),
-                ("s · esc", "sends nothing"),
+                ("p", "takes its picks"),
+                ("s", "sets it aside"),
+                ("esc", "back"),
             ]
         } else if asks {
             vec![

@@ -539,7 +539,7 @@ pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
 
 /// The decisions blocks of session key not answered, newest first, as
 /// the column shows them: one answered from the card whose answer hasn't
-/// landed yet left out. Worked out again only when the conversation has
+/// landed yet, or one whose card was set aside, left out. Worked out again only when the conversation has
 /// changed (open_decisions walks every turn).
 fn open_decisions(m: &mut Model, key: &str) -> Vec<(u32, Vec<Decision>)> {
     let Model { session, kept, .. } = m;
@@ -559,11 +559,11 @@ fn open_decisions(m: &mut Model, key: &str) -> Vec<(u32, Vec<Decision>)> {
         .2
         .iter()
         .filter(|(n, _)| {
+            // Nor one whose card was set aside.
             let r = rush_convo::render::decisions_ref(&format!("t{n}"));
-            !v.o.open
-                .get(&rush_convo::render::decisions_sent(&r))
-                .copied()
-                .unwrap_or(false)
+            let on = |k: String| v.o.open.get(&k).copied().unwrap_or(false);
+            !on(rush_convo::render::decisions_sent(&r))
+                && !on(rush_convo::render::decisions_gone(&r))
         })
         .cloned()
         .collect()

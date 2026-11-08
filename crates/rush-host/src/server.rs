@@ -3727,7 +3727,15 @@ impl Host {
                 } else {
                     &st.last_said
                 };
-                let d = crate::decisions::decisions_of(said);
+                let mut d = crate::decisions::decisions_of(said);
+                // The same block asked again (a turn that woke on its own
+                // repeating it) is the same card: its id kept, so what
+                // you've answered on it so far stays.
+                if let (Some(n), Some(o)) = (d.as_mut(), st.info.decisions.as_ref())
+                    && n.asks == o.asks
+                {
+                    n.id = o.id.clone();
+                }
                 if d.is_some() || !st.woke {
                     st.info.decisions = d;
                 }

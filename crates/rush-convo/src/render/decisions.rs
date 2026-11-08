@@ -5,6 +5,7 @@
 //! DecisionsSent, answered, answerItem, decisions, decisionPreview,
 //! pickedLine :211, answerRows :221, lastDecisions :241, answeredRows :262).
 
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -34,10 +35,18 @@ pub fn decisions_sent(r: &str) -> String {
     format!("{r}:sent")
 }
 
-/// How a message answering a decisions block starts: "1a. Topic: yes",
-/// "1a 2b", or "2: …".
+/// The Open key saying block ref's card was set aside: it waits on you no
+/// longer, though nothing of yours came after it (beyond Go, which kept
+/// such a block open in the column and the catch-up).
+pub fn decisions_gone(r: &str) -> String {
+    format!("{r}:gone")
+}
+
+/// A line of a message answering a decisions block: "1a. Topic: yes",
+/// "1a 2b", or "2: …", at the start of any of its lines, so an answer
+/// after words of your own counts too.
 static ANSWER_OPENS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*(\d+)(?:[a-z]\b|:)").expect("a valid pattern"));
+    LazyLock::new(|| Regex::new(r"(?im)^\s*(\d+)(?:[a-z]\b|:)").expect("a valid pattern"));
 
 /// How many rows of an option's preview the block shows.
 const PREVIEW_MOST: usize = 14;
@@ -58,8 +67,9 @@ fn answered(s: &Session, ti: usize, ds: &[Decision]) -> bool {
     for u in &s.turns[ti + 1..] {
         if u.from.is_empty()
             && u.cause.is_empty()
-            && let Some(m) = ANSWER_OPENS.captures(&u.prompt)
-            && ds.iter().any(|d| d.r#ref == m[1])
+            && ANSWER_OPENS
+                .captures_iter(&u.prompt)
+                .any(|m| ds.iter().any(|d| d.r#ref == m[1]))
         {
             return true;
         }
@@ -97,9 +107,21 @@ fn still_open(s: &Session, ti: usize) -> Vec<Decision> {
     }
 }
 
+/// Whether turn ti's block had its card set aside (decisions_gone).
+fn set_aside(s: &Session, ti: usize, open: &HashMap<String, bool>) -> bool {
+    s.turns.get(ti).is_some_and(|t| {
+        let r = decisions_ref(&format!("t{}", t.n));
+        open.get(&decisions_gone(&r)).copied().unwrap_or(false)
+    })
+}
+
 /// The decisions turn ti's answer asks that still wait on you
-/// (still_open): what the Chat and Catch-up views say needs you.
-pub(crate) fn open_list(s: &Session, ti: usize) -> Vec<Decision> {
+/// (still_open), none once its card was set aside: what the Chat and
+/// Catch-up views say needs you.
+pub(crate) fn open_list(s: &Session, ti: usize, open: &HashMap<String, bool>) -> Vec<Decision> {
+    if set_aside(s, ti, open) {
+        return Vec::new();
+    }
     still_open(s, ti)
 }
 
@@ -161,7 +183,11 @@ impl Drawer<'_> {
             && !ti.is_some_and(|ti| answered(self.s, ti, ds));
         let mut head = pad.clone().and(paint(strong(C_TEXT), "Decisions"));
         if passed && ti.is_some_and(|ti| !still_open(self.s, ti).is_empty()) {
-            head.push(dim(" · not answered · d opens the card"));
+            if opened(&decisions_gone(&r)) {
+                head.push(dim(" · set aside · d opens the card"));
+            } else {
+                head.push(dim(" · not answered · d opens the card"));
+            }
         }
         self.add(&r, Color::Default, head, Txt::new());
         for (i, dc) in ds.iter().enumerate() {

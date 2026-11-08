@@ -3,16 +3,13 @@
 //! card (Info.decisions) and your answers go back as the next message
 //! (decision_answer). It's read at every turn's end.
 //!
-//! Ported from internal/host/decisions.go:36-50 (decisionsPrompt,
-//! decisionsMost), 377-463 (DecisionsOf, DecisionAnswer, DismissAsleep,
+//! Ported from internal/host/decisions.go:36-50 (decisionsPrompt; not
+//! decisionsMost: a card takes every decision), 377-463 (DecisionsOf, DecisionAnswer, DismissAsleep,
 //! NeedsDecisions).
 
 use std::collections::HashMap;
 
 use rush_core::event::{Ask, Choice, Question};
-
-/// How many decisions a card takes.
-pub const DECISIONS_MOST: usize = 9;
 
 /// Tells the agent how to ask for decisions so rush can draw them as a
 /// card: kept short, as every session carries it.
@@ -56,7 +53,8 @@ pub fn decisions_of(text: &str) -> Option<Question> {
         id: format!("decisions-{}", base36(rush_state::Time::now().unix_nanos())),
         ..Question::default()
     };
-    for d in ds.iter().take(DECISIONS_MOST) {
+    // Every one: the card steps through them all (beyond Go's nine).
+    for d in &ds {
         let mut a = Ask {
             id: d.r#ref.clone(),
             header: d.topic.clone(),
@@ -164,7 +162,7 @@ mod tests {
         for i in 1..=12 {
             many += &format!("{i}. **T{i}:** (a) yes; (b) no.\n");
         }
-        assert_eq!(decisions_of(&many).unwrap().asks.len(), DECISIONS_MOST);
+        assert_eq!(decisions_of(&many).unwrap().asks.len(), 12);
         assert_eq!(needs_decisions(&q), "2 decisions");
         assert!(q.id.starts_with("decisions-"));
     }

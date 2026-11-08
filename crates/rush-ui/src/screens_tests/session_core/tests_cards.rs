@@ -801,12 +801,12 @@ fn a_decisions_card_leaves_the_box_on_a_small_screen() {
         let s = screen(&mut m);
         let at = |t: &str| s.iter().position(|l| l.contains(t));
         let all = s.join("\n");
-        assert!(all.contains("1  dark"), "{k}: {all}");
+        assert!(all.contains("a  dark"), "{k}: {all}");
         // Taller than the rows left, the card's top scrolls off under the
         // latest prompt, pinned (promptpins.go).
         let (asked, card, boxed) = (
             at("latest  please decide"),
-            at("1  dark"),
+            at("a  dark"),
             at("a message for this agent"),
         );
         assert!(
@@ -849,7 +849,7 @@ fn clicks_on_the_decisions_card_when(read: bool, turns: usize) {
     let f = screen(&mut m);
     let y = f
         .iter()
-        .position(|r| r.contains("2  light"))
+        .position(|r| r.contains("b  light"))
         .unwrap_or_else(|| panic!("no option\n{}", f.join("\n")));
     let x = f[y].find("light").unwrap();
     // The card's first row is where clicks reckon it is.

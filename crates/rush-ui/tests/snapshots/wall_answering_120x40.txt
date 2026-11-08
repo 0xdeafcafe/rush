@@ -9,13 +9,13 @@
   ┃ ▍                                                                                                                ┃  
   ┃ ▍  1. Subagents on the Wall                                                                                      ┃  
   ┃ ▍                                                                                                                ┃  
-  ┃ ▍    1  fold them in  ★ its pick                                                                                 ┃  
+  ┃ ▍    a  fold them in  ★ its pick                                                                                 ┃  
   ┃ ▍                                                                                                                ┃  
-  ┃ ▍ ▌  2  small tiles                                                                                              ┃  
+  ┃ ▍ ▌  b  small tiles                                                                                              ┃  
   ┃ ▍                                                                                                                ┃  
   ┃ ▍    ✎  Something else  opens the session to type your own                                                       ┃  
   ┃ ▍                                                                                                                ┃  
-  ┃ ▍  a takes its picks  ·  s · esc sends nothing  ·  ↑↓ choose  ·  enter picks  ·  ←→ questions                    ┃  
+  ┃ ▍  p takes its picks  ·  s sets it aside  ·  ↑↓ choose  ·  enter picks  ·  a–b pick one  ·  ←→ questions         ┃  
   ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛  
                                                                                                                         
                                                                                                                         
@@ -34,4 +34,4 @@
                                                                                                                         
                                                                                                                         
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  enter picks  ·  a takes its picks  ·  s · esc sends nothing                                                           
+  enter picks  ·  p takes its picks  ·  s sets it aside  ·  esc back                                                    

@@ -1880,10 +1880,50 @@ is made. Everything below is in `rush_ui::frame`.
   bring the card back on its send page with them kept
   (`question::answer_failed`) rather than leaving a block that reads as
   answered. Set aside with no host, it's noted beside its info
-  (`Hosts::dismiss_asleep`). The block the card is up for is pinned only
-  once the last turn ends with one (a view reading from the start has
-  an earlier turn last for a moment), and follows its turn when the
-  view's turns are numbered afresh (`take_whole`).
+  (`Hosts::dismiss_asleep`). The block the card is up for is the turn
+  whose block reads as the card's (`question::owner_turn`, beyond Go,
+  which took the last turn: a turn that woke on its own after the block
+  left it drawn in full above its card, and d opened a fresh card), back
+  no further than the last turn you began; a view reading from the start
+  pins nothing until it has that turn, and the pin follows its turn when
+  the view's turns are numbered afresh (`take_whole`).
+  A decisions card's keys (beyond Go): each option's keycap is its
+  letter, and the letter picks it (digits still do); p takes the
+  agent's picks, offered only while a decision you haven't answered has
+  one: with all answered it sends, else it fills those and moves to the
+  first still open rather than sending part. s sets the card aside; esc
+  only gives the keys back to the box (on a Wall tile, closes the card
+  with the tile still asking), and any other letter goes to the box as
+  typing. A card set aside marks its block's Open
+  (`render::decisions_gone`): the block says "set aside · d opens the
+  card", and the column beside and the catch-up no longer list it. The
+  mark is the view's, as the sent mark is: a session opened afresh reads
+  the block as open again until a message of yours comes after it.
+  A card takes every decision (Go stopped at nine while the block's row
+  said how many there were). A turn that asks the same block again keeps
+  the host's card id (`server.rs` turn end), so what you'd answered on
+  it stays.
+- **Decisions blocks** (`rush_convo::decisions::decisions_in`; Go's
+  host/decisions.go DecisionsIn, with its misreadings fixed). The block
+  is the run of numbered items under the last "Decisions" heading
+  (`Decisions:`, `Decisions (my picks: 1a):`, `## Decisions`,
+  `**Decisions**`), else the last run with lettered options; a numbered
+  list after it ("Next steps: 1. 2.") is left as text after it, not
+  taken for the block. Options start only at a real `(a)`, `(A)`, `a)`
+  or `A)`, not inside a word (`test(s)`) or inline code (`f(x)`); a
+  letter before the first (a) (`(i)`) is the topic's, one out of
+  sequence inside an option its text. Option lines may sit at any indent
+  under their item, after a `- ` or `* ` bullet; a line naming an option
+  the item already offered says more of it (its detail), or names the
+  fence under it, which is that option's preview; fences close only on a
+  run of the same mark at least as long. Numbered lines indented past the
+  items are the item's own text, and lazy `1. 1. 1.` numbering is
+  numbered as it comes. An item with no topic is "Decision n". Picks
+  come from the heading and the first picks line after the block ("My
+  picks: 1a", "My pick:", "I'd go with 1a", "Recommend: 2b"), which is
+  left out of what's after wherever it is, else from the line just
+  above; the whole text isn't searched. An answer counts as answering a
+  block when any of its lines starts "1a"/"2:", not only its first.
 - **Moving agents** (`session_core::rushmove`, `session_core::moveto`;
   rushmode.go moveToRush, picker.go). /rush, #rush and a message to a
   past session move it to rush mode through `Hosts::adopt` (the new

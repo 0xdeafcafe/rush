@@ -287,6 +287,13 @@ fn decisions_on_the_session() {
         assert_eq!(crate::decisions::needs_decisions(d), "2 decisions");
         d.id.clone()
     };
+    // The same block asked again is the same card, its id kept.
+    turn(M1326, "done");
+    assert_eq!(
+        h.lock().info.decisions.as_ref().map(|d| d.id.clone()),
+        Some(id.clone()),
+        "the same block asked again is a new card"
+    );
     let mut o = crate::op::Op::named("decisions_dismiss");
     o.id = "someone else's".into();
     h.do_op(o).unwrap();

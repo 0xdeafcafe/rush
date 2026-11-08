@@ -237,7 +237,7 @@ fn answers_decisions_from_the_wall() {
         "2 decisions, yours to make",
         "1. Subagents on the Wall",
         "fold them in  ★ its pick",
-        "a takes its picks",
+        "p takes its picks",
         "Something else  opens the session to type your own",
     ] {
         assert!(f.contains(t), "{t:?} on the card:\n{f}");
@@ -267,7 +267,7 @@ fn answers_decisions_from_the_wall() {
 }
 
 /// The card on the tile is the session's: its id, and its answer as the
-/// card writes it. A click on an option picks it at once, and a takes
+/// card writes it. A click on an option picks it at once, and p takes
 /// the agent's picks for the rest and sends.
 #[test]
 fn a_click_picks_and_a_takes_its_picks_on_a_tile() {
@@ -308,7 +308,7 @@ fn a_click_picks_and_a_takes_its_picks_on_a_tile() {
     let c = &m.cards().conns["default/d"];
     assert_eq!(c.q_idx, 1, "picked, on to the next");
     assert_eq!(c.q_answer["1. Subagents on the Wall"], "small tiles");
-    press(&mut m, "a");
+    press(&mut m, "p");
     assert_eq!(
         acts(&mut m),
         vec![Act::Answer {
@@ -320,13 +320,13 @@ fn a_click_picks_and_a_takes_its_picks_on_a_tile() {
     assert_eq!(m.agents_page, 1, "still on the Wall");
 }
 
-/// a straight away sends every one of the agent's picks.
+/// p straight away sends every one of the agent's picks.
 #[test]
 fn a_sends_its_picks_from_a_tile() {
     let mut m = deciding(120, 40);
     recording(&mut m);
     press(&mut m, "enter");
-    press(&mut m, "a");
+    press(&mut m, "p");
     assert_eq!(
         acts(&mut m),
         vec![Act::Answer {
@@ -336,9 +336,10 @@ fn a_sends_its_picks_from_a_tile() {
     );
 }
 
-/// esc and s on a tile's card send nothing: the card is set aside as
-/// the session's is (the host told, nothing to the agent), and the tile
-/// stops asking; the Wall stays.
+/// s on a tile's card sends nothing: the card is set aside as the
+/// session's is (the host told, nothing to the agent), and the tile stops
+/// asking; esc only closes the card, the tile still asking. The Wall
+/// stays.
 #[test]
 fn esc_and_s_send_nothing_from_a_tile() {
     for k in ["esc", "s"] {
@@ -347,15 +348,17 @@ fn esc_and_s_send_nothing_from_a_tile() {
         press(&mut m, "enter");
         press(&mut m, "down");
         press(&mut m, k);
-        assert_eq!(
-            acts(&mut m),
-            vec![Act::DismissDecisions("d1".into())],
-            "{k}"
-        );
+        let aside = k == "s";
+        let want = if aside {
+            vec![Act::DismissDecisions("d1".into())]
+        } else {
+            Vec::new()
+        };
+        assert_eq!(acts(&mut m), want, "{k}");
         assert_eq!(m.agents_page, 1, "{k}: still on the Wall");
         let f = screen(&mut m).join("\n");
         assert!(!f.contains("? decide"), "{k}: closed:\n{f}");
-        assert!(!f.contains("2 decisions to answer"), "{k}: set aside:\n{f}");
+        assert_eq!(f.contains("2 decisions to answer"), !aside, "{k}:\n{f}");
     }
 }
 
@@ -379,7 +382,7 @@ fn a_rush_sessions_host_card_is_answered_on_its_tile() {
     let f = screen(&mut m).join("\n");
     assert!(f.contains("2 decisions to answer"), "{f}");
     press(&mut m, "enter");
-    press(&mut m, "a");
+    press(&mut m, "p");
     assert_eq!(
         acts(&mut m),
         vec![Act::Answer {

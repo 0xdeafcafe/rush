@@ -864,8 +864,9 @@ fn decisions_model(msg: &str) -> Model {
 }
 
 /// A turn that ended with decisions shows them as a card with the
-/// agent's picks marked and under the cursor; a pick of your own, then a
-/// takes its picks for the rest, and the answers go as your next message.
+/// agent's picks marked and under the cursor, each option keyed by its
+/// letter; a pick of your own, then p takes its picks for the rest, and
+/// the answers go as your next message.
 #[test]
 fn decisions_card() {
     let mut m = decisions_model(DECISIONS_MSG);
@@ -877,9 +878,10 @@ fn decisions_card() {
         "? decide",
         "2 decisions",
         "1. Scope",
-        "the full recommendation  ★ its pick",
-        "a takes its picks",
-        "s · esc sends nothing",
+        "a  the full recommendation  ★ its pick",
+        "b  the easier alternative",
+        "p takes its picks",
+        "s sets it aside",
     ] {
         assert!(card.contains(want), "card missing {want:?}:\n{card}");
     }
@@ -887,7 +889,7 @@ fn decisions_card() {
     card_key(&mut m, "k", &i, "2", true);
     let c = &m.cards().conns["k"];
     assert_eq!((c.q_idx, c.q_cursor, c.card_focus), (1, 1, true));
-    assert_eq!(card_key(&mut m, "k", &i, "a", true), Out::Draw);
+    assert_eq!(card_key(&mut m, "k", &i, "p", true), Out::Draw);
     assert_eq!(
         acts(&mut m),
         vec![Act::Answer {
@@ -932,8 +934,8 @@ const LOADER_MSG: &str = "The lane is done.\n\nDecisions:\n\
 1. **Committing the loader work:** rush's permission check stopped the lane's commit, so this needs your go-ahead. (a) yes: I commit it on perf/loader as one commit per fix, nothing pushed; (b) no: leave it uncommitted for you to look at first.\n\
 My picks: 1a.";
 
-/// One option a line, "no" a label like "yes", the pick starred; a takes
-/// it.
+/// One option a line, "no" a label like "yes", the pick starred; its
+/// letter picks it.
 #[test]
 fn decisions_card_loader() {
     let mut m = decisions_model(LOADER_MSG);
@@ -942,11 +944,11 @@ fn decisions_card_loader() {
     let card = text(&rows(&mut m, 100, 0));
     for want in [
         "rush's permission check stopped",
-        "1  yes  ★ its pick",
+        "a  yes  ★ its pick",
         "I commit it on perf/loader",
-        "2  no",
+        "b  no",
         "leave it uncommitted for you to look at first",
-        "a takes its picks",
+        "p takes its picks",
     ] {
         assert!(card.contains(want), "card missing {want:?}:\n{card}");
     }
@@ -1158,17 +1160,45 @@ fn decisions_card_waits_for_up() {
     assert!(m.cards().conns["k"].card_focus, "↑ puts you on the card");
 }
 
-/// esc on the decisions card sends the same as s: nothing, the card set
-/// aside.
+/// esc on the decisions card only lets go of it: nothing sent, nothing
+/// set aside, the card still up for ↑.
 #[test]
-fn decisions_card_esc_sends_nothing() {
+fn decisions_card_esc_lets_go() {
     let mut m = decisions_model(DECISIONS_MSG);
     let i = info(&m, "k").unwrap();
     card_key(&mut m, "k", &i, "up", true);
-    assert_ne!(card_key(&mut m, "k", &i, "esc", true), Out::Pass);
-    assert_eq!(acts(&mut m), vec![Act::DismissDecisions("d1".into())]);
+    assert_eq!(card_key(&mut m, "k", &i, "esc", true), Out::Draw);
+    assert!(acts(&mut m).is_empty());
     let c = m.cards().conns["k"].clone();
-    assert_eq!(card_kind(&m, "k", &c, &i), "");
+    assert!(!c.card_focus);
+    assert_eq!(card_kind(&m, "k", &c, &i), "decisions");
+}
+
+/// A letter picks the option it keys; p with only some decisions picked
+/// by the agent takes those and moves to the first still open, sending
+/// nothing; with no picks left it isn't offered.
+#[test]
+fn decisions_card_letters_and_partial_picks() {
+    let msg = "Decisions:\n\
+1. **Scope:** (a) all; (b) some.\n\
+2. **Format:** (a) lines; (b) table.\n\
+3. **Ship:** (a) now; (b) later.\n\
+My picks: 1b 3a.";
+    let mut m = decisions_model(msg);
+    let i = info(&m, "k").unwrap();
+    card_key(&mut m, "k", &i, "up", true);
+    card_key(&mut m, "k", &i, "p", true);
+    assert!(acts(&mut m).is_empty(), "2 has no pick: nothing sent");
+    let c = m.cards().conns["k"].clone();
+    assert_eq!(c.q_idx, 1, "on the one still open");
+    assert_eq!(c.q_answer["1. Scope"], "some");
+    let card = text(&rows(&mut m, 100, 0));
+    assert!(!card.contains("takes its picks"), "no picks left:\n{card}");
+    card_key(&mut m, "k", &i, "b", true);
+    assert_eq!(
+        answered(&mut m),
+        vec!["1b. Scope: some\n\n2b. Format: table\n\n3a. Ship: now"]
+    );
 }
 
 /// Once answered the card is gone, and d on the block in the
@@ -1229,6 +1259,62 @@ fn decisions_block_on_the_card() {
     assert!(
         !out.contains("not answered"),
         "sent, not passed over:\n{out}"
+    );
+}
+
+/// A card set aside leaves its block saying so, not "not answered": it
+/// waits on you no longer.
+#[test]
+fn decisions_set_aside_reads_so() {
+    let mut m = loader_model(LOADER_MSG, true);
+    m.frame();
+    press(&mut m, "up");
+    press(&mut m, "s");
+    m.frame();
+    let out = text(&m.frame());
+    assert!(out.contains("set aside · d opens the card"), "{out}");
+    assert!(!out.contains("not answered"), "{out}");
+}
+
+/// A turn that woke on its own after the block (a task finished) leaves
+/// the card on the block it's of: one row, not drawn again in full above
+/// the card.
+#[test]
+fn decisions_card_after_a_woken_turn() {
+    use rush_core::event::{Message, Part, PartKind, TurnEnd};
+    let mut m = loader_model(LOADER_MSG, true);
+    let v = m.session.as_mut().unwrap();
+    v.sess.sent("a task finished".into(), vec![], 5_000);
+    v.sess.turns.last_mut().unwrap().from = "a background task".into();
+    apply(
+        &mut m,
+        Event::Message(Message {
+            role: "assistant".into(),
+            id: "b".into(),
+            parts: vec![Part {
+                kind: PartKind::Text,
+                text: "Noted; the decision still waits.".into(),
+                ..Part::default()
+            }],
+            ..Message::default()
+        }),
+    );
+    apply(
+        &mut m,
+        Event::TurnEnd(TurnEnd {
+            reason: "done".into(),
+            ..TurnEnd::default()
+        }),
+    );
+    let out = text(&m.frame());
+    assert!(
+        out.contains("Decisions · 1 decision · on the card below"),
+        "{out}"
+    );
+    assert_eq!(
+        out.matches("Committing the loader work").count(),
+        1,
+        "the choices only on the card:\n{out}"
     );
 }
 
@@ -1425,8 +1511,8 @@ fn decisions_card_previews() {
         "? PR card layout",
         "yours to decide",
         "[ #118 ✗ ]  #121 ✓",
-        "1  tabs  ★ its pick",
-        "2  stacked",
+        "a  tabs  ★ its pick",
+        "b  stacked",
     ] {
         assert!(card.contains(want), "card missing {want:?}:\n{card}");
     }

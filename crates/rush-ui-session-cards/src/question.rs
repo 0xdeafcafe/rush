@@ -144,20 +144,18 @@ pub fn sync_decisions_shown(m: &mut Model, key: &str) {
     let card = info_any(m, key).and_then(|i| decisions_card(&c, &i, pending(m, key).len()));
     let (mut want, mut id) = (String::new(), String::new());
     if let Some(d) = card {
-        id = d.id;
+        id = d.id.clone();
         if id == c.dec_id && !c.dec_shown.is_empty() {
             want = c.dec_shown.clone();
         } else if c.q_again.is_some() {
             want = rush_convo::render::decisions_on_card(&c.q_again_ref);
-        } else if let Some(t) = session(m, key)
-            .and_then(|s| s.turns.last())
-            .filter(|t| ends_with_decisions(t))
-        {
+        } else if let Some(n) = session(m, key).and_then(|s| owner_turn(s, &d)) {
+            // The turn whose answer is the card's block, not merely the
+            // last: a turn that woke on its own after it keeps the card.
             // Only a turn whose answer ends with the block: a view still
-            // reading its conversation from the start has an earlier turn
-            // last for a moment, and pinning that one would leave the
-            // block drawn in full above its card.
-            let r = rush_convo::render::decisions_ref(&format!("t{}", t.n));
+            // reading its conversation from the start may not have it
+            // yet, and pins nothing until it does.
+            let r = rush_convo::render::decisions_ref(&format!("t{n}"));
             want = rush_convo::render::decisions_on_card(&r);
         }
     }
@@ -173,6 +171,14 @@ pub fn sync_decisions_shown(m: &mut Model, key: &str) {
             // as a turn, which says so for every view.
             let r = c.dec_shown.strip_suffix(":card").unwrap_or(&c.dec_shown);
             open.insert(rush_convo::render::decisions_sent(r), true);
+        } else if !c.dec_shown.is_empty() && !c.dec_id.is_empty() && c.q_gone == c.dec_id {
+            // Set aside: the block waits on you no longer, in the column
+            // and the catch-up as on the card.
+            let r = c.dec_shown.strip_suffix(":card").unwrap_or(&c.dec_shown);
+            open.insert(rush_convo::render::decisions_gone(r), true);
+        }
+        if let Some(r) = want.strip_suffix(":card") {
+            open.remove(&rush_convo::render::decisions_gone(r)); // up again
         }
         open.remove(&c.dec_shown);
         if !want.is_empty() {
@@ -183,16 +189,34 @@ pub fn sync_decisions_shown(m: &mut Model, key: &str) {
     put(m, key, c);
 }
 
-/// Whether turn t's answer, its last text, ends with a decisions block.
-fn ends_with_decisions(t: &rush_convo::model::Turn) -> bool {
-    t.items
-        .iter()
-        .rev()
-        .find_map(|it| match it {
-            rush_convo::model::Item::Text { text, .. } => Some(text),
-            _ => None,
-        })
-        .is_some_and(|text| !rush_convo::decisions::decisions_in(text).1.is_empty())
+/// Turn t's answer, its last text.
+fn last_text(t: &rush_convo::model::Turn) -> Option<&str> {
+    t.items.iter().rev().find_map(|it| match it {
+        rush_convo::model::Item::Text { text, .. } => Some(text.as_str()),
+        _ => None,
+    })
+}
+
+/// The number of the turn whose answer ends with card q's block: the
+/// newest whose block reads as q's decisions, looking back no further
+/// than the last turn you began (anything before it you've answered);
+/// else the last turn, when its answer ends with a block.
+pub fn owner_turn(s: &rush_convo::model::Session, q: &Question) -> Option<u32> {
+    for t in s.turns.iter().rev() {
+        if last_text(t)
+            .and_then(|a| decisions_of(a, &q.id))
+            .is_some_and(|d| d.asks == q.asks)
+        {
+            return Some(t.n);
+        }
+        if t.from.is_empty() && t.cause.is_empty() {
+            break;
+        }
+    }
+    s.turns
+        .last()
+        .filter(|t| last_text(t).is_some_and(|a| decisions_of(a, "").is_some()))
+        .map(|t| t.n)
 }
 
 /// The kind of card waiting: "question", "approval", "decisions" or ""
@@ -648,7 +672,7 @@ pub fn draw_question(
             let mut p = vec![
                 ("enter", "sends it"),
                 (&change, "changes it"),
-                ("s · esc", "sends nothing"),
+                ("s", "sets it aside"),
             ];
             if !edit.is_empty() {
                 p.insert(1, (&edit, "edit"));
@@ -658,7 +682,7 @@ pub fn draw_question(
             let mut p = vec![
                 ("enter", "sends your answers"),
                 (&change, "changes one"),
-                ("s · esc", "sends nothing"),
+                ("s", "sets it aside"),
             ];
             if !edit.is_empty() {
                 p.insert(1, (&edit, "edit"));
@@ -716,7 +740,7 @@ pub fn draw_question(
     if c.q_full && c.card_focus && c.q_cursor < q.options.len() {
         let o = &q.options[c.q_cursor];
         let (label, rec) = option_label(&o.label);
-        let cap = keycap(&(c.q_cursor + 1).to_string(), true);
+        let cap = keycap(&option_cap(c, o, c.q_cursor), true);
         let name = line([spb(label.clone(), TEXT)]);
         let mut chips: Vec<Span> = Vec::new();
         if rec || o.picked {
@@ -851,7 +875,7 @@ pub fn draw_question(
             let mut t = line([plain(" "), bar.clone(), plain(" ")]);
             if j == 0 {
                 t.spans
-                    .extend([keycap(&(i + 1).to_string(), on), plain(" ")]);
+                    .extend([keycap(&option_cap(c, o, i), on), plain(" ")]);
                 t.spans.extend(boxed.clone());
             } else {
                 t.spans.push(plain(blanks(pw - 3 + bw)));
@@ -1007,7 +1031,12 @@ pub fn draw_question(
     cl(&mut out, Line::new());
     let ww = w.saturating_sub(6);
     if c.card_focus {
-        let range = format!("1–{n_opts}");
+        let range = match (q.options.first(), q.options.last()) {
+            (Some(f), Some(l)) if c.q_decide => {
+                format!("{}–{}", option_cap(c, f, 0), option_cap(c, l, n_opts - 1))
+            }
+            _ => format!("1–{n_opts}"),
+        };
         // A decision's last pick sends; the other key puts the answers in
         // the box to edit instead.
         let sends = c.q_decide && !c.q_on_tile && !q.multi;
@@ -1029,8 +1058,12 @@ pub fn draw_question(
             pairs.push(("←→", "questions"));
         }
         if c.q_decide {
-            // Its own keys first: they're what a narrow card keeps.
-            let mut p = vec![("a", "takes its picks"), ("s · esc", "sends nothing")];
+            // Its own keys first: they're what a narrow card keeps; p only
+            // when the agent picked one you haven't answered.
+            let mut p = vec![("s", "sets it aside")];
+            if picks_left(c, qs) {
+                p.insert(0, ("p", "takes its picks"));
+            }
             p.extend(pairs);
             pairs = p;
             if q.options.iter().any(|o| !o.preview.is_empty()) {
@@ -1201,6 +1234,23 @@ fn rec_word(c: &Conn) -> &'static str {
     }
 }
 
+/// The key on option i's keycap: on a decisions card its letter, which
+/// picks it, else its number.
+fn option_cap(c: &Conn, o: &Choice, i: usize) -> String {
+    if c.q_decide && o.key.len() == 1 {
+        o.key.clone()
+    } else {
+        (i + 1).to_string()
+    }
+}
+
+/// Whether p has picks to take: a decision you haven't answered that the
+/// agent picked an option of.
+fn picks_left(c: &Conn, qs: &[Q]) -> bool {
+    qs.iter()
+        .any(|q| !c.q_answer.contains_key(&q.question) && q.options.iter().any(|o| o.picked))
+}
+
 // ---- answering ----
 
 /// What a key did on a question.
@@ -1324,7 +1374,13 @@ pub fn question_key(
             _ => {}
         }
     }
-    if empty && let Some(i) = digit(s) {
+    // A decision's options are picked by their letters too.
+    let letter = || {
+        (c.q_decide && s.len() == 1)
+            .then(|| q.options.iter().position(|o| o.key == s))
+            .flatten()
+    };
+    if empty && let Some(i) = digit(s).or_else(letter) {
         if i >= q.options.len() {
             return Res::Yes;
         }
@@ -1544,7 +1600,7 @@ pub fn decisions_of(text: &str, id: &str) -> Option<Question> {
         id: id.to_string(),
         ..Question::default()
     };
-    for d in ds.iter().take(9) {
+    for d in &ds {
         let mut a = Ask {
             id: d.r#ref.clone(),
             header: d.topic.clone(),
@@ -1684,14 +1740,15 @@ pub fn decide_again(m: &mut Model, key: &str, r: &str) -> Out {
         return Out::Pass;
     };
     let now = super::now(m);
-    let last = s.turns.len().checked_sub(1);
+    // The turn the host's card is of, which needn't be the last.
+    let owner = i.decisions.as_ref().and_then(|d| owner_turn(s, d));
     let mut q = None;
     let mut open = false;
-    for (n, t) in s.turns.iter().enumerate() {
+    for t in &s.turns {
         if format!("t{}", t.n) != tr {
             continue;
         }
-        if i.decisions.is_some() && Some(n) == last {
+        if i.decisions.is_some() && owner == Some(t.n) {
             q = i.decisions.clone(); // still open: the card is this block
             open = true;
         } else {
@@ -1943,17 +2000,16 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
                 return Out::Pass;
             };
             c.sync_question(&req, i.decisions.as_ref());
-            let aside = (s == "s" || s == "esc") && !c.q_full;
-            if c.card_focus && (aside || s == "a") {
-                // s or esc sets it aside; opened again here, it's no card
-                // of the host's: nothing to dismiss.
-                let s = if aside { "s" } else { "a" };
+            if c.card_focus && !c.q_full && (s == "s" || s == "p") {
+                // s sets it aside; opened again here, it's no card of the
+                // host's: nothing to dismiss. esc only lets go of the card.
                 let again = c.q_again.as_ref().is_some_and(|q| q.id == req.id);
-                return match decide_own_key(c, &req, s, again) {
-                    Res::Do(a) => done(m, key, c, vec![a]),
-                    Res::Yes if s == "s" => done(m, key, c, Vec::new()),
-                    r => finish(m, key, c, r),
-                };
+                match decide_own_key(c, &req, &s, again) {
+                    Res::No => {}
+                    Res::Do(a) => return done(m, key, c, vec![a]),
+                    Res::Yes if s == "s" => return done(m, key, c, Vec::new()),
+                    r => return finish(m, key, c, r),
+                }
             }
             // What's typed is a message as ever, unless you chose to
             // answer one in your own words.
@@ -2129,9 +2185,18 @@ const SKIPPED: &str = "The user skipped the question; carry on with your best ju
 
 /// A decisions card's own keys, wherever it's drawn: s sets it aside,
 /// sending nothing (to the host too unless local, a card that isn't the
-/// host's), and a takes the agent's picks for whatever you haven't
-/// answered yourself and sends them. Res::No for any other key.
+/// host's), and p takes the agent's picks for whatever you haven't
+/// answered yourself: with every decision answered it sends them, else
+/// it moves to the first still open. Res::No for any other key, for an
+/// option's own letter, and for p with no picks to take.
 pub fn decide_own_key(c: &mut Conn, req: &Question, s: &str, local: bool) -> Res {
+    let opt = req
+        .asks
+        .get(c.q_idx)
+        .is_some_and(|a| a.options.iter().any(|o| o.key == s));
+    if opt {
+        return Res::No; // the option's letter picks it
+    }
     match s {
         "s" => {
             c.q_gone = req.id.clone();
@@ -2144,16 +2209,28 @@ pub fn decide_own_key(c: &mut Conn, req: &Question, s: &str, local: bool) -> Res
             }
             Res::Do(Act::DismissDecisions(req.id.clone()))
         }
-        "a" => {
+        "p" => {
+            let mut took = false;
             for a in &req.asks {
-                if !c.q_answer.contains_key(&a.text) && !a.options.is_empty() {
-                    let o = &a.options[picked_at(&a.options)];
-                    if o.picked {
-                        c.q_answer.insert(a.text.clone(), o.label.clone());
-                    }
+                if !c.q_answer.contains_key(&a.text)
+                    && let Some(o) = a.options.iter().find(|o| o.picked)
+                {
+                    c.q_answer.insert(a.text.clone(), o.label.clone());
+                    took = true;
                 }
             }
-            send_answers(c, req)
+            let (_, qs) = questions(req);
+            match qs
+                .iter()
+                .position(|q| !c.q_answer.contains_key(&q.question))
+            {
+                None => send_answers(c, req),
+                Some(i) if took => {
+                    go_question(c, &qs, i, &mut String::new());
+                    Res::Yes
+                }
+                Some(_) => Res::No,
+            }
         }
         _ => Res::No,
     }
@@ -2195,9 +2272,10 @@ pub fn tile_rows(
 }
 
 /// A key on agent key's decisions card q on a tile, taken as its
-/// session's card takes it with the keys on it: ↑↓ choose, a digit or
-/// enter picks, ←→ between decisions, a takes its picks, s or esc sends
-/// nothing; "@n" picks option n, as a click on it does. What it sends
+/// session's card takes it with the keys on it: ↑↓ choose, an option's
+/// letter, a digit or enter picks, ←→ between decisions, p takes its
+/// picks, s sets it aside, sending nothing, and esc only closes the card;
+/// "@n" picks option n, as a click on it does. What it sends
 /// goes as the session's card sends it (Act::Answer), and the card's
 /// state is the session's, so either sees it answered.
 pub fn tile_key(m: &mut Model, key: &str, q: &Question, s: &str) -> Decided {
@@ -2213,7 +2291,10 @@ pub fn tile_key(m: &mut Model, key: &str, q: &Question, s: &str) -> Decided {
         return Decided::Yes;
     }
     if s == "esc" {
-        s = "s".into();
+        // Closed, not set aside: the tile still asks.
+        c.card_focus = false;
+        put(m, key, c);
+        return Decided::Done;
     }
     if let Some(n) = s.strip_prefix('@').and_then(|n| n.parse::<usize>().ok()) {
         c.q_cursor = n;
