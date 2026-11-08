@@ -282,11 +282,11 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         }
         // Editing a queued message, any send saves it in place, as a
         // Session's does: the old text never goes too (keys.rs send).
-        "enter" | "ctrl+enter" | "ctrl+s" if editing => {
+        "enter" | "ctrl+enter" if editing => {
             save_edit(m, &key, &id);
             Out::Draw
         }
-        "enter" | "ctrl+enter" | "ctrl+s" => {
+        "enter" | "ctrl+enter" => {
             let now = s != "enter";
             let d = draft(m, &key, &id);
             // A line ending in \ goes on to a new line (keys::send).
