@@ -82,6 +82,7 @@ fn control() {
         )]
         .into(),
         prompt: "Be kind.".into(),
+        allow: vec!["Bash(du:*)".into(), "Write(//t/**)".into()],
         tap: Some(Arc::new(move |l: &[u8]| {
             lock(&t).push(String::from_utf8_lossy(l).into_owned())
         })),
@@ -164,7 +165,8 @@ fn control() {
     want_in(
         &format!("{log}.args"),
         &[
-            "--allowedTools mcp__t__draw",
+            // rush's tools, then the session's own rules (StartOptions::allow).
+            "--allowedTools mcp__t__draw,Bash(du:*),Write(//t/**)",
             r#"--agents {"p:helper":{"description":"helps"}}"#,
             "--append-system-prompt Be kind.",
         ],

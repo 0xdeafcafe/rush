@@ -106,6 +106,11 @@ pub struct StartOptions {
     /// What the agent goes without, in its own words: for Claude Code, tool
     /// rules taken out of its context.
     pub without: Vec<String>,
+    /// What this session alone may do without asking, as Claude Code's
+    /// permission rules say it (Bash(du:*), Write(//dir/**)): passed as
+    /// its --allowedTools, never written to anyone's settings. A harness
+    /// without such rules goes without (it asks). Rust-only.
+    pub allow: Vec<String>,
     /// A command to run after each tool call, the call's hook input on its
     /// stdin: what it prints is a message for the (sub)agent that made the
     /// call. An agent that can take one says so (takes_subagent_messages).

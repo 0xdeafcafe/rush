@@ -379,6 +379,10 @@ pub struct Start {
     pub started_by: String,
     /// Why, in a few words, for its row (Config.Meta's "why").
     pub why: String,
+    /// What it alone may do without asking, in Claude Code's rule syntax
+    /// (Config.allow; "$TMPDIR" its scratch folder). Rust-only: the
+    /// cleanup agent's read-only commands.
+    pub allow: Vec<String>,
 }
 
 /// A session started (hostStartedMsg).

@@ -55,6 +55,43 @@ pub struct CareStart {
     pub started_by: String,
     /// Why, in a few words, for its row (meta "why"): "18G free on disk".
     pub why: String,
+    /// What it may do without asking, its session's alone (care_allow).
+    pub allow: Vec<String>,
+}
+
+/// The read-only commands the cleanup agent runs without asking, as Claude
+/// Code's rules: a prefix rule (`Bash(du:*)`) takes the command and its
+/// arguments; one without `:*` only that command as written. Claude Code
+/// matches each command of a chain (&&, ;, |) on its own, so `du x && rm
+/// y` still asks for the rm. Only commands with no form that deletes or
+/// writes: no find (-delete, -exec), no git log (--output), git branch
+/// only in its listing forms (never -d/-D). Rust-only.
+pub const CARE_READS: [&str; 13] = [
+    "Bash(du:*)",
+    "Bash(df:*)",
+    "Bash(ls:*)",
+    "Bash(stat:*)",
+    "Bash(git status:*)",
+    "Bash(git worktree list:*)",
+    "Bash(git rev-list:*)",
+    "Bash(git branch)",
+    "Bash(git branch --list)",
+    "Bash(git branch -a)",
+    "Bash(git branch -v)",
+    "Bash(git branch -vv)",
+    "Bash(xcrun simctl list:*)",
+];
+
+/// What the cleanup session alone may do without asking: CARE_READS, and
+/// write its plan and script in its own scratch folder ("$TMPDIR", which
+/// its host makes the folder: `//` is Claude Code's absolute path).
+/// Running the script, rm, git worktree remove, pnpm store prune and
+/// simctl delete always ask. Never written to anyone's settings: it goes
+/// as the session's --allowedTools. Rust-only.
+pub fn care_allow() -> Vec<String> {
+    let mut v: Vec<String> = CARE_READS.iter().map(|r| r.to_string()).collect();
+    v.extend(["Write(/$TMPDIR/**)".into(), "Edit(/$TMPDIR/**)".into()]);
+    v
 }
 
 /// How long Start waits on rush's look at the worktrees and the plugins'
@@ -585,6 +622,7 @@ pub fn start_care(
         // rush's own: the list says so, and finds it again after a reload.
         started_by: CARE_PLUGIN.into(),
         why: short.into(),
+        allow: care_allow(),
     };
     let Some(f) = m.kept::<CareStarter>().0 else {
         m.flash_err("starting a cleanup agent isn't in this rush yet");
@@ -642,6 +680,7 @@ pub fn start_with_hosts(m: &mut Model, c: CareStart) -> Out {
     s.name = c.name;
     s.started_by = c.started_by;
     s.why = c.why;
+    s.allow = c.allow;
     s.profile = if next.profile.is_empty() {
         start_profile(m, &c.cwd).name
     } else {
@@ -1028,7 +1067,7 @@ pub const CARE_PLAN_FILE: &str = "cleanup-plan.tsv";
 /// The cleanup agent's two phases: a read-only plan the user approves,
 /// then exactly what was approved, in one script (Rust-only: Go's ran in
 /// auto mode and deleted as it went).
-const CARE_PHASES: &str = "Phase 1, now, is read-only: survey (df -h, du, git status and git worktree list, the reports below) and delete, remove or stop nothing. End your turn with a plan:
+const CARE_PHASES: &str = "Phase 1, now, is read-only: survey (df -h, du, git status and git worktree list, the reports below) and delete, remove or stop nothing. These run without asking: du, df, ls, stat, git status, git worktree list, git rev-list, git branch (listing it only), xcrun simctl list, and writing files in $TMPDIR; run each plainly as its own command (git in the repository's folder rather than git -C, nothing chained after it, no redirection), or it asks. Anything else asks the user, so keep to these. End your turn with a plan:
 - every path you would delete, each with its size and why it's safe to go (a can-go worktree, a done session's scratch, a cache that rebuilds itself, …) and conservative: yes when it's only something made or fetched again that loses no work (a done session's scratch untouched for days, a build cache in a worktree nobody works in, pnpm store prune), else conservative: no;
 - each group's total, and a grand total of the space it frees;
 - what you'd leave, and why;

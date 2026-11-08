@@ -239,10 +239,42 @@ pub(crate) fn within(root: &Path, p: &Path) -> bool {
     p.starts_with(&r)
 }
 
+/// A session's own permission rules (Config.allow) with "$TMPDIR" made its
+/// scratch folder tmp, clean and without its "/": `Write(/$TMPDIR/**)`
+/// is `Write(//…/tmp/app-1a2b3c4d/s1/**)`, Claude Code's absolute path.
+/// Rust-only.
+pub fn allow_rules(rules: &[String], tmp: &str) -> Vec<String> {
+    let t = clean(Path::new(tmp)).to_string_lossy().into_owned();
+    rules
+        .iter()
+        .filter(|r| !r.contains("$TMPDIR") || (t.starts_with('/') && t != "/"))
+        .map(|r| r.replace("$TMPDIR", &t))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testing::Home;
+
+    #[test]
+    fn allow_rules_name_the_scratch() {
+        let rules = ["Bash(du:*)".to_string(), "Write(/$TMPDIR/**)".to_string()];
+        for (tmp, want) in [
+            (
+                "/r/tmp/p-1/s1",
+                vec!["Bash(du:*)", "Write(//r/tmp/p-1/s1/**)"],
+            ),
+            (
+                "/r/tmp/p-1/s1/",
+                vec!["Bash(du:*)", "Write(//r/tmp/p-1/s1/**)"],
+            ),
+            ("", vec!["Bash(du:*)"]),
+            ("/", vec!["Bash(du:*)"]),
+        ] {
+            assert_eq!(allow_rules(&rules, tmp), want, "{tmp:?}");
+        }
+    }
 
     #[test]
     fn slugs_as_go_names_them() {

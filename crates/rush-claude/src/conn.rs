@@ -133,7 +133,10 @@ impl Driver for Claude {
             binary: o.binary.clone(),
             ..headless::Options::default()
         };
-        let allowed = trusted(&tools);
+        let mut allowed = trusted(&tools);
+        // What this session alone may do without asking (the cleanup
+        // agent's read-only commands): its flag, never anyone's settings.
+        allowed.extend(o.allow.iter().cloned());
         if !allowed.is_empty() {
             // rush's own tools only draw, so they never ask.
             ho.flags

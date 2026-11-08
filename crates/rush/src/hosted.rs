@@ -752,6 +752,7 @@ fn start_config(s: &Start) -> Config {
         // rush's own (the cleanup agent): the list says so, and finds
         // it again after a reload (machinecare.go:320).
         started_by: s.started_by.clone(),
+        allow: s.allow.clone(),
         ..Config::default()
     };
     if !s.why.is_empty() {

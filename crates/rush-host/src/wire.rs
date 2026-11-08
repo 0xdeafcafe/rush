@@ -73,6 +73,16 @@ pub struct Config {
         deserialize_with = "nullvec::deserialize"
     )]
     pub without: Vec<String>,
+    /// What this session alone may do without asking, in Claude Code's
+    /// rule syntax (StartOptions::allow); "$TMPDIR" in one is the
+    /// session's scratch folder, filled in as it starts. Rust-only: the
+    /// cleanup agent's read-only commands.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "nullvec::deserialize"
+    )]
+    pub allow: Vec<String>,
     /// The conversation this one continues, for showing its history.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub from: String,

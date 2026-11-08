@@ -163,7 +163,88 @@ fn starts_as_rush_s_own() {
         "{}",
         s.permission_mode
     );
+    // Its read-only commands and its own scratch, as its session's rules.
+    assert_eq!(s.allow, care_allow());
     assert_eq!(m.kept::<Care>().agents[0].0, "fake-1");
+}
+
+/// Whether Claude Code's rule lets cmd run without asking, as its
+/// permission rules read: `Bash(p:*)` is p or p and arguments, `Bash(c)`
+/// only c, and each command of a chain (&&, ||, ;, |) must be allowed.
+fn allows(rules: &[String], cmd: &str) -> bool {
+    let one = |c: &str| {
+        let c = c.trim();
+        rules.iter().any(|r| {
+            let Some(inner) = r.strip_prefix("Bash(").and_then(|r| r.strip_suffix(')')) else {
+                return false;
+            };
+            match inner.strip_suffix(":*") {
+                Some(p) => c == p || c.starts_with(&format!("{p} ")),
+                None => c == inner,
+            }
+        })
+    };
+    cmd.split("&&")
+        .flat_map(|c| c.split("||"))
+        .flat_map(|c| c.split(';'))
+        .flat_map(|c| c.split('|'))
+        .all(one)
+}
+
+// The cleanup agent's rules run its read-only commands without asking and
+// nothing that deletes: rm, git worktree remove, pnpm store prune, simctl
+// delete, its script, git branch -D, find -delete, a read chained to an rm.
+#[test]
+fn care_rules_read_and_never_delete() {
+    let rules = care_allow();
+    for (cmd, want) in [
+        ("du -sh /Users/me/src", true),
+        ("df -h", true),
+        ("ls -la ~/.config/rush/tmp", true),
+        ("stat -f %m x", true),
+        ("git status --short", true),
+        ("git worktree list --porcelain", true),
+        ("git rev-list --count main..HEAD", true),
+        ("git branch -vv", true),
+        ("xcrun simctl list devices", true),
+        ("rm -rf /Users/me/src/app/target", false),
+        ("git worktree remove /w/a", false),
+        ("git -C /r worktree remove /w/a", false),
+        ("pnpm store prune", false),
+        ("xcrun simctl delete unavailable", false),
+        ("bash /t/cleanup.sh", false),
+        ("sh cleanup.sh", false),
+        ("git branch -D rush/a", false),
+        ("git branch -d rush/a", false),
+        ("find . -name target -delete", false),
+        ("git log --output=/etc/x", false),
+        ("du -sh x && rm -rf y", false),
+        ("ls; rm -rf y", false),
+        ("df -h | xargs rm", false),
+        ("dutree x", false),
+    ] {
+        assert_eq!(allows(&rules, cmd), want, "{cmd}");
+    }
+    for r in &rules {
+        let l = r.to_lowercase();
+        for bad in [
+            "rm",
+            "remove",
+            "prune",
+            "delete",
+            "cleanup.sh",
+            "find",
+            "log",
+        ] {
+            assert!(
+                !l.contains(&format!("({bad}")) && !l.contains(&format!(" {bad}")),
+                "{r} names {bad}"
+            );
+        }
+    }
+    // Writes only in its own scratch, which its host fills in.
+    let writes: Vec<&String> = rules.iter().filter(|r| !r.starts_with("Bash(")).collect();
+    assert_eq!(writes, ["Write(/$TMPDIR/**)", "Edit(/$TMPDIR/**)"]);
 }
 
 // The cleanup agent's mode is one that asks: default where there is one,
@@ -244,7 +325,9 @@ fn prompt_has_rules_known_and_reports() {
     for want in [
         "Never delete, remove or stop anything on your own",
         "Phase 1, now, is read-only",
-        "delete, remove or stop nothing. End your turn with a plan",
+        "delete, remove or stop nothing.",
+        "These run without asking: du, df, ls, stat, git status, git worktree list, git rev-list, git branch (listing it only), xcrun simctl list, and writing files in $TMPDIR",
+        "Anything else asks the user, so keep to these. End your turn with a plan",
         "every path you would delete, each with its size and why it's safe to go",
         "conservative: yes when it's only something made or fetched again",
         "each group's total, and a grand total",

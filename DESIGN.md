@@ -1072,6 +1072,23 @@ deleted as it went. Here it never deletes on its own:
   sets the mode of its agent's that asks (`asking_mode`: "default", else
   the first trust-0 mode but plan, else the agent's own ""), never the
   mode new sessions start in, which may be auto or bypass.
+- Its read-only commands don't ask. `care_allow` is `CARE_READS`
+  (`Bash(du:*)`, `df`, `ls`, `stat`, `git status`, `git worktree list`,
+  `git rev-list`, `xcrun simctl list`, and `git branch` only as written in
+  its listing forms) plus `Write(/$TMPDIR/**)` and `Edit(/$TMPDIR/**)`.
+  They go as the session's own rules: `Start.allow` → host `Config.allow`
+  (saved with the session, so a wake keeps them) → `StartOptions::allow`,
+  `$TMPDIR` made its scratch folder by `tmp::allow_rules` (`//` is Claude
+  Code's absolute path), → rush-claude's conn adds them to its
+  `--allowedTools`. Nothing is written to anyone's settings. Claude Code
+  matches each command of a chain on its own, so `du x && rm -rf y` still
+  asks for the rm. Left out because some form of them deletes or writes:
+  find (-delete, -exec), git log (--output), git branch's other forms
+  (-d/-D). Deleting always asks: rm, git worktree remove, pnpm store
+  prune, simctl delete, running cleanup.sh. The prompt tells it to run
+  these plainly, one per command (git in the repository's folder, not
+  `git -C`), as a prefix rule needs. Other harnesses (Codex) have no such
+  rules: there every command asks.
 - `care_prompt` (`CARE_PHASES`) has two phases. Phase 1 is read-only: it
   surveys and ends its turn with a plan of every path it would delete
   (size, why it's safe, conservative: yes/no), each group's total and a

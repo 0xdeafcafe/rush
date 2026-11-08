@@ -1540,6 +1540,7 @@ impl Host {
             flags: c.flags.clone(),
             binary: c.binary.clone(),
             without: c.without.clone(),
+            allow: crate::tmp::allow_rules(&c.allow, &tmp.to_string_lossy()),
             temp_dir: tmp.to_string_lossy().into_owned(),
             lean: c.lean,
             subagents: adapter::subagent_cap(),
