@@ -3369,9 +3369,19 @@ Measured (`images::tests::measured_on_fixtures`: screenshots drawn by
 the test; tokens as the high-resolution tier bills the original, and
 the copy as sent):
 
-| image | bytes before | after | tokens before | after |
-|---|---|---|---|---|
-| (filled in from CI) | | | | |
+| image | bytes before | after | tokens before | after | tokens saved |
+|---|---|---|---|---|---|
+| Retina terminal, 3024×1964 PNG (to 1372×891) | 625,652 | 257,312 | 4,760 | 1,568 | 67% |
+| web page, 1920×1080 PNG (to 1456×819) | 184,638 | 149,226 | 2,691 | 1,560 | 42% |
+| phone, 1179×2556 PNG (to 723×1568) | 124,644 | 95,022 | 3,956 | 1,456 | 63% |
+| photo, 2000×1500 JPEG (to 1270×952) | 413,544 | 91,824 | 3,888 | 1,564 | 60% |
+| icon, 128×128 PNG (left alone) | 681 | 681 | 25 | 25 | 0 |
+
+The drawn screenshots are flat colour and bitmap text, which PNG
+already packs well, so their bytes fall less than a real screenshot's
+would; the tokens are exact either way, as they follow from the sizes.
+On a standard-tier model (which cuts every image to 1,568 tokens
+itself) the copy saves bytes, not tokens.
 
 ### What rush adds to an agent's context, word for word (Rust-only)
 

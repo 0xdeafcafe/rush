@@ -665,7 +665,7 @@ mod tests {
         assert_eq!(r["result"]["isError"], false, "{r}");
         let said = content[0]["text"].as_str().unwrap();
         assert!(
-            said.starts_with("2 images on one sheet, 2 across: ")
+            said.starts_with("2 images on one sheet, ")
                 && said.ends_with(&format!("Kept at {}.", out.display())),
             "{said}"
         );

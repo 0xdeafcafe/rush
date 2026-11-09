@@ -786,11 +786,11 @@ mod tests {
             }
         }
         let want: Vec<(&str, u64, u64, u64, u64)> = vec![
-            ("Retina terminal, 3024×1964 PNG", 0, 0, 0, 0),
-            ("web page, 1920×1080 PNG", 0, 0, 0, 0),
-            ("phone, 1179×2556 PNG", 0, 0, 0, 0),
-            ("photo, 2000×1500 JPEG", 0, 0, 0, 0),
-            ("icon, 128×128 PNG", 0, 0, 0, 0),
+            ("Retina terminal, 3024×1964 PNG", 625652, 257312, 4760, 1568),
+            ("web page, 1920×1080 PNG", 184638, 149226, 2691, 1560),
+            ("phone, 1179×2556 PNG", 124644, 95022, 3956, 1456),
+            ("photo, 2000×1500 JPEG", 413544, 91824, 3888, 1564),
+            ("icon, 128×128 PNG", 681, 681, 25, 25),
         ];
         assert_eq!(got, want);
     }
@@ -829,8 +829,9 @@ mod tests {
             paths.push(p);
         }
         paths.push(dir.path().join("gone.png"));
+        // How many of the last (gone.png, and the shots before it).
         let cases: &[(usize, u32)] = &[
-            (1, TOKENS),
+            (2, TOKENS),
             (4, TOKENS),
             (13, TOKENS),
             (13, 800),
