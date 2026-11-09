@@ -250,18 +250,18 @@ fn new_work_waits_behind_a_nudge() {
     assert!(!answer_path("kidn").exists(), "the nudge's turn answered");
 }
 
-/// A host whose successor's start is the test's to settle: each start
-/// is sent on starts, and waits for go's answer.
-fn handing_host(
-    id: &str,
-    f: impl FnOnce(&mut Config),
-) -> (
+/// The host, its kept conn, the successors' starts, and their answers.
+type Handing = (
     Host,
     Arc<Kept>,
     Arc<dyn Conn>,
     Receiver<Config>,
     Sender<Start>,
-) {
+);
+
+/// A host whose successor's start is the test's to settle: each start
+/// is sent on starts, and waits for go's answer.
+fn handing_host(id: &str, f: impl FnOnce(&mut Config)) -> Handing {
     let (starts_tx, starts) = channel::<Config>();
     let (go, go_rx) = channel::<Start>();
     let (starts_tx, go_rx) = (Mutex::new(starts_tx), Mutex::new(go_rx));
