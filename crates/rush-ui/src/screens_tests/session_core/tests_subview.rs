@@ -214,6 +214,50 @@ fn the_tab() {
     assert!(views::show_view(&mut m, KEY, "subagents"));
 }
 
+/// Every tab takes a click where it's drawn, from every view: the
+/// Subagents view's run column, right of its list, is the body's rows
+/// only, so the tabs over it (Background, Memory) are still the tabs'
+/// (model.go:1680, clickPaneTab before the preview's click).
+#[test]
+fn every_tab_takes_a_click_from_every_view() {
+    use crate::frame::Mouse;
+    use rush_draw::{Button, MouseKind};
+    for w in [120, 150] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = model(&d);
+        m.w = w;
+        let all = views::views(&m, KEY);
+        assert_eq!(all.len(), 6, "{all:?}");
+        let labels: Vec<String> = all.iter().map(|v| views::tab_label(v)).collect();
+        for from in &all {
+            for to in &all {
+                if *from == "conversation" && *to == "conversation" {
+                    continue; // the views' dropdown (tests_presets.rs)
+                }
+                assert!(views::show_view(&mut m, KEY, from));
+                if *from == "subagents" {
+                    m.session.as_mut().unwrap().sel = "sub:x".into();
+                }
+                let s: Vec<String> = m.frame().iter().map(Line::plain).collect();
+                let y = s
+                    .iter()
+                    .position(|r| labels.iter().all(|l| r.contains(l.as_str())))
+                    .unwrap_or_else(|| panic!("{w} {from}: no tabs row in\n{}", s.join("\n")));
+                let row = &s[y];
+                let at = row.find(&views::tab_label(to)).unwrap();
+                let x = rush_core::text::width(&row[..at]);
+                m.mouse_event(&Mouse {
+                    kind: MouseKind::Down(Button::Left),
+                    x: x as u16,
+                    y: y as u16,
+                    mods: Default::default(),
+                });
+                assert_eq!(views::view_name(&m, KEY), *to, "{w}: {from} -> {to} at {x}");
+            }
+        }
+    }
+}
+
 /// enter or → on a run in the list gives its pane the keys: its
 /// conversation stays beside the list, never a screen of its own; esc
 /// and ← give them back to the list, the run still picked.

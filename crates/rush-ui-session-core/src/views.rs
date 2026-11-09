@@ -773,6 +773,7 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
     if subs {
         c.watch.split = if stacked { list_rows } else { 0 };
         c.watch.pane_w = w;
+        c.watch.body_rows = rows;
     }
     if stacked {
         c.vs.rows = list_rows;

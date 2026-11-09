@@ -65,6 +65,9 @@ pub struct Watch {
     pub split: usize,
     /// The pane's width as the view was last drawn (paneW).
     pub pane_w: usize,
+    /// The body's rows as the view was last drawn: the list's and the
+    /// run's together, under the header's tabs and over the dock.
+    pub body_rows: usize,
     /// The folds opened in the list: a run's earlier tries
     /// ("tries:<id>"), a finished workflow run (its ref).
     pub open_folds: HashSet<String>,
@@ -1647,12 +1650,17 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     let pw = conn(m, &key).watch.pane_w;
     let split = conn(m, &key).watch.split;
     // Wide, the column beside the list is the run's, not the list's;
-    // narrow, the rows under it.
-    let beside = if split > 0 {
-        y >= top + split
-    } else {
-        pw >= WIDE_AT && x.saturating_sub(2) >= list_width(pw)
-    };
+    // narrow, the rows under it. Only on the body's rows: the header's
+    // tabs over it and the box under it are their own (Go clicks the
+    // pane's tabs first, model.go:1680 clickPaneTab).
+    let body = conn(m, &key).watch.body_rows;
+    let on_body = y >= top && y < top + body;
+    let beside = on_body
+        && if split > 0 {
+            y >= top + split
+        } else {
+            pw >= WIDE_AT && x.saturating_sub(2) >= list_width(pw)
+        };
     if row.is_none() && !in_peek && !in_box && !beside {
         return Out::Pass;
     }
