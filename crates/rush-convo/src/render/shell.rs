@@ -2011,6 +2011,54 @@ pub(crate) fn short_paths(text: &str, home: &str, cur: &mut CwdAt, top: bool) ->
     out.concat()
 }
 
+/// A command with its $TMPDIR (or ${TMPDIR}) as the folder it is, so
+/// what it leaves there can be found; one in single quotes stays as
+/// written, as the shell would leave it. Rust-only.
+pub(crate) fn resolve_tmp(text: &str, tmp: &str) -> String {
+    let tmp = tmp.trim_end_matches('/');
+    if tmp.is_empty() || !text.contains("TMPDIR") {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len() + tmp.len());
+    let (mut quoted, mut dq, mut esc) = (false, false, false);
+    let mut i = 0;
+    while i < text.len() {
+        let rest = &text[i..];
+        let c = rest.chars().next().unwrap_or(' ');
+        if !quoted && !esc && c == '$' {
+            let n = if rest.starts_with("${TMPDIR}") {
+                9
+            } else if rest.starts_with("$TMPDIR")
+                && !rest[7..]
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+            {
+                7
+            } else {
+                0
+            };
+            if n > 0 {
+                out.push_str(tmp);
+                i += n;
+                continue;
+            }
+        }
+        if esc {
+            esc = false;
+        } else if c == '\\' && !quoted {
+            esc = true;
+        } else if c == '\'' && !dq {
+            quoted = !quoted;
+        } else if c == '"' && !quoted {
+            dq = !dq;
+        }
+        out.push(c);
+        i += c.len_utf8();
+    }
+    out
+}
+
 fn short_path(p: &str, home: &str, cur: &str) -> String {
     if !cur.is_empty() && p == cur {
         return ".".into();
@@ -2497,5 +2545,32 @@ mod tests {
         );
         let ps = phrases(&p, "rm -rf ~/.claude");
         assert_eq!(ps[0].verb, "delete");
+    }
+
+    #[test]
+    fn tmpdir_as_the_folder_it_is() {
+        let t = "/u/.config/rush/tmp/p/1a2b/";
+        for (cmd, want) in [
+            (
+                "cp a $TMPDIR/b.png",
+                "cp a /u/.config/rush/tmp/p/1a2b/b.png",
+            ),
+            ("ls ${TMPDIR}", "ls /u/.config/rush/tmp/p/1a2b"),
+            (
+                "echo \"$TMPDIR/x\"",
+                "echo \"/u/.config/rush/tmp/p/1a2b/x\"",
+            ),
+            (
+                "echo \"it's $TMPDIR\"",
+                "echo \"it's /u/.config/rush/tmp/p/1a2b\"",
+            ),
+            ("echo '$TMPDIR'", "echo '$TMPDIR'"),
+            ("echo \\$TMPDIR", "echo \\$TMPDIR"),
+            ("echo $TMPDIRS", "echo $TMPDIRS"),
+            ("echo $TMPDIR_X", "echo $TMPDIR_X"),
+        ] {
+            assert_eq!(resolve_tmp(cmd, t), want, "{cmd:?}");
+        }
+        assert_eq!(resolve_tmp("ls $TMPDIR", ""), "ls $TMPDIR");
     }
 }
