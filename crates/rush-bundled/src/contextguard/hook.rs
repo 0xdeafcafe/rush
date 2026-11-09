@@ -16,7 +16,8 @@ use std::time::{Duration, SystemTime};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use super::rules::{self, FileStat, Outcome, Refusal, Rules, State};
+use super::images;
+use super::rules::{self, FileStat, ImageStep, Outcome, Refusal, Rules, State};
 use super::squeeze;
 
 /// Files up to this size are read for their lines and a hash.
@@ -37,6 +38,11 @@ pub struct Env {
     pub rules: Rules,
     /// The time now as the agent's clock says it: 14:03:12.
     pub clock: String,
+    /// And in seconds since 1970.
+    pub now: u64,
+    /// Claude Code's own folder (CLAUDE_CONFIG_DIR, else ~/.claude), for
+    /// your permission rules about reads.
+    pub claude_dir: Option<PathBuf>,
 }
 
 /// The hook's answer: what it prints, and what it logs (an event's kind
@@ -62,6 +68,7 @@ struct Input {
     is_interrupt: bool,
     source: String,
     cwd: String,
+    permission_mode: String,
 }
 
 fn num(v: &Value, key: &str) -> Option<u64> {
@@ -135,10 +142,13 @@ pub fn step(input: &[u8], env: &Env) -> Option<Answer> {
             None
         }
         ("PreToolUse" | "", "Read") => {
+            let p = path();
+            if images::is_image(Path::new(&p)) {
+                return image_pre(&inp, env, session, agent, p);
+            }
             if !env.rules.reread && !env.rules.big_read {
                 return None;
             }
-            let p = path();
             let file = stat(Path::new(&p))?;
             let (offset, limit) = (
                 num(&inp.tool_input, "offset"),
@@ -171,10 +181,26 @@ pub fn step(input: &[u8], env: &Env) -> Option<Answer> {
             Some(deny(r, &inp, json!({"command": clip(&command)})))
         }
         ("PostToolUse", "Read") => {
+            let p = path();
+            if images::is_image(Path::new(&p)) {
+                if env.rules.reread || env.rules.images {
+                    with_state(env, session, |st| {
+                        let a = st.agents.entry(agent.into()).or_default();
+                        // Shown a copy, it looked at the image it asked for.
+                        let asked = rules::image_asked(a, &inp.tool_use_id).unwrap_or(p);
+                        let Some(file) = stat(Path::new(&asked)) else {
+                            return;
+                        };
+                        let tokens = images::dimensions(Path::new(&asked))
+                            .map_or(0, |(w, h)| images::billed(w, h));
+                        rules::image_done(a, &asked, &inp.tool_use_id, file, tokens, &env.clock);
+                    });
+                }
+                return None;
+            }
             if !env.rules.reread {
                 return None;
             }
-            let p = path();
             let file = stat(Path::new(&p))?;
             let (offset, limit) = (
                 num(&inp.tool_input, "offset"),
@@ -236,6 +262,165 @@ pub fn step(input: &[u8], env: &Env) -> Option<Answer> {
         }
         _ => None,
     }
+}
+
+/// Before a Read of an image: a re-read refused; else, where it helps, the
+/// read pointed at a smaller WebP copy (Claude Code's updatedInput), and a
+/// word on contact sheets once the agent has looked at many.
+fn image_pre(inp: &Input, env: &Env, session: &str, agent: &str, p: String) -> Option<Answer> {
+    let rules = env.rules;
+    if !rules.reread && !rules.images {
+        return None;
+    }
+    let src = Path::new(&p);
+    let file = stat(src)?;
+    let tokens = images::dimensions(src).map_or(0, |(w, h)| images::billed(w, h));
+    let copy = if rules.images && may_rewrite(inp, env, &p) {
+        images::shrink(src, &env.tmp.join(images::DIR), rules.image_tokens)
+    } else {
+        None
+    };
+    let step = with_state(env, session, |st| {
+        Some(rules::image(
+            st.agents.entry(agent.into()).or_default(),
+            rules,
+            &p,
+            &file,
+            tokens,
+            copy.as_ref().map(|c| c.tokens().1),
+            &inp.tool_use_id,
+            env.now,
+        ))
+    })?;
+    let (shrink, nudge) = match step {
+        ImageStep::Refused(r) => return Some(deny(r, inp, json!({"path": p}))),
+        ImageStep::Read { shrink, nudge } => (shrink, nudge),
+    };
+    let copy = copy.filter(|_| shrink);
+    if copy.is_none() && nudge.is_empty() {
+        return None;
+    }
+    let mut out = Map::new();
+    out.insert("hookEventName".into(), "PreToolUse".into());
+    let mut fields = Map::new();
+    fields.insert("tool".into(), Value::String(inp.tool_name.clone()));
+    fields.insert("tool_use_id".into(), Value::String(inp.tool_use_id.clone()));
+    if !inp.agent_id.is_empty() {
+        fields.insert("agent".into(), Value::String(inp.agent_id.clone()));
+    }
+    fields.insert("path".into(), Value::String(p.clone()));
+    let mut notes = Vec::new();
+    if let Some(c) = &copy {
+        let mut input = inp.tool_input.as_object().cloned().unwrap_or_default();
+        input.insert(
+            "file_path".into(),
+            Value::String(c.path.to_string_lossy().into_owned()),
+        );
+        out.insert("permissionDecision".into(), "allow".into());
+        out.insert(
+            "permissionDecisionReason".into(),
+            "context-guard: a smaller copy of the image".into(),
+        );
+        out.insert("updatedInput".into(), Value::Object(input));
+        let (was, now) = c.tokens();
+        let cost = if now < was {
+            format!(
+                "about {} tokens instead of {}",
+                images::thousands(now),
+                images::thousands(was)
+            )
+        } else {
+            format!(
+                "{} KB instead of {} KB",
+                c.after.div_ceil(1024),
+                c.before.div_ceil(1024)
+            )
+        };
+        let why = format!(
+            "context-guard: you're seeing a smaller copy of {p}: {}×{} WebP, from {}×{} ({cost}). If you need it \
+             at full size, read {p} again straight away: that read goes through as it is.",
+            c.to.0, c.to.1, c.from.0, c.from.1
+        );
+        fields.insert("why".into(), Value::String(why.clone()));
+        fields.insert(
+            "copy".into(),
+            Value::String(c.path.to_string_lossy().into_owned()),
+        );
+        fields.insert(
+            "from".into(),
+            Value::String(format!("{}x{}", c.from.0, c.from.1)),
+        );
+        fields.insert("to".into(), Value::String(format!("{}x{}", c.to.0, c.to.1)));
+        fields.insert("before".into(), Value::from(c.before));
+        fields.insert("after".into(), Value::from(c.after));
+        fields.insert("tokens_before".into(), Value::from(was));
+        fields.insert("tokens_after".into(), Value::from(now));
+        notes.push(why);
+    }
+    if !nudge.is_empty() {
+        if copy.is_none() {
+            fields.insert("why".into(), Value::String(nudge.clone()));
+        }
+        fields.insert("nudge".into(), Value::Bool(true));
+        notes.push(nudge);
+    }
+    out.insert(
+        "additionalContext".into(),
+        Value::String(notes.join("\n\n")),
+    );
+    Some(Answer {
+        out: json!({ "hookSpecificOutput": Value::Object(out) }),
+        kind: if copy.is_some() {
+            "hook-shrunk"
+        } else {
+            "hook-nudged"
+        },
+        fields,
+    })
+}
+
+/// Whether the guard may point a read of p at a copy, which it does with
+/// "allow": not when you have permission rules of your own about reads
+/// (they'd be judged against the copy, not p), nor for a file Claude Code
+/// would ask you about (outside the agent's folder and scratch folder,
+/// unless it runs without asking).
+fn may_rewrite(inp: &Input, env: &Env, p: &str) -> bool {
+    if read_rules(env.claude_dir.as_deref(), &inp.cwd) {
+        return false;
+    }
+    let inside = |dir: &str| !dir.is_empty() && Path::new(p).starts_with(dir);
+    matches!(inp.permission_mode.as_str(), "bypassPermissions" | "auto")
+        || inside(&inp.cwd)
+        || inside(env.tmp.to_str().unwrap_or(""))
+}
+
+/// Whether your Claude Code settings (yours, the project's, the project's
+/// own local) have a deny or ask rule about Read.
+fn read_rules(claude_dir: Option<&Path>, cwd: &str) -> bool {
+    let mut files = Vec::new();
+    if let Some(d) = claude_dir {
+        files.push(d.join("settings.json"));
+    }
+    if !cwd.is_empty() {
+        let c = Path::new(cwd).join(".claude");
+        files.push(c.join("settings.json"));
+        files.push(c.join("settings.local.json"));
+    }
+    files.iter().any(|f| {
+        let Some(v) = fs::read(f)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        else {
+            return false;
+        };
+        ["deny", "ask"].iter().any(|k| {
+            v["permissions"][k].as_array().is_some_and(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .any(|r| r == "Read" || r.starts_with("Read("))
+            })
+        })
+    })
 }
 
 fn clip(s: &str) -> String {
@@ -516,6 +701,8 @@ mod tests {
                 tmp: home.path().join("tmp"),
                 rules,
                 clock: "14:03:12".into(),
+                now: 1_000_000,
+                claude_dir: Some(home.path().join("claude")),
             },
             work,
             _home: home,
@@ -532,6 +719,8 @@ mod tests {
                     tmp: self.env.tmp.clone(),
                     rules,
                     clock: self.env.clock.clone(),
+                    now: self.env.now,
+                    claude_dir: self.env.claude_dir.clone(),
                 },
                 work: self.work.clone(),
             }
@@ -693,5 +882,235 @@ mod tests {
         });
         let resp = json!({"tool_response": {"stdout": out, "stderr": ""}});
         assert_eq!(bash(&off, "PostToolUse", "cargo build", resp), None);
+    }
+
+    /// A screenshot-sized PNG with something in it.
+    fn screenshot(path: &Path, w: u32, h: u32) {
+        let mut img = image::RgbImage::new(w, h);
+        for (x, y, p) in img.enumerate_pixels_mut() {
+            *p = image::Rgb([(x % 251) as u8, (y % 241) as u8, ((x ^ y) % 239) as u8]);
+        }
+        img.save(path).unwrap();
+    }
+
+    fn look(
+        t: &T,
+        session: &str,
+        id: &str,
+        file: &str,
+        event: &str,
+        extra: Value,
+    ) -> Option<Answer> {
+        let mut v = json!({"hook_event_name": event, "session_id": session, "tool_name": "Read",
+                           "cwd": t.work, "tool_use_id": id, "tool_input": {"file_path": file}});
+        if let (Value::Object(m), Value::Object(e)) = (&mut v, extra) {
+            m.extend(e);
+        }
+        hook(t, v)
+    }
+
+    fn context(a: &Option<Answer>) -> &str {
+        a.as_ref()
+            .and_then(|a| a.out["hookSpecificOutput"]["additionalContext"].as_str())
+            .unwrap_or("")
+    }
+
+    /// An image read as a smaller copy; asked again straight after, the
+    /// original; a third time, refused as unchanged.
+    #[test]
+    fn images_through_the_hook() {
+        let t = setup(Rules::ALL);
+        let f = t.work.join("shot.png");
+        screenshot(&f, 3024, 1964);
+        let p = f.to_string_lossy().into_owned();
+        let a = look(&t, "s1", "toolu_1", &p, "PreToolUse", json!({})).unwrap();
+        assert_eq!(a.kind, "hook-shrunk");
+        let out = &a.out["hookSpecificOutput"];
+        assert_eq!(out["permissionDecision"], "allow");
+        let copy = out["updatedInput"]["file_path"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(
+            copy.starts_with(&*t.env.tmp.join("rush-images").to_string_lossy()),
+            "{copy}"
+        );
+        let (w, h) = images::dimensions(Path::new(&copy)).unwrap();
+        assert!(images::tokens(w, h) <= 1568, "{w}x{h}");
+        let said = out["additionalContext"].as_str().unwrap();
+        assert!(
+            said.starts_with(&format!("context-guard: you're seeing a smaller copy of {p}: {w}×{h} WebP, from 3024×1964 (about ")),
+            "{said}"
+        );
+        assert!(
+            said.contains("(about 1,568 tokens instead of 4,760)"),
+            "{said}"
+        );
+        assert_eq!(
+            (&a.fields["tokens_before"], &a.fields["tokens_after"]),
+            (&json!(4760), &json!(1568))
+        );
+        // It went through, as the copy.
+        look(&t, "s1", "toolu_1", &copy, "PostToolUse", json!({}));
+        // Asked again straight after: the original, as it is.
+        assert_eq!(look(&t, "s1", "toolu_2", &p, "PreToolUse", json!({})), None);
+        look(&t, "s1", "toolu_2", &p, "PostToolUse", json!({}));
+        // And again: it's in its context.
+        let a = look(&t, "s1", "toolu_3", "shot.png", "PreToolUse", json!({}));
+        assert!(
+            reason(&a).starts_with(&format!(
+                "context-guard: {p} is unchanged since you looked at it at 14:03:12. The image is still in your context"
+            )),
+            "{a:?}"
+        );
+        assert_eq!(a.unwrap().fields["rule"], "reread");
+        // Changed, it's read again, as a copy.
+        screenshot(&f, 3000, 2000);
+        let a = look(&t, "s1", "toolu_4", &p, "PreToolUse", json!({}));
+        assert_eq!(a.map(|a| a.kind), Some("hook-shrunk"));
+        // Off, nothing: no copy, and no refusal with re-reads off too.
+        let off = t.with(Rules {
+            images: false,
+            reread: false,
+            ..Rules::ALL
+        });
+        assert_eq!(
+            look(&off, "s2", "toolu_5", &p, "PreToolUse", json!({})),
+            None
+        );
+    }
+
+    #[test]
+    fn images_left_alone() {
+        let t = setup(Rules::ALL);
+        let small = t.work.join("icon.png");
+        screenshot(&small, 64, 64);
+        let outside = tempfile::tempdir().unwrap();
+        let far = outside.path().join("far.png");
+        screenshot(&far, 2000, 1500);
+        let far = far.to_string_lossy().into_owned();
+        let small = small.to_string_lossy().into_owned();
+        let cases: Vec<(&str, &str, Value, bool)> = vec![
+            // Small already: nothing to say.
+            ("small", &small, json!({}), false),
+            // Outside the agent's folders, Claude Code would ask you: left to it.
+            (
+                "outside",
+                &far,
+                json!({"permission_mode": "default"}),
+                false,
+            ),
+            // Unless it runs without asking.
+            (
+                "outside, auto",
+                &far,
+                json!({"permission_mode": "auto"}),
+                true,
+            ),
+            (
+                "outside, bypass",
+                &far,
+                json!({"permission_mode": "bypassPermissions"}),
+                true,
+            ),
+        ];
+        for (i, (what, p, extra, shrunk)) in cases.into_iter().enumerate() {
+            let a = look(&t, &format!("s{i}"), "toolu_1", p, "PreToolUse", extra);
+            assert_eq!(a.is_some_and(|a| a.kind == "hook-shrunk"), shrunk, "{what}");
+        }
+        // Your own rules about reads: left to them.
+        let claude = t.env.claude_dir.clone().unwrap();
+        fs::create_dir_all(&claude).unwrap();
+        fs::write(
+            claude.join("settings.json"),
+            r#"{"permissions": {"deny": ["Read(./secrets/**)"]}}"#,
+        )
+        .unwrap();
+        let a = look(
+            &t,
+            "s9",
+            "toolu_1",
+            &far,
+            "PreToolUse",
+            json!({"permission_mode": "auto"}),
+        );
+        assert_eq!(a, None);
+    }
+
+    /// Many images, or several at once, and the agent is pointed to a
+    /// contact sheet: a word beside the read, never a refusal.
+    #[test]
+    fn contact_sheets_suggested() {
+        let t = setup(Rules::ALL);
+        let mut paths = Vec::new();
+        for i in 0..10 {
+            let f = t.work.join(format!("s{i}.png"));
+            screenshot(&f, 120 + i, 90);
+            paths.push(f.to_string_lossy().into_owned());
+        }
+        // One after another: the 9th gets the word.
+        for (i, p) in paths.iter().enumerate().take(9) {
+            let id = format!("toolu_{i}");
+            let a = look(&t, "seq", &id, p, "PreToolUse", json!({}));
+            if i < 8 {
+                assert_eq!(a, None, "read {}", i + 1);
+            } else {
+                let a = a.unwrap();
+                assert_eq!(a.kind, "hook-nudged");
+                assert!(
+                    a.out["hookSpecificOutput"]
+                        .get("permissionDecision")
+                        .is_none()
+                );
+                let said = a.out["hookSpecificOutput"]["additionalContext"]
+                    .as_str()
+                    .unwrap();
+                assert!(
+                    said.starts_with("context-guard: that's 9 images you've looked at in this conversation. Each one stays in your context"),
+                    "{said}"
+                );
+                assert!(said.contains("mcp__rush__contact_sheet"), "{said}");
+            }
+            look(&t, "seq", &id, p, "PostToolUse", json!({}));
+        }
+        // Three at once: the third gets it, once.
+        let at_once: Vec<Option<Answer>> = (0..4)
+            .map(|i| {
+                look(
+                    &t,
+                    "batch",
+                    &format!("toolu_{i}"),
+                    &paths[i],
+                    "PreToolUse",
+                    json!({}),
+                )
+            })
+            .collect();
+        assert_eq!(context(&at_once[0]), "");
+        assert_eq!(context(&at_once[1]), "");
+        assert!(
+            context(&at_once[2]).starts_with("context-guard: that's 3 images read at once."),
+            "{:?}",
+            at_once[2]
+        );
+        assert_eq!(context(&at_once[3]), "");
+        // Off, nothing.
+        let off = t.with(Rules {
+            images: false,
+            ..Rules::ALL
+        });
+        for (i, p) in paths.iter().take(4).enumerate() {
+            assert_eq!(
+                look(
+                    &off,
+                    "off",
+                    &format!("toolu_{i}"),
+                    p,
+                    "PreToolUse",
+                    json!({})
+                ),
+                None
+            );
+        }
     }
 }

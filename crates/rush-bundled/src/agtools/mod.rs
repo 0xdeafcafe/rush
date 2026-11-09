@@ -11,9 +11,11 @@
 
 mod agents;
 mod remind;
+mod sheet;
 
 pub use agents::*;
 pub use remind::*;
+pub use sheet::{CONTACT_SHEET, SheetInput};
 
 use std::io::{BufRead, Read, Write};
 use std::sync::{Arc, Mutex};
@@ -110,7 +112,8 @@ fn view_tool() -> Tool {
 
 /// rush's tools by their own names, which all never ask: show only draws,
 /// view only fills rush's panel, the agent tools start what the Agent tool
-/// would, and the reminder tools only message the session itself.
+/// would, the reminder tools only message the session itself, and
+/// contact_sheet only reads images (as their pixels) and writes the sheet.
 pub fn names() -> Vec<String> {
     let mut out = vec![show_tool().name, view_tool().name];
     out.extend(
@@ -120,6 +123,7 @@ pub fn names() -> Vec<String> {
             .filter(|n| n != ANSWER_AGENT), // the caller's permissions judge it
     );
     out.extend(remind_tools().into_iter().map(|t| t.name));
+    out.push(sheet::sheet_tool().name);
     out
 }
 
@@ -220,6 +224,7 @@ fn answer(ag: Option<&dyn Agents>, msg: &[u8]) -> Vec<u8> {
                     list.push(view_tool());
                 }
             }
+            list.push(sheet::sheet_tool());
             ok(serde_json::json!({ "tools": list }))
         }
         "tools/call" => {
@@ -230,6 +235,9 @@ fn answer(ag: Option<&dyn Agents>, msg: &[u8]) -> Vec<u8> {
             }
             if let Some(res) = call_remind(ag, &p.name, p.arguments.as_deref()) {
                 return ok(res);
+            }
+            if p.name == CONTACT_SHEET {
+                return ok(sheet::call_sheet(p.arguments.as_deref()));
             }
             if headless {
                 return ok(result(&format!("rush has no tool named {}.", p.name), true));
@@ -434,7 +442,7 @@ mod tests {
         );
         let got = allowed();
         assert!(
-            got.len() == 8 && got[0] == SHOW && got[1] == format!("{PREFIX}view"),
+            got.len() == 9 && got[0] == SHOW && got[1] == format!("{PREFIX}view"),
             "allowed: {got:?}"
         );
         // Written as Go writes it: keys in order.
@@ -633,6 +641,60 @@ mod tests {
 
     // agtools_test.go TestHeadlessHasNoDrawingTools: a headless run isn't
     // given the tools that draw, and can't call them.
+    /// contact_sheet answers with the sheet itself, and says where it's
+    /// kept; what it can't do, it says why.
+    #[test]
+    fn contact_sheet() {
+        let list = rpc(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#).to_string();
+        assert!(list.contains(r#""name":"contact_sheet""#), "{list}");
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.png");
+        image::RgbImage::from_pixel(900, 600, image::Rgb([40, 90, 200]))
+            .save(&a)
+            .unwrap();
+        let out = dir.path().join("sheet.webp");
+        let call = |args: Value| {
+            rpc(
+                &serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": {"name": "contact_sheet", "arguments": args}})
+                .to_string(),
+            )
+        };
+        let r = call(serde_json::json!({"images": [a, a], "out": out}));
+        let content = &r["result"]["content"];
+        assert_eq!(r["result"]["isError"], false, "{r}");
+        let said = content[0]["text"].as_str().unwrap();
+        assert!(
+            said.starts_with("2 images on one sheet, 2 across: ")
+                && said.ends_with(&format!("Kept at {}.", out.display())),
+            "{said}"
+        );
+        assert_eq!(content[1]["type"], "image");
+        assert_eq!(content[1]["mimeType"], "image/webp");
+        assert!(std::fs::read(&out).unwrap().starts_with(b"RIFF"));
+        let cases: &[(Value, &str)] = &[
+            (
+                serde_json::json!({"images": ["a.png"]}),
+                "Give each image's absolute path: a.png isn't one.",
+            ),
+            (
+                serde_json::json!({"images": []}),
+                "No images: give the paths",
+            ),
+        ];
+        for (args, want) in cases {
+            let r = call(args.clone());
+            assert_eq!(r["result"]["isError"], true, "{r}");
+            assert!(
+                r["result"]["content"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with(want),
+                "{r}"
+            );
+        }
+    }
+
     #[test]
     fn headless_has_no_drawing_tools() {
         let f = Arc::new(Fake {
