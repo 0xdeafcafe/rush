@@ -1916,6 +1916,90 @@ an estimate: the strong model might have taken more or fewer turns. It
 shows as a finding, and in the advisor's digest. Subagent rows in
 sessions already show their model, read from the subagent's transcript.
 
+### Images in tool results (Rust-only)
+
+Go counted an image in a tool result as nothing (only its text parts'
+bytes). An audit of two days (2026-11-07..09) found agents had Read 3,297
+images, 1,680 of them a path the same session had read before, and one
+subagent's context grew from 24k to 300k on 1,126 images. An image stays
+in context, so every later request pays for it again as a cache read.
+
+`image.rs` reads an image's size from the first bytes of its base64 (PNG
+IHDR, GIF screen, WebP VP8/VP8L/VP8X, JPEG's first SOF found by walking
+segment lengths), decoding only the 4-character groups those bytes are
+in, never the whole image. Its tokens follow Anthropic's rule, from
+platform.claude.com/docs/en/build-with-claude/vision ("Resolution and
+token cost") and vision-coordinates ("How Claude resizes and pads
+images"), read 2026-11-09:
+
+- tokens = ⌈w/28⌉ × ⌈h/28⌉ (one visual token per 28×28 patch);
+- first scaled down, aspect kept, to the largest size whose edges, padded
+  to 28, fit the long-edge limit and whose tokens fit the budget (the
+  docs' binary search, short edge rounded half to even);
+- high-resolution tier (Claude 4.7 and later, Fable, Mythos, and a model
+  it can't place): 2,576 px and 4,784 tokens; standard tier (the rest,
+  Haiku 4.5, Sonnet 4.5, Opus 4.6 and older): 1,568 px and 1,568 tokens.
+  So 1920×1080 is 2,691 tokens on Opus 5.5 and 1,560 on Haiku 4.5.
+- An image whose size can't be read counts `UNREAD_TOKENS` (1,568, the
+  standard tier's budget).
+
+The docs' older w×h/750 rule with a 1,568 px long edge is superseded by
+the patch rule (1000×1000: 1,333 by the old, 1,296 by the new; small
+images differ more, 200×200 being 53 against 64).
+
+Per hour (`Bucket`, additive keys Go ignores): images `im`, their tokens
+`it`, image tokens re-read `ik`, images read again `ix` and their re-read
+tokens `ixk`. Re-read tokens are exact for the transcript: a request
+re-reads every image already sent (an image is first sent by the request
+after its result, as a cache write, and read by each one after), until a
+compaction drops them. Per transcript (`File`): path → image reads
+(`ird`), the open Read calls' paths, the image tokens held, and the most
+held at once (`imx`). `rv` (`FILE_REV`) makes this build read again a
+transcript an older one (or Go's, which drops the key) read, without
+changing the cache's version Go checks.
+
+Findings (costs at the transcript's cache-read price, said as estimates):
+"N image reads were of an image the same session had read already"
+(from 10 repeats; names the path read most) and "N sessions were heavy
+on images" (50 images or more, or the images held a quarter of a peak
+past 50k). Their fixes are rush's words: note what an image showed rather
+than reading it again, batch them, a contact sheet, downscaling first, or
+a fresh reviewer that reads each once.
+
+### Codex in the Efficiency place (Rust-only)
+
+Efficiency reads more than one agent: `source::sources()` is Claude
+Code's and Codex's, and `Store::refresh` reads each profile through its
+kind's Source (`source_for`; a profile naming no kind is Claude Code's,
+an agent with none, as Kimi, is passed over). Each File says its agent
+(`ag`, empty for Claude Code, so its files are as Go wrote them). Codex's
+files are cached in `efficiency-agents.json`, apart from
+`efficiency.json`, which Go's build reads and would count them in.
+
+`codex.rs` reads `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl` (the
+profile's folder, else `$CODEX_HOME`, else `~/.codex`): session_meta for
+the thread's id and folder (a `source.subagent` makes it a subagent),
+turn_context for the model, and event_msg token_count for each request.
+OpenAI's input_tokens includes the cached and cache-written tokens, so
+input is what's left; output includes reasoning. Codex writes a count
+again when only its rate limits move, so a count whose running total
+(`total_token_usage.total_tokens`) hasn't changed is the same request;
+an `info` of null is skipped. Codex has no Pricer (rush-codex), so its
+tokens are counted and never priced: no dollars are made up.
+
+A View splits by agent (`View.agents`, sessions, subagents and a Bucket
+each), and `Query.agents` narrows it to some (none: every agent). The
+advisor's digest says the split only when there's more than one agent,
+so a Claude Code digest reads as before. There is no Efficiency screen
+in the Rust port yet to show it in.
+
+Findings, in tokens: "N Codex sessions ran near their context window"
+(a transcript with 20 requests or more that sent 90% of the window,
+`NEAR_WINDOW`, `NEAR_REQS`) and "N long Codex sessions ran on <model>"
+(200 requests or more on a frontier model that has a cheaper one:
+`codex::FRONTIER`, the one place Codex's model names are, gpt-6-astra →
+gpt-6.1-sol).
+
 ## A session's runs
 
 The Session follows the runs its session started (session_core's

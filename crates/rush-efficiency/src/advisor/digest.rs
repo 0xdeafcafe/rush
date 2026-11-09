@@ -144,6 +144,58 @@ pub fn digest(input: &Input) -> String {
         );
     }
 
+    // Rust-only: said only when there's something, so a digest of Claude
+    // Code's sessions alone reads as Go's.
+    if v.agents.len() > 1 {
+        let parts: Vec<String> = v
+            .agents
+            .iter()
+            .map(|(k, a)| {
+                format!(
+                    "{k} {} sessions, {} requests, {} in ({:.0}% cached), {} out, {}",
+                    a.sessions,
+                    a.b.req,
+                    tokens(a.b.context()),
+                    if a.b.context() > 0 {
+                        100.0 * a.b.cr as f64 / a.b.context() as f64
+                    } else {
+                        0.0
+                    },
+                    tokens(a.b.out),
+                    if a.b.cost() > 0.0 {
+                        money(a.b.cost())
+                    } else {
+                        "not priced".into()
+                    }
+                )
+            })
+            .collect();
+        p!("By agent: {}.", parts.join("; "));
+    }
+    if t.img > 0 {
+        p!(
+            "Images in tool results: {}, ≈{} tokens, re-read ≈{} (≈{}); {} read again from a path already read, in {} transcripts.",
+            t.img,
+            tokens(t.img_tok),
+            tokens(t.img_carry),
+            money(v.img_carry),
+            t.img_rep,
+            v.img_rep_sessions
+        );
+    }
+    if v.near > 0 {
+        p!(
+            "{} transcripts sent {:.0}%+ of their context window {}+ times; most {} times, {} of {} on {}.",
+            v.near,
+            crate::scan::NEAR_WINDOW * 100.0,
+            crate::aggregate::NEAR_REQS,
+            v.nearest.near,
+            tokens(v.nearest.input),
+            tokens(v.nearest.window),
+            v.nearest.model
+        );
+    }
+
     let status = |id: &str| input.found.get(id).map_or(Status::Off, |f| f.status);
     let mut on = Vec::new();
     let mut half = Vec::new();
@@ -192,6 +244,15 @@ pub fn digest(input: &Input) -> String {
         );
         if s.worst_reads >= REREAD_AT {
             p!("   read {} ×{}", s.worst_read, s.worst_reads);
+        }
+        if s.b.img > 0 {
+            p!(
+                "   {} images, ≈{} tokens; image read most: {} ×{}",
+                s.b.img,
+                tokens(s.b.img_tok),
+                s.worst_image,
+                s.worst_image_reads
+            );
         }
         if let Some(br) = input.briefs.as_ref().and_then(|b| b.get(i))
             && !br.is_empty()

@@ -9,7 +9,14 @@ use crate::AGENT;
 /// What the agent's tokens u cost on model, in its fast mode or not; 0 for
 /// a model it doesn't price.
 pub fn cost(model: &str, u: &TokenUsage, fast: bool) -> f64 {
-    let Some(a) = global().get(AGENT) else {
+    cost_of(AGENT, model, u, fast)
+}
+
+/// What agent's tokens u cost on model, at its own prices: 0 for an agent
+/// without a Pricer (Codex has none), so its tokens are counted but not
+/// priced. Rust-only.
+pub fn cost_of(agent: &str, model: &str, u: &TokenUsage, fast: bool) -> f64 {
+    let Some(a) = global().get(agent) else {
         return 0.0;
     };
     if fast && let Some(fp) = a.fast_pricer() {
@@ -47,11 +54,16 @@ pub fn saved_against_default(model: &str, b: &crate::scan::Bucket) -> f64 {
 /// Dollars per million tokens read from the cache, at the agent's own
 /// prices: its default model's when model has none.
 pub fn cache_read_price(model: &str) -> f64 {
+    cache_read_price_of(AGENT, model)
+}
+
+/// cache_read_price at agent's prices: 0 when it has none. Rust-only.
+pub fn cache_read_price_of(agent: &str, model: &str) -> f64 {
     let u = TokenUsage {
         cache_read: 1_000_000,
         ..TokenUsage::default()
     };
-    global().price(AGENT, model, &u).unwrap_or(0.0)
+    global().price(agent, model, &u).unwrap_or(0.0)
 }
 
 #[cfg(test)]

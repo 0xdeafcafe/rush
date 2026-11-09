@@ -27,6 +27,11 @@ pub struct SessionCost {
     /// The file read most often, and how many times.
     pub worst_read: String,
     pub worst_reads: i64,
+    /// The agent whose transcript it is ("claude", "codex"). Rust-only.
+    pub agent: String,
+    /// The path an image was read from most, and how many times.
+    pub worst_image: String,
+    pub worst_image_reads: i64,
 }
 
 impl Store {
@@ -50,6 +55,7 @@ impl Store {
                 peak_ctx: f.peak_ctx,
                 compacts: f.compacts.len() as i64,
                 big: f.big,
+                agent: f.agent().to_string(),
                 ..SessionCost::default()
             };
             f.each_hour(|h, b| {
@@ -59,6 +65,12 @@ impl Store {
             });
             if c.b.req == 0 {
                 continue;
+            }
+            for (file, &k) in &f.img_reads {
+                if k > c.worst_image_reads || (k == c.worst_image_reads && *file < c.worst_image) {
+                    c.worst_image = file.clone();
+                    c.worst_image_reads = k;
+                }
             }
             for (file, &k) in &f.reads {
                 if k > c.worst_reads || (k == c.worst_reads && *file < c.worst_read) {
@@ -71,6 +83,7 @@ impl Store {
         out.sort_by(|a, b| {
             b.b.cost()
                 .total_cmp(&a.b.cost())
+                .then_with(|| b.b.context().cmp(&a.b.context()))
                 .then_with(|| a.path.cmp(&b.path))
         });
         out.truncate(n);

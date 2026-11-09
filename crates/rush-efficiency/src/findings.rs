@@ -98,8 +98,16 @@ pub fn findings(v: &View, found: &HashMap<String, Found>) -> Vec<Finding> {
         }
         out.push(f);
     }
+    images(v, &mut out);
+    codex(v, &mut out);
     if v.start_median > 30_000 {
-        let carry = v.start_median as f64 * v.total.req as f64 * cache_read_price("") / 1e6;
+        // At Claude Code's prices, so over its requests alone.
+        let req = if v.agents.is_empty() {
+            v.total.req
+        } else {
+            v.agents.get(crate::AGENT).map_or(0, |a| a.b.req)
+        };
+        let carry = v.start_median as f64 * req as f64 * cache_read_price("") / 1e6;
         out.push(Finding {
             title: format!(
                 "Sessions start with {} tokens of context (p90 {})",
@@ -252,6 +260,108 @@ pub fn findings(v: &View, found: &HashMap<String, Found>) -> Vec<Finding> {
         a.rank.cmp(&b.rank)
     });
     out
+}
+
+/// Image reads that were repeats worth a finding.
+pub const IMAGE_REPEATS_AT: i64 = 10;
+
+fn base_name(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// Images read again, and sessions heavy on them (Rust-only). Their
+/// costs are estimates: every request after an image re-reads it, at the
+/// cache-read price, until a compaction drops it.
+fn images(v: &View, out: &mut Vec<Finding>) {
+    let t = &v.total;
+    if t.img_rep >= IMAGE_REPEATS_AT {
+        let mut detail = format!(
+            "the requests after them re-read about {} tokens of them, about {} (an estimate)",
+            tokens(t.img_rep_carry),
+            money(v.img_rep_carry)
+        );
+        if v.worst_image_reads > 1 {
+            detail += &format!(
+                "; most: {}, read {} times",
+                base_name(&v.worst_image),
+                v.worst_image_reads
+            );
+        }
+        detail += ". Note what an image showed rather than reading it again, or put the ones to compare on one contact sheet";
+        out.push(Finding {
+            title: format!(
+                "{} image reads were of an image the same session had read already",
+                t.img_rep
+            ),
+            detail,
+            cost: v.img_rep_carry,
+            rank: 1,
+            ..Finding::default()
+        });
+    }
+    if v.img_heavy > 0 {
+        let h = &v.heaviest;
+        let mut detail = format!(
+            "{} images in all, about {} tokens; they stay in context, so every later request pays for them again: about {} here (an estimate)",
+            t.img,
+            tokens(t.img_tok),
+            money(v.img_carry)
+        );
+        if h.held > 0 && h.peak > 0 {
+            detail += &format!(
+                ". The heaviest held {} of its {} peak context in images",
+                tokens(h.held),
+                tokens(h.peak)
+            );
+        }
+        detail += ". Read them in batches, put them on a contact sheet, downscale them first, or hand the looking to a fresh reviewer that reads each once";
+        out.push(Finding {
+            title: format!("{} sessions were heavy on images", v.img_heavy),
+            detail,
+            cost: v.img_carry,
+            rank: 1,
+            ..Finding::default()
+        });
+    }
+}
+
+/// Codex sessions near their window, and long ones on its frontier model
+/// (Rust-only). rush has no prices for Codex, so they are in tokens.
+fn codex(v: &View, out: &mut Vec<Finding>) {
+    if v.near > 0 {
+        let n = &v.nearest;
+        out.push(Finding {
+            title: format!("{} Codex sessions ran near their context window", v.near),
+            detail: format!(
+                "the closest sent {} of {} tokens, {} requests running ({}): every request re-reads all of it, and one long output can run out of room. A fresh session with a short hand-off, or /compact, keeps each turn smaller",
+                tokens(n.input),
+                tokens(n.window),
+                n.near,
+                n.model
+            ),
+            rank: 1,
+            ..Finding::default()
+        });
+    }
+    if v.frontier > 0 {
+        let l = &v.longest;
+        let cheaper = crate::codex::cheaper(&l.model).unwrap_or_default();
+        out.push(Finding {
+            title: format!("{} long Codex sessions ran on {}", v.frontier, l.model),
+            detail: format!(
+                "the longest took {} requests and {} tokens of input. Routine work (a described edit, a lookup, running tests) does as well on {}, which costs less; keep {} for design and debugging. rush has no prices for Codex, so this is in tokens",
+                l.req,
+                tokens(l.input),
+                cheaper,
+                l.model
+            ),
+            rank: 2,
+            ..Finding::default()
+        });
+    }
 }
 
 /// Dollars in words, short.
