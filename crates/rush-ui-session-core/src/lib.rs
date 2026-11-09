@@ -52,7 +52,6 @@ pub mod queue;
 pub mod relay;
 pub mod reopen;
 pub mod running;
-pub mod runview;
 pub mod rushcmd;
 pub mod rushmove;
 pub mod scripts;
@@ -66,6 +65,7 @@ pub mod start;
 pub mod subbox;
 pub mod subfollow;
 pub mod subname;
+pub mod subpane;
 pub mod subqueue;
 pub mod subs;
 pub mod subview;
@@ -117,7 +117,6 @@ pub fn register(x: &mut Ext) {
     x.session_keys.insert(0, jobkeys::ctrl_b);
     // The box under a run beside the subagents list, while it has the
     // keys, has them all.
-    x.session_keys.insert(0, subbox::key);
     // Focus in the column beside the conversation (→ from the box or the
     // conversation): its keys come before everything else's.
     x.session_keys.insert(0, side::focus_key);
@@ -190,12 +189,14 @@ pub fn register(x: &mut Ext) {
     x.session_keys.insert(0, viewsuggest::watch_key);
     x.mouse.insert(0, viewsuggest::watch_mouse);
     // The subagents list's ↑↓ and enter, before the box's and the cards'
-    // (subview::list_key); a run open whole has every key and click
-    // first (runview.rs), and a hosted child's breadcrumb its click.
+    // (subview::list_key); a run's pane with the keys has every key first,
+    // and the pointer over its conversation (subpane.rs); a hosted child's
+    // breadcrumb its click.
     x.session_keys.insert(0, subview::list_key);
-    x.session_keys.insert(0, runview::key);
-    x.mouse.insert(0, runview::mouse);
-    x.mouse.insert(0, runview::crumb_click);
+    x.session_keys.insert(0, subpane::key);
+    x.mouse.insert(0, subpane::mouse);
+    x.mouse.insert(0, subpane::crumb_click);
+    x.here_keys.push(subpane::here_keys);
 }
 
 /// The views' keys (a row picked, ↑↓ through the conversation), after
@@ -204,7 +205,7 @@ pub fn register(x: &mut Ext) {
 pub fn register_last(x: &mut Ext) {
     x.session_keys.push(subview::key);
     x.session_keys.push(views::key);
-    // A run open whole's header, over every group's (runview.rs).
+    // A hosted child's breadcrumb, over every group's header (subpane.rs).
     x.session_head.push(views::head_last);
     // A task typed in the box starts a session, once nothing before has
     // taken it (keys.go submit's last step).
@@ -227,8 +228,8 @@ pub struct Core {
     /// id and the text. The same again for the same card is no new message
     /// (cards_host's answer).
     pub sent_answers: HashMap<String, (String, String)>,
-    /// The session whose run open whole stands in its place for a call
-    /// (runview::as_run): its view then is the conversation.
+    /// The session whose subagent's run stands in its place for a call
+    /// (subpane::as_run): its view then is the conversation.
     pub as_run: Option<String>,
     /// No map beside the conversation, whatever the config says (tests
     /// drawn as Go's, with HideMinimap).

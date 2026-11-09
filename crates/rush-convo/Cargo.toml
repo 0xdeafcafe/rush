@@ -44,3 +44,7 @@ harness = false
 [[bench]]
 name = "follow"
 harness = false
+
+[[bench]]
+name = "subrun"
+harness = false

@@ -788,7 +788,14 @@ impl Model {
 
     pub fn session_key(&mut self, s: &str) -> Step {
         let rows = self.session_rows();
-        let (w, now, tick) = (self.w.saturating_sub(3), self.now, self.tick);
+        self.session_key_at(s, self.w.saturating_sub(3), rows)
+    }
+
+    /// session_key, for a conversation laid out w wide and rows tall: a
+    /// subagent's run in its pane beside the list (session_core's
+    /// subpane.rs), as it was drawn.
+    pub fn session_key_at(&mut self, s: &str, w: usize, rows: usize) -> Step {
+        let (now, tick) = (self.now, self.tick);
         let Some(v) = self.session.as_mut() else {
             return Step::Idle;
         };

@@ -246,9 +246,9 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
 /// Session draws them: the item under the pointer lit, the dragged-over
 /// text painted, prompts pinned and, scrolled up, the "more below" pill;
 /// and how many of them are the conversation's (the pill's row isn't).
-/// The session's own conversation and a run opened whole (runview.rs)
-/// are both drawn with it.
-fn rows_of(
+/// The session's own conversation and a subagent's run in its pane
+/// (subpane.rs) are both drawn with it.
+pub fn rows_of(
     v: &mut crate::session::SessionView,
     rows: usize,
     cw: usize,
@@ -306,38 +306,6 @@ fn rows_of(
         b.push(spread(Line::new(), pill, cw));
     }
     (b, n)
-}
-
-/// A run opened whole (runview.rs), its view in m.session's place for the
-/// call: its conversation's rows as the session's own are drawn
-/// (rows_of), without what's the session's alone beside and under them
-/// (the map, the column, the views beside, Needs you, the opening card).
-pub fn run_text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
-    let (now, tick) = (m.now, m.tick);
-    let pref = m.cfg.column_width;
-    let txt = conn(m, key).txt;
-    let hover = conn(m, key).vs.hover_ref.clone();
-    let Some(v) = m.session.as_mut() else {
-        return Vec::new();
-    };
-    v.side = 0;
-    v.sync(w, now, tick);
-    v.o.wide = true;
-    let mut out = if !v.read {
-        vec![fit(line([sp("reading its conversation…", DIM)]), w)]
-    } else if v.sess.turns.is_empty() {
-        let first = if v.err.is_empty() {
-            line([sp("  nothing in it yet", DIM)])
-        } else {
-            line([sp(format!("couldn't read it: {}", v.err), RED)])
-        };
-        v.shown = vec![String::new()];
-        vec![fit(first, w)]
-    } else {
-        rows_of(v, rows, w, &hover, None, &txt, pref).0
-    };
-    out.truncate(rows);
-    out
 }
 
 // What a pinned row's ref starts with is the base's (crate::sess).

@@ -867,6 +867,9 @@ run's edits (`Detail::changes`), the open session's split into the
 project's and the rest, a list row's view summary, the pairing QR code;
 the dock's `job_subs` looks runs up rather than scanning them (`cargo
 bench -p rush-ui-session-core --bench subs`).
+Then a subagent's run picked: its readings built and laid out on the
+reader, a stat of its transcript gone from the UI thread, and a key
+drawing two parts of its turn rather than all ("A run's pane").
 
 Still on it, to move (the stall log says which matter):
 - `Store::load` the first time the store's asked for (Settings opened
@@ -1902,7 +1905,7 @@ once when asked (a run opened, the subagents view shown), and not at all
 when nothing does. The dock shows the running ones (or the column beside
 a wide conversation, or the top of the views panel while that's open);
 the subagents view lists every run, its numbers followed only while it
-shows, and opens one whole (below); ↑ from the box picks the dock's runs
+shows, and drives the one picked in its pane (below); ↑ from the box picks the dock's runs
 and space watches one. The agents rush hosted for a session come from the
 binary's `Hosts::spawned` (rush/hosted.rs `hosted_runs`, spawns.go
 hostedRuns): the hosts whose meta says `spawnedBy` it, their prompt and
@@ -1922,12 +1925,12 @@ The subagents view (`subview::list`) is a line a run: its mark, what it
 was asked, a short status and how long it went, under Running and
 Finished headings. Its model, worktree, steps, cost and effort show only
 for the run picked: under its row when the pane is narrow (a click there
-opens it), else in the column beside the list (`subview::beside`, from
-`WIDE_AT` = 110 cells). That column follows clicks only, never the
-pointer; the views panel's run rows pick a run there too
-(`subview::pick_run`). ↑↓ move the pick through the list whatever has
-the keys, the run's box too while it's empty (`subview::list_key`, ahead
-of the cards' ↑ and the box's own keys). Past the newest
+gives its pane the keys), else in the column beside the list
+(`subview::beside`, from `WIDE_AT` = 110 cells). That column follows
+clicks only, never the pointer; the views panel's run rows pick a run
+there too (`subview::pick_run`). ↑↓ move the pick through the list while
+the list has the keys (`subview::list_key`, ahead of the cards' ↑ and
+the box's own keys); while the run's pane has them they're its own. Past the newest
 `EARLIER_AFTER` (8), finished runs fold under "Earlier · N"
 (`earlier:runs`), but those that failed or were stopped, and the one
 picked. A workflow run is named with when it started;
@@ -1937,51 +1940,82 @@ tries (resumed after a restart) fold under the try that replaced them
 worktree its own calls reached into most (`Session::worktree_most`): a
 subagent's transcript only says the folder its parent was in when it
 started it, so it's read for that only for agents rush hosts. Under the
-run in the column is a box to message it (`subview::box_key`, `→` or a
-click gives it the keys): an agent rush hosts gets it from its own host
+run in its pane is a box to message it: an agent rush hosts gets it from its own host
 (`spawned::send_text`); a running subagent whose host has an inbox, into
 that; any other Claude Code subagent has no line of its own, so the main
 session is asked to pass it on with SendMessage (which resumes one that
 finished), and the box says so; a workflow's agent without an inbox, or a
 session rush doesn't run, can't be reached, and the box says why
-(`relay::route`). One box is live at a time: while the run's has the
-keys the session's own isn't drawn, and the foot names whose it is
+(`relay::route`). One box is live at a time: while the run's pane has
+the keys the session's own isn't drawn, and the foot names whose it is
 ("enter send to <run>"); without them it says "tab or click here".
 
-### A run opened whole
+### A run's pane
 
-enter or → on a run picked in the list, a second click on its row within
-400 ms, or "open ›" at the right of its head opens it whole, as a
-session of its own looks (`runview.rs`): its conversation full width,
-drawn by the Session's own `conversation::rows_of` (pins, the pill, the
-row under the pointer, dragged-over text) and driven by its own row keys
-(`Model::session_key`: ↑↓ pick, enter → ← open and close, ctrl+o shows
-all, o a step's file, a click picks or opens a row, a link opens). Over
-it a header of its own: `‹ <parent> › <run>` and how it stands, then its
-facts (model, effort, worktree, steps, tokens, cost), then its tabs:
-Conversation, Overview (status, what it was asked, its steps so far),
-Changes (the files it edited) and Tasks, the last two where it has them.
-Under it one box, the run's (`subbox::run_key`), routed as the box
-beside the list is. esc, ← from an empty box, or a click on the
-breadcrumb goes back to the list with the run picked; one opened from a
-subagent's step (enter or → on it opens it so) goes back to that step on
-esc. A long run opens at its end: its reader starts the tail at the
-transcript's last 2 MB (`Tail::from_end`, `Tail::subagent_from_end`),
-draws that, then reads it whole, as a long session opens.
+A run is never a screen of its own (the user's call, 2026-11-09: b83b446b
+opened one full width; that's gone). tab, enter or → on the run picked,
+a click in its pane, or a subagent's step in the conversation (enter or
+→, which picks it in the view) gives its pane the keys (`subpane.rs`),
+and then everything a session's conversation does works in it, at the
+pane's width: ↑↓ pick rows (↑ from the empty box picks its queue's last
+first, as a Session's), enter → ← open and close, ctrl+o shows all, o
+opens a step's file or diff, PgUp/PgDn, Home and End (End follows its
+tail), the pins and the "↓ N more" pill, a click picks or opens a row or
+follows a link, dragged-over text copies. What's typed goes to the run's
+own box (`subbox::run_key`), with its queue above it (picked with ↑,
+edited, moved, merged, dropped, held, ctrl+enter sends now), routed by
+`relay::route`; one nothing can reach says why, and what's typed goes
+nowhere, the session's box neither. esc gives the keys back to the list
+(one picked from elsewhere goes straight back there), and esc from the
+list goes on as ever. The key guide's first section is the pane's keys
+while it has them (`Ext::here_keys`).
 
-It's a sub-state of the parent's Session (`Watch::open`), not a session
-of its own. The run's conversation is the `SessionView` subs.rs already
-reads for the run picked (`Runs::detail`); `runview::as_run` puts it in
-`m.session`'s place for the length of one call (`Core::as_run` makes
-`views::view_name` say "conversation" meanwhile), so the Session's
-drawing, keys and clicks work on it unchanged, while the parent's live
-link, its box, queue, cards and header stay the parent's and nothing is
-torn down to go back. A session of its own would have needed an agent
-row, a host link and a key for each run, which Claude Code's subagents
-don't have. A child rush hosts still opens as its own session
-(`spawned::open_session`, alt+o); its header's first row then says
-`‹ <parent> › <child>`, and a click on the parent goes back to its
-Subagents list with the child picked (`runview::child_crumb`).
+/compact typed there: a child rush hosts is a session of its own, and it
+goes to it as typed in its own box. Claude Code can't compact a subagent:
+its control requests (interrupt, stop_task, set_permission_mode,
+get_context_usage, rewind_files) have none for one, and SendMessage
+passes words, not commands; each compacts on its own as it fills. The box
+says so, and the pane's facts say how full its context is ("context 45k
+of 200k · 22%", from its view's last request).
+
+The run's conversation is the `SessionView` subs.rs reads for the run
+picked (`Runs::detail`); `subpane::as_run` swaps it into `m.session`'s
+place for the length of one call (`Core::as_run` makes
+`views::view_name` say "conversation" meanwhile), its dragged-over text,
+rows and row under the pointer into the session's, so the Session's
+drawing (`conversation::rows_of`), keys (`Model::session_key_at`, at the
+pane's size) and clicks (moved to where the conversation's text starts)
+work on it unchanged. A swap of the two views moves a few hundred bytes;
+nothing is copied or laid out again. A child rush hosts still opens as
+its own session (`spawned::open_session`, alt+o); its header's first row
+says `‹ <parent> › <child>`, and a click on the parent goes back to its
+Subagents list with the child picked (`subpane::child_crumb`).
+
+What it costs the UI thread (Rust-only, 2026-11-09). A subagent's run is
+one turn: what it was asked, then thousands of calls, and the renderer
+lays out a turn at a time, whole. Before, for a run of 5,000 steps:
+
+- its reading was applied on the UI thread: a short one's (under 2 MB)
+  a 512 KB slice at a time, a frame and a reading each, the pane showing
+  its start growing; a long one's end as lines; and the reader's own
+  copy taken over there (`seed_detail`, a stat of its file);
+- its first frame laid the whole turn out on the UI thread;
+- every key that moved the pick drew every part of the turn again: the
+  pick was in each part's memo key (`units.rs unit_ctx`);
+- the pane kept a scroll of its own and drew a plain body, so nothing a
+  session's conversation does worked in it.
+
+Now its first reading, and a long one's whole after its end, are built on
+the reader (`read_detail`: the reader's copy topped up, or a short one
+whole at once, or a long one's last 2 MB) and laid out there as the pane
+last drew (`worker::warm` with the view's `drawn`, primed before the
+reading's asked for); the frame takes them by a move (`seed`,
+`take_end`, `take_whole_drawn`, which keeps the place). The pick is in a
+part's key only when it comes to or leaves one of its rows, so a key
+draws two parts. What's left per frame is a working run's: its turn is
+walked again each tick, its finished parts copied, not drawn. `cargo
+bench -p rush-convo --bench subrun` has the four; `rush events -k
+ui-stall` the live UI's.
 
 A run is finished only on a real end: its task-finished notice (an
 interim one saying running or pending isn't), its session's process

@@ -874,7 +874,7 @@ pub fn spawn_read(
 /// turns drawn, rather than drawing a long conversation's end while you
 /// wait (Go's warmed, rushmode.go:2064). None when the view hasn't drawn
 /// yet. s takes what the list said of it, as the view's will.
-fn warm(
+pub fn warm(
     s: &mut Session,
     drawn: &Drawn,
     spawns: Option<&SpawnsBy>,

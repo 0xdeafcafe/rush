@@ -94,8 +94,7 @@ pub fn lines(m: &mut Model, key: &str, id: &str, w: usize) -> Vec<Line> {
     lines_for(m, key, id, w, focused)
 }
 
-/// lines, with the keys or without them: a run open whole (runview.rs)
-/// has its box alone, and it has them.
+/// lines, with the keys or without them.
 pub fn lines_for(m: &mut Model, key: &str, id: &str, w: usize, focused: bool) -> Vec<Line> {
     let rt = super::relay::route(m, key, id);
     let name = runs_of(m, key)
@@ -164,8 +163,22 @@ pub fn lines_for(m: &mut Model, key: &str, id: &str, w: usize, focused: bool) ->
     out
 }
 
-/// The keys the foot says while run id's box has them.
+/// The keys the foot says while run id's pane has them.
 pub fn hint(m: &mut Model, key: &str, id: &str, w: usize) -> Line {
+    // A row of its conversation picked: its row keys.
+    if super::subpane::row_picked(m, key, id) {
+        return fit_keys(
+            w,
+            &[
+                ("enter · →", "open"),
+                ("←", "close"),
+                ("ctrl+o", "show all"),
+                ("o", "its file"),
+                ("type", "to the run"),
+                ("esc", "done"),
+            ],
+        );
+    }
     let send_now = super::spawned::send_now_key(m);
     let d = draft(m, key, id);
     if d.pick.is_some() {
@@ -205,16 +218,14 @@ pub fn hint(m: &mut Model, key: &str, id: &str, w: usize) -> Line {
     let mut pairs = vec![("enter", to.as_str()), (send_now.as_str(), "send now")];
     if !queue_of(m, key, id).items.is_empty() {
         pairs.push(("↑", "the queue"));
+    } else {
+        pairs.push(("↑", "its rows"));
     }
     if conn(m, key).runs.hosted_of(id).is_some() {
         pairs.push(("alt+o", "its own session"));
     }
     pairs.push(("ctrl+v", "image"));
-    if super::runview::open_id(m, key).is_some() {
-        pairs.push(("esc", "back to subagents"));
-    } else {
-        pairs.push(("tab · esc", "back to the list"));
-    }
+    pairs.push(("tab · esc", "back to the list"));
     fit_keys(w, &pairs)
 }
 
@@ -227,34 +238,8 @@ fn take_text(d: &mut Draft) -> String {
     with_images(text.trim(), &images).trim().to_string()
 }
 
-/// Keys while run id's box has them (keys::key's for a Session's box).
-pub fn key(m: &mut Model, k: &Press) -> Out {
-    let Some(key) = open_key(m) else {
-        return Out::Pass;
-    };
-    if m.confirm.is_some() || m.sheet.is_some() || m.on_place() {
-        return Out::Pass;
-    }
-    if !conn(m, &key).watch.msg_focus {
-        return Out::Pass;
-    }
-    let Some(id) = super::subview::box_run(m, &key)
-        .filter(|_| super::views::view_name(m, &key) == "subagents")
-    else {
-        conn(m, &key).watch.msg_focus = false;
-        return Out::Pass;
-    };
-    // A box no message can reach any more (its session stopped, its run
-    // not found) lets the keys go rather than keep them (Rust-only).
-    if super::relay::route(m, &key, &id).is_err() {
-        conn(m, &key).watch.msg_focus = false;
-        return Out::Pass;
-    }
-    run_key(m, &key, &id, k)
-}
-
-/// Key k in run id's box: typing, sending, its queue's keys. The box
-/// beside the list's (key) and a run open whole's (runview.rs).
+/// Key k in run id's box: typing, sending, its queue's keys, while its
+/// pane has the keys (subpane::key).
 pub fn run_key(m: &mut Model, key: &str, id: &str, k: &Press) -> Out {
     let (key, id) = (key.to_string(), id.to_string());
     if super::relay::route(m, &key, &id).is_err() {

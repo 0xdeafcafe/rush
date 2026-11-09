@@ -243,11 +243,18 @@ as guidance mid-turn where the agent can take that.
   host went without saying, else done. Its row under the parent in the
   list is ● while it (or one it started) waits on you, and says how it
   ended for a minute after.
-- A run opens whole from the parent's Subagents list (enter or →, a
-  second click, or "open ›"): its conversation full width as a session's,
-  under `‹ parent › run`, with Conversation, Overview, Changes and Tasks
-  tabs and the run's own box; esc goes back to the list with it picked.
-  A hosted child opened as its own session (alt+o) has the same
-  breadcrumb on its header, back to the parent's list.
+- A run shows in its pane beside the parent's Subagents list (under it
+  when narrow), never full screen. tab, enter or → on it, or a click in
+  its pane, gives the pane the keys: its conversation is then driven as
+  a session's (↑↓ rows, enter → ← ctrl+o, o a file, PgUp/PgDn, Home/End,
+  a click, dragged-over text, the pins and the "↓ N more" pill), and
+  what's typed goes to the run's own box and queue, never the parent's.
+  esc gives the keys back to the list, then to where it was picked from.
+  `/compact` in a hosted child's box goes to its session, as typed there;
+  a Claude Code subagent can't be compacted from outside (Claude Code has
+  no control request for it, and SendMessage carries only words), so the
+  box says so, and the pane's facts show how full its context is.
+  A hosted child opened as its own session (alt+o) has a breadcrumb on
+  its header, back to the parent's list.
 - The Agent tool's background launch text isn't shown; its step is drawn
   as the run's own row (`✢ task · working…  open ›`).

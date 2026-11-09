@@ -1,14 +1,16 @@
-//! A run opened whole (runview.rs), and the subagents list's own keys:
-//! its conversation drawn and driven as a session's, opening at its end;
-//! ↑↓ through the list whatever has the keys; older finished runs folded
-//! under Earlier. Rust-only. No sleeps: a model with no loop reads at once.
+//! A run's pane in the subagents view (subpane.rs), and the list's own
+//! keys: its conversation drawn and driven as a session's, beside the
+//! list, opening at its end; its box takes what's typed, never the
+//! session's; /compact says what it can do; older finished runs fold
+//! under Earlier. Rust-only. No sleeps: a model with no loop reads at
+//! once.
 
 use rush_convo::Subagent;
 use rush_core::text::Line;
 
 use super::host::Fake;
-use super::tests_subview::{KEY, model, picked_beside, press};
-use super::{conn, runview, subview, views};
+use super::tests_subview::{KEY, model, picked_beside, press, typed};
+use super::{conn, subpane, subview, views};
 use crate::model::Model;
 use crate::session::Pos;
 
@@ -23,10 +25,14 @@ fn sel(m: &Model) -> String {
     m.session.as_ref().unwrap().sel.clone()
 }
 
-/// The run's own view's pick, and what it has opened.
+/// The run's own view's pick, and where it is.
 fn run_view(m: &mut Model) -> (String, Pos) {
     let d = conn(m, KEY).runs.detail.as_ref().expect("the run read");
     (d.view.sel.clone(), d.view.pos)
+}
+
+fn flash(m: &Model) -> String {
+    m.flash.as_ref().map(|f| f.0.clone()).unwrap_or_default()
 }
 
 /// A run's transcript of n exchanges, each answer long: well over the
@@ -47,12 +53,14 @@ fn long_run(n: usize) -> String {
     out
 }
 
-/// Opening a long run lands at its end, as a long session opens: its
-/// last answer in sight, its first not, following it.
+/// Picking a long run shows its end in its pane, as a long session
+/// opens: its last answer in sight, its first not, following it; its
+/// whole read after, off the UI thread, takes the end's place unseen.
 #[test]
-fn opening_a_long_run_lands_at_its_end() {
+fn a_long_run_shows_its_end() {
     let d = tempfile::tempdir().unwrap();
     let mut m = model(&d);
+    (m.w, m.h) = (180, 80);
     let x = d.path().join("agent-long.jsonl");
     let body = long_run(1400);
     assert!(body.len() > 2 << 20, "not long enough: {}", body.len());
@@ -66,9 +74,7 @@ fn opening_a_long_run_lands_at_its_end() {
     }
     super::subs::kick(&mut m, KEY);
     super::subs::refresh(&mut m, KEY);
-    views::show_view(&mut m, KEY, "subagents");
-    m.session.as_mut().unwrap().sel = "sub:x".into();
-    assert!(runview::open(&mut m, KEY, "x"));
+    subview::pick_run(&mut m, KEY, "x");
     // Read on as the loop would, till nothing more comes.
     for _ in 0..4 {
         let _ = m.frame();
@@ -77,21 +83,25 @@ fn opening_a_long_run_lands_at_its_end() {
     let all = text(&m.frame());
     assert!(all.contains("answer 1399"), "not at its end:\n{all}");
     assert!(!all.contains("answer 0 "), "at its start:\n{all}");
+    assert!(all.contains("Finished"), "not beside the list:\n{all}");
     assert_eq!(run_view(&mut m).1, Pos::End);
+    let whole = &conn(&mut m, KEY).runs.detail.as_ref().unwrap().view.sess;
+    assert_eq!(whole.turns.len(), 1400, "its whole not read");
 }
 
-/// In a run open whole its rows are a session's: ↑ from the empty box
+/// With the keys, the pane's rows are a session's: ↑ from the empty box
 /// picks the row by it and goes on up, enter opens the row picked, esc
-/// lets the pick go; the session's own pick stays the run's row.
+/// lets the pick go, esc again gives the keys back; the list's pick
+/// stays the run's row throughout.
 #[test]
-fn up_and_a_row_expand_work_in_a_runs_view() {
+fn the_panes_rows_are_a_sessions() {
     let d = tempfile::tempdir().unwrap();
     let mut m = model(&d);
     views::show_view(&mut m, KEY, "subagents");
     m.session.as_mut().unwrap().sel = "sub:x".into();
     let _ = m.frame();
-    press(&mut m, "enter");
-    assert_eq!(runview::open_id(&m, KEY).as_deref(), Some("x"));
+    press(&mut m, "tab");
+    assert!(conn(&mut m, KEY).watch.msg_focus, "tab gave it no keys");
     let _ = m.frame();
     press(&mut m, "up");
     let (first, _) = run_view(&mut m);
@@ -106,50 +116,48 @@ fn up_and_a_row_expand_work_in_a_runs_view() {
     }
     let (step, _) = run_view(&mut m);
     assert!(step.contains(":s:"), "no step picked: {step}");
-    let was = conn(&mut m, KEY)
-        .runs
-        .detail
-        .as_ref()
-        .unwrap()
-        .view
-        .o
-        .open
-        .get(&step)
-        .copied();
+    let open = |m: &mut Model| {
+        conn(m, KEY)
+            .runs
+            .detail
+            .as_ref()
+            .unwrap()
+            .view
+            .o
+            .open
+            .get(&step)
+            .copied()
+    };
+    let was = open(&mut m);
     press(&mut m, "enter");
-    let now = conn(&mut m, KEY)
-        .runs
-        .detail
-        .as_ref()
-        .unwrap()
-        .view
-        .o
-        .open
-        .get(&step)
-        .copied();
-    assert_ne!(was, now, "enter didn't open the step");
-    assert_eq!(sel(&m), "sub:x", "the session's own pick moved");
+    assert_ne!(was, open(&mut m), "enter didn't open the step");
+    assert_eq!(sel(&m), "sub:x", "the list's pick moved");
     press(&mut m, "esc");
     assert_eq!(run_view(&mut m).0, "");
-    assert!(
-        runview::open_id(&m, KEY).is_some(),
-        "esc with a pick closed it"
-    );
+    assert!(conn(&mut m, KEY).watch.msg_focus, "esc with a pick left");
+    press(&mut m, "esc");
+    assert!(!conn(&mut m, KEY).watch.msg_focus);
+    assert_eq!(sel(&m), "sub:x");
 }
 
-/// ↑↓ move the pick through the list though a click gave the run's box
-/// the keys: its box empty, they're the list's. (x runs; y, under it,
-/// is finished.)
+/// ↑↓ are the pane's while it has the keys, the list's once it gives
+/// them back. (x runs; y, under it, is finished.)
 #[test]
-fn arrows_pick_rows_in_the_list_from_the_runs_box() {
+fn arrows_are_the_panes_then_the_lists() {
     let d = tempfile::tempdir().unwrap();
     let fake = Fake::new();
     let mut m = picked_beside(&d, &fake, true);
     press(&mut m, "tab");
     assert!(conn(&mut m, KEY).watch.msg_focus);
+    press(&mut m, "up");
+    assert_eq!(sel(&m), "sub:x", "↑ moved the list");
+    assert!(conn(&mut m, KEY).watch.msg_focus, "↑ lost the keys");
+    assert!(!run_view(&mut m).0.is_empty(), "↑ picked no row of the run");
+    press(&mut m, "esc");
+    press(&mut m, "esc");
+    assert!(!conn(&mut m, KEY).watch.msg_focus);
     press(&mut m, "down");
     assert_eq!(sel(&m), "sub:y");
-    assert!(!conn(&mut m, KEY).watch.msg_focus);
     press(&mut m, "up");
     assert_eq!(sel(&m), "sub:x");
     // Nothing picked, ↓ picks the first row in sight.
@@ -157,6 +165,50 @@ fn arrows_pick_rows_in_the_list_from_the_runs_box() {
     let _ = m.frame();
     press(&mut m, "down");
     assert!(!sel(&m).is_empty(), "↓ picked nothing");
+}
+
+/// What's typed with the pane's keys goes to the run's box, never the
+/// session's; /compact for a Claude Code subagent says it can't be done,
+/// and sends nothing.
+#[test]
+fn the_panes_box_is_the_runs() {
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = picked_beside(&d, &fake, true);
+    press(&mut m, "tab");
+    typed(&mut m, "/compact");
+    assert!(
+        conn(&mut m, KEY).input.is_empty(),
+        "it went to the main box"
+    );
+    assert_eq!(
+        super::subbox::draft(&mut m, KEY, "x").input.string(),
+        "/compact"
+    );
+    press(&mut m, "enter");
+    assert!(
+        flash(&m).contains("Claude Code can't compact a subagent"),
+        "{}",
+        flash(&m)
+    );
+    assert!(fake.ops().is_empty(), "sent: {:?}", fake.ops());
+}
+
+/// The key guide, opened from the pane, lists the pane's keys first.
+#[test]
+fn the_key_guide_lists_the_panes_keys() {
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = picked_beside(&d, &fake, true);
+    press(&mut m, "tab");
+    let (title, keys) = subpane::here_keys(&mut m).expect("the pane's keys");
+    assert_eq!(title, "Subagent's pane");
+    assert!(keys.iter().any(|(k, _)| *k == "ctrl+o"), "{keys:?}");
+    press(&mut m, "esc");
+    assert!(
+        subpane::here_keys(&mut m).is_none(),
+        "the list has the keys"
+    );
 }
 
 /// Past the newest few, finished runs fold under Earlier, but the one

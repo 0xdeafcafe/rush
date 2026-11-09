@@ -137,8 +137,34 @@ pub fn rebuild(m: &mut Model) {
             order.push(c);
         }
     }
-    let km = key_map(m);
     let mut all = Vec::new();
+    // What has the keys now, when it says its own (a subagent's pane).
+    for i in 0..m.ext.here_keys.len() {
+        let Some((title, keys)) = (m.ext.here_keys[i])(m) else {
+            continue;
+        };
+        let section = format!("Here · {title}");
+        let rows: Vec<Row> = keys
+            .into_iter()
+            .map(|(k, t)| Row {
+                section: section.clone(),
+                keys: vec![k.into()],
+                title: t.into(),
+                ..Default::default()
+            })
+            .filter(|r| matches(r, &q))
+            .collect();
+        if rows.is_empty() {
+            continue;
+        }
+        all.push(Row {
+            section,
+            heading: true,
+            ..Default::default()
+        });
+        all.extend(rows);
+    }
+    let km = key_map(m);
     for (i, c) in order.iter().enumerate() {
         let mut section = title(*c).to_string();
         if i < n_here {

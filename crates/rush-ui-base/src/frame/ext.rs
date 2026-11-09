@@ -57,6 +57,10 @@ pub type DecideRows = (Vec<Line>, HashMap<usize, String>);
 
 /// A mouse handler: `Out::Pass` when the event isn't its.
 pub type MouseHook = fn(&mut Model, &Mouse) -> Out;
+
+/// The keys of what has them now, for the key guide's first section: its
+/// title and each key with what it does; None when it hasn't them.
+pub type HereKeys = fn(&mut Model) -> Option<(&'static str, Vec<(&'static str, &'static str)>)>;
 /// A paste handler: `Out::Pass` when the paste isn't its.
 pub type PasteHook = fn(&mut Model, &str) -> Out;
 /// A `#name arg` command typed into the Agents' box: given the arg.
@@ -167,6 +171,9 @@ pub struct Ext {
     pub session_keys: Vec<KeyHook>,
     /// Every mouse event, first.
     pub mouse: Vec<MouseHook>,
+    /// The key guide's section for what has the keys, before the rest
+    /// (a subagent's pane: session_core's subpane.rs).
+    pub here_keys: Vec<HereKeys>,
     /// Every paste, first; the Agents box takes the rest.
     pub paste: Vec<PasteHook>,
     /// `#name` commands (keys.go:874 command).

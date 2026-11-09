@@ -214,42 +214,32 @@ fn the_tab() {
     assert!(views::show_view(&mut m, KEY, "subagents"));
 }
 
-/// enter or → on a run in the list opens it whole, as a session of its
-/// own: its conversation full width under a breadcrumb back; esc and ←
-/// go back to the list, the run still picked. space leaves it picked in
-/// the list, its conversation with it.
+/// enter or → on a run in the list gives its pane the keys: its
+/// conversation stays beside the list, never a screen of its own; esc
+/// and ← give them back to the list, the run still picked.
 #[test]
-fn enter_opens_a_run_whole() {
+fn enter_gives_the_runs_pane_the_keys() {
     for k in ["enter", "right"] {
         let d = tempfile::tempdir().unwrap();
         let mut m = model(&d);
         views::show_view(&mut m, KEY, "subagents");
         m.session.as_mut().unwrap().sel = "sub:x".into();
         let _ = views::body(&mut m, 120, 20);
-        press(&mut m, "space");
-        assert!(
-            super::runview::open_id(&m, KEY).is_none(),
-            "space opened it"
-        );
         press(&mut m, k);
-        assert_eq!(
-            super::runview::open_id(&m, KEY).as_deref(),
-            Some("x"),
-            "{k}"
-        );
+        assert!(conn(&mut m, KEY).watch.msg_focus, "{k}");
         let all = text(&m.frame());
-        assert!(all.contains("‹ port it › review the diff"), "{k}:\n{all}");
         assert!(
             all.contains("The diff is fine: one nit in view.go."),
             "{k}:\n{all}"
         );
-        assert!(!all.contains("Finished  2"), "the list still shows:\n{all}");
+        assert!(all.contains("Finished  2"), "the list went:\n{all}");
         for back in ["esc", "left"] {
             press(&mut m, back);
-            assert!(super::runview::open_id(&m, KEY).is_none(), "{back}");
+            assert!(!conn(&mut m, KEY).watch.msg_focus, "{back}");
             assert_eq!(views::view_name(&m, KEY), "subagents", "{back}");
             assert_eq!(sel(&m), "sub:x", "{back}");
             press(&mut m, k);
+            assert!(conn(&mut m, KEY).watch.msg_focus, "{k} again");
         }
     }
 }
@@ -299,9 +289,9 @@ fn from_the_dock() {
     assert_eq!(sel(&m), "");
 }
 
-/// enter or → on a step a subagent made opens that run whole in the
-/// subagents view, and esc comes back to the step (rushmode.go:4270
-/// subOfStep, closeSub).
+/// enter or → on a step a subagent made picks that run in the subagents
+/// view, its pane with the keys, and esc comes back to the step
+/// (rushmode.go:4270 subOfStep, closeSub).
 #[test]
 fn enter_on_a_subagents_step_picks_it() {
     for k in ["enter", "right"] {
@@ -316,13 +306,9 @@ fn enter_on_a_subagents_step_picks_it() {
         press(&mut m, k);
         assert_eq!(views::view_name(&m, KEY), "subagents", "{k}");
         assert_eq!(sel(&m), "sub:x", "{k}");
-        assert_eq!(
-            super::runview::open_id(&m, KEY).as_deref(),
-            Some("x"),
-            "{k}"
-        );
         let body = text(&views::body(&mut m, 150, 24).unwrap());
         assert!(body.contains("The diff is fine"), "{k}:\n{body}");
+        assert!(conn(&mut m, KEY).watch.msg_focus, "{k}: its pane");
         press(&mut m, "esc");
         assert_eq!(views::view_name(&m, KEY), "conversation", "{k}");
         assert_eq!(sel(&m), "t2:s:toolu_x", "{k}");
@@ -489,10 +475,11 @@ fn nothing_beside_the_list_until_a_click() {
 }
 
 /// A click on a run picks it and shows it beside the list, with its
-/// facts, its conversation and a box to message it; a second click on it
-/// opens it whole, and esc comes back to the list.
+/// facts, its conversation and a box to message it, its pane with the
+/// keys; a second click opens nothing whole, a click in its conversation
+/// keeps the keys there, and esc gives them back to the list.
 #[test]
-fn a_click_picks_a_run_and_a_second_opens_it() {
+fn a_click_picks_a_run_and_its_pane_has_the_keys() {
     use crate::frame::Mouse;
     use rush_draw::{Button, MouseKind};
     let d = tempfile::tempdir().unwrap();
@@ -518,11 +505,30 @@ fn a_click_picks_a_run_and_a_second_opens_it() {
     assert!(all.contains("The diff is fine"), "{all}");
     assert!(all.contains("claude-opus-4-1 · 1 step"), "{all}");
     assert!(all.contains("to review the diff"), "{all}");
+    assert!(conn(&mut m, KEY).watch.msg_focus, "the click's run");
     click(&mut m);
-    assert_eq!(super::runview::open_id(&m, KEY).as_deref(), Some("x"));
-    let all = text(&m.frame());
-    assert!(all.contains("‹ port it › review the diff"), "{all}");
+    let frame = m.frame();
+    let all = text(&frame);
+    assert!(all.contains("Finished  2"), "opened whole:\n{all}");
+    // In its conversation: the keys stay the pane's.
+    let (py, px) = frame
+        .iter()
+        .enumerate()
+        .find_map(|(i, l)| {
+            let t = l.plain();
+            t.find("The diff is fine")
+                .map(|x| (i, t[..x].chars().count()))
+        })
+        .expect("its answer on screen");
+    m.mouse_event(&Mouse {
+        kind: MouseKind::Down(Button::Left),
+        x: px as u16 + 2,
+        y: py as u16,
+        mods: Default::default(),
+    });
+    assert!(conn(&mut m, KEY).watch.msg_focus, "a click in its pane");
     press(&mut m, "esc");
+    assert!(!conn(&mut m, KEY).watch.msg_focus);
     assert_eq!(sel(&m), "sub:x");
     let all = text(&m.frame());
     assert!(all.contains("│  ✓ review the diff"), "{all}");
@@ -686,12 +692,18 @@ fn a_spawned_agents_box_goes_to_its_host() {
         conn(&mut m, KEY).watch.msg_focus,
         "tab with the main box typed in"
     );
-    // Its run gone from what rush hosts, the box lets the keys go.
+    // Its run gone from what rush hosts, the box lets the keys go, and
+    // what's typed goes nowhere else.
+    conn(&mut m, KEY).input.clear();
     conn(&mut m, KEY).runs.spawns.clear();
     press(&mut m, "x");
     assert!(
         !conn(&mut m, KEY).watch.msg_focus,
         "a box with no route kept the keys"
+    );
+    assert!(
+        conn(&mut m, KEY).input.is_empty(),
+        "it went to the main box"
     );
 }
 
@@ -912,8 +924,9 @@ fn the_box_beside_the_list_messages_the_run() {
     }
 }
 
-/// A session rush doesn't run can't pass a message on: the box says why
-/// and takes no keys.
+/// A session rush doesn't run can't pass a message on: the box says why;
+/// its pane still takes the keys for its conversation, and what's typed
+/// goes nowhere, the main box neither.
 #[test]
 fn the_box_says_why_nothing_can_reach_the_run() {
     let d = tempfile::tempdir().unwrap();
@@ -923,7 +936,14 @@ fn the_box_says_why_nothing_can_reach_the_run() {
     let all = text(&m.frame());
     assert!(all.contains("the session isn't running in rush"), "{all}");
     press(&mut m, "tab");
-    assert!(!conn(&mut m, KEY).watch.msg_focus);
+    assert!(conn(&mut m, KEY).watch.msg_focus);
+    typed(&mut m, "hi");
+    assert!(
+        conn(&mut m, KEY).input.is_empty(),
+        "it went to the main box"
+    );
+    let flash = m.flash.as_ref().map(|f| f.0.clone()).unwrap_or_default();
+    assert!(flash.contains("isn't running in rush"), "{flash}");
     // It stays picked with the list.
     assert_eq!(views::view_name(&m, KEY), "subagents");
     assert_eq!(sel(&m), "sub:x");
@@ -1153,8 +1173,8 @@ fn row_of(m: &mut Model, id: &str) -> String {
 /// started and hm when w was asked, in local time.
 fn working_view(wf: &str, hm: &str) -> String {
     [
-        "  1 agent and 1 workflow running · 4 runs in all  ·  click one to see it h… │  · check the port's tests                           running  57s  open ›",
-        "                                                                            │    claude-opus-4-1 · 1 step · $0.02",
+        "  1 agent and 1 workflow running · 4 runs in all  ·  click one to see it h… │  · check the port's tests                                   running  57s",
+        "                                                                            │    claude-opus-4-1 · 1 step · $0.02 · context 960 of 1M · 0%",
         "  Running  2                                                                │ ────────────────────────────────────────────────────────────────────────",
         "  · ⋔ Port rush t… · {wf}   · Port 1/3  ›  · C…  running              5m   │",
         "    · Port  1 of 3 done                                                     │ ▍ You  {hm}",
@@ -1206,8 +1226,8 @@ fn working_narrow(wf: &str, hm: &str) -> String {
         "▍ · check the port's tests                                    · run the tests…       57s",
         "",
         "──────────────────────────────────────────────────────────────────────────────────────────",
-        " · check the port's tests                                             running  57s  open ›",
-        "   claude-opus-4-1 · 1 step · $0.02",
+        " · check the port's tests                                                     running  57s",
+        "   claude-opus-4-1 · 1 step · $0.02 · context 960 of 1M · 0%",
         "──────────────────────────────────────────────────────────────────────────────────────────",
         "",
         "▍ You  {hm}",

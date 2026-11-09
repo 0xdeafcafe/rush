@@ -98,6 +98,20 @@ struct Unit {
     key: UnitKey,
     lines: Vec<RenderedLine>,
     out: Carry,
+    /// The row picked when it was drawn, when one of its rows was that
+    /// row (its ref or its owner); None when the pick was elsewhere.
+    sel: Option<String>,
+}
+
+/// The pick, when one of lines is it (its ref, or the item it's part of).
+fn picked_in(lines: &[RenderedLine], sel: &str) -> Option<String> {
+    if sel.is_empty() {
+        return None;
+    }
+    lines
+        .iter()
+        .any(|l| l.r#ref == sel || l.owner == sel)
+        .then(|| sel.to_string())
 }
 
 /// An open turn's parts as last drawn, by the index of each one's first
@@ -190,10 +204,10 @@ impl Drawer<'_> {
         let mut view: Vec<_> = self.o.view.iter().collect();
         view.sort();
         view.hash(&mut h);
-        let sel = &self.o.selected;
-        if sel.starts_with(&self.r) {
-            sel.hash(&mut h);
-        }
+        // Not the row picked: a part is drawn again only when the pick
+        // comes to or leaves one of its own rows (memoized), so moving it
+        // through a turn of thousands of steps draws two parts, not all
+        // of them (Rust-only: Go's ctx held the pick, render.go:1003).
         self.o.needs.key().hash(&mut h);
         (&self.s.info.cwd, &self.s.cwd).hash(&mut h);
         self.spine().plain().hash(&mut h);
@@ -309,8 +323,10 @@ impl Drawer<'_> {
             above: self.above(),
             carry: self.carry_out(),
         };
+        let o = self.o;
         if let Some(u) = self.units.as_ref().and_then(|m| m.0.get(&lo))
             && u.key == key
+            && picked_in(&u.lines, &o.selected) == u.sel
         {
             let (lines, out) = (u.lines.clone(), u.out.clone());
             self.lines.extend(lines);
@@ -332,7 +348,16 @@ impl Drawer<'_> {
         if let Some(m) = self.units.as_deref_mut() {
             match lines {
                 Some(lines) => {
-                    m.0.insert(lo, Unit { key, lines, out });
+                    let sel = picked_in(&lines, &o.selected);
+                    m.0.insert(
+                        lo,
+                        Unit {
+                            key,
+                            lines,
+                            out,
+                            sel,
+                        },
+                    );
                 }
                 None => {
                     m.0.remove(&lo);
