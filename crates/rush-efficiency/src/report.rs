@@ -197,18 +197,7 @@ pub fn found_in(profiles: &[Profile]) -> HashMap<String, Found> {
     out
 }
 
-/// A count with its thousands marked: 12,345.
-pub fn count(n: i64) -> String {
-    let s = n.unsigned_abs().to_string();
-    let mut out = String::new();
-    for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    if n < 0 { format!("-{out}") } else { out }
-}
+pub use crate::findings::count;
 
 /// A time, short: 7 Nov 09:12.
 fn at(t: Time) -> String {
@@ -307,6 +296,15 @@ fn wrap(s: &str, w: usize) -> Vec<String> {
     out
 }
 
+/// A finding's dollars in the cost column, or – where it has none.
+pub fn finding_cost(f: &Finding) -> String {
+    if f.cost > 0.0 {
+        money(f.cost)
+    } else {
+        "–".into()
+    }
+}
+
 /// The report as `rush efficiency` prints it.
 pub fn text(r: &Report) -> String {
     let mut b = String::new();
@@ -351,13 +349,13 @@ pub fn text(r: &Report) -> String {
     if !r.findings.is_empty() {
         p(String::new());
         p("Findings, biggest cost first".into());
-        for f in &r.findings {
-            let c = if f.cost > 0.0 {
-                money(f.cost)
-            } else {
-                String::new()
-            };
-            p(format!("  {c:>7}  {}", f.title));
+        // Each its own block: its cost (– where it has none), its title,
+        // its detail under it, a blank line before the next.
+        for (i, f) in r.findings.iter().enumerate() {
+            if i > 0 {
+                p(String::new());
+            }
+            p(format!("  {:>7}  {}", finding_cost(f), f.title));
             for l in wrap(&f.detail, 86) {
                 p(format!("           {l}"));
             }

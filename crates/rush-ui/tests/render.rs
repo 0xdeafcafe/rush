@@ -910,7 +910,7 @@ fn efficiency_fixture() -> rush_efficiency::Report {
         }],
         findings: vec![
             finding(
-                "1680 image reads were of an image the same session had read already",
+                "1,680 image reads were of an image the same session had read already",
                 "the requests after them re-read about 41M tokens of them, about $20.50 (an estimate). Note what an image showed rather than reading it again, or put the ones to compare on one contact sheet",
                 20.5,
             ),
@@ -952,7 +952,7 @@ fn snapshot_settings_usage_figures() {
     let rows = form::flat(&usage::sections(&m));
     let at = rows
         .iter()
-        .position(|r| r.label.starts_with("1680 image reads"))
+        .position(|r| r.label.starts_with("1,680 image reads"))
         .expect("the findings are on the page");
     for label in ["Claude Code", "rush", "a1 → b1"] {
         assert!(rows.iter().any(|r| r.label == label), "no row {label}");

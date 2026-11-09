@@ -6,7 +6,7 @@
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   What rush does on its own to save tokens and money, and to keep agents in check.
 
-    Shrink images agents read      ‹ on           ›                         │ 1680 image reads were of an image the…
+    Shrink images agents read      ‹ on           ›                         │ 1,680 image reads were of an image th…
       images cost at most          ‹ 1,568 tokens ›                         │
       contact sheet after          ‹ 8 images     ›                         │ the requests after them re-read about
                                                                             │ 41M tokens of them, about $20.50 (an
@@ -29,8 +29,8 @@
      45.3M  rush  8 Nov 16:00 → 9 Nov 02:00  peak 412k  830 req             │
                                                                             │
   Findings · biggest cost first                                             │
-  ▍  $20.50  1680 image reads were of an image the same session had read…   │
-             Only 84% of input came from the cache                          │
+  ▍  $20.50  1,680 image reads were of an image the same session had rea…   │
+          –  Only 84% of input came from the cache                          │
                                                                             │
   Emeritus handovers · saving ≈39.9M tokens by estimate, ≈$19.95            │
     a1 → b1: 307k → 22k, saved ≈39.9M tokens, ≈$19.95                       │

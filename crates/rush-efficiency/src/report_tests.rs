@@ -238,7 +238,7 @@ fn sample() -> Report {
         ],
         findings: vec![
             Finding {
-                title: "1680 image reads were of an image the same session had read already".into(),
+                title: "1,680 image reads were of an image the same session had read already".into(),
                 detail: "the requests after them re-read about 41M tokens of them, about $20.50 (an estimate). Note what an image showed rather than reading it again, or put the ones to compare on one contact sheet".into(),
                 cost: 20.5,
                 ..Finding::default()
@@ -285,11 +285,12 @@ fn prints_the_sample() {
         format!("    9.2M  rush  {}  peak 96k  120 req  subagent", span(ago(3), ago(2))),
         String::new(),
         "Findings, biggest cost first".into(),
-        "   $20.50  1680 image reads were of an image the same session had read already".into(),
+        "   $20.50  1,680 image reads were of an image the same session had read already".into(),
         "           the requests after them re-read about 41M tokens of them, about $20.50 (an estimate).".into(),
         "           Note what an image showed rather than reading it again, or put the ones to compare on".into(),
         "           one contact sheet".into(),
-        "           Only 84% of input came from the cache".into(),
+        String::new(),
+        "        –  Only 84% of input came from the cache".into(),
         "           sessions left idle past the cache's life, or switching model, write the whole context".into(),
         "           again".into(),
         String::new(),
@@ -307,6 +308,14 @@ fn prints_the_sample() {
     .concat();
     assert_eq!(text(&r), want, "drawn now:\n{}", text(&r));
     assert!(text(&Report::default()).contains("No requests in that time."));
+    for (n, want) in [
+        (0, "0"),
+        (999, "999"),
+        (1_680, "1,680"),
+        (1_234_567, "1,234,567"),
+    ] {
+        assert_eq!(count(n), want);
+    }
 }
 
 #[test]

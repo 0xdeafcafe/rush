@@ -53,7 +53,7 @@ pub use compare::{Compare, FEW_SESSIONS, Side};
 pub use detect::{Env, Found, Status, look_path, pick};
 pub use estimate::{Base, Cut, Estimate, Measured, Verdict, Working};
 pub use events::{Event, add_event, load_events, observe, remember};
-pub use findings::{Finding, bytes, findings, money, tokens};
+pub use findings::{Finding, bytes, count, findings, money, tokens};
 pub use gain::{Gain, rtk_gains};
 pub use install::Plan;
 pub use memory::memory_findings;

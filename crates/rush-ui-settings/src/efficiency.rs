@@ -156,13 +156,8 @@ pub fn sections(m: &Model) -> Vec<Section> {
             .findings
             .iter()
             .map(|f| {
-                let cost = if f.cost > 0.0 {
-                    money(f.cost)
-                } else {
-                    String::new()
-                };
                 let l = line([
-                    sp(format!("{cost:>7}  "), ORANGE),
+                    sp(format!("{:>7}  ", report::finding_cost(f)), ORANGE),
                     sp(f.title.clone(), TEXT),
                 ]);
                 fact(f.title.clone(), l, f.detail.clone())
