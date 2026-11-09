@@ -1052,7 +1052,39 @@ pub fn job_lines(s: &Session, b: &Bg) -> Vec<(Line, String)> {
         if jobs.is_empty() {
             continue;
         }
-        lines.push((fit(line([plain("  "), spb(title, SUB)]), w), String::new()));
+        if title == "Running" {
+            lines.push((fit(line([plain("  "), spb(title, SUB)]), w), String::new()));
+        } else {
+            // Finished folds, closed till opened: a long session's done
+            // tasks are noise beside what runs (Rust-only). Those that
+            // failed, and the one picked, still show.
+            let open = (b.open)(BG_FINISHED_REF);
+            let mut row = line([
+                plain("  "),
+                sp(if open { "▾ " } else { "▸ " }, FAINT),
+                spb(title, SUB),
+                sp(format!("  {}", jobs.len()), FAINT),
+            ]);
+            if !open {
+                row.spans.push(sp(" · click to show", FAINT));
+            }
+            let row = if b.sel == BG_FINISHED_REF {
+                picked(row, w, b.focused)
+            } else {
+                fit(row, w)
+            };
+            lines.push((row, BG_FINISHED_REF.to_string()));
+            let shown: Vec<&Job> = jobs
+                .iter()
+                .copied()
+                .filter(|j| open || j.status == "failed" || b.sel == format!("job:{}", j.id))
+                .collect();
+            for (i, j) in shown.iter().enumerate() {
+                job_block(s, b, j, i, &mut lines, &mut inside);
+            }
+            lines.push((Line::new(), String::new()));
+            continue;
+        }
         for (i, j) in jobs.iter().enumerate() {
             job_block(s, b, j, i, &mut lines, &mut inside);
         }
@@ -1060,6 +1092,10 @@ pub fn job_lines(s: &Session, b: &Bg) -> Vec<(Line, String)> {
     }
     lines
 }
+
+/// The background view's fold its finished tasks go under, closed till
+/// opened.
+pub const BG_FINISHED_REF: &str = "fold:bg-finished";
 
 /// One task's rows in the background view (jobLines' section body).
 fn job_block(

@@ -126,7 +126,7 @@ job:b2|      │ npm warn
 job:b2|      │ 100%
 job:b2|      │ listening on :3000
 |
-|  Finished
+fold:bg-finished|  ▸ Finished  1 · click to show
 job:b1|▍ ▸ $ shell    go test ./...                                                                            ✗ failed · 30s
 job:b1|▍     exit status 1
 |
@@ -142,7 +142,7 @@ job:b2|      │ npm warn
 job:b2|      │ 100%
 job:b2|      │ listening on :3000
 |
-|  Finished
+fold:bg-finished|  ▸ Finished  1 · click to show
 job:b1|▍ ▸ $ shell    go test ./...                                    ✗ failed · 30s
 job:b1|▍     exit status 1
 |
@@ -160,12 +160,57 @@ job:b2|      │ npm warn
 job:b2|      │ 100%
 job:b2|      │ listening on :3000
 |
-|  Finished
+fold:bg-finished|  ▸ Finished  1 · click to show
 job:b1|▍ ▸ $ shell    go test ./...                                                                                                                                                            ✗ failed · 30s
 job:b1|▍     exit status 1
 |
 "#;
     assert_eq!(dump(&mut m, 200), want200);
+}
+
+/// Finished tasks fold, closed till opened, but one that failed and the
+/// one picked; space on the fold opens it, a click closes it again.
+#[test]
+fn finished_tasks_fold() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = background(&d);
+    let s = &mut m.session.as_mut().unwrap().sess;
+    s.apply(
+        &Event::TaskStarted(TaskStarted {
+            id: "b3".into(),
+            call_id: "t3x".into(),
+            kind: TaskKind::Shell,
+            label: "cargo build".into(),
+            background: true,
+            ..TaskStarted::default()
+        }),
+        NOW - 100_000,
+    );
+    s.apply(
+        &Event::TaskDone(TaskDone {
+            id: "b3".into(),
+            status: "completed".into(),
+            ..TaskDone::default()
+        }),
+        NOW - 80_000,
+    );
+    let got = dump(&mut m, 120);
+    assert!(got.contains("|  ▸ Finished  2 · click to show"), "{got}");
+    assert!(
+        got.contains("go test ./..."),
+        "the failed one folded: {got}"
+    );
+    assert!(!got.contains("cargo build"), "{got}");
+    pick(&mut m, "job:b3");
+    assert!(dump(&mut m, 120).contains("cargo build"), "the pick folded");
+    views::show_view(&mut m, KEY, "background");
+    pick(&mut m, "fold:bg-finished");
+    super::tests_subview::press(&mut m, "space");
+    let got = dump(&mut m, 120);
+    assert!(got.contains("|▍ ▾ Finished  2"), "{got}");
+    assert!(got.contains("cargo build"), "{got}");
+    running::background_click(&mut m, KEY, "fold:bg-finished");
+    assert!(!dump(&mut m, 120).contains("cargo build"));
 }
 
 /// A task a subagent started says whose it is, a dot between the agent's
@@ -213,7 +258,7 @@ job:b2|│     ▸ command details · d to show
 job:b2|▍     ▾ command details · d to hide
 job:b2|▍     $ npm run dev -- --port 3000
 |
-|  Finished
+fold:bg-finished|  ▸ Finished  1 · click to show
 job:b1|  ▸ $ shell    go test ./...                                                                            ✗ failed · 30s
 ";
     assert!(got.contains(want), "{got}");

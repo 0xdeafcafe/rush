@@ -673,6 +673,16 @@ pub fn background_key(m: &mut Model, key: &str, s: &str) -> Out {
         .as_ref()
         .map(|v| v.sel.clone())
         .unwrap_or_default();
+    // The Finished fold opens and closes in place (→ only opens).
+    if sel == rush_ui_list_extras::jobs::BG_FINISHED_REF {
+        if !matches!(s, "space" | " " | "right" | "enter") {
+            return Out::Pass;
+        }
+        let c = conn(m, key);
+        let was = c.vs.open.get(&sel).copied().unwrap_or(false);
+        c.vs.open.insert(sel, s == "right" || !was);
+        return Out::Draw;
+    }
     if let Some(id) = sel.strip_prefix("run:") {
         if matches!(s, "space" | " " | "right" | "enter") {
             let id = id.to_string();
@@ -821,7 +831,7 @@ pub fn background_click(m: &mut Model, key: &str, r: &str) -> Out {
         super::subview::pick_from(m, key, &id, r);
         return Out::Draw;
     }
-    if r.starts_with("job:") {
+    if r.starts_with("job:") || r == rush_ui_list_extras::jobs::BG_FINISHED_REF {
         let c = conn(m, key);
         let was = c.vs.open.get(r).copied().unwrap_or(false);
         c.vs.open.insert(r.to_string(), !was);

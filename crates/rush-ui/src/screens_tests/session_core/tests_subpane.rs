@@ -186,8 +186,12 @@ fn arrows_are_the_panes_then_the_lists() {
     press(&mut m, "esc");
     press(&mut m, "esc");
     assert!(!conn(&mut m, KEY).watch.msg_focus);
+    // Down through Finished's fold to y, and back.
+    press(&mut m, "down");
+    assert_eq!(sel(&m), subview::FINISHED_REF);
     press(&mut m, "down");
     assert_eq!(sel(&m), "sub:y");
+    press(&mut m, "up");
     press(&mut m, "up");
     assert_eq!(sel(&m), "sub:x");
     // Nothing picked, ↓ picks the first row in sight.
@@ -239,6 +243,41 @@ fn the_key_guide_lists_the_panes_keys() {
         subpane::here_keys(&mut m).is_none(),
         "the list has the keys"
     );
+}
+
+/// Finished runs fold, closed till opened: only the one picked (and any
+/// that failed or were stopped) shows under it; enter on it opens it.
+#[test]
+fn finished_runs_fold() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = model(&d);
+    conn(&mut m, KEY)
+        .watch
+        .open_folds
+        .remove(subview::FINISHED_REF);
+    let list = |m: &mut Model| {
+        text(
+            &subview::list(m, KEY, 120, false)
+                .into_iter()
+                .map(|(l, _)| l)
+                .collect::<Vec<_>>(),
+        )
+    };
+    let got = list(&mut m);
+    assert!(got.contains("▸ Finished  2 · click to show"), "{got}");
+    assert!(!got.contains("review the diff"), "{got}");
+    assert!(!got.contains("plan the next piece"), "{got}");
+    assert!(got.contains("port:claude"), "running runs fold: {got}");
+    m.session.as_mut().unwrap().sel = "sub:x".into();
+    let got = list(&mut m);
+    assert!(got.contains("review the diff"), "the pick folded: {got}");
+    assert!(!got.contains("plan the next piece"), "{got}");
+    views::show_view(&mut m, KEY, "subagents");
+    m.session.as_mut().unwrap().sel = subview::FINISHED_REF.into();
+    press(&mut m, "enter");
+    let got = list(&mut m);
+    assert!(got.contains("▾ Finished  2"), "{got}");
+    assert!(got.contains("plan the next piece"), "{got}");
 }
 
 /// Past the newest few, finished runs fold under Earlier, but the one

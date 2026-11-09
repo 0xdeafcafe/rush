@@ -1957,7 +1957,12 @@ gives its pane the keys), else in the column beside the list
 clicks only, never the pointer; the views panel's run rows pick a run
 there too (`subview::pick_run`). ↑↓ move the pick through the list while
 the list has the keys (`subview::list_key`, ahead of the cards' ↑ and
-the box's own keys); while the run's pane has them they're its own. Past the newest
+the box's own keys); while the run's pane has them they're its own. A click
+on a run shows it and leaves the keys with the list, so ↑↓ go on through
+the runs; with nothing picked ↑ picks the top row, as ↓ does. Finished
+is a fold, closed till opened (`fold:finished`), as the background
+view's is (`fold:bg-finished`): closed, only those that failed (or were
+stopped) and the one picked show under it. Opened, past the newest
 `EARLIER_AFTER` (8), finished runs fold under "Earlier · N"
 (`earlier:runs`), but those that failed or were stopped, and the one
 picked. A workflow run is named with when it started;

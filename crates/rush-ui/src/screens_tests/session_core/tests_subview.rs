@@ -114,6 +114,12 @@ pub(super) fn model(d: &tempfile::TempDir) -> Model {
     );
     // Its runs' numbers, as the subagents view reads them.
     r.follow_all = true;
+    // Finished opened, as these tests look at the runs under it: it's
+    // closed till opened (tests_subpane's finished_runs_fold).
+    conn(&mut m, KEY)
+        .watch
+        .open_folds
+        .insert(subview::FINISHED_REF.into());
     super::subs::kick(&mut m, KEY);
     super::subs::refresh(&mut m, KEY);
     m
@@ -185,7 +191,7 @@ fn the_list() {
         "      ◌ port:draw    waiting to start".into(),
         "    · Check  not started".into(),
         "".into(),
-        "  Finished  2".into(),
+        "  ▾ Finished  2".into(),
         "  ✓ plan the next piece of the port with care                                             done".into(),
         "▍ ✓ review the diff                                                                       done                      9s".into(),
     ];
@@ -1190,7 +1196,7 @@ fn working_view(wf: &str, hm: &str) -> String {
         "    · Check  not started                                                    │",
         "▍ · check the port's tests                        · run the test…     57s   │ ▍   · running Bash…  36s  turn 56s",
         "                                                                            │",
-        "  Finished  2                                                               │",
+        "  ▾ Finished  2                                                             │",
         "  ✓ plan the next piece of the port with care     done                      │",
         "  ✓ review the diff                               done                 9s   │",
         "                                                                            │",

@@ -864,7 +864,26 @@ pub fn list(m: &mut Model, key: &str, w: usize, wide: bool) -> Vec<(Line, String
             continue;
         }
         l.out.push((Line::new(), String::new()));
-        l.out.push(heading(title, n, w));
+        // Finished folds, closed till opened: a long session's finished
+        // runs are noise beside what's working (Rust-only).
+        let closed = !live && !l.open.contains(FINISHED_REF);
+        if live {
+            l.out.push(heading(title, n, w));
+        } else {
+            let row = line([
+                plain("  "),
+                faint(if closed { "▸ " } else { "▾ " }),
+                Span::new(title.to_string(), bold(SUB)),
+                faint(format!("  {n}")),
+                faint(if closed { " · click to show" } else { "" }),
+            ]);
+            let row = if sel == FINISHED_REF {
+                picked1(row, w, true)
+            } else {
+                fit(row, w)
+            };
+            l.out.push((row, FINISHED_REF.to_string()));
+        }
         // Workflows and runs together, newest first.
         let mut items: Vec<(Ms, Option<&Group>, usize)> = gs
             .iter()
@@ -895,6 +914,13 @@ pub fn list(m: &mut Model, key: &str, w: usize, wide: bool) -> Vec<(Line, String
         };
         let (shown, earlier) = if live {
             (items, Vec::new())
+        } else if closed {
+            // Folded, those that failed or were stopped, and the one
+            // picked, still show.
+            (
+                items.into_iter().filter(|it| keep(it)).collect(),
+                Vec::new(),
+            )
         } else {
             let (mut shown, mut earlier) = (Vec::new(), Vec::new());
             for (n, it) in items.into_iter().enumerate() {
@@ -941,6 +967,9 @@ pub fn list(m: &mut Model, key: &str, w: usize, wide: bool) -> Vec<(Line, String
 
 /// The fold the older finished runs go under.
 pub const EARLIER_REF: &str = "earlier:runs";
+
+/// The fold every finished run goes under, closed till opened.
+pub const FINISHED_REF: &str = "fold:finished";
 
 /// How many finished runs show before the rest fold under Earlier.
 pub const EARLIER_AFTER: usize = 8;
@@ -1579,7 +1608,7 @@ fn toggle_fold(m: &mut Model, key: &str, rf: &str) {
 /// Whether ref is a fold the list opens and closes in place: earlier
 /// tries, or a workflow run that has finished.
 fn is_fold(m: &Model, key: &str, rf: &str) -> bool {
-    if rf.starts_with(TRIES_REF) || rf == EARLIER_REF {
+    if rf.starts_with(TRIES_REF) || rf == EARLIER_REF || rf == FINISHED_REF {
         return true;
     }
     if !is_workflow_ref(m, rf) {
