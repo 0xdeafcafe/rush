@@ -1569,6 +1569,8 @@ check, on one page after General (`PAGE_USAGE`, rush-ui-settings
   config.json `guard`).
 - **Advisor**: on or off (moved from General's Help and advice, which is
   now Help; config.json `advisor`). It has no other setting.
+- Then what the transcripts say, once read: totals, the heaviest
+  sessions, findings and handovers ("Where the figures show" below).
 
 Left where they were, on purpose: General's Hibernate, Disk and memory,
 Stalls (the machine and the list, not tokens), and "#compact starts on"
@@ -1943,6 +1945,10 @@ images"), read 2026-11-09:
 - An image whose size can't be read counts `UNREAD_TOKENS` (1,568, the
   standard tier's budget).
 
+`image.rs` is the one copy of the rule: the context guard's copies and
+contact sheets (rush-bundled `contextguard/images.rs`) take its patches,
+resize and tiers' numbers rather than a port of their own.
+
 The docs' older w×h/750 rule with a 1,568 px long edge is superseded by
 the patch rule (1000×1000: 1,333 by the old, 1,296 by the new; small
 images differ more, 200×200 being 53 against 64).
@@ -1990,8 +1996,9 @@ tokens are counted and never priced: no dollars are made up.
 A View splits by agent (`View.agents`, sessions, subagents and a Bucket
 each), and `Query.agents` narrows it to some (none: every agent). The
 advisor's digest says the split only when there's more than one agent,
-so a Claude Code digest reads as before. There is no Efficiency screen
-in the Rust port yet to show it in.
+so a Claude Code digest reads as before. There is no Efficiency place
+in the Rust port; `rush efficiency` and Settings › Usage show the
+figures (below).
 
 Findings, in tokens: "N Codex sessions ran near their context window"
 (a transcript with 20 requests or more that sent 90% of the window,
@@ -1999,6 +2006,45 @@ Findings, in tokens: "N Codex sessions ran near their context window"
 (200 requests or more on a frontier model that has a cheaper one:
 `codex::FRONTIER`, the one place Codex's model names are, gpt-6-astra →
 gpt-6.1-sol).
+
+### Where the figures show (Rust-only)
+
+Go had no Efficiency screen or CLI in the end, so the findings had no
+reader. `report.rs` (rush-efficiency) works out one `Report` for a
+query: each agent's totals (requests; input split into uncached, cache
+writes and cache reads; output; dollars where the agent has prices,
+"not priced" for Codex), the five transcripts that processed most
+tokens (input and output, not dollars) with their project, start → end,
+peak context and requests, the findings biggest cost first in their own
+words, and Emeritus's handovers.
+
+- `rush efficiency [--since 7d] [--agent claude|codex] [--json]` reads
+  what's new in every profile's transcripts (the same store and cache
+  as the place's), prints a table of the agents, the sessions, the
+  findings with their details wrapped under them, and the handovers.
+  `--since` takes 90m, 24h, 2d or 1w; `--json` is the same report whole.
+- Settings › Usage shows it under its rules, the last 7 days, read as
+  the page opens (off the UI, one `Store` kept while rush runs): "Where
+  tokens went", "Most tokens processed", "Findings" and "Emeritus
+  handovers", a row each, drawn by the row itself so the rules' columns
+  don't move; a row's About says the rest (a finding's detail, a
+  session's model, cost and transcript, a handover's method). The
+  sections are there only once the report has something, and a read
+  that finds nothing never hides one shown. A page of its own would be
+  new chrome for four short lists; Usage is where you go to change what
+  they point at.
+
+What a handover saved is an estimate, said as one wherever it shows:
+A's context at the handover less B's at its first request, times B's
+requests, as if A had done B's work at its own size, priced at the
+cache-read rate. It leaves out a compaction A might have made and what
+the baton cost to write. B's transcript is found by the log alone (the
+event has no conversation id for B): the same account and agent, not
+A's conversation, begun from 30 minutes before the event to 5 after,
+whose first context is nearest the event's `toContext` (within a
+quarter of it or 5k). One not found yet shows the per-request figure
+only. The advisor's digest has a line for them, and one per handover
+with its threshold and lineage, only when there were any.
 
 ## A session's runs
 

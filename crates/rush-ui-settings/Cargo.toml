@@ -24,6 +24,8 @@ rush-remote = { path = "../rush-remote" }
 # The bundled plugins Settings › Plugins offers.
 rush-bundled = { path = "../rush-bundled" }
 rush-claude.workspace = true
+# Usage's figures: the transcripts' report, as rush efficiency prints it.
+rush-efficiency = { path = "../rush-efficiency" }
 rush-host = { path = "../rush-host" }
 # Settings › Providers › Ollama: its models' context and the decision
 # models #compact prunes with (settings_ollama_models.go).

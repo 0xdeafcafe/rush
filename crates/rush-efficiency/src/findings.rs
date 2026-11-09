@@ -31,6 +31,20 @@ pub struct Finding {
     pub(crate) rank: i32,
 }
 
+impl Finding {
+    /// A finding in so many words, of cost dollars, with no saver or file
+    /// to it: as one is shown, for a fixture outside this crate, whose
+    /// rank is the crate's own. Rust-only.
+    pub fn new(title: &str, detail: &str, cost: f64) -> Finding {
+        Finding {
+            title: title.into(),
+            detail: detail.into(),
+            cost,
+            ..Finding::default()
+        }
+    }
+}
+
 /// The view's findings, most at stake first.
 pub fn findings(v: &View, found: &HashMap<String, Found>) -> Vec<Finding> {
     let mut out = Vec::new();
@@ -287,14 +301,14 @@ fn images(v: &View, out: &mut Vec<Finding>) {
             detail += &format!(
                 "; most: {}, read {} times",
                 base_name(&v.worst_image),
-                v.worst_image_reads
+                count(v.worst_image_reads)
             );
         }
         detail += ". Note what an image showed rather than reading it again, or put the ones to compare on one contact sheet";
         out.push(Finding {
             title: format!(
                 "{} image reads were of an image the same session had read already",
-                t.img_rep
+                count(t.img_rep)
             ),
             detail,
             cost: v.img_rep_carry,
@@ -306,7 +320,7 @@ fn images(v: &View, out: &mut Vec<Finding>) {
         let h = &v.heaviest;
         let mut detail = format!(
             "{} images in all, about {} tokens; they stay in context, so every later request pays for them again: about {} here (an estimate)",
-            t.img,
+            count(t.img),
             tokens(t.img_tok),
             money(v.img_carry)
         );
@@ -319,7 +333,7 @@ fn images(v: &View, out: &mut Vec<Finding>) {
         }
         detail += ". Read them in batches, put them on a contact sheet, downscale them first, or hand the looking to a fresh reviewer that reads each once";
         out.push(Finding {
-            title: format!("{} sessions were heavy on images", v.img_heavy),
+            title: format!("{} sessions were heavy on images", count(v.img_heavy)),
             detail,
             cost: v.img_carry,
             rank: 1,
@@ -334,12 +348,12 @@ fn codex(v: &View, out: &mut Vec<Finding>) {
     if v.near > 0 {
         let n = &v.nearest;
         out.push(Finding {
-            title: format!("{} Codex sessions ran near their context window", v.near),
+            title: format!("{} Codex sessions ran near their context window", count(v.near)),
             detail: format!(
                 "the closest sent {} of {} tokens, {} requests running ({}): every request re-reads all of it, and one long output can run out of room. A fresh session with a short hand-off, or /compact, keeps each turn smaller",
                 tokens(n.input),
                 tokens(n.window),
-                n.near,
+                count(n.near),
                 n.model
             ),
             rank: 1,
@@ -350,10 +364,10 @@ fn codex(v: &View, out: &mut Vec<Finding>) {
         let l = &v.longest;
         let cheaper = crate::codex::cheaper(&l.model).unwrap_or_default();
         out.push(Finding {
-            title: format!("{} long Codex sessions ran on {}", v.frontier, l.model),
+            title: format!("{} long Codex sessions ran on {}", count(v.frontier), l.model),
             detail: format!(
                 "the longest took {} requests and {} tokens of input. Routine work (a described edit, a lookup, running tests) does as well on {}, which costs less; keep {} for design and debugging. rush has no prices for Codex, so this is in tokens",
-                l.req,
+                count(l.req),
                 tokens(l.input),
                 cheaper,
                 l.model
@@ -362,6 +376,20 @@ fn codex(v: &View, out: &mut Vec<Finding>) {
             ..Finding::default()
         });
     }
+}
+
+/// A count with its thousands marked: 12,345. Rust-only: the findings
+/// ported from Go keep Go's plain numbers.
+pub fn count(n: i64) -> String {
+    let s = n.unsigned_abs().to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    if n < 0 { format!("-{out}") } else { out }
 }
 
 /// Dollars in words, short.

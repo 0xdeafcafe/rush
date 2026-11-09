@@ -81,6 +81,8 @@ const USAGE: &str = "rush — a lighter agents view for Claude Code
   rush serve       this machine's sessions to a browser and to rush elsewhere (docs/remote.md)
   rush events      what rush did and why, newest first (\"rush events -h\")
   rush why <id>    a session's last hour, each event under the one that caused it
+  rush efficiency  where your agents' tokens went, and what would save them
+                    (\"rush efficiency -h\")
   rush --dump      print what the view sees, for debugging
 ";
 
@@ -219,6 +221,16 @@ fn run(args: &[String]) -> i32 {
             return rush_prdrive::cli::pr_cmd_in(&env, &args[1..], &mut stdout, &mut stderr);
         }
         Some("watch") => return rush_watch::watch_cmd(&args[1..], &mut stdout, &mut stderr),
+        Some("efficiency") => {
+            let profiles: Vec<_> = reg.all().iter().flat_map(|a| reg.profiles_of(a)).collect();
+            return rush_efficiency::efficiency_cmd(
+                &profiles,
+                &args[1..],
+                rush_state::Time::now(),
+                &mut stdout,
+                &mut stderr,
+            );
+        }
         Some("events") => {
             let log = rush_events::path();
             return rush_events::events_cmd(&log, &args[1..], now(), &mut stdout, &mut stderr);

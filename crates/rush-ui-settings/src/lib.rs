@@ -25,6 +25,7 @@ pub mod catalog;
 pub mod cheap;
 pub mod common;
 pub mod configpage;
+pub mod efficiency;
 pub mod files;
 pub mod form;
 pub mod general;
@@ -184,6 +185,8 @@ pub struct Dialog {
     pub own: Option<ownsettings::Read>,
     /// The context guard's settings, as Usage last read them.
     pub guard: Option<usage::GuardRead>,
+    /// What the transcripts say, as Usage last read it (efficiency.rs).
+    pub efficiency: Option<Rc<rush_efficiency::Report>>,
 }
 
 /// The settings group's state: the dialog while a settings place shows,
