@@ -41,7 +41,8 @@ pub use pr::{
     interval, log_errors, resolve, summary, watch_pr,
 };
 pub use run::{
-    Arg, RunOptions, Runs, Target, What, WorkflowRun, job_state, parse_arg, resolve_run, watch_run,
+    Arg, RunOptions, Runs, Target, What, WorkflowRun, full_sha, job_state, parse_arg, resolve_run,
+    watch_run,
 };
 
 // Every test runs in a throwaway home (rush-testenv).

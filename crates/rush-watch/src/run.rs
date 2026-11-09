@@ -184,7 +184,14 @@ pub fn resolve_run(dir: &Path, what: &str, workflow: &str) -> Result<Target, Str
     let what = match arg {
         Arg::Run(id) => What::Run(id),
         Arg::Sha(sha) => What::Sha {
-            sha,
+            sha: full_sha(
+                &sha,
+                |s| {
+                    let rev = format!("{s}^{{commit}}");
+                    git(dir, &["rev-parse", "--verify", "-q", &rev])
+                },
+                |s| commit_sha(&repo, s),
+            )?,
             branch: String::new(),
         },
         Arg::Current => {
@@ -204,6 +211,46 @@ pub fn resolve_run(dir: &Path, what: &str, workflow: &str) -> Result<Target, Str
         what,
         workflow: workflow.to_string(),
     })
+}
+
+/// sha as the full 40 characters GitHub's head_sha filter needs (it matches
+/// nothing shorter): as given when already full, else what local (git
+/// rev-parse in the watch's dir) says, else what remote (GitHub's commits
+/// endpoint) says. Neither knowing it is an error at once, not a wait.
+pub fn full_sha(
+    sha: &str,
+    local: impl Fn(&str) -> Option<String>,
+    remote: impl Fn(&str) -> Option<String>,
+) -> Result<String, String> {
+    let is_full = |s: &str| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit());
+    if is_full(sha) {
+        return Ok(sha.to_string());
+    }
+    if let Some(s) = local(sha).map(|s| s.trim().to_ascii_lowercase())
+        && is_full(&s)
+    {
+        return Ok(s);
+    }
+    remote(sha)
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| is_full(s))
+        .ok_or_else(|| format!("no commit {} here or on GitHub: was it pushed?", quote(sha)))
+}
+
+/// The full sha GitHub gives a commit (any unambiguous prefix of one).
+fn commit_sha(repo: &str, rev: &str) -> Option<String> {
+    #[derive(Deserialize, Default)]
+    struct Commit {
+        #[serde(default, deserialize_with = "nd")]
+        sha: String,
+    }
+    gh::get(
+        &format!("repos/{repo}/commits/{rev}"),
+        Duration::from_secs(10),
+    )
+    .ok()
+    .and_then(|(b, _)| decode::<Commit>(&b).ok())
+    .map(|c| c.sha)
 }
 
 /// The commit branch (or a tag) heads on GitHub.
