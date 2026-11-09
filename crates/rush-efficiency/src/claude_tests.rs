@@ -229,3 +229,85 @@ fn lists_and_refreshes() {
     rush_state::set_thread_dir(None);
     rush_state::set_thread_cache_dir(None);
 }
+
+// A session that reads one screenshot again and again: each read is an
+// image counted at the model's tier, every read after the first is a
+// repeat, and every request re-reads the images sent before it until a
+// compaction drops them (Rust-only).
+fn image_transcript(reads: usize) -> Vec<String> {
+    let png = crate::image::tests::png(1920, 1080);
+    let mut out = Vec::new();
+    let usage = r#""usage":{"input_tokens":10,"cache_read_input_tokens":100000,"cache_creation_input_tokens":0,"output_tokens":5}"#;
+    for i in 0..reads {
+        out.push(format!(
+            r#"{{"type":"assistant","timestamp":"2026-09-20T10:00:{i:02}Z","sessionId":"s1","cwd":"/work/repo","message":{{"id":"m{i}","model":"claude-opus-5-5","content":[{{"type":"tool_use","id":"t{i}","name":"Read","input":{{"file_path":"/work/repo/shot.png"}}}}],{usage}}}}}"#
+        ));
+        out.push(format!(
+            r#"{{"type":"user","timestamp":"2026-09-20T10:00:{i:02}Z","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"t{i}","content":[{{"type":"image","source":{{"type":"base64","media_type":"image/png","data":"{png}"}}}}]}}]}}}}"#
+        ));
+    }
+    out.push(format!(
+        r#"{{"type":"assistant","timestamp":"2026-09-20T10:01:00Z","message":{{"id":"last","model":"claude-opus-5-5","content":[{{"type":"text","text":"done"}}],{usage}}}}}"#
+    ));
+    out
+}
+
+#[test]
+fn counts_images_and_their_rereads() {
+    crate::testutil::claude();
+    let dir = tempfile::tempdir().unwrap();
+    let p = write(dir.path(), &image_transcript(12));
+    let mut f = File::new("/acct", false);
+    scan(&Claude, &p, &mut f, Vec::new()).unwrap();
+    let t = f.totals();
+    // 1920×1080 is 2,691 tokens on Opus 5.5's high-resolution tier.
+    let one = 2691;
+    assert_eq!((t.img, t.img_tok, t.img_rep), (12, 12 * one, 11), "{t:?}");
+    // Image i is first sent by request i+1 and re-read by each after it,
+    // to the 13th: 11 + 10 + … + 1 reads, the repeats' 10 + … + 1.
+    assert_eq!(t.img_carry, 66 * one);
+    assert_eq!(t.img_rep_carry, 55 * one);
+    assert_eq!(f.img_reads.get("/work/repo/shot.png"), Some(&12));
+    assert_eq!(f.img_max, 12 * one);
+    assert_eq!(t.bytes[TOOL_READ], 0, "an image isn't text");
+
+    let s = Store::of(HashMap::from([(p, f)]));
+    let at = Time::parse("2026-09-20T23:00:00Z").unwrap();
+    let v = s.view(&Query::new(RANGES[0], at));
+    assert_eq!((v.img_rep_sessions, v.worst_image_reads), (1, 12));
+    assert_eq!(v.img_heavy, 1, "a third of its peak context was images");
+    let read = crate::price::cache_read_price("claude-opus-5-5");
+    assert!((v.img_carry - (66 * one) as f64 * read / 1e6).abs() < 1e-9);
+    let fs = findings(&v, &HashMap::new());
+    let titles: Vec<&str> = fs.iter().map(|f| f.title.as_str()).collect();
+    for want in [
+        "11 image reads were of an image the same session had read already",
+        "1 sessions were heavy on images",
+    ] {
+        let Some(f) = fs.iter().find(|f| f.title == want) else {
+            panic!("no {want:?} in {titles:?}");
+        };
+        assert!(f.cost > 0.0 && f.detail.contains("an estimate"), "{f:?}");
+    }
+    assert!(
+        fs.iter()
+            .any(|f| f.detail.contains("shot.png, read 12 times"))
+    );
+}
+
+// A compaction drops the images: the requests after it re-read none.
+#[test]
+fn compaction_drops_images() {
+    crate::testutil::claude();
+    let dir = tempfile::tempdir().unwrap();
+    let mut lines = image_transcript(3);
+    let last = lines.pop().unwrap();
+    lines.push(r#"{"type":"system","subtype":"compact_boundary","timestamp":"2026-09-20T10:00:30Z","compactMetadata":{"trigger":"auto","preTokens":500000,"postTokens":20000}}"#.into());
+    lines.push(last);
+    let p = write(dir.path(), &lines);
+    let mut f = File::new("", false);
+    scan(&Claude, &p, &mut f, Vec::new()).unwrap();
+    // Only the third request re-read an image (the first); the one after
+    // the compaction, none.
+    assert_eq!(f.totals().img_carry, 2691);
+}

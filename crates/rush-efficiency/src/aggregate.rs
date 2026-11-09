@@ -1,13 +1,13 @@
 //! A view of the figures: one query's points, totals and what the savers
 //! did inside it. Port of internal/efficiency/aggregate.go.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use rush_state::Time;
 
 use crate::catalog::CATALOG;
 use crate::compare::SideAcc;
-use crate::price::{cache_read_price, saved_against_default};
+use crate::price::{cache_read_price_of, saved_against_default};
 use crate::scan::{Bucket, File, N_TOOLS, TOOL_NAMES, Use};
 use crate::store::Store;
 use crate::when::{DAY, HOUR, add_secs, at_secs, hour_of, local_day_start, next_local_day, secs};
@@ -72,6 +72,8 @@ pub struct Query {
     pub to: Time,
     /// Buckets of a local day rather than an hour.
     pub daily: bool,
+    /// Agents ("claude", "codex"); none is every agent. Rust-only.
+    pub agents: Vec<String>,
 }
 
 /// One of the spans the place offers.
@@ -177,15 +179,90 @@ pub struct View {
 
     /// By saver ID: sessions with it, without.
     pub(crate) split: HashMap<String, [SideAcc; 2]>,
+
+    // Rust-only from here.
+    /// Each agent's part of the view, by kind ("claude", "codex").
+    pub agents: BTreeMap<String, AgentPart>,
+
+    /// About what re-reading the images in context cost, and the part of
+    /// that for images read again (total.img_carry, img_rep_carry, at
+    /// each transcript's cache-read price): estimates.
+    pub img_carry: f64,
+    pub img_rep_carry: f64,
+    /// Transcripts that read an image from the same path again; the path
+    /// read most, and how many times.
+    pub img_rep_sessions: i64,
+    pub worst_image: String,
+    pub worst_image_reads: i64,
+    /// Transcripts heavy on images (HEAVY_IMAGES or more, or image tokens
+    /// HEAVY_SHARE of their peak context), and the one holding the most.
+    pub img_heavy: i64,
+    pub heaviest: Heavy,
+
+    /// Transcripts that sent NEAR_WINDOW of their window NEAR_REQS times
+    /// or more, and the one that did most.
+    pub near: i64,
+    pub nearest: Near,
+    /// Sessions of LONG_REQS requests or more on a frontier model that has
+    /// a cheaper one (codex::FRONTIER), and the longest.
+    pub frontier: i64,
+    pub longest: Near,
+}
+
+/// One agent's part of a view.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AgentPart {
+    pub sessions: i64,
+    pub subagents: i64,
+    pub b: Bucket,
+}
+
+/// The transcript heaviest on images.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Heavy {
+    pub path: String,
+    pub model: String,
+    pub sub: bool,
+    pub images: i64,
+    /// The most image tokens it held at once, and its peak context.
+    pub held: i64,
+    pub peak: i64,
+}
+
+/// A transcript near its window, or a long one on a frontier model.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Near {
+    pub path: String,
+    pub model: String,
+    pub req: i64,
+    /// Requests near the window, the most input one sent (for a long
+    /// session, all it sent), the window.
+    pub near: i64,
+    pub input: i64,
+    pub window: i64,
 }
 
 pub const FAT_CONTEXT: i64 = 400_000;
 pub const REREAD_AT: i64 = 4;
+/// A transcript with this many images is heavy on them.
+pub const HEAVY_IMAGES: i64 = 50;
+/// Or one whose images were this share of its peak context, once that
+/// peak is past HEAVY_PEAK.
+pub const HEAVY_SHARE: f64 = 0.25;
+pub const HEAVY_PEAK: i64 = 50_000;
+/// A transcript this many requests near its window ran near it.
+pub const NEAR_REQS: i64 = 20;
+/// A session this many requests long is a long one.
+pub const LONG_REQS: i64 = 200;
 
 impl Query {
     /// Whether a file is inside the query's accounts and folder.
     pub fn has(&self, f: &File) -> bool {
-        self.has_account(&f.account) && self.has_project(&f.project)
+        self.has_account(&f.account) && self.has_project(&f.project) && self.has_agent(f.agent())
+    }
+
+    fn has_agent(&self, agent: &str) -> bool {
+        self.agents.is_empty() || self.agents.iter().any(|a| a == agent)
     }
 
     fn has_account(&self, acct: &str) -> bool {
@@ -264,7 +341,7 @@ impl Store {
                 }
             }
         };
-        for f in inner.files.values() {
+        for (p, f) in &inner.files {
             if !q.has(f) {
                 continue;
             }
@@ -314,7 +391,7 @@ impl Store {
                     // average.
                     let over = (peak - FAT_CONTEXT) as f64;
                     v.fat_carry += over / 2.0 * file_b.req as f64 * over / peak as f64
-                        * cache_read_price(&f.model)
+                        * cache_read_price_of(f.agent(), &f.model)
                         / 1e6;
                 }
                 let (mut worst, mut worst_n) = ("", 0);
@@ -340,11 +417,12 @@ impl Store {
                 }
             }
             v.big += f.big;
+            v.add_rust_only(p, f, &file_b);
             // A token of tool output is read again by roughly half the
             // session's later requests, on average, at the cache-read
             // price.
             if file_b.req > 0 {
-                let read = cache_read_price(&f.model);
+                let read = cache_read_price_of(f.agent(), &f.model);
                 let per = file_b.req as f64 / 2.0 * read / 1e6;
                 for c in 0..N_TOOLS {
                     v.carry[c] += file_b.bytes[c] as f64 / 4.0 * per;
@@ -369,7 +447,7 @@ impl Store {
             }
         }
         for (acct, r) in &inner.retired {
-            if !q.has_account(acct) || !q.project.is_empty() {
+            if !q.has_account(acct) || !q.project.is_empty() || !q.has_agent(crate::AGENT) {
                 continue;
             }
             for (k, u) in &r.uses {
@@ -431,6 +509,75 @@ pub struct Series {
 }
 
 impl View {
+    /// What Rust's view adds of one transcript at path, its use inside the
+    /// view being b: its agent's part, its images, and how near its window
+    /// it ran.
+    fn add_rust_only(&mut self, path: &str, f: &File, b: &Bucket) {
+        let part = self.agents.entry(f.agent().to_string()).or_default();
+        part.b.add(b);
+        if f.sub {
+            part.subagents += 1;
+        } else if f.first >= self.q.from && b.req > 0 {
+            part.sessions += 1;
+        }
+
+        let read = cache_read_price_of(f.agent(), &f.model) / 1e6;
+        self.img_carry += b.img_carry as f64 * read;
+        self.img_rep_carry += b.img_rep_carry as f64 * read;
+        if b.img_rep > 0 {
+            self.img_rep_sessions += 1;
+            for (p, &n) in &f.img_reads {
+                if n > self.worst_image_reads
+                    || (n == self.worst_image_reads && *p < self.worst_image)
+                {
+                    self.worst_image = p.clone();
+                    self.worst_image_reads = n;
+                }
+            }
+        }
+        let peak = f.peak();
+        let heavy = b.img >= HEAVY_IMAGES
+            || (peak > HEAVY_PEAK && b.img > 0 && f.img_max as f64 >= HEAVY_SHARE * peak as f64);
+        if heavy {
+            self.img_heavy += 1;
+            if f.img_max > self.heaviest.held {
+                self.heaviest = Heavy {
+                    path: path.to_string(),
+                    model: f.model.clone(),
+                    sub: f.sub,
+                    images: b.img,
+                    held: f.img_max,
+                    peak,
+                };
+            }
+        }
+
+        let near = Near {
+            path: path.to_string(),
+            model: f.model.clone(),
+            req: b.req,
+            near: b.near,
+            input: f.near_max,
+            window: f.window,
+        };
+        if b.near >= NEAR_REQS {
+            self.near += 1;
+            if b.near > self.nearest.near {
+                self.nearest = near.clone();
+            }
+        }
+        if !f.sub && b.req >= LONG_REQS && crate::codex::cheaper(&f.model).is_some() {
+            self.frontier += 1;
+            if b.req > self.longest.req {
+                // Its input is all it sent, for a long session.
+                self.longest = Near {
+                    input: b.context(),
+                    ..near
+                };
+            }
+        }
+    }
+
     /// A metric over the view's points.
     pub fn series(&self, m: Metric) -> Series {
         let per = |n: i64, d: i64| if d == 0 { 0.0 } else { n as f64 / d as f64 };

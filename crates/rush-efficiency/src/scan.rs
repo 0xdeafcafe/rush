@@ -91,6 +91,28 @@ pub struct Bucket {
     pub look_calls: i32,
     #[serde(rename = "lb", skip_serializing_if = "zero_i")]
     pub look: i64,
+
+    // Rust-only, and additive: Go's build reads and writes the same file
+    // without them.
+    /// Images tool results gave back, and their tokens (image.rs).
+    #[serde(rename = "im", skip_serializing_if = "zero_i")]
+    pub img: i64,
+    #[serde(rename = "it", skip_serializing_if = "zero_i")]
+    pub img_tok: i64,
+    /// Image tokens the requests re-read: each request's images already
+    /// in its context, summed.
+    #[serde(rename = "ik", skip_serializing_if = "zero_i")]
+    pub img_carry: i64,
+    /// Images read again: a path the session had read an image from
+    /// before. Their tokens re-read, as img_carry.
+    #[serde(rename = "ix", skip_serializing_if = "zero_i")]
+    pub img_rep: i64,
+    #[serde(rename = "ixk", skip_serializing_if = "zero_i")]
+    pub img_rep_carry: i64,
+    /// Requests whose input was NEAR_WINDOW of the model's context window
+    /// or more (Codex says its window).
+    #[serde(rename = "nw", skip_serializing_if = "zero_i")]
+    pub near: i64,
 }
 
 impl Bucket {
@@ -120,6 +142,12 @@ impl Bucket {
         }
         self.look_calls += o.look_calls;
         self.look += o.look;
+        self.img += o.img;
+        self.img_tok += o.img_tok;
+        self.img_carry += o.img_carry;
+        self.img_rep += o.img_rep;
+        self.img_rep_carry += o.img_rep_carry;
+        self.near += o.near;
     }
 }
 
@@ -225,7 +253,65 @@ pub struct File {
     /// LOOK_FLAG for a shell command that searches or reads code.
     #[serde(rename = "op", skip_serializing_if = "HashMap::is_empty")]
     pub open: HashMap<String, u8>,
+
+    // Rust-only, and additive (Go's build drops them when it writes the
+    // file, and rev then has it read again).
+    /// The agent whose transcript it is; "" is Claude Code's.
+    #[serde(rename = "ag", skip_serializing_if = "String::is_empty")]
+    pub agent: String,
+    /// What this build reads from a line: below FILE_REV, the transcript
+    /// is read again from its start.
+    #[serde(rename = "rv", skip_serializing_if = "zero_i")]
+    pub rev: i64,
+    /// Path → times an image was read from it.
+    #[serde(rename = "ird", skip_serializing_if = "HashMap::is_empty")]
+    pub img_reads: HashMap<String, i64>,
+    /// Read calls whose results haven't come back: id → path.
+    #[serde(rename = "opr", skip_serializing_if = "HashMap::is_empty")]
+    pub open_read: HashMap<String, String>,
+    /// Image tokens in context and sent at least once, and those come
+    /// since the last request (sent by the next); the same for images
+    /// read again. A compaction drops them.
+    #[serde(rename = "ih", skip_serializing_if = "zero_i")]
+    pub img_held: i64,
+    #[serde(rename = "in", skip_serializing_if = "zero_i")]
+    pub img_new: i64,
+    #[serde(rename = "rh", skip_serializing_if = "zero_i")]
+    pub rep_held: i64,
+    #[serde(rename = "rn", skip_serializing_if = "zero_i")]
+    pub rep_new: i64,
+    /// The most image tokens it held at once.
+    #[serde(rename = "imx", skip_serializing_if = "zero_i")]
+    pub img_max: i64,
+    /// What the pending request re-reads of them.
+    #[serde(rename = "pik", skip_serializing_if = "zero_i")]
+    pub pend_img_carry: i64,
+    #[serde(rename = "prk", skip_serializing_if = "zero_i")]
+    pub pend_rep_carry: i64,
+    /// The model's context window, when the agent says it (Codex).
+    #[serde(rename = "win", skip_serializing_if = "zero_i")]
+    pub window: i64,
+    /// The most input a request near the window sent.
+    #[serde(rename = "nwm", skip_serializing_if = "zero_i")]
+    pub near_max: i64,
+    /// The agent's running total of tokens at its last count (Codex's
+    /// total_token_usage), to tell a new request from the same one told
+    /// again.
+    #[serde(rename = "ctt", skip_serializing_if = "zero_i")]
+    pub seen_total: i64,
+    /// The model the agent's turns run on now, when it says so apart from
+    /// each request (Codex's turn_context).
+    #[serde(rename = "tm", skip_serializing_if = "String::is_empty")]
+    pub turn_model: String,
 }
+
+/// What a File records today; bumped when a line yields more, so cached
+/// transcripts are read again without the cache's version changing (Go's
+/// build shares it).
+pub const FILE_REV: i64 = 1;
+
+/// A request near its window sent this share of it or more.
+pub const NEAR_WINDOW: f64 = 0.9;
 
 /// A tool result big enough to be worth a finding: about 10k tokens.
 pub const BIG_RESULT: i64 = 40_000;
@@ -245,7 +331,26 @@ impl File {
         File {
             account: account.to_string(),
             sub,
+            rev: FILE_REV,
             ..File::default()
+        }
+    }
+
+    /// A transcript of agent's not yet read.
+    pub fn of_agent(agent: &str, account: &str, sub: bool) -> File {
+        let mut f = File::new(account, sub);
+        if agent != crate::AGENT {
+            f.agent = agent.to_string();
+        }
+        f
+    }
+
+    /// The agent whose transcript it is.
+    pub fn agent(&self) -> &str {
+        if self.agent.is_empty() {
+            crate::AGENT
+        } else {
+            &self.agent
         }
     }
 
@@ -270,7 +375,8 @@ impl File {
     /// The pending message as one request's use.
     fn pend_bucket(&self) -> Bucket {
         let (u, model, fast) = (&self.pend_use, self.pend_model.as_str(), self.pend_fast);
-        let c = |t: TokenUsage| crate::price::cost(model, &t, fast);
+        let agent = self.agent();
+        let c = |t: TokenUsage| crate::price::cost_of(agent, model, &t, fast);
         Bucket {
             req: 1,
             input: u.input,
@@ -295,6 +401,8 @@ impl File {
                 cache_write_1h: u.cache_write_1h,
                 ..TokenUsage::default()
             }),
+            img_carry: self.pend_img_carry,
+            img_rep_carry: self.pend_rep_carry,
             ..Bucket::default()
         }
     }
@@ -317,6 +425,8 @@ impl File {
         self.pend_use = TokenUsage::default();
         self.pend_think = 0;
         self.pend_fast = false;
+        self.pend_img_carry = 0;
+        self.pend_rep_carry = 0;
     }
 
     /// The context the session started with, the message still being
@@ -395,6 +505,12 @@ impl File {
     ) {
         if id != self.pend_id {
             self.commit();
+            // A new request re-reads the images already sent, and sends
+            // those come since the last one.
+            self.pend_img_carry = self.img_held;
+            self.pend_rep_carry = self.rep_held;
+            self.img_held += std::mem::take(&mut self.img_new);
+            self.rep_held += std::mem::take(&mut self.rep_new);
         }
         self.pend_id = id.to_string();
         self.pend_model = model.to_string();
@@ -419,11 +535,13 @@ impl File {
                     _ => {}
                 }
             }
-            Kind::Read
-                if !input.path.is_empty()
-                    && (self.reads.contains_key(&input.path) || self.reads.len() < MAX_READS) =>
-            {
-                *self.reads.entry(input.path.clone()).or_default() += 1;
+            Kind::Read if !input.path.is_empty() => {
+                if self.reads.contains_key(&input.path) || self.reads.len() < MAX_READS {
+                    *self.reads.entry(input.path.clone()).or_default() += 1;
+                }
+                if self.open_read.len() < MAX_OPEN {
+                    self.open_read.insert(id.to_string(), input.path.clone());
+                }
             }
             _ => {}
         }
@@ -434,6 +552,36 @@ impl File {
 
     /// What the call id gave back: n bytes of text.
     pub fn result(&mut self, id: &str, n: i64, at: Time) {
+        self.result_with(id, n, &[], at);
+    }
+
+    /// What the call id gave back: n bytes of text and images of these
+    /// tokens each. An image read from a path the session read one from
+    /// before is counted as read again.
+    pub fn result_with(&mut self, id: &str, n: i64, images: &[i64], at: Time) {
+        let path = self.open_read.remove(id);
+        if !images.is_empty() {
+            let tok: i64 = images.iter().sum();
+            let mut again = false;
+            if let Some(p) = path
+                && (self.img_reads.contains_key(&p) || self.img_reads.len() < MAX_READS)
+            {
+                let k = self.img_reads.entry(p).or_default();
+                *k += 1;
+                again = *k > 1;
+            }
+            self.img_new += tok;
+            if again {
+                self.rep_new += tok;
+            }
+            self.img_max = self.img_max.max(self.img_held + self.img_new);
+            let b = self.hour(at);
+            b.img += images.len() as i64;
+            b.img_tok += tok;
+            if again {
+                b.img_rep += images.len() as i64;
+            }
+        }
         let mut cl = self.open.remove(id).unwrap_or(TOOL_OTHER as u8);
         let big = n > BIG_RESULT;
         let b = self.hour(at);
@@ -470,6 +618,21 @@ impl File {
     /// One compaction of the conversation.
     pub fn compacted(&mut self, c: Compact) {
         self.compacts.push(c);
+        // The images go with what was summarised.
+        (self.img_held, self.img_new, self.rep_held, self.rep_new) = (0, 0, 0, 0);
+    }
+
+    /// A request at that sent input tokens, of a model whose context
+    /// window is window: counted when it's near the window.
+    pub fn sent(&mut self, input: i64, window: i64, at: Time) {
+        if window <= 0 {
+            return;
+        }
+        self.window = window;
+        if input as f64 >= NEAR_WINDOW * window as f64 {
+            self.hour(at).near += 1;
+            self.near_max = self.near_max.max(input);
+        }
     }
 }
 
@@ -494,7 +657,9 @@ pub fn scan(src: &dyn Source, path: &str, f: &mut File, mut buf: Vec<u8>) -> io:
     let mut fh = fs::File::open(path)?;
     let size = fh.metadata()?.len() as i64;
     if size < f.offset {
+        let agent = std::mem::take(&mut f.agent);
         *f = File::new(&f.account, f.sub); // rewritten: read it again
+        f.agent = agent;
     }
     f.size = size;
     if size == f.offset {

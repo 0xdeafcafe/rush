@@ -20,12 +20,16 @@ pub mod catalog;
 pub mod claude;
 #[cfg(test)]
 mod claude_tests;
+pub mod codex;
+#[cfg(test)]
+mod codex_tests;
 pub mod compare;
 pub mod detect;
 pub mod estimate;
 pub mod events;
 pub mod findings;
 pub mod gain;
+pub mod image;
 pub mod install;
 pub mod memory;
 pub mod price;
@@ -38,7 +42,8 @@ pub mod when;
 use std::path::PathBuf;
 
 pub use aggregate::{
-    METRIC_NAMES, Metric, Point, Query, RANGES, Range, SaverUse, Series, View, quantile,
+    AgentPart, HEAVY_IMAGES, Heavy, LONG_REQS, METRIC_NAMES, Metric, NEAR_REQS, Near, Point, Query,
+    RANGES, Range, SaverUse, Series, View, quantile,
 };
 pub use catalog::{
     CATALOG, Detect, KIND_NAMES, Kind, Recipe, Saver, Setting, SettingValue, Step, find,
@@ -53,16 +58,16 @@ pub use install::Plan;
 pub use memory::memory_findings;
 pub use price::cache_read_price;
 pub use scan::{
-    BIG_RESULT, Bucket, Compact, File, N_TOOLS, TOOL_BASH, TOOL_EDIT, TOOL_MCP, TOOL_NAMES,
-    TOOL_OTHER, TOOL_READ, TOOL_SEARCH, Use, looks, scan,
+    BIG_RESULT, Bucket, Compact, FILE_REV, File, N_TOOLS, NEAR_WINDOW, TOOL_BASH, TOOL_EDIT,
+    TOOL_MCP, TOOL_NAMES, TOOL_OTHER, TOOL_READ, TOOL_SEARCH, Use, looks, scan,
 };
-pub use source::{Setup, Source, source, transcripts, transcripts_dir};
+pub use source::{Setup, Source, source, source_for, sources, transcripts, transcripts_dir};
 pub use store::{Retired, Store};
 pub use top::SessionCost;
 
-/// The agent whose sessions efficiency reads, and whose prices it counts
-/// them at: Claude Code's transcripts are the only ones it reads
-/// (aggregate.go Agent, state.LoginsKind).
+/// The agent whose sessions efficiency first read, and whose prices it
+/// counts them at (aggregate.go Agent, state.LoginsKind). Codex's are
+/// read too (codex.rs), each File saying its agent.
 pub const AGENT: &str = "claude";
 
 /// Where the Efficiency place keeps what can't be worked out again: the

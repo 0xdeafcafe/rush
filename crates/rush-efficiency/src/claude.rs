@@ -97,6 +97,10 @@ fn subdirs(dir: &Path) -> Vec<PathBuf> {
 }
 
 impl Source for Claude {
+    fn kind(&self) -> &'static str {
+        crate::AGENT
+    }
+
     /// p's transcripts: projects/*/*.jsonl, then their subagents'
     /// projects/*/*/subagents/*.jsonl.
     fn transcripts(&self, p: &Profile) -> Vec<String> {
@@ -460,29 +464,61 @@ fn user(f: &mut File, l: &RawLine, at: Time) {
     let Ok(blocks) = serde_json::from_str::<Vec<Block>>(raw) else {
         return;
     };
+    // The images are counted at the model that asked for them: the one
+    // whose message is pending, or the last.
+    let model = if f.pend_model.is_empty() {
+        f.model.clone()
+    } else {
+        f.pend_model.clone()
+    };
     for bl in blocks.iter().filter(|b| b.kind == "tool_result") {
-        f.result(&bl.tool_use_id, result_size(bl.content), at);
+        let (n, images) = result_size(bl.content, &model);
+        f.result_with(&bl.tool_use_id, n, &images, at);
     }
 }
 
-/// How much text a tool result gave back; images count as nothing, being
-/// tokens of another kind.
-fn result_size(raw: Option<&RawValue>) -> i64 {
-    let Some(raw) = raw else { return 0 };
+/// How much text a tool result gave back, and the tokens of each image in
+/// it (image.rs), images being tokens of another kind than text.
+fn result_size(raw: Option<&RawValue>, model: &str) -> (i64, Vec<i64>) {
+    let Some(raw) = raw else {
+        return (0, Vec::new());
+    };
     let raw = raw.get();
     if raw.is_empty() {
-        return 0;
+        return (0, Vec::new());
     }
     if raw.starts_with('"') {
-        return raw.len() as i64 - 2;
+        return (raw.len() as i64 - 2, Vec::new());
     }
     #[derive(Deserialize, Default)]
     #[serde(default)]
-    struct Part {
-        text: String,
+    struct Part<'a> {
+        #[serde(rename = "type")]
+        kind: String,
+        #[serde(borrow)]
+        text: std::borrow::Cow<'a, str>,
+        #[serde(borrow)]
+        source: Option<ImageSource<'a>>,
+    }
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct ImageSource<'a> {
+        #[serde(borrow)]
+        data: std::borrow::Cow<'a, str>,
     }
     match serde_json::from_str::<Vec<Part>>(raw) {
-        Ok(parts) => parts.iter().map(|p| p.text.len() as i64).sum(),
-        Err(_) => raw.len() as i64,
+        Ok(parts) => {
+            let n = parts.iter().map(|p| p.text.len() as i64).sum();
+            let images = parts
+                .iter()
+                .filter(|p| p.kind == "image")
+                .map(|p| {
+                    let data = p.source.as_ref().map_or("", |s| s.data.as_ref());
+                    crate::image::tokens(data, model)
+                })
+                .collect();
+            (n, images)
+        }
+        Err(_) => (raw.len() as i64, Vec::new()),
     }
 }

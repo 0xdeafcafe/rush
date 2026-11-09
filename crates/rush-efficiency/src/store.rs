@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 use rush_core::adapter::Profile;
 use serde::{Deserialize, Serialize};
 
-use crate::scan::{Bucket, File, Use, scan};
-use crate::source::{Source, source};
+use crate::scan::{Bucket, FILE_REV, File, Use, scan};
+use crate::source::{Source, source_for};
 
 /// Bumped when File changes shape: the transcripts are then read again
 /// from the start.
@@ -62,6 +62,13 @@ fn cache_path() -> PathBuf {
     rush_state::cache_path("efficiency.json")
 }
 
+/// Where other agents' transcripts (Codex's) are kept: apart from Claude
+/// Code's, whose file Go's build reads too and would count them in.
+/// Rust-only.
+fn others_path() -> PathBuf {
+    rush_state::cache_path("efficiency-agents.json")
+}
+
 fn retired_path() -> PathBuf {
     crate::dir().join("retired.json")
 }
@@ -70,13 +77,15 @@ impl Store {
     /// The store as its cache left it; the first refresh fills it.
     pub fn open() -> Store {
         let mut inner = Inner::default();
-        if let Some(c) = std::fs::read(cache_path())
-            .ok()
-            .and_then(|b| serde_json::from_slice::<CacheFile>(&b).ok())
-            && c.version == CACHE_VERSION
-            && let Some(files) = c.files
-        {
-            inner.files = files;
+        for path in [cache_path(), others_path()] {
+            if let Some(c) = std::fs::read(path)
+                .ok()
+                .and_then(|b| serde_json::from_slice::<CacheFile>(&b).ok())
+                && c.version == CACHE_VERSION
+                && let Some(files) = c.files
+            {
+                inner.files.extend(files);
+            }
         }
         if let Some(r) = std::fs::read(retired_path())
             .ok()
@@ -114,39 +123,53 @@ impl Store {
         self.len() == 0
     }
 
-    /// Reads what's new in every profile's transcripts, through the
-    /// agent's Source; whether anything changed.
+    /// Reads what's new in every profile's transcripts, each through its
+    /// agent's Source (sources: Claude Code's and Codex's); whether
+    /// anything changed. A profile of an agent efficiency doesn't read is
+    /// passed over.
     pub fn refresh(&self, profiles: &[Profile]) -> bool {
-        self.refresh_from(source(), profiles)
+        self.refresh_by(profiles, source_for)
     }
 
-    /// refresh, reading through src.
+    /// refresh, reading every profile through src.
     pub fn refresh_from(&self, src: &dyn Source, profiles: &[Profile]) -> bool {
+        self.refresh_by(profiles, |_| Some(src))
+    }
+
+    fn refresh_by<'s>(
+        &self,
+        profiles: &[Profile],
+        pick: impl Fn(&Profile) -> Option<&'s dyn Source>,
+    ) -> bool {
         let _one = self.scan.lock().unwrap_or_else(|e| e.into_inner());
-        let mut jobs: Vec<(String, File)> = Vec::new();
+        let mut jobs: Vec<(String, File, &'s dyn Source)> = Vec::new();
         let mut listed = HashSet::new();
         let mut gone = Vec::new();
         {
             let inner = self.read();
             for a in profiles {
+                let Some(src) = pick(a) else { continue };
                 for p in src.transcripts(a) {
                     listed.insert(p.clone());
                     let Ok(st) = std::fs::metadata(&p) else {
                         continue;
                     };
                     let size = st.len() as i64;
-                    let old = inner.files.get(&p);
+                    // A transcript read by an older build is read again
+                    // whole, for what this one reads more of.
+                    let old = inner.files.get(&p).filter(|o| o.rev >= FILE_REV);
                     if old.is_some_and(|o| o.size == size && o.offset == size) {
                         continue;
                     }
                     let f = match old {
                         Some(o) => o.clone(),
-                        None => File::new(
+                        None => File::of_agent(
+                            src.kind(),
                             &a.dir,
                             p.contains(&format!("{0}subagents{0}", std::path::MAIN_SEPARATOR)),
                         ),
                     };
-                    jobs.push((p, f));
+                    jobs.push((p, f, src));
                 }
             }
             for (p, f) in &inner.files {
@@ -173,7 +196,7 @@ impl Store {
                         let mut buf = Vec::with_capacity(64 << 10);
                         loop {
                             let job = queue.lock().unwrap_or_else(|e| e.into_inner()).pop();
-                            let Some((path, mut f)) = job else { break };
+                            let Some((path, mut f, src)) = job else { break };
                             buf = scan(src, &path, &mut f, std::mem::take(&mut buf))
                                 .unwrap_or_default();
                             if buf.capacity() > 8 << 20 {
@@ -226,7 +249,7 @@ impl Store {
 
     /// Writes the cache when it has changed.
     pub fn save(&self) {
-        let b = {
+        let (claude, others) = {
             let mut inner = self.inner.write().unwrap_or_else(|e| e.into_inner());
             if !inner.dirty {
                 return;
@@ -236,15 +259,25 @@ impl Store {
             #[derive(Serialize)]
             struct Out<'a> {
                 version: i64,
-                files: &'a HashMap<String, File>,
+                files: HashMap<&'a String, &'a File>,
             }
-            serde_json::to_vec(&Out {
-                version: CACHE_VERSION,
-                files: &inner.files,
-            })
+            let part = |claude: bool| {
+                serde_json::to_vec(&Out {
+                    version: CACHE_VERSION,
+                    files: inner
+                        .files
+                        .iter()
+                        .filter(|(_, f)| f.agent.is_empty() == claude)
+                        .collect(),
+                })
+            };
+            (part(true), part(false))
         };
-        if let Ok(b) = b {
+        if let Ok(b) = claude {
             let _ = crate::write_file(&cache_path(), &b);
+        }
+        if let Ok(b) = others {
+            let _ = crate::write_file(&others_path(), &b);
         }
     }
 }

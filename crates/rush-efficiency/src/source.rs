@@ -14,6 +14,8 @@ use crate::scan::File;
 /// each line of one into a File through File's saw, request, call, result
 /// and the rest.
 pub trait Source: Send + Sync {
+    /// The agent's kind, as its profiles name it: "claude", "codex".
+    fn kind(&self) -> &'static str;
     /// p's transcripts: its sessions' and their subagents', whose paths
     /// have a "subagents" folder in them.
     fn transcripts(&self, p: &Profile) -> Vec<String>;
@@ -44,18 +46,36 @@ pub struct Setup {
     pub env: Vec<String>,
 }
 
-/// The agent's Source: Claude Code's transcripts are the only ones
-/// efficiency reads.
+/// Claude Code's Source: the one savers are found in, and the one a
+/// profile that names no agent reads through.
 pub fn source() -> &'static dyn Source {
     &crate::claude::Claude
 }
 
-/// p's transcripts, as the Source finds them.
+/// Every agent efficiency reads the transcripts of: Claude Code's, then
+/// Codex's (Rust-only).
+pub fn sources() -> &'static [&'static dyn Source] {
+    &[&crate::claude::Claude, &crate::codex::Codex]
+}
+
+/// The Source of p's agent, Claude Code's for a profile that names none;
+/// None for an agent whose transcripts efficiency doesn't read.
+pub fn source_for(p: &Profile) -> Option<&'static dyn Source> {
+    let k = p.kind.0.as_str();
+    if k.is_empty() {
+        return Some(source());
+    }
+    sources().iter().copied().find(|s| s.kind() == k)
+}
+
+/// p's transcripts, as its agent's Source finds them.
 pub fn transcripts(p: &Profile) -> Vec<String> {
-    source().transcripts(p)
+    source_for(p).map(|s| s.transcripts(p)).unwrap_or_default()
 }
 
 /// The folder all of p's transcripts are under.
 pub fn transcripts_dir(p: &Profile) -> String {
-    source().transcripts_dir(p)
+    source_for(p)
+        .map(|s| s.transcripts_dir(p))
+        .unwrap_or_default()
 }
