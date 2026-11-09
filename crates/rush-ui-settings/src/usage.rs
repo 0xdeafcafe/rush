@@ -30,6 +30,7 @@ pub struct GuardRead {
 /// Reads the context guard's settings as the page opens, off the UI: the
 /// disk.
 pub fn read(m: &mut Model) {
+    super::efficiency::read(m);
     m.later(
         || GuardRead {
             on: rush_plugin::bundled_on(cg::NAME),
@@ -51,6 +52,8 @@ pub fn sections(m: &Model) -> Vec<Section> {
     s.extend(super::cheap::sections(m));
     s.extend(super::guard::sections(m));
     s.push(advisor_section(m));
+    // What the transcripts say, once read: under the rules that act on it.
+    s.extend(super::efficiency::sections(m));
     s
 }
 

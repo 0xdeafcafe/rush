@@ -79,6 +79,8 @@ rush-testenv = { path = "../rush-testenv" }
 rush-host = { path = "../rush-host", features = ["fake"] }
 # A fake Ollama for Settings › Providers › Ollama.
 rush-ollama = { path = "../rush-ollama", features = ["fake"] }
+# Settings › Usage's figures, drawn from a report built in the test.
+rush-efficiency = { path = "../rush-efficiency" }
 tempfile.workspace = true
 
 [[bench]]

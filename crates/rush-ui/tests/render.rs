@@ -845,6 +845,133 @@ fn snapshot_settings_usage() {
     assert!(differ.is_empty(), "drawn now:\n{}", differ.join("\n\n"));
 }
 
+/// What the transcripts said, as Settings › Usage shows it under its
+/// rules: the agents' totals, the sessions, the findings and the
+/// handovers.
+fn efficiency_fixture() -> rush_efficiency::Report {
+    use rush_efficiency::events::Handover;
+    use rush_efficiency::{AgentPart, Bucket, Finding, Saving, SessionCost};
+    let t = |s: &str| rush_state::Time::parse(s).unwrap();
+    rush_efficiency::Report {
+        from: t("2026-11-02T12:00:00Z"),
+        to: t("2026-11-09T12:00:00Z"),
+        agents: vec![
+            (
+                "claude".into(),
+                AgentPart {
+                    sessions: 12,
+                    subagents: 30,
+                    b: Bucket {
+                        req: 1_204,
+                        input: 1_234_000,
+                        cw: 3_400_000,
+                        cr: 120_000_000,
+                        out: 900_000,
+                        c_cr: 60.0,
+                        c_cw: 21.25,
+                        c_out: 22.5,
+                        c_in: 6.17,
+                        ..Bucket::default()
+                    },
+                },
+            ),
+            (
+                "codex".into(),
+                AgentPart {
+                    sessions: 3,
+                    subagents: 0,
+                    b: Bucket {
+                        req: 310,
+                        input: 2_000_000,
+                        cr: 40_000_000,
+                        out: 300_000,
+                        ..Bucket::default()
+                    },
+                },
+            ),
+        ],
+        top: vec![SessionCost {
+            path: "/t/a.jsonl".into(),
+            project: "/src/rush".into(),
+            model: "claude-opus-5-5".into(),
+            first: t("2026-11-08T16:00:00Z"),
+            last: t("2026-11-09T02:00:00Z"),
+            peak_ctx: 412_000,
+            b: Bucket {
+                req: 830,
+                input: 50_000,
+                cw: 1_000_000,
+                cr: 44_050_000,
+                out: 200_000,
+                ..Bucket::default()
+            },
+            ..SessionCost::default()
+        }],
+        findings: vec![
+            Finding {
+                title: "1680 image reads were of an image the same session had read already"
+                    .into(),
+                detail: "the requests after them re-read about 41M tokens of them, about $20.50 (an estimate). Note what an image showed rather than reading it again, or put the ones to compare on one contact sheet".into(),
+                cost: 20.5,
+                ..Finding::default()
+            },
+            Finding {
+                title: "Only 84% of input came from the cache".into(),
+                detail: "sessions left idle past the cache's life, or switching model, write the whole context again".into(),
+                ..Finding::default()
+            },
+        ],
+        handovers: vec![Saving {
+            at: t("2026-11-09T02:00:00Z"),
+            h: Handover {
+                from: "a1".into(),
+                to: "b1".into(),
+                from_context: 307_000,
+                to_context: 22_000,
+                threshold: 300_000,
+                lineage: 1,
+                ..Handover::default()
+            },
+            transcript: "/t/b.jsonl".into(),
+            requests: 140,
+            per_request: 285_000,
+            tokens: 39_900_000,
+            usd: 19.95,
+        }],
+    }
+}
+
+/// Settings › Usage with the transcripts' figures read, the first
+/// finding highlighted so its About shows. A snapshot not yet kept, or
+/// one that differs, fails with the frame as drawn.
+#[test]
+fn snapshot_settings_usage_figures() {
+    use rush_ui::screens::settings::{PAGE_USAGE, dialog_mut, efficiency, form, usage};
+    let mut m = model();
+    rush_ui::screens::settings::set_settings_page(&mut m, PAGE_USAGE);
+    efficiency::show(&mut m, efficiency_fixture());
+    let rows = form::flat(&usage::sections(&m));
+    let at = rows
+        .iter()
+        .position(|r| r.label.starts_with("1680 image reads"))
+        .expect("the findings are on the page");
+    for label in ["Claude Code", "rush", "a1 → b1"] {
+        assert!(rows.iter().any(|r| r.label == label), "no row {label}");
+    }
+    dialog_mut(&mut m).cursor = at;
+    let f = plain(&mut m, 120, 40, &[]);
+    let name = "snap_settings_usage_figures_120x40";
+    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("snapshots")
+        .join(format!("{name}.txt"));
+    if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
+        snapshot(name, &f);
+    }
+    let want = std::fs::read_to_string(&p).unwrap_or_default();
+    assert!(want == f, "{name} differs; drawn now:\n{f}");
+}
+
 /// Every place's pages on a row of their own under the places, drawn
 /// alike: the header alone, at 120×40, one per place with pages.
 #[test]
