@@ -749,6 +749,9 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
     }
     // The stash told, for its history's Sent (rushmode.go:4743 keepSent).
     hooks::keep_sent(m, key, &text);
+    // Commands you ran waiting to go with it (+ with my next message), in
+    // front of your words (Rust-only).
+    let text = super::shellbox::with_attached(m, key, text);
     if now && images.is_empty() && !queue_of(m, key).items.is_empty() {
         queue::send_now(m, key, &text);
         return Out::Draw;
@@ -944,6 +947,10 @@ fn answer_failed(m: &mut Model, key: &str, id: &str) {
 /// put away: else a put-away session sent to works on in Earlier
 /// (markSending, sending.go:46).
 fn mark_sending(m: &mut Model, key: &str, text: &str) {
+    // Commands you ran sent with it show as they'll be drawn: your words,
+    // else `! cmd` (Rust-only).
+    let shown = rush_convo::shellbox::sent_prompt(text);
+    let text = shown.as_deref().unwrap_or(text);
     rush_ui_cmdbar::stops::undone(m, key);
     let now = m.now;
     let queued = queue_of(m, key).items.len();

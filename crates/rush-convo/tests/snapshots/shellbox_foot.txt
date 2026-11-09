@@ -3,7 +3,7 @@ t1:sh:0:0     |▍ ╭─ shell · /work/app ───────────�
               |▍ │ $ rm ~/Desktop/DeveloperIDApplication.p12                                           │
               |▍ ├─────────────────────────────────────────────────────────────────────────────────────┤
               |▍ │ removed                                                                             │
-              |▍ ╰─ ✓ exit 0 · 0.1s ───────────────── → send to agent  ✎ draft  ≈ summary  ↻ again  ✕ ─╯
+              |▍ ╰─ ✓ exit 0 · 0.1s ─────────────────── → send  + with next  ✎ draft  ≈ summary  ↻  ✕ ─╯
 sent
 t1:sh:0:0     |▍ ╭─ shell · /work/app ────────────────────── ✎ edit  ⧉ copy ─╮
               |▍ │ $ rm ~/Desktop/DeveloperIDApplication.p12                 │

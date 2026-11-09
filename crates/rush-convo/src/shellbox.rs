@@ -316,6 +316,14 @@ pub struct ShellRun {
     /// Bumped with every change, for what draws it.
     #[serde(skip)]
     pub ver: u64,
+    /// Started with ◐ background: drawn as one row while it runs.
+    pub background: bool,
+    /// Goes to the agent by itself as it ends (a background run's "send
+    /// when done").
+    pub send_done: bool,
+    /// Waits to go with the next message you send (+ with my next
+    /// message).
+    pub attached: bool,
 }
 
 impl ShellRun {
@@ -453,6 +461,33 @@ impl ShellRun {
         s
     }
 
+    /// The command and what it printed as Claude Code writes a command
+    /// you ran with `!` (`<bash-input>`, then `<bash-stdout>` and
+    /// `<bash-stderr>`), in one message: what → send gives a Claude agent,
+    /// which reads it as a command you ran and rush draws as one
+    /// (sent_runs). Its output's last SEND_LINES lines, at most
+    /// SEND_CHARS characters, colours taken out; how it ended, when not
+    /// with 0, as Claude Code's Bash tool says it ("Exit code 1").
+    /// Rust-only.
+    pub fn bash_text(&self) -> String {
+        let out = self.tail_lines(SEND_LINES, SEND_CHARS).unwrap_or_default();
+        let err = if self.stopped {
+            "Stopped by you".to_string()
+        } else if self.lost {
+            "Ended while rush was closed".to_string()
+        } else {
+            match self.exit {
+                Some(0) => String::new(),
+                Some(c) => format!("Exit code {c}"),
+                None => "Killed".to_string(),
+            }
+        };
+        format!(
+            "<bash-input>{}</bash-input>\n<bash-stdout>{out}</bash-stdout><bash-stderr>{err}</bash-stderr>",
+            self.command.trim()
+        )
+    }
+
     /// Whether it goes to the agent by itself now it's ended: a run of a
     /// block whose output the agent asked for (```sh send; not typed
     /// after `!`), as the agent wrote it (not edited), that ended by
@@ -498,9 +533,19 @@ impl ShellRun {
     /// characters, colours taken out, as a fenced block saying how many
     /// earlier lines were left out; "(no output)" when it wrote none.
     fn tail(&self, lines_most: usize, chars_most: usize) -> String {
+        match self.tail_lines(lines_most, chars_most) {
+            Some(t) => format!("```\n{t}\n```"),
+            None => "(no output)".into(),
+        }
+    }
+
+    /// Its output's last lines, at most lines of them and chars
+    /// characters, colours taken out, the first saying how many earlier
+    /// lines were left out; None when it wrote nothing.
+    fn tail_lines(&self, lines_most: usize, chars_most: usize) -> Option<String> {
         let lines: Vec<String> = self.lines().iter().map(|l| plain_text(l)).collect();
         if lines.iter().all(|l| l.trim().is_empty()) {
-            return "(no output)".into();
+            return None;
         }
         let mut kept: Vec<&str> = Vec::new();
         let mut chars = 0;
@@ -513,13 +558,12 @@ impl ShellRun {
         }
         kept.reverse();
         let left = self.dropped + lines.len() - kept.len();
-        let mut s = String::from("```\n");
+        let mut s = String::new();
         if left > 0 {
             s.push_str(&format!("… {left} earlier lines left out\n"));
         }
         s.push_str(&kept.join("\n"));
-        s.push_str("\n```");
-        s
+        Some(s)
     }
 
     /// What the quick model is asked to sum up: the command, how it
@@ -538,6 +582,62 @@ impl ShellRun {
         s.push_str(summary.trim());
         s
     }
+}
+
+/// A command you ran that rush sent to the agent in Claude Code's `!`
+/// form (ShellRun::bash_text): the command, what it printed, and what
+/// it said of how it ended ("" for exit 0).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SentRun {
+    pub command: String,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+/// The commands you ran at the start of a message rush sent, each its
+/// `<bash-input>` with its `<bash-stdout>` and `<bash-stderr>` after it,
+/// and what's left: the words you sent with them, if any. A message
+/// that's only a `<bash-input>` (Claude Code's own `!`, its output in the
+/// next message) has none.
+pub fn sent_runs(s: &str) -> (Vec<SentRun>, &str) {
+    fn tag<'a>(s: &'a str, name: &str) -> Option<(&'a str, &'a str)> {
+        let open = format!("<{name}>");
+        let close = format!("</{name}>");
+        let rest = s.trim_start().strip_prefix(open.as_str())?;
+        let end = rest.find(close.as_str())?;
+        Some((&rest[..end], &rest[end + close.len()..]))
+    }
+    let mut runs = Vec::new();
+    let mut rest = s;
+    while let Some((cmd, r)) = tag(rest, "bash-input") {
+        let Some((out, r)) = tag(r, "bash-stdout") else {
+            break;
+        };
+        let (err, r) = tag(r, "bash-stderr").unwrap_or(("", r));
+        runs.push(SentRun {
+            command: cmd.to_string(),
+            stdout: out.to_string(),
+            stderr: err.to_string(),
+        });
+        rest = r;
+    }
+    if runs.is_empty() {
+        return (runs, s);
+    }
+    (runs, rest.trim())
+}
+
+/// What a message rush sent with commands you ran shows as your words:
+/// the words sent with them, else the first command as `! cmd`, as
+/// Claude Code's own `!` is shown; None for any other message.
+pub fn sent_prompt(s: &str) -> Option<String> {
+    let (runs, rest) = sent_runs(s);
+    let first = runs.first()?;
+    Some(if rest.is_empty() {
+        format!("! {}", first.command)
+    } else {
+        rest.to_string()
+    })
 }
 
 /// How much of a run's output the quick model is given to sum up.

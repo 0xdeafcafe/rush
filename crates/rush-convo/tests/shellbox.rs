@@ -90,11 +90,8 @@ fn a_block_before_and_after_its_run() {
     let run = finished("rm ~/Desktop/DeveloperIDApplication.p12", "removed\n", 0);
     got.push_str(&the_box(&draw(&s, &opts("", &[(&r, run)], at(20)))));
     snap("shellbox_block", &got);
-    assert!(got.contains("▶ run  ✎ edit  ⧉ copy"), "{got}");
-    assert!(
-        got.contains("enter runs it · e edits it · c copies it"),
-        "{got}"
-    );
+    assert!(got.contains("▶ run  ◐ background  ✎ edit  ⧉ copy"), "{got}");
+    assert!(got.contains("enter runs it · b in the background"), "{got}");
     assert!(got.contains("✓ exit 0 · 0.1s"), "{got}");
     assert!(got.contains("→ send  ✎ draft  ≈ summary  ↻  ✕"), "{got}");
 }
@@ -134,7 +131,7 @@ fn the_foot_as_its_buttons_are_used() {
     each("narrow", &|_| {}, 40);
     snap("shellbox_foot", &got);
     assert!(
-        got.contains("→ send to agent  ✎ draft  ≈ summary  ↻ again  ✕"),
+        got.contains("→ send  + with next  ✎ draft  ≈ summary  ↻  ✕"),
         "{got}"
     );
     assert!(got.contains("✓ sent"), "{got}");
@@ -492,4 +489,124 @@ fn a_bang_run_before_any_turn() {
     let bx = got.find("a.txt").expect(&got);
     let asked = got.find("now the real work").expect(&got);
     assert!(bx < asked, "{got}");
+}
+
+/// What → send gives a Claude agent: Claude Code's own `!` form, its
+/// output's end and how it ended as its Bash tool says it.
+#[test]
+fn a_run_as_claude_codes_bang() {
+    let mut stopped = finished("sleep 9", "", 0);
+    stopped.stopped = true;
+    let long = finished(
+        "seq 200",
+        &(1..=200).map(|i| format!("{i}\n")).collect::<String>(),
+        0,
+    );
+    let cases: [(&str, ShellRun, &str); 5] = [
+        (
+            "ok",
+            finished("ls", "a\nb\n", 0),
+            "<bash-input>ls</bash-input>\n<bash-stdout>a\nb</bash-stdout><bash-stderr></bash-stderr>",
+        ),
+        (
+            "failed",
+            finished("cargo test", "boom\n", 101),
+            "<bash-input>cargo test</bash-input>\n<bash-stdout>boom</bash-stdout><bash-stderr>Exit code 101</bash-stderr>",
+        ),
+        (
+            "no output",
+            finished("true", "", 0),
+            "<bash-input>true</bash-input>\n<bash-stdout></bash-stdout><bash-stderr></bash-stderr>",
+        ),
+        (
+            "stopped",
+            stopped,
+            "<bash-input>sleep 9</bash-input>\n<bash-stdout></bash-stdout><bash-stderr>Stopped by you</bash-stderr>",
+        ),
+        (
+            "long",
+            long,
+            "<bash-input>seq 200</bash-input>\n<bash-stdout>… 120 earlier lines left out\n121\n",
+        ),
+    ];
+    for (name, run, want) in cases {
+        let got = run.bash_text();
+        assert!(got.starts_with(want), "{name}: {got}");
+    }
+}
+
+/// A message rush sent with commands you ran: the runs, and your words.
+#[test]
+fn sent_runs_are_read_back() {
+    use rush_convo::shellbox::{sent_prompt, sent_runs};
+    let one = finished("ls", "a\n", 0).bash_text();
+    let two = format!("{one}\n\n{}", finished("false", "", 1).bash_text());
+    let cases: [(&str, String, usize, Option<&str>); 5] = [
+        ("alone", one.clone(), 1, Some("! ls")),
+        (
+            "with words",
+            format!("{one}\n\nwhy is a there?"),
+            1,
+            Some("why is a there?"),
+        ),
+        ("two", two, 2, Some("! ls")),
+        (
+            "claude's own !",
+            "<bash-input>ls</bash-input>".into(),
+            0,
+            None,
+        ),
+        ("plain words", "hello".into(), 0, None),
+    ];
+    for (name, text, n, prompt) in cases {
+        let (runs, _) = sent_runs(&text);
+        assert_eq!(runs.len(), n, "{name}");
+        assert_eq!(sent_prompt(&text).as_deref(), prompt, "{name}");
+    }
+    let (runs, _) = sent_runs(&format!(
+        "{one}\n\n{}",
+        finished("false", "", 1).bash_text()
+    ));
+    assert_eq!(runs[0].command, "ls");
+    assert_eq!(runs[0].stdout, "a");
+    assert_eq!(runs[1].stderr, "Exit code 1");
+}
+
+/// A background run while it runs is one row: its command, ✕ stop and
+/// whether it goes to the agent when done; no box.
+#[test]
+fn a_background_run_is_a_row() {
+    let s = session(REPLY);
+    let r = block_ref(1, 0, 0);
+    let mut run = ShellRun::new(
+        "rm ~/Desktop/DeveloperIDApplication.p12",
+        "/work/app",
+        at(10),
+    );
+    run.background = true;
+    let got = draw(&s, &opts("", &[(&r, run.clone())], at(20)));
+    assert!(got.contains("◐ $ rm ~/Desktop/"), "{got}");
+    assert!(got.contains("✕ stop · ☐ send when done"), "{got}");
+    assert!(!got.contains("shell · "), "{got}");
+    run.send_done = true;
+    let got = draw(&s, &opts("", &[(&r, run.clone())], at(20)));
+    assert!(got.contains("☑ send when done"), "{got}");
+    // Once it ends it's a box again.
+    run.push("done\n");
+    run.finish(Some(0), at(30));
+    let got = draw(&s, &opts("", &[(&r, run)], at(40)));
+    assert!(got.contains("✓ exit 0"), "{got}");
+}
+
+/// A run waiting to go with your next message says so on its foot.
+#[test]
+fn an_attached_run_says_so() {
+    let s = session(REPLY);
+    let r = block_ref(1, 0, 0);
+    let mut run = finished("rm ~/Desktop/DeveloperIDApplication.p12", "removed\n", 0);
+    run.attached = true;
+    let mut o = opts("", &[(&r, run)], at(20));
+    o.width = 120;
+    let got = draw(&s, &o);
+    assert!(got.contains("✓ with your next message"), "{got}");
 }

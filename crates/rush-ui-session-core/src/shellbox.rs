@@ -100,6 +100,8 @@ pub struct Kept {
     /// The boxes whose runs went to the agent, by their ref, while rush
     /// runs: one let go of (✕) and run again still doesn't send itself.
     told: std::collections::HashSet<String>,
+    /// The box whose next run starts in the background (◐ background).
+    bg_next: Option<String>,
 }
 
 /// Every session's runs, by its key.
@@ -531,6 +533,7 @@ pub fn start(m: &mut Model, key: &str, r: &str, script: &str, bang: Option<(u32,
     let block = bang.is_none().then(|| block_of(m, r)).flatten();
     run.edited = block.as_ref().is_some_and(|b| b.script().trim() != script);
     run.asked = block.is_some_and(|b| b.send);
+    run.background = kept(m, key).bg_next.take().as_deref() == Some(r);
     run.told_before = kept(m, key).told.contains(r)
         || run_of(m, key, r).is_some_and(|x| x.told_before || x.told || x.told_summary);
     let proc_ = match fake {
@@ -594,11 +597,28 @@ pub fn start(m: &mut Model, key: &str, r: &str, script: &str, bang: Option<(u32,
 /// how to send it. None when nothing was sent.
 fn send_itself(m: &mut Model, key: &str, r: &str, at: Ms) -> Option<Out> {
     let run = run_of(m, key, r)?;
+    let open = m.session.as_ref().is_some_and(|v| v.key == key);
+    let late = m.now - at > LATE;
+    // A background run you asked to send when done goes however long,
+    // as → send would send it, but only to an agent rush runs now.
+    if run.send_done && !run.told && !run.lost && !late {
+        let text = out_text(m, key, &run);
+        let (o, went) = super::keys::send_out(m, key, &text, None);
+        if !went {
+            if open {
+                m.flash("done · s sends it (the agent isn't running now)");
+            }
+            return None;
+        }
+        change(m, key, r, |x| x.told = true);
+        kept(m, key).told.insert(r.to_string());
+        save(m, key);
+        m.flash("done · sent to the agent");
+        return Some(o);
+    }
     if run.bang || run.stopped || run.lost {
         return None;
     }
-    let open = m.session.as_ref().is_some_and(|v| v.key == key);
-    let late = m.now - at > LATE;
     if !run.sends_itself() || late {
         if open && !late {
             let why = if run.asked && !run.edited && !run.told_before && !run.short_enough() {
@@ -616,7 +636,8 @@ fn send_itself(m: &mut Model, key: &str, r: &str, at: Ms) -> Option<Out> {
         }
         return None;
     }
-    let (o, went) = super::keys::send_out(m, key, &run.send_text(), None);
+    let text = out_text(m, key, &run);
+    let (o, went) = super::keys::send_out(m, key, &text, None);
     if !went {
         if open {
             m.flash("the agent asked for it · s sends it (it isn't running now)");
@@ -823,6 +844,48 @@ pub fn again(m: &mut Model, key: &str, r: &str) -> Out {
     start(m, key, r, &script, bang)
 }
 
+/// ◐ background (b): box r's commands run as one row with a clock until
+/// they end, the box back then; w (or its ☐) has the output go to the
+/// agent when they're done. Rust-only.
+pub fn background(m: &mut Model, key: &str, r: &str) -> Out {
+    let script = match run_of(m, key, r) {
+        Some(x) if x.running() => {
+            m.flash_err("it's already running");
+            return Out::Draw;
+        }
+        Some(x) => match block_script(m, r) {
+            Some(s) if !x.edited => s,
+            _ => x.command.clone(),
+        },
+        None => match block_script(m, r) {
+            Some(s) => s,
+            None => return Out::Idle,
+        },
+    };
+    let bang = run_of(m, key, r).and_then(|x| x.bang.then_some((x.turn, x.after)));
+    kept(m, key).bg_next = Some(r.to_string());
+    let o = start(m, key, r, &script, bang);
+    kept(m, key).bg_next = None;
+    o
+}
+
+/// ☐ send when done (w), on a background run: its output goes to the
+/// agent as → send would send it once it ends; again takes that back.
+pub fn send_done(m: &mut Model, key: &str, r: &str) -> Out {
+    let Some(run) = run_of(m, key, r) else {
+        return Out::Idle;
+    };
+    let on = !run.send_done;
+    change(m, key, r, |x| x.send_done = on);
+    save(m, key);
+    m.flash(if on {
+        "goes to the agent when it's done"
+    } else {
+        "stays with you when it's done"
+    });
+    Out::Draw
+}
+
 /// What box r's editor starts with: what it last ran, or its block's
 /// commands as the agent wrote them.
 fn command_now(m: &mut Model, key: &str, r: &str) -> Option<String> {
@@ -946,6 +1009,21 @@ fn tell(m: &mut Model, key: &str, r: &str, text: String, summary: bool) -> Out {
     o
 }
 
+/// What run goes to session key's agent as: to a Claude agent, as
+/// Claude Code writes a command you ran with `!` (ShellRun::bash_text),
+/// which it reads as one and rush draws as one; to any other, "I ran
+/// `cmd` (exit 0):" and its output (ShellRun::send_text).
+pub fn out_text(m: &Model, key: &str, run: &ShellRun) -> String {
+    if super::agent(m, key).is_some_and(|a| a.kind.as_str() == CLAUDE) {
+        run.bash_text()
+    } else {
+        run.send_text()
+    }
+}
+
+/// The adapter kind of Claude Code's agents (rush_claude::KIND).
+const CLAUDE: &str = "claude";
+
 /// → send (s): run r's command, code and the end of its output go to the
 /// agent at once, as a message you sent.
 pub fn send(m: &mut Model, key: &str, r: &str) -> Out {
@@ -956,7 +1034,62 @@ pub fn send(m: &mut Model, key: &str, r: &str) -> Out {
         m.flash_err("it's still running · send it once it's done");
         return Out::Draw;
     }
-    tell(m, key, r, run.send_text(), false)
+    if run.attached {
+        change(m, key, r, |x| x.attached = false);
+    }
+    let text = out_text(m, key, &run);
+    tell(m, key, r, text, false)
+}
+
+/// The foot's "+ with my next message" (a): run r's output waits to go
+/// with the next message you send, in front of your words, the agent not
+/// asked to answer it before; again takes it off. Rust-only.
+pub fn attach(m: &mut Model, key: &str, r: &str) -> Out {
+    let Some(run) = run_of(m, key, r) else {
+        return Out::Idle;
+    };
+    if run.running() {
+        m.flash_err("it's still running · attach it once it's done");
+        return Out::Draw;
+    }
+    let on = !run.attached;
+    change(m, key, r, |x| x.attached = on);
+    save(m, key);
+    m.flash(if on {
+        "goes with your next message"
+    } else {
+        "won't go with your next message"
+    });
+    Out::Draw
+}
+
+/// The text you're sending to session key's agent with the runs waiting
+/// to go with it (attach) in front, each as out_text says, oldest first;
+/// they're marked sent. text as it is when none wait.
+pub fn with_attached(m: &mut Model, key: &str, text: String) -> String {
+    let mut waiting: Vec<(String, Arc<ShellRun>)> = kept(m, key)
+        .runs
+        .iter()
+        .filter(|(_, x)| x.attached && !x.running())
+        .map(|(r, x)| (r.clone(), x.clone()))
+        .collect();
+    if waiting.is_empty() {
+        return text;
+    }
+    waiting.sort_by_key(|(_, x)| x.start);
+    let mut parts: Vec<String> = waiting.iter().map(|(_, x)| out_text(m, key, x)).collect();
+    if !text.trim().is_empty() {
+        parts.push(text);
+    }
+    for (r, _) in &waiting {
+        change(m, key, r, |x| {
+            x.attached = false;
+            x.told = true;
+        });
+        kept(m, key).told.insert(r.clone());
+    }
+    save(m, key);
+    parts.join("\n\n")
 }
 
 /// ≈ summary (m): a quick model sums run r up, off the UI thread, and the
@@ -1242,6 +1375,9 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         "enter" => enter(m, &key, &r),
         "c" => copy(m, &key, &r),
         "e" if !running => edit(m, &key, &r),
+        "b" if !running => background(m, &key, &r),
+        "a" if done => attach(m, &key, &r),
+        "w" if running => send_done(m, &key, &r),
         "r" if done => again(m, &key, &r),
         "s" if done => send(m, &key, &r),
         "d" if done => draft(m, &key, &r),
@@ -1308,6 +1444,9 @@ pub fn click(m: &mut Model, key: &str, url: &str) -> Option<Out> {
         "summary" => summary(m, key, r),
         "edit" => edit(m, key, r),
         "clear" => clear(m, key, r),
+        "background" => background(m, key, r),
+        "attach" => attach(m, key, r),
+        "senddone" => send_done(m, key, r),
         _ => Out::Pass,
     })
 }
@@ -1339,7 +1478,15 @@ pub fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Option<Line> {
     BoxRef::parse(picked)?;
     let running = kept(m, key).procs.contains_key(picked);
     let done = !running && run_of(m, key, picked).is_some();
-    let keys: &[(&str, &str)] = if running {
+    let bg = running && run_of(m, key, picked).is_some_and(|x| x.background);
+    let keys: &[(&str, &str)] = if bg {
+        &[
+            ("x", "stop it"),
+            ("w", "send when done"),
+            ("c", "copy"),
+            ("esc", "back to message"),
+        ]
+    } else if running {
         &[
             ("x", "stop it"),
             ("k", "skip the command running"),
@@ -1351,8 +1498,9 @@ pub fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Option<Line> {
     } else if done {
         &[
             ("s", "send to agent"),
-            ("d", "draft it first"),
             ("m", "summarise and send"),
+            ("a", "with my next message"),
+            ("d", "draft it first"),
             ("r", "run again"),
             ("e", "edit and run"),
             ("enter", "all it wrote"),
@@ -1363,6 +1511,7 @@ pub fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Option<Line> {
     } else {
         &[
             ("enter", "run it here"),
+            ("b", "in the background"),
             ("e", "edit it first"),
             ("c", "copy"),
             ("↑↓", "pick"),
