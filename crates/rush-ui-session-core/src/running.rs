@@ -19,7 +19,7 @@ use rush_core::time::Ms;
 use super::dock::{picked1, spread};
 use super::paint::{dim, faint, plural};
 use super::side::side_head;
-use super::subname::{sub_mark, sub_name, sub_tag, sub_word};
+use super::subname::{sub_mark, sub_name, sub_name_width, sub_tag, sub_word};
 use super::subs::{DOCK_RUNS_SHOWN, DoneRun, Runs, jobs_of, loose_jobs};
 use super::workflow::{DockFlow, dock_flows, flow_row, round_s, workflow_now, workflow_of};
 use super::{conn, core, open_key};
@@ -293,20 +293,26 @@ pub fn running_preview(
             let right = line([dim(facts.join(" · ")), plain("  ")]);
             let kind = sub_kind(c, sa);
             let tag = sub_tag(sa, c.r.stats.get(&sa.id), &kind, c.kind);
-            let mut left = line([plain(lead), spin_of(c.reg, &kind, c.tick + i), plain(" ")]);
-            join(&mut left, sub_name(sa, &tag, (w / 2).clamp(16, 36), TEXT));
+            let head = line([plain(lead), spin_of(c.reg, &kind, c.tick + i), plain(" ")]);
+            let mut rest = Line::new();
             let q = (c.queued)(&sa.id);
             if q > 0 {
-                left.spans.push(plain(" "));
-                left.spans.push(sp(format!("✉{q}"), QUEUE));
+                rest.spans.push(plain(" "));
+                rest.spans.push(sp(format!("✉{q}"), QUEUE));
             }
-            left.spans.push(plain("  "));
-            left.spans.push(sp("›", ORANGE));
-            left.spans.push(plain(" "));
-            join(&mut left, doing);
-            join(&mut left, trail);
-            let keep = (w as isize - right.width() as isize - 2).max(20) as usize;
-            let mut top = spread(rush_draw::truncate_line(&left, keep, "…"), right, w);
+            rest.spans.push(plain("  "));
+            rest.spans.push(sp("›", ORANGE));
+            rest.spans.push(plain(" "));
+            join(&mut rest, doing);
+            join(&mut rest, trail);
+            let name = |nw: usize| sub_name(sa, &tag, nw, TEXT);
+            let queue_w = if q > 0 {
+                rush_core::text::width(&format!(" ✉{q}"))
+            } else {
+                0
+            };
+            let natural = sub_name_width(sa, &tag);
+            let mut top = run_line(head, &name, natural, rest, queue_w, right, w);
             if c.sel == format!("run:{}", sa.id) {
                 top = picked1(top, w, c.focus);
             }
@@ -352,17 +358,17 @@ pub fn running_preview(
         }
         facts.push(format!("{} ago", dur(round_s(c.now - d.at))));
         let tag = sub_tag(&d.sa, c.r.stats.get(&d.sa.id), &kind, c.kind);
-        let mut left = line([
+        let head = line([
             plain("  "),
             sub_mark(c.reg, &kind, &st, false, 0),
             plain(" "),
         ]);
-        join(&mut left, sub_name(&d.sa, &tag, (w / 2).clamp(16, 36), SUB));
-        left.spans.push(plain("  "));
-        left.spans.push(sub_word(&st, false));
+        let rest = line([plain("  "), sub_word(&st, false)]);
         let right = line([dim(facts.join(" · ")), plain("  ")]);
-        let keep = (w as isize - right.width() as isize - 2).max(20) as usize;
-        let mut row = spread(rush_draw::truncate_line(&left, keep, "…"), right, w);
+        let name = |nw: usize| sub_name(&d.sa, &tag, nw, SUB);
+        let natural = sub_name_width(&d.sa, &tag);
+        let word = rest.width();
+        let mut row = run_line(head, &name, natural, rest, word, right, w);
         if c.sel == format!("run:{}", d.sa.id) {
             row = picked1(row, w, c.focus);
         }
@@ -370,6 +376,37 @@ pub fn running_preview(
         refs.push(format!("run:{}", d.sa.id));
     }
     (out, refs)
+}
+
+/// A run's row w wide: head (its lead and mark), its name laid out by
+/// name in the cells given, natural being all it wants, then rest, and
+/// its facts right. The name has the row before the facts: it's whole
+/// where it fits, and the facts show only where they fit beside it, else
+/// they go rather than both being cut; what's left of rest after the
+/// name, keep cells of it kept (its ✉, its word), comes last
+/// (runningPreview cut the name to half the row and the facts after;
+/// Rust-only, as the column beside the conversation is narrow).
+fn run_line(
+    head: Line,
+    name: &dyn Fn(usize) -> Line,
+    natural: usize,
+    rest: Line,
+    keep: usize,
+    right: Line,
+    w: usize,
+) -> Line {
+    let room = w.saturating_sub(head.width() + keep);
+    let nw = natural.min(room);
+    let rw = right.width();
+    let facts = rw > 0 && head.width() + nw + keep + 2 + rw <= w;
+    let mut left = head;
+    join(&mut left, name(nw));
+    join(&mut left, rest);
+    if facts {
+        spread(rush_draw::truncate_line(&left, w - rw - 2, "…"), right, w)
+    } else {
+        fit(rush_draw::truncate_line(&left, w, "…"), w)
+    }
 }
 
 /// The agent run sa is: a spawned one's own, else the session's

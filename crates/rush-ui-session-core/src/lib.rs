@@ -160,6 +160,9 @@ pub fn register(x: &mut Ext) {
     // A click anywhere on it first drops the column's keys and the text
     // dragged over, then goes on.
     x.mouse.push(keys::click_drops);
+    // The column's left edge, held, is dragged before anything under it
+    // has the pointer.
+    x.mouse.push(side::edge_mouse);
     x.mouse.push(rush_ui_plugin_ui::views::beside::mouse);
     x.mouse.push(subview::mouse);
     x.mouse.push(keys::mouse);
@@ -343,6 +346,11 @@ pub struct Conn {
     /// The column's row the arrow keys have picked (the first row of the
     /// item), while focus is in the column; None when it is not.
     pub side_pick: Option<usize>,
+    /// The column's left edge, held by the mouse (side::edge_mouse).
+    pub side_drag: Option<side::Drag>,
+    /// When the column's edge was last clicked without a drag, for a
+    /// double click; 0 for not lately.
+    pub side_tap: Ms,
     pub q_shown: (usize, usize),
     pub out: Outbox,
     /// When the box was last wiped: its hints say how to bring it back.

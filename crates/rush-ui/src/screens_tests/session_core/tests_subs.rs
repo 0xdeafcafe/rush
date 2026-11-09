@@ -650,3 +650,44 @@ fn running_preview_pick_past_runs() {
         assert!(out.contains(w), "missing {w:?} in\n{out}");
     }
 }
+
+/// In a row as narrow as the column beside the conversation, a run's
+/// name has the row before its facts: whole where it fits, and the facts
+/// go where they won't fit beside it, rather than both being cut ("✶
+/// Build Emer… · 0…"). Wide, both show as ever.
+#[test]
+fn a_runs_name_before_its_facts() {
+    let s = Session::new();
+    let run = |d: &str| {
+        let mut r = Runs {
+            subs: vec![Subagent {
+                id: "a1".into(),
+                typ: "Explore".into(),
+                description: d.into(),
+                path: "/x/agent-a1.jsonl".into(),
+                modified: NOW,
+                ..Subagent::default()
+            }],
+            follow: follower(),
+            ..Runs::default()
+        };
+        r.stats.insert("a1".into(), stat_of(&DOCK_LINES, &[]));
+        r
+    };
+    let row_of = |out: &str| out.lines().nth(1).expect("its row").to_string();
+    let mut r = run("Build Emergency Plan");
+    let row = row_of(&preview(&s, &mut r, "", 43).0);
+    assert!(row.contains("Build Emergency Plan · Explore"), "{row:?}");
+    assert!(!row.contains("steps"), "the facts were kept: {row:?}");
+    let row = row_of(&preview(&s, &mut r, "", 100).0);
+    assert!(
+        row.contains("Build Emergency Plan · Explore") && row.contains("2 steps"),
+        "{row:?}"
+    );
+
+    // Longer than the row: cut where the row ends, and no facts.
+    let mut r = run("Build the emergency rollback plan for the release train");
+    let row = row_of(&preview(&s, &mut r, "", 43).0);
+    assert!(row.contains("Build the emergency rollback"), "{row:?}");
+    assert!(!row.contains("steps"), "{row:?}");
+}

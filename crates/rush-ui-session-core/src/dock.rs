@@ -145,16 +145,12 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     super::agentrows::sync(m, &key);
     let in_panel = rush_ui_plugin_ui::views::beside::subs_shown_in_panel(m, &key, w);
     let sw = super::side::column_width(m, &key, w);
-    let runs = super::running::blocks(
-        m,
-        &key,
-        if sw > 0 {
-            super::side::text_width(sw)
-        } else {
-            w - 1
-        },
-        in_panel,
-    );
+    let run_w = if sw > 0 {
+        super::side::text_width_with(sw, m.cfg.column_width)
+    } else {
+        w - 1
+    };
+    let runs = super::running::blocks(m, &key, run_w, in_panel);
     let mut run_rows = (0, Vec::new());
     if sw > 0 {
         conn(m, &key).side_runs = runs;
@@ -1023,6 +1019,12 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
         // Said last of all but the way back, so it's the first to go when
         // the row is too narrow.
         back.insert(back.len() - 1, (preset_key.as_str(), "conversation view"));
+    }
+    // With nothing typed, alt+←/→ make the column beside the text
+    // narrower or wider (its edge drags too): said after the view's key,
+    // so it goes first of all when the row is too narrow (Rust-only).
+    if view == "conversation" && !st.typed && !conn(m, key).side.rows.is_empty() {
+        back.insert(back.len() - 1, ("alt+←→", "the side's width"));
     }
     few_keys(w, 3, &pairs, &back)
 }

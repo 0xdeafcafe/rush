@@ -55,5 +55,16 @@ pub fn side_room(w: usize) -> usize {
 /// column is still a card, its ground filling it, so its parts read
 /// together rather than spread across the room.
 pub fn text_width(sw: usize) -> usize {
-    sw.saturating_sub(1).min(79)
+    text_width_with(sw, 0)
+}
+
+/// text_width, the column's width being one you set (pref, as
+/// side_width_with's): then its rows are as wide as it, the card no wider
+/// than you asked for, so widening it gives its rows the room (Rust-only).
+pub fn text_width_with(sw: usize, pref: i64) -> usize {
+    if pref > 0 {
+        sw.saturating_sub(1)
+    } else {
+        sw.saturating_sub(1).min(79)
+    }
 }

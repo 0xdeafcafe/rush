@@ -37,7 +37,9 @@ use super::paint::{cut, dim, faint, plural};
 use super::{conn, open_key};
 use crate::frame::{Out, Press};
 use crate::model::Model;
-pub use crate::sidecol::{VIEWS_REF, side_head, side_width, side_width_with, text_width};
+pub use crate::sidecol::{
+    VIEWS_REF, side_head, side_width, side_width_with, text_width, text_width_with,
+};
 use crate::style::*;
 
 /// A click on a task row in the column opens the Tasks view.
@@ -364,8 +366,23 @@ pub fn column_width(m: &mut Model, key: &str, w: usize) -> usize {
     if super::views::view_name(m, key) != "conversation" {
         return 0;
     }
+    room_beside(m, key, w).0
+}
+
+/// The column's width and the most it could be, text w wide: none while
+/// the session's views stand open in its place. They take its room, and
+/// a column squeezed into what's left of a very wide screen (no map
+/// beside it) would stand at its least, 44, left of them, the room past
+/// the text cut in two (views_beside; Rust-only).
+fn room_beside(m: &mut Model, key: &str, w: usize) -> (usize, usize) {
     let views = rush_ui_plugin_ui::views::beside::views_beside(m, key, w).2;
-    side_width_with(w - views, m.cfg.column_width)
+    if views > rush_ui_plugin_ui::views::panel::VIEWS_STRIP {
+        return (0, 0);
+    }
+    (
+        side_width_with(w - views, m.cfg.column_width),
+        crate::sidecol::side_room(w - views),
+    )
 }
 
 /// alt+← and alt+→ (or ctrl, where ⌥ is no key) in a Session (the box empty) make the column beside
@@ -396,11 +413,100 @@ pub fn resize_key(m: &mut Model, key: &str, k: &Press) -> Out {
     } else {
         cur.saturating_sub(2).max(crate::sidecol::SIDE_MIN)
     };
+    keep_width(m, to);
+    Out::Draw
+}
+
+/// Keeps the column to columns wide, in config.json too, and says so.
+fn keep_width(m: &mut Model, to: usize) {
     m.cfg.column_width = to as i64;
     rush_ui_base::config::save(m, "couldn't keep the side column's width", move |c| {
         c.column_width = to as i64;
     });
     m.flash(&format!("side column {to} columns"));
+}
+
+/// The column's left edge held by the mouse: the column's width then
+/// (it keeps to the right, so only its left edge moves), where it was
+/// pressed, and whether it has moved since.
+#[derive(Clone, Copy, Debug)]
+pub struct Drag {
+    pub w: usize,
+    pub at: (usize, usize),
+    pub moved: bool,
+}
+
+/// Whether screen cell (x, y) is on the column's left edge: its ▌, or
+/// the blank cell before it, on a row it was drawn on.
+pub fn on_edge(side: &Side, x: usize, y: usize) -> bool {
+    side.shown > 0
+        && side.w > 0
+        && (side.y..side.y + side.shown).contains(&y)
+        && (x == side.x || x + 1 == side.x)
+}
+
+/// How soon a second click on the column's edge makes it a double one.
+const DOUBLE_CLICK: Ms = 500;
+
+/// The mouse on the column's left edge (Rust-only; as the list's edge
+/// is dragged, split.rs): pressed there, the edge follows the pointer,
+/// the column between its least, 44, and all the room left of the text,
+/// its width said as it goes; let go, the width is kept as alt+←/→ keep
+/// it. Clicked twice, the column is rush's own width again: a width kept
+/// is in columns, so one set on a narrow screen stays that narrow on a
+/// wide one.
+pub fn edge_mouse(m: &mut Model, e: &crate::frame::Mouse) -> Out {
+    use rush_draw::{Button, MouseKind};
+    let Some(key) = open_key(m) else {
+        return Out::Pass;
+    };
+    let (x, y) = (e.x as usize, e.y as usize);
+    if let Some(mut d) = conn(m, &key).side_drag {
+        if let MouseKind::Drag(Button::Left) = e.kind {
+            let room = conn(m, &key).side.room.max(crate::sidecol::SIDE_MIN);
+            // As many columns wider as the pointer is left of the press.
+            let to = (d.w as isize + d.at.0 as isize - x as isize)
+                .clamp(crate::sidecol::SIDE_MIN as isize, room as isize)
+                as usize;
+            d.moved = d.moved || x != d.at.0;
+            conn(m, &key).side_drag = Some(d);
+            if d.moved {
+                m.cfg.column_width = to as i64;
+                m.flash(&format!("side column {to} columns · release to keep"));
+            }
+            return Out::Draw;
+        }
+        conn(m, &key).side_drag = None;
+        if d.moved {
+            let to = m.cfg.column_width.max(0) as usize;
+            keep_width(m, to);
+        } else {
+            conn(m, &key).side_tap = m.now;
+        }
+        return Out::Draw;
+    }
+    if m.session.is_none() || m.confirm.is_some() || m.sheet.is_some() || m.on_place() {
+        return Out::Pass;
+    }
+    if e.kind != MouseKind::Down(Button::Left) || !on_edge(&conn(m, &key).side, x, y) {
+        return Out::Pass;
+    }
+    // A second click on the edge, quickly: rush's own width again.
+    let tap = std::mem::take(&mut conn(m, &key).side_tap);
+    if tap > 0 && m.now - tap <= DOUBLE_CLICK {
+        m.cfg.column_width = 0;
+        rush_ui_base::config::save(m, "couldn't keep the side column's width", |c| {
+            c.column_width = 0;
+        });
+        m.flash("side column back to rush's own width");
+        return Out::Draw;
+    }
+    let w = conn(m, &key).side.w;
+    conn(m, &key).side_drag = Some(Drag {
+        w,
+        at: (x, y),
+        moved: false,
+    });
     Out::Draw
 }
 
@@ -412,11 +518,10 @@ pub fn resize_key(m: &mut Model, key: &str, k: &Press) -> Out {
 /// there's room. Returns whether the tasks went in it.
 pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
     // The room is right of the text, left of any views beside it.
-    let views = rush_ui_plugin_ui::views::beside::views_beside(m, key, w).2;
-    let sw = side_width_with(w - views, m.cfg.column_width);
+    let (sw, room) = room_beside(m, key, w);
     let mut side = Side {
         w: sw,
-        room: crate::sidecol::side_room(w - views),
+        room,
         ..Side::default()
     };
     let runs = std::mem::take(&mut conn(m, key).side_runs);
@@ -424,7 +529,7 @@ pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
         conn(m, key).side = side;
         return false;
     }
-    let tw = text_width(sw);
+    let tw = text_width_with(sw, m.cfg.column_width);
     let part = |side: &mut Side, edge, rows: Vec<Line>, refs: Vec<String>| {
         if rows.is_empty() {
             return;
@@ -863,11 +968,15 @@ mod tests {
         }
     }
 
-    /// However wide the column, its rows are laid out 79 wide at most.
+    /// However wide rush's own column, its rows are laid out 79 wide at
+    /// most; at a width you set, as wide as the column.
     #[test]
     fn rows_readable_in_a_wide_column() {
         for (sw, want) in [(44, 43), (80, 79), (140, 79)] {
             assert_eq!(text_width(sw), want, "{sw}");
+        }
+        for (sw, want) in [(44, 43), (80, 79), (140, 139)] {
+            assert_eq!(text_width_with(sw, sw as i64), want, "{sw} set");
         }
     }
 }
