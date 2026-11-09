@@ -140,8 +140,7 @@ pub fn savings(store: &Store, q: &Query, events: &[Event]) -> Vec<Saving> {
             if f.account != e.account
                 || f.agent() != agent
                 || (!h.from_session.is_empty() && f.session == h.from_session)
-                || gap < -MATCH_BEFORE
-                || gap > MATCH_AFTER
+                || !(-MATCH_BEFORE..=MATCH_AFTER).contains(&gap)
             {
                 continue;
             }
@@ -203,7 +202,7 @@ pub fn count(n: i64) -> String {
     let s = n.unsigned_abs().to_string();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);
