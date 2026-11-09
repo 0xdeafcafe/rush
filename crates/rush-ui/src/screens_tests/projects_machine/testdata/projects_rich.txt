@@ -387,18 +387,15 @@ HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
                                                                           ● 1 running · – ram · 0% cpu · 3M can go c
 
 ╭─ Projects ─────────────────────────────────────────────────────────────────────────────────────────────────── 2 ─╮
-│ ┃ alpha  /src/alpha · main                                                                                 300M  │
-│ ┃ ├─   main checkout         main                    2 changed                keep                               │
-│ ┃ └─ ✱ fix                   fix                     fix the parser     300M  can go, by hand                    │
+│ ⇡ Pull requests       asking GitHub…                                                                             │
+│ ◌ Temporary           6M                                                                                         │
+│ ⚙ System              0 processes                                                                                │
+│                                                                                                                  │
+│ ┃ alpha  /src/alpha · main · 2 changed                                            300M                           │
+│ ┃ └─ ✱ fix                   fix the parser                                       300M  can go, by hand          │
 │                                                                                                                  │
 │ OTHER FOLDERS  ◇ not a repository ────────────────────────────────────────────────────────────────────────────── │
 │ ┃ ◇ Downloads  /Users/me/Downloads                                                                               │
-│                                                                                                                  │
-│ ⇡ Pull requests       asking GitHub…                                                                             │
-│                                                                                                                  │
-│ NO PROJECT'S ─────────────────────────────────────────────────────────────────────────────────────────────────── │
-│ ◌ Temporary           6M                                                                                         │
-│ ⚙ System              0 processes                                                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 
 ╭─ ◆ alpha ──────────────────────────────────────────────────────────────────────────────────────── 1 working · 2 ─╮
@@ -422,18 +419,15 @@ HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
                                                       ● 1 running · – ram · 0% cpu · 3M can go c
 
 ╭─ Projects ─────────────────────────────────────────────────────────────────────────────── 2 ─╮
-│ ┃ alpha  /src/alpha · main                                                             300M  │
-│ ┃ ├─   main checkout         main                              keep                          │
-│ ┃ └─ ✱ fix                   fix                         300M  can go, by hand               │
+│ ⇡ Pull requests       asking GitHub…                                                         │
+│ ◌ Temporary           6M                                                                     │
+│ ⚙ System              0 processes                                                            │
+│                                                                                              │
+│ ┃ alpha  /src/alpha · main · 2 changed                        300M                           │
+│ ┃ └─ ✱ fix                   fix the parser                   300M  can go, by hand          │
 │                                                                                              │
 │ OTHER FOLDERS  ◇ not a repository ────────────────────────────────────────────────────────── │
 │ ┃ ◇ Downloads  /Users/me/Downloads                                                           │
-│                                                                                              │
-│ ⇡ Pull requests       asking GitHub…                                                         │
-│                                                                                              │
-│ NO PROJECT'S ─────────────────────────────────────────────────────────────────────────────── │
-│ ◌ Temporary           6M                                                                     │
-│ ⚙ System              0 processes                                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
 
 ╭─ ◆ alpha ──────────────────────────────────────────────────────────────────── 1 working · 2 ─╮

@@ -42,16 +42,13 @@ HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
                                                                                         ● 3 running · – ram · 0% cpu
 
 ╭─ Projects ─────────────────────────────────────────────────────────────────────────────────────────────────── 2 ─╮
-│ ┃ alpha  /src/alpha · asking git…                                                                                │
-│ ┃ └─   main checkout                                 …                        keep                               │
-│ ┃ beta  /src/beta · asking git…                                                                                  │
-│ ┃ └─   main checkout                                 …                        keep                               │
-│                                                                                                                  │
 │ ⇡ Pull requests       asking GitHub…                                                                             │
-│                                                                                                                  │
-│ NO PROJECT'S ─────────────────────────────────────────────────────────────────────────────────────────────────── │
 │ ◌ Temporary           –                                                                                          │
 │ ⚙ System              0 processes                                                                                │
+│                                                                                                                  │
+│ ┃ alpha  /src/alpha · asking git…                                                                                │
+│                                                                                                                  │
+│ ┃ beta  /src/beta · asking git…                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 
 ╭─ ◆ alpha ──────────────────────────────────────────────────────────────────────────────────────── 2 working · 2 ─╮

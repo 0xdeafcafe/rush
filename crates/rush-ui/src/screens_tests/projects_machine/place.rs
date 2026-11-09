@@ -768,3 +768,90 @@ fn clean_up_is_suggested_once_sizes_are_in() {
     );
     assert_eq!(said(&m).len(), 1, "once a day");
 }
+
+/// rich's alpha with three subagent worktrees beside its own.
+fn with_subagents(w: usize) -> Model {
+    let mut m = rich(w, Cfg::default());
+    let d = m.kept::<Data>();
+    for n in ["one", "two", "three"] {
+        let mut t = Worktree::default();
+        t.path = format!("/src/alpha/.claude/worktrees/agent-{n}");
+        t.repo = "/src/alpha".into();
+        t.branch = format!("worktree-agent-{n}");
+        t.made = rush_fleet::MADE_BY_SUBAGENT;
+        t.size = 10 << 20;
+        t.checked = NOW;
+        d.wts.push(t);
+    }
+    m
+}
+
+fn frame(m: &mut Model) -> String {
+    m.frame()
+        .iter()
+        .map(Line::plain)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The Projects box alone, cut from beside what's picked.
+fn tree(m: &mut Model) -> String {
+    let f = frame(m);
+    let top = f.lines().find(|l| l.contains("╭─ Projects")).unwrap();
+    let n = top.chars().position(|c| c == '╮').unwrap() + 1;
+    f.lines()
+        .map(|l| l.chars().take(n).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn subagent_worktrees_fold_into_one_row() {
+    let mut m = with_subagents(160);
+    let f = tree(&mut m);
+    assert!(f.contains("▸ 3 subagent worktrees"), "{f}");
+    assert!(f.contains("agent-one · agent-three"), "{f}");
+    assert!(!f.contains("a subagent's"), "{f}");
+    // Its own worktree is named by its branch, the main checkout's state
+    // is the heading's, and nothing says it's kept.
+    assert!(!f.contains("main checkout       "), "{f}");
+    assert!(f.contains("alpha  /src/alpha · main · 2 changed"), "{f}");
+    for quiet in ["  keep", "in use"] {
+        assert!(!f.contains(quiet), "{quiet}: {f}");
+    }
+
+    rush_ui_projects_machine::pick_in_projects(&mut m, "f/src/alpha");
+    assert!(hint(&mut m).contains("→ unfold"));
+    press(&mut m, "right");
+    let f = tree(&mut m);
+    assert!(f.contains("▾ 3 subagent worktrees"), "{f}");
+    for n in ["one", "two", "three"] {
+        assert!(f.contains(&format!("worktree-agent-{n}")), "{f}");
+    }
+    assert!(hint(&mut m).contains("← fold"));
+    // ← on a worktree inside folds it again, the cursor back on the fold.
+    press(&mut m, "down");
+    assert!(press(&mut m, "left") != Out::Close);
+    let f = tree(&mut m);
+    assert!(f.contains("▸ 3 subagent worktrees"), "{f}");
+    assert!(hint(&mut m).contains("→ unfold"));
+}
+
+#[test]
+fn the_tree_sits_beside_its_pick_when_wide() {
+    for (w, beside) in [(160, true), (129, false)] {
+        let mut m = with_subagents(w);
+        let f = frame(&mut m);
+        let top = f.lines().find(|l| l.contains("╭─ Projects")).unwrap();
+        assert_eq!(top.contains("╭─ ◆ alpha"), beside, "{w}: {f}");
+        // Pull requests, Temporary and System come before the projects,
+        // and the first project is picked.
+        let prs = f.find("⇡ Pull requests").unwrap();
+        assert!(prs < f.find("┃ alpha").unwrap(), "{w}: {f}");
+        assert!(f.contains("╭─ ◆ alpha"), "{w}: {f}");
+    }
+    // A worktree's row shows its repository on the right.
+    let mut m = with_subagents(160);
+    rush_ui_projects_machine::pick_in_projects(&mut m, "w/src/alpha/.claude/worktrees/fix");
+    assert!(frame(&mut m).contains("╭─ ◆ alpha"));
+}

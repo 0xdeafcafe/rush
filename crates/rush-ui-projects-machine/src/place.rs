@@ -63,6 +63,7 @@ impl Projects {
             return (rows, i);
         }
         let rows = project_list(m, w);
+        first_project(&rows, &mut self.proj_pos, &mut self.proj_sel);
         let i = pick_row(&rows, &mut self.proj_pos, &mut self.proj_sel);
         (rows, i)
     }
@@ -104,17 +105,29 @@ impl Place for Projects {
         self.take_pick(m);
         let w = w.saturating_sub(2);
         let mut out = vec![summary_bar(m, w), Line::new()];
-        let mut lw = (w * 2 / 5).clamp(64, 84);
+        // The tree is wider than the table, and capped so a row's verdict
+        // sits near its name (Rust-only: Go's rail look always stacked).
+        let mut lw = if data(m).cfg.rail() {
+            (w * 3 / 5).clamp(72, 112)
+        } else {
+            (w * 2 / 5).clamp(64, 84)
+        };
         let mut rw = w.saturating_sub(lw + 1);
-        let mut stack = w < 130;
-        if stack || data(m).cfg.rail() {
-            (lw, rw, stack) = (w, w, true);
+        let stack = w < 130;
+        if stack {
+            (lw, rw) = (w, w);
         }
         let list = project_list(m, lw.saturating_sub(4));
+        first_project(&list, &mut self.proj_pos, &mut self.proj_sel);
         let pick = pick_row(&list, &mut self.proj_pos, &mut self.proj_sel);
+        // A worktree's row, or its subagents' fold, shows its repository.
+        let shown = match pick.map(|i| &list[i]) {
+            Some(r) if !r.owner.is_empty() => format!("p{}", r.owner),
+            _ => self.proj_sel.clone(),
+        };
         // The boxes run to the bottom of the screen, whatever is in them.
         let fill = h.saturating_sub(out.len() + 3);
-        let detail = picked_rows(m, &self.proj_sel, rw.saturating_sub(4));
+        let detail = picked_rows(m, &shown, rw.saturating_sub(4));
         let dpick = if self.proj_in {
             pick_row(&detail, &mut self.in_pos, &mut self.in_sel)
         } else {
@@ -123,7 +136,7 @@ impl Place for Projects {
         let left = draw_rows(&list, pick, lw.saturating_sub(4), !self.proj_in);
         let right = draw_rows(&detail, dpick, rw.saturating_sub(4), self.proj_in);
         let bold = |s: &str| ln([spb(s, TEXT)]);
-        let (title, meta) = match self.proj_sel.as_str() {
+        let (title, meta) = match shown.as_str() {
             PANE_TEMP => (
                 cat(ln([kind_mark(Kind::Temp), plain(" ")]), bold("Temporary")),
                 ln([sp("/tmp and all sessions’ temp work", DIM)]),
@@ -291,6 +304,17 @@ pub fn projects_hint(m: &Model, r: &WorkRow, w: usize) -> Line {
             ]);
             keys_fit(w, &k)
         }
+        What::Fold(key) => {
+            let fold = if d.unfolded.contains(key) {
+                ("←", "fold")
+            } else {
+                ("→", "unfold")
+            };
+            keys_fit(
+                w,
+                &[("↑↓", "move"), fold, ("c", "clean up"), ("esc", "back")],
+            )
+        }
         What::Mem(_) => keys_fit(
             w,
             &[
@@ -308,6 +332,7 @@ impl Projects {
         let (rows, i) = self.cur(m);
         let r = i.map(|i| rows[i].clone()).unwrap_or_default();
         match k.s.as_str() {
+            "left" if !self.proj_in && self.fold_back(m, &rows, &r) => {}
             "esc" | "q" | "left" => {
                 if self.proj_in {
                     self.proj_in = false;
@@ -330,6 +355,12 @@ impl Projects {
                     }
                 }
                 What::Agent(key) => return open_agent(m, key),
+                What::Fold(key) => {
+                    let d = m.kept::<Data>();
+                    if !d.unfolded.remove(key) {
+                        d.unfolded.insert(key.clone());
+                    }
+                }
                 What::Wt(wt) => delete::ask_remove_worktree(m, (**wt).clone()),
                 What::Tmp => delete::ask_clear_scratch(m),
                 What::Temp(key) => scan::open_temp(m, key),
@@ -415,6 +446,39 @@ impl Projects {
             _ => return Out::Pass,
         }
         Out::Draw
+    }
+}
+
+impl Projects {
+    /// ← on an unfolded fold, or on a worktree inside one, folds it and
+    /// puts the cursor on the fold; false when ← isn't that.
+    fn fold_back(&mut self, m: &mut Model, rows: &[WorkRow], r: &WorkRow) -> bool {
+        let key = match &r.what {
+            What::Fold(key) => key.clone(),
+            What::Wt(t) if t.made == rush_fleet::MADE_BY_SUBAGENT => r.owner.clone(),
+            _ => return false,
+        };
+        if !m.kept::<Data>().unfolded.remove(&key) {
+            return false;
+        }
+        let id = fold_id(&key);
+        if let Some(i) = rows.iter().position(|r| r.id == id) {
+            self.proj_pos = i;
+        }
+        self.proj_sel = id;
+        true
+    }
+}
+
+/// With nothing picked yet, the list's first project, not the panes the
+/// tree puts above the projects.
+fn first_project(rows: &[WorkRow], pos: &mut usize, sel: &mut String) {
+    if !sel.is_empty() {
+        return;
+    }
+    if let Some(i) = rows.iter().position(|r| matches!(r.what, What::Proj(_))) {
+        *pos = i;
+        *sel = rows[i].id.clone();
     }
 }
 

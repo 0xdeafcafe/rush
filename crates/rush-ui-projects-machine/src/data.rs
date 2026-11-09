@@ -227,6 +227,9 @@ pub struct Data {
     /// Folders' tops, opened temp work, and sizes of things in it.
     pub peeks: HashMap<String, PathInfo>,
     pub opened: HashSet<String>,
+    /// Repositories whose subagent worktrees are unfolded in the tree, by
+    /// key (Rust-only: the tree folds them into one row).
+    pub unfolded: HashSet<String>,
     pub lists: HashMap<String, (Vec<TempEntry>, Ms)>,
     pub sizes: HashMap<String, i64>,
     /// Each project's memory as last read, by root, and those being read

@@ -137,6 +137,9 @@ pub enum What {
     Pr(Box<PrRow>),
     /// A project's memory: enter reviews it.
     Mem(Box<super::projectmem::MemSummary>),
+    /// A repository's subagent worktrees folded into one row in the tree,
+    /// by the repository's key: → unfolds it, ← folds it again.
+    Fold(String),
 }
 
 /// One line of the Projects page: something to pick, or text.

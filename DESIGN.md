@@ -1222,6 +1222,33 @@ from `watch_machine`'s disk read, in the rush that leads, at most every
   and that the rest waits, and the cleanup session is sent a note
   (queued) to ask the same decisions again for what's left.
 
+## The Projects tree (Rust-only)
+
+In the rail look Projects draws every repository as a tree
+(rush-ui-projects-machine `view.rs` `project_tree`). It differs from
+Go's projecttree.go in these ways, so a machine with many subagent
+worktrees stays readable:
+
+- Pull requests, Temporary and System come first, above the projects.
+  With nothing picked yet, the first project is picked
+  (`place.rs` `first_project`).
+- A repository's heading holds its main checkout's state (branch, how
+  many files changed, how far behind), with `needs a pull` in the
+  verdict column. There is no `main checkout` row.
+- A worktree is named by its branch (its folder's name when it has no
+  branch). Its verdict is said only when there's something to do:
+  `can go`, `can go, by hand`, or `⚠` and what removing it would lose.
+  `in use` and `PR open` leave the column blank.
+- A repository's subagent worktrees fold into one row
+  (`What::Fold`, id `f<repo>`): how many, their branches, their size,
+  how many are working, and how many can go or would lose work. → or
+  enter unfolds it, ← folds it again (also from a worktree inside it).
+  `Data::unfolded` keeps which are open for the rest of the run.
+- At 130 columns or wider the tree sits beside what's picked, as the
+  classic table does, its box 60% of the width (72 to 112 columns) so a
+  verdict stays near its name. A worktree's or fold's row shows its
+  repository on the right. Below 130 columns the boxes stack.
+
 ## The list kept between runs (Rust-only)
 
 rush opens on the list as it last read it (rush-ui `listcache.rs`): each

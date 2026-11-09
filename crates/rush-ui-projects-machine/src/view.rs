@@ -34,9 +34,8 @@ use crate::style::*;
 const PROJ_NAME_W: usize = 22;
 const PROJ_GIT_W: usize = 24;
 const TREE_NAME_W: usize = 22;
-const TREE_BRANCH_W: usize = 24;
 const TREE_SIZE_W: usize = 7;
-const TREE_VERD_W: usize = 34;
+const TREE_VERD_W: usize = 24;
 
 fn base(p: &str) -> &str {
     p.rsplit('/').next().unwrap_or(p)
@@ -770,12 +769,20 @@ pub fn worktree_line(t: &str, st: &GitState, wt: &Worktree, running: usize, w: u
 
 // ---- the tree, in the rail look ----
 
-/// The Projects list as a tree: each repository on an edge, its main
-/// checkout and worktrees hung off it; then the pull requests, Temporary
-/// and System.
+/// The Projects list as a tree: first what's every project's and no
+/// project's (pull requests, Temporary, System), then each repository on
+/// an edge with its worktrees hung off it, its subagents' folded into one
+/// row; then the folders that aren't repositories. Rust-only layout (the
+/// Go tree put the main checkout on its own row, every worktree on one
+/// and the panes last).
 pub fn project_tree(m: &Model, w: usize) -> Vec<WorkRow> {
     let list = projects(m);
     let mut rows = Vec::new();
+    let tail = classic_project_list(m, w);
+    if let Some(i) = tail.iter().position(|r| r.id == PANE_PRS) {
+        rows.extend(tail.into_iter().skip(i).filter(WorkRow::pickable));
+        rows.push(WorkRow::blank());
+    }
     if list.is_empty() {
         rows.push(WorkRow::text(ln([sp(
             "no agent has worked anywhere in the last day",
@@ -790,18 +797,21 @@ pub fn project_tree(m: &Model, w: usize) -> Vec<WorkRow> {
                 "◇ not a repository",
                 w,
             )));
+        } else if i > 0 && p.repo {
+            rows.push(WorkRow::blank());
         }
         rows.extend(project_tree_rows(m, p, w));
-    }
-    let tail = classic_project_list(m, w);
-    if let Some(i) = tail.iter().position(|r| r.id == PANE_PRS) {
-        rows.push(WorkRow::blank());
-        rows.extend(tail.into_iter().skip(i));
     }
     rows
 }
 
-/// One repository's: its heading, its main checkout, then its worktrees.
+/// The id of a repository's folded subagent worktrees' row.
+pub fn fold_id(key: &str) -> String {
+    format!("f{key}")
+}
+
+/// One repository's: its heading with its main checkout's state, then its
+/// worktrees, its subagents' folded into one row unless unfolded.
 fn project_tree_rows(m: &Model, p: &Project, w: usize) -> Vec<WorkRow> {
     let d = data(m);
     let edge = sp("┃", if p.open { ORANGE } else { FAINT });
@@ -816,76 +826,167 @@ fn project_tree_rows(m: &Model, p: &Project, w: usize) -> Vec<WorkRow> {
     head.spans.push(spb(p.title.clone(), TEXT));
     head.spans.push(plain("  "));
     head.spans.push(sp(tildify(&p.key), DIM));
+    let mut verdict = Line::new();
     match f {
         Some(f) if p.repo => {
             head.spans.push(sp(format!(" · {}", f.git.branch), DIM));
+            if f.git.changed > 0 {
+                head.spans.push(sp(" · ", DIM));
+                head.spans
+                    .push(sp(format!("{} changed", f.git.changed), YELLOW));
+            }
             if f.git.behind > 0 {
                 head.spans.push(sp(" · ", DIM));
                 head.spans
                     .push(sp(format!("{} behind", f.git.behind), YELLOW));
+                verdict = ln([sp("needs a pull", YELLOW)]);
             }
         }
         None if p.repo => head.spans.push(sp(" · asking git…", FAINT)),
         _ => {}
     }
-    let mut rt = Line::new();
-    if total > 0 {
-        rt.spans.push(sp(disk(total), DIM));
-    }
-    rt.spans.push(plain(" "));
     let mut rows = vec![WorkRow {
         id: format!("p{}", p.key),
         what: What::Proj(p.key.clone()),
-        line: spread(head, rt, w),
+        line: tree_tail(head, total, verdict, w),
         owner: String::new(),
     }];
     if !p.repo {
         return rows;
     }
-    let n = trees.len() + 1;
-    let branch = |i: usize| if i == n - 1 { "└─" } else { "├─" };
-    let git = f.map(|f| f.git.clone()).unwrap_or_default();
-    let main = match f {
-        None => ln([sp("…", FAINT)]),
-        Some(_) if git.changed > 0 => ln([sp(format!("{} changed", git.changed), YELLOW)]),
-        Some(_) => ln([sp("clean", FAINT)]),
-    };
-    let verdict = if f.is_some() && git.behind > 0 {
-        ln([sp("needs a pull", YELLOW)])
-    } else {
-        ln([sp("keep", FAINT)])
-    };
-    rows.push(WorkRow::text(wt_tree_line(
-        &edge,
-        branch(0),
-        plain(" "),
-        sp("main checkout", DIM),
-        &git.branch,
-        main,
-        0,
-        verdict,
-        w,
-    )));
-    for (i, t) in trees.into_iter().enumerate() {
-        let l = wt_tree_line(
-            &edge,
-            branch(i + 1),
-            tree_mark(m, &t),
-            sp(tree_name(&t), TEXT),
-            &t.branch,
-            tree_what(m, &t),
-            t.size,
-            tree_verdict(&t),
-            w,
-        );
-        rows.push(WorkRow {
-            id: format!("w{}", t.path),
-            owner: p.key.clone(),
-            line: l,
-            what: What::Wt(Box::new(t)),
-        });
+    let (subs, own): (Vec<Worktree>, Vec<Worktree>) =
+        trees.into_iter().partition(|t| t.made == MADE_BY_SUBAGENT);
+    // The subagents' fold sits where they'd sort: after rush's and Claude
+    // Code's, before those made by hand.
+    let mut items: Vec<Option<Worktree>> = Vec::new();
+    let mut folded = subs.is_empty();
+    for t in own {
+        if !folded && t.made == MADE_BY_OTHER {
+            items.push(None);
+            folded = true;
+        }
+        items.push(Some(t));
+    }
+    if !folded {
+        items.push(None);
+    }
+    let n = items.len();
+    let open = d.unfolded.contains(&p.key);
+    for (i, it) in items.into_iter().enumerate() {
+        let last = i == n - 1;
+        let lead = if last { "└─" } else { "├─" };
+        match it {
+            Some(t) => rows.push(tree_row(m, &edge, lead, t, &p.key, w)),
+            None => {
+                rows.push(fold_row(m, &edge, lead, &subs, open, &p.key, w));
+                if open {
+                    let k = subs.len();
+                    for (j, t) in subs.iter().enumerate() {
+                        let lead = format!(
+                            "{}{}",
+                            if last { "   " } else { "│  " },
+                            if j == k - 1 { "└─" } else { "├─" }
+                        );
+                        rows.push(tree_row(m, &edge, &lead, t.clone(), &p.key, w));
+                    }
+                }
+            }
+        }
     }
     rows
+}
+
+/// A worktree's row in the tree.
+fn tree_row(m: &Model, edge: &Span, lead: &str, t: Worktree, owner: &str, w: usize) -> WorkRow {
+    let name = if t.branch.is_empty() {
+        tree_name(&t)
+    } else {
+        t.branch.clone()
+    };
+    let l = wt_tree_line(
+        edge,
+        lead,
+        tree_mark(m, &t),
+        sp(name, TEXT),
+        tree_what(m, &t),
+        t.size,
+        tree_verdict(&t),
+        w,
+    );
+    WorkRow {
+        id: format!("w{}", t.path),
+        owner: owner.to_string(),
+        line: l,
+        what: What::Wt(Box::new(t)),
+    }
+}
+
+/// A repository's subagent worktrees in one row: how many, their branches,
+/// their size, and whether any can go or would lose work.
+fn fold_row(
+    m: &Model,
+    edge: &Span,
+    lead: &str,
+    subs: &[Worktree],
+    open: bool,
+    key: &str,
+    w: usize,
+) -> WorkRow {
+    let n = subs.len();
+    let size: i64 = subs.iter().map(|t| t.size).sum();
+    let (mut go, mut lose, mut working) = (0, 0, 0);
+    for t in subs {
+        match t.verdict().kind {
+            VerdictKind::CanGo => go += 1,
+            VerdictKind::WouldLose => lose += 1,
+            _ => {}
+        }
+        if tree_mark(m, t).text == "✱" {
+            working += 1;
+        }
+    }
+    let mut what = Vec::new();
+    if working > 0 {
+        what.push(ln([sp(format!("{working} working"), ORANGE)]));
+    }
+    if !open {
+        let names: Vec<String> = subs
+            .iter()
+            .map(|t| {
+                let b = if t.branch.is_empty() {
+                    tree_name(t)
+                } else {
+                    t.branch.clone()
+                };
+                let b = b.rsplit('/').next().unwrap_or(&b);
+                b.strip_prefix("worktree-").unwrap_or(b).to_string()
+            })
+            .collect();
+        what.push(ln([sp(names.join(" · "), DIM)]));
+    }
+    let mut verdict = Vec::new();
+    if lose > 0 {
+        verdict.push(ln([sp(format!("⚠ {lose} would lose work"), YELLOW)]));
+    }
+    if go > 0 {
+        verdict.push(ln([sp(format!("{go} can go"), BLUE)]));
+    }
+    let l = wt_tree_line(
+        edge,
+        lead,
+        sp(if open { "▾" } else { "▸" }, SUB),
+        sp(format!("{n} subagent worktree{}", plural(n)), TEXT),
+        joined(what, sp(" · ", DIM)),
+        size,
+        joined(verdict, sp(" · ", DIM)),
+        w,
+    );
+    WorkRow {
+        id: fold_id(key),
+        owner: key.to_string(),
+        line: l,
+        what: What::Fold(key.to_string()),
+    }
 }
 
 /// A repository's worktrees as clean-up's scan found them: rush's own
@@ -989,34 +1090,48 @@ fn tree_what(m: &Model, t: &Worktree) -> Line {
     ln([sp(
         match t.made {
             MADE_BY_SUBAGENT => "a subagent's",
-            MADE_BY_OTHER => "not made by rush",
+            MADE_BY_OTHER => "made by hand",
             _ => "no session in it",
         },
         DIM,
     )])
 }
 
-/// What clean-up may do with a worktree, in a few words.
+/// What clean-up may do with a worktree, in a few words, said only when
+/// there's something to do: kept ones (in use, a pull request open) say
+/// nothing.
 pub fn tree_verdict(t: &Worktree) -> Line {
     let v = t.verdict();
     match v.kind {
-        VerdictKind::KeepInUse => ln([sp("in use", DIM)]),
-        VerdictKind::KeepPrOpen => ln([sp("PR open", DIM)]),
+        VerdictKind::KeepInUse | VerdictKind::KeepPrOpen => Line::new(),
         VerdictKind::CanGo if !t.own => ln([sp("can go, by hand", BLUE)]),
         VerdictKind::CanGo => ln([sp("can go", BLUE)]),
-        VerdictKind::WouldLose => ln([sp(v.reason, YELLOW)]),
+        VerdictKind::WouldLose => ln([sp(format!("⚠ {}", v.reason), YELLOW)]),
     }
 }
 
-/// One line under a repository: branch, mark, name, branch name, what it
+/// left, then size and verdict in their columns at the right of w.
+fn tree_tail(left: Line, size: i64, verdict: Line, w: usize) -> Line {
+    if size <= 0 && verdict.width() == 0 {
+        return fit(left, w);
+    }
+    let sz = if size > 0 { disk(size) } else { String::new() };
+    let mut tail = ln([sp(right(&sz, TREE_SIZE_W), FAINT), plain("  ")]);
+    join(&mut tail, fit(verdict, TREE_VERD_W));
+    let room = w as isize - tail.width() as isize - 1;
+    let mut l = fit(left, room.max(0) as usize);
+    l.spans.push(plain(" "));
+    cat(l, tail)
+}
+
+/// One line under a repository: lead, mark, name (the branch), what it
 /// is, size, verdict.
 #[allow(clippy::too_many_arguments)]
 fn wt_tree_line(
     edge: &Span,
-    branch: &str,
+    lead: &str,
     mark: Span,
     name: Span,
-    git_branch: &str,
     what: Line,
     size: i64,
     verdict: Line,
@@ -1025,20 +1140,13 @@ fn wt_tree_line(
     let mut left = ln([
         edge.clone(),
         plain(" "),
-        sp(branch, FAINT),
+        sp(lead, FAINT),
         plain(" "),
         mark,
         plain(" "),
     ]);
     join(&mut left, fit(ln([name]), TREE_NAME_W));
-    join(&mut left, fit(ln([sp(git_branch, DIM)]), TREE_BRANCH_W));
-    let sz = if size > 0 { disk(size) } else { String::new() };
-    let mut tail = ln([sp(right(&sz, TREE_SIZE_W), FAINT), plain("  ")]);
-    join(&mut tail, fit(verdict, TREE_VERD_W));
-    let room = w as isize - left.width() as isize - tail.width() as isize - 1;
-    let mut l = cat(left, fit(what, room.max(0) as usize));
-    l.spans.push(plain(" "));
-    cat(l, tail)
+    tree_tail(cat(left, what), size, verdict, w)
 }
 
 // ---- Temporary ----
