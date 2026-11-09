@@ -452,6 +452,9 @@ pub struct Info {
     pub started_by: String,
     pub spawned_by: String,
     pub started_from: String,
+    /// The scratch folder its host gave it and everything it runs as
+    /// TMPDIR: its commands' $TMPDIR is drawn as the folder it is.
+    pub temp_dir: String,
 }
 
 /// A subagent of the session, and its conversation: what it edits shows

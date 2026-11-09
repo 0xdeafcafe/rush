@@ -95,6 +95,7 @@ pub fn info_over(says: bool, read: rush_convo::Info, had: rush_convo::Info) -> r
         started_by: or(read.started_by, had.started_by),
         spawned_by: or(read.spawned_by, had.spawned_by),
         started_from: or(read.started_from, had.started_from),
+        temp_dir: or(read.temp_dir, had.temp_dir),
     }
 }
 
