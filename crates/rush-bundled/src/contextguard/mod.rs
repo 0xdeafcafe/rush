@@ -3,12 +3,14 @@
 //! changed since the agent read it, no reading a huge file whole without
 //! a word first, no running a command a fourth time that failed the same
 //! way three times, and a shell command's output squeezed of terminal
-//! codes, progress redraws and repeats. Each is a setting of its own, on
-//! by default. rush gate hook asks it, as it asks search-guard; what it
-//! refuses or squeezes is logged, for rush why and rush events.
-//! Rust-only: Go rush has no context guard.
+//! codes, progress redraws and repeats; and an image read as a smaller
+//! WebP copy, a contact sheet suggested once an agent has looked at many.
+//! Each is a setting of its own, on by default. rush gate hook asks it, as
+//! it asks search-guard; what it refuses, squeezes or shrinks is logged,
+//! for rush why and rush events. Rust-only: Go rush has no context guard.
 
 pub mod hook;
+pub mod images;
 pub mod rules;
 pub mod squeeze;
 
@@ -33,6 +35,11 @@ pub const REREAD_KB: &str = "reread-kb";
 pub const BIG_LINES: &str = "big-read-lines";
 pub const REPEATS: &str = "repeat-after";
 pub const SQUEEZE_LINES: &str = "squeeze-lines";
+/// Images read as a smaller WebP copy, and a contact sheet suggested; the
+/// most tokens a copy costs; images looked at before the suggestion.
+pub const IMAGES: &str = "images";
+pub const IMAGE_TOKENS: &str = "image-tokens";
+pub const SHEET_AFTER: &str = "sheet-after";
 
 /// The choices of each number, as stored, and each one's default
 /// (today's rule).
@@ -40,6 +47,8 @@ pub const REREAD_KB_CHOICES: &[&str] = &["1", "2", "4", "8"];
 pub const BIG_LINES_CHOICES: &[&str] = &["500", "1000", "2000"];
 pub const REPEATS_CHOICES: &[&str] = &["2", "3", "5"];
 pub const SQUEEZE_LINES_CHOICES: &[&str] = &["300", "600", "1200"];
+pub const IMAGE_TOKENS_CHOICES: &[&str] = &["800", "1568", "3000"];
+pub const SHEET_AFTER_CHOICES: &[&str] = &["4", "8", "16"];
 
 /// The context guard's. Its settings are edited in Settings › Usage ›
 /// Context guard; the plugin's own page points there.
@@ -68,7 +77,7 @@ pub fn manifest() -> Manifest {
                 "No re-reading unchanged files",
                 "Refuses an agent's read of a file it already read (the same lines or more) when the file hasn't \
                  changed since and it hasn't edited it; after its context is compacted it may read it again. Files \
-                 under 2 KB (as set) are let through",
+                 under 2 KB (as set) are let through. Images too, but for one it was just shown a smaller copy of",
             ),
             on(
                 BIG_READ,
@@ -119,13 +128,34 @@ pub fn manifest() -> Manifest {
                 "600",
                 "Output longer than this many lines keeps a third of them at each end",
             ),
+            on(
+                IMAGES,
+                "Shrink images agents read",
+                "Points an agent's read of a PNG, JPEG, GIF or large WebP at a WebP copy cut to about 1,568 tokens \
+                 (as set), and says so; reading it again straight after gets the original. After 8 images (as set), \
+                 or several at once, it suggests a contact sheet. Left alone while you have permission rules about reads",
+            ),
+            pick(
+                IMAGE_TOKENS,
+                "Images cost at most",
+                IMAGE_TOKENS_CHOICES,
+                "1568",
+                "The most visual tokens a copy of an image costs; the model itself spends up to 4,784 on a big one",
+            ),
+            pick(
+                SHEET_AFTER,
+                "Suggest a contact sheet after",
+                SHEET_AFTER_CHOICES,
+                "8",
+                "How many images an agent looks at before it's pointed to a contact sheet, and again for every as many more",
+            ),
         ],
         ..crate::manifest(
             NAME,
             "",
             "Keeps agents' context lean from their tool calls: no re-reading files that haven't changed, no \
-             reading huge files whole, no running a command again that failed the same way 3 times, and command \
-             output without colour codes, progress bars and repeats.",
+             reading huge files whole, no running a command again that failed the same way 3 times, command \
+             output without colour codes, progress bars and repeats, and images read as smaller copies.",
             16,
         )
     }
@@ -166,6 +196,13 @@ pub fn rules_of(values: &std::collections::BTreeMap<String, String>) -> Rules {
         repeats: n(REPEATS).map_or(all.repeats, |r| r as u32),
         cap_lines,
         keep_lines: cap_lines / 3,
+        images: on(IMAGES),
+        image_tokens: n(IMAGE_TOKENS)
+            .filter(|n| *n >= 64)
+            .map_or(all.image_tokens, |n| {
+                n.min(u64::from(images::MODEL_TOKENS)) as u32
+            }),
+        sheet_after: n(SHEET_AFTER).map_or(all.sheet_after, |n| n.min(1000) as u32),
     }
 }
 
@@ -183,6 +220,13 @@ pub fn step(input: &[u8]) -> Option<Answer> {
         tmp: std::env::temp_dir(),
         rules,
         clock: local.get(11..19).unwrap_or_default().to_string(),
+        now: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs()),
+        claude_dir: std::env::var_os("CLAUDE_CONFIG_DIR")
+            .filter(|d| !d.is_empty())
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".claude"))),
     };
     hook::step(input, &env)
 }
@@ -229,7 +273,7 @@ mod tests {
             .map(|s| (s.key, s.default))
             .collect();
         assert_eq!(rules_of(&defaults), Rules::ALL, "{defaults:?}");
-        for k in [REREAD, BIG_READ, REPEAT, SQUEEZE] {
+        for k in [REREAD, BIG_READ, REPEAT, SQUEEZE, IMAGES] {
             assert_eq!(defaults[k], "true", "{k}");
         }
     }
@@ -278,7 +322,29 @@ mod tests {
                     ..Rules::ALL
                 },
             ),
+            (
+                v(IMAGE_TOKENS, "800"),
+                Rules {
+                    image_tokens: 800,
+                    ..Rules::ALL
+                },
+            ),
+            (
+                v(SHEET_AFTER, "16"),
+                Rules {
+                    sheet_after: 16,
+                    ..Rules::ALL
+                },
+            ),
+            (
+                v(IMAGES, "false"),
+                Rules {
+                    images: false,
+                    ..Rules::ALL
+                },
+            ),
             // Nonsense reads as the default.
+            (v(IMAGE_TOKENS, "10"), Rules::ALL),
             (v(REPEATS, "0"), Rules::ALL),
             (v(SQUEEZE_LINES, "lots"), Rules::ALL),
         ];

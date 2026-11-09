@@ -246,7 +246,7 @@ mod tests {
             &ts,
             r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
         ));
-        assert_eq!(got, ["show"]);
+        assert_eq!(got, ["show", "contact_sheet"]);
     }
 
     #[test]

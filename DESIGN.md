@@ -1560,7 +1560,7 @@ check, on one page after General (`PAGE_USAGE`, rush-ui-settings
   harness's subagents' cache life, and the two numbers they share (the
   table in "Keeping the prompt cache warm" below). config.json
   `cacheKeep` and `subagentCache`.
-- **Context guard**: the bundled plugin's four rules and their numbers
+- **Context guard**: the bundled plugin's five rules and their numbers
   (the table in "The context guard"). Its own settings, read as the page
   opens (off the UI) and written as you change them, so its hook sees
   them at the next call. While the plugin is off the section's note says
@@ -3214,14 +3214,16 @@ shell (`shellbox::set_fake`), which also keeps nothing on disk.
 
 A bundled plugin, `context-guard` (rush-bundled `contextguard/`), on by
 default, that steps into an agent's tool calls through its hooks to keep
-what goes into its context lean. Four rules, each its own setting, all on
+what goes into its context lean. Five rules, each its own setting, all on
 by default, each with a number you can set (Settings › Usage › Context
 guard; Settings › Plugins › context-guard turns the plugin on or off and
 says where its rules are, not showing them twice). Each step-in is
 logged in the session's events (`hook-denied` with `rule`, `why`,
 `tool`, `path` or `command`; `hook-squeezed` with `before`, `after`,
-`cut`), so `rush why <session>` and `rush events -k hook-denied` show
-what rush did and why.
+`cut`; `hook-shrunk` with `path`, `copy`, `from`, `to`, `before`,
+`after`, `tokens_before`, `tokens_after`; `hook-nudged` with `why`), so
+`rush why <session>` and `rush events -k hook-denied` show what rush did
+and why.
 
 ```
   agent ── Read ──▶ PreToolUse ─┐                     ┌─ deny + why
@@ -3266,6 +3268,9 @@ value its choices don't allow, is today's number:
 | ‧ after | `repeat-after` | 2, 3, 5 in a row | 3 |
 | Trim command output | `squeeze` | on, off | on |
 | ‧ longer than | `squeeze-lines` | 300, 600, 1,200 lines (a third kept at each end) | 600: first and last 200 |
+| Shrink images agents read | `images` | on, off | on |
+| ‧ images cost at most | `image-tokens` | 800, 1,568, 3,000 tokens | 1,568 |
+| ‧ contact sheet after | `sheet-after` | 4, 8, 16 images | 8 |
 
 The numbers that stay constants: a read with no limit covers 2,000 lines
 (Claude Code's Read), a failure's last 12 lines say whether two were the
@@ -3283,8 +3288,13 @@ refused: `context-guard: <path> is unchanged since you read it at
 changed since, one the agent edited since (any Edit, Write, MultiEdit,
 NotebookEdit forgets the read), after a compaction (PreCompact forgets
 that agent's reads; SessionStart `compact` everyone's, `clear` all), for
-a file under 2 KB (refusing costs about what reading does), or for an
-image, PDF or notebook. A read is taken note of after it went through
+a file under 2 KB (refusing costs about what reading does), or for a
+PDF or notebook. An image looked at again, unchanged, is refused too,
+in its own words (`context-guard: <path> is unchanged since you looked
+at it at 14:03:12. The image is still in your context: look back at it
+there rather than paying for it again…`), but not one under 256 visual
+tokens, nor one it was shown a smaller copy of just before (rule 5). A
+read is taken note of after it went through
 (PostToolUse), so one refused by anything else isn't counted. A read
 with no limit covers 2,000 lines (Claude Code's Read), the file's end
 when it has fewer.
@@ -3367,6 +3377,95 @@ bytes / 4):
 | pytest (412 tests, coloured) | 1,755 | 1,397 | 439 | 350 | 20% |
 | a download's progress bar (curl -#) | 80,081 | 80 | 20,021 | 20 | 99.9% |
 
+**5. Images** (`images`). Why: in two days agents read 3,297 PNGs, 1,680
+of them a path read before; one reviewer subagent read 1,126 images in
+188 calls, its context growing from 24k to 300k tokens. An image stays
+in the context and is paid for again with every later request.
+
+How an image is billed, by its pixels and not its bytes, and the
+tiers' limits: see "Images in tool results" (rush-efficiency
+`image.rs`, from platform.claude.com's Vision pages). Here,
+`images::resized` ports the pages' reference resize (`resized_size`) and
+`images::billed` is what the high-resolution tier spends on an image as
+it is; the guard's budget defaults to the standard tier's 1,568 tokens,
+a third of what the high tier spends on a big screenshot. So WebP alone
+saves bytes (the request, the transcript, upload time), not tokens;
+fewer pixels save tokens.
+
+Before a Read of a `.png`, `.jpg`/`.jpeg`, `.gif` or `.webp`, the guard
+makes a lossy WebP copy (libwebp through the `webp` crate, built from
+source, quality 85; `image` 0.25's own WebP encoder is lossless only),
+cut with Catmull-Rom to the largest size within **1,568 tokens** (as
+set; the standard tier's long edge up to that budget, the high tier's
+past it), in `$TMPDIR/rush-images/<hash>.webp` (the agent's scratch
+folder; keyed by the path, size, mtime and budget, so asked again it's
+the same file, not encoded again). It answers PreToolUse with
+`permissionDecision: allow` and `updatedInput` (the call's input with
+`file_path` the copy's), and `additionalContext`: `context-guard: you're
+seeing a smaller copy of <path>: 1372×891 WebP, from 3024×1964 (about
+1,568 tokens instead of 4,760). If you need it at full size, read <path>
+again straight away: that read goes through as it is.` That is the
+opt-out for the agent; the setting is yours. Turned as its EXIF says
+first; an alpha channel kept only where it isn't opaque throughout.
+
+"allow" because, with no decision, auto mode denies a call whose input
+a hook changed (hooks › PreToolUse `updatedInput` in auto mode), and
+Claude Code judges permission rules against the input the hook returns.
+So the guard leaves a read as it is, never rewritten, when that could
+let something through you'd be asked about: while your settings
+(`$CLAUDE_CONFIG_DIR` or `~/.claude`, the project's `.claude/settings`
+and `settings.local`) have a deny or ask rule about `Read`; and for an
+image outside the agent's folder and its scratch folder, unless it runs
+in `auto` or `bypassPermissions` mode.
+
+Left alone, too: an image already within the budget and under 64 KB, a
+WebP within the budget, one whose copy wouldn't save a quarter of its
+bytes, anything that can't be read, decoded (512 MB at most) or encoded:
+the guard never breaks a read; whatever goes wrong, the read goes ahead
+as asked. Logged as `hook-shrunk`.
+
+Contact sheets. `rush contact-sheet [-o out.webp] [--tokens N] <image>…`
+and the rush MCP tool `contact_sheet` (`{images: [absolute paths], out}`;
+it answers with the sheet itself as an image and where it's kept) tile
+up to 48 images onto one WebP within the same budget: a grid of as many
+columns as makes each image biggest (the images' median shape), each
+under a caption of its number and file name (font8x8, twice its size
+when cells are 320 px wide or more; a long name loses its middle), one
+that can't be read saying so. The guard points an agent there, as a
+word beside the read and never a refusal (`hook-nudged`), the first
+time 3 image reads are under way at once, and once it has looked at
+more than **8** images (as set) since its context last started over,
+and again for every 8 more: `context-guard: that's 9 images you've
+looked at in this conversation. Each one stays in your context and is
+sent again with every request. To look over several, put them on one
+contact sheet: mcp__rush__contact_sheet with their paths (or `rush
+contact-sheet <image>…` in a shell) gives one image with each captioned
+by its file name, for about what one screenshot costs. Read an image
+alone when you need its detail.` A read under way 2 minutes is taken as
+never finished.
+
+Codex has no hook before a read (rush gives it no `tool_hook`), so none
+of this reaches it yet; it can run `rush contact-sheet` and the MCP tool
+(`rush mcp-tools`) like any agent.
+
+Measured (`images::tests::measured_on_fixtures`: screenshots drawn by
+the test; tokens as the high-resolution tier bills the original, and
+the copy as sent):
+
+| image | bytes before | after | tokens before | after | tokens saved |
+|---|---|---|---|---|---|
+| Retina terminal, 3024×1964 PNG (to 1372×891) | 625,652 | 257,312 | 4,760 | 1,568 | 67% |
+| web page, 1920×1080 PNG (to 1456×819) | 184,638 | 149,226 | 2,691 | 1,560 | 42% |
+| phone, 1179×2556 PNG (to 723×1568) | 124,644 | 95,022 | 3,956 | 1,456 | 63% |
+| photo, 2000×1500 JPEG (to 1270×952) | 413,544 | 91,824 | 3,888 | 1,564 | 60% |
+| icon, 128×128 PNG (left alone) | 681 | 681 | 25 | 25 | 0 |
+
+The drawn screenshots are flat colour and bitmap text, which PNG
+already packs well, so their bytes fall less than a real screenshot's
+would; the tokens are exact either way, as they follow from the sizes.
+On a standard-tier model (which cuts every image to 1,568 tokens
+itself) the copy saves bytes, not tokens.
+
 ### What rush adds to an agent's context, word for word (Rust-only)
 
 A provider caches the prompt in order: tools, system prompt, then the
@@ -3412,9 +3511,11 @@ view clicked, views gone stale, a stuck command stopped, the gate
 stopping or pausing a run), reminders (their id and times), the away
 check-in, long background tasks, a child agent's answer, revive, retry
 and limit messages, pull request news, room turns, rush's own tools'
-results (show, view, spawn_agent, agent_result, remind), the gate's
+results (show, view, spawn_agent, agent_result, remind, contact_sheet), the gate's
 waiting line in a command's output, and the hooks' refusals (runaway
-guard, search guard, watch, context guard) and squeezed output.
+guard, search guard, watch, context guard), squeezed output, and the
+context guard's words beside an image read (a smaller copy, a contact
+sheet).
 
 ## Panics
 

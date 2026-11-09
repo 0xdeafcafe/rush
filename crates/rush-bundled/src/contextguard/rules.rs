@@ -22,6 +22,15 @@ pub const REPEATS: u32 = 3;
 /// How much of a failure's output, from its end, says whether two
 /// failures were the same.
 const TAIL_LINES: usize = 12;
+/// Images an agent looks at before it's pointed to a contact sheet, and
+/// again for every as many more.
+pub const SHEET_AFTER: u32 = 8;
+/// Image reads under way at once, this one too, that count as a batch.
+pub const BATCH: usize = 3;
+/// An image costing fewer tokens than this is read again without a word.
+pub const SMALL_IMAGE_TOKENS: u64 = 256;
+/// A read under way this long (seconds) is taken as never finished.
+pub const LOOKING_FOR: u64 = 120;
 
 /// Which rules are on, and their numbers as set (Settings › Usage ›
 /// Context guard): each the constant above unless set otherwise.
@@ -42,6 +51,12 @@ pub struct Rules {
     /// keep_lines (squeeze's CAP_LINES, KEEP_LINES).
     pub cap_lines: usize,
     pub keep_lines: usize,
+    /// Images read as a smaller WebP copy, and pointed to a contact sheet.
+    pub images: bool,
+    /// The most visual tokens a copy costs (images::TOKENS).
+    pub image_tokens: u32,
+    /// Images looked at before the agent is pointed to a contact sheet.
+    pub sheet_after: u32,
 }
 
 impl Rules {
@@ -57,6 +72,9 @@ impl Rules {
         repeats: REPEATS,
         cap_lines: crate::contextguard::squeeze::CAP_LINES,
         keep_lines: crate::contextguard::squeeze::KEEP_LINES,
+        images: true,
+        image_tokens: crate::contextguard::images::TOKENS,
+        sheet_after: SHEET_AFTER,
     };
 
     /// Every rule off.
@@ -65,11 +83,12 @@ impl Rules {
         big_read: false,
         repeat: false,
         squeeze: false,
+        images: false,
         ..Rules::ALL
     };
 
     pub fn any(&self) -> bool {
-        self.reread || self.big_read || self.repeat || self.squeeze
+        self.reread || self.big_read || self.repeat || self.squeeze || self.images
     }
 }
 
@@ -91,6 +110,59 @@ pub struct Agent {
     pub warned: BTreeSet<String>,
     /// Its last shell command's run of identical failures.
     pub bash: Option<Streak>,
+    /// The images it looked at, by path (the original's, when it was shown
+    /// a copy).
+    pub images: BTreeMap<String, Looked>,
+    /// Its image reads under way, by tool_use_id.
+    pub looking: BTreeMap<String, Looking>,
+    /// Images it looked at since its context last started over, and how
+    /// many it had when it was last pointed to a contact sheet.
+    pub looked: u32,
+    pub nudged: u32,
+    /// Whether the reads under way now were pointed to one already.
+    pub batch_nudged: bool,
+    /// The image it was last given a smaller copy of: asked for again
+    /// straight after, it's read as it is.
+    pub last_shrunk: String,
+}
+
+/// An image an agent looked at.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Looked {
+    pub file: FileStat,
+    /// When, as the agent's clock says it.
+    pub at: String,
+    /// Whether it saw it as it is, not a copy.
+    pub full: bool,
+    /// The tokens what it saw cost.
+    pub tokens: u64,
+}
+
+/// An image read under way.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Looking {
+    /// The image asked for.
+    pub path: String,
+    /// Whether it's being shown a copy.
+    pub shrunk: bool,
+    /// What it costs.
+    pub tokens: u64,
+    /// When it started, in seconds since 1970.
+    pub since: u64,
+}
+
+/// What the guard says of an image read, before it runs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ImageStep {
+    Refused(Refusal),
+    /// Let through: with the copy in place of the image or not, and a
+    /// word pointing to a contact sheet ("" for none).
+    Read {
+        shrink: bool,
+        nudge: String,
+    },
 }
 
 /// A read: the lines it covered, and the file as it was.
@@ -254,6 +326,121 @@ pub fn read(
     None
 }
 
+/// What the guard says of a Read of the image at path, before it runs: a
+/// re-read refused, or let through, as a smaller copy where one is made
+/// (copy: its tokens), with a word on contact sheets once the agent has
+/// looked at many, or reads several at once. tokens is what the image
+/// costs as it is; id the read's tool_use_id; now in seconds.
+#[allow(clippy::too_many_arguments)]
+pub fn image(
+    agent: &mut Agent,
+    rules: Rules,
+    path: &str,
+    file: &FileStat,
+    tokens: u64,
+    copy: Option<u64>,
+    id: &str,
+    now: u64,
+) -> ImageStep {
+    agent
+        .looking
+        .retain(|_, l| now.saturating_sub(l.since) < LOOKING_FOR);
+    if agent.looking.is_empty() {
+        agent.batch_nudged = false;
+    }
+    let had = agent.images.get(path).filter(|s| s.file.same(file));
+    // Shown a copy, and asking again straight after: it wants it as it is.
+    let insist = had.is_some_and(|s| !s.full) && agent.last_shrunk == path;
+    if rules.reread
+        && !insist
+        && let Some(seen) = had
+        && seen.tokens.max(tokens) >= SMALL_IMAGE_TOKENS
+    {
+        return ImageStep::Refused(Refusal {
+            rule: "reread",
+            why: format!(
+                "context-guard: {path} is unchanged since you looked at it at {}. The image is still in your context: \
+                 look back at it there rather than paying for it again. Once it changes, it can be read again.",
+                seen.at
+            ),
+        });
+    }
+    let shrink = rules.images && copy.is_some() && !insist;
+    agent.last_shrunk = if shrink {
+        path.to_string()
+    } else {
+        String::new()
+    };
+    let others = agent.looking.len();
+    agent.looking.insert(
+        id.to_string(),
+        Looking {
+            path: path.to_string(),
+            shrunk: shrink,
+            tokens: if shrink {
+                copy.unwrap_or(tokens)
+            } else {
+                tokens
+            },
+            since: now,
+        },
+    );
+    let mut nudge = String::new();
+    if rules.images {
+        let count = agent.looked + others as u32 + 1;
+        if others + 1 >= BATCH && !agent.batch_nudged {
+            agent.batch_nudged = true;
+            agent.nudged = count;
+            nudge = sheet_nudge(&format!("that's {} images read at once", others + 1));
+        } else if count > rules.sheet_after && count >= agent.nudged + rules.sheet_after {
+            agent.nudged = count;
+            nudge = sheet_nudge(&format!(
+                "that's {count} images you've looked at in this conversation"
+            ));
+        }
+    }
+    ImageStep::Read { shrink, nudge }
+}
+
+/// The word pointing an agent to a contact sheet: a nudge, not a refusal.
+pub fn sheet_nudge(what: &str) -> String {
+    format!(
+        "context-guard: {what}. Each one stays in your context and is sent again with every request. To look over \
+         several, put them on one contact sheet: mcp__rush__contact_sheet with their paths (or `rush contact-sheet \
+         <image>…` in a shell) gives one image with each captioned by its file name, for about what one screenshot \
+         costs. Read an image alone when you need its detail."
+    )
+}
+
+/// Takes note of an image read that went through: id's, else one of path
+/// as it is.
+pub fn image_done(agent: &mut Agent, path: &str, id: &str, file: FileStat, tokens: u64, at: &str) {
+    let l = agent.looking.remove(id);
+    if agent.looking.is_empty() {
+        agent.batch_nudged = false;
+    }
+    agent.looked += 1;
+    let (path, full, tokens) = match l {
+        Some(l) => (l.path, !l.shrunk, l.tokens),
+        None => (path.to_string(), true, tokens),
+    };
+    agent.images.insert(
+        path,
+        Looked {
+            file,
+            at: at.to_string(),
+            full,
+            tokens,
+        },
+    );
+}
+
+/// The image a read under way was asked for, when it was shown a copy
+/// or not.
+pub fn image_asked(agent: &Agent, id: &str) -> Option<String> {
+    agent.looking.get(id).map(|l| l.path.clone())
+}
+
 /// Takes note of a Read of path that went through.
 pub fn read_done(
     agent: &mut Agent,
@@ -289,6 +476,7 @@ pub fn read_done(
 /// stands, and its failing command may now go differently.
 pub fn edited(agent: &mut Agent, path: &str) {
     agent.reads.remove(path);
+    agent.images.remove(path);
     agent.bash = None;
 }
 
@@ -296,6 +484,10 @@ pub fn edited(agent: &mut Agent, path: &str) {
 /// read.
 pub fn forgot(agent: &mut Agent) {
     agent.reads.clear();
+    agent.images.clear();
+    agent.last_shrunk.clear();
+    agent.looked = 0;
+    agent.nudged = 0;
 }
 
 /// A command as it's compared: its words, single spaced.
@@ -911,5 +1103,117 @@ mod tests {
             let got = bash(&mut a, rules, "cargo test");
             assert_eq!(got.is_some(), want, "{repeats} set, {runs} failed: {got:?}");
         }
+    }
+
+    /// An image's reads in a row: whether each is refused, shown a copy,
+    /// or as it is.
+    #[test]
+    fn image_rereads() {
+        #[derive(Debug, PartialEq)]
+        enum Got {
+            Refused,
+            Copy,
+            Whole,
+        }
+        let img = FileStat {
+            size: 900_000,
+            mtime: 1,
+            text: false,
+            ..FileStat::default()
+        };
+        let changed = FileStat {
+            mtime: 2,
+            ..img.clone()
+        };
+        // What happens between reads: (the file, a copy's tokens, what it
+        // gets).
+        type Case = (&'static str, Vec<(FileStat, Option<u64>, Got)>);
+        let cases: Vec<Case> = vec![
+            (
+                "copy, then asked again, then refused",
+                vec![
+                    (img.clone(), Some(1568), Got::Copy),
+                    (img.clone(), Some(1568), Got::Whole),
+                    (img.clone(), Some(1568), Got::Refused),
+                ],
+            ),
+            (
+                "no copy: refused the second time",
+                vec![
+                    (img.clone(), None, Got::Whole),
+                    (img.clone(), None, Got::Refused),
+                ],
+            ),
+            (
+                "changed since: read again",
+                vec![
+                    (img.clone(), Some(1568), Got::Copy),
+                    (changed.clone(), Some(1568), Got::Copy),
+                    (changed.clone(), Some(1568), Got::Whole),
+                    (changed.clone(), Some(1568), Got::Refused),
+                ],
+            ),
+        ];
+        for (what, reads) in cases {
+            let mut a = Agent::default();
+            for (i, (file, copy, want)) in reads.into_iter().enumerate() {
+                let id = format!("t{i}");
+                let got = match image(&mut a, Rules::ALL, "/s.png", &file, 4784, copy, &id, 100) {
+                    ImageStep::Refused(r) => {
+                        assert!(
+                            r.why
+                                .contains("is unchanged since you looked at it at 14:03:12"),
+                            "{}",
+                            r.why
+                        );
+                        Got::Refused
+                    }
+                    ImageStep::Read { shrink: true, .. } => Got::Copy,
+                    ImageStep::Read { shrink: false, .. } => Got::Whole,
+                };
+                assert_eq!(got, want, "{what}: read {}", i + 1);
+                if got != Got::Refused {
+                    image_done(&mut a, "/copy.webp", &id, file, 4784, "14:03:12");
+                }
+            }
+        }
+        // A tiny image is never refused; a compaction forgets them all.
+        let mut a = Agent::default();
+        for i in 0..3 {
+            let id = format!("t{i}");
+            let got = image(&mut a, Rules::ALL, "/i.png", &img, 20, None, &id, 100);
+            assert_eq!(
+                got,
+                ImageStep::Read {
+                    shrink: false,
+                    nudge: String::new()
+                }
+            );
+            image_done(&mut a, "/i.png", &id, img.clone(), 20, "14:03:12");
+        }
+        image(&mut a, Rules::ALL, "/s.png", &img, 4784, None, "x", 100);
+        image_done(&mut a, "/s.png", "x", img.clone(), 4784, "14:03:12");
+        forgot(&mut a);
+        assert!(matches!(
+            image(&mut a, Rules::ALL, "/s.png", &img, 4784, None, "y", 100),
+            ImageStep::Read { .. }
+        ));
+        // A read under way that never finished is let go of.
+        let mut a = Agent::default();
+        image(&mut a, Rules::ALL, "/a.png", &img, 20, None, "a", 100);
+        image(&mut a, Rules::ALL, "/b.png", &img, 20, None, "b", 100);
+        let ImageStep::Read { nudge, .. } = image(
+            &mut a,
+            Rules::ALL,
+            "/c.png",
+            &img,
+            20,
+            None,
+            "c",
+            100 + LOOKING_FOR,
+        ) else {
+            panic!("refused");
+        };
+        assert_eq!(nudge, "", "the two before are long gone");
     }
 }

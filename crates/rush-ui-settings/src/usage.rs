@@ -266,7 +266,7 @@ pub fn context_guard_section(m: &Model) -> Section {
         &g,
         cg::REREAD,
         "Don't re-read unchanged files",
-        "Refuses an agent's read of a file it already read (the same lines or more) when the file hasn't changed since and it hasn't edited it; after its context is compacted it may read it again. Images, PDFs and notebooks are left alone. Each refusal is in the session's events as hook-denied.",
+        "Refuses an agent's read of a file it already read (the same lines or more) when the file hasn't changed since and it hasn't edited it; after its context is compacted it may read it again. An image looked at again is refused the same way (but for one it was just shown a smaller copy of); PDFs and notebooks are left alone. Each refusal is in the session's events as hook-denied.",
         "a read of a file unchanged since is refused, with when it was read.",
         "files are read again as asked.",
     )];
@@ -332,6 +332,32 @@ pub fn context_guard_section(m: &Model) -> Section {
             "Output longer than this many lines keeps its first and last third (200 each of 600); the rest is left out, kept whole in a file the agent is pointed to.",
             cg::SQUEEZE_LINES_CHOICES,
             &|n| format!("{} lines", thousands(n)),
+        ));
+    }
+    rows.push(guard_switch(
+        &g,
+        cg::IMAGES,
+        "Shrink images agents read",
+        "Points an agent's read of a PNG, JPEG, GIF or large WebP at a WebP copy cut to the tokens below, and tells it so; reading the image again straight after gets the original. A model is billed by an image's pixels, so the copy costs less with every request it stays in the context for. After the number of images below, or several at once, the agent is pointed to a contact sheet (rush contact-sheet), all of them on one image. Small images, and reads while you have permission rules about reads, are left alone. Each is in the session's events as hook-shrunk or hook-nudged.",
+        "images are read as smaller copies.",
+        "images are read as they are.",
+    ));
+    if on(cg::IMAGES) {
+        rows.push(guard_number(
+            &g,
+            cg::IMAGE_TOKENS,
+            "  images cost at most",
+            "The most visual tokens a copy costs: 1,568 fits a 1080p screenshot almost whole; the newest models spend up to 4,784 on a big one as it is.",
+            cg::IMAGE_TOKENS_CHOICES,
+            &|n| format!("{} tokens", thousands(n)),
+        ));
+        rows.push(guard_number(
+            &g,
+            cg::SHEET_AFTER,
+            "  contact sheet after",
+            "How many images an agent looks at before it's pointed to a contact sheet, and again for every as many more.",
+            cg::SHEET_AFTER_CHOICES,
+            &|n| format!("{n} images"),
         ));
     }
     let note = if g.on {

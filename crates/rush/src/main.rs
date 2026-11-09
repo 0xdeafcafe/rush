@@ -70,6 +70,8 @@ const USAGE: &str = "rush — a lighter agents view for Claude Code
   rush feed        the feed agents share, once on (\"rush feed help\")
   rush watch       wait on a PR's checks for an agent, without polling (\"rush watch help\")
   rush remind      send a session a message at a time, waking it (\"rush remind help\")
+  rush contact-sheet <image>…
+                   many images on one captioned WebP, for an agent to look over at once
   rush room        a group chat of fresh agents arguing a topic to a verdict
                     (\"rush room help\")
   rush session     start, send to, stop and list rush-mode sessions without
@@ -155,6 +157,13 @@ fn run(args: &[String]) -> i32 {
         }
         Some("remind" | "reminders") => {
             return rush_host::cli::remind_cmd(&args[1..], &mut stdout, &mut stderr);
+        }
+        Some("contact-sheet") => {
+            return rush_bundled::contextguard::images::sheet_cmd(
+                &args[1..],
+                &mut stdout,
+                &mut stderr,
+            );
         }
         _ => {}
     }

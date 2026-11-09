@@ -16,6 +16,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 regex = "1"
 libc = "0.2"
+base64.workspace = true
+# Images agents read, shrunk to WebP, and contact sheets (contextguard
+# images.rs): image decodes and resizes, webp (libwebp, built from source)
+# encodes lossy, which image's own WebP encoder can't; font8x8 captions.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+webp = { version = "0.3", default-features = false }
+font8x8 = { version = "0.3", default-features = false }
 
 [dev-dependencies]
 rush-testenv = { path = "../rush-testenv" }
