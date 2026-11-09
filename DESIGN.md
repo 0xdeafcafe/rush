@@ -3298,16 +3298,15 @@ of them a path read before; one reviewer subagent read 1,126 images in
 188 calls, its context growing from 24k to 300k tokens. An image stays
 in the context and is paid for again with every later request.
 
-How an image is billed (platform.claude.com, Vision › Resolution and
-token cost, and Vision coordinates › How Claude resizes and pads
-images): by its pixels, not its bytes, `⌈w/28⌉ × ⌈h/28⌉` visual tokens
-(one per 28×28 patch, about w·h/784), after the model's own resize to
-fit its tier: a long edge of 2,576 px and 4,784 tokens on the
-high-resolution tier (Claude 4.7 and later), 1,568 px and 1,568 tokens
-on the standard one. `images::resized` is a port of the pages' reference
-code (`resized_size`); `images::billed` is what the high-resolution tier
-spends on an image as it is. So WebP alone saves bytes (the request, the
-transcript, upload time), not tokens; fewer pixels save tokens.
+How an image is billed, by its pixels and not its bytes, and the
+tiers' limits: see "Images in tool results" (rush-efficiency
+`image.rs`, from platform.claude.com's Vision pages). Here,
+`images::resized` ports the pages' reference resize (`resized_size`) and
+`images::billed` is what the high-resolution tier spends on an image as
+it is; the guard's budget defaults to the standard tier's 1,568 tokens,
+a third of what the high tier spends on a big screenshot. So WebP alone
+saves bytes (the request, the transcript, upload time), not tokens;
+fewer pixels save tokens.
 
 Before a Read of a `.png`, `.jpg`/`.jpeg`, `.gif` or `.webp`, the guard
 makes a lossy WebP copy (libwebp through the `webp` crate, built from
