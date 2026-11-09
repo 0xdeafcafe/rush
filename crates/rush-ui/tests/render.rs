@@ -851,6 +851,7 @@ fn snapshot_settings_usage() {
 fn efficiency_fixture() -> rush_efficiency::Report {
     use rush_efficiency::events::Handover;
     use rush_efficiency::{AgentPart, Bucket, Finding, Saving, SessionCost};
+    let finding = Finding::new;
     let t = |s: &str| rush_state::Time::parse(s).unwrap();
     rush_efficiency::Report {
         from: t("2026-11-02T12:00:00Z"),
@@ -908,18 +909,16 @@ fn efficiency_fixture() -> rush_efficiency::Report {
             ..SessionCost::default()
         }],
         findings: vec![
-            Finding {
-                title: "1680 image reads were of an image the same session had read already"
-                    .into(),
-                detail: "the requests after them re-read about 41M tokens of them, about $20.50 (an estimate). Note what an image showed rather than reading it again, or put the ones to compare on one contact sheet".into(),
-                cost: 20.5,
-                ..Finding::default()
-            },
-            Finding {
-                title: "Only 84% of input came from the cache".into(),
-                detail: "sessions left idle past the cache's life, or switching model, write the whole context again".into(),
-                ..Finding::default()
-            },
+            finding(
+                "1680 image reads were of an image the same session had read already",
+                "the requests after them re-read about 41M tokens of them, about $20.50 (an estimate). Note what an image showed rather than reading it again, or put the ones to compare on one contact sheet",
+                20.5,
+            ),
+            finding(
+                "Only 84% of input came from the cache",
+                "sessions left idle past the cache's life, or switching model, write the whole context again",
+                0.0,
+            ),
         ],
         handovers: vec![Saving {
             at: t("2026-11-09T02:00:00Z"),

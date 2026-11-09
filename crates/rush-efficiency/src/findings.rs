@@ -31,6 +31,20 @@ pub struct Finding {
     pub(crate) rank: i32,
 }
 
+impl Finding {
+    /// A finding in so many words, of cost dollars, with no saver or file
+    /// to it: as one is shown, for a fixture outside this crate, whose
+    /// rank is the crate's own. Rust-only.
+    pub fn new(title: &str, detail: &str, cost: f64) -> Finding {
+        Finding {
+            title: title.into(),
+            detail: detail.into(),
+            cost,
+            ..Finding::default()
+        }
+    }
+}
+
 /// The view's findings, most at stake first.
 pub fn findings(v: &View, found: &HashMap<String, Found>) -> Vec<Finding> {
     let mut out = Vec::new();
