@@ -1,6 +1,6 @@
 {
- "commit": "d463f4cb586572e4b208edbc929f77e821a87533",
- "at": "2026-11-09T00:21:04Z",
+ "commit": "b83b446baf3d750cb8de0a4b8763a08305ee8401",
+ "at": "2026-11-09T02:11:43Z",
  "metrics": {
   "binary: rush, release": {
    "kind": "binary",
@@ -733,5 +733,7 @@
    "commit": "9df70072d538cf062bd62d6d87f31b6102a0691c"
   }
  },
- "flagged": []
+ "flagged": [
+  "render 3000 turns w120: chat: cold frame at the end, bytes"
+ ]
 }
