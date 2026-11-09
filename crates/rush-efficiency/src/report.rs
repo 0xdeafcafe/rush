@@ -31,6 +31,9 @@ pub const SAVING_METHOD: &str = "An estimate: the context the retiring session h
 const MATCH_BEFORE: i64 = 30 * 60;
 const MATCH_AFTER: i64 = 5 * 60;
 
+/// Said of a handover whose successor was found by the heuristic.
+const BY_TIME: &str = "; its successor's transcript is a guess from the account, agent, time and starting context, as the event names no conversation";
+
 /// What one handover saved, by estimate (SAVING_METHOD).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Saving {
@@ -39,6 +42,10 @@ pub struct Saving {
     /// The successor's transcript, when it was found, and its requests.
     pub transcript: String,
     pub requests: i64,
+    /// The transcript was found by the heuristic (an older event with no
+    /// `toSession`): the same account and agent, a time window, the
+    /// nearest start. False when `toSession` named it, or none was found.
+    pub by_time: bool,
     /// The context each of its requests didn't re-read: A's at the
     /// handover less B's at its start.
     pub per_request: i64,
@@ -116,9 +123,11 @@ fn agent_of(kind: &str) -> &str {
 }
 
 /// The handovers logged inside q, each with what it saved: its successor
-/// is the transcript of the same account and agent, not the retiring
-/// conversation, that began about when the handover was logged and
-/// started nearest the context the handover says it did.
+/// is the transcript of the conversation `toSession` names, exactly. Only
+/// an older event without it falls back to the transcript of the same
+/// account and agent, not the retiring conversation, that began about
+/// when the handover was logged and started nearest the context the
+/// handover says it did.
 pub fn savings(store: &Store, q: &Query, events: &[Event]) -> Vec<Saving> {
     let inner = store.read();
     let mut out = Vec::new();
@@ -135,7 +144,20 @@ pub fn savings(store: &Store, q: &Query, events: &[Event]) -> Vec<Saving> {
             continue;
         }
         let mut best: Option<(&String, &crate::scan::File, i64)> = None;
+        let by_time = h.to_session.is_empty();
         for (p, f) in &inner.files {
+            if !by_time {
+                // Exactly B's conversation; its own transcript over a
+                // subagent's, then the path, for a stable pick.
+                if f.session != h.to_session || f.agent() != agent {
+                    continue;
+                }
+                let rank = i64::from(f.sub);
+                if best.is_none_or(|(bp, _, br)| rank < br || (rank == br && p < bp)) {
+                    best = Some((p, f, rank));
+                }
+                continue;
+            }
             let gap = since(f.first, e.at);
             if f.account != e.account
                 || f.agent() != agent
@@ -161,6 +183,7 @@ pub fn savings(store: &Store, q: &Query, events: &[Event]) -> Vec<Saving> {
         };
         if let Some((p, f, _)) = best {
             s.transcript = p.clone();
+            s.by_time = by_time;
             s.requests = f.totals().req;
             s.tokens = per_request * s.requests;
             let model = if f.model.is_empty() {
@@ -272,6 +295,9 @@ pub fn handover_line(s: &Saving) -> String {
         );
         if s.usd > 0.0 {
             l += &format!(", ≈{}", money(s.usd));
+        }
+        if s.by_time {
+            l += BY_TIME;
         }
     }
     l

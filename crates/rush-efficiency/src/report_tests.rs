@@ -39,7 +39,7 @@ fn file(agent: &str, session: &str, project: &str, first: Time, last: Time, b: B
     f
 }
 
-fn handover(at: Time, account: &str, from_session: &str) -> Event {
+fn handover(at: Time, account: &str, from_session: &str, to_session: &str) -> Event {
     Event {
         at,
         kind: HANDOVER.into(),
@@ -49,6 +49,7 @@ fn handover(at: Time, account: &str, from_session: &str) -> Event {
             from: "a1".into(),
             from_session: from_session.into(),
             to: "b1".into(),
+            to_session: to_session.into(),
             agent: "claude".into(),
             model: "opus".into(),
             from_context: 307_000,
@@ -57,6 +58,7 @@ fn handover(at: Time, account: &str, from_session: &str) -> Event {
             threshold: 300_000,
             lineage: 1,
             subagent: false,
+            cwd: "/src/rush".into(),
         }),
         ..Event::default()
     }
@@ -122,9 +124,9 @@ fn builds_from_the_store_and_the_log() {
         ("/t/c.jsonl".to_string(), c),
     ]));
     let events = vec![
-        handover(ago(100), "/acct", "s-a"),
-        handover(ago(10), "/acct", "s-a"),
-        handover(ago(1), "/elsewhere", "s-x"),
+        handover(ago(100), "/acct", "s-a", ""),
+        handover(ago(10), "/acct", "s-a", ""),
+        handover(ago(1), "/elsewhere", "s-x", ""),
     ];
     let q = query(now(), 2 * DAY, "");
     let r = Report::build(&store, &q, &HashMap::new(), &events);
@@ -142,6 +144,7 @@ fn builds_from_the_store_and_the_log() {
     let want = 39_900_000.0 * cache_read_price_of("claude", "claude-opus-5-5") / 1e6;
     assert!(s.usd > 0.0 && (s.usd - want).abs() < 1e-9, "{}", s.usd);
     let lost = &r.handovers[1];
+    assert!(s.by_time && handover_line(s).contains("a guess"), "{s:?}");
     assert!(lost.transcript.is_empty() && lost.tokens == 0, "{lost:?}");
     assert!(handover_line(lost).contains("isn't read yet"));
     assert_eq!(r.saved().0, 39_900_000);
@@ -260,6 +263,7 @@ fn sample() -> Report {
             },
             transcript: "/t/b.jsonl".into(),
             requests: 140,
+            by_time: false,
             per_request: 285_000,
             tokens: 39_900_000,
             usd: 19.95,
@@ -386,7 +390,12 @@ fn the_command() {
         ],
     );
     let acct = claude.to_string_lossy().into_owned();
-    let mut ev = handover(Time::parse("2026-11-08T10:31:30Z").unwrap(), &acct, "s1");
+    let mut ev = handover(
+        Time::parse("2026-11-08T10:31:30Z").unwrap(),
+        &acct,
+        "s1",
+        "",
+    );
     if let Some(h) = ev.handover.as_mut() {
         h.from_context = 300_000;
         h.to_context = 510;
@@ -437,4 +446,49 @@ fn the_command() {
     crate::detect::set_thread_search_path(None);
     rush_state::set_thread_dir(None);
     rush_state::set_thread_cache_dir(None);
+}
+
+// A handover that names its successor's conversation finds exactly that
+// transcript, whatever the time and starting context say, and doesn't
+// say it guessed; one naming a conversation not read yet finds nothing
+// rather than the nearest look-alike.
+#[test]
+fn matches_the_successor_by_its_conversation() {
+    crate::testutil::claude();
+    let bucket = Bucket {
+        req: 10,
+        ..Bucket::default()
+    };
+    // Starts nothing like the handover's 22k, long before it.
+    let mut named = file("claude", "s-named", "/src/rush", ago(600), ago(590), bucket);
+    named.start_ctx = 90_000;
+    // The look-alike the heuristic would pick.
+    let mut twin = file("claude", "s-twin", "/src/rush", ago(10), ago(8), bucket);
+    twin.start_ctx = 22_000;
+    let store = Store::of(HashMap::from([
+        ("/t/named.jsonl".to_string(), named),
+        ("/t/twin.jsonl".to_string(), twin),
+    ]));
+    for (to_session, want, by_time) in [
+        ("s-named", "/t/named.jsonl", false),
+        ("s-twin", "/t/twin.jsonl", false),
+        ("s-unread", "", false),
+        ("", "/t/twin.jsonl", true),
+    ] {
+        let events = vec![handover(ago(10), "/acct", "s-a", to_session)];
+        let got = savings(&store, &query(now(), 2 * DAY, ""), &events);
+        assert_eq!(got.len(), 1, "{to_session:?}");
+        let s = &got[0];
+        assert_eq!(
+            (s.transcript.as_str(), s.by_time, s.requests),
+            (want, by_time, if want.is_empty() { 0 } else { 10 }),
+            "{to_session:?}"
+        );
+        assert_eq!(
+            handover_line(s).contains("a guess"),
+            by_time,
+            "{to_session:?}: {}",
+            handover_line(s)
+        );
+    }
 }
