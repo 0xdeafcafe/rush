@@ -952,3 +952,67 @@ fn runs_rush_was_closed_on_are_picked_up() {
     drop(m);
     rush_state::set_thread_dir(None);
 }
+
+/// + with my next message (a): nothing goes until you send a message,
+/// then the run goes in front of your words, once.
+#[test]
+fn a_run_goes_with_your_next_message() {
+    let fake = Fake::new();
+    let mut m = replied_hosted(&fake);
+    pick_the_box(&mut m);
+    press(&mut m, "enter");
+    let _ = fake.ops();
+    press(&mut m, "a");
+    assert!(shellbox::run_of(&mut m, KEY, BOX).unwrap().attached);
+    assert!(shown(&mut m).contains("✓ with"), "the foot says it waits");
+    assert!(sends(&fake).is_empty(), "nothing goes yet");
+    if let Some(v) = m.session.as_mut() {
+        v.sel.clear();
+    }
+    conn(&mut m, KEY).input.set("why is it there?");
+    let _ = super::keys::send(&mut m, KEY, false);
+    assert_eq!(sends(&fake), [format!("{SENT}\n\nwhy is it there?")]);
+    let run = shellbox::run_of(&mut m, KEY, BOX).unwrap();
+    assert!(run.told && !run.attached);
+    // The next message goes alone.
+    conn(&mut m, KEY).input.set("thanks");
+    let _ = super::keys::send(&mut m, KEY, false);
+    assert_eq!(sends(&fake), ["thanks"]);
+}
+
+/// ◐ background (b): the run is a row while it runs, w has it go to the
+/// agent when it's done.
+#[test]
+fn a_background_run_sends_when_done() {
+    let fake = Fake::new();
+    let mut m = replied_hosted(&fake);
+    shellbox::set_fake(Some(hangs));
+    pick_the_box(&mut m);
+    press(&mut m, "b");
+    let run = shellbox::run_of(&mut m, KEY, BOX).expect("started");
+    assert!(run.running() && run.background);
+    let s = shown(&mut m);
+    assert!(s.contains("◐ $ rm ~/x.p12"), "{s}");
+    press(&mut m, "w");
+    assert!(shellbox::run_of(&mut m, KEY, BOX).unwrap().send_done);
+    assert!(shown(&mut m).contains("☑ send when done"));
+}
+
+/// To a Claude agent a run goes as Claude Code's own `!`; to any other,
+/// as "I ran".
+#[test]
+fn a_claude_agent_gets_its_own_bang() {
+    let fake = Fake::new();
+    let mut m = replied(&fake);
+    pick_the_box(&mut m);
+    press(&mut m, "enter");
+    let run = shellbox::run_of(&mut m, KEY, BOX).unwrap();
+    assert_eq!(shellbox::out_text(&m, KEY, &run), SENT);
+    if let Some(a) = m.agents.iter_mut().find(|a| a.key == KEY) {
+        a.kind = rush_core::adapter::Kind::new("claude");
+    }
+    assert_eq!(
+        shellbox::out_text(&m, KEY, &run),
+        "<bash-input>rm ~/x.p12</bash-input>\n<bash-stdout>ran rm ~/x.p12 in /src/checkout</bash-stdout><bash-stderr></bash-stderr>"
+    );
+}

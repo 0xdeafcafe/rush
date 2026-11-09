@@ -521,14 +521,20 @@ impl Drawer<'_> {
         };
         tail.push(button(done, "senddone", r));
         let cmd = x.command.lines().next().unwrap_or("").trim();
-        let more = if x.command.trim().lines().count() > 1 { " …" } else { "" };
+        let more = if x.command.trim().lines().count() > 1 {
+            " …"
+        } else {
+            ""
+        };
         let lead = paint(if picked { C_ORANGE } else { C_FAINT }, "◐ ");
         let room = (inner + 4).saturating_sub(tail.width() + 4 + more.len());
         let head = lead
             .and(faint("$ "))
             .and(quiet_tint(&truncate_cells(cmd, room.max(8))))
             .and(dim(more));
-        let gap = (inner + 4).saturating_sub(head.width() + tail.width()).max(2);
+        let gap = (inner + 4)
+            .saturating_sub(head.width() + tail.width())
+            .max(2);
         let l = self.sp(indent - 1).and(head).and(blanks(gap)).and(tail);
         let top = if self.box_under_row { "" } else { r };
         self.add(top, Color::Default, l, Txt::new());

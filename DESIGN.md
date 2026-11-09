@@ -3028,6 +3028,41 @@ as the box narrows: `→ send to agent`, `→ send`, `→`):
 
 Each goes through the session's own harness like any message.
 
+**What a send says** (Rust-only). To a Claude agent, → send, a run that
+sends itself, a background run's "send when done" and + with my next
+message go as Claude Code writes a command you ran with `!`, in one
+message: `<bash-input>cmd</bash-input>` then `<bash-stdout>` (the same
+last 80 lines, 6000 characters, colours taken out) and `<bash-stderr>`
+(empty for exit 0, else "Exit code N", "Stopped by you", "Killed" or
+"Ended while rush was closed"; `ShellRun::bash_text`). The agent reads
+it as a command you ran. To any other harness it goes as "I ran `cmd`
+(exit 0):" as before (`session_core::shellbox::out_text`). ✎ draft
+always puts the "I ran" text in the box, since it's yours to edit, and
+≈ summary sends its summary as words. rush reads such a message back
+(`shellbox::sent_runs`, in `Session::send`, so from the transcript and
+from a host's echo alike) as your turn with a finished `you ran` step
+for each command (`Session::shell_sent`, ids `you-<n>-sent-<k>`), its
+prompt the words sent with them or else `! cmd`. So it's drawn as a
+tool call, not a bubble repeating the output, and the "sending" line
+shows that prompt too.
+
+**+ with my next message** (a), on a finished box's foot beside
+→ send: the run waits (`ShellRun::attached`, `✓ with your next
+message` on its foot, a again takes it off) and goes in front of the
+next message you send from the box, in the form above, oldest first
+(`shellbox::with_attached`, called by `keys::send` after the stash
+keeps what you typed). The agent isn't asked to answer it on its own.
+
+**◐ background** (b), on a box's top edge before it's run (and b to
+run it again so): the run is one row while it runs (`background_row`):
+`◐ $ cmd`, its clock and chain step, ✕ stop, and ☐ send when done
+(w, or a click), which has its output go to the agent as it ends as →
+send would (`ShellRun::send_done`; only to an agent rush runs now, like
+a run that sends itself). Once it ends it's a box again.
+
+**A click on a command** edits it (the same ✎ edit), unless it runs
+now. Letter keys on a picked box keep their actions.
+
 **A rush watch in the background** (Rust-only): an agent's Bash call
 that put `rush watch pr|run` in the background draws, in the
 conversation, the watch's card in place of `↳ running in the background

@@ -227,6 +227,28 @@ fn shell_turns() {
     assert_eq!(st.out().stdout, "a\nb");
 }
 
+/// Commands you ran that rush sent with their output in one message, and
+/// your words after them: your turn, a finished step each.
+#[test]
+fn commands_rush_sent() {
+    let tmp = Tmp::new("sent");
+    let path = tmp.file(&[
+        r#"{"type":"user","timestamp":"2026-09-23T20:00:00Z","message":{"role":"user","content":"<bash-input>ls</bash-input>\n<bash-stdout>a</bash-stdout><bash-stderr></bash-stderr>"}}"#,
+        r#"{"type":"user","timestamp":"2026-09-23T20:01:00Z","message":{"role":"user","content":"<bash-input>cargo test</bash-input>\n<bash-stdout>boom</bash-stdout><bash-stderr>Exit code 101</bash-stderr>\n\nwhy did it fail?"}}"#,
+    ]);
+    let s = read_all(&path);
+    assert_eq!(s.turns.len(), 2);
+    assert_eq!(s.turns[0].prompt, "! ls");
+    let st = s.step(s.step_by_call("you-1-sent-0").unwrap());
+    assert_eq!(st.status, Status::Ok);
+    assert_eq!(st.call().input.command, "ls");
+    assert_eq!(st.out().stdout, "a");
+    assert_eq!(s.turns[1].prompt, "why did it fail?");
+    let st = s.step(s.step_by_call("you-2-sent-0").unwrap());
+    assert_eq!(st.status, Status::Failed);
+    assert_eq!(st.out().exit, Some(101));
+}
+
 #[test]
 fn injected_prompts() {
     let cases = [

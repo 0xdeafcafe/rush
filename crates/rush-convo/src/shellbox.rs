@@ -470,9 +470,7 @@ impl ShellRun {
     /// with 0, as Claude Code's Bash tool says it ("Exit code 1").
     /// Rust-only.
     pub fn bash_text(&self) -> String {
-        let out = self
-            .tail_lines(SEND_LINES, SEND_CHARS)
-            .unwrap_or_default();
+        let out = self.tail_lines(SEND_LINES, SEND_CHARS).unwrap_or_default();
         let err = if self.stopped {
             "Stopped by you".to_string()
         } else if self.lost {
