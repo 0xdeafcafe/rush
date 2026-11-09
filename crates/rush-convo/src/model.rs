@@ -921,6 +921,27 @@ impl Session {
         echo: bool,
     ) -> (usize, Option<usize>) {
         self.saw(now);
+        // Commands you ran that rush sent with it (Rust-only): your words
+        // (or `! cmd`), then a step each.
+        let (ran, _) = crate::shellbox::sent_runs(&text);
+        let text = match crate::shellbox::sent_prompt(&text) {
+            Some(p) => p,
+            None => text,
+        };
+        let at = self.send_text(text, images, now, echo);
+        for (k, r) in ran.iter().enumerate() {
+            self.shell_sent(k, r, now);
+        }
+        at
+    }
+
+    fn send_text(
+        &mut self,
+        text: String,
+        images: Vec<Box<str>>,
+        now: Ms,
+        echo: bool,
+    ) -> (usize, Option<usize>) {
         let echoed = echo.then(|| text.clone());
         let at = if let Some(i) = self.live_idx() {
             let t = &mut self.turns[i];
@@ -989,10 +1010,12 @@ impl Session {
         if !m.id.is_empty() && !self.user_ids.insert(m.id.as_str().into()) {
             return true;
         }
+        let shown = crate::shellbox::sent_prompt(&text);
+        let shown = shown.as_deref().unwrap_or(&text);
         let found = self
             .echoes
             .iter()
-            .position(|e| crate::transcript::clean_prompt(&e.text) == text);
+            .position(|e| crate::transcript::clean_prompt(&e.text) == shown);
         let (turn, item) = match found {
             Some(i) => {
                 let e = self.echoes.remove(i);
@@ -1683,7 +1706,13 @@ impl Session {
     /// Makes a step of a command you ran with !, in the live turn.
     pub(crate) fn shell_start(&mut self, cmd: &str, at: Ms) {
         let Some(ti) = self.live_idx() else { return };
-        let id: Box<str> = format!("you-{}", self.turns[ti].n).into();
+        let id = format!("you-{}", self.turns[ti].n);
+        self.shell_step(ti, id, cmd, at);
+    }
+
+    /// A step of a command you ran, by id, in turn ti, running.
+    fn shell_step(&mut self, ti: usize, id: String, cmd: &str, at: Ms) -> StepId {
+        let id: Box<str> = id.into();
         let raw = serde_json::to_string(&BTreeMap::from([
             ("command", cmd),
             ("description", "you ran"),
@@ -1730,6 +1759,40 @@ impl Session {
         t.steps.push(sid);
         t.items.push(Item::Step(sid));
         t.touch();
+        sid
+    }
+
+    /// A command you ran that rush sent the agent in one message
+    /// (shellbox::sent_runs), the k-th of its message: a finished step of
+    /// the live turn, as a command you ran with ! is, the turn going on
+    /// for the agent's answer. Rust-only.
+    pub(crate) fn shell_sent(&mut self, k: usize, run: &crate::shellbox::SentRun, at: Ms) {
+        let Some(ti) = self.live_idx() else { return };
+        let id = format!("you-{}-sent-{k}", self.turns[ti].n);
+        let sid = self.shell_step(ti, id, &run.command, at);
+        let stdout = run.stdout.as_str();
+        let stderr = run.stderr.as_str();
+        let failed = !stderr.trim().is_empty();
+        let st = &mut self.steps[sid as usize];
+        st.output = format!("{stdout}\n{stderr}").trim().into();
+        st.end = at;
+        st.status = if failed { Status::Failed } else { Status::Ok };
+        st.result =
+            serde_json::to_string(&BTreeMap::from([("stdout", stdout), ("stderr", stderr)]))
+                .ok()
+                .map(String::into_boxed_str);
+        st.out = Some(Box::new(Output {
+            is_error: failed,
+            stdout: stdout.to_owned(),
+            stderr: stderr.to_owned(),
+            exit: Some(if failed {
+                exit_code_in(stderr).map_or(-1, i64::from)
+            } else {
+                0
+            }),
+            ..Output::default()
+        }));
+        self.step_ver += 1;
     }
 
     /// What a command you ran with ! printed, on its step; the turn ends.

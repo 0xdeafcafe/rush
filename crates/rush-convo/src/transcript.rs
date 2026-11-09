@@ -661,6 +661,18 @@ fn take_prompt(
     effort: Option<Box<str>>,
     at: Ms,
 ) {
+    // Commands you ran that rush sent the agent with their output, in one
+    // message (Rust-only): your turn, a step each, the words sent with
+    // them as its prompt (else `! cmd`), the agent's answer after.
+    if crate::shellbox::sent_prompt(&text).is_some() {
+        if let Some(live) = s.live()
+            && (!live.prompt.is_empty() || s.partial && live.n == 1)
+        {
+            s.apply(&done(), at);
+        }
+        s.send(text, images, at, false);
+        return;
+    }
     // A shell command you ran with ! is its own small turn, and its output
     // lands on it rather than starting another.
     if let Some((out, err)) = shell_output(&text) {
@@ -816,12 +828,14 @@ pub fn join_texts(texts: &[&str]) -> String {
 /// Drops the markup Claude Code wraps around slash commands and system
 /// notes, keeping what you actually said.
 pub fn clean_prompt(s: &str) -> String {
+    if s.contains("<bash-stdout>") || s.contains("<bash-stderr>") {
+        // kept whole for shell_output, and for commands rush sent with
+        // their output (shellbox::sent_runs)
+        return s.to_owned();
+    }
     let cmd = between(s, "<bash-input>", "</bash-input>");
     if !cmd.is_empty() {
         return format!("! {cmd}");
-    }
-    if s.contains("<bash-stdout>") || s.contains("<bash-stderr>") {
-        return s.to_owned(); // kept whole for shell_output
     }
     let name = between(s, "<command-name>", "</command-name>");
     if !name.is_empty() {

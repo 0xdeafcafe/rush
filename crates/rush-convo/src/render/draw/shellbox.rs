@@ -226,10 +226,17 @@ impl Drawer<'_> {
             label.push(dim(" · "));
         }
         label.push(sub(&self.p.short_abs(cwd)));
+        // A background run while it runs is a row, not a box.
+        if let Some(x) = run.filter(|x| x.background && x.running()) {
+            self.background_row(r, x, indent, inner, picked, from);
+            return;
+        }
         let copy = button(sub("⧉ copy"), "copy", r);
         let edit = button(sub("✎ edit"), "edit", r);
         let top_r = match run {
             None => button(paint(C_ORANGE, "▶ run"), "run", r)
+                .and_raw("  ")
+                .and(button(sub("◐ background"), "background", r))
                 .and_raw("  ")
                 .and(edit)
                 .and_raw("  ")
@@ -306,6 +313,12 @@ impl Drawer<'_> {
                 paint(C_TEXT.bold(), &t)
             } else {
                 quiet_tint(&t)
+            };
+            // A click on a command edits it, unless it runs now.
+            let tint = if running {
+                tint
+            } else {
+                button(tint, "edit", r)
             };
             for (j, w) in wrap(&tint, fit.max(8)).into_iter().enumerate() {
                 let mut row = if j == 0 {
@@ -422,6 +435,8 @@ impl Drawer<'_> {
             None if picked => (
                 key_hint("enter", "runs it")
                     .and(faint(" · "))
+                    .and(key_hint("b", "in the background"))
+                    .and(faint(" · "))
                     .and(key_hint("e", "edits it"))
                     .and(faint(" · "))
                     .and(key_hint("c", "copies it")),
@@ -476,6 +491,50 @@ impl Drawer<'_> {
 }
 
 impl Drawer<'_> {
+    /// A run started with ◐ background, while it runs: one row, as a
+    /// background task of the agent's is, its command, how long it's run,
+    /// ✕ stop, and whether it goes to the agent when it's done. It's a
+    /// box again once it ends. Rust-only.
+    fn background_row(
+        &mut self,
+        r: &str,
+        x: &ShellRun,
+        indent: usize,
+        inner: usize,
+        picked: bool,
+        from: usize,
+    ) {
+        let t = self.since(x.start);
+        let mut tail = paint(C_ORANGE, &format!("{} {t}", spin(self.o.tick)));
+        let label = x.label();
+        if !label.is_empty() {
+            tail.push(faint(" · "));
+            tail.push(dim(&truncate_cells(&label, 24)));
+        }
+        tail.push(faint(" · "));
+        tail.push(button(sub("✕ stop"), "stop", r));
+        tail.push(faint(" · "));
+        let done = if x.send_done {
+            paint(C_BLUE, "☑ send when done")
+        } else {
+            sub("☐ send when done")
+        };
+        tail.push(button(done, "senddone", r));
+        let cmd = x.command.lines().next().unwrap_or("").trim();
+        let more = if x.command.trim().lines().count() > 1 { " …" } else { "" };
+        let lead = paint(if picked { C_ORANGE } else { C_FAINT }, "◐ ");
+        let room = (inner + 4).saturating_sub(tail.width() + 4 + more.len());
+        let head = lead
+            .and(faint("$ "))
+            .and(quiet_tint(&truncate_cells(cmd, room.max(8))))
+            .and(dim(more));
+        let gap = (inner + 4).saturating_sub(head.width() + tail.width()).max(2);
+        let l = self.sp(indent - 1).and(head).and(blanks(gap)).and(tail);
+        let top = if self.box_under_row { "" } else { r };
+        self.add(top, Color::Default, l, Txt::new());
+        self.own(r, from);
+    }
+
     /// A box whose commands are being edited (✎ edit): its frame lit,
     /// "editing" on its top edge, the text as it stands with the cursor
     /// on it, and on its foot what enter, a new line and esc do.
@@ -545,8 +604,8 @@ impl Drawer<'_> {
 }
 
 /// A finished run's buttons on its foot, in words as long as tier says
-/// (0 the longest, 2 marks alone): → send it to the agent, ✎ draft it in
-/// your message first, ≈ send a summary, ↻ run it again, ✕ let it go.
+/// (0 the longest, 2 marks alone): → send it to the agent, + send it with
+/// your next message, ✎ draft it in your message first, ≈ send a summary, ↻ run it again, ✕ let it go.
 /// One done says so in their place; a summary being made, that it is.
 fn foot_buttons(x: &ShellRun, r: &str, tier: usize) -> Txt {
     let pick = |w: [&'static str; 3]| w[tier.min(2)];
@@ -556,6 +615,25 @@ fn foot_buttons(x: &ShellRun, r: &str, tier: usize) -> Txt {
         button(
             paint(C_BLUE, pick(["→ send to agent", "→ send", "→"])),
             "send",
+            r,
+        )
+    };
+    // + with my next message: waits to go in front of your next words.
+    let attach = if x.told {
+        Txt::new()
+    } else if x.attached {
+        button(
+            paint(
+                C_BLUE,
+                pick(["✓ with your next message", "✓ with next", "✓+"]),
+            ),
+            "attach",
+            r,
+        )
+    } else {
+        button(
+            sub(pick(["+ with my next message", "+ with next", "+"])),
+            "attach",
             r,
         )
     };
@@ -574,8 +652,11 @@ fn foot_buttons(x: &ShellRun, r: &str, tier: usize) -> Txt {
     let again = button(sub(pick(["↻ again", "↻", "↻"])), "again", r);
     let gone = button(sub("✕"), "clear", r);
     let mut out = Txt::new();
-    for (i, b) in [send, draft, summary, again, gone].into_iter().enumerate() {
-        if i > 0 {
+    for b in [send, attach, draft, summary, again, gone] {
+        if b.is_empty() {
+            continue;
+        }
+        if !out.is_empty() {
             out = out.and_raw("  ");
         }
         out = out.and(b);
