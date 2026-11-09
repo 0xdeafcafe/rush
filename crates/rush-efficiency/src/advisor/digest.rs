@@ -35,6 +35,9 @@ pub struct Input {
     /// Earlier candidates Opus hasn't checked yet: checked before new ones
     /// worth less.
     pub pending: Vec<Finding>,
+    /// Emeritus's handovers inside the view and what each saved, by
+    /// estimate (report::savings). Rust-only.
+    pub handovers: Vec<crate::report::Saving>,
 }
 
 /// The input in words.
@@ -196,6 +199,34 @@ pub fn digest(input: &Input) -> String {
         );
     }
 
+    // Rust-only: said only when there were handovers.
+    if !input.handovers.is_empty() {
+        let (saved, usd) = input
+            .handovers
+            .iter()
+            .fold((0, 0.0), |(t, u), s| (t + s.tokens, u + s.usd));
+        p!(
+            "Emeritus handovers: {}, saving ≈{} tokens{} by estimate. {}",
+            input.handovers.len(),
+            tokens(saved),
+            if usd > 0.0 {
+                format!(" (≈{})", money(usd))
+            } else {
+                String::new()
+            },
+            crate::report::SAVING_METHOD
+        );
+        for s in &input.handovers {
+            let h = &s.h;
+            p!(
+                "- {}; threshold {}, lineage {}",
+                crate::report::handover_line(s),
+                tokens(h.threshold),
+                h.lineage
+            );
+        }
+    }
+
     let status = |id: &str| input.found.get(id).map_or(Status::Off, |f| f.status);
     let mut on = Vec::new();
     let mut half = Vec::new();
@@ -341,6 +372,34 @@ mod tests {
             assert!(d.contains(want), "digest lacks {want:?}:\n{d}");
         }
         assert!(d.len() <= 8 << 10, "digest is {} bytes", d.len());
+        assert!(!d.contains("Emeritus"), "no handovers, no line:\n{d}");
+        input.handovers = vec![crate::report::Saving {
+            at: now,
+            h: crate::events::Handover {
+                from: "a1".into(),
+                to: "b1".into(),
+                from_context: 307_000,
+                to_context: 22_000,
+                threshold: 300_000,
+                lineage: 2,
+                subagent: true,
+                ..Default::default()
+            },
+            transcript: "/p/b.jsonl".into(),
+            requests: 140,
+            per_request: 285_000,
+            tokens: 39_900_000,
+            usd: 19.95,
+        }];
+        let d = digest(&input);
+        for want in [
+            "Emeritus handovers: 1, saving ≈39.9M tokens (≈$19.95) by estimate. An estimate:",
+            "a1 → b1",
+            ", subagent, ≈285k a request less × 140 requests",
+            "threshold 300k, lineage 2",
+        ] {
+            assert!(d.contains(want), "digest lacks {want:?}:\n{d}");
+        }
         assert_eq!(span(40 * 60), "40m");
         assert_eq!(span(98 * 3600 + 15 * 60), "98h15m");
     }

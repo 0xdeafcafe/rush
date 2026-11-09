@@ -33,6 +33,7 @@ pub mod image;
 pub mod install;
 pub mod memory;
 pub mod price;
+pub mod report;
 pub mod scan;
 pub mod source;
 pub mod store;
@@ -57,6 +58,7 @@ pub use gain::{Gain, rtk_gains};
 pub use install::Plan;
 pub use memory::memory_findings;
 pub use price::cache_read_price;
+pub use report::{Report, SAVING_METHOD, Saving, efficiency_cmd};
 pub use scan::{
     BIG_RESULT, Bucket, Compact, FILE_REV, File, N_TOOLS, NEAR_WINDOW, TOOL_BASH, TOOL_EDIT,
     TOOL_MCP, TOOL_NAMES, TOOL_OTHER, TOOL_READ, TOOL_SEARCH, Use, looks, scan,

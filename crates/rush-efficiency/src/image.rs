@@ -9,7 +9,9 @@
 //! aspect, to the largest size whose padded edges fit the model's long
 //! edge and whose tokens fit its budget: 2,576 px and 4,784 tokens on
 //! Claude 4.7 and later (and Fable, Mythos), 1,568 px and 1,568 tokens on
-//! the rest. DESIGN.md says the same.
+//! the rest. DESIGN.md says the same. This is the one copy of the rule:
+//! the context guard's copies and contact sheets (rush-bundled
+//! contextguard/images.rs) count with it too.
 
 /// One patch of an image: a visual token covers PATCH × PATCH pixels.
 pub const PATCH: i64 = 28;
