@@ -568,24 +568,6 @@ fn narrow_the_run_shows_under_the_list() {
     assert!(under.contains("plan the next piece"), "{got}");
 }
 
-/// Nothing in the list picked, ↑ as ↓ picks its top row, not the one at
-/// its foot by the box.
-#[test]
-fn up_with_nothing_picked_picks_the_lists_top() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = model(&d);
-    m.w = 180;
-    views::show_view(&mut m, KEY, "subagents");
-    m.session.as_mut().unwrap().sel.clear();
-    let _ = m.frame();
-    let refs = conn(&mut m, KEY).vs.refs.clone();
-    let top = refs.iter().find(|r| !r.is_empty()).cloned().expect("rows");
-    let foot = refs.iter().rev().find(|r| !r.is_empty()).cloned().unwrap();
-    assert_ne!(top, foot, "one row only: {refs:?}");
-    press(&mut m, "up");
-    assert_eq!(sel(&m), top);
-}
-
 /// A workflow agent tried again: its earlier try folds under the try
 /// that replaced it, opened by a click or enter, never a row of its own
 /// while the workflow runs.
@@ -1007,29 +989,28 @@ fn a_phase_counts_an_agent_once_however_often_it_was_tried() {
     assert!(workflow_strip(&[p], 0).plain().contains("Port 2/3"));
 }
 
-/// The lowest row with a ref in sight, as the view was last drawn.
-fn by_the_box(m: &mut Model) -> String {
+/// The highest row with a ref in sight, as the view was last drawn.
+fn top_in_sight(m: &mut Model) -> String {
     conn(m, KEY)
         .vs
         .refs
         .iter()
-        .rev()
         .find(|r| !r.is_empty())
         .cloned()
         .expect("a row in sight")
 }
 
-/// ↑ from the box picks the row in sight by the box, as the
-/// conversation's ↑ does, not the list's last row (the oldest run
-/// finished), however far below that is.
+/// ↑ from the box picks the list's top row in sight, as ↓ does: not the
+/// row by the box, as the conversation's ↑ does, nor the list's last row
+/// (the oldest run finished), however far below that is.
 #[test]
-fn up_from_the_box_picks_the_row_by_it() {
+fn up_from_the_box_picks_the_lists_top() {
     let d = tempfile::tempdir().unwrap();
     let mut m = model(&d);
     views::show_view(&mut m, KEY, "subagents");
     views::body(&mut m, 120, 8).unwrap();
     assert_eq!(conn(&mut m, KEY).vs.top, 0);
-    let by_box = by_the_box(&mut m);
+    let top = top_in_sight(&mut m);
     let last = conn(&mut m, KEY)
         .vs
         .all_refs
@@ -1038,16 +1019,16 @@ fn up_from_the_box_picks_the_row_by_it() {
         .find(|r| !r.is_empty())
         .cloned()
         .unwrap();
-    assert_ne!(by_box, last, "the whole list is in sight");
+    assert_ne!(top, last, "one row only");
     press(&mut m, "up");
-    assert_eq!(sel(&m), by_box);
+    assert_eq!(sel(&m), top);
     views::body(&mut m, 120, 8).unwrap();
     assert_eq!(conn(&mut m, KEY).vs.top, 0, "the view jumped");
 }
 
 /// The wheel moves the subagents view and leaves the pick where it is,
 /// out of sight, as the conversation's wheel does; drawn again (the runs
-/// read again) it stays put; ↑ then picks the row in sight by the box.
+/// read again) it stays put; ↑ then picks the top row in sight.
 #[test]
 fn the_wheel_leaves_the_pick() {
     use crate::frame::{Mouse, Out};
@@ -1084,9 +1065,9 @@ fn the_wheel_leaves_the_pick() {
         assert!(!conn(&mut m, KEY).vs.refs.contains(&x));
         assert_eq!(sel(&m), x, "the wheel moved the pick");
     }
-    let by_box = by_the_box(&mut m);
+    let top = top_in_sight(&mut m);
     press(&mut m, "up");
-    assert_eq!(sel(&m), by_box);
+    assert_eq!(sel(&m), top);
     views::body(&mut m, 120, 8).unwrap();
     assert_eq!(conn(&mut m, KEY).vs.top, 0, "the view jumped");
 }

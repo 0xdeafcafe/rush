@@ -110,8 +110,10 @@ fn a_long_run_shows_its_end() {
     assert_eq!(whole.turns.len(), 1400, "what came before not read");
     assert!(!whole.partial);
     let all = text(&m.frame());
+    let at = format!("answer {shown}");
     assert!(
-        all.contains(&format!("answer {shown} ")),
+        all.lines()
+            .any(|l| l.ends_with(&at) || l.contains(&format!("{at} "))),
         "moved off answer {shown}:\n{all}"
     );
     assert!(!all.contains("answer 1399"), "back at its end:\n{all}");
