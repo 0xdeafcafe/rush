@@ -249,11 +249,30 @@ fn held_config(m: &mut crate::model::Model) -> Option<&mut rush_state::Config> {
 }
 
 /// Writes a whole copy of the config the UI holds (Settings', the
-/// accounts'), never in the middle of a queued change being written: the
-/// copy has every queued change made in it already.
-pub fn write_store(s: &rush_state::Store) -> std::io::Result<()> {
-    let _g = KEEPING.lock().unwrap_or_else(|e| e.into_inner());
-    s.save_config()
+/// accounts'), off the UI thread: queued as a change that puts the copy
+/// in place, so it lands after the changes queued before it and before
+/// those after (the copy has every one queued so far in it already). A
+/// failed write is flashed after `what`. Rust-only: it was written on
+/// the UI thread, which could wait there for another thread's write of
+/// config.json (KEEPING) besides its own.
+pub fn save_whole(m: &mut crate::model::Model, what: &'static str) {
+    if crate::accounts::read_only(m) {
+        return;
+    }
+    let Some(c) = held_config(m).map(|c| c.clone()) else {
+        return;
+    };
+    WAITING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push_back(Box::new(move |dst| *dst = c.clone()));
+    m.later(write_waiting, move |m, r| match r {
+        Ok(()) => crate::frame::Out::Idle,
+        Err(e) => {
+            m.fail(&format!("{what}: {e}"));
+            crate::frame::Out::Draw
+        }
+    });
 }
 
 /// Changes config.json as f says, for off the UI thread: each change is

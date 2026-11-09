@@ -171,7 +171,7 @@ fn tabs(m: &Model, key: &str, id: &str) -> Vec<&'static str> {
     else {
         return t;
     };
-    if !rush_ui_base::changes::changes(&d.view.sess).is_empty() {
+    if !d.changes().is_empty() {
         t.push("changes");
     }
     if !d.view.sess.tasks.is_empty() {
@@ -362,7 +362,7 @@ fn changes(m: &mut Model, key: &str, id: &str, w: usize) -> Vec<Line> {
     else {
         return Vec::new();
     };
-    let mut files = rush_ui_base::changes::changes(&d.view.sess);
+    let mut files = d.changes().to_vec();
     files.sort_by_key(|f| std::cmp::Reverse(f.add + f.del));
     let (a, del) = files
         .iter()

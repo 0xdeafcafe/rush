@@ -12,6 +12,7 @@ pub mod event;
 pub mod failure;
 pub mod guard;
 pub mod name;
+pub mod offui;
 pub mod par;
 pub mod sandbox;
 pub mod subcache;

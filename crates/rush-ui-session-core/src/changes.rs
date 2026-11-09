@@ -103,7 +103,11 @@ pub fn of_open(m: &mut Model) -> Arc<Vec<FileChange>> {
 /// under its git root (its folder until git is read), and its own files
 /// outside it, such as memory notes, plans and scratch. With no folder
 /// known, every file is the project's (ProjectChanges).
-pub fn project_changes(m: &mut Model) -> (Vec<FileChange>, Vec<FileChange>) {
+/// Split once for the edits as of_open last worked them out and the root
+/// they're split by, then shared: the side column and the tab strip ask
+/// each frame, and a split copied every file's patches and contents
+/// (Rust-only).
+pub fn project_changes(m: &mut Model) -> (Changed, Changed) {
     let all = of_open(m);
     let dir = m
         .session
@@ -111,14 +115,27 @@ pub fn project_changes(m: &mut Model) -> (Vec<FileChange>, Vec<FileChange>) {
         .map(|v| open_dir(&v.sess))
         .unwrap_or_default();
     if dir.is_empty() || all.is_empty() {
-        return (all.to_vec(), Vec::new());
+        return (all, Changed::default());
     }
     let mut root = tree_of(m, &dir).root;
     if root.is_empty() {
         root = dir;
     }
-    all.iter().cloned().partition(|fc| inside(&root, &fc.path))
+    if let Some((of, r, p, o)) = &m.kept::<Trees>().split
+        && Arc::ptr_eq(of, &all)
+        && *r == root
+    {
+        return (p.clone(), o.clone());
+    }
+    let (p, o): (Vec<FileChange>, Vec<FileChange>) =
+        all.iter().cloned().partition(|fc| inside(&root, &fc.path));
+    let (p, o) = (Arc::new(p), Arc::new(o));
+    m.kept::<Trees>().split = Some((all, root, p.clone(), o.clone()));
+    (p, o)
 }
+
+/// Edits shared between the frames that draw them.
+pub type Changed = Arc<Vec<FileChange>>;
 
 /// The lines and files project_changes counts for the project, without
 /// copying its changes out: what the header says each frame.
@@ -202,7 +219,7 @@ pub fn own_changes(m: &mut Model, key: &str) -> (Vec<FileChange>, Vec<FileChange
     let read: HashSet<String> = super::memory::memory_known(m, key)
         .map(|r| r.files.into_iter().map(|f| f.path).collect())
         .unwrap_or_default();
-    own.into_iter().partition(|fc| {
+    own.iter().cloned().partition(|fc| {
         mem_tab
             && (read.contains(&fc.path)
                 || rush_ui_projects_machine::memory::in_memory_dir(&fc.path))
@@ -266,6 +283,9 @@ pub struct Trees {
     /// The open session's edits, and the session and step version they're
     /// of.
     pub memo: Option<(Ver, Arc<Vec<FileChange>>)>,
+    /// memo's edits split by project_changes, with the root it split them
+    /// by: those in the project and the rest.
+    split: Option<(Changed, String, Changed, Changed)>,
     /// Paths with their symlinks resolved, and those being resolved
     /// (realPath's cache).
     real: HashMap<String, String>,

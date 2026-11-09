@@ -194,6 +194,7 @@ pub fn tail_span_chunked<R: Read + Seek>(
 /// The tail of the file at path, as tail_span: its span, and the file
 /// open, for reading it.
 pub fn file_tail(path: &std::path::Path, most: u64) -> io::Result<(std::fs::File, TailSpan)> {
+    crate::offui::check("a file's tail read");
     let mut f = std::fs::File::open(path)?;
     let size = f.metadata()?.len();
     let span = tail_span(&mut f, size, most)?;

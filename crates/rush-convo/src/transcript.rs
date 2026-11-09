@@ -210,6 +210,7 @@ impl Tail {
     /// Applies whatever has been appended since the last call and says
     /// whether anything changed. Nothing new costs one stat.
     pub fn read(&mut self, sess: &mut Session) -> io::Result<bool> {
+        rush_core::offui::check("a transcript read");
         let meta = std::fs::metadata(&self.path)?;
         let size = meta.len();
         if rewritten(&mut self.seen, self.off, &meta) {
@@ -306,6 +307,7 @@ impl Tail {
     /// one short step. `Fresh::more` says there's more to fetch now. A line
     /// longer than a slice is kept until the slice that ends it.
     pub fn fetch_most(&mut self, most: usize) -> io::Result<Fresh> {
+        rush_core::offui::check("a transcript read");
         let mut fresh = Fresh {
             reset: false,
             more: false,

@@ -899,6 +899,7 @@ impl Client {
 
     /// Connects saying hello as a client of protocol proto; 0 says none.
     pub fn dial_proto(id: &str, proto: i64) -> Result<Client> {
+        rush_core::offui::check("a dial of a session's host");
         let sock = sock_path(id);
         rush_core::sandbox::guard("a host's socket", &sock);
         let c = UnixStream::connect(sock)?;

@@ -53,6 +53,7 @@ impl std::fmt::Display for Error {
 
 /// Runs cmd for its stdout.
 pub fn output_within(cmd: &mut Command, limit: Duration) -> Result<Out, Error> {
+    rush_core::offui::check("a program run");
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -63,6 +64,7 @@ pub fn output_within(cmd: &mut Command, limit: Duration) -> Result<Out, Error> {
 
 /// Runs cmd with stdout and stderr together, as Go's `CombinedOutput`.
 pub fn combined_within(cmd: &mut Command, limit: Duration) -> Result<Out, Error> {
+    rush_core::offui::check("a program run");
     let (r, w) = std::io::pipe().map_err(Error::Start)?;
     cmd.stdin(Stdio::null())
         .stdout(w.try_clone().map_err(Error::Start)?)

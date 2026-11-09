@@ -251,7 +251,7 @@ impl MemReviewSheet {
         (self.busy, self.err) = (true, String::new());
         if m.sender().is_none() {
             // No loop: done at once, while this sheet has the key.
-            let r = f();
+            let r = rush_core::offui::off(f);
             self.landed(&path, what, r);
             return Out::Draw;
         }

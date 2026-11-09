@@ -166,8 +166,12 @@ pub fn start(
     screens::cmdbar::linkkinds::start(m);
     // The conversation's pictures, made off the UI (convo.Picture).
     screens::session_cards::pictures::start(m);
-    // Anything holding the UI thread over 40 ms is noted in stalls.log.
-    frame::uistall::watch_ui(config::dir().join("stalls.log"));
+    // Anything holding the UI thread over 25 ms is logged as a ui-stall.
+    frame::uistall::watch_ui();
+    // What's installed and its profiles are asked on keys and frames:
+    // looked for again in the background once stale, never on the UI
+    // thread (a search of PATH for every agent's program, each 3 min).
+    m.reg.never_wait_from_now();
     // Hosted leaves past conversations out of each reading until its
     // list is shown (NewHosted's loader.SkipPast(true)). Either way the
     // UI keeps the loader's handle, to link what a session spawned

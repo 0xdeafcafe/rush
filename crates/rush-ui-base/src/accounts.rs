@@ -364,11 +364,7 @@ pub fn save(m: &mut Model) {
     if accounts(m).read_only {
         return;
     }
-    if let Some(s) = accounts(m).store.as_ref()
-        && let Err(e) = crate::config::write_store(s)
-    {
-        m.fail(&format!("couldn't save rush's settings: {e}"));
-    }
+    crate::config::save_whole(m, "couldn't save rush's settings");
 }
 
 /// The store, loaded now when it isn't yet: a key wants it.

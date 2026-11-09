@@ -20,7 +20,7 @@ use rush_sys::fswait::{Stop, Watcher};
 
 use super::model::View;
 use super::panel::ViewsState;
-use super::{plugin_draws_views, shown_views, view_summary};
+use super::{plugin_draws_views, shown_views};
 use crate::frame::Out;
 use crate::model::Model;
 use crate::worker::Note;
@@ -125,7 +125,20 @@ pub fn summary_of(m: &Model, a: &Agent) -> Option<View> {
     if id.is_empty() {
         return None;
     }
-    view_summary(&views_of(m, id)).cloned()
+    // Picked where they're kept: each row asks every frame, and a copy of
+    // every view to pick one went with each ask (Rust-only).
+    if views_off(m) {
+        return None;
+    }
+    let sv = m.kept.peek::<Views>().and_then(|v| v.by_id.get(id))?;
+    let shown = |v: &&View| v.by.is_empty() || plugin_draws_views(m, &v.by);
+    [false, true].into_iter().find_map(|plugins| {
+        sv.list
+            .iter()
+            .filter(shown)
+            .find(|v| !v.summary.is_empty() && v.by.is_empty() != plugins)
+            .cloned()
+    })
 }
 
 /// Keeps what was read of id: whether it differs from what was kept.

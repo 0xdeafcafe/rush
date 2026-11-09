@@ -215,11 +215,7 @@ pub fn show_detail(m: &mut Model, key: &str, id: &str, src: DetailSrc) {
     if let Some(s) = seed {
         view.seed(s);
     }
-    conn(m, key).runs.detail = Some(Detail {
-        id: id.to_string(),
-        src,
-        view,
-    });
+    conn(m, key).runs.detail = Some(Detail::new(id.to_string(), src, view));
     super::subs::kick(m, key);
     super::subs::refresh(m, key);
 }

@@ -477,7 +477,10 @@ impl Model {
         if let Some(id) = journal.filter(|id| !id.is_empty()) {
             let r#gen = self.r#gen;
             if self.tx.is_none() {
-                v.exchanges = rush_host::exchange_journal::read_exchanges(&id).into();
+                // No loop to hand it to: the worker's part, run here.
+                v.exchanges =
+                    rush_core::offui::off(|| rush_host::exchange_journal::read_exchanges(&id))
+                        .into();
             } else {
                 self.later(
                     move || rush_host::exchange_journal::read_exchanges(&id),
@@ -549,7 +552,7 @@ impl Model {
                 };
             }
             None => {
-                v.read_now();
+                rush_core::offui::off(|| v.read_now());
                 v.restore_exchanges(Vec::new());
             }
         }
@@ -1772,8 +1775,40 @@ impl Model {
     }
 }
 
-impl App<Note> for Model {
-    fn update(&mut self, msg: Msg<Note>) -> Step {
+impl Model {
+    /// What a message is, for the stall watch: cheap, no text made.
+    fn stall_of(msg: &Msg<Note>) -> (uistall::Phase, uistall::What) {
+        use uistall::{Phase, What};
+        match msg {
+            Msg::Input(Event::Key { code, mods } | Event::KeyRepeat { code, mods }) => {
+                (Phase::Key, What::Key(*code, *mods))
+            }
+            Msg::Input(Event::Mouse { kind, .. }) => (Phase::Mouse, What::Mouse(*kind)),
+            Msg::Input(Event::Paste(_)) => (Phase::Key, What::Named("paste")),
+            Msg::Input(Event::Resize(..)) => (Phase::Msg, What::Named("resize")),
+            Msg::Input(_) => (Phase::Msg, What::Named("focus")),
+            Msg::App(n) => (
+                Phase::Msg,
+                What::Named(match n {
+                    Note::Fleet(_) => "fleet",
+                    Note::Preview(..) => "preview",
+                    Note::Tail { .. } => "tail",
+                    Note::TailFailed { .. } => "tail-failed",
+                    Note::End { .. } => "end",
+                    Note::Seeded { .. } => "seeded",
+                    Note::Whole { .. } => "whole",
+                    Note::Apply(_) => "apply",
+                }),
+            ),
+        }
+    }
+
+    /// The open session's key, for a stall's line.
+    fn stall_session(&self) -> Option<&str> {
+        self.session.as_ref().map(|v| v.key.as_str())
+    }
+
+    fn handle(&mut self, msg: Msg<Note>) -> Step {
         // A key let go is only push-to-talk's: nothing else changes.
         if let Msg::Input(Event::KeyUp { code, mods }) = msg {
             return match self.ext.calls.dictation_released {
@@ -1781,10 +1816,6 @@ impl App<Note> for Model {
                 None => Step::Idle,
             };
         }
-        let _busy = uistall::busy(match &msg {
-            Msg::Input(_) => "input",
-            Msg::App(_) => "note",
-        });
         // Whatever changes a box, undo can take back (frame/keepundo.rs).
         let g = self.guard_boxes();
         if let Msg::Input(Event::Key { .. } | Event::Mouse { .. } | Event::Paste(_)) = &msg {
@@ -1846,8 +1877,7 @@ impl App<Note> for Model {
         st
     }
 
-    fn draw(&mut self, c: &mut Canvas) {
-        let _busy = uistall::busy("frame");
+    fn paint(&mut self, c: &mut Canvas) {
         self.w = c.width() as usize;
         self.h = c.height() as usize;
         crate::style::take_turn();
@@ -1873,6 +1903,25 @@ impl App<Note> for Model {
         self.turn = crate::style::take_turn()
             .map(|d| drawn + Duration::from_millis(d as u64) + Duration::from_millis(5));
     }
+}
+
+impl App<Note> for Model {
+    fn update(&mut self, msg: Msg<Note>) -> Step {
+        let _ui = rush_core::offui::ui_thread();
+        let (phase, what) = Self::stall_of(&msg);
+        let began = uistall::begin();
+        let st = self.handle(msg);
+        uistall::end(began, phase, what, || self.stall_session());
+        st
+    }
+
+    fn draw(&mut self, c: &mut Canvas) {
+        let _ui = rush_core::offui::ui_thread();
+        let began = uistall::begin();
+        self.paint(c);
+        let what = uistall::What::Named("frame");
+        uistall::end(began, uistall::Phase::Draw, what, || self.stall_session());
+    }
 
     fn wake_at(&self) -> Option<Instant> {
         let at = [self.draw_at(), self.turn, self.regroup, self.timer_due()]
@@ -1886,7 +1935,12 @@ impl App<Note> for Model {
     }
 
     fn wake(&mut self) -> Step {
-        self.wake_on(Instant::now())
+        let _ui = rush_core::offui::ui_thread();
+        let began = uistall::begin();
+        let st = self.wake_on(Instant::now());
+        let what = uistall::What::Named("wake");
+        uistall::end(began, uistall::Phase::Tick, what, || self.stall_session());
+        st
     }
 
     fn title(&self) -> Option<&str> {

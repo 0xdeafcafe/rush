@@ -833,6 +833,53 @@ frame; `agent_of` making every phase per run) and the Changes tab's
 count (copying every file's patches out each frame); see
 `cargo bench -p rush-convo --bench jobs`.
 
+### Nothing that waits on the UI thread (Rust-only)
+
+The model's `update`, `draw` and `wake` (rush-ui-base `model.rs`) mark
+their thread as the UI's for the turn (`rush_core::offui::ui_thread`).
+rush's own helpers for what waits call `offui::check`, which panics in
+a debug build (tests included) on a marked thread: a transcript's read
+(`rush_convo::Tail::read`, `fetch_most`), a file's tail
+(`rush_core::tailread::file_tail`), a program run
+(`rush_sys::cmd::output_within`, `combined_within`), the process table
+(`rush_sys::proc::snapshot`) and a dial of a session's host
+(`rush_host::client::Client::dial_proto`); `offui::fs` wraps std::fs's
+reads the same way for code that has no helper. With no loop to hand
+work to (tests, `--render`), `Model::later` runs its work at once with
+the mark lifted (`offui::off`), as do the view's own read and the other
+no-loop stand-ins for a worker. A release build pays a thread-local
+read at each check. Its stalls are logged ("Performance testing", UI
+stalls).
+
+Moved off it (2026-11-09): what's installed and its profiles
+(`Registry::never_wait_from_now` as the view starts: the account rows
+read every agent's profiles from disk each frame, and a PATH search ran
+every 3 min); Providers' logins' health (read and parsed each frame it
+changed); whole config.json writes (now queued with `config::save`'s);
+the live mirror's close (it took a lock the typist holds across a write
+to the session); another agent's run shown whole (its history applied
+on the UI thread each second). Kept, not worked out again each frame: a
+run's edits (`Detail::changes`), the open session's split into the
+project's and the rest, a list row's view summary, the pairing QR code;
+the dock's `job_subs` looks runs up rather than scanning them (`cargo
+bench -p rush-ui-session-core --bench subs`).
+
+Still on it, to move (the stall log says which matter):
+- `Store::load` the first time the store's asked for (Settings opened
+  before the accounts read it), and the accounts' `keep_before` copy
+  of config.json without write-behind: not yet checked by `offui`.
+- The command bar's This chat, `Session::search_top` over the open
+  conversation on each key (memoized, benched by `--bench search`), and
+  again on each batch the transcripts' search sends.
+- A hand-off's summary of the open session (`switch.rs`
+  `conversation_later`), once per hand-off.
+- A shell box's fork (`shellbox.rs` `start`), the image paths a typed
+  space or paste stats and copies (`look_disk`, `ImageRefs::keep_in`),
+  the git remotes the prompt's offer reads once a project.
+- The dock's other passes over every run each frame (`Runs::rebuild`'s
+  copy of the listed runs, `running` and `state` asked several times):
+  CPU, not waiting; benched by `--bench subs`.
+
 ## The host
 
 `rush host run <id>` serves one session (rush-host). Its files
@@ -3420,6 +3467,17 @@ Go rush is gone from the tree; its last version is the `go-final` tag
   not by its profile, session, folder and state held again beside the
   row: 13.7 → 13.4 MiB and 117,209 → 110,184 allocations kept. The rows
   themselves are the rest of it (about 2.3 KiB a row).
+- UI stalls (Rust-only, rush-ui-base `frame/uistall.rs`): every key,
+  click, message, tick and frame the loop hands the model is timed (an
+  Instant pair a turn); one that holds the UI thread past 25 ms is
+  logged to rush's events log as kind `ui-stall`, with `phase`
+  (key/mouse/msg/tick/draw), `what` (the key's name, a letter typed being
+  `char`; the message's kind; `frame`), `piece` (the function whose
+  `Model::later` apply or `Model::after` timer took longest that turn),
+  `open` (the session open) and `ms`. Ten lines in a burst, then one
+  each 6 s; the stalls not logged are counted in the next line's
+  `dropped`. The live UI's numbers: `rush events -k ui-stall --since 1h`.
+  The Network sheet counts them and names the longest.
 - Footprint: `/usr/bin/footprint -p <pid>` idle on the list, and with the
   largest transcript under `~/.claude/projects` open; side by side with Go.
 - Idle: `top -l` CPU and wakeups over 60 s with nothing changing.

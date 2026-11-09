@@ -607,6 +607,21 @@ const QR_EYE: Color = Color::Rgb(190, 92, 60);
 /// zone of cream, and the rush bottle in the middle, one module to its
 /// pixel, which the code's error correction reads past (qrLines).
 pub fn qr_lines(text: &str) -> Vec<Line> {
+    // The sheet draws it each frame: encoded once for the address it
+    // shows (Rust-only).
+    thread_local! {
+        static LAST: std::cell::RefCell<Option<(String, Vec<Line>)>> =
+            const { std::cell::RefCell::new(None) };
+    }
+    if let Some(l) = LAST.with_borrow(|c| c.as_ref().filter(|c| c.0 == text).map(|c| c.1.clone())) {
+        return l;
+    }
+    let l = qr_lines_now(text);
+    LAST.with_borrow_mut(|c| *c = Some((text.to_string(), l.clone())));
+    l
+}
+
+fn qr_lines_now(text: &str) -> Vec<Line> {
     let mut c = qr::encode(text, qr::Level::H);
     if c.as_ref().is_ok_and(|c| c.size >= 45) {
         // From version 7 an alignment pattern sits in the middle, under

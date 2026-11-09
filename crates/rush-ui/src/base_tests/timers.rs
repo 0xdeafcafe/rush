@@ -46,3 +46,25 @@ fn after_waits_on_the_loops_deadline() {
     assert_eq!(m.kept::<Ran>().0, [1, 2, 3]);
     assert!(m.timer_due().is_none());
 }
+
+/// What the model is handed (a message, a frame) runs with the UI
+/// thread marked, so a blocking helper called there panics in tests;
+/// later's work, run at once with no loop, runs with it lifted.
+#[test]
+fn the_ui_thread_is_marked_while_the_model_has_it() {
+    use rush_draw::Msg;
+    let mut m = crate::kit::model(80, 24);
+    assert!(!rush_core::offui::on_ui());
+    m.update(Msg::App(Note::Apply(Box::new(|m: &mut crate::Model| {
+        assert!(rush_core::offui::on_ui(), "a message is the UI thread's");
+        m.later(rush_core::offui::on_ui, |m, marked| {
+            assert!(!marked, "later's work is off the UI thread");
+            assert!(rush_core::offui::on_ui(), "its apply is on it");
+            m.kept::<Ran>().0.push(1);
+            Out::Idle
+        });
+        Out::Idle
+    }))));
+    assert_eq!(m.kept::<Ran>().0, [1]);
+    assert!(!rush_core::offui::on_ui(), "the mark goes with the turn");
+}

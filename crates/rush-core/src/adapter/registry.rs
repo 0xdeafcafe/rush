@@ -846,6 +846,27 @@ impl Registry {
         self.look();
     }
 
+    /// [`Registry::never_wait`], with the first look made here and now
+    /// (as rush's view starts, before its loop), so nothing reads as not
+    /// installed meanwhile and the profiles are there from the start.
+    pub fn never_wait_from_now(&self) {
+        let paths = Arc::new(self.look_all());
+        {
+            let mut f = lock(&self.0.found);
+            f.paths = Some(paths);
+            f.at = Some(Instant::now());
+        }
+        // Read with what was just found, as the background look does.
+        let homes = self
+            .all()
+            .iter()
+            .map(|a| (a.kind(), a.profiles()))
+            .collect();
+        let mut f = lock(&self.0.found);
+        f.homes = homes;
+        f.no_wait = true;
+    }
+
     /// Every registered agent's program, found at most every INSTALLED_FOR.
     fn look(&self) -> Arc<HashMap<Kind, String>> {
         let mut f = lock(&self.0.found);

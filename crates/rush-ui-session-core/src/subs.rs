@@ -418,6 +418,9 @@ pub struct Reader {
     full: HashMap<String, (u64, Ms, Option<ReadOn>)>,
     /// The process table last read, for CPU; let go when nothing's open.
     table: Option<rush_sys::proc::Table>,
+    /// The run shown whole that its adapter reads back: its id, and how
+    /// many events and bytes its history had when last built.
+    hist: Option<(String, usize, u64)>,
 }
 
 /// Where the run shown whole is read from (subTail, subPeek; a spawned
@@ -437,6 +440,37 @@ pub struct Detail {
     pub id: String,
     pub src: DetailSrc,
     pub view: crate::session::SessionView,
+    /// Its edits, worked out again only once a step of it changed: the
+    /// run's screen asks for them several times a frame (its tabs, the
+    /// Changes tab), and each walk copies every patch (Rust-only).
+    pub edits:
+        std::cell::RefCell<Option<(super::changes::Ver, Arc<Vec<super::changes::FileChange>>)>>,
+}
+
+impl Detail {
+    pub fn new(id: String, src: DetailSrc, view: crate::session::SessionView) -> Detail {
+        Detail {
+            id,
+            src,
+            view,
+            edits: Default::default(),
+        }
+    }
+
+    /// Its edits by file (changes), as last worked out while its steps
+    /// stand as they were.
+    pub fn changes(&self) -> Arc<Vec<super::changes::FileChange>> {
+        let s = &self.view.sess;
+        let at = super::changes::memo_key_of(s, &Default::default());
+        if let Some((k, c)) = &*self.edits.borrow()
+            && *k == at
+        {
+            return c.clone();
+        }
+        let c = Arc::new(super::changes::changes(s));
+        *self.edits.borrow_mut() = Some((at, c.clone()));
+        c
+    }
 }
 
 /// What a read of the run shown whole brought.
@@ -450,7 +484,11 @@ enum DetailGot {
     End(rush_convo::Fresh),
     /// The whole of a long run whose end showed first.
     Whole(Box<Session>),
-    Events(Vec<rush_core::event::Event>),
+    /// Another agent's run read back by its adapter, built here off the
+    /// UI thread (Rust-only: its events were applied on the UI thread,
+    /// all of them, each second it worked); None when it reads as the
+    /// last reading did.
+    History(Option<Box<Session>>),
     Failed(String),
 }
 
@@ -570,8 +608,8 @@ struct Ask {
     /// The runs whose worktree isn't known yet, and the session's folder.
     wt_for: Vec<(String, String)>,
     cwd: String,
-    /// The run shown whole.
-    detail: Option<(String, DetailSrc)>,
+    /// The run shown whole, and whether its view has a reading yet.
+    detail: Option<(String, DetailSrc, bool)>,
     /// The runs to read whole: id, path, whether it's a spawned agent's
     /// own session rather than a subagent's sidechain, and the kind of
     /// agent that reads it back when it isn't in Claude Code's format.
@@ -627,7 +665,7 @@ impl Got {
 /// half-written: it starts afresh.
 fn read_guarded(ask: Ask, reader: &Mutex<Reader>, reg: &rush_core::adapter::Registry) -> Got {
     let (now, path) = (ask.now, ask.path.clone());
-    let shown = ask.detail.as_ref().map(|(id, _)| id.clone());
+    let shown = ask.detail.as_ref().map(|(id, ..)| id.clone());
     let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ask.read(reader, reg)));
     let p = match read {
         Ok(got) => return got,
@@ -788,14 +826,20 @@ impl Ask {
             got.full.insert(id.clone(), s.unwrap_or_default());
         }
         match &self.detail {
-            Some((id, src)) => {
+            Some((id, src, shown)) => {
+                if !shown {
+                    r.hist = None; // a view afresh: built whole for it
+                }
                 got.detail = Some((
                     id.clone(),
                     read_detail(&mut r, id, src, self.decode.as_ref(), reg),
                 ));
             }
             // Rust-only: nothing's shown whole: its tail goes too.
-            None => r.detail = None,
+            None => {
+                r.detail = None;
+                r.hist = None;
+            }
         }
         match &self.procs {
             Some(a) => got.procs = Some(super::jobprocs::read(&mut r.table, a)),
@@ -946,6 +990,9 @@ fn read_detail(
         }
         DetailSrc::History { kind, path } => {
             r.detail = None;
+            if r.hist.as_ref().is_some_and(|(at, ..)| at != id) {
+                r.hist = None;
+            }
             let Some(ad) = reg.get(rush_core::adapter::migrated(kind).as_str()) else {
                 return DetailGot::Failed(format!("rush can't read {kind}'s sessions"));
             };
@@ -958,7 +1005,17 @@ fn read_detail(
                 ..rush_core::adapter::Session::default()
             };
             match rush_core::adapter::read_history(h, &s, 0) {
-                Ok(evs) => DetailGot::Events(evs),
+                Ok(evs) => {
+                    let size = std::fs::metadata(path).map_or(0, |m| m.len());
+                    let seen = (id.to_string(), evs.len(), size);
+                    if r.hist.as_ref() == Some(&seen) {
+                        return DetailGot::History(None);
+                    }
+                    r.hist = Some(seen);
+                    let mut sess = Session::new();
+                    rush_convo::reading::apply_events(&mut sess, &evs, false);
+                    DetailGot::History(Some(Box::new(sess)))
+                }
                 Err(e) => DetailGot::Failed(e.to_string()),
             }
         }
@@ -1056,14 +1113,28 @@ pub fn prime_spawns(m: &mut Model, key: &str, sp: crate::worker::SpawnSteps) {
 /// listed yet.
 pub fn job_subs(s: &Session, have: &[Subagent], claude: bool) -> Vec<Subagent> {
     let mut out = Vec::new();
+    // Looked up, not scanned for each task: the dock asks every frame,
+    // and a session of hundreds of runs and tasks made it tasks × runs
+    // string compares (Rust-only).
+    let mut calls: Option<HashSet<&str>> = None;
+    let mut ids: Option<HashSet<&str>> = None;
     for j in s.jobs() {
         if s.job_kind(j) != "subagent" || claude && !j.running() {
             continue;
         }
+        let calls = calls.get_or_insert_with(|| {
+            have.iter()
+                .map(|sa| sa.tool_use_id.as_str())
+                .filter(|c| !c.is_empty())
+                .collect()
+        });
         // Claude Code's task id is its run's agent id.
-        if have.iter().any(|sa| {
-            !j.tool_use_id.is_empty() && sa.tool_use_id == j.tool_use_id || claude && sa.id == j.id
-        }) {
+        if !j.tool_use_id.is_empty() && calls.contains(j.tool_use_id.as_str())
+            || claude
+                && ids
+                    .get_or_insert_with(|| have.iter().map(|sa| sa.id.as_str()).collect())
+                    .contains(j.id.as_str())
+        {
             continue;
         }
         out.push(Subagent {
@@ -1752,7 +1823,10 @@ pub fn refresh(m: &mut Model, key: &str) {
         s.info.cwd.clone()
     };
     // The run shown whole.
-    let detail = r.detail.as_ref().map(|d| (d.id.clone(), d.src.clone()));
+    let detail = r
+        .detail
+        .as_ref()
+        .map(|d| (d.id.clone(), d.src.clone(), d.view.read));
     // The background tasks' calls, to know which run started each.
     let calls: Vec<String> = dock_jobs(s)
         .iter()
@@ -2056,7 +2130,14 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
                 });
             }
             DetailGot::Whole(s) => det.view.take_whole(*s),
-            DetailGot::Events(evs) => det.view.take_events(evs, true),
+            DetailGot::History(None) => det.view.read = true,
+            DetailGot::History(Some(s)) => {
+                // As take_events' reset: what its host saved stays.
+                let mut s = *s;
+                s.info = std::mem::take(&mut det.view.sess.info);
+                det.view.read = true;
+                rush_sys::mem::let_go(std::mem::replace(&mut det.view.sess, s));
+            }
             DetailGot::Failed(e) => {
                 det.view.read = true;
                 det.view.err = e;

@@ -100,6 +100,7 @@ fn demo() -> Option<Arc<DemoTable>> {
 /// Samples every process. Memory and CPU are left for [`Table::fill`], so
 /// a sample never pays for processes nobody is looking at.
 pub fn snapshot() -> Table {
+    rush_core::offui::check("the process table read");
     let ps = match demo() {
         Some(d) => (d.procs)(),
         None => os::list(),

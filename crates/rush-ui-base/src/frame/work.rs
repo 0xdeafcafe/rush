@@ -51,15 +51,20 @@ impl Model {
         work: impl FnOnce() -> T + Send + 'static,
         apply: impl FnOnce(&mut Model, T) -> Out + Send + 'static,
     ) {
+        // The stall watch names a slow apply by the function it's from.
+        let name = super::uistall::name_of(&apply);
         let Some(tx) = self.sender() else {
-            let v = work();
-            let _ = apply(self, v);
+            // The worker's part, run here: not the UI thread's own work.
+            let v = rush_core::offui::off(work);
+            let _ = super::uistall::piece(name, || apply(self, v));
             return;
         };
         let tx = tx.lane(1);
         let spawned = LATER.run(move || {
             let v = work();
-            tx.send(Note::Apply(Box::new(move |m: &mut Model| apply(m, v))));
+            tx.send(Note::Apply(Box::new(move |m: &mut Model| {
+                super::uistall::piece(name, || apply(m, v))
+            })));
         });
         if spawned.is_err() {
             self.fail("couldn't start a thread for that");
@@ -73,7 +78,9 @@ impl Model {
     /// [`Model::run_timers`] runs what's due.
     pub fn after(&mut self, d: Duration, apply: impl FnOnce(&mut Model) -> Out + 'static) {
         let at = self.instant.unwrap_or_else(Instant::now) + d;
-        self.kept::<Timers>().0.push((at, Box::new(apply)));
+        let name = super::uistall::name_of(&apply);
+        let f = move |m: &mut Model| super::uistall::piece(name, || apply(m));
+        self.kept::<Timers>().0.push((at, Box::new(f)));
     }
 
     /// When the soonest of [`Model::after`]'s is due.

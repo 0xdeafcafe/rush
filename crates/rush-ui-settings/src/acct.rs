@@ -436,7 +436,13 @@ pub fn expired(q: &Quota) -> bool {
 pub fn health_lines(m: &Model, k: &str, label: &dyn Fn(&str) -> Line) -> Vec<Line> {
     use rush_state::health;
     let harness = reg().current_kind(k).0;
-    let all = health::load();
+    // As read off the UI thread (read_health); with no loop to read it
+    // on (tests, --render), here.
+    let all = match m.kept.peek::<super::State>().and_then(|s| s.health.clone()) {
+        Some(a) => a,
+        None if m.sender().is_none() => health::load(),
+        None => Default::default(),
+    };
     let mut keys: Vec<&String> = all.keys().collect();
     keys.sort();
     let mut out = Vec::new();
@@ -475,6 +481,37 @@ pub fn health_lines(m: &Model, k: &str, label: &dyn Fn(&str) -> Line) -> Vec<Lin
         out.push(l);
     }
     out
+}
+
+/// The logins' health read again off the UI thread, while Providers is
+/// open: as it opens and with each reading of the list (Rust-only; it
+/// was read on every frame, its file looked at and parsed again once it
+/// changed, on the UI thread).
+pub fn read_health(m: &mut Model) {
+    if super::dialog(m).page != super::PAGE_PROVIDERS
+        || m.kept
+            .peek::<super::State>()
+            .is_none_or(|s| s.dialog.is_none())
+    {
+        return;
+    }
+    let st = m.kept::<super::State>();
+    if std::mem::replace(&mut st.health_reading, true) {
+        return;
+    }
+    m.later(rush_state::health::load, |m, all| {
+        let st = m.kept::<super::State>();
+        st.health_reading = false;
+        if st
+            .health
+            .as_ref()
+            .is_some_and(|h| std::sync::Arc::ptr_eq(h, &all))
+        {
+            return Out::Idle;
+        }
+        st.health = Some(all);
+        Out::Draw
+    });
 }
 
 /// A health record's account as you know it: a login's name, by its

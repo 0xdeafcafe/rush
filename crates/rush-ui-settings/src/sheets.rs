@@ -786,7 +786,7 @@ impl Sheet for NetSheet {
             out.push(line([plain("  "), sp("none", FAINT)]));
         }
         // The UI's own thread.
-        let (n, longest, last, path) = crate::frame::uistall::report();
+        let (n, longest, last) = crate::frame::uistall::report();
         let after = go_dur(crate::frame::uistall::STALL_AFTER);
         out.push(Line::new());
         out.push(line([spb("Keys and frames", TEXT)]));
@@ -823,14 +823,7 @@ impl Sheet for NetSheet {
             out.push(line([
                 plain("    "),
                 sp(
-                    format!(
-                        "what it was doing: {}",
-                        tildify(
-                            &path
-                                .map(|p| p.to_string_lossy().into_owned())
-                                .unwrap_or_default()
-                        )
-                    ),
+                    "what it was doing: rush events -k ui-stall".to_string(),
                     FAINT,
                 ),
             ]));

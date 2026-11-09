@@ -588,7 +588,8 @@ pub fn room_view(m: &mut Model, key: &str) -> Option<SessionView> {
     feed.room = room.clone();
     let now = m.now;
     if m.sender().is_none() {
-        let r = read_whole(room, now);
+        // No loop: the worker's part, run here.
+        let r = rush_core::offui::off(|| read_whole(room, now));
         take_read(m.kept::<RoomFeed>(), &mut v, r, now);
         return Some(v);
     }

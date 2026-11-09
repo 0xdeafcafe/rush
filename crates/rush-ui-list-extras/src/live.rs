@@ -255,7 +255,10 @@ fn on_open(m: &mut Model, l: Live, r: Result<Mirror, String>) -> Out {
     let st = m.kept::<LiveState>();
     if l.key != st.opening {
         if let Ok(mr) = r {
-            let_go(Some(mr.conn));
+            let c = mr.conn;
+            let _ = std::thread::Builder::new()
+                .name("rush-live-close".into())
+                .spawn(move || drop(c));
         }
         return Out::Idle;
     }
@@ -415,19 +418,18 @@ pub fn close(m: &mut Model) {
     st.embedded = false;
     if let Some(l) = st.live.take() {
         l.sh.dead.store(true, Ordering::SeqCst);
-        let conn = l.sh.conn.lock().unwrap_or_else(|e| e.into_inner()).take();
-        let_go(conn);
+        let_go(l.sh.clone());
     }
 }
 
-/// Closes a connection off the UI thread: a socket's close is a system
-/// call.
-fn let_go(conn: Option<Box<dyn Write + Send>>) {
-    if let Some(c) = conn {
-        let _ = std::thread::Builder::new()
-            .name("rush-live-close".into())
-            .spawn(move || drop(c));
-    }
+/// Closes the connection off the UI thread: a socket's close is a system
+/// call, and the typist holds its lock across a write that waits on the
+/// host (Rust-only: it was taken on the UI thread, which could wait out
+/// that write).
+fn let_go(sh: Arc<Shared>) {
+    let _ = std::thread::Builder::new()
+        .name("rush-live-close".into())
+        .spawn(move || drop(sh.conn.lock().unwrap_or_else(|e| e.into_inner()).take()));
 }
 
 /// Whether agent key's screen is mirrored and has drawn.

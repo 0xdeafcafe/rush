@@ -207,6 +207,10 @@ pub struct State {
     pub plugins_reading: bool,
     pub updates: updates::Updates,
     pub remote: remote::Snap,
+    /// The logins' health as last read off the UI thread, for Providers
+    /// (acct::read_health), and whether a reading is on its way.
+    pub health: Option<std::sync::Arc<rush_state::health::All>>,
+    pub health_reading: bool,
 }
 
 thread_local! {
@@ -233,9 +237,8 @@ pub use crate::accounts::{config, config_mut, loaded_config, store, use_store};
 /// After a change: config.json saved, and the list drawn from it again
 /// (formKey's changed: SaveConfig, rebuild).
 pub fn changed(m: &mut Model) {
-    if let Err(e) = crate::config::write_store(store(m)) {
-        m.fail(&format!("couldn't save the settings: {e}"));
-    }
+    store(m);
+    crate::config::save_whole(m, "couldn't save the settings");
     sync(m);
 }
 
@@ -295,6 +298,7 @@ pub fn open_dialog(m: &mut Model, p: usize) {
     match p {
         // Microphones plugged in since show at once.
         PAGE_GENERAL => (m.ext.calls.dictation_read_mics())(m),
+        PAGE_PROVIDERS => acct::read_health(m),
         PAGE_USAGE => usage::read(m),
         PAGE_PLUGINS => plugins::read(m),
         PAGE_UPDATES => updates::recheck_after(m),
@@ -756,6 +760,7 @@ pub fn register(x: &mut Ext) {
     // Before every other key hook, the global keymap's too: a key being
     // recorded is the key itself (takeKey, settings_keys.go:325).
     x.keys.insert(0, keys::capture);
+    x.on_fleet.push(acct::read_health);
     x.overlays.push(keys::modal);
     // The installed rush and the sessions on an older one, looked at with
     // readings of the list (reload.go:134 watchBinary).
