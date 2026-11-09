@@ -1,11 +1,11 @@
 before
-t1:sh:0:0     |▍ ╭─ shell · /work/app ─────────────── ▶ run  ✎ edit  ⧉ copy ─╮
+t1:sh:0:0     |▍ ╭─ shell · /work/app ─ ▶ run  ◐ background  ✎ edit  ⧉ copy ─╮
               |▍ │ $ rm ~/Desktop/DeveloperIDApplication.p12                 │
               |▍ ╰───────────────────────────────────────────────────────────╯
 picked
-t1:sh:0:0     |▏ ╭─ shell · /work/app ─────────────── ▶ run  ✎ edit  ⧉ copy ─╮
+t1:sh:0:0     |▏ ╭─ shell · /work/app ─ ▶ run  ◐ background  ✎ edit  ⧉ copy ─╮
               |▍ │ $ rm ~/Desktop/DeveloperIDApplication.p12                 │
-              |▍ ╰─ enter runs it · e edits it · c copies it ────────────────╯
+              |▍ ╰─ enter runs it · b in the background · e edits it · c … ──╯
 run
 t1:sh:0:0     |▍ ╭─ shell · /work/app ────────────────────── ✎ edit  ⧉ copy ─╮
               |▍ │ $ rm ~/Desktop/DeveloperIDApplication.p12                 │

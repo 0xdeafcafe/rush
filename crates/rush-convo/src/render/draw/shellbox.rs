@@ -234,13 +234,24 @@ impl Drawer<'_> {
         let copy = button(sub("⧉ copy"), "copy", r);
         let edit = button(sub("✎ edit"), "edit", r);
         let top_r = match run {
-            None => button(paint(C_ORANGE, "▶ run"), "run", r)
-                .and_raw("  ")
-                .and(button(sub("◐ background"), "background", r))
-                .and_raw("  ")
-                .and(edit)
-                .and_raw("  ")
-                .and(copy),
+            None => {
+                let run_b = button(paint(C_ORANGE, "▶ run"), "run", r);
+                let all = run_b
+                    .clone()
+                    .and_raw("  ")
+                    .and(button(sub("◐ background"), "background", r))
+                    .and_raw("  ")
+                    .and(edit.clone())
+                    .and_raw("  ")
+                    .and(copy.clone());
+                // ◐ background only where it fits beside the folder; b
+                // still runs it so.
+                if all.width() + 12 <= inner {
+                    all
+                } else {
+                    run_b.and_raw("  ").and(edit).and_raw("  ").and(copy)
+                }
+            }
             Some(x) if x.running() => copy,
             Some(_) => edit.and_raw("  ").and(copy),
         };
@@ -625,7 +636,9 @@ fn foot_buttons(x: &ShellRun, r: &str, tier: usize) -> Txt {
         )
     };
     // + with my next message: waits to go in front of your next words.
-    let attach = if x.told {
+    // Only while its words fit (tiers 0 and 1), or once it's chosen: the
+    // a key and the hint say it otherwise.
+    let attach = if x.told || !x.attached && tier >= 2 {
         Txt::new()
     } else if x.attached {
         button(

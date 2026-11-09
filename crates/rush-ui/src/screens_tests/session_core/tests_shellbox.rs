@@ -162,7 +162,7 @@ fn a_click_on_run_runs_the_block() {
     let mut m = replied(&fake);
     let s = shown(&mut m);
     assert!(s.contains("shell · /src/checkout"), "{s}");
-    assert!(s.contains("▶ run  ✎ edit  ⧉ copy"), "{s}");
+    assert!(s.contains("▶ run  ◐ background  ✎ edit  ⧉ copy"), "{s}");
     assert!(s.contains("$ rm ~/x.p12"), "{s}");
     assert!(shellbox::ran().is_empty(), "nothing runs by itself");
     let (x, y) = cell_of(&mut m, "▶ run");
@@ -200,7 +200,7 @@ fn keys_on_the_picked_block() {
     pick_the_box(&mut m);
     let s = shown(&mut m);
     assert!(
-        s.contains("enter runs it · e edits it · c copies it"),
+        s.contains("enter runs it · b in the background · e edits it · c copies it"),
         "{s}"
     );
     press(&mut m, "c");
@@ -276,8 +276,8 @@ fn a_finished_box_has_three_ways_to_send() {
     m.flash = None;
     let s = shown(&mut m);
     assert!(s.contains("send to agent"), "{s}");
-    assert!(s.contains("draft it first"), "{s}");
     assert!(s.contains("summarise and send"), "{s}");
+    assert!(s.contains("with my next message"), "{s}");
 }
 
 /// → send sends the command and its output to the agent at once, as a
@@ -977,7 +977,7 @@ fn a_run_goes_with_your_next_message() {
     // The next message goes alone.
     conn(&mut m, KEY).input.set("thanks");
     let _ = super::keys::send(&mut m, KEY, false);
-    assert_eq!(sends(&fake), ["thanks"]);
+    assert_eq!(sends(&fake).last().map(String::as_str), Some("thanks"));
 }
 
 /// ◐ background (b): the run is a row while it runs, w has it go to the

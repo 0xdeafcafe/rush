@@ -1498,9 +1498,9 @@ pub fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Option<Line> {
     } else if done {
         &[
             ("s", "send to agent"),
+            ("m", "summarise and send"),
             ("a", "with my next message"),
             ("d", "draft it first"),
-            ("m", "summarise and send"),
             ("r", "run again"),
             ("e", "edit and run"),
             ("enter", "all it wrote"),

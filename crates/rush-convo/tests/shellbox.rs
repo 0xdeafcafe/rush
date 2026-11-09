@@ -93,7 +93,7 @@ fn a_block_before_and_after_its_run() {
     assert!(got.contains("▶ run  ◐ background  ✎ edit  ⧉ copy"), "{got}");
     assert!(got.contains("enter runs it · b in the background"), "{got}");
     assert!(got.contains("✓ exit 0 · 0.1s"), "{got}");
-    assert!(got.contains("+ with next"), "{got}");
+    assert!(got.contains("→ send  ✎ draft  ≈ summary  ↻  ✕"), "{got}");
 }
 
 /// A finished run's foot as each of its buttons was used: sent to the
@@ -578,10 +578,17 @@ fn sent_runs_are_read_back() {
 fn a_background_run_is_a_row() {
     let s = session(REPLY);
     let r = block_ref(1, 0, 0);
-    let mut run = ShellRun::new("rush watch run main", "/work/app", at(10));
+    let mut run = ShellRun::new(
+        "rm ~/Desktop/DeveloperIDApplication.p12",
+        "/work/app",
+        at(10),
+    );
     run.background = true;
     let got = draw(&s, &opts("", &[(&r, run.clone())], at(20)));
-    assert!(got.contains("◐ $ rush watch run main"), "{got}");
+    assert!(
+        got.contains("◐ $ rm ~/Desktop/DeveloperIDApplication.p12"),
+        "{got}"
+    );
     assert!(got.contains("✕ stop · ☐ send when done"), "{got}");
     assert!(!got.contains("shell · "), "{got}");
     run.send_done = true;
@@ -599,7 +606,7 @@ fn a_background_run_is_a_row() {
 fn an_attached_run_says_so() {
     let s = session(REPLY);
     let r = block_ref(1, 0, 0);
-    let mut run = finished("ls", "a\n", 0);
+    let mut run = finished("rm ~/Desktop/DeveloperIDApplication.p12", "removed\n", 0);
     run.attached = true;
     let mut o = opts("", &[(&r, run)], at(20));
     o.width = 120;
