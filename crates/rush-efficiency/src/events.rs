@@ -48,8 +48,14 @@ pub struct Handover {
     pub from: String,
     #[serde(rename = "fromSession", skip_serializing_if = "String::is_empty")]
     pub from_session: String,
-    /// The rush session that took over.
+    /// The rush session that took over, and its agent's conversation:
+    /// with the folder and the account, its transcript exactly.
     pub to: String,
+    #[serde(rename = "toSession", skip_serializing_if = "String::is_empty")]
+    pub to_session: String,
+    /// The folder both worked in.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub cwd: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub agent: String,
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -262,6 +268,8 @@ mod tests {
             from: "a1".into(),
             from_session: "s-a".into(),
             to: "b1".into(),
+            to_session: "s-b".into(),
+            cwd: "/work/app".into(),
             agent: "claude".into(),
             model: "opus".into(),
             from_context: 307_000,
@@ -295,6 +303,9 @@ mod tests {
             "\"fromCostUsd\":15.55",
             "\"toContext\":22000",
             "\"subagent\":true",
+            "\"fromSession\":\"s-a\"",
+            "\"toSession\":\"s-b\"",
+            "\"cwd\":\"/work/app\"",
         ] {
             assert!(line.contains(key), "{key} in {line}");
         }

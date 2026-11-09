@@ -602,11 +602,30 @@ pub fn finish(a: &Config, j: &Journal, to_context: i64) {
         let _ = report(&j.to, &p);
         let _ = report(&j.from, "");
     }
-    let to_lineage = read_config(&j.to).map(|c| lineage(&c)).unwrap_or(0);
+    let to_cfg = read_config(&j.to).ok();
+    let to_lineage = to_cfg.as_ref().map(lineage).unwrap_or(0);
+    let to_info = read_info(&j.to).ok();
+    // The conversation its agent says it's on, else the one rush gave it.
+    let to_session = to_info
+        .as_ref()
+        .map(|i| i.session_id.clone())
+        .filter(|s| !s.is_empty())
+        .or_else(|| to_cfg.as_ref().map(|c| c.session_id.clone()))
+        .unwrap_or_default();
+    let from_session = read_info(&j.from)
+        .ok()
+        .map(|i| i.session_id)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| a.session_id.clone());
     let h = rush_efficiency::events::Handover {
         from: j.from.clone(),
-        from_session: a.session_id.clone(),
+        from_session,
         to: j.to.clone(),
+        to_session,
+        cwd: to_cfg
+            .as_ref()
+            .map(|c| c.cwd.clone())
+            .unwrap_or_else(|| a.cwd.clone()),
         agent: a.kind.clone(),
         model: a.model.clone(),
         from_context: j.from_context,

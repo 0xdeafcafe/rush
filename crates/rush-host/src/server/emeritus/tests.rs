@@ -484,6 +484,17 @@ fn a_handover_commits_and_retires_for_good() {
             && hs[0].subagent,
         "{hs:?}"
     );
+    // Both conversations, and the folder, so their transcripts are found
+    // exactly.
+    assert_eq!(
+        (
+            hs[0].from_session.as_str(),
+            hs[0].to_session.as_str(),
+            hs[0].cwd.as_str()
+        ),
+        ("s-hova", b.session_id.as_str(), "/tmp"),
+    );
+    assert!(!b.session_id.is_empty());
 
     // Terminal: nothing gets in, nothing wakes it.
     for o in [typed("hello?"), exchange("x2", "more"), Op::named("rewind")] {
