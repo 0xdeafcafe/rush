@@ -191,6 +191,67 @@ fn resolve_asks_github_for_a_branch_head_once() {
 }
 
 #[test]
+fn full_sha_widens_a_short_sha_before_asking_for_runs() {
+    let full = "a9b518bf00000000000000000000000000000001";
+    let other = "1111111111111111111111111111111111111111";
+    type Case = (
+        &'static str,
+        Option<&'static str>,
+        Option<&'static str>,
+        Option<&'static str>,
+    );
+    let padded = "  a9b518bf00000000000000000000000000000001\n";
+    let cases: [Case; 7] = [
+        // Already full: no asking.
+        (full, None, None, Some(full)),
+        // The checkout knows it.
+        ("a9b518bf", Some(full), Some(other), Some(full)),
+        // The checkout doesn't; the remote does.
+        ("a9b518bf", None, Some(full), Some(full)),
+        // Neither does.
+        ("a9b518bf", None, None, None),
+        // An answer that isn't a full sha is no answer.
+        ("a9b518bf", Some("a9b518bf"), None, None),
+        ("a9b518bf", Some("junk"), Some(full), Some(full)),
+        // Output is trimmed.
+        ("a9b518bf", Some(padded), None, Some(full)),
+    ];
+    for (sha, local, remote, want) in cases {
+        let got = full_sha(
+            sha,
+            |_| local.map(String::from),
+            |_| remote.map(String::from),
+        );
+        match want {
+            Some(w) => assert_eq!(got.as_deref(), Ok(w), "{sha} {local:?} {remote:?}"),
+            None => {
+                let e = got.unwrap_err();
+                assert!(e.contains("no commit \"a9b518bf\""), "{e}");
+            }
+        }
+    }
+}
+
+#[test]
+fn resolve_widens_a_short_sha_and_labels_it_short() {
+    let _home = home();
+    let full = "a9b518bf00000000000000000000000000000001";
+    let asked = fake_gh(move |args| {
+        assert_eq!(args.last().unwrap(), "repos/o/r/commits/a9b518bf");
+        ok(&format!(r#"{{"sha": "{full}"}}"#))
+    });
+    // Not a checkout: only the remote can say.
+    let t = resolve_run(Path::new("/nonexistent-rush-dir"), "o/r@a9b518bf", "").unwrap();
+    assert_eq!(t.label(), "a9b518b");
+    assert_eq!(
+        t.runs_path(),
+        format!("repos/o/r/actions/runs?head_sha={full}&per_page=100")
+    );
+    assert_eq!(asked.lock().unwrap().len(), 1);
+    set_thread_gh(None);
+}
+
+#[test]
 fn fetch_keeps_each_workflows_newest_run_and_its_jobs() {
     let _home = home();
     fake_gh(actions);
