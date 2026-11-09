@@ -475,11 +475,12 @@ fn nothing_beside_the_list_until_a_click() {
 }
 
 /// A click on a run picks it and shows it beside the list, with its
-/// facts, its conversation and a box to message it, its pane with the
-/// keys; a second click opens nothing whole, a click in its conversation
-/// keeps the keys there, and esc gives them back to the list.
+/// facts, its conversation and a box to message it, the list keeping the
+/// keys so ↑↓ go on through the runs; tab gives its pane them, a second
+/// click opens nothing whole, a click in its conversation keeps the keys
+/// there, and esc gives them back to the list.
 #[test]
-fn a_click_picks_a_run_and_its_pane_has_the_keys() {
+fn a_click_picks_a_run_and_the_list_keeps_the_keys() {
     use crate::frame::Mouse;
     use rush_draw::{Button, MouseKind};
     let d = tempfile::tempdir().unwrap();
@@ -505,7 +506,12 @@ fn a_click_picks_a_run_and_its_pane_has_the_keys() {
     assert!(all.contains("The diff is fine"), "{all}");
     assert!(all.contains("claude-opus-4-1 · 1 step"), "{all}");
     assert!(all.contains("to review the diff"), "{all}");
-    assert!(conn(&mut m, KEY).watch.msg_focus, "the click's run");
+    assert!(
+        !conn(&mut m, KEY).watch.msg_focus,
+        "the list keeps the keys"
+    );
+    press(&mut m, "tab");
+    assert!(conn(&mut m, KEY).watch.msg_focus, "tab: the run's pane");
     click(&mut m);
     let frame = m.frame();
     let all = text(&frame);
@@ -560,6 +566,24 @@ fn narrow_the_run_shows_under_the_list() {
     let got = text(&views::body(&mut m, 90, 30).unwrap());
     let under: String = got.lines().skip(rule).collect::<Vec<_>>().join("\n");
     assert!(under.contains("plan the next piece"), "{got}");
+}
+
+/// Nothing in the list picked, ↑ as ↓ picks its top row, not the one at
+/// its foot by the box.
+#[test]
+fn up_with_nothing_picked_picks_the_lists_top() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = model(&d);
+    m.w = 180;
+    views::show_view(&mut m, KEY, "subagents");
+    m.session.as_mut().unwrap().sel.clear();
+    let _ = m.frame();
+    let refs = conn(&mut m, KEY).vs.refs.clone();
+    let top = refs.iter().find(|r| !r.is_empty()).cloned().expect("rows");
+    let foot = refs.iter().rev().find(|r| !r.is_empty()).cloned().unwrap();
+    assert_ne!(top, foot, "one row only: {refs:?}");
+    press(&mut m, "up");
+    assert_eq!(sel(&m), top);
 }
 
 /// A workflow agent tried again: its earlier try folds under the try

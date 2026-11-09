@@ -207,7 +207,11 @@ pub fn show_detail(m: &mut Model, key: &str, id: &str, src: DetailSrc, w: usize)
     let mut view = SessionView::new(key.to_string(), Source::Hosted, 0);
     super::subpane::prime(&mut view, w, (m.now, m.tick), live, false);
     view.note_drawn();
-    conn(m, key).runs.detail = Some(Detail::new(id.to_string(), src, view));
+    let r = &mut conn(m, key).runs;
+    r.detail = Some(Detail::new(id.to_string(), src, view));
+    r.detail_more = false;
+    // A reading under way stops short for it (Runs::hurry).
+    r.hurry.store(true, std::sync::atomic::Ordering::Relaxed);
     super::subs::kick(m, key);
     super::subs::refresh(m, key);
 }
@@ -1236,6 +1240,12 @@ fn peek(m: &mut Model, key: &str, id: &str, right: &mut [Line], pw: usize, (x, y
     let read = c.runs.detail.as_ref().is_some_and(|d| d.id == id);
     if read {
         if rows > 0 {
+            // More was just read above what showed: it stays in place.
+            if let Some(d) = conn(m, key).runs.detail.as_mut()
+                && let Some(below) = d.keep_below.take()
+            {
+                d.view.keep_rows_below(below, rows);
+            }
             let body = super::subpane::as_run(m, key, id, |m| {
                 super::subpane::text(m, key, pw, rows, live, focused)
             })
@@ -1243,6 +1253,7 @@ fn peek(m: &mut Model, key: &str, id: &str, right: &mut [Line], pw: usize, (x, y
             for (i, l) in body.into_iter().enumerate().take(rows) {
                 right[at + i] = l;
             }
+            more_above(m, key, rows);
         }
     } else if at < h {
         right[at] = line([faint(
@@ -1255,6 +1266,24 @@ fn peek(m: &mut Model, key: &str, id: &str, right: &mut [Line], pw: usize, (x, y
         }
     }
     conn(m, key).watch.msg_at = [x, y + body_end, pw, box_h];
+}
+
+/// A long run shows only its end: scrolled to within a screen of the top
+/// of what it has ("reading earlier…"), more of what came before is read,
+/// rather than the whole of it at once when it opens (Rust-only).
+fn more_above(m: &mut Model, key: &str, rows: usize) {
+    let r = &mut conn(m, key).runs;
+    let top = r
+        .detail
+        .as_ref()
+        .is_some_and(|d| d.view.read && d.view.sess.partial && d.view.start <= rows);
+    if !top || r.detail_more {
+        return;
+    }
+    r.detail_more = true;
+    r.hurry.store(true, std::sync::atomic::Ordering::Relaxed);
+    super::subs::kick(m, key);
+    super::subs::refresh(m, key);
 }
 
 /// The subagents view's keys before the views': esc goes back where the
@@ -1309,7 +1338,8 @@ pub fn key_first(m: &mut Model, k: &Press) -> Out {
 /// The list's own keys, before the cards' and the box's, while the list
 /// has them: ↑↓ move the pick through the list (the cards' ↑ from an
 /// empty box doesn't take them here), ↓ with nothing picked picks the
-/// first row in sight; enter or → on a run gives its pane the keys
+/// first row in sight, as ↑ does (not the last); enter or → on a run
+/// gives its pane the keys
 /// (subpane.rs), which keeps them till esc. Rust-only: ↑↓ went to the box
 /// a click had focused, or to the cards, and never moved the pick.
 pub fn list_key(m: &mut Model, k: &Press) -> Out {
@@ -1327,13 +1357,13 @@ pub fn list_key(m: &mut Model, k: &Press) -> Out {
     let picked = sel(m);
     match s {
         "up" | "down" if own_empty || !picked.is_empty() => {
-            if s == "down" && picked.is_empty() {
-                let first = conn(m, &key)
-                    .vs
-                    .refs
-                    .iter()
-                    .find(|r| !r.is_empty())
-                    .cloned();
+            // Nothing in the list picked (or what's picked is out of
+            // sight): ↑ or ↓ picks its top row in sight, not the one by
+            // the box as the conversation's ↑ does (Rust-only).
+            let refs = &conn(m, &key).vs.refs;
+            let in_list = !picked.is_empty() && refs.contains(&picked);
+            if !in_list {
+                let first = refs.iter().find(|r| !r.is_empty()).cloned();
                 match first {
                     Some(r) => set_sel(m, r),
                     None => return Out::Idle,
@@ -1602,10 +1632,10 @@ fn focus_pane(m: &mut Model, key: &str) -> bool {
 }
 
 /// The pointer over the subagents view: in the list a click picks a run,
-/// which then shows with the list (beside it or under it), and opens or
-/// closes a fold; with the run, a click on the box gives it the keys,
-/// elsewhere gives them back, and the wheel scrolls the run's
-/// conversation (subHoverAt, subMouseMove, clickRef).
+/// which then shows with the list (beside it or under it) while the list
+/// keeps the keys, and opens or closes a fold; with the run, a click on
+/// the box gives it the keys, elsewhere gives them back, and the wheel
+/// scrolls the run's conversation (subHoverAt, subMouseMove, clickRef).
 pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     let Some(key) = open_key(m) else {
         return Out::Pass;
@@ -1680,11 +1710,9 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
             if is_fold(m, &key, &rf) {
                 toggle_fold(m, &key, &rf);
             }
-            // A run clicked: its pane has the keys once it shows
-            // (Rust-only).
-            if let Some(id) = rf.strip_prefix("sub:") {
-                conn(m, &key).watch.focus_next = id.to_string();
-            }
+            // A run clicked shows beside the list, which keeps the keys:
+            // ↑↓ go on through the runs; tab, enter or → give its pane
+            // them (Rust-only).
             set_sel(m, rf);
             Out::Draw
         }
