@@ -953,7 +953,7 @@ fn runs_rush_was_closed_on_are_picked_up() {
     rush_state::set_thread_dir(None);
 }
 
-/// + with my next message (a): nothing goes until you send a message,
+/// The foot's "+ with my next message" (a): nothing goes until you send a message,
 /// then the run goes in front of your words, once.
 #[test]
 fn a_run_goes_with_your_next_message() {

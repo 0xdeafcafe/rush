@@ -1041,9 +1041,9 @@ pub fn send(m: &mut Model, key: &str, r: &str) -> Out {
     tell(m, key, r, text, false)
 }
 
-/// + with my next message (a): run r's output waits to go with the next
-/// message you send, in front of your words, the agent not asked to
-/// answer it before; again takes it off. Rust-only.
+/// The foot's "+ with my next message" (a): run r's output waits to go
+/// with the next message you send, in front of your words, the agent not
+/// asked to answer it before; again takes it off. Rust-only.
 pub fn attach(m: &mut Model, key: &str, r: &str) -> Out {
     let Some(run) = run_of(m, key, r) else {
         return Out::Idle;

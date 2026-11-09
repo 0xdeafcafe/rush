@@ -609,10 +609,7 @@ pub fn sent_runs(s: &str) -> (Vec<SentRun>, &str) {
     }
     let mut runs = Vec::new();
     let mut rest = s;
-    loop {
-        let Some((cmd, r)) = tag(rest, "bash-input") else {
-            break;
-        };
+    while let Some((cmd, r)) = tag(rest, "bash-input") {
         let Some((out, r)) = tag(r, "bash-stdout") else {
             break;
         };
