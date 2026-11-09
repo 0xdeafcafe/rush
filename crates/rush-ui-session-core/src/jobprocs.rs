@@ -115,15 +115,76 @@ pub(crate) fn base(p: &str) -> &str {
 /// one line, the home folder as ~, at most 200 cells; its comm when they
 /// can't be read (shortCmd, readProcWords, trimCmd).
 fn short_cmd(pid: Pid, comm: &str) -> String {
-    let mut args = proc::args(pid);
+    let args = proc::args(pid);
     if args.is_empty() {
         return comm.to_string();
     }
-    args[0] = base(&args[0]).to_string();
-    let s = tildify(&one_line(&args.join(" ")));
+    let home = std::env::var("HOME").unwrap_or_default();
+    let s = proc_words(&args, home.trim_end_matches('/'));
     rush_draw::truncate(&strip_ansi(&s), 200, "…")
         .trim_end()
         .to_string()
+}
+
+/// A process's words as they read best: its program by name; a shell's
+/// -c script as what it evals when it's a harness's wrapper (Claude
+/// Code's source-the-snapshot … eval '…'); home as ~ in every word and
+/// doubled slashes made one. Rust-only.
+pub fn proc_words(args: &[String], home: &str) -> String {
+    let Some(prog) = args.first() else {
+        return String::new();
+    };
+    let prog = base(prog).to_string();
+    let script = shell_command(args);
+    let s = if script.is_empty() {
+        let mut w = vec![prog];
+        w.extend(args[1..].iter().cloned());
+        w.join(" ")
+    } else {
+        let script = eval_body(&script).unwrap_or(script);
+        format!("{prog} -c {script}")
+    };
+    let s = one_line(&s);
+    let s = if home.is_empty() {
+        s
+    } else {
+        tildify(&s.replace(&format!("{home}/"), "~/"))
+    };
+    one_slash(&s)
+}
+
+/// What an eval wrapper runs: the single-quoted words after its eval.
+fn eval_body(script: &str) -> Option<String> {
+    let at = script.find("eval '")?;
+    let rest = &script[at + 6..];
+    let mut out = String::new();
+    let mut i = 0;
+    while i < rest.len() {
+        let r = &rest[i..];
+        if r.starts_with("'\\''") {
+            out.push('\'');
+            i += 4;
+        } else if r.starts_with('\'') {
+            return Some(out);
+        } else {
+            let c = r.chars().next()?;
+            out.push(c);
+            i += c.len_utf8();
+        }
+    }
+    None
+}
+
+/// Doubled slashes in paths made one; a URL's // stays.
+fn one_slash(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c == '/' && out.ends_with('/') && !out.ends_with(":/") {
+            continue;
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Whether a program is a shell the agent runs a call in (shellComm).
@@ -238,6 +299,35 @@ mod tests {
             (s(&["zsh", "-c"]), ""),
         ] {
             assert_eq!(shell_command(&args), want, "{args:?}");
+        }
+    }
+
+    /// A process's words as the Processes rows read them.
+    #[test]
+    fn a_processs_words() {
+        let wrap = "source /h/.claude/shell-snapshots/snapshot-zsh-1.sh 2>/dev/null || true && \
+                    export RUSH_SESSION='6a' && eval 'zsh $TMPDIR/tools/i.sh > $TMPDIR/l.log 2>&1' \\< /dev/null && pwd -P >| /tmp/claude-1-cwd";
+        for (args, want) in [
+            (
+                s(&["/bin/zsh", "-c", wrap]),
+                "zsh -c zsh $TMPDIR/tools/i.sh > $TMPDIR/l.log 2>&1",
+            ),
+            (
+                s(&["zsh", "-c", r"eval 'echo '\''hi'\'''"]),
+                "zsh -c echo 'hi'",
+            ),
+            (s(&["/bin/zsh", "-c", "ls /h/x"]), "zsh -c ls ~/x"),
+            (
+                s(&["zsh", "/h/.config/rush/tmp/p/6a//tools/i.sh"]),
+                "zsh ~/.config/rush/tmp/p/6a/tools/i.sh",
+            ),
+            (
+                s(&["/usr/bin/curl", "https://example.com"]),
+                "curl https://example.com",
+            ),
+            (s(&["/h"]), "h"),
+        ] {
+            assert_eq!(proc_words(&args, "/h"), want, "{args:?}");
         }
     }
 }

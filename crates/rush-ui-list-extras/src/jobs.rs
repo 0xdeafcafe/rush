@@ -860,6 +860,52 @@ pub fn jobs_preview(
     (out, refs)
 }
 
+/// A process's words tinted as a command reads: its program bright, its
+/// flags and redirects dim, what joins commands orange, and a long path
+/// with its middle left out, so its file still shows. Rust-only.
+fn proc_line(cmd: &str) -> Line {
+    let mut l = line([]);
+    let mut head = true;
+    for (i, word) in cmd.split(' ').enumerate() {
+        if i > 0 {
+            l.spans.push(plain(" "));
+        }
+        if word.is_empty() {
+            continue;
+        }
+        let op = matches!(word, "&&" | "||" | "|" | ";" | "|&");
+        let span = if op {
+            head = true;
+            sp(word.to_string(), ORANGE)
+        } else if head && !word.contains('=') {
+            head = false;
+            sp(word.to_string(), TEXT)
+        } else if word.starts_with('-')
+            || word
+                .trim_start_matches(|c: char| c.is_ascii_digit())
+                .starts_with(['>', '<'])
+        {
+            sp(word.to_string(), DIM)
+        } else if word.contains('/') {
+            sp(fold_path(word), SUB)
+        } else {
+            sp(word.to_string(), SUB)
+        };
+        l.spans.push(span);
+    }
+    l
+}
+
+/// A long path as its start, … and its last two parts.
+fn fold_path(p: &str) -> String {
+    let parts: Vec<&str> = p.split('/').collect();
+    if width(p) <= 40 || parts.len() <= 5 || p.contains("://") {
+        return p.to_string();
+    }
+    let n = parts.len();
+    [parts[0], parts[1], "…", parts[n - 2], parts[n - 1]].join("/")
+}
+
 /// The edge down the left of an opened task (cEdge).
 pub const EDGE: Color = Color::Rgb(79, 73, 67);
 
@@ -1451,8 +1497,12 @@ fn job_block(
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
         for n in busy.into_iter().take(5) {
-            let name = if details_open { &n.cmd } else { &n.comm };
-            let name = fit(line([sp(name.clone(), SUB)]), w.saturating_sub(24).max(10));
+            let name = if details_open {
+                proc_line(&n.cmd)
+            } else {
+                line([sp(n.comm.clone(), SUB)])
+            };
+            let name = fit(name, w.saturating_sub(24).max(10));
             let mut l = line([plain("      ")]);
             join(&mut l, name);
             l.spans
