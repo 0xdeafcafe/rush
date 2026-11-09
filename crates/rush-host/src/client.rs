@@ -162,6 +162,13 @@ fn nearest_there(dir: &str) -> String {
 /// never came up rather than leave it: restart starts another.
 pub(crate) fn spawn_on(mut cfg: Config, exe: Option<&Path>) -> Result<Config> {
     cfg.fill_ids();
+    // Retired is terminal (docs/emeritus.md): whatever starts it (a wake,
+    // a resume, a restart), and whatever config it's started with, the
+    // one on disk says so first.
+    if let Some(why) = crate::emeritus::refusal(&cfg).or_else(|| crate::emeritus::refused(&cfg.id))
+    {
+        return Err(why.into());
+    }
     let d = dir(&cfg.id);
     mkdir(&d)?;
     if let Ok(info) = read_info(&cfg.id) {
@@ -1353,6 +1360,9 @@ pub fn ensure(id: &str, cause: &str) -> Result<()> {
 pub(crate) fn ensure_with(id: &str, prompt: &str, cause: &str) -> Result<()> {
     if id.is_empty() || id == "." || id == ".." || id.contains(['/', '\\', '\0']) {
         return Err("invalid session ID".to_string().into());
+    }
+    if let Some(why) = crate::emeritus::refused(id) {
+        return Err(why.into()); // retired: never woken
     }
     if let Ok(info) = read_info_file(id)
         && info.is_remote()

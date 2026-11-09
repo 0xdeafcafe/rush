@@ -54,8 +54,10 @@ use crate::timer::{TimerId, Timers};
 use crate::wire::*;
 
 mod agent;
+mod emeritus;
 mod upgrade;
 use agent::Watching;
+use emeritus::Em;
 mod memallow;
 mod openasks;
 mod readallow;
@@ -218,7 +220,15 @@ pub struct Hooks {
     /// Stands in for the exec that moves the host onto a newer rush, and
     /// for asking that rush first: for tests. Rust-only.
     pub exec: Option<Exec>,
+    /// Stands in for starting an Emeritus successor and waiting for its
+    /// first request (server/emeritus.rs): its context then, or why it
+    /// couldn't start. For tests. Rust-only.
+    pub successor: Option<Successor>,
 }
+
+/// Starts a successor's host for its config and waits for its first
+/// request: what it started at, or why not.
+pub type Successor = Arc<dyn Fn(Config) -> crate::emeritus::Start + Send + Sync>;
 
 impl Hooks {
     /// The real ones.
@@ -242,6 +252,7 @@ impl Hooks {
             cwd_settle: Duration::from_secs(2),
             info_every: INFO_EVERY,
             exec: None,
+            successor: None,
         }
     }
 
@@ -431,6 +442,8 @@ pub(crate) struct State {
     w: Watching,
     /// Its subagents, for their prompt caches: see server/subkeep.rs.
     sk: SubWatch,
+    /// Where it stands in an Emeritus handover: see server/emeritus.rs.
+    em: Em,
     /// Asked to move onto a newer rush once between turns, and a move
     /// being tried (server/upgrade.rs).
     upgrade_due: bool,
@@ -518,10 +531,21 @@ pub fn run(id: &str) -> Result<(), String> {
 /// run, with the agents reg knows and hooks: tests run a host in their own
 /// process with a fake agent.
 pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
+    // A handover its last host was cut short in is settled first: it may
+    // retire this session (docs/emeritus.md).
+    if let Some(phase) = crate::emeritus::recover(id) {
+        log_event(id, "emeritus-recovered", json!({"phase": phase}));
+    }
     let p = dir(id).join("config.json");
     let b = std::fs::read(&p)
         .map_err(|e| format!("open {}: {}", p.display(), crate::reload::os_err(&e)))?;
     let cfg = Config::parse(&b).map_err(|e| e.to_string())?;
+    if let Some(why) = crate::emeritus::refusal(&cfg) {
+        // Retired is terminal: no host starts for it, however it's woken.
+        log_event(id, "emeritus-refused", json!({"why": why}));
+        crate::emeritus::mark_stopped(id, &cfg);
+        return Err(why);
+    }
     // What started it led to its start and its first message, not to all
     // it does after: its agent's lines say their own causes.
     let started = rush_events::id();
@@ -733,6 +757,16 @@ fn build(reg: Registry, hooks: Hooks, mut cfg: Config) -> (Host, Receiver<Msg>) 
         upgrades: crate::upgrade::adopts(&reg, &cfg.kind),
         workspace: cfg.workspace.clone(),
         generation: 1,
+        emeritus: if cfg.retired() {
+            "retired".into()
+        } else {
+            String::new()
+        },
+        successor: cfg
+            .emeritus
+            .as_ref()
+            .map(|e| e.successor.clone())
+            .unwrap_or_default(),
         ..Info::default()
     };
     let began = cfg.resume;
@@ -796,6 +830,7 @@ fn build(reg: Registry, hooks: Hooks, mut cfg: Config) -> (Host, Receiver<Msg>) 
         info_owed: None,
         w: Watching::default(),
         sk: SubWatch::default(),
+        em: Em::default(),
         upgrade_due: false,
         upgrading: false,
         listen_fd: -1,
@@ -2113,6 +2148,9 @@ impl Host {
         if st.info.sleeping {
             return Err("session is sleeping; reconnect before sending".into());
         }
+        if let Some(why) = crate::emeritus::refusal(&st.cfg) {
+            return Err(why); // retired: nothing is passed on
+        }
         let n = name_from(text);
         if st.cfg.name_first && !n.is_empty() {
             st.cfg.name_first = false;
@@ -2140,6 +2178,14 @@ impl Host {
         // what starts without you, another agent's or rush's own. A
         // message you send yourself goes, and sent now, anything does.
         let held = st.info.queue_held || st.info.queue_guarded && exchange.is_some();
+        // Another agent's message during a handover waits: it goes on to
+        // the successor, or back here if the handover is rolled back.
+        // One that brings new work to an agent past Emeritus's threshold
+        // waits behind a nudge to hand over first (server/emeritus.rs).
+        let nudge_first = (!now && !busy && !held && exchange.is_some())
+            .then(|| self.nudge_first(&st))
+            .flatten();
+        let held = held || st.em.handing || nudge_first.is_some();
         if !now && (busy || held) {
             if st.info.queue.is_empty() {
                 st.queued_at = Some(Instant::now());
@@ -2163,6 +2209,9 @@ impl Host {
                 st.pics.insert(p.clone(), pics[i].clone());
             }
             self.publish(&mut st);
+            if let Some(past) = nudge_first {
+                self.nudge(&mut st, past, true);
+            }
             return Ok(());
         }
         if !st.info.queue.is_empty() && (now || !st.info.queue_held) && (!busy || self.cuts_in(&st))
@@ -2239,6 +2288,7 @@ impl Host {
         if st.conn.is_none()
             || st.info.state != "working"
             || !self.ready(&st)
+            || st.em.nudged // what waits behind a nudge waits for its turn's end
             || st.info.limit.is_some()
             || st
                 .queued_at
@@ -2322,7 +2372,9 @@ impl Host {
     /// Whether what's queued goes when the turn ends: what you sent now,
     /// else what the holds let go (queue_ready).
     fn ready(&self, st: &State) -> bool {
-        st.go_now > 0 && !st.info.queue.is_empty() || queue_ready(&st.info)
+        // A handover under way holds it all: it goes on to the successor,
+        // or back to this agent if the handover is rolled back.
+        !st.em.handing && (st.go_now > 0 && !st.info.queue.is_empty() || queue_ready(&st.info))
     }
 
     /// Sends queued text with its images, from where they were read when
@@ -2769,6 +2821,11 @@ impl Host {
     }
 
     fn do_op_inner(&self, o: &Op) -> Result<(), String> {
+        // Emeritus's own ops, and what a retired session or one handing
+        // over refuses (server/emeritus.rs).
+        if let Some(r) = self.emeritus_op(o) {
+            return r;
+        }
         if o.op == "send" {
             let r = if o.guide {
                 self.guide_exchange(&o.text, &o.images, o.exchange.clone(), &o.cause)
@@ -3776,6 +3833,13 @@ impl Host {
             st.woke = false;
             if st.info.away.as_ref().is_some_and(|a| a.on()) && crate::away::away_done(&e.text) {
                 self.end_away(st); // nothing left to keep it going on
+            }
+            if self.emeritus_turn_end(st, &e) {
+                // It hands over, or was nudged to: the turn's end is
+                // settled there.
+                self.publish(st);
+                self.turn_done(st, &e);
+                return;
             }
             if self.overstays(st, conn) && !st.info.relogin {
                 // Warm, but kept on the old login too long: it moves.

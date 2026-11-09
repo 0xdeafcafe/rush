@@ -179,13 +179,55 @@ pub struct Config {
     /// The worktree the session works in, and its branch.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace: Option<Workspace>,
+    /// Where it stands in Emeritus's handover (docs/emeritus.md): nudged,
+    /// or retired for good. Rust-only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emeritus: Option<Emeritus>,
     /// The agent's profile: on disk as {"name", "configDir"}, last, as Go's
     /// wireConfig has it (config.go).
     #[serde(with = "wire_account")]
     pub account: Profile,
 }
 
+/// A session's part in Emeritus, kept in its config so every start reads
+/// it: once retired, it's retired for good (emeritus.rs).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Emeritus {
+    /// When the host nudged it to hand over: once per session.
+    #[serde(rename = "nudgedAt", skip_serializing_if = "zero_time")]
+    pub nudged_at: Time,
+    /// Its context when it was last nudged, in tokens.
+    #[serde(rename = "nudgedContext", skip_serializing_if = "zero")]
+    pub nudged_context: i64,
+    /// The threshold it was last nudged past, in tokens.
+    #[serde(rename = "nudgedPast", skip_serializing_if = "zero")]
+    pub nudged_past: i64,
+    /// When it retired: terminal from then on, at every way in.
+    #[serde(rename = "retiredAt", skip_serializing_if = "zero_time")]
+    pub retired_at: Time,
+    /// The session that took over from it, when one did.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub successor: String,
+    /// Why it's retired without having handed over: a successor whose
+    /// start was rolled back, which its predecessor carries on from.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub why: String,
+}
+
+impl Emeritus {
+    /// Whether the session is retired: terminal.
+    pub fn retired(&self) -> bool {
+        !self.retired_at.is_zero()
+    }
+}
+
 impl Config {
+    /// Whether the session is retired for good (docs/emeritus.md).
+    pub fn retired(&self) -> bool {
+        self.emeritus.as_ref().is_some_and(Emeritus::retired)
+    }
+
     /// A config as config.json has it, brought up to date: an older
     /// rush's names no kind for Claude Code, and the account's kind is the
     /// session's.
@@ -654,6 +696,14 @@ pub struct Info {
     /// The decisions block its last turn ended with, as a question card.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub decisions: Option<Question>,
+    /// Emeritus (Rust-only, docs/emeritus.md): "retiring" once it asked
+    /// to retire after its turn, "handing" while its successor starts,
+    /// "retired" once it has handed over for good; "" otherwise.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub emeritus: String,
+    /// The session that took over from it, once it's retired.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub successor: String,
 }
 
 /// Each queued message's images: a message with none is null, as Go

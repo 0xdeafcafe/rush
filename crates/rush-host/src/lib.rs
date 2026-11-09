@@ -28,6 +28,7 @@ pub mod cheap;
 pub mod cli;
 pub mod client;
 pub mod decisions;
+pub mod emeritus;
 pub mod events;
 pub mod exchange_journal;
 #[cfg(any(test, feature = "fake"))]

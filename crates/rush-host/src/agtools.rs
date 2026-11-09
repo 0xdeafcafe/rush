@@ -12,7 +12,7 @@
 use std::io::Write;
 use std::sync::Arc;
 
-use rush_bundled::agtools::{self, Agents, Reminders, Viewer};
+use rush_bundled::agtools::{self, Agents, Reminders, Retirer, Viewer};
 use rush_core::adapter::{Handle, Registry, ToolServer};
 use rush_core::wire::RawJson;
 use serde_json::value::RawValue;
@@ -99,6 +99,21 @@ impl Agents for SubAgents {
 
     fn reminders(&self) -> Option<&dyn Reminders> {
         Some(self)
+    }
+
+    fn retirer(&self) -> Option<&dyn Retirer> {
+        // Emeritus off: the tool isn't listed and a call is no tool's.
+        rush_state::Store::load()
+            .config
+            .emeritus
+            .on
+            .then_some(self as &dyn Retirer)
+    }
+}
+
+impl Retirer for SubAgents {
+    fn retire(&self, input: agtools::RetireInput) -> Result<String, String> {
+        crate::emeritus::ask_retire(self.parent(), &input.baton)
     }
 }
 

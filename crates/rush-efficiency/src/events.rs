@@ -29,6 +29,70 @@ pub struct Event {
     pub source: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub detail: String,
+    /// A handover's numbers, on a "handover" event (Rust-only): what
+    /// Emeritus later says it saved is worked out from them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub handover: Option<Handover>,
+}
+
+/// The kind of the event a handover logs.
+pub const HANDOVER: &str = "handover";
+
+/// One Emeritus handover (docs/emeritus.md): the session that retired, at
+/// what context and cost, and the one that took over, at what context it
+/// started. Rust-only.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Handover {
+    /// The rush session that retired, and its agent's conversation.
+    pub from: String,
+    #[serde(rename = "fromSession", skip_serializing_if = "String::is_empty")]
+    pub from_session: String,
+    /// The rush session that took over.
+    pub to: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub agent: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub model: String,
+    /// The retiring session's context, in tokens, as its last request
+    /// sent it, and what it had cost.
+    #[serde(rename = "fromContext")]
+    pub from_context: i64,
+    #[serde(rename = "fromCostUsd")]
+    pub from_cost_usd: f64,
+    /// The successor's context at its first request: the baton and its
+    /// system prompt.
+    #[serde(rename = "toContext")]
+    pub to_context: i64,
+    /// The threshold that nudged it, in tokens; 0 when it retired unasked.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub threshold: i64,
+    /// How many handovers led to the successor: 1 for the first.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub lineage: i64,
+    /// Whether the session was another's subagent.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub subagent: bool,
+}
+
+fn is_zero(n: &i64) -> bool {
+    *n == 0
+}
+
+/// Logs a handover, rush's own doing, for account (the profile's
+/// folder).
+pub fn add_handover(account: &str, h: Handover) -> std::io::Result<()> {
+    add_event(Event {
+        kind: HANDOVER.into(),
+        account: account.into(),
+        source: "rush".into(),
+        detail: format!(
+            "{} handed over to {} at {} tokens",
+            h.from, h.to, h.from_context
+        ),
+        handover: Some(h),
+        ..Event::default()
+    })
 }
 
 static EVENTS: Mutex<()> = Mutex::new(());
@@ -131,6 +195,7 @@ pub fn observe(env: &Env) -> HashMap<String, Found> {
             account: acct.clone(),
             source: source.into(),
             detail,
+            handover: None,
         };
         let Some(before) = &before else {
             if f.status != Status::Off && !f.since.is_zero() {
@@ -179,4 +244,60 @@ pub fn remember(env: &Env, id: &str, f: &Found) {
         },
     );
     write_detected(&all);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use super::*;
+
+    // A handover is logged with its numbers and read back whole; an event
+    // an older rush wrote has none.
+    #[test]
+    fn handovers_are_logged_with_their_numbers() {
+        let home = tempfile::tempdir().unwrap();
+        rush_state::set_thread_dir(Some(home.path().to_path_buf()));
+        let h = Handover {
+            from: "a1".into(),
+            from_session: "s-a".into(),
+            to: "b1".into(),
+            agent: "claude".into(),
+            model: "opus".into(),
+            from_context: 307_000,
+            from_cost_usd: 15.55,
+            to_context: 22_000,
+            threshold: 300_000,
+            lineage: 1,
+            subagent: true,
+        };
+        add_handover("/acct", h.clone()).unwrap();
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(events_path())
+            .unwrap()
+            .write_all(b"{\"at\":\"2026-01-02T03:04:05Z\",\"kind\":\"note\",\"source\":\"you\"}\n")
+            .unwrap();
+        let evs = load_events();
+        let got: Vec<(&str, Option<&Handover>)> = evs
+            .iter()
+            .map(|e| (e.kind.as_str(), e.handover.as_ref()))
+            .collect();
+        assert_eq!(got, vec![("note", None), (HANDOVER, Some(&h))]);
+        let ev = &evs[1];
+        assert!(
+            ev.account == "/acct" && ev.source == "rush" && ev.detail.contains("a1"),
+            "{ev:?}"
+        );
+        let line = std::fs::read_to_string(events_path()).unwrap();
+        for key in [
+            "\"fromContext\":307000",
+            "\"fromCostUsd\":15.55",
+            "\"toContext\":22000",
+            "\"subagent\":true",
+        ] {
+            assert!(line.contains(key), "{key} in {line}");
+        }
+        rush_state::set_thread_dir(None);
+    }
 }

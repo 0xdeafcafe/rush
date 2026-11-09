@@ -155,7 +155,12 @@ impl Host {
 
     /// Whether the host may exit: nothing at all is left for it to do.
     pub(super) fn sleep_safe(&self, st: &State) -> bool {
-        self.runtime_idle_safe(st) && st.info.quiet() && self.answer_given(st)
+        // A handover under way, or due, keeps it up to settle.
+        self.runtime_idle_safe(st)
+            && st.info.quiet()
+            && self.answer_given(st)
+            && !st.em.handing
+            && st.em.due.is_none()
     }
 
     /// Whether an agent another session started owes no answer: none held
@@ -1028,6 +1033,13 @@ impl Host {
     /// session it reports to once there's nothing more to do. Called once
     /// on_turn_end has settled the state.
     pub(super) fn turn_done(&self, st: &mut State, e: &event::TurnEnd) {
+        // A nudge's turn, or the one a handover began after, answers no
+        // one: what the agent was asked is answered by the turn after, or
+        // by its successor (server/emeritus.rs).
+        if std::mem::take(&mut st.em.nudged) || st.em.handing {
+            st.last_said.clear();
+            return;
+        }
         if !answers(st) {
             st.last_said.clear(); // the next turn's words are its own
             return;
@@ -1126,7 +1138,7 @@ impl Host {
 /// Whether the session was started by another, which may wait on its
 /// answers or ask for them: its child, or one started beside it
 /// (subtool.go:512).
-fn answers(st: &State) -> bool {
+pub(super) fn answers(st: &State) -> bool {
     let set = |k: &str| st.cfg.meta.get(k).is_some_and(|s| !s.is_empty());
     set("spawnedBy") || set("startedFrom")
 }

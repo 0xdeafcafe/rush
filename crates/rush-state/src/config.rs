@@ -268,6 +268,15 @@ pub struct Config {
         skip_serializing_if = "is_default"
     )]
     pub cheap_subagents: CheapSubagents,
+    /// Emeritus (Rust-only): a session near the end of its context hands
+    /// over to a fresh one on a baton it writes. Off until turned on. See
+    /// [`Emeritus`] and docs/emeritus.md.
+    #[serde(
+        rename = "emeritus",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_default"
+    )]
+    pub emeritus: Emeritus,
     /// The harness each provider runs in, by provider, where it isn't its
     /// usual one: "ollama": "pi" runs Ollama in Pi.
     #[serde(
@@ -1140,6 +1149,76 @@ pub struct CheapSubagents {
     pub models: BTreeMap<String, String>,
 }
 
+/// Settings for Emeritus, the handover near the end of a context
+/// (docs/emeritus.md). One threshold for main agents and subagents alike:
+/// [`Emeritus::threshold`]. The host measures it, not the agent.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Emeritus {
+    /// Whether rush nudges a session to hand over and offers it the
+    /// retire tool. Off until turned on.
+    #[serde(
+        rename = "on",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_false"
+    )]
+    pub on: bool,
+    /// The context, in tokens, past which a session is nudged: 0 is
+    /// [`EMERITUS_TOKENS`].
+    #[serde(
+        rename = "tokens",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_zero_i64"
+    )]
+    pub tokens: i64,
+    /// The share of the model's window, in percent, past which it is
+    /// nudged when that comes first: 0 is [`EMERITUS_PERCENT`].
+    #[serde(
+        rename = "percent",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_zero_i64"
+    )]
+    pub percent: i64,
+}
+
+/// The context past which a session hands over, unless set: the lab at
+/// ~300k found each call's re-read of the context dominating there
+/// (docs/emeritus.md, "Lab tests").
+pub const EMERITUS_TOKENS: i64 = 300_000;
+
+/// The share of the window past which a session hands over, when that is
+/// smaller than [`EMERITUS_TOKENS`]: a 200k window's 140k.
+pub const EMERITUS_PERCENT: i64 = 70;
+
+impl Emeritus {
+    /// The context, in tokens, past which a session whose model has a
+    /// window of window tokens is nudged: the token threshold, or the
+    /// window's share if that's smaller. A window not known (0 or less)
+    /// leaves the token threshold.
+    pub fn threshold(&self, window: i64) -> i64 {
+        let tokens = if self.tokens > 0 {
+            self.tokens
+        } else {
+            EMERITUS_TOKENS
+        };
+        let percent = if self.percent > 0 {
+            self.percent.min(100)
+        } else {
+            EMERITUS_PERCENT
+        };
+        if window <= 0 {
+            return tokens;
+        }
+        tokens.min(window.saturating_mul(percent) / 100)
+    }
+
+    /// Whether a session with context tokens of a window-token model is
+    /// past the threshold, with Emeritus on.
+    pub fn due(&self, context: i64, window: i64) -> bool {
+        self.on && context > 0 && context >= self.threshold(window)
+    }
+}
+
 /// Routine subagent work goes to the cheaper model, by the agent's choice.
 pub const CHEAP_MODE_ON: &str = "on";
 /// Every subagent that names no model of its own starts on it.
@@ -1543,6 +1622,66 @@ fn key_in_own(id: &str, k: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Emeritus is off until turned on and says nothing until set; its
+    // threshold is 300k tokens or 70% of the window, whichever comes
+    // first, one rule for main agents and subagents alike.
+    #[test]
+    fn emeritus_threshold() {
+        let j = serde_json::to_string(&Config::default()).unwrap();
+        assert!(!j.contains("emeritus"), "{j}");
+        let on = Emeritus {
+            on: true,
+            ..Emeritus::default()
+        };
+        let with = |tokens: i64, percent: i64| Emeritus {
+            on: true,
+            tokens,
+            percent,
+        };
+        let cases: &[(&str, Emeritus, i64, i64)] = &[
+            (
+                "1M window: the token threshold",
+                on.clone(),
+                1_000_000,
+                300_000,
+            ),
+            ("200k window: 70% of it", on.clone(), 200_000, 140_000),
+            ("unknown window", on.clone(), 0, 300_000),
+            ("set lower", with(150_000, 0), 1_000_000, 150_000),
+            ("set share", with(0, 50), 400_000, 200_000),
+            (
+                "a share past 100 is the window",
+                with(900_000, 250),
+                500_000,
+                500_000,
+            ),
+        ];
+        for (name, e, window, want) in cases {
+            assert_eq!(e.threshold(*window), *want, "{name}");
+        }
+        let due: &[(&str, Emeritus, i64, i64, bool)] = &[
+            ("past it", on.clone(), 300_000, 1_000_000, true),
+            ("short of it", on.clone(), 299_999, 1_000_000, false),
+            ("past 70% of 200k", on.clone(), 140_000, 200_000, true),
+            ("off", Emeritus::default(), 900_000, 1_000_000, false),
+            ("no context known", on.clone(), 0, 0, false),
+        ];
+        for (name, e, ctx, window, want) in due {
+            assert_eq!(e.due(*ctx, *window), *want, "{name}");
+        }
+        let c = Config {
+            emeritus: with(250_000, 0),
+            ..Config::default()
+        };
+        let j = serde_json::to_string(&c).unwrap();
+        assert!(
+            j.contains(r#""emeritus":{"on":true,"tokens":250000}"#),
+            "{j}"
+        );
+        let back: Config = serde_json::from_str(&j).unwrap();
+        assert_eq!(back, c);
+    }
 
     // Cheaper subagents are off until turned on, and a config that never
     // set them says nothing; the model is the chosen one while it is
