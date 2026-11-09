@@ -13,6 +13,7 @@ use serde_json::{Map, Value, json};
 use crate::gate::{AcquireError, Ask, Cancel, Gate, HELD_ENV, Run, Wait, bin_dir};
 use crate::godur;
 use crate::heavy::{heavy, worker_env_here};
+use crate::history::project_of;
 use crate::hook;
 use crate::host::{Fields, Host};
 use crate::node::{base, node_name};
@@ -209,6 +210,12 @@ fn gate_run(ctx: &Ctx, path_env: &str, name: &str, argv: &[String]) -> i32 {
     };
     let own = owner(ctx);
     let signals = Signals::new();
+    // Rust-only: what it runs, for its history: the words after the
+    // program, wrapped (env go test) or not.
+    let words = argv
+        .iter()
+        .position(|a| base(a) == name)
+        .map_or(&argv[1..], |i| &argv[i + 1..]);
     let run = own.acquire(
         ctx,
         &signals.cancel,
@@ -217,6 +224,10 @@ fn gate_run(ctx: &Ctx, path_env: &str, name: &str, argv: &[String]) -> i32 {
             rule,
             session: own.key.clone(),
             reserve: ctx.plugin.reserve(),
+            command: crate::heavy::command(&name, words),
+            project: std::env::current_dir()
+                .map(|d| project_of(&d))
+                .unwrap_or_default(),
         },
         true,
     );
@@ -416,13 +427,15 @@ impl Owner {
         let start = Instant::now();
         let mut waited = false;
         let name = a.name.clone();
-        let memory = a.rule.memory;
         let mut on_wait = |w: Wait| {
             waited = true;
-            self.log(
-                "gate-waiting",
-                fields(json!({"name": name, "ahead": w.ahead, "running": w.running, "need": w.need, "room": w.room})),
+            let mut f = fields(
+                json!({"name": name, "ahead": w.ahead, "running": w.running, "need": w.need, "room": w.room}),
             );
+            if w.held {
+                f.insert("held".into(), Value::Bool(true)); // Rust-only
+            }
+            self.log("gate-waiting", f);
             if tell {
                 tell_wait(&mut io::stderr(), &name, &w);
             }
@@ -430,8 +443,8 @@ impl Owner {
         let r = ctx.gate.acquire(cancel, a, Some(&mut on_wait));
         let took = godur::string(godur::round_secs(start.elapsed()));
         match &r {
-            Ok(_) => {
-                let mut f = fields(json!({"name": name, "memory": memory}));
+            Ok(run) => {
+                let mut f = fields(json!({"name": name, "memory": run.memory()}));
                 if waited {
                     f.insert("waited".into(), Value::String(took));
                 }
@@ -496,6 +509,20 @@ impl Owner {
 
 /// Says on w why name waits.
 fn tell_wait(w: &mut dyn Write, name: &str, wait: &Wait) {
+    if wait.held {
+        // Rust-only: it could start ahead of the first, but may not.
+        let _ = writeln!(
+            w,
+            "rush gate: {name} waiting its turn: {} ahead; it would fit (it needs {}, there's {} past what's kept free), \
+             but the run first in line has waited over {}, so nothing more starts ahead of it ({} running)…",
+            wait.ahead,
+            size(wait.need),
+            size(wait.room),
+            godur::string(crate::share::BACKFILL_FOR),
+            wait.running
+        );
+        return;
+    }
     if wait.need > 0 {
         let _ = writeln!(
             w,
@@ -520,6 +547,7 @@ fn tell_wait(w: &mut dyn Write, name: &str, wait: &Wait) {
 pub fn gate_hold(ctx: &Ctx, args: &[String]) -> i32 {
     let mut ready = String::new();
     let mut pid = 0i32;
+    let mut dir = String::new();
     let mut args = args;
     while !args.is_empty() && args[0] != "--" {
         if args.len() < 2 {
@@ -527,7 +555,9 @@ pub fn gate_hold(ctx: &Ctx, args: &[String]) -> i32 {
         }
         match args[0].as_str() {
             "--ready" => ready = args[1].clone(),
-            "--dir" => {} // memory is the machine's: where it runs doesn't matter now
+            // Memory is the machine's, so where it runs doesn't decide
+            // when; it says whose history the run's is (Rust-only).
+            "--dir" => dir = args[1].clone(),
             "--pid" => pid = args[1].parse().unwrap_or(0),
             _ => return 2,
         }
@@ -568,6 +598,12 @@ pub fn gate_hold(ctx: &Ctx, args: &[String]) -> i32 {
         rule,
         session: own.key.clone(),
         reserve: ctx.plugin.reserve(),
+        command: crate::heavy::command(&name, &args[2..]),
+        project: if dir.is_empty() {
+            String::new()
+        } else {
+            project_of(Path::new(&dir))
+        },
     };
     let run = match own.acquire(ctx, &cancel, ask, true) {
         Ok(r) => r,
@@ -1539,6 +1575,7 @@ mod tests {
                     },
                     session: "s1".into(),
                     reserve: 0.15,
+                    ..Ask::default()
                 },
                 None,
             )
@@ -1652,6 +1689,7 @@ mod tests {
                 running: 3,
                 need: 0,
                 room: 0,
+                held: false,
             },
         );
         tell_wait(
@@ -1662,12 +1700,27 @@ mod tests {
                 running: 1,
                 need: 2 * GIB,
                 room: GIB,
+                held: false,
+            },
+        );
+        // Rust-only: one that would start ahead of the first but may not.
+        tell_wait(
+            &mut w,
+            "eslint",
+            &Wait {
+                ahead: 1,
+                running: 1,
+                need: GIB,
+                room: 2 * GIB,
+                held: true,
             },
         );
         assert_eq!(
             String::from_utf8(w).unwrap(),
             "rush gate: tsc waiting its turn: 2 ahead, the agents running least first (3 running)…\n\
-             rush gate: go waiting for memory: it needs 2.0 GiB, there's 1.0 GiB past what's kept free (1 running)…\n"
+             rush gate: go waiting for memory: it needs 2.0 GiB, there's 1.0 GiB past what's kept free (1 running)…\n\
+             rush gate: eslint waiting its turn: 1 ahead; it would fit (it needs 1.0 GiB, there's 2.0 GiB past what's kept free), \
+             but the run first in line has waited over 2m0s, so nothing more starts ahead of it (1 running)…\n"
         );
     }
 }

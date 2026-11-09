@@ -2,7 +2,9 @@
 //! flock under rush's folder's gate, no daemon: a ticket frees itself when
 //! its holder dies, however it dies. Same files as Go rush, so either's
 //! runs wait on the other's.
-//! Ported from internal/gate/gate.go:1-363.
+//! Ported from internal/gate/gate.go:1-363. Rust-only: a small run may
+//! start ahead of the first waiter (share::backfill), and a run expects
+//! what recent runs like it held (history.rs, share::estimate).
 
 use std::fmt;
 use std::fs::{File, OpenOptions};
@@ -14,8 +16,10 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::godur;
+use crate::history;
 use crate::rules::{Rule, size};
-use crate::share::{State, Ticket, admit, order, room};
+use crate::share::{BACKFILL_FOR, Backfill, State, Ticket, admit, backfill, order, room};
 use crate::sys::{Machine, Real};
 
 /// Set in a gated program's environment: a gate inside it lets everything
@@ -98,6 +102,12 @@ pub struct Ask {
     pub session: String,
     /// The share of memory kept free of gated runs.
     pub reserve: f64,
+    /// What it runs, as heavy::command has it, and the project it runs
+    /// in, as history::project_of has it: what runs like it held is kept
+    /// under them, and it expects what they held (Rust-only). With no
+    /// command it expects the rule's figure and leaves no history.
+    pub command: String,
+    pub project: String,
 }
 
 /// Where a waiter stands, told each time it changes.
@@ -107,9 +117,13 @@ pub struct Wait {
     /// -1 before anything is known.
     pub running: i64,
     /// The memory it waits for, and room what there is, when it's next and
-    /// memory holds it; both 0 while others go first.
+    /// memory holds it, or when it's held; both 0 while others go first.
     pub need: u64,
     pub room: u64,
+    /// Whether it would start ahead of the first waiter, being small and
+    /// fitting, but the first has waited too long for anything more to
+    /// (Rust-only: share::Backfill::Held).
+    pub held: bool,
 }
 
 /// The gate: where its tickets are, and the machine it shares.
@@ -170,13 +184,14 @@ impl Gate {
     ) -> Result<Arc<Run>, AcquireError> {
         let dir = self.runs();
         mkdir_all(&dir)?;
-        let (f, path) = take_ticket(&dir, &a)?;
+        let memory = self.expect(&a);
+        let (f, path) = take_ticket(&dir, &a, memory)?;
         let mut last = Wait {
             running: -1,
             ..Wait::default()
         };
         loop {
-            match self.try_start(&dir, &path, &a) {
+            match self.try_start(&dir, &path, &a, memory) {
                 Err(e) => {
                     let _ = std::fs::remove_file(&path);
                     return Err(e.into());
@@ -187,6 +202,7 @@ impl Gate {
                         f: Mutex::new(Some(f)),
                         path: running,
                         ask: a,
+                        memory,
                         w: Mutex::new(WatchState::default()),
                         released: AtomicBool::new(false),
                     }));
@@ -207,10 +223,21 @@ impl Gate {
         }
     }
 
+    /// What a's run is expected to need: the rule's figure, or less once
+    /// runs of its command have shown they need less (Rust-only).
+    pub fn expect(&self, a: &Ask) -> u64 {
+        if a.command.is_empty() {
+            return a.rule.memory;
+        }
+        let peaks = history::peaks(&self.root, &a.project, &a.command);
+        crate::share::estimate(a.rule.memory, &peaks)
+    }
+
     /// Starts the run when it's next by the fair order and memory lets it,
-    /// else says where it stands. Starting is done under the folder's
-    /// lock, so two waiters never both judge themselves next.
-    fn try_start(&self, dir: &Path, path: &Path, a: &Ask) -> io::Result<Started> {
+    /// or, further back, when it may start ahead of the first (Rust-only:
+    /// share::backfill); else says where it stands. Starting is done under
+    /// the folder's lock, so two waiters never both judge themselves next.
+    fn try_start(&self, dir: &Path, path: &Path, a: &Ask, memory: u64) -> io::Result<Started> {
         let lock = OpenOptions::new()
             .read(true)
             .write(true)
@@ -227,15 +254,32 @@ impl Gate {
             ahead: order(&ts).iter().take_while(|t| t.file != mine).count(),
             ..Wait::default()
         };
+        let me = ts
+            .iter()
+            .find(|t| t.file == mine)
+            .cloned()
+            .unwrap_or(Ticket {
+                file: mine.clone(),
+                memory,
+                ..Ticket::default()
+            });
         if w.ahead > 0 {
-            return Ok(Started::Waits(w));
-        }
-        let me = Ticket {
-            file: mine.clone(),
-            memory: a.rule.memory,
-            ..Ticket::default()
-        };
-        if w.running > 0 {
+            let (avail, total) = self.machine.memory();
+            if w.running == 0 || total == 0 {
+                return Ok(Started::Waits(w));
+            }
+            let reserve = (total as f64 * a.reserve) as u64;
+            match backfill(&me, &ts, avail, reserve, SystemTime::now()) {
+                Backfill::Go => {}
+                Backfill::Held => {
+                    w.held = true;
+                    w.need = me.memory;
+                    w.room = room(&ts, avail, reserve);
+                    return Ok(Started::Waits(w));
+                }
+                _ => return Ok(Started::Waits(w)),
+            }
+        } else if w.running > 0 {
             // Memory it can't read lets the run start, as without a gate.
             let (avail, total) = self.machine.memory();
             if total > 0 {
@@ -323,20 +367,33 @@ impl Gate {
         let ts = self.tickets();
         let running: Vec<Ticket> = ts.iter().filter(|t| t.running).cloned().collect();
         let mut waiting = Vec::new();
+        let (avail, total) = self.machine.memory();
+        let res = (total as f64 * reserve) as u64;
+        let now = SystemTime::now();
         for (i, t) in order(&ts).into_iter().enumerate() {
             let mut why = format!("behind {i}");
+            if i > 0 && !running.is_empty() && total > 0 {
+                // Rust-only: one that may start ahead of the first says so,
+                // and one held from it by the first's long wait says why.
+                match backfill(&t, &ts, avail, res, now) {
+                    Backfill::Go => why = "starting ahead of the first: it's small and fits".into(),
+                    Backfill::Held => {
+                        why = format!(
+                            "behind {i}: it would fit, but the first has waited over {}, so nothing more starts ahead of it",
+                            godur::string(BACKFILL_FOR)
+                        )
+                    }
+                    _ => {}
+                }
+            }
             if i == 0 {
                 why = "starting".into();
-                let (avail, total) = self.machine.memory();
-                if !running.is_empty() && total > 0 {
-                    let res = (total as f64 * reserve) as u64;
-                    if !admit(&t, &ts, avail, res) {
-                        why = format!(
-                            "for memory: needs {}, there's {} past what's kept free",
-                            size(t.memory),
-                            size(room(&ts, avail, res))
-                        );
-                    }
+                if !running.is_empty() && total > 0 && !admit(&t, &ts, avail, res) {
+                    why = format!(
+                        "for memory: needs {}, there's {} past what's kept free",
+                        size(t.memory),
+                        size(room(&ts, avail, res))
+                    );
                 }
             }
             waiting.push(Waiter {
@@ -384,7 +441,10 @@ pub fn bin_dir(root: &Path) -> PathBuf {
 /// Whether a waiter would tell w as it told last: the room moves each
 /// look, so only whether memory is the reason counts.
 fn same(w: &Wait, last: &Wait) -> bool {
-    w.ahead == last.ahead && w.running == last.running && (w.need > 0) == (last.need > 0)
+    w.ahead == last.ahead
+        && w.running == last.running
+        && (w.need > 0) == (last.need > 0)
+        && w.held == last.held
 }
 
 /// What a holder's watchdog keeps, shared with wake.
@@ -394,6 +454,9 @@ pub(crate) struct WatchState {
     pub state: State,
     /// Paused in all, so far.
     pub paused: Duration,
+    /// The most its processes have held together (Rust-only: kept in the
+    /// history when it's released).
+    pub peak: u64,
 }
 
 /// A ticket that got in: its holder keeps it until it's released, or
@@ -404,6 +467,8 @@ pub struct Run {
     f: Mutex<Option<File>>,
     pub(crate) path: PathBuf,
     pub(crate) ask: Ask,
+    /// What it was expected to need: its ticket's.
+    pub(crate) memory: u64,
     pub(crate) w: Mutex<WatchState>,
     released: AtomicBool,
 }
@@ -414,18 +479,26 @@ impl Run {
         &self.ask
     }
 
+    /// What the run was expected to need when it got in (Rust-only: the
+    /// rule's figure, or less from its command's history).
+    pub fn memory(&self) -> u64 {
+        self.memory
+    }
+
     /// Records what a run its holder watches itself holds, so the room
     /// counts its reservation as what it's yet to take, not all it might.
     pub fn note(&self, footprint: u64) {
         let st = {
             let mut w = self.w.lock().unwrap_or_else(|e| e.into_inner());
             w.state.footprint = footprint;
+            w.peak = w.peak.max(footprint);
             w.state.clone()
         };
         self.write_state(&st);
     }
 
-    /// Frees the run's place.
+    /// Frees the run's place, and adds the most it held to its command's
+    /// history (Rust-only).
     pub fn release(&self) {
         if self.released.swap(true, Ordering::SeqCst) {
             return;
@@ -433,6 +506,10 @@ impl Run {
         let _ = std::fs::remove_file(with_ext(&self.path, ".state"));
         let _ = std::fs::remove_file(&self.path);
         self.f.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let peak = self.w.lock().unwrap_or_else(|e| e.into_inner()).peak;
+        if peak > 0 && !self.ask.command.is_empty() {
+            let _ = history::record(&self.gate.root, &self.ask.project, &self.ask.command, peak);
+        }
     }
 
     /// Says s of the run, whole, for anyone reading at once.
@@ -467,8 +544,8 @@ static SEQ: AtomicI64 = AtomicI64::new(0);
 
 /// Joins the waiters: a file named by when, held with flock so it's seen
 /// as gone the moment its holder is. It's locked under a hidden name
-/// first, so no one sees it unheld.
-fn take_ticket(dir: &Path, a: &Ask) -> io::Result<(File, PathBuf)> {
+/// first, so no one sees it unheld. memory is what it's expected to need.
+fn take_ticket(dir: &Path, a: &Ask, memory: u64) -> io::Result<(File, PathBuf)> {
     let now = nanos(SystemTime::now());
     let base = format!(
         "{:020}-{}-{}",
@@ -495,7 +572,7 @@ fn take_ticket(dir: &Path, a: &Ask) -> io::Result<(File, PathBuf)> {
         a.name,
         nanos(SystemTime::now()),
         session,
-        a.rule.memory
+        memory
     );
     let path = dir.join(format!("ticket-{base}"));
     if let Err(e) = std::fs::rename(&tmp, &path) {
@@ -666,7 +743,72 @@ pub(crate) mod tests {
             },
             session: session.into(),
             reserve: 0.0,
+            ..Ask::default()
         }
+    }
+
+    // Rust-only: while the first waiter waits for memory, a small run
+    // behind it that fits starts ahead of it; the first keeps its place.
+    #[test]
+    fn small_runs_start_past_a_waiting_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let g = Gate::at(dir.path(), Fake::new(4 * GIB));
+        let a = g
+            .acquire(&Cancel::new(), ask("tsc", 8 * GIB, "a"), None)
+            .unwrap();
+        a.note(8 * GIB); // it holds all it expects: 4 GiB is room
+        let (waits_tx, waits) = mpsc::channel();
+        let g2 = g.clone();
+        let cancel = Cancel::new();
+        let c2 = cancel.clone();
+        let h = std::thread::spawn(move || {
+            let mut tell = |w: Wait| {
+                let _ = waits_tx.send(w);
+            };
+            g2.acquire(&c2, ask("cargo", 6 * GIB, "b"), Some(&mut tell))
+                .map(|_| ())
+        });
+        let w = waits.recv().unwrap();
+        assert_eq!((w.ahead, w.need), (0, 6 * GIB), "the first waits as {w:?}");
+        // Taken on this thread, so it's let in or the test hangs.
+        let small = g
+            .acquire(&Cancel::new(), ask("eslint", GIB, "c"), None)
+            .unwrap();
+        let (run, wait) = g.status(0.0);
+        assert_eq!(run.len(), 2);
+        assert_eq!(wait.len(), 1, "the first lost its place");
+        assert_eq!(wait[0].ticket.name, "cargo");
+        assert!(wait[0].why.starts_with("for memory"), "{}", wait[0].why);
+        small.release();
+        cancel.cancel();
+        assert!(matches!(h.join().unwrap(), Err(AcquireError::Cancelled)));
+        a.release();
+    }
+
+    // Rust-only: what a command's runs held is what the next expects.
+    #[test]
+    fn runs_expect_what_runs_like_them_held() {
+        let dir = tempfile::tempdir().unwrap();
+        let g = Gate::at(dir.path(), Fake::new(64 * GIB));
+        let mut a = ask("cargo", 4 * GIB, "a");
+        (a.command, a.project) = ("cargo check".into(), "/p".into());
+        assert_eq!(g.expect(&a), 4 * GIB, "no history: the rule's");
+        let run = g.acquire(&Cancel::new(), a.clone(), None).unwrap();
+        assert_eq!(run.memory(), 4 * GIB);
+        run.note(GIB / 2);
+        run.note(GIB / 4);
+        run.release();
+        assert_eq!(g.expect(&a), 5 * GIB / 8);
+        let run = g.acquire(&Cancel::new(), a.clone(), None).unwrap();
+        assert_eq!(run.memory(), 5 * GIB / 8);
+        assert_eq!(g.tickets()[0].memory, 5 * GIB / 8, "its ticket says so");
+        run.release();
+        // Another project's, or one with no command, keeps the rule's.
+        let mut b = a.clone();
+        b.project = "/q".into();
+        assert_eq!(g.expect(&b), 4 * GIB);
+        b.command.clear();
+        assert_eq!(g.expect(&b), 4 * GIB);
     }
 
     // gate_test.go TestMemoryHoldsTheSecond: a run waits while there's no

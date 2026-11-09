@@ -203,6 +203,7 @@ impl Run {
                 let mut g = self.w.lock().unwrap_or_else(|e| e.into_inner());
                 g.state = st.clone();
                 g.paused += paused_more;
+                g.peak = g.peak.max(st.footprint); // Rust-only: for the history
             }
             self.write_state(&st);
             // Told once the state says it, so what the agent then reads of

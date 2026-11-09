@@ -1,6 +1,6 @@
 //! Which runs the gate queues: builds, checks and test runs, not watchers
 //! or questions. Ported from internal/gate/heavy.go:1-59 and
-//! workers.go:1-25.
+//! workers.go:1-25; command is Rust-only.
 
 /// Whether name run with args is the kind of run the gate queues: a build,
 /// a check, a test run. A watcher, a dev server, a language server or a
@@ -73,6 +73,18 @@ const LIGHT_SUBS: &[&str] = &[
     "completion",
     "init",
 ];
+
+/// What name run with args is, for the gate's history of what runs held
+/// (Rust-only): the program, and the subcommand of one that does many
+/// things: "cargo check", "go test", "tsc".
+pub fn command<S: AsRef<str>>(name: &str, args: &[S]) -> String {
+    let sub = subcommand(args);
+    if heavy_subs(name).is_some() && !sub.is_empty() {
+        format!("{name} {sub}")
+    } else {
+        name.to_string()
+    }
+}
 
 /// args' first word that isn't a flag, a flag's value or a toolchain
 /// (cargo +nightly build), or "".
@@ -168,6 +180,23 @@ mod tests {
         ] {
             let w: Vec<&str> = cmd.split_whitespace().collect();
             assert_eq!(heavy(w[0], &w[1..]), want, "Heavy({cmd:?})");
+        }
+    }
+
+    // Rust-only: the command a run's history is kept under.
+    #[test]
+    fn commands() {
+        for (cmd, want) in [
+            ("cargo +nightly check --workspace", "cargo check"),
+            ("cargo --manifest-path x/Cargo.toml test", "cargo test"),
+            ("go -C ./sub test ./...", "go test"),
+            ("vite build", "vite build"),
+            ("tsc -p tsconfig.json", "tsc"),
+            ("eslint src/a.ts", "eslint"),
+            ("webpack", "webpack"),
+        ] {
+            let w: Vec<&str> = cmd.split_whitespace().collect();
+            assert_eq!(command(w[0], &w[1..]), want, "{cmd}");
         }
     }
 

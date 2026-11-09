@@ -3655,6 +3655,56 @@ left to strip. Where the memory goes, and what the host module does about it:
   entirely off won't start. A network proxy (`ANTHROPIC_BASE_URL`) gains
   visibility, not speed.
 
+## The gate: backfilling and what a run expects (Rust-only)
+
+The gate (rush-gate; `docs/gate-sharing.md`) queues builds, checks and
+test runs and starts them by memory. Go rush (`internal/gate/share.go`,
+`gate.go` at `go-final`) starts waiters strictly in the fair order: by
+how few runs their agent has going, then by ticket. So while the first
+waits for memory, everything behind it waits too, a 1 GiB lint behind a
+4 GiB build behind a run that holds the rest: head-of-line blocking.
+
+Rust starts waiters by EASY backfilling, as batch schedulers do
+(`share::backfill`, `gate::try_start`):
+
+- The first in the fair order keeps its place.
+- While it waits for memory, one behind it starts ahead of it when it
+  fits in the room now (`room() >= its memory`, admit's rule) and needs
+  at most half what the first needs (`BACKFILL_SHARE`). Of those that
+  may, the fair order says who goes first, so fairness by agent holds
+  for backfillers too.
+- Nothing starves the first: once it has waited 2 minutes
+  (`BACKFILL_FOR`, from its ticket's time) nothing more starts ahead of
+  it until it starts. A waiter that would fit then says so and why
+  (`Wait::held`; "it would fit …, but the run first in line has waited
+  over 2m0s, so nothing more starts ahead of it"), and `rush gate status`
+  gives the same reason, or "starting ahead of the first" for one let
+  past.
+
+Batch schedulers backfill only jobs whose run time ends before the
+first's reserved start; the gate knows no run times, so the size rule
+(small next to the first) and the time limit stand in for it. A
+backfilled run that grows past its estimate is the watchdog's, as any
+run is (paused under critical pressure, stopped past its cap).
+
+What a run expects to need was its program's rule figure (`rules.rs`).
+Rust keeps what runs actually held: each run's peak footprint (what the
+watchdog notes each tick) goes, on release, to `history` in the gate's
+folder (`history.rs`), the last 5 runs per command (`cargo check`,
+`go test`, `tsc`: `heavy::command`) per project (the main checkout of
+the run's git repository, so worktrees share it; else its folder), 256
+commands at most. A run then expects the most recent runs held and a
+quarter more, never more than the rule (`share::estimate`): the rule is
+the ceiling, and history only says a command is smaller, so a small
+command is known to be small and backfills. A run shorter than the
+watchdog's 2 s tick leaves no history. The cap the watchdog stops at
+stays three times the rule's figure.
+
+The ticket files keep Go's format: the estimate goes in the memory line
+Go already reads, and `history` sits outside the tickets' folder, so Go
+rush never sees it. A Go waiter first in line is backfilled past like a
+Rust one; a Go waiter behind doesn't backfill.
+
 ## Background processes' memory (Rust-only)
 
 What rush keeps running beside the view, measured 2026-11-02 on the

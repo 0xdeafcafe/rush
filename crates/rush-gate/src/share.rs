@@ -2,7 +2,8 @@
 //! is never held back, only lowered as it ages; memory is the one thing a
 //! run waits for, and waiters go fairly by agent. The decisions are here,
 //! as pure functions; gate.rs and watch.rs do what they say.
-//! Ported from internal/gate/share.go:1-162.
+//! Ported from internal/gate/share.go:1-162; backfill and estimate are
+//! Rust-only.
 
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
@@ -93,6 +94,90 @@ pub fn admit(next: &Ticket, ts: &[Ticket], avail: u64, reserve: u64) -> bool {
         return room(ts, avail, reserve) >= next.memory;
     }
     true
+}
+
+/// How long the first waiter may wait before nothing more starts ahead of
+/// it (Rust-only): past this, a run behind it waits for it to start, so
+/// backfilling never starves it.
+pub const BACKFILL_FOR: Duration = Duration::from_secs(120);
+
+/// How much smaller than the first waiter's need a run behind it must be
+/// to start ahead of it (Rust-only): it may need at most a half.
+pub const BACKFILL_SHARE: u64 = 2;
+
+/// Whether a waiter behind the first may start ahead of it, and if not,
+/// why (Rust-only).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Backfill {
+    /// It may start now, ahead of the first.
+    Go,
+    /// It's the first itself, or the first can start now: the first goes
+    /// first.
+    FirstGoes,
+    /// It needs more than 1/[`BACKFILL_SHARE`] of what the first needs.
+    TooBig,
+    /// It's small, but the room doesn't cover it.
+    NoRoom,
+    /// A waiter ahead of it may start ahead of the first too: that one
+    /// goes first.
+    Behind,
+    /// It's small and fits, but the first has waited [`BACKFILL_FOR`] or
+    /// more, so nothing more starts ahead of it.
+    Held,
+}
+
+/// Whether me, a waiter in ts, may start ahead of the first waiter by the
+/// fair order: EASY backfilling, as batch schedulers do (Rust-only). The
+/// first keeps its place; while it waits for memory, one behind it may go
+/// first when it fits in the room now (as admit has it) and needs at most
+/// 1/BACKFILL_SHARE of what the first does, until the first has waited
+/// BACKFILL_FOR since it took its ticket (a ticket with no time counts as
+/// waited that long). Of those that may, the fair order says who goes
+/// first.
+pub fn backfill(me: &Ticket, ts: &[Ticket], avail: u64, reserve: u64, now: SystemTime) -> Backfill {
+    let waiters = order(ts);
+    let Some(first) = waiters.first() else {
+        return Backfill::FirstGoes;
+    };
+    if first.file == me.file || admit(first, ts, avail, reserve) {
+        return Backfill::FirstGoes;
+    }
+    let r = room(ts, avail, reserve);
+    let small = |t: &Ticket| t.memory.saturating_mul(BACKFILL_SHARE) <= first.memory;
+    let fits = |t: &Ticket| small(t) && r >= t.memory;
+    if !small(me) {
+        return Backfill::TooBig;
+    }
+    if !fits(me) {
+        return Backfill::NoRoom;
+    }
+    let waited = first
+        .since
+        .map(|s| now.duration_since(s).unwrap_or_default());
+    if waited.is_none_or(|w| w >= BACKFILL_FOR) {
+        return Backfill::Held;
+    }
+    for t in &waiters[1..] {
+        if t.file == me.file {
+            break;
+        }
+        if fits(t) {
+            return Backfill::Behind;
+        }
+    }
+    Backfill::Go
+}
+
+/// What a run is expected to need (Rust-only): the rule's figure, or, once
+/// runs of the same command in the same project have been seen, the most
+/// the recent ones held and a quarter more, never past the rule's figure.
+/// So a command known to be small is taken to be small, and the rule stays
+/// the ceiling.
+pub fn estimate(rule: u64, peaks: &[u64]) -> u64 {
+    match peaks.iter().copied().max() {
+        Some(p) if p > 0 => rule.min(p.saturating_add(p / 4)),
+        _ => rule,
+    }
 }
 
 /// The nice a run gets once it has run for d: short checks keep the CPU,
@@ -251,6 +336,166 @@ mod tests {
         assert!(!admit(&next, &ts, 7 * GIB, GIB));
         assert!(admit(&next, &ts, 8 * GIB, GIB));
         assert_eq!(room(&ts, GIB, 2 * GIB), 0);
+    }
+
+    // Rust-only: a small waiter starts ahead of a big first one waiting
+    // for memory while it fits, the fair order kept, until the first has
+    // waited BACKFILL_FOR.
+    #[test]
+    fn backfill_past_a_waiting_first() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let ago = |s: u64| Some(now - Duration::from_secs(s));
+        // One run of agent "a" holds all it expects; the first waiter,
+        // agent "b"'s, needs 4 GiB.
+        let base = || {
+            vec![
+                Ticket {
+                    file: "ticket-1".into(),
+                    session: "a".into(),
+                    running: true,
+                    memory: 4 * GIB,
+                    state: State {
+                        footprint: 4 * GIB,
+                        ..State::default()
+                    },
+                    ..Ticket::default()
+                },
+                Ticket {
+                    file: "ticket-2".into(),
+                    session: "b".into(),
+                    memory: 4 * GIB,
+                    since: ago(10),
+                    ..Ticket::default()
+                },
+            ]
+        };
+        let waiter = |file: &str, session: &str, memory: u64| Ticket {
+            file: file.into(),
+            session: session.into(),
+            memory,
+            since: ago(1),
+            ..Ticket::default()
+        };
+        struct Case {
+            name: &'static str,
+            avail: u64,
+            first_waited: u64,
+            behind: Vec<Ticket>,
+            me: &'static str,
+            want: Backfill,
+        }
+        let cases = [
+            Case {
+                name: "small, fits",
+                avail: 3 * GIB,
+                first_waited: 10,
+                behind: vec![waiter("ticket-3", "c", GIB)],
+                me: "ticket-3",
+                want: Backfill::Go,
+            },
+            Case {
+                name: "small, doesn't fit",
+                avail: GIB,
+                first_waited: 10,
+                behind: vec![waiter("ticket-3", "c", 3 * GIB / 2)],
+                me: "ticket-3",
+                want: Backfill::NoRoom,
+            },
+            Case {
+                name: "fits, but not small next to the first",
+                avail: 3 * GIB,
+                first_waited: 10,
+                behind: vec![waiter("ticket-3", "c", 3 * GIB)],
+                me: "ticket-3",
+                want: Backfill::TooBig,
+            },
+            Case {
+                name: "half the first's is small",
+                avail: 3 * GIB,
+                first_waited: 10,
+                behind: vec![waiter("ticket-3", "c", 2 * GIB)],
+                me: "ticket-3",
+                want: Backfill::Go,
+            },
+            Case {
+                name: "the first has waited past the limit",
+                avail: 3 * GIB,
+                first_waited: BACKFILL_FOR.as_secs(),
+                behind: vec![waiter("ticket-3", "c", GIB)],
+                me: "ticket-3",
+                want: Backfill::Held,
+            },
+            Case {
+                name: "the first can start",
+                avail: 8 * GIB,
+                first_waited: 10,
+                behind: vec![waiter("ticket-3", "c", GIB)],
+                me: "ticket-3",
+                want: Backfill::FirstGoes,
+            },
+            Case {
+                name: "the first itself",
+                avail: GIB,
+                first_waited: 10,
+                behind: vec![],
+                me: "ticket-2",
+                want: Backfill::FirstGoes,
+            },
+            // "a" has a run going, "c" none: c's goes first, though later.
+            Case {
+                name: "fair by agent: the busier agent's waits",
+                avail: 3 * GIB,
+                first_waited: 10,
+                behind: vec![waiter("ticket-3", "a", GIB), waiter("ticket-4", "c", GIB)],
+                me: "ticket-3",
+                want: Backfill::Behind,
+            },
+            Case {
+                name: "fair by agent: the calmer agent's goes",
+                avail: 3 * GIB,
+                first_waited: 10,
+                behind: vec![waiter("ticket-3", "a", GIB), waiter("ticket-4", "c", GIB)],
+                me: "ticket-4",
+                want: Backfill::Go,
+            },
+            Case {
+                name: "one ahead that doesn't fit doesn't hold it",
+                avail: 3 * GIB / 2,
+                first_waited: 10,
+                behind: vec![
+                    waiter("ticket-3", "c", 2 * GIB),
+                    waiter("ticket-4", "d", GIB),
+                ],
+                me: "ticket-4",
+                want: Backfill::Go,
+            },
+        ];
+        for c in cases {
+            let mut ts = base();
+            ts[1].since = ago(c.first_waited);
+            ts.extend(c.behind);
+            let me = ts.iter().find(|t| t.file == c.me).unwrap().clone();
+            assert_eq!(backfill(&me, &ts, c.avail, 0, now), c.want, "{}", c.name);
+        }
+        // A first waiter with no time counts as waited long: nothing jumps it.
+        let mut ts = base();
+        ts[1].since = None;
+        ts.push(waiter("ticket-3", "c", GIB));
+        assert_eq!(backfill(&ts[2], &ts, 3 * GIB, 0, now), Backfill::Held);
+    }
+
+    // Rust-only: the recent peak, and a quarter more, under the rule's.
+    #[test]
+    fn estimates() {
+        for (rule, peaks, want) in [
+            (4 * GIB, &[][..], 4 * GIB),
+            (4 * GIB, &[0][..], 4 * GIB),
+            (4 * GIB, &[GIB / 2, 400 << 20][..], 5 * GIB / 8),
+            (4 * GIB, &[GIB, 4 * GIB][..], 4 * GIB),
+            (4 * GIB, &[8 * GIB][..], 4 * GIB),
+        ] {
+            assert_eq!(estimate(rule, peaks), want, "{peaks:?}");
+        }
     }
 
     // share_test.go TestNiceAt

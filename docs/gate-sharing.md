@@ -31,6 +31,11 @@ job held haven's only slot while it waited in rush's.
    right now; ties go to the oldest ticket. Each waiter works this out
    from the ticket files itself: still no daemon, still flock, still
    self-freeing when a holder dies. Tickets record the session id.
+   Rust-only: while the first waiter waits for memory, a run behind it
+   that fits now and needs at most half as much starts ahead of it, until
+   the first has waited 2 minutes; and a run expects what recent runs of
+   its command in its project held, never more than the estimate above
+   (DESIGN.md, "The gate: backfilling and what a run expects").
 
 3. **A watchdog in the holder handles rogue runs**, every 2s:
    - wall-clock past its program's limit (default 30 min, settings

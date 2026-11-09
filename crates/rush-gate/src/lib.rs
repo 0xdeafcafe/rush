@@ -19,6 +19,7 @@ pub mod gate;
 pub mod godur;
 pub mod guard;
 pub mod heavy;
+pub mod history;
 pub mod hook;
 pub mod host;
 pub mod node;
@@ -37,7 +38,7 @@ pub use host::{FileHost, Host};
 pub use node::node_name;
 pub use plugin::Plugin;
 pub use rules::{Rule, Rules, parse_floor, parse_reserve, parse_rules, parse_size, size};
-pub use share::{Act, Look, State, Ticket, judge, nice_at};
+pub use share::{Act, Backfill, Look, State, Ticket, backfill, estimate, judge, nice_at};
 pub use sys::{Machine, Real};
 pub use watch::Watch;
 
