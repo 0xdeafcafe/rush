@@ -250,6 +250,102 @@ fn new_work_waits_behind_a_nudge() {
     assert!(!answer_path("kidn").exists(), "the nudge's turn answered");
 }
 
+// Past the threshold, no nudge when its agent started with Emeritus off
+// (its tools lack retire until its next start), nor when the cap on
+// handovers in a row is reached: that's said once, in its info and
+// events, and kept in its config.
+#[test]
+fn no_nudge_unlisted_or_capped() {
+    struct Case {
+        name: &'static str,
+        unlisted: bool,
+        lineage: &'static str,
+        depth: i64,
+        want_nudge: bool,
+        want_info: &'static str,
+    }
+    let cases = [
+        Case {
+            name: "listed, two handovers down",
+            unlisted: false,
+            lineage: "2",
+            depth: 0,
+            want_nudge: true,
+            want_info: "",
+        },
+        Case {
+            name: "started with Emeritus off",
+            unlisted: true,
+            lineage: "",
+            depth: 0,
+            want_nudge: false,
+            want_info: "",
+        },
+        Case {
+            name: "three handovers down, the default cap",
+            unlisted: false,
+            lineage: "3",
+            depth: 0,
+            want_nudge: false,
+            want_info: "capped",
+        },
+        Case {
+            name: "one handover down, capped at one",
+            unlisted: false,
+            lineage: "1",
+            depth: 1,
+            want_nudge: false,
+            want_info: "capped",
+        },
+    ];
+    for (n, c) in cases.iter().enumerate() {
+        let _home = Home::new();
+        let mut s = rush_state::Store::load();
+        s.config.emeritus.on = true;
+        s.config.emeritus.depth = c.depth;
+        s.save_config().unwrap();
+        let id = format!("cap{n}");
+        let h = host(cfg(&id, |cf| {
+            if !c.lineage.is_empty() {
+                cf.meta.insert("lineage".into(), c.lineage.into());
+            }
+        }));
+        let k = Arc::new(Kept::default());
+        let conn: Arc<dyn Conn> = k.clone();
+        with_conn(&h, conn.clone());
+        {
+            let mut st = h.lock();
+            st.em.unlisted = c.unlisted;
+            st.info.context_tokens = past() + 10;
+            st.info.cache_warm = Time::now() + Duration::from_secs(300);
+        }
+        turn_end(&h, &conn, "done");
+        let nudged = sent(&k).iter().any(|t| t.contains(NUDGE_START));
+        assert_eq!(nudged, c.want_nudge, "{}", c.name);
+        let st = h.lock();
+        assert_eq!(st.info.emeritus, c.want_info, "{}", c.name);
+        let capped = st
+            .cfg
+            .emeritus
+            .as_ref()
+            .is_some_and(|e| !e.capped_at.is_zero());
+        assert_eq!(capped, c.want_info == "capped", "{}", c.name);
+        drop(st);
+        if c.want_info == "capped" {
+            turn_end(&h, &conn, "done");
+            crate::events::flush();
+            let ev = std::fs::read_to_string(crate::paths::events_path(&id)).unwrap_or_default();
+            assert_eq!(
+                ev.matches("emeritus-capped").count(),
+                1,
+                "{}: said once",
+                c.name
+            );
+            assert!(sent(&k).is_empty(), "{}: the agent isn't told", c.name);
+        }
+    }
+}
+
 /// The host, its kept conn, the successors' starts, and their answers.
 type Handing = (
     Host,

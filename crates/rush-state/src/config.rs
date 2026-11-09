@@ -1179,7 +1179,21 @@ pub struct Emeritus {
         skip_serializing_if = "is_zero_i64"
     )]
     pub percent: i64,
+    /// The most handovers in a row: a session that many handovers down
+    /// its chain isn't nudged again. 0 is [`EMERITUS_DEPTH`].
+    #[serde(
+        rename = "depth",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_zero_i64"
+    )]
+    pub depth: i64,
 }
+
+/// The most handovers in a row, unless set: each baton loses a little of
+/// what the agent knew (the lab's successors came within one hidden check
+/// of the original), so a long chain drifts. Three handovers is four
+/// contexts' work on one task.
+pub const EMERITUS_DEPTH: i64 = 3;
 
 /// The context past which a session hands over, unless set: the lab at
 /// ~300k found each call's re-read of the context dominating there
@@ -1216,6 +1230,21 @@ impl Emeritus {
     /// past the threshold, with Emeritus on.
     pub fn due(&self, context: i64, window: i64) -> bool {
         self.on && context > 0 && context >= self.threshold(window)
+    }
+
+    /// The most handovers in a row.
+    pub fn depth(&self) -> i64 {
+        if self.depth > 0 {
+            self.depth
+        } else {
+            EMERITUS_DEPTH
+        }
+    }
+
+    /// Whether a session lineage handovers down its chain has reached the
+    /// cap: it isn't nudged to hand over again.
+    pub fn capped(&self, lineage: i64) -> bool {
+        lineage >= self.depth()
     }
 }
 
@@ -1638,6 +1667,7 @@ mod tests {
             on: true,
             tokens,
             percent,
+            ..Emeritus::default()
         };
         let cases: &[(&str, Emeritus, i64, i64)] = &[
             (
@@ -1669,6 +1699,20 @@ mod tests {
         ];
         for (name, e, ctx, window, want) in due {
             assert_eq!(e.due(*ctx, *window), *want, "{name}");
+        }
+        let capped: &[(&str, i64, i64, bool)] = &[
+            ("started afresh", 0, 0, false),
+            ("two down, the default cap", 0, 2, false),
+            ("three down, the default cap", 0, 3, true),
+            ("one down, capped at one", 1, 1, true),
+            ("five down, capped at ten", 10, 5, false),
+        ];
+        for (name, depth, lineage, want) in capped {
+            let e = Emeritus {
+                depth: *depth,
+                ..on.clone()
+            };
+            assert_eq!(e.capped(*lineage), *want, "{name}");
         }
         let c = Config {
             emeritus: with(250_000, 0),
