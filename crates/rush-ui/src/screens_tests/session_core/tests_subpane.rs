@@ -54,8 +54,9 @@ fn long_run(n: usize) -> String {
 }
 
 /// Picking a long run shows its end in its pane, as a long session
-/// opens: its last answer in sight, its first not, following it; its
-/// whole read after, off the UI thread, takes the end's place unseen.
+/// opens: its last answer in sight, its first not, following it; only its
+/// end is read till the pane's scrolled up to the top of it, and then
+/// what came before is read above what shows, which stays in sight.
 #[test]
 fn a_long_run_shows_its_end() {
     let d = tempfile::tempdir().unwrap();
@@ -85,8 +86,37 @@ fn a_long_run_shows_its_end() {
     assert!(!all.contains("answer 0 "), "at its start:\n{all}");
     assert!(all.contains("Finished"), "not beside the list:\n{all}");
     assert_eq!(run_view(&mut m).1, Pos::End);
+    let end = &conn(&mut m, KEY).runs.detail.as_ref().unwrap().view.sess;
+    assert!(end.partial, "its whole read, not scrolled up to");
+    let (cut, first) = (end.turns.len(), end.turns[0].n);
+    assert!(cut < 1400, "its whole read: {cut} turns");
+
+    // Scrolled to the top of its end: what came before is read, and the
+    // rows that showed still show.
+    conn(&mut m, KEY).runs.detail.as_mut().unwrap().view.pos = Pos::At { n: first, off: 0 };
+    let top = text(&m.frame());
+    let shown = top
+        .lines()
+        .find_map(|l| {
+            l.find("answer ")
+                .map(|i| l[i..].split(' ').nth(1).unwrap().to_string())
+        })
+        .expect("an answer at the top");
+    for _ in 0..4 {
+        super::subs::refresh(&mut m, KEY);
+        let _ = m.frame();
+    }
     let whole = &conn(&mut m, KEY).runs.detail.as_ref().unwrap().view.sess;
-    assert_eq!(whole.turns.len(), 1400, "its whole not read");
+    assert_eq!(whole.turns.len(), 1400, "what came before not read");
+    assert!(!whole.partial);
+    let all = text(&m.frame());
+    let at = format!("answer {shown}");
+    assert!(
+        all.lines()
+            .any(|l| l.ends_with(&at) || l.contains(&format!("{at} "))),
+        "moved off answer {shown}:\n{all}"
+    );
+    assert!(!all.contains("answer 1399"), "back at its end:\n{all}");
 }
 
 /// With the keys, the pane's rows are a session's: ↑ from the empty box
@@ -156,8 +186,12 @@ fn arrows_are_the_panes_then_the_lists() {
     press(&mut m, "esc");
     press(&mut m, "esc");
     assert!(!conn(&mut m, KEY).watch.msg_focus);
+    // Down through Finished's fold to y, and back.
+    press(&mut m, "down");
+    assert_eq!(sel(&m), subview::FINISHED_REF);
     press(&mut m, "down");
     assert_eq!(sel(&m), "sub:y");
+    press(&mut m, "up");
     press(&mut m, "up");
     assert_eq!(sel(&m), "sub:x");
     // Nothing picked, ↓ picks the first row in sight.
@@ -209,6 +243,41 @@ fn the_key_guide_lists_the_panes_keys() {
         subpane::here_keys(&mut m).is_none(),
         "the list has the keys"
     );
+}
+
+/// Finished runs fold, closed till opened: only the one picked (and any
+/// that failed or were stopped) shows under it; enter on it opens it.
+#[test]
+fn finished_runs_fold() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = model(&d);
+    conn(&mut m, KEY)
+        .watch
+        .open_folds
+        .remove(subview::FINISHED_REF);
+    let list = |m: &mut Model| {
+        text(
+            &subview::list(m, KEY, 120, false)
+                .into_iter()
+                .map(|(l, _)| l)
+                .collect::<Vec<_>>(),
+        )
+    };
+    let got = list(&mut m);
+    assert!(got.contains("▸ Finished  2 · click to show"), "{got}");
+    assert!(!got.contains("review the diff"), "{got}");
+    assert!(!got.contains("plan the next piece"), "{got}");
+    assert!(got.contains("port:claude"), "running runs fold: {got}");
+    m.session.as_mut().unwrap().sel = "sub:x".into();
+    let got = list(&mut m);
+    assert!(got.contains("review the diff"), "the pick folded: {got}");
+    assert!(!got.contains("plan the next piece"), "{got}");
+    views::show_view(&mut m, KEY, "subagents");
+    m.session.as_mut().unwrap().sel = subview::FINISHED_REF.into();
+    press(&mut m, "enter");
+    let got = list(&mut m);
+    assert!(got.contains("▾ Finished  2"), "{got}");
+    assert!(got.contains("plan the next piece"), "{got}");
 }
 
 /// Past the newest few, finished runs fold under Earlier, but the one

@@ -126,7 +126,7 @@ job:b2|      │ npm warn
 job:b2|      │ 100%
 job:b2|      │ listening on :3000
 |
-|  Finished
+fold:bg-finished|  ▸ Finished  1 · click to show
 job:b1|▍ ▸ $ shell    go test ./...                                                                            ✗ failed · 30s
 job:b1|▍     exit status 1
 |
@@ -142,7 +142,7 @@ job:b2|      │ npm warn
 job:b2|      │ 100%
 job:b2|      │ listening on :3000
 |
-|  Finished
+fold:bg-finished|  ▸ Finished  1 · click to show
 job:b1|▍ ▸ $ shell    go test ./...                                    ✗ failed · 30s
 job:b1|▍     exit status 1
 |
@@ -160,12 +160,118 @@ job:b2|      │ npm warn
 job:b2|      │ 100%
 job:b2|      │ listening on :3000
 |
-|  Finished
+fold:bg-finished|  ▸ Finished  1 · click to show
 job:b1|▍ ▸ $ shell    go test ./...                                                                                                                                                            ✗ failed · 30s
 job:b1|▍     exit status 1
 |
 "#;
     assert_eq!(dump(&mut m, 200), want200);
+}
+
+/// Finished tasks fold, closed till opened, but one that failed and the
+/// one picked; space on the fold opens it, a click closes it again.
+#[test]
+fn finished_tasks_fold() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = background(&d);
+    let s = &mut m.session.as_mut().unwrap().sess;
+    s.apply(
+        &Event::TaskStarted(TaskStarted {
+            id: "b3".into(),
+            call_id: "t3x".into(),
+            kind: TaskKind::Shell,
+            label: "cargo build".into(),
+            background: true,
+            ..TaskStarted::default()
+        }),
+        NOW - 100_000,
+    );
+    s.apply(
+        &Event::TaskDone(TaskDone {
+            id: "b3".into(),
+            status: "completed".into(),
+            ..TaskDone::default()
+        }),
+        NOW - 80_000,
+    );
+    let got = dump(&mut m, 120);
+    assert!(got.contains("|  ▸ Finished  2 · click to show"), "{got}");
+    assert!(
+        got.contains("go test ./..."),
+        "the failed one folded: {got}"
+    );
+    assert!(!got.contains("cargo build"), "{got}");
+    pick(&mut m, "job:b3");
+    assert!(dump(&mut m, 120).contains("cargo build"), "the pick folded");
+    views::show_view(&mut m, KEY, "background");
+    pick(&mut m, "fold:bg-finished");
+    super::tests_subview::press(&mut m, "space");
+    let got = dump(&mut m, 120);
+    assert!(got.contains("|▍ ▾ Finished  2"), "{got}");
+    assert!(got.contains("cargo build"), "{got}");
+    running::background_click(&mut m, KEY, "fold:bg-finished");
+    assert!(!dump(&mut m, 120).contains("cargo build"));
+}
+
+/// Two running monitors or more go under one Monitors row: in the
+/// background view folded, a short row each once opened, one opened its
+/// whole block; in the dock the one row, which opens them there.
+#[test]
+fn monitors_go_under_one_row() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = background(&d);
+    let s = &mut m.session.as_mut().unwrap().sess;
+    for (id, label) in [("m1", "tail server.log"), ("m2", "watch the deploy")] {
+        s.apply(
+            &Event::TaskStarted(TaskStarted {
+                id: id.into(),
+                call_id: format!("t{id}"),
+                kind: TaskKind::Monitor,
+                label: label.into(),
+                background: true,
+                ..TaskStarted::default()
+            }),
+            NOW - 30_000,
+        );
+    }
+    let got = dump(&mut m, 120);
+    assert!(
+        got.contains("fold:monitors|  ▸ ◎ Monitors  2 watching · click to show"),
+        "{got}"
+    );
+    assert!(!got.contains("tail server.log"), "{got}");
+    assert!(got.contains("npm run dev"), "a shell folded: {got}");
+    views::show_view(&mut m, KEY, "background");
+    pick(&mut m, "fold:monitors");
+    super::tests_subview::press(&mut m, "space");
+    let got = dump(&mut m, 120);
+    assert!(got.contains("|▍ ▾ ◎ Monitors  2 watching"), "{got}");
+    let short: Vec<&str> = got
+        .lines()
+        .filter(|l| l.starts_with("job:m1|") || l.starts_with("job:m2|"))
+        .collect();
+    assert_eq!(short.len(), 2, "a row each: {got}");
+    assert!(short[0].contains("◎ tail server.log"), "{got}");
+    // One opened: its whole block, its own fold open.
+    pick(&mut m, "job:m1");
+    super::tests_subview::press(&mut m, "space");
+    let got = dump(&mut m, 120);
+    assert!(
+        got.lines()
+            .any(|l| l.starts_with("job:m1|") && l.contains("▾ ◎ monitor")),
+        "{got}"
+    );
+
+    // The dock's one row for them, which opens them in the background view.
+    views::show_view(&mut m, KEY, "conversation");
+    conn(&mut m, KEY).vs.open.clear();
+    super::running::sync(&mut m, KEY);
+    let refs = subview::dock_refs(&mut m, KEY);
+    assert!(refs.contains(&"fold:monitors".to_string()), "{refs:?}");
+    assert!(!refs.iter().any(|r| r == "job:m1"), "{refs:?}");
+    assert!(subview::click_ref(&mut m, KEY, "fold:monitors"));
+    assert_eq!(views::view_name(&m, KEY), "background");
+    assert!(dump(&mut m, 120).contains("tail server.log"));
 }
 
 /// A task a subagent started says whose it is, a dot between the agent's
@@ -213,7 +319,7 @@ job:b2|│     ▸ command details · d to show
 job:b2|▍     ▾ command details · d to hide
 job:b2|▍     $ npm run dev -- --port 3000
 |
-|  Finished
+fold:bg-finished|  ▸ Finished  1 · click to show
 job:b1|  ▸ $ shell    go test ./...                                                                            ✗ failed · 30s
 ";
     assert!(got.contains(want), "{got}");

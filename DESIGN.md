@@ -2098,7 +2098,12 @@ gives its pane the keys), else in the column beside the list
 clicks only, never the pointer; the views panel's run rows pick a run
 there too (`subview::pick_run`). ↑↓ move the pick through the list while
 the list has the keys (`subview::list_key`, ahead of the cards' ↑ and
-the box's own keys); while the run's pane has them they're its own. Past the newest
+the box's own keys); while the run's pane has them they're its own. A click
+on a run shows it and leaves the keys with the list, so ↑↓ go on through
+the runs; with nothing picked ↑ picks the top row, as ↓ does. Finished
+is a fold, closed till opened (`fold:finished`), as the background
+view's is (`fold:bg-finished`): closed, only those that failed (or were
+stopped) and the one picked show under it. Opened, past the newest
 `EARLIER_AFTER` (8), finished runs fold under "Earlier · N"
 (`earlier:runs`), but those that failed or were stopped, and the one
 picked. A workflow run is named with when it started;
@@ -2173,9 +2178,9 @@ lays out a turn at a time, whole. Before, for a run of 5,000 steps:
 - the pane kept a scroll of its own and drew a plain body, so nothing a
   session's conversation does worked in it.
 
-Now its first reading, and a long one's whole after its end, are built on
-the reader (`read_detail`: the reader's copy topped up, or a short one
-whole at once, or a long one's last 2 MB) and laid out there as the pane
+Now its first reading, and more of a long one, are built on the reader
+(`read_detail`: a short one's copy topped up, or a short one whole at
+once, or a long one's last 2 MB) and laid out there as the pane
 last drew (`worker::warm` with the view's `drawn`, primed before the
 reading's asked for); the frame takes them by a move (`seed`,
 `take_end`, `take_whole_drawn`, which keeps the place). The pick is in a
@@ -2184,6 +2189,20 @@ draws two parts. What's left per frame is a working run's: its turn is
 walked again each tick, its finished parts copied, not drawn. `cargo
 bench -p rush-convo --bench subrun` has the four; `rush events -k
 ui-stall` the live UI's.
+
+A long run isn't read whole once its end shows (2026-11-09): a run is
+one turn, laid out whole, and one subagent's transcript here is 1 GB. Its
+pane asks for more only once it's scrolled to within a screen of the top
+of what it has ("reading earlier…", `subview::more_above`): four times as
+much of its end, or the whole once that's most of it, swapped in with the
+rows from the pane's top to the end kept (`SessionView::keep_rows_below`),
+so nothing on screen moves. And a run picked doesn't wait behind every
+run's numbers: while the subagents view shows they're all followed, each a
+whole transcript (572 runs, 2.6 GB in one session here), and the run's
+reading came after them in the same pass. `Runs::hurry` is set when a run
+is picked or asks for more: a pass under way stops between runs (or part
+way through one, `Tail::stop`, its numbers left as they were) and reads
+the run picked; what it skipped is read in the next pass.
 
 A run is finished only on a real end: its task-finished notice (an
 interim one saying running or pending isn't), its session's process
@@ -3260,6 +3279,17 @@ pull request or runs, a bar and ✓/✗/◌ counts, what it waits on, then
 how long it's waited. While a card shows, the conversation is drawn again
 each second. The agent is told none of it: the watch says once, briefly,
 how it ended.
+
+In the dock and the background view the card is a few rows tall
+(`JobCard::rows`, 2026-11-09): under its row, each check that failed a
+row of its own (three, then "✗ N more failed"), and those still running
+on one row; what it ends on and when GitHub was last asked come under
+it once it's picked. Two running monitors or more go under one Monitors
+row (`fold:monitors`, `jobs::monitors`): in the background view folded
+till opened, then a short row each (a watch's card words, else what it
+watches and its latest line), one opened its whole block; in the dock
+the one row, saying how many watch and how many watches have a failure,
+which opens them in the background view.
 
 **✎ edit** (e), on a box's top edge before it's run and after, turns the
 box into an editor of its commands (`Options::shell_edit`, drawn by

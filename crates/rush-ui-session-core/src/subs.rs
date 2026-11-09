@@ -22,6 +22,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rush_claude::headless::workflow::{Workflow, read_workflow, workflow_dir};
@@ -295,13 +296,15 @@ enum Followed {
 }
 
 /// How follow_run reads: with what, whether every run's numbers are due
-/// again (the tasks asked about changed), when, and those tasks' calls.
+/// again (the tasks asked about changed), when, and those tasks' calls;
+/// and what, once set, stops a read part way (Runs::hurry).
 #[derive(Clone, Copy)]
 struct Follow<'a> {
     decode: &'a Decode,
     again: bool,
     now: Ms,
     calls: &'a [String],
+    stop: Option<&'a Arc<AtomicBool>>,
 }
 
 /// A call id hashed, for Followed::Let's calls.
@@ -322,15 +325,25 @@ fn follow_run(
     whole: bool,
     how: &Follow,
     ag: &super::overview::Agentry,
-) -> (Followed, Option<RunStat>) {
+) -> (Option<Followed>, Option<RunStat>) {
     let Follow {
         decode,
         again,
         now,
         calls,
+        stop,
     } = *how;
     let meta = std::fs::metadata(path).ok();
     let size = meta.as_ref().map_or(0, |m| m.len());
+    // What it was, should a read from the start be stopped part way.
+    let before = match &f {
+        Some(Followed::Let { size, stat, calls }) => Some(Followed::Let {
+            size: *size,
+            stat: stat.clone(),
+            calls: calls.clone(),
+        }),
+        _ => None,
+    };
     let (mut t, mut s, new) = match f {
         Some(Followed::Read(t, s)) => (t, s, false),
         Some(Followed::Let {
@@ -340,11 +353,11 @@ fn follow_run(
         }) if was == size => {
             if !again {
                 return (
-                    Followed::Let {
+                    Some(Followed::Let {
                         size,
                         stat,
                         calls: ids,
-                    },
+                    }),
                     None,
                 );
             }
@@ -355,11 +368,11 @@ fn follow_run(
                 .collect();
             let st = (*stat).clone();
             return (
-                Followed::Let {
+                Some(Followed::Let {
                     size,
                     stat,
                     calls: ids,
-                },
+                }),
                 Some(st),
             );
         }
@@ -373,7 +386,22 @@ fn follow_run(
             (t, Box::default(), true)
         }
     };
+    t.stop = stop.cloned();
     let grew = t.read(&mut s).unwrap_or(false);
+    t.stop = None;
+    if stop.is_some_and(|x| x.load(Ordering::Relaxed)) {
+        // Stopped for the run picked (Rust-only): one read on keeps where
+        // it got to, its numbers as they were; one read from its start is
+        // as it was, read again next time.
+        return (
+            if new {
+                before
+            } else {
+                Some(Followed::Read(t, s))
+            },
+            None,
+        );
+    }
     let stat = (new || grew || again).then(|| RunStat::of(&s, calls).priced(&s, ag));
     let quiet = meta
         .and_then(|m| m.modified().ok())
@@ -384,7 +412,7 @@ fn follow_run(
         .iter()
         .any(|st| matches!(st.status, Status::Running | Status::Waiting));
     if !quiet || out {
-        return (Followed::Read(t, s), stat);
+        return (Some(Followed::Read(t, s)), stat);
     }
     let stat = stat.unwrap_or_else(|| RunStat::of(&s, calls).priced(&s, ag));
     let mut ids: Vec<u64> = s.steps().iter().map(|st| call_hash(&st.id)).collect();
@@ -395,7 +423,7 @@ fn follow_run(
         stat: Box::new(stat.clone()),
         calls: ids.into(),
     };
-    (held, Some(stat))
+    (Some(held), Some(stat))
 }
 
 /// The reader's side: what stays with the transcripts, never the UI's.
@@ -408,9 +436,10 @@ pub struct Reader {
     calls: Vec<String>,
     /// The run shown whole, and its tail.
     detail: Option<(String, Tail)>,
-    /// The run shown whole is long: its tail began at its end, and the
-    /// whole of it is read next, after its end has shown.
-    detail_cut: bool,
+    /// The run shown whole is long: its tail began this many bytes from
+    /// its end, 0 when it holds the whole of it. More is read only once
+    /// its pane is scrolled to the top of what it has (Ask::detail's more).
+    detail_win: u64,
     /// Each run read whole for Changes, by id: how big its transcript
     /// was when read (fullSubs), and, one in Claude Code's format, its
     /// tail and the session it's read on into, shared with the UI.
@@ -445,6 +474,9 @@ pub struct Detail {
     /// Changes tab), and each walk copies every patch (Rust-only).
     pub edits:
         std::cell::RefCell<Option<(super::changes::Ver, Arc<Vec<super::changes::FileChange>>)>>,
+    /// More was just read above what showed: the pane's top goes back to
+    /// this many rows above the end when it's next drawn (Rust-only).
+    pub keep_below: Option<usize>,
 }
 
 impl Detail {
@@ -454,6 +486,7 @@ impl Detail {
             src,
             view,
             edits: Default::default(),
+            keep_below: None,
         }
     }
 
@@ -488,9 +521,9 @@ enum DetailGot {
     /// (Reader::tails) with what was written since, or read here.
     Seeded(Box<Session>, Warm),
     /// A long run's end, read first so it opens at once at its end (as
-    /// a long session opens): its whole is read next.
+    /// a long session opens): more is read as its pane scrolls up to it.
     End(Box<Session>, Warm),
-    /// The whole of a long run whose end showed first.
+    /// More of a long run whose end showed first, or the whole of it.
     Whole(Box<Session>, Warm),
     /// Another agent's run read back by its adapter, built here off the
     /// UI thread (Rust-only: its events were applied on the UI thread,
@@ -570,6 +603,15 @@ pub struct Runs {
     pub follow_all: bool,
     /// The run shown whole, when one is.
     pub detail: Option<Detail>,
+    /// The run shown whole is long and shows only its end, and its pane
+    /// is scrolled to the top of that: more of what came before is read
+    /// (Rust-only).
+    pub detail_more: bool,
+    /// Set once a run is picked to show whole, or asks for more, till
+    /// that's read: a reading under way stops reading the runs' numbers
+    /// (each a whole transcript, hundreds of them) and reads it first; the
+    /// rest is read next (Rust-only: it waited behind them all).
+    pub hurry: Arc<AtomicBool>,
     /// The running run picked in the Subagents tab, its transcript
     /// waited on so each write is read at once (subfollow).
     pub live: Option<super::subfollow::Follow>,
@@ -616,9 +658,13 @@ struct Ask {
     /// The runs whose worktree isn't known yet, and the session's folder.
     wt_for: Vec<(String, String)>,
     cwd: String,
-    /// The run shown whole, whether its view has a reading yet, and how
-    /// its view last drew (to lay out what's read the same way).
-    detail: Option<(String, DetailSrc, bool, crate::worker::Drawn)>,
+    /// The run shown whole, whether its view has a reading yet, how its
+    /// view last drew (to lay out what's read the same way), and whether
+    /// it asks for more of what came before its end (scrolled to its top).
+    detail: Option<(String, DetailSrc, bool, crate::worker::Drawn, bool)>,
+    /// Set while the run shown whole waits for its reading (Runs::hurry):
+    /// the runs' numbers and the rest stop where they are for it.
+    hurry: Arc<AtomicBool>,
     /// The runs to read whole: id, path, whether it's a spawned agent's
     /// own session rather than a subagent's sidechain, and the kind of
     /// agent that reads it back when it isn't in Claude Code's format.
@@ -643,6 +689,8 @@ struct Got {
     detail: Option<(String, DetailGot)>,
     /// The runs read whole again, as they now are.
     full: HashMap<String, Arc<Session>>,
+    /// Stopped short for the run shown whole: the rest is read next.
+    cut_short: bool,
 }
 
 impl Got {
@@ -663,6 +711,7 @@ impl Got {
             wt: HashMap::new(),
             detail: None,
             full: HashMap::new(),
+            cut_short: false,
         }
     }
 }
@@ -710,8 +759,16 @@ impl Ask {
         if let Some((h, parent)) = &self.spawned {
             got.spawned = Some(h.spawned(parent));
         }
+        let hurry = |got: &mut Got| {
+            let h = self.hurry.load(Ordering::Relaxed);
+            got.cut_short |= h;
+            h
+        };
         let mut taken = self.taken.clone();
         for w in &self.want {
+            if hurry(&mut got) {
+                break;
+            }
             if let Some(s) = find_spawn(
                 reg,
                 w,
@@ -759,6 +816,9 @@ impl Ask {
                 .retain(|id, _| self.stats.iter().any(|(want, _)| want == id));
             let mut let_go = r.tails.len() != before;
             for (id, path) in &self.stats {
+                if hurry(&mut got) {
+                    break;
+                }
                 let kind = self
                     .kinds
                     .get(id)
@@ -769,6 +829,7 @@ impl Ask {
                     again,
                     now: self.now,
                     calls: &self.calls,
+                    stop: Some(&self.hurry),
                 };
                 let was = r.tails.remove(id);
                 let was_let = match &was {
@@ -777,8 +838,10 @@ impl Ask {
                 };
                 let (f, st) = follow_run(was, path, self.whole.contains(id), &how, &ag);
                 // A conversation read whole, or read on, and let go.
-                let_go |= matches!(&f, Followed::Let { size, .. } if Some(*size) != was_let);
-                r.tails.insert(id.clone(), f);
+                let_go |= matches!(&f, Some(Followed::Let { size, .. }) if Some(*size) != was_let);
+                if let Some(f) = f {
+                    r.tails.insert(id.clone(), f);
+                }
                 if let Some(st) = st {
                     got.stats.insert(id.clone(), st);
                 }
@@ -797,6 +860,9 @@ impl Ask {
         r.full
             .retain(|id, _| self.full.iter().any(|(want, ..)| want == id));
         for (id, path, whole, kind) in &self.full {
+            if hurry(&mut got) {
+                break;
+            }
             let size = std::fs::metadata(path).map_or(0, |m| m.len());
             // Rust-only: one that grew is read again FULL_EVERY at most,
             // not on every write: the UI holds what it read, so each
@@ -835,7 +901,7 @@ impl Ask {
             got.full.insert(id.clone(), s.unwrap_or_default());
         }
         match &self.detail {
-            Some((id, src, shown, drawn)) => {
+            Some((id, src, shown, drawn, more)) => {
                 if !shown {
                     // A view afresh: built whole for it, never topped up
                     // from a tail it didn't take.
@@ -844,8 +910,13 @@ impl Ask {
                 }
                 got.detail = Some((
                     id.clone(),
-                    read_detail(&mut r, id, src, self.decode.as_ref(), reg, drawn),
+                    read_detail(&mut r, id, src, self.decode.as_ref(), reg, drawn, *more),
                 ));
+                // What it waited for is read: the next reading isn't
+                // stopped short.
+                if !shown || *more {
+                    self.hurry.store(false, Ordering::Relaxed);
+                }
             }
             // Rust-only: nothing's shown whole: its tail goes too.
             None => {
@@ -909,6 +980,7 @@ fn read_detail(
     decode: Option<&Decode>,
     reg: &rush_core::adapter::Registry,
     drawn: &crate::worker::Drawn,
+    more: bool,
 ) -> DetailGot {
     let warm = |s: &mut Session| crate::worker::warm(s, drawn, None, false);
     match src {
@@ -916,26 +988,30 @@ fn read_detail(
             let Some(decode) = decode else {
                 return DetailGot::Failed("rush can't read this agent's transcripts".into());
             };
+            let end = crate::worker::TAIL_END;
+            let size = std::fs::metadata(path).map_or(0, |m| m.len());
+            let long = size > end;
             if r.detail.as_ref().is_none_or(|(at, _)| at != id) {
                 // Rust-only: its numbers' reading has the whole of it
                 // already (every run's while the subagents view shows):
                 // taken over, topped up, rather than read again from the
-                // start. Its numbers read it afresh next time.
-                if matches!(r.tails.get(id), Some(Followed::Read(..)))
+                // start. Its numbers read it afresh next time. Not a long
+                // one's: it's one turn, laid out whole, so only its end.
+                if !long
+                    && matches!(r.tails.get(id), Some(Followed::Read(..)))
                     && let Some(Followed::Read(mut t, mut s)) = r.tails.remove(id)
                     && t.path.to_string_lossy() == path.as_str()
                     && t.read(&mut s).is_ok()
                 {
                     r.detail = Some((id.to_string(), t));
-                    r.detail_cut = false;
+                    r.detail_win = 0;
                     let w = warm(&mut s);
                     return DetailGot::Seeded(s, w);
                 }
                 // Rust-only: a long one's end first, at once, as a long
-                // session opens; its whole after. Read from its start a
-                // slice a time, a long run opened at its first turn.
-                let end = crate::worker::TAIL_END;
-                let long = std::fs::metadata(path).is_ok_and(|m| m.len() > end);
+                // session opens; more of it as its pane scrolls up to it.
+                // Read from its start a slice a time, a long run opened at
+                // its first turn.
                 let mut t = match (*whole, long) {
                     (true, false) => Tail::new(path, decode.clone()),
                     (false, false) => Tail::subagent(path, decode.clone()),
@@ -957,26 +1033,31 @@ fn read_detail(
                     return DetailGot::Failed(e.to_string());
                 }
                 r.detail = Some((id.to_string(), t));
-                r.detail_cut = long;
+                r.detail_win = if long { end } else { 0 };
                 let w = warm(&mut s);
                 return if long {
                     DetailGot::End(Box::new(s), w)
                 } else {
                     DetailGot::Seeded(Box::new(s), w)
                 };
-            } else if r.detail_cut {
-                // Its end has shown: now the whole of it, read on from
-                // there as it grows.
-                r.detail_cut = false;
-                let mut t = if *whole {
-                    Tail::new(path, decode.clone())
-                } else {
-                    Tail::subagent(path, decode.clone())
+            } else if r.detail_win > 0 && more {
+                // Scrolled to the top of what it has: four times as much of
+                // its end, or the whole of it once that's most of it, read
+                // on from there as it grows. A step at a time back, each
+                // read costs what all those before it did together.
+                let win = r.detail_win.saturating_mul(4);
+                let all = size <= win;
+                let mut t = match (*whole, all) {
+                    (true, true) => Tail::new(path, decode.clone()),
+                    (false, true) => Tail::subagent(path, decode.clone()),
+                    (true, false) => Tail::from_end(path, win, decode.clone()),
+                    (false, false) => Tail::subagent_from_end(path, win, decode.clone()),
                 };
                 let mut s = Session::new();
                 return match t.read(&mut s) {
                     Ok(_) => {
                         r.detail = Some((id.to_string(), t));
+                        r.detail_win = if all { 0 } else { win };
                         let w = warm(&mut s);
                         DetailGot::Whole(Box::new(s), w)
                     }
@@ -1832,8 +1913,14 @@ pub fn refresh(m: &mut Model, key: &str) {
             d.src.clone(),
             d.view.read,
             d.view.drawn.clone(),
+            r.detail_more,
         )
     });
+    if detail.is_none() {
+        // Nothing waits to be shown: nothing's stopped short for it.
+        r.detail_more = false;
+        r.hurry.store(false, Ordering::Relaxed);
+    }
     // The background tasks' calls, to know which run started each.
     let calls: Vec<String> = dock_jobs(s)
         .iter()
@@ -1996,6 +2083,7 @@ pub fn refresh(m: &mut Model, key: &str) {
         wt_for,
         cwd,
         detail,
+        hurry: r.hurry.clone(),
         full,
         path: if claude { path } else { String::new() },
         kind,
@@ -2114,11 +2202,15 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
     }
     r.full.extend(got.full);
     let mut more = false;
+    let mut got_more = false;
     let mut answered = false;
     if let (Some((id, d)), Some(det)) = (got.detail, r.detail.as_mut())
         && det.id == id
     {
         answered = !det.view.read;
+        // Whatever it asked for is answered: asked again, should its pane
+        // still show the top of what it has.
+        got_more = true;
         match d {
             DetailGot::Fresh(f) => {
                 more = f.more;
@@ -2137,11 +2229,16 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
                 }
             }
             DetailGot::End(s, w) => {
-                // Its end in view; its whole read at once after.
-                more = true;
+                // Its end in view; more of it as its pane scrolls up.
                 det.view.take_end(*s, w.map(|w| (w.r, w.exchanges)));
             }
-            DetailGot::Whole(s, w) => det.view.take_whole_drawn(*s, w.map(|w| (w.r, w.exchanges))),
+            DetailGot::Whole(s, w) => {
+                // More of what came before, read above what shows: the
+                // pane stays where it was (Detail::keep_below).
+                let below = det.view.rows_below_top();
+                det.view.take_whole_drawn(*s, w.map(|w| (w.r, w.exchanges)));
+                det.keep_below = Some(below);
+            }
             DetailGot::History(None) => det.view.read = true,
             DetailGot::History(Some(s)) => {
                 // As take_events' reset: what its host saved stays.
@@ -2159,8 +2256,13 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
             end_detail_turn(s, &r.subs, det, got.now);
         }
     }
-    // Kicked while it read (its picked run's transcript grew): read again.
-    let fresh = fresh || more || found_new || r.kick; // a run found is read at once
+    if got_more {
+        // Asked again should it still show the top of what it has.
+        r.detail_more = false;
+    }
+    // Kicked while it read (its picked run's transcript grew), or stopped
+    // short for the run shown whole: read again.
+    let fresh = fresh || more || found_new || r.kick || got.cut_short; // a run found is read at once
     // The conversation draws the steps that ran them as the agents, with
     // their steps and replies under them.
     if let Some(ran) = ran
@@ -2315,24 +2417,28 @@ mod tests {
             again,
             now,
             calls,
+            stop: None,
         };
         let (f, st) = follow_run(None, &path, false, &how(false, &[]), &ag);
         assert_eq!(st.as_ref(), Some(&whole));
-        assert!(matches!(f, Followed::Let { .. }), "a quiet run kept read");
-        let (f, st) = follow_run(Some(f), &path, false, &how(false, &[]), &ag);
+        assert!(
+            matches!(f, Some(Followed::Let { .. })),
+            "a quiet run kept read"
+        );
+        let (f, st) = follow_run(f, &path, false, &how(false, &[]), &ag);
         assert_eq!(st, None, "unchanged, its numbers again");
         let calls = ["t1".to_string(), "t9".to_string()];
-        let (f, st) = follow_run(Some(f), &path, false, &how(true, &calls), &ag);
+        let (f, st) = follow_run(f, &path, false, &how(true, &calls), &ag);
         assert_eq!(st.map(|st| st.made), Some(vec!["t9".to_string()]));
-        assert!(matches!(f, Followed::Let { .. }));
+        assert!(matches!(f, Some(Followed::Let { .. })));
 
         // It writes again: read whole, and kept read on while it works.
         let more = r#"{"type":"assistant","isSidechain":true,"timestamp":"2026-09-23T20:00:03Z","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"done"}]}}"#;
         std::fs::write(&p, LINES.join("\n") + "\n" + more + "\n").unwrap();
-        let (f, st) = follow_run(Some(f), &path, false, &how(false, &[]), &ag);
+        let (f, st) = follow_run(f, &path, false, &how(false, &[]), &ag);
         assert_eq!(st.map(|st| st.last_words), Some("done".to_string()));
         assert!(
-            matches!(f, Followed::Read(..)),
+            matches!(f, Some(Followed::Read(..))),
             "a run written lately let go"
         );
     }

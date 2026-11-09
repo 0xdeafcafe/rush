@@ -639,8 +639,14 @@ fn card_row(
     let mut right = segs(&card.right);
     right.spans.push(plain("  "));
     let mut rows = vec![with_right(&|_| left.clone(), right, w, true)];
+    let pad = blanks(left_lead(lead, who) + 2 + 8);
+    // Its rows, always: what failed, and what still runs.
+    for r in &card.rows {
+        let mut l = line([plain(pad.clone())]);
+        join(&mut l, segs(r));
+        rows.push(rush_draw::truncate_line(&l, w.saturating_sub(1), "…"));
+    }
     if d.sel == format!("job:{}", j.id) {
-        let pad = blanks(left_lead(lead, who) + 2 + 8);
         for det in &card.detail {
             let mut l = line([plain(pad.clone())]);
             join(&mut l, segs(det));
@@ -787,9 +793,21 @@ pub fn jobs_preview(
     d: &Dock,
     hint: Line,
 ) -> (Vec<Line>, Vec<String>) {
+    // Two monitors or more are one row, the background view a key away.
+    let all = jobs;
+    let mons = monitors(s, all);
+    let rest: Vec<&Job> = if mons.is_empty() {
+        all.to_vec()
+    } else {
+        all.iter()
+            .copied()
+            .filter(|j| !mons.iter().any(|m| m.id == j.id))
+            .collect()
+    };
+    let jobs = rest.as_slice();
     let picked_at = jobs.iter().position(|j| d.sel == format!("job:{}", j.id));
-    let fg = jobs.iter().filter(|j| !j.background).count();
-    let bg = jobs.len() - fg;
+    let fg = all.iter().filter(|j| !j.background).count();
+    let bg = all.len() - fg;
     let head = if fg == 0 {
         "in the background".to_string()
     } else if bg > 0 {
@@ -802,13 +820,13 @@ pub fn jobs_preview(
         None => hint,
     };
     hint.spans.push(plain("  "));
-    let word = jobs_word(s, jobs);
+    let word = jobs_word(s, all);
     let title = format!("{}{}", word[..1].to_uppercase(), &word[1..]);
     let head = line([
         plain(" "),
         spb(title, SUB),
         plain("  "),
-        sp(format!("{} {head}", jobs.len()), DIM),
+        sp(format!("{} {head}", all.len()), DIM),
     ]);
     let mut out = vec![spread(head, hint, w)];
     let mut refs = vec![String::new()];
@@ -826,6 +844,10 @@ pub fn jobs_preview(
             out.push(r);
             refs.push(format!("job:{}", j.id));
         }
+    }
+    if !mons.is_empty() {
+        out.push(monitors_row(&mons, w, "  ", None, d.sel, d.focus, d.now));
+        refs.push(MONITORS_REF.to_string());
     }
     if jobs.len() > start + DOCK_JOBS_SHOWN {
         let rest = jobs.len() - start - DOCK_JOBS_SHOWN;
@@ -1073,13 +1095,168 @@ pub fn job_lines(s: &Session, b: &Bg) -> Vec<(Line, String)> {
         if jobs.is_empty() {
             continue;
         }
-        lines.push((fit(line([plain("  "), spb(title, SUB)]), w), String::new()));
-        for (i, j) in jobs.iter().enumerate() {
-            job_block(s, b, j, i, &mut lines, &mut inside);
+        if title == "Running" {
+            lines.push((fit(line([plain("  "), spb(title, SUB)]), w), String::new()));
+            // Two monitors or more fold under one row, closed till opened;
+            // opened, a short row each, one opened its whole block.
+            let mons = monitors(s, jobs);
+            for (i, j) in jobs.iter().enumerate() {
+                if !mons.iter().any(|m| m.id == j.id) {
+                    job_block(s, b, j, i, &mut lines, &mut inside);
+                }
+            }
+            if !mons.is_empty() {
+                let open = (b.open)(MONITORS_REF);
+                let row = monitors_row(&mons, w, "  ", Some(open), b.sel, b.focused, b.now);
+                lines.push((row, MONITORS_REF.to_string()));
+                if open {
+                    for (i, j) in mons.iter().enumerate() {
+                        let r = format!("job:{}", j.id);
+                        if (b.open)(&r) {
+                            job_block(s, b, j, i, &mut lines, &mut inside);
+                        } else {
+                            lines.push((monitor_short(s, b, j, i), r));
+                        }
+                    }
+                }
+            }
+            lines.push((Line::new(), String::new()));
+        } else {
+            // Finished folds, closed till opened: a long session's done
+            // tasks are noise beside what runs (Rust-only). Those that
+            // failed, and the one picked, still show.
+            let open = (b.open)(BG_FINISHED_REF);
+            let mut row = line([
+                plain("  "),
+                sp(if open { "▾ " } else { "▸ " }, FAINT),
+                spb(title, SUB),
+                sp(format!("  {}", jobs.len()), FAINT),
+            ]);
+            if !open {
+                row.spans.push(sp(" · click to show", FAINT));
+            }
+            let row = if b.sel == BG_FINISHED_REF {
+                picked(row, w, b.focused)
+            } else {
+                fit(row, w)
+            };
+            lines.push((row, BG_FINISHED_REF.to_string()));
+            let shown: Vec<&Job> = jobs
+                .iter()
+                .copied()
+                .filter(|j| open || j.status == "failed" || b.sel == format!("job:{}", j.id))
+                .collect();
+            for (i, j) in shown.iter().enumerate() {
+                job_block(s, b, j, i, &mut lines, &mut inside);
+            }
+            lines.push((Line::new(), String::new()));
         }
-        lines.push((Line::new(), String::new()));
     }
     lines
+}
+
+/// The background view's fold its finished tasks go under, closed till
+/// opened.
+pub const BG_FINISHED_REF: &str = "fold:bg-finished";
+
+/// The row the running monitors go under, two or more of them: folded in
+/// the background view, the dock's one row for them all.
+pub const MONITORS_REF: &str = "fold:monitors";
+
+/// The running monitors among jobs, when there are two or more of them to
+/// go under one row; else none (Rust-only: a sea of monitors).
+pub fn monitors<'a>(s: &Session, jobs: &[&'a Job]) -> Vec<&'a Job> {
+    let mons: Vec<&Job> = jobs
+        .iter()
+        .copied()
+        .filter(|j| j.running() && s.job_kind(j) == "monitor")
+        .collect();
+    if mons.len() < 2 { Vec::new() } else { mons }
+}
+
+/// The monitors' row: how many watch, and how many of the watches on
+/// checks have a failure; folded or not when it folds (the background
+/// view), not when it doesn't (the dock).
+pub fn monitors_row(
+    mons: &[&Job],
+    w: usize,
+    lead: &str,
+    fold: Option<bool>,
+    sel: &str,
+    focus: bool,
+    now: Ms,
+) -> Line {
+    let failing = mons
+        .iter()
+        .filter_map(|j| job_card_of(j, now))
+        .filter(|c| c.tone == Tone::Bad)
+        .count();
+    let (icon, col) = job_icon("monitor");
+    let mut l = line([plain(lead)]);
+    if let Some(open) = fold {
+        l.spans.push(sp(if open { "▾ " } else { "▸ " }, FAINT));
+    }
+    l.spans.extend([
+        sp(icon, col),
+        plain(" "),
+        spb("Monitors", TEXT),
+        sp(format!("  {} watching", mons.len()), DIM),
+    ]);
+    if failing > 0 {
+        l.spans.push(sp(" · ", FAINT));
+        l.spans.push(sp(format!("✗ {failing} failing"), RED));
+    }
+    if fold == Some(false) {
+        l.spans.push(sp(" · click to show", FAINT));
+    } else if fold.is_none() {
+        l.spans.push(sp(" · space: show them", FAINT));
+    }
+    if sel == MONITORS_REF {
+        picked(l, w, focus)
+    } else {
+        fit(l, w)
+    }
+}
+
+/// A monitor's short row under the monitors' fold: its card's words when
+/// a plugin draws it (a rush watch's checks), else what it watches and
+/// its latest line; how it stands at the end.
+fn monitor_short(s: &Session, b: &Bg, j: &Job, i: usize) -> Line {
+    let w = b.w;
+    let out = (b.out)(j).1;
+    let mut left = line([plain("      ")]);
+    let right;
+    if let Some(c) = job_card_of(j, b.now) {
+        left.spans.extend([card_mark(&c, b.tick + i), plain(" ")]);
+        join(&mut left, segs(&c.body));
+        right = segs(&c.right);
+    } else {
+        let (icon, col) = job_icon("monitor");
+        left.spans.extend([
+            sp(icon, col),
+            plain(" "),
+            sp(
+                rush_draw::truncate(&job_label(s, j), 32, "…").into_owned(),
+                SUB,
+            ),
+        ]);
+        if let Some(last) = out.and_then(|t| t.lines.last()) {
+            left.spans.push(plain("  "));
+            left.spans.push(sp("›", ORANGE));
+            left.spans.push(plain(" "));
+            left.spans.push(sp(last.clone(), DIM));
+        }
+        right = job_right_used(j, out, (b.usage)(j), b.now);
+    }
+    let mut right = right;
+    right.spans.push(plain("  "));
+    let keep = (w as isize - right.width() as isize - 2).max(20) as usize;
+    let row = spread(rush_draw::truncate_line(&left, keep, "…"), right, w);
+    if b.sel == format!("job:{}", j.id) {
+        picked(row, w, b.focused)
+    } else {
+        row
+    }
 }
 
 /// One task's rows in the background view (jobLines' section body).
@@ -1187,10 +1364,14 @@ fn job_block(
         ));
     }
     let mut rows = vec![spread(left, right, w)];
-    for d in card.iter().flat_map(|c| &c.detail) {
-        let mut l = line([plain("      ")]);
-        join(&mut l, segs(d));
-        rows.push(cut(l));
+    // A card's rows always; its detail once it's picked or opened.
+    let more = b.sel == r || opened;
+    if let Some(c) = &card {
+        for d in c.rows.iter().chain(c.detail.iter().filter(|_| more)) {
+            let mut l = line([plain("      ")]);
+            join(&mut l, segs(d));
+            rows.push(cut(l));
+        }
     }
     let mut facts = line([plain("      ")]);
     let fact = |l: &mut Line, f: Vec<Span>| {

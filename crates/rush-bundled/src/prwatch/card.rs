@@ -30,6 +30,9 @@ pub struct JobCard {
     pub body: Vec<Seg>,
     /// Ends the row, before the task's own state.
     pub right: Vec<Seg>,
+    /// A line each under the row, always: what failed, a row each, and
+    /// what still runs (Rust-only: a card a few rows tall).
+    pub rows: Vec<Vec<Seg>>,
     /// A line each under the row when the task is picked.
     pub detail: Vec<Vec<Seg>>,
 }
@@ -207,8 +210,42 @@ pub(crate) fn card(l: &Live, now: Time) -> JobCard {
             c.right.push(seg(" · looking", Tone::Info));
         }
     }
+    c.rows = rows(l);
     c.detail = detail(l, now);
     c
+}
+
+/// How many failed checks get a row of their own.
+const FAILED_ROWS: usize = 3;
+
+/// The rows under a watch's card: each check that failed, then those
+/// still running on one row (Rust-only).
+fn rows(l: &Live) -> Vec<Vec<Seg>> {
+    let mut out = Vec::new();
+    for name in l.failed_checks.iter().take(FAILED_ROWS) {
+        out.push(vec![
+            seg("✗ ", Tone::Bad),
+            seg(name.clone(), Tone::Text),
+            seg("  failed", Tone::Bad),
+        ]);
+    }
+    if l.failed_checks.len() > FAILED_ROWS {
+        out.push(vec![seg(
+            format!("✗ {} more failed", l.failed_checks.len() - FAILED_ROWS),
+            Tone::Bad,
+        )]);
+    }
+    if !l.running.is_empty() {
+        let mut names: Vec<String> = l.running.iter().take(4).cloned().collect();
+        if l.running.len() > 4 {
+            names.push(format!("+{}", l.running.len() - 4));
+        }
+        out.push(vec![
+            seg("◌ ", Tone::Wait),
+            seg(names.join(" · "), Tone::Sub),
+        ]);
+    }
+    out
 }
 
 /// What l's expected end says at now: "~4m left", or how far past it
@@ -247,19 +284,8 @@ fn bar(l: &Live, n: i64) -> Vec<Seg> {
 
 /// What the picked card says under its row.
 fn detail(l: &Live, now: Time) -> Vec<Vec<Seg>> {
+    // What failed and what runs are its rows, always under it.
     let mut out = Vec::new();
-    if !l.failed_checks.is_empty() {
-        out.push(vec![
-            seg("failed   ", Tone::Dim),
-            seg(names(&l.failed_checks, 6), Tone::Bad),
-        ]);
-    }
-    if !l.running.is_empty() {
-        out.push(vec![
-            seg("running  ", Tone::Dim),
-            seg(names(&l.running, 6), Tone::Wait),
-        ]);
-    }
     let mut ends = match l.until.0.as_str() {
         Until::DONE => "once every check has finished",
         Until::FAIL => "at the first failure, else once all finish",
@@ -364,10 +390,48 @@ mod tests {
             "a watch holding a failure reads as waiting: {c:?}"
         );
         assert_eq!(text(&c.right), "1h06m of 1h50m · next look 40s");
-        let d = text(&c.detail[2]);
+        let rows: Vec<String> = c.rows.iter().map(|r| text(r.as_slice())).collect();
+        assert_eq!(
+            rows,
+            ["✗ test  failed", "◌ codeql-complete · sdk-python-complete"]
+        );
+        let d = text(&c.detail[0]);
         assert!(
             d.contains("--until done") && d.contains("in 44m at its timeout"),
             "ends line {d:?}"
+        );
+    }
+
+    /// Past three failed checks, the rest are one row; past four running,
+    /// a count. Rust-only.
+    #[test]
+    fn the_cards_rows_stay_short() {
+        let now = Time::from_unix(10_000, 0);
+        let names =
+            |p: &str, n: usize| -> Vec<String> { (0..n).map(|i| format!("{p}{i}")).collect() };
+        let c = card(
+            &Live {
+                number: 1,
+                start: now,
+                asked: now,
+                failed: 5,
+                pending: 6,
+                failed_checks: names("f", 5),
+                running: names("r", 6),
+                ..Default::default()
+            },
+            now,
+        );
+        let rows: Vec<String> = c.rows.iter().map(|r| text(r.as_slice())).collect();
+        assert_eq!(
+            rows,
+            [
+                "✗ f0  failed",
+                "✗ f1  failed",
+                "✗ f2  failed",
+                "✗ 2 more failed",
+                "◌ r0 · r1 · r2 · r3 · +2",
+            ]
         );
     }
 

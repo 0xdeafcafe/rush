@@ -210,7 +210,11 @@ pub fn show_detail(m: &mut Model, key: &str, id: &str, src: DetailSrc, w: usize)
     let mut view = SessionView::new(key.to_string(), Source::Hosted, 0);
     super::subpane::prime(&mut view, w, (m.now, m.tick), live, false);
     view.note_drawn();
-    conn(m, key).runs.detail = Some(Detail::new(id.to_string(), src, view));
+    let r = &mut conn(m, key).runs;
+    r.detail = Some(Detail::new(id.to_string(), src, view));
+    r.detail_more = false;
+    // A reading under way stops short for it (Runs::hurry).
+    r.hurry.store(true, std::sync::atomic::Ordering::Relaxed);
     super::subs::kick(m, key);
     super::subs::refresh(m, key);
 }
@@ -392,7 +396,18 @@ pub fn dock_refs(m: &mut Model, key: &str) -> Vec<String> {
         }
     }
     refs.extend(sh.done.iter().map(|d| format!("run:{}", d.sa.id)));
-    refs.extend(sh.loose.iter().map(|id| format!("job:{id}")));
+    // Two monitors or more are the one row, as the dock draws them.
+    let loose: Vec<&Job> = sh.loose.iter().filter_map(|id| v.sess.job(id)).collect();
+    let mons = rush_ui_list_extras::jobs::monitors(&v.sess, &loose);
+    refs.extend(
+        loose
+            .iter()
+            .filter(|j| !mons.iter().any(|m| m.id == j.id))
+            .map(|j| format!("job:{}", j.id)),
+    );
+    if !mons.is_empty() {
+        refs.push(rush_ui_list_extras::jobs::MONITORS_REF.to_string());
+    }
     refs
 }
 
@@ -863,7 +878,26 @@ pub fn list(m: &mut Model, key: &str, w: usize, wide: bool) -> Vec<(Line, String
             continue;
         }
         l.out.push((Line::new(), String::new()));
-        l.out.push(heading(title, n, w));
+        // Finished folds, closed till opened: a long session's finished
+        // runs are noise beside what's working (Rust-only).
+        let closed = !live && !l.open.contains(FINISHED_REF);
+        if live {
+            l.out.push(heading(title, n, w));
+        } else {
+            let row = line([
+                plain("  "),
+                faint(if closed { "▸ " } else { "▾ " }),
+                Span::new(title.to_string(), bold(SUB)),
+                faint(format!("  {n}")),
+                faint(if closed { " · click to show" } else { "" }),
+            ]);
+            let row = if sel == FINISHED_REF {
+                picked1(row, w, true)
+            } else {
+                fit(row, w)
+            };
+            l.out.push((row, FINISHED_REF.to_string()));
+        }
         // Workflows and runs together, newest first.
         let mut items: Vec<(Ms, Option<&Group>, usize)> = gs
             .iter()
@@ -894,6 +928,13 @@ pub fn list(m: &mut Model, key: &str, w: usize, wide: bool) -> Vec<(Line, String
         };
         let (shown, earlier) = if live {
             (items, Vec::new())
+        } else if closed {
+            // Folded, those that failed or were stopped, and the one
+            // picked, still show.
+            (
+                items.into_iter().filter(|it| keep(it)).collect(),
+                Vec::new(),
+            )
         } else {
             let (mut shown, mut earlier) = (Vec::new(), Vec::new());
             for (n, it) in items.into_iter().enumerate() {
@@ -940,6 +981,9 @@ pub fn list(m: &mut Model, key: &str, w: usize, wide: bool) -> Vec<(Line, String
 
 /// The fold the older finished runs go under.
 pub const EARLIER_REF: &str = "earlier:runs";
+
+/// The fold every finished run goes under, closed till opened.
+pub const FINISHED_REF: &str = "fold:finished";
 
 /// How many finished runs show before the rest fold under Earlier.
 pub const EARLIER_AFTER: usize = 8;
@@ -1239,6 +1283,12 @@ fn peek(m: &mut Model, key: &str, id: &str, right: &mut [Line], pw: usize, (x, y
     let read = c.runs.detail.as_ref().is_some_and(|d| d.id == id);
     if read {
         if rows > 0 {
+            // More was just read above what showed: it stays in place.
+            if let Some(d) = conn(m, key).runs.detail.as_mut()
+                && let Some(below) = d.keep_below.take()
+            {
+                d.view.keep_rows_below(below, rows);
+            }
             let body = super::subpane::as_run(m, key, id, |m| {
                 super::subpane::text(m, key, pw, rows, live, focused)
             })
@@ -1246,6 +1296,7 @@ fn peek(m: &mut Model, key: &str, id: &str, right: &mut [Line], pw: usize, (x, y
             for (i, l) in body.into_iter().enumerate().take(rows) {
                 right[at + i] = l;
             }
+            more_above(m, key, rows);
         }
     } else if at < h {
         right[at] = line([faint(
@@ -1258,6 +1309,24 @@ fn peek(m: &mut Model, key: &str, id: &str, right: &mut [Line], pw: usize, (x, y
         }
     }
     conn(m, key).watch.msg_at = [x, y + body_end, pw, box_h];
+}
+
+/// A long run shows only its end: scrolled to within a screen of the top
+/// of what it has ("reading earlier…"), more of what came before is read,
+/// rather than the whole of it at once when it opens (Rust-only).
+fn more_above(m: &mut Model, key: &str, rows: usize) {
+    let r = &mut conn(m, key).runs;
+    let top = r
+        .detail
+        .as_ref()
+        .is_some_and(|d| d.view.read && d.view.sess.partial && d.view.start <= rows);
+    if !top || r.detail_more {
+        return;
+    }
+    r.detail_more = true;
+    r.hurry.store(true, std::sync::atomic::Ordering::Relaxed);
+    super::subs::kick(m, key);
+    super::subs::refresh(m, key);
 }
 
 /// The subagents view's keys before the views': esc goes back where the
@@ -1312,7 +1381,8 @@ pub fn key_first(m: &mut Model, k: &Press) -> Out {
 /// The list's own keys, before the cards' and the box's, while the list
 /// has them: ↑↓ move the pick through the list (the cards' ↑ from an
 /// empty box doesn't take them here), ↓ with nothing picked picks the
-/// first row in sight; enter or → on a run gives its pane the keys
+/// first row in sight, as ↑ does (not the last); enter or → on a run
+/// gives its pane the keys
 /// (subpane.rs), which keeps them till esc. Rust-only: ↑↓ went to the box
 /// a click had focused, or to the cards, and never moved the pick.
 pub fn list_key(m: &mut Model, k: &Press) -> Out {
@@ -1330,13 +1400,13 @@ pub fn list_key(m: &mut Model, k: &Press) -> Out {
     let picked = sel(m);
     match s {
         "up" | "down" if own_empty || !picked.is_empty() => {
-            if s == "down" && picked.is_empty() {
-                let first = conn(m, &key)
-                    .vs
-                    .refs
-                    .iter()
-                    .find(|r| !r.is_empty())
-                    .cloned();
+            // Nothing in the list picked (or what's picked is out of
+            // sight): ↑ or ↓ picks its top row in sight, not the one by
+            // the box as the conversation's ↑ does (Rust-only).
+            let refs = &conn(m, &key).vs.refs;
+            let in_list = !picked.is_empty() && refs.contains(&picked);
+            if !in_list {
+                let first = refs.iter().find(|r| !r.is_empty()).cloned();
                 match first {
                     Some(r) => set_sel(m, r),
                     None => return Out::Idle,
@@ -1410,6 +1480,11 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
                 pick_from(m, &key, &id, &picked);
                 return Out::Draw;
             }
+            // The dock's monitors: the background view, with them opened.
+            if picked == rush_ui_list_extras::jobs::MONITORS_REF && name == "conversation" {
+                super::running::open_monitors(m, &key);
+                return Out::Draw;
+            }
             if picked.starts_with("wf:") || is_workflow_ref(m, &picked) && name != "subagents" {
                 open_workflow(m, &key, &picked);
                 return Out::Draw;
@@ -1467,6 +1542,10 @@ fn run_of_step(m: &mut Model, key: &str, picked: &str) -> Option<String> {
 pub fn click_ref(m: &mut Model, key: &str, r: &str) -> bool {
     if is_workflow_ref(m, r) {
         open_workflow(m, key, r);
+        return true;
+    }
+    if r == rush_ui_list_extras::jobs::MONITORS_REF {
+        super::running::open_monitors(m, key);
         return true;
     }
     if r.starts_with("run:") || r.starts_with("job:") {
@@ -1552,7 +1631,7 @@ fn toggle_fold(m: &mut Model, key: &str, rf: &str) {
 /// Whether ref is a fold the list opens and closes in place: earlier
 /// tries, or a workflow run that has finished.
 fn is_fold(m: &Model, key: &str, rf: &str) -> bool {
-    if rf.starts_with(TRIES_REF) || rf == EARLIER_REF {
+    if rf.starts_with(TRIES_REF) || rf == EARLIER_REF || rf == FINISHED_REF {
         return true;
     }
     if !is_workflow_ref(m, rf) {
@@ -1605,10 +1684,10 @@ fn focus_pane(m: &mut Model, key: &str) -> bool {
 }
 
 /// The pointer over the subagents view: in the list a click picks a run,
-/// which then shows with the list (beside it or under it), and opens or
-/// closes a fold; with the run, a click on the box gives it the keys,
-/// elsewhere gives them back, and the wheel scrolls the run's
-/// conversation (subHoverAt, subMouseMove, clickRef).
+/// which then shows with the list (beside it or under it) while the list
+/// keeps the keys, and opens or closes a fold; with the run, a click on
+/// the box gives it the keys, elsewhere gives them back, and the wheel
+/// scrolls the run's conversation (subHoverAt, subMouseMove, clickRef).
 pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     let Some(key) = open_key(m) else {
         return Out::Pass;
@@ -1688,11 +1767,9 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
             if is_fold(m, &key, &rf) {
                 toggle_fold(m, &key, &rf);
             }
-            // A run clicked: its pane has the keys once it shows
-            // (Rust-only).
-            if let Some(id) = rf.strip_prefix("sub:") {
-                conn(m, &key).watch.focus_next = id.to_string();
-            }
+            // A run clicked shows beside the list, which keeps the keys:
+            // ↑↓ go on through the runs; tab, enter or → give its pane
+            // them (Rust-only).
             set_sel(m, rf);
             Out::Draw
         }

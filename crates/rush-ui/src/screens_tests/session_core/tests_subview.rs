@@ -114,6 +114,12 @@ pub(super) fn model(d: &tempfile::TempDir) -> Model {
     );
     // Its runs' numbers, as the subagents view reads them.
     r.follow_all = true;
+    // Finished opened, as these tests look at the runs under it: it's
+    // closed till opened (tests_subpane's finished_runs_fold).
+    conn(&mut m, KEY)
+        .watch
+        .open_folds
+        .insert(subview::FINISHED_REF.into());
     super::subs::kick(&mut m, KEY);
     super::subs::refresh(&mut m, KEY);
     m
@@ -185,7 +191,7 @@ fn the_list() {
         "      ◌ port:draw    waiting to start".into(),
         "    · Check  not started".into(),
         "".into(),
-        "  Finished  2".into(),
+        "  ▾ Finished  2".into(),
         "  ✓ plan the next piece of the port with care                                             done".into(),
         "▍ ✓ review the diff                                                                       done                      9s".into(),
     ];
@@ -519,11 +525,12 @@ fn nothing_beside_the_list_until_a_click() {
 }
 
 /// A click on a run picks it and shows it beside the list, with its
-/// facts, its conversation and a box to message it, its pane with the
-/// keys; a second click opens nothing whole, a click in its conversation
-/// keeps the keys there, and esc gives them back to the list.
+/// facts, its conversation and a box to message it, the list keeping the
+/// keys so ↑↓ go on through the runs; tab gives its pane them, a second
+/// click opens nothing whole, a click in its conversation keeps the keys
+/// there, and esc gives them back to the list.
 #[test]
-fn a_click_picks_a_run_and_its_pane_has_the_keys() {
+fn a_click_picks_a_run_and_the_list_keeps_the_keys() {
     use crate::frame::Mouse;
     use rush_draw::{Button, MouseKind};
     let d = tempfile::tempdir().unwrap();
@@ -549,7 +556,12 @@ fn a_click_picks_a_run_and_its_pane_has_the_keys() {
     assert!(all.contains("The diff is fine"), "{all}");
     assert!(all.contains("claude-opus-4-1 · 1 step"), "{all}");
     assert!(all.contains("to review the diff"), "{all}");
-    assert!(conn(&mut m, KEY).watch.msg_focus, "the click's run");
+    assert!(
+        !conn(&mut m, KEY).watch.msg_focus,
+        "the list keeps the keys"
+    );
+    press(&mut m, "tab");
+    assert!(conn(&mut m, KEY).watch.msg_focus, "tab: the run's pane");
     click(&mut m);
     let frame = m.frame();
     let all = text(&frame);
@@ -1027,29 +1039,28 @@ fn a_phase_counts_an_agent_once_however_often_it_was_tried() {
     assert!(workflow_strip(&[p], 0).plain().contains("Port 2/3"));
 }
 
-/// The lowest row with a ref in sight, as the view was last drawn.
-fn by_the_box(m: &mut Model) -> String {
+/// The highest row with a ref in sight, as the view was last drawn.
+fn top_in_sight(m: &mut Model) -> String {
     conn(m, KEY)
         .vs
         .refs
         .iter()
-        .rev()
         .find(|r| !r.is_empty())
         .cloned()
         .expect("a row in sight")
 }
 
-/// ↑ from the box picks the row in sight by the box, as the
-/// conversation's ↑ does, not the list's last row (the oldest run
-/// finished), however far below that is.
+/// ↑ from the box picks the list's top row in sight, as ↓ does: not the
+/// row by the box, as the conversation's ↑ does, nor the list's last row
+/// (the oldest run finished), however far below that is.
 #[test]
-fn up_from_the_box_picks_the_row_by_it() {
+fn up_from_the_box_picks_the_lists_top() {
     let d = tempfile::tempdir().unwrap();
     let mut m = model(&d);
     views::show_view(&mut m, KEY, "subagents");
     views::body(&mut m, 120, 8).unwrap();
     assert_eq!(conn(&mut m, KEY).vs.top, 0);
-    let by_box = by_the_box(&mut m);
+    let top = top_in_sight(&mut m);
     let last = conn(&mut m, KEY)
         .vs
         .all_refs
@@ -1058,16 +1069,16 @@ fn up_from_the_box_picks_the_row_by_it() {
         .find(|r| !r.is_empty())
         .cloned()
         .unwrap();
-    assert_ne!(by_box, last, "the whole list is in sight");
+    assert_ne!(top, last, "one row only");
     press(&mut m, "up");
-    assert_eq!(sel(&m), by_box);
+    assert_eq!(sel(&m), top);
     views::body(&mut m, 120, 8).unwrap();
     assert_eq!(conn(&mut m, KEY).vs.top, 0, "the view jumped");
 }
 
 /// The wheel moves the subagents view and leaves the pick where it is,
 /// out of sight, as the conversation's wheel does; drawn again (the runs
-/// read again) it stays put; ↑ then picks the row in sight by the box.
+/// read again) it stays put; ↑ then picks the top row in sight.
 #[test]
 fn the_wheel_leaves_the_pick() {
     use crate::frame::{Mouse, Out};
@@ -1104,9 +1115,9 @@ fn the_wheel_leaves_the_pick() {
         assert!(!conn(&mut m, KEY).vs.refs.contains(&x));
         assert_eq!(sel(&m), x, "the wheel moved the pick");
     }
-    let by_box = by_the_box(&mut m);
+    let top = top_in_sight(&mut m);
     press(&mut m, "up");
-    assert_eq!(sel(&m), by_box);
+    assert_eq!(sel(&m), top);
     views::body(&mut m, 120, 8).unwrap();
     assert_eq!(conn(&mut m, KEY).vs.top, 0, "the view jumped");
 }
@@ -1229,7 +1240,7 @@ fn working_view(wf: &str, hm: &str) -> String {
         "    · Check  not started                                                    │",
         "▍ · check the port's tests                        · run the test…     57s   │ ▍   · running Bash…  36s  turn 56s",
         "                                                                            │",
-        "  Finished  2                                                               │",
+        "  ▾ Finished  2                                                             │",
         "  ✓ plan the next piece of the port with care     done                      │",
         "  ✓ review the diff                               done                 9s   │",
         "                                                                            │",

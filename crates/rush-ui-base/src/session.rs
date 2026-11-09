@@ -609,6 +609,22 @@ impl SessionView {
         };
     }
 
+    /// How many rows the conversation has from the view's top to its end,
+    /// as last laid out: what keep_rows_below puts back once more of what
+    /// came before its end is read (Rust-only).
+    pub fn rows_below_top(&mut self) -> usize {
+        let total = self.r.count(&self.sess, &self.o) + self.panels.len();
+        total.saturating_sub(self.start)
+    }
+
+    /// Puts the view's top below rows above the conversation's end, rows
+    /// tall: where it was before more was read above it, so nothing on
+    /// screen jumps (Rust-only).
+    pub fn keep_rows_below(&mut self, below: usize, rows: usize) {
+        let total = self.r.count(&self.sess, &self.o) + self.panels.len();
+        self.set_start(total.saturating_sub(below), total, rows);
+    }
+
     /// Draws the turns around the view, rows tall, and only those (Go's
     /// drawWindow, up to three passes as what was estimated is drawn).
     /// Returns where the view starts and where the drawn rows do.

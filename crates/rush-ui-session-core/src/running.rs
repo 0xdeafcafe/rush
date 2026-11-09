@@ -710,6 +710,19 @@ pub fn background_key(m: &mut Model, key: &str, s: &str) -> Out {
         .as_ref()
         .map(|v| v.sel.clone())
         .unwrap_or_default();
+    // The Finished and Monitors folds open and close in place (→ only
+    // opens).
+    if sel == rush_ui_list_extras::jobs::BG_FINISHED_REF
+        || sel == rush_ui_list_extras::jobs::MONITORS_REF
+    {
+        if !matches!(s, "space" | " " | "right" | "enter") {
+            return Out::Pass;
+        }
+        let c = conn(m, key);
+        let was = c.vs.open.get(&sel).copied().unwrap_or(false);
+        c.vs.open.insert(sel, s == "right" || !was);
+        return Out::Draw;
+    }
     if let Some(id) = sel.strip_prefix("run:") {
         if matches!(s, "space" | " " | "right" | "enter") {
             let id = id.to_string();
@@ -827,6 +840,17 @@ fn dock_key(m: &mut Model, key: &str, s: &str, empty: bool) -> Out {
     }
 }
 
+/// The dock's monitors' row taken: the background view, its monitors
+/// opened under their row and that row picked (Rust-only).
+pub fn open_monitors(m: &mut Model, key: &str) {
+    use rush_ui_list_extras::jobs::MONITORS_REF;
+    super::views::show_view(m, key, "background");
+    conn(m, key).vs.open.insert(MONITORS_REF.into(), true);
+    if let Some(v) = m.session.as_mut() {
+        v.sel = MONITORS_REF.into();
+    }
+}
+
 /// Whether task id has a launch command or a process to show (jobKey's
 /// d: JobCommand, jobPID).
 fn has_details(m: &mut Model, key: &str, id: &str) -> bool {
@@ -858,7 +882,10 @@ pub fn background_click(m: &mut Model, key: &str, r: &str) -> Out {
         super::subview::pick_from(m, key, &id, r);
         return Out::Draw;
     }
-    if r.starts_with("job:") {
+    if r.starts_with("job:")
+        || r == rush_ui_list_extras::jobs::BG_FINISHED_REF
+        || r == rush_ui_list_extras::jobs::MONITORS_REF
+    {
         let c = conn(m, key);
         let was = c.vs.open.get(r).copied().unwrap_or(false);
         c.vs.open.insert(r.to_string(), !was);
