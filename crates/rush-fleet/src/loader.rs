@@ -1846,13 +1846,17 @@ impl Loader {
         // not your turn. Nor is one away or looping.
         let done = a.job.state == State::Done;
         a.seen = done && info.idle_since == 0 || done && info.away.as_ref().is_some_and(|w| w.on());
-        // A sleeping host has gone; its pid is the one it had.
+        // A sleeping host has gone; its pid is the one it had. A process
+        // table that read nothing (the sysctl failed, as it can on a
+        // machine short of memory) says nothing of it: its host answered
+        // the list's kill(0) (hostfiles' alive), so it's taken as running,
+        // and a session blocked on you stays under Needs you (Rust-only).
         if info.state != "stopped"
             && !info.sleeping
             && info.host_pid > 0
             && tab
                 .as_ref()
-                .is_none_or(|t| t.procs.contains_key(&info.host_pid))
+                .is_none_or(|t| t.procs.is_empty() || t.procs.contains_key(&info.host_pid))
         {
             a.pid = info.host_pid;
         }

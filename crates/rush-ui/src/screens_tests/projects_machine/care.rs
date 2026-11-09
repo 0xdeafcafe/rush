@@ -276,6 +276,38 @@ fn asking_modes() {
     ] {
         assert_eq!(asking_mode(&modes), want, "{modes:?}");
     }
+    // What a session rush started runs in, asked for a mode: the cleanup
+    // agent's never trusts more than asking, and never the agent's own
+    // default, which its settings may make bypass; anyone else's is as
+    // asked.
+    let claude = ms(&[
+        "default",
+        "acceptEdits",
+        "plan",
+        "auto",
+        "bypassPermissions",
+    ]);
+    let codex = ms(&["suggest", "auto-edit", "full-access"]);
+    for (by, mode, modes, want) in [
+        ("cleanup", "bypassPermissions", &claude, "default"),
+        ("cleanup", "auto", &claude, "default"),
+        ("cleanup", "acceptEdits", &claude, "default"),
+        ("cleanup", "", &claude, "default"),
+        ("cleanup", "default", &claude, "default"),
+        ("cleanup", "plan", &claude, "plan"),
+        ("cleanup", "full-access", &codex, "suggest"),
+        ("cleanup", "yolo", &ms(&[]), ""),
+        ("", "bypassPermissions", &claude, "bypassPermissions"),
+        ("", "auto", &claude, "auto"),
+        ("", "", &claude, ""),
+        ("git-clean", "yolo", &codex, "yolo"),
+    ] {
+        assert_eq!(
+            rush_core::adapter::mode_for(by, mode, modes),
+            want,
+            "{by} {mode}"
+        );
+    }
 }
 
 // Its plan's turn ends on a decisions block: it waits on you (Blocked,

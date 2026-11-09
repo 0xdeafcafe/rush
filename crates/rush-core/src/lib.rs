@@ -14,6 +14,7 @@ pub mod guard;
 pub mod name;
 pub mod offui;
 pub mod par;
+pub mod readrules;
 pub mod sandbox;
 pub mod subcache;
 pub mod subkeep;

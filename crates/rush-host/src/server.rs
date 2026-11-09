@@ -58,6 +58,7 @@ mod upgrade;
 use agent::Watching;
 mod memallow;
 mod openasks;
+mod readallow;
 mod serve;
 mod subkeep;
 pub use agent::{ROOT_IDLE, SPAWNED_IDLE, STALL_AFTER};
@@ -685,8 +686,25 @@ fn serve_on(h: &Host, ln: UnixListener, sock: PathBuf) -> Result<(), String> {
     Ok(())
 }
 
+/// The mode session cfg may run in, asked for mode: mode, unless rush
+/// started it to ask first (the cleanup agent), when a mode that trusts
+/// more becomes its agent's asking one (rush_core's mode_for). Rust-only.
+pub fn asks_first_mode(reg: &Registry, cfg: &Config, mode: &str) -> String {
+    if !rush_core::adapter::asks_first(&cfg.started_by) {
+        return mode.to_string();
+    }
+    let modes = reg
+        .choices_of(&cfg.kind)
+        .map(|c| c.modes)
+        .unwrap_or_default();
+    rush_core::adapter::mode_for(&cfg.started_by, mode, &modes)
+}
+
 /// A host for session cfg, its agents' queue to take: no socket yet.
-fn build(reg: Registry, hooks: Hooks, cfg: Config) -> (Host, Receiver<Msg>) {
+fn build(reg: Registry, hooks: Hooks, mut cfg: Config) -> (Host, Receiver<Msg>) {
+    // Beyond Go: rush's own that ask first (the cleanup agent) start, wake
+    // and resume in a mode that asks, whatever was saved or set.
+    cfg.permission_mode = asks_first_mode(&reg, &cfg, &cfg.permission_mode);
     let now = Time::now();
     let (tx, rx) = channel();
     let inbox = crate::inbox::takes_inbox(&reg, &cfg.kind);
@@ -2925,6 +2943,12 @@ impl Host {
                 return r;
             }
             "mode" => {
+                if asks_first_mode(&self.reg, &st.cfg, &o.mode) != o.mode {
+                    return Err(format!(
+                        "permission mode {} isn't for this session: rush's cleanup agent always asks before it acts",
+                        crate::reload::go_quote(&o.mode)
+                    ));
+                }
                 let (mut known, mut selectable) = (false, false);
                 if !st.info.permission_modes.is_empty() {
                     selectable = true;
@@ -3435,7 +3459,10 @@ impl Host {
                 st.pending.insert(a.id.clone(), Asked::default());
                 st.calls.insert(a.id.clone(), a.call.clone());
                 let needs = needs_call(&a.call);
-                if !self.answer_as_memory(st, &a) && !self.hold(st, &a.id, "permission", &needs) {
+                if !self.answer_as_rules(st, &a)
+                    && !self.answer_as_memory(st, &a)
+                    && !self.hold(st, &a.id, "permission", &needs)
+                {
                     st.info.state = "blocked".into();
                     st.info.needs = needs;
                     st.info.asking.push(crate::wire::Asking {

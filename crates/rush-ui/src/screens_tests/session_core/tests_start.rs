@@ -707,3 +707,87 @@ fn a_click_in_the_menu_bar_opens_its_agent() {
     let _ = m.update(Msg::Input(Event::FocusGained));
     assert_eq!(m.sel, a, "an agent not in the list isn't gone to");
 }
+
+/// An agent rush can run that has modes to pick from, as Claude Code's.
+struct Moded;
+
+impl Adapter for Moded {
+    fn kind(&self) -> Kind {
+        Kind::from("moded")
+    }
+    fn name(&self) -> String {
+        "Moded Code".into()
+    }
+    fn features(&self) -> Features {
+        [(Feature::Run, Support::YES)].into_iter().collect()
+    }
+    fn level(&self) -> Level {
+        Level::default()
+    }
+    fn profiles(&self) -> Vec<Profile> {
+        Vec::new()
+    }
+    rush_core::has!(chooser: Chooser);
+}
+
+impl rush_core::adapter::Chooser for Moded {
+    fn choices(&self) -> rush_core::adapter::Choices {
+        let modes = [
+            "default",
+            "acceptEdits",
+            "plan",
+            "auto",
+            "bypassPermissions",
+        ]
+        .iter()
+        .map(|id| rush_core::adapter::Choice {
+            id: (*id).into(),
+            ..Default::default()
+        })
+        .collect();
+        rush_core::adapter::Choices {
+            modes,
+            ..Default::default()
+        }
+    }
+}
+
+// The cleanup agent starts in the mode that asks, whatever new sessions
+// start in (bypass, auto), even when told to start in auto: the Start its
+// host's Config is made of says "default", and that it's the cleanup's.
+#[test]
+fn the_cleanup_agent_starts_asking_whatever_new_sessions_start_in() {
+    use rush_ui_projects_machine::{CareStart, care_start_with_hosts};
+    for next in ["bypassPermissions", "auto", "acceptEdits", ""] {
+        for auto in [false, true] {
+            let fake = Fake::new();
+            let (mut m, _d) = model(&fake);
+            m.reg.register(Moded);
+            accounts(&mut m).start_over = Some(StartOver {
+                kind: "moded".into(),
+                mode: next.into(),
+                mode_set: true,
+                ..StartOver::default()
+            });
+            care_start_with_hosts(
+                &mut m,
+                CareStart {
+                    prompt: "free some space".into(),
+                    cwd: "/Users/me".into(),
+                    name: "Cleanup".into(),
+                    auto,
+                    started_by: "cleanup".into(),
+                    why: "19.7G free on disk".into(),
+                    allow: vec!["Bash(du:*)".into()],
+                },
+            );
+            let starts = fake.starts.lock().unwrap().clone();
+            assert_eq!(starts.len(), 1, "{next} {auto}: {}", flash(&m));
+            let s = &starts[0];
+            assert_eq!(s.kind, "moded");
+            assert_eq!(s.permission_mode, "default", "{next} auto={auto}");
+            assert_eq!(s.started_by, "cleanup");
+            assert_eq!(s.allow, ["Bash(du:*)"]);
+        }
+    }
+}

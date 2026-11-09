@@ -127,6 +127,7 @@ fn info(m: &Model, key: &str) -> Option<HostInfo> {
         unused: c.unused.clone(),
         limit: c.info.limit.clone(),
         error: c.info.error.clone(),
+        started_by: a.map(|a| a.started_by.clone()).unwrap_or_default(),
         updated: (c.info.now.updated_ns / 1_000_000) as rush_core::time::Ms,
         conv_tokens: c.context.as_ref().map(|u| {
             let msg = &u.messages;

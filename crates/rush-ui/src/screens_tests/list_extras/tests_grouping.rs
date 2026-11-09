@@ -76,6 +76,30 @@ fn needs_you_never_earlier() {
     assert_eq!(sections(&m), vec![NEEDS]);
 }
 
+/// A rush session blocked on a permission needs you, the cleanup agent's
+/// too: rush's own, in the home folder or in its scratch, it's never
+/// Scratch or the home folder's first.
+#[test]
+fn a_cleanup_agent_blocked_on_you_needs_you() {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/Users/me".into());
+    let scratch = format!(
+        "{}/tmp/afr-dcf3328e/7ce941c8",
+        crate::config::dir().display()
+    );
+    for cwd in [home, scratch] {
+        let mut a = agent("a:7ce941c8", "Cleanup", State::Blocked, 7904);
+        a.rush = true;
+        a.started_by = "cleanup".into();
+        a.why = "19.7G free on disk".into();
+        a.job.cwd = cwd.clone();
+        a.job.needs = "Bash du -xhd1 ~/Library/Developer/Xcode".into();
+        let mut you = agent("b:1", "fix the tax rounding", State::Blocked, 42);
+        you.job.cwd = "/src/app".into();
+        let m = model_of(vec![a, you], 120, 40);
+        assert_eq!(sections(&m), vec![NEEDS], "in {cwd}");
+    }
+}
+
 /// Split by project, each section's rows sit under their repository's
 /// heading, and the line under each row names its branch, not the
 /// project its heading already names (model.go:2346, rail.go:184).

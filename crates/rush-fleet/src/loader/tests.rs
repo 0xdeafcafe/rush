@@ -2306,3 +2306,42 @@ fn whole_reading_boxes_its_idle_rows() {
     let unboxed = size_of::<(String, (HostInfo, Agent))>();
     assert!(unboxed >= 2_000, "an idle entry unboxed is {unboxed} bytes");
 }
+
+// A rush session blocked on a permission (its info's state blocked, an
+// asking entry) needs you, the cleanup agent's in the home folder too,
+// whether the process table has its host, read nothing, or wasn't read.
+#[test]
+fn a_hosted_session_blocked_on_an_ask_needs_you() {
+    let d = tempfile::tempdir().unwrap();
+    let pid = std::process::id() as i32;
+    for (by, cwd) in [("", "/src/app"), ("cleanup", "/Users/me")] {
+        let info = format!(
+            r#"{{"id":"7ce941c8","sessionId":"7ce941c8-99bf","cwd":"{cwd}","name":"Cleanup",
+            "hostPid":{pid},"claudePid":{pid},"state":"blocked","detail":"measure Xcode",
+            "needs":"Bash du -xhd1 /Users/me/Library/Developer/Xcode",
+            "asking":[{{"id":"a55e","call":"Bash: du -xhd1 /Users/me/Library/Developer/Xcode","reason":"Contains backslash-escaped whitespace"}}],
+            "permissionMode":"default","proto":12,"gen":1,"turn":1,"kind":"claude","profile":"claude",
+            "startedBy":"{by}","meta":{{"why":"19.7G free on disk"}},
+            "startedAt":"2026-11-09T04:23:25+01:00","updatedAt":"2026-11-09T04:28:24+01:00"}}"#
+        );
+        std::fs::write(d.path().join("info.json"), info).unwrap();
+        let i = crate::hostfiles::read_info(d.path()).expect("its info reads");
+        assert_eq!((i.state.as_str(), i.started_by.as_str()), ("blocked", by));
+        let mut l = loader();
+        let mine = table(vec![Proc {
+            pid,
+            ..Proc::default()
+        }]);
+        for (what, mut tab) in [
+            ("has its host", Some(mine)),
+            ("read nothing", Some(table(Vec::new()))),
+            ("wasn't read", None),
+        ] {
+            let a = l.hosted(&test_profile(), &i, tab.as_mut(), now());
+            assert_eq!(a.job.state, State::Blocked, "{by} {what}");
+            assert!(a.needs_you(), "{by}: a table that {what}");
+            assert_eq!(a.started_by, by);
+            assert_eq!(a.job.cwd, cwd);
+        }
+    }
+}

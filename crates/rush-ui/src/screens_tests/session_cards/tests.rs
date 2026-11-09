@@ -435,6 +435,51 @@ fn card_auto_is_not_yolo() {
     assert!(out.contains("o Yolo"), "{out}");
 }
 
+/// The cleanup agent always asks: its card has no Auto or Yolo, and o, u
+/// and #yolo switch it to nothing that trusts more (Rust-only).
+#[test]
+fn the_cleanup_agents_card_never_trusts_more() {
+    let mut m = hosted(120, 50);
+    set_info(&mut m, |i| {
+        i.permission_modes = ["default", "acceptEdits", "auto", "bypassPermissions"]
+            .into_iter()
+            .map(|id| Mode {
+                id: id.into(),
+                ..Mode::default()
+            })
+            .collect();
+        i.permission_mode = "default".into();
+        i.started_by = "cleanup".into();
+    });
+    ask(
+        &mut m,
+        "Bash",
+        Kind::Shell,
+        Input {
+            command: "echo $TMPDIR; getconf DARWIN_USER_TEMP_DIR".into(),
+            ..Input::default()
+        },
+        true,
+    );
+    let out = text(&rows(&mut m, 120, 40));
+    assert!(out.contains("y Allow once"), "{out}");
+    assert!(!out.contains("u Auto") && !out.contains("o Yolo"), "{out}");
+    let i = info(&m, "k").unwrap();
+    card_key(&mut m, "k", &i, "up", true);
+    for k in ["o", "u"] {
+        card_key(&mut m, "k", &i, k, true);
+    }
+    assert!(acts(&mut m).is_empty(), "nothing allowed or switched");
+    let key = "k";
+    crate::screens::session_cards::permissions::set_permission(&mut m, key, "bypassPermissions");
+    assert!(acts(&mut m).is_empty());
+    let f = m.flash.clone().unwrap();
+    assert_eq!(
+        f.0,
+        "The cleanup agent always asks before it acts, so it can't run in bypassPermissions"
+    );
+}
+
 #[test]
 fn always_words() {
     use super::permcard::{always_label, always_words};

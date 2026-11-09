@@ -212,6 +212,9 @@ pub struct HostInfo {
     /// Why its agent last failed (Info.Error): a sign-in that ran out
     /// starts with rush_host's AUTH_STOPPED.
     pub error: String,
+    /// What in rush started it ("cleanup": machine care), empty when you
+    /// did (Agent.started_by).
+    pub started_by: String,
 }
 
 /// What's done once a session started for it is up (Act::Start).

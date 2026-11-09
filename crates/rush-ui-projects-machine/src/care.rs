@@ -39,7 +39,7 @@ const CARE_WARMUP: Ms = 120_000;
 /// How often the pressure is read (Go's every 5 ticks).
 pub const CARE_EVERY: Ms = 5_000;
 /// The plugin rush recommends turning on (bundled/cleanup).
-pub const CARE_PLUGIN: &str = "cleanup";
+pub const CARE_PLUGIN: &str = rush_core::adapter::STARTED_BY_CLEANUP;
 
 /// A cleanup agent to start: its task, where, and its name. auto runs it
 /// in its agent's auto mode where there is one (Go's, for nobody watching
@@ -644,24 +644,9 @@ pub fn care_started(m: &mut Model, r: Result<String, String>) -> Out {
     Out::Draw
 }
 
-/// The mode of an agent's modes that asks before it does anything it
-/// isn't sure of (rush_core's trust 0), for a cleanup agent that mustn't
-/// delete on its own: "default" where there is one, else the first that
-/// asks and isn't plan (which would keep it from running the removals
-/// you approve). "" (the agent's own default) only when none is listed.
-/// Rust-only.
-pub fn asking_mode(modes: &[rush_core::adapter::Choice]) -> String {
-    modes
-        .iter()
-        .find(|x| x.id == "default")
-        .or_else(|| {
-            modes.iter().find(|x| {
-                rush_core::adapter::trust(&x.id) == 0 && x.id != "plan" && !x.id.is_empty()
-            })
-        })
-        .map(|x| x.id.clone())
-        .unwrap_or_default()
-}
+/// The mode of an agent's modes that asks, for a cleanup agent that
+/// mustn't delete on its own (rush_core's asking_mode). Rust-only.
+pub use rush_core::adapter::asking_mode;
 
 /// The starter session_core sets once hosts can start sessions: the
 /// cleanup agent in c.cwd as the next session starts there, named
@@ -697,6 +682,9 @@ pub fn start_with_hosts(m: &mut Model, c: CareStart) -> Out {
         // Never the mode new sessions start in, which may trust more.
         s.permission_mode = asking_mode(&modes);
     }
+    // rush's own that ask first (the cleanup agent) keep to asking, as
+    // their host keeps them.
+    s.permission_mode = rush_core::adapter::mode_for(&s.started_by, &s.permission_mode, &modes);
     let h = hosts(m);
     m.later(move || h.start(&s).map(|st| st.id), care_started);
     Out::Draw
@@ -1067,7 +1055,7 @@ pub const CARE_PLAN_FILE: &str = "cleanup-plan.tsv";
 /// The cleanup agent's two phases: a read-only plan the user approves,
 /// then exactly what was approved, in one script (Rust-only: Go's ran in
 /// auto mode and deleted as it went).
-const CARE_PHASES: &str = "Phase 1, now, is read-only: survey (df -h, du, git status and git worktree list, the reports below) and delete, remove or stop nothing. These run without asking: du, df, ls, stat, git status, git worktree list, git rev-list, git branch (listing it only), xcrun simctl list, and writing files in $TMPDIR; run each plainly as its own command (git in the repository's folder rather than git -C, nothing chained after it, no redirection), or it asks. Anything else asks the user, so keep to these. End your turn with a plan:
+const CARE_PHASES: &str = "Phase 1, now, is read-only: survey (df -h, du, git status and git worktree list, the reports below) and delete, remove or stop nothing. These run without asking: du, df, ls, stat, git status, git worktree list, git rev-list, git branch (listing it only), xcrun simctl list, and writing files in $TMPDIR; run each plainly as its own command (git in the repository's folder rather than git -C, nothing chained after it, no redirection, a path with a space in it quoted (\"~/Library/Developer/Xcode/iOS DeviceSupport\") rather than its space escaped), or it asks. Anything else asks the user, so keep to these. End your turn with a plan:
 - every path you would delete, each with its size and why it's safe to go (a can-go worktree, a done session's scratch, a cache that rebuilds itself, …) and conservative: yes when it's only something made or fetched again that loses no work (a done session's scratch untouched for days, a build cache in a worktree nobody works in, pnpm store prune), else conservative: no;
 - each group's total, and a grand total of the space it frees;
 - what you'd leave, and why;

@@ -18,6 +18,17 @@ use crate::model::Model;
 /// that harness, else what its adapter says a new session can start with
 /// (permissionChoices).
 pub fn permission_choices(m: &Model, kind: &str, c: Option<&HostInfo>) -> Vec<Choice> {
+    let mut all = offered_modes(m, kind, c);
+    // Beyond Go: rush's cleanup agent keeps to the modes that ask, as its
+    // host keeps it, so no card, key or # command trusts it more.
+    if c.is_some_and(|c| rush_core::adapter::asks_first(&c.started_by)) {
+        all.retain(|v| trust(&v.id) == 0);
+    }
+    all
+}
+
+/// The modes on offer, whoever started the session.
+fn offered_modes(m: &Model, kind: &str, c: Option<&HostInfo>) -> Vec<Choice> {
     if let Some(c) = c
         && c.kind == kind
         && !c.permission_modes.is_empty()
@@ -85,6 +96,12 @@ pub fn set_permission(m: &mut Model, key: &str, mode: &str) -> Out {
         m.flash_err("Permissions can be changed in a hosted session; use #rush first");
         return Out::Draw;
     };
+    if rush_core::adapter::asks_first(&c.started_by) && trust(mode) > 0 {
+        m.flash_err(&format!(
+            "The cleanup agent always asks before it acts, so it can't run in {mode}"
+        ));
+        return Out::Draw;
+    }
     if !permission_known(m, &c.kind, Some(&c), mode) {
         m.flash_err(&format!(
             "This harness does not offer permission mode {mode}"

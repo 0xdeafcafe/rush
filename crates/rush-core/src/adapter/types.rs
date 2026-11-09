@@ -290,6 +290,49 @@ pub fn trusted_as(mode: &str, modes: &[Choice]) -> String {
     best.to_string()
 }
 
+/// The started_by of rush's cleanup agent (machine care), whose sessions
+/// always ask before they do anything they aren't sure of. Rust-only.
+pub const STARTED_BY_CLEANUP: &str = "cleanup";
+
+/// Whether a session rush started for started_by must keep to a mode that
+/// asks (trust 0) whatever the user's settings say: the cleanup agent's,
+/// which deletes only what you approved. Rust-only.
+pub fn asks_first(started_by: &str) -> bool {
+    started_by == STARTED_BY_CLEANUP
+}
+
+/// The mode of modes that asks before it does anything it isn't sure of
+/// (trust 0): "default" where there is one, else the first that asks and
+/// isn't plan (which would keep it from running what you approve). ""
+/// (the agent's own default) only when none is listed. Rust-only.
+pub fn asking_mode(modes: &[Choice]) -> String {
+    modes
+        .iter()
+        .find(|x| x.id == "default")
+        .or_else(|| {
+            modes
+                .iter()
+                .find(|x| trust(&x.id) == 0 && x.id != "plan" && !x.id.is_empty())
+        })
+        .map(|x| x.id.clone())
+        .unwrap_or_default()
+}
+
+/// The mode a session started for started_by runs in, asked for mode:
+/// mode itself, unless the session must ask first (asks_first) and mode
+/// trusts more than asking, or is the agent's own default, which its
+/// settings may make bypass; then asking_mode. Rust-only.
+pub fn mode_for(started_by: &str, mode: &str, modes: &[Choice]) -> String {
+    if !asks_first(started_by) || (trust(mode) == 0 && !mode.is_empty()) {
+        return mode.to_string();
+    }
+    let m = asking_mode(modes);
+    if m.is_empty() && trust(mode) == 0 {
+        return mode.to_string();
+    }
+    m
+}
+
 /// Where a session goes.
 #[derive(Clone, Default)]
 pub struct Move {

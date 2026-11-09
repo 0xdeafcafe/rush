@@ -511,7 +511,11 @@ Claude, fleet, the other adapters) builds on these.
   sessions' leftovers, each with its tree's memory and CPU) and the hosts'
   infos; `load_unsampled` is Load(false), `load_quick` LoadQuick. It reads
   the process table once a load (`proc::snapshot`, one sysctl) and fills
-  memory and CPU only for the rows' and machine rows' trees.
+  memory and CPU only for the rows' and machine rows' trees. A table
+  that read nothing (the sysctl failed, as it can short of memory) says
+  nothing of a hosted row's host, whose kill(0) `InfoFiles` already
+  answered: the row keeps its host's pid, so one blocked on you still
+  needs you (`needs_you` wants a pid). Rust-only.
   `Loader::new(registry)` reads no state of rush's, lists no rush
   sessions and never asks GitHub (what tests want); `Loader::from_state`
   is rush's: config and overlay from rush-state (names, groups, done,
@@ -1127,6 +1131,32 @@ deleted as it went. Here it never deletes on its own:
   sets the mode of its agent's that asks (`asking_mode`: "default", else
   the first trust-0 mode but plan, else the agent's own ""), never the
   mode new sessions start in, which may be auto or bypass.
+- And it stays there. Session 7ce941c8 started in default, then the
+  approval card's Yolo (o) switched it to bypassPermissions, which its
+  host saved in config.json and woke in. Now `rush_core::adapter::
+  mode_for` keeps any session whose `started_by` asks first
+  (`asks_first`: "cleanup") to its agent's asking mode: a trusting mode,
+  or the agent's own "" (which Claude's settings may make bypass),
+  becomes `asking_mode`'s. `start_with_hosts` applies it to the Start;
+  the host applies it to its Config on every start, wake and resume
+  (`server.rs` `asks_first_mode`, in `build`) and refuses a `mode` op
+  that trusts more; the cards drop every mode above trust 0 from
+  `permission_choices` (no Auto or Yolo button, o and u do nothing) and
+  `set_permission` says "The cleanup agent always asks before it acts,
+  so it can't run in …".
+- Claude Code asks about a command with a variable in it ("A variable
+  in this command can't be checked before it runs") or a backslash
+  before a space ("Contains backslash-escaped whitespace") whatever its
+  allow rules say, even in bypass mode: its own check, not rush's. So
+  the host answers those itself when `rush_core::readrules::reads_only`
+  says every command in it (split at `;` and `&&`) is one of the Bash
+  rules rush gave the session (`Config.allow`), or echo, printf, pwd or
+  getconf, with no substitution, redirection, pipe, background,
+  subshell, group or `VAR=` prefix, and no variable but TMPDIR, HOME,
+  RUSH_SESSION, PWD and USER (`server/readallow.rs`, logged as
+  permission-auto, reason rules). Any other variable or command still
+  asks. Only sessions rush gave Bash rules (the cleanup agent's), and
+  the prompt quotes a path with a space rather than escaping it.
 - Its read-only commands don't ask. `care_allow` is `CARE_READS`
   (`Bash(du:*)`, `df`, `ls`, `stat`, `git status`, `git worktree list`,
   `git rev-list`, `xcrun simctl list`, and `git branch` only as written in
