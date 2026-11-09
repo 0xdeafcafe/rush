@@ -12,6 +12,8 @@ rush-state = { path = "../rush-state" }
 rush-events = { path = "../rush-events" }
 rush-sys = { path = "../rush-sys" }
 rush-gh = { path = "../rush-gh" }
+# Anthropic's image rule (patches, resize, tiers): one copy, efficiency's.
+rush-efficiency = { path = "../rush-efficiency" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 regex = "1"

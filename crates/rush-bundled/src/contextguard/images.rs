@@ -16,19 +16,23 @@ use std::time::SystemTime;
 use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, ImageDecoder, ImageFormat, ImageReader, Limits};
 
-/// One visual token per patch this many pixels square.
-pub const PATCH: u32 = 28;
+use rush_efficiency::image as rule;
+
+/// One visual token per patch this many pixels square. Anthropic's rule
+/// itself (the patches, the resize, the tiers) is rush-efficiency's
+/// image.rs: the Efficiency figures and this guard count an image alike.
+pub const PATCH: u32 = rule::PATCH as u32;
 /// The high-resolution tier's limits (Claude 4.7 and later): what a copy
 /// that isn't made would be cut to by the model itself.
-pub const MODEL_EDGE: u32 = 2576;
-pub const MODEL_TOKENS: u32 = 4784;
+pub const MODEL_EDGE: u32 = rule::HIGH_EDGE as u32;
+pub const MODEL_TOKENS: u32 = rule::HIGH_TOKENS as u32;
 /// The standard tier's long edge, the edge a copy is cut to at budgets up
 /// to its tokens.
-pub const STANDARD_EDGE: u32 = 1568;
+pub const STANDARD_EDGE: u32 = rule::STANDARD_EDGE as u32;
 /// The guard's own budget for one image, unless set: the standard tier's,
 /// under a third of what the high-resolution tier spends on a big
 /// screenshot.
-pub const TOKENS: u32 = 1568;
+pub const TOKENS: u32 = rule::STANDARD_TOKENS as u32;
 /// An image this small in bytes, and in budget already, is read as it is.
 pub const SMALL_IMAGE: u64 = 64 * 1024;
 /// libwebp's quality, 0-100: text in screenshots stays sharp.
@@ -40,9 +44,9 @@ pub const DIR: &str = "rush-images";
 /// Decoding gives up past this much memory.
 const MAX_ALLOC: u64 = 512 << 20;
 
-/// An image's visual tokens as it's sent.
+/// An image's visual tokens as it's sent (rule::patches).
 pub fn tokens(w: u32, h: u32) -> u64 {
-    u64::from(w.div_ceil(PATCH)) * u64::from(h.div_ceil(PATCH))
+    rule::patches(i64::from(w), i64::from(h)) as u64
 }
 
 /// The long edge a budget of tokens goes with.
@@ -55,41 +59,23 @@ pub fn edge_for(budget: u32) -> u32 {
 }
 
 /// The largest size, of the same shape, that keeps within max_edge and
-/// max_tokens: the model's own resize, ported from the reference in
-/// platform.claude.com, Vision coordinates › Resize your image before
-/// uploading. An image that fits is its own size.
+/// max_tokens: the model's own resize (rule::resized, the docs'
+/// reference). An image that fits is its own size.
 pub fn resized(w: u32, h: u32, max_edge: u32, max_tokens: u32) -> (u32, u32) {
-    let fits = |w: u32, h: u32| {
-        w.div_ceil(PATCH) * PATCH <= max_edge
-            && h.div_ceil(PATCH) * PATCH <= max_edge
-            && tokens(w, h) <= u64::from(max_tokens)
-    };
-    if w == 0 || h == 0 || fits(w, h) {
-        return (w, h);
-    }
-    if h > w {
-        let (b, a) = resized(h, w, max_edge, max_tokens);
-        return (a, b);
-    }
-    let aspect = f64::from(w) / f64::from(h);
-    let short = |long: u32| ((f64::from(long) / aspect).round_ties_even() as u32).max(1);
-    let (mut lo, mut hi) = (1, w);
-    while lo + 1 < hi {
-        let mid = (lo + hi) / 2;
-        if fits(mid, short(mid)) {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
-    (lo, short(lo))
+    let (a, b) = rule::resized(
+        i64::from(w),
+        i64::from(h),
+        i64::from(max_edge),
+        i64::from(max_tokens),
+    );
+    (a as u32, b as u32)
 }
 
 /// The tokens an image of w × h costs as it is, on the high-resolution
-/// tier: after the model's own resize.
+/// tier: after the model's own resize (rule::tokens_for of a model it
+/// can't place, which reads on that tier).
 pub fn billed(w: u32, h: u32) -> u64 {
-    let (a, b) = resized(w, h, MODEL_EDGE, MODEL_TOKENS);
-    tokens(a, b)
+    rule::tokens_for(i64::from(w), i64::from(h), "") as u64
 }
 
 /// Whether Claude Code's Read shows path as an image, by its name.
