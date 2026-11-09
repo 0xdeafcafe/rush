@@ -51,8 +51,11 @@ pub const SECTIONS: &[&str] = &[
     "Next action",
 ];
 
-/// What every nudge begins with, for the view to draw it as rush's own.
-pub const NUDGE_START: &str = "rush (Emeritus): your context is at ";
+/// What every nudge begins with, and the notes after: rush-convo's, so
+/// the view draws them as rush's own.
+pub use rush_convo::emeritus::{
+    CALLED_OFF, NUDGE_START, ROLLED_BACK_START, TAKE_OVER_START, WAITS_START,
+};
 
 /// The baton's template, as the nudge and the retire tool give it.
 pub fn template() -> String {
@@ -97,7 +100,7 @@ your transcript's path and your cost):\n\n{}",
 /// What the retiring session is told when its handover didn't happen.
 pub fn rolled_back_note(why: &str) -> String {
     format!(
-        "rush (Emeritus): your handover didn't happen: your successor {why}. You aren't retired: carry on with the task \
+        "{ROLLED_BACK_START}{why}. You aren't retired: carry on with the task \
 yourself. You may call `{RETIRE_TOOL}` again later."
     )
 }
@@ -105,15 +108,10 @@ yourself. You may call `{RETIRE_TOOL}` again later."
 /// What a session that asked to retire is told when it can't yet.
 pub fn waits_for_tasks(n: usize) -> String {
     format!(
-        "rush (Emeritus): your retire waits for your background tasks: {n} still running. Wait for them (or stop \
+        "{WAITS_START}{n} still running. Wait for them (or stop \
 them), then call `{RETIRE_TOOL}` again. You aren't retired."
     )
 }
-
-/// The note put ahead of what the user sent a session whose retire it
-/// called off.
-pub const CALLED_OFF: &str =
-    "rush (Emeritus): your retire was called off because the user wrote to you; carry on.";
 
 /// Why a baton won't do: the sections it lacks. Empty when it will.
 pub fn baton_lacks(baton: &str) -> Vec<&'static str> {
@@ -247,7 +245,7 @@ pub fn successor_prompt(a: &Config, baton: &str, transcript: &str, fwd: &[Forwar
         format!("\"{}\" ", a.name)
     };
     let mut out = format!(
-        "You take over this task from {name}(rush session {}), an agent that handed it over near the end of its \
+        "{TAKE_OVER_START}{name}(rush session {}), an agent that handed it over near the end of its \
 context and has retired. Its baton follows: its own judgement of what matters, then the state rush recorded as \
 it handed over. Check that state before you rely on it, and work from the baton as if it were your own notes.",
         a.id

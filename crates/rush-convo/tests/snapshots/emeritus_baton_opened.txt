@@ -1,0 +1,39 @@
+
+▍ You  00:00
+▍ fix the flaky test
+
+▍ Agent  00:00
+▍
+▍ Fixed the watcher's race.
+
+▍   ↻ rush  context at 312k, past 300k · asked to hand over (Emeritus)
+
+▍ Agent  00:00
+│   ✓ ↻ handing over to a fresh agent  CI green on rush/fix-flaky with the flaky test fixed…  1.0s
+│
+│       Destination
+│       CI green on rush/fix-flaky with the flaky test fixed for good.
+│
+│       Core ideas
+│       • The race is in the watcher.
+│
+│       Methods
+│       cargo test -p rush-fleet
+│
+│       Journey
+│       A sleep hid it.
+│
+│       Limits
+│       ❌ never a sleep in a test
+│
+│       Tests that pin text
+│       none
+│
+│       Key files
+│       • crates/rush-fleet/src/watch.rs: the watcher
+│
+│       Next action
+│       Push and watch CI.
+▍
+▍ Handing over.
+▍                                                                             1 step   13s   $0.20

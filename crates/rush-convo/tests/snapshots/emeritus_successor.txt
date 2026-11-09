@@ -1,0 +1,39 @@
+
+▍   ↻ rush  took over from "fix the flaky test" (rush session a1b2c3) as it retired (Emeritus)
+▍     its baton · 16 lines ▸ show
+
+▍ Agent  00:00
+▍
+▍ Picking it up from the baton.
+---- opened ----
+
+▍   ↻ rush  took over from "fix the flaky test" (rush session a1b2c3) as it retired (Emeritus)
+▍     its baton ▾ hide
+▍
+▍    Destination
+▍    CI green on rush/fix-flaky with the flaky test fixed for good.
+▍
+▍    Core ideas
+▍    • The race is in the watcher.
+▍
+▍    Methods
+▍    cargo test -p rush-fleet
+▍
+▍    Journey
+▍    A sleep hid it.
+▍
+▍    Limits
+▍    ❌ never a sleep in a test
+▍
+▍    Tests that pin text
+▍    none
+▍
+▍    Key files
+▍    • crates/rush-fleet/src/watch.rs: the watcher
+▍
+▍    Next action
+▍    Push and watch CI.
+
+▍ Agent  00:00
+▍
+▍ Picking it up from the baton.
