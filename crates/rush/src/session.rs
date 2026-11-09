@@ -1363,7 +1363,7 @@ mod tests {
     #[test]
     fn answers_what_a_session_waits_on() {
         let home = Home::new();
-        let mut env = fake_env();
+        let env = fake_env();
         env.reg.register(Asker);
         let cwd = home.path();
         let (code, out, err) = run(&env, &["start", "--agent", "asker", "--cwd", &cwd], "");
