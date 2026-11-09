@@ -1,0 +1,39 @@
+     !
+    ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working                                                               default
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings                                  0% cpu · – · 37.0G free · 80%
+    RUSH      General   Usage   Keys   Plugins   Updates   Remote   [ ]
+   ▀▀▀▀▀▀
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  What rush does on its own to save tokens and money, and to keep agents in check.
+
+    Shrink images agents read      ‹ on           ›                         │ 1680 image reads were of an image the…
+      images cost at most          ‹ 1,568 tokens ›                         │
+      contact sheet after          ‹ 8 images     ›                         │ the requests after them re-read about
+                                                                            │ 41M tokens of them, about $20.50 (an
+  Cheaper subagents · off until you turn it on                              │ estimate). Note what an image showed
+    Cheaper model for routine sub… ‹ off          ›                         │ rather than reading it again, or put
+                                                                            │ the ones to compare on one contact
+  Runaway guard · each part off until you turn it on                        │ sheet
+    Pace guard                     ‹ off          ›                         │
+    Agents at once                 ‹ no cap       ›                         │
+    When you're away               ‹ off          ›                         │
+                                                                            │
+  Advisor                                                                   │
+    Advisor                        ‹ off          ›                         │
+                                                                            │
+  Where tokens went · the last 7 days, from your agents' transcripts        │
+    Claude Code   1,204 req · in 1.2M / 3.4M / 120.0M · out 900k · $110     │
+    codex           310 req · in 2.0M / 0 / 40.0M · out 300k · not priced   │
+                                                                            │
+  Most tokens processed · each session's input and output                   │
+     45.3M  rush  8 Nov 16:00 → 9 Nov 02:00  peak 412k  830 req             │
+                                                                            │
+  Findings · biggest cost first                                             │
+  ▍  $20.50  1680 image reads were of an image the same session had read…   │
+             Only 84% of input came from the cache                          │
+                                                                            │
+  Emeritus handovers · saving ≈39.9M tokens by estimate, ≈$19.95            │
+    a1 → b1: 307k → 22k, saved ≈39.9M tokens, ≈$19.95                       │
+    28 of 30 ──────────────────────────────────────────────────────────────────────────────────────────────────────
+  ? details  ·  ctrl+↑↓ section  ·  [ ] page  ·  esc back
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

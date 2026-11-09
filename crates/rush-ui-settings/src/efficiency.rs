@@ -88,7 +88,7 @@ pub fn sections(m: &Model) -> Vec<Section> {
                 sp(format!("{:>7} req", count(t.req)), TEXT),
                 sp(
                     format!(
-                        " · in {} uncached, {} cache write, {} cache read · out {} · ",
+                        " · in {} / {} / {} · out {} · ",
                         tokens(t.input),
                         tokens(t.cw),
                         tokens(t.cr),
@@ -99,10 +99,16 @@ pub fn sections(m: &Model) -> Vec<Section> {
                 sp(cost_of(t.cost()), TEXT),
             ]);
             let what = format!(
-                "{name}: {} sessions and {} subagent runs started in these {}. Input is what each request sent: uncached, written to the cache, or read from it (a tenth of the price). Dollars are at list prices where rush has them; it has none for Codex. rush efficiency prints the same.",
+                "{name}: {} sessions and {} subagent runs started in these {}; {} requests sent {} uncached, wrote {} to the cache and read {} from it (a tenth of the price), and {} came out. That cost {}: list prices, where rush has them; it has none for Codex. rush efficiency prints the same.",
                 a.sessions,
                 a.subagents,
-                span_words(&r)
+                span_words(&r),
+                count(t.req),
+                tokens(t.input),
+                tokens(t.cw),
+                tokens(t.cr),
+                tokens(t.out),
+                cost_of(t.cost())
             );
             fact(name, l, what)
         })
@@ -182,16 +188,28 @@ pub fn sections(m: &Model) -> Vec<Section> {
             .map(|s| {
                 let h = &s.h;
                 let what = format!(
-                    "{SAVING_METHOD} Threshold {}, lineage {}{}.",
+                    "{}; threshold {}, lineage {}. {SAVING_METHOD}",
+                    handover_line(s),
                     tokens(h.threshold),
-                    h.lineage,
-                    if h.subagent { ", a subagent" } else { "" }
+                    h.lineage
                 );
-                fact(
-                    format!("{} → {}", h.from, h.to),
-                    line([sp(handover_line(s), TEXT)]),
-                    what,
-                )
+                // The row says what it saved; About says the rest.
+                let mut l = format!(
+                    "{} → {}: {} → {}",
+                    h.from,
+                    h.to,
+                    tokens(h.from_context),
+                    tokens(h.to_context)
+                );
+                if s.transcript.is_empty() {
+                    l += &format!(", ≈{} a request less", tokens(s.per_request));
+                } else {
+                    l += &format!(", saved ≈{} tokens", tokens(s.tokens));
+                    if s.usd > 0.0 {
+                        l += &format!(", ≈{}", money(s.usd));
+                    }
+                }
+                fact(format!("{} → {}", h.from, h.to), line([sp(l, TEXT)]), what)
             })
             .collect();
         out.push(Section {
