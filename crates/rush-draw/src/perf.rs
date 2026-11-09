@@ -90,8 +90,14 @@ pub(crate) fn thread_cpu_us() -> u64 {
 }
 
 /// When this process started, from the kernel (macOS: kinfo_proc's
-/// p_starttime); now where that can't be read.
+/// p_starttime; Linux: /proc/self/stat's start after /proc/stat's boot
+/// time); now where that can't be read.
 fn started_us() -> u128 {
+    #[cfg(target_os = "linux")]
+    if let Some(us) = linux_started_us() {
+        return us;
+    }
+    #[cfg(target_os = "macos")]
     {
         let mut mib = [
             libc::CTL_KERN,
@@ -122,6 +128,30 @@ fn started_us() -> u128 {
         }
     }
     now_us()
+}
+
+#[cfg(target_os = "linux")]
+fn linux_started_us() -> Option<u128> {
+    let st = std::fs::read_to_string("/proc/self/stat").ok()?;
+    // Field 22, counted after the command's closing parenthesis (field 2).
+    let start: u128 = st
+        .rsplit_once(')')?
+        .1
+        .split_ascii_whitespace()
+        .nth(19)?
+        .parse()
+        .ok()?;
+    let boot: u128 = std::fs::read_to_string("/proc/stat")
+        .ok()?
+        .lines()
+        .find_map(|l| l.strip_prefix("btime "))?
+        .trim()
+        .parse()
+        .ok()?;
+    // SAFETY: sysconf takes a plain name.
+    let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    let hz = if hz > 0 { hz as u128 } else { 100 };
+    Some(boot * 1_000_000 + start * 1_000_000 / hz)
 }
 
 impl Perf {

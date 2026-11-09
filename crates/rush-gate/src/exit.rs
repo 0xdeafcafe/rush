@@ -1,7 +1,7 @@
 //! Waiting for a process that isn't ours to go: the node process a gate
 //! holder holds a run for. Go looks every 250ms (cmd/rush/gate.go:416);
-//! here kqueue says the moment it exits, and elsewhere it's still a look
-//! every 250ms.
+//! here the kernel says the moment it exits (kqueue on macOS, a pidfd on
+//! Linux), and where it can't it's still a look every 250ms.
 
 use rush_sys::proc::{self, Pid};
 
@@ -21,7 +21,37 @@ pub fn wait_gone(pid: Pid) {
     }
 }
 
+/// Waits on pid's pidfd for its exit; false when it can't, to look
+/// instead.
+#[cfg(target_os = "linux")]
+fn kq_wait(pid: Pid) -> bool {
+    use std::os::fd::AsRawFd;
+    let Some(fd) = proc::pidfd(pid) else {
+        return !runs(pid); // gone already, or a kernel without pidfds
+    };
+    // Held now, so it can't exit unseen; it may have before.
+    if !runs(pid) {
+        return true;
+    }
+    let mut p = libc::pollfd {
+        fd: fd.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    loop {
+        // SAFETY: one valid pollfd; no timeout, so it blocks.
+        let n = unsafe { libc::poll(&mut p, 1, -1) };
+        if n > 0 {
+            return true;
+        }
+        if n < 0 && std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+            return false;
+        }
+    }
+}
+
 /// Waits on kqueue for pid's exit; false when it can't, to look instead.
+#[cfg(target_os = "macos")]
 fn kq_wait(pid: Pid) -> bool {
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
     // SAFETY: kqueue takes nothing; a non-negative result is ours.

@@ -7,15 +7,19 @@
 //! The look at its tmp (trim.go) is a job on the host's timers rather than
 //! a thread of its own.
 //!
-//! Where the kqueue can't be made, a thread waits on each as before
-//! (serve_on).
+//! Where the kqueue can't be made, and off macOS, a thread waits on each
+//! as before (serve_on).
 
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsRawFd, OwnedFd};
+#[cfg(target_os = "macos")]
+use std::os::fd::{FromRawFd, RawFd};
 
 use super::*;
 
 /// A pipe the host's wait reads: written as the host quits.
 pub(super) struct Wake {
+    // Read only by the kqueue wait, which is macOS's.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     r: OwnedFd,
     w: OwnedFd,
 }
@@ -41,6 +45,7 @@ impl Wake {
         unsafe { libc::write(self.w.as_raw_fd(), b"x".as_ptr().cast(), 1) };
     }
 
+    #[cfg(target_os = "macos")]
     fn drain(&self) {
         let mut b = [0u8; 64];
         // SAFETY: reads into our buffer from our non-blocking pipe.
@@ -48,6 +53,7 @@ impl Wake {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn kevent_of(ident: usize, filter: i16, flags: u16, fflags: u32) -> libc::kevent {
     // SAFETY: kevent is plain data.
     let mut ev: libc::kevent = unsafe { std::mem::zeroed() };
@@ -59,6 +65,7 @@ fn kevent_of(ident: usize, filter: i16, flags: u16, fflags: u32) -> libc::kevent
 }
 
 /// Registers one change on kq: whether it took, and the error when not.
+#[cfg(target_os = "macos")]
 fn change(kq: &OwnedFd, ev: libc::kevent) -> std::io::Result<()> {
     // SAFETY: one valid change, no events read.
     let r = unsafe {
@@ -80,10 +87,12 @@ fn change(kq: &OwnedFd, ev: libc::kevent) -> std::io::Result<()> {
 
 /// What a change to the folder itself (not an entry in it) says: it's
 /// gone or moved, so it's watched again by its path.
+#[cfg(target_os = "macos")]
 const FOLDER_GONE: u32 = libc::NOTE_DELETE | libc::NOTE_RENAME | libc::NOTE_REVOKE;
 
 /// Watches dir's entries on kq: its descriptor, which stops the watch as
 /// it closes; None when it can't be opened.
+#[cfg(target_os = "macos")]
 fn watch_folder(kq: &OwnedFd, dir: &Path) -> Option<OwnedFd> {
     use std::os::unix::ffi::OsStrExt;
     let c = std::ffi::CString::new(dir.as_os_str().as_bytes()).ok()?;
@@ -108,6 +117,7 @@ fn watch_folder(kq: &OwnedFd, dir: &Path) -> Option<OwnedFd> {
 /// dialled and went before it was taken leaves none, and a wait here
 /// would wait past the host's quitting. Non-blocking only for the call,
 /// as the listener is handed on across an upgrade's exec as it was.
+#[cfg(target_os = "macos")]
 fn accept_now(ln: &UnixListener) -> std::io::Result<(UnixStream, std::os::unix::net::SocketAddr)> {
     ln.set_nonblocking(true)?;
     let c = ln.accept();
@@ -156,6 +166,7 @@ impl Host {
 
     /// Stops the host for why, on a thread of its own, as a watcher of
     /// Go's does: the wait goes on serving clients meanwhile.
+    #[cfg(target_os = "macos")]
     fn stop_for(&self, why: Value) {
         let st = self.lock();
         if st.quit {
@@ -173,6 +184,16 @@ impl Host {
     /// in one kqueue on this thread, until the host quits: true then.
     /// False at once when the wait can't be made: the caller's threads
     /// do it. What can't be watched so is watched by a thread as before.
+    #[cfg(not(target_os = "macos"))]
+    pub(super) fn serve_kq(&self, _ln: &UnixListener, _sock: &Path, _owner: Option<i64>) -> bool {
+        false
+    }
+
+    /// Serves ln's clients and watches sock and owner (when it's given)
+    /// in one kqueue on this thread, until the host quits: true then.
+    /// False at once when the wait can't be made: the caller's threads
+    /// do it. What can't be watched so is watched by a thread as before.
+    #[cfg(target_os = "macos")]
     pub(super) fn serve_kq(&self, ln: &UnixListener, sock: &Path, owner: Option<i64>) -> bool {
         let Some(wake) = &self.wake else {
             return false;

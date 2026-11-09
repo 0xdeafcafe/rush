@@ -95,7 +95,8 @@ mod tests {
 
     // A file kept open crosses into what the process execs; one left to
     // close on exec doesn't. The child is a fork and exec, as the host's
-    // own exec is, of a shell that writes to the file by its number.
+    // own exec is, of a shell that writes to the file by its number
+    // (through /dev/fd: dash takes no fd past 9 after >&).
     #[test]
     fn a_kept_file_survives_exec_and_the_rest_close() {
         for keep in [true, false] {
@@ -105,7 +106,7 @@ mod tests {
                 keep_open(fd).unwrap();
             }
             let st = Command::new("/bin/sh")
-                .args(["-c", &format!("echo crossed >&{fd}")])
+                .args(["-c", &format!("echo crossed >/dev/fd/{fd}")])
                 .stderr(std::process::Stdio::null())
                 .status()
                 .unwrap();

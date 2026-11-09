@@ -636,9 +636,11 @@ fn raise_open_files() {
     if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut r) } != 0 {
         return;
     }
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
     let mut want = r.rlim_max;
     // macOS refuses more than kern.maxfilesperproc, even under an
     // unlimited hard limit.
+    #[cfg(target_os = "macos")]
     {
         let mut n: libc::c_int = 0;
         let mut size = std::mem::size_of::<libc::c_int>();

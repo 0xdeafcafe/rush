@@ -8,8 +8,12 @@
 //! in the resource fork, type 4), the same as Go writes.
 
 use std::fs::Metadata;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
+
+use flate2::Compression;
+use flate2::write::ZlibEncoder;
 
 /// What a pass did.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -29,6 +33,9 @@ pub struct Pass {
 /// as it was.
 pub fn transcripts<P: AsRef<Path>>(dirs: &[P], idle: Duration) -> Pass {
     let mut r = Pass::default();
+    if !cfg!(target_os = "macos") {
+        return r; // only macOS stores files compressed this way
+    }
     let mut failed: Vec<String> = Vec::new(); // the first few, and why, for the log
     let cutoff = SystemTime::now()
         .checked_sub(idle)
@@ -101,85 +108,98 @@ fn walk(dir: &Path, f: &mut dyn FnMut(&Path)) {
     }
 }
 
-pub use darwin::{compressed, encode, file};
+#[cfg(target_os = "macos")]
+pub use darwin::{compressed, file};
+
+/// Whether a file is stored compressed already: never, off macOS.
+#[cfg(not(target_os = "macos"))]
+pub fn compressed(_info: &Metadata) -> bool {
+    false
+}
+
+/// Compresses one file in place: only macOS stores files this way.
+#[cfg(not(target_os = "macos"))]
+pub fn file(_path: &Path) -> Result<(), String> {
+    Err("only on macOS".into())
+}
+
+/// decmpfs compresses 64 KB at a time.
+const BLOCK: usize = 64 << 10;
+/// zlib blocks in the resource fork.
+const TYPE_ZLIB_FORK: u32 = 4;
+
+/// The resource map every decmpfs resource fork ends with: one resource
+/// of type 'cmpf', id 1, no name.
+const FORK_MAP: [u8; 50] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0x1c, 0, 0x32, 0, 0, b'c', b'm', //
+    b'p', b'f', 0, 0, 0, 0x0a, 0, 1, 0xff, 0xff, 0, 0, 0, 0, 0, 0, //
+    0, 0,
+];
+
+/// Builds the decmpfs header and resource fork for data.
+pub fn encode(data: &[u8]) -> std::io::Result<(Vec<u8>, Vec<u8>)> {
+    let n = data.len().div_ceil(BLOCK);
+    let mut blocks = Vec::new();
+    let mut table = vec![0u8; 4 + 8 * n];
+    table[..4].copy_from_slice(&(n as u32).to_le_bytes());
+    let mut off = table.len() as u32;
+    for i in 0..n {
+        let chunk = &data[i * BLOCK..((i + 1) * BLOCK).min(data.len())];
+        let mut z = ZlibEncoder::new(Vec::new(), Compression::best());
+        z.write_all(chunk)?;
+        let mut b = z.finish()?;
+        if b.len() >= chunk.len() {
+            // Doesn't shrink: stored as it is, marked by a leading 0xff.
+            b = Vec::with_capacity(chunk.len() + 1);
+            b.push(0xff);
+            b.extend_from_slice(chunk);
+        }
+        table[4 + 8 * i..8 + 8 * i].copy_from_slice(&off.to_le_bytes());
+        table[8 + 8 * i..12 + 8 * i].copy_from_slice(&(b.len() as u32).to_le_bytes());
+        off += b.len() as u32;
+        blocks.extend_from_slice(&b);
+    }
+    let mut res = table;
+    res.extend_from_slice(&blocks);
+    let data_len = 4 + res.len();
+    let mut fork = vec![0u8; 0x100];
+    fork.reserve(data_len + FORK_MAP.len());
+    fork[0..4].copy_from_slice(&0x100u32.to_be_bytes());
+    fork[4..8].copy_from_slice(&((0x100 + data_len) as u32).to_be_bytes());
+    fork[8..12].copy_from_slice(&(data_len as u32).to_be_bytes());
+    fork[12..16].copy_from_slice(&(FORK_MAP.len() as u32).to_be_bytes());
+    fork.extend_from_slice(&(res.len() as u32).to_be_bytes());
+    fork.extend_from_slice(&res);
+    fork.extend_from_slice(&FORK_MAP);
+    let mut header = vec![0u8; 16];
+    header[..4].copy_from_slice(b"fpmc");
+    header[4..8].copy_from_slice(&TYPE_ZLIB_FORK.to_le_bytes());
+    header[8..16].copy_from_slice(&(data.len() as u64).to_le_bytes());
+    Ok((header, fork))
+}
 
 fn disk_use(info: &Metadata) -> i64 {
     use std::os::unix::fs::MetadataExt;
     info.blocks() as i64 * 512
 }
 
+#[cfg(target_os = "macos")]
 mod darwin {
     use std::ffi::CString;
     use std::fs::Metadata;
-    use std::io::Write;
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     use std::path::Path;
 
-    use flate2::Compression;
-    use flate2::write::ZlibEncoder;
+    use super::encode;
 
-    /// decmpfs compresses 64 KB at a time.
-    const BLOCK: usize = 64 << 10;
-    /// zlib blocks in the resource fork.
-    const TYPE_ZLIB_FORK: u32 = 4;
     const UF_COMPRESSED: u32 = libc::UF_COMPRESSED;
 
     /// Whether a file is stored compressed already.
     pub fn compressed(info: &Metadata) -> bool {
         use std::os::macos::fs::MetadataExt;
         info.st_flags() & UF_COMPRESSED != 0
-    }
-
-    /// The resource map every decmpfs resource fork ends with: one resource
-    /// of type 'cmpf', id 1, no name.
-    const FORK_MAP: [u8; 50] = [
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0x1c, 0, 0x32, 0, 0, b'c', b'm', //
-        b'p', b'f', 0, 0, 0, 0x0a, 0, 1, 0xff, 0xff, 0, 0, 0, 0, 0, 0, //
-        0, 0,
-    ];
-
-    /// Builds the decmpfs header and resource fork for data.
-    pub fn encode(data: &[u8]) -> std::io::Result<(Vec<u8>, Vec<u8>)> {
-        let n = data.len().div_ceil(BLOCK);
-        let mut blocks = Vec::new();
-        let mut table = vec![0u8; 4 + 8 * n];
-        table[..4].copy_from_slice(&(n as u32).to_le_bytes());
-        let mut off = table.len() as u32;
-        for i in 0..n {
-            let chunk = &data[i * BLOCK..((i + 1) * BLOCK).min(data.len())];
-            let mut z = ZlibEncoder::new(Vec::new(), Compression::best());
-            z.write_all(chunk)?;
-            let mut b = z.finish()?;
-            if b.len() >= chunk.len() {
-                // Doesn't shrink: stored as it is, marked by a leading 0xff.
-                b = Vec::with_capacity(chunk.len() + 1);
-                b.push(0xff);
-                b.extend_from_slice(chunk);
-            }
-            table[4 + 8 * i..8 + 8 * i].copy_from_slice(&off.to_le_bytes());
-            table[8 + 8 * i..12 + 8 * i].copy_from_slice(&(b.len() as u32).to_le_bytes());
-            off += b.len() as u32;
-            blocks.extend_from_slice(&b);
-        }
-        let mut res = table;
-        res.extend_from_slice(&blocks);
-        let data_len = 4 + res.len();
-        let mut fork = vec![0u8; 0x100];
-        fork.reserve(data_len + FORK_MAP.len());
-        fork[0..4].copy_from_slice(&0x100u32.to_be_bytes());
-        fork[4..8].copy_from_slice(&((0x100 + data_len) as u32).to_be_bytes());
-        fork[8..12].copy_from_slice(&(data_len as u32).to_be_bytes());
-        fork[12..16].copy_from_slice(&(FORK_MAP.len() as u32).to_be_bytes());
-        fork.extend_from_slice(&(res.len() as u32).to_be_bytes());
-        fork.extend_from_slice(&res);
-        fork.extend_from_slice(&FORK_MAP);
-        let mut header = vec![0u8; 16];
-        header[..4].copy_from_slice(b"fpmc");
-        header[4..8].copy_from_slice(&TYPE_ZLIB_FORK.to_le_bytes());
-        header[8..16].copy_from_slice(&(data.len() as u64).to_le_bytes());
-        Ok((header, fork))
     }
 
     fn cpath(p: &Path) -> Result<CString, String> {
@@ -270,14 +290,15 @@ mod darwin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
+    #[cfg(target_os = "macos")]
     fn set_mtime(p: &Path, t: SystemTime) {
         let f = std::fs::File::options().write(true).open(p).unwrap();
         f.set_times(std::fs::FileTimes::new().set_accessed(t).set_modified(t))
             .unwrap();
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn compresses_idle_transcripts() {
         let dir = tempfile::tempdir().unwrap();
@@ -337,6 +358,7 @@ mod tests {
         assert!(left.is_empty(), "left a temp file");
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn incompressible_is_left_alone() {
         let dir = tempfile::tempdir().unwrap();

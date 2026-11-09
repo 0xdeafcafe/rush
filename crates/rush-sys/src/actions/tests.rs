@@ -19,10 +19,11 @@ fn end_tree_ends_a_pipeline_that_ignores_term() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
+    // Its stderr stays open till the end: a shell that says a part was
+    // terminated (dash does) must not die writing it to a closed pipe.
+    let mut stderr = BufReader::new(c.stderr.take().unwrap());
     let mut line = String::new();
-    BufReader::new(c.stderr.take().unwrap())
-        .read_line(&mut line)
-        .unwrap();
+    stderr.read_line(&mut line).unwrap();
     assert_eq!(line, "ready\n");
     let root_pid = c.id() as Pid;
     std::thread::spawn(move || c.wait());

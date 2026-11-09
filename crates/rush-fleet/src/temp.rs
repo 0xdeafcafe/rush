@@ -4,6 +4,7 @@
 //! diskusage_background.go (paced walks, heavy folders reused).
 
 use std::collections::HashMap;
+#[cfg(target_os = "macos")]
 use std::ffi::CString;
 use std::path::Path;
 use std::sync::Mutex;
@@ -449,14 +450,19 @@ fn stat_usage(dir: &str, pace: &mut Option<Pacer>) -> i64 {
 /// Folders that are huge, rarely change, and cost thousands of calls a
 /// walk: a background walk reuses one's last total while its own modified
 /// time holds and the total is under an hour old.
+#[cfg(target_os = "macos")]
 const HEAVY: &[&str] = &["node_modules", ".git", "target", ".venv", "venv", "Pods"];
+#[cfg(target_os = "macos")]
 const HEAVY_TTL: Duration = Duration::from_secs(3600);
 
 /// A heavy folder's modified time, when its total was counted, and it.
+#[cfg(target_os = "macos")]
 type Heavy = HashMap<String, (i128, Instant, i64)>;
 
+#[cfg(target_os = "macos")]
 static HEAVY_CACHE: Mutex<Option<Heavy>> = Mutex::new(None);
 
+#[cfg(target_os = "macos")]
 fn mtime_nanos(dir: &str) -> Option<i128> {
     use std::os::unix::fs::MetadataExt;
     let m = std::fs::symlink_metadata(dir).ok()?;
@@ -465,6 +471,7 @@ fn mtime_nanos(dir: &str) -> Option<i128> {
 
 /// Whether dir is a heavy folder whose last total still holds; the stamp
 /// is its modified time, to store the new total under.
+#[cfg(target_os = "macos")]
 fn heavy_hit(dir: &str, pace: &Option<Pacer>) -> (i128, Option<i64>) {
     let name = dir.rsplit('/').next().unwrap_or(dir);
     if pace.is_none() || !HEAVY.contains(&name) {
@@ -483,6 +490,7 @@ fn heavy_hit(dir: &str, pace: &Option<Pacer>) -> (i128, Option<i64>) {
     (stamp, None)
 }
 
+#[cfg(target_os = "macos")]
 fn heavy_store(dir: &str, stamp: i128, total: i64) {
     if stamp == 0 {
         return;
@@ -496,9 +504,10 @@ fn heavy_store(dir: &str, stamp: i128, total: i64) {
 }
 
 /// What's inside a folder, read with getattrlistbulk where the file
-/// system has it: each call hands back a folder's worth of entries' names,
-/// types and allocated sizes.
+/// system has it (macOS's): each call hands back a folder's worth of
+/// entries' names, types and allocated sizes. Elsewhere, a stat of each.
 fn dir_usage(dir: &str, pace: &mut Option<Pacer>) -> i64 {
+    #[cfg(target_os = "macos")]
     {
         let mut buf = vec![0u8; 128 << 10];
         if let Some(n) = bulk::usage(libc::AT_FDCWD, dir, dir, &mut buf, pace) {
@@ -508,6 +517,7 @@ fn dir_usage(dir: &str, pace: &mut Option<Pacer>) -> i64 {
     stat_usage(dir, pace) // a file system without it
 }
 
+#[cfg(target_os = "macos")]
 mod bulk {
     use super::*;
 

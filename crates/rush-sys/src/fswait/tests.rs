@@ -72,7 +72,7 @@ fn grown_replaced_and_missing() {
     }
     // Replaced by one the same size: told, so whoever reads starts over.
     // (Replaced before the watch, it would watch the new one: wait for it.)
-    darwin::watched::wait(&p);
+    watched::wait(&p);
     let tmp = d.path().join("t.tmp");
     std::fs::write(&tmp, "cd").unwrap();
     std::fs::rename(&tmp, &p).unwrap();
@@ -345,10 +345,11 @@ fn follow_misses_no_write() {
     stop.close();
 }
 
-// A watcher of many: a folder of many watched paths is watched through
+// A watcher of many (macOS): a folder of many watched paths is watched through
 // one FSEvents stream, with no descriptor each, and tells what kqueue
 // would: a folder's entries added, removed or renamed, a file written,
 // but not a file written deep inside a watched folder.
+#[cfg(target_os = "macos")]
 #[test]
 fn watcher_many() {
     let d = tempfile::tempdir().unwrap();

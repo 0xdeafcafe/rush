@@ -67,7 +67,8 @@ const DROP: &[&str] = &[
 ];
 
 #[used]
-#[unsafe(link_section = "__DATA,__mod_init_func")]
+#[cfg_attr(target_os = "macos", unsafe(link_section = "__DATA,__mod_init_func"))]
+#[cfg_attr(target_os = "linux", unsafe(link_section = ".init_array"))]
 static INIT: extern "C" fn() = init;
 
 /// Runs before main, so before libtest starts a thread: setting the

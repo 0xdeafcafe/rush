@@ -164,8 +164,27 @@ fn stat_of(m: &std::fs::Metadata) -> Option<Stat> {
     Some((m.len(), m.modified().ok()?, m.dev(), m.ino()))
 }
 
+/// Whether the machine is short of memory (on Linux, less than a tenth of
+/// it available, as /proc/meminfo says): nothing is read ahead then.
+#[cfg(target_os = "linux")]
+fn memory_short() -> bool {
+    let Ok(s) = std::fs::read_to_string("/proc/meminfo") else {
+        return false;
+    };
+    let kb = |key: &str| {
+        s.lines()
+            .find_map(|l| l.strip_prefix(key))
+            .and_then(|v| v.split_ascii_whitespace().next()?.parse::<u64>().ok())
+    };
+    match (kb("MemAvailable:"), kb("MemTotal:")) {
+        (Some(avail), Some(total)) if total > 0 => avail * 10 < total,
+        _ => false,
+    }
+}
+
 /// Whether the machine is short of memory (the kernel's pressure level
 /// past normal): nothing is read ahead then.
+#[cfg(target_os = "macos")]
 fn memory_short() -> bool {
     {
         let mut v: u32 = 0;
