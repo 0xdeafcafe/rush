@@ -393,7 +393,18 @@ pub fn dock_refs(m: &mut Model, key: &str) -> Vec<String> {
         }
     }
     refs.extend(sh.done.iter().map(|d| format!("run:{}", d.sa.id)));
-    refs.extend(sh.loose.iter().map(|id| format!("job:{id}")));
+    // Two monitors or more are the one row, as the dock draws them.
+    let loose: Vec<&Job> = sh.loose.iter().filter_map(|id| v.sess.job(id)).collect();
+    let mons = rush_ui_list_extras::jobs::monitors(&v.sess, &loose);
+    refs.extend(
+        loose
+            .iter()
+            .filter(|j| !mons.iter().any(|m| m.id == j.id))
+            .map(|j| format!("job:{}", j.id)),
+    );
+    if !mons.is_empty() {
+        refs.push(rush_ui_list_extras::jobs::MONITORS_REF.to_string());
+    }
     refs
 }
 
@@ -1466,6 +1477,11 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
                 pick_from(m, &key, &id, &picked);
                 return Out::Draw;
             }
+            // The dock's monitors: the background view, with them opened.
+            if picked == rush_ui_list_extras::jobs::MONITORS_REF && name == "conversation" {
+                super::running::open_monitors(m, &key);
+                return Out::Draw;
+            }
             if picked.starts_with("wf:") || is_workflow_ref(m, &picked) && name != "subagents" {
                 open_workflow(m, &key, &picked);
                 return Out::Draw;
@@ -1523,6 +1539,10 @@ fn run_of_step(m: &mut Model, key: &str, picked: &str) -> Option<String> {
 pub fn click_ref(m: &mut Model, key: &str, r: &str) -> bool {
     if is_workflow_ref(m, r) {
         open_workflow(m, key, r);
+        return true;
+    }
+    if r == rush_ui_list_extras::jobs::MONITORS_REF {
+        super::running::open_monitors(m, key);
         return true;
     }
     if r.starts_with("run:") || r.starts_with("job:") {

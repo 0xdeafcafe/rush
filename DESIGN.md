@@ -3126,6 +3126,17 @@ how long it's waited. While a card shows, the conversation is drawn again
 each second. The agent is told none of it: the watch says once, briefly,
 how it ended.
 
+In the dock and the background view the card is a few rows tall
+(`JobCard::rows`, 2026-11-09): under its row, each check that failed a
+row of its own (three, then "✗ N more failed"), and those still running
+on one row; what it ends on and when GitHub was last asked come under
+it once it's picked. Two running monitors or more go under one Monitors
+row (`fold:monitors`, `jobs::monitors`): in the background view folded
+till opened, then a short row each (a watch's card words, else what it
+watches and its latest line), one opened its whole block; in the dock
+the one row, saying how many watch and how many watches have a failure,
+which opens them in the background view.
+
 **✎ edit** (e), on a box's top edge before it's run and after, turns the
 box into an editor of its commands (`Options::shell_edit`, drawn by
 `edit_box`): the message box's editing keys and undo, ⇧enter (alt+enter,

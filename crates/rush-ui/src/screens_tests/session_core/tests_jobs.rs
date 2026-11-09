@@ -213,6 +213,67 @@ fn finished_tasks_fold() {
     assert!(!dump(&mut m, 120).contains("cargo build"));
 }
 
+/// Two running monitors or more go under one Monitors row: in the
+/// background view folded, a short row each once opened, one opened its
+/// whole block; in the dock the one row, which opens them there.
+#[test]
+fn monitors_go_under_one_row() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = background(&d);
+    let s = &mut m.session.as_mut().unwrap().sess;
+    for (id, label) in [("m1", "tail server.log"), ("m2", "watch the deploy")] {
+        s.apply(
+            &Event::TaskStarted(TaskStarted {
+                id: id.into(),
+                call_id: format!("t{id}"),
+                kind: TaskKind::Monitor,
+                label: label.into(),
+                background: true,
+                ..TaskStarted::default()
+            }),
+            NOW - 30_000,
+        );
+    }
+    let got = dump(&mut m, 120);
+    assert!(
+        got.contains("fold:monitors|  ▸ ◎ Monitors  2 watching · click to show"),
+        "{got}"
+    );
+    assert!(!got.contains("tail server.log"), "{got}");
+    assert!(got.contains("npm run dev"), "a shell folded: {got}");
+    views::show_view(&mut m, KEY, "background");
+    pick(&mut m, "fold:monitors");
+    super::tests_subview::press(&mut m, "space");
+    let got = dump(&mut m, 120);
+    assert!(got.contains("|▍ ▾ ◎ Monitors  2 watching"), "{got}");
+    let short: Vec<&str> = got
+        .lines()
+        .filter(|l| l.starts_with("job:m1|") || l.starts_with("job:m2|"))
+        .collect();
+    assert_eq!(short.len(), 2, "a row each: {got}");
+    assert!(short[0].contains("◎ tail server.log"), "{got}");
+    // One opened: its whole block, its own fold open.
+    pick(&mut m, "job:m1");
+    super::tests_subview::press(&mut m, "space");
+    let got = dump(&mut m, 120);
+    assert!(
+        got.lines()
+            .any(|l| l.starts_with("job:m1|") && l.contains("▾ ◎ monitor")),
+        "{got}"
+    );
+
+    // The dock's one row for them, which opens them in the background view.
+    views::show_view(&mut m, KEY, "conversation");
+    conn(&mut m, KEY).vs.open.clear();
+    super::running::sync(&mut m, KEY);
+    let refs = subview::dock_refs(&mut m, KEY);
+    assert!(refs.contains(&"fold:monitors".to_string()), "{refs:?}");
+    assert!(!refs.iter().any(|r| r == "job:m1"), "{refs:?}");
+    assert!(subview::click_ref(&mut m, KEY, "fold:monitors"));
+    assert_eq!(views::view_name(&m, KEY), "background");
+    assert!(dump(&mut m, 120).contains("tail server.log"));
+}
+
 /// A task a subagent started says whose it is, a dot between the agent's
 /// type and the task's words: they never run together.
 #[test]
