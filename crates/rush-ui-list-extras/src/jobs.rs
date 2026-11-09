@@ -1345,7 +1345,7 @@ fn job_block(
     let mut rows = vec![spread(left, right, w)];
     // A card's rows always; its detail once it's picked or opened.
     let more = b.sel == r || opened;
-    for c in &card {
+    if let Some(c) = &card {
         for d in c.rows.iter().chain(c.detail.iter().filter(|_| more)) {
             let mut l = line([plain("      ")]);
             join(&mut l, segs(d));
