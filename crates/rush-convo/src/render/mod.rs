@@ -23,6 +23,7 @@ mod shell;
 mod spawn;
 mod stepout;
 pub(crate) mod style;
+mod tools;
 pub(crate) mod txt;
 mod udiff;
 mod units;

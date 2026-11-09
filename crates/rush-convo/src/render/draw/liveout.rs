@@ -51,6 +51,14 @@ impl<'a> Drawer<'a> {
         if lines.is_empty() {
             return;
         }
+        // How far it has got, when it's a tool that says (cargo,
+        // xcodebuild, ffmpeg): above its last lines, a bar when it knows
+        // how much there is.
+        let prog = {
+            let plain: Vec<String> = lines.iter().map(|l| plain_text(l)).collect();
+            let ls: Vec<&str> = plain.iter().map(String::as_str).collect();
+            crate::render::tools::progress(&self.info(id).call.input.command, &ls)
+        };
         let r = live_ref(&self.step_ref(self.s.step(id)));
         let open = self.o.open.get(&r).copied().unwrap_or(false);
         let most = if open { LIVE_OPEN_MOST } else { LIVE_SHOWN };
@@ -80,6 +88,20 @@ impl<'a> Drawer<'a> {
             self.add(&r, Color::Default, l, Txt::new());
         }
         let room = self.cw.saturating_sub(indent + 4).max(8);
+        if let Some(pr) = prog {
+            let mut row = pad.clone().and(faint("│ "));
+            if let Some((n, m)) = pr.done.filter(|d| d.1 > 0) {
+                const BAR: usize = 12;
+                let full = (n.min(m) * BAR) / m;
+                row = row
+                    .and(paint(C_BLUE, &"▰".repeat(full)))
+                    .and(faint(&"▱".repeat(BAR - full)))
+                    .and_raw(" ");
+            }
+            let left = room.saturating_sub(row.width().saturating_sub(pad.width() + 2));
+            row = row.and(paint(C_SUB, &truncate_cells(&pr.text, left)));
+            self.add("", Color::Default, row, Txt::new());
+        }
         for l in &lines[lines.len() - shown..] {
             let text = expand_tabs(&plain_text(l));
             let row = pad

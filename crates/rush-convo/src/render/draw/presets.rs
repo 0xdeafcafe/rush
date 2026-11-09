@@ -172,6 +172,11 @@ fn check_in(ws: &[&str]) -> Option<&'static str> {
             "prettier" | "gofmt" | "rustfmt" | "black" | "isort" | "dprint" | "goimports"
             | "swiftformat" | "clang-format" | "oxfmt" => Some("fmt"),
             "tsc" | "vue-tsc" | "mypy" | "pyright" => Some("typecheck"),
+            "xcodebuild" => match crate::render::tools::xcode_action(rest) {
+                "test" | "test-without-building" => Some("tests"),
+                "build" | "build-for-testing" | "archive" | "analyze" => Some("build"),
+                _ => None,
+            },
             _ => None,
         };
         if found.is_some() {

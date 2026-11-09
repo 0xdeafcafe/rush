@@ -2749,6 +2749,11 @@ impl<'a> Drawer<'a> {
         let st = self.s.step(id);
         let path = if st.kind == Kind::Read {
             self.p.abs(&self.info(id).call.input.path)
+        } else if st.kind == Kind::Shell && st.status == Status::Ok {
+            // The screenshot it took (xcrun simctl io … screenshot).
+            super::tools::shot_path(&self.info(id).call.input.command)
+                .map(|p| self.p.abs(&p))
+                .unwrap_or_default()
         } else {
             String::new()
         };
