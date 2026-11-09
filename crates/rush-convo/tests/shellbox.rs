@@ -131,7 +131,7 @@ fn the_foot_as_its_buttons_are_used() {
     each("narrow", &|_| {}, 40);
     snap("shellbox_foot", &got);
     assert!(
-        got.contains("→ send to agent  ✎ draft  ≈ summary  ↻ again  ✕"),
+        got.contains("→ send  + with next  ✎ draft  ≈ summary  ↻  ✕"),
         "{got}"
     );
     assert!(got.contains("✓ sent"), "{got}");
