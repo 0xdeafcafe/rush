@@ -3384,6 +3384,26 @@ results (show, view, spawn_agent, agent_result, remind), the gate's
 waiting line in a command's output, and the hooks' refusals (runaway
 guard, search guard, watch, context guard) and squeezed output.
 
+## Emeritus: handing over near the end of a context (Rust-only)
+
+docs/emeritus.md has it whole. Off until `emeritus.on`. The host owns the
+trigger: past `emeritus.tokens` (300k) or `emeritus.percent` (70%) of the
+model's window, whichever is smaller, one rule for main agents and
+subagents, it nudges the agent once at a turn's end while its prompt cache
+is warm (a rush-hosted subagent: when new work comes to it, the work
+waiting behind the nudge). The agent writes a baton and calls `retire`;
+at its turn's end the host freezes it, appends the git facts, starts a
+successor on A's folder, model, mode and account, and commits once the
+successor's first request is back: the session's config says it's
+retired (terminal at spawn, ensure, the host's start and every op), what
+it started and what was owed to it move to the successor, and the
+handover goes to the Efficiency event log. A successor that can't start
+is retired instead and the session carries on, told why. Each step is
+journalled in `handover.json` and settled at the next start if a host is
+cut short. Nothing you type is passed on: it's refused with the
+successor's id. Claude Code's and Codex's own in-process subagents are out
+of reach: rush doesn't own their lifecycle.
+
 ## Panics
 
 Release builds unwind (`panic = "unwind"`), so one thread's panic ends
