@@ -54,7 +54,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.98.1"
+      # GitHub's download of sccache sometimes answers 504; then build
+      # uncached rather than fail the run before anything is built.
       - uses: mozilla-actions/sccache-action@v0.0.9
+        id: sccache
+        continue-on-error: true
+      - name: Without sccache
+        if: steps.sccache.outcome != 'success'
+        run: |
+          echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=false" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
         with:
           key: footprint

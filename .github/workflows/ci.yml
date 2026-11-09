@@ -46,7 +46,16 @@ jobs:
         with:
           toolchain: "1.98.1"
           components: rustfmt, clippy
+      # GitHub's download of sccache sometimes answers 504; then build
+      # uncached rather than fail the run before anything is built.
       - uses: mozilla-actions/sccache-action@v0.0.9
+        id: sccache
+        continue-on-error: true
+      - name: Without sccache
+        if: steps.sccache.outcome != 'success'
+        run: |
+          echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=false" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
         with:
           key: check
@@ -69,7 +78,8 @@ jobs:
             --skip compacts_only_the_conversation_expected
       - name: Cache use
         if: always()
-        run: sccache --show-stats
+        run: |
+          if command -v sccache >/dev/null; then sccache --show-stats; else echo "no sccache, so built uncached"; fi
 
   build:
     # Main's build for Apple silicon, for install-ci.sh.
@@ -84,7 +94,16 @@ jobs:
         with:
           toolchain: "1.98.1"
           targets: aarch64-apple-darwin
+      # GitHub's download of sccache sometimes answers 504; then build
+      # uncached rather than fail the run before anything is built.
       - uses: mozilla-actions/sccache-action@v0.0.9
+        id: sccache
+        continue-on-error: true
+      - name: Without sccache
+        if: steps.sccache.outcome != 'success'
+        run: |
+          echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=false" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
         with:
           # The release workflow's cache for the same target.
@@ -100,7 +119,8 @@ jobs:
           dist/rush --version
       - name: Cache use
         if: always()
-        run: sccache --show-stats
+        run: |
+          if command -v sccache >/dev/null; then sccache --show-stats; else echo "no sccache, so built uncached"; fi
       - uses: actions/upload-artifact@v4
         with:
           name: rush-main
