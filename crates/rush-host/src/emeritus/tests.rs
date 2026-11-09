@@ -349,8 +349,11 @@ fn retired_is_terminal_at_every_way_in() {
         why.contains("suc1") && why.contains("nothing sent here is passed on"),
         "{why}"
     );
+    // A config with no session id is a new session with an id of its own,
+    // so a fresh one for this session names a conversation too.
     let fresh = Config {
         id: "ret1".into(),
+        session_id: "another-conversation".into(),
         kind: "fake".into(),
         ..Config::default()
     };
