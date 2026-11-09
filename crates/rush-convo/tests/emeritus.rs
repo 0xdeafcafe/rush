@@ -155,3 +155,30 @@ fn a_successor_starts() {
     let opened = rows(&s, &o);
     snapshot("successor", &format!("{folded}---- opened ----\n{opened}"));
 }
+
+// The card a successor's conversation opens on names the session it took
+// over from, alt+o opening it, and says so once the cap on handovers in a
+// row is reached.
+#[test]
+fn the_card_names_the_predecessor() {
+    let mut s = Session::new();
+    s.cwd = "/work/rush".into();
+    s.info.started_at = at(0);
+    s.info.kind = "claude".into();
+    s.feed(sent("carry on"), at(0));
+    s.feed(say("On it."), at(5));
+    s.feed(done(0.1), at(6));
+    let mut o = opts(10);
+    o.hosted = true;
+    o.predecessor = "fix the flaky test".into();
+    o.handovers = 3;
+    o.capped = true;
+    let got = rows(&s, &o);
+    assert!(
+        got.contains(
+            "↻ took over from \"fix the flaky test\" as it retired, on its baton · alt+o opens it"
+        ),
+        "{got}"
+    );
+    snapshot("opening", &got);
+}

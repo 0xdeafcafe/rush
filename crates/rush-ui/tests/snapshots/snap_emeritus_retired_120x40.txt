@@ -1,0 +1,40 @@
+     !
+    ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working                                                               default
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings                                  0% cpu · – · 37.0G free · 80%
+    RUSH      Agents   Wall   [ ]
+   ▀▀▀▀▀▀
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  AGENTS▾                   TIME │
+┃ Needs you  1 · $0.19           │    set up caching for CI   @set-up-caching-for-ci  ·  retired            context 0%
+┃ └─ ? fix the flaky t… ✻   2m ● │    checkout · main                               retired · its successor carries on
+┃      checkout · main           │    Conversation ▾   Overview   Changes    [ ] views
+┃        ╰ asks: Round half up…  │───━━━━━━━━━━━━━━━━───────────────────────────────────────────────────────────────────
+                                 │
+┃ Working  2 · $5.72             │  ▍ You  12:00
+┃ ├─ ✳ add Apple Pa… ✻ ↳1    21m │  ▍ fix the test
+┃ │    checkout · feat/apple-pay │
+┃ └─ ✳ move the des… ✻ ↻3    20m │    Claude  12:00 · @set-up-caching-for-ci
+┃      checkout · main           │      ✓ cargo test                                                               7s
+                                 │          │ ok
+┃ Idle  1 · $1.10 · 120M idle ram│
+▌ └─ · set… ✻ Claude Code    10m │    Fixed it.
+▌      checkout · main           │                                                                       1 step   13s
+                                 │
+┃ Today  1 · $1.71               │
+┃ └─ · why does the le… ✻     3h │
+┃      checkout · main           │
+                                 │
+ ▸ Earlier  1 · $0.42            │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+                                 │
+╭─ new agent in checkout ───────╮│  ╭─ retired · handed over to move the design tokens to CSS v… · enter opens it ────╮
+│ ❯ esc or ← to come back here  ││  │ ❯  read-only: what's typed here goes nowhere                                    │
+╰───────────────────────────────╯│  ╰─────────────────────────────────────────────────────────────────────────────────╯
+  retired: it takes no messages …│    ↑ steps  ·  f1 more  ·  ⌥s conversation view  ·  esc back

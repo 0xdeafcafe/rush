@@ -320,6 +320,8 @@ struct WireInfo {
     away: Option<WireAway>,
     workspace: Option<WireWorkspace>,
     decisions: Option<WireQuestion>,
+    emeritus: String,
+    successor: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -450,6 +452,8 @@ pub(crate) fn read_info(dir: &Path) -> Option<HostInfo> {
                 .map(|a| a.header)
                 .collect()
         }),
+        emeritus: w.emeritus,
+        successor: w.successor,
     })
 }
 

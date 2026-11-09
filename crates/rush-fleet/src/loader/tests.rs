@@ -2345,3 +2345,74 @@ fn a_hosted_session_blocked_on_an_ask_needs_you() {
         }
     }
 }
+
+// Emeritus: a session that retired a while ago folds into the row at the
+// end of its chain of successors, its cost counted there, and that row
+// names the session it took over from; one that just retired, or is open
+// as a session of its own, stays a row saying it handed over; one whose
+// successor isn't listed stays a row.
+#[test]
+fn retired_sessions_fold_into_their_successor() {
+    let t = now();
+    let old = t - 20 * MINUTE;
+    let row = |l: &mut Loader, id: &str, name: &str, at: Ms, f: &dyn Fn(&mut HostInfo)| {
+        let mut i = info(id, "stopped", "/work/app", at);
+        i.name = name.into();
+        f(&mut i);
+        let mut a = l.hosted(&test_profile(), &i, None, t);
+        a.spend.cost = 1.0;
+        a
+    };
+    let retired = |to: &'static str| {
+        move |i: &mut HostInfo| {
+            i.emeritus = "retired".into();
+            i.successor = to.into();
+        }
+    };
+    let took_over = |from: &'static str, n: &'static str| {
+        move |i: &mut HostInfo| {
+            i.state = "idle".into();
+            i.meta.insert("predecessor".into(), from.into());
+            i.meta.insert("lineage".into(), n.into());
+        }
+    };
+    let mut l = loader();
+    let a = row(&mut l, "aaaa", "fix it", old, &retired("bbbb"));
+    let both = |i: &mut HostInfo| {
+        took_over("aaaa", "1")(i);
+        retired("cccc")(i);
+    };
+    let b = row(&mut l, "bbbb", "fix it (2)", old, &both);
+    let c = row(&mut l, "cccc", "fix it (3)", t, &took_over("bbbb", "2"));
+    let lone = row(&mut l, "dddd", "gone on", old, &retired("zzzz"));
+    let fresh = row(&mut l, "eeee", "just now", t - MINUTE, &retired("cccc"));
+    assert_eq!(a.job.detail, "retired · handed over to its successor");
+    assert_eq!(a.successor(), "bbbb");
+    let got = l.fold_retired(vec![a, b, c, lone, fresh], t);
+    let ids: Vec<&str> = got.iter().map(|a| a.job.id.as_str()).collect();
+    assert_eq!(ids, ["cccc", "dddd", "eeee"]);
+    let c = &got[0];
+    let lin = c.lineage.as_deref().unwrap();
+    assert_eq!(
+        (
+            lin.predecessor.as_str(),
+            lin.name.as_str(),
+            lin.handovers,
+            lin.folded
+        ),
+        ("bbbb", "fix it (2)", 2, 2)
+    );
+    assert_eq!(
+        c.spend.cost, 3.0,
+        "the chain's cost on the row carrying it on"
+    );
+
+    // Open as a session of its own, a retired one stays a row.
+    let mut l = loader();
+    l.handle().unfold("aaaa");
+    l.take_in();
+    let a = row(&mut l, "aaaa", "fix it", old, &retired("bbbb"));
+    let b = row(&mut l, "bbbb", "fix it (2)", t, &took_over("aaaa", "1"));
+    let got = l.fold_retired(vec![a, b], t);
+    assert_eq!(got.len(), 2);
+}

@@ -43,6 +43,27 @@ impl Drawer<'_> {
         head.push(dim(" · "));
         head.push(self.started_by());
         self.add("", Color::Default, pad().and(head), Txt::new());
+        // Emeritus: the session it took over from, on its baton.
+        if !self.o.predecessor.is_empty() {
+            let l = pad()
+                .and_raw("  ")
+                .and(paint(C_ORANGE, "↻ "))
+                .and(dim("took over from "))
+                .and(paint(C_TEXT, &format!("\"{}\"", self.o.predecessor)))
+                .and(dim(" as it retired, on its baton · "))
+                .and(faint("alt+o opens it"));
+            self.add("", Color::Default, l, Txt::new());
+            if self.o.capped {
+                let l = pad().and_raw("    ").and(paint(
+                    C_YELLOW,
+                    &format!(
+                        "no more handovers: {} in a row is the most Settings › Usage › Emeritus allows",
+                        self.o.handovers
+                    ),
+                ));
+                self.add("", Color::Default, l, Txt::new());
+            }
+        }
         let model = if i.model.is_empty() {
             &s.model
         } else {
@@ -145,6 +166,9 @@ impl Drawer<'_> {
                 .and(paint(C_TEXT, &i.started_by))
                 .and(dim(" plugin"));
         }
+        if !self.o.predecessor.is_empty() {
+            return dim("by rush, as a handover"); // Emeritus
+        }
         if !self.t.from.is_empty() {
             return dim("by ").and(paint(C_TEXT, &self.t.from));
         }
@@ -218,7 +242,7 @@ pub(crate) fn opening_print(s: &Session, o: &Options) -> String {
     let i = &s.info;
     let today = (o.now + o.offset(o.now) * 1000).div_euclid(86_400_000);
     format!(
-        "{}|{}{}|{}|{}|{}|{}{}|{}{}{}|{}{}|{}{}|{}|{}",
+        "{}|{}{}|{}|{}|{}|{}{}|{}{}{}|{}{}{}{}{}|{}{}|{}|{}",
         i.started_at / 1000,
         i.model,
         s.model,
@@ -232,6 +256,9 @@ pub(crate) fn opening_print(s: &Session, o: &Options) -> String {
         i.started_from,
         o.parent,
         o.started_from,
+        o.predecessor,
+        o.handovers,
+        o.capped,
         o.hosted,
         o.brief.len(),
         s.commands.len(),

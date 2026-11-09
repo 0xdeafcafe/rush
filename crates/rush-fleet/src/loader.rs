@@ -1184,6 +1184,8 @@ impl Loader {
         let spawned = self.hosted_spawns(&hosted, &snap.agents, spawned);
         let agents = std::mem::take(&mut snap.agents);
         snap.agents = self.fold_spawns(tab.as_deref_table(), agents, spawned, &mut parents);
+        let agents = std::mem::take(&mut snap.agents);
+        snap.agents = self.fold_retired(agents, now);
         let hidden = &self.store.overlay.hidden;
         if !hidden.is_empty() {
             snap.agents.retain(|a| !hidden.contains_key(&a.key));
@@ -1810,6 +1812,7 @@ impl Loader {
                 (now - info.stalled) / MINUTE
             );
         }
+        crate::emeritus::retired_detail(info, &mut j);
         j.state = State::from_word(st);
         let blocked = j.state == State::Blocked;
         let mut a = Agent {
@@ -1828,6 +1831,7 @@ impl Loader {
             peer: info.remote.clone(),
             decides: blocked && info.decisions.is_some(),
             at_work,
+            lineage: crate::emeritus::lineage_of(info),
             job: j,
             ..Agent::default()
         };

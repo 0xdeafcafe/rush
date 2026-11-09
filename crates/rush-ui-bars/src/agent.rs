@@ -574,6 +574,9 @@ fn conn_words(o: &Of) -> Line {
         return r.clone();
     }
     let a = o.a;
+    if a.rush && !a.successor().is_empty() {
+        return one(dim("retired · its successor carries on")); // Emeritus
+    }
     if a.rush {
         return one(dim("send to resume"));
     }
@@ -914,6 +917,8 @@ pub fn state_words(o: &Of, now: Ms) -> Line {
             spb("working", ORANGE)
         } else if a.pid != 0 {
             dim("idle")
+        } else if a.rush && !a.successor().is_empty() {
+            dim("retired") // Emeritus: handed over for good
         } else {
             dim("stopped")
         });

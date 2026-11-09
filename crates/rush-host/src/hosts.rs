@@ -252,6 +252,8 @@ pub fn host_info(i: &Info) -> HostInfo {
         },
         profile: i.profile.clone(),
         started_by: i.started_by.clone(),
+        emeritus: i.emeritus.clone(),
+        successor: i.successor.clone(),
         queue_stuck: ms(i.queue_stuck),
         meta: i.meta.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
         background: i

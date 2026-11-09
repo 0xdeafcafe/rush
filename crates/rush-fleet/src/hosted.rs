@@ -131,6 +131,10 @@ pub struct HostInfo {
     /// The headings of the decisions its last turn ended with, as a
     /// question card for you; None when it ended with none.
     pub decisions: Option<Vec<String>>,
+    /// Emeritus (Rust-only): "retired" once it has handed over for good,
+    /// and the session that took over from it.
+    pub emeritus: String,
+    pub successor: String,
 }
 
 impl HostInfo {
