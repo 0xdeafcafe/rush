@@ -1488,6 +1488,7 @@ dependencies = [
  "rush-claude",
  "rush-convo",
  "rush-core",
+ "rush-efficiency",
  "rush-events",
  "rush-fleet",
  "rush-gate",

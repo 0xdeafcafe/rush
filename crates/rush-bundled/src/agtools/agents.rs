@@ -133,6 +133,10 @@ pub trait Agents: Send + Sync {
     fn reminders(&self) -> Option<&dyn super::Reminders> {
         None
     }
+    /// Its retire tool, while it offers one (Emeritus, Rust-only).
+    fn retirer(&self) -> Option<&dyn super::Retirer> {
+        None
+    }
 }
 
 /// Whether a tool call named name is spawn_agent, by any harness's name

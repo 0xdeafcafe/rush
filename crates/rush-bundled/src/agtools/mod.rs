@@ -11,9 +11,11 @@
 
 mod agents;
 mod remind;
+mod retire;
 
 pub use agents::*;
 pub use remind::*;
+pub use retire::*;
 
 use std::io::{BufRead, Read, Write};
 use std::sync::{Arc, Mutex};
@@ -120,6 +122,7 @@ pub fn names() -> Vec<String> {
             .filter(|n| n != ANSWER_AGENT), // the caller's permissions judge it
     );
     out.extend(remind_tools().into_iter().map(|t| t.name));
+    out.push(retire_tool().name); // it only asks: rush hands over at the turn's end
     out
 }
 
@@ -216,6 +219,7 @@ fn answer(ag: Option<&dyn Agents>, msg: &[u8]) -> Vec<u8> {
             if let Some(ag) = ag {
                 list.extend(agent_list(ag));
                 list.extend(remind_list(ag));
+                list.extend(retire_list(ag));
                 if ag.viewer().is_some() && !headless {
                     list.push(view_tool());
                 }
@@ -229,6 +233,9 @@ fn answer(ag: Option<&dyn Agents>, msg: &[u8]) -> Vec<u8> {
                 return ok(res);
             }
             if let Some(res) = call_remind(ag, &p.name, p.arguments.as_deref()) {
+                return ok(res);
+            }
+            if let Some(res) = call_retire(ag, &p.name, p.arguments.as_deref()) {
                 return ok(res);
             }
             if headless {
@@ -434,7 +441,10 @@ mod tests {
         );
         let got = allowed();
         assert!(
-            got.len() == 8 && got[0] == SHOW && got[1] == format!("{PREFIX}view"),
+            got.len() == 9
+                && got[0] == SHOW
+                && got[1] == format!("{PREFIX}view")
+                && got[8] == format!("{PREFIX}{RETIRE_TOOL}"),
             "allowed: {got:?}"
         );
         // Written as Go writes it: keys in order.
@@ -756,5 +766,82 @@ mod tests {
             !out.contains(r#""isError":true"#) && cancel == ["ab12"],
             "reminders: {out} {cancel:?}"
         );
+    }
+
+    /// Retires, or refuses to, as offered.
+    #[derive(Default)]
+    struct FakeRetirer {
+        offered: bool,
+        batons: Mutex<Vec<String>>,
+    }
+
+    impl Retirer for FakeRetirer {
+        fn retire(&self, input: RetireInput) -> Result<String, String> {
+            if input.baton.is_empty() {
+                return Err("no baton".into());
+            }
+            self.batons.lock().unwrap().push(input.baton);
+            Ok("retiring".into())
+        }
+    }
+
+    impl Agents for FakeRetirer {
+        fn catalogue(&self) -> String {
+            String::new()
+        }
+        fn spawn(&self, _: SpawnInput) -> Result<String, String> {
+            Err("no".into())
+        }
+        fn start(&self, _: StartInput) -> Result<String, String> {
+            Err("no".into())
+        }
+        fn result(&self, _: ResultInput) -> Result<String, String> {
+            Err("no".into())
+        }
+        fn send(&self, _: SendInput) -> Result<String, String> {
+            Err("no".into())
+        }
+        fn retirer(&self) -> Option<&dyn Retirer> {
+            self.offered.then_some(self as &dyn Retirer)
+        }
+    }
+
+    // Emeritus: retire is listed only where it's offered (Emeritus on),
+    // never asks, and its call reaches the session; where it isn't
+    // offered, a call is no tool's.
+    #[test]
+    fn retire() {
+        let cases: &[(&str, bool, &str, bool, usize)] = &[
+            (
+                "offered",
+                true,
+                r###"{"baton":"## Destination\nx"}"###,
+                false,
+                1,
+            ),
+            ("offered, no baton", true, r#"{}"#, true, 0),
+            ("not offered", false, r#"{"baton":"b"}"#, true, 0),
+        ];
+        for (name, offered, args, is_err, kept) in cases {
+            let f = Arc::new(FakeRetirer {
+                offered: *offered,
+                ..Default::default()
+            });
+            let h = handler(Some(f.clone()));
+            let list =
+                String::from_utf8(h(br#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)).unwrap();
+            assert_eq!(
+                list.contains(r#""name":"retire""#),
+                *offered,
+                "{name}: {list}"
+            );
+            let msg = format!(
+                r#"{{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{{"name":"retire","arguments":{args}}}}}"#
+            );
+            let out = String::from_utf8(h(msg.as_bytes())).unwrap();
+            assert_eq!(out.contains(r#""isError":true"#), *is_err, "{name}: {out}");
+            assert_eq!(f.batons.lock().unwrap().len(), *kept, "{name}");
+        }
+        assert!(names().iter().any(|t| t == RETIRE_TOOL), "retire would ask");
     }
 }

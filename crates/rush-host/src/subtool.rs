@@ -567,83 +567,133 @@ fn wait_for(
     wait: Duration,
     answered: &str,
 ) -> (Result<String, String>, bool) {
-    let name = match read_config(id) {
+    let name_of = |id: &str| match read_config(id) {
         Ok(c) => format!("{} ({id})", agent_name(reg, &migrated(&c.kind).0)),
         Err(_) => id.to_string(),
     };
+    // An agent that handed over (Emeritus) is followed to its successor,
+    // which answers what it was asked; the caller is told.
+    let mut handed = String::new();
+    let mut cur = id.to_string();
     let w = rush_sys::fswait::Watcher::new();
     w.watch(&[dir(id)]);
     let deadline = Instant::now() + wait;
     loop {
-        let info = match read_info(id) {
-            Ok(i) => i,
-            Err(e) => return (Err(format!("no agent {id}: {e}")), false),
+        if let Some(next) = crate::emeritus::successor(&cur) {
+            handed += &format!(
+                "{} handed over to {} near the end of its context; it carries on the task.\n\n",
+                name_of(&cur),
+                name_of(&next)
+            );
+            cur = next;
+            w.watch(&[dir(&cur)]);
+            continue;
+        }
+        let (r, done) = wait_once(
+            reg,
+            &cur,
+            parent,
+            since,
+            deadline,
+            answered,
+            &name_of(&cur),
+            &w,
+        );
+        let Some(r) = r else { continue };
+        let r = match r {
+            Ok(s) => Ok(format!("{handed}{s}")),
+            Err(s) => Err(format!("{handed}{s}")),
         };
-        let (a, done) = finished(reg, id, &info, since);
-        if done && !a.err.is_empty() {
-            let _ = report(id, ""); // answered here, so not as a message too
-            return (
-                Err(format!("{name}{} failed: {}", titled(&info.name), a.err)),
-                true,
-            );
-        }
-        if done {
-            let _ = report(id, "");
-            let t = a.text.trim();
-            let t = if t.is_empty() { "(it said nothing)" } else { t };
-            return (Ok(format!("{name} finished:\n\n{t}")), true);
-        }
-        if !info.sleeping && info.host_pid > 0 && !crate::alive(info.host_pid) {
-            let why = if info.error.is_empty() {
-                "its host went away"
-            } else {
-                &info.error
-            };
-            return (Err(format!("{name} stopped: {why}")), false);
-        }
-        if let Some(l) = info.limit.as_ref().filter(|l| l.continue_) {
-            if let Err(e) = report(id, parent) {
-                return (Err(e.to_string()), false);
-            }
-            return (
-                Ok(format!(
-                    "{name} hit a usage limit and carries on when it resets at {}. Its answer is sent to you as a message when it finishes.",
-                    clock(l.resets_at)
-                )),
-                false,
-            );
-        }
-        let asks: Vec<_> = info.asking.iter().filter(|a| a.id != answered).collect();
-        if !asks.is_empty() {
-            return (Ok(asking(&name, id, &asks)), false);
-        }
-        // Blocked on the one just answered: it's on its way to the agent.
-        let on_answered = !info.asking.is_empty();
-        if info.state == "blocked" && !info.needs.is_empty() && !on_answered {
-            return (
-                Ok(format!(
-                    "{name} is waiting for the user to allow {}. Ask again with agent_result and wait_seconds once they have.",
-                    info.needs
-                )),
-                false,
-            );
-        }
-        let now = Instant::now();
-        if now >= deadline {
-            let what = if info.detail.is_empty() {
-                &info.state
-            } else {
-                &info.detail
-            };
-            return (
-                Ok(format!(
-                    "{name} is still working ({what}). Ask again with agent_result and wait_seconds."
-                )),
-                false,
-            );
-        }
-        w.wait(None, Some((deadline - now).min(Duration::from_secs(5))));
+        return (r, done);
     }
+}
+
+/// One look at agent id for wait_for, waiting on w a while when it's
+/// still at work: None to look again, else what wait_for says.
+#[allow(clippy::too_many_arguments)]
+fn wait_once(
+    reg: &Registry,
+    id: &str,
+    parent: &str,
+    since: Time,
+    deadline: Instant,
+    answered: &str,
+    name: &str,
+    w: &rush_sys::fswait::Watcher,
+) -> (Option<Result<String, String>>, bool) {
+    let info = match read_info(id) {
+        Ok(i) => i,
+        Err(e) => return (Some(Err(format!("no agent {id}: {e}"))), false),
+    };
+    let (a, done) = finished(reg, id, &info, since);
+    if done && !a.err.is_empty() {
+        let _ = report(id, ""); // answered here, so not as a message too
+        return (
+            Some(Err(format!(
+                "{name}{} failed: {}",
+                titled(&info.name),
+                a.err
+            ))),
+            true,
+        );
+    }
+    if done {
+        let _ = report(id, "");
+        let t = a.text.trim();
+        let t = if t.is_empty() { "(it said nothing)" } else { t };
+        return (Some(Ok(format!("{name} finished:\n\n{t}"))), true);
+    }
+    if !info.sleeping && info.host_pid > 0 && !crate::alive(info.host_pid) {
+        let why = if info.error.is_empty() {
+            "its host went away"
+        } else {
+            &info.error
+        };
+        return (Some(Err(format!("{name} stopped: {why}"))), false);
+    }
+    if let Some(l) = info.limit.as_ref().filter(|l| l.continue_) {
+        if let Err(e) = report(id, parent) {
+            return (Some(Err(e.to_string())), false);
+        }
+        return (
+            Some(Ok(format!(
+                "{name} hit a usage limit and carries on when it resets at {}. Its answer is sent to you as a message when it finishes.",
+                clock(l.resets_at)
+            ))),
+            false,
+        );
+    }
+    let asks: Vec<_> = info.asking.iter().filter(|a| a.id != answered).collect();
+    if !asks.is_empty() {
+        return (Some(Ok(asking(name, id, &asks))), false);
+    }
+    // Blocked on the one just answered: it's on its way to the agent.
+    let on_answered = !info.asking.is_empty();
+    if info.state == "blocked" && !info.needs.is_empty() && !on_answered {
+        return (
+            Some(Ok(format!(
+                "{name} is waiting for the user to allow {}. Ask again with agent_result and wait_seconds once they have.",
+                info.needs
+            ))),
+            false,
+        );
+    }
+    let now = Instant::now();
+    if now >= deadline {
+        let what = if info.detail.is_empty() {
+            &info.state
+        } else {
+            &info.detail
+        };
+        return (
+            Some(Ok(format!(
+                "{name} is still working ({what}). Ask again with agent_result and wait_seconds."
+            ))),
+            false,
+        );
+    }
+    w.wait(None, Some((deadline - now).min(Duration::from_secs(5))));
+    (None, false)
 }
 
 /// What agent id asks to be allowed, for the caller to answer.
@@ -763,6 +813,9 @@ pub fn agent_name(reg: &Registry, k: &str) -> String {
 /// Gives parent child's answer as a message from child, waking parent if
 /// it rests.
 pub fn send_result(child: &str, parent: &str, text: &str) -> Result<(), String> {
+    // A parent that handed over (Emeritus) is answered by its successor:
+    // the answers owed to it are its successor's.
+    let parent = &crate::emeritus::live(parent);
     let e = Exchange {
         id: hex_id(),
         direction: "received".into(),
