@@ -933,6 +933,7 @@ fn efficiency_fixture() -> rush_efficiency::Report {
             },
             transcript: "/t/b.jsonl".into(),
             requests: 140,
+            by_time: false,
             per_request: 285_000,
             tokens: 39_900_000,
             usd: 19.95,

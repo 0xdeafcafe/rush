@@ -2007,6 +2007,12 @@ Findings, in tokens: "N Codex sessions ran near their context window"
 `codex::FRONTIER`, the one place Codex's model names are, gpt-6-astra →
 gpt-6.1-sol).
 
+Counts in the findings (and the advisor's digest and `rush efficiency`)
+have their thousands marked, "1,680", `findings::count`. That includes
+the findings ported from Go, which printed plain numbers: a deliberate
+departure from "keep Go's words exactly" (AGENTS.md), made at the
+user's request so every finding reads alike.
+
 ### Where the figures show (Rust-only)
 
 Go had no Efficiency screen or CLI in the end, so the findings had no
@@ -2038,12 +2044,17 @@ What a handover saved is an estimate, said as one wherever it shows:
 A's context at the handover less B's at its first request, times B's
 requests, as if A had done B's work at its own size, priced at the
 cache-read rate. It leaves out a compaction A might have made and what
-the baton cost to write. B's transcript is found by the log alone (the
-event has no conversation id for B): the same account and agent, not
-A's conversation, begun from 30 minutes before the event to 5 after,
-whose first context is nearest the event's `toContext` (within a
-quarter of it or 5k). One not found yet shows the per-request figure
-only. The advisor's digest has a line for them, and one per handover
+the baton cost to write. B's transcript is the one of the conversation
+the event's `toSession` names, exactly (the same agent; its own
+transcript over a subagent's). Only an older event without `toSession`
+falls back to the heuristic: the same account and agent, not A's
+conversation, begun from 30 minutes before the event to 5 after, whose
+first context is nearest the event's `toContext` (within a quarter of
+it or 5k); that one, and only that one, says so, in the handover's line
+and so in its About, the digest and the CLI (`Saving::by_time`). An
+event naming a conversation not read yet isn't matched by the heuristic:
+it shows the per-request figure only, as does a fallback that found
+nothing. The advisor's digest has a line for them, and one per handover
 with its threshold and lineage, only when there were any.
 
 ## A session's runs

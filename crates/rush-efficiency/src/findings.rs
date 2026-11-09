@@ -107,7 +107,10 @@ pub fn findings(v: &View, found: &HashMap<String, Found>) -> Vec<Finding> {
                 .unwrap_or_default();
             f.detail += &format!(
                 "; {} sessions read one file {}+ times (most: {}, {} times)",
-                v.rereads, REREAD_AT, base, v.worst_reads
+                count(v.rereads),
+                count(REREAD_AT),
+                base,
+                count(v.worst_reads)
             );
         }
         out.push(f);
@@ -140,7 +143,7 @@ pub fn findings(v: &View, found: &HashMap<String, Found>) -> Vec<Finding> {
         let mut f = Finding {
             title: format!(
                 "{} sessions went past {} tokens of context",
-                v.fat,
+                count(v.fat),
                 tokens(FAT_CONTEXT)
             ),
             detail: "every request re-reads all of it; compacting sooner keeps each turn cheaper"
@@ -175,7 +178,7 @@ pub fn findings(v: &View, found: &HashMap<String, Found>) -> Vec<Finding> {
         out.push(Finding {
             title: format!(
                 "{} subagents ran on a cheaper model, saving about {}",
-                v.sub_cheap,
+                count(v.sub_cheap),
                 money(v.sub_cheap_saved)
             ),
             detail: format!(
@@ -190,7 +193,7 @@ pub fn findings(v: &View, found: &HashMap<String, Found>) -> Vec<Finding> {
         out.push(Finding {
             title: format!(
                 "{} tool results were over {} tokens each",
-                v.big,
+                count(v.big),
                 tokens(BIG_RESULT / 4)
             ),
             detail: "a lower cap keeps the start and end and saves the rest to a file".into(),
@@ -378,8 +381,9 @@ fn codex(v: &View, out: &mut Vec<Finding>) {
     }
 }
 
-/// A count with its thousands marked: 12,345. Rust-only: the findings
-/// ported from Go keep Go's plain numbers.
+/// A count with its thousands marked: 12,345. Every count in a finding,
+/// the advisor's digest and the report uses it, the ones ported from Go
+/// too (a departure from Go's plain numbers, at the user's request).
 pub fn count(n: i64) -> String {
     let s = n.unsigned_abs().to_string();
     let mut out = String::new();

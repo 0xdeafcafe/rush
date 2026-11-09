@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 use crate::aggregate::{FAT_CONTEXT, REREAD_AT, View};
 use crate::catalog::CATALOG;
 use crate::detect::{Found, Status};
-use crate::findings::{self, bytes, money, tokens};
+use crate::findings::{self, bytes, count, money, tokens};
 use crate::scan::{BIG_RESULT, TOOL_NAMES};
 use crate::top::SessionCost;
 use crate::when::{local, since};
@@ -67,9 +67,9 @@ pub fn digest(input: &Input) -> String {
     p!(
         "Spend {} over {} requests, {} sessions and {} subagent runs (list prices).",
         money(t.cost()),
-        t.req,
-        v.sessions,
-        v.subagents
+        count(t.req),
+        count(v.sessions),
+        count(v.subagents)
     );
     p!(
         "Cost by kind: input {}, output {}, cache reads {}, cache writes {}. Cache hits {:.0}% of input.",
@@ -90,11 +90,11 @@ pub fn digest(input: &Input) -> String {
         tokens(v.start_median),
         tokens(v.start_p90),
         tokens(v.peak_median),
-        v.fat,
+        count(v.fat),
         tokens(FAT_CONTEXT),
         money(v.fat_carry),
-        v.compacts,
-        v.autos
+        count(v.compacts),
+        count(v.autos)
     );
     let (all, share) = v.tool_bytes();
     let tools: Vec<String> = TOOL_NAMES
@@ -104,7 +104,7 @@ pub fn digest(input: &Input) -> String {
         .map(|(i, name)| {
             format!(
                 "{name} {} calls, {} ({:.0}%), carried ≈{}",
-                t.calls[i],
+                count(t.calls[i].into()),
                 bytes(t.bytes[i]),
                 share[i] * 100.0,
                 money(v.carry[i])
@@ -115,19 +115,19 @@ pub fn digest(input: &Input) -> String {
     if t.look_calls > 0 {
         p!(
             "Shell commands that searched or read code: {}, {}, carried ≈{}.",
-            t.look_calls,
+            count(t.look_calls.into()),
             bytes(t.look),
             money(v.look_carry)
         );
     }
-    p!("Tool results over {}: {}.", bytes(BIG_RESULT), v.big);
+    p!("Tool results over {}: {}.", bytes(BIG_RESULT), count(v.big));
     if v.rereads > 0 {
         p!(
             "{} sessions read one file {}+ times; worst {} ×{}.",
-            v.rereads,
-            REREAD_AT,
+            count(v.rereads),
+            count(REREAD_AT),
             v.worst_read,
-            v.worst_reads
+            count(v.worst_reads)
         );
     }
     if v.sub_cost > 0.0 {
@@ -141,7 +141,7 @@ pub fn digest(input: &Input) -> String {
     if v.sub_cheap > 0 {
         p!(
             "{} subagents ran on Sonnet or Haiku, costing {}; on the default model the same tokens would have cost about {} more.",
-            v.sub_cheap,
+            count(v.sub_cheap),
             money(v.sub_cheap_cost),
             money(v.sub_cheap_saved)
         );
@@ -156,8 +156,8 @@ pub fn digest(input: &Input) -> String {
             .map(|(k, a)| {
                 format!(
                     "{k} {} sessions, {} requests, {} in ({:.0}% cached), {} out, {}",
-                    a.sessions,
-                    a.b.req,
+                    count(a.sessions),
+                    count(a.b.req),
                     tokens(a.b.context()),
                     if a.b.context() > 0 {
                         100.0 * a.b.cr as f64 / a.b.context() as f64
@@ -178,21 +178,21 @@ pub fn digest(input: &Input) -> String {
     if t.img > 0 {
         p!(
             "Images in tool results: {}, ≈{} tokens, re-read ≈{} (≈{}); {} read again from a path already read, in {} transcripts.",
-            t.img,
+            count(t.img),
             tokens(t.img_tok),
             tokens(t.img_carry),
             money(v.img_carry),
-            t.img_rep,
-            v.img_rep_sessions
+            count(t.img_rep),
+            count(v.img_rep_sessions)
         );
     }
     if v.near > 0 {
         p!(
             "{} transcripts sent {:.0}%+ of their context window {}+ times; most {} times, {} of {} on {}.",
-            v.near,
+            count(v.near),
             crate::scan::NEAR_WINDOW * 100.0,
-            crate::aggregate::NEAR_REQS,
-            v.nearest.near,
+            count(crate::aggregate::NEAR_REQS),
+            count(v.nearest.near),
             tokens(v.nearest.input),
             tokens(v.nearest.window),
             v.nearest.model
@@ -207,7 +207,7 @@ pub fn digest(input: &Input) -> String {
             .fold((0, 0.0), |(t, u), s| (t + s.tokens, u + s.usd));
         p!(
             "Emeritus handovers: {}, saving ≈{} tokens{} by estimate. {}",
-            input.handovers.len(),
+            count(input.handovers.len() as i64),
             tokens(saved),
             if usd > 0.0 {
                 format!(" (≈{})", money(usd))
@@ -263,26 +263,26 @@ pub fn digest(input: &Input) -> String {
             "{}. {}, {} req, {}, {}{} in {}, start {}, peak {}, {} compactions, {} big results",
             i + 1,
             money(s.b.cost()),
-            s.b.req,
+            count(s.b.req),
             span(since(s.last, s.first)),
             s.model,
             kind,
             s.project,
             tokens(s.start_ctx),
             tokens(s.peak_ctx),
-            s.compacts,
-            s.big
+            count(s.compacts),
+            count(s.big)
         );
         if s.worst_reads >= REREAD_AT {
-            p!("   read {} ×{}", s.worst_read, s.worst_reads);
+            p!("   read {} ×{}", s.worst_read, count(s.worst_reads));
         }
         if s.b.img > 0 {
             p!(
                 "   {} images, ≈{} tokens; image read most: {} ×{}",
-                s.b.img,
+                count(s.b.img),
                 tokens(s.b.img_tok),
                 s.worst_image,
-                s.worst_image_reads
+                count(s.worst_image_reads)
             );
         }
         if let Some(br) = input.briefs.as_ref().and_then(|b| b.get(i))
@@ -359,6 +359,23 @@ mod tests {
             ..SessionCost::default()
         }];
         input.known = vec!["Trim CLAUDE.md".into()];
+        // Counts have their thousands marked, as the findings do.
+        input.view.total.req = 1_680;
+        input.view.total.calls[TOOL_BASH] = 12_345;
+        input.view.rereads = 2_000;
+        input.view.worst_reads = 1_500;
+        let d = digest(&input);
+        for want in [
+            "1,680 requests",
+            "Bash 12,345 calls",
+            "2,000 sessions read one file",
+            "×1,500.",
+        ] {
+            assert!(d.contains(want), "digest lacks {want:?}:\n{d}");
+        }
+        input.view.total.req = 100;
+        input.view.total.calls[TOOL_BASH] = 40;
+        input.view.rereads = 0;
         let d = digest(&input);
         for want in [
             "100 requests",
@@ -387,6 +404,7 @@ mod tests {
             },
             transcript: "/p/b.jsonl".into(),
             requests: 140,
+            by_time: false,
             per_request: 285_000,
             tokens: 39_900_000,
             usd: 19.95,
