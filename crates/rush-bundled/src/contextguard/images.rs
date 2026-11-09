@@ -499,7 +499,7 @@ pub fn thousands(n: u64) -> String {
     let s = n.to_string();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);
@@ -605,7 +605,9 @@ mod tests {
     #[test]
     fn resizes_as_the_model_does() {
         // The examples in platform.claude.com's Vision pages.
-        let cases: &[(u32, u32, u32, u32, (u32, u32), u64)] = &[
+        // Width, height, the long edge and tokens allowed; the size and its tokens.
+        type Case = (u32, u32, u32, u32, (u32, u32), u64);
+        let cases: &[Case] = &[
             (200, 200, 1568, 1568, (200, 200), 64),
             (1000, 1000, 1568, 1568, (1000, 1000), 1296),
             (1092, 1092, 1568, 1568, (1092, 1092), 1521),
