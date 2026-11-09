@@ -585,10 +585,7 @@ fn a_background_run_is_a_row() {
     );
     run.background = true;
     let got = draw(&s, &opts("", &[(&r, run.clone())], at(20)));
-    assert!(
-        got.contains("◐ $ rm ~/Desktop/DeveloperIDApplication.p12"),
-        "{got}"
-    );
+    assert!(got.contains("◐ $ rm ~/Desktop/"), "{got}");
     assert!(got.contains("✕ stop · ☐ send when done"), "{got}");
     assert!(!got.contains("shell · "), "{got}");
     run.send_done = true;

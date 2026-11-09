@@ -484,7 +484,7 @@ impl Drawer<'_> {
                 let l = how.and(dim(&format!(" · {took}")));
                 // The longest words that fit, else shorter, else marks.
                 let mut rt = Txt::new();
-                for tier in 0..3 {
+                for tier in 0..4 {
                     rt = foot_buttons(x, r, tier);
                     if l.width() + rt.width() + 8 <= inner {
                         break;
@@ -538,7 +538,9 @@ impl Drawer<'_> {
             ""
         };
         let lead = paint(if picked { C_ORANGE } else { C_FAINT }, "◐ ");
-        let room = (inner + 4).saturating_sub(tail.width() + 4 + more.len());
+        // The row is as wide as a box's edge: ◐, "$ ", the command, a gap
+        // of at least 2, then the tail.
+        let room = (inner + 4).saturating_sub(tail.width() + 6 + more.chars().count());
         let head = lead
             .and(faint("$ "))
             .and(quiet_tint(&truncate_cells(cmd, room.max(8))))
@@ -625,7 +627,10 @@ impl Drawer<'_> {
 /// your next message, ✎ draft it in your message first, ≈ send a summary, ↻ run it again, ✕ let it go.
 /// One done says so in their place; a summary being made, that it is.
 fn foot_buttons(x: &ShellRun, r: &str, tier: usize) -> Txt {
-    let pick = |w: [&'static str; 3]| w[tier.min(2)];
+    // Tiers 0 and 1 have + with my next message in words; 2 has the
+    // others' short words without it; 3 marks alone.
+    let words = [0, 1, 1, 2][tier.min(3)];
+    let pick = |w: [&'static str; 3]| w[words];
     let send = if x.told && !x.told_summary {
         dim(pick(["✓ sent to agent", "✓ sent", "✓"]))
     } else {
@@ -640,6 +645,8 @@ fn foot_buttons(x: &ShellRun, r: &str, tier: usize) -> Txt {
     // a key and the hint say it otherwise.
     let attach = if x.told || !x.attached && tier >= 2 {
         Txt::new()
+    } else if x.attached && tier >= 2 {
+        button(paint(C_BLUE, "✓+"), "attach", r)
     } else if x.attached {
         button(
             paint(
