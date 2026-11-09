@@ -111,14 +111,16 @@ pub fn views(m: &Model, key: &str) -> Vec<&'static str> {
     v
 }
 
-/// The view showing in session key (viewName).
+/// The view showing in session key (viewName). While a run open whole
+/// stands in the session's place for a call (runview::as_run), its
+/// conversation: the Session's own drawing and keys then work on it.
 pub fn view_name(m: &Model, key: &str) -> &'static str {
+    let core = m.kept.peek::<super::Core>();
+    if core.is_some_and(|c| c.as_run.as_deref() == Some(key)) {
+        return "conversation";
+    }
     let v = views(m, key);
-    let i = m
-        .kept
-        .peek::<super::Core>()
-        .and_then(|c| c.conns.get(key))
-        .map_or(0, |c| c.vs.view);
+    let i = core.and_then(|c| c.conns.get(key)).map_or(0, |c| c.vs.view);
     v[i % v.len()]
 }
 
@@ -390,10 +392,35 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     let c = conn(m, &key);
     c.vs.tabs = tabs;
     c.vs.context = at;
+    // A run open whole: its own header over the session's, and none of
+    // the session's tabs to click (runview.rs).
+    if super::runview::open_id(m, &key).is_some() {
+        let c = conn(m, &key);
+        c.vs.tabs.clear();
+        c.vs.context = (0, 0);
+    }
+}
+
+/// After every group's header (the agent bar's name and where it works
+/// draw on rows 1 and 2): a run open whole puts its own over it, and a
+/// child rush hosts the way back to the session that started it
+/// (runview.rs).
+pub fn head_last(m: &mut Model, rows: &mut [Line], w: usize) {
+    let Some(key) = open_key(m) else {
+        return;
+    };
+    if rows.len() < HEAD_H || crate::rooms::row_agent(m, &key).is_none() {
+        return;
+    }
+    if let Some(id) = super::runview::open_id(m, &key) {
+        super::runview::head(m, &key, &id, rows, w);
+    }
+    let crumb = super::runview::child_crumb(m, rows, w).unwrap_or_default();
+    conn(m, &key).watch.child_crumb = crumb;
 }
 
 /// A header row: two cells in, on the chrome's ground, a cell after.
-fn chrome(l: Line, iw: usize) -> Line {
+pub(super) fn chrome(l: Line, iw: usize) -> Line {
     let mut out = line([Span::new("  ", Style::default().on(CHROME_BG))]);
     join(&mut out, on_ground(l, iw, CHROME_BG));
     out.spans
@@ -527,7 +554,7 @@ fn picked_ref(m: &Model) -> String {
 /// sight, the one by the box, as the conversation does (not the view's
 /// last row, however far below that is); ↓ picks the highest in sight,
 /// or with nothing picked stays in the box.
-fn move_sel(m: &mut Model, key: &str, d: isize) {
+pub(super) fn move_sel(m: &mut Model, key: &str, d: isize) {
     let vs = &conn(m, key).vs;
     let refs = vs.all_refs.clone();
     let rows = vs.rows.max(1);
@@ -683,6 +710,12 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
     }
     if !subs {
         conn(m, &key).runs.detail = None;
+        conn(m, &key).watch.open = None;
+    }
+    // A run open whole: its own screen in the view's place.
+    if let Some(id) = super::runview::open_id(m, &key) {
+        conn(m, &key).map.visible = false;
+        return Some(super::runview::body(m, &key, &id, w, rows));
     }
     if name == "conversation" {
         return Some(super::conversation::body(m, &key, w, rows));

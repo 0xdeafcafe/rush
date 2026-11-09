@@ -597,6 +597,68 @@ fn stuck_queue_needs_you() {
     );
 }
 
+// A host's background tasks, as the row says them: each kind in the
+// list's word, and a subagent's own command left to its subagent (it's
+// in flight still), so three subagents with a command each read as three
+// subagents, not three tasks besides (Rust-only).
+#[test]
+fn background_tasks_as_the_row_says_them() {
+    use crate::hosted::HostTask;
+    let task = |id: &str, kind: &str, parent: &str| HostTask {
+        id: id.into(),
+        kind: kind.into(),
+        label: id.into(),
+        parent: parent.into(),
+        ..HostTask::default()
+    };
+    let cases: Vec<(Vec<HostTask>, Vec<&str>, u32, u32)> = vec![
+        (vec![], vec![], 0, 0),
+        (
+            vec![task("a1", "local_agent", ""), task("b1", "local_bash", "")],
+            vec!["agent\0a1", "shell\0b1"],
+            1,
+            2,
+        ),
+        (
+            vec![
+                task("a1", "local_agent", ""),
+                task("a2", "local_agent", ""),
+                task("b1", "local_bash", "a1"),
+                task("b2", "local_bash", "a2"),
+            ],
+            vec!["agent\0a1", "agent\0a2"],
+            2,
+            4,
+        ),
+        (
+            vec![
+                task("w", "local_workflow", ""),
+                task("m", "monitor_ws", ""),
+                task("x", "dream", ""),
+            ],
+            vec!["workflow\0w", "monitor\0m", "task\0x"],
+            0,
+            3,
+        ),
+    ];
+    let t = now();
+    for (i, (bg, want, subs, flight)) in cases.into_iter().enumerate() {
+        let mut l = loader();
+        let d = tempfile::tempdir().unwrap();
+        let mut hi = info(&format!("bg{i}"), "idle", &s(d.path()), t);
+        hi.background = bg;
+        let a = l.hosted(&test_profile(), &hi, None, t);
+        assert_eq!(a.job.background, want, "case {i}");
+        assert_eq!(
+            (a.job.subagents, a.job.in_flight),
+            (subs, flight),
+            "case {i}"
+        );
+    }
+    assert_eq!(background_kind("in_process_teammate"), "agent");
+    assert_eq!(background_kind(""), "task");
+}
+
 // fleet.go:1218: a session a plugin started says which, and why.
 #[test]
 fn hosted_says_who_started_it() {
@@ -1588,7 +1650,7 @@ fn subagents_follow_rewind() {
     for _ in 0..3 {
         // looked at, told newly watched, trusted
         begin(&mut l, t);
-        l.subagents(&k, "k", &s(&t1), false, 0, t);
+        l.subagents(&k, "k", &s(&t1), false, false, 0, t);
         let paths = l.sub_watch.clone();
         l.watching
             .as_ref()
@@ -1603,7 +1665,10 @@ fn subagents_follow_rewind() {
         "the project folder isn't trusted"
     );
     begin(&mut l, t);
-    assert_eq!(l.subagents(&k, "k", &s(&t2), false, 0, t).0.spawned, 1);
+    assert_eq!(
+        l.subagents(&k, "k", &s(&t2), false, false, 0, t).0.spawned,
+        1
+    );
 }
 
 // A transcript found is trusted while it's watched and quiet; removed, it

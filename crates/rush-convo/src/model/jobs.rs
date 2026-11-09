@@ -38,6 +38,9 @@ pub struct Job {
     pub label: String,
     /// A subagent's type.
     pub agent: String,
+    /// The subagent's task that started it, if one did: the subagent's own
+    /// work, as the agent's background list says (Rust-only).
+    pub parent: String,
     /// Runs beside the turn rather than holding it.
     pub background: bool,
     /// Empty while it runs; then completed, failed, stopped, or ended when
@@ -126,6 +129,26 @@ impl Session {
     /// The tasks still running, in the order they started.
     pub fn running_jobs(&self) -> impl Iterator<Item = &Job> {
         self.jobs.iter().filter(|j| j.running())
+    }
+
+    /// What the session itself runs in the background now, by kind
+    /// (job_kind): its subagents, its workflows and its other tasks,
+    /// leaving out what a subagent started, which is that subagent's
+    /// (Rust-only). The Session's header and its column beside the
+    /// conversation both say this, so they agree.
+    pub fn background_counts(&self) -> (usize, usize, usize) {
+        let (mut agents, mut flows, mut other) = (0, 0, 0);
+        for j in self.jobs.iter() {
+            if !j.running() || !j.background || !j.parent.is_empty() {
+                continue;
+            }
+            match self.job_kind(j) {
+                "subagent" => agents += 1,
+                "workflow" => flows += 1,
+                _ => other += 1,
+            }
+        }
+        (agents, flows, other)
     }
 
     /// The task of the subagent run with this agent id or started by this
@@ -228,7 +251,12 @@ impl Session {
         };
         match j.kind_word.as_str() {
             "local_bash" if tool() == Some("Monitor") => "monitor",
-            "" if matches!(tool(), Some("Agent" | "Task")) => "subagent",
+            // A task the agent named no kind rush knows: a subagent's type,
+            // or the Agent or Task call that started it, says it's a
+            // subagent from the start, not a task until its run is found
+            // (Rust-only: Go took only an unnamed kind with its call).
+            "" | "task" if !j.agent.is_empty() => "subagent",
+            "" | "task" if matches!(tool(), Some("Agent" | "Task")) => "subagent",
             _ => j.kind(),
         }
     }
@@ -318,6 +346,12 @@ impl Session {
                 let j = &mut self.jobs[i];
                 j.tool_use_id = first_non_empty(&[&j.tool_use_id, &e.call_id]).to_owned();
                 j.output_file = first_non_empty(&[&e.output_file, &j.output_file]).to_owned();
+                // A notice that says the task still runs (or waits) is word
+                // of it, not its end: only one with no word, or an end's,
+                // ends it (Rust-only).
+                if matches!(e.status.as_str(), "running" | "pending") {
+                    return;
+                }
                 if j.running() || j.status == "ended" {
                     j.status = first_non_empty(&[job_status(&e.status), "completed"]).to_owned();
                 }
@@ -385,6 +419,7 @@ impl Session {
             j.background = true;
             j.kind_word = first_non_empty(&[&j.kind_word, &t.kind_word]).to_owned();
             j.label = first_non_empty(&[&j.label, &t.label]).to_owned();
+            j.parent = first_non_empty(&[&t.parent, &j.parent]).to_owned();
         }
         for j in &mut self.jobs {
             if j.running() && j.background && !on.contains(j.id.as_str()) {

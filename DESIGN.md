@@ -1825,7 +1825,7 @@ once when asked (a run opened, the subagents view shown), and not at all
 when nothing does. The dock shows the running ones (or the column beside
 a wide conversation, or the top of the views panel while that's open);
 the subagents view lists every run, its numbers followed only while it
-shows, and opens one under a banner; ↑ from the box picks the dock's runs
+shows, and opens one whole (below); ↑ from the box picks the dock's runs
 and space watches one. The agents rush hosted for a session come from the
 binary's `Hosts::spawned` (rush/hosted.rs `hosted_runs`, spawns.go
 hostedRuns): the hosts whose meta says `spawnedBy` it, their prompt and
@@ -1847,9 +1847,13 @@ Finished headings. Its model, worktree, steps, cost and effort show only
 for the run picked: under its row when the pane is narrow (a click there
 opens it), else in the column beside the list (`subview::beside`, from
 `WIDE_AT` = 110 cells). That column follows clicks only, never the
-pointer, and a click never opens a run across the whole view; enter
-does, and the views panel's run rows pick a run there too
-(`subview::pick_run`). A workflow run is named with when it started;
+pointer; the views panel's run rows pick a run there too
+(`subview::pick_run`). ↑↓ move the pick through the list whatever has
+the keys, the run's box too while it's empty (`subview::list_key`, ahead
+of the cards' ↑ and the box's own keys). Past the newest
+`EARLIER_AFTER` (8), finished runs fold under "Earlier · N"
+(`earlier:runs`), but those that failed or were stopped, and the one
+picked. A workflow run is named with when it started;
 finished, it's dimmed and folded to its row. A workflow agent's earlier
 tries (resumed after a restart) fold under the try that replaced them
 (`tries:<id>`), never rows of their own. Where a run works is the
@@ -1863,7 +1867,51 @@ that; any other Claude Code subagent has no line of its own, so the main
 session is asked to pass it on with SendMessage (which resumes one that
 finished), and the box says so; a workflow's agent without an inbox, or a
 session rush doesn't run, can't be reached, and the box says why
-(`relay::route`).
+(`relay::route`). One box is live at a time: while the run's has the
+keys the session's own isn't drawn, and the foot names whose it is
+("enter send to <run>"); without them it says "tab or click here".
+
+### A run opened whole
+
+enter or → on a run picked in the list, a second click on its row within
+400 ms, or "open ›" at the right of its head opens it whole, as a
+session of its own looks (`runview.rs`): its conversation full width,
+drawn by the Session's own `conversation::rows_of` (pins, the pill, the
+row under the pointer, dragged-over text) and driven by its own row keys
+(`Model::session_key`: ↑↓ pick, enter → ← open and close, ctrl+o shows
+all, o a step's file, a click picks or opens a row, a link opens). Over
+it a header of its own: `‹ <parent> › <run>` and how it stands, then its
+facts (model, effort, worktree, steps, tokens, cost), then its tabs:
+Conversation, Overview (status, what it was asked, its steps so far),
+Changes (the files it edited) and Tasks, the last two where it has them.
+Under it one box, the run's (`subbox::run_key`), routed as the box
+beside the list is. esc, ← from an empty box, or a click on the
+breadcrumb goes back to the list with the run picked; one opened from a
+subagent's step (enter or → on it opens it so) goes back to that step on
+esc. A long run opens at its end: its reader starts the tail at the
+transcript's last 2 MB (`Tail::from_end`, `Tail::subagent_from_end`),
+draws that, then reads it whole, as a long session opens.
+
+It's a sub-state of the parent's Session (`Watch::open`), not a session
+of its own. The run's conversation is the `SessionView` subs.rs already
+reads for the run picked (`Runs::detail`); `runview::as_run` puts it in
+`m.session`'s place for the length of one call (`Core::as_run` makes
+`views::view_name` say "conversation" meanwhile), so the Session's
+drawing, keys and clicks work on it unchanged, while the parent's live
+link, its box, queue, cards and header stay the parent's and nothing is
+torn down to go back. A session of its own would have needed an agent
+row, a host link and a key for each run, which Claude Code's subagents
+don't have. A child rush hosts still opens as its own session
+(`spawned::open_session`, alt+o); its header's first row then says
+`‹ <parent> › <child>`, and a click on the parent goes back to its
+Subagents list with the child picked (`runview::child_crumb`).
+
+A run is finished only on a real end: its task-finished notice (an
+interim one saying running or pending isn't), its session's process
+gone, or a restart since it began. A quiet transcript isn't one while
+the session's process lives (`SubagentRuns::set_alive`); a launch in
+the background (`isAsync`) and a SendMessage to a run by its name wake
+it.
 
 The background view (`running::background_lines`, drawn by
 list_extras::jobs `job_lines`, Go's jobLines) lists every task the

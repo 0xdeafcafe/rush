@@ -2577,6 +2577,11 @@ impl<'a> Drawer<'a> {
         if self.fan(st) && !self.o.verbose {
             return;
         }
+        // A subagent put in the background: its run's row, not the
+        // harness's boilerplate its call returned (Rust-only).
+        if self.background_run(st, indent) {
+            return;
+        }
         let (v, _) = self.view_of(id, &r);
         if v == "pretty" || v == "text" && self.o.view.get(&r).is_some_and(|x| x == "text") {
             self.view = v;
@@ -2698,6 +2703,30 @@ impl<'a> Drawer<'a> {
             st.status == Status::Failed,
         );
         self.shell = None;
+    }
+
+    /// A subagent call that put its agent in the background returned the
+    /// harness's words for that ("Async agent launched successfully…",
+    /// "The agent is working in the background… output_file… Do NOT
+    /// Read or tail this file…"): drawn as its run's row from o.runs,
+    /// else a short note with the agent's id. Whether st was one.
+    /// Rust-only.
+    fn background_run(&mut self, st: &Step, indent: usize) -> bool {
+        if st.kind != Kind::Subagent {
+            return false;
+        }
+        let Some(agent) = background_agent(st) else {
+            return false;
+        };
+        let w = self.cw.saturating_sub(indent + 1);
+        let row = match self.o.runs.get(&*st.id) {
+            Some(row) => Txt(row.spans.clone()).truncate(w, &Txt::raw("…")),
+            None if agent.is_empty() => dim("running in the background"),
+            None => dim(&format!("running in the background · {agent}")),
+        };
+        let pl = self.sp(indent - 1).and(dim("↳ ")).and(row);
+        self.add("", Color::Default, pl, Txt::new());
+        true
     }
 
     fn answers(&mut self, qa: &[(String, String)], indent: usize) {
@@ -4414,6 +4443,35 @@ fn tool_summary(st: &Step) -> Txt {
         },
         _ => Txt::new(),
     }
+}
+
+/// The agent a subagent call put in the background, when what it
+/// returned is the harness's note that it did (Claude Code's
+/// async_launched result): its id from the result, else from the text
+/// ("agentId: a1b2"), "" when neither says. None for any other result.
+/// Rust-only.
+fn background_agent(st: &Step) -> Option<String> {
+    let o = st.out();
+    let text = first_non_empty(&[&o.stdout, &o.stderr, &st.output]);
+    let r = st.result_json();
+    let launched = text.contains("Async agent launched")
+        || text.contains("working in the background") && text.contains("notified")
+        || r.contains("\"async_launched\"");
+    if !launched {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_str(r).unwrap_or_default();
+    if let Some(id) = v.get("agentId").and_then(|x| x.as_str())
+        && !id.is_empty()
+    {
+        return Some(id.to_string());
+    }
+    static ID: LazyLock<Regex> = LazyLock::new(|| re(r"agentId:\s*([A-Za-z0-9_-]+)"));
+    Some(
+        ID.captures(text)
+            .map(|c| c[1].to_string())
+            .unwrap_or_default(),
+    )
 }
 
 /// A question's answers, each with its question (messages.go:330).

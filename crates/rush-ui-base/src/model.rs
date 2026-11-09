@@ -783,7 +783,7 @@ impl Model {
             .max(1)
     }
 
-    pub(crate) fn session_key(&mut self, s: &str) -> Step {
+    pub fn session_key(&mut self, s: &str) -> Step {
         let rows = self.session_rows();
         let (w, now, tick) = (self.w.saturating_sub(3), self.now, self.tick);
         let Some(v) = self.session.as_mut() else {

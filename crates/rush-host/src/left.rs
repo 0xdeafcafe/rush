@@ -302,6 +302,33 @@ pub fn cd_target(cmd: &str) -> String {
     d.to_string()
 }
 
+/// The folders message m's calls worked in, as follow_edits counts them
+/// towards a move: none for a subagent's message (m.parent names the call
+/// that started it), whose edits and cds are its own, in a worktree of its
+/// own as often as not, never its parent's (Rust-only: Go's followEdits
+/// counted them, so three edits by an isolated subagent moved the session
+/// into that subagent's worktree). Nor a Claude Code subagent's isolated
+/// worktree (`.claude/worktrees/agent-<id>`) the session itself reached
+/// into, to look at what it did.
+pub fn dirs_worked(m: &event::Message, cwd: &str, start_cwd: &str) -> Vec<String> {
+    if !m.parent.is_empty() {
+        return Vec::new();
+    }
+    m.parts
+        .iter()
+        .map(|p| worked_in(p.call.as_deref(), cwd, start_cwd))
+        .filter(|d| !d.is_empty() && !subagent_worktree(d))
+        .collect()
+}
+
+/// Whether d is in a worktree Claude Code made for a subagent's isolation
+/// (`<repo>/.claude/worktrees/agent-<id>`).
+pub fn subagent_worktree(d: &str) -> bool {
+    d.split("/.claude/worktrees/")
+        .skip(1)
+        .any(|rest| rest.starts_with("agent-"))
+}
+
 /// The top of the one checkout, not was's, every one of dirs is in.
 pub fn edited_in(was: &str, dirs: &[String], root: impl Fn(&str) -> String) -> Option<String> {
     let mut top = String::new();
@@ -480,6 +507,48 @@ mod tests {
     }
 
     // edits_test.go:41
+    #[test]
+    fn a_subagents_calls_never_move_its_parent() {
+        let edit = |p: &str| event::Part {
+            kind: event::PartKind::ToolCall,
+            call: Some(Box::new(tool::Call {
+                kind: Kind::Edit,
+                input: tool::Input {
+                    path: p.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        let msg = |parent: &str, p: &str| event::Message {
+            role: "assistant".into(),
+            parent: parent.into(),
+            parts: vec![edit(p)],
+            ..Default::default()
+        };
+        let wt = "/r/rush/.claude/worktrees/agent-a998/src/a.rs";
+        for (m, want) in [
+            // Its own edit in another checkout counts.
+            (msg("", "/lw/src/a.ts"), vec!["/lw/src"]),
+            // A subagent's, anywhere, doesn't.
+            (msg("toolu_1", "/lw/src/a.ts"), vec![]),
+            (msg("toolu_1", wt), vec![]),
+            // Nor its own reach into a subagent's isolated worktree.
+            (msg("", wt), vec![]),
+            // A worktree of its own named otherwise does.
+            (
+                msg("", "/r/rush/.claude/worktrees/6a3b/src/a.rs"),
+                vec!["/r/rush/.claude/worktrees/6a3b/src"],
+            ),
+        ] {
+            assert_eq!(dirs_worked(&m, "/rush", "/rush"), want, "{m:?}");
+        }
+        assert!(subagent_worktree("/r/.claude/worktrees/agent-x"));
+        assert!(!subagent_worktree("/r/.claude/worktrees/lane-a"));
+        assert!(!subagent_worktree("/r/agent-x"));
+    }
+
     #[test]
     fn worked_in_reads_cds_and_edits() {
         let home = std::env::var("HOME").unwrap();

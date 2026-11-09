@@ -182,53 +182,8 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
         v.shown = vec![String::new(); out.len().min(rows)];
         out
     } else {
-        // Scrolled up, the "more below" pill takes a row of its own rather
-        // than covering the last one (which may be the one picked).
-        if v.pos != Pos::End && rows > 1 {
-            n = rows - 1;
-        }
-        let mut b = v.body(n);
-        let drawn = v.r.rows();
-        if !hover.is_empty() {
-            let under = format!("{hover}{OWNER_SEP}");
-            for (i, l) in b.iter_mut().enumerate() {
-                let Some(r) = (v.start + i).checked_sub(v.base).and_then(|j| drawn.get(j)) else {
-                    continue;
-                };
-                let o = if r.owner.is_empty() {
-                    &r.r#ref
-                } else {
-                    &r.owner
-                };
-                if *o == hover || o.starts_with(&under) {
-                    *l = hover_line(std::mem::take(l), cw);
-                }
-            }
-        }
-        if let Some((r, u)) = &hover_tag
-            && let Some(l) = b.get_mut(*r)
-        {
-            rush_ui_session_cards::handles::underline_link(l, u);
-        }
-        textsel::paint(&mut b, v.start, &txt, cw);
-        pin_prompt(v, &mut b, cw, pref);
-        if v.pos != Pos::End {
-            let total = v.total();
-            let below = total.saturating_sub(v.start + b.len());
-            let pill = line([
-                Span::new(" ", Style::default().on(SEL_BG)),
-                Span::new(
-                    format!("↓ {below} more · end follows"),
-                    Style::fg(TEXT).on(SEL_BG),
-                ),
-                Span::new(" ", Style::default().on(SEL_BG)),
-            ]);
-            b.truncate(n);
-            while b.len() < n {
-                b.push(Line::new());
-            }
-            b.push(spread(Line::new(), pill, cw));
-        }
+        let (b, shown) = rows_of(v, rows, cw, &hover, hover_tag.as_ref(), &txt, pref);
+        n = shown;
         b
     };
     out.truncate(rows);
@@ -284,6 +239,104 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
         mm = minimap::Minimap::default();
     }
     conn(m, key).map = mm;
+    out
+}
+
+/// The conversation's rows in view, `rows` tall and `cw` wide, as the
+/// Session draws them: the item under the pointer lit, the dragged-over
+/// text painted, prompts pinned and, scrolled up, the "more below" pill;
+/// and how many of them are the conversation's (the pill's row isn't).
+/// The session's own conversation and a run opened whole (runview.rs)
+/// are both drawn with it.
+fn rows_of(
+    v: &mut crate::session::SessionView,
+    rows: usize,
+    cw: usize,
+    hover: &str,
+    hover_tag: Option<&(usize, String)>,
+    txt: &textsel::TextSel,
+    pref: i64,
+) -> (Vec<Line>, usize) {
+    let mut n = rows;
+    // Scrolled up, the "more below" pill takes a row of its own rather
+    // than covering the last one (which may be the one picked).
+    if v.pos != Pos::End && rows > 1 {
+        n = rows - 1;
+    }
+    let mut b = v.body(n);
+    let drawn = v.r.rows();
+    if !hover.is_empty() {
+        let under = format!("{hover}{OWNER_SEP}");
+        for (i, l) in b.iter_mut().enumerate() {
+            let Some(r) = (v.start + i).checked_sub(v.base).and_then(|j| drawn.get(j)) else {
+                continue;
+            };
+            let o = if r.owner.is_empty() {
+                &r.r#ref
+            } else {
+                &r.owner
+            };
+            if *o == hover || o.starts_with(&under) {
+                *l = hover_line(std::mem::take(l), cw);
+            }
+        }
+    }
+    if let Some((r, u)) = hover_tag
+        && let Some(l) = b.get_mut(*r)
+    {
+        rush_ui_session_cards::handles::underline_link(l, u);
+    }
+    textsel::paint(&mut b, v.start, txt, cw);
+    pin_prompt(v, &mut b, cw, pref);
+    if v.pos != Pos::End {
+        let total = v.total();
+        let below = total.saturating_sub(v.start + b.len());
+        let pill = line([
+            Span::new(" ", Style::default().on(SEL_BG)),
+            Span::new(
+                format!("↓ {below} more · end follows"),
+                Style::fg(TEXT).on(SEL_BG),
+            ),
+            Span::new(" ", Style::default().on(SEL_BG)),
+        ]);
+        b.truncate(n);
+        while b.len() < n {
+            b.push(Line::new());
+        }
+        b.push(spread(Line::new(), pill, cw));
+    }
+    (b, n)
+}
+
+/// A run opened whole (runview.rs), its view in m.session's place for the
+/// call: its conversation's rows as the session's own are drawn
+/// (rows_of), without what's the session's alone beside and under them
+/// (the map, the column, the views beside, Needs you, the opening card).
+pub fn run_text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
+    let (now, tick) = (m.now, m.tick);
+    let pref = m.cfg.column_width;
+    let txt = conn(m, key).txt;
+    let hover = conn(m, key).vs.hover_ref.clone();
+    let Some(v) = m.session.as_mut() else {
+        return Vec::new();
+    };
+    v.side = 0;
+    v.sync(w, now, tick);
+    v.o.wide = true;
+    let mut out = if !v.read {
+        vec![fit(line([sp("reading its conversation…", DIM)]), w)]
+    } else if v.sess.turns.is_empty() {
+        let first = if v.err.is_empty() {
+            line([sp("  nothing in it yet", DIM)])
+        } else {
+            line([sp(format!("couldn't read it: {}", v.err), RED)])
+        };
+        v.shown = vec![String::new()];
+        vec![fit(first, w)]
+    } else {
+        rows_of(v, rows, w, &hover, None, &txt, pref).0
+    };
+    out.truncate(rows);
     out
 }
 

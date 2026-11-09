@@ -262,6 +262,7 @@ pub fn host_info(i: &Info) -> HostInfo {
                 kind: t.kind.clone(),
                 label: t.label.clone(),
                 started_at: ms(t.started_at),
+                parent: t.parent.clone(),
             })
             .collect(),
         away: i.away.as_ref().map(|a| Away {

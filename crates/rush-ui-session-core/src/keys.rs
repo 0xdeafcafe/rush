@@ -929,6 +929,14 @@ pub fn send_offline_answer(m: &mut Model, key: &str, text: String, id: String) -
 }
 
 fn answer_failed(m: &mut Model, key: &str, id: &str) {
+    // Not sent: the same answers may go again.
+    if core(m)
+        .sent_answers
+        .get(key)
+        .is_some_and(|(at, _)| at == id)
+    {
+        core(m).sent_answers.remove(key);
+    }
     rush_ui_session_cards::question::answer_failed(m, key, id);
 }
 

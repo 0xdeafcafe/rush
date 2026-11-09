@@ -845,9 +845,10 @@ impl Host {
     /// its own: EDITS_TO_MOVE edits, or shell commands that cd there, in a
     /// row. git runs off the lock.
     pub(super) fn follow_edits(&self, st: &mut State, m: &event::Message) {
-        for p in &m.parts {
-            let d = crate::left::worked_in(p.call.as_deref(), &st.cfg.cwd, &st.start_cwd);
-            if !d.is_empty() && !crate::tmp::is_temp(&d) {
+        // A subagent's calls never move the session it works for
+        // (left::dirs_worked).
+        for d in crate::left::dirs_worked(m, &st.cfg.cwd, &st.start_cwd) {
+            if !crate::tmp::is_temp(&d) {
                 st.w.edited.push(d);
                 let n = st.w.edited.len();
                 if n > crate::left::EDITS_TO_MOVE {

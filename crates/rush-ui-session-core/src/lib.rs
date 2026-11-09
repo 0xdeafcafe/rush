@@ -21,6 +21,7 @@
 //! sessions ([`start`]); without it [`host::NoHosts`] says rush can't send.
 
 pub mod actions;
+pub mod agentrows;
 pub mod cards_host;
 pub mod carry;
 pub mod changes;
@@ -51,6 +52,7 @@ pub mod queue;
 pub mod relay;
 pub mod reopen;
 pub mod running;
+pub mod runview;
 pub mod rushcmd;
 pub mod rushmove;
 pub mod scripts;
@@ -187,6 +189,13 @@ pub fn register(x: &mut Ext) {
     // suggestion waits while you type or scroll (viewsuggest.rs).
     x.session_keys.insert(0, viewsuggest::watch_key);
     x.mouse.insert(0, viewsuggest::watch_mouse);
+    // The subagents list's ↑↓ and enter, before the box's and the cards'
+    // (subview::list_key); a run open whole has every key and click
+    // first (runview.rs), and a hosted child's breadcrumb its click.
+    x.session_keys.insert(0, subview::list_key);
+    x.session_keys.insert(0, runview::key);
+    x.mouse.insert(0, runview::mouse);
+    x.mouse.insert(0, runview::crumb_click);
 }
 
 /// The views' keys (a row picked, ↑↓ through the conversation), after
@@ -195,6 +204,8 @@ pub fn register(x: &mut Ext) {
 pub fn register_last(x: &mut Ext) {
     x.session_keys.push(subview::key);
     x.session_keys.push(views::key);
+    // A run open whole's header, over every group's (runview.rs).
+    x.session_head.push(views::head_last);
     // A task typed in the box starts a session, once nothing before has
     // taken it (keys.go submit's last step).
     x.submit.push(start::submit);
@@ -212,6 +223,13 @@ pub struct Core {
     pub send_modes: HashMap<String, SendMode>,
     /// Messages meant for subagents their conversation doesn't show.
     pub sub_notes: HashMap<String, Vec<SubNote>>,
+    /// The decisions answers last sent to each session, by key: the card's
+    /// id and the text. The same again for the same card is no new message
+    /// (cards_host's answer).
+    pub sent_answers: HashMap<String, (String, String)>,
+    /// The session whose run open whole stands in its place for a call
+    /// (runview::as_run): its view then is the conversation.
+    pub as_run: Option<String>,
     /// No map beside the conversation, whatever the config says (tests
     /// drawn as Go's, with HideMinimap).
     pub hide_map: bool,

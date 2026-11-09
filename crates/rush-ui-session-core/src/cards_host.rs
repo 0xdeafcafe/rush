@@ -462,7 +462,20 @@ fn act(m: &mut Model, key: &str, a: Act) -> Out {
 /// sending, as a typed one is; a host asleep wakes for them and a stopped
 /// rush session resumes with them (sendAnswers' wakeHost, sendAs). Ones
 /// that don't go bring the card back with them (answer_failed).
+///
+/// The same answers to the same card go once: a card shown again with its
+/// answers kept (a turn that asks the same block again keeps its id), or
+/// answered from a second place (the Wall, the menu bar), sends nothing
+/// more and says so (Rust-only; an answer that didn't go can be sent
+/// again: keys::answer_failed forgets it).
 fn answer(m: &mut Model, key: &str, id: String, text: String) -> Out {
+    let sent = (id.clone(), text.trim().to_string());
+    if super::core(m).sent_answers.get(key) == Some(&sent) {
+        rush_ui_session_cards::question::answer_sent(m, key, &id);
+        m.flash("already sent");
+        return Out::Draw;
+    }
+    super::core(m).sent_answers.insert(key.to_string(), sent);
     if !conn(m, key).hosted() {
         return super::keys::send_offline_answer(m, key, text, id);
     }

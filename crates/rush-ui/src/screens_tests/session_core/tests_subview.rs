@@ -214,27 +214,44 @@ fn the_tab() {
     assert!(views::show_view(&mut m, KEY, "subagents"));
 }
 
-/// There's no view of one run alone: enter or space on a run in the list
-/// leaves it picked in the list, its conversation with it (Go's openSub
-/// opened it whole under a banner).
+/// enter or → on a run in the list opens it whole, as a session of its
+/// own: its conversation full width under a breadcrumb back; esc and ←
+/// go back to the list, the run still picked. space leaves it picked in
+/// the list, its conversation with it.
 #[test]
-fn a_run_never_opens_alone() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = model(&d);
-    views::show_view(&mut m, KEY, "subagents");
-    m.session.as_mut().unwrap().sel = "sub:x".into();
-    let _ = views::body(&mut m, 120, 20);
-    for k in ["enter", "space"] {
+fn enter_opens_a_run_whole() {
+    for k in ["enter", "right"] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = model(&d);
+        views::show_view(&mut m, KEY, "subagents");
+        m.session.as_mut().unwrap().sel = "sub:x".into();
+        let _ = views::body(&mut m, 120, 20);
+        press(&mut m, "space");
+        assert!(
+            super::runview::open_id(&m, KEY).is_none(),
+            "space opened it"
+        );
         press(&mut m, k);
-        assert_eq!(views::view_name(&m, KEY), "subagents", "{k}");
-        assert_eq!(sel(&m), "sub:x", "{k}");
+        assert_eq!(
+            super::runview::open_id(&m, KEY).as_deref(),
+            Some("x"),
+            "{k}"
+        );
+        let all = text(&m.frame());
+        assert!(all.contains("‹ port it › review the diff"), "{k}:\n{all}");
+        assert!(
+            all.contains("The diff is fine: one nit in view.go."),
+            "{k}:\n{all}"
+        );
+        assert!(!all.contains("Finished  2"), "the list still shows:\n{all}");
+        for back in ["esc", "left"] {
+            press(&mut m, back);
+            assert!(super::runview::open_id(&m, KEY).is_none(), "{back}");
+            assert_eq!(views::view_name(&m, KEY), "subagents", "{back}");
+            assert_eq!(sel(&m), "sub:x", "{back}");
+            press(&mut m, k);
+        }
     }
-    let body = text(&views::body(&mut m, 120, 20).unwrap());
-    assert!(!body.contains("‹ subagents"), "{body}");
-    assert!(
-        body.contains("The diff is fine: one nit in view.go."),
-        "{body}"
-    );
 }
 
 /// A run known only by its task has no conversation to show: it says
@@ -282,8 +299,8 @@ fn from_the_dock() {
     assert_eq!(sel(&m), "");
 }
 
-/// enter or → on a step a subagent made shows the subagents view with
-/// that run picked, and esc comes back to the step (rushmode.go:4270
+/// enter or → on a step a subagent made opens that run whole in the
+/// subagents view, and esc comes back to the step (rushmode.go:4270
 /// subOfStep, closeSub).
 #[test]
 fn enter_on_a_subagents_step_picks_it() {
@@ -299,6 +316,11 @@ fn enter_on_a_subagents_step_picks_it() {
         press(&mut m, k);
         assert_eq!(views::view_name(&m, KEY), "subagents", "{k}");
         assert_eq!(sel(&m), "sub:x", "{k}");
+        assert_eq!(
+            super::runview::open_id(&m, KEY).as_deref(),
+            Some("x"),
+            "{k}"
+        );
         let body = text(&views::body(&mut m, 150, 24).unwrap());
         assert!(body.contains("The diff is fine"), "{k}:\n{body}");
         press(&mut m, "esc");
@@ -467,10 +489,10 @@ fn nothing_beside_the_list_until_a_click() {
 }
 
 /// A click on a run picks it and shows it beside the list, with its
-/// facts, its conversation and a box to message it; nothing opens it
-/// across the whole view.
+/// facts, its conversation and a box to message it; a second click on it
+/// opens it whole, and esc comes back to the list.
 #[test]
-fn a_click_picks_a_run_and_never_opens_it() {
+fn a_click_picks_a_run_and_a_second_opens_it() {
     use crate::frame::Mouse;
     use rush_draw::{Button, MouseKind};
     let d = tempfile::tempdir().unwrap();
@@ -497,7 +519,10 @@ fn a_click_picks_a_run_and_never_opens_it() {
     assert!(all.contains("claude-opus-4-1 · 1 step"), "{all}");
     assert!(all.contains("to review the diff"), "{all}");
     click(&mut m);
-    press(&mut m, "enter");
+    assert_eq!(super::runview::open_id(&m, KEY).as_deref(), Some("x"));
+    let all = text(&m.frame());
+    assert!(all.contains("‹ port it › review the diff"), "{all}");
+    press(&mut m, "esc");
     assert_eq!(sel(&m), "sub:x");
     let all = text(&m.frame());
     assert!(all.contains("│  ✓ review the diff"), "{all}");
@@ -704,7 +729,7 @@ fn a_live_subagent_takes_the_box() {
     );
     let _ = m.frame();
     let hint = crate::sess::state(&mut m).hint.clone().unwrap().plain();
-    assert!(hint.starts_with("enter send to the subagent"), "{hint}");
+    assert!(hint.starts_with("enter send to review the diff"), "{hint}");
     typed(&mut m, "check the tests too");
     press(&mut m, "enter");
     let flash = m.flash.as_ref().map(|f| f.0.clone()).unwrap_or_default();
@@ -801,7 +826,7 @@ fn each_run_keeps_its_own_draft() {
 
 /// Session key's run x working in the background, in a session rush runs
 /// through fake, picked beside the wide list, not opened.
-fn picked_beside(d: &tempfile::TempDir, fake: &Arc<Fake>, inbox: bool) -> Model {
+pub(super) fn picked_beside(d: &tempfile::TempDir, fake: &Arc<Fake>, inbox: bool) -> Model {
     use super::host::Hosts;
     use rush_core::event::{Event, TaskKind, TaskStarted};
     let mut m = model(d);
@@ -827,7 +852,7 @@ fn picked_beside(d: &tempfile::TempDir, fake: &Arc<Fake>, inbox: bool) -> Model 
     m
 }
 
-fn typed(m: &mut Model, s: &str) {
+pub(super) fn typed(m: &mut Model, s: &str) {
     for c in s.chars() {
         let k = if c == ' ' {
             "space".into()
@@ -848,9 +873,9 @@ fn the_box_beside_the_list_messages_the_run() {
     let fake = Fake::new();
     let mut m = picked_beside(&d, &fake, true);
     let all = text(&m.frame());
-    assert!(all.contains("click here or press → to message it"), "{all}");
+    assert!(all.contains("tab or click here to message it"), "{all}");
     assert!(all.contains("into its inbox"), "{all}");
-    press(&mut m, "right");
+    press(&mut m, "tab");
     assert!(conn(&mut m, KEY).watch.msg_focus);
     typed(&mut m, "check tests");
     assert!(
@@ -874,7 +899,7 @@ fn the_box_beside_the_list_messages_the_run() {
     let mut m = picked_beside(&d, &fake, false);
     let all = text(&m.frame());
     assert!(all.contains("passes it on with SendMessage"), "{all}");
-    press(&mut m, "right");
+    press(&mut m, "tab");
     typed(&mut m, "stop");
     press(&mut m, "enter");
     match &fake.ops()[..] {
@@ -897,9 +922,9 @@ fn the_box_says_why_nothing_can_reach_the_run() {
     subview::pick_run(&mut m, KEY, "x");
     let all = text(&m.frame());
     assert!(all.contains("the session isn't running in rush"), "{all}");
-    press(&mut m, "right");
+    press(&mut m, "tab");
     assert!(!conn(&mut m, KEY).watch.msg_focus);
-    // Nothing opens it alone instead: it stays picked with the list.
+    // It stays picked with the list.
     assert_eq!(views::view_name(&m, KEY), "subagents");
     assert_eq!(sel(&m), "sub:x");
 }
@@ -1128,7 +1153,7 @@ fn row_of(m: &mut Model, id: &str) -> String {
 /// started and hm when w was asked, in local time.
 fn working_view(wf: &str, hm: &str) -> String {
     [
-        "  1 agent and 1 workflow running · 4 runs in all  ·  click one to see it h… │  · check the port's tests                                   running  57s",
+        "  1 agent and 1 workflow running · 4 runs in all  ·  click one to see it h… │  · check the port's tests                           running  57s  open ›",
         "                                                                            │    claude-opus-4-1 · 1 step · $0.02",
         "  Running  2                                                                │ ────────────────────────────────────────────────────────────────────────",
         "  · ⋔ Port rush t… · {wf}   · Port 1/3  ›  · C…  running              5m   │",
@@ -1181,7 +1206,7 @@ fn working_narrow(wf: &str, hm: &str) -> String {
         "▍ · check the port's tests                                    · run the tests…       57s",
         "",
         "──────────────────────────────────────────────────────────────────────────────────────────",
-        " · check the port's tests                                                     running  57s",
+        " · check the port's tests                                             running  57s  open ›",
         "   claude-opus-4-1 · 1 step · $0.02",
         "──────────────────────────────────────────────────────────────────────────────────────────",
         "",

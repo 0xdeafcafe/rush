@@ -167,6 +167,14 @@ impl Tail {
         t
     }
 
+    /// from_end for a subagent's own transcript: a long run's end read at
+    /// once, as a long session's is (Rust-only).
+    pub fn subagent_from_end(path: impl Into<PathBuf>, most: u64, decode: Decode) -> Tail {
+        let mut t = Tail::from_end(path, most, decode);
+        t.sidechain = true;
+        t
+    }
+
     fn start_at(&mut self, from: u64) {
         self.off = from - 1;
         self.cut = true;

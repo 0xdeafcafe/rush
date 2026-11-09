@@ -187,12 +187,21 @@ pub fn worktrees_in(s: &str) -> Vec<&str> {
         }
         let rest = &s[from..];
         let end = rest
-            .find(|c: char| c == '/' || c.is_whitespace() || c == '"' || c == '\'' || c == '\\')
+            .find(|c: char| {
+                c == '/'
+                    || c.is_whitespace()
+                    || matches!(c, '"' | '\'' | '\\' | '`' | ';' | ',')
+                    || matches!(c, ')' | '(' | '<' | '>' | '|' | '&' | '*')
+            })
             .unwrap_or(rest.len());
-        if end > 0 {
-            out.push(&rest[..end]);
-            from += end;
+        // A sentence's end isn't the name's: "…/worktrees/agent-a1." is
+        // agent-a1 (Rust-only: Go kept the ";" of "isolated in the
+        // worktree …/agent-a1;").
+        let name = rest[..end].trim_end_matches(['.', ':', '!', '?']);
+        if !name.is_empty() {
+            out.push(name);
         }
+        from += end;
     }
     out
 }
@@ -238,6 +247,18 @@ mod tests {
             assert_eq!(drop_cd(keep), keep);
         }
         assert_eq!(worktree_in("/a/worktrees/x and /b/.worktrees/y"), "y");
+        for (said, want) in [
+            (
+                "This agent is isolated in the worktree /r/.claude/worktrees/agent-a998;",
+                "agent-a998",
+            ),
+            ("see /r/.worktrees/lane-a, then", "lane-a"),
+            ("(in /r/.worktrees/lane-b)", "lane-b"),
+            ("it's in `/r/.worktrees/v1.2`.", "v1.2"),
+            ("done in /r/.worktrees/x: all green", "x"),
+        ] {
+            assert_eq!(worktree_in(said), want, "{said}");
+        }
         assert_eq!(worktree_in("myworktrees/x"), "");
         assert_eq!(
             worktrees_in("cd /r/.claude/worktrees/a && cp /r/.claude/worktrees/b/x ."),

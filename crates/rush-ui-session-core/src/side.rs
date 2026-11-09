@@ -481,12 +481,28 @@ pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
         None => (Vec::new(), Vec::new()),
     };
     if rows.is_empty() && runs.is_empty() {
-        part(
-            &mut side,
-            FAINT,
-            quiet_part("Running", "nothing now", tw),
-            Vec::new(),
-        );
+        // Its runs drawn elsewhere (the views panel), or not read yet:
+        // what its conversation says runs, as the header says it, never
+        // "nothing now" while the header says three run (Rust-only).
+        let lanes = m
+            .session
+            .as_ref()
+            .filter(|v| v.key == key)
+            .and_then(|v| crate::look::session_lanes(&v.sess));
+        match lanes {
+            Some(l) => part(
+                &mut side,
+                ORANGE,
+                vec![fit(side_head("Running", line([dim(l)])), tw)],
+                Vec::new(),
+            ),
+            None => part(
+                &mut side,
+                FAINT,
+                quiet_part("Running", "nothing now", tw),
+                Vec::new(),
+            ),
+        }
     }
     part(&mut side, ORANGE, rows, refs);
     for b in runs {

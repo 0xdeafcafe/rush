@@ -55,6 +55,12 @@ pub struct SubagentRuns {
     /// written before it, was cut off by the restart: none goes on in a
     /// new process (a restart's 'revived' and 'host-started').
     pub since: Ms,
+    /// The session's agent process is known to run now (seen among the
+    /// machine's processes). A run the transcripts call running then runs
+    /// however long it's quiet: a background agent waiting on a long build
+    /// writes nothing for minutes. RUN_STALE is only for when that can't
+    /// be told (Rust-only).
+    pub alive: bool,
 
     path: String,
     /// How far each transcript has been read; None until reset.
@@ -102,6 +108,10 @@ struct AgentCall {
     /// How a run the turn waited on ended.
     status: String,
     at: Ms,
+    /// The name the call gave its run (a SendMessage's `to` may be it),
+    /// and the agent id its launch said (Rust-only).
+    name: String,
+    agent: String,
 }
 
 #[derive(Clone, Default)]
@@ -137,6 +147,7 @@ impl SubagentRuns {
         *self = SubagentRuns {
             gone: self.gone,
             since: self.since,
+            alive: self.alive,
             path: path.to_string(),
             files: Some(HashMap::new()),
             ..SubagentRuns::default()
@@ -211,6 +222,7 @@ impl SubagentRuns {
         SubagentRuns {
             gone: self.gone,
             since: self.since,
+            alive: self.alive,
             path: self.path.clone(),
             seq: self.seq,
             calls: self.calls.clone(),
@@ -392,6 +404,7 @@ impl SubagentRuns {
                             bl.id.to_string(),
                             AgentCall {
                                 seq: self.seq,
+                                name: input_name(bl.input),
                                 ..AgentCall::default()
                             },
                         );
@@ -402,7 +415,22 @@ impl SubagentRuns {
                     "SendMessage" => {
                         let to = send_to(bl.input);
                         if !to.is_empty() {
-                            self.woken.insert(to, self.seq);
+                            // Sent to the run by the name its call gave it
+                            // as well as by its id: the run named wakes,
+                            // by its call and its agent id (Rust-only).
+                            let mut keys: Vec<String> = Vec::new();
+                            for (call, c) in &self.calls {
+                                if c.name == to || (!c.agent.is_empty() && c.agent == to) {
+                                    keys.push(call.clone());
+                                    if !c.agent.is_empty() {
+                                        keys.push(c.agent.clone());
+                                    }
+                                }
+                            }
+                            keys.push(to);
+                            for k in keys {
+                                self.woken.insert(k, self.seq);
+                            }
                         }
                     }
                     _ => {}
@@ -420,8 +448,17 @@ impl SubagentRuns {
                 }
                 (c.result, c.at, c.res_seq) = (true, line_time(b), seq);
                 self.unmet -= 1;
-                c.is_async =
-                    contains(b, br#""async_launched""#) || contains(b, b"Async agent launched");
+                // A background run's launch isn't its end, however its
+                // result says so: its toolUseResult's isAsync is enough
+                // without the status or the words (Rust-only: Go knew the
+                // first two). Not a phrase of its text: a run's own reply
+                // is in the same line, and may say anything.
+                c.is_async = contains(b, br#""async_launched""#)
+                    || contains(b, b"Async agent launched")
+                    || contains(b, br#""isAsync":true"#);
+                if c.is_async {
+                    c.agent = agent_id_in(b);
+                }
                 c.status = if interrupted(bl.content) {
                     "stopped"
                 } else if bl.is_error {
@@ -443,6 +480,11 @@ impl SubagentRuns {
             let Some(status) = status.first() else {
                 continue;
             };
+            // Word that a run still goes, or waits, isn't its end
+            // (Rust-only).
+            if matches!(status.as_str(), "running" | "pending") {
+                continue;
+            }
             let end = RunEnd {
                 status: if status == "killed" {
                     "stopped".into()
@@ -501,11 +543,13 @@ impl SubagentRuns {
                 end = e.clone();
             }
         }
-        if !id.is_empty()
-            && let Some(&w) = self.woken.get(id)
-            && w as i64 > run
-        {
-            run = w as i64;
+        for k in [id, tool_use_id] {
+            if !k.is_empty()
+                && let Some(&w) = self.woken.get(k)
+                && w as i64 > run
+            {
+                run = w as i64;
+            }
         }
         if run < 0 && done < 0 {
             return (RunState::Unknown, String::new(), 0);
@@ -541,6 +585,10 @@ impl SubagentRuns {
                 }
                 if self.cut(mod_time) {
                     return (false, "stopped".into());
+                }
+                // Its process seen running, a quiet run is no dead one.
+                if self.alive {
+                    return (true, String::new());
                 }
                 (mod_time == 0 || now - mod_time < RUN_STALE, String::new())
             }
@@ -666,6 +714,9 @@ impl adapter::SubagentRuns for SubagentRuns {
     fn set_since(&mut self, since: Ms) {
         self.since = since;
     }
+    fn set_alive(&mut self, alive: bool) {
+        self.alive = alive;
+    }
     fn cut(&self, mod_time: Ms) -> bool {
         SubagentRuns::cut(self, mod_time)
     }
@@ -765,6 +816,43 @@ struct Block<'a> {
     input: Option<&'a RawValue>,
     #[serde(borrow)]
     content: Option<&'a RawValue>,
+}
+
+/// The name an Agent call gives its run (its input's `name`), "" for none.
+fn input_name(input: Option<&RawValue>) -> String {
+    let Some(v) = input else {
+        return String::new();
+    };
+    if !v.get().contains(r#""name""#) {
+        return String::new();
+    }
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct Named {
+        #[serde(deserialize_with = "nd")]
+        name: String,
+    }
+    serde_json::from_str::<Named>(v.get())
+        .map(|n| n.name)
+        .unwrap_or_default()
+}
+
+/// The agent id a background launch's result line says: its
+/// toolUseResult's `agentId`, else its text's "agentId: <id>"; "" for none.
+fn agent_id_in(b: &[u8]) -> String {
+    for mark in [&br#""agentId":""#[..], &b"agentId: "[..]] {
+        if let Some(i) = memmem::find(b, mark) {
+            let rest = &b[i + mark.len()..];
+            let n = rest
+                .iter()
+                .take_while(|c| c.is_ascii_alphanumeric() || **c == b'-' || **c == b'_')
+                .count();
+            if n > 0 {
+                return String::from_utf8_lossy(&rest[..n]).into_owned();
+            }
+        }
+    }
+    String::new()
 }
 
 /// A SendMessage call's input: who it's to.
@@ -1030,6 +1118,133 @@ mod tests {
             r.going("a1", "t1", ms(quiet), now()),
             (false, "ended".into())
         );
+    }
+
+    /// The lines given, read as the session's transcript's.
+    fn fed(lines: &[String]) -> SubagentRuns {
+        let mut r = SubagentRuns::new();
+        for l in lines {
+            r.took("s.jsonl", l.as_bytes());
+        }
+        r
+    }
+
+    fn result(id: &str, text: &str, extra: &str) -> String {
+        format!(
+            r#"{{"type":"user","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"{id}","content":"{text}"}}]}}{extra}}}"#
+        )
+    }
+
+    fn notice(id: &str, call: &str, status: &str) -> String {
+        format!(
+            r#"{{"type":"user","timestamp":"2026-09-27T20:09:00Z","message":{{"role":"user","content":"<task-notification>\n<task-id>{id}</task-id>\n<tool-use-id>{call}</tool-use-id>\n<status>{status}</status>\n</task-notification>"}}}}"#
+        )
+    }
+
+    // Rust-only: a run its transcripts call running, quiet past
+    // RUN_STALE, runs while its session's process is seen running; gone
+    // or restarted since, it doesn't, whatever alive says.
+    #[test]
+    fn a_quiet_run_runs_while_its_process_does() {
+        let t = now();
+        let last = t - 20 * 60_000;
+        // gone, alive, since, then going.
+        let cases: &[(bool, bool, Ms, (bool, &str))] = &[
+            (false, false, 0, (false, "")),
+            (false, true, 0, (true, "")),
+            (true, true, 0, (false, "ended")),
+            (false, true, last + 1, (false, "stopped")),
+        ];
+        for &(gone, alive, since, (g, how)) in cases {
+            let mut r = fed(&[use_("t1", "Agent", r#"{"description":"build"}"#)]);
+            adapter::SubagentRuns::set_gone(&mut r, gone);
+            adapter::SubagentRuns::set_alive(&mut r, alive);
+            adapter::SubagentRuns::set_since(&mut r, since);
+            let want = (g, how.to_string());
+            let case = (gone, alive, since);
+            assert_eq!(r.going("a1", "t1", last, t), want, "{case:?}");
+            // As the UI asks it, and after a rewind reads it all again.
+            assert_eq!(r.clone_state().going("a1", "t1", last, t), want, "{case:?}");
+            r.reset("s.jsonl");
+            assert_eq!(r.alive, alive, "{case:?}: reset forgot alive");
+        }
+    }
+
+    // Rust-only: however a call's result words a background launch, the
+    // run goes on after it; any other result is the run's end.
+    #[test]
+    fn a_background_launch_however_worded() {
+        let cases: &[(&str, &str, RunState)] = &[
+            ("Async agent launched successfully.", "", RunState::Running),
+            (
+                "ok",
+                r#","toolUseResult":{"isAsync":true,"agentId":"a1"}"#,
+                RunState::Running,
+            ),
+            ("found it", "", RunState::Done),
+            (
+                "left the build working in the background",
+                "",
+                RunState::Done,
+            ),
+        ];
+        for &(text, extra, want) in cases {
+            let r = fed(&[
+                use_("t1", "Agent", r#"{"description":"scout"}"#),
+                result("t1", text, extra),
+            ]);
+            assert_eq!(r.state("", "t1").0, want, "{text:?} {extra:?}");
+        }
+    }
+
+    // Rust-only: a message to a finished run wakes it whether it's sent to
+    // the run's agent id or the name its call gave it; one to another
+    // doesn't.
+    #[test]
+    fn a_message_by_name_wakes_its_run() {
+        let cases: &[(&str, RunState)] = &[
+            ("a1", RunState::Running),
+            ("scout", RunState::Running),
+            ("other", RunState::Done),
+        ];
+        for &(to, want) in cases {
+            let send = format!(r#"{{"to":"{to}","message":"more"}}"#);
+            let r = fed(&[
+                use_(
+                    "t1",
+                    "Agent",
+                    r#"{"description":"look","name":"scout","run_in_background":true}"#,
+                ),
+                launched("t1", "a1"),
+                notice("a1", "t1", "completed"),
+                use_("t2", "SendMessage", &send),
+            ]);
+            assert_eq!(r.state("a1", "t1").0, want, "to {to}");
+            assert_eq!(r.state("", "t1").0, want, "to {to}, by its call alone");
+        }
+    }
+
+    // Rust-only: a notice that a run still goes, or waits, isn't its end.
+    #[test]
+    fn an_interim_notice_isnt_an_end() {
+        let cases: &[(&str, RunState)] = &[
+            ("running", RunState::Running),
+            ("pending", RunState::Running),
+            ("completed", RunState::Done),
+            ("killed", RunState::Done),
+        ];
+        for &(status, want) in cases {
+            let r = fed(&[
+                use_(
+                    "t1",
+                    "Agent",
+                    r#"{"description":"look","run_in_background":true}"#,
+                ),
+                launched("t1", "a1"),
+                notice("a1", "t1", status),
+            ]);
+            assert_eq!(r.state("a1", "t1").0, want, "{status}");
+        }
     }
 
     // A host restarted after a run's last write killed it: the call its

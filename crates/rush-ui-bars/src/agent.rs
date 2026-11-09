@@ -964,15 +964,17 @@ pub fn state_words(o: &Of, now: Ms) -> Line {
             sp(" · its last message asks", YELLOW),
         ]);
     }
-    if !a.job.background.is_empty() {
+    // What its open conversation says it runs, the column beside it says
+    // too: the two agree (Rust-only; Go said its host's word alone).
+    let own = sess.and_then(crate::look::session_lanes);
+    if !a.job.background.is_empty() || own.is_some() {
         // Its turn ended with a workflow, subagents or shells still at
         // work: the list has it under Working, so the pane isn't "idle".
         // Its host's background tasks, as the fleet read them from its
-        // info (rushmode.go paneHeader's info.Background).
-        return line([
-            spb("working", ORANGE),
-            sp(format!(" · {}", crate::look::lanes_line(a)), ORANGE),
-        ]);
+        // info (rushmode.go paneHeader's info.Background), when its
+        // conversation doesn't say.
+        let lanes = own.unwrap_or_else(|| crate::look::lanes_line(a));
+        return line([spb("working", ORANGE), sp(format!(" · {lanes}"), ORANGE)]);
     }
     one(dim("idle"))
 }

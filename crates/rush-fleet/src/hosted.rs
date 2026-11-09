@@ -21,6 +21,9 @@ pub struct HostTask {
     pub kind: String,
     pub label: String,
     pub started_at: Ms,
+    /// The subagent's task that started it, if one did: the subagent's
+    /// own work, counted with it, not the session's (Rust-only).
+    pub parent: String,
 }
 
 /// A usage limit that stopped the session (host.Limit).

@@ -367,7 +367,9 @@ pub fn show_profile(cfg: &rush_state::Config, name: &str) -> bool {
     !name.is_empty() && !name.eq_ignore_ascii_case(&cfg.default_profile().name)
 }
 
-/// What a busy agent still runs (lanesLine).
+/// What a busy agent still runs (lanesLine), from its host's word: its
+/// subagents' own commands are the subagents' (the fleet leaves them
+/// out), not tasks of its own.
 pub fn lanes_line(a: &Agent) -> String {
     let (mut agents, mut workflows, mut other) = (0, 0, 0);
     for b in &a.job.background {
@@ -379,6 +381,22 @@ pub fn lanes_line(a: &Agent) -> String {
             other += 1;
         }
     }
+    lanes_words(agents, workflows, other)
+}
+
+/// What session s runs in the background, as its own conversation says
+/// (Session::background_counts): what the Session's header and its column
+/// beside the conversation both say while it's open, so they agree
+/// (Rust-only). None when nothing runs.
+pub fn session_lanes(s: &rush_convo::Session) -> Option<String> {
+    let (agents, workflows, other) = s.background_counts();
+    (agents + workflows + other > 0).then(|| lanes_words(agents, workflows, other))
+}
+
+/// How many workflows, subagents and other tasks run, in words: "2
+/// subagents running, 1 task running"; "background work running" for
+/// none.
+pub fn lanes_words(agents: usize, workflows: usize, other: usize) -> String {
     let s = |n: usize| if n == 1 { "" } else { "s" };
     let mut parts = Vec::new();
     if workflows > 0 {

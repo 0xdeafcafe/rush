@@ -300,6 +300,12 @@ pub struct Options {
     /// how far it's got, the time left). Set by whoever reads them.
     /// Rust-only.
     pub tasks: HashMap<String, Line>,
+    /// The runs a harness's own subagent calls started in the background,
+    /// by the call's id: a row (its mark, what it was asked, how it
+    /// stands, "open ›") drawn in place of the boilerplate the call
+    /// returned ("Async agent launched… output_file… Do NOT Read…").
+    /// Set by whoever reads the runs. Rust-only.
+    pub runs: HashMap<String, Line>,
 }
 
 /// What a running shell step is doing now: a line from its processes, and
@@ -410,6 +416,26 @@ struct TurnKey {
     shells: u64,
     /// The rows of its calls' background tasks, as they stand (tasks).
     tasks: u64,
+    /// The rows of its subagent calls' runs, as they stand (runs).
+    runs: u64,
+}
+
+/// What turn t's subagent calls' runs draw as now: their rows in o.runs,
+/// for the turn's key.
+fn runs_sig(s: &Session, t: &crate::model::Turn, o: &Options) -> u64 {
+    let mut h = DefaultHasher::new();
+    for it in &t.items {
+        let Item::Step(id) = it else { continue };
+        let st = s.step(*id);
+        let Some(row) = o.runs.get(&*st.id) else {
+            continue;
+        };
+        st.id.hash(&mut h);
+        for sp in &row.spans {
+            (sp.text.as_str(), sp.style).hash(&mut h);
+        }
+    }
+    h.finish()
 }
 
 /// What turn t's calls' background tasks draw as now: their rows in
@@ -680,6 +706,9 @@ impl Renderer {
         }
         if !o.tasks.is_empty() {
             k.tasks = tasks_sig(s, t, o);
+        }
+        if !o.runs.is_empty() {
+            k.runs = runs_sig(s, t, o);
         }
         if o.preset == Preset::CatchUp {
             let last = i + 1 == s.turns.len();

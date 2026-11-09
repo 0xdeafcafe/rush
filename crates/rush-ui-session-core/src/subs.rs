@@ -408,6 +408,9 @@ pub struct Reader {
     calls: Vec<String>,
     /// The run shown whole, and its tail.
     detail: Option<(String, Tail)>,
+    /// The run shown whole is long: its tail began at its end, and the
+    /// whole of it is read next, after its end has shown.
+    detail_cut: bool,
     /// Each run read whole for Changes, by id: how big its transcript
     /// was when read (fullSubs), and, one in Claude Code's format, its
     /// tail and the session it's read on into, shared with the UI.
@@ -442,6 +445,11 @@ enum DetailGot {
     /// The whole of it as its numbers were read (Reader::tails), with
     /// what was written since: its first reading.
     Seeded(Box<Session>),
+    /// A long run's end, read first so it opens at once at its end (as
+    /// a long session opens): its whole is read next.
+    End(rush_convo::Fresh),
+    /// The whole of a long run whose end showed first.
+    Whole(Box<Session>),
     Events(Vec<rush_core::event::Event>),
     Failed(String),
 }
@@ -678,6 +686,9 @@ impl Ask {
                 }
                 if let Some(f) = r.follow.as_mut() {
                     f.set_gone(self.gone);
+                    // Its session's process still holds it: a quiet run
+                    // is working, not done (only a real end ends it).
+                    f.set_alive(!self.gone);
                     f.set_since(self.since());
                     f.update_runs(&self.path, &sub_runs(&subs));
                     got.follow = Some(f.clone_runs());
@@ -882,14 +893,48 @@ fn read_detail(
                     && t.read(&mut s).is_ok()
                 {
                     r.detail = Some((id.to_string(), t));
+                    r.detail_cut = false;
                     return DetailGot::Seeded(s);
                 }
-                let t = if *whole {
+                // Rust-only: a long one's end first, at once, as a long
+                // session opens; its whole after. Read from its start a
+                // slice a time, a long run opened at its first turn.
+                let end = crate::worker::TAIL_END;
+                let long = std::fs::metadata(path).is_ok_and(|m| m.len() > end);
+                let t = match (*whole, long) {
+                    (true, false) => Tail::new(path, decode.clone()),
+                    (false, false) => Tail::subagent(path, decode.clone()),
+                    (true, true) => Tail::from_end(path, end, decode.clone()),
+                    (false, true) => Tail::subagent_from_end(path, end, decode.clone()),
+                };
+                r.detail = Some((id.to_string(), t));
+                r.detail_cut = long;
+                if long {
+                    let Some((_, t)) = r.detail.as_mut() else {
+                        unreachable!("the tail was just set")
+                    };
+                    return match t.fetch_most(end as usize) {
+                        Ok(f) => DetailGot::End(f),
+                        Err(e) => DetailGot::Failed(e.to_string()),
+                    };
+                }
+            } else if r.detail_cut {
+                // Its end has shown: now the whole of it, read on from
+                // there as it grows.
+                r.detail_cut = false;
+                let mut t = if *whole {
                     Tail::new(path, decode.clone())
                 } else {
                     Tail::subagent(path, decode.clone())
                 };
-                r.detail = Some((id.to_string(), t));
+                let mut s = Session::new();
+                return match t.read(&mut s) {
+                    Ok(_) => {
+                        r.detail = Some((id.to_string(), t));
+                        DetailGot::Whole(Box::new(s))
+                    }
+                    Err(e) => DetailGot::Failed(e.to_string()),
+                };
             }
             let Some((_, t)) = r.detail.as_mut() else {
                 unreachable!("the tail was just set")
@@ -2002,6 +2047,15 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
                 });
             }
             DetailGot::Seeded(s) => det.view.seed(*s),
+            DetailGot::End(f) => {
+                // Its end in view; its whole read at once after.
+                more = true;
+                det.view.take(rush_convo::reading::Slice {
+                    got: rush_convo::reading::Got::Lines(f),
+                    more: false,
+                });
+            }
+            DetailGot::Whole(s) => det.view.take_whole(*s),
             DetailGot::Events(evs) => det.view.take_events(evs, true),
             DetailGot::Failed(e) => {
                 det.view.read = true;

@@ -475,6 +475,68 @@ fn a_running_workflow_says_working() {
     );
 }
 
+/// The header says what the open conversation says runs, as the column
+/// beside it does, over its host's word: three subagents, each with a
+/// command of its own, are three subagents running, not tasks besides
+/// (Rust-only).
+#[test]
+fn the_header_says_what_the_conversation_runs() {
+    use crate::host::Info;
+    use rush_core::event::{Background, BackgroundTask, Event, TaskKind, TaskStarted};
+    let mut m = opened("default");
+    if let Some(a) = m.agents.iter_mut().find(|a| a.key == KEY) {
+        a.job.in_flight = 7;
+        a.job.background = vec![
+            "agent\0a".into(),
+            "agent\0b".into(),
+            "agent\0c".into(),
+            "task\0x".into(),
+        ];
+    }
+    let mut s = rush_convo::Session::new();
+    for id in ["a1", "a2", "a3"] {
+        s.apply(
+            &Event::TaskStarted(TaskStarted {
+                id: id.into(),
+                kind: TaskKind::Subagent,
+                agent: "Explore".into(),
+                background: true,
+                ..TaskStarted::default()
+            }),
+            NOW,
+        );
+    }
+    let bg = |id: &str, kind: TaskKind, parent: &str| BackgroundTask {
+        id: id.into(),
+        kind,
+        parent: parent.into(),
+        ..BackgroundTask::default()
+    };
+    s.apply(
+        &Event::Background(Background {
+            tasks: vec![
+                bg("a1", TaskKind::Subagent, ""),
+                bg("a2", TaskKind::Subagent, ""),
+                bg("a3", TaskKind::Subagent, ""),
+                bg("b1", TaskKind::Shell, "a1"),
+                bg("b2", TaskKind::Shell, "a2"),
+            ],
+        }),
+        NOW,
+    );
+    let info = Info::default();
+    let cases: [(Option<&rush_convo::Session>, &str); 2] = [
+        (Some(&s), "working · 3 subagents running"),
+        (None, "working · 3 subagents running, 1 task running"),
+    ];
+    for (sess, want) in cases {
+        let mut o = super::agent::Of::read(&m, KEY).unwrap();
+        o.info = Some(&info);
+        o.sess = sess;
+        assert_eq!(super::agent::state_words(&o, NOW).plain(), want);
+    }
+}
+
 /// Billing and an older rush from its host's info (bars.go:188, :210;
 /// stale.go:41): a host from before it said its rush is never older.
 #[test]

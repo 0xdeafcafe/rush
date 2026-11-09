@@ -90,6 +90,13 @@ pub fn give_back(m: &mut Model, key: &str, id: &str, text: &str) {
 /// The box's lines, w wide: the queue card when anything waits, then
 /// the box (subPreviewLines' box).
 pub fn lines(m: &mut Model, key: &str, id: &str, w: usize) -> Vec<Line> {
+    let focused = conn(m, key).watch.msg_focus;
+    lines_for(m, key, id, w, focused)
+}
+
+/// lines, with the keys or without them: a run open whole (runview.rs)
+/// has its box alone, and it has them.
+pub fn lines_for(m: &mut Model, key: &str, id: &str, w: usize, focused: bool) -> Vec<Line> {
     let rt = super::relay::route(m, key, id);
     let name = runs_of(m, key)
         .and_then(|r| r.subs.iter().find(|sa| sa.id == id))
@@ -101,7 +108,7 @@ pub fn lines(m: &mut Model, key: &str, id: &str, w: usize) -> Vec<Line> {
     };
     let send_now = super::spawned::send_now_key(m);
     let q = queue_of(m, key, id);
-    let focused = conn(m, key).watch.msg_focus && rt.is_ok();
+    let focused = focused && rt.is_ok();
     let d = draft(m, key, id).clone();
     let mut out = Vec::new();
     if !q.items.is_empty() {
@@ -146,7 +153,7 @@ pub fn lines(m: &mut Model, key: &str, id: &str, w: usize) -> Vec<Line> {
             (Ok(_), true) => {
                 format!("a message for it · enter sends · {send_now} now · esc leaves")
             }
-            (Ok(_), false) => "click here or press → to message it".into(),
+            (Ok(_), false) => "tab or click here to message it".into(),
         },
         lead: line([sp("❯ ", if typing { ORANGE } else { FAINT })]),
         max_rows: 6,
@@ -185,10 +192,17 @@ pub fn hint(m: &mut Model, key: &str, id: &str, w: usize) -> Line {
             ],
         );
     }
-    let mut pairs = vec![
-        ("enter", "send to the subagent"),
-        (send_now.as_str(), "send now"),
-    ];
+    // The run it goes to, by name: the one box on screen says whose it is.
+    let name = runs_of(m, key)
+        .and_then(|r| r.subs.iter().find(|sa| sa.id == id))
+        .map(sub_task)
+        .unwrap_or_default();
+    let to = if name.is_empty() {
+        "send to the subagent".to_string()
+    } else {
+        format!("send to {}", rush_draw::truncate(&name, 32, "…"))
+    };
+    let mut pairs = vec![("enter", to.as_str()), (send_now.as_str(), "send now")];
     if !queue_of(m, key, id).items.is_empty() {
         pairs.push(("↑", "the queue"));
     }
@@ -196,7 +210,11 @@ pub fn hint(m: &mut Model, key: &str, id: &str, w: usize) -> Line {
         pairs.push(("alt+o", "its own session"));
     }
     pairs.push(("ctrl+v", "image"));
-    pairs.push(("tab · esc", "back to the list"));
+    if super::runview::open_id(m, key).is_some() {
+        pairs.push(("esc", "back to subagents"));
+    } else {
+        pairs.push(("tab · esc", "back to the list"));
+    }
     fit_keys(w, &pairs)
 }
 
@@ -230,6 +248,16 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     // not found) lets the keys go rather than keep them (Rust-only).
     if super::relay::route(m, &key, &id).is_err() {
         conn(m, &key).watch.msg_focus = false;
+        return Out::Pass;
+    }
+    run_key(m, &key, &id, k)
+}
+
+/// Key k in run id's box: typing, sending, its queue's keys. The box
+/// beside the list's (key) and a run open whole's (runview.rs).
+pub fn run_key(m: &mut Model, key: &str, id: &str, k: &Press) -> Out {
+    let (key, id) = (key.to_string(), id.to_string());
+    if super::relay::route(m, &key, &id).is_err() {
         return Out::Pass;
     }
     let s = k.s.as_str();

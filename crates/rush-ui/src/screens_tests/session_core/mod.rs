@@ -23,6 +23,7 @@ mod tests_pastes;
 mod tests_plugins;
 mod tests_presets;
 mod tests_reopen;
+mod tests_runview;
 mod tests_scripts;
 mod tests_shellbox;
 mod tests_slash;

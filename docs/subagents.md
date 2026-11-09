@@ -243,3 +243,11 @@ as guidance mid-turn where the agent can take that.
   host went without saying, else done. Its row under the parent in the
   list is ● while it (or one it started) waits on you, and says how it
   ended for a minute after.
+- A run opens whole from the parent's Subagents list (enter or →, a
+  second click, or "open ›"): its conversation full width as a session's,
+  under `‹ parent › run`, with Conversation, Overview, Changes and Tasks
+  tabs and the run's own box; esc goes back to the list with it picked.
+  A hosted child opened as its own session (alt+o) has the same
+  breadcrumb on its header, back to the parent's list.
+- The Agent tool's background launch text isn't shown; its step is drawn
+  as the run's own row (`✢ task · working…  open ›`).

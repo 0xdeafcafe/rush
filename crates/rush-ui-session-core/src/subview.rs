@@ -4,12 +4,12 @@
 //! earlier tries folded under the try that replaced them. The run picked
 //! shows with the list: its facts, its conversation (with its working line
 //! while it works) and a box to message it; beside the list when there's
-//! room, under a short list of the runs when there isn't. There is no view
-//! of one run alone: everything that opens a run (a subagent's step, the
-//! dock, a card's link) shows this view with it picked, and esc goes back
-//! where it came from. Where the user asked, this parts from Go: one line
-//! a run rather than two, the run picked never opened whole, the branch
-//! from where the run worked. After Go's internal/ui/rushmode.go (views
+//! room, under a short list of the runs when there isn't. enter or → on
+//! it, a second click, or "open ›" over it opens it whole, as a session
+//! of its own looks (runview.rs); a subagent's step opens it so too, the
+//! dock and a card's link pick it here; esc goes back where it came from.
+//! Where the user asked, this parts from Go: one line a run rather than
+//! two, the branch from where the run worked. After Go's internal/ui/rushmode.go (views
 //! :47, cycleSub :734, watchRun :809, subHoverAt :990, subagentLines
 //! :1039, subagentList :1059, subRow.appendTo :1213, subEffort :1231,
 //! tabStat's subagents :1469, paneKey's subagents keys :4255-4262, moveSel
@@ -79,7 +79,18 @@ pub struct Watch {
     /// The run picked from elsewhere whose box takes the keys once it's
     /// drawn, if a message can reach it (Rust-only).
     pub focus_next: String,
+    /// The run open whole, its own screen in the Session's (runview.rs).
+    pub open: Option<super::runview::Open>,
+    /// The row last clicked in the list, and when: a second click on it
+    /// soon after opens it whole.
+    pub last_click: (String, Ms),
+    /// A hosted child's breadcrumb back to its parent, screen cells
+    /// (runview::child_crumb).
+    pub child_crumb: (usize, usize),
 }
+
+/// How soon a second click on a row opens it, as the Wall's does.
+const DOUBLE_CLICK_MS: Ms = 400;
 
 /// The run's conversation beside the wide list, as last drawn
 /// (subPreview).
@@ -99,6 +110,8 @@ pub struct Peek {
     pub w: usize,
     pub h: usize,
     pub visible: bool,
+    /// Its head's "open ›": from and to, and the row, screen cells.
+    pub open_at: (usize, usize, usize),
 }
 
 /// Whether the list is wide enough for a run's conversation beside it
@@ -189,7 +202,7 @@ pub fn src_of(m: &Model, key: &str, id: &str) -> Option<DetailSrc> {
 }
 
 /// Shows run id whole: read from the start, at once (subDetail).
-fn show_detail(m: &mut Model, key: &str, id: &str, src: DetailSrc) {
+pub fn show_detail(m: &mut Model, key: &str, id: &str, src: DetailSrc) {
     let r = &mut conn(m, key).runs;
     if r.detail
         .as_ref()
@@ -418,7 +431,7 @@ struct List<'a> {
 pub const TRIES_REF: &str = "tries:";
 
 /// How long a run has gone, or went.
-fn took_of(st: Option<&RunStat>, live: bool, now: Ms) -> String {
+pub fn took_of(st: Option<&RunStat>, live: bool, now: Ms) -> String {
     let (first, last) = st.map_or((0, 0), |t| (t.first, t.last));
     let end = if live { now } else { last };
     if first > 0 && end > 0 {
@@ -465,7 +478,7 @@ fn short_status(r: &Row, w: usize, tick: usize) -> Line {
 
 /// The run's facts: what runs it, where it works, its steps, what it
 /// cost and its effort (subagentList's second row).
-fn facts_of(r: &Runs, sa: &Subagent, home: &str, w: usize) -> Vec<String> {
+pub fn facts_of(r: &Runs, sa: &Subagent, home: &str, w: usize) -> Vec<String> {
     let kind = kind_of(r, home, &sa.id);
     let st = r.stats.get(&sa.id);
     let mut facts: Vec<String> = Vec::new();
@@ -877,15 +890,68 @@ pub fn list(m: &mut Model, key: &str, w: usize, wide: bool) -> Vec<(Line, String
             }
         }
         items.sort_by_key(|it| std::cmp::Reverse(it.0));
-        for (_, g, i) in items {
+        // Finished, the newest few show; the rest fold under Earlier but
+        // those that failed or were stopped, and the one picked, which
+        // stay in sight (Rust-only: a long session's 248 were one list).
+        let keep = |it: &(Ms, Option<&Group>, usize)| match it.1 {
+            Some(g) => sel == g.r#ref(),
+            None => {
+                let r = &rows[it.2];
+                matches!(r.status.as_str(), "failed" | "stopped")
+                    || sel == format!("sub:{}", r.sa.id)
+            }
+        };
+        let (shown, earlier) = if live {
+            (items, Vec::new())
+        } else {
+            let (mut shown, mut earlier) = (Vec::new(), Vec::new());
+            for (n, it) in items.into_iter().enumerate() {
+                if n < EARLIER_AFTER || keep(&it) {
+                    shown.push(it);
+                } else {
+                    earlier.push(it);
+                }
+            }
+            (shown, earlier)
+        };
+        for (_, g, i) in shown {
             match g {
                 Some(g) => l.group(g, &by_id),
                 None => l.draw(&rows[i], i, "", false),
             }
         }
+        if !earlier.is_empty() {
+            let open = l.open.contains(EARLIER_REF);
+            let row = line([
+                plain("  "),
+                faint(if open { "▾ " } else { "▸ " }),
+                dim(format!("Earlier · {}", earlier.len())),
+                faint(if open { "" } else { " · click to show" }),
+            ]);
+            let row = if sel == EARLIER_REF {
+                picked1(row, w, true)
+            } else {
+                fit(row, w)
+            };
+            l.out.push((row, EARLIER_REF.to_string()));
+            if open {
+                for (_, g, i) in earlier {
+                    match g {
+                        Some(g) => l.group(g, &by_id),
+                        None => l.draw(&rows[i], i, "", false),
+                    }
+                }
+            }
+        }
     }
     l.out
 }
+
+/// The fold the older finished runs go under.
+pub const EARLIER_REF: &str = "earlier:runs";
+
+/// How many finished runs show before the rest fold under Earlier.
+pub const EARLIER_AFTER: usize = 8;
 
 /// The run whose conversation shows beside the wide list: the one picked,
 /// and only once it's picked; the pointer passing over the list moves
@@ -893,6 +959,9 @@ pub fn list(m: &mut Model, key: &str, w: usize, wide: bool) -> Vec<(Line, String
 fn peek_id(m: &Model) -> Option<String> {
     sel(m).strip_prefix("sub:").map(str::to_string)
 }
+
+/// What a click on opens a run whole, at the right of its head.
+const OPEN_WORD: &str = "open ›";
 
 /// The column's top rows for run id: how it stands, then its facts.
 fn peek_head(m: &mut Model, key: &str, id: &str, w: usize) -> Vec<Line> {
@@ -917,6 +986,9 @@ fn peek_head(m: &mut Model, key: &str, id: &str, w: usize) -> Vec<Line> {
     if !took.is_empty() {
         right.spans.push(dim(format!("  {took}")));
     }
+    // It opens whole from here (runview.rs); peek() keeps where.
+    right.spans.push(plain("  "));
+    right.spans.push(sp(OPEN_WORD, SUB));
     let name =
         rush_draw::truncate(&sub_task(sa), w.saturating_sub(right.width() + 6), "…").into_owned();
     let top = spread(
@@ -1154,6 +1226,7 @@ fn peek(m: &mut Model, key: &str, id: &str, right: &mut [Line], pw: usize, (x, y
     p.w = pw;
     p.h = rows;
     p.visible = true;
+    p.open_at = (x + pw.saturating_sub(width(OPEN_WORD)), x + pw, y);
     if let Some(d) = c.runs.detail.as_mut().filter(|d| d.id == id) {
         let v = &mut d.view;
         v.sync(pw, now, tick);
@@ -1257,6 +1330,75 @@ pub fn key_first(m: &mut Model, k: &Press) -> Out {
     }
 }
 
+/// The list's own keys, before the cards' and the box's: ↑↓ move the pick
+/// through the list whatever has them (the run's box, empty, gives them
+/// up; the cards' ↑ from an empty box doesn't take them here), ↓ with
+/// nothing picked picks the first row in sight; enter or → on a run opens
+/// it whole (runview.rs). Rust-only: ↑↓ went to the box a click had
+/// focused, or to the cards, and never moved the pick.
+pub fn list_key(m: &mut Model, k: &Press) -> Out {
+    let Some(key) = open_key(m) else {
+        return Out::Pass;
+    };
+    if m.confirm.is_some() || m.sheet.is_some() || m.on_place() {
+        return Out::Pass;
+    }
+    if super::views::view_name(m, &key) != "subagents" || super::runview::open_id(m, &key).is_some()
+    {
+        return Out::Pass;
+    }
+    let s = k.s.as_str();
+    let focus = conn(m, &key).watch.msg_focus;
+    let bx = box_run(m, &key).filter(|_| focus);
+    // The run's box with the keys keeps them while it has something typed
+    // or a queued message picked, and ↑ for its queue.
+    if let Some(id) = &bx {
+        let d = super::subbox::draft(m, &key, id);
+        if !d.input.is_empty() || d.pick.is_some() || d.edit_q > 0 {
+            return Out::Pass;
+        }
+        if s == "up" && !super::subbox::queue_of(m, &key, id).items.is_empty() {
+            return Out::Pass;
+        }
+    } else if focus {
+        return Out::Pass;
+    }
+    let own_empty = conn(m, &key).input.is_empty();
+    let picked = sel(m);
+    match s {
+        "up" | "down" if bx.is_some() || own_empty || !picked.is_empty() => {
+            conn(m, &key).watch.msg_focus = false;
+            if s == "down" && picked.is_empty() {
+                let first = conn(m, &key)
+                    .vs
+                    .refs
+                    .iter()
+                    .find(|r| !r.is_empty())
+                    .cloned();
+                match first {
+                    Some(r) => set_sel(m, r),
+                    None => return Out::Idle,
+                }
+            } else {
+                super::views::move_sel(m, &key, if s == "up" { -1 } else { 1 });
+            }
+            Out::Draw
+        }
+        "enter" | "right"
+            if bx.is_none()
+                && own_empty
+                && picked.starts_with("sub:")
+                && !is_fold(m, &key, &picked) =>
+        {
+            if super::runview::open(m, &key, &picked[4..]) {
+                return Out::Draw;
+            }
+            Out::Pass
+        }
+        _ => Out::Pass,
+    }
+}
+
 /// enter, space or → on a run picked in the list gives its box the keys;
 /// on a subagent's step in the conversation (enter or →) or a run in the
 /// dock, shows it picked in the subagents view; on a workflow, its
@@ -1285,6 +1427,8 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
                 && src_of(m, &key, &id).is_some() =>
         {
             pick_from(m, &key, &id, &picked);
+            // Opened whole, as a session; esc comes back to the step.
+            super::runview::open(m, &key, &id);
             Out::Draw
         }
         "enter" | "space" | " " | "right" if !picked.is_empty() => {
@@ -1450,7 +1594,7 @@ fn toggle_fold(m: &mut Model, key: &str, rf: &str) {
 /// Whether ref is a fold the list opens and closes in place: earlier
 /// tries, or a workflow run that has finished.
 fn is_fold(m: &Model, key: &str, rf: &str) -> bool {
-    if rf.starts_with(TRIES_REF) {
+    if rf.starts_with(TRIES_REF) || rf == EARLIER_REF {
         return true;
     }
     if !is_workflow_ref(m, rf) {
@@ -1532,6 +1676,7 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
         .and_then(|i| conn(m, &key).vs.refs.get(i).cloned())
         .unwrap_or_default();
     let p = &conn(m, &key).watch.peek;
+    let p_visible = p.visible;
     let in_peek = p.visible && x >= p.x && x < p.x + p.w && y >= p.y && y < p.y + p.h;
     let b = conn(m, &key).watch.msg_at;
     let in_box = b[2] > 0 && x >= b[0] && x < b[0] + b[2] && y >= b[1] && y < b[1] + b[3];
@@ -1549,6 +1694,14 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     }
     match e.kind {
         MouseKind::Down(Button::Left) => {
+            let o = conn(m, &key).watch.peek.open_at;
+            if p_visible && y == o.2 && x >= o.0 && x < o.1 {
+                let id = conn(m, &key).watch.peek.id.clone();
+                if super::runview::open(m, &key, &id) {
+                    return Out::Draw;
+                }
+                return Out::Idle;
+            }
             if in_box {
                 if !focus_box(m, &key) {
                     return Out::Idle;
@@ -1571,6 +1724,21 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
             if is_fold(m, &key, &rf) {
                 toggle_fold(m, &key, &rf);
             }
+            // A run clicked again soon after: open whole (runview.rs).
+            let now = m.now;
+            let (last, at) = conn(m, &key).watch.last_click.clone();
+            if let Some(id) = rf.strip_prefix("sub:")
+                && last == rf
+                && now.saturating_sub(at) <= DOUBLE_CLICK_MS
+                && sel(m) == rf
+            {
+                let id = id.to_string();
+                conn(m, &key).watch.last_click = Default::default();
+                if super::runview::open(m, &key, &id) {
+                    return Out::Draw;
+                }
+            }
+            conn(m, &key).watch.last_click = (rf.clone(), now);
             // A run clicked: its box has the keys once it shows, when a
             // message can reach it (Rust-only).
             if let Some(id) = rf.strip_prefix("sub:") {

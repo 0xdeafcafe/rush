@@ -98,6 +98,22 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     // Its background tasks a plugin has a card for (a rush watch): drawn
     // in the conversation as they stand.
     super::taskcards::sync(m, &key);
+    // A run open whole: its box alone, the run's, with what became of
+    // what was sent it (runview.rs); the session's own waits.
+    if let Some(id) = super::runview::open_id(m, &key) {
+        let w = w.saturating_sub(INDENT + 1).max(20);
+        let mut out = vec![Line::new()];
+        out.extend(super::runview::dock_rows(m, &key, &id, w));
+        conn(m, &key).dock_rows = out.len();
+        return out
+            .into_iter()
+            .map(|l| {
+                let mut r = line([plain(blanks(INDENT))]);
+                join(&mut r, l);
+                r
+            })
+            .collect();
+    }
     // Go's pane is the screen less 3, from column 2 (view.go:1210); the
     // box gives the map its width from 96 wide (rushmode.go:3224).
     let w = w.saturating_sub(INDENT + 1).max(20);
@@ -142,6 +158,7 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     // none of them started; beside a wide conversation, in the column
     // there, else each a block of its own (paneDock's panels :3488).
     super::running::sync(m, &key);
+    super::agentrows::sync(m, &key);
     let in_panel = rush_ui_plugin_ui::views::beside::subs_shown_in_panel(m, &key, w);
     let sw = super::side::column_width(m, &key, w);
     let runs = super::running::blocks(
@@ -270,12 +287,19 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     out.extend(tasks);
 
     let b = message_box(m, &key, w, &picked);
+    // The run's box beside the list has the keys: it's the one box live,
+    // the session's own not drawn under it to say otherwise (Rust-only).
+    let run_box = conn(m, &key).watch.msg_focus
+        && super::views::view_name(m, &key) == "subagents"
+        && super::subview::box_run(m, &key).is_some();
     let c = conn(m, &key);
     c.box_off = out.len();
     c.q_off = q_off;
     c.q_rows = q_rows;
     c.q_panel = scrolls && aux > 0;
-    out.extend(b.lines());
+    if !run_box {
+        out.extend(b.lines());
+    }
     c.drawn = b;
 
     let hint = if m.pane_idle && !(m.ext.calls.hosted_alone())(m) {

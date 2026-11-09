@@ -65,6 +65,36 @@ fn delta(text: &str) -> Event {
     })
 }
 
+/// A task notice that says the run still goes (or waits) isn't its end;
+/// one with no status, or an end's, is (Rust-only).
+#[test]
+fn interim_notice_keeps_a_task_running() {
+    let cases: &[(&str, bool, &str)] = &[
+        ("running", true, ""),
+        ("pending", true, ""),
+        ("", false, "completed"),
+        ("completed", false, "completed"),
+        ("failed", false, "failed"),
+        ("killed", false, "stopped"),
+    ];
+    for &(status, running, ended) in cases {
+        let mut s = Session::new();
+        s.apply(
+            &started("a1", "toolu_01", TaskKind::Subagent, "Explore", true),
+            1,
+        );
+        s.apply(&done("a1", "toolu_01", status, ""), 2);
+        let j = s.job("a1").unwrap();
+        assert_eq!(j.running(), running, "{status:?}");
+        assert_eq!(j.status, ended, "{status:?}");
+        assert_eq!(
+            s.task_status.get("a1").map(|s| &**s),
+            (!running).then_some(ended),
+            "{status:?}"
+        );
+    }
+}
+
 #[test]
 fn jobs() {
     let mut s = Session::new();
@@ -434,4 +464,86 @@ fn redirects_a_step_tails() {
     ] {
         assert_eq!(s.writes(cmd), want, "{cmd}");
     }
+}
+
+/// A background task is known for what it is from the start: one of a
+/// kind rush doesn't know, started for a subagent type, is a subagent
+/// (not a task until its run is found); the session's own background
+/// work is counted by kind, a subagent's own command left to it, so the
+/// Session's header and its column agree (Rust-only).
+#[test]
+fn background_counts_by_kind() {
+    let sub = |id: &str, kind: TaskKind, agent: &str| {
+        Event::TaskStarted(TaskStarted {
+            id: id.into(),
+            call_id: format!("c-{id}"),
+            kind,
+            label: id.into(),
+            agent: agent.into(),
+            background: true,
+        })
+    };
+    let listed = |ts: &[(&str, TaskKind, &str)]| {
+        Event::Background(Background {
+            tasks: ts
+                .iter()
+                .map(|(id, kind, parent)| BackgroundTask {
+                    id: (*id).into(),
+                    kind: *kind,
+                    parent: (*parent).into(),
+                    ..BackgroundTask::default()
+                })
+                .collect(),
+        })
+    };
+    type Case = (&'static str, Vec<Event>, (usize, usize, usize));
+    let cases: Vec<Case> = vec![
+        ("none", vec![], (0, 0, 0)),
+        (
+            "a subagent of an unknown kind, by its type",
+            vec![sub("a1", TaskKind::Other, "Explore")],
+            (1, 0, 0),
+        ),
+        (
+            "a task of an unknown kind with no type",
+            vec![sub("t1", TaskKind::Other, "")],
+            (0, 0, 1),
+        ),
+        (
+            "three subagents and their own commands",
+            vec![
+                sub("a1", TaskKind::Subagent, "Explore"),
+                sub("a2", TaskKind::Subagent, "Plan"),
+                sub("a3", TaskKind::Subagent, ""),
+                listed(&[
+                    ("a1", TaskKind::Subagent, ""),
+                    ("a2", TaskKind::Subagent, ""),
+                    ("a3", TaskKind::Subagent, ""),
+                    ("b1", TaskKind::Shell, "a1"),
+                    ("b2", TaskKind::Shell, "a2"),
+                    ("b3", TaskKind::Shell, "a3"),
+                    ("b4", TaskKind::Shell, ""),
+                ]),
+            ],
+            (3, 0, 1),
+        ),
+        (
+            "a workflow and a monitor",
+            vec![
+                sub("w", TaskKind::Workflow, ""),
+                sub("m", TaskKind::Monitor, ""),
+            ],
+            (0, 1, 1),
+        ),
+    ];
+    for (name, evs, want) in cases {
+        let mut s = Session::new();
+        for e in &evs {
+            s.apply(e, 1);
+        }
+        assert_eq!(s.background_counts(), want, "{name}");
+    }
+    let mut s = Session::new();
+    s.apply(&sub("a1", TaskKind::Other, "Explore"), 1);
+    assert_eq!(s.job_kind(s.job("a1").unwrap()), "subagent");
 }

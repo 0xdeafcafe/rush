@@ -196,6 +196,7 @@ struct WireTask {
     label: String,
     #[serde(rename = "startedAt")]
     started_at: Option<String>,
+    parent: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -424,6 +425,7 @@ pub(crate) fn read_info(dir: &Path) -> Option<HostInfo> {
                 kind: t.kind,
                 label: t.label,
                 started_at: time(&t.started_at),
+                parent: t.parent,
             })
             .collect(),
         away: w.away.map(|a| Away {

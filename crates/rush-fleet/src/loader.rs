@@ -54,6 +54,18 @@ const HOUR: Ms = 60 * MINUTE;
 /// idle hosted row made again: none can start.
 const PAST_EVERY: Ms = 15 * SECOND;
 
+/// What a host's background task is, in the list's word: agent,
+/// monitor, workflow, shell, else task (Agent.job.background's kinds).
+pub fn background_kind(kind_word: &str) -> &'static str {
+    match kind_word {
+        "local_agent" | "remote_agent" | "in_process_teammate" => "agent",
+        "monitor_mcp" | "monitor_ws" => "monitor",
+        "local_workflow" => "workflow",
+        "local_bash" => "shell",
+        _ => "task",
+    }
+}
+
 /// What a session waits on you for when a message sent it waits on a turn
 /// that can't take it (host.Info.QueueStuck; fleet.go:1143).
 pub const STUCK_NEEDS: &str =
@@ -218,6 +230,8 @@ struct SubsEntry {
     dir: Ms,
     main: u64,
     gone: bool,
+    /// Its agent's process seen running, as counted under.
+    alive: bool,
     /// When the session's agent last (re)started, as counted under.
     since: Ms,
     runs: Option<Box<dyn SubagentRuns>>,
@@ -246,6 +260,7 @@ struct PendingSubs {
     e: SubsEntry,
     transcript: String,
     gone: bool,
+    alive: bool,
     since: Ms,
     now: Ms,
     dir: Ms,
@@ -926,7 +941,7 @@ impl Loader {
                     // Its process isn't always known, so it's never taken
                     // as gone.
                     (a.subs, a.subagents) =
-                        self.subagents(&p.kind, &key, &j.transcript_path, false, 0, now);
+                        self.subagents(&p.kind, &key, &j.transcript_path, false, false, 0, now);
                 }
                 for u in &a.spend.prs {
                     // Only PRs its agent linked to a session; a URL merely
@@ -1033,7 +1048,7 @@ impl Loader {
                 (a.repo, a.branch) = git_for(&mut self.git, &dir, now);
                 a.job.cwd = dir;
                 let tp = a.job.transcript_path.clone();
-                (a.subs, a.subagents) = self.subagents(&p.kind, &key, &tp, false, 0, now); // listed only while its process runs
+                (a.subs, a.subagents) = self.subagents(&p.kind, &key, &tp, false, false, 0, now); // listed only while its process runs
                 self.sample(tab.as_mut(), &mut a);
                 count(&mut av, &a);
                 snap.agents.push(a);
@@ -1401,12 +1416,14 @@ impl Loader {
             |_, mut j| {
                 if let Some(runs) = &mut j.e.runs {
                     runs.set_gone(j.gone);
+                    runs.set_alive(j.alive);
                     runs.set_since(j.since);
                     j.e.st = runs.stats(&j.transcript, j.now);
                     j.e.tiles = subagent_tiles(&j.transcript, &runs.running());
                 }
                 let e = &mut j.e;
                 (e.at, e.dir, e.main, e.gone, e.since) = (j.now, j.dir, j.main, j.gone, j.since);
+                e.alive = j.alive;
                 j
             },
         );
@@ -1441,6 +1458,7 @@ impl Loader {
         key: &str,
         transcript: &str,
         gone: bool,
+        alive: bool,
         since: Ms,
         now: Ms,
     ) -> (SubagentStats, Vec<SubagentTile>) {
@@ -1520,6 +1538,7 @@ impl Loader {
             && e.dir == dir
             && e.main == main
             && e.gone == gone
+            && e.alive == alive
             && e.since == since
             && now - e.at < 30 * SECOND
             && (!working || now - e.at < 3 * SECOND)
@@ -1540,6 +1559,7 @@ impl Loader {
                 e,
                 transcript: transcript.to_string(),
                 gone,
+                alive,
                 since,
                 now,
                 dir,
@@ -1550,6 +1570,7 @@ impl Loader {
         match &mut e.runs {
             Some(runs) => {
                 runs.set_gone(gone);
+                runs.set_alive(alive);
                 runs.set_since(since);
                 e.st = runs.stats(transcript, now);
                 e.tiles = subagent_tiles(transcript, &runs.running());
@@ -1561,6 +1582,7 @@ impl Loader {
             }
         }
         (e.at, e.dir, e.main, e.gone, e.since) = (now, dir, main, gone, since);
+        e.alive = alive;
         let r = (e.st, e.tiles.clone());
         self.subs.insert(key.to_string(), e);
         r
@@ -1639,10 +1661,14 @@ impl Loader {
         // own process's if that started again since (a restart, or the
         // agent alone). A run that last wrote before died with the one
         // before.
-        let agent_start = tab
+        let agent_proc = tab
             .as_deref()
             .filter(|_| info.claude_pid > 0)
-            .and_then(|t| t.procs.get(&info.claude_pid))
+            .and_then(|t| t.procs.get(&info.claude_pid));
+        // Its agent's process seen running: its runs the transcripts call
+        // running are, however long they're quiet (Rust-only).
+        let alive = agent_proc.is_some();
+        let agent_start = agent_proc
             .and_then(|p| p.start.duration_since(std::time::UNIX_EPOCH).ok())
             .map_or(0, |d| d.as_millis() as Ms);
         let since = info.started_at.max(agent_start);
@@ -1655,7 +1681,8 @@ impl Loader {
                 a.key.clone(),
                 a.job.transcript_path.clone(),
             );
-            (a.subs, a.subagents) = self.subagents(&k, &key, &tp, gone, since, now);
+            let alive = alive && !gone;
+            (a.subs, a.subagents) = self.subagents(&k, &key, &tp, gone, alive, since, now);
         }
         if idle {
             // Read again on its own clock, an idle row's files aren't
@@ -1732,16 +1759,17 @@ impl Loader {
         // What it runs in the background, as the agent's own background
         // sessions record theirs, so the list says so alike.
         for t in &info.background {
-            let kind = match t.kind.as_str() {
-                "local_agent" | "remote_agent" | "in_process_teammate" => {
-                    j.subagents += 1;
-                    "agent"
-                }
-                "monitor_mcp" | "monitor_ws" => "monitor",
-                "local_workflow" => "workflow",
-                "local_bash" => "shell",
-                _ => "task",
-            };
+            j.in_flight += 1;
+            // A subagent's own command is its work, said with it, not one
+            // of the session's tasks: else 3 subagents with a command each
+            // read as "3 subagents running, 3 tasks running" (Rust-only).
+            if !t.parent.is_empty() {
+                continue;
+            }
+            let kind = background_kind(&t.kind);
+            if kind == "agent" {
+                j.subagents += 1;
+            }
             j.running.push(Task {
                 id: t.id.clone(),
                 kind: kind.into(),
@@ -1749,7 +1777,6 @@ impl Loader {
                 started_at: t.started_at,
             });
             j.background.push(format!("{kind}\x00{}", t.label));
-            j.in_flight += 1;
         }
         if let Some(l) = &info.limit {
             j.detail = "usage limit".into();

@@ -1333,3 +1333,41 @@ fn a_subagents_own_agents_and_decisions_ask_here() {
     assert_eq!(core(&mut m).open_on_load, "h9");
     assert_ne!(super::views::view_name(&m, KEY), "subagents", "not its run");
 }
+
+/// The same answers to the same decisions card go once, however often
+/// they're sent (a card shown again with its answers kept, a second
+/// place answering it): the second time sends nothing and says so; other
+/// answers, or another card, go as ever.
+#[test]
+fn the_same_decisions_answers_go_once() {
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = hosted(&d, &fake, 1);
+    let sends = |fake: &Fake| -> Vec<String> {
+        ops(fake)
+            .into_iter()
+            .filter_map(|o| match o {
+                Op::Send { text, .. } => Some(text),
+                _ => None,
+            })
+            .collect()
+    };
+    let answer = |id: &str, text: &str| Act::Answer {
+        id: id.into(),
+        text: text.into(),
+    };
+    let grid = "1a. Gate: AI beat grid";
+    let none = "1b. Gate: none";
+    for (a, want, said) in [
+        (answer("q1", grid), vec![grid], None),
+        (answer("q1", grid), vec![], Some("already sent")),
+        (answer("q1", none), vec![none], None),
+        (answer("q2", none), vec![none], None),
+    ] {
+        act(&mut m, a);
+        assert_eq!(sends(&fake), want);
+        if let Some(s) = said {
+            assert_eq!(flash(&m), s);
+        }
+    }
+}
