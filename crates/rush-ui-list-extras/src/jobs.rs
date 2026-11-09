@@ -310,6 +310,24 @@ pub fn spread(left: Line, right: Line, w: usize) -> Line {
     out
 }
 
+/// A task's row w wide: left, laid out by left_of for the cells right
+/// leaves it, cut to fit, then right at the end. Its name has the row
+/// before right: when it wouldn't show whole beside right (whole says
+/// whether it does), or right can't show at all, right goes, and left is
+/// laid out again with the whole row, rather than both being cut
+/// (Rust-only: Go cut the name, and spread then dropped right too).
+pub fn with_right(left_of: &dyn Fn(usize) -> Line, right: Line, w: usize, whole: bool) -> Line {
+    let rw = right.width();
+    if whole {
+        let keep = (w as isize - rw as isize - 2).max(20) as usize;
+        let cut = rush_draw::truncate_line(&left_of(rw), keep, "…");
+        if cut.width() + rw + 2 <= w {
+            return spread(cut, right, w);
+        }
+    }
+    fit(rush_draw::truncate_line(&left_of(0), w, "…"), w)
+}
+
 /// A row picked: the bar at its left, orange when the pane has the keys,
 /// on the selection's ground (picked1).
 pub fn picked(l: Line, w: usize, focused: bool) -> Line {
@@ -620,8 +638,7 @@ fn card_row(
     join(&mut left, whose);
     let mut right = segs(&card.right);
     right.spans.push(plain("  "));
-    let keep = (w as isize - right.width() as isize - 2).max(20) as usize;
-    let mut rows = vec![spread(rush_draw::truncate_line(&left, keep, "…"), right, w)];
+    let mut rows = vec![with_right(&|_| left.clone(), right, w, true)];
     if d.sel == format!("job:{}", j.id) {
         let pad = blanks(left_lead(lead, who) + 2 + 8);
         for det in &card.detail {
@@ -690,46 +707,50 @@ fn shell_row(s: &Session, j: &Job, i: usize, w: usize, lead: &str, who: bool, d:
     let out = (d.out)(j);
     let right = job_right_used(j, out, (d.usage)(j), d.now);
     let whose = if who { (d.who)(j) } else { Line::new() };
-    let room =
-        (w as isize - right.width() as isize - whose.width() as isize - 12 - width(lead) as isize)
-            .max(12) as usize;
-    let mut left = line([plain(lead)]);
-    let name = if who {
-        spb(format!("{kind:<7}"), TEXT)
-    } else {
-        left.spans.push(sp("↳", FAINT));
-        left.spans.push(plain(" "));
-        sp(format!("{kind:<7}"), SUB)
+    let room_of = |right_w: usize| {
+        (w as isize - right_w as isize - whose.width() as isize - 12 - width(lead) as isize).max(12)
+            as usize
     };
-    left.spans.extend([
-        mark,
-        plain(" "),
-        name,
-        plain(" "),
-        sp(
-            rush_draw::truncate(&job_label(s, j), room.min(40), "…").into_owned(),
-            SUB,
-        ),
-    ]);
-    join(&mut left, whose);
-    // Its latest line of output, on the same row, as far as there's room;
-    // a workflow's phase now.
-    if kind == "workflow" {
-        let now = (d.flow)(j, d.tick + i);
-        if !now.spans.is_empty() {
+    let left_of = |right_w: usize| {
+        let mut left = line([plain(lead)]);
+        let name = if who {
+            spb(format!("{kind:<7}"), TEXT)
+        } else {
+            left.spans.push(sp("↳", FAINT));
+            left.spans.push(plain(" "));
+            sp(format!("{kind:<7}"), SUB)
+        };
+        left.spans.extend([
+            mark.clone(),
+            plain(" "),
+            name,
+            plain(" "),
+            sp(
+                rush_draw::truncate(&job_label(s, j), room_of(right_w).min(40), "…").into_owned(),
+                SUB,
+            ),
+        ]);
+        join(&mut left, whose.clone());
+        // Its latest line of output, on the same row, as far as there's room;
+        // a workflow's phase now.
+        if kind == "workflow" {
+            let now = (d.flow)(j, d.tick + i);
+            if !now.spans.is_empty() {
+                left.spans.push(plain("  "));
+                left.spans.push(sp("›", ORANGE));
+                left.spans.push(plain(" "));
+                join(&mut left, now);
+            }
+        } else if let Some(last) = out.and_then(|t| t.lines.last()) {
             left.spans.push(plain("  "));
             left.spans.push(sp("›", ORANGE));
             left.spans.push(plain(" "));
-            join(&mut left, now);
+            left.spans.push(sp(last.clone(), DIM));
         }
-    } else if let Some(last) = out.and_then(|t| t.lines.last()) {
-        left.spans.push(plain("  "));
-        left.spans.push(sp("›", ORANGE));
-        left.spans.push(plain(" "));
-        left.spans.push(sp(last.clone(), DIM));
-    }
-    let keep = (w as isize - right.width() as isize - 2).max(20) as usize;
-    let row = spread(rush_draw::truncate_line(&left, keep, "…"), right, w);
+        left
+    };
+    let whole = width(&job_label(s, j)).min(40) <= room_of(right.width());
+    let row = with_right(&left_of, right, w, whole);
     if d.sel == format!("job:{}", j.id) {
         return picked(row, w, d.focus);
     }

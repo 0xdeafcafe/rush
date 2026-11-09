@@ -23,7 +23,7 @@ use crate::frame::{Mouse, Out};
 use crate::model::Model;
 use crate::panel_host;
 use crate::sess::open_key;
-use crate::sidecol::{side_width_with, text_width};
+use crate::sidecol::{side_width_with, text_width_with};
 
 /// Whether what's running shows at the top of the session's panel: it's
 /// open on one of the agent's views, and there are tasks to show; the
@@ -393,7 +393,8 @@ pub fn folded_in_side(
         return None;
     }
     let edge = side.first().map_or(crate::style::SUB, super::view_accent);
-    let (rows, refs) = super::panel::side_views(&side, &past, text_width(sw));
+    let (rows, refs) =
+        super::panel::side_views(&side, &past, text_width_with(sw, m.cfg.column_width));
     Some((edge, rows, refs))
 }
 

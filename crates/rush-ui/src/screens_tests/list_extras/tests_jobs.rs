@@ -250,3 +250,38 @@ fn workflow_with_the_subagents() {
     let hint = job_hint(s.job("w1").unwrap(), true, None).plain();
     assert_eq!(hint, "space its agents  ·  x stop  ·  shift+x …and say why");
 }
+
+/// In a row as narrow as the column beside the conversation, a task's
+/// label has the row before what it says right: where the label wouldn't
+/// show whole beside that, that goes, rather than both being cut. Wide,
+/// both show as ever.
+#[test]
+fn a_tasks_label_before_its_facts() {
+    let mut s = Session::new();
+    s.apply(
+        &started("b1", "npm run dev -- --port 3000 --host", true),
+        NOW - MIN,
+    );
+    let jobs = dock_jobs(&s);
+    let none = Tailed::default();
+    let out = |j: &Job| (j.id == "none").then_some(&none);
+    let d = Dock {
+        sel: "",
+        focus: true,
+        tick: 0,
+        now: NOW,
+        out: &out,
+        who: &nobody,
+        flow: &no_flow,
+        usage: &no_usage,
+    };
+    let wide = plain(&jobs_preview(&s, &jobs, 110, &d, Line::new()).0);
+    assert!(
+        wide.contains("npm run dev -- --port 3000 --host") && wide.contains("in background"),
+        "{wide}"
+    );
+    let narrow = plain(&jobs_preview(&s, &jobs, 43, &d, Line::new()).0);
+    let row = narrow.lines().nth(1).expect("its row");
+    assert!(row.contains("npm run dev -- --port 3000"), "{row:?}");
+    assert!(!row.contains("in background"), "{row:?}");
+}

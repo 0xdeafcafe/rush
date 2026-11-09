@@ -57,4 +57,4 @@
 ╭─ new agent in checkout ──────────────────────────────────────╮│  ╭─ open in a terminal, so it can't take messages here ───────────────────────────────────────────────────────────── │
 │ ❯ esc or ← to come back here                                 ││  │ ❯  a message for this agent                                                                                       │
 ╰──────────────────────────────────────────────────────────────╯│  ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
-  ctrl+n 1 needs you  ·  esc · ← back to Agents                 │    ctrl+x stop it  ·  ↑ steps  ·  f1 more  ·  ⌥s conversation view  ·  esc back                                      │
+  ctrl+n 1 needs you  ·  esc · ← back to Agents                 │    ctrl+x stop it  ·  ↑ steps  ·  f1 more  ·  ⌥s conversation view  ·  ⌥←→ the side's width  ·  esc back             │

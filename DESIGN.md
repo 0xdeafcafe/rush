@@ -2822,18 +2822,31 @@ is made. Everything below is in `rush_ui::frame`.
   wider than its text needs keeps the text at 124 columns; the column
   beside the conversation (`session_core/side.rs`: tasks, changes, what
   runs, folded views) takes the rest, its card's ground filling it and
-  its rows laid out 79 wide at most (`side::text_width`). Its width is
+  its rows laid out 79 wide at most at rush's own width, as wide as the
+  column at one you set (`sidecol::text_width_with`). Its width is
   rush's own (three quarters of that room, 44 at least) until you set one:
   alt+←/→ in a Session, with nothing typed, make it two columns narrower
   or wider, between 44 and all the room left of the text, and keep it as
   `columnWidth` in config.json (`Config::column_width`, saved as the
   list's width is; `sidecol::side_width_with`); they do nothing while the
-  column isn't showing, and jump a word while the box has text. shift+←/→
+  column isn't showing, and jump a word while the box has text. Its left
+  edge (the ▌ down its rows, or the cell before it) drags too, the width
+  said as it goes ("side column 170 columns · release to keep") and kept
+  when let go (`side::edge_mouse`); two clicks on the edge give it rush's
+  own width again, as a width kept is in columns: one set on a narrower
+  screen, or pushed to its least, stays that narrow on a wide one (a
+  330-wide screen with `columnWidth` 44 showed a 44-column card at the
+  right edge and 160 blank columns before it). The session's views, open,
+  stand in its place: no column is squeezed in at its least between the
+  text and them. shift+←/→
   move the list's edge, in a Session as in the list; alt+←/→ in the list
   move it too. The conversation's view stays on alt+s, and the hint under
   the box says so ("alt+s conversation view", from the key the keymap has
-  for session.preset), the first of the hint's keys to go when the row is
-  too narrow. An opened Session (`Model::session`, with the
+  for session.preset), and, with the column showing and nothing typed,
+  "⌥←→ the side's width" after it; those are the first of the hint's keys
+  to go when the row is too narrow. In the column's rows a run's or a
+  task's name has the row before its facts: whole where it fits, and the
+  facts go where they won't fit beside it, rather than both being cut. An opened Session (`Model::session`, with the
   keys) stands beside the list wherever there's room, as Go's focusPane
   does; it has the screen only when there isn't, or when the Session
   alone is your layout. esc, ←, { } and tab give the list the keys back

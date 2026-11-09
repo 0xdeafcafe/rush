@@ -54,6 +54,11 @@ pub fn sub_name(sa: &Subagent, tag: &str, w: usize, ink: Color) -> Line {
     if tag.is_empty() {
         return line([sp(rush_draw::truncate(&task, w, "…").into_owned(), ink)]);
     }
+    if sub_name_width(sa, tag) <= w {
+        // Room for it whole: nothing gives way (Rust-only; Go cut the tag
+        // to half the room even then).
+        return line([sp(task, ink), dim(" · "), dim(tag.to_string())]);
+    }
     let tw = width(tag).min((w / 2).saturating_sub(3).max(4));
     line([
         sp(
@@ -63,6 +68,17 @@ pub fn sub_name(sa: &Subagent, tag: &str, w: usize, ink: Color) -> Line {
         dim(" · "),
         dim(rush_draw::truncate(tag, tw, "…").into_owned()),
     ])
+}
+
+/// How many cells sa's name takes whole: its task, then the tag after
+/// " · " (sub_name with room for all of it).
+pub fn sub_name_width(sa: &Subagent, tag: &str) -> usize {
+    let task = width(&sub_task(sa));
+    if tag.is_empty() {
+        task
+    } else {
+        task + 3 + width(tag)
+    }
 }
 
 /// How a run stands, as a mark: its harness's spinner while it works,

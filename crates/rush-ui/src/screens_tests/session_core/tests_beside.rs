@@ -526,3 +526,158 @@ fn each_session_drawn_keeps_its_follower() {
     assert_eq!(summary(&m, "vb-grid-a"), "first", "a, drawn now, kept");
     assert_eq!(summary(&m, "vb-grid-b"), "second", "b followed anew");
 }
+
+/// A session 330 wide, the map off, with a task list, the column's width
+/// set to pref (0: rush's own) and the views given.
+fn very_wide(id: &str, pref: i64, views: Vec<View>) -> Model {
+    let mut m = rush_open(id, 330, 30, views);
+    m.cfg.hide_minimap = true;
+    m.cfg.column_width = pref;
+    let task = |id: &str, subject: &str, status: &str| rush_convo::Task {
+        id: id.into(),
+        subject: subject.into(),
+        active: subject.into(),
+        status: status.into(),
+    };
+    sess(&mut m).tasks = vec![
+        task("1", FIRST_TASK, "completed"),
+        task(
+            "2",
+            "Give the rows their names before the meta",
+            "in_progress",
+        ),
+        task("3", "Let the edge be dragged", "pending"),
+    ];
+    m
+}
+
+const FIRST_TASK: &str = "Find why the column came out at its minimum on a wide terminal";
+
+fn mouse(m: &mut Model, kind: MouseKind, x: usize, y: usize) -> Out {
+    m.mouse_event(&Mouse {
+        kind,
+        x: x as u16,
+        y: y as u16,
+        mods: KeyMods::NONE,
+    })
+}
+
+/// On a very wide screen with no width set, the column is rush's own,
+/// three quarters of the room past the text, its rows whole; with the
+/// map, as much less as the map takes.
+#[test]
+fn the_column_takes_its_share_on_a_wide_screen() {
+    let mut m = very_wide("cw-share", 0, Vec::new());
+    let f = screen(&mut m).join(
+        "
+",
+    );
+    let (w, room) = {
+        let side = &conn(&mut m, KEY).side;
+        (side.w, side.room)
+    };
+    assert_eq!((w, room), (150, 200), "{f}");
+    assert!(
+        f.contains(FIRST_TASK),
+        "a task cut:
+{f}"
+    );
+    let mut m = very_wide("cw-share-map", 0, Vec::new());
+    m.cfg.hide_minimap = false;
+    screen(&mut m);
+    let side = &conn(&mut m, KEY).side;
+    assert_eq!(side.w, side.room * 3 / 4);
+    assert!(side.w > 100, "{}", side.w);
+}
+
+/// A width kept is in columns: kept at the least, the column stays 44
+/// however wide the screen, the room past the text left blank (what the
+/// screen 330 wide showed). Two clicks on its edge give it rush's own
+/// width again, and forget the one kept.
+#[test]
+fn a_width_kept_stays_until_the_edge_is_clicked_twice() {
+    let mut m = very_wide("cw-kept", 44, Vec::new());
+    screen(&mut m);
+    let (x, y, w) = {
+        let side = &conn(&mut m, KEY).side;
+        (side.x, side.y, side.w)
+    };
+    assert_eq!((w, x), (44, 330 - 44 - 3), "at the right edge");
+    for _ in 0..2 {
+        mouse(&mut m, MouseKind::Down(rush_draw::Button::Left), x, y);
+        mouse(&mut m, MouseKind::Up(rush_draw::Button::Left), x, y);
+    }
+    assert_eq!(m.cfg.column_width, 0, "forgotten");
+    assert_eq!(flash(&m), "side column back to rush's own width");
+    assert_eq!(column_w(&mut m), 150);
+}
+
+/// The column's left edge, dragged, makes it wider or narrower, between
+/// 44 and all the room past the text, saying its width as it goes; let
+/// go, the width is kept, as alt+arrows keep it.
+#[test]
+fn dragging_the_columns_edge_resizes_it() {
+    use rush_draw::Button;
+    let mut m = very_wide("cw-drag", 0, Vec::new());
+    screen(&mut m);
+    let (x, y, w) = {
+        let side = &conn(&mut m, KEY).side;
+        (side.x, side.y, side.w)
+    };
+    assert_eq!(w, 150);
+    // Held on its edge (the cell before it takes it too).
+    mouse(&mut m, MouseKind::Down(Button::Left), x - 1, y);
+    mouse(&mut m, MouseKind::Drag(Button::Left), x - 21, y);
+    assert_eq!(flash(&m), "side column 170 columns · release to keep");
+    assert_eq!(column_w(&mut m), 170);
+    assert_eq!(
+        conn(&mut m, KEY).side.x + 170,
+        x + w,
+        "its right edge stays"
+    );
+    mouse(&mut m, MouseKind::Drag(Button::Left), 0, y);
+    assert_eq!(column_w(&mut m), 200, "all the room past the text");
+    mouse(&mut m, MouseKind::Drag(Button::Left), 329, y);
+    assert_eq!(column_w(&mut m), 44, "its least");
+    mouse(&mut m, MouseKind::Drag(Button::Left), x - 31, y);
+    mouse(&mut m, MouseKind::Up(Button::Left), x - 31, y);
+    assert_eq!(m.cfg.column_width, 180, "kept");
+    assert_eq!(flash(&m), "side column 180 columns");
+    assert_eq!(column_w(&mut m), 180);
+    // Let go, the mouse is the conversation's again.
+    mouse(&mut m, MouseKind::Drag(Button::Left), 10, y);
+    assert_eq!(column_w(&mut m), 180);
+}
+
+/// The views, open, stand in the column's place: no column squeezed in
+/// at its least between the text and them.
+#[test]
+fn open_views_take_the_columns_place() {
+    let mut m = very_wide("cw-views", 0, vec![view("prs", "Pull requests", "3 ready")]);
+    let f = screen(&mut m).join(
+        "
+",
+    );
+    assert_eq!(conn(&mut m, KEY).side.w, 0, "{f}");
+    assert!(panel(&m).2 > 100, "the views: {:?}", panel(&m));
+    assert!(!f.contains("▌ Decisions"), "{f}");
+}
+
+/// Under the box, with the column showing and nothing typed, the hint
+/// says alt+arrows resize it; typing, or with no column, it doesn't.
+#[test]
+fn the_box_hints_the_columns_width_keys() {
+    let mut m = very_wide("cw-hint", 0, Vec::new());
+    let f = screen(&mut m);
+    let last = f[f.len() - 1].clone();
+    assert!(
+        last.contains("⌥s conversation view  ·  ⌥←→ the side's width  ·  esc back"),
+        "{last:?}"
+    );
+    typed(&mut m, "x");
+    let f = screen(&mut m);
+    assert!(!f[f.len() - 1].contains("the side's width"), "typing");
+    let mut m = rush_open("cw-hint-narrow", 120, 40, Vec::new());
+    let f = screen(&mut m);
+    assert!(!f[f.len() - 1].contains("the side's width"), "no column");
+}
