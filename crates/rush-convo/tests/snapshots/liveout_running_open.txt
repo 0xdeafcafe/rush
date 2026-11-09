@@ -5,6 +5,7 @@ t1            |▍ run the tests
               |▍ Agent  22:00
 t1:s:b1       |│   ✳ cargo test --workspace                                                                   19s
 t1:s:b1:live  |│       ▾ fewer lines
+              |│       │ tests 20 passed
               |│       │ test t1 ... ok
               |│       │ test t2 ... ok
               |│       │ test t3 ... ok

@@ -2919,6 +2919,38 @@ how often each was taken and turned down in view-suggest.json in rush's
 folder, and after three turned down in a row it isn't made again (one
 taken starts the count over). session-core viewsuggest.rs.
 
+## Rows for xcodebuild, simctl, xctrace, ffmpeg and gh run (Rust-only)
+
+An agent's shell step that runs one of these gets a row of its own, read
+from the command's words and what it printed only (convo render/tools.rs).
+
+- **What the row says.** `xcodebuild test WalkTests/test01 on iPhone 17
+  Pro`: the action (build when none is given), the scheme or the
+  `-only-testing` tests, and where it runs (the destination's name, else
+  its platform, else its id's first block). `-list` and
+  `-showdestinations` say so. `xcrun` is dropped: `simctl boot 641A0D41`,
+  `simctl screenshot shots/home.png`, `simctl install App.app`,
+  `simctl launch red.forbes.app`. `xctrace record Time Profiler of rush`,
+  `xctrace export t.trace`. `ffmpeg rec.mov → f_%03d.jpg`: its first
+  input to its output.
+- **How it came out.** xcodebuild is a build, or tests for `test`, like
+  cargo's: `xcodebuild 2 errors in 2 files` (an error it says twice, once
+  as it compiles and again at the end, is one, as is any problem said
+  twice by any tool), `xcodebuild built`, `xcodebuild test 40 passed, 2
+  failed` (XCTest's and Swift Testing's own lines, else XCTest's last
+  "Executed n tests"). A build that says FAILED with no error rush can
+  read has one. An XCTest failure in the problems table is named by its
+  test. `gh run view`/`watch` count the run's jobs (`2 passed, 1
+  failed`), `gh run list` its finished runs.
+- **While it runs.** Above its last lines, how far it has got: cargo's
+  `▰▰▰▱▱ 45/120 · now rush-convo` when it draws its bar, else `compiled
+  12 crates · now rush-convo`, and its tests as they pass; xcodebuild's
+  `compiled 42 files · 1 error`, then `tests 12 passed, 1 failed · now
+  test03`; ffmpeg's `00:00:30 of 00:02:00 · 2.1x` with a bar.
+- **What it made.** A screenshot (`simctl io … screenshot`,
+  `screencapture`) that succeeded is a thumbnail under its row, as a read
+  image is; it opens when clicked.
+
 ## Shell commands rush runs for you (Rust-only)
 
 Two ways in, both only on your click or key, never by themselves:

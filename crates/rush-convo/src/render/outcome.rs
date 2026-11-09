@@ -72,6 +72,8 @@ static BRACKET_TAIL: LazyLock<Regex> =
     LazyLock::new(|| re(r"^(?P<m>.*?)\s+\[(?P<rule>[a-z][\w.-]*)\]$"));
 static PAREN_TAIL: LazyLock<Regex> =
     LazyLock::new(|| re(r"^(?P<m>.*?)\s+\((?P<rule>[a-z][\w-]*)\)$"));
+/// An XCTest failure's words: -[Module.Class testName] : what failed.
+static XCTEST: LazyLock<Regex> = LazyLock::new(|| re(r"^-\[[\w.]+ (?P<t>\w+)\] : (?P<m>.*)$"));
 static RUST_HEAD: LazyLock<Regex> =
     LazyLock::new(|| re(r"^(?P<sev>error|warning)(?:\[(?P<code>[^\]]+)\])?: (?P<m>.+)$"));
 static RUST_AT: LazyLock<Regex> =
@@ -145,6 +147,10 @@ pub fn diagnostics(lines: &[String], known: bool) -> Vec<Diag> {
         // A note on the problem before it (mypy's).
         i += 1;
     }
+    // The same problem said again (xcodebuild says each one twice, once
+    // as it compiles and once at the end) is one.
+    let mut seen: HashSet<(String, usize, usize, String)> = HashSet::new();
+    out.retain(|d| seen.insert((d.path.clone(), d.line, d.col, d.msg.clone())));
     out
 }
 
@@ -178,6 +184,12 @@ fn short_form(l: &str, known: bool) -> Option<Diag> {
             rule = c.as_str().to_string();
         }
         rest = s["r"].to_string();
+    }
+    if rule.is_empty()
+        && let Some(t) = XCTEST.captures(&rest)
+    {
+        rule = t["t"].to_string();
+        rest = t["m"].to_string();
     }
     if rule.is_empty() {
         if let Some(t) = TOOL_RULE.captures(&rest) {
@@ -447,6 +459,20 @@ pub fn tools(cmd: &str) -> Vec<(String, Family)> {
                 Some((base.into(), Family::Lint))
             }
             "pytest" | "jest" | "vitest" | "mocha" => Some((base.into(), Family::Tests)),
+            "xcodebuild" => match super::tools::xcode_action(&ws[1..]) {
+                "test" | "test-without-building" => Some(("xcodebuild test".into(), Family::Tests)),
+                "build" | "build-for-testing" | "archive" | "analyze" => {
+                    Some(("xcodebuild".into(), Family::Build))
+                }
+                _ => None,
+            },
+            "gh" if next == "run"
+                && ws[1..]
+                    .iter()
+                    .any(|w| matches!(*w, "view" | "watch" | "list")) =>
+            {
+                Some(("gh run".into(), Family::Tests))
+            }
             _ => None,
         };
         if let Some(f) = found
@@ -542,6 +568,25 @@ fn tests_of(tool: &str, out: &str) -> Option<(usize, usize)> {
             );
             (ok + bad > 0).then_some((0, bad))
         }
+        "xcodebuild test" => super::tools::xcode_tests(out),
+        "gh run" => {
+            static JOB: LazyLock<Regex> =
+                LazyLock::new(|| re(r"(?m)^\s*(?P<g>✓|X|✗)\s+\S.*\(ID \d+\)\s*$"));
+            static LISTED: LazyLock<Regex> =
+                LazyLock::new(|| re(r"(?m)^completed\s+(?P<c>success|failure)\b"));
+            let count =
+                |r: &Regex, k: &str, ok: &str| {
+                    r.captures_iter(out).fold((0, 0), |(p, f), m| {
+                        if &m[k] == ok { (p + 1, f) } else { (p, f + 1) }
+                    })
+                };
+            let (p, f) = count(&JOB, "g", "✓");
+            if p + f > 0 {
+                return Some((p, f));
+            }
+            let (p, f) = count(&LISTED, "c", "success");
+            (p + f > 0).then_some((p, f))
+        }
         _ => None,
     }
 }
@@ -573,6 +618,7 @@ fn counted(tool: &str, out: &str) -> Option<(usize, usize)> {
             }
             last_num(&FOUND, out, "e").map(|e| (e, 0))
         }
+        "xcodebuild" => super::tools::xcode_counted(out),
         "clippy" | "cargo build" | "cargo check" => {
             let e = sum(&RUST_E, out, "e");
             let w = sum(&RUST_W, out, "w");
@@ -973,5 +1019,63 @@ mod tests {
             "cargo build 2 errors"
         );
         assert_eq!(say("ls -la", "a\nb", true), "");
+        // xcodebuild says each error twice: it's one.
+        assert_eq!(
+            say(
+                "xcodebuild -scheme App -destination 'generic/platform=iOS Simulator' build",
+                "/a/P.swift:132:18: error: cannot find 'q' in scope\n** BUILD FAILED **\n/a/P.swift:132:18: error: cannot find 'q' in scope\n/a/V.swift:8:2: error: switch must be exhaustive",
+                false
+            ),
+            "xcodebuild 2 errors in 2 files"
+        );
+        assert_eq!(
+            say(
+                "xcodebuild -scheme App build",
+                "** BUILD SUCCEEDED **",
+                true
+            ),
+            "xcodebuild built"
+        );
+        assert_eq!(
+            say(
+                "xcodebuild test -scheme App",
+                "Test Case '-[A.T testOne]' passed (1.0 seconds).\n/a/T.swift:16: error: -[A.T testTwo] : Timed out\nTest Case '-[A.T testTwo]' failed (2.0 seconds).\n** TEST FAILED **",
+                false
+            ),
+            "xcodebuild test 1 passed, 1 failed"
+        );
+        assert_eq!(
+            say("xcodebuild -list -project A.xcodeproj", "Schemes:", true),
+            ""
+        );
+        assert_eq!(
+            say(
+                "gh run view 42559170172",
+                "X main CI · 42559170172\nTriggered via push about 1 hour ago\n\nJOBS\n✓ fmt in 1m2s (ID 1)\n✓ clippy in 9m (ID 2)\nX check in 17m2s (ID 3)\n\nANNOTATIONS\nX Process completed with exit code 101.",
+                true
+            ),
+            "gh run 2 passed, 1 failed"
+        );
+        assert_eq!(
+            say(
+                "gh run list --limit 3",
+                "completed\tsuccess\tfix: a\tCI\tmain\tpush\t1\t17s\tx\ncompleted\tfailure\tfix: b\tCI\tmain\tpush\t2\t8m\tx\nin_progress\t\tfix: c\tCI\tmain\tpush\t3\t5m\tx",
+                true
+            ),
+            "gh run 1 passed, 1 failed"
+        );
+    }
+
+    #[test]
+    fn an_xctest_failure_is_named_by_its_test() {
+        let ls = lines(
+            "/a/T.swift:16: error: -[App_UITests.WalkTests test02_Play] : Failed to get screenshot: Timed out.",
+        );
+        let d = diagnostics(&ls, true);
+        assert_eq!(d.len(), 1);
+        assert_eq!(
+            (d[0].line, d[0].rule.as_str(), d[0].msg.as_str()),
+            (16, "test02_Play", "Failed to get screenshot: Timed out.")
+        );
     }
 }

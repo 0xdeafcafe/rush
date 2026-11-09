@@ -1417,6 +1417,9 @@ fn phrase_of(p: &Places, s: &Segment, words: &[&str]) -> Option<Phrase> {
             return phrase_of(p, &seg, rest);
         }
     }
+    if let Some(ph) = super::tools::phrase(p, prog, args) {
+        return Some(ph);
+    }
     let plain = paths(p, &non_flags(args));
     let ph = |verb: &str, objs: Vec<String>| {
         Some(Phrase {
