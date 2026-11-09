@@ -30,10 +30,10 @@
       images cost at most          ‹ 1,568 tokens ›                         │ events as cache-kept, with its cost.
       contact sheet after          ‹ 8 images     ›                         │
                                                                             │ on: idle sessions' caches are kept for
-  Cheaper subagents · off until you turn it on                              │ the time below, then lapse.
-    Cheaper model for routine sub… ‹ off          ›                         │
+  Emeritus · off until you turn it on; reaches a running agent at its next… │ the time below, then lapse.
+    Hand over near the end of con… ‹ off          ›                         │
                                                                             │
-  Runaway guard · each part off until you turn it on                        │
-    1 of 24 ───────────────────────────────────────────────────────────────────────────────────────────────────────
+  Cheaper subagents · off until you turn it on                              │
+    1 of 25 ───────────────────────────────────────────────────────────────────────────────────────────────────────
   space switch  ·  enter choose  ·  ? details  ·  ctrl+↑↓ section  ·  [ ] page  ·  esc back
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

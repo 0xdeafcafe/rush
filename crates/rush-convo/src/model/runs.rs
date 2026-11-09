@@ -21,6 +21,8 @@ pub const SPAWN_AGENT: &str = "spawn_agent";
 pub const START_AGENT: &str = "start_agent";
 pub const AGENT_RESULT: &str = "agent_result";
 pub const AGENT_SEND: &str = "agent_send";
+/// Emeritus's: the session hands its task over on a baton and retires.
+pub use crate::emeritus::RETIRE;
 
 /// Whether tool is n as whichever harness names it: n, mcp__rush__n,
 /// rush.n, rush/n.
@@ -33,8 +35,9 @@ fn named(tool: &str, n: &str) -> bool {
 
 /// Which of rush's own tools a call is, by its plain name, as whichever
 /// harness names it: the agent tools by any name ending in theirs, the
-/// rest (show, view, remind, reminders) only under rush's server, as
-/// another server may have a tool of that name. None for any other tool.
+/// rest (show, view, remind, reminders, retire) only under rush's server,
+/// as another server may have a tool of that name. None for any other
+/// tool.
 pub fn rush_tool(tool: &str) -> Option<&'static str> {
     if let Some(n) = [SPAWN_AGENT, START_AGENT, AGENT_RESULT, AGENT_SEND]
         .into_iter()
@@ -45,7 +48,7 @@ pub fn rush_tool(tool: &str) -> Option<&'static str> {
     let rest = ["mcp__rush__", "rush.", "rush/", "rush__"]
         .iter()
         .find_map(|p| tool.strip_prefix(p))?;
-    ["show", "view", "remind", "reminders"]
+    ["show", "view", "remind", "reminders", RETIRE]
         .into_iter()
         .find(|n| *n == rest)
 }
@@ -56,6 +59,24 @@ pub fn input_str(st: &Step, key: &str) -> String {
         .ok()
         .and_then(|v| v.get(key).and_then(|x| x.as_str()).map(str::to_string))
         .unwrap_or_default()
+}
+
+/// The first line under a baton's Destination heading: what the task
+/// is for, as the session handing it over put it. "" when it has none.
+pub fn destination(baton: &str) -> String {
+    let mut lines = baton.lines();
+    for l in lines.by_ref() {
+        let h = l.trim_start_matches('#').trim();
+        if l.trim_start().starts_with('#') && h.eq_ignore_ascii_case("destination") {
+            break;
+        }
+    }
+    lines
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .filter(|l| !l.starts_with('#'))
+        .unwrap_or("")
+        .to_string()
 }
 
 /// The agent an agent_result or agent_send call is about, by the id
@@ -141,6 +162,8 @@ pub fn rush_words(s: &Session, st: &Step, now: bool) -> Option<String> {
         (AGENT_SEND, false) => format!("told {}", called()),
         ("show", _) => "drawing".into(),
         ("view", _) => "updating its view".into(),
+        (RETIRE, true) => "handing over".into(),
+        (RETIRE, false) => "asked to hand over".into(),
         ("remind", true) => "setting a reminder".into(),
         ("remind", false) => "set a reminder".into(),
         (_, true) => "reading its reminders".into(),

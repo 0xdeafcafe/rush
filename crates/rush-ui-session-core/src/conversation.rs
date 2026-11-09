@@ -144,6 +144,12 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     let hover_tag = conn(m, key).vs.hover_tag.clone();
     let mut mm = std::mem::take(&mut conn(m, key).map);
     let opening = opening(m, key);
+    let predecessor = super::emeritus::predecessor(m, key)
+        .map(|p| p.name)
+        .unwrap_or_default();
+    let (handovers, capped) = super::agent(m, key)
+        .and_then(|a| a.lineage.as_deref())
+        .map_or((0, false), |l| (l.handovers, l.capped));
     let preset = super::presets::current(m);
     let since = looked_since(m, key);
     // Rows run the whole width while no column stands right of them
@@ -161,6 +167,7 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     o.preset = preset;
     o.since = since;
     (o.parent, o.started_from, o.hosted) = (opening.0, opening.1, opening.2);
+    (o.predecessor, o.handovers, o.capped) = (predecessor, handovers, capped);
     if o.brief != opening.3 {
         o.brief = opening.3;
     }

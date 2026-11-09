@@ -270,6 +270,13 @@ pub struct Options {
     /// on (render.go:112-117).
     pub parent: String,
     pub started_from: String,
+    /// Emeritus: the session this one took over from as it retired, by
+    /// name, for the card it opens on; "" when it took over from none.
+    pub predecessor: String,
+    /// How many handovers led to it, and whether that's the cap on them
+    /// in a row (it isn't asked to hand over again).
+    pub handovers: u32,
+    pub capped: bool,
     /// rush runs the session, and so added its own prompt to the agent's;
     /// brief is what the session's start added after it.
     pub hosted: bool,

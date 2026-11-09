@@ -1,0 +1,16 @@
+
+▍ You  00:00
+▍ fix the flaky test
+
+▍ Agent  00:00
+▍
+▍ Fixed the watcher's race.
+
+▍   ↻ rush  context at 312k, past 300k · asked to hand over (Emeritus)
+
+▍ Agent  00:00
+│   ✓ ↻ handing over to a fresh agent  CI green on rush/fix-flaky with the flaky test fixed…  1.0s
+│       its baton · 16 lines ▸ open the row to read it
+▍
+▍ Handing over.
+▍                                                                             1 step   13s   $0.20

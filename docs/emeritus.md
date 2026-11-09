@@ -1,10 +1,13 @@
 # Emeritus: an honourable handover
 
-Status: built 2026-11-09 on `rush/emeritus`, off until `emeritus.on` is
-set. Designed 2026-10-02; two adversarial reviews and three lab tests
-shaped it (the third at ~300k context, which changed the trigger, its
-timing and the baton); results at the bottom. The Q&A fork is not built:
-it's off by default, so it's never offered.
+Status: built 2026-11-09 on `rush/emeritus`, finished on
+`rush/emeritus-finish` (its settings, the retired session in the UI, the
+nudge and baton drawn as rush's own, a cap on handovers in a row, the
+tool reaching running agents), off until `emeritus.on` is set. Designed
+2026-10-02; two adversarial reviews and three lab tests shaped it (the
+third at ~300k context, which changed the trigger, its timing and the
+baton); results at the bottom. The Q&A fork is not built: the lab found
+it never used and dearer than a whole successor.
 
 An agent near the end of its context writes a baton, rush starts a fresh
 agent on it, and the old one retires for good. It isn't a phoenix: the old
@@ -95,9 +98,12 @@ agents' messages that were waiting for A, by sender.
 | A's parent is told B took over: a wait on A (spawn_agent, agent_send, agent_result) follows the chain of successors and says so; a child's answer to A goes to the live successor | The parent asked A, and B answers |
 | B inherits A's folder, workspace, kind, model, effort, permission mode, account and parent | The CLI start path uses the profile's defaults |
 | Nothing is silently redirected: what you type to A while it hands over, or after, is refused with B's id. Only other agents' messages move, named by sender. A message you queued during A's last turn calls the retire off | Typing into A must not quietly instruct someone else |
+| Design call: typing during the retire turn calls the retire off, rather than holding your message for B or asking which you meant | You wrote to A, about A's work as A knows it; carrying it to B would be the silent redirect above, and asking would leave A frozen on a question. The note the agent gets ("your retire was called off because the user wrote to you") is drawn as rush's line above your words |
 | A's background tasks: the retire is called off (A is told to wait for them and ask again) | They die with A's process or report to A's conversation; they can't move |
 | The check is host-owned and deduplicated (the nudge kept in A's config); the nudge is advisory | Plugin `turn.ended` comes from what a TUI window saw: absent headless, doubled across windows |
 | `lineage` counts the chain (B's meta `predecessor` and `lineage`) | Bounds chains, and lets a later reader follow them |
+| A session `emeritus.depth` (3) handovers down its chain isn't nudged: past its threshold it's marked capped once (config `cappedAt`, info `capped`, event `emeritus-capped`), its conversation's card and its list row say so, and it carries on as any session does. The agent isn't told: that would cost a turn to say nothing it can act on. `retire` itself isn't refused at the cap: you may still ask it to hand over | Each baton keeps most of what A knew, not all (the lab's successors came within one hidden check), so a long chain drifts |
+| An agent whose process started while Emeritus was off isn't nudged (`Em::unlisted`, set at each start): its tools lack `retire`. It gets the tool at its next start (a wake, a resume, a restart onto a new build), when the tool list is read again | A running agent's tool list is never changed mid-life: the tools are the start of the cached prompt, so adding one writes its whole context to the cache again, the cost Emeritus exists to avoid. Nudging it to call a tool it doesn't have would waste a turn |
 | Every harness rush hosts, not Claude only | The handover itself needs only a rush host; only the Q&A fork needed Claude, and it isn't built |
 
 ## Settings
@@ -109,9 +115,28 @@ In rush's config.json:
 | `emeritus.on` | false | Nudge and offer the `retire` tool. Off until set |
 | `emeritus.tokens` | 300000 (0 is the default) | The context, in tokens, past which a session hands over |
 | `emeritus.percent` | 70 (0 is the default) | The share of the window past which it hands over, when that's smaller |
+| `emeritus.depth` | 3 (0 is the default) | The most handovers in a row: a session that many down its chain isn't nudged again |
 
-The tool list is read as an agent starts, so turning it on reaches agents
-started (or restarted) after.
+They're on Settings › Usage › Emeritus, after the context guard: the
+switch, and once on, "past" (tokens), "or past" (share of the window) and
+"handovers in a row". The help says what a handover costs (the baton's
+turn, ~$0.16 warm; $2.33 cold, so never asked cold) and what the lab saw
+it save ($1.94 against $2.85 at ~300k, 10 of 11 hidden checks to 11).
+
+The tool list is read as an agent starts. Turning Emeritus on reaches a
+running agent at its next start (woken, resumed, or moved onto a new
+build), not mid-life: its tools are never changed while it runs (see
+Rules), and until then it isn't nudged. The section's note and the
+switch's help say so.
+
+## In the UI
+
+| Where | What |
+|---|---|
+| A's conversation | The nudge is rush's line (`↻ rush  context at 312k, past 300k · asked to hand over (Emeritus)`), not your message. The retire call is a row, `↻ handing over to a fresh agent  <the baton's Destination>`; opened, the baton is drawn as the Markdown it was written in (as the latest step, a line saying how long it is). A handover rolled back and a retire waiting on tasks are rush's lines too; a retire you called off by writing is rush's line above your words. `rush_convo::emeritus` holds these words; the host writes with them |
+| A's box | Read-only: `retired · handed over to <B> · enter opens it`, typing refused with a flash naming B. Its header says `retired · its successor carries on` |
+| B's conversation | Its card says `by rush, as a handover` and `↻ took over from "<A>" as it retired, on its baton · alt+o opens it`, then, at the cap, `no more handovers: 3 in a row is the most Settings › Usage › Emeritus allows`. Its first turn is rush's line `took over from "<A>" (rush session <id>) as it retired (Emeritus)`, the baton folded under it (`its baton · 16 lines ▸ show`) |
+| The list | A session retired more than ten minutes ago folds into the row at the end of its chain of successors, its cost counted there; one just retired stays a row (`retired · handed over to its successor`) for that while, and one open as a session of its own stays a row while it's open. B's row shows its handovers, `↻n`, yellow once capped |
 
 ## Subagents
 
@@ -128,8 +153,10 @@ threshold.
 ## Measurement
 
 Each commit is logged to the Efficiency place's event log
-(`efficiency/events.jsonl`, kind `handover`), with A's and B's sessions,
-agent, model, A's context and cost at handover, B's context at its first
+(`efficiency/events.jsonl`, kind `handover`), with A's and B's rush
+sessions (`from`, `to`), their agents' conversations (`fromSession`,
+`toSession`) and the folder (`cwd`), so both transcripts are found
+exactly, the agent, model, A's context and cost at handover, B's context at its first
 request, the threshold that nudged it, the lineage, and whether A was a
 subagent. That's what lets the Efficiency place later say what Emeritus
 saved; it doesn't say it yet.
@@ -160,13 +187,27 @@ direct predecessor.
 | The words, the facts, B's config, the journal, recovery, the terminal check, moving children | `rush_host::emeritus` |
 | The nudge, the retire op, the transaction | `rush_host` server/emeritus.rs, called from `on_turn_end` and `send_exchange` |
 | The `retire` tool | `rush_bundled::agtools::retire`, served by `SubAgents` (in process for Claude, `rush mcp-tools` for the rest) |
+| Its words in the conversation, read back | `rush_convo::emeritus`; drawn by render/draw.rs (`rush_ask`, `baton_under`) and draw/agtools.rs (the retire row and `retire_body`) |
+| The settings rows | `rush_ui_settings::emeritus` |
+| The list's folding | `rush_fleet` emeritus.rs (`fold_retired`), from the host info's `emeritus`/`successor` and meta `predecessor`/`lineage`, as `Agent::lineage` |
+| The box, the keys, B's card | `rush_ui_session_core::emeritus`, conversation.rs (`Options::predecessor`), render/opening.rs |
 | Following a successor | `subtool::wait_for`, `subtool::send_result` |
 | The Efficiency event | `rush_efficiency::events::add_handover` |
 
 Its events, in the session's events.jsonl: `emeritus-nudged`,
 `emeritus-retire-asked`, `emeritus-called-off`, `emeritus-handover`,
 `emeritus-committed`, `emeritus-rolled-back`, `emeritus-voided`,
-`emeritus-adopted`, `emeritus-refused`, `emeritus-recovered`.
+`emeritus-adopted`, `emeritus-refused`, `emeritus-recovered`,
+`emeritus-capped`.
+
+## Left out
+
+- The Q&A fork (below): never used in the lab, and one answer cost more
+  than a whole successor.
+- Holding what you type during the retire turn for B: see the design
+  call in Rules.
+- A header segment for the cap: it's said on B's card and its list row
+  instead; /statusline has no Emeritus segment.
 
 ## Against what exists
 

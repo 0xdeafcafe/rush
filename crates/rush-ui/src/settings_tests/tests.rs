@@ -1941,6 +1941,56 @@ fn projects_lists_every_project() {
     );
 }
 
+/// Settings › Usage › Emeritus: off until turned on; on, where it hands
+/// over and how many times in a row show under it at their defaults, the
+/// help says what it costs and saves and that a running agent gets it at
+/// its next start, and a pick is kept in config.json's emeritus.
+#[test]
+fn usage_emeritus() {
+    let (mut m, _d) = model(140, 50);
+    set_settings_page(&mut m, PAGE_USAGE);
+    let at = |m: &Model, label: &str| -> Option<(usize, Setting)> {
+        let all = flat(&usage::sections(m));
+        let i = all.iter().position(|r| r.label == label)?;
+        Some((i, all[i].clone()))
+    };
+    let (i, row) = at(&m, "Hand over near the end of context").expect("its row");
+    assert_eq!(row.shown(), "off");
+    for said in ["$1.94", "$2.85", "10 of 11", "next starts", "prompt cache"] {
+        assert!(row.what.contains(said), "its help says {said}");
+    }
+    assert!(at(&m, "  past").is_none(), "its numbers wait for it");
+    dialog_mut(&mut m).cursor = i;
+    let secs = usage::sections(&m);
+    form_key(&mut m, &secs, "space");
+    assert!(config(&m).emeritus.on);
+    let shown: Vec<(String, String)> = ["  past", "  or past", "  handovers in a row"]
+        .iter()
+        .map(|l| (l.to_string(), at(&m, l).expect(l).1.shown()))
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            ("  past", "300k tokens"),
+            ("  or past", "70% of its window"),
+            ("  handovers in a row", "3"),
+        ]
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+    );
+    for (label, v) in [
+        ("  past", "200000"),
+        ("  or past", "50"),
+        ("  handovers in a row", "5"),
+    ] {
+        let (_, r) = at(&m, label).unwrap();
+        (r.set.unwrap())(&mut m, v);
+    }
+    let e = &config(&m).emeritus;
+    assert_eq!((e.tokens, e.percent, e.depth), (200_000, 50, 5));
+    assert_eq!(e.threshold(1_000_000), 200_000);
+    assert!(e.capped(5) && !e.capped(4));
+}
+
 /// Settings › Usage gathers what rush does on its own to save tokens and
 /// money: the prompt cache, the context guard, the runaway guard and the
 /// advisor, each at today's values, and none of them left on General. A
@@ -1978,6 +2028,7 @@ fn usage_gathers_the_rules() {
         ("Shrink images agents read", "on"),
         ("  images cost at most", "1,568 tokens"),
         ("  contact sheet after", "8 images"),
+        ("Hand over near the end of context", "off"),
         ("Cheaper model for routine subagents", "off"),
         ("Pace guard", "off"),
         ("Agents at once", "no cap"),

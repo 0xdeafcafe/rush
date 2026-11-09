@@ -658,12 +658,19 @@ impl<'a> Drawer<'a> {
             && rush_ask(t).is_empty()
             && (!t.prompt.trim().is_empty() || !imgs.is_empty() || multi);
         if yours {
-            let ask = if multi { "" } else { t.prompt.trim() };
+            let mut ask = if multi { "" } else { t.prompt.trim() };
+            // What you wrote called a retire off: rush's note to the agent
+            // ahead of it is rush's line, not your words.
+            if let Some(rest) = crate::emeritus::called_off(ask) {
+                self.rush_line("retire called off: you wrote to it");
+                ask = rest;
+            }
             let r = self.r.clone();
             let pics = sent_images(&t.pictures, &t.images);
             self.user_box(&r, ask, &imgs, &pics, multi);
         } else {
             self.other_ask(&ask, noun, how, wake);
+            self.baton_under();
         }
         if multi {
             let cmd = t.command.clone();
@@ -1473,6 +1480,43 @@ impl<'a> Drawer<'a> {
                 self.wrapped();
             }
         }
+    }
+
+    /// One of rush's own lines at a turn's head, as other_ask draws one.
+    fn rush_line(&mut self, said: &str) {
+        let r = self.r.clone();
+        let l = self
+            .sp(GUTTER - 1)
+            .and(dim("↻ rush"))
+            .and_raw("  ")
+            .and(paint(C_ORANGE, said));
+        self.add(&r, Color::Default, l, Txt::new());
+    }
+
+    /// A successor's first turn: the baton it started on, under the line
+    /// saying whom it took over from, folded to a line until opened
+    /// (verbose shows it whole). Drawn as Markdown, as it was written.
+    fn baton_under(&mut self) {
+        let Some(took) = crate::emeritus::took_over(&self.t.prompt) else {
+            return;
+        };
+        if took.baton.is_empty() {
+            return;
+        }
+        let r = format!("{}:baton", self.r);
+        let n = took.baton.matches('\n').count() + 1;
+        let open = self.o.verbose || self.o.open.get(&r).copied().unwrap_or(false);
+        let lead = self.sp(GUTTER + 1);
+        if !open {
+            let l = lead
+                .and(dim(&format!("its baton · {} ", plural(n, "line"))))
+                .and(faint("▸ show"));
+            self.add(&r, Color::Default, l, Txt::new());
+            return;
+        }
+        let l = lead.and(dim("its baton ")).and(faint("▾ hide"));
+        self.add(&r, Color::Default, l, Txt::new());
+        self.prose(&took.baton, GUTTER + 1, C_SUB);
     }
 
     /// A turn you didn't start, as a quiet line of its own (userbox.go:224).
@@ -2575,6 +2619,9 @@ impl<'a> Drawer<'a> {
             return;
         }
         if self.fan(st) && !self.o.verbose {
+            return;
+        }
+        if self.retire_body(id, indent) {
             return;
         }
         // A subagent put in the background: its run's row, not the
@@ -4921,6 +4968,14 @@ fn unasked(t: &Turn) -> &str {
 
 /// What a turn rush started says in place of its words to the agent.
 fn rush_ask(t: &Turn) -> String {
+    // Emeritus: the nudge to hand over, a handover rolled back, a retire
+    // waiting on tasks, and a successor's start.
+    if let Some(said) = crate::emeritus::said(&t.prompt) {
+        return said;
+    }
+    if let Some(took) = crate::emeritus::took_over(&t.prompt) {
+        return format!("took over from {} as it retired (Emeritus)", took.from);
+    }
     if t.prompt
         .starts_with("continue: you're on another account now, with room")
     {

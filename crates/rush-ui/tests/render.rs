@@ -1041,3 +1041,66 @@ fn a_hosted_session_with_the_column_wraps_left_of_it() {
         );
     }
 }
+
+/// Emeritus: a retired session's box is read-only, naming the session it
+/// handed over to, and enter opens that one; typing goes nowhere. The
+/// session that took over shows how many handovers carried its task in
+/// the list, yellow at the cap.
+#[test]
+fn snapshot_emeritus_retired() {
+    let dir = std::env::temp_dir().join(format!("rush-ui-snap-emeritus-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("s.jsonl");
+    std::fs::write(&path, SNAP_SESSION.join("\n") + "\n").unwrap();
+    let p = path.to_string_lossy().into_owned();
+    let setup = |m: &mut Model| {
+        let i = m.agents.iter().position(|a| a.job.id == "d4").unwrap();
+        m.agents[i].job.transcript_path = p.clone();
+        m.agents[i].rush = true;
+        m.agents[i].pid = 0;
+        m.agents[i].lineage = Some(Box::new(rush_core::agent::Lineage {
+            successor: "c3".into(),
+            ..Default::default()
+        }));
+        m.agents[i].job.detail = "retired · handed over to its successor".into();
+        let j = m.agents.iter().position(|a| a.job.id == "c3").unwrap();
+        m.agents[j].rush = true;
+        m.agents[j].lineage = Some(Box::new(rush_core::agent::Lineage {
+            predecessor: "d4".into(),
+            name: "set up caching for CI".into(),
+            handovers: 3,
+            capped: true,
+            ..Default::default()
+        }));
+        m.sel = m.agents[i].key.clone();
+    };
+    let mut m = model();
+    setup(&mut m);
+    let f = plain(
+        &mut m,
+        120,
+        40,
+        &[(Key::Enter, KeyMods::NONE), (Key::Char('x'), KeyMods::NONE)],
+    );
+    snapshot("snap_emeritus_retired_120x40", &f);
+    assert!(
+        f.contains("retired · handed over to move the design tokens to CSS v… · enter opens it"),
+        "{f}"
+    );
+    assert!(!f.contains("❯ x"), "typing went into a retired box:\n{f}");
+    assert!(
+        f.contains("↻3"),
+        "the successor's handovers in the list:\n{f}"
+    );
+    // enter opens the successor.
+    let f = plain(&mut m, 120, 40, &[(Key::Enter, KeyMods::NONE)]);
+    let c3 = m
+        .agents
+        .iter()
+        .find(|a| a.job.id == "c3")
+        .unwrap()
+        .key
+        .clone();
+    assert_eq!(m.sel, c3, "{f}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}

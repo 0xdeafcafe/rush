@@ -35,10 +35,21 @@ pub(crate) struct Em {
     pub(super) handing: bool,
     /// The turn under way is a nudge's: it answers no one.
     pub(super) nudged: bool,
+    /// Its agent started while Emeritus was off, so the tools it was
+    /// given lack `retire`: it isn't nudged until it starts again (a
+    /// wake, a resume, a restart), when it's listed. Its tools aren't
+    /// changed while it runs: that would write its whole prompt cache
+    /// again, what Emeritus is there to save.
+    pub(super) unlisted: bool,
     /// How many handovers this host has settled, either way: what a test
     /// waits on.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(super) settled: u64,
+}
+
+/// What a session's info says of its Emeritus once nothing is under way.
+fn at_rest(cfg: &crate::wire::Config) -> String {
+    cfg.emeritus.as_ref().map_or("", Emeritus::word).into()
 }
 
 /// What a session handing over says to what you send it.
@@ -138,7 +149,7 @@ impl Host {
     /// did either, settling the turn's end.
     pub(super) fn emeritus_turn_end(&self, st: &mut State, e: &event::TurnEnd) -> bool {
         if let Some(baton) = st.em.due.take() {
-            st.info.emeritus.clear();
+            st.info.emeritus = at_rest(&st.cfg);
             if e.reason == "interrupted" {
                 // Stopped by you: you have something to say to it.
                 self.event(st, "emeritus-called-off", json!({"why": "interrupted"}));
@@ -177,10 +188,47 @@ impl Host {
             return false;
         }
         let Some(past) = self.nudge_due(st) else {
+            self.note_capped(st);
             return false;
         };
         self.nudge(st, past, false);
         true
+    }
+
+    /// Past its threshold with the cap on handovers in a row reached: it
+    /// isn't nudged, and that's said once, in its info (the session's
+    /// header shows it) and its events.
+    pub(super) fn note_capped(&self, st: &mut State) {
+        let set = rush_state::Store::load().config.emeritus;
+        let lineage = em::lineage(&st.cfg);
+        if !set.on
+            || !set.capped(lineage)
+            || st.cfg.retired()
+            || st
+                .cfg
+                .emeritus
+                .as_ref()
+                .is_some_and(|e| !e.capped_at.is_zero())
+        {
+            return;
+        }
+        let model = if st.info.model.is_empty() {
+            &st.cfg.model
+        } else {
+            &st.info.model
+        };
+        let window = self.reg.context_window(&st.cfg.kind, model);
+        if !set.due(st.info.context_tokens, window) {
+            return;
+        }
+        let e = st.cfg.emeritus.get_or_insert_with(Emeritus::default);
+        e.capped_at = Time::now();
+        self.save_config(st);
+        st.info.emeritus = "capped".into();
+        let f =
+            json!({"context": st.info.context_tokens, "lineage": lineage, "depth": set.depth()});
+        self.event(st, "emeritus-capped", f);
+        self.publish(st);
     }
 
     /// The threshold the agent's context is past, when it's due a nudge:
@@ -189,7 +237,14 @@ impl Host {
     /// its own running or waiting.
     pub(super) fn nudge_due(&self, st: &State) -> Option<i64> {
         let set = rush_state::Store::load().config.emeritus;
-        if !set.on || st.cfg.retired() || st.em.handing || st.em.due.is_some() || st.em.nudged {
+        if !set.on
+            || st.em.unlisted
+            || st.cfg.retired()
+            || st.em.handing
+            || st.em.due.is_some()
+            || st.em.nudged
+            || set.capped(em::lineage(&st.cfg))
+        {
             return None;
         }
         let model = if st.info.model.is_empty() {
@@ -420,7 +475,7 @@ impl Host {
         let _ = write_journal(&j.from, &j);
         let mut st = self.lock();
         st.em.handing = false;
-        st.info.emeritus.clear();
+        st.info.emeritus = at_rest(&st.cfg);
         st.info.detail.clear();
         self.event(&st, "emeritus-rolled-back", json!({"to": j.to, "why": why}));
         if !st.quit {

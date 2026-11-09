@@ -7,7 +7,8 @@
 
 use super::*;
 use crate::model::runs::{
-    AGENT_RESULT, AGENT_SEND, START_AGENT, agent_id, input_str, rush_tool, rush_words,
+    AGENT_RESULT, AGENT_SEND, RETIRE, START_AGENT, agent_id, destination, input_str, rush_tool,
+    rush_words,
 };
 use crate::render::spawn::Child;
 
@@ -84,6 +85,19 @@ impl<'a> Drawer<'a> {
                     .and_raw("  ")
                     .and(faint(first_line(&input_str(st, "prompt"))))
             }
+            // Emeritus: the baton handed over, by where the task is
+            // going; opened, the baton itself (retire_body).
+            RETIRE => {
+                let did = if running || st.status == Status::Ok {
+                    "handing over to a fresh agent"
+                } else {
+                    "couldn't hand over"
+                };
+                g("↻")
+                    .and(lbl(did))
+                    .and_raw("  ")
+                    .and(faint(&destination(&input_str(st, "baton"))))
+            }
             AGENT_SEND => g("→")
                 .and(lbl(&called()))
                 .and_raw("  ")
@@ -110,6 +124,34 @@ impl<'a> Drawer<'a> {
             }
             _ => return None,
         })
+    }
+
+    /// An opened retire call: the baton, drawn as the Markdown it was
+    /// written in, then what rush said back when that wasn't the usual
+    /// "retiring after this turn". Whether it was one.
+    pub(crate) fn retire_body(&mut self, id: StepId, indent: usize) -> bool {
+        let st = self.s.step(id);
+        if rush_tool(&st.tool) != Some(RETIRE) {
+            return false;
+        }
+        let baton = input_str(st, "baton");
+        let failed = st.status == Status::Failed;
+        let out = st.output.to_string();
+        if self.peek && !baton.trim().is_empty() {
+            // Open only as the latest step: a line, not the whole baton.
+            let n = baton.trim().matches('\n').count() + 1;
+            let l = self
+                .sp(indent - 1)
+                .and(dim(&format!("its baton · {} ", plural(n, "line"))))
+                .and(faint("▸ open the row to read it"));
+            self.add("", Color::Default, l, Txt::new());
+        } else if !baton.trim().is_empty() {
+            self.prose(&baton, indent, C_SUB);
+        }
+        if failed && !out.trim().is_empty() {
+            self.output(&out, indent, true);
+        }
+        true
     }
 
     /// Under an agent_result call that waits, what the agent it waits on

@@ -162,6 +162,14 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     if o.used() {
         return o;
     }
+    // Emeritus: a retired session's box is read-only, enter opening its
+    // successor; alt+o opens the session this one took over from.
+    if picked.is_empty() {
+        let o = super::emeritus::key(m, k);
+        if o.used() {
+            return o;
+        }
+    }
     // → from the box with nothing typed, or the cursor at the end of what
     // is: open the picked item, else into the column beside the
     // conversation.

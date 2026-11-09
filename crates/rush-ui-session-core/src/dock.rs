@@ -655,6 +655,7 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         b.holder = "a command to run in this folder".into();
         b.edge = Some(ORANGE);
     }
+    super::emeritus::retired_box(m, key, &mut b);
     b = b.scrolled();
     // What a click takes on the top edge, where the edge drew it: the
     // permission mode on its right opens what changes it (as #perm),

@@ -8,10 +8,10 @@
 
   ▸ Prompt cache           │                                                                                                            │ Keep idle conversations warm
     Context guard          │ Prompt cache · on unless you turn it off; Claude Code for now                                              │
-    Cheaper subagents      │ ▍ Keep idle conversations warm         ‹ on           ›                                                    │ A provider keeps a session's prompt cached for a while
-    Runaway guard          │     for                                ‹ 15 minutes   ›                                                    │ after its last request (Claude: 5 minutes, or an hour),
-    Advisor                │     compact long waits                 ‹ off          ›                                                    │ and a message after that pays to write the whole context
-                           │   Keep waiting subagents' cache        ‹ on           ›                                                    │ again: 1.25× the input price for a 5-minute cache, 2× for
+    Emeritus               │ ▍ Keep idle conversations warm         ‹ on           ›                                                    │ A provider keeps a session's prompt cached for a while
+    Cheaper subagents      │     for                                ‹ 15 minutes   ›                                                    │ after its last request (Claude: 5 minutes, or an hour),
+    Runaway guard          │     compact long waits                 ‹ off          ›                                                    │ and a message after that pays to write the whole context
+    Advisor                │   Keep waiting subagents' cache        ‹ on           ›                                                    │ again: 1.25× the input price for a 5-minute cache, 2× for
                            │     slow commands in background        ‹ on           ›                                                    │ an hour's. Just before an idle session's cache lapses,
                            │   Claude Code subagents' cache         ‹ automatic    ›                                                    │ rush sends one small request that reads the whole cached
                            │   Smallest worth keeping               ‹ 20k tokens   ›                                                    │ context, a tenth of the price, and its life starts over.
@@ -30,6 +30,9 @@
                            │     images cost at most                ‹ 1,568 tokens ›                                                    │
                            │     contact sheet after                ‹ 8 images     ›                                                    │
                            │                                                                                                            │
+                           │ Emeritus · off until you turn it on; reaches a running agent at its next start                             │
+                           │   Hand over near the end of context    ‹ off          ›                                                    │
+                           │                                                                                                            │
                            │ Cheaper subagents · off until you turn it on                                                               │
                            │   Cheaper model for routine subagents  ‹ off          ›                                                    │
                            │                                                                                                            │
@@ -41,9 +44,6 @@
                            │ Advisor                                                                                                    │
                            │   Advisor                              ‹ off          ›                                                    │
                            │                                                                                                            │
-                           │                                                                                                            │
-                           │                                                                                                            │
-                           │                                                                                                            │
-    1 of 24 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    1 of 25 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   space switch  ·  enter choose  ·  ? details  ·  ctrl+↑↓ section  ·  [ ] page  ·  esc back
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

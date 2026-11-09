@@ -29,6 +29,7 @@ pub mod changes;
 pub use rush_ui_base::context;
 pub mod conversation;
 pub mod dock;
+pub mod emeritus;
 pub mod exchange;
 pub mod finish;
 pub mod history;

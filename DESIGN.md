@@ -3596,6 +3596,20 @@ cut short. Nothing you type is passed on: it's refused with the
 successor's id. Claude Code's and Codex's own in-process subagents are out
 of reach: rush doesn't own their lifecycle.
 
+At most `emeritus.depth` (3) handovers in a row: a session that far down
+its chain isn't nudged, and is marked capped once. An agent started while
+Emeritus was off isn't nudged until its next start lists `retire`: a
+running agent's tools are never changed, as that rewrites its whole
+prompt cache. The settings are on Settings › Usage › Emeritus. In the
+UI, rush_convo::emeritus reads its words back so the nudge, the notes and
+a successor's start are rush's lines and the retire call a row with its
+baton drawn as Markdown; a retired session's box is read-only, enter
+opening its successor; the list folds a session retired over ten minutes
+ago into its successor's row (rush_fleet's fold_retired), which shows
+`↻n`; the successor's card names its predecessor, alt+o opening it. The
+handover event carries both conversations (`fromSession`, `toSession`)
+and `cwd`.
+
 ## Panics
 
 Release builds unwind (`panic = "unwind"`), so one thread's panic ends

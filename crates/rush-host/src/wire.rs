@@ -203,6 +203,10 @@ pub struct Emeritus {
     /// The threshold it was last nudged past, in tokens.
     #[serde(rename = "nudgedPast", skip_serializing_if = "zero")]
     pub nudged_past: i64,
+    /// When it was found past its threshold with the cap on handovers in
+    /// a row reached (emeritus.depth): it isn't nudged, and is told once.
+    #[serde(rename = "cappedAt", skip_serializing_if = "zero_time")]
+    pub capped_at: Time,
     /// When it retired: terminal from then on, at every way in.
     #[serde(rename = "retiredAt", skip_serializing_if = "zero_time")]
     pub retired_at: Time,
@@ -219,6 +223,17 @@ impl Emeritus {
     /// Whether the session is retired: terminal.
     pub fn retired(&self) -> bool {
         !self.retired_at.is_zero()
+    }
+
+    /// What its info says of it at rest: "retired", "capped" or "".
+    pub fn word(&self) -> &'static str {
+        if self.retired() {
+            "retired"
+        } else if !self.capped_at.is_zero() {
+            "capped"
+        } else {
+            ""
+        }
     }
 }
 
@@ -698,7 +713,9 @@ pub struct Info {
     pub decisions: Option<Question>,
     /// Emeritus (Rust-only, docs/emeritus.md): "retiring" once it asked
     /// to retire after its turn, "handing" while its successor starts,
-    /// "retired" once it has handed over for good; "" otherwise.
+    /// "retired" once it has handed over for good, "capped" once it's past
+    /// its threshold with the cap on handovers in a row reached (it isn't
+    /// nudged); "" otherwise.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub emeritus: String,
     /// The session that took over from it, once it's retired.

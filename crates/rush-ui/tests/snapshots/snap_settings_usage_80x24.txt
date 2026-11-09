@@ -18,6 +18,6 @@
 
   A provider keeps a session's prompt cached for a while after its last
   on: idle sessions' caches are kept for the time below, then lapse.
-    1 of 24 ───────────────────────────────────────────────────────────────
+    1 of 25 ───────────────────────────────────────────────────────────────
   space switch  ·  enter choose  ·  ? details  ·  esc back
 ────────────────────────────────────────────────────────────────────────────────

@@ -4,7 +4,8 @@
 //! accounts module's keep_warm, the host's subagent watch, the gate's
 //! known-slow commands), the context guard (the bundled context-guard
 //! plugin's rules, kept in its own settings, which its hook reads at every
-//! call), the runaway guard (guard.rs) and the advisor. A config that says
+//! call), Emeritus's handover near the end of a context (emeritus.rs), the
+//! runaway guard (guard.rs) and the advisor. A config that says
 //! nothing is today's rule.
 
 use std::collections::BTreeMap;
@@ -49,6 +50,7 @@ pub fn read(m: &mut Model) {
 pub fn sections(m: &Model) -> Vec<Section> {
     let mut s = cache_sections(m);
     s.push(context_guard_section(m));
+    s.extend(super::emeritus::sections(m));
     s.extend(super::cheap::sections(m));
     s.extend(super::guard::sections(m));
     s.push(advisor_section(m));

@@ -324,6 +324,40 @@ pub struct Agent {
     /// Where its agent compacts its context, when set smaller than the
     /// model's window.
     pub compaction: crate::adapter::Compaction,
+    /// Emeritus (Rust-only, docs/emeritus.md): where a rush session
+    /// stands in a chain of handovers, when it's in one. Boxed: most rows
+    /// aren't.
+    pub lineage: Option<Box<Lineage>>,
+}
+
+impl Agent {
+    /// The rush session that took over from this one as it retired
+    /// (Emeritus); "" for one that hasn't.
+    pub fn successor(&self) -> &str {
+        self.lineage.as_deref().map_or("", |l| l.successor.as_str())
+    }
+}
+
+/// Where a rush session that took over from another stands in its chain
+/// of handovers (Emeritus, Rust-only).
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Lineage {
+    /// The session that took over from it as it retired, by rush id; ""
+    /// while it hasn't retired.
+    pub successor: String,
+    /// The session it took over from, by rush id; "" for the first.
+    pub predecessor: String,
+    /// Its name, as the list had it; "" while it isn't known.
+    pub name: String,
+    /// How many handovers led to it: 0 for the first, 1 for its successor.
+    pub handovers: u32,
+    /// How many retired sessions of its chain the list folded into its
+    /// row, their cost counted with its.
+    pub folded: u32,
+    /// Past its threshold with the cap on handovers in a row reached: it
+    /// isn't asked to hand over again.
+    pub capped: bool,
 }
 
 /// The worktree a rush session works in (Go's host.Workspace).
@@ -470,7 +504,8 @@ mod sizes {
     #[test]
     fn rows_stay_small() {
         let cases = [
-            ("Agent", size_of::<Agent>(), 1280),
+            // 1288: Emeritus's lineage, boxed (8 B).
+            ("Agent", size_of::<Agent>(), 1288),
             ("Job", size_of::<Job>(), 384),
             ("Spend", size_of::<Spend>(), 304),
             (

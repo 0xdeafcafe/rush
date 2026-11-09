@@ -1684,7 +1684,16 @@ impl Model {
     /// Subagents and background shells, the RUNNING column.
     fn activity(&self, a: &Agent, w: usize) -> Line {
         let mut l = Line::new();
+        // Emeritus: how many handovers carried its task here, yellow
+        // once that's the cap on them.
+        if let Some(lin) = a.lineage.as_deref().filter(|l| l.handovers > 0) {
+            let col = if lin.capped { YELLOW } else { DIM };
+            l.spans.push(sp(format!("↻{}", lin.handovers), col));
+        }
         if a.subs.direct + a.subs.nested > 0 {
+            if !l.spans.is_empty() {
+                l.spans.push(plain(" "));
+            }
             let mut v = format!("↳{}", a.subs.direct);
             if a.subs.nested > 0 {
                 v.push_str(&format!("+{}", a.subs.nested));

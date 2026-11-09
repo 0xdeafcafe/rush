@@ -757,11 +757,7 @@ fn build(reg: Registry, hooks: Hooks, mut cfg: Config) -> (Host, Receiver<Msg>) 
         upgrades: crate::upgrade::adopts(&reg, &cfg.kind),
         workspace: cfg.workspace.clone(),
         generation: 1,
-        emeritus: if cfg.retired() {
-            "retired".into()
-        } else {
-            String::new()
-        },
+        emeritus: cfg.emeritus.as_ref().map_or("", Emeritus::word).into(),
         successor: cfg
             .emeritus
             .as_ref()
@@ -1545,6 +1541,10 @@ impl Host {
         // or account move added the whole conversation's cost again.
         self.leave_gone_worktree(st);
         st.start_cwd = st.cfg.cwd.clone();
+        // The tools its agent is given are read as it starts: with
+        // Emeritus off they lack retire, and it isn't nudged until its
+        // next start (server/emeritus.rs).
+        st.em.unlisted = !rush_state::Store::load().config.emeritus.on;
         let Some(a) = self.reg.get(&st.cfg.kind) else {
             let k = st.cfg.kind.clone();
             return Err(format!(

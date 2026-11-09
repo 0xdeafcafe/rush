@@ -26,6 +26,7 @@ pub mod cheap;
 pub mod common;
 pub mod configpage;
 pub mod efficiency;
+pub mod emeritus;
 pub mod files;
 pub mod form;
 pub mod general;

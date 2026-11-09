@@ -196,6 +196,8 @@ pub fn started(m: &mut Model, r: Result<Started, String>) -> Out {
 /// After each reading of the list: the session just started, once it's
 /// in the list, picked and opened (selectOnLoad).
 pub fn pick_started(m: &mut Model) {
+    // A retired session open here stays a row while it's open (Emeritus).
+    super::emeritus::keep_open(m);
     // A spawned agent opened as a session of its own, once it's a row
     // (spawned::open_session; Rust-only).
     let id = core(m).open_on_load.clone();
