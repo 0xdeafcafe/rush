@@ -1,6 +1,6 @@
 {
- "commit": "9c6a5f40c096afe7e9f790d1fb4c46ac0943177a",
- "at": "2026-11-10T04:50:17Z",
+ "commit": "7169e8dfc3a063eec0bad3e9fc598b5eaa2d39eb",
+ "at": "2026-11-10T09:23:23Z",
  "metrics": {
   "binary: rush, release": {
    "kind": "binary",
@@ -739,7 +739,6 @@
   "open whole file, fetch+apply: allocations made",
   "open whole file: allocations made",
   "open: subagent runs followed, allocations made",
-  "render 3000 turns w120: chat: cold frame at the end, bytes",
-  "ui: footprint"
+  "render 3000 turns w120: chat: cold frame at the end, bytes"
  ]
 }
