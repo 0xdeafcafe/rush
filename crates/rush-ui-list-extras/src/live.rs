@@ -657,14 +657,18 @@ pub fn enter_key(m: &mut Model, k: &Press) -> Out {
 }
 
 /// A paste while the screen has the keys goes into it whole, bracketed
-/// (embedPaste).
+/// (embedPaste). The screen gone (a Session opened over it, its agent
+/// ended), the keys come back, as a key does, and the paste goes on to
+/// the box that has them now, never dropped.
 pub fn paste(m: &mut Model, text: &str) -> Out {
     if !embedded(m) {
         return Out::Pass;
     }
-    if can_embed(m) {
-        send_live(m, rush_ui_plugin_ui::embed::paste_bytes(text));
+    if !can_embed(m) {
+        m.kept::<LiveState>().embedded = false;
+        return Out::Pass;
     }
+    send_live(m, rush_ui_plugin_ui::embed::paste_bytes(text));
     Out::Idle
 }
 
