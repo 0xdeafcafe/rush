@@ -195,6 +195,20 @@ fn paste_chips_undo() {
     assert_eq!(pbox(&m).0, chipped);
 }
 
+/// The keys left with the screen beside the list, then a Session opened
+/// over it: a paste goes into the Session's box, not after the screen
+/// that's gone, and every paste after it too.
+#[test]
+fn paste_after_the_screen_had_the_keys() {
+    let mut m = session();
+    m.kept::<crate::screens::list_extras::live::LiveState>()
+        .embedded = true;
+    m.paste("one");
+    assert_eq!(sbox(&mut m).0, "one");
+    m.paste(" two");
+    assert_eq!(sbox(&mut m).0, "one two");
+}
+
 /// Whatever else changes a box (a picker completing, the stash or the
 /// history setting it, an editor's text coming back) is one step to
 /// undo, though nothing in it said so.
