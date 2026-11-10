@@ -1854,7 +1854,7 @@ fn catalog_clicks_move_the_keys_between_the_panes() {
 }
 
 /// Keys › Commands lists rush's # commands as Go's fleetCommands, 49 of
-/// them in its order, and none of the aliases that stand for one
+/// them in its order, and Rust's #reincarnate (50), and none of the aliases that stand for one
 /// (keybind.go:32-39; sweep 3 P3-10).
 #[test]
 fn keys_lists_the_commands_without_their_aliases() {
@@ -1866,7 +1866,7 @@ fn keys_lists_the_commands_without_their_aliases() {
         .into_iter()
         .filter_map(|a| a.id.strip_prefix("command:"))
         .collect();
-    assert_eq!(names.len(), 49, "{names:?}");
+    assert_eq!(names.len(), 50, "{names:?}");
     assert_eq!(names[..3], ["expand", "collapse", "model"]);
     for alias in ["preset", "profile", "agent", "net", "afk"] {
         assert!(!names.contains(&alias), "{alias}");
