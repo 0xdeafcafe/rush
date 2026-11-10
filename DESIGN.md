@@ -967,7 +967,10 @@ run against rush-host's fake host (its `fake` feature) in the test's own
 process. Every stop of an agent (#stop, #rm, #kill, #done, ctrl+x, alt+d,
 the close question, hibernate) goes through `cmdbar::outside::stop_outside`
 (`cmdbar/stops.rs`): a rush session stops through `Hosts::stop_all`, with
-the agents it spawned; the cleanup agent's host through `Hosts::stop`.
+the agents it spawned; the cleanup agent's host through `Hosts::stop`. #reincarnate (Rust-only) is ctrl+d twice
+and a start: `Hosts::stop_all`, the row kept in the list, then
+`Hosts::wake` with nothing to send, so the host starts again at once and
+resumes the conversation.
 The cleanup agent starts through `CareStarter`, which `start::install`
 sets (`care::start_with_hosts`: StartedBy and Meta's why go into its
 config). `start::install` also sets `Accounts::switcher` and

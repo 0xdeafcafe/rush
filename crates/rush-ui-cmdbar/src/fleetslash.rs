@@ -56,8 +56,26 @@ pub const FLEET_ALIASES: &[(&str, &str)] = &[
 /// # commands that act on the selected or focused agent: offered only
 /// once one's in view. The rest are rush-wide.
 pub const FLEET_NEEDS_AGENT: &[&str] = &[
-    "done", "go", "land", "away", "loop", "back", "stop", "rm", "kill", "clean", "cd", "rename",
-    "pin", "pr", "full", "rush", "compact", "slim", "fork",
+    "done",
+    "go",
+    "land",
+    "away",
+    "loop",
+    "back",
+    "stop",
+    "rm",
+    "kill",
+    "reincarnate",
+    "clean",
+    "cd",
+    "rename",
+    "pin",
+    "pr",
+    "full",
+    "rush",
+    "compact",
+    "slim",
+    "fork",
 ];
 
 /// The command a name stands for: itself, or what it's an alias of.
