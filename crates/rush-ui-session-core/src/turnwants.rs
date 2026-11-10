@@ -353,28 +353,82 @@ pub fn read_turn(m: &mut Model) {
     );
     let k = key.clone();
     m.later(
-        move || {
-            let p = reg.read_preview(&kind, &path, 128 << 10);
-            let text = if p.text.is_empty() { detail } else { p.text };
-            if text.trim().is_empty() {
-                let t = TurnWants {
-                    at,
-                    wants: WANTS_DONE.into(),
-                    ..TurnWants::default()
-                };
-                save_turn(&k, &t);
-                return Some(t);
-            }
-            let mut t = ground(&text, wanter(&reg, &text, &p.last_user)?);
-            t.at = at;
-            save_turn(&k, &t);
-            Some(t)
-        },
+        move || read_and_save(&reg, wanter, &k, at, &kind, &path, detail),
         move |m, r| {
             on_turn_read(m, key, at, r);
             Out::Draw
         },
     );
+}
+
+/// Has a model read the last message of the turn that ended at `at` (the
+/// transcript at path, else detail), and keeps its answer in the cache
+/// under key; None when no model could say. Off the UI thread only.
+fn read_and_save(
+    reg: &Registry,
+    wanter: Wanter,
+    key: &str,
+    at: Ms,
+    kind: &str,
+    path: &str,
+    detail: String,
+) -> Option<TurnWants> {
+    let p = reg.read_preview(kind, path, 128 << 10);
+    let text = if p.text.is_empty() { detail } else { p.text };
+    if text.trim().is_empty() {
+        let t = TurnWants {
+            at,
+            wants: WANTS_DONE.into(),
+            ..TurnWants::default()
+        };
+        save_turn(key, &t);
+        return Some(t);
+    }
+    let mut t = ground(&text, wanter(reg, &text, &p.last_user)?);
+    t.at = at;
+    save_turn(key, &t);
+    Some(t)
+}
+
+/// What the cache says a's finished turn wants, when a rush has read that
+/// very turn; None otherwise. Rust-only: `rush session list` and `info`.
+pub fn cached(a: &Agent) -> Option<TurnWants> {
+    let b = std::fs::read(turns_file()).ok()?;
+    let got: HashMap<String, TurnWants> = serde_json::from_slice(&b).ok()?;
+    got.get(&a.key)
+        .filter(|t| t.at == a.job.updated_at && !t.wants.is_empty())
+        .cloned()
+}
+
+/// What a's finished turn wants, as the view reads it: the cache's, else
+/// read now by the model the leading view asks (and kept for every rush),
+/// for a turn the view would read: one you haven't looked at. Empty when
+/// there's no such turn or no model could say. Rust-only: `rush session
+/// needs` and `wait`, so a monitoring agent needn't wait on a view.
+pub fn read_now(reg: &Registry, a: &Agent, now: Ms) -> TurnWants {
+    if let Some(t) = cached(a) {
+        return t;
+    }
+    if !unlooked(now, a) || a.job.transcript_path.is_empty() {
+        return TurnWants::default();
+    }
+    let wanter = (*WANTER.read().unwrap_or_else(|e| e.into_inner())).unwrap_or(
+        if rush_core::sandbox::active() {
+            no_model
+        } else {
+            ask_model
+        },
+    );
+    read_and_save(
+        reg,
+        wanter,
+        &a.key,
+        a.job.updated_at,
+        a.kind.as_str(),
+        &a.job.transcript_path,
+        a.job.detail.clone(),
+    )
+    .unwrap_or_default()
 }
 
 /// The finished turn the model reads next, the newest not read yet; None

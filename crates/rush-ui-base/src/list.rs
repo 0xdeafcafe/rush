@@ -41,7 +41,7 @@ use crate::landing::{land_of, tree_of};
 use crate::model::Model;
 use crate::rooms::{ROOM_KEY_PREFIX, RoomRows, Under, grouped};
 use crate::style::*;
-use crate::turnwants::{turn_label, wants_mark, wants_of, wants_say, wants_you};
+use crate::turnwants::{needs_you_of, turn_label, wants_mark, wants_of, wants_say, wants_you};
 
 pub const NEEDS: &str = "Needs you";
 pub const FINISHED: &str = "Finished";
@@ -575,7 +575,7 @@ impl Model {
             }
             // What needs you is never Earlier, put away or a day old: its
             // row says so, and Earlier is folded out of sight.
-            if asks(a) || wants_you(self, a) {
+            if needs_you_of(now, a, &wants_of(self, a)).is_some() {
                 // A question, or its last message hands you a step, offers
                 // one, asks or says it couldn't.
                 add(&mut groups, NEEDS, 0, it, at);
