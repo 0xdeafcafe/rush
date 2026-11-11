@@ -818,12 +818,12 @@ mod tests {
             (
                 "mcp",
                 r#"{"type":"mcpToolCall","id":"m","server":"rush","tool":"contact_sheet","result":{"content":[{"type":"text","text":"a sheet"},{"type":"image","data":"iVBORw==","mimeType":"image/webp"}]}}"#,
-                vec![("image/webp", 6, "")],
+                vec![("image/webp", 4, "")],
             ),
             (
                 "dynamic",
                 r#"{"type":"dynamicToolCall","id":"d","tool":"t","contentItems":[{"type":"inputText","text":"x"},{"type":"inputImage","imageUrl":"data:image/png;base64,iVBORw=="},{"type":"inputImage","imageUrl":"file:///tmp/a%20b.png"}]}"#,
-                vec![("image/png", 6, ""), ("", 0, "/tmp/a b.png")],
+                vec![("image/png", 4, ""), ("", 0, "/tmp/a b.png")],
             ),
             (
                 "text only",

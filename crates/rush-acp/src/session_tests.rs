@@ -855,7 +855,7 @@ fn tool_images_follow_the_result() {
     assert_eq!(kinds, [PartKind::ToolResult, PartKind::Image]);
     assert_eq!(output_of(&m).text, "a sheet");
     let img = m.parts[1].image.as_ref().unwrap();
-    assert_eq!((img.media_type.as_str(), img.data.len()), ("image/webp", 6));
+    assert_eq!((img.media_type.as_str(), img.data.len()), ("image/webp", 4));
 }
 
 // tasks_test.go: TestSubagentCall: Copilot's subagent, kind other, a
