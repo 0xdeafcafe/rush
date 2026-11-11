@@ -2092,10 +2092,15 @@ loader (no running tile, so nothing nudges it) and by the subagents view
 The subagents view (`subview::list`) is a line a run: its mark, what it
 was asked, a short status and how long it went, under Running and
 Finished headings. Its model, worktree, steps, cost and effort show only
-for the run picked: under its row when the pane is narrow (a click there
-gives its pane the keys), else in the column beside the list
-(`subview::beside`, from `WIDE_AT` = 110 cells). That column follows
-clicks only, never the pointer; the views panel's run rows pick a run
+for the run picked, in its pane. The list is laid across the top of the
+view and the run picked shows under it at the view's whole width, never
+in a column beside it (Rust-only, the owner's call 2026-11-11: two
+columns wasted the width). The list's rows flow down then across into
+as many columns as fit (`subview::band_cols`: 46 cells at least, 3
+between, up to 4; one below 95 cells, as Go's narrow list), a few rows
+tall (`split_rows`), scrolled to keep the pick in sight; the pointer
+lights the row under it by column (`band_at`), none between two. The
+run under it follows clicks only, never the pointer; the views panel's run rows pick a run
 there too (`subview::pick_run`). ↑↓ move the pick through the list while
 the list has the keys (`subview::list_key`, ahead of the cards' ↑ and
 the box's own keys); while the run's pane has them they're its own. A click

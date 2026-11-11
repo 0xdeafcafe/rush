@@ -1,4 +1,4 @@
-//! The subagents view, a run picked with the list (beside it or under it)
+//! The subagents view, a run picked under the list (laid across the top)
 //! and the dock's runs under ↑: after Go's internal/ui workflow_test.go
 //! (TestWorkflowRows' list), subview_test.go (TestSubagentsView,
 //! TestWatchFromDock, TestCycleSubagents), spawns_test.go
@@ -265,7 +265,7 @@ fn every_tab_takes_a_click_from_every_view() {
 }
 
 /// enter or → on a run in the list gives its pane the keys: its
-/// conversation stays beside the list, never a screen of its own; esc
+/// conversation stays under the list, never a screen of its own; esc
 /// and ← give them back to the list, the run still picked.
 #[test]
 fn enter_gives_the_runs_pane_the_keys() {
@@ -480,26 +480,45 @@ fn cycling_the_runs() {
     assert_eq!(seen, ["a2", "y", "x", "a1", "a0", "conversation"]);
 }
 
-/// Wide, the picked run's conversation shows beside the list, saying
-/// where it is in it (drawSubPreview).
+/// Wide, the list's rows flow into columns across the top, and the picked
+/// run's conversation shows under them all at the view's whole width,
+/// never in a column beside the list (Rust-only, the owner's call).
 #[test]
-fn wide_shows_the_run_beside_the_list() {
+fn wide_lays_the_list_across_the_run_under_it() {
     let d = tempfile::tempdir().unwrap();
     let mut m = model(&d);
     m.w = 180;
     views::show_view(&mut m, KEY, "subagents");
     m.session.as_mut().unwrap().sel = "sub:x".into();
     let body = text(&views::body(&mut m, 170, 20).unwrap());
-    let first = body.lines().next().unwrap();
-    assert!(first.contains("│  ✓ review the diff"), "{body}");
-    assert!(body.contains("The diff is fine"), "{body}");
-    assert!(conn(&mut m, KEY).watch.peek.visible);
+    let w = &conn(&mut m, KEY).watch;
+    assert_eq!((w.cols, w.cell_w), (3, 54), "{body}");
+    assert!(w.peek.visible);
+    let rule = body
+        .lines()
+        .position(|l| l.starts_with("─────"))
+        .unwrap_or_else(|| panic!("no rule under the list:\n{body}"));
+    assert_eq!(conn(&mut m, KEY).watch.split, rule);
+    let lines: Vec<&str> = body.lines().collect();
+    let (list, under) = (lines[..rule].join("\n"), lines[rule..].join("\n"));
+    assert!(!list.contains('│'), "a column beside the list:\n{body}");
+    assert!(
+        list.lines()
+            .any(|l| l.contains("Running") && l.contains("review the diff"))
+            || list
+                .lines()
+                .any(|l| l.contains("port:hl") && l.contains("Finished")),
+        "the list isn't laid across:\n{body}"
+    );
+    assert!(rule <= 8, "the list took {rule} rows:\n{body}");
+    assert!(under.contains("The diff is fine"), "{body}");
+    assert!(under.contains("to review the diff"), "{body}");
 }
 
-/// Wide, nothing shows beside the list until a run is picked: the
-/// pointer passing over one moves nothing.
+/// Wide, nothing shows under the list until a run is picked: the pointer
+/// passing over one moves nothing.
 #[test]
-fn nothing_beside_the_list_until_a_click() {
+fn nothing_under_the_list_until_a_click() {
     use crate::frame::Mouse;
     use rush_draw::MouseKind;
     let d = tempfile::tempdir().unwrap();
@@ -524,7 +543,7 @@ fn nothing_beside_the_list_until_a_click() {
     assert!(!all.contains("The diff is fine"), "{all}");
 }
 
-/// A click on a run picks it and shows it beside the list, with its
+/// A click on a run picks it and shows it under the list, with its
 /// facts, its conversation and a box to message it, the list keeping the
 /// keys so ↑↓ go on through the runs; tab gives its pane them, a second
 /// click opens nothing whole, a click in its conversation keeps the keys
@@ -538,14 +557,19 @@ fn a_click_picks_a_run_and_the_list_keeps_the_keys() {
     m.w = 180;
     views::show_view(&mut m, KEY, "subagents");
     let frame = m.frame();
-    let y = frame
+    let (y, x) = frame
         .iter()
-        .position(|l| l.plain().contains("review the diff"))
+        .enumerate()
+        .find_map(|(i, l)| {
+            let t = l.plain();
+            t.find("review the diff")
+                .map(|x| (i, rush_core::text::width(&t[..x])))
+        })
         .expect("its row on screen");
     let click = |m: &mut Model| {
         m.mouse_event(&Mouse {
             kind: MouseKind::Down(Button::Left),
-            x: 10,
+            x: x as u16,
             y: y as u16,
             mods: Default::default(),
         });
@@ -587,7 +611,7 @@ fn a_click_picks_a_run_and_the_list_keeps_the_keys() {
     assert!(!conn(&mut m, KEY).watch.msg_focus);
     assert_eq!(sel(&m), "sub:x");
     let all = text(&m.frame());
-    assert!(all.contains("│  ✓ review the diff"), "{all}");
+    assert!(all.contains("✓ review the diff"), "{all}");
 }
 
 /// Narrow, the picked run shows under a short list of the runs, a rule
@@ -893,7 +917,7 @@ fn each_run_keeps_its_own_draft() {
 }
 
 /// Session key's run x working in the background, in a session rush runs
-/// through fake, picked beside the wide list, not opened.
+/// through fake, picked under the wide list, not opened.
 pub(super) fn picked_beside(d: &tempfile::TempDir, fake: &Arc<Fake>, inbox: bool) -> Model {
     use super::host::Hosts;
     use rush_core::event::{Event, TaskKind, TaskStarted};
@@ -931,12 +955,12 @@ pub(super) fn typed(m: &mut Model, s: &str) {
     }
 }
 
-/// The box under a run beside the list: → gives it the keys, and what's
+/// The box under a run in the subagents view: → gives it the keys, and what's
 /// typed goes to the run, not the main session: into its inbox where its
 /// host has one, else passed on by the main session with SendMessage,
 /// which the box says.
 #[test]
-fn the_box_beside_the_list_messages_the_run() {
+fn the_box_under_the_run_messages_it() {
     let d = tempfile::tempdir().unwrap();
     let fake = Fake::new();
     let mut m = picked_beside(&d, &fake, true);
@@ -1165,7 +1189,7 @@ fn working(d: &tempfile::TempDir) -> Model {
 }
 
 /// While a run works, the subagents view shows the session's working line:
-/// docked under its conversation, beside the list and under it, and,
+/// docked under its conversation, wide and narrow, and,
 /// short, on its row (the spinner and its step); a finished run shows how
 /// it ended. Once it finishes, the line goes and its row says done.
 #[test]
@@ -1186,7 +1210,31 @@ fn a_working_run_shows_its_working_line() {
     let wf = subview::started(start, NOW);
     let asked = crate::screens::settings::paint::civil(NOW - 56_789);
     let hm = format!("{:02}:{:02}", asked.hour, asked.minute);
-    assert_eq!(got, working_view(&wf, &hm), "\n{got}");
+    // Wide, the list is laid across the top in columns, the run under it
+    // at the whole width with its working line (Rust-only).
+    let rule = got
+        .lines()
+        .position(|l| l.starts_with("─────"))
+        .unwrap_or_else(|| panic!("no rule under the list:\n{got}"));
+    let lines: Vec<&str> = got.lines().collect();
+    let (list, under) = (lines[..rule].join("\n"), lines[rule..].join("\n"));
+    assert_eq!(conn(&mut m, KEY).watch.cols, 3, "\n{got}");
+    assert!(
+        !list.contains('│') && list.contains("Running  2"),
+        "\n{got}"
+    );
+    assert!(list.contains("✓ review the diff"), "\n{got}");
+    assert!(
+        under.contains("· check the port's tests") && under.contains("running  57s"),
+        "\n{got}"
+    );
+    assert!(under.contains(&format!("▍ You  {hm}")), "\n{got}");
+    assert!(
+        under.contains("▍   · running Bash…  36s  turn 56s"),
+        "\n{got}"
+    );
+    assert!(under.contains("╭─ to check the port's tests"), "\n{got}");
+    assert!(got.contains(&wf), "\n{got}");
     // Narrow, the run goes under a short list, its working line with it.
     let narrow = text(&views::body(&mut m, 90, 30).unwrap());
     assert!(narrow.contains("· running Bash…"), "narrow:\n{narrow}");
@@ -1221,47 +1269,6 @@ fn row_of(m: &mut Model, id: &str) -> String {
         .find(|(_, r)| *r == rf)
         .map(|(l, _)| l.plain())
         .unwrap_or_default()
-}
-
-/// The subagents view 150 wide, w picked and working: the line under its
-/// conversation, its short form on its row; wf is when the workflow
-/// started and hm when w was asked, in local time.
-fn working_view(wf: &str, hm: &str) -> String {
-    [
-        "  1 agent and 1 workflow running · 4 runs in all  ·  click one to see it h… │  · check the port's tests                                   running  57s",
-        "                                                                            │    claude-opus-4-1 · 1 step · $0.02 · context 960 of 1M · 0%",
-        "  Running  2                                                                │ ────────────────────────────────────────────────────────────────────────",
-        "  · ⋔ Port rush t… · {wf}   · Port 1/3  ›  · C…  running              5m   │",
-        "    · Port  1 of 3 done                                                     │ ▍ You  {hm}",
-        "      ✓ port:hl                                   done                      │ ▍ check the port's tests",
-        "        ▸ 1 earlier try · click to show                                     │",
-        "      ✢ port:claude                               · working…                │ ▍ Agent  {hm}",
-        "      ◌ port:draw    waiting to start                                       │ │   ✳ run the tests  cargo test                        36s since {hm}",
-        "    · Check  not started                                                    │",
-        "▍ · check the port's tests                        · run the test…     57s   │ ▍   · running Bash…  36s  turn 56s",
-        "                                                                            │",
-        "  ▾ Finished  2                                                             │",
-        "  ✓ plan the next piece of the port with care     done                      │",
-        "  ✓ review the diff                               done                 9s   │",
-        "                                                                            │",
-        "                                                                            │",
-        "                                                                            │",
-        "                                                                            │",
-        "                                                                            │",
-        "                                                                            │",
-        "                                                                            │",
-        "                                                                            │",
-        "                                                                            │",
-        "                                                                            │",
-        "                                                                            │",
-        "                                                                            │",
-        "                                                                            │ ╭─ to check the port's tests ──────────────────────────────────────────╮",
-        "                                                                            │ │ ❯ the session isn't running in rush · resume it to send              │",
-        "                                                                            │ ╰──────────────────────────────────────────────────────────────────────╯",
-    ]
-    .join("\n")
-    .replace("{wf}", wf)
-    .replace("{hm}", hm)
 }
 
 /// The subagents view 90 wide, w picked and working: a short list, then

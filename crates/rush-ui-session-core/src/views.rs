@@ -746,13 +746,8 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
         "background" => super::running::background_lines(m, &key, w),
         "memory" => super::memory::lines(m, &key, w, rows),
         "subagents" => {
-            let wide = super::subview::wide(w, true);
-            let lw = if wide {
-                super::subview::list_width(w)
-            } else {
-                w
-            };
-            super::subview::list(m, &key, lw, wide)
+            let cw = super::subview::cell_width(w, super::subview::band_cols(w));
+            super::subview::list(m, &key, cw, false)
         }
         _ => Vec::new(),
     };
@@ -761,10 +756,17 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
         .as_ref()
         .map(|v| v.sel.clone())
         .unwrap_or_default();
-    // Narrow, the subagents list takes a few rows at the top, scrolled,
-    // and the run picked the rest under it.
-    let list_rows = if subs && !super::subview::wide(w, true) {
-        super::subview::split_rows(all.len(), rows)
+    // The subagents list takes a few rows at the top, laid into as many
+    // columns as fit, scrolled, and the run picked the rest under it at
+    // the view's whole width (Rust-only: never a column beside it).
+    let cols = if subs {
+        super::subview::band_cols(w)
+    } else {
+        1
+    };
+    let cw = super::subview::cell_width(w, cols);
+    let list_rows = if subs {
+        super::subview::split_rows(all.len().div_ceil(cols), rows)
     } else {
         rows
     };
@@ -774,6 +776,8 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
         c.watch.split = if stacked { list_rows } else { 0 };
         c.watch.pane_w = w;
         c.watch.body_rows = rows;
+        c.watch.cols = cols;
+        c.watch.cell_w = cw;
     }
     if stacked {
         c.vs.rows = list_rows;
@@ -783,40 +787,45 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
     // not while the wheel has scrolled the view away from it, so rows
     // coming and going don't pull the view back.
     let n = all.len();
-    let most = n.saturating_sub(list_rows);
+    let window = list_rows * cols;
+    let most = n.saturating_sub(window);
     let free = c.vs.free.as_deref() == Some(sel.as_str());
     if !free && let Some(i) = all.iter().position(|(_, r)| !sel.is_empty() && *r == sel) {
         if i < c.vs.top {
             c.vs.top = i.saturating_sub(1);
-        } else if i >= c.vs.top + list_rows {
-            c.vs.top = i + 1 - list_rows;
+        } else if i >= c.vs.top + window {
+            c.vs.top = i + 1 - window;
         }
     }
     c.vs.top = c.vs.top.min(most);
     let top = c.vs.top;
-    let shown = &all[top..(top + list_rows).min(n)];
+    let shown = &all[top..(top + window).min(n)];
     c.vs.refs = shown.iter().map(|(_, r)| r.clone()).collect();
     let hover = c.vs.hover_ref.clone();
     let refs: Vec<String> = shown.iter().map(|(_, r)| r.clone()).collect();
-    let mut out: Vec<Line> = shown
-        .iter()
-        .map(|(l, r)| {
-            // The background view lights the row under the pointer itself,
-            // inside its edge.
-            if !hover.is_empty() && *r == hover && *r != sel && name != "background" {
-                hover_line(l.clone(), w)
-            } else {
-                l.clone()
-            }
-        })
-        .collect();
+    // The background view lights the row under the pointer itself,
+    // inside its edge.
+    let lit = |r: &str| !hover.is_empty() && r == hover && r != sel && name != "background";
+    let mut out: Vec<Line> = if cols > 1 {
+        super::subview::band(shown, list_rows, cols, cw, &lit)
+    } else {
+        shown
+            .iter()
+            .map(|(l, r)| {
+                if lit(r.as_str()) {
+                    hover_line(l.clone(), w)
+                } else {
+                    l.clone()
+                }
+            })
+            .collect()
+    };
     if let Some(v) = m.session.as_mut() {
         v.shown = refs; // the frame's clicks
     }
     out.truncate(list_rows);
     if subs {
-        // The run picked: wide, beside the list's rows in sight; narrow,
-        // under them.
+        // The run picked, under the list's rows in sight.
         let top = m.session.as_ref().map_or(0, |v| v.top);
         while out.len() < rows {
             out.push(Line::new());
@@ -824,7 +833,9 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
         if stacked {
             super::subview::below(m, &key, &mut out, w, list_rows, top);
         } else {
-            super::subview::beside(m, &key, &mut out, w, top);
+            let w = &mut conn(m, &key).watch;
+            w.peek.visible = false;
+            w.msg_at = [0; 4];
         }
     }
     conn(m, &key).vs.lines = out.clone();

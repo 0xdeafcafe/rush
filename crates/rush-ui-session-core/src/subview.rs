@@ -61,8 +61,12 @@ pub struct Watch {
     /// The picked run's conversation, beside the wide list or under the
     /// narrow one.
     pub peek: Peek,
-    /// Narrow, the rows the list takes over the picked run; 0 when wide.
+    /// The rows the list takes over the picked run; 0 when the list takes
+    /// them all.
     pub split: usize,
+    /// The columns the list flows into across the top, and their width.
+    pub cols: usize,
+    pub cell_w: usize,
     /// The pane's width as the view was last drawn (paneW).
     pub pane_w: usize,
     /// The body's rows as the view was last drawn: the list's and the
@@ -108,14 +112,8 @@ pub struct Peek {
     pub visible: bool,
 }
 
-/// Whether the list is wide enough for a run's conversation beside it
-/// (wideSubagents); narrower, the run goes under a short list.
-pub fn wide(w: usize, any: bool) -> bool {
-    w >= WIDE_AT && any
-}
-
-/// Narrow, the rows the list takes over the picked run, rows tall in all,
-/// the list n rows long: a short list, scrolled, the rest the run's.
+/// The rows the list takes over the picked run, rows tall in all, the
+/// list n rows long: a short list, scrolled, the rest the run's.
 pub fn split_rows(n: usize, rows: usize) -> usize {
     let most = (rows * 2 / 5).max(6);
     if rows < most + 8 {
@@ -124,14 +122,64 @@ pub fn split_rows(n: usize, rows: usize) -> usize {
     n.min(most)
 }
 
-/// How wide the pane is before the picked run shows beside the list: room
-/// for the list's one-line rows and a column that reads.
-pub const WIDE_AT: usize = 110;
+/// The narrowest a column of the list goes, and the room between two.
+pub const CELL_MIN: usize = 46;
+pub const CELL_GAP: usize = 3;
 
-/// The list's width when the run's conversation is beside it
-/// (subListWidth).
-pub fn list_width(w: usize) -> usize {
-    (w / 2).clamp(48, 80)
+/// How many columns the list's rows flow into across the top of the view,
+/// w wide: as many as fit, up to 4, the picked run under them all at the
+/// view's whole width. Rust-only: the owner's call (2026-11-11), the
+/// list laid across rather than a column beside the run (Go's
+/// wideSubagents, subListWidth).
+pub fn band_cols(w: usize) -> usize {
+    ((w + CELL_GAP) / (CELL_MIN + CELL_GAP)).clamp(1, 4)
+}
+
+/// Each of cols columns' width in a band w wide.
+pub fn cell_width(w: usize, cols: usize) -> usize {
+    let cols = cols.max(1);
+    w.saturating_sub((cols - 1) * CELL_GAP) / cols
+}
+
+/// The rows of the list in sight laid into cols columns of cw, rows tall,
+/// down each column then across: hover lights the one under the pointer.
+pub fn band(
+    shown: &[(Line, String)],
+    rows: usize,
+    cols: usize,
+    cw: usize,
+    lit: &dyn Fn(&str) -> bool,
+) -> Vec<Line> {
+    let mut out = Vec::with_capacity(rows);
+    for r in 0..rows {
+        let mut row = Line::new();
+        for c in 0..cols {
+            let Some((l, rf)) = shown.get(c * rows + r) else {
+                break;
+            };
+            if c > 0 {
+                row.spans.push(plain(" ".repeat(CELL_GAP)));
+            }
+            let l = if lit(rf.as_str()) {
+                hover_line(l.clone(), cw)
+            } else {
+                l.clone()
+            };
+            join(&mut row, fit(l, cw));
+        }
+        out.push(row);
+    }
+    out
+}
+
+/// The list's row under cell (x, y) of the band, rows tall, as its place
+/// in the rows in sight: none between two columns.
+pub fn band_at(x: usize, y: usize, rows: usize, cols: usize, cw: usize) -> Option<usize> {
+    let c = x / (cw + CELL_GAP);
+    if c >= cols.max(1) || x % (cw + CELL_GAP) >= cw || y >= rows {
+        return None;
+    }
+    Some(c * rows + y)
 }
 
 /// Session key's runs, read without changing anything.
@@ -1149,34 +1197,8 @@ fn group_lines(m: &mut Model, key: &str, rf: &str, w: usize) -> Vec<Line> {
     out
 }
 
-/// Lays the picked run beside the wide list, over the rows after the
-/// view's first top: how it stands and its facts, its conversation's
-/// latest, and a box to message it; a workflow picked, its phases;
-/// nothing picked, how to pick one (drawSubPreview, subPreviewLines).
-pub fn beside(m: &mut Model, key: &str, out: &mut [Line], w: usize, screen_top: usize) {
-    conn(m, key).watch.peek.visible = false;
-    conn(m, key).watch.msg_at = [0; 4];
-    let any = has_runs(m, key);
-    if !wide(w, any) {
-        return;
-    }
-    let lw = list_width(w);
-    let pw = w.saturating_sub(lw + 3);
-    let h = out.len();
-    let mut right: Vec<Line> = vec![Line::new(); h];
-    column(m, key, &mut right, pw, (2 + lw + 3, screen_top));
-    for (i, l) in out.iter_mut().enumerate() {
-        let mut row = fit(std::mem::take(l), lw);
-        row.spans.push(plain(" "));
-        row.spans.push(faint("│"));
-        row.spans.push(plain(" "));
-        join(&mut row, fit(std::mem::take(&mut right[i]), pw));
-        *l = row;
-    }
-}
-
-/// Narrow, the picked run under the list's first split rows, out rows
-/// tall in all: a rule, then what the wide view shows beside the list.
+/// The picked run under the list's first split rows, out rows tall in
+/// all, at the view's whole width: a rule, then the run.
 pub fn below(
     m: &mut Model,
     key: &str,
@@ -1718,28 +1740,30 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     }
     let (x, y) = (e.x as usize, e.y as usize);
     let rows = conn(m, &key).vs.rows.max(1);
+    let (cols, cw) = (conn(m, &key).watch.cols, conn(m, &key).watch.cell_w);
     let row = y.checked_sub(top).filter(|&i| i < rows);
     let rf = row
+        .and_then(|i| {
+            if cols > 1 {
+                band_at(x.saturating_sub(2), i, rows, cols, cw)
+            } else {
+                Some(i)
+            }
+        })
         .and_then(|i| conn(m, &key).vs.refs.get(i).cloned())
         .unwrap_or_default();
     let p = &conn(m, &key).watch.peek;
     let in_peek = p.visible && x >= p.x && x < p.x + p.w && y >= p.y && y < p.y + p.h;
     let b = conn(m, &key).watch.msg_at;
     let in_box = b[2] > 0 && x >= b[0] && x < b[0] + b[2] && y >= b[1] && y < b[1] + b[3];
-    let pw = conn(m, &key).watch.pane_w;
     let split = conn(m, &key).watch.split;
-    // Wide, the column beside the list is the run's, not the list's;
-    // narrow, the rows under it. Only on the body's rows: the header's
-    // tabs over it and the box under it are their own (Go clicks the
-    // pane's tabs first, model.go:1680 clickPaneTab).
+    // The rows under the list are the run's, not the list's. Only on the
+    // body's rows: the header's tabs over it and the box under it are
+    // their own (Go clicks the pane's tabs first, model.go:1680
+    // clickPaneTab).
     let body = conn(m, &key).watch.body_rows;
     let on_body = y >= top && y < top + body;
-    let beside = on_body
-        && if split > 0 {
-            y >= top + split
-        } else {
-            pw >= WIDE_AT && x.saturating_sub(2) >= list_width(pw)
-        };
+    let beside = on_body && split > 0 && y >= top + split;
     if row.is_none() && !in_peek && !in_box && !beside {
         return Out::Pass;
     }
@@ -1762,12 +1786,13 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
             }
             conn(m, &key).watch.msg_focus = false;
             if rf.is_empty() {
-                return Out::Pass;
+                // Between the list's columns: no row of it, and no view's.
+                return if cols > 1 { Out::Idle } else { Out::Pass };
             }
             if is_fold(m, &key, &rf) {
                 toggle_fold(m, &key, &rf);
             }
-            // A run clicked shows beside the list, which keeps the keys:
+            // A run clicked shows under the list, which keeps the keys:
             // ↑↓ go on through the runs; tab, enter or → give its pane
             // them (Rust-only).
             set_sel(m, rf);

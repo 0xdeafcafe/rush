@@ -394,49 +394,56 @@ fn picked_from_the_background_view() {
     assert_eq!(m.session.as_ref().unwrap().sel, "run:x");
 }
 
-/// Wide, with no run open, the pointer right of the list is over the
-/// run's conversation beside it: it lights no row of the list behind
-/// (subHoverAt :1007-1011, 3a4a7e4b).
+/// Where text first shows on frame: its row and its column, in cells.
+fn spot(frame: &[rush_core::text::Line], text: &str) -> (u16, u16) {
+    frame
+        .iter()
+        .enumerate()
+        .find_map(|(i, l)| {
+            let t = l.plain();
+            t.find(text)
+                .map(|x| (i as u16, rush_core::text::width(&t[..x]) as u16))
+        })
+        .unwrap_or_else(|| panic!("{text:?} not on screen"))
+}
+
+/// Wide, the list laid across in columns lights only the row under the
+/// pointer: none between two columns (Rust-only; subHoverAt :1007-1011,
+/// 3a4a7e4b).
 #[test]
 fn the_wide_list_lights_only_its_own_rows() {
     let d = tempfile::tempdir().unwrap();
     let mut m = background(&d);
     m.w = 180;
     views::show_view(&mut m, KEY, "subagents");
-    let frame = m.frame();
-    let y = frame
-        .iter()
-        .position(|l| l.plain().contains("review the diff"))
-        .expect("its row on screen");
+    let (y, x) = spot(&m.frame(), "review the diff");
     let over = |m: &mut Model, x: u16| {
         m.mouse_event(&Mouse {
             kind: MouseKind::Moved,
             x,
-            y: y as u16,
+            y,
             mods: Default::default(),
         });
         conn(m, KEY).vs.hover_ref.clone()
     };
-    assert_eq!(over(&mut m, 10), "sub:x");
-    let lw = subview::list_width(conn(&mut m, KEY).watch.pane_w);
-    assert_eq!(over(&mut m, (2 + lw + 1) as u16), "");
+    assert_eq!(over(&mut m, x), "sub:x");
+    let (cols, cw) = (conn(&mut m, KEY).watch.cols, conn(&mut m, KEY).watch.cell_w);
+    assert!(cols > 1, "not laid across: {cols}");
+    assert_eq!(over(&mut m, (2 + cw + 1) as u16), "");
 }
 
-/// The pointer moving again inside the column beside the list still lights
-/// no row of it, and a click there picks none.
+/// The pointer moving under the list, over what shows of the run, lights
+/// no row of the list, and a click there picks none.
 #[test]
-fn the_column_beside_the_list_hovers_and_picks_nothing() {
+fn under_the_list_hovers_and_picks_nothing() {
     let d = tempfile::tempdir().unwrap();
     let mut m = background(&d);
     m.w = 180;
     views::show_view(&mut m, KEY, "subagents");
     let frame = m.frame();
-    let y = frame
-        .iter()
-        .position(|l| l.plain().contains("review the diff"))
-        .expect("its row on screen") as u16;
-    let lw = subview::list_width(conn(&mut m, KEY).watch.pane_w);
-    let at = |m: &mut Model, kind: MouseKind, x: u16| {
+    let (y, x) = spot(&frame, "review the diff");
+    let (below, _) = spot(&frame, "Click an agent to see it here");
+    let at = |m: &mut Model, kind: MouseKind, x: u16, y: u16| {
         m.mouse_event(&Mouse {
             kind,
             x,
@@ -445,15 +452,14 @@ fn the_column_beside_the_list_hovers_and_picks_nothing() {
         });
         conn(m, KEY).vs.hover_ref.clone()
     };
-    assert_eq!(at(&mut m, MouseKind::Moved, 10), "sub:x");
-    let right = (2 + lw + 6) as u16;
+    assert_eq!(at(&mut m, MouseKind::Moved, x, y), "sub:x");
     for dx in 0..3 {
-        assert_eq!(at(&mut m, MouseKind::Moved, right + dx), "", "move {dx}");
+        assert_eq!(at(&mut m, MouseKind::Moved, x + dx, below), "", "move {dx}");
     }
     let sel = m.session.as_ref().unwrap().sel.clone();
-    at(&mut m, MouseKind::Down(Button::Left), right);
+    at(&mut m, MouseKind::Down(Button::Left), x, below);
     assert_eq!(m.session.as_ref().unwrap().sel, sel, "a click picked a row");
-    assert_eq!(at(&mut m, MouseKind::Moved, 10), "sub:x");
+    assert_eq!(at(&mut m, MouseKind::Moved, x, y), "sub:x");
 }
 
 /// In the views panel beside the conversation, a run's row picks it
