@@ -836,6 +836,28 @@ fn shell_output_as_it_comes() {
     assert!(output_of(&next!(h, Message)).text.contains("ok  ./b"));
 }
 
+// A tool's images come after its result in the same message, as Claude
+// Code's do, so they're drawn under its step. Rust-only.
+#[test]
+fn tool_images_follow_the_result() {
+    let (_s, mut f, h) = start();
+    next!(h, Init);
+    f.update(json!({"sessionUpdate": "tool_call", "toolCallId": "c1", "title": "mcp__rush__contact_sheet", "kind": "other", "status": "in_progress",
+        "rawInput": {"images": ["/w/a.png"]}}));
+    next!(h, Message);
+    f.update(json!({"sessionUpdate": "tool_call_update", "toolCallId": "c1", "status": "completed",
+        "content": [{"type": "content", "content": {"type": "text", "text": "a sheet"}},
+            {"type": "content", "content": {"type": "image", "data": "iVBORw==", "mimeType": "image/webp"}},
+            {"type": "content", "content": {"type": "image", "data": "", "mimeType": "image/png"}}]}));
+    next!(h, CallUpdated);
+    let m = next!(h, Message);
+    let kinds: Vec<PartKind> = m.parts.iter().map(|p| p.kind).collect();
+    assert_eq!(kinds, [PartKind::ToolResult, PartKind::Image]);
+    assert_eq!(output_of(&m).text, "a sheet");
+    let img = m.parts[1].image.as_ref().unwrap();
+    assert_eq!((img.media_type.as_str(), img.data.len()), ("image/webp", 6));
+}
+
 // tasks_test.go: TestSubagentCall: Copilot's subagent, kind other, a
 // prompt and an agent type. It's a task until its call ends.
 #[test]

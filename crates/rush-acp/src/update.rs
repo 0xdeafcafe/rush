@@ -425,13 +425,15 @@ impl Inner {
                 tc.raw_output.as_deref(),
             );
             text = out.text.clone();
+            let mut parts = vec![event::Part {
+                kind: PartKind::ToolResult,
+                output: Some(Box::new(out)),
+                ..event::Part::default()
+            }];
+            parts.extend(result_images(&c.content));
             self.emit(Event::Message(event::Message {
                 role: "user".into(),
-                parts: vec![event::Part {
-                    kind: PartKind::ToolResult,
-                    output: Some(Box::new(out)),
-                    ..event::Part::default()
-                }],
+                parts,
                 ..event::Message::default()
             }));
             if !c.task.is_empty() && !c.c.input.background {
@@ -777,6 +779,30 @@ pub(crate) fn read_input(
 }
 
 /// A finished call's result.
+/// The images a tool gave back in its content, as image parts to follow
+/// its result, as Claude Code's tool results carry theirs. Rust-only.
+pub(crate) fn result_images(content: &[ToolContent]) -> Vec<event::Part> {
+    content
+        .iter()
+        .filter(|c| c.kind == "content" && c.content.kind == "image")
+        .filter_map(|c| {
+            let data = base64::engine::general_purpose::STANDARD
+                .decode(c.content.data.as_bytes())
+                .ok()
+                .filter(|d| !d.is_empty())?;
+            Some(event::Part {
+                kind: PartKind::Image,
+                image: Some(Box::new(event::ImageData {
+                    media_type: c.content.mime_type.clone(),
+                    data,
+                    ..event::ImageData::default()
+                })),
+                ..event::Part::default()
+            })
+        })
+        .collect()
+}
+
 pub(crate) fn read_output(
     id: &str,
     failed: bool,
