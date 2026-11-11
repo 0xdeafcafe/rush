@@ -1193,6 +1193,29 @@ deleted as it went. Here it never deletes on its own:
   plan isn't taken for it; while it waits nothing more is offered.
 - The sheet, the cleanup plugin's description and Settings › Disk and
   memory say it proposes a list for you to approve.
+- The sheet's first choice is Clean up now (`CareChoice::CleanUp`, `c`):
+  rush's own list by its rules, no agent and no plugin needed. It opens
+  Clean up, which beyond worktrees and scratch measures, off the UI once
+  it's open, caches that rebuild themselves (`clean.rs` `find_caches`):
+  - the folders cleanup rules name (rush-fleet's `rules.rs`): built in
+    (`BUILT_IN`: go-build, golangci-lint, goimports, pnpm's metadata cache,
+    VS Code's update download, deno, biome, act, vitest) and learned. A
+    rule is only ever a folder directly in ~/Library/Caches or ~/.cache,
+    never rush's or agtop's own (`may_be_rule`); ticked whatever changed
+    it lately, since the tool that made it makes it again;
+  - the build caches at the top of each worktree nobody works in that
+    isn't ticked to go whole, never a main checkout; ticked once unchanged
+    for a day (`CACHE_IDLE`).
+  Delete removes them through `remove_rule_cache` (refused unless a rule
+  names it, as named, a folder not a link) and `remove_cache` (refused
+  when changed since Clean up measured it), then pnpm store prune when a
+  node_modules went, which is what frees pnpm's hard links.
+- Learning: when Clean up opens, each cleanup session's
+  `cleanup-plan.tsv` is read, and each line marked conservative: yes whose
+  path may be a rule and isn't one yet is kept in rush's folder
+  (`cleanup-rules.tsv`, path with ~ and why, tab separated) and said in the
+  news. The prompt tells the agent so. So what an agent found once is
+  offered by rush, without an agent, from then on.
 
 When the disk is dire and you're away, rush itself (not the agent, which
 would need to run unattended) cleans the conservative set (`dire.rs`,

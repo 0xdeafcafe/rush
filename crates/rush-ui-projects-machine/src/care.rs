@@ -431,6 +431,8 @@ pub struct CareSheet {
 /// What each choice on the cleanup sheet does.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CareChoice {
+    /// Open Clean up, rush's own list by its rules: no agent (Rust-only).
+    CleanUp,
     TurnOn,
     Start,
     /// Start one that also looks at the rest of the disk (Beyond Go).
@@ -439,15 +441,21 @@ pub enum CareChoice {
 }
 
 impl CareSheet {
-    /// The choices, top to bottom: Turn on and Not now while the plugin is
-    /// off, else Start, Start and look further, and Not now.
+    /// The choices, top to bottom: Clean up first, rush's own list that
+    /// needs no agent; then Turn on and Not now while the plugin is off,
+    /// else Start, Start and look further, and Not now.
     pub fn choices(&self) -> &'static [CareChoice] {
         use CareChoice::*;
         if self.off {
-            &[TurnOn, NotNow]
+            &[CleanUp, TurnOn, NotNow]
         } else {
-            &[Start, Further, NotNow]
+            &[CleanUp, Start, Further, NotNow]
         }
+    }
+
+    /// Where a choice is, when it's offered.
+    pub fn at(&self, c: CareChoice) -> Option<usize> {
+        self.choices().iter().position(|x| *x == c)
     }
 
     /// Where Not now is: the last choice.
@@ -475,6 +483,13 @@ impl CareSheet {
             }
             return Out::Close;
         }
+        if choice == CareChoice::CleanUp {
+            // rush's own list, by its rules: what it knows can go, ticked,
+            // and the caches it knows of measured; nothing goes until you
+            // confirm it there.
+            super::clean::open_clean_sheet(m);
+            return Out::Close;
+        }
         let further = choice == CareChoice::Further;
         self.busy = true;
         if self.off {
@@ -496,7 +511,11 @@ impl CareSheet {
                     s.off = false;
                     // Unasked, the cursor stays off Start, so an enter
                     // meant for something else starts nothing.
-                    s.cur = if s.asked { 0 } else { s.not_now() };
+                    s.cur = if s.asked {
+                        s.at(CareChoice::Start).unwrap_or(0)
+                    } else {
+                        s.not_now()
+                    };
                     m.flash("cleanup plugin on");
                     Out::Draw
                 },
@@ -703,7 +722,7 @@ impl Sheet for CareSheet {
                 format!(
                     "rush noticed that {}. The cleanup plugin is off, and recommended now: with it on, rush offers a cleanup agent \
                      when this happens, which looks at {reads} and proposes a list of what can go without losing work for you to approve. \
-                     Nothing starts until you say yes.",
+                     Nothing starts until you say yes. Clean up now needs no plugin: it's rush's own list, by its rules.",
                     self.why
                 ),
                 (
@@ -719,7 +738,9 @@ impl Sheet for CareSheet {
             };
             (
                 format!(
-                    "{noticed}A cleanup agent can look at {reads}, \
+                    "{noticed}Clean up now opens rush's own list, with no agent: worktrees that can go, done sessions' scratch, \
+                     and caches that rebuild themselves (ones rush knows, and ones cleanup agents' plans taught it), ticked for you to confirm. \
+                     A cleanup agent can look at {reads}, \
                      deleting nothing, and propose a list of what can go without losing work (a worktree only once it's committed and pushed) \
                      and what holds memory that nobody works in, with each path, its size and why, for you to approve: all, some or none. \
                      It removes only what you approve, in one command you see first, and tells you what it freed. \
@@ -746,6 +767,10 @@ impl Sheet for CareSheet {
         };
         for (i, c) in self.choices().iter().enumerate() {
             let (what, about) = match c {
+                CareChoice::CleanUp => (
+                    "Clean up now",
+                    "rush's own list, no agent: what it knows can go and caches that rebuild, ticked",
+                ),
                 CareChoice::TurnOn | CareChoice::Start => first,
                 CareChoice::Further => (
                     "Start one that looks further",
@@ -795,12 +820,16 @@ impl Sheet for CareSheet {
                 self.cur = (self.cur + n - 1) % n;
                 Out::Draw
             }
-            "y" => {
+            "c" => {
                 self.cur = 0;
                 self.pick(m)
             }
-            "f" if !self.off => {
+            "y" => {
                 self.cur = 1;
+                self.pick(m)
+            }
+            "f" if !self.off => {
+                self.cur = self.at(CareChoice::Further).unwrap_or(n - 1);
                 self.pick(m)
             }
             "n" | "esc" | "ctrl+c" => {
@@ -1059,7 +1088,7 @@ const CARE_PHASES: &str = "Phase 1, now, is read-only: survey (df -h, du, git st
 - every path you would delete, each with its size and why it's safe to go (a can-go worktree, a done session's scratch, a cache that rebuilds itself, …) and conservative: yes when it's only something made or fetched again that loses no work (a done session's scratch untouched for days, a build cache in a worktree nobody works in, pnpm store prune), else conservative: no;
 - each group's total, and a grand total of the space it frees;
 - what you'd leave, and why;
-- the same plan as $TMPDIR/cleanup-plan.tsv, one line per path: path, bytes, conservative (yes or no) and why, tab separated; it's the one file you write in phase 1;
+- the same plan as $TMPDIR/cleanup-plan.tsv, one line per path: path, bytes, conservative (yes or no) and why, tab separated; it's the one file you write in phase 1. rush learns from it: a folder directly in ~/Library/Caches or ~/.cache marked yes becomes one of its rules, and its Clean up offers it from then on without an agent, so give each such line a why that says what makes it again;
 - then a decisions block with one decision: (a) delete all of it; (b) only some, the user names which; (c) none.
 Phase 2 starts only once the user answers. Delete exactly what they approved, nothing new: write the removals as one script, $TMPDIR/cleanup.sh, one line per approved path (rm -rf for a folder or file, git -C <repo> worktree remove for a worktree), then pnpm store prune if the plan has it, and run it once, so the user sees and approves one command. Run df -h before and after. Look at each path again first: one that changed since the plan (touched since, or now in use) stays out of the script, and you say so. With (c), delete nothing and say what you'd have freed.
 ";
@@ -1105,7 +1134,9 @@ pub fn ask_care(m: &mut Model) -> Out {
             m.open_sheet(Box::new(CareSheet {
                 why: format!("you asked for one, with {free} free on disk"),
                 short: format!("asked, {free} free on disk"),
-                cur: 0,
+                // On Start (or Turn on): you asked for an agent, the
+                // choice after Clean up.
+                cur: 1,
                 busy: false,
                 looking: false,
                 off: !on,

@@ -9,7 +9,9 @@
 //! cleanup.go (askRemoveWorktree :487, askClearScratch :497, clearScratch
 //! :505, onScratchCleared :513, removeWorktree :539, onRemoved :547),
 //! tempwork.go (askClean :102, askCleanAll :120, cleanTemp :136,
-//! onCleaned :165) and fleet/temp.go:72 (CleanTemp's guard).
+//! onCleaned :165) and fleet/temp.go:72 (CleanTemp's guard). Rust-only:
+//! caches that rebuild themselves, as Clean up measured them (CacheFound),
+//! then pnpm store prune after a node_modules.
 
 use rush_core::adapter::TempDir;
 use rush_core::text::{Color, Line};
@@ -36,6 +38,8 @@ pub struct Doomed {
     /// What's in rush's scratch root that no session owns, as Clean up
     /// saw it (Rust-only).
     pub orphan: Option<rush_fleet::TempOrphan>,
+    /// A cache that rebuilds itself, as Clean up measured it (Rust-only).
+    pub cache: Option<CacheFound>,
     // Looked at off the UI.
     pub looked: bool,
     /// The orphan changed, or went, since Clean up saw it.
@@ -44,6 +48,78 @@ pub struct Doomed {
     pub commits: Vec<String>,
     pub dirs: Vec<TempDir>,
     pub stale: Vec<ScratchItem>,
+}
+
+/// A cache Clean up offers: a folder a cleanup rule names
+/// (rush_fleet::cache_rules), or a build cache at the top of a worktree
+/// nobody works in (wt is that worktree). Rust-only.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CacheFound {
+    pub found: rush_fleet::FoundCache,
+    pub wt: String,
+}
+
+impl CacheFound {
+    pub fn node_modules(&self) -> bool {
+        self.found.path.ends_with("/node_modules")
+    }
+}
+
+/// Deletes caches, each through rush_fleet's checked removals: a rule's
+/// only when a rule names it, a worktree's only when nothing in it changed
+/// since Clean up measured it. Then pnpm store prune when a node_modules
+/// went, which is what frees pnpm's hard links. Rust-only.
+fn remove_caches(m: &mut Model, list: Vec<CacheFound>) {
+    if list.is_empty() {
+        return;
+    }
+    let total: i64 = list.iter().map(|c| c.found.size).sum();
+    m.flash(&format!("deleting {} of caches…", disk(total)));
+    m.later(
+        move || {
+            let why = "ticked in Clean up";
+            let rules = rush_fleet::cache_rules();
+            let (mut freed, mut failed, mut prune) = (0, None, false);
+            for c in &list {
+                let r = if c.wt.is_empty() {
+                    rush_fleet::remove_rule_cache(&c.found.path, &rules, why)
+                } else {
+                    rush_fleet::remove_cache(
+                        &c.found.path,
+                        std::slice::from_ref(&c.wt),
+                        c.found.newest + 1,
+                        why,
+                        None,
+                    )
+                };
+                match r {
+                    Ok(n) => {
+                        freed += n;
+                        prune |= c.node_modules();
+                    }
+                    Err(e) => {
+                        failed.get_or_insert(e);
+                    }
+                }
+            }
+            if prune && let Err(e) = super::dire::pnpm_prune(why) {
+                failed.get_or_insert(e);
+            }
+            (freed, prune, failed)
+        },
+        |m, (freed, prune, failed)| {
+            let text = format!(
+                "freed {} of caches{}",
+                disk(freed),
+                if prune { " · pnpm store pruned" } else { "" }
+            );
+            match failed {
+                Some(e) => m.fail(&format!("{text} · {e}")),
+                None => m.flash(&text),
+            }
+            Out::Draw
+        },
+    );
 }
 
 /// Deletes what an agent left, looked at afresh first, then looks at
@@ -127,6 +203,13 @@ pub fn open_delete(m: &mut Model, back: Option<Box<dyn Sheet>>, items: Vec<Doome
                 } else if let Some(o) = &d.orphan {
                     let n = o.again();
                     d.changed = n.gone || n.newest != o.newest;
+                } else if let Some(c) = &d.cache {
+                    // A worktree's cache that changed since may be in use;
+                    // a rule's is a cache whatever it does.
+                    if !c.wt.is_empty() {
+                        let (_, newest) = rush_fleet::walk(&c.found.path);
+                        d.changed = newest > c.found.newest;
+                    }
                 } else if d.tmp {
                     d.stale = stale_scratch(&own, "/tmp");
                 } else {
@@ -158,6 +241,9 @@ impl Doomed {
         }
         if let Some(o) = &self.orphan {
             return o.size;
+        }
+        if let Some(c) = &self.cache {
+            return c.found.size;
         }
         if self.tmp && !self.looked {
             return st.tmp.stale;
@@ -199,6 +285,21 @@ impl Doomed {
                 return format!(
                     "{} changed since Clean up looked; it stays",
                     tildify(&o.path)
+                );
+            }
+        }
+        if let Some(c) = &self.cache
+            && !c.wt.is_empty()
+        {
+            if let Some(w) = data(m).wts.iter().find(|w| w.path == c.wt)
+                && let Some(g) = running(m, &w.agents)
+            {
+                return format!("{} is running in its worktree", one_line(&g.a.display_name));
+            }
+            if self.looked && self.changed {
+                return format!(
+                    "{} changed since Clean up looked; it stays",
+                    tildify(&c.found.path)
                 );
             }
         }
@@ -287,6 +388,31 @@ impl Doomed {
                 ]),
             ];
         }
+        if let Some(c) = &self.cache {
+            let (what, note) = if c.wt.is_empty() {
+                (
+                    "cache · deleted".to_string(),
+                    format!("{}; made again by the tool that made it", c.found.why),
+                )
+            } else {
+                let wt = c.wt.rsplit('/').next().unwrap_or(&c.wt);
+                (
+                    format!("build cache in {wt} · deleted"),
+                    "an install or build puts it back; kept if it changed since Clean up looked"
+                        .to_string(),
+                )
+            };
+            return vec![
+                kind_line(
+                    Kind::Temp,
+                    &tildify(&c.found.path),
+                    &what,
+                    &disk(self.size(m)),
+                    w,
+                ),
+                ln([plain("   "), sp(note, DIM)]),
+            ];
+        }
         if self.tmp {
             let n = if self.looked {
                 self.stale.len()
@@ -338,7 +464,7 @@ impl Doomed {
         if self.wt.is_some() {
             return self.worktree_loss(m, w);
         }
-        if self.left.is_some() || self.orphan.is_some() {
+        if self.left.is_some() || self.orphan.is_some() || self.cache.is_some() {
             return Vec::new();
         }
         if self.tmp {
@@ -526,8 +652,11 @@ impl DeleteSheet {
                 return Out::Draw;
             }
         }
+        let mut caches = Vec::new();
         for d in std::mem::take(&mut self.items) {
-            if let Some(w) = d.wt {
+            if let Some(c) = d.cache {
+                caches.push(c);
+            } else if let Some(w) = d.wt {
                 let force = !w.safe();
                 remove_wt(m, w, force);
             } else if let Some(l) = d.left {
@@ -540,6 +669,7 @@ impl DeleteSheet {
                 clean_temp(m, d.agents);
             }
         }
+        remove_caches(m, caches);
         Out::Close
     }
 }
