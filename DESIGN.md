@@ -3586,8 +3586,8 @@ fine.
 The cached parts, and what's done to keep them stable:
 
 - **The system prompt rush adds** (`server::system_prompt`): constants
-  (the task list, scratch folder, decisions, shell boxes, the agents
-  note), then the session's own prompt, then the parts a setting or a
+  (the task list, scratch folder, decisions, shell boxes, formatting for
+  a harness that isn't Claude Code, the agents note), then the session's own prompt, then the parts a setting or a
   move changes, last: views (Settings), the feed (Settings), the
   worktree note (`workspace_note`). It reads no clock and no state;
   `system_prompt_is_word_for_word_stable` builds it twice and with each
@@ -3621,6 +3621,73 @@ waiting line in a command's output, and the hooks' refusals (runaway
 guard, search guard, watch, context guard), squeezed output, and the
 context guard's words beside an image read (a smaller copy, a contact
 sheet).
+
+### Every harness told and drawn as Claude Code is (Rust-only)
+
+What rush tells an agent, and how its conversation is drawn, are the same
+whichever harness runs it. The host builds one system prompt for every
+session (`server::system_prompt`); each harness takes it by the channel
+it reads:
+
+| harness | where rush's prompt goes |
+|---|---|
+| Claude Code (and providers riding it) | `--append-system-prompt`, every start |
+| Codex | the thread's `developerInstructions`: `thread/start`, `thread/resume` and `thread/fork` alike |
+| ACP agents (Kimi, Copilot, Gemini, OpenCode, Vibe, dsh) | no system prompt in ACP (Kimi Code's `session/new` takes none; its `--agent-file` can't be combined with a resume): atop the first message of a new session, in `<system-reminder>`, which the conversation strips from what you said; a resume finds it in the agent's own history |
+
+Claude Code's own prompt says how to write for its terminal (short,
+GitHub-flavored Markdown in a monospace font, no emojis, `file:line`).
+Codex's base instructions are written for an app (Mermaid, interactive
+visuals, file links as `[app.py](/abs/app.py:12)`), so a watched session
+whose program isn't Claude Code (`!reads_as_claude`, not headless) is
+given rush's own part, after the shell boxes, `server::FORMAT_PROMPT`,
+word for word:
+
+> rush draws your replies in a terminal, in a monospace font, as
+> GitHub-flavored Markdown (CommonMark): headings, lists, tables, links
+> and fenced code blocks, each fence naming its language. Keep replies
+> short and to the point. No emojis unless the user asks. Name code as
+> `path/to/file.rs:42`, or link it as [file.rs](/abs/path/file.rs:42),
+> which opens the file. rush draws no Mermaid, HTML, LaTeX or
+> interactive visuals: for a diagram, a layout or a tree, use rush's show
+> tool where you have it, else a plain ```text block; use a table to
+> compare.
+
+`server/prompt_tests.rs` starts a Claude Code, a Codex and a Kimi
+session and checks each is told the task list, scratch folder,
+decisions, shell boxes and views, the formatting part only where its
+program isn't Claude Code, and Kimi's atop its first message once;
+rush-codex's `rushs_prompt_is_the_threads_developer_instructions`
+checks all three thread methods carry it.
+
+Drawn the same (each of these Go dropped):
+
+- **Codex's rollouts read back whole.** A turn with items is read from
+  its items alone, and `McpToolCall`, `SubAgentActivity` and
+  `CollabAgentToolCall` items were `Other`, so a session read back lost
+  every MCP call (rush's view, show, spawn_agent, contact_sheet), every
+  subagent it started and every wait on one. They are read as the
+  app-server's `mcpToolCall`, `subAgentActivity` and
+  `collabAgentToolCall` (`rollout_thread_item`; snake_case tool names
+  made camelCase), drawn as a live session's are; a subagent's
+  `completed` is no step, as live.
+- **Images a tool gave back** come after its result in one message, as
+  Claude Code's tool results carry theirs, so they're drawn under its
+  step: an MCP tool's image content and a dynamic tool's input images in
+  Codex (`items::images_of`, live and read back), an ACP tool call's
+  image content (`update::result_images`).
+- **File links with a line.** `[app.py](/abs/app.py:12)`, `:12:3`,
+  `#L12-L20` and Codex's `[My Report.md](</abs/My Project/My
+  Report.md:3>)` (spaces allowed inside `<…>` only) open the file
+  (`markdown::link_target`); the line was part of the path, so the link
+  opened nothing.
+
+Not yet the same: an ACP agent's own compaction can summarise its first
+message away, and with it rush's prompt, as Claude Code's and Codex's
+system prompts never are; ACP sends no compaction rush could follow
+with the prompt again. Codex's `commentary` messages are drawn as any
+text, as Claude Code's between steps are; Codex folds them away once its
+final answer comes.
 
 ## Emeritus: handing over near the end of a context (Rust-only)
 
