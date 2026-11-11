@@ -197,6 +197,10 @@ impl Adapter for Codex {
             dir,
         }]
     }
+    /// What's sent while a turn works is steered into it (turn/steer).
+    fn steers(&self) -> bool {
+        true
+    }
     /// OpenAI keeps its models warm in the cloud.
     fn warm(&self) -> bool {
         true

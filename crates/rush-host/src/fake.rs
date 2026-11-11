@@ -60,6 +60,9 @@ impl Adapter for Fake {
     fn profiles(&self) -> Vec<Profile> {
         Vec::new()
     }
+    fn steers(&self) -> bool {
+        self.kind == "codex"
+    }
     rush_core::has!(driver: Driver, adopter: Adopter);
 }
 

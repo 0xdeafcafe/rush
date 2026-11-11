@@ -56,6 +56,19 @@ pub fn takes_mid_turn(reg: &rush_core::adapter::Registry, kind: &str) -> bool {
     takes_inbox(reg, k) || reg.supports(k, rush_core::adapter::Feature::Guide)
 }
 
+/// Whether what's sent kind while its turn works goes into that turn at
+/// once, never queued behind it (Adapter::steers: Codex). Rust-only.
+pub fn steers(reg: &rush_core::adapter::Registry, kind: &str) -> bool {
+    let k = if kind.is_empty() {
+        rush_core::adapter::LEGACY_KIND
+    } else {
+        kind
+    };
+    let h = reg.harness_of(k);
+    reg.get(h.as_str()).is_some_and(|a| a.steers())
+        && reg.supports(k, rush_core::adapter::Feature::Guide)
+}
+
 /// Whether kind's subagents can be sent messages straight.
 pub fn takes_inbox(reg: &rush_core::adapter::Registry, kind: &str) -> bool {
     let h = reg.harness_of(kind);

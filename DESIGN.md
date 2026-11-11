@@ -3714,6 +3714,59 @@ weeks of the user's sessions). Three causes, three fixes, in
   and socket, outside Codex's sandbox: each start writes
   `<CODEX_HOME>/rules/rush.rules`, a `prefix_rule` that allows `rush`.
 
+What a turn asked ends with the turn: on the main thread's
+`turn/completed` each of its open asks is an `ApprovalCancelled` before
+the `TurnEnd`. Codex takes no answer to them after, and left open they
+kept the host "working" past the turn's end (2026-11-11: a three-hour
+turn stopped with an approval open left the host waiting on nothing,
+every `rush queue send` stopping a turn that no longer ran).
+
+## Messages to a working Codex (Rust-only)
+
+Codex takes input mid-turn (`turn/steer`, images as `localImage`
+parts), so nothing sent to a working Codex waits behind its turn
+(owner, 2026-11-11, after a Codex agent's three-hour turn held every
+message typed in its pane). `Adapter::steers` says an agent takes it so
+(Codex only); `inbox::steers` asks it for a kind. While such an agent
+works, or waits on an answer (blocked), the host puts a message after
+what waits and steers all that may go of its queue in at once, as one
+message where it can (`steer_queue`, `send_queue`): the user typing in
+its pane or its own view, its parent's `agent_send`, and `rush queue
+send` alike. It is never stopped for one: `cuts_in` is false for it,
+the send-now key steers too, and `queue_send` steers the message named
+rather than cutting in. Steered while blocked, the session stays
+blocked on its answer and no new turn is counted. What a hold keeps
+(yours, the runaway guard's, a handover's, a nudge to hand over) stays
+queued as for any agent; what wasn't taken (the app-server didn't
+answer) is tried again every 5 s (`STEER_RETRY`).
+
+The queue's two-minute look (`late_queue`, Claude Code's way into a
+long turn) no longer gives up: blocked on an answer or held, it looks
+again in two minutes while the turn goes on, rather than leaving the
+message behind the turn for good. `rush queue send` (plugind's
+`queued`) gives the host 5 s from its op; one the host took but still
+holds, its turn being stopped for it, isn't failed.
+
+The sender is told what happened. `Hosts::send_images_to` says whether
+a message waits in the queue or went in; a spawned agent's box says
+"into its turn now" for Codex, "it goes into its turn within 2 minutes"
+for Claude Code (the old "when its turn ends" was wrong: the two-minute
+look hands it in), and one left waiting as a warning (`STEER_WAITS`,
+yellow, flashed as a failure). `agent_send` asks the host
+(`client::deliver_how`) and, when the message waits, tells the parent
+why in its result (`subtool::stuck_behind`): held by the user, held by
+the runaway guard, a turn that can't take it (Kimi), not taken yet, or
+Claude Code's two minutes.
+
+Images sent a spawned agent from its box go as images, for Codex and
+Claude Code alike (`sending::take_images` on the box's `[image: path]`
+tags, then `Hosts::send_images_to`); before, they went as words naming
+the file, which Codex never opened. While that box has the keys its
+edge and prompt are the queue's lavender (`QUEUE`), not the session's
+orange, and its top edge reads "to <subagent> · the subagent, not the
+main session", so a message typed there is never taken for the main
+session's.
+
 ## Open files
 
 The binary raises its soft limit on open files to the most allowed

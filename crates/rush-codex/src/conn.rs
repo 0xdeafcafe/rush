@@ -643,6 +643,21 @@ impl State {
                         end.duration = Duration::from_millis(d.max(0) as u64);
                     }
                     let mut out = self.detach(); // what still runs outlives the turn
+                    // What the turn asked dies with it: Codex never takes
+                    // an answer to it now, and left open it held the host
+                    // working after the turn had ended (Rust-only).
+                    let main = self.thread.clone();
+                    let mut gone: Vec<String> = self
+                        .asks
+                        .iter()
+                        .filter(|(_, a)| a.thread == main)
+                        .map(|(id, _)| id.clone())
+                        .collect();
+                    gone.sort();
+                    for id in gone {
+                        self.asks.remove(&id);
+                        out.push(Event::ApprovalCancelled(ApprovalCancelled { id }));
+                    }
                     if let Some(e) = get(t, "error") {
                         end.err = st(e, "message");
                         if s(e, "codexErrorInfo") == "usageLimitExceeded" {

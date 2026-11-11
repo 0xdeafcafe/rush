@@ -1311,7 +1311,13 @@ pub fn resting(err: &ClientError) -> bool {
 /// Gives session id the exchange, waking it if it rests, and returns once
 /// its host has taken it: sent on, or queued.
 pub fn deliver(id: &str, e: &Exchange, now: bool) -> Result<()> {
-    let mut last = Ok(());
+    deliver_how(id, e, now).map(|_| ())
+}
+
+/// deliver, saying whether it waits in the session's queue (true) rather
+/// than having gone to its agent (Rust-only).
+pub fn deliver_how(id: &str, e: &Exchange, now: bool) -> Result<bool> {
+    let mut last = Ok(false);
     for i in 0..3 {
         if i > 0 {
             std::thread::sleep(Duration::from_millis(100));
@@ -1325,28 +1331,31 @@ pub fn deliver(id: &str, e: &Exchange, now: bool) -> Result<()> {
     last
 }
 
-fn deliver_once(id: &str, e: &Exchange, now: bool) -> Result<()> {
+fn deliver_once(id: &str, e: &Exchange, now: bool) -> Result<bool> {
     ensure(id, "")?;
     let c = Client::dial(id)?;
     // The replay ends with the host's info: what follows answers this.
     await_line(&c, Duration::from_secs(10), |l| matches!(l, Line::Info(_)))?;
     c.send_exchange(e.clone(), now)?;
-    let mut failed = None;
+    let (mut failed, mut queued) = (None, false);
     await_line(&c, Duration::from_secs(5), |l| match l {
         Line::Error(s) => {
             failed = Some(s.clone());
             true
         }
         Line::Sent(s) => s.exchange.as_ref().is_some_and(|x| x.id == e.id),
-        Line::Info(i) => i
-            .queue_exchanges
-            .iter()
-            .any(|q| q.as_ref().is_some_and(|q| q.id == e.id)),
+        Line::Info(i) => {
+            queued = i
+                .queue_exchanges
+                .iter()
+                .any(|q| q.as_ref().is_some_and(|q| q.id == e.id));
+            queued
+        }
         _ => false,
     })?;
     match failed {
         Some(f) => Err(ClientError::Other(f)),
-        None => Ok(()),
+        None => Ok(queued),
     }
 }
 

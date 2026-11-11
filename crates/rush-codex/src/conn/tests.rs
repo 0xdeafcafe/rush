@@ -509,6 +509,40 @@ fn command_approval() {
     );
 }
 
+// Rust-only: what a turn asked ends with the turn, so its host isn't left
+// working on an answer Codex no longer takes.
+#[test]
+fn a_turns_asks_end_with_it() {
+    let (mut run, _) = start(StartOptions::default());
+    run.next();
+    run.f.request(
+        "req-9".into(),
+        REQ_COMMAND,
+        json!({"kind": "command", "threadId": "th1", "turnId": "tu1", "itemId": "c9", "startedAtMs": 1,
+            "command": "ls", "cwd": "/work"}),
+    );
+    assert!(matches!(run.next(), Event::Approval(_)));
+    run.f.notify(
+        "turn/completed",
+        json!({"threadId": "th1", "turn": {"id": "tu1", "status": "interrupted"}}),
+    );
+    let mut evs = Vec::new();
+    loop {
+        let e = run.next();
+        let end = matches!(e, Event::TurnEnd(_));
+        evs.push(e);
+        if end {
+            break;
+        }
+    }
+    let cancelled = Event::ApprovalCancelled(ApprovalCancelled { id: "req-9".into() });
+    assert!(
+        evs.iter().position(|e| *e == cancelled) == Some(evs.len() - 2),
+        "{evs:?}"
+    );
+    assert!(run.c.answer("req-9", "accept").is_err(), "still answerable");
+}
+
 #[test]
 fn permissions_and_question() {
     let (mut run, _) = start(StartOptions::default());

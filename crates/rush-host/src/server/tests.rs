@@ -1560,9 +1560,14 @@ fn stuck_behind_tells_the_sender() {
         };
         h.publish(&mut st);
         let note = crate::subtool::stuck_behind(&h.reg, &id);
-        let want = kind == "kimi";
+        // Rust-only: Claude Code's wait, two minutes at most, is said too.
+        let want = if kind == "kimi" {
+            "lanes is mid-turn and can't take a message until that turn ends"
+        } else {
+            "lanes is mid-turn; rush hands it to that turn at a step within two minutes"
+        };
         assert!(
-            (!note.is_empty()) == want && (!want || note.contains("lanes is mid-turn")),
+            note.starts_with("Queued, not delivered yet: ") && note.contains(want),
             "{kind}: {note:?}"
         );
     }
@@ -2552,4 +2557,179 @@ fn a_warm_session_left_on_an_old_login_moves_after_the_cap() {
             assert!(!h.leaves(&st, &conn), "{what}: a warm one left");
         }
     }
+}
+
+// ---- Rust-only: an agent that steers (Codex) takes what's sent mid-turn ----
+
+/// A host for Codex, which steers what's sent into the turn under way.
+fn codex_host(id: &str) -> Host {
+    std::fs::create_dir_all(dir(id)).unwrap();
+    let reg = registry();
+    reg.register(Fake {
+        kind: "codex",
+        features: vec![
+            Feature::Run,
+            Feature::Interrupt,
+            Feature::Guide,
+            Feature::Prompt,
+        ],
+    });
+    let (h, _rx) = build(
+        reg,
+        Hooks::quiet(),
+        Config {
+            id: id.into(),
+            kind: "codex".into(),
+            ..Config::default()
+        },
+    );
+    h
+}
+
+// Typed in its pane, sent by its parent, or sent now: what goes to a
+// working Codex goes into its turn at once, images and all, never queued
+// behind it nor stopping it.
+#[test]
+fn codex_takes_what_is_sent_mid_turn_at_once() {
+    let _home = Home::new();
+    let d = tempfile::tempdir().unwrap();
+    let pic = d.path().join("shot.jpg").to_string_lossy().into_owned();
+    std::fs::write(&pic, "jpeg").unwrap();
+    let h = codex_host("cx");
+    assert!(
+        crate::inbox::steers(&h.reg, "codex") && !crate::inbox::steers(&h.reg, "claude"),
+        "Codex steers; Claude Code queues"
+    );
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    h.lock().info.state = "working".into();
+    h.send("would opengl be better?", &[], false).unwrap();
+    h.send("or this", std::slice::from_ref(&pic), true).unwrap();
+    let st = h.lock();
+    let got = c.got.lock().unwrap();
+    assert!(
+        got.len() == 2
+            && got[0].text == "would opengl be better?"
+            && got[1].text == "or this"
+            && got[1].images == vec![pic],
+        "{got:?}"
+    );
+    assert!(
+        st.info.queue.is_empty()
+            && c.stops.load(Ordering::SeqCst) == 0
+            && st.info.state == "working"
+            && st.turn == 0,
+        "queue {:?}, {} stops, {} turn {}",
+        st.info.queue,
+        c.stops.load(Ordering::SeqCst),
+        st.info.state,
+        st.turn
+    );
+}
+
+// Waiting on an answer it's still mid-turn: a message goes in, and the
+// session still waits on the answer, no new turn counted.
+#[test]
+fn codex_waiting_on_an_answer_still_takes_a_message() {
+    let _home = Home::new();
+    let h = codex_host("cb");
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    {
+        let mut st = h.lock();
+        st.pending.insert("r1".into(), Asked { question: false });
+        st.info.state = "blocked".into();
+        st.info.needs = "shell ls".into();
+    }
+    h.send("lots of models are broken", &[], false).unwrap();
+    let st = h.lock();
+    assert_eq!(c.got.lock().unwrap().len(), 1);
+    assert!(
+        st.info.queue.is_empty()
+            && st.info.state == "blocked"
+            && st.info.needs == "shell ls"
+            && st.turn == 0,
+        "queue {:?}, {} ({}), turn {}",
+        st.info.queue,
+        st.info.state,
+        st.info.needs,
+        st.turn
+    );
+}
+
+// rush queue send on a working Codex steers the message in: its turn is
+// never stopped for it, and the queue shrinks at once, so the sender
+// isn't left waiting on a turn's end.
+#[test]
+fn codex_queue_send_steers_never_stops() {
+    let _home = Home::new();
+    let h = codex_host("cq");
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    {
+        let mut st = h.lock();
+        st.info.state = "working".into();
+        st.info.queue = vec!["a".into(), "b".into()];
+        st.info.queue_held = true;
+    }
+    for was in ["b", "a"] {
+        h.do_op(op("queue_send", |o| {
+            o.index = 0;
+            o.was = was.into();
+        }))
+        .unwrap();
+    }
+    let got = c.got.lock().unwrap();
+    assert!(
+        got.len() == 2 && got[0].text == "b" && got[1].text == "a",
+        "{got:?}"
+    );
+    assert!(h.lock().info.queue.is_empty());
+    assert_eq!(c.stops.load(Ordering::SeqCst), 0);
+}
+
+// What waits in a working Codex's queue (a steer that failed) goes on the
+// next look, all of it as one message.
+#[test]
+fn codex_late_queue_steers_what_waits() {
+    let _home = Home::new();
+    let h = codex_host("cl");
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    {
+        let mut st = h.lock();
+        st.info.state = "working".into();
+        st.info.queue = vec!["one".into(), "two".into()];
+    }
+    h.late_queue();
+    let got = c.got.lock().unwrap();
+    assert!(
+        got.len() == 1 && got[0].text.contains("one") && got[0].text.contains("two"),
+        "{got:?}"
+    );
+    assert!(h.lock().info.queue.is_empty());
+}
+
+// The runaway guard still holds another agent's message for a Codex turn,
+// as for any other: steering doesn't go around a hold.
+#[test]
+fn codex_steering_keeps_the_guard() {
+    let _home = Home::new();
+    let h = codex_host("cg");
+    let c = Arc::new(Kept::default());
+    with_conn(&h, c.clone());
+    {
+        let mut st = h.lock();
+        st.info.state = "working".into();
+        st.info.queue_guarded = true;
+    }
+    let ex = Exchange {
+        id: "x1".into(),
+        text: "from another".into(),
+        ..Exchange::default()
+    };
+    h.send_exchange("from another", &[], false, Some(Box::new(ex)), "")
+        .unwrap();
+    assert!(c.got.lock().unwrap().is_empty());
+    assert_eq!(queue(&h), "from another");
 }

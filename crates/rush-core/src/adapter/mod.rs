@@ -206,6 +206,12 @@ pub trait Adapter: Send + Sync {
     fn takes_subagent_messages(&self) -> bool {
         false
     }
+    /// A message sent while its turn works goes into that turn at once,
+    /// read at its next step, never queued behind the turn (Codex's
+    /// turn/steer). Rust-only.
+    fn steers(&self) -> bool {
+        false
+    }
     /// Its QuotaSource reads any account's limits, not only those of the
     /// account a profile is signed in to (Go's AnyAccountQuota).
     fn reads_any_account(&self) -> bool {

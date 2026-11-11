@@ -27,7 +27,7 @@ use crate::agentmatch::{find, no_agent};
 use crate::agents::{
     Pick, WORK_PROMPT, catalogue_of, own_def, picks, session_picks, start_catalogue_of,
 };
-use crate::client::{deliver, read_config, read_info, spawn};
+use crate::client::{deliver, deliver_how, read_config, read_info, spawn};
 use crate::events::{clip, log_event};
 use crate::paths::dir;
 use crate::views::{drop_view, save_view};
@@ -441,13 +441,17 @@ impl SubAgents {
         };
         report(&input.id, to).map_err(|e| e.to_string())?;
         let since = Time::now();
-        deliver(
+        let queued = deliver_how(
             &input.id,
             &self.exchange(&input.id, "message", &input.prompt),
             false,
         )
         .map_err(|e| e.to_string())?;
-        let note = stuck_behind(&self.reg, &input.id);
+        let note = if queued {
+            stuck_behind(&self.reg, &input.id)
+        } else {
+            String::new()
+        };
         if !note.is_empty() {
             // Waited on, the call would wait out a turn that won't end for it.
             report(&input.id, &self.parent).map_err(|e| e.to_string())?;
@@ -829,16 +833,16 @@ pub fn send_result(child: &str, parent: &str, text: &str) -> Result<(), String> 
 }
 
 /// What to tell the sender of a message to session id that went into its
-/// queue behind a turn that can't take it: it waits for that turn to end,
-/// or for the user to stop it. Empty when it went in (subtool.go:283).
+/// queue rather than its turn: why it waits, and how long. Empty when
+/// nothing waits (subtool.go:283). Rust-only: Go said only a turn that
+/// can't take it; a hold, the runaway guard, and Claude Code's two
+/// minutes before a queued message goes into its turn are said too.
 pub fn stuck_behind(reg: &Registry, id: &str) -> String {
     let Ok(info) = read_info(id) else {
         return String::new();
     };
-    if info.state != "working"
-        || info.queue.is_empty()
-        || crate::inbox::takes_mid_turn(reg, &info.kind)
-    {
+    let busy = matches!(info.state.as_str(), "working" | "blocked");
+    if info.queue.is_empty() || !busy && !info.queue_held && !info.queue_guarded {
         return String::new();
     }
     let name = if info.name.is_empty() {
@@ -846,10 +850,24 @@ pub fn stuck_behind(reg: &Registry, id: &str) -> String {
     } else {
         info.name.as_str()
     };
+    let why = if info.queue_held {
+        format!("the user is holding {name}'s queue, so it goes when they let it go")
+    } else if info.queue_guarded {
+        format!(
+            "rush's runaway guard holds other agents' messages to {name} until the user lets them through"
+        )
+    } else if !crate::inbox::takes_mid_turn(reg, &info.kind) {
+        format!(
+            "{name} is mid-turn and can't take a message until that turn ends. \
+Yours waits behind it; after a couple of minutes rush shows the user it's waiting, and they can stop the turn to send it"
+        )
+    } else if crate::inbox::steers(reg, &info.kind) {
+        format!("{name} hasn't taken it into its turn yet; rush tries again every few seconds")
+    } else {
+        format!("{name} is mid-turn; rush hands it to that turn at a step within two minutes")
+    };
     format!(
-        "Queued, not delivered yet: {name} is mid-turn and can't take a message until that turn ends. \
-Yours waits behind it; after a couple of minutes rush shows the user it's waiting, and they can stop the turn to send it. \
-Its answer is sent to you as a message when it has one."
+        "Queued, not delivered yet: {why}. Its answer is sent to you as a message when it has one."
     )
 }
 

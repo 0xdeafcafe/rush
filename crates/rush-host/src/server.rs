@@ -139,6 +139,9 @@ pub const LIMIT_CONTINUE: &str = "continue: you're on another account now, with 
 /// into it.
 const QUEUE_LATE: Duration = Duration::from_secs(120);
 
+/// How soon a message an agent that steers didn't take is tried again.
+const STEER_RETRY: Duration = Duration::from_secs(5);
+
 /// How often an idle agent waiting to start again on another account is
 /// looked at for work of its own still running.
 /// How often the session's views are looked at for age.
@@ -2186,6 +2189,29 @@ impl Host {
             .then(|| self.nudge_first(&st))
             .flatten();
         let held = held || st.em.handing || nudge_first.is_some();
+        if busy && (now || !held) && self.steers(&st) {
+            // After what waits, never ahead of it; not published till it's
+            // been steered in, so no client sees it queued on its way.
+            let mut qi = queue_images(&st.info);
+            let mut qe = queue_exchanges(&st.info);
+            st.info.queue.push(text.to_string());
+            qi.push(images.to_vec());
+            qe.push(exchange.clone());
+            st.info.queue_images = trim_images(qi);
+            st.info.queue_exchanges = trim_exchanges(qe);
+            for (i, p) in images.iter().enumerate() {
+                st.pics.insert(p.clone(), pics[i].clone());
+            }
+            if now {
+                st.go_now = st.info.queue.len();
+            }
+            self.steer_queue(&mut st);
+            if !st.info.queue.is_empty() {
+                let f = json!({"text": clip(text), "images": images.len(), "behind": st.info.state, "cause": cause});
+                self.event(&st, "queued", sent_by(f, ex));
+            }
+            return Ok(());
+        }
         if !now && (busy || held) {
             if st.info.queue.is_empty() {
                 st.queued_at = Some(Instant::now());
@@ -2259,7 +2285,8 @@ impl Host {
             (
                 st.conn.is_some()
                     && st.info.state == "working"
-                    && self.reg.supports(&k, Feature::Guide),
+                    && self.reg.supports(&k, Feature::Guide)
+                    || self.steers(&st),
                 st.cfg.id.clone(),
             )
         };
@@ -2285,15 +2312,31 @@ impl Host {
     /// (host.go:1446).
     fn late_queue(&self) {
         let mut st = self.lock();
-        if st.conn.is_none()
-            || st.info.state != "working"
+        if st.conn.is_none() || st.info.queue.is_empty() {
+            return;
+        }
+        if self.steers(&st) {
+            self.steer_queue(&mut st);
+            return;
+        }
+        if st
+            .queued_at
+            .is_none_or(|q| q.elapsed() < self.hooks.queue_late)
+        {
+            return;
+        }
+        if st.info.state != "working"
             || !self.ready(&st)
             || st.em.nudged // what waits behind a nudge waits for its turn's end
             || st.info.limit.is_some()
-            || st
-                .queued_at
-                .is_none_or(|q| q.elapsed() < self.hooks.queue_late)
         {
+            // Blocked on an answer, or held: looked at again while the
+            // turn goes on, never left behind it for good (Rust-only).
+            if matches!(st.info.state.as_str(), "working" | "blocked") {
+                let h = self.clone();
+                self.timers
+                    .after(self.hooks.queue_late, move || h.late_queue());
+            }
             return;
         }
         if !crate::inbox::takes_mid_turn(&self.reg, &st.cfg.kind) {
@@ -2321,12 +2364,46 @@ impl Host {
         self.publish(&mut st);
     }
 
+    /// Whether what's sent now goes into the turn under way, never queued
+    /// behind it nor stopping it: an agent that steers (Codex), working
+    /// or waiting on an answer, with nothing holding its turn's messages
+    /// back (Rust-only).
+    fn steers(&self, st: &State) -> bool {
+        st.conn.is_some()
+            && matches!(st.info.state.as_str(), "working" | "blocked")
+            && st.info.limit.is_none()
+            && !st.em.handing
+            && !st.em.nudged
+            && crate::inbox::steers(&self.reg, &st.cfg.kind)
+    }
+
+    /// Steers all that may go of the queue into the turn under way, as one
+    /// message where it can (send_queue). What didn't go, a send that
+    /// failed, is tried again in STEER_RETRY; what a hold keeps stays.
+    fn steer_queue(&self, st: &mut State) {
+        while self.steers(st) && self.ready(st) {
+            let n = st.info.queue.len();
+            let f = json!({"queue": n, "text": clip(&st.info.queue[0])});
+            self.event(st, "steer", f);
+            self.send_queue(st);
+            if st.info.queue.len() >= n {
+                break;
+            }
+        }
+        if !st.info.queue.is_empty() && self.steers(st) && self.ready(st) {
+            let h = self.clone();
+            self.timers.after(STEER_RETRY, move || h.late_queue());
+        }
+        self.publish(st);
+    }
+
     /// Whether a message sent now waits for the turn to be stopped rather
-    /// than going to it.
+    /// than going to it. One that steers never stops for a message.
     fn cuts_in(&self, st: &State) -> bool {
         st.conn.is_some()
             && st.info.state == "working"
             && self.reg.supports(&st.cfg.kind, Feature::Interrupt)
+            && !crate::inbox::steers(&self.reg, &st.cfg.kind)
     }
 
     /// Puts text and its images at place at in the queue, so it's sent
@@ -2535,7 +2612,9 @@ impl Host {
         // A message to an agent at rest starts a turn: what comes of the
         // turn is caused by its delivery.
         let ev = rush_events::id();
-        let turn = st.info.state != "working";
+        // Waiting on an answer, an agent that steers is still mid-turn.
+        let turn = st.info.state != "working" && !(st.info.state == "blocked" && self.steers(st));
+        let asking = st.info.state == "blocked" && !st.pending.is_empty();
         st.starting = ev.clone();
         st.generation += 1; // any continue or retry waiting is now moot
         self.disarm_idle(st);
@@ -2646,8 +2725,12 @@ impl Host {
             self.sent(st, &input);
             self.record(st, lines::echo_line(text, images, None));
         }
-        st.info.state = "working".into();
-        st.info.detail.clear();
+        // Still waiting on its answer, it stays blocked: a message steered
+        // in doesn't answer it.
+        if !(asking && st.info.state == "blocked" && !st.pending.is_empty()) {
+            st.info.state = "working".into();
+            st.info.detail.clear();
+        }
         self.publish(st);
         let now = Instant::now();
         st.waiting = Some(now);
@@ -2951,7 +3034,8 @@ impl Host {
             }
             "queue_send" => {
                 let i = st.info.queue.iter().position(|q| *q == o.was);
-                if o.guide
+                // One that steers takes it into the turn, never stopped for it.
+                if (o.guide || self.steers(&st))
                     && !o.was.is_empty()
                     && let Some(i) = i
                 {
