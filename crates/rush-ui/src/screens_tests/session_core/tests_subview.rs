@@ -504,10 +504,7 @@ fn wide_lays_the_list_across_the_run_under_it() {
     assert!(!list.contains('│'), "a column beside the list:\n{body}");
     assert!(
         list.lines()
-            .any(|l| l.contains("Running") && l.contains("review the diff"))
-            || list
-                .lines()
-                .any(|l| l.contains("port:hl") && l.contains("Finished")),
+            .any(|l| l.contains("Running") && l.contains("port:claude")),
         "the list isn't laid across:\n{body}"
     );
     assert!(rule <= 8, "the list took {rule} rows:\n{body}");
@@ -1100,9 +1097,10 @@ fn up_from_the_box_picks_the_lists_top() {
     assert_eq!(conn(&mut m, KEY).vs.top, 0, "the view jumped");
 }
 
-/// The wheel moves the subagents view and leaves the pick where it is,
-/// out of sight, as the conversation's wheel does; drawn again (the runs
-/// read again) it stays put; ↑ then picks the top row in sight.
+/// One column wide, the wheel moves the subagents view and leaves the
+/// pick where it is, out of sight, as the conversation's wheel does; drawn
+/// again (the runs read again) it stays put; ↑ then picks the top row in
+/// sight.
 #[test]
 fn the_wheel_leaves_the_pick() {
     use crate::frame::{Mouse, Out};
@@ -1111,7 +1109,7 @@ fn the_wheel_leaves_the_pick() {
     let mut m = model(&d);
     views::show_view(&mut m, KEY, "subagents");
     m.session.as_mut().unwrap().sel = "sub:x".into();
-    views::body(&mut m, 120, 8).unwrap();
+    views::body(&mut m, 90, 8).unwrap();
     let x = "sub:x".to_string();
     assert!(
         conn(&mut m, KEY).vs.top > 0,
@@ -1134,7 +1132,7 @@ fn the_wheel_leaves_the_pick() {
     }
     assert_eq!(wheel(&mut m, MouseKind::ScrollUp), Out::Idle, "at the top");
     for _ in 0..2 {
-        views::body(&mut m, 120, 8).unwrap();
+        views::body(&mut m, 90, 8).unwrap();
         assert_eq!(conn(&mut m, KEY).vs.top, 0, "the pick pulled it back");
         assert!(!conn(&mut m, KEY).vs.refs.contains(&x));
         assert_eq!(sel(&m), x, "the wheel moved the pick");
@@ -1142,7 +1140,7 @@ fn the_wheel_leaves_the_pick() {
     let top = top_in_sight(&mut m);
     press(&mut m, "up");
     assert_eq!(sel(&m), top);
-    views::body(&mut m, 120, 8).unwrap();
+    views::body(&mut m, 90, 8).unwrap();
     assert_eq!(conn(&mut m, KEY).vs.top, 0, "the view jumped");
 }
 

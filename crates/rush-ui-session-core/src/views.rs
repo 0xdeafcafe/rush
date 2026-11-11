@@ -544,9 +544,14 @@ fn picked_ref(m: &Model) -> String {
 /// last row, however far below that is); ↓ picks the highest in sight,
 /// or with nothing picked stays in the box.
 pub(super) fn move_sel(m: &mut Model, key: &str, d: isize) {
+    let cols = if view_name(m, key) == "subagents" {
+        conn(m, key).watch.cols.max(1)
+    } else {
+        1
+    };
     let vs = &conn(m, key).vs;
     let refs = vs.all_refs.clone();
-    let rows = vs.rows.max(1);
+    let rows = vs.rows.max(1) * cols;
     let top = vs.top.min(refs.len());
     let Some(v) = m.session.as_mut() else {
         return;
