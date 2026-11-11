@@ -136,11 +136,16 @@ pub fn note_lines(notes: &[SubNote], sub: &Session, live: bool, w: usize) -> Vec
         let how = format!(" · {how}");
         let room = 10.max(w.saturating_sub(6 + rush_core::text::width(&how)));
         let text = rush_draw::truncate(&one_line(&n.text), room, "…").into_owned();
+        let tone = if n.how.starts_with('⚠') {
+            YELLOW
+        } else {
+            DIM
+        };
         out.push(line([
             plain("  "),
             sp("↪ ", SUB),
             sp(text, TEXT),
-            sp(how, DIM),
+            sp(how, tone),
         ]));
     }
     let skip = out.len().saturating_sub(3);

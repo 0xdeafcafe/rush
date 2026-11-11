@@ -29,7 +29,12 @@ pub fn send_now_key(m: &mut Model) -> String {
 }
 
 /// What a message to a spawned agent of kind says it did (sendPane's how).
+/// Rust-only: one that steers (Codex) takes it into its turn at once, and
+/// Claude Code's turn takes a queued one within two minutes.
 pub fn how(m: &mut Model, kind: &str, now: bool) -> String {
+    if hosts(m).steers(kind) {
+        return "into its turn now · it reads it at its next step".into();
+    }
     if now {
         return "its turn stopped for it · it reads it now".into();
     }
@@ -39,8 +44,13 @@ pub fn how(m: &mut Model, kind: &str, now: bool) -> String {
             send_now_key(m)
         );
     }
-    "in its own queue · it reads it when its turn ends".into()
+    "in its own queue · it goes into its turn within 2 minutes".into()
 }
+
+/// What's said of a message to a spawned agent that steers but waits in
+/// its queue all the same: held there, or not taken yet.
+pub const STEER_WAITS: &str =
+    "⚠ waiting in its queue · not in its turn yet · rush tries again every few seconds";
 
 /// Sends the box of session key to the spawned agent run sub, whose host
 /// is id and agent kind: queued for its turn's end, or now, stopping it
@@ -57,7 +67,8 @@ pub fn send(m: &mut Model, key: &str, sub: &str, id: &str, kind: &str, now: bool
 
 /// Sends text to the spawned agent run sub, whose host is id and agent
 /// kind; side when it came from the box under the run in the subagents
-/// view's column, where it goes back to when it doesn't go.
+/// view's column, where it goes back to when it doesn't go. The images
+/// its [image: path] tags name go as images, for any agent (Rust-only).
 pub fn send_text(
     m: &mut Model,
     key: &str,
@@ -67,14 +78,24 @@ pub fn send_text(
     side: bool,
 ) -> Out {
     let how = how(m, kind, now);
+    let steers = hosts(m).steers(kind);
     let h = hosts(m);
     let (key, sub, id) = (key.to_string(), sub.to_string(), id.to_string());
     m.later(
         {
             let (id, text) = (id.clone(), text.clone());
-            move || h.send_to(&id, &text, now)
+            move || {
+                let (words, images) = super::sending::take_images(&text);
+                h.send_images_to(&id, &words, &images, now)
+            }
         },
-        move |m, r| sent(m, &key, &sub, text, how, side, r),
+        move |m, r| {
+            let how = match &r {
+                Ok(true) if steers => STEER_WAITS.to_string(),
+                _ => how,
+            };
+            sent(m, &key, &sub, text, how, side, r.map(|_| ()))
+        },
     );
     Out::Draw
 }
@@ -108,7 +129,11 @@ fn sent(
                     told: false,
                 },
             );
-            m.flash(&format!("sent to {name} · {how}"));
+            if how.starts_with('⚠') {
+                m.fail(&format!("sent to {name} · {how}"));
+            } else {
+                m.flash(&format!("sent to {name} · {how}"));
+            }
         }
         Err(e) => {
             let why = format!("couldn't send to {name}: {e}");

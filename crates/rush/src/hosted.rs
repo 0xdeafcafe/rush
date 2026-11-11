@@ -457,6 +457,16 @@ impl Hosts for RushHosts {
     }
 
     fn send_to(&self, id: &str, text: &str, now: bool) -> Result<(), String> {
+        self.send_images_to(id, text, &[], now).map(|_| ())
+    }
+
+    fn send_images_to(
+        &self,
+        id: &str,
+        text: &str,
+        images: &[String],
+        now: bool,
+    ) -> Result<bool, String> {
         (self.starts.ensure)(&self.reg, id)?;
         let c = Client::dial(id).map_err(|e| e.to_string())?;
         // Once the replay's in (it ends with the host's info), sent, and
@@ -466,24 +476,34 @@ impl Hosts for RushHosts {
         let wait = std::time::Duration::from_secs(10);
         let e = |e: rush_host::ClientError| e.to_string();
         rush_host::client::await_line(&c, wait, |l| matches!(l, Line::Info(_))).map_err(e)?;
-        if now {
+        if images.is_empty() && now {
             c.send_now(text).map_err(e)?;
-        } else {
+        } else if images.is_empty() {
             c.send(text).map_err(e)?;
+        } else {
+            c.send_images(text, images, now).map_err(e)?;
         }
-        let mut failed = None;
+        let (mut failed, mut queued) = (None, false);
         rush_host::client::await_line(&c, wait, |l| match l {
             Line::Error(s) => {
                 failed = Some(s.clone());
                 true
             }
-            Line::Sent(s) => s.text == text,
-            Line::Info(i) => i.queue.iter().any(|q| q == text),
+            // Joined with what waited before it, it's one part of the echo.
+            Line::Sent(s) => s.text == text || s.text.contains(text),
+            Line::Info(i) => {
+                queued = i.queue.iter().any(|q| q == text);
+                queued
+            }
             _ => false,
         })
         .map_err(e)?;
         c.close();
-        failed.map_or(Ok(()), Err)
+        failed.map_or(Ok(queued), Err)
+    }
+
+    fn steers(&self, kind: &str) -> bool {
+        rush_host::inbox::steers(&self.reg, kind)
     }
 
     fn takes_mid_turn(&self, kind: &str) -> bool {

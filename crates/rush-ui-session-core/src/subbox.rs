@@ -15,7 +15,6 @@ use super::host::join_queue;
 use super::paint::{dim, faint};
 use super::queue::{LocalQueue, Queued, with_images};
 use super::subname::sub_task;
-use super::subview::runs_of;
 use super::{conn, core, open_key};
 use crate::frame::editor::{clean_paste, extract_images, look_disk};
 use crate::frame::{Editor, Out, Press};
@@ -87,6 +86,20 @@ pub fn give_back(m: &mut Model, key: &str, id: &str, text: &str) {
     d.input.set(&t);
 }
 
+/// What run id is called on its box: as wherever it asks you, for an
+/// agent rush hosts (cards_host::sub_who), else what it was asked.
+fn who(m: &mut Model, key: &str, id: &str) -> String {
+    let r = &conn(m, key).runs;
+    if let Some(x) = r.hosted_of(id) {
+        return super::cards_host::sub_who(r, id, x);
+    }
+    r.subs
+        .iter()
+        .find(|sa| sa.id == id)
+        .map(sub_task)
+        .unwrap_or_default()
+}
+
 /// The box's lines, w wide: the queue card when anything waits, then
 /// the box (subPreviewLines' box).
 pub fn lines(m: &mut Model, key: &str, id: &str, w: usize) -> Vec<Line> {
@@ -97,10 +110,7 @@ pub fn lines(m: &mut Model, key: &str, id: &str, w: usize) -> Vec<Line> {
 /// lines, with the keys or without them.
 pub fn lines_for(m: &mut Model, key: &str, id: &str, w: usize, focused: bool) -> Vec<Line> {
     let rt = super::relay::route(m, key, id);
-    let name = runs_of(m, key)
-        .and_then(|r| r.subs.iter().find(|sa| sa.id == id))
-        .map(sub_task)
-        .unwrap_or_default();
+    let name = who(m, key, id);
     let hint = match &rt {
         Ok(rt) => rt.hint(m),
         Err(e) => e.clone(),
@@ -122,11 +132,19 @@ pub fn lines_for(m: &mut Model, key: &str, id: &str, w: usize, focused: bool) ->
             super::dock::queue_rows(&q, when, &picked, !d.input.is_empty(), &send_now, w);
         out.extend(rows);
     }
-    let to = rush_draw::truncate(&name, w.saturating_sub(16).max(8), "…").into_owned();
+    let to = rush_draw::truncate(&name, w.saturating_sub(40).max(8), "…").into_owned();
+    // Whose box this is can't be missed: the subagent's name on its edge,
+    // which isn't the session's colour while it has the keys (Rust-only).
     let top = if d.edit_q > 0 {
         line([
             sp(format!("editing queued message {}", d.edit_q), QUEUE),
             dim(format!(" · to {to}")),
+        ])
+    } else if focused {
+        line([
+            sp("to ", QUEUE),
+            spb(to, QUEUE),
+            dim(" · the subagent, not the main session"),
         ])
     } else {
         line([dim(format!("to {to}"))])
@@ -149,14 +167,16 @@ pub fn lines_for(m: &mut Model, key: &str, id: &str, w: usize, focused: bool) ->
         hot: d.input.hot,
         holder: match (&rt, focused) {
             (Err(_), _) => rush_draw::truncate(&hint, w.saturating_sub(8), "…").into_owned(),
-            (Ok(_), true) => {
-                format!("a message for it · enter sends · {send_now} now · esc leaves")
-            }
+            (Ok(_), true) => format!(
+                "a message for {} · enter sends · {send_now} now · esc leaves",
+                rush_draw::truncate(&name, 32, "…")
+            ),
             (Ok(_), false) => "tab or click here to message it".into(),
         },
-        lead: line([sp("❯ ", if typing { ORANGE } else { FAINT })]),
+        lead: line([sp("❯ ", if typing { QUEUE } else { FAINT })]),
         max_rows: 6,
         idle: !typing,
+        edge: focused.then_some(QUEUE),
         ..Default::default()
     };
     out.extend(b.lines());
@@ -206,10 +226,7 @@ pub fn hint(m: &mut Model, key: &str, id: &str, w: usize) -> Line {
         );
     }
     // The run it goes to, by name: the one box on screen says whose it is.
-    let name = runs_of(m, key)
-        .and_then(|r| r.subs.iter().find(|sa| sa.id == id))
-        .map(sub_task)
-        .unwrap_or_default();
+    let name = who(m, key, id);
     let to = if name.is_empty() {
         "send to the subagent".to_string()
     } else {

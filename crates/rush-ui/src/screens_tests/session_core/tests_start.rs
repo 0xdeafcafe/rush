@@ -398,7 +398,7 @@ fn a_spawned_agent_from_its_parents_view() {
         (
             "runs",
             false,
-            "in its own queue · it reads it when its turn ends",
+            "in its own queue · it goes into its turn within 2 minutes",
         ),
         ("runs", true, "its turn stopped for it · it reads it now"),
         (
@@ -426,6 +426,49 @@ fn a_spawned_agent_from_its_parents_view() {
         flash(&m),
         "couldn't send to the spawned agent: no host · back in the box"
     );
+}
+
+// Rust-only: a spawned Codex takes what's sent into its turn at once, and
+// says so; one it left waiting in its queue is said plainly, as a warning.
+#[test]
+fn a_spawned_codex_takes_it_into_its_turn() {
+    let fake = Fake::new();
+    let key = "default/a:h1";
+    let mut m = open_hosted(&fake, key);
+    conn(&mut m, key)
+        .input
+        .insert_str("would opengl be better?");
+    spawned::send(&mut m, key, "spawn:s1", "s1", "codex", false);
+    assert_eq!(
+        flash(&m),
+        "sent to the spawned agent · into its turn now · it reads it at its next step"
+    );
+    *fake.sends_queue.lock().unwrap() = true;
+    conn(&mut m, key).input.insert_str("or html in canvas");
+    spawned::send(&mut m, key, "spawn:s1", "s1", "codex", false);
+    assert_eq!(
+        flash(&m),
+        format!("sent to the spawned agent · {}", spawned::STEER_WAITS)
+    );
+    let notes = core(&mut m).sub_notes[&super::subqueue::key(key, "spawn:s1")].clone();
+    assert_eq!(notes.last().unwrap().how, spawned::STEER_WAITS);
+}
+
+// Rust-only: the images a message to a spawned agent carries go as
+// images, for Codex and Claude Code alike, never as words naming them.
+#[test]
+fn a_spawned_agent_gets_its_images() {
+    let fake = Fake::new();
+    let key = "default/a:h1";
+    let mut m = open_hosted(&fake, key);
+    for (i, kind) in ["codex", "runs"].into_iter().enumerate() {
+        let text = "look at this [Image #1]\n[image: /tmp/shot.png]".to_string();
+        spawned::send_text(&mut m, key, ("spawn:s1", "s1", kind), text, false, true);
+        let sent = fake.sent_to.lock().unwrap()[i].clone();
+        assert_eq!(sent, ("s1".into(), "look at this [Image #1]".into(), false));
+        let images = fake.sent_images.lock().unwrap()[i].clone();
+        assert_eq!(images, ("s1".into(), vec!["/tmp/shot.png".to_string()]));
+    }
 }
 
 // A session started from hosted's list is in rush's Agents; the hosted

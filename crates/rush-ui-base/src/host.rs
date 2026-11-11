@@ -614,6 +614,25 @@ pub trait Hosts: Send + Sync {
     fn send_to(&self, _id: &str, _text: &str, _now: bool) -> Result<(), String> {
         Err(NOT_YET.into())
     }
+    /// send_to with image files attached: true when it waits in the
+    /// session's queue, false when it went in (Rust-only).
+    fn send_images_to(
+        &self,
+        id: &str,
+        text: &str,
+        images: &[String],
+        now: bool,
+    ) -> Result<bool, String> {
+        if !images.is_empty() {
+            return Err(NOT_YET.into());
+        }
+        self.send_to(id, text, now).map(|()| false)
+    }
+    /// Whether what's sent an agent of kind while it works goes into its
+    /// turn at once, never queued behind it (Codex; host.inbox::steers).
+    fn steers(&self, _kind: &str) -> bool {
+        false
+    }
     /// Moves the rush session id to dir, listed there from now on, and
     /// names it afresh for dir when retitle (cdHosted, retitleHosted):
     /// best effort, as an older host ignores both. Waits.
@@ -919,6 +938,10 @@ pub struct Fake {
     pub dismissed: Mutex<Vec<(String, String)>>,
     /// Sends without a view, as (id, text, now).
     pub sent_to: Mutex<Vec<(String, String, bool)>>,
+    /// The images each send without a view carried, as (id, images); and
+    /// whether such a send waits in its session's queue.
+    pub sent_images: Mutex<Vec<(String, Vec<String>)>>,
+    pub sends_queue: Mutex<bool>,
     /// Kinds that take nothing mid-turn.
     pub not_mid_turn: Mutex<Vec<String>>,
     /// The sessions rush hosted for a parent's shell.
@@ -1143,6 +1166,21 @@ impl Hosts for Arc<Fake> {
         let s = (id.to_string(), text.to_string(), now);
         self.sent_to.lock().unwrap().push(s);
         Ok(())
+    }
+    fn send_images_to(
+        &self,
+        id: &str,
+        text: &str,
+        images: &[String],
+        now: bool,
+    ) -> Result<bool, String> {
+        self.send_to(id, text, now)?;
+        let i = (id.to_string(), images.to_vec());
+        self.sent_images.lock().unwrap().push(i);
+        Ok(*self.sends_queue.lock().unwrap())
+    }
+    fn steers(&self, kind: &str) -> bool {
+        kind == "codex"
     }
     fn cd(&self, id: &str, dir: &str, retitle: bool) -> Result<(), String> {
         let c = (id.to_string(), dir.to_string(), retitle);

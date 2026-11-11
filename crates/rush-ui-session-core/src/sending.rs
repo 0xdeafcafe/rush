@@ -173,6 +173,21 @@ impl Outbox {
 static IMAGE_TAG: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\[image: ([^\]]+)\]").expect("the image tag's pattern"));
 
+/// A message's [image: path] tags taken out, as the images it carries in
+/// order, so they go as images rather than as words (Rust-only).
+pub fn take_images(s: &str) -> (String, Vec<String>) {
+    let images: Vec<String> = IMAGE_TAG
+        .captures_iter(s)
+        .map(|c| c[1].to_string())
+        .collect();
+    if images.is_empty() {
+        return (s.to_string(), images);
+    }
+    let text = IMAGE_TAG.replace_all(s, "");
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    (lines.join("\n").trim().to_string(), images)
+}
+
 /// The image paths a message carries, shown as their names.
 pub fn short_images(s: &str) -> String {
     IMAGE_TAG
