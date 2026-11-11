@@ -229,6 +229,38 @@ fn thread_start_params() {
     );
 }
 
+/// rush's guidance, which Claude Code takes as --append-system-prompt,
+/// reaches Codex as the thread's developerInstructions however the thread
+/// is opened: started, resumed or forked.
+#[test]
+fn rushs_prompt_is_the_threads_developer_instructions() {
+    for (method, resume, fork) in [
+        ("thread/start", false, false),
+        ("thread/resume", true, false),
+        ("thread/fork", false, true),
+    ] {
+        let (c, mut f, _rx) = connect();
+        let _h = begin(
+            &c,
+            StartOptions {
+                session_id: "old".into(),
+                resume,
+                fork,
+                prompt: "  rush draws your replies in a terminal\n".into(),
+                ..StartOptions::default()
+            },
+        );
+        let init = f.expect("initialize");
+        f.respond(&init, json!({"userAgent": "rush/1"}));
+        f.expect("initialized");
+        let p = f.expect(method)["params"].clone();
+        assert_eq!(
+            p["developerInstructions"], "rush draws your replies in a terminal",
+            "{method}"
+        );
+    }
+}
+
 #[test]
 fn turn() {
     let (mut run, _) = start(StartOptions {

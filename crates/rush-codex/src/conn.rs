@@ -32,13 +32,13 @@ use serde_json::value::RawValue;
 use serde_json::{Value, json};
 
 use crate::items::{
-    ThreadItem, call_of, output_of, path_base, reasoning_text, script, text_part, todo_status,
-    user_message,
+    ThreadItem, call_of, images_of, output_of, path_base, reasoning_text, script, text_part,
+    todo_status, user_message,
 };
 use crate::json::{arr, get, int, keep, s, st};
 use crate::models::{CachedModel, model_id, read_models};
 use crate::quota::{Snapshot, account_billing, quota_from, read_quota};
-use crate::rollout::{call_part, result};
+use crate::rollout::{call_part, result_with};
 use crate::rpc::{Client, Handler, Incoming, Message as RpcMessage, RpcError, id_string, spawn};
 
 // Server requests rush answers.
@@ -853,7 +853,7 @@ impl State {
             // Web searches say what they searched only at the end.
             out.push(self.call_message(call));
         }
-        out.push(result(output_of(&it, Some(keep(raw)))));
+        out.push(result_with(output_of(&it, Some(keep(raw))), images_of(&it)));
         out.extend(self.finished(&it));
         out
     }

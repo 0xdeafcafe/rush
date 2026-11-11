@@ -34,7 +34,7 @@ use serde_json::value::RawValue;
 
 use crate::items::{
     ContentItem, ThreadItem, action_of, as_claude, call_of, content_items, data_image, image_part,
-    local_path, output_of, text_part, texts,
+    images_of, local_path, output_of, text_part, texts,
 };
 use crate::json::{Envelope, arr, get, int, is_null, keep, ms, parse, s, st, strs};
 use crate::quota::{Snapshot, quota_from};
@@ -166,6 +166,32 @@ pub(crate) fn rollout_thread_item(v: &Value) -> Option<ThreadItem> {
             }
         }
         "ImageView" => (t.typ, t.path) = ("imageView".into(), st(v, "path")),
+        "McpToolCall" => {
+            t.typ = "mcpToolCall".into();
+            (t.server, t.tool) = (st(v, "server"), st(v, "tool"));
+            t.arguments = get(v, "arguments").and_then(crate::json::raw_of);
+            t.result = v.get("result").cloned().unwrap_or(Value::Null);
+            t.error = match v.get("error") {
+                Some(Value::String(e)) if !e.is_empty() => Some(e.clone()),
+                Some(e @ Value::Object(_)) => Some(st(e, "message")),
+                _ => None,
+            };
+            if t.result.get("isError").and_then(Value::as_bool) == Some(true) && t.status.is_empty()
+            {
+                t.status = "failed".into();
+            }
+        }
+        "SubAgentActivity" => {
+            t.typ = "subAgentActivity".into();
+            (t.kind, t.model) = (st(v, "kind"), st(v, "model"));
+            (t.agent_thread_id, t.agent_path) = (st(v, "agent_thread_id"), st(v, "agent_path"));
+        }
+        "CollabAgentToolCall" => {
+            t.typ = "collabAgentToolCall".into();
+            t.tool = camel(s(v, "tool"));
+            (t.prompt, t.model) = (st(v, "prompt"), st(v, "model"));
+            t.receivers = strs(v, "receiver_thread_ids");
+        }
         "Extension" => {
             if s(v, "kind") != "web.search" {
                 return None;
@@ -176,6 +202,24 @@ pub(crate) fn rollout_thread_item(v: &Value) -> Option<ThreadItem> {
         _ => return None,
     }
     Some(t)
+}
+
+/// A snake_case name as the app-server's camelCase one: a rollout's
+/// spawn_agent is a live item's spawnAgent.
+fn camel(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut up = false;
+    for c in name.chars() {
+        if c == '_' {
+            up = true;
+        } else if up {
+            out.extend(c.to_uppercase());
+            up = false;
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// Which of a rollout's two accounts of a turn an event comes from.
@@ -466,12 +510,14 @@ impl Replay {
                         raw,
                     })];
                 };
-                let mut call = call_of(&t, raw.clone()).unwrap_or_default();
+                let Some(mut call) = call_of(&t, raw.clone()) else {
+                    return Vec::new(); // a subagent's end, which its own task says
+                };
                 call.input.background = outlived && t.typ == "commandExecution";
                 let out = output_of(&t, raw);
                 vec![
                     self.assistant(&call.id.clone(), call_part(call)),
-                    result(out),
+                    result_with(out, images_of(&t)),
                 ]
             }
         }
@@ -616,14 +662,23 @@ pub(crate) fn call_part(c: Call) -> Part {
 
 /// A tool's output as the user message that carries it back.
 pub(crate) fn result(o: Output) -> Event {
+    result_with(o, Vec::new())
+}
+
+/// A tool's output and the images it gave back, after it in one message,
+/// as Claude Code's tool results carry theirs.
+pub(crate) fn result_with(o: Output, images: Vec<rush_core::event::ImageData>) -> Event {
+    let id = format!("{}:result", o.call_id);
+    let mut parts = vec![Part {
+        kind: PartKind::ToolResult,
+        output: Some(Box::new(o)),
+        ..Part::default()
+    }];
+    parts.extend(images.into_iter().map(image_part));
     Event::Message(Message {
         role: "user".into(),
-        id: format!("{}:result", o.call_id),
-        parts: vec![Part {
-            kind: PartKind::ToolResult,
-            output: Some(Box::new(o)),
-            ..Part::default()
-        }],
+        id,
+        parts,
         ..Message::default()
     })
 }
@@ -1053,7 +1108,19 @@ pub(crate) mod tests {
             }}))
             .item(json!({"type": "Extension", "id": "ws", "kind": "web.search", "query": "go generics",
                 "action": {"type": "search", "query": "go generics"}, "results": []}))
-            .item(json!({"type": "SubAgentActivity", "id": "sa", "kind": "started"}))
+            .item(json!({"type": "SubAgentActivity", "id": "sa", "kind": "started",
+                "agent_thread_id": "kid", "agent_path": "/root/pong", "model": "gpt-5"}))
+            .item(json!({"type": "McpToolCall", "id": "mc", "server": "rush", "tool": "contact_sheet",
+                "arguments": {"images": ["/tmp/a.png"]}, "status": "completed",
+                "result": {"content": [{"type": "text", "text": "1 image on one sheet"},
+                    {"type": "image", "data": "iVBORw==", "mimeType": "image/png"}], "isError": false}}))
+            .item(json!({"type": "McpToolCall", "id": "mf", "server": "rush", "tool": "spawn_agent",
+                "arguments": {"agent": "sol"}, "status": "failed",
+                "result": {"content": [{"type": "text", "text": "no agent sol"}], "isError": true}}))
+            .item(json!({"type": "CollabAgentToolCall", "id": "cw", "tool": "wait", "status": "completed",
+                "sender_thread_id": "thread-1", "receiver_thread_ids": [], "receiver_agents": [], "agents_states": {}}))
+            .item(json!({"type": "SubAgentActivity", "id": "sd", "kind": "completed",
+                "agent_thread_id": "kid", "agent_path": "/root/pong"}))
             .event("token_count", token_count(200, 150, 20, 0, 12.0))
             .event("task_complete", json!({"turn_id": "u", "duration_ms": 1500, "error": null}))
     }
@@ -1075,7 +1142,14 @@ pub(crate) mod tests {
             r#"user() result:fc "" err=false patch:/work/a.go@1+1:+package a patch:/work/b.go@1+2:-old|+new| ctx"#,
             "assistant(gpt-5) call:ws web_search websearch go generics",
             r#"user() result:ws "" err=false"#,
-            "other item/SubAgentActivity",
+            "assistant(gpt-5) call:sa spawn_agent subagent ",
+            r#"user() result:sa "" err=false"#,
+            "assistant(gpt-5) call:mc mcp__rush__contact_sheet mcp ",
+            r#"user() result:mc "1 image on one sheet" err=false; image:image/png"#,
+            "assistant(gpt-5) call:mf mcp__rush__spawn_agent mcp ",
+            r#"user() result:mf "no agent sol" err=true"#,
+            "assistant(gpt-5) call:cw TaskOutput other ",
+            r#"user() result:cw "" err=false"#,
             "context 220/1000",
             r#"end done "" in=110 out=30 cache=190 reason=5 1.5s"#,
         ]

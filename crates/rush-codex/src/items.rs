@@ -93,6 +93,8 @@ pub(crate) struct FileUpdate {
 pub(crate) struct ContentItem {
     pub typ: String,
     pub text: String,
+    /// inputImage
+    pub image_url: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -116,6 +118,7 @@ pub(crate) fn content_items(v: &[Value]) -> Vec<ContentItem> {
         .map(|c| ContentItem {
             typ: st(c, "type"),
             text: st(c, "text"),
+            image_url: st(c, "imageUrl"),
         })
         .collect()
 }
@@ -414,6 +417,44 @@ pub(crate) fn output_of(it: &ThreadItem, raw: Option<RawJson>) -> Output {
         _ => o.is_error = failed,
     }
     o
+}
+
+/// The images a finished tool call item gave back, as Claude Code's tool
+/// results carry theirs: an MCP tool's image content, a dynamic tool's
+/// input images. Rust-only.
+pub(crate) fn images_of(it: &ThreadItem) -> Vec<ImageData> {
+    match it.typ.as_str() {
+        "mcpToolCall" => arr(&it.result, "content")
+            .iter()
+            .filter(|c| s(c, "type") == "image")
+            .filter_map(|c| {
+                let data = base64::engine::general_purpose::STANDARD
+                    .decode(s(c, "data"))
+                    .ok()?;
+                let mut media_type = st(c, "mimeType");
+                if media_type.is_empty() {
+                    media_type = st(c, "mime_type");
+                }
+                Some(ImageData {
+                    media_type,
+                    data,
+                    path: String::new(),
+                })
+            })
+            .collect(),
+        "dynamicToolCall" => it
+            .content_items
+            .iter()
+            .filter(|c| c.typ == "inputImage" && !c.image_url.is_empty())
+            .map(|c| {
+                data_image(&c.image_url).unwrap_or_else(|| ImageData {
+                    path: local_path(&c.image_url),
+                    ..ImageData::default()
+                })
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 /// The texts of content parts, a line each.
@@ -767,5 +808,43 @@ mod tests {
         );
         assert_eq!(path_base("/root/echoer"), "echoer");
         assert_eq!(path_base(""), ".");
+    }
+
+    /// The images a tool gave back come with its result, as Claude Code's
+    /// do: an MCP tool's image content, a dynamic tool's input images.
+    #[test]
+    fn images_of_items() {
+        for (name, raw, want) in [
+            (
+                "mcp",
+                r#"{"type":"mcpToolCall","id":"m","server":"rush","tool":"contact_sheet","result":{"content":[{"type":"text","text":"a sheet"},{"type":"image","data":"iVBORw==","mimeType":"image/webp"}]}}"#,
+                vec![("image/webp", 6, "")],
+            ),
+            (
+                "dynamic",
+                r#"{"type":"dynamicToolCall","id":"d","tool":"t","contentItems":[{"type":"inputText","text":"x"},{"type":"inputImage","imageUrl":"data:image/png;base64,iVBORw=="},{"type":"inputImage","imageUrl":"file:///tmp/a%20b.png"}]}"#,
+                vec![("image/png", 6, ""), ("", 0, "/tmp/a b.png")],
+            ),
+            (
+                "text only",
+                r#"{"type":"mcpToolCall","id":"m","server":"s","tool":"t","result":{"content":[{"type":"text","text":"a"}]}}"#,
+                vec![],
+            ),
+            (
+                "a command",
+                r#"{"type":"commandExecution","id":"c","command":"ls"}"#,
+                vec![],
+            ),
+        ] {
+            let got: Vec<(String, usize, String)> = images_of(&item(raw))
+                .into_iter()
+                .map(|i| (i.media_type, i.data.len(), i.path))
+                .collect();
+            let want: Vec<(String, usize, String)> = want
+                .into_iter()
+                .map(|(m, n, p)| (m.to_string(), n, p.to_string()))
+                .collect();
+            assert_eq!(got, want, "{name}");
+        }
     }
 }
