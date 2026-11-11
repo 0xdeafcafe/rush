@@ -158,7 +158,11 @@ fn md_links(runs: &[Run], base: Style) -> Txt {
         let open = open + last;
         let end = end + mid + 2;
         let (label, target) = (&s[open + 1..mid], s[mid + 2..end].trim());
-        if label.contains(['[', ']']) || target.is_empty() || target.contains([' ', '\t']) {
+        let bracketed = target.len() > 2 && target.starts_with('<') && target.ends_with('>');
+        if label.contains(['[', ']'])
+            || target.is_empty()
+            || (!bracketed && target.contains([' ', '\t']))
+        {
             p = mid + 2;
             continue;
         }
@@ -203,9 +207,14 @@ fn md_links(runs: &[Run], base: Style) -> Txt {
 /// as it is, a path as a file:// URL; None for anything else
 /// (render.go:2031 linkTarget).
 pub fn link_target(t: &str) -> Option<String> {
+    let t = t
+        .strip_prefix('<')
+        .and_then(|x| x.strip_suffix('>'))
+        .unwrap_or(t);
     if t.starts_with("http://") || t.starts_with("https://") || t.starts_with("file://") {
         return Some(t.to_string());
     }
+    let t = without_line(t);
     let home;
     let t = match t.strip_prefix("~/") {
         Some(rest) => {
@@ -218,6 +227,28 @@ pub fn link_target(t: &str) -> Option<String> {
         return None;
     }
     Some(format!("file://{}", escape_path(&t)))
+}
+
+/// A file link's path without the line it points at: Codex links a file
+/// as `/abs/app.py:12` (or `:12:3`), others as `/abs/app.py#L12`, and the
+/// file is what opens. Rust-only.
+fn without_line(t: &str) -> &str {
+    let digits = |x: &str| !x.is_empty() && x.bytes().all(|b| b.is_ascii_digit());
+    if let Some((path, frag)) = t.rsplit_once("#L")
+        && frag
+            .split(['-'])
+            .all(|n| digits(n.strip_prefix('L').unwrap_or(n)))
+    {
+        return path;
+    }
+    let mut out = t;
+    for _ in 0..2 {
+        match out.rsplit_once(':') {
+            Some((path, n)) if digits(n) && !path.is_empty() => out = path,
+            _ => break,
+        }
+    }
+    out
 }
 
 /// A path as a URL's, escaped as Go's url.URL.String escapes one.
@@ -870,9 +901,42 @@ mod tests {
         assert_eq!(url(&t, "see"), None);
         let t = inline("![shot](/tmp/my shots/a.png) [b](/tmp/a b.md)", C_TEXT);
         assert_eq!(url(&t, "▣"), None, "a target with a space isn't one");
+        let t = inline(
+            "[app.py](/w/app.py:12) and [My Report.md](</w/My Project/My Report.md:3>)",
+            C_TEXT,
+        );
+        assert_eq!(url(&t, "app.py").as_deref(), Some("file:///w/app.py"));
+        assert_eq!(
+            url(&t, "Report").as_deref(),
+            Some("file:///w/My%20Project/My%20Report.md")
+        );
+        assert_eq!(t.plain(), "app.py and My Report.md");
         let t = inline("![shot](/tmp/a%.png)", C_TEXT);
         assert_eq!(url(&t, "shot").as_deref(), Some("file:///tmp/a%25.png"));
         assert_eq!(url(&t, "▣").as_deref(), Some("file:///tmp/a%25.png"));
+    }
+
+    /// A file link opens its file whichever way the agent wrote the line it
+    /// points at: Codex's `path:12`, `path:12:3` and `<path with spaces>`,
+    /// a `#L12-L20` anchor.
+    #[test]
+    fn file_links_open_their_file() {
+        for (target, want) in [
+            ("/w/app.py:12", Some("file:///w/app.py")),
+            ("/w/app.py:12:3", Some("file:///w/app.py")),
+            ("/w/app.py#L12", Some("file:///w/app.py")),
+            ("/w/app.py#L12-L20", Some("file:///w/app.py")),
+            (
+                "</w/My Project/a.md:3>",
+                Some("file:///w/My%20Project/a.md"),
+            ),
+            ("/w/app.py", Some("file:///w/app.py")),
+            ("/w/a:b", Some("file:///w/a:b")),
+            ("https://x.dev:8080", Some("https://x.dev:8080")),
+            ("app.py:12", None),
+        ] {
+            assert_eq!(super::link_target(target).as_deref(), want, "{target}");
+        }
     }
 
     /// Rows past the gutter's column, a blank row at the end dropped.
