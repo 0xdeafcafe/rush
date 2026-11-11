@@ -688,7 +688,9 @@ fn obj(v: Value) -> Map<String, Value> {
 
 /// Sends now, or drops, the message at index in a session's queue, and
 /// waits until the session says it's gone. was, when given, names it by
-/// its text, so it's still the one meant if the queue moved.
+/// its text, so it's still the one meant if the queue moved. One sent
+/// that the session took but still holds (its turn being stopped for it)
+/// isn't failed: it goes as soon as the turn lets it (Rust-only).
 pub(crate) fn queued(
     hosts: &dyn Hosts,
     id: &str,
@@ -711,8 +713,11 @@ fn queued_on(
     was: &str,
     send: bool,
 ) -> Result<Option<Raw>, Error> {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let next = |want: &mut dyn FnMut(&HostEvent) -> Result<bool, Error>| -> Result<(), Error> {
+    let wait = Duration::from_secs(5);
+    let timed_out = std::cell::Cell::new(false);
+    let next = |deadline: Instant,
+                want: &mut dyn FnMut(&HostEvent) -> Result<bool, Error>|
+     -> Result<(), Error> {
         loop {
             let evs = match d
                 .lines
@@ -723,6 +728,7 @@ fn queued_on(
                     return Err(server(format!("session {id} went away")));
                 }
                 Err(RecvTimeoutError::Timeout) => {
+                    timed_out.set(true);
                     return Err(server(format!("session {id} didn't answer")));
                 }
             };
@@ -734,7 +740,7 @@ fn queued_on(
         }
     };
     let mut queue: Vec<String> = Vec::new();
-    next(&mut |ev| {
+    next(Instant::now() + wait, &mut |ev| {
         if let HostEvent::Info(i) = ev {
             queue = i.queue.clone();
             return Ok(true);
@@ -759,12 +765,20 @@ fn queued_on(
         Op::queue_remove(index, &was)
     };
     d.client.op(op).map_err(server)?;
-    next(&mut |ev| match ev {
+    let mut held = false;
+    let r = next(Instant::now() + wait, &mut |ev| match ev {
         HostEvent::Error(e) => Err(server(e)),
-        HostEvent::Info(i) => Ok(count(&i.queue) < n),
+        HostEvent::Info(i) => {
+            held = count(&i.queue) >= n;
+            Ok(!held)
+        }
         _ => Ok(false),
-    })?;
-    Ok(empty())
+    });
+    match r {
+        Err(_) if send && held && timed_out.get() => Ok(empty()),
+        Err(e) => Err(e),
+        Ok(()) => Ok(empty()),
+    }
 }
 
 fn with_host(
