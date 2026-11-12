@@ -593,4 +593,31 @@ mod tests {
             assert!(!saved.contains(not), "saved has {not}:\n{saved}");
         }
     }
+
+    // The idle rest a host waits comes from config.json's rest, and the
+    // environment can set it for one run.
+    #[test]
+    fn rest_from_config_and_env() {
+        let d = home();
+        fs::write(
+            d.path().join("config.json"),
+            r#"{"rest": {"afterSeconds": 3, "spawnedAfterSeconds": 60}}"#,
+        )
+        .unwrap();
+        let s = Store::load_with_env(&|_| None);
+        assert_eq!(
+            (
+                s.config.rest.after_seconds,
+                s.config.rest.spawned_after_seconds
+            ),
+            (3, 60)
+        );
+        let from = |name: &str| (name == "RUSH_REST_AFTER_SECONDS").then(|| "10".to_string());
+        let s = Store::load_with_env(&from);
+        assert_eq!(s.config.rest.after_seconds, 10);
+        assert_eq!(
+            s.from_env("rest.afterSeconds").as_deref(),
+            Some("RUSH_REST_AFTER_SECONDS")
+        );
+    }
 }

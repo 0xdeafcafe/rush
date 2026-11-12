@@ -431,6 +431,13 @@ pub struct Config {
     pub hide_columns: Vec<String>,
     #[serde(rename = "hibernate", deserialize_with = "lenient")]
     pub hibernate: Hibernate,
+    /// How long a headless session's host waits idle before it sleeps.
+    #[serde(
+        rename = "rest",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_default"
+    )]
+    pub rest: Rest,
     /// What rush sets in every agent's own settings, each in its own words.
     #[serde(
         rename = "everywhere",
@@ -637,6 +644,29 @@ pub struct Config {
         skip_serializing_if = "String::is_empty"
     )]
     pub microphone: String,
+}
+
+/// How long a session's host waits idle before it sleeps, freeing its
+/// agent's process: the conversation stays and the next message starts it
+/// again. 0 keeps rush's own wait (30 minutes for a session you started,
+/// 5 for a spawned one).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Rest {
+    /// For a session you started.
+    #[serde(
+        rename = "afterSeconds",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_default"
+    )]
+    pub after_seconds: i64,
+    /// For a session another agent spawned.
+    #[serde(
+        rename = "spawnedAfterSeconds",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_default"
+    )]
+    pub spawned_after_seconds: i64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

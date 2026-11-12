@@ -239,9 +239,36 @@ pub struct Hooks {
 /// request: what it started at, or why not.
 pub type Successor = Arc<dyn Fn(Config) -> crate::emeritus::Start + Send + Sync>;
 
+/// How long a session you started, and a spawned one, wait idle before
+/// their host sleeps: config.json's rest, or ROOT_IDLE and SPAWNED_IDLE
+/// where it says 0.
+pub fn rest_waits(rest: &rush_state::Rest) -> (Duration, Duration) {
+    let wait = |secs: i64, default: Duration| {
+        u64::try_from(secs)
+            .ok()
+            .filter(|s| *s > 0)
+            .map_or(default, Duration::from_secs)
+    };
+    (
+        wait(rest.after_seconds, ROOT_IDLE),
+        wait(rest.spawned_after_seconds, SPAWNED_IDLE),
+    )
+}
+
 impl Hooks {
-    /// The real ones.
+    /// The real ones; the idle waits as config.json says when the host
+    /// starts.
     pub fn real() -> Hooks {
+        let (root_idle, spawned_idle) = rest_waits(&rush_state::Store::load().config.rest);
+        Hooks {
+            root_idle,
+            spawned_idle,
+            ..Hooks::wired()
+        }
+    }
+
+    /// The real ones with rush's own idle waits, config.json unread.
+    fn wired() -> Hooks {
         Hooks {
             may_go: Arc::new(rush_net::netproof::may_go),
             net_fail: Arc::new(rush_net::netproof::fail),
@@ -275,7 +302,7 @@ impl Hooks {
             health_answered: Arc::new(|_| {}),
             titler: None,
             feed_summer: None,
-            ..Hooks::real()
+            ..Hooks::wired()
         }
     }
 }

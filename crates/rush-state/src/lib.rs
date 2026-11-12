@@ -33,7 +33,7 @@ pub mod took;
 pub mod vault;
 pub mod writebehind;
 
-pub use config::{Config, Dispatch, Emeritus, Folder, Login, SignIn, Start};
+pub use config::{Config, Dispatch, Emeritus, Folder, Login, Rest, SignIn, Start};
 pub use costcache::CostCache;
 pub use dir::{
     cache_dir, cache_path, dir, expand_home, key, set_thread_cache_dir, set_thread_dir,

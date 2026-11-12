@@ -2733,3 +2733,38 @@ fn codex_steering_keeps_the_guard() {
     assert!(c.got.lock().unwrap().is_empty());
     assert_eq!(queue(&h), "from another");
 }
+
+// config.json's rest sets the idle waits; 0 or less keeps rush's own.
+#[test]
+fn rest_waits_follow_config() {
+    let r = |after, spawned| rush_state::Rest {
+        after_seconds: after,
+        spawned_after_seconds: spawned,
+    };
+    assert_eq!(rest_waits(&r(0, 0)), (ROOT_IDLE, SPAWNED_IDLE));
+    assert_eq!(rest_waits(&r(-5, 0)), (ROOT_IDLE, SPAWNED_IDLE));
+    assert_eq!(rest_waits(&r(3, 0)), (Duration::from_secs(3), SPAWNED_IDLE));
+    assert_eq!(rest_waits(&r(0, 60)), (ROOT_IDLE, Duration::from_secs(60)));
+}
+
+// A host's real hooks read config.json's rest as they're made; a test's
+// quiet ones never read it.
+#[test]
+fn real_hooks_wait_as_config_says() {
+    let home = Home::new();
+    std::fs::write(
+        home.path().join("config.json"),
+        r#"{"rest": {"afterSeconds": 3, "spawnedAfterSeconds": 60}}"#,
+    )
+    .unwrap();
+    let real = Hooks::real();
+    assert_eq!(
+        (real.root_idle, real.spawned_idle),
+        (Duration::from_secs(3), Duration::from_secs(60))
+    );
+    let quiet = Hooks::quiet();
+    assert_eq!(
+        (quiet.root_idle, quiet.spawned_idle),
+        (ROOT_IDLE, SPAWNED_IDLE)
+    );
+}
