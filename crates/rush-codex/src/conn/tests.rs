@@ -1126,6 +1126,89 @@ fn background_shell() {
     assert!(matches!(&done[0], Event::TaskDone(d) if d.status == "stopped"));
 }
 
+/// A command still running when its turn is interrupted ends with the
+/// turn: Codex aborts the call and never says its item completed, so it's
+/// no background task (one was listed for 35 hours). One already in the
+/// background stays, and both carry Claude Code's word for their kind.
+#[test]
+fn interrupted_turn_leaves_no_background_shell() {
+    let mut st = root();
+    let cmd = |id: &str, status: &str| {
+        json!({"type": "commandExecution", "id": id, "command": "/bin/zsh -lc 'node check.mjs'",
+            "cwd": "/w", "processId": "15547", "source": "unifiedExecStartup", "status": status, "commandActions": []})
+    };
+    let n = |st: &mut State, method: &str, mut p: Value| {
+        p["threadId"] = "root".into();
+        note(st, method, p)
+    };
+    let mut evs = n(
+        &mut st,
+        "turn/started",
+        json!({"turn": {"id": "t1", "status": "inProgress"}}),
+    );
+    evs.extend(n(
+        &mut st,
+        "item/started",
+        json!({"item": cmd("exec-bg", "inProgress")}),
+    ));
+    evs.extend(n(
+        &mut st,
+        "item/started",
+        json!({"item": {"type": "reasoning", "id": "r1"}}),
+    ));
+    evs.extend(n(
+        &mut st,
+        "item/started",
+        json!({"item": cmd("exec-cut", "inProgress")}),
+    ));
+    evs.extend(n(
+        &mut st,
+        "turn/completed",
+        json!({"turn": {"id": "t1", "status": "interrupted"}}),
+    ));
+    let started: Vec<String> = evs
+        .iter()
+        .filter_map(|e| match e {
+            Event::TaskStarted(t) => Some(t.id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(started, ["exec-bg"]);
+    let bg = st.background().tasks;
+    assert_eq!(
+        bg.iter()
+            .map(|t| (t.id.as_str(), t.kind_word.as_str()))
+            .collect::<Vec<_>>(),
+        [("exec-bg", "local_bash")]
+    );
+    // Its item completing after all only lands its result.
+    let late = n(
+        &mut st,
+        "item/completed",
+        json!({"item": cmd("exec-cut", "completed")}),
+    );
+    assert!(
+        !late
+            .iter()
+            .any(|e| matches!(e, Event::TaskDone(_) | Event::Background(_))),
+        "{late:?}"
+    );
+    assert!(
+        !late
+            .iter()
+            .any(|e| matches!(e, Event::Message(m) if m.role == "assistant")),
+        "its call isn't made again: {late:?}"
+    );
+    st.adopt("kid", "spawn", "worker");
+    let words: Vec<String> = st
+        .background()
+        .tasks
+        .iter()
+        .map(|t| t.kind_word.clone())
+        .collect();
+    assert!(words.contains(&"local_agent".to_string()), "{words:?}");
+}
+
 // modeof_test.go:TestModeOfPolicy
 #[test]
 fn mode_of_policy() {

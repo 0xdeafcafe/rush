@@ -1761,6 +1761,9 @@ impl Loader {
         // What it runs in the background, as the agent's own background
         // sessions record theirs, so the list says so alike.
         for t in &info.background {
+            if info.left_running(t, now) {
+                continue;
+            }
             j.in_flight += 1;
             // A subagent's own command is its work, said with it, not one
             // of the session's tasks: else 3 subagents with a command each

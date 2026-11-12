@@ -39,6 +39,9 @@ a watcher, or a task its agent lost track of): answer.json's `from` is
 when the turn before it ended, and only tasks started since then hold it.
 Without that, one task that never ends kept every later answer from being
 reported, and `agent_result` called the child "still working" for good.
+The list treats the same tasks alike: a shell or
+monitor an earlier turn left running, 30 minutes or more, doesn't make an
+idle child "working" (DESIGN.md, "Background tasks an earlier turn left").
 
 ## The tools
 

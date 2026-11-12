@@ -313,6 +313,55 @@ fn compact_divider() {
     assert_eq!(s.context, 11658);
 }
 
+/// A /compact as Claude Code writes it now (no `turn_duration` after any
+/// turn, the summary before the command, then the command's output) is a
+/// turn of its own that the next prompt closes: it doesn't take every
+/// later prompt as said mid-turn and run on, live, for days.
+#[test]
+fn compact_turn_closes_on_the_next_prompt() {
+    let tmp = Tmp::new("compact-closes");
+    let path = tmp.file(&[
+        r#"{"type":"user","timestamp":"2026-11-10T03:00:00Z","message":{"role":"user","content":"do the thing"}}"#,
+        r#"{"type":"assistant","timestamp":"2026-11-10T03:00:05Z","message":{"id":"m1","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"Done."}]}}"#,
+        r#"{"type":"system","subtype":"compact_boundary","timestamp":"2026-11-10T03:22:29.057Z","compactMetadata":{"trigger":"manual","preTokens":197680,"postTokens":13059}}"#,
+        r#"{"type":"user","timestamp":"2026-11-10T03:22:29.056Z","message":{"role":"user","content":"This session is being continued from a previous conversation that ran out of context. Summary: stuff"}}"#,
+        r#"{"type":"user","isMeta":true,"timestamp":"2026-11-10T03:21:39.343Z","message":{"role":"user","content":"<local-command-caveat>Caveat</local-command-caveat>"}}"#,
+        r#"{"type":"user","timestamp":"2026-11-10T03:21:39.343Z","message":{"role":"user","content":"<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>"}}"#,
+        r#"{"type":"user","timestamp":"2026-11-10T03:22:29.494Z","message":{"role":"user","content":"<local-command-stdout>Compacted</local-command-stdout>"}}"#,
+        r#"{"type":"user","timestamp":"2026-11-10T03:22:29.470Z","message":{"role":"user","content":"nudge it"}}"#,
+        r#"{"type":"assistant","timestamp":"2026-11-10T03:22:43Z","message":{"id":"m2","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"Nudged."}]}}"#,
+        r#"{"type":"user","timestamp":"2026-11-12T11:13:00Z","message":{"role":"user","content":"and now?"}}"#,
+        r#"{"type":"assistant","timestamp":"2026-11-12T11:14:06Z","message":{"id":"m3","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"All done."}]}}"#,
+    ]);
+    let s = read_all(&path);
+    let shape: Vec<_> = s
+        .turns
+        .iter()
+        .map(|t| (t.prompt.as_str(), t.cause.as_str(), t.live))
+        .collect();
+    assert_eq!(
+        shape,
+        [
+            ("do the thing", "", false),
+            ("", "/compact", false),
+            ("nudge it", "", false),
+            ("and now?", "", true),
+        ]
+    );
+    for t in &s.turns {
+        assert!(
+            !t.items.iter().any(|it| matches!(it, Item::Interject(_))),
+            "turn {} took a prompt as said mid-turn: {:?}",
+            t.n,
+            t.items
+        );
+    }
+    assert_eq!(
+        s.live().map(|t| t.start),
+        Some(parse_rfc3339("2026-11-12T11:13:00Z"))
+    );
+}
+
 #[test]
 fn notice() {
     let tmp = Tmp::new("notice");

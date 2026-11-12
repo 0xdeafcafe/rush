@@ -304,6 +304,8 @@ struct WireInfo {
     updated_at: Option<String>,
     #[serde(rename = "idleSince")]
     idle_since: Option<String>,
+    #[serde(rename = "turnBegan")]
+    turn_began: Option<String>,
     stalled: Option<String>,
     proto: i64,
     sleeping: bool,
@@ -401,6 +403,7 @@ pub(crate) fn read_info(dir: &Path) -> Option<HostInfo> {
         started_at: time(&w.started_at),
         updated_at: time(&w.updated_at),
         idle_since: time(&w.idle_since),
+        turn_began: time(&w.turn_began),
         stalled: time(&w.stalled),
         proto: w.proto,
         sleeping: w.sleeping,

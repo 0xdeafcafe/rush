@@ -642,7 +642,14 @@ impl State {
                     if let Some(d) = int(t, "durationMs") {
                         end.duration = Duration::from_millis(d.max(0) as u64);
                     }
-                    let mut out = self.detach(); // what still runs outlives the turn
+                    // What still runs outlives the turn; an interrupted
+                    // one's unfinished commands end with it.
+                    let mut out = if s(t, "status") == "interrupted" {
+                        self.abandon();
+                        Vec::new()
+                    } else {
+                        self.detach()
+                    };
                     // What the turn asked dies with it: Codex never takes
                     // an answer to it now, and left open it held the host
                     // working after the turn had ended (Rust-only).
@@ -954,7 +961,10 @@ impl State {
         })]
     }
 
-    /// The spawned threads and background shells running now.
+    /// The spawned threads and background shells running now, each with
+    /// Claude Code's word for its kind (local_agent, local_bash), which the
+    /// list and the host's check-ins read to tell a subagent from a shell
+    /// (Rust-only).
     fn background(&self) -> Background {
         let mut tasks: Vec<BackgroundTask> = self
             .kids
@@ -963,6 +973,7 @@ impl State {
             .map(|(id, k)| BackgroundTask {
                 id: id.clone(),
                 kind: TaskKind::Subagent,
+                kind_word: "local_agent".into(),
                 label: k.label.clone(),
                 ..BackgroundTask::default()
             })
@@ -972,6 +983,7 @@ impl State {
                 tasks.push(BackgroundTask {
                     id: id.clone(),
                     kind: TaskKind::Shell,
+                    kind_word: "local_bash".into(),
                     label: self
                         .calls
                         .get(id)
@@ -1037,6 +1049,18 @@ impl State {
         }
         out.push(Event::Background(self.background()));
         out
+    }
+
+    /// The commands still running when the turn is interrupted (Rust-only):
+    /// Codex aborts their calls ("aborted by user") and never says their
+    /// items completed, so kept they'd be background tasks no end ever
+    /// reaches, the session "working" on them for days. They end with the
+    /// turn, their steps lost with it; one already in the background (its
+    /// call returned and the model read on) is a terminal of its own and
+    /// stays. Their calls are kept, so an item that completes after all
+    /// lands its result on its own step.
+    fn abandon(&mut self) {
+        self.shells.retain(|_, sh| sh.bg);
     }
 
     /// What a command item completing means: a background shell's task is

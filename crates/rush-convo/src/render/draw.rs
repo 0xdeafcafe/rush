@@ -43,7 +43,7 @@ use super::txt::width as width_of;
 use super::txt::{Txt, blanks, code_rows, row, width, wrap};
 use super::udiff::{UDiff, clean_output, collapse_cr, expand_tabs, has_diff, parse_diff, unscreen};
 use super::{CAP_ROW, Depth, GUTTER, Options, RenderedLine};
-use crate::model::{Item, Session, Status, Step, StepId, Turn, agent_name};
+use crate::model::{Item, STALL_AFTER, Session, Status, Step, StepId, Turn, agent_name};
 use crate::text::{first_line, first_non_empty};
 use crate::transcript::pr_news_parts;
 use rush_core::event::{Exchange, Peer};
@@ -766,7 +766,7 @@ impl<'a> Drawer<'a> {
         } else {
             self.draw_items(0, items.len(), keep);
         }
-        if t.live && !self.o.hide_activity {
+        if t.live && !self.o.hide_activity && !self.left_open() {
             if self.o.dock_activity {
                 self.docked_live_line();
             } else {
@@ -1685,15 +1685,21 @@ impl<'a> Drawer<'a> {
             ));
             self.add("", Color::Default, l, Txt::new());
         } else if !tool_active && t.start != 0 && quiet >= STALL_AFTER {
-            let s = dur(quiet);
-            let l = pad.and_raw("  ").and(paint(
-                C_YELLOW,
-                &format!(
-                    "⚠ stalled · nothing from the model for {s} · stop the turn and send again"
-                ),
-            ));
+            let mut words = format!("⚠ stalled · nothing from the model for {}", dur(quiet));
+            if !self.o.stall_action.is_empty() {
+                words.push_str(" · ");
+                words.push_str(&self.o.stall_action);
+            }
+            let l = pad.and_raw("  ").and(paint(C_YELLOW, &words));
             self.add("", Color::Default, l, Txt::new());
         }
+    }
+
+    /// A turn the conversation holds open that its host or row says is
+    /// over (Turn::left_open): it isn't working and hasn't stalled, so no
+    /// live line. A compaction under way still draws its own.
+    fn left_open(&self) -> bool {
+        self.s.compacting().is_none() && self.t.left_open(self.o.now, self.o.between_turns)
     }
 
     /// Whether the prompt cache had gone by at: an hour past the main
@@ -4016,7 +4022,6 @@ pub(crate) fn waiting(s: &Session, t: &Turn) -> bool {
 }
 
 pub(crate) const SPAWN_SHOWN: usize = 4;
-const STALL_AFTER: Ms = 120_000;
 
 /// One of words for the stretch that began at since, the same for all of
 /// it. A time not known (0; a history's events carry none) is Go's zero

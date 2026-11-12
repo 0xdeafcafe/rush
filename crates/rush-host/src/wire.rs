@@ -609,6 +609,12 @@ pub struct Info {
     /// When it last went idle: a turn's end. Zero until its first turn.
     #[serde(rename = "idleSince", skip_serializing_if = "zero_time")]
     pub idle_since: Time,
+    /// When its latest turn began, delivered or taken up on its own: the
+    /// list reads which background tasks an earlier turn left running
+    /// (rush-fleet's HostInfo::left_running). Zero until its first turn,
+    /// and from a host before it said. Rust-only.
+    #[serde(rename = "turnBegan", skip_serializing_if = "zero_time")]
+    pub turn_began: Time,
     /// When it last heard from its agent, set once a turn has heard
     /// nothing for a while with no tool running; zero otherwise.
     #[serde(skip_serializing_if = "zero_time")]

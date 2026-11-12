@@ -606,6 +606,7 @@ pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
             st.info.generation = old.generation + 1;
             st.turn = old.turn;
             st.info.turn = old.turn;
+            st.info.turn_began = old.turn_began;
             st.info.left = old.left.clone();
             h.set_away(&mut st, old.away.clone()); // restarted while away, or with what an away left for you
             if old.state == "idle" && st.began {
@@ -2685,6 +2686,7 @@ impl Host {
             st.info.turn = st.turn;
             st.turn_ev = ev.clone();
             st.turn_began = Time::now();
+            st.info.turn_began = st.turn_began;
             st.turn_changes.clear();
         }
         // The views rush greyed, named at the end of the message that
@@ -3832,6 +3834,7 @@ impl Host {
             st.info.state = "working".into();
             st.woke = true;
             st.turn_began = Time::now();
+            st.info.turn_began = st.turn_began;
             st.turn_changes.clear();
         }
         for p in &m.parts {

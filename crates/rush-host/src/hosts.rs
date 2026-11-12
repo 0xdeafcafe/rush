@@ -238,6 +238,7 @@ pub fn host_info(i: &Info) -> HostInfo {
         started_at: ms(i.started_at),
         updated_at: ms(i.updated_at),
         idle_since: ms(i.idle_since),
+        turn_began: ms(i.turn_began),
         stalled: ms(i.stalled),
         proto: i.proto,
         sleeping: i.sleeping,

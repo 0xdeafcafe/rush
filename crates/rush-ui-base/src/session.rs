@@ -987,7 +987,9 @@ pub fn header(
         spb("stopped mid-turn", RED)
     } else if a.job.live() {
         let mut s = spb("working", ORANGE);
-        if let Some(t) = v.sess.live() {
+        if let Some(t) = v.sess.live()
+            && !t.left_open(now, v.o.between_turns)
+        {
             s.text.push_str(&format!(" · {}", dur(now - t.start)));
         }
         s

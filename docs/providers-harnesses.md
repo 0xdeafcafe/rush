@@ -109,7 +109,9 @@ limit choice the one under the table. The rest stays in the config
 - Claude Code sessions rush hosts run with Claude Code's stream watchdog on
   (`CLAUDE_ENABLE_STREAM_WATCHDOG=1`), so a silent stream is cut and retried.
 - rush marks a turn with no stream activity for 2 minutes as stalled, on its
-  working line, with a key to interrupt and send again.
+  working line, with the key that interrupts it (esc) where the pane has one.
+  A session its host says is between turns is never shown stalled: a turn
+  still open then is one whose end the conversation never saw.
 - Settings > General says what's on.
 
 ## Order of work (run in parallel where files don't overlap)

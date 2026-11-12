@@ -652,6 +652,18 @@ fn take(s: &mut Session, p: Parsed, before: Ms) -> (bool, bool) {
     (changed, false)
 }
 
+/// A new prompt closes the turn the transcript never marked done: Claude
+/// Code no longer writes `turn_duration`, so the next prompt is all that
+/// ends one. Any live turn, not only one with words of yours and the one
+/// a Partial session began part way through (transcript.go:478): a
+/// /compact's turn has its prompt cleared to its cause, and left open it
+/// took every later prompt as said mid-turn, one turn running for days.
+fn close_live(s: &mut Session, at: Ms) {
+    if s.live().is_some() {
+        s.apply(&done(), at);
+    }
+}
+
 fn take_prompt(
     s: &mut Session,
     mut text: String,
@@ -665,11 +677,7 @@ fn take_prompt(
     // message (Rust-only): your turn, a step each, the words sent with
     // them as its prompt (else `! cmd`), the agent's answer after.
     if crate::shellbox::sent_prompt(&text).is_some() {
-        if let Some(live) = s.live()
-            && (!live.prompt.is_empty() || s.partial && live.n == 1)
-        {
-            s.apply(&done(), at);
-        }
+        close_live(s, at);
         s.send(text, images, at, false);
         return;
     }
@@ -685,6 +693,11 @@ fn take_prompt(
         return;
     }
     let trimmed = text.trim();
+    // A command's own output (`<local-command-stdout>`) leaves nothing
+    // you said: it isn't a prompt, and mustn't hold a turn open.
+    if trimmed.is_empty() && images.is_empty() && pictures.is_empty() {
+        return;
+    }
     // The summary a compaction leaves goes with its divider.
     if trimmed.starts_with("This session is being continued from a previous conversation")
         && s.compact_summary(&text)
@@ -696,13 +709,7 @@ fn take_prompt(
         s.interrupted(at);
         return;
     }
-    // A new prompt closes a turn the transcript never marked done, and the
-    // one a Partial session began part way through.
-    if let Some(live) = s.live()
-        && (!live.prompt.is_empty() || s.partial && live.n == 1)
-    {
-        s.apply(&done(), at);
-    }
+    close_live(s, at);
     let mut from = None;
     if let Some((f, t)) = injected(&text) {
         from = Some(f);

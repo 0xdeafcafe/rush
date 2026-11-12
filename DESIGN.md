@@ -3804,6 +3804,51 @@ kept the host "working" past the turn's end (2026-11-11: a three-hour
 turn stopped with an approval open left the host waiting on nothing,
 every `rush queue send` stopping a turn that no longer ran).
 
+## Background tasks an earlier turn left (Rust-only)
+
+Codex says a command ended only as its item completing. A command still
+running when its turn is interrupted gets no such word: Codex aborts the
+call ("aborted by user") and the item never completes. Rush used to move
+it to the background at `turn/completed`, where it stayed for good
+(2026-11-12: two execs, a `node` check and a `cat >> NOTES.md` heredoc,
+listed for 35 hours; the session "working" in the list, and the host's
+check-ins waking the agent to ask about them every few hours, its
+subagent row spinning while it answered). Now an interrupted turn's
+unfinished commands end with it (`State::abandon`); one already in the
+background (its call returned, the model read on) is a terminal of its
+own and stays. Codex's tasks carry Claude Code's kind words
+(`local_bash`, `local_agent`), so the list and the check-ins tell its
+shells from its subagents.
+
+Whatever the cause, a task an earlier turn left running doesn't make an
+idle session working in the list, its row, the Working group or what its
+lanes say (`HostInfo::left_running`). That's a shell or monitor (never a subagent or a
+workflow, whose ends are always told) that began before the session's
+latest turn (`Info.turnBegan`) and has run 30 minutes, the check-in's own
+mark. It's a server or a watcher the agent has moved on from, or one
+whose end was never told; it stays in the session's own tasks, where it
+can be stopped. `subtool::finished` lets the same tasks go when it hands
+a subagent's answer back, so the list and `agent_result` agree.
+
+## A turn whose end was never seen (Rust-only)
+
+Claude Code no longer writes `turn_duration`, so a transcript's turn
+ends only at the next prompt. Any prompt now closes the live turn, not
+only one with words of yours (Go closed only those): a `/compact`'s turn
+has its prompt cleared to its cause, and left open it took every later
+prompt as said mid-turn, one turn "warming up" for 56 hours. A command's
+own output (`<local-command-stdout>`) is no prompt and opens nothing.
+
+The last turn of a transcript is still open until the next prompt. A
+live turn quiet past the stall mark (2 minutes) while the session is
+between turns (its host asleep, idle or stopped; not hosted, its row not
+working) is one whose end the conversation never saw
+(`Turn::left_open`): it gets no live line, no stall and no "working ·
+time" in the header. A real stall, the host working and the model
+silent for 2 minutes, says what to do in the pane's own keys: "esc stops
+the turn, then send again" where esc interrupts it (hosted, and the
+harness can), and nothing more where nothing does.
+
 ## Messages to a working Codex (Rust-only)
 
 Codex takes input mid-turn (`turn/steer`, images as `localImage`

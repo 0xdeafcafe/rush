@@ -236,6 +236,15 @@ pub struct Options {
     pub history_open: bool,
     /// The live line is drawn elsewhere.
     pub hide_activity: bool,
+    /// Its host or its row says it's between turns: a turn the
+    /// conversation still holds open, quiet past the stall mark, is one
+    /// whose end it never saw, not a stall, and has no live line.
+    /// Rust-only.
+    pub between_turns: bool,
+    /// What the stall warning says to do about a turn gone quiet, in the
+    /// keys of the pane it's drawn in ("esc stops the turn, then send
+    /// again"); "" where nothing there stops one. Rust-only.
+    pub stall_action: String,
     /// The live line is the pane's docked one (activity.go:13): a running
     /// or waiting step is named on it, with the turn's time, as its own
     /// row may be folded or scrolled away.
@@ -372,6 +381,7 @@ impl Options {
         )
             .hash(&mut h);
         (self.dock_activity, code::show_whitespace(), self.preset).hash(&mut h);
+        (self.between_turns, &self.stall_action).hash(&mut h);
         self.shell_cwd.hash(&mut h);
         if self.preset == Preset::CatchUp {
             self.since.hash(&mut h);

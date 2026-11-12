@@ -659,6 +659,59 @@ fn background_tasks_as_the_row_says_them() {
     assert_eq!(background_kind(""), "task");
 }
 
+// A shell or monitor an earlier turn left running, 30 minutes on, doesn't
+// make an idle session working: a server it moved on from, or a command
+// whose end its harness never told (a Codex exec its interrupted turn
+// abandoned, listed for 35 hours). This turn's, a young one, a subagent,
+// a task of unknown kind and any task of a working session still count
+// (Rust-only).
+#[test]
+fn tasks_an_earlier_turn_left_running_dont_count() {
+    use crate::hosted::HostTask;
+    let t = now();
+    let began = t - 10 * MINUTE;
+    let task = |id: &str, kind: &str, at: Ms| HostTask {
+        id: id.into(),
+        kind: kind.into(),
+        label: id.into(),
+        started_at: at,
+        ..HostTask::default()
+    };
+    let old = t - 35 * 60 * MINUTE;
+    let cases: Vec<(&str, Ms, HostTask, bool)> = vec![
+        ("idle", began, task("left", "local_bash", old), false),
+        ("idle", began, task("watch", "monitor_mcp", old), false),
+        (
+            "idle",
+            began,
+            task("now", "local_bash", began + MINUTE),
+            true,
+        ),
+        (
+            "idle",
+            began,
+            task("young", "local_bash", t - 20 * MINUTE),
+            true,
+        ),
+        ("idle", began, task("agent", "local_agent", old), true),
+        ("idle", began, task("flow", "local_workflow", old), true),
+        ("idle", began, task("what", "", old), true),
+        ("idle", 0, task("older-host", "local_bash", old), true),
+        ("working", began, task("busy", "local_bash", old), true),
+    ];
+    for (state, turn_began, bg, counts) in cases {
+        let mut l = loader();
+        let d = tempfile::tempdir().unwrap();
+        let mut hi = info(&bg.id, state, &s(d.path()), t);
+        hi.turn_began = turn_began;
+        let id = bg.id.clone();
+        hi.background = vec![bg];
+        let a = l.hosted(&test_profile(), &hi, None, t);
+        assert_eq!(a.job.in_flight > 0, counts, "{id}");
+        assert_eq!(a.job.background.is_empty(), !counts, "{id}");
+    }
+}
+
 // fleet.go:1218: a session a plugin started says which, and why.
 #[test]
 fn hosted_says_who_started_it() {

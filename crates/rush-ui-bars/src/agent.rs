@@ -949,7 +949,11 @@ pub fn state_words(o: &Of, now: Ms) -> Line {
     if sess.is_some_and(|s| !s.pending().is_empty()) {
         return one(spb("needs you", YELLOW));
     }
-    if let Some(t) = sess.and_then(|s| s.live()) {
+    // A turn the conversation holds open past its host's idle is one whose
+    // end it never saw, not work (Turn::left_open).
+    if let Some(t) = sess.and_then(|s| s.live())
+        && !t.left_open(now, matches!(info.state.as_str(), "idle" | "stopped"))
+    {
         return line([
             spb("working", ORANGE),
             sp(format!(" · {}", dur(now - t.start)), ORANGE),

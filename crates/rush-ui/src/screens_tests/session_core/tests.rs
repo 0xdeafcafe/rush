@@ -1817,3 +1817,50 @@ fn a_message_brings_a_put_away_session_back() {
     assert!(!m.agents[0].done, "still put away");
     assert_eq!(m.group_of.get(KEY).map(String::as_str), Some("Working"));
 }
+
+/// A turn its conversation holds open, quiet 40 minutes: while its host
+/// says it works, it has stalled and the line says the keys that stop
+/// it; once its host says it's idle, or asleep, the turn's end was never
+/// seen, and there's no live line, no stall and no "working" over it.
+#[test]
+fn a_turn_left_open_between_turns_is_not_stalled() {
+    let (mut m, _) = hosted("steer", Vec::new());
+    sess(&mut m).sent("go".into(), Vec::new(), NOW - 40 * 60_000);
+    m.session.as_mut().unwrap().read = true;
+    let stalled = format!(
+        "⚠ stalled · nothing from the model for 40m 00s · {}",
+        super::conversation::STALL_ACTION
+    );
+    conn(&mut m, KEY).info.state = "working".into();
+    let f = screen(&mut m).join("\n");
+    assert!(f.contains(&stalled), "{f}");
+    assert!(f.contains("…  40m 00s"), "{f}");
+    for (state, asleep) in [("idle", false), ("stopped", false), ("working", true)] {
+        let c = conn(&mut m, KEY);
+        c.info.state = state.into();
+        c.sleeping = asleep;
+        let f = screen(&mut m).join("\n");
+        assert!(!f.contains("stalled"), "{state} {asleep}: {f}");
+        assert!(!f.contains("40m 00s"), "{state} {asleep}: {f}");
+    }
+}
+
+/// Where nothing in the pane stops a turn (an agent that can't be
+/// interrupted), a stall says only that it's quiet.
+#[test]
+fn a_stall_with_nothing_to_stop_it_offers_no_keys() {
+    let (mut m, _) = hosted("plain", Vec::new());
+    sess(&mut m).sent("go".into(), Vec::new(), NOW - 3 * 60_000);
+    m.session.as_mut().unwrap().read = true;
+    conn(&mut m, KEY).info.state = "working".into();
+    let f = screen(&mut m).join("\n");
+    let row = f
+        .lines()
+        .find(|l| l.contains("⚠ stalled"))
+        .unwrap_or_else(|| panic!("no stall: {f}"));
+    assert!(
+        row.contains("⚠ stalled · nothing from the model for 3m 00s"),
+        "{row}"
+    );
+    assert!(!row.contains("esc"), "{row}");
+}

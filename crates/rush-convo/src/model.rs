@@ -328,7 +328,18 @@ pub struct Turn {
     ver: u32,
 }
 
+/// How long a live turn may hear nothing from its agent before it's drawn
+/// as stalled (render.go:1214).
+pub const STALL_AFTER: Ms = 120_000;
+
 impl Turn {
+    /// Live, but quiet past STALL_AFTER at now while its session is
+    /// between turns, as its host or its row says: a turn whose end the
+    /// conversation never saw, neither at work nor stalled. Rust-only.
+    pub fn left_open(&self, now: Ms, between_turns: bool) -> bool {
+        self.live && between_turns && now - self.heard.max(self.start) >= STALL_AFTER
+    }
+
     /// The first line of the turn's answer, without markdown.
     pub fn outcome(&self) -> String {
         self.answer().map(first_plain).unwrap_or_default()

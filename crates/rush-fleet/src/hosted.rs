@@ -96,6 +96,9 @@ pub struct HostInfo {
     pub updated_at: Ms,
     /// When it last went idle: a turn's end. 0 until its first turn.
     pub idle_since: Ms,
+    /// When its latest turn began (host.Info's turnBegan); 0 until its
+    /// first, and from a host before it said. Rust-only.
+    pub turn_began: Ms,
     /// When it last heard from its agent, once a turn has heard nothing
     /// for a while with no tool running; 0 otherwise.
     pub stalled: Ms,
@@ -142,7 +145,29 @@ impl HostInfo {
     pub fn is_remote(&self) -> bool {
         !self.remote.is_empty()
     }
+
+    /// Whether background task t is one an earlier turn left running, not
+    /// work the session is at (Rust-only): the session is idle, t is a
+    /// shell or a monitor (never a subagent or a workflow), t began
+    /// before the latest turn did, and it has run LEFT_RUNNING_AFTER. A
+    /// server or a watcher the agent has moved on from, or a command whose
+    /// end its harness never told: it stays listed and can be stopped,
+    /// but doesn't make the session working. rush-host's finished() lets
+    /// the same tasks go when it hands a subagent's answer back.
+    pub fn left_running(&self, t: &HostTask, now: Ms) -> bool {
+        self.state == "idle"
+            && self.turn_began != 0
+            && t.started_at != 0
+            && t.started_at < self.turn_began
+            && now - t.started_at >= LEFT_RUNNING_AFTER
+            && matches!(crate::loader::background_kind(&t.kind), "shell" | "monitor")
+    }
 }
+
+/// How long a task an earlier turn left running counts as the session's
+/// work: rush-host's LONG_TASK_AFTER, when its check-in asks the agent
+/// about one gone quiet.
+pub const LEFT_RUNNING_AFTER: Ms = 30 * 60_000;
 
 /// What a session's config says that the list reads (host.Config).
 #[derive(Clone, Debug, Default, PartialEq)]

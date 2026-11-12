@@ -15,6 +15,7 @@
 //! plugin_ui's views::beside).
 
 use rush_convo::render::OWNER_SEP;
+use rush_core::adapter::Feature;
 use rush_core::text::{Color, Line, Span, Style};
 use rush_draw::{Button, MouseKind};
 
@@ -124,6 +125,38 @@ pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     out
 }
 
+/// What the stall warning says to do in a hosted session whose agent can
+/// be interrupted: esc on an empty box stops the turn (keys.rs
+/// stop_turn), and what's sent after starts the next.
+pub const STALL_ACTION: &str = "esc stops the turn, then send again";
+
+/// Whether the session is between turns, and what the stall warning says
+/// to do about a turn gone quiet (Rust-only). Its host says, while rush
+/// hosts it: asleep, idle or stopped is between turns; else its row does.
+/// A turn the conversation still holds open then is one whose end it
+/// never saw (a transcript's last turn: Claude Code no longer marks one
+/// done), and its live line would say a finished session had stalled.
+fn turn_state(m: &mut Model, key: &str) -> (bool, &'static str) {
+    let a = super::agent(m, key);
+    let row_idle = a.is_some_and(|a| !a.job.live());
+    let kind = a.map(|a| a.kind.as_str().to_string()).unwrap_or_default();
+    let stops = m.reg.supports(&kind, Feature::Interrupt);
+    let c = conn(m, key);
+    let between = if c.sleeping || c.info.sleeping {
+        true
+    } else if c.hosted() {
+        matches!(c.info.state.as_str(), "idle" | "stopped")
+    } else {
+        row_idle
+    };
+    let action = if c.hosted() && stops {
+        STALL_ACTION
+    } else {
+        ""
+    };
+    (between, action)
+}
+
 /// The conversation's text, `rows` tall (see body).
 fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     conn(m, key).vs.rows = rows;
@@ -157,6 +190,7 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     // column is drawn over the room past the reading width, so rows wrapped
     // for the whole width would lose their ends under it.
     let wide = conn(m, key).side.rows.is_empty();
+    let (between, action) = turn_state(m, key);
     let Some(v) = m.session.as_mut() else {
         return Vec::new();
     };
@@ -164,6 +198,10 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     v.sync(w, now, tick);
     let o = &mut v.o;
     o.wide = wide;
+    o.between_turns = between;
+    if o.stall_action != action {
+        o.stall_action = action.to_string();
+    }
     o.preset = preset;
     o.since = since;
     (o.parent, o.started_from, o.hosted) = (opening.0, opening.1, opening.2);
