@@ -1054,8 +1054,13 @@ impl Host {
         if !st.w.owed.is_empty() {
             text = format!("{}\n\n{text}", st.w.owed).trim().to_string();
         }
+        let from = std::fs::read(answer_path(&st.cfg.id))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Answer>(&b).ok())
+            .map_or(Time::default(), |p| p.at);
         let mut a = Answer {
             at: Time::now(),
+            from,
             text,
             ..Answer::default()
         };

@@ -33,6 +33,13 @@ them.
              arrives later as a message from the child (an exchange row)
 ```
 
+A turn's answer waits for the work that turn left running in the
+background, but not for work left running by an earlier turn (a server,
+a watcher, or a task its agent lost track of): answer.json's `from` is
+when the turn before it ended, and only tasks started since then hold it.
+Without that, one task that never ends kept every later answer from being
+reported, and `agent_result` called the child "still working" for good.
+
 ## The tools
 
 | Tool | Input | Returns |

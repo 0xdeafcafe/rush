@@ -521,6 +521,10 @@ pub fn peer(id: &str) -> Peer {
 #[serde(default)]
 pub struct Answer {
     pub at: Time,
+    /// When the turn before it ended: work still running from before then
+    /// was left going by an earlier turn, so doesn't hold this answer.
+    #[serde(skip_serializing_if = "crate::wire::zero_time")]
+    pub from: Time,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub text: String,
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -752,7 +756,12 @@ pub fn finished(reg: &Registry, id: &str, info: &Info, since: Time) -> (Answer, 
         };
         a.err = fail_report(reg, &info.kind, reason, &r.last_step, r.attempt - 1);
     } else if info.state == "stopped" || info.sleeping {
-    } else if info.state != "idle" || !info.queue.is_empty() || !info.background.is_empty() {
+    } else if info.state != "idle"
+        || !info.queue.is_empty()
+        || info.background.iter().any(|t| !t.started_at.before(a.from))
+    {
+        // A task an earlier turn left running (a server, a watcher, or one
+        // its agent lost track of) would hold every answer after it.
         return (a, false);
     }
     (a, true)
@@ -875,7 +884,7 @@ Yours waits behind it; after a couple of minutes rush shows the user it's waitin
 mod tests {
     use super::*;
     use crate::testing::Home;
-    use crate::wire::{Limit, Retry};
+    use crate::wire::{Limit, Retry, Task};
 
     // failreport_test.go:11
     #[test]
@@ -922,9 +931,48 @@ mod tests {
                 queue: vec!["next".into()],
                 ..Info::default()
             },
+            Info {
+                state: "idle".into(),
+                background: vec![Task {
+                    id: "exec-1".into(),
+                    started_at: Time::now(),
+                    ..Task::default()
+                }],
+                ..Info::default()
+            },
         ] {
             assert!(!finished(&reg, id, &info, Time::default()).1, "{info:?}");
         }
+        // A task an earlier turn left running doesn't hold this turn's answer;
+        // one this turn started does.
+        let left = Time::now();
+        let b = Answer {
+            at: Time::now(),
+            from: left + Duration::from_secs(5),
+            text: "hi".into(),
+            ..Answer::default()
+        };
+        std::fs::write(answer_path(id), serde_json::to_vec(&b).unwrap()).unwrap();
+        let with = |started_at| Info {
+            state: "idle".into(),
+            background: vec![Task {
+                id: "exec-1".into(),
+                started_at,
+                ..Task::default()
+            }],
+            ..Info::default()
+        };
+        assert!(finished(&reg, id, &with(left), Time::default()).1);
+        assert!(
+            !finished(
+                &reg,
+                id,
+                &with(left + Duration::from_secs(10)),
+                Time::default()
+            )
+            .1
+        );
+        std::fs::write(answer_path(id), serde_json::to_vec(&a).unwrap()).unwrap();
         let limited = Info {
             state: "idle".into(),
             limit: Some(Limit::default()),
