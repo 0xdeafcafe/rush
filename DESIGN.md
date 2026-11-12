@@ -131,7 +131,14 @@ Claude, fleet, the other adapters) builds on these.
   transcript read back. An `Exchange` is an `Item::Exchange` card in its
   turn (`exchange_text(ref)`, `exchange_peer(ref)` for its ref
   `exchange:dir:id:peer`; the peer's mark is Go's default ◇ until the UI
-  hands over agents' logos). `TaskStarted/Updated/Progress/Done` and
+  hands over agents' logos). An archived record takes the place of the
+  agent's copy of it: its prompt or interjection (rush's injected
+  messages read as their one line), or, in the turn under way however
+  long it has run, the card a transcript's `queued_command` of rush's PR
+  news made (Rust-only); unmatched, it goes at its turn's end. Two or
+  more of rush's PR news in a row draw as one card (`t<n>:news:<i>`): a
+  row a pull request, how it stands at its last news and what came
+  before; opened, each its own card. `TaskStarted/Updated/Progress/Done` and
   `Background` keep `Session::jobs()` (`Job`, Go's jobs.go: running,
   backgrounded, ended, a shell task with no call of its own given a
   stand-in step); a task that ends or fires puts the turn the agent wakes

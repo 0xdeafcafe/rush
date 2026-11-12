@@ -1300,8 +1300,84 @@ impl<'a> Drawer<'a> {
                 self.while_ = false;
             }
             Item::Step(id) => self.step(*id, 0),
-            Item::Exchange(x) => self.exchange(&x.exchange),
+            Item::Exchange(x) => {
+                // rush's news of pull requests, two or more in a row: one
+                // card, drawn at the first (Rust-only).
+                let items = &self.t.items;
+                if !pr_news(&items[i]) {
+                    return self.exchange(&x.exchange);
+                }
+                if i > 0 && pr_news(&items[i - 1]) {
+                    return; // the run's card, drawn at its first, has it
+                }
+                let run: Vec<&Exchange> = items[i..]
+                    .iter()
+                    .map_while(|it| match it {
+                        Item::Exchange(y) if pr_news(it) => Some(&y.exchange),
+                        _ => None,
+                    })
+                    .collect();
+                if run.len() < 2 {
+                    return self.exchange(&x.exchange);
+                }
+                self.news_run(i, &run);
+            }
         }
+    }
+
+    /// A run of rush's news of pull requests as one card: a row a pull
+    /// request, how it stands now and, quieter, how it stood before;
+    /// opened, each message as its own card (Rust-only).
+    fn news_run(&mut self, i: usize, run: &[&Exchange]) {
+        let r = format!("{}:news:{i}", self.r);
+        if self.o.open.get(&r).copied().unwrap_or(self.o.verbose) {
+            for e in run {
+                self.exchange(e);
+            }
+            let picked = self.o.selected == r;
+            let l = self.sp(GUTTER).and(if picked {
+                key_hint("space", "folds")
+            } else {
+                faint(&format!("▴ {} messages", run.len()))
+            });
+            self.add(&r, Color::Default, l, Txt::new());
+            self.gap();
+            return;
+        }
+        let rows = news_rows(run);
+        let room = (self.cw.min(CAP_ROW) as isize - GUTTER as isize - 4).clamp(20, 96) as usize;
+        let name_w = rows.iter().map(|r| width_of(&r.0)).max().unwrap_or(0);
+        let lines: Vec<Txt> = rows
+            .iter()
+            .map(|(pr, now, before)| {
+                let pad = " ".repeat(name_w - width_of(pr));
+                let mut l = paint(C_WHITE, pr)
+                    .and_raw(&format!("{pad}  "))
+                    .and(now.clone());
+                if !before.is_empty() {
+                    l.push(faint(&format!("  ({before} before)")));
+                }
+                l.truncate(room, &Txt::raw("…"))
+            })
+            .collect();
+        let mut sender = run[run.len() - 1].sender.clone();
+        if rows.len() > 1 {
+            sender.name = format!("rush · {} pull requests", rows.len());
+        }
+        let shown = Exchange {
+            sender,
+            ..run[run.len() - 1].clone()
+        };
+        let picked = self.o.selected == r;
+        let frame = if picked { C_ORANGE } else { C_FAINT };
+        let mut foot = dim(&format!("{} messages", run.len()));
+        if picked {
+            foot = foot.and(dim(" · ")).and(key_hint("space", "shows each"));
+        }
+        self.gap();
+        let who = exchange_who(&shown, room - 4);
+        self.frame_box(&r, GUTTER, who, Txt::new(), lines, foot, room, frame, true);
+        self.gap();
     }
 
     /// A message between agents as a card: who sent it to whom on its top
@@ -5038,6 +5114,85 @@ fn exchange_body(e: &Exchange, text: &str) -> String {
         }
         _ => text.to_owned(),
     }
+}
+
+/// Whether an item is rush's news of a pull request (rush pr follow).
+pub(crate) fn pr_news(it: &Item) -> bool {
+    matches!(it, Item::Exchange(x) if pr_news_parts(&x.exchange.text).is_some())
+}
+
+/// What one piece of PR news says happened, in a word or two, and how
+/// it's coloured: how the pull request stands when it's settled (merged,
+/// ready), else the first new thing to do (failed, conflict).
+fn news_word(text: &str) -> (String, Style) {
+    let body = pr_news_parts(text).map_or(text, |(_, b)| b);
+    let verdict = body
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("VERDICT: "))
+        .unwrap_or("")
+        .trim();
+    let settled = match verdict {
+        "MERGED" => Some(("merged", C_GREEN)),
+        "CLOSED" => Some(("closed", C_DIM)),
+        "READY FOR APPROVAL" => Some(("ready", C_GREEN)),
+        "MERGEABLE" => Some(("mergeable", C_GREEN)),
+        _ => None,
+    };
+    if let Some((w, c)) = settled {
+        return (w.into(), c);
+    }
+    let first = body
+        .strip_prefix("New since rush last told you:\n- ")
+        .and_then(|rest| rest.split_whitespace().next());
+    match first {
+        Some("FAILED") => ("failed".into(), C_RED),
+        Some("CANCELLED") => ("cancelled".into(), C_ORANGE),
+        Some("CONFLICT") => ("conflict".into(), C_RED),
+        Some("BOT") => ("bot finding".into(), C_ORANGE),
+        Some("ADDRESS") | Some("CONTESTED") => ("review".into(), C_ORANGE),
+        Some("READ") => ("comment".into(), C_ORANGE),
+        Some(w) => (w.to_lowercase(), C_ORANGE),
+        None => match verdict {
+            "WAITING" => ("waiting".into(), C_DIM),
+            "" => ("news".into(), C_DIM),
+            v => (v.to_lowercase(), C_ORANGE),
+        },
+    }
+}
+
+/// A run of PR news a row a pull request, in the order each first came:
+/// its name, how it stands at its last news, and what came before
+/// (repeats counted: "failed ×2").
+fn news_rows(run: &[&Exchange]) -> Vec<(String, Txt, String)> {
+    let mut order: Vec<&str> = Vec::new();
+    let mut said: HashMap<&str, Vec<(String, Style)>> = HashMap::new();
+    for e in run {
+        let pr = pr_news_parts(&e.text).map_or("", |(pr, _)| pr);
+        if !said.contains_key(pr) {
+            order.push(pr);
+        }
+        said.entry(pr).or_default().push(news_word(&e.text));
+    }
+    order
+        .into_iter()
+        .map(|pr| {
+            let mut words = said.remove(pr).unwrap_or_default();
+            let (now, c) = words.pop().unwrap_or(("news".into(), C_DIM));
+            let mut before: Vec<(String, usize)> = Vec::new();
+            for (w, _) in words {
+                match before.last_mut() {
+                    Some((last, n)) if *last == w => *n += 1,
+                    _ => before.push((w, 1)),
+                }
+            }
+            let before = before
+                .into_iter()
+                .map(|(w, n)| if n > 1 { format!("{w} ×{n}") } else { w })
+                .collect::<Vec<_>>()
+                .join(", ");
+            (pr.to_string(), paint(c, &now), before)
+        })
+        .collect()
 }
 
 /// Who sent a message to whom, each half the room (exchange.go:198).

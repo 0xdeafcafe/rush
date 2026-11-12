@@ -252,6 +252,17 @@ impl Drawer<'_> {
                     h.text(&x.exchange.id);
                     h.mix(x.exchange.images.len() as u64);
                     h.mix(x.pictures.len() as u64);
+                    // A run of PR news draws at its first: what follows
+                    // it in the run is that card's too.
+                    for next in self.t.items[lo + j + 1..]
+                        .iter()
+                        .take_while(|it| super::draw::pr_news(it))
+                    {
+                        if let Item::Exchange(y) = next {
+                            h.text(&y.exchange.text);
+                            h.text(&y.exchange.id);
+                        }
+                    }
                 }
                 // Cheap to draw.
                 Item::Compact { .. } | Item::Notice { .. } => return None,
