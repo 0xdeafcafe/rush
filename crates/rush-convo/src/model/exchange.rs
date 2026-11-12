@@ -101,6 +101,36 @@ impl Session {
         });
     }
 
+    /// rush's news of a pull request as the agent's transcript keeps it,
+    /// handed over mid-turn: its card where it was taken, until rush's own
+    /// record of it, restored, takes its place (Rust-only).
+    pub(crate) fn news_taken(&mut self, text: &str, now: Ms) {
+        // Already its card: rush delivered it while this session watched.
+        let shown = self.turns.iter().rev().take(2).any(|t| {
+            t.items
+                .iter()
+                .any(|it| matches!(it, Item::Exchange(x) if x.exchange.text == text))
+        });
+        if shown {
+            return;
+        }
+        let pr = crate::transcript::pr_news_parts(text).map_or("", |(pr, _)| pr);
+        let e = Exchange {
+            at: now,
+            direction: "received".into(),
+            phase: "message".into(),
+            text: text.into(),
+            sender: Peer {
+                kind: "rush".into(),
+                name: format!("rush · {pr}"),
+                ..Peer::default()
+            },
+            ..Exchange::default()
+        };
+        self.applied += 1;
+        self.exchange(&e, now);
+    }
+
     /// Merges rush's archived records of exchanges into a transcript read
     /// back: the agent's copy of a received message becomes its row.
     pub fn restore_exchanges(&mut self, records: &[Exchange]) {
@@ -142,6 +172,10 @@ impl Session {
         let mut replace = None;
         let mut matched_prompt = false;
         let mut best = Ms::MAX;
+        // The agent's copy of a message rush injected (PR news, a task's
+        // end) reads as its line, not its whole text (Rust-only).
+        let line = crate::transcript::injected(&e.text).map(|(_, t)| t);
+        let same = |s: &str| !e.text.is_empty() && (s == e.text || line.as_deref() == Some(s));
         if e.direction == "received" && e.phase != "result" && e.at != 0 {
             for (ti, t) in self.turns.iter().enumerate() {
                 if t.start == 0 {
@@ -151,18 +185,39 @@ impl Session {
                 if distance > NEAR {
                     continue;
                 }
-                if !e.text.is_empty() && t.prompt == e.text && distance < best {
+                if same(&t.prompt) && distance < best {
                     (target, replace, matched_prompt, best) = (Some(ti), None, true, distance);
                 }
                 for (ii, it) in t.items.iter().enumerate() {
                     if let Item::Interject(x) = it
-                        && x.text == e.text
+                        && same(&x.text)
                         && distance < best
                     {
                         (target, replace, matched_prompt, best) =
                             (Some(ti), Some(ii), false, distance);
                     }
                 }
+            }
+            // Taken mid-turn in a turn begun long before: its copy in the
+            // turn it arrived in, the first not yet matched (Rust-only).
+            let ran = self
+                .turns
+                .iter()
+                .rposition(|t| t.start != 0 && t.start <= now)
+                .filter(|&ti| {
+                    let t = &self.turns[ti];
+                    t.live || t.end == 0 || now <= t.end + NEAR
+                });
+            if target.is_none()
+                && let Some(ti) = ran
+                && let Some(ii) = self.turns[ti].items.iter().position(|it| match it {
+                    Item::Interject(x) => same(&x.text),
+                    // news_taken's: the transcript's copy, no record yet.
+                    Item::Exchange(x) => x.exchange.id.is_empty() && x.exchange.text == e.text,
+                    _ => false,
+                })
+            {
+                (target, replace) = (Some(ti), Some(ii));
             }
         }
         if let Some(ti) = target {

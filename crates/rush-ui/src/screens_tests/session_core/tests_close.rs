@@ -139,3 +139,48 @@ fn alt_d_puts_it_away() {
     assert!(m.agents[0].done);
     assert_eq!(*fake.stopped_all.lock().unwrap(), ["k1"]);
 }
+
+/// #reincarnate stops a rush agent with all it started and starts it
+/// again at once, kept in the list; mid-turn it asks first; one rush
+/// doesn't run says how to bring it over.
+#[test]
+fn reincarnate_stops_then_starts_again() {
+    let fake = Fake::new();
+    let mut m = open(ours(State::Idle), &fake, 120, 40);
+    m.command("#reincarnate");
+    assert!(m.confirm.is_none());
+    assert_eq!(*fake.stopped_all.lock().unwrap(), ["k1".to_string()]);
+    assert_eq!(
+        *fake.wakes.lock().unwrap(),
+        [(m.agents[0].key.clone(), String::new(), false)]
+    );
+    assert!(!m.agents[0].done, "it stays in the list");
+    assert_eq!(
+        flash(&m),
+        "reincarnated tidy the parser · it carries on where it was"
+    );
+
+    let fake = Fake::new();
+    let mut m = open(ours(State::Working), &fake, 120, 40);
+    m.command("#reincarnate");
+    assert_eq!(
+        m.confirm.as_ref().map(|c| c.question.as_str()),
+        Some("Reincarnate tidy the parser?")
+    );
+    assert!(
+        fake.stopped_all.lock().unwrap().is_empty(),
+        "not before yes"
+    );
+    press(&mut m, "y");
+    assert_eq!(*fake.stopped_all.lock().unwrap(), ["k1".to_string()]);
+    assert_eq!(fake.wakes.lock().unwrap().len(), 1);
+
+    let fake = Fake::new();
+    let mut m = open(agent("steer", State::Idle), &fake, 120, 40);
+    m.command("#reincarnate");
+    assert!(fake.stopped_all.lock().unwrap().is_empty());
+    assert_eq!(
+        flash(&m),
+        "tidy the parser isn't a rush session · #rush moves it over first"
+    );
+}

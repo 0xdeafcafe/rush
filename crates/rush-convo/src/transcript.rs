@@ -468,12 +468,13 @@ impl Tail {
                 let a = l.attachment.unwrap_or_default();
                 let content = a.content.map_or("", RawValue::get);
                 let told = told(&a.typ, content);
+                let news = queued_news(&a.typ, a.prompt);
                 let hooks = if a.typ == "hook_success" || a.typ == "hook_additional_context" {
                     hook_notes(&a.hook_event, content)
                 } else {
                     Vec::new()
                 };
-                p.line = Line::Attachment { told, hooks };
+                p.line = Line::Attachment { told, news, hooks };
             }
             _ => {}
         }
@@ -514,6 +515,8 @@ enum Line {
     },
     Attachment {
         told: Option<String>,
+        /// rush's news of a pull request, handed over mid-turn.
+        news: Option<String>,
         hooks: Vec<Hook>,
     },
 }
@@ -556,6 +559,21 @@ struct Attachment<'a> {
     hook_event: Cow<'a, str>,
     #[serde(default, borrow)]
     content: Option<&'a RawValue>,
+    /// A queued_command's: what the agent was handed mid-turn.
+    #[serde(default, borrow)]
+    prompt: Option<&'a RawValue>,
+}
+
+/// rush's news of a pull request the agent was handed mid-turn, from the
+/// queued_command Claude Code keeps of it (Rust-only).
+fn queued_news(kind: &str, prompt: Option<&RawValue>) -> Option<String> {
+    if kind != "queued_command" {
+        return None;
+    }
+    let text: String = serde_json::from_str(prompt?.get()).ok()?;
+    text.trim_start()
+        .starts_with("<rush-pr-news")
+        .then_some(text)
 }
 
 #[derive(Deserialize, Default)]
@@ -635,11 +653,15 @@ fn take(s: &mut Session, p: Parsed, before: Ms) -> (bool, bool) {
                 true
             }
         }
-        Line::Attachment { told, hooks } => {
+        Line::Attachment { told, news, hooks } => {
             // A message rush's inbox handed over mid-turn: yours, as sent.
-            let was = told.is_some();
+            let was = told.is_some() || news.is_some();
             if let Some(text) = told {
                 s.sent(text, Vec::new(), at);
+            }
+            // rush's news of a pull request: its card, where it was taken.
+            if let Some(text) = news {
+                s.news_taken(&text, at);
             }
             if !hooks.is_empty() {
                 s.add_hooks(hooks);
@@ -662,6 +684,24 @@ fn close_live(s: &mut Session, at: Ms) {
     if s.live().is_some() {
         s.apply(&done(), at);
     }
+}
+
+const CONTINUED: &str = "This session is being continued from a previous conversation";
+
+/// The summary a compaction leaves, from its first words on (Rust-only):
+/// Claude Code may put a marker tag and a note about whose words it
+/// restates before it, `<artifact-content-authored-by-others/>` and a line.
+fn compact_summary_text(t: &str) -> Option<&str> {
+    if t.starts_with(CONTINUED) {
+        return Some(t);
+    }
+    let first = t.lines().next()?;
+    if !(first.starts_with('<') && first.trim_end().ends_with("/>")) {
+        return None;
+    }
+    // The preamble is a line or two; the summary starts a line of its own.
+    let at = t.find(&format!("\n{CONTINUED}"))?;
+    (t[..at].lines().count() <= 3).then(|| &t[at + 1..])
 }
 
 fn take_prompt(
@@ -699,8 +739,8 @@ fn take_prompt(
         return;
     }
     // The summary a compaction leaves goes with its divider.
-    if trimmed.starts_with("This session is being continued from a previous conversation")
-        && s.compact_summary(&text)
+    if let Some(summary) = compact_summary_text(trimmed)
+        && s.compact_summary(summary)
     {
         return;
     }
@@ -726,7 +766,9 @@ fn take_prompt(
             _ => s.turns[ti].pictures = pictures,
         }
     }
+    // Only a turn it started is its: taken mid-turn, the turn stays yours.
     if let Some(f) = from
+        && item.is_none()
         && let Some(t) = s.turns.last_mut()
     {
         t.from = f;

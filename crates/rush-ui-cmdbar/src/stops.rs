@@ -47,6 +47,11 @@ pub fn register(x: &mut Ext) {
         "kill the agent and everything it started",
         kill_command,
     );
+    x.command(
+        "reincarnate",
+        "stop the agent with all it started and start it again where it was, as ctrl+d twice would",
+        reincarnate_command,
+    );
     x.list_keys.push(list_key);
     x.on_fleet.push(hibernate);
 }
@@ -123,6 +128,52 @@ fn kill_command(m: &mut Model, _: &str) -> Out {
         ask_kill_tree(m, a);
     }
     Out::Draw
+}
+
+/// #reincarnate: what ctrl+d twice does, and then some. The rush agent
+/// stops with all it started (its spawned agents, its reminders), as
+/// ctrl+d's put-away does; it stays in the list, as the second ctrl+d
+/// brings it back; and its host starts again at once, resuming the
+/// conversation, rather than waiting for your next message. One mid-turn
+/// asks first. Rust-only.
+fn reincarnate_command(m: &mut Model, _: &str) -> Out {
+    let Some(a) = need(m) else {
+        return Out::Draw;
+    };
+    if !a.rush {
+        m.flash_err(&format!(
+            "{} isn't a rush session · #rush moves it over first",
+            a.display_name
+        ));
+        return Out::Draw;
+    }
+    if a.done {
+        // Put away already: it comes back, as a second ctrl+d brings it.
+        toggle_done(m, &a.key);
+    }
+    let working = a.job.live() || a.busy();
+    let name = a.display_name.clone();
+    let go = move |m: &mut Model| -> Out {
+        let (h, a) = (hosts(m), a.clone());
+        m.flash(&format!("reincarnating {}…", a.display_name));
+        let msg = format!(
+            "reincarnated {} · it carries on where it was",
+            a.display_name
+        );
+        run(m, msg, move || {
+            h.stop_all(&a.job.id)?;
+            h.wake(&a, "", &[], false).map(|_| ())
+        });
+        Out::Draw
+    };
+    if working {
+        m.ask(
+            Confirm::new(format!("Reincarnate {name}?"), go)
+                .detail("it's in the middle of a turn · y cuts it off, then starts it again"),
+        );
+        return Out::Draw;
+    }
+    go(m)
 }
 
 /// Runs work off the UI thread, then says msg, or what went wrong

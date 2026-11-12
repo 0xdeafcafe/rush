@@ -1124,6 +1124,13 @@ pub(crate) fn with_views_note(input: String, note: &str) -> String {
 
 /// The session, a message's sender and the exchange's id, which its
 /// queuing and its delivery share, put on f.
+/// The pull request rush's news is about (rush pr follow's
+/// `<rush-pr-news pr="o/r#n">`), None for any other message.
+fn pr_news_key(text: &str) -> Option<&str> {
+    let rest = text.trim_start().strip_prefix("<rush-pr-news pr=\"")?;
+    rest.split_once('"').map(|(pr, _)| pr)
+}
+
 fn sent_by(mut f: Value, e: Option<&Exchange>) -> Value {
     if let Some(e) = e {
         f["xid"] = e.id.clone().into();
@@ -2267,9 +2274,23 @@ impl Host {
             self.event(&st, "queued", f);
             let mut qi = queue_images(&st.info);
             let mut qe = queue_exchanges(&st.info);
-            st.info.queue.push(text.to_string());
-            qi.push(images.to_vec());
-            qe.push(exchange.clone());
+            // rush's news of a pull request takes the place of its news
+            // still waiting: the newer says the whole state (Rust-only).
+            let stale = pr_news_key(text).and_then(|k| {
+                (0..st.info.queue.len()).find(|&i| {
+                    qe.get(i).is_some_and(|x| x.is_some())
+                        && pr_news_key(&st.info.queue[i]) == Some(k)
+                })
+            });
+            if let Some(i) = stale {
+                st.info.queue[i] = text.to_string();
+                qi[i] = images.to_vec();
+                qe[i] = exchange.clone();
+            } else {
+                st.info.queue.push(text.to_string());
+                qi.push(images.to_vec());
+                qe.push(exchange.clone());
+            }
             st.info.queue_images = trim_images(qi);
             st.info.queue_exchanges = trim_exchanges(qe);
             for (i, p) in images.iter().enumerate() {

@@ -131,7 +131,14 @@ Claude, fleet, the other adapters) builds on these.
   transcript read back. An `Exchange` is an `Item::Exchange` card in its
   turn (`exchange_text(ref)`, `exchange_peer(ref)` for its ref
   `exchange:dir:id:peer`; the peer's mark is Go's default ◇ until the UI
-  hands over agents' logos). `TaskStarted/Updated/Progress/Done` and
+  hands over agents' logos). An archived record takes the place of the
+  agent's copy of it: its prompt or interjection (rush's injected
+  messages read as their one line), or, in the turn under way however
+  long it has run, the card a transcript's `queued_command` of rush's PR
+  news made (Rust-only); unmatched, it goes at its turn's end. Two or
+  more of rush's PR news in a row draw as one card (`t<n>:news:<i>`): a
+  row a pull request, how it stands at its last news and what came
+  before; opened, each its own card. `TaskStarted/Updated/Progress/Done` and
   `Background` keep `Session::jobs()` (`Job`, Go's jobs.go: running,
   backgrounded, ended, a shell task with no call of its own given a
   stand-in step); a task that ends or fires puts the turn the agent wakes
@@ -967,7 +974,10 @@ run against rush-host's fake host (its `fake` feature) in the test's own
 process. Every stop of an agent (#stop, #rm, #kill, #done, ctrl+x, alt+d,
 the close question, hibernate) goes through `cmdbar::outside::stop_outside`
 (`cmdbar/stops.rs`): a rush session stops through `Hosts::stop_all`, with
-the agents it spawned; the cleanup agent's host through `Hosts::stop`.
+the agents it spawned; the cleanup agent's host through `Hosts::stop`. #reincarnate (Rust-only) is ctrl+d twice
+and a start: `Hosts::stop_all`, the row kept in the list, then
+`Hosts::wake` with nothing to send, so the host starts again at once and
+resumes the conversation.
 The cleanup agent starts through `CareStarter`, which `start::install`
 sets (`care::start_with_hosts`: StartedBy and Meta's why go into its
 config). `start::install` also sets `Accounts::switcher` and

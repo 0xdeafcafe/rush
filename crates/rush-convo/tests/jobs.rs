@@ -376,6 +376,116 @@ fn opened_exchange_offers_to_fold() {
     assert!(out.contains("space folds"), "{out}");
 }
 
+/// rush's news of pull requests, several in a row, is one card: a row a
+/// pull request, how it stands at its last news and, quieter, what came
+/// before; opened, each its own card again. One alone keeps its own.
+#[test]
+fn a_run_of_pr_news_is_one_card() {
+    let news = |id: &str, pr: &str, body: &str| Exchange {
+        id: id.into(),
+        direction: "received".into(),
+        phase: "message".into(),
+        text: format!(
+            "<rush-pr-news pr=\"{pr}\">\nrush is following {pr} for you (rush pr follow).\n\n{body}\n</rush-pr-news>"
+        ),
+        sender: peer("", "rush", &format!("rush · {pr}")),
+        ..Exchange::default()
+    };
+    let state = |v: &str| format!("o/r#1 Title\n  VERDICT: {v}");
+    let run = [
+        news(
+            "a",
+            "o/r#1",
+            &format!(
+                "New since rush last told you:\n- CONFLICT with main\n\n{}",
+                state("WORK")
+            ),
+        ),
+        news(
+            "b",
+            "o/r#2",
+            &format!(
+                "New since rush last told you:\n- FAILED ci / check (required)\n\n{}",
+                state("WORK")
+            ),
+        ),
+        news(
+            "c",
+            "o/r#2",
+            &format!(
+                "New since rush last told you:\n- FAILED ci / lint (required)\n\n{}",
+                state("WORK")
+            ),
+        ),
+        news("d", "o/r#1", &state("READY FOR APPROVAL")),
+        news(
+            "e",
+            "o/r#1",
+            &format!(
+                "It merged. rush has stopped following it.\n\n{}",
+                state("MERGED")
+            ),
+        ),
+        news("f", "o/r#2", &state("READY FOR APPROVAL")),
+    ];
+    let mut s = Session::new();
+    for (k, e) in run.iter().enumerate() {
+        s.apply(&Event::Exchange(Box::new(e.clone())), 1000 + k as i64);
+    }
+    let o = Options {
+        width: 100,
+        now: 9000,
+        ..Options::default()
+    };
+    let out = render(&s, &o);
+    assert!(out.contains("rush · 2 pull requests"), "{out}");
+    assert!(out.contains("6 messages"), "{out}");
+    let row = |pr: &str| {
+        out.lines()
+            .find(|l| l.contains(pr))
+            .unwrap_or("")
+            .to_string()
+    };
+    let one = row("o/r#1  ");
+    assert!(
+        one.contains("merged") && one.contains("(conflict, ready before)"),
+        "{out}"
+    );
+    let two = row("o/r#2  ");
+    assert!(
+        two.contains("ready") && two.contains("(failed ×2 before)"),
+        "{out}"
+    );
+    assert!(
+        !out.contains("CONFLICT with main"),
+        "folded, the messages aren't drawn: {out}"
+    );
+
+    // Opened, each is its own card again.
+    let r = s.turns[0].n;
+    let mut o = o;
+    o.open.insert(format!("t{r}:news:0"), true);
+    let out = render(&s, &o);
+    assert!(out.contains("CONFLICT with main"), "{out}");
+    assert_eq!(out.matches("rush · o/r#2").count(), 3, "{out}");
+
+    // One alone is its own card.
+    let mut s = Session::new();
+    s.apply(&Event::Exchange(Box::new(run[0].clone())), 1000);
+    let out = render(
+        &s,
+        &Options {
+            width: 100,
+            now: 9000,
+            ..Options::default()
+        },
+    );
+    assert!(
+        out.contains("CONFLICT with main") && !out.contains("messages"),
+        "{out}"
+    );
+}
+
 // exchange_test.go: TestFoldedResultReadsAsMarkdown, as deecb643 has it.
 #[test]
 fn folded_result_reads_as_markdown() {

@@ -110,6 +110,11 @@ pub const FLEET_COMMANDS: &[(&str, &str, &str)] = &[
     ),
     ("kill", "kill the agent and everything it started", ""),
     (
+        "reincarnate",
+        "stop the agent with all it started and start it again where it was, as ctrl+d twice would",
+        "",
+    ),
+    (
         "perm",
         "choose session permissions (also in Shift+Tab)",
         "[mode]",
