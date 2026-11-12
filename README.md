@@ -145,6 +145,7 @@ Other apps can run sessions headless and follow them as they work, a line of JSO
 ```sh
 rush session start --cwd DIR [--agent A] --json
 echo 'next message' | rush session send <id>
+echo 'Coffee' | rush session answer <id>
 rush session watch <id> --json --until-idle
 rush open <id> --hosted
 ```

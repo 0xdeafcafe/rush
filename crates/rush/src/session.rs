@@ -1,5 +1,5 @@
 //! `rush session`: rush-mode sessions without the view. start, send,
-//! interrupt, stop, watch, info and list, with Go's words, flags and exit
+//! answer, interrupt, stop, watch, info and list, with Go's words, flags and exit
 //! codes; `--on MACHINE` is serve.rs's. send is how push-later's failed
 //! push reaches its session; start is also how serve starts a session a
 //! remote client asks for (start_requested).
@@ -9,14 +9,18 @@
 //! :165, sessionStart :182, startSession :269, firstWordsOf :400,
 //! sessionSend :419, sessionControl :571, sessionWatch :629, sessionInfo
 //! :740, sessionList :767), serve.go:58 (serve's starts) and exchange.go:24
-//! (outgoingExchange, here spawn.rs's).
+//! (outgoingExchange, here spawn.rs's). answer is the agtop fork's
+//! cmd/rush/answer.go (skippedQuestion :16, sessionAnswer :24, asking
+//! :102, waits :109, pendingOf :141).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 
 use rush_core::adapter::Registry;
+use rush_core::event::Event;
 use rush_host::client::{Client, ClientError, await_line, ensure, read_info, resting};
 use rush_host::events::log_event;
 use rush_host::{Config, Info, Line, alive};
@@ -37,6 +41,10 @@ pub const USAGE: &str = "rush session: run rush-mode sessions without the view
   else the folder's rule or the default profile says.
   rush session send <id> [--now] [--image PATH]...   message text on stdin; into the
         turn under way, or with --now stopping it
+  rush session answer <id> [--deny] [--request ID]    answer text on stdin
+        answers the question the session waits on, or allows the tool call
+        it asks permission for; --deny declines it; --request names the
+        request (its id, or its tool call's) it answers
   rush session interrupt <id>
   rush session stop <id>
   rush session watch <id> [--json] [--until-idle]   what it says and does, as it
@@ -99,6 +107,7 @@ pub fn session_cmd(
         }
         "start" => session_start(env, rest, stdin, stdout),
         "send" => (false, session_send(rest, stdin, stdout)),
+        "answer" => (false, session_answer(env, rest, stdin, stdout)),
         "interrupt" => (false, session_control(env, rest, stdout, false)),
         "stop" => (false, session_control(env, rest, stdout, true)),
         "watch" => session_watch(env, rest, stdout),
@@ -583,6 +592,149 @@ fn session_control(
     Ok(())
 }
 
+/// What the agent is told when its question is declined (skippedQuestion).
+const SKIPPED_QUESTION: &str = "The user skipped the question; carry on with your best judgement.";
+
+/// Settles what a session waits on, as the view's card does: the text on
+/// stdin answers its question (the first one, when it asks several), and a
+/// tool call it asks permission for is allowed. --deny declines either;
+/// --request names the request (its id, or the tool call's), so an answer
+/// meant for one that was settled meanwhile doesn't land on the next
+/// (sessionAnswer).
+fn session_answer(
+    env: &Env,
+    args: &[String],
+    stdin: &mut dyn Read,
+    stdout: &mut dyn Write,
+) -> Result<(), String> {
+    let mut fs = Flags::session("answer", &["request"], &["deny"], &[]);
+    let id = fs.id_and_flags(args)?;
+    let (deny, request) = (fs.b("deny"), fs.s("request"));
+    if !session_exists(&id) {
+        return Err(format!("session {id} not found"));
+    }
+    if !read_info(&id).is_ok_and(|i| (env.alive)(&i)) {
+        return Err(format!("session {id} is not running"));
+    }
+    let mut b = Vec::new();
+    stdin.read_to_end(&mut b).map_err(|e| e.to_string())?;
+    let text = String::from_utf8_lossy(&b).trim().to_string();
+    let c = Client::dial(&id).map_err(|e| e.to_string())?;
+    let Some(r) = pending_of(&c, Duration::from_secs(10))?.last() else {
+        return Err(format!("session {id} is not waiting on an answer"));
+    };
+    if !request.is_empty() && r.id != request && r.call_id != request {
+        return Err(format!("session {id} is not waiting on {request} any more"));
+    }
+    let sent = match (&r.q, deny) {
+        (Some(_), true) => c.deny(&r.id, SKIPPED_QUESTION, false),
+        (None, true) => c.deny(&r.id, &text, false),
+        (Some(q), false) => {
+            if text.is_empty() {
+                return Err("nothing to answer: write the answer on stdin".into());
+            }
+            let Some(first) = q.asks.first() else {
+                return Err(format!("session {id} asked a question with nothing in it"));
+            };
+            let input = rush_menubar::host::answer_input(q, &[(first.text.clone(), text)]);
+            c.allow(&r.id, Some(rush_core::wire::RawJson(input)), false)
+        }
+        (None, false) => c.allow(&r.id, None, false),
+    };
+    sent.map_err(|e| e.to_string())?;
+    let mut failed = None;
+    let _ = await_line(&c, Duration::from_secs(5), |l| match l {
+        Line::Error(e) => {
+            failed = Some(e.clone());
+            true
+        }
+        Line::Answered(a) => *a == r.id,
+        _ => false,
+    });
+    if let Some(f) = failed {
+        return Err(f);
+    }
+    let _ = writeln!(stdout, "answered {id}");
+    Ok(())
+}
+
+/// A request a session waits on: a question, or a tool call to allow
+/// (asking).
+struct Asking {
+    id: String,
+    /// The tool call it is about.
+    call_id: String,
+    q: Option<rush_core::event::Question>,
+}
+
+/// What a host's replay asked and hasn't yet settled, in order (waits).
+#[derive(Default)]
+struct Waits {
+    open: HashMap<String, Asking>,
+    order: Vec<String>,
+}
+
+impl Waits {
+    fn take(&mut self, l: Line) {
+        let r = match l {
+            Line::Event(Event::Approval(a)) => Asking {
+                id: a.id,
+                call_id: a.call.id,
+                q: None,
+            },
+            Line::Event(Event::Question(q)) => Asking {
+                id: q.id.clone(),
+                call_id: q.call_id.clone(),
+                q: Some(q),
+            },
+            Line::Event(Event::ApprovalCancelled(c)) => {
+                self.open.remove(&c.id);
+                return;
+            }
+            Line::Answered(id) => {
+                self.open.remove(&id);
+                return;
+            }
+            _ => return,
+        };
+        self.order.push(r.id.clone());
+        self.open.insert(r.id.clone(), r);
+    }
+
+    /// The latest still open.
+    fn last(mut self) -> Option<Asking> {
+        self.order.iter().rev().find_map(|id| self.open.remove(id))
+    }
+}
+
+/// The requests still open, as the host's replay on c says: it ends with
+/// the host's info (pendingOf).
+fn pending_of(c: &Client, d: Duration) -> Result<Waits, String> {
+    let end = Instant::now() + d;
+    let mut dec = rush_host::Decoder::default();
+    let mut w = Waits::default();
+    loop {
+        let l = match c
+            .lines
+            .recv_timeout(end.saturating_duration_since(Instant::now()))
+        {
+            Ok(l) => l,
+            Err(RecvTimeoutError::Disconnected) => {
+                return Err("the host closed the connection".into());
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                return Err("the host did not answer in time".into());
+            }
+        };
+        for l in dec.decode(&l).unwrap_or_default() {
+            if matches!(l, Line::Info(_)) {
+                return Ok(w);
+            }
+            w.take(l);
+        }
+    }
+}
+
 /// The plugin broker's view of hosts, with each agent's own words for a
 /// tool call: what watch reads a session through.
 struct WatchHosts {
@@ -1045,6 +1197,271 @@ mod tests {
         ) -> rush_core::adapter::Result<Box<dyn rush_core::adapter::Conn>> {
             rush_core::adapter::Driver::start(&self.0, o, sink)
         }
+    }
+
+    /// An agent that asks on each message, as Claude Code does through
+    /// can_use_tool: a question when the message says "question", else
+    /// leave to run a command, request rN for tool call tN. What it is
+    /// answered goes to answers.log beside its profile, before its turn
+    /// ends.
+    struct Asker;
+
+    impl rush_core::adapter::Adapter for Asker {
+        fn kind(&self) -> rush_core::adapter::Kind {
+            rush_core::adapter::Kind::from("asker")
+        }
+        fn name(&self) -> String {
+            "Asker".into()
+        }
+        fn features(&self) -> rush_core::adapter::Features {
+            use rush_core::adapter::{Feature, Support};
+            [Feature::Run, Feature::Prompt]
+                .into_iter()
+                .map(|f| (f, Support::YES))
+                .collect()
+        }
+        fn level(&self) -> rush_core::adapter::Level {
+            rush_core::adapter::Level::Preview
+        }
+        fn profiles(&self) -> Vec<rush_core::adapter::Profile> {
+            rush_core::adapter::Adapter::profiles(&Profiled(fake::Fake::default()))
+        }
+        rush_core::has!(driver: Driver);
+    }
+
+    impl rush_core::adapter::Driver for Asker {
+        fn start(
+            &self,
+            o: rush_core::adapter::StartOptions,
+            sink: std::sync::Arc<dyn rush_core::adapter::Sink>,
+        ) -> rush_core::adapter::Result<Box<dyn rush_core::adapter::Conn>> {
+            sink.event(Event::Init(Box::new(rush_core::event::Init {
+                session_id: "asker-session".into(),
+                ..Default::default()
+            })));
+            Ok(Box::new(AskerConn {
+                sink,
+                log: std::path::Path::new(&o.profile.dir).join("answers.log"),
+                n: std::sync::atomic::AtomicUsize::new(0),
+            }))
+        }
+    }
+
+    struct AskerConn {
+        sink: std::sync::Arc<dyn rush_core::adapter::Sink>,
+        log: std::path::PathBuf,
+        n: std::sync::atomic::AtomicUsize,
+    }
+
+    impl AskerConn {
+        fn answered(&self, line: String) -> rush_core::adapter::Result<()> {
+            let mut f = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.log)?;
+            writeln!(f, "{line}")?;
+            self.sink
+                .event(Event::TurnEnd(rush_core::event::TurnEnd::default()));
+            Ok(())
+        }
+    }
+
+    impl rush_core::adapter::Conn for AskerConn {
+        fn send(&self, input: rush_core::adapter::Input) -> rush_core::adapter::Result<()> {
+            use rush_core::event::{Approval, Ask, Choice, Question};
+            let n = self.n.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            let (id, call_id) = (format!("r{n}"), format!("t{n}"));
+            let choice = |l: &str| Choice {
+                label: l.into(),
+                ..Default::default()
+            };
+            self.sink.event(if input.text.contains("question") {
+                Event::Question(Question {
+                    id,
+                    call_id,
+                    asks: vec![Ask {
+                        header: "Drink".into(),
+                        text: "Tea or coffee?".into(),
+                        options: vec![choice("Tea"), choice("Coffee")],
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                })
+            } else {
+                Event::Approval(Box::new(Approval {
+                    id,
+                    call: rush_core::tool::Call {
+                        id: call_id,
+                        name: "shell".into(),
+                        kind: rush_core::tool::Kind::Shell,
+                        input: rush_core::tool::Input {
+                            command: "ls".into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }))
+            });
+            Ok(())
+        }
+        fn answer(&self, id: &str, option: &str) -> rush_core::adapter::Result<()> {
+            self.answered(format!("answer {id} {option}"))
+        }
+        fn interrupt(&self) -> rush_core::adapter::Result<()> {
+            Ok(())
+        }
+        fn set_model(&self, _: &str) -> rush_core::adapter::Result<()> {
+            Ok(())
+        }
+        fn set_mode(&self, _: &str) -> rush_core::adapter::Result<()> {
+            Ok(())
+        }
+        fn close(&self) -> rush_core::adapter::Result<()> {
+            self.sink.ended(None);
+            Ok(())
+        }
+        fn responder(&self) -> Option<&dyn rush_core::adapter::Responder> {
+            Some(self)
+        }
+    }
+
+    impl rush_core::adapter::Responder for AskerConn {
+        fn allow(
+            &self,
+            id: &str,
+            input: Option<&serde_json::value::RawValue>,
+            _always: bool,
+        ) -> rush_core::adapter::Result<()> {
+            self.answered(format!("allow {id} {}", input.map_or("-", |i| i.get())))
+        }
+        fn deny(
+            &self,
+            id: &str,
+            message: &str,
+            _interrupt: bool,
+        ) -> rush_core::adapter::Result<()> {
+            self.answered(format!("deny {id} {message}"))
+        }
+    }
+
+    /// Waits for the session's host to say it is in state: its replay ends
+    /// with its info, and it says each change after.
+    fn wait_state(id: &str, state: &str) {
+        let c = Client::dial(id).unwrap();
+        await_line(
+            &c,
+            Duration::from_secs(10),
+            |l| matches!(l, Line::Info(i) if i.state == state),
+        )
+        .unwrap_or_else(|e| panic!("{id} never got {state}: {e}"));
+    }
+
+    // sessionAnswer against a host running in this process: a permission
+    // allowed or denied, a question answered from stdin or skipped, and
+    // what can't be answered says why.
+    #[test]
+    fn answers_what_a_session_waits_on() {
+        let home = Home::new();
+        let env = fake_env();
+        env.reg.register(Asker);
+        let cwd = home.path();
+        let (code, out, err) = run(&env, &["start", "--agent", "asker", "--cwd", &cwd], "");
+        assert_eq!((code, err.as_str()), (0, ""), "{out}");
+        let id = id_of(&out);
+        let log = rush_state::dir().join("acct/answers.log");
+        let answers = || std::fs::read_to_string(&log).unwrap_or_default();
+        let answer = |args: &[&str], stdin: &str| {
+            let mut a = vec!["answer", id.as_str()];
+            a.extend_from_slice(args);
+            run(&env, &a, stdin)
+        };
+        let not_waiting = format!("rush: session {id} is not waiting on an answer\n");
+        assert_eq!(answer(&[], "yes"), (1, String::new(), not_waiting.clone()));
+
+        // A permission: a stale --request is refused, the call's id lets
+        // it run.
+        run(&env, &["send", &id], "list the files");
+        wait_state(&id, "blocked");
+        assert_eq!(
+            answer(&["--request", "t0"], ""),
+            (
+                1,
+                String::new(),
+                format!("rush: session {id} is not waiting on t0 any more\n")
+            )
+        );
+        assert_eq!(
+            answer(&["--request", "t1"], ""),
+            (0, format!("answered {id}\n"), String::new())
+        );
+        wait_state(&id, "idle");
+        assert_eq!(answers(), "allow r1 -\n");
+        assert_eq!(answer(&[], ""), (1, String::new(), not_waiting.clone()));
+
+        // A question takes stdin as the answer to its first ask.
+        run(&env, &["send", &id], "a question");
+        wait_state(&id, "blocked");
+        assert_eq!(
+            answer(&[], " \n"),
+            (
+                1,
+                String::new(),
+                "rush: nothing to answer: write the answer on stdin\n".into()
+            )
+        );
+        assert_eq!(
+            answer(&["--request", "r2"], "Coffee\n"),
+            (0, format!("answered {id}\n"), String::new())
+        );
+        wait_state(&id, "idle");
+        let got = answers();
+        let got = got.lines().last().unwrap();
+        let input: Value = serde_json::from_str(got.strip_prefix("allow r2 ").unwrap()).unwrap();
+        assert_eq!(input["answers"], json!({"Tea or coffee?": "Coffee"}));
+        assert_eq!(input["questions"][0]["question"], "Tea or coffee?");
+
+        // --deny skips a question, and refuses a call with stdin's words.
+        run(&env, &["send", &id], "another question");
+        wait_state(&id, "blocked");
+        assert_eq!(answer(&["--deny"], "").0, 0);
+        wait_state(&id, "idle");
+        run(&env, &["send", &id], "remove the files");
+        wait_state(&id, "blocked");
+        assert_eq!(answer(&["--deny"], "not those\n").0, 0);
+        wait_state(&id, "idle");
+        let got = answers();
+        let got: Vec<&str> = got.lines().skip(2).collect();
+        assert_eq!(
+            got,
+            [
+                format!("deny r3 {SKIPPED_QUESTION}"),
+                "deny r4 not those".to_string()
+            ]
+        );
+
+        let cases: &[(&[&str], String)] = &[
+            (&["answer"], "usage: rush session answer <id>".into()),
+            (&["answer", "nosuch"], "session nosuch not found".into()),
+            (
+                &["answer", &id, "--request"],
+                "flag needs an argument: -request".into(),
+            ),
+        ];
+        for (args, want) in cases {
+            let (code, _, err) = run(&env, args, "");
+            assert_eq!((code, err), (1, format!("rush: {want}\n")), "{args:?}");
+        }
+        let (code, _, _) = run(&env, &["stop", &id], "");
+        assert_eq!(code, 0);
+        assert_eq!(
+            answer(&[], "yes"),
+            (
+                1,
+                String::new(),
+                format!("rush: session {id} is not running\n")
+            )
+        );
     }
 
     /// Sessions hosted in this process by rush-host's fake host: never
