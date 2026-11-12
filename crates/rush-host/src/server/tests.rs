@@ -1375,6 +1375,53 @@ fn exchange_queue_retains_attribution() {
     );
 }
 
+// Rust-only: rush's news of a pull request takes the place of its news
+// still waiting, where it waited; other news and messages keep theirs.
+#[test]
+fn pr_news_replaces_its_waiting_news() {
+    let _home = Home::new();
+    let news =
+        |pr: &str, says: &str| format!("<rush-pr-news pr=\"{pr}\">\n{says}\n</rush-pr-news>");
+    let h = host(Config {
+        id: "prq".into(),
+        kind: "fake".into(),
+        ..Config::default()
+    });
+    with_conn(&h, Arc::new(Kept::default()));
+    h.lock().info.state = "working".into();
+    let sends = [
+        ("a", news("o/r#1", "CONFLICT")),
+        ("b", "agent input".to_string()),
+        ("c", news("o/r#2", "FAILED")),
+        ("d", news("o/r#1", "READY")),
+        ("e", news("o/r#1", "MERGED")),
+    ];
+    for (id, text) in &sends {
+        let e = exchange(id, text, "rush");
+        h.do_op(op("send", |o| {
+            o.text = e.text.clone();
+            o.exchange = Some(Box::new(e.clone()));
+        }))
+        .unwrap();
+    }
+    let st = h.lock();
+    assert_eq!(
+        st.info.queue,
+        vec![
+            news("o/r#1", "MERGED"),
+            "agent input".to_string(),
+            news("o/r#2", "FAILED"),
+        ]
+    );
+    let ids: Vec<&str> = st
+        .info
+        .queue_exchanges
+        .iter()
+        .map(|x| x.as_ref().map_or("", |x| x.id.as_str()))
+        .collect();
+    assert_eq!(ids, ["e", "b", "c"]);
+}
+
 // afterask_test.go:10: a message sent now while the agent asks something
 // waits behind the question, and goes once it's answered.
 #[test]
