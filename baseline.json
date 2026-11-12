@@ -1,6 +1,6 @@
 {
- "commit": "bfd717af04e4d1180fdc13e59a58ef0b6821dbb1",
- "at": "2026-11-12T10:57:14Z",
+ "commit": "437a49faec0a288cff01d86f59b91c57c230a180",
+ "at": "2026-11-12T11:45:56Z",
  "metrics": {
   "binary: rush, release": {
    "kind": "binary",
