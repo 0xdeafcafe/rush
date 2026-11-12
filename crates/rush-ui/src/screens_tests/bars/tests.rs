@@ -182,7 +182,8 @@ fn a_window_meter() {
         let l = usage_meter(&win(p, left), 0.0, NOW, 10, when);
         assert_eq!(l.plain(), want, "{p} {left} {when}");
     }
-    // Red from 80%, yellow from 50% or ahead of pace.
+    // Red from 85%, yellow from 60% or ahead of pace: every usage
+    // colour's levels.
     let c = |p: f64, left: Ms| {
         usage_meter(&win(p, left), 0.0, NOW, 10, false)
             .spans
@@ -190,7 +191,9 @@ fn a_window_meter() {
             .map(|s| s.style.fg)
     };
     assert_eq!(c(85.0, HOUR), Some(crate::style::RED));
-    assert_eq!(c(55.0, HOUR), Some(crate::style::YELLOW));
+    assert_eq!(c(82.0, HOUR), Some(crate::style::YELLOW));
+    assert_eq!(c(65.0, HOUR), Some(crate::style::YELLOW));
+    assert_eq!(c(55.0, HOUR), Some(crate::style::GREEN));
     assert_eq!(c(30.0, 4 * HOUR), Some(crate::style::YELLOW));
     assert_eq!(c(30.0, HOUR), Some(crate::style::GREEN));
 }

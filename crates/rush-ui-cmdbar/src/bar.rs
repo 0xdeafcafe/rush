@@ -1287,18 +1287,9 @@ pub fn bar_transcripts(m: &Model, words: &[String]) -> Vec<Item> {
         .collect()
 }
 
-/// About how long d is: 5m, 3h, 2d (view.go:479 roughly).
-pub fn roughly(d: Ms) -> String {
-    const MIN: Ms = 60_000;
-    const HOUR: Ms = 60 * MIN;
-    if d < HOUR {
-        format!("{}m", ((d + MIN / 2) / MIN).max(1))
-    } else if d < 48 * HOUR {
-        format!("{}h", (d + HOUR / 2) / HOUR)
-    } else {
-        format!("{}d", (d + 12 * HOUR) / (24 * HOUR))
-    }
-}
+/// About how long d is: 5m, 3h, 2d (view.go:479 roughly), never 60m or
+/// 48h.
+pub use rush_core::time::roughly;
 
 /// When t was, as people say it: 5m ago, yesterday, or the date past a
 /// week; "" when it isn't known (whenAgo).

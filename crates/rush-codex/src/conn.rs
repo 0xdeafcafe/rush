@@ -714,7 +714,7 @@ impl State {
                     let snap = Snapshot::from_value(rl);
                     let mut q = quota_from(&snap);
                     q.account = self.account.clone();
-                    let mut out = vec![Event::Quota(q)];
+                    let mut out = vec![Event::Quota(Box::new(q))];
                     if let Some(b) = snap.billing() {
                         out.push(Event::Billing(Billing { billing: b }));
                     }
@@ -1303,7 +1303,7 @@ fn read_quota_once(rpc: &Client, inner: &Inner) {
         return;
     };
     inner.st().account = q.account.clone();
-    inner.emit(vec![Event::Quota(q)]);
+    inner.emit(vec![Event::Quota(Box::new(q))]);
 }
 
 /// Starts or resumes a thread: CODEX_HOME is the profile's folder, and the

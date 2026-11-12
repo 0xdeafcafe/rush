@@ -360,6 +360,18 @@ pub struct FetchedUsage {
     pub usage: Usage,
     #[serde(with = "wire::time", skip_serializing_if = "is_zero")]
     pub wait: Ms,
+    /// Asks that failed in a row since the last good reading, and when
+    /// the last of them did: the next waits usage::backoff(failures)
+    /// after it, in every process. Rust-only: Go asked again every
+    /// USAGE_EVERY however often it failed.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub failures: i64,
+    #[serde(
+        rename = "failedAt",
+        with = "wire::time",
+        skip_serializing_if = "is_zero"
+    )]
+    pub failed_at: Ms,
 }
 
 fn is_zero(t: &Ms) -> bool {
@@ -398,6 +410,7 @@ pub fn record_usage(path: &Path, key: &str, u: Usage) -> io::Result<()> {
             return false;
         }
         f.usage = u;
+        (f.failures, f.failed_at) = (0, 0); // a newer reading ends a run of failures
         true
     })
 }
@@ -524,7 +537,13 @@ pub fn usage_key(a: &Account, u: &Usage) -> String {
     a.config_dir.to_string_lossy().into_owned()
 }
 
-/// refresh_usage for readings kept under key, fetched by fetch.
+/// refresh_usage for readings kept under key, fetched by fetch. An ask
+/// that fails on its request (OauthError::Other: no answer, an error
+/// status, one that can't be read) is kept as a failure, and every process
+/// waits usage::backoff of them before asking again; one about the
+/// sign-in costs no request of its own and isn't. fetch has
+/// usage::DEADLINE for all its requests (Go gave Claude's 20 seconds,
+/// its other providers 30; one deadline for all here).
 pub fn refresh_usage_for(
     path: &Path,
     key: &str,
@@ -539,13 +558,17 @@ pub fn refresh_usage_for(
     if now < f.wait {
         u.problem = format!("rate-limited to {}", clock(f.wait));
     }
-    if offline || now < f.wait || now - u.fetched_at < USAGE_EVERY {
+    let backing_off = now - f.failed_at < usage::backoff(f.failures).as_millis() as Ms;
+    if offline || now < f.wait || backing_off || now - u.fetched_at < USAGE_EVERY {
         return u;
     }
     if !rush_sys::events::net_run(USAGE_JOB) {
         return u; // the network's down: the last reading, until it's back
     }
-    let got = fetch();
+    let got = {
+        let _deadline = usage::Deadline::start(usage::DEADLINE);
+        fetch()
+    };
     rush_sys::events::net_done(USAGE_JOB);
     match got {
         Ok(got) => {
@@ -559,6 +582,8 @@ pub fn refresh_usage_for(
                 FetchedUsage {
                     usage: f.usage,
                     wait: until,
+                    failures: f.failures,
+                    failed_at: f.failed_at,
                 },
             );
             rush_sys::events::log(
@@ -576,16 +601,21 @@ pub fn refresh_usage_for(
             // (a rush that doesn't lead finds the sign-in expired without
             // trying to refresh it). A newer reading clears it.
             let expired = e == OauthError::Expired;
+            let failed = matches!(&e, OauthError::Other(m) if !usage::sign_in_problem(m));
             if !(expired && !f.usage.problem.is_empty()) {
                 u.problem = e.to_string();
             }
             let (at, problem) = (f.usage.fetched_at, u.problem.clone());
             let _ = update_fetched_usage(path, |all| {
                 let k = all.entry(key.to_string()).or_default();
-                if k.usage.fetched_at != at || k.usage.problem == problem {
+                if k.usage.fetched_at != at || (k.usage.problem == problem && !failed) {
                     return false;
                 }
                 k.usage.problem = problem;
+                if failed {
+                    k.failures += 1;
+                    k.failed_at = rush_core::time::now();
+                }
                 true
             });
             u
@@ -708,7 +738,15 @@ mod tests {
             },
             ..Usage::default()
         };
-        save_fetched_usage(&path, "/a", FetchedUsage { usage: u, wait: 0 }).unwrap();
+        save_fetched_usage(
+            &path,
+            "/a",
+            FetchedUsage {
+                usage: u,
+                ..FetchedUsage::default()
+            },
+        )
+        .unwrap();
         let wait = at + 3_600_000;
         save_fetched_usage(
             &path,
@@ -728,6 +766,10 @@ mod tests {
         assert_eq!(raw["/a"]["usage"]["SevenDay"]["Percent"], 50);
         assert_eq!(raw["/a"]["usage"]["FiveHour"]["ResetsAt"], wire::ZERO_TIME);
         assert!(raw["/a"].get("wait").is_none(), "a zero wait is left out");
+        assert!(
+            raw["/a"].get("failures").is_none() && raw["/a"].get("failedAt").is_none(),
+            "no failures are left out"
+        );
     }
 
     // A file as Go rush writes it reads back the same.
@@ -813,6 +855,7 @@ mod tests {
             FetchedUsage {
                 usage: at(n, 50.0),
                 wait,
+                ..FetchedUsage::default()
             },
         )
         .unwrap();
@@ -927,8 +970,9 @@ mod tests {
 
     // Why a reading failed is kept beside the last one in usage.json, so
     // the rows (which read the file, not the answer) say it rather than
-    // only "not read since"; asking again isn't held back by it, and the
-    // next good reading clears it. "sign-in expired" doesn't hide a reason
+    // only "not read since"; a sign-in's trouble doesn't hold asking again
+    // back (a failed request does: asks_less_after_failed_requests), and
+    // the next good reading clears it. "sign-in expired" doesn't hide a reason
     // kept already.
     #[test]
     fn a_failed_reading_keeps_why() {
@@ -962,6 +1006,65 @@ mod tests {
         });
         assert_eq!(got.problem, "");
         assert_eq!(readings(&path)["k"].problem, "");
+    }
+
+    // An ask whose request fails is kept as a failure in usage.json, and
+    // every process waits longer after each before asking again; the next
+    // good reading clears them.
+    #[test]
+    fn asks_less_after_failed_requests() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("usage.json");
+        let old = now() - 60 * 60_000;
+        let last = Usage {
+            fetched_at: old,
+            plan: "max".into(),
+            ..Usage::default()
+        };
+        record_usage(&path, "k", last).unwrap();
+        let fail = || Err::<Usage, _>(OauthError::Other("usage request returned 500".into()));
+        let got = refresh_usage_for(&path, "k", false, fail);
+        assert_eq!(
+            (got.problem.as_str(), got.plan.as_str()),
+            ("usage request returned 500", "max")
+        );
+        let kept = load_fetched_usage(&path)["k"].clone();
+        assert_eq!((kept.failures, kept.usage.fetched_at), (1, old));
+        assert_ne!(kept.failed_at, 0);
+        let got = refresh_usage_for(&path, "k", false, || panic!("asked while backing off"));
+        assert_eq!(got.problem, "usage request returned 500");
+        // As though the failure was 6 minutes ago: 5 are up, and the
+        // second failure waits 10.
+        let failed_ago = |ago: Ms| {
+            save_fetched_usage(
+                &path,
+                "k",
+                FetchedUsage {
+                    failed_at: now() - ago,
+                    ..load_fetched_usage(&path)["k"].clone()
+                },
+            )
+            .unwrap();
+        };
+        failed_ago(6 * 60_000);
+        refresh_usage_for(&path, "k", false, fail);
+        assert_eq!(load_fetched_usage(&path)["k"].failures, 2);
+        failed_ago(6 * 60_000);
+        refresh_usage_for(&path, "k", false, || panic!("asked within 10 minutes"));
+        failed_ago(11 * 60_000);
+        let got = refresh_usage_for(&path, "k", false, || {
+            Ok(Usage {
+                fetched_at: now(),
+                plan: "max".into(),
+                ..Usage::default()
+            })
+        });
+        assert_eq!(got.problem, "");
+        let kept = &load_fetched_usage(&path)["k"];
+        assert_eq!(
+            (kept.failures, kept.failed_at, kept.usage.problem.as_str()),
+            (0, 0, "")
+        );
     }
 
     // The three shapes a reading of an account takes now Anthropic's top

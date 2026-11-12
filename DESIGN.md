@@ -466,6 +466,12 @@ Claude, fleet, the other adapters) builds on these.
   Claude Code) until the next try, not "sign-in expired"; and a failed
   reading's reason is kept beside the last one in usage.json, so the
   rows say it rather than only "not read since" (oauth.rs, usage.rs).
+  A failed request (not a sign-in's own trouble) is also kept there as
+  one more failure in a row with when, as quotas.json keeps other
+  agents' (`usage::refresh`): every process then waits
+  `usage::backoff` (5, 10, 20, 40, then 60 minutes) before asking
+  again, where Go asked every 5 minutes from each. A read has Go's
+  30-second deadline (`usage::Deadline`; requests ask `usage::within`).
   A claude process whose environment the kernel won't give (another
   user's, or one exited and not yet reaped) runs on no folder, where Go
   counted it as in use on every folder: that kept an idle login's
@@ -2841,7 +2847,12 @@ is made. Everything below is in `rush_ui::frame`.
   order and the meters go by the weekly alone; a place drawn for the
   5-hour meter (Settings' account table, the provider's rows, the
   Usage tab, the limit card) says `usage::NO_FIVE_HOUR`
-  (`Quota::no_five_hour`). The plan's name is the sign-in's
+  (`Quota::no_five_hour`), the menu bar too (`feed::windows` places
+  Claude's windows by name). The top bar, `nearly_out` and
+  `switch_point` read a window whose reset has passed as empty
+  (`Quota::since`); Go showed it full until the next reading. Every
+  usage colour turns at `usage::level`'s 60/85 (Go's meters used 50/80,
+  60/85 or 70/90). The plan's name is the sign-in's
   subscriptionType. Not yet:
   the other logins' own refresh (fetchLoginUsage), a kept sign-in's of
   an agent reading any account's, a session's billing and its host's
@@ -4373,3 +4384,25 @@ after and feed fixtures use Sam's isolated world and copies of the capture tool
 named `claude` as inert workers, blocked on stdin. They never invoke a model or
 read the real home; cleanup closes and reaps the fixture workers. The original
 raster screenshot route remains available for the README.
+
+## Reading the events log (where it parts from Go)
+
+`rush events` and `rush why` (rush-events `cli.rs`, `query.rs`) read the
+log as Go did, with these changes:
+
+- A bad flag says what's wrong above the usage (`rush events: flag
+  provided but not defined: -bogus`); `-n` below 0 is refused, and `-n 0`
+  is all of them. `rush why -h` is the usage and exit 0.
+- `-s` and `rush why` take the start of a session's id; a start two
+  sessions share is refused, naming them.
+- `--grep` matches a line's text with its strings unescaped, as well as
+  the line as kept, so a quote is found as typed.
+- An object value shows its short fields before its lists, so a `state`
+  row says the state before its background tasks fill the row.
+- `--since 1d12h` is a while back; Go took days only alone.
+- `rush why` leaves out `state`, `task-started` and `task-done` lines
+  unless one led to a line it keeps, saying how many; `--all` keeps them.
+  They were three quarters of a busy session's story.
+- The UI logs `stale-hosts` when a count changes or you asked, not at
+  every look while a session can't move: Go wrote it every 30s for as
+  long as one couldn't, 4,400 lines in a day and a half.

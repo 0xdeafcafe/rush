@@ -839,15 +839,9 @@ pub fn totals(s: &rush_convo::Session, now: Ms) -> Totals {
     t
 }
 
-/// A window's use's colour (usageColor).
+/// A window's use's colour (usageColor): the one set every screen uses.
 pub fn usage_color(p: f64) -> Color {
-    if p >= 85.0 {
-        RED
-    } else if p >= 60.0 {
-        YELLOW
-    } else {
-        GREEN
-    }
+    rush_ui_base::meters::usage_color(p)
 }
 
 /// A window's use as a wide bar, with the share of the window gone

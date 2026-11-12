@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 
 use rush_core::agent::State as Doing;
 use rush_core::time::now;
-use rush_core::usage::{Quota, Reading};
+use rush_core::usage::{self, Quota, Reading};
 use rush_sys::fswait::{Stop, Watcher};
 use serde_json::{Map, Value, json};
 
@@ -73,20 +73,42 @@ impl Hosts for Local {
     }
 }
 
-/// A quota's two windows for the feed: the first two of those that limit
+/// A quota's two windows for the feed. Claude's go by name, its 5-hour
+/// first and its weekly second, so a plan without a 5-hour limit has the
+/// first say so ("no 5-hour limit", as rush's screens do) rather than
+/// show its weekly there and "–" beside it (Rust-only: Go's plans always
+/// had both). Any other provider's: the first two of those that limit
 /// every model.
 pub fn windows(q: &Quota) -> (Window, Window) {
+    let of = |w: &rush_core::usage::Window| Window {
+        present: true,
+        percent: w.percent,
+        resets_at: w.resets_at,
+        label: w.label.clone(),
+        name: w.name.clone(),
+        ..Window::default()
+    };
+    if q.window(usage::FIVE_HOUR).is_some() || q.window(usage::SEVEN_DAY).is_some() {
+        let five = q.window(usage::FIVE_HOUR).map_or_else(
+            || Window {
+                label: "5h".into(),
+                name: "5-hour".into(),
+                absent: if q.no_five_hour() {
+                    usage::NO_FIVE_HOUR.into()
+                } else {
+                    String::new()
+                },
+                ..Window::default()
+            },
+            of,
+        );
+        return (five, q.window(usage::SEVEN_DAY).map(of).unwrap_or_default());
+    }
     let mut out = q
         .windows
         .iter()
         .filter(|w| w.scope.models.is_empty())
-        .map(|w| Window {
-            present: true,
-            percent: w.percent,
-            resets_at: w.resets_at,
-            label: w.label.clone(),
-            name: w.name.clone(),
-        });
+        .map(of);
     (
         out.next().unwrap_or_default(),
         out.next().unwrap_or_default(),

@@ -23,14 +23,13 @@ const HOUR: Ms = 3_600_000;
 // An account as a meter shows it is the base's: the accounts read it too.
 pub use crate::accounts::MeterRow;
 
-/// Green, yellow from 60%, red from 85% (usageColor).
+/// Green, yellow from 60%, red from 85% (usageColor): usage::level's
+/// colours, the one set every screen colours a window's use by.
 pub fn usage_color(p: f64) -> Color {
-    if p >= 85.0 {
-        RED
-    } else if p >= 60.0 {
-        YELLOW
-    } else {
-        GREEN
+    match rush_core::usage::level(p) {
+        rush_core::usage::Level::High => RED,
+        rush_core::usage::Level::Warn => YELLOW,
+        rush_core::usage::Level::Low => GREEN,
     }
 }
 

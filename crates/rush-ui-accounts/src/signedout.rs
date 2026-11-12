@@ -92,12 +92,11 @@ pub fn signin_choices(m: &Model, from: &StartOver) -> Vec<SigninChoice> {
 pub fn signin_usage(r: &AcctRow, now: Ms) -> Option<Span> {
     let w = r.q.since(now).tightest("")?;
     let s = format!("{:.0}% · {}", w.percent, quota_window_name(&w));
-    Some(if w.percent >= 95.0 {
-        sp(s, RED)
-    } else if w.percent >= 80.0 {
-        sp(s, YELLOW)
-    } else {
-        sp(s, SUB)
+    // The levels every usage colour turns at (Go's here were 80/95).
+    Some(match rush_core::usage::level(w.percent) {
+        rush_core::usage::Level::High => sp(s, RED),
+        rush_core::usage::Level::Warn => sp(s, YELLOW),
+        rush_core::usage::Level::Low => sp(s, SUB),
     })
 }
 

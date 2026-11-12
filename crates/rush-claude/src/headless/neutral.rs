@@ -226,7 +226,7 @@ fn rate_limit(e: &h::RateLimit, now: Ms) -> Vec<Event> {
     let mut out = Vec::new();
     if let Some(mut q) = e.raw.as_ref().and_then(|r| live_quota(r.get(), now)) {
         q.source = usage::Source::Live;
-        out.push(Event::Quota(q));
+        out.push(Event::Quota(Box::new(q)));
     }
     out.push(Event::Billing(event::Billing {
         billing: if e.overage {

@@ -315,6 +315,38 @@ fn a_subagents_ask_is_answered_on_its_host() {
     assert!(s.waiting.is_empty(), "{:?}", s.waiting);
 }
 
+// Claude's windows go by name: a plan without a 5-hour limit says so in
+// the first place, and its weekly keeps the second.
+#[test]
+fn a_plan_without_a_5_hour_limit_says_so() {
+    let win = |id: &str, label: &str, pct: f64| QWindow {
+        id: id.into(),
+        label: label.into(),
+        percent: pct,
+        ..QWindow::default()
+    };
+    let q = |ws: Vec<QWindow>| Quota {
+        windows: ws,
+        ..Quota::default()
+    };
+    let (five, week) = windows(&q(vec![win("seven_day", "7d", 98.0)]));
+    assert!(
+        !five.present && five.absent == rush_core::usage::NO_FIVE_HOUR,
+        "{five:?}"
+    );
+    assert!(
+        week.present && week.label == "7d" && week.percent == 98.0,
+        "{week:?}"
+    );
+    let (five, week) = windows(&q(vec![
+        win("seven_day", "7d", 40.0),
+        win("five_hour", "5h", 10.0),
+    ]));
+    assert_eq!((five.label.as_str(), five.percent), ("5h", 10.0));
+    assert!(five.absent.is_empty());
+    assert_eq!((week.label.as_str(), week.percent), ("7d", 40.0));
+}
+
 #[test]
 fn windows_are_a_quotas_first_two() {
     let q = Quota {

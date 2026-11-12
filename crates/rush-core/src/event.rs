@@ -34,8 +34,9 @@ pub enum Event {
     Status(Status),
     TurnEnd(TurnEnd),
     Compacted(Compacted),
-    /// A fresh reading of the account's limits.
-    Quota(usage::Quota),
+    /// A fresh reading of the account's limits. Boxed, as Approval is: a quota is the
+    /// largest event, and enums that carry an Event pass clippy's variant size with it boxed.
+    Quota(Box<usage::Quota>),
     Limited(Limited),
     Billing(Billing),
     Context(Context),
@@ -1025,7 +1026,7 @@ mod tests {
                 r#"{"t":"turn_end","e":{"Reason":"done","Err":"","Text":"","Cost":0,"Tokens":{"Input":0,"Output":0,"CacheRead":0,"CacheWrite5m":0,"CacheWrite1h":0,"Reasoning":0},"Duration":1000000000,"Turns":0}}"#,
             ),
             (
-                Event::Quota(usage::Quota {
+                Event::Quota(Box::new(usage::Quota {
                     windows: vec![usage::Window {
                         id: s("five_hour"),
                         percent: 12.0,
@@ -1041,7 +1042,7 @@ mod tests {
                         ..Default::default()
                     }),
                     ..Default::default()
-                }),
+                })),
                 r#"{"t":"quota","e":{"Account":"","Email":"","Plan":"","Balance":"","Windows":[{"ID":"five_hour","Label":"","Name":"","Span":18000000000000,"Percent":12,"Used":0,"Limit":0,"ResetsAt":"2026-09-27T12:00:00Z","Scope":{"Models":["opus"]}}],"FetchedAt":"0001-01-01T00:00:00Z","Source":0,"Problem":"","Resets":{"Available":1}}}"#,
             ),
             (

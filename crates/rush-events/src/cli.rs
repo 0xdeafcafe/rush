@@ -8,22 +8,36 @@ use std::path::Path;
 use rush_core::time::Ms;
 
 use crate::flags::{Kind, Parsed, parse};
-use crate::query::{BUDGET, Filter, Line, chain, flat, format, query, query_why, tree};
+use crate::query::{
+    BUDGET, Filter, Line, chain, flat, format, query, query_why, sessions_starting, tree,
+};
 use crate::since::parse_since;
 
-/// rush events -h (events.go:13).
+/// rush events -h (events.go:13), with what rush took on since: a
+/// session by the start of its id, -n 0 for all, why's --all.
 pub const EVENTS_USAGE: &str = "rush events: what rush did and why, newest first, a line each
 
   rush events [-s SESSION] [-k kind,kind] [-p proc] [--since 10m] [--grep TEXT] [-n 20] [--json]
   rush events --chain EV    one line's chain: what led to it and what came of that
-  rush why SESSION [--last 1h]
+  rush why SESSION [--last 1h] [--all]
                             that session's lines, its parent's, children's and
                             senders', and rush's own failures, each under its cause
 
   A row is: how long ago, kind, session, process:pid, #ev ←cause, then its fields.
-  -k takes kind* for every kind it starts. --since takes 90s, 10m, 2h, 3d or a
-  time (2026-10-23T09:00). --json prints the lines as they're kept.
+  -s takes a session's id or the start of it. -k 'hook*' is every kind hook
+  starts (quote the * from your shell). --since takes 90s, 10m, 2h, 3d, 1d12h
+  or a time (2026-10-23T09:00). -n 0 prints them all. --json prints the lines
+  as they're kept. why leaves out state and task lines; --all keeps them.
 ";
+
+/// rush why's usage, said when it's asked for or given nothing.
+const WHY_USAGE: &str = "usage: rush why SESSION [--last 1h] [--all] [--json]\n";
+
+/// The kinds that say how a session stands rather than what happened to
+/// it: a session's state and its background tasks starting and ending.
+/// rush why leaves them out unless --all, or one led to a line it keeps;
+/// they were most of a busy session's story.
+const WHY_QUIET: [&str; 3] = ["state", "task-started", "task-done"];
 
 /// What a cut-short answer says to narrow it with.
 pub const NARROW_EVENTS: &str = "-s, -k, -p, --since or --grep";
@@ -49,14 +63,25 @@ pub fn events_cmd(
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> i32 {
-    let (p, failed) = match parse(&EVENTS_FLAGS, args) {
-        Ok(p) => (p, false),
-        Err((p, _)) => (p, true),
+    // What's wrong is said above the usage; Go said only the usage.
+    let (p, wrong) = match parse(&EVENTS_FLAGS, args) {
+        Ok(p) => (p, None),
+        Err((p, e)) if e == "flag: help requested" => (p, Some(String::new())),
+        Err((p, e)) => (p, Some(e)),
     };
-    let help = p.bool("h");
-    if failed || help || !p.args.is_empty() {
+    let help = p.bool("h") || wrong.as_deref() == Some("");
+    let wrong = match (wrong, p.args.first()) {
+        (Some(e), _) if !e.is_empty() => Some(e),
+        (_, Some(a)) if !help => Some(format!("{a:?} isn't a flag; rush events takes only flags")),
+        _ if p.int("n", 20) < 0 => Some("-n takes how many lines, or 0 for all of them".into()),
+        _ => None,
+    };
+    if help || wrong.is_some() {
+        if let Some(e) = &wrong {
+            let _ = writeln!(stderr, "rush events: {e}\n");
+        }
         let _ = stderr.write_all(EVENTS_USAGE.as_bytes());
-        return if help { 0 } else { 2 };
+        return if wrong.is_none() { 0 } else { 2 };
     }
     let raw = p.bool("json");
     let ch = p.str("chain", "");
@@ -82,7 +107,7 @@ pub fn events_cmd(
         kinds: split("k"),
         proc: p.str("p", ""),
         grep: p.str("grep", ""),
-        limit: p.int("n", 20).max(0) as usize,
+        limit: p.int("n", 20) as usize,
         since: 0,
     };
     f.since = match parse_since(&p.str("since", ""), now) {
@@ -112,7 +137,11 @@ pub fn events_cmd(
     0
 }
 
-const WHY_FLAGS: [(&str, Kind); 2] = [("last", Kind::Str), ("json", Kind::Bool)];
+const WHY_FLAGS: [(&str, Kind); 3] = [
+    ("last", Kind::Str),
+    ("json", Kind::Bool),
+    ("all", Kind::Bool),
+];
 
 /// rush why: a session's story, each line under its cause (events.go:96).
 /// linked is the sessions a session's config and the others' say it's
@@ -126,8 +155,15 @@ pub fn why_cmd(
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> i32 {
-    let Some((id, p)) = id_and_flags(&WHY_FLAGS, args) else {
-        let _ = writeln!(stderr, "usage: rush why SESSION [--last 1h] [--json]");
+    if args
+        .iter()
+        .any(|a| matches!(a.as_str(), "-h" | "--h" | "-help" | "--help"))
+    {
+        let _ = stderr.write_all(WHY_USAGE.as_bytes());
+        return 0;
+    }
+    let Some((mut id, p)) = id_and_flags(&WHY_FLAGS, args) else {
+        let _ = stderr.write_all(WHY_USAGE.as_bytes());
         return 2;
     };
     let last = p.str("last", "1h");
@@ -138,19 +174,68 @@ pub fn why_cmd(
             return 2;
         }
     };
-    let lines = match query_why(log, &id, &linked(&id), since) {
+    // A session by the start of its id, as rush's lists show it, when
+    // that start is one session's alone.
+    match sessions_starting(log, &id, since) {
+        Ok(s) if s.len() == 1 => id = s[0].clone(),
+        Ok(s) if s.len() > 1 && !s.contains(&id) => {
+            let _ = writeln!(
+                stderr,
+                "rush why: {id} is the start of {}; say more of it",
+                s.join(", ")
+            );
+            return 2;
+        }
+        Ok(_) => {}
+        Err(e) => {
+            let _ = writeln!(stderr, "rush why: {e}");
+            return 1;
+        }
+    }
+    let mut lines = match query_why(log, &id, &linked(&id), since) {
         Ok(l) => l,
         Err(e) => {
             let _ = writeln!(stderr, "rush why: {e}");
             return 1;
         }
     };
+    // "in the last 1h", or "since 2026-10-23T09:00" for a time.
+    let span = if last.len() >= 10 && last.as_bytes()[4] == b'-' {
+        format!("since {last}")
+    } else {
+        format!("in the last {last}")
+    };
     if lines.is_empty() {
-        let _ = writeln!(stderr, "rush why: nothing of {id}'s in the last {last}");
+        let _ = writeln!(stderr, "rush why: nothing of {id}'s {span}");
         return 1;
     }
-    let narrow = format!("--last, or rush events -s {id} -k");
-    print_lines(stdout, &lines, p.bool("json"), now, &narrow)
+    let mut quiet = 0;
+    if !p.bool("all") && !p.bool("json") {
+        let causes: std::collections::HashSet<String> = lines
+            .iter()
+            .filter(|l| !l.cause.is_empty())
+            .map(|l| l.cause.clone())
+            .collect();
+        let before = lines.len();
+        lines.retain(|l| !WHY_QUIET.contains(&l.kind.as_str()) || causes.contains(&l.ev));
+        quiet = before - lines.len();
+    }
+    if lines.is_empty() {
+        let _ = writeln!(
+            stderr,
+            "rush why: only state and task lines of {id}'s {span}; --all shows them"
+        );
+        return 1;
+    }
+    let narrow = format!("--last, or rush events -s {id} -k KIND");
+    let code = print_lines(stdout, &lines, p.bool("json"), now, &narrow);
+    if quiet > 0 {
+        let _ = writeln!(
+            stdout,
+            "… {quiet} state and task lines left out; --all shows them"
+        );
+    }
+    code
 }
 
 /// A command's id, first or after its flags, and its flags (session.go:115).
@@ -241,6 +326,14 @@ mod tests {
     fn events_prints_as_go_does() {
         let now = 1_793_190_896_000;
         let (_home, p) = log(now);
+        let extra = format!(
+            "rush events: \"extra\" isn't a flag; rush events takes only flags\n\n{EVENTS_USAGE}"
+        );
+        let bogus = format!("rush events: flag provided but not defined: -bogus\n\n{EVENTS_USAGE}");
+        let nabc = format!("rush events: invalid value \"abc\" for flag -n\n\n{EVENTS_USAGE}");
+        let nneg =
+            format!("rush events: -n takes how many lines, or 0 for all of them\n\n{EVENTS_USAGE}");
+        let snone = format!("rush events: flag needs an argument: -s\n\n{EVENTS_USAGE}");
         for (a, code, out, err) in [
             (
                 &["-n", "2"][..],
@@ -265,8 +358,12 @@ mod tests {
                 "rush events: \"soon\" is neither a while back (10m, 2h, 3d) nor a time (2026-10-23T09:00)\n",
             ),
             (&["-h"], 0, "", EVENTS_USAGE),
-            (&["extra"], 2, "", EVENTS_USAGE),
-            (&["-bogus"], 2, "", EVENTS_USAGE),
+            (&["--help"], 0, "", EVENTS_USAGE),
+            (&["extra"], 2, "", extra.as_str()),
+            (&["-bogus"], 2, "", bogus.as_str()),
+            (&["-n", "abc"], 2, "", nabc.as_str()),
+            (&["-n", "-1"], 2, "", nneg.as_str()),
+            (&["-s"], 2, "", snone.as_str()),
             (
                 &["--chain", "#nope"],
                 1,
@@ -290,6 +387,74 @@ mod tests {
                 assert_eq!(o, out, "{a:?}");
             }
         }
+    }
+
+    #[test]
+    fn why_leaves_out_state_and_takes_an_ids_start() {
+        let now = 1_793_190_896_000;
+        let home = TempDir::new();
+        let p = home.0.join("events.jsonl");
+        let lines = [
+            format!(
+                r#"{{"ev":"st","kind":"state","proc":"host","session":"abc1","t":"{}"}}"#,
+                t(now - 5 * MIN)
+            ),
+            format!(
+                r#"{{"ev":"tk","kind":"task-started","proc":"host","session":"abc1","t":"{}"}}"#,
+                t(now - 4 * MIN)
+            ),
+            format!(
+                r#"{{"cause":"tk","ev":"dl","kind":"delivered","proc":"host","session":"abc1","t":"{}"}}"#,
+                t(now - 3 * MIN)
+            ),
+            format!(
+                r#"{{"ev":"td","kind":"task-done","proc":"host","session":"abc1","t":"{}"}}"#,
+                t(now - 2 * MIN)
+            ),
+            format!(
+                r#"{{"ev":"o2","kind":"turn-end","proc":"host","session":"abc2","t":"{}"}}"#,
+                t(now - MIN)
+            ),
+        ];
+        std::fs::write(&p, lines.join("\n") + "\n").unwrap();
+        let none = |_: &str| Vec::new();
+        let (c, o, e) = run(|o, e| why_cmd(&p, &args(&["abc1"]), now, &none, o, e));
+        assert_eq!((c, e.as_str()), (0, ""));
+        assert_eq!(
+            o,
+            "4m  task-started  s=abc1  host  #tk\n  3m  delivered  s=abc1  host  #dl ←tk\n\
+             … 2 state and task lines left out; --all shows them\n",
+            "a task line that led to one kept stays"
+        );
+        let (c, o, _) = run(|o, e| why_cmd(&p, &args(&["abc1", "--all"]), now, &none, o, e));
+        assert!(
+            c == 0 && o.contains("#st") && o.contains("#td") && !o.contains("left out"),
+            "{o}"
+        );
+        let (c, _, e) = run(|o, e| why_cmd(&p, &args(&["abc"]), now, &none, o, e));
+        assert_eq!(
+            (c, e.as_str()),
+            (
+                2,
+                "rush why: abc is the start of abc2, abc1; say more of it\n"
+            )
+        );
+        let (c, o, _) = run(|o, e| why_cmd(&p, &args(&["abc2"]), now, &none, o, e));
+        assert_eq!((c, o.as_str()), (0, "1m  turn-end  s=abc2  host  #o2\n"));
+        let (c, _, e) = run(|o, e| {
+            why_cmd(
+                &p,
+                &args(&["abc1", "--last", "2030-01-01T00:00"]),
+                now,
+                &none,
+                o,
+                e,
+            )
+        });
+        assert_eq!(
+            (c, e.as_str()),
+            (1, "rush why: nothing of abc1's since 2030-01-01T00:00\n")
+        );
     }
 
     #[test]
@@ -331,13 +496,9 @@ mod tests {
                 "",
                 "rush why: \"soon\" is neither a while back (10m, 2h, 3d) nor a time (2026-10-23T09:00)\n",
             ),
-            (&[], 2, "", "usage: rush why SESSION [--last 1h] [--json]\n"),
-            (
-                &["-h"],
-                2,
-                "",
-                "usage: rush why SESSION [--last 1h] [--json]\n",
-            ),
+            (&[], 2, "", WHY_USAGE),
+            (&["-h"], 0, "", WHY_USAGE),
+            (&["B", "--help"], 0, "", WHY_USAGE),
         ] {
             let (c, o, e) = run(|o, e| why_cmd(&p, &args(a), now, &linked, o, e));
             assert_eq!((c, o.as_str(), e.as_str()), (code, out, err), "{a:?}");

@@ -398,17 +398,15 @@ pub fn problem(m: &Model, r: &AcctRow) -> String {
     r.q.problem.clone()
 }
 
-/// A duration to one unit: 40m, 3h, 5d (roughly).
-pub fn roughly(d: Ms) -> String {
-    const MIN: Ms = 60_000;
-    const HOUR: Ms = 60 * MIN;
-    if d < HOUR {
-        format!("{}m", ((d + MIN / 2) / MIN).max(1))
-    } else if d < 48 * HOUR {
-        format!("{}h", (d + HOUR / 2) / HOUR)
-    } else {
-        format!("{}d", (d + 12 * HOUR) / (24 * HOUR))
-    }
+/// A duration to one unit: 40m, 3h, 5d (roughly), never 60m or 48h.
+pub use rush_core::time::roughly;
+
+/// A window's label in a meter's cell, and the space after it: as wide as
+/// it is, from 2 cells ("5h", "7d") to 8 ("Opus 7d", "month"); a longer
+/// one is cut there. Rust-only: Go cut every label to 3, so "Opus 7d"
+/// read "Opu".
+pub fn meter_label(label: &str) -> String {
+    fit_str(label, rush_core::text::width(label).clamp(2, 8) + 1)
 }
 
 /// When a window resets, roughly: " ↻3h" (resetIn).
@@ -469,10 +467,13 @@ pub fn limits(m: &Model, r: &AcctRow, w1: usize, w2: usize) -> Line {
     }
     let every = usage::EVERY.as_millis() as Ms;
     if now - q.fetched_at > 3 * every {
-        // Say why it's old, not only that it is: a sign-in gone, a limit on asking.
-        let mut why = format!("not read since {}", clock(q.fetched_at, false));
+        // Say why it's old, not only that it is: a sign-in gone, a limit on
+        // asking. Its day too when that wasn't today (Rust-only: Go gave
+        // the clock alone, so a reading days old read as this morning's).
+        let at = clock(q.fetched_at, !crate::model::same_day(q.fetched_at, now));
+        let mut why = format!("not read since {at}");
         if !q.problem.is_empty() {
-            why = format!("{} · last read {}", q.problem, clock(q.fetched_at, false));
+            why = format!("{} · last read {at}", q.problem);
         }
         return fit(line([sp("! ", YELLOW), sp(why, DIM)]), w1 + w2);
     }
@@ -489,7 +490,7 @@ pub fn limits(m: &Model, r: &AcctRow, w1: usize, w2: usize) -> Line {
             join(&mut out, line([plain(blanks(cw))]));
             continue;
         };
-        let mut cell = line([sp(fit_str(&win.label, 3), FAINT)]);
+        let mut cell = line([sp(meter_label(&win.label), FAINT)]);
         join(&mut cell, bar(win.percent));
         cell.spans.push(plain(" "));
         cell.spans.push(sp(format!("{:>3.0}%", win.percent), TEXT));
@@ -539,7 +540,13 @@ pub fn window_lines(q: &Quota, now: Ms, label: &dyn Fn(&str) -> Span) -> Vec<Lin
         };
         out.push(line([
             label("usage"),
-            sp(format!("{source} at {}", clock(q.fetched_at, false)), FAINT),
+            sp(
+                format!(
+                    "{source} at {}",
+                    clock(q.fetched_at, !crate::model::same_day(q.fetched_at, now))
+                ),
+                FAINT,
+            ),
         ]));
     }
     out

@@ -522,16 +522,11 @@ pub fn mem_color(b: u64, s: impl Into<rush_core::text::CompactString>) -> Span {
     }
 }
 
-/// A 10-cell usage meter.
+/// A 10-cell usage meter, coloured as every usage meter is (Rust-only:
+/// Go's turned at 50/80 where others did at 60/85).
 pub fn bar(pct: f64) -> Line {
     let n = ((pct / 10.0 + 0.5) as isize).clamp(0, 10) as usize;
-    let c = if pct >= 80.0 {
-        RED
-    } else if pct >= 50.0 {
-        YELLOW
-    } else {
-        GREEN
-    };
+    let c = crate::meters::usage_color(pct);
     line([sp("▰".repeat(n), c), sp("▱".repeat(10 - n), FAINT)])
 }
 

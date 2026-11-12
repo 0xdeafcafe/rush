@@ -938,6 +938,30 @@ fn accounts_together() {
     assert_eq!(acct::roughly(72 * 3_600_000), "3d");
 }
 
+/// A setting's description cut short to fit ends its last line kept with
+/// "…", the value still under it; one that fits whole is left as it is.
+#[test]
+fn a_cut_description_ends_in_an_ellipsis() {
+    let st = choice(
+        "Keep it",
+        "on",
+        "one two three four five six seven eight nine ten eleven twelve",
+        &[("on", "it's kept."), ("off", "it isn't.")],
+        None,
+    );
+    let plain = |ls: Vec<Line>| {
+        ls.iter()
+            .map(|l| l.plain().trim_end().to_string())
+            .collect::<Vec<_>>()
+    };
+    let cut = plain(workspace::help(&st, 20, 4));
+    assert_eq!(cut.len(), 4, "{cut:?}");
+    assert_eq!(cut[2], "one two three four…");
+    assert!(cut[3].ends_with("it's kept."), "{cut:?}");
+    let whole = plain(workspace::help(&st, 20, 20));
+    assert!(whole.iter().all(|l| !l.contains('…')), "{whole:?}");
+}
+
 /// An account's limits: a meter for each of its first two windows, or
 /// why there are none (limits).
 #[test]

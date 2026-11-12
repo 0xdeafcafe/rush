@@ -51,17 +51,8 @@ fn mark(glyph: &str, colour: Option<Color>) -> Span {
     sp(glyph, colour.unwrap_or(TEXT))
 }
 
-/// A duration to one unit: 40m, 3h, 5d (roughly).
-pub fn roughly(d: Ms) -> String {
-    let round = |d: Ms, u: Ms| (d + u / 2) / u;
-    if d < HOUR {
-        format!("{}m", round(d, 60_000).max(1))
-    } else if d < 48 * HOUR {
-        format!("{}h", round(d, HOUR))
-    } else {
-        format!("{}d", round(d, 24 * HOUR))
-    }
-}
+/// A duration to one unit: 40m, 3h, 5d (roughly), never 60m or 48h.
+pub use rush_core::time::roughly;
 
 /// [`roughly`] of the time left until something, noted for the moment
 /// its text changes: rounded to the next unit down, or a unit less.

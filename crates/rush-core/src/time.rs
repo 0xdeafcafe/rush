@@ -12,6 +12,24 @@ pub fn now() -> Ms {
         .unwrap_or(0)
 }
 
+/// A duration to one unit, rounded: 40m, 3h, 5d. Rounding that reaches
+/// the next unit says it in that one, so never "60m" or "48h" (Rust-only:
+/// Go's roughly said both just short of the next unit).
+pub fn roughly(d: Ms) -> String {
+    const MIN: Ms = 60_000;
+    const HOUR: Ms = 60 * MIN;
+    let d = d.max(0);
+    let mins = (d + MIN / 2) / MIN;
+    if mins < 60 {
+        return format!("{}m", mins.max(1));
+    }
+    let hours = (d + HOUR / 2) / HOUR;
+    if hours < 48 {
+        return format!("{hours}h");
+    }
+    format!("{}d", (d + 12 * HOUR) / (24 * HOUR))
+}
+
 /// Parses `2026-10-28T12:34:56.789Z` (or with a `+hh:mm` offset, any number
 /// of fraction digits) to Unix milliseconds; 0 when it isn't one.
 pub fn parse_rfc3339(s: &str) -> Ms {
@@ -161,6 +179,29 @@ mod tests {
                 s.ends_with('Z') || s[s.len() - 6..].starts_with(['+', '-']),
                 "{s}"
             );
+        }
+    }
+
+    #[test]
+    fn roughly_says_one_unit() {
+        const MIN: Ms = 60_000;
+        const HOUR: Ms = 60 * MIN;
+        for (d, want) in [
+            (0, "1m"),
+            (20_000, "1m"),
+            (40 * MIN, "40m"),
+            (59 * MIN + 20_000, "59m"),
+            (59 * MIN + 40_000, "1h"),
+            (HOUR, "1h"),
+            (90 * MIN, "2h"),
+            (5 * HOUR, "5h"),
+            (47 * HOUR, "47h"),
+            (47 * HOUR + 40 * MIN, "2d"),
+            (48 * HOUR, "2d"),
+            (72 * HOUR, "3d"),
+            (-5 * MIN, "1m"),
+        ] {
+            assert_eq!(roughly(d), want, "{d}");
         }
     }
 

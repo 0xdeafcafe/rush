@@ -64,8 +64,15 @@ pub fn limit_handled(m: &Model, a: &Agent) -> bool {
 
 /// Posts a notification off the UI thread: posting runs a program, and
 /// whether the menu bar runs is a look at the disk. With unless_menu_bar,
-/// the menu bar posts it instead when it runs (notifyLater).
-fn notify_later(f: &mut Finish, title: String, body: String, unless_menu_bar: bool) {
+/// the menu bar posts it instead when it runs (notifyLater). Its line in
+/// the log names the rush session it's about, so rush why shows it (Go's
+/// named none).
+fn notify_later(f: &mut Finish, a: &Agent, title: String, body: String, unless_menu_bar: bool) {
+    let session = if a.rush {
+        a.job.id.clone()
+    } else {
+        String::new()
+    };
     if rush_core::sandbox::active() {
         f.told.push((title, body));
         return;
@@ -77,12 +84,13 @@ fn notify_later(f: &mut Finish, title: String, body: String, unless_menu_bar: bo
             rush_sys::actions::notify(&title, &body);
             "rush"
         };
-        rush_sys::events::log(
-            "notify",
-            serde_json::json!({
-                "title": title, "body": rush_host::events::clip(&body), "by": by,
-            }),
-        );
+        let mut fields = serde_json::json!({
+            "title": title, "body": rush_host::events::clip(&body), "by": by,
+        });
+        if !session.is_empty() {
+            fields["session"] = session.into();
+        }
+        rush_sys::events::log("notify", fields);
     });
 }
 
@@ -145,7 +153,13 @@ pub fn on_fleet(m: &mut Model) {
                 if !k.is_empty() {
                     f.told_card.insert(a.key.clone(), k.clone());
                 }
-                notify_later(&mut f, format!("{} needs you", a.display_name), body, true);
+                notify_later(
+                    &mut f,
+                    a,
+                    format!("{} needs you", a.display_name),
+                    body,
+                    true,
+                );
             }
         }
         // A stalled turn waits for good: rush never ends it, so it says
@@ -162,6 +176,7 @@ pub fn on_fleet(m: &mut Model) {
             if !quiet && !watching {
                 notify_later(
                     &mut f,
+                    a,
                     format!("{} stalled", a.display_name),
                     format!(
                         "nothing from the model for {}m and no step running · it keeps waiting until you stop it or send it something",
@@ -183,6 +198,7 @@ pub fn on_fleet(m: &mut Model) {
         {
             notify_later(
                 &mut f,
+                a,
                 format!("{} stopped", a.display_name),
                 a.halt_reason(now),
                 false,

@@ -11,11 +11,21 @@ pub fn parse_since(s: &str, now: Ms) -> Result<Ms, String> {
     if s.is_empty() {
         return Ok(0);
     }
-    if let Some(n) = s.strip_suffix('d')
+    // Days, alone or ahead of the rest of a duration: 3d, 1d12h. Go took
+    // only a whole number of days on its own; 1d12h is a while back too.
+    if let Some((n, rest)) = s.split_once('d')
+        && !n.is_empty()
+        && n.bytes().all(|b| b.is_ascii_digit() || b == b'.')
         && let Ok(d) = n.parse::<f64>()
+        && let Ok(more) = if rest.is_empty() {
+            Ok(0)
+        } else {
+            parse_duration(rest)
+        }
+        && more >= 0
     {
         let ns = (d * 86_400e9) as i64;
-        return Ok(now - ns / 1_000_000);
+        return Ok(now - ns / 1_000_000 - more / 1_000_000);
     }
     if let Ok(ns) = parse_duration(s) {
         return Ok(now - ns / 1_000_000);
@@ -324,6 +334,8 @@ mod tests {
             ("10m", now - 10 * 60_000),
             ("3d", now - 72 * 3_600_000),
             ("1.5d", now - 36 * 3_600_000),
+            ("1d12h", now - 36 * 3_600_000),
+            ("2d30m", now - 48 * 3_600_000 - 30 * 60_000),
             ("90s", now - 90_000),
             ("2h45m", now - (2 * 60 + 45) * 60_000),
             ("2026-10-23T09:00:00Z", now - 3 * 3_600_000),
@@ -356,6 +368,9 @@ mod tests {
             "2026-10-23T09:00:00",
             "d",
             "1x",
+            "-3d",
+            "1d-2h",
+            "1dx",
         ] {
             assert!(parse_since(bad, now).is_err(), "{bad}");
         }

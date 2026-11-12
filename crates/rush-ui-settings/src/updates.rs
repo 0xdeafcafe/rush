@@ -69,6 +69,9 @@ pub struct Updates {
     pub failed: usize,
     /// Sessions on an older rush whose folder is gone.
     pub gone: usize,
+    /// How many couldn't move at the last look logged, so one that can't
+    /// is logged when that changes, not at every look. Rust-only.
+    pub failed_logged: usize,
     pub checked_at: Option<Instant>,
     /// When the last look ended, by the clock (Unix ms; 0 before one), for
     /// "checked 4m ago". Rust-only.
@@ -198,7 +201,10 @@ pub struct Swept {
 /// Restart on install the reload onto the new rush (watchHosts' apply).
 fn on_swept(m: &mut Model, s: Swept, asked: bool) -> Out {
     let u = &mut m.kept::<State>().updates;
-    if s.stale != u.stale || asked || s.restarted > 0 || s.failed > 0 {
+    // Go logged at every look while a session couldn't move: every 30s,
+    // the same line, for as long as its agent ran.
+    if s.stale != u.stale || asked || s.restarted > 0 || s.failed != u.failed_logged {
+        u.failed_logged = s.failed;
         rush_sys::events::log(
             "stale-hosts",
             serde_json::json!({

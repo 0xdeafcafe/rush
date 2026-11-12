@@ -96,10 +96,13 @@ pub static SEGS: &[Seg] = &[
         about: "each account's shortest limit, of every agent, when there are several",
         draw: |x| {
             let mut parts = Vec::new();
+            let now = now(x.m);
             for r in account_rows(x.m) {
-                // The shortest window: the one that moves.
+                // The shortest window: the one that moves, empty once it
+                // has reset.
+                let q = r.q.since(now);
                 if !r.head
-                    && let Some(w) = r.q.windows.first()
+                    && let Some(w) = q.windows.first()
                 {
                     parts.push(line([
                         dim(format!("{} ", r.name(x.m))),
@@ -366,7 +369,8 @@ pub fn acct_queues(m: &Model) -> (Vec<Queue>, Vec<MeterRow>) {
                 .map(|l| rush_fleet::LoginView {
                     login: l.login.clone(),
                     usage: l.usage.clone(),
-                    quota: l.quota.clone(),
+                    // A window that has reset since is empty.
+                    quota: l.quota.since(now),
                     current: l.current,
                 })
                 .collect();
@@ -389,7 +393,7 @@ pub fn acct_queues(m: &Model) -> (Vec<Queue>, Vec<MeterRow>) {
                 qu.accts.push(InQueue {
                     name: a.name,
                     cur: a.current,
-                    q: a.q,
+                    q: a.q.since(now),
                 });
             }
         }
@@ -431,7 +435,9 @@ pub fn start_plan(m: &Model) -> (String, Quota) {
         name += " · ";
         name += &rush_draw::truncate(&account, 12, "…");
     }
-    (name, q.unwrap_or_default())
+    // A window that has reset since the reading is empty, not as full as
+    // it read (Rust-only: Go showed it full until the next reading).
+    (name, q.unwrap_or_default().since(now(m)))
 }
 
 /// The default provider's plan, fixed in its order; where a provider has
@@ -511,6 +517,9 @@ pub fn active_usage(m: &Model, w: usize) -> Line {
     if let Some(q) = start_quota(m) {
         u = q; // new sessions run another agent: its account's
     }
+    // A window that has reset since the reading is empty: 0%, and nothing
+    // to switch away from (Rust-only: Go showed it full, "reset").
+    let u = u.since(now(m));
     let k = start_kind(m);
     if u.windows.is_empty() {
         return trim_lead(other_meters(m, &k, w));
@@ -566,6 +575,13 @@ fn usage_detail(m: &Model, u: &Quota, cells: usize, when: bool) -> Line {
     for a in &accts {
         crate::plan::note_resets(&a.q, now);
     }
+    let accts: Vec<MeterRow> = accts
+        .into_iter()
+        .map(|mut a| {
+            a.q = a.q.since(now);
+            a
+        })
+        .collect();
     let waits = cfg(m).default_profile().limit() == rush_state::profiles::LIMIT_WAIT;
     if let Some(next) = upcoming(&accts, u.used(""), waits, now) {
         // Where sessions go at the switch: glyph, name, and a short bar
@@ -599,7 +615,7 @@ fn usage_detail(m: &Model, u: &Quota, cells: usize, when: bool) -> Line {
         crate::style::turns_at(u.fetched_at + 20 * HOUR + 1, now);
     }
     if u.fetched_at != 0 && now - u.fetched_at > 3 * every {
-        let day = now - u.fetched_at > 20 * HOUR;
+        let day = !crate::model::same_day(u.fetched_at, now);
         let when = crate::model::clock(u.fetched_at, day);
         s.spans.push(sp(format!(" as of {when}"), FAINT));
     }
@@ -617,12 +633,14 @@ pub fn usage_meter(win: &Window, rate: f64, now: Ms, w: usize, when: bool) -> Li
     // The share of the window gone, when we know when it ends.
     let pace = (resets != 0 && resets > now && span > 0)
         .then(|| 1.0 - (resets - now) as f64 / span as f64);
-    let c = if pct_ >= 80.0 {
-        RED
-    } else if pct_ >= 50.0 || pace.is_some_and(|p| pct_ / 100.0 > p + 0.1) {
-        YELLOW // high, or burning faster than the window allows
-    } else {
-        GREEN
+    // The levels every usage colour turns at (Rust-only: Go's meter here
+    // turned at 50/80, its others at 60/85).
+    let ahead = pace.is_some_and(|p| pct_ / 100.0 > p + 0.1);
+    let c = match rush_core::usage::level(pct_) {
+        rush_core::usage::Level::High => RED,
+        rush_core::usage::Level::Warn => YELLOW,
+        rush_core::usage::Level::Low if ahead => YELLOW, // burning faster than the window allows
+        rush_core::usage::Level::Low => GREEN,
     };
     let mut fill = ((pct_ / 100.0 * w as f64 + 0.5).max(0.0) as usize).min(w);
     if pct_ > 0.0 && fill == 0 {

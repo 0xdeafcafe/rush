@@ -234,10 +234,14 @@ pub fn help(st: &Setting, w: usize, h: usize) -> Vec<Line> {
     let (title, what, now) = st.explained();
     let w1 = w.max(1);
     let mut out = vec![line([spb(fit_str(&title, w), TEXT)]), Line::new()];
-    if !what.is_empty() {
-        for l in wrap(&what, w1) {
-            out.push(line([sp(l, SUB)]));
-        }
+    let what_lines = if what.is_empty() {
+        Vec::new()
+    } else {
+        wrap(&what, w1)
+    };
+    let what_at = out.len();
+    for l in &what_lines {
+        out.push(line([sp(l.clone(), SUB)]));
     }
     if !now.is_empty() {
         out.push(Line::new());
@@ -260,11 +264,24 @@ pub fn help(st: &Setting, w: usize, h: usize) -> Vec<Line> {
         out.truncate(h.max(1));
         // The whole explanation is there on a larger screen; the value
         // stays in view even when the description is cut.
-        if !now.is_empty() && h > 2 {
+        let keep_now = !now.is_empty() && h > 2;
+        if keep_now {
             out[h - 1] = line([sp(fit_str(&now, w), TEXT)]);
+        }
+        // A description cut short ends its last line kept with "…", so it
+        // doesn't read on into the value under it (Rust-only).
+        let kept = out.len() - usize::from(keep_now);
+        if kept > what_at && kept < what_at + what_lines.len() {
+            let last = &what_lines[kept - 1 - what_at];
+            out[kept - 1] = line([sp(cut_short(last, w1), SUB)]);
         }
     }
     out
+}
+
+/// s, a line of a description cut short after it, ending in "…" within w.
+fn cut_short(s: &str, w: usize) -> String {
+    rush_draw::truncate(&format!("{}…", s.trim_end()), w, "…").into_owned()
 }
 
 /// The keys that move through a form: ? its details, ctrl+↑↓ a section,

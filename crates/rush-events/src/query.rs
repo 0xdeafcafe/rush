@@ -40,7 +40,7 @@ pub struct Line {
 /// What lines a query wants. Its default wants every one (query.go:32).
 #[derive(Clone, Debug, Default)]
 pub struct Filter {
-    /// Any of these.
+    /// Any of these, or a session whose id starts with one.
     pub sessions: Vec<String>,
     /// Any of these; one ending in * is any kind it starts.
     pub kinds: Vec<String>,
@@ -48,7 +48,8 @@ pub struct Filter {
     pub proc: String,
     /// None before (Unix ms; 0 for no bound).
     pub since: Ms,
-    /// The line has this, in any case.
+    /// The line has this, in any case: in its text as a row says it, its
+    /// strings unescaped, or in the line as kept.
     pub grep: String,
     /// At most this many; 0 is no limit.
     pub limit: usize,
@@ -59,7 +60,14 @@ impl Filter {
         if l.at != 0 && l.at < self.since {
             return false;
         }
-        if !self.sessions.is_empty() && !self.sessions.contains(&l.session) {
+        // A session by the start of its id, as rush's lists show it. Go
+        // took only the whole id.
+        if !self.sessions.is_empty()
+            && !self
+                .sessions
+                .iter()
+                .any(|s| !s.is_empty() && l.session.starts_with(s.as_str()))
+        {
             return false;
         }
         if !self.proc.is_empty() && l.proc != self.proc {
@@ -75,9 +83,42 @@ impl Filter {
         }
         match grep {
             None => true,
-            Some(g) => String::from_utf8_lossy(&l.raw).to_lowercase().contains(g),
+            Some(g) => {
+                let raw = String::from_utf8_lossy(&l.raw);
+                // Decoded only where an escape could hide what's asked:
+                // reading every line of a full log that way is slow.
+                raw.to_lowercase().contains(g)
+                    || raw.contains('\\') && grep_text(&raw).to_lowercase().contains(g)
+            }
         }
     }
+}
+
+/// A line's text for --grep: its values with their strings unescaped, so
+/// a quote or an accent is found as typed. Go matched the line as kept,
+/// where a quote is \" and an é is as written but a < is \u003c.
+fn grep_text(raw: &str) -> String {
+    fn walk(out: &mut String, v: &Value) {
+        match v {
+            Value::String(s) => out.push_str(s),
+            Value::Array(a) => a.iter().for_each(|v| {
+                walk(out, v);
+                out.push(' ');
+            }),
+            Value::Object(m) => m.iter().for_each(|(k, v)| {
+                out.push_str(k);
+                out.push('=');
+                walk(out, v);
+                out.push(' ');
+            }),
+            v => out.push_str(&v.to_string()),
+        }
+    }
+    let mut out = String::new();
+    if let Ok(v) = serde_json::from_str::<Value>(raw) {
+        walk(&mut out, &v);
+    }
+    out
 }
 
 /// The lines of the log at log that f wants, newest first, and whether more
@@ -155,6 +196,19 @@ pub fn query_why(
         .zip(keep)
         .filter_map(|(l, k)| k.then_some(l))
         .collect())
+}
+
+/// The sessions since since whose id starts with prefix, the newest
+/// first: what a session given by the start of its id can be.
+pub fn sessions_starting(log: &Path, prefix: &str, since: Ms) -> Result<Vec<String>, Error> {
+    let mut out: Vec<String> = Vec::new();
+    each_back(log, since, |l| {
+        if l.session.starts_with(prefix) && !out.contains(&l.session) {
+            out.push(l.session);
+        }
+        true
+    })?;
+    Ok(out)
 }
 
 /// The chain of causes line ev is in: the line nothing led to that it comes
@@ -395,15 +449,29 @@ fn format_line(l: &Line, now: Ms) -> String {
 }
 
 /// v as a row shows it: a string as it is where it has no spaces, else as
-/// JSON.
+/// JSON. An object's short values come before its lists and objects, so
+/// a session's state shows ahead of its long list of background tasks
+/// before the row is cut (Go sorted them all by name).
 fn value(v: &Value) -> String {
-    if let Value::String(s) = v
-        && !s.is_empty()
-        && !s.contains([' ', '\t', '\n', '"'])
-    {
-        return s.clone();
+    match v {
+        Value::String(s) if !s.is_empty() && !s.contains([' ', '\t', '\n', '"']) => s.clone(),
+        Value::Object(m) => {
+            let mut keys: Vec<&String> = m.keys().collect();
+            keys.sort_by_key(|k| (matches!(m[*k], Value::Array(_) | Value::Object(_)), *k));
+            let mut out = String::from("{");
+            for (i, k) in keys.into_iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                out.push_str(&marshal(&Value::String(k.clone()), true));
+                out.push(':');
+                out.push_str(&marshal(&m[k], true));
+            }
+            out.push('}');
+            out
+        }
+        _ => marshal(v, true),
     }
-    marshal(v, true)
 }
 
 fn cut(s: &str, n: usize) -> String {
@@ -701,7 +769,7 @@ mod tests {
                 at(3 * HOUR)
             ),
             format!(
-                r#"{{"ev":"a2","kind":"delivered","proc":"host","session":"s1","t":"{}","text":"fix the Auth bug"}}"#,
+                r#"{{"ev":"a2","kind":"delivered","proc":"host","session":"s1","t":"{}","text":"fix the \"Auth\" bug"}}"#,
                 at(20 * MIN)
             ),
             format!(
@@ -781,6 +849,22 @@ mod tests {
                 },
                 "a2",
             ),
+            // As typed, quotes and all, not as kept.
+            (
+                Filter {
+                    grep: "the \"auth\" bug".into(),
+                    ..Default::default()
+                },
+                "a2",
+            ),
+            // A session by the start of its id.
+            (
+                Filter {
+                    sessions: s(&["s"]),
+                    ..Default::default()
+                },
+                "a3 a2 a1",
+            ),
         ] {
             let desc = format!("{f:?}");
             assert_eq!(evs(f), want, "{desc}");
@@ -854,12 +938,22 @@ mod tests {
     }
 
     #[test]
-    fn rows_say_fields_in_order() {
-        let raw = r#"{"zeta":[1,2],"alpha":{"b":2,"a":"x y"},"kind":"k","proc":"p","pid":3,"t":"x","err":"","why":"because","turn":2,"n":null}"#;
+    fn rows_say_an_objects_short_values_first() {
+        let raw = r#"{"kind":"state","proc":"host","info":{"away":false,"background":["a","b"],"queue":0,"state":"idle"}}"#;
         let l = parse_head(raw.as_bytes()).unwrap();
         assert_eq!(
             format_line(&l, 0),
-            r#"106751d  k  p:3  why=because  turn=2  alpha={"a":"x y","b":2}  zeta=[1,2]"#
+            r#"106751d  state  host  info={"away":false,"queue":0,"state":"idle","background":["a","b"]}"#
+        );
+    }
+
+    #[test]
+    fn rows_say_fields_in_order() {
+        let raw = r#"{"zeta":[1,2],"alpha":{"c":[3],"b":2,"a":"x y"},"kind":"k","proc":"p","pid":3,"t":"x","err":"","why":"because","turn":2,"n":null}"#;
+        let l = parse_head(raw.as_bytes()).unwrap();
+        assert_eq!(
+            format_line(&l, 0),
+            r#"106751d  k  p:3  why=because  turn=2  alpha={"a":"x y","b":2,"c":[3]}  zeta=[1,2]"#
         );
     }
 

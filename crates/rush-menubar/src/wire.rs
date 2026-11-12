@@ -68,6 +68,10 @@ pub struct Window {
     /// "5-hour", "weekly"
     #[serde(skip_serializing_if = "String::is_empty")]
     pub name: String,
+    /// What the bar says in its place when the account has no such limit:
+    /// "no 5-hour limit". Rust-only; an app that doesn't know it shows –.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub absent: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

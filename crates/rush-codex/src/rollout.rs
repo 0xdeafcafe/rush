@@ -428,7 +428,7 @@ impl Replay {
                         if t != 0 {
                             q.fetched_at = t;
                         }
-                        self.add(Src::Both, Event::Quota(q));
+                        self.add(Src::Both, Event::Quota(Box::new(q)));
                     }
                 }
             }

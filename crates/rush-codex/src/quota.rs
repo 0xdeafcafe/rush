@@ -247,10 +247,13 @@ pub(crate) fn quota_from_response(r: &Value) -> Quota {
 
 /// Asks a connected app-server for the account's limits. Neither call
 /// spends model quota.
+/// Each call waits at most within, or what's left of a reading's deadline
+/// when that's less (usage::within).
 pub(crate) fn read_quota(c: &Client, within: Option<Duration>) -> adapter::Result<Quota> {
-    let rl = c.call("account/rateLimits/read", Value::Null, within)?;
+    let within = || within.map(rush_core::usage::within);
+    let rl = c.call("account/rateLimits/read", Value::Null, within())?;
     let mut q = quota_from_response(&crate::json::parse(rl.get()));
-    if let Ok(a) = c.call("account/read", serde_json::json!({}), within) {
+    if let Ok(a) = c.call("account/read", serde_json::json!({}), within()) {
         let a = crate::json::parse(a.get());
         if let Some(acct) = get(&a, "account") {
             let plan = s(acct, "planType");
@@ -284,7 +287,7 @@ pub fn quota(p: &Profile, binary: &str) -> (Quota, Option<adapter::Error>) {
         Err(e) => return fail(e),
     };
     let out = c
-        .initialize(Some(WITHIN))
+        .initialize(Some(rush_core::usage::within(WITHIN)))
         .and_then(|_| read_quota(&c, Some(WITHIN)));
     c.close();
     match out {

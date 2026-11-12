@@ -162,6 +162,12 @@ pub fn usage_tip(a: &Account, now: Ms) -> String {
         let r = resets(w.resets_at, now);
         if w.present && !r.is_empty() {
             t.push(format!("{} resets {r}", named(w, fallback)));
+        } else if !w.present && !w.absent.is_empty() {
+            let absent = Window {
+                name: w.absent.clone(),
+                ..Window::default()
+            };
+            t.push(named(&absent, ""));
         }
     }
     if a.live > 0 {
@@ -199,13 +205,13 @@ pub enum Level {
     Red,
 }
 
+/// usage::level's, the levels every screen's usage colours turn at
+/// (Rust-only: Go's menu turned at 70/90, rush's screens at 60/85).
 pub fn level(pct: f64) -> Level {
-    if pct >= 90.0 {
-        Level::Red
-    } else if pct >= 70.0 {
-        Level::Orange
-    } else {
-        Level::Green
+    match rush_core::usage::level(pct) {
+        rush_core::usage::Level::High => Level::Red,
+        rush_core::usage::Level::Warn => Level::Orange,
+        rush_core::usage::Level::Low => Level::Green,
     }
 }
 
@@ -434,9 +440,24 @@ mod tests {
             "40%"
         );
         assert_eq!(percent(&Window::default()), "–");
-        assert_eq!(level(95.0), Level::Red);
-        assert_eq!(level(70.0), Level::Orange);
-        assert_eq!(level(10.0), Level::Green);
+        for (pct, want) in [
+            (95.0, Level::Red),
+            (85.0, Level::Red),
+            (84.0, Level::Orange),
+            (60.0, Level::Orange),
+            (59.0, Level::Green),
+            (10.0, Level::Green),
+        ] {
+            assert_eq!(level(pct), want, "{pct}");
+        }
+        let no5 = Account {
+            five_hour: Window {
+                absent: "no 5-hour limit".into(),
+                ..Window::default()
+            },
+            ..Account::default()
+        };
+        assert_eq!(usage_tip(&no5, 0), "No 5-hour limit");
     }
 
     #[test]

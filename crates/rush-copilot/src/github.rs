@@ -135,8 +135,10 @@ impl Inner {
         tok: &str,
         timeout: Duration,
     ) -> Result<Box<dyn Read + Send>> {
+        // Within what's left of a reading of limits' deadline, when it's
+        // one (usage::within).
         let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_global(Some(timeout))
+            .timeout_global(Some(rush_core::usage::within(timeout)))
             .http_status_as_error(false)
             .build()
             .into();

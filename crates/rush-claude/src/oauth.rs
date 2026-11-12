@@ -86,9 +86,12 @@ fn owner_err(e: OauthError) -> OauthError {
     }
 }
 
+/// An agent whose requests wait at most timeout, or less when they're
+/// part of a reading of usage that has less left of its deadline
+/// (usage::within).
 fn agent(timeout: Duration) -> ureq::Agent {
     ureq::Agent::config_builder()
-        .timeout_global(Some(timeout))
+        .timeout_global(Some(rush_core::usage::within(timeout)))
         .http_status_as_error(false)
         .max_redirects(0)
         .build()

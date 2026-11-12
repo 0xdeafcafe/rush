@@ -376,7 +376,8 @@ impl Source for FleetSource {
             snap.others.push(Other {
                 name: a.name(),
                 kind: k.as_str().to_string(),
-                quota: q.clone(),
+                // A window whose reset has passed reads empty, as Claude's.
+                quota: q.since(now),
             });
         }
         snap

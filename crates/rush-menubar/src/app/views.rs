@@ -366,6 +366,17 @@ impl UsageView {
 
     fn window(&self, name: &str, win: &Window, x: f64, w: f64, label: &NSFont, digits: &NSFont) {
         let b = self.bounds();
+        if !win.present && !win.absent.is_empty() {
+            // No such limit on this plan: say so where its meter would be.
+            text(
+                &win.absent,
+                label,
+                &NSColor::tertiaryLabelColor(),
+                rect(x, 0.0, w, b.size.height),
+                false,
+            );
+            return;
+        }
         let (lw, pw) = (20.0, 32.0);
         text(
             name,

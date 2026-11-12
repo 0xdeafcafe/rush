@@ -18,9 +18,12 @@ pub(crate) struct Got {
     pub body: Vec<u8>,
 }
 
+/// Its requests wait WITHIN at most, or what's left of a reading of
+/// limits' deadline when that's less (usage::within): Gemini's reading
+/// makes two.
 fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
-        .timeout_global(Some(WITHIN))
+        .timeout_global(Some(rush_core::usage::within(WITHIN)))
         .http_status_as_error(false)
         .build()
         .into()

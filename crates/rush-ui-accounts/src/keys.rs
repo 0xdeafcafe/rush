@@ -723,7 +723,7 @@ pub fn roomy_logins(m: &Model) -> std::collections::BTreeMap<String, String> {
                 && !l.id.is_empty()
                 && fresh(&l.quota, now)
                 && !l.quota.windows.is_empty()
-                && l.quota.used("") < rush_state::config::SWITCH_AT
+                && l.quota.since(now).used("") < rush_state::config::SWITCH_AT
                 && !l.quota.nearly_out("", usage::LEAD, now)
         })
         .map(|l| (l.id.clone(), l.name.clone()))

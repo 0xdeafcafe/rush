@@ -270,18 +270,8 @@ fn same_day(a: Ms, b: Ms) -> bool {
     a > 0 && day(a) == day(b)
 }
 
-/// A duration to one unit: 40m, 3h, 5d (roughly).
-pub fn roughly(d: Ms) -> String {
-    const MIN: f64 = 60_000.0;
-    let d = d as f64;
-    if d < 60.0 * MIN {
-        format!("{}m", ((d / MIN).round() as i64).max(1))
-    } else if d < 48.0 * 60.0 * MIN {
-        format!("{}h", (d / (60.0 * MIN)).round() as i64)
-    } else {
-        format!("{}d", (d / (24.0 * 60.0 * MIN)).round() as i64)
-    }
-}
+/// A duration to one unit: 40m, 3h, 5d (roughly), never 60m or 48h.
+pub use rush_core::time::roughly;
 
 /// When a window resets, from now (resetIn).
 pub fn reset_in(at: Ms, now: Ms) -> Line {
@@ -341,7 +331,13 @@ pub fn limits(m: &Model, r: &AcctRow, w1: usize, w2: usize) -> Line {
     }
     let now = m.now;
     if now - q.fetched_at > 3 * usage::EVERY.as_millis() as Ms {
-        let at = clock(q.fetched_at, q.fetched_at, false);
+        // With its day when that wasn't today (Rust-only: Go gave the
+        // clock alone).
+        let at = clock(
+            q.fetched_at,
+            q.fetched_at,
+            !crate::model::same_day(q.fetched_at, now),
+        );
         let why = if q.problem.is_empty() {
             format!("not read since {at}")
         } else {
@@ -362,7 +358,13 @@ pub fn limits(m: &Model, r: &AcctRow, w1: usize, w2: usize) -> Line {
             join(&mut out, fit(Line::new(), cw));
             continue;
         };
-        let mut cell = line([sp(fit_str(&win.label, 3), FAINT)]);
+        let mut cell = line([sp(
+            fit_str(
+                &win.label,
+                rush_core::text::width(&win.label).clamp(2, 8) + 1,
+            ),
+            FAINT,
+        )]);
         join(&mut cell, bar(win.percent));
         cell.spans.push(plain(" "));
         cell.spans.push(sp(format!("{:3.0}%", win.percent), TEXT));
@@ -417,7 +419,14 @@ pub fn window_lines(q: &Quota, now: Ms, label: &dyn Fn(&str) -> Line) -> Vec<Lin
         };
         let mut l = label("usage");
         l.spans.push(sp(
-            format!("{source} at {}", clock(q.fetched_at, q.fetched_at, false)),
+            format!(
+                "{source} at {}",
+                clock(
+                    q.fetched_at,
+                    q.fetched_at,
+                    !crate::model::same_day(q.fetched_at, now)
+                )
+            ),
             FAINT,
         ));
         out.push(l);

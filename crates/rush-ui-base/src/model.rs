@@ -1650,6 +1650,15 @@ pub fn clock(ms: Ms, day: bool) -> String {
     format!("{} {hm}", DAYS[tm.tm_wday.clamp(0, 6) as usize])
 }
 
+/// Whether a and b fall on the same local day: whether a time near now
+/// can be said by the clock alone, or needs its day (clock's day).
+pub fn same_day(a: Ms, b: Ms) -> bool {
+    match (local_tm(a), local_tm(b)) {
+        (Some(x), Some(y)) => (x.tm_year, x.tm_yday) == (y.tm_year, y.tm_yday),
+        _ => false,
+    }
+}
+
 /// The local hour at ms.
 pub fn local_hour(ms: Ms) -> i32 {
     local_tm(ms).map_or(12, |t| t.tm_hour)

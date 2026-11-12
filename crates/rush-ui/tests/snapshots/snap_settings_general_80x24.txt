@@ -16,7 +16,7 @@
     Clean up done work after        ‹ 3h           ›
   Hibernate finished agents
 
-  A finished agent's process stays in memory (often 300–800 MB) until it is
+  A finished agent's process stays in memory (often 300–800 MB) until it is…
   off: finished agents stay in memory until you stop them (ctrl+x).
     1 of 49 ───────────────────────────────────────────────────────────────
   enter choose  ·  ? details  ·  ctrl+↑↓ section  ·  [ ] page  ·  esc back

@@ -86,6 +86,95 @@ pub const JOB: &str = "Other agents' limits";
 
 const HOUR_MS: f64 = 3_600_000.0;
 
+/// How far a failed read in a row backs off at most: past the first,
+/// each waits twice as long as the last (backoff).
+pub const BACKOFF_MOST: Duration = Duration::from_secs(60 * 60);
+
+/// How long after its nth failed read in a row an account is read again:
+/// EVERY, then twice that each time, at most BACKOFF_MOST; nothing before
+/// the first. Rust-only: Go asked again every EVERY however often it
+/// failed, from every process.
+pub fn backoff(failures: i64) -> Duration {
+    if failures <= 0 {
+        return Duration::ZERO;
+    }
+    let doublings = (failures - 1).min(8) as u32;
+    (EVERY * 2u32.pow(doublings)).min(BACKOFF_MOST)
+}
+
+/// How long one read of an account's limits may take, every request it
+/// makes together: Go's cache.go gave its fetch a 30-second context.
+pub const DEADLINE: Duration = Duration::from_secs(30);
+
+thread_local! {
+    /// When this thread's read of an account's limits must be done by;
+    /// 0 while it isn't reading one.
+    static DEADLINE_BY: std::cell::Cell<Ms> = const { std::cell::Cell::new(0) };
+}
+
+/// This thread's read of an account's limits under way, its deadline set
+/// until it drops: what Go's context carried down to each request. The
+/// requests it makes ask [`within`] how long they may wait.
+#[must_use]
+pub struct Deadline {
+    was: Ms,
+}
+
+impl Deadline {
+    /// A deadline d from now, or the one already set when that's sooner.
+    pub fn start(d: Duration) -> Deadline {
+        let by = time::now().saturating_add(d.as_millis() as Ms);
+        let was = DEADLINE_BY.with(|c| c.get());
+        let by = if was != 0 { was.min(by) } else { by };
+        DEADLINE_BY.with(|c| c.set(by));
+        Deadline { was }
+    }
+}
+
+impl Drop for Deadline {
+    fn drop(&mut self) {
+        DEADLINE_BY.with(|c| c.set(self.was));
+    }
+}
+
+/// How long a request may wait: cap, or what's left of this thread's
+/// Deadline when that's less. Never zero, as a zero timeout is none to
+/// some clients: past the deadline it's a millisecond.
+pub fn within(cap: Duration) -> Duration {
+    let by = DEADLINE_BY.with(|c| c.get());
+    if by == 0 {
+        return cap;
+    }
+    let left = Duration::from_millis((by - time::now()).max(1) as u64);
+    cap.min(left)
+}
+
+/// Where a window's use turns from fine to worth watching, and to nearly
+/// out: one pair for every screen and the menu bar. Rust-only: Go
+/// coloured the same percentage at 50/80 in some meters, 60/85 in others
+/// and 70/90 in the menu bar.
+pub const WARN_AT: f64 = 60.0;
+pub const HIGH_AT: f64 = 85.0;
+
+/// How full a window is, for a screen to colour its own way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Level {
+    Low,
+    Warn,
+    High,
+}
+
+/// A window's use, pct percent, as a Level.
+pub fn level(pct: f64) -> Level {
+    if pct >= HIGH_AT {
+        Level::High
+    } else if pct >= WARN_AT {
+        Level::Warn
+    } else {
+        Level::Low
+    }
+}
+
 /// Claude's 5-hour and weekly windows, by Anthropic's names for them.
 pub const FIVE_HOUR: &str = "five_hour";
 pub const SEVEN_DAY: &str = "seven_day";
@@ -285,6 +374,17 @@ pub struct Quota {
     /// none, or didn't say.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resets: Option<Resets>,
+    /// Reads that failed in a row since the last good one, and when the
+    /// last of them did: the next waits backoff(failures) after it, in
+    /// every process. Rust-only.
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub failures: i64,
+    #[serde(with = "wire::time", skip_serializing_if = "is_zero_i64")]
+    pub failed_at: Ms,
+}
+
+fn is_zero_i64(n: &i64) -> bool {
+    *n == 0
 }
 
 /// An account's earned limit resets: each one, spent, resets the limits
@@ -316,9 +416,10 @@ pub struct ResetCredit {
 impl Quota {
     /// Whether a window that limits model fills within lead: 99% full
     /// already, or full before then, and before it resets, as fast as it
-    /// fills.
+    /// fills. A window that has reset since the reading is empty
+    /// (Rust-only: Go read it as full until the next reading).
     pub fn nearly_out(&self, model: &str, lead: Duration, now: Ms) -> bool {
-        self.windows.iter().any(|w| {
+        self.since(now).windows.iter().any(|w| {
             w.scope.covers(model)
                 && (w.percent >= 99.0
                     || w.percent + w.rate(now) * (w.ahead(lead, now) as f64 / HOUR_MS) >= 100.0)
@@ -328,7 +429,7 @@ impl Quota {
     /// How full the tightest window for model gets before nearly_out says
     /// so: 99%, or sooner the faster it fills.
     pub fn switch_point(&self, model: &str, lead: Duration, now: Ms) -> f64 {
-        let w = self.tightest(model).unwrap_or_default();
+        let w = self.since(now).tightest(model).unwrap_or_default();
         let fill = w.rate(now) * (w.ahead(lead, now) as f64 / HOUR_MS);
         (100.0 - fill).clamp(0.0, 99.0)
     }
@@ -377,13 +478,15 @@ impl Quota {
     }
 
     /// Empties the windows that have reset since the reading was made:
-    /// nothing has been used of them yet, as far as the reading knows.
+    /// nothing has been used of them yet, as far as the reading knows, and
+    /// the pace it was used at is the last window's, not this one's.
     pub fn since(&self, now: Ms) -> Quota {
         let mut q = self.clone();
         for w in &mut q.windows {
             if w.resets_at != 0 && now > w.resets_at {
                 w.percent = 0.0;
                 w.used = 0.0;
+                w.burn = 0.0;
                 w.resets_at = 0;
             }
         }
@@ -500,16 +603,46 @@ pub fn load(path: &Path) -> BTreeMap<String, Quota> {
 
 /// Keeps q under key, unless the reading there is newer.
 pub fn record(path: &Path, key: &str, q: &Quota) -> io::Result<()> {
+    update(path, |all| {
+        if let Some(old) = all.get(key)
+            && q.fetched_at <= old.fetched_at
+        {
+            return false;
+        }
+        all.insert(key.to_string(), q.clone());
+        true
+    })
+}
+
+/// Keeps a failed read of key beside its last reading: why, and one more
+/// failure in a row as of at, so every process backs off from it. Left
+/// alone when a newer reading than failed's has come in meanwhile.
+fn record_failure(path: &Path, key: &str, failed: &Quota, at: Ms) -> io::Result<()> {
+    update(path, |all| {
+        let k = all.entry(key.to_string()).or_insert_with(|| failed.clone());
+        if k.fetched_at > failed.fetched_at {
+            return false;
+        }
+        k.problem.clone_from(&failed.problem);
+        k.failures = failed.failures;
+        k.failed_at = at;
+        true
+    })
+}
+
+/// Changes the readings at path under the lock; change says whether it
+/// changed them, and they're written only then.
+fn update(
+    path: &Path,
+    change: impl FnOnce(&mut BTreeMap<String, Quota>) -> bool,
+) -> io::Result<()> {
     let dir = path.parent().unwrap_or(Path::new("."));
     mkdir_private(dir)?;
     let _lock = lock(&with_suffix(path, ".lock"));
     let mut all = load(path);
-    if let Some(old) = all.get(key)
-        && q.fetched_at <= old.fetched_at
-    {
+    if !change(&mut all) {
         return Ok(());
     }
-    all.insert(key.to_string(), q.clone());
     let b = serde_json::to_vec(&all).map_err(io::Error::other)?;
     // As Go's os.CreateTemp: a new file only its owner reads, as the
     // readings name accounts.
@@ -534,7 +667,9 @@ pub fn record(path: &Path, key: &str, q: &Quota) -> io::Result<()> {
 /// The reading kept under key, read again with fetch when it's older than
 /// EVERY; offline never reads. One process reads at a time, and the others
 /// find its reading. A failed read keeps the last reading, with why in
-/// problem.
+/// problem, kept in the file with the failure so that every process waits
+/// backoff(failures) before asking again; fetch has DEADLINE to do it in
+/// (its requests ask within).
 pub fn refresh(
     path: &Path,
     key: &str,
@@ -549,17 +684,31 @@ pub fn refresh(
         lock(&with_suffix(path, ".locks").join(hex))
     });
     let mut q = load(path).remove(key).unwrap_or_default();
-    if offline || time::now() - q.fetched_at < EVERY.as_millis() as i64 {
+    let now = time::now();
+    let backing_off = now - q.failed_at < backoff(q.failures).as_millis() as i64;
+    if offline || backing_off || now - q.fetched_at < EVERY.as_millis() as i64 {
         return q;
     }
     if !net.run(JOB) {
         return q; // the network's down: the last reading, until it's back
     }
-    let got = fetch();
+    let got = {
+        let _deadline = Deadline::start(DEADLINE);
+        fetch()
+    };
     net.done(JOB, got.as_ref().err().map(String::as_str));
     match got {
         Err(e) => {
+            // Trouble with the sign-in isn't backed off: it's put right by
+            // signing in, and the next look should find that at once.
+            if sign_in_problem(&e) {
+                q.failures = 0;
+            } else {
+                q.failures += 1;
+            }
             q.problem = e;
+            q.failed_at = time::now();
+            let _ = record_failure(path, key, &q, q.failed_at);
             q
         }
         Ok(mut got) => {
@@ -573,6 +722,16 @@ pub fn refresh(
             got
         }
     }
+}
+
+/// Whether a failed read's why is about the sign-in ("not signed in",
+/// "signed in as another account", "sign in again"): put right by signing
+/// in, not by waiting, so it isn't backed off.
+pub fn sign_in_problem(e: &str) -> bool {
+    let e = e.to_ascii_lowercase();
+    ["sign in", "signed in", "sign-in", "log in", "logged in"]
+        .iter()
+        .any(|w| e.contains(w))
 }
 
 fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
@@ -1021,6 +1180,7 @@ mod tests {
                     id: "five_hour".into(),
                     percent: 80.0,
                     resets_at: now - MINUTE,
+                    burn: 30.0,
                     ..Window::default()
                 },
                 Window {
@@ -1034,7 +1194,10 @@ mod tests {
         };
         let got = q.since(now);
         let w = got.window("five_hour").unwrap();
-        assert!(w.percent == 0.0 && w.resets_at == 0, "{w:?}");
+        assert!(
+            w.percent == 0.0 && w.resets_at == 0 && w.burn == 0.0,
+            "{w:?}"
+        );
         assert_eq!(got.window("seven_day").unwrap().percent, 30.0);
         assert_eq!(
             q.window("five_hour").unwrap().percent,
@@ -1154,6 +1317,149 @@ mod tests {
             Err("signed out".into())
         });
         assert_eq!(failed.problem, "signed out");
+    }
+
+    #[test]
+    fn sign_in_trouble_isnt_backed_off() {
+        for (e, want) in [
+            ("not signed in", true),
+            ("not signed in with Google", true),
+            (
+                "rush's sign-in for it is another account's; sign in again",
+                true,
+            ),
+            ("Not logged in", true),
+            ("usage request returned 500", false),
+            ("request timed out", false),
+        ] {
+            assert_eq!(sign_in_problem(e), want, "{e}");
+        }
+    }
+
+    #[test]
+    fn backoff_doubles_to_an_hour() {
+        let m = |n: u64| Duration::from_secs(n * 60);
+        for (failures, want) in [
+            (0, Duration::ZERO),
+            (1, m(5)),
+            (2, m(10)),
+            (3, m(20)),
+            (4, m(40)),
+            (5, m(60)),
+            (40, m(60)),
+        ] {
+            assert_eq!(backoff(failures), want, "{failures}");
+        }
+    }
+
+    // A failed read is kept in the file with when it failed, so every
+    // process waits before asking again, longer each time; a good one
+    // clears it.
+    #[test]
+    fn refresh_backs_off_failed_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("quotas.json");
+        let fail = || Err::<Quota, String>("usage request returned 500".into());
+        let q = refresh(&path, "k", false, &Online, fail);
+        assert_eq!(
+            (q.problem.as_str(), q.failures),
+            ("usage request returned 500", 1)
+        );
+        let kept = &load(&path)["k"];
+        assert_eq!(
+            (kept.problem.as_str(), kept.failures),
+            (q.problem.as_str(), 1)
+        );
+        assert_ne!(kept.failed_at, 0);
+        let q = refresh(&path, "k", false, &Online, || {
+            panic!("asked while backing off")
+        });
+        assert_eq!(
+            q.problem, "usage request returned 500",
+            "why is shown meanwhile"
+        );
+        // As though the first failure was 6 minutes ago: the 5 minutes
+        // are up, and the second failure waits 10.
+        let set_failed_at = |at: Ms| {
+            let mut all = load(&path);
+            all.get_mut("k").unwrap().failed_at = at;
+            fs::write(&path, serde_json::to_vec(&all).unwrap()).unwrap();
+        };
+        set_failed_at(time::now() - 6 * MINUTE);
+        assert_eq!(refresh(&path, "k", false, &Online, fail).failures, 2);
+        set_failed_at(time::now() - 6 * MINUTE);
+        refresh(&path, "k", false, &Online, || {
+            panic!("asked within 10 minutes")
+        });
+        set_failed_at(time::now() - 11 * MINUTE);
+        let q = refresh(&path, "k", false, &Online, || {
+            Ok(Quota {
+                windows: vec![Window {
+                    id: "primary".into(),
+                    percent: 10.0,
+                    ..Window::default()
+                }],
+                ..Quota::default()
+            })
+        });
+        assert!(q.problem.is_empty() && q.failures == 0);
+        let kept = &load(&path)["k"];
+        assert_eq!(
+            (kept.failures, kept.failed_at, kept.problem.as_str()),
+            (0, 0, "")
+        );
+    }
+
+    // A fetch's requests wait no longer than what's left of its deadline,
+    // and outside one, as long as they would.
+    #[test]
+    fn requests_keep_to_the_deadline() {
+        let cap = Duration::from_secs(15);
+        assert_eq!(within(cap), cap, "no deadline");
+        {
+            let _d = Deadline::start(Duration::from_secs(5));
+            let left = within(cap);
+            assert!(left <= Duration::from_secs(5) && left > Duration::from_secs(4));
+            {
+                let _later = Deadline::start(Duration::from_secs(60));
+                assert!(
+                    within(cap) <= Duration::from_secs(5),
+                    "a later one kept the sooner"
+                );
+            }
+            assert!(within(cap) <= Duration::from_secs(5));
+            let _past = Deadline::start(Duration::ZERO);
+            assert_eq!(
+                within(cap),
+                Duration::from_millis(1),
+                "past it, a millisecond"
+            );
+        }
+        assert_eq!(within(cap), cap, "dropped");
+    }
+
+    #[test]
+    fn levels() {
+        for (pct, want) in [
+            (0.0, Level::Low),
+            (59.9, Level::Low),
+            (60.0, Level::Warn),
+            (84.9, Level::Warn),
+            (85.0, Level::High),
+            (120.0, Level::High),
+        ] {
+            assert_eq!(level(pct), want, "{pct}");
+        }
+    }
+
+    // A window that has reset since its reading isn't nearly out, however
+    // full it read.
+    #[test]
+    fn a_reset_window_isnt_nearly_out() {
+        let now = time::now();
+        let q = week(now, 100.0, HOUR, -MINUTE);
+        assert!(!q.nearly_out("", LEAD, now));
+        assert_eq!(q.switch_point("", LEAD, now), 99.0);
     }
 
     #[test]

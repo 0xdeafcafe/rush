@@ -191,13 +191,12 @@ const GREY: &str = "\x1b[38;2;168;162;152m";
 const DIM: &str = "\x1b[38;2;122;117;108m";
 const RESET: &str = "\x1b[0m";
 
+/// The colour of p percent: usage::level's, as rush's own screens.
 fn level(p: f64) -> &'static str {
-    if p >= 85.0 {
-        RED
-    } else if p >= 60.0 {
-        YELLOW
-    } else {
-        GREEN
+    match rush_core::usage::level(p) {
+        rush_core::usage::Level::High => RED,
+        rush_core::usage::Level::Warn => YELLOW,
+        rush_core::usage::Level::Low => GREEN,
     }
 }
 
