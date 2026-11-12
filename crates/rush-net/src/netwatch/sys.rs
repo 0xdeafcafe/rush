@@ -120,10 +120,88 @@ pub(crate) fn network_of(addrs: &[(String, IpAddr)]) -> (String, String) {
     (parts.join(","), label)
 }
 
+/// The bytes in and out of each of the machine's own interfaces, by their
+/// place in /proc/net/dev (Go internal/netwatch/counters_linux.go).
+#[cfg(target_os = "linux")]
+pub(crate) fn counters() -> Option<Counters> {
+    let s = std::fs::read_to_string("/proc/net/dev").ok()?;
+    Some(counters_of(&s))
+}
+
+/// counters from /proc/net/dev's text: two header lines, then one line per
+/// interface, `name: rx_bytes` and seven more receive fields, then
+/// `tx_bytes`.
+#[cfg(any(target_os = "linux", test))]
+pub(crate) fn counters_of(s: &str) -> Counters {
+    let mut out = Counters::new();
+    for (i, l) in s.lines().enumerate() {
+        let Some((name, rest)) = l.split_once(':') else {
+            continue;
+        };
+        if tunnel(name.trim()) {
+            continue;
+        }
+        let f: Vec<&str> = rest.split_ascii_whitespace().collect();
+        if f.len() < 9 {
+            continue;
+        }
+        let n = |x: &str| x.parse::<u64>().unwrap_or(0);
+        out.insert(i as u32 + 1, [n(f[0]), n(f[8])]);
+    }
+    out
+}
+
+/// Calls changed(true) each time the machine's addresses or links change,
+/// from a thread that sleeps in the kernel between (a netlink socket on
+/// the link and address groups), and changed(false) if it stops being able
+/// to hear of them; false where there's no way to hear of it at all (the
+/// caller then looks on its sample instead). The thread ends when changed
+/// returns false.
+#[cfg(target_os = "linux")]
+pub(crate) fn on_change(changed: impl FnMut(bool) -> bool + Send + 'static) -> bool {
+    // SAFETY: a plain socket, closed when the thread ends.
+    let fd = unsafe {
+        libc::socket(
+            libc::AF_NETLINK,
+            libc::SOCK_RAW | libc::SOCK_CLOEXEC,
+            libc::NETLINK_ROUTE,
+        )
+    };
+    if fd < 0 {
+        return false;
+    }
+    // SAFETY: sockaddr_nl is plain data; zero is a valid value.
+    let mut sa: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
+    sa.nl_family = libc::AF_NETLINK as libc::sa_family_t;
+    sa.nl_groups = (libc::RTMGRP_LINK | libc::RTMGRP_IPV4_IFADDR | libc::RTMGRP_IPV6_IFADDR) as u32;
+    // SAFETY: sa is a sockaddr_nl of the size given.
+    let r = unsafe {
+        libc::bind(
+            fd,
+            (&sa as *const libc::sockaddr_nl).cast(),
+            std::mem::size_of::<libc::sockaddr_nl>() as libc::socklen_t,
+        )
+    };
+    if r != 0 {
+        // SAFETY: fd is ours, closed once.
+        unsafe { libc::close(fd) };
+        return false;
+    }
+    listen(fd, changed, |m| {
+        // nlmsghdr: a u32 length, then a u16 type.
+        m.len() >= 6
+            && matches!(
+                u16::from_ne_bytes([m[4], m[5]]),
+                libc::RTM_NEWADDR | libc::RTM_DELADDR | libc::RTM_NEWLINK | libc::RTM_DELLINK
+            )
+    })
+}
+
 /// The bytes in and out of each of the machine's own interfaces, by index,
 /// read from the routing table's interface list: no process run. macOS
 /// hands them to a process that isn't root cut to 32 bits, so they wrap
 /// every 4G; rates allow for that.
+#[cfg(target_os = "macos")]
 pub(crate) fn counters() -> Option<Counters> {
     let mut mib = [libc::CTL_NET, libc::PF_ROUTE, 0, 0, libc::NET_RT_IFLIST2, 0];
     let mut len: libc::size_t = 0;
@@ -182,6 +260,7 @@ pub(crate) fn counters() -> Option<Counters> {
 /// it stops being able to hear of them; false where there's no way to hear
 /// of it at all (the caller then looks on its sample instead). The thread
 /// ends when changed returns false.
+#[cfg(target_os = "macos")]
 pub(crate) fn on_change(changed: impl FnMut(bool) -> bool + Send + 'static) -> bool {
     // SAFETY: a plain socket, kept from the processes rush starts (macOS
     // has no SOCK_CLOEXEC); closed when the thread ends.
@@ -269,6 +348,18 @@ mod tests {
         ] {
             assert_eq!(tunnel(name), want, "{name}");
         }
+    }
+
+    #[test]
+    fn proc_net_dev() {
+        let s = "Inter-|   Receive                                                |  Transmit\n \
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n \
+    lo: 900 9 0 0 0 0 0 0 900 9 0 0 0 0 0 0\n \
+  eth0: 1000 10 0 0 0 0 0 0 2000 20 0 0 0 0 0 0\n \
+docker0: 5 1 0 0 0 0 0 0 6 1 0 0 0 0 0 0\n";
+        let c = counters_of(s);
+        assert_eq!(c.len(), 1, "{c:?}");
+        assert_eq!(c.get(&4), Some(&[1000, 2000]));
     }
 
     #[test]

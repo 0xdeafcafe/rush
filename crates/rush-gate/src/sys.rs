@@ -68,8 +68,14 @@ pub fn parse_vm_stat(s: &str) -> Option<u64> {
 /// from one that failed.
 fn clear_errno() {
     // SAFETY: errno is this thread's own.
+    #[cfg(target_os = "macos")]
     unsafe {
         *libc::__error() = 0;
+    }
+    // SAFETY: as above.
+    #[cfg(target_os = "linux")]
+    unsafe {
+        *libc::__errno_location() = 0;
     }
 }
 
@@ -89,6 +95,7 @@ fn priority(pid: i32) -> Option<i32> {
     Some(p)
 }
 
+#[cfg(target_os = "macos")]
 mod os {
     use std::ffi::CString;
 
@@ -160,6 +167,70 @@ mod os {
     }
 }
 
+#[cfg(target_os = "linux")]
+mod os {
+    /// What the machine has, available and in all, in bytes, as
+    /// /proc/meminfo says; 0, 0 when it can't be read.
+    pub fn memory() -> (u64, u64) {
+        let Ok(s) = std::fs::read_to_string("/proc/meminfo") else {
+            return (0, 0);
+        };
+        super::parse_meminfo(&s)
+    }
+
+    /// Unknown here: no run is paused for it.
+    pub fn pressure() -> i32 {
+        0
+    }
+
+    /// MemAvailable as a share of MemTotal, 0 to 100; -1 when it can't be
+    /// read.
+    pub fn mem_level() -> i32 {
+        match memory() {
+            (_, 0) => -1,
+            (avail, total) => (avail * 100 / total) as i32,
+        }
+    }
+
+    /// Lowers each of pid's threads to nice n, never raising one: Linux
+    /// keeps a nice per thread.
+    pub fn renice(pid: i32, n: i32) {
+        let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) else {
+            return;
+        };
+        for t in tasks.flatten() {
+            let Some(tid) = t.file_name().to_str().and_then(|s| s.parse::<i32>().ok()) else {
+                continue;
+            };
+            if super::priority(tid).is_some_and(|cur| cur >= n) {
+                continue;
+            }
+            // SAFETY: setpriority takes plain integers.
+            unsafe {
+                libc::setpriority(libc::PRIO_PROCESS, tid as libc::id_t, n);
+            }
+        }
+    }
+}
+
+/// MemAvailable and MemTotal from /proc/meminfo's text, in bytes.
+pub fn parse_meminfo(s: &str) -> (u64, u64) {
+    let (mut avail, mut total) = (0u64, 0u64);
+    for l in s.lines() {
+        let mut f = l.split_ascii_whitespace();
+        let (Some(k), Some(v)) = (f.next(), f.next()) else {
+            continue;
+        };
+        let n = v.parse::<u64>().unwrap_or(0) << 10;
+        match k {
+            "MemAvailable:" => avail = n,
+            "MemTotal:" => total = n,
+            _ => {}
+        }
+    }
+    (avail, total)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,6 +244,13 @@ mod tests {
             Pages purgeable:                                 3.\n";
         assert_eq!(parse_vm_stat(out), Some(123 * 16384));
         assert_eq!(parse_vm_stat("nonsense"), None);
+    }
+
+    #[test]
+    fn parses_meminfo() {
+        let s = "MemTotal:       16000 kB\nMemFree:  10 kB\nMemAvailable:    4000 kB\n";
+        assert_eq!(parse_meminfo(s), (4000 << 10, 16000 << 10));
+        assert_eq!(parse_meminfo(""), (0, 0));
     }
 
     #[test]

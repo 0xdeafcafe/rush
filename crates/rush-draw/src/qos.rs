@@ -9,6 +9,7 @@
 /// Puts the calling thread in macOS's user-interactive class; elsewhere
 /// does nothing.
 pub(crate) fn interactive() {
+    #[cfg(target_os = "macos")]
     // SAFETY: takes plain values and changes only the calling thread.
     unsafe {
         libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_USER_INTERACTIVE, 0);

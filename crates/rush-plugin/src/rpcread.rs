@@ -1,6 +1,7 @@
 //! One thread reads every JSON-RPC connection in the process (Rust-only:
 //! Go reads each connection in a goroutine, which costs far less than a
-//! thread). It waits in one kqueue on every connection's descriptor, reads
+//! thread). It waits in one kqueue (an epoll on Linux) on every
+//! connection's descriptor, reads
 //! what's ready without blocking, cuts it into messages and hands each to
 //! its connection (`Conn::deliver`, rpc.rs). No handler runs on it: a
 //! slow one would hold up every other connection.
@@ -10,7 +11,7 @@
 use std::collections::HashMap;
 use std::io;
 use std::ops::Range;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -228,16 +229,7 @@ impl Reader {
     }
 
     fn make() -> Option<Reader> {
-        // SAFETY: kqueue takes nothing; a non-negative result is ours.
-        let kq = unsafe { libc::kqueue() };
-        if kq < 0 {
-            return None;
-        }
-        // SAFETY: kq is a descriptor we just made, ours to own.
-        let kq = unsafe {
-            libc::fcntl(kq, libc::F_SETFD, libc::FD_CLOEXEC);
-            OwnedFd::from_raw_fd(kq)
-        };
+        let kq = sys::queue()?;
         Some(Reader {
             kq,
             conns: Mutex::new(HashMap::new()),
@@ -282,7 +274,7 @@ impl Reader {
             }),
         });
         lock(&self.conns).insert(token, e);
-        if self.ctl(raw, libc::EV_ADD, token).is_ok() {
+        if self.ctl(raw, sys::Op::Add, token).is_ok() {
             return Ok(());
         }
         // Never watched, so nothing else holds it.
@@ -293,61 +285,27 @@ impl Reader {
         }
     }
 
-    fn ctl(&self, fd: RawFd, flags: u16, token: u64) -> io::Result<()> {
-        // SAFETY: kevent is plain data.
-        let mut ev: libc::kevent = unsafe { std::mem::zeroed() };
-        ev.ident = fd as usize;
-        ev.filter = libc::EVFILT_READ;
-        ev.flags = flags;
-        ev.udata = std::ptr::without_provenance_mut(token as usize);
-        // SAFETY: one change from a valid kevent; no events asked for.
-        let r = unsafe {
-            libc::kevent(
-                self.kq.as_raw_fd(),
-                &ev,
-                1,
-                std::ptr::null_mut(),
-                0,
-                std::ptr::null(),
-            )
-        };
-        if r < 0 {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(())
-        }
+    fn ctl(&self, fd: RawFd, op: sys::Op, token: u64) -> io::Result<()> {
+        sys::ctl(&self.kq, fd, op, token)
     }
 
     fn run(&self) {
-        // SAFETY: kevent is plain data.
-        let mut events = vec![unsafe { std::mem::zeroed::<libc::kevent>() }; 64];
+        let mut events = Vec::with_capacity(64);
         loop {
-            // SAFETY: events is valid for its length; no timeout.
-            let n = unsafe {
-                libc::kevent(
-                    self.kq.as_raw_fd(),
-                    std::ptr::null(),
-                    0,
-                    events.as_mut_ptr(),
-                    events.len() as i32,
-                    std::ptr::null(),
-                )
-            };
-            if n < 0 {
-                let e = io::Error::last_os_error();
+            events.clear();
+            if let Err(e) = sys::wait(&self.kq, &mut events) {
                 if e.kind() == io::ErrorKind::Interrupted {
                     continue;
                 }
                 self.fail(&e.to_string());
                 return;
             }
-            for ev in &events[..n as usize] {
-                let token = ev.udata.addr() as u64;
+            for &(token, err) in &events {
                 let Some(e) = lock(&self.conns).get(&token).cloned() else {
                     continue; // ended since
                 };
-                if ev.flags & libc::EV_ERROR != 0 {
-                    let err = io::Error::from_raw_os_error(ev.data as i32).to_string();
+                if let Some(errno) = err {
+                    let err = io::Error::from_raw_os_error(errno).to_string();
                     self.end_locked(&e, &mut lock(&e.state), err);
                     continue;
                 }
@@ -383,7 +341,7 @@ impl Reader {
                 // between seeing the queue empty and this.
                 if !st.ended && e.conn.queued() {
                     st.paused = true;
-                    let _ = self.ctl(e.fd.as_raw_fd(), libc::EV_DISABLE, e.token);
+                    let _ = self.ctl(e.fd.as_raw_fd(), sys::Op::Disable, e.token);
                 }
             }
             Err(err)
@@ -403,7 +361,7 @@ impl Reader {
             return;
         }
         st.ended = true;
-        let _ = self.ctl(e.fd.as_raw_fd(), libc::EV_DELETE, e.token);
+        let _ = self.ctl(e.fd.as_raw_fd(), sys::Op::Delete, e.token);
         lock(&self.conns).remove(&e.token);
         e.conn.deliver(Item::Finish(err));
     }
@@ -430,7 +388,7 @@ pub(crate) fn resume(token: u64) {
     let mut st = lock(&e.state);
     if st.paused && !st.ended {
         st.paused = false;
-        let _ = r.ctl(e.fd.as_raw_fd(), libc::EV_ENABLE, e.token);
+        let _ = r.ctl(e.fd.as_raw_fd(), sys::Op::Enable, e.token);
     }
 }
 
@@ -449,6 +407,143 @@ pub(crate) fn end(token: u64, why: Why) {
         Why::Closed => "file already closed".into(),
     };
     r.end_locked(&e, &mut st, err);
+}
+
+/// The kernel's queue of ready descriptors: kqueue on macOS, epoll on
+/// Linux. Both watch for reading, level-triggered: what's left unread
+/// stays ready.
+mod sys {
+    use std::io;
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+
+    /// What's done to a descriptor's watch.
+    #[derive(Clone, Copy)]
+    pub(super) enum Op {
+        Add,
+        /// Kept, but not told of till enabled again.
+        Disable,
+        Enable,
+        Delete,
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn queue() -> Option<OwnedFd> {
+        // SAFETY: kqueue takes nothing; a non-negative result is ours.
+        let kq = unsafe { libc::kqueue() };
+        if kq < 0 {
+            return None;
+        }
+        // SAFETY: kq is a descriptor we just made, ours to own.
+        Some(unsafe {
+            libc::fcntl(kq, libc::F_SETFD, libc::FD_CLOEXEC);
+            OwnedFd::from_raw_fd(kq)
+        })
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn ctl(kq: &OwnedFd, fd: RawFd, op: Op, token: u64) -> io::Result<()> {
+        // SAFETY: kevent is plain data.
+        let mut ev: libc::kevent = unsafe { std::mem::zeroed() };
+        ev.ident = fd as usize;
+        ev.filter = libc::EVFILT_READ;
+        ev.flags = match op {
+            Op::Add => libc::EV_ADD,
+            Op::Disable => libc::EV_DISABLE,
+            Op::Enable => libc::EV_ENABLE,
+            Op::Delete => libc::EV_DELETE,
+        };
+        ev.udata = std::ptr::without_provenance_mut(token as usize);
+        // SAFETY: one change from a valid kevent; no events asked for.
+        let r = unsafe {
+            libc::kevent(
+                kq.as_raw_fd(),
+                &ev,
+                1,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null(),
+            )
+        };
+        if r < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Blocks until descriptors are ready: each one's token, and the
+    /// error the kernel gave it, if any.
+    #[cfg(target_os = "macos")]
+    pub(super) fn wait(kq: &OwnedFd, out: &mut Vec<(u64, Option<i32>)>) -> io::Result<()> {
+        // SAFETY: kevent is plain data.
+        let mut events = [unsafe { std::mem::zeroed::<libc::kevent>() }; 64];
+        // SAFETY: events is valid for its length; no timeout.
+        let n = unsafe {
+            libc::kevent(
+                kq.as_raw_fd(),
+                std::ptr::null(),
+                0,
+                events.as_mut_ptr(),
+                events.len() as i32,
+                std::ptr::null(),
+            )
+        };
+        if n < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        out.extend(events[..n as usize].iter().map(|ev| {
+            let err = (ev.flags & libc::EV_ERROR != 0).then_some(ev.data as i32);
+            (ev.udata.addr() as u64, err)
+        }));
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn queue() -> Option<OwnedFd> {
+        // SAFETY: epoll_create1 takes flags; a non-negative result is ours.
+        let ep = unsafe { libc::epoll_create1(libc::EPOLL_CLOEXEC) };
+        // SAFETY: as above.
+        (ep >= 0).then(|| unsafe { OwnedFd::from_raw_fd(ep) })
+    }
+
+    /// epoll won't watch a regular file (EPERM): that fails the add, and
+    /// the connection reads on a thread of its own.
+    #[cfg(target_os = "linux")]
+    pub(super) fn ctl(ep: &OwnedFd, fd: RawFd, op: Op, token: u64) -> io::Result<()> {
+        let (how, events) = match op {
+            Op::Add => (libc::EPOLL_CTL_ADD, libc::EPOLLIN),
+            Op::Disable => (libc::EPOLL_CTL_MOD, 0),
+            Op::Enable => (libc::EPOLL_CTL_MOD, libc::EPOLLIN),
+            Op::Delete => (libc::EPOLL_CTL_DEL, 0),
+        };
+        let mut ev = libc::epoll_event {
+            events: events as u32,
+            u64: token,
+        };
+        // SAFETY: both descriptors are open; ev is one valid event.
+        let r = unsafe { libc::epoll_ctl(ep.as_raw_fd(), how, fd, &mut ev) };
+        if r < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Blocks until descriptors are ready: each one's token. An error or
+    /// hang-up shows when it's read, as an end.
+    #[cfg(target_os = "linux")]
+    pub(super) fn wait(ep: &OwnedFd, out: &mut Vec<(u64, Option<i32>)>) -> io::Result<()> {
+        let mut events = [libc::epoll_event { events: 0, u64: 0 }; 64];
+        // SAFETY: events is valid for its length; no timeout.
+        let n = unsafe {
+            libc::epoll_wait(ep.as_raw_fd(), events.as_mut_ptr(), events.len() as i32, -1)
+        };
+        if n < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        out.extend(events[..n as usize].iter().map(|ev| (ev.u64, None)));
+        Ok(())
+    }
 }
 
 fn is_socket(fd: RawFd) -> bool {

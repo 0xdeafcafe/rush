@@ -1,20 +1,36 @@
 //! Whether you're at the machine (Rust-only): how long since any key or
 //! mouse anywhere on it, and whether its screen is locked. The runaway
 //! guard's away mode asks; both are cheap calls (IOKit's HIDIdleTime, the
-//! window server's session dictionary). None where it can't tell.
+//! window server's session dictionary). None where it can't tell, which
+//! is anywhere but macOS.
 
 use std::time::Duration;
 
 /// How long since the last key or mouse anywhere on the machine.
+#[cfg(target_os = "macos")]
 pub fn since_input() -> Option<Duration> {
     mac::hid_idle()
 }
 
 /// Whether the screen is locked.
+#[cfg(target_os = "macos")]
 pub fn screen_locked() -> Option<bool> {
     Some(mac::locked())
 }
 
+/// How long since the last key or mouse: not told here.
+#[cfg(not(target_os = "macos"))]
+pub fn since_input() -> Option<Duration> {
+    None
+}
+
+/// Whether the screen is locked: not told here.
+#[cfg(not(target_os = "macos"))]
+pub fn screen_locked() -> Option<bool> {
+    None
+}
+
+#[cfg(target_os = "macos")]
 mod mac {
     use std::ffi::{c_char, c_void};
     use std::time::Duration;

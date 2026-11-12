@@ -1,5 +1,6 @@
 //! Waiting on processes without polling them: kqueue's NOTE_EXIT on macOS,
-//! a look every 50ms elsewhere (as Go looks everywhere).
+//! a pidfd on Linux, a look every 50ms where neither can be had (as Go
+//! looks everywhere).
 
 use std::time::{Duration, Instant};
 
@@ -31,8 +32,35 @@ pub fn wait_exit_forever(pid: i64) {
     }
 }
 
+/// Waits on pid's pidfd for its exit: Some(true) when it did, Some(false)
+/// at the timeout, None when it can't wait so (no pidfd, or no such pid).
+#[cfg(target_os = "linux")]
+fn kq_wait(pid: i32, timeout: Option<Duration>) -> Option<bool> {
+    use std::os::fd::AsRawFd;
+    let fd = rush_sys::proc::pidfd(pid)?;
+    // Held now, so it can't exit unseen; but it may already be a zombie.
+    if !crate::alive(pid as i64) {
+        return Some(true);
+    }
+    let ms = timeout.map_or(-1, |d| d.as_millis().min(i32::MAX as u128) as i32);
+    let mut p = libc::pollfd {
+        fd: fd.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    loop {
+        // SAFETY: one valid pollfd.
+        let n = unsafe { libc::poll(&mut p, 1, ms) };
+        if n < 0 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+            continue;
+        }
+        return Some(n > 0);
+    }
+}
+
 /// Waits on kqueue for pid's exit: Some(true) when it did, Some(false) at
 /// the timeout, None when it can't wait so (no kqueue, or no such pid).
+#[cfg(target_os = "macos")]
 fn kq_wait(pid: i32, timeout: Option<Duration>) -> Option<bool> {
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
     // SAFETY: kqueue takes nothing; a non-negative result is ours.

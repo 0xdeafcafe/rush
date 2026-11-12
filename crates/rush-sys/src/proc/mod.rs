@@ -2,15 +2,24 @@
 //! them costs in memory and CPU.
 //!
 //! Ported from internal/proc/proc.go:1-159 and protect.go:1-37; the
-//! platform half is in `darwin.rs` (proc_darwin.go).
+//! platform half is in `darwin.rs` (proc_darwin.go) and `linux.rs`
+//! (proc_linux.go).
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasher, BuildHasherDefault, Hasher};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+#[cfg(target_os = "macos")]
 mod darwin;
+#[cfg(target_os = "macos")]
 use darwin as os;
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+use linux as os;
+#[cfg(target_os = "linux")]
+pub use linux::pidfd;
 
 mod sampler;
 pub use sampler::{Sampler, Usage};
@@ -246,7 +255,7 @@ pub fn readable_env(pid: Pid) -> Option<Vec<String>> {
 }
 
 /// The name a process runs as (its comm: the program's file name, cut to
-/// 16 bytes on macOS); None when it isn't running. What tells a pid that's
+/// 16 bytes on macOS, 15 on Linux); None when it isn't running. What tells a pid that's
 /// still the agent's program from one reused by another.
 pub fn comm(pid: Pid) -> Option<String> {
     if let Some(d) = demo() {

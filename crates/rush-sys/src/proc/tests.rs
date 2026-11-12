@@ -70,6 +70,7 @@ fn readable_env_only_when_the_kernel_gives_it() {
     assert_eq!(readable_env(pid), None, "a gone process's");
 }
 
+#[cfg(target_os = "macos")]
 #[test]
 fn procargs2() {
     let mut b = 2u32.to_le_bytes().to_vec();
@@ -84,6 +85,22 @@ fn procargs2() {
         (vec!["x".into(), "y".into()], vec![])
     );
     assert_eq!(darwin::parse_procargs2(b"ab"), (vec![], vec![]));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn stat_line() {
+    let s = linux::parse_stat(
+        b"42 (a (b) c) S 7 42 42 0 -1 4194560 100 0 0 0 30 12 0 0 20 0 1 0 5000 1000 50",
+    )
+    .unwrap();
+    assert_eq!(s.comm, b"a (b) c");
+    assert_eq!(
+        (s.state, s.ppid, s.cpu_ticks, s.start_ticks),
+        (b'S', 7, 42, 5000)
+    );
+    assert_eq!(linux::parse_stat(b"42 (x) S 7"), None);
+    assert_eq!(linux::parse_stat(b"no parens"), None);
 }
 
 /// A made-up table: pid → (ppid, footprint, cpu).
@@ -245,7 +262,16 @@ fn a_process_its_own_parent_ends_the_walk() {
 #[test]
 fn comm_names_the_program() {
     let mut c = Command::new("sleep").arg("30").spawn().unwrap();
-    assert_eq!(comm(c.id() as Pid).as_deref(), Some("sleep"));
+    // Linux names the process as exec ends, a moment after the parent
+    // may already go on: until then it has the forking thread's name.
+    let pid = c.id() as Pid;
+    for _ in 0..200 {
+        if comm(pid).as_deref() == Some("sleep") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(comm(pid).as_deref(), Some("sleep"));
     c.kill().unwrap();
     c.wait().unwrap();
     assert_eq!(comm(c.id() as Pid), None);

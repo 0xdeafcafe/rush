@@ -95,6 +95,7 @@ fn poll_exits(tab: &Table, pids: &[Pid], end: Instant) -> Vec<Pid> {
 
 /// Waiting for processes to exit on kqueue: it returns the moment the last
 /// one goes, rather than at the next look.
+#[cfg(target_os = "macos")]
 mod exits {
     use std::collections::HashSet;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -183,6 +184,68 @@ mod exits {
                 .filter(|p| waiting.contains(p))
                 .collect(),
         )
+    }
+}
+
+/// Waiting for processes to exit on their pidfds, as on kqueue elsewhere.
+#[cfg(target_os = "linux")]
+mod exits {
+    use std::os::fd::{AsRawFd, OwnedFd};
+    use std::time::Instant;
+
+    use crate::proc::{self, Pid, Table};
+
+    /// Which of pids (all in tab) are still running at end; None when the
+    /// kernel gives no pidfds.
+    pub(super) fn wait(tab: &Table, pids: &[Pid], end: Instant) -> Option<Vec<Pid>> {
+        let mut waiting: Vec<(Pid, OwnedFd)> = Vec::new();
+        for &pid in pids {
+            let Some(fd) = proc::pidfd(pid) else {
+                if std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+                    continue; // gone already
+                }
+                return None;
+            };
+            // Held now, so it can't exit unseen; but it may have exited
+            // (a zombie) or been replaced before it was.
+            let same = proc::started(pid)
+                .is_some_and(|s| tab.procs.get(&pid).is_some_and(|p| p.start == s));
+            if same && !proc::zombie(pid) {
+                waiting.push((pid, fd));
+            }
+        }
+        while !waiting.is_empty() {
+            let Some(d) = end
+                .checked_duration_since(Instant::now())
+                .filter(|d| !d.is_zero())
+            else {
+                break;
+            };
+            let mut fds: Vec<libc::pollfd> = waiting
+                .iter()
+                .map(|(_, fd)| libc::pollfd {
+                    fd: fd.as_raw_fd(),
+                    events: libc::POLLIN,
+                    revents: 0,
+                })
+                .collect();
+            let ms = d.as_millis().clamp(1, i32::MAX as u128) as i32;
+            // SAFETY: fds is valid for its length.
+            let n = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, ms) };
+            if n < 0 {
+                if std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
+                    continue;
+                }
+                return None;
+            }
+            let mut i = 0;
+            waiting.retain(|_| {
+                let gone = fds[i].revents != 0;
+                i += 1;
+                !gone
+            });
+        }
+        Some(waiting.into_iter().map(|(p, _)| p).collect())
     }
 }
 

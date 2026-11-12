@@ -35,6 +35,7 @@ pub fn wait_stopped(pid: i32, cont: bool) {
 
 /// Whether pid exits (or is gone already) within d: any process, not only
 /// our children. kqueue's EVFILT_PROC says so the moment it does.
+#[cfg(target_os = "macos")]
 pub fn gone_within(pid: i32, d: Duration) -> bool {
     // SAFETY: plain kqueue calls on a kqueue we own and close.
     unsafe {
@@ -63,6 +64,24 @@ pub fn gone_within(pid: i32, d: Duration) -> bool {
         libc::close(kq);
         n > 0
     }
+}
+
+/// Whether pid exits (or is gone already) within d: any process, not only
+/// our children. Its pidfd turns readable the moment it does.
+#[cfg(target_os = "linux")]
+pub fn gone_within(pid: i32, d: Duration) -> bool {
+    use std::os::fd::AsRawFd;
+    let Some(fd) = crate::proc::pidfd(pid) else {
+        return true; // ESRCH: not there
+    };
+    let mut p = libc::pollfd {
+        fd: fd.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    let ms = d.as_millis().min(i32::MAX as u128) as i32;
+    // SAFETY: one valid pollfd.
+    unsafe { libc::poll(&mut p, 1, ms) > 0 }
 }
 
 /// Whether pid answers kill(pid, 0) and isn't a zombie.

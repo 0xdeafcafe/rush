@@ -1,7 +1,8 @@
 name: CI
 
 # Checks every push to main and to a rush/* branch: formatting, clippy and
-# the tests, on a Mac (rush's home). A push to main also builds rush for
+# the tests, on a Mac (rush's home), and a build and the system crates'
+# tests on Linux. A push to main also builds rush for
 # Apple silicon and keeps it as the run's artifact, `rush-main`, which
 # tools/install-ci.sh downloads and installs: the builds that would
 # otherwise load the machine rush runs on.
@@ -76,6 +77,39 @@ jobs:
             --skip shimmers_on_his_second \
             --skip stuck_shell_is_stopped \
             --skip compacts_only_the_conversation_expected
+      - name: Cache use
+        if: always()
+        run: |
+          if command -v sccache >/dev/null; then sccache --show-stats; else echo "no sccache, so built uncached"; fi
+
+  linux:
+    # rush on a Linux server: it builds, and the crates with their own
+    # Linux code (processes, file watches, network) pass their tests.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+      # GitHub's download of sccache sometimes answers 504; then build
+      # uncached rather than fail the run before anything is built.
+      - uses: mozilla-actions/sccache-action@v0.0.9
+        id: sccache
+        continue-on-error: true
+      - name: Without sccache
+        if: steps.sccache.outcome != 'success'
+        run: |
+          echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=false" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: linux
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build
+        run: cargo build --locked -p rush
+      - name: Test
+        run: cargo test --locked -p rush-sys -p rush-net -p rush-state
       - name: Cache use
         if: always()
         run: |

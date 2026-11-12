@@ -145,10 +145,29 @@ pub fn lock() -> Result<u32, i32> {
 /// A process's arguments; empty when they can't be read (another user's
 /// process, or none at pid).
 pub fn proc_args(pid: i32) -> Vec<Vec<u8>> {
-    darwin_args(pid)
+    os_args(pid)
+}
+
+#[cfg(target_os = "macos")]
+use self::darwin_args as os_args;
+#[cfg(target_os = "linux")]
+use self::linux_args as os_args;
+
+/// /proc/<pid>/cmdline: the arguments, each ended by a NUL.
+#[cfg(target_os = "linux")]
+fn linux_args(pid: i32) -> Vec<Vec<u8>> {
+    let Ok(b) = fs::read(format!("/proc/{pid}/cmdline")) else {
+        return Vec::new();
+    };
+    let b = b.strip_suffix(&[0]).unwrap_or(&b);
+    if b.is_empty() {
+        return Vec::new();
+    }
+    b.split(|c| *c == 0).map(<[u8]>::to_vec).collect()
 }
 
 /// kern.procargs2: argc, the executable's path, padding, then argv.
+#[cfg(target_os = "macos")]
 fn darwin_args(pid: i32) -> Vec<Vec<u8>> {
     let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
     let mut size: libc::size_t = 0;

@@ -126,7 +126,7 @@ pub fn grown(stop: &Stop, files: &[File]) -> bool {
         return poll(stop, files, Duration::from_millis(25));
     }
     #[cfg(test)]
-    watched::told(files);
+    super::watched::told(files);
     // Written between being read and being watched.
     if changed(files) {
         return true;
@@ -735,28 +735,5 @@ impl Watcher {
         w.retire.clear();
         w.joined.clear();
         w.kq = None;
-    }
-}
-
-/// Tests wait here until a grown call watches their file, so what they do
-/// next lands after the watch starts.
-#[cfg(test)]
-pub(crate) mod watched {
-    use std::path::{Path, PathBuf};
-    use std::sync::{Condvar, Mutex};
-
-    static W: (Mutex<Vec<PathBuf>>, Condvar) = (Mutex::new(Vec::new()), Condvar::new());
-
-    pub(crate) fn told(files: &[super::File]) {
-        W.0.lock()
-            .unwrap()
-            .extend(files.iter().map(|f| f.path.clone()));
-        W.1.notify_all();
-    }
-
-    /// Blocks until a grown call has watched p.
-    pub(crate) fn wait(p: &Path) {
-        let g = W.0.lock().unwrap();
-        let _g = W.1.wait_while(g, |w| !w.iter().any(|x| x == p)).unwrap();
     }
 }

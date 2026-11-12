@@ -156,8 +156,36 @@ pub fn read_disk() -> Disk {
 /// IOKit's power sources where pmset reads it, with no program started:
 /// present with an internal battery, its charge, and charging while the
 /// power comes from AC.
+#[cfg(target_os = "macos")]
 pub fn read_battery() -> Battery {
     ps::read().unwrap_or_default()
+}
+
+/// The battery, from Linux's power supply class: the first BAT* there,
+/// its capacity, and charging unless it says it is discharging.
+#[cfg(not(target_os = "macos"))]
+pub fn read_battery() -> Battery {
+    let Ok(dir) = std::fs::read_dir("/sys/class/power_supply") else {
+        return Battery::default();
+    };
+    let mut bats: Vec<std::path::PathBuf> = dir
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().as_encoded_bytes().starts_with(b"BAT"))
+        .map(|e| e.path())
+        .collect();
+    bats.sort();
+    let Some(b) = bats.first() else {
+        return Battery::default();
+    };
+    let Ok(c) = std::fs::read_to_string(b.join("capacity")) else {
+        return Battery::default();
+    };
+    let status = std::fs::read_to_string(b.join("status")).unwrap_or_default();
+    Battery {
+        present: true,
+        percent: c.trim().parse().unwrap_or(0),
+        charging: status.trim() != "Discharging",
+    }
 }
 
 /// The battery, from `pmset -g batt`: what [`read_battery`] reads,
@@ -173,6 +201,7 @@ pub fn read_battery_pmset() -> Battery {
 }
 
 /// IOKit's power sources (IOPowerSources.h), as pmset reads them.
+#[cfg(target_os = "macos")]
 mod ps {
     use std::ffi::{c_char, c_void};
 
@@ -306,6 +335,7 @@ mod tests {
     use super::*;
 
     // IOKit's reading is the one pmset prints (Go reads pmset).
+    #[cfg(target_os = "macos")]
     #[test]
     fn iokit_reads_as_pmset_does() {
         let (a, b) = (read_battery(), read_battery_pmset());

@@ -154,6 +154,7 @@ pub fn count() -> usize {
 }
 
 /// How many threads process pid runs now; 0 when it can't be told.
+#[cfg(target_os = "macos")]
 pub fn count_of(pid: i32) -> usize {
     // SAFETY: zeroed is a valid proc_taskinfo; proc_pidinfo fills it.
     let mut ti: libc::proc_taskinfo = unsafe { std::mem::zeroed() };
@@ -177,10 +178,12 @@ pub fn count_of(pid: i32) -> usize {
 
 /// proc_pidinfo's list of a process's threads (sys/proc_info.h), which
 /// libc doesn't name.
+#[cfg(target_os = "macos")]
 const PROC_PIDLISTTHREADS: libc::c_int = 6;
 
 /// The names of this process's threads now, an unnamed one as ""; empty
 /// when they can't be told. For a test to say which it didn't expect.
+#[cfg(target_os = "macos")]
 pub fn names() -> Vec<String> {
     let pid = std::process::id() as i32;
     let mut ids = vec![0u64; count() + 16];
@@ -220,6 +223,29 @@ pub fn names() -> Vec<String> {
                     .into_owned()
             })
         })
+        .collect()
+}
+
+/// How many threads process pid runs now; 0 when it can't be told. On
+/// Linux, the entries of /proc/<pid>/task.
+#[cfg(target_os = "linux")]
+pub fn count_of(pid: i32) -> usize {
+    if pid <= 0 {
+        return 0;
+    }
+    std::fs::read_dir(format!("/proc/{pid}/task")).map_or(0, |d| d.count())
+}
+
+/// The names of this process's threads now, an unnamed one as its
+/// program's name (Linux names a thread after it until told otherwise);
+/// empty when they can't be told.
+#[cfg(target_os = "linux")]
+pub fn names() -> Vec<String> {
+    let Ok(d) = std::fs::read_dir("/proc/self/task") else {
+        return Vec::new();
+    };
+    d.filter_map(|e| std::fs::read_to_string(e.ok()?.path().join("comm")).ok())
+        .map(|s| s.trim_end_matches('\n').to_string())
         .collect()
 }
 

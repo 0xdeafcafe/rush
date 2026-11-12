@@ -19,14 +19,22 @@ pub fn let_go<T: Send + 'static>(v: T) {
         });
 }
 
-/// Asks the allocator to return the pages it holds free.
+/// Asks the allocator to return the pages it holds free: every malloc
+/// zone on macOS, glibc's malloc_trim on Linux.
 pub fn give_back() {
     // SAFETY: a null zone asks every zone; it only returns free pages.
+    #[cfg(target_os = "macos")]
     unsafe {
         malloc_zone_pressure_relief(std::ptr::null_mut(), 0);
     }
+    // SAFETY: only returns free pages.
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    unsafe {
+        libc::malloc_trim(0);
+    }
 }
 
+#[cfg(target_os = "macos")]
 unsafe extern "C" {
     fn malloc_zone_pressure_relief(zone: *mut libc::c_void, goal: libc::size_t) -> libc::size_t;
 }
