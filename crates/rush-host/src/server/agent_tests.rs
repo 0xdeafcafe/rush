@@ -901,3 +901,73 @@ fn an_answered_turn_rests() {
     h.on_agent_event(&mut st, &conn, turn_end("Done."));
     assert!(h.runtime_idle_safe(&st));
 }
+
+// Rust-only: a limit the agent said before stays its own. A sign-in that
+// fails after it is the sign-in, never the limit again; and an agent
+// started again (as a switch of login does) starts with none.
+#[test]
+fn a_limit_said_before_isnt_a_sign_in() {
+    let _home = Home::new();
+    for (name, before, err, limit, signed_out) in [
+        (
+            "signed out after a limit",
+            true,
+            "Failed to authenticate: OAuth session expired and could not be refreshed",
+            false,
+            true,
+        ),
+        ("an error after a limit", true, "is_error", true, false),
+        (
+            "a limit",
+            false,
+            "You've hit your weekly limit · resets Nov 15 at 4pm",
+            true,
+            false,
+        ),
+        (
+            "signed out",
+            false,
+            "Not logged in · Please run /login",
+            false,
+            true,
+        ),
+    ] {
+        let h = host(cfg("lim"));
+        let conn: Arc<dyn Conn> = Arc::new(Kept::default());
+        with_conn(&h, conn.clone());
+        let mut st = h.lock();
+        st.info.state = "working".into();
+        if before {
+            st.limited = Some(event::Limited {
+                window: "seven_day".into(),
+                resets_at: 1,
+            });
+            st.info.limit = Some(Limit::default());
+        }
+        h.on_turn_end(
+            &mut st,
+            &conn,
+            event::TurnEnd {
+                reason: "done".into(),
+                err: err.into(),
+                ..Default::default()
+            },
+        );
+        assert_eq!(st.info.limit.is_some(), limit, "{name}: limit");
+        assert_eq!(
+            st.info.error.starts_with(AUTH_STOPPED),
+            signed_out,
+            "{name}: {}",
+            st.info.error
+        );
+    }
+    let h = host(cfg("lim2"));
+    with_conn(&h, Arc::new(Kept::default()));
+    let mut st = h.lock();
+    st.limited = Some(event::Limited::default());
+    let _ = h.detach(&mut st);
+    assert!(
+        st.limited.is_none(),
+        "a new agent starts with the old one's limit"
+    );
+}
