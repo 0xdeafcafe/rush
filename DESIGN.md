@@ -1263,20 +1263,72 @@ deleted as it went. Here it never deletes on its own:
 - The sheet's first choice is Clean up now (`CareChoice::CleanUp`, `c`):
   rush's own list by its rules, no agent and no plugin needed. It opens
   Clean up, which beyond worktrees and scratch measures, off the UI once
-  it's open, caches that rebuild themselves (`clean.rs` `find_caches`):
-  - the folders cleanup rules name (rush-fleet's `rules.rs`): built in
-    (`BUILT_IN`: go-build, golangci-lint, goimports, pnpm's metadata cache,
-    VS Code's update download, deno, biome, act, vitest) and learned. A
-    rule is only ever a folder directly in ~/Library/Caches or ~/.cache,
-    never rush's or agtop's own (`may_be_rule`); ticked whatever changed
-    it lately, since the tool that made it makes it again;
-  - the build caches at the top of each worktree nobody works in that
-    isn't ticked to go whole, never a main checkout; ticked once unchanged
-    for a day (`CACHE_IDLE`).
-  Delete removes them through `remove_rule_cache` (refused unless a rule
-  names it, as named, a folder not a link) and `remove_cache` (refused
-  when changed since Clean up measured it), then pnpm store prune when a
-  node_modules went, which is what frees pnpm's hard links.
+  it's open, what rush's rules decide (`rush_fleet::survey`, rush-fleet's
+  `sweep.rs`), so the rules run as code and an agent is needed only for
+  what they can't decide:
+  - the folders cleanup rules name (rush-fleet's `rules.rs`). Built in,
+    an explicit allowlist (`BUILT_IN`), always: go-build (both),
+    golangci-lint, goimports, pnpm's metadata cache, VS Code's update
+    download, deno, biome, dotslash, Arc, act, vitest,
+    ~/.langwatch/portless/node-compile-cache, and rush's own
+    ~/Library/Caches/rush/terraform-plugins (terraform init fetches it
+    again); only once untouched for a while (`idle`, `decide`):
+    ~/.cache/prisma 30 days, ~/.cache/uv an hour (running sessions write
+    to it), each ~/.nx/<hex hash> 7 days (`each`); and Go's module cache
+    (`go_mod_cache`: GOMODCACHE, GOPATH's, ~/go/pkg/mod), cleared by `go
+    clean -modcache` and never removed by hand (`How::GoClean`: its files
+    are read-only). Learned rules are only ever a folder directly in
+    ~/Library/Caches or ~/.cache, never rush's or agtop's own
+    (`may_be_rule`). Ticked when the rule says it goes now, with why
+    (`FoundCache::ok`, `note`);
+  - the build caches of each worktree nobody works in that isn't ticked to
+    go whole, never a main checkout: at its top (`CACHE_NAMES`) and each
+    app's `apps/*/node_modules` (`caches_in`); ticked once the worktree,
+    outside node_modules, sat untouched for a day (`WT_IDLE`,
+    `newest_outside`) and no process works in it (`process_cwds`: every
+    process's cwd, `rush_sys::proc::cwd`);
+  - last, the commands every run ends with (`end_commands`, group "Run
+    last, once"): pnpm store prune when pnpm is there, then `docker image
+    prune -f` and `docker builder prune -f` when docker is; under colima
+    (~/.colima) the row says the space comes back only once its VM trims
+    its disk.
+  Each worktree row says its group and why (`rush_fleet::Triage`,
+  `triage.rs`), from its uncommitted files (noise told from work: a lone
+  .claude/settings.local.json, a lockfile; `noise`), its pull request as
+  GitHub says (a squash merge is merged), its commits on no remote and in
+  no merged pull request, when it last changed outside node_modules, and
+  whether a process works in it: SAFE goes whole and loses nothing;
+  NOISE-ONLY too, only noise uncommitted (an own one is ticked, and Delete
+  doesn't call it losing work); CACHE-ONLY holds work so it stays, but
+  sat a day untouched, so its caches go; KEEP, someone works in it, git
+  can't say, or it holds work touched within the day. Not yet measured,
+  one holding work is KEEP without a time.
+  And at the bottom, never ticked and not tickable, the biggest of what
+  rush never touches (`never_touch_big`: each child of a NEVER_TOUCH
+  folder of 1G or more, at most 8), for you to decide on.
+  Delete removes them through `remove_found`: `remove_rule_cache`
+  (refused unless a rule names it, as named, a folder not a link, and,
+  for a rule that waits, still untouched), `remove_cache` (refused when
+  changed since Clean up measured it, or a process now works in its
+  worktree), then the commands once each. It reads the free disk before
+  and after (statfs, as df) and says what df shows it freed, not a sum of
+  sizes (`cleaned_words`), logged as `clean-up`.
+- Every removal a cleanup makes (Clean up's, the dire clean's, tidy's
+  temp work, scratch, orphans, what agents left) goes through
+  `rush_fleet::remove_tree`. It refuses, before anything goes, a path that
+  is, is in, or holds one of `NEVER_TOUCH` (~/.colima, ~/.codex/sessions,
+  ~/.claude, ~/Library/Application Support, ~/Library/Containers,
+  ~/Library/Group Containers, ~/Pictures, ~/.ollama), as given and
+  resolved; and a folder `remove_dir_all` can't empty (Permission denied:
+  nlpgo's code-block folders of mode 300 in sessions' scratch, which made
+  tidy fail every ten minutes with freed=0; dotslash's read-only .app
+  bundles) is made the owner's throughout (chmod -R u+rwx, links neither
+  followed nor changed) and removed again.
+- The cleanup agent is told what rush's rules found (`rules_known`): what
+  they say goes (left to Clean up), what they hold back and why, the
+  commands rush runs, and the biggest of what rush never touches, which
+  the agent may only list. Starting one measures the survey beside the
+  worktree scan and the plugins' reports.
 - Learning: when Clean up opens, each cleanup session's
   `cleanup-plan.tsv` is read, and each line marked conservative: yes whose
   path may be a rule and isn't one yet is kept in rush's folder
@@ -1296,19 +1348,24 @@ from `watch_machine`'s disk read, in the rush that leads, at most every
   start) for 30 minutes, and the cleanup's plan (its agent Blocked) open
   as long; with no plan yet, what rush knows is used (`dire_due`);
 - the set (`conservative_set`): done sessions' scratch untouched for 3
-  days, build caches (`rush_fleet::CACHE_NAMES`: target, node_modules,
-  .next, .turbo, dist) unchanged since the plan in worktrees nobody works
-  in and none would lose, then pnpm store prune after a node_modules.
-  Never a worktree, a stopped session's scratch, an orphan, or anything
-  changed since the plan. With a plan file, only what it marks
-  conservative and rush's own look agrees with. Biggest first, until free
-  is back over the level and 2G (`pick_dire`). Xcode's DerivedData isn't
-  in it: it isn't in a worktree, and rush can't tell Xcode's in use;
+  days, build caches (`rush_fleet::caches_in`) unchanged since the plan in
+  worktrees nobody works in, none would lose, untouched outside
+  node_modules for a day with no process in them (`touched`). Never a
+  worktree, a stopped session's scratch, an orphan, or anything changed
+  since the plan. With a plan file, only what it marks conservative and
+  rush's own look agrees with. To it, whatever the plan says, what the
+  cleanup rules say goes now (`DireKind::RuleCache`). Biggest first, until
+  free is back over the level and 2G, then the commands every clean ends
+  with (`pick_dire`'s ends: pnpm store prune, docker's prunes). Xcode's
+  DerivedData isn't in it: it isn't in a worktree, and rush can't tell
+  Xcode's in use;
 - each goes through rush-fleet's checked removals (`clean_stale_temp`,
-  `remove_cache`: refused when changed or in use, dry-run aware as
-  `empty-stale-temp`, `remove-cache`, `pnpm-store-prune`, each logged:
-  `temp-cleaned`, `cache-removed` with the cleanup session, and one
-  `dire-clean` with what went), then the news and a flash say what went
+  `remove_cache`, `remove_rule_cache`, `run_command`: refused when changed
+  or in use, dry-run aware as `empty-stale-temp`, `remove-cache`,
+  `remove-rule-cache`, `go-clean-modcache`, `run-cleanup-command`, each
+  logged: `temp-cleaned`, `cache-removed` with the cleanup session,
+  `cleanup-command`, and one `dire-clean` with what went and the free disk
+  before and after), then the news and a flash say what df shows it freed
   and that the rest waits, and the cleanup session is sent a note
   (queued) to ask the same decisions again for what's left.
 

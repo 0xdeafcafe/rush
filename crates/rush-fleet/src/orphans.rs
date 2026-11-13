@@ -221,12 +221,7 @@ pub fn remove_temp_orphan(o: &TempOrphan, running: &[String]) -> Result<i64, Str
         if rush_core::dryrun::would("remove-temp-orphan", &o.path, &why) {
             return Ok(0);
         }
-        let rm = if std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir()) {
-            std::fs::remove_dir_all(p)
-        } else {
-            std::fs::remove_file(p)
-        };
-        rm.map(|_| n.size).map_err(|e| e.to_string())
+        crate::sweep::remove_tree(&o.path).map(|_| n.size)
     })();
     rush_sys::events::log(
         "temp-orphan-removed",

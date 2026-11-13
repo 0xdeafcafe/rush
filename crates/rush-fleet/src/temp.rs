@@ -202,15 +202,11 @@ pub(crate) fn ms_of(t: std::time::SystemTime) -> Ms {
     }
 }
 
+/// Removes p, made writable first where it must be (a scratch folder of
+/// mode 300 that tidy's removal once failed on every ten minutes with
+/// Permission denied): sweep::remove_tree.
 fn remove_all(p: &str) -> Result<(), String> {
-    let path = Path::new(p);
-    let r = match std::fs::symlink_metadata(path) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => Err(e),
-        Ok(m) if m.is_dir() => std::fs::remove_dir_all(path),
-        Ok(_) => std::fs::remove_file(path),
-    };
-    r.map_err(|e| e.to_string())
+    crate::sweep::remove_tree(p)
 }
 
 /// Logs something done to an agent's files or processes: with its

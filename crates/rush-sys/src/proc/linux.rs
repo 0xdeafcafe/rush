@@ -244,6 +244,12 @@ pub(super) fn fd_file(pid: Pid, fd: i32) -> Option<PathBuf> {
     p.is_absolute().then_some(p)
 }
 
+/// The folder pid works in, through /proc/<pid>/cwd.
+pub(super) fn cwd(pid: Pid) -> Option<PathBuf> {
+    let p = std::fs::read_link(format!("/proc/{pid}/cwd")).ok()?;
+    p.is_absolute().then_some(p)
+}
+
 /// A descriptor that reads as ready once pid exits (pidfd_open(2)); None
 /// on a kernel without it, or when pid is gone.
 pub fn pidfd(pid: Pid) -> Option<OwnedFd> {

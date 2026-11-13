@@ -409,3 +409,35 @@ pub(super) fn fd_file(pid: Pid, fd: i32) -> Option<std::path::PathBuf> {
         &raw[..end],
     )))
 }
+
+/// The folder pid works in (proc_pidinfo's PROC_PIDVNODEPATHINFO, its
+/// cdir); None for a process gone or not ours to read.
+pub(super) fn cwd(pid: Pid) -> Option<std::path::PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    // SAFETY: plain data; zero is a valid value.
+    let mut info: libc::proc_vnodepathinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_vnodepathinfo>() as libc::c_int;
+    // SAFETY: info is a proc_vnodepathinfo, the flavour asked for, and size
+    // its size.
+    let n = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDVNODEPATHINFO,
+            0,
+            (&mut info as *mut libc::proc_vnodepathinfo).cast(),
+            size,
+        )
+    };
+    if n != size {
+        return None;
+    }
+    // SAFETY: vip_path is MAXPATHLEN bytes, held as 32 rows of 32.
+    let raw: &[u8] = unsafe {
+        std::slice::from_raw_parts(
+            info.pvi_cdir.vip_path.as_ptr().cast::<u8>(),
+            std::mem::size_of_val(&info.pvi_cdir.vip_path),
+        )
+    };
+    let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
+    (end > 0).then(|| std::path::PathBuf::from(std::ffi::OsStr::from_bytes(&raw[..end])))
+}

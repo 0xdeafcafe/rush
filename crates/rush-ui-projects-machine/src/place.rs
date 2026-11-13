@@ -773,16 +773,10 @@ fn remove_temp_entry(
     ))
 }
 
+/// Removes p, made writable first where it must be, never what rush never
+/// touches (rush_fleet::remove_tree).
 fn remove_all(p: &std::path::Path) -> Result<(), String> {
-    let r = if p.is_dir() && !p.is_symlink() {
-        std::fs::remove_dir_all(p)
-    } else {
-        std::fs::remove_file(p)
-    };
-    match r {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
-        _ => Ok(()),
-    }
+    rush_fleet::remove_tree(&p.to_string_lossy())
 }
 
 /// Empties a project's agent scratch folder, keeping it: only ever a tmp

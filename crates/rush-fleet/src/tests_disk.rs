@@ -120,6 +120,15 @@ fn clean_stale_temp_folder() {
     let (old, fresh) = (dir.join("old"), dir.join("fresh"));
     std::fs::create_dir_all(old.join("deep")).unwrap();
     std::fs::create_dir_all(&fresh).unwrap();
+    // A folder of mode 300 (nlpgo's code blocks): tidy failed on it every
+    // ten minutes with Permission denied until it was made the owner's.
+    let block = old.join("deep").join("nlpgo-codeblock-1");
+    std::fs::create_dir_all(block.join("x")).unwrap();
+    std::fs::write(block.join("x").join("f"), "x").unwrap();
+    for p in [block.join("x"), block.clone()] {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o300)).unwrap();
+    }
     let long = t - 5 * HOUR;
     touch(&old, long);
     assert!(
@@ -448,6 +457,25 @@ fn caches_removed_safely() {
         size
     );
     assert!(!wt.join("target").exists() && wt.join("src").exists());
+    // Each app's node_modules is one too; nothing else in apps is.
+    for n in [
+        "apps/web/node_modules",
+        "apps/web/src",
+        "apps/.x/node_modules",
+    ] {
+        std::fs::create_dir_all(wt.join(n).join("x")).unwrap();
+        std::fs::write(wt.join(n).join("x").join("f"), "data").unwrap();
+    }
+    let web = s(&wt.join("apps/web/node_modules"));
+    assert!(caches_in(&s(&wt)).contains(&web));
+    for p in [
+        s(&wt.join("apps/web/src")),
+        s(&wt.join("apps/.x/node_modules")),
+    ] {
+        assert!(remove_cache(&p, &free, later, "test", None).is_err(), "{p}");
+    }
+    assert!(remove_cache(&web, &free, later, "test", None).unwrap() > 0);
+    assert!(!wt.join("apps/web/node_modules").exists() && wt.join("apps/web/src").exists());
 }
 
 // An orphan goes only as it was looked at: not while a running session's

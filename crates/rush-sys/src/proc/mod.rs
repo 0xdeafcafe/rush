@@ -281,6 +281,16 @@ pub fn fd_file(pid: Pid, fd: i32) -> Option<std::path::PathBuf> {
     os::fd_file(pid, fd)
 }
 
+/// The folder a process works in (its cwd); None for one gone or not
+/// ours to read. Rust-only: what Clean up asks before it calls a folder
+/// nobody works in.
+pub fn cwd(pid: Pid) -> Option<std::path::PathBuf> {
+    if demo().is_some() || pid <= 0 {
+        return None;
+    }
+    os::cwd(pid)
+}
+
 /// A process's arguments, joined by spaces.
 pub fn command_line(pid: Pid) -> String {
     args(pid).join(" ")

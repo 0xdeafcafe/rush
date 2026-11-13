@@ -51,24 +51,56 @@ pub struct Doomed {
 }
 
 /// A cache Clean up offers: a folder a cleanup rule names
-/// (rush_fleet::cache_rules), or a build cache at the top of a worktree
-/// nobody works in (wt is that worktree). Rust-only.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct CacheFound {
-    pub found: rush_fleet::FoundCache,
-    pub wt: String,
+/// (rush_fleet::cache_rules), a build cache in a worktree nobody works in
+/// (wt is that worktree), or a command every run ends with. Rust-only.
+pub use rush_fleet::CacheFound;
+
+/// What a run of Clean up's caches did: the free disk before and after,
+/// as df says it (not a sum of what du measured), the commands run, and
+/// the first thing that failed.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Cleaned {
+    pub before: u64,
+    pub after: u64,
+    pub ran: Vec<String>,
+    pub failed: Option<String>,
+    /// docker runs in colima's VM, which gives space back only once it
+    /// trims its disk.
+    pub colima: bool,
 }
 
-impl CacheFound {
-    pub fn node_modules(&self) -> bool {
-        self.found.path.ends_with("/node_modules")
+/// What a run of Clean up's caches did, in a few words: what df shows it
+/// freed, and the free space before and after.
+pub fn cleaned_words(c: &Cleaned) -> String {
+    let freed = c.after as i64 - c.before as i64;
+    let mut s = if freed > 0 {
+        format!(
+            "freed {} as df measures it ({} → {} free)",
+            disk(freed),
+            disk(c.before as i64),
+            disk(c.after as i64)
+        )
+    } else {
+        format!("df shows nothing freed yet ({} free)", disk(c.after as i64))
+    };
+    if !c.ran.is_empty() {
+        s += &format!(" · ran {}", c.ran.join(", "));
     }
+    if c.colima && c.ran.iter().any(|r| r.starts_with("docker")) {
+        s += " · colima gives docker's space back once its VM trims its disk";
+    }
+    if let Some(e) = &c.failed {
+        s += &format!(" · {e}");
+    }
+    s
 }
 
-/// Deletes caches, each through rush_fleet's checked removals: a rule's
-/// only when a rule names it, a worktree's only when nothing in it changed
-/// since Clean up measured it. Then pnpm store prune when a node_modules
-/// went, which is what frees pnpm's hard links. Rust-only.
+/// Deletes caches, each through rush_fleet's checked removals
+/// (remove_found: a rule's only when a rule names it and still says it
+/// goes, a worktree's only when nothing in it changed since Clean up
+/// measured it and no process works there), then runs the commands every
+/// run ends with, once each (pnpm store prune frees what node_modules
+/// linked). The free disk is read before and after. Rust-only.
 fn remove_caches(m: &mut Model, list: Vec<CacheFound>) {
     if list.is_empty() {
         return;
@@ -78,43 +110,46 @@ fn remove_caches(m: &mut Model, list: Vec<CacheFound>) {
     m.later(
         move || {
             let why = "ticked in Clean up";
+            let before = rush_sys::sysinfo::read_disk().free;
             let rules = rush_fleet::cache_rules();
-            let (mut freed, mut failed, mut prune) = (0, None, false);
-            for c in &list {
-                let r = if c.wt.is_empty() {
-                    rush_fleet::remove_rule_cache(&c.found.path, &rules, why)
-                } else {
-                    rush_fleet::remove_cache(
-                        &c.found.path,
-                        std::slice::from_ref(&c.wt),
-                        c.found.newest + 1,
-                        why,
-                        None,
-                    )
-                };
-                match r {
-                    Ok(n) => {
-                        freed += n;
-                        prune |= c.node_modules();
+            let cwds = rush_fleet::process_cwds();
+            let (cmds, folders): (Vec<CacheFound>, Vec<CacheFound>) = list
+                .into_iter()
+                .partition(|c| matches!(c.found.how, rush_fleet::How::Run(_)));
+            let mut done = Cleaned {
+                before,
+                colima: rush_fleet::colima(&std::env::var("HOME").unwrap_or_default()),
+                ..Cleaned::default()
+            };
+            let mut gone = Vec::new();
+            for c in folders.iter().chain(cmds.iter()) {
+                match rush_fleet::remove_found(c, &rules, &cwds, why) {
+                    Ok(_) if matches!(c.found.how, rush_fleet::How::Run(_)) => {
+                        done.ran.push(c.found.path.clone());
                     }
+                    Ok(_) => gone.push(c.found.path.clone()),
                     Err(e) => {
-                        failed.get_or_insert(e);
+                        done.failed.get_or_insert(e);
                     }
                 }
             }
-            if prune && let Err(e) = super::dire::pnpm_prune(why) {
-                failed.get_or_insert(e);
+            done.after = rush_sys::sysinfo::read_disk().free;
+            let mut f = serde_json::Map::new();
+            f.insert("why".into(), why.into());
+            f.insert("removed".into(), gone.into());
+            f.insert("ran".into(), done.ran.clone().into());
+            f.insert("freeBefore".into(), done.before.into());
+            f.insert("freeAfter".into(), done.after.into());
+            if let Some(e) = &done.failed {
+                f.insert("err".into(), e.clone().into());
             }
-            (freed, prune, failed)
+            rush_events::log("clean-up", f);
+            done
         },
-        |m, (freed, prune, failed)| {
-            let text = format!(
-                "freed {} of caches{}",
-                disk(freed),
-                if prune { " · pnpm store pruned" } else { "" }
-            );
-            match failed {
-                Some(e) => m.fail(&format!("{text} · {e}")),
+        |m, done| {
+            let text = cleaned_words(&done);
+            match done.failed {
+                Some(_) => m.fail(&text),
                 None => m.flash(&text),
             }
             Out::Draw
@@ -254,10 +289,15 @@ impl Doomed {
         self.agents.iter().map(|(k, _)| st.temp_of(k)).sum()
     }
 
-    /// It throws away work nowhere else.
+    /// It throws away work nowhere else: what's uncommitted only noise
+    /// (rush_fleet::noise: Claude Code's local settings, a lockfile) isn't.
     fn losing(&self) -> bool {
         self.wt.as_ref().is_some_and(|w| {
-            w.changed > 0 || w.unpushed > 0 && w.branch.is_empty() || !w.err.is_empty()
+            let noise_only =
+                w.files.len() == w.changed && w.files.iter().all(|f| rush_fleet::noise(f));
+            w.changed > 0 && !noise_only
+                || w.unpushed > 0 && w.branch.is_empty()
+                || !w.err.is_empty()
         })
     }
 
@@ -389,7 +429,17 @@ impl Doomed {
             ];
         }
         if let Some(c) = &self.cache {
-            let (what, note) = if c.wt.is_empty() {
+            let (what, note) = if matches!(c.found.how, rush_fleet::How::Run(_)) {
+                (
+                    "command · run once, after the rest".to_string(),
+                    format!("{}; {}", c.found.why, c.found.note),
+                )
+            } else if c.found.how == rush_fleet::How::GoClean {
+                (
+                    "Go's module cache · go clean -modcache".to_string(),
+                    format!("{}; its files are read-only, so go clears it", c.found.why),
+                )
+            } else if c.wt.is_empty() {
                 (
                     "cache · deleted".to_string(),
                     format!("{}; made again by the tool that made it", c.found.why),
@@ -517,7 +567,18 @@ impl Doomed {
             ]));
         }
         let n = self.files.len();
-        if n > 0 {
+        if n > 0 && self.files.iter().all(|f| rush_fleet::noise(f)) {
+            out.push(ln([
+                plain("   "),
+                sp(
+                    format!(
+                        "! only noise uncommitted ({}): local settings or a lockfile, gone with it",
+                        self.files.join(", ")
+                    ),
+                    YELLOW,
+                ),
+            ]));
+        } else if n > 0 {
             out.push(ln([
                 plain("   "),
                 spb(
@@ -922,23 +983,27 @@ fn clean_temp(m: &mut Model, list: Vec<(String, String)>) {
                         continue;
                     }
                     let r = if d.keep {
-                        std::fs::read_dir(&d.path).map(|rd| {
-                            for e in rd.flatten() {
-                                let p = e.path();
-                                let _ = if p.is_dir() {
-                                    std::fs::remove_dir_all(&p)
-                                } else {
-                                    std::fs::remove_file(&p)
-                                };
+                        match std::fs::read_dir(&d.path) {
+                            // Each goes, whatever another says; the first
+                            // that couldn't is said.
+                            Ok(rd) => {
+                                let mut first = Ok(());
+                                for e in rd.flatten() {
+                                    let r = rush_fleet::remove_tree(&e.path().to_string_lossy());
+                                    if first.is_ok() {
+                                        first = r;
+                                    }
+                                }
+                                first
                             }
-                        })
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                            Err(e) => Err(e.to_string()),
+                        }
                     } else {
-                        std::fs::remove_dir_all(&d.path)
+                        rush_fleet::remove_tree(&d.path)
                     };
-                    if let Err(e) = r
-                        && e.kind() != std::io::ErrorKind::NotFound
-                    {
-                        failed.get_or_insert(e.to_string());
+                    if let Err(e) = r {
+                        failed.get_or_insert(e);
                     }
                 }
                 let paths: Vec<&str> = dirs.iter().map(|d| d.path.as_str()).collect();
@@ -962,4 +1027,56 @@ fn clean_temp(m: &mut Model, list: Vec<(String, String)>) {
             Out::Draw
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const G: u64 = 1 << 30;
+
+    // What a run says is what df shows, before and after; docker's prunes
+    // under colima say the space comes later.
+    #[test]
+    fn says_what_df_shows() {
+        let c = |before, after, ran: &[&str], colima, failed: Option<&str>| Cleaned {
+            before,
+            after,
+            ran: ran.iter().map(|s| s.to_string()).collect(),
+            failed: failed.map(String::from),
+            colima,
+        };
+        for (got, want) in [
+            (
+                c(2 * G, 9 * G, &[], false, None),
+                "freed 7.0G as df measures it (2.0G → 9.0G free)",
+            ),
+            (
+                c(9 * G, 9 * G, &[], false, None),
+                "df shows nothing freed yet (9.0G free)",
+            ),
+            (
+                c(
+                    2 * G,
+                    3 * G,
+                    &["pnpm store prune", "docker image prune -f"],
+                    true,
+                    None,
+                ),
+                "freed 1.0G as df measures it (2.0G → 3.0G free) · ran pnpm store prune, docker image prune -f · colima gives docker's space back once its VM trims its disk",
+            ),
+            (
+                c(
+                    2 * G,
+                    3 * G,
+                    &["pnpm store prune"],
+                    true,
+                    Some("x: changed lately; it stays"),
+                ),
+                "freed 1.0G as df measures it (2.0G → 3.0G free) · ran pnpm store prune · x: changed lately; it stays",
+            ),
+        ] {
+            assert_eq!(cleaned_words(&got), want);
+        }
+    }
 }

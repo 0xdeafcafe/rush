@@ -184,6 +184,12 @@ pub struct Data {
     pub folders_asked: Ms,
     /// Clean-up's look at every worktree.
     pub wts: Vec<Worktree>,
+    /// What decides each worktree's group and its caches, by path, and
+    /// what rush's rules found, as Clean up's last survey measured them
+    /// (Rust-only): what the cleanup agent is told.
+    pub wt_facts: HashMap<String, rush_fleet::WtFacts>,
+    pub survey: Vec<rush_fleet::CacheFound>,
+    pub never: Vec<rush_fleet::FoundCache>,
     pub checking: bool,
     pub checked: Ms,
     pub tmp: Scratch,

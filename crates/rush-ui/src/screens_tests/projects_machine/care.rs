@@ -678,10 +678,79 @@ fn known_before_and_after_a_look() {
         out,
         [
             "",
-            "Worktrees, as rush checked them 5m ago (path · branch · size · verdict):",
-            "- /src/r/.claude/worktrees/a · rush/a · – · would-lose (not looked at with git yet)",
+            "Worktrees, as rush checked them 5m ago (path · branch · size · group (why)), grouped by rush's rules: SAFE goes whole and loses nothing; NOISE-ONLY too, all that's uncommitted is local settings or a lockfile; CACHE-ONLY holds work, so it stays, but nobody touched it for a day: its build caches can go; KEEP stays as it is:",
+            "- /src/r/.claude/worktrees/a · rush/a · – · KEEP (not looked at with git yet)",
             "",
             "/tmp: 2 of your items untouched for days, 3M.",
+        ]
+    );
+}
+
+// The agent is told what rush's rules decided, what they held back and
+// why, the commands rush runs, and what rush never touches.
+#[test]
+fn known_says_what_the_rules_decided() {
+    let mut m = crate::new_model("t");
+    m.now = 40 * 86_400_000;
+    let c = |path: &str, size: i64, ok: bool, note: &str, how| rush_fleet::CacheFound {
+        found: rush_fleet::FoundCache {
+            path: path.into(),
+            why: "a cache".into(),
+            size,
+            ok,
+            note: note.into(),
+            how,
+            ..rush_fleet::FoundCache::default()
+        },
+        wt: String::new(),
+    };
+    let d = m.kept::<Data>();
+    d.survey = vec![
+        c(
+            "/h/Library/Caches/go-build",
+            2 << 30,
+            true,
+            "",
+            rush_fleet::How::Remove,
+        ),
+        c(
+            "/h/.cache/uv",
+            1 << 30,
+            false,
+            "written 5m ago; goes once untouched for 1h",
+            rush_fleet::How::Remove,
+        ),
+        c(
+            "pnpm store prune",
+            0,
+            true,
+            "",
+            rush_fleet::How::Run(rush_fleet::PNPM_PRUNE),
+        ),
+    ];
+    d.never = vec![rush_fleet::FoundCache {
+        path: "/h/.colima/_lima".into(),
+        why: "colima's VM disks".into(),
+        size: 40 << 30,
+        newest: 10 * 86_400_000,
+        ..rush_fleet::FoundCache::default()
+    }];
+    let mut out = Vec::new();
+    rules_known(&m, &mut out);
+    assert_eq!(
+        out,
+        [
+            "",
+            "rush's rules say these go (path · size · what): rush's own Clean up removes them, with no agent; leave them out of your plan:",
+            "- /h/Library/Caches/go-build · 2.0G · a cache",
+            "",
+            "rush's rules hold these back for now (path · size · what (why)): leave them too unless you find more than the rules know:",
+            "- /h/.cache/uv · 1.0G · a cache (written 5m ago; goes once untouched for 1h)",
+            "",
+            "rush's Clean up ends every run with pnpm store prune: don't run them yourself.",
+            "",
+            "rush never touches these, and neither do you: never in a script, only in your leave list for the user to decide on (path · size · what · last changed):",
+            "- /h/.colima/_lima · 40.0G · colima's VM disks · 30 days ago",
         ]
     );
 }

@@ -21,7 +21,9 @@ mod pr;
 mod predicates;
 mod rules;
 mod spawn;
+mod sweep;
 mod temp;
+mod triage;
 mod verdict;
 mod watch;
 mod worktree;
@@ -52,13 +54,21 @@ pub use orphans::{ORPHAN_IDLE, TempOrphan, find_temp_orphans, remove_temp_orphan
 pub use pr::{as_linked, find_pr, from_linked, from_status};
 pub use predicates::*;
 pub use rules::{
-    BUILT_IN, CacheRule, FoundCache, RULES_FILE, cache_rules, learn, learn_from_plan, may_be_rule,
-    measure_caches, read_rules, remove_rule_cache, rules_with,
+    BUILT_IN, BuiltIn, CacheRule, FoundCache, How, RULES_FILE, cache_rules, decide, go_mod_cache,
+    learn, learn_from_plan, may_be_rule, measure_caches, read_rules, remove_rule_cache, rule_for,
+    rules_with,
+};
+pub use sweep::{
+    CacheFound, DAY, DOCKER_BUILDER_PRUNE, DOCKER_IMAGE_PRUNE, HOUR, NEVER_TOUCH, PNPM_PRUNE,
+    Survey, WT_IDLE, WtFacts, colima, end_commands, find_tool, never_touch, never_touch_big,
+    newest_outside, process_cwds, remove_found, remove_tree, run_command, span, survey, works_in,
+    wt_cache, wt_facts,
 };
 pub use temp::{
     TempSize, TempSizes, clean_stale_temp, clean_temp, disk_usage, disk_usage_background,
     remove_temp_entry, temp_dirs,
 };
+pub use triage::{Class, Triage, noise};
 pub use verdict::{
     MADE_BY_CLAUDE, MADE_BY_OTHER, MADE_BY_RUSH, MADE_BY_SUBAGENT, Verdict, VerdictKind,
     fast_forward, is_own_worktree, landed_branches, made_by, settle,
