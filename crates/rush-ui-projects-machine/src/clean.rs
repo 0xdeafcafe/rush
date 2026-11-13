@@ -8,12 +8,21 @@
 //! never shows. Rust-only: what's in rush's scratch root that no session
 //! owns (rush_fleet::find_temp_orphans), ticked once untouched for days
 //! and no running session's id starts its name.
+//!
+//! Rust-only too: caches that rebuild themselves, measured off the UI once
+//! the sheet is open, so rush offers them itself rather than starting an
+//! agent to find them. The folders cleanup rules name (rush_fleet::
+//! cache_rules: built in, and learned from cleanup agents' plans), ticked;
+//! and the build caches at the top of each worktree nobody works in that
+//! isn't going whole (rush_fleet::caches_in), ticked once nothing in them
+//! changed for CACHE_IDLE.
 
 use rush_core::text::Line;
+use rush_core::time::Ms;
 use rush_fleet::{VerdictKind, Worktree};
 
 use super::data::*;
-use super::delete::{Doomed, open_delete};
+use super::delete::{CacheFound, Doomed, open_delete};
 use super::rows::*;
 use super::scan;
 use crate::frame::picker::round_move;
@@ -57,11 +66,20 @@ pub struct CleanItem {
     /// it's sat untouched for days (Rust-only).
     pub orphan: Option<rush_fleet::TempOrphan>,
     pub stale: bool,
+    /// A cache that rebuilds itself (Rust-only); stale is whether a
+    /// worktree's has sat unchanged for CACHE_IDLE.
+    pub cache: Option<CacheFound>,
 }
+
+/// How long a worktree's build cache sits unchanged before Clean up ticks
+/// it: nobody built there today.
+pub const CACHE_IDLE: Ms = 24 * 3_600_000;
 
 impl CleanItem {
     fn group(&self) -> &'static str {
-        if self.wt.is_some() {
+        if self.cache.is_some() {
+            "Caches that rebuild themselves"
+        } else if self.wt.is_some() {
             "Worktrees"
         } else if self.left.is_some() {
             "Left outside projects"
@@ -83,6 +101,9 @@ impl CleanItem {
         if let Some(l) = &self.left {
             return self.busy.is_empty() && l.safe();
         }
+        if let Some(c) = &self.cache {
+            return self.busy.is_empty() && (c.wt.is_empty() || self.stale);
+        }
         if self.orphan.is_some() {
             return self.busy.is_empty() && self.stale;
         }
@@ -98,6 +119,103 @@ impl CleanItem {
 pub struct CleanSheet {
     pub items: Vec<CleanItem>,
     pub cur: usize,
+    /// The caches are still being measured.
+    pub measuring: bool,
+}
+
+/// The caches Clean up offers, measured: what the rules name, then each
+/// free worktree's build caches. Off the UI: it walks each.
+pub fn find_caches(free_wts: &[String]) -> Vec<CacheFound> {
+    let mut out: Vec<CacheFound> = rush_fleet::measure_caches(&rush_fleet::cache_rules())
+        .into_iter()
+        .map(|found| CacheFound {
+            found,
+            wt: String::new(),
+        })
+        .collect();
+    for wt in free_wts {
+        for p in rush_fleet::caches_in(wt) {
+            let (size, newest) = rush_fleet::walk(&p);
+            if size <= 0 {
+                continue;
+            }
+            out.push(CacheFound {
+                found: rush_fleet::FoundCache {
+                    path: p,
+                    why: "build cache in a worktree nobody works in".into(),
+                    size,
+                    newest,
+                },
+                wt: wt.clone(),
+            });
+        }
+    }
+    out
+}
+
+/// The caches as Clean up lists them: ticked when safe, biggest first.
+pub fn cache_items(found: Vec<CacheFound>, now: Ms) -> Vec<CleanItem> {
+    let mut items: Vec<CleanItem> = found
+        .into_iter()
+        .map(|c| {
+            let stale = now - c.found.newest >= CACHE_IDLE;
+            let mut it = CleanItem {
+                stale,
+                cache: Some(c),
+                ..CleanItem::default()
+            };
+            it.on = it.safe();
+            it
+        })
+        .collect();
+    items.sort_by(|a, b| {
+        let size = |it: &CleanItem| it.cache.as_ref().map_or(0, |c| c.found.size);
+        b.on.cmp(&a.on).then(size(b).cmp(&size(a)))
+    });
+    items
+}
+
+/// Learns from cleanup agents' plans (rush_fleet::learn), then measures
+/// the caches for the Clean up sheet that's open, and adds them when
+/// that's done; closes it, saying so, when there's nothing at all.
+fn measure_into_sheet(m: &mut Model, free_wts: Vec<String>, plans: Vec<std::path::PathBuf>) {
+    m.later(
+        move || {
+            let learned: usize = plans
+                .iter()
+                .filter_map(|p| std::fs::read_to_string(p).ok())
+                .filter_map(|t| rush_fleet::learn(&t).ok())
+                .map(|n| n.len())
+                .sum();
+            (find_caches(&free_wts), learned)
+        },
+        |m, (found, learned)| {
+            if learned > 0 {
+                m.news(
+                    &format!(
+                        "rush learned {learned} cache{} from a cleanup agent's plan · Clean up offers {} from now on",
+                        plural(learned),
+                        if learned == 1 { "it" } else { "them" }
+                    ),
+                    "",
+                );
+            }
+            let now = m.now;
+            let Some(s) = m.sheet_as::<CleanSheet>() else {
+                return Out::Idle;
+            };
+            s.measuring = false;
+            s.items.extend(cache_items(found, now));
+            let empty = s.items.is_empty();
+            if empty {
+                m.sheet = None;
+                m.flash(
+                    "no worktrees, no caches, nothing left outside projects and nothing stale in /tmp · nothing to clean",
+                );
+            }
+            Out::Draw
+        },
+    );
 }
 
 /// Opens Clean up, once git has looked at the worktrees.
@@ -212,13 +330,46 @@ pub fn open_clean_sheet(m: &mut Model) {
             ..CleanItem::default()
         });
     }
-    if items.is_empty() {
+    // The worktrees whose build caches are offered: nobody works in them,
+    // git could look, and they aren't going whole; never a main checkout.
+    let free_wts: Vec<String> = items
+        .iter()
+        .filter_map(|it| it.wt.as_ref().map(|w| (it, w)))
+        .filter(|(it, w)| {
+            !it.on
+                && it.busy.is_empty()
+                && w.err.is_empty()
+                && w.in_use.is_empty()
+                && w.path != w.repo
+        })
+        .map(|(_, w)| w.path.clone())
+        .collect();
+    let measuring = !data(m).frozen;
+    if items.is_empty() && !measuring {
         m.flash(
             "no worktrees, nothing left outside projects and nothing stale in /tmp · nothing to clean",
         );
         return;
     }
-    m.open_sheet(Box::new(CleanSheet { items, cur: 0 }));
+    m.open_sheet(Box::new(CleanSheet {
+        items,
+        cur: 0,
+        measuring,
+    }));
+    if measuring {
+        // Cleanup agents' plans, done or waiting on you: what they mark
+        // conservative is learned before the rules are read.
+        let plans: Vec<std::path::PathBuf> = m
+            .agents
+            .iter()
+            .filter(|a| a.rush && a.started_by == super::care::CARE_PLUGIN && !a.job.id.is_empty())
+            .map(|a| {
+                std::path::Path::new(&rush_fleet::temp_dir(&a.job.id))
+                    .join(super::care::CARE_PLAN_FILE)
+            })
+            .collect();
+        measure_into_sheet(m, free_wts, plans);
+    }
 }
 
 impl CleanSheet {
@@ -234,6 +385,10 @@ impl CleanSheet {
             }
             if let Some(o) = &it.orphan {
                 size += o.size;
+                continue;
+            }
+            if let Some(c) = &it.cache {
+                size += c.found.size;
                 continue;
             }
             if it.kind.is_some() {
@@ -300,6 +455,39 @@ impl CleanSheet {
                         sp(pad_to(&path, 44), TEXT),
                         sp(format!("{:>7}  ", disk(l.size)), FAINT),
                         sp(format!("{} · ", one_line(&l.agent.display_name)), DIM),
+                    ]),
+                    why,
+                ),
+                w,
+            );
+        }
+        if let Some(c) = &it.cache {
+            let why = if c.wt.is_empty() {
+                ln([sp(c.found.why.clone(), GREEN)])
+            } else if it.stale {
+                ln([sp(
+                    format!(
+                        "build cache, unchanged for {}",
+                        untouched_for(m.now - c.found.newest)
+                    ),
+                    GREEN,
+                )])
+            } else {
+                ln([sp(
+                    format!(
+                        "build cache, changed {} ago: may be in use",
+                        untouched_for(m.now - c.found.newest)
+                    ),
+                    YELLOW,
+                )])
+            };
+            let path = rush_draw::truncate(&tildify(&c.found.path), 43, "…").into_owned();
+            return fit(
+                cat(
+                    ln([
+                        bx,
+                        sp(pad_to(&path, 44), TEXT),
+                        sp(format!("{:>7}  ", disk(c.found.size)), FAINT),
                     ]),
                     why,
                 ),
@@ -403,6 +591,13 @@ impl CleanSheet {
                 });
                 continue;
             }
+            if let Some(c) = &it.cache {
+                picked.push(Doomed {
+                    cache: Some(c.clone()),
+                    ..Doomed::default()
+                });
+                continue;
+            }
             if it.kind.is_some() {
                 picked.push(Doomed {
                     agents: it
@@ -488,6 +683,13 @@ impl Sheet for CleanSheet {
             );
             out.push(sheet_row(l, i == self.cur, w));
         }
+        if self.measuring {
+            out.push(ln([
+                plain("  "),
+                sp(SPINNER[m.tick % SPINNER.len()], ORANGE),
+                sp(" measuring caches that rebuild themselves…", DIM),
+            ]));
+        }
         out.extend([
             Line::new(),
             ln([sp(
@@ -563,4 +765,55 @@ pub fn nudge_clean(m: &mut Model) {
         ),
         "",
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NOW: Ms = 1_793_190_896_789;
+
+    fn found(path: &str, wt: &str, size: i64, ago: Ms) -> CacheFound {
+        CacheFound {
+            found: rush_fleet::FoundCache {
+                path: path.into(),
+                why: "a cache".into(),
+                size,
+                newest: NOW - ago,
+            },
+            wt: wt.into(),
+        }
+    }
+
+    // A rule's cache is ticked whatever changed it lately; a worktree's
+    // only once nobody built there for CACHE_IDLE. Ticked first, then by
+    // size.
+    #[test]
+    fn ticks_caches_that_are_safe() {
+        let items = cache_items(
+            vec![
+                found("/h/Library/Caches/go-build", "", 6 << 30, 60_000),
+                found("/w/a/node_modules", "/w/a", 3 << 30, 2 * CACHE_IDLE),
+                found("/w/b/node_modules", "/w/b", 9 << 30, 60_000),
+            ],
+            NOW,
+        );
+        let got: Vec<(&str, bool)> = items
+            .iter()
+            .map(|it| (it.cache.as_ref().unwrap().found.path.as_str(), it.on))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("/h/Library/Caches/go-build", true),
+                ("/w/a/node_modules", true),
+                ("/w/b/node_modules", false),
+            ]
+        );
+        assert!(
+            items
+                .iter()
+                .all(|it| it.group() == "Caches that rebuild themselves")
+        );
+    }
 }

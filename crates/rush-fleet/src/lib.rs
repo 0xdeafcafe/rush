@@ -19,6 +19,7 @@ mod machine;
 mod orphans;
 mod pr;
 mod predicates;
+mod rules;
 mod spawn;
 mod temp;
 mod verdict;
@@ -50,6 +51,10 @@ pub use machine::{
 pub use orphans::{ORPHAN_IDLE, TempOrphan, find_temp_orphans, remove_temp_orphan};
 pub use pr::{as_linked, find_pr, from_linked, from_status};
 pub use predicates::*;
+pub use rules::{
+    BUILT_IN, CacheRule, FoundCache, RULES_FILE, cache_rules, learn, learn_from_plan, may_be_rule,
+    measure_caches, read_rules, remove_rule_cache, rules_with,
+};
 pub use temp::{
     TempSize, TempSizes, clean_stale_temp, clean_temp, disk_usage, disk_usage_background,
     remove_temp_entry, temp_dirs,

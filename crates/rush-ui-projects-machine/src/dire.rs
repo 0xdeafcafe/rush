@@ -395,8 +395,9 @@ fn dire_clean(
     done
 }
 
-/// pnpm store prune, when pnpm is there.
-fn pnpm_prune(why: &str) -> Result<(), String> {
+/// pnpm store prune, when pnpm is there. Clean up's caches run it too
+/// (delete.rs).
+pub(crate) fn pnpm_prune(why: &str) -> Result<(), String> {
     if rush_core::dryrun::would("pnpm-store-prune", "pnpm store prune", why) {
         return Ok(());
     }
