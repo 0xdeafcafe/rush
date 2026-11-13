@@ -41,6 +41,9 @@ pub struct Worktree {
 
     /// Files with uncommitted changes, untracked ones included.
     pub changed: usize,
+    /// Those files, as git status --porcelain names them (Rust-only: what
+    /// triage tells noise from work by).
+    pub files: Vec<String>,
     /// Tracked files gone from disk, nothing staged: nothing lost.
     pub deleted: usize,
     /// Commits on no remote and not in main.
@@ -139,6 +142,7 @@ impl Worktree {
         if let Some(c) = hit {
             self.checked = now();
             (self.changed, self.deleted, self.unpushed) = (c.changed, c.deleted, c.unpushed);
+            self.files = c.files;
             (self.off_remote, self.no_remote) = (c.off_remote, c.no_remote);
             self.err = c.err;
             (self.landed, self.in_pr, self.own_work, self.head) =
@@ -152,6 +156,7 @@ impl Worktree {
                 sig,
                 at: Instant::now(),
                 changed: self.changed,
+                files: self.files.clone(),
                 deleted: self.deleted,
                 unpushed: self.unpushed,
                 off_remote: self.off_remote,
@@ -187,6 +192,7 @@ impl Worktree {
     fn look(&mut self) -> (Vec<String>, Vec<String>, bool) {
         self.checked = now();
         self.err.clear();
+        self.files.clear();
         let Ok(status) = git(
             &self.path,
             &["status", "--porcelain", "--untracked-files=normal"],
@@ -197,6 +203,7 @@ impl Worktree {
         let (files, deleted) = changes(&status);
         self.deleted = deleted;
         self.changed = files.len();
+        self.files.clone_from(&files);
         let remotes = git(&self.path, &["remote"]).unwrap_or_default();
         self.no_remote = remotes.trim().is_empty();
         let Ok((commits, off)) = unkept(&self.path, &self.repo, self.no_remote) else {
@@ -237,6 +244,7 @@ struct Looked {
     sig: String,
     at: Instant,
     changed: usize,
+    files: Vec<String>,
     deleted: usize,
     unpushed: usize,
     off_remote: usize,

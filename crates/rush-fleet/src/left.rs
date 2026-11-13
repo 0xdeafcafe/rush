@@ -182,13 +182,7 @@ pub fn remove_left(it: &LeftItem) -> Result<i64, String> {
         if !why.is_empty() {
             return Err(format!("{}: {why}; it stays", it.path));
         }
-        let p = Path::new(&it.path);
-        let rm = if std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir()) {
-            std::fs::remove_dir_all(p)
-        } else {
-            std::fs::remove_file(p)
-        };
-        rm.map(|_| n.size).map_err(|e| e.to_string())
+        crate::sweep::remove_tree(&it.path).map(|_| n.size)
     })();
     agent_event(
         Some(&it.agent),
@@ -269,14 +263,8 @@ pub fn clear_scratch(reg: &Registry, dir: &str) -> (i64, usize, Option<String>) 
         if now() - newest < SCRATCH_IDLE {
             continue;
         }
-        let path = Path::new(&p);
-        let r = if std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir()) {
-            std::fs::remove_dir_all(path)
-        } else {
-            std::fs::remove_file(path)
-        };
-        if let Err(e) = r {
-            err.get_or_insert(e.to_string());
+        if let Err(e) = crate::sweep::remove_tree(&p) {
+            err.get_or_insert(e);
             continue;
         }
         freed += size;
