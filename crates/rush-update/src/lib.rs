@@ -164,8 +164,20 @@ impl Host for Quiet {}
 /// The target rush is released for on this machine, as the release's file
 /// names have it; None where there's no release built for it.
 pub const fn target() -> Option<&'static str> {
-    if cfg!(target_arch = "aarch64") {
+    if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         Some("aarch64-apple-darwin")
+    } else if cfg!(all(
+        target_os = "linux",
+        target_env = "gnu",
+        target_arch = "x86_64"
+    )) {
+        Some("x86_64-unknown-linux-gnu")
+    } else if cfg!(all(
+        target_os = "linux",
+        target_env = "gnu",
+        target_arch = "aarch64"
+    )) {
+        Some("aarch64-unknown-linux-gnu")
     } else {
         None
     }
