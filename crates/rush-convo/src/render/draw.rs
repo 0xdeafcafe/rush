@@ -34,8 +34,9 @@ use super::cards::key_hint;
 use super::code::{Emph, HlState, highlight, lang_for, pretty_json, pretty_text};
 use super::shell::{
     CwdAt, OutSpan, Places, base_name, chain_glyph, chain_label, chain_spans, compound, drop_cd,
-    echo_marks, mark_heading, phrases, program, quiet_tint, quiet_tokens, script_lines, segments,
-    shell_lines, shell_shape, short_paths, subshell_lines, token_rows, truncate_cells,
+    echo_marks, mark_heading, phrases, program, quiet_tint, quiet_tokens, resolve_tmp,
+    script_lines, segments, shell_lines, shell_shape, short_paths, subshell_lines, token_rows,
+    truncate_cells,
 };
 use super::style::one_line;
 use super::style::*;
@@ -2976,13 +2977,19 @@ impl<'a> Drawer<'a> {
         }
         let room = room.max(0) as usize;
         let home = self.p.home.clone();
+        let tmp = &self.s.info.temp_dir;
         let start = CwdAt {
             dir: self.p.bases.first().cloned().unwrap_or_default(),
             sure: false,
         };
         if marks.is_empty() && !cmd.contains('\n') {
             let mut cur = start.clone();
-            let one = short_paths(&expand_tabs(cmd), &home, &mut cur, !script);
+            let one = short_paths(
+                &resolve_tmp(&expand_tabs(cmd), tmp),
+                &home,
+                &mut cur,
+                !script,
+            );
             if width(&one) <= room {
                 let l = pad.and(faint("$ ")).and(quiet_tint(&one));
                 self.add("", BG_WELL, l, Txt::new());
@@ -2992,7 +2999,12 @@ impl<'a> Drawer<'a> {
         let mut cur = start;
         for l in &mut raw {
             if !l.verbatim {
-                l.text = short_paths(&l.text, &home, &mut cur, !script && l.depth == 0);
+                l.text = short_paths(
+                    &resolve_tmp(&l.text, tmp),
+                    &home,
+                    &mut cur,
+                    !script && l.depth == 0,
+                );
             }
         }
         let mut lines: Vec<super::shell::ShLine> = Vec::new();

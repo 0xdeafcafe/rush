@@ -1119,6 +1119,10 @@ Beyond Go:
   session's folder. Rush keeps the folder itself without the slash
   (`StartOptions::temp_dir`, `Info.temp_dir`, the Overview's Scratch), and
   whatever reads a path back cleans it first (`is_temp`, `is_temp_dir`).
+- A command's `$TMPDIR` (or `${TMPDIR}`) is drawn as that folder
+  (`rush_convo::Info::temp_dir`, render's `resolve_tmp`), so what it
+  leaves there can be found; one in single quotes or escaped stays as
+  written.
 - `is_temp_dir` (rush-host and rush-fleet), the guard on every tidy-up
   that empties a session's scratch, takes `tmp/<project>/<x>` as one only
   when `sessions/<x>` exists, not anything two below the root.
@@ -2262,7 +2266,11 @@ reads the machine's process table (session_core::jobprocs: one sysctl and
 the agent's tree filled, the last table kept for CPU and let go once
 nothing's open): the task's process, its CPU and memory, the processes
 under it, and the shells its Bash calls run in, for the chain's command
-running now. While any Bash call of the session runs (`Session::shell_running`)
+running now. Rust-only, those processes read as commands
+(`jobprocs::proc_words`, jobs' `proc_line`): a harness's eval wrapper
+(Claude Code's source-the-snapshot … eval '…') as what it runs, home as
+~, doubled slashes made one, the program bright, flags and redirects dim,
+what joins commands orange, a long path with its middle left out. While any Bash call of the session runs (`Session::shell_running`)
 the shells are read on every look too, opened or not, as Go read them on
 every fleet read (snapload.go:60), so the conversation can say which command
 of a chain runs. A shell whose own output file is empty is read from the

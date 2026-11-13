@@ -1024,6 +1024,9 @@ pub fn take_info(to: &mut rush_convo::Info, info: &super::host::Info) {
     to.started_by.clone_from(&i.started_by);
     to.spawned_by.clone_from(&i.spawned_by);
     to.started_from.clone_from(&i.started_from);
+    if !i.temp_dir.is_empty() {
+        to.temp_dir.clone_from(&i.temp_dir);
+    }
     if !i.cwd.is_empty() {
         to.cwd.clone_from(&i.cwd);
     }
