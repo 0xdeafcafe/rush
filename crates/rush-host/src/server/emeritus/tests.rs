@@ -67,6 +67,7 @@ fn turn_end(h: &Host, conn: &Arc<dyn Conn>, reason: &str) {
         conn,
         event::TurnEnd {
             reason: reason.into(),
+            turns: 1,
             ..Default::default()
         },
     );

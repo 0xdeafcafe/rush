@@ -119,6 +119,10 @@ fn cache_life(i: &Info) -> Duration {
 /// out; what follows is what the agent said.
 pub const AUTH_STOPPED: &str = "log in to continue: ";
 
+/// The error of a turn that ended done with nothing run, nothing spent and
+/// nothing said.
+pub const SILENT_TURN: &str = "the turn ended with no reply and nothing spent: this session's history may not have loaded · a new session usually gets past it";
+
 /// How RetryPrompt begins, for the view to draw it as rush's own.
 pub const RETRY_PROMPT_START: &str = "Your previous run stopped with a provider error (";
 
@@ -4067,6 +4071,16 @@ impl Host {
             self.event(st, "limit", f);
             self.schedule_continue(st);
             return true;
+        }
+        if Self::silent_turn(st, e) {
+            // Unless it's sent again for having gone unread (check_heard),
+            // it would sit idle with nothing to show for it.
+            let again = st.w.unheard.as_ref().is_some_and(|u| u.again);
+            let hears = st.conn.as_ref().is_some_and(|c| c.hearer().is_some());
+            if again || !hears {
+                self.silent_stall(st);
+                return true;
+            }
         }
         if !is_err && !said.starts_with("API Error:") {
             return false;

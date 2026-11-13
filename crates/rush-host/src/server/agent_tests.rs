@@ -243,6 +243,7 @@ fn decisions_on_the_session() {
             &conn,
             event::TurnEnd {
                 reason: reason.into(),
+                turns: 1,
                 ..Default::default()
             },
         );
@@ -658,11 +659,13 @@ fn askable_skips_subagents_and_ended() {
 #[derive(Default)]
 struct Deaf {
     got: Mutex<Vec<Input>>,
+    /// Its transcript has the message: it read it, and answered nothing.
+    has_it: bool,
 }
 
 impl Hearer for Deaf {
     fn heard(&self, _: &str, _: rush_core::time::Ms) -> Option<bool> {
-        Some(false)
+        Some(self.has_it)
     }
 }
 
@@ -729,13 +732,110 @@ fn dropped_message_goes_again() {
         );
     }
     assert_eq!(d.got.lock().unwrap()[1].text, "do the thing");
-    // The second time it's dropped, it isn't sent a third.
+    // The second time it's dropped, it isn't sent a third: it stops on an
+    // error instead of sitting idle.
     {
         let mut st = h.lock();
         assert!(st.w.unheard.as_ref().is_some_and(|u| u.again));
         h.on_turn_end(&mut st, &conn, end);
+        assert_eq!(st.info.error, SILENT_TURN);
     }
     assert_eq!(d.got.lock().unwrap().len(), 2);
+}
+
+/// Ends the turn of turn_under_way's message with nothing run and nothing
+/// said, at what it cost and how it ended.
+fn end_silently(h: &Host, conn: &Arc<dyn Conn>, reason: &str, cost: f64) {
+    let mut st = h.lock();
+    h.on_turn_end(
+        &mut st,
+        conn,
+        event::TurnEnd {
+            reason: reason.into(),
+            cost,
+            ..Default::default()
+        },
+    );
+}
+
+// A turn that ran to completion, cost nothing and said nothing never
+// happens for a real prompt: it's a resume that failed to load, with no
+// error of its own. It stalls on an error rather than going idle with
+// nothing to show for it.
+#[test]
+fn silent_empty_turn_stalls() {
+    let _home = Home::new();
+    let (h, conn) = turn_under_way("silent");
+    end_silently(&h, &conn, "done", 0.0);
+    let st = h.lock();
+    assert_eq!(st.info.state, "idle");
+    assert_eq!(st.info.error, SILENT_TURN);
+}
+
+// The same empty turn, interrupted rather than done, is someone stopping
+// it on purpose: not a silent failure.
+#[test]
+fn interrupted_empty_turn_does_not_stall() {
+    let _home = Home::new();
+    let (h, conn) = turn_under_way("silent-interrupted");
+    end_silently(&h, &conn, "interrupted", 0.0);
+    assert!(h.lock().info.error.is_empty());
+}
+
+// A done turn that spent something, even with no closing words, is an
+// ordinary turn and doesn't stall.
+#[test]
+fn empty_text_with_cost_does_not_stall() {
+    let _home = Home::new();
+    let (h, conn) = turn_under_way("silent-cost");
+    end_silently(&h, &conn, "done", 0.01);
+    assert!(h.lock().info.error.is_empty());
+}
+
+// A slash command's turn (a /compact) can end with nothing said and
+// nothing spent on purpose.
+#[test]
+fn silent_slash_command_does_not_stall() {
+    let _home = Home::new();
+    let (h, conn) = turn_on("silent-slash", "/compact");
+    end_silently(&h, &conn, "done", 0.0);
+    assert!(h.lock().info.error.is_empty());
+}
+
+// An agent that can say whether it read the message, and did, yet ended
+// the turn with nothing said: it isn't sent again, it stops on an error.
+#[test]
+fn silent_turn_on_a_message_it_read_stalls() {
+    let _home = Home::new();
+    let mut c = cfg("heard-silent");
+    c.kind = "fake".into();
+    std::fs::create_dir_all(dir("heard-silent")).unwrap();
+    let (h, _rx) = super::super::build(
+        super::super::tests::registry(),
+        Hooks {
+            heard_wait: Duration::ZERO,
+            ..Hooks::quiet()
+        },
+        c,
+    );
+    let d = Arc::new(Deaf {
+        has_it: true,
+        ..Default::default()
+    });
+    let conn: Arc<dyn Conn> = d.clone();
+    with_conn(&h, conn.clone());
+    h.send("do the thing", &[], false).unwrap();
+    let w = rush_sys::fswait::Watcher::new();
+    w.watch(&[dir("heard-silent")]);
+    end_silently(&h, &conn, "done", 0.0);
+    while h.lock().info.error.is_empty() {
+        assert!(
+            w.wait(None, Some(Duration::from_secs(10))),
+            "never said nothing came back"
+        );
+    }
+    assert_eq!(h.lock().info.error, SILENT_TURN);
+    assert_eq!(d.got.lock().unwrap().len(), 1, "sent again");
 }
 
 // startctx_test.go:14: a start says what changed from the last.
@@ -801,13 +901,18 @@ fn detach_forgets_the_shells_waited_on() {
 
 /// A host with a Kept conn whose message was just sent: a turn under way.
 fn turn_under_way(id: &str) -> (Host, Arc<dyn Conn>) {
+    turn_on(id, "watch the build")
+}
+
+/// turn_under_way, on the message text.
+fn turn_on(id: &str, text: &str) -> (Host, Arc<dyn Conn>) {
     let mut c = cfg(id);
     c.kind = "fake".into();
     std::fs::create_dir_all(dir(id)).unwrap();
     let (h, _rx) = super::super::build(super::super::tests::registry(), Hooks::quiet(), c);
     let conn: Arc<dyn Conn> = Arc::new(Kept::default());
     with_conn(&h, conn.clone());
-    h.send("watch the build", &[], false).unwrap();
+    h.send(text, &[], false).unwrap();
     (h, conn)
 }
 
