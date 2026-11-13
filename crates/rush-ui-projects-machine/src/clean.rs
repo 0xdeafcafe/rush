@@ -10,16 +10,22 @@
 //! and no running session's id starts its name.
 //!
 //! Rust-only too: caches that rebuild themselves, measured off the UI once
-//! the sheet is open, so rush offers them itself rather than starting an
-//! agent to find them. The folders cleanup rules name (rush_fleet::
-//! cache_rules: built in, and learned from cleanup agents' plans), ticked;
-//! and the build caches at the top of each worktree nobody works in that
-//! isn't going whole (rush_fleet::caches_in), ticked once nothing in them
-//! changed for CACHE_IDLE.
+//! the sheet is open (rush_fleet::survey), so rush offers them itself
+//! rather than starting an agent to find them. The folders cleanup rules
+//! name (rush_fleet::cache_rules: built in, and learned from cleanup
+//! agents' plans), ticked when the rule says so (some only once untouched
+//! for a while); the build caches of each worktree nobody works in that
+//! isn't going whole (rush_fleet::caches_in: its top, apps/*/node_modules),
+//! ticked once the worktree, outside node_modules, sat untouched for
+//! rush_fleet::WT_IDLE and no process works in it; then the commands every
+//! run ends with (pnpm store prune, docker's prunes). Each worktree shows
+//! its group and why (rush_fleet::Triage: SAFE, CACHE-ONLY, NOISE-ONLY,
+//! KEEP), and last, what rush never touches, biggest first, for you to
+//! decide on: never ticked.
 
 use rush_core::text::Line;
 use rush_core::time::Ms;
-use rush_fleet::{VerdictKind, Worktree};
+use rush_fleet::{Class, How, VerdictKind, Worktree};
 
 use super::data::*;
 use super::delete::{CacheFound, Doomed, open_delete};
@@ -66,18 +72,27 @@ pub struct CleanItem {
     /// it's sat untouched for days (Rust-only).
     pub orphan: Option<rush_fleet::TempOrphan>,
     pub stale: bool,
-    /// A cache that rebuilds itself (Rust-only); stale is whether a
-    /// worktree's has sat unchanged for CACHE_IDLE.
+    /// A cache that rebuilds itself, or a command every run ends with
+    /// (Rust-only).
     pub cache: Option<CacheFound>,
+    /// A worktree's group and why, once its facts are in (Rust-only).
+    pub triage: Option<rush_fleet::Triage>,
+    /// Something big rush never touches, for you to decide on: never
+    /// ticked (Rust-only).
+    pub never: Option<rush_fleet::FoundCache>,
 }
-
-/// How long a worktree's build cache sits unchanged before Clean up ticks
-/// it: nobody built there today.
-pub const CACHE_IDLE: Ms = 24 * 3_600_000;
 
 impl CleanItem {
     fn group(&self) -> &'static str {
-        if self.cache.is_some() {
+        if self.never.is_some() {
+            "Yours to decide: rush never touches these"
+        } else if self
+            .cache
+            .as_ref()
+            .is_some_and(|c| matches!(c.found.how, How::Run(_)))
+        {
+            "Run last, once"
+        } else if self.cache.is_some() {
             "Caches that rebuild themselves"
         } else if self.wt.is_some() {
             "Worktrees"
@@ -101,17 +116,34 @@ impl CleanItem {
         if let Some(l) = &self.left {
             return self.busy.is_empty() && l.safe();
         }
+        if self.never.is_some() {
+            return false;
+        }
         if let Some(c) = &self.cache {
-            return self.busy.is_empty() && (c.wt.is_empty() || self.stale);
+            return self.busy.is_empty() && c.found.ok;
         }
         if self.orphan.is_some() {
             return self.busy.is_empty() && self.stale;
         }
+        let noise_only = self
+            .triage
+            .as_ref()
+            .is_some_and(|t| t.class == Class::NoiseOnly);
         self.busy.is_empty()
             && self
                 .wt
                 .as_ref()
-                .is_none_or(|w| w.own && w.verdict().can_go())
+                .is_none_or(|w| w.own && (w.verdict().can_go() || noise_only))
+    }
+}
+
+/// A worktree's group, as Clean up colours it.
+fn class_color(c: Class) -> rush_core::text::Color {
+    match c {
+        Class::Safe => GREEN,
+        Class::NoiseOnly => GREEN,
+        Class::CacheOnly => YELLOW,
+        Class::Keep => DIM,
     }
 }
 
@@ -123,62 +155,109 @@ pub struct CleanSheet {
     pub measuring: bool,
 }
 
-/// The caches Clean up offers, measured: what the rules name, then each
-/// free worktree's build caches. Off the UI: it walks each.
-pub fn find_caches(free_wts: &[String]) -> Vec<CacheFound> {
-    let mut out: Vec<CacheFound> = rush_fleet::measure_caches(&rush_fleet::cache_rules())
+/// The caches as Clean up lists them: ticked when the rules say so, those
+/// ticked first, biggest first; the commands every run ends with last, in
+/// their order.
+pub fn cache_items(found: Vec<CacheFound>) -> Vec<CleanItem> {
+    let item = |c: CacheFound| {
+        let mut it = CleanItem {
+            stale: c.found.ok,
+            cache: Some(c),
+            ..CleanItem::default()
+        };
+        it.on = it.safe();
+        it
+    };
+    let (cmds, caches): (Vec<CacheFound>, Vec<CacheFound>) = found
         .into_iter()
-        .map(|found| CacheFound {
-            found,
-            wt: String::new(),
-        })
-        .collect();
-    for wt in free_wts {
-        for p in rush_fleet::caches_in(wt) {
-            let (size, newest) = rush_fleet::walk(&p);
-            if size <= 0 {
-                continue;
-            }
-            out.push(CacheFound {
-                found: rush_fleet::FoundCache {
-                    path: p,
-                    why: "build cache in a worktree nobody works in".into(),
-                    size,
-                    newest,
-                },
-                wt: wt.clone(),
-            });
-        }
-    }
-    out
-}
-
-/// The caches as Clean up lists them: ticked when safe, biggest first.
-pub fn cache_items(found: Vec<CacheFound>, now: Ms) -> Vec<CleanItem> {
-    let mut items: Vec<CleanItem> = found
-        .into_iter()
-        .map(|c| {
-            let stale = now - c.found.newest >= CACHE_IDLE;
-            let mut it = CleanItem {
-                stale,
-                cache: Some(c),
-                ..CleanItem::default()
-            };
-            it.on = it.safe();
-            it
-        })
-        .collect();
+        .partition(|c| matches!(c.found.how, How::Run(_)));
+    let mut items: Vec<CleanItem> = caches.into_iter().map(item).collect();
     items.sort_by(|a, b| {
         let size = |it: &CleanItem| it.cache.as_ref().map_or(0, |c| c.found.size);
         b.on.cmp(&a.on).then(size(b).cmp(&size(a)))
     });
+    items.extend(cmds.into_iter().map(item));
     items
 }
 
+/// What rush never touches, as Clean up lists it: never ticked, and can't
+/// be.
+pub fn never_items(never: Vec<rush_fleet::FoundCache>) -> Vec<CleanItem> {
+    never
+        .into_iter()
+        .map(|f| CleanItem {
+            busy: f.note.clone(),
+            never: Some(f),
+            ..CleanItem::default()
+        })
+        .collect()
+}
+
+/// What rush never touches is listed from this size up, at most so many.
+const NEVER_SHOWN: i64 = 1 << 30;
+const NEVER_MAX: usize = 8;
+
+/// The worktrees a survey reads the facts of (all but main checkouts), and
+/// those whose build caches it measures: nobody works in them, git could
+/// look, and they aren't ones rush removes whole.
+pub fn survey_paths(m: &Model) -> (Vec<String>, Vec<String>) {
+    let d = data(m);
+    let wts: Vec<&Worktree> = d.wts.iter().filter(|w| w.path != w.repo).collect();
+    let free = wts
+        .iter()
+        .filter(|w| {
+            !(w.own && w.verdict().can_go())
+                && running(m, &w.agents).is_none()
+                && w.err.is_empty()
+                && w.in_use.is_empty()
+        })
+        .map(|w| w.path.clone())
+        .collect();
+    (wts.iter().map(|w| w.path.clone()).collect(), free)
+}
+
+/// Everything a survey measures, and the biggest of what rush never
+/// touches. Off the UI.
+pub fn survey_all(
+    wts: &[String],
+    free: &[String],
+    now: Ms,
+) -> (rush_fleet::Survey, Vec<rush_fleet::FoundCache>) {
+    let home = std::env::var("HOME").unwrap_or_default();
+    (
+        rush_fleet::survey(&rush_fleet::cache_rules(), wts, free, now),
+        rush_fleet::never_touch_big(&home, NEVER_SHOWN, NEVER_MAX),
+    )
+}
+
+/// Each worktree's group in the sheet, by the facts measured.
+fn triage_items(
+    items: &mut [CleanItem],
+    facts: &std::collections::HashMap<String, rush_fleet::WtFacts>,
+    now: Ms,
+) {
+    for it in items.iter_mut() {
+        let Some(w) = &it.wt else { continue };
+        let t = w.triage(facts.get(&w.path).copied(), now);
+        let was = it.on;
+        it.triage = Some(t);
+        // An own worktree that's only noise is ticked once that's known.
+        it.on = was || it.safe();
+    }
+}
+
 /// Learns from cleanup agents' plans (rush_fleet::learn), then measures
-/// the caches for the Clean up sheet that's open, and adds them when
-/// that's done; closes it, saying so, when there's nothing at all.
-fn measure_into_sheet(m: &mut Model, free_wts: Vec<String>, plans: Vec<std::path::PathBuf>) {
+/// the caches and the worktrees' facts for the Clean up sheet that's open
+/// (rush_fleet::survey), and adds them when that's done; closes it, saying
+/// so, when there's nothing at all. What rush never touches is measured
+/// after, and listed last.
+fn measure_into_sheet(
+    m: &mut Model,
+    wts: Vec<String>,
+    free_wts: Vec<String>,
+    plans: Vec<std::path::PathBuf>,
+) {
+    let now = m.now;
     m.later(
         move || {
             let learned: usize = plans
@@ -187,9 +266,27 @@ fn measure_into_sheet(m: &mut Model, free_wts: Vec<String>, plans: Vec<std::path
                 .filter_map(|t| rush_fleet::learn(&t).ok())
                 .map(|n| n.len())
                 .sum();
-            (find_caches(&free_wts), learned)
+            let s = rush_fleet::survey(&rush_fleet::cache_rules(), &wts, &free_wts, now);
+            (s, learned)
         },
-        |m, (found, learned)| {
+        |m, (survey, learned)| {
+            let found = survey.caches.clone();
+            let d = m.kept::<Data>();
+            d.wt_facts.extend(survey.facts.clone());
+            d.survey = survey.caches;
+            m.later(
+                || {
+                    let home = std::env::var("HOME").unwrap_or_default();
+                    rush_fleet::never_touch_big(&home, NEVER_SHOWN, NEVER_MAX)
+                },
+                |m, never| {
+                    m.kept::<Data>().never = never.clone();
+                    if let Some(s) = m.sheet_as::<CleanSheet>() {
+                        s.items.extend(never_items(never));
+                    }
+                    Out::Draw
+                },
+            );
             if learned > 0 {
                 m.news(
                     &format!(
@@ -201,11 +298,13 @@ fn measure_into_sheet(m: &mut Model, free_wts: Vec<String>, plans: Vec<std::path
                 );
             }
             let now = m.now;
+            let facts = data(m).wt_facts.clone();
             let Some(s) = m.sheet_as::<CleanSheet>() else {
                 return Out::Idle;
             };
             s.measuring = false;
-            s.items.extend(cache_items(found, now));
+            triage_items(&mut s.items, &facts, now);
+            s.items.extend(cache_items(found));
             let empty = s.items.is_empty();
             if empty {
                 m.sheet = None;
@@ -242,6 +341,9 @@ pub fn open_clean_sheet(m: &mut Model) {
         }
         items.push(it);
     }
+    // Each one's group by what the last survey measured; measured afresh
+    // below.
+    triage_items(&mut items, &d.wt_facts, m.now);
     // Ticked first, the biggest of them on top; then the rest by size.
     items.sort_by(|a, b| {
         b.on.cmp(&a.on).then(
@@ -344,6 +446,12 @@ pub fn open_clean_sheet(m: &mut Model) {
         })
         .map(|(_, w)| w.path.clone())
         .collect();
+    let wts: Vec<String> = data(m)
+        .wts
+        .iter()
+        .filter(|w| w.path != w.repo)
+        .map(|w| w.path.clone())
+        .collect();
     let measuring = !data(m).frozen;
     if items.is_empty() && !measuring {
         m.flash(
@@ -368,7 +476,7 @@ pub fn open_clean_sheet(m: &mut Model) {
                     .join(super::care::CARE_PLAN_FILE)
             })
             .collect();
-        measure_into_sheet(m, free_wts, plans);
+        measure_into_sheet(m, wts, free_wts, plans);
     }
 }
 
@@ -461,33 +569,50 @@ impl CleanSheet {
                 w,
             );
         }
+        if let Some(f) = &it.never {
+            let path = rush_draw::truncate(&tildify(&f.path), 43, "…").into_owned();
+            return fit(
+                ln([
+                    sp("· ", FAINT),
+                    sp(pad_to(&path, 44), TEXT),
+                    sp(format!("{:>7}  ", disk(f.size)), FAINT),
+                    sp(
+                        format!(
+                            "{} · changed {} ago · never ticked: yours to decide",
+                            f.why,
+                            untouched_for(m.now - f.newest)
+                        ),
+                        DIM,
+                    ),
+                ]),
+                w,
+            );
+        }
         if let Some(c) = &it.cache {
-            let why = if c.wt.is_empty() {
-                ln([sp(c.found.why.clone(), GREEN)])
-            } else if it.stale {
-                ln([sp(
-                    format!(
-                        "build cache, unchanged for {}",
-                        untouched_for(m.now - c.found.newest)
-                    ),
-                    GREEN,
-                )])
+            let col = if c.found.ok { GREEN } else { YELLOW };
+            let mut words = if c.wt.is_empty() {
+                c.found.why.clone()
             } else {
-                ln([sp(
-                    format!(
-                        "build cache, changed {} ago: may be in use",
-                        untouched_for(m.now - c.found.newest)
-                    ),
-                    YELLOW,
-                )])
+                "build cache".to_string()
             };
-            let path = rush_draw::truncate(&tildify(&c.found.path), 43, "…").into_owned();
+            if !c.found.note.is_empty() {
+                words += &format!(" · {}", c.found.note);
+            }
+            let why = ln([sp(words, col)]);
+            let (path, size) = if matches!(c.found.how, How::Run(_)) {
+                (c.found.path.clone(), "?".to_string())
+            } else {
+                (
+                    rush_draw::truncate(&tildify(&c.found.path), 43, "…").into_owned(),
+                    disk(c.found.size),
+                )
+            };
             return fit(
                 cat(
                     ln([
                         bx,
                         sp(pad_to(&path, 44), TEXT),
-                        sp(format!("{:>7}  ", disk(c.found.size)), FAINT),
+                        sp(format!("{size:>7}  "), FAINT),
                     ]),
                     why,
                 ),
@@ -545,6 +670,15 @@ impl CleanSheet {
             ln([sp(format!("{} is running in it", it.busy), DIM)])
         } else if !wt.err.is_empty() {
             ln([sp(wt.err.clone(), RED)])
+        } else if let Some(t) = &it.triage {
+            let mut l = ln([
+                spb(format!("{} ", t.class.as_str()), class_color(t.class)),
+                sp(t.reason.clone(), class_color(t.class)),
+            ]);
+            if !wt.own && matches!(t.class, Class::Safe | Class::NoiseOnly) {
+                l.spans.push(sp(" · not rush's: yours to tick", FAINT));
+            }
+            l
         } else if v.kind == VerdictKind::WouldLose {
             ln([sp(format!("would lose {}", v.reason), YELLOW)])
         } else if v.kind == VerdictKind::CanGo && !wt.own {
@@ -773,47 +907,68 @@ mod tests {
 
     const NOW: Ms = 1_793_190_896_789;
 
-    fn found(path: &str, wt: &str, size: i64, ago: Ms) -> CacheFound {
+    fn found(path: &str, wt: &str, size: i64, ok: bool) -> CacheFound {
         CacheFound {
             found: rush_fleet::FoundCache {
                 path: path.into(),
                 why: "a cache".into(),
                 size,
-                newest: NOW - ago,
+                newest: NOW,
+                ok,
+                ..rush_fleet::FoundCache::default()
             },
             wt: wt.into(),
         }
     }
 
-    // A rule's cache is ticked whatever changed it lately; a worktree's
-    // only once nobody built there for CACHE_IDLE. Ticked first, then by
-    // size.
+    // What the rules say goes is ticked, the rest isn't: ticked first, then
+    // by size; the commands every run ends with last, ticked, in their
+    // order.
     #[test]
-    fn ticks_caches_that_are_safe() {
-        let items = cache_items(
-            vec![
-                found("/h/Library/Caches/go-build", "", 6 << 30, 60_000),
-                found("/w/a/node_modules", "/w/a", 3 << 30, 2 * CACHE_IDLE),
-                found("/w/b/node_modules", "/w/b", 9 << 30, 60_000),
-            ],
-            NOW,
-        );
-        let got: Vec<(&str, bool)> = items
+    fn ticks_caches_the_rules_say_go() {
+        let mut prune = found("pnpm store prune", "", 0, true);
+        prune.found.how = How::Run(rush_fleet::PNPM_PRUNE);
+        let items = cache_items(vec![
+            prune,
+            found("/h/.cache/uv", "", 1 << 30, false),
+            found("/h/Library/Caches/go-build", "", 6 << 30, true),
+            found("/w/a/node_modules", "/w/a", 3 << 30, true),
+            found("/w/b/node_modules", "/w/b", 9 << 30, false),
+        ]);
+        let got: Vec<(&str, bool, &str)> = items
             .iter()
-            .map(|it| (it.cache.as_ref().unwrap().found.path.as_str(), it.on))
+            .map(|it| {
+                (
+                    it.cache.as_ref().unwrap().found.path.as_str(),
+                    it.on,
+                    it.group(),
+                )
+            })
             .collect();
+        let c = "Caches that rebuild themselves";
         assert_eq!(
             got,
             [
-                ("/h/Library/Caches/go-build", true),
-                ("/w/a/node_modules", true),
-                ("/w/b/node_modules", false),
+                ("/h/Library/Caches/go-build", true, c),
+                ("/w/a/node_modules", true, c),
+                ("/w/b/node_modules", false, c),
+                ("/h/.cache/uv", false, c),
+                ("pnpm store prune", true, "Run last, once"),
             ]
         );
-        assert!(
-            items
-                .iter()
-                .all(|it| it.group() == "Caches that rebuild themselves")
-        );
+    }
+
+    // What rush never touches is listed, never ticked, and can't be.
+    #[test]
+    fn never_ticks_what_rush_never_touches() {
+        let mut items = never_items(vec![rush_fleet::FoundCache {
+            path: "/h/.colima/_lima".into(),
+            size: 40 << 30,
+            note: "rush never touches ~/.colima: yours to decide".into(),
+            ..rush_fleet::FoundCache::default()
+        }]);
+        let it = &mut items[0];
+        assert!(!it.on && !it.safe() && !it.busy.is_empty());
+        assert_eq!(it.group(), "Yours to decide: rush never touches these");
     }
 }

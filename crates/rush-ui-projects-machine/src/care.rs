@@ -535,9 +535,25 @@ impl CareSheet {
         };
         let why = self.why.clone();
         let short = self.short.clone();
+        // What rush's own rules decide, measured beside the rest: the agent
+        // is told, and looks only at what they can't.
+        let (wts, free) = super::clean::survey_paths(m);
+        let (now, frozen) = (m.now, data(m).frozen);
         m.later(
-            move || care_start(scan, care_reports, CARE_SCAN_WAIT),
-            move |m, st| {
+            move || {
+                let survey = (!frozen).then(|| {
+                    std::thread::spawn(move || super::clean::survey_all(&wts, &free, now))
+                });
+                let st = care_start(scan, care_reports, CARE_SCAN_WAIT);
+                (st, survey.and_then(|h| h.join().ok()))
+            },
+            move |m, (st, survey)| {
+                if let Some((s, never)) = survey {
+                    let d = m.kept::<Data>();
+                    d.wt_facts.extend(s.facts);
+                    d.survey = s.caches;
+                    d.never = never;
+                }
                 if let Some(late) = st.late {
                     // The scan lands when it's done, whatever became of the sheet.
                     m.later(
@@ -874,26 +890,27 @@ pub fn care_known_with(m: &Model, out: &mut Vec<String>, mem_level: i32) {
     }
     out.push(String::new());
     out.push(format!(
-        "Worktrees, as rush checked them {} (path · branch · size · verdict):",
+        "Worktrees, as rush checked them {} (path · branch · size · group (why)), grouped by rush's rules: SAFE goes whole and loses nothing; NOISE-ONLY too, all that's uncommitted is local settings or a lockfile; CACHE-ONLY holds work, so it stays, but nobody touched it for a day: its build caches can go; KEEP stays as it is:",
         ago(m.now - st.checked)
     ));
     for w in &st.wts {
-        let v = w.verdict();
+        let t = w.triage(st.wt_facts.get(&w.path).copied(), m.now);
         let mut l = format!(
             "- {} · {} · {} · {}",
             w.path,
             w.branch,
             disk(w.size),
-            verdict_word(v.kind)
+            t.class.as_str()
         );
-        if !v.reason.is_empty() {
-            l += &format!(" ({})", v.reason);
+        if !t.reason.is_empty() {
+            l += &format!(" ({})", t.reason);
         }
         if running(m, &w.agents).is_some() {
             l += " · an agent is working in it now";
         }
         out.push(l);
     }
+    rules_known(m, out);
     if st.tmp.stale_items > 0 {
         out.push(String::new());
         out.push(format!(
@@ -991,14 +1008,76 @@ fn scratch_known(m: &Model, out: &mut Vec<String>) {
     }
 }
 
-/// A verdict as Go's VerdictKind.String says it.
-fn verdict_word(k: rush_fleet::VerdictKind) -> &'static str {
-    use rush_fleet::VerdictKind::*;
-    match k {
-        KeepInUse => "keep-in-use",
-        KeepPrOpen => "keep-pr-open",
-        CanGo => "can-go",
-        WouldLose => "would-lose",
+/// What rush's own rules found when Clean up last measured (Rust-only):
+/// what they say goes (rush's Clean up removes it without an agent), what
+/// they hold back and why, the commands every run ends with, and the
+/// biggest of what rush never touches. The agent is told to leave the
+/// first to rush and spend its time on what the rules can't decide.
+pub fn rules_known(m: &Model, out: &mut Vec<String>) {
+    let st = data(m);
+    if st.survey.is_empty() && st.never.is_empty() {
+        return;
+    }
+    let line = |c: &rush_fleet::CacheFound| {
+        let mut l = format!(
+            "- {} · {} · {}",
+            c.found.path,
+            disk(c.found.size),
+            c.found.why
+        );
+        if !c.found.note.is_empty() {
+            l += &format!(" ({})", c.found.note);
+        }
+        l
+    };
+    let (cmds, caches): (Vec<&rush_fleet::CacheFound>, Vec<&rush_fleet::CacheFound>) = st
+        .survey
+        .iter()
+        .partition(|c| matches!(c.found.how, rush_fleet::How::Run(_)));
+    let yes: Vec<String> = caches
+        .iter()
+        .filter(|c| c.found.ok)
+        .map(|c| line(c))
+        .collect();
+    let not: Vec<String> = caches
+        .iter()
+        .filter(|c| !c.found.ok)
+        .map(|c| line(c))
+        .collect();
+    if !yes.is_empty() {
+        out.push(String::new());
+        out.push("rush's rules say these go (path · size · what): rush's own Clean up removes them, with no agent; leave them out of your plan:".into());
+        out.extend(yes);
+    }
+    if !not.is_empty() {
+        out.push(String::new());
+        out.push("rush's rules hold these back for now (path · size · what (why)): leave them too unless you find more than the rules know:".into());
+        out.extend(not);
+    }
+    if !cmds.is_empty() {
+        out.push(String::new());
+        out.push(format!(
+            "rush's Clean up ends every run with {}: don't run them yourself.",
+            and_list(
+                &cmds
+                    .iter()
+                    .map(|c| c.found.path.clone())
+                    .collect::<Vec<_>>()
+            )
+        ));
+    }
+    if !st.never.is_empty() {
+        out.push(String::new());
+        out.push("rush never touches these, and neither do you: never in a script, only in your leave list for the user to decide on (path · size · what · last changed):".into());
+        for f in &st.never {
+            out.push(format!(
+                "- {} · {} · {} · {}",
+                f.path,
+                disk(f.size),
+                f.why,
+                touched(m.now - f.newest)
+            ));
+        }
     }
 }
 
@@ -1048,12 +1127,15 @@ pub fn care_prompt(
     b += "Never delete, remove or stop anything on your own: you work in two phases, and nothing goes before the user answers.\n\n";
     b += CARE_PHASES;
     b += "\nWhat may be in your plan:
-- A worktree only when it's can-go below, or git shows nothing uncommitted, unpushed or unmerged in it. can-go is safe even when git calls its branch unmerged: rush found its pull request merged (a squash merge). It goes with git worktree remove, its branch kept. Never one an agent is working in, or a repository's main checkout.
+- A worktree only when it's SAFE or NOISE-ONLY below, or git shows nothing uncommitted, unpushed or unmerged in it. SAFE is safe even when git calls its branch unmerged: rush found its pull request merged (a squash merge). A CACHE-ONLY one stays; only its build caches may go. It goes with git worktree remove, its branch kept. Never one an agent is working in, or a repository's main checkout.
 - What agents left in /tmp or outside their projects only when it's marked safe, or nothing has touched it for days and nothing running uses it.
 - Rush's scratch folders (each session's $TMPDIR, listed below): a done session's; a stopped one's only once nothing has touched it for days, as it may be resumed; a running one's never. What's in rush's scratch folders but no session's once nothing has touched it for days and no running session uses it (none whose id starts its name). What's in them, never the folders that hold them: rush's tmp folder and each project's folder in it.
 - Build caches that rebuild themselves (node_modules, .next, .turbo, target, dist) from worktrees nobody works in.
 - pnpm's node_modules are mostly hard links into its shared store, so removing them frees little until pnpm store prune runs: when the plan has any, it ends with pnpm store prune, once.
 - Never databases, ~/.claude, transcripts, anything in a project that isn't a cache or a worktree, or anything you're unsure of: those go in the list you leave, with why.
+- Never anything in ~/.colima, ~/.codex/sessions, ~/.claude, ~/Library/Application Support, ~/Library/Containers, ~/Library/Group Containers, ~/Pictures or ~/.ollama: rush never touches them. List the biggest in your leave list, each with its size, for the user to decide on.
+- What rush's rules decide is listed below, with each worktree's group (SAFE, NOISE-ONLY, CACHE-ONLY, KEEP) and why: trust it, leave what they say goes to rush's own Clean up, and spend your time on what they can't decide.
+- Go's module cache goes only through go clean -modcache, never rm (its files are read-only). A folder rm can't remove for Permission denied is made the owner's first (chmod -R u+rwx), in the script.
 ";
     if further {
         b += CARE_FURTHER;
