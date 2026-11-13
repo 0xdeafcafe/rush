@@ -27,7 +27,7 @@ use rush_core::usage;
 use rush_state::Time;
 use serde_json::{Value, json};
 
-use super::{Host, State};
+use super::{Host, SILENT_TURN, State};
 use crate::away::{AWAY_HELD, DEFAULT_AWAY_EVERY, away_due, away_note, keep_awake};
 use crate::events::clip;
 use crate::longtask::{LONG_TASK_LAST, last_output, long_task_note, overdue_tasks, task_dirs};
@@ -753,6 +753,32 @@ impl Host {
         });
     }
 
+    /// Whether a turn ended done on a message of ours with nothing run,
+    /// nothing spent and nothing said, and no error to relay: Claude Code
+    /// resuming a history it can't load ends turns so. A slash command's
+    /// turn (a /compact) can end so on purpose.
+    pub(super) fn silent_turn(st: &State, e: &event::TurnEnd) -> bool {
+        e.reason == "done"
+            && e.err.is_empty()
+            && e.turns == 0
+            && e.cost == 0.0
+            && e.text.trim().is_empty()
+            && st
+                .w
+                .unheard
+                .as_ref()
+                .is_some_and(|u| !u.input.text.trim_start().starts_with('/'))
+    }
+
+    /// Ends a silent turn ([`Self::silent_turn`]) on an error, rather than
+    /// an idle session with nothing to show for it.
+    pub(super) fn silent_stall(&self, st: &mut State) {
+        st.info.state = "idle".into();
+        st.info.error = SILENT_TURN.into();
+        let f = json!({"account": st.info.home});
+        self.event(st, "silent-turn", f);
+    }
+
     /// Looks again at a message the agent ended a turn without reading (no
     /// request made, nothing said). A Claude Code just resumed on a turn a
     /// restart cut off can end that turn and drop what came in as it
@@ -767,6 +793,7 @@ impl Host {
         let Some(u) = st.w.unheard.clone() else {
             return;
         };
+        let silent = Self::silent_turn(st, e);
         if u.again
             || conn.hearer().is_none()
             || e.turns != 0
@@ -788,12 +815,20 @@ impl Host {
             };
             let mut st = h.lock();
             let same = st.w.unheard.as_ref().is_some_and(|x| x.n == u.n && !x.again);
-            if heard
-                || !super::same_conn(&st.conn, &Some(conn.clone()))
+            if !super::same_conn(&st.conn, &Some(conn.clone()))
                 || !same
                 || st.info.state != "idle"
                 || st.info.sleeping
             {
+                return;
+            }
+            if heard {
+                // It has the message, yet answered nothing: sent again it
+                // would end the same way.
+                if silent {
+                    h.silent_stall(&mut st);
+                    h.publish(&mut st);
+                }
                 return;
             }
             if let Some(x) = &mut st.w.unheard {
