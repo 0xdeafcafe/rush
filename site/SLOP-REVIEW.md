@@ -1,5 +1,8 @@
 # Bottle front-page review
 
+Historical review of the initial port. See [MOBILE-REVIEW.md](MOBILE-REVIEW.md)
+for the later WebKit/mobile fix, printed label geometry and updated measurements.
+
 Reviewed 2026-11-07 against `ANTI-SLOP.md`, the brief and the README, using the
 production build served by Python's HTTP server. Chrome 156.0.8078.80, headless
 with ANGLE Metal on Apple M1 Max. The 390 px checks use an iframe inside the

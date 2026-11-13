@@ -1,4 +1,5 @@
 import type { WebGLRenderer, CanvasTexture, Mesh } from "three";
+import { measureLabel } from "./label-canvas";
 
 // Pinned r180. Imports wait for an observed contentful paint; the still and HTML are already usable.
 const intro = document.querySelector<HTMLElement>("#bottle-intro")!;
@@ -18,10 +19,12 @@ const capability = navigator as Navigator & {
   connection?: EventTarget & { saveData?: boolean };
 };
 const connection = capability.connection;
-const constrained =
-  connection?.saveData ||
-  (capability.deviceMemory && capability.deviceMemory <= 2) ||
-  navigator.hardwareConcurrency <= 2;
+// Hardware hints choose detail, never exclude an iPhone from the experience.
+const modestHardware =
+  (capability.deviceMemory ?? 8) <= 2 || navigator.hardwareConcurrency <= 2;
+const mobile = matchMedia("(max-width: 700px)").matches;
+let detail = mobile || modestHardware ? 1 : 0;
+let fallbackLogged = false;
 let active = false,
   stopped = false,
   draw = () => {},
@@ -44,6 +47,11 @@ function schedule() {
   }
 }
 function fallback(reason: string) {
+  intro.dataset.fallback = reason;
+  if (!fallbackLogged) {
+    console.info(`[rush bottle] fallback: ${reason}`);
+    fallbackLogged = true;
+  }
   const wasActive = active;
   const oldPageTop = page.getBoundingClientRect().top;
   active = false;
@@ -95,10 +103,16 @@ addEventListener(
   { passive: true },
 );
 document.addEventListener("visibilitychange", schedule);
-if (motionPreference.matches || constrained) {
-  intro.dataset.mode = motionPreference.matches
-    ? "reduced-motion"
-    : "low-power";
+// Safari toolbar movement changes dvh; this never changes travel or calls scrollTo.
+window.visualViewport?.addEventListener(
+  "resize",
+  () => {
+    if (active) resize();
+  },
+  { passive: true },
+);
+if (motionPreference.matches || connection?.saveData) {
+  fallback(motionPreference.matches ? "reduced-motion" : "save-data");
 } else {
   // A second rAF can still precede the browser's first presented paint.
   // Observe FCP where supported, rather than assuming the still has appeared.
@@ -128,8 +142,13 @@ if (motionPreference.matches || constrained) {
 }
 
 async function startBottle() {
-  if (stopped || motionPreference.matches || scrollY > 48 || location.hash) {
-    if (!stopped) intro.dataset.mode = "reading";
+  if (
+    stopped ||
+    motionPreference.matches ||
+    scrollY >= intro.offsetTop + stage.clientHeight ||
+    location.hash
+  ) {
+    if (!stopped) fallback("already-reading");
     return;
   }
   let renderer: WebGLRenderer | undefined;
@@ -137,9 +156,6 @@ async function startBottle() {
     const context = canvas.getContext("webgl2", {
       alpha: true,
       antialias: true,
-      powerPreference: "low-power",
-      preserveDrawingBuffer: true,
-      failIfMajorPerformanceCaveat: true,
     });
     if (!context) {
       fallback("no-webgl");
@@ -147,11 +163,18 @@ async function startBottle() {
     }
     intro.dataset.loading = "module";
     const THREE = await import("three");
-    const { RoomEnvironment } = await import(
-      "three/addons/environments/RoomEnvironment.js"
-    );
-    if (stopped || motionPreference.matches || scrollY > 48 || location.hash) {
-      intro.dataset.mode = "reading";
+    const { RoomEnvironment } =
+      await import("three/addons/environments/RoomEnvironment.js");
+    if (
+      stopped ||
+      motionPreference.matches ||
+      scrollY >= intro.offsetTop + stage.clientHeight ||
+      location.hash
+    ) {
+      if (!stopped)
+        fallback(
+          motionPreference.matches ? "reduced-motion" : "already-reading",
+        );
       return;
     }
     renderer = new THREE.WebGLRenderer({
@@ -159,12 +182,10 @@ async function startBottle() {
       context,
       antialias: true,
       alpha: true,
-      powerPreference: "low-power",
-      preserveDrawingBuffer: true,
     });
-    renderer.setPixelRatio(
-      Math.min(devicePixelRatio, innerWidth < 700 ? 1.5 : 1.75),
-    );
+    const renderRatio = () =>
+      Math.min(devicePixelRatio, detail >= 2 ? 1 : detail === 1 ? 1.5 : 2);
+    renderer.setPixelRatio(renderRatio());
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 0.72;
@@ -177,13 +198,25 @@ async function startBottle() {
       40,
     );
     intro.dataset.loading = "environment";
-    const pmrem = new THREE.PMREMGenerator(renderer);
-    const room = new RoomEnvironment();
-    const environment = pmrem.fromScene(room, 0.025);
-    scene.environment = environment.texture;
-    scene.environmentIntensity = 0.65;
-    room.dispose();
-    pmrem.dispose();
+    // PMREM uses half-float render targets. Keep the bottle if those are absent.
+    let environment:
+      | ReturnType<InstanceType<typeof THREE.PMREMGenerator>["fromScene"]>
+      | undefined;
+    if (
+      context.getExtension("EXT_color_buffer_float") ||
+      context.getExtension("EXT_color_buffer_half_float")
+    ) {
+      const pmrem = new THREE.PMREMGenerator(renderer);
+      const room = new RoomEnvironment();
+      environment = pmrem.fromScene(room, 0.025, 0.1, 100, {
+        size: detail ? 128 : 256,
+      });
+      scene.environment = environment.texture;
+      scene.environmentIntensity = 0.65;
+      room.dispose();
+      pmrem.dispose();
+      intro.dataset.reflections = "pmrem";
+    } else intro.dataset.reflections = "direct-light";
     const key = new THREE.DirectionalLight(0xffffff, 1.65);
     key.position.set(-3, 5, 5);
     scene.add(key);
@@ -224,25 +257,25 @@ async function startBottle() {
     ];
     const curvedProfile = new THREE.SplineCurve(
       profile.slice(1, -1).map((p) => new THREE.Vector2(p[0], p[1])),
-    ).getPoints(160);
+    ).getPoints(detail ? 64 : 120);
     const bodyPoints = [
       new THREE.Vector2(0, -1.55),
       ...curvedProfile,
       new THREE.Vector2(0, 1.02),
     ];
     const body = new THREE.Mesh(
-      new THREE.LatheGeometry(bodyPoints, 128),
+      new THREE.LatheGeometry(bodyPoints, detail ? 64 : 96),
       yellow,
     );
     shell.add(body);
     const cap = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.77, 0.79, 0.77, 128, 1),
+      new THREE.CylinderGeometry(0.77, 0.79, 0.77, detail ? 64 : 96, 1),
       capMaterial,
     );
     cap.position.y = 1.12;
     shell.add(cap);
     const lip = new THREE.Mesh(
-      new THREE.TorusGeometry(0.755, 0.024, 12, 128),
+      new THREE.TorusGeometry(0.755, 0.024, 8, 64),
       capMaterial,
     );
     lip.rotation.x = Math.PI / 2;
@@ -265,7 +298,7 @@ async function startBottle() {
     seamMaterial.color.setHex(0x9d7500);
     seamMaterial.roughness = 0.4;
     const seam = new THREE.Mesh(
-      new THREE.TorusGeometry(0.556, 0.018, 8, 128),
+      new THREE.TorusGeometry(0.556, 0.018, 8, 64),
       seamMaterial,
     );
     seam.rotation.x = Math.PI / 2;
@@ -304,12 +337,90 @@ async function startBottle() {
     shadow.position.set(0.05, -1.565, 0);
     scene.add(shadow);
 
-    // The texture is the real responsive label. There is no second bottle artwork.
-    const labelMaterial = new THREE.MeshBasicMaterial({
+    // Paper follows the same sampled profile and angular vertices as the body.
+    // A 0.2% lift plus polygon offset is enough; no separate sleeve radius.
+    const flatInk = { value: 0 };
+    const labelMaterial = new THREE.MeshPhysicalMaterial({
       side: THREE.DoubleSide,
-      toneMapped: false,
+      roughness: 0.32,
+      metalness: 0.02,
+      clearcoat: 0.45,
+      clearcoatRoughness: 0.2,
+      envMapIntensity: 1.35,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
     });
-    const labelGeometry = new THREE.PlaneGeometry(1, 1, 160, 60);
+    labelMaterial.onBeforeCompile = (shader) => {
+      shader.uniforms.labelFlat = flatInk;
+      shader.fragmentShader =
+        "uniform float labelFlat;\n" + shader.fragmentShader;
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "void main() {",
+        `void main() {
+        #ifdef USE_MAP
+        if (labelFlat >= 1.0) {
+          gl_FragColor = linearToOutputTexel(vec4(texture2D(map, vMapUv).rgb, 1.0));
+          return;
+        }
+        #endif
+      `,
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <tonemapping_fragment>",
+        "#include <tonemapping_fragment>\n#ifdef USE_MAP\n gl_FragColor.rgb = mix(gl_FragColor.rgb, texture2D(map, vMapUv).rgb, labelFlat);\n#endif",
+      );
+    };
+    const angularSegments = detail ? 64 : 96;
+    const arcSteps = detail ? 22 : 32;
+    const labelBottom = -1.46,
+      labelTop = 0.3;
+    const labelRows = [
+      labelBottom,
+      ...curvedProfile
+        .filter((p) => p.y > labelBottom && p.y < labelTop)
+        .map((p) => p.y),
+      labelTop,
+    ];
+    const radiusAt = (y: number) => {
+      for (let i = 1; i < curvedProfile.length; i++) {
+        const a = curvedProfile[i - 1],
+          b = curvedProfile[i];
+        if (y >= a.y && y <= b.y)
+          return (
+            THREE.MathUtils.lerp(a.x, b.x, (y - a.y) / (b.y - a.y)) * 1.002
+          );
+      }
+      throw new Error("Label outside body profile");
+    };
+    const vertices: number[] = [],
+      uv: number[] = [],
+      indices: number[] = [];
+    for (let row = 0; row < labelRows.length; row++) {
+      const y = labelRows[row],
+        radius = radiusAt(y);
+      for (let col = 0; col <= arcSteps; col++) {
+        const angle = ((col - arcSteps / 2) * 2 * Math.PI) / angularSegments;
+        vertices.push(Math.sin(angle) * radius, y, Math.cos(angle) * radius);
+        uv.push(col / arcSteps, (y - labelBottom) / (labelTop - labelBottom));
+        if (row && col) {
+          const d = row * (arcSteps + 1) + col,
+            c = d - 1,
+            b = d - arcSteps - 1,
+            a = b - 1;
+          indices.push(a, b, d, a, d, c);
+        }
+      }
+    }
+    const labelGeometry = new THREE.BufferGeometry();
+    labelGeometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(vertices, 3),
+    );
+    labelGeometry.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    labelGeometry.setIndex(indices);
+    labelGeometry.computeVertexNormals();
+    const wrappedPositions = Float32Array.from(vertices);
     const positions = labelGeometry.attributes.position;
     const uvs = labelGeometry.attributes.uv;
     const label = new THREE.Mesh(labelGeometry, labelMaterial);
@@ -320,128 +431,115 @@ async function startBottle() {
       htmlTexture: CanvasTexture | null = null,
       pixelTexture: CanvasTexture | null = null;
     let sampleFrames = 0,
+      slowFrames = 0,
+      warmUntil = Infinity;
+    let uploading = false,
+      paintedWidth = 0;
+    const resetBudget = () => {
+      sampleFrames = 0;
       slowFrames = 0;
+      warmUntil = performance.now() + 1000;
+    };
     let baseDistance = 8.2,
       flatWidth = 5,
       flatHeight = 3;
     let lastProgress = -1;
     const look = new THREE.Vector3();
-    const radiusAt = (y: number) => {
-      if (y > 0.735) return 0.804 - (y - 0.735) * 0.026;
-      for (let j = 1; j < curvedProfile.length; j++) {
-        const lo = curvedProfile[j - 1],
-          hi = curvedProfile[j];
-        if (y >= lo.y && y <= hi.y)
-          return (
-            THREE.MathUtils.lerp(lo.x, hi.x, (y - lo.y) / (hi.y - lo.y)) + 0.012
-          );
-      }
-      return 0.817;
-    };
+    let flatY = 0;
     function updateVertices(unroll: number) {
       for (let i = 0; i < positions.count; i++) {
         const u = uvs.getX(i),
-          v = uvs.getY(i),
-          angle = (u - 0.5) * 2.8,
-          y = -1.42 + v * 1.88,
-          r = radiusAt(y);
-        const x = Math.sin(angle) * r,
-          z = Math.cos(angle) * r;
+          v = uvs.getY(i);
         positions.setXYZ(
           i,
-          THREE.MathUtils.lerp(x, (u - 0.5) * flatWidth, unroll),
-          THREE.MathUtils.lerp(y, (v - 0.5) * flatHeight, unroll),
-          THREE.MathUtils.lerp(z, 0, unroll),
+          THREE.MathUtils.lerp(
+            wrappedPositions[i * 3],
+            (u - 0.5) * flatWidth,
+            unroll,
+          ),
+          THREE.MathUtils.lerp(
+            wrappedPositions[i * 3 + 1],
+            flatY + (v - 0.5) * flatHeight,
+            unroll,
+          ),
+          THREE.MathUtils.lerp(wrappedPositions[i * 3 + 2], 0, unroll),
         );
       }
       positions.needsUpdate = true;
       labelGeometry.computeVertexNormals();
       labelGeometry.computeBoundingSphere();
+      flatInk.value = smooth(0.3, 1, unroll);
     }
+    const designTokens = getComputedStyle(document.documentElement);
+    const designWidth = Number(
+      designTokens.getPropertyValue("--label-design-width"),
+    );
+    const designHeight = Number(
+      designTokens.getPropertyValue("--label-design-height"),
+    );
     async function htmlSnapshot() {
       const version = ++textureVersion;
-      await document.fonts.ready;
-      const snapshot = document.createElement("div");
-      snapshot.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
-      snapshot.setAttribute(
-        "style",
-        "width:" +
-          width +
-          "px;height:" +
-          height +
-          "px;overflow:hidden;background:var(--ground);color:var(--print);font:400 var(--body)/1.6 var(--sans);-webkit-font-smoothing:antialiased;",
-      );
-      // Same-origin Vite CSS is already loaded; no duplicate CSS download or separate layout.
-      const style = document.createElement("style");
-      style.textContent = Array.from(document.styleSheets)
-        .map((sheet) =>
-          Array.from(sheet.cssRules)
-            .map((rule) => rule.cssText)
-            .join("\n"),
-        )
-        .join("\n");
-      snapshot.append(style);
-      // SVG image documents don't inherit the host's dark preference consistently.
-      // Resolve every token from the live page, including the actual system theme.
-      const tokens = getComputedStyle(document.documentElement);
-      for (const name of Array.from(tokens))
-        if (name.startsWith("--"))
-          snapshot.style.setProperty(name, tokens.getPropertyValue(name));
-      snapshot.append(page.querySelector("[data-label-face]")!.cloneNode(true));
-      const serial = new XMLSerializer().serializeToString(snapshot);
-      const svg =
-        '<svg xmlns="http://www.w3.org/2000/svg" width="' +
-        width +
-        '" height="' +
-        height +
-        '"><foreignObject width="100%" height="100%">' +
-        serial +
-        "</foreignObject></svg>";
-      const image = new Image();
-      image.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
-      await image.decode();
-      if (stopped || version !== textureVersion) return;
-      const textureCanvas = document.createElement("canvas");
-      const scale = Math.min(
-        4096 / Math.max(width, height),
-        Math.max(2, 2048 / Math.max(width, height)),
-      );
-      textureCanvas.width = Math.round(width * scale);
-      textureCanvas.height = Math.round(height * scale);
-      textureCanvas
-        .getContext("2d")!
-        .drawImage(image, 0, 0, textureCanvas.width, textureCanvas.height);
-      // Fail closed if foreignObject cannot be used as a texture on this browser.
-      textureCanvas.getContext("2d")!.getImageData(0, 0, 1, 1);
-      const texture = new THREE.CanvasTexture(textureCanvas);
-      texture.colorSpace = THREE.SRGBColorSpace;
-      texture.anisotropy = Math.min(
-        8,
-        renderer!.capabilities.getMaxAnisotropy(),
-      );
-      htmlTexture?.dispose();
-      htmlTexture = texture;
-      labelMaterial.map = texture;
-      labelMaterial.needsUpdate = true;
-      // A native-resolution level of the SAME SVG avoids resampling glyph edges at the swap.
-      const pixels = document.createElement("canvas");
-      pixels.width = Math.floor(width * devicePixelRatio);
-      pixels.height = Math.floor(height * devicePixelRatio);
-      if (Math.max(pixels.width, pixels.height) > renderer!.capabilities.maxTextureSize) throw new Error("Viewport exceeds texture size");
-      pixels
-        .getContext("2d")!
-        .drawImage(image, 0, 0, pixels.width, pixels.height);
-      pixelTexture?.dispose();
-      pixelTexture = new THREE.CanvasTexture(pixels);
-      pixelTexture.colorSpace = THREE.SRGBColorSpace;
-      pixelTexture.generateMipmaps = false;
-      pixelTexture.minFilter = THREE.NearestFilter;
-      pixelTexture.magFilter = THREE.NearestFilter;
-      intro.dataset.texture = textureCanvas.width + "x" + textureCanvas.height;
-      lastProgress = -1;
-      schedule();
+      uploading = true;
+      try {
+        const face = page.querySelector<HTMLElement>("[data-label-face]")!;
+        const art = face.getBoundingClientRect();
+        const paint = await measureLabel(face, art.width, art.height);
+        if (stopped || version !== textureVersion) return;
+        const limit = Math.min(
+          renderer!.capabilities.maxTextureSize,
+          detail >= 2 ? 1024 : detail ? 2048 : 4096,
+        );
+        const scale = Math.min(
+          limit / Math.max(designWidth, designHeight),
+          detail >= 2 ? 1 : 2,
+        );
+        const textureCanvas = paint((scale * designWidth) / art.width);
+        const texture = new THREE.CanvasTexture(textureCanvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = Math.min(
+          detail ? 2 : 4,
+          renderer!.capabilities.getMaxAnisotropy(),
+        );
+        renderer!.initTexture(texture);
+        htmlTexture?.dispose();
+        htmlTexture = texture;
+        labelMaterial.map = texture;
+        labelMaterial.needsUpdate = true;
+        const pixels = paint(
+          Math.min(
+            devicePixelRatio,
+            2,
+            limit / Math.max(art.width, art.height),
+          ),
+        );
+        const native = new THREE.CanvasTexture(pixels);
+        native.colorSpace = THREE.SRGBColorSpace;
+        native.generateMipmaps = false;
+        native.minFilter = THREE.LinearFilter;
+        native.magFilter = THREE.LinearFilter;
+        renderer!.initTexture(native);
+        pixelTexture?.dispose();
+        pixelTexture = native;
+        intro.dataset.texture = `${textureCanvas.width}x${textureCanvas.height}`;
+        intro.dataset.painter = "canvas-2d";
+        paintedWidth = art.width;
+        lastProgress = -1;
+      } finally {
+        if (version === textureVersion) {
+          uploading = false;
+          resetBudget();
+          schedule();
+        }
+      }
     }
-    resize = () => {
+    const measureStage = () => {
+      if (
+        stage.clientWidth === width &&
+        stage.clientHeight === height &&
+        travel
+      )
+        return;
+      const widthChanged = stage.clientWidth !== width;
       const previousTravel = travel,
         previousProgress = previousTravel
           ? clamp((scrollY - intro.offsetTop) / previousTravel)
@@ -454,7 +552,8 @@ async function startBottle() {
       renderer!.setSize(width, height, false);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
-      travel = height * (width < 700 ? 1.75 : 2.5);
+      if (!travel || widthChanged)
+        travel = Math.round(height * (width < 700 ? 1.75 : 2.5));
       document.documentElement.style.setProperty(
         "--bottle-travel",
         travel + "px",
@@ -463,7 +562,7 @@ async function startBottle() {
         "--bottle-height",
         height + "px",
       );
-      if (previousTravel && active)
+      if (previousTravel && active && widthChanged)
         scrollTo(0, intro.offsetTop + previousProgress * travel + beyond);
       const viewAngle = THREE.MathUtils.degToRad(camera.fov / 2);
       baseDistance = Math.max(
@@ -471,11 +570,29 @@ async function startBottle() {
         1.18 / (Math.tan(viewAngle) * camera.aspect),
       );
       if (width < 700 && height < 700) baseDistance *= 1.35;
-      flatHeight = 2 * Math.tan(viewAngle) * 3.1;
-      flatWidth = flatHeight * camera.aspect;
+      const viewHeight = 2 * Math.tan(viewAngle) * 3.1;
+      const frame = page
+        .querySelector<HTMLElement>(".label-frame")!
+        .getBoundingClientRect();
+      flatHeight = (viewHeight * frame.height) / height;
+      flatWidth = (viewHeight * frame.width) / height;
+      const frameTop = Math.max(0, (height - frame.height) / 2);
+      flatY =
+        viewHeight / 2 - ((frameTop + frame.height / 2) * viewHeight) / height;
       lastProgress = -1;
-      htmlSnapshot().catch(() => fallback("texture-unavailable"));
+      resetBudget();
       schedule();
+    };
+    resize = () => {
+      measureStage();
+      const artWidth = page
+        .querySelector<HTMLElement>(".label-frame")!
+        .getBoundingClientRect().width;
+      if (artWidth !== paintedWidth)
+        htmlSnapshot().catch((error: unknown) => {
+          intro.dataset.failure = String(error);
+          fallback("texture-unavailable");
+        });
     };
     draw = () => {
       const p = clamp((scrollY - intro.offsetTop) / travel);
@@ -493,7 +610,9 @@ async function startBottle() {
       );
       bottle.position.set(
         0,
-        width < 700 ? THREE.MathUtils.lerp(height < 700 ? 0.85 : 0.34, 0, zoom) : 0,
+        width < 700
+          ? THREE.MathUtils.lerp(height < 700 ? 0.85 : 0.34, 0, zoom)
+          : 0,
         0,
       );
       camera.position.set(
@@ -503,10 +622,11 @@ async function startBottle() {
       );
       look.set(0, THREE.MathUtils.lerp(-0.05, 0, zoom), 0);
       camera.lookAt(look);
-      // Curved frames have a bounded fill rate; flat frames use actual screen pixels
-      // so a Retina display does not resample text at the HTML handoff.
-      const pixelRatio = unroll === 1 ? devicePixelRatio : Math.min(devicePixelRatio, width < 700 ? 1.5 : 1.75);
-      if (renderer!.getPixelRatio() !== pixelRatio) renderer!.setPixelRatio(pixelRatio);
+      // Keep fill rate bounded throughout, including the last flat frames.
+      const pixelRatio =
+        unroll === 1 ? Math.min(devicePixelRatio, 2) : renderRatio();
+      if (renderer!.getPixelRatio() !== pixelRatio)
+        renderer!.setPixelRatio(pixelRatio);
       updateVertices(unroll);
       labelMaterial.map = unroll === 1 ? pixelTexture : htmlTexture;
       shell.visible = p < 0.54;
@@ -529,10 +649,22 @@ async function startBottle() {
         p < 0.22 ? "turn" : p < 0.54 ? "approach" : showing ? "html" : "unwrap";
       if (!showing) renderer!.render(scene, camera);
       const cost = performance.now() - start;
-      // Ignore shader warm-up. Sustained expensive frames fall back instead of draining a weak device.
-      if (p > 0 && p < 0.9 && ++sampleFrames > 10) {
+      // Upload/compile/resize are not steady-state frames. Lower detail first.
+      if (
+        !uploading &&
+        performance.now() > warmUntil &&
+        p > 0 &&
+        p < 0.88 &&
+        ++sampleFrames > 30
+      ) {
         slowFrames = cost > 50 ? slowFrames + 1 : Math.max(0, slowFrames - 1);
-        if (slowFrames > 20) fallback("low-frame-budget");
+        if (slowFrames > 30 && detail < 2) {
+          detail++;
+          intro.dataset.quality = String(detail);
+          renderer!.setPixelRatio(renderRatio());
+          htmlSnapshot().catch(() => fallback("texture-unavailable"));
+        } else if (slowFrames > 90 && detail === 2 && cost > 100)
+          fallback("low-frame-budget");
       }
     };
     dispose = () => {
@@ -551,13 +683,16 @@ async function startBottle() {
       htmlTexture?.dispose();
       pixelTexture?.dispose();
       shadowTexture.dispose();
-      environment.dispose();
+      environment?.dispose();
       renderer!.dispose();
     };
     const repaintTheme = () => {
       if (!active) return;
       lastProgress = -1;
-      htmlSnapshot().catch(() => fallback("texture-unavailable"));
+      htmlSnapshot().catch((error: unknown) => {
+        intro.dataset.failure = String(error);
+        fallback("texture-unavailable");
+      });
       schedule();
     };
     darkPreference.addEventListener("change", repaintTheme);
@@ -566,28 +701,43 @@ async function startBottle() {
     renderer!.setSize(width, height, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
+    measureStage();
     intro.dataset.loading = "label";
     await htmlSnapshot();
-    if (stopped || scrollY > 48) {
+    if (stopped || scrollY >= intro.offsetTop + stage.clientHeight) {
       dispose();
-      if (!stopped) intro.dataset.mode = "reading";
+      if (!stopped) fallback("already-reading");
       return;
     }
     intro.dataset.loading = "shaders";
+    // Explicitly upload both textures and render the mapped shader before reveal.
+    // compileAsync alone does not upload textures or warm the GPU draw path.
+    updateVertices(0);
+    camera.position.set(0, 0.45, 8.2);
+    camera.lookAt(0, -0.05, 0);
     await renderer.compileAsync(scene, camera);
-    if (stopped || scrollY > 48) {
+    if (stopped) return;
+    renderer.initTexture(shadowTexture);
+    renderer.render(scene, camera);
+    labelMaterial.map = pixelTexture;
+    renderer.render(scene, camera);
+    labelMaterial.map = htmlTexture;
+    resetBudget();
+    if (stopped || scrollY >= intro.offsetTop + stage.clientHeight) {
       dispose();
-      if (!stopped) intro.dataset.mode = "reading";
+      if (!stopped) fallback("already-reading");
       return;
     }
     active = true;
     intro.dataset.mode = "webgl";
     intro.dataset.loading = "ready";
+    intro.dataset.quality = String(detail);
+    delete intro.dataset.fallback;
     document.documentElement.classList.add("bottle-active");
     stillControl.hidden = false;
-    resize();
     draw();
   } catch (error) {
+    if (stopped) return;
     intro.dataset.failure =
       error instanceof Error ? error.message : String(error);
     renderer?.dispose();
