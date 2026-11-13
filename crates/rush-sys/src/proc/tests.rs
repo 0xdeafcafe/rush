@@ -311,3 +311,22 @@ fn fd_file_is_a_regular_file_only() {
     p.wait().unwrap();
     assert_eq!(fd_file(0, 1), None);
 }
+
+// A child started in a folder says it works there; one gone says nothing.
+#[test]
+fn cwd_is_where_a_process_works() {
+    let d = tempfile::tempdir().unwrap();
+    let mut c = Command::new("/bin/cat")
+        .current_dir(d.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    let pid = c.id() as Pid;
+    let got = cwd(pid).map(|p| p.canonicalize().unwrap());
+    assert_eq!(got, Some(d.path().canonicalize().unwrap()));
+    drop(c.stdin.take());
+    c.wait().unwrap();
+    assert_eq!(cwd(pid), None, "a process reaped");
+    assert_eq!(cwd(0), None);
+}
