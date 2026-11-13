@@ -256,6 +256,12 @@ pub trait LoginKeeper: Send + Sync {
     fn using_login(&self, cfg: &crate::Config) -> String;
     /// Makes l the login new sessions run as.
     fn use_login(&self, cfg: &crate::Config, l: &Login) -> io::Result<()>;
+    /// Readies the sign-in new sessions now run on (after use_login) for
+    /// several to start on at once: refreshed first if it has run out or
+    /// is about to. Whether it refreshed. Rust-only.
+    fn ready_login(&self, _cfg: &crate::Config) -> Result<bool, String> {
+        Ok(false)
+    }
     /// Keeps the sign-in just made in p as its login's.
     fn adopt_login(&self, p: &rush_core::adapter::Profile) -> io::Result<Login>;
     /// Drops what rush keeps of the login with id.

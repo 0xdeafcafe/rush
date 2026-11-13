@@ -354,6 +354,13 @@ fn switch_login_and(
                     ..LoginSwitched::default()
                 };
             }
+            // Before anything starts on it: sessions starting together on
+            // a sign-in that has run out fail to refresh it. Rust-only.
+            match k.ready_login(&c) {
+                Ok(true) => f["renewed"] = true.into(),
+                Err(e) => f["renewErr"] = e.into(),
+                Ok(false) => {}
+            }
             if !mv {
                 rush_events::log("login-switch", obj(f));
                 return LoginSwitched {
@@ -544,8 +551,12 @@ pub fn limit_stopped(m: &Model, root: &str) -> bool {
 pub fn carry_on(m: &mut Model, root: &str) -> Out {
     let c = cfg(m).clone();
     let root = root.to_string();
+    let k = keeper(m);
     m.later(
         move || {
+            if let Some(k) = k {
+                let _ = k.ready_login(&c); // it logs how that went
+            }
             let (n, _) = relogin_hosts(&root, &c, &BTreeMap::new(), host_spawn);
             rush_events::log(
                 "limit-carry-on",
@@ -598,92 +609,119 @@ pub fn relogin_hosts(
     roomy: &BTreeMap<String, String>,
     spawn: HostSpawn,
 ) -> (usize, usize) {
+    // Each on a thread of its own: told one after another, each taking
+    // seconds to stop and start, a switch of four took 18 s to say it had
+    // happened, the sessions failing meanwhile. Rust-only.
+    let dirs = rush_state::thread_dirs();
+    std::thread::scope(|s| {
+        let all: Vec<_> = rush_host::client::list()
+            .into_iter()
+            .map(|info| {
+                let dirs = dirs.clone();
+                s.spawn(move || {
+                    rush_state::set_thread_dirs(dirs);
+                    relogin_host(info, root, c, roomy, spawn)
+                })
+            })
+            .collect();
+        all.into_iter()
+            .filter_map(|t| t.join().ok())
+            .fold((0, 0), |(r, w), (dr, dw)| (r + dr, w + dw))
+    })
+}
+
+/// relogin_hosts for one session: whether it resumed, and whether it
+/// moves once its turn ends, as counts.
+fn relogin_host(
+    info: rush_host::wire::Info,
+    root: &str,
+    c: &Config,
+    roomy: &BTreeMap<String, String>,
+    spawn: HostSpawn,
+) -> (usize, usize) {
     use rush_host::events::log_event;
     use rush_host::replace::{IDLE_EVERY, busy, replace_host, replace_when_idle};
-    let (mut resumed, mut waiting) = (0, 0);
-    for info in rush_host::client::list() {
-        if (info.account != root && !info.account.is_empty()) || info.state == "stopped" {
-            continue;
-        }
-        if let Some(name) = roomy.get(&info.login)
-            && info.limit.is_none()
-        {
-            log_event(
-                &info.id,
-                "relogin",
-                json!({"account": root, "how": "stays", "login": name, "why": "its own login still has room"}),
-            );
-            continue;
-        }
-        let wait = info.limit.is_some()
-            && c.profile_for(&info.cwd, &info.profile).limit() == rush_state::profiles::LIMIT_WAIT;
-        if !info.homes && (info.kind.is_empty() || info.kind == LOGINS_KIND) {
-            if busy(&info) {
-                log_event(
-                    &info.id,
-                    "relogin",
-                    json!({"account": root, "how": "replace once idle", "why": "a host from before homes, busy"}),
-                );
-                // On a thread of its own, in this one's rush folder.
-                let (id, home, cache) =
-                    (info.id.clone(), rush_state::dir(), rush_state::cache_dir());
-                let _ = std::thread::Builder::new()
-                    .name("replace-when-idle".into())
-                    .spawn(move || {
-                        rush_state::set_thread_dir(Some(home));
-                        rush_state::set_thread_cache_dir(Some(cache));
-                        replace_when_idle(&id, IDLE_EVERY, &spawn);
-                    });
-                waiting += 1;
-            } else if replace_host(&info, !wait, &spawn).is_ok() && info.limit.is_some() && !wait {
-                resumed += 1;
-            }
-            continue;
-        }
-        if wait {
-            log_event(
-                &info.id,
-                "relogin",
-                json!({"account": root, "how": "none", "why": "its profile waits at a limit"}),
-            );
-            continue;
-        }
-        if info.sleeping {
-            continue; // no host to tell: it starts in the new home when woken
-        }
-        let cl = match rush_host::client::Client::dial(&info.id) {
-            Ok(cl) => cl,
-            Err(e) => {
-                log_event(
-                    &info.id,
-                    "relogin",
-                    json!({"account": root, "how": "relogin", "err": e.to_string()}),
-                );
-                continue;
-            }
-        };
-        let mut err = cl.relogin().err().map(|e| e.to_string());
-        let mut how = "relogin";
-        if err.is_none() && info.limit.is_some() && still_limited(&info.id) {
-            how = "relogin, then restart its agent and host";
-            cl.close();
-            err = rush_host::client::restart_agent(&info.id, rush_host::server::LIMIT_CONTINUE)
-                .err()
-                .map(|e| e.to_string());
-        }
+    if (info.account != root && !info.account.is_empty()) || info.state == "stopped" {
+        return (0, 0);
+    }
+    if let Some(name) = roomy.get(&info.login)
+        && info.limit.is_none()
+    {
         log_event(
             &info.id,
             "relogin",
-            json!({"account": root, "how": how, "limited": info.limit.is_some(), "err": err.clone().unwrap_or_default()}),
+            json!({"account": root, "how": "stays", "login": name, "why": "its own login still has room"}),
         );
-        if err.is_some() {
-        } else if info.limit.is_some() {
-            resumed += 1;
-        } else if busy(&info) {
-            waiting += 1;
-        }
+        return (0, 0);
     }
-    (resumed, waiting)
+    let wait = info.limit.is_some()
+        && c.profile_for(&info.cwd, &info.profile).limit() == rush_state::profiles::LIMIT_WAIT;
+    if !info.homes && (info.kind.is_empty() || info.kind == LOGINS_KIND) {
+        if busy(&info) {
+            log_event(
+                &info.id,
+                "relogin",
+                json!({"account": root, "how": "replace once idle", "why": "a host from before homes, busy"}),
+            );
+            // On a thread of its own, in this one's rush folder.
+            let (id, home, cache) = (info.id.clone(), rush_state::dir(), rush_state::cache_dir());
+            let _ = std::thread::Builder::new()
+                .name("replace-when-idle".into())
+                .spawn(move || {
+                    rush_state::set_thread_dir(Some(home));
+                    rush_state::set_thread_cache_dir(Some(cache));
+                    replace_when_idle(&id, IDLE_EVERY, &spawn);
+                });
+            return (0, 1);
+        }
+        let resumed = replace_host(&info, !wait, &spawn).is_ok() && info.limit.is_some() && !wait;
+        return (usize::from(resumed), 0);
+    }
+    if wait {
+        log_event(
+            &info.id,
+            "relogin",
+            json!({"account": root, "how": "none", "why": "its profile waits at a limit"}),
+        );
+        return (0, 0);
+    }
+    if info.sleeping {
+        return (0, 0); // no host to tell: it starts in the new home when woken
+    }
+    let cl = match rush_host::client::Client::dial(&info.id) {
+        Ok(cl) => cl,
+        Err(e) => {
+            log_event(
+                &info.id,
+                "relogin",
+                json!({"account": root, "how": "relogin", "err": e.to_string()}),
+            );
+            return (0, 0);
+        }
+    };
+    let mut err = cl.relogin().err().map(|e| e.to_string());
+    let mut how = "relogin";
+    if err.is_none() && info.limit.is_some() && still_limited(&info.id) {
+        how = "relogin, then restart its agent and host";
+        cl.close();
+        err = rush_host::client::restart_agent(&info.id, rush_host::server::LIMIT_CONTINUE)
+            .err()
+            .map(|e| e.to_string());
+    }
+    log_event(
+        &info.id,
+        "relogin",
+        json!({"account": root, "how": how, "limited": info.limit.is_some(), "err": err.clone().unwrap_or_default()}),
+    );
+    if err.is_some() {
+        (0, 0)
+    } else if info.limit.is_some() {
+        (1, 0)
+    } else if busy(&info) {
+        (0, 1)
+    } else {
+        (0, 0)
+    }
 }
 
 /// Waits up to 3 s for a session a limit stopped to carry on

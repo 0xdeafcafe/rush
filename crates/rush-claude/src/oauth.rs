@@ -397,6 +397,32 @@ pub(crate) fn renew_unless(a: &Account, busy: &dyn Fn(&Account) -> bool) -> Resu
     Ok(())
 }
 
+/// How long a sign-in must have left for sessions to start on it as it is.
+const FRESH_FOR: Ms = 5 * 60_000;
+
+/// Refreshes a's sign-in first when it has expired or is about to, before
+/// sessions start on it: Claude Codes starting together on an expired one
+/// each try to refresh it, and the rest fail with "OAuth session expired
+/// and could not be refreshed" (a switch of login moved four at once).
+/// Whether it refreshed. Rust-only.
+pub fn renew_if_stale(a: &Account) -> Result<bool, OauthError> {
+    let cred = read_creds(a).map_err(|_| OauthError::NotSignedIn)?;
+    if !stale(&cred, now()) {
+        return Ok(false);
+    }
+    renew(a).map(|()| true)
+}
+
+/// Whether cred, refreshable, has no token that lasts FRESH_FOR past at.
+fn stale(cred: &[u8], at: Ms) -> bool {
+    let Ok(c) = serde_json::from_slice::<Creds>(cred) else {
+        return false;
+    };
+    !c.oauth.refresh.is_empty()
+        && (c.oauth.token.is_empty()
+            || (c.oauth.expires_at > 0 && c.oauth.expires_at < at.saturating_add(FRESH_FOR)))
+}
+
 /// Refreshes the sign-in the vault keeps for id, one no folder holds and
 /// so no Claude Code runs on.
 pub fn renew_kept(id: &str) -> Result<(), OauthError> {
@@ -659,6 +685,30 @@ pub(crate) mod tests {
     use std::net::TcpListener;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    // Rust-only: a sign-in sessions are about to start on is refreshed
+    // first when it has run out or will within FRESH_FOR, and only when
+    // it can be.
+    #[test]
+    fn stale_sign_ins() {
+        let at: Ms = 1_000_000_000;
+        let c = |token: &str, refresh: &str, exp: Ms| {
+            format!(
+                r#"{{"claudeAiOauth":{{"accessToken":"{token}","refreshToken":"{refresh}","expiresAt":{exp}}}}}"#
+            )
+        };
+        for (name, cred, want) in [
+            ("expired", c("a", "r", at - 1), true),
+            ("expires soon", c("a", "r", at + FRESH_FOR - 1), true),
+            ("lasts", c("a", "r", at + FRESH_FOR + 1), false),
+            ("no expiry kept", c("a", "r", 0), false),
+            ("lost its token", c("", "r", at + FRESH_FOR + 1), true),
+            ("no refresh token", c("a", "", at - 1), false),
+            ("not JSON", "nope".to_string(), false),
+        ] {
+            assert_eq!(stale(cred.as_bytes(), at), want, "{name}");
+        }
+    }
 
     /// A server answering every request with status and body, until the
     /// test ends; each request's body is passed to check. Its URL, and how

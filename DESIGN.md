@@ -1540,6 +1540,17 @@ moves at its next turn end (`account-move-capped`, then the usual
 `relogin`: it rests once quiet and its next message starts on the new
 login), writing its cache once there. Rust-only.
 
+A switch with `move` readies the login first (`LoginKeeper::ready_login`):
+its sign-in, if it has run out or will within 5 minutes, is refreshed
+under Claude Code's own refresh lock before any session starts on it.
+Four Claude Codes started together on an expired one each failed with
+"OAuth session expired and could not be refreshed". The sessions are
+then told on a thread each (`relogin_hosts`): one after another, each
+taking about 4 s to stop and start, a switch of four took 18 s. A limit
+belongs to the agent that hit it: an agent started again begins with
+none, and a sign-in failure is never taken for the limit it hit before
+(it was, so the new login showed the old one's weekly reset). Rust-only.
+
 A session on an account past its pace is also refused new subagents and
 workflows (`Plan::spawns_for`: the sessions on a tripped account, minus
 any you let through with alt+h, whose spawns go while you keep it busy;

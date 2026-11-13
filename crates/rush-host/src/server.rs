@@ -1887,6 +1887,10 @@ impl Host {
         st.task_start.clear();
         st.not_asked.clear();
         st.info.relogin = false;
+        // A limit is the agent's that said it: one started again (on
+        // another account, often) hasn't hit it. Kept, it made the next
+        // error of any kind the old account's limit. Rust-only.
+        st.limited = None;
         st.pending.clear();
         st.open_asks.clear();
         st.calls.clear();
@@ -4037,7 +4041,11 @@ impl Host {
             e.err.clone()
         };
         let kind = failure::kind_of(&said);
-        if is_err && (st.limited.is_some() || kind == failure::Kind::Limit) {
+        // Signed out is never a limit, whatever the agent said before it:
+        // waiting for a reset wouldn't sign it in again. Rust-only.
+        let limit =
+            kind == failure::Kind::Limit || (st.limited.is_some() && kind != failure::Kind::Auth);
+        if is_err && limit {
             let mut l = Limit::default();
             if let Some(lim) = &st.limited {
                 l.window = lim.window.clone();
@@ -4085,6 +4093,7 @@ impl Host {
                 json!({"said": clip(&said), "account": st.info.home}),
             );
             st.info.state = "idle".into();
+            st.info.limit = None; // what stops it now is the sign-in
             st.info.error = format!("{AUTH_STOPPED}{}", first_line(&said));
             return true;
         }

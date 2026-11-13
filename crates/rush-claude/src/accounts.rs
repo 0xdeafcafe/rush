@@ -417,6 +417,18 @@ impl rush_state::vault::LoginKeeper for Claude {
     fn use_login(&self, cfg: &Config, l: &Login) -> std::io::Result<()> {
         Claude::use_login(self, cfg, l)
     }
+    fn ready_login(&self, cfg: &Config) -> Result<bool, String> {
+        let a = home::run_account(cfg);
+        let res = oauth::renew_if_stale(&a);
+        if !matches!(res, Ok(false)) {
+            let mut f = json!({"account": a.config_dir, "why": "sessions start on it"});
+            if let Err(e) = &res {
+                f["err"] = json!(e.to_string());
+            }
+            rush_sys::events::log("signin-renewed", f);
+        }
+        res.map_err(|e| e.to_string())
+    }
     fn adopt_login(&self, p: &Profile) -> std::io::Result<Login> {
         Claude::adopt_login(self, p)
     }
