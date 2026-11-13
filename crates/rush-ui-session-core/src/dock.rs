@@ -272,12 +272,23 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     let run_box = conn(m, &key).watch.msg_focus
         && super::views::view_name(m, &key) == "subagents"
         && super::subview::box_run(m, &key).is_some();
+    // Under a decisions card there's no box till you pick Something else
+    // (Rust-only): the card is what you answer, and a box beside it read
+    // as a second way to. What it says of a text set aside stays.
+    let (deciding, own, _) = cards_now(m, &key);
+    let decide_only = deciding && !own && conn(m, &key).hosted();
     let c = conn(m, &key);
     c.box_off = out.len();
     c.q_off = q_off;
     c.q_rows = q_rows;
     c.q_panel = scrolls && aux > 0;
-    if !run_box {
+    if decide_only {
+        if !b.foot_l.spans.is_empty() {
+            let mut l = line([plain("  ")]);
+            join(&mut l, b.foot_l.clone());
+            out.push(l);
+        }
+    } else if !run_box {
         out.extend(b.lines());
     }
     c.drawn = b;
@@ -411,6 +422,26 @@ pub fn queue_rows(
     (rows, at)
 }
 
+/// Whether a stopped agent's prompt cache is still warm, and for how
+/// long: its host's word while it has one, else an hour from the last
+/// request (the Prompt cache segment's rule, rush-ui-bars agent.rs).
+fn stopped_cache(m: &mut Model, key: &str) -> Option<Line> {
+    let now = m.now;
+    let host = conn(m, key).info.cache_warm;
+    let s = m.session.as_ref().filter(|v| v.key == key)?;
+    let (at, cold) = match crate::agentry::cache_cold(&s.sess, now) {
+        _ if host != 0 => (host, now > host),
+        c => c?,
+    };
+    Some(if cold {
+        line([sp("cache cold", DIM)])
+    } else {
+        let left = at - now;
+        let c = if left < 10 * 60_000 { YELLOW } else { GREEN };
+        line([sp("cache warm ", DIM), sp(dur(left), c)])
+    })
+}
+
 /// The message box, w wide, with who it goes to and what enter does on
 /// its edge (paneDock's box).
 fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
@@ -425,6 +456,10 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         .flatten();
     // A room's pane is its row's, as Go's room rows are agents.
     let a = crate::rooms::row_agent(m, key).cloned();
+    let paused = a
+        .as_ref()
+        .is_some_and(|a| rush_ui_cmdbar::stops::hibernated(m, &a.key));
+    let warm = stopped_cache(m, key);
     let c = conn(m, key);
     let hosted = c.hosted();
     let typed = !c.input.is_empty();
@@ -476,10 +511,23 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
                 ]),
             );
         } else if a.rush {
+            // Who stopped it, and whether its prompt cache outlived it:
+            // resumed while warm, its first message reads the context at a
+            // tenth of the price rather than writing it all again (Rust-only).
+            let who = if paused {
+                format!("rush paused {}", harness_name(&m.reg, &a.kind))
+            } else {
+                "stopped".to_string()
+            };
+            let mut l = line([sp(who, DIM)]);
+            if let Some(w) = warm {
+                l.spans.push(sp(" · ", DIM));
+                join(&mut l, w);
+            }
+            add(&mut top, l);
             add(
                 &mut top,
                 line([
-                    sp("stopped; ", DIM),
                     sp("enter resumes it", ORANGE),
                     sp(" with your message", DIM),
                 ]),
@@ -516,7 +564,7 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
     } else if hosted && deciding && own {
         add(
             &mut top,
-            line([sp("type your answer · enter gives it", YELLOW)]),
+            line([sp("something else · enter gives your answer", YELLOW)]),
         );
     } else if hosted && deciding {
         add(
@@ -654,6 +702,14 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         b.lead = line([sp("! ", ORANGE)]);
         b.holder = "a command to run in this folder".into();
         b.edge = Some(ORANGE);
+    }
+    // Something else picked on a decisions card: the box comes up as the
+    // answer's own, in the card's colour (Rust-only).
+    if hosted && deciding && own && !bang {
+        b.edge = Some(YELLOW);
+        b.lead = line([sp("✎ ", YELLOW)]);
+        b.holder = "your answer, in your own words".into();
+        b.top_r = line([sp("esc back to the choices", DIM)]);
     }
     super::emeritus::retired_box(m, key, &mut b);
     b = b.scrolled();

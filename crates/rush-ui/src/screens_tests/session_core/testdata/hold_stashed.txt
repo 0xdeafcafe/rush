@@ -1,3 +1,0 @@
-  ╭─ answering the card above · esc returns here ─────────────────────────────╮
-  │ ❯ a message for this agent                                                │
-  ╰─ stashed · comes back after the decision ─────────────────────────────────╯

@@ -122,7 +122,11 @@ fn a_pause_with_an_empty_box_shows_it() {
     let s = screen(&mut m).join("\n");
     assert!(s.contains("? decide"), "the card:\n{s}");
     assert!(!s.contains("decision waiting"), "{s}");
-    assert!(s.contains("↑ to decide above"), "{s}");
+    assert!(
+        !s.contains("a message for this agent"),
+        "no box under it:\n{s}"
+    );
+    assert!(m.cards().conns[KEY].card_focus, "the card has the keys");
 }
 
 /// alt+j opens it now with the keys on it, what's typed left as it was.
@@ -135,7 +139,10 @@ fn alt_j_opens_it_keeping_the_text() {
     press(&mut m, "alt+j");
     let s = screen(&mut m).join("\n");
     assert!(s.contains("? decide"), "{s}");
-    assert!(s.contains("answering the card above"), "{s}");
+    assert!(
+        !s.contains("a message for this agent"),
+        "the box hides:\n{s}"
+    );
     assert!(m.cards().conns[KEY].card_focus);
     assert_eq!(input(&mut m), ("my draft".into(), 8));
 }
@@ -155,8 +162,9 @@ fn stash_then_answer_puts_the_text_back() {
     assert_eq!(input(&mut m), (String::new(), 0), "set aside");
     let s = screen(&mut m).join("\n");
     assert!(s.contains("? decide"), "{s}");
+    // No box under the card, but what it says of the text set aside.
     assert!(s.contains("stashed · comes back after the decision"), "{s}");
-    golden("hold_stashed", &the_box(&mut m));
+    assert!(!s.contains("a message for this agent"), "{s}");
     // p takes the agent's picks and sends them.
     press(&mut m, "p");
     screen(&mut m);
