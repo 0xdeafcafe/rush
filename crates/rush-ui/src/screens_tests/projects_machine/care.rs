@@ -732,7 +732,7 @@ fn known_says_what_the_rules_decided() {
         path: "/h/.colima/_lima".into(),
         why: "colima's VM disks".into(),
         size: 40 << 30,
-        newest: m.now - 30 * 86_400_000,
+        newest: 10 * 86_400_000,
         ..rush_fleet::FoundCache::default()
     }];
     let mut out = Vec::new();
