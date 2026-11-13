@@ -1483,7 +1483,9 @@ The actions, by the name the log gives them:
   (rush-fleet's `temp.rs`); `remove-cache`, `pnpm-store-prune`: the
   dire clean's (`dire.rs`, rush-fleet's `caches.rs`); `remove-temp-orphan`: rush's scratch no
   session owns, ticked in Clean up (`orphans.rs`); `trim-tmp`: a running session's tmp with the
-  disk low (rush-host's `trim.rs`);
+  disk low (rush-host's `trim.rs`); `expire-kept`: a session's kept
+  folder untouched for 30 days, or the oldest with under 5G free
+  (rush-host's `keep.rs`, from `tidydone.rs`);
 - `compress-transcript` (rush-sys's `squeeze.rs`);
 - `hibernate` (`cmdbar/stops.rs`), `stop-cleanup-agent`
   (`projects_machine/care.rs`), `rest-agent` (a host's idle sleep);
@@ -1506,6 +1508,29 @@ Rush's own files (its state, caches, the search index, the events log)
 are still written. To try a rush that leads without it touching anything,
 run it under a sandbox that denies writes outside a copy of rush's folder
 and signals to other processes as well (the sweep's `lead-trial.sb`).
+
+## Scratch and kept files (Rust-only)
+
+Every session gets two folders, set in its environment by the host
+(`server.rs`, where it starts the agent):
+
+- `$TMPDIR`, its scratch: `tmp/<project>/<id>`, linked from
+  `sessions/<id>/tmp` (rush-host's `tmp.rs`). Builds, clones, downloads,
+  caches. It may be cleaned whenever nothing has it open: the host's
+  low-disk trim (`trim.rs`), done work's clean-up and Projects › clean.
+- `$RUSH_KEEP`, what it or you may want to look at again (screenshots,
+  outputs, logs, reports): `keep/<project>/<id>`, linked from
+  `sessions/<id>/keep` (rush-host's `keep.rs`). A tree of its own, so
+  nothing that cleans `tmp` reaches it. Once made it stays where it is,
+  as the conversation names its files by path. It outlives the session:
+  the clean-up of done work (`tidydone.rs`) removes one 30 days after
+  anything at its top was last touched, or, with under 5G free once the
+  scratch has gone, the oldest first until there's 5G. Never one whose
+  host runs, nor one something has open (lsof).
+
+The prompt every agent gets (`SCRATCH_PROMPT`) says which goes where.
+Plugins keep theirs in `$RUSH_PLUGIN_DATA` as before. Projects › clean
+doesn't list kept folders yet, nor does the Overview show `$RUSH_KEEP`.
 
 ## One answer for a memory (Rust-only)
 

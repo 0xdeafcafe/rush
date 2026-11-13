@@ -156,8 +156,8 @@ const ONLINE_EVERY: Duration = Duration::from_secs(5);
 pub const TASKS_PROMPT: &str = "You are running inside rush, which shows your task list (todo list or plan) to the user live. For any work with more than two steps, write the steps to your task list before starting, keep exactly one in progress, and mark each done as you finish it.";
 
 /// What every agent rush runs is told, watched or not: where scratch files
-/// go, and how to ask rush what it did.
-pub const SCRATCH_PROMPT: &str = "Put scratch files (clones, downloads, logs, builds you won't keep) in $TMPDIR, never /tmp or elsewhere outside the project: $TMPDIR is this session's own, so what you leave there is cleaned up for you. To try something on a copy of a big folder you already have (a build, a checkout), clone it (cp -cR on macOS, cp -R --reflink=auto on Linux) rather than building a fresh one for each try: a clone takes no space until its files change.\n\nWhen rush itself did something odd (a message held, a restart, an agent woken or stopped), `rush why $RUSH_SESSION` and `rush events -h` say what it did and why.";
+/// go, where what's worth keeping goes, and how to ask rush what it did.
+pub const SCRATCH_PROMPT: &str = "Put scratch files (clones, downloads, builds, caches) in $TMPDIR, never /tmp or elsewhere outside the project: $TMPDIR is this session's own, and what's there may be cleaned up whenever nothing has it open. Put what you or the user may want to look at again (screenshots, outputs, logs, reports, bench results) in $RUSH_KEEP: it stays after the session is done, for 30 days after it was last touched. To try something on a copy of a big folder you already have (a build, a checkout), clone it (cp -cR on macOS, cp -R --reflink=auto on Linux) rather than building a fresh one for each try: a clone takes no space until its files change.\n\nWhen rush itself did something odd (a message held, a restart, an agent woken or stopped), `rush why $RUSH_SESSION` and `rush events -h` say what it did and why.";
 
 /// Tells a watched agent that a shell block in its reply is a box the user
 /// can run in place, so it hands them commands that way, and that a block
@@ -1610,12 +1610,14 @@ impl Host {
             &rush_state::Store::load().config.cheap_subagents,
             &st.cfg.kind,
         );
+        let keep = crate::keep::place_keep(&st.cfg.id, &st.cfg.cwd);
         let mut env = vec![
             // Ending in "/", as macOS's own: "$TMPDIR$name" stays inside.
             format!(
                 "TMPDIR={}",
                 rush_core::adapter::tmpdir_env(&tmp.to_string_lossy())
             ),
+            format!("RUSH_KEEP={}", keep.to_string_lossy()),
             rush_events::env(&ev),
         ];
         env.extend(crate::shim::shim_env(&self.reg, &c.id, &c.kind));

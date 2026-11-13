@@ -244,6 +244,12 @@ pub fn temp_root() -> PathBuf {
     rush_state::dir().join("tmp")
 }
 
+/// Where sessions keep what they made to look at again ($RUSH_KEEP), one
+/// folder per project (rush-host's keep).
+pub fn keep_root() -> PathBuf {
+    rush_state::dir().join("keep")
+}
+
 /// Where a session's agent and everything it runs keep their scratch
 /// files. The session's own folder links to it (tmp); one from before the
 /// per-project layout has the folder itself there.
@@ -274,15 +280,17 @@ pub fn is_temp_dir(p: &str) -> bool {
                 .is_some_and(|n| host_root().join(n).is_dir())
 }
 
-/// Whether p is in a temp folder, a session's or the system's: somewhere
-/// work is scratch, never a project.
+/// Whether p is in a temp folder, a session's (its scratch or what it
+/// keeps) or the system's: somewhere work is scratch, never a project.
 pub fn is_temp(p: &str) -> bool {
     if p.is_empty() {
         return false;
     }
     let p = crate::worktree::clean(p);
     let tmp = temp_root();
-    if inside(&tmp.to_string_lossy(), &p) || system_temp(&p) {
+    let keep = keep_root();
+    if inside(&tmp.to_string_lossy(), &p) || inside(&keep.to_string_lossy(), &p) || system_temp(&p)
+    {
         return true;
     }
     let root = host_root();
