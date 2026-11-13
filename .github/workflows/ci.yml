@@ -1,7 +1,7 @@
 name: CI
 
 # Checks every push to main and to a rush/* branch: formatting, clippy and
-# the tests, on a Mac (rush's home), and a build and the system crates'
+# the tests, on a Mac (rush's home), and a build and the system and update crates'
 # tests on Linux. A push to main also builds rush for
 # Apple silicon and keeps it as the run's artifact, `rush-main`, which
 # tools/install-ci.sh downloads and installs: the builds that would
@@ -109,7 +109,7 @@ jobs:
       - name: Build
         run: cargo build --locked -p rush
       - name: Test
-        run: cargo test --locked -p rush-sys -p rush-net -p rush-state
+        run: cargo test --locked -p rush-sys -p rush-net -p rush-state -p rush-update
       - name: Cache use
         if: always()
         run: |
