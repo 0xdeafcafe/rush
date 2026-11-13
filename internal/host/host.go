@@ -832,6 +832,14 @@ func (s *server) stalled(e event.TurnEnd) bool {
 		s.info.Detail = "usage limit reached"
 		s.scheduleContinue()
 		return true
+	case !isErr && e.Reason == "done" && e.Cost == 0 && strings.TrimSpace(e.Text) == "":
+		// A turn that ran, cost nothing, and said nothing never happens
+		// for a real prompt: resuming an oversized transcript can make
+		// Claude Code end the turn this way, with no error to relay. A
+		// silent idle here reads as "it ran and chose not to reply", so
+		// say plainly that nothing came back.
+		s.info.State, s.info.Error = "idle", "the turn ended with no reply and no cost — resuming this session's history may have failed silently; a fresh session usually recovers it"
+		return true
 	case !isErr && !strings.HasPrefix(said, "API Error:"):
 		return false
 	case isAuthError(text):

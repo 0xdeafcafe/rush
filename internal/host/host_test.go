@@ -497,6 +497,47 @@ func TestRetryWaitsForProofPastTheCache(t *testing.T) {
 	}
 }
 
+// A turn that ran to completion, cost nothing and said nothing never
+// happens for a real prompt: it's a resume that silently failed to load,
+// with no error to relay otherwise. It should stall with a plain error
+// rather than leave the session idle with nothing to show for it.
+func TestSilentEmptyTurnStalls(t *testing.T) {
+	setup(t)
+	s := &server{cfg: Config{ID: "q", Binary: "/nonexistent/claude"}, clients: map[*conn]struct{}{}}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.stalled(event.TurnEnd{Reason: "done", Cost: 0, Text: ""}) {
+		t.Fatal("a done turn with no cost and no text should stall")
+	}
+	if s.info.Error == "" {
+		t.Fatal("should explain that nothing came back")
+	}
+}
+
+// The same empty turn, interrupted rather than done, is a person stopping
+// it on purpose: not a silent failure, and shouldn't be treated as one.
+func TestInterruptedEmptyTurnDoesNotStall(t *testing.T) {
+	setup(t)
+	s := &server{cfg: Config{ID: "q", Binary: "/nonexistent/claude"}, clients: map[*conn]struct{}{}}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stalled(event.TurnEnd{Reason: "interrupted", Cost: 0, Text: ""}) {
+		t.Fatal("an interrupted turn shouldn't be read as a silent failure")
+	}
+}
+
+// A done turn that actually cost something, even with no closing text,
+// is an ordinary turn (e.g. it only ran tools) and shouldn't stall.
+func TestEmptyTextWithCostDoesNotStall(t *testing.T) {
+	setup(t)
+	s := &server{cfg: Config{ID: "q", Binary: "/nonexistent/claude"}, clients: map[*conn]struct{}{}}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stalled(event.TurnEnd{Reason: "done", Cost: 0.01, Text: ""}) {
+		t.Fatal("a turn that spent something shouldn't be treated as silently empty")
+	}
+}
+
 // Cut off by the network, a warm session waits until the API can be
 // reached, however long, then continues; one whose cache ran out while it
 // waited asks for proof instead.
