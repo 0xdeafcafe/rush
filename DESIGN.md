@@ -1341,7 +1341,12 @@ so `leads()` is neither. What only the rush that leads does:
   following`, set by the binary).
 
 - stops agents finished for longer than Hibernate after
-  (`cmdbar/stops.rs` `to_hibernate`; model.go:2036);
+  (`cmdbar/stops.rs` `to_hibernate`; model.go:2036); the stopped
+  agent's box then says "rush paused Claude Code" (`stops::hibernated`,
+  this run of rush only; else "stopped") and whether its prompt cache is
+  still warm, and for how long, as the Prompt cache segment reckons it
+  (`dock::stopped_cache`, beyond Go): resumed warm, the first message
+  reads the context rather than writing it again;
 - puts a finished cleanup agent in Earlier and stops its host
   (`projects_machine/care.rs` `finished_care`; machinecare.go:80);
 - tidies done work and settles work that landed, through rush-fleet's
@@ -2384,7 +2389,7 @@ is made. Everything below is in `rush_ui::frame`.
   (`session_cards::hold`, beyond Go): `decisions_card` skips it and the
   box's bottom edge counts what waits. It shows once the box is empty
   and 3 s pass without a key; with text left it waits for alt+j (open,
-  text kept: the card sits above the box) or alt+shift+j (the box's
+  text kept, hidden with the box) or alt+shift+j (the box's
   `Editor` set aside whole and put back once the card is answered or
   set aside). The list's needs-you marks don't read the hold.
   Enter on a decisions card's pick sends (beyond Go, which asked "Send
@@ -2394,8 +2399,9 @@ is made. Everything below is in `rush_ui::frame`.
   text). ⇧enter (`session.decide.edit`; alt+enter too, where the terminal
   can't tell it from enter, as ctrl+enter, the kitty keyboard in
   rush-draw) puts the answers in the box instead (`Act::Edit`, after any
-  text there, a blank line between); enter, or a click, with text in the
-  box does the same, so nothing typed is sent over or lost. The review
+  text there, a blank line between). Text left in the hidden box is
+  neither sent over nor taken for an answer: a pick sends the pick, and
+  the text is there once the card goes. The review
   page stays for ← and a digit to reach. The hint names the keys from the
   keymap (`Conn::q_edit_key`).
   A decisions card stays on a session rush doesn't run now when its
@@ -2419,10 +2425,17 @@ is made. Everything below is in `rush_ui::frame`.
   letter, and the letter picks it (digits still do); p takes the
   agent's picks, offered only while a decision you haven't answered has
   one: with all answered it sends, else it fills those and moves to the
-  first still open rather than sending part. s sets the card aside; esc
-  only gives the keys back to the box (on a Wall tile, closes the card
-  with the tile still asking), and any other letter goes to the box as
-  typing. A card set aside marks its block's Open
+  first still open rather than sending part. s sets the card aside.
+  In a session the card has no message box under it (beyond Go, whose
+  card waited for ↑ above the box: two ways to answer read as one too
+  many): it takes the keys as it comes (`up_only` leaves it out) and
+  keeps them whenever no conversation row is picked; esc and ↓ off its
+  last row do nothing. Something else (enter on its row, or any
+  character not an option's letter: `question::own_typed`) brings the
+  box up as the answer's own (yellow edge, ✎, "something else · enter
+  gives your answer", `dock::message_box`), and esc or ↑ from it empty
+  goes back to the choices, the draft kept. On a Wall tile esc closes
+  the card with the tile still asking. A card set aside marks its block's Open
   (`render::decisions_gone`): the block says "set aside · d opens the
   card", and the column beside and the catch-up no longer list it. The
   mark is the view's, as the sent mark is: a session opened afresh reads

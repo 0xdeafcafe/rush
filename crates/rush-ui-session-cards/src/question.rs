@@ -298,15 +298,14 @@ pub fn card_id(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> String {
 }
 
 /// Whether a card of kind takes the keys only from ↑ or a click: a
-/// question's and decisions' letters and digits answer, so the start of a
-/// message would (upOnly). A subagent's ask is too (Rust-only): its y
-/// and n would answer for another agent, so only alt+y and alt+n do until
-/// it's given the keys.
+/// question's letters and digits answer, so the start of a message would
+/// (upOnly). A subagent's ask is too (Rust-only): its y and n would
+/// answer for another agent, so only alt+y and alt+n do until it's given
+/// the keys. A decisions card isn't (Rust-only): the box hides under it,
+/// so it always has them, and one that comes while you type waits
+/// (hold.rs) until you stop or open it.
 fn up_only(kind: &str) -> bool {
-    matches!(
-        kind,
-        "finish" | "question" | "subquestion" | "subask" | "decisions"
-    )
+    matches!(kind, "finish" | "question" | "subquestion" | "subask")
 }
 
 /// The cards waiting on you, w wide and a question folded to fit max_h
@@ -326,11 +325,11 @@ pub fn card_rows(m: &mut Model, key: &str, i: &HostInfo, w: usize, max_h: usize)
         c.card_typing = now.saturating_sub(m.cards().last_key) < 1_000;
         c.card_at = now;
         // What waits on you takes the keys as it comes, unless you were
-        // typing: then ↑ gives it them (modal.go:32 cardModal).
+        // typing: then ↑ gives it them (modal.go:32 cardModal). A decisions
+        // card always does: there's no box under it (Rust-only).
+        let kind = card_kind(m, key, &c, i);
         if !id.is_empty()
-            && !up_only(card_kind(m, key, &c, i))
-            && !c.card_typing
-            && i.input.is_empty()
+            && (kind == "decisions" || !up_only(kind) && !c.card_typing && i.input.is_empty())
         {
             c.card_focus = true;
             if let Some(v) = m.session.as_mut() {
@@ -925,7 +924,7 @@ pub fn draw_question(
             "opens the session to type your own",
         )
     } else {
-        ("enter, then type it below", "type your own answer below")
+        ("enter to write your own", "or just start typing your own")
     };
     let mut own_text = if own {
         line([spb("Something else", TEXT), plain("  "), sp(own_on, SUB)])
@@ -1084,12 +1083,10 @@ pub fn draw_question(
         join(&mut l, keys_fit(ww, &pairs));
         cl(&mut out, l);
     } else {
-        let (a, b, c2) = if c.q_decide {
-            (
-                "↑",
-                " to decide   ·   a message typed below goes as ever",
-                "",
-            )
+        let (a, b, c2) = if c.q_decide && c.q_own {
+            ("esc", " back to the choices", "")
+        } else if c.q_decide {
+            ("↓", " back to the decision", "")
         } else {
             (
                 "↑",
@@ -2008,6 +2005,21 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
                 return Out::Pass;
             };
             c.sync_question(&req, i.decisions.as_ref());
+            // The box hides under a decision (Rust-only): the card has the
+            // keys unless you've gone up into the conversation, and esc,
+            // or ↑ from an empty box, takes your own answer back to it.
+            if c.q_own && (s == "esc" || s == "up" && empty && sel_empty) {
+                c.q_own = false;
+                c.card_focus = true;
+                return Out::Draw;
+            }
+            if !c.q_own && sel_empty && !c.card_focus {
+                // ↑ that gives it the keys does only that, as on any card.
+                c.card_focus = true;
+                if s == "up" {
+                    return Out::Draw;
+                }
+            }
             if c.card_focus && !c.q_full && (s == "s" || s == "p") {
                 // s sets it aside; opened again here, it's no card of the
                 // host's: nothing to dismiss. esc only lets go of the card.
@@ -2019,13 +2031,19 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
                     r => return finish(m, key, c, r),
                 }
             }
-            // What's typed is a message as ever, unless you chose to
-            // answer one in your own words.
+            // Enter gives what's typed once you chose to answer one in
+            // your own words; till then the card has the keys.
             if !empty && s == "enter" && c.q_own || c.card_focus {
                 let r = keyed(m, key, i, c, &req, &s, empty);
                 if r.used() {
                     return finish(m, key, c, r);
                 }
+            }
+            if !c.q_own
+                && c.card_focus
+                && let Some(o) = own_typed(c, &req, &s)
+            {
+                return o;
             }
         }
         _ => {}
@@ -2427,15 +2445,56 @@ fn keyed(
     c.sync_question(req, i.decisions.as_ref());
     let edit = c.q_decide && (s == "shift+enter" || s == "alt+enter");
     let s = if edit { "enter" } else { s };
-    let boxed = c.q_decide && !c.q_own && !i.input.trim().is_empty();
-    let empty = empty || boxed && s == "enter";
-    c.q_edit = edit || boxed;
+    // Under a decision the box is hidden till you choose your own words:
+    // what it holds then is that answer's draft, never taken for one.
+    let empty = empty || c.q_decide && !c.q_own;
+    c.q_edit = edit;
     let r = question_key(c, req, i.decisions.as_ref(), s, empty, &mut input);
     c.q_edit = false;
     if input != i.input {
         set_input(m, key, &input);
     }
     r
+}
+
+/// A key a decisions card with the keys had no use for (Rust-only): a
+/// character starts your own answer in the box, which comes up for it;
+/// the box's editing keys do nothing on its hidden draft; ↑ goes on up
+/// into the conversation as from any card (None); anything else passes,
+/// the card keeping the keys.
+fn own_typed(c: &mut Conn, req: &Question, s: &str) -> Option<Out> {
+    if s == "up" {
+        return None;
+    }
+    let mut ch = s.chars();
+    let printable = matches!((ch.next(), ch.next()), (Some(k), None) if !k.is_control());
+    if printable || s == "space" {
+        if let Some(q) = req.asks.get(c.q_idx) {
+            c.q_cursor = q.options.len();
+        }
+        c.q_own = true;
+        c.card_focus = false;
+        return Some(Out::Pass);
+    }
+    let editing = matches!(
+        s,
+        "down"
+            | "esc"
+            | "enter"
+            | "backspace"
+            | "delete"
+            | "left"
+            | "right"
+            | "home"
+            | "end"
+            | "tab"
+            | "shift+tab"
+            | "ctrl+u"
+            | "ctrl+w"
+            | "ctrl+k"
+            | "alt+backspace"
+    );
+    Some(if editing { Out::Draw } else { Out::Pass })
 }
 
 /// A question's key done: what it sends goes, and the card lets go.

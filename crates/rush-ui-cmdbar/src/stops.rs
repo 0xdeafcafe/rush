@@ -764,6 +764,12 @@ fn keep_done(m: &mut Model, key: &str, done: bool) {
 #[derive(Default)]
 struct Hibernated(HashSet<String>);
 
+/// Whether hibernate stopped agent key in this run of rush: rush paused
+/// it, not you (the message box says so).
+pub fn hibernated(m: &mut Model, key: &str) -> bool {
+    m.kept::<Hibernated>().0.contains(key)
+}
+
 /// The finished agents whose process is still resident after Settings ›
 /// General's Hibernate after, each once; none in a rush that follows: the
 /// one that leads stops them (hibernate, applySnap's leads).

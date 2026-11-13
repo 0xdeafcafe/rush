@@ -950,13 +950,17 @@ fn decisions_card() {
     );
 }
 
-/// What's typed goes as a message, not an answer, unless you chose to
-/// answer in your own words; s sets the card aside and sends nothing.
+/// Under a decisions card the box is hidden: a character typed starts
+/// your own answer and brings it up, ↑ from it empty goes back to the
+/// choices, enter on Something else brings it up too and gives what's
+/// typed; s sets the card aside and sends nothing.
 #[test]
 fn decisions_card_typing_and_dismiss() {
     let mut m = decisions_model(DECISIONS_MSG);
     let i = info(&m, "k").unwrap();
-    assert_eq!(card_key(&mut m, "k", &i, "enter", false), Out::Pass);
+    assert_eq!(card_key(&mut m, "k", &i, "x", true), Out::Pass);
+    let c = &m.cards().conns["k"];
+    assert!(c.q_own && !c.card_focus, "typing starts your own answer");
     for k in ["up", "down", "down", "enter"] {
         card_key(&mut m, "k", &i, k, true);
     }
@@ -1154,20 +1158,19 @@ fn decisions_card_shift_and_alt_enter_fill_the_box() {
     }
 }
 
-/// Text already in the box is not sent over: a pick puts the answer into
-/// the box after it.
+/// Text already in the hidden box (a card opened with alt+j) is neither
+/// sent over nor taken as the answer: a pick sends just the pick.
 #[test]
 fn decisions_card_pick_keeps_typed_text() {
     let mut m = loader_model(LOADER_MSG, true);
     set_info(&mut m, |i| i.input = "and one more thing".into());
     let i = info(&m, "k").unwrap();
     card_key(&mut m, "k", &i, "up", true);
-    m.cards().conns.get_mut("k").unwrap().card_focus = true;
+    assert!(m.cards().conns["k"].card_focus);
     card_key(&mut m, "k", &i, "enter", false);
-    assert!(answered(&mut m).is_empty());
     assert_eq!(
-        acts(&mut m),
-        vec![Act::Edit("1a. Committing the loader work: yes".into())]
+        answered(&mut m),
+        vec!["1a. Committing the loader work: yes"]
     );
 }
 
@@ -1187,35 +1190,35 @@ fn decisions_card_own_words() {
     assert_eq!(answered(&mut m), vec!["1: commit it, but squash into one"]);
 }
 
-/// A decisions card coming up doesn't take the keys: a message starting
-/// with a, s or a digit is a message, and only ↑ puts you on the card
-/// (TestDecisionsCardWaitsForUp).
+/// A decisions card coming up takes the keys, the box hidden under it
+/// (Rust-only; Go's TestDecisionsCardWaitsForUp waited for ↑): its
+/// letters pick at once.
 #[test]
-fn decisions_card_waits_for_up() {
+fn decisions_card_takes_the_keys() {
     let mut m = decisions_model(DECISIONS_MSG);
     rows(&mut m, 100, 0); // it comes
-    assert!(!m.cards().conns["k"].card_focus);
+    assert!(m.cards().conns["k"].card_focus);
     let i = info(&m, "k").unwrap();
-    for k in ["a", "s", "1"] {
-        assert_eq!(card_key(&mut m, "k", &i, k, true), Out::Pass, "{k}");
-        assert!(!m.cards().conns["k"].card_focus);
-    }
-    assert!(acts(&mut m).is_empty());
-    card_key(&mut m, "k", &i, "up", true);
-    assert!(m.cards().conns["k"].card_focus, "↑ puts you on the card");
+    card_key(&mut m, "k", &i, "b", true);
+    let c = m.cards().conns["k"].clone();
+    assert_eq!(c.q_idx, 1, "b picked the first, on to the second");
+    assert!(c.card_focus);
 }
 
-/// esc on the decisions card only lets go of it: nothing sent, nothing
-/// set aside, the card still up for ↑.
+/// esc and ↓ off the decisions card do nothing: with no box under it,
+/// it keeps the keys; nothing sent, nothing set aside.
 #[test]
-fn decisions_card_esc_lets_go() {
+fn decisions_card_esc_keeps_it() {
     let mut m = decisions_model(DECISIONS_MSG);
     let i = info(&m, "k").unwrap();
     card_key(&mut m, "k", &i, "up", true);
     assert_eq!(card_key(&mut m, "k", &i, "esc", true), Out::Draw);
+    for _ in 0..4 {
+        card_key(&mut m, "k", &i, "down", true);
+    }
     assert!(acts(&mut m).is_empty());
     let c = m.cards().conns["k"].clone();
-    assert!(!c.card_focus);
+    assert!(c.card_focus && !c.q_own);
     assert_eq!(card_kind(&m, "k", &c, &i), "decisions");
 }
 
@@ -1313,7 +1316,7 @@ fn decisions_block_on_the_card() {
 fn decisions_set_aside_reads_so() {
     let mut m = loader_model(LOADER_MSG, true);
     m.frame();
-    press(&mut m, "up");
+    // The card has the keys as it comes: no ↑ needed.
     press(&mut m, "s");
     m.frame();
     let out = text(&m.frame());
@@ -1400,7 +1403,7 @@ fn decisions_decide_again_with_no_host() {
         i.wakes = true;
     });
     m.frame();
-    press(&mut m, "up");
+    // The card has the keys as it comes: no ↑ needed.
     press(&mut m, "s");
     assert_eq!(acts(&mut m), vec![Act::DismissDecisions("d1".into())]);
     let i = info_any(&m, "k").unwrap();
@@ -1441,7 +1444,7 @@ fn decisions_cold_cant_answer() {
 fn decisions_answer_failed_brings_the_card_back() {
     let mut m = loader_model(LOADER_MSG, true);
     m.frame();
-    press(&mut m, "up");
+    // The card has the keys as it comes: no ↑ needed.
     press(&mut m, "down"); // no
     press(&mut m, "enter");
     press(&mut m, "enter"); // Send answers

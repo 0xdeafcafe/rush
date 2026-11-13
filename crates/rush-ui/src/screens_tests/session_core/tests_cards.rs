@@ -731,19 +731,9 @@ My picks: 1a 2b.";
     let s = screen(&mut m).join("\n");
     assert!(s.contains("? decide"), "the card is up:\n{s}");
     let cards = |m: &mut Model| m.cards().conns[KEY].clone();
-    // The box says what it does under the card, and while the card has
-    // the keys (rushmode.go:3689, :3707).
-    assert!(
-        s.contains("↑ to decide above · or type a message as ever"),
-        "{s}"
-    );
-    press(&mut m, "up");
-    assert!(cards(&mut m).card_focus, "↑ puts you on the card");
-    let s = screen(&mut m).join("\n");
-    assert!(
-        s.contains("answering the card above · esc returns here"),
-        "{s}"
-    );
+    // No box under it: the card has the keys as it comes (Rust-only).
+    assert!(!s.contains("a message for this agent"), "{s}");
+    assert!(cards(&mut m).card_focus, "the card has the keys");
     assert_eq!(cards(&mut m).q_cursor, 0, "on its pick");
     press(&mut m, "down");
     assert_eq!(cards(&mut m).q_cursor, 1);
@@ -772,13 +762,13 @@ pub(super) const FAKE_DECIDE: &str = "I need two things settled before I carry o
 
 /// At 100x30 a decisions card keeps to three fifths of the Session's
 /// rows, not the screen's, and in a conversation it's the conversation's
-/// last part, scrolling with it: the message box stays under it and what
+/// last part, scrolling with it: no box under it (Rust-only) and what
 /// you asked stays above it, pinned once the card's top has scrolled
 /// off, with or without the keys on the card
 /// (rushmode.go:3418 cardRows(…, h*3/5), h the pane's; :2327-2335 the
 /// dock's panels on the transcript's end).
 #[test]
-fn a_decisions_card_leaves_the_box_on_a_small_screen() {
+fn a_decisions_card_on_a_small_screen() {
     use super::tests::{press, screen, sess};
     let (mut m, _fake) = super::tests::hosted("steer", Vec::new());
     m.cards().host = Some(super::cards_host::host());
@@ -804,14 +794,14 @@ fn a_decisions_card_leaves_the_box_on_a_small_screen() {
         assert!(all.contains("a  dark"), "{k}: {all}");
         // Taller than the rows left, the card's top scrolls off under the
         // latest prompt, pinned (promptpins.go).
-        let (asked, card, boxed) = (
-            at("latest  please decide"),
-            at("a  dark"),
-            at("a message for this agent"),
+        let (asked, card) = (at("latest  please decide"), at("a  dark"));
+        assert!(
+            asked.is_some() && asked < card,
+            "{k}: what you asked, the card\n{all}"
         );
         assert!(
-            asked.is_some() && asked < card && card < boxed,
-            "{k}: what you asked, the card, the box\n{all}"
+            at("a message for this agent").is_none(),
+            "{k}: no box\n{all}"
         );
     }
     assert!(
@@ -1029,7 +1019,7 @@ fn m_on_the_finishing_card_asks_how_to_merge() {
 }
 
 /// A card scrolled with the conversation takes clicks only where it's in
-/// sight: not on the box under it once scrolled away below, nor on the
+/// sight: not below the view once scrolled away under it, nor on the
 /// pinned prompt over its top (panelClip, rushmode.go:2765).
 #[test]
 fn clicks_miss_a_card_out_of_sight() {
@@ -1067,25 +1057,15 @@ fn clicks_miss_a_card_out_of_sight() {
     let (_, floor, _) = crate::screens::session_cards::card_top(&m, KEY);
     assert_eq!(floor, pin + 1, "clicks on the card start under the pin");
     click(&mut m, pin);
-    assert!(!m.cards().conns[KEY].card_focus, "the pin isn't the card");
-    // Scrolled up, the card is below the view: the box isn't it.
+    assert_eq!(m.cards().conns[KEY].q_click, 0, "the pin isn't the card");
+    // Scrolled up, the card is below the view: clicks on it stop at the
+    // view's foot.
     press(&mut m, "pgup");
-    let s = screen(&mut m);
-    let boxed = s
-        .iter()
-        .position(|l| l.contains("a message for this agent"))
-        .unwrap();
-    let (top, _, _) = crate::screens::session_cards::card_top(&m, KEY);
-    let n = m.cards().conns[KEY].q_rows.len() as isize;
-    assert!(
-        top <= boxed as isize && (boxed as isize) < top + n,
-        "the hidden card would be under the box: {top} {boxed} {n}"
-    );
+    screen(&mut m);
     let (_, _, ceil) = crate::screens::session_cards::card_top(&m, KEY);
-    assert!(ceil <= boxed, "clicks on the card stop at the view's foot");
-    click(&mut m, boxed);
+    click(&mut m, ceil);
     let c = &m.cards().conns[KEY];
-    assert!(!c.card_focus && c.q_click == 0, "the box isn't the card");
+    assert_eq!(c.q_click, 0, "below the view isn't the card");
 }
 
 /// Rust-only: a subagent rush hosts waiting on you is the session's card,
