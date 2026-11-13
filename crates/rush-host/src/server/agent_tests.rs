@@ -955,7 +955,7 @@ fn a_limit_said_before_isnt_a_sign_in() {
         );
         assert_eq!(st.info.limit.is_some(), limit, "{name}: limit");
         assert_eq!(
-            st.info.error.starts_with(AUTH_STOPPED),
+            st.info.error.starts_with(crate::server::AUTH_STOPPED),
             signed_out,
             "{name}: {}",
             st.info.error
