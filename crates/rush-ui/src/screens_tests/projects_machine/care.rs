@@ -415,13 +415,14 @@ fn asked_sheet_starts_on_start_and_snoozes_nothing() {
     let mut s = CareSheet {
         why: "you asked for one, with 3.0G free on disk".into(),
         asked: true,
-        cur: 0,
+        cur: 1,
         ..sheet(false)
     };
     let t = text(&s.body(&m, 100, 30));
     assert!(t.starts_with("Cleanup  you asked for one"), "{t}");
     assert!(!t.contains("rush noticed"), "{t}");
     assert!(t.contains("▍ Start a cleanup agent"), "{t}");
+    assert!(t.contains("Clean up now  rush's own list, no agent"), "{t}");
     assert!(
         t.contains("Start one that looks further  also hunts caches"),
         "{t}"
@@ -475,13 +476,19 @@ fn sheet_says_what_it_reads() {
 fn sheet_keys() {
     let mut m = crate::new_model("t");
     let mut s = sheet(false);
-    assert_eq!(s.cur, 2);
-    for (k, cur) in [("down", 0), ("tab", 1), ("up", 0), ("shift+tab", 2)] {
+    assert_eq!(s.choices()[0], CareChoice::CleanUp, "Clean up comes first");
+    assert_eq!(s.cur, 3);
+    for (k, cur) in [("down", 0), ("tab", 1), ("up", 0), ("shift+tab", 3)] {
         assert_eq!(s.key(&mut m, &Press::of(k).unwrap()), Out::Draw);
         assert_eq!(s.cur, cur, "{k}");
     }
     let mut s = sheet(true);
-    assert_eq!(s.cur, 1);
+    assert_eq!(
+        s.choices()[0],
+        CareChoice::CleanUp,
+        "even with the plugin off"
+    );
+    assert_eq!(s.cur, 2);
     assert_eq!(s.key(&mut m, &Press::of("down").unwrap()), Out::Draw);
     assert_eq!(s.cur, 0);
     assert_eq!(s.key(&mut m, &Press::of("f").unwrap()), Out::Idle);
@@ -489,7 +496,7 @@ fn sheet_keys() {
         let mut s = sheet(false);
         s.cur = 0;
         assert_eq!(s.key(&mut m, &Press::of(k).unwrap()), Out::Close, "{k}");
-        assert_eq!(s.cur, 2);
+        assert_eq!(s.cur, 3);
     }
     let mut s = sheet(false);
     s.busy = true;

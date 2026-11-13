@@ -52,6 +52,23 @@ pub const USAGE: &str = "rush session: run rush-mode sessions without the view
         when the turn ends
   rush session info <id> [--json]
   rush session list [--json] [--meta k=v]...
+        with --json each says needsYou (null, or {kind, reason, text}) and
+        lastReplyAt, when its last turn ended
+  rush session read <id> [--last N | --turns N] [--json]   its conversation:
+        your messages and its words whole, a line a tool call, with times;
+        the last turn unless told. Any session the view lists, rush's or not
+  rush session wait <id>... [--until turn|needs-you] [--since T] [--timeout D] [--json]
+        blocks until one of them ends a turn, or with --until needs-you
+        needs you; prints it, its last reply and what it needs of you.
+        --since (a turn's number, a time, or 10m back) reports at once what
+        happened after what you last saw: pass the `next` it printed. Ends
+        0 something happened, 2 timed out, 3 the sessions are gone
+  rush session needs <id>... [--json]   what each needs of you, as the
+        view's Needs you reads it: decision, approval, question, problem,
+        command, step, offer, or none, with why and the words it's read from
+  rush session search <text> [<id>...] [--since 2h] [--limit N] [--json]
+        matches in their conversations (every session's, with no ids):
+        session, turn, time and the words around each
   rush session --on MACHINE <command> …   on another machine's rush serve
         (rush remote add); start takes --cwd --agent --profile --name
         --model --effort --prompt-file, or --resume SESSION to carry on one
@@ -66,6 +83,9 @@ pub struct Env {
     pub spawn: fn(&Registry, Config) -> Result<Config, String>,
     /// Whether a session's host runs (host.Alive of its pid).
     pub alive: fn(&Info) -> bool,
+    /// The sessions the view's list has (rush-fleet's loader): what read,
+    /// wait, needs and search find a session in.
+    pub load: fn(&Registry) -> Vec<rush_core::agent::Agent>,
 }
 
 impl Env {
@@ -75,6 +95,7 @@ impl Env {
             reg: reg.clone(),
             spawn: |_, cfg| rush_host::spawn(cfg).map_err(|e| e.to_string()),
             alive: |i| alive(i.host_pid),
+            load: crate::monitor::load_agents,
         }
     }
 
@@ -113,6 +134,10 @@ pub fn session_cmd(
         "watch" => session_watch(env, rest, stdout),
         "info" => session_info(env, rest, stdout),
         "list" => session_list(env, rest, stdout),
+        "read" => crate::monitor::session_read(env, rest, stdout),
+        "needs" => crate::monitor::session_needs(env, rest, stdout),
+        "search" => crate::monitor::session_search(env, rest, stdout),
+        "wait" => return crate::monitor::session_wait(env, rest, stdout, stderr),
         other => (
             false,
             Err(format!("unknown session command {other:?}\n\n{USAGE}")),
@@ -132,7 +157,7 @@ pub fn session_cmd(
 }
 
 /// v as a line of JSON, as jsonx.Write writes it.
-fn write_json<T: serde::Serialize + ?Sized>(w: &mut dyn Write, v: &T) {
+pub(crate) fn write_json<T: serde::Serialize + ?Sized>(w: &mut dyn Write, v: &T) {
     let mut b = rush_state::json::to_vec(v).unwrap_or_default();
     b.push(b'\n');
     let _ = w.write_all(&b);
@@ -975,7 +1000,8 @@ fn session_info(env: &Env, args: &[String], stdout: &mut dyn Write) -> (bool, Re
     };
     let v = env.view(info);
     if as_json {
-        write_json(stdout, &v);
+        let agents = (env.load)(&env.reg);
+        write_json(stdout, &crate::monitor::listed(&env.reg, &agents, &v));
         return (true, Ok(()));
     }
     let i = &v.info;
@@ -1010,6 +1036,11 @@ fn session_list(env: &Env, args: &[String], stdout: &mut dyn Write) -> (bool, Re
         .map(|i| env.view(i))
         .collect();
     if as_json {
+        let agents = (env.load)(&env.reg);
+        let out: Vec<_> = out
+            .iter()
+            .map(|v| crate::monitor::listed(&env.reg, &agents, v))
+            .collect();
         write_json(stdout, &out);
         return (true, Ok(()));
     }
@@ -1474,6 +1505,7 @@ mod tests {
             reg,
             spawn: |reg, cfg| fake::spawn(reg.clone(), cfg).map_err(|e| e.to_string()),
             alive: |i| Client::dial(&i.id).is_ok(),
+            load: |_| Vec::new(),
         }
     }
 
@@ -1624,7 +1656,10 @@ mod tests {
             (v["id"].as_str(), v["alive"].as_bool()),
             (Some(id.as_str()), Some(true))
         );
-        assert!(out.ends_with("\"alive\":true}\n"), "{out}");
+        assert!(
+            out.ends_with("\"alive\":true,\"needsYou\":null,\"lastReplyAt\":null}\n"),
+            "{out}"
+        );
         let (code, out, err) = run(&env, &["info", "nosuch"], "");
         assert_eq!(
             (code, out.as_str(), err.as_str()),

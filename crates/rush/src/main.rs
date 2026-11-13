@@ -15,6 +15,7 @@ mod flags;
 mod hosted;
 mod install;
 mod memory;
+mod monitor;
 mod pushlater;
 mod room;
 mod serve;

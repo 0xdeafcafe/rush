@@ -170,3 +170,73 @@ pub fn turn_label(m: &Model, a: &Agent) -> Vec<Span> {
 pub fn unlooked(now: Ms, a: &Agent) -> bool {
     a.your_turn(now) || a.just_finished(now) && !a.seen && !a.checking
 }
+
+/// Why a session sits under Needs you: what kind of thing it wants, a
+/// line that says it, and the words it's read from. The list's section
+/// and `rush session needs` both ask [`needs_you_of`]. Rust-only.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct NeedsYou {
+    /// decision, approval, question, problem, command, step or offer.
+    pub kind: String,
+    pub reason: String,
+    /// What it's read from: the call waiting, the card's topics, the
+    /// halt's error, or the last message's own words.
+    pub text: String,
+}
+
+/// What a needs of you, as the list's Needs you section has it, given
+/// what its finished turn was read to want (t: [`wants_of`], or the
+/// cache's reading); None when it isn't there. Its live state first (a
+/// question, a permission, a decisions card, a halt), then the reading of
+/// a turn you haven't looked at yet.
+pub fn needs_you_of(now: Ms, a: &Agent, t: &TurnWants) -> Option<NeedsYou> {
+    let mk = |kind: &str, reason: &str, text: &str| NeedsYou {
+        kind: kind.into(),
+        reason: reason.into(),
+        text: text.into(),
+    };
+    if crate::list::asks(a) {
+        if !a.needs_you() && !a.waiting() {
+            // Halted: its last turn ended on an error.
+            let text = a.spend.halt.as_ref().map_or("", |h| h.text.as_str());
+            return Some(mk("problem", &a.halt_reason(now), text));
+        }
+        let needs = a.job.needs.as_str();
+        if a.decides {
+            let topics: Vec<&str> = a
+                .decisions_key
+                .split('\x1f')
+                .filter(|s| !s.is_empty())
+                .collect();
+            return Some(mk("decision", needs, &topics.join("; ")));
+        }
+        let question =
+            needs.starts_with("asks:") || needs == "has a question" || needs.ends_with('?');
+        let kind = if question { "question" } else { "approval" };
+        let reason = if needs.is_empty() {
+            "waits on you"
+        } else {
+            needs
+        };
+        return Some(mk(kind, reason, needs));
+    }
+    if !unlooked(now, a) || !asks(t) {
+        return None;
+    }
+    let kind = match t.wants.as_str() {
+        WANTS_YOU if t.ui.iter().any(|i| i.kind == "run") => "command",
+        WANTS_YOU => "step",
+        WANTS_OFFER => "offer",
+        WANTS_ASK => "question",
+        _ => "problem",
+    };
+    let text = if t.quote.is_empty() {
+        t.ui.iter()
+            .map(|i| format!("{}: {}", i.kind, i.text))
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        t.quote.clone()
+    };
+    Some(mk(kind, &wants_whole(t), &text))
+}
