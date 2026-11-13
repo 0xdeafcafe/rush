@@ -1105,6 +1105,53 @@ the empty turn Claude Code runs on resume for a stale task's notice
 ends no turn (`neutral::noop_notice`), so it isn't read as the answer to
 the message just sent.
 
+## Watching sessions from the shell (Rust-only)
+
+An agent asked to watch other sessions and tell you when each needs you
+does it with four `rush session` commands (crates/rush/src/monitor.rs),
+not by reading transcripts or polling `list`:
+
+- **Finding a session.** read, needs and search find a session as the
+  view's list has it (rush-fleet's `Loader::load_quick`, `Env::load`): a
+  rush session by its short id, any agent's by its session id or the
+  start of one (8 characters or more, one session's only), or a row's
+  key. So they reach sessions rush didn't start (`list --others`) too.
+- **read** reads the conversation as the view does
+  (`rush_ui::search::conversation_of`): Claude Code's transcript through
+  a `Tail` from its last 8 MB, any other agent's history through its
+  adapter, into a rush-convo `Session`. It prints your messages and the
+  agent's words whole and each tool call on a line (`Registry::doing`),
+  the last turn unless `--turns N` or `--last N` says. Words carry no
+  time of their own: they take the last call's, the final words the
+  turn's end.
+- **needs** is the list's own reading: `turnwants::needs_you_of`
+  (rush-ui-base), which the list's Needs you section asks too, so the two
+  can't differ. A live question, permission or decisions card
+  (`question`, `approval`, `decision`), or a halt (`problem`); else, for
+  a finished turn you haven't looked at, what the cheap model read it to
+  want (`command` when it gave a command to run, `step`, `offer`,
+  `question`, `problem`). The reading is the cache's (turns.json); when
+  no rush has read that turn yet, needs and wait have the model read it
+  as the leading view would (`session_core::turnwants::read_now`) and
+  keep the answer for every rush. `list --json` and `info --json` add
+  `needsYou` from the cache alone (they never ask a model) and
+  `lastReplyAt`: the host's `idleSince`, else the last `turn-end` in the
+  end of its events.jsonl.
+- **wait** follows each rush session's events.jsonl, the host's own
+  record of its turns' ends (`turn-end`, with the turn's number) and
+  states, with kqueue (`rush_sys::fswait::grown`): it wakes only when a
+  host writes. A sleeping session still counts (a message wakes it); one
+  stopped, or with no folder, is gone, and when all are, wait ends 3. It
+  can't miss a turn: `--since` (a turn's number, a time, or a while back)
+  reports at once a turn that ended after it, and every report ends with
+  the `--since` to pass next. With `--until needs-you` a turn's end, or
+  a `blocked` state, counts only when needs_you_of says it needs you.
+  Exit codes are `rush watch`'s: 0, 2 timed out, 3 gone (1 a usage
+  error). Only rush sessions have a host to follow.
+- **search** is the command bar's (rush-convo's `Library::search`), over
+  every session the list has, the most recently active first, or the ids
+  given; `--since` leaves out sessions, and hits, older than it.
+
 ## Sessions' scratch folders
 
 Each session's scratch is `tmp/<project-slug>/<id>` in rush's folder
