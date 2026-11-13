@@ -1316,7 +1316,7 @@ fn decisions_block_on_the_card() {
 fn decisions_set_aside_reads_so() {
     let mut m = loader_model(LOADER_MSG, true);
     m.frame();
-    press(&mut m, "up");
+    // The card has the keys as it comes: no ↑ needed.
     press(&mut m, "s");
     m.frame();
     let out = text(&m.frame());
@@ -1403,7 +1403,7 @@ fn decisions_decide_again_with_no_host() {
         i.wakes = true;
     });
     m.frame();
-    press(&mut m, "up");
+    // The card has the keys as it comes: no ↑ needed.
     press(&mut m, "s");
     assert_eq!(acts(&mut m), vec![Act::DismissDecisions("d1".into())]);
     let i = info_any(&m, "k").unwrap();
@@ -1444,7 +1444,7 @@ fn decisions_cold_cant_answer() {
 fn decisions_answer_failed_brings_the_card_back() {
     let mut m = loader_model(LOADER_MSG, true);
     m.frame();
-    press(&mut m, "up");
+    // The card has the keys as it comes: no ↑ needed.
     press(&mut m, "down"); // no
     press(&mut m, "enter");
     press(&mut m, "enter"); // Send answers
