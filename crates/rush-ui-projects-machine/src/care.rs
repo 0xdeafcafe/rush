@@ -1036,13 +1036,15 @@ pub fn rules_known(m: &Model, out: &mut Vec<String>) {
         .partition(|c| matches!(c.found.how, rush_fleet::How::Run(_)));
     let yes: Vec<String> = caches
         .iter()
+        .copied()
         .filter(|c| c.found.ok)
-        .map(|c| line(c))
+        .map(line)
         .collect();
     let not: Vec<String> = caches
         .iter()
+        .copied()
         .filter(|c| !c.found.ok)
-        .map(|c| line(c))
+        .map(line)
         .collect();
     if !yes.is_empty() {
         out.push(String::new());

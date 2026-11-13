@@ -984,10 +984,18 @@ fn clean_temp(m: &mut Model, list: Vec<(String, String)>) {
                     }
                     let r = if d.keep {
                         match std::fs::read_dir(&d.path) {
-                            Ok(rd) => rd
-                                .flatten()
-                                .map(|e| rush_fleet::remove_tree(&e.path().to_string_lossy()))
-                                .fold(Ok(()), |a, r| a.and(r)),
+                            // Each goes, whatever another says; the first
+                            // that couldn't is said.
+                            Ok(rd) => {
+                                let mut first = Ok(());
+                                for e in rd.flatten() {
+                                    let r = rush_fleet::remove_tree(&e.path().to_string_lossy());
+                                    if first.is_ok() {
+                                        first = r;
+                                    }
+                                }
+                                first
+                            }
                             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
                             Err(e) => Err(e.to_string()),
                         }
