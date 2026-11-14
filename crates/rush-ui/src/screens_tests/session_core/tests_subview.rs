@@ -1,11 +1,13 @@
-//! The subagents view, a run picked under the list (laid across the top)
-//! and the dock's runs under ↑: after Go's internal/ui workflow_test.go
-//! (TestWorkflowRows' list), subview_test.go (TestSubagentsView,
-//! TestWatchFromDock, TestCycleSubagents), spawns_test.go
-//! (TestWatchedHostTakesTheBox) and a88d13b3. No sleeps: a model with no
-//! loop reads at once. Models are named as the registry rush runs with
-//! names them (run_tag reads the global one, left empty here): the
-//! parity check against Go's frames names them as Go does.
+//! Runs opened on the conversation's page (openrun.rs): beside it where
+//! the column fits, else (or as Settings asks) framed under the step that
+//! started it; tab moves the keys between it and the conversation, esc or
+//! its ✕ closes it; a workflow opens there too, its agents rows that open
+//! them. And the dock's runs under the conversation, a run's box and its
+//! queue: after Go's internal/ui subview_test.go (TestWatchFromDock,
+//! TestCycleSubagents), spawns_test.go (TestWatchedHostTakesTheBox) and
+//! a88d13b3; where it shows is Rust-only. No sleeps: a model with no loop
+//! reads at once. Models are named as the registry rush runs with names
+//! them (run_tag reads the global one, left empty here).
 
 use std::sync::Arc;
 
@@ -18,7 +20,7 @@ use rush_core::text::Line;
 use super::host::{Fake, Spawned, set_hosts};
 use super::subs::FlowSeen;
 use super::tests_subs::{NOW, workflow_session};
-use super::{conn, subview, views};
+use super::{conn, openrun, subview, views};
 use crate::model::Model;
 use crate::session::{SessionView, Source};
 
@@ -112,14 +114,8 @@ pub(super) fn model(d: &tempfile::TempDir) -> Model {
             },
         },
     );
-    // Its runs' numbers, as the subagents view reads them.
+    // Its runs' numbers, as an open run reads them.
     r.follow_all = true;
-    // Finished opened, as these tests look at the runs under it: it's
-    // closed till opened (tests_subpane's finished_runs_fold).
-    conn(&mut m, KEY)
-        .watch
-        .open_folds
-        .insert(subview::FINISHED_REF.into());
     super::subs::kick(&mut m, KEY);
     super::subs::refresh(&mut m, KEY);
     m
@@ -161,157 +157,135 @@ pub(super) fn press(m: &mut Model, k: &str) {
     m.key(code, mods);
 }
 
-/// The list: a count, then under their headings the workflow running,
-/// its phases and its agents' runs a line each, an agent's earlier try
-/// folded under the try that replaced it; then the runs finished, the
-/// one picked lit, its facts with it under the list (TestWorkflowRows'
-/// list, Go's subagentList at 120, made one line a run).
-#[test]
-fn the_list() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = model(&d);
-    m.session.as_mut().unwrap().sel = "sub:x".into();
-    let rows: Vec<Line> = subview::list(&mut m, KEY, 120, false)
-        .into_iter()
-        .map(|(l, _)| l)
-        .collect();
-    let got = text(&rows);
-    // The workflow's start, in local time.
-    let start = m.session.as_ref().unwrap().sess.jobs()[0].start;
-    let at = subview::started(start, NOW);
-    let want: Vec<String> = vec![
-        "  1 workflow running · 3 runs in all  ·  click one to see it below".into(),
-        "".into(),
-        "  Running  1".into(),
-        format!("  · ⋔ Port rush to Rust · {at}   · Port 1/3  ›  · Check                                  running                   5m"),
-        "    · Port  1 of 3 done".into(),
-        "      ✓ port:hl                                                                           done".into(),
-        "        ▸ 1 earlier try · click to show".into(),
-        "      ✢ port:claude                                                                       · working…".into(),
-        "      ◌ port:draw    waiting to start".into(),
-        "    · Check  not started".into(),
-        "".into(),
-        "  ▾ Finished  2".into(),
-        "  ✓ plan the next piece of the port with care                                             done".into(),
-        "▍ ✓ review the diff                                                                       done                      9s".into(),
-    ];
-    let want = want.join("\n");
-    assert_eq!(got, want);
+/// What's open in session key, as drawn last: its id, and its frame's
+/// first cell (x, y) and size.
+fn open_of(m: &mut Model) -> (Option<String>, [usize; 4]) {
+    (openrun::open_id(m, KEY), conn(m, KEY).watch.frame)
 }
 
-/// A session with runs has a Subagents tab, saying how many run.
+/// Gives run x's call a step, t2's.
+fn x_has_a_step(m: &mut Model) {
+    for sa in conn(m, KEY).runs.subs.iter_mut() {
+        if sa.id == "x" {
+            sa.tool_use_id = "toolu_x".into();
+        }
+    }
+}
+
+/// A session's runs have no tab of their own, nor its background tasks.
 #[test]
-fn the_tab() {
+fn no_tabs_of_their_own() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = model(&d);
+    let m = model(&d);
     assert_eq!(
         views::views(&m, KEY),
-        // Its workflow runs in the background: the background view too.
-        [
-            "conversation",
-            "overview",
-            "changes",
-            "subagents",
-            "background",
-            "memory"
-        ]
+        ["conversation", "overview", "changes", "memory"]
     );
-    assert_eq!(subview::tab_stat(&m, KEY).plain(), "1 running");
-    assert!(views::show_view(&mut m, KEY, "subagents"));
 }
 
-/// Every tab takes a click where it's drawn, from every view: the
-/// Subagents view's run column, right of its list, is the body's rows
-/// only, so the tabs over it (Background, Memory) are still the tabs'
-/// (model.go:1680, clickPaneTab before the preview's click).
+/// Wide, a run opened shows beside the conversation, in the column right
+/// of it, the conversation still there; it takes the keys as it shows;
+/// tab gives them back and takes them again; esc closes it, back on the
+/// row it was opened from.
 #[test]
-fn every_tab_takes_a_click_from_every_view() {
-    use crate::frame::Mouse;
-    use rush_draw::{Button, MouseKind};
-    for w in [120, 150] {
-        let d = tempfile::tempdir().unwrap();
-        let mut m = model(&d);
-        m.w = w;
-        let all = views::views(&m, KEY);
-        assert_eq!(all.len(), 6, "{all:?}");
-        let labels: Vec<String> = all.iter().map(|v| views::tab_label(v)).collect();
-        for from in &all {
-            for to in &all {
-                if *from == "conversation" && *to == "conversation" {
-                    continue; // the views' dropdown (tests_presets.rs)
-                }
-                assert!(views::show_view(&mut m, KEY, from));
-                if *from == "subagents" {
-                    m.session.as_mut().unwrap().sel = "sub:x".into();
-                }
-                let s: Vec<String> = m.frame().iter().map(Line::plain).collect();
-                let y = s
-                    .iter()
-                    .position(|r| labels.iter().all(|l| r.contains(l.as_str())))
-                    .unwrap_or_else(|| panic!("{w} {from}: no tabs row in\n{}", s.join("\n")));
-                let row = &s[y];
-                let at = row.find(&views::tab_label(to)).unwrap();
-                let x = rush_core::text::width(&row[..at]);
-                m.mouse_event(&Mouse {
-                    kind: MouseKind::Down(Button::Left),
-                    x: x as u16,
-                    y: y as u16,
-                    mods: Default::default(),
-                });
-                assert_eq!(views::view_name(&m, KEY), *to, "{w}: {from} -> {to} at {x}");
-            }
-        }
-    }
-}
-
-/// enter or → on a run in the list gives its pane the keys: its
-/// conversation stays under the list, never a screen of its own; esc
-/// and ← give them back to the list, the run still picked.
-#[test]
-fn enter_gives_the_runs_pane_the_keys() {
-    for k in ["enter", "right"] {
-        let d = tempfile::tempdir().unwrap();
-        let mut m = model(&d);
-        views::show_view(&mut m, KEY, "subagents");
-        m.session.as_mut().unwrap().sel = "sub:x".into();
-        let _ = views::body(&mut m, 120, 20);
-        press(&mut m, k);
-        assert!(conn(&mut m, KEY).watch.msg_focus, "{k}");
-        let all = text(&m.frame());
-        assert!(
-            all.contains("The diff is fine: one nit in view.go."),
-            "{k}:\n{all}"
-        );
-        assert!(all.contains("Finished  2"), "the list went:\n{all}");
-        for back in ["esc", "left"] {
-            press(&mut m, back);
-            assert!(!conn(&mut m, KEY).watch.msg_focus, "{back}");
-            assert_eq!(views::view_name(&m, KEY), "subagents", "{back}");
-            assert_eq!(sel(&m), "sub:x", "{back}");
-            press(&mut m, k);
-            assert!(conn(&mut m, KEY).watch.msg_focus, "{k} again");
-        }
-    }
-}
-
-/// A run known only by its task has no conversation to show: it says
-/// where its step is.
-#[test]
-fn a_run_known_by_its_task() {
+fn a_run_opens_beside_the_conversation() {
     let d = tempfile::tempdir().unwrap();
     let mut m = model(&d);
-    subview::pick_run(&mut m, KEY, "job:t9");
-    assert_eq!(views::view_name(&m, KEY), "subagents");
-    let body = text(&views::body(&mut m, 170, 20).unwrap());
-    assert!(
-        body.contains("its conversation isn't found yet; its step is in the main conversation"),
-        "{body}"
-    );
+    m.w = 180;
+    x_has_a_step(&mut m);
+    let step = "t2:s:toolu_x";
+    m.session.as_mut().unwrap().sel = step.into();
+    press(&mut m, "enter");
+    assert_eq!(views::view_name(&m, KEY), "conversation");
+    let all = text(&m.frame());
+    assert!(all.contains("The diff is fine"), "{all}");
+    assert!(all.contains("tab back · esc closes"), "{all}");
+    let (id, [x, _, w, _]) = open_of(&mut m);
+    assert_eq!(id.as_deref(), Some("x"));
+    assert!(x > 60 && x + w <= 180, "not beside it: {x} {w}\n{all}");
+    assert!(conn(&mut m, KEY).watch.msg_focus, "it didn't take the keys");
+    press(&mut m, "tab");
+    assert!(!conn(&mut m, KEY).watch.msg_focus, "tab kept the keys");
+    let all = text(&m.frame());
+    assert!(all.contains("tab to it · esc closes"), "{all}");
+    press(&mut m, "tab");
+    assert!(conn(&mut m, KEY).watch.msg_focus, "tab took no keys");
+    press(&mut m, "esc");
+    assert_eq!(open_of(&mut m).0, None, "esc didn't close it");
+    assert_eq!(sel(&m), step);
+    // Closed from the conversation's keys too.
+    press(&mut m, "enter");
+    let _ = m.frame();
+    press(&mut m, "tab");
+    press(&mut m, "esc");
+    assert_eq!(open_of(&mut m).0, None, "esc from the conversation");
 }
 
-/// From the dock: ↑ picks its last run, space shows it picked in the
-/// subagents view, and esc comes back to the conversation on that run's
-/// row (watchRun, closeSub, dockRefs).
+/// Narrow, it's a peek: framed under its step in the conversation, at
+/// the conversation's width, the rest going on under it.
+#[test]
+fn narrow_a_run_peeks_under_its_step() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = model(&d);
+    m.w = 90;
+    x_has_a_step(&mut m);
+    m.session.as_mut().unwrap().sel = "t2:s:toolu_x".into();
+    press(&mut m, "enter");
+    let frame = m.frame();
+    let all = text(&frame);
+    assert!(all.contains("The diff is fine"), "{all}");
+    let (id, [x, y, w, h]) = open_of(&mut m);
+    assert_eq!(id.as_deref(), Some("x"));
+    assert_eq!(x, 2, "not in the conversation:\n{all}");
+    assert!(w > 60 && h >= 10, "{w}×{h}:\n{all}");
+    let top = frame[y].plain();
+    assert!(top.contains('╭') && top.contains('✕'), "its edge: {top}");
+}
+
+/// Settings can ask for the peek, however wide.
+#[test]
+fn the_setting_asks_for_the_peek() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = model(&d);
+    m.w = 180;
+    crate::accounts::use_store(&mut m, rush_state::Store::default());
+    crate::accounts::config_mut(&mut m).runs_open = openrun::PEEK.into();
+    subview::pick_run(&mut m, KEY, "x");
+    let all = text(&m.frame());
+    assert!(all.contains("The diff is fine"), "{all}");
+    assert_eq!(open_of(&mut m).1[0], 2, "beside it:\n{all}");
+}
+
+/// A click on its ✕ closes it; a click elsewhere gives the keys back to
+/// the conversation, the run left open.
+#[test]
+fn its_x_closes_it() {
+    use crate::frame::Mouse;
+    use rush_draw::{Button, MouseKind};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = model(&d);
+    m.w = 180;
+    subview::pick_run(&mut m, KEY, "x");
+    let _ = m.frame();
+    let click = |m: &mut Model, x: usize, y: usize| {
+        m.mouse_event(&Mouse {
+            kind: MouseKind::Down(Button::Left),
+            x: x as u16,
+            y: y as u16,
+            mods: Default::default(),
+        });
+    };
+    click(&mut m, 4, 6);
+    assert!(!conn(&mut m, KEY).watch.msg_focus, "the run kept the keys");
+    assert_eq!(open_of(&mut m).0.as_deref(), Some("x"));
+    let _ = m.frame();
+    let (cx, cy) = conn(&mut m, KEY).watch.close_at;
+    click(&mut m, cx, cy);
+    assert_eq!(open_of(&mut m).0, None, "✕ didn't close it");
+}
+
+/// From the dock: ↑ picks its last run, space opens it, and esc comes back
+/// to the conversation on that run's row (watchRun, closeSub, dockRefs).
 #[test]
 fn from_the_dock() {
     let d = tempfile::tempdir().unwrap();
@@ -328,10 +302,10 @@ fn from_the_dock() {
     assert_eq!(sel(&m), "run:a2");
     m.session.as_mut().unwrap().sel = "run:x".into();
     press(&mut m, "space");
-    assert_eq!(views::view_name(&m, KEY), "subagents");
-    assert_eq!(sel(&m), "sub:x");
+    assert_eq!(openrun::open_id(&m, KEY).as_deref(), Some("x"));
+    let _ = m.frame();
     press(&mut m, "esc");
-    assert_eq!(views::view_name(&m, KEY), "conversation");
+    assert!(!openrun::is_open(&m, KEY));
     assert_eq!(sel(&m), "run:x");
     // ↓ past the dock's last goes back to the box.
     m.session.as_mut().unwrap().sel = "run:a2".into();
@@ -339,11 +313,11 @@ fn from_the_dock() {
     assert_eq!(sel(&m), "");
 }
 
-/// enter or → on a step a subagent made picks that run in the subagents
-/// view, its pane with the keys, and esc comes back to the step
-/// (rushmode.go:4270 subOfStep, closeSub).
+/// enter or → on a step a subagent made opens that run, its pane with the
+/// keys, and esc comes back to the step (rushmode.go:4270 subOfStep,
+/// closeSub).
 #[test]
-fn enter_on_a_subagents_step_picks_it() {
+fn enter_on_a_subagents_step_opens_it() {
     for k in ["enter", "right"] {
         let d = tempfile::tempdir().unwrap();
         let mut m = model(&d);
@@ -354,19 +328,18 @@ fn enter_on_a_subagents_step_picks_it() {
         }
         m.session.as_mut().unwrap().sel = "t2:s:toolu_x".into();
         press(&mut m, k);
-        assert_eq!(views::view_name(&m, KEY), "subagents", "{k}");
-        assert_eq!(sel(&m), "sub:x", "{k}");
-        let body = text(&views::body(&mut m, 150, 24).unwrap());
+        assert_eq!(openrun::open_id(&m, KEY).as_deref(), Some("x"), "{k}");
+        let body = text(&m.frame());
         assert!(body.contains("The diff is fine"), "{k}:\n{body}");
         assert!(conn(&mut m, KEY).watch.msg_focus, "{k}: its pane");
         press(&mut m, "esc");
-        assert_eq!(views::view_name(&m, KEY), "conversation", "{k}");
+        assert!(!openrun::is_open(&m, KEY), "{k}");
         assert_eq!(sel(&m), "t2:s:toolu_x", "{k}");
     }
 }
 
-/// enter on a call of rush's agent tools shows the agent it's about
-/// picked in the subagents view, whichever harness made the call: the one
+/// enter on a call of rush's agent tools opens the agent it's about,
+/// whichever harness made the call: the one
 /// a spawn_agent call started, the one an agent_result or agent_send call
 /// names by its id.
 #[test]
@@ -441,15 +414,19 @@ fn enter_on_an_agent_tools_step_picks_its_agent() {
         let picked = format!("t9:s:{step}");
         m.session.as_mut().unwrap().sel.clone_from(&picked);
         press(&mut m, "enter");
-        assert_eq!(views::view_name(&m, KEY), "subagents", "{step}");
-        assert_eq!(sel(&m), "sub:spawn:h9", "{step}");
+        assert_eq!(
+            openrun::open_id(&m, KEY).as_deref(),
+            Some("spawn:h9"),
+            "{step}"
+        );
+        let _ = m.frame();
         press(&mut m, "esc");
         assert_eq!(sel(&m), picked, "{step}");
     }
 }
 
-/// space on the dock's workflow shows the subagents view on it
-/// (openWorkflow).
+/// space on the dock's workflow opens it on the conversation's page: its
+/// phases and agents, the keys left with the conversation (openWorkflow).
 #[test]
 fn a_workflow_from_the_dock() {
     let d = tempfile::tempdir().unwrap();
@@ -457,13 +434,48 @@ fn a_workflow_from_the_dock() {
     super::running::sync(&mut m, KEY);
     m.session.as_mut().unwrap().sel = "job:w1".into();
     press(&mut m, "space");
-    assert_eq!(views::view_name(&m, KEY), "subagents");
-    assert_eq!(sel(&m), "job:w1");
+    assert_eq!(openrun::open_id(&m, KEY).as_deref(), Some("job:w1"));
+    assert_eq!(views::view_name(&m, KEY), "conversation");
+    let all = text(&m.frame());
+    assert!(all.contains("click one of its agents to open it"), "{all}");
+    assert!(all.contains("port:claude"), "{all}");
+    assert!(!conn(&mut m, KEY).watch.msg_focus);
+}
+
+/// A click on one of an open workflow's agents opens that agent; esc,
+/// closing it, goes back to the workflow.
+#[test]
+fn a_workflows_agent_opens_from_its_row() {
+    use crate::frame::Mouse;
+    use rush_draw::{Button, MouseKind};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = model(&d);
+    m.w = 180;
+    super::running::sync(&mut m, KEY);
+    subview::open_workflow(&mut m, KEY, "job:w1");
+    let all = text(&m.frame());
+    let w = &conn(&mut m, KEY).watch;
+    let [fx, fy, _, _] = w.flow_at;
+    let i = w
+        .flow_refs
+        .iter()
+        .position(|r| r == "a2")
+        .unwrap_or_else(|| panic!("no row for a2: {:?}\n{all}", w.flow_refs));
+    let (x, y) = (fx + 4, fy + i);
+    m.mouse_event(&Mouse {
+        kind: MouseKind::Down(Button::Left),
+        x: x as u16,
+        y: y as u16,
+        mods: Default::default(),
+    });
+    assert_eq!(openrun::open_id(&m, KEY).as_deref(), Some("a2"));
+    openrun::close(&mut m, KEY);
+    assert_eq!(openrun::open_id(&m, KEY).as_deref(), Some("job:w1"));
 }
 
 /// shift+↓ steps from the conversation through the runs, working ones
-/// first, then the rest newest first, each picked in the subagents view,
-/// and back to the conversation (cycleSub).
+/// first, then the rest newest first, each opened in turn, and back to the
+/// conversation alone (cycleSub).
 #[test]
 fn cycling_the_runs() {
     let d = tempfile::tempdir().unwrap();
@@ -471,200 +483,9 @@ fn cycling_the_runs() {
     let mut seen = Vec::new();
     for _ in 0..6 {
         press(&mut m, "shift+down");
-        let view = views::view_name(&m, KEY).to_string();
-        seen.push(match sel(&m).strip_prefix("sub:") {
-            Some(id) if view == "subagents" => id.to_string(),
-            _ => view,
-        });
+        seen.push(openrun::open_id(&m, KEY).unwrap_or_else(|| "conversation".into()));
     }
     assert_eq!(seen, ["a2", "y", "x", "a1", "a0", "conversation"]);
-}
-
-/// Wide, the list's rows flow into columns across the top, and the picked
-/// run's conversation shows under them all at the view's whole width,
-/// never in a column beside the list (Rust-only, the owner's call).
-#[test]
-fn wide_lays_the_list_across_the_run_under_it() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = model(&d);
-    m.w = 180;
-    views::show_view(&mut m, KEY, "subagents");
-    m.session.as_mut().unwrap().sel = "sub:x".into();
-    let body = text(&views::body(&mut m, 170, 20).unwrap());
-    let w = &conn(&mut m, KEY).watch;
-    assert_eq!((w.cols, w.cell_w), (3, 54), "{body}");
-    assert!(w.peek.visible);
-    let rule = body
-        .lines()
-        .position(|l| l.starts_with("─────"))
-        .unwrap_or_else(|| panic!("no rule under the list:\n{body}"));
-    assert_eq!(conn(&mut m, KEY).watch.split, rule);
-    let lines: Vec<&str> = body.lines().collect();
-    let (list, under) = (lines[..rule].join("\n"), lines[rule..].join("\n"));
-    assert!(!list.contains('│'), "a column beside the list:\n{body}");
-    assert!(
-        list.lines()
-            .any(|l| l.contains("Running") && l.contains("port:claude")),
-        "the list isn't laid across:\n{body}"
-    );
-    assert!(rule <= 8, "the list took {rule} rows:\n{body}");
-    assert!(under.contains("The diff is fine"), "{body}");
-    assert!(under.contains("to review the diff"), "{body}");
-}
-
-/// Wide, nothing shows under the list until a run is picked: the pointer
-/// passing over one moves nothing.
-#[test]
-fn nothing_under_the_list_until_a_click() {
-    use crate::frame::Mouse;
-    use rush_draw::MouseKind;
-    let d = tempfile::tempdir().unwrap();
-    let mut m = model(&d);
-    m.w = 180;
-    views::show_view(&mut m, KEY, "subagents");
-    let frame = m.frame();
-    let all = text(&frame);
-    assert!(all.contains("Click an agent to see it here"), "{all}");
-    let y = frame
-        .iter()
-        .position(|l| l.plain().contains("review the diff"))
-        .expect("its row on screen");
-    m.mouse_event(&Mouse {
-        kind: MouseKind::Moved,
-        x: 10,
-        y: y as u16,
-        mods: Default::default(),
-    });
-    let all = text(&m.frame());
-    assert!(all.contains("Click an agent to see it here"), "{all}");
-    assert!(!all.contains("The diff is fine"), "{all}");
-}
-
-/// A click on a run picks it and shows it under the list, with its
-/// facts, its conversation and a box to message it, the list keeping the
-/// keys so ↑↓ go on through the runs; tab gives its pane them, a second
-/// click opens nothing whole, a click in its conversation keeps the keys
-/// there, and esc gives them back to the list.
-#[test]
-fn a_click_picks_a_run_and_the_list_keeps_the_keys() {
-    use crate::frame::Mouse;
-    use rush_draw::{Button, MouseKind};
-    let d = tempfile::tempdir().unwrap();
-    let mut m = model(&d);
-    m.w = 180;
-    views::show_view(&mut m, KEY, "subagents");
-    let frame = m.frame();
-    let (y, x) = frame
-        .iter()
-        .enumerate()
-        .find_map(|(i, l)| {
-            let t = l.plain();
-            t.find("review the diff")
-                .map(|x| (i, rush_core::text::width(&t[..x])))
-        })
-        .expect("its row on screen");
-    let click = |m: &mut Model| {
-        m.mouse_event(&Mouse {
-            kind: MouseKind::Down(Button::Left),
-            x: x as u16,
-            y: y as u16,
-            mods: Default::default(),
-        });
-    };
-    click(&mut m);
-    assert_eq!(sel(&m), "sub:x");
-    let all = text(&m.frame());
-    assert!(all.contains("The diff is fine"), "{all}");
-    assert!(all.contains("claude-opus-4-1 · 1 step"), "{all}");
-    assert!(all.contains("to review the diff"), "{all}");
-    assert!(
-        !conn(&mut m, KEY).watch.msg_focus,
-        "the list keeps the keys"
-    );
-    press(&mut m, "tab");
-    assert!(conn(&mut m, KEY).watch.msg_focus, "tab: the run's pane");
-    click(&mut m);
-    let frame = m.frame();
-    let all = text(&frame);
-    assert!(all.contains("Finished  2"), "opened whole:\n{all}");
-    // In its conversation: the keys stay the pane's.
-    let (py, px) = frame
-        .iter()
-        .enumerate()
-        .find_map(|(i, l)| {
-            let t = l.plain();
-            t.find("The diff is fine")
-                .map(|x| (i, t[..x].chars().count()))
-        })
-        .expect("its answer on screen");
-    m.mouse_event(&Mouse {
-        kind: MouseKind::Down(Button::Left),
-        x: px as u16 + 2,
-        y: py as u16,
-        mods: Default::default(),
-    });
-    assert!(conn(&mut m, KEY).watch.msg_focus, "a click in its pane");
-    press(&mut m, "esc");
-    assert!(!conn(&mut m, KEY).watch.msg_focus);
-    assert_eq!(sel(&m), "sub:x");
-    let all = text(&m.frame());
-    assert!(all.contains("✓ review the diff"), "{all}");
-}
-
-/// Narrow, the picked run shows under a short list of the runs, a rule
-/// between: ↑↓ move the pick in the list and the run under it follows.
-#[test]
-fn narrow_the_run_shows_under_the_list() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = model(&d);
-    m.w = 90;
-    views::show_view(&mut m, KEY, "subagents");
-    m.session.as_mut().unwrap().sel = "sub:x".into();
-    let got = text(&views::body(&mut m, 90, 30).unwrap());
-    let rule = got
-        .lines()
-        .position(|l| l.starts_with("─────"))
-        .unwrap_or_else(|| panic!("no rule under the list:\n{got}"));
-    let lines: Vec<&str> = got.lines().collect();
-    let (list, under) = (lines[..rule].join("\n"), lines[rule..].join("\n"));
-    assert!(list.contains("▍ ✓ review the diff"), "{got}");
-    assert!(under.contains("claude-opus-4-1 · 1 step"), "{got}");
-    assert!(under.contains("The diff is fine"), "{got}");
-    assert!(under.contains("to review the diff"), "{got}");
-    assert_eq!(conn(&mut m, KEY).watch.split, rule);
-    press(&mut m, "up");
-    assert_eq!(sel(&m), "sub:y");
-    let got = text(&views::body(&mut m, 90, 30).unwrap());
-    let under: String = got.lines().skip(rule).collect::<Vec<_>>().join("\n");
-    assert!(under.contains("plan the next piece"), "{got}");
-}
-
-/// A workflow agent tried again: its earlier try folds under the try
-/// that replaced it, opened by a click or enter, never a row of its own
-/// while the workflow runs.
-#[test]
-fn earlier_tries_fold_under_the_new_one() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = model(&d);
-    let got = text(
-        &subview::list(&mut m, KEY, 120, false)
-            .into_iter()
-            .map(|(l, _)| l)
-            .collect::<Vec<_>>(),
-    );
-    assert!(got.contains("▸ 1 earlier try"), "{got}");
-    assert!(!got.contains("failed"), "{got}");
-    views::show_view(&mut m, KEY, "subagents");
-    m.session.as_mut().unwrap().sel = "tries:a1".into();
-    press(&mut m, "enter");
-    let got = text(
-        &subview::list(&mut m, KEY, 120, false)
-            .into_iter()
-            .map(|(l, _)| l)
-            .collect::<Vec<_>>(),
-    );
-    assert!(got.contains("▾ 1 earlier try"), "{got}");
-    assert!(got.contains("✗ port:hl"), "{got}");
 }
 
 /// Where a run works is where its own calls reached, not the folder its
@@ -673,13 +494,13 @@ fn earlier_tries_fold_under_the_new_one() {
 fn a_runs_branch_is_where_it_worked() {
     let d = tempfile::tempdir().unwrap();
     let mut m = model(&d);
-    views::show_view(&mut m, KEY, "subagents");
-    m.session.as_mut().unwrap().sel = "sub:x".into();
-    // Picking it reads its transcript afresh; where it worked is set after.
-    let _ = views::body(&mut m, 170, 20);
+    m.w = 180;
+    subview::pick_run(&mut m, KEY, "x");
+    // Opening it reads its transcript afresh; where it worked is set after.
+    let _ = m.frame();
     let r = &mut conn(&mut m, KEY).runs;
     r.stats.get_mut("x").unwrap().worktree = "perf-memlist".into();
-    let got = text(&views::body(&mut m, 170, 20).unwrap());
+    let got = text(&m.frame());
     assert!(got.contains("⎇ perf-memlist"), "{got}");
     // A subagent's transcript says only its parent's folder: rush doesn't
     // ask it for one.
@@ -736,9 +557,8 @@ fn a_spawned_agents_box_goes_to_its_host() {
     super::subs::kick(&mut m, KEY);
     super::subs::refresh(&mut m, KEY);
     subview::pick_from(&mut m, KEY, "spawn:s1", "run:spawn:s1");
-    assert_eq!(views::view_name(&m, KEY), "subagents");
     let _ = m.frame();
-    // Picked from elsewhere, its box has the keys as it shows, and keeps
+    // Opened, its box has the keys as it shows, and keeps
     // them as the run is drawn again (Rust-only).
     assert!(
         conn(&mut m, KEY).watch.msg_focus,
@@ -784,8 +604,8 @@ fn a_spawned_agents_box_goes_to_its_host() {
     );
 }
 
-/// A click on the dock's workflow, on the transcript's end, shows its
-/// agents; on a run, picks it (clickRef :5102).
+/// A click on the dock's run, on the transcript's end, opens it; on its
+/// workflow, opens that with its agents (clickRef :5102).
 #[test]
 fn clicking_the_docks_runs() {
     let d = tempfile::tempdir().unwrap();
@@ -795,9 +615,9 @@ fn clicking_the_docks_runs() {
     let refs = m.session.as_ref().unwrap().panel_refs.clone();
     assert!(refs.iter().any(|r| r == "run:a2"), "{refs:?}");
     assert!(subview::click_ref(&mut m, KEY, "run:a2"));
-    assert_eq!(sel(&m), "run:a2");
+    assert_eq!(openrun::open_id(&m, KEY).as_deref(), Some("a2"));
     assert!(subview::click_ref(&mut m, KEY, "job:w1"));
-    assert_eq!(views::view_name(&m, KEY), "subagents");
+    assert_eq!(openrun::open_id(&m, KEY).as_deref(), Some("job:w1"));
     assert!(!subview::click_ref(&mut m, KEY, "3:s:t1"));
 }
 
@@ -914,7 +734,8 @@ fn each_run_keeps_its_own_draft() {
 }
 
 /// Session key's run x working in the background, in a session rush runs
-/// through fake, picked under the wide list, not opened.
+/// through fake, open beside the conversation, the keys given back to the
+/// conversation.
 pub(super) fn picked_beside(d: &tempfile::TempDir, fake: &Arc<Fake>, inbox: bool) -> Model {
     use super::host::Hosts;
     use rush_core::event::{Event, TaskKind, TaskStarted};
@@ -938,6 +759,8 @@ pub(super) fn picked_beside(d: &tempfile::TempDir, fake: &Arc<Fake>, inbox: bool
     c.info.inbox = inbox;
     subview::pick_run(&mut m, KEY, "x");
     let _ = m.frame();
+    conn(&mut m, KEY).watch.msg_focus = false;
+    let _ = m.frame();
     m
 }
 
@@ -952,7 +775,7 @@ pub(super) fn typed(m: &mut Model, s: &str) {
     }
 }
 
-/// The box under a run in the subagents view: → gives it the keys, and what's
+/// The box under a run open: tab gives it the keys, and what's
 /// typed goes to the run, not the main session: into its inbox where its
 /// host has one, else passed on by the main session with SendMessage,
 /// which the box says.
@@ -979,7 +802,7 @@ fn the_box_under_the_run_messages_it() {
             text: "check tests".into()
         }]
     );
-    press(&mut m, "esc");
+    press(&mut m, "tab");
     assert!(!conn(&mut m, KEY).watch.msg_focus);
 
     // No inbox: the main session passes it on, and the box says so.
@@ -1012,7 +835,7 @@ fn the_box_says_why_nothing_can_reach_the_run() {
     subview::pick_run(&mut m, KEY, "x");
     let all = text(&m.frame());
     assert!(all.contains("the session isn't running in rush"), "{all}");
-    press(&mut m, "tab");
+    // Opened, its pane has the keys: it has a conversation to read.
     assert!(conn(&mut m, KEY).watch.msg_focus);
     typed(&mut m, "hi");
     assert!(
@@ -1021,9 +844,8 @@ fn the_box_says_why_nothing_can_reach_the_run() {
     );
     let flash = m.flash.as_ref().map(|f| f.0.clone()).unwrap_or_default();
     assert!(flash.contains("isn't running in rush"), "{flash}");
-    // It stays picked with the list.
-    assert_eq!(views::view_name(&m, KEY), "subagents");
-    assert_eq!(sel(&m), "sub:x");
+    // It stays open.
+    assert_eq!(openrun::open_id(&m, KEY).as_deref(), Some("x"));
 }
 
 /// A workflow resumed after a restart lists an agent once a try: the
@@ -1058,90 +880,6 @@ fn a_phase_counts_an_agent_once_however_often_it_was_tried() {
         .collect();
     assert_eq!(earlier, ["l1", "l3"]);
     assert!(workflow_strip(&[p], 0).plain().contains("Port 2/3"));
-}
-
-/// The highest row with a ref in sight, as the view was last drawn.
-fn top_in_sight(m: &mut Model) -> String {
-    conn(m, KEY)
-        .vs
-        .refs
-        .iter()
-        .find(|r| !r.is_empty())
-        .cloned()
-        .expect("a row in sight")
-}
-
-/// ↑ from the box picks the list's top row in sight, as ↓ does: not the
-/// row by the box, as the conversation's ↑ does, nor the list's last row
-/// (the oldest run finished), however far below that is.
-#[test]
-fn up_from_the_box_picks_the_lists_top() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = model(&d);
-    views::show_view(&mut m, KEY, "subagents");
-    views::body(&mut m, 120, 8).unwrap();
-    assert_eq!(conn(&mut m, KEY).vs.top, 0);
-    let top = top_in_sight(&mut m);
-    let last = conn(&mut m, KEY)
-        .vs
-        .all_refs
-        .iter()
-        .rev()
-        .find(|r| !r.is_empty())
-        .cloned()
-        .unwrap();
-    assert_ne!(top, last, "one row only");
-    press(&mut m, "up");
-    assert_eq!(sel(&m), top);
-    views::body(&mut m, 120, 8).unwrap();
-    assert_eq!(conn(&mut m, KEY).vs.top, 0, "the view jumped");
-}
-
-/// One column wide, the wheel moves the subagents view and leaves the
-/// pick where it is, out of sight, as the conversation's wheel does; drawn
-/// again (the runs read again) it stays put; ↑ then picks the top row in
-/// sight.
-#[test]
-fn the_wheel_leaves_the_pick() {
-    use crate::frame::{Mouse, Out};
-    use rush_draw::MouseKind;
-    let d = tempfile::tempdir().unwrap();
-    let mut m = model(&d);
-    views::show_view(&mut m, KEY, "subagents");
-    m.session.as_mut().unwrap().sel = "sub:x".into();
-    views::body(&mut m, 90, 8).unwrap();
-    let x = "sub:x".to_string();
-    assert!(
-        conn(&mut m, KEY).vs.top > 0,
-        "the pick isn't brought in sight"
-    );
-    assert!(conn(&mut m, KEY).vs.refs.contains(&x));
-    let wheel = |m: &mut Model, kind: MouseKind| {
-        views::mouse(
-            m,
-            &Mouse {
-                kind,
-                x: 4,
-                y: 10,
-                mods: Default::default(),
-            },
-        )
-    };
-    for _ in 0..4 {
-        wheel(&mut m, MouseKind::ScrollUp);
-    }
-    assert_eq!(wheel(&mut m, MouseKind::ScrollUp), Out::Idle, "at the top");
-    for _ in 0..2 {
-        views::body(&mut m, 90, 8).unwrap();
-        assert_eq!(conn(&mut m, KEY).vs.top, 0, "the pick pulled it back");
-        assert!(!conn(&mut m, KEY).vs.refs.contains(&x));
-        assert_eq!(sel(&m), x, "the wheel moved the pick");
-    }
-    let top = top_in_sight(&mut m);
-    press(&mut m, "up");
-    assert_eq!(sel(&m), top);
-    views::body(&mut m, 90, 8).unwrap();
-    assert_eq!(conn(&mut m, KEY).vs.top, 0, "the view jumped");
 }
 
 /// A working run's transcript: asked, it ran a command it hasn't heard
@@ -1186,58 +924,20 @@ fn working(d: &tempfile::TempDir) -> Model {
     m
 }
 
-/// While a run works, the subagents view shows the session's working line:
-/// docked under its conversation, wide and narrow, and,
-/// short, on its row (the spinner and its step); a finished run shows how
-/// it ended. Once it finishes, the line goes and its row says done.
+/// While a run works, it shows the session's working line docked under
+/// its conversation; once it finishes, the line goes.
 #[test]
 fn a_working_run_shows_its_working_line() {
     use rush_core::event::{Event, TaskDone};
     let d = tempfile::tempdir().unwrap();
     let mut m = working(&d);
-    m.w = 150;
-    views::show_view(&mut m, KEY, "subagents");
-    m.session.as_mut().unwrap().sel = "sub:w".into();
-    let got = text(&views::body(&mut m, 150, 30).unwrap());
-    let row = row_of(&mut m, "w");
-    assert!(row.contains("· run the tests…"), "its row: {row}");
+    m.w = 180;
+    subview::pick_run(&mut m, KEY, "w");
+    let _ = m.frame();
+    let got = text(&m.frame());
     assert!(got.contains("· running Bash…"), "no working line:\n{got}");
-    let done = row_of(&mut m, "x");
-    assert!(done.contains("done"), "the finished run: {done}");
-    let start = m.session.as_ref().unwrap().sess.jobs()[0].start;
-    let wf = subview::started(start, NOW);
-    let asked = crate::screens::settings::paint::civil(NOW - 56_789);
-    let hm = format!("{:02}:{:02}", asked.hour, asked.minute);
-    // Wide, the list is laid across the top in columns, the run under it
-    // at the whole width with its working line (Rust-only).
-    let rule = got
-        .lines()
-        .position(|l| l.starts_with("─────"))
-        .unwrap_or_else(|| panic!("no rule under the list:\n{got}"));
-    let lines: Vec<&str> = got.lines().collect();
-    let (list, under) = (lines[..rule].join("\n"), lines[rule..].join("\n"));
-    assert_eq!(conn(&mut m, KEY).watch.cols, 3, "\n{got}");
-    assert!(
-        !list.contains('│') && list.contains("Running  2"),
-        "\n{got}"
-    );
-    assert!(list.contains("✓ review the diff"), "\n{got}");
-    assert!(
-        under.contains("· check the port's tests") && under.contains("running  57s"),
-        "\n{got}"
-    );
-    assert!(under.contains(&format!("▍ You  {hm}")), "\n{got}");
-    assert!(
-        under.contains("▍   · running Bash…  36s  turn 56s"),
-        "\n{got}"
-    );
-    assert!(under.contains("╭─ to check the port's tests"), "\n{got}");
-    assert!(got.contains(&wf), "\n{got}");
-    // Narrow, the run goes under a short list, its working line with it.
-    let narrow = text(&views::body(&mut m, 90, 30).unwrap());
-    assert!(narrow.contains("· running Bash…"), "narrow:\n{narrow}");
-    assert_eq!(narrow, working_narrow(&wf, &hm), "\n{narrow}");
-    // It finishes: the line goes, and its row says how it ended.
+    assert!(got.contains("· check the port's tests"), "its head:\n{got}");
+    assert!(got.contains("to check the port's tests"), "its box:\n{got}");
     m.session.as_mut().unwrap().sess.apply(
         &Event::TaskDone(TaskDone {
             id: "w".into(),
@@ -1247,66 +947,8 @@ fn a_working_run_shows_its_working_line() {
         }),
         NOW,
     );
-    let narrow = text(&views::body(&mut m, 90, 30).unwrap());
-    assert!(
-        !narrow.contains("running Bash"),
-        "narrow, finished:\n{narrow}"
-    );
-    let got = text(&views::body(&mut m, 150, 30).unwrap());
+    let got = text(&m.frame());
     assert!(!got.contains("running Bash"), "finished:\n{got}");
-    let row = row_of(&mut m, "w");
-    assert!(!row.contains("run the tests"), "its row, finished: {row}");
-    assert!(row.contains("done"), "its row, finished: {row}");
-}
-
-/// Run id's row in the list, 120 wide.
-fn row_of(m: &mut Model, id: &str) -> String {
-    let rf = format!("sub:{id}");
-    subview::list(m, KEY, 120, false)
-        .into_iter()
-        .find(|(_, r)| *r == rf)
-        .map(|(l, _)| l.plain())
-        .unwrap_or_default()
-}
-
-/// The subagents view 90 wide, w picked and working: a short list, then
-/// w under it with the line under its conversation.
-fn working_narrow(wf: &str, hm: &str) -> String {
-    [
-        "  1 agent and 1 workflow running · 4 runs in all  ·  click one to see it below",
-        "",
-        "  Running  2",
-        "  · ⋔ Port rush to Rust · {wf}   · Port 1/3  ›  · Check      running                 5m",
-        "    · Port  1 of 3 done",
-        "      ✓ port:hl                                               done",
-        "        ▸ 1 earlier try · click to show",
-        "      ✢ port:claude                                           · working…",
-        "      ◌ port:draw    waiting to start",
-        "    · Check  not started",
-        "▍ · check the port's tests                                    · run the tests…       57s",
-        "",
-        "──────────────────────────────────────────────────────────────────────────────────────────",
-        " · check the port's tests                                                     running  57s",
-        "   claude-opus-4-1 · 1 step · $0.02 · context 960 of 1M · 0%",
-        "──────────────────────────────────────────────────────────────────────────────────────────",
-        "",
-        "▍ You  {hm}",
-        "▍ check the port's tests",
-        "",
-        "▍ Agent  {hm}",
-        "│   ✳ run the tests  cargo test                                          36s since {hm}",
-        "",
-        "▍   · running Bash…  36s  turn 56s",
-        "",
-        "",
-        "",
-        "╭─ to check the port's tests ────────────────────────────────────────────────────────────╮",
-        "│ ❯ the session isn't running in rush · resume it to send                                │",
-        "╰────────────────────────────────────────────────────────────────────────────────────────╯",
-    ]
-    .join("\n")
-    .replace("{wf}", wf)
-    .replace("{hm}", hm)
 }
 
 /// What the picked run follows, by id: None when nothing is.
@@ -1314,18 +956,18 @@ fn followed(m: &mut Model) -> Option<String> {
     conn(m, KEY).runs.live.as_ref().map(|f| f.id.clone())
 }
 
-/// w picked in the Subagents tab, shown 150 wide.
+/// w open beside the conversation, 180 wide.
 fn picked_working(d: &tempfile::TempDir) -> Model {
     let mut m = working(d);
-    m.w = 150;
+    m.w = 180;
     subview::pick_run(&mut m, KEY, "w");
-    let _ = views::body(&mut m, 150, 30);
+    let _ = m.frame();
     m
 }
 
-/// A running subagent picked is followed: what its transcript gains shows
-/// after one wake of its watch, its conversation's new step and its row's
-/// short working form, with no wait for the next refresh.
+/// A running subagent open is followed: what its transcript gains shows
+/// after one wake of its watch, its conversation's new step, with no wait
+/// for the next refresh.
 #[test]
 fn a_picked_running_subagent_is_followed() {
     use std::io::Write;
@@ -1343,27 +985,25 @@ fn a_picked_running_subagent_is_followed() {
     drop(f);
     // One wake, as the watch on its file gives when it grows.
     let _ = super::subfollow::woke(&mut m, KEY, "w");
-    let got = text(&views::body(&mut m, 150, 30).unwrap());
+    let got = text(&m.frame());
     assert!(got.contains("lint it"), "its new step:\n{got}");
-    let row = row_of(&mut m, "w");
-    assert!(row.contains("lint it"), "its row: {row}");
 }
 
-/// The tab not showing, nothing is followed; a wake from a follow left
-/// over lets it go.
+/// Closed, nothing is followed; a wake from a follow left over lets it
+/// go.
 #[test]
-fn a_hidden_tab_follows_nothing() {
+fn a_closed_run_is_not_followed() {
     let d = tempfile::tempdir().unwrap();
     let mut m = picked_working(&d);
     assert_eq!(followed(&mut m).as_deref(), Some("w"));
-    views::show_view(&mut m, KEY, "conversation");
+    openrun::close(&mut m, KEY);
     let _ = super::subfollow::woke(&mut m, KEY, "w");
     assert_eq!(followed(&mut m), None);
     super::subs::refresh(&mut m, KEY);
     assert_eq!(followed(&mut m), None);
 }
 
-/// A finished subagent isn't followed: picked once done, or let go as it
+/// A finished subagent isn't followed: opened once done, or let go as it
 /// finishes.
 #[test]
 fn a_finished_subagent_is_not_followed() {
@@ -1371,10 +1011,10 @@ fn a_finished_subagent_is_not_followed() {
     let d = tempfile::tempdir().unwrap();
     let mut m = picked_working(&d);
     subview::pick_run(&mut m, KEY, "x");
-    let _ = views::body(&mut m, 150, 30);
+    let _ = m.frame();
     assert_eq!(followed(&mut m), None, "x is done");
     subview::pick_run(&mut m, KEY, "w");
-    let _ = views::body(&mut m, 150, 30);
+    let _ = m.frame();
     assert_eq!(followed(&mut m).as_deref(), Some("w"));
     m.session.as_mut().unwrap().sess.apply(
         &Event::TaskDone(TaskDone {
@@ -1385,6 +1025,6 @@ fn a_finished_subagent_is_not_followed() {
         }),
         NOW,
     );
-    let _ = views::body(&mut m, 150, 30);
+    let _ = m.frame();
     assert_eq!(followed(&mut m), None, "w finished");
 }

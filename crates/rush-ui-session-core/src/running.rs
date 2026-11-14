@@ -11,6 +11,8 @@
 //! clicks (clickRef :5102-5122), and spawns.go (spawnJob :584,
 //! jobKind :595).
 
+use std::collections::HashMap;
+
 use rush_convo::{Job, Session, Subagent};
 use rush_core::adapter::Registry;
 use rush_core::text::{Color, Line};
@@ -582,6 +584,129 @@ pub fn has_background(m: &Model, key: &str) -> bool {
     !bg_tasks(m, key).is_empty()
 }
 
+/// The rows under the step that started each of session key's
+/// background commands and monitors, by its call, w wide: the block the
+/// background view drew for it (rush_ui_list_extras's task_rows), opened
+/// while its step's output is (the step's live fold, which reads the
+/// processes under it too, subs.rs's bg_open), its launch script while d
+/// has opened that. Rust-only: Go drew it in the background view
+/// (jobLines, jobs.go:416-671).
+pub fn task_rows(m: &mut Model, key: &str, w: usize) -> HashMap<String, Vec<Line>> {
+    let (tick, now) = (m.tick, m.now);
+    let kind = super::agent(m, key)
+        .map(|a| a.kind.as_str().to_string())
+        .unwrap_or_default();
+    let reg = m.reg.clone();
+    let open = conn(m, key).vs.open.clone();
+    let Model { session, kept, .. } = m;
+    let Some(v) = session.as_ref().filter(|v| v.key == key) else {
+        return HashMap::new();
+    };
+    let r = &kept
+        .get::<super::Core>()
+        .conns
+        .entry(key.to_string())
+        .or_default()
+        .runs;
+    let s = &v.sess;
+    // A step's output opened: its task's whole block.
+    let opened: Vec<String> =
+        v.o.open
+            .iter()
+            .filter(|(_, on)| **on)
+            .filter_map(|(r, _)| r.strip_suffix(":live"))
+            .filter_map(|r| r.split_once(":s:").map(|(_, c)| c.to_string()))
+            .collect();
+    let no_queue = |_: &str| 0;
+    let no_kept = |_: &str| None;
+    let ctx = Ctx {
+        s,
+        r,
+        reg: &reg,
+        kind: &kind,
+        sel: "",
+        focus: true,
+        tick,
+        now,
+        idle_box: false,
+        queued: &no_queue,
+        cache_kept: &no_kept,
+    };
+    let is_open = |rf: &str| {
+        if let Some(id) = rf.strip_prefix("job:") {
+            return s.job(id).is_some_and(|j| opened.contains(&j.tool_use_id));
+        }
+        open.get(rf).copied().unwrap_or(false)
+    };
+    let spawned = |j: &Job| spawn_job(r, j);
+    let out = |j: &Job| r.from_of(s, j, now);
+    let own = |j: &Job| r.job_output(j);
+    let tailed = |p: &str| r.outs.get(p);
+    let writes = |j: &Job| r.writes_of(j).to_vec();
+    let usage = |j: &Job| r.usage_of(j);
+    let procs = |j: &Job| r.procs.trees.get(&j.id).map(Vec::as_slice);
+    let part = |j: &Job| s.running_part(&j.tool_use_id);
+    let cwd = if s.info.cwd.is_empty() {
+        s.cwd.clone()
+    } else {
+        s.info.cwd.clone()
+    };
+    let shown = |p: &str| shown_path(p, &cwd);
+    let who = |j: &Job| ctx.who(j);
+    let flow = |_: &Job, _: bool| -> rush_ui_list_extras::jobs::Rows { (Vec::new(), Vec::new()) };
+    let mut o = v.o.clone();
+    o.width = w;
+    let details = |j: &Job| {
+        rush_convo::render::job_lines(s, j, &o, 6)
+            .into_iter()
+            .map(|l| l.line)
+            .collect()
+    };
+    let b = rush_ui_list_extras::jobs::Bg {
+        w,
+        now,
+        tick,
+        sel: "",
+        focused: false,
+        hover: "",
+        open: &is_open,
+        spawned: &spawned,
+        out: &out,
+        own: &own,
+        tailed: &tailed,
+        writes: &writes,
+        usage: &usage,
+        procs: &procs,
+        part: &part,
+        shown: &shown,
+        cwd: &cwd,
+        who: &who,
+        flow: &flow,
+        details: &details,
+        memo: Some(&r.job_rows),
+    };
+    let mut got = HashMap::new();
+    for j in s.jobs() {
+        if j.tool_use_id.is_empty() || !is_bg_step(s, j) {
+            continue;
+        }
+        let rows = rush_ui_list_extras::jobs::task_rows(s, &b, j);
+        got.insert(j.tool_use_id.clone(), rows);
+    }
+    got
+}
+
+/// Whether task j's rows go under its step: a monitor, which always runs
+/// beside the turn, or a command once it's sent to the background (a
+/// foreground one's output is its step's own).
+pub fn is_bg_step(s: &Session, j: &Job) -> bool {
+    match s.job_kind(j) {
+        "monitor" => true,
+        "shell" => j.background,
+        _ => false,
+    }
+}
+
 /// A path as a task's rows name it: from the agent's folder when it's in
 /// it, else with ~ for the home folder (shownPath).
 pub fn shown_path(p: &str, cwd: &str) -> String {
@@ -617,6 +742,32 @@ fn dock_key(m: &mut Model, key: &str, s: &str, empty: bool) -> Out {
         .as_ref()
         .map(|v| v.sel.clone())
         .unwrap_or_default();
+    // d on a background task's step: its launch script under it, the
+    // step's output opened with it.
+    if s == "d"
+        && empty
+        && let Some((_, call)) = sel.split_once(":s:")
+        && let Some(id) = m.session.as_ref().and_then(|v| {
+            v.sess
+                .jobs()
+                .iter()
+                .find(|j| j.tool_use_id == call && is_bg_step(&v.sess, j))
+                .map(|j| j.id.clone())
+        })
+    {
+        if !has_details(m, key, &id) {
+            m.flash("this task did not report a launch command or process details");
+            return Out::Draw;
+        }
+        let c = conn(m, key);
+        let d = format!("job-details:{id}");
+        let was = c.vs.open.get(&d).copied().unwrap_or(false);
+        c.vs.open.insert(d, !was);
+        if let Some(v) = m.session.as_mut() {
+            v.o.open.insert(format!("{sel}:live"), true);
+        }
+        return Out::Draw;
+    }
     let Some(id) = sel.strip_prefix("job:").map(str::to_string) else {
         return Out::Pass;
     };

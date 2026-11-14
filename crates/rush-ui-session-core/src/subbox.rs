@@ -274,13 +274,14 @@ pub fn run_key(m: &mut Model, key: &str, id: &str, k: &Press) -> Out {
             end_edit(m, &key, &id);
             Out::Draw
         }
-        // esc on an empty box of a run picked from elsewhere goes back
-        // there at once, as it would from the list (Rust-only).
-        "esc" if empty && conn(m, &key).watch.back => {
+        // esc on an empty box closes the run, back to where it was opened
+        // from (Rust-only).
+        "esc" if empty => {
             super::subview::go_back(m, &key);
             Out::Draw
         }
-        // esc and tab give the keys back to the list; what's typed stays.
+        // esc and tab give the keys back to the conversation; what's typed
+        // stays.
         "esc" | "tab" => {
             conn(m, &key).watch.msg_focus = false;
             Out::Draw

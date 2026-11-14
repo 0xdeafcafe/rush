@@ -679,6 +679,12 @@ pub fn key_first(m: &mut Model, k: &Press) -> Out {
             focus_pane(m, &key);
             Out::Draw
         }
+        // The conversation has the keys, its box empty: esc closes what's
+        // open, as its edge says, before it unpicks a row.
+        "esc" if conn(m, &key).input.is_empty() => {
+            go_back(m, &key);
+            Out::Draw
+        }
         // A run rush hosts: its own session, where what it asks is
         // answered (Rust-only).
         "alt+o" => {

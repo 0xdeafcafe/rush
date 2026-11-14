@@ -21,20 +21,32 @@ use crate::model::Model;
 const EVERY: Duration = Duration::from_secs(1);
 
 /// Hands session key's open view what its background commands and
-/// monitors have written, by the call that started each: the end of it
-/// is drawn under the call, the call opened by itself while its task runs
-/// (rush_convo's bg_rows). From the tails the runs' reader keeps
-/// (Runs::from_of, once a second while anything runs); after
-/// running::sync, so it's this frame's. Rust-only.
+/// monitors have written, by the call that started each, and the rows the
+/// background view drew for them (running::task_rows): drawn under the
+/// call, the call opened by itself while its task runs (rush_convo's
+/// bg_rows). From the tails the runs' reader keeps (Runs::from_of, once a
+/// second while anything runs); after running::sync, so it's this
+/// frame's. Rust-only.
 pub fn sync_out(m: &mut Model, key: &str) {
+    let Some(w) = m
+        .session
+        .as_ref()
+        .filter(|v| v.key == key)
+        .map(|v| v.o.width)
+    else {
+        return;
+    };
+    // Under a step, on its gutter: a few cells in.
+    let rows = super::running::task_rows(m, key, w.saturating_sub(6).max(40));
     // Its marks spin and its lines come in while one runs.
-    if fill_out(m, key) {
+    if fill_out(m, key, rows) {
         m.ask_wake(Instant::now() + EVERY);
     }
 }
 
-/// sync_out's work: whether a task it drew still runs.
-fn fill_out(m: &mut Model, key: &str) -> bool {
+/// sync_out's work, with each task's rows by its call: whether a task it
+/// drew still runs.
+fn fill_out(m: &mut Model, key: &str, mut rows: HashMap<String, Vec<Line>>) -> bool {
     let now = m.now;
     let Model { session, kept, .. } = m;
     let Some(v) = session.as_mut().filter(|v| v.key == key) else {
@@ -50,37 +62,33 @@ fn fill_out(m: &mut Model, key: &str) -> bool {
     let s = &v.sess;
     let mut bg: HashMap<String, BgOut> = HashMap::new();
     for j in s.jobs() {
-        if j.tool_use_id.is_empty() {
+        if j.tool_use_id.is_empty() || !super::running::is_bg_step(s, j) {
             continue;
         }
-        // A monitor always runs beside the turn; a command once it's sent
-        // to the background (a foreground one's output is its step's own).
-        match s.job_kind(j) {
-            "monitor" => {}
-            "shell" if j.background => {}
-            _ => continue,
-        }
-        let Some(t) = r.from_of(s, j, now).1 else {
-            continue;
+        let lines = rows.remove(&j.tool_use_id).unwrap_or_default();
+        let (dropped, text) = match r.from_of(s, j, now).1 {
+            Some(t) => (
+                t.nos.first().map_or(0, |n| n.saturating_sub(1)),
+                t.lines.join("\n"),
+            ),
+            None => (0, String::new()),
         };
-        if t.lines.is_empty() {
+        if text.is_empty() && lines.is_empty() {
             continue;
         }
-        let dropped = t.nos.first().map_or(0, |n| n.saturating_sub(1));
-        let out = LiveOut {
-            out: t.lines.join("\n"),
-            dropped,
-        };
+        let out = LiveOut { out: text, dropped };
         let running = j.running();
-        let same =
-            v.o.bg
-                .get(&j.tool_use_id)
-                .filter(|b| *b.out == out && b.running == running);
-        let b = match same {
-            Some(b) => b.clone(),
-            None => BgOut {
-                out: Arc::new(out),
-                running,
+        let was = v.o.bg.get(&j.tool_use_id);
+        let b = BgOut {
+            out: match was.filter(|b| *b.out == out) {
+                Some(b) => b.out.clone(),
+                None => Arc::new(out),
+            },
+            running,
+            // The same rows keep their Arc: the turn isn't drawn again.
+            rows: match was.filter(|b| *b.rows == lines) {
+                Some(b) => b.rows.clone(),
+                None => Arc::new(lines),
             },
         };
         bg.insert(j.tool_use_id.clone(), b);

@@ -989,7 +989,7 @@ pub struct RowsMemo {
 impl RowsMemo {
     /// Marks the kept rows, to see them used.
     pub fn mark_for_test(&mut self) {
-        if let Some(r) = self.rows.first_mut() {
+        if let Some(r) = self.rows.last_mut() {
             *r = line([plain("(kept)")]);
         }
     }
@@ -1199,6 +1199,52 @@ pub fn job_lines(s: &Session, b: &Bg) -> Vec<(Line, String)> {
         }
     }
     lines
+}
+
+/// Task j's rows under the step that started it, in the conversation: its
+/// block as the background view drew it (its facts, what it's doing, its
+/// output or the files it writes; opened, the processes under it, the
+/// other files and its launch script a d away), but its own first row,
+/// which is the step's, and the lead and edge the view drew it with: the
+/// conversation draws them as a step's (Rust-only: Go, and the port
+/// before this, showed it in a view of its own).
+pub fn task_rows(s: &Session, b: &Bg, j: &Job) -> Vec<Line> {
+    let mut lines = Vec::new();
+    let mut inside = HashMap::new();
+    job_block(s, b, j, 0, &mut lines, &mut inside);
+    lines
+        .into_iter()
+        .skip(1)
+        .map(|(l, _)| drop_lead(l, 6))
+        .collect()
+}
+
+/// l without its first n cells where they're the lead a row of the
+/// background view is drawn with: blanks and the edge of an opened task.
+fn drop_lead(mut l: Line, n: usize) -> Line {
+    let mut left = n;
+    for s in l.spans.iter_mut() {
+        if left == 0 {
+            break;
+        }
+        let (gone, keep, rest) = {
+            let t: &str = &s.text;
+            let lead: Vec<char> = t
+                .chars()
+                .take(left)
+                .take_while(|c| matches!(c, ' ' | '│' | '▍'))
+                .collect();
+            let cut: usize = lead.iter().map(|c| c.len_utf8()).sum();
+            (lead.len(), t.len() > cut, t[cut..].to_string())
+        };
+        s.text = rest.into();
+        left -= gone;
+        if keep {
+            break;
+        }
+    }
+    l.spans.retain(|s| !s.text.is_empty());
+    l
 }
 
 /// The background view's fold its finished tasks go under, closed till

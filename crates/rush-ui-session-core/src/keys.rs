@@ -64,8 +64,8 @@ pub fn esc_twice(m: &mut Model, k: &Press) -> Out {
     if !c.input.is_empty() || c.edit_q > 0 {
         return Out::Pass;
     }
-    // A picked row is dropped.
-    if !sel(m).is_empty() {
+    // A picked row is dropped; a run open is closed (subview::key_first).
+    if !sel(m).is_empty() || super::openrun::is_open(m, &key) {
         core(m).esc_at = 0;
         return Out::Pass;
     }

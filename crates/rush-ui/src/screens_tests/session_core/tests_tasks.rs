@@ -14,18 +14,20 @@ use rush_core::tool::{Call, Input, Kind as ToolKind};
 use super::host::{Fake, Hosts, Op, set_hosts};
 use super::jobprocs::{JobProcs, ProcRow};
 use super::tests::flash;
-use super::tests_jobs::{background, dump, open, pick};
+use super::tests_jobs::{background, dump, open, open_as, pick};
 use super::tests_subs::NOW;
 use super::tests_subview::{KEY, press};
-use super::{conn, running, views};
+use super::{conn, running};
 use crate::model::Model;
 use crate::screens::session_cards::ModelCards;
 
 /// A dev server whose own output file is empty, its output in the file
 /// its command sends it to, and another it wrote at its start and left,
-/// with what its processes use: the background view's rows against Go's,
-/// at 80, 120 and 200 columns, shut and opened (testdata dumped from Go's
-/// jobLines for the same session and process table).
+/// with what its processes use: its rows under its step against Go's
+/// background view, at 80, 120 and 200 columns, shut and opened (testdata
+/// dumped from Go's jobLines for the same session and process table): the
+/// task's block but its own row, which is the step's, and the lead the
+/// view drew it with.
 #[test]
 fn the_files_and_processes_against_gos() {
     let d = tempfile::tempdir().unwrap();
@@ -54,7 +56,6 @@ fn the_files_and_processes_against_gos() {
         NOW - 60_000,
     );
     task(&mut m, "b2", "t2", "npm run dev", true, NOW - 60_000);
-    views::show_view(&mut m, KEY, "background");
     super::subs::kick(&mut m, KEY);
     running::sync(&mut m, KEY);
     let row = |pid, comm: &str, cpu, mb: u64| ProcRow {
@@ -76,13 +77,33 @@ fn the_files_and_processes_against_gos() {
     };
     let mut got = String::new();
     for opened in [false, true] {
-        conn(&mut m, KEY).vs.open.insert("job:b2".into(), opened);
+        open_as(&mut m, "job:b2", opened);
         for w in [80, 120, 200] {
             got += &format!("== open {opened} width {w}\n");
             got += &dump(&mut m, w);
         }
     }
-    let want = include_str!("testdata/go_task_files.txt");
+    // Go's view: its task's rows but the first, without their lead.
+    let mut want = String::new();
+    let mut first = false;
+    for l in include_str!("testdata/go_task_files.txt").lines() {
+        if l.starts_with("== ") {
+            want += &format!("{l}\n");
+            first = true;
+            continue;
+        }
+        let Some(t) = l.strip_prefix("job:b2|") else {
+            continue;
+        };
+        if std::mem::take(&mut first) {
+            continue;
+        }
+        let t = t
+            .strip_prefix("│     ")
+            .or_else(|| t.strip_prefix("      "))
+            .unwrap_or(t);
+        want += &format!("job:b2|{t}\n");
+    }
     for (g, w) in got.lines().zip(want.lines()) {
         assert_eq!(g, w, "\n{got}");
     }
@@ -323,9 +344,9 @@ fn a_run_picked() {
     assert_eq!(flash(&m), "that subagent has already finished");
 }
 
-/// What a running shell's processes use ends its row in the dock and the
-/// background view; opened, the processes under it, busiest first, the
-/// MCP server beside it not among them (TestJobUsage).
+/// What a running shell's processes use ends its row in the dock; its
+/// step's output opened, the processes under it, busiest first, the MCP
+/// server beside it not among them (TestJobUsage).
 #[test]
 fn processes_under_an_opened_task() {
     let d = tempfile::tempdir().unwrap();
@@ -360,12 +381,11 @@ fn processes_under_an_opened_task() {
     assert!(dock.contains("25% · 302M"), "{dock}");
     open(&mut m, "job:b2");
     let got = dump(&mut m, 110);
-    let want = "job:b2|│     Processes · busiest first
-job:b2|│     vite                                                                                     24%    300M
-job:b2|│     zsh                                                                                       1%      2M
-job:b2|│     ▸ command details · d to show
+    let want = "job:b2|Processes · busiest first
+job:b2|vite                                                                                     24%    300M
+job:b2|zsh                                                                                       1%      2M
+job:b2|▸ command details · d to show
 ";
-    assert!(got.contains("25% · 302M  ·  in background · 1m"), "{got}");
     assert!(got.contains(want), "{got}");
     // Its details shown, each process by its words.
     conn(&mut m, KEY)
@@ -373,7 +393,7 @@ job:b2|│     ▸ command details · d to show
         .open
         .insert("job-details:b2".into(), true);
     let got = dump(&mut m, 110);
-    assert!(got.contains("│     vite --port 3000 "), "{got}");
+    assert!(got.contains("job:b2|vite --port 3000 "), "{got}");
 }
 
 /// A shell whose own output is empty reads the files its command writes:
@@ -407,13 +427,12 @@ fn the_files_a_command_writes() {
         NOW - 30_000,
     );
     task(&mut m, "b4", "t4", "check it", true, NOW - 30_000);
-    views::show_view(&mut m, KEY, "background");
     super::subs::kick(&mut m, KEY);
     running::sync(&mut m, KEY);
     let got = dump(&mut m, 110);
-    let want = "job:b4|      from check.log · updated 3s ago
-job:b4|      │ checking a
-job:b4|      │ checking b
+    let want = "job:b4|from check.log · updated 3s ago
+job:b4|│ checking a
+job:b4|│ checking b
 ";
     assert!(got.contains(want), "{got}");
     open(&mut m, "job:b4");
@@ -421,19 +440,16 @@ job:b4|      │ checking b
     running::sync(&mut m, KEY);
     let got = dump(&mut m, 110);
     assert!(
-        got.contains("job:b4|│     from r6.out · empty so far · updated 2s ago"),
+        got.contains("job:b4|from r6.out · empty so far · updated 2s ago"),
         "{got}"
     );
     // spec.json, left since its start, is named among the other files
     // but doesn't stand for the output.
     assert!(
-        got.contains("│     from spec.json · updated 2m ago"),
+        got.contains("job:b4|from spec.json · updated 2m ago"),
         "{got}"
     );
-    assert!(
-        got.contains("job:b4|│     1  {"),
-        "a document, numbered:\n{got}"
-    );
+    assert!(got.contains("job:b4|1  {"), "a document, numbered:\n{got}");
 }
 
 /// A chain seen running says which of its commands runs now
@@ -458,10 +474,7 @@ fn the_chains_command_running_now() {
     };
     m.session.as_mut().unwrap().sess.watch_shells(&[shell], NOW);
     let got = dump(&mut m, 110);
-    assert!(
-        got.contains("job:b5|      ▸ 2/3 go test ./internal/ui"),
-        "{got}"
-    );
+    assert!(got.contains("job:b5|▸ 2/3 go test ./internal/ui"), "{got}");
 }
 
 /// A finished task's rows are drawn once and kept until what they're

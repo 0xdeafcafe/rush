@@ -1133,8 +1133,12 @@ fn a_subagents_ask_is_answered_on_its_host() {
     assert_eq!(info(&m).sub_asks, Vec::new(), "the answered card is gone");
 
     act(&mut m, Act::OpenRun("spawn:h9".into()));
-    assert_eq!(super::views::view_name(&m, KEY), "subagents");
-    assert_eq!(m.session.as_ref().unwrap().sel, "sub:spawn:h9");
+    assert_eq!(super::views::view_name(&m, KEY), "conversation");
+    assert_eq!(
+        super::openrun::open_id(&m, KEY).as_deref(),
+        Some("spawn:h9")
+    );
+    super::openrun::close(&mut m, KEY);
 
     // A question it asks comes whole, and its answers go to its host.
     let q = rush_core::event::Question {
@@ -1311,7 +1315,7 @@ fn a_subagents_own_agents_and_decisions_ask_here() {
     assert_eq!(info(&m).sub_asks.len(), 1);
     act(&mut m, Act::OpenRun("spawn:h9".into()));
     assert_eq!(core(&mut m).open_on_load, "h9");
-    assert_ne!(super::views::view_name(&m, KEY), "subagents", "not its run");
+    assert!(!super::openrun::is_open(&m, KEY), "not its run");
 }
 
 /// The same answers to the same decisions card go once, however often
