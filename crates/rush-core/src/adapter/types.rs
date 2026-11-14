@@ -1169,6 +1169,10 @@ pub struct OwnSetting {
     pub choices: Vec<(String, String)>,
     /// How "" shows: what the harness does when it's unset.
     pub unset: String,
+    /// What you're asked before it's set to anything but "", when it
+    /// changes more than a setting (another program's trust, say); ""
+    /// sets it as it's picked. Rush-only.
+    pub ask: String,
 }
 
 /// How a setting is set.
