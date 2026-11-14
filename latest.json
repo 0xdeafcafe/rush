@@ -1,17 +1,17 @@
 {
- "commit": "2bd16b666476bde2a633ec7c227cab35e7fa99d7",
+ "commit": "320efe24e9f5dc94fb2b4e4f3e85b060e9063a5c",
  "ref": "main",
- "run": "43557149408",
- "at": "2026-11-14T04:55:24Z",
+ "run": "43610175398",
+ "at": "2026-11-14T16:07:27Z",
  "window_s": 60,
  "metrics": {
   "binary: rush, release": {
    "kind": "binary",
-   "value": 63423224
+   "value": 63405080
   },
   "follow a run: read on, each write, allocated": {
    "kind": "bytes",
-   "value": 18664570
+   "value": 18664666
   },
   "follow a run: read on, each write, allocations made": {
    "kind": "allocs",
@@ -19,7 +19,7 @@
   },
   "follow a run: read whole, shared, each write, allocated": {
    "kind": "bytes",
-   "value": 2404010994
+   "value": 2404059066
   },
   "follow a run: read whole, shared, each write, allocations made": {
    "kind": "allocs",
@@ -27,7 +27,7 @@
   },
   "follow a run: read whole, shared, once a second, allocated": {
    "kind": "bytes",
-   "value": 284844058
+   "value": 284848930
   },
   "follow a run: read whole, shared, once a second, allocations made": {
    "kind": "allocs",
@@ -75,15 +75,15 @@
   },
   "host: CPU to start, s": {
    "kind": "info",
-   "value": 0.155
+   "value": 0.146
   },
   "host: footprint": {
    "kind": "footprint",
-   "value": 3818816
+   "value": 3867968
   },
   "host: idle CPU": {
    "kind": "cpu",
-   "value": 0.0009
+   "value": 0.0013
   },
   "host: idle wake-ups": {
    "kind": "wakeups",
@@ -99,7 +99,7 @@
   },
   "list, past left out (the feed's): loader alone, retained": {
    "kind": "heap",
-   "value": 2548894
+   "value": 2552174
   },
   "list, past left out (the feed's): rows": {
    "kind": "info",
@@ -115,11 +115,11 @@
   },
   "list: loader alone, retained": {
    "kind": "heap",
-   "value": 4252328
+   "value": 4255528
   },
   "list: loader and reading, retained": {
    "kind": "heap",
-   "value": 5441777
+   "value": 5444977
   },
   "list: rows": {
    "kind": "info",
@@ -143,11 +143,11 @@
   },
   "menubar feed: CPU to start, s": {
    "kind": "info",
-   "value": 0.21
+   "value": 0.168
   },
   "menubar feed: footprint": {
    "kind": "footprint",
-   "value": 12485952
+   "value": 13812992
   },
   "menubar feed: idle CPU": {
    "kind": "cpu",
@@ -163,7 +163,7 @@
   },
   "open last 2 MB: allocated": {
    "kind": "bytes",
-   "value": 11887526
+   "value": 11912006
   },
   "open last 2 MB: allocations kept": {
    "kind": "allocs",
@@ -175,15 +175,15 @@
   },
   "open last 2 MB: peak": {
    "kind": "heap",
-   "value": 1691706
+   "value": 1703994
   },
   "open last 2 MB: retained": {
    "kind": "heap",
-   "value": 1602890
+   "value": 1615178
   },
   "open whole file, fetch+apply: allocated": {
    "kind": "bytes",
-   "value": 58696526
+   "value": 58794734
   },
   "open whole file, fetch+apply: allocations kept": {
    "kind": "allocs",
@@ -199,11 +199,11 @@
   },
   "open whole file, fetch+apply: retained": {
    "kind": "heap",
-   "value": 7478839
+   "value": 7527991
   },
   "open whole file: allocated": {
    "kind": "bytes",
-   "value": 46287404
+   "value": 46385612
   },
   "open whole file: allocations kept": {
    "kind": "allocs",
@@ -215,15 +215,15 @@
   },
   "open whole file: peak": {
    "kind": "heap",
-   "value": 7563913
+   "value": 7613065
   },
   "open whole file: retained": {
    "kind": "heap",
-   "value": 7478839
+   "value": 7527991
   },
   "open whole session, copied: allocated": {
    "kind": "bytes",
-   "value": 6979927
+   "value": 7015927
   },
   "open whole session, copied: allocations kept": {
    "kind": "allocs",
@@ -235,15 +235,15 @@
   },
   "open whole session, copied: peak": {
    "kind": "heap",
-   "value": 6979927
+   "value": 7015927
   },
   "open whole session, copied: retained": {
    "kind": "heap",
-   "value": 6979927
+   "value": 7015927
   },
   "open: its subagent runs, retained": {
    "kind": "heap",
-   "value": 1735264
+   "value": 1744480
   },
   "open: subagent runs followed, allocations kept": {
    "kind": "allocs",
@@ -255,7 +255,7 @@
   },
   "open: subagent runs followed, peak": {
    "kind": "heap",
-   "value": 377944
+   "value": 379480
   },
   "open: subagent runs followed, retained": {
    "kind": "heap",
@@ -263,19 +263,19 @@
   },
   "plugind: CPU to start, s": {
    "kind": "info",
-   "value": 0.064
+   "value": 0.073
   },
   "plugind: footprint": {
    "kind": "footprint",
-   "value": 4785536
+   "value": 4867456
   },
   "plugind: idle CPU": {
    "kind": "cpu",
-   "value": 0.0161
+   "value": 0.012
   },
   "plugind: idle wake-ups": {
    "kind": "wakeups",
-   "value": 16.8
+   "value": 13.8
   },
   "plugind: threads": {
    "kind": "threads",
@@ -287,7 +287,7 @@
   },
   "render 300 turns w120: cold frame at the end, bytes": {
    "kind": "bytes",
-   "value": 501138
+   "value": 509298
   },
   "render 300 turns w120: cold jump to the top (window), allocations": {
    "kind": "allocs",
@@ -295,7 +295,7 @@
   },
   "render 300 turns w120: cold jump to the top (window), bytes": {
    "kind": "bytes",
-   "value": 933962
+   "value": 942122
   },
   "render 300 turns w120: cold layout (all turns), allocations": {
    "kind": "allocs",
@@ -303,7 +303,7 @@
   },
   "render 300 turns w120: cold layout (all turns), bytes": {
    "kind": "bytes",
-   "value": 30813765
+   "value": 30821925
   },
   "render 300 turns w120: stream: delta, then a frame, allocations": {
    "kind": "allocs",
@@ -335,7 +335,7 @@
   },
   "render 300 turns w250: cold frame at the end, bytes": {
    "kind": "bytes",
-   "value": 501195
+   "value": 509355
   },
   "render 300 turns w250: cold jump to the top (window), allocations": {
    "kind": "allocs",
@@ -343,7 +343,7 @@
   },
   "render 300 turns w250: cold jump to the top (window), bytes": {
    "kind": "bytes",
-   "value": 934115
+   "value": 942275
   },
   "render 300 turns w250: cold layout (all turns), allocations": {
    "kind": "allocs",
@@ -351,7 +351,7 @@
   },
   "render 300 turns w250: cold layout (all turns), bytes": {
    "kind": "bytes",
-   "value": 20875503
+   "value": 20883663
   },
   "render 300 turns w250: stream: delta, then a frame, allocations": {
    "kind": "allocs",
@@ -383,7 +383,7 @@
   },
   "render 3000 turns w120: catch-up: cold frame at the end, bytes": {
    "kind": "bytes",
-   "value": 2988657
+   "value": 3054161
   },
   "render 3000 turns w120: catch-up: warm frame at the end, allocations": {
    "kind": "allocs",
@@ -407,7 +407,7 @@
   },
   "render 3000 turns w120: chat: cold frame at the end, bytes": {
    "kind": "bytes",
-   "value": 3012610
+   "value": 3078114
   },
   "render 3000 turns w120: chat: warm frame at the end, allocations": {
    "kind": "allocs",
@@ -431,7 +431,7 @@
   },
   "render 3000 turns w120: code: cold frame at the end, bytes": {
    "kind": "bytes",
-   "value": 3063564
+   "value": 3129068
   },
   "render 3000 turns w120: code: warm frame at the end, allocations": {
    "kind": "allocs",
@@ -455,7 +455,7 @@
   },
   "render 3000 turns w120: cold frame at the end, bytes": {
    "kind": "bytes",
-   "value": 2936570
+   "value": 3002074
   },
   "render 3000 turns w120: cold jump to the top (window), allocations": {
    "kind": "allocs",
@@ -463,7 +463,7 @@
   },
   "render 3000 turns w120: cold jump to the top (window), bytes": {
    "kind": "bytes",
-   "value": 3377433
+   "value": 3442937
   },
   "render 3000 turns w120: cold layout (all turns), allocations": {
    "kind": "allocs",
@@ -471,7 +471,7 @@
   },
   "render 3000 turns w120: cold layout (all turns), bytes": {
    "kind": "bytes",
-   "value": 285435571
+   "value": 285501075
   },
   "render 3000 turns w120: normal: cold frame at the end, allocations": {
    "kind": "allocs",
@@ -479,7 +479,7 @@
   },
   "render 3000 turns w120: normal: cold frame at the end, bytes": {
    "kind": "bytes",
-   "value": 2936570
+   "value": 3002074
   },
   "render 3000 turns w120: normal: warm frame at the end, allocations": {
    "kind": "allocs",
@@ -511,7 +511,7 @@
   },
   "render 3000 turns w120: trail: cold frame at the end, bytes": {
    "kind": "bytes",
-   "value": 2907532
+   "value": 2973036
   },
   "render 3000 turns w120: trail: warm frame at the end, allocations": {
    "kind": "allocs",
@@ -547,7 +547,7 @@
   },
   "serve: CPU to start, s": {
    "kind": "info",
-   "value": 0.421
+   "value": 0.38
   },
   "serve: a listing, retained": {
    "kind": "heap",
@@ -555,15 +555,15 @@
   },
   "serve: footprint": {
    "kind": "footprint",
-   "value": 6636800
+   "value": 6604032
   },
   "serve: idle CPU": {
    "kind": "cpu",
-   "value": 0.4079
+   "value": 0.254
   },
   "serve: idle wake-ups": {
    "kind": "wakeups",
-   "value": 73.0
+   "value": 75.8
   },
   "serve: threads": {
    "kind": "threads",
@@ -571,23 +571,23 @@
   },
   "ui: CPU to start, s": {
    "kind": "info",
-   "value": 2.084
+   "value": 1.875
   },
   "ui: footprint": {
    "kind": "footprint",
-   "value": 33490560
+   "value": 32409088
   },
   "ui: idle CPU": {
    "kind": "cpu",
-   "value": 0.4164
+   "value": 0.2196
   },
   "ui: idle wake-ups": {
    "kind": "wakeups",
-   "value": 206.1
+   "value": 205.8
   },
   "ui: threads": {
    "kind": "threads",
-   "value": 9
+   "value": 8
   }
  },
  "errors": {},
@@ -602,13 +602,13 @@
    "threads seen": [
     7
    ],
-   "ps cpu over the window": 0.41
+   "ps cpu over the window": 0.26
   },
   "host": {
    "threads seen": [
     7
    ],
-   "ps cpu over the window": 0.01
+   "ps cpu over the window": 0.0
   },
   "menubar feed": {
    "threads seen": [
@@ -618,12 +618,12 @@
   },
   "ui": {
    "threads seen": [
+    8,
     9,
     10,
-    12,
-    16
+    14
    ],
-   "ps cpu over the window": 0.44
+   "ps cpu over the window": 0.22
   }
  }
 }

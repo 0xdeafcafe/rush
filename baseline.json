@@ -1,6 +1,6 @@
 {
- "commit": "2bd16b666476bde2a633ec7c227cab35e7fa99d7",
- "at": "2026-11-14T04:55:24Z",
+ "commit": "320efe24e9f5dc94fb2b4e4f3e85b060e9063a5c",
+ "at": "2026-11-14T16:07:27Z",
  "metrics": {
   "binary: rush, release": {
    "kind": "binary",
@@ -739,8 +739,17 @@
   "open whole file, fetch+apply: allocations made",
   "open whole file: allocations made",
   "open: subagent runs followed, allocations made",
+  "render 300 turns w120: cold frame at the end, bytes",
+  "render 300 turns w120: cold jump to the top (window), bytes",
+  "render 300 turns w250: cold frame at the end, bytes",
+  "render 300 turns w250: cold jump to the top (window), bytes",
+  "render 3000 turns w120: catch-up: cold frame at the end, bytes",
   "render 3000 turns w120: chat: cold frame at the end, bytes",
-  "ui: footprint",
-  "ui: threads"
+  "render 3000 turns w120: code: cold frame at the end, bytes",
+  "render 3000 turns w120: cold frame at the end, bytes",
+  "render 3000 turns w120: cold jump to the top (window), bytes",
+  "render 3000 turns w120: normal: cold frame at the end, bytes",
+  "render 3000 turns w120: trail: cold frame at the end, bytes",
+  "ui: footprint"
  ]
 }
