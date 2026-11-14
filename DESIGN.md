@@ -506,6 +506,26 @@ Claude, fleet, the other adapters) builds on these.
   told `ended` once the app-server's output ends. Until `start`
   returns, what is said waits in the Conn, then goes on in order; a
   start that fails tells the sink nothing, not even `ended`.
+- **Codex beside Claude Code on one project** (Rust-only, 2026-11-14).
+  A thread rush starts reads CLAUDE.md where a folder has no AGENTS.md
+  (`project_doc_fallback_filenames`, config.toml's own names first),
+  and the user's `~/.claude/CLAUDE.md` in its developer instructions
+  when `~/.codex` has no AGENTS.md (`reach.rs`). Its workspace sandbox
+  may also write the repository's git folders and rush's own
+  (`writable_roots`, at thread/start and in each turn's policy): Codex
+  keeps `.git` read-only even inside a writable root, and a worktree's
+  lives outside it, so without them a commit fails on `index.lock` and
+  rush feed, memory and watch fail on rush's folder (tried with `codex
+  sandbox`, 0.169.0). The common dir alone isn't enough: Codex also
+  shuts the worktree's own git dir under it, so both are listed. An
+  agent that isn't Claude Code is told the project's memory notes, kept
+  in Claude Code's folder, and to add one with `rush memory add`
+  (rush-host `memshare.rs`). A model config.toml sets that its models
+  cache doesn't list yet (gpt-6.2-sol) is listed first, and a whole
+  `gpt-…` id goes to the server as named. Codex's hooks (`[features]
+  hooks`) take Claude Code's hook input, but run only hooks the user
+  trusted (config.toml's `hooks.state`), so rush's gate and context
+  guard don't reach it yet; its PATH shims do.
 - **Shared types.** `SubagentStats` is `rush_core::agent`'s (the adapter
   module re-exports it). Processes are read by `rush_sys::proc` (a table
   with `snapshot`, filled only for the trees asked; `Sampler` for one
