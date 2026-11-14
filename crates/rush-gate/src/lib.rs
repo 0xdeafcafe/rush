@@ -29,7 +29,9 @@ pub mod share;
 pub mod sys;
 pub mod watch;
 
-pub use cli::{Ctx, GATE_USAGE, gate_cmd, gate_hold, gate_hook, gate_status};
+pub use cli::{
+    CODEX_FLAG, Ctx, GATE_USAGE, gate_cmd, gate_hold, gate_hook, gate_hook_codex, gate_status,
+};
 pub use gate::{AcquireError, Ask, Cancel, Gate, HELD_ENV, Run, Wait, Waiter, bin_dir, root};
 pub use guard::{DEFAULT_FLOOR, Guard, Victim};
 pub use heavy::{heavy, worker_env};

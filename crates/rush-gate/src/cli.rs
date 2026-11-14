@@ -135,7 +135,11 @@ pub fn gate_cmd(ctx: &Ctx, args: &[String]) -> i32 {
             0
         }
         "hook" => {
-            gate_hook(ctx, &mut io::stdin().lock(), &mut out);
+            if args.get(1).is_some_and(|a| a == CODEX_FLAG) {
+                gate_hook_codex(ctx, &mut io::stdin().lock(), &mut out);
+            } else {
+                gate_hook(ctx, &mut io::stdin().lock(), &mut out);
+            }
             0
         }
         _ => {
@@ -749,6 +753,24 @@ pub fn spawns_refused(home: &Path, now: rush_core::time::Ms, session: &str) -> O
 /// rest of its input as it was. Anything else, or anything it can't read,
 /// gets nothing: the call goes ahead as it is.
 pub fn gate_hook(ctx: &Ctx, r: &mut dyn Read, w: &mut dyn Write) {
+    hook_as(ctx, false, r, w);
+}
+
+/// What follows `rush gate hook` in the command Codex runs it by.
+pub const CODEX_FLAG: &str = "--codex";
+
+/// gate_hook answering Codex, whose hooks read as Claude Code's (its
+/// shell tool is Bash, its command tool_input.command) but which keeps
+/// an updatedInput only beside permissionDecision "allow"; an allow there
+/// still goes through Codex's own sandbox and approvals. A command is
+/// rewritten only in a session rush runs, whose sandbox lets it write
+/// rush's folder as rush gate run and a script's trace must; one started
+/// outside rush gets the refusals alone. Rush-only.
+pub fn gate_hook_codex(ctx: &Ctx, r: &mut dyn Read, w: &mut dyn Write) {
+    hook_as(ctx, true, r, w);
+}
+
+fn hook_as(ctx: &Ctx, codex: bool, r: &mut dyn Read, w: &mut dyn Write) {
     #[derive(serde::Deserialize, Default)]
     #[serde(default)]
     struct In {
@@ -870,6 +892,9 @@ pub fn gate_hook(ctx: &Ctx, r: &mut dyn Read, w: &mut dyn Write) {
         }
         return;
     }
+    if codex && ctx.session.is_empty() {
+        return;
+    }
     let name = hook::gated(&command, ctx.plugin.rules().as_ref());
     let mut held = None;
     if !exe.is_empty() && !rush_gh::pushlater::off() {
@@ -903,7 +928,8 @@ pub fn gate_hook(ctx: &Ctx, r: &mut dyn Read, w: &mut dyn Write) {
     // A subagent's command known to outlast its prompt cache runs in the
     // background from the start, and it's told to check back in time.
     let mut note = String::new();
-    if !background
+    if !codex
+        && !background
         && !inp.agent_id.is_empty()
         && let Some((took, ttl)) = ctx.host.long_ahead(&command)
     {
@@ -942,6 +968,8 @@ pub fn gate_hook(ctx: &Ctx, r: &mut dyn Read, w: &mut dyn Write) {
     struct Hso<'a> {
         #[serde(rename = "hookEventName")]
         event: &'a str,
+        #[serde(rename = "permissionDecision", skip_serializing_if = "str::is_empty")]
+        decision: &'a str,
         #[serde(rename = "updatedInput")]
         input: &'a std::collections::BTreeMap<String, rush_state::json::RawJson>,
         #[serde(rename = "additionalContext", skip_serializing_if = "str::is_empty")]
@@ -950,6 +978,7 @@ pub fn gate_hook(ctx: &Ctx, r: &mut dyn Read, w: &mut dyn Write) {
     let out = Out {
         hso: Hso {
             event: "PreToolUse",
+            decision: if codex { "allow" } else { "" },
             input: &input,
             context: &note,
         },
@@ -1389,6 +1418,53 @@ mod tests {
             ),
             ""
         );
+    }
+
+    // Codex's hook input, as codex-cli 0.169.0 sends it, read as it is:
+    // in a session rush runs, a rewrite says allow beside it (Codex keeps
+    // updatedInput only then); outside rush, refusals alone.
+    #[test]
+    fn hook_answers_codex() {
+        let home = tempfile::tempdir().unwrap();
+        let host = Arc::new(Fake2::default());
+        let input = |command: &str| {
+            json!({"session_id": "01a1dbb7", "turn_id": "01a1dbb7-1974", "transcript_path": "/h/sessions/rollout.jsonl",
+                "cwd": "/w", "hook_event_name": "PreToolUse", "model": "gpt-6-luna", "permission_mode": "default",
+                "tool_name": "Bash", "tool_input": {"command": command}, "tool_use_id": "exec-0510da47"})
+            .to_string()
+        };
+        let codex = |c: &Ctx, input: &str| {
+            let mut out = Vec::new();
+            gate_hook_codex(c, &mut input.as_bytes(), &mut out);
+            String::from_utf8(out).unwrap()
+        };
+        let deny = r#"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"search the project, not the disk"}}"#.to_string() + "\n";
+        let refusing = Arc::new(Fake2 {
+            refuse: "search the project, not the disk".into(),
+            ..Fake2::default()
+        });
+        let at = |host: &Arc<Fake2>, session: &str| {
+            let mut c = ctx(home.path(), Some("tsc"), host.clone());
+            c.session = session.into();
+            c
+        };
+        let (ours, outside) = (at(&host, "6a"), at(&host, ""));
+        let (ours_refusing, outside_refusing) = (at(&refusing, "6a"), at(&refusing, ""));
+        for (c, command, want) in [
+            (
+                &ours,
+                "tsc -b",
+                r#"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"command":"'/opt/rush' gate run --name 'tsc' --dir '/w' -- bash -c 'tsc -b'"}}}"#.to_string() + "\n",
+            ),
+            (&ours, "ls", String::new()),
+            (&outside, "tsc -b", String::new()),
+            (&ours_refusing, "grep -r x /", deny.clone()),
+            (&outside_refusing, "grep -r x /", deny.clone()),
+        ] {
+            assert_eq!(codex(c, &input(command)), want, "{command} in {:?}", c.session);
+        }
+        // Claude Code's answer stays its own: no allow.
+        assert!(!hook(&ours, &input("tsc -b")).contains("permissionDecision"));
     }
 
     // The runaway guard: a new subagent or workflow is denied with why
