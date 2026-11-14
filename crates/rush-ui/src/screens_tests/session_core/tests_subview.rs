@@ -183,7 +183,8 @@ fn no_tabs_of_their_own() {
     );
 }
 
-/// Wide, a run opened shows beside the conversation, in the column right
+/// Wide (the column beside the conversation fits from 171), a run opened
+/// shows beside the conversation, in the column right
 /// of it, the conversation still there; it takes the keys as it shows;
 /// tab gives them back and takes them again; esc closes it, back on the
 /// row it was opened from.
@@ -191,7 +192,7 @@ fn no_tabs_of_their_own() {
 fn a_run_opens_beside_the_conversation() {
     let d = tempfile::tempdir().unwrap();
     let mut m = model(&d);
-    m.w = 180;
+    m.w = 220;
     x_has_a_step(&mut m);
     let step = "t2:s:toolu_x";
     m.session.as_mut().unwrap().sel = step.into();
@@ -202,7 +203,7 @@ fn a_run_opens_beside_the_conversation() {
     assert!(all.contains("tab back · esc closes"), "{all}");
     let (id, [x, _, w, _]) = open_of(&mut m);
     assert_eq!(id.as_deref(), Some("x"));
-    assert!(x > 60 && x + w <= 180, "not beside it: {x} {w}\n{all}");
+    assert!(x > 60 && x + w <= 220, "not beside it: {x} {w}\n{all}");
     assert!(conn(&mut m, KEY).watch.msg_focus, "it didn't take the keys");
     press(&mut m, "tab");
     assert!(!conn(&mut m, KEY).watch.msg_focus, "tab kept the keys");
@@ -247,7 +248,7 @@ fn narrow_a_run_peeks_under_its_step() {
 fn the_setting_asks_for_the_peek() {
     let d = tempfile::tempdir().unwrap();
     let mut m = model(&d);
-    m.w = 180;
+    m.w = 220;
     crate::accounts::use_store(&mut m, rush_state::Store::default());
     crate::accounts::config_mut(&mut m).runs_open = openrun::PEEK.into();
     subview::pick_run(&mut m, KEY, "x");
@@ -740,7 +741,7 @@ pub(super) fn picked_beside(d: &tempfile::TempDir, fake: &Arc<Fake>, inbox: bool
     use super::host::Hosts;
     use rush_core::event::{Event, TaskKind, TaskStarted};
     let mut m = model(d);
-    m.w = 180;
+    m.w = 220;
     set_hosts(&mut m, Arc::new(fake.clone()));
     m.session.as_mut().unwrap().sess.apply(
         &Event::TaskStarted(TaskStarted {

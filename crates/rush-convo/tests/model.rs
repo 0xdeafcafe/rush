@@ -583,7 +583,9 @@ fn parts_stay_small() {
     use rush_convo::{RenderedLine, Request, Step, Turn};
     let cases = [
         ("Step", size_of::<Step>(), 200),
-        ("Turn", size_of::<Turn>(), 328),
+        // 328, and a woken turn's call (woke_call, 2026-11-14): its
+        // notice goes to the step whose task woke it.
+        ("Turn", size_of::<Turn>(), 352),
         ("Item", size_of::<Item>(), 40),
         ("Request", size_of::<Request>(), 120),
         ("RenderedLine", size_of::<RenderedLine>(), 88),

@@ -1,4 +1,4 @@
-//! The running subagent picked in the Subagents tab, followed as its
+//! The running subagent open on the conversation's page, followed as its
 //! transcript grows, the way the open conversation follows its own: a
 //! thread waits on the file (rush_sys::fswait, kqueue on macOS) and wakes
 //! the UI the moment something is written, and the runs are read again
@@ -38,13 +38,13 @@ impl Drop for Follow {
 }
 
 /// The run to follow in session key now, and its transcript: the one
-/// picked in the Subagents tab, showing, and running.
+/// open on the conversation's page (openrun.rs), and running.
 fn want(m: &Model, key: &str) -> Option<(String, String)> {
-    if open_key(m).as_deref() != Some(key) || !super::openrun::is_open(m, key) {
+    if open_key(m).as_deref() != Some(key) {
         return None;
     }
-    let v = m.session.as_ref().filter(|v| v.key == key)?;
-    let id = v.sel.strip_prefix("sub:")?;
+    let id = super::openrun::open_id(m, key)?;
+    let id = id.as_str();
     if !super::subview::run_live(m, key, id) {
         return None;
     }

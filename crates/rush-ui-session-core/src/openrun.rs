@@ -170,10 +170,11 @@ pub fn frame(m: &mut Model, key: &str, w: usize, h: usize, y: usize) -> Vec<Line
     if w < 12 || h < 3 {
         return Vec::new();
     }
+    let iw = w - 4;
+    // Drawn first: an opened run takes the keys as it's drawn.
+    let body = draw(m, key, iw, h - 2, (2 + 2, y + 1));
     let focused = conn(m, key).watch.msg_focus;
     let edge = if focused { SUB } else { FAINT };
-    let iw = w - 4;
-    let body = draw(m, key, iw, h - 2, (2 + 2, y + 1));
     let says = if focused {
         " tab back · esc closes "
     } else {
@@ -221,9 +222,11 @@ pub fn beside(
     if w < 8 || rows < 2 {
         return vec![Line::new(); rows];
     }
+    let iw = w - 2;
+    // Drawn first: an opened run takes the keys as it's drawn.
+    let body = draw(m, key, iw, rows - 1, (x + 2, y + 1));
     let focused = conn(m, key).watch.msg_focus;
     let edge = if focused { SUB } else { FAINT };
-    let iw = w - 2;
     let says = if focused {
         "tab back · esc closes"
     } else {
@@ -235,7 +238,6 @@ pub fn beside(
         line([sp(close, edge)]),
         w,
     );
-    let body = draw(m, key, iw, rows - 1, (x + 2, y + 1));
     let mut out = Vec::with_capacity(rows);
     out.push(bar);
     for l in body {

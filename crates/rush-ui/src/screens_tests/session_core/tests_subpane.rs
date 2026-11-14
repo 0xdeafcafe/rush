@@ -58,7 +58,7 @@ fn long_run(n: usize) -> String {
 fn a_long_run_shows_its_end() {
     let d = tempfile::tempdir().unwrap();
     let mut m = model(&d);
-    (m.w, m.h) = (180, 80);
+    (m.w, m.h) = (220, 80);
     let x = d.path().join("agent-long.jsonl");
     let body = long_run(1400);
     assert!(body.len() > 2 << 20, "not long enough: {}", body.len());
