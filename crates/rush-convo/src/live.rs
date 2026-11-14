@@ -26,7 +26,7 @@ pub const DELTA_CHARS: usize = 6_000;
 
 /// What the watcher is told it is, and how to answer: the same words every
 /// time, so every update reads them from the cache.
-pub const SYSTEM: &str = r#"You watch a coding agent work and keep a small live dashboard of it for its user, who glances at it instead of reading the conversation. Each message tells you only what happened since the last one: turns the user started, the agent's steps (one line each), its answers, its task list.
+pub const SYSTEM: &str = r#"You watch a coding agent work and keep a small live dashboard of it for its user, who glances at it instead of reading the conversation. Each message gives you the dashboard as it stands, then only what happened since it was last updated: turns the user started, the agent's steps (one line each), its answers, its task list.
 
 Reply with one JSON object and nothing else, a patch to the dashboard:
 {"headline": "...", "progress": [done, total], "blocks": [block, ...], "remove": ["id", ...], "order": ["id", ...]}
@@ -49,6 +49,18 @@ Rules:
 - Don't repeat what the dashboard already shows on its own: what needs the user, which checks passed or failed, which files changed, the step running now.
 - Plain words, no markdown. Never invent progress the messages don't show."#;
 
+/// The shape of the watcher's answer, for a harness that can hold it to
+/// one: SYSTEM's patch, every key optional.
+pub const SCHEMA: &str = r#"{"type":"object","properties":{"headline":{"type":"string"},"progress":{"type":"array","items":{"type":"integer"}},"remove":{"type":"array","items":{"type":"string"}},"order":{"type":"array","items":{"type":"string"}},"blocks":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"kind":{"type":"string","enum":["steps","timeline","list","kv","bars","callout","text"]},"title":{"type":"string"},"tone":{"type":"string"},"text":{"type":"string"},"items":{"type":"array","items":{"type":"object","properties":{"text":{"type":"string"},"meta":{"type":"string"},"tone":{"type":"string"},"done":{"type":"boolean"},"value":{"type":"number"},"time":{"type":"string"}},"required":["text"]}}},"required":["id","kind"]}}}}"#;
+
+/// What the small-job model is told for the Now line: one step in, a few
+/// words out.
+pub const NOW_SYSTEM: &str = "You say in a few plain words what a coding agent's step is doing, for a status line: under 50 characters, present tense, no quotes, no full stop, no \"The agent\". Reply with the words only.";
+
+/// Between updates while a turn runs, at least this long: the watcher is
+/// asked again at a turn's end, and meanwhile only this often.
+pub const EVERY: Ms = 20_000;
+
 /// How a block or an item stands, as its colour says.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Tone {
@@ -70,6 +82,17 @@ impl Tone {
             "busy" => Tone::Busy,
             "quiet" => Tone::Quiet,
             _ => Tone::Plain,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Tone::Plain => "",
+            Tone::Good => "good",
+            Tone::Bad => "bad",
+            Tone::Warn => "warn",
+            Tone::Busy => "busy",
+            Tone::Quiet => "quiet",
         }
     }
 }
@@ -99,6 +122,18 @@ impl BlockKind {
             "text" => BlockKind::Text,
             _ => return None,
         })
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            BlockKind::List => "list",
+            BlockKind::Steps => "steps",
+            BlockKind::Timeline => "timeline",
+            BlockKind::Kv => "kv",
+            BlockKind::Bars => "bars",
+            BlockKind::Callout => "callout",
+            BlockKind::Text => "text",
+        }
     }
 }
 
@@ -215,6 +250,111 @@ impl Story {
         self.serial += 1;
         true
     }
+
+    /// The dashboard as the watcher writes it, compact: what it's shown
+    /// as standing, so a watcher that remembers nothing can patch it.
+    /// Empty fields are left out.
+    pub fn to_json(&self) -> String {
+        use serde_json::{Map, json};
+        let mut p = Map::new();
+        if !self.headline.is_empty() {
+            p.insert("headline".into(), json!(self.headline));
+        }
+        if self.progress.1 > 0 {
+            p.insert("progress".into(), json!([self.progress.0, self.progress.1]));
+        }
+        let blocks: Vec<Value> = self
+            .blocks
+            .iter()
+            .map(|b| {
+                let mut o = Map::new();
+                o.insert("id".into(), json!(b.id));
+                o.insert("kind".into(), json!(b.kind.name()));
+                for (k, v) in [("title", &b.title), ("text", &b.text)] {
+                    if !v.is_empty() {
+                        o.insert(k.into(), json!(v));
+                    }
+                }
+                if b.tone != Tone::Plain {
+                    o.insert("tone".into(), json!(b.tone.name()));
+                }
+                if !b.items.is_empty() {
+                    let items: Vec<Value> = b.items.iter().map(item_json).collect();
+                    o.insert("items".into(), Value::Array(items));
+                }
+                Value::Object(o)
+            })
+            .collect();
+        if !blocks.is_empty() {
+            p.insert("blocks".into(), Value::Array(blocks));
+        }
+        Value::Object(p).to_string()
+    }
+}
+
+fn item_json(it: &StoryItem) -> Value {
+    use serde_json::{Map, json};
+    let mut o = Map::new();
+    o.insert("text".into(), json!(it.text));
+    for (k, v) in [("meta", &it.meta), ("time", &it.time)] {
+        if !v.is_empty() {
+            o.insert(k.into(), json!(v));
+        }
+    }
+    if it.tone != Tone::Plain {
+        o.insert("tone".into(), json!(it.tone.name()));
+    }
+    if it.done {
+        o.insert("done".into(), json!(true));
+    }
+    if it.value != 0.0 {
+        o.insert("value".into(), json!(it.value));
+    }
+    Value::Object(o)
+}
+
+/// What the watcher is sent: the dashboard as it stands, then what's new
+/// (delta's). The same words every time come first, for the cache.
+pub fn prompt(story: &Story, delta: &str) -> String {
+    let now = story.to_json();
+    let now = if now == "{}" {
+        "(empty: nothing on it yet)".to_string()
+    } else {
+        now
+    };
+    format!("The dashboard now:\n{now}\n\nWhat happened since:\n{delta}")
+}
+
+/// The main agent's step running now in s's last turn, if a turn is live.
+pub fn running(s: &Session) -> Option<StepId> {
+    let t = s.turns.last().filter(|t| t.live)?;
+    t.steps.iter().copied().find(|&id| {
+        let st = s.step(id);
+        st.parent.is_none() && st.kind != Kind::Todo && st.status == Status::Running
+    })
+}
+
+/// Whether the watcher is due to be asked about s, told up to c and last
+/// asked at `asked` (0: never): at once the first time, as soon as a turn
+/// has ended it hasn't heard the end of, and while a turn runs every
+/// EVERY at most.
+pub fn due(s: &Session, c: &Cursor, asked: Ms, now: Ms) -> bool {
+    if s.turns.is_empty() {
+        return false;
+    }
+    if !c.started() {
+        return true;
+    }
+    let ended = s
+        .turns
+        .iter()
+        .rev()
+        .take_while(|t| !c.answered.contains(&t.n))
+        .any(|t| !t.live);
+    if ended || s.turns.len() > c.turns {
+        return true;
+    }
+    s.turns.last().is_some_and(|t| t.live) && now - asked >= EVERY
 }
 
 /// A block from the watcher's JSON; None without an id or a kind the view

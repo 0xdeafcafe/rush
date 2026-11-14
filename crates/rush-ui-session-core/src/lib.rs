@@ -64,6 +64,7 @@ pub mod side;
 pub mod slash;
 pub mod spawned;
 pub mod start;
+pub mod storywatch;
 pub mod subbox;
 pub mod subfollow;
 pub mod subname;

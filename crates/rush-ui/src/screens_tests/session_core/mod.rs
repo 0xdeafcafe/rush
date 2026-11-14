@@ -28,6 +28,7 @@ mod tests_shellbox;
 mod tests_slash;
 mod tests_split;
 mod tests_start;
+mod tests_storywatch;
 mod tests_subpane;
 mod tests_subs;
 mod tests_subview;

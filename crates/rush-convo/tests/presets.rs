@@ -6,7 +6,9 @@ rush_testenv::sandboxed!();
 
 use std::sync::Arc;
 
-use rush_convo::live::{Cursor, DELTA_CHARS, Story, delta};
+use rush_convo::live::{
+    Cursor, DELTA_CHARS, EVERY, SCHEMA, Story, delta, due, prompt, running, step_line,
+};
 use rush_convo::render::{check_names, plain};
 use rush_convo::{Options, Preset, Renderer, Session};
 use serde_json::json;
@@ -548,6 +550,53 @@ fn the_watcher_is_told_only_whats_new() {
     assert!(next.starts_with("Turn 3: the user asked: 1a"), "{next}");
     assert!(next.contains("Turn 3 answered: Going with now."), "{next}");
     assert!(!next.contains("dock.rs"), "told again: {next}");
+}
+
+#[test]
+fn the_watcher_is_asked_when_its_due_and_shown_the_dashboard() {
+    let mut s = session();
+    let mut c = Cursor::default();
+    // The first look asks at once.
+    assert!(due(&s, &c, 0, at(1800)));
+    delta(&s, &mut c, at(1800)).unwrap();
+    assert!(!due(&s, &c, at(1800), at(1900)), "nothing ended since");
+    // A turn running: asked every EVERY at most, its step the one running.
+    s.feed(sent("now ship it"), at(1900));
+    assert!(due(&s, &c, at(1800), at(1900)), "a turn it hasn't heard of");
+    delta(&s, &mut c, at(1901)).unwrap();
+    s.feed(
+        tool_use("b1", "Bash", json!({"command": "cargo build"})),
+        at(1902),
+    );
+    let id = running(&s).expect("cargo build runs");
+    assert!(step_line(&s, id, at(1903)).contains("cargo build"));
+    assert!(!due(&s, &c, at(1901), at(1901) + EVERY - 1));
+    assert!(due(&s, &c, at(1901), at(1901) + EVERY));
+    // The turn's end is told at once.
+    s.feed(tool_result("b1", "ok", false, None), at(1905));
+    s.feed(say("Shipped."), at(1906));
+    s.feed(done(0.01), at(1907));
+    assert_eq!(running(&s), None);
+    assert!(due(&s, &c, at(1906), at(1907)));
+
+    // The dashboard as it stands goes first, and reads back the same.
+    let mut st = Story::default();
+    let empty = prompt(&st, "Turn 4: the user asked: x");
+    assert!(empty.starts_with("The dashboard now:\n(empty"), "{empty}");
+    st.apply(r#"{"headline":"Ship the fix","progress":[1,3],"blocks":[{"id":"plan","kind":"steps","items":[{"text":"find","done":true},{"text":"fix","tone":"busy"}]},{"id":"why","kind":"callout","tone":"warn","text":"Waiting on CI."}]}"#).unwrap();
+    let p = prompt(&st, "Turn 4 answered: done");
+    assert!(
+        p.ends_with("What happened since:\nTurn 4 answered: done"),
+        "{p}"
+    );
+    let mut back = Story::default();
+    back.apply(&st.to_json()).unwrap();
+    assert_eq!(
+        (back.headline, back.progress, back.blocks),
+        (st.headline.clone(), st.progress, st.blocks.clone())
+    );
+    // The schema the harness holds the answer to is JSON.
+    serde_json::from_str::<serde_json::Value>(SCHEMA).unwrap();
 }
 
 #[test]
