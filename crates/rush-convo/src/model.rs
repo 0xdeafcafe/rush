@@ -313,6 +313,9 @@ pub struct Turn {
     pub cause: String,
     /// The command of the shell task that woke it, when it runs over a line.
     pub command: String,
+    /// The call whose background task woke it: its notice links back to
+    /// that call's step (Rust-only).
+    pub woke_call: String,
     /// What's streamed this turn (text, thinking, tool input), in bytes.
     pub streamed: usize,
     /// When the thinking now under way began; 0 when none is.
@@ -1317,6 +1320,7 @@ impl Session {
                 self.sent(text, Vec::new(), now);
                 if let Some(t) = self.turns.last_mut() {
                     t.from = from;
+                    t.woke_call = crate::transcript::woke_call(&p.text);
                 }
             }
         }

@@ -1630,7 +1630,17 @@ impl<'a> Drawer<'a> {
         if wake && let Some(last) = rows.last_mut() {
             last.push(how);
         }
-        let r = self.r.clone();
+        // A background task's notice links back to the call that started
+        // the task: enter or a click on it goes to that step (Rust-only).
+        let linked = !t.woke_call.is_empty() && self.s.made_call(&t.woke_call);
+        if linked && let Some(last) = rows.last_mut() {
+            last.push(faint("  ↑ its step"));
+        }
+        let r = if linked {
+            woke_ref(&self.r)
+        } else {
+            self.r.clone()
+        };
         for (i, row) in rows.into_iter().enumerate() {
             if i == 0 {
                 let l = self
@@ -2043,11 +2053,14 @@ impl<'a> Drawer<'a> {
             || !self.s.running_label(id).is_empty()
             // A command printing as it runs shows the last of it.
             || self.live_out_of(id).is_some()
+            // So does one whose task runs on in the background.
+            || self.bg_out_of(id).is_some_and(|b| b.running)
     }
 
     fn status_mark(&self, st: &Step) -> Txt {
         // Its shell returned; the agent it ran works on.
-        let status = if self.run_live(st) && st.status == Status::Ok {
+        let bg = self.o.bg.get(&*st.id).is_some_and(|b| b.running);
+        let status = if (self.run_live(st) || bg) && st.status == Status::Ok {
             Status::Running
         } else {
             st.status
@@ -2656,6 +2669,8 @@ impl<'a> Drawer<'a> {
         self.by_path = false;
         self.reset_hl();
         self.body_rows(id, indent);
+        // What its background task has written, under it (Rust-only).
+        self.bg_rows(id, indent);
         self.hit = None;
         self.lg = None;
         self.by_path = false;
@@ -5241,6 +5256,13 @@ fn exchange_peer_txt(p: &Peer, width: usize) -> Txt {
 }
 
 /// A turn a task woke: its noun and how it ended (render.go:661).
+/// The ref of turn r's notice row when it links back to the step whose
+/// background task woke it ("t7:woke"): enter or a click there goes to
+/// that step (Turn::woke_call). Rust-only.
+pub fn woke_ref(r: &str) -> String {
+    format!("{r}:woke")
+}
+
 fn woke(t: &Turn) -> (&'static str, Txt, bool) {
     let (kind, status) = t.from.split_once(" · ").unwrap_or((&t.from, ""));
     let noun = match kind {

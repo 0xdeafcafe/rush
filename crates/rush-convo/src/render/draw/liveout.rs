@@ -35,12 +35,51 @@ impl<'a> Drawer<'a> {
         })
     }
 
+    /// What the background task step id started has written, as rush last
+    /// read it (Options::bg); None while the step itself runs, its own
+    /// output drawn then.
+    pub(crate) fn bg_out_of(&self, id: StepId) -> Option<&'a crate::render::BgOut> {
+        let st = self.s.step(id);
+        if st.status == Status::Running || st.id.is_empty() {
+            return None;
+        }
+        self.o
+            .bg
+            .get(&*st.id)
+            .filter(|b| !b.out.out.trim().is_empty())
+    }
+
+    /// Under a call whose task runs in the background (a command sent
+    /// there, a monitor): a line saying so, then the last of what it has
+    /// written, as a running command's are, ▸ opening the rest. Rust-only.
+    pub(crate) fn bg_rows(&mut self, id: StepId, indent: usize) {
+        let Some(b) = self.bg_out_of(id) else {
+            return;
+        };
+        let pad = self.sp(indent - 1);
+        let head = if b.running {
+            pad.and(faint("│ "))
+                .and(paint(C_ORANGE, spin(self.o.tick + id as usize)))
+                .and(dim(" in the background · what it has written so far"))
+        } else {
+            pad.and(faint("│ ")).and(dim("what it wrote"))
+        };
+        self.add("", Color::Default, head, Txt::new());
+        self.tail_rows(id, &b.out, indent);
+    }
+
     /// The running step's last lines, dim, each on the gutter its output
     /// is drawn on, and above them how many more there are: ▸ opens them.
     pub(crate) fn live_out_rows(&mut self, id: StepId, indent: usize) {
         let Some(out) = self.live_out_of(id) else {
             return;
         };
+        self.tail_rows(id, out, indent);
+    }
+
+    /// out's last lines under step id, dim on its output's gutter, and
+    /// above them how many more there are: ▸ opens them (its live_ref).
+    fn tail_rows(&mut self, id: StepId, out: &LiveOut, indent: usize) {
         let mut lines = out.lines();
         while lines
             .last()
