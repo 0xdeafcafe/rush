@@ -518,10 +518,12 @@ impl Session {
             command = cause.trim().to_owned();
             cause = first_line(&cause).to_owned();
         }
+        let call = j.tool_use_id.clone();
         let t = &mut self.turns[ti];
         t.from = from;
         t.cause = cause;
         t.command = command;
+        t.woke_call = call;
         t.touch();
     }
 

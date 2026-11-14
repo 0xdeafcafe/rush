@@ -259,10 +259,10 @@ pub fn on_click(m: &mut Model, key: &str, c: Click) -> Out {
             Out::Draw
         }
         Click::Run(r) => {
-            // A workflow shows its agents, a run is picked in the
-            // subagents view, shown beside its list rather than across the
-            // whole view, a task is picked: its keys show under it
-            // (agentviews.go:908-916; the user asked for the pick).
+            // A workflow opens with its agents and a run opens, both on
+            // the conversation's page; a task opens its step where it is
+            // (agentviews.go:908-916; Rust-only: Go showed them in views
+            // of their own).
             m.act(Act::OpenRun {
                 key: key.to_string(),
                 r,

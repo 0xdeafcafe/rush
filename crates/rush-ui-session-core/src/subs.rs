@@ -1695,19 +1695,28 @@ pub fn refresh(m: &mut Model, key: &str) {
     let sid = a.job.session_id.clone();
     let rush = a.rush;
     let hosts = super::host::hosts_of(m);
-    // The running tasks opened in the background view: their processes
-    // and every file they write are read.
-    let bg_open: Vec<String> = if super::views::view_name(m, key) == "background" {
-        conn(m, key)
-            .vs
-            .open
-            .iter()
-            .filter(|(_, on)| **on)
-            .filter_map(|(r, _)| r.strip_prefix("job:").map(str::to_string))
-            .collect()
-    } else {
-        Vec::new()
-    };
+    // The tasks whose steps are opened whole in the conversation (their
+    // output's fold, "t3:s:toolu_1:live"): their processes and every file
+    // they write are read.
+    let bg_open: Vec<String> = m
+        .session
+        .as_ref()
+        .filter(|v| v.key == key)
+        .map(|v| {
+            v.o.open
+                .iter()
+                .filter(|(_, on)| **on)
+                .filter_map(|(r, _)| r.strip_suffix(":live")?.split_once(":s:").map(|x| x.1))
+                .flat_map(|call| {
+                    v.sess
+                        .jobs()
+                        .iter()
+                        .filter(move |j| j.tool_use_id.as_str() == call)
+                        .map(|j| j.id.clone())
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let agent_pid = match conn(m, key).info.agent_pid {
         0 => a.pid,
         p => p as i32,

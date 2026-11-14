@@ -295,10 +295,14 @@ fn act(m: &mut Model, a: Act) {
             } else if let Some(id) = r.strip_prefix("run:") {
                 let id = id.to_string();
                 session_core::subview::pick_run(m, &key, &id);
-            } else if r.starts_with("job:")
-                && let Some(v) = m.session.as_mut()
-            {
-                v.sel = r;
+            } else if let Some(id) = r.strip_prefix("job:") {
+                // A task: its step, opened where it is, else its row.
+                let id = id.to_string();
+                if !session_core::running::open_task(m, &key, &id)
+                    && let Some(v) = m.session.as_mut()
+                {
+                    v.sel = r;
+                }
             }
         }
         Act::SendAs { key, text } => session_core::keys::send_as(m, &key, &text),

@@ -189,13 +189,33 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     // (rushmode.go:2366 Wide: len(c.side) == 0), hosted alone or not: the
     // column is drawn over the room past the reading width, so rows wrapped
     // for the whole width would lose their ends under it.
-    let wide = conn(m, key).side.rows.is_empty();
+    let beside_run = !conn(m, key).side.run.is_empty();
+    let run_w = conn(m, key).side.w;
+    let wide = conn(m, key).side.rows.is_empty() && !beside_run;
+    // A run open where the column isn't its: framed under its step, the
+    // conversation laid out the frame's rows shorter so its end still
+    // shows (openrun.rs).
+    let peek_h = match super::openrun::open_id(m, key) {
+        Some(_) if !beside_run => super::openrun::peek_rows(rows),
+        _ => 0,
+    };
+    let full = rows;
+    let rows = rows - peek_h;
+    conn(m, key).vs.rows = rows;
     let (between, action) = turn_state(m, key);
     let Some(v) = m.session.as_mut() else {
         return Vec::new();
     };
     v.side = side;
-    v.sync(w, now, tick);
+    // A run beside it can leave the text less than its reading width
+    // (openrun::run_width keeps it 90 to 124): its rows are laid out to
+    // the room left of the run, so none runs on under it.
+    let laid = if beside_run {
+        w.saturating_sub(run_w + 2)
+    } else {
+        w
+    };
+    v.sync(laid, now, tick);
     let o = &mut v.o;
     o.wide = wide;
     o.between_turns = between;
@@ -210,6 +230,11 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
         o.brief = opening.3;
     }
     let cw = w.saturating_sub(side);
+    let lay = if beside_run {
+        cw.saturating_sub(run_w + 2)
+    } else {
+        cw
+    };
     let mut n = rows;
     let mut out = if !v.read {
         v.note_drawn();
@@ -227,7 +252,7 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
         v.shown = vec![String::new(); out.len().min(rows)];
         out
     } else {
-        let (b, shown) = rows_of(v, rows, cw, &hover, hover_tag.as_ref(), &txt, pref);
+        let (b, shown) = rows_of(v, rows, lay, &hover, hover_tag.as_ref(), &txt, pref);
         n = shown;
         b
     };
@@ -256,6 +281,13 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
             0
         };
     let top = v.top;
+    let mut foot = foot;
+    let rows = full;
+    if peek_h > 0 {
+        foot = splice_peek(m, key, &mut out, foot, cw, peek_h, top);
+    }
+    // A run beside it has the column the whole height.
+    let foot = if beside_run { rows } else { foot };
     super::side::paste(m, key, &mut out, foot, cw, top);
     views::beside::paste(m, key, &mut out, rows, cw, vw, &vs, &past, top);
     // The map, and what's drawn after, run beside the views.
@@ -285,6 +317,65 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     }
     conn(m, key).map = mm;
     out
+}
+
+/// Puts the run open, framed h rows tall, under the last row of its step
+/// in the conversation's rows out (cw wide, the first at screen row top),
+/// what was under the step pushed down; a step out of sight (or a
+/// workflow, which has none) has it docked under the conversation's last
+/// row. The rows' refs move with them, the frame's are none. Returns the
+/// foot moved down past it.
+fn splice_peek(
+    m: &mut Model,
+    key: &str,
+    out: &mut Vec<Line>,
+    foot: usize,
+    cw: usize,
+    h: usize,
+    top: usize,
+) -> usize {
+    let Some(id) = super::openrun::open_id(m, key) else {
+        return foot;
+    };
+    let call = super::openrun::anchor(m, key, &id);
+    let shown = m
+        .session
+        .as_ref()
+        .map(|v| v.shown.clone())
+        .unwrap_or_default();
+    let n = out.len();
+    let at = call
+        .and_then(|c| {
+            shown
+                .iter()
+                .take(n)
+                .rposition(|r| super::openrun::is_step_of(r, &c))
+        })
+        .map_or(n, |i| i + 1);
+    // The column beside, while it shows, keeps its room.
+    let side = conn(m, key).side.w;
+    let fw = if side > 0 && !conn(m, key).side.rows.is_empty() {
+        cw.saturating_sub(side + 3)
+    } else {
+        cw
+    };
+    let frame = super::openrun::frame(m, key, fw, h, top + at);
+    if frame.is_empty() {
+        return foot;
+    }
+    let k = frame.len();
+    while out.len() < at {
+        out.push(Line::new());
+    }
+    out.splice(at..at, frame);
+    if let Some(v) = m.session.as_mut() {
+        while v.shown.len() < at {
+            v.shown.push(String::new());
+        }
+        v.shown
+            .splice(at..at, std::iter::repeat_n(String::new(), k));
+    }
+    if at <= foot { foot + k } else { foot }
 }
 
 /// The conversation's rows in view, `rows` tall and `cw` wide, as the

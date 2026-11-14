@@ -43,7 +43,7 @@ pub use decisions::{
 };
 pub use draw::presets::check_names;
 pub use draw::{OWNER_SEP, each_paste, image_label, paste_chip};
-pub use draw::{drawing, fold_pastes, live_head};
+pub use draw::{drawing, fold_pastes, live_head, woke_ref};
 pub use markdown::{answer_lines, link_target, markdown_lines};
 pub use needs::{
     NEEDS_ALL, NEEDS_KINDS, Needs, NeedsItem, has_quote, needs_of, needs_ref, without_chrome,
@@ -323,6 +323,23 @@ pub struct Options {
     /// returned ("Async agent launched… output_file… Do NOT Read…").
     /// Set by whoever reads the runs. Rust-only.
     pub runs: HashMap<String, Line>,
+    /// What the background tasks the conversation's calls started (a
+    /// command sent to the background, a monitor) have written, by the
+    /// call's id: its last lines drawn under the call, as a running
+    /// command's are (liveout.rs bg_rows), the call opened by itself
+    /// while its task runs. Set by whoever reads them. Rust-only.
+    pub bg: HashMap<String, BgOut>,
+}
+
+/// What a background task has written, as last read, and whether it
+/// still runs; and, where the UI knows more of it, its rows to draw under
+/// its step in place of the bare output (its facts, the files it writes,
+/// the processes under it, its launch script), laid out to fit.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BgOut {
+    pub out: std::sync::Arc<crate::model::LiveOut>,
+    pub running: bool,
+    pub rows: std::sync::Arc<Vec<Line>>,
 }
 
 /// What a running shell step is doing now: a line from its processes, and
@@ -436,6 +453,33 @@ struct TurnKey {
     tasks: u64,
     /// The rows of its subagent calls' runs, as they stand (runs).
     runs: u64,
+    /// What its calls' background tasks have written, as it stands (bg).
+    bg: u64,
+}
+
+/// What turn t's calls' background tasks have written, as o.bg has it,
+/// for the turn's key: and the clock while one runs, its mark spinning.
+fn bg_sig(s: &Session, t: &crate::model::Turn, o: &Options) -> u64 {
+    let mut h = DefaultHasher::new();
+    let mut running = false;
+    for it in &t.items {
+        let Item::Step(id) = it else { continue };
+        let st = s.step(*id);
+        let Some(b) = o.bg.get(&*st.id) else {
+            continue;
+        };
+        (&*st.id, b.out.out.len(), b.out.dropped, b.running).hash(&mut h);
+        // Its rows are handed over anew only when they change.
+        (std::sync::Arc::as_ptr(&b.rows) as usize).hash(&mut h);
+        if let Some(l) = b.out.out.lines().last() {
+            l.hash(&mut h);
+        }
+        running |= b.running;
+    }
+    if running {
+        (o.tick, o.now / 1000).hash(&mut h);
+    }
+    h.finish()
 }
 
 /// What turn t's subagent calls' runs draw as now: their rows in o.runs,
@@ -727,6 +771,9 @@ impl Renderer {
         }
         if !o.runs.is_empty() {
             k.runs = runs_sig(s, t, o);
+        }
+        if !o.bg.is_empty() {
+            k.bg = bg_sig(s, t, o);
         }
         if o.preset == Preset::CatchUp {
             let last = i + 1 == s.turns.len();

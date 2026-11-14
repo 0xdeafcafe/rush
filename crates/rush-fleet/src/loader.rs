@@ -53,6 +53,9 @@ const HOUR: Ms = 60 * MINUTE;
 /// How often a past conversation's subagents are looked at again, and an
 /// idle hosted row made again: none can start.
 const PAST_EVERY: Ms = 15 * SECOND;
+/// How long an idle host whose agent was handed a finished task's notice
+/// reads as working: rush-host's UNANSWERED_FOR.
+const WAKING_FOR: Ms = MINUTE;
 
 /// What a host's background task is, in the list's word: agent,
 /// monitor, workflow, shell, else task (Agent.job.background's kinds).
@@ -1709,6 +1712,20 @@ impl Loader {
     /// A rush session's info as a row.
     fn hosted(&mut self, p: &Profile, info: &HostInfo, tab: Option<&mut Table>, now: Ms) -> Agent {
         let mut st = match info.state.as_str() {
+            // A finished task's notice reached it idle: the agent is already
+            // on the turn that takes it up, which the host calls working
+            // only once the model's first message is back, often 20 s on.
+            // Without this the row sits in Finished meanwhile. A notice
+            // stamped before its last turn ended went into that turn
+            // (host.go:267); one nothing comes of is a finish again after
+            // the host's own bound (rush-host's UNANSWERED_FOR). Rust-only.
+            "idle"
+                if info.waking != 0
+                    && info.waking >= info.idle_since
+                    && now - info.waking < WAKING_FOR =>
+            {
+                "working"
+            }
             "idle" | "starting" => "done",
             "" => "stopped",
             s => s,

@@ -525,14 +525,19 @@ fn back_to_agents_and_what_isnt_in_rush() {
     assert_eq!(input(&mut m), "");
 }
 
-/// /tasks shows what runs in the background; /diff the changes view.
+/// /tasks, with no task list, says what runs in the background is in
+/// the column's Running, not a view of its own; /diff shows the changes
+/// view.
 #[test]
 fn tasks_and_diff_show_their_views() {
     let d = tempfile::tempdir().unwrap();
     let (mut m, _) = session(&d);
     rushcmd::run(&mut m, KEY, "/tasks");
-    assert_eq!(super::views::view_name(&m, KEY), "background");
-    assert_eq!(flash(&m), "");
+    assert_eq!(super::views::view_name(&m, KEY), "conversation");
+    assert_eq!(
+        flash(&m),
+        "no task list · what runs in the background is under Running"
+    );
     rushcmd::run(&mut m, KEY, "/diff");
     assert_eq!(super::views::view_name(&m, KEY), "changes");
 }

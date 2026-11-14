@@ -111,11 +111,8 @@ fn command(m: &mut Model, key: &str, name: &str, arg: &str, text: &str) -> Out {
             Out::Draw
         }
         "tasks" => {
-            if !["background", "subagents", "tasks"]
-                .iter()
-                .any(|v| views::show_view(m, key, v))
-            {
-                m.flash("nothing running in the background");
+            if !views::show_view(m, key, "tasks") {
+                m.flash("no task list · what runs in the background is under Running");
             }
             Out::Draw
         }

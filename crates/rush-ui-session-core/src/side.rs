@@ -358,6 +358,9 @@ pub struct Side {
     pub y: usize,
     pub x: usize,
     pub shown: usize,
+    /// The run (or workflow) open in the column in its parts' place, at
+    /// all the room it has (openrun.rs); "" while it shows its parts.
+    pub run: String,
 }
 
 /// The column's width beside session key's conversation, text w wide:
@@ -383,6 +386,17 @@ fn room_beside(m: &mut Model, key: &str, w: usize) -> (usize, usize) {
         side_width_with(w - views, m.cfg.column_width),
         crate::sidecol::side_room(w - views),
     )
+}
+
+/// How wide a run open beside the conversation is, w wide in all, right
+/// of the views strip; 0 when the views panel takes the room, or there's
+/// too little (openrun::run_width).
+fn run_room(m: &mut Model, key: &str, w: usize) -> usize {
+    let views = rush_ui_plugin_ui::views::beside::views_beside(m, key, w).2;
+    if views > rush_ui_plugin_ui::views::panel::VIEWS_STRIP {
+        return 0;
+    }
+    super::openrun::run_width(w - views)
 }
 
 /// alt+← and alt+→ (or ctrl, where ⌥ is no key) in a Session (the box empty) make the column beside
@@ -525,6 +539,18 @@ pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
         ..Side::default()
     };
     let runs = std::mem::take(&mut conn(m, key).side_runs);
+    // A run open beside the conversation has the column, in its parts'
+    // place, and from narrower than they do (openrun::run_width).
+    if conversation && let Some(id) = super::openrun::open_id(m, key) {
+        let rw = run_room(m, key, w);
+        if super::openrun::place(m, rw) == super::openrun::Place::Beside {
+            side.w = rw;
+            side.room = rw;
+            side.run = id;
+            conn(m, key).side = side;
+            return false;
+        }
+    }
     if sw == 0 || !conversation {
         conn(m, key).side = side;
         return false;
@@ -699,6 +725,10 @@ fn open_decisions(m: &mut Model, key: &str) -> Vec<(u32, Vec<Decision>)> {
 /// as the views' panel is as tall as what's in it (rushPane's paste,
 /// laid from the top rather than at the foot).
 pub fn paste(m: &mut Model, key: &str, out: &mut Vec<Line>, foot: usize, cw: usize, top: usize) {
+    if !conn(m, key).side.run.is_empty() {
+        paste_run(m, key, out, foot, cw, top);
+        return;
+    }
     let c = conn(m, key);
     let at = c.side_pick;
     let side = &mut c.side;
@@ -734,6 +764,30 @@ pub fn paste(m: &mut Model, key: &str, out: &mut Vec<Line>, foot: usize, cw: usi
     }
     side.shown = n;
     side.y = top + y;
+    side.x = 2 + x;
+}
+
+/// The column with a run open in it (openrun::beside), laid over the
+/// conversation's rows from the top down to foot as its parts are.
+fn paste_run(m: &mut Model, key: &str, out: &mut Vec<Line>, foot: usize, cw: usize, top: usize) {
+    let sw = conn(m, key).side.w;
+    if sw == 0 || cw < sw + 2 || foot < 2 {
+        conn(m, key).side.shown = 0;
+        return;
+    }
+    let x = cw - sw - 2;
+    while out.len() < foot {
+        out.push(Line::new());
+    }
+    let col = super::openrun::beside(m, key, sw, foot, (2 + x, top));
+    for (l, row) in out.iter_mut().zip(col) {
+        let mut r = fit(cut(l, 0, x), x);
+        join(&mut r, row);
+        *l = fit(r, cw);
+    }
+    let side = &mut conn(m, key).side;
+    side.shown = foot;
+    side.y = top;
     side.x = 2 + x;
 }
 

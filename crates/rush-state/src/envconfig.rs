@@ -115,6 +115,7 @@ static FIELDS: &[Field] = fields![
     "advisor" => Bool: advisor,
     "convoView" => Str: convo_view,
     "viewSuggest" => Str: view_suggest,
+    "runsOpen" => Str: runs_open,
 ];
 
 /// One setting the environment set.

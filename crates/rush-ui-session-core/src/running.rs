@@ -11,6 +11,8 @@
 //! clicks (clickRef :5102-5122), and spawns.go (spawnJob :584,
 //! jobKind :595).
 
+use std::collections::HashMap;
+
 use rush_convo::{Job, Session, Subagent};
 use rush_core::adapter::Registry;
 use rush_core::text::{Color, Line};
@@ -27,7 +29,7 @@ use crate::frame::Out;
 use crate::look::spin_of;
 use crate::model::Model;
 use crate::style::*;
-use rush_ui_list_extras::jobs::{Bg, Dock, job_lines, job_row, jobs_preview};
+use rush_ui_list_extras::jobs::{Dock, job_row, jobs_preview};
 
 /// What runs, as this frame shows it: worked out once as the dock is
 /// drawn, and read by the views panel after.
@@ -582,29 +584,23 @@ pub fn has_background(m: &Model, key: &str) -> bool {
     !bg_tasks(m, key).is_empty()
 }
 
-/// What the background view's tab says: how many of its tasks run.
-pub fn background_stat(m: &Model, key: &str) -> Line {
-    let n = bg_tasks(m, key).into_iter().filter(|r| *r).count();
-    if n == 0 {
-        return Line::new();
-    }
-    line([sp(format!("{n} running"), ORANGE)])
-}
-
-/// The background view's rows for session key, w wide, with each one's
-/// ref (jobLines).
-pub fn background_lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
+/// The rows under the step that started each of session key's
+/// background commands and monitors, by its call, w wide: the block the
+/// background view drew for it (rush_ui_list_extras's task_rows), opened
+/// while its step's output is (the step's live fold, which reads the
+/// processes under it too, subs.rs's bg_open), its launch script while d
+/// has opened that. Rust-only: Go drew it in the background view
+/// (jobLines, jobs.go:416-671).
+pub fn task_rows(m: &mut Model, key: &str, w: usize) -> HashMap<String, Vec<Line>> {
     let (tick, now) = (m.tick, m.now);
     let kind = super::agent(m, key)
         .map(|a| a.kind.as_str().to_string())
         .unwrap_or_default();
     let reg = m.reg.clone();
-    let c = conn(m, key);
-    let open = c.vs.open.clone();
-    let hover = c.vs.hover_ref.clone();
+    let open = conn(m, key).vs.open.clone();
     let Model { session, kept, .. } = m;
     let Some(v) = session.as_ref().filter(|v| v.key == key) else {
-        return Vec::new();
+        return HashMap::new();
     };
     let r = &kept
         .get::<super::Core>()
@@ -612,14 +608,23 @@ pub fn background_lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String
         .entry(key.to_string())
         .or_default()
         .runs;
+    let s = &v.sess;
+    // A step's output opened: its task's whole block.
+    let opened: Vec<String> =
+        v.o.open
+            .iter()
+            .filter(|(_, on)| **on)
+            .filter_map(|(r, _)| r.strip_suffix(":live"))
+            .filter_map(|r| r.split_once(":s:").map(|(_, c)| c.to_string()))
+            .collect();
     let no_queue = |_: &str| 0;
     let no_kept = |_: &str| None;
     let ctx = Ctx {
-        s: &v.sess,
+        s,
         r,
         reg: &reg,
         kind: &kind,
-        sel: &v.sel,
+        sel: "",
         focus: true,
         tick,
         now,
@@ -627,9 +632,13 @@ pub fn background_lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String
         queued: &no_queue,
         cache_kept: &no_kept,
     };
-    let is_open = |r: &str| open.get(r).copied().unwrap_or(false);
+    let is_open = |rf: &str| {
+        if let Some(id) = rf.strip_prefix("job:") {
+            return s.job(id).is_some_and(|j| opened.contains(&j.tool_use_id));
+        }
+        open.get(rf).copied().unwrap_or(false)
+    };
     let spawned = |j: &Job| spawn_job(r, j);
-    let s = &v.sess;
     let out = |j: &Job| r.from_of(s, j, now);
     let own = |j: &Job| r.job_output(j);
     let tailed = |p: &str| r.outs.get(p);
@@ -644,31 +653,22 @@ pub fn background_lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String
     };
     let shown = |p: &str| shown_path(p, &cwd);
     let who = |j: &Job| ctx.who(j);
-    let flow = |j: &Job, opened: bool| {
-        super::workflow::workflow_rows(
-            &workflow_of(r, j),
-            &format!("job:{}", j.id),
-            opened,
-            w,
-            tick,
-            now,
-        )
-    };
+    let flow = |_: &Job, _: bool| -> rush_ui_list_extras::jobs::Rows { (Vec::new(), Vec::new()) };
     let mut o = v.o.clone();
     o.width = w;
     let details = |j: &Job| {
-        rush_convo::render::job_lines(&v.sess, j, &o, 6)
+        rush_convo::render::job_lines(s, j, &o, 6)
             .into_iter()
             .map(|l| l.line)
             .collect()
     };
-    let b = Bg {
+    let b = rush_ui_list_extras::jobs::Bg {
         w,
         now,
         tick,
-        sel: &v.sel,
-        focused: true,
-        hover: &hover,
+        sel: "",
+        focused: false,
+        hover: "",
         open: &is_open,
         spawned: &spawned,
         out: &out,
@@ -685,7 +685,26 @@ pub fn background_lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String
         details: &details,
         memo: Some(&r.job_rows),
     };
-    job_lines(&v.sess, &b)
+    let mut got = HashMap::new();
+    for j in s.jobs() {
+        if j.tool_use_id.is_empty() || !is_bg_step(s, j) {
+            continue;
+        }
+        let rows = rush_ui_list_extras::jobs::task_rows(s, &b, j);
+        got.insert(j.tool_use_id.clone(), rows);
+    }
+    got
+}
+
+/// Whether task j's rows go under its step: a monitor, which always runs
+/// beside the turn, or a command once it's sent to the background (a
+/// foreground one's output is its step's own).
+pub fn is_bg_step(s: &Session, j: &Job) -> bool {
+    match s.job_kind(j) {
+        "monitor" => true,
+        "shell" => j.background,
+        _ => false,
+    }
 }
 
 /// A path as a task's rows name it: from the agent's folder when it's in
@@ -699,78 +718,8 @@ pub fn shown_path(p: &str, cwd: &str) -> String {
     tildify(p)
 }
 
-/// A key on a row picked in the background view: on a task, space or →
-/// opens or closes its output (→ only opens) and d its launch script; on
-/// a workflow they show its agents in the subagents view; on one of a
-/// workflow's agents they pick it there (jobKey, jobs.go:707-735; paneKey's
-/// run: rows, rushmode.go:4084).
-pub fn background_key(m: &mut Model, key: &str, s: &str) -> Out {
-    let sel = m
-        .session
-        .as_ref()
-        .map(|v| v.sel.clone())
-        .unwrap_or_default();
-    // The Finished and Monitors folds open and close in place (→ only
-    // opens).
-    if sel == rush_ui_list_extras::jobs::BG_FINISHED_REF
-        || sel == rush_ui_list_extras::jobs::MONITORS_REF
-    {
-        if !matches!(s, "space" | " " | "right" | "enter") {
-            return Out::Pass;
-        }
-        let c = conn(m, key);
-        let was = c.vs.open.get(&sel).copied().unwrap_or(false);
-        c.vs.open.insert(sel, s == "right" || !was);
-        return Out::Draw;
-    }
-    if let Some(id) = sel.strip_prefix("run:") {
-        if matches!(s, "space" | " " | "right" | "enter") {
-            let id = id.to_string();
-            super::subview::pick_from(m, key, &id, &sel);
-            return Out::Draw;
-        }
-        return Out::Pass;
-    }
-    let Some(id) = sel.strip_prefix("job:").map(str::to_string) else {
-        return Out::Pass;
-    };
-    let Some(kind) = m
-        .session
-        .as_ref()
-        .and_then(|v| v.sess.job(&id).map(|j| v.sess.job_kind(j)))
-    else {
-        return Out::Pass;
-    };
-    let has_cmd = has_details(m, key, &id);
-    match s {
-        "d" => {
-            if !has_cmd {
-                m.flash("this task did not report a launch command or process details");
-                return Out::Draw;
-            }
-            let c = conn(m, key);
-            let d = format!("job-details:{id}");
-            let was = c.vs.open.get(&d).copied().unwrap_or(false);
-            c.vs.open.insert(d, !was);
-            c.vs.open.insert(sel, true);
-            Out::Draw
-        }
-        "space" | " " | "right" | "enter" if kind == "workflow" => {
-            super::subview::open_workflow(m, key, &sel);
-            Out::Draw
-        }
-        "space" | " " | "right" | "enter" => {
-            let c = conn(m, key);
-            let was = c.vs.open.get(&sel).copied().unwrap_or(false);
-            c.vs.open.insert(sel, s == "right" || !was);
-            Out::Draw
-        }
-        _ => Out::Pass,
-    }
-}
-
-/// The background view's keys on a picked row, with the box empty,
-/// before the box types them (paneKey's jobKey, jobs.go:676).
+/// The keys on a task picked in the dock or the column, with the box
+/// empty, before the box types them (paneKey's jobKey, jobs.go:676).
 pub fn bg_key(m: &mut Model, k: &crate::frame::Press) -> Out {
     let Some(key) = open_key(m) else {
         return Out::Pass;
@@ -779,24 +728,46 @@ pub fn bg_key(m: &mut Model, k: &crate::frame::Press) -> Out {
         return Out::Pass;
     }
     let empty = conn(m, &key).input.is_empty();
-    if super::views::view_name(m, &key) != "background" {
-        return dock_key(m, &key, &k.s, empty);
-    }
-    match k.s.as_str() {
-        "d" if empty => background_key(m, &key, "d"),
-        s @ ("space" | " " | "right") => background_key(m, &key, s),
-        _ => Out::Pass,
-    }
+    dock_key(m, &key, &k.s, empty)
 }
 
-/// d, space or → on a task picked in the dock: the background view, on
-/// it, opened; d with its launch script shown (jobKey :707-735).
+/// d, space or → on a task picked in the dock: its step in the
+/// conversation, opened where it is with the end of what it writes under
+/// it; d with its launch script too. A workflow opens beside the
+/// conversation (jobKey :707-735; Rust-only: Go showed the task in the
+/// background view).
 fn dock_key(m: &mut Model, key: &str, s: &str, empty: bool) -> Out {
     let sel = m
         .session
         .as_ref()
         .map(|v| v.sel.clone())
         .unwrap_or_default();
+    // d on a background task's step: its launch script under it, the
+    // step's output opened with it.
+    if s == "d"
+        && empty
+        && let Some((_, call)) = sel.split_once(":s:")
+        && let Some(id) = m.session.as_ref().and_then(|v| {
+            v.sess
+                .jobs()
+                .iter()
+                .find(|j| j.tool_use_id == call && is_bg_step(&v.sess, j))
+                .map(|j| j.id.clone())
+        })
+    {
+        if !has_details(m, key, &id) {
+            m.flash("this task did not report a launch command or process details");
+            return Out::Draw;
+        }
+        let c = conn(m, key);
+        let d = format!("job-details:{id}");
+        let was = c.vs.open.get(&d).copied().unwrap_or(false);
+        c.vs.open.insert(d, !was);
+        if let Some(v) = m.session.as_mut() {
+            v.o.open.insert(format!("{sel}:live"), true);
+        }
+        return Out::Draw;
+    }
     let Some(id) = sel.strip_prefix("job:").map(str::to_string) else {
         return Out::Pass;
     };
@@ -818,10 +789,6 @@ fn dock_key(m: &mut Model, key: &str, s: &str, empty: bool) -> Out {
             let was = c.vs.open.get(&d).copied().unwrap_or(false);
             c.vs.open.insert(d, !was);
             c.vs.open.insert(sel.clone(), true);
-            super::views::show_view(m, key, "background");
-            if let Some(v) = m.session.as_mut() {
-                v.sel = sel;
-            }
             Out::Draw
         }
         "space" | " " | "right" if kind == "workflow" => {
@@ -829,23 +796,82 @@ fn dock_key(m: &mut Model, key: &str, s: &str, empty: bool) -> Out {
             Out::Draw
         }
         "space" | " " | "right" => {
-            super::views::show_view(m, key, "background");
-            conn(m, key).vs.open.insert(sel.clone(), true);
-            if let Some(v) = m.session.as_mut() {
-                v.sel = sel;
+            if open_task(m, key, &id) {
+                return Out::Draw;
             }
+            // A task no step of the conversation started: its rows in the
+            // dock open in place.
+            let c = conn(m, key);
+            let was = c.vs.open.get(&sel).copied().unwrap_or(false);
+            c.vs.open.insert(sel, s == "right" || !was);
             Out::Draw
         }
         _ => Out::Pass,
     }
 }
 
-/// The dock's monitors' row taken: the background view, its monitors
-/// opened under their row and that row picked (Rust-only).
+/// Task id's step, opened in the conversation where it is (its turn too),
+/// in view and picked: the step shows the end of what the task writes
+/// while it runs, and all of it when opened (rush_convo's bg_rows).
+/// Whether the conversation has the step.
+pub fn open_task(m: &mut Model, key: &str, id: &str) -> bool {
+    let call = m
+        .session
+        .as_ref()
+        .filter(|v| v.key == key)
+        .and_then(|v| v.sess.job(id).map(|j| j.tool_use_id.clone()))
+        .filter(|c| !c.is_empty());
+    let Some(call) = call else {
+        return false;
+    };
+    if !super::presets::reveal_step(m, &call) {
+        return false;
+    }
+    if let Some(v) = m.session.as_mut() {
+        let r = format!("{}:live", v.sel);
+        v.o.open.insert(r, true);
+    }
+    true
+}
+
+/// A woken turn's notice r ("t7:woke"), taken: the step whose background
+/// task woke it, opened where it is with what the task wrote. Whether r
+/// was one with a step to go to.
+pub fn open_woke(m: &mut Model, key: &str, r: &str) -> bool {
+    let Some(n) = r
+        .strip_suffix(":woke")
+        .and_then(|t| t.strip_prefix('t'))
+        .and_then(|n| n.parse::<u32>().ok())
+    else {
+        return false;
+    };
+    let call = m
+        .session
+        .as_ref()
+        .filter(|v| v.key == key)
+        .and_then(|v| v.sess.turns.iter().find(|t| t.n == n))
+        .map(|t| t.woke_call.clone())
+        .filter(|c| !c.is_empty());
+    let Some(call) = call else {
+        return false;
+    };
+    if !super::presets::reveal_step(m, &call) {
+        return false;
+    }
+    if let Some(v) = m.session.as_mut() {
+        let r = format!("{}:live", v.sel);
+        v.o.open.insert(r, true);
+    }
+    true
+}
+
+/// The dock's monitors' row taken: its monitors opened under it, the row
+/// picked (Rust-only).
 pub fn open_monitors(m: &mut Model, key: &str) {
     use rush_ui_list_extras::jobs::MONITORS_REF;
-    super::views::show_view(m, key, "background");
-    conn(m, key).vs.open.insert(MONITORS_REF.into(), true);
+    let c = conn(m, key);
+    let was = c.vs.open.get(MONITORS_REF).copied().unwrap_or(false);
+    c.vs.open.insert(MONITORS_REF.into(), !was);
     if let Some(v) = m.session.as_mut() {
         v.sel = MONITORS_REF.into();
     }
@@ -860,36 +886,4 @@ fn has_details(m: &mut Model, key: &str, id: &str) -> bool {
             .is_some_and(|j| !v.sess.job_command(j).is_empty())
     });
     cmd || conn(m, key).runs.procs.pids.contains_key(id)
-}
-
-/// A click on the background view's row r: a workflow shows its agents,
-/// one of its agents is picked there, a task opens or closes on the first
-/// click: its rows are one thing (clickRef, rushmode.go:5102-5122).
-pub fn background_click(m: &mut Model, key: &str, r: &str) -> Out {
-    if let Some(v) = m.session.as_mut() {
-        v.sel = r.to_string();
-    }
-    let workflow = m
-        .session
-        .as_ref()
-        .is_some_and(|v| super::workflow::is_workflow_ref(&v.sess, r));
-    if workflow {
-        super::subview::open_workflow(m, key, r);
-        return Out::Draw;
-    }
-    if let Some(id) = r.strip_prefix("run:") {
-        let id = id.to_string();
-        super::subview::pick_from(m, key, &id, r);
-        return Out::Draw;
-    }
-    if r.starts_with("job:")
-        || r == rush_ui_list_extras::jobs::BG_FINISHED_REF
-        || r == rush_ui_list_extras::jobs::MONITORS_REF
-    {
-        let c = conn(m, key);
-        let was = c.vs.open.get(r).copied().unwrap_or(false);
-        c.vs.open.insert(r.to_string(), !was);
-        return Out::Draw;
-    }
-    Out::Idle
 }

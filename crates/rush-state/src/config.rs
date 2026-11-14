@@ -634,6 +634,16 @@ pub struct Config {
         skip_serializing_if = "String::is_empty"
     )]
     pub view_suggest: String,
+    /// Where a run (a subagent, a workflow) opened from the conversation
+    /// shows: "" beside the conversation where its column fits, else
+    /// framed under its step; "peek" always framed under its step. New in
+    /// the Rust port.
+    #[serde(
+        rename = "runsOpen",
+        deserialize_with = "lenient",
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub runs_open: String,
 
     /// The microphone push-to-talk hears (the apple voice plugin), by
     /// CoreAudio's id for it; empty is the Mac's input. New in the Rust

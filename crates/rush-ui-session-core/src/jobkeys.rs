@@ -405,7 +405,7 @@ fn shell_key(m: &mut Model, key: &str, s: &str, empty: bool) -> Out {
 
 /// Acts on a picked task, and ctrl+b on whatever the turn waits on
 /// (jobKey); x on a picked run stops it (paneKey). The background view's
-/// space, → and d are running::background_key's.
+/// space, → and d are running::dock_key's.
 pub fn job_key(m: &mut Model, key: &str, s: &str, empty: bool) -> Out {
     if s == "ctrl+b" {
         // Only while the turn waits on a command; otherwise ctrl+b is /btw's.

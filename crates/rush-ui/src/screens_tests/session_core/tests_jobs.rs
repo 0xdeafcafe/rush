@@ -1,23 +1,21 @@
-//! The background view against Go's: every task but subagents, running
-//! first, a workflow with its phases under it, a task opened to its
-//! output and its launch script, picked and edged as Go draws them
-//! (jobs.go jobLines; the rows are Go's, dumped from its jobLines for the
-//! same session at 80 and 120 columns). Its keys and clicks, and a
-//! workflow's agent watched from it with esc coming back (jobs_test.go
-//! TestJobDock, workflow_test.go TestWorkflowRows, rushmode.go watchRun).
+//! A background task under the step that started it: the rows the
+//! background view drew for it (jobs.go jobLines' block, its own first row
+//! the step's), opened with the step's output, its launch script a d
+//! away; the dock's and the panel's task rows open that step, a workflow
+//! opens on the conversation's page (jobs_test.go TestJobDock,
+//! workflow_test.go TestWorkflowRows). Rust-only where it shows: Go had a
+//! background view.
 
 use rush_core::event::{Event, Message, Part, PartKind, TaskDone, TaskKind, TaskStarted};
 use rush_core::tool::{Call, Input, Kind as ToolKind};
-use rush_draw::{Button, MouseKind};
 
 use super::tests_subs::NOW;
-use super::tests_subview::{KEY, model};
-use super::{conn, running, subview, views};
-use crate::frame::Mouse;
+use super::tests_subview::{KEY, model, press};
+use super::{conn, openrun, running, subview, views};
 use crate::model::Model;
 use crate::screens::list_extras::jobs::read_tail;
 
-/// The subagents view's session, with a dev server running in the
+/// tests_subview's session, with a dev server running in the
 /// background (its output last written 5s ago) and a test run that
 /// failed.
 pub(super) fn background(d: &tempfile::TempDir) -> Model {
@@ -87,135 +85,58 @@ pub(super) fn background(d: &tempfile::TempDir) -> Model {
     m
 }
 
-/// The view's rows as Go's test dumps them: each one's ref, then its text.
+/// The rows each background task draws under its step, w wide, as Go's
+/// test dumps a view's: the task's ref, then its text.
 pub(super) fn dump(m: &mut Model, w: usize) -> String {
-    running::background_lines(m, KEY, w)
-        .into_iter()
-        .map(|(l, r)| format!("{r}|{}\n", l.plain().trim_end()))
-        .collect()
+    let rows = running::task_rows(m, KEY, w);
+    let s = &m.session.as_ref().unwrap().sess;
+    let mut out = String::new();
+    for j in s.jobs() {
+        for l in rows.get(&j.tool_use_id).into_iter().flatten() {
+            out += &format!("job:{}|{}\n", j.id, l.plain().trim_end());
+        }
+    }
+    out
 }
 
 pub(super) fn pick(m: &mut Model, r: &str) {
     m.session.as_mut().unwrap().sel = r.into();
 }
 
+/// Opens or shuts the output of the step task r ("job:b2") was started
+/// by, as its row in the dock does.
+pub(super) fn open_as(m: &mut Model, r: &str, on: bool) {
+    let id = r.strip_prefix("job:").unwrap_or(r);
+    let v = m.session.as_mut().unwrap();
+    let call = v.sess.job(id).map(|j| j.tool_use_id.clone()).unwrap();
+    v.o.open.insert(format!("t0:s:{call}:live"), on);
+}
+
 pub(super) fn open(m: &mut Model, r: &str) {
-    conn(m, KEY).vs.open.insert(r.into(), true);
+    open_as(m, r, true);
 }
 
-const HEAD: &str = "|  2 running · 3 tasks · space or click: output · d: command details · x: stop
-|
-|  Running
-";
-
-/// Closed, each task's row, what it has used and its latest output; the
-/// workflow's phases under it; the failed test run picked (Go's jobLines
-/// at 80 and 120).
+/// Shut, a task's facts, what it's doing and its last lines: its own row
+/// is its step's (jobLines' block at 120, but its first row).
 #[test]
-fn the_background_view() {
+fn a_tasks_rows_under_its_step() {
     let d = tempfile::tempdir().unwrap();
     let mut m = background(&d);
-    pick(&mut m, "job:b1");
-    let want120 = HEAD.to_string()
-        + "job:w1|  ▸ ⋔ workflow Port rush to Rust                                                                    in background · 5m
-job:w1|      235 steps · 980k tokens
-job:w1|      · Port 1/3  ›  · Check
-job:b2|  ▸ $ shell    npm run dev                                                                          in background · 1m
-job:b2|      output active · updated 5s ago
-job:b2|      │ npm warn
-job:b2|      │ 100%
-job:b2|      │ listening on :3000
-|
-fold:bg-finished|  ▸ Finished  1 · click to show
-job:b1|▍ ▸ $ shell    go test ./...                                                                            ✗ failed · 30s
-job:b1|▍     exit status 1
-|
+    let got = dump(&mut m, 120);
+    let want = "job:b2|output active · updated 5s ago
+job:b2|│ npm warn
+job:b2|│ 100%
+job:b2|│ listening on :3000
 ";
-    assert_eq!(dump(&mut m, 120), want120);
-    let want80 = HEAD.to_string()
-        + "job:w1|  ▸ ⋔ workflow Port rush to Rust                            in background · 5m
-job:w1|      235 steps · 980k tokens
-job:w1|      · Port 1/3  ›  · Check
-job:b2|  ▸ $ shell    npm run dev                                  in background · 1m
-job:b2|      output active · updated 5s ago
-job:b2|      │ npm warn
-job:b2|      │ 100%
-job:b2|      │ listening on :3000
-|
-fold:bg-finished|  ▸ Finished  1 · click to show
-job:b1|▍ ▸ $ shell    go test ./...                                    ✗ failed · 30s
-job:b1|▍     exit status 1
-|
-";
-    assert_eq!(dump(&mut m, 80), want80);
-    let want200 = r#"|  2 running · 3 tasks · space or click: output · d: command details · x: stop
-|
-|  Running
-job:w1|  ▸ ⋔ workflow Port rush to Rust                                                                                                                                                    in background · 5m
-job:w1|      235 steps · 980k tokens
-job:w1|      · Port 1/3  ›  · Check
-job:b2|  ▸ $ shell    npm run dev                                                                                                                                                          in background · 1m
-job:b2|      output active · updated 5s ago
-job:b2|      │ npm warn
-job:b2|      │ 100%
-job:b2|      │ listening on :3000
-|
-fold:bg-finished|  ▸ Finished  1 · click to show
-job:b1|▍ ▸ $ shell    go test ./...                                                                                                                                                            ✗ failed · 30s
-job:b1|▍     exit status 1
-|
-"#;
-    assert_eq!(dump(&mut m, 200), want200);
+    assert!(got.contains(want), "{got}");
+    assert!(got.contains("job:b1|exit status 1"), "{got}");
+    assert!(!got.contains("npm run dev"), "its own row: {got}");
+    // A workflow is drawn as a workflow, not as a task.
+    assert!(!got.contains("job:w1|"), "{got}");
 }
 
-/// Finished tasks fold, closed till opened, but one that failed and the
-/// one picked; space on the fold opens it, a click closes it again.
-#[test]
-fn finished_tasks_fold() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = background(&d);
-    let s = &mut m.session.as_mut().unwrap().sess;
-    s.apply(
-        &Event::TaskStarted(TaskStarted {
-            id: "b3".into(),
-            call_id: "t3x".into(),
-            kind: TaskKind::Shell,
-            label: "cargo build".into(),
-            background: true,
-            ..TaskStarted::default()
-        }),
-        NOW - 100_000,
-    );
-    s.apply(
-        &Event::TaskDone(TaskDone {
-            id: "b3".into(),
-            status: "completed".into(),
-            ..TaskDone::default()
-        }),
-        NOW - 80_000,
-    );
-    let got = dump(&mut m, 120);
-    assert!(got.contains("|  ▸ Finished  2 · click to show"), "{got}");
-    assert!(
-        got.contains("go test ./..."),
-        "the failed one folded: {got}"
-    );
-    assert!(!got.contains("cargo build"), "{got}");
-    pick(&mut m, "job:b3");
-    assert!(dump(&mut m, 120).contains("cargo build"), "the pick folded");
-    views::show_view(&mut m, KEY, "background");
-    pick(&mut m, "fold:bg-finished");
-    super::tests_subview::press(&mut m, "space");
-    let got = dump(&mut m, 120);
-    assert!(got.contains("|▍ ▾ Finished  2"), "{got}");
-    assert!(got.contains("cargo build"), "{got}");
-    running::background_click(&mut m, KEY, "fold:bg-finished");
-    assert!(!dump(&mut m, 120).contains("cargo build"));
-}
-
-/// Two running monitors or more go under one Monitors row: in the
-/// background view folded, a short row each once opened, one opened its
-/// whole block; in the dock the one row, which opens them there.
+/// Two running monitors or more go under one row in the dock, which opens
+/// them there.
 #[test]
 fn monitors_go_under_one_row() {
     let d = tempfile::tempdir().unwrap();
@@ -234,255 +155,109 @@ fn monitors_go_under_one_row() {
             NOW - 30_000,
         );
     }
-    let got = dump(&mut m, 120);
-    assert!(
-        got.contains("fold:monitors|  ▸ ◎ Monitors  2 watching · click to show"),
-        "{got}"
-    );
-    assert!(!got.contains("tail server.log"), "{got}");
-    assert!(got.contains("npm run dev"), "a shell folded: {got}");
-    views::show_view(&mut m, KEY, "background");
-    pick(&mut m, "fold:monitors");
-    super::tests_subview::press(&mut m, "space");
-    let got = dump(&mut m, 120);
-    assert!(got.contains("|▍ ▾ ◎ Monitors  2 watching"), "{got}");
-    let short: Vec<&str> = got
-        .lines()
-        .filter(|l| l.starts_with("job:m1|") || l.starts_with("job:m2|"))
-        .collect();
-    assert_eq!(short.len(), 2, "a row each: {got}");
-    assert!(short[0].contains("◎ tail server.log"), "{got}");
-    // One opened: its whole block, its own fold open.
-    pick(&mut m, "job:m1");
-    super::tests_subview::press(&mut m, "space");
-    let got = dump(&mut m, 120);
-    assert!(
-        got.lines()
-            .any(|l| l.starts_with("job:m1|") && l.contains("▾ ◎ monitor")),
-        "{got}"
-    );
-
-    // The dock's one row for them, which opens them in the background view.
-    views::show_view(&mut m, KEY, "conversation");
-    conn(&mut m, KEY).vs.open.clear();
     super::running::sync(&mut m, KEY);
     let refs = subview::dock_refs(&mut m, KEY);
-    assert!(refs.contains(&"fold:monitors".to_string()), "{refs:?}");
+    let mons = crate::screens::list_extras::jobs::MONITORS_REF;
+    assert!(refs.iter().any(|r| r == mons), "{refs:?}");
     assert!(!refs.iter().any(|r| r == "job:m1"), "{refs:?}");
-    assert!(subview::click_ref(&mut m, KEY, "fold:monitors"));
-    assert_eq!(views::view_name(&m, KEY), "background");
-    assert!(dump(&mut m, 120).contains("tail server.log"));
+    assert!(subview::click_ref(&mut m, KEY, mons));
+    assert_eq!(views::view_name(&m, KEY), "conversation");
+    assert_eq!(conn(&mut m, KEY).vs.open.get(mons), Some(&true));
+    assert_eq!(m.session.as_ref().unwrap().sel, mons);
 }
 
-/// A task a subagent started says whose it is, a dot between the agent's
-/// type and the task's words: they never run together.
-#[test]
-fn a_subagents_task_names_its_agent_apart() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = background(&d);
-    let r = &mut conn(&mut m, KEY).runs;
-    let st = rush_ui_session_core::subs::RunStat {
-        made: vec!["t2".into()],
-        ..Default::default()
-    };
-    r.stats.insert("x".into(), st);
-    let got = dump(&mut m, 120);
-    assert!(got.contains("→ Explore · npm run dev"), "{got}");
-}
-
-/// Opened, a task's whole recent output inside an edge down its left,
-/// and its launch script a d away; picked, the edge is the pick's bar.
+/// Opened with its step's output, a task's whole recent output, and its
+/// launch script a d away on the step.
 #[test]
 fn a_task_opened() {
     let d = tempfile::tempdir().unwrap();
     let mut m = background(&d);
-    pick(&mut m, "job:b1");
     open(&mut m, "job:b2");
     let got = dump(&mut m, 120);
-    let want = "job:b2|│ ▾ $ shell    npm run dev                                                                          in background · 1m
-job:b2|│     output active · updated 5s ago
-job:b2|│     Recent output · updated 5s ago
-job:b2|│     │ first line
-job:b2|│     │ npm warn
-job:b2|│     │ 100%
-job:b2|│     │ listening on :3000
-job:b2|│     ▸ command details · d to show
-|
+    let want = "job:b2|output active · updated 5s ago
+job:b2|Recent output · updated 5s ago
+job:b2|│ first line
+job:b2|│ npm warn
+job:b2|│ 100%
+job:b2|│ listening on :3000
+job:b2|▸ command details · d to show
 ";
     assert!(got.contains(want), "{got}");
-    // d on it shows its launch script.
-    views::show_view(&mut m, KEY, "background");
-    pick(&mut m, "job:b2");
-    super::tests_subview::press(&mut m, "d");
+    // d on its step shows its launch script.
+    let step = super::presets::step_ref(&m.session.as_ref().unwrap().sess, "t2").expect("its step");
+    pick(&mut m, &step);
+    press(&mut m, "d");
     let got = dump(&mut m, 120);
-    let want = "job:b2|▍     │ listening on :3000
-job:b2|▍     ▾ command details · d to hide
-job:b2|▍     $ npm run dev -- --port 3000
-|
-fold:bg-finished|  ▸ Finished  1 · click to show
-job:b1|  ▸ $ shell    go test ./...                                                                            ✗ failed · 30s
+    let want = "job:b2|│ listening on :3000
+job:b2|▾ command details · d to hide
+job:b2|$ npm run dev -- --port 3000
 ";
     assert!(got.contains(want), "{got}");
 }
 
-/// The view is there while the session has run anything in the
-/// background, its tab saying how many run; space opens and closes a
-/// task, a click too; on the workflow it shows its agents among the
-/// subagents (TestJobDock, TestWorkflowRows).
+/// No view of its own: the session's views are the conversation's and
+/// the rest; space on a task's row in the dock opens its step where it
+/// is, its output with it; on the workflow, it opens on the
+/// conversation's page (TestJobDock, TestWorkflowRows).
 #[test]
-fn its_tab_keys_and_clicks() {
+fn a_tasks_row_opens_its_step() {
     let d = tempfile::tempdir().unwrap();
     let mut m = background(&d);
     assert_eq!(
         views::views(&m, KEY),
-        [
-            "conversation",
-            "overview",
-            "changes",
-            "subagents",
-            "background",
-            "memory"
-        ]
+        ["conversation", "overview", "changes", "memory"]
     );
-    assert_eq!(running::background_stat(&m, KEY).plain(), "2 running");
-    assert!(views::show_view(&mut m, KEY, "background"));
+    running::sync(&mut m, KEY);
     pick(&mut m, "job:b2");
-    super::tests_subview::press(&mut m, "space");
-    assert_eq!(conn(&mut m, KEY).vs.open.get("job:b2"), Some(&true));
-    super::tests_subview::press(&mut m, "space");
-    assert_eq!(conn(&mut m, KEY).vs.open.get("job:b2"), Some(&false));
-    // A click on a task's row opens it at once.
-    let y = m
-        .frame()
-        .iter()
-        .position(|l| l.plain().contains("go test ./..."))
-        .expect("its row on screen");
-    m.mouse_event(&Mouse {
-        kind: MouseKind::Down(Button::Left),
-        x: 10,
-        y: y as u16,
-        mods: Default::default(),
-    });
-    assert_eq!(conn(&mut m, KEY).vs.open.get("job:b1"), Some(&true));
-    assert_eq!(m.session.as_ref().unwrap().sel, "job:b1");
-    // space on the workflow: its agents, among the subagents.
-    pick(&mut m, "job:w1");
-    super::tests_subview::press(&mut m, "space");
-    assert_eq!(views::view_name(&m, KEY), "subagents");
-    assert_eq!(m.session.as_ref().unwrap().sel, "job:w1");
-}
-
-/// A workflow's agent picked from the background view shows in the
-/// subagents view; esc comes back to the background view, on its row
-/// (watchRun, closeSub).
-#[test]
-fn picked_from_the_background_view() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = background(&d);
-    views::show_view(&mut m, KEY, "background");
-    pick(&mut m, "run:x");
-    super::tests_subview::press(&mut m, "space");
-    assert_eq!(views::view_name(&m, KEY), "subagents");
-    assert_eq!(m.session.as_ref().unwrap().sel, "sub:x");
-    let w = &conn(&mut m, KEY).watch;
-    assert_eq!(
-        (w.from.as_str(), w.from_view.as_str()),
-        ("run:x", "background")
-    );
-    super::tests_subview::press(&mut m, "esc");
-    assert_eq!(views::view_name(&m, KEY), "background");
-    assert_eq!(m.session.as_ref().unwrap().sel, "run:x");
-}
-
-/// Where text first shows on frame: its row and its column, in cells.
-fn spot(frame: &[rush_core::text::Line], text: &str) -> (u16, u16) {
-    frame
-        .iter()
-        .enumerate()
-        .find_map(|(i, l)| {
-            let t = l.plain();
-            t.find(text)
-                .map(|x| (i as u16, rush_core::text::width(&t[..x]) as u16))
-        })
-        .unwrap_or_else(|| panic!("{text:?} not on screen"))
-}
-
-/// Wide, the list laid across in columns lights only the row under the
-/// pointer: none between two columns (Rust-only; subHoverAt :1007-1011,
-/// 3a4a7e4b).
-#[test]
-fn the_wide_list_lights_only_its_own_rows() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = background(&d);
-    m.w = 180;
-    views::show_view(&mut m, KEY, "subagents");
-    let (y, x) = spot(&m.frame(), "review the diff");
-    let over = |m: &mut Model, x: u16| {
-        m.mouse_event(&Mouse {
-            kind: MouseKind::Moved,
-            x,
-            y,
-            mods: Default::default(),
-        });
-        conn(m, KEY).vs.hover_ref.clone()
-    };
-    assert_eq!(over(&mut m, x), "sub:x");
-    let (cols, cw) = (conn(&mut m, KEY).watch.cols, conn(&mut m, KEY).watch.cell_w);
-    assert!(cols > 1, "not laid across: {cols}");
-    assert_eq!(over(&mut m, (2 + cw + 1) as u16), "");
-}
-
-/// The pointer moving under the list, over what shows of the run, lights
-/// no row of the list, and a click there picks none.
-#[test]
-fn under_the_list_hovers_and_picks_nothing() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = background(&d);
-    m.w = 180;
-    views::show_view(&mut m, KEY, "subagents");
-    let frame = m.frame();
-    let (y, x) = spot(&frame, "review the diff");
-    let (below, _) = spot(&frame, "Click an agent to see it here");
-    let at = |m: &mut Model, kind: MouseKind, x: u16, y: u16| {
-        m.mouse_event(&Mouse {
-            kind,
-            x,
-            y,
-            mods: Default::default(),
-        });
-        conn(m, KEY).vs.hover_ref.clone()
-    };
-    assert_eq!(at(&mut m, MouseKind::Moved, x, y), "sub:x");
-    for dx in 0..3 {
-        assert_eq!(at(&mut m, MouseKind::Moved, x + dx, below), "", "move {dx}");
-    }
+    press(&mut m, "space");
     let sel = m.session.as_ref().unwrap().sel.clone();
-    at(&mut m, MouseKind::Down(Button::Left), x, below);
-    assert_eq!(m.session.as_ref().unwrap().sel, sel, "a click picked a row");
-    assert_eq!(at(&mut m, MouseKind::Moved, x, y), "sub:x");
+    assert!(sel.ends_with(":s:t2"), "{sel}");
+    let live = format!("{sel}:live");
+    assert_eq!(m.session.as_ref().unwrap().o.open.get(&live), Some(&true));
+    assert!(dump(&mut m, 120).contains("job:b2|Recent output"));
+    pick(&mut m, "job:w1");
+    press(&mut m, "space");
+    assert_eq!(openrun::open_id(&m, KEY).as_deref(), Some("job:w1"));
+    assert_eq!(views::view_name(&m, KEY), "conversation");
 }
 
-/// In the views panel beside the conversation, a run's row picks it
-/// and a workflow's shows its agents (agentviews.go:908-916, d0df4ab4).
+/// A finished task's step opened shows how it ended.
+#[test]
+fn a_finished_tasks_step() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = background(&d);
+    let s = &mut m.session.as_mut().unwrap().sess;
+    s.apply(
+        &Event::TaskDone(TaskDone {
+            id: "b2".into(),
+            status: "completed".into(),
+            ..TaskDone::default()
+        }),
+        NOW,
+    );
+    let got = dump(&mut m, 120);
+    assert!(got.contains("job:b2|│ listening on :3000"), "{got}");
+}
+
+/// In the views panel beside the conversation, a run's row opens it, a
+/// workflow's opens with its agents, a task's opens its step
+/// (agentviews.go:908-916, d0df4ab4).
 #[test]
 fn the_panels_runs_open_on_a_click() {
     use crate::screens::plugin_ui::views::beside::on_click;
     use crate::screens::plugin_ui::views::panel::Click;
     let d = tempfile::tempdir().unwrap();
     let mut m = background(&d);
-    // A run is picked in the subagents view, beside its list, not
-    // opened across it.
     on_click(&mut m, KEY, Click::Run("run:x".into()));
-    assert_eq!(views::view_name(&m, KEY), "subagents");
-    assert_eq!(m.session.as_ref().unwrap().sel, "sub:x");
-    views::show_view(&mut m, KEY, "conversation");
+    assert_eq!(views::view_name(&m, KEY), "conversation");
+    assert_eq!(openrun::open_id(&m, KEY).as_deref(), Some("x"));
     on_click(&mut m, KEY, Click::Run("job:w1".into()));
-    assert_eq!(views::view_name(&m, KEY), "subagents");
-    assert_eq!(m.session.as_ref().unwrap().sel, "job:w1");
-    views::show_view(&mut m, KEY, "conversation");
+    assert_eq!(openrun::open_id(&m, KEY).as_deref(), Some("job:w1"));
+    openrun::close(&mut m, KEY);
     on_click(&mut m, KEY, Click::Run("job:b2".into()));
     assert_eq!(views::view_name(&m, KEY), "conversation");
-    assert_eq!(m.session.as_ref().unwrap().sel, "job:b2");
+    let sel = m.session.as_ref().unwrap().sel.clone();
+    assert!(sel.ends_with(":s:t2"), "{sel}");
 }
 
 /// The Overview's Subagents count the agents the session ran on any

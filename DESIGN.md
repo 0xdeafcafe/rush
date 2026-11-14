@@ -144,8 +144,8 @@ Claude, fleet, the other adapters) builds on these.
   stand-in step); a task that ends or fires puts the turn the agent wakes
   for down to it (`Turn::from`/`cause`/`command`), and a turn's end ends
   the foreground ones. `MessageStart`, `Quota`, `Billing`, `Commands` and
-  `Other` are the host's, as in Go. The background view lists the jobs
-  (see "A session's runs"). A step that ran an agent is drawn as that
+  `Other` are the host's, as in Go. A background job shows under its
+  step (see "A session's runs"). A step that ran an agent is drawn as that
   agent's row: a spawn_agent call from its input, a shell command once
   the UI hands the renderer the agent it found (`Options::ran`, Go's
   SetChildren with one child). `Options::kids` are the agents a step
@@ -317,7 +317,7 @@ Claude, fleet, the other adapters) builds on these.
   plan, a question rush can't take here) opens that session on alt+o:
   the fleet stops folding it (`Handle::unfold`) and it's opened once
   it's a row (`spawned::open_session`, `Core::open_on_load`); alt+o on a
-  hosted run in the subagents view, or in its box, does too. A spawn
+  hosted run open on the conversation's page, or in its box, does too. A spawn
   missing from `MISSED_GONE` (2) lookings in a row is taken for gone
   (not live, asking nothing, ⏹ stopped), so its parent's 2 s look stops;
   one that ended carries its host's end (`Spawned::ended`,
@@ -989,8 +989,8 @@ waits for it to take the history, and stops the source only if it stayed
 quiet; the source is then put away in Earlier. A usage limit's hand-on
 (`accounts/handoff.rs`, only where rush leads) uses `hand_over` directly, as
 Go's handOff calls handOverMessage. Not yet: carrying on sessions a limit
-stopped (`limit_stopped`/`relogin`). Watching a spawned agent rush hosts in
-the subagents view, the box under it goes to it (`relay::send_to`, then
+stopped (`limit_stopped`/`relogin`). With a spawned agent rush hosts open on
+the conversation's page, the box under it goes to it (`relay::send_to`, then
 `session_core::spawned::send_text`). A run picked from elsewhere (its
 step, the dock, a card) or clicked gives that box the keys once it shows,
 when a message can reach it; they stay with that run's box however often
@@ -2257,12 +2257,11 @@ frame takes in whole what it brought: the list, each run's numbers
 transcripts stay with the reader), each task's output tail, a workflow's
 files, and the run shown whole, as a slice of fresh lines its
 `SessionView` takes. It reads once a second while something runs, at
-once when asked (a run opened, the subagents view shown), and not at all
+once when asked (a run opened), and not at all
 when nothing does. The dock shows the running ones (or the column beside
 a wide conversation, or the top of the views panel while that's open);
-the subagents view lists every run, its numbers followed only while it
-shows, and drives the one picked in its pane (below); ↑ from the box picks the dock's runs
-and space watches one. The agents rush hosted for a session come from the
+a run opened is driven in its pane (below); ↑ from the box picks the
+dock's runs and space opens one. The agents rush hosted for a session come from the
 binary's `Hosts::spawned` (rush/hosted.rs `hosted_runs`, spawns.go
 hostedRuns): the hosts whose meta says `spawnedBy` it, their prompt and
 start from the request exchange, their transcript where their agent keeps
@@ -2274,39 +2273,41 @@ but which last wrote before the session's agent last started (its host's
 `started_at`, or its agent's process's start if later: a 'revived' and
 'host-started' leave both) is stopped, not quiet: `SubagentRuns::
 set_since` and `cut` (rush-claude's subruns.rs), set by the fleet's
-loader (no running tile, so nothing nudges it) and by the subagents view
+loader (no running tile, so nothing nudges it) and by the session's runs
 (its row says stopped).
 
-The subagents view (`subview::list`) is a line a run: its mark, what it
-was asked, a short status and how long it went, under Running and
-Finished headings. Its model, worktree, steps, cost and effort show only
-for the run picked, in its pane. The list is laid across the top of the
-view and the run picked shows under it at the view's whole width, never
-in a column beside it (Rust-only, the owner's call 2026-11-11: two
-columns wasted the width). The list's rows flow down then across into
-as many columns as fit (`subview::band_cols`: 46 cells at least, 3
-between, up to 4; one below 95 cells, as Go's narrow list), a few rows
-tall (`split_rows`), scrolled to keep the pick in sight; the pointer
-lights the row under it by column (`band_at`), none between two. The
-run under it follows clicks only, never the pointer; the views panel's run rows pick a run
-there too (`subview::pick_run`). ↑↓ move the pick through the list while
-the list has the keys (`subview::list_key`, ahead of the cards' ↑ and
-the box's own keys); while the run's pane has them they're its own. A click
-on a run shows it and leaves the keys with the list, so ↑↓ go on through
-the runs; with nothing picked ↑ picks the top row, as ↓ does. Finished
-is a fold, closed till opened (`fold:finished`), as the background
-view's is (`fold:bg-finished`): closed, only those that failed (or were
-stopped) and the one picked show under it. Opened, past the newest
-`EARLIER_AFTER` (8), finished runs fold under "Earlier · N"
-(`earlier:runs`), but those that failed or were stopped, and the one
-picked. A workflow run is named with when it started;
-finished, it's dimmed and folded to its row. A workflow agent's earlier
-tries (resumed after a restart) fold under the try that replaced them
-(`tries:<id>`), never rows of their own. Where a run works is the
+### Runs and tasks on the conversation's page
+
+A session's runs and background tasks have no views of their own
+(Rust-only, the owner's call 2026-11-14: Go, and the port before this,
+had a Subagents tab and a Background tab). A run is opened from its step
+(enter or → on the subagent's call), from the dock's or the column's
+Running rows (space, a click), from a card's link or the views panel, or
+with shift+↑↓, which step through them all (`subview::cycle_sub`); it
+opens on the conversation's page (`openrun.rs`). Where there's room, it
+takes the column right of the conversation, its whole height: from 149
+wide, not the column's 171, the conversation keeping 90 to 124 cells and
+laid out to what's left of the run, the run asking for 80 and having 56 at
+least (`openrun::run_width`: 80 at 180, 133 at 260), a rule down its left and its top row the way
+out ("tab back · esc closes", and ✕). Where it doesn't, or when Settings
+asks for it (Interface › Look › Open a subagent: under its step,
+`Config::runs_open = "peek"`), it's a peek, as an editor peeks at a
+definition: a frame under the row of its step, three fifths of the
+conversation's height (ten rows at least), its own conversation scrolling
+inside and its box at its foot, the parent's conversation going on under
+it (`conversation::splice_peek`); a step out of sight docks the frame over
+the box. The run takes the keys as it opens, if it has a conversation or a
+box; tab moves them between it and the conversation, and its edge lights
+while it has them; esc (from either, its box empty) or its ✕ closes it,
+the conversation's pick back on the row it was opened from. A workflow
+opens the same way (`subview::flow_lines`): when it started, how it
+stands, each phase and how far it got, its agents a row each that opens
+that agent's run, esc on which comes back to the workflow. Its model,
+worktree, steps, cost and effort show in the run's head. Where a run works
+is the
 worktree its own calls reached into most (`Session::worktree_most`): a
 subagent's transcript only says the folder its parent was in when it
-started it, so it's read for that only for agents rush hosts. Under the
-run in its pane is a box to message it: an agent rush hosts gets it from its own host
+started it, so it's read for that only for agents rush hosts. Under the run is a box to message it: an agent rush hosts gets it from its own host
 (`spawned::send_text`); a running subagent whose host has an inbox, into
 that; any other Claude Code subagent has no line of its own, so the main
 session is asked to pass it on with SendMessage (which resumes one that
@@ -2319,9 +2320,8 @@ the keys the session's own isn't drawn, and the foot names whose it is
 ### A run's pane
 
 A run is never a screen of its own (the user's call, 2026-11-09: b83b446b
-opened one full width; that's gone). tab, enter or → on the run picked,
-a click in its pane, or a subagent's step in the conversation (enter or
-→, which picks it in the view) gives its pane the keys (`subpane.rs`),
+opened one full width; that's gone). Opened, or tab or a click in it,
+gives its pane the keys (`subpane.rs`),
 and then everything a session's conversation does works in it, at the
 pane's width: ↑↓ pick rows (↑ from the empty box picks its queue's last
 first, as a Session's), enter → ← open and close, ctrl+o shows all, o
@@ -2331,9 +2331,9 @@ follows a link, dragged-over text copies. What's typed goes to the run's
 own box (`subbox::run_key`), with its queue above it (picked with ↑,
 edited, moved, merged, dropped, held, ctrl+enter sends now), routed by
 `relay::route`; one nothing can reach says why, and what's typed goes
-nowhere, the session's box neither. esc gives the keys back to the list
-(one picked from elsewhere goes straight back there), and esc from the
-list goes on as ever. The key guide's first section is the pane's keys
+nowhere, the session's box neither. tab gives the keys back to the
+conversation, the run left open; esc on its empty box closes it (and isn't
+the first of esc-twice). The key guide's first section is the pane's keys
 while it has them (`Ext::here_keys`).
 
 /compact typed there: a child rush hosts is a session of its own, and it
@@ -2354,8 +2354,8 @@ pane's size) and clicks (moved to where the conversation's text starts)
 work on it unchanged. A swap of the two views moves a few hundred bytes;
 nothing is copied or laid out again. A child rush hosts still opens as
 its own session (`spawned::open_session`, alt+o); its header's first row
-says `‹ <parent> › <child>`, and a click on the parent goes back to its
-Subagents list with the child picked (`subpane::child_crumb`).
+says `‹ <parent> › <child>`, and a click on the parent goes back to it
+(`subpane::child_crumb`).
 
 What it costs the UI thread (Rust-only, 2026-11-09). A subagent's run is
 one turn: what it was asked, then thousands of calls, and the renderer
@@ -2389,10 +2389,10 @@ pane asks for more only once it's scrolled to within a screen of the top
 of what it has ("reading earlier…", `subview::more_above`): four times as
 much of its end, or the whole once that's most of it, swapped in with the
 rows from the pane's top to the end kept (`SessionView::keep_rows_below`),
-so nothing on screen moves. And a run picked doesn't wait behind every
-run's numbers: while the subagents view shows they're all followed, each a
-whole transcript (572 runs, 2.6 GB in one session here), and the run's
-reading came after them in the same pass. `Runs::hurry` is set when a run
+so nothing on screen moves. And a run opened doesn't wait behind every
+run's numbers: while the subagents view showed they were all followed,
+each a whole transcript (572 runs, 2.6 GB in one session here), and the
+run's reading came after them in the same pass. `Runs::hurry` is set when a run
 is picked or asks for more: a pass under way stops between runs (or part
 way through one, `Tail::stop`, its numbers left as they were) and reads
 the run picked; what it skipped is read in the next pass.
@@ -2404,16 +2404,25 @@ the session's process lives (`SubagentRuns::set_alive`); a launch in
 the background (`isAsync`) and a SendMessage to a run by its name wake
 it.
 
-The background view (`running::background_lines`, drawn by
-list_extras::jobs `job_lines`, Go's jobLines) lists every task the
-session ran in the background but subagents, from what the reader last
-brought (each task's output tail): nothing is read to draw it. A
-workflow's row has its phases under it; space or a click on it shows its
-agents in the subagents view, and one watched from there goes back to
-the background view on esc. x (ctrl+x) stops the picked task, b and
+A background command or monitor shows under the step that started it
+(Rust-only, 2026-11-14; Go had a background view): what Go's background
+view drew for it (list_extras::jobs `task_rows`, Go's jobLines block),
+but its own first row, which is the step's, and the view's lead
+(`running::task_rows`, handed to the conversation as `Options::bg` by
+`taskcards::sync_out`, drawn by rush_convo's `bg_rows` on the step's
+gutter). The step stays open, its mark spinning, while the task runs:
+its facts, what it's doing and its last lines, or the file it writes
+standing for its output. Its output opened (the step's live fold: from
+the dock's row, the notice the task woke the agent with, or ▸) it's the
+whole block: its recent output, the other files its command writes, the
+processes under it, busiest first, and its launch script a d away on
+the step (`job-details:<id>`). The turn a task woke says so on its notice
+row, a ref of its own (`t<n>:woke`, from `Turn::woke_call`) that goes to
+the step. From what the reader last brought: nothing is read to draw
+it. A workflow opens on the conversation's page (above). x (ctrl+x) stops the picked task, b and
 ctrl+b move what the turn waits on to the background, x on a run stops it
 alone (session_core::jobkeys, the host link's `Op::StopTask` and
-`Op::Background`). While a running task is opened there, the reader also
+`Op::Background`). While a running task's step output is opened, the reader also
 reads the machine's process table (session_core::jobprocs: one sysctl and
 the agent's tree filled, the last table kept for CPU and let go once
 nothing's open): the task's process, its CPU and memory, the processes
@@ -3490,16 +3499,13 @@ how long it's waited. While a card shows, the conversation is drawn again
 each second. The agent is told none of it: the watch says once, briefly,
 how it ended.
 
-In the dock and the background view the card is a few rows tall
+In the dock and under its step the card is a few rows tall
 (`JobCard::rows`, 2026-11-09): under its row, each check that failed a
 row of its own (three, then "✗ N more failed"), and those still running
 on one row; what it ends on and when GitHub was last asked come under
 it once it's picked. Two running monitors or more go under one Monitors
-row (`fold:monitors`, `jobs::monitors`): in the background view folded
-till opened, then a short row each (a watch's card words, else what it
-watches and its latest line), one opened its whole block; in the dock
-the one row, saying how many watch and how many watches have a failure,
-which opens them in the background view.
+row in the dock (`fold:monitors`, `jobs::monitors`), saying how many
+watch and how many watches have a failure, which opens them under it.
 
 **✎ edit** (e), on a box's top edge before it's run and after, turns the
 box into an editor of its commands (`Options::shell_edit`, drawn by

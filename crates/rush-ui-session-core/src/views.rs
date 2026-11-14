@@ -96,12 +96,6 @@ pub fn views(m: &Model, key: &str) -> Vec<&'static str> {
     if m.session.as_ref().is_some_and(|s| !s.sess.tasks.is_empty()) {
         v.push("tasks");
     }
-    if super::subview::has_runs(m, key) {
-        v.push("subagents");
-    }
-    if super::running::has_background(m, key) {
-        v.push("background");
-    }
     let kind = agent(m, key)
         .map(|a| a.kind.as_str().to_string())
         .unwrap_or_default();
@@ -220,8 +214,6 @@ pub fn tab_stat(m: &mut Model, key: &str, v: &str) -> Line {
             }
             l
         }
-        "subagents" => super::subview::tab_stat(m, key),
-        "background" => super::running::background_stat(m, key),
         "memory" => {
             let mem = super::changes::own_changes(m, key).0;
             if mem.is_empty() {
@@ -544,14 +536,9 @@ fn picked_ref(m: &Model) -> String {
 /// last row, however far below that is); ↓ picks the highest in sight,
 /// or with nothing picked stays in the box.
 pub(super) fn move_sel(m: &mut Model, key: &str, d: isize) {
-    let cols = if view_name(m, key) == "subagents" {
-        conn(m, key).watch.cols.max(1)
-    } else {
-        1
-    };
     let vs = &conn(m, key).vs;
     let refs = vs.all_refs.clone();
-    let rows = vs.rows.max(1) * cols;
+    let rows = vs.rows.max(1);
     let top = vs.top.min(refs.len());
     let Some(v) = m.session.as_mut() else {
         return;
@@ -649,9 +636,6 @@ fn act(m: &mut Model, key: &str, name: &str, s: &str) -> Out {
         show_view(m, key, "memory");
         return Out::Draw;
     }
-    if name == "background" {
-        return super::running::background_key(m, key, s).or_idle();
-    }
     if name == "changes" && (sel.starts_with("chg:") || sel.starts_with("tree:")) {
         let c = conn(m, key);
         let open = c.vs.open.get(&sel).copied().unwrap_or(false);
@@ -683,9 +667,9 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
         conn(m, &key).vs.drawn = name;
         super::textsel::drop(m, &key);
     }
-    // Every run's numbers while the subagents view shows (followedSubs);
-    // the run shown whole only while it does.
-    let subs = name == "subagents";
+    // Every run's numbers while one is open on the page (followedSubs);
+    // the run shown whole only while it is (openrun.rs).
+    let subs = name == "conversation" && super::openrun::is_open(m, &key);
     let c = conn(m, &key);
     if c.runs.follow_all != subs {
         c.runs.follow_all = subs;
@@ -748,12 +732,7 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
             }
         },
         "tasks" => super::tasks::lines(m, w),
-        "background" => super::running::background_lines(m, &key, w),
         "memory" => super::memory::lines(m, &key, w, rows),
-        "subagents" => {
-            let cw = super::subview::cell_width(w, super::subview::band_cols(w));
-            super::subview::list(m, &key, cw, false)
-        }
         _ => Vec::new(),
     };
     let sel = m
@@ -761,38 +740,14 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
         .as_ref()
         .map(|v| v.sel.clone())
         .unwrap_or_default();
-    // The subagents list takes a few rows at the top, laid into as many
-    // columns as fit, scrolled, and the run picked the rest under it at
-    // the view's whole width (Rust-only: never a column beside it).
-    let cols = if subs {
-        super::subview::band_cols(w)
-    } else {
-        1
-    };
-    let cw = super::subview::cell_width(w, cols);
-    let list_rows = if subs {
-        super::subview::split_rows(all.len().div_ceil(cols), rows)
-    } else {
-        rows
-    };
-    let stacked = list_rows < rows;
+    let list_rows = rows;
     let c = conn(m, &key);
-    if subs {
-        c.watch.split = if stacked { list_rows } else { 0 };
-        c.watch.pane_w = w;
-        c.watch.body_rows = rows;
-        c.watch.cols = cols;
-        c.watch.cell_w = cw;
-    }
-    if stacked {
-        c.vs.rows = list_rows;
-    }
     c.vs.all_refs = all.iter().map(|(_, r)| r.clone()).collect();
     // The row picked stays in sight, a row of what's above it with it;
     // not while the wheel has scrolled the view away from it, so rows
     // coming and going don't pull the view back.
     let n = all.len();
-    let window = list_rows * cols;
+    let window = list_rows;
     let most = n.saturating_sub(window);
     let free = c.vs.free.as_deref() == Some(sel.as_str());
     if !free && let Some(i) = all.iter().position(|(_, r)| !sel.is_empty() && *r == sel) {
@@ -808,41 +763,21 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
     c.vs.refs = shown.iter().map(|(_, r)| r.clone()).collect();
     let hover = c.vs.hover_ref.clone();
     let refs: Vec<String> = shown.iter().map(|(_, r)| r.clone()).collect();
-    // The background view lights the row under the pointer itself,
-    // inside its edge.
-    let lit = |r: &str| !hover.is_empty() && r == hover && r != sel && name != "background";
-    let mut out: Vec<Line> = if cols > 1 {
-        super::subview::band(shown, list_rows, cols, cw, &lit)
-    } else {
-        shown
-            .iter()
-            .map(|(l, r)| {
-                if lit(r.as_str()) {
-                    hover_line(l.clone(), w)
-                } else {
-                    l.clone()
-                }
-            })
-            .collect()
-    };
+    let lit = |r: &str| !hover.is_empty() && r == hover && r != sel;
+    let mut out: Vec<Line> = shown
+        .iter()
+        .map(|(l, r)| {
+            if lit(r.as_str()) {
+                hover_line(l.clone(), w)
+            } else {
+                l.clone()
+            }
+        })
+        .collect();
     if let Some(v) = m.session.as_mut() {
         v.shown = refs; // the frame's clicks
     }
     out.truncate(list_rows);
-    if subs {
-        // The run picked, under the list's rows in sight.
-        let top = m.session.as_ref().map_or(0, |v| v.top);
-        while out.len() < rows {
-            out.push(Line::new());
-        }
-        if stacked {
-            super::subview::below(m, &key, &mut out, w, list_rows, top);
-        } else {
-            let w = &mut conn(m, &key).watch;
-            w.peek.visible = false;
-            w.msg_at = [0; 4];
-        }
-    }
     conn(m, &key).vs.lines = out.clone();
     Some(out)
 }
@@ -931,9 +866,6 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
                 if name != "conversation" && y >= top && y < top + rows {
                     let r = conn(m, &key).vs.refs.get(y - top).cloned();
                     if let Some(r) = r.filter(|r| !r.is_empty()) {
-                        if name == "background" {
-                            return super::running::background_click(m, &key, &r);
-                        }
                         if let Some(v) = m.session.as_mut() {
                             v.sel = r;
                         }
@@ -970,10 +902,6 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
                     } else {
                         String::new()
                     }
-                } else if name == "subagents" {
-                    // The list's own mouse (subview.rs) decides which row
-                    // is lit, by column too; this keeps its answer.
-                    conn(m, &key).vs.hover_ref.clone()
                 } else {
                     conn(m, &key)
                         .vs

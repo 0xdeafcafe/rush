@@ -772,6 +772,9 @@ fn take_prompt(
         && let Some(t) = s.turns.last_mut()
     {
         t.from = f;
+        if let Some(n) = &note {
+            t.woke_call = woke_call(n);
+        }
     }
     if let Some(cmd) = shell {
         s.shell_start(&cmd, at);
@@ -928,6 +931,18 @@ fn shell_output(s: &str) -> Option<(&str, &str)> {
         between(s, "<bash-stdout>", "</bash-stdout>"),
         between(s, "<bash-stderr>", "</bash-stderr>"),
     ))
+}
+
+/// The call whose background task a notice Claude Code injects is of
+/// (its <tool-use-id>); "" when it names none. Rust-only.
+pub fn woke_call(s: &str) -> String {
+    let t = s.trim();
+    if !t.starts_with("<task-notification>") {
+        return String::new();
+    }
+    between(t, "<tool-use-id>", "</tool-use-id>")
+        .trim()
+        .to_owned()
 }
 
 /// Recognises text Claude Code puts in a user message that you didn't

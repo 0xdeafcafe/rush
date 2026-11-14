@@ -653,9 +653,38 @@ pub fn sections(m: &Model) -> Vec<Section> {
             }
         }),
     );
+    // Where a subagent or workflow opened from the conversation shows
+    // (session-core openrun.rs). Rust-only.
+    let runs_open = choice(
+        "Open a subagent",
+        if c.runs_open == "peek" {
+            "under its step"
+        } else {
+            "beside it"
+        },
+        "Where a subagent, a workflow or another agent a session started shows when you open it from its step or from Running. Either way it's on the conversation's page, with its own box: tab moves between it and the conversation, esc closes it.",
+        &[
+            (
+                "beside it",
+                "in the column right of the conversation, where the screen is wide enough; else under its step.",
+            ),
+            (
+                "under its step",
+                "framed under its step in the conversation, the conversation carrying on below it.",
+            ),
+        ],
+        set(|m, v| {
+            config_mut(m).runs_open = if v == "under its step" {
+                "peek".into()
+            } else {
+                String::new()
+            }
+        }),
+    );
     look_rows.push(minimap);
     look_rows.push(pictures);
     look_rows.push(view_suggest);
+    look_rows.push(runs_open);
     vec![
         Section::new("Look", look_rows),
         Section::new("Agents list", list_rows),

@@ -281,6 +281,41 @@ pub fn show(m: &mut Model, p: Preset) {
     m.flash(&format!("{} · {}", p.title(), p.about()));
 }
 
+/// The conversation's ref of the step that made call ("t4:s:toolu_1"),
+/// when the session has it.
+pub fn step_ref(s: &rush_convo::Session, call: &str) -> Option<String> {
+    let at = s.step_by_call(call)?;
+    let ti = s.step(at).turn? as usize;
+    let n = s.turns.get(ti)?.n;
+    Some(format!("t{n}:s:{call}"))
+}
+
+/// The step that made call, opened where it is, in view and picked: its
+/// turn and the run folding it opened too; in Normal when another view
+/// shows (a background task's notice, its row in the column). Whether the
+/// session has the step.
+pub fn reveal_step(m: &mut Model, call: &str) -> bool {
+    let Some(r) = m.session.as_ref().and_then(|v| step_ref(&v.sess, call)) else {
+        return false;
+    };
+    if current(m) != Preset::Normal {
+        open_in_normal(m, &r);
+        return true;
+    }
+    let rows = rows(m);
+    if let Some(v) = m.session.as_mut() {
+        let turn = r.split(':').next().unwrap_or("").to_string();
+        v.o.open.insert(turn.clone(), true);
+        v.o.open.insert(r.clone(), true);
+        for at in run_starts(&v.sess, &turn, call) {
+            v.o.open.insert(format!("{turn}:run:{at}"), true);
+        }
+        v.sel.clone_from(&r);
+        v.reveal(&r, rows);
+    }
+    true
+}
+
 /// Row r (a catch-up card's turn, a trail's step) opened in Normal, in
 /// view and picked.
 pub fn open_in_normal(m: &mut Model, r: &str) -> Out {
