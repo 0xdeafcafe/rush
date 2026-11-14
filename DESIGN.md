@@ -3311,42 +3311,57 @@ how often each was taken and turned down in view-suggest.json in rush's
 folder, and after three turned down in a row it isn't made again (one
 taken starts the count over). session-core viewsuggest.rs.
 
-### Live, "what is it doing?" (Rust-only, planned)
+### Live, "what is it doing?" (Rust-only)
 
-A sixth view whose layout a model writes. Two layers, one renderer:
+A sixth view whose story a model writes (rush-convo live.rs, drawn by
+render/draw/presets.rs `live`). Two layers on one card, the last turn's;
+the turns before are a row each:
 
-- Facts, from code, free and always right: what needs you, the step
-  running and for how long, checks and their results, files changed,
-  todos (`activeForm` is the "doing" line), subagents, cost. The same
-  digests Catch-up and Code already make.
-- Story, from a watcher model: the work grouped into phases, a headline
-  and how far along, which blocks show it best. It writes the view
-  panel's block JSON (rush-host viewparse.rs; drawn by rush-ui-plugin-ui
-  views/blocks.rs), as patches by block id, never drawing code. Its
-  words are checked against the facts layer: a phase it calls done with
-  a check failing is drawn as the check says.
+- Facts, from the session itself, free and always right: what needs you,
+  the step running and for how long, what changed (+/−), checks and how
+  they came out, what you ran. Catch-up's card gathers the same (`facts`,
+  shared). The story never overrides them: the watcher is told not to
+  repeat them, and the card draws them from the session either way.
+- Story, from a watcher model: a headline, phases done of planned (a bar
+  and "2/3  66%"), and up to 6 blocks of 12 items by id, each one of
+  steps, timeline, list, kv, bars, callout or text. It answers with a
+  JSON patch (blocks replaced by id or added, removed, reordered), never
+  drawing code; what it gets wrong in a block is left out, and an answer
+  with no JSON changes nothing. Its own vocabulary, not the view panel's
+  blocks: rush-convo can't reach rush-host's.
 
-The watcher. Sonnet, through the session's harness (`claude -p`
-stream-json, no tools, no MCP, no transcript kept). Its conversation only
-grows: a fixed system prompt (the view guide and rules) first, then one
-user message per update holding only the events since the last (≤ 2k
-tokens, neutral events cut to a line each), so every update reads all
-before it from the cache and writes only the new events. Past ~60k
-tokens it starts over, seeded with the view as it stands. Each step's
-"now" line comes from the small-job model (Apple Intelligence first, as
-titles do: free, on the machine, 4096 tokens), never the watcher.
+The watcher (rush-ui-session-core storywatch.rs) is one query each time
+through the session's harness (the advisor's Ask, as view suggestions
+ask): Sonnet for Claude Code's sessions, else the harness's quick model,
+held to live::SCHEMA. It's sent the dashboard as it stands and only
+what's happened since (live::delta: a line a finished step, the turns'
+asks and answers, the task list when it changes; ≤ 6,000 chars, the
+middle steps cut first), so no process stays up between asks. The
+system prompt, tools and schema come first and are the same every time,
+so asks read them from the cache. The Now line is the small-job
+model's (rush_core cheap: Apple Intelligence first), asked as the step
+running changes and cleared until it answers.
 
-When it runs: only while a session's Live view is on screen, at a turn's
-end, and while busy at most every 20 s and only after new steps; coming
-back sends one update covering the time away. Sessions not on screen run
-nothing, so at most one watcher process exists (a hosted `claude -p` is
-~150 MB): it stops 30 s after the view is left, and a return within the
-5-minute cache reads its conversation back for a tenth of the price.
+When: only while a session's Live view is drawn. As it opens (the first
+time the last 3 turns; coming back, what's new since), as soon as a
+turn ends, and while one runs at most every 20 s (live::EVERY), only
+when there's something new. A failed ask is said on the card ("the
+watcher couldn't say: …") and tried again after 20 s, told the same
+again. The stories of the last 16 sessions looked at are kept.
 
-Cost, before it's built (list prices, Sonnet at $2/$10 per M): about
-1–1.5¢ an update, $0.60–0.90 an hour watched. Not a fork of the session:
-the cache is per model, and an Opus fork re-reads the whole context each
-update (~6¢ at 150k).
+Measured (one ask as the Cli asker runs it, Claude Code 2.1.322, a 1.5k
+char update to a dashboard of one block, 5 runs): 3.3–3.8 s, the
+`claude -p` at 141–165 MB footprint (median 157) for those seconds and
+nothing after; the first ask 2.1¢ (it writes 4,769 tokens of system,
+tools and schema to the cache), each after 0.28¢ (232 tokens out, the
+same read from the cache). Every answer patched. Planned first was one
+Sonnet process kept up while the view is open (~150 MB the whole time,
+its conversation growing and the cache reading all of it): a query each
+time costs the same and holds no memory between asks.
+
+Frame cost: `cargo bench -p rush-convo --bench render` ("live:" rows and
+the Live preset's): the fullest story (6 blocks of 12), its delta,
+prompt and patch, and a frame after the story changes.
 
 Not possible: Claude Code's Code Mode (`CLAUDE_CODE_EXPERIMENTAL_CODE_MODE`)
 works only in an interactive terminal, not `-p` or the SDK, so no rush
