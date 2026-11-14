@@ -174,8 +174,8 @@ impl Story {
             .flatten()
         {
             let Some(b) = block_of(b) else { continue };
-            match self.blocks.iter_mut().find(|x| x.id == b.id) {
-                Some(x) => *x = b,
+            match self.blocks.iter().position(|x| x.id == b.id) {
+                Some(i) => self.blocks[i] = b,
                 None if self.blocks.len() < MOST_BLOCKS => self.blocks.push(b),
                 None => {}
             }

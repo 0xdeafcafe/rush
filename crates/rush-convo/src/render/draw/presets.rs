@@ -1471,7 +1471,7 @@ impl<'a> Drawer<'a> {
     /// what needs you, what was done and said, changed and checked, what
     /// you ran and what's still going. The Catch-up card and the Live
     /// card both draw it.
-    fn facts(&self, from: usize) -> Facts<'a> {
+    fn facts(&mut self, from: usize) -> Facts<'a> {
         let s: &'a Session = self.s;
         let turns = &s.turns[from..];
         let k = turns.len();
