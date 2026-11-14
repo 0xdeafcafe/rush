@@ -151,6 +151,34 @@ fn change(m: &mut Model, k: &str, it: &OwnSetting, file: &str, value: &str) -> O
     Out::Draw
 }
 
+/// Sets a setting that's asked about (OwnSetting's ask) once you've said
+/// yes, or turns it off, and says it's done; what went wrong, when it
+/// didn't (Rush-only).
+fn set_asked(m: &mut Model, k: &str, it: &OwnSetting, value: &str) -> Out {
+    let Some((a, _, _)) = source(m, k) else {
+        return Out::Idle;
+    };
+    if let Some(Err(why)) = a
+        .harness_settings()
+        .map(|h| h.check_setting(&it.key, value))
+    {
+        m.flash_err(&why);
+        return Out::Draw;
+    }
+    let now = if value.is_empty() || value == "off" {
+        "off"
+    } else {
+        "on"
+    };
+    read(
+        m,
+        k,
+        vec![OwnEdit::new(&it.key, value)],
+        format!("{} · {now}", it.label),
+    );
+    Out::Draw
+}
+
 /// e on any row: the settings file in your editor.
 fn open_key(m: &mut Model, s: &str) -> Out {
     if s == "e"
@@ -187,6 +215,19 @@ fn row(k: &str, it: &OwnSetting, file: &str, path: &str) -> Setting {
     );
     let (k1, it1, f1) = (k.to_string(), it.clone(), file.to_string());
     st.run = Some(Rc::new(move |m: &mut Model, v: &str| {
+        // One that changes more than a setting is asked first, and says
+        // how it went (Rush-only).
+        if !it1.ask.is_empty() && !v.is_empty() && v != it1.value {
+            let (k2, it2, v2) = (k1.clone(), it1.clone(), v.to_string());
+            m.ask(
+                Confirm::new(it1.ask.clone(), move |m| set_asked(m, &k2, &it2, &v2))
+                    .detail(it1.what.clone()),
+            );
+            return Out::Draw;
+        }
+        if !it1.ask.is_empty() {
+            return set_asked(m, &k1, &it1, v);
+        }
         change(m, &k1, &it1, &f1, v)
     }));
     match it.kind {
