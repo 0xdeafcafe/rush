@@ -240,6 +240,7 @@ pub fn host_info(i: &Info) -> HostInfo {
         idle_since: ms(i.idle_since),
         turn_began: ms(i.turn_began),
         stalled: ms(i.stalled),
+        waking: ms(i.waking),
         proto: i.proto,
         sleeping: i.sleeping,
         exe_mod: ms(i.exe.mod_),

@@ -742,6 +742,34 @@ fn new_hosted_agent_is_not_your_turn() {
     assert!(l.hosted(&test_profile(), &i, None, t).your_turn(t));
 }
 
+// A finished task's notice wakes it: idle by its host's word until the
+// model's first message, it's at work, not your turn; a notice nothing
+// came of for a minute is a finish again.
+#[test]
+fn a_task_notice_wakes_it_to_work() {
+    let mut l = loader();
+    let t = now();
+    let d = tempfile::tempdir().unwrap();
+    let mut i = info("wk", "idle", &s(d.path()), t);
+    i.started_at = t - 30 * MINUTE;
+    i.idle_since = t - 11 * MINUTE;
+    for (waking, working) in [
+        (0, false),
+        (t - 5 * SECOND, true),
+        (t - 59 * SECOND, true),
+        (t - MINUTE, false),
+    ] {
+        i.waking = waking;
+        let a = l.hosted(&test_profile(), &i, None, t);
+        assert_eq!(
+            (a.job.state == State::Working, a.your_turn(t)),
+            (working, !working),
+            "waking {}s ago",
+            (t - waking) / SECOND
+        );
+    }
+}
+
 // A host gone without a word is being brought back: mid-turn it says so,
 // and one gone between turns (beyond Go) doesn't say it was cut off.
 #[test]

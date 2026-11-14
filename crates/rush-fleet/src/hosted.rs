@@ -102,6 +102,10 @@ pub struct HostInfo {
     /// When it last heard from its agent, once a turn has heard nothing
     /// for a while with no tool running; 0 otherwise.
     pub stalled: Ms,
+    /// When a finished task's notice reached its agent, which takes it up
+    /// in a turn of its own (host.Info's waking); 0 once it has begun
+    /// answering. Rust-only.
+    pub waking: Ms,
     /// What the host can do (host.Proto).
     pub proto: i64,
     /// A clean idle exit: explicit input wakes the saved session.

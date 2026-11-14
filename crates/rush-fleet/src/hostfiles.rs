@@ -307,6 +307,7 @@ struct WireInfo {
     #[serde(rename = "turnBegan")]
     turn_began: Option<String>,
     stalled: Option<String>,
+    waking: Option<String>,
     proto: i64,
     sleeping: bool,
     exe: Option<WireExe>,
@@ -405,6 +406,7 @@ pub(crate) fn read_info(dir: &Path) -> Option<HostInfo> {
         idle_since: time(&w.idle_since),
         turn_began: time(&w.turn_began),
         stalled: time(&w.stalled),
+        waking: time(&w.waking),
         proto: w.proto,
         sleeping: w.sleeping,
         exe_mod: w.exe.as_ref().map_or(0, |e| time(&e.mod_)),
