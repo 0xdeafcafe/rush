@@ -543,9 +543,11 @@ fn fit(mut lines: Vec<String>) -> String {
     if len(&lines) <= DELTA_CHARS {
         return lines.join("\n");
     }
-    // Drop step lines from the middle until it fits.
+    // Drop step lines from the middle until it fits, with room for the
+    // line that counts them.
+    const COUNTED: usize = 32;
     let mut dropped = 0;
-    while len(&lines) > DELTA_CHARS {
+    while len(&lines) + COUNTED > DELTA_CHARS {
         let steps: Vec<usize> = (0..lines.len())
             .filter(|&i| lines[i].starts_with("- "))
             .collect();

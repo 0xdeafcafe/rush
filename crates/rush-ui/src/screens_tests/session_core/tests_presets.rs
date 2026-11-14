@@ -73,7 +73,7 @@ fn menu_rows(s: &[String]) -> Vec<String> {
         .iter()
         .position(|l| l.contains("Normal") && l.contains("everything, as usual"))
         .unwrap_or_else(|| panic!("no dropdown:\n{}", s.join("\n")));
-    s[from..=from + 5]
+    s[from..=from + 6]
         .iter()
         .map(|l| l.trim_end().to_string())
         .collect()
