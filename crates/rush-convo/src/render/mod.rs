@@ -137,7 +137,8 @@ pub enum Depth {
 /// was; Chat "what did we say?" (bubbles, yours right, the agent's left);
 /// Code "what did it change?" (each turn's diffs and checks); CatchUp
 /// "what happened while I was away?" (one card since you last looked);
-/// Trail "where did the time go?" (a line a step on a time axis). Each
+/// Trail "where did the time go?" (a line a step on a time axis); Live
+/// "what is it doing?" (a card a watcher model lays out, live.rs). Each
 /// draws the same parsed turns, a turn at a time, so a long conversation
 /// costs what a screen of it does whichever is picked.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -148,16 +149,18 @@ pub enum Preset {
     Code,
     CatchUp,
     Trail,
+    Live,
 }
 
 impl Preset {
     /// Every one, in the order the key goes through them.
-    pub const ALL: [Preset; 5] = [
+    pub const ALL: [Preset; 6] = [
         Preset::Normal,
         Preset::Chat,
         Preset::Code,
         Preset::CatchUp,
         Preset::Trail,
+        Preset::Live,
     ];
 
     /// Its name as the config keeps it.
@@ -168,6 +171,7 @@ impl Preset {
             Preset::Code => "code",
             Preset::CatchUp => "catch-up",
             Preset::Trail => "trail",
+            Preset::Live => "live",
         }
     }
 
@@ -179,6 +183,7 @@ impl Preset {
             Preset::Code => "Code",
             Preset::CatchUp => "Catch-up",
             Preset::Trail => "Trail",
+            Preset::Live => "Live",
         }
     }
 
@@ -190,6 +195,7 @@ impl Preset {
             Preset::Code => "what did it change?",
             Preset::CatchUp => "what happened while I was away?",
             Preset::Trail => "where did the time go?",
+            Preset::Live => "what is it doing?",
         }
     }
 
@@ -228,6 +234,9 @@ pub struct Options {
     /// When you last looked at this session before now (0: never, as far
     /// as rush knows): the Catch-up view's card covers what came after.
     pub since: Ms,
+    /// What the watcher has made of the session: the Live view's story
+    /// (live.rs). None: the card draws what's sure alone. Rust-only.
+    pub story: Option<std::sync::Arc<crate::live::Story>>,
     pub selected: String,
     pub focused: bool,
     /// Rows may run the whole width, past CAP_ROW.
@@ -775,6 +784,21 @@ impl Renderer {
         if !o.bg.is_empty() {
             k.bg = bg_sig(s, t, o);
         }
+        if o.preset == Preset::Live && i + 1 == s.turns.len() {
+            // The card: the story as it stands, and what's still going.
+            let mut h = DefaultHasher::new();
+            o.story.as_ref().map(|st| st.serial).hash(&mut h);
+            let mut going = t.live;
+            for j in s.running_jobs().filter(|j| j.background) {
+                (&j.id, &j.label).hash(&mut h);
+                going = true;
+            }
+            if going {
+                (o.now / 1000).hash(&mut h);
+            }
+            (s.tasks.len(), s.current().1).hash(&mut h);
+            k.view = h.finish();
+        }
         if o.preset == Preset::CatchUp {
             let last = i + 1 == s.turns.len();
             let mut h = DefaultHasher::new();
@@ -1211,6 +1235,13 @@ fn presets_estimate(s: &Session, o: &Options, i: usize, catch: usize) -> usize {
         Preset::CatchUp if i + 1 == s.turns.len() => 9,
         Preset::CatchUp if i >= catch => 0,
         Preset::CatchUp => 1,
+        Preset::Live if i + 1 == s.turns.len() => {
+            let story = o.story.as_ref().map_or(0, |st| {
+                st.blocks.iter().map(|b| 2 + b.items.len()).sum::<usize>()
+            });
+            8 + story
+        }
+        Preset::Live => 1,
         Preset::Trail => 4 + steps(),
         Preset::Code => {
             let edits = t

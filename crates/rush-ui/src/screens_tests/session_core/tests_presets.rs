@@ -165,7 +165,7 @@ fn the_key_opens_the_dropdown_and_picks() {
     for (r, p) in rows.iter().zip(Preset::ALL) {
         assert!(r.contains(p.title()) && r.contains(p.about()), "{r}");
     }
-    assert!(rows[5].contains(super::presets::MENU_HOW), "{rows:?}");
+    assert!(rows[6].contains(super::presets::MENU_HOW), "{rows:?}");
     // Under the tab, a cell in.
     assert_eq!(col(&s[at], "▸"), col(&s[i], "Conversation"));
     press(&mut m, "down");
@@ -345,6 +345,7 @@ fn the_dropdown_marks_the_suggested_view() {
             "     Code       what did it change?",
             "     Catch-up   what happened while I was away?",
             "     Trail      where did the time go?  ✦ long turns, many steps",
+            "     Live       what is it doing?",
             "   ↑↓ · enter shows it · esc closes",
         ]
     );

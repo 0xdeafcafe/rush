@@ -618,7 +618,8 @@ pub struct Config {
     )]
     pub advisor: bool,
     /// How the Session's conversation is shown, for every session until
-    /// it's changed: "" or "normal", "chat", "code", "catch-up", "trail".
+    /// it's changed: "" or "normal", "chat", "code", "catch-up", "trail",
+    /// "live".
     #[serde(
         rename = "convoView",
         deserialize_with = "lenient",

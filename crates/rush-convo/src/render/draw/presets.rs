@@ -24,6 +24,7 @@ use super::super::Preset;
 use super::super::decisions::{decisions_of, open_list};
 use super::*;
 use crate::decisions::decisions_in;
+use crate::live::{BlockKind, StoryBlock, Tone};
 use crate::shellbox::{BoxRef, Piece, ShellBlock, ShellRun, pieces};
 
 /// Rows of lines a file's diff shows in Code until opened.
@@ -407,7 +408,228 @@ struct Leg {
     run: Option<String>,
 }
 
-impl Drawer<'_> {
+/// A card's label, LABEL_W wide.
+fn card_label(s: &str, c: Style) -> Txt {
+    paint(c, &format!("{s:<w$}", w = LABEL_W))
+}
+
+/// A card's rows for what needs you, each with what it opens.
+fn needs_rows(needs: &[(Txt, String)], room: usize) -> Vec<(Txt, String)> {
+    needs
+        .iter()
+        .map(|(w, r)| {
+            let action = paint(C_ORANGE, "[answer]");
+            let room = room.saturating_sub(action.width() + 3);
+            let l = card_label("? needs you", C_YELLOW)
+                .and(w.truncate(room, &faint("…")))
+                .and_raw("   ")
+                .and(action);
+            (l, r.clone())
+        })
+        .collect()
+}
+
+/// A card's Changed row: how many files, the lines, and their names.
+fn changed_row(files: &[String], add: usize, del: usize, inner: usize) -> Txt {
+    let names: Vec<&str> = files.iter().map(|f| base_after_slash(f)).collect();
+    card_label("Changed", C_SUB)
+        .and(text(&plural(files.len(), "file")))
+        .and_raw("  ")
+        .and(Drawer::add_del(add, del))
+        .and(faint(&format!("   ({})", names.join(", "))))
+        .truncate(inner, &faint("…)"))
+}
+
+/// A card's Checks row: each check and how it came out.
+fn checks_row(checks: &[(&'static str, Came, bool, Option<usize>)], inner: usize) -> Txt {
+    let mut l = card_label("Checks", C_SUB);
+    for (i, (n, c, failed_once, tests)) in checks.iter().enumerate() {
+        if i > 0 {
+            l.push_str("   ", Style::default());
+        }
+        let word = match tests {
+            Some(p) if *n == "tests" && *c == Came::Passed => format!("{n} {}", grouped(*p)),
+            _ => n.to_string(),
+        };
+        l.push(match c {
+            Came::Running => paint(C_ORANGE, &format!("✱ {word}")),
+            Came::Passed => paint(C_GREEN, "✓").and_raw(" ").and(text(&word)),
+            Came::Failed => paint(C_RED, &format!("✗ {word}")),
+        });
+        if *failed_once && *c == Came::Passed {
+            l.push(faint(" (failed, rerun passed)"));
+        }
+    }
+    l.truncate(inner, &faint("…"))
+}
+
+/// The colour a story's tone draws in.
+fn tone_style(t: Tone) -> Style {
+    match t {
+        Tone::Good => C_GREEN,
+        Tone::Bad => C_RED,
+        Tone::Warn => C_YELLOW,
+        Tone::Busy => C_ORANGE,
+        Tone::Quiet => C_FAINT,
+        Tone::Plain => Style::default(),
+    }
+}
+
+/// A story block's rows, inner wide: its title, then its items as its
+/// kind lays them out.
+fn story_rows(b: &StoryBlock, inner: usize) -> Vec<Txt> {
+    let mut out = Vec::new();
+    let tone = tone_style(b.tone);
+    if !b.title.is_empty() && b.kind != BlockKind::Callout {
+        out.push(paint(C_SUB, &b.title).truncate(inner, &faint("…")));
+    }
+    let cut = |t: Txt| t.truncate(inner, &faint("…"));
+    match b.kind {
+        BlockKind::Steps => {
+            let mut l = Txt::new();
+            for (i, it) in b.items.iter().enumerate() {
+                if i > 0 {
+                    l.push(faint(" ─ "));
+                }
+                let (mark, st) = if it.done {
+                    ("✓ ", C_GREEN)
+                } else if it.tone == Tone::Busy {
+                    ("◉ ", C_ORANGE)
+                } else if it.tone != Tone::Plain {
+                    ("○ ", tone_style(it.tone))
+                } else {
+                    ("○ ", C_FAINT)
+                };
+                l.push(paint(st, mark));
+                l.push(if it.done || it.tone == Tone::Busy {
+                    text(&it.text)
+                } else {
+                    sub(&it.text)
+                });
+            }
+            out.extend(wrap(&l, inner));
+        }
+        BlockKind::Timeline => {
+            for it in &b.items {
+                let mut l = dim(&format!("{:<6}", it.time));
+                l.push(paint(tone_style(it.tone), "● "));
+                l.push(text(&it.text));
+                if !it.meta.is_empty() {
+                    l.push(faint(&format!(" · {}", it.meta)));
+                }
+                out.push(cut(l));
+            }
+        }
+        BlockKind::List => {
+            for it in &b.items {
+                let mut l = paint(tone_style(it.tone), if it.done { "✓ " } else { "• " });
+                l.push(text(&it.text));
+                if !it.meta.is_empty() {
+                    l.push_str("   ", Style::default());
+                    l.push(dim(&it.meta));
+                }
+                out.push(cut(l));
+            }
+        }
+        BlockKind::Kv => {
+            for it in &b.items {
+                let k = format!("{:<w$}", it.text, w = LABEL_W - 1);
+                let l = dim(&k)
+                    .and_raw(" ")
+                    .and(paint(tone_style(it.tone), &it.meta));
+                out.push(cut(l));
+            }
+        }
+        BlockKind::Bars => {
+            let most = b.items.iter().map(|it| it.value).fold(0.0, f64::max);
+            let w = (inner / 3).clamp(6, 24);
+            for it in &b.items {
+                let frac = if most > 0.0 { it.value / most } else { 0.0 };
+                let st = if it.tone == Tone::Plain {
+                    C_SUB
+                } else {
+                    tone_style(it.tone)
+                };
+                let name = format!("{:<w$} ", it.text, w = LABEL_W - 1);
+                let mut l = text(&name).truncate(LABEL_W, &faint("…"));
+                l.push(paint(st, &format!("{:<w$}", bar(frac, w), w = w)));
+                if !it.meta.is_empty() {
+                    l.push_str(" ", Style::default());
+                    l.push(dim(&it.meta));
+                }
+                out.push(cut(l));
+            }
+        }
+        BlockKind::Callout => {
+            let st = if b.tone == Tone::Plain {
+                C_YELLOW
+            } else {
+                tone
+            };
+            let mut words = b.text.clone();
+            if words.is_empty() {
+                words = b
+                    .items
+                    .iter()
+                    .map(|it| it.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join("; ");
+            }
+            if !b.title.is_empty() {
+                words = format!("{}: {words}", b.title);
+            }
+            for (i, w) in wrap(&text(&words), inner.saturating_sub(2))
+                .into_iter()
+                .take(4)
+                .enumerate()
+            {
+                let lead = if i == 0 {
+                    paint(st, "! ")
+                } else {
+                    Txt::raw("  ")
+                };
+                out.push(lead.and(w));
+            }
+        }
+        BlockKind::Text => {
+            let words = if b.text.is_empty() {
+                b.items
+                    .iter()
+                    .map(|it| it.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            } else {
+                b.text.clone()
+            };
+            out.extend(wrap(&sub(&words), inner).into_iter().take(4));
+        }
+    }
+    out
+}
+
+/// What's sure of a run of turns (Drawer::facts).
+struct Facts<'a> {
+    /// What needs you, each with the ref it opens.
+    needs: Vec<(Txt, String)>,
+    /// Each answer's first sentence, and the rest of the last one.
+    done: Vec<String>,
+    said: String,
+    /// The files changed, and the lines added and taken away.
+    files: Vec<String>,
+    add: usize,
+    del: usize,
+    /// Each check: its name, how it came out last, whether it failed
+    /// before, and how many tests passed.
+    checks: Vec<(&'static str, Came, bool, Option<usize>)>,
+    /// What's still going: steps running, background tasks, your commands.
+    going: Vec<String>,
+    /// The commands you ran that have ended, by their box's ref, oldest
+    /// first; `more` of them before the newest RAN_SHOWN.
+    ran: Vec<(&'a String, &'a ShellRun)>,
+    more: usize,
+}
+
+impl<'a> Drawer<'a> {
     /// The turn drawn as p has it.
     pub(crate) fn preset(&mut self, p: Preset) {
         self.no_hooks = true;
@@ -417,6 +639,7 @@ impl Drawer<'_> {
             Preset::Code => self.code_view(),
             Preset::CatchUp => self.catch_up(),
             Preset::Trail => self.trail(),
+            Preset::Live => self.live(),
             Preset::Normal => self.open(),
         }
     }
@@ -1244,81 +1467,16 @@ impl Drawer<'_> {
 
     // ---- Catch-up ----
 
-    /// One card for every turn since you last looked, drawn with the last
-    /// of them; the turns in it before the last draw nothing, and those
-    /// before the card a row each.
-    fn catch_up(&mut self) {
-        let n = self.s.turns.len();
-        let (from, fresh) = catch_from(self.s, self.o.since);
-        if self.ti < from {
-            self.older_row();
-        } else if self.ti + 1 == n {
-            self.catch_card(from, fresh);
-        }
-    }
-
-    /// A turn before the card, as one row: when, what you asked, and what
-    /// it took.
-    fn older_row(&mut self) {
-        let t = self.t;
-        let r = self.r.clone();
-        let mut right = Vec::new();
-        let n = self.steps_counted();
-        if n > 0 {
-            right.push(plural(n, "step"));
-        }
-        let files = self.changed_files(t).len();
-        if files > 0 {
-            right.push(plural(files, "file"));
-        }
-        let m = money(t.cost);
-        if !m.is_empty() {
-            right.push(m);
-        }
-        let right = dim(&right.join(" · ")).and_raw("  ");
-        let mut l = self.sp(1);
-        if t.start != 0 {
-            l.push(dim(&clock(t.start, self.o.offset(t.start))));
-            l.push_str("  ", Style::default());
-        }
-        l.push(self.mark());
-        l.push(faint(&format!("turn {:<4} ", t.n)));
-        let room = self.cw.saturating_sub(l.width() + right.width() + 3);
-        l.push(sub(&Self::asked_line(t)).truncate(room.max(8), &faint("…")));
-        self.add(&r, Color::Default, l, right);
-    }
-
-    /// The card: a heading saying since when, what needs you first with
-    /// its action, then what was done, changed and checked, what it said
-    /// to you last, and what's still going.
-    fn catch_card(&mut self, from: usize, fresh: bool) {
-        let s = self.s;
+    /// What's sure of turns from.. to the last, from the session itself:
+    /// what needs you, what was done and said, changed and checked, what
+    /// you ran and what's still going. The Catch-up card and the Live
+    /// card both draw it.
+    fn facts(&self, from: usize) -> Facts<'a> {
+        let s: &'a Session = self.s;
         let turns = &s.turns[from..];
-        let first_r = format!("t{}", turns[0].n);
-        let last_r = self.r.clone();
-        // The heading.
         let k = turns.len();
         let since = self.o.since;
-        let mut head = if since <= 0 && k == 1 {
-            text("The last turn")
-        } else if since <= 0 {
-            text(&format!("The last {k} turns"))
-        } else if fresh {
-            text("Since you last looked")
-        } else {
-            text("Nothing new since you last looked")
-        };
-        if since > 0 {
-            head.push(dim(&format!(" · {} ago", dur(self.o.now - since))));
-        }
-        if fresh && since > 0 {
-            head.push(dim(&format!(" · {}", plural(k, "turn"))));
-        }
-        let cost: f64 = turns.iter().map(|t| t.cost).sum();
-        let m = money(cost);
-        if !m.is_empty() {
-            head.push(dim(&format!(" · {m}")));
-        }
+        let last_r = self.r.clone();
         // What needs you, each row with what it opens.
         let mut needs: Vec<(Txt, String)> = Vec::new();
         for (j, t) in turns.iter().enumerate() {
@@ -1426,8 +1584,8 @@ impl Drawer<'_> {
         }
         // What you ran since you last looked: a line each once done, and
         // those still running with what's still going.
-        let o: &Options = self.o;
-        let mut ran: Vec<(&String, &ShellRun)> = o
+        let o: &'a Options = self.o;
+        let mut ran: Vec<(&'a String, &'a ShellRun)> = o
             .shells
             .iter()
             .filter(|(k, r)| {
@@ -1455,6 +1613,108 @@ impl Drawer<'_> {
             };
             going.push(format!("working{at}"));
         }
+        let more = ran.len().saturating_sub(RAN_SHOWN);
+        Facts {
+            needs,
+            done,
+            said,
+            files,
+            add,
+            del,
+            checks,
+            going,
+            ran,
+            more,
+        }
+    }
+
+    /// One card for every turn since you last looked, drawn with the last
+    /// of them; the turns in it before the last draw nothing, and those
+    /// before the card a row each.
+    fn catch_up(&mut self) {
+        let n = self.s.turns.len();
+        let (from, fresh) = catch_from(self.s, self.o.since);
+        if self.ti < from {
+            self.older_row();
+        } else if self.ti + 1 == n {
+            self.catch_card(from, fresh);
+        }
+    }
+
+    /// A turn before the card, as one row: when, what you asked, and what
+    /// it took.
+    fn older_row(&mut self) {
+        let t = self.t;
+        let r = self.r.clone();
+        let mut right = Vec::new();
+        let n = self.steps_counted();
+        if n > 0 {
+            right.push(plural(n, "step"));
+        }
+        let files = self.changed_files(t).len();
+        if files > 0 {
+            right.push(plural(files, "file"));
+        }
+        let m = money(t.cost);
+        if !m.is_empty() {
+            right.push(m);
+        }
+        let right = dim(&right.join(" · ")).and_raw("  ");
+        let mut l = self.sp(1);
+        if t.start != 0 {
+            l.push(dim(&clock(t.start, self.o.offset(t.start))));
+            l.push_str("  ", Style::default());
+        }
+        l.push(self.mark());
+        l.push(faint(&format!("turn {:<4} ", t.n)));
+        let room = self.cw.saturating_sub(l.width() + right.width() + 3);
+        l.push(sub(&Self::asked_line(t)).truncate(room.max(8), &faint("…")));
+        self.add(&r, Color::Default, l, right);
+    }
+
+    /// The card: a heading saying since when, what needs you first with
+    /// its action, then what was done, changed and checked, what it said
+    /// to you last, and what's still going.
+    fn catch_card(&mut self, from: usize, fresh: bool) {
+        let s = self.s;
+        let turns = &s.turns[from..];
+        let first_r = format!("t{}", turns[0].n);
+        // The heading.
+        let k = turns.len();
+        let since = self.o.since;
+        let mut head = if since <= 0 && k == 1 {
+            text("The last turn")
+        } else if since <= 0 {
+            text(&format!("The last {k} turns"))
+        } else if fresh {
+            text("Since you last looked")
+        } else {
+            text("Nothing new since you last looked")
+        };
+        if since > 0 {
+            head.push(dim(&format!(" · {} ago", dur(self.o.now - since))));
+        }
+        if fresh && since > 0 {
+            head.push(dim(&format!(" · {}", plural(k, "turn"))));
+        }
+        let cost: f64 = turns.iter().map(|t| t.cost).sum();
+        let m = money(cost);
+        if !m.is_empty() {
+            head.push(dim(&format!(" · {m}")));
+        }
+        let Facts {
+            needs,
+            done,
+            said,
+            files,
+            add,
+            del,
+            checks,
+            going,
+            ran,
+            more,
+        } = self.facts(from);
+        let last = &turns[k - 1];
         // Laid out.
         let rail_c = if !needs.is_empty() {
             C_YELLOW
@@ -1467,16 +1727,7 @@ impl Drawer<'_> {
         let room = inner.saturating_sub(LABEL_W);
         let rail = || paint(rail_c, "┃").and_raw(" ");
         let label = |s: &str, c: Style| paint(c, &format!("{s:<w$}", w = LABEL_W));
-        let mut rows: Vec<(Txt, String)> = Vec::new();
-        for (w, r) in &needs {
-            let action = paint(C_ORANGE, "[answer]");
-            let room = room.saturating_sub(action.width() + 3);
-            let l = label("? needs you", C_YELLOW)
-                .and(w.truncate(room, &faint("…")))
-                .and_raw("   ")
-                .and(action);
-            rows.push((l, r.clone()));
-        }
+        let mut rows: Vec<(Txt, String)> = needs_rows(&needs, room);
         if !needs.is_empty() {
             rows.push((Txt::new(), String::new()));
         }
@@ -1511,39 +1762,12 @@ impl Drawer<'_> {
             }
         }
         if !files.is_empty() {
-            let names: Vec<&str> = files.iter().map(|f| base_after_slash(f)).collect();
-            let l = label("Changed", C_SUB)
-                .and(text(&plural(files.len(), "file")))
-                .and_raw("  ")
-                .and(Self::add_del(add, del))
-                .and(faint(&format!("   ({})", names.join(", "))));
-            rows.push((l.truncate(inner, &faint("…)")), String::new()));
+            rows.push((changed_row(&files, add, del, inner), String::new()));
         }
         if !checks.is_empty() {
-            let mut l = label("Checks", C_SUB);
-            for (i, (n, c, failed_once, tests)) in checks.iter().enumerate() {
-                if i > 0 {
-                    l.push_str("   ", Style::default());
-                }
-                let word = match tests {
-                    Some(p) if *n == "tests" && *c == Came::Passed => {
-                        format!("{n} {}", grouped(*p))
-                    }
-                    _ => n.to_string(),
-                };
-                l.push(match c {
-                    Came::Running => paint(C_ORANGE, &format!("✱ {word}")),
-                    Came::Passed => paint(C_GREEN, "✓").and_raw(" ").and(text(&word)),
-                    Came::Failed => paint(C_RED, &format!("✗ {word}")),
-                });
-                if *failed_once && *c == Came::Passed {
-                    l.push(faint(" (failed, rerun passed)"));
-                }
-            }
-            rows.push((l.truncate(inner, &faint("…")), String::new()));
+            rows.push((checks_row(&checks, inner), String::new()));
         }
         // What you ran, the newest RAN_SHOWN, a line each to pick and open.
-        let more = ran.len().saturating_sub(RAN_SHOWN);
         for (j, (r, run)) in ran.iter().skip(more).enumerate() {
             let lead = if j == 0 {
                 label("You ran", C_SUB)
@@ -1597,6 +1821,132 @@ impl Drawer<'_> {
         for (r, run) in ran.iter().skip(more) {
             self.box_under(r, run);
         }
+    }
+
+    // ---- Live ----
+
+    /// The card a watcher model lays out, with the last turn; the turns
+    /// before it a row each, as Catch-up's are.
+    fn live(&mut self) {
+        if self.ti + 1 < self.s.turns.len() {
+            self.older_row();
+        } else {
+            self.live_card();
+        }
+    }
+
+    /// The card: the story's headline and how far along, what needs you,
+    /// what's running now (the small-job model's line for it, when it has
+    /// one), the story's blocks, then what changed and was checked this
+    /// turn. What's sure comes from the session, the rest from the story.
+    fn live_card(&mut self) {
+        let s = self.s;
+        let t = self.t;
+        let n = s.turns.len();
+        let r = self.r.clone();
+        let story = self.o.story.clone();
+        let Facts {
+            needs,
+            files,
+            add,
+            del,
+            checks,
+            going,
+            ..
+        } = self.facts(n - 1);
+        let inner = self.cw.saturating_sub(GUTTER + 2).max(20);
+        let room = inner.saturating_sub(LABEL_W);
+        // The heading: the story's headline, or what you asked.
+        let headline = story
+            .as_ref()
+            .map(|st| st.headline.clone())
+            .filter(|h| !h.is_empty())
+            .unwrap_or_else(|| Self::asked_line(t));
+        let progress = story.as_ref().map_or((0, 0), |st| st.progress);
+        let right = if progress.1 > 0 {
+            dim(&format!(
+                "{}/{}  {}%",
+                progress.0,
+                progress.1,
+                progress.0 * 100 / progress.1
+            ))
+            .and_raw("  ")
+        } else {
+            Txt::new()
+        };
+        let mut rows: Vec<(Txt, String)> = Vec::new();
+        if progress.1 > 0 {
+            let w = inner.min(48);
+            let frac = f64::from(progress.0) / f64::from(progress.1);
+            let done = if progress.0 == 0 {
+                String::new()
+            } else {
+                bar(frac, w)
+            };
+            let left = w.saturating_sub(Txt::raw(&done).width());
+            let l = paint(C_ORANGE, &done).and(faint(&"─".repeat(left)));
+            rows.push((l, String::new()));
+        }
+        rows.extend(needs_rows(&needs, room));
+        // Now: the small-job model's line, else what's running.
+        if !going.is_empty() {
+            let line = story
+                .as_ref()
+                .map(|st| st.now.clone())
+                .filter(|x| !x.is_empty())
+                .unwrap_or_else(|| going[0].clone());
+            let mut l = card_label("Now", C_ORANGE).and(paint(C_ORANGE, &line));
+            if going.len() > 1 {
+                l.push(dim(&format!("  · {}", going[1..].join(" · "))));
+            }
+            rows.push((l.truncate(inner, &faint("…")), String::new()));
+        }
+        // The story's blocks, a blank row between them.
+        if let Some(st) = &story {
+            for b in &st.blocks {
+                rows.push((Txt::new(), String::new()));
+                for l in story_rows(b, inner) {
+                    rows.push((l, String::new()));
+                }
+            }
+            if !st.note.is_empty() {
+                rows.push((faint(&st.note), String::new()));
+            }
+        }
+        if !files.is_empty() || !checks.is_empty() {
+            rows.push((Txt::new(), String::new()));
+        }
+        if !files.is_empty() {
+            rows.push((changed_row(&files, add, del, inner), String::new()));
+        }
+        if !checks.is_empty() {
+            rows.push((checks_row(&checks, inner), String::new()));
+        }
+        if rows.is_empty() {
+            rows.push((faint("nothing going on"), String::new()));
+        }
+        // Laid out on a rail: yellow when it needs you, orange at work.
+        let rail_c = if !needs.is_empty() {
+            C_YELLOW
+        } else if t.live {
+            C_ORANGE
+        } else {
+            C_FAINT
+        };
+        if self.ti > 0 {
+            self.bare();
+        }
+        let from_row = self.lines.len();
+        let room = self.cw.saturating_sub(right.width() + 3);
+        let l = self
+            .sp(1)
+            .and(text(&headline).truncate(room.max(8), &faint("…")));
+        self.add(&r, Color::Default, l, right);
+        for (row, rr) in rows {
+            let l = self.sp(1).and(paint(rail_c, "┃").and_raw(" ")).and(row);
+            self.add(&rr, Color::Default, l, Txt::new());
+        }
+        self.own(&r, from_row);
     }
 
     // ---- Trail ----

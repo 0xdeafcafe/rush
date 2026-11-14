@@ -4,6 +4,9 @@
 // Every test runs in a throwaway home (rush-testenv).
 rush_testenv::sandboxed!();
 
+use std::sync::Arc;
+
+use rush_convo::live::{Cursor, DELTA_CHARS, Story, delta};
 use rush_convo::render::{check_names, plain};
 use rush_convo::{Options, Preset, Renderer, Session};
 use serde_json::json;
@@ -298,7 +301,7 @@ fn presets_have_names_and_go_round() {
     assert_eq!(Preset::from_name("nonsense"), Preset::Normal);
     let mut p = Preset::Normal;
     let mut seen = Vec::new();
-    for _ in 0..5 {
+    for _ in 0..Preset::ALL.len() {
         seen.push(p);
         p = p.next();
     }
@@ -463,6 +466,88 @@ fn catch_up_is_one_card_since_you_looked() {
     s.feed(done(0.01), at(1751));
     let got = draw(&s, Preset::CatchUp, &[]);
     assert!(!got.contains("needs you"), "{got}");
+}
+
+#[test]
+fn live_is_a_card_the_watcher_lays_out() {
+    let s = session();
+    // No story yet: what you asked heads the card, and what's sure is
+    // drawn all the same; the turn before is a row.
+    let got = draw(&s, Preset::Live, &[]);
+    assert!(
+        got.contains("? needs you") && got.contains("Read from the end"),
+        "{got}"
+    );
+    assert!(
+        got.lines()
+            .any(|l| l.starts_with("t1 ") && l.contains("turn 1")),
+        "{got}"
+    );
+    // The watcher's story, each kind of block as it lays it out.
+    let mut st = Story::default();
+    st.apply(
+        r#"{"headline":"Fixing the decision card's overlap","progress":[2,3],"blocks":[
+            {"id":"p","kind":"steps","items":[{"text":"find","done":true},{"text":"fix","done":true},{"text":"merge","tone":"busy"}]},
+            {"id":"c","kind":"callout","text":"Waiting on which read order to ship."},
+            {"id":"k","kind":"kv","items":[{"text":"branch","meta":"main"}]},
+            {"id":"t","kind":"timeline","items":[{"time":"22:14","text":"found the cause","meta":"dock.rs"}]},
+            {"id":"b","kind":"bars","items":[{"text":"dock.rs","value":6,"meta":"+6"},{"text":"question.rs","value":3,"meta":"+3"}]},
+            {"id":"x","kind":"text","text":"Long options wrapped under the side panel."}]}"#,
+    )
+    .unwrap();
+    st.note = "the watcher is a minute behind".into();
+    let mut o = opts(Preset::Live, 120);
+    o.story = Some(Arc::new(st));
+    let got = plain(&Renderer::new().render(&s, &o));
+    for want in [
+        "Fixing the decision card's overlap",
+        "2/3  66%",
+        "✓ find ─ ✓ fix ─ ◉ merge",
+        "! Waiting on which read order to ship.",
+        "22:14 ● found the cause · dock.rs",
+        "Long options wrapped under the side panel.",
+        "the watcher is a minute behind",
+        "? needs you",
+    ] {
+        assert!(got.contains(want), "{want}:\n{got}");
+    }
+    let row = |w: &str| got.lines().find(|l| l.contains(w)).unwrap_or("");
+    assert!(row("branch").contains("main"), "{got}");
+    assert!(row("dock.rs  ").contains("+6"), "{got}");
+    // The story's own line for what's running goes on the Now row; with
+    // nothing running there's no Now row.
+    assert!(!got.contains("Now "), "{got}");
+}
+
+#[test]
+fn the_watcher_is_told_only_whats_new() {
+    let s = session();
+    let mut c = Cursor::default();
+    assert!(!c.started());
+    let first = delta(&s, &mut c, at(1800)).unwrap();
+    for want in [
+        "Turn 1: the user asked: the decision card still overlaps on long options",
+        "- read /work/rush/src/dock.rs",
+        "- edited /work/rush/src/dock.rs",
+        "Turn 2 answered: Merged to main as f3760931.",
+    ] {
+        assert!(first.contains(want), "{want}:\n{first}");
+    }
+    assert!(first.len() <= DELTA_CHARS);
+    assert!(c.started());
+    assert_eq!(
+        delta(&s, &mut c, at(1800)),
+        None,
+        "nothing new, nothing sent"
+    );
+    let mut s = s;
+    s.feed(sent("1a"), at(1850));
+    s.feed(say("Going with now."), at(1851));
+    s.feed(done(0.01), at(1852));
+    let next = delta(&s, &mut c, at(1900)).unwrap();
+    assert!(next.starts_with("Turn 3: the user asked: 1a"), "{next}");
+    assert!(next.contains("Turn 3 answered: Going with now."), "{next}");
+    assert!(!next.contains("dock.rs"), "told again: {next}");
 }
 
 #[test]
