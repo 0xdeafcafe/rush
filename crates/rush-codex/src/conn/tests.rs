@@ -222,7 +222,10 @@ fn thread_start_params() {
     let init = f.expect("initialize");
     f.respond(&init, json!({"userAgent": "rush/1"}));
     f.expect("initialized");
-    let p = f.expect("thread/resume")["params"].clone();
+    let mut p = f.expect("thread/resume")["params"].clone();
+    // What it reads and may write besides (reads_claude_md_and_writes_rush).
+    let cfg = p.as_object_mut().unwrap().remove("config").unwrap();
+    assert_eq!(cfg["project_doc_fallback_filenames"], json!(["CLAUDE.md"]));
     assert_eq!(
         p,
         json!({"threadId": "old", "cwd": "/w", "model": "m", "approvalPolicy": "never", "sandbox": "danger-full-access", "excludeTurns": true})
