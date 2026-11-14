@@ -785,6 +785,12 @@ impl Renderer {
             k.bg = bg_sig(s, t, o);
         }
         if o.preset == Preset::Live && i + 1 == s.turns.len() {
+            // The card has nothing that turns with the tick (no spinner),
+            // only times: drawn again as they change, not every tick
+            // (the full story's card is ~90 µs a draw).
+            if let Some((_, at)) = k.clock {
+                k.clock = Some((0, at));
+            }
             // The card: the story as it stands, and what's still going.
             let mut h = DefaultHasher::new();
             o.story.as_ref().map(|st| st.serial).hash(&mut h);
