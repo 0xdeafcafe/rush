@@ -133,7 +133,7 @@ codex,OpenAI,Codex,tested,True,commands,Commands and skills,planned,declaration;
 codex,OpenAI,Codex,tested,True,btw,Side questions (btw),no,declaration; see caveats,
 codex,OpenAI,Codex,tested,True,dirs,cd and add-dir,no,declaration; see caveats,
 codex,OpenAI,Codex,tested,True,mcp,MCP,yes,declaration; see caveats,
-codex,OpenAI,Codex,tested,True,hooks,Hooks,no,declaration; see caveats,
+codex,OpenAI,Codex,tested,True,hooks,Hooks,no,declaration; see caveats,"no /hooks command; rush's gate and context guard as Codex's own trusted hooks once you turn it on (Settings › Harnesses › Codex), in every Codex session"
 codex,OpenAI,Codex,tested,True,plugins,Plugins,no,declaration; see caveats,
 codex,OpenAI,Codex,tested,True,statusline,Statusline,no,declaration; see caveats,
 codex,OpenAI,Codex,tested,True,screen,Its own screen,no,declaration; see caveats,

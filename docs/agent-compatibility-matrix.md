@@ -58,7 +58,7 @@ Pi and OpenCode can expose providers configured in their native tools; those dyn
 | Side questions (btw) | ✓ | — | — | — | — | — | — | — | — | — |
 | cd and add-dir | ✓ | — | — | — | — | — | — | — | — | — |
 | MCP | ✓ | ✓ | ✓ | ✓ | — | —* | ✓ | ✓ | ✓ | ✓ |
-| Hooks | ✓ | — | — | — | — | — | — | — | — | — |
+| Hooks | ✓ | —* | — | — | — | — | — | — | — | — |
 | Plugins | ✓ | — | — | — | — | — | — | — | — | — |
 | Statusline | ✓ | — | — | — | — | — | — | — | — | — |
 | Its own screen | ✓ | — | — | — | — | — | — | — | — | — |
@@ -209,6 +209,7 @@ Pi and OpenCode can expose providers configured in their native tools; those dyn
 ## Important qualifications
 
 - **Codex compaction:** `/compact` and #compact call native `thread/compact/start` (Codex and Ollama-in-Codex). Conversation rollback (`thread/rollback`) is deprecated and is not file restoration. These are integration gaps/distinctions, not evidence that Codex cannot compress. [Official app-server documentation](https://learn.chatgpt.com/docs/app-server).
+- **Codex hooks:** rush has no /hooks command for Codex, but Settings › Harnesses › Codex › rush's gate and context guard (off until you turn it on, and asked first) writes rush's hook into hooks.json in Codex's folder and trusts it in config.toml's `hooks.state`, through Codex's own app-server. Then every Codex session, rush's or one started outside rush, runs it before and after each shell command (PreToolUse and PostToolUse on `Bash`, and PreCompact): search and context guard refusals everywhere, gate rewrites only in sessions rush runs. Codex runs only hooks you trusted and skips one passed with `-c` for one session, so nothing is passed per session. Turning it off takes it out of both files.
 - **External compression:** only Claude and Ollama currently implement the summarizer interface. Codex is not an available summarizing engine. The target session must advertise rewind, have a protocol-9-or-newer host, and pass unchanged-session/idle/queue guards. Most harnesses are therefore excluded. Native compaction is a separate path. Ollama classifiers such as tev1 are excluded as summarizers.
 - **Inherited rewind declarations corrected:** `deepseek-claude` and `glm-claude` do not implement `agent.Rewinder` or `agent.Brancher`; their rewind flags are now disabled. A registry regression test requires both interfaces for every advertised rewind feature. Their other inherited ticks remain declarations, not verified end-to-end coverage; provider-specific image/tool behavior needs checking.
 - **ACP harnesses:** Kimi, Vibe, Copilot, OpenCode, dsh and ZCode use protocol negotiation. Resume depends on advertised load/resume support; images depend on advertised image input and model ability; model/permission/plan choices depend on what the running CLI returns. A static yes is not a guarantee that a particular installation offers the control.

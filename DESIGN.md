@@ -523,9 +523,30 @@ Claude, fleet, the other adapters) builds on these.
   (rush-host `memshare.rs`). A model config.toml sets that its models
   cache doesn't list yet (gpt-6.2-sol) is listed first, and a whole
   `gpt-…` id goes to the server as named. Codex's hooks (`[features]
-  hooks`) take Claude Code's hook input, but run only hooks the user
-  trusted (config.toml's `hooks.state`), so rush's gate and context
-  guard don't reach it yet; its PATH shims do.
+  hooks`, on by default) take Claude Code's hook input as it is (its
+  shell tool is `Bash`, the command `tool_input.command`), but run only
+  hooks the user trusted (config.toml's `hooks.state."<key>"
+  .trusted_hash`); one passed with `-c` for a session is skipped. So
+  `StartOptions.bash_hook`/`tool_hook` aren't passed to Codex: Settings ›
+  Harnesses › Codex › rush's gate and context guard (off; asked first)
+  writes `'<rush>' gate hook --codex` into hooks.json in Codex's folder
+  for PreToolUse and PostToolUse on `Bash` and PreCompact, and trusts
+  each with the hash `hooks/list` reports, by `config/batchWrite` on
+  `hooks.state` (a key path is split at dots, and a key is hooks.json's
+  real path, so it's written as a table); every Codex session after,
+  rush's or not, runs it (`rush-codex/hooks.rs`). The key is
+  `<real path>:pre_tool_use:<group>:<hook>` and the hash the hook's own,
+  the same at any index, so off moves the trust of a hook of yours that
+  moves up. A session start re-trusts it when it names another rush (an
+  update moved it). `--codex` answers as Codex keeps an updatedInput:
+  only beside `permissionDecision: "allow"`, which still goes through
+  Codex's sandbox and approvals (tried); without it the rewrite was
+  dropped. A rewrite (gate run, a long command as a script) writes
+  rush's folder, which Codex's sandbox allows only in rush's sessions,
+  so outside rush the hook only refuses. Codex's PostToolUse
+  `tool_response` is a string and it can't replace a tool's output, so
+  the context guard doesn't squeeze there. All tried with codex-cli
+  0.169.0 and throwaway CODEX_HOMEs.
 - **Shared types.** `SubagentStats` is `rush_core::agent`'s (the adapter
   module re-exports it). Processes are read by `rush_sys::proc` (a table
   with `snapshot`, filled only for the trees asked; `Sampler` for one
