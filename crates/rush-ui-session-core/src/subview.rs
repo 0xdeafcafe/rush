@@ -385,6 +385,11 @@ fn peek_head(m: &mut Model, key: &str, id: &str, w: usize) -> Vec<Line> {
     let home = home_kind(m, key);
     let (now, tick) = (m.now, m.tick);
     let reg = m.reg.clone();
+    // The parent's auto-compact window: its subagents run in its process,
+    // under the same settings, so they compact within it too.
+    let compaction = super::agent(m, key)
+        .map(|a| a.compaction)
+        .unwrap_or_default();
     let Some(v) = m.session.as_ref().filter(|v| v.key == key) else {
         return Vec::new();
     };
@@ -428,12 +433,23 @@ fn peek_head(m: &mut Model, key: &str, id: &str, w: usize) -> Vec<Line> {
         } else {
             reg.context_window(&kind, model)
         };
-        facts.push(if window > 0 {
+        // A subagent of the parent's own harness compacts within the
+        // parent's window (an agent rush hosts beside it has its own).
+        let f = rush_core::adapter::fill_of(
+            used,
+            window,
+            if kind == home {
+                compaction
+            } else {
+                Default::default()
+            },
+        );
+        facts.push(if f.window > 0 {
             format!(
-                "context {} of {} · {}%",
+                "context {} of {} · {:.0}%",
                 tokens(used),
-                tokens(window),
-                used * 100 / window
+                tokens(f.window),
+                f.pct()
             )
         } else {
             format!("context {}", tokens(used))

@@ -285,6 +285,28 @@ fn the_setting_asks_for_the_peek() {
     assert_eq!(open_of(&mut m).1[0], 2, "beside it:\n{all}");
 }
 
+/// A subagent runs in its parent's process, under its settings: its
+/// context is counted against the window the parent compacts within
+/// (CLAUDE_CODE_AUTO_COMPACT_WINDOW=400000), not the model's 1M.
+#[test]
+fn a_runs_context_is_of_its_parents_compact_window() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = model(&d);
+    m.w = 220;
+    m.agents[0].compaction = rush_core::adapter::Compaction {
+        window: 400_000,
+        headroom: 33_000,
+    };
+    subview::pick_run(&mut m, KEY, "x");
+    let all = text(&m.frame());
+    let ctx = all
+        .lines()
+        .find(|l| l.contains("context "))
+        .unwrap_or_else(|| panic!("no context:\n{all}"));
+    assert!(ctx.contains(" of 400k"), "{ctx}");
+    assert!(!ctx.contains(" of 1M"), "{ctx}");
+}
+
 /// A click on its ✕ closes it; a click elsewhere gives the keys back to
 /// the conversation, the run left open.
 #[test]
