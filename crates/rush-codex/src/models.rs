@@ -17,8 +17,36 @@ pub(crate) struct CachedModel {
     pub context_window: i64,
 }
 
-/// Every model Codex's cache in dir has, listed or not.
+/// Every model Codex's cache in dir has, listed or not, with first the
+/// model config.toml in dir sets when the cache doesn't have it: OpenAI
+/// serves a new model (gpt-6.2-sol) before Codex's cache lists it, and
+/// whoever set it there runs on it.
 pub(crate) fn read_models(dir: &str) -> Vec<CachedModel> {
+    let mut models = cached_models(dir);
+    if let Some(slug) = configured_model(dir)
+        && !models.is_empty()
+        && !models.iter().any(|m| m.slug.eq_ignore_ascii_case(&slug))
+    {
+        // As big a context as the cache's model of its name (sol) has.
+        let short = &slug[slug.rfind('-').map_or(0, |i| i + 1)..];
+        let context_window = models
+            .iter()
+            .find(|m| m.slug.ends_with(&format!("-{short}")))
+            .map_or(0, |m| m.context_window);
+        models.insert(
+            0,
+            CachedModel {
+                slug,
+                visibility: "list".into(),
+                description: "Codex's default model, set in its config.toml.".into(),
+                context_window,
+            },
+        );
+    }
+    models
+}
+
+fn cached_models(dir: &str) -> Vec<CachedModel> {
     let Ok(b) = std::fs::read(Path::new(dir).join("models_cache.json")) else {
         return Vec::new();
     };
@@ -34,6 +62,16 @@ pub(crate) fn read_models(dir: &str) -> Vec<CachedModel> {
             context_window: int(m, "context_window").unwrap_or(0),
         })
         .collect()
+}
+
+/// The model config.toml in dir sets, if any.
+fn configured_model(dir: &str) -> Option<String> {
+    let text = std::fs::read_to_string(Path::new(dir).join("config.toml")).ok()?;
+    let table: toml::Table = toml::from_str(&text).ok()?;
+    match table.get("model")? {
+        toml::Value::String(s) if !s.trim().is_empty() => Some(s.trim().to_string()),
+        _ => None,
+    }
 }
 
 /// The models Codex offers the account signed in at dir, as its models
@@ -69,8 +107,9 @@ impl std::error::Error for NoModel {}
 
 /// name as Codex knows it: a model of models, or the one whose last word
 /// it is (astra for gpt-6-astra). With no models known, name stands as it
-/// is; else one Codex doesn't have is an error that says which it has,
-/// rather than a turn its server refuses.
+/// is, as does a whole GPT id (gpt-6.2-sol): OpenAI serves models before
+/// Codex's cache lists them. Else one Codex doesn't have is an error that
+/// says which it has, rather than a turn its server refuses.
 pub(crate) fn model_id(name: &str, models: &[CachedModel]) -> Result<String, NoModel> {
     if name.is_empty() || models.is_empty() {
         return Ok(name.to_string());
@@ -87,6 +126,9 @@ pub(crate) fn model_id(name: &str, models: &[CachedModel]) -> Result<String, NoM
     }
     if by.len() == 1 {
         return Ok(by.remove(0));
+    }
+    if low.starts_with("gpt-") {
+        return Ok(low);
     }
     let listed: Vec<&str> = models
         .iter()
@@ -205,6 +247,44 @@ mod tests {
         let err = model_id("opus[1m]", &models).unwrap_err();
         assert!(err.0.contains("gpt-6-astra, gpt-6-luna"), "{err}");
         assert_eq!(model_id("anything", &[]).unwrap(), "anything");
+        // A GPT the cache doesn't list yet goes to the server as named.
+        assert_eq!(model_id("GPT-6.2-Sol", &models).unwrap(), "gpt-6.2-sol");
+    }
+
+    // A model config.toml sets that the cache doesn't list comes first,
+    // with the context of the cache's model of its name; one it lists, or
+    // none set, changes nothing.
+    #[test]
+    fn configs_model_listed() {
+        let cache = r#"{"models":[
+		{"slug":"gpt-6.1-sol","visibility":"list","description":"Workhorse.","context_window":500000},
+		{"slug":"gpt-6-luna","visibility":"list","description":"Fast."}]}"#;
+        for (config, want) in [
+            (
+                "model = \"gpt-6.2-sol\"\nmodel_reasoning_effort = \"high\"\n",
+                vec![
+                    ("gpt-6.2-sol", 500000),
+                    ("gpt-6.1-sol", 500000),
+                    ("gpt-6-luna", 0),
+                ],
+            ),
+            (
+                "model = \"gpt-6-luna\"\n",
+                vec![("gpt-6.1-sol", 500000), ("gpt-6-luna", 0)],
+            ),
+            ("", vec![("gpt-6.1-sol", 500000), ("gpt-6-luna", 0)]),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join("models_cache.json"), cache).unwrap();
+            std::fs::write(dir.path().join("config.toml"), config).unwrap();
+            let got: Vec<(String, i64)> = list_models(&dir.path().to_string_lossy())
+                .into_iter()
+                .map(|c| (c.id, c.context))
+                .collect();
+            let want: Vec<(String, i64)> =
+                want.into_iter().map(|(s, c)| (s.to_string(), c)).collect();
+            assert_eq!(got, want, "{config}");
+        }
     }
 
     // installed_test.go:TestReads
