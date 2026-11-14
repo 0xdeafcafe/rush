@@ -204,7 +204,7 @@ fn ask_now(m: &mut Model, key: &str, of: String, words: String) {
     m.later(
         move || match say {
             Some(f) => f(&words),
-            None => rush_core::adapter::cheap::ask_cheap(&reg, live::NOW_SYSTEM, &words, "")
+            None => rush_core::adapter::ask_cheap(&reg, live::NOW_SYSTEM, &words, "")
                 .ok()
                 .map(|(_, a)| a),
         },
