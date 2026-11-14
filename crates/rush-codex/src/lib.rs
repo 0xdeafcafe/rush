@@ -19,6 +19,7 @@ mod diff;
 mod discover;
 mod grants;
 mod history;
+pub mod hooks;
 mod items;
 mod json;
 mod models;

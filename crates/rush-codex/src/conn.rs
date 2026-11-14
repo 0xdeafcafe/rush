@@ -1380,6 +1380,14 @@ pub fn start(mut o: StartOptions, sink: Arc<dyn Sink>) -> adapter::Result<Conn> 
         o.mode.clear();
     }
     crate::grants::write_rules(&o.profile.dir);
+    // Rush's hook in Codex's own hooks.json, left by an older rush, is
+    // trusted again as this one, off to the side (hooks::refresh). It
+    // stands in for o.bash_hook and o.tool_hook, which Codex can't take
+    // for one session.
+    if crate::hooks::command().is_some() {
+        let home = std::path::PathBuf::from(codex_home(&o.profile.dir));
+        std::thread::spawn(move || crate::hooks::refresh(&home));
+    }
     let inner = new_inner(sink, starting());
     let rpc = spawn(
         &o.binary,

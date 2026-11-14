@@ -234,16 +234,35 @@ impl Adapter for Codex {
 
 impl HarnessSettings for Codex {
     fn own_settings(&self, p: &Profile, _env: &[(String, String)]) -> adapter::Result<OwnSettings> {
-        Ok(crate::settings::read(&crate::settings::config_path(p))?)
+        let path = crate::settings::config_path(p);
+        let mut s = crate::settings::read(&path)?;
+        // Rush's hook in every Codex session, once you say so (hooks.rs).
+        if let (Some(c), Some(home)) = (crate::hooks::command(), path.parent()) {
+            s.groups.push(crate::hooks::group(home, c));
+        }
+        Ok(s)
     }
     fn check_setting(&self, key: &str, value: &str) -> Result<(), String> {
+        if key == crate::hooks::KEY {
+            return crate::hooks::check(value);
+        }
         crate::settings::check(key, value)
     }
     fn set_own_settings(&self, p: &Profile, edits: &[OwnEdit]) -> adapter::Result<()> {
-        Ok(crate::settings::write(
-            &crate::settings::config_path(p),
-            edits,
-        )?)
+        let path = crate::settings::config_path(p);
+        let (hooks, rest): (Vec<OwnEdit>, Vec<OwnEdit>) = edits
+            .iter()
+            .cloned()
+            .partition(|e| e.key == crate::hooks::KEY);
+        if !rest.is_empty() {
+            crate::settings::write(&path, &rest)?;
+        }
+        if let Some(home) = path.parent() {
+            for e in hooks {
+                crate::hooks::set(home, &e.value)?;
+            }
+        }
+        Ok(())
     }
 }
 
