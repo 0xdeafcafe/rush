@@ -190,6 +190,7 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     // column is drawn over the room past the reading width, so rows wrapped
     // for the whole width would lose their ends under it.
     let beside_run = !conn(m, key).side.run.is_empty();
+    let run_w = conn(m, key).side.w;
     let wide = conn(m, key).side.rows.is_empty() && !beside_run;
     // A run open where the column isn't its: framed under its step, the
     // conversation laid out the frame's rows shorter so its end still
@@ -206,7 +207,15 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
         return Vec::new();
     };
     v.side = side;
-    v.sync(w, now, tick);
+    // A run beside it can leave the text less than its reading width
+    // (openrun::run_width keeps it 90 to 124): its rows are laid out to
+    // the room left of the run, so none runs on under it.
+    let laid = if beside_run {
+        w.saturating_sub(run_w + 2)
+    } else {
+        w
+    };
+    v.sync(laid, now, tick);
     let o = &mut v.o;
     o.wide = wide;
     o.between_turns = between;
@@ -221,6 +230,11 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
         o.brief = opening.3;
     }
     let cw = w.saturating_sub(side);
+    let lay = if beside_run {
+        cw.saturating_sub(run_w + 2)
+    } else {
+        cw
+    };
     let mut n = rows;
     let mut out = if !v.read {
         v.note_drawn();
@@ -238,7 +252,7 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
         v.shown = vec![String::new(); out.len().min(rows)];
         out
     } else {
-        let (b, shown) = rows_of(v, rows, cw, &hover, hover_tag.as_ref(), &txt, pref);
+        let (b, shown) = rows_of(v, rows, lay, &hover, hover_tag.as_ref(), &txt, pref);
         n = shown;
         b
     };

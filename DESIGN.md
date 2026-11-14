@@ -2284,9 +2284,11 @@ had a Subagents tab and a Background tab). A run is opened from its step
 (enter or → on the subagent's call), from the dock's or the column's
 Running rows (space, a click), from a card's link or the views panel, or
 with shift+↑↓, which step through them all (`subview::cycle_sub`); it
-opens on the conversation's page (`openrun.rs`). Where the column right
-of the conversation fits, it takes the column, all the room right of the
-text and its whole height, a rule down its left and its top row the way
+opens on the conversation's page (`openrun.rs`). Where there's room, it
+takes the column right of the conversation, its whole height: from 149
+wide, not the column's 171, the conversation keeping 90 to 124 cells and
+laid out to what's left of the run, the run asking for 80 and having 56 at
+least (`openrun::run_width`: 80 at 180, 133 at 260), a rule down its left and its top row the way
 out ("tab back · esc closes", and ✕). Where it doesn't, or when Settings
 asks for it (Interface › Look › Open a subagent: under its step,
 `Config::runs_open = "peek"`), it's a peek, as an editor peeks at a

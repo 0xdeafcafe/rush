@@ -388,6 +388,17 @@ fn room_beside(m: &mut Model, key: &str, w: usize) -> (usize, usize) {
     )
 }
 
+/// How wide a run open beside the conversation is, w wide in all, right
+/// of the views strip; 0 when the views panel takes the room, or there's
+/// too little (openrun::run_width).
+fn run_room(m: &mut Model, key: &str, w: usize) -> usize {
+    let views = rush_ui_plugin_ui::views::beside::views_beside(m, key, w).2;
+    if views > rush_ui_plugin_ui::views::panel::VIEWS_STRIP {
+        return 0;
+    }
+    super::openrun::run_width(w - views)
+}
+
 /// alt+← and alt+→ (or ctrl, where ⌥ is no key) in a Session (the box empty) make the column beside
 /// the conversation two columns narrower or wider, between its least,
 /// 44, and all the room left of the text, and keep the width. Nothing
@@ -528,17 +539,19 @@ pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
         ..Side::default()
     };
     let runs = std::mem::take(&mut conn(m, key).side_runs);
-    if sw == 0 || !conversation {
-        conn(m, key).side = side;
-        return false;
+    // A run open beside the conversation has the column, in its parts'
+    // place, and from narrower than they do (openrun::run_width).
+    if conversation && let Some(id) = super::openrun::open_id(m, key) {
+        let rw = run_room(m, key, w);
+        if super::openrun::place(m, rw) == super::openrun::Place::Beside {
+            side.w = rw;
+            side.room = rw;
+            side.run = id;
+            conn(m, key).side = side;
+            return false;
+        }
     }
-    // A run open beside the conversation has the column, all the room it
-    // could have, in its parts' place (openrun.rs).
-    if let Some(id) = super::openrun::open_id(m, key)
-        && super::openrun::place(m, sw) == super::openrun::Place::Beside
-    {
-        side.w = room.max(sw);
-        side.run = id;
+    if sw == 0 || !conversation {
         conn(m, key).side = side;
         return false;
     }

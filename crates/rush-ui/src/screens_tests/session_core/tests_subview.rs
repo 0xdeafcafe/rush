@@ -183,7 +183,7 @@ fn no_tabs_of_their_own() {
     );
 }
 
-/// Wide (the column beside the conversation fits from 171), a run opened
+/// Wide (from 149, the conversation keeping 90 to 124), a run opened
 /// shows beside the conversation, in the column right
 /// of it, the conversation still there; it takes the keys as it shows;
 /// tab gives them back and takes them again; esc closes it, back on the
@@ -192,7 +192,7 @@ fn no_tabs_of_their_own() {
 fn a_run_opens_beside_the_conversation() {
     let d = tempfile::tempdir().unwrap();
     let mut m = model(&d);
-    m.w = 220;
+    m.w = 180;
     x_has_a_step(&mut m);
     let step = "t2:s:toolu_x";
     m.session.as_mut().unwrap().sel = step.into();
@@ -201,9 +201,19 @@ fn a_run_opens_beside_the_conversation() {
     let all = text(&m.frame());
     assert!(all.contains("The diff is fine"), "{all}");
     assert!(all.contains("tab back · esc closes"), "{all}");
-    let (id, [x, _, w, _]) = open_of(&mut m);
+    let (id, [x, y, w, h]) = open_of(&mut m);
     assert_eq!(id.as_deref(), Some("x"));
-    assert!(x > 60 && x + w <= 220, "not beside it: {x} {w}\n{all}");
+    assert!(x > 60 && x + w <= 180, "not beside it: {x} {w}\n{all}");
+    // The conversation is laid out left of it: none of its rows runs on
+    // under the run's edge.
+    let frame = m.frame();
+    for l in frame.iter().skip(y).take(h) {
+        let t = l.plain();
+        let cells: Vec<char> = t.chars().collect();
+        if let Some(&c) = cells.get(x) {
+            assert!(c == '│' || c == ' ', "a row runs under the run at {x}: {t}");
+        }
+    }
     assert!(conn(&mut m, KEY).watch.msg_focus, "it didn't take the keys");
     press(&mut m, "tab");
     assert!(!conn(&mut m, KEY).watch.msg_focus, "tab kept the keys");
@@ -220,6 +230,24 @@ fn a_run_opens_beside_the_conversation() {
     press(&mut m, "tab");
     press(&mut m, "esc");
     assert_eq!(open_of(&mut m).0, None, "esc from the conversation");
+}
+
+/// How wide a run beside the conversation is, by the screen's width: the
+/// conversation keeps 90 to 124, the run asks for 80 and has 56 at least,
+/// else it's a peek.
+#[test]
+fn a_run_beside_is_as_wide_as_the_room() {
+    for (w, want) in [
+        (120, 0),
+        (148, 0),
+        (149, 56),
+        (150, 57),
+        (180, 80),
+        (220, 93),
+        (260, 133),
+    ] {
+        assert_eq!(openrun::run_width(w), want, "{w}");
+    }
 }
 
 /// Narrow, it's a peek: framed under its step in the conversation, at

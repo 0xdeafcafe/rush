@@ -44,6 +44,26 @@ pub fn is_open(m: &Model, key: &str) -> bool {
     open_id(m, key).is_some()
 }
 
+/// The least a run beside the conversation may have, the least and the
+/// most the conversation keeps beside it, and what the run asks for.
+pub const RUN_MIN: usize = 56;
+const TEXT_MIN: usize = 90;
+const TEXT_MOST: usize = 124; // convo's capRow, as the column's
+const RUN_WANTS: usize = 80;
+
+/// How wide a run beside a conversation w wide in all is: the room past
+/// the conversation, which keeps 90 to 124 cells, the run asking for 80;
+/// 0 when that leaves the run under 56, and it's a peek. From 149 wide,
+/// not the column's 171: a run is read beside the conversation more than
+/// the column's parts are (Rust-only, the owner's call 2026-11-14). At
+/// 180 it's 80, at 260 133, as the column's room.
+pub fn run_width(w: usize) -> usize {
+    let w = w.saturating_sub(3);
+    let text = w.saturating_sub(RUN_WANTS).clamp(TEXT_MIN, TEXT_MOST);
+    let run = w.saturating_sub(text);
+    if run >= RUN_MIN { run } else { 0 }
+}
+
 /// Where what's open shows, the column cols wide where it fits (0 where
 /// it doesn't).
 pub fn place(m: &Model, cols: usize) -> Place {
