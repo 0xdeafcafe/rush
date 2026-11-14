@@ -1,45 +1,34 @@
-//! The subagents view: every run the session started, a line each, under
-//! Running and Finished, workflows with their phases and agents, a finished
-//! workflow folded to its row and named by when it started, an agent's
-//! earlier tries folded under the try that replaced them. The run picked
-//! shows with the list: its facts, its conversation (with its working line
-//! while it works) and a box to message it; beside the list when there's
-//! room, under a short list of the runs when there isn't. tab, enter or →
-//! on it, or a click in its pane, gives the pane the keys: its
-//! conversation is then a session's own, driven as one (subpane.rs),
-//! never a screen of its own; a subagent's step, the dock and a card's
-//! link pick it here with the keys in its pane; esc goes back where it
-//! came from.
-//! Where the user asked, this parts from Go: one line a run rather than
-//! two, the branch from where the run worked. After Go's internal/ui/rushmode.go (views
-//! :47, cycleSub :734, watchRun :809, subHoverAt :990, subagentLines
-//! :1039, subagentList :1059, subRow.appendTo :1213, subEffort :1231,
-//! tabStat's subagents :1469, paneKey's subagents keys :4255-4262, moveSel
-//! :4932, dockRefs :4900, clickRef :5046, :5102-5122, subWhere :6299,
-//! subWorktree :6308), workflow.go (workflowGroupLines :400,
-//! openWorkflow :586), subpreview.go (wideSubagents :20, subListWidth
-//! :24, subPreviewLines :33, drawSubPreview :94), spawns.go (spawnRunFor
-//! :694, subKind :721) and model.go (the preview's click :1700 and wheel
-//! :1760, subHoverMsg :1192).
+//! A session's runs, opened on the conversation's page (openrun.rs says
+//! where): what an open run shows (its facts, its conversation with its
+//! working line while it works, and a box to message it), a workflow's
+//! phases and agents, the dock's runs under the conversation, and the keys
+//! and clicks that open, cycle and close them. A run's conversation is a
+//! session's own while its pane has the keys, driven as one (subpane.rs).
+//! Rust-only in where it shows: Go, and the port before this, listed the
+//! runs in a subagents view, a tab of their own. After Go's
+//! internal/ui/rushmode.go (cycleSub :734, watchRun :809, subHoverAt :990,
+//! subRow.appendTo :1213, subEffort :1231, paneKey's subagents keys
+//! :4255-4262, dockRefs :4900, clickRef :5046, :5102-5122, subWhere :6299,
+//! subWorktree :6308), workflow.go (workflowGroupLines :400, openWorkflow
+//! :586), subpreview.go (subPreviewLines :33, drawSubPreview :94),
+//! spawns.go (spawnRunFor :694, subKind :721) and model.go (the preview's
+//! click :1700 and wheel :1760, subHoverMsg :1192).
 //!
-//! The picked run is read by subs.rs off the UI thread, as the Session's
+//! The open run is read by subs.rs off the UI thread, as the Session's
 //! runs are, into a SessionView of its own (Runs::detail), and drawn as a
 //! conversation is; what its box sends is relay.rs's. Not here: what a
-//! working run takes of the machine (subUsage: the process table). Wide,
-//! the pointer right of the list lights no row (subHoverAt :1007-1011).
-
-use std::collections::{HashMap, HashSet};
+//! working run takes of the machine (subUsage: the process table).
 
 use rush_convo::{Job, Subagent};
-use rush_core::text::{Line, Span, Style, width};
+use rush_core::text::{Line, Span, width};
 use rush_core::time::Ms;
 use rush_draw::{Button, MouseKind};
 
-use super::dock::{picked1, spread};
+use super::dock::spread;
 use super::paint::{dim, faint, plural, tokens};
 use super::subname::{sub_mark, sub_tag, sub_task, sub_word};
 use super::subs::{Detail, DetailSrc, RunStat, Runs};
-use super::workflow::{Group, agent_row, groups, phase_mark, round_s, workflow_strip};
+use super::workflow::{agent_row, groups, phase_mark, round_s};
 use super::{agent, conn, open_key};
 use crate::frame::{Mouse, Out, Press};
 use crate::model::Model;
@@ -47,34 +36,18 @@ use crate::session::{SessionView, Source};
 use crate::spawns::SPAWN_PREFIX;
 use crate::style::*;
 
-/// How the subagents view got its run picked (Go's hostConn: subBack,
-/// subFrom, subFromView, subHoverAt, subPreview).
+/// What's open of session key's runs, and how it got there (Go's hostConn:
+/// subBack, subFrom, subHoverAt, subPreview).
 #[derive(Default)]
 pub struct Watch {
-    /// Picked from elsewhere (a step, the dock, the background view): esc
-    /// goes back to that view, to the row it was picked from.
+    /// Opened from elsewhere (a step, the dock, the column): esc, closing
+    /// it, picks that row again.
     pub back: bool,
     pub from: String,
-    pub from_view: String,
     /// When the pointer came to rest on what it's over.
     pub hover_at: Ms,
-    /// The picked run's conversation, beside the wide list or under the
-    /// narrow one.
+    /// The open run's conversation, as last drawn.
     pub peek: Peek,
-    /// The rows the list takes over the picked run; 0 when the list takes
-    /// them all.
-    pub split: usize,
-    /// The columns the list flows into across the top, and their width.
-    pub cols: usize,
-    pub cell_w: usize,
-    /// The pane's width as the view was last drawn (paneW).
-    pub pane_w: usize,
-    /// The body's rows as the view was last drawn: the list's and the
-    /// run's together, under the header's tabs and over the dock.
-    pub body_rows: usize,
-    /// The folds opened in the list: a run's earlier tries
-    /// ("tries:<id>"), a finished workflow run (its ref).
-    pub open_folds: HashSet<String>,
     /// The box under the run beside the list: what's typed for each run
     /// (subbox.rs), whether it has the keys, and where it was drawn (x,
     /// y, w, h).
@@ -122,87 +95,12 @@ pub struct Peek {
     pub visible: bool,
 }
 
-/// The rows the list takes over the picked run, rows tall in all, the
-/// list n rows long: a short list, scrolled, the rest the run's.
-pub fn split_rows(n: usize, rows: usize) -> usize {
-    let most = (rows * 2 / 5).max(6);
-    if rows < most + 8 {
-        return rows; // too short for the run under it
-    }
-    n.min(most)
-}
-
-/// The narrowest a column of the list goes, and the room between two.
-pub const CELL_MIN: usize = 46;
-pub const CELL_GAP: usize = 3;
-
-/// How many columns the list's rows flow into across the top of the view,
-/// w wide: as many as fit, up to 4, the picked run under them all at the
-/// view's whole width. Rust-only: the owner's call (2026-11-11), the
-/// list laid across rather than a column beside the run (Go's
-/// wideSubagents, subListWidth).
-pub fn band_cols(w: usize) -> usize {
-    ((w + CELL_GAP) / (CELL_MIN + CELL_GAP)).clamp(1, 4)
-}
-
-/// Each of cols columns' width in a band w wide.
-pub fn cell_width(w: usize, cols: usize) -> usize {
-    let cols = cols.max(1);
-    w.saturating_sub((cols - 1) * CELL_GAP) / cols
-}
-
-/// The rows of the list in sight laid into cols columns of cw, rows tall,
-/// down each column then across: hover lights the one under the pointer.
-pub fn band(
-    shown: &[(Line, String)],
-    rows: usize,
-    cols: usize,
-    cw: usize,
-    lit: &dyn Fn(&str) -> bool,
-) -> Vec<Line> {
-    let mut out = Vec::with_capacity(rows);
-    for r in 0..rows {
-        let mut row = Line::new();
-        for c in 0..cols {
-            let Some((l, rf)) = shown.get(c * rows + r) else {
-                break;
-            };
-            if c > 0 {
-                row.spans.push(plain(" ".repeat(CELL_GAP)));
-            }
-            let l = if lit(rf.as_str()) {
-                hover_line(l.clone(), cw)
-            } else {
-                l.clone()
-            };
-            join(&mut row, fit(l, cw));
-        }
-        out.push(row);
-    }
-    out
-}
-
-/// The list's row under cell (x, y) of the band, rows tall, as its place
-/// in the rows in sight: none between two columns.
-pub fn band_at(x: usize, y: usize, rows: usize, cols: usize, cw: usize) -> Option<usize> {
-    let c = x / (cw + CELL_GAP);
-    if c >= cols.max(1) || x % (cw + CELL_GAP) >= cw || y >= rows {
-        return None;
-    }
-    Some(c * rows + y)
-}
-
 /// Session key's runs, read without changing anything.
 pub fn runs_of<'a>(m: &'a Model, key: &str) -> Option<&'a Runs> {
     m.kept
         .peek::<super::Core>()
         .and_then(|c| c.conns.get(key))
         .map(|c| &c.runs)
-}
-
-/// Whether session key has runs, so a subagents view.
-pub fn has_runs(m: &Model, key: &str) -> bool {
-    runs_of(m, key).is_some_and(|r| !r.subs.is_empty())
 }
 
 /// The agent run id is: a spawned one's own, else home, the session's
@@ -367,18 +265,6 @@ pub fn open_workflow(m: &mut Model, key: &str, r: &str) {
     conn(m, key).watch.focus_next.clear();
 }
 
-/// What the subagents view's tab says: how many run (tabStat).
-pub fn tab_stat(m: &Model, key: &str) -> Line {
-    let (Some(v), Some(r)) = (m.session.as_ref(), runs_of(m, key)) else {
-        return Line::new();
-    };
-    let n = r.running(&v.sess, m.now).len();
-    if n == 0 {
-        return Line::new();
-    }
-    line([sp(format!("{n} running"), ORANGE)])
-}
-
 /// The rows ↑↓ go through between the conversation and the box, top to
 /// bottom as drawn: the dock's workflows, runs and their tasks, those
 /// just done, then the loose tasks (dockRefs, without the queue's).
@@ -424,31 +310,6 @@ pub fn dock_refs(m: &mut Model, key: &str) -> Vec<String> {
     refs
 }
 
-/// A run as the list shows it (subListRow).
-struct Row<'a> {
-    sa: &'a Subagent,
-    st: Option<&'a RunStat>,
-    status: String,
-    live: bool,
-}
-
-/// What the list is drawn from.
-struct List<'a> {
-    r: &'a Runs,
-    reg: &'a rush_core::adapter::Registry,
-    home: &'a str,
-    sel: &'a str,
-    /// The folds opened: earlier tries, finished workflow runs.
-    open: &'a HashSet<String>,
-    tick: usize,
-    now: Ms,
-    w: usize,
-    out: Vec<(Line, String)>,
-}
-
-/// Picks a row: its ref.
-pub const TRIES_REF: &str = "tries:";
-
 /// How long a run has gone, or went.
 pub fn took_of(st: Option<&RunStat>, live: bool, now: Ms) -> String {
     let (first, last) = st.map_or((0, 0), |t| (t.first, t.last));
@@ -472,27 +333,6 @@ pub fn started(at: Ms, now: Ms) -> String {
         return format!("{} {hm}", c.weekday_name());
     }
     hm
-}
-
-/// What a run is doing or how it ended, short, w wide: while it works,
-/// the session's working line with its step under way (the spinner at
-/// tick); waiting on an answer, that; else done, failed or stopped.
-fn short_status(r: &Row, w: usize, tick: usize) -> Line {
-    if r.live && r.st.is_some_and(|t| t.waiting) {
-        let s = rush_draw::truncate("waiting on you", w, "…").into_owned();
-        return line([sp(s, YELLOW)]);
-    }
-    if r.live {
-        let doing = r.st.map(|t| one_line(&t.doing)).unwrap_or_default();
-        let verb = if doing.is_empty() {
-            "working"
-        } else {
-            doing.as_str()
-        };
-        let head = rush_convo::render::live_head(tick, verb, None);
-        return rush_draw::truncate_line(&head, w, "…");
-    }
-    line([sub_word(&r.status, false)])
 }
 
 /// The run's facts: what runs it, where it works, its steps, what it
@@ -539,467 +379,6 @@ pub fn worktree_of(r: &Runs, id: &str) -> String {
     }
     r.wt.get(id).cloned().unwrap_or_default()
 }
-
-impl List<'_> {
-    /// A run's row: how it stands, what it was asked, what it's doing and
-    /// how long it went.
-    fn draw(&mut self, r: &Row, i: usize, indent: &str, quiet: bool) {
-        let (sa, w) = (r.sa, self.w);
-        let rf = format!("sub:{}", sa.id);
-        let took = took_of(r.st, r.live, self.now);
-        let kind = kind_of(self.r, self.home, &sa.id);
-        let mark = sub_mark(self.reg, &kind, &r.status, r.live, self.tick + i);
-        let status_w = (w / 5).clamp(10, 20);
-        let status = short_status(r, status_w, self.tick);
-        let pad = status_w.saturating_sub(status.width());
-        let mut right = status;
-        right.spans.extend([plain(blanks(pad)), plain("  ")]);
-        right.spans.push(dim(format!("{took:>6}")));
-        right.spans.push(plain("  "));
-        let room = (w as isize - right.width() as isize - 6 - indent.len() as isize).max(12);
-        let name = rush_draw::truncate(&sub_task(sa), room as usize, "…").into_owned();
-        let ink = if r.live {
-            bold(TEXT)
-        } else if quiet {
-            Style::fg(DIM)
-        } else {
-            Style::fg(TEXT)
-        };
-        let top = spread(
-            line([
-                plain(format!("{indent}  ")),
-                mark,
-                plain(" "),
-                Span::new(name, ink),
-            ]),
-            right,
-            w,
-        );
-        if self.sel != rf {
-            self.out.push((fit(top, w), rf));
-            return;
-        }
-        // Picked, its facts and conversation show with the list.
-        self.out.push((picked1(top, w, true), rf));
-    }
-
-    /// A fold of earlier tries, under the row of the try that replaced
-    /// them: how many, and, opened, each a row of its own, quieter.
-    fn tries(&mut self, rf: String, tries: &[&Row], indent: &str) {
-        if tries.is_empty() {
-            return;
-        }
-        let open = self.open.contains(&rf);
-        let n = tries.len();
-        let words = format!("{} earlier {}", n, if n == 1 { "try" } else { "tries" });
-        let row = line([
-            plain(format!("{indent}    ")),
-            faint(if open { "▾ " } else { "▸ " }),
-            dim(words),
-            faint(if open { "" } else { " · click to show" }),
-        ]);
-        let picked = self.sel == rf;
-        self.out.push((
-            if picked {
-                picked1(row, self.w, true)
-            } else {
-                fit(row, self.w)
-            },
-            rf,
-        ));
-        if !open {
-            return;
-        }
-        for (i, r) in tries.iter().enumerate() {
-            self.draw(r, i, &format!("{indent}  "), true);
-        }
-    }
-
-    /// Workflow g: its row (what it's for, when it started, its phases,
-    /// how it stands); while it runs, or opened, each phase with its
-    /// agents under it, a try that replaced earlier ones with those
-    /// folded under it (workflowGroupLines).
-    fn group(&mut self, g: &Group, runs: &HashMap<String, Row>) {
-        let (w, now, tick) = (self.w, self.now, self.tick);
-        let rf = g.r#ref();
-        let open = g.live || self.open.contains(&rf);
-        let end = if g.live || g.end == 0 { now } else { g.end };
-        let mut right = match () {
-            _ if g.live => line([sp("running", ORANGE)]),
-            _ if g.status == "failed" => line([sp("failed", RED)]),
-            _ if g.status == "stopped" => line([dim("stopped")]),
-            _ => line([dim("done")]),
-        };
-        let status_w = (w / 5).clamp(10, 20);
-        right
-            .spans
-            .push(plain(blanks(status_w.saturating_sub(right.width()))));
-        right.spans.push(plain("  "));
-        let took = if g.start > 0 {
-            dur(round_s(end - g.start))
-        } else {
-            String::new()
-        };
-        right.spans.push(dim(format!("{took:>6}")));
-        right.spans.push(plain("  "));
-        let mark = if g.live {
-            sp(SPINNER[tick % SPINNER.len()], ORANGE)
-        } else if open {
-            faint("▾")
-        } else {
-            faint("▸")
-        };
-        // The title gives way first, then what follows it: when it
-        // started always shows, to tell runs of one name apart.
-        let at = started(g.start, now);
-        let at = if at.is_empty() {
-            Line::new()
-        } else {
-            line([faint(format!(" · {at}"))])
-        };
-        let tail = if g.live {
-            workflow_strip(&g.phases, tick)
-        } else {
-            let n: usize = g.phases.iter().map(|p| p.current().len()).sum();
-            if n > 0 {
-                line([dim(plural(n, "agent"))])
-            } else {
-                Line::new()
-            }
-        };
-        let room = w as isize - right.width() as isize - 9 - at.width() as isize;
-        let title_w = (room - 3 - tail.width().min(18) as isize).clamp(10, 48) as usize;
-        let title = rush_draw::truncate(&g.title, title_w, "…").into_owned();
-        let mut left = line([
-            plain("  "),
-            mark,
-            plain(" "),
-            sp("⋔ ", QUEUE),
-            Span::new(title, if g.live { bold(TEXT) } else { Style::fg(SUB) }),
-        ]);
-        join(&mut left, at);
-        if !tail.spans.is_empty() {
-            left.spans.push(plain("   "));
-            join(&mut left, tail);
-        }
-        let keep = w.saturating_sub(right.width() + 2).max(20);
-        let top = spread(rush_draw::truncate_line(&left, keep, "…"), right, w);
-        self.out.push((
-            if self.sel == rf {
-                picked1(top, w, true)
-            } else {
-                fit(top, w)
-            },
-            rf.clone(),
-        ));
-        if !open {
-            return;
-        }
-        // Its runs no phase lists: the tries an agent made before the one
-        // its phase lists, once its progress is heard of; before, all of
-        // them.
-        let listed: HashSet<&str> = g
-            .phases
-            .iter()
-            .flat_map(|p| &p.agents)
-            .map(|a| a.id.as_str())
-            .filter(|id| runs.contains_key(*id))
-            .collect();
-        let mut left_over: Vec<&Row> = self
-            .r
-            .subs
-            .iter()
-            .rev()
-            .filter(|sa| sa.workflow == g.run && !listed.contains(sa.id.as_str()))
-            .filter_map(|sa| runs.get(&sa.id))
-            .collect();
-        let label_w = g
-            .phases
-            .iter()
-            .flat_map(|p| &p.agents)
-            .map(|a| width(&a.label).min(28))
-            .fold(8, usize::max);
-        for p in &g.phases {
-            let title = if p.title.is_empty() {
-                "agents"
-            } else {
-                &p.title
-            };
-            let agents = p.current();
-            let mut head = line([
-                plain("    "),
-                phase_mark(p, tick),
-                plain(" "),
-                Span::new(title.to_string(), bold(SUB)),
-            ]);
-            let done = agents.iter().filter(|a| a.state == "done").count();
-            head.spans.push(if agents.is_empty() {
-                faint("  not started")
-            } else {
-                dim(format!("  {done} of {} done", agents.len()))
-            });
-            self.out.push((fit(head, w), String::new()));
-            for (i, a) in agents.into_iter().enumerate() {
-                // Its earlier tries: those its phase lists before it, and
-                // the runs of its label no phase lists.
-                let mut mine: Vec<&Row> = p
-                    .earlier(a)
-                    .iter()
-                    .filter_map(|b| runs.get(&b.id))
-                    .collect();
-                let (same, rest): (Vec<&Row>, Vec<&Row>) = left_over.into_iter().partition(|t| {
-                    !a.label.is_empty()
-                        && (t.sa.description == a.label || sub_task(t.sa) == a.label)
-                });
-                left_over = rest;
-                mine.extend(same);
-                if let Some(r) = runs.get(&a.id).filter(|_| !a.id.is_empty()) {
-                    self.draw(r, i, "    ", false);
-                } else {
-                    // Not started, or its run's files aren't there yet.
-                    let row = agent_row(a, label_w, tick + i, w, now);
-                    self.out.push((fit(cut_lead(row, 2), w), String::new()));
-                }
-                self.tries(format!("{TRIES_REF}{}", a.id), &mine, "    ");
-            }
-        }
-        if listed.is_empty() {
-            for (i, r) in left_over.iter().enumerate() {
-                self.draw(r, i, "    ", false);
-            }
-        } else {
-            self.tries(format!("{TRIES_REF}wf:{}", g.run), &left_over, "  ");
-        }
-    }
-}
-
-/// row without its first n cells of blank (TrimPrefix of spaces).
-fn cut_lead(mut l: Line, mut n: usize) -> Line {
-    for s in &mut l.spans {
-        if n == 0 {
-            break;
-        }
-        let blank = s.text.len() - s.text.trim_start_matches(' ').len();
-        let k = blank.min(n);
-        s.text.replace_range(..k, "");
-        n -= k;
-        if !s.text.is_empty() {
-            break;
-        }
-    }
-    l
-}
-
-/// A section's heading: its name, how many are in it, and a gap above
-/// the rows.
-fn heading(title: &str, n: usize, w: usize) -> (Line, String) {
-    (
-        fit(
-            line([
-                plain("  "),
-                Span::new(title.to_string(), bold(SUB)),
-                faint(format!("  {n}")),
-            ]),
-            w,
-        ),
-        String::new(),
-    )
-}
-
-/// The runs, a row each: a count, then those running and those finished
-/// under their headings, workflows first, newest first; a finished
-/// workflow folded to its row. wide when the picked run shows beside the
-/// list, else under it (subagentList). Each row with its ref.
-pub fn list(m: &mut Model, key: &str, w: usize, wide: bool) -> Vec<(Line, String)> {
-    let home = home_kind(m, key);
-    let (now, tick) = (m.now, m.tick);
-    let sel = sel(m);
-    let reg = m.reg.clone();
-    let Model { session, kept, .. } = m;
-    let Some(v) = session.as_ref().filter(|v| v.key == key) else {
-        return Vec::new();
-    };
-    let s = &v.sess;
-    let c = &*kept
-        .get::<super::Core>()
-        .conns
-        .entry(key.to_string())
-        .or_default();
-    let r = &c.runs;
-    let jobs: HashMap<String, &Job> = s.subagent_jobs();
-    let mut running = 0;
-    let mut rows: Vec<Row> = Vec::new();
-    let mut by_id: HashMap<String, Row> = HashMap::new();
-    for sa in r.subs.iter().rev() {
-        let (status, live) = r.state(s, sa, &jobs, now);
-        let row = Row {
-            sa,
-            st: r.stats.get(&sa.id),
-            status,
-            live,
-        };
-        if sa.workflow.is_empty() {
-            if live {
-                running += 1;
-            }
-            rows.push(row);
-        } else {
-            by_id.insert(sa.id.clone(), row);
-        }
-    }
-    let live_of = |sa: &Subagent| r.state(s, sa, &jobs, now).1;
-    let gs = groups(r, s, &live_of);
-    let flows_live = gs.iter().filter(|g| g.live).count();
-    let mut head = line([plain("  ")]);
-    if running + flows_live > 0 {
-        let mut said = Vec::new();
-        if running > 0 {
-            said.push(plural(running, "agent"));
-        }
-        if flows_live > 0 {
-            said.push(plural(flows_live, "workflow"));
-        }
-        head.spans
-            .push(sp(format!("{} running", said.join(" and ")), ORANGE));
-        head.spans.push(dim(" · "));
-    }
-    head.spans.push(dim(format!(
-        "{} in all",
-        plural(rows.len() + gs.len(), "run")
-    )));
-    head.spans.push(faint(if wide {
-        "  ·  click one to see it here"
-    } else {
-        "  ·  click one to see it below"
-    }));
-    let mut l = List {
-        r,
-        reg: &reg,
-        home: &home,
-        sel: &sel,
-        open: &c.watch.open_folds,
-        tick,
-        now,
-        w,
-        out: vec![(fit(head, w), String::new())],
-    };
-    rows.sort_by_key(|r| !r.live);
-    for (title, live) in [("Running", true), ("Finished", false)] {
-        let n = gs.iter().filter(|g| g.live == live).count()
-            + rows.iter().filter(|r| r.live == live).count();
-        if n == 0 {
-            continue;
-        }
-        l.out.push((Line::new(), String::new()));
-        // Finished folds, closed till opened: a long session's finished
-        // runs are noise beside what's working (Rust-only).
-        let closed = !live && !l.open.contains(FINISHED_REF);
-        if live {
-            l.out.push(heading(title, n, w));
-        } else {
-            let row = line([
-                plain("  "),
-                faint(if closed { "▸ " } else { "▾ " }),
-                Span::new(title.to_string(), bold(SUB)),
-                faint(format!("  {n}")),
-                faint(if closed { " · click to show" } else { "" }),
-            ]);
-            let row = if sel == FINISHED_REF {
-                picked1(row, w, true)
-            } else {
-                fit(row, w)
-            };
-            l.out.push((row, FINISHED_REF.to_string()));
-        }
-        // Workflows and runs together, newest first.
-        let mut items: Vec<(Ms, Option<&Group>, usize)> = gs
-            .iter()
-            .filter(|g| g.live == live)
-            .map(|g| (g.start, Some(g), 0))
-            .collect();
-        for (i, r) in rows.iter().enumerate() {
-            if r.live == live {
-                let at = if r.sa.born > 0 {
-                    r.sa.born
-                } else {
-                    r.st.map_or(0, |t| t.first)
-                };
-                items.push((at, None, i));
-            }
-        }
-        items.sort_by_key(|it| std::cmp::Reverse(it.0));
-        // Finished, the newest few show; the rest fold under Earlier but
-        // those that failed or were stopped, and the one picked, which
-        // stay in sight (Rust-only: a long session's 248 were one list).
-        let keep = |it: &(Ms, Option<&Group>, usize)| match it.1 {
-            Some(g) => sel == g.r#ref(),
-            None => {
-                let r = &rows[it.2];
-                matches!(r.status.as_str(), "failed" | "stopped")
-                    || sel == format!("sub:{}", r.sa.id)
-            }
-        };
-        let (shown, earlier) = if live {
-            (items, Vec::new())
-        } else if closed {
-            // Folded, those that failed or were stopped, and the one
-            // picked, still show.
-            (
-                items.into_iter().filter(|it| keep(it)).collect(),
-                Vec::new(),
-            )
-        } else {
-            let (mut shown, mut earlier) = (Vec::new(), Vec::new());
-            for (n, it) in items.into_iter().enumerate() {
-                if n < EARLIER_AFTER || keep(&it) {
-                    shown.push(it);
-                } else {
-                    earlier.push(it);
-                }
-            }
-            (shown, earlier)
-        };
-        for (_, g, i) in shown {
-            match g {
-                Some(g) => l.group(g, &by_id),
-                None => l.draw(&rows[i], i, "", false),
-            }
-        }
-        if !earlier.is_empty() {
-            let open = l.open.contains(EARLIER_REF);
-            let row = line([
-                plain("  "),
-                faint(if open { "▾ " } else { "▸ " }),
-                dim(format!("Earlier · {}", earlier.len())),
-                faint(if open { "" } else { " · click to show" }),
-            ]);
-            let row = if sel == EARLIER_REF {
-                picked1(row, w, true)
-            } else {
-                fit(row, w)
-            };
-            l.out.push((row, EARLIER_REF.to_string()));
-            if open {
-                for (_, g, i) in earlier {
-                    match g {
-                        Some(g) => l.group(g, &by_id),
-                        None => l.draw(&rows[i], i, "", false),
-                    }
-                }
-            }
-        }
-    }
-    l.out
-}
-
-/// The fold the older finished runs go under.
-pub const EARLIER_REF: &str = "earlier:runs";
-
-/// The fold every finished run goes under, closed till opened.
-pub const FINISHED_REF: &str = "fold:finished";
-
-/// How many finished runs show before the rest fold under Earlier.
-pub const EARLIER_AFTER: usize = 8;
 
 /// The column's top rows for run id: how it stands, then its facts.
 fn peek_head(m: &mut Model, key: &str, id: &str, w: usize) -> Vec<Line> {
@@ -1092,11 +471,11 @@ pub fn run_live(m: &Model, key: &str, id: &str) -> bool {
 pub fn flow_lines(m: &mut Model, key: &str, rf: &str, w: usize) -> (Vec<Line>, Vec<String>) {
     let (now, tick) = (m.now, m.tick);
     let Some(v) = m.session.as_ref().filter(|v| v.key == key) else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
     let s = &v.sess;
     let Some(r) = runs_of(m, key) else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
     let jobs = s.subagent_jobs();
     let live_of = |sa: &Subagent| r.state(s, sa, &jobs, now).1;
