@@ -332,11 +332,14 @@ pub struct Options {
 }
 
 /// What a background task has written, as last read, and whether it
-/// still runs.
+/// still runs; and, where the UI knows more of it, its rows to draw under
+/// its step in place of the bare output (its facts, the files it writes,
+/// the processes under it, its launch script), laid out to fit.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BgOut {
     pub out: std::sync::Arc<crate::model::LiveOut>,
     pub running: bool,
+    pub rows: std::sync::Arc<Vec<Line>>,
 }
 
 /// What a running shell step is doing now: a line from its processes, and
@@ -466,6 +469,8 @@ fn bg_sig(s: &Session, t: &crate::model::Turn, o: &Options) -> u64 {
             continue;
         };
         (&*st.id, b.out.out.len(), b.out.dropped, b.running).hash(&mut h);
+        // Its rows are handed over anew only when they change.
+        (std::sync::Arc::as_ptr(&b.rows) as usize).hash(&mut h);
         if let Some(l) = b.out.out.lines().last() {
             l.hash(&mut h);
         }

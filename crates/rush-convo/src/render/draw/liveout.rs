@@ -65,7 +65,17 @@ impl<'a> Drawer<'a> {
             pad.and(faint("│ ")).and(dim("what it wrote"))
         };
         self.add("", Color::Default, head, Txt::new());
-        self.tail_rows(id, &b.out, indent);
+        if b.rows.is_empty() {
+            self.tail_rows(id, &b.out, indent);
+            return;
+        }
+        // What the UI knows of it, laid out already: on the step's gutter.
+        let w = self.cw.saturating_sub(indent + 2);
+        for l in b.rows.iter() {
+            let row = Txt(l.spans.clone()).truncate(w, &Txt::raw("…"));
+            let pl = self.sp(indent - 1).and(faint("│ ")).and(row);
+            self.add("", Color::Default, pl, Txt::new());
+        }
     }
 
     /// The running step's last lines, dim, each on the gutter its output
