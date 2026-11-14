@@ -21,11 +21,15 @@
 //! run ends with (pnpm store prune, docker's prunes). Each worktree shows
 //! its group and why (rush_fleet::Triage: SAFE, CACHE-ONLY, NOISE-ONLY,
 //! KEEP), and last, what rush never touches, biggest first, for you to
-//! decide on: never ticked.
+//! decide on: never ticked. Rust-only as well: Claude Code's and
+//! subagents' worktrees in .claude/worktrees are ticked by the same rule
+//! as rush's own (ticks_itself); the rest that would lose nothing, made by
+//! hand or another tool, stay for you to tick, and the title says how many
+//! and how much (more_safe).
 
 use rush_core::text::Line;
 use rush_core::time::Ms;
-use rush_fleet::{Class, How, VerdictKind, Worktree};
+use rush_fleet::{Class, How, MADE_BY_CLAUDE, MADE_BY_SUBAGENT, VerdictKind, Worktree};
 
 use super::data::*;
 use super::delete::{CacheFound, Doomed, open_delete};
@@ -125,6 +129,15 @@ impl CleanItem {
         if self.orphan.is_some() {
             return self.busy.is_empty() && self.stale;
         }
+        match &self.wt {
+            None => self.busy.is_empty(),
+            Some(w) => ticks_itself(w) && self.loses_nothing(),
+        }
+    }
+
+    /// A worktree removing which loses nothing (the rule says it can go, or
+    /// all it has is noise), with nobody in it, whoever made it.
+    fn loses_nothing(&self) -> bool {
         let noise_only = self
             .triage
             .as_ref()
@@ -133,8 +146,15 @@ impl CleanItem {
             && self
                 .wt
                 .as_ref()
-                .is_none_or(|w| w.own && (w.verdict().can_go() || noise_only))
+                .is_some_and(|w| w.verdict().can_go() || noise_only)
     }
+}
+
+/// Whether Clean up ticks a worktree itself when it loses nothing: rush's
+/// own, and those Claude Code and its subagents made in .claude/worktrees.
+/// One made by hand or another tool, only by you.
+pub fn ticks_itself(w: &Worktree) -> bool {
+    w.own || w.made == MADE_BY_CLAUDE || w.made == MADE_BY_SUBAGENT
 }
 
 /// A worktree's group, as Clean up colours it.
@@ -206,7 +226,7 @@ pub fn survey_paths(m: &Model) -> (Vec<String>, Vec<String>) {
     let free = wts
         .iter()
         .filter(|w| {
-            !(w.own && w.verdict().can_go())
+            !(ticks_itself(w) && w.verdict().can_go())
                 && running(m, &w.agents).is_none()
                 && w.err.is_empty()
                 && w.in_use.is_empty()
@@ -331,7 +351,7 @@ pub fn open_clean_sheet(m: &mut Model) {
         // hand.
         let mut it = CleanItem {
             wt: Some(w.clone()),
-            on: w.own && w.verdict().can_go(),
+            on: ticks_itself(w) && w.verdict().can_go(),
             ..CleanItem::default()
         };
         if let Some(g) = running(m, &w.agents) {
@@ -516,6 +536,17 @@ impl CleanSheet {
         (n, losing, size)
     }
 
+    /// How many worktrees not ticked would lose nothing, nobody in them, and
+    /// how much they take: what's left for you to tick.
+    pub fn more_safe(&self) -> (usize, i64) {
+        self.items
+            .iter()
+            .filter(|it| !it.on && it.loses_nothing())
+            .fold((0, 0), |(n, s), it| {
+                (n + 1, s + it.wt.as_ref().map_or(0, |w| w.size))
+            })
+    }
+
     fn item_line(&self, m: &Model, it: &CleanItem, w: usize) -> Line {
         let mut bx = if it.on {
             sp("✓ ", GREEN)
@@ -675,13 +706,13 @@ impl CleanSheet {
                 spb(format!("{} ", t.class.as_str()), class_color(t.class)),
                 sp(t.reason.clone(), class_color(t.class)),
             ]);
-            if !wt.own && matches!(t.class, Class::Safe | Class::NoiseOnly) {
+            if !ticks_itself(wt) && matches!(t.class, Class::Safe | Class::NoiseOnly) {
                 l.spans.push(sp(" · not rush's: yours to tick", FAINT));
             }
             l
         } else if v.kind == VerdictKind::WouldLose {
             ln([sp(format!("would lose {}", v.reason), YELLOW)])
-        } else if v.kind == VerdictKind::CanGo && !wt.own {
+        } else if v.kind == VerdictKind::CanGo && !ticks_itself(wt) {
             ln([
                 sp(v.reason.clone(), GREEN),
                 sp(" · not rush's: yours to tick", FAINT),
@@ -793,6 +824,13 @@ impl Sheet for CleanSheet {
         }
         if losing == 0 && n > 0 {
             about += " · loses nothing";
+        }
+        let (more, more_size) = self.more_safe();
+        if more > 0 {
+            about += &format!(
+                " · {more} more would lose nothing, yours to tick: {}",
+                disk(more_size)
+            );
         }
         let mut out = vec![sheet_title("Clean up", &about, w), Line::new()];
         let (from, to) = window(self.items.len(), self.cur, 1.max(h.saturating_sub(10)));
@@ -956,6 +994,55 @@ mod tests {
                 ("pnpm store prune", true, "Run last, once"),
             ]
         );
+    }
+
+    fn wt_item(made: &'static str, own: bool, size: i64, busy: &str) -> CleanItem {
+        CleanItem {
+            wt: Some(Worktree {
+                path: format!("/r/.claude/worktrees/{made}"),
+                repo: "/r".into(),
+                checked: NOW,
+                no_remote: true,
+                made,
+                own,
+                size,
+                ..Worktree::default()
+            }),
+            busy: busy.into(),
+            ..CleanItem::default()
+        }
+    }
+
+    // A worktree that loses nothing is ticked when rush, Claude Code or a
+    // subagent made it and nobody is in it; one made by hand never is, and
+    // the title counts it for you to tick.
+    #[test]
+    fn ticks_harness_worktrees_too() {
+        let cases = [
+            (rush_fleet::MADE_BY_RUSH, true, "", true),
+            (MADE_BY_CLAUDE, false, "", true),
+            (MADE_BY_SUBAGENT, false, "", true),
+            (rush_fleet::MADE_BY_OTHER, false, "", false),
+            (MADE_BY_CLAUDE, false, "an agent", false),
+        ];
+        for (made, own, busy, want) in cases {
+            assert_eq!(wt_item(made, own, 1, busy).safe(), want, "{made} {busy}");
+        }
+        let mut items = vec![
+            wt_item(MADE_BY_CLAUDE, false, 5, ""),
+            wt_item(rush_fleet::MADE_BY_OTHER, false, 7, ""),
+            wt_item(rush_fleet::MADE_BY_OTHER, false, 11, ""),
+            wt_item(rush_fleet::MADE_BY_OTHER, false, 13, "an agent"),
+        ];
+        for it in &mut items {
+            it.on = it.safe();
+        }
+        let s = CleanSheet {
+            items,
+            cur: 0,
+            measuring: false,
+        };
+        assert_eq!(s.more_safe(), (2, 18));
     }
 
     // What rush never touches is listed, never ticked, and can't be.
