@@ -1855,10 +1855,16 @@ pub fn refresh(m: &mut Model, key: &str) {
         }
     }
     let unread = full.iter().any(|(id, ..)| !r.full.contains_key(id));
+    // Rust-only: the run shown whole with no reading yet is due however
+    // its ask went (its kick taken by a read that didn't carry it, its
+    // answer for a view since put back): else it stayed "reading its
+    // conversation…" for good in a session gone quiet.
+    let shown_unread = r.detail.as_ref().is_some_and(|d| !d.view.read);
     let due = !r.reading
         && (r.kick
             || r.read_at == 0
             || unread
+            || shown_unread
             || !spawn_want.is_empty()
             || busy && now - r.read_at >= READ_EVERY);
     if !due {
@@ -1929,6 +1935,12 @@ pub fn refresh(m: &mut Model, key: &str) {
         // Nothing waits to be shown: nothing's stopped short for it.
         r.detail_more = false;
         r.hurry.store(false, Ordering::Relaxed);
+    } else if shown_unread || r.detail_more {
+        // Rust-only: read first, whatever an earlier reading did with
+        // its hurry (it lets it go once its own run's read, though
+        // another was picked meanwhile and waited behind every run's
+        // numbers).
+        r.hurry.store(true, Ordering::Relaxed);
     }
     // The background tasks' calls, to know which run started each.
     let calls: Vec<String> = dock_jobs(s)
@@ -2215,6 +2227,16 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
     let mut answered = false;
     if let (Some((id, d)), Some(det)) = (got.detail, r.detail.as_mut())
         && det.id == id
+        // Rust-only: what a run's read since gained, more of it, or that
+        // it's as it was, asked for a view put back unread meanwhile
+        // (closed and opened again): never taken as its first reading
+        // (Fresh is only its last lines, Whole leaves it unread, an
+        // unchanged History left it empty); it's read whole next (due).
+        && (det.view.read
+            || !matches!(
+                d,
+                DetailGot::Fresh(_) | DetailGot::Whole(..) | DetailGot::History(None)
+            ))
     {
         answered = !det.view.read;
         // Whatever it asked for is answered: asked again, should its pane
@@ -2269,9 +2291,11 @@ fn took(m: &mut Model, key: &str, got: Got) -> Out {
         // Asked again should it still show the top of what it has.
         r.detail_more = false;
     }
-    // Kicked while it read (its picked run's transcript grew), or stopped
-    // short for the run shown whole: read again.
-    let fresh = fresh || more || found_new || r.kick || got.cut_short; // a run found is read at once
+    // Kicked while it read (its picked run's transcript grew), stopped
+    // short for the run shown whole, or that run still unread (this read
+    // was for another, or not for it at all): read again.
+    let unread = r.detail.as_ref().is_some_and(|d| !d.view.read);
+    let fresh = fresh || more || found_new || r.kick || got.cut_short || unread; // a run found is read at once
     // The conversation draws the steps that ran them as the agents, with
     // their steps and replies under them.
     if let Some(ran) = ran

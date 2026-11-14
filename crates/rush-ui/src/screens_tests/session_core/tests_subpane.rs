@@ -119,6 +119,52 @@ fn a_long_run_shows_its_end() {
     assert!(!all.contains("answer 1399"), "back at its end:\n{all}");
 }
 
+/// A run opened while a read of the session's runs is out, its ask then
+/// taken by a read that didn't carry it (asked while its view stood
+/// elsewhere), is read all the same at the next look: it never stays
+/// "reading its conversation…" in a session gone quiet.
+#[test]
+fn a_run_whose_ask_went_astray_is_read() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = model(&d);
+    // A read out as it opens: its view waits for the next.
+    conn(&mut m, KEY).runs.reading = true;
+    subview::pick_run(&mut m, KEY, "x");
+    let _ = m.frame();
+    let unread = |m: &mut Model| {
+        conn(m, KEY)
+            .runs
+            .detail
+            .as_ref()
+            .is_some_and(|d| !d.view.read)
+    };
+    assert!(unread(&mut m), "read while a read was out");
+    // That read back, and the ask for it taken by a read made while its
+    // view wasn't where the reading looks for it.
+    conn(&mut m, KEY).runs.reading = false;
+    let held = conn(&mut m, KEY).runs.detail.take();
+    super::subs::refresh(&mut m, KEY);
+    conn(&mut m, KEY).runs.detail = held;
+    assert!(!conn(&mut m, KEY).runs.kick, "its ask wasn't taken");
+    assert!(unread(&mut m));
+    // The next look reads it, with nothing kicked.
+    super::subs::refresh(&mut m, KEY);
+    let _ = m.frame();
+    assert!(!unread(&mut m), "left reading its conversation");
+    let det = conn(&mut m, KEY).runs.detail.as_ref().unwrap();
+    assert!(det.view.err.is_empty(), "{}", det.view.err);
+    assert!(
+        det.view
+            .sess
+            .turns
+            .iter()
+            .any(|t| t.prompt.contains("review the diff")),
+        "not its conversation"
+    );
+    let all = text(&m.frame());
+    assert!(!all.contains("reading its conversation"), "{all}");
+}
+
 /// The run opened has the keys, its pane's rows a session's: ↑ from the
 /// empty box picks the row by it and goes on up, enter opens the row
 /// picked, esc lets the pick go, esc again closes the run; the
