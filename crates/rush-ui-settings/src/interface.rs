@@ -660,12 +660,12 @@ pub fn sections(m: &Model) -> Vec<Section> {
         if c.runs_open == "peek" {
             "under its step"
         } else {
-            "beside the conversation"
+            "beside it"
         },
         "Where a subagent, a workflow or another agent a session started shows when you open it from its step or from Running. Either way it's on the conversation's page, with its own box: tab moves between it and the conversation, esc closes it.",
         &[
             (
-                "beside the conversation",
+                "beside it",
                 "in the column right of the conversation, where the screen is wide enough; else under its step.",
             ),
             (
