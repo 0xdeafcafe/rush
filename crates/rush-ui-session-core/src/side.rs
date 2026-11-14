@@ -358,6 +358,9 @@ pub struct Side {
     pub y: usize,
     pub x: usize,
     pub shown: usize,
+    /// The run (or workflow) open in the column in its parts' place, at
+    /// all the room it has (openrun.rs); "" while it shows its parts.
+    pub run: String,
 }
 
 /// The column's width beside session key's conversation, text w wide:
@@ -526,6 +529,16 @@ pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
     };
     let runs = std::mem::take(&mut conn(m, key).side_runs);
     if sw == 0 || !conversation {
+        conn(m, key).side = side;
+        return false;
+    }
+    // A run open beside the conversation has the column, all the room it
+    // could have, in its parts' place (openrun.rs).
+    if let Some(id) = super::openrun::open_id(m, key)
+        && super::openrun::place(m, sw) == super::openrun::Place::Beside
+    {
+        side.w = room.max(sw);
+        side.run = id;
         conn(m, key).side = side;
         return false;
     }
@@ -699,6 +712,10 @@ fn open_decisions(m: &mut Model, key: &str) -> Vec<(u32, Vec<Decision>)> {
 /// as the views' panel is as tall as what's in it (rushPane's paste,
 /// laid from the top rather than at the foot).
 pub fn paste(m: &mut Model, key: &str, out: &mut Vec<Line>, foot: usize, cw: usize, top: usize) {
+    if !conn(m, key).side.run.is_empty() {
+        paste_run(m, key, out, foot, cw, top);
+        return;
+    }
     let c = conn(m, key);
     let at = c.side_pick;
     let side = &mut c.side;
@@ -734,6 +751,30 @@ pub fn paste(m: &mut Model, key: &str, out: &mut Vec<Line>, foot: usize, cw: usi
     }
     side.shown = n;
     side.y = top + y;
+    side.x = 2 + x;
+}
+
+/// The column with a run open in it (openrun::beside), laid over the
+/// conversation's rows from the top down to foot as its parts are.
+fn paste_run(m: &mut Model, key: &str, out: &mut Vec<Line>, foot: usize, cw: usize, top: usize) {
+    let sw = conn(m, key).side.w;
+    if sw == 0 || cw < sw + 2 || foot < 2 {
+        conn(m, key).side.shown = 0;
+        return;
+    }
+    let x = cw - sw - 2;
+    while out.len() < foot {
+        out.push(Line::new());
+    }
+    let col = super::openrun::beside(m, key, sw, foot, (2 + x, top));
+    for (l, row) in out.iter_mut().zip(col) {
+        let mut r = fit(cut(l, 0, x), x);
+        join(&mut r, row);
+        *l = fit(r, cw);
+    }
+    let side = &mut conn(m, key).side;
+    side.shown = foot;
+    side.y = top;
     side.x = 2 + x;
 }
 

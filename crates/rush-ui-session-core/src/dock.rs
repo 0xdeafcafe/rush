@@ -143,6 +143,9 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     // there, else each a block of its own (paneDock's panels :3488).
     super::running::sync(m, &key);
     super::agentrows::sync(m, &key);
+    // What its background commands and monitors have written, under
+    // their calls in the conversation.
+    super::taskcards::sync_out(m, &key);
     let in_panel = rush_ui_plugin_ui::views::beside::subs_shown_in_panel(m, &key, w);
     let sw = super::side::column_width(m, &key, w);
     let run_w = if sw > 0 {
@@ -270,7 +273,7 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     // The run's box beside the list has the keys: it's the one box live,
     // the session's own not drawn under it to say otherwise (Rust-only).
     let run_box = conn(m, &key).watch.msg_focus
-        && super::views::view_name(m, &key) == "subagents"
+        && super::openrun::is_open(m, &key)
         && super::subview::box_run(m, &key).is_some();
     // Under a decisions card there's no box till you pick Something else
     // (Rust-only): the card is what you answer, and a box beside it read
@@ -787,7 +790,7 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     }
     // The picked run's box in the subagents view has the keys.
     if conn(m, key).watch.msg_focus
-        && super::views::view_name(m, key) == "subagents"
+        && super::openrun::is_open(m, key)
         && let Some(id) = super::subview::box_run(m, key)
     {
         return super::subbox::hint(m, key, &id, w);

@@ -212,7 +212,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     if m.confirm.is_some() || m.sheet.is_some() || m.on_place() {
         return Out::Pass;
     }
-    if !conn(m, &key).watch.msg_focus || super::views::view_name(m, &key) != "subagents" {
+    if !conn(m, &key).watch.msg_focus || !super::openrun::is_open(m, &key) {
         return Out::Pass;
     }
     let Some(id) = super::subview::box_run(m, &key) else {
@@ -250,12 +250,13 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
             Out::Draw
         }
         "esc" if editing => super::subbox::run_key(m, &key, &id, k),
-        // Picked from elsewhere: esc goes straight back there.
-        "esc" if empty && conn(m, &key).watch.back => {
+        // esc closes the run, back to where it was opened from.
+        "esc" if empty => {
             super::subview::go_back(m, &key);
             Out::Draw
         }
-        // esc and tab give the keys back to the list; what's typed stays.
+        // tab (and esc with something typed) gives the keys back to the
+        // conversation; what's typed stays.
         "esc" | "tab" => {
             conn(m, &key).watch.msg_focus = false;
             Out::Draw
@@ -337,7 +338,7 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
 /// The keys the guide lists while the run's pane has them.
 pub fn here_keys(m: &mut Model) -> Option<(&'static str, Vec<(&'static str, &'static str)>)> {
     let key = open_key(m)?;
-    if !conn(m, &key).watch.msg_focus || super::views::view_name(m, &key) != "subagents" {
+    if !conn(m, &key).watch.msg_focus || !super::openrun::is_open(m, &key) {
         return None;
     }
     super::subview::box_run(m, &key)?;
@@ -358,7 +359,8 @@ pub fn here_keys(m: &mut Model) -> Option<(&'static str, Vec<(&'static str, &'st
             ),
             ("/compact", "compact a run rush hosts"),
             ("alt+o", "a run rush hosts: its own session"),
-            ("esc · tab", "back to the list"),
+            ("tab", "back to the conversation"),
+            ("esc", "close it"),
         ],
     ))
 }
@@ -374,7 +376,7 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     if m.confirm.is_some() || m.sheet.is_some() || m.on_place() {
         return Out::Pass;
     }
-    if super::views::view_name(m, &key) != "subagents" {
+    if !super::openrun::is_open(m, &key) {
         return Out::Pass;
     }
     let (x, y) = (e.x as usize, e.y as usize);
@@ -504,11 +506,8 @@ pub fn crumb_click(m: &mut Model, e: &Mouse) -> Out {
             .iter()
             .find(|(_, s)| s.hosted == child)
             .map(|(step, _)| format!("{}{step}", crate::spawns::SPAWN_PREFIX));
-        match run {
-            Some(id) => super::subview::pick_run(m, &parent, &id),
-            None => {
-                super::views::show_view(m, &parent, "subagents");
-            }
+        if let Some(id) = run {
+            super::subview::pick_run(m, &parent, &id);
         }
     }
     Out::Draw

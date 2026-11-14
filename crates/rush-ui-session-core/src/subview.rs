@@ -91,6 +91,16 @@ pub struct Watch {
     /// A hosted child's breadcrumb back to its parent, screen cells
     /// (subpane::child_crumb).
     pub child_crumb: (usize, usize),
+    /// The run (its id) or workflow (its ref) open on the conversation's
+    /// page, beside it or framed under its step (openrun.rs); "" for none.
+    pub open: String,
+    /// Where it was drawn, screen cells (x, y, w, h), and its ✕.
+    pub frame: [usize; 4],
+    pub close_at: (usize, usize),
+    /// A workflow open: the ref on each row of its pane, and the pane's
+    /// cells (x, y, w, h).
+    pub flow_refs: Vec<String>,
+    pub flow_at: [usize; 4],
 }
 
 /// The run's conversation in its pane, as last drawn (subPreview): what
@@ -280,60 +290,32 @@ fn sel(m: &Model) -> String {
         .unwrap_or_default()
 }
 
-/// Shows the subagents view with run id picked: beside the list when
-/// there's room, under a short list when not (the one place a run shows;
-/// Go's openSub opened it whole).
+/// Opens run id on the conversation's page (openrun.rs), its pane with
+/// the keys once it shows.
 pub fn pick_run(m: &mut Model, key: &str, id: &str) {
-    super::views::show_view(m, key, "subagents");
-    let w = &mut conn(m, key).watch;
-    w.back = false;
-    w.from.clear();
-    w.from_view.clear();
-    w.msg_focus = false;
-    w.focus_next.clear();
-    set_sel(m, format!("sub:{id}"));
+    super::openrun::open(m, key, id, "");
 }
 
-/// Shows run id picked in the subagents view from elsewhere, the row from
-/// picked in the view showing (a subagent's step, the dock's run, the
-/// background view's): esc goes back there (watchRun, rushmode.go:777).
+/// Opens run id from the row from picked in the conversation (a
+/// subagent's step, the dock's run, the column's): esc, closing it, picks
+/// that row again (watchRun, rushmode.go:777).
 pub fn pick_from(m: &mut Model, key: &str, id: &str, from: &str) {
-    let view = super::views::view_name(m, key).to_string();
-    pick_run(m, key, id);
-    let w = &mut conn(m, key).watch;
-    w.back = true;
-    w.from = from.to_string();
-    w.from_view = view;
-    // Picked to look at it, its box has the keys once it shows, when a
-    // message can reach it: what's typed goes to it (Rust-only).
-    w.focus_next = id.to_string();
+    super::openrun::open(m, key, id, from);
 }
 
-/// Back to where the run picked was picked from, when it was picked from
-/// elsewhere (closeSub): whether it was.
+/// Closes the run open, back to where it was opened from (closeSub):
+/// whether one was open.
 pub fn go_back(m: &mut Model, key: &str) -> bool {
-    let w = &mut conn(m, key).watch;
-    if !w.back {
+    if !super::openrun::is_open(m, key) {
         return false;
     }
-    w.back = false;
-    w.msg_focus = false;
-    w.focus_next.clear();
-    let from = std::mem::take(&mut w.from);
-    let view = std::mem::take(&mut w.from_view);
-    conn(m, key).runs.detail = None;
-    if view.is_empty() || view == "conversation" {
-        conn(m, key).vs.view = 0;
-    } else {
-        super::views::show_view(m, key, &view);
-    }
-    set_sel(m, from);
+    super::openrun::close(m, key);
     true
 }
 
-/// Steps through the conversation and its runs, running ones first, then
-/// the rest, newest first, each picked in the subagents view; the
-/// conversation sits at either end (cycleSub).
+/// Steps through the session's runs, running ones first, then the rest,
+/// newest first, each opened in turn; the conversation alone sits at
+/// either end (cycleSub).
 pub fn cycle_sub(m: &mut Model, key: &str, dir: isize) {
     let now = m.now;
     let order: Vec<String> = {
@@ -359,47 +341,30 @@ pub fn cycle_sub(m: &mut Model, key: &str, dir: isize) {
         return;
     }
     let n = order.len() as isize + 1;
-    let mut cur = 0;
-    if super::views::view_name(m, key) == "subagents" {
-        let picked = sel(m);
-        if let Some(i) = order
-            .iter()
-            .position(|id| picked.strip_prefix("sub:") == Some(id.as_str()))
-        {
-            cur = i as isize + 1;
-        }
-    }
+    let open = super::openrun::open_id(m, key).unwrap_or_default();
+    let cur = order
+        .iter()
+        .position(|id| *id == open)
+        .map_or(0, |i| i as isize + 1);
     let next = ((cur + dir) % n + n) % n;
     if next == 0 {
-        conn(m, key).runs.detail = None;
-        conn(m, key).watch.back = false;
-        conn(m, key).vs.view = 0;
-        set_sel(m, String::new());
+        go_back(m, key);
         return;
     }
-    // A sibling is still picked from where this one was.
-    let (back, from, view) = {
-        let w = &conn(m, key).watch;
-        (w.back, w.from.clone(), w.from_view.clone())
-    };
-    pick_run(m, key, &order[next as usize - 1]);
-    let w = &mut conn(m, key).watch;
-    w.back = back;
-    w.from = from;
-    w.from_view = view;
+    // A sibling is still opened from where this one was.
+    let from = conn(m, key).watch.from.clone();
+    let from = if from.is_empty() { sel(m) } else { from };
+    pick_from(m, key, &order[next as usize - 1], &from);
 }
 
-/// Shows the subagents view on the workflow ref picks: its phases and
-/// its agents' runs (openWorkflow).
+/// Opens the workflow ref picks on the conversation's page: its phases
+/// and its agents, each a row that opens its run (openWorkflow).
 pub fn open_workflow(m: &mut Model, key: &str, r: &str) {
-    super::views::show_view(m, key, "subagents");
-    let w = &mut conn(m, key).watch;
-    w.back = false;
-    w.from.clear();
-    w.from_view.clear();
-    w.msg_focus = false;
     conn(m, key).runs.detail = None;
-    set_sel(m, r.to_string());
+    let from = sel(m);
+    super::openrun::open(m, key, r, &from);
+    // A workflow's pane has no box: the keys stay where they were.
+    conn(m, key).watch.focus_next.clear();
 }
 
 /// What the subagents view's tab says: how many run (tabStat).
@@ -1036,13 +1001,6 @@ pub const FINISHED_REF: &str = "fold:finished";
 /// How many finished runs show before the rest fold under Earlier.
 pub const EARLIER_AFTER: usize = 8;
 
-/// The run whose conversation shows beside the wide list: the one picked,
-/// and only once it's picked; the pointer passing over the list moves
-/// nothing (subPreviewLines' id).
-fn peek_id(m: &Model) -> Option<String> {
-    sel(m).strip_prefix("sub:").map(str::to_string)
-}
-
 /// The column's top rows for run id: how it stands, then its facts.
 fn peek_head(m: &mut Model, key: &str, id: &str, w: usize) -> Vec<Line> {
     let home = home_kind(m, key);
@@ -1128,9 +1086,10 @@ pub fn run_live(m: &Model, key: &str, id: &str) -> bool {
         .is_some_and(|sa| r.state(s, sa, &jobs, m.now).1)
 }
 
-/// The column beside the list for a workflow picked: when it started,
-/// how it stands, each phase and how far it got.
-fn group_lines(m: &mut Model, key: &str, rf: &str, w: usize) -> Vec<Line> {
+/// A workflow open (openrun.rs): when it started, how it stands, each
+/// phase and how far it got, its agents under it; and the ref on each
+/// row, an agent's run's id where it has one, which a click opens.
+pub fn flow_lines(m: &mut Model, key: &str, rf: &str, w: usize) -> (Vec<Line>, Vec<String>) {
     let (now, tick) = (m.now, m.tick);
     let Some(v) = m.session.as_ref().filter(|v| v.key == key) else {
         return Vec::new();
@@ -1142,7 +1101,7 @@ fn group_lines(m: &mut Model, key: &str, rf: &str, w: usize) -> Vec<Line> {
     let jobs = s.subagent_jobs();
     let live_of = |sa: &Subagent| r.state(s, sa, &jobs, now).1;
     let Some(g) = groups(r, s, &live_of).into_iter().find(|g| g.r#ref() == rf) else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
     let mut out = vec![line([
         plain(" "),
@@ -1172,6 +1131,7 @@ fn group_lines(m: &mut Model, key: &str, rf: &str, w: usize) -> Vec<Line> {
     }
     out.push(line([plain("   "), dim(facts.join(" · "))]));
     out.push(Line::new());
+    let mut refs: Vec<String> = Vec::new();
     for p in &g.phases {
         let agents = p.current();
         let done = agents.iter().filter(|a| a.state == "done").count();
@@ -1191,63 +1151,31 @@ fn group_lines(m: &mut Model, key: &str, rf: &str, w: usize) -> Vec<Line> {
                 format!("  {done} of {} done", agents.len())
             }),
         ]));
+        refs.resize(out.len(), String::new());
+        let label_w = agents.iter().map(|a| width(&a.label)).max().unwrap_or(0);
+        for (i, a) in agents.into_iter().enumerate() {
+            out.push(fit(agent_row(a, label_w, tick + i, w, now), w));
+            let run = g.subs.get(&a.id).map(|sa| sa.id.clone());
+            refs.push(run.unwrap_or_default());
+        }
     }
     out.push(Line::new());
-    out.push(line([faint("   click one of its agents to see it here")]));
-    out
-}
-
-/// The picked run under the list's first split rows, out rows tall in
-/// all, at the view's whole width: a rule, then the run.
-pub fn below(
-    m: &mut Model,
-    key: &str,
-    out: &mut [Line],
-    w: usize,
-    split: usize,
-    screen_top: usize,
-) {
-    conn(m, key).watch.peek.visible = false;
-    conn(m, key).watch.msg_at = [0; 4];
-    let h = out.len();
-    if split + 1 >= h {
-        return;
-    }
-    out[split] = line([faint("─".repeat(w))]);
-    let mut under: Vec<Line> = vec![Line::new(); h - split - 1];
-    column(m, key, &mut under, w, (2, screen_top + split + 1));
-    for (i, l) in under.into_iter().enumerate() {
-        out[split + 1 + i] = fit(l, w);
-    }
-}
-
-/// What shows with the list, into rows pw wide whose first cell is at
-/// (x, y) on the screen: the run picked, a workflow's phases, or how to
-/// pick one.
-fn column(m: &mut Model, key: &str, rows: &mut [Line], pw: usize, at: (usize, usize)) {
-    let picked = sel(m);
-    if let Some(id) = peek_id(m) {
-        peek(m, key, &id, rows, pw, at);
-        return;
-    }
-    let lines = if is_workflow_ref(m, &picked) {
-        group_lines(m, key, &picked, pw)
-    } else {
-        vec![
-            Line::new(),
-            line([faint(" Click an agent to see it here: how it stands,")]),
-            line([faint(" what it's doing, and a box to send it a message.")]),
-        ]
-    };
-    for (i, l) in lines.into_iter().enumerate().take(rows.len()) {
-        rows[i] = l;
-    }
+    out.push(line([faint("   click one of its agents to open it")]));
+    refs.resize(out.len(), String::new());
+    (out, refs)
 }
 
 /// Run id in rows pw wide, the first at (x, y) on the screen: its head,
 /// its conversation (a session's own, subpane.rs), what became of what
 /// was sent it, its box.
-fn peek(m: &mut Model, key: &str, id: &str, right: &mut [Line], pw: usize, (x, y): (usize, usize)) {
+pub fn peek(
+    m: &mut Model,
+    key: &str,
+    id: &str,
+    right: &mut [Line],
+    pw: usize,
+    (x, y): (usize, usize),
+) {
     let h = right.len();
     if let Some(src) = src_of(m, key, id) {
         show_detail(m, key, id, src, pw);
@@ -1351,11 +1279,10 @@ fn more_above(m: &mut Model, key: &str, rows: usize) {
     super::subs::refresh(m, key);
 }
 
-/// The subagents view's keys before the views': esc goes back where the
-/// run picked was picked from (closeSub); tab gives the picked run's box
-/// the keys, as → does, and tab in the box gives them back; both
-/// whatever the session's own box holds. alt+o on a run rush hosts opens its
-/// own session (Rust-only).
+/// The keys of a run open on the conversation's page before the views':
+/// tab gives the run's pane the keys (and tab in it gives them back,
+/// subpane.rs), whatever the session's own box holds but a / command's
+/// picker; alt+o on a run rush hosts opens its own session (Rust-only).
 pub fn key_first(m: &mut Model, k: &Press) -> Out {
     let Some(key) = open_key(m) else {
         return Out::Pass;
@@ -1363,30 +1290,22 @@ pub fn key_first(m: &mut Model, k: &Press) -> Out {
     if m.confirm.is_some() || m.sheet.is_some() || m.on_place() {
         return Out::Pass;
     }
-    if super::views::view_name(m, &key) != "subagents" {
+    let Some(open) = super::openrun::open_id(m, &key) else {
         return Out::Pass;
-    }
+    };
     let s = k.s.as_str();
-    // What's typed in the session's own box doesn't keep tab or esc
-    // here: they're the view's (Rust-only). A / command's picker keeps
-    // its tab.
     let picker = conn(m, &key).input.string().starts_with('/');
     match s {
-        "esc" if conn(m, &key).watch.back => {
-            go_back(m, &key);
-            Out::Draw
-        }
-        "tab" if !picker && box_run(m, &key).is_some_and(|id| sel(m) == format!("sub:{id}")) => {
+        "tab" if !picker && box_run(m, &key).is_some() => {
             focus_pane(m, &key);
             Out::Draw
         }
-        // A run rush hosts, picked in the list: its own session, where
-        // what it asks is answered (Rust-only).
+        // A run rush hosts: its own session, where what it asks is
+        // answered (Rust-only).
         "alt+o" => {
-            let picked = sel(m);
-            let host = picked
-                .strip_prefix("sub:")
-                .and_then(|id| conn(m, &key).runs.hosted_of(id))
+            let host = conn(m, &key)
+                .runs
+                .hosted_of(&open)
                 .map(|x| x.hosted.clone());
             match host {
                 Some(h) => {
@@ -1400,61 +1319,11 @@ pub fn key_first(m: &mut Model, k: &Press) -> Out {
     }
 }
 
-/// The list's own keys, before the cards' and the box's, while the list
-/// has them: ↑↓ move the pick through the list (the cards' ↑ from an
-/// empty box doesn't take them here), ↓ with nothing picked picks the
-/// first row in sight, as ↑ does (not the last); enter or → on a run
-/// gives its pane the keys
-/// (subpane.rs), which keeps them till esc. Rust-only: ↑↓ went to the box
-/// a click had focused, or to the cards, and never moved the pick.
-pub fn list_key(m: &mut Model, k: &Press) -> Out {
-    let Some(key) = open_key(m) else {
-        return Out::Pass;
-    };
-    if m.confirm.is_some() || m.sheet.is_some() || m.on_place() {
-        return Out::Pass;
-    }
-    if super::views::view_name(m, &key) != "subagents" || conn(m, &key).watch.msg_focus {
-        return Out::Pass;
-    }
-    let s = k.s.as_str();
-    let own_empty = conn(m, &key).input.is_empty();
-    let picked = sel(m);
-    match s {
-        "up" | "down" if own_empty || !picked.is_empty() => {
-            // Nothing in the list picked (or what's picked is out of
-            // sight): ↑ or ↓ picks its top row in sight, not the one by
-            // the box as the conversation's ↑ does (Rust-only).
-            let refs = &conn(m, &key).vs.refs;
-            let in_list = !picked.is_empty() && refs.contains(&picked);
-            if !in_list {
-                let first = refs.iter().find(|r| !r.is_empty()).cloned();
-                match first {
-                    Some(r) => set_sel(m, r),
-                    None => return Out::Idle,
-                }
-            } else {
-                super::views::move_sel(m, &key, if s == "up" { -1 } else { 1 });
-            }
-            Out::Draw
-        }
-        "enter" | "right"
-            if own_empty && picked.starts_with("sub:") && !is_fold(m, &key, &picked) =>
-        {
-            if box_run(m, &key).is_some_and(|id| picked[4..] == id) && focus_pane(m, &key) {
-                return Out::Draw;
-            }
-            Out::Pass
-        }
-        _ => Out::Pass,
-    }
-}
-
-/// enter, space or → on a run picked in the list gives its pane the keys;
-/// on a subagent's step in the conversation (enter or →) or a run in the
-/// dock, shows it picked in the subagents view; on a workflow, its
-/// agents. ↑↓ go through the dock's runs between the conversation and the
-/// queue (paneKey :4255-4270, moveSel :4932, subOfStep).
+/// enter or → on a subagent's step in the conversation, or space too on a
+/// run in the dock or the column, opens that run on the conversation's
+/// page; on a workflow, its phases and agents. ↑↓ go through the dock's
+/// runs between the conversation and the queue (paneKey :4255-4270,
+/// moveSel :4932, subOfStep).
 pub fn key(m: &mut Model, k: &Press) -> Out {
     let Some(key) = open_key(m) else {
         return Out::Pass;
@@ -1467,9 +1336,8 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     let picked = sel(m);
     let name = super::views::view_name(m, &key);
     match s {
-        // On a step a subagent made: that run, picked in the subagents
-        // view; esc comes back to the step. Not found to read yet, the
-        // step opens in place instead.
+        // On a step a subagent made: that run, opened; esc comes back to
+        // the step. Not found to read yet, the step opens in place instead.
         "enter" | "right"
             if empty
                 && name == "conversation"
@@ -1477,37 +1345,26 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
                 && let Some(id) = run_of_step(m, &key, &picked)
                 && src_of(m, &key, &id).is_some() =>
         {
-            // Its pane has the keys once it shows; esc comes back to the
-            // step.
             pick_from(m, &key, &id, &picked);
             Out::Draw
         }
         "enter" | "space" | " " | "right" if !picked.is_empty() => {
-            if name == "subagents" && is_fold(m, &key, &picked) {
-                if s != "right" || !conn(m, &key).watch.open_folds.contains(&picked) {
-                    toggle_fold(m, &key, &picked);
-                }
+            // On a background task's notice: the step that started it.
+            if picked.ends_with(":woke") && super::running::open_woke(m, &key, &picked) {
                 return Out::Draw;
             }
-            // A run picked in the list: its pane has the keys.
-            if picked.starts_with("sub:") && name == "subagents" {
-                if box_run(m, &key).is_some_and(|id| picked[4..] == id) {
-                    focus_pane(m, &key);
-                }
-                return Out::Draw;
-            }
-            // On a run in the dock: that run, picked in the subagents view.
+            // On a run in the dock: that run, opened.
             if let Some(id) = picked.strip_prefix("run:") {
                 let id = id.to_string();
                 pick_from(m, &key, &id, &picked);
                 return Out::Draw;
             }
-            // The dock's monitors: the background view, with them opened.
+            // The dock's monitors: opened under their row.
             if picked == rush_ui_list_extras::jobs::MONITORS_REF && name == "conversation" {
                 super::running::open_monitors(m, &key);
                 return Out::Draw;
             }
-            if picked.starts_with("wf:") || is_workflow_ref(m, &picked) && name != "subagents" {
+            if picked.starts_with("wf:") || is_workflow_ref(m, &picked) {
                 open_workflow(m, &key, &picked);
                 return Out::Draw;
             }
@@ -1516,9 +1373,9 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         "up" | "down" if name == "conversation" && (empty || !picked.is_empty()) => {
             dock_nav(m, &key, s == "up", &picked)
         }
-        // Through the conversation and its runs, each picked in the
-        // subagents view (cycleSub); a picked queued message has taken
-        // shift+↑↓ before this.
+        // Through the conversation and its runs, each opened in turn
+        // (cycleSub); a picked queued message has taken shift+↑↓ before
+        // this.
         "shift+up" | "shift+down" | "alt+up" | "alt+down" if empty || s.starts_with("alt") => {
             cycle_sub(m, &key, if s.ends_with("up") { -1 } else { 1 });
             Out::Draw
@@ -1559,9 +1416,15 @@ fn run_of_step(m: &mut Model, key: &str, picked: &str) -> Option<String> {
 }
 
 /// A click on one of the dock's runs, in the conversation or the column
-/// beside it: a workflow shows its agents, a run or task is picked
-/// (clickRef :5102). Whether it was one.
+/// beside it: a workflow opens with its agents, a run opens on the
+/// conversation's page, a task's step opens where it is in the
+/// conversation, a task no step started is picked (clickRef :5102;
+/// Rust-only: Go picked them in their views). Whether it was one.
 pub fn click_ref(m: &mut Model, key: &str, r: &str) -> bool {
+    // A background task's notice: the step that started the task.
+    if r.ends_with(":woke") {
+        return super::running::open_woke(m, key, r);
+    }
     if is_workflow_ref(m, r) {
         open_workflow(m, key, r);
         return true;
@@ -1570,8 +1433,17 @@ pub fn click_ref(m: &mut Model, key: &str, r: &str) -> bool {
         super::running::open_monitors(m, key);
         return true;
     }
-    if r.starts_with("run:") || r.starts_with("job:") {
-        set_sel(m, r.to_string());
+    if let Some(id) = r.strip_prefix("run:") {
+        let id = id.to_string();
+        let from = sel(m);
+        pick_from(m, key, &id, &from);
+        return true;
+    }
+    if let Some(id) = r.strip_prefix("job:") {
+        let id = id.to_string();
+        if !super::running::open_task(m, key, &id) {
+            set_sel(m, r.to_string());
+        }
         return true;
     }
     false
@@ -1641,36 +1513,6 @@ fn dock_nav(m: &mut Model, key: &str, up: bool, picked: &str) -> Out {
     Out::Draw
 }
 
-/// Opens or closes the fold rf picks: a run's earlier tries, or a
-/// finished workflow run.
-fn toggle_fold(m: &mut Model, key: &str, rf: &str) {
-    let f = &mut conn(m, key).watch.open_folds;
-    if !f.remove(rf) {
-        f.insert(rf.to_string());
-    }
-}
-
-/// Whether ref is a fold the list opens and closes in place: earlier
-/// tries, or a workflow run that has finished.
-fn is_fold(m: &Model, key: &str, rf: &str) -> bool {
-    if rf.starts_with(TRIES_REF) || rf == EARLIER_REF || rf == FINISHED_REF {
-        return true;
-    }
-    if !is_workflow_ref(m, rf) {
-        return false;
-    }
-    let now = m.now;
-    let (Some(v), Some(r)) = (m.session.as_ref(), runs_of(m, key)) else {
-        return false;
-    };
-    let s = &v.sess;
-    let jobs = s.subagent_jobs();
-    let live_of = |sa: &Subagent| r.state(s, sa, &jobs, now).1;
-    groups(r, s, &live_of)
-        .iter()
-        .any(|g| g.r#ref() == rf && !g.live)
-}
-
 /// The run the box beside the list is for, while it shows.
 pub fn box_run(m: &Model, key: &str) -> Option<String> {
     let c = m.kept.peek::<super::Core>()?.conns.get(key)?;
@@ -1705,11 +1547,13 @@ fn focus_pane(m: &mut Model, key: &str) -> bool {
     true
 }
 
-/// The pointer over the subagents view: in the list a click picks a run,
-/// which then shows with the list (beside it or under it) while the list
-/// keeps the keys, and opens or closes a fold; with the run, a click on
-/// the box gives it the keys, elsewhere gives them back, and the wheel
-/// scrolls the run's conversation (subHoverAt, subMouseMove, clickRef).
+/// The pointer while a run is open on the conversation's page: ✕ on its
+/// edge closes it; a click on its box, its head or its edge gives its pane
+/// the keys (its conversation's own clicks are subpane.rs's), a click on a
+/// workflow's agent opens that agent; the wheel anywhere in it is its own.
+/// A click elsewhere gives the keys back to the conversation and goes on.
+/// With nothing open, a click on one of the dock's runs opens it
+/// (clickRef).
 pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     let Some(key) = open_key(m) else {
         return Out::Pass;
@@ -1720,103 +1564,51 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     let Some(top) = m.session.as_ref().map(|v| v.top) else {
         return Out::Pass;
     };
-    let name = super::views::view_name(m, &key);
-    if name != "subagents" {
-        // The dock's runs on the transcript's end; another view's rows
-        // are its own (the background view's: views.rs).
-        if e.kind != MouseKind::Down(Button::Left) || name != "conversation" {
-            return Out::Pass;
-        }
-        let r = m
-            .session
-            .as_ref()
-            .and_then(|v| v.shown.get(e.y as usize - top.min(e.y as usize)).cloned())
-            .filter(|_| e.y as usize >= top)
-            .unwrap_or_default();
-        if !r.is_empty() && click_ref(m, &key, &r) {
-            return Out::Draw;
-        }
+    if super::views::view_name(m, &key) != "conversation" {
         return Out::Pass;
     }
     let (x, y) = (e.x as usize, e.y as usize);
-    let rows = conn(m, &key).vs.rows.max(1);
-    let (cols, cw) = (conn(m, &key).watch.cols, conn(m, &key).watch.cell_w);
-    let row = y.checked_sub(top).filter(|&i| i < rows);
-    let rf = row
-        .and_then(|i| {
-            if cols > 1 {
-                band_at(x.saturating_sub(2), i, rows, cols, cw)
-            } else {
-                Some(i)
-            }
-        })
-        .and_then(|i| conn(m, &key).vs.refs.get(i).cloned())
-        .unwrap_or_default();
-    let p = &conn(m, &key).watch.peek;
-    let in_peek = p.visible && x >= p.x && x < p.x + p.w && y >= p.y && y < p.y + p.h;
-    let b = conn(m, &key).watch.msg_at;
-    let in_box = b[2] > 0 && x >= b[0] && x < b[0] + b[2] && y >= b[1] && y < b[1] + b[3];
-    let split = conn(m, &key).watch.split;
-    // The rows under the list are the run's, not the list's. Only on the
-    // body's rows: the header's tabs over it and the box under it are
-    // their own (Go clicks the pane's tabs first, model.go:1680
-    // clickPaneTab).
-    let body = conn(m, &key).watch.body_rows;
-    let on_body = y >= top && y < top + body;
-    let beside = on_body && split > 0 && y >= top + split;
-    if row.is_none() && !in_peek && !in_box && !beside {
-        return Out::Pass;
-    }
-    match e.kind {
-        MouseKind::Down(Button::Left) => {
-            if in_box {
+    if super::openrun::is_open(m, &key) {
+        let inside = super::openrun::inside(m, &key, x, y);
+        match e.kind {
+            MouseKind::Down(Button::Left) if inside => {
+                if super::openrun::on_close(m, &key, x, y) {
+                    super::openrun::close(m, &key);
+                    return Out::Draw;
+                }
+                if let Some(id) = super::openrun::flow_ref_at(m, &key, x, y) {
+                    let from = conn(m, &key).watch.open.clone();
+                    pick_from(m, &key, &id, &from);
+                    return Out::Draw;
+                }
                 if !focus_pane(m, &key) {
                     return Out::Idle;
                 }
                 return Out::Draw;
             }
-            if beside {
-                // Elsewhere with the run: the keys go back to the list.
-                let w = &mut conn(m, &key).watch;
-                if w.msg_focus {
-                    w.msg_focus = false;
-                    return Out::Draw;
-                }
+            MouseKind::Down(Button::Left) => {
+                // Elsewhere: the keys go back to the conversation, and the
+                // click goes on to what's under it.
+                conn(m, &key).watch.msg_focus = false;
+            }
+            MouseKind::ScrollUp | MouseKind::ScrollDown | MouseKind::Moved if inside => {
                 return Out::Idle;
             }
-            conn(m, &key).watch.msg_focus = false;
-            if rf.is_empty() {
-                // Between the list's columns: no row of it, and no view's.
-                return if cols > 1 { Out::Idle } else { Out::Pass };
-            }
-            if is_fold(m, &key, &rf) {
-                toggle_fold(m, &key, &rf);
-            }
-            // A run clicked shows under the list, which keeps the keys:
-            // ↑↓ go on through the runs; tab, enter or → give its pane
-            // them (Rust-only).
-            set_sel(m, rf);
-            Out::Draw
+            _ => {}
         }
-        // The wheel over the run's conversation is its pane's (subpane).
-        MouseKind::ScrollUp | MouseKind::ScrollDown if in_peek => Out::Idle,
-        MouseKind::Moved => {
-            // The pointer lights the list's row under it, and nothing
-            // else: what shows with the list changes on a click only.
-            let over = if in_peek || in_box || beside {
-                String::new()
-            } else {
-                rf
-            };
-            let now = m.now;
-            let c = conn(m, &key);
-            if c.vs.hover_ref == over {
-                return Out::Pass;
-            }
-            c.vs.hover_ref = over;
-            c.watch.hover_at = now;
-            Out::Draw
-        }
-        _ => Out::Pass,
     }
+    // The dock's runs on the transcript's end.
+    if e.kind != MouseKind::Down(Button::Left) {
+        return Out::Pass;
+    }
+    let r = m
+        .session
+        .as_ref()
+        .and_then(|v| v.shown.get(y - top.min(y)).cloned())
+        .filter(|_| y >= top)
+        .unwrap_or_default();
+    if !r.is_empty() && click_ref(m, &key, &r) {
+        return Out::Draw;
+    }
+    Out::Pass
 }

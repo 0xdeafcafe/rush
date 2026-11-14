@@ -40,7 +40,7 @@ impl Drop for Follow {
 /// The run to follow in session key now, and its transcript: the one
 /// picked in the Subagents tab, showing, and running.
 fn want(m: &Model, key: &str) -> Option<(String, String)> {
-    if open_key(m).as_deref() != Some(key) || super::views::view_name(m, key) != "subagents" {
+    if open_key(m).as_deref() != Some(key) || !super::openrun::is_open(m, key) {
         return None;
     }
     let v = m.session.as_ref().filter(|v| v.key == key)?;

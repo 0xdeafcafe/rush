@@ -43,6 +43,7 @@ pub mod memedit;
 pub mod memory;
 pub mod minimap;
 pub mod moveto;
+pub mod openrun;
 pub mod overview;
 pub mod panelsubs;
 pub mod presets;
@@ -116,8 +117,6 @@ pub fn register(x: &mut Ext) {
     // ctrl+b backgrounds what the turn waits on before /btw has it
     // (paneKey :4003).
     x.session_keys.insert(0, jobkeys::ctrl_b);
-    // The box under a run beside the subagents list, while it has the
-    // keys, has them all.
     // Focus in the column beside the conversation (→ from the box or the
     // conversation): its keys come before everything else's.
     x.session_keys.insert(0, side::focus_key);
@@ -192,11 +191,9 @@ pub fn register(x: &mut Ext) {
     // suggestion waits while you type or scroll (viewsuggest.rs).
     x.session_keys.insert(0, viewsuggest::watch_key);
     x.mouse.insert(0, viewsuggest::watch_mouse);
-    // The subagents list's ↑↓ and enter, before the box's and the cards'
-    // (subview::list_key); a run's pane with the keys has every key first,
-    // and the pointer over its conversation (subpane.rs); a hosted child's
-    // breadcrumb its click.
-    x.session_keys.insert(0, subview::list_key);
+    // A run open on the conversation's page, its pane with the keys, has
+    // every key first, and the pointer over its conversation (subpane.rs);
+    // a hosted child's breadcrumb its click.
     x.session_keys.insert(0, subpane::key);
     x.mouse.insert(0, subpane::mouse);
     x.mouse.insert(0, subpane::crumb_click);
