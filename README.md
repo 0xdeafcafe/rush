@@ -18,7 +18,17 @@ brew install 0xdeafcafe/tap/rush
 rush
 ```
 
-Use the full name: homebrew/core has a different `rush` (GNU's restricted shell), and plain `brew install rush` gets you that one. Macs with Apple silicon only.
+Use the full name: homebrew/core has a different `rush` (GNU's restricted shell), and plain `brew install rush` gets you that one. Homebrew installs are for Macs with Apple silicon.
+
+On Linux (x86_64 or arm64, glibc 2.35 or newer), take the release's tarball for your machine:
+
+```sh
+gh release download --repo 0xdeafcafe/rush --pattern "rush-*-$(uname -m)-unknown-linux-gnu.tar.gz"
+tar -xzf rush-*-linux-gnu.tar.gz rush
+install -m 755 rush ~/.local/bin/rush
+```
+
+Or download it from the [releases page](https://github.com/0xdeafcafe/rush/releases). A rush installed this way updates itself from the releases.
 
 ## Fast, on purpose
 

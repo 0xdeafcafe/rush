@@ -921,3 +921,38 @@ what's new in v0.1.0-beta.6
     );
     assert_eq!(text(&[], 10), "");
 }
+
+// Each machine downloads the tarball built for it: a Linux arm64 rush never
+// takes the Mac's.
+#[test]
+fn target_is_this_machines_release() {
+    let want = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        Some("aarch64-apple-darwin")
+    } else if cfg!(all(
+        target_os = "linux",
+        target_env = "gnu",
+        target_arch = "x86_64"
+    )) {
+        Some("x86_64-unknown-linux-gnu")
+    } else if cfg!(all(
+        target_os = "linux",
+        target_env = "gnu",
+        target_arch = "aarch64"
+    )) {
+        Some("aarch64-unknown-linux-gnu")
+    } else {
+        None
+    };
+    assert_eq!(target(), want);
+    if let Some(t) = target() {
+        let os = if cfg!(target_os = "macos") {
+            "darwin"
+        } else {
+            "linux"
+        };
+        assert!(
+            t.contains(os) && t.starts_with(std::env::consts::ARCH),
+            "{t}"
+        );
+    }
+}
