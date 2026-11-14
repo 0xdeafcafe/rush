@@ -648,11 +648,11 @@ fn claude_run_sections(m: &Model) -> (Section, Section) {
     let quick = choice(
         "Quick start",
         on_off(cfg.dispatch.quick_start()),
-        "Starts rush-mode sessions without Claude Code's non-essential network traffic (CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC), for them alone. Claude Code is ready in about 0.3s instead of 0.65s, which you feel on every new session and every message after one has rested.",
+        "Starts rush-mode sessions without Claude Code's non-essential network traffic (CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC), for them alone. Each session holds about 6 MB less once idle (137 against 143), spends a sixth less CPU on a turn, and sends about 1,200 fewer tokens a request; it starts no quicker (0.33s either way on Claude Code 2.1.322).",
         &[
             (
                 "on",
-                "quicker starts, but no DesignSync, Projects, plugin downloads or live preview in them. Your telemetry settings are unaffected.",
+                "leaner, but no /advisor, /ultrareview, DesignSync, skills and plugins synced from claude.ai, plugin downloads or live preview in them, and no telemetry from them.",
             ),
             ("off", "sessions start with everything Claude Code has."),
         ],
