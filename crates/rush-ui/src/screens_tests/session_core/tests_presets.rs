@@ -186,15 +186,15 @@ fn the_key_opens_the_dropdown_and_picks() {
         "drawn so"
     );
     // Opened again, Chat is the one marked and picked; ↑ goes round the
-    // top to Trail.
+    // top to Live.
     press(&mut m, "alt+s");
     let (_, s) = tab_row(&mut m);
     assert!(menu_rows(&s)[1].contains("▸ ● Chat"), "{:?}", menu_rows(&s));
     press(&mut m, "up");
     press(&mut m, "up");
     press(&mut m, "enter");
-    assert_eq!(super::presets::current(&m), Preset::Trail);
-    assert_eq!(kept(&m), "trail");
+    assert_eq!(super::presets::current(&m), Preset::Live);
+    assert_eq!(kept(&m), "live");
     press(&mut m, "alt+s");
     press(&mut m, "down");
     press(&mut m, "enter");
