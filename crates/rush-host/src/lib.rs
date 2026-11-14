@@ -43,6 +43,7 @@ pub mod kind;
 pub mod left;
 pub mod lines;
 pub mod longtask;
+pub mod memshare;
 pub mod name;
 pub mod op;
 pub mod open;

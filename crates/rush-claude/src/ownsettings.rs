@@ -164,6 +164,7 @@ fn item(
         from: shown.from,
         choices: pairs(choices),
         unset: unset.into(),
+        ask: String::new(),
     }
 }
 
@@ -409,6 +410,7 @@ fn env_items(s: &Snapshot) -> Vec<OwnSetting> {
             from,
             choices,
             unset: "not set".into(),
+            ask: String::new(),
         });
     }
     for (name, value) in &env {
@@ -453,6 +455,7 @@ fn plugin_items(s: &Snapshot) -> Vec<OwnSetting> {
                 ("off", "installed, but no session loads it."),
             ]),
             unset: String::new(),
+            ask: String::new(),
         })
         .collect()
 }

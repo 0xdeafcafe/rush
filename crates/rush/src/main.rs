@@ -599,6 +599,7 @@ fn register() {
         rush_claude::Claude::at(rush_claude::Account::home()),
     ));
     rush_codex::register();
+    rush_codex::hooks::use_command(rush_gate::plugin::codex_hook_command);
     reg.register(rush_pi::Pi::new());
     reg.register(rush_antigravity::Antigravity::new());
     rush_copilot::register(reg);

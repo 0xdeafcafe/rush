@@ -1737,6 +1737,13 @@ impl Host {
             o.skill_roots = crate::agents::skill_roots(&self.reg, &c.cwd);
             format!("{told}\n\n{PASTES_PROMPT}")
         };
+        // Claude Code reads the project's memory notes itself; another
+        // agent is told them, and how to add one, so the two share them.
+        let memory = if self.reg.reads_as_claude(&kind) {
+            String::new()
+        } else {
+            crate::memshare::memory_prompt(&self.reg, &c.cwd)
+        };
         let feed = if rush_state::Store::load().config.feed {
             COMMUNITY_PROMPT
         } else {
@@ -1778,6 +1785,7 @@ impl Host {
             views,
             feed,
             &cheap.prompt,
+            &memory,
             &note,
         ]);
         // The same parts by name, so the next start can say what changed.
@@ -1791,6 +1799,7 @@ impl Host {
             ("rush's agents and tools".into(), told.as_str()),
             ("community feed".into(), feed),
             ("cheaper subagent model".into(), cheap.prompt.as_str()),
+            ("rush's memory notes".into(), memory.as_str()),
         ];
         // Each plugin's apart (the map is sorted by name).
         for (n, t) in &pc.prompts {

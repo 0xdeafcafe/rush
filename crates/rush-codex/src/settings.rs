@@ -132,6 +132,7 @@ pub fn read(path: &Path) -> io::Result<OwnSettings> {
                     .map(|(a, b)| (a.to_string(), b.to_string()))
                     .collect(),
                 unset: unset.to_string(),
+                ask: String::new(),
             }
         })
         .collect();

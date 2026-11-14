@@ -38,6 +38,7 @@ use crate::items::{
 use crate::json::{arr, get, int, keep, s, st};
 use crate::models::{CachedModel, model_id, read_models};
 use crate::quota::{Snapshot, account_billing, quota_from, read_quota};
+use crate::reach;
 use crate::rollout::{call_part, result_with};
 use crate::rpc::{Client, Handler, Incoming, Message as RpcMessage, RpcError, id_string, spawn};
 
@@ -47,6 +48,20 @@ pub(crate) const REQ_FILE_CHANGE: &str = "item/fileChange/requestApproval";
 pub(crate) const REQ_PERMISSIONS: &str = "item/permissions/requestApproval";
 pub(crate) const REQ_USER_INPUT: &str = "item/tool/requestUserInput";
 pub(crate) const REQ_ELICITATION: &str = "mcpServer/elicitation/request";
+
+/// The Codex home a profile's dir names: its own, else ~/.codex.
+fn codex_home(dir: &str) -> String {
+    if !dir.is_empty() {
+        return dir.to_string();
+    }
+    match std::env::var_os("CODEX_HOME").filter(|d| !d.is_empty()) {
+        Some(d) => d.to_string_lossy().into_owned(),
+        None => std::path::Path::new(&std::env::var_os("HOME").unwrap_or_default())
+            .join(".codex")
+            .to_string_lossy()
+            .into_owned(),
+    }
+}
 
 /// The MCP server rush serves its own tools as (Go's agtools.Server).
 const TOOLS_SERVER: &str = "rush";
@@ -58,8 +73,9 @@ struct Mode {
     approval: &'static str,
     /// thread/start's SandboxMode
     sandbox: &'static str,
-    /// turn/start's SandboxPolicy
-    turn: fn() -> Value,
+    /// turn/start's SandboxPolicy, with the folders it may write besides
+    /// the workspace (reach::writable_roots)
+    turn: fn(&[String]) -> Value,
 }
 
 /// The presets Codex's own /approvals offers.
@@ -68,14 +84,14 @@ const MODES: [Mode; 3] = [
         id: "read-only",
         approval: "on-request",
         sandbox: "read-only",
-        turn: || json!({"type": "readOnly", "networkAccess": false}),
+        turn: |_| json!({"type": "readOnly", "networkAccess": false}),
     },
     Mode {
         id: "auto",
         approval: "on-request",
         sandbox: "workspace-write",
-        turn: || {
-            json!({"type": "workspaceWrite", "writableRoots": [], "networkAccess": false,
+        turn: |roots| {
+            json!({"type": "workspaceWrite", "writableRoots": roots, "networkAccess": false,
                 "excludeTmpdirEnvVar": false, "excludeSlashTmp": false})
         },
     },
@@ -83,7 +99,7 @@ const MODES: [Mode; 3] = [
         id: "full-access",
         approval: "never",
         sandbox: "danger-full-access",
-        turn: || json!({"type": "dangerFullAccess"}),
+        turn: |_| json!({"type": "dangerFullAccess"}),
     },
 ];
 
@@ -96,7 +112,7 @@ fn mode(id: &str) -> Option<&'static Mode> {
 pub(crate) fn mode_of(approval: &str, sandbox: &str) -> &'static str {
     MODES
         .iter()
-        .find(|m| m.approval == approval && s(&(m.turn)(), "type") == sandbox)
+        .find(|m| m.approval == approval && s(&(m.turn)(&[]), "type") == sandbox)
         .map_or("", |m| m.id)
 }
 
@@ -243,6 +259,8 @@ struct State {
     shells: BTreeMap<String, Shell>,
     /// The yeses for a session rush keeps past a restart.
     granted: crate::grants::Granted,
+    /// What its workspace sandbox may write besides its folder.
+    roots: Vec<String>,
 }
 
 /// Where a connection is in its life, as its sink hears it.
@@ -1171,8 +1189,30 @@ impl Conn {
         };
         set("model", &model);
         set("cwd", &o.dir);
-        // rush's own prompt, which Claude Code gets in --append-system-prompt.
-        set("developerInstructions", o.prompt.trim());
+        // rush's own prompt, which Claude Code gets in --append-system-prompt,
+        // and the user's CLAUDE.md where Codex has no AGENTS.md of its own.
+        let home = codex_home(&o.profile.dir);
+        let user = reach::user_doc(&home, &reach::claude_home());
+        let told = [o.prompt.trim(), user.as_str()]
+            .into_iter()
+            .filter(|t| !t.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        set("developerInstructions", &told);
+        // A project's CLAUDE.md where it has no AGENTS.md; and what a commit
+        // and rush's own commands write, which its workspace sandbox keeps
+        // read-only (thread/start's default; each turn's policy says it too).
+        let roots = reach::writable_roots(&o.dir, &rush_state::dir().to_string_lossy());
+        self.inner.st().roots = roots.clone();
+        let mut config = serde_json::Map::new();
+        config.insert(
+            "project_doc_fallback_filenames".into(),
+            json!(reach::doc_fallbacks(&home)),
+        );
+        config.insert(
+            "sandbox_workspace_write.writable_roots".into(),
+            json!(roots),
+        );
         if let Some(t) = o
             .tools
             .iter()
@@ -1192,14 +1232,15 @@ impl Conn {
             // session's (RUSH_HOME).
             let mut env: Vec<String> = std::env::vars().map(|(k, v)| format!("{k}={v}")).collect();
             env.extend(o.env.iter().cloned());
-            params.insert(
-                "config".into(),
-                json!({ format!("mcp_servers.{TOOLS_SERVER}"): {
+            config.insert(
+                format!("mcp_servers.{TOOLS_SERVER}"),
+                json!({
                     "command": exe.to_string_lossy(), "args": t.args,
                     "tool_timeout_sec": 3600, "env_vars": env_names(&env), "tools": tools,
-                }}),
+                }),
             );
         }
+        params.insert("config".into(), Value::Object(config));
         if !o.skill_roots.is_empty() {
             // Claude Code's skills beside Codex's own; not reading them is
             // no reason not to start.
@@ -1339,6 +1380,14 @@ pub fn start(mut o: StartOptions, sink: Arc<dyn Sink>) -> adapter::Result<Conn> 
         o.mode.clear();
     }
     crate::grants::write_rules(&o.profile.dir);
+    // Rush's hook in Codex's own hooks.json, left by an older rush, is
+    // trusted again as this one, off to the side (hooks::refresh). It
+    // stands in for o.bash_hook and o.tool_hook, which Codex can't take
+    // for one session.
+    if crate::hooks::command().is_some() {
+        let home = std::path::PathBuf::from(codex_home(&o.profile.dir));
+        std::thread::spawn(move || crate::hooks::refresh(&home));
+    }
     let inner = new_inner(sink, starting());
     let rpc = spawn(
         &o.binary,
@@ -1396,9 +1445,14 @@ impl ConnTrait for Conn {
         for p in &input.images {
             parts.push(json!({"type": "localImage", "path": p}));
         }
-        let (thread, turn, next) = {
+        let (thread, turn, next, roots) = {
             let st = self.inner.st();
-            (st.thread.clone(), st.turn.clone(), st.next.clone())
+            (
+                st.thread.clone(),
+                st.turn.clone(),
+                st.next.clone(),
+                st.roots.clone(),
+            )
         };
         if !turn.is_empty() {
             match self.rpc.call(
@@ -1423,7 +1477,7 @@ impl ConnTrait for Conn {
         }
         if let Some(m) = mode(&next.mode) {
             params.insert("approvalPolicy".into(), m.approval.into());
-            params.insert("sandboxPolicy".into(), (m.turn)());
+            params.insert("sandboxPolicy".into(), (m.turn)(&roots));
         }
         let res = self.rpc.call("turn/start", Value::Object(params), None)?;
         let res: Value = serde_json::from_str(res.get()).unwrap_or(Value::Null);

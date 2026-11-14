@@ -306,6 +306,16 @@ pub fn hook_command() -> String {
     format!("{} gate hook", quote(&e))
 }
 
+/// The same hook as Codex runs it, answering in Codex's words
+/// (cli::gate_hook_codex); "" when there's no rush to run it. Rush-only.
+pub fn codex_hook_command() -> String {
+    let c = hook_command();
+    if c.is_empty() {
+        return c;
+    }
+    format!("{c} {}", crate::cli::CODEX_FLAG)
+}
+
 fn default_setting(s: &Spec) -> &'static str {
     let d = default_of(s.key);
     if !d.is_empty() {
