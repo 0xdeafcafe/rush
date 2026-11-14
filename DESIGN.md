@@ -3360,8 +3360,25 @@ its conversation growing and the cache reading all of it): a query each
 time costs the same and holds no memory between asks.
 
 Frame cost: `cargo bench -p rush-convo --bench render` ("live:" rows and
-the Live preset's): the fullest story (6 blocks of 12), its delta,
-prompt and patch, and a frame after the story changes.
+the Live preset's), on the fullest story (6 blocks of 12), 3,000 turns,
+w120, CI's macOS runner (footprint run 43615184800; its times wander
+by half between runs, the allocations don't):
+
+| | µs | allocs |
+|---|---|---|
+| Live opened (cold frame at the end) | 208 | 955 |
+| the same frame again, a turn running | 0.5 | 2 |
+| mid-way | 2.3 | 0 |
+| the story changed, then a frame | 84 | 946 |
+| what's new, first time (3 turns) | 12 | 77 |
+| what's new, nothing | 0.1 | 2 |
+| the prompt | 51 | 681 |
+| an answer applied | 95 | 1,391 |
+
+A running turn's key holds the tick (its spinner turns); the card has
+none, only times, so it holds the clock alone and is drawn again as
+they change, not every tick: the same frame cost 89 µs and 945
+allocations before (run 43610924730), Normal's 6–7 µs.
 
 Not possible: Claude Code's Code Mode (`CLAUDE_CODE_EXPERIMENTAL_CODE_MODE`)
 works only in an interactive terminal, not `-p` or the SDK, so no rush
