@@ -1,6 +1,6 @@
 {
- "commit": "304821549a0ce1bdbeb0573986abbe2613561dc2",
- "at": "2026-11-14T18:18:01Z",
+ "commit": "311f90b1e469d6e0338242bd6fd78d0a0676a469",
+ "at": "2026-11-14T21:18:21Z",
  "metrics": {
   "binary: rush, release": {
    "kind": "binary",
@@ -815,7 +815,6 @@
  },
  "flagged": [
   "binary: rush, release",
-  "menubar feed: footprint",
   "open last 2 MB: allocations made",
   "open whole file, fetch+apply: allocations made",
   "open whole file: allocations made",
@@ -830,7 +829,6 @@
   "render 3000 turns w120: cold frame at the end, bytes",
   "render 3000 turns w120: cold jump to the top (window), bytes",
   "render 3000 turns w120: normal: cold frame at the end, bytes",
-  "render 3000 turns w120: trail: cold frame at the end, bytes",
-  "ui: footprint"
+  "render 3000 turns w120: trail: cold frame at the end, bytes"
  ]
 }
