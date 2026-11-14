@@ -753,6 +753,45 @@ fn trusted_tools_approved() {
     );
 }
 
+// A project's CLAUDE.md is read where it has no AGENTS.md, and the
+// workspace sandbox may write rush's own folder, at the thread's start and
+// in each turn's policy.
+#[test]
+fn reads_claude_md_and_writes_rush() {
+    let (c, mut f, _rx) = connect();
+    let h = begin(&c, StartOptions::default());
+    let init = f.expect("initialize");
+    f.respond(&init, json!({"userAgent": "rush/1"}));
+    f.expect("initialized");
+    let ts = f.expect("thread/start");
+    let cfg = &ts["params"]["config"];
+    assert_eq!(cfg["project_doc_fallback_filenames"], json!(["CLAUDE.md"]));
+    let roots = cfg["sandbox_workspace_write.writable_roots"].clone();
+    assert!(
+        roots
+            .as_array()
+            .is_some_and(|r| r.len() == 1 && r[0].as_str().is_some_and(|d| !d.is_empty())),
+        "{roots}"
+    );
+    f.respond(&ts, json!({"thread": {"id": "th1"}, "model": "gpt-5.5"}));
+    h.join().unwrap().unwrap();
+    c.set_mode("auto").unwrap();
+    let sent = spawn_call(&c, |c| {
+        c.send(Input {
+            text: "hi".into(),
+            ..Input::default()
+        })
+    });
+    let t = f.expect("turn/start");
+    let p = &t["params"]["sandboxPolicy"];
+    assert!(
+        p["type"] == "workspaceWrite" && p["writableRoots"] == roots,
+        "{p}"
+    );
+    f.respond(&t, json!({"turn": {"id": "tu1"}}));
+    sent.join().unwrap().unwrap();
+}
+
 // compact_test.go:TestNativeCompactionLifecycle
 #[test]
 fn native_compaction_lifecycle() {
