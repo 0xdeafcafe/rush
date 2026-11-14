@@ -997,17 +997,17 @@ mod tests {
     }
 
     fn wt_item(made: &'static str, own: bool, size: i64, busy: &str) -> CleanItem {
+        // Worktree has fields of its crate's own: set one field at a time.
+        let mut w = Worktree::default();
+        w.path = format!("/r/.claude/worktrees/{made}");
+        w.repo = "/r".into();
+        w.checked = NOW;
+        w.no_remote = true;
+        w.made = made;
+        w.own = own;
+        w.size = size;
         CleanItem {
-            wt: Some(Worktree {
-                path: format!("/r/.claude/worktrees/{made}"),
-                repo: "/r".into(),
-                checked: NOW,
-                no_remote: true,
-                made,
-                own,
-                size,
-                ..Worktree::default()
-            }),
+            wt: Some(w),
             busy: busy.into(),
             ..CleanItem::default()
         }
