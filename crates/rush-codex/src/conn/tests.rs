@@ -1252,7 +1252,7 @@ fn interrupted_turn_leaves_no_background_shell() {
 #[test]
 fn mode_of_policy() {
     for m in &MODES {
-        assert_eq!(mode_of(m.approval, s(&(m.turn)(), "type")), m.id);
+        assert_eq!(mode_of(m.approval, s(&(m.turn)(&[]), "type")), m.id);
     }
     assert_eq!(mode_of("on-request", "somethingNew"), "");
 }
