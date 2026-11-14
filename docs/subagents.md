@@ -118,10 +118,9 @@ What rush can't answer here has only Open it. A child rush hosts
 waiting on something only its own session answers (a plan to approve,
 say) opens that session: it's no longer folded into its parent's
 (`Handle::unfold`) and is opened once the list has it as a row
-(`spawned::open_session`). alt+o on a hosted run in the subagents view,
-or in the box under it, opens its session too. An agent rush doesn't
-host that waits on you in its transcript is picked in the subagents
-view. The parent's host is looked at for its agents every 2 s while it
+(`spawned::open_session`). alt+o on a hosted run open on the conversation's
+page, or in the box under it, opens its session too. An agent rush
+doesn't host that waits on you in its transcript is opened there. The parent's host is looked at for its agents every 2 s while it
 works or any of them does; one missing from two lookings in a row is
 taken for gone (not working, asking nothing), so the looking stops.
 
@@ -253,18 +252,22 @@ as guidance mid-turn where the agent can take that.
   host went without saying, else done. Its row under the parent in the
   list is ● while it (or one it started) waits on you, and says how it
   ended for a minute after.
-- A run shows in its pane beside the parent's Subagents list (under it
-  when narrow), never full screen. tab, enter or → on it, or a click in
-  its pane, gives the pane the keys: its conversation is then driven as
+- A run opens on the parent's conversation page, never full screen and
+  never a tab of its own: in the column right of the conversation where
+  that fits, else (or when Settings › Interface › Open a subagent says
+  "under its step") framed under the step that started it, the parent's
+  conversation going on below. Opened, or tab or a click in it, gives the
+  pane the keys: its conversation is then driven as
   a session's (↑↓ rows, enter → ← ctrl+o, o a file, PgUp/PgDn, Home/End,
   a click, dragged-over text, the pins and the "↓ N more" pill), and
   what's typed goes to the run's own box and queue, never the parent's.
-  esc gives the keys back to the list, then to where it was picked from.
+  tab gives the keys back to the conversation; esc (its box empty) or the
+  ✕ on its edge closes it, back on the row it was opened from.
   `/compact` in a hosted child's box goes to its session, as typed there;
   a Claude Code subagent can't be compacted from outside (Claude Code has
   no control request for it, and SendMessage carries only words), so the
   box says so, and the pane's facts show how full its context is.
   A hosted child opened as its own session (alt+o) has a breadcrumb on
-  its header, back to the parent's list.
+  its header, back to the parent.
 - The Agent tool's background launch text isn't shown; its step is drawn
   as the run's own row (`✢ task · working…  open ›`).
