@@ -19,8 +19,11 @@ const fn p(input: f64, output: f64, cache_read: f64) -> Price {
     }
 }
 
-/// List prices, first-party API. Longest prefix wins.
+/// List prices, first-party API. Longest prefix wins. Haiku 5.5's are for
+/// prompts up to 100K tokens (5× beyond), which rush doesn't tell apart.
 const PRICES: &[(&str, Price)] = &[
+    ("claude-fable-5-2", p(8.0, 40.0, 0.20)),
+    ("claude-mythos-5-2", p(8.0, 40.0, 0.20)),
     ("claude-fable-5-1", p(10.0, 50.0, 0.25)),
     ("claude-mythos-5-1", p(10.0, 50.0, 0.25)),
     ("claude-fable-5", p(10.0, 50.0, 0.0)),
@@ -31,9 +34,11 @@ const PRICES: &[(&str, Price)] = &[
     ("claude-opus-4-0", p(15.0, 75.0, 0.0)),
     ("claude-opus-4-2025", p(15.0, 75.0, 0.0)),
     ("claude-opus-4", p(5.0, 25.0, 0.0)),
+    ("claude-sonnet-5-5", p(2.0, 10.0, 0.10)),
     ("claude-sonnet-5", p(2.0, 10.0, 0.0)),
     ("claude-sonnet-4", p(3.0, 15.0, 0.0)),
     ("claude-3-7-sonnet", p(3.0, 15.0, 0.0)),
+    ("claude-haiku-5-5", p(0.10, 0.50, 0.0)),
     ("claude-haiku-4", p(1.0, 5.0, 0.0)),
     ("claude-3-5-haiku", p(0.8, 4.0, 0.0)),
 ];
@@ -44,8 +49,8 @@ fn alias(m: &str) -> Option<&'static str> {
     Some(match m {
         "opus" => "claude-opus-5-5",
         "sonnet" => "claude-sonnet-5-5",
-        "haiku" => "claude-haiku-4-5",
-        "fable" => "claude-fable-5-1",
+        "haiku" => "claude-haiku-5-5",
+        "fable" => "claude-fable-5-2",
         _ => return None,
     })
 }
@@ -81,9 +86,11 @@ pub fn cost(model: &str, u: TokenUsage, fast: bool) -> f64 {
     c / 1e6
 }
 
-/// The model's window; everything current but Haiku has 1M.
+/// The model's window: 1M for everything current, 200K for Haiku before
+/// 5.5.
 pub fn context_window(model: &str) -> i64 {
-    if model.contains("haiku") {
+    let model = alias(model.strip_suffix("[1m]").unwrap_or(model)).unwrap_or(model);
+    if model.contains("haiku") && !model.contains("haiku-5") {
         200_000
     } else {
         1_000_000
@@ -101,6 +108,27 @@ mod tests {
         assert_eq!(price_for("claude-haiku-4-5-20251001").unwrap().input, 1.0);
         assert_eq!(price_for("opus[1m]").unwrap().input, 4.0);
         assert!(price_for("gpt-5").is_none(), "unknown model priced");
+        // The aliases as Claude Code 2.1.322 runs them, and their prices.
+        for (m, input, read) in [
+            ("haiku", 0.10, 0.0),
+            ("claude-haiku-5-5", 0.10, 0.0),
+            ("sonnet", 2.0, 0.10),
+            ("fable", 8.0, 0.20),
+            ("claude-fable-5-2", 8.0, 0.20),
+            ("claude-fable-5-1", 10.0, 0.25),
+            ("claude-sonnet-5", 2.0, 0.0),
+        ] {
+            let p = price_for(m).unwrap();
+            assert_eq!((p.input, p.cache_read), (input, read), "{m}");
+        }
+        for (m, w) in [
+            ("haiku", 1_000_000),
+            ("claude-haiku-5-5", 1_000_000),
+            ("claude-haiku-4-5-20251001", 200_000),
+            ("opus[1m]", 1_000_000),
+        ] {
+            assert_eq!(context_window(m), w, "{m}");
+        }
         let u = TokenUsage {
             cache_read: 1_000_000,
             ..Default::default()
