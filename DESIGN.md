@@ -3311,6 +3311,47 @@ how often each was taken and turned down in view-suggest.json in rush's
 folder, and after three turned down in a row it isn't made again (one
 taken starts the count over). session-core viewsuggest.rs.
 
+### Live, "what is it doing?" (Rust-only, planned)
+
+A sixth view whose layout a model writes. Two layers, one renderer:
+
+- Facts, from code, free and always right: what needs you, the step
+  running and for how long, checks and their results, files changed,
+  todos (`activeForm` is the "doing" line), subagents, cost. The same
+  digests Catch-up and Code already make.
+- Story, from a watcher model: the work grouped into phases, a headline
+  and how far along, which blocks show it best. It writes the view
+  panel's block JSON (rush-host viewparse.rs; drawn by rush-ui-plugin-ui
+  views/blocks.rs), as patches by block id, never drawing code. Its
+  words are checked against the facts layer: a phase it calls done with
+  a check failing is drawn as the check says.
+
+The watcher. Sonnet, through the session's harness (`claude -p`
+stream-json, no tools, no MCP, no transcript kept). Its conversation only
+grows: a fixed system prompt (the view guide and rules) first, then one
+user message per update holding only the events since the last (≤ 2k
+tokens, neutral events cut to a line each), so every update reads all
+before it from the cache and writes only the new events. Past ~60k
+tokens it starts over, seeded with the view as it stands. Each step's
+"now" line comes from the small-job model (Apple Intelligence first, as
+titles do: free, on the machine, 4096 tokens), never the watcher.
+
+When it runs: only while a session's Live view is on screen, at a turn's
+end, and while busy at most every 20 s and only after new steps; coming
+back sends one update covering the time away. Sessions not on screen run
+nothing, so at most one watcher process exists (a hosted `claude -p` is
+~150 MB): it stops 30 s after the view is left, and a return within the
+5-minute cache reads its conversation back for a tenth of the price.
+
+Cost, before it's built (list prices, Sonnet at $2/$10 per M): about
+1–1.5¢ an update, $0.60–0.90 an hour watched. Not a fork of the session:
+the cache is per model, and an Opus fork re-reads the whole context each
+update (~6¢ at 150k).
+
+Not possible: Claude Code's Code Mode (`CLAUDE_CODE_EXPERIMENTAL_CODE_MODE`)
+works only in an interactive terminal, not `-p` or the SDK, so no rush
+session can run it.
+
 ## Rows for xcodebuild, simctl, xctrace, ffmpeg and gh run (Rust-only)
 
 An agent's shell step that runs one of these gets a row of its own, read
@@ -4421,6 +4462,22 @@ left to strip. Where the memory goes, and what the host module does about it:
   discarding old bytecode saves ~5 MB more for twice the CPU; the JIT
   entirely off won't start. A network proxy (`ANTHROPIC_BASE_URL`) gains
   visibility, not speed.
+- **Quick start's traffic switch, measured again** (2026-11-14, Claude
+  Code 2.1.322, Haiku, a Read turn then 65 s idle, 5 runs, medians;
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` against flags left on):
+  initialize 0.327 s against 0.331 (the 0.65 → 0.3 s it was turned on for
+  is gone), idle footprint 137 MB against 143, CPU a turn 0.64 s against
+  0.76, prompt 58.3k tokens against 59.5k (flags add the DesignSync and
+  PushNotification tools). What it takes away, from `system/init`:
+  /advisor, /ultrareview, /skill-doctor, /import, the design skills,
+  claude.ai's synced skills and plugins, and telemetry. The lean preload
+  measured the same way: idle 137 MB against 155 without it. `/fast` says
+  "not available in the Agent SDK" with or without the switch. Measured
+  and not worth it: `--exclude-dynamic-system-prompt-sections` across
+  worktrees reads only ~1.4k more tokens from another session's cache (the
+  rest of the first request differs by folder anyway), `--bare` can't use
+  a keychain login, `CLAUDE_CODE_DISABLE_CFC_PROMPT` saves no tokens under
+  `-p`, and `idleCompaction` applies only to interactive sessions.
 
 ## The gate: backfilling and what a run expects (Rust-only)
 
