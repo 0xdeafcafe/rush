@@ -931,6 +931,19 @@ impl Server {
             .map(|(n, s)| (n.as_ref(), s.time as f64 / 1000.0, s.calls, s.failed))
             .collect();
         tools.sort_by(|x, y| y.2.cmp(&x.2).then(x.0.cmp(y.0)));
+        // A transcript that doesn't say its window (Claude Code's) has the
+        // one its agent runs the model with, as the TUI's bar does
+        // (Rust-only).
+        let model = if sess.model.is_empty() {
+            info.model.as_str()
+        } else {
+            sess.model.as_ref()
+        };
+        let window = if sess.window > 0 || model.is_empty() {
+            sess.window
+        } else {
+            self.reg.context_window(&info.kind, model)
+        };
         write_json(&json!({
             "model": sess.model,
             "cwd": if sess.cwd.is_empty() { info.cwd.clone() } else { sess.cwd.clone() },
@@ -942,7 +955,7 @@ impl Server {
             "turnCosts": turn_costs,
             "workingMs": working,
             "context": sess.context,
-            "window": sess.window,
+            "window": window,
             "input": input, "output": output,
             "cacheRead": cache_read, "cacheWrite": cache_write,
             "tools": tools.iter().map(|(n, s, c, f)| json!({

@@ -36,8 +36,10 @@ server in front of those hosts. This is the simpler plan that replaced
     its limit rather than split one.
   - `GET /api/sessions/{id}/overview` is a session's numbers read from its
     whole transcript: turns (with each one's cost), the model and cwd, tokens
-    in and out with cache reads and writes, the context it holds, what it has
-    spent, its models with what each has cost, and its tools by count.
+    in and out with cache reads and writes, the context it holds and its
+    window (the transcript's, else the one its agent runs the model with),
+    what it has spent, its models with what each has cost, and its tools by
+    count.
   - `GET /api/sessions/{id}/subagents` lists them as they sit beside the
     transcript (type, description, model, the call that spawned them, depth,
     born), each with what it last said, and
@@ -144,10 +146,24 @@ server in front of those hosts. This is the simpler plan that replaced
     **overview** (the endpoint above, drawn as bars, tables and money).
     Switching tabs keeps the session's stream running underneath and its
     scroll position; the route is `#/s/<machine>/<id>/<tab>`.
-  - **The fleet** (`#/fleet`) is the dashboard over every machine: each
-    peer's sessions listed through the hub's `/m/<name>` proxy with the same
-    rows as the home screen, and this machine's feed beside them — threads
-    with replies and resolving, a chirp to post when the feed is on.
+  - Every list of sessions (home, the sidebar, the fleet) draws the same
+    rows: a rule per state (needs you, working, idle, asleep, stopped) with
+    its count and spend, each session newest first with what it needs or is
+    doing, and the runs it spawned (`meta.spawnedBy`) nested under it with a
+    count of those at work.
+  - On a wide screen (1100px and up) a session keeps the machine's list
+    beside it, the one you're in marked, kept current from
+    `/api/sessions/stream`.
+  - **The fleet** (`#/fleet`) is the dashboard over every machine: counts
+    of what needs you, what's working, runs working, idle and the spend;
+    then every peer's sessions (through the hub's `/m/<name>` proxy) in one
+    list by state, each named with its machine when there's more than one;
+    and this machine's feed — threads with replies and resolving, a chirp to
+    post when the feed is on. Wide, the feed sits beside the sessions;
+    narrow, it's a tab.
+  - The page's Content-Security-Policy allows no inline styles: what's
+    sized at run time (the context bar, the composer's height) is set
+    through the CSSOM, and the rest are classes in `app.css`.
 - **Native terminal, two ways.** `rush session --on <name> list|start|send|interrupt|stop|info|watch`
   goes over HTTP; `<name>` is a peer in `remote.json` (`rush remote add`), or `self`.
   `list --others` lists sessions Rush didn't start there, and `start --resume SESSION`

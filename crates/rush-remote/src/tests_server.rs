@@ -981,7 +981,18 @@ impl Adapter for Files {
     fn profiles(&self) -> Vec<Profile> {
         Vec::new()
     }
-    rush_core::has!(history_reader: HistoryReader, transcript_locator: TranscriptLocator);
+    rush_core::has!(
+        history_reader: HistoryReader,
+        transcript_locator: TranscriptLocator,
+        context_windower: ContextWindower,
+    );
+}
+
+/// Its models run with a 200k window; one it doesn't know, none.
+impl rush_core::adapter::ContextWindower for Files {
+    fn context_window(&self, model: &str) -> i64 {
+        if model == "big" { 200_000 } else { 0 }
+    }
 }
 
 impl TranscriptLocator for Files {
@@ -1287,6 +1298,15 @@ fn a_sessions_tabs_are_served() {
     assert_eq!(v["input"], 0, "{v}");
     assert_eq!(v["tools"].as_array().unwrap().len(), 0, "{v}");
     assert_eq!(v["models"].as_object().unwrap().len(), 0, "{v}");
+    // a transcript that doesn't say its window has the one its agent runs
+    // the session's model with
+    assert_eq!(v["window"], 0, "no model, no window: {v}");
+    let p = rush_host::dir("d7d7d7d7").join("info.json");
+    let mut i: Info = serde_json::from_slice(&std::fs::read(&p).unwrap()).unwrap();
+    i.model = "big".into();
+    std::fs::write(&p, serde_json::to_vec(&i).unwrap()).unwrap();
+    let v = page_json(get("/overview"));
+    assert_eq!(v["window"], 200_000, "{v}");
 
     // the subagents: what each is, and what the one with a transcript
     // last said
