@@ -1,0 +1,13 @@
+== 80 wide
+ ✗ CI  rush/beside-asks · 8379d25                       ━━━━━━━━──── ✓1 ✗1 ✶1 7m
+     ✓ fmt 1m00s   ✗ check 6m00s   ✶ linux 7m00s
+     ✗ check  test render::presets::orchestrator ... FAILED
+== 56 wide
+ ✗ CI  rush/beside-asks · 837…  ━━━━━━━━──── ✓1 ✗1 ✶1 7m
+     ✓ fmt 1m00s   ✗ check 6m00s   ✶ linux 7m00s
+     ✗ check  test render::presets::orchestrator ... FA…
+== 40 wide
+ ✗ CI  rush/b…  ━━━━━━━━──── ✓1 ✗1 ✶1 7m
+     ✓ fmt 1m00s   ✗ check 6m00s
+     ✶ linux 7m00s
+     ✗ check  test render::presets::orc…

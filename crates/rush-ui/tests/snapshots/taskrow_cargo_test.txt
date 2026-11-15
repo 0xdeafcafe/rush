@@ -1,0 +1,9 @@
+== 80 wide
+ ✻ cargo test -p rush-convo                               3/8 ━━━━──────── 1m04s
+   › test render::presets::orchestrator ... ok
+== 56 wide
+ ✻ cargo test -p rush-convo       3/8 ━━━━──────── 1m04s
+   › test render::presets::orchestrator ... ok
+== 40 wide
+ ✻ cargo test -p rush-c…  3/8 ━─── 1m04s
+   › test render::presets::orchestrator…

@@ -770,8 +770,24 @@ fn a_run_watch_keeps_its_task_live_until_it_ends() {
     assert_eq!((l.passed, l.failed, l.pending), (1, 0, 1));
     assert_eq!(l.running, ["test"]);
     assert_eq!(l.expect, Time::from_unix(1500, 0));
+    // Each job, for the task row's chips (Rust-only).
+    let jobs: Vec<(&str, &str)> = l
+        .jobs
+        .iter()
+        .map(|j| (j.name.as_str(), j.state.as_str()))
+        .collect();
+    assert_eq!(jobs, [("lint", "passed"), ("test", "pending")]);
     assert!(
         live_for("rt1", now.get()).is_none(),
         "the record outlived the watch"
+    );
+    // How it ended is kept a while, for rush to draw it as one row.
+    let ended = rush_watch::live::ended_for("rt1", now.get()).expect("its end kept");
+    assert_eq!(ended.outcome, "passed");
+    assert_eq!(ended.ended, now.get());
+    assert!(ended.jobs.iter().all(|j| j.state == "passed"), "{ended:?}");
+    assert!(
+        rush_watch::live::ended_for("rt1", now.get() + Duration::from_secs(25 * 3600)).is_none(),
+        "kept past a day"
     );
 }

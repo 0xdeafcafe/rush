@@ -11,7 +11,7 @@ use std::sync::Mutex;
 
 use rush_state::Time;
 
-use super::live::{Live, Until, live_for};
+use super::live::{Live, Until, ended_for, live_for};
 
 /// How a plugin has a task it knows drawn in place of the shell row: what
 /// it's waiting on, how far it's got, in its own words. The plugin says
@@ -35,6 +35,106 @@ pub struct JobCard {
     pub rows: Vec<Vec<Seg>>,
     /// A line each under the row when the task is picked.
     pub detail: Vec<Vec<Seg>>,
+    /// What the task row is laid out from (Rust-only): its name, where,
+    /// its checks a chip each, its times. rush lays it out to fit.
+    pub task: TaskCard,
+}
+
+/// A watch as rush's task row draws it (Rust-only): the workflows' name
+/// (or the pull request's number) bold, where it runs dim, a bar of its
+/// checks, how long it has run and is expected to, and each check as a
+/// chip; once it has ended, one row saying how it went. Times are
+/// milliseconds since the epoch, 0 when not known.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TaskCard {
+    /// "CI", "CI, Release", "#8982".
+    pub name: String,
+    /// "rush/beside-asks · 8379d25", a pull request's title.
+    pub place: String,
+    pub passed: i64,
+    pub failed: i64,
+    pub pending: i64,
+    pub skipped: i64,
+    /// When what it waits on began: its first check's start, else the
+    /// watch's.
+    pub began: i64,
+    /// When it should be done, from how long its workflows usually take.
+    pub expect: i64,
+    /// Its checks, in GitHub's order.
+    pub jobs: Vec<CardJob>,
+    /// When the watch ended (0 while it runs), and how: passed, failed,
+    /// timed out, cancelled, stopped.
+    pub ended: i64,
+    pub outcome: String,
+    /// Waiting on GitHub's first answer.
+    pub asking: bool,
+    /// GitHub's rate limit is low: it asks less often.
+    pub limited: bool,
+}
+
+/// One check of a task card: its name, state (passed, failed,
+/// cancelled, skipped, pending), when it started and ended, and a failed
+/// one's first line that says why.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CardJob {
+    pub name: String,
+    pub state: String,
+    pub started: i64,
+    pub ended: i64,
+    pub note: String,
+}
+
+fn ms(t: Time) -> i64 {
+    if t.is_zero() { 0 } else { t.to_ms() }
+}
+
+/// What a watch's record says, as its task row is drawn from it.
+fn task_card(l: &Live) -> TaskCard {
+    let (name, place) = if l.what.is_empty() {
+        (format!("#{}", l.number), l.title.clone())
+    } else if l.title.is_empty() {
+        ("watch".to_string(), l.what.replace(" @ ", " · "))
+    } else {
+        (l.title.clone(), l.what.replace(" @ ", " · "))
+    };
+    let began = l
+        .jobs
+        .iter()
+        .map(|j| j.started)
+        .filter(|t| !t.is_zero())
+        .min()
+        .unwrap_or(l.start);
+    TaskCard {
+        name,
+        place,
+        passed: l.passed,
+        failed: l.failed,
+        pending: l.pending,
+        skipped: l.skipped,
+        began: ms(began),
+        expect: ms(l.expect),
+        jobs: l
+            .jobs
+            .iter()
+            .map(|j| CardJob {
+                name: j.name.clone(),
+                state: j.state.clone(),
+                started: ms(j.started),
+                ended: ms(j.ended),
+                note: j.note.clone(),
+            })
+            .collect(),
+        ended: ms(l.ended),
+        outcome: l.outcome.clone(),
+        asking: l.asked.is_zero() && l.ended.is_zero(),
+        limited: l.limited,
+    }
+}
+
+/// l's card, for a test or a caller that has the record (card_for reads
+/// it).
+pub fn card_of(l: &Live, now: Time) -> JobCard {
+    card(l, now)
 }
 
 /// A run of a card's text in one tone.
@@ -90,16 +190,22 @@ static LIVES: Mutex<Option<HashMap<String, LiveRead>>> = Mutex::new(None);
 /// What task's record last said. The card is drawn on the UI's thread, so
 /// the file is read in the background: a frame draws the last reading,
 /// and the dock's next one the new.
-fn live_of(task: &str, now: Time) -> Option<Live> {
+fn live_of(task: &str, now: Time, fresh: i128) -> Option<Live> {
     let mut g = LIVES.lock().unwrap_or_else(|e| e.into_inner());
     let lives = g.get_or_insert_with(HashMap::new);
     let got = lives.get(task).cloned();
+    // A watch that has ended doesn't change again.
+    let ended = |r: &LiveRead| r.l.as_ref().is_some_and(|l| !l.ended.is_zero());
     if let Some(r) = &got
-        && (r.reading || now.sub_nanos(r.at) < LIVES_FRESH_NS)
+        // A watch still running is read again within a second, however
+        // long its finished tasks' look-ups keep.
+        && (r.reading
+            || ended(r)
+            || now.sub_nanos(r.at) < if r.l.is_some() { fresh.min(LIVES_FRESH_NS) } else { fresh })
     {
         return r.l.clone();
     }
-    lives.retain(|_, r| r.reading || now.sub_nanos(r.at) <= 60 * 1_000_000_000);
+    lives.retain(|_, r| r.reading || now.sub_nanos(r.at) <= 10 * 60 * 1_000_000_000);
     let mut r = got.unwrap_or(LiveRead {
         at: now,
         ..Default::default()
@@ -108,7 +214,7 @@ fn live_of(task: &str, now: Time) -> Option<Live> {
     lives.insert(task.to_string(), r.clone());
     let task = task.to_string();
     std::thread::spawn(move || {
-        let l = live_for(&task, now);
+        let l = live_for(&task, now).or_else(|| ended_for(&task, now));
         let mut g = LIVES.lock().unwrap_or_else(|e| e.into_inner());
         g.get_or_insert_with(HashMap::new).insert(
             task,
@@ -128,10 +234,26 @@ pub fn card_for(kind: &str, id: &str, now: Time) -> Option<JobCard> {
     if kind != "shell" {
         return None;
     }
-    live_of(id, now).map(|l| card(&l, now))
+    live_of(id, now, LIVES_FRESH_NS).map(|l| card(&l, now))
+}
+
+/// The card of a task that has finished, when it was a rush watch: how
+/// it ended, from the record the watch keeps a day (Rust-only). Asked of
+/// finished tasks, so a task with no record is looked for again only
+/// once a minute.
+pub fn ended_card_for(kind: &str, id: &str, now: Time) -> Option<JobCard> {
+    if kind != "shell" {
+        return None;
+    }
+    live_of(id, now, 60 * 1_000_000_000)
+        .filter(|l| !l.ended.is_zero())
+        .map(|l| card(&l, now))
 }
 
 pub(crate) fn card(l: &Live, now: Time) -> JobCard {
+    if !l.ended.is_zero() {
+        return ended_card(l, now);
+    }
     let mut c = JobCard {
         mark: "◷".into(),
         tone: Tone::Wait,
@@ -212,6 +334,42 @@ pub(crate) fn card(l: &Live, now: Time) -> JobCard {
     }
     c.rows = rows(l);
     c.detail = detail(l, now);
+    c.task = task_card(l);
+    c
+}
+
+/// A watch that has ended, as one row: how it went and how long it took.
+fn ended_card(l: &Live, now: Time) -> JobCard {
+    let (mark, tone) = match l.outcome.as_str() {
+        "passed" => ("✓", Tone::Good),
+        "failed" => ("✗", Tone::Bad),
+        "timed out" => ("◷", Tone::Wait),
+        _ => ("⏹", Tone::Dim),
+    };
+    let t = task_card(l);
+    let mut c = JobCard {
+        mark: mark.into(),
+        tone,
+        kind: "watch".into(),
+        ..Default::default()
+    };
+    c.body.push(seg(t.name.clone(), Tone::Text));
+    if !t.place.is_empty() {
+        c.body
+            .push(seg(format!(" {}", clip(&t.place, 36)), Tone::Sub));
+    }
+    let took = round((l.ended.unix_nanos() - Time::from_ms(t.began).unix_nanos()).max(0));
+    let word = if l.outcome.is_empty() {
+        "ended"
+    } else {
+        l.outcome.as_str()
+    };
+    c.right.push(seg(format!("{word} in {took}"), tone));
+    c.right.push(seg(
+        format!(" · {} ago", round(now.sub_nanos(l.ended).max(0))),
+        Tone::Dim,
+    ));
+    c.task = t;
     c
 }
 
@@ -493,6 +651,53 @@ mod tests {
         let body = text(&c.body);
         assert!(body.starts_with("main @ abc1234 CI"), "{body}");
         assert!(!body.contains('#'), "{body}");
+    }
+
+    /// A record's checks and times, as the task row draws them; ended,
+    /// one row saying how it went. Rust-only.
+    #[test]
+    fn the_task_card_and_an_ended_one() {
+        use crate::prwatch::LiveJob;
+        let now = Time::from_unix(10_000, 0);
+        let at = |m: i64| now.add_nanos(m * MIN);
+        let mut l = Live {
+            what: "main @ abc1234".into(),
+            title: "CI".into(),
+            start: at(-5),
+            asked: now,
+            passed: 1,
+            pending: 1,
+            jobs: vec![
+                LiveJob {
+                    name: "lint".into(),
+                    state: "passed".into(),
+                    started: at(-4),
+                    ended: at(-3),
+                    ..Default::default()
+                },
+                LiveJob {
+                    name: "test".into(),
+                    state: "pending".into(),
+                    started: at(-4),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let c = card(&l, now);
+        assert_eq!(
+            (c.task.name.as_str(), c.task.place.as_str()),
+            ("CI", "main · abc1234")
+        );
+        assert_eq!(c.task.began, at(-4).to_ms(), "from its first check's start");
+        assert_eq!(c.task.jobs.len(), 2);
+        assert_eq!(c.task.ended, 0);
+        l.ended = at(-2);
+        l.outcome = "passed".into();
+        let c = card(&l, now);
+        assert_eq!((c.mark.as_str(), c.tone, c.spin), ("✓", Tone::Good, false));
+        assert_eq!(text(&c.right), "passed in 2m · 2m ago");
+        assert_eq!(c.task.ended, at(-2).to_ms());
     }
 
     // card_test.go TestTheCardWaitsWhenNothingHasFailed

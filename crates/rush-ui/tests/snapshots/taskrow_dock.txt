@@ -1,0 +1,18 @@
+== 80 wide
+ Shell  2 running
+  ✳ cargo test -p rush-convo                              2/4 ━━━━━━────── 1m04s
+    › test b ... ok
+  ✶ npm run dev                                                            1m04s
+    › listening on :3000
+== 56 wide
+ Shell  2 running
+  ✳ cargo test -p rush-convo      2/4 ━━━━━━────── 1m04s
+    › test b ... ok
+  ✶ npm run dev                                    1m04s
+    › listening on :3000
+== 40 wide
+ Shell  2 running
+  ✳ cargo test -p rush-…  2/4 ━━── 1m04s
+    › test b ... ok
+  ✶ npm run dev                    1m04s
+    › listening on :3000

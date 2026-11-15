@@ -63,6 +63,33 @@ pub struct Live {
     /// usually take; zero when not known.
     #[serde(rename = "expectEnd", skip_serializing_if = "zero")]
     pub expect: Time,
+    /// Each check as it stands, in GitHub's order (Rust-only, as are
+    /// ended and outcome).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub jobs: Vec<LiveJob>,
+    /// When the watch ended: zero while it runs.
+    #[serde(skip_serializing_if = "zero")]
+    pub ended: Time,
+    /// How it ended: passed, failed, timed out, cancelled or stopped.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub outcome: String,
+}
+
+/// One check as a watch keeps it: its name, its state (passed, failed,
+/// cancelled, skipped, pending), when it started and finished (zero
+/// before it has), and a failed one's first line that says why.
+/// Rust-only.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LiveJob {
+    pub name: String,
+    pub state: String,
+    #[serde(skip_serializing_if = "zero")]
+    pub started: Time,
+    #[serde(skip_serializing_if = "zero")]
+    pub ended: Time,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub note: String,
 }
 
 fn zero(t: &Time) -> bool {
@@ -127,6 +154,28 @@ pub fn save_live(l: &Live) {
     if std::fs::write(&tmp, b).is_ok() {
         let _ = std::fs::rename(&tmp, &file);
     }
+}
+
+/// Where the records of watches that have ended are kept, a day.
+pub fn ended_dir() -> PathBuf {
+    rush_state::dir().join("watch").join("ended")
+}
+
+/// How long after its end a watch's record is drawn from.
+const ENDED_KEPT_NS: i128 = 24 * 60 * 60 * 1_000_000_000;
+
+/// The record of the watch task ran as, once it has ended (the watch's
+/// save_ended), within a day of its end. Rust-only.
+pub fn ended_for(task: &str, now: Time) -> Option<Live> {
+    if task.is_empty() || !valid_task(task) {
+        return None;
+    }
+    let b = std::fs::read(ended_dir().join(format!("{task}.json"))).ok()?;
+    let l: Live = rush_state::json::from_slice(&b).ok()?;
+    if l.task != task || l.ended.is_zero() || now.sub_nanos(l.ended) > ENDED_KEPT_NS {
+        return None;
+    }
+    Some(l)
 }
 
 fn valid_task(task: &str) -> bool {

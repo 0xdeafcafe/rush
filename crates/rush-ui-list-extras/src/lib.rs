@@ -63,6 +63,7 @@ pub mod split;
 pub mod stash;
 pub mod stuck;
 pub mod subs;
+pub mod taskrow;
 pub mod vt;
 pub mod wall;
 pub mod work;

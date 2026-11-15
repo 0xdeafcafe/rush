@@ -88,6 +88,87 @@ pub struct Live {
         skip_serializing_if = "is_zero_time"
     )]
     pub expect: Time,
+    /// Each check (a run's jobs, a pull request's checks) as it stands,
+    /// in GitHub's order: what rush's task row draws as chips. Rust-only,
+    /// as are ended and outcome.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub jobs: Vec<LiveJob>,
+    /// When the watch ended, zero while it runs: set only on the record
+    /// kept after it (save_ended).
+    #[serde(
+        default,
+        deserialize_with = "time_or_zero",
+        skip_serializing_if = "is_zero_time"
+    )]
+    pub ended: Time,
+    /// How it ended: passed, failed, timed out, cancelled or stopped.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub outcome: String,
+}
+
+/// One check as a watch's record keeps it: its name and state (passed,
+/// failed, cancelled, skipped, pending), when it started and finished
+/// (zero before it has), and for a failed one, the first line of its log
+/// that says why (or what it says of itself). Rust-only.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LiveJob {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub state: String,
+    #[serde(
+        default,
+        deserialize_with = "time_or_zero",
+        skip_serializing_if = "is_zero_time"
+    )]
+    pub started: Time,
+    #[serde(
+        default,
+        deserialize_with = "time_or_zero",
+        skip_serializing_if = "is_zero_time"
+    )]
+    pub ended: Time,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub note: String,
+}
+
+impl LiveJob {
+    /// check as a record keeps it, its note what says why it failed.
+    pub fn of(c: &crate::pr::Check, why: Option<&String>) -> LiveJob {
+        LiveJob {
+            name: c.name.clone(),
+            state: c.state.clone(),
+            started: c.started,
+            ended: c.ended,
+            note: match why {
+                Some(w) if !w.is_empty() => w.clone(),
+                _ if c.state == "failed" => c.note.clone(),
+                _ => String::new(),
+            },
+        }
+    }
+}
+
+/// The first line of a failed job's log that says why: what the record
+/// shows beside it, its step's name left out.
+pub fn first_cause(log: &str) -> String {
+    crate::causes::log_lines(log, 4)
+        .into_iter()
+        .map(|l| l.trim().to_string())
+        .find(|l| !l.is_empty() && !l.starts_with("step: ") && !l.starts_with("… and "))
+        .unwrap_or_default()
+}
+
+/// How a watch's exit code reads on its kept record.
+pub fn outcome_of(code: i32, why: &str) -> String {
+    match code {
+        crate::pr::EXIT_PASSED => "passed",
+        crate::pr::EXIT_FAILED => "failed",
+        crate::pr::EXIT_TIMED_OUT => "timed out",
+        _ if why == "stopped" => "stopped",
+        _ => "cancelled",
+    }
+    .to_string()
 }
 
 impl Live {
@@ -196,6 +277,61 @@ pub(crate) fn drop_live(task: &str) {
     }
 }
 
+/// Where the records of watches that have ended are kept, a while.
+fn ended_dir() -> PathBuf {
+    crate::gh::root().join("ended")
+}
+
+/// How long a watch's record is kept once it has ended: rush draws it as
+/// one row under the call that started it ("passed in 8m · 2m ago").
+pub const ENDED_KEPT: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Keeps l, a watch that has ended (l.ended set), for rush to draw how it
+/// went; records older than ENDED_KEPT go as it does. Rust-only.
+pub fn save_ended(l: &Live) {
+    if l.task.is_empty() || mkdir_all(&ended_dir()).is_err() {
+        return;
+    }
+    if let Ok(rd) = std::fs::read_dir(ended_dir()) {
+        for e in rd.flatten() {
+            let old = e
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .is_some_and(|age| age > ENDED_KEPT);
+            if old {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    let Ok(b) = rush_state::json::to_vec(l) else {
+        return;
+    };
+    let file = ended_dir().join(format!("{}.json", l.task));
+    let tmp = ended_dir().join(format!("{}.json.tmp", l.task));
+    if write_private(&tmp, &b).is_ok() {
+        let _ = std::fs::rename(&tmp, &file);
+    }
+}
+
+/// The record of the watch task ran as, once it has ended, within
+/// ENDED_KEPT of its end. Rust-only.
+pub fn ended_for(task: &str, now: Time) -> Option<Live> {
+    if task.is_empty() || !valid_task(task) {
+        return None;
+    }
+    let b = std::fs::read(ended_dir().join(format!("{task}.json"))).ok()?;
+    let l: Live = rush_state::json::from_slice(&b).ok()?;
+    if l.task != task || l.ended.is_zero() {
+        return None;
+    }
+    if now.sub_nanos(l.ended) > ENDED_KEPT.as_nanos() as i128 {
+        return None;
+    }
+    Some(l)
+}
+
 /// How long past its timeout a watch's record is believed: past it, the
 /// watch was killed before it could take it away.
 const LIVE_GRACE: Duration = Duration::from_secs(5 * 60);
@@ -230,6 +366,7 @@ fn valid_task(task: &str) -> bool {
 }
 
 /// p as the watch with o stands now, about to ask again at next.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn live(
     o: &Options,
     task: &str,
@@ -238,6 +375,7 @@ pub(crate) fn live(
     asked: Time,
     next: Time,
     limited: bool,
+    notes: &std::collections::HashMap<i64, String>,
 ) -> Live {
     let mut l = Live {
         task: task.to_string(),
@@ -263,6 +401,7 @@ pub(crate) fn live(
             "pending" => l.running.push(c.name.clone()),
             _ => {}
         }
+        l.jobs.push(LiveJob::of(c, notes.get(&c.id)));
     }
     l
 }

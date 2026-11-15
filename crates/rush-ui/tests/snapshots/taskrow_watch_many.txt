@@ -1,0 +1,12 @@
+== 80 wide
+ ✶ CI  v0.1.0-beta.18 · 2683631                      ━━━━━━━───── ✓9 ✶5 5m / ~8m
+     ✓ 9 passed   ✶ test shard 9 5m00s   ✶ test shard 10 5m00s
+     ✶ test shard 11 5m00s   ✶ test shard 12 5m00s   ✶ test shard 13 5m00s
+== 56 wide
+ ✶ CI  v0.1.0-beta.18 · 26…  ━━━━━━━───── ✓9 ✶5 5m / ~8m
+     ✓ 9 passed   ✶ test shard 9 5m00s
+     ✶ test shard 10 5m00s   +3 more
+== 40 wide
+ ✶ CI  v0.…  ━━━━━━━───── ✓9 ✶5 5m / ~8m
+     ✓ 9 passed   ✶ test shard 9 5m00s
+     ✶ test shard 10 5m00s   +3 more

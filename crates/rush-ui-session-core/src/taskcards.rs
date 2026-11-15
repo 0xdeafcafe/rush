@@ -3,8 +3,10 @@
 //! reads in the conversation as its card, in place of "running in the
 //! background": what it waits on, its checks so far, and the time left as
 //! its workflows usually take. The agent hears none of it: it's told once,
-//! when the watch ends. Read from the dock's card (jobs::job_card_line),
-//! once a frame, while the conversation is open. New in the Rust port.
+//! when the watch ends; once it has, its row says how it went, one line,
+//! from the record the watch keeps a day. Laid out as the dock lays it
+//! out (jobs::watch_head, taskrow.rs), once a frame, while the
+//! conversation is open. New in the Rust port.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -13,12 +15,23 @@ use std::time::{Duration, Instant};
 use rush_convo::model::LiveOut;
 use rush_convo::render::BgOut;
 use rush_core::text::Line;
-use rush_ui_list_extras::jobs::job_card_line;
+use rush_ui_list_extras::jobs::watch_head;
 
 use crate::model::Model;
 
 /// How often a conversation showing a card is drawn again: its clock.
+/// The tick its spinners turn with moves once a second too
+/// (rush_ui_base's wake_draw), so nothing is drawn more often.
 const EVERY: Duration = Duration::from_secs(1);
+
+/// The cells a call's note is drawn in from the conversation's edge: its
+/// gutter, its indent and the "↳ " before it.
+const GUTTER: usize = 10;
+
+/// Whether cmd runs a rush watch (pr or run).
+fn is_watch(cmd: &str) -> bool {
+    cmd.contains("rush watch pr") || cmd.contains("rush watch run")
+}
 
 /// Hands session key's open view what its background commands and
 /// monitors have written, by the call that started each, and the rows the
@@ -100,20 +113,35 @@ fn fill_out(m: &mut Model, key: &str, mut rows: HashMap<String, Vec<Line>>) -> b
     running
 }
 
-/// Hands session key's open view the rows of its running background
-/// tasks that have a card.
+/// Hands session key's open view the head rows of its background tasks
+/// that have a card: a rush watch running (its card's head, as the dock
+/// draws it: taskrow.rs), and one that has ended (how it went, one row).
+/// Laid out to the conversation's width less its step's gutter; its
+/// spinner turns with the tick, which moves once a second, so a turn
+/// with one running is drawn again once a second, no more.
 pub fn sync(m: &mut Model, key: &str) {
-    let now = m.now;
+    let (now, tick) = (m.now, m.tick);
     let Some(v) = m.session.as_ref().filter(|v| v.key == key) else {
         return;
     };
-    let rows: HashMap<String, Line> = v
-        .sess
-        .running_jobs()
+    let w = v.o.width.saturating_sub(GUTTER).max(40);
+    let s = &v.sess;
+    let mut any = false;
+    let rows: HashMap<String, Line> = s
+        .jobs()
+        .iter()
         .filter(|j| j.background)
-        .filter_map(|j| Some((j.id.clone(), job_card_line(j, now)?)))
+        .filter_map(|j| {
+            // A finished task is asked of only when it was a rush watch.
+            let watch = !j.running() && is_watch(&s.job_command(j));
+            if !j.running() && !watch {
+                return None;
+            }
+            let row = watch_head(j, watch, tick, now, w)?;
+            any |= j.running();
+            Some((j.id.clone(), row))
+        })
         .collect();
-    let any = !rows.is_empty();
     if let Some(v) = m.session.as_mut().filter(|v| v.key == key)
         && v.o.tasks != rows
     {

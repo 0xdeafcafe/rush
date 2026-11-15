@@ -3,7 +3,7 @@
 //! Ported from internal/watch/pr.go.
 
 use std::cell::Cell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -31,6 +31,10 @@ pub struct Check {
     pub actions: bool,
     /// What it says of itself: its output's title, a status's description.
     pub note: String,
+    /// When it started and finished, zero before it has (a status has
+    /// neither). Rust-only: for the times on rush's task row.
+    pub started: Time,
+    pub ended: Time,
 }
 
 impl Check {
@@ -151,6 +155,10 @@ pub fn fetch(repo: &str, n: i64, fresh: Duration) -> (Result<PR, Error>, i64) {
         app: App,
         #[serde(default, deserialize_with = "nd")]
         output: Output,
+        #[serde(default, deserialize_with = "crate::gh::time_or_zero")]
+        started_at: Time,
+        #[serde(default, deserialize_with = "crate::gh::time_or_zero")]
+        completed_at: Time,
     }
     #[derive(Deserialize)]
     struct Runs {
@@ -172,6 +180,8 @@ pub fn fetch(repo: &str, n: i64, fresh: Duration) -> (Result<PR, Error>, i64) {
             url: r.html_url,
             actions: r.app.slug == "github-actions",
             note: r.output.title,
+            started: r.started_at,
+            ended: r.completed_at,
         });
     }
     #[derive(Deserialize)]
@@ -208,6 +218,7 @@ pub fn fetch(repo: &str, n: i64, fresh: Duration) -> (Result<PR, Error>, i64) {
             url: s.target_url,
             actions: false,
             note: s.description,
+            ..Default::default()
         });
     }
     (Ok(p), remaining.get())
@@ -405,6 +416,7 @@ pub fn watch_pr(o: &Options) -> i32 {
         remaining: -1,
         last: None,
         why: String::new(),
+        notes: HashMap::new(),
     };
     o.log(
         "watch-pr",
@@ -414,6 +426,23 @@ pub fn watch_pr(o: &Options) -> i32 {
         ),
     );
     let code = watching(o, start, &mut run);
+    if !o.task.is_empty() {
+        // Kept a while, for rush to draw how it went.
+        let now = o.now();
+        let mut l = live::live(
+            o,
+            &o.task,
+            start,
+            run.last.as_ref(),
+            now,
+            Time::default(),
+            false,
+            &run.notes,
+        );
+        l.ended = now;
+        l.outcome = live::outcome_of(code, &run.why);
+        live::save_ended(&l);
+    }
     let mut f = fields(json!({"repo": o.repo, "pr": o.number, "code": code,
         "after": duration(round_to(since(o.now(), start), Duration::from_secs(1))),
         "remaining": run.remaining}));
@@ -443,12 +472,29 @@ pub fn watch_pr(o: &Options) -> i32 {
     code
 }
 
+/// Reads why each check of p that failed did, once a check, from its
+/// job's log's first cause: for the task row (Rust-only).
+fn note_failures(o: &Options, p: &PR, notes: &mut HashMap<i64, String>) {
+    for c in &p.checks {
+        if c.state != "failed" || !c.actions || c.id == 0 || notes.contains_key(&c.id) {
+            continue;
+        }
+        let why = o
+            .logs(c.id)
+            .map(|b| live::first_cause(&String::from_utf8_lossy(&b)))
+            .unwrap_or_default();
+        notes.insert(c.id, why);
+    }
+}
+
 /// What a watch keeps for its last line in the log.
 struct Run {
     remaining: i64,
     /// The last answer, for the log.
     last: Option<PR>,
     why: String,
+    /// Each failed check's first cause, read once, for its Live.
+    notes: HashMap<i64, String>,
 }
 
 fn watching(o: &Options, start: Time, run: &mut Run) -> i32 {
@@ -493,6 +539,9 @@ fn watching(o: &Options, start: Time, run: &mut Run) -> i32 {
                 limited = false;
                 asked = o.now();
                 run.last = Some(p.clone());
+                if !o.task.is_empty() {
+                    note_failures(o, &p, &mut run.notes);
+                }
                 if let Some(f) = &o.expect
                     && !p.head.is_empty()
                     && p.head != expected_for
@@ -517,6 +566,7 @@ fn watching(o: &Options, start: Time, run: &mut Run) -> i32 {
             asked,
             o.now() + wait,
             limited,
+            &run.notes,
         );
         l.expect = expect;
         live::save_live(&l);

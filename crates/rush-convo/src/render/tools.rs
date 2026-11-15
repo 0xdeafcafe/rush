@@ -298,7 +298,7 @@ fn ffmpeg(p: &Places, args: &[&str]) -> Option<Phrase> {
 /// How far a running command has got: what it says, and how much of
 /// what it does is done (n of m) when it knows.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Progress {
+pub struct Progress {
     pub text: String,
     pub done: Option<(usize, usize)>,
 }
@@ -388,7 +388,7 @@ fn tests_text(pass: usize, fail: usize, skip: usize, now: &str) -> String {
 
 /// How far a running cmd has got from the lines it has printed; None
 /// when it isn't one this knows or nothing says yet.
-pub(crate) fn progress(cmd: &str, lines: &[&str]) -> Option<Progress> {
+pub fn progress(cmd: &str, lines: &[&str]) -> Option<Progress> {
     let progs = programs(cmd);
     let has = |p: &str| progs.iter().any(|(b, _)| b == p);
     if has("ffmpeg") {
@@ -503,6 +503,67 @@ pub(crate) fn progress(cmd: &str, lines: &[&str]) -> Option<Progress> {
         }
     }
     None
+}
+
+static RUST_RUNNING: LazyLock<Regex> = LazyLock::new(|| re(r"^running (?P<m>\d+) tests?$"));
+static ANY_PCT: LazyLock<Regex> =
+    LazyLock::new(|| re(r"(?:^|[\s\[(:])(?P<n>\d{1,3}(?:\.\d+)?)\s?%(?:$|[\s\])|,.])"));
+static ANY_OF: LazyLock<Regex> =
+    LazyLock::new(|| re(r"(?:^|[\s\[(])(?P<n>\d+)\s?/\s?(?P<m>\d+)(?:$|[\s\]):,])"));
+
+/// How far any running command has got, for a task row (Rust-only): what
+/// progress says of the tools it knows; else cargo test's tests since its
+/// last "running N tests", when that's among lines; else what the last
+/// line says of itself, "45%" or "12/30". None when nothing says.
+pub fn progress_any(cmd: &str, lines: &[&str]) -> Option<Progress> {
+    let known = progress(cmd, lines);
+    if known.as_ref().is_some_and(|p| p.done.is_some()) {
+        return known;
+    }
+    if let Some(i) = lines.iter().rposition(|l| RUST_RUNNING.is_match(l.trim())) {
+        let m: usize = RUST_RUNNING
+            .captures(lines[i].trim())
+            .and_then(|c| c["m"].parse().ok())
+            .unwrap_or(0);
+        let (mut pass, mut fail, mut skip) = (0, 0, 0);
+        for l in &lines[i + 1..] {
+            if let Some(c) = RUST_TEST.captures(l) {
+                match &c["r"] {
+                    "ok" => pass += 1,
+                    "FAILED" => fail += 1,
+                    _ => skip += 1,
+                }
+            }
+        }
+        if m > 0 {
+            return Some(Progress {
+                text: tests_text(pass, fail, skip, ""),
+                done: Some(((pass + fail + skip).min(m), m)),
+            });
+        }
+    }
+    if known.is_some() {
+        return known;
+    }
+    let last = lines.iter().rev().find(|l| !l.trim().is_empty())?;
+    if let Some(c) = ANY_OF.captures(last) {
+        let (n, m): (usize, usize) = (c["n"].parse().ok()?, c["m"].parse().ok()?);
+        if m >= 2 && n <= m {
+            return Some(Progress {
+                text: format!("{n}/{m}"),
+                done: Some((n, m)),
+            });
+        }
+    }
+    let c = ANY_PCT.captures(last)?;
+    let pct: f64 = c["n"].parse().ok()?;
+    if pct > 100.0 {
+        return None;
+    }
+    Some(Progress {
+        text: format!("{}%", c["n"].trim()),
+        done: Some(((pct * 10.0) as usize, 1000)),
+    })
 }
 
 // ---- how it came out ----
