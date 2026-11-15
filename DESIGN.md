@@ -3591,23 +3591,90 @@ now. Letter keys on a picked box keep their actions.
 
 **A rush watch in the background** (Rust-only): an agent's Bash call
 that put `rush watch pr|run` in the background draws, in the
-conversation, the watch's card in place of `↳ running in the background
-· <id>` and its output file (`Options::tasks`, set once a frame by
-session-core's taskcards.rs from the dock's card, `jobs::job_card_line`;
-part of each turn's key, so the turn is drawn again as it moves): its
-pull request or runs, a bar and ✓/✗/◌ counts, what it waits on, then
-`~4m left` (or `2m over the usual`) from the record's `expectEnd`, and
-how long it's waited. While a card shows, the conversation is drawn again
-each second. The agent is told none of it: the watch says once, briefly,
-how it ended.
+conversation, the watch's head row in place of `↳ running in the
+background · <id>` and its output file (`Options::tasks`, set once a
+frame by session-core's taskcards.rs, `jobs::watch_head`; part of each
+turn's key, so the turn is drawn again as it moves), laid out as the
+dock lays it out (below). Once the watch has ended it stays, one row
+saying how it went (`passed in 8m · 2m ago`, `✗ check failed: <why> ·
+30s ago`), for a day. The agent is told none of it: the watch says once,
+briefly, how it ended.
 
-In the dock and under its step the card is a few rows tall
-(`JobCard::rows`, 2026-11-09): under its row, each check that failed a
-row of its own (three, then "✗ N more failed"), and those still running
-on one row; what it ends on and when GitHub was last asked come under
-it once it's picked. Two running monitors or more go under one Monitors
-row in the dock (`fold:monitors`, `jobs::monitors`), saying how many
-watch and how many watches have a failure, which opens them under it.
+### Task rows (Rust-only, 2026-11-15)
+
+A background task is drawn the same in the dock and under the call that
+started it (list_extras `taskrow.rs`): a mark (the spinner while it
+runs, ✓ ✗ once done), what it is bold, where it is dim, and on the
+right a slot that's never cut: a bar and its counts, then its clock.
+The words give way first (the place, then the name down to 12 cells),
+then the bar shrinks from 12 cells to 4, then it and its counts go,
+the clock last (`Right::lay`). At 80 columns:
+
+```
+Shell  3 running                                         ↑ pick one to stop
+ ✶ Release  v0.1.0-beta.18 · 2683631  ━━━━─────────── ✓1 ✶2 6m / ~9m
+     ✓ build x86_64-unknown-linux-gnu 4m12s   ✶ build aarch64-apple-darwin 5m58s
+     ◌ publish
+ ✗ CI  rush/beside-asks · 8379d25           ━━━━━━━━── ✓1 ✗1 ✶1 7m
+     ✓ fmt 1m00s   ✗ check 6m00s   ✶ linux 7m00s
+     ✗ check  test render::presets::orchestrator ... FAILED
+ ✶ cargo test -p rush-convo                  212/430 ━━━━━━────── 1m04s
+   › test render::presets::orchestrator ... ok
+```
+
+(the snapshots, crates/rush-ui/tests/snapshots/taskrow_*.txt, are the
+exact rows at 80, 56 and 40 wide.)
+
+- **A rush watch** (pr or run), from the watch plugin's card
+  (`JobCard::task`, a `TaskCard`): the workflows' names (or `#<n>` for
+  a pull request) and branch · sha (or its title); a bar of its checks
+  (passed green, failed red, the rest faint) and ✓/✗/spinner counts;
+  how long since its first check started and, from how long its
+  workflows usually take (eta.rs, the record's `expectEnd`), `6m / ~9m`,
+  yellow once past it. Under it its checks as chips (✓ ✗ ⊘ –, the
+  spinner while one runs, ◌ before it starts; each one's time), on two
+  rows at most: when they don't fit, those that passed are one `✓ N
+  passed` chip and the rest end in `+N more`. A failed check is red,
+  and under the chips (two at most) with the first line of its log that
+  says why. A watch holding a failure until the rest finish has a red ✗
+  for its mark. Picked in the dock, what it ends on and when GitHub was
+  last asked come under it. Ended: one row, as above.
+- **Any other command** (or monitor): its command shortened
+  (`short_command`: no `cd … &&`, `2>&1`, redirect to /dev/null, `|
+  tail`, `| head` or `| tee`), and when its output says how far it has
+  got (rush_convo's `render::progress_any`: what `progress` knows of
+  cargo, xcodebuild and ffmpeg; cargo test's results since its last
+  `running N tests`; else a last line's `n/m` or `n%`) a bar with its
+  counts; its CPU and memory when read, or `⚠ error in recent output`;
+  its clock (42s, 1m04s, 12m, 1h05m). Under it, its last line that says
+  something (`› …`, not a bar's or a spinner's leftovers). Under its call
+  in the conversation, the same progress is a row above its facts
+  (`taskrow::progress_row`).
+
+The dock's heading says how many run (`Shell  2 running`), not "in the
+background". What the watch keeps for it is additive in its record
+(rush-watch live.rs): each job's name, state, start and end, and a
+failed one's first cause (`first_cause`, its log read once a job, only
+for a watch running as a background task); and as it ends, the record
+again with `ended` and `outcome` in `watch/ended/<task>.json`, kept a day
+(`save_ended`, `ended_for`), so `live_for` still says it has gone. The
+UI reads a finished task's record only when its command was a rush
+watch, a minute between looks for one that has none, never again once
+read (prwatch card.rs `ended_card_for`).
+
+Nothing draws more often for it: the frame's tick, which turns every
+spinner, moves once a second (rush_ui_base `wake_draw`), and
+taskcards.rs asks to be woken a second on (`EVERY`) while a task runs;
+a running task's output is read once a second (`Runs::from_of`). The
+dock is drawn each frame anyway; a turn with a card is drawn again when
+its row changes, which is once a second while it runs, and never once
+it has ended. `cargo bench -p rush-convo --bench progress` times
+`progress_any` over a 30-line tail, which the dock asks of each command
+it shows each frame.
+
+Two running monitors or more go under one Monitors row in the dock
+(`fold:monitors`, `jobs::monitors`), saying how many watch and how many
+watches have a failure, which opens them under it.
 
 **✎ edit** (e), on a box's top edge before it's run and after, turns the
 box into an editor of its commands (`Options::shell_edit`, drawn by

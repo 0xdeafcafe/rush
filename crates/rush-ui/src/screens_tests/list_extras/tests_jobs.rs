@@ -61,9 +61,9 @@ fn job_dock() {
     };
     let got = plain(&jobs_preview(&s, &jobs, 110, &d, Line::new()).0);
     for want in [
-        "Shell  1 in the background",
+        "Shell  1 running",
         "npm run dev",
-        "in background",
+        "1m00s",
         "› listening on :3000",
     ] {
         assert!(got.contains(want), "no {want:?} in\n{got}");
@@ -72,7 +72,8 @@ fn job_dock() {
     // Picked, its keys head the block and its row is lit.
     let d = Dock { sel: "job:b2", ..d };
     let (rows, refs) = jobs_preview(&s, &jobs, 110, &d, Line::new());
-    assert_eq!(refs, ["", "job:b2"]);
+    // Its head and its last line, both its.
+    assert_eq!(refs, ["", "job:b2", "job:b2"]);
     assert!(rows[0].plain().contains("x stop"), "{}", rows[0].plain());
     assert!(rows[1].plain().starts_with('▍'), "{}", rows[1].plain());
     assert_eq!(rows[1].width(), 110);
@@ -277,11 +278,12 @@ fn a_tasks_label_before_its_facts() {
     };
     let wide = plain(&jobs_preview(&s, &jobs, 110, &d, Line::new()).0);
     assert!(
-        wide.contains("npm run dev -- --port 3000 --host") && wide.contains("in background"),
+        wide.contains("npm run dev -- --port 3000 --host") && wide.contains("1m00s"),
         "{wide}"
     );
+    // Narrow, the label is cut and its clock, in its slot, stays.
     let narrow = plain(&jobs_preview(&s, &jobs, 43, &d, Line::new()).0);
     let row = narrow.lines().nth(1).expect("its row");
     assert!(row.contains("npm run dev -- --port 3000"), "{row:?}");
-    assert!(!row.contains("in background"), "{row:?}");
+    assert!(row.ends_with("1m00s"), "{row:?}");
 }

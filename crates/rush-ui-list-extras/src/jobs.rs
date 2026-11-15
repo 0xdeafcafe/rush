@@ -577,25 +577,6 @@ pub fn segs(ss: &[Seg]) -> Line {
     )
 }
 
-/// Running task j's card as one row, for the conversation: its mark (not
-/// turning: the conversation isn't drawn each tick), its kind, what it
-/// says, then its right end; None when no plugin has a card for it.
-pub fn job_card_line(j: &Job, now: Ms) -> Option<Line> {
-    let c = job_card_of(j, now)?;
-    let mut l = Line::from_spans(vec![
-        sp(c.mark.clone(), tone_colour(c.tone)),
-        plain(" "),
-        sp(c.kind.clone(), SUB),
-        plain(" "),
-    ]);
-    l.spans.extend(segs(&c.body).spans);
-    if !c.right.is_empty() {
-        l.spans.push(plain("  "));
-        l.spans.extend(segs(&c.right).spans);
-    }
-    Some(l)
-}
-
 /// A card's mark: the spinner, turning, while it waits.
 fn card_mark(c: &JobCard, tick: usize) -> Span {
     if c.spin {
@@ -695,10 +676,83 @@ pub fn job_rows(
     who: bool,
     d: &Dock,
 ) -> Vec<Line> {
-    if let Some(card) = job_card_of(j, d.now) {
+    let card = job_card_of(j, d.now);
+    let kind = s.job_kind(j);
+    if who && j.background && (card.is_some() || matches!(kind, "shell" | "monitor")) {
+        // The dock's own tasks, laid out as the conversation draws them
+        // (taskrow.rs, Rust-only).
+        let mut rows = match &card {
+            Some(c) => crate::taskrow::watch_rows(c, lead, d.tick + i, d.now, w),
+            None => shell_task_rows(s, j, i, w, lead, d),
+        };
+        if d.sel == format!("job:{}", j.id) {
+            let pad = blanks(width(lead) + 4);
+            for det in card.iter().flat_map(|c| c.detail.iter()) {
+                let mut l = line([plain(pad.clone())]);
+                join(&mut l, segs(det));
+                rows.push(rush_draw::truncate_line(&l, w.saturating_sub(1), "…"));
+            }
+            rows = rows.into_iter().map(|r| picked(r, w, d.focus)).collect();
+        }
+        return rows;
+    }
+    if let Some(card) = card {
         return card_row(j, &card, i, w, lead, who, d);
     }
     vec![shell_row(s, j, i, w, lead, who, d)]
+}
+
+/// A background command's (or monitor's) rows in the dock: what it runs,
+/// how far it has got and how long it has run, then its last line that
+/// says something (taskrow::shell_rows). Rust-only.
+fn shell_task_rows(s: &Session, j: &Job, i: usize, w: usize, lead: &str, d: &Dock) -> Vec<Line> {
+    let out = (d.out)(j);
+    let mark = if s.job_kind(j) == "monitor" {
+        let (icon, col) = job_icon("monitor");
+        sp(icon, col)
+    } else {
+        sp(SPINNER[(d.tick + i) % SPINNER.len()], ORANGE)
+    };
+    let mut used = Vec::new();
+    if job_crashed(j, out, d.now) {
+        used.extend([sp("⚠ error in recent output", RED), sp(" · ", DIM)]);
+    } else if let Some((b, cpu)) = (d.usage)(j) {
+        used.extend([
+            cpu_color(cpu, format!("{cpu:.0}%")),
+            sp(" · ", DIM),
+            mem_color(b, mem(b)),
+            sp(" · ", DIM),
+        ]);
+    }
+    let cmd = s.job_command(j);
+    let cmd = if cmd.is_empty() { job_label(s, j) } else { cmd };
+    let none: Vec<String> = Vec::new();
+    let t = crate::taskrow::ShellTask {
+        cmd: &cmd,
+        lines: out.map_or(&none, |t| &t.lines),
+        start: if j.start != 0 { j.start } else { d.now },
+        now: d.now,
+        mark,
+        used,
+    };
+    crate::taskrow::shell_rows(&t, lead, w)
+}
+
+/// A rush watch's head row w wide, for the conversation in place of its
+/// call's "running in the background": while it runs, its card's head;
+/// once it has ended (watch: its command was a rush watch), how it went.
+/// None when no plugin has a card for it. Rust-only.
+pub fn watch_head(j: &Job, watch: bool, tick: usize, now: Ms, w: usize) -> Option<Line> {
+    let c = if j.running() {
+        job_card_of(j, now)?
+    } else if watch && j.background {
+        rush_bundled::prwatch::ended_card_for(j.kind(), &j.id, rush_state::Time::from_ms(now))?
+    } else {
+        return None;
+    };
+    crate::taskrow::watch_rows(&c, "", tick, now, w)
+        .into_iter()
+        .next()
 }
 
 /// A shell's (or monitor's, workflow's) row in the dock (jobRow).
@@ -809,7 +863,7 @@ pub fn jobs_preview(
     let fg = all.iter().filter(|j| !j.background).count();
     let bg = all.len() - fg;
     let head = if fg == 0 {
-        "in the background".to_string()
+        "running".to_string()
     } else if bg > 0 {
         format!("running · {bg} in the background")
     } else {
@@ -1459,10 +1513,22 @@ fn job_block(
     // A card's rows always; its detail once it's picked or opened.
     let more = b.sel == r || opened;
     if let Some(c) = &card {
-        for d in c.rows.iter().chain(c.detail.iter().filter(|_| more)) {
+        // Its checks as chips and why each failed one did, as the dock
+        // lays them out (taskrow.rs); its detail once it's picked.
+        let laid = crate::taskrow::watch_rows(c, "  ", b.tick + i, b.now, w.saturating_sub(2));
+        rows.extend(laid.into_iter().skip(1));
+        for d in c.detail.iter().filter(|_| more) {
             let mut l = line([plain("      ")]);
             join(&mut l, segs(d));
             rows.push(cut(l));
+        }
+    } else if j.running() && kind == "shell" {
+        // How far its output says it has got: a bar and its counts.
+        let cmd = s.job_command(j);
+        if let Some(l) =
+            out.and_then(|t| crate::taskrow::progress_row(&cmd, &t.lines, 6, w.saturating_sub(2)))
+        {
+            rows.push(l);
         }
     }
     let mut facts = line([plain("      ")]);
