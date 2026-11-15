@@ -59,6 +59,96 @@ fn esc_twice_asks_to_close_and_r_restarts() {
     );
 }
 
+/// u, beside restart, has rush restart under the agent and what it
+/// spawned, its program running on: the host is asked, not the agent.
+/// Rust-only.
+#[test]
+fn u_restarts_rush_under_the_agent() {
+    let (mut m, fake) = hosted("steer", Vec::new());
+    m.agents[0].rush = true;
+    m.agents[0].pid = 0;
+    working(&mut m, "go");
+    press(&mut m, "esc");
+    press(&mut m, "esc");
+    assert!(
+        more_keys(&m).contains(&"u".to_string()),
+        "{:?}",
+        more_keys(&m)
+    );
+    press(&mut m, "u");
+    assert!(m.confirm.is_none(), "it asks nothing: nothing stops");
+    assert_eq!(*fake.rehosted.lock().unwrap(), ["k1".to_string()]);
+    assert!(fake.restarted.lock().unwrap().is_empty());
+    assert_eq!(
+        flash(&m),
+        "rush restarts for tidy the parser · once it's between turns · its agent runs on"
+    );
+}
+
+/// What #rehost says of what it asked, for each shape of tree.
+#[test]
+fn rehost_says_what_it_asked() {
+    use crate::host::Rehost;
+    let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    let l = |v: &[(&str, &str)]| {
+        v.iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect::<Vec<_>>()
+    };
+    let cases: Vec<(Rehost, Result<&str, &str>)> = vec![
+        (
+            Rehost {
+                asked: s(&["p"]),
+                now: 1,
+                left: vec![],
+            },
+            Ok("rush restarts for P now · its agent runs on"),
+        ),
+        (
+            Rehost {
+                asked: s(&["p", "a", "b", "c"]),
+                now: 1,
+                left: vec![],
+            },
+            Ok(
+                "rush restarts for P and its 3 agents · each once it's between turns · their agents run on",
+            ),
+        ),
+        (
+            Rehost {
+                asked: s(&["p", "a"]),
+                now: 0,
+                left: l(&[("b", "it's asleep")]),
+            },
+            Ok(
+                "rush restarts for P and the agent it spawned · each once it's between turns · their agents run on · 1 agent stays: it's asleep",
+            ),
+        ),
+        (
+            Rehost {
+                asked: s(&["a", "b"]),
+                now: 2,
+                left: l(&[("p", "it runs on another machine"), ("c", "x"), ("d", "y")]),
+            },
+            Ok(
+                "rush restarts for P's 2 agents now · their agents run on · P stays: it runs on another machine · 2 agents stay as they are",
+            ),
+        ),
+        (
+            Rehost {
+                asked: vec![],
+                now: 0,
+                left: l(&[("p", "it isn't running")]),
+            },
+            Err("rush can't restart under P: it isn't running"),
+        ),
+    ];
+    for (r, want) in &cases {
+        let got = crate::screens::cmdbar::stops::rehost_said("P", "p", r);
+        assert_eq!(got.as_deref().map_err(String::as_str), *want, "{r:?}");
+    }
+}
+
 /// Something typed: esc clears it and doesn't count toward closing.
 #[test]
 fn esc_with_text_doesnt_count() {

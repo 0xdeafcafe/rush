@@ -115,6 +115,11 @@ pub const FLEET_COMMANDS: &[(&str, &str, &str)] = &[
         "",
     ),
     (
+        "rehost",
+        "restart rush under the agent and those it spawned · their agents run on",
+        "",
+    ),
+    (
         "perm",
         "choose session permissions (also in Shift+Tab)",
         "[mode]",

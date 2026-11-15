@@ -66,6 +66,7 @@ pub const FLEET_NEEDS_AGENT: &[&str] = &[
     "rm",
     "kill",
     "reincarnate",
+    "rehost",
     "clean",
     "cd",
     "rename",

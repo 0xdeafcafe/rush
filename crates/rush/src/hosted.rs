@@ -430,6 +430,11 @@ impl Hosts for RushHosts {
         rush_host::client::restart_agent(id, text).map_err(|e| e.to_string())
     }
 
+    fn rehost(&self, id: &str) -> Result<rush_host::upgrade::Rehost, String> {
+        // Rust-only: the in-place move, for the session and its tree.
+        rush_host::upgrade::ask_tree(id, "the view")
+    }
+
     fn stop(&self, id: &str) -> Result<(), String> {
         // Gone already: stopped (machinecare.go:105-109).
         let Ok(c) = Client::dial(id) else {
