@@ -35,9 +35,20 @@ pub const POST_TIMEOUT_SECS: u64 = 3600;
 pub const STAND_IN_MODEL: &str = "haiku";
 
 /// What the stand-in is, and the task it's handed in place of the real
-/// one: it only has to end its turn.
-pub const STAND_IN_PROMPT: &str = "Reply with the single word: ok. Do nothing else.";
-pub const STAND_IN_TASK: &str = "Reply with the single word: ok.";
+/// one: it only has to end its run. A Claude Code that takes a subagent's
+/// report only through SubagentHandback holds one that just says "ok"
+/// to its turn limit and notes it stopped before finishing, so it hands
+/// back; one without that tool replies.
+pub const STAND_IN_PROMPT: &str = "End your run at once: call SubagentHandback with the message \"ok\". If you have no such tool, reply with the single word: ok. Do nothing else.";
+pub const STAND_IN_TASK: &str =
+    "Call SubagentHandback with the message \"ok\" (or, without it, reply: ok).";
+
+/// The only tool the stand-in may call.
+pub const HANDBACK: &str = "SubagentHandback";
+
+/// The stand-in's turns: one to hand back, one more should Claude Code
+/// ask again for the report.
+pub const STAND_IN_TURNS: u32 = 2;
 
 /// Adds each of others to agents as a stand-in definition, unless one of
 /// that name is there already (the session's own, a plugin's).
@@ -50,8 +61,8 @@ pub fn stand_ins(others: &[OtherAgent], agents: &mut BTreeMap<String, RawJson>) 
             "description": o.description,
             "model": STAND_IN_MODEL,
             "prompt": STAND_IN_PROMPT,
-            "tools": [],
-            "maxTurns": 1,
+            "tools": [HANDBACK],
+            "maxTurns": STAND_IN_TURNS,
         });
         if let Ok(b) = RawJson::new(&v.to_string()) {
             agents.insert(o.name.clone(), b);
@@ -243,8 +254,8 @@ mod tests {
         let k: Value = serde_json::from_str(agents["kimi"].get()).unwrap();
         assert_eq!(k["description"], "Moonshot's.");
         assert_eq!(k["model"], STAND_IN_MODEL);
-        assert_eq!(k["maxTurns"], 1);
-        assert_eq!(k["tools"], json!([]));
+        assert_eq!(k["maxTurns"], STAND_IN_TURNS);
+        assert_eq!(k["tools"], json!([HANDBACK]));
     }
 
     /// A call for one of rush's types: before it, the stand-in's input;

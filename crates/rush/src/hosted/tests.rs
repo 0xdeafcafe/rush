@@ -373,6 +373,65 @@ fn hosted_runs_are_the_parents_own() {
     assert_eq!(nested.needs, "Bash make");
 }
 
+// A provider in another's harness (GLM in Claude Code) is a run of its
+// parent's too: its transcript is where its harness writes, in the
+// pair's own folder (Rust-only).
+#[test]
+fn hosted_runs_find_a_pairs_transcript() {
+    let home = Home::new();
+    let reg = Registry::new();
+    reg.register(rush_claude::Claude::at(rush_claude::Account::at(
+        "",
+        home.path().join("claude"),
+    )));
+    for p in rush_providers::cross::pairs(&reg) {
+        reg.register(p);
+    }
+    let glm_dir = home.path().join("glm-claude");
+    let d = rush_host::dir("g1");
+    std::fs::create_dir_all(&d).unwrap();
+    let cfg = Config {
+        id: "g1".into(),
+        kind: "glm-claude".into(),
+        cwd: "/w".into(),
+        prompt: "build the server".into(),
+        account: Profile {
+            kind: "glm-claude".into(),
+            name: "GLM".into(),
+            dir: glm_dir.to_string_lossy().into_owned(),
+        },
+        ..Config::default()
+    };
+    std::fs::write(d.join("config.json"), cfg.to_json_indent()).unwrap();
+    let i = rush_host::Info {
+        id: "g1".into(),
+        kind: "glm-claude".into(),
+        session_id: "s-g1".into(),
+        state: "working".into(),
+        started_at: rush_state::Time::from_ms(9_000),
+        meta: [
+            ("spawnedBy".to_string(), "p".to_string()),
+            ("spawnStep".to_string(), "toolu_g".to_string()),
+        ]
+        .into(),
+        ..rush_host::Info::default()
+    };
+    let got = hosted_runs(&reg, &[i], "p");
+    assert_eq!(got.len(), 1, "{got:?}");
+    let s = &got[0];
+    assert_eq!(
+        (s.kind.as_str(), s.step.as_str()),
+        ("glm-claude", "toolu_g")
+    );
+    assert!(s.live);
+    assert!(
+        s.transcript.starts_with(&*glm_dir.to_string_lossy())
+            && s.transcript.ends_with("s-g1.jsonl"),
+        "{}",
+        s.transcript
+    );
+}
+
 /// Reads session id's host info until want takes it; panics after ten
 /// seconds.
 fn info_until(id: &str, want: impl Fn(&rush_host::Info) -> bool) -> rush_host::Info {
