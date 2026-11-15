@@ -456,11 +456,12 @@ mod tests {
         );
         let got = allowed();
         assert!(
-            got.len() == 10
+            got.len() == 11
                 && got[0] == SHOW
                 && got[1] == format!("{PREFIX}view")
                 && got[8] == format!("{PREFIX}{CONTACT_SHEET}")
-                && got[9] == format!("{PREFIX}{RETIRE_TOOL}"),
+                && got[9] == format!("{PREFIX}{RETIRE_TOOL}")
+                && got[10] == format!("{PREFIX}{ASK_GUEST}"),
             "allowed: {got:?}"
         );
         // Written as Go writes it: keys in order.
