@@ -20,8 +20,9 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use rush_core::adapter::{
-    Account, Adapter, Conn, Driver, Feature, Features, Kind, Level, PlanRider, Profile, Programmer,
-    Provided, QuotaSource, Registry, Result, Rider, Sink, StartOptions, Support,
+    Account, Adapter, Choice, Choices, Chooser, Conn, Driver, Feature, Features, Kind, Level,
+    PlanRider, Profile, Programmer, Provided, QuotaSource, Registry, Result, Rider, Sink,
+    StartOptions, Support,
 };
 use rush_core::usage::Quota;
 
@@ -77,6 +78,8 @@ pub struct Pair0 {
     /// rush's own in models.json, speaking pi_api, with models to offer.
     pi_provider: &'static str,
     pi_api: &'static str,
+    /// The provider's models: Pi's models.json, and in Claude Code what
+    /// its picker and the agents rush offers name (Rust-only there).
     models: &'static [&'static str],
     /// Runs the provider on the plan the harness is signed in to (Pi's
     /// own /login), in the harness's own folder, with no key at all.
@@ -95,6 +98,7 @@ const PAIRS: [Pair0; 8] = [
         provider: "deepseek",
         harness: CLAUDE,
         url: "https://api.deepseek.com/anthropic",
+        models: &["deepseek-chat", "deepseek-reasoner"],
         ..NONE
     },
     Pair0 {
@@ -103,6 +107,7 @@ const PAIRS: [Pair0; 8] = [
         provider: "glm",
         harness: CLAUDE,
         url: "https://api.z.ai/api/anthropic",
+        models: &["glm-5.3", "glm-5.3-flash"],
         coding_plan: true,
         ..NONE
     },
@@ -388,9 +393,31 @@ impl Adapter for Pair {
         provided: Provided,
         plan_rider: PlanRider,
     );
+    /// A Claude Code pair's own models, with Claude Code's modes: what a
+    /// session's picker and the agents rush offers other sessions name
+    /// ("glm-5.3"), rather than Claude's names it maps to them.
+    fn chooser(&self) -> Option<&dyn Chooser> {
+        (self.harness == CLAUDE && !self.models.is_empty()).then_some(self as &dyn Chooser)
+    }
     /// GLM's Coding Plan's limits, which its key draws from.
     fn quota_source(&self) -> Option<&dyn QuotaSource> {
         self.coding_plan.then_some(self as &dyn QuotaSource)
+    }
+}
+
+impl Chooser for Pair {
+    fn choices(&self) -> Choices {
+        let mut c = self.reg.choices_of(self.harness).unwrap_or_default();
+        c.efforts.clear(); // as the provider serves it
+        c.models = self
+            .models
+            .iter()
+            .map(|m| Choice {
+                id: (*m).to_string(),
+                ..Choice::default()
+            })
+            .collect();
+        c
     }
 }
 
