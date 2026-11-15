@@ -470,6 +470,19 @@ pub fn sub_name(agent: &str, task: &str) -> String {
     }
 }
 
+/// The rush session a hosted one is the subagent of, from its config's
+/// Meta spawnedBy and startedFrom: None for one of its own. One started
+/// beside another (startedFrom: start_agent, or `rush session start
+/// --meta startedFrom=…` from a session's shell, which also says
+/// spawnedBy) is a session of its own, with its own row, whatever else
+/// it says. Rust-only.
+pub fn subagent_of<'a>(spawned_by: Option<&'a str>, started_from: Option<&str>) -> Option<&'a str> {
+    if started_from.is_some_and(|s| !s.is_empty()) {
+        return None;
+    }
+    spawned_by.filter(|s| !s.is_empty())
+}
+
 fn is_zero_u32(v: &u32) -> bool {
     *v == 0
 }
