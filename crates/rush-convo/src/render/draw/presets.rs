@@ -1380,17 +1380,34 @@ impl<'a> Drawer<'a> {
                     if name.is_empty() {
                         name = self.label(id).plain();
                     }
-                    let what = job
+                    let mut what = job
                         .map(|j| j.agent.clone())
                         .filter(|a| !a.is_empty())
                         .unwrap_or_else(|| "subagent".into());
-                    let state = match job {
+                    let mut state = match job {
                         Some(j) if j.running() => LaneState::Working,
                         Some(j) if j.status == "failed" => LaneState::Failed,
                         Some(j) if j.status == "stopped" => LaneState::Stopped,
                         Some(_) => LaneState::Done,
                         None => LaneState::of(st.status),
                     };
+                    // Another model answered the call (a rush-hosted run
+                    // under it): that model is what runs it, at work as
+                    // long as it is, not Claude Code's stand-in
+                    // (Rust-only).
+                    if let Some(k) = o.kids.get(&*st.id).and_then(|ks| ks.first()) {
+                        what = k.spawn.name.clone();
+                        // "top · astra" says it already.
+                        if !k.spawn.model.is_empty()
+                            && k.spawn.model != what
+                            && !what.contains(" · ")
+                        {
+                            what = format!("{what} · {}", k.spawn.model);
+                        }
+                        if k.live {
+                            state = LaneState::Working;
+                        }
+                    }
                     let end = job.map_or(st.end, |j| j.end);
                     let (mut news, mut at) = woke
                         .get(&*st.id)

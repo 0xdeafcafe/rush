@@ -1298,8 +1298,22 @@ impl Runs {
     /// only a task says.
     pub fn rebuild(&mut self, s: &Session, claude: bool) {
         let title = |step: &str| spawn_title(s, step);
-        let mut subs = self.listed.clone();
-        subs.extend(spawn_subs(&self.spawns, &title));
+        let spawned = spawn_subs(&self.spawns, &title);
+        // A call of its own another model answered (rush-claude's
+        // others.rs): the model's run, rush hosts, is the call's run, not
+        // Claude Code's stand-in for it (Rust-only).
+        let calls: HashSet<String> = spawned
+            .iter()
+            .map(|sa| sa.tool_use_id.clone())
+            .filter(|c| !c.is_empty())
+            .collect();
+        let mut subs: Vec<Subagent> = self
+            .listed
+            .iter()
+            .filter(|sa| sa.tool_use_id.is_empty() || !calls.contains(&sa.tool_use_id))
+            .cloned()
+            .collect();
+        subs.extend(spawned);
         self.subs = with_job_subs(s, subs, claude);
     }
 
