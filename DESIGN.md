@@ -707,7 +707,8 @@ on every frame. Go retains about 22 MiB for the same.
    it in draws little; then what's added as it grows
    (`fswait::follow_grows`). A transcript in the form Claude Code writes
    (`reading::Transcript`, every adapter whose `claude_transcripts` says
-   so) and another agent's history as its adapter reads it back
+   so: Claude Code, and another provider run in it, such as GLM, DeepSeek
+   or Ollama) and another agent's history as its adapter reads it back
    (`reading::History`: its `TailReader` for the end, its follower or
    reader for the whole) are the two forms read; an adapter that can't
    read its end alone (Gemini, whose log rewinds; Copilot's remote log)

@@ -149,6 +149,10 @@ impl Adapter for Ollama {
             dir: self.home(),
         }]
     }
+    /// Claude Code writes them, in rush's Claude folder for Ollama.
+    fn claude_transcripts(&self) -> bool {
+        true
+    }
     rush_core::has!(
         programmer: Programmer,
         rider: Rider,
@@ -326,6 +330,7 @@ mod tests {
         assert_eq!(reg.program_kind("/opt/homebrew/bin/ollama"), None);
         assert!(!reg.is_program("ollama"));
         assert_eq!(reg.harness_of(KIND).as_str(), "claude");
+        assert!(reg.reads_as_claude(KIND), "its sessions are Claude Code's");
         assert_eq!(reg.price(KIND, "any", &TokenUsage::default()), Some(0.0));
     }
 

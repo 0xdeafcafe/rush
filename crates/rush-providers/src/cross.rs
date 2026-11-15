@@ -455,6 +455,11 @@ impl Adapter for Pair {
             dir: self.home(),
         }]
     }
+    /// A pair in Claude Code writes Claude Code's transcripts, in the
+    /// pair's own Claude folder; Pi's sessions rush can't read yet.
+    fn claude_transcripts(&self) -> bool {
+        self.harness == CLAUDE
+    }
     rush_core::has!(
         driver: Driver,
         programmer: Programmer,
@@ -734,6 +739,10 @@ mod tests {
         assert_eq!(f[&Feature::Quota].note, "paid per token with the API key");
         assert_eq!(f[&Feature::Live].is, rush_core::adapter::Has::No);
         assert!(f.contains_key(&Feature::Rewind));
+        // A pair in Claude Code is read as Claude Code's transcripts are.
+        assert!(reg.reads_as_claude("glm-claude"));
+        assert!(reg.reads_as_claude("deepseek-claude"));
+        assert!(!reg.reads_as_claude("deepseek-pi"));
         assert!(reg.get("deepseek-claude").unwrap().quota_source().is_none());
         // GLM's key draws from its Coding Plan, whose limits it reads.
         let glm = reg.get("glm-claude").unwrap();
