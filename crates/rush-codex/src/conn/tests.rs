@@ -795,6 +795,91 @@ fn reads_claude_md_and_writes_rush() {
     sent.join().unwrap().unwrap();
 }
 
+/// What rush answers another model's call with, in a test.
+struct Answers(Mutex<Vec<rush_core::adapter::DelegateCall>>);
+
+impl rush_core::adapter::Delegate for Answers {
+    fn run(&self, call: rush_core::adapter::DelegateCall) -> Result<String, String> {
+        let out = format!("{} finished:\n\nreviewed: {}", call.agent, call.prompt);
+        self.0.lock().unwrap().push(call);
+        Ok(out)
+    }
+}
+
+/// Another provider's model as one of the thread's own (Rust-only,
+/// others.rs): run_agent among thread/start's dynamicTools, its types
+/// listed, and a call of it answered with that model's answer as the
+/// tool's output. A resumed thread keeps its tools; another tool's call
+/// is still refused.
+#[test]
+fn another_model_answers_run_agent() {
+    let answers = Arc::new(Answers(Mutex::new(Vec::new())));
+    let others = vec![rush_core::adapter::OtherAgent {
+        name: "opus".into(),
+        description: "Anthropic's; top tier.".into(),
+    }];
+    let (c, mut f, _rx) = connect();
+    let h = begin(
+        &c,
+        StartOptions {
+            others: others.clone(),
+            delegate: Some(answers.clone() as rush_core::adapter::DelegateRef),
+            ..StartOptions::default()
+        },
+    );
+    let init = f.expect("initialize");
+    f.respond(&init, json!({"userAgent": "rush/1"}));
+    f.expect("initialized");
+    let ts = f.expect("thread/start");
+    let tools = &ts["params"]["dynamicTools"];
+    assert_eq!(tools[0]["name"], "run_agent");
+    assert_eq!(
+        tools[0]["inputSchema"]["properties"]["agent_type"]["enum"],
+        json!(["opus"])
+    );
+    f.respond(&ts, json!({"thread": {"id": "th1"}, "model": "gpt-5.5"}));
+    h.join().unwrap().unwrap();
+    f.request(
+        7.into(),
+        "item/tool/call",
+        json!({"threadId": "th1", "turnId": "tu1", "callId": "call-1", "tool": "run_agent",
+            "arguments": {"agent_type": "opus", "message": "review main.rs"}}),
+    );
+    let b = f.line();
+    assert_eq!(b["id"], 7);
+    assert_eq!(
+        b["result"],
+        json!({"contentItems": [{"type": "inputText", "text": "opus finished:\n\nreviewed: review main.rs"}], "success": true})
+    );
+    let calls = answers.0.lock().unwrap().clone();
+    assert_eq!(
+        (calls[0].agent.as_str(), calls[0].step.as_str()),
+        ("opus", "call-1")
+    );
+    f.request(8.into(), "item/tool/call", json!({"tool": "other"}));
+    let b = f.line();
+    assert!(b["id"] == 8 && b.get("error").is_some(), "{b}");
+
+    let (c, mut f, _rx) = connect();
+    let h = begin(
+        &c,
+        StartOptions {
+            others,
+            delegate: Some(answers as rush_core::adapter::DelegateRef),
+            session_id: "old".into(),
+            resume: true,
+            ..StartOptions::default()
+        },
+    );
+    let init = f.expect("initialize");
+    f.respond(&init, json!({"userAgent": "rush/1"}));
+    f.expect("initialized");
+    let tr = f.expect("thread/resume");
+    assert!(tr["params"].get("dynamicTools").is_none(), "{tr}");
+    f.respond(&tr, json!({"thread": {"id": "old"}, "model": "gpt-5.5"}));
+    h.join().unwrap().unwrap();
+}
+
 // compact_test.go:TestNativeCompactionLifecycle
 #[test]
 fn native_compaction_lifecycle() {

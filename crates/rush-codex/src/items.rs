@@ -288,6 +288,18 @@ pub(crate) fn call_of(it: &ThreadItem, raw: Option<RawJson>) -> Option<Call> {
         }
         "dynamicToolCall" => {
             (c.name, c.raw) = (it.tool.clone(), it.arguments.clone());
+            if it.tool == crate::others::RUN_AGENT {
+                // Another model rush runs as the thread's own subagent
+                // (others.rs): drawn as one.
+                let a: Value = it
+                    .arguments
+                    .as_ref()
+                    .and_then(|r| serde_json::from_str(r.get()).ok())
+                    .unwrap_or(Value::Null);
+                c.kind = Kind::Subagent;
+                c.input.agent = a["agent_type"].as_str().unwrap_or_default().into();
+                c.input.prompt = a["message"].as_str().unwrap_or_default().into();
+            }
         }
         "webSearch" => {
             (c.name, c.kind, c.input.query) =
