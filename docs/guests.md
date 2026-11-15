@@ -85,8 +85,8 @@ a time: a file change may wait for another participant to finish").
 A guest's turn is in the lead's conversation as a card, the way messages
 between agents already are (an `Exchange`, phase `guest`): `you → ◐ Kimi`
 for the ask, `◐ Kimi → you` (or `→ ✻ Claude` when an agent asked) for the
-reply, the mark the agent's provider's (the same marks Settings uses,
-`rush_core::agent::look`). The reply holds the guest's last words and a
+reply, the mark the agent's harness's (rush-convo's `guest_mark`, Settings'
+marks without their colours; other message cards keep Go's ◇). The reply holds the guest's last words and a
 line of what it did (`did: editing migrate.rs · running cargo test`);
 folded to its start and end like any message card, space opens it whole.
 The cards go through the lead's host (`record_exchange`) into its
@@ -147,6 +147,10 @@ One participant changes files at a time, per conversation.
   The UI's `@name` sends the end of the conversation (as a hand-off tells
   it) with a new guest's first ask.
 - The lead hears guests at its next turn, not mid-turn.
+- The `@` picker offers the agents running now, as before; a model that
+  isn't running (`@kimi` with no Kimi session) is still asked when typed,
+  but isn't offered. Filling the picker from the registry off the UI's
+  thread would make its rows change under the tests that pin them.
 - Lease waits are looked at once a second; a hook waits at most 9
   minutes.
 
