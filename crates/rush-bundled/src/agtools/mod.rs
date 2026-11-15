@@ -10,11 +10,13 @@
 //! and the room).
 
 mod agents;
+mod guest;
 mod remind;
 mod retire;
 mod sheet;
 
 pub use agents::*;
+pub use guest::*;
 pub use remind::*;
 pub use retire::*;
 pub use sheet::{CONTACT_SHEET, SheetInput};
@@ -127,6 +129,7 @@ pub fn names() -> Vec<String> {
     out.extend(remind_tools().into_iter().map(|t| t.name));
     out.push(sheet::sheet_tool().name);
     out.push(retire_tool().name); // it only asks: rush hands over at the turn's end
+    out.push(guest_tool().name); // asks what the user's own @name asks
     out
 }
 
@@ -224,6 +227,7 @@ fn answer(ag: Option<&dyn Agents>, msg: &[u8]) -> Vec<u8> {
                 list.extend(agent_list(ag));
                 list.extend(remind_list(ag));
                 list.extend(retire_list(ag));
+                list.extend(guest_list(ag));
                 if ag.viewer().is_some() && !headless {
                     list.push(view_tool());
                 }
@@ -244,6 +248,9 @@ fn answer(ag: Option<&dyn Agents>, msg: &[u8]) -> Vec<u8> {
                 return ok(sheet::call_sheet(p.arguments.as_deref()));
             }
             if let Some(res) = call_retire(ag, &p.name, p.arguments.as_deref()) {
+                return ok(res);
+            }
+            if let Some(res) = call_guest(ag, &p.name, p.arguments.as_deref()) {
                 return ok(res);
             }
             if headless {
@@ -449,11 +456,12 @@ mod tests {
         );
         let got = allowed();
         assert!(
-            got.len() == 10
+            got.len() == 11
                 && got[0] == SHOW
                 && got[1] == format!("{PREFIX}view")
                 && got[8] == format!("{PREFIX}{CONTACT_SHEET}")
-                && got[9] == format!("{PREFIX}{RETIRE_TOOL}"),
+                && got[9] == format!("{PREFIX}{RETIRE_TOOL}")
+                && got[10] == format!("{PREFIX}{ASK_GUEST}"),
             "allowed: {got:?}"
         );
         // Written as Go writes it: keys in order.

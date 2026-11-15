@@ -55,6 +55,7 @@ use crate::wire::*;
 
 mod agent;
 mod emeritus;
+mod guests;
 mod upgrade;
 use agent::Watching;
 use emeritus::Em;
@@ -490,6 +491,8 @@ pub(crate) struct State {
     upgrading: bool,
     /// Its socket's listener, by number: what a move keeps open.
     listen_fd: i32,
+    /// Its part in a conversation with guests: see server/guests.rs.
+    gs: guests::GuestState,
 }
 
 pub(crate) struct Shared {
@@ -871,6 +874,7 @@ fn build(reg: Registry, hooks: Hooks, mut cfg: Config) -> (Host, Receiver<Msg>) 
         upgrade_due: false,
         upgrading: false,
         listen_fd: -1,
+        gs: guests::GuestState::default(),
     };
     let sh = Arc::new_cyclic(|me| Shared {
         reg,
@@ -1676,6 +1680,9 @@ impl Host {
         // The same command answers for the context guard, which reads its
         // switches as each hook runs.
         o.tool_hook = o.bash_hook.clone();
+        // The write lease of a conversation with guests, where the harness
+        // runs hooks: a shell test until the session has guests or is one.
+        o.lease_hook = crate::guests::hook::command(&c.id);
         // Its subagents' caches kept while they wait on long calls, as
         // Settings › Usage › Prompt cache says, where its agent can.
         let keep = rush_state::Store::load().config.cache_keep;
@@ -2753,6 +2760,9 @@ impl Host {
         } else {
             String::new()
         };
+        // What guests said since the lead's last turn, atop this one
+        // (server/guests.rs): marked told only once the agent has it.
+        let guests_note = if turn { self.guests_note(st) } else { None };
         let f = sent_by(
             json!({"text": clip(text), "images": images.len(), "ev": ev, "cause": cause, "turn": st.turn}),
             ex,
@@ -2779,6 +2789,9 @@ impl Host {
                 );
             }
             input = with_views_note(input, &views_note);
+            if let Some((n, _)) = &guests_note {
+                input = format!("<system-reminder>\n{n}\n</system-reminder>\n\n{input}");
+            }
             if let Err(e) = conn.send(Input {
                 text: input,
                 images: pics.to_vec(),
@@ -2786,6 +2799,10 @@ impl Host {
                 return Err(self.not_taken(st, turn, text, e.to_string(), &ev, cause));
             }
             st.untold.clear();
+            if let Some((_, seen)) = guests_note {
+                self.guests_told(st, seen);
+            }
+            self.guests_given(st, text, Some(e));
             let mut received = e.clone();
             received.direction = "received".into();
             received.text = text.to_string();
@@ -2807,6 +2824,9 @@ impl Host {
                 );
             }
             input = with_views_note(input, &views_note);
+            if let Some((n, _)) = &guests_note {
+                input = format!("<system-reminder>\n{n}\n</system-reminder>\n\n{input}");
+            }
             let input = Input {
                 text: input,
                 images: pics.to_vec(),
@@ -2820,6 +2840,10 @@ impl Host {
                 return Err(self.not_taken(st, turn, text, e.to_string(), &ev, cause));
             }
             st.untold.clear();
+            if let Some((_, seen)) = guests_note {
+                self.guests_told(st, seen);
+            }
+            self.guests_given(st, text, None);
             self.sent(st, &input);
             self.record(st, lines::echo_line(text, images, None));
         }
@@ -3620,6 +3644,17 @@ impl Host {
     // ---- Agents' events ----
 
     fn on_agent_event(&self, st: &mut State, conn: &Arc<dyn Conn>, ev: Event) {
+        // A file change asked while another participant of its
+        // conversation holds the write lease waits for it, unseen
+        // (server/guests.rs).
+        if let Event::Approval(a) = &ev
+            && self.lease_parks(st, conn, a)
+        {
+            return;
+        }
+        if let Event::ApprovalCancelled(c) = &ev {
+            Host::lease_cancelled(st, &c.id);
+        }
         self.heard_from(st, &ev);
         if !conn.taps()
             && let Ok(b) = lines::event_line(&ev)
@@ -3690,6 +3725,7 @@ impl Host {
                 }
                 self.shell_calls(st, &m);
                 self.sub_message(st, &m);
+                self.guests_message(st, &m);
                 self.on_message(st, &m);
             }
             Event::Approval(a) => {

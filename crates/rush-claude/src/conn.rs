@@ -78,6 +78,18 @@ pub fn context_hooks(hooks: &mut Map<String, Value>, command: &str) {
     }
 }
 
+/// Puts the write lease of a conversation with guests (command) before
+/// each edit and Bash call, beside hooks already there for them: it may
+/// wait for another participant's turn, so it's given ten minutes
+/// (Rust-only; rush-host's guests::hook).
+pub fn lease_hooks(hooks: &mut Map<String, Value>, command: &str) {
+    let h = json!({"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash", "hooks": [{"type": "command", "command": command, "timeout": 600}]});
+    let list = hooks.entry("PreToolUse").or_insert_with(|| json!([]));
+    if let Value::Array(a) = list {
+        a.push(h);
+    }
+}
+
 /// How long a control request is waited on: Go's callers give it a minute
 /// at most (host.go:1723).
 const ASK_WITHIN: Duration = Duration::from_secs(60);
@@ -179,6 +191,9 @@ impl Driver for Claude {
         }
         if !o.tool_hook.is_empty() {
             context_hooks(&mut hooks, &o.tool_hook);
+        }
+        if !o.lease_hook.is_empty() {
+            lease_hooks(&mut hooks, &o.lease_hook);
         }
         if !hooks.is_empty() {
             ho.flags.extend([

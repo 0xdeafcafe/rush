@@ -140,12 +140,17 @@ impl SubAgents {
         &self.parent
     }
 
+    /// The agents they reach.
+    pub fn reg(&self) -> &Registry {
+        &self.reg
+    }
+
     /// Whether no one watches the session in rush (Config.headless).
     pub fn headless(&self) -> bool {
         self.headless
     }
 
-    fn leader(&self) -> String {
+    pub(crate) fn leader(&self) -> String {
         self.reg.harness_of(&self.kind).0
     }
 
@@ -334,7 +339,12 @@ impl SubAgents {
 
     /// The agent a call names, on the model it runs, once it may take
     /// work.
-    fn choose(&self, ps: &[Pick], name: &str, model: &str) -> Result<(Pick, String), String> {
+    pub(crate) fn choose(
+        &self,
+        ps: &[Pick],
+        name: &str,
+        model: &str,
+    ) -> Result<(Pick, String), String> {
         let Some((p, model)) = find(&self.reg, ps, name, model) else {
             return Err(no_agent(&self.reg, name, model, ps));
         };
@@ -418,7 +428,7 @@ impl SubAgents {
     }
 
     /// Readies cfg's agent k to run it, signed in.
-    fn use_agent(&self, cfg: &mut Config, k: &str) -> Result<(), String> {
+    pub(crate) fn use_agent(&self, cfg: &mut Config, k: &str) -> Result<(), String> {
         cfg.use_agent(&self.reg, k)?;
         let _ = crate::kind::sign_in_if_out(&self.reg, k, &cfg.account);
         Ok(())

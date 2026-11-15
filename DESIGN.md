@@ -4134,6 +4134,19 @@ ago into its successor's row (rush_fleet's fold_retired), which shows
 handover event carries both conversations (`fromSession`, `toSession`)
 and `cwd`.
 
+## Guests in a conversation (Rust-only)
+
+Other models answer in a conversation rush hosts: `@kimi …` in the box,
+or an agent's `ask_guest`, starts (once) a guest, a hosted session per
+conversation and agent (Meta `guestOf`, `spawnedBy`), and gives it what
+was said since its last turn, as a room member gets it
+(`rush_room::seen`). Its replies are exchange cards in the lead's
+conversation (phase `guest`, kept in the lead's journal); the lead is
+told what guests said atop its next turn. One participant changes files
+at a time: a lease per conversation, held at the approval step in every
+harness and by a PreToolUse hook in Claude Code. `rush-host`'s `guests`
+module; the whole design in `docs/guests.md`.
+
 ## Panics
 
 Release builds unwind (`panic = "unwind"`), so one thread's panic ends

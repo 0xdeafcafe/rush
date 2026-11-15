@@ -1068,6 +1068,9 @@ impl Host {
     /// session it reports to once there's nothing more to do. Called once
     /// on_turn_end has settled the state.
     pub(super) fn turn_done(&self, st: &mut State, e: &event::TurnEnd) {
+        // Its words in its conversation's chat, its write lease given up,
+        // a guest's reply drawn in the lead's (server/guests.rs).
+        self.guests_turn_end(st, e);
         // A nudge's turn, or the one a handover began after, answers no
         // one: what the agent was asked is answered by the turn after, or
         // by its successor (server/emeritus.rs).

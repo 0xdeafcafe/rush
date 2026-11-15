@@ -109,6 +109,48 @@ pub fn pruned(s: &Session, keep: &[bool]) -> String {
     })
 }
 
+/// The end of the conversation as plain text, at most most bytes of whole
+/// turns (the newest whole, cut from its start when it alone is longer):
+/// your words, its words and each step on a line, for an agent joining it
+/// as a guest (guests.rs). Rust-only.
+pub fn latest(s: &Session, most: usize) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut total = 0;
+    for t in s.turns.iter().rev() {
+        let mut b = String::new();
+        if !t.prompt.is_empty() {
+            b += &format!("\n## User\n{}\n", t.prompt.trim());
+        } else if !t.from.is_empty() {
+            b += &format!("\n## {}\n", t.from);
+        }
+        for it in &t.items {
+            match it {
+                Item::Text { text, .. } => b += &format!("\n## Assistant\n{}\n", text.trim()),
+                Item::Interject(i) => b += &format!("\n## User (mid-turn)\n{}\n", i.text.trim()),
+                Item::Step(id) => {
+                    let st = s.step(*id);
+                    b += &format!("- {} {}\n", st.tool, clip_text(&st.input_json(), 160));
+                }
+                _ => {}
+            }
+        }
+        if total + b.len() > most {
+            if parts.is_empty() {
+                let mut cut = b.len().saturating_sub(most);
+                while !b.is_char_boundary(cut) {
+                    cut += 1;
+                }
+                parts.push(format!("[shortened] {}", &b[cut..]));
+            }
+            break;
+        }
+        total += b.len();
+        parts.push(b);
+    }
+    parts.reverse();
+    parts.concat().trim().to_string()
+}
+
 /// t trimmed and cut to n bytes, never mid-character, with " …" when cut.
 fn clip_text(t: &str, n: usize) -> String {
     let t = t.trim();

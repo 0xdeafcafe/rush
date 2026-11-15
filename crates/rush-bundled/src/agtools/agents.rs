@@ -137,6 +137,11 @@ pub trait Agents: Send + Sync {
     fn retirer(&self) -> Option<&dyn super::Retirer> {
         None
     }
+    /// Its ask_guest tool, where it asks a conversation's participants
+    /// (Rust-only).
+    fn guests(&self) -> Option<&dyn super::Guests> {
+        None
+    }
 }
 
 /// Whether a tool call named name is spawn_agent, by any harness's name
