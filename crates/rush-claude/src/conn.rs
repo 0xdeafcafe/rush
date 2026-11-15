@@ -142,6 +142,12 @@ impl Driver for Claude {
             ho.flags
                 .extend(["--allowedTools".into(), allowed.join(",")]);
         }
+        // Every other model rush runs, as subagent types of its own that
+        // rush answers (others.rs).
+        let native = crate::others::Native::of(&o.others, o.delegate.clone()).map(Arc::new);
+        if native.is_some() {
+            crate::others::stand_ins(&o.others, &mut o.agents);
+        }
         if !o.agents.is_empty() {
             ho.flags
                 .extend(["--agents".into(), serde_json::to_string(&o.agents)?]);
@@ -244,7 +250,12 @@ impl Driver for Claude {
         let (s, reader) = headless::start(&ho)?;
         // Every process needs rush's tools registered before its first
         // message.
-        let init_id = match s.initialize(&names) {
+        let hooks = if native.is_some() {
+            crate::others::hooks()
+        } else {
+            Value::Null
+        };
+        let init_id = match s.initialize_with(&names, hooks) {
             Ok(id) => id,
             Err(e) => {
                 // Read to its end, so stopping it can tell it has.
@@ -258,6 +269,7 @@ impl Driver for Claude {
             sink,
             tools,
             init_id,
+            native,
             carried: Mutex::new(carried),
             acct,
             root,
@@ -372,6 +384,7 @@ impl Adopter for Claude {
             sink,
             tools,
             init_id: p.init_id,
+            native: crate::others::Native::of(&o.others, o.delegate.clone()).map(Arc::new),
             carried: Mutex::new(String::new()),
             acct,
             root: p.root,
@@ -408,6 +421,9 @@ impl adapter::Upgrader for ClaudeConn {
         }
         if !lock(&c.waits).is_empty() {
             return Err(err("it's answering a question of rush's"));
+        }
+        if c.native.as_ref().is_some_and(|n| n.busy()) {
+            return Err(err("another model is at work on its subagent call"));
         }
         let unread = c.s.pause(Duration::from_secs(5))?;
         if !lock(&c.asks).is_empty() || !lock(&c.waits).is_empty() {
@@ -548,6 +564,9 @@ struct Inner {
     sink: Arc<dyn Sink>,
     tools: Vec<ToolServer>,
     init_id: String,
+    /// The other models it has as subagent types, and the calls for them
+    /// rush answers (others.rs).
+    native: Option<Arc<crate::others::Native>>,
     /// Imported history, acknowledged by initialize.
     carried: Mutex<String>,
     acct: Account,
@@ -625,6 +644,10 @@ impl Inner {
                 }
                 return true;
             }
+            HEvent::HookCallback(e) => {
+                self.hook(e);
+                return true;
+            }
             HEvent::ControlReply(e) => {
                 if let Some(w) = lock(&self.waits).remove(&e.id) {
                     let _ = w.send(e.clone());
@@ -655,6 +678,35 @@ impl Inner {
             _ => {}
         }
         false
+    }
+
+    /// Answers one of the hooks rush registered: before an Agent call at
+    /// once, after one on a thread of its own, as it waits on the model
+    /// asked for (others.rs).
+    fn hook(&self, e: &crate::headless::HookCallback) {
+        let input: Value = e
+            .input
+            .as_ref()
+            .and_then(|r| serde_json::from_str(r.get()).ok())
+            .unwrap_or(Value::Null);
+        let Some(n) = self.native.clone() else {
+            let _ = self.s.reply_hook(&e.id, json!({}));
+            return;
+        };
+        if e.callback == crate::others::POST {
+            let (s, id) = (self.s.clone(), e.id.clone());
+            std::thread::spawn(move || {
+                let out = n.post(&input);
+                let _ = s.reply_hook(&id, out);
+            });
+            return;
+        }
+        let out = if e.callback == crate::others::PRE {
+            n.pre(&input)
+        } else {
+            json!({})
+        };
+        let _ = self.s.reply_hook(&e.id, out);
     }
 
     /// Passes the plan usage Claude Code reports with each request to every

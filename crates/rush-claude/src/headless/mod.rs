@@ -35,7 +35,7 @@ use rush_core::wire::RawJson;
 use rush_sys::proc;
 use serde_json::{Map, Value, json};
 
-pub use event::{ControlReply, Event, PermissionRequest, decode};
+pub use event::{ControlReply, Event, HookCallback, PermissionRequest, decode};
 
 use crate::account::Account;
 
@@ -1066,11 +1066,27 @@ impl Session {
     /// an interrupt stops only the turn and leaves running subagents be;
     /// without that, Claude Code kills them all with the turn.
     pub fn initialize(&self, servers: &[String]) -> Result<String> {
+        self.initialize_with(servers, Value::Null)
+    }
+
+    /// initialize, registering hooks too: an object of hook events to
+    /// matchers, each {"matcher", "hookCallbackIds", "timeout"}, whose
+    /// firing then arrives as a HookCallback (Rust-only).
+    pub fn initialize_with(&self, servers: &[String], hooks: Value) -> Result<String> {
         let mut req = json!({"subtype": "initialize", "perTaskStopAffordance": true});
         if !servers.is_empty() {
             req["sdkMcpServers"] = json!(servers);
         }
+        if hooks.is_object() {
+            req["hooks"] = hooks;
+        }
         self.control_of(req)
+    }
+
+    /// Answers a HookCallback with the hook's output, as a command hook
+    /// prints it.
+    pub fn reply_hook(&self, id: &str, output: Value) -> Result<()> {
+        self.reply(id, output, "")
     }
 
     /// Answers an McpRequest with its server's JSON-RPC reply.
