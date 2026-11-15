@@ -12,6 +12,7 @@ anthropic-pi,Anthropic,Pi,preview,True,plan,Plan mode,no,declaration; see caveat
 anthropic-pi,Anthropic,Pi,preview,True,images,Images,yes,declaration; see caveats,
 anthropic-pi,Anthropic,Pi,preview,True,questions,Questions,yes,declaration; see caveats,an extension's select and confirm
 anthropic-pi,Anthropic,Pi,preview,True,subagents,Subagents,no,declaration; see caveats,only as an extension
+anthropic-pi,Anthropic,Pi,preview,True,others,Other models as subagents,no,declaration; see caveats,rush's shell stand-ins only
 anthropic-pi,Anthropic,Pi,preview,True,background,Background tasks,no,declaration; see caveats,
 anthropic-pi,Anthropic,Pi,preview,True,context,Context breakdown,yes,declaration; see caveats,"how full it is, not what fills it"
 anthropic-pi,Anthropic,Pi,preview,True,compact,Compact,yes,declaration; see caveats,
@@ -50,6 +51,7 @@ antigravity,Google,Antigravity CLI,preview,True,plan,Plan mode,yes,declaration; 
 antigravity,Google,Antigravity CLI,preview,True,images,Images,no,declaration; see caveats,agy's streaming input accepts text only
 antigravity,Google,Antigravity CLI,preview,True,questions,Questions,no,declaration; see caveats,native headless policy; no interactive approval protocol
 antigravity,Google,Antigravity CLI,preview,True,subagents,Subagents,no,declaration; see caveats,
+antigravity,Google,Antigravity CLI,preview,True,others,Other models as subagents,no,declaration; see caveats,rush's shell stand-ins only
 antigravity,Google,Antigravity CLI,preview,True,background,Background tasks,no,declaration; see caveats,
 antigravity,Google,Antigravity CLI,preview,True,context,Context breakdown,no,declaration; see caveats,
 antigravity,Google,Antigravity CLI,preview,True,compact,Compact,no,declaration; see caveats,
@@ -88,6 +90,7 @@ claude,Anthropic,Claude Code,full,True,plan,Plan mode,yes,declaration; see cavea
 claude,Anthropic,Claude Code,full,True,images,Images,yes,declaration; see caveats,
 claude,Anthropic,Claude Code,full,True,questions,Questions,yes,declaration; see caveats,
 claude,Anthropic,Claude Code,full,True,subagents,Subagents,yes,declaration; see caveats,
+claude,Anthropic,Claude Code,full,True,others,Other models as subagents,yes,declaration; see caveats,--agents stand-ins answered by rush's hooks; one haiku turn per call
 claude,Anthropic,Claude Code,full,True,background,Background tasks,yes,declaration; see caveats,
 claude,Anthropic,Claude Code,full,True,context,Context breakdown,yes,declaration; see caveats,
 claude,Anthropic,Claude Code,full,True,compact,Compact,yes,declaration; see caveats,
@@ -126,6 +129,7 @@ codex,OpenAI,Codex,tested,True,plan,Plan mode,no,declaration; see caveats,
 codex,OpenAI,Codex,tested,True,images,Images,yes,declaration; see caveats,
 codex,OpenAI,Codex,tested,True,questions,Questions,yes,declaration; see caveats,
 codex,OpenAI,Codex,tested,True,subagents,Subagents,no,declaration; see caveats,
+codex,OpenAI,Codex,tested,True,others,Other models as subagents,yes,declaration; see caveats,run_agent dynamic tool rush answers; spawn_agent on a resumed thread
 codex,OpenAI,Codex,tested,True,background,Background tasks,no,declaration; see caveats,
 codex,OpenAI,Codex,tested,True,context,Context breakdown,yes,declaration; see caveats,"how full it is, not what fills it"
 codex,OpenAI,Codex,tested,True,compact,Compact,yes,declaration; see caveats,
@@ -164,6 +168,7 @@ copilot,GitHub,Copilot,tested,True,plan,Plan mode,yes,declaration; see caveats,w
 copilot,GitHub,Copilot,tested,True,images,Images,yes,declaration; see caveats,
 copilot,GitHub,Copilot,tested,True,questions,Questions,yes,declaration; see caveats,
 copilot,GitHub,Copilot,tested,True,subagents,Subagents,no,declaration; see caveats,
+copilot,GitHub,Copilot,tested,True,others,Other models as subagents,yes,declaration; see caveats,"through rush's spawn_agent, told as its own subagents"
 copilot,GitHub,Copilot,tested,True,background,Background tasks,no,declaration; see caveats,ACP has no background tasks
 copilot,GitHub,Copilot,tested,True,context,Context breakdown,no,declaration; see caveats,
 copilot,GitHub,Copilot,tested,True,compact,Compact,no,declaration; see caveats,
@@ -202,6 +207,7 @@ deepseek,DeepSeek,dsh,preview,True,plan,Plan mode,no,declaration; see caveats,
 deepseek,DeepSeek,dsh,preview,True,images,Images,yes,declaration; see caveats,on models that take them
 deepseek,DeepSeek,dsh,preview,True,questions,Questions,no,declaration; see caveats,
 deepseek,DeepSeek,dsh,preview,True,subagents,Subagents,no,declaration; see caveats,
+deepseek,DeepSeek,dsh,preview,True,others,Other models as subagents,yes,declaration; see caveats,"through rush's spawn_agent, told as its own subagents"
 deepseek,DeepSeek,dsh,preview,True,background,Background tasks,no,declaration; see caveats,ACP has no background tasks
 deepseek,DeepSeek,dsh,preview,True,context,Context breakdown,no,declaration; see caveats,
 deepseek,DeepSeek,dsh,preview,True,compact,Compact,no,declaration; see caveats,
@@ -240,6 +246,7 @@ deepseek-claude,DeepSeek,Claude Code,preview,True,plan,Plan mode,yes,declaration
 deepseek-claude,DeepSeek,Claude Code,preview,True,images,Images,yes,declaration; see caveats,
 deepseek-claude,DeepSeek,Claude Code,preview,True,questions,Questions,yes,declaration; see caveats,
 deepseek-claude,DeepSeek,Claude Code,preview,True,subagents,Subagents,yes,declaration; see caveats,
+deepseek-claude,DeepSeek,Claude Code,preview,True,others,Other models as subagents,yes,declaration; see caveats,--agents stand-ins answered by rush's hooks; one haiku turn per call
 deepseek-claude,DeepSeek,Claude Code,preview,True,background,Background tasks,yes,declaration; see caveats,
 deepseek-claude,DeepSeek,Claude Code,preview,True,context,Context breakdown,yes,declaration; see caveats,
 deepseek-claude,DeepSeek,Claude Code,preview,True,compact,Compact,yes,declaration; see caveats,
@@ -278,6 +285,7 @@ deepseek-pi,DeepSeek,Pi,preview,True,plan,Plan mode,no,declaration; see caveats,
 deepseek-pi,DeepSeek,Pi,preview,True,images,Images,yes,declaration; see caveats,
 deepseek-pi,DeepSeek,Pi,preview,True,questions,Questions,yes,declaration; see caveats,an extension's select and confirm
 deepseek-pi,DeepSeek,Pi,preview,True,subagents,Subagents,no,declaration; see caveats,only as an extension
+deepseek-pi,DeepSeek,Pi,preview,True,others,Other models as subagents,no,declaration; see caveats,rush's shell stand-ins only
 deepseek-pi,DeepSeek,Pi,preview,True,background,Background tasks,no,declaration; see caveats,
 deepseek-pi,DeepSeek,Pi,preview,True,context,Context breakdown,yes,declaration; see caveats,"how full it is, not what fills it"
 deepseek-pi,DeepSeek,Pi,preview,True,compact,Compact,yes,declaration; see caveats,
@@ -316,6 +324,7 @@ gemini,Google,Gemini CLI,preview,False,plan,Plan mode,yes,declaration; see cavea
 gemini,Google,Gemini CLI,preview,False,images,Images,yes,declaration; see caveats,
 gemini,Google,Gemini CLI,preview,False,questions,Questions,yes,declaration; see caveats,
 gemini,Google,Gemini CLI,preview,False,subagents,Subagents,no,declaration; see caveats,
+gemini,Google,Gemini CLI,preview,False,others,Other models as subagents,yes,declaration; see caveats,"through rush's spawn_agent, told as its own subagents"
 gemini,Google,Gemini CLI,preview,False,background,Background tasks,no,declaration; see caveats,ACP has no background tasks
 gemini,Google,Gemini CLI,preview,False,context,Context breakdown,no,declaration; see caveats,
 gemini,Google,Gemini CLI,preview,False,compact,Compact,no,declaration; see caveats,
@@ -354,6 +363,7 @@ glm,GLM,ZCode,preview,True,plan,Plan mode,yes,declaration; see caveats,when the 
 glm,GLM,ZCode,preview,True,images,Images,yes,declaration; see caveats,
 glm,GLM,ZCode,preview,True,questions,Questions,yes,declaration; see caveats,
 glm,GLM,ZCode,preview,True,subagents,Subagents,no,declaration; see caveats,
+glm,GLM,ZCode,preview,True,others,Other models as subagents,yes,declaration; see caveats,"through rush's spawn_agent, told as its own subagents"
 glm,GLM,ZCode,preview,True,background,Background tasks,no,declaration; see caveats,ACP has no background tasks
 glm,GLM,ZCode,preview,True,context,Context breakdown,no,declaration; see caveats,
 glm,GLM,ZCode,preview,True,compact,Compact,no,declaration; see caveats,
@@ -392,6 +402,7 @@ glm-claude,GLM,Claude Code,preview,True,plan,Plan mode,yes,declaration; see cave
 glm-claude,GLM,Claude Code,preview,True,images,Images,yes,declaration; see caveats,
 glm-claude,GLM,Claude Code,preview,True,questions,Questions,yes,declaration; see caveats,
 glm-claude,GLM,Claude Code,preview,True,subagents,Subagents,yes,declaration; see caveats,
+glm-claude,GLM,Claude Code,preview,True,others,Other models as subagents,yes,declaration; see caveats,--agents stand-ins answered by rush's hooks; one haiku turn per call
 glm-claude,GLM,Claude Code,preview,True,background,Background tasks,yes,declaration; see caveats,
 glm-claude,GLM,Claude Code,preview,True,context,Context breakdown,yes,declaration; see caveats,
 glm-claude,GLM,Claude Code,preview,True,compact,Compact,yes,declaration; see caveats,
@@ -430,6 +441,7 @@ glm-pi,GLM,Pi,preview,True,plan,Plan mode,no,declaration; see caveats,only as an
 glm-pi,GLM,Pi,preview,True,images,Images,yes,declaration; see caveats,
 glm-pi,GLM,Pi,preview,True,questions,Questions,yes,declaration; see caveats,an extension's select and confirm
 glm-pi,GLM,Pi,preview,True,subagents,Subagents,no,declaration; see caveats,only as an extension
+glm-pi,GLM,Pi,preview,True,others,Other models as subagents,no,declaration; see caveats,rush's shell stand-ins only
 glm-pi,GLM,Pi,preview,True,background,Background tasks,no,declaration; see caveats,
 glm-pi,GLM,Pi,preview,True,context,Context breakdown,yes,declaration; see caveats,"how full it is, not what fills it"
 glm-pi,GLM,Pi,preview,True,compact,Compact,yes,declaration; see caveats,
@@ -468,6 +480,7 @@ kimi,Moonshot,Kimi CLI,tested,True,plan,Plan mode,yes,declaration; see caveats,w
 kimi,Moonshot,Kimi CLI,tested,True,images,Images,yes,declaration; see caveats,
 kimi,Moonshot,Kimi CLI,tested,True,questions,Questions,yes,declaration; see caveats,
 kimi,Moonshot,Kimi CLI,tested,True,subagents,Subagents,no,declaration; see caveats,
+kimi,Moonshot,Kimi CLI,tested,True,others,Other models as subagents,yes,declaration; see caveats,"through rush's spawn_agent, told as its own subagents"
 kimi,Moonshot,Kimi CLI,tested,True,background,Background tasks,no,declaration; see caveats,ACP has no background tasks
 kimi,Moonshot,Kimi CLI,tested,True,context,Context breakdown,no,declaration; see caveats,
 kimi,Moonshot,Kimi CLI,tested,True,compact,Compact,yes,declaration; see caveats,its own /compact
@@ -506,6 +519,7 @@ ollama,Ollama,Claude Code,tested,True,plan,Plan mode,no,declaration; see caveats
 ollama,Ollama,Claude Code,tested,True,images,Images,yes,declaration; see caveats,on models that take them
 ollama,Ollama,Claude Code,tested,True,questions,Questions,no,declaration; see caveats,
 ollama,Ollama,Claude Code,tested,True,subagents,Subagents,no,declaration; see caveats,left out to keep the prompt small
+ollama,Ollama,Claude Code,tested,True,others,Other models as subagents,yes,declaration; see caveats,--agents stand-ins answered by rush's hooks; one local-model turn per call
 ollama,Ollama,Claude Code,tested,True,background,Background tasks,no,declaration; see caveats,
 ollama,Ollama,Claude Code,tested,True,context,Context breakdown,no,declaration; see caveats,
 ollama,Ollama,Claude Code,tested,True,compact,Compact,yes,declaration; see caveats,at the window the model was loaded with
@@ -544,6 +558,7 @@ ollama-codex,Ollama,Codex,tested,True,plan,Plan mode,no,declaration; see caveats
 ollama-codex,Ollama,Codex,tested,True,images,Images,yes,declaration; see caveats,on models that take them
 ollama-codex,Ollama,Codex,tested,True,questions,Questions,yes,declaration; see caveats,
 ollama-codex,Ollama,Codex,tested,True,subagents,Subagents,no,declaration; see caveats,
+ollama-codex,Ollama,Codex,tested,True,others,Other models as subagents,yes,declaration; see caveats,run_agent dynamic tool rush answers; spawn_agent on a resumed thread
 ollama-codex,Ollama,Codex,tested,True,background,Background tasks,no,declaration; see caveats,
 ollama-codex,Ollama,Codex,tested,True,context,Context breakdown,yes,declaration; see caveats,"how full it is, not what fills it"
 ollama-codex,Ollama,Codex,tested,True,compact,Compact,yes,declaration; see caveats,
@@ -582,6 +597,7 @@ ollama-pi,Ollama,Pi,tested,True,plan,Plan mode,no,declaration; see caveats,
 ollama-pi,Ollama,Pi,tested,True,images,Images,yes,declaration; see caveats,on models that take them
 ollama-pi,Ollama,Pi,tested,True,questions,Questions,yes,declaration; see caveats,an extension's select and confirm
 ollama-pi,Ollama,Pi,tested,True,subagents,Subagents,no,declaration; see caveats,
+ollama-pi,Ollama,Pi,tested,True,others,Other models as subagents,no,declaration; see caveats,rush's shell stand-ins only
 ollama-pi,Ollama,Pi,tested,True,background,Background tasks,no,declaration; see caveats,
 ollama-pi,Ollama,Pi,tested,True,context,Context breakdown,yes,declaration; see caveats,"how full it is, not what fills it"
 ollama-pi,Ollama,Pi,tested,True,compact,Compact,yes,declaration; see caveats,at the window the model was loaded with
@@ -620,6 +636,7 @@ ollama-vibe,Ollama,Vibe,tested,True,plan,Plan mode,no,declaration; see caveats,
 ollama-vibe,Ollama,Vibe,tested,True,images,Images,yes,declaration; see caveats,on models that take them
 ollama-vibe,Ollama,Vibe,tested,True,questions,Questions,yes,declaration; see caveats,
 ollama-vibe,Ollama,Vibe,tested,True,subagents,Subagents,no,declaration; see caveats,
+ollama-vibe,Ollama,Vibe,tested,True,others,Other models as subagents,yes,declaration; see caveats,"through rush's spawn_agent, told as its own subagents"
 ollama-vibe,Ollama,Vibe,tested,True,background,Background tasks,no,declaration; see caveats,ACP has no background tasks
 ollama-vibe,Ollama,Vibe,tested,True,context,Context breakdown,no,declaration; see caveats,
 ollama-vibe,Ollama,Vibe,tested,True,compact,Compact,no,declaration; see caveats,
@@ -658,6 +675,7 @@ openai-pi,OpenAI,Pi,preview,True,plan,Plan mode,no,declaration; see caveats,only
 openai-pi,OpenAI,Pi,preview,True,images,Images,yes,declaration; see caveats,
 openai-pi,OpenAI,Pi,preview,True,questions,Questions,yes,declaration; see caveats,an extension's select and confirm
 openai-pi,OpenAI,Pi,preview,True,subagents,Subagents,no,declaration; see caveats,only as an extension
+openai-pi,OpenAI,Pi,preview,True,others,Other models as subagents,no,declaration; see caveats,rush's shell stand-ins only
 openai-pi,OpenAI,Pi,preview,True,background,Background tasks,no,declaration; see caveats,
 openai-pi,OpenAI,Pi,preview,True,context,Context breakdown,yes,declaration; see caveats,"how full it is, not what fills it"
 openai-pi,OpenAI,Pi,preview,True,compact,Compact,yes,declaration; see caveats,
@@ -696,6 +714,7 @@ opencode,OpenCode,OpenCode,preview,True,plan,Plan mode,yes,declaration; see cave
 opencode,OpenCode,OpenCode,preview,True,images,Images,yes,declaration; see caveats,
 opencode,OpenCode,OpenCode,preview,True,questions,Questions,yes,declaration; see caveats,
 opencode,OpenCode,OpenCode,preview,True,subagents,Subagents,no,declaration; see caveats,
+opencode,OpenCode,OpenCode,preview,True,others,Other models as subagents,yes,declaration; see caveats,"through rush's spawn_agent, told as its own subagents"
 opencode,OpenCode,OpenCode,preview,True,background,Background tasks,no,declaration; see caveats,ACP has no background tasks
 opencode,OpenCode,OpenCode,preview,True,context,Context breakdown,no,declaration; see caveats,
 opencode,OpenCode,OpenCode,preview,True,compact,Compact,no,declaration; see caveats,
@@ -734,6 +753,7 @@ pi,Pi,Pi,tested,True,plan,Plan mode,no,declaration; see caveats,only as an exten
 pi,Pi,Pi,tested,True,images,Images,yes,declaration; see caveats,
 pi,Pi,Pi,tested,True,questions,Questions,yes,declaration; see caveats,an extension's select and confirm
 pi,Pi,Pi,tested,True,subagents,Subagents,no,declaration; see caveats,only as an extension
+pi,Pi,Pi,tested,True,others,Other models as subagents,no,declaration; see caveats,rush's shell stand-ins only
 pi,Pi,Pi,tested,True,background,Background tasks,no,declaration; see caveats,
 pi,Pi,Pi,tested,True,context,Context breakdown,yes,declaration; see caveats,"how full it is, not what fills it"
 pi,Pi,Pi,tested,True,compact,Compact,yes,declaration; see caveats,
@@ -772,6 +792,7 @@ vibe,Mistral,Vibe,preview,True,plan,Plan mode,yes,declaration; see caveats,when 
 vibe,Mistral,Vibe,preview,True,images,Images,yes,declaration; see caveats,
 vibe,Mistral,Vibe,preview,True,questions,Questions,yes,declaration; see caveats,
 vibe,Mistral,Vibe,preview,True,subagents,Subagents,no,declaration; see caveats,
+vibe,Mistral,Vibe,preview,True,others,Other models as subagents,yes,declaration; see caveats,"through rush's spawn_agent, told as its own subagents"
 vibe,Mistral,Vibe,preview,True,background,Background tasks,no,declaration; see caveats,ACP has no background tasks
 vibe,Mistral,Vibe,preview,True,context,Context breakdown,no,declaration; see caveats,
 vibe,Mistral,Vibe,preview,True,compact,Compact,no,declaration; see caveats,
