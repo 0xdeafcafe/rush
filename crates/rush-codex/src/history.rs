@@ -157,6 +157,81 @@ pub(crate) fn tail_before(
     Ok((evs, true))
 }
 
+/// HistoryWindow::history_window: the whole rollout lines within bytes
+/// [from, end), each line's settled events with the byte its line starts
+/// at, oldest first, fed through a Replay with the head it needs (the
+/// first line and the first turn_context, read from before from, as
+/// tail_before). A turn end cuts is given as though it ended there, as
+/// the whole reader gives it: the page above holds the rest of the turn,
+/// and the page below starts below it.
+pub(crate) fn window(s: &Session, from: u64, end: u64) -> adapter::Result<Vec<(u64, Vec<Event>)>> {
+    let f = File::open(rollout_path(s)?)?;
+    let size = f.metadata()?.len();
+    let end = end.min(size);
+    if from >= end {
+        return Ok(Vec::new());
+    }
+    // from names a line a former read gave, or 0; a guess past mid-line
+    // starts at the next whole line instead.
+    let mut at = from;
+    if at > 0 {
+        let mut was = [0u8];
+        let aligned = f.read_at(&mut was, at - 1).is_ok_and(|_| was == [b'\n']);
+        if !aligned {
+            let mut skip = Vec::new();
+            let mut r =
+                BufReader::with_capacity(64 << 10, section(&f, at as i64, (end - at) as i64));
+            if r.read_until(b'\n', &mut skip)? == 0 || at + skip.len() as u64 >= end {
+                return Ok(Vec::new());
+            }
+            at += skip.len() as u64;
+        }
+    }
+    let mut rp = Replay::default();
+    let mut out = Vec::new();
+    // The head, as tail_before takes it: the first line and the first
+    // turn_context, nothing between.
+    if at > 0 {
+        let (mut n, mut head_at) = (0, 0u64);
+        let mut hr = BufReader::with_capacity(64 << 10, section(&f, 0, at as i64));
+        read_lines(&mut hr, |b, ln| {
+            n += 1;
+            let this_at = head_at;
+            head_at += ln as u64;
+            let context = n > 1
+                && memchr::memmem::find(&b[..b.len().min(160)], br#""type":"turn_context""#)
+                    .is_some();
+            if n == 1 || context {
+                feed(&mut rp, b, 0);
+                let evs = rp.take();
+                if !evs.is_empty() {
+                    out.push((this_at, evs));
+                }
+            }
+            !context && n < 64
+        })?;
+    }
+    let mut r = BufReader::with_capacity(1 << 20, section(&f, at as i64, (end - at) as i64));
+    let (mut line_at, mut last_at) = (at, at);
+    read_lines(&mut r, |b, ln| {
+        let this_at = line_at;
+        line_at += ln as u64;
+        last_at = this_at;
+        feed(&mut rp, b, 0);
+        let evs = rp.take();
+        if !evs.is_empty() {
+            out.push((this_at, evs));
+        }
+        true
+    })?;
+    rp.flush();
+    let evs = rp.take();
+    if !evs.is_empty() {
+        out.push((last_at, evs));
+    }
+    Ok(out)
+}
+
 /// Bytes from..from+n of f.
 fn section(f: &File, from: i64, n: i64) -> impl Read + '_ {
     let mut r = f;
@@ -534,6 +609,21 @@ mod tests {
     #[test]
     fn its_end_is_the_end_of_its_whole() {
         let d = tempfile::tempdir().unwrap();
+        let (path, n) = forty_turns(&d);
+        rush_core::adapter::conform::check_tail(&crate::Codex::new(), &at(&path), n / 4);
+    }
+
+    /// The shared check every adapter's window read is held to
+    /// (adapter::conform).
+    #[test]
+    fn its_windows_cover_its_whole() {
+        let d = tempfile::tempdir().unwrap();
+        let (path, n) = forty_turns(&d);
+        rush_core::adapter::conform::check_window(&crate::Codex::new(), &at(&path), n / 4);
+    }
+
+    /// Forty turns of ask and answer over one thread.
+    fn forty_turns(d: &tempfile::TempDir) -> (PathBuf, i64) {
         let path = d.path().join("rollout.jsonl");
         let mut r = Rollout::new(t0()).add("session_meta", meta("thread-1", "cli".into()));
         for i in 0..40 {
@@ -548,6 +638,6 @@ mod tests {
         }
         r.write(&path);
         let n = std::fs::metadata(&path).unwrap().len() as i64;
-        rush_core::adapter::conform::check_tail(&crate::Codex::new(), &at(&path), n / 4);
+        (path, n)
     }
 }

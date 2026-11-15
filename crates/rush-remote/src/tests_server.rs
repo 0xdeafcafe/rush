@@ -882,3 +882,298 @@ fn until(what: &str, ok: impl Fn() -> bool) {
     }
     panic!("timed out: {what}");
 }
+
+// ── history pages ──
+use rush_core::adapter::{
+    Adapter, Features, HistoryReader, HistoryWindow, Kind, Level, Profile, Session,
+    TranscriptLocator,
+};
+use rush_core::event::{Event, Message, Part, PartKind};
+
+/// An agent whose history pages: a transcript of one-word lines, each
+/// line one message event at the byte it starts (a page's cursor), its
+/// transcript where its profile's dir keeps <session>.log.
+struct Paged;
+
+impl Adapter for Paged {
+    fn kind(&self) -> Kind {
+        Kind::from("paged")
+    }
+    fn name(&self) -> String {
+        "Paged".into()
+    }
+    fn features(&self) -> Features {
+        Features::default()
+    }
+    fn level(&self) -> Level {
+        Level::default()
+    }
+    fn profiles(&self) -> Vec<Profile> {
+        Vec::new()
+    }
+    rush_core::has!(history_window: HistoryWindow, transcript_locator: TranscriptLocator);
+}
+
+impl TranscriptLocator for Paged {
+    fn transcript_path(&self, p: &Profile, _: &str, sid: &str) -> String {
+        std::path::Path::new(&p.dir)
+            .join(format!("{sid}.log"))
+            .to_string_lossy()
+            .into_owned()
+    }
+}
+
+fn line_message(line: &[u8]) -> Event {
+    Event::Message(Message {
+        role: "user".into(),
+        parts: vec![Part {
+            kind: PartKind::Text,
+            text: String::from_utf8_lossy(line.trim()).into_owned(),
+            ..Part::default()
+        }],
+        ..Message::default()
+    })
+}
+
+impl HistoryWindow for Paged {
+    fn history_window(
+        &self,
+        s: &Session,
+        from: u64,
+        end: u64,
+    ) -> rush_core::adapter::Result<Vec<(u64, Vec<Event>)>> {
+        let b = std::fs::read(&s.transcript).unwrap_or_default();
+        let mut out = Vec::new();
+        let mut at = 0u64;
+        for line in b.split_inclusive(|&c| c == b'\n') {
+            let next = at + line.len() as u64;
+            if at >= from && next <= end && !line.trim().is_empty() {
+                out.push((at, vec![line_message(line)]));
+            }
+            at = next;
+        }
+        Ok(out)
+    }
+}
+
+/// The same agent without windows, paging by count through its whole
+/// history.
+struct Plain;
+
+impl Adapter for Plain {
+    fn kind(&self) -> Kind {
+        Kind::from("plain")
+    }
+    fn name(&self) -> String {
+        "Plain".into()
+    }
+    fn features(&self) -> Features {
+        Features::default()
+    }
+    fn level(&self) -> Level {
+        Level::default()
+    }
+    fn profiles(&self) -> Vec<Profile> {
+        Vec::new()
+    }
+    rush_core::has!(history_reader: HistoryReader, transcript_locator: TranscriptLocator);
+}
+
+impl TranscriptLocator for Plain {
+    fn transcript_path(&self, p: &Profile, _: &str, sid: &str) -> String {
+        std::path::Path::new(&p.dir)
+            .join(format!("{sid}.log"))
+            .to_string_lossy()
+            .into_owned()
+    }
+}
+
+impl HistoryReader for Plain {
+    fn history(
+        &self,
+        s: &Session,
+        _: i64,
+        _: usize,
+        each: &mut dyn FnMut(Vec<Event>) -> bool,
+    ) -> rush_core::adapter::Result<()> {
+        let b = std::fs::read(&s.transcript).unwrap_or_default();
+        let evs: Vec<Event> = b
+            .split_inclusive(|&c| c == b'\n')
+            .filter(|l| !l.trim().is_empty())
+            .map(line_message)
+            .collect();
+        if !evs.is_empty() {
+            each(evs);
+        }
+        Ok(())
+    }
+}
+
+/// One stopped session of kind with a transcript of n lines in its
+/// profile's dir, and the server that knows the agents.
+fn paged_server(id: &str, kind: &str, lines: usize) -> Arc<Server> {
+    let reg = rush_core::adapter::Registry::new();
+    reg.register(Paged);
+    reg.register(Plain);
+    let mut s = Server::new(Config::default(), TOKEN.into(), reg);
+    s.bad_guess = Duration::ZERO;
+    let s = Arc::new(s);
+    let dir = rush_host::dir(id);
+    let pro = dir.join("pro");
+    std::fs::create_dir_all(&pro).unwrap();
+    let body: String = (0..lines).map(|i| format!("line {i:03}\n")).collect();
+    std::fs::write(pro.join("s1.log"), &body).unwrap();
+    let cfg = format!(
+        r#"{{"id":"{id}","kind":"{kind}","sessionId":"s1","account":{{"name":"","configDir":{}}}}}"#,
+        serde_json::to_string(pro.to_str().unwrap()).unwrap()
+    );
+    std::fs::write(dir.join("config.json"), cfg).unwrap();
+    let info = Info {
+        id: id.into(),
+        kind: kind.into(),
+        session_id: "s1".into(),
+        state: "stopped".into(),
+        host_pid: 0,
+        updated_at: Time::now(),
+        ..Info::default()
+    };
+    std::fs::write(dir.join("info.json"), serde_json::to_vec(&info).unwrap()).unwrap();
+    s
+}
+
+/// The answer of one page as JSON.
+fn page_json(r: Response) -> Value {
+    assert_eq!(r.status, 200, "{}", r.status);
+    match r.body {
+        crate::http::Body::Bytes(b) => serde_json::from_slice(&b).unwrap(),
+        _ => panic!("not bytes"),
+    }
+}
+
+fn texts(v: &Value) -> Vec<String> {
+    v["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["e"]["Parts"][0]["Text"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// History pages back: the newest page first, each cursor naming the
+/// next, until the start — never the whole history at once — with
+/// appends leaving a page put and a rewrite answering reset.
+#[test]
+fn history_pages_back_before_a_cursor() {
+    let _h = home();
+    let s = paged_server("e5e5e5e5", "paged", 90);
+    let get = |q: &str| {
+        call(
+            &s,
+            "GET",
+            &format!("/api/sessions/e5e5e5e5/events/before{q}"),
+            "",
+            &[("Authorization", &bearer(TOKEN))],
+        )
+    };
+
+    // the token still counts
+    let r = call(&s, "GET", "/api/sessions/e5e5e5e5/events/before", "", &[]);
+    assert_eq!(r.status, 401);
+
+    // paging to the start, thirty a page
+    let (mut cur, mut seen, mut pages) = (None::<String>, Vec::new(), 0);
+    loop {
+        let q = match &cur {
+            Some(c) => format!("?limit=30&cursor={c}"),
+            None => "?limit=30".into(),
+        };
+        let v = page_json(get(&q));
+        let got = texts(&v);
+        assert!(!got.is_empty(), "an empty page before the start");
+        assert!(got.len() <= 30, "a page over its limit");
+        pages += 1;
+        seen.extend(got);
+        let more = v["more"].as_bool().unwrap();
+        cur = v["cursor"].as_str().map(String::from);
+        if !more {
+            break;
+        }
+        assert!(cur.is_some(), "more without a cursor");
+    }
+    assert_eq!(pages, 3, "{pages} pages for 90 lines");
+    let want: Vec<String> = (0..90).map(|i| format!("line {i:03}")).collect();
+    let mut all = seen.clone();
+    all.reverse();
+    assert_eq!(all, want, "the pages in order");
+
+    // a page asked for again after the transcript grew: the same answer
+    let first = {
+        let v = page_json(get("?limit=30"));
+        v["cursor"].as_str().unwrap().to_string()
+    };
+    let pro = rush_host::dir("e5e5e5e5").join("pro");
+    let mut body = std::fs::read_to_string(pro.join("s1.log")).unwrap();
+    let before = page_json(get(&format!("?limit=30&cursor={first}")));
+    body.push_str("line 090\nline 091\n");
+    std::fs::write(pro.join("s1.log"), &body).unwrap();
+    let after = page_json(get(&format!("?limit=30&cursor={first}")));
+    assert_eq!(texts(&before), texts(&after), "appends moved a page");
+
+    // a rewrite shorter than where paging began: reset, for the app to
+    // start its stream over
+    std::fs::write(pro.join("s1.log"), "only one\n").unwrap();
+    let v = page_json(get(&format!("?limit=30&cursor={first}")));
+    assert_eq!(v["reset"], true, "{v}");
+
+    // a bad cursor is refused
+    for bad in ["nonsense", "9-10", "-1", "10-"] {
+        let r = get(&format!("?cursor={bad}"));
+        assert_eq!(r.status, 400, "{bad}");
+    }
+
+    // a session that isn't: 404
+    let r = call(
+        &s,
+        "GET",
+        "/api/sessions/nope/events/before",
+        "",
+        &[("Authorization", &bearer(TOKEN))],
+    );
+    assert_eq!(r.status, 404);
+}
+
+/// An agent without windows pages by count: the same walk, a number for
+/// a cursor.
+#[test]
+fn an_agent_without_windows_pages_by_count() {
+    let _h = home();
+    let s = paged_server("f6f6f6f6", "plain", 20);
+    let get = |q: &str| {
+        call(
+            &s,
+            "GET",
+            &format!("/api/sessions/f6f6f6f6/events/before{q}"),
+            "",
+            &[("Authorization", &bearer(TOKEN))],
+        )
+    };
+    let v = page_json(get("?limit=6"));
+    let got = texts(&v);
+    assert_eq!(
+        (got.first().unwrap(), got.last().unwrap(), got.len()),
+        (&"line 014".to_string(), &"line 019".to_string(), 6)
+    );
+    assert_eq!(v["more"], true);
+    let cur = v["cursor"].as_str().unwrap().to_string();
+    assert!(cur.chars().all(|c| c.is_ascii_digit()), "{cur}");
+    let v = page_json(get(&format!("?limit=6&cursor={cur}")));
+    let got = texts(&v);
+    assert_eq!(
+        (got.first().unwrap(), got.last().unwrap(), got.len()),
+        (&"line 008".to_string(), &"line 013".to_string(), 6)
+    );
+    let cur = v["cursor"].as_str().unwrap().to_string();
+    let v = page_json(get(&format!("?limit=100&cursor={cur}")));
+    assert_eq!((texts(&v).len(), v["more"]), (8, false));
+    assert_eq!(texts(&v).first().unwrap(), "line 000");
+}

@@ -4,10 +4,10 @@
 // (webstyle/app.css).
 //
 // Routes are the hash, and the hash alone says what's on screen: #/ the
-// sessions, #/s/<machine>/<id> one (…/all with its whole history), #/new,
-// #/devices. Each screen is a scope: leaving it ends its streams and
-// timers, and anything still in flight from it is dropped, so nothing
-// late ever draws over the screen you're on. Lists update rows in place.
+// sessions, #/s/<machine>/<id> one, #/new, #/devices. Each screen is a
+// scope: leaving it ends its streams and timers, and anything still in
+// flight from it is dropped, so nothing late ever draws over the screen
+// you're on. Lists update rows in place.
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -80,7 +80,7 @@ function route() {
   const h = location.hash;
   let m;
   $('#main').style.paddingBottom = '';
-  if ((m = h.match(/^#\/s\/([^/]+)\/([^/]+)(\/all)?$/))) { setMachine(decodeURIComponent(m[1])); return sessionScreen(m[2], !!m[3]); }
+  if ((m = h.match(/^#\/s\/([^/]+)\/([^/]+)(?:\/all)?$/))) { setMachine(decodeURIComponent(m[1])); return sessionScreen(m[2]); }
   if (h === '#/new') return newScreen();
   if (h === '#/devices') return devicesScreen();
   homeScreen();
@@ -328,7 +328,7 @@ function devicesScreen() {
 
 // ── one session ──
 const glyphs = {Bash: '$', Edit: '✎', MultiEdit: '✎', Write: '✎', Read: '◧', Grep: '⌕', Glob: '⌕', WebFetch: '⊕', WebSearch: '⊕', Task: '⇉', Agent: '⇉', TodoWrite: '☐'};
-function sessionScreen(id, full) {
+function sessionScreen(id) {
   const sc = newScope();
   let info = lastList.find(i => i.id === id) || {};
   const head = () => {
@@ -338,7 +338,7 @@ function sessionScreen(id, full) {
     const lg = $('#composer legend');
     if (lg) lg.innerHTML = `to <b>${esc(info.name || id)}</b>${st === 'working' ? ' · <em>working</em>, send queues, steer goes in now' : ''}`;
   };
-  $('#main').innerHTML = `<div id=log class="pt-1"></div><div id=asks></div>
+  $('#main').innerHTML = `<button id=jump class="key key-plain hidden" style="position:fixed;right:14px;bottom:88px;z-index:5" aria-label="to the newest">↓</button><div id=log class="pt-1"></div><div id=asks></div>
     <div class=composer id=composer><div id=pics class=chips></div>
       <fieldset class=box><legend></legend><span class=prompt>❯</span><textarea id=txt rows=1 placeholder="message for this agent" enterkeyhint=send></textarea><button class="key key-on h-7" id=send>send</button></fieldset>
       <div class=hints><button id=pic><b>image</b></button><input id=file type=file accept="image/*" multiple class=hidden><span class=sep>·</span>
@@ -350,7 +350,16 @@ function sessionScreen(id, full) {
   sc.on(() => ro.disconnect());
 
   const log = $('#log'), asks = new Map(), tasks = new Map(), calls = new Map();
-  let stick = !full, live = null, plan = null;
+  let stick = true, live = null, plan = null;
+
+  // The history paged back: every event loaded (evts, oldest first), which
+  // of them the log renders from (lo; the rest were dropped off the top to
+  // keep the DOM a window), and where the server reads on from (cursor,
+  // more). Scrolling to the top fills the window in — from evts when it
+  // still holds what's missing, else from the server, a page at a time.
+  const CAP = 600, PAGE = 300;
+  let evts = [], lo = 0, cursor = null, more = false, busy = false;
+  const seenIds = new Set();
   const op = o => post(`/sessions/${encodeURIComponent(id)}/op`, o).then(() => true, e => { failed(e); return false; });
 
   // say sends the draft once. It stays in the box until the server has taken
@@ -411,10 +420,95 @@ function sessionScreen(id, full) {
   };
 
   const down = () => { if (stick) scrollTo(0, document.body.scrollHeight); };
-  const onScroll = () => { stick = innerHeight + scrollY >= document.body.scrollHeight - 120; };
+  const onScroll = () => {
+    stick = innerHeight + scrollY >= document.body.scrollHeight - 120;
+    const j = $('#jump');
+    if (j) j.classList.toggle('hidden', stick);
+    if (scrollY < 80) earlier();
+  };
   addEventListener('scroll', onScroll, {passive: true});
   sc.on(() => removeEventListener('scroll', onScroll));
-  const add = h => { const e = el(h); log.append(e); down(); return e; };
+  const jb = $('#jump');
+  if (jb) jb.onclick = () => { stick = true; down(); };
+
+  // fill the window in above what's drawn: from evts when it still reaches
+  // back far enough, else a page from the server. The scroll stays put.
+  const earlier = () => {
+    if (busy || !sc.live) return;
+    while (scrollY < 80 && lo > 0) {
+      const from = Math.max(0, lo - PAGE);
+      // a plan redrawn from history would only repeat the one drawn: the
+      // newest of the range, and only when none is
+      const planAt = plan ? -1 : from + evts.slice(from, lo).findLastIndex(e => e.t === 'plan');
+      const f = document.createDocumentFragment();
+      for (let i = from; i < lo; i++) if (evts[i].t !== 'plan' || i === planAt) apply(evts[i], true, i, f);
+      const h0 = document.body.scrollHeight;
+      log.prepend(f);
+      lo = from;
+      scrollBy(0, document.body.scrollHeight - h0);
+    }
+    if (lo === 0 && more) page();
+  };
+  const topOff = () => { const t = $('#older'); if (t) t.remove(); };
+  const page = async () => {
+    if (busy || !more || !sc.live) return;
+    busy = true;
+    const t = el('<div class="px-3 py-2 text-faint" id=older>…</div>');
+    log.prepend(t);
+    let again = false;
+    try {
+      const q = (cursor ? `?cursor=${encodeURIComponent(cursor)}&` : '?') + `limit=${PAGE}`;
+      const v = await (await api(`/sessions/${encodeURIComponent(id)}/events/before${q}`)).json();
+      if (!sc.live) return;
+      if (v.reset) return stream(); // the transcript was rewritten: the stream says so
+      more = !!v.more;
+      cursor = v.cursor || null;
+      topOff();
+      if (!v.events?.length) return;
+      // one plan a page (the newest of them, and only when none is drawn —
+      // the stream's is the newest there is), and nothing the stream drew
+      // (a message by its id, a call its card already in the log)
+      const planAt = v.events.map(e => e.t).lastIndexOf('plan');
+      const known = e => e.e?.Parts?.some(p => p.Call && calls.has(p.Call.ID));
+      const kept = v.events.filter((e, n) =>
+        (e.t !== 'plan' || (n === planAt && !plan))
+        && !(e.t === 'message' && e.e?.ID && seenIds.has(e.e.ID))
+        && !(e.t === 'message' && known(e)));
+      if (!kept.length) return;
+      const k = kept.length;
+      // what the page holds sits above everything evts had: their indexes
+      // move up by k, the drawn nodes with them.
+      const seam = log.firstElementChild;
+      for (const n of log.children) if (n._i !== undefined) n._i += k;
+      evts = kept.concat(evts);
+      lo += k;
+      const f = document.createDocumentFragment();
+      kept.forEach((e, i) => { if (e.e?.ID) seenIds.add(e.e.ID); apply(e, true, i, f); });
+      const h0 = document.body.scrollHeight;
+      log.prepend(f);
+      scrollBy(0, document.body.scrollHeight - h0);
+      // the newest of the page may be one the stream drew (an id-less user
+      // message, live before the page was asked for): drop the page's copy
+      // when the pair renders the same
+      const above = seam?.previousElementSibling;
+      if (above && above._i !== undefined && seam?._i !== undefined && above.outerHTML === seam.outerHTML) above.remove();
+      if (more && lo === 0 && (!k || log.scrollHeight < innerHeight * 1.5)) again = true;
+    } catch (e) { topOff(); failed(e); }
+    finally { busy = false; if (again) page(); }
+  };
+
+  // keeps the log a window: when it holds more than CAP items and you're at
+  // the bottom, whole events drop off the top (lo names where it starts).
+  const trim = () => {
+    if (!stick) return;
+    while (log.children.length > CAP && log.firstElementChild?._i !== undefined) {
+      const i0 = log.firstElementChild._i;
+      if (i0 >= evts.length - 40) break; // the live end stays
+      while (log.firstElementChild && log.firstElementChild._i === i0) log.firstElementChild.remove();
+      lo = i0 + 1;
+    }
+    if (plan && !plan.isConnected) plan = null; // trimmed off with its turn
+  };
 
   const diff = ed => `<pre>${ed.Old ? ed.Old.split('\n').map(x => `<span class=del>- ${esc(x)}</span>`).join('\n') + '\n' : ''}${(ed.New || '').split('\n').map(x => `<span class=add>+ ${esc(x)}</span>`).join('\n')}</pre>`;
   const callBody = c => {
@@ -538,58 +632,87 @@ function sessionScreen(id, full) {
     };
   };
 
-  const es = new EventSource(base + `/api/sessions/${encodeURIComponent(id)}/events` + (full ? '?full=1' : ''));
-  sc.on(() => es.close());
-  es.onmessage = m => {
-    if (!sc.live) return;
-    const e = JSON.parse(m.data), v = e.e || {};
+  // one event drawn. prep (a page, or a range filled back in from evts)
+  // appends its nodes to box, a fragment the caller puts above the log;
+  // the live stream appends to the log itself. Old asks, tasks and info
+  // are live state, not history: prep leaves them alone.
+  const apply = (e, prep, i, box) => {
+    const put = x => {
+      const n = typeof x === 'string' ? el(x) : x;
+      n._i = i;
+      (box || log).append(n);
+      if (!prep) down();
+      return n;
+    };
+    const v = e.e || {};
     switch (e.t) {
-      case 'reset': log.innerHTML = ''; asks.clear(); $('#asks').innerHTML = ''; decEl = null; tasks.clear(); calls.clear(); live = null; plan = null; break;
-      case 'cut':
-        if (full) log.prepend(el('<p class="px-3 py-2 text-faint">— the earliest history is too long to show —</p>'));
-        else { const b = el('<div class="px-3 py-2"><button class="key key-plain text-dim" id=earlier>↑ show earlier</button></div>'); log.prepend(b); $('#earlier').onclick = () => go(`#/s/${encodeURIComponent(machine)}/${id}/all`); }
-        break;
-      case 'sent': live = null; add(`<div class=you><span class=who>you</span><div>${esc(v.Text)}${v.Images && v.Images.length ? ` <span class="font-normal text-dim">+ ${v.Images.length} image${v.Images.length > 1 ? 's' : ''}</span>` : ''}</div></div>`); break;
-      case 'delta': if (v.Kind === 0) {
-        if (!live) { live = add('<div class=say></div>'); live._s = ''; }
+      case 'reset': break; // the stream handles it where it reads it
+      case 'cut': more = true; break;
+      case 'sent': if (prep) break; live = null; put(`<div class=you><span class=who>you</span><div>${esc(v.Text)}${v.Images && v.Images.length ? ` <span class="font-normal text-dim">+ ${v.Images.length} image${v.Images.length > 1 ? 's' : ''}</span>` : ''}</div></div>`); break;
+      case 'delta': if (v.Kind === 0 && !prep) {
+        if (!live) { live = put('<div class=say></div>'); live._s = ''; }
         live._s += v.Text; live.textContent = live._s; down();
       } break;
-      case 'message':
+      case 'message': {
         if (v.Parent) break;
+        if (v.ID) seenIds.add(v.ID);
         if (v.Role === 'assistant') {
           for (const p of v.Parts || []) {
-            if (p.Kind === 0 && p.Text.trim()) { if (live) { live.innerHTML = md(p.Text); live = null; } else add(`<div class=say>${md(p.Text)}</div>`); }
-            else if (p.Kind === 2 && p.Call) { const c = callEl(p.Call); log.append(c); calls.set(p.Call.ID, c); down(); }
+            if (p.Kind === 0 && p.Text.trim()) { if (!prep && live) { live.innerHTML = md(p.Text); live = null; } else put(`<div class=say>${md(p.Text)}</div>`); }
+            else if (p.Kind === 2 && p.Call) { const c = put(callEl(p.Call)); calls.set(p.Call.ID, c); }
           }
         } else for (const p of v.Parts || []) {
-          if (p.Kind === 0 && p.Text && !v.Injected && !live) add(`<div class=you><span class=who>you</span><div>${esc(p.Text)}</div></div>`);
+          if (p.Kind === 0 && p.Text && !v.Injected && !(live && !prep)) put(`<div class=you><span class=who>you</span><div>${esc(p.Text)}</div></div>`);
           if (p.Kind === 3 && p.Output) {
             const o = p.Output, c = calls.get(o.CallID), txt = (o.Text || o.Stdout || '').slice(0, 3000);
             if (c) { if (txt) $('.step-body', c).insertAdjacentHTML('beforeend', `<pre>${esc(txt)}</pre>`); finish(c, o.IsError); }
           }
         }
-        break;
-      case 'call_updated': { const c = calls.get(v.Call.ID); if (c) { const n = callEl(v.Call); n.open = c.open; c.replaceWith(n); calls.set(v.Call.ID, n); } } break;
-      case 'approval': case 'question': { drop(v.ID); const a = askEl(e.t, v); asks.set(v.ID, a); $('#asks').append(a); down(); navigator.vibrate && navigator.vibrate(60); } break;
+      } break;
+      case 'call_updated': { const c = calls.get(v.Call.ID); if (c) { const n = callEl(v.Call); n._i = c._i; n.open = c.open; c.replaceWith(n); calls.set(v.Call.ID, n); } } break;
+      case 'approval': case 'question': if (prep) break; { drop(v.ID); const a = askEl(e.t, v); asks.set(v.ID, a); $('#asks').append(a); down(); navigator.vibrate && navigator.vibrate(60); } break;
       case 'approval_cancelled': case 'answered': drop(v.ID); break;
-      case 'task_started': tasks.set(v.ID, v); drawDetails(); break;
-      case 'task_updated': case 'task_done': { const t = tasks.get(v.ID) || {ID: v.ID}; if (v.Status) t.done = true; tasks.set(v.ID, t); drawDetails(); } break;
-      case 'task_progress': { const t = tasks.get(v.ID); if (t) { t.status = v.Summary || v.LastTool; drawDetails(); } } break;
-      case 'background': { const ids = new Set((v.Tasks || []).map(t => t.ID)); tasks.forEach((t, k) => { if (!ids.has(k)) t.done = true; }); (v.Tasks || []).forEach(t => { if (!tasks.has(t.ID)) tasks.set(t.ID, t); }); drawDetails(); } break;
+      case 'task_started': if (prep) break; tasks.set(v.ID, v); drawDetails(); break;
+      case 'task_updated': case 'task_done': if (prep) break; { const t = tasks.get(v.ID) || {ID: v.ID}; if (v.Status) t.done = true; tasks.set(v.ID, t); drawDetails(); } break;
+      case 'task_progress': if (prep) break; { const t = tasks.get(v.ID); if (t) { t.status = v.Summary || v.LastTool; drawDetails(); } } break;
+      case 'background': if (prep) break; { const ids = new Set((v.Tasks || []).map(t => t.ID)); tasks.forEach((t, k) => { if (!ids.has(k)) t.done = true; }); (v.Tasks || []).forEach(t => { if (!tasks.has(t.ID)) tasks.set(t.ID, t); }); drawDetails(); } break;
       case 'plan': {
         const todos = v.Todos || [], now = todos.find(t => t.Status === 'in_progress'), done = todos.filter(t => t.Status === 'completed').length;
         const h = `<div class=plan><div>${esc(now ? now.Label : 'plan')} <span class=text-dim>${done}/${todos.length}</span></div><ul>${todos.map(t => `<li data-s="${esc(t.Status)}"><span>${t.Status === 'completed' ? '✓' : t.Status === 'in_progress' ? '▸' : '·'}</span><span>${esc(t.Label)}</span></li>`).join('')}</ul></div>`;
-        if (plan) { const n = el(h); plan.replaceWith(n); plan = n; } else plan = add(h);
+        if (plan && !prep && plan.isConnected) { const n = el(h); n._i = plan._i; plan.replaceWith(n); plan = n; } else plan = put(h);
       } break;
-      case 'turn_end': live = null; if (v.Err) add(`<div class=err-line>✗ ${esc(v.Err)}</div>`); break;
-      case 'error': add(`<div class=err-line>✗ ${esc(v.Error)}</div>`); break;
-      case 'info':
+      case 'turn_end': if (!prep) live = null; if (v.Err) put(`<div class=err-line>✗ ${esc(v.Err)}</div>`); break;
+      case 'error': put(`<div class=err-line>✗ ${esc(v.Error)}</div>`); break;
+      case 'info': if (prep) break;
         info = v; head(); drawDetails();
         if (v.state && v.state !== 'blocked') { asks.forEach(a => a.remove()); asks.clear(); } // a decision no longer waited on is stale
         showDecisions(v.decisions);
         break;
     }
   };
+
+  // the stream: the conversation's live end, with the transcript's end
+  // before it. What it sends is kept in evts, drawn into the log.
+  let es = null;
+  const clearAll = () => {
+    log.innerHTML = ''; asks.clear(); $('#asks').innerHTML = ''; decEl = null; tasks.clear(); calls.clear();
+    live = null; plan = null; evts = []; lo = 0; cursor = null; more = false; seenIds.clear();
+  };
+  const stream = () => {
+    if (es) es.close();
+    clearAll();
+    es = new EventSource(base + `/api/sessions/${encodeURIComponent(id)}/events`);
+    es.onmessage = m => {
+      if (!sc.live) return;
+      const e = JSON.parse(m.data);
+      if (e.t === 'reset') return clearAll();
+      evts.push(e);
+      apply(e, false, evts.length - 1, null);
+      trim();
+    };
+  };
+  sc.on(() => es && es.close());
+  stream();
 }
 
 // picture is an image file as a send carries it. A type an agent can't take

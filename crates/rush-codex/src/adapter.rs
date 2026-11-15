@@ -18,10 +18,10 @@ use std::sync::Arc;
 use rush_core::adapter::{
     self, Account, Accounts, Adapter, Adopter, ChildFinder, Choice, Choices, Chooser, Conn,
     Discoverer, Driver, Feature, Features, HarnessSettings, HistoryFollower, HistoryReader,
-    HistoryTailBeforeReader, Keyed, Kind, Level, LoginHinter, Made, Media, MediaReader,
-    ModelLister, OwnEdit, OwnSettings, Profile, Programmer, ProjectFolderer, Published, Publisher,
-    QuotaSource, ResetSpender, Session, SignInDone, Sink, Spawnable, Speaker, StartOptions,
-    Support, TailReader,
+    HistoryTailBeforeReader, HistoryWindow, Keyed, Kind, Level, LoginHinter, Made, Media,
+    MediaReader, ModelLister, OwnEdit, OwnSettings, Profile, Programmer, ProjectFolderer,
+    Published, Publisher, QuotaSource, ResetSpender, Session, SignInDone, Sink, Spawnable, Speaker,
+    StartOptions, Support, TailReader,
 };
 use rush_core::event::Event;
 use rush_core::time::Ms;
@@ -214,6 +214,7 @@ impl Adapter for Codex {
         history_follower: HistoryFollower,
         tail_reader: TailReader,
         history_tail_before_reader: HistoryTailBeforeReader,
+        history_window: HistoryWindow,
         quota_source: QuotaSource,
         reset_spender: ResetSpender,
         accounts: Accounts,
@@ -389,6 +390,17 @@ impl HistoryTailBeforeReader for Codex {
         before: Ms,
     ) -> adapter::Result<(Vec<Event>, bool)> {
         history::tail_before(s, most, before)
+    }
+}
+
+impl HistoryWindow for Codex {
+    fn history_window(
+        &self,
+        s: &Session,
+        from: u64,
+        end: u64,
+    ) -> adapter::Result<Vec<(u64, Vec<Event>)>> {
+        history::window(s, from, end)
     }
 }
 

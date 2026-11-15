@@ -242,6 +242,9 @@ impl Server {
             ["api", "sessions", id, "events"] if !id.is_empty() => {
                 allow(get, "GET, HEAD").unwrap_or_else(|| self.events(r, id))
             }
+            ["api", "sessions", id, "events", "before"] if !id.is_empty() => {
+                allow(get, "GET, HEAD").unwrap_or_else(|| self.page_history(r, id))
+            }
             ["api", "sessions", id, "op"] if !id.is_empty() => {
                 allow(m == "POST", "POST").unwrap_or_else(|| self.op(r, id))
             }
@@ -736,6 +739,119 @@ impl Server {
         resp
     }
 
+    /// One page of a session's history before a cursor, newest last: what
+    /// the stream's "cut" points at, for the app to pull older turns as
+    /// you scroll up. A cursor names where paging began — a transcript
+    /// length, so what's appended later doesn't move a page — and the
+    /// line the last page reached; with none, paging begins now. An
+    /// adapter that can't read a window pages by count instead. A
+    /// transcript rewritten shorter answers reset.
+    fn page_history(&self, r: &Request, id: &str) -> Response {
+        if !valid_id(id) {
+            return fail(404, "no such session");
+        }
+        let limit = r
+            .query_get("limit")
+            .and_then(|l| l.trim().parse::<usize>().ok())
+            .unwrap_or(300)
+            .clamp(1, 1000);
+        let empty = || write_json(&json!({ "events": [], "more": false }));
+        let Ok(info) = rush_host::read_info(id) else {
+            return empty();
+        };
+        let Some((a, s)) = history_parts(&self.reg, &info) else {
+            return empty();
+        };
+        let cur = r.query_get("cursor");
+        if let Some(w) = a.history_window() {
+            // The byte cursor: <end>-<at>, the transcript's length where
+            // paging began and the line to read down to.
+            let size = std::fs::metadata(&s.transcript)
+                .map(|m| m.len())
+                .unwrap_or(0);
+            let (end, at) = match cur.as_deref() {
+                None => (size, size),
+                Some(c) => match parse_cursor(c) {
+                    Some(x) if x.1 <= x.0 => x,
+                    _ => return fail(400, "bad cursor"),
+                },
+            };
+            if end > size {
+                return write_json(&json!({ "reset": true, "events": [], "more": false }));
+            }
+            let at = at.min(size);
+            let mut window: u64 = 4 << 20;
+            let (groups, from) = loop {
+                let from = at.saturating_sub(window);
+                let g = match w.history_window(&s, from, at) {
+                    Ok(g) => g,
+                    Err(_) => return empty(),
+                };
+                let n: usize = g.iter().map(|(_, evs)| evs.len()).sum();
+                if n > limit || from == 0 {
+                    break (g, from);
+                }
+                window = window.saturating_mul(16);
+            };
+            let n: usize = groups.iter().map(|(_, evs)| evs.len()).sum();
+            let mut cut = n.saturating_sub(limit);
+            // The line the page's first event starts at. When it's the
+            // first line the read reached, the page takes that line whole
+            // rather than over it: a cursor can't reach inside a line.
+            let mut at0 = at;
+            let mut seen = 0usize;
+            for (o, evs) in &groups {
+                if seen + evs.len() > cut {
+                    at0 = *o;
+                    break;
+                }
+                seen += evs.len();
+            }
+            if at0 == 0 {
+                cut = 0;
+            }
+            let more = !(from == 0 && cut == 0);
+            page_json(&groups, cut, &format!("{end}-{at0}"), more)
+        } else if let Some(hr) = a.history_reader() {
+            // The count cursor: <drop>, how many of the newest events the
+            // pages so far have covered. Numbered from the end, so a read
+            // capped to what a page needs stays put; what's appended
+            // while paging moves a page of these adapters' sessions.
+            let drop = match cur.as_deref() {
+                None => 0,
+                Some(c) => match c.trim().parse::<usize>() {
+                    Ok(n) => n,
+                    Err(_) => return fail(400, "bad cursor"),
+                },
+            };
+            let mut keep: VecDeque<Event> = VecDeque::new();
+            let mut below = false;
+            let ok = hr
+                .history(&s, 0, rush_core::adapter::SLICE, &mut |slice| {
+                    for ev in slice {
+                        keep.push_back(ev);
+                        if keep.len() > drop + limit {
+                            keep.pop_front();
+                            below = true;
+                        }
+                    }
+                    true
+                })
+                .is_ok();
+            if !ok {
+                return empty();
+            }
+            let page = keep.len().saturating_sub(drop);
+            let groups = vec![(
+                0u64,
+                keep.iter().skip(drop).cloned().collect::<Vec<Event>>(),
+            )];
+            page_json(&groups, 0, &format!("{}", drop + page), below)
+        } else {
+            empty()
+        }
+    }
+
     /// Serves on ln until ctx ends or serving fails, with notifications
     /// and what exposes it running beside it. Whichever way it ends, ctx
     /// is cancelled before waiting on them, so a failed server can't leave
@@ -1154,6 +1270,72 @@ pub fn wire_line(l: &[u8]) -> Option<Vec<u8>> {
 pub const HISTORY_MOST: usize = 600;
 pub const FULL_MOST: usize = 50_000;
 
+/// The adapter and session a history read of info runs through: its kind
+/// as rush knows it now, with the transcript found for it. None when the
+/// kind is one rush doesn't know.
+fn history_parts(
+    reg: &Registry,
+    info: &Info,
+) -> Option<(rush_core::adapter::AdapterRef, AgentSession)> {
+    let kind = migrated(&info.kind);
+    let a = reg.get(kind.as_str())?;
+    let mut p = Profile {
+        kind: kind.clone(),
+        ..Profile::default()
+    };
+    if let Ok(cfg) = rush_host::read_config(&info.id) {
+        p.dir = cfg.account.dir;
+    }
+    let transcript = reg.find_transcript(kind.as_str(), &p, &info.cwd, &info.session_id);
+    Some((
+        a,
+        AgentSession {
+            id: info.session_id.clone(),
+            name: info.name.clone(),
+            cwd: info.cwd.clone(),
+            profile: p,
+            transcript,
+            ..AgentSession::default()
+        },
+    ))
+}
+
+/// A paging cursor <end>-<at>: two lengths, the second no greater.
+fn parse_cursor(c: &str) -> Option<(u64, u64)> {
+    let (end, at) = c.trim().split_once('-')?;
+    let (end, at) = (end.parse::<u64>().ok()?, at.parse::<u64>().ok()?);
+    (at <= end).then_some((end, at))
+}
+
+/// The answer of a page: its events as the wire's own {"t":…,"e":…}, the
+/// first cut of them skipped, with the next cursor and whether there's
+/// more before it.
+fn page_json(groups: &[(u64, Vec<Event>)], cut: usize, cursor: &str, more: bool) -> Response {
+    let mut b = String::from("{\"events\":[");
+    let mut skipped = 0usize;
+    let mut first = true;
+    for (_, evs) in groups {
+        for ev in evs {
+            if skipped < cut {
+                skipped += 1;
+                continue;
+            }
+            if let Ok(e) = event::marshal(ev) {
+                if !first {
+                    b.push(',');
+                }
+                first = false;
+                b.push_str(&e);
+            }
+        }
+    }
+    b.push_str(&format!("],\"more\":{more},\"cursor\":{cursor:?}}}"));
+    let mut r = Response::new(200, b.into_bytes());
+    r.set("Content-Type", "application/json");
+    r.set("Cache-Control", "no-store");
+    r
+}
+
 /// Sends what a session's transcript holds from before before (all of it
 /// when zero): its last HISTORY_MOST events, or with full the whole
 /// transcript up to FULL_MOST. A "cut" says there's more before.
@@ -1164,25 +1346,8 @@ pub fn send_history(
     full: bool,
     emit: &mut dyn FnMut(Vec<u8>),
 ) {
-    let kind = migrated(&info.kind);
-    let Some(a) = reg.get(kind.as_str()) else {
+    let Some((a, s)) = history_parts(reg, info) else {
         return;
-    };
-    let mut p = Profile {
-        kind: kind.clone(),
-        ..Profile::default()
-    };
-    if let Ok(cfg) = rush_host::read_config(&info.id) {
-        p.dir = cfg.account.dir;
-    }
-    let transcript = reg.find_transcript(kind.as_str(), &p, &info.cwd, &info.session_id);
-    let s = AgentSession {
-        id: info.session_id.clone(),
-        name: info.name.clone(),
-        cwd: info.cwd.clone(),
-        profile: p,
-        transcript,
-        ..AgentSession::default()
     };
     const TAIL_BYTES: i64 = 4 << 20;
     let most = if full { FULL_MOST } else { HISTORY_MOST };
