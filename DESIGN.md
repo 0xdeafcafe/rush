@@ -2201,6 +2201,17 @@ Every other harness with MCP is told rush's `spawn_agent` is its own subagents (
 
 **GLM fix.** `agents::takes` used to refuse a provider that rides the leader's own harness whenever the leader's cell for it wasn't on (GLM, whose ★ is ZCode). Now it falls through to the general rule, and the `*-claude` pairs list their provider's own models.
 
+**One call, one row.** In Claude Code the stand-in and the hosted run share the Agent call's id: the PreToolUse hook starts the model, and the run's `spawnStep` is that `tool_use_id`. `Runs::rebuild` leaves out Claude Code's run for any call a hosted run answers. The Orchestrator lane for the call takes the hosted run's name ("top · astra") and its liveness.
+
+**GLM in Claude Code, as Z.ai's guide sets it up** (`cross::zai_env`, for glm-claude only). On top of `claude_env`'s endpoint, key, empty API key and no nonessential traffic, it sets:
+
+- opus, sonnet and fable to the model picked, or `glm-5.3[1m]` when none is picked
+- haiku and `ANTHROPIC_SMALL_FAST_MODEL` to `glm-5.3-flash[1m]`, so background jobs run on Flash
+- `ANTHROPIC_MODEL` to the model picked, with `[1m]`, which is also passed as `--model`
+- `API_TIMEOUT_MS=3000000`, `CLAUDE_CODE_MAX_CONTEXT_TOKENS` and `CLAUDE_CODE_AUTO_COMPACT_WINDOW` at 1M, and `DISABLE_TELEMETRY=1`
+
+The pair reports a 1M window (`ContextWindower`), where it used to fall back to the 200K default. DeepSeek and Ollama in Claude Code are unchanged.
+
 ### Images in tool results (Rust-only)
 
 Go counted an image in a tool result as nothing (only its text parts'

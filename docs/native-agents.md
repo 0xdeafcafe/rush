@@ -34,6 +34,10 @@ The native list is `native::NATIVE`, which holds harness names, so every provide
 
 `native::others_of` leaves out the harness's own models, because the harness already offers those (opus in Claude Code, sol in Codex). It then appends the tiers: `top`, `workhorse` and `quick`. For each trait that some of a tier's models have and others don't, it also adds a `{tier}-{trait}` entry, for example `workhorse-vision`. Sign-ins aren't checked when the list is built, so it stays the same for the whole session; they're checked when a call is made.
 
+### One call, one run
+
+In Claude Code the PreToolUse hook starts the requested model right away, while the stand-in runs, so the hosted run exists as soon as the stand-in does. The PostToolUse hook then waits for the model's answer. The hosted run's `spawnStep` is the Agent call's `tool_use_id`, the same id Claude Code records on the stand-in. When a run rush hosts has that id, the Subagents panel leaves out Claude Code's run for the call (`Runs::rebuild` in `rush-ui-session-core/src/subs.rs`). That leaves exactly one row, and it is labelled `top · astra` or the model's name. Pressing enter on the call opens that run's conversation. On the Orchestrator board the call's lane names the same model and shows it at work for as long as it is (`lanes` in `rush-convo/src/render/draw/presets.rs`).
+
 ### Background and parallel calls
 
 - **Claude Code:** the PostToolUse hook runs on its own thread, so several Agent calls can be in flight at once. A call with `run_in_background` still returns at once: the Delegate starts the child in the background and returns its id. The stand-in itself always runs in the foreground, so the hook gets to answer. The model's answer then arrives as rush's existing agent message.
@@ -60,6 +64,14 @@ Three traits can sit on top of a tier: `long-context`, `vision` and `cheap`.
 
 When a provider rides the leader's own harness with an endpoint of its own (GLM's Coding Plan in Claude Code, DeepSeek in Claude Code), any session can start it by name: `glm`, `glm-5.3`, `flash`, `glm 5.3 flash`. Before this change, `takes()` refused GLM from a Claude Code session whenever the Claude Code cell for GLM wasn't on. GLM's ★ points at ZCode, and ZCode isn't installed. Now, if the leader's harness has no cell for the provider, the general rule applies and resolves to `glm-claude`. The pair also lists the provider's own models (`glm-5.3`, `glm-5.3-flash`; `deepseek-chat`, `deepseek-reasoner`) rather than Claude's names. The test is `agents::tests::glm_in_claude_code_is_offered_to_every_harness`.
 
+GLM in Claude Code is set up the way [Z.ai's guide](https://docs.z.ai/devpack/tool/claude) says (`cross::zai_env`):
+
+- **Models:** opus and sonnet run on the model picked, or `glm-5.3[1m]` when none is picked. Haiku and Claude Code's background jobs run on `glm-5.3-flash[1m]`. A picked GLM-5 model is passed with `[1m]`, as the guide names both.
+- **Context:** 1M (`CLAUDE_CODE_MAX_CONTEXT_TOKENS`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW`), and rush shows a 1M window for it.
+- **Other settings:** `API_TIMEOUT_MS=3000000` and `DISABLE_TELEMETRY=1`.
+
+The test is `cross::tests::glm_in_claude_code_is_set_up_as_zai_says`. A side effect: the stand-in on `haiku` runs on GLM's Flash in a GLM session.
+
 ## Tests
 
 - `rush-core` `others::tests`: tier placement by family (table) and parsing tier queries (table).
@@ -81,7 +93,6 @@ When a provider rides the leader's own harness with an endpoint of its own (GLM'
 
 - **Claude Code's stand-in costs one haiku turn per call.** A zero-hop route needs one of two things from Claude Code: a hook that can skip running a subagent and still return a result (PreToolUse `deny` caps its reason at about 2000 characters, so it can't carry an answer), or a custom agent `model` that points at another endpoint.
 - **Resuming a stand-in with SendMessage** gets the stand-in, not the model. A follow-up has to be a new Agent call, or `agent_send` to the hosted child.
-- **The Subagents panel may show two rows for a Claude Code call:** the stand-in's (Claude Code's own) and the hosted child's. Folding them into one needs the stand-in's `agentId` matched to the call's `step`.
 - **Codex `dynamicTools` on resume** isn't accepted, so `run_agent` is missing from threads resumed after an upgrade. Those fall back to `spawn_agent`. It's not yet verified whether Codex keeps a thread's dynamic tools across `thread/resume` once it has them.
 - **Vibe and OpenCode could go zero-hop** by pointing a profile's endpoint at a small OpenAI-compatible server inside rush that answers with the model's reply. Not built.
 - **Pi could get native subagents** through an extension loaded with `-e`. Not built.
