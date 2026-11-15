@@ -889,7 +889,10 @@ fn a_beside_sessions_ask_is_a_card_here() {
         asking: vec![ask.clone()],
         ..Spawned::default()
     };
-    *fake.spawned.lock().unwrap() = vec![spawned("b1", true), spawned("u1", false)];
+    // One begun an hour before any step ran: no window holds it.
+    let mut unclaimed = spawned("u1", false);
+    unclaimed.born = NOW - 3_600_000;
+    *fake.spawned.lock().unwrap() = vec![spawned("b1", true), unclaimed];
     let look = |m: &mut Model| {
         super::subs::kick(m, KEY);
         super::subs::refresh(m, KEY);
@@ -905,8 +908,8 @@ fn a_beside_sessions_ask_is_a_card_here() {
     assert!(!r.subs.iter().any(|s| s.id.starts_with("spawn:")));
     let got = cards(&m);
     let hosts: Vec<&str> = got.iter().map(|a| a.host.as_str()).collect();
-    assert_eq!(hosts, ["b1", "u1"], "{got:?}");
-    let a = &got[0];
+    assert_eq!(hosts, ["u1", "b1"], "{got:?}");
+    let a = &got[1];
     assert_eq!(
         a.who,
         "GLM Coding Plan in Claude Code · Rich remote web app"
