@@ -8,8 +8,8 @@
 mod card;
 mod live;
 
-pub use card::{JobCard, Seg, Tone, card_for};
-pub use live::{Live, Until, live_dir, live_for, save_live};
+pub use card::{CardJob, JobCard, Seg, TaskCard, Tone, card_for, card_of, ended_card_for};
+pub use live::{Live, LiveJob, Until, ended_dir, ended_for, live_dir, live_for, save_live};
 
 use rush_plugin::{Bundle, Manifest};
 
