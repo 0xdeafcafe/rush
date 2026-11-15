@@ -881,9 +881,13 @@ fn hosted_runs<I: std::borrow::Borrow<rush_host::Info>>(
     let mut out = Vec::new();
     for i in infos {
         let i: &rush_host::Info = i.borrow();
-        let by = |k: &str| i.meta.get(k).map(String::as_str) == Some(parent);
-        let beside = !by("spawnedBy") && by("startedFrom");
-        if !by("spawnedBy") && !beside {
+        let meta = |k: &str| i.meta.get(k).map(String::as_str);
+        // Started beside it is so whatever else its Meta says: `rush
+        // session start --meta startedFrom=…` from its shell says
+        // spawnedBy too.
+        let beside = meta("startedFrom") == Some(parent);
+        let sub = rush_core::agent::subagent_of(meta("spawnedBy"), meta("startedFrom"));
+        if sub != Some(parent) && !beside {
             continue;
         }
         let live = rush_ui::screens::list_extras::spawns::hosted_live(&i.state);
@@ -944,6 +948,7 @@ fn hosted_runs<I: std::borrow::Borrow<rush_host::Info>>(
             session_id: i.session_id.clone(),
             profile,
             beside,
+            title: i.name.clone(),
             ended: rush_ui::screens::list_extras::spawns::hosted_end(&i.state, &i.error, i.lost)
                 .to_string(),
             needs: if i.state == "blocked" {
