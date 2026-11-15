@@ -1111,6 +1111,20 @@ move are counted and said, never restarted. A row whose host's
 `exe` is older than the installed rush shows a faint `old` (`old build`
 in full) beside its badge.
 
+You can also ask it for one session, stale or not: `u` in the close
+question (restart rush, keep the agent running), `#rehost`, and
+`rush session rehost <id>`. `upgrade::ask_tree` asks the session and
+every session it spawned, theirs too (`Meta spawnedBy`, walked a
+generation at a time, each once; sessions started beside it with
+`startedFrom` are left out, as they have rows of their own), sending each
+movable one the `upgrade` op. Each moves once it's between turns, as
+above, onto the installed rush even when it's the build it already runs:
+rush restarts under the agent, which keeps its pid, pipes and
+conversation. One that can't move (another machine's, stopped, asleep,
+an adapter without `Adopter`, or a stand-in's host with an owner) is left
+where it is and said with why (`upgrade::why_not`). Each ask is logged
+as `rehost-asked` (by, root, and whether it was between turns).
+
 Restarting an agent restarts its host too (`client::restart_agent`): the
 agent is going down anyway, so there is no old host worth keeping. Every
 restart goes this one way: the close question's restart (session and
