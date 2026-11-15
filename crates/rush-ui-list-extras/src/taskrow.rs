@@ -177,8 +177,12 @@ pub fn head_row(lead: &str, mark: Span, name: Span, place: &str, right: &Right, 
     // The place goes first, then the bar shrinks to keep the name whole,
     // then the name is cut to NAME_LEAST and the right laid out smaller.
     let whole = w.saturating_sub(full + 2);
+    let small = w.saturating_sub(least + 2);
     let r = if whole >= right.least() {
         right.lay(whole)
+    } else if small >= right.least() {
+        // The bar at its smallest, the name all the rest.
+        right.lay(right.least())
     } else {
         right.lay(w.saturating_sub(least + 2))
     };

@@ -1,0 +1,14 @@
+-- passed
+== 80 wide
+ ✓ CI  rush/guests · 714c3c5                               passed in 4m · 2m ago
+== 56 wide
+ ✓ CI  rush/guests · 714c3c5       passed in 4m · 2m ago
+== 40 wide
+ ✓ CI  rush/gues…  passed in 4m · 2m ago
+-- failed
+== 80 wide
+ ✗ CI  rush/besi…  ✗ check failed: test render::presets::orchestrator… · 30s ago
+== 56 wide
+ ✗ CI  rush/besi…  ✗ check failed: test rende… · 30s ago
+== 40 wide
+ ✗ CI  rush/b…  ✗ check failed · 30s ago

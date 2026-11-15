@@ -1,0 +1,12 @@
+== 80 wide
+ ✶ Release  v0.1.0-beta.18 · 2683631                 ━━━━──────── ✓1 ✶2 6m / ~9m
+     ✓ build x86_64-unknown-linux-… 4m12s   ✶ build aarch64-apple-darwin 5m58s
+     ◌ publish
+== 56 wide
+ ✶ Release  v0.1.0-beta.18…  ━━━━──────── ✓1 ✶2 6m / ~9m
+     ✓ build x86_64-unknown-linux-… 4m12s
+     ✶ build aarch64-apple-darwin 5m58s   ◌ publish
+== 40 wide
+ ✶ Release…  ━━━━──────── ✓1 ✶2 6m / ~9m
+     ✓ 1 passed
+     ✶ build aarch64-apple-d…   +1 more

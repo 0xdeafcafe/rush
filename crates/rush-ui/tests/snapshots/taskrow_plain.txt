@@ -1,0 +1,9 @@
+== 80 wide
+ ✻ npm run dev -- --port 3000                                                12m
+   › listening on :3000
+== 56 wide
+ ✻ npm run dev -- --port 3000                        12m
+   › listening on :3000
+== 40 wide
+ ✻ npm run dev -- --port 3000        12m
+   › listening on :3000
