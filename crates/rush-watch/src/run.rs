@@ -7,7 +7,7 @@
 //! New in the Rust port: Go's rush watched pull requests only.
 
 use std::cell::Cell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::LazyLock;
@@ -434,6 +434,10 @@ pub fn fetch(t: &Target, fresh: Duration) -> (Result<Runs, Error>, i64) {
         conclusion: String,
         #[serde(default, deserialize_with = "nd")]
         html_url: String,
+        #[serde(default, deserialize_with = "crate::gh::time_or_zero")]
+        started_at: Time,
+        #[serde(default, deserialize_with = "crate::gh::time_or_zero")]
+        completed_at: Time,
     }
     #[derive(Deserialize)]
     struct Jobs {
@@ -476,6 +480,8 @@ pub fn fetch(t: &Target, fresh: Duration) -> (Result<Runs, Error>, i64) {
                 url: j.html_url,
                 actions: true,
                 note: String::new(),
+                started: j.started_at,
+                ended: j.completed_at,
             });
         }
         if w.jobs.is_empty() && w.status == "completed" {
@@ -488,6 +494,7 @@ pub fn fetch(t: &Target, fresh: Duration) -> (Result<Runs, Error>, i64) {
                 url: w.url.clone(),
                 actions: false,
                 note: format!("the run ended {} before any job ran", w.conclusion),
+                ..Default::default()
             });
         }
         out.runs.push(w);
@@ -656,6 +663,8 @@ struct State {
     remaining: i64,
     last: Option<Runs>,
     why: String,
+    /// Each failed job's first cause, read once, for its Live.
+    notes: HashMap<i64, String>,
 }
 
 /// Waits on o's runs as o.until has it, and says once, briefly, what
@@ -678,8 +687,23 @@ pub fn watch_run(o: &RunOptions) -> i32 {
         remaining: -1,
         last: None,
         why: String::new(),
+        notes: HashMap::new(),
     };
     let code = watching(o, start, &mut st);
+    if !o.task.is_empty() {
+        // Kept a while, for rush to draw how it went.
+        let now = o.now();
+        let looked = Looked {
+            runs: st.last.clone(),
+            asked: now,
+            notes: st.notes.clone(),
+            ..Default::default()
+        };
+        let mut l = live(o, start, &looked);
+        l.ended = now;
+        l.outcome = crate::live::outcome_of(code, &st.why);
+        crate::live::save_ended(&l);
+    }
     let mut f = fields(json!({"repo": repo, "what": label, "code": code,
         "after": duration(round_to(since(o.now(), start), Duration::from_secs(1))),
         "remaining": st.remaining}));
@@ -742,8 +766,25 @@ pub fn live(o: &RunOptions, start: Time, at: &Looked) -> crate::live::Live {
             "pending" => l.running.push(j.name.clone()),
             _ => {}
         }
+        l.jobs
+            .push(crate::live::LiveJob::of(j, at.notes.get(&j.id)));
     }
     l
+}
+
+/// Reads why each job of rs that failed did, once a job, from its log's
+/// first cause: for the task row (Rust-only).
+fn note_failures(o: &RunOptions, rs: &Runs, notes: &mut HashMap<i64, String>) {
+    for (_, j) in rs.jobs() {
+        if j.state != "failed" || !j.actions || j.id == 0 || notes.contains_key(&j.id) {
+            continue;
+        }
+        let why = o
+            .logs(j.id)
+            .map(|b| crate::live::first_cause(&String::from_utf8_lossy(&b)))
+            .unwrap_or_default();
+        notes.insert(j.id, why);
+    }
 }
 
 /// Where a run watch stands between looks, for its Live.
@@ -754,6 +795,9 @@ pub struct Looked {
     pub next: Time,
     pub limited: bool,
     pub expect: Time,
+    /// Each failed job's first line of its log that says why, by its id
+    /// (Rust-only: the task row's).
+    pub notes: HashMap<i64, String>,
 }
 
 fn watching(o: &RunOptions, start: Time, st: &mut State) -> i32 {
@@ -814,6 +858,9 @@ fn watching(o: &RunOptions, start: Time, st: &mut State) -> i32 {
                 limited = false;
                 st.last = Some(rs.clone());
                 looked.asked = o.now();
+                if !o.task.is_empty() {
+                    note_failures(o, &rs, &mut st.notes);
+                }
                 let ids: Vec<i64> = rs.runs.iter().map(|r| r.id).collect();
                 if !ids.is_empty() && ids != expected_for && !rs.done() {
                     looked.expect = o.expect(&rs);
@@ -840,6 +887,7 @@ fn watching(o: &RunOptions, start: Time, st: &mut State) -> i32 {
         if !o.task.is_empty() {
             looked.runs = prev.clone();
             looked.limited = limited;
+            looked.notes.clone_from(&st.notes);
             looked.next = o.now().add_nanos(wait.as_nanos() as i64);
             crate::live::save_live(&live(o, start, &looked));
         }
