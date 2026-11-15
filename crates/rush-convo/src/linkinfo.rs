@@ -12,7 +12,8 @@
 //! RegisterLink :94, LookLinks :101, linkKindOf :108, LinkInfo :124,
 //! LinkInfoOf :159, due :166, ask :178, ForgetLink :198, linkAfter :213) and
 //! linkinfo_github.go (the GitHub kinds, prBadge :52, issueBadge :85).
-//! Go's 30-second limit on a lookup is gh's own here.
+//! Go's 30-second limit on a lookup is gh's own here. The Actions run kind
+//! (LINK_GITHUB_RUN, run_badge) is Rush-only.
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -21,7 +22,7 @@ use std::sync::{Arc, Condvar, LazyLock, Mutex, PoisonError, RwLock};
 use std::time::{Duration, Instant};
 
 use rush_core::text::{Line, Span};
-use rush_gh::ghpr::{self, Gh, Issue, PR};
+use rush_gh::ghpr::{self, Gh, Issue, PR, Run};
 
 use crate::render::style::{C_BLUE, C_GREEN, C_RED, C_YELLOW, dim, faint, paint, sub};
 use crate::render::txt::Txt;
@@ -300,6 +301,8 @@ pub fn link_after(u: &str) -> Line {
 /// through gh.
 pub const LINK_GITHUB_PR: &str = "github-pr";
 pub const LINK_GITHUB_ISSUE: &str = "github-issue";
+/// An Actions run (Rush-only: Go knew pull requests and issues).
+pub const LINK_GITHUB_RUN: &str = "github-run";
 
 /// Registers the GitHub kinds, once, ahead of any registered after.
 fn github() {
@@ -328,6 +331,22 @@ fn github() {
             look: Arc::new(|key| Gh::shared().view_issue(key).map_err(|e| e.to_string())),
             badge: issue_badge,
             fresh: Some(|_| Duration::from_secs(10 * 60)),
+        });
+        push_kind(LinkKind::<Run> {
+            name: LINK_GITHUB_RUN,
+            key: |u| {
+                ghpr::parse_run_url(u).map_or_else(String::new, |(r, id)| ghpr::run_url(&r, id))
+            },
+            look: Arc::new(|key| Gh::shared().view_run(key).map_err(|e| e.to_string())),
+            badge: run_badge,
+            // A run going moves; a finished one stays.
+            fresh: Some(|r| {
+                if r.status == "completed" {
+                    Duration::ZERO
+                } else {
+                    Duration::from_secs(30)
+                }
+            }),
         });
     });
 }
@@ -375,6 +394,18 @@ pub fn issue_badge(i: &Issue) -> Line {
             "DUPLICATE" => dim("◎ duplicate"),
             _ => paint(C_BLUE, "◎ closed"),
         }
+    };
+    t.into_line()
+}
+
+/// How an Actions run went, or that it's still going (Rush-only).
+pub fn run_badge(r: &Run) -> Line {
+    let w = r.word();
+    let t: Txt = match w {
+        "passed" => paint(C_GREEN, "▶ passed"),
+        "failed" => paint(C_RED, "▶ failed"),
+        "running" | "queued" => sub(&format!("▶ {w}")),
+        _ => dim(&format!("▶ {w}")),
     };
     t.into_line()
 }
@@ -428,6 +459,12 @@ mod tests {
             ..Issue::default()
         };
         assert_eq!(issue_badge(&i).plain(), "◎ not planned");
+        let r = Run {
+            status: "completed".into(),
+            conclusion: "failure".into(),
+            ..Run::default()
+        };
+        assert_eq!(run_badge(&r).plain(), "▶ failed");
     }
 
     #[test]
@@ -440,6 +477,11 @@ mod tests {
         );
         let (k, _) = kind_of("https://github.com/acme/terrafied/issues/4").unwrap();
         assert_eq!(k.name, LINK_GITHUB_ISSUE);
+        let (k, key) = kind_of("https://github.com/acme/t/actions/runs/9/job/3").unwrap();
+        assert_eq!(
+            (k.name, key.as_str()),
+            (LINK_GITHUB_RUN, "https://github.com/acme/t/actions/runs/9")
+        );
         assert!(kind_of("https://example.com/x").is_none());
     }
 }
