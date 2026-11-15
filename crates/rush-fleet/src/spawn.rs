@@ -157,11 +157,25 @@ impl Loader {
             .map(|a| (a.job.id.as_str(), a))
             .collect();
         for info in hosted {
-            let (Some(by), Some(a)) = (info.meta.get("spawnedBy"), by_id.get(info.id.as_str()))
+            let meta = |k: &str| info.meta.get(k).map(String::as_str);
+            let Some(a) = by_id.get(info.id.as_str()) else {
+                continue;
+            };
+            // One started beside another is a row of its own, its ask
+            // its row's: never folded into it, as an older reading may
+            // have (Rust-only).
+            if let Some(from) = meta("startedFrom").filter(|s| !s.is_empty())
+                && let Some(p) = by_id.get(from)
+                && self.links.get(&a.key) == Some(&p.key)
+            {
+                let k = a.key.clone();
+                self.unlink(&k);
+            }
+            let Some(by) = rush_core::agent::subagent_of(meta("spawnedBy"), meta("startedFrom"))
             else {
                 continue;
             };
-            if let Some(p) = by_id.get(by.as_str()) {
+            if let Some(p) = by_id.get(by) {
                 let (k, pk) = (a.key.clone(), p.key.clone());
                 self.link(&k, &pk, "spawnedBy");
             } else if a.pid != 0 {

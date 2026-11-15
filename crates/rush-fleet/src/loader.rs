@@ -721,6 +721,17 @@ impl Loader {
         }
     }
 
+    /// Lists child with nothing: it's a row of its own again (Rust-only).
+    pub(crate) fn unlink(&mut self, child: &str) {
+        if let Some(old) = self.links.remove(child) {
+            rush_sys::events::log(
+                "spawn-unlinked",
+                serde_json::json!({"child": child, "was": old}),
+            );
+            self.links_dirty = true;
+        }
+    }
+
     fn set_fetched(&mut self, key: &str, u: Reading) {
         if u.fetched_at == 0
             && let Some(old) = self.fetched.get_mut(key)
