@@ -93,6 +93,7 @@ function route() {
   }
   if (h === '#/new') return newScreen();
   if (h === '#/devices') return devicesScreen();
+  if (h === '#/fleet') return fleetScreen();
   homeScreen();
 }
 addEventListener('hashchange', route);
@@ -201,7 +202,7 @@ function homeScreen() {
     acts.push(s);
   }
   if ('PushManager' in window) acts.push(action('bell', 'notify', subscribe));
-  acts.push(action('devs', 'devices', () => go('#/devices')), action('new', '<span class=text-orange>+</span> new', () => go('#/new')));
+  acts.push(action('fleet', 'fleet', () => go('#/fleet')), action('devs', 'devices', () => go('#/devices')), action('new', '<span class=text-orange>+</span> new', () => go('#/new')));
   bar({title: machines.length > 1 ? esc(machine) : 'rush', actions: acts});
   $('#main').innerHTML = `<div id=list>${'<div class=row><div class="skeleton h-4 w-2/3 my-0.5"></div><div class="skeleton h-3 w-1/3 ml-[2ch] mt-1.5"></div></div>'.repeat(3)}</div><div id=oth></div>`;
   const draw = l => {
@@ -333,6 +334,120 @@ function devicesScreen() {
     if (me) await post(`/devices/${encodeURIComponent(me)}/revoke`, {}).catch(() => {});
     await fetch('/api/logout', {method: 'POST'}).catch(() => {});
     location.replace(location.pathname); // the app afresh, from its start: the sign-in
+  };
+}
+
+// ── the fleet: every machine's sessions, and the feed ──
+// api for a machine that isn't the picked one: the same reads through
+// its own proxy prefix
+const mapi = (m, p, o) => fetch((m.self ? '' : '/m/' + encodeURIComponent(m.name)) + '/api' + p, o).then(async r => {
+  if (r.status === 401) throw 401;
+  if (!r.ok) throw ((await r.json().catch(() => ({}))).error || r.statusText);
+  return r;
+});
+function fleetScreen() {
+  const sc = newScope();
+  bar({title: 'fleet', back: true});
+  $('#main').innerHTML = `<nav class=tabs id=ftabs><button class="tab tab-on" data-t=sessions>sessions</button><button class=tab data-t=feed>feed</button></nav>
+    <div id=fsess></div><div id=ffeed class=hidden></div>`;
+  let tab = 'sessions';
+
+  // every machine's sessions, each under its machine
+  const rows = [];
+  const draw = () => {
+    keyed($('#fsess'), rows, r => r.k,
+      r => r.hdr ? el('<div class=rule><b></b><span></span></div>')
+        : el(`<a class=row><div class=row-top><span class=mark></span><b></b><span class=cost></span><time></time></div><div class=row-sub><span class=tree>└</span><span class=why></span></div></a>`),
+      (e, r) => {
+        if (r.hdr) { set(e, 'b', '▾ ' + r.name); set(e, 'span', r.err ? `<span class=text-red>${esc(r.err)}</span>` : `${r.n}${r.cost ? ' · ' + money(r.cost) : ''}`, true); return; }
+        const i = r.i;
+        e.href = `#/s/${encodeURIComponent(r.mach)}/${encodeURIComponent(i.id)}`;
+        e.dataset.state = i.st;
+        set(e, '.mark', marks[i.st] || '·');
+        set(e, 'b', i.name || i.id);
+        set(e, '.cost', money(i.costUsd));
+        const t = $('time', e); t.dataset.t = i.updatedAt; set(t, '', ago(i.updatedAt));
+        const where = `<span class=text-blue>${esc(home(i.cwd))}</span> <span class=text-faint>· ${esc([agentName(i.kind), i.model].filter(Boolean).join(' · '))}</span>`;
+        set(e, '.why', i.st === 'blocked' ? `<span class=text-yellow>${esc(stateWords(i.st, i.needs))}</span> <span class=text-faint>· ${esc(home(i.cwd))}</span>` : i.st === 'working' && i.detail ? esc(i.detail) : where, true);
+      });
+    const all = rows.filter(r => !r.hdr).map(r => r.i);
+    const n = all.filter(i => i.st === 'blocked').length, w = all.filter(i => i.st === 'working' || i.st === 'starting').length;
+    set($('#sub'), '', [n && `<span class=text-yellow>● ${n} need${n > 1 ? '' : 's'} you</span>`, w && `<span class=text-orange>✻ ${w} working</span>`, `${all.length} on ${machines.length} machine${machines.length > 1 ? 's' : ''}`].filter(Boolean).join(' · '), true);
+  };
+  const poll = () => Promise.all(machines.map(m =>
+    mapi(m, '/sessions').then(r => r.json()).then(l => ({m, l}), () => ({m, l: null}))
+  )).then(got => {
+    if (!sc.live || tab !== 'sessions') return;
+    rows.length = 0;
+    for (const {m, l} of got) {
+      if (!l) { rows.push({k: 'h' + m.name, hdr: true, name: m.name, err: 'unreachable'}); continue; }
+      const ss = l.map(i => ({...i, st: stateOf(i)})).sort((a, b) => (b.updatedAt > a.updatedAt ? 1 : -1));
+      rows.push({k: 'h' + m.name, hdr: true, name: m.name, n: ss.length, cost: ss.reduce((x, i) => x + (i.costUsd || 0), 0)});
+      for (const i of ss) rows.push({k: m.name + '/' + i.id, i, mach: m.name});
+    }
+    draw();
+  });
+  poll();
+  const pt = setInterval(poll, 5000);
+  sc.on(() => clearInterval(pt));
+
+  // the feed: the picked machine's board (rush feed), read and posted to
+  let threads = [], feedOn = false;
+  const who = a => esc(a.name || a.handle || (a.sessionId ? '@' + a.sessionId : 'someone'));
+  const tags = s => esc(s).replace(/(^|\s)(#[\p{L}\p{N}][\p{L}\p{N}-]*)/gu, '$1<span class=text-orange>$2</span>');
+  const proj = t => t.author.project ? ` <span class=text-faint>${esc('#' + t.author.project.split('/').pop().toLowerCase().replace(/[^a-z0-9]+/g, '-'))}</span>` : '';
+  const drawFeed = () => {
+    $('#ffeed').innerHTML = `${feedOn ? `<fieldset class=box id=fsay><legend>chirp as <b>you</b></legend>
+        <textarea id=ftxt class=field rows=2 placeholder="what's happening; #hashtags sort it"></textarea>
+        <div class="flex justify-end pt-2"><button class="key key-on" id=fpost>post</button></div></fieldset>`
+        : `<p class="px-3 py-2 text-dim">the feed is off; the user turns it on with <b>#feed on</b></p>`}
+      ${threads.length ? '' : `<div class=empty><p>no chirps yet</p></div>`}` +
+      threads.map(t => `<details class=chirp data-id="${esc(t.id)}"${t.resolved ? ' data-resolved' : ''}>
+        <summary><span class=who>${who(t.author)}${t.to ? ` <span class=text-faint>→</span> ${who(t.to)}` : ''}</span><span class=what>${tags(t.title)}${proj(t)}</span><time data-t="${esc(t.updatedAt)}">${ago(t.updatedAt)}</time></summary>
+        ${(t.messages || []).map(m => `<div class=msg><span class=who>${who(m.author)}</span><div class=body>${tags(m.text)}</div></div>`).join('')}
+        ${feedOn ? `<div class=actions><input class=field placeholder="reply" enterkeyhint=send><button class="key key-on" data-reply>reply</button><button class=key data-resolve>${t.resolved ? 'unresolve' : 'resolve'}</button></div>` : ''}
+      </details>`).join('');
+  };
+  const feed = () => api('/feed').then(r => r.json()).then(v => {
+    if (!sc.live || tab !== 'feed') return;
+    feedOn = !!v.on;
+    const open = new Set($$('#ffeed .chirp[open]').map(e => e.dataset.id));
+    threads = v.threads || [];
+    drawFeed();
+    for (const e of $$('#ffeed .chirp')) if (open.has(e.dataset.id)) e.open = true;
+  }, () => {});
+  const ft = setInterval(feed, 15000);
+  sc.on(() => clearInterval(ft));
+
+  const fbox = $('#ffeed');
+  const send = async (o, done) => { try { await post('/feed', o); done && done(); feed(); } catch (e) { failed(e); } };
+  fbox.onclick = e => {
+    const d = e.target.closest('[data-id]');
+    if (e.target.closest('#fpost')) {
+      const b = $('#ftxt'), t = b.value.trim();
+      if (t) send({op: 'post', text: t}, () => b.value = '');
+    } else if (e.target.closest('[data-reply]') && d) {
+      const b = $('input', d), t = b.value.trim();
+      if (t) send({op: 'reply', id: d.dataset.id, text: t});
+    } else if (e.target.closest('[data-resolve]') && d) {
+      send({op: 'resolve', id: d.dataset.id, resolve: !d.hasAttribute('data-resolved')});
+    }
+  };
+  fbox.onkeydown = e => {
+    if (e.key !== 'Enter' || e.shiftKey) return;
+    const d = e.target.closest('[data-id]');
+    if (d && e.target.matches('input')) { e.preventDefault(); $('[data-reply]', d).click(); }
+  };
+
+  $('#ftabs').onclick = e => {
+    const b = e.target.closest('[data-t]');
+    if (!b || b.dataset.t === tab) return;
+    tab = b.dataset.t;
+    $$('#ftabs .tab').forEach(x => x.classList.toggle('tab-on', x === b));
+    $('#fsess').classList.toggle('hidden', tab !== 'sessions');
+    fbox.classList.toggle('hidden', tab !== 'feed');
+    scrollTo(0, 0);
+    if (tab === 'feed') feed(); else poll();
   };
 }
 

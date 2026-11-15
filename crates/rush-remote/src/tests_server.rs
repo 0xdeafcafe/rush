@@ -1002,10 +1002,27 @@ impl HistoryReader for Files {
         each: &mut dyn FnMut(Vec<Event>) -> bool,
     ) -> rush_core::adapter::Result<()> {
         let b = std::fs::read(&s.transcript).unwrap_or_default();
+        // a line "end <total>" ends the turn, saying what the whole
+        // session had spent by then (as an agent's turn end does)
         let evs: Vec<Event> = b
             .split_inclusive(|&c| c == b'\n')
             .filter(|l| !l.trim_ascii().is_empty())
-            .map(line_message)
+            .map(|l| {
+                let t = l.trim_ascii();
+                if t.starts_with(b"end") {
+                    let cost = std::str::from_utf8(&t[3..])
+                        .ok()
+                        .and_then(|s| s.trim().parse::<f64>().ok())
+                        .unwrap_or(0.0);
+                    Event::TurnEnd(rush_core::event::TurnEnd {
+                        reason: "done".into(),
+                        cost,
+                        ..Default::default()
+                    })
+                } else {
+                    line_message(l)
+                }
+            })
             .collect();
         if !evs.is_empty() {
             each(evs);
@@ -1199,6 +1216,18 @@ fn a_sessions_tabs_are_served() {
     let _h = home();
     let s = paged_server("d7d7d7d7", "listed", 5);
     let pro = rush_host::dir("d7d7d7d7").join("pro");
+    // five turns, each ended saying the session had spent another cent
+    // (a turn's end cost is the session's total so far, so the totals
+    // climb: each turn's own slice is a cent)
+    let body: String = (0..5)
+        .flat_map(|i| {
+            [
+                format!("line {i:03}\n"),
+                format!("end {:.02}\n", (i as f64 + 1.0) * 0.01),
+            ]
+        })
+        .collect();
+    std::fs::write(pro.join("s1.jsonl"), &body).unwrap();
     // two subagents, as Claude Code writes them beside the transcript:
     // a meta to say what each is, a transcript of its own
     let sub = pro.join("s1/subagents");
@@ -1249,11 +1278,12 @@ fn a_sessions_tabs_are_served() {
         assert_eq!(r.status, 404, "{p}");
     }
 
-    // the overview: what the transcript says of it, priced where its
-    // agent can price (these lines say nothing to price)
+    // the overview: what the transcript says of it — five turns, a cent
+    // apiece as each turn's end said the session had spent
     let v = page_json(get("/overview"));
     assert_eq!(v["turns"], 5, "{v}");
-    assert_eq!(v["cost"], 0.0, "{v}");
+    assert!((v["cost"].as_f64().unwrap() - 0.05).abs() < 1e-9, "{v}");
+    assert_eq!(v["turnCosts"].as_array().unwrap().len(), 5, "{v}");
     assert_eq!(v["input"], 0, "{v}");
     assert_eq!(v["tools"].as_array().unwrap().len(), 0, "{v}");
     assert_eq!(v["models"].as_object().unwrap().len(), 0, "{v}");
@@ -1281,4 +1311,113 @@ fn a_sessions_tabs_are_served() {
     // one that isn't
     let r = get("/subagents/nope/events");
     assert_eq!(r.status, 404);
+}
+
+/// The feed on the dashboard: the board whole, whether it takes posts,
+/// and a chirp, a reply and a resolve through it as you.
+#[test]
+fn the_feed_is_served() {
+    let _h = home();
+    let s = server(vec![]);
+    let b = bearer(TOKEN);
+    let json = ("Content-Type", "application/json");
+    // home() clears serve's own files, not the board and the state
+    // config that say what the feed is
+    let home = rush_state::dir();
+    let _ = std::fs::remove_dir_all(home.join("community"));
+    let _ = std::fs::remove_file(home.join("config.json"));
+
+    // the token counts, both ways
+    for m in ["GET", "POST"] {
+        let r = call(&s, m, "/api/feed", "", &[]);
+        assert_eq!(r.status, 401, "{m}");
+    }
+
+    // an empty board, and posting needs the feed on
+    let v = page_json(call(&s, "GET", "/api/feed", "", &[("Authorization", &b)]));
+    assert_eq!(v["threads"].as_array().unwrap().len(), 0, "{v}");
+    assert_eq!(v["on"], false, "{v}");
+    let r = call(
+        &s,
+        "POST",
+        "/api/feed",
+        r#"{"op":"post","text":"anyone building?"}"#,
+        &[("Authorization", &b), json],
+    );
+    assert_eq!(r.status, 400, "{}", String::from_utf8_lossy(r.bytes()));
+
+    // the user turns it on
+    let mut st = rush_state::Store::load();
+    st.config.feed = true;
+    st.save_config().unwrap();
+
+    // a chirp: the first line is its title, the author is you
+    let r = call(
+        &s,
+        "POST",
+        "/api/feed",
+        "{\"op\":\"post\",\"text\":\"who's running a build?\\nmy tests crawl\"}",
+        &[("Authorization", &b), json],
+    );
+    assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(r.bytes()));
+    let v = page_json(call(&s, "GET", "/api/feed", "", &[("Authorization", &b)]));
+    assert_eq!(v["on"], true, "{v}");
+    let threads = v["threads"].as_array().unwrap();
+    assert_eq!(threads.len(), 1, "{v}");
+    assert_eq!(threads[0]["title"], "who's running a build?", "{v}");
+    assert_eq!(threads[0]["author"]["name"], "You", "{v}");
+    assert_eq!(threads[0]["resolved"], false, "{v}");
+    let msgs = threads[0]["messages"].as_array().unwrap();
+    assert_eq!(msgs.len(), 1, "{v}");
+    assert_eq!(msgs[0]["text"], "who's running a build?\nmy tests crawl");
+    let id = threads[0]["id"].as_str().unwrap().to_string();
+
+    // a reply, then a resolve — each lands on the thread
+    let r = call(
+        &s,
+        "POST",
+        "/api/feed",
+        "{\"op\":\"reply\",\"text\":\"it was me, sorry\"}",
+        &[("Authorization", &b), json],
+    );
+    assert_eq!(r.status, 400, "a reply names its thread");
+    let r = call(
+        &s,
+        "POST",
+        "/api/feed",
+        &format!("{{\"op\":\"reply\",\"id\":\"{id}\",\"text\":\"it was me, sorry\"}}"),
+        &[("Authorization", &b), json],
+    );
+    assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(r.bytes()));
+    let r = call(
+        &s,
+        "POST",
+        "/api/feed",
+        &format!("{{\"op\":\"resolve\",\"id\":\"{id}\",\"resolve\":true}}"),
+        &[("Authorization", &b), json],
+    );
+    assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(r.bytes()));
+    let v = page_json(call(&s, "GET", "/api/feed", "", &[("Authorization", &b)]));
+    let t = &v["threads"][0];
+    assert_eq!(t["messages"].as_array().unwrap().len(), 2, "{v}");
+    assert_eq!(t["messages"][1]["text"], "it was me, sorry", "{v}");
+    assert_eq!(t["messages"][1]["author"]["name"], "You", "{v}");
+    assert_eq!(t["resolved"], true, "{v}");
+
+    // what isn't a post
+    for (name, body) in [
+        ("no text", r#"{"op":"post","text":"  "}"#),
+        ("no op", r#"{"text":"anything"}"#),
+        ("no thread", r#"{"op":"resolve"}"#),
+        ("not json", "just words"),
+    ] {
+        let r = call(
+            &s,
+            "POST",
+            "/api/feed",
+            body,
+            &[("Authorization", &b), json],
+        );
+        assert_eq!(r.status, 400, "{name}");
+    }
 }

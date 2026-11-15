@@ -13,6 +13,7 @@ rush-convo.workspace = true
 rush-events.workspace = true
 rush-sys.workspace = true
 rush-host = { path = "../rush-host" }
+rush-room = { path = "../rush-room" }
 rush-plugin = { path = "../rush-plugin" }
 rush-bundled = { path = "../rush-bundled" }
 serde.workspace = true

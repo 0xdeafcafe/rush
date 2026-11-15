@@ -1751,6 +1751,7 @@ dependencies = [
  "rush-events",
  "rush-host",
  "rush-plugin",
+ "rush-room",
  "rush-state",
  "rush-sys",
  "rush-testenv",

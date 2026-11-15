@@ -261,6 +261,11 @@ impl Server {
             }
             ["api", "git"] => allow(m == "POST", "POST").unwrap_or_else(|| self.git(r)),
             ["api", "others"] => allow(get, "GET, HEAD").unwrap_or_else(|| self.others()),
+            ["api", "feed"] => match m {
+                "GET" | "HEAD" => self.feed_list(),
+                "POST" => self.feed_post(r),
+                _ => allow(false, "GET, HEAD, POST").unwrap_or_else(|| fail(405, "")),
+            },
             ["api", "pair"] => allow(m == "POST", "POST").unwrap_or_else(|| self.pair(r)),
             ["api", "devices"] => allow(get, "GET, HEAD").unwrap_or_else(|| self.list_devices()),
             ["api", "devices", id, "revoke"] if !id.is_empty() => {
@@ -915,7 +920,9 @@ impl Server {
                 turn_costs[i] = t.cost;
             }
             cost += turn_costs[i];
-            *models.entry(t.model.to_string()).or_default() += turn_costs[i];
+            if !t.model.is_empty() {
+                *models.entry(t.model.to_string()).or_default() += turn_costs[i];
+            }
             working += (t.end - t.start).max(0);
         }
         let mut tools: Vec<(&str, f64, u32, u32)> = sess
@@ -1031,6 +1038,66 @@ impl Server {
         x.set("Content-Type", "application/json");
         x.set("Cache-Control", "no-store");
         x
+    }
+
+    /// The feed: rush's shared local board, the chirps agents post and you
+    /// answer (rush feed list), whole threads with whether the feed is on
+    /// to post to.
+    fn feed_list(&self) -> Response {
+        let home = rush_state::dir();
+        let mut rows = rush_room::community::Feed::at(&home)
+            .list()
+            .unwrap_or_default();
+        // chirps from before projects: their session says where
+        for t in &mut rows {
+            if t.author.project.is_empty() && !t.author.session_id.is_empty() {
+                t.author.project = session_project(&home, &t.author.session_id);
+            }
+        }
+        let threads: Vec<Value> = rows
+            .iter()
+            .filter_map(|t| serde_json::to_value(t).ok())
+            .collect();
+        write_json(&json!({ "threads": threads, "on": rush_room::community::on() }))
+    }
+
+    /// A post to the feed as you: a chirp, a reply on one, or resolving
+    /// one (rush feed post/reply/resolve). Mentions are kept by their
+    /// ids, as the CLI keeps them.
+    fn feed_post(&self, r: &Request) -> Response {
+        if !rush_room::community::on() {
+            return fail(400, "the feed is off; the user turns it on with #feed on");
+        }
+        let p = match read_json::<FeedPost>(r, OP_MOST) {
+            Ok(p) => p,
+            Err(e) => return fail(400, &e),
+        };
+        let home = rush_state::dir();
+        let you = rush_room::community::Author {
+            name: "You".into(),
+            ..Default::default()
+        };
+        let feed = rush_room::community::Feed::at(&home);
+        let bad = rush_room::community::Error(
+            "a chirp needs text; a reply or a resolve names its thread".into(),
+        );
+        let res = match p.op.as_str() {
+            "post" if !p.text.trim().is_empty() => {
+                let body = rush_room::handle::Names::from_home(&home).store(&p.text);
+                let title = body.split('\n').next().unwrap_or("");
+                feed.ask(&you, title, &body).map(|_| ())
+            }
+            "reply" if !p.id.is_empty() && !p.text.trim().is_empty() => {
+                let body = rush_room::handle::Names::from_home(&home).store(&p.text);
+                feed.reply(&p.id, &you, &body).map(|_| ())
+            }
+            "resolve" if !p.id.is_empty() => feed.resolve(&p.id, p.resolve).map(|_| ()),
+            _ => Err(bad),
+        };
+        match res {
+            Ok(()) => write_json(&json!({ "ok": true })),
+            Err(e) => fail(400, &e.0),
+        }
     }
 
     /// Serves on ln until ctx ends or serving fails, with notifications
@@ -1555,6 +1622,35 @@ fn last_said(path: &str) -> String {
         }
     }
     String::new()
+}
+
+/// A post to the feed as you (feed_post).
+#[derive(serde::Deserialize, Default)]
+#[serde(default)]
+struct FeedPost {
+    op: String,
+    text: String,
+    /// The thread a reply or a resolve names.
+    id: String,
+    resolve: bool,
+}
+
+/// A session's project, as the feed names one: the main checkout its
+/// folder is in. "" when its config has gone.
+fn session_project(home: &std::path::Path, id: &str) -> String {
+    if id.is_empty() || id.contains(['/', '\\', '\0']) || id == "." || id == ".." {
+        return String::new();
+    }
+    let cwd = std::fs::read(home.join("sessions").join(id).join("config.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .and_then(|v| v["cwd"].as_str().map(String::from))
+        .unwrap_or_default();
+    if cwd.is_empty() {
+        String::new()
+    } else {
+        rush_room::feed::main_checkout(&cwd)
+    }
 }
 
 /// Sends what a session's transcript holds from before before (all of it
