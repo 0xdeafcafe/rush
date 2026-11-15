@@ -928,7 +928,7 @@ fn line_message(line: &[u8]) -> Event {
         role: "user".into(),
         parts: vec![Part {
             kind: PartKind::Text,
-            text: String::from_utf8_lossy(line.trim()).into_owned(),
+            text: String::from_utf8_lossy(line.trim_ascii()).into_owned(),
             ..Part::default()
         }],
         ..Message::default()
@@ -947,7 +947,7 @@ impl HistoryWindow for Paged {
         let mut at = 0u64;
         for line in b.split_inclusive(|&c| c == b'\n') {
             let next = at + line.len() as u64;
-            if at >= from && next <= end && !line.trim().is_empty() {
+            if at >= from && next <= end && !line.trim_ascii().is_empty() {
                 out.push((at, vec![line_message(line)]));
             }
             at = next;
@@ -999,7 +999,7 @@ impl HistoryReader for Plain {
         let b = std::fs::read(&s.transcript).unwrap_or_default();
         let evs: Vec<Event> = b
             .split_inclusive(|&c| c == b'\n')
-            .filter(|l| !l.trim().is_empty())
+            .filter(|l| !l.trim_ascii().is_empty())
             .map(line_message)
             .collect();
         if !evs.is_empty() {
@@ -1174,6 +1174,6 @@ fn an_agent_without_windows_pages_by_count() {
     );
     let cur = v["cursor"].as_str().unwrap().to_string();
     let v = page_json(get(&format!("?limit=100&cursor={cur}")));
-    assert_eq!((texts(&v).len(), v["more"]), (8, false));
+    assert_eq!((texts(&v).len(), v["more"].as_bool().unwrap()), (8, false));
     assert_eq!(texts(&v).first().unwrap(), "line 000");
 }

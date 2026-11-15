@@ -174,7 +174,7 @@ pub(crate) fn window(s: &Session, from: u64, end: u64) -> adapter::Result<Vec<(u
     let mut at = from;
     if at > 0 {
         let mut was = [0u8];
-        let aligned = f.read_at(&mut was, at - 1).is_ok_and(|_| was == [b'\n']);
+        let aligned = f.read_at(&mut was, at - 1).is_ok_and(|_| was == *b"\n");
         if !aligned {
             f.seek(SeekFrom::Start(at))?;
             let mut skip = Vec::new();
@@ -186,7 +186,7 @@ pub(crate) fn window(s: &Session, from: u64, end: u64) -> adapter::Result<Vec<(u
         }
     }
     f.seek(SeekFrom::Start(at))?;
-    let mut r = BufReader::with_capacity(64 << 10, f.take((end - at) as u64));
+    let mut r = BufReader::with_capacity(64 << 10, f.take(end - at));
     let mut dec = crate::messages();
     let (mut out, mut line) = (Vec::new(), Vec::new());
     let mut line_at = at;
@@ -197,10 +197,10 @@ pub(crate) fn window(s: &Session, from: u64, end: u64) -> adapter::Result<Vec<(u
             break;
         }
         let next_at = line_at + n as u64;
-        if let Took::Events(evs) = take(dec.as_mut(), &line, 0) {
-            if !evs.is_empty() {
-                out.push((line_at, evs));
-            }
+        if let Took::Events(evs) = take(dec.as_mut(), &line, 0)
+            && !evs.is_empty()
+        {
+            out.push((line_at, evs));
         }
         line_at = next_at;
     }

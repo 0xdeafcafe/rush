@@ -176,7 +176,7 @@ pub(crate) fn window(s: &Session, from: u64, end: u64) -> adapter::Result<Vec<(u
     let mut at = from;
     if at > 0 {
         let mut was = [0u8];
-        let aligned = f.read_at(&mut was, at - 1).is_ok_and(|_| was == [b'\n']);
+        let aligned = f.read_at(&mut was, at - 1).is_ok_and(|_| was == *b"\n");
         if !aligned {
             let mut skip = Vec::new();
             let mut r =

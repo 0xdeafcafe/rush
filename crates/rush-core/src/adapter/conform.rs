@@ -149,7 +149,7 @@ pub fn check_window(ad: &dyn Adapter, s: &Session, most: i64) {
     let wants = said(&whole);
     for m in &wants {
         let left = paged.iter().filter(|x| x == &m).count();
-        let want = wants.iter().filter(|x| x == m).count();
+        let want = wants.iter().filter(|x| *x == m).count();
         assert!(left >= want, "{name}: paging lost {m:?}");
     }
 }
