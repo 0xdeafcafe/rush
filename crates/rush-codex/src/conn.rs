@@ -1898,7 +1898,13 @@ pub(crate) fn adopt(
             );
         }
     }
+    // The thread keeps the run_agent it started with; this build answers
+    // it (others.rs).
+    if let Some(others) = crate::others::Others::of(&o.others, o.delegate.clone()) {
+        *inner.others.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(others));
+    }
     let rpc = Client::adopt(k, Some(handler(&inner)))?;
+    let _ = inner.rpc.set(Arc::downgrade(&rpc));
     Ok(Conn {
         rpc,
         inner,
