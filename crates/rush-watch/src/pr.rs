@@ -15,6 +15,7 @@ use serde_json::{Map, Value, json};
 
 use crate::gh::{self, Error};
 use crate::go::{clip, duration, quote, round, round_to, short};
+use crate::limit::{self, Patience, Waited};
 use crate::live;
 
 /// One check on a pull request's head commit: a check run, or a commit
@@ -323,9 +324,19 @@ pub struct Options<'a> {
     pub log: Option<LogFn<'a>>,
     /// Whether to stop: Go's ctx.Err() != nil. Unset, a signal stops it.
     pub stopped: Option<StoppedFn<'a>>,
+    /// When GitHub's spent rate limit resets, if it is: unset, what every
+    /// watcher shares (gh::limited_until).
+    pub limited: Option<crate::run::LimitFn<'a>>,
 }
 
 impl Options<'_> {
+    fn limited(&self) -> Option<Time> {
+        match &self.limited {
+            Some(f) => f(),
+            None => gh::limited_until(),
+        }
+    }
+
     fn say(&self, s: &str) {
         if let Some(f) = &self.say {
             f(s)
@@ -501,6 +512,9 @@ fn watching(o: &Options, start: Time, run: &mut Run) -> i32 {
     let mut prev: Option<PR> = None;
     let mut fails = 0;
     let mut limited = false;
+    // Looks in a row GitHub said it's limited, and the resume time last said.
+    let mut strikes = 0;
+    let mut said_for: Option<Time> = None;
     let mut asked = Time::default();
     // When its checks should be done, and the head commit that was for.
     let (mut expect, mut expected_for) = (Time::default(), String::new());
@@ -513,6 +527,8 @@ fn watching(o: &Options, start: Time, run: &mut Run) -> i32 {
             run.why = "stopped".into();
             return EXIT_ERROR;
         }
+        // How long to wait for a spent limit, when it is.
+        let mut spent: Option<Duration> = None;
         match res {
             Err(Error::Limited) => {
                 run.remaining = 0;
@@ -524,6 +540,22 @@ fn watching(o: &Options, start: Time, run: &mut Run) -> i32 {
                             "why": Error::Limited.to_string()})),
                     );
                 }
+                // Waits it out, and says so once: a spent limit isn't a
+                // failure, unless it resets after the timeout.
+                let now = o.now();
+                let wait = limit::wait_for(o.limited(), now, strikes);
+                strikes += 1;
+                let resume = now + wait;
+                if !o.timeout.is_zero() && since(resume, start) > o.timeout {
+                    o.say(&limit::timed_out_line(resume.local(), now, o.timeout));
+                    run.why = "timed out".into();
+                    return EXIT_TIMED_OUT;
+                }
+                if said_for.is_none_or(|s| since(resume, s) > Duration::from_secs(30)) {
+                    said_for = Some(resume);
+                    o.say(&limit::waiting_line(resume.local(), now));
+                }
+                spent = Some(wait);
             }
             Err(err) => {
                 // A blip is asked again; three in a row end it.
@@ -537,6 +569,8 @@ fn watching(o: &Options, start: Time, run: &mut Run) -> i32 {
             Ok(p) => {
                 fails = 0;
                 limited = false;
+                strikes = 0;
+                said_for = None;
                 asked = o.now();
                 run.last = Some(p.clone());
                 if !o.task.is_empty() {
@@ -557,7 +591,7 @@ fn watching(o: &Options, start: Time, run: &mut Run) -> i32 {
             }
         }
         let gone = since(o.now(), start);
-        let wait = interval(gone, run.remaining);
+        let wait = spent.unwrap_or_else(|| interval(gone, run.remaining));
         let mut l = live::live(
             o,
             &o.task,
@@ -917,6 +951,38 @@ fn atoi(s: &str) -> Option<i64> {
 /// repository), owner/name#number, a pull request's URL, or "" for the
 /// pull request of dir's branch.
 pub fn resolve(dir: &Path, what: &str) -> Result<(String, i64), String> {
+    resolve_with(dir, what, &Patience::none()).map_err(|e| e.to_string())
+}
+
+/// What stopped a name being resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Unresolved {
+    /// It can't be: why.
+    Failed(String),
+    /// GitHub's rate limit resets after the timeout: what to say.
+    TimedOut(String),
+}
+
+impl std::fmt::Display for Unresolved {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Unresolved::Failed(s) | Unresolved::TimedOut(s) => f.write_str(s),
+        }
+    }
+}
+
+impl Unresolved {
+    pub(crate) fn of(w: Waited) -> Unresolved {
+        match w {
+            Waited::Err(e) => Unresolved::Failed(e.to_string()),
+            Waited::TimedOut(s) => Unresolved::TimedOut(s),
+            Waited::Stopped => Unresolved::Failed("stopped".into()),
+        }
+    }
+}
+
+/// [`resolve`], waiting out GitHub's rate limit as patience says.
+pub fn resolve_with(dir: &Path, what: &str, p: &Patience) -> Result<(String, i64), Unresolved> {
     let what = what.trim();
     if let Some(m) = PR_URL.captures(what) {
         return Ok((m[1].to_string(), atoi(&m[2]).unwrap_or(0)));
@@ -926,16 +992,21 @@ pub fn resolve(dir: &Path, what: &str) -> Result<(String, i64), String> {
     {
         return match atoi(num) {
             Some(n) if n > 0 => Ok((repo.to_string(), n)),
-            _ => Err(format!("{} isn't a pull request", quote(what))),
+            _ => Err(Unresolved::Failed(format!(
+                "{} isn't a pull request",
+                quote(what)
+            ))),
         };
     }
-    let gh = |args: &[&str]| -> Result<String, String> {
-        let out = gh::run(Some(dir), args);
+    let gh = |args: &[&str]| -> Result<String, Unresolved> {
+        let out = p
+            .call(|| gh::run_checked(Some(dir), args))
+            .map_err(Unresolved::of)?;
         match &out.err {
-            Some(e @ rush_gh::ghpr::RunError::Exit { .. }) => {
-                Err(gh::gh_error(0, &[], &out.stderr, Some(e)).to_string())
-            }
-            Some(e) => Err(e.to_string()),
+            Some(e @ rush_gh::ghpr::RunError::Exit { .. }) => Err(Unresolved::Failed(
+                gh::gh_error(0, &[], &out.stderr, Some(e)).to_string(),
+            )),
+            Some(e) => Err(Unresolved::Failed(e.to_string())),
             None => Ok(String::from_utf8_lossy(&out.stdout).trim().to_string()),
         }
     };
@@ -944,10 +1015,10 @@ pub fn resolve(dir: &Path, what: &str) -> Result<(String, i64), String> {
         match atoi(what.strip_prefix('#').unwrap_or(what)) {
             Some(v) if v > 0 => n = v,
             _ => {
-                return Err(format!(
+                return Err(Unresolved::Failed(format!(
                     "{} isn't a pull request: give its number, owner/name#number or its URL",
                     quote(what)
-                ));
+                )));
             }
         }
     }
@@ -960,9 +1031,15 @@ pub fn resolve(dir: &Path, what: &str) -> Result<(String, i64), String> {
         ".nameWithOwner",
     ])?;
     if n == 0 {
-        let s = gh(&["pr", "view", "--json", "number", "--jq", ".number"])
-            .map_err(|e| format!("no pull request for this branch: {e}"))?;
-        n = atoi(&s).ok_or_else(|| "no pull request for this branch".to_string())?;
+        let s =
+            gh(&["pr", "view", "--json", "number", "--jq", ".number"]).map_err(|e| match e {
+                Unresolved::Failed(e) => {
+                    Unresolved::Failed(format!("no pull request for this branch: {e}"))
+                }
+                e => e,
+            })?;
+        n = atoi(&s)
+            .ok_or_else(|| Unresolved::Failed("no pull request for this branch".to_string()))?;
     }
     Ok((repo, n))
 }

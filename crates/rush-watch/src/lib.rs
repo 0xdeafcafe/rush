@@ -26,6 +26,7 @@ pub mod gh;
 pub mod go;
 pub mod goflag;
 pub mod hook;
+pub mod limit;
 pub mod live;
 pub mod pr;
 pub mod run;
@@ -35,14 +36,15 @@ pub use causes::{log_causes, log_lines};
 pub use cli::{Env, WATCH_USAGE, bundled_on, watch_cmd, watch_cmd_in};
 pub use gh::{Error, get, limited_until, raw, remaining, shared_remaining};
 pub use hook::{PROMPT, redirect};
+pub use limit::{Patience, Waited, backoff, classify};
 pub use live::{Live, live_for, task_id};
 pub use pr::{
-    Check, EXIT_ERROR, EXIT_FAILED, EXIT_PASSED, EXIT_TIMED_OUT, Options, PR, Until, fetch,
-    interval, log_errors, resolve, summary, watch_pr,
+    Check, EXIT_ERROR, EXIT_FAILED, EXIT_PASSED, EXIT_TIMED_OUT, Options, PR, Unresolved, Until,
+    fetch, interval, log_errors, resolve, resolve_with, summary, watch_pr,
 };
 pub use run::{
     Arg, RunOptions, Runs, Target, What, WorkflowRun, full_sha, job_state, parse_arg, resolve_run,
-    watch_run,
+    resolve_run_with, watch_run,
 };
 
 // Every test runs in a throwaway home (rush-testenv).
