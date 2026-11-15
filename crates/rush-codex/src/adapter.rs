@@ -16,8 +16,8 @@ use std::process::Command;
 use std::sync::Arc;
 
 use rush_core::adapter::{
-    self, Account, Accounts, Adapter, ChildFinder, Choice, Choices, Chooser, Conn, Discoverer,
-    Driver, Feature, Features, HarnessSettings, HistoryFollower, HistoryReader,
+    self, Account, Accounts, Adapter, Adopter, ChildFinder, Choice, Choices, Chooser, Conn,
+    Discoverer, Driver, Feature, Features, HarnessSettings, HistoryFollower, HistoryReader,
     HistoryTailBeforeReader, Keyed, Kind, Level, LoginHinter, Made, Media, MediaReader,
     ModelLister, OwnEdit, OwnSettings, Profile, Programmer, ProjectFolderer, Published, Publisher,
     QuotaSource, ResetSpender, Session, SignInDone, Sink, Spawnable, Speaker, StartOptions,
@@ -209,6 +209,7 @@ impl Adapter for Codex {
     rush_core::has!(
         discoverer: Discoverer,
         driver: Driver,
+        adopter: Adopter,
         history_reader: HistoryReader,
         history_follower: HistoryFollower,
         tail_reader: TailReader,
@@ -294,6 +295,19 @@ impl Driver for Codex {
         flags.append(&mut o.flags);
         o.flags = flags;
         Ok(Box::new(conn::start(o, sink)?))
+    }
+}
+
+impl Adopter for Codex {
+    /// Takes up the app-server a host passed to itself across an exec onto
+    /// a newer rush, its thread running on (Rust-only).
+    fn adopt(
+        &self,
+        o: StartOptions,
+        u: adapter::Upgrade,
+        sink: Arc<dyn Sink>,
+    ) -> adapter::Result<Box<dyn Conn>> {
+        Ok(Box::new(conn::adopt(o, u, sink)?))
     }
 }
 

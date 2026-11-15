@@ -1063,13 +1063,22 @@ retried or running in the background, no start or stop under way), then:
    agent up says why. Either way the host stays where it is.
 2. holds its agent through the Conn's `Upgrader::pass`: the adapter writes
    what's queued for the agent, stops writing, and stops its reader
-   between two reads (Claude's reader polls its stdout and a wake pipe), so
-   nothing the agent says is lost: what was read of a line so far is
-   handed on as `unread`. It refuses while the agent waits on an answer.
+   between two reads (Claude's reader, and Codex's on its app-server, poll
+   stdout and a wake pipe), so nothing the agent says is lost: what was
+   read of a line so far is handed on as `unread`. It refuses while the
+   agent waits on an answer. Codex's also refuses mid-turn, while a
+   subagent or command of its runs, or while a request of rush's waits on
+   the app-server's answer (it waits up to 5s for those): nothing is in
+   flight, so the next build's request ids, going on from the last one
+   used, never meet an answer meant for the old.
 3. writes `sessions/<id>/upgrade.json` (0600): its info, the replay ring,
    the session's commands and context lines, its listener's fd, and the
    agent's `Upgrade` (pid, fds by name, unread, the adapter's own state:
-   for Claude its session id, sign-in, account and control request count).
+   for Claude its session id, sign-in, account and control request count;
+   for Codex its thread, the last turn to end, model, account and version,
+   what the next turn applies (model, effort, mode), its sandbox's
+   writable roots, the threads it spawned and the calls that spawned them,
+   and the last request id).
 4. clears close-on-exec on the listener and the agent's fds (stdin,
    stdout, stderr, and the pgguard's pipe: closed, the guard would end the
    agent's group) and execs `rush host adopt <id> <state>` with the lock
@@ -1096,8 +1105,10 @@ What survives: the agent process and its pipes, the conversation, the
 replay, queue/hold/away/decisions state, costs, the turn count. What
 doesn't: a client's open connection (it redials), timers (idle sleep and
 away are armed again; the rest only run mid-turn), a caffeinate held while
-away (started again). Adapters: only Claude Code's (`rush-claude`
-conn.rs `Upgrader` and `Adopter`) today; a host on any other agent has
+away (started again). Adapters: Claude Code's (`rush-claude` conn.rs
+`Upgrader` and `Adopter`) and Codex's (`rush-codex` conn.rs, the reader
+held in rpc.rs; its app-server is told nothing: no initialize, no
+thread/resume); a host on any other agent (ollama-codex included) has
 `Info.upgrades` false and stays on its build, as does a remote host or one
 from before this.
 

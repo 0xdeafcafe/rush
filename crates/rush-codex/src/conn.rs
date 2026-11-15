@@ -9,6 +9,9 @@
 //!
 //! Go's Conn queues events for a channel a goroutine pumps; here the sink
 //! never blocks, so the reader pushes each in order as it reads it.
+//!
+//! Rust-only: between turns a thread can be handed on, its app-server
+//! running on, to its host exec'd onto a newer rush (Upgrader, adopt).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -225,7 +228,8 @@ struct Shell {
 }
 
 /// What's applied on the next turn/start.
-#[derive(Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 struct Next {
     model: String,
     effort: String,
@@ -1616,6 +1620,10 @@ impl ConnTrait for Conn {
     fn pid(&self) -> Option<i32> {
         self.rpc.pid()
     }
+
+    fn upgrader(&self) -> Option<&dyn adapter::Upgrader> {
+        Some(self)
+    }
 }
 
 impl rush_core::adapter::EffortSetter for Conn {
@@ -1674,6 +1682,179 @@ impl TaskStopper for Conn {
         )?;
         Ok(())
     }
+}
+
+/// What a Codex thread passed across an upgrade keeps beyond its pipes
+/// (Rust-only): its thread, what the next turn applies, its account's
+/// words, and the threads it spawned, by id, with the calls that spawned
+/// them.
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+#[serde(default)]
+struct Passed {
+    thread: String,
+    ended: String,
+    model: String,
+    account: String,
+    version: String,
+    next: Next,
+    roots: Vec<String>,
+    kids: BTreeMap<String, (String, String)>,
+    /// The last request id used: the next build's go on from it.
+    seq: i64,
+    guard_pid: i32,
+}
+
+impl State {
+    /// Why the thread can't be handed on now, if it can't: only between
+    /// turns, with nothing asked or running beside it.
+    fn unmovable(&self) -> Option<&'static str> {
+        if self.thread.is_empty() {
+            Some("its thread hasn't started")
+        } else if !self.asks.is_empty() {
+            Some("it's waiting on your answer")
+        } else if !self.turn.is_empty() {
+            Some("it's in the middle of a turn")
+        } else if self.kids.values().any(|k| k.busy || !k.turn.is_empty()) {
+            Some("a subagent of its is still working")
+        } else if !self.shells.is_empty() {
+            Some("a command it started is still running")
+        } else {
+            None
+        }
+    }
+
+    fn passed(&self, seq: i64, guard_pid: i32) -> Passed {
+        Passed {
+            thread: self.thread.clone(),
+            ended: self.ended.clone(),
+            model: self.model.clone(),
+            account: self.account.clone(),
+            version: self.version.clone(),
+            next: self.next.clone(),
+            roots: self.roots.clone(),
+            kids: self
+                .kids
+                .iter()
+                .filter(|(_, k)| !k.call.is_empty())
+                .map(|(id, k)| (id.clone(), (k.call.clone(), k.label.clone())))
+                .collect(),
+            seq,
+            guard_pid,
+        }
+    }
+}
+
+impl adapter::Upgrader for Conn {
+    /// Holds the thread between two of the app-server's lines and says
+    /// how the next build reaches it: only between turns, with no
+    /// approval or question open, nothing running beside it, and no
+    /// request of rush's waiting on an answer (Rust-only).
+    fn pass(&self) -> adapter::Result<adapter::Upgrade> {
+        if self.closed.load(Ordering::SeqCst) || !matches!(*self.inner.phase(), Phase::Running) {
+            return Err(err("codex: the session has ended"));
+        }
+        if let Some(why) = self.inner.st().unmovable() {
+            return Err(err(format!("codex: {why}")));
+        }
+        let unread = self.rpc.pause(Duration::from_secs(5))?;
+        let refuse = |why: &str| {
+            self.rpc.resume();
+            Err(err(format!("codex: {why}")))
+        };
+        // What was read before it held may have asked or begun something.
+        let st = self.inner.st();
+        if let Some(why) = st.unmovable() {
+            drop(st);
+            return refuse(why);
+        }
+        let Some(k) = self.rpc.kept(unread) else {
+            drop(st);
+            return refuse("its app-server isn't rush's own to hand on");
+        };
+        let mut fds = BTreeMap::new();
+        fds.insert("stdin".to_string(), k.stdin);
+        fds.insert("stdout".to_string(), k.stdout);
+        let mut guard_pid = 0;
+        if let Some((pid, fd)) = k.guard {
+            fds.insert("guard".to_string(), fd);
+            guard_pid = pid;
+        }
+        let p = st.passed(k.next, guard_pid);
+        drop(st);
+        let state = match serde_json::to_value(p) {
+            Ok(v) => v,
+            Err(e) => {
+                self.rpc.resume();
+                return Err(e.into());
+            }
+        };
+        Ok(adapter::Upgrade {
+            pid: k.pid,
+            fds,
+            unread: k.unread,
+            state,
+        })
+    }
+
+    fn keep(&self) {
+        self.rpc.resume();
+    }
+}
+
+/// Takes up the app-server a host passed to itself across an exec
+/// (Rust-only): its process runs on, told nothing (no initialize, no
+/// thread/resume), its output read from where the last build stopped.
+pub(crate) fn adopt(
+    o: StartOptions,
+    u: adapter::Upgrade,
+    sink: Arc<dyn Sink>,
+) -> adapter::Result<Conn> {
+    let p: Passed = serde_json::from_value(u.state.clone())?;
+    let fd = |n: &str| {
+        u.fds
+            .get(n)
+            .copied()
+            .ok_or_else(|| err(format!("codex: no {n} was passed")))
+    };
+    let k = crate::rpc::Kept {
+        pid: u.pid,
+        stdin: fd("stdin")?,
+        stdout: fd("stdout")?,
+        guard: u.fds.get("guard").map(|&g| (p.guard_pid, g)),
+        next: p.seq,
+        unread: u.unread,
+    };
+    if k.pid <= 0 {
+        return Err(err("codex: no app-server was passed"));
+    }
+    let inner = new_inner(sink, Phase::Running);
+    {
+        let mut st = inner.st();
+        st.thread = if p.thread.is_empty() {
+            o.session_id.clone()
+        } else {
+            p.thread
+        };
+        (st.ended, st.model, st.account, st.version) = (p.ended, p.model, p.account, p.version);
+        (st.next, st.roots) = (p.next, p.roots);
+        st.models = read_models(&o.profile.dir);
+        for (id, (call, label)) in p.kids {
+            st.kids.insert(
+                id,
+                Kid {
+                    call,
+                    label,
+                    ..Kid::default()
+                },
+            );
+        }
+    }
+    let rpc = Client::adopt(k, Some(handler(&inner)))?;
+    Ok(Conn {
+        rpc,
+        inner,
+        closed: AtomicBool::new(false),
+    })
 }
 
 impl Drop for Conn {
