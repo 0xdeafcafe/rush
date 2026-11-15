@@ -948,7 +948,6 @@ fn hosted_runs<I: std::borrow::Borrow<rush_host::Info>>(
             session_id: i.session_id.clone(),
             profile,
             beside,
-            title: i.name.clone(),
             ended: rush_ui::screens::list_extras::spawns::hosted_end(&i.state, &i.error, i.lost)
                 .to_string(),
             needs: if i.state == "blocked" {
