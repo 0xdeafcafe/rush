@@ -43,7 +43,8 @@ mod tests {
 
     #[test]
     fn tags_at_the_start() {
-        let cases: Vec<(&str, Option<(Vec<&str>, &str)>)> = vec![
+        type Case<'a> = (&'a str, Option<(Vec<&'a str>, &'a str)>);
+        let cases: Vec<Case> = vec![
             ("hello", None),
             ("", None),
             (

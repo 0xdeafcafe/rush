@@ -203,7 +203,7 @@ mod tests {
 
     #[test]
     fn a_reply_card() {
-        let did = vec![
+        let did = [
             "editing migrate.rs".to_string(),
             "running cargo test".to_string(),
         ];
