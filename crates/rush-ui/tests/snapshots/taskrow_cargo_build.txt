@@ -1,0 +1,9 @@
+== 80 wide
+ ✻ cargo build --release                              212/430 ━━━━━─────── 1m04s
+   › Compiling rush-convo v0.1.0 (/Users/me/src/rush/crates/rush-convo)
+== 56 wide
+ ✻ cargo build --release      212/430 ━━━━━─────── 1m04s
+   › Compiling rush-convo v0.1.0 (/Users/me/src/rush/cr…
+== 40 wide
+ ✻ cargo build --re…  212/430 ━─── 1m04s
+   › Compiling rush-convo v0.1.0 (/User…
