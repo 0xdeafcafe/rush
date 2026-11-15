@@ -195,6 +195,14 @@ impl Host {
             mode: c.permission_mode.clone(),
             lightly: true,
             tools: vec![crate::agtools::tool_server(self.reg.clone(), &c.id)],
+            // The other models it registered as its own subagent types are
+            // still answered here (native.rs).
+            others: if crate::native::native(&self.reg, a.kind().as_str()) {
+                crate::native::others_of(&crate::native::offers(&self.reg, a.kind().as_str()))
+            } else {
+                Vec::new()
+            },
+            delegate: Some(crate::native::delegate(self.reg.clone(), &c.id)),
             ..StartOptions::default()
         };
         let pid = u.pid;

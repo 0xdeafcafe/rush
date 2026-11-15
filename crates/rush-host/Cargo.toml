@@ -33,6 +33,8 @@ fake = []
 [dev-dependencies]
 rush-testenv = { path = "../rush-testenv" }
 rush-claude.workspace = true
+rush-acp = { path = "../rush-acp" }
+rush-providers = { path = "../rush-providers" }
 tempfile.workspace = true
 
 [[bench]]

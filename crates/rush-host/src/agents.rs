@@ -153,9 +153,14 @@ pub fn takes(reg: &Registry, cfg: &Settings, leader: &str, k: &str, prov: &str) 
     let h = reg.harness_of(k);
     if !leader.is_empty() && h.as_str() == leader {
         let cell = leader_cell(reg, cfg, leader, k, prov);
-        return (!cell.is_empty()).then_some(cell);
-    }
-    if !leader.is_empty() && leader_runs(reg, cfg, leader, prov) {
+        if !cell.is_empty() || k == leader {
+            return (!cell.is_empty()).then_some(cell);
+        }
+        // Another provider riding the leader's harness on its own
+        // endpoint (GLM in Claude Code) that the leader's row doesn't run:
+        // offered as any other provider is, where it's set to run, since
+        // the leader's own subagents can't reach its endpoint (Rust-only).
+    } else if !leader.is_empty() && leader_runs(reg, cfg, leader, prov) {
         return None;
     }
     if !cfg.harness_on(h.as_str()) {
@@ -334,8 +339,19 @@ pub fn picks_of(rs: &[Runner]) -> Vec<Pick> {
         } else {
             &r.models
         };
-        for c in models {
-            let name = def_name(r, &c.id, &taken);
+        for (i, c) in models.iter().enumerate() {
+            let mut name = def_name(r, &c.id, &taken);
+            // A first model with no short name of its own goes by its
+            // provider's: kimi, glm, not kimi-code-k3 (Rust-only).
+            let prov = clean_name(&r.prov);
+            if i == 0
+                && !c.id.is_empty()
+                && !plain_model(&name)
+                && plain_model(&prov)
+                && !taken.contains(&prov)
+            {
+                name = prov;
+            }
             taken.insert(name.clone());
             let note = if c.note.is_empty() {
                 "A capable general agent"
@@ -642,5 +658,57 @@ mod tests {
         let defs = agent_defs(&reg, "claude");
         let names: Vec<&str> = defs.keys().map(String::as_str).collect();
         assert_eq!(names, ["fable", "haiku", "opus", "sonnet"]);
+    }
+
+    /// GLM's Coding Plan in Claude Code runs on GLM's endpoint, which a
+    /// Claude Code session's own subagents can't reach: it's offered to a
+    /// Claude Code session as to any other, by GLM's models' names, when
+    /// its key is kept, though GLM is set to run in ZCode (not here).
+    #[test]
+    fn glm_in_claude_code_is_offered_to_every_harness() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = crate::testing::Home::new();
+        let bin = rush_testenv::root().join("bin").join("claude");
+        std::fs::write(&bin, "#!/bin/sh\necho 2.1.0\n").unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(home.path().join("config.json"), r#"{"apiKeys":["glm"]}"#).unwrap();
+        let reg = Registry::new();
+        reg.register(rush_claude::Claude::at(rush_claude::Account::home()));
+        reg.register(rush_acp::glm::Glm::new());
+        rush_providers::register(&reg);
+        for leader in ["claude", "codex", "kimi"] {
+            let ps = picks(&reg, leader);
+            let glm: Vec<(&str, &str)> = ps
+                .iter()
+                .filter(|p| p.r.prov == "glm")
+                .map(|p| (p.name.as_str(), p.model.as_str()))
+                .collect();
+            assert_eq!(
+                glm,
+                [("glm", "glm-5.3"), ("flash", "glm-5.3-flash")],
+                "{leader}"
+            );
+            for (q, model) in [
+                ("glm", "glm-5.3"),
+                ("glm-5.3", "glm-5.3"),
+                ("glm 5.3 flash", "glm-5.3-flash"),
+            ] {
+                let (p, m) = crate::agentmatch::find(&reg, &ps, q, "")
+                    .unwrap_or_else(|| panic!("{leader}: {q} in {ps:?}"));
+                assert_eq!(
+                    (p.r.k.as_str(), p.model.as_str(), m.as_str()),
+                    ("glm-claude", model, ""),
+                    "{leader}: {q}"
+                );
+            }
+        }
+        // As Claude Code's own subagent types it's rush's to answer, not
+        // one of the session's own.
+        let names: Vec<String> = crate::native::others_of(&crate::native::offers(&reg, "claude"))
+            .into_iter()
+            .map(|o| o.name)
+            .collect();
+        assert!(names.iter().any(|n| n == "glm"), "{names:?}");
+        assert!(!names.iter().any(|n| n == "opus"), "{names:?}");
     }
 }
