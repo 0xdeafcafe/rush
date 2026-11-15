@@ -103,6 +103,22 @@ fn spans_w(ss: &[Span]) -> usize {
 }
 
 impl Right {
+    /// The fewest cells it shows everything in: its bar at BAR_LEAST.
+    fn least(&self) -> usize {
+        let (bw, aw) = (spans_w(&self.before), spans_w(&self.after));
+        let parts = [
+            bw,
+            if self.bar.is_some_and(|b| b.2 > 0) {
+                BAR_LEAST
+            } else {
+                0
+            },
+            aw,
+        ];
+        let n = parts.iter().filter(|w| **w > 0).count();
+        parts.iter().sum::<usize>() + n.saturating_sub(1)
+    }
+
     /// Laid out for room cells at most: as much as fits, the time last
     /// to go.
     fn lay(&self, room: usize) -> Line {
@@ -151,13 +167,21 @@ impl Right {
 /// the place is cut first, then the name down to NAME_LEAST, then right
 /// is laid out smaller.
 pub fn head_row(lead: &str, mark: Span, name: Span, place: &str, right: &Right, w: usize) -> Line {
+    let full = width(lead) + 2 + width(&name.text);
     let least = width(lead) + 2 + width(&name.text).min(NAME_LEAST);
     let mut left = line([plain(lead), mark, plain(" "), name]);
     if !place.is_empty() {
         left.spans.push(plain("  "));
         left.spans.push(sp(place.to_string(), DIM));
     }
-    let r = right.lay(w.saturating_sub(least + 2));
+    // The place goes first, then the bar shrinks to keep the name whole,
+    // then the name is cut to NAME_LEAST and the right laid out smaller.
+    let whole = w.saturating_sub(full + 2);
+    let r = if whole >= right.least() {
+        right.lay(whole)
+    } else {
+        right.lay(w.saturating_sub(least + 2))
+    };
     let rw = r.width();
     if rw == 0 {
         return fit(left, w);
@@ -501,7 +525,14 @@ fn ended_row(t: &TaskCard, lead: &str, now: Ms, w: usize) -> Line {
 /// redirect to /dev/null, no | tail, | head or | tee after it, on one
 /// line, home as ~.
 pub fn short_command(cmd: &str) -> String {
-    let mut c = one_line(&tildify(rush_convo::text::drop_cd(cmd)));
+    let mut c = one_line(&tildify(cmd.trim()));
+    // Every cd before what it runs: where is the row's place, not its name.
+    while let Some(after) = c.strip_prefix("cd ") {
+        match after.split_once(" && ") {
+            Some((dir, rest)) if !dir.contains([';', '|', '&']) => c = rest.to_string(),
+            _ => break,
+        }
+    }
     for tail in [" | tail", " | head", " | tee", " |& tee"] {
         if let Some(i) = c.find(tail) {
             c.truncate(i);
@@ -523,7 +554,9 @@ pub fn short_command(cmd: &str) -> String {
 /// spinner's or a bar's leftovers.
 fn says_something(l: &str) -> bool {
     let t = l.trim();
+    // cargo's bar is the head's bar already.
     !t.is_empty()
+        && !t.starts_with("Building [")
         && t.chars().any(|c| c.is_alphanumeric())
         && !t
             .chars()
@@ -556,7 +589,7 @@ pub struct ShellTask<'a> {
 /// A running command's rows w wide: its head (mark, command, a bar and
 /// counts when its output says how far it has got, its clock), then its
 /// last line that says something.
-pub fn shell_rows(t: &ShellTask, lead: &str, w: usize) -> Vec<Line> {
+pub fn shell_rows(t: &ShellTask, lead: &str, place: &str, w: usize) -> Vec<Line> {
     let ls: Vec<&str> = t.lines.iter().map(String::as_str).collect();
     let prog = rush_convo::render::progress_any(t.cmd, &ls);
     let mut after = t.used.clone();
@@ -580,7 +613,7 @@ pub fn shell_rows(t: &ShellTask, lead: &str, w: usize) -> Vec<Line> {
         },
     };
     let name = sp(short_command(t.cmd), TEXT);
-    let mut out = vec![head_row(lead, t.mark.clone(), name, "", &right, w)];
+    let mut out = vec![head_row(lead, t.mark.clone(), name, place, &right, w)];
     let indent = width(lead) + 2;
     let said = last_said(t.lines).map(str::to_string).or_else(|| {
         prog.as_ref()

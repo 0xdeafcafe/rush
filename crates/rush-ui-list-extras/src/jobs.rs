@@ -735,7 +735,9 @@ fn shell_task_rows(s: &Session, j: &Job, i: usize, w: usize, lead: &str, d: &Doc
         mark,
         used,
     };
-    crate::taskrow::shell_rows(&t, lead, w)
+    // Whose it is and the worktree it works in, as its place.
+    let whose = (d.who)(j).plain();
+    crate::taskrow::shell_rows(&t, lead, whose.trim(), w)
 }
 
 /// A rush watch's head row w wide, for the conversation in place of its

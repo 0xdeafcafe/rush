@@ -203,6 +203,7 @@ fn shell(cmd: &str, out: &[&str], ran: Ms) -> String {
                 used: Vec::new(),
             },
             " ",
+            "",
             w,
         )
     })
