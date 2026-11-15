@@ -20,9 +20,9 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use rush_core::adapter::{
-    Account, Adapter, Choice, Choices, Chooser, Conn, Driver, Feature, Features, Kind, Level,
-    PlanRider, Profile, Programmer, Provided, QuotaSource, Registry, Result, Rider, Sink,
-    StartOptions, Support,
+    Account, Adapter, Choice, Choices, Chooser, Conn, ContextWindower, Driver, Feature, Features,
+    Kind, Level, PlanRider, Profile, Programmer, Provided, QuotaSource, Registry, Result, Rider,
+    Sink, StartOptions, Support,
 };
 use rush_core::usage::Quota;
 
@@ -54,6 +54,7 @@ const NONE: Pair0 = Pair0 {
     models: &[],
     plan: false,
     coding_plan: false,
+    zai: false,
 };
 
 impl std::ops::Deref for Pair {
@@ -86,6 +87,9 @@ pub struct Pair0 {
     plan: bool,
     /// Its key draws from GLM's Coding Plan, whose limits it reads.
     coding_plan: bool,
+    /// Claude Code set up as Z.ai's guide says (zai_env), its models'
+    /// window 1M (Rust-only).
+    zai: bool,
 }
 
 // ponytail: DeepSeek's and GLM's model ids are as they were named in 2026
@@ -109,6 +113,7 @@ const PAIRS: [Pair0; 8] = [
         url: "https://api.z.ai/api/anthropic",
         models: &["glm-5.3", "glm-5.3-flash"],
         coding_plan: true,
+        zai: true,
         ..NONE
     },
     Pair0 {
@@ -321,6 +326,70 @@ pub fn claude_env(url: &str, key: &str, model: &str) -> Vec<String> {
     env
 }
 
+/// GLM's model in Claude Code with its 1M window: glm-5.3 and its Flash
+/// as glm-5.3[1m] (Z.ai's guide names them so); any other as it is.
+pub fn zai_model(model: &str) -> String {
+    if model.starts_with("glm-5") && !model.ends_with("[1m]") {
+        format!("{model}[1m]")
+    } else {
+        model.to_string()
+    }
+}
+
+/// GLM's main model in Claude Code when none is picked, and the one its
+/// background jobs and haiku run on (Z.ai's guide).
+pub const ZAI_MAIN: &str = "glm-5.3[1m]";
+pub const ZAI_FAST: &str = "glm-5.3-flash[1m]";
+
+/// Claude Code on GLM's Coding Plan, as Z.ai's guide sets it up
+/// (docs.z.ai/devpack/tool/claude): claude_env's endpoint and key, opus
+/// and sonnet on the model picked (else glm-5.3), haiku and Claude Code's
+/// background jobs on Flash, both with their 1M window, a long timeout,
+/// and no telemetry. The model picked stays ANTHROPIC_MODEL (Rust-only).
+pub fn zai_env(url: &str, key: &str, model: &str) -> Vec<String> {
+    let mut env = claude_env(url, key, "");
+    let main = if model.is_empty() {
+        ZAI_MAIN.to_string()
+    } else {
+        zai_model(model)
+    };
+    if !model.is_empty() {
+        env.push(format!("ANTHROPIC_MODEL={main}"));
+    }
+    for a in [
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_FABLE_MODEL",
+    ] {
+        env.push(format!("{a}={main}"));
+    }
+    for a in [
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "ANTHROPIC_SMALL_FAST_MODEL",
+    ] {
+        env.push(format!("{a}={ZAI_FAST}"));
+    }
+    env.extend(
+        [
+            "API_TIMEOUT_MS=3000000",
+            "CLAUDE_CODE_MAX_CONTEXT_TOKENS=1000000",
+            "CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000",
+            "DISABLE_TELEMETRY=1",
+        ]
+        .map(String::from),
+    );
+    env
+}
+
+/// A Z.ai pair's models' window in Claude Code (zai_env sets it).
+pub const ZAI_WINDOW: i64 = 1_000_000;
+
+impl ContextWindower for Pair {
+    fn context_window(&self, _model: &str) -> i64 {
+        ZAI_WINDOW
+    }
+}
+
 impl Adapter for Pair {
     fn kind(&self) -> Kind {
         Kind::from(self.kind)
@@ -398,6 +467,10 @@ impl Adapter for Pair {
     /// ("glm-5.3"), rather than Claude's names it maps to them.
     fn chooser(&self) -> Option<&dyn Chooser> {
         (self.harness == CLAUDE && !self.models.is_empty()).then_some(self as &dyn Chooser)
+    }
+    /// Its models' window, where rush sets it (zai_env).
+    fn context_windower(&self) -> Option<&dyn ContextWindower> {
+        self.zai.then_some(self as &dyn ContextWindower)
     }
     /// GLM's Coding Plan's limits, which its key draws from.
     fn quota_source(&self) -> Option<&dyn QuotaSource> {
@@ -490,6 +563,14 @@ impl Driver for Pair {
         o.effort.clear();
         o.binary = self.reg.path(self.harness);
         let h = self.harness_driver()?;
+        if self.harness == CLAUDE && self.zai {
+            o.env.extend(zai_env(self.url, &key, &o.model));
+            // Its 1M window, as the model's own name says it.
+            if !o.model.is_empty() {
+                o.model = zai_model(&o.model);
+            }
+            return h.driver().expect("checked").start(o, sink);
+        }
         if self.harness == CLAUDE {
             o.env.extend(claude_env(self.url, &key, &o.model));
             return h.driver().expect("checked").start(o, sink);
@@ -539,6 +620,65 @@ mod tests {
                 .contains(&"ANTHROPIC_DEFAULT_OPUS_MODEL=glm-4.6".to_string()),
             "a model picked stands in for opus"
         );
+    }
+
+    /// GLM in Claude Code as Z.ai's guide sets it up: with a model picked
+    /// and with none, every variable it gets, in order.
+    #[test]
+    fn glm_in_claude_code_is_set_up_as_zai_says() {
+        let base = [
+            "ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic",
+            "ANTHROPIC_AUTH_TOKEN=zk",
+            "ANTHROPIC_API_KEY=",
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
+        ];
+        let tail = [
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL=glm-5.3-flash[1m]",
+            "ANTHROPIC_SMALL_FAST_MODEL=glm-5.3-flash[1m]",
+            "API_TIMEOUT_MS=3000000",
+            "CLAUDE_CODE_MAX_CONTEXT_TOKENS=1000000",
+            "CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000",
+            "DISABLE_TELEMETRY=1",
+        ];
+        for (model, picked, main) in [
+            ("", None, "glm-5.3[1m]"),
+            ("glm-5.3", Some("glm-5.3[1m]"), "glm-5.3[1m]"),
+            ("glm-5.3[1m]", Some("glm-5.3[1m]"), "glm-5.3[1m]"),
+            (
+                "glm-5.3-flash",
+                Some("glm-5.3-flash[1m]"),
+                "glm-5.3-flash[1m]",
+            ),
+        ] {
+            let mut want: Vec<String> = base.iter().map(|s| s.to_string()).collect();
+            if let Some(p) = picked {
+                want.push(format!("ANTHROPIC_MODEL={p}"));
+            }
+            for a in ["OPUS", "SONNET", "FABLE"] {
+                want.push(format!("ANTHROPIC_DEFAULT_{a}_MODEL={main}"));
+            }
+            want.extend(tail.iter().map(|s| s.to_string()));
+            assert_eq!(
+                zai_env("https://api.z.ai/api/anthropic", "zk", model),
+                want,
+                "{model:?}"
+            );
+        }
+        // Only GLM's pair: DeepSeek's keeps claude_env as it was.
+        let reg = Registry::new();
+        reg.register(rush_claude::Claude::new());
+        assert!(pair(&reg, "glm-claude").zai);
+        assert!(!pair(&reg, "deepseek-claude").zai);
+        // The window rush shows for it is the 1M it runs with.
+        reg.register(pair(&reg, "glm-claude"));
+        reg.register(pair(&reg, "deepseek-claude"));
+        for (k, m, w) in [
+            ("glm-claude", "glm-5.3", 1_000_000),
+            ("glm-claude", "glm-5.3-flash[1m]", 1_000_000),
+            ("deepseek-claude", "deepseek-chat", 200_000),
+        ] {
+            assert_eq!(reg.context_window(k, m), w, "{k} {m}");
+        }
     }
 
     // Pi reads a provider it knows from the key's variable, and one it
