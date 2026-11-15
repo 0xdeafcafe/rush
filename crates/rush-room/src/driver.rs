@@ -24,10 +24,6 @@ use crate::room::{
 /// The longest one turn may run before it's stopped.
 const TURN_LIMIT: Duration = Duration::from_secs(10 * 60);
 
-/// Caps what one turn's prompt carries of the room, in bytes; a member
-/// with a small context window caps it lower (Member::context).
-const PROMPT_BUDGET: usize = 60_000;
-
 /// How often a turn's time is looked at.
 const TICK: Duration = Duration::from_secs(10);
 
@@ -1058,76 +1054,20 @@ impl Driver<'_> {
     /// spoke to it, and whether you spoke at all.
     fn since(&self, i: usize) -> (String, bool, bool) {
         let m = &self.ms[i];
-        let mut parts: Vec<String> = Vec::new();
-        let (mut to_you, mut from_user) = (false, false);
-        for (k, e) in self.log[m.seen.min(self.log.len())..].iter().enumerate() {
-            if e.from == m.m.name || m.told.contains(&(m.seen + k)) {
-                continue;
-            }
-            if e.from == USER {
-                from_user = true;
-                let mut who = "The user".to_string();
-                if !e.to.is_empty() {
-                    who += &format!(" (to {})", e.to);
-                    to_you = to_you || e.to.to_lowercase() == m.m.name.to_lowercase();
-                }
-                parts.push(format!("\n{who}:\n{}\n", e.text));
-            } else if e.kind == TOOL {
-                parts.push(format!(
-                    "  ({} ran a tool: {}{})\n",
-                    e.from,
-                    e.text,
-                    if_set(" — ", &e.detail)
-                ));
-            } else if e.kind == SAY {
-                parts.push(format!(
-                    "\n{}:\n{}\n{}",
-                    e.from,
-                    e.text,
-                    if_set("READY: ", &e.ready)
-                ));
-            }
-        }
-        // The newest is kept whole; the oldest goes first when it's long.
-        let budget = self.budget();
-        let mut total = 0;
-        let mut from = parts.len();
-        while from > 0 && total + parts[from - 1].len() <= budget {
-            from -= 1;
-            total += parts[from].len();
-        }
-        if from == parts.len() && from > 0 {
-            // even the newest is too long: its tail
-            let last = &parts[from - 1];
-            let mut cut = last.len().saturating_sub(budget);
-            while !last.is_char_boundary(cut) {
-                cut += 1; // a character cut in two is left out
-            }
-            parts[from - 1] = format!("[shortened] {}", &last[cut..]);
-            from -= 1;
-        }
-        let mut out = parts[from..].concat();
-        if from > 0 {
-            out = format!("(earlier turns left out for length)\n{out}");
-        }
-        (out, to_you, from_user)
+        let from = m.seen.min(self.log.len());
+        let es = self.log[from..]
+            .iter()
+            .enumerate()
+            .filter(|(k, _)| !m.told.contains(&(from + k)))
+            .map(|(_, e)| e);
+        let s = crate::seen::since(es, &m.m.name, self.budget());
+        (s.text, s.to_you, s.from_user)
     }
 
     /// PROMPT_BUDGET, or less where a member's context window is small:
     /// about a byte and a half per token of it, less the rules.
     fn budget(&self) -> usize {
-        let mut b = PROMPT_BUDGET as i64;
-        for m in &self.ms {
-            if m.m.context > 0 {
-                // Saturating: a context read from room.json can be anything.
-                b = b.min(
-                    (m.m.context.saturating_mul(3) / 2)
-                        .saturating_sub(4096)
-                        .max(2048),
-                );
-            }
-        }
-        b as usize
+        crate::seen::budget(self.ms.iter().map(|m| m.m.context))
     }
 }
 
