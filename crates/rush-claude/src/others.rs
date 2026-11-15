@@ -14,7 +14,8 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::mpsc::{Receiver, channel};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use rush_core::adapter::{DelegateCall, DelegateRef, OtherAgent};
 use rush_core::wire::RawJson;
@@ -70,10 +71,11 @@ pub fn hooks() -> Value {
 pub struct Native {
     delegate: DelegateRef,
     names: HashSet<String>,
-    /// Calls rush took, by tool_use_id, from before the call to after it.
-    calls: Mutex<HashMap<String, DelegateCall>>,
-    /// Calls waiting on their model's answer.
-    open: AtomicUsize,
+    /// Calls rush took, by tool_use_id, from before the call to after it:
+    /// where their model's answer comes.
+    calls: Mutex<HashMap<String, Receiver<Result<String, String>>>>,
+    /// Calls whose model is still at work.
+    open: Arc<AtomicUsize>,
 }
 
 impl Native {
@@ -87,11 +89,11 @@ impl Native {
             delegate,
             names: others.iter().map(|o| o.name.clone()).collect(),
             calls: Mutex::new(HashMap::new()),
-            open: AtomicUsize::new(0),
+            open: Arc::new(AtomicUsize::new(0)),
         })
     }
 
-    fn calls(&self) -> MutexGuard<'_, HashMap<String, DelegateCall>> {
+    fn calls(&self) -> MutexGuard<'_, HashMap<String, Receiver<Result<String, String>>>> {
         self.calls.lock().unwrap_or_else(|e| e.into_inner())
     }
 
@@ -101,7 +103,10 @@ impl Native {
     }
 
     /// The PreToolUse hook's output for an Agent call (its hook input):
-    /// for one of rush's types, the stand-in's input; else no word.
+    /// for one of rush's types, the stand-in's input; else no word. The
+    /// model asked for starts now, beside the stand-in, so the run rush
+    /// hosts is there as soon as Claude Code's (which the UI then hides
+    /// behind it) and its answer is no later for the stand-in's turn.
     pub fn pre(&self, input: &Value) -> Value {
         let ti = &input["tool_input"];
         let ty = ti["subagent_type"].as_str().unwrap_or_default();
@@ -115,7 +120,15 @@ impl Native {
             background: ti["run_in_background"].as_bool().unwrap_or(false),
             step: id.to_string(),
         };
-        self.calls().insert(id.to_string(), call);
+        let (tx, rx) = channel();
+        self.calls().insert(id.to_string(), rx);
+        let (delegate, open) = (self.delegate.clone(), self.open.clone());
+        open.fetch_add(1, Ordering::SeqCst);
+        std::thread::spawn(move || {
+            let out = delegate.run(call);
+            open.fetch_sub(1, Ordering::SeqCst);
+            let _ = tx.send(out);
+        });
         let mut stand_in = ti.clone();
         if let Some(m) = stand_in.as_object_mut() {
             m.insert("prompt".into(), STAND_IN_TASK.into());
@@ -138,15 +151,14 @@ impl Native {
     /// it has one; else no word. It waits as long as the model works.
     pub fn post(&self, input: &Value) -> Value {
         let id = input["tool_use_id"].as_str().unwrap_or_default();
-        let Some(call) = self.calls().remove(id) else {
+        let Some(rx) = self.calls().remove(id) else {
             return json!({});
         };
-        self.open.fetch_add(1, Ordering::SeqCst);
-        let text = match self.delegate.run(call) {
-            Ok(t) => t,
-            Err(e) => e,
+        let text = match rx.recv() {
+            Ok(Ok(t)) => t,
+            Ok(Err(e)) => e,
+            Err(_) => "the model's run ended without an answer".to_string(),
         };
-        self.open.fetch_sub(1, Ordering::SeqCst);
         json!({"hookSpecificOutput": {
             "hookEventName": "PostToolUse",
             "updatedToolOutput": answered(&input["tool_response"], &text),
