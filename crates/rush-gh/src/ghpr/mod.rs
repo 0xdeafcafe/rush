@@ -8,11 +8,13 @@
 
 mod act;
 mod branches;
+mod links;
 mod run;
 mod view;
 
 pub use act::{Comment, sel};
 pub use branches::{BRANCH_EVERY, ByBranch, Status, parse_branches};
+pub use links::{GhLink, Job, Run, github_link, parse_run, parse_run_url, run_url};
 pub use run::{Error, MergeError, RunError, Runner, SystemGh, gh_err, merge_err};
 pub use view::{Issue, issue_url, parse_issue_url, parse_one, parse_url, pr_url};
 
