@@ -1046,11 +1046,17 @@ fn nested_asks<I: std::borrow::Borrow<rush_host::Info>>(
 
 /// Where a hosted run's agent writes session sid, and the profile it's
 /// under: where its agent keeps sessions, else where its own list has it
-/// (spawns.go:266 hostedSession).
+/// (spawns.go:266 hostedSession). A provider in another's harness (GLM in
+/// Claude Code) writes where its harness would, in its own folder: the
+/// harness says where (Rust-only).
 fn hosted_transcript(reg: &Registry, k: &str, cfg: &Config, sid: &str) -> Option<(String, String)> {
     let mut t = reg.transcript_path(k, &cfg.account, &cfg.cwd, sid);
     if t.is_empty() && reg.reads_as_claude(k) {
         t = reg.transcript_path(rush_core::adapter::LEGACY_KIND, &cfg.account, &cfg.cwd, sid);
+    }
+    let h = reg.harness_of(k);
+    if t.is_empty() && h.as_str() != k {
+        t = reg.transcript_path(h.as_str(), &cfg.account, &cfg.cwd, sid);
     }
     if !t.is_empty() {
         return Some((t, cfg.account.name.clone()));
