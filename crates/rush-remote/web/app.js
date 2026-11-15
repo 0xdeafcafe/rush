@@ -510,18 +510,68 @@ function sessionScreen(id) {
     if (plan && !plan.isConnected) plan = null; // trimmed off with its turn
   };
 
-  const diff = ed => `<pre>${ed.Old ? ed.Old.split('\n').map(x => `<span class=del>- ${esc(x)}</span>`).join('\n') + '\n' : ''}${(ed.New || '').split('\n').map(x => `<span class=add>+ ${esc(x)}</span>`).join('\n')}</pre>`;
+  // a call's kind as rush numbers it (core's KINDS), the glyph each draws,
+  // and one drawn: folded, what it works on, and — open — what went in and
+  // what came out (the output lands in it as it arrives).
+  const K = {SHELL: 1, READ: 2, EDIT: 3, WRITE: 4, DELETE: 5, MOVE: 6, SEARCH: 7, GLOB: 8, FETCH: 9, WEB: 10, AGENT: 11, TODO: 12, ASK: 13, PLAN: 14, MCP: 15, NOTE: 16, THINK: 17};
+  const kindGlyph = ['·', '$', '◧', '✎', '✎', '✕', '→', '⌕', '⌕', '⊕', '⊕', '⇉', '☐', '?', '◫', '◆', '▦', '·'];
+  const kindName = k => Object.entries(K).find(([, n]) => n === k)?.[0].toLowerCase() || 'other';
+  const diff = ed => `<pre class=indiff>${ed.Old ? ed.Old.split('\n').map(x => `<span class=del>- ${esc(x)}</span>`).join('\n') + '\n' : ''}${(ed.New || '').split('\n').map(x => `<span class=add>+ ${esc(x)}</span>`).join('\n')}</pre>`;
+  // what an edit or write did, as its output's patches say: a file's hunks,
+  // each line prefixed as the patch has it
+  const patchDiff = p => `<div class="text-blue truncate">${esc(home(p.path || ''))}</div><pre>${p.lines ? p.lines.map(l => `<span class="${l.startsWith('+') ? 'add' : l.startsWith('-') ? 'del' : ''}">${esc(l)}</span>`).join('\n') : ''}</pre>`;
+  const todoBox = (label, ts) => `<div class=plan><div>${esc(label)} <span class=text-dim>${ts.filter(t => t.Status === 'completed').length}/${ts.length}</span></div><ul>${ts.map(t => `<li data-s="${esc(t.Status)}"><span>${t.Status === 'completed' ? '✓' : t.Status === 'in_progress' ? '▸' : '·'}</span><span>${esc(t.Label)}</span></li>`).join('')}</ul></div>`;
   const callBody = c => {
     const i = c.Input || {};
-    if (i.Edits && i.Edits.length) return i.Edits.map(e => `<div class=text-blue>${esc(home(e.Path || i.Path))}</div>${diff(e)}`).join('');
-    if (i.Content) return `<div class=text-blue>${esc(home(i.Path))}</div><pre>${esc(i.Content.slice(0, 4000))}</pre>`;
-    if (i.Command) return `<pre>${esc(i.Command)}</pre>`;
-    return '';
+    switch (c.Kind) {
+      case K.SHELL: return `${i.Cwd ? `<div class=where>${esc(home(i.Cwd))}${i.Background ? ' · in the background' : ''}</div>` : ''}<pre class=cmd>${esc(i.Command || '')}</pre>`;
+      case K.EDIT: return (i.Edits || []).map(e => `<div class="text-blue truncate">${esc(home(e.Path || i.Path))}</div>${diff(e)}`).join('') || `<div class="text-blue truncate">${esc(home(i.Path))}</div>`;
+      case K.WRITE: return `<div class="text-blue truncate">${esc(home(i.Path))}</div>${i.Content ? `<pre>${esc(i.Content.slice(0, 4000))}</pre>${i.Content.length > 4000 ? '<p class=text-faint>…</p>' : ''}` : ''}`;
+      case K.READ: case K.NOTE: return `<div class="text-blue truncate">${esc(home(i.Path))}${i.Offset ? ` <span class=text-dim>from line ${i.Offset}${i.Limit ? `, ${i.Limit} lines` : ''}</span>` : ''}</div>`;
+      case K.FETCH: return `${i.URL ? `<a href="${esc(i.URL)}" target=_blank rel=noreferrer>${esc(i.URL)}</a>` : ''}${i.Prompt ? `<p class=text-dim>${esc(i.Prompt)}</p>` : ''}`;
+      case K.WEB: return `<p>${esc(i.Query || '')}</p>`;
+      case K.SEARCH: case K.GLOB: return `<pre>${esc(i.Pattern || '')}${i.Path ? `\n<span class=text-dim>in ${esc(home(i.Path))}</span>` : ''}</pre>`;
+      case K.TODO: return todoBox((i.Todos || []).find(t => t.Status === 'in_progress')?.Active || 'task list', i.Todos || []);
+      case K.AGENT: return `<div class=agent>${esc(i.Agent || c.Name || 'agent')}</div>${i.Prompt ? `<p class=text-dim>${esc(i.Prompt.slice(0, 600))}${i.Prompt.length > 600 ? '…' : ''}</p>` : ''}`;
+      default: return c.Title ? `<p class=text-dim>${esc(c.Title)}</p>` : '';
+    }
   };
-  const callWhat = c => { const i = c.Input || {}; return i.Description || home(i.Path) || i.Pattern || (i.Command || '').split('\n')[0] || ''; };
-  const callMore = c => { const i = c.Input || {}; return i.Description ? (i.Command || '').split('\n')[0] : ''; };
-  const callEl = c => el(`<details class=step><summary><span class=run>✻</span><span class=glyph>${glyphs[c.Name] || '·'}</span><span class=what>${esc(callWhat(c) || c.Title || c.Name)}</span><span class=more>${esc(callMore(c))}</span></summary><div class=step-body>${callBody(c)}</div></details>`);
+  const callWhat = c => { const i = c.Input || {};
+    switch (c.Kind) {
+      case K.SHELL: return (i.Command || '').split('\n')[0] || i.Description || '';
+      case K.READ: case K.EDIT: case K.WRITE: case K.NOTE: return home(i.Path);
+      case K.MOVE: return `${home(i.Path)} → ${home(i.To)}`;
+      case K.SEARCH: case K.GLOB: return i.Pattern || '';
+      case K.FETCH: return i.URL || '';
+      case K.WEB: return i.Query || '';
+      case K.AGENT: return i.Description || (i.Prompt || '').split('\n')[0] || 'subagent';
+      case K.TODO: { const t = (i.Todos || []).find(x => x.Status === 'in_progress'); return (t && (t.Active || t.Label)) || 'task list'; }
+      default: return i.Description || home(i.Path) || i.Pattern || (i.Command || '').split('\n')[0] || '';
+    }
+  };
+  const callMore = c => { const i = c.Input || {};
+    if (c.Kind === K.EDIT || c.Kind === K.WRITE) {
+      const a = (i.Content || '').split('\n').length + (i.Edits || []).reduce((n, e) => n + (e.New || '').split('\n').length, 0);
+      const d = (i.Edits || []).reduce((n, e) => n + (e.Old || '').split('\n').length, 0);
+      return `+${Math.max(0, a - 1)} −${Math.max(0, d - 1)}`;
+    }
+    if (c.Kind === K.AGENT) return i.Agent || '';
+    return i.Description ? (i.Command || '').split('\n')[0] : '';
+  };
+  const callEl = c => el(`<details class=step data-kind=${kindName(c.Kind)}><summary><span class=run>✻</span><span class=glyph>${kindGlyph[c.Kind] || glyphs[c.Name] || '·'}</span><span class=what>${esc(callWhat(c) || c.Title || c.Name)}</span><span class=more>${esc(callMore(c))}</span></summary><div class=step-body>${callBody(c)}</div></details>`);
   const finish = (c, bad) => { const m = $('summary > span', c); m.className = 'ok'; m.textContent = bad ? '✗' : '✓'; if (bad) c.dataset.err = ''; };
+  // a call's output lands in its card: what its edit did as patches, its
+  // text or stdout (kept to a scroll), and its stderr when it failed
+  const callOut = (c, o) => {
+    const b = $('.step-body', c);
+    if (!b) return;
+    if (o.Patches && o.Patches.length) { const d = $('.indiff', c); if (d) d.remove(); b.insertAdjacentHTML('beforeend', o.Patches.map(patchDiff).join('')); }
+    const txt = (o.Text || o.Stdout || '').slice(0, 3000);
+    if (txt) b.insertAdjacentHTML('beforeend', `<pre class=out>${esc(txt)}${(o.Text || o.Stdout || '').length > 3000 ? '\n…' : ''}</pre>`);
+    if (o.IsError && o.Stderr && o.Stderr !== o.Text) b.insertAdjacentHTML('beforeend', `<pre class="out err-out">${esc(o.Stderr.slice(0, 1500))}</pre>`);
+    if (o.Exit != null && o.Exit !== 0) b.insertAdjacentHTML('beforeend', `<p class=exit>exit ${+o.Exit}</p>`);
+    finish(c, o.IsError || (o.Exit != null && o.Exit !== 0));
+  };
 
   const askEl = (t, v) => {
     const a = document.createElement('div'); a.className = 'ask';
@@ -664,8 +714,8 @@ function sessionScreen(id) {
         } else for (const p of v.Parts || []) {
           if (p.Kind === 0 && p.Text && !v.Injected && !(live && !prep)) put(`<div class=you><span class=who>you</span><div>${esc(p.Text)}</div></div>`);
           if (p.Kind === 3 && p.Output) {
-            const o = p.Output, c = calls.get(o.CallID), txt = (o.Text || o.Stdout || '').slice(0, 3000);
-            if (c) { if (txt) $('.step-body', c).insertAdjacentHTML('beforeend', `<pre>${esc(txt)}</pre>`); finish(c, o.IsError); }
+            const c = calls.get(p.Output.CallID);
+            if (c) callOut(c, p.Output);
           }
         }
       } break;
@@ -677,8 +727,8 @@ function sessionScreen(id) {
       case 'task_progress': if (prep) break; { const t = tasks.get(v.ID); if (t) { t.status = v.Summary || v.LastTool; drawDetails(); } } break;
       case 'background': if (prep) break; { const ids = new Set((v.Tasks || []).map(t => t.ID)); tasks.forEach((t, k) => { if (!ids.has(k)) t.done = true; }); (v.Tasks || []).forEach(t => { if (!tasks.has(t.ID)) tasks.set(t.ID, t); }); drawDetails(); } break;
       case 'plan': {
-        const todos = v.Todos || [], now = todos.find(t => t.Status === 'in_progress'), done = todos.filter(t => t.Status === 'completed').length;
-        const h = `<div class=plan><div>${esc(now ? now.Label : 'plan')} <span class=text-dim>${done}/${todos.length}</span></div><ul>${todos.map(t => `<li data-s="${esc(t.Status)}"><span>${t.Status === 'completed' ? '✓' : t.Status === 'in_progress' ? '▸' : '·'}</span><span>${esc(t.Label)}</span></li>`).join('')}</ul></div>`;
+        const todos = v.Todos || [], now = todos.find(t => t.Status === 'in_progress');
+        const h = todoBox(now ? now.Label : 'plan', todos);
         if (plan && !prep && plan.isConnected) { const n = el(h); n._i = plan._i; plan.replaceWith(n); plan = n; } else plan = put(h);
       } break;
       case 'turn_end': if (!prep) live = null; if (v.Err) put(`<div class=err-line>✗ ${esc(v.Err)}</div>`); break;
