@@ -12,7 +12,10 @@ use serde_json::{Map, Value};
 
 use crate::go::quote;
 use crate::goflag::{FlagSet, Kind};
-use crate::pr::{EXIT_ERROR, Options, Until, resolve, watch_pr};
+use crate::limit::Patience;
+use crate::pr::{EXIT_ERROR, EXIT_TIMED_OUT, Options, Unresolved, Until, resolve_with, watch_pr};
+use crate::run::resolve_run_with;
+use rush_state::Time;
 
 pub const WATCH_USAGE: &str =
     "rush watch: wait on something without polling it yourself. rush asks for
@@ -175,6 +178,13 @@ pub fn watch_cmd_in(
             log_session_event(&session, kind, f)
         }
     };
+    // Say writes each line as it's said, as Go's Fprintln does.
+    let out = std::cell::RefCell::new(stdout);
+    let say = |s: &str| {
+        let mut w = out.borrow_mut();
+        let _ = writeln!(w, "{s}");
+        let _ = w.flush();
+    };
     let mut o = Options {
         until,
         // A negative timeout is never, as Go's is.
@@ -196,27 +206,22 @@ pub fn watch_cmd_in(
         Some(l) => l,
         None => Box::new(log),
     };
-    let (repo, n) = match resolve(Path::new(&env.dir), &what) {
+    let patience = patience(o.timeout, &say);
+    let (repo, n) = match resolve_with(Path::new(&env.dir), &what, &patience) {
         Ok(v) => v,
         Err(e) => {
             let mut f = Map::new();
             f.insert("what".into(), what.clone().into());
-            f.insert("err".into(), e.clone().into());
+            f.insert("err".into(), e.to_string().into());
             log("watch-pr-failed", f);
-            let _ = writeln!(stderr, "rush watch: {e}");
-            return EXIT_ERROR;
+            return unresolved(e, stderr, &say);
         }
     };
     o.repo = repo;
     o.number = n;
     o.log = Some(log);
-    // Say writes each line as it's said, as Go's Fprintln does.
-    let out = std::cell::RefCell::new(stdout);
-    o.say = Some(Box::new(move |s: &str| {
-        let mut w = out.borrow_mut();
-        let _ = writeln!(w, "{s}");
-        let _ = w.flush();
-    }));
+    o.say = Some(Box::new(say));
+    drop(patience);
     watch_pr(&o)
 }
 
@@ -270,30 +275,33 @@ fn watch_run_cmd(
             log_session_event(&session, kind, f)
         }
     };
-    let target = match crate::run::resolve_run(Path::new(&env.dir), &what, &workflow) {
+    // Say writes each line as it's said.
+    let out = std::cell::RefCell::new(stdout);
+    let say = |s: &str| {
+        let mut w = out.borrow_mut();
+        let _ = writeln!(w, "{s}");
+        let _ = w.flush();
+    };
+    // A negative timeout is never, as watch pr's is.
+    let timeout = Duration::from_nanos(fs.duration("timeout").max(0) as u64);
+    let patience = patience(timeout, &say);
+    let target = match resolve_run_with(Path::new(&env.dir), &what, &workflow, &patience) {
         Ok(t) => t,
         Err(e) => {
             let mut f = Map::new();
             f.insert("what".into(), what.clone().into());
-            f.insert("err".into(), e.clone().into());
+            f.insert("err".into(), e.to_string().into());
             log("watch-run-failed", f);
-            let _ = writeln!(stderr, "rush watch: {e}");
-            return EXIT_ERROR;
+            return unresolved(e, stderr, &say);
         }
     };
+    drop(patience);
     let repo = target.repo.clone();
-    // Say writes each line as it's said.
-    let out = std::cell::RefCell::new(stdout);
     let o = crate::run::RunOptions {
         target: Some(target),
         until,
-        // A negative timeout is never, as watch pr's is.
-        timeout: Duration::from_nanos(fs.duration("timeout").max(0) as u64),
-        say: Some(Box::new(move |s: &str| {
-            let mut w = out.borrow_mut();
-            let _ = writeln!(w, "{s}");
-            let _ = w.flush();
-        })),
+        timeout,
+        say: Some(Box::new(say)),
         log: Some(Box::new(log)),
         task: env.task.clone(),
         expect: (!env.task.is_empty()).then(|| {
@@ -305,4 +313,34 @@ fn watch_run_cmd(
         ..Default::default()
     };
     crate::run::watch_run(&o)
+}
+
+/// How what comes before a watch (naming its branch or pull request) waits
+/// out GitHub's rate limit: for as long as the timeout, saying when.
+fn patience<'a>(timeout: Duration, say: &'a dyn Fn(&str)) -> Patience<'a> {
+    Patience {
+        wait: true,
+        start: Time::now(),
+        timeout,
+        say: Box::new(say),
+        sleep: Box::new(crate::stop::sleep),
+        now: Box::new(Time::now),
+        limited: Box::new(crate::gh::limited_until),
+    }
+}
+
+/// How a watch that couldn't start ends: 2 when GitHub's rate limit resets
+/// after its timeout (said on stdout, as a timed out watch says it), 3
+/// otherwise.
+fn unresolved(e: Unresolved, stderr: &mut dyn Write, say: &dyn Fn(&str)) -> i32 {
+    match e {
+        Unresolved::TimedOut(line) => {
+            say(&line);
+            EXIT_TIMED_OUT
+        }
+        Unresolved::Failed(e) => {
+            let _ = writeln!(stderr, "rush watch: {e}");
+            EXIT_ERROR
+        }
+    }
 }

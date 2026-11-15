@@ -20,9 +20,10 @@ use serde_json::{Map, Value, json};
 
 use crate::gh::{self, Error, nd};
 use crate::go::{duration, quote, round, round_to, short};
+use crate::limit::{self, Patience};
 use crate::pr::{
     Check, EXIT_ERROR, EXIT_FAILED, EXIT_PASSED, EXIT_TIMED_OUT, LogFn, LogsFn, NowFn, SayFn,
-    SleepFn, StoppedFn, Until, interval,
+    SleepFn, StoppedFn, Unresolved, Until, interval,
 };
 
 /// What rush watch run was given to watch, before asking anyone.
@@ -160,27 +161,45 @@ fn git(dir: &Path, args: &[&str]) -> Option<String> {
 /// names one, kept to workflow when one is given. A branch is asked of
 /// GitHub for its head commit, once; "" is this checkout's commit.
 pub fn resolve_run(dir: &Path, what: &str, workflow: &str) -> Result<Target, String> {
-    let (mut repo, arg) = parse_arg(what)?;
+    resolve_run_with(dir, what, workflow, &Patience::none()).map_err(|e| e.to_string())
+}
+
+/// [`resolve_run`], waiting out GitHub's rate limit as patience says.
+pub fn resolve_run_with(
+    dir: &Path,
+    what: &str,
+    workflow: &str,
+    p: &Patience,
+) -> Result<Target, Unresolved> {
+    let (mut repo, arg) = parse_arg(what).map_err(Unresolved::Failed)?;
     if repo.is_empty() {
-        let out = gh::run(
-            Some(dir),
-            &[
-                "repo",
-                "view",
-                "--json",
-                "nameWithOwner",
-                "--jq",
-                ".nameWithOwner",
-            ],
-        );
+        let out = p
+            .call(|| {
+                gh::run_checked(
+                    Some(dir),
+                    &[
+                        "repo",
+                        "view",
+                        "--json",
+                        "nameWithOwner",
+                        "--jq",
+                        ".nameWithOwner",
+                    ],
+                )
+            })
+            .map_err(Unresolved::of)?;
         repo = match &out.err {
             Some(e @ rush_gh::ghpr::RunError::Exit { .. }) => {
-                return Err(gh::gh_error(0, &[], &out.stderr, Some(e)).to_string());
+                return Err(Unresolved::Failed(
+                    gh::gh_error(0, &[], &out.stderr, Some(e)).to_string(),
+                ));
             }
-            Some(e) => return Err(e.to_string()),
+            Some(e) => return Err(Unresolved::Failed(e.to_string())),
             None => String::from_utf8_lossy(&out.stdout).trim().to_string(),
         };
     }
+    // A wait that ran out of time, from the lookups that return no error.
+    let held: std::cell::RefCell<Option<Unresolved>> = std::cell::RefCell::new(None);
     let what = match arg {
         Arg::Run(id) => What::Run(id),
         Arg::Sha(sha) => What::Sha {
@@ -190,19 +209,28 @@ pub fn resolve_run(dir: &Path, what: &str, workflow: &str) -> Result<Target, Str
                     let rev = format!("{s}^{{commit}}");
                     git(dir, &["rev-parse", "--verify", "-q", &rev])
                 },
-                |s| commit_sha(&repo, s),
-            )?,
+                |s| match commit_sha(&repo, s, p) {
+                    Ok(sha) => sha,
+                    Err(e) => {
+                        *held.borrow_mut() = Some(e);
+                        None
+                    }
+                },
+            )
+            .map_err(|e| held.borrow_mut().take().unwrap_or(Unresolved::Failed(e)))?,
             branch: String::new(),
         },
         Arg::Current => {
             let sha = git(dir, &["rev-parse", "HEAD"])
                 .filter(|s| !s.is_empty())
-                .ok_or_else(|| "no commit here: give a branch, a sha or a run id".to_string())?;
+                .ok_or_else(|| {
+                    Unresolved::Failed("no commit here: give a branch, a sha or a run id".into())
+                })?;
             let branch = git(dir, &["symbolic-ref", "--short", "-q", "HEAD"]).unwrap_or_default();
             What::Sha { sha, branch }
         }
         Arg::Branch(b) => What::Sha {
-            sha: head_of(&repo, &b)?,
+            sha: head_of(&repo, &b, p)?,
             branch: b,
         },
     };
@@ -238,23 +266,30 @@ pub fn full_sha(
 }
 
 /// The full sha GitHub gives a commit (any unambiguous prefix of one).
-fn commit_sha(repo: &str, rev: &str) -> Option<String> {
+fn commit_sha(repo: &str, rev: &str, p: &Patience) -> Result<Option<String>, Unresolved> {
     #[derive(Deserialize, Default)]
     struct Commit {
         #[serde(default, deserialize_with = "nd")]
         sha: String,
     }
-    gh::get(
-        &format!("repos/{repo}/commits/{rev}"),
-        Duration::from_secs(10),
-    )
-    .ok()
-    .and_then(|(b, _)| decode::<Commit>(&b).ok())
-    .map(|c| c.sha)
+    let got = p.call(|| {
+        gh::get(
+            &format!("repos/{repo}/commits/{rev}"),
+            Duration::from_secs(10),
+        )
+    });
+    match got {
+        Ok((b, _)) => Ok(decode::<Commit>(&b).ok().map(|c| c.sha)),
+        Err(limit::Waited::Err(Error::Limited)) => {
+            Err(Unresolved::Failed(Error::Limited.to_string()))
+        }
+        Err(limit::Waited::Err(_)) => Ok(None),
+        Err(w) => Err(Unresolved::of(w)),
+    }
 }
 
 /// The commit branch (or a tag) heads on GitHub.
-fn head_of(repo: &str, branch: &str) -> Result<String, String> {
+fn head_of(repo: &str, branch: &str, p: &Patience) -> Result<String, Unresolved> {
     #[derive(Deserialize, Default)]
     struct Commit {
         #[serde(default, deserialize_with = "nd")]
@@ -266,19 +301,36 @@ fn head_of(repo: &str, branch: &str) -> Result<String, String> {
         commit: Commit,
     }
     let fresh = Duration::from_secs(10);
-    let by_branch = gh::get(&format!("repos/{repo}/branches/{branch}"), fresh)
-        .and_then(|(b, _)| decode::<Branch>(&b))
-        .map(|b| b.commit.sha);
+    let by_branch = p.call(|| {
+        gh::get(&format!("repos/{repo}/branches/{branch}"), fresh)
+            .and_then(|(b, _)| decode::<Branch>(&b))
+            .map(|b| b.commit.sha)
+    });
     match by_branch {
-        Ok(sha) if !sha.is_empty() => Ok(sha),
-        Err(Error::Limited) => Err(Error::Limited.to_string()),
-        _ => match gh::get(&format!("repos/{repo}/commits/{branch}"), fresh)
+        Ok(sha) if !sha.is_empty() => return Ok(sha),
+        Err(limit::Waited::Err(Error::Limited)) => {
+            return Err(Unresolved::Failed(Error::Limited.to_string()));
+        }
+        Err(w @ (limit::Waited::TimedOut(_) | limit::Waited::Stopped)) => {
+            return Err(Unresolved::of(w));
+        }
+        _ => {}
+    }
+    let by_commit = p.call(|| {
+        gh::get(&format!("repos/{repo}/commits/{branch}"), fresh)
             .and_then(|(b, _)| decode::<Commit>(&b))
-        {
-            Ok(c) if !c.sha.is_empty() => Ok(c.sha),
-            Ok(_) => Err(format!("no branch or tag {} in {repo}", quote(branch))),
-            Err(e) => Err(format!("no branch or tag {} in {repo}: {e}", quote(branch))),
-        },
+    });
+    match by_commit {
+        Ok(c) if !c.sha.is_empty() => Ok(c.sha),
+        Ok(_) => Err(Unresolved::Failed(format!(
+            "no branch or tag {} in {repo}",
+            quote(branch)
+        ))),
+        Err(limit::Waited::Err(e)) => Err(Unresolved::Failed(format!(
+            "no branch or tag {} in {repo}: {e}",
+            quote(branch)
+        ))),
+        Err(w) => Err(Unresolved::of(w)),
     }
 }
 
@@ -563,7 +615,7 @@ impl RunOptions<'_> {
         match &self.head {
             Some(f) => f(repo, branch, sha),
             None => {
-                let new = head_of(repo, branch).ok()?;
+                let new = head_of(repo, branch, &Patience::none()).ok()?;
                 let has = (new != sha).then(|| has_commit(repo, sha, &new)).flatten();
                 Some((new, has))
             }
@@ -807,7 +859,9 @@ fn watching(o: &RunOptions, start: Time, st: &mut State) -> i32 {
     let mut expected_for: Vec<i64> = Vec::new();
     let mut fails = 0;
     let mut limited = false;
-    let mut said_limited = false;
+    // Looks in a row GitHub said it's limited, and the resume time last said.
+    let mut strikes = 0;
+    let mut said_for: Option<Time> = None;
     let mut said_waiting = false;
     loop {
         let (res, r) = o.fetch(Duration::from_secs(10));
@@ -818,11 +872,12 @@ fn watching(o: &RunOptions, start: Time, st: &mut State) -> i32 {
             st.why = "stopped".into();
             return EXIT_ERROR;
         }
-        let mut until: Option<Time> = None;
+        // How long to wait for a spent limit, when it is.
+        let mut spent: Option<Duration> = None;
         match res {
             Err(Error::Limited) => {
                 st.remaining = 0;
-                until = o.limited();
+                let until = o.limited();
                 if !limited {
                     limited = true;
                     o.log(
@@ -831,18 +886,22 @@ fn watching(o: &RunOptions, start: Time, st: &mut State) -> i32 {
                             "why": Error::Limited.to_string()})),
                     );
                 }
-                if !said_limited {
-                    // Said once: a watch that waits out the limit isn't
-                    // a failure.
-                    said_limited = true;
-                    o.say(&match until {
-                        Some(u) => format!(
-                            "rush watch: GitHub's rate limit is spent; asking again when it resets, in {}",
-                            round(since(u, o.now()))
-                        ),
-                        None => "rush watch: GitHub's rate limit is spent; asking again later".into(),
-                    });
+                // Waits it out, and says so once: a spent limit isn't a
+                // failure, unless it resets after the timeout.
+                let now = o.now();
+                let wait = limit::wait_for(until, now, strikes);
+                strikes += 1;
+                let resume = now + wait;
+                if !o.timeout.is_zero() && since(resume, start) > o.timeout {
+                    o.say(&limit::timed_out_line(resume.local(), now, o.timeout));
+                    st.why = "timed out".into();
+                    return EXIT_TIMED_OUT;
                 }
+                if said_for.is_none_or(|s| since(resume, s) > Duration::from_secs(30)) {
+                    said_for = Some(resume);
+                    o.say(&limit::waiting_line(resume.local(), now));
+                }
+                spent = Some(wait);
             }
             Err(err) => {
                 // A blip is asked again; three in a row end it.
@@ -856,6 +915,8 @@ fn watching(o: &RunOptions, start: Time, st: &mut State) -> i32 {
             Ok(rs) => {
                 fails = 0;
                 limited = false;
+                strikes = 0;
+                said_for = None;
                 st.last = Some(rs.clone());
                 looked.asked = o.now();
                 if !o.task.is_empty() {
@@ -879,11 +940,8 @@ fn watching(o: &RunOptions, start: Time, st: &mut State) -> i32 {
             }
         }
         let gone = since(o.now(), start);
-        let mut wait = interval(gone, st.remaining);
-        if let Some(u) = until {
-            // Not before it resets, and not long after.
-            wait = since(u, o.now()).max(Duration::from_secs(5));
-        }
+        // A spent limit is waited for until it resets, and not long after.
+        let wait = spent.unwrap_or_else(|| interval(gone, st.remaining));
         if !o.task.is_empty() {
             looked.runs = prev.clone();
             looked.limited = limited;

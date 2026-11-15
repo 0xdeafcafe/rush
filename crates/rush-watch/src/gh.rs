@@ -24,6 +24,10 @@ use rush_state::Time;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 
+use crate::limit::{
+    BACKOFF_FIRST, Limit, backoff, classify, reset_from_headers, reset_from_rate_limit,
+};
+
 /// What running gh gave: its output, what it said on stderr, and how it
 /// failed, if it did. Output is kept even when it failed: `gh api -i`
 /// exits 1 on a 304, its headers on stdout.
@@ -303,21 +307,15 @@ pub fn get(path: &str, fresh: Duration) -> Result<(Vec<u8>, i64), Error> {
                 c.remaining = n.parse().unwrap_or(0);
             }
         }
-        403 | 429 => {
+        _ => {
             // The hourly limit spent, or a secondary limit (too many at
-            // once), which says when to come back in Retry-After.
-            if h.get("x-ratelimit-remaining").map(String::as_str) == Some("0")
-                || status == 429
-                || h.contains_key("retry-after")
-                || contains(&b.to_ascii_lowercase(), b"rate limit")
-            {
-                LAST_REMAINING.store(0, Ordering::SeqCst);
-                set_limited(reset_at(&h, Time::now()), &h);
+            // once), or GraphQL's: nobody asks until it resets.
+            if let Some(l) = crate::limit::classify(status, &h, b, &out.stderr, Time::now()) {
+                hold(&l, &h);
                 return Err(Error::Limited);
             }
             return Err(gh_error(status, b, &out.stderr, out.err.as_ref()));
         }
-        _ => return Err(gh_error(status, b, &out.stderr, out.err.as_ref())),
     }
     if c.remaining >= 0 {
         LAST_REMAINING.store(c.remaining, Ordering::SeqCst);
@@ -345,6 +343,10 @@ struct Budget {
     remaining: Option<i64>,
     #[serde(default, deserialize_with = "time_or_zero")]
     reset: Time,
+    /// How many answers in a row said limited and not when it ends: the
+    /// next backoff doubles by it.
+    #[serde(default)]
+    strikes: u32,
 }
 
 fn budget_file() -> PathBuf {
@@ -410,6 +412,7 @@ fn note_budget(h: &HashMap<String, String>) {
         return;
     };
     let mut b = read_budget();
+    b.strikes = 0;
     b.remaining = Some(left);
     if let Some(r) = h
         .get("x-ratelimit-reset")
@@ -424,9 +427,28 @@ fn note_budget(h: &HashMap<String, String>) {
     write_budget(&b);
 }
 
-/// Holds every watcher off until then.
-fn set_limited(until: Time, h: &HashMap<String, String>) {
+/// Holds every watcher off until GitHub's limit resets: when the answer
+/// said, else what `gh api rate_limit` says (it costs none of the limit),
+/// else a backoff that doubles for as long as the answers keep saying it's
+/// limited and not when it ends (1m, 2m, 4m, 8m, 10m).
+fn hold(l: &Limit, h: &HashMap<String, String>) {
+    LAST_REMAINING.store(0, Ordering::SeqCst);
+    let now = Time::now();
+    let known = l.reset.or_else(|| {
+        let out = runner(&["rate_limit"]);
+        let (status, _, b) = parse_response(&out.stdout);
+        if status == 200 {
+            reset_from_rate_limit(b, l.graphql, now)
+        } else {
+            None
+        }
+    });
     let mut b = read_budget();
+    let until = known.unwrap_or_else(|| {
+        let t = now + backoff(b.strikes);
+        b.strikes = b.strikes.saturating_add(1);
+        t
+    });
     b.until = until;
     if h.get("x-ratelimit-remaining").map(String::as_str) == Some("0") {
         b.remaining = Some(0);
@@ -436,38 +458,46 @@ fn set_limited(until: Time, h: &HashMap<String, String>) {
 }
 
 /// When to ask again after GitHub turned a call back: Retry-After's
-/// seconds, else the limit's reset, else a minute (GitHub's advice for a
-/// secondary limit that says neither); never more than an hour away.
+/// seconds, else the limit's reset, else a minute; never more than an
+/// hour away.
 pub fn reset_at(h: &HashMap<String, String>, now: Time) -> Time {
-    let most = now + Duration::from_secs(3600);
-    if let Some(s) = h
-        .get("retry-after")
-        .and_then(|v| v.trim().parse::<u64>().ok())
-    {
-        return (now + Duration::from_secs(s.max(1))).min(most);
+    reset_from_headers(h, now).unwrap_or(now + BACKOFF_FIRST)
+}
+
+/// Runs gh (not gh api) with args, for what a watch does before it
+/// watches: Limited when GitHub's limit is spent, which it keeps for every
+/// watcher (and which stops anyone asking while it is).
+pub fn run_checked<S: AsRef<str>>(dir: Option<&Path>, args: &[S]) -> Result<GhOutput, Error> {
+    if limited_until().is_some() {
+        return Err(Error::Limited);
     }
-    if let Some(r) = h
-        .get("x-ratelimit-reset")
-        .and_then(|v| v.trim().parse::<i64>().ok())
+    let out = run(dir, args);
+    if out.err.is_some()
+        && let Some(l) = classify(0, &HashMap::new(), &out.stdout, &out.stderr, Time::now())
     {
-        let t = Time::from_unix(r, 0);
-        if t > now {
-            return t.min(most);
-        }
+        hold(&l, &HashMap::new());
+        return Err(Error::Limited);
     }
-    now + Duration::from_secs(60)
+    Ok(out)
 }
 
 /// path's body from GitHub, unshared and uncached: a job's log.
 pub fn raw(path: &str) -> Result<Vec<u8>, Error> {
+    if limited_until().is_some() {
+        return Err(Error::Limited);
+    }
     // A log is coloured, which gh won't print unless asked; an older gh
     // doesn't know the flag, and prints it anyway.
     let mut out = runner(&["--allow-escape-sequences", path]);
     if contains(&out.stderr, b"unknown flag") {
         out = runner(&[path]);
     }
-    let (status, _, b) = parse_response(&out.stdout);
+    let (status, h, b) = parse_response(&out.stdout);
     if status != 200 {
+        if let Some(l) = classify(status, &h, b, &out.stderr, Time::now()) {
+            hold(&l, &h);
+            return Err(Error::Limited);
+        }
         return Err(gh_error(status, b, &out.stderr, out.err.as_ref()));
     }
     Ok(b.to_vec())

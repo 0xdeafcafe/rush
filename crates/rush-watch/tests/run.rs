@@ -700,7 +700,7 @@ fn a_spent_limit_is_waited_out_and_said_once() {
     assert_eq!(said.len(), 2, "{said:?}");
     assert_eq!(
         said[0],
-        "rush watch: GitHub's rate limit is spent; asking again when it resets, in 1m"
+        rush_watch::limit::waiting_line(Time::from_unix(90, 0).local(), Time::from_unix(0, 0))
     );
     // Until the reset, then (it having passed) a few seconds.
     assert_eq!(slept[0], Duration::from_secs(90));
