@@ -154,11 +154,16 @@ One participant changes files at a time, per conversation.
 - Lease waits are looked at once a second; a hook waits at most 9
   minutes.
 
+## Decided
+
+- **A guest runs in the chat's own mode** (the user's call, 2026-11-15):
+  it has the lead's trust, as a spawned agent does, and isn't made to ask
+  before each write. Claude Code still waits its turn in any mode (the
+  hook above); another harness in a mode that never asks is only seen, so
+  two such guests can write at once.
+
 ## Open questions
 
-- Should a guest run in a mode that always asks before writing, so the
-  lease holds it in every harness? Now it has the lead's trust, as a
-  spawned agent does, and an agent that never asks is only seen.
 - Guests' cards sit in the lead's turn they land in (exchanges attach to
   the turn under way or the last); a turn of their own, headed by the
   guest, would need the conversation model to take turns that aren't
