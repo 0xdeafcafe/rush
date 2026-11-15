@@ -24,6 +24,33 @@ server in front of those hosts. This is the simpler plan that replaced
     starts with the transcript's last 600 events (a `cut` event says there's
     more); `?full=1` sends all of it (up to 50,000), which the web app's
     *Show earlier* and `rush remote attach` ask for.
+  - `GET /api/sessions/{id}/events/before?cursor=…&limit=…` pages that history
+    back: one page a call, each page's events oldest first (the app sets them
+    above the seam it cut at), the answer carrying the next cursor and whether
+    there's more. The first pull has no cursor. A cursor is `<end>-<at>` — two
+    byte lengths into the transcript — while the adapter has a history window
+    (Claude Code, Codex); without one it is `<drop>`, a count of the newest
+    events to skip, which follows appends but not rewrites: a transcript that
+    shrank under a byte cursor answers `{"reset":true}`, and the app asks for
+    the stream again. A cursor can't reach inside a line, so a page overruns
+    its limit rather than split one.
+  - `GET /api/sessions/{id}/overview` is a session's numbers read from its
+    whole transcript: turns (with each one's cost), the model and cwd, tokens
+    in and out with cache reads and writes, the context it holds, what it has
+    spent, its models with what each has cost, and its tools by count.
+  - `GET /api/sessions/{id}/subagents` lists them as they sit beside the
+    transcript (type, description, model, the call that spawned them, depth,
+    born), each with what it last said, and
+    `GET /api/sessions/{id}/subagents/{sub}/events` pages a subagent's own
+    transcript back like the session's.
+  - `GET /api/feed` serves rush's shared local board (`rush feed list`)
+    whole — threads with their messages, each author backfilled with the
+    project its session says when the chirp didn't carry one — and whether
+    the feed is on. `POST /api/feed` posts as You: `{"op":"post","text":…}`
+    (the first line is the title), `{"op":"reply","id":…,"text":…}` and
+    `{"op":"resolve","id":…,"resolve":bool}`; mentions are kept by their ids
+    as the CLI keeps them, and a feed that's off answers 400 (the user turns
+    it on with `#feed on`).
   - `POST /api/sessions/{id}/op` sends one host op from an allowlist: send,
     allow/deny, interrupt, stop, model/effort/mode, stop_task, background,
     queue ops, away/back, limit (carry on at the reset or not), context,
@@ -95,14 +122,32 @@ server in front of those hosts. This is the simpler plan that replaced
   rush's own look (one monospace face, its colours from `internal/ui/style.go`,
   dark and light). Its CSS is Tailwind, built from `webstyle/app.css` by
   `go generate ./internal/remote` (which installs Tailwind 4 in a scratch
-  folder) and committed, so `go install` needs no Node. Routes are the hash
-  alone (`#/`, `#/s/<machine>/<id>`, `#/new`, `#/devices`); each screen is a
-  scope whose streams and timers end when you leave it, and whose late
-  answers are dropped, so nothing draws over the screen you're on. Lists
-  update their rows in place. The session list comes from
-  `GET /api/sessions/stream` (SSE: the list when it changes, a keepalive every
-  15s, and first the browser's own device id); a peer without it is polled.
-  It also serves a PWA manifest and a service worker.
+  folder) and committed, so `go install` needs no Node; styles the Tailwind
+  build has no class for are hand-written after it, in its variables. Routes
+  are the hash alone (`#/`, `#/s/<machine>/<id>`, `#/new`, `#/devices`,
+  `#/fleet`); each screen is a scope whose streams and timers end when you
+  leave it, and whose late answers are dropped, so nothing draws over the
+  screen you're on. Lists update their rows in place, keyed by id. The
+  session list comes from `GET /api/sessions/stream` (SSE: the list when it
+  changes, a keepalive every 15s, and first the browser's own device id); a
+  peer without it is polled. It also serves a PWA manifest and a service
+  worker.
+  - A conversation pages its history back as you scroll up (the endpoint
+    above), keeps only a window of it in the DOM, and draws what a turn
+    holds as the TUI does: tool calls with their arguments and output,
+    files read and edited (a diff), todos, thinking, plans, subagent
+    spawns, questions and their answers.
+  - A session carries tabs beside its conversation: its **subagents** (each
+    one's status, model and activity, its own conversation a sheet away),
+    its **shells** (its tasks and background commands, to stop or read),
+    its **changes** (the working tree, as the changes sheet), and an
+    **overview** (the endpoint above, drawn as bars, tables and money).
+    Switching tabs keeps the session's stream running underneath and its
+    scroll position; the route is `#/s/<machine>/<id>/<tab>`.
+  - **The fleet** (`#/fleet`) is the dashboard over every machine: each
+    peer's sessions listed through the hub's `/m/<name>` proxy with the same
+    rows as the home screen, and this machine's feed beside them — threads
+    with replies and resolving, a chirp to post when the feed is on.
 - **Native terminal, two ways.** `rush session --on <name> list|start|send|interrupt|stop|info|watch`
   goes over HTTP; `<name>` is a peer in `remote.json` (`rush remote add`), or `self`.
   `list --others` lists sessions Rush didn't start there, and `start --resume SESSION`
@@ -328,3 +373,59 @@ and the attached session's changes view in a real TUI (tested through
 on attached sessions answer "isn't available"; the attached view's list doesn't
 show sessions Rush didn't start; notifications poll every 4s; peers that are
 offline are skipped.
+
+## The rich web app (Rust port, 2026-11-15)
+
+Four things the port added to the app, each behind the same token:
+
+1. **History pages back.** The stream still opens with its tail and a `cut`;
+   scrolling near the top pulls `events/before` pages (the endpoint above)
+   and sets them above the seam, keeping only a window of the conversation
+   in the DOM. A `reset` answer (the transcript shrank under a byte cursor)
+   sends the app back to the stream.
+2. **The conversation draws what a turn holds** — calls with arguments and
+   output, diffs, todos, thinking, questions — as the TUI draws them.
+3. **A session has tabs**: subagents (each with its own conversation a
+   sheet away), shells (tasks and background commands), changes, overview.
+4. **The fleet** (`#/fleet`): every peer's sessions beside the feed.
+
+Tested (`crates/rush-remote/src/tests_server.rs`, table-driven through the
+handler): pages back under both cursors — the byte cursor through line
+boundaries, the count cursor through appends, a shrunk transcript answering
+`reset`, a bad cursor 400; a page's events come oldest-first *within* the
+page while the pages themselves arrive newest-block-first, so a test's
+bookkeeping reverses the page order, not the concatenation. The tabs:
+overview read from a transcript whose turn ends say what the session had
+spent (a turn's own slice is the difference), subagents listed with their
+last words, their own events paged, unknown ones 404, each behind the
+token. The feed: an empty board with the feed off, posting refused while
+off, then a chirp, a reply and a resolve as You through the state config's
+switch, and every malformed post 400.
+
+## Open questions
+
+- **The fleet's feed is one machine's.** The fleet screen spans every
+  peer's sessions, but its feed pane reads the board of the serve you
+  opened — each machine's board is its own (`rush-room` keeps one per
+  home), and nothing merges them. Right thing or not: should the fleet
+  ask each machine and interleave the boards, or is one board the point
+  (agents you share a home with)? Left as one machine's for now, the
+  simplest reading of "the feed" on a phone.
+- **No framework.** The app stays hand-written JS on purpose — no Node at
+  install, assets embedded, keyed in-place updates and manual windowing
+  already written. If the app outgrows that, the first thing to try is a
+  vendored Preact + htm (about 11 KB, no build step), not React or Svelte.
+- **Live-tried, and not.** None of the four was driven against a real
+  `rush serve`: CI builds a binary artifact only for pushes to main, so a
+  branch has nothing to run, and local builds are off (CLAUDE.md). They
+  are covered by the handler tests above, and the app's JS only by
+  `node --check` — the fixture harness that drove the Go app in a real
+  browser (`testdata/controls.js`) has no Rust-port counterpart yet;
+  bringing it over is its own piece of work. A throwaway-home fixture
+  for that harness is drafted at `crates/rush-remote/testdata/mkfixture.py`
+  (a claude transcript with calls, todos and a subagent, the feed on),
+  waiting for a binary to serve it.
+- **`?full=1` and the paged history are two doors to the same room.** The
+  stream's whole-history mode is what *Show earlier* used; the app now
+  pages instead, but `rush remote attach` still asks for `full`. Whether
+  `full` should go (and attach page too) is open; both work today.
