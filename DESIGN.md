@@ -3606,20 +3606,21 @@ A background task is drawn the same in the dock and under the call that
 started it (list_extras `taskrow.rs`): a mark (the spinner while it
 runs, ✓ ✗ once done), what it is bold, where it is dim, and on the
 right a slot that's never cut: a bar and its counts, then its clock.
-The words give way first (the place, then the name down to 12 cells),
-then the bar shrinks from 12 cells to 4, then it and its counts go,
-the clock last (`Right::lay`). At 80 columns:
+The place gives way first, then the bar shrinks from 12 cells to 4 to
+keep the name whole, then the name is cut (to 12 cells at least), then
+the bar and its counts go, the clock last (`head_row`, `Right::lay`).
+At 80 columns:
 
 ```
-Shell  3 running                                         ↑ pick one to stop
- ✶ Release  v0.1.0-beta.18 · 2683631  ━━━━─────────── ✓1 ✶2 6m / ~9m
-     ✓ build x86_64-unknown-linux-gnu 4m12s   ✶ build aarch64-apple-darwin 5m58s
+ ✶ Release  v0.1.0-beta.18 · 2683631                 ━━━━──────── ✓1 ✶2 6m / ~9m
+     ✓ build x86_64-unknown-linux-… 4m12s   ✶ build aarch64-apple-darwin 5m58s
      ◌ publish
- ✗ CI  rush/beside-asks · 8379d25           ━━━━━━━━── ✓1 ✗1 ✶1 7m
+ ✗ CI  rush/beside-asks · 8379d25                       ━━━━━━━━──── ✓1 ✗1 ✶1 7m
      ✓ fmt 1m00s   ✗ check 6m00s   ✶ linux 7m00s
      ✗ check  test render::presets::orchestrator ... FAILED
- ✶ cargo test -p rush-convo                  212/430 ━━━━━━────── 1m04s
-   › test render::presets::orchestrator ... ok
+ ✓ CI  rush/guests · 714c3c5                               passed in 4m · 2m ago
+ ✻ cargo build --release                              212/430 ━━━━━─────── 1m04s
+   › Compiling rush-convo v0.1.0 (/Users/me/src/rush/crates/rush-convo)
 ```
 
 (the snapshots, crates/rush-ui/tests/snapshots/taskrow_*.txt, are the
