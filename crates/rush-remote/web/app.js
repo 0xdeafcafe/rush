@@ -85,18 +85,59 @@ function route() {
   $('#main').style.paddingBottom = '';
   if ((m = h.match(/^#\/s\/([^/]+)\/([^/]+)(?:\/(all|agents|shells|changes|overview))?$/))) {
     setMachine(decodeURIComponent(m[1]));
+    sideFor(decodeURIComponent(m[2]));
     const tab = m[3] && m[3] !== 'all' ? m[3] : 'c';
     // the same session's tab is a switch in place, not a rebuild: its
     // stream keeps running under whichever tab is shown
     if (curTab?.id === m[2] && curTab.live) return curTab.set(tab);
     return sessionScreen(m[2], tab);
   }
+  sideOff();
   if (h === '#/new') return newScreen();
   if (h === '#/devices') return devicesScreen();
   if (h === '#/fleet') return fleetScreen();
   homeScreen();
 }
 addEventListener('hashchange', route);
+
+// ── the sidebar: on a wide screen a session keeps the list beside it, the
+// one you're in marked, kept current from the machine's list stream ──
+const wideQ = matchMedia('(min-width: 1100px)');
+const side = {es: null, timer: 0, mach: '', list: [], cur: ''};
+// the session on screen hears the list too: its name and state as they change
+let onList = null;
+function sideFor(id) {
+  side.cur = id;
+  document.body.classList.toggle('with-side', wideQ.matches);
+  if (!wideQ.matches) return;
+  if (side.mach !== machine || (!side.es && !side.timer)) {
+    if (side.es) side.es.close();
+    clearInterval(side.timer);
+    side.es = null; side.timer = 0; side.mach = machine; side.list = [];
+    let got = false;
+    const take = l => { side.list = l; lastList = l; sideDraw(); onList && onList(l); };
+    const es = side.es = new EventSource(base + '/api/sessions/stream');
+    es.onmessage = m => { got = true; const v = JSON.parse(m.data); if (v.sessions) take(v.sessions); };
+    // a peer whose serve can't stream is asked every 4s
+    es.onerror = () => {
+      if (got || side.timer) return;
+      es.close(); side.es = null;
+      const poll = () => api('/sessions').then(r => r.json()).then(take, () => {});
+      poll(); side.timer = setInterval(poll, 4000);
+    };
+  }
+  sideDraw();
+}
+function sideOff() { side.cur = ''; document.body.classList.remove('with-side'); }
+function sideDraw() {
+  const box = $('#sidelist');
+  if (!box || !document.body.classList.contains('with-side')) return;
+  const ss = side.list.map(i => ({...i, st: stateOf(i), mach: side.mach}));
+  keyed(box, sessionRows(ss), r => r.k, rowEl, rowSet);
+  $$('a[data-id]', box).forEach(e => e.classList.toggle('row-cur', e.dataset.id === side.cur));
+  set($('#sidesub'), '', [machines.length > 1 ? esc(side.mach) : '', ...tally(ss)].filter(Boolean).join(' '), true);
+}
+wideQ.addEventListener('change', () => { if (side.cur) sideFor(side.cur); });
 
 function setMachine(name) {
   const m = machines.find(x => x.name === name) || machines[0];
@@ -152,6 +193,7 @@ setInterval(() => $$('time[data-t]').forEach(t => { t.textContent = ago(t.datase
 
 // ── start ──
 async function start() {
+  $('#sidehome').innerHTML = bottle() + '<b>rush</b>';
   // opened from rush's pairing QR code: trade the one-time code for the sign-in
   const pair = location.hash.match(/^#pair=([\w-]+)$/);
   if (pair) {
@@ -193,6 +235,67 @@ const failed = e => e === 401 ? signIn() : toast(String(e), 'bad');
 // ── the sessions ──
 const groups = [['blocked', 'Needs you'], ['working', 'Working'], ['idle', 'Idle'], ['asleep', 'Asleep'], ['stopped', 'Stopped']];
 const groupOf = st => st === 'starting' ? 'working' : groups.some(g => g[0] === st) ? st : 'idle';
+const atWork = st => st === 'working' || st === 'starting';
+// whose run a session is: the session that spawned it (a subagent rush
+// hosts), as the TUI's list nests them
+const parentOf = i => (i.meta && (i.meta.spawnedBy || '')) || '';
+// sessionRows is a list of sessions as the lists draw it: a rule per state
+// (its count and spend), each top-level session newest first, its runs under
+// it. ss are sessions with st (stateOf) and mach (their machine) set.
+function sessionRows(ss, {byMachine = false} = {}) {
+  const ids = new Set(ss.map(i => i.mach + '/' + i.id));
+  const kids = new Map();
+  for (const i of ss) {
+    const p = parentOf(i);
+    if (p && ids.has(i.mach + '/' + p)) { const k = i.mach + '/' + p; kids.set(k, [...(kids.get(k) || []), i]); }
+  }
+  const top = ss.filter(i => !(parentOf(i) && ids.has(i.mach + '/' + parentOf(i))));
+  const newest = (a, b) => (b.updatedAt || '') > (a.updatedAt || '') ? 1 : -1;
+  const rows = [];
+  const add = (i, depth) => {
+    const ks = (kids.get(i.mach + '/' + i.id) || []).sort((a, b) => atWork(b.st) - atWork(a.st) || newest(a, b));
+    rows.push({k: i.mach + '/' + i.id, i, depth, runs: ks.filter(x => atWork(x.st)).length, byMachine});
+    if (depth < 3) ks.forEach((x, n) => add({...x, last: n === ks.length - 1}, depth + 1));
+  };
+  for (const [g, name] of groups) {
+    const in_ = top.filter(i => groupOf(i.st) === g).sort(newest);
+    if (!in_.length) continue;
+    const cost = in_.reduce((n, i) => n + (i.costUsd || 0), 0);
+    rows.push({k: 'h:' + g, hdr: g, name, n: in_.length, cost});
+    in_.forEach(i => add(i, 0));
+  }
+  return rows;
+}
+const rowEl = r => r.hdr ? el('<div class=rule><b></b><span></span></div>')
+  : el(`<a class=row><div class=row-top><span class=tree></span><span class=mark></span><b></b><span class=mach></span><span class=cost></span><time></time></div><div class=row-sub><span class=tree></span><span class=why></span></div></a>`);
+const rowSet = (e, r) => {
+  if (r.hdr) { set(e, 'b', '▾ ' + r.name); set(e, 'span', `${r.n}${r.cost ? ' · ' + money(r.cost) : ''}`); return; }
+  const i = r.i, sub = r.depth > 0;
+  e.href = `#/s/${encodeURIComponent(i.mach)}/${encodeURIComponent(i.id)}`;
+  e.dataset.id = i.id; e.dataset.state = i.st; e.dataset.mach = i.mach;
+  e.classList.toggle('row-run', sub);
+  const pad = '\u2003'.repeat(Math.max(0, r.depth - 1));
+  set($('.row-top .tree', e), '', sub ? pad + (i.last ? '└' : '├') : '');
+  set(e, '.mark', marks[i.st] || '·');
+  set(e, 'b', i.name || i.id);
+  set(e, '.mach', r.byMachine ? i.mach : '');
+  set(e, '.cost', money(i.costUsd));
+  const t = $('time', e); t.dataset.t = i.updatedAt || ''; set(t, '', ago(i.updatedAt));
+  set($('.row-sub .tree', e), '', sub ? pad + (i.last ? '\u2003' : '│') + '\u2003' : '└');
+  const who = esc([agentName(i.kind), i.model].filter(Boolean).join(' · '));
+  const runs = r.runs ? ` <span class=text-queue>⇉ ${r.runs} run${r.runs > 1 ? 's' : ''} working</span>` : '';
+  let why;
+  if (i.st === 'blocked') why = `<span class=text-yellow>${esc(stateWords(i.st, i.needs))}</span>`;
+  else if (atWork(i.st)) why = `<span class=text-orange>${esc(i.detail || 'working…')}</span>`;
+  else if (sub) why = `<span class=text-faint>${who}</span>`;
+  else why = `<span class=text-blue>${esc(home(i.cwd))}</span> <span class=text-faint>· ${who}</span>`;
+  if (sub && (i.st === 'blocked' || atWork(i.st))) why += ` <span class=text-faint>· ${who}</span>`;
+  set(e, '.why', why + runs, true);
+};
+const tally = ss => {
+  const n = ss.filter(i => i.st === 'blocked').length, w = ss.filter(i => atWork(i.st) && !parentOf(i)).length, r = ss.filter(i => atWork(i.st) && parentOf(i)).length;
+  return [n && `<span class=text-yellow>● ${n} need${n > 1 ? '' : 's'} you</span>`, w && `<span class=text-orange>✻ ${w} working</span>`, r && `<span class=text-queue>⇉ ${r} run${r > 1 ? 's' : ''}</span>`].filter(Boolean);
+};
 function homeScreen() {
   const sc = newScope();
   const acts = [];
@@ -211,30 +314,9 @@ function homeScreen() {
     const list = $('#list');
     if (!l.length) { list.innerHTML = `<div class=empty><div class="flex justify-center">${bottle('h-12 w-[29px] opacity-60')}</div><p>no sessions yet</p><p class=text-faint>start one with + new, or carry one on from below</p></div>`; set($('#sub'), '', ''); return; }
     if (!list.querySelector('[data-key]')) list.innerHTML = '';
-    const ss = l.map(i => ({...i, st: stateOf(i)}));
-    const rows = [];
-    for (const [g, name] of groups) {
-      const in_ = ss.filter(i => groupOf(i.st) === g).sort((a, b) => b.startedAt > a.startedAt ? 1 : -1);
-      if (!in_.length) continue;
-      const cost = in_.reduce((n, i) => n + (i.costUsd || 0), 0);
-      rows.push({hdr: g, name, n: in_.length, cost}, ...in_);
-    }
-    keyed(list, rows, i => i.hdr ? 'h:' + i.hdr : i.id,
-      i => i.hdr ? el('<div class=rule><b></b><span></span></div>')
-        : el(`<a class=row><div class=row-top><span class=mark></span><b></b><span class=cost></span><time></time></div><div class=row-sub><span class=tree>└</span><span class=why></span></div></a>`),
-      (e, i) => {
-        if (i.hdr) { set(e, 'b', '▾ ' + i.name); set(e, 'span', `${i.n}${i.cost ? ' · ' + money(i.cost) : ''}`); return; }
-        e.href = `#/s/${encodeURIComponent(machine)}/${encodeURIComponent(i.id)}`;
-        e.dataset.id = i.id; e.dataset.state = i.st;
-        set(e, '.mark', marks[i.st] || '·');
-        set(e, 'b', i.name || i.id);
-        set(e, '.cost', money(i.costUsd));
-        const t = $('time', e); t.dataset.t = i.updatedAt; set(t, '', ago(i.updatedAt));
-        const where = `<span class=text-blue>${esc(home(i.cwd))}</span> <span class=text-faint>· ${esc([agentName(i.kind), i.model].filter(Boolean).join(' · '))}</span>`;
-        set(e, '.why', i.st === 'blocked' ? `<span class=text-yellow>${esc(stateWords(i.st, i.needs))}</span> <span class=text-faint>· ${esc(home(i.cwd))}</span>` : i.detail && i.st === 'working' ? `${esc(i.detail)}` : where, true);
-      });
-    const n = ss.filter(i => i.st === 'blocked').length, w = ss.filter(i => groupOf(i.st) === 'working').length;
-    set($('#sub'), '', [n && `<span class=text-yellow>● ${n} need${n > 1 ? '' : 's'} you</span>`, w && `<span class=text-orange>✻ ${w} working</span>`].filter(Boolean).join(' '), true);
+    const ss = l.map(i => ({...i, st: stateOf(i), mach: machine}));
+    keyed(list, sessionRows(ss), r => r.k, rowEl, rowSet);
+    set($('#sub'), '', tally(ss).join(' '), true);
   };
   // the list as serve streams it; a peer whose serve can't stream is asked every 4s
   let got = false, timer = 0;
@@ -348,47 +430,44 @@ const mapi = (m, p, o) => fetch((m.self ? '' : '/m/' + encodeURIComponent(m.name
 function fleetScreen() {
   const sc = newScope();
   bar({title: 'fleet', back: true});
-  $('#main').innerHTML = `<nav class=tabs id=ftabs><button class="tab tab-on" data-t=sessions>sessions</button><button class=tab data-t=feed>feed</button></nav>
-    <div id=fsess></div><div id=ffeed class=hidden></div>`;
+  // wide, the sessions and the feed sit side by side; narrow, a tab each
+  const wide = matchMedia('(min-width: 1100px)').matches;
+  $('#main').classList.add('main-wide');
+  sc.on(() => $('#main').classList.remove('main-wide'));
+  $('#main').innerHTML = `<nav class="tabs${wide ? ' hidden' : ''}" id=ftabs><button class="tab tab-on" data-t=sessions>sessions</button><button class=tab data-t=feed>feed</button></nav>
+    <div class="${wide ? 'fleet-grid' : ''}"><section><div id=fstats class=stats></div><div id=fsess></div><div id=fgone></div></section>
+    <section id=ffeedcol${wide ? '' : ' class=hidden'}>${wide ? '<div class=rule><b>▾ the feed</b><span></span></div>' : ''}<div id=ffeed></div></section></div>`;
   let tab = 'sessions';
+  const showing = t => wide || tab === t;
 
-  // every machine's sessions, each under its machine
-  const rows = [];
-  const draw = () => {
-    keyed($('#fsess'), rows, r => r.k,
-      r => r.hdr ? el('<div class=rule><b></b><span></span></div>')
-        : el(`<a class=row><div class=row-top><span class=mark></span><b></b><span class=cost></span><time></time></div><div class=row-sub><span class=tree>└</span><span class=why></span></div></a>`),
-      (e, r) => {
-        if (r.hdr) { set(e, 'b', '▾ ' + r.name); set(e, 'span', r.err ? `<span class=text-red>${esc(r.err)}</span>` : `${r.n}${r.cost ? ' · ' + money(r.cost) : ''}`, true); return; }
-        const i = r.i;
-        e.href = `#/s/${encodeURIComponent(r.mach)}/${encodeURIComponent(i.id)}`;
-        e.dataset.state = i.st;
-        set(e, '.mark', marks[i.st] || '·');
-        set(e, 'b', i.name || i.id);
-        set(e, '.cost', money(i.costUsd));
-        const t = $('time', e); t.dataset.t = i.updatedAt; set(t, '', ago(i.updatedAt));
-        const where = `<span class=text-blue>${esc(home(i.cwd))}</span> <span class=text-faint>· ${esc([agentName(i.kind), i.model].filter(Boolean).join(' · '))}</span>`;
-        set(e, '.why', i.st === 'blocked' ? `<span class=text-yellow>${esc(stateWords(i.st, i.needs))}</span> <span class=text-faint>· ${esc(home(i.cwd))}</span>` : i.st === 'working' && i.detail ? esc(i.detail) : where, true);
-      });
-    const all = rows.filter(r => !r.hdr).map(r => r.i);
-    const n = all.filter(i => i.st === 'blocked').length, w = all.filter(i => i.st === 'working' || i.st === 'starting').length;
-    set($('#sub'), '', [n && `<span class=text-yellow>● ${n} need${n > 1 ? '' : 's'} you</span>`, w && `<span class=text-orange>✻ ${w} working</span>`, `${all.length} on ${machines.length} machine${machines.length > 1 ? 's' : ''}`].filter(Boolean).join(' · '), true);
+  // every machine's sessions at a glance: what needs you first, then what's
+  // at work (each with its runs under it), then the rest
+  const draw = got => {
+    const ss = [], gone = [];
+    for (const {m, l} of got) {
+      if (!l) { gone.push(m.name); continue; }
+      ss.push(...l.map(i => ({...i, st: stateOf(i), mach: m.name})));
+    }
+    const multi = got.length > 1;
+    keyed($('#fsess'), sessionRows(ss, {byMachine: multi}), r => r.k, rowEl, rowSet);
+    if (!ss.length) $('#fsess').innerHTML = `<div class=empty><p>no sessions on ${multi ? 'any machine' : 'this machine'}</p></div>`;
+    const top = ss.filter(i => !parentOf(i));
+    const stat = (n, label, cls) => `<div class=stat><b class="${n ? cls : 'text-faint'}">${n}</b><span>${label}</span></div>`;
+    const spent = ss.reduce((n, i) => n + (i.costUsd || 0), 0);
+    set($('#fstats'), '', [
+      stat(ss.filter(i => i.st === 'blocked').length, 'need you', 'text-yellow'),
+      stat(top.filter(i => atWork(i.st)).length, 'working', 'text-orange'),
+      stat(ss.filter(i => parentOf(i) && atWork(i.st)).length, 'runs working', 'text-queue'),
+      stat(top.filter(i => i.st === 'idle').length, 'idle', 'text-green'),
+      `<div class=stat><b class=text-bright>${money(spent) || '$0'}</b><span>spent</span></div>`].join(''), true);
+    set($('#fgone'), '', gone.length ? `<p class="px-3 py-2 text-red">can't reach ${esc(gone.join(', '))}</p>` : '', true);
+    set($('#sub'), '', [...tally(ss), `${top.length} on ${got.length - gone.length} machine${got.length - gone.length === 1 ? '' : 's'}`].join(' · '), true);
   };
   const poll = () => Promise.all(machines.map(m =>
     mapi(m, '/sessions').then(r => r.json()).then(l => ({m, l}), () => ({m, l: null}))
-  )).then(got => {
-    if (!sc.live || tab !== 'sessions') return;
-    rows.length = 0;
-    for (const {m, l} of got) {
-      if (!l) { rows.push({k: 'h' + m.name, hdr: true, name: m.name, err: 'unreachable'}); continue; }
-      const ss = l.map(i => ({...i, st: stateOf(i)})).sort((a, b) => (b.updatedAt > a.updatedAt ? 1 : -1));
-      rows.push({k: 'h' + m.name, hdr: true, name: m.name, n: ss.length, cost: ss.reduce((x, i) => x + (i.costUsd || 0), 0)});
-      for (const i of ss) rows.push({k: m.name + '/' + i.id, i, mach: m.name});
-    }
-    draw();
-  });
+  )).then(got => { if (sc.live && showing('sessions')) draw(got); });
   poll();
-  const pt = setInterval(poll, 5000);
+  const pt = setInterval(poll, 4000);
   sc.on(() => clearInterval(pt));
 
   // the feed: the picked machine's board (rush feed), read and posted to
@@ -409,7 +488,7 @@ function fleetScreen() {
       </details>`).join('');
   };
   const feed = () => api('/feed').then(r => r.json()).then(v => {
-    if (!sc.live || tab !== 'feed') return;
+    if (!sc.live || !showing('feed')) return;
     feedOn = !!v.on;
     const open = new Set($$('#ffeed .chirp[open]').map(e => e.dataset.id));
     threads = v.threads || [];
@@ -417,6 +496,7 @@ function fleetScreen() {
     for (const e of $$('#ffeed .chirp')) if (open.has(e.dataset.id)) e.open = true;
   }, () => {});
   const ft = setInterval(feed, 15000);
+  if (wide) feed();
   sc.on(() => clearInterval(ft));
 
   const fbox = $('#ffeed');
@@ -444,8 +524,8 @@ function fleetScreen() {
     if (!b || b.dataset.t === tab) return;
     tab = b.dataset.t;
     $$('#ftabs .tab').forEach(x => x.classList.toggle('tab-on', x === b));
-    $('#fsess').classList.toggle('hidden', tab !== 'sessions');
-    fbox.classList.toggle('hidden', tab !== 'feed');
+    $('#fsess').parentNode.classList.toggle('hidden', tab !== 'sessions');
+    $('#ffeedcol').classList.toggle('hidden', tab !== 'feed');
     scrollTo(0, 0);
     if (tab === 'feed') feed(); else poll();
   };
@@ -463,7 +543,7 @@ function sessionScreen(id, init) {
     const lg = $('#composer legend');
     if (lg) lg.innerHTML = `to <b>${esc(info.name || id)}</b>${st === 'working' ? ' · <em>working</em>, send queues, steer goes in now' : ''}`;
   };
-  $('#main').innerHTML = `<button id=jump class="key key-plain hidden" style="position:fixed;right:14px;bottom:88px;z-index:5" aria-label="to the newest">↓</button>
+  $('#main').innerHTML = `<button id=jump class="key key-plain jump hidden" aria-label="to the newest">↓</button>
     <nav class=tabs id=tabs aria-label="this session"><button class=tab data-t=c>conversation</button><button class=tab data-t=agents>agents</button><button class=tab data-t=shells>shells</button><button class=tab data-t=changes>changes</button><button class=tab data-t=overview>overview</button></nav>
     <div id=log class="pt-1"></div><div id=asks></div><div id=tabpane class="px-3 pt-2 hidden"></div>
     <div class=composer id=composer><div id=pics class=chips></div>
@@ -471,6 +551,13 @@ function sessionScreen(id, init) {
       <div class=hints><button id=pic><b>image</b></button><input id=file type=file accept="image/*" multiple class=hidden><span class=sep>·</span>
         <button id=steer title="into the turn under way"><b>steer</b></button><span class=sep>·</span><button id=halt class=text-red>stop</button><span class=sep>·</span><button id=chg><b>changes</b></button></div></div>`;
   head();
+  onList = l => {
+    const x = l.find(i => i.id === id);
+    if (!x || !sc.live) return;
+    const k = i => [i.name, i.state, i.alive, i.needs, i.model, i.cwd].join('\u0000');
+    if (k(x) !== k(info)) { info = {...info, ...x}; head(); }
+  };
+  sc.on(() => { onList = null; });
   // the conversation stays clear of the box, whatever its height
   const ro = new ResizeObserver(() => { $('#main').style.paddingBottom = $('#composer').offsetHeight + 8 + 'px'; });
   ro.observe($('#composer'));
@@ -689,7 +776,9 @@ function sessionScreen(id, init) {
       return `+${Math.max(0, a - 1)} −${Math.max(0, d - 1)}`;
     }
     if (c.Kind === K.AGENT) return i.Agent || '';
-    return i.Description ? (i.Command || '').split('\n')[0] : '';
+    // what a shell call is for, when the agent said and it isn't the command again
+    const cmd = (i.Command || '').split('\n')[0];
+    return c.Kind === K.SHELL && i.Description && i.Description !== cmd ? i.Description : '';
   };
   const callEl = c => el(`<details class=step data-kind=${kindName(c.Kind)}><summary><span class=run>✻</span><span class=glyph>${kindGlyph[c.Kind] || glyphs[c.Name] || '·'}</span><span class=what>${esc(callWhat(c) || c.Title || c.Name)}</span><span class=more>${esc(callMore(c))}</span></summary><div class=step-body>${callBody(c)}</div></details>`);
   const finish = (c, bad) => { const m = $('summary > span', c); m.className = 'ok'; m.textContent = bad ? '✗' : '✓'; if (bad) c.dataset.err = ''; };
@@ -945,7 +1034,7 @@ function sessionScreen(id, init) {
     rows.reverse();
     if (!rows.length) { pane.innerHTML = `<div class=empty><p>nothing in the background</p></div>`; pane.onclick = null; return; }
     pane.innerHTML = rows.map((r, i) => `<div class=row data-i=${i} tabindex=0>
-      <div class=row-top><b>${esc(r.top)}</b>${r.stop ? `<button class="key key-plain key-bad" data-stop="${esc(r.stop)}">stop</button>` : ''}${r.mark ? `<span style=flex-shrink:0>${r.mark}</span>` : ''}</div>
+      <div class=row-top><b>${esc(r.top)}</b>${r.stop ? `<button class="key key-plain key-bad" data-stop="${esc(r.stop)}">stop</button>` : ''}${r.mark ? `<span class=shrink-0>${r.mark}</span>` : ''}</div>
       ${r.sub ? `<div class=row-sub><span>${esc(r.sub)}</span></div>` : ''}</div>`).join('');
     pane.onclick = e => {
       const b = e.target.closest('[data-stop]');
@@ -965,6 +1054,7 @@ function sessionScreen(id, init) {
   // overview: the session's numbers at a glance, as its transcript reads
   const drawOverview = v => {
     if (!v || (!v.turns && !v.window)) { pane.innerHTML = `<div class=empty><p>no overview for this one</p></div>`; return; }
+    const fill = () => { const f = $('.ctxfill', pane); if (f) { f.style.width = pct + '%'; f.classList.toggle('ctx-hot', pct >= 80); } };
     const pct = v.window ? Math.min(100, Math.round(100 * (v.context || 0) / v.window)) : 0;
     const models = Object.entries(v.models || {}).filter(([, c]) => c > 0);
     pane.innerHTML = `<fieldset class=box><legend>overview</legend><dl class=facts>
@@ -974,13 +1064,14 @@ function sessionScreen(id, init) {
         ${v.cost ? `<dt>spent</dt><dd class=tabular-nums>${money(v.cost)}</dd>` : ''}
         ${v.version ? `<dt>version</dt><dd>${esc(v.version)}</dd>` : ''}
         ${(v.mcp || []).length ? `<dt>mcp</dt><dd>${v.mcp.map(esc).join(', ')}</dd>` : ''}</dl>
-        <div class=ctxbar><div class=ctxfill style="width:${pct}%"></div></div>
-        <p class="text-dim pt-2">${tok(v.context)} of ${tok(v.window || 0)} in context</p></fieldset>
+        ${v.window ? `<div class=ctxbar><div class=ctxfill></div></div>` : ''}
+        <p class="text-dim pt-2">${v.window ? `${tok(v.context)} of ${tok(v.window)} in context · ${pct}%` : `${tok(v.context)} in context`}</p></fieldset>
       <fieldset class=box><legend>tokens</legend><dl class=facts>
         <dt>input</dt><dd>${tok(v.input)}</dd><dt>output</dt><dd>${tok(v.output)}</dd>
         <dt>cache read</dt><dd>${tok(v.cacheRead)}</dd><dt>cache write</dt><dd>${tok(v.cacheWrite)}</dd></dl>
         ${models.length ? `<div class=pt-2>${models.map(([m, c]) => `<div class="flex justify-between gap-2"><span class=truncate>${esc(m)}</span><span class="text-dim tabular-nums">${money(c)}</span></div>`).join('')}</div>` : ''}</fieldset>
       ${(v.tools || []).length ? `<fieldset class=box><legend>tools · ${(v.tools || []).reduce((n, t) => n + (t.calls || 0), 0)} calls</legend><table class=ttable>${v.tools.map(t => `<tr><td>${esc(t.name)}</td><td>${t.calls || 0}${t.failed ? ` <span class=text-red>✗${t.failed}</span>` : ''}</td><td class=text-dim>${t.secs ? Math.round(t.secs) + 's' : ''}</td></tr>`).join('')}</table></fieldset>` : ''}`;
+    fill();
   };
 
   const startTab = () => {
