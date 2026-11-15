@@ -333,7 +333,8 @@ fn short_commands() {
 /// Table: how far any command's output says it has got.
 #[test]
 fn progress_of_any_command() {
-    let cases: [(&str, &[&str], Option<(usize, usize)>); 6] = [
+    type Case<'a> = (&'a str, &'a [&'a str], Option<(usize, usize)>);
+    let cases: [Case; 6] = [
         ("make", &["building", "[ 45%] Linking"], Some((450, 1000))),
         ("rsync -a", &["file 12/30"], Some((12, 30))),
         ("npm test", &["GET / 200"], None),
