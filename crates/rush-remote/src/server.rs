@@ -842,10 +842,7 @@ impl Server {
                 return empty();
             }
             let page = keep.len().saturating_sub(drop);
-            let groups = vec![(
-                0u64,
-                keep.iter().skip(drop).cloned().collect::<Vec<Event>>(),
-            )];
+            let groups = vec![(0u64, keep.into_iter().take(page).collect::<Vec<Event>>())];
             page_json(&groups, 0, &format!("{}", drop + page), below)
         } else {
             empty()
