@@ -51,6 +51,7 @@ pub use needs::{
 pub use scriptdoc::{ScriptView, script_line, script_line_ref};
 pub use spawn::{Child, Spawn, agent_run, asked, spawn_of, tool_run, unquote_arg};
 pub use style::{SHOW_ALL_REF, dur, key_word, money};
+pub use tools::{Progress, progress, progress_any};
 pub use udiff::clean_output;
 
 // The Needs-you section's replies as choices.
@@ -308,8 +309,9 @@ pub struct Options {
     pub shell_edit: Option<crate::shellbox::ShellEdit>,
     /// Background tasks rush can say more of than that they run, by task
     /// id: a row drawn in place of the call's "running in the background"
-    /// note while the task runs (a rush watch's card: what it waits on,
-    /// how far it's got, the time left). Set by whoever reads them.
+    /// note (a rush watch's card: what it waits on, how far it's got, the
+    /// time left; once it has ended, how it went). Set by whoever reads
+    /// them.
     /// Rust-only.
     pub tasks: HashMap<String, Line>,
     /// The runs a harness's own subagent calls started in the background,
@@ -496,7 +498,9 @@ fn runs_sig(s: &Session, t: &crate::model::Turn, o: &Options) -> u64 {
 /// o.tasks, for the turn's key.
 fn tasks_sig(s: &Session, t: &crate::model::Turn, o: &Options) -> u64 {
     let mut h = DefaultHasher::new();
-    for j in s.running_jobs() {
+    // Every task with a row: a watch that has ended has one too (how it
+    // went), drawn again when it changes.
+    for j in s.jobs() {
         let Some(row) = o.tasks.get(&j.id) else {
             continue;
         };

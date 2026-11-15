@@ -48,3 +48,7 @@ harness = false
 [[bench]]
 name = "subrun"
 harness = false
+
+[[bench]]
+name = "progress"
+harness = false
