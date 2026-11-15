@@ -1393,6 +1393,7 @@ impl<'a> Drawer<'a> {
         let noun = match e.phase.as_str() {
             "request" => "delegated task",
             "result" => "result",
+            "guest" => "guest",
             _ => "message",
         };
         let r = format!("exchange:{}:{}:{}", e.direction, e.id, peer.session_id);
@@ -5251,18 +5252,21 @@ fn news_rows(run: &[&Exchange]) -> Vec<(String, Txt, String)> {
 /// Who sent a message to whom, each half the room (exchange.go:198).
 fn exchange_who(e: &Exchange, width: usize) -> Txt {
     let half = width.saturating_sub(3) / 2;
-    exchange_peer_txt(&e.sender, half)
+    let guest = e.phase == "guest";
+    exchange_peer_txt(&e.sender, half, guest)
         .and_raw(" ")
         .and(paint(C_BLUE, "→"))
         .and_raw(" ")
-        .and(exchange_peer_txt(&e.receiver, half))
+        .and(exchange_peer_txt(&e.receiver, half, guest))
 }
 
 /// One end of a message: its mark, its name, and the start of its
 /// session's id, which tells two sessions of one title apart. The mark is
-/// Go's default ◇ until rush-ui hands the renderer agents' logos.
-fn exchange_peer_txt(p: &Peer, width: usize) -> Txt {
-    let mark = "◇";
+/// Go's default ◇ until rush-ui hands the renderer agents' logos; in a
+/// guest's card (Rust-only, docs/guests.md) it is its harness's, so who
+/// spoke reads at a glance.
+fn exchange_peer_txt(p: &Peer, width: usize, guest: bool) -> Txt {
+    let mark = if guest { guest_mark(&p.kind) } else { "◇" };
     let name = one_line(&p.name);
     let name = first_non_empty(&[&name, &p.kind, "agent"]);
     let id = p.session_id.get(..8).unwrap_or(&p.session_id);
@@ -5279,6 +5283,25 @@ fn exchange_peer_txt(p: &Peer, width: usize) -> Txt {
         .and(paint(C_WHITE, name).truncate(room.max(1) as usize, &ell))
         .and(tail)
         .truncate(width, &ell)
+}
+
+/// The mark of an agent of kind in a guest's card: rush-ui-settings'
+/// logos, without their colours (Rust-only).
+fn guest_mark(kind: &str) -> &'static str {
+    match kind {
+        "claude" => "✻",
+        "codex" => "◎",
+        "copilot" => "◈",
+        "deepseek" => "◆",
+        "glm" => "▲",
+        "antigravity" | "gemini" => "✦",
+        "kimi" => "◐",
+        "vibe" => "■",
+        "ollama" => "◉",
+        "opencode" => "▣",
+        "pi" => "π",
+        _ => "◇",
+    }
 }
 
 /// A turn a task woke: its noun and how it ended (render.go:661).
