@@ -42,6 +42,94 @@ pub trait Sheet: Any {
     fn wake_at(&self, _m: &Model) -> Option<Instant> {
         None
     }
+    /// A small box by what opened it rather than the panel in the middle:
+    /// its title in its top edge, no blank rows, nothing behind it faded
+    /// while it sits by a click (Rush-only; a GitHub link's popover).
+    fn popover(&self, _m: &Model) -> Option<Popover> {
+        None
+    }
+}
+
+/// How a sheet drawn as a popover sits (Sheet::popover).
+#[derive(Clone, Debug, Default)]
+pub struct Popover {
+    /// In the top edge, on the left: what it's for.
+    pub title: Line,
+    /// In the top edge, on the right: where it stands.
+    pub state: Line,
+    /// Its width, edges and all; never more than the screen.
+    pub width: usize,
+    /// The screen cell it was opened from: the box hangs under it, or
+    /// sits above it when there's no room below. None centres it.
+    pub at: Option<(usize, usize)>,
+}
+
+/// A popover's box: the title and state in its top edge, its rows each
+/// between the edges with a space either side, bw wide (Rust-only).
+pub fn popover_box(p: &Popover, body: &[Line], bw: usize) -> Vec<Line> {
+    let edge = |s: String| sp(s, DIM);
+    let inner = bw.saturating_sub(4);
+    // ╭ title ─── state ╮: the state kept whole, the title cut first.
+    let state_w = p.state.width();
+    let state_room = if state_w > 0 { state_w + 2 } else { 0 };
+    let title_room = bw.saturating_sub(6 + state_room);
+    let title = rush_draw::truncate_line(&p.title, title_room, "…");
+    let mut top = line([edge("╭ ".into())]);
+    let tw = title.width();
+    join(&mut top, title);
+    let dashes = bw.saturating_sub(3 + tw + state_room + usize::from(tw > 0));
+    if tw > 0 {
+        top.spans.push(plain(" "));
+    }
+    top.spans.push(edge("─".repeat(dashes)));
+    if state_w > 0 && state_room + 6 <= bw {
+        top.spans.push(plain(" "));
+        join(&mut top, p.state.clone());
+        top.spans.push(plain(" "));
+    } else {
+        top.spans.push(edge("─".repeat(state_room)));
+    }
+    top.spans.push(edge("╮".into()));
+    let mut out = vec![top];
+    for l in body {
+        let mut row = line([edge("│".into())]);
+        let mut inside = line([plain(" ")]);
+        join(&mut inside, fit(l.clone(), inner));
+        inside.spans.push(plain(" "));
+        join(&mut row, on_ground(inside, inner + 2, PANEL_BG));
+        row.spans.push(edge("│".into()));
+        out.push(row);
+    }
+    out.push(line([edge(format!(
+        "╰{}╯",
+        "─".repeat(bw.saturating_sub(2))
+    ))]));
+    out
+}
+
+/// Where a popover's box of bw by bh goes on a screen w by h: under the
+/// cell it was opened from, above it when there's no room below, kept on
+/// screen; centred when it wasn't opened from a cell (Rust-only).
+pub fn popover_at(
+    at: Option<(usize, usize)>,
+    bw: usize,
+    bh: usize,
+    w: usize,
+    h: usize,
+) -> (usize, usize) {
+    let centre = (w.saturating_sub(bw) / 2, h.saturating_sub(bh) / 2);
+    let Some((x, y)) = at else {
+        return centre;
+    };
+    let left = x.saturating_sub(2).min(w.saturating_sub(bw));
+    let top = if y + 1 + bh <= h {
+        y + 1
+    } else if y >= bh {
+        y - bh
+    } else {
+        h.saturating_sub(bh)
+    };
+    (left, top)
 }
 
 impl Model {
@@ -113,6 +201,25 @@ impl Model {
         let Some(mut s) = self.sheet.take() else {
             return;
         };
+        if let Some(p) = s.popover(self) {
+            let bw = p.width.min(self.w).max(12.min(self.w));
+            // Its rows, and the edges above and below them.
+            let body = s.body(
+                self,
+                bw.saturating_sub(4),
+                base.len().saturating_sub(2).max(1),
+            );
+            self.sheet = Some(s);
+            let b = popover_box(&p, &body, bw);
+            let (left, top) = popover_at(p.at, bw, b.len(), self.w, base.len());
+            if p.at.is_none() {
+                super::dialog::fade(base, self.w);
+            }
+            self.keep_overlay(left, top, bw, b.len(), left + 2, top + 1);
+            self.sheet_at = (left + 2, top + 1);
+            super::dialog::paste_at(base, &b, top, left);
+            return;
+        }
         let bw = self.sheet_width(s.width(self));
         let body = s.body(self, bw - 4, 8.max(self.h.saturating_sub(6)));
         self.sheet = Some(s);

@@ -140,6 +140,10 @@ pub struct Model {
     pub keys_disambiguated: bool,
     /// Where the open sheet's body landed on screen.
     pub sheet_at: (usize, usize),
+    /// The screen cell the mouse button being handled went down on, while
+    /// that press is handled: what it opens can sit by it (a link's
+    /// popover). None for a key (Rust-only).
+    pub click_at: Option<(usize, usize)>,
     /// The header tab under the pointer: (index, is a page).
     pub top_hover: Option<(usize, bool)>,
     /// The tabs' and pages' rows as last drawn, for the mouse.
@@ -248,6 +252,7 @@ impl Model {
             over: OverlayHit::default(),
             keys_disambiguated: false,
             sheet_at: (0, 0),
+            click_at: None,
             top_hover: None,
             header_text: Default::default(),
             edge: EdgePush::default(),

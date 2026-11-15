@@ -18,6 +18,7 @@ pub mod keyhelp;
 pub mod known;
 pub mod linkkinds;
 pub mod linkmenu;
+pub mod linkpop;
 pub mod offui;
 pub mod oncmd;
 pub mod outside;

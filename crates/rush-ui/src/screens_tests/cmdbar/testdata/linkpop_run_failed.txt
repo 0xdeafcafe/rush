@@ -1,0 +1,7 @@
+╭ CI · Fix the login redirect ───────────── failed ╮
+│ 0xdeafcafe/rush · rush/login · ✗ test            │
+│                                                  │
+│ ↗ Open on GitHub   ↗ Failed job                  │
+│ ⧉ Copy link                                      │
+│ ▸ Re-run   failed jobs · all jobs                │
+╰──────────────────────────────────────────────────╯

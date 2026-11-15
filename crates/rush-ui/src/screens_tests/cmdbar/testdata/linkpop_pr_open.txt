@@ -1,0 +1,12 @@
+╭ #482 Fix the login redirect ─────────────── open ╮
+│ 0xdeafcafe/rush · rush/login → main · ✓ checks   │
+│                                                  │
+│ ↗ Open on GitHub   ↗ Checks   ↗ Files            │
+│ ⧉ Copy link                                      │
+│ ▾ Review                                         │
+│     approve                                      │
+│     request changes                              │
+│     comment                                      │
+│ ▸ Merge     squash · merge commit · rebase       │
+│ ▸ In rush   PR sheet                             │
+╰──────────────────────────────────────────────────╯

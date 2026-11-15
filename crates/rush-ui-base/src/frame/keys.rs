@@ -388,7 +388,11 @@ impl Model {
             Ok(o) => return o,
             Err(changed) => changed,
         };
+        // Where a press went down, while it's handled (Model::click_at).
+        self.click_at =
+            matches!(e.kind, MouseKind::Down(_)).then_some((e.x as usize, e.y as usize));
         let o = self.mouse_routed(e);
+        self.click_at = None;
         match o {
             Out::Pass | Out::Idle if lit => Out::Draw,
             o => o,

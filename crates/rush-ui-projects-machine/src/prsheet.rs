@@ -9,7 +9,9 @@
 //! wherever its repository is, and it's read from the link's lookup
 //! (prs.go:325 live, :328 sel, :331 mergeKey, :354 ForgetLink, :388 pr,
 //! :566 url in pr-merge). GitHub is asked off the UI, and only ever acted
-//! on from a key.
+//! on from a key. Rush-only: a link's popover (cmdbar's linkpop.rs) asks
+//! these same questions with no sheet open (ask_merge_link,
+//! ask_approve_link) and opens the sheet writing (open_pr_link_writing).
 
 use std::sync::LazyLock;
 
@@ -438,6 +440,21 @@ fn ask_approve(m: &mut Model, at: At, pr: &PR) {
 /// Asks how to merge the pull request, saying what's not ready. Nothing
 /// is merged until a key says how.
 pub fn ask_merge(m: &mut Model, at: At, pr: &PR) {
+    ask_merge_as(m, at, pr, "squash");
+}
+
+/// The ways a pull request merges: how gh says it, its key in the
+/// question, and its name there.
+const WAYS: [(&str, &str, &str); 3] = [
+    ("squash", "s", "squash"),
+    ("rebase", "r", "rebase"),
+    ("merge", "M", "merge commit"),
+];
+
+/// ask_merge with first, a way of WAYS, as its y (Rust-only: the link
+/// popover's Merge rows each ask with their own way first; ask_merge's
+/// squash, r rebase, M merge commit are Go's).
+fn ask_merge_as(m: &mut Model, at: At, pr: &PR, first: &str) {
     let n = at.num;
     let key = at.merge_key();
     let base = if pr.base.is_empty() {
@@ -486,10 +503,16 @@ pub fn ask_merge(m: &mut Model, at: At, pr: &PR) {
             Out::Draw
         })
     };
-    let mut more: Vec<(String, String, Then)> = vec![
-        ("r".into(), "rebase".into(), merge("rebase", false)),
-        ("M".into(), "merge commit".into(), merge("merge", false)),
-    ];
+    let first = WAYS
+        .iter()
+        .find(|w| w.0 == first)
+        .copied()
+        .unwrap_or(WAYS[0]);
+    let mut more: Vec<(String, String, Then)> = WAYS
+        .iter()
+        .filter(|w| w.0 != first.0)
+        .map(|&(how, k, name)| (k.to_string(), name.to_string(), merge(how, false)))
+        .collect();
     let mut detail = merge_detail(pr);
     if let Some((err, admin)) = data(m).merge_failed.get(&key) {
         detail += &format!("\n\nlast try failed: {err}");
@@ -500,8 +523,8 @@ pub fn ask_merge(m: &mut Model, at: At, pr: &PR) {
     m.ask(Confirm {
         question: format!("Merge #{n} on GitHub?"),
         detail,
-        yes_text: "squash".into(),
-        on_yes: Some(merge("squash", false)),
+        yes_text: first.2.into(),
+        on_yes: Some(merge(first.0, false)),
         more,
         ..Confirm::default()
     });
@@ -516,6 +539,36 @@ pub fn ask_merge_pr(m: &mut Model, root: &str, pr: &PR) {
         url: String::new(),
     };
     ask_merge(m, at, pr);
+}
+
+/// The pull request at url, opened from its link with no sheet.
+fn link_at(url: &str, pr: &PR) -> At {
+    At {
+        root: String::new(),
+        num: pr.number,
+        url: url.to_string(),
+    }
+}
+
+/// Asks how to merge the pull request at url, how first, no sheet open:
+/// its link's popover (Rust-only). Nothing is merged without a key.
+pub fn ask_merge_link(m: &mut Model, url: &str, pr: &PR, how: &str) {
+    ask_merge_as(m, link_at(url, pr), pr, how);
+}
+
+/// Asks before approving the pull request at url as you, no sheet open:
+/// its link's popover (Rust-only).
+pub fn ask_approve_link(m: &mut Model, url: &str, pr: &PR) {
+    ask_approve(m, link_at(url, pr), pr);
+}
+
+/// Opens the pull request at url in its sheet with what's written started:
+/// "comment", or "changes" to ask for (its link's popover, Rust-only).
+pub fn open_pr_link_writing(m: &mut Model, url: &str, pr: &PR, what: &str) {
+    open_sheet(m, "", url, pr);
+    if let Some(s) = m.sheet_as::<PrSheet>() {
+        s.writing = what.to_string();
+    }
 }
 
 /// Asks how to merge the open sheet's pull request, pr as its link said
