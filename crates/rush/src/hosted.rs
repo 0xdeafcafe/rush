@@ -925,9 +925,13 @@ fn hosted_runs<I: std::borrow::Borrow<rush_host::Info>>(
         else {
             continue;
         };
-        let name = reg
-            .get(k.as_str())
-            .map_or_else(|| k.0.clone(), |a| a.name());
+        // A tier's run by the model it ran on ("top · astra"), Rust-only.
+        let name = match i.meta.get("spawnLabel").filter(|l| !l.is_empty()) {
+            Some(l) => l.clone(),
+            None => reg
+                .get(k.as_str())
+                .map_or_else(|| k.0.clone(), |a| a.name()),
+        };
         out.push(Spawned {
             id: i.id.clone(),
             step: i.meta.get("spawnStep").cloned().unwrap_or_default(),
