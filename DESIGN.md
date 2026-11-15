@@ -2182,6 +2182,36 @@ an estimate: the strong model might have taken more or fewer turns. It
 shows as a finding, and in the advisor's digest. Subagent rows in
 sessions already show their model, read from the subagent's transcript.
 
+### Every model as a harness's own subagents, and tiers (Rust-only)
+
+Full detail is in `docs/native-agents.md`.
+
+**What an adapter gets.** `StartOptions` carries `others` (an `OtherAgent` for each model or tier to offer, under its plain name with a description) and `delegate` (`rush_core::adapter::Delegate`, which runs one call and blocks until it's answered).
+
+**How rush answers.** The host (`rush-host/src/native.rs`) builds the offers from `spawn_agent`'s own picks, so it respects the same enabled adapters and accounts. The Delegate runs the call through `SubAgents::spawn` as a hosted child of the session (Meta `spawnedBy`). Only harnesses in `native::NATIVE` get this:
+
+- **Claude Code** registers each model as an `--agents` stand-in on haiku (`maxTurns` 1, no tools), plus SDK hook callbacks. PreToolUse swaps the task for a one-word one; PostToolUse runs the real task and returns the answer as `updatedToolOutput`. Each call costs one haiku turn.
+- **Codex** gets a `run_agent` dynamic tool on `thread/start` and answers `item/tool/call` itself, with no extra hop.
+
+Every other harness with MCP is told rush's `spawn_agent` is its own subagents (`OTHERS_NOTE`). Pi and Antigravity keep their shell stand-ins.
+
+**Tiers.** `others::place` puts a model in a tier (top, workhorse, quick) with traits (long-context, vision, cheap) based on the words in its id. `Config.modelTiers` overrides that, and it's set in Settings › Config with `t`.
+
+**Picking a model for a tier.** A tier name, optionally followed by traits, is accepted wherever a model name is. `native::tier_pick` picks a ready model with quota, choosing the least-held provider, so parallel calls spread out. A process-wide hold list counts the calls that are running. The run's Meta gets `spawnLabel` = "top · astra", which the card, the Subagents panel and the board show.
+
+**GLM fix.** `agents::takes` used to refuse a provider that rides the leader's own harness whenever the leader's cell for it wasn't on (GLM, whose ★ is ZCode). Now it falls through to the general rule, and the `*-claude` pairs list their provider's own models.
+
+**One call, one row.** In Claude Code the stand-in and the hosted run share the Agent call's id: the PreToolUse hook starts the model, and the run's `spawnStep` is that `tool_use_id`. `Runs::rebuild` leaves out Claude Code's run for any call a hosted run answers. The Orchestrator lane for the call takes the hosted run's name ("top · astra") and its liveness.
+
+**GLM in Claude Code, as Z.ai's guide sets it up** (`cross::zai_env`, for glm-claude only). On top of `claude_env`'s endpoint, key, empty API key and no nonessential traffic, it sets:
+
+- opus, sonnet and fable to the model picked, or `glm-5.3[1m]` when none is picked
+- haiku and `ANTHROPIC_SMALL_FAST_MODEL` to `glm-5.3-flash[1m]`, so background jobs run on Flash
+- `ANTHROPIC_MODEL` to the model picked, with `[1m]`, which is also passed as `--model`
+- `API_TIMEOUT_MS=3000000`, `CLAUDE_CODE_MAX_CONTEXT_TOKENS` and `CLAUDE_CODE_AUTO_COMPACT_WINDOW` at 1M, and `DISABLE_TELEMETRY=1`
+
+The pair reports a 1M window (`ContextWindower`), where it used to fall back to the 200K default. DeepSeek and Ollama in Claude Code are unchanged.
+
 ### Images in tool results (Rust-only)
 
 Go counted an image in a tool result as nothing (only its text parts'

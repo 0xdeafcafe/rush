@@ -443,3 +443,98 @@ fn moved_after_the_login_in_use_changes() {
     assert!(moved_off(true, &b, &a));
     assert!(!moved_off(false, &b, &a));
 }
+
+/// What rush answers another model's call with, in a test: the task back.
+struct Answers(Mutex<Vec<rush_core::adapter::DelegateCall>>);
+
+impl rush_core::adapter::Delegate for Answers {
+    fn run(&self, call: rush_core::adapter::DelegateCall) -> Result<String, String> {
+        let out = format!("{} finished:\n\nreviewed: {}", call.agent, call.prompt);
+        lock(&self.0).push(call);
+        Ok(out)
+    }
+}
+
+/// Another provider's model as one of Claude Code's subagent types
+/// (Rust-only, others.rs): a stand-in in --agents, rush's two hooks
+/// registered at initialize, and an Agent call for it answered by that
+/// model: the stand-in gets a one-line task, and the call's output is the
+/// model's answer, the rest of it as Claude Code wrote it.
+#[test]
+fn another_model_answers_an_agent_call() {
+    let dir = tempfile::tempdir().unwrap();
+    let (bin, log) = fake_claude(
+        dir.path(),
+        r#"read -r init; printf '%s\n' "$init" >> "$LOG"
+echo '{"type":"control_request","request_id":"h-1","request":{"subtype":"hook_callback","callback_id":"rush-others-pre","tool_use_id":"tu-1","input":{"hook_event_name":"PreToolUse","tool_name":"Agent","tool_use_id":"tu-1","tool_input":{"subagent_type":"kimi","prompt":"review main.rs","description":"review"}}}}'
+read -r pre; printf '%s\n' "$pre" >> "$LOG"
+echo '{"type":"control_request","request_id":"h-2","request":{"subtype":"hook_callback","callback_id":"rush-others-post","tool_use_id":"tu-1","input":{"hook_event_name":"PostToolUse","tool_name":"Agent","tool_use_id":"tu-1","tool_input":{"subagent_type":"kimi"},"tool_response":{"status":"completed","agentId":"a-1","content":[{"type":"text","text":"ok"}]}}}}'
+read -r post; printf '%s\n' "$post" >> "$LOG"
+echo '{"type":"system","subtype":"init","cwd":"/work","session_id":"s-1","tools":[],"model":"m"}'
+while read -r more; do printf '%s\n' "$more" >> "$LOG"; done
+"#,
+    );
+    let answers = Arc::new(Answers(Mutex::new(Vec::new())));
+    let o = StartOptions {
+        dir: dir.path().display().to_string(),
+        profile: crate::adapter::profile(&Account::at("x", dir.path().join("cfg"))),
+        binary: bin.display().to_string(),
+        others: vec![rush_core::adapter::OtherAgent {
+            name: "kimi".into(),
+            description: "Moonshot's; workhorse tier.".into(),
+        }],
+        delegate: Some(answers.clone() as rush_core::adapter::DelegateRef),
+        ..StartOptions::default()
+    };
+    let (tx, rx) = channel();
+    let conn = Claude::new()
+        .start(o, Arc::new(Tagged { key: 1u8, tx }))
+        .unwrap();
+    // The fake says it's started once it has read both answers.
+    let _ = next(&rx);
+    let lines: Vec<Value> = std::fs::read_to_string(&log)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let init = &lines[0]["request"];
+    assert_eq!(
+        init["hooks"]["PreToolUse"][0]["hookCallbackIds"][0],
+        "rush-others-pre"
+    );
+    assert_eq!(init["hooks"]["PreToolUse"][0]["matcher"], "Agent|Task");
+    assert_eq!(
+        init["hooks"]["PostToolUse"][0]["hookCallbackIds"][0],
+        "rush-others-post"
+    );
+    let pre = &lines[1]["response"];
+    assert_eq!(
+        (pre["subtype"].as_str(), pre["request_id"].as_str()),
+        (Some("success"), Some("h-1"))
+    );
+    let u = &pre["response"]["hookSpecificOutput"]["updatedInput"];
+    assert_eq!(u["prompt"], crate::others::STAND_IN_TASK);
+    assert_eq!(u["subagent_type"], "kimi");
+    let post = &lines[2]["response"];
+    assert_eq!(post["request_id"], "h-2");
+    let out = &post["response"]["hookSpecificOutput"]["updatedToolOutput"];
+    assert_eq!(
+        out["content"][0]["text"],
+        "kimi finished:\n\nreviewed: review main.rs"
+    );
+    assert_eq!(out["agentId"], "a-1");
+    let calls = lock(&answers.0).clone();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        (calls[0].prompt.as_str(), calls[0].step.as_str()),
+        ("review main.rs", "tu-1")
+    );
+    // The stand-in is a subagent type of its own, on the cheapest model.
+    let args = std::fs::read_to_string(format!("{}.args", log.display())).unwrap();
+    assert!(
+        args.contains(r#""kimi":{"description":"Moonshot's; workhorse tier.""#),
+        "{args}"
+    );
+    assert!(args.contains(r#""model":"haiku""#), "{args}");
+    let _ = conn.close();
+}

@@ -47,6 +47,9 @@ pub enum Event {
     /// One MCP message for a server the host runs in-process (one named in
     /// Session::initialize). Answer it with Session::reply_mcp.
     McpRequest(McpRequest),
+    /// One of the hooks the host registered at initialize, fired: answer
+    /// it with Session::reply_hook (Rust-only).
+    HookCallback(HookCallback),
     TaskStarted(TaskStarted),
     TaskUpdated(TaskUpdated),
     TaskProgress(TaskProgress),
@@ -188,6 +191,16 @@ pub struct McpRequest {
     pub id: String,
     pub server: String,
     pub message: Option<RawJson>,
+}
+
+/// A hook the host registered, fired: callback names which, input is the
+/// hook's input as a command hook gets it on its stdin.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct HookCallback {
+    pub id: String,
+    pub callback: String,
+    pub input: Option<RawJson>,
+    pub tool_use_id: String,
 }
 
 /// Claude Code started a task: a Bash command, a subagent, a monitor or a
@@ -731,8 +744,18 @@ fn decode_control(e: &Envelope, other: Other) -> Result<Event, DecodeError> {
         server_name: String,
         #[serde(borrow)]
         message: Option<&'a RawValue>,
+        #[serde(deserialize_with = "nd")]
+        callback_id: String,
     }
     let r: R = serde_json::from_str(e.request.map_or("null", RawValue::get))?;
+    if r.subtype == "hook_callback" && !r.callback_id.is_empty() {
+        return Ok(Event::HookCallback(HookCallback {
+            id: e.request_id.to_string(),
+            callback: r.callback_id,
+            input: raw(r.input),
+            tool_use_id: r.tool_use_id,
+        }));
+    }
     if r.subtype == "mcp_message" {
         return Ok(Event::McpRequest(McpRequest {
             id: e.request_id.to_string(),

@@ -51,6 +51,7 @@ Pi and OpenCode can expose providers configured in their native tools; those dyn
 | Images | ✓ | ✓ | ✓ | ✓ | —* | ✓ | ✓ | ✓ | ✓* | ✓ |
 | Questions | ✓ | ✓ | ✓ | ✓ | —* | ✓* | ✓ | ✓ | — | ✓ |
 | Subagents | ✓ | — | — | — | — | —* | — | — | — | — |
+| Other models as subagents | ✓ | ✓ | ✓* | ✓* | — | — | ✓* | ✓* | ✓* | ✓* |
 | Background tasks | ✓ | — | —* | —* | — | — | —* | —* | —* | —* |
 | Context breakdown | ✓ | ✓* | — | — | — | ✓* | — | — | — | — |
 | Compact | ✓ | ✓ | ✓* | — | — | ✓ | — | — | — | — |
@@ -94,6 +95,7 @@ Pi and OpenCode can expose providers configured in their native tools; those dyn
 | Images | ✓* | ✓* | ✓* | ✓* |
 | Questions | — | ✓ | ✓* | ✓ |
 | Subagents | —* | — | — | — |
+| Other models as subagents | ✓ | ✓ | — | ✓* |
 | Background tasks | — | — | — | —* |
 | Context breakdown | — | ✓* | ✓* | — |
 | Compact | ✓* | ✓ | ✓* | — |
@@ -137,6 +139,7 @@ Pi and OpenCode can expose providers configured in their native tools; those dyn
 | Images | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Questions | ✓* | ✓ | ✓* | ✓ | ✓* | ✓* |
 | Subagents | —* | ✓ | —* | ✓ | —* | —* |
+| Other models as subagents | — | ✓ | — | ✓ | — | — |
 | Background tasks | — | ✓ | — | ✓ | — | — |
 | Context breakdown | ✓* | ✓ | ✓* | ✓ | ✓* | ✓* |
 | Compact | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -180,6 +183,7 @@ Pi and OpenCode can expose providers configured in their native tools; those dyn
 | Images | ✓ |
 | Questions | ✓ |
 | Subagents | — |
+| Other models as subagents | ✓* |
 | Background tasks | —* |
 | Context breakdown | — |
 | Compact | — |
@@ -218,6 +222,7 @@ Pi and OpenCode can expose providers configured in their native tools; those dyn
 - **Kimi:** native login, configured model discovery, local history, and Kimi Code plan quota are integrated. Its native `/compact` is exposed. No Rush account swapping, rewind, or mid-turn steering is declared. Its saved wire history reader and account handling are specific to Kimi; its conversation UI is shared.
 - **Vibe:** native login and saved local history are integrated. No Rush account switching or remaining-quota display; effort depends on the model. Ollama-in-Vibe is a separate adapter with a different feature set.
 - **Usage semantics differ:** Claude/Codex quota windows, Copilot premium requests, DeepSeek API balance, GLM Coding Plan (read in ZCode, Claude Code and Pi, with ZCode's key or the Coding Plan key Settings › Providers keeps) and Kimi Code plan limits are distinct measures. Local Ollama pricing means no provider token charge, not zero machine/energy cost.
+- **Other models as subagents (Rust-only):** ✓ = every model rush runs is one of the harness's own subagent types (Claude Code: `--agents` stand-ins on haiku whose Agent call rush's hooks answer, one haiku turn per call; Codex: a `run_agent` dynamic tool rush answers, no extra model). ✓* = through rush's `spawn_agent` MCP tool, told as its own subagents. — = rush's shell stand-ins only. Tiers (top, workhorse, quick, with long-context, vision or cheap) are named the same way. See [native-agents.md](native-agents.md).
 - **Shared Rush features:** composer, queue persistence, transcript row controls, agent-message rows and community/discussion views are core UI features. The adapter’s “Subagents” flag refers to native subagent integration, not whether Rush can launch a separate peer session.
 
 ## Kimi screenshot

@@ -285,6 +285,10 @@ struct Inner {
     sink: Arc<dyn Sink>,
     st: Mutex<State>,
     phase: Mutex<Phase>,
+    /// The other models the thread has as its own (others.rs), and the
+    /// client their answers go back through, once known.
+    others: Mutex<Option<Arc<crate::others::Others>>>,
+    rpc: std::sync::OnceLock<std::sync::Weak<Client>>,
 }
 
 impl Inner {
@@ -346,6 +350,34 @@ impl Inner {
         } else {
             *ph = Phase::Running;
         }
+    }
+
+    /// Answers a run_agent call (params p, request id) on a thread of its
+    /// own, once its model has: whether it was one.
+    fn run_agent(&self, p: &Value, id: &RawValue) -> bool {
+        let Some(others) = self
+            .others
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+        else {
+            return false;
+        };
+        let Some(call) = others.call(p) else {
+            return false;
+        };
+        let Some(rpc) = self.rpc.get().and_then(std::sync::Weak::upgrade) else {
+            return false;
+        };
+        let id = keep(id);
+        std::thread::spawn(move || {
+            let (text, ok) = match call.and_then(|c| others.delegate.run(c)) {
+                Ok(t) => (t, true),
+                Err(e) => (e, false),
+            };
+            let _ = rpc.reply(&id.0, crate::others::result(&text, ok));
+        });
+        true
     }
 
     /// What the app-server says, turned into rush's events, and the
@@ -473,6 +505,7 @@ impl Inner {
                 self.emit(vec![other(&m.method, &m.params)]);
                 return;
             }
+            crate::others::REQ_TOOL_CALL if self.run_agent(&p, &a.id) => return,
             _ => {
                 drop(state);
                 let _ = rpc.refuse(&a.id, &format!("rush does not handle {}", m.method));
@@ -1167,6 +1200,7 @@ impl Conn {
         };
         let inner = new_inner(sink, phase);
         let rpc = Client::new(r, w, Some(handler(&inner)));
+        let _ = inner.rpc.set(Arc::downgrade(&rpc));
         Conn {
             rpc,
             inner,
@@ -1245,6 +1279,18 @@ impl Conn {
             );
         }
         params.insert("config".into(), Value::Object(config));
+        // Every other model rush runs, as a tool of the thread's own that
+        // rush answers (others.rs). A resumed thread keeps the tools it
+        // started with.
+        if let Some(others) = crate::others::Others::of(&o.others, o.delegate.clone()) {
+            if !o.fork && !o.resume {
+                params.insert(
+                    "dynamicTools".into(),
+                    json!([crate::others::tool_spec(&o.others)]),
+                );
+            }
+            *self.inner.others.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(others));
+        }
         if !o.skill_roots.is_empty() {
             // Claude Code's skills beside Codex's own; not reading them is
             // no reason not to start.
@@ -1344,6 +1390,8 @@ fn new_inner(sink: Arc<dyn Sink>, phase: Phase) -> Arc<Inner> {
             ..State::default()
         }),
         phase: Mutex::new(phase),
+        others: Mutex::new(None),
+        rpc: std::sync::OnceLock::new(),
     })
 }
 
@@ -1400,6 +1448,7 @@ pub fn start(mut o: StartOptions, sink: Arc<dyn Sink>) -> adapter::Result<Conn> 
         &o.flags,
         Some(handler(&inner)),
     )?;
+    let _ = inner.rpc.set(Arc::downgrade(&rpc));
     launch(
         Conn {
             rpc,
@@ -1849,7 +1898,13 @@ pub(crate) fn adopt(
             );
         }
     }
+    // The thread keeps the run_agent it started with; this build answers
+    // it (others.rs).
+    if let Some(others) = crate::others::Others::of(&o.others, o.delegate.clone()) {
+        *inner.others.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(others));
+    }
     let rpc = Client::adopt(k, Some(handler(&inner)))?;
+    let _ = inner.rpc.set(Arc::downgrade(&rpc));
     Ok(Conn {
         rpc,
         inner,

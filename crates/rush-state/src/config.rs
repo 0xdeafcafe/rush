@@ -292,6 +292,15 @@ pub struct Config {
         skip_serializing_if = "BTreeMap::is_empty"
     )]
     pub harnesses: BTreeMap<String, Vec<String>>,
+    /// Models moved to another tier than their name puts them in, by model
+    /// id: "glm-5.3": "top". Settings › Config's t moves one (Rust-only;
+    /// docs/native-agents.md).
+    #[serde(
+        rename = "modelTiers",
+        deserialize_with = "lenient",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    pub model_tiers: BTreeMap<String, String>,
     /// Set once an older config's profiles were fitted to built-in ones.
     #[serde(
         rename = "builtinProfiles",

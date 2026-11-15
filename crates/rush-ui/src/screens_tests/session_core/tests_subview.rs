@@ -476,6 +476,95 @@ fn enter_on_an_agent_tools_step_picks_its_agent() {
     }
 }
 
+/// Rust-only: an Agent call another model answered (rush-claude's
+/// others.rs) is one run, the model's that rush hosts ("top · astra"):
+/// Claude Code's Haiku stand-in for it, listed beside its transcript
+/// under the same call, is no row of its own, and enter on the call
+/// opens the model's conversation.
+#[test]
+fn a_call_another_model_answered_is_one_run() {
+    use rush_core::event::{Event, Message, Part, PartKind};
+    use rush_core::tool::Call;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = model(&d);
+    let p = d.path().join("hosted.jsonl");
+    std::fs::write(
+        &p,
+        X_LINES
+            .join("\n")
+            .replace("\"isSidechain\":true", "\"isSidechain\":false")
+            + "\n",
+    )
+    .unwrap();
+    let stand_in = d.path().join("agent-stand.jsonl");
+    std::fs::write(&stand_in, X_LINES.join("\n") + "\n").unwrap();
+    let c = Call {
+        id: "n1".into(),
+        name: "Agent".into(),
+        raw: Some(
+            rush_core::wire::RawJson::new(
+                r#"{"subagent_type":"top","description":"Design the cache","prompt":"design it"}"#,
+            )
+            .unwrap(),
+        ),
+        ..Call::default()
+    };
+    m.session.as_mut().unwrap().sess.apply(
+        &Event::Message(Message {
+            role: "assistant".into(),
+            id: "m-n1".into(),
+            parts: vec![Part {
+                kind: PartKind::ToolCall,
+                call: Some(Box::new(c)),
+                ..Part::default()
+            }],
+            ..Message::default()
+        }),
+        NOW - 5_000,
+    );
+    let r = &mut conn(&mut m, KEY).runs;
+    r.listed.push(Subagent {
+        id: "stand".into(),
+        typ: "top".into(),
+        description: "Design the cache".into(),
+        model: "claude-haiku-4-5".into(),
+        tool_use_id: "n1".into(),
+        path: stand_in.to_string_lossy().into_owned(),
+        born: NOW - 4_900,
+        ..Subagent::default()
+    });
+    r.spawns.insert(
+        "h7".into(),
+        crate::spawns::SpawnRun {
+            step: "n1".into(),
+            kind: "codex".into(),
+            name: "top · astra".into(),
+            model: "gpt-6-astra".into(),
+            prompt: "design it".into(),
+            path: p.to_string_lossy().into_owned(),
+            hosted: "h7".into(),
+            live: true,
+            ..Default::default()
+        },
+    );
+    super::subs::kick(&mut m, KEY);
+    super::subs::refresh(&mut m, KEY);
+    let rows: Vec<(String, String)> = conn(&mut m, KEY)
+        .runs
+        .subs
+        .iter()
+        .filter(|sa| sa.tool_use_id == "n1")
+        .map(|sa| (sa.id.clone(), sa.typ.clone()))
+        .collect();
+    assert_eq!(rows, [("spawn:h7".to_string(), "top · astra".to_string())]);
+    // The session's other runs stay.
+    assert!(conn(&mut m, KEY).runs.subs.iter().any(|sa| sa.id == "x"));
+    let picked = "t9:s:n1".to_string();
+    m.session.as_mut().unwrap().sel.clone_from(&picked);
+    press(&mut m, "enter");
+    assert_eq!(openrun::open_id(&m, KEY).as_deref(), Some("spawn:h7"));
+}
+
 /// space on the dock's workflow opens it on the conversation's page: its
 /// phases and agents, the keys left with the conversation (openWorkflow).
 #[test]

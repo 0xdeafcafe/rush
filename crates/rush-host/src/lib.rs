@@ -45,6 +45,7 @@ pub mod lines;
 pub mod longtask;
 pub mod memshare;
 pub mod name;
+pub mod native;
 pub mod op;
 pub mod open;
 pub mod pack;

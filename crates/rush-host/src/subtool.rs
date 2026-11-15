@@ -24,9 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::agentmatch::{find, no_agent};
-use crate::agents::{
-    Pick, WORK_PROMPT, catalogue_of, own_def, picks, session_picks, start_catalogue_of,
-};
+use crate::agents::{Pick, WORK_PROMPT, picks, session_picks, start_catalogue_of};
 use crate::client::{deliver, deliver_how, read_config, read_info, spawn};
 use crate::events::{clip, log_event};
 use crate::paths::dir;
@@ -92,6 +90,15 @@ pub struct AnswerInput {
     pub reason: String,
 }
 
+/// A tier pick's held place (native::hold_pick), let go when dropped.
+struct Hold(u64);
+
+impl Drop for Hold {
+    fn drop(&mut self) {
+        crate::native::release(self.0);
+    }
+}
+
 /// What a denied agent is told when the caller gives no reason.
 const DENIED: &str = "The agent that started you denied this. Do the task another way, or say what you'd need and why.";
 
@@ -138,12 +145,6 @@ impl SubAgents {
         self.headless
     }
 
-    /// Whether p is one of the session's own subagent types (agent_defs),
-    /// which its Agent tool starts rather than spawn_agent.
-    fn own(&self, p: &Pick) -> bool {
-        self.reg.reads_as_claude(&self.kind) && own_def(p, &self.kind)
-    }
-
     fn leader(&self) -> String {
         self.reg.harness_of(&self.kind).0
     }
@@ -168,11 +169,10 @@ impl SubAgents {
         drop_view(&self.parent, name)
     }
 
-    /// The agents spawn_agent can start, a line each (agents::catalogue_of).
+    /// The agents spawn_agent can start, a line each, and the tiers
+    /// (native::catalogue).
     pub fn catalogue(&self) -> String {
-        catalogue_of(&self.reg, picks(&self.reg, &self.leader()), &|p| {
-            self.own(p)
-        })
+        crate::native::catalogue(&crate::native::offers(&self.reg, &self.kind))
     }
 
     /// The agents start_agent starts that spawn_agent doesn't list (Claude
@@ -194,8 +194,21 @@ impl SubAgents {
             return Err("spawn_agent needs a prompt: the whole task".into());
         }
         let ps = picks(&self.reg, &self.leader());
-        let (p, model) = self.choose(&ps, &input.agent, &input.model)?;
+        // A tier ("top", "quick long-context") is a model rush picks, its
+        // place held so calls made at once spread across providers.
+        let mut hold = None;
+        let (p, model) = match self.tier(&ps, &input.agent, &input.model)? {
+            Some((p, token)) => {
+                hold = Some(Hold(token));
+                (p, String::new())
+            }
+            None => self.choose(&ps, &input.agent, &input.model)?,
+        };
         let mut cfg = self.config(&p, &model, &input.prompt, &input.effort, false);
+        if hold.is_some() {
+            // The card, the list and the board say the model it ran.
+            cfg.meta.insert("spawnLabel".into(), p.name.clone());
+        }
         if !input.step.is_empty() {
             cfg.meta.insert("spawnStep".into(), input.step.clone()); // the call that asked: the UI draws it there
         }
@@ -227,12 +240,50 @@ impl SubAgents {
             }
         };
         if input.background {
+            if let Some(h) = hold.take() {
+                // Held until its first answer is in.
+                crate::native::started(h.0, &started.id);
+                std::mem::forget(h);
+            }
             return Ok(format!(
                 "{} started in the background as agent {}. Its answer is sent to you as a message when it finishes; agent_result with this id asks sooner.",
                 p.name, started.id
             ));
         }
-        await_answer(&self.reg, &started.id, &self.parent, since, FOREGROUND)
+        let out = await_answer(&self.reg, &started.id, &self.parent, since, FOREGROUND);
+        if hold.is_none() {
+            return out;
+        }
+        // Which model the tier ran on, said first.
+        match out {
+            Ok(t) => Ok(format!("{}: {t}", p.name)),
+            Err(e) => Err(format!("{}: {e}", p.name)),
+        }
+    }
+
+    /// The model a tier the call names runs on ("top", "quick
+    /// long-context"), named "top · astra", and its held place; None when
+    /// it names no tier, or names a model too.
+    fn tier(&self, ps: &[Pick], name: &str, model: &str) -> Result<Option<(Pick, u64)>, String> {
+        if !model.trim().is_empty() {
+            return Ok(None);
+        }
+        let Some((tier, traits)) = rush_core::adapter::others::tier_query(name) else {
+            return Ok(None);
+        };
+        let cfg = rush_state::Store::load().config;
+        let offers = crate::native::offers_of(&self.reg, &cfg, &self.kind, ps.to_vec());
+        let cands = crate::native::candidates(&self.reg, &cfg, &offers, &crate::native::readings());
+        let Some((i, token)) = crate::native::hold_pick(&self.parent, &cands, tier, &traits) else {
+            return Err(crate::native::no_tier(tier, &traits, &cands));
+        };
+        let mut p = offers[i].pick.clone();
+        p.name = format!(
+            "{} · {}",
+            rush_core::adapter::others::tier_name(tier, &traits),
+            p.name
+        );
+        Ok(Some((p, token)))
     }
 
     /// Starts an agent on in.prompt as a session of its own beside the

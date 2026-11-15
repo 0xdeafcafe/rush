@@ -532,3 +532,55 @@ fn orchestrator_without_agents_says_so() {
     assert!(got.contains("none started yet"), "{got}");
     assert!(got.contains("no agents yet"), "{got}");
 }
+
+/// Rust-only: an Agent call another model answered (rush-claude's
+/// others.rs) is one lane on the board, run by that model as rush hosts
+/// it ("top · astra"), at work as long as it is: never Claude Code's
+/// Haiku stand-in that ended at once.
+#[test]
+fn orchestrator_shows_the_model_that_answered_an_agent_call() {
+    let mut s = Session::new();
+    s.cwd = "/work/game".into();
+    let evs = vec![
+        (0, sent("have the top tier design the cache")),
+        (
+            1,
+            tool_use(
+                "n1",
+                "Agent",
+                json!({"description": "Design the cache", "prompt": "design it", "subagent_type": "top"}),
+            ),
+        ),
+        (2, tool_result("n1", "ok", false, None)),
+    ];
+    for (sec, e) in evs {
+        s.feed(e, at(sec));
+    }
+    for (live, mark) in [(true, "●"), (false, "✓")] {
+        let mut o = opts(Preset::Orchestrator, 120);
+        o.kids.insert(
+            "n1".into(),
+            vec![rush_convo::render::Child {
+                id: "h1".into(),
+                spawn: rush_convo::render::Spawn {
+                    kind: "codex".into(),
+                    name: "top · astra".into(),
+                    model: "gpt-6-astra".into(),
+                    ..Default::default()
+                },
+                sess: None,
+                live,
+                start: at(2),
+            }],
+        );
+        let got = plain(&Renderer::new().render(&s, &o));
+        let lanes: Vec<&str> = got
+            .lines()
+            .filter(|l| l.contains("Design the cache"))
+            .collect();
+        assert_eq!(lanes.len(), 1, "{got}");
+        assert!(lanes[0].contains("top · astra"), "{got}");
+        assert!(!lanes[0].contains("gpt-6-astra"), "{got}");
+        assert!(lanes[0].contains(mark), "{live}: {got}");
+    }
+}

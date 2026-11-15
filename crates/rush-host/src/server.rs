@@ -1717,12 +1717,24 @@ impl Host {
                 .filter_map(|(n, d)| RawJson::new(d.get()).ok().map(|d| (n.clone(), d)))
         };
         o.agents = plugin_agents().collect();
+        // Every other model rush runs, as the harness's own subagent types
+        // where it can register them, rush answering a call for one
+        // (native.rs, Rust-only).
+        let native = crate::native::native(&self.reg, &kind);
+        if native {
+            o.others = crate::native::others_of(&crate::native::offers(&self.reg, &kind));
+            o.delegate = Some(crate::native::delegate(self.reg.clone(), &c.id));
+        }
         let told = if self.reg.reads_as_claude(&kind) {
             // The agents it can hand work to are its own subagent types, by
             // name; a plugin's of the same name is the plugin's.
             o.agents = crate::agents::agent_defs(&self.reg, &kind);
             o.agents.extend(plugin_agents());
-            crate::agents::AGENTS_NOTE.to_string()
+            if o.others.is_empty() {
+                crate::agents::AGENTS_NOTE.to_string()
+            } else {
+                crate::native::CLAUDE_NOTE.to_string()
+            }
         } else {
             // Claude Code's own prompt tells it of pastes, and it reads
             // these skills itself.
@@ -1731,8 +1743,12 @@ impl Host {
                 // No tools: its shell, through the stand-ins. MCP is the
                 // harness's, whichever provider rides it.
                 crate::agents::agents_prompt(&self.reg, h.as_str())
+            } else if native && !o.others.is_empty() {
+                crate::native::CODEX_NOTE.to_string()
             } else {
-                crate::agents::TOOLS_NOTE.to_string()
+                // Its own subagents can't take other models: rush's tool
+                // starts them, said as its own (native.rs).
+                crate::native::OTHERS_NOTE.to_string()
             };
             o.skill_roots = crate::agents::skill_roots(&self.reg, &c.cwd);
             format!("{told}\n\n{PASTES_PROMPT}")

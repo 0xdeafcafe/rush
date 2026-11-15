@@ -162,7 +162,9 @@ impl Neutral {
                     .collect(),
             })],
             h::Event::RateLimit(e) => rate_limit(&e, now),
-            h::Event::ControlReply(_) | h::Event::McpRequest(_) => Vec::new(),
+            h::Event::ControlReply(_) | h::Event::McpRequest(_) | h::Event::HookCallback(_) => {
+                Vec::new()
+            }
             h::Event::Other(o) => {
                 if o.kind == "system"
                     && o.subtype == "api_retry"
