@@ -1,0 +1,10 @@
+╭ #482 Fix the login re… ── open ╮
+│ 0xdeafcafe/rush                │
+│                                │
+│ ↗ Open on GitHub   ↗ Checks    │
+│ ↗ Files                        │
+│ ⧉ Copy link                    │
+│ ▸ Review    approve · request… │
+│ ▸ Merge     squash · merge co… │
+│ ▸ In rush   PR sheet           │
+╰────────────────────────────────╯

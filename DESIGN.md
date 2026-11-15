@@ -3171,11 +3171,39 @@ is made. Everything below is in `rush_ui::frame`.
   link's kind off the UI; the TUI turns lookups on as it starts
   (`cmdbar::linkkinds::start`: `look_links(true)`, and `on_lookup`
   sending a frame on a lane of one, never waiting), tests and `--render`
-  leave them off. `cmdbar/linkkinds.rs` keys what the UI does by kind:
-  a pull request's link opens its sheet (`prsheet::open_pr_link`, asked
-  of gh by its url, read from the link's lookup) from a click in a
-  message, and its menu offers Open in rush and Merge… first. Merging
-  only ever asks; nothing goes to GitHub without a key.
+  leave them off. The kinds are a pull request, an issue and (Rust-only)
+  an Actions run (`LINK_GITHUB_RUN`, `gh run view`, badged `▶ failed`);
+  `rush_gh::ghpr::github_link` also reads a commit's and a repository's
+  address, with nothing to look up.
+- **A GitHub link's popover** (Rust-only; Go opened a pull request's
+  whole sheet from its link). A click on a GitHub link of any of those
+  kinds (`cmdbar::linkkinds::open_known_link`), its right-click menu or
+  o on its step (`linkmenu::open_link_menu`) opens `cmdbar/linkpop.rs`:
+  a box 52 wide at most, hung under the cell clicked (`Model::click_at`,
+  set while a press is handled; above it when there's no room below)
+  or, from a key, in the middle. The sheet frame draws it
+  (`Sheet::popover`, `sheet::popover_box`/`popover_at`): its title and
+  state in the top edge (`#482 Fix the login redirect ─── open`, a run's
+  `CI · title ─── failed`), no blank rows, nothing behind faded while it
+  hangs by a click. Inside: one quiet facts line (repo · branch → base ·
+  checks; a run's branch and failed job), its parts dropped from the end
+  to fit; the links out first (`↗ Open on GitHub`, a PR's Checks and
+  Files, a run's Failed job, an issue's Comments, a repo's Pull requests,
+  Actions and Issues), flowing onto more rows as the width needs, then
+  `⧉ Copy link`; then the actions in groups, folded, each showing its
+  rows as a faint hint cut to fit (`▸ Review  approve · request changes ·
+  comment`, `▸ Merge  squash · merge commit · rebase`, `▸ In rush  PR
+  sheet`, a finished run's `▸ Re-run  failed jobs · all jobs`). Keys:
+  ↑↓ by row, ←→ along a row of links, → or enter unfolds a group, ← or
+  esc folds it, esc with nothing unfolded closes; each row's letter (lit
+  orange, an unfolded group's rows choosing first) does it; a click on a
+  row does it, a click outside closes the box whole. Nothing is done
+  without a key: approve and merge ask through the PR sheet's own
+  questions (`prsheet::ask_approve_link`, `ask_merge_link`, the merge
+  question's y being the way picked), comment and request changes open
+  the PR sheet writing, and Re-run asks before `gh run rerun`. The whole
+  PR sheet is In rush's PR sheet, never opened by itself. Any other link
+  keeps the link menu.
 - **The list and the Session side by side.** `list.rs` groups each
   section by project (Settings' split by project) and draws the rail look
   or the classic; `list_extras/split.rs` decides the layout as Go's

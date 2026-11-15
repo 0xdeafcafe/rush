@@ -8,5 +8,6 @@ mod tests;
 mod tests_attach;
 mod tests_hash;
 mod tests_linkmenu;
+mod tests_linkpop;
 mod tests_screens;
 mod tests_stops;

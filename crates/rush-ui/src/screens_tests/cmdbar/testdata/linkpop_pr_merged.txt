@@ -1,0 +1,7 @@
+╭ #480 Tidy the list ────────────────────── merged ╮
+│ 0xdeafcafe/rush · tidy → main                    │
+│                                                  │
+│ ↗ Open on GitHub   ↗ Checks   ↗ Files            │
+│ ⧉ Copy link                                      │
+│ ▸ In rush   PR sheet                             │
+╰──────────────────────────────────────────────────╯

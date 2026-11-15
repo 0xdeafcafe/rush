@@ -2,7 +2,6 @@
 
 use crate::frame::sheet::Sheet;
 use crate::frame::{Out, Press};
-use rush_convo::linkinfo::LINK_GITHUB_PR;
 use rush_core::text::Line;
 use rush_gh::ghpr::{Comment, PR};
 use rush_ui_projects_machine::data::*;
@@ -185,79 +184,45 @@ fn merging_says_what_it_does() {
     assert_eq!(c.more.len(), 3, "squash as admin");
 }
 
-/// A link to a pull request in any repository opens in rush once its
-/// lookup has answered: a click opens its sheet, read from the link,
-/// and its menu offers opening it there and merging it before the
-/// browser; merging only asks (TestPRLinkOpensInRush). The kind is a
-/// stand-in at pr.test, so nothing asks GitHub.
+/// A link to a pull request in any repository opens its popover, not its
+/// whole sheet: the sheet is In rush's PR sheet, read from the link, and
+/// merging from there only asks (TestPRLinkOpensInRush, Rust-only since
+/// the popover). Nothing asks GitHub: lookups are off, so what the link
+/// would say is given.
 #[test]
 fn a_pr_link_opens_in_rush() {
     use crate::screens::cmdbar::linkkinds::open_known_link;
-    use crate::screens::cmdbar::linkmenu::open_link_menu;
-    use rush_convo::linkinfo::{LinkKind, link_info, look_links, register_link};
-    use std::time::{Duration, Instant};
-    register_link(LinkKind::<PR> {
-        name: LINK_GITHUB_PR,
-        key: |u| {
-            u.strip_prefix("https://pr.test/")
-                .map_or_else(String::new, str::to_string)
-        },
-        look: std::sync::Arc::new(|key| {
-            Ok(PR {
-                number: 33,
-                title: "Emoji fix".into(),
-                url: format!("https://pr.test/{key}"),
-                state: "OPEN".into(),
-                head: "emoji".into(),
-                base: "main".into(),
-                ..PR::default()
-            })
-        }),
-        badge: |_| Line::new(),
-        fresh: None,
-    });
-    look_links(true);
-    let u = "https://pr.test/acme/linkopens/pull/33";
-    let end = Instant::now() + Duration::from_secs(5);
-    while link_info(u).is_none() {
-        assert!(Instant::now() < end, "the lookup never answered");
-        std::thread::sleep(Duration::from_millis(1));
-    }
+    use crate::screens::cmdbar::linkpop::{Info, LinkPop, open_link_pop_with};
+    let u = "https://github.com/acme/linkopens/pull/33";
+    let p = PR {
+        number: 33,
+        title: "Emoji fix".into(),
+        url: u.into(),
+        state: "OPEN".into(),
+        head: "emoji".into(),
+        base: "main".into(),
+        ..PR::default()
+    };
     let mut m = crate::new_model("t");
     (m.w, m.h) = (160, 50);
     m.kept::<Data>().frozen = true;
     assert_eq!(open_known_link(&mut m, u), Some(Out::Draw));
+    assert!(m.sheet_as::<LinkPop>().is_some(), "its popover");
+    assert!(open_link_pop_with(&mut m, u, Some(Info::Pr(p))));
+    // In rush, then its PR sheet.
+    m.sheet_key(&Press::of("i").unwrap());
+    m.sheet_key(&Press::of("enter").unwrap());
     let s = m.sheet_as::<PrSheet>().expect("its sheet");
     assert_eq!((s.url.as_str(), s.num), (u, 33));
     let s = m.sheet.take().unwrap();
     let s: &dyn std::any::Any = s.as_ref();
     let s = s.downcast_ref::<PrSheet>().unwrap();
-    let pr = s.pr(&m);
+    let pr = s.last.clone();
     assert_eq!(pr.title, "Emoji fix");
     assert!(
         text(&[s.keys(&pr, 200)]).contains("m merge…"),
         "a linked open pull request can be merged"
     );
-    assert!(open_link_menu(&mut m, u), "no menu");
-    let labels: Vec<String> = {
-        let p: &dyn std::any::Any = m.sheet.as_ref().unwrap().as_ref();
-        let p = p.downcast_ref::<crate::frame::Picker>().unwrap();
-        p.rows.iter().map(|r| r.label.plain()).collect()
-    };
-    assert_eq!(
-        labels.join(", "),
-        "Open in rush, Merge…, Open in browser, Copy link"
-    );
-    // Merge… opens it and asks how: nothing is merged on its own.
-    m.sheet_key(&Press::of("down").unwrap());
-    m.sheet_key(&Press::of("enter").unwrap());
-    assert!(m.sheet_as::<PrSheet>().is_some(), "its sheet is open");
-    assert_eq!(
-        m.confirm.as_ref().map(|c| c.question.as_str()),
-        Some("Merge #33 on GitHub?")
-    );
-    assert!(m.kept::<Data>().merging.is_empty());
     // Any other link is left to the terminal.
     assert!(open_known_link(&mut m, "https://example.com/x").is_none());
-    look_links(false);
 }

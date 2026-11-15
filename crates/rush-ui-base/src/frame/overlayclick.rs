@@ -92,6 +92,17 @@ impl Model {
             return Out::Pass;
         }
         if x < o.x0 || x >= o.x1 || y < o.y0 || y >= o.y1 {
+            // A popover goes whole, though esc in it may only fold what's
+            // open in it (Rust-only).
+            if self.confirm.is_none()
+                && self
+                    .sheet
+                    .as_ref()
+                    .is_some_and(|s| s.popover(self).is_some())
+            {
+                self.sheet = None;
+                return Out::Draw;
+            }
             return self.press("esc");
         }
         // A sheet that takes the mouse has it inside its box.
