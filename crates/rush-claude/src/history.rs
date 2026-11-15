@@ -154,6 +154,59 @@ pub(crate) fn tail(s: &Session, most: i64) -> adapter::Result<(Vec<Event>, bool)
     Ok((out, true))
 }
 
+/// HistoryWindow::history_window: the events of the whole transcript
+/// lines within bytes [from, end), each line's with the byte its line
+/// starts at, oldest first. from past mid-line reads from the first whole
+/// line at or after it; end past the file reads to its end.
+pub(crate) fn window(s: &Session, from: u64, end: u64) -> adapter::Result<Vec<(u64, Vec<Event>)>> {
+    if s.transcript.is_empty() {
+        return Err(Box::new(NoTranscript));
+    }
+    let mut f = File::open(&s.transcript)?;
+    let size = f.metadata()?.len();
+    let end = end.min(size);
+    if from >= end {
+        return Ok(Vec::new());
+    }
+    use std::os::unix::fs::FileExt;
+    // from names a line a former read gave, or 0; a guess past mid-line
+    // starts at the next whole line instead.
+    let mut at = from;
+    if at > 0 {
+        let mut was = [0u8];
+        let aligned = f.read_at(&mut was, at - 1).is_ok_and(|_| was == *b"\n");
+        if !aligned {
+            f.seek(SeekFrom::Start(at))?;
+            let mut skip = Vec::new();
+            let mut r = BufReader::with_capacity(64 << 10, &mut f);
+            if r.read_until(b'\n', &mut skip)? == 0 || at + skip.len() as u64 >= end {
+                return Ok(Vec::new());
+            }
+            at += skip.len() as u64;
+        }
+    }
+    f.seek(SeekFrom::Start(at))?;
+    let mut r = BufReader::with_capacity(64 << 10, f.take(end - at));
+    let mut dec = crate::messages();
+    let (mut out, mut line) = (Vec::new(), Vec::new());
+    let mut line_at = at;
+    loop {
+        line.clear();
+        let n = r.read_until(b'\n', &mut line)?;
+        if n == 0 {
+            break;
+        }
+        let next_at = line_at + n as u64;
+        if let Took::Events(evs) = take(dec.as_mut(), &line, 0)
+            && !evs.is_empty()
+        {
+            out.push((line_at, evs));
+        }
+        line_at = next_at;
+    }
+    Ok(out)
+}
+
 /// HistoryFollower::follow_history: s's transcript from its start, then
 /// what's added as it grows.
 pub(crate) fn follow(s: &Session) -> adapter::Result<Box<dyn Follow>> {
@@ -344,6 +397,29 @@ mod tests {
     #[test]
     fn its_end_is_the_end_of_its_whole() {
         let d = TempDir::new("claude-end");
+        let s = forty_turns(&d);
+        rush_core::adapter::conform::check_tail(
+            &crate::Claude::new(),
+            &s,
+            std::fs::read(&s.transcript).unwrap().len() as i64 / 4,
+        );
+    }
+
+    /// The shared check every adapter's window read is held to
+    /// (adapter::conform).
+    #[test]
+    fn its_windows_cover_its_whole() {
+        let d = TempDir::new("claude-window");
+        let s = forty_turns(&d);
+        rush_core::adapter::conform::check_window(
+            &crate::Claude::new(),
+            &s,
+            std::fs::read(&s.transcript).unwrap().len() as i64 / 4,
+        );
+    }
+
+    /// Forty turns of ask and answer, each line a long one.
+    fn forty_turns(d: &TempDir) -> Session {
         let path = d.0.join("t.jsonl");
         let mut b = String::new();
         for i in 0..40 {
@@ -360,10 +436,9 @@ mod tests {
             b.push('\n');
         }
         std::fs::write(&path, &b).unwrap();
-        let s = Session {
+        Session {
             transcript: path.to_string_lossy().into_owned(),
             ..Session::default()
-        };
-        rush_core::adapter::conform::check_tail(&crate::Claude::new(), &s, b.len() as i64 / 4);
+        }
     }
 }

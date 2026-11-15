@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine as _;
-use rush_core::adapter::{Profile, Registry, Session as AgentSession, migrated};
+use rush_core::adapter::{Profile, Registry, Session as AgentSession, migrated, read_history};
 use rush_core::event::{self, Event};
 use rush_core::wire::RawJson;
 use rush_host::{Away, Info};
@@ -242,11 +242,30 @@ impl Server {
             ["api", "sessions", id, "events"] if !id.is_empty() => {
                 allow(get, "GET, HEAD").unwrap_or_else(|| self.events(r, id))
             }
+            ["api", "sessions", id, "events", "before"] if !id.is_empty() => {
+                allow(get, "GET, HEAD").unwrap_or_else(|| self.page_history(r, id))
+            }
+            ["api", "sessions", id, "overview"] if !id.is_empty() => {
+                allow(get, "GET, HEAD").unwrap_or_else(|| self.overview(id))
+            }
+            ["api", "sessions", id, "subagents"] if !id.is_empty() => {
+                allow(get, "GET, HEAD").unwrap_or_else(|| self.subagents(id))
+            }
+            ["api", "sessions", id, "subagents", sub, "events"]
+                if !id.is_empty() && !sub.is_empty() =>
+            {
+                allow(get, "GET, HEAD").unwrap_or_else(|| self.subagent_history(r, id, sub))
+            }
             ["api", "sessions", id, "op"] if !id.is_empty() => {
                 allow(m == "POST", "POST").unwrap_or_else(|| self.op(r, id))
             }
             ["api", "git"] => allow(m == "POST", "POST").unwrap_or_else(|| self.git(r)),
             ["api", "others"] => allow(get, "GET, HEAD").unwrap_or_else(|| self.others()),
+            ["api", "feed"] => match m {
+                "GET" | "HEAD" => self.feed_list(),
+                "POST" => self.feed_post(r),
+                _ => allow(false, "GET, HEAD, POST").unwrap_or_else(|| fail(405, "")),
+            },
             ["api", "pair"] => allow(m == "POST", "POST").unwrap_or_else(|| self.pair(r)),
             ["api", "devices"] => allow(get, "GET, HEAD").unwrap_or_else(|| self.list_devices()),
             ["api", "devices", id, "revoke"] if !id.is_empty() => {
@@ -736,6 +755,351 @@ impl Server {
         resp
     }
 
+    /// One page of a session's history before a cursor, newest last: what
+    /// the stream's "cut" points at, for the app to pull older turns as
+    /// you scroll up. A cursor names where paging began — a transcript
+    /// length, so what's appended later doesn't move a page — and the
+    /// line the last page reached; with none, paging begins now. An
+    /// adapter that can't read a window pages by count instead. A
+    /// transcript rewritten shorter answers reset.
+    fn page_history(&self, r: &Request, id: &str) -> Response {
+        if !valid_id(id) {
+            return fail(404, "no such session");
+        }
+        let limit = r
+            .query_get("limit")
+            .and_then(|l| l.trim().parse::<usize>().ok())
+            .unwrap_or(300)
+            .clamp(1, 1000);
+        let empty = || write_json(&json!({ "events": [], "more": false }));
+        let Ok(info) = rush_host::read_info(id) else {
+            return empty();
+        };
+        let Some((a, s)) = history_parts(&self.reg, &info) else {
+            return empty();
+        };
+        let cur = r.query_get("cursor");
+        if let Some(w) = a.history_window() {
+            // The byte cursor: <end>-<at>, the transcript's length where
+            // paging began and the line to read down to.
+            let size = std::fs::metadata(&s.transcript)
+                .map(|m| m.len())
+                .unwrap_or(0);
+            let (end, at) = match cur.as_deref() {
+                None => (size, size),
+                Some(c) => match parse_cursor(c) {
+                    Some(x) if x.1 <= x.0 => x,
+                    _ => return fail(400, "bad cursor"),
+                },
+            };
+            if end > size {
+                return write_json(&json!({ "reset": true, "events": [], "more": false }));
+            }
+            let at = at.min(size);
+            let mut window: u64 = 4 << 20;
+            let (groups, from) = loop {
+                let from = at.saturating_sub(window);
+                let g = match w.history_window(&s, from, at) {
+                    Ok(g) => g,
+                    Err(_) => return empty(),
+                };
+                let n: usize = g.iter().map(|(_, evs)| evs.len()).sum();
+                if n > limit || from == 0 {
+                    break (g, from);
+                }
+                window = window.saturating_mul(16);
+            };
+            let n: usize = groups.iter().map(|(_, evs)| evs.len()).sum();
+            let mut cut = n.saturating_sub(limit);
+            // The line the page's first event starts at. When it's the
+            // first line the read reached, the page takes that line whole
+            // rather than over it: a cursor can't reach inside a line.
+            let mut at0 = at;
+            let mut seen = 0usize;
+            for (o, evs) in &groups {
+                if seen + evs.len() > cut {
+                    at0 = *o;
+                    break;
+                }
+                seen += evs.len();
+            }
+            if at0 == 0 {
+                cut = 0;
+            }
+            let more = !(from == 0 && cut == 0);
+            page_json(&groups, cut, &format!("{end}-{at0}"), more)
+        } else if let Some(hr) = a.history_reader() {
+            // The count cursor: <drop>, how many of the newest events the
+            // pages so far have covered. Numbered from the end, so a read
+            // capped to what a page needs stays put; what's appended
+            // while paging moves a page of these adapters' sessions.
+            let drop = match cur.as_deref() {
+                None => 0,
+                Some(c) => match c.trim().parse::<usize>() {
+                    Ok(n) => n,
+                    Err(_) => return fail(400, "bad cursor"),
+                },
+            };
+            let mut keep: VecDeque<Event> = VecDeque::new();
+            let mut below = false;
+            let ok = hr
+                .history(&s, 0, rush_core::adapter::SLICE, &mut |slice| {
+                    for ev in slice {
+                        keep.push_back(ev);
+                        if keep.len() > drop + limit {
+                            keep.pop_front();
+                            below = true;
+                        }
+                    }
+                    true
+                })
+                .is_ok();
+            if !ok {
+                return empty();
+            }
+            let page = keep.len().saturating_sub(drop);
+            let groups = vec![(0u64, keep.into_iter().take(page).collect::<Vec<Event>>())];
+            page_json(&groups, 0, &format!("{}", drop + page), below)
+        } else {
+            empty()
+        }
+    }
+
+    /// The session's numbers at a glance — the TUI's Overview view: its
+    /// turns and what each cost on which model, its tools, its context
+    /// window and its cache, read from its whole transcript through its
+    /// adapter.
+    fn overview(&self, id: &str) -> Response {
+        if !valid_id(id) {
+            return fail(404, "no such session");
+        }
+        let Ok(info) = rush_host::read_info(id) else {
+            return fail(404, "no such session");
+        };
+        let Some((a, s)) = history_parts(&self.reg, &info) else {
+            return write_json(&json!({}));
+        };
+        let empty = || write_json(&json!({}));
+        let Some(hr) = a.history_reader() else {
+            return empty();
+        };
+        let Ok(evs) = read_history(hr, &s, 0) else {
+            return empty();
+        };
+        let mut sess = rush_convo::Session::new();
+        for ev in &evs {
+            sess.apply(ev, 0);
+        }
+        // What each turn cost (the Overview's bars): its requests priced,
+        // or its own total where the agent said one.
+        let mut turn_costs = vec![0.0; sess.turns.len()];
+        let mut ti = 0;
+        for rq in &sess.requests {
+            while ti + 1 < sess.turns.len() && rq.at >= sess.turns[ti + 1].start {
+                ti += 1;
+            }
+            if ti < sess.turns.len()
+                && let Some(p) = a.pricer()
+                && let Some(c) = p.cost(&rq.model, &rq.usage)
+            {
+                turn_costs[ti] += c;
+            }
+        }
+        let (mut input, mut output, mut cache_read, mut cache_write) = (0, 0, 0, 0);
+        for rq in &sess.requests {
+            input += rq.usage.input;
+            output += rq.usage.output;
+            cache_read += rq.usage.cache_read;
+            cache_write += rq.usage.cache_write_5m + rq.usage.cache_write_1h;
+        }
+        let mut cost = 0.0;
+        let mut models: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+        let mut working = 0;
+        for (i, t) in sess.turns.iter().enumerate() {
+            if t.cost > 0.0 {
+                turn_costs[i] = t.cost;
+            }
+            cost += turn_costs[i];
+            if !t.model.is_empty() {
+                *models.entry(t.model.to_string()).or_default() += turn_costs[i];
+            }
+            working += (t.end - t.start).max(0);
+        }
+        let mut tools: Vec<(&str, f64, u32, u32)> = sess
+            .tools
+            .iter()
+            .map(|(n, s)| (n.as_ref(), s.time as f64 / 1000.0, s.calls, s.failed))
+            .collect();
+        tools.sort_by(|x, y| y.2.cmp(&x.2).then(x.0.cmp(y.0)));
+        write_json(&json!({
+            "model": sess.model,
+            "cwd": if sess.cwd.is_empty() { info.cwd.clone() } else { sess.cwd.clone() },
+            "version": sess.version,
+            "ntools": sess.ntools,
+            "mcp": sess.mcp.iter().map(|m| m.name.clone()).collect::<Vec<_>>(),
+            "turns": sess.turns.len(),
+            "cost": cost,
+            "turnCosts": turn_costs,
+            "workingMs": working,
+            "context": sess.context,
+            "window": sess.window,
+            "input": input, "output": output,
+            "cacheRead": cache_read, "cacheWrite": cache_write,
+            "tools": tools.iter().map(|(n, s, c, f)| json!({
+                "name": n, "secs": s, "calls": c, "failed": f
+            })).collect::<Vec<_>>(),
+            "models": models,
+            "first": sess.first, "last": sess.last,
+        }))
+    }
+
+    /// The session's subagents as Claude Code records them beside its
+    /// transcript, with what each last said.
+    fn subagents(&self, id: &str) -> Response {
+        if !valid_id(id) {
+            return fail(404, "no such session");
+        }
+        let empty = || write_json(&json!({ "subagents": [] }));
+        let Ok(info) = rush_host::read_info(id) else {
+            return empty();
+        };
+        let Some((_, s)) = history_parts(&self.reg, &info) else {
+            return empty();
+        };
+        let list = rush_convo::list_subagents(&s.transcript);
+        let out: Vec<Value> = list
+            .iter()
+            .map(|sa| {
+                json!({
+                    "id": sa.id, "type": sa.typ, "description": sa.description,
+                    "model": sa.model, "depth": sa.depth, "toolUseId": sa.tool_use_id,
+                    "born": sa.born, "modified": sa.modified, "size": sa.size,
+                    "activity": last_said(&sa.path),
+                })
+            })
+            .collect();
+        write_json(&json!({ "subagents": out }))
+    }
+
+    /// One subagent's own conversation: the last events of its transcript,
+    /// read through the session's adapter, whose format it shares.
+    fn subagent_history(&self, r: &Request, id: &str, sub: &str) -> Response {
+        if !valid_id(id) {
+            return fail(404, "no such session");
+        }
+        let empty = || write_json(&json!({ "events": [] }));
+        let Ok(info) = rush_host::read_info(id) else {
+            return fail(404, "no such session");
+        };
+        let Some((a, s)) = history_parts(&self.reg, &info) else {
+            return empty();
+        };
+        let Some(sa) = rush_convo::list_subagents(&s.transcript)
+            .into_iter()
+            .find(|x| x.id == sub)
+        else {
+            return fail(404, "no such subagent");
+        };
+        let Some(hr) = a.history_reader() else {
+            return empty();
+        };
+        let limit = r
+            .query_get("limit")
+            .and_then(|l| l.trim().parse::<usize>().ok())
+            .unwrap_or(200)
+            .clamp(1, 1000);
+        let ss = AgentSession {
+            transcript: sa.path.clone(),
+            ..AgentSession::default()
+        };
+        let mut keep: VecDeque<Event> = VecDeque::new();
+        let _ = hr.history(&ss, 0, rush_core::adapter::SLICE, &mut |slice| {
+            for ev in slice {
+                keep.push_back(ev);
+                if keep.len() > limit {
+                    keep.pop_front();
+                }
+            }
+            true
+        });
+        let mut b = String::from("{\"events\":[");
+        let mut first = true;
+        for ev in &keep {
+            if let Ok(e) = event::marshal(ev) {
+                if !first {
+                    b.push(',');
+                }
+                first = false;
+                b.push_str(&e);
+            }
+        }
+        b.push_str("]}");
+        let mut x = Response::new(200, b.into_bytes());
+        x.set("Content-Type", "application/json");
+        x.set("Cache-Control", "no-store");
+        x
+    }
+
+    /// The feed: rush's shared local board, the chirps agents post and you
+    /// answer (rush feed list), whole threads with whether the feed is on
+    /// to post to.
+    fn feed_list(&self) -> Response {
+        let home = rush_state::dir();
+        let mut rows = rush_room::community::Feed::at(&home)
+            .list()
+            .unwrap_or_default();
+        // chirps from before projects: their session says where
+        for t in &mut rows {
+            if t.author.project.is_empty() && !t.author.session_id.is_empty() {
+                t.author.project = session_project(&home, &t.author.session_id);
+            }
+        }
+        let threads: Vec<Value> = rows
+            .iter()
+            .filter_map(|t| serde_json::to_value(t).ok())
+            .collect();
+        write_json(&json!({ "threads": threads, "on": rush_room::community::on() }))
+    }
+
+    /// A post to the feed as you: a chirp, a reply on one, or resolving
+    /// one (rush feed post/reply/resolve). Mentions are kept by their
+    /// ids, as the CLI keeps them.
+    fn feed_post(&self, r: &Request) -> Response {
+        if !rush_room::community::on() {
+            return fail(400, "the feed is off; the user turns it on with #feed on");
+        }
+        let p = match read_json::<FeedPost>(r, OP_MOST) {
+            Ok(p) => p,
+            Err(e) => return fail(400, &e),
+        };
+        let home = rush_state::dir();
+        let you = rush_room::community::Author {
+            name: "You".into(),
+            ..Default::default()
+        };
+        let feed = rush_room::community::Feed::at(&home);
+        let bad = rush_room::community::Error(
+            "a chirp needs text; a reply or a resolve names its thread".into(),
+        );
+        let res = match p.op.as_str() {
+            "post" if !p.text.trim().is_empty() => {
+                let body = rush_room::handle::Names::from_home(&home).store(&p.text);
+                let title = body.split('\n').next().unwrap_or("");
+                feed.ask(&you, title, &body).map(|_| ())
+            }
+            "reply" if !p.id.is_empty() && !p.text.trim().is_empty() => {
+                let body = rush_room::handle::Names::from_home(&home).store(&p.text);
+                feed.reply(&p.id, &you, &body).map(|_| ())
+            }
+            "resolve" if !p.id.is_empty() => feed.resolve(&p.id, p.resolve).map(|_| ()),
+            _ => Err(bad),
+        };
+        match res {
+            Ok(()) => write_json(&json!({ "ok": true })),
+            Err(e) => fail(400, &e.0),
+        }
+    }
+
     /// Serves on ln until ctx ends or serving fails, with notifications
     /// and what exposes it running beside it. Whichever way it ends, ctx
     /// is cancelled before waiting on them, so a failed server can't leave
@@ -1154,6 +1518,141 @@ pub fn wire_line(l: &[u8]) -> Option<Vec<u8>> {
 pub const HISTORY_MOST: usize = 600;
 pub const FULL_MOST: usize = 50_000;
 
+/// The adapter and session a history read of info runs through: its kind
+/// as rush knows it now, with the transcript found for it. None when the
+/// kind is one rush doesn't know.
+fn history_parts(
+    reg: &Registry,
+    info: &Info,
+) -> Option<(rush_core::adapter::AdapterRef, AgentSession)> {
+    let kind = migrated(&info.kind);
+    let a = reg.get(kind.as_str())?;
+    let mut p = Profile {
+        kind: kind.clone(),
+        ..Profile::default()
+    };
+    if let Ok(cfg) = rush_host::read_config(&info.id) {
+        p.dir = cfg.account.dir;
+    }
+    let transcript = reg.find_transcript(kind.as_str(), &p, &info.cwd, &info.session_id);
+    Some((
+        a,
+        AgentSession {
+            id: info.session_id.clone(),
+            name: info.name.clone(),
+            cwd: info.cwd.clone(),
+            profile: p,
+            transcript,
+            ..AgentSession::default()
+        },
+    ))
+}
+
+/// A paging cursor <end>-<at>: two lengths, the second no greater.
+fn parse_cursor(c: &str) -> Option<(u64, u64)> {
+    let (end, at) = c.trim().split_once('-')?;
+    let (end, at) = (end.parse::<u64>().ok()?, at.parse::<u64>().ok()?);
+    (at <= end).then_some((end, at))
+}
+
+/// The answer of a page: its events as the wire's own {"t":…,"e":…}, the
+/// first cut of them skipped, with the next cursor and whether there's
+/// more before it.
+fn page_json(groups: &[(u64, Vec<Event>)], cut: usize, cursor: &str, more: bool) -> Response {
+    let mut b = String::from("{\"events\":[");
+    let mut skipped = 0usize;
+    let mut first = true;
+    for (_, evs) in groups {
+        for ev in evs {
+            if skipped < cut {
+                skipped += 1;
+                continue;
+            }
+            if let Ok(e) = event::marshal(ev) {
+                if !first {
+                    b.push(',');
+                }
+                first = false;
+                b.push_str(&e);
+            }
+        }
+    }
+    b.push_str(&format!("],\"more\":{more},\"cursor\":{cursor:?}}}"));
+    let mut r = Response::new(200, b.into_bytes());
+    r.set("Content-Type", "application/json");
+    r.set("Cache-Control", "no-store");
+    r
+}
+
+/// What a subagent last said: the text of its transcript's last assistant
+/// line, kept short. Subagents' transcripts are Claude Code's own
+/// sidechain files, which is where these are read from.
+fn last_said(path: &str) -> String {
+    use std::os::unix::fs::FileExt;
+    let Ok(f) = std::fs::File::open(path) else {
+        return String::new();
+    };
+    let size = f.metadata().map_or(0, |m| m.len());
+    let from = size.saturating_sub(64 << 10);
+    let mut b = vec![0u8; (size - from) as usize];
+    if f.read_at(&mut b, from).is_err() {
+        return String::new();
+    }
+    let start = if from == 0 {
+        0
+    } else {
+        b.iter()
+            .position(|&c| c == b'\n')
+            .map_or(b.len(), |i| i + 1)
+    };
+    for line in b[start..].rsplit(|&c| c == b'\n') {
+        let Ok(v) = serde_json::from_slice::<Value>(line) else {
+            continue;
+        };
+        if v["type"] != "assistant" {
+            continue;
+        }
+        for p in v["message"]["content"].as_array().into_iter().flatten() {
+            if p["type"] == "text"
+                && let Some(t) = p["text"].as_str()
+                && !t.trim().is_empty()
+            {
+                return t.trim().chars().take(200).collect();
+            }
+        }
+    }
+    String::new()
+}
+
+/// A post to the feed as you (feed_post).
+#[derive(serde::Deserialize, Default)]
+#[serde(default)]
+struct FeedPost {
+    op: String,
+    text: String,
+    /// The thread a reply or a resolve names.
+    id: String,
+    resolve: bool,
+}
+
+/// A session's project, as the feed names one: the main checkout its
+/// folder is in. "" when its config has gone.
+fn session_project(home: &std::path::Path, id: &str) -> String {
+    if id.is_empty() || id.contains(['/', '\\', '\0']) || id == "." || id == ".." {
+        return String::new();
+    }
+    let cwd = std::fs::read(home.join("sessions").join(id).join("config.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .and_then(|v| v["cwd"].as_str().map(String::from))
+        .unwrap_or_default();
+    if cwd.is_empty() {
+        String::new()
+    } else {
+        rush_room::feed::main_checkout(&cwd)
+    }
+}
+
 /// Sends what a session's transcript holds from before before (all of it
 /// when zero): its last HISTORY_MOST events, or with full the whole
 /// transcript up to FULL_MOST. A "cut" says there's more before.
@@ -1164,25 +1663,8 @@ pub fn send_history(
     full: bool,
     emit: &mut dyn FnMut(Vec<u8>),
 ) {
-    let kind = migrated(&info.kind);
-    let Some(a) = reg.get(kind.as_str()) else {
+    let Some((a, s)) = history_parts(reg, info) else {
         return;
-    };
-    let mut p = Profile {
-        kind: kind.clone(),
-        ..Profile::default()
-    };
-    if let Ok(cfg) = rush_host::read_config(&info.id) {
-        p.dir = cfg.account.dir;
-    }
-    let transcript = reg.find_transcript(kind.as_str(), &p, &info.cwd, &info.session_id);
-    let s = AgentSession {
-        id: info.session_id.clone(),
-        name: info.name.clone(),
-        cwd: info.cwd.clone(),
-        profile: p,
-        transcript,
-        ..AgentSession::default()
     };
     const TAIL_BYTES: i64 = 4 << 20;
     let most = if full { FULL_MOST } else { HISTORY_MOST };

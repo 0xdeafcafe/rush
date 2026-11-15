@@ -256,6 +256,7 @@ pub trait Adapter: Send + Sync {
         history_follower: HistoryFollower;
         tail_reader: TailReader;
         history_tail_before_reader: HistoryTailBeforeReader;
+        history_window: HistoryWindow;
         quota_source: QuotaSource;
         reset_spender: ResetSpender;
         plan_reader: PlanReader;

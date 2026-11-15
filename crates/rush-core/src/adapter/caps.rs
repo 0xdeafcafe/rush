@@ -202,6 +202,18 @@ pub trait HistoryTailBeforeReader {
     -> Result<(Vec<Event>, bool)>;
 }
 
+/// Reads a session's history one window at a time, for paging it back
+/// newest first without reading from the start: the events of the whole
+/// lines within bytes [from, end) of the transcript, each line's with the
+/// byte its line starts at, oldest first. from is 0 or the offset a
+/// former read named (one these reads only ever hand back at a line
+/// start, or the first whole line after it); end is a transcript length,
+/// so what's appended later doesn't move a page. A line that decodes to
+/// nothing is left out. Rust-only.
+pub trait HistoryWindow {
+    fn history_window(&self, s: &Session, from: u64, end: u64) -> Result<Vec<(u64, Vec<Event>)>>;
+}
+
 /// Reads an account's limits. p is the profile to read them through, for
 /// agents whose sign-in lives in the profile.
 pub trait QuotaSource {

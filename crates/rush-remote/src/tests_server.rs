@@ -882,3 +882,542 @@ fn until(what: &str, ok: impl Fn() -> bool) {
     }
     panic!("timed out: {what}");
 }
+
+// ── history pages ──
+use rush_core::adapter::{
+    Adapter, Features, HistoryReader, HistoryWindow, Kind, Level, Profile, Session,
+    TranscriptLocator,
+};
+use rush_core::event::{Event, Message, Part, PartKind};
+
+/// An agent whose history pages: a transcript of one-word lines, each
+/// line one message event at the byte it starts (a page's cursor), its
+/// transcript where its profile's dir keeps <session>.log.
+struct Paged;
+
+impl Adapter for Paged {
+    fn kind(&self) -> Kind {
+        Kind::from("paged")
+    }
+    fn name(&self) -> String {
+        "Paged".into()
+    }
+    fn features(&self) -> Features {
+        Features::default()
+    }
+    fn level(&self) -> Level {
+        Level::default()
+    }
+    fn profiles(&self) -> Vec<Profile> {
+        Vec::new()
+    }
+    rush_core::has!(history_window: HistoryWindow, transcript_locator: TranscriptLocator);
+}
+
+impl TranscriptLocator for Paged {
+    fn transcript_path(&self, p: &Profile, _: &str, sid: &str) -> String {
+        std::path::Path::new(&p.dir)
+            .join(format!("{sid}.log"))
+            .to_string_lossy()
+            .into_owned()
+    }
+}
+
+fn line_message(line: &[u8]) -> Event {
+    Event::Message(Message {
+        role: "user".into(),
+        parts: vec![Part {
+            kind: PartKind::Text,
+            text: String::from_utf8_lossy(line.trim_ascii()).into_owned(),
+            ..Part::default()
+        }],
+        ..Message::default()
+    })
+}
+
+impl HistoryWindow for Paged {
+    fn history_window(
+        &self,
+        s: &Session,
+        from: u64,
+        end: u64,
+    ) -> rush_core::adapter::Result<Vec<(u64, Vec<Event>)>> {
+        let b = std::fs::read(&s.transcript).unwrap_or_default();
+        let mut out = Vec::new();
+        let mut at = 0u64;
+        for line in b.split_inclusive(|&c| c == b'\n') {
+            let next = at + line.len() as u64;
+            if at >= from && next <= end && !line.trim_ascii().is_empty() {
+                out.push((at, vec![line_message(line)]));
+            }
+            at = next;
+        }
+        Ok(out)
+    }
+}
+
+/// The same agent without windows, paging by count through its whole
+/// history — one line per event, wherever its transcripts are named
+/// ("plain": s1.log, "listed": s1.jsonl, as Claude Code names them so
+/// subagents sit beside them).
+struct Files {
+    kind: &'static str,
+    ext: &'static str,
+}
+
+impl Adapter for Files {
+    fn kind(&self) -> Kind {
+        Kind::from(self.kind)
+    }
+    fn name(&self) -> String {
+        "Files".into()
+    }
+    fn features(&self) -> Features {
+        Features::default()
+    }
+    fn level(&self) -> Level {
+        Level::default()
+    }
+    fn profiles(&self) -> Vec<Profile> {
+        Vec::new()
+    }
+    rush_core::has!(history_reader: HistoryReader, transcript_locator: TranscriptLocator);
+}
+
+impl TranscriptLocator for Files {
+    fn transcript_path(&self, p: &Profile, _: &str, sid: &str) -> String {
+        std::path::Path::new(&p.dir)
+            .join(format!("{sid}.{}", self.ext))
+            .to_string_lossy()
+            .into_owned()
+    }
+}
+
+impl HistoryReader for Files {
+    fn history(
+        &self,
+        s: &Session,
+        _: i64,
+        _: usize,
+        each: &mut dyn FnMut(Vec<Event>) -> bool,
+    ) -> rush_core::adapter::Result<()> {
+        let b = std::fs::read(&s.transcript).unwrap_or_default();
+        // a line "end <total>" ends the turn, saying what the whole
+        // session had spent by then (as an agent's turn end does)
+        let evs: Vec<Event> = b
+            .split_inclusive(|&c| c == b'\n')
+            .filter(|l| !l.trim_ascii().is_empty())
+            .map(|l| {
+                let t = l.trim_ascii();
+                if t.starts_with(b"end") {
+                    let cost = std::str::from_utf8(&t[3..])
+                        .ok()
+                        .and_then(|s| s.trim().parse::<f64>().ok())
+                        .unwrap_or(0.0);
+                    Event::TurnEnd(rush_core::event::TurnEnd {
+                        reason: "done".into(),
+                        cost,
+                        ..Default::default()
+                    })
+                } else {
+                    line_message(l)
+                }
+            })
+            .collect();
+        if !evs.is_empty() {
+            each(evs);
+        }
+        Ok(())
+    }
+}
+
+/// One stopped session of kind with a transcript of n lines in its
+/// profile's dir, and the server that knows the agents.
+fn paged_server(id: &str, kind: &str, lines: usize) -> Arc<Server> {
+    let reg = rush_core::adapter::Registry::new();
+    reg.register(Paged);
+    reg.register(Files {
+        kind: "plain",
+        ext: "log",
+    });
+    reg.register(Files {
+        kind: "listed",
+        ext: "jsonl",
+    });
+    let mut s = Server::new(Config::default(), TOKEN.into(), reg);
+    s.bad_guess = Duration::ZERO;
+    let s = Arc::new(s);
+    let dir = rush_host::dir(id);
+    let pro = dir.join("pro");
+    std::fs::create_dir_all(&pro).unwrap();
+    let body: String = (0..lines).map(|i| format!("line {i:03}\n")).collect();
+    let ext = if kind == "listed" { "jsonl" } else { "log" };
+    std::fs::write(pro.join(format!("s1.{ext}")), &body).unwrap();
+    let cfg = format!(
+        r#"{{"id":"{id}","kind":"{kind}","sessionId":"s1","account":{{"name":"","configDir":{}}}}}"#,
+        serde_json::to_string(pro.to_str().unwrap()).unwrap()
+    );
+    std::fs::write(dir.join("config.json"), cfg).unwrap();
+    let info = Info {
+        id: id.into(),
+        kind: kind.into(),
+        session_id: "s1".into(),
+        state: "stopped".into(),
+        host_pid: 0,
+        updated_at: Time::now(),
+        ..Info::default()
+    };
+    std::fs::write(dir.join("info.json"), serde_json::to_vec(&info).unwrap()).unwrap();
+    s
+}
+
+/// The answer of one endpoint as JSON.
+fn page_json(r: Response) -> Value {
+    assert_eq!(r.status, 200, "{}", r.status);
+    match r.body {
+        crate::http::Body::Bytes(b) => serde_json::from_slice(&b).unwrap(),
+        _ => panic!("not bytes"),
+    }
+}
+
+fn texts(v: &Value) -> Vec<String> {
+    v["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["e"]["Parts"][0]["Text"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// History pages back: the newest page first, each cursor naming the
+/// next, until the start — never the whole history at once — with
+/// appends leaving a page put and a rewrite answering reset.
+#[test]
+fn history_pages_back_before_a_cursor() {
+    let _h = home();
+    let s = paged_server("e5e5e5e5", "paged", 90);
+    let get = |q: &str| {
+        call(
+            &s,
+            "GET",
+            &format!("/api/sessions/e5e5e5e5/events/before{q}"),
+            "",
+            &[("Authorization", &bearer(TOKEN))],
+        )
+    };
+
+    // the token still counts
+    let r = call(&s, "GET", "/api/sessions/e5e5e5e5/events/before", "", &[]);
+    assert_eq!(r.status, 401);
+
+    // paging to the start, thirty a page. Each page reads oldest-first
+    // (it's prepended above the seam), the pages come newest-first.
+    let (mut cur, mut seen, mut pages) = (None::<String>, Vec::<Vec<String>>::new(), 0);
+    loop {
+        let q = match &cur {
+            Some(c) => format!("?limit=30&cursor={c}"),
+            None => "?limit=30".into(),
+        };
+        let v = page_json(get(&q));
+        let got = texts(&v);
+        assert!(!got.is_empty(), "an empty page before the start");
+        assert!(got.len() <= 30, "a page over its limit");
+        pages += 1;
+        seen.push(got);
+        let more = v["more"].as_bool().unwrap();
+        cur = v["cursor"].as_str().map(String::from);
+        if !more {
+            break;
+        }
+        assert!(cur.is_some(), "more without a cursor");
+    }
+    assert_eq!(pages, 3, "{pages} pages for 90 lines");
+    let want: Vec<String> = (0..90).map(|i| format!("line {i:03}")).collect();
+    let all: Vec<String> = seen.into_iter().rev().flatten().collect();
+    assert_eq!(all, want, "the pages in order");
+
+    // a page asked for again after the transcript grew: the same answer
+    let first = {
+        let v = page_json(get("?limit=30"));
+        v["cursor"].as_str().unwrap().to_string()
+    };
+    let pro = rush_host::dir("e5e5e5e5").join("pro");
+    let mut body = std::fs::read_to_string(pro.join("s1.log")).unwrap();
+    let before = page_json(get(&format!("?limit=30&cursor={first}")));
+    body.push_str("line 090\nline 091\n");
+    std::fs::write(pro.join("s1.log"), &body).unwrap();
+    let after = page_json(get(&format!("?limit=30&cursor={first}")));
+    assert_eq!(texts(&before), texts(&after), "appends moved a page");
+
+    // a rewrite shorter than where paging began: reset, for the app to
+    // start its stream over
+    std::fs::write(pro.join("s1.log"), "only one\n").unwrap();
+    let v = page_json(get(&format!("?limit=30&cursor={first}")));
+    assert_eq!(v["reset"], true, "{v}");
+
+    // a bad cursor is refused
+    for bad in ["nonsense", "9-10", "-1", "10-"] {
+        let r = get(&format!("?cursor={bad}"));
+        assert_eq!(r.status, 400, "{bad}");
+    }
+
+    // a session that isn't: 404
+    let r = call(
+        &s,
+        "GET",
+        "/api/sessions/nope/events/before",
+        "",
+        &[("Authorization", &bearer(TOKEN))],
+    );
+    assert_eq!(r.status, 404);
+}
+
+/// An agent without windows pages by count: the same walk, a number for
+/// a cursor.
+#[test]
+fn an_agent_without_windows_pages_by_count() {
+    let _h = home();
+    let s = paged_server("f6f6f6f6", "plain", 20);
+    let get = |q: &str| {
+        call(
+            &s,
+            "GET",
+            &format!("/api/sessions/f6f6f6f6/events/before{q}"),
+            "",
+            &[("Authorization", &bearer(TOKEN))],
+        )
+    };
+    let v = page_json(get("?limit=6"));
+    let got = texts(&v);
+    assert_eq!(
+        (got.first().unwrap(), got.last().unwrap(), got.len()),
+        (&"line 014".to_string(), &"line 019".to_string(), 6)
+    );
+    assert_eq!(v["more"], true);
+    let cur = v["cursor"].as_str().unwrap().to_string();
+    assert!(cur.chars().all(|c| c.is_ascii_digit()), "{cur}");
+    let v = page_json(get(&format!("?limit=6&cursor={cur}")));
+    let got = texts(&v);
+    assert_eq!(
+        (got.first().unwrap(), got.last().unwrap(), got.len()),
+        (&"line 008".to_string(), &"line 013".to_string(), 6)
+    );
+    let cur = v["cursor"].as_str().unwrap().to_string();
+    let v = page_json(get(&format!("?limit=100&cursor={cur}")));
+    assert_eq!((texts(&v).len(), v["more"].as_bool().unwrap()), (8, false));
+    assert_eq!(texts(&v).first().unwrap(), "line 000");
+}
+
+/// The session's other tabs: its overview as its whole transcript reads
+/// it, its subagents as they sit beside the transcript, and one
+/// subagent's own history — each behind the token, each 404'd without.
+#[test]
+fn a_sessions_tabs_are_served() {
+    let _h = home();
+    let s = paged_server("d7d7d7d7", "listed", 5);
+    let pro = rush_host::dir("d7d7d7d7").join("pro");
+    // five turns, each ended saying the session had spent another cent
+    // (a turn's end cost is the session's total so far, so the totals
+    // climb: each turn's own slice is a cent)
+    let body: String = (0..5)
+        .flat_map(|i| {
+            [
+                format!("line {i:03}\n"),
+                format!("end {:.02}\n", (i as f64 + 1.0) * 0.01),
+            ]
+        })
+        .collect();
+    std::fs::write(pro.join("s1.jsonl"), &body).unwrap();
+    // two subagents, as Claude Code writes them beside the transcript:
+    // a meta to say what each is, a transcript of its own
+    let sub = pro.join("s1/subagents");
+    std::fs::create_dir_all(&sub).unwrap();
+    std::fs::write(
+        sub.join("agent-abc.meta.json"),
+        r#"{"agentType":"Explore","description":"find the paging bug","model":"sonnet","toolUseId":"call080","spawnDepth":1}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        sub.join("agent-abc.jsonl"),
+        concat!(
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"reading server.rs\"}]}}\n",
+            "line 001\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        sub.join("agent-def.meta.json"),
+        r#"{"agentType":"Plan","description":"map the modules","model":"opus","toolUseId":"","spawnDepth":2}"#,
+    )
+    .unwrap();
+
+    let get = |p: &str| {
+        call(
+            &s,
+            "GET",
+            &format!("/api/sessions/d7d7d7d7{p}"),
+            "",
+            &[("Authorization", &bearer(TOKEN))],
+        )
+    };
+
+    // the token still counts, on each of them
+    for p in ["/overview", "/subagents", "/subagents/abc/events"] {
+        let r = call(&s, "GET", &format!("/api/sessions/d7d7d7d7{p}"), "", &[]);
+        assert_eq!(r.status, 401, "{p}");
+    }
+    // a session that isn't
+    for p in ["/overview", "/subagents", "/subagents/abc/events"] {
+        let r = call(
+            &s,
+            "GET",
+            &format!("/api/sessions/nope{p}"),
+            "",
+            &[("Authorization", &bearer(TOKEN))],
+        );
+        assert_eq!(r.status, 404, "{p}");
+    }
+
+    // the overview: what the transcript says of it — five turns, a cent
+    // apiece as each turn's end said the session had spent
+    let v = page_json(get("/overview"));
+    assert_eq!(v["turns"], 5, "{v}");
+    assert!((v["cost"].as_f64().unwrap() - 0.05).abs() < 1e-9, "{v}");
+    assert_eq!(v["turnCosts"].as_array().unwrap().len(), 5, "{v}");
+    assert_eq!(v["input"], 0, "{v}");
+    assert_eq!(v["tools"].as_array().unwrap().len(), 0, "{v}");
+    assert_eq!(v["models"].as_object().unwrap().len(), 0, "{v}");
+
+    // the subagents: what each is, and what the one with a transcript
+    // last said
+    let v = page_json(get("/subagents"));
+    let subs = v["subagents"].as_array().unwrap();
+    assert_eq!(subs.len(), 2, "{v}");
+    assert_eq!(subs[0]["id"], "abc", "{v}");
+    assert_eq!(subs[0]["type"], "Explore");
+    assert_eq!(subs[0]["description"], "find the paging bug");
+    assert_eq!(subs[0]["model"], "sonnet");
+    assert_eq!(subs[0]["toolUseId"], "call080");
+    assert_eq!(subs[0]["depth"], 1);
+    assert_eq!(subs[0]["activity"], "reading server.rs", "{v}");
+    assert_eq!(subs[1]["id"], "def");
+    assert_eq!(subs[1]["activity"], "", "no transcript, nothing said");
+
+    // a subagent's own history, newest-held like any other
+    let v = page_json(get("/subagents/abc/events?limit=1"));
+    let got = texts(&v);
+    assert_eq!(got.len(), 1, "{v}");
+    assert_eq!(got[0], "line 001");
+    // one that isn't
+    let r = get("/subagents/nope/events");
+    assert_eq!(r.status, 404);
+}
+
+/// The feed on the dashboard: the board whole, whether it takes posts,
+/// and a chirp, a reply and a resolve through it as you.
+#[test]
+fn the_feed_is_served() {
+    let _h = home();
+    let s = server(vec![]);
+    let b = bearer(TOKEN);
+    let json = ("Content-Type", "application/json");
+    // home() clears serve's own files, not the board and the state
+    // config that say what the feed is
+    let home = rush_state::dir();
+    let _ = std::fs::remove_dir_all(home.join("community"));
+    let _ = std::fs::remove_file(home.join("config.json"));
+
+    // the token counts, both ways
+    for m in ["GET", "POST"] {
+        let r = call(&s, m, "/api/feed", "", &[]);
+        assert_eq!(r.status, 401, "{m}");
+    }
+
+    // an empty board, and posting needs the feed on
+    let v = page_json(call(&s, "GET", "/api/feed", "", &[("Authorization", &b)]));
+    assert_eq!(v["threads"].as_array().unwrap().len(), 0, "{v}");
+    assert_eq!(v["on"], false, "{v}");
+    let r = call(
+        &s,
+        "POST",
+        "/api/feed",
+        r#"{"op":"post","text":"anyone building?"}"#,
+        &[("Authorization", &b), json],
+    );
+    assert_eq!(r.status, 400, "{}", String::from_utf8_lossy(r.bytes()));
+
+    // the user turns it on
+    let mut st = rush_state::Store::load();
+    st.config.feed = true;
+    st.save_config().unwrap();
+
+    // a chirp: the first line is its title, the author is you
+    let r = call(
+        &s,
+        "POST",
+        "/api/feed",
+        "{\"op\":\"post\",\"text\":\"who's running a build?\\nmy tests crawl\"}",
+        &[("Authorization", &b), json],
+    );
+    assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(r.bytes()));
+    let v = page_json(call(&s, "GET", "/api/feed", "", &[("Authorization", &b)]));
+    assert_eq!(v["on"], true, "{v}");
+    let threads = v["threads"].as_array().unwrap();
+    assert_eq!(threads.len(), 1, "{v}");
+    assert_eq!(threads[0]["title"], "who's running a build?", "{v}");
+    assert_eq!(threads[0]["author"]["name"], "You", "{v}");
+    assert_eq!(threads[0]["resolved"], false, "{v}");
+    let msgs = threads[0]["messages"].as_array().unwrap();
+    assert_eq!(msgs.len(), 1, "{v}");
+    assert_eq!(msgs[0]["text"], "who's running a build?\nmy tests crawl");
+    let id = threads[0]["id"].as_str().unwrap().to_string();
+
+    // a reply, then a resolve — each lands on the thread
+    let r = call(
+        &s,
+        "POST",
+        "/api/feed",
+        "{\"op\":\"reply\",\"text\":\"it was me, sorry\"}",
+        &[("Authorization", &b), json],
+    );
+    assert_eq!(r.status, 400, "a reply names its thread");
+    let r = call(
+        &s,
+        "POST",
+        "/api/feed",
+        &format!("{{\"op\":\"reply\",\"id\":\"{id}\",\"text\":\"it was me, sorry\"}}"),
+        &[("Authorization", &b), json],
+    );
+    assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(r.bytes()));
+    let r = call(
+        &s,
+        "POST",
+        "/api/feed",
+        &format!("{{\"op\":\"resolve\",\"id\":\"{id}\",\"resolve\":true}}"),
+        &[("Authorization", &b), json],
+    );
+    assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(r.bytes()));
+    let v = page_json(call(&s, "GET", "/api/feed", "", &[("Authorization", &b)]));
+    let t = &v["threads"][0];
+    assert_eq!(t["messages"].as_array().unwrap().len(), 2, "{v}");
+    assert_eq!(t["messages"][1]["text"], "it was me, sorry", "{v}");
+    assert_eq!(t["messages"][1]["author"]["name"], "You", "{v}");
+    assert_eq!(t["resolved"], true, "{v}");
+
+    // what isn't a post
+    for (name, body) in [
+        ("no text", r#"{"op":"post","text":"  "}"#),
+        ("no op", r#"{"text":"anything"}"#),
+        ("no thread", r#"{"op":"resolve"}"#),
+        ("not json", "just words"),
+    ] {
+        let r = call(
+            &s,
+            "POST",
+            "/api/feed",
+            body,
+            &[("Authorization", &b), json],
+        );
+        assert_eq!(r.status, 400, "{name}");
+    }
+}

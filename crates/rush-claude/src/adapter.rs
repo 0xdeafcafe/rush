@@ -269,6 +269,7 @@ impl adapter::Adapter for Claude {
         history_reader: HistoryReader,
         history_follower: HistoryFollower,
         tail_reader: TailReader,
+        history_window: HistoryWindow,
         programmer: Programmer,
         project_folderer: ProjectFolderer,
         login_hinter: LoginHinter,
@@ -668,6 +669,17 @@ impl TailReader for Claude {
         most: i64,
     ) -> adapter::Result<(Vec<rush_core::event::Event>, bool)> {
         history::tail(s, most)
+    }
+}
+
+impl adapter::HistoryWindow for Claude {
+    fn history_window(
+        &self,
+        s: &Session,
+        from: u64,
+        end: u64,
+    ) -> adapter::Result<Vec<(u64, Vec<rush_core::event::Event>)>> {
+        history::window(s, from, end)
     }
 }
 
