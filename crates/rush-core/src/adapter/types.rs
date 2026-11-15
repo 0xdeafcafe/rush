@@ -150,6 +150,12 @@ pub struct StartOptions {
     /// Subagents to offer it, by name, each defined in its agent's own
     /// words; prompt is added to its system prompt.
     pub agents: BTreeMap<String, RawJson>,
+    /// Every other model rush can run, to offer as the harness's own
+    /// subagent types where it can register them, and delegate, which
+    /// answers a call for one. A harness that can't goes without; the
+    /// session reaches them through rush's tools (Rust-only).
+    pub others: Vec<super::OtherAgent>,
+    pub delegate: Option<super::DelegateRef>,
     pub prompt: String,
     /// For a new session, another agent's conversation for it to take as
     /// its own history, where it can (FeaturePort).
