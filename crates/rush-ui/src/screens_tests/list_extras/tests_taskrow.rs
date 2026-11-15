@@ -24,13 +24,6 @@ fn t(ms: Ms) -> Time {
     Time::from_ms(ms)
 }
 
-/// rows as text, a line each, their trailing blanks gone.
-fn text(rows: &[Line]) -> String {
-    rows.iter()
-        .map(|l| format!("{}\n", l.plain().trim_end()))
-        .collect()
-}
-
 /// got checked against tests/snapshots/taskrow_<name>.txt;
 /// UPDATE_SNAPSHOTS=1 writes it. A missing one fails, printed whole, so
 /// CI shows it.
