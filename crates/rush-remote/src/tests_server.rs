@@ -957,15 +957,20 @@ impl HistoryWindow for Paged {
 }
 
 /// The same agent without windows, paging by count through its whole
-/// history.
-struct Plain;
+/// history — one line per event, wherever its transcripts are named
+/// ("plain": s1.log, "listed": s1.jsonl, as Claude Code names them so
+/// subagents sit beside them).
+struct Files {
+    kind: &'static str,
+    ext: &'static str,
+}
 
-impl Adapter for Plain {
+impl Adapter for Files {
     fn kind(&self) -> Kind {
-        Kind::from("plain")
+        Kind::from(self.kind)
     }
     fn name(&self) -> String {
-        "Plain".into()
+        "Files".into()
     }
     fn features(&self) -> Features {
         Features::default()
@@ -979,16 +984,16 @@ impl Adapter for Plain {
     rush_core::has!(history_reader: HistoryReader, transcript_locator: TranscriptLocator);
 }
 
-impl TranscriptLocator for Plain {
+impl TranscriptLocator for Files {
     fn transcript_path(&self, p: &Profile, _: &str, sid: &str) -> String {
         std::path::Path::new(&p.dir)
-            .join(format!("{sid}.log"))
+            .join(format!("{sid}.{}", self.ext))
             .to_string_lossy()
             .into_owned()
     }
 }
 
-impl HistoryReader for Plain {
+impl HistoryReader for Files {
     fn history(
         &self,
         s: &Session,
@@ -1014,7 +1019,14 @@ impl HistoryReader for Plain {
 fn paged_server(id: &str, kind: &str, lines: usize) -> Arc<Server> {
     let reg = rush_core::adapter::Registry::new();
     reg.register(Paged);
-    reg.register(Plain);
+    reg.register(Files {
+        kind: "plain",
+        ext: "log",
+    });
+    reg.register(Files {
+        kind: "listed",
+        ext: "jsonl",
+    });
     let mut s = Server::new(Config::default(), TOKEN.into(), reg);
     s.bad_guess = Duration::ZERO;
     let s = Arc::new(s);
@@ -1022,7 +1034,8 @@ fn paged_server(id: &str, kind: &str, lines: usize) -> Arc<Server> {
     let pro = dir.join("pro");
     std::fs::create_dir_all(&pro).unwrap();
     let body: String = (0..lines).map(|i| format!("line {i:03}\n")).collect();
-    std::fs::write(pro.join("s1.log"), &body).unwrap();
+    let ext = if kind == "listed" { "jsonl" } else { "log" };
+    std::fs::write(pro.join(format!("s1.{ext}")), &body).unwrap();
     let cfg = format!(
         r#"{{"id":"{id}","kind":"{kind}","sessionId":"s1","account":{{"name":"","configDir":{}}}}}"#,
         serde_json::to_string(pro.to_str().unwrap()).unwrap()
@@ -1041,7 +1054,7 @@ fn paged_server(id: &str, kind: &str, lines: usize) -> Arc<Server> {
     s
 }
 
-/// The answer of one page as JSON.
+/// The answer of one endpoint as JSON.
 fn page_json(r: Response) -> Value {
     assert_eq!(r.status, 200, "{}", r.status);
     match r.body {
@@ -1080,8 +1093,9 @@ fn history_pages_back_before_a_cursor() {
     let r = call(&s, "GET", "/api/sessions/e5e5e5e5/events/before", "", &[]);
     assert_eq!(r.status, 401);
 
-    // paging to the start, thirty a page
-    let (mut cur, mut seen, mut pages) = (None::<String>, Vec::new(), 0);
+    // paging to the start, thirty a page. Each page reads oldest-first
+    // (it's prepended above the seam), the pages come newest-first.
+    let (mut cur, mut seen, mut pages) = (None::<String>, Vec::<Vec<String>>::new(), 0);
     loop {
         let q = match &cur {
             Some(c) => format!("?limit=30&cursor={c}"),
@@ -1092,7 +1106,7 @@ fn history_pages_back_before_a_cursor() {
         assert!(!got.is_empty(), "an empty page before the start");
         assert!(got.len() <= 30, "a page over its limit");
         pages += 1;
-        seen.extend(got);
+        seen.push(got);
         let more = v["more"].as_bool().unwrap();
         cur = v["cursor"].as_str().map(String::from);
         if !more {
@@ -1102,8 +1116,7 @@ fn history_pages_back_before_a_cursor() {
     }
     assert_eq!(pages, 3, "{pages} pages for 90 lines");
     let want: Vec<String> = (0..90).map(|i| format!("line {i:03}")).collect();
-    let mut all = seen.clone();
-    all.reverse();
+    let all: Vec<String> = seen.into_iter().rev().flatten().collect();
     assert_eq!(all, want, "the pages in order");
 
     // a page asked for again after the transcript grew: the same answer
@@ -1176,4 +1189,96 @@ fn an_agent_without_windows_pages_by_count() {
     let v = page_json(get(&format!("?limit=100&cursor={cur}")));
     assert_eq!((texts(&v).len(), v["more"].as_bool().unwrap()), (8, false));
     assert_eq!(texts(&v).first().unwrap(), "line 000");
+}
+
+/// The session's other tabs: its overview as its whole transcript reads
+/// it, its subagents as they sit beside the transcript, and one
+/// subagent's own history — each behind the token, each 404'd without.
+#[test]
+fn a_sessions_tabs_are_served() {
+    let _h = home();
+    let s = paged_server("d7d7d7d7", "listed", 5);
+    let pro = rush_host::dir("d7d7d7d7").join("pro");
+    // two subagents, as Claude Code writes them beside the transcript:
+    // a meta to say what each is, a transcript of its own
+    let sub = pro.join("s1/subagents");
+    std::fs::create_dir_all(&sub).unwrap();
+    std::fs::write(
+        sub.join("agent-abc.meta.json"),
+        r#"{"agentType":"Explore","description":"find the paging bug","model":"sonnet","toolUseId":"call080","spawnDepth":1}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        sub.join("agent-abc.jsonl"),
+        concat!(
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"reading server.rs\"}]}}\n",
+            "line 001\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        sub.join("agent-def.meta.json"),
+        r#"{"agentType":"Plan","description":"map the modules","model":"opus","toolUseId":"","spawnDepth":2}"#,
+    )
+    .unwrap();
+
+    let get = |p: &str| {
+        call(
+            &s,
+            "GET",
+            &format!("/api/sessions/d7d7d7d7{p}"),
+            "",
+            &[("Authorization", &bearer(TOKEN))],
+        )
+    };
+
+    // the token still counts, on each of them
+    for p in ["/overview", "/subagents", "/subagents/abc/events"] {
+        let r = call(&s, "GET", &format!("/api/sessions/d7d7d7d7{p}"), "", &[]);
+        assert_eq!(r.status, 401, "{p}");
+    }
+    // a session that isn't
+    for p in ["/overview", "/subagents", "/subagents/abc/events"] {
+        let r = call(
+            &s,
+            "GET",
+            &format!("/api/sessions/nope{p}"),
+            "",
+            &[("Authorization", &bearer(TOKEN))],
+        );
+        assert_eq!(r.status, 404, "{p}");
+    }
+
+    // the overview: what the transcript says of it, priced where its
+    // agent can price (these lines say nothing to price)
+    let v = page_json(get("/overview"));
+    assert_eq!(v["turns"], 5, "{v}");
+    assert_eq!(v["cost"], 0.0, "{v}");
+    assert_eq!(v["input"], 0, "{v}");
+    assert_eq!(v["tools"].as_array().unwrap().len(), 0, "{v}");
+    assert_eq!(v["models"].as_object().unwrap().len(), 0, "{v}");
+
+    // the subagents: what each is, and what the one with a transcript
+    // last said
+    let v = page_json(get("/subagents"));
+    let subs = v["subagents"].as_array().unwrap();
+    assert_eq!(subs.len(), 2, "{v}");
+    assert_eq!(subs[0]["id"], "abc", "{v}");
+    assert_eq!(subs[0]["type"], "Explore");
+    assert_eq!(subs[0]["description"], "find the paging bug");
+    assert_eq!(subs[0]["model"], "sonnet");
+    assert_eq!(subs[0]["toolUseId"], "call080");
+    assert_eq!(subs[0]["depth"], 1);
+    assert_eq!(subs[0]["activity"], "reading server.rs", "{v}");
+    assert_eq!(subs[1]["id"], "def");
+    assert_eq!(subs[1]["activity"], "", "no transcript, nothing said");
+
+    // a subagent's own history, newest-held like any other
+    let v = page_json(get("/subagents/abc/events?limit=1"));
+    let got = texts(&v);
+    assert_eq!(got.len(), 1, "{v}");
+    assert_eq!(got[0], "line 001");
+    // one that isn't
+    let r = get("/subagents/nope/events");
+    assert_eq!(r.status, 404);
 }

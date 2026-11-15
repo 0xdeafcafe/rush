@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine as _;
-use rush_core::adapter::{Profile, Registry, Session as AgentSession, migrated};
+use rush_core::adapter::{Profile, Registry, Session as AgentSession, migrated, read_history};
 use rush_core::event::{self, Event};
 use rush_core::wire::RawJson;
 use rush_host::{Away, Info};
@@ -244,6 +244,17 @@ impl Server {
             }
             ["api", "sessions", id, "events", "before"] if !id.is_empty() => {
                 allow(get, "GET, HEAD").unwrap_or_else(|| self.page_history(r, id))
+            }
+            ["api", "sessions", id, "overview"] if !id.is_empty() => {
+                allow(get, "GET, HEAD").unwrap_or_else(|| self.overview(id))
+            }
+            ["api", "sessions", id, "subagents"] if !id.is_empty() => {
+                allow(get, "GET, HEAD").unwrap_or_else(|| self.subagents(id))
+            }
+            ["api", "sessions", id, "subagents", sub, "events"]
+                if !id.is_empty() && !sub.is_empty() =>
+            {
+                allow(get, "GET, HEAD").unwrap_or_else(|| self.subagent_history(r, id, sub))
             }
             ["api", "sessions", id, "op"] if !id.is_empty() => {
                 allow(m == "POST", "POST").unwrap_or_else(|| self.op(r, id))
@@ -849,6 +860,179 @@ impl Server {
         }
     }
 
+    /// The session's numbers at a glance — the TUI's Overview view: its
+    /// turns and what each cost on which model, its tools, its context
+    /// window and its cache, read from its whole transcript through its
+    /// adapter.
+    fn overview(&self, id: &str) -> Response {
+        if !valid_id(id) {
+            return fail(404, "no such session");
+        }
+        let Ok(info) = rush_host::read_info(id) else {
+            return fail(404, "no such session");
+        };
+        let Some((a, s)) = history_parts(&self.reg, &info) else {
+            return write_json(&json!({}));
+        };
+        let empty = || write_json(&json!({}));
+        let Some(hr) = a.history_reader() else {
+            return empty();
+        };
+        let Ok(evs) = read_history(hr, &s, 0) else {
+            return empty();
+        };
+        let mut sess = rush_convo::Session::new();
+        for ev in &evs {
+            sess.apply(ev, 0);
+        }
+        // What each turn cost (the Overview's bars): its requests priced,
+        // or its own total where the agent said one.
+        let mut turn_costs = vec![0.0; sess.turns.len()];
+        let mut ti = 0;
+        for rq in &sess.requests {
+            while ti + 1 < sess.turns.len() && rq.at >= sess.turns[ti + 1].start {
+                ti += 1;
+            }
+            if ti < sess.turns.len()
+                && let Some(p) = a.pricer()
+                && let Some(c) = p.cost(&rq.model, &rq.usage)
+            {
+                turn_costs[ti] += c;
+            }
+        }
+        let (mut input, mut output, mut cache_read, mut cache_write) = (0, 0, 0, 0);
+        for rq in &sess.requests {
+            input += rq.usage.input;
+            output += rq.usage.output;
+            cache_read += rq.usage.cache_read;
+            cache_write += rq.usage.cache_write_5m + rq.usage.cache_write_1h;
+        }
+        let mut cost = 0.0;
+        let mut models: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+        let mut working = 0;
+        for (i, t) in sess.turns.iter().enumerate() {
+            if t.cost > 0.0 {
+                turn_costs[i] = t.cost;
+            }
+            cost += turn_costs[i];
+            *models.entry(t.model.to_string()).or_default() += turn_costs[i];
+            working += (t.end - t.start).max(0);
+        }
+        let mut tools: Vec<(&str, f64, u32, u32)> = sess
+            .tools
+            .iter()
+            .map(|(n, s)| (n.as_ref(), s.time as f64 / 1000.0, s.calls, s.failed))
+            .collect();
+        tools.sort_by(|x, y| y.2.cmp(&x.2).then(x.0.cmp(y.0)));
+        write_json(&json!({
+            "model": sess.model,
+            "cwd": if sess.cwd.is_empty() { info.cwd.clone() } else { sess.cwd.clone() },
+            "version": sess.version,
+            "ntools": sess.ntools,
+            "mcp": sess.mcp.iter().map(|m| m.name.clone()).collect::<Vec<_>>(),
+            "turns": sess.turns.len(),
+            "cost": cost,
+            "turnCosts": turn_costs,
+            "workingMs": working,
+            "context": sess.context,
+            "window": sess.window,
+            "input": input, "output": output,
+            "cacheRead": cache_read, "cacheWrite": cache_write,
+            "tools": tools.iter().map(|(n, s, c, f)| json!({
+                "name": n, "secs": s, "calls": c, "failed": f
+            })).collect::<Vec<_>>(),
+            "models": models,
+            "first": sess.first, "last": sess.last,
+        }))
+    }
+
+    /// The session's subagents as Claude Code records them beside its
+    /// transcript, with what each last said.
+    fn subagents(&self, id: &str) -> Response {
+        if !valid_id(id) {
+            return fail(404, "no such session");
+        }
+        let empty = || write_json(&json!({ "subagents": [] }));
+        let Ok(info) = rush_host::read_info(id) else {
+            return empty();
+        };
+        let Some((_, s)) = history_parts(&self.reg, &info) else {
+            return empty();
+        };
+        let list = rush_convo::list_subagents(&s.transcript);
+        let out: Vec<Value> = list
+            .iter()
+            .map(|sa| {
+                json!({
+                    "id": sa.id, "type": sa.typ, "description": sa.description,
+                    "model": sa.model, "depth": sa.depth, "toolUseId": sa.tool_use_id,
+                    "born": sa.born, "modified": sa.modified, "size": sa.size,
+                    "activity": last_said(&sa.path),
+                })
+            })
+            .collect();
+        write_json(&json!({ "subagents": out }))
+    }
+
+    /// One subagent's own conversation: the last events of its transcript,
+    /// read through the session's adapter, whose format it shares.
+    fn subagent_history(&self, r: &Request, id: &str, sub: &str) -> Response {
+        if !valid_id(id) {
+            return fail(404, "no such session");
+        }
+        let empty = || write_json(&json!({ "events": [] }));
+        let Ok(info) = rush_host::read_info(id) else {
+            return fail(404, "no such session");
+        };
+        let Some((a, s)) = history_parts(&self.reg, &info) else {
+            return empty();
+        };
+        let Some(sa) = rush_convo::list_subagents(&s.transcript)
+            .into_iter()
+            .find(|x| x.id == sub)
+        else {
+            return fail(404, "no such subagent");
+        };
+        let Some(hr) = a.history_reader() else {
+            return empty();
+        };
+        let limit = r
+            .query_get("limit")
+            .and_then(|l| l.trim().parse::<usize>().ok())
+            .unwrap_or(200)
+            .clamp(1, 1000);
+        let ss = AgentSession {
+            transcript: sa.path.clone(),
+            ..AgentSession::default()
+        };
+        let mut keep: VecDeque<Event> = VecDeque::new();
+        let _ = hr.history(&ss, 0, rush_core::adapter::SLICE, &mut |slice| {
+            for ev in slice {
+                keep.push_back(ev);
+                if keep.len() > limit {
+                    keep.pop_front();
+                }
+            }
+            true
+        });
+        let mut b = String::from("{\"events\":[");
+        let mut first = true;
+        for ev in &keep {
+            if let Ok(e) = event::marshal(ev) {
+                if !first {
+                    b.push(',');
+                }
+                first = false;
+                b.push_str(&e);
+            }
+        }
+        b.push_str("]}");
+        let mut x = Response::new(200, b.into_bytes());
+        x.set("Content-Type", "application/json");
+        x.set("Cache-Control", "no-store");
+        x
+    }
+
     /// Serves on ln until ctx ends or serving fails, with notifications
     /// and what exposes it running beside it. Whichever way it ends, ctx
     /// is cancelled before waiting on them, so a failed server can't leave
@@ -1331,6 +1515,46 @@ fn page_json(groups: &[(u64, Vec<Event>)], cut: usize, cursor: &str, more: bool)
     r.set("Content-Type", "application/json");
     r.set("Cache-Control", "no-store");
     r
+}
+
+/// What a subagent last said: the text of its transcript's last assistant
+/// line, kept short. Subagents' transcripts are Claude Code's own
+/// sidechain files, which is where these are read from.
+fn last_said(path: &str) -> String {
+    use std::os::unix::fs::FileExt;
+    let Ok(f) = std::fs::File::open(path) else {
+        return String::new();
+    };
+    let size = f.metadata().map_or(0, |m| m.len());
+    let from = size.saturating_sub(64 << 10);
+    let mut b = vec![0u8; (size - from) as usize];
+    if f.read_at(&mut b, from).is_err() {
+        return String::new();
+    }
+    let start = if from == 0 {
+        0
+    } else {
+        b.iter()
+            .position(|&c| c == b'\n')
+            .map_or(b.len(), |i| i + 1)
+    };
+    for line in b[start..].rsplit(|&c| c == b'\n') {
+        let Ok(v) = serde_json::from_slice::<Value>(line) else {
+            continue;
+        };
+        if v["type"] != "assistant" {
+            continue;
+        }
+        for p in v["message"]["content"].as_array().into_iter().flatten() {
+            if p["type"] == "text"
+                && let Some(t) = p["text"].as_str()
+                && !t.trim().is_empty()
+            {
+                return t.trim().chars().take(200).collect();
+            }
+        }
+    }
+    String::new()
 }
 
 /// Sends what a session's transcript holds from before before (all of it

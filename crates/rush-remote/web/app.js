@@ -74,13 +74,23 @@ function bar({title = 'rush', sub = '', back = false, actions = []}) {
 const action = (id, words, onclick) => { const b = el(`<button class="key key-plain" id="${id}">${words}</button>`); b.onclick = onclick; return b; };
 $('#back').onclick = () => go('#/');
 const go = h => { if (location.hash === h) route(); else location.hash = h; };
+// the session screen on screen, if its scope is still live, for its tabs
+// to switch in place
+let curTab = null;
 
 function route() {
   if (!machines.length) return;
   const h = location.hash;
   let m;
   $('#main').style.paddingBottom = '';
-  if ((m = h.match(/^#\/s\/([^/]+)\/([^/]+)(?:\/all)?$/))) { setMachine(decodeURIComponent(m[1])); return sessionScreen(m[2]); }
+  if ((m = h.match(/^#\/s\/([^/]+)\/([^/]+)(?:\/(all|agents|shells|changes|overview))?$/))) {
+    setMachine(decodeURIComponent(m[1]));
+    const tab = m[3] && m[3] !== 'all' ? m[3] : 'c';
+    // the same session's tab is a switch in place, not a rebuild: its
+    // stream keeps running under whichever tab is shown
+    if (curTab?.id === m[2] && curTab.live) return curTab.set(tab);
+    return sessionScreen(m[2], tab);
+  }
   if (h === '#/new') return newScreen();
   if (h === '#/devices') return devicesScreen();
   homeScreen();
@@ -328,7 +338,7 @@ function devicesScreen() {
 
 // ── one session ──
 const glyphs = {Bash: '$', Edit: '✎', MultiEdit: '✎', Write: '✎', Read: '◧', Grep: '⌕', Glob: '⌕', WebFetch: '⊕', WebSearch: '⊕', Task: '⇉', Agent: '⇉', TodoWrite: '☐'};
-function sessionScreen(id) {
+function sessionScreen(id, init) {
   const sc = newScope();
   let info = lastList.find(i => i.id === id) || {};
   const head = () => {
@@ -338,7 +348,9 @@ function sessionScreen(id) {
     const lg = $('#composer legend');
     if (lg) lg.innerHTML = `to <b>${esc(info.name || id)}</b>${st === 'working' ? ' · <em>working</em>, send queues, steer goes in now' : ''}`;
   };
-  $('#main').innerHTML = `<button id=jump class="key key-plain hidden" style="position:fixed;right:14px;bottom:88px;z-index:5" aria-label="to the newest">↓</button><div id=log class="pt-1"></div><div id=asks></div>
+  $('#main').innerHTML = `<button id=jump class="key key-plain hidden" style="position:fixed;right:14px;bottom:88px;z-index:5" aria-label="to the newest">↓</button>
+    <nav class=tabs id=tabs aria-label="this session"><button class=tab data-t=c>conversation</button><button class=tab data-t=agents>agents</button><button class=tab data-t=shells>shells</button><button class=tab data-t=changes>changes</button><button class=tab data-t=overview>overview</button></nav>
+    <div id=log class="pt-1"></div><div id=asks></div><div id=tabpane class="px-3 pt-2 hidden"></div>
     <div class=composer id=composer><div id=pics class=chips></div>
       <fieldset class=box><legend></legend><span class=prompt>❯</span><textarea id=txt rows=1 placeholder="message for this agent" enterkeyhint=send></textarea><button class="key key-on h-7" id=send>send</button></fieldset>
       <div class=hints><button id=pic><b>image</b></button><input id=file type=file accept="image/*" multiple class=hidden><span class=sep>·</span>
@@ -405,25 +417,31 @@ function sessionScreen(id) {
   $('#steer').onclick = () => say(true);
   $('#halt').onclick = () => op({op: 'interrupt'});
 
-  // changes: git's diff of the working folder against HEAD, and what's untracked, read on its machine
-  $('#chg').onclick = async () => {
-    const git = async args => {
-      const r = await (await post('/git', {cwd: info.cwd, args})).json();
-      return new TextDecoder().decode(Uint8Array.from(atob(r.out || ''), c => c.charCodeAt(0))) + (r.error ? '\n' + r.error : '');
-    };
-    const d = sheet(`<fieldset class=box><legend>changes · <span class=text-blue>${esc(home(info.cwd))}</span></legend><div id=chgbody><div class="skeleton h-40"></div></div></fieldset>`, 'changes');
+  // changes: git's diff of the working folder against HEAD, and what's
+  // untracked, read on its machine — a tab, or the sheet the composer's
+  // button opens from any of them
+  const git = async args => {
+    const r = await (await post('/git', {cwd: info.cwd, args})).json();
+    return new TextDecoder().decode(Uint8Array.from(atob(r.out || ''), c => c.charCodeAt(0))) + (r.error ? '\n' + r.error : '');
+  };
+  const fillChanges = async box => {
+    box.innerHTML = `<div class="skeleton h-40"></div>`;
     try {
       const [df, u] = await Promise.all([git(['diff', 'HEAD', '--no-color', '--no-ext-diff']), git(['ls-files', '--others', '--exclude-standard', '--full-name', '--', ':/'])]);
       const lines = df.split('\n').map(l => `<span class="${l.startsWith('+') ? 'add' : l.startsWith('-') ? 'del' : l.startsWith('@@') || l.startsWith('diff ') ? 'hunk' : ''}">${esc(l)}</span>`).join('\n');
-      $('#chgbody', d).innerHTML = (u.trim() ? `<p class="text-dim pb-1">untracked: ${esc(u.trim().split('\n').join(', '))}</p>` : '') + `<pre>${df.trim() ? lines : 'no changes against HEAD'}</pre>`;
-    } catch (e) { $('#chgbody', d).innerHTML = `<div class=err-line>${esc(e)}</div>`; }
+      box.innerHTML = (u.trim() ? `<p class="text-dim pb-1">untracked: ${esc(u.trim().split('\n').join(', '))}</p>` : '') + `<pre>${df.trim() ? lines : 'no changes against HEAD'}</pre>`;
+    } catch (e) { box.innerHTML = `<div class=err-line>${esc(e)}</div>`; }
+  };
+  $('#chg').onclick = () => {
+    const d = sheet(`<fieldset class=box><legend>changes · <span class=text-blue>${esc(home(info.cwd))}</span></legend><div id=chgbody></div></fieldset>`, 'changes');
+    fillChanges($('#chgbody', d));
   };
 
   const down = () => { if (stick) scrollTo(0, document.body.scrollHeight); };
   const onScroll = () => {
     stick = innerHeight + scrollY >= document.body.scrollHeight - 120;
     const j = $('#jump');
-    if (j) j.classList.toggle('hidden', stick);
+    if (j) j.classList.toggle('hidden', stick || tab !== 'c');
     if (scrollY < 80) earlier();
   };
   addEventListener('scroll', onScroll, {passive: true});
@@ -709,7 +727,7 @@ function sessionScreen(id) {
         if (v.Role === 'assistant') {
           for (const p of v.Parts || []) {
             if (p.Kind === 0 && p.Text.trim()) { if (!prep && live) { live.innerHTML = md(p.Text); live = null; } else put(`<div class=say>${md(p.Text)}</div>`); }
-            else if (p.Kind === 2 && p.Call) { const c = put(callEl(p.Call)); calls.set(p.Call.ID, c); }
+            else if (p.Kind === 2 && p.Call) { const c = put(callEl(p.Call)); c._call = p.Call; calls.set(p.Call.ID, c); }
           }
         } else for (const p of v.Parts || []) {
           if (p.Kind === 0 && p.Text && !v.Injected && !(live && !prep)) put(`<div class=you><span class=who>you</span><div>${esc(p.Text)}</div></div>`);
@@ -719,7 +737,7 @@ function sessionScreen(id) {
           }
         }
       } break;
-      case 'call_updated': { const c = calls.get(v.Call.ID); if (c) { const n = callEl(v.Call); n._i = c._i; n.open = c.open; c.replaceWith(n); calls.set(v.Call.ID, n); } } break;
+      case 'call_updated': { const c = calls.get(v.Call.ID); if (c) { const n = callEl(v.Call); n._i = c._i; n._call = v.Call; n.open = c.open; c.replaceWith(n); calls.set(v.Call.ID, n); } } break;
       case 'approval': case 'question': if (prep) break; { drop(v.ID); const a = askEl(e.t, v); asks.set(v.ID, a); $('#asks').append(a); down(); navigator.vibrate && navigator.vibrate(60); } break;
       case 'approval_cancelled': case 'answered': drop(v.ID); break;
       case 'task_started': if (prep) break; tasks.set(v.ID, v); drawDetails(); break;
@@ -741,6 +759,165 @@ function sessionScreen(id) {
     }
   };
 
+  // ── the session's tabs ──
+  // The conversation is one of five tabs on the session: its stream keeps
+  // running under whichever is shown, so switching shows and hides rather
+  // than rebuilding, and each tab draws into the one pane. The hash names
+  // the tab, so it's a place you can come back to (and 'all', the old
+  // link, still reads as the conversation).
+  let tab = '', back = 0, tabTimer = null, lastSubs = [];
+  const pane = $('#tabpane');
+  const stopTab = () => { if (tabTimer) { clearInterval(tabTimer); tabTimer = null; } };
+  const tok = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e4 ? Math.round(n / 1e3) + 'k' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n || 0);
+  const dur = ms => { const m = Math.round((ms || 0) / 6e4); return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`; };
+
+  // subagents: what each is, what it last said, and its own conversation
+  // one tap in. Whether one is running is read off the parent's card for
+  // the call that started it, when the window still holds it.
+  const subCard = s => {
+    const c = s.toolUseId && calls.get(s.toolUseId);
+    const st = c && $('summary .run', c) ? '<span class=st-working>✻ running</span>'
+      : c && $('summary .ok', c) ? (c.dataset.err !== undefined ? '<span class=text-red>✗ failed</span>' : '<span class=st-idle>✓ done</span>') : '';
+    const when = s.modified || s.born;
+    return `<div class=row-top><b>⇉ ${esc(s.description || s.type || s.id)}</b>${when ? `<time data-t="${new Date(when).toISOString()}">${ago(new Date(when).toISOString())}</time>` : ''}</div>
+      <div class=row-sub>${s.activity ? `<span>${esc(s.activity)}</span>` : '<span class=text-faint>nothing said yet</span>'}</div>
+      <div class=row-sub>${st ? `<span>${st}</span>` : ''}${s.model ? `<span>${esc(s.model)}</span>` : ''}${s.depth > 1 ? `<span>depth ${s.depth}</span>` : ''}</div>`;
+  };
+  const drawAgents = v => {
+    lastSubs = v.subagents || [];
+    if (!lastSubs.length) { pane.innerHTML = `<div class=empty><p>no subagents</p></div>`; return; }
+    keyed(pane, lastSubs, s => s.id, () => el('<button class=row></button>'), (e, s) => { e.dataset.sub = s.id; e.innerHTML = subCard(s); });
+  };
+  const openSub = s => {
+    const d = sheet(`<fieldset class=box><legend>⇉ ${esc(s.description || s.id)}${s.model ? ` · <span class=text-dim>${esc(s.model)}</span>` : ''}</legend><div id=sublog><div class="skeleton h-40"></div></div></fieldset>`, 'subagent');
+    api(`/sessions/${encodeURIComponent(id)}/subagents/${encodeURIComponent(s.id)}/events?limit=400`)
+      .then(r => r.json(), () => null)
+      .then(v => {
+        const box = $('#sublog', d);
+        if (!box || !v) return;
+        box.innerHTML = '';
+        const cs = new Map();
+        for (const e of v.events || []) {
+          const w = e.e || {};
+          if (e.t === 'turn_end') { if (w.Err) box.insertAdjacentHTML('beforeend', `<div class=err-line>✗ ${esc(w.Err)}</div>`); continue; }
+          if (e.t === 'plan') { const ts = w.Todos || [], now = ts.find(t => t.Status === 'in_progress'); box.insertAdjacentHTML('beforeend', todoBox(now ? now.Label : 'plan', ts)); continue; }
+          if (e.t !== 'message' || w.Parent) continue;
+          if (w.Role === 'assistant') {
+            for (const p of w.Parts || []) {
+              if (p.Kind === 0 && p.Text.trim()) box.insertAdjacentHTML('beforeend', `<div class=say>${md(p.Text)}</div>`);
+              else if (p.Kind === 2 && p.Call) { const c = callEl(p.Call); box.append(c); cs.set(p.Call.ID, c); }
+            }
+          } else for (const p of w.Parts || []) {
+            if (p.Kind === 0 && p.Text && !w.Injected) box.insertAdjacentHTML('beforeend', `<div class=you><span class=who>you</span><div>${esc(p.Text)}</div></div>`);
+            if (p.Kind === 3 && p.Output) { const c = cs.get(p.Output.CallID); if (c) callOut(c, p.Output); }
+          }
+        }
+      });
+  };
+
+  // shells: the session's background — the tasks its events tell of, and
+  // the shell calls it asked to run there. A finished one stays, its
+  // output one tap in.
+  const drawShells = () => {
+    const rows = [];
+    for (const t of tasks.values()) if (!t.done) rows.push({top: t.Label || t.ID, sub: t.status || 'running', stop: t.ID});
+    for (const c of calls.values()) {
+      const k = c._call;
+      if (!k || k.Kind !== K.SHELL || !k.Input?.Background) continue;
+      const running = !!$('summary .run', c), failed = c.dataset.err !== undefined;
+      rows.push({top: (k.Input.Command || '').split('\n')[0] || k.Title || 'shell', mark: running ? '<span class=st-working>✻</span>' : failed ? '<span class=text-red>✗</span>' : '<span class=st-idle>✓</span>', card: c});
+    }
+    rows.reverse();
+    if (!rows.length) { pane.innerHTML = `<div class=empty><p>nothing in the background</p></div>`; pane.onclick = null; return; }
+    pane.innerHTML = rows.map((r, i) => `<div class=row data-i=${i} tabindex=0>
+      <div class=row-top><b>${esc(r.top)}</b>${r.stop ? `<button class="key key-plain key-bad" data-stop="${esc(r.stop)}">stop</button>` : ''}${r.mark ? `<span style=flex-shrink:0>${r.mark}</span>` : ''}</div>
+      ${r.sub ? `<div class=row-sub><span>${esc(r.sub)}</span></div>` : ''}</div>`).join('');
+    pane.onclick = e => {
+      const b = e.target.closest('[data-stop]');
+      if (b) { op({op: 'stop_task', id: b.dataset.stop}); return; }
+      const r = e.target.closest('[data-i]');
+      if (r) {
+        const x = rows[+r.dataset.i];
+        if (!x?.card) return;
+        const d = sheet('<div id=shout></div>', 'shellout');
+        const n = x.card.cloneNode(true);
+        n.open = true;
+        $('#shout', d).append(n);
+      }
+    };
+  };
+
+  // overview: the session's numbers at a glance, as its transcript reads
+  const drawOverview = v => {
+    if (!v || (!v.turns && !v.window)) { pane.innerHTML = `<div class=empty><p>no overview for this one</p></div>`; return; }
+    const pct = v.window ? Math.min(100, Math.round(100 * (v.context || 0) / v.window)) : 0;
+    const models = Object.entries(v.models || {}).filter(([, c]) => c > 0);
+    pane.innerHTML = `<fieldset class=box><legend>overview</legend><dl class=facts>
+        <dt>agent</dt><dd>${esc(agentName(info.kind))}${v.model ? ` · ${esc(v.model)}` : ''}${info.effort ? ` · ${esc(info.effort)}` : ''}</dd>
+        <dt>folder</dt><dd class=text-blue>${esc(home(v.cwd || info.cwd))}</dd>
+        <dt>turns</dt><dd>${v.turns || 0} · ${dur(v.workingMs)} working</dd>
+        ${v.cost ? `<dt>spent</dt><dd class=tabular-nums>${money(v.cost)}</dd>` : ''}
+        ${v.version ? `<dt>version</dt><dd>${esc(v.version)}</dd>` : ''}
+        ${(v.mcp || []).length ? `<dt>mcp</dt><dd>${v.mcp.map(esc).join(', ')}</dd>` : ''}</dl>
+        <div class=ctxbar><div class=ctxfill style="width:${pct}%"></div></div>
+        <p class="text-dim pt-2">${tok(v.context)} of ${tok(v.window || 0)} in context</p></fieldset>
+      <fieldset class=box><legend>tokens</legend><dl class=facts>
+        <dt>input</dt><dd>${tok(v.input)}</dd><dt>output</dt><dd>${tok(v.output)}</dd>
+        <dt>cache read</dt><dd>${tok(v.cacheRead)}</dd><dt>cache write</dt><dd>${tok(v.cacheWrite)}</dd></dl>
+        ${models.length ? `<div class=pt-2>${models.map(([m, c]) => `<div class="flex justify-between gap-2"><span class=truncate>${esc(m)}</span><span class="text-dim tabular-nums">${money(c)}</span></div>`).join('')}</div>` : ''}</fieldset>
+      ${(v.tools || []).length ? `<fieldset class=box><legend>tools · ${(v.tools || []).reduce((n, t) => n + (t.calls || 0), 0)} calls</legend><table class=ttable>${v.tools.map(t => `<tr><td>${esc(t.name)}</td><td>${t.calls || 0}${t.failed ? ` <span class=text-red>✗${t.failed}</span>` : ''}</td><td class=text-dim>${t.secs ? Math.round(t.secs) + 's' : ''}</td></tr>`).join('')}</table></fieldset>` : ''}`;
+  };
+
+  const startTab = () => {
+    stopTab();
+    pane.innerHTML = '';
+    pane.onclick = null;
+    if (tab === 'agents') {
+      const poll = () => api(`/sessions/${encodeURIComponent(id)}/subagents`).then(r => r.json(), () => null).then(v => { if (v && sc.live && tab === 'agents') drawAgents(v); });
+      poll();
+      tabTimer = setInterval(poll, 5000);
+      pane.onclick = e => { const b = e.target.closest('[data-sub]'); if (!b) return; const s = lastSubs.find(x => x.id === b.dataset.sub); if (s) openSub(s); };
+    } else if (tab === 'shells') {
+      drawShells();
+    } else if (tab === 'changes') {
+      pane.innerHTML = `<fieldset class=box><legend>changes · <span class=text-blue>${esc(home(info.cwd))}</span></legend><div id=chgbody></div></fieldset>`;
+      fillChanges($('#chgbody', pane));
+    } else if (tab === 'overview') {
+      pane.innerHTML = `<div class="skeleton h-40"></div>`;
+      api(`/sessions/${encodeURIComponent(id)}/overview`).then(r => r.json(), () => null).then(v => { if (sc.live && tab === 'overview') drawOverview(v); });
+    }
+  };
+  const setTab = t => {
+    if (t === tab) return;
+    const was = tab;
+    tab = t;
+    $$('.tab', $('#tabs')).forEach(b => b.classList.toggle('tab-on', b.dataset.t === t));
+    const conv = t === 'c';
+    if (was === 'c') back = scrollY; // where the conversation was, kept for the way back
+    log.classList.toggle('hidden', !conv);
+    $('#asks').classList.toggle('hidden', !conv);
+    $('#composer').classList.toggle('hidden', !conv);
+    const j = $('#jump');
+    if (j) j.classList.toggle('hidden', !conv || stick);
+    pane.classList.toggle('hidden', conv);
+    if (conv) {
+      stopTab(); pane.innerHTML = ''; pane.onclick = null;
+      if (was) { scrollTo(0, back); stick = innerHeight + back >= document.body.scrollHeight - 120; }
+    } else {
+      scrollTo(0, 0);
+      startTab();
+    }
+  };
+  $('#tabs').onclick = e => {
+    const b = e.target.closest('[data-t]');
+    if (!b || b.dataset.t === tab) return;
+    go(b.dataset.t === 'c' ? `#/s/${encodeURIComponent(machine)}/${id}` : `#/s/${encodeURIComponent(machine)}/${id}/${b.dataset.t}`);
+  };
+  setTab(init);
+  // for route(): the same session's tab switches in place, its scope alive
+  curTab = {id, set: setTab, get live() { return sc.live; }};
+  sc.on(() => { stopTab(); if (curTab?.id === id) curTab = null; });
+
   // the stream: the conversation's live end, with the transcript's end
   // before it. What it sends is kept in evts, drawn into the log.
   let es = null;
@@ -759,6 +936,7 @@ function sessionScreen(id) {
       evts.push(e);
       apply(e, false, evts.length - 1, null);
       trim();
+      if (tab === 'shells') drawShells(); // its rows are the background's live state
     };
   };
   sc.on(() => es && es.close());

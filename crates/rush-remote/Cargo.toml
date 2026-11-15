@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 rush-core.workspace = true
 rush-state.workspace = true
+rush-convo.workspace = true
 rush-events.workspace = true
 rush-sys.workspace = true
 rush-host = { path = "../rush-host" }

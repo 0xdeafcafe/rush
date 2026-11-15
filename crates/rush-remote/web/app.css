@@ -9,3 +9,16 @@
 .step-body .plan{margin-inline:0}
 .step[data-kind=agent]{background-color:var(--color-chrome)}
 .step[data-kind=agent][data-err]{background-color:var(--color-err)}
+/* ── session tabs, hand-written ── */
+.tabs{position:sticky;top:calc(3.25rem + env(safe-area-inset-top));z-index:15;display:flex;gap:calc(var(--spacing)*.5);background-color:var(--color-ground);border-bottom:1px solid var(--color-faint);padding-inline:calc(var(--spacing)*1.5);overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+#tabpane{padding-bottom:calc(var(--spacing)*8)}
+#tabpane fieldset{margin-block:calc(var(--spacing)*2)}
+#tabpane fieldset:first-child{margin-top:0}
+.tabular-nums{font-variant-numeric:tabular-nums}
+.ctxbar{margin-top:calc(var(--spacing)*2);height:6px;background-color:var(--color-input)}
+.ctxfill{height:100%;background-color:var(--color-orange)}
+.ttable{width:100%}
+.ttable td{padding-block:calc(var(--spacing)*.5);text-align:right;vertical-align:baseline;white-space:nowrap}
+.ttable td:first-child{text-align:left;color:var(--color-text);overflow-wrap:anywhere}
+.ttable td:nth-child(2){color:var(--color-dim)}
