@@ -1063,13 +1063,22 @@ retried or running in the background, no start or stop under way), then:
    agent up says why. Either way the host stays where it is.
 2. holds its agent through the Conn's `Upgrader::pass`: the adapter writes
    what's queued for the agent, stops writing, and stops its reader
-   between two reads (Claude's reader polls its stdout and a wake pipe), so
-   nothing the agent says is lost: what was read of a line so far is
-   handed on as `unread`. It refuses while the agent waits on an answer.
+   between two reads (Claude's reader, and Codex's on its app-server, poll
+   stdout and a wake pipe), so nothing the agent says is lost: what was
+   read of a line so far is handed on as `unread`. It refuses while the
+   agent waits on an answer. Codex's also refuses mid-turn, while a
+   subagent or command of its runs, or while a request of rush's waits on
+   the app-server's answer (it waits up to 5s for those): nothing is in
+   flight, so the next build's request ids, going on from the last one
+   used, never meet an answer meant for the old.
 3. writes `sessions/<id>/upgrade.json` (0600): its info, the replay ring,
    the session's commands and context lines, its listener's fd, and the
    agent's `Upgrade` (pid, fds by name, unread, the adapter's own state:
-   for Claude its session id, sign-in, account and control request count).
+   for Claude its session id, sign-in, account and control request count;
+   for Codex its thread, the last turn to end, model, account and version,
+   what the next turn applies (model, effort, mode), its sandbox's
+   writable roots, the threads it spawned and the calls that spawned them,
+   and the last request id).
 4. clears close-on-exec on the listener and the agent's fds (stdin,
    stdout, stderr, and the pgguard's pipe: closed, the guard would end the
    agent's group) and execs `rush host adopt <id> <state>` with the lock
@@ -1096,8 +1105,10 @@ What survives: the agent process and its pipes, the conversation, the
 replay, queue/hold/away/decisions state, costs, the turn count. What
 doesn't: a client's open connection (it redials), timers (idle sleep and
 away are armed again; the rest only run mid-turn), a caffeinate held while
-away (started again). Adapters: only Claude Code's (`rush-claude`
-conn.rs `Upgrader` and `Adopter`) today; a host on any other agent has
+away (started again). Adapters: Claude Code's (`rush-claude` conn.rs
+`Upgrader` and `Adopter`) and Codex's (`rush-codex` conn.rs, the reader
+held in rpc.rs; its app-server is told nothing: no initialize, no
+thread/resume); a host on any other agent (ollama-codex included) has
 `Info.upgrades` false and stays on its build, as does a remote host or one
 from before this.
 
@@ -1110,6 +1121,20 @@ mid-turn ones too, which move once their turn ends; hosts that can't
 move are counted and said, never restarted. A row whose host's
 `exe` is older than the installed rush shows a faint `old` (`old build`
 in full) beside its badge.
+
+You can also ask it for one session, stale or not: `u` in the close
+question (restart rush, keep the agent running), `#rehost`, and
+`rush session rehost <id>`. `upgrade::ask_tree` asks the session and
+every session it spawned, theirs too (`Meta spawnedBy`, walked a
+generation at a time, each once; sessions started beside it with
+`startedFrom` are left out, as they have rows of their own), sending each
+movable one the `upgrade` op. Each moves once it's between turns, as
+above, onto the installed rush even when it's the build it already runs:
+rush restarts under the agent, which keeps its pid, pipes and
+conversation. One that can't move (another machine's, stopped, asleep,
+an adapter without `Adopter`, or a stand-in's host with an owner) is left
+where it is and said with why (`upgrade::why_not`). Each ask is logged
+as `rehost-asked` (by, root, and whether it was between turns).
 
 Restarting an agent restarts its host too (`client::restart_agent`): the
 agent is going down anyway, so there is no old host worth keeping. Every
@@ -2658,7 +2683,7 @@ is made. Everything below is in `rush_ui::frame`.
   goes back to the choices, the draft kept. On a Wall tile esc closes
   the card with the tile still asking. A card set aside marks its block's Open
   (`render::decisions_gone`): the block says "set aside · d opens the
-  card", and the column beside and the catch-up no longer list it. The
+  card", and the column beside and the Orchestrator board no longer list it. The
   mark is the view's, as the sent mark is: a session opened afresh reads
   the block as open again until a message of yours comes after it.
   A card takes every decision (Go stopped at nine while the block's row
@@ -2731,9 +2756,8 @@ is made. Everything below is in `rush_ui::frame`.
   commands a row of the keys: k skips the command running now, x stops the
   whole chain, p pauses (with "↑ pick this step, then" until it's picked;
   new in the Rust port, Go showed them only in the hint row). Code's check
-  line and Trail's step line say the place too, Chat's bubble foot and
-  Catch-up's "Still going" name it; Code shows the keys, Trail once the
-  step is picked.
+  line says the place too, Chat's bubble foot names it; Code shows the
+  keys.
   A pipeline is one command of the chain (one place, one time; k and p
   act on all its stages together) but drawn split by pipe
   (`shell::pipeline_stages`): the stage doing the work on the command's
@@ -3252,7 +3276,7 @@ is made. Everything below is in `rush_ui::frame`.
 
 ## Conversation views (Rust-only)
 
-The Conversation tab has five views, one for every session, kept in
+The Conversation tab has four views, one for every session, kept in
 config.json as `convoView` ("" is Normal). Each answers one question:
 
 - Normal: everything, as always.
@@ -3268,28 +3292,27 @@ config.json as `convoView` ("" is Normal). Each answers one question:
   file until enter opens the whole diff, and a line for each check (tests,
   builds, linters) with its result, time, and "→ passed next run" when a
   later run of it passed.
-- Catch-up, "what happened while I was away?": one card for every turn
-  since you last looked at the session (`Options.since`), drawn with the
-  last turn; the turns it covers before that draw nothing, and the turns
-  before it a row each (enter opens them in Normal). The card: needs you
-  first (open decisions, waiting permissions, what the last message
-  asks) with `[answer]`, Done (each answer's first sentence, no model
-  call), Changed, Checks, Said to you (the rest of the last answer),
-  Still going (running steps and background tasks). Never looked: the
-  last four turns. A turn is new when it did anything after that: its
-  end, or its last step's when the end came over an hour later (a turn
-  left open is ended when rush reads it). "Last looked" is kept per
-  session in the UI
-  (session-core conversation.rs `looked_since`): a look runs while the
-  conversation is drawn frame after frame (`Model::frames`); one begun
-  after a frame without it, 30 s or more later, starts from the end of
-  the one before.
-- Trail, "where did the time go?": what you said, then a line a step on a
-  time axis, steps of a kind quicker than 10 s side by side merged ("read
-  4 files"), a bar as long as the step against the turn's longest, the
-  slowest marked when it took 10 s and 30% of the turn, the reply's first
-  sentence, and a line splitting the turn into thinking, tools (their
-  spans, overlaps once) and waiting on you.
+- Orchestrator, "who's doing what?" (Rust-only): a lead's session as the
+  agents it hands work to. Each turn you started is two labelled lines
+  or a few: what you said (2 rows at most) and what the lead answered
+  (3), opening the turn. Turns woken by an agent's news (a background
+  subagent's notice, a "Codex (agent 21bcc40e) finished:" report) draw
+  nothing. Under the last turn, a board: "Agents · 2 working · 14 done ·
+  $1,103", what needs you (`[answer]`, as Normal's needs), then every
+  agent it started: its subagents (Agent/Task calls, how they stand from
+  their background task, else their step) and those it started through
+  rush's spawn_agent (at work from "as agent <id>" till that agent's
+  report comes, or its own session while rush has it found). Those at
+  work come first, oldest first, then those done, newest first, eight of
+  them and "and N more before them". A row: its mark (● at work, ?
+  asks, ✓ done, ✗ failed, ✕ stopped or lost), what it was given (the
+  subagent's description, what the agent was asked), what runs it and
+  for how long; under it, the last word on it: the first sentence of
+  what the lead said in the turn its news woke, else its own progress
+  or answer. Enter on a row opens its step in Normal. Read from every
+  turn, so the board costs what the session's steps do; it's drawn with
+  the last turn only, its key holding every task's and found agent's
+  state, and the clock while one works.
 
 ⌥s (session.preset, also ctrl+] g) goes through them; the tab row names
 one other than Normal and a click on it opens a picker; enter or a click
@@ -3297,28 +3320,28 @@ on a turn or a step in any of them opens it in Normal. Changing view
 keeps the picked row, else the turn at the top.
 
 They are `Options.preset` (rush_convo::Preset), part of the renderer's
-signature (and `since` with Catch-up): the same parsed turns, drawn a turn
-at a time (render/draw/presets.rs), so only the turns in view are drawn
-whichever is picked. Catch-up's first turn is counted again as turns come
-(`Renderer.catch`), and its last turn's key carries the background tasks
-it says are going. Checks are read from the command's words (cargo, go,
+signature: the same parsed turns, drawn a turn at a time
+(render/draw/presets.rs), so only the turns in view are drawn whichever
+is picked. Checks are read from the command's words (cargo, go,
 npm/pnpm/yarn/bun scripts, make, pytest, eslint, ruff, tsc, …) and its
 exit code, never from one harness's own result shape.
 
 `cargo bench -p rush-convo --bench render`, 3000 turns at 120 wide
-(µs per frame):
+(µs per frame), before Orchestrator (not measured yet):
 
-| frame | Normal | Chat | Code | Catch-up | Trail |
-|---|---|---|---|---|---|
-| cold, at the end | 780 | 559 | 192 | 235 | 173 |
-| warm, at the end | 4.3 | 5.8 | 2.2 | 18.5 | 4.3 |
-| warm, mid-way | 4.0 | 5.5 | 1.9 | 18.4 | 4.1 |
+| frame | Normal | Chat | Code |
+|---|---|---|---|
+| cold, at the end | 780 | 559 | 192 |
+| warm, at the end | 4.3 | 5.8 | 2.2 |
+| warm, mid-way | 4.0 | 5.5 | 1.9 |
 
 Cold frames swing with the machine's load (a run under heavier load had
 Code's at 3151 µs and Normal's main-bench one at 2925 µs); warm frames are
-the steady cost. Catch-up's window holds ~50 turns of one row each before
-the card, so its warm frame checks 50 turns' keys: still far under a
-millisecond.
+the steady cost.
+
+Catch-up ("what happened while I was away?"), Trail ("where did the time
+go?") and Live ("what is it doing?", a card a watcher model wrote) were
+views until v0.1.0-beta.17; a `convoView` naming one now reads as Normal.
 
 ### Which view fits (Rust-only, off by default)
 
@@ -3331,10 +3354,10 @@ seen; a glance at the list and back isn't one), or a turn ends while it's
 open. A moment waits while a key or the wheel moved in the last 3 s.
 
 The rules (rush_convo::suggest, a pure function of a digest of counts
-from the last finished turn and the time away) pick first: back with
-unseen finished turns → Catch-up; files changed and checks run (the
-Code view's check detection) → Code; a turn of 2 minutes or more mostly
-in tools → Trail; mostly talk, two steps or fewer → Chat; a short turn
+from the last finished turn, the session's agents and the time away)
+pick first: a session that has handed work to three agents or more →
+Orchestrator; files changed and checks run (the Code view's check
+detection) → Code; mostly talk, two steps or fewer → Chat; a short turn
 that changed nothing → Normal; anything else is unclear. Only then is the
 session's harness's quick model asked, through the advisor's Ask (the
 adapter's Querier, headless), off the UI thread, at most once per session
@@ -3347,79 +3370,10 @@ says `Code view fits · changed 4 files, ran tests  ⌥t take it`
 (session.take_view_suggestion, ⌥t or ctrl+] T). Switch changes the view
 only as you come back, never when a turn ends, and says so with ⌥t going
 back. A suggestion left showing until the next moment, or another view
-chosen, is turned down; per moment and view (`back:catch-up`) rush keeps
+chosen, is turned down; per moment and view (`back:chat`) rush keeps
 how often each was taken and turned down in view-suggest.json in rush's
 folder, and after three turned down in a row it isn't made again (one
 taken starts the count over). session-core viewsuggest.rs.
-
-### Live, "what is it doing?" (Rust-only)
-
-A sixth view whose story a model writes (rush-convo live.rs, drawn by
-render/draw/presets.rs `live`). Two layers on one card, the last turn's;
-the turns before are a row each:
-
-- Facts, from the session itself, free and always right: what needs you,
-  the step running and for how long, what changed (+/−), checks and how
-  they came out, what you ran. Catch-up's card gathers the same (`facts`,
-  shared). The story never overrides them: the watcher is told not to
-  repeat them, and the card draws them from the session either way.
-- Story, from a watcher model: a headline, phases done of planned (a bar
-  and "2/3  66%"), and up to 6 blocks of 12 items by id, each one of
-  steps, timeline, list, kv, bars, callout or text. It answers with a
-  JSON patch (blocks replaced by id or added, removed, reordered), never
-  drawing code; what it gets wrong in a block is left out, and an answer
-  with no JSON changes nothing. Its own vocabulary, not the view panel's
-  blocks: rush-convo can't reach rush-host's.
-
-The watcher (rush-ui-session-core storywatch.rs) is one query each time
-through the session's harness (the advisor's Ask, as view suggestions
-ask): Sonnet for Claude Code's sessions, else the harness's quick model,
-held to live::SCHEMA. It's sent the dashboard as it stands and only
-what's happened since (live::delta: a line a finished step, the turns'
-asks and answers, the task list when it changes; ≤ 6,000 chars, the
-middle steps cut first), so no process stays up between asks. The
-system prompt, tools and schema come first and are the same every time,
-so asks read them from the cache. The Now line is the small-job
-model's (rush_core cheap: Apple Intelligence first), asked as the step
-running changes and cleared until it answers.
-
-When: only while a session's Live view is drawn. As it opens (the first
-time the last 3 turns; coming back, what's new since), as soon as a
-turn ends, and while one runs at most every 20 s (live::EVERY), only
-when there's something new. A failed ask is said on the card ("the
-watcher couldn't say: …") and tried again after 20 s, told the same
-again. The stories of the last 16 sessions looked at are kept.
-
-Measured (one ask as the Cli asker runs it, Claude Code 2.1.322, a 1.5k
-char update to a dashboard of one block, 5 runs): 3.3–3.8 s, the
-`claude -p` at 141–165 MB footprint (median 157) for those seconds and
-nothing after; the first ask 2.1¢ (it writes 4,769 tokens of system,
-tools and schema to the cache), each after 0.28¢ (232 tokens out, the
-same read from the cache). Every answer patched. Planned first was one
-Sonnet process kept up while the view is open (~150 MB the whole time,
-its conversation growing and the cache reading all of it): a query each
-time costs the same and holds no memory between asks.
-
-Frame cost: `cargo bench -p rush-convo --bench render` ("live:" rows and
-the Live preset's), on the fullest story (6 blocks of 12), 3,000 turns,
-w120, CI's macOS runner (footprint run 43615184800; its times wander
-by half between runs, the allocations don't):
-
-| | µs | allocs |
-|---|---|---|
-| Live opened (cold frame at the end) | 208 | 955 |
-| the same frame again, a turn running | 0.5 | 2 |
-| mid-way | 2.3 | 0 |
-| the story changed, then a frame | 84 | 946 |
-| what's new, first time (3 turns) | 12 | 77 |
-| what's new, nothing | 0.1 | 2 |
-| the prompt | 51 | 681 |
-| an answer applied | 95 | 1,391 |
-
-A running turn's key holds the tick (its spinner turns); the card has
-none, only times, so it holds the clock alone and is drawn again as
-they change, not every tick: the same frame cost 89 µs and 945
-allocations before (run 43610924730), Normal's 6–7 µs.
 
 Not possible: Claude Code's Code Mode (`CLAUDE_CODE_EXPERIMENTAL_CODE_MODE`)
 works only in an interactive terminal, not `-p` or the SDK, so no rush
@@ -3494,11 +3448,7 @@ The boxes are in every view (presets.rs), the same box and keys:
   with a check's look (✓/✗/✕/✱, `$ command`, its code, its time);
   enter opens its box under its line. A block not run is its box, with
   ▶ run, under the turn's changes.
-- **Catch-up**: "You ran" lines for what you ran since you last looked
-  (the newest 4), enter opening one's box under the card; one running
-  is under "Still going".
-- **Trail**: a run is a `you ran` line with its time bar, where it
-  started among the steps (never the "slow" one).
+- **Orchestrator**: not shown; it's about the agents.
 
 A run (`rush_convo::ShellRun`, kept by the UI in session_core's
 `shellbox.rs` and handed to the view as `Options::shells`) is the

@@ -11,7 +11,7 @@
 //! :740, sessionList :767), serve.go:58 (serve's starts) and exchange.go:24
 //! (outgoingExchange, here spawn.rs's). answer is the agtop fork's
 //! cmd/rush/answer.go (skippedQuestion :16, sessionAnswer :24, asking
-//! :102, waits :109, pendingOf :141).
+//! :102, waits :109, pendingOf :141). rehost is Rust-only.
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, Write};
@@ -47,6 +47,10 @@ pub const USAGE: &str = "rush session: run rush-mode sessions without the view
         request (its id, or its tool call's) it answers
   rush session interrupt <id>
   rush session stop <id>
+  rush session rehost <id>   restarts rush under the session and every agent
+        it spawned, theirs too, onto the rush installed, each once it's
+        between turns; their agents keep running, the same process and
+        conversation
   rush session watch <id> [--json] [--until-idle]   what it says and does, as it
         happens, from the start of the turn under way; --until-idle stops
         when the turn ends
@@ -131,6 +135,7 @@ pub fn session_cmd(
         "answer" => (false, session_answer(env, rest, stdin, stdout)),
         "interrupt" => (false, session_control(env, rest, stdout, false)),
         "stop" => (false, session_control(env, rest, stdout, true)),
+        "rehost" => (false, session_rehost(rest, stdout)),
         "watch" => session_watch(env, rest, stdout),
         "info" => session_info(env, rest, stdout),
         "list" => session_list(env, rest, stdout),
@@ -615,6 +620,52 @@ fn session_control(
     drop(c);
     let _ = writeln!(stdout, "stopped {id}");
     Ok(())
+}
+
+/// `rush session rehost <id>`: asks the session's host and those of every
+/// agent it spawned, theirs too, to move onto the installed rush in
+/// place (rush_host::upgrade::ask_tree), and says what it asked.
+/// Rust-only.
+fn session_rehost(args: &[String], stdout: &mut dyn Write) -> Result<(), String> {
+    let id = Flags::session("rehost", &[], &[], &[]).id_and_flags(args)?;
+    if !session_exists(&id) {
+        return Err(format!("session {id} not found"));
+    }
+    let by = std::env::var("RUSH_SESSION").unwrap_or_default();
+    let r = rush_host::upgrade::ask_tree(&id, &or(&by, "rush session rehost"))?;
+    let _ = write!(stdout, "{}", rehost_said(&id, &r)?);
+    Ok(())
+}
+
+/// What `rush session rehost` prints of what it asked of session id's
+/// tree: an error when it asked none.
+fn rehost_said(id: &str, r: &rush_host::upgrade::Rehost) -> Result<String, String> {
+    if r.asked.is_empty() {
+        return Err(match r.left.iter().find(|(i, _)| i == id) {
+            Some((_, why)) => format!("rush can't restart under {id}: {why}"),
+            None => format!("rush can't restart under {id} now"),
+        });
+    }
+    let n = r.asked.len();
+    let hosts = if n == 1 { "host" } else { "hosts" };
+    let mut out = format!(
+        "asked {n} {hosts} to move onto the installed rush: {}\n",
+        r.asked.join(" ")
+    );
+    out.push_str(&match (r.now, n) {
+        (1, 1) => "it moves now · its agent keeps running\n".to_string(),
+        (0, 1) => "it moves once it's between turns · its agent keeps running\n".to_string(),
+        (k, n) if k == n => "they move now · their agents keep running\n".to_string(),
+        (0, _) => "each moves once it's between turns · their agents keep running\n".to_string(),
+        (k, _) => format!(
+            "{k} {} now, the rest once they're between turns · their agents keep running\n",
+            if k == 1 { "moves" } else { "move" }
+        ),
+    });
+    for (i, why) in &r.left {
+        out.push_str(&format!("{i} stays: {why}\n"));
+    }
+    Ok(out)
 }
 
 /// What the agent is told when its question is declined (skippedQuestion).
@@ -1159,6 +1210,57 @@ mod tests {
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()
+    }
+
+    /// What `rush session rehost` prints of what it asked.
+    #[test]
+    fn rehost_says_what_it_asked() {
+        use rush_host::upgrade::Rehost;
+        let why = |i: &str, w: &str| (i.to_string(), w.to_string());
+        let cases: Vec<(Rehost, Result<&str, &str>)> = vec![
+            (
+                Rehost {
+                    asked: s(&["p"]),
+                    now: 1,
+                    left: vec![],
+                },
+                Ok(
+                    "asked 1 host to move onto the installed rush: p\nit moves now · its agent keeps running\n",
+                ),
+            ),
+            (
+                Rehost {
+                    asked: s(&["p", "a", "b"]),
+                    now: 1,
+                    left: vec![why("c", "it's asleep")],
+                },
+                Ok(
+                    "asked 3 hosts to move onto the installed rush: p a b\n1 moves now, the rest once they're between turns · their agents keep running\nc stays: it's asleep\n",
+                ),
+            ),
+            (
+                Rehost {
+                    asked: s(&["p", "a"]),
+                    now: 0,
+                    left: vec![],
+                },
+                Ok(
+                    "asked 2 hosts to move onto the installed rush: p a\neach moves once it's between turns · their agents keep running\n",
+                ),
+            ),
+            (
+                Rehost {
+                    asked: vec![],
+                    now: 0,
+                    left: vec![why("p", "it isn't running")],
+                },
+                Err("rush can't restart under p: it isn't running"),
+            ),
+        ];
+        for (r, want) in &cases {
+            let got = rehost_said("p", r);
+            assert_eq!(got.as_deref().map_err(String::as_str), *want, "{r:?}");
+        }
     }
 
     /// A rush folder for this thread under /tmp, where a socket's path

@@ -78,8 +78,8 @@ fn opening(m: &mut Model, key: &str) -> (String, String, bool, String) {
     (parent, from, !id.is_empty(), brief)
 }
 
-/// When each session's conversation was looked at, for the Catch-up
-/// view's "since you last looked": a look runs while the conversation is
+/// When each session's conversation was looked at, for what's come
+/// "since you last looked" (Options.since): a look runs while the conversation is
 /// drawn frame after frame; one begun after a frame without it (and a
 /// while since) starts from the end of the one before. Rust-only: Go rush
 /// had no such view.
@@ -117,8 +117,6 @@ pub fn looked_since(m: &mut Model, key: &str) -> rush_core::time::Ms {
 pub fn body(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     // A view that fits, at the moments it's worth saying (off: nothing).
     super::viewsuggest::look(m, key);
-    // The Live view's watcher, while it's on screen (storywatch.rs).
-    super::storywatch::look(m, key);
 
     // The views' dropdown, when open, hangs over its first rows under the
     // Conversation tab.
@@ -205,11 +203,6 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     let rows = rows - peek_h;
     conn(m, key).vs.rows = rows;
     let (between, action) = turn_state(m, key);
-    let story = if preset == rush_convo::Preset::Live {
-        super::storywatch::story(m, key)
-    } else {
-        None
-    };
     let Some(v) = m.session.as_mut() else {
         return Vec::new();
     };
@@ -231,7 +224,6 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     }
     o.preset = preset;
     o.since = since;
-    o.story = story;
     (o.parent, o.started_from, o.hosted) = (opening.0, opening.1, opening.2);
     (o.predecessor, o.handovers, o.capped) = (predecessor, handovers, capped);
     if o.brief != opening.3 {

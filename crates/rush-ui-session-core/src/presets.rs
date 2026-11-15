@@ -1,10 +1,10 @@
-//! The conversation's views: Normal, Chat, Code, Catch-up and Trail
+//! The conversation's views: Normal, Chat, Code and Orchestrator
 //! (rush_convo::Preset), one for every session, kept in rush's config
 //! (convoView) until changed. The dropdown under the Conversation tab
 //! that picks one (a click on the tab while it shows, or the views' key),
 //! and enter or a click on a turn or a step in any of them (a chat
-//! bubble's foot, a code heading or check, the catch-up card or a turn
-//! before it, a trail's row) opening it in Normal. Changing view keeps
+//! bubble's foot, a code heading or check, what you said in
+//! Orchestrator or an agent on its board) opening it in Normal. Changing view keeps
 //! the view on the message it was on. New in the Rust port: Go rush had
 //! no such views.
 
@@ -42,7 +42,7 @@ pub fn menu_rows(
         };
         let mut l = line([
             mark,
-            Span::new(format!("{:<9}", p.title()), bold(BRIGHT)),
+            Span::new(format!("{:<12}", p.title()), bold(BRIGHT)),
             plain("  "),
             sp(p.about(), DIM),
         ]);
@@ -262,13 +262,6 @@ pub fn show(m: &mut Model, p: Preset) {
     let rows = rows(m);
     if let Some(v) = m.session.as_mut() {
         v.o.preset = p;
-        // A catch-up card is a turn: a step picked picks its turn.
-        if p == Preset::CatchUp
-            && let Some((t, _)) = v.sel.split_once(':')
-            && t.starts_with('t')
-        {
-            v.sel = t.to_string();
-        }
         let sel = v.sel.clone();
         if sel.starts_with('t') && sel[1..].starts_with(|c: char| c.is_ascii_digit()) {
             if !v.reveal(&sel, rows) {
@@ -316,7 +309,7 @@ pub fn reveal_step(m: &mut Model, call: &str) -> bool {
     true
 }
 
-/// Row r (a catch-up card's turn, a trail's step) opened in Normal, in
+/// Row r (a turn, or an agent on the Orchestrator board) opened in Normal, in
 /// view and picked.
 pub fn open_in_normal(m: &mut Model, r: &str) -> Out {
     keep(m, Preset::Normal);
@@ -367,8 +360,8 @@ fn run_starts(s: &rush_convo::Session, turn: &str, call: &str) -> Vec<usize> {
     out
 }
 
-/// Whether r is a turn's ref or a step's in one: what a catch-up card or
-/// a trail's row opens.
+/// Whether r is a turn's ref or a step's in one: what a row of another
+/// view opens.
 pub fn turn_or_step(r: &str) -> bool {
     let t = r.split(':').next().unwrap_or("");
     t.len() > 1

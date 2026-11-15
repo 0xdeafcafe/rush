@@ -633,7 +633,7 @@ pub fn sections(m: &Model) -> Vec<Section> {
             "switch" => "switch when I come back",
             _ => "off",
         },
-        "When you come back to a session, or a turn ends while it's open, rush works out which conversation view fits (Normal, Chat, Code, Catch-up, Trail): Catch-up after turns you haven't seen, Code after changes and checks, Trail after a long turn mostly in tools, Chat after mostly talk. Simple rules decide first; only when they can't tell does it ask the session's harness's quick model, which sees counts (edits, steps, checks, times), never the conversation. It never changes the view while you type or scroll, and stops suggesting one you turn down three times in a row.",
+        "When you come back to a session, or a turn ends while it's open, rush works out which conversation view fits (Normal, Chat, Code, Orchestrator): Orchestrator for a session that has handed work to three agents or more, Code after changes and checks, Chat after mostly talk. Simple rules decide first; only when they can't tell does it ask the session's harness's quick model, which sees counts (edits, steps, checks, agents, times), never the conversation. It never changes the view while you type or scroll, and stops suggesting one you turn down three times in a row.",
         &[
             ("off", "no suggestions; rush does no work for them."),
             (

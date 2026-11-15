@@ -8,12 +8,12 @@
 //! - Code, "what did it change?": each turn's edits as their diffs, file by
 //!   file, a few rows each until opened, and a line for each check (tests,
 //!   builds, linters) with how it came out and how long it took.
-//! - Catch-up, "what happened while I was away?": one card for every turn
-//!   since you last looked at the session (Options.since), what needs you
-//!   first; the turns before it a row each.
-//! - Trail, "where did the time go?": a line a step on a time axis, quick
-//!   steps of a kind merged, a bar for how long each took, and the turn's
-//!   time split into thinking, tools and waiting on you.
+//! - Orchestrator, "who's doing what?": a lead's session as the agents it
+//!   hands work to. What you said and what it answered, a few rows each;
+//!   the turns its agents' news woke draw nothing. Under the last turn, a
+//!   board of every agent it started (its subagents, and those started
+//!   through rush's spawn_agent), at work first, each with the last word
+//!   on it, the lead's own where it said one.
 //!
 //! Every view is drawn from the turn as the session already holds it, from
 //! the generic model only (Kind, Status, exit codes, the shell's command),
@@ -24,22 +24,20 @@ use super::super::Preset;
 use super::super::decisions::{decisions_of, open_list};
 use super::*;
 use crate::decisions::decisions_in;
-use crate::live::{BlockKind, StoryBlock, Tone};
-use crate::shellbox::{BoxRef, Piece, ShellBlock, ShellRun, pieces};
+use crate::model::runs::{AGENT_SEND, agent_id, input_str, rush_tool};
+use crate::render::spawn::{asked, tool_run};
+use crate::shellbox::{Piece, ShellBlock, ShellRun, pieces};
 
 /// Rows of lines a file's diff shows in Code until opened.
 const CODE_CAP: usize = 40;
-/// The width of a catch-up card's labels ("Said to you ").
+/// The width of an Orchestrator label ("You ", the lead's name).
 const LABEL_W: usize = 14;
-/// The most turns a catch-up card covers.
-const CATCH_MOST: usize = 200;
-/// The turns a catch-up card covers when you've not looked before.
-const CATCH_FIRST: usize = 4;
-/// The most commands you ran a catch-up card names, the newest.
-const RAN_SHOWN: usize = 4;
-/// A step quicker than this merges with the steps of its kind beside it
-/// on the trail.
-const QUICK: Ms = 10_000;
+/// The rows what you said takes in Orchestrator, and what the lead said
+/// back, before they're cut.
+const EXCHANGE_YOU: usize = 2;
+const EXCHANGE_SAID: usize = 3;
+/// The agents done that the board shows, the newest.
+const BOARD_DONE: usize = 8;
 
 /// The checks a shell command runs, by kind ("tests", "clippy", "fmt",
 /// "lint", "build", "check", "typecheck", "vet"), in the order it runs
@@ -207,51 +205,6 @@ fn script_check(n: &str) -> Option<&'static str> {
     }
 }
 
-/// The first turn a catch-up card covers, and whether any turn ended
-/// after since: the turns since you last looked (at most CATCH_MOST);
-/// the last CATCH_FIRST when you've never looked (since 0); the last one
-/// when nothing is new. Read from the end, so it costs what the card does.
-pub(crate) fn catch_from(s: &Session, since: Ms) -> (usize, bool) {
-    let n = s.turns.len();
-    if n == 0 {
-        return (0, false);
-    }
-    if since <= 0 {
-        return (n.saturating_sub(CATCH_FIRST), true);
-    }
-    let mut i = n;
-    while i > 0 && n - i < CATCH_MOST {
-        let t = &s.turns[i - 1];
-        if t.live || last_heard(s, t) > since {
-            i -= 1;
-        } else {
-            break;
-        }
-    }
-    if i == n { (n - 1, false) } else { (i, true) }
-}
-
-/// When turn t last did anything: its end, unless that came over an hour
-/// after its last step (a turn left open, ended when rush read it), then
-/// its last step's.
-fn last_heard(s: &Session, t: &Turn) -> Ms {
-    let steps = t
-        .steps
-        .iter()
-        .map(|&id| {
-            let st = s.step(id);
-            st.end.max(st.start)
-        })
-        .max()
-        .unwrap_or(0)
-        .max(t.start);
-    if t.end > steps + 3_600_000 && !t.steps.is_empty() {
-        steps
-    } else {
-        t.end.max(t.start)
-    }
-}
-
 /// The first sentence of s as plain words: its first line up to the end
 /// of the sentence that starts it.
 fn first_sentence(s: &str) -> String {
@@ -283,19 +236,6 @@ fn flat(s: &str) -> String {
     one_line(&lines.join(" "))
 }
 
-/// What follows the first sentence of s, on one line.
-fn after_first(s: &str) -> String {
-    let flat = flat(s.trim());
-    let first = first_sentence(s);
-    match flat.find(first.trim_end_matches(':')) {
-        Some(at) => flat[at + first.trim_end_matches(':').len()..]
-            .trim_start_matches(':')
-            .trim()
-            .to_string(),
-        None => String::new(),
-    }
-}
-
 /// n with its thousands apart: 1,240.
 fn grouped(n: usize) -> String {
     let s = n.to_string();
@@ -307,20 +247,6 @@ fn grouped(n: usize) -> String {
         out.push(c);
     }
     out
-}
-
-/// A bar frac of w cells long, in eighths, never shorter than one.
-fn bar(frac: f64, w: usize) -> String {
-    const PART: [&str; 8] = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
-    let e = ((frac.clamp(0.0, 1.0) * (w * 8) as f64).round() as usize).max(1);
-    let mut s = "█".repeat(e / 8);
-    s.push_str(PART[e % 8]);
-    s
-}
-
-/// How long ms is, said short: 0 for nothing.
-fn took(ms: Ms) -> String {
-    if ms <= 0 { "0".into() } else { dur(ms) }
 }
 
 /// How a command you ran stands, as a check's mark: ✱ running, ✓ exit 0,
@@ -394,18 +320,81 @@ enum ChatSeg {
     Bang(String),
 }
 
-/// A row of the trail: one step, or quick steps of a kind side by side.
-struct Leg {
-    ids: Vec<StepId>,
-    verb: &'static str,
-    names: Vec<String>,
-    start: Ms,
-    end: Ms,
-    running: bool,
-    waiting: bool,
-    bad: bool,
-    /// A command you ran, by its box's ref, not a step.
-    run: Option<String>,
+/// How an agent on the Orchestrator board is doing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LaneState {
+    Working,
+    /// It asks something of the lead.
+    Waiting,
+    Done,
+    Failed,
+    Stopped,
+}
+
+impl LaneState {
+    /// As the step that started it stands.
+    fn of(st: Status) -> LaneState {
+        match st {
+            Status::Running => LaneState::Working,
+            Status::Waiting => LaneState::Waiting,
+            Status::Failed => LaneState::Failed,
+            // Its turn ended without a word of how it went.
+            Status::Lost => LaneState::Stopped,
+            _ => LaneState::Done,
+        }
+    }
+}
+
+/// An agent the session handed work to, on the Orchestrator board.
+#[derive(Clone, Debug)]
+pub(crate) struct Lane {
+    /// What it was given: a subagent's description, what a started agent
+    /// was asked.
+    pub name: String,
+    /// What runs it: the subagent's type, the agent and its model.
+    pub what: String,
+    pub state: LaneState,
+    pub start: Ms,
+    pub end: Ms,
+    /// The last word on it: what the lead said when its news came, else
+    /// its own; and when.
+    pub news: String,
+    pub news_at: Ms,
+    /// The step that started it, which the row opens.
+    pub r: String,
+    /// The turn it started in.
+    pub turn: usize,
+    /// A subagent of the session's own, not an agent started through rush.
+    pub sub: bool,
+}
+
+/// The agent a message reports for: "Codex (agent 21bcc40e) finished:"
+/// is 21bcc40e's report. None for any other message.
+fn reported_by(prompt: &str) -> Option<String> {
+    let first = prompt.trim_start().lines().next()?;
+    let (_, rest) = first.split_once("(agent ")?;
+    let (id, tail) = rest.split_once(')')?;
+    (tail.trim_start().starts_with("finished") && !id.is_empty()).then(|| id.to_string())
+}
+
+/// A report's words after its "… finished:" line.
+fn after_report(prompt: &str) -> &str {
+    let p = prompt.trim_start();
+    match p.split_once('\n') {
+        Some((first, rest)) if reported_by(first).is_some() => rest.trim(),
+        _ => p,
+    }
+}
+
+/// The agent a spawn_agent call started, by id, from what it answered:
+/// "… in the background as agent 21bcc40e." None when it started none.
+fn started_id(out: &str) -> Option<String> {
+    let (_, rest) = out.split_once("as agent ")?;
+    let id: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .collect();
+    (!id.is_empty()).then_some(id)
 }
 
 /// A card's label, LABEL_W wide.
@@ -429,206 +418,6 @@ fn needs_rows(needs: &[(Txt, String)], room: usize) -> Vec<(Txt, String)> {
         .collect()
 }
 
-/// A card's Changed row: how many files, the lines, and their names.
-fn changed_row(files: &[String], add: usize, del: usize, inner: usize) -> Txt {
-    let names: Vec<&str> = files.iter().map(|f| base_after_slash(f)).collect();
-    card_label("Changed", C_SUB)
-        .and(text(&plural(files.len(), "file")))
-        .and_raw("  ")
-        .and(Drawer::add_del(add, del))
-        .and(faint(&format!("   ({})", names.join(", "))))
-        .truncate(inner, &faint("…)"))
-}
-
-/// A card's Checks row: each check and how it came out.
-fn checks_row(checks: &[(&'static str, Came, bool, Option<usize>)], inner: usize) -> Txt {
-    let mut l = card_label("Checks", C_SUB);
-    for (i, (n, c, failed_once, tests)) in checks.iter().enumerate() {
-        if i > 0 {
-            l.push_str("   ", Style::default());
-        }
-        let word = match tests {
-            Some(p) if *n == "tests" && *c == Came::Passed => format!("{n} {}", grouped(*p)),
-            _ => n.to_string(),
-        };
-        l.push(match c {
-            Came::Running => paint(C_ORANGE, &format!("✱ {word}")),
-            Came::Passed => paint(C_GREEN, "✓").and_raw(" ").and(text(&word)),
-            Came::Failed => paint(C_RED, &format!("✗ {word}")),
-        });
-        if *failed_once && *c == Came::Passed {
-            l.push(faint(" (failed, rerun passed)"));
-        }
-    }
-    l.truncate(inner, &faint("…"))
-}
-
-/// The colour a story's tone draws in.
-fn tone_style(t: Tone) -> Style {
-    match t {
-        Tone::Good => C_GREEN,
-        Tone::Bad => C_RED,
-        Tone::Warn => C_YELLOW,
-        Tone::Busy => C_ORANGE,
-        Tone::Quiet => C_FAINT,
-        Tone::Plain => Style::default(),
-    }
-}
-
-/// A story block's rows, inner wide: its title, then its items as its
-/// kind lays them out.
-fn story_rows(b: &StoryBlock, inner: usize) -> Vec<Txt> {
-    let mut out = Vec::new();
-    let tone = tone_style(b.tone);
-    if !b.title.is_empty() && b.kind != BlockKind::Callout {
-        out.push(paint(C_SUB, &b.title).truncate(inner, &faint("…")));
-    }
-    let cut = |t: Txt| t.truncate(inner, &faint("…"));
-    match b.kind {
-        BlockKind::Steps => {
-            let mut l = Txt::new();
-            for (i, it) in b.items.iter().enumerate() {
-                if i > 0 {
-                    l.push(faint(" ─ "));
-                }
-                let (mark, st) = if it.done {
-                    ("✓ ", C_GREEN)
-                } else if it.tone == Tone::Busy {
-                    ("◉ ", C_ORANGE)
-                } else if it.tone != Tone::Plain {
-                    ("○ ", tone_style(it.tone))
-                } else {
-                    ("○ ", C_FAINT)
-                };
-                l.push(paint(st, mark));
-                l.push(if it.done || it.tone == Tone::Busy {
-                    text(&it.text)
-                } else {
-                    sub(&it.text)
-                });
-            }
-            out.extend(wrap(&l, inner));
-        }
-        BlockKind::Timeline => {
-            for it in &b.items {
-                let mut l = dim(&format!("{:<6}", it.time));
-                l.push(paint(tone_style(it.tone), "● "));
-                l.push(text(&it.text));
-                if !it.meta.is_empty() {
-                    l.push(faint(&format!(" · {}", it.meta)));
-                }
-                out.push(cut(l));
-            }
-        }
-        BlockKind::List => {
-            for it in &b.items {
-                let mut l = paint(tone_style(it.tone), if it.done { "✓ " } else { "• " });
-                l.push(text(&it.text));
-                if !it.meta.is_empty() {
-                    l.push_str("   ", Style::default());
-                    l.push(dim(&it.meta));
-                }
-                out.push(cut(l));
-            }
-        }
-        BlockKind::Kv => {
-            for it in &b.items {
-                let k = format!("{:<w$}", it.text, w = LABEL_W - 1);
-                let l = dim(&k)
-                    .and_raw(" ")
-                    .and(paint(tone_style(it.tone), &it.meta));
-                out.push(cut(l));
-            }
-        }
-        BlockKind::Bars => {
-            let most = b.items.iter().map(|it| it.value).fold(0.0, f64::max);
-            let w = (inner / 3).clamp(6, 24);
-            for it in &b.items {
-                let frac = if most > 0.0 { it.value / most } else { 0.0 };
-                let st = if it.tone == Tone::Plain {
-                    C_SUB
-                } else {
-                    tone_style(it.tone)
-                };
-                let name = format!("{:<w$} ", it.text, w = LABEL_W - 1);
-                let mut l = text(&name).truncate(LABEL_W, &faint("…"));
-                l.push(paint(st, &format!("{:<w$}", bar(frac, w), w = w)));
-                if !it.meta.is_empty() {
-                    l.push_str(" ", Style::default());
-                    l.push(dim(&it.meta));
-                }
-                out.push(cut(l));
-            }
-        }
-        BlockKind::Callout => {
-            let st = if b.tone == Tone::Plain {
-                C_YELLOW
-            } else {
-                tone
-            };
-            let mut words = b.text.clone();
-            if words.is_empty() {
-                words = b
-                    .items
-                    .iter()
-                    .map(|it| it.text.as_str())
-                    .collect::<Vec<_>>()
-                    .join("; ");
-            }
-            if !b.title.is_empty() {
-                words = format!("{}: {words}", b.title);
-            }
-            for (i, w) in wrap(&text(&words), inner.saturating_sub(2))
-                .into_iter()
-                .take(4)
-                .enumerate()
-            {
-                let lead = if i == 0 {
-                    paint(st, "! ")
-                } else {
-                    Txt::raw("  ")
-                };
-                out.push(lead.and(w));
-            }
-        }
-        BlockKind::Text => {
-            let words = if b.text.is_empty() {
-                b.items
-                    .iter()
-                    .map(|it| it.text.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            } else {
-                b.text.clone()
-            };
-            out.extend(wrap(&sub(&words), inner).into_iter().take(4));
-        }
-    }
-    out
-}
-
-/// What's sure of a run of turns (Drawer::facts).
-struct Facts<'a> {
-    /// What needs you, each with the ref it opens.
-    needs: Vec<(Txt, String)>,
-    /// Each answer's first sentence, and the rest of the last one.
-    done: Vec<String>,
-    said: String,
-    /// The files changed, and the lines added and taken away.
-    files: Vec<String>,
-    add: usize,
-    del: usize,
-    /// Each check: its name, how it came out last, whether it failed
-    /// before, and how many tests passed.
-    checks: Vec<(&'static str, Came, bool, Option<usize>)>,
-    /// What's still going: steps running, background tasks, your commands.
-    going: Vec<String>,
-    /// The commands you ran that have ended, by their box's ref, oldest
-    /// first; `more` of them before the newest RAN_SHOWN.
-    ran: Vec<(&'a String, &'a ShellRun)>,
-    more: usize,
-}
-
 impl<'a> Drawer<'a> {
     /// The turn drawn as p has it.
     pub(crate) fn preset(&mut self, p: Preset) {
@@ -637,9 +426,7 @@ impl<'a> Drawer<'a> {
         match p {
             Preset::Chat => self.chat(),
             Preset::Code => self.code_view(),
-            Preset::CatchUp => self.catch_up(),
-            Preset::Trail => self.trail(),
-            Preset::Live => self.live(),
+            Preset::Orchestrator => self.orchestrator(),
             Preset::Normal => self.open(),
         }
     }
@@ -1465,36 +1252,289 @@ impl<'a> Drawer<'a> {
         self.box_under_row = false;
     }
 
-    // ---- Catch-up ----
+    // ---- Orchestrator ----
 
-    /// What's sure of turns from.. to the last, from the session itself:
-    /// what needs you, what was done and said, changed and checked, what
-    /// you ran and what's still going. The Catch-up card and the Live
-    /// card both draw it.
-    fn facts(&mut self, from: usize) -> Facts<'a> {
-        let s: &'a Session = self.s;
-        let turns = &s.turns[from..];
-        let k = turns.len();
-        let since = self.o.since;
-        let last_r = self.r.clone();
-        // What needs you, each row with what it opens.
-        let mut needs: Vec<(Txt, String)> = Vec::new();
-        for (j, t) in turns.iter().enumerate() {
-            let ds = open_list(s, from + j, &self.o.open);
-            if let Some(d) = ds.first() {
-                let mut w = one_line(&d.topic);
-                if ds.len() > 1 {
-                    w = format!("{w} and {} more", ds.len() - 1);
+    /// A lead's session as the work it hands out: what you said and what
+    /// it answered, a few rows each; the turns its agents woke draw
+    /// nothing, as the board under the last turn says what came of them.
+    fn orchestrator(&mut self) {
+        if Self::yours(self.t) && reported_by(&self.t.prompt).is_none() {
+            self.exchange_rows();
+        }
+        if self.ti + 1 == self.s.turns.len() {
+            self.board();
+        }
+    }
+
+    /// What you said, then what the lead said back, each a few lines on
+    /// a label: the turn's own rows, which open it.
+    fn exchange_rows(&mut self) {
+        let t = self.t;
+        let r = self.r.clone();
+        if self.ti > 0 {
+            self.bare();
+        }
+        let from = self.lines.len();
+        let inner = self.cw.saturating_sub(GUTTER + 2).max(20);
+        let room = inner.saturating_sub(LABEL_W);
+        let when = if t.start != 0 {
+            dim(&clock(t.start, self.o.offset(t.start)))
+        } else {
+            Txt::new()
+        };
+        let lead = if self.o.speaker.is_empty() {
+            "Agent".to_string()
+        } else {
+            self.o.speaker.clone()
+        };
+        let asked = flat(&fold_pastes(&t.prompt));
+        let said = t.answer().map(|a| flat(decisions_in(a).0));
+        let said = match said {
+            Some(w) if !w.is_empty() => sub(&w),
+            _ if t.live => paint(
+                C_ORANGE,
+                &format!("working · {}", self.since(t.start.max(1))),
+            ),
+            _ => faint(first_line(unasked(t))),
+        };
+        let parts = [
+            (card_label("You", C_SUB), text(&asked), EXCHANGE_YOU, when),
+            (card_label(&lead, C_SUB), said, EXCHANGE_SAID, Txt::new()),
+        ];
+        for (label, words, most, right) in parts {
+            let room = room.saturating_sub(right.width() + 2).max(8);
+            let ws = wrap(&words, room);
+            let cut = ws.len() > most;
+            for (i, w) in ws.into_iter().take(most).enumerate() {
+                let mut w = w;
+                if cut && i + 1 == most && !w.plain().ends_with('…') {
+                    w = w.truncate(room.saturating_sub(1), &faint("…"));
+                    w.push(faint("…"));
                 }
-                needs.push((text(&w), format!("t{}", t.n)));
+                let l = if i == 0 {
+                    label.clone()
+                } else {
+                    blanks(LABEL_W)
+                };
+                let right = if i == 0 { right.clone() } else { Txt::new() };
+                let row = self.sp(1).and(l).and(w);
+                self.add(&r, Color::Default, row, right);
             }
         }
-        let last = &turns[k - 1];
+        self.own(&r, from);
+    }
+
+    /// Every agent the session handed work to, as it stands: its
+    /// subagents and the agents it started through rush (spawn_agent),
+    /// each with how it's doing and the last word on it, the lead's own
+    /// where it said one. Read from every turn, so it costs what the
+    /// session's steps do; drawn with the last turn only.
+    pub(crate) fn lanes(&mut self) -> Vec<Lane> {
+        let s: &'a Session = self.s;
+        let o: &'a Options = self.o;
+        // The last turn each subagent's call woke, and each agent's
+        // report, by its id: what the lead made of it.
+        // And the last turn each was sent more work in (agent_send): at
+        // work again till its next report.
+        let mut woke: HashMap<&str, usize> = HashMap::new();
+        let mut came: HashMap<String, usize> = HashMap::new();
+        let mut sent: HashMap<String, usize> = HashMap::new();
+        for (i, t) in s.turns.iter().enumerate() {
+            if !t.woke_call.is_empty() {
+                woke.insert(t.woke_call.as_str(), i);
+            }
+            if let Some(id) = reported_by(&t.prompt) {
+                came.insert(id, i);
+            }
+            for &id in &t.steps {
+                let st = s.step(id);
+                if rush_tool(&st.tool) == Some(AGENT_SEND)
+                    && st.status != Status::Failed
+                    && let Some(a) = agent_id(st)
+                {
+                    sent.insert(a, i);
+                }
+            }
+        }
+        let news_of = |i: usize| -> (String, Ms) {
+            let t = &s.turns[i];
+            let w = t
+                .answer()
+                .map(|a| first_sentence(decisions_in(a).0))
+                .unwrap_or_default();
+            (w, t.end.max(t.start))
+        };
+        let mut out: Vec<Lane> = Vec::new();
+        for (ti, t) in s.turns.iter().enumerate() {
+            for &id in &t.steps {
+                let st = s.step(id);
+                if st.parent.is_some() {
+                    continue; // a subagent's own work: its lane's
+                }
+                if st.kind == Kind::Subagent {
+                    let job = s.jobs().iter().find(|j| j.tool_use_id == *st.id);
+                    let mut name = input_str(st, "description");
+                    if name.is_empty() {
+                        name = job.map(|j| one_line(&j.label)).unwrap_or_default();
+                    }
+                    if name.is_empty() {
+                        name = self.label(id).plain();
+                    }
+                    let what = job
+                        .map(|j| j.agent.clone())
+                        .filter(|a| !a.is_empty())
+                        .unwrap_or_else(|| "subagent".into());
+                    let state = match job {
+                        Some(j) if j.running() => LaneState::Working,
+                        Some(j) if j.status == "failed" => LaneState::Failed,
+                        Some(j) if j.status == "stopped" => LaneState::Stopped,
+                        Some(_) => LaneState::Done,
+                        None => LaneState::of(st.status),
+                    };
+                    let end = job.map_or(st.end, |j| j.end);
+                    let (mut news, mut at) = woke
+                        .get(&*st.id)
+                        .map_or_else(|| (String::new(), 0), |&i| news_of(i));
+                    if news.is_empty()
+                        && let Some(j) = job
+                    {
+                        news = one_line(&j.summary);
+                        at = j.progress_at.max(j.end);
+                    }
+                    if news.is_empty() && !st.output.is_empty() && state != LaneState::Working {
+                        news = first_sentence(&st.output);
+                    }
+                    out.push(Lane {
+                        name,
+                        what,
+                        state,
+                        start: job.map_or(st.start, |j| j.start).max(st.start),
+                        end,
+                        news,
+                        news_at: at,
+                        r: self.step_ref(st),
+                        turn: ti,
+                        sub: true,
+                    });
+                } else if let Some(sp) = tool_run(st) {
+                    let kid = o.kids.get(&*st.id).and_then(|ks| ks.first());
+                    let agent = kid.map(|k| k.id.clone()).or_else(|| started_id(&st.output));
+                    let mut state = LaneState::of(st.status);
+                    if state == LaneState::Done && agent.is_some() {
+                        // Started in the background: at work till its
+                        // report comes.
+                        state = LaneState::Working;
+                    }
+                    let (mut news, mut at, mut end) = (String::new(), 0, st.end);
+                    if let Some(i) = agent.as_ref().and_then(|a| came.get(a)) {
+                        state = LaneState::Done;
+                        (news, at) = news_of(*i);
+                        end = s.turns[*i].start;
+                        if news.is_empty() {
+                            news = first_sentence(after_report(&s.turns[*i].prompt));
+                        }
+                        // Sent more since: at work on it.
+                        if agent
+                            .as_ref()
+                            .and_then(|a| sent.get(a))
+                            .is_some_and(|j| j >= i)
+                        {
+                            state = LaneState::Working;
+                        }
+                    }
+                    if let Some(k) = kid {
+                        state = if k.live {
+                            LaneState::Working
+                        } else if state == LaneState::Working {
+                            LaneState::Done
+                        } else {
+                            state
+                        };
+                    }
+                    let mut what = sp.name.clone();
+                    if !sp.model.is_empty() && sp.model != sp.name {
+                        what = format!("{what} · {}", sp.model);
+                    }
+                    out.push(Lane {
+                        name: asked(&sp),
+                        what,
+                        state,
+                        start: st.start,
+                        end,
+                        news,
+                        news_at: at,
+                        r: self.step_ref(st),
+                        turn: ti,
+                        sub: false,
+                    });
+                }
+            }
+        }
+        // A subagent started again on the same work (its description)
+        // is the same lane: the newest stands for it.
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut kept: Vec<Lane> = Vec::new();
+        for l in out.into_iter().rev() {
+            if l.sub && !seen.insert(l.name.clone()) {
+                continue;
+            }
+            kept.push(l);
+        }
+        kept.reverse();
+        kept
+    }
+
+    /// The board: a heading counting the agents by how they're doing, what
+    /// needs you, then the agents at work, oldest first, and those done,
+    /// newest first, BOARD_DONE of them and how many more.
+    fn board(&mut self) {
+        let s = self.s;
+        let lanes = self.lanes();
+        let inner = self.cw.saturating_sub(GUTTER + 2).max(20);
+        let room = inner.saturating_sub(LABEL_W);
+        let first_r = format!("t{}", s.turns[0].n);
+        let count = |f: &dyn Fn(LaneState) -> bool| lanes.iter().filter(|l| f(l.state)).count();
+        let working = count(&|x| x == LaneState::Working);
+        let waiting = count(&|x| x == LaneState::Waiting);
+        let failed = count(&|x| matches!(x, LaneState::Failed | LaneState::Stopped));
+        let done = count(&|x| x == LaneState::Done);
+        let mut head = text("Agents");
+        let mut said = Vec::new();
+        for (n, w) in [
+            (working, "working"),
+            (waiting, "waiting"),
+            (failed, "stopped or failed"),
+            (done, "done"),
+        ] {
+            if n > 0 {
+                said.push(format!("{n} {w}"));
+            }
+        }
+        if said.is_empty() {
+            said.push("none started yet".into());
+        }
+        head.push(dim(&format!(" · {}", said.join(" · "))));
+        let cost: f64 = s.turns.iter().map(|t| t.cost).sum();
+        let m = money(cost);
+        if !m.is_empty() {
+            head.push(dim(&format!(" · {m}")));
+        }
+        // What needs you: the last turn's questions and permissions, and
+        // the choices its answer left you.
+        let last = &s.turns[self.ti];
+        let mut needs: Vec<(Txt, String)> = Vec::new();
+        let ds = open_list(s, self.ti, &self.o.open);
+        if let Some(d) = ds.first() {
+            let mut w = one_line(&d.topic);
+            if ds.len() > 1 {
+                w = format!("{w} and {} more", ds.len() - 1);
+            }
+            needs.push((text(&w), format!("t{}", last.n)));
+        }
         for &id in &last.steps {
             let st = s.step(id);
             if st.status == Status::Waiting {
-                let w = self.label(id).plain();
-                needs.push((text(&w), self.step_ref(st)));
+                needs.push((text(&self.label(id).plain()), self.step_ref(st)));
             }
         }
         if needs.is_empty() && self.needs_here() {
@@ -1503,311 +1543,45 @@ impl<'a> Drawer<'a> {
             } else {
                 one_line(&self.o.needs.reason)
             };
-            needs.push((text(&reason), last_r.clone()));
+            needs.push((text(&reason), self.r.clone()));
         }
-        // Done: the first sentence of each answer; said: the rest of the
-        // last one.
-        let answers: Vec<&str> = turns.iter().filter_map(|t| t.answer()).collect();
-        let done: Vec<String> = answers
-            .iter()
-            .map(|a| first_sentence(decisions_in(a).0))
-            .filter(|x| !x.is_empty())
-            .collect();
-        let said = answers
-            .last()
-            .map(|a| after_first(decisions_in(a).0))
-            .unwrap_or_default();
-        // Changed and checked, over every turn.
-        let mut files: Vec<String> = Vec::new();
-        let (mut add, mut del) = (0, 0);
-        let mut checks: Vec<(&'static str, Came, bool, Option<usize>)> = Vec::new();
-        for t in turns {
-            for f in self.changed_files(t) {
-                add += f.add;
-                del += f.del;
-                if !files.contains(&f.path) {
-                    files.push(f.path);
-                }
-            }
-            for id in self.check_steps(t) {
-                // How many passed, from a run that passed and counted them.
-                let passed = self
-                    .tests_counted(id)
-                    .map(|c| c.0)
-                    .filter(|&p| p > 0 && !self.bad(id));
-                for (n, c) in self.checks_of(id) {
-                    match checks.iter_mut().find(|x| x.0 == n) {
-                        Some(x) => {
-                            x.2 |= x.1 == Came::Failed;
-                            x.1 = c;
-                            if n == "tests" && c == Came::Passed {
-                                x.3 = passed;
-                            }
-                        }
-                        None => {
-                            let tests = if n == "tests" { passed } else { None };
-                            checks.push((n, c, false, tests));
-                        }
-                    }
-                }
-            }
-        }
-        // Still going: steps running, tasks in the background.
-        let mut going: Vec<String> = Vec::new();
-        for &id in &last.steps {
-            let st = s.step(id);
-            if st.status == Status::Running && st.parent.is_none() {
-                let part = s.running_label(id);
-                let w = if part.is_empty() {
-                    self.label(id).plain()
-                } else {
-                    part
-                };
-                let at = if st.start != 0 {
-                    format!(" · {}", self.since(st.start))
-                } else {
-                    String::new()
-                };
-                going.push(format!("{w}{at}"));
-            }
-        }
-        for j in s.running_jobs() {
-            if !j.background {
-                continue;
-            }
-            let at = if j.start != 0 {
-                format!(" · {}", self.since(j.start))
-            } else {
-                String::new()
-            };
-            going.push(format!("{}{at}", one_line(&j.label)));
-        }
-        // What you ran since you last looked: a line each once done, and
-        // those still running with what's still going.
-        let o: &'a Options = self.o;
-        let mut ran: Vec<(&'a String, &'a ShellRun)> = o
-            .shells
-            .iter()
-            .filter(|(k, r)| {
-                let n = BoxRef::parse(k).map_or(0, |b| b.turn());
-                (n == 0 || turns.iter().any(|t| t.n == n))
-                    && (since <= 0 || r.start > since || r.running())
-            })
-            .map(|(k, r)| (k, &**r))
-            .collect();
-        ran.sort_by(|a, b| (a.1.start, a.0).cmp(&(b.1.start, b.0)));
-        for (_, run) in ran.iter().filter(|(_, r)| r.running()) {
-            let mut w = one_line(first_line(run.command.trim()));
-            let part = run.label();
-            if !part.is_empty() {
-                w = part;
-            }
-            going.push(format!("{w} · {}", self.since(run.start)));
-        }
-        ran.retain(|(_, r)| !r.running());
-        if going.is_empty() && last.live {
-            let at = if last.start != 0 {
-                format!(" · {}", self.since(last.start))
-            } else {
-                String::new()
-            };
-            going.push(format!("working{at}"));
-        }
-        let more = ran.len().saturating_sub(RAN_SHOWN);
-        Facts {
-            needs,
-            done,
-            said,
-            files,
-            add,
-            del,
-            checks,
-            going,
-            ran,
-            more,
-        }
-    }
-
-    /// One card for every turn since you last looked, drawn with the last
-    /// of them; the turns in it before the last draw nothing, and those
-    /// before the card a row each.
-    fn catch_up(&mut self) {
-        let n = self.s.turns.len();
-        let (from, fresh) = catch_from(self.s, self.o.since);
-        if self.ti < from {
-            self.older_row();
-        } else if self.ti + 1 == n {
-            self.catch_card(from, fresh);
-        }
-    }
-
-    /// A turn before the card, as one row: when, what you asked, and what
-    /// it took.
-    fn older_row(&mut self) {
-        let t = self.t;
-        let r = self.r.clone();
-        let mut right = Vec::new();
-        let n = self.steps_counted();
-        if n > 0 {
-            right.push(plural(n, "step"));
-        }
-        let files = self.changed_files(t).len();
-        if files > 0 {
-            right.push(plural(files, "file"));
-        }
-        let m = money(t.cost);
-        if !m.is_empty() {
-            right.push(m);
-        }
-        let right = dim(&right.join(" · ")).and_raw("  ");
-        let mut l = self.sp(1);
-        if t.start != 0 {
-            l.push(dim(&clock(t.start, self.o.offset(t.start))));
-            l.push_str("  ", Style::default());
-        }
-        l.push(self.mark());
-        l.push(faint(&format!("turn {:<4} ", t.n)));
-        let room = self.cw.saturating_sub(l.width() + right.width() + 3);
-        l.push(sub(&Self::asked_line(t)).truncate(room.max(8), &faint("…")));
-        self.add(&r, Color::Default, l, right);
-    }
-
-    /// The card: a heading saying since when, what needs you first with
-    /// its action, then what was done, changed and checked, what it said
-    /// to you last, and what's still going.
-    fn catch_card(&mut self, from: usize, fresh: bool) {
-        let s = self.s;
-        let turns = &s.turns[from..];
-        let first_r = format!("t{}", turns[0].n);
-        // The heading.
-        let k = turns.len();
-        let since = self.o.since;
-        let mut head = if since <= 0 && k == 1 {
-            text("The last turn")
-        } else if since <= 0 {
-            text(&format!("The last {k} turns"))
-        } else if fresh {
-            text("Since you last looked")
-        } else {
-            text("Nothing new since you last looked")
-        };
-        if since > 0 {
-            head.push(dim(&format!(" · {} ago", dur(self.o.now - since))));
-        }
-        if fresh && since > 0 {
-            head.push(dim(&format!(" · {}", plural(k, "turn"))));
-        }
-        let cost: f64 = turns.iter().map(|t| t.cost).sum();
-        let m = money(cost);
-        if !m.is_empty() {
-            head.push(dim(&format!(" · {m}")));
-        }
-        let Facts {
-            needs,
-            done,
-            said,
-            files,
-            add,
-            del,
-            checks,
-            going,
-            ran,
-            more,
-        } = self.facts(from);
-        let last = &turns[k - 1];
-        // Laid out.
-        let rail_c = if !needs.is_empty() {
-            C_YELLOW
-        } else if last.live {
-            C_ORANGE
-        } else {
-            C_FAINT
-        };
-        let inner = self.cw.saturating_sub(GUTTER + 2).max(20);
-        let room = inner.saturating_sub(LABEL_W);
-        let rail = || paint(rail_c, "┃").and_raw(" ");
-        let label = |s: &str, c: Style| paint(c, &format!("{s:<w$}", w = LABEL_W));
         let mut rows: Vec<(Txt, String)> = needs_rows(&needs, room);
         if !needs.is_empty() {
             rows.push((Txt::new(), String::new()));
         }
-        if !done.is_empty() {
-            // Sentences run on; words with no stop of their own get one.
-            let mut all = String::new();
-            for d in &done {
-                if !all.is_empty() {
-                    all.push_str(if all.ends_with(['.', '!', '?']) {
-                        " "
-                    } else {
-                        "; "
-                    });
-                }
-                all.push_str(d);
-            }
-            let ws = wrap(&text(&all), room);
-            for (i, w) in ws.iter().take(3).enumerate() {
-                let mut w = w.clone();
-                if i == 2 && ws.len() > 3 {
-                    w = w.truncate(room.saturating_sub(1), &faint("…"));
-                    if !w.plain().ends_with('…') {
-                        w.push(faint("…"));
-                    }
-                }
-                let lead = if i == 0 {
-                    label("Done", C_SUB)
-                } else {
-                    blanks(LABEL_W)
-                };
-                rows.push((lead.and(w), String::new()));
-            }
-        }
-        if !files.is_empty() {
-            rows.push((changed_row(&files, add, del, inner), String::new()));
-        }
-        if !checks.is_empty() {
-            rows.push((checks_row(&checks, inner), String::new()));
-        }
-        // What you ran, the newest RAN_SHOWN, a line each to pick and open.
-        for (j, (r, run)) in ran.iter().skip(more).enumerate() {
-            let lead = if j == 0 {
-                label("You ran", C_SUB)
-            } else {
-                blanks(LABEL_W)
-            };
-            let mut came = run_came(run);
-            if run.end - run.start >= 100 {
-                came.push(dim(&format!(" · {}", dur(run.end - run.start))));
-            }
-            let room = room.saturating_sub(came.width() + 3);
-            let l = lead
-                .and(run_mark(run))
-                .and_raw(" ")
-                .and(run_words(run, room.max(8)))
-                .and_raw("   ")
-                .and(came);
-            rows.push((l, (*r).clone()));
+        let mut at_work: Vec<&Lane> = lanes
+            .iter()
+            .filter(|l| matches!(l.state, LaneState::Working | LaneState::Waiting))
+            .collect();
+        at_work.sort_by_key(|l| (l.state != LaneState::Waiting, l.start));
+        let mut ended: Vec<&Lane> = lanes
+            .iter()
+            .filter(|l| !matches!(l.state, LaneState::Working | LaneState::Waiting))
+            .collect();
+        ended.sort_by_key(|l| std::cmp::Reverse((l.end.max(l.news_at), l.turn)));
+        let more = ended.len().saturating_sub(BOARD_DONE);
+        for l in at_work.iter().chain(ended.iter().take(BOARD_DONE)) {
+            rows.extend(self.lane_rows(l, inner));
         }
         if more > 0 {
-            let l = blanks(LABEL_W).and(dim(&format!("and {more} before them")));
+            let l = blanks(2).and(dim(&format!("and {more} more before them")));
             rows.push((l, String::new()));
         }
-        if !said.is_empty() {
-            let q = format!("\"{said}\"");
-            let l = label("Said to you", C_SUB).and(sub(&q).truncate(room, &faint("…\"")));
-            rows.push((l, String::new()));
+        if lanes.is_empty() {
+            rows.push((
+                faint("no agents yet: its subagents and the agents it starts show here"),
+                String::new(),
+            ));
         }
-        if !going.is_empty() {
-            let l = label("Still going", C_SUB)
-                .and(paint(C_ORANGE, &going.join(" · ")).truncate(room, &faint("…")));
-            rows.push((l, String::new()));
-        }
-        if rows.is_empty() {
-            rows.push((faint("nothing to say yet"), String::new()));
-        }
-        // The heading, the rows on their rail.
-        if self.ti > 0 {
-            self.bare();
-        }
+        let rail_c = if !needs.is_empty() {
+            C_YELLOW
+        } else if working > 0 || last.live {
+            C_ORANGE
+        } else {
+            C_FAINT
+        };
+        let rail = || paint(rail_c, "┃").and_raw(" ");
+        self.bare();
         let from_row = self.lines.len();
         let l = self.sp(1).and(head.truncate(inner + 2, &faint("…")));
         self.add(&first_r, Color::Default, l, Txt::new());
@@ -1816,525 +1590,43 @@ impl<'a> Drawer<'a> {
             self.add(&r, Color::Default, l, Txt::new());
         }
         self.own(&first_r, from_row);
-        // A command you ran opened (enter on its line): its box under the
-        // card.
-        for (r, run) in ran.iter().skip(more) {
-            self.box_under(r, run);
-        }
     }
 
-    // ---- Live ----
-
-    /// The card a watcher model lays out, with the last turn; the turns
-    /// before it a row each, as Catch-up's are.
-    fn live(&mut self) {
-        if self.ti + 1 < self.s.turns.len() {
-            self.older_row();
+    /// One agent on the board: its mark, what it was given, what runs it
+    /// and for how long; under it, at work or done, the last word on it.
+    fn lane_rows(&mut self, l: &Lane, inner: usize) -> Vec<(Txt, String)> {
+        let (mark, c) = match l.state {
+            LaneState::Working => ("●", C_ORANGE),
+            LaneState::Waiting => ("?", C_YELLOW),
+            LaneState::Done => ("✓", C_GREEN),
+            LaneState::Failed => ("✗", C_RED),
+            LaneState::Stopped => ("✕", C_FAINT),
+        };
+        let took = match l.state {
+            LaneState::Working | LaneState::Waiting if l.start != 0 => self.since(l.start),
+            _ if l.start != 0 && l.end > l.start => dur(l.end - l.start),
+            _ => String::new(),
+        };
+        let mut right = dim(&l.what);
+        if !took.is_empty() {
+            right.push(dim(&format!(" · {took}")));
+        }
+        let room = inner.saturating_sub(right.width() + 5).max(8);
+        let name = if matches!(l.state, LaneState::Working | LaneState::Waiting) {
+            text(&l.name)
         } else {
-            self.live_card();
-        }
-    }
-
-    /// The card: the story's headline and how far along, what needs you,
-    /// what's running now (the small-job model's line for it, when it has
-    /// one), the story's blocks, then what changed and was checked this
-    /// turn. What's sure comes from the session, the rest from the story.
-    fn live_card(&mut self) {
-        let s = self.s;
-        let t = self.t;
-        let n = s.turns.len();
-        let r = self.r.clone();
-        let story = self.o.story.clone();
-        let Facts {
-            needs,
-            files,
-            add,
-            del,
-            checks,
-            going,
-            ..
-        } = self.facts(n - 1);
-        let inner = self.cw.saturating_sub(GUTTER + 2).max(20);
-        let room = inner.saturating_sub(LABEL_W);
-        // The heading: the story's headline, or what you asked.
-        let headline = story
-            .as_ref()
-            .map(|st| st.headline.clone())
-            .filter(|h| !h.is_empty())
-            .unwrap_or_else(|| Self::asked_line(t));
-        let progress = story.as_ref().map_or((0, 0), |st| st.progress);
-        let right = if progress.1 > 0 {
-            dim(&format!(
-                "{}/{}  {}%",
-                progress.0,
-                progress.1,
-                progress.0 * 100 / progress.1
-            ))
+            sub(&l.name)
+        };
+        let head = paint(c, mark)
+            .and_raw(" ")
+            .and(name.truncate(room, &faint("…")))
             .and_raw("  ")
-        } else {
-            Txt::new()
-        };
-        let mut rows: Vec<(Txt, String)> = Vec::new();
-        if progress.1 > 0 {
-            let w = inner.min(48);
-            let frac = f64::from(progress.0) / f64::from(progress.1);
-            let done = if progress.0 == 0 {
-                String::new()
-            } else {
-                bar(frac, w)
-            };
-            let left = w.saturating_sub(Txt::raw(&done).width());
-            let l = paint(C_ORANGE, &done).and(faint(&"─".repeat(left)));
-            rows.push((l, String::new()));
-        }
-        rows.extend(needs_rows(&needs, room));
-        // Now: the small-job model's line, else what's running.
-        if !going.is_empty() {
-            let line = story
-                .as_ref()
-                .map(|st| st.now.clone())
-                .filter(|x| !x.is_empty())
-                .unwrap_or_else(|| going[0].clone());
-            let mut l = card_label("Now", C_ORANGE).and(paint(C_ORANGE, &line));
-            if going.len() > 1 {
-                l.push(dim(&format!("  · {}", going[1..].join(" · "))));
-            }
-            rows.push((l.truncate(inner, &faint("…")), String::new()));
-        }
-        // The story's blocks, a blank row between them.
-        if let Some(st) = &story {
-            for b in &st.blocks {
-                rows.push((Txt::new(), String::new()));
-                for l in story_rows(b, inner) {
-                    rows.push((l, String::new()));
-                }
-            }
-            if !st.note.is_empty() {
-                rows.push((faint(&st.note), String::new()));
-            }
-        }
-        if !files.is_empty() || !checks.is_empty() {
-            rows.push((Txt::new(), String::new()));
-        }
-        if !files.is_empty() {
-            rows.push((changed_row(&files, add, del, inner), String::new()));
-        }
-        if !checks.is_empty() {
-            rows.push((checks_row(&checks, inner), String::new()));
-        }
-        if rows.is_empty() {
-            rows.push((faint("nothing going on"), String::new()));
-        }
-        // Laid out on a rail: yellow when it needs you, orange at work.
-        let rail_c = if !needs.is_empty() {
-            C_YELLOW
-        } else if t.live {
-            C_ORANGE
-        } else {
-            C_FAINT
-        };
-        if self.ti > 0 {
-            self.bare();
-        }
-        let from_row = self.lines.len();
-        let room = self.cw.saturating_sub(right.width() + 3);
-        let l = self
-            .sp(1)
-            .and(text(&headline).truncate(room.max(8), &faint("…")));
-        self.add(&r, Color::Default, l, right);
-        for (row, rr) in rows {
-            let l = self.sp(1).and(paint(rail_c, "┃").and_raw(" ")).and(row);
-            self.add(&rr, Color::Default, l, Txt::new());
-        }
-        self.own(&r, from_row);
-    }
-
-    // ---- Trail ----
-
-    /// The turn on a time axis: what you said, a line a step (quick ones
-    /// of a kind merged) with a bar as long as it took against the
-    /// slowest, how it ended, and where its time went.
-    fn trail(&mut self) {
-        let t = self.t;
-        let r = self.r.clone();
-        if self.ti > 0 {
-            self.bare();
-        }
-        let when = |d: &Self, at: Ms| {
-            if at != 0 {
-                clock(at, d.o.offset(at))
-            } else {
-                "     ".to_string()
-            }
-        };
-        // Who started it.
-        let mut l = self.sp(1).and(dim(&when(self, t.start))).and_raw("  ");
-        if Self::yours(t) {
-            l.push(paint(C_BLUE.bold(), "You"));
-            l.push(blanks(8));
-        } else {
-            l.push(faint("◇"));
-            l.push(blanks(10));
-        }
-        let room = self.cw.saturating_sub(l.width() + 3);
-        l.push(text(&Self::asked_line(t)).truncate(room.max(8), &faint("…")));
-        self.add(&r, Color::Default, l, Txt::new());
-        // Its steps, and the commands you ran in it where they started.
-        let mut legs = self.legs();
-        for (r, run) in self.turn_runs() {
-            let running = run.running();
-            let g = Leg {
-                ids: Vec::new(),
-                verb: "you ran",
-                names: vec![one_line(first_line(run.command.trim()))],
-                start: run.start,
-                end: if running { run.start } else { run.end },
-                running,
-                waiting: false,
-                bad: !running && !run.stopped && !run.lost && run.exit != Some(0),
-                run: Some(r),
-            };
-            let at = legs
-                .iter()
-                .position(|x| x.start > g.start)
-                .unwrap_or(legs.len());
-            legs.insert(at, g);
-        }
-        let now = self.o.now;
-        let len = |g: &Leg| {
-            let d = if g.running || g.waiting {
-                now - g.start
-            } else {
-                g.end - g.start
-            };
-            d.max(0)
-        };
-        let longest = legs.iter().map(len).max().unwrap_or(0);
-        let total = (if t.live { now } else { t.end }) - t.start;
-        let slow = legs
-            .iter()
-            .enumerate()
-            .filter(|(_, g)| g.run.is_none())
-            .max_by_key(|&(_, g)| len(g))
-            .filter(|&(_, g)| len(g) >= QUICK && len(g) * 10 >= total.max(1) * 3)
-            .map(|(i, _)| i);
-        let bw = if self.cw >= 110 {
-            16
-        } else if self.cw >= 90 {
-            12
-        } else {
-            8
-        };
-        let ending = self.trail_end();
-        for (i, g) in legs.iter().enumerate() {
-            let tree = if i + 1 == legs.len() && ending.is_empty() {
-                "└ "
-            } else {
-                "├ "
-            };
-            let gl = len(g);
-            let colour = if g.running {
-                C_ORANGE
-            } else if g.bad {
-                C_RED
-            } else if Some(i) == slow {
-                C_YELLOW
-            } else {
-                C_DIM
-            };
-            let b = if longest > 0 {
-                bar(gl as f64 / longest as f64, bw)
-            } else {
-                bar(0.0, bw)
-            };
-            let bwid = width(&b);
-            let d = if g.running {
-                self.since(g.start)
-            } else {
-                took(gl)
-            };
-            let mut right = paint(colour, &b)
-                .and(blanks(bw.saturating_sub(bwid)))
-                .and(dim(&format!(" {d:>7}")));
-            right.push(if Some(i) == slow {
-                paint(C_YELLOW, "   ← slow")
-            } else {
-                blanks(9)
-            });
-            right.push_str("  ", Style::default());
-            let lead = self
-                .sp(1)
-                .and(dim(&when(self, g.start)))
-                .and_raw("  ")
-                .and(faint(tree));
-            let o: &Options = self.o;
-            let run = g
-                .run
-                .as_ref()
-                .and_then(|r| o.shells.get(r).map(|x| (r, &**x)));
-            let (sr, part) = match run {
-                Some((r, x)) => (r.clone(), x.label()),
-                None => {
-                    let st = self.s.step(g.ids[0]);
-                    (self.step_ref(st), self.s.running_label(g.ids[0]))
-                }
-            };
-            let mut tail = Txt::new();
-            if g.bad {
-                tail.push(paint(C_RED, " ✗"));
-            }
-            if let Some((_, x)) = run
-                && (x.stopped || x.lost)
-            {
-                tail.push(paint(C_YELLOW, &format!(" ✕ {}", x.outcome())));
-            }
-            if g.waiting {
-                tail.push(paint(C_YELLOW, " · waiting on you"));
-            }
-            if g.running && !part.is_empty() {
-                tail.push(faint(" · "));
-                tail.push(paint(C_SUB, &part));
-            }
-            let room = self
-                .cw
-                .saturating_sub(lead.width() + right.width() + tail.width() + 3);
-            let what = self
-                .leg_words(g)
-                .truncate(room.max(8), &faint("…"))
-                .and(tail);
-            let picked = self.o.selected == sr;
-            let from = self.lines.len();
-            self.add(&sr, Color::Default, lead.and(what), right);
-            match run {
-                // Opened (enter), its box under it.
-                Some((r, x)) => {
-                    self.box_under(r, x);
-                    self.own(r, from);
-                }
-                // Picked, a running chain's keys under it.
-                None if picked && g.running => self.chain_keys(g.ids[0], 12),
-                None => {}
-            }
-        }
-        // How it ended.
-        if !ending.is_empty() {
-            let end_at = if t.live { now } else { t.end };
-            let lead = self
-                .sp(1)
-                .and(dim(&when(self, end_at)))
-                .and_raw("  ")
-                .and(faint("└ "));
-            let room = self.cw.saturating_sub(lead.width() + 3);
-            let l = lead.and(ending.truncate(room.max(8), &faint("…")));
-            self.add("", Color::Default, l, Txt::new());
-        }
-        // Where the time went.
-        if t.start != 0 && total > 0 {
-            let (tools, waiting) = self.tool_time(&legs);
-            let thinking = (total - tools - waiting).max(0);
-            let l = self.sp(1).and(blanks(7)).and(dim(&format!(
-                "turn {} · thinking {} · tools {} · waiting on you {}",
-                took(total),
-                took(thinking),
-                took(tools),
-                took(waiting)
-            )));
-            self.add("", Color::Default, l, Txt::new());
-        }
-    }
-
-    /// How the turn ended, for the trail's last line: its reply's first
-    /// sentence, still working, stopped, or failed.
-    fn trail_end(&mut self) -> Txt {
-        let t = self.t;
-        if t.live {
-            let mut l = paint(C_ORANGE, "✱ working");
-            if t.start != 0 {
-                let s = self.since(t.start);
-                l.push(dim(&format!(" · {s}")));
-            }
-            return l;
-        }
-        if t.stopped {
-            return dim("⏹ stopped");
-        }
-        if !t.err.is_empty() {
-            return paint(C_RED, &format!("✗ {}", one_line(&t.err)));
-        }
-        match t.answer() {
-            Some(a) => {
-                let first = first_sentence(decisions_in(a).0);
-                let first = if first.is_empty() {
-                    first_sentence(a)
-                } else {
-                    first
-                };
-                sub(&format!("{:<9}", "reply")).and(text(&format!("\"{first}\"")))
-            }
-            None => Txt::new(),
-        }
-    }
-
-    /// The turn's steps as the trail's rows: a row a step, steps of a
-    /// kind quicker than QUICK side by side as one.
-    fn legs(&mut self) -> Vec<Leg> {
-        let mut out: Vec<Leg> = Vec::new();
-        let t = self.t;
-        for it in &t.items {
-            let Item::Step(id) = it else { continue };
-            let st = self.s.step(*id);
-            // A tool loaded before its call took time too: Trail keeps it.
-            if always_hidden(st) {
-                continue;
-            }
-            let (verb, name) = self.leg_of(*id);
-            let running = st.status == Status::Running;
-            let waiting = st.status == Status::Waiting;
-            let bad = !running && !waiting && self.bad(*id);
-            let end = if st.end != 0 { st.end } else { st.start };
-            let quick = !running && !waiting && !bad && end - st.start < QUICK && verb != "shell";
-            if quick
-                && let Some(g) = out.last_mut()
-                && g.verb == verb
-                && !g.running
-                && !g.waiting
-                && !g.bad
-                && g.end - g.start < QUICK
-                && g.verb != "shell"
-            {
-                g.ids.push(*id);
-                if !g.names.contains(&name) {
-                    g.names.push(name);
-                }
-                g.end = g.end.max(end);
-                continue;
-            }
-            out.push(Leg {
-                ids: vec![*id],
-                verb,
-                names: vec![name],
-                start: st.start,
-                end,
-                running,
-                waiting,
-                bad,
-                run: None,
-            });
+            .and(right);
+        let mut out = vec![(head, l.r.clone())];
+        if !l.news.is_empty() {
+            let w = faint(&l.news).truncate(inner.saturating_sub(2), &faint("…"));
+            out.push((blanks(2).and(w), l.r.clone()));
         }
         out
-    }
-
-    /// A step's kind on the trail and what it was on: read and a file,
-    /// search and its pattern, a shell step's command.
-    fn leg_of(&mut self, id: StepId) -> (&'static str, String) {
-        let st = self.s.step(id);
-        let info = self.info(id);
-        let x = &info.call.input;
-        let base = |p: &str| base_after_slash(p).to_string();
-        // rush's own tools by what they did, to which agent.
-        if let Some(w) = crate::model::runs::rush_words(self.s, st, st.status == Status::Running) {
-            return ("agent", w);
-        }
-        match st.kind {
-            Kind::Read => ("read", base(&x.path)),
-            Kind::Search | Kind::Glob => {
-                let p = if x.pattern.is_empty() {
-                    &x.query
-                } else {
-                    &x.pattern
-                };
-                ("search", format!("\"{}\"", one_line(p)))
-            }
-            Kind::Edit | Kind::Write | Kind::Notebook | Kind::Delete | Kind::Move => {
-                ("edit", base(&x.path))
-            }
-            // A shell step by what the agent said it does, else its command.
-            Kind::Shell if !x.description.trim().is_empty() => ("shell", one_line(&x.description)),
-            Kind::Shell => ("shell", one_line(first_line(no_cd(&x.command)))),
-            Kind::Fetch | Kind::WebSearch => {
-                let w = if x.url.is_empty() { &x.query } else { &x.url };
-                ("web", one_line(w))
-            }
-            Kind::Subagent => {
-                let w = if x.description.is_empty() {
-                    &x.prompt
-                } else {
-                    &x.description
-                };
-                ("agent", one_line(first_line(w)))
-            }
-            Kind::Question | Kind::PlanMode => ("ask", self.label(id).plain()),
-            _ => ("tool", st.tool.to_string()),
-        }
-    }
-
-    /// A trail row's words: a shell step's command as it is; the rest a
-    /// verb and what it was on, merged steps counted or named.
-    fn leg_words(&self, g: &Leg) -> Txt {
-        if g.verb == "shell" {
-            return text(&g.names[0]);
-        }
-        let n = if g.run.is_some() { 1 } else { g.ids.len() };
-        let what = if n == 1 {
-            g.names[0].clone()
-        } else {
-            match g.verb {
-                "read" | "edit" => {
-                    let joined = g.names.join(", ");
-                    if width(&joined) <= 32 {
-                        joined
-                    } else {
-                        plural(g.names.len(), "file")
-                    }
-                }
-                "search" => plural(n, "search").replace("searchs", "searches"),
-                "web" => plural(n, "lookup"),
-                _ => plural(n, "call"),
-            }
-        };
-        sub(&format!("{:<9}", g.verb)).and(text(&what))
-    }
-
-    /// The turn's time in its tools (as they ran, overlaps once) and
-    /// waiting on you (questions asked, permissions waiting).
-    fn tool_time(&self, legs: &[Leg]) -> (Ms, Ms) {
-        let now = self.o.now;
-        let mut spans: Vec<(Ms, Ms)> = Vec::new();
-        let mut waiting = 0;
-        for g in legs {
-            for &id in &g.ids {
-                let st = self.s.step(id);
-                let end = match st.status {
-                    Status::Running | Status::Waiting => now,
-                    _ if st.end != 0 => st.end,
-                    _ => st.start,
-                };
-                if st.start == 0 || end <= st.start {
-                    continue;
-                }
-                if st.status == Status::Waiting || st.kind == Kind::Question {
-                    waiting += end - st.start;
-                } else {
-                    spans.push((st.start, end));
-                }
-            }
-        }
-        spans.sort_unstable();
-        let mut tools = 0;
-        let mut cur: Option<(Ms, Ms)> = None;
-        for (a, b) in spans {
-            match cur {
-                Some((ca, cb)) if a <= cb => cur = Some((ca, cb.max(b))),
-                Some((ca, cb)) => {
-                    tools += cb - ca;
-                    cur = Some((a, b));
-                }
-                None => cur = Some((a, b)),
-            }
-        }
-        if let Some((a, b)) = cur {
-            tools += b - a;
-        }
-        (tools, waiting)
     }
 }

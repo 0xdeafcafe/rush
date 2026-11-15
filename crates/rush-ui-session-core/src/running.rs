@@ -290,7 +290,13 @@ pub fn running_preview(
                     facts.push(format!("{} effort", st.effort));
                 }
             } else {
-                doing.spans.push(dim("starting…"));
+                match c.r.hosted_doing(&sa.id) {
+                    Some(d) if !d.is_empty() => {
+                        doing.spans.push(sp(d, TEXT));
+                    }
+                    Some(_) => doing.spans.push(dim("working…")),
+                    None => doing.spans.push(dim("starting…")),
+                }
             }
             let right = line([dim(facts.join(" · ")), plain("  ")]);
             let kind = sub_kind(c, sa);

@@ -29,6 +29,9 @@ use rush_core::adapter::Profile;
 
 use crate::model::Model;
 
+/// What asking a session's rush to restart under it and its agents asked.
+pub use rush_host::upgrade::Rehost;
+
 /// One thing asked of a session's host (Go's op).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Op {
@@ -452,6 +455,11 @@ pub struct Spawned {
     /// Its agent's name: "Codex", "Claude Code".
     pub name: String,
     pub prompt: String,
+    /// The rush session's name: its first words until a model titles it,
+    /// and what its host's agent does now (Info.name, Info.detail).
+    /// Rust-only.
+    pub title: String,
+    pub detail: String,
     pub model: String,
     pub cwd: String,
     /// The session its agent writes, and when it began (what the
@@ -684,6 +692,13 @@ pub trait Hosts: Send + Sync {
     /// starts at once, else it starts with the next message. One not
     /// running says so (restart's run, restartClaude). Waits.
     fn restart(&self, _id: &str, _name: &str, _text: &str) -> Result<(), String> {
+        Err(NOT_YET.into())
+    }
+    /// Asks rush session id's host and those of every agent it spawned,
+    /// theirs too, to move onto the installed rush in place, each once
+    /// it's between turns, their agents running on
+    /// (rush_host::upgrade::ask_tree). Rust-only. Waits.
+    fn rehost(&self, _id: &str) -> Result<Rehost, String> {
         Err(NOT_YET.into())
     }
     /// Has rush session id carry on from conversation session_id, a copy
@@ -956,6 +971,10 @@ pub struct Fake {
     pub stopped: Mutex<Vec<String>>,
     /// Restarts, as (id, text).
     pub restarted: Mutex<Vec<(String, String)>>,
+    /// Sessions whose rush was asked to restart under them, by id; and
+    /// what each such ask says it did (just the session, unset).
+    pub rehosted: Mutex<Vec<String>>,
+    pub rehost_as: Mutex<Option<Rehost>>,
     /// Rewinds, as (id, session id, resume, left); and whether a rewind
     /// finds its host from an older rush.
     pub rewound: Mutex<Vec<(String, String, bool, Branch)>>,
@@ -1229,6 +1248,17 @@ impl Hosts for Arc<Fake> {
             .unwrap()
             .push((id.to_string(), text.to_string()));
         Ok(())
+    }
+    fn rehost(&self, id: &str) -> Result<Rehost, String> {
+        if let Some(e) = self.failed() {
+            return Err(e);
+        }
+        self.rehosted.lock().unwrap().push(id.to_string());
+        let r = self.rehost_as.lock().unwrap().clone();
+        Ok(r.unwrap_or(Rehost {
+            asked: vec![id.to_string()],
+            ..Rehost::default()
+        }))
     }
     fn rewind(
         &self,

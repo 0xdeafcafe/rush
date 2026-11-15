@@ -1,7 +1,7 @@
 //! The conversation's views (presets.rs): the Conversation tab naming the
 //! view, the dropdown under it that picks one (by key and by click), the
-//! config remembering the one picked for every session, and enter on a
-//! catch-up card opening its turn in Normal.
+//! config remembering the one picked for every session, and enter on
+//! what you said in Orchestrator opening its turn in Normal.
 
 use rush_convo::Preset;
 use rush_core::agent::State;
@@ -73,7 +73,7 @@ fn menu_rows(s: &[String]) -> Vec<String> {
         .iter()
         .position(|l| l.contains("Normal") && l.contains("everything, as usual"))
         .unwrap_or_else(|| panic!("no dropdown:\n{}", s.join("\n")));
-    s[from..=from + 6]
+    s[from..=from + Preset::ALL.len()]
         .iter()
         .map(|l| l.trim_end().to_string())
         .collect()
@@ -113,7 +113,7 @@ fn the_tab_bar_in_normal() {
     );
     assert!(
         !s.iter()
-            .any(|l| l.contains("Catch-up") || l.contains("alt+s")),
+            .any(|l| l.contains("Orchestrator") || l.contains("alt+s")),
         "{}",
         s.join("\n")
     );
@@ -145,7 +145,7 @@ fn the_conversation_has_the_row_back() {
     assert_eq!(v.top_off, 0);
 }
 
-/// ⌥s opens the dropdown under the tab: the five views, what each is for,
+/// ⌥s opens the dropdown under the tab: the four views, what each is for,
 /// the one showing marked; ↓ and enter show the next, which the config
 /// keeps for every session, and the dropdown closes.
 #[test]
@@ -165,7 +165,10 @@ fn the_key_opens_the_dropdown_and_picks() {
     for (r, p) in rows.iter().zip(Preset::ALL) {
         assert!(r.contains(p.title()) && r.contains(p.about()), "{r}");
     }
-    assert!(rows[6].contains(super::presets::MENU_HOW), "{rows:?}");
+    assert!(
+        rows[Preset::ALL.len()].contains(super::presets::MENU_HOW),
+        "{rows:?}"
+    );
     // Under the tab, a cell in.
     assert_eq!(col(&s[at], "▸"), col(&s[i], "Conversation"));
     press(&mut m, "down");
@@ -186,15 +189,15 @@ fn the_key_opens_the_dropdown_and_picks() {
         "drawn so"
     );
     // Opened again, Chat is the one marked and picked; ↑ goes round the
-    // top to Live.
+    // top to Orchestrator.
     press(&mut m, "alt+s");
     let (_, s) = tab_row(&mut m);
     assert!(menu_rows(&s)[1].contains("▸ ● Chat"), "{:?}", menu_rows(&s));
     press(&mut m, "up");
     press(&mut m, "up");
     press(&mut m, "enter");
-    assert_eq!(super::presets::current(&m), Preset::Live);
-    assert_eq!(kept(&m), "live");
+    assert_eq!(super::presets::current(&m), Preset::Orchestrator);
+    assert_eq!(kept(&m), "orchestrator");
     press(&mut m, "alt+s");
     press(&mut m, "down");
     press(&mut m, "enter");
@@ -233,16 +236,15 @@ fn the_dropdown_says_its_keys() {
     );
 }
 
-/// Enter on the catch-up card opens the first turn it covers in Normal,
-/// picked; with no look before, the card covers the last turns.
+/// Enter on what you said in Orchestrator opens its turn in Normal,
+/// picked; the board says the session has started no agents.
 #[test]
-fn enter_on_a_card_opens_its_turn_in_normal() {
+fn enter_on_an_exchange_opens_its_turn_in_normal() {
     let mut m = talked(6);
-    super::presets::set(&mut m, Preset::CatchUp);
+    super::presets::set(&mut m, Preset::Orchestrator);
     let f = screen(&mut m).join("\n");
-    assert!(f.contains("The last 4 turns"), "{f}");
-    assert!(f.contains("Done") && f.contains("answer 5"), "{f}");
-    assert!(f.contains("question 1"), "a turn before the card: {f}");
+    assert!(f.contains("none started yet"), "{f}");
+    assert!(f.contains("answer 5"), "{f}");
     m.session.as_mut().unwrap().sel = "t3".into();
     let _ = screen(&mut m);
     press(&mut m, "enter");
@@ -331,8 +333,8 @@ fn the_tab_from_another_view_shows_the_conversation() {
 #[test]
 fn the_dropdown_marks_the_suggested_view() {
     use crate::style::ORANGE;
-    let why = "long turns, many steps".to_string();
-    let rows = super::presets::menu_rows(Preset::Normal, Some((Preset::Trail, why)), 0, 120);
+    let why = "3 agents at work".to_string();
+    let rows = super::presets::menu_rows(Preset::Normal, Some((Preset::Orchestrator, why)), 0, 120);
     let plain: Vec<String> = rows
         .iter()
         .map(|l| l.plain().trim_end().to_string())
@@ -340,18 +342,16 @@ fn the_dropdown_marks_the_suggested_view() {
     assert_eq!(
         plain,
         [
-            " ▸ ● Normal     everything, as usual",
-            "     Chat       what did we say?",
-            "     Code       what did it change?",
-            "     Catch-up   what happened while I was away?",
-            "     Trail      where did the time go?  ✦ long turns, many steps",
-            "     Live       what is it doing?",
+            " ▸ ● Normal        everything, as usual",
+            "     Chat          what did we say?",
+            "     Code          what did it change?",
+            "     Orchestrator  who's doing what?  ✦ 3 agents at work",
             "   ↑↓ · enter shows it · esc closes",
         ]
     );
     assert!(rows.iter().all(|l| l.width() == rows[0].width()));
     assert!(
-        rows[4]
+        rows[3]
             .spans
             .iter()
             .any(|s| s.text == "✦" && s.style.fg == ORANGE)

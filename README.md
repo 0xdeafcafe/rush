@@ -77,15 +77,14 @@ Agents in rush get more than a stream of markdown to talk to you with.
 - **Drawings.** Diagrams, layouts and trees in a frame of their own, full width, never wrapped, copyable whole.
 - **Needs you.** The bit of a finished turn that's actually waiting on you gets a section of its own, so you don't have to dig the question out of four paragraphs.
 
-## Five ways to read a conversation
+## Four ways to read a conversation
 
-One conversation, five questions. `alt+s` flips between them.
+One conversation, four questions. `alt+s` flips between them.
 
 - **Normal**: everything. Steps fold away, code's highlighted, a failed step shows the line that says why.
 - **Chat**: what did we say? Your messages and the agent's words in bubbles, no steps.
 - **Code**: what did it change? Each turn's diffs, and every test, build and lint it ran with its result (and "→ passed next run" when it was fixed later).
-- **Catch-up**: what happened while I was away? One card for everything since you last looked: what needs you, what's done, what changed, what's still going.
-- **Trail**: where did the time go? Every step on a time axis, the slow one marked, and the turn split into thinking, tools and waiting on you.
+- **Orchestrator**: who's doing what? For a session running other agents: what you and it said, and a board of every agent it started, at work first, each with the last word on it.
 
 Around them sit **Changes** (every file the session touched, which turn wrote each hunk, your review marks), **Subagents** (every run and workflow, with its own conversation a click away), the **queue** (messages sent mid-turn, to edit, reorder, merge or send now) and **Memory**.
 

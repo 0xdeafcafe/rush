@@ -1605,11 +1605,29 @@ impl<'a> Drawer<'a> {
             label = dim("◌");
         }
         let mut ask = ask.to_string();
+        let mut how = how;
         if wake {
+            // ⇉ what it was, then how it came out and how long it ran,
+            // as a task's row says it (Rust-only).
             style = text;
-            label = dim(noun);
-            if !ask.is_empty() {
-                ask = format!("\"{ask}\"");
+            label = paint(C_SUB, noun);
+            ask = woke_name(&ask);
+            let ran = self
+                .s
+                .jobs()
+                .iter()
+                .find(|j| !t.woke_call.is_empty() && j.tool_use_id == t.woke_call)
+                .filter(|j| j.start != 0 && j.end > j.start)
+                .map(|j| dur(j.end - j.start));
+            if let Some(d) = ran {
+                how = if how.width() == 0 {
+                    dim(&d)
+                } else {
+                    how.and(dim(&format!(" · {d}")))
+                };
+            }
+            if how.width() > 0 {
+                how = Txt::raw("  ").and(how);
             }
         }
         let said = rush_ask(t);
@@ -1633,7 +1651,15 @@ impl<'a> Drawer<'a> {
         // A background task's notice links back to the call that started
         // the task: enter or a click on it goes to that step (Rust-only).
         let linked = !t.woke_call.is_empty() && self.s.made_call(&t.woke_call);
-        if linked && let Some(last) = rows.last_mut() {
+        let right = if linked && wake {
+            faint("↑ its step")
+        } else {
+            Txt::new()
+        };
+        if linked
+            && !wake
+            && let Some(last) = rows.last_mut()
+        {
             last.push(faint("  ↑ its step"));
         }
         let r = if linked {
@@ -1646,9 +1672,9 @@ impl<'a> Drawer<'a> {
                 let l = self
                     .sp(GUTTER - 1)
                     .and(label.clone())
-                    .and_raw("  ")
+                    .and_raw(if wake { " " } else { "  " })
                     .and(row);
-                self.add(&r, Color::Default, l, Txt::new());
+                self.add(&r, Color::Default, l, right.clone());
             } else {
                 let l = self.sp(GUTTER - 1 + lw + 2).and(row);
                 self.add(&r, Color::Default, l, Txt::new());
@@ -4262,7 +4288,7 @@ pub(crate) fn tool_load(st: &Step) -> bool {
     &*st.tool == "ToolSearch" && st.status != Status::Failed
 }
 
-/// Whether a step is left out of every view, Trail's too.
+/// Whether a step is left out of every view.
 pub(crate) fn always_hidden(st: &Step) -> bool {
     st.kind == Kind::Todo
         || matches!(
@@ -5265,11 +5291,13 @@ pub fn woke_ref(r: &str) -> String {
 
 fn woke(t: &Turn) -> (&'static str, Txt, bool) {
     let (kind, status) = t.from.split_once(" · ").unwrap_or((&t.from, ""));
+    // Its kind as the glyph its rows have elsewhere (Rust-only: Go said
+    // "Background agent" and the like in words).
     let noun = match kind {
-        "background shell" => "Background command",
-        "background subagent" => "Background agent",
-        "background workflow" => "Background workflow",
-        "monitor" => "Monitor",
+        "background shell" => "$",
+        "background subagent" => "⇉",
+        "background workflow" => "◇",
+        "monitor" => "◉",
         _ => return ("", Txt::new(), false),
     };
     if t.cause.is_empty() {
@@ -5277,11 +5305,22 @@ fn woke(t: &Turn) -> (&'static str, Txt, bool) {
     }
     let how = match status {
         "" => Txt::new(),
-        "completed" => Txt::raw(" ").and(paint(C_GREEN, status)),
-        "failed" => Txt::raw(" ").and(paint(C_RED, status)),
-        _ => Txt::raw(" ").and(dim(status)),
+        "completed" => paint(C_GREEN, "✓ done"),
+        "failed" => paint(C_RED, "✗ failed"),
+        "stopped" | "killed" => dim("✕ stopped"),
+        _ => dim(status),
     };
     (noun, how, true)
+}
+
+/// What a task's notice names, without its quotes and the words around
+/// them: `Agent "Audio effects" finished` is Audio effects.
+fn woke_name(ask: &str) -> String {
+    let a = ask.trim();
+    match (a.find('"'), a.rfind('"')) {
+        (Some(i), Some(j)) if j > i + 1 => a[i + 1..j].to_string(),
+        _ => a.to_string(),
+    }
 }
 
 /// rush's show tool.

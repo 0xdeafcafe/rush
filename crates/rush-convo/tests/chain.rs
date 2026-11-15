@@ -113,8 +113,8 @@ fn normal_shows_the_place_the_times_and_the_keys() {
     );
 }
 
-/// Code's check line, Trail's step line and Chat's bubble foot say
-/// which command runs; Code shows the keys, Trail once it's picked.
+/// Code's check line and Chat's bubble foot say which command runs; Code
+/// shows the keys.
 #[test]
 fn other_views_say_it_too() {
     let s = running();
@@ -122,11 +122,6 @@ fn other_views_say_it_too() {
     let row = code.lines().find(|l| l.contains("running")).expect(&code);
     assert!(row.contains("2/3 cargo test"), "{code}");
     assert!(code.contains("k skip cargo test"), "{code}");
-    let trail = draw(&s, Preset::Trail, "");
-    assert!(trail.contains("2/3 cargo test"), "{trail}");
-    assert!(!trail.contains("k skip"), "{trail}");
-    let trail = draw(&s, Preset::Trail, "t1:s:b1");
-    assert!(trail.contains("k skip cargo test"), "{trail}");
     let chat = draw(&s, Preset::Chat, "");
     assert!(chat.contains("✱ running 2/3 cargo test"), "{chat}");
 }

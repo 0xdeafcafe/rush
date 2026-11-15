@@ -11,7 +11,6 @@ pub mod decisions;
 pub mod emeritus;
 pub mod handles;
 pub mod linkinfo;
-pub mod live;
 pub mod model;
 pub mod peers;
 pub mod pictures;

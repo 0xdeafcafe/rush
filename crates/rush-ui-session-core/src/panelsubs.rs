@@ -311,7 +311,11 @@ impl Panel<'_, '_> {
     fn doing(&self, lead: &str, sa: &Subagent) -> Line {
         let room = (self.w as isize - width(lead) as isize - 2).max(4) as usize;
         let text = match self.runs.stats.get(&sa.id) {
-            None => line([sp("starting…", DIM)]),
+            None => match self.runs.hosted_doing(&sa.id) {
+                Some(d) if !d.is_empty() => line([sp("› ", ORANGE), sp(d, TEXT)]),
+                Some(_) => line([sp("working…", DIM)]),
+                None => line([sp("starting…", DIM)]),
+            },
             Some(t) if !t.doing.is_empty() => line([sp("› ", ORANGE), sp(t.doing.clone(), TEXT)]),
             Some(t) if !t.did.is_empty() => line([sp(format!("‹ {}", t.did[0]), DIM)]),
             Some(t) if !t.last_words.is_empty() => line([sp(format!("‹ {}", t.last_words), DIM)]),

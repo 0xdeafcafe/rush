@@ -4,13 +4,9 @@
 // Every test runs in a throwaway home (rush-testenv).
 rush_testenv::sandboxed!();
 
-use std::sync::Arc;
-
-use rush_convo::live::{
-    Cursor, DELTA_CHARS, EVERY, SCHEMA, Story, delta, due, prompt, running, step_line,
-};
 use rush_convo::render::{check_names, plain};
 use rush_convo::{Options, Preset, Renderer, Session};
+use rush_core::event::{Event, TaskKind, TaskStarted};
 use serde_json::json;
 
 mod common;
@@ -254,7 +250,7 @@ fn snapshot(name: &str, got: &str) -> bool {
 fn every_view_at_every_width() {
     let s = session();
     let mut same = true;
-    for p in [Preset::Chat, Preset::Code, Preset::CatchUp, Preset::Trail] {
+    for p in [Preset::Chat, Preset::Code] {
         for w in [80, 120, 200] {
             let got = plain(&Renderer::new().render(&s, &opts(p, w)));
             same &= snapshot(&format!("views_{}_{w}", p.name()), &got);
@@ -406,234 +402,6 @@ fn code_shows_each_turns_diffs_and_checks() {
     );
 }
 
-#[test]
-fn catch_up_is_one_card_since_you_looked() {
-    let s = session();
-    // Never looked: the last turns.
-    let got = draw(&s, Preset::CatchUp, &[]);
-    assert!(got.contains("The last 2 turns"), "{got}");
-    let card = |got: &str, w: &str| {
-        got.lines()
-            .filter(|l| l.contains(w))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    let needs = card(&got, "? needs you");
-    assert!(
-        needs.contains("Read from the end") && needs.contains("[answer]"),
-        "{got}"
-    );
-    assert!(needs.starts_with("t2 "), "{needs}");
-    // Needs you comes first.
-    let rows: Vec<&str> = got.lines().collect();
-    let row_of = |w: &str| rows.iter().position(|l| l.contains(w)).unwrap();
-    assert!(row_of("? needs you") < row_of("Done"), "{got}");
-    assert!(card(&got, "Done").contains("Found it:"), "{got}");
-    assert!(got.contains("f3760931."), "{got}");
-    let changed = card(&got, "Changed");
-    assert!(
-        changed.contains("2 files") && changed.contains("+9") && changed.contains("−5"),
-        "{changed}"
-    );
-    let checks = card(&got, "Checks");
-    assert!(checks.contains("✓ tests 108"), "{checks}");
-    assert!(checks.contains("✗ clippy"), "{checks}");
-    assert!(
-        card(&got, "Said to you").contains("One decision for you."),
-        "{got}"
-    );
-    assert!(got.contains("$1.51"), "{got}");
-    // Looked after the first turn: only the second is in the card, the
-    // first a row before it.
-    let mut o = opts(Preset::CatchUp, 120);
-    o.since = at(1100);
-    let got = plain(&Renderer::new().render(&s, &o));
-    assert!(
-        got.contains("Since you last looked · 11m 40s ago · 1 turn"),
-        "{got}"
-    );
-    assert!(
-        got.lines()
-            .any(|l| l.starts_with("t1 ") && l.contains("turn 1")),
-        "{got}"
-    );
-    assert!(!card(&got, "Changed").contains("files"), "{got}");
-    // Nothing since: says so.
-    o.since = at(1700);
-    let got = plain(&Renderer::new().render(&s, &o));
-    assert!(got.contains("Nothing new since you last looked"), "{got}");
-    // An answered decision doesn't need you.
-    let mut s = s;
-    s.feed(sent("1a"), at(1750));
-    s.feed(done(0.01), at(1751));
-    let got = draw(&s, Preset::CatchUp, &[]);
-    assert!(!got.contains("needs you"), "{got}");
-}
-
-#[test]
-fn live_is_a_card_the_watcher_lays_out() {
-    let s = session();
-    // No story yet: what you asked heads the card, and what's sure is
-    // drawn all the same; the turn before is a row.
-    let got = draw(&s, Preset::Live, &[]);
-    assert!(
-        got.contains("? needs you") && got.contains("Read from the end"),
-        "{got}"
-    );
-    assert!(
-        got.lines()
-            .any(|l| l.starts_with("t1 ") && l.contains("turn 1")),
-        "{got}"
-    );
-    // The watcher's story, each kind of block as it lays it out.
-    let mut st = Story::default();
-    st.apply(
-        r#"{"headline":"Fixing the decision card's overlap","progress":[2,3],"blocks":[
-            {"id":"p","kind":"steps","items":[{"text":"find","done":true},{"text":"fix","done":true},{"text":"merge","tone":"busy"}]},
-            {"id":"c","kind":"callout","text":"Waiting on which read order to ship."},
-            {"id":"k","kind":"kv","items":[{"text":"branch","meta":"main"}]},
-            {"id":"t","kind":"timeline","items":[{"time":"22:14","text":"found the cause","meta":"dock.rs"}]},
-            {"id":"b","kind":"bars","items":[{"text":"dock.rs","value":6,"meta":"+6"},{"text":"question.rs","value":3,"meta":"+3"}]},
-            {"id":"x","kind":"text","text":"Long options wrapped under the side panel."}]}"#,
-    )
-    .unwrap();
-    st.note = "the watcher is a minute behind".into();
-    let mut o = opts(Preset::Live, 120);
-    o.story = Some(Arc::new(st));
-    let got = plain(&Renderer::new().render(&s, &o));
-    for want in [
-        "Fixing the decision card's overlap",
-        "2/3  66%",
-        "✓ find ─ ✓ fix ─ ◉ merge",
-        "! Waiting on which read order to ship.",
-        "22:14 ● found the cause · dock.rs",
-        "Long options wrapped under the side panel.",
-        "the watcher is a minute behind",
-        "? needs you",
-    ] {
-        assert!(got.contains(want), "{want}:\n{got}");
-    }
-    let row = |w: &str| got.lines().find(|l| l.contains(w)).unwrap_or("");
-    assert!(row("branch").contains("main"), "{got}");
-    assert!(row("dock.rs  ").contains("+6"), "{got}");
-    // The story's own line for what's running goes on the Now row; with
-    // nothing running there's no Now row.
-    assert!(!got.contains("Now "), "{got}");
-}
-
-#[test]
-fn the_watcher_is_told_only_whats_new() {
-    let s = session();
-    let mut c = Cursor::default();
-    assert!(!c.started());
-    let first = delta(&s, &mut c, at(1800)).unwrap();
-    for want in [
-        "Turn 1: the user asked: the decision card still overlaps on long options",
-        "- read /work/rush/src/dock.rs",
-        "- edited /work/rush/src/dock.rs",
-        "Turn 2 answered: Merged to main as f3760931.",
-    ] {
-        assert!(first.contains(want), "{want}:\n{first}");
-    }
-    assert!(first.len() <= DELTA_CHARS);
-    assert!(c.started());
-    assert_eq!(
-        delta(&s, &mut c, at(1800)),
-        None,
-        "nothing new, nothing sent"
-    );
-    let mut s = s;
-    s.feed(sent("1a"), at(1850));
-    s.feed(say("Going with now."), at(1851));
-    s.feed(done(0.01), at(1852));
-    let next = delta(&s, &mut c, at(1900)).unwrap();
-    assert!(next.starts_with("Turn 3: the user asked: 1a"), "{next}");
-    assert!(next.contains("Turn 3 answered: Going with now."), "{next}");
-    assert!(!next.contains("dock.rs"), "told again: {next}");
-}
-
-#[test]
-fn the_watcher_is_asked_when_its_due_and_shown_the_dashboard() {
-    let mut s = session();
-    let mut c = Cursor::default();
-    // The first look asks at once.
-    assert!(due(&s, &c, 0, at(1800)));
-    delta(&s, &mut c, at(1800)).unwrap();
-    assert!(!due(&s, &c, at(1800), at(1900)), "nothing ended since");
-    // A turn running: asked every EVERY at most, its step the one running.
-    s.feed(sent("now ship it"), at(1900));
-    assert!(due(&s, &c, at(1800), at(1900)), "a turn it hasn't heard of");
-    delta(&s, &mut c, at(1901)).unwrap();
-    s.feed(
-        tool_use("b1", "Bash", json!({"command": "cargo build"})),
-        at(1902),
-    );
-    let id = running(&s).expect("cargo build runs");
-    assert!(step_line(&s, id, at(1903)).contains("cargo build"));
-    assert!(!due(&s, &c, at(1901), at(1901) + EVERY - 1));
-    assert!(due(&s, &c, at(1901), at(1901) + EVERY));
-    // The turn's end is told at once.
-    s.feed(tool_result("b1", "ok", false, None), at(1905));
-    s.feed(say("Shipped."), at(1906));
-    s.feed(done(0.01), at(1907));
-    assert_eq!(running(&s), None);
-    assert!(due(&s, &c, at(1906), at(1907)));
-
-    // The dashboard as it stands goes first, and reads back the same.
-    let mut st = Story::default();
-    let empty = prompt(&st, "Turn 4: the user asked: x");
-    assert!(empty.starts_with("The dashboard now:\n(empty"), "{empty}");
-    st.apply(r#"{"headline":"Ship the fix","progress":[1,3],"blocks":[{"id":"plan","kind":"steps","items":[{"text":"find","done":true},{"text":"fix","tone":"busy"}]},{"id":"why","kind":"callout","tone":"warn","text":"Waiting on CI."}]}"#).unwrap();
-    let p = prompt(&st, "Turn 4 answered: done");
-    assert!(
-        p.ends_with("What happened since:\nTurn 4 answered: done"),
-        "{p}"
-    );
-    let mut back = Story::default();
-    back.apply(&st.to_json()).unwrap();
-    assert_eq!(
-        (back.headline, back.progress, back.blocks),
-        (st.headline.clone(), st.progress, st.blocks.clone())
-    );
-    // The schema the harness holds the answer to is JSON.
-    serde_json::from_str::<serde_json::Value>(SCHEMA).unwrap();
-}
-
-#[test]
-fn trail_is_a_line_a_step_on_a_time_axis() {
-    let s = session();
-    let got = draw(&s, Preset::Trail, &[]);
-    // Quick reads of a kind are one row.
-    let reads = got.lines().find(|l| l.contains("read")).unwrap();
-    assert!(reads.contains("4 files"), "{reads}");
-    assert!(reads.starts_with("t1:s:r1 "), "{reads}");
-    // The slowest step is marked, its bar the longest.
-    let slow = got
-        .lines()
-        .find(|l| l.contains("← slow"))
-        .expect(got.as_str());
-    assert!(slow.contains("cargo test"), "{slow}");
-    assert!(slow.contains("████"), "{slow}");
-    let clippy = got.lines().find(|l| l.contains("cargo clippy")).unwrap();
-    assert!(
-        clippy.contains("✗") && clippy.contains("4m 10s"),
-        "{clippy}"
-    );
-    assert!(got.contains("reply"), "{got}");
-    assert!(got.contains("\"Found it: the card was laid out at the full width, but the views beside it take room.\""), "{got}");
-    assert!(
-        got.lines()
-            .any(|l| l.contains("You") && l.contains("the decision card")),
-        "{got}"
-    );
-    let totals = got.lines().find(|l| l.contains("thinking")).unwrap();
-    assert!(
-        totals.contains("turn 17m 01s") && totals.contains("waiting on you 0"),
-        "{totals}"
-    );
-    assert!(!got.contains("Looking at how"), "no prose: {got}");
-}
-
 /// A long conversation in another view lays out only what's in view.
 #[test]
 fn another_view_draws_only_a_window() {
@@ -651,4 +419,116 @@ fn another_view_draws_only_a_window() {
         let (lo, hi) = r.window_turns();
         assert!(hi - lo < 60, "{p:?} drew turns {lo}..{hi}");
     }
+}
+
+/// A lead: you ask for three lanes; it starts two subagents and Sol
+/// through rush; one subagent finishes, Sol reports and the lead says
+/// what came of it.
+fn lead() -> Session {
+    let mut s = Session::new();
+    s.cwd = "/work/game".into();
+    let evs = vec![
+        (0, sent("start the depth, shader and review lanes")),
+        (
+            1,
+            tool_use(
+                "a1",
+                "Agent",
+                json!({"description": "Depth render-to-texture", "prompt": "fix it", "subagent_type": "general-purpose"}),
+            ),
+        ),
+        (
+            1,
+            Ev::Do(Event::TaskStarted(TaskStarted {
+                id: "job1".into(),
+                call_id: "a1".into(),
+                kind: TaskKind::Subagent,
+                label: "Depth render-to-texture".into(),
+                background: true,
+                ..TaskStarted::default()
+            })),
+        ),
+        (
+            2,
+            tool_use(
+                "a2",
+                "Agent",
+                json!({"description": "Shaders: z-max clamp", "prompt": "fix it"}),
+            ),
+        ),
+        (
+            3,
+            tool_use(
+                "s1",
+                "mcp__rush__spawn_agent",
+                json!({"agent": "sol", "prompt": "Review the boot branch for races", "background": true}),
+            ),
+        ),
+        (
+            4,
+            tool_result(
+                "s1",
+                "sol started in the background as agent 21bcc40e. Its answer is sent to you as a message when it finishes.",
+                false,
+                None,
+            ),
+        ),
+        (
+            60,
+            tool_result("a2", "Clamped z-max; tests pass.", false, None),
+        ),
+        (61, say("Three lanes are going.")),
+        (62, done(0.4)),
+        (
+            300,
+            sent("Codex (agent 21bcc40e) finished:\n\nNo races found. One nit in boot.rs."),
+        ),
+        (301, say("Sol found no races in boot, only a nit.")),
+        (302, done(0.1)),
+    ];
+    for (sec, e) in evs {
+        s.feed(e, at(sec));
+    }
+    s
+}
+
+#[test]
+fn orchestrator_is_the_agents_a_lead_hands_work_to() {
+    let s = lead();
+    let got = draw(&s, Preset::Orchestrator, &[]);
+    let row = |w: &str| {
+        got.lines()
+            .find(|l| l.contains(w))
+            .unwrap_or_else(|| panic!("no {w:?} in\n{got}"))
+            .to_string()
+    };
+    // What you said, and what it said back.
+    assert!(row("start the depth, shader").contains("You"), "{got}");
+    assert!(row("Three lanes are going.").contains("Claude"), "{got}");
+    // A report is no message of yours: its turn draws nothing of its own.
+    assert!(!got.contains("Codex (agent"), "{got}");
+    // The board: one at work, two done; the one at work first.
+    assert!(row("Agents").contains("1 working · 2 done"), "{got}");
+    assert!(row("Depth render-to-texture").contains("●"), "{got}");
+    assert!(row("Shaders: z-max clamp").contains("✓"), "{got}");
+    let sol = row("Review the boot branch");
+    assert!(sol.contains("✓") && sol.contains("sol"), "{sol}");
+    let rows: Vec<&str> = got.lines().collect();
+    let at = |w: &str| rows.iter().position(|l| l.contains(w)).unwrap();
+    assert!(at("Depth render") < at("Review the boot"), "{got}");
+    // The last word on Sol is the lead's, under its row.
+    assert_eq!(at("Sol found no races"), at("Review the boot") + 1, "{got}");
+    // A subagent's answer, under its row.
+    assert_eq!(at("Clamped z-max"), at("Shaders: z-max") + 1, "{got}");
+}
+
+#[test]
+fn orchestrator_without_agents_says_so() {
+    let mut s = Session::new();
+    s.feed(sent("hello"), at(0));
+    s.feed(say("Hi."), at(1));
+    s.feed(done(0.0), at(2));
+    let got = draw(&s, Preset::Orchestrator, &[]);
+    assert!(got.contains("none started yet"), "{got}");
+    assert!(got.contains("no agents yet"), "{got}");
 }

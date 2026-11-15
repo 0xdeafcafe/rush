@@ -135,32 +135,27 @@ pub enum Depth {
 /// Which way the conversation is shown, one for every session (the
 /// config's convoView), each answering one question: Normal as it always
 /// was; Chat "what did we say?" (bubbles, yours right, the agent's left);
-/// Code "what did it change?" (each turn's diffs and checks); CatchUp
-/// "what happened while I was away?" (one card since you last looked);
-/// Trail "where did the time go?" (a line a step on a time axis); Live
-/// "what is it doing?" (a card a watcher model lays out, live.rs). Each
-/// draws the same parsed turns, a turn at a time, so a long conversation
-/// costs what a screen of it does whichever is picked.
+/// Code "what did it change?" (each turn's diffs and checks);
+/// Orchestrator "who's doing what?" (a lead's session as the agents it
+/// hands work to, with what you and it said). Each draws the same parsed
+/// turns, a turn at a time, so a long conversation costs what a screen of
+/// it does whichever is picked.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Preset {
     #[default]
     Normal,
     Chat,
     Code,
-    CatchUp,
-    Trail,
-    Live,
+    Orchestrator,
 }
 
 impl Preset {
     /// Every one, in the order the key goes through them.
-    pub const ALL: [Preset; 6] = [
+    pub const ALL: [Preset; 4] = [
         Preset::Normal,
         Preset::Chat,
         Preset::Code,
-        Preset::CatchUp,
-        Preset::Trail,
-        Preset::Live,
+        Preset::Orchestrator,
     ];
 
     /// Its name as the config keeps it.
@@ -169,9 +164,7 @@ impl Preset {
             Preset::Normal => "normal",
             Preset::Chat => "chat",
             Preset::Code => "code",
-            Preset::CatchUp => "catch-up",
-            Preset::Trail => "trail",
-            Preset::Live => "live",
+            Preset::Orchestrator => "orchestrator",
         }
     }
 
@@ -181,9 +174,7 @@ impl Preset {
             Preset::Normal => "Normal",
             Preset::Chat => "Chat",
             Preset::Code => "Code",
-            Preset::CatchUp => "Catch-up",
-            Preset::Trail => "Trail",
-            Preset::Live => "Live",
+            Preset::Orchestrator => "Orchestrator",
         }
     }
 
@@ -193,9 +184,7 @@ impl Preset {
             Preset::Normal => "everything, as usual",
             Preset::Chat => "what did we say?",
             Preset::Code => "what did it change?",
-            Preset::CatchUp => "what happened while I was away?",
-            Preset::Trail => "where did the time go?",
-            Preset::Live => "what is it doing?",
+            Preset::Orchestrator => "who's doing what?",
         }
     }
 
@@ -232,11 +221,8 @@ pub struct Options {
     /// Which way the conversation is shown.
     pub preset: Preset,
     /// When you last looked at this session before now (0: never, as far
-    /// as rush knows): the Catch-up view's card covers what came after.
+    /// as rush knows).
     pub since: Ms,
-    /// What the watcher has made of the session: the Live view's story
-    /// (live.rs). None: the card draws what's sure alone. Rust-only.
-    pub story: Option<std::sync::Arc<crate::live::Story>>,
     pub selected: String,
     pub focused: bool,
     /// Rows may run the whole width, past CAP_ROW.
@@ -409,9 +395,6 @@ impl Options {
         (self.dock_activity, code::show_whitespace(), self.preset).hash(&mut h);
         (self.between_turns, &self.stall_action).hash(&mut h);
         self.shell_cwd.hash(&mut h);
-        if self.preset == Preset::CatchUp {
-            self.since.hash(&mut h);
-        }
         let mut ran: Vec<_> = self.ran.iter().collect();
         ran.sort();
         ran.hash(&mut h);
@@ -453,8 +436,8 @@ struct TurnKey {
     /// What of its scripts shows (scriptsSig, render.go:392).
     scripts: u64,
     /// What another view draws it from besides the turn itself: in
-    /// Catch-up, whether the card covers it, and the background tasks the
-    /// last turn's card says are still going.
+    /// Orchestrator, whether it's the last turn, and on it every agent's
+    /// state the board says.
     view: u64,
     /// The commands rush ran itself in it, as they stand (shellbox.rs).
     shells: u64,
@@ -582,8 +565,6 @@ pub struct Renderer {
     /// Windows drawn so far; rows kept.
     windows: u64,
     kept: usize,
-    /// The first turn the Catch-up card covers, as last counted.
-    catch: usize,
 }
 
 impl Renderer {
@@ -628,21 +609,12 @@ impl Renderer {
         } else {
             self.links
         };
-        // The turns the catch-up card covers draw nothing; when that
-        // changes, every turn is counted again.
-        let catch = if o.preset == Preset::CatchUp {
-            draw::presets::catch_from(s, o.since).0
-        } else {
-            0
-        };
         if sig != self.sig
             || links != self.links
             || s.serial() != self.serial
             || s.turns.len() < self.slots.len()
             || places
-            || catch != self.catch
         {
-            self.catch = catch;
             self.clear();
             self.sig = sig;
             self.links = links;
@@ -650,7 +622,7 @@ impl Renderer {
         }
         let was = self.slots.len();
         for i in was..s.turns.len() {
-            let est = estimate(s, o, i, self.catch);
+            let est = estimate(s, o, i);
             self.slots.push(Slot {
                 est,
                 ..Slot::default()
@@ -784,55 +756,31 @@ impl Renderer {
         if !o.bg.is_empty() {
             k.bg = bg_sig(s, t, o);
         }
-        if o.preset == Preset::Live && i + 1 == s.turns.len() {
-            // The card has nothing that turns with the tick (no spinner),
-            // only times: drawn again as they change, not every tick
-            // (the full story's card is ~90 µs a draw).
-            if let Some((_, at)) = k.clock {
-                k.clock = Some((0, at));
-            }
-            // The card: the story as it stands, and what's still going.
-            let mut h = DefaultHasher::new();
-            o.story.as_ref().map(|st| st.serial).hash(&mut h);
-            let mut going = t.live;
-            for j in s.running_jobs().filter(|j| j.background) {
-                (&j.id, &j.label).hash(&mut h);
-                going = true;
-            }
-            if going {
-                (o.now / 1000).hash(&mut h);
-            }
-            (s.tasks.len(), s.current().1).hash(&mut h);
-            k.view = h.finish();
-        }
-        if o.preset == Preset::CatchUp {
+        if o.preset == Preset::Orchestrator {
+            // The board, with the last turn: every agent as it stands, and
+            // how long each has been at it.
             let last = i + 1 == s.turns.len();
             let mut h = DefaultHasher::new();
-            (i >= self.catch, last).hash(&mut h);
+            last.hash(&mut h);
             if last {
-                let mut going = false;
-                for j in s.running_jobs().filter(|j| j.background) {
-                    (&j.id, &j.label).hash(&mut h);
-                    going = true;
+                let mut going = t.live;
+                for j in s.jobs() {
+                    (&j.id, &j.status, &j.summary, j.end).hash(&mut h);
+                    going |= j.running();
+                }
+                let mut kids: Vec<_> = o.kids.iter().collect();
+                kids.sort_by(|a, b| a.0.cmp(b.0));
+                for (step, cs) in kids {
+                    step.hash(&mut h);
+                    for c in cs {
+                        (&c.id, c.live).hash(&mut h);
+                        going |= c.live;
+                    }
                 }
                 if going {
                     (o.now / 1000).hash(&mut h);
                 }
-                // The commands you ran, any turn's: the card names them,
-                // and opens the one picked.
-                if !o.shells.is_empty() {
-                    draw::shellbox::turn_sig(o, "t").hash(&mut h);
-                    if crate::shellbox::BoxRef::parse(&o.selected).is_some() {
-                        o.selected.hash(&mut h);
-                    }
-                    let mut opened: Vec<_> = o
-                        .open
-                        .iter()
-                        .filter(|(k, _)| crate::shellbox::BoxRef::parse(k).is_some())
-                        .collect();
-                    opened.sort();
-                    opened.hash(&mut h);
-                }
+                (o.needs.reason.as_str(), s.turns.len()).hash(&mut h);
             }
             k.view = h.finish();
         }
@@ -1167,9 +1115,9 @@ impl RowIndex {
 /// heading, its words wrapped, and the gap after it; open, a row a step;
 /// gone past, a row a run of plain steps and one for each step that stays
 /// out of a run (Go's estimate, window.go).
-fn estimate(s: &Session, o: &Options, i: usize, catch: usize) -> (usize, usize) {
+fn estimate(s: &Session, o: &Options, i: usize) -> (usize, usize) {
     if o.preset != Preset::Normal {
-        let n = presets_estimate(s, o, i, catch);
+        let n = presets_estimate(s, o, i);
         return (n, n);
     }
     let t = &s.turns[i];
@@ -1224,31 +1172,18 @@ fn estimate(s: &Session, o: &Options, i: usize, catch: usize) -> (usize, usize) 
 }
 
 /// How many rows turn i takes in another view, before it's drawn: Chat
-/// its bubbles, Code a heading and each file's few rows, Catch-up a row
-/// for a turn before the card and the card on the last, Trail a row a
-/// step.
-fn presets_estimate(s: &Session, o: &Options, i: usize, catch: usize) -> usize {
+/// its bubbles, Code a heading and each file's few rows, Orchestrator a
+/// few rows for each turn you started, and the board on the last.
+fn presets_estimate(s: &Session, o: &Options, i: usize) -> usize {
     let t = &s.turns[i];
     let w = 20.max(o.width.min(o.prose_cap()) * 3 / 5).max(1);
     let lines = |x: &str| 1 + x.matches('\n').count() + x.len() / w;
-    let steps = || {
-        t.items
-            .iter()
-            .filter(|it| matches!(it, Item::Step(_)))
-            .count()
-    };
     match o.preset {
-        Preset::CatchUp if i + 1 == s.turns.len() => 9,
-        Preset::CatchUp if i >= catch => 0,
-        Preset::CatchUp => 1,
-        Preset::Live if i + 1 == s.turns.len() => {
-            let story = o.story.as_ref().map_or(0, |st| {
-                st.blocks.iter().map(|b| 2 + b.items.len()).sum::<usize>()
-            });
-            8 + story
+        Preset::Orchestrator => {
+            let yours = t.from.is_empty() && !t.prompt.trim().is_empty();
+            let board = if i + 1 == s.turns.len() { 12 } else { 0 };
+            board + if yours { 6 } else { 0 }
         }
-        Preset::Live => 1,
-        Preset::Trail => 4 + steps(),
         Preset::Code => {
             let edits = t
                 .steps

@@ -13,6 +13,8 @@
 //! :2699, movedMsg :1308), keybind.go:181 (list.close, session.close) and
 //! outside.go:19-22 (stopOutside, as of e0f011a4). A room's row asks to
 //! hide the room (roomrows.go:229 askHideRoom, social/rooms.rs).
+//! #rehost and u when closing, rush restarting under an agent that runs
+//! on, are Rust-only.
 
 use std::collections::HashSet;
 
@@ -51,6 +53,11 @@ pub fn register(x: &mut Ext) {
         "reincarnate",
         "stop the agent with all it started and start it again where it was, as ctrl+d twice would",
         reincarnate_command,
+    );
+    x.command(
+        "rehost",
+        "restart rush under the agent and those it spawned · their agents run on",
+        rehost_command,
     );
     x.list_keys.push(list_key);
     x.on_fleet.push(hibernate);
@@ -385,7 +392,8 @@ pub fn dismiss(m: &mut Model, a: Option<Agent>) -> Out {
 /// The one way to close an agent, esc twice in its Session or ctrl+] x:
 /// y hides it (stopped, gone from the list for good; its conversation
 /// kept on disk), z stops it and keeps it in the list, r restarts it, s
-/// switches its harness or model, x deletes it for good (askClose).
+/// switches its harness or model, x deletes it for good (askClose). u
+/// restarts rush under a rush agent, its program running on (Rust-only).
 pub fn ask_close(m: &mut Model, a: Option<Agent>) -> Out {
     let Some(a) = a else {
         return Out::Idle;
@@ -423,6 +431,14 @@ pub fn ask_close(m: &mut Model, a: Option<Agent>) -> Out {
             "r".into(),
             "restart".into(),
             Box::new(move |m| restart(m, b, String::new())),
+        ));
+    }
+    if !a.past && a.rush {
+        let b = a.clone();
+        c.more.push((
+            "u".into(),
+            "restart rush, keep the agent running".into(),
+            Box::new(move |m| rehost(m, b)),
         ));
     }
     let linked = crate::sess::state(m).linked == a.key;
@@ -512,6 +528,93 @@ pub fn restart(m: &mut Model, a: Agent, text: String) -> Out {
         return Out::Draw;
     }
     go(m)
+}
+
+/// #rehost, and u when closing: rush restarts under a rush agent and every
+/// agent it spawned, theirs too, onto the newest rush installed, each once
+/// it's between turns; their programs run on, the same process and
+/// conversation (Hosts::rehost). Rust-only.
+pub fn rehost(m: &mut Model, a: Agent) -> Out {
+    if !a.rush {
+        m.flash_err(&format!(
+            "rush doesn't host {} · /rush moves it over first",
+            a.display_name
+        ));
+        return Out::Draw;
+    }
+    let h = hosts(m);
+    let (id, name) = (a.job.id.clone(), a.display_name.clone());
+    let root = id.clone();
+    m.later(
+        move || h.rehost(&id),
+        move |m, r| {
+            match r {
+                Ok(r) => match rehost_said(&name, &root, &r) {
+                    Ok(s) => m.flash(&s),
+                    Err(e) => m.flash_err(&e),
+                },
+                Err(e) => m.fail(&e),
+            }
+            Out::Draw
+        },
+    );
+    Out::Draw
+}
+
+/// What #rehost says it asked of session root, named name: Err when it
+/// asked none. Rust-only.
+pub fn rehost_said(name: &str, root: &str, r: &crate::host::Rehost) -> Result<String, String> {
+    let root_asked = r.asked.iter().any(|i| i == root);
+    let root_left = r.left.iter().find(|(i, _)| i == root).map(|l| l.1.as_str());
+    let others = r.asked.len() - usize::from(root_asked);
+    if r.asked.is_empty() {
+        return Err(match root_left {
+            Some(why) => format!("rush can't restart under {name}: {why}"),
+            None => format!("rush can't restart under {name} now"),
+        });
+    }
+    let mut s = match (root_asked, others) {
+        (true, 0) => format!("rush restarts for {name}"),
+        (true, 1) => format!("rush restarts for {name} and the agent it spawned"),
+        (true, n) => format!("rush restarts for {name} and its {n} agents"),
+        (false, 1) => format!("rush restarts for the agent {name} spawned"),
+        (false, n) => format!("rush restarts for {name}'s {n} agents"),
+    };
+    if r.now == r.asked.len() {
+        s.push_str(" now");
+    } else if r.asked.len() == 1 {
+        s.push_str(" · once it's between turns");
+    } else {
+        s.push_str(" · each once it's between turns");
+    }
+    s.push_str(if r.asked.len() == 1 && root_asked {
+        " · its agent runs on"
+    } else {
+        " · their agents run on"
+    });
+    if let Some(why) = root_left {
+        s.push_str(&format!(" · {name} stays: {why}"));
+    }
+    let left: Vec<&str> = r
+        .left
+        .iter()
+        .filter(|(i, _)| i != root)
+        .map(|l| l.1.as_str())
+        .collect();
+    match left[..] {
+        [] => {}
+        [why] => s.push_str(&format!(" · 1 agent stays: {why}")),
+        _ => s.push_str(&format!(" · {} agents stay as they are", left.len())),
+    }
+    Ok(s)
+}
+
+/// #rehost: rush restarts under the agent picked and all it spawned.
+fn rehost_command(m: &mut Model, _: &str) -> Out {
+    match need(m) {
+        Some(a) => rehost(m, a),
+        None => Out::Draw,
+    }
 }
 
 /// Starts a session running outside rush again on profile to, keeping

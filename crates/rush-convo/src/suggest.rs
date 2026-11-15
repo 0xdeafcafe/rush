@@ -16,9 +16,11 @@ use crate::render::{Preset, check_names};
 
 /// Away this long, a look at the session is coming back to it.
 pub const AWAY: Ms = 10 * 60_000;
-/// A turn this long or longer is a long one: where its time went is worth
-/// a look.
+/// A turn this long or longer is a long one.
 pub const LONG_TURN: Ms = 2 * 60_000;
+/// A session that has handed work to this many agents is a lead's: the
+/// Orchestrator view fits it.
+pub const LEAD_AGENTS: usize = 3;
 /// A turn with this many steps or fewer is mostly talk.
 const FEW_STEPS: usize = 2;
 
@@ -65,6 +67,10 @@ pub struct Digest {
     /// turns that finished since.
     pub away: Ms,
     pub unseen: usize,
+    /// The agents the session has handed work to (its subagents, and
+    /// those it started through rush), and those still at work.
+    pub agents: usize,
+    pub agents_working: usize,
 }
 
 /// The view the rules pick, and why in a few words; None when they can't
@@ -131,9 +137,38 @@ pub fn digest(s: &Session, seen: Ms, now: Ms) -> Option<Digest> {
             _ => 0,
         })
         .sum();
+    (d.agents, d.agents_working) = agents(s);
     d.turn = (t.end - t.start).max(0);
     d.thinking = (d.turn - d.tools - d.waiting).max(0);
     Some(d)
+}
+
+/// The agents session s has handed work to, every turn's, and how many
+/// are still at work: its subagents' calls and its spawn_agent calls.
+fn agents(s: &Session) -> (usize, usize) {
+    let (mut all, mut working) = (0, 0);
+    for st in s.steps() {
+        if st.parent.is_some() {
+            continue;
+        }
+        let sub = st.kind == Kind::Subagent;
+        if !sub && crate::render::tool_run(st).is_none() {
+            continue;
+        }
+        all += 1;
+        let running = if sub {
+            s.jobs()
+                .iter()
+                .find(|j| j.tool_use_id == *st.id)
+                .map_or(st.status == Status::Running, |j| j.running())
+        } else {
+            st.status == Status::Running
+        };
+        if running {
+            working += 1;
+        }
+    }
+    (all, working)
 }
 
 /// The time spans cover, overlaps counted once.
@@ -184,12 +219,17 @@ fn count(n: usize, one: &str) -> String {
     }
 }
 
-/// The view the rules pick for d at moment, with a short reason; None when
-/// they can't tell, and a quick model may be asked.
-pub fn rules(d: &Digest, moment: Moment) -> Ruled {
-    if moment == Moment::Back && d.unseen >= 1 {
-        let n = count(d.unseen, "turn");
-        return Some((Preset::CatchUp, format!("{n} finished while you were away")));
+/// The view the rules pick for d, with a short reason; None when they
+/// can't tell, and a quick model may be asked. The moment picks nothing
+/// now that Catch-up is gone; it's kept for the question and the record.
+pub fn rules(d: &Digest, _moment: Moment) -> Ruled {
+    if d.agents >= LEAD_AGENTS {
+        let why = if d.agents_working > 0 {
+            format!("{} at work", count(d.agents_working, "agent"))
+        } else {
+            format!("handed work to {}", count(d.agents, "agent"))
+        };
+        return Some((Preset::Orchestrator, why));
     }
     if d.files > 0 && !d.checks.is_empty() {
         let names: Vec<&str> = d.checks.iter().map(|c| c.0).collect();
@@ -203,16 +243,6 @@ pub fn rules(d: &Digest, moment: Moment) -> Ruled {
             why.push_str(&format!(" ({} failed)", failed.join(", ")));
         }
         return Some((Preset::Code, why));
-    }
-    if d.turn >= LONG_TURN && d.tools * 2 > d.turn {
-        return Some((
-            Preset::Trail,
-            format!(
-                "took {} min, {} of them in tools",
-                minutes(d.turn),
-                minutes(d.tools)
-            ),
-        ));
     }
     if d.steps <= FEW_STEPS && d.files == 0 && d.words > 0 {
         let steps = if d.steps == 0 {
@@ -231,16 +261,11 @@ pub fn rules(d: &Digest, moment: Moment) -> Ruled {
     None
 }
 
-/// ms as whole minutes, at least 1.
-fn minutes(ms: Ms) -> i64 {
-    ((ms + 30_000) / 60_000).max(1)
-}
-
 /// What the quick model is told it does.
-pub const SYSTEM: &str = "You pick which view of a coding agent's conversation fits best right now, from counts about its last turn. Views: normal (everything, as usual), chat (what did we say? just the words), code (what did it change? diffs and checks), catch-up (what happened while I was away? one summary card), trail (where did the time go? steps on a time axis). Answer with the view's name and a reason of at most eight plain words.";
+pub const SYSTEM: &str = "You pick which view of a coding agent's conversation fits best right now, from counts about its last turn. Views: normal (everything, as usual), chat (what did we say? just the words), code (what did it change? diffs and checks), orchestrator (who's doing what? the agents it handed work to, for a lead running several). Answer with the view's name and a reason of at most eight plain words.";
 
 /// The shape of its answer.
-pub const SCHEMA: &str = r#"{"type":"object","properties":{"view":{"type":"string","enum":["normal","chat","code","catch-up","trail"]},"reason":{"type":"string"}},"required":["view","reason"]}"#;
+pub const SCHEMA: &str = r#"{"type":"object","properties":{"view":{"type":"string","enum":["normal","chat","code","orchestrator"]},"reason":{"type":"string"}},"required":["view","reason"]}"#;
 
 /// The question put to the quick model: d's counts, the moment, the view
 /// in use and the last views chosen. Numbers and view names only.
@@ -267,6 +292,8 @@ pub fn prompt(d: &Digest, moment: Moment, using: Preset, recent: &[Preset]) -> S
             "toolSeconds": d.tools / 1000,
             "waitingOnUserSeconds": d.waiting / 1000,
         },
+        "agentsStarted": d.agents,
+        "agentsAtWork": d.agents_working,
         "minutesAway": d.away / 60_000,
         "unseenTurns": d.unseen,
         "viewInUse": using.name(),

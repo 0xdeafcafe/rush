@@ -1278,6 +1278,16 @@ pub fn step_state(s: &Session, id: &str) -> (String, bool) {
 }
 
 impl Runs {
+    /// What a spawned agent rush hosts does now, as its host says, for
+    /// run id: Some("") while it works without saying what; None for any
+    /// other run, or one that has stopped. Its session isn't read here
+    /// when it isn't Claude Code's (Rust-only).
+    pub fn hosted_doing(&self, id: &str) -> Option<String> {
+        let r = self.spawns.get(id.strip_prefix(SPAWN_PREFIX)?)?;
+        (!r.hosted.is_empty() && (r.live || !r.detail.is_empty()))
+            .then(|| crate::style::one_line(&r.detail))
+    }
+
     /// Its runs again: those listed, the spawned agents found, and those
     /// only a task says.
     pub fn rebuild(&mut self, s: &Session, claude: bool) {
@@ -1326,6 +1336,8 @@ impl Runs {
                 r.missed = 0;
                 r.live = h.live;
                 r.ended = h.ended;
+                r.title = h.title;
+                r.detail = h.detail;
                 r.take_asks(h.needs, h.asking);
                 continue;
             }
@@ -1359,6 +1371,8 @@ impl Runs {
                     born: h.born,
                     hosted: h.id,
                     live: h.live,
+                    title: h.title,
+                    detail: h.detail,
                     ended: h.ended,
                     needs: h.needs,
                     asking: h.asking,

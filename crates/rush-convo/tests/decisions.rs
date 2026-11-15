@@ -70,7 +70,7 @@ fn decision_answer_drawn_as_choices() {
 
 /// A block is open until a message of yours comes after it, picking from
 /// it or not, as rush's host takes its card away for either: the column
-/// beside a wide conversation lists it, the catch-up card counts it and
+/// beside a wide conversation lists it, the Orchestrator board counts it and
 /// the block says "not answered" only until then. A turn another agent
 /// began leaves it open; a newer block is open in its turn.
 #[test]
@@ -271,7 +271,7 @@ fn an_answer_after_typed_text_counts() {
 }
 
 /// A block whose card was set aside says so, and isn't open for the
-/// catch-up or the chat any more.
+/// Orchestrator board or the chat any more.
 #[test]
 fn a_block_set_aside() {
     let s = decisions_session(LOADER_ANSWER);

@@ -780,6 +780,8 @@ fn snapshot_session_views_dropdown() {
     snapshot("snap_session_views_menu_80x24", &f);
     assert!(f.contains("Conversation ▾"), "{f}");
     assert!(f.contains("● Normal"), "{f}");
+    assert!(f.contains("Orchestrator  who's doing what?"), "{f}");
+    assert!(!f.contains("Catch-up") && !f.contains("Trail"), "{f}");
     let mut m = model();
     open(&mut m);
     let f = plain(

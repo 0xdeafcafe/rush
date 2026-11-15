@@ -223,93 +223,6 @@ fn main() {
         run(turns, w);
     }
     presets(3000, 120);
-    live(3000, 120);
-}
-
-/// The fullest story the watcher may write (6 blocks of 12 items), its
-/// headline saying n.
-fn full_story(n: usize) -> rush_convo::live::Story {
-    let kinds = ["steps", "timeline", "list", "kv", "bars", "callout"];
-    let blocks: Vec<serde_json::Value> = kinds
-        .iter()
-        .map(|k| {
-            let items: Vec<serde_json::Value> = (0..12)
-                .map(|i| {
-                    serde_json::json!({"text": format!("item {i} of the {k} block, a few words long"),
-                        "meta": "meta", "done": i < 6, "value": i, "time": "14:05"})
-                })
-                .collect();
-            serde_json::json!({"id": k, "kind": k, "title": format!("The {k}"), "text": "A sentence of context.", "items": items})
-        })
-        .collect();
-    let mut st = rush_convo::live::Story::default();
-    let patch = serde_json::json!({"headline": format!("Shipping the fix, update {n}"), "progress": [3, 5], "blocks": blocks});
-    st.apply(&patch.to_string()).expect("a patch");
-    // As the watcher's updates number it: each a new key for the view.
-    st.serial = n as u64 + 1;
-    st
-}
-
-/// The Live view's own costs: what the watcher is told (delta), its
-/// answer taken in (apply), and a frame after the story changes.
-fn live(turns: usize, w: usize) {
-    use rush_convo::live::{Cursor, delta, prompt};
-    let s = bench_session(turns);
-    println!("— live, {turns} turns, w{w}");
-    drawing(format!("{turns} turns w{w}"));
-    report(
-        "live: first delta (3 turns)",
-        measure(200, |_| {
-            let mut c = Cursor::default();
-            std::hint::black_box(delta(&s, &mut c, at(100_000)));
-        }),
-    );
-    let mut c = Cursor::default();
-    delta(&s, &mut c, at(100_000));
-    report(
-        "live: delta, nothing new",
-        measure(2000, |_| {
-            let mut c = c.clone();
-            std::hint::black_box(delta(&s, &mut c, at(100_000)));
-        }),
-    );
-    let st = full_story(0);
-    let answer = {
-        let mut p: serde_json::Value = serde_json::from_str(&st.to_json()).expect("json");
-        p["headline"] = "Shipping the fix, again".into();
-        p.to_string()
-    };
-    report(
-        "live: prompt (full story)",
-        measure(2000, |_| {
-            std::hint::black_box(prompt(&st, "Turn 9 answered: done"));
-        }),
-    );
-    report(
-        "live: answer applied (full story)",
-        measure(2000, |_| {
-            let mut st = st.clone();
-            st.apply(&answer).expect("a patch");
-        }),
-    );
-    let mut o = Options {
-        preset: Preset::Live,
-        story: Some(std::sync::Arc::new(full_story(0))),
-        ..opts(w)
-    };
-    let mut r = Renderer::new();
-    r.tail(&s, &o, 50);
-    let stories: Vec<_> = (1..=50)
-        .map(|n| std::sync::Arc::new(full_story(n)))
-        .collect();
-    report(
-        "live: story changed, then a frame",
-        measure(2000, |i| {
-            o.story = Some(stories[i % stories.len()].clone());
-            o.tick = i;
-            r.tail(&s, &o, 50);
-        }),
-    );
 }
 
 /// Each of the conversation's views on a long session: the cold frame at
@@ -320,7 +233,6 @@ fn presets(turns: usize, w: usize) {
     for p in Preset::ALL {
         let o = Options {
             preset: p,
-            story: (p == Preset::Live).then(|| std::sync::Arc::new(full_story(0))),
             ..opts(w)
         };
         let name = p.name();

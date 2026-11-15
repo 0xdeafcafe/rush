@@ -18,7 +18,13 @@
 //! whose adapter can't, says no, and the host stays where it is, its agent
 //! untouched, and says so (Info.upgrade). It never stops the agent to
 //! move.
+//!
+//! Asked for one session ([`ask_tree`]: `rush session rehost`, u in the
+//! close question, #rehost), the session and every agent it spawned,
+//! theirs too, move the same way onto the installed rush, stale or not:
+//! rush restarts under them and their agents run on.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -27,6 +33,7 @@ use base64::engine::general_purpose::STANDARD;
 use rush_core::adapter::{Registry, Upgrade};
 use serde::{Deserialize, Serialize};
 
+use crate::events::log_event;
 use crate::op::Op;
 use crate::paths::dir;
 use crate::wire::{BinStamp, Info};
@@ -153,10 +160,186 @@ pub fn movable(i: &Info) -> bool {
     i.upgrades && !i.is_remote() && i.state != "stopped" && !i.sleeping
 }
 
+/// Why info's host can't be asked to move, in a few words; None when it
+/// can (see [`movable`]).
+pub fn why_not(i: &Info) -> Option<&'static str> {
+    if i.is_remote() {
+        Some("it runs on another machine")
+    } else if i.state == "stopped" {
+        Some("it isn't running")
+    } else if i.sleeping {
+        Some("it's asleep · it wakes on the installed rush")
+    } else if !i.upgrades {
+        Some("its rush can't move in place · /restart it")
+    } else {
+        None
+    }
+}
+
+/// Session id and every session it spawned, theirs too (Meta spawnedBy),
+/// out of infos: id first, then each generation, each once. Empty when
+/// infos hasn't id.
+pub fn tree<'a>(infos: &'a [Info], id: &str) -> Vec<&'a Info> {
+    let Some(root) = infos.iter().find(|i| i.id == id) else {
+        return Vec::new();
+    };
+    let mut seen: HashSet<&str> = HashSet::from([root.id.as_str()]);
+    let mut out = vec![root];
+    let mut at = 0;
+    while at < out.len() {
+        let parent = out[at].id.as_str();
+        for i in infos {
+            if i.meta.get("spawnedBy").is_some_and(|b| b == parent) && seen.insert(i.id.as_str()) {
+                out.push(i);
+            }
+        }
+        at += 1;
+    }
+    out
+}
+
+/// What [`ask_tree`] asked.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Rehost {
+    /// The sessions asked to move, the one named first when it was.
+    pub asked: Vec<String>,
+    /// How many of those were between turns, so move now.
+    pub now: usize,
+    /// The ones left where they are, each with why.
+    pub left: Vec<(String, String)>,
+}
+
+/// Asks session id's host and those of every agent it spawned, theirs
+/// too, to move onto the installed rush in place, stale or not: each once
+/// it's between turns, its agent running on (the same process, pipes and
+/// conversation). by says who asked, for the events. Rust-only.
+pub fn ask_tree(id: &str, by: &str) -> Result<Rehost, String> {
+    let infos = crate::client::list();
+    let tree = tree(&infos, id);
+    if tree.is_empty() {
+        return Err(format!("session {id} not found"));
+    }
+    let mut r = Rehost::default();
+    for i in tree {
+        let why =
+            why_not(i)
+                .map(str::to_string)
+                .or_else(|| match crate::client::read_config(&i.id) {
+                    Ok(c) if c.owner == 0 => None,
+                    Ok(_) => Some("its host ends with the program that started it".into()),
+                    Err(e) => Some(e.to_string()),
+                });
+        if let Some(why) = why {
+            r.left.push((i.id.clone(), why));
+            continue;
+        }
+        if rush_core::dryrun::would("upgrade-host", &i.id, "asked to restart its rush") {
+            continue;
+        }
+        if let Err(e) = ask(&i.id) {
+            let err = e.to_string();
+            log_event(&i.id, "upgrade-ask-failed", serde_json::json!({"err": err}));
+            r.left.push((i.id.clone(), err));
+            continue;
+        }
+        log_event(
+            &i.id,
+            "rehost-asked",
+            serde_json::json!({"by": by, "root": id, "quiet": i.quiet()}),
+        );
+        if i.quiet() {
+            r.now += 1;
+        }
+        r.asked.push(i.id.clone());
+    }
+    Ok(r)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    // A session's tree: itself, then what it spawned, generation by
+    // generation, each once, whatever order the list has them in.
+    #[test]
+    fn a_tree_is_the_session_and_all_it_spawned() {
+        let s = |id: &str, by: &str| Info {
+            id: id.into(),
+            meta: if by.is_empty() {
+                BTreeMap::new()
+            } else {
+                BTreeMap::from([("spawnedBy".to_string(), by.to_string())])
+            },
+            ..Info::default()
+        };
+        let beside = Info {
+            meta: BTreeMap::from([("startedFrom".to_string(), "p".to_string())]),
+            ..s("b", "")
+        };
+        let list = vec![
+            s("g", "c1"),
+            s("c1", "p"),
+            s("p", ""),
+            s("c2", "p"),
+            s("o", ""),
+            s("oc", "o"),
+            beside,
+            s("loop", "g"),
+            s("g", "c2"), // listed twice: once
+        ];
+        let cases: &[(&str, &[&str])] = &[
+            ("p", &["p", "c1", "c2", "g", "loop"]),
+            ("c1", &["c1", "g", "loop"]),
+            ("o", &["o", "oc"]),
+            ("loop", &["loop"]),
+            ("b", &["b"]),
+            ("none", &[]),
+        ];
+        for (id, want) in cases {
+            let got: Vec<&str> = tree(&list, id).iter().map(|i| i.id.as_str()).collect();
+            assert_eq!(got, *want, "{id}");
+        }
+    }
+
+    // Why a host is left where it is, or none when it's asked.
+    #[test]
+    fn says_why_a_host_isnt_asked() {
+        let up = Info {
+            upgrades: true,
+            state: "idle".into(),
+            ..Info::default()
+        };
+        let with = |f: fn(&mut Info)| {
+            let mut i = up.clone();
+            f(&mut i);
+            i
+        };
+        let cases: Vec<(Info, Option<&str>)> = vec![
+            (up.clone(), None),
+            (with(|i| i.state = "working".into()), None),
+            (
+                with(|i| i.upgrades = false),
+                Some("its rush can't move in place · /restart it"),
+            ),
+            (
+                with(|i| i.remote = "mac".into()),
+                Some("it runs on another machine"),
+            ),
+            (
+                with(|i| i.state = "stopped".into()),
+                Some("it isn't running"),
+            ),
+            (
+                with(|i| i.sleeping = true),
+                Some("it's asleep · it wakes on the installed rush"),
+            ),
+        ];
+        for (i, want) in &cases {
+            assert_eq!(why_not(i), *want, "{i:?}");
+            assert_eq!(movable(i), want.is_none(), "{i:?}");
+        }
+    }
 
     // What a host passes on reads back as it was written, once.
     #[test]

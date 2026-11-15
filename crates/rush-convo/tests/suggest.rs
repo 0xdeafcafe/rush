@@ -104,7 +104,7 @@ fn the_question_has_no_conversation_text() {
         &d,
         Moment::Back,
         Preset::Chat,
-        &[Preset::Code, Preset::Trail],
+        &[Preset::Code, Preset::Orchestrator],
     );
     for w in [
         "flamingo", "pelican", "walrus", "zebra", "please", "Fixed", "cargo", "/work",
@@ -112,7 +112,10 @@ fn the_question_has_no_conversation_text() {
         assert!(!q.contains(w), "{w} in {q}");
     }
     assert!(q.contains(r#""viewInUse":"chat""#), "{q}");
-    assert!(q.contains(r#""recentViews":["code","trail"]"#), "{q}");
+    assert!(
+        q.contains(r#""recentViews":["code","orchestrator"]"#),
+        "{q}"
+    );
     assert!(q.contains(r#""filesChanged":2"#), "{q}");
     assert!(q.contains(r#""kind":"tests""#), "{q}");
 }
@@ -132,14 +135,32 @@ type Case = (&'static str, Digest, Moment, Option<(Preset, &'static str)>);
 fn the_rules_table() {
     let cases: Vec<Case> = vec![
         (
-            "back to finished turns",
+            "a lead with agents at work",
             dg(|d| {
-                d.unseen = 3;
+                d.agents = 5;
+                d.agents_working = 2;
                 d.files = 2;
                 d.checks = vec![("tests", true)];
             }),
             Moment::Back,
-            Some((Preset::CatchUp, "3 turns finished while you were away")),
+            Some((Preset::Orchestrator, "2 agents at work")),
+        ),
+        (
+            "a lead whose agents are done",
+            dg(|d| {
+                d.agents = 3;
+            }),
+            Moment::Ended,
+            Some((Preset::Orchestrator, "handed work to 3 agents")),
+        ),
+        (
+            "two agents aren't a lead",
+            dg(|d| {
+                d.agents = 2;
+                d.words = 40;
+            }),
+            Moment::Ended,
+            Some((Preset::Chat, "mostly talk, no steps")),
         ),
         (
             "unseen turns don't count when a turn just ended",
@@ -164,14 +185,14 @@ fn the_rules_table() {
             )),
         ),
         (
-            "a long turn mostly in tools",
+            "a long turn mostly in tools: unclear",
             dg(|d| {
                 d.turn = 6 * 60_000;
                 d.tools = 4 * 60_000;
                 d.steps = 20;
             }),
             Moment::Ended,
-            Some((Preset::Trail, "took 6 min, 4 of them in tools")),
+            None,
         ),
         (
             "mostly talk",
@@ -234,12 +255,12 @@ fn the_rules_table() {
 #[test]
 fn the_answer_is_read_or_dropped() {
     assert_eq!(
-        answer(br#"{"view":"trail","reason":"long\nturn"}"#),
-        Some((Preset::Trail, "long turn".into()))
+        answer(br#"{"view":"orchestrator","reason":"many\nagents"}"#),
+        Some((Preset::Orchestrator, "many agents".into()))
     );
     assert_eq!(
-        answer(br#"{"view":"Catch-up","reason":""}"#),
-        Some((Preset::CatchUp, String::new()))
+        answer(br#"{"view":"Orchestrator","reason":""}"#),
+        Some((Preset::Orchestrator, String::new()))
     );
     assert_eq!(answer(br#"{"view":"diff","reason":"x"}"#), None);
     assert_eq!(answer(b"not json"), None);

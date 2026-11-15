@@ -37,7 +37,7 @@ pub fn decisions_sent(r: &str) -> String {
 
 /// The Open key saying block ref's card was set aside: it waits on you no
 /// longer, though nothing of yours came after it (beyond Go, which kept
-/// such a block open in the column and the catch-up).
+/// such a block open in the column).
 pub fn decisions_gone(r: &str) -> String {
     format!("{r}:gone")
 }
@@ -98,8 +98,8 @@ fn replied(s: &Session, ti: usize) -> bool {
 /// The decisions turn ti's answer asks that still wait on you: none once
 /// the turn is under way again or a message of yours came after it
 /// (replied). The one rule for every place that says a block is open:
-/// the column beside a wide conversation, the catch-up card and the
-/// block's own "not answered".
+/// the column beside a wide conversation, the Orchestrator board and
+/// the block's own "not answered".
 fn still_open(s: &Session, ti: usize) -> Vec<Decision> {
     match s.turns.get(ti) {
         Some(t) if !t.live && !replied(s, ti) => decisions_of(t),
@@ -117,7 +117,7 @@ fn set_aside(s: &Session, ti: usize, open: &HashMap<String, bool>) -> bool {
 
 /// The decisions turn ti's answer asks that still wait on you
 /// (still_open), none once its card was set aside: what the Chat and
-/// Catch-up views say needs you.
+/// Orchestrator views say needs you.
 pub(crate) fn open_list(s: &Session, ti: usize, open: &HashMap<String, bool>) -> Vec<Decision> {
     if set_aside(s, ti, open) {
         return Vec::new();

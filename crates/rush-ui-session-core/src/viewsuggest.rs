@@ -70,7 +70,7 @@ pub fn mode(m: &Model) -> Mode {
     }
 }
 
-/// A suggestion showing: the view, why, its kind ("back:catch-up") and,
+/// A suggestion showing: the view, why, its kind ("back:chat") and,
 /// when rush switched to it, the view it switched from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Shown {

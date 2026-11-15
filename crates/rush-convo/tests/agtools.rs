@@ -349,9 +349,6 @@ fn a_tool_load_shows_in_trail_alone() {
     }
     let out = rows(&s, &opts(Preset::Normal));
     assert!(out.contains("↩ Codex answered"), "{out}");
-    let out = rows(&s, &opts(Preset::Trail));
-    assert!(out.contains("ToolSearch"), "Trail lost the load:\n{out}");
-    let mut same = snapshot("load_normal", &rows(&s, &opts(Preset::Normal)));
-    same &= snapshot("load_trail", &rows(&s, &opts(Preset::Trail)));
+    let same = snapshot("load_normal", &rows(&s, &opts(Preset::Normal)));
     assert!(same, "a drawing differs from its snapshot");
 }

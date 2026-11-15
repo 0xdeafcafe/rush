@@ -181,7 +181,7 @@ fn shown(m: &mut Model) -> Option<viewsuggest::Shown> {
 #[test]
 fn off_by_default_does_no_work() {
     assert_eq!(rush_state::Config::default().view_suggest, "");
-    let quick = Quick::new(Ok(r#"{"view":"trail","reason":"long"}"#));
+    let quick = Quick::new(Ok(r#"{"view":"orchestrator","reason":"long"}"#));
     let fake = Fake::new();
     let mut m = open(agent("steer", State::Idle), &fake, 120, 40);
     crate::accounts::use_store(&mut m, rush_state::Store::default());
@@ -257,32 +257,6 @@ fn suggests_as_you_open_and_the_key_takes_it() {
     assert_eq!(viewsuggest::count(&mut m, "back:chat").taken, 1);
 }
 
-/// Back after ten minutes away with turns you haven't seen: Catch-up; the
-/// suggestion left showing before it counts as turned down.
-#[test]
-fn back_after_away_suggests_catch_up() {
-    let quick = Quick::new(Err("unused"));
-    let mut m = model("suggest", &quick);
-    talk(&mut m, NOW - 60_000);
-    frame_at(&mut m, NOW);
-    assert_eq!(shown(&mut m).unwrap().view, Preset::Chat);
-    look_away(&mut m);
-    talk(&mut m, NOW + 60_000);
-    talk(&mut m, NOW + 120_000);
-    frame_at(&mut m, NOW + 11 * 60_000);
-    let s = shown(&mut m).unwrap();
-    assert_eq!(
-        (s.view, s.reason.as_str()),
-        (Preset::CatchUp, "2 turns finished while you were away")
-    );
-    assert_eq!(viewsuggest::count(&mut m, "back:chat").declined, 1);
-    // A glance away and back with nothing new isn't coming back.
-    presets::set(&mut m, Preset::CatchUp);
-    look_away(&mut m);
-    frame_at(&mut m, NOW + 12 * 60_000);
-    assert!(shown(&mut m).is_none());
-}
-
 /// A turn that changed files and ran the tests ends while you watch:
 /// Code, with what it changed and ran.
 #[test]
@@ -321,7 +295,9 @@ fn waits_while_you_type() {
 /// at most once in ten minutes for a session.
 #[test]
 fn the_quick_model_is_asked_when_unclear_and_throttled() {
-    let quick = Quick::new(Ok(r#"{"view":"trail","reason":"where the time went"}"#));
+    let quick = Quick::new(Ok(
+        r#"{"view":"orchestrator","reason":"where the agents are"}"#,
+    ));
     let mut m = model("suggest", &quick);
     edit(&mut m, NOW - 60_000, None);
     frame_at(&mut m, NOW);
@@ -333,7 +309,7 @@ fn the_quick_model_is_asked_when_unclear_and_throttled() {
     let s = shown(&mut m).unwrap();
     assert_eq!(
         (s.view, s.reason.as_str()),
-        (Preset::Trail, "where the time went")
+        (Preset::Orchestrator, "where the agents are")
     );
     // Another unclear turn a minute later: not asked again.
     edit(&mut m, NOW + 1000, None);
@@ -344,7 +320,7 @@ fn the_quick_model_is_asked_when_unclear_and_throttled() {
     edit(&mut m, NOW + 61_000, None);
     frame_at(&mut m, NOW + 11 * 60_000);
     assert_eq!(quick.asked().len(), 2);
-    assert_eq!(shown(&mut m).unwrap().view, Preset::Trail);
+    assert_eq!(shown(&mut m).unwrap().view, Preset::Orchestrator);
 }
 
 /// The quick model failing (timed out, unreadable) is no suggestion.
@@ -415,20 +391,13 @@ fn three_turned_down_in_a_row_stop_it() {
     next(&mut m);
     assert!(shown(&mut m).is_none(), "still stopped");
 
-    // Another kind: turned down twice (once by switching elsewhere), then
-    // taken.
+    // Turned down by switching elsewhere, then taken once back.
     let quick = Quick::new(Err("unused"));
     let mut m = model("suggest", &quick);
     talk(&mut m, NOW - 60_000);
     frame_at(&mut m, NOW);
-    presets::set(&mut m, Preset::Trail);
+    presets::set(&mut m, Preset::Orchestrator);
     assert_eq!(viewsuggest::count(&mut m, "back:chat").streak, 1);
-    look_away(&mut m);
-    talk(&mut m, NOW + 50_000);
-    frame_at(&mut m, NOW + 61_000);
-    let s = shown(&mut m).unwrap();
-    assert_eq!(s.kind, "back:catch-up");
-    presets::set(&mut m, Preset::Normal);
     look_away(&mut m);
     frame_at(&mut m, NOW + 20 * 60_000);
     assert_eq!(shown(&mut m).unwrap().kind, "back:chat");

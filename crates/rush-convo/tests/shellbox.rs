@@ -424,36 +424,6 @@ fn code_has_your_runs_as_check_lines() {
     assert!(got.contains("→ send"), "{got}");
 }
 
-/// Catch-up: what you ran a line each; one running still is still going.
-#[test]
-fn catch_up_says_what_you_ran() {
-    let (s, mut runs) = ran_some();
-    let mut going = ShellRun::new("cargo test", "/work/app", at(14));
-    going.push("running 3 tests\n");
-    runs.push((block_ref(1, 0, 1), going));
-    let got = draw(&s, &in_view(Preset::CatchUp, opts_of(&runs, "", at(20))));
-    let ran = got.lines().find(|l| l.contains("You ran")).expect(&got);
-    assert!(ran.contains("✓ $ rm ~/Desktop"), "{got}");
-    assert!(got.contains("✓ $ git status"), "{got}");
-    let still = got.lines().find(|l| l.contains("Still going")).expect(&got);
-    assert!(still.contains("cargo test · 6s"), "{still}");
-}
-
-/// Trail: a run as a line with its time bar, where it started.
-#[test]
-fn trail_has_your_runs() {
-    let (s, runs) = ran_some();
-    let got = draw(&s, &in_view(Preset::Trail, opts_of(&runs, "", at(20))));
-    let row = got
-        .lines()
-        .find(|l| l.contains("you ran  git status"))
-        .expect(&got);
-    assert!(row.contains('█') || row.contains('▏'), "{row}");
-    assert!(row.contains("0.3s"), "{row}");
-    assert!(row.starts_with(runs[1].0.as_str()), "{row}");
-    assert!(got.contains("you ran  rm ~/Desktop"), "{got}");
-}
-
 /// A `!` run in a session with no turn: its box is all there is, in
 /// every view, as a window draws it too; with a turn after, it stays
 /// above it.
@@ -465,13 +435,7 @@ fn a_bang_run_before_any_turn() {
     run.bang = true;
     let r = bang_ref(0, run.start);
     assert!(r.starts_with("t0:bang:"));
-    for p in [
-        Preset::Normal,
-        Preset::Chat,
-        Preset::Code,
-        Preset::CatchUp,
-        Preset::Trail,
-    ] {
+    for p in [Preset::Normal, Preset::Chat, Preset::Code] {
         let o = in_view(p, opts("", &[(&r, run.clone())], at(20)));
         let got = draw(&s, &o);
         assert!(got.contains("! shell · /work/app"), "{p:?}:\n{got}");

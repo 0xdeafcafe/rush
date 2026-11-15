@@ -618,8 +618,8 @@ pub struct Config {
     )]
     pub advisor: bool,
     /// How the Session's conversation is shown, for every session until
-    /// it's changed: "" or "normal", "chat", "code", "catch-up", "trail",
-    /// "live".
+    /// it's changed: "" or "normal", "chat", "code", "orchestrator"; one
+    /// it no longer has ("catch-up", "trail", "live") reads as normal.
     #[serde(
         rename = "convoView",
         deserialize_with = "lenient",
@@ -1805,14 +1805,14 @@ mod tests {
         let j = serde_json::to_string(&Config::default()).unwrap();
         assert!(!j.contains("convoView"), "{j}");
         let c = Config {
-            convo_view: "catch-up".into(),
+            convo_view: "orchestrator".into(),
             ..Config::default()
         };
         let b = crate::json::to_vec(&c).unwrap();
         let s = String::from_utf8(b.clone()).unwrap();
-        assert!(s.contains(r#""convoView":"catch-up""#), "{s}");
+        assert!(s.contains(r#""convoView":"orchestrator""#), "{s}");
         let back: Config = crate::json::from_slice(&b).unwrap();
-        assert_eq!(back.convo_view, "catch-up");
+        assert_eq!(back.convo_view, "orchestrator");
     }
 
     #[test]

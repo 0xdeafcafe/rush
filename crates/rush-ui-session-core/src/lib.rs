@@ -64,7 +64,6 @@ pub mod side;
 pub mod slash;
 pub mod spawned;
 pub mod start;
-pub mod storywatch;
 pub mod subbox;
 pub mod subfollow;
 pub mod subname;
@@ -136,7 +135,7 @@ pub fn register(x: &mut Ext) {
     x.session_keys.push(shellbox::key);
     x.session_keys.push(keys::esc_twice);
     // The conversation's views: the key through them, and enter on a
-    // catch-up card or a trail's step, before a picked row's own keys.
+    // turn or a step in another view, before a picked row's own keys.
     x.session_keys.push(presets::key);
     x.session_keys.push(viewsuggest::key);
     x.session_keys.push(textsel::key);

@@ -43,6 +43,10 @@ pub struct SpawnRun {
     pub born: Ms,
     pub hosted: String,
     pub live: bool,
+    /// A hosted one's rush session name, and what it does now, as its
+    /// host last said (Spawned's). Rust-only.
+    pub title: String,
+    pub detail: String,
     /// How a hosted one ended, once it has: "failed", "stopped", or ""
     /// for done (Spawned's). Rust-only.
     pub ended: String,
@@ -123,12 +127,21 @@ pub fn spawn_subs<'a>(
         .into_iter()
         .filter(|(_, r)| !r.path.is_empty())
         .map(|(id, r)| {
+            // Its rush session's name first: a model titles it from what
+            // it was asked, where a spawn_agent call has no title of its
+            // own, only the prompt (Rust-only).
+            let named = gist(&r.title);
             let t = title(&r.step);
-            let p = crate::style::one_line(&r.prompt);
             rush_convo::Subagent {
                 id: format!("{SPAWN_PREFIX}{id}"),
                 typ: r.name.clone(),
-                description: if !t.is_empty() { t } else { p },
+                description: if !named.is_empty() {
+                    named
+                } else if !t.is_empty() {
+                    t
+                } else {
+                    gist(&r.prompt)
+                },
                 model: r.model.clone(),
                 tool_use_id: r.step.clone(),
                 path: r.path.clone(),
@@ -143,6 +156,36 @@ pub fn spawn_subs<'a>(
             .then_with(|| a.id.cmp(&b.id))
     });
     out
+}
+
+/// What a prompt or name asks, as a row's name: its first line, the
+/// markdown's marks taken out (bold, code, headings, quotes, list marks)
+/// and a leading "Please" dropped, its first letter made a capital.
+/// Rust-only: Go named a spawned agent by its prompt as written.
+pub fn gist(s: &str) -> String {
+    let first = s
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && l.chars().any(char::is_alphanumeric))
+        .unwrap_or("");
+    let mut t = first
+        .trim_start_matches(['#', '>', '-', '*', ' '])
+        .to_string();
+    for mark in ["**", "__", "`"] {
+        t = t.replace(mark, "");
+    }
+    let t = crate::style::one_line(&t);
+    let low = t.to_lowercase();
+    let t = ["please", "can you", "could you"]
+        .iter()
+        .find(|p| low.starts_with(*p) && low[p.len()..].starts_with([' ', ',']))
+        .map_or(t.as_str(), |p| &t[p.len()..])
+        .trim_start_matches([',', ' ']);
+    let mut c = t.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().chain(c).collect(),
+        None => String::new(),
+    }
 }
 
 /// The shell steps' and spawn_agent calls' windows in s, in order; one
@@ -430,6 +473,27 @@ mod tests {
             ("fix", "", false),
         ] {
             assert_eq!(same_prompt(asked, got), want, "{asked:?} {got:?}");
+        }
+    }
+
+    /// A prompt as a row's name: its first line with the markdown's
+    /// marks and a leading "Please" taken out.
+    #[test]
+    fn gists() {
+        for (in_, want) in [
+            (
+                "Please review a branch for landing in h2re",
+                "Review a branch for landing in h2re",
+            ),
+            (
+                "You're lane **hot-overrides** in h2recomp",
+                "You're lane hot-overrides in h2recomp",
+            ),
+            ("\n## Fix `parse()`\nmore", "Fix parse()"),
+            ("- can you, check CI", "Check CI"),
+            ("", ""),
+        ] {
+            assert_eq!(gist(in_), want, "{in_:?}");
         }
     }
 
