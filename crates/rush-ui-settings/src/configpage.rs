@@ -9,6 +9,7 @@
 //! :303, cellModels :385, cellPickLines :395, cellPickKey :434).
 
 use rush_core::adapter::Choice;
+use rush_core::adapter::others::Tier;
 use rush_core::text::Line;
 use rush_state::setup::{AT_LIMIT_ACCOUNT, AT_LIMIT_NEXT, AT_LIMIT_WAIT};
 
@@ -549,6 +550,7 @@ fn cell_pick_lines(m: &Model, p: &CellPick, w: usize, h: usize) -> Vec<Line> {
             star,
             sp(fit_str(&model_word(&p.kind, &c.id), 28), TEXT),
             plain(" "),
+            sp(format!("{:<10}", tier_of(cfg, &p.kind, c).as_str()), FAINT),
             sp(c.note.clone(), FAINT),
         ]));
     }
@@ -577,6 +579,7 @@ fn cell_pick_lines(m: &Model, p: &CellPick, w: usize, h: usize) -> Vec<Line> {
             ("↑↓", "model"),
             ("space", "may call it or not"),
             ("*", "starts with it"),
+            ("t", "its tier"),
             ("esc", "done"),
         ],
     ));
@@ -646,8 +649,44 @@ fn cell_pick_key(m: &mut Model, s: &str) -> Out {
             }
             super::changed(m);
         }
+        "t" => {
+            // Its tier, for an agent that names one (top, workhorse,
+            // quick) rather than a model: round the three, back to where
+            // its name puts it (Rust-only, docs/native-agents.md).
+            if p.cursor == 0 {
+                return Out::Draw;
+            }
+            let c = models[p.cursor - 1].clone();
+            let named = named_tier(&p.kind, &c);
+            let next = match tier_of(config(m), &p.kind, &c) {
+                Tier::Top => Tier::Workhorse,
+                Tier::Workhorse => Tier::Quick,
+                Tier::Quick => Tier::Top,
+            };
+            let cfg = config_mut(m);
+            if next == named {
+                cfg.model_tiers.remove(&c.id);
+            } else {
+                cfg.model_tiers.insert(c.id.clone(), next.as_str().into());
+            }
+            super::changed(m);
+        }
         _ => return Out::Idle,
     }
     dialog_mut(m).cell_pick = Some(p);
     Out::Draw
+}
+
+/// The tier model c of agent kind's name puts it in.
+fn named_tier(kind: &str, c: &Choice) -> Tier {
+    let local = reg().provider_of(kind) == "ollama";
+    rush_core::adapter::others::place(&c.id, c.context, local).tier
+}
+
+/// Model c's tier: where Settings moved it, else where its name puts it.
+fn tier_of(cfg: &rush_state::Config, kind: &str, c: &Choice) -> Tier {
+    cfg.model_tiers
+        .get(&c.id)
+        .and_then(|t| Tier::parse(t))
+        .unwrap_or_else(|| named_tier(kind, c))
 }
