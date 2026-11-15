@@ -476,7 +476,8 @@ pub struct Spawned {
     pub session_id: String,
     pub profile: String,
     /// Started beside the session as one of its own (start_agent, Meta
-    /// startedFrom), not its subagent: it keeps its own row in the list.
+    /// startedFrom), not its subagent: it keeps its own row in the list,
+    /// and what it asks is a card in this session too.
     pub beside: bool,
     /// What it waits on you for, while it does (Info.needs); and the
     /// permissions among that, each whole, to answer from its parent's

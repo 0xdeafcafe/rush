@@ -847,6 +847,106 @@ fn a_found_spawn_is_linked_to_its_session() {
     );
 }
 
+/// Rust-only: what a session started beside this one asks you (start_agent,
+/// or `rush session start --meta startedFrom=…` from its shell), and what
+/// one rush hosted for it that no step's window holds asks, is a card in
+/// this session, as its runs' asks are, though neither is a run of its:
+/// called by its agent and its session's name, answered on its own host
+/// and kept away while that's on its way, and opened as its own session.
+#[test]
+fn a_beside_sessions_ask_is_a_card_here() {
+    use super::host::{SpawnAsk, Spawned};
+    use crate::screens::session_cards::Act;
+    let d = tempfile::tempdir().unwrap();
+    let fake = Fake::new();
+    let mut m = hosted(&d, &fake);
+    m.agents[0].rush = true;
+    m.agents[0].job.id = "rush-parent".into();
+    let mut beside = m.agents[0].clone();
+    beside.key = "glm/a:b1".into();
+    beside.job.id = "b1".into();
+    m.agents.push(beside);
+    let p = d.path().join("s9.jsonl");
+    std::fs::write(&p, super::tests_subview::X_LINES.join("\n") + "\n").unwrap();
+    let ask = SpawnAsk {
+        id: "call_1".into(),
+        call: "Bash: rg -n Event crates".into(),
+        ..SpawnAsk::default()
+    };
+    let spawned = |id: &str, beside: bool| Spawned {
+        id: id.into(),
+        kind: "claude".into(),
+        name: "GLM Coding Plan in Claude Code".into(),
+        title: "Rich remote web app".into(),
+        prompt: "make the web app rich".into(),
+        transcript: p.to_string_lossy().into_owned(),
+        born: NOW - 19_000,
+        live: true,
+        session_id: format!("{id}-0123456789abcdef"),
+        profile: "glm".into(),
+        beside,
+        needs: "Bash rg -n Event crates".into(),
+        asking: vec![ask.clone()],
+        ..Spawned::default()
+    };
+    // One begun an hour before any step ran: no window holds it.
+    let mut unclaimed = spawned("u1", false);
+    unclaimed.born = NOW - 3_600_000;
+    *fake.spawned.lock().unwrap() = vec![spawned("b1", true), unclaimed];
+    let look = |m: &mut Model| {
+        super::subs::kick(m, KEY);
+        super::subs::refresh(m, KEY);
+    };
+    let cards = |m: &Model| {
+        (super::cards_host::host().info)(m, KEY)
+            .expect("hosted")
+            .sub_asks
+    };
+    look(&mut m);
+    let r = &conn(&mut m, KEY).runs;
+    assert!(r.spawns.is_empty(), "not its runs: {:?}", r.spawns);
+    assert!(!r.subs.iter().any(|s| s.id.starts_with("spawn:")));
+    let got = cards(&m);
+    let hosts: Vec<&str> = got.iter().map(|a| a.host.as_str()).collect();
+    assert_eq!(hosts, ["u1", "b1"], "{got:?}");
+    let a = &got[1];
+    assert_eq!(
+        a.who,
+        "GLM Coding Plan in Claude Code · Rich remote web app"
+    );
+    assert!(a.answers(), "{a:?}");
+    assert_eq!(
+        (a.request.as_str(), a.call.as_str()),
+        ("call_1", "Bash: rg -n Event crates")
+    );
+
+    let act = super::cards_host::host().act;
+    act(
+        &mut m,
+        KEY,
+        Act::AnswerSub {
+            host: "b1".into(),
+            request: "call_1".into(),
+            allow: true,
+            why: String::new(),
+        },
+    );
+    assert_eq!(
+        *fake.spawn_answers.lock().unwrap(),
+        vec![("b1".into(), "call_1".into(), true, String::new())]
+    );
+    // Its host still lists it at the next look: the card stays away.
+    m.now += 3_000;
+    m.clock = Some(m.now);
+    look(&mut m);
+    let hosts: Vec<String> = cards(&m).into_iter().map(|a| a.host).collect();
+    assert_eq!(hosts, ["u1"]);
+
+    // Open opens its own session, not a run of this one's.
+    act(&mut m, KEY, Act::OpenRun("spawn:b1".into()));
+    assert_eq!(m.session.as_ref().map(|v| v.key.as_str()), Some("glm/a:b1"));
+}
+
 /// A past conversation's agents its shell ran are looked for once it's
 /// read, even when the first look came before it was: the search runs
 /// on every tick, not only when a reading is due (refreshSpawns,

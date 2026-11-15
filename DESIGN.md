@@ -324,7 +324,17 @@ Claude, fleet, the other adapters) builds on these.
   `spawns::hosted_end`: ✗ failed on an error, ⏹ stopped when its host
   was lost, else ✓ done), as a Claude subagent's does. A sibling
   start_agent started (`Spawned::beside`) is never a run of the caller's,
-  and a start_agent call has no window to claim one. One name for a
+  and a start_agent call has no window to claim one. Started beside
+  is so whatever else its Meta says (`rush_core::agent::subagent_of`):
+  `rush session start --meta startedFrom=…` from a session's shell no
+  longer adds spawnedBy, and one that has both (started before that) is
+  still a row of its own, the fleet dropping a link an older reading made
+  (`Loader::unlink`), its `?` and what it asks on its own row. What it
+  asks is a card in the caller's conversation too, as its runs' asks
+  are, and so is what a hosted run no step's window holds asks
+  (`Runs::askers`, kept only for their asks: not runs, nothing to open
+  but the session itself, which "Open it" does); before, both were
+  dropped, and a run folded into its parent's row asked from nowhere. One name for a
   child everywhere it's told of (`rush_core::agent::sub_name`: "Codex ·
   fix the flaky test"). A folded run's row under its parent says it
   waits on you (●) or, a minute after, how it ended, not a spinner

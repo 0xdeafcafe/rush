@@ -1203,6 +1203,64 @@ fn spawned_codex() {
     );
 }
 
+// A session started beside another (Meta startedFrom, with or without the
+// spawnedBy `rush session start` from its shell adds) is a row of its own
+// asking for itself: its parent doesn't need you for it, and a link an
+// older reading made is dropped (Rust-only).
+#[test]
+fn started_beside_asks_on_its_own_row() {
+    let rush_row = |key: &str, id: &str| {
+        let mut a = Agent {
+            key: key.into(),
+            rush: true,
+            ..Agent::default()
+        };
+        a.job.id = id.into();
+        a
+    };
+    let parent = rush_row("default/a:parent00", "parent00");
+    let mut kid = rush_row("glm/a:beside00", "beside00");
+    kid.job.state = State::Blocked;
+    kid.job.needs = "Bash rg -n Event crates".into();
+    let metas: [&[(&str, &str)]; 2] = [
+        &[("startedFrom", "parent00")],
+        &[("startedFrom", "parent00"), ("spawnedBy", "parent00")],
+    ];
+    for meta in metas {
+        let hosted = vec![
+            HostInfo {
+                id: "parent00".into(),
+                ..HostInfo::default()
+            },
+            HostInfo {
+                id: "beside00".into(),
+                meta: meta
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+                ..HostInfo::default()
+            },
+        ];
+        let mut l = loader();
+        l.ask_inline = true;
+        l.link(&kid.key, &parent.key, "spawnedBy"); // an older reading's
+        let agents = vec![parent.clone(), kid.clone()];
+        let spawned = l.hosted_spawns(&hosted, &agents, Vec::new());
+        assert!(!l.links.contains_key(&kid.key), "{meta:?}: still linked");
+        let got = l.fold_spawns(None, agents, spawned, &mut HashSet::new());
+        let keys: Vec<&str> = got.iter().map(|a| a.key.as_str()).collect();
+        assert_eq!(keys, [parent.key.as_str(), kid.key.as_str()], "{meta:?}");
+        assert_ne!(
+            got[0].job.state,
+            State::Blocked,
+            "{meta:?}: the parent asks"
+        );
+        assert!(!got[0].sub_asks(), "{meta:?}");
+        assert_eq!(got[1].job.state, State::Blocked, "{meta:?}");
+        assert_eq!(got[1].job.needs, "Bash rg -n Event crates", "{meta:?}");
+    }
+}
+
 // A run an agent's stand-in hosted is listed with the rush session that
 // ran it, running or not; one another agent ran is found by its process.
 #[test]

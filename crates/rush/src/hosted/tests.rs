@@ -315,9 +315,17 @@ fn hosted_runs_are_the_parents_own() {
     write("h4", "port the parser");
     let mut sibling = info("h4", "", "working");
     sibling.meta = [("startedFrom".to_string(), "p".to_string())].into();
-    let got = hosted_runs(&reg, &[sibling], "p");
+    let got = hosted_runs(&reg, &[sibling.clone()], "p");
     assert_eq!(got.len(), 1, "{got:?}");
     assert!(got[0].beside && got[0].id == "h4", "{got:?}");
+    // So is one `rush session start --meta startedFrom=p` started from
+    // its shell, which says spawnedBy too: called by its session's name.
+    sibling.meta.insert("spawnedBy".into(), "p".into());
+    sibling.name = "Port the parser".into();
+    let got = hosted_runs(&reg, &[sibling], "p");
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(got[0].beside, "{got:?}");
+    assert_eq!(got[0].title, "Port the parser");
 
     // How it ended, the block its last turn ended with, and what an agent
     // it started asks in turn, saying whose and answered on its own host

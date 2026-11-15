@@ -476,11 +476,14 @@ pub fn start_session(env: &Env, o: StartOpts) -> Result<Info, String> {
     if let Some(m) = &o.meta {
         cfg.meta.extend(m.clone());
     }
-    // Started from a rush session's shell, it's that session's subagent.
+    // Started from a rush session's shell, it's that session's subagent;
+    // one told it's started beside it (--meta startedFrom=…) is a session
+    // of its own, as start_agent's are.
     if let Ok(by) = std::env::var("RUSH_SESSION")
         && !by.is_empty()
         && !cfg.resume
         && cfg.meta.get("spawnedBy").is_none_or(String::is_empty)
+        && cfg.meta.get("startedFrom").is_none_or(String::is_empty)
     {
         cfg.meta.insert("spawnedBy".into(), by);
     }

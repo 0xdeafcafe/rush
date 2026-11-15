@@ -576,6 +576,12 @@ pub struct Runs {
     /// The agents rush hosted for the session's shell or its spawn_agent
     /// calls, by the step that ran each (spawns.go's c.spawns).
     pub spawns: HashMap<String, SpawnRun>,
+    /// The sessions rush hosted for it that aren't among its runs, by
+    /// their rush session: those started beside it (start_agent, or
+    /// `rush session start --meta startedFrom=…`), and those no step's
+    /// window holds. Each is kept only for what it asks you, which is a
+    /// card in this session as its runs' asks are (Rust-only).
+    pub askers: HashMap<String, SpawnRun>,
     /// The steps whose agent is looked for by its session, not found yet:
     /// when each was last looked for, and whether it's given up on, looked
     /// for past its command's end (spawnRun.looked, lost).
@@ -1328,8 +1334,15 @@ impl Runs {
                 r.answered.clear();
             }
         }
+        self.askers.retain(|id, r| {
+            if !seen.contains(id) {
+                r.missed = r.missed.saturating_add(1);
+            }
+            r.missed < crate::spawns::MISSED_GONE
+        });
         for h in found {
             if h.beside {
+                self.ask_only(h);
                 continue;
             }
             if let Some(r) = self.spawns.get_mut(&h.id) {
@@ -1342,46 +1355,77 @@ impl Runs {
                 continue;
             }
             if self.host_none.contains(&h.id) || h.transcript.is_empty() {
+                self.ask_only(h);
                 continue;
             }
             let mut step = h.step.clone();
             if step.is_empty() || s.step_by_call(&step).is_none() {
                 if !step.is_empty() && s.partial {
-                    continue; // further back than read so far
+                    self.ask_only(h); // further back than read so far
+                    continue;
                 }
                 let wins = wins.get_or_insert_with(|| windows(s, now, SPAWN_GRACE));
                 step = claim(wins, &h.kind, &h.prompt, h.born, false).to_string();
             }
             if step.is_empty() {
                 // Begun outside every window, it stays so.
-                self.host_none.insert(h.id);
+                self.host_none.insert(h.id.clone());
+                self.ask_only(h);
                 continue;
             }
+            // A run now, what it asks is its run's; what was answered of
+            // it as an asker stays answered.
+            let answered = self
+                .askers
+                .remove(&h.id)
+                .map(|a| a.answered)
+                .unwrap_or_default();
             let row = spawn_row(&h.profile, &h.session_id);
             links.extend(row.clone());
-            self.spawns.insert(
-                h.id.clone(),
-                SpawnRun {
-                    step,
-                    kind: h.kind,
-                    name: h.name,
-                    prompt: h.prompt,
-                    model: h.model,
-                    path: h.transcript,
-                    born: h.born,
-                    hosted: h.id,
-                    live: h.live,
-                    title: h.title,
-                    detail: h.detail,
-                    ended: h.ended,
-                    needs: h.needs,
-                    asking: h.asking,
-                    row: row.unwrap_or_default(),
-                    ..SpawnRun::default()
-                },
-            );
+            let mut r = SpawnRun {
+                step,
+                kind: h.kind,
+                name: h.name,
+                prompt: h.prompt,
+                model: h.model,
+                path: h.transcript,
+                born: h.born,
+                hosted: h.id.clone(),
+                live: h.live,
+                title: h.title,
+                detail: h.detail,
+                ended: h.ended,
+                answered,
+                row: row.unwrap_or_default(),
+                ..SpawnRun::default()
+            };
+            r.take_asks(h.needs, h.asking);
+            self.spawns.insert(h.id, r);
         }
         links
+    }
+
+    /// Keeps what hosted session h, not one of this session's runs, asks
+    /// you, to be its card here: what it's called is its own session's
+    /// name, as its row in the list says, when it has one (Rust-only).
+    fn ask_only(&mut self, h: super::host::Spawned) {
+        let r = self.askers.entry(h.id.clone()).or_default();
+        r.hosted = h.id;
+        r.kind = h.kind;
+        r.name = h.name;
+        r.prompt = if h.title.trim().is_empty() {
+            h.prompt
+        } else {
+            h.title.clone()
+        };
+        r.title = h.title;
+        r.detail = h.detail;
+        r.model = h.model;
+        r.born = h.born;
+        r.live = h.live;
+        r.ended = h.ended;
+        r.missed = 0;
+        r.take_asks(h.needs, h.asking);
     }
 
     /// Takes in the sessions found for the agents its steps ran, each
@@ -2098,7 +2142,12 @@ pub fn refresh(m: &mut Model, key: &str) {
     let mut spawned = None;
     // An agent it hosted still at work may come to ask you something
     // with the session idle: its ask is the session's card (Rust-only).
-    let spawn_live = r.spawns.values().any(|x| x.live && !x.hosted.is_empty());
+    // So may one started beside it, its ask a card here too.
+    let spawn_live = r
+        .spawns
+        .values()
+        .chain(r.askers.values())
+        .any(|x| x.live && !x.hosted.is_empty());
     if rush
         && !host_id.is_empty()
         && (r.hosted_at == 0 || (busy || spawn_live) && now - r.hosted_at >= SPAWN_EVERY)

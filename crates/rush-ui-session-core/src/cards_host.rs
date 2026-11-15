@@ -145,7 +145,8 @@ fn info(m: &Model, key: &str) -> Option<HostInfo> {
 /// waiting (Rust-only).
 fn sub_asks(m: &Model, c: &super::Conn, s: Option<&rush_convo::Session>) -> Vec<cards::SubAsk> {
     let r = &c.runs;
-    let mut runs: Vec<_> = r.spawns.iter().collect();
+    // Those started beside it, or no step's, ask here too (askers).
+    let mut runs: Vec<_> = r.spawns.iter().chain(r.askers.iter()).collect();
     runs.sort_by(|a, b| (a.1.born, a.0).cmp(&(b.1.born, b.0)));
     let mut out = Vec::new();
     let mut running: Option<Vec<String>> = None;
@@ -263,7 +264,8 @@ fn sent_sub(
 /// Marks request, asked by subagent host, answered in session key's
 /// runs (or, when answered is false, not after all).
 fn mark_sub(m: &mut Model, key: &str, host: &str, request: &str, answered: bool) {
-    for x in conn(m, key).runs.spawns.values_mut() {
+    let r = &mut conn(m, key).runs;
+    for x in r.spawns.values_mut().chain(r.askers.values_mut()) {
         let asks = x.hosted == host || x.asking.iter().any(|a| a.host == host);
         if !asks {
             continue;
@@ -280,7 +282,17 @@ fn mark_sub(m: &mut Model, key: &str, host: &str, request: &str, answered: bool)
 /// when rush hosts it and it waits on what can't be answered here;
 /// whether it did.
 fn open_waiting(m: &mut Model, key: &str, run: &str) -> bool {
-    let Some(x) = conn(m, key).runs.hosted_of(run) else {
+    // One that isn't its run is opened as the session it is, where its
+    // own cards are.
+    let r = &conn(m, key).runs;
+    if let Some(x) = run
+        .strip_prefix(crate::spawns::SPAWN_PREFIX)
+        .and_then(|id| r.askers.get(id))
+    {
+        let host = x.hosted.clone();
+        return super::spawned::open_session(m, &host);
+    }
+    let Some(x) = r.hosted_of(run) else {
         return false;
     };
     let there = x
