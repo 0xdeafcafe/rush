@@ -4,7 +4,8 @@
 //! zcode-acp-server (npm zcode-acp), which drives that same ZCode runtime
 //! and speaks ACP, and reads the GLM Coding Plan's limits as ZCode does.
 //! It stays out of sight until both are installed. Port of
-//! internal/adapters/glm/glm.go:1-99 and quota.go:1-190.
+//! internal/adapters/glm/glm.go:1-99 and quota.go:1-190; plan_quota,
+//! for GLM in Claude Code and Pi, is rush's own.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -153,6 +154,10 @@ impl Keyed for Glm {
     fn key_env(&self) -> String {
         "ZAI_API_KEY".into()
     }
+    /// A Coding Plan's: Z.ai's key pays from the plan.
+    fn key_name(&self) -> String {
+        "Coding Plan key".into()
+    }
 }
 
 impl Programmer for Glm {
@@ -240,9 +245,12 @@ struct QuotaData {
 #[derive(Deserialize, Default)]
 #[serde(default)]
 struct Limit {
-    /// TOKENS_LIMIT, TIME_LIMIT (MCP calls)
+    /// TOKENS_LIMIT or CREDIT_LIMIT (the plan's allowance, as Z.ai
+    /// counted it before and after 2026), TIME_LIMIT (MCP calls)
     #[serde(rename = "type")]
     kind: String,
+    /// The span's unit: 3 hours, 5 months, 6 weeks.
+    unit: Option<i64>,
     number: Option<i64>,
     usage: Option<f64>,
     #[serde(rename = "currentValue")]
@@ -270,12 +278,26 @@ impl QuotaSource for Glm {
         if key.is_empty() {
             return Err(Box::new(no_key()));
         }
+        self.read_plan(&key, &base, "ZCode's API key")
+    }
+}
+
+impl Glm {
+    /// The Coding Plan's limits for key, a Z.ai one: what GLM in Claude
+    /// Code and in Pi read with the key Settings › Providers keeps.
+    pub fn plan_quota(&self, key: &str) -> adapter::Result<Quota> {
+        self.read_plan(key, HOST_INTL, "the Coding Plan key")
+    }
+
+    /// The limits for key from the host its base URL is on: whose names
+    /// the key when it's refused.
+    fn read_plan(&self, key: &str, base: &str, whose: &str) -> adapter::Result<Quota> {
         let host = if base.contains("z.ai") {
             &self.host_intl
         } else {
             &self.host_cn
         };
-        let res = crate::http::get(&format!("{host}{QUOTA_PATH}"), &key).map_err(Error::other)?;
+        let res = crate::http::get(&format!("{host}{QUOTA_PATH}"), key).map_err(Error::other)?;
         if res.code == 429 {
             return Err(Box::new(Error::other("GLM quota: rate-limited")));
         }
@@ -283,7 +305,7 @@ impl QuotaSource for Glm {
             .map_err(|_| Error::other(format!("GLM quota: {}", res.status)))?;
         if !r.success {
             if r.code == 401 || r.code == 1001 {
-                return Err(Box::new(Error::other("GLM refused ZCode's API key")));
+                return Err(Box::new(Error::other(format!("GLM refused {whose}"))));
             }
             return Err(Box::new(Error::other(format!("GLM quota: {}", r.msg))));
         }
@@ -310,18 +332,23 @@ fn window_of(l: &Limit) -> Option<Window> {
         span: Duration::from_secs(hours * 3600),
         ..Window::default()
     };
-    let mut win = match (l.kind.as_str(), l.number) {
-        ("TOKENS_LIMIT", Some(5)) => w("token_5h", "5h", "5-hour", 5),
-        ("TOKENS_LIMIT", Some(7)) => w("token_week", "7d", "weekly", 7 * 24),
-        ("TOKENS_LIMIT", n) => {
+    let mut win = match (l.kind.as_str(), l.unit, l.number) {
+        ("TOKENS_LIMIT" | "CREDIT_LIMIT", Some(3) | None, Some(5)) => {
+            w("token_5h", "5h", "5-hour", 5)
+        }
+        // A week: unit 6 of 1, as Z.ai sends it, or 7 (days) in ZCode's.
+        ("TOKENS_LIMIT" | "CREDIT_LIMIT", Some(6), _) | ("TOKENS_LIMIT", None, Some(7)) => {
+            w("token_week", "7d", "weekly", 7 * 24)
+        }
+        ("TOKENS_LIMIT" | "CREDIT_LIMIT", _, n) => {
             let mut x = w("token", "tokens", "tokens", 0);
             if let Some(n) = n {
                 x.id = format!("token_{n}");
             }
             x
         }
-        ("TIME_LIMIT" | "MCP_LIMIT", _) => w("mcp", "MCP", "MCP calls", 30 * 24),
-        (t, _) => w(&t.to_lowercase(), t, t, 0),
+        ("TIME_LIMIT" | "MCP_LIMIT", _, _) => w("mcp", "MCP", "MCP calls", 30 * 24),
+        (t, _, _) => w(&t.to_lowercase(), t, t, 0),
     };
     // The most precise figure there is: what's left of the parts, what's
     // used of the allowance, then the percentage used.
@@ -417,6 +444,48 @@ mod tests {
         assert_eq!(err.to_string(), no_key().to_string());
     }
 
+    // As Z.ai answered for a Max plan in November 2026: its allowance in
+    // credits, a week as unit 6 of 1.
+    const CREDITS: &str = r#"{"code":200,"msg":"Operation successful","data":{"limits":[{"type":"CREDIT_LIMIT","unit":3,"number":5,"usage":28000,"currentValue":7000,"remaining":21000,"percentage":25},{"type":"CREDIT_LIMIT","unit":6,"number":1,"usage":140000,"currentValue":0,"remaining":140000,"percentage":0,"nextResetTime":1795348571998}],"level":"max"},"success":true}"#;
+
+    #[test]
+    fn credit_limits() {
+        let r: QuotaResponse = serde_json::from_str(CREDITS).unwrap();
+        let q = quota_of(&r, 0);
+        assert_eq!((q.plan.as_str(), q.windows.len()), ("max", 2));
+        let five = q.window("token_5h").unwrap();
+        assert_eq!(
+            (five.used, five.limit, five.percent),
+            (7000.0, 28000.0, 25.0)
+        );
+        let week = q.window("token_week").unwrap();
+        assert_eq!(
+            (week.label.as_str(), week.limit, week.resets_at),
+            ("7d", 140000.0, 1795348571998)
+        );
+    }
+
+    // GLM in another harness reads the plan's limits with the key it was
+    // handed, from Z.ai's host.
+    #[test]
+    fn plan_quota_with_a_kept_key() {
+        let seen = Arc::new(Mutex::new(String::new()));
+        let s2 = seen.clone();
+        let srv = fake::serve(move |r| {
+            *s2.lock().unwrap() = r.auth.clone();
+            (200, QUOTA.to_string())
+        });
+        let g = Glm::at(&srv.url, "http://cn.invalid", "/nowhere");
+        let q = g.plan_quota("kept-key").unwrap();
+        assert_eq!(*seen.lock().unwrap(), "Bearer kept-key");
+        assert_eq!((q.plan.as_str(), q.windows.len()), ("pro", 3));
+        let srv = fake::serve(|_| (200, REFUSED.to_string()));
+        let err = Glm::at(&srv.url, "http://cn.invalid", "/nowhere")
+            .plan_quota("bad")
+            .unwrap_err();
+        assert_eq!(err.to_string(), "GLM refused the Coding Plan key");
+    }
+
     // glm_test.go: TestDormantUntilInstalled, through a registry with a
     // PATH of its own: the bridge is what's looked for.
     #[test]
@@ -443,6 +512,7 @@ mod tests {
         let g = Glm::new();
         assert_eq!((g.name().as_str(), g.maker().as_str()), ("ZCode", "GLM"));
         assert_eq!(g.key_env(), "ZAI_API_KEY");
+        assert_eq!(g.key_name(), "Coding Plan key");
         assert!(g.features().contains_key(&Feature::Quota));
     }
 }

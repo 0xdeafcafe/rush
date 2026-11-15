@@ -1,8 +1,9 @@
 //! One provider's models in another's harness, where the provider serves
 //! the API that harness speaks: DeepSeek and GLM in Claude Code, on their
 //! Anthropic-compatible APIs, and Anthropic, OpenAI, DeepSeek and GLM in
-//! Pi. Each is paid for per token with the provider's API key, which
-//! Settings › Providers keeps.
+//! Pi. Each is paid for with the provider's key, which Settings ›
+//! Providers keeps: per token, but for GLM's, whose endpoints here are
+//! its Coding Plan's, which the key draws from (rush's own, after Go).
 //!
 //! Pairs that would need a translator aren't here: Claude Code speaks only
 //! Anthropic's API, which OpenAI doesn't serve, and Codex only OpenAI's
@@ -19,9 +20,10 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use rush_core::adapter::{
-    Adapter, Conn, Driver, Feature, Features, Kind, Level, PlanRider, Profile, Programmer,
-    Provided, Registry, Result, Rider, Sink, StartOptions, Support,
+    Account, Adapter, Conn, Driver, Feature, Features, Kind, Level, PlanRider, Profile, Programmer,
+    Provided, QuotaSource, Registry, Result, Rider, Sink, StartOptions, Support,
 };
+use rush_core::usage::Quota;
 
 use crate::{Getenv, process_env};
 
@@ -50,6 +52,7 @@ const NONE: Pair0 = Pair0 {
     pi_api: "",
     models: &[],
     plan: false,
+    coding_plan: false,
 };
 
 impl std::ops::Deref for Pair {
@@ -78,10 +81,13 @@ pub struct Pair0 {
     /// Runs the provider on the plan the harness is signed in to (Pi's
     /// own /login), in the harness's own folder, with no key at all.
     plan: bool,
+    /// Its key draws from GLM's Coding Plan, whose limits it reads.
+    coding_plan: bool,
 }
 
-// ponytail: DeepSeek's and GLM's model ids are as they were named in 2026;
-// read the provider's /models when they go stale.
+// ponytail: DeepSeek's and GLM's model ids are as they were named in 2026
+// (the Coding Plan serves GLM-5.3 and its Flash only); read the
+// provider's /models when they go stale.
 const PAIRS: [Pair0; 8] = [
     Pair0 {
         kind: "deepseek-claude",
@@ -93,10 +99,11 @@ const PAIRS: [Pair0; 8] = [
     },
     Pair0 {
         kind: "glm-claude",
-        name: "GLM in Claude Code",
+        name: "GLM Coding Plan in Claude Code",
         provider: "glm",
         harness: CLAUDE,
         url: "https://api.z.ai/api/anthropic",
+        coding_plan: true,
         ..NONE
     },
     Pair0 {
@@ -146,13 +153,14 @@ const PAIRS: [Pair0; 8] = [
     },
     Pair0 {
         kind: "glm-pi",
-        name: "GLM in Pi",
+        name: "GLM Coding Plan in Pi",
         provider: "glm",
         harness: PI,
         url: "https://api.z.ai/api/coding/paas/v4",
         pi_provider: "rush-glm",
         pi_api: "openai-completions",
-        models: &["glm-4.6", "glm-4.5-air"],
+        models: &["glm-5.3", "glm-5.3-flash"],
+        coding_plan: true,
         ..NONE
     },
 ];
@@ -339,6 +347,13 @@ impl Adapter for Pair {
         );
         out.insert(Feature::SignIn, no("an API key, not a sign-in"));
         out.insert(Feature::Effort, no("as the provider serves it"));
+        if self.coding_plan {
+            let key = "one Coding Plan key, kept in Settings › Providers";
+            out.insert(Feature::Quota, Support::YES.with("the GLM Coding Plan's"));
+            out.insert(Feature::Pricing, no("the plan's, not per token"));
+            out.insert(Feature::Switch, no(key));
+            out.insert(Feature::SignIn, no("a Coding Plan key, not a sign-in"));
+        }
         if self.plan {
             out.insert(Feature::Quota, no("your plan's, which Pi doesn't report"));
             out.insert(Feature::Switch, no("the one Pi's /login signed in"));
@@ -373,6 +388,26 @@ impl Adapter for Pair {
         provided: Provided,
         plan_rider: PlanRider,
     );
+    /// GLM's Coding Plan's limits, which its key draws from.
+    fn quota_source(&self) -> Option<&dyn QuotaSource> {
+        self.coding_plan.then_some(self as &dyn QuotaSource)
+    }
+}
+
+impl QuotaSource for Pair {
+    /// The Coding Plan's limits, read with the key Settings › Providers
+    /// keeps. It reads the keychain: never on the UI thread.
+    fn quota(&self, _: &Profile, _: &Account) -> Result<Quota> {
+        let key = rush_state::vault::api_key(self.provider);
+        if key.is_empty() {
+            return Err(err(format!(
+                "{} has no {}: add one in Settings › Providers",
+                self.reg.provider_label(self.provider),
+                self.reg.key_name(self.provider)
+            )));
+        }
+        rush_acp::glm::Glm::new().plan_quota(&key)
+    }
 }
 
 impl Rider for Pair {
@@ -416,8 +451,9 @@ impl Driver for Pair {
         };
         if key.is_empty() {
             return Err(err(format!(
-                "{} has no API key: add one in Settings › Providers",
-                self.reg.provider_label(self.provider)
+                "{} has no {}: add one in Settings › Providers",
+                self.reg.provider_label(self.provider),
+                self.reg.key_name(self.provider)
             )));
         }
         if o.profile.dir.is_empty() {
@@ -531,6 +567,15 @@ mod tests {
         assert_eq!(f[&Feature::Quota].note, "paid per token with the API key");
         assert_eq!(f[&Feature::Live].is, rush_core::adapter::Has::No);
         assert!(f.contains_key(&Feature::Rewind));
+        assert!(reg.get("deepseek-claude").unwrap().quota_source().is_none());
+        // GLM's key draws from its Coding Plan, whose limits it reads.
+        let glm = reg.get("glm-claude").unwrap();
+        assert_eq!(glm.name(), "GLM Coding Plan in Claude Code");
+        assert!(glm.quota_source().is_some());
+        let f = reg.features("glm-claude").unwrap();
+        assert_eq!(f[&Feature::Quota].is, rush_core::adapter::Has::Yes);
+        assert_eq!(f[&Feature::Quota].note, "the GLM Coding Plan's");
+        assert_eq!(pair(&reg, "glm-pi").models, ["glm-5.3", "glm-5.3-flash"]);
         let plan = reg.features("anthropic-plan-pi").unwrap();
         assert_eq!(plan[&Feature::SignIn].note, "Pi's own /login, in Pi");
         assert!(!plan.contains_key(&Feature::Rewind));

@@ -411,10 +411,10 @@ glm-claude,GLM,Claude Code,preview,True,stats,Usage history,yes,declaration; see
 glm-claude,GLM,Claude Code,preview,True,live,Running sessions,no,declaration; see caveats,not for a provider in another's harness yet
 glm-claude,GLM,Claude Code,preview,True,history,Past sessions,no,declaration; see caveats,not for a provider in another's harness yet
 glm-claude,GLM,Claude Code,preview,True,remote,Remote sessions,no,declaration; see caveats,
-glm-claude,GLM,Claude Code,preview,True,switch,Account switching,no,declaration; see caveats,"one API key, kept in Settings › Providers"
-glm-claude,GLM,Claude Code,preview,True,signin,Sign-in,no,declaration; see caveats,"an API key, not a sign-in"
-glm-claude,GLM,Claude Code,preview,True,quota,Limits,no,declaration; see caveats,paid per token with the API key
-glm-claude,GLM,Claude Code,preview,True,pricing,Pricing,no,declaration; see caveats,"the provider's own prices, which rush doesn't know"
+glm-claude,GLM,Claude Code,preview,True,switch,Account switching,no,declaration; see caveats,"one Coding Plan key, kept in Settings › Providers"
+glm-claude,GLM,Claude Code,preview,True,signin,Sign-in,no,declaration; see caveats,"a Coding Plan key, not a sign-in"
+glm-claude,GLM,Claude Code,preview,True,quota,Limits,yes,declaration; see caveats,the GLM Coding Plan's
+glm-claude,GLM,Claude Code,preview,True,pricing,Pricing,no,declaration; see caveats,"the plan's, not per token"
 glm-claude,GLM,Claude Code,preview,True,efficiency,Efficiency,yes,declaration; see caveats,
 glm-claude,GLM,Claude Code,preview,True,memory,Memory,yes,declaration; see caveats,
 glm-pi,GLM,Pi,preview,True,run,Run in rush mode,yes,declaration; see caveats,
@@ -449,10 +449,10 @@ glm-pi,GLM,Pi,preview,True,stats,Usage history,no,declaration; see caveats,
 glm-pi,GLM,Pi,preview,True,live,Running sessions,no,declaration; see caveats,not for a provider in another's harness yet
 glm-pi,GLM,Pi,preview,True,history,Past sessions,no,declaration; see caveats,not for a provider in another's harness yet
 glm-pi,GLM,Pi,preview,True,remote,Remote sessions,no,declaration; see caveats,
-glm-pi,GLM,Pi,preview,True,switch,Account switching,no,declaration; see caveats,"one API key, kept in Settings › Providers"
-glm-pi,GLM,Pi,preview,True,signin,Sign-in,no,declaration; see caveats,"an API key, not a sign-in"
-glm-pi,GLM,Pi,preview,True,quota,Limits,no,declaration; see caveats,paid per token with the API key
-glm-pi,GLM,Pi,preview,True,pricing,Pricing,no,declaration; see caveats,"the provider's own prices, which rush doesn't know"
+glm-pi,GLM,Pi,preview,True,switch,Account switching,no,declaration; see caveats,"one Coding Plan key, kept in Settings › Providers"
+glm-pi,GLM,Pi,preview,True,signin,Sign-in,no,declaration; see caveats,"a Coding Plan key, not a sign-in"
+glm-pi,GLM,Pi,preview,True,quota,Limits,yes,declaration; see caveats,the GLM Coding Plan's
+glm-pi,GLM,Pi,preview,True,pricing,Pricing,no,declaration; see caveats,"the plan's, not per token"
 glm-pi,GLM,Pi,preview,True,efficiency,Efficiency,no,declaration; see caveats,
 glm-pi,GLM,Pi,preview,True,memory,Memory,yes,declaration; see caveats,its AGENTS.md files
 kimi,Moonshot,Kimi CLI,tested,True,run,Run in rush mode,yes,declaration; see caveats,

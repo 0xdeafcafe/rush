@@ -476,6 +476,11 @@ pub trait Made {
 /// any subscription: the variable its own programs read the key from.
 pub trait Keyed {
     fn key_env(&self) -> String;
+    /// What the key is called where you keep it: "API key", or GLM's
+    /// "Coding Plan key", whose key pays from a plan.
+    fn key_name(&self) -> String {
+        "API key".into()
+    }
 }
 
 /// A rider that runs its provider on the plan its harness is signed in to,

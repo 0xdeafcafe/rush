@@ -1019,7 +1019,8 @@ pub fn ask_api_key(m: &mut Model, p: &str) -> Out {
         m.flash_err(&format!("{name} takes no API key"));
         return Out::Draw;
     }
-    let mut what = format!("{name} API key");
+    let key = reg().key_name(p);
+    let mut what = format!("{name} {key}");
     if config(m).has_api_key(p) {
         what.push_str(" (none forgets it)");
     }
@@ -1029,7 +1030,7 @@ pub fn ask_api_key(m: &mut Model, p: &str) -> Out {
         &what,
         Rc::new(move |m: &mut Model, v: &str| {
             let v = if v == "none" { "" } else { v }.to_string();
-            let (p, name) = (p.clone(), name.clone());
+            let (p, name, key) = (p.clone(), name.clone(), key.clone());
             let put = (p.clone(), v.clone());
             m.later(
                 move || rush_state::vault::put_api_key(&put.0, &put.1).map_err(|e| e.to_string()),
@@ -1041,10 +1042,10 @@ pub fn ask_api_key(m: &mut Model, p: &str) -> Out {
                     config_mut(m).mark_api_key(&p, !v.is_empty());
                     super::changed(m);
                     if v.is_empty() {
-                        m.flash(&format!("{name}'s API key is forgotten"));
+                        m.flash(&format!("{name}'s {key} is forgotten"));
                     } else {
                         m.flash(&format!(
-                            "{name}'s API key is kept in the keychain · #use picks it per session"
+                            "{name}'s {key} is kept in the keychain · #use picks it per session"
                         ));
                     }
                     Out::Draw

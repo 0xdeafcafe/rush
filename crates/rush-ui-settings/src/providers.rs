@@ -211,6 +211,7 @@ pub fn key(m: &mut Model, s: &str) -> Out {
 
 /// The keys of the list's line it (listKeys).
 pub fn list_keys(it: &str) -> Vec<String> {
+    let name = reg().key_name(&reg().billed(it).0);
     let k: &[&str] = if pays_by_key(it) {
         &[
             "enter",
@@ -220,7 +221,7 @@ pub fn list_keys(it: &str) -> Vec<String> {
             "*",
             "make default",
             "$",
-            "API key",
+            &name,
         ]
     } else {
         &[
@@ -330,7 +331,16 @@ pub fn head(m: &Model, id: &str, w: usize) -> Vec<Line> {
         out.push(l);
     }
     if pays_by_key(id) {
-        let mut l = label("API key");
+        // GLM's is a Coding Plan key: too long for the label, so it's said.
+        let name = r.key_name(&pr);
+        let mut l = label(if name.chars().count() <= 10 {
+            &name
+        } else {
+            "key"
+        });
+        if name.chars().count() > 10 {
+            l.spans.push(sp(format!("{name} "), DIM));
+        }
         if cfg.has_api_key(&pr) {
             l.spans.push(sp("✓ kept", GREEN));
             l.spans.push(sp(" · $ changes it", FAINT));

@@ -473,7 +473,11 @@ pub fn pairing_support(k: &str, model: &str, f: Feature) -> Support {
     let r = reg();
     let support = r.feature_of(k, f);
     if r.key_only(k) && matches!(f, Feature::Switch | Feature::SignIn | Feature::Quota) {
-        return Support::NO;
+        // But for a key that draws from a plan whose limits it reads (GLM's).
+        let reads = f == Feature::Quota && r.get(k).is_some_and(|a| a.quota_source().is_some());
+        if !reads {
+            return Support::NO;
+        }
     }
     if f == Feature::Images
         && !model.is_empty()

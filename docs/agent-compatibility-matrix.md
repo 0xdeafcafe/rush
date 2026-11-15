@@ -158,7 +158,7 @@ Pi and OpenCode can expose providers configured in their native tools; those dyn
 | Remote sessions | — | — | — | — | — | — |
 | Account switching | —* | —* | —* | —* | —* | —* |
 | Sign-in | —* | —* | —* | —* | —* | —* |
-| Limits | —* | —* | —* | —* | —* | —* |
+| Limits | —* | —* | —* | ✓* | ✓* | —* |
 | Pricing | —* | —* | —* | —* | —* | —* |
 | Efficiency | — | ✓ | — | ✓ | — | — |
 | Memory | ✓* | ✓ | ✓* | ✓ | ✓* | ✓* |
@@ -217,7 +217,7 @@ Pi and OpenCode can expose providers configured in their native tools; those dyn
 - **Pi:** fork means the whole conversation, not rewind to a selected message. Context is occupancy, not a composition breakdown. Questions are extension select/confirm. Rush does not expose Pi permission modes; its adapter notes that tools run without asking. Extension features are not automatically Rush features.
 - **Kimi:** native login, configured model discovery, local history, and Kimi Code plan quota are integrated. Its native `/compact` is exposed. No Rush account swapping, rewind, or mid-turn steering is declared. Its saved wire history reader and account handling are specific to Kimi; its conversation UI is shared.
 - **Vibe:** native login and saved local history are integrated. No Rush account switching or remaining-quota display; effort depends on the model. Ollama-in-Vibe is a separate adapter with a different feature set.
-- **Usage semantics differ:** Claude/Codex quota windows, Copilot premium requests, DeepSeek API balance, GLM Coding Plan and Kimi Code plan limits are distinct measures. Local Ollama pricing means no provider token charge, not zero machine/energy cost.
+- **Usage semantics differ:** Claude/Codex quota windows, Copilot premium requests, DeepSeek API balance, GLM Coding Plan (read in ZCode, Claude Code and Pi, with ZCode's key or the Coding Plan key Settings › Providers keeps) and Kimi Code plan limits are distinct measures. Local Ollama pricing means no provider token charge, not zero machine/energy cost.
 - **Shared Rush features:** composer, queue persistence, transcript row controls, agent-message rows and community/discussion views are core UI features. The adapter’s “Subagents” flag refers to native subagent integration, not whether Rush can launch a separate peer session.
 
 ## Kimi screenshot
@@ -355,10 +355,10 @@ The blue “agent message” row is rendered by `internal/convo/exchange.go` for
 - Commands and skills (not exposed): not for a provider in another's harness yet
 - Running sessions (not exposed): not for a provider in another's harness yet
 - Past sessions (not exposed): not for a provider in another's harness yet
-- Account switching (not exposed): one API key, kept in Settings › Providers
-- Sign-in (not exposed): an API key, not a sign-in
-- Limits (not exposed): paid per token with the API key
-- Pricing (not exposed): the provider's own prices, which rush doesn't know
+- Account switching (not exposed): one Coding Plan key, kept in Settings › Providers
+- Sign-in (not exposed): a Coding Plan key, not a sign-in
+- Limits (supported): the GLM Coding Plan's
+- Pricing (not exposed): the plan's, not per token
 
 ### glm-pi
 
@@ -376,10 +376,10 @@ The blue “agent message” row is rendered by `internal/convo/exchange.go` for
 - Settings files (supported): settings.json, yours and the project's
 - Running sessions (not exposed): not for a provider in another's harness yet
 - Past sessions (not exposed): not for a provider in another's harness yet
-- Account switching (not exposed): one API key, kept in Settings › Providers
-- Sign-in (not exposed): an API key, not a sign-in
-- Limits (not exposed): paid per token with the API key
-- Pricing (not exposed): the provider's own prices, which rush doesn't know
+- Account switching (not exposed): one Coding Plan key, kept in Settings › Providers
+- Sign-in (not exposed): a Coding Plan key, not a sign-in
+- Limits (supported): the GLM Coding Plan's
+- Pricing (not exposed): the plan's, not per token
 - Memory (supported): its AGENTS.md files
 
 ### kimi

@@ -628,6 +628,13 @@ impl Registry {
             .unwrap_or_default()
     }
 
+    /// What provider p's key is called: "API key" unless p names it.
+    pub fn key_name(&self, p: &str) -> String {
+        self.get(p)
+            .and_then(|a| a.keyed().map(|k| k.key_name()))
+            .unwrap_or_else(|| "API key".into())
+    }
+
     /// Whether agent k is paid for only with its provider's API key: a
     /// provider that takes one, in another's harness.
     pub fn key_only(&self, k: &str) -> bool {

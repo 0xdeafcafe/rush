@@ -63,7 +63,7 @@ pub struct StartOver {
 /// (setupLabel).
 pub fn setup_label(reg: &Registry, k: &str, billing: &str, account: &str) -> String {
     if billing == BILLING_KEY || reg.key_only(k) {
-        return format!("{} · API key", reg.label(k));
+        return format!("{} · {}", reg.label(k), reg.key_name(&reg.provider_of(k)));
     }
     if !account.is_empty() && reg.harness_of(k).as_str() == k {
         return format!("{} · {account}", reg.label(k));
