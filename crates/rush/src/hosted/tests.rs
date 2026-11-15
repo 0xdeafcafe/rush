@@ -382,7 +382,7 @@ fn hosted_runs_find_a_pairs_transcript() {
     let reg = Registry::new();
     reg.register(rush_claude::Claude::at(rush_claude::Account::at(
         "",
-        &home.path().join("claude"),
+        home.path().join("claude"),
     )));
     for p in rush_providers::cross::pairs(&reg) {
         reg.register(p);
