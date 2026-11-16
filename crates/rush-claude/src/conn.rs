@@ -36,6 +36,8 @@ use crate::neutral::Neutral;
 /// Turns on Claude Code's own watchdog for a model stream that goes
 /// silent.
 pub const STREAM_WATCHDOG_ENV: &str = "CLAUDE_ENABLE_STREAM_WATCHDOG";
+/// Claude Code's experimental code mode, on by default where rush starts it.
+pub const CODE_MODE_ENV: &str = "CLAUDE_CODE_EXPERIMENTAL_CODE_MODE";
 const SUBAGENT_CAP_ENV: &str = "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS";
 /// How long Claude Code's prompt cache lives for everything outside the
 /// main conversation (2.1.316): "5m" or "1h". Unset, it's 5 minutes.
@@ -244,6 +246,10 @@ impl Driver for Claude {
         // run headless; rush shows it live, so it's always in.
         if unset("CLAUDE_CODE_ENABLE_TODO_TOOLS") {
             ho.env.push("CLAUDE_CODE_ENABLE_TODO_TOOLS=1".into());
+        }
+        // Claude Code's code mode, on unless you've set it yourself.
+        if unset(CODE_MODE_ENV) {
+            ho.env.push(format!("{CODE_MODE_ENV}=1"));
         }
         if !o.api_key.is_empty() {
             // Ahead of the login signed in: paid per token.
