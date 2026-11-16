@@ -198,7 +198,12 @@ mod tests {
 
     fn links(t: &Txt) -> Vec<(String, String)> {
         t.0.iter()
-            .filter_map(|s| s.style.link.url().map(|u| (s.text.clone(), u.to_string())))
+            .filter_map(|s| {
+                s.style
+                    .link
+                    .url()
+                    .map(|u| (s.text.to_string(), u.to_string()))
+            })
             .collect()
     }
 
