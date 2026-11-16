@@ -59,7 +59,7 @@ const fn always(path: &'static str, why: &'static str) -> BuiltIn {
 
 /// The caches rush offers before it has learned any: made again by the
 /// tool that made them, and losing no work.
-pub const BUILT_IN: [BuiltIn; 17] = [
+pub const BUILT_IN: [BuiltIn; 19] = [
     always("Library/Caches/go-build", "Go's build cache"),
     always(".cache/go-build", "Go's build cache"),
     always("Library/Caches/golangci-lint", "golangci-lint's cache"),
@@ -96,6 +96,21 @@ pub const BUILT_IN: [BuiltIn; 17] = [
         path: ".cache/uv",
         why: "uv's package cache; running sessions use it",
         idle: HOUR,
+        each: false,
+    },
+    // Logs nothing reads again, gone once the tool stopped writing them
+    // for a week (portless's dev-server logs, 9G; kanban-code's one log,
+    // 9G): the tool makes the folder again when it next logs.
+    BuiltIn {
+        path: ".langwatch/portless/logs",
+        why: "portless's dev-server logs",
+        idle: 7 * DAY,
+        each: false,
+    },
+    BuiltIn {
+        path: ".kanban-code/logs",
+        why: "Kanban Code's logs",
+        idle: 7 * DAY,
         each: false,
     },
     BuiltIn {
@@ -545,6 +560,12 @@ mod tests {
                 Some("an Nx workspace's cache"),
             ),
             ("/Users/me/.nx", None),
+            ("/Users/me/.kanban-code/logs", Some("Kanban Code's logs")),
+            (
+                "/Users/me/.langwatch/portless/logs",
+                Some("portless's dev-server logs"),
+            ),
+            ("/Users/me/.kanban-code", None),
             ("/Users/me/.nx/daemon", None),
             (
                 "/Users/me/.cache/uv",

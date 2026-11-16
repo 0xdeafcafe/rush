@@ -404,7 +404,7 @@ fn sheet(off: bool) -> CareSheet {
 fn prompt_looks_further_when_told() {
     let p = care_prompt("you asked for one", &[], &[], true);
     assert!(p.contains("\nLook further, too:"), "{p}");
-    assert!(p.contains("never its volumes or containers"), "{p}");
+    assert!(p.contains("never containers or named volumes"), "{p}");
     assert!(p.contains("com.google.Chrome.code_sign_clone"), "{p}");
     assert!(p.contains("the biggest things you found but left"), "{p}");
 }

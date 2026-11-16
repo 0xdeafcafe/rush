@@ -86,7 +86,11 @@ pub fn cleaned_words(c: &Cleaned) -> String {
     if !c.ran.is_empty() {
         s += &format!(" · ran {}", c.ran.join(", "));
     }
-    if c.colima && c.ran.iter().any(|r| r.starts_with("docker")) {
+    // Said only when the trim didn't run (colima's command missing).
+    if c.colima
+        && c.ran.iter().any(|r| r.starts_with("docker"))
+        && !c.ran.iter().any(|r| r.starts_with("colima"))
+    {
         s += " · colima gives docker's space back once its VM trims its disk";
     }
     if let Some(e) = &c.failed {
@@ -1064,6 +1068,16 @@ mod tests {
                     None,
                 ),
                 "freed 1.0G as df measures it (2.0G → 3.0G free) · ran pnpm store prune, docker image prune -f · colima gives docker's space back once its VM trims its disk",
+            ),
+            (
+                c(
+                    2 * G,
+                    9 * G,
+                    &["docker volume prune -f", "colima ssh -- sudo fstrim -a"],
+                    true,
+                    None,
+                ),
+                "freed 7.0G as df measures it (2.0G → 9.0G free) · ran docker volume prune -f, colima ssh -- sudo fstrim -a",
             ),
             (
                 c(

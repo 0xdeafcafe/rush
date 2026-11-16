@@ -374,6 +374,8 @@ fn dire_clean(
     let ends: Vec<DireItem> =
         rush_fleet::end_commands(&|t| rush_fleet::find_tool(t).is_some(), &home)
             .into_iter()
+            // A volume's data is yours to let go of: never while you're away.
+            .filter(|c| !matches!(c.how, How::Run(a) if rush_fleet::asks_you(a)))
             .map(|c| DireItem {
                 how: c.how,
                 ..DireItem::new(DireKind::Command, &c.path, 0)

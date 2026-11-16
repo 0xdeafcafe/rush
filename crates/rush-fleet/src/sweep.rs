@@ -11,9 +11,10 @@
 //!   again.
 //! - NEVER_TOUCH's biggest are measured (never_touch_big) and listed for
 //!   you to decide on, never ticked.
-//! - end_commands: pnpm store prune once, and docker's dangling images and
-//!   build cache when docker is there (with colima, the space comes back
-//!   only once its VM trims its disk).
+//! - end_commands: pnpm store prune once, and docker's dangling and
+//!   week-old unused images, build cache and unnamed unused volumes when
+//!   docker is there, then colima's trim, which gives the VM's freed space
+//!   back to macOS. The volume prune is never run while you're away.
 //! - survey: the rules' caches, each worktree's build caches and the facts
 //!   that decide them (the newest change outside node_modules, whether a
 //!   process works there), measured off the UI.
@@ -202,7 +203,30 @@ pub fn span(ms: Ms) -> String {
 
 pub const PNPM_PRUNE: &[&str] = &["pnpm", "store", "prune"];
 pub const DOCKER_IMAGE_PRUNE: &[&str] = &["docker", "image", "prune", "-f"];
+/// Images no container uses, made over a week ago: pulled or built again.
+pub const DOCKER_OLD_IMAGE_PRUNE: &[&str] = &[
+    "docker",
+    "image",
+    "prune",
+    "-a",
+    "-f",
+    "--filter",
+    "until=168h",
+];
 pub const DOCKER_BUILDER_PRUNE: &[&str] = &["docker", "builder", "prune", "-f"];
+/// Volumes no container uses that have no name (docker's default since
+/// 23: named volumes stay). On one machine 45G of 75G, left by test runs.
+pub const DOCKER_VOLUME_PRUNE: &[&str] = &["docker", "volume", "prune", "-f"];
+/// Gives what was freed in colima's VM back to macOS: its disk file
+/// shrinks only once the VM trims it.
+pub const COLIMA_TRIM: &[&str] = &["colima", "ssh", "--", "sudo", "fstrim", "-a"];
+
+/// Whether a command loses something only you can say isn't wanted (a
+/// volume's data): Clean up ticks it where you see it, the dire clean,
+/// which runs while you're away, never runs it.
+pub fn asks_you(args: &[&str]) -> bool {
+    args == DOCKER_VOLUME_PRUNE
+}
 
 /// Where a tool is: on PATH, or where package managers put them (rush
 /// started from the menu bar has a short PATH).
@@ -259,12 +283,29 @@ pub fn end_commands(has: &dyn Fn(&str) -> bool, home: &str) -> Vec<FoundCache> {
     }
     if has("docker") {
         let trim = if colima(home) {
-            "colima: the space comes back to macOS only once its VM trims its disk"
+            "colima: the space comes back to macOS once its VM trims its disk, the last line"
         } else {
-            "never volumes or containers"
+            "never containers, nor named volumes"
         };
         out.push(cmd(DOCKER_IMAGE_PRUNE, "docker's dangling images", trim));
+        out.push(cmd(
+            DOCKER_OLD_IMAGE_PRUNE,
+            "docker images no container uses, made over a week ago; pulled or built again",
+            trim,
+        ));
         out.push(cmd(DOCKER_BUILDER_PRUNE, "docker's build cache", trim));
+        out.push(cmd(
+            DOCKER_VOLUME_PRUNE,
+            "docker volumes with no name that no container uses, left by test runs; a removed container's data goes with them",
+            "named volumes stay; never while you're away",
+        ));
+        if colima(home) && has("colima") {
+            out.push(cmd(
+                COLIMA_TRIM,
+                "gives what docker freed in colima's VM back to macOS",
+                "only while colima runs",
+            ));
+        }
     }
     out
 }
@@ -733,14 +774,35 @@ mod tests {
             [
                 "pnpm store prune",
                 "docker image prune -f",
-                "docker builder prune -f"
+                "docker image prune -a -f --filter until=168h",
+                "docker builder prune -f",
+                "docker volume prune -f"
             ]
         );
         assert!(end_commands(&all, &home).iter().all(|c| c.ok));
         assert!(!colima(&home));
         std::fs::create_dir(d.path().join(".colima")).unwrap();
         assert!(colima(&home));
-        assert!(end_commands(&all, &home)[1].note.contains("trims its disk"));
+        let with_colima = end_commands(&all, &home);
+        assert!(with_colima[1].note.contains("trims its disk"));
+        assert_eq!(
+            with_colima.last().map(|c| c.path.as_str()),
+            Some("colima ssh -- sudo fstrim -a"),
+            "the trim runs last, after docker has freed"
+        );
+        let docker_only = |t: &str| t == "docker";
+        assert!(
+            !names(end_commands(&docker_only, &home))
+                .iter()
+                .any(|p| p.starts_with("colima")),
+            "no trim without colima's command"
+        );
+        let asks: Vec<String> = with_colima
+            .iter()
+            .filter(|c| matches!(c.how, How::Run(a) if asks_you(a)))
+            .map(|c| c.path.clone())
+            .collect();
+        assert_eq!(asks, ["docker volume prune -f"]);
     }
 
     #[test]

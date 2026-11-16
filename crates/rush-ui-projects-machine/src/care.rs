@@ -1183,7 +1183,7 @@ Look further, too: past what rush knows, find what takes the most space on this 
 - applications' caches in ~/Library/Caches and ~/.cache;
 - Xcode's DerivedData, device support for OS versions no device here runs, and unavailable simulators (xcrun simctl delete unavailable);
 - package managers' caches through their own commands (brew cleanup, npm cache clean --force, pnpm store prune, pip cache purge, cargo's registry cache), and build caches (target, node_modules, .next) in projects untouched for weeks;
-- Docker's dangling images and build cache (docker image prune, docker builder prune), never its volumes or containers;
+- Docker's dangling images, images no container uses made over a week ago, build cache and volumes with no name that no container uses (docker image prune, docker image prune -a --filter until=168h, docker builder prune, docker volume prune), then, under colima, colima ssh -- sudo fstrim -a so macOS gets the space back; never containers or named volumes;
 - the copies of Chrome each launch leaves in $(getconf DARWIN_USER_TEMP_DIR)/../X/com.google.Chrome.code_sign_clone, except those a running Chrome has open (lsof): they share most of their blocks with Chrome, so du overstates them; say what df shows they freed.
 Commands that free space (brew cleanup, docker image prune, …) go in the plan, and in phase 2's script once approved, as paths do.
 Never propose documents, Downloads, Desktop, photos, music, mail, messages, or anything in ~/Library/Containers, ~/Library/Application Support or ~/Library/Group Containers: list the biggest of these in your plan's leave list for the user to decide on.

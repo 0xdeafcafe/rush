@@ -1351,7 +1351,9 @@ deleted as it went. Here it never deletes on its own:
     ~/Library/Caches/rush/terraform-plugins (terraform init fetches it
     again); only once untouched for a while (`idle`, `decide`):
     ~/.cache/prisma 30 days, ~/.cache/uv an hour (running sessions write
-    to it), each ~/.nx/<hex hash> 7 days (`each`); and Go's module cache
+    to it), each ~/.nx/<hex hash> 7 days (`each`), and logs nothing
+    reads again 7 days: ~/.langwatch/portless/logs (9G on one machine) and
+    ~/.kanban-code/logs (one 9G log); and Go's module cache
     (`go_mod_cache`: GOMODCACHE, GOPATH's, ~/go/pkg/mod), cleared by `go
     clean -modcache` and never removed by hand (`How::GoClean`: its files
     are read-only). Learned rules are only ever a folder directly in
@@ -1365,10 +1367,18 @@ deleted as it went. Here it never deletes on its own:
     `newest_outside`) and no process works in it (`process_cwds`: every
     process's cwd, `rush_sys::proc::cwd`);
   - last, the commands every run ends with (`end_commands`, group "Run
-    last, once"): pnpm store prune when pnpm is there, then `docker image
-    prune -f` and `docker builder prune -f` when docker is; under colima
-    (~/.colima) the row says the space comes back only once its VM trims
-    its disk.
+    last, once"): pnpm store prune when pnpm is there, then, when docker
+    is, `docker image prune -f`, `docker image prune -a -f --filter
+    until=168h` (images no container uses, made over a week ago), `docker
+    builder prune -f` and `docker volume prune -f` (volumes with no name
+    no container uses: docker's default since 23 leaves named ones); under
+    colima (~/.colima, and its command there) `colima ssh -- sudo fstrim
+    -a` last, which is what gives the VM's freed space back to macOS. On
+    one machine colima's disk was 75G and full inside, 45G of it volumes
+    no container used, while the prunes alone gave macOS nothing back.
+    The volume prune is the one that loses data only you can call
+    unwanted (`asks_you`): ticked in Clean up, never run by the dire
+    clean.
   Each worktree row says its group and why (`rush_fleet::Triage`,
   `triage.rs`), from its uncommitted files (noise told from work: a lone
   .claude/settings.local.json, a lockfile; `noise`), its pull request as
