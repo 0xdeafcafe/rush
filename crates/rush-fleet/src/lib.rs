@@ -65,10 +65,11 @@ pub use rules::{
     rule_for, rules_with,
 };
 pub use sweep::{
-    COLIMA_TRIM, CacheFound, DAY, DOCKER_BUILDER_PRUNE, DOCKER_IMAGE_PRUNE, DOCKER_OLD_IMAGE_PRUNE,
-    DOCKER_VOLUME_PRUNE, HOUR, NEVER_TOUCH, PNPM_PRUNE, Survey, WT_IDLE, WtFacts, asks_you, colima,
-    end_commands, find_tool, never_touch, never_touch_big, newest_outside, process_cwds,
-    remove_found, remove_tree, run_command, span, survey, works_in, wt_cache, wt_facts,
+    COLIMA_TRIM, CacheFound, DAY, DOCKER_BUILDER_PRUNE, DOCKER_IMAGE_PRUNE, DOCKER_OLD_BUILD_PRUNE,
+    DOCKER_OLD_IMAGE_PRUNE, DOCKER_VOLUME_PRUNE, HOUR, NEVER_TOUCH, PNPM_PRUNE, Survey, WT_IDLE,
+    WtFacts, asks_you, colima, end_commands, find_tool, never_touch, never_touch_big,
+    newest_outside, process_cwds, remove_found, remove_tree, run_command, span, survey, works_in,
+    wt_cache, wt_facts,
 };
 pub use temp::{
     TempSize, TempSizes, clean_stale_temp, clean_temp, disk_usage, disk_usage_background,

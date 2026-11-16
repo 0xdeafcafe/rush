@@ -1481,6 +1481,37 @@ from `watch_machine`'s disk read, in the rush that leads, at most every
   and that the rest waits, and the cleanup session is sent a note
   (queued) to ask the same decisions again for what's left.
 
+The quiet clean (`quiet.rs`, Rust-only) keeps space from piling up until
+the disk is dire: on one machine colima's VM had grown to 75G and two
+tools' logs to 18G before anyone looked. Once a day (`QUIET_EVERY`, the
+last run kept in rush's cache as `quiet-clean` so a restart doesn't run
+another), whatever the free disk, in the rush that leads, with you away
+from rush for `QUIET_AWAY` (10 minutes) and no dire clean running; off
+with "Clean up done work after" off. Nothing is asked. What goes
+(`quiet_set`), each through rush-fleet's checked removals, which look
+again first:
+
+- done sessions' scratch untouched for 3 days, stopped ones' (not done,
+  host gone) for `QUIET_IDLE` (14 days) (`clean_stale_temp`), never a
+  running session's;
+- rush's scratch no session owns, untouched for `ORPHAN_IDLE`, that no
+  running session's id starts (`find_temp_orphans`, `remove_temp_orphan`);
+- the build caches of worktrees nobody works in, never a main checkout,
+  once the worktree outside node_modules and the cache itself sat
+  untouched for 14 days and no process works there (`remove_cache`): a
+  session back in one installs again;
+- what a cleanup rule that waits says goes now (logs, Nx workspaces,
+  Prisma, rules made in Clean up); never a rule that always goes (vitest,
+  go-build), which costs a rebuild while in use;
+- last (`quiet_ends`): pnpm store prune, docker's dangling images and its
+  build cache unused for a week (`DOCKER_OLD_BUILD_PRUNE`) when `docker
+  system df` answers, and colima's trim. Never docker's volumes or unused
+  images.
+
+Each removal is logged as its own event, and the run as `quiet-clean`
+(what went, what stayed and why, the free disk before and after). The
+news says so (`quiet_words`) only when df shows a gigabyte or more freed.
+
 ## The Projects tree (Rust-only)
 
 In the rail look Projects draws every repository as a tree

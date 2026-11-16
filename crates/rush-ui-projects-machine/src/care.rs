@@ -324,6 +324,7 @@ pub fn watch_machine(m: &mut Model) {
                 c.pressed_since = now;
             }
             super::dire::watch_dire(m, d.free, d.total);
+            super::quiet::watch_quiet(m);
             let c = m.kept::<Care>();
             if c.busy
                 || now - c.started < CARE_WARMUP

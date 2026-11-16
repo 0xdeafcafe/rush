@@ -214,6 +214,10 @@ pub const DOCKER_OLD_IMAGE_PRUNE: &[&str] = &[
     "until=168h",
 ];
 pub const DOCKER_BUILDER_PRUNE: &[&str] = &["docker", "builder", "prune", "-f"];
+/// Docker's build cache unused for a week: what the quiet clean prunes,
+/// so a build this week stays fast.
+pub const DOCKER_OLD_BUILD_PRUNE: &[&str] =
+    &["docker", "builder", "prune", "-f", "--filter", "until=168h"];
 /// Volumes no container uses that have no name (docker's default since
 /// 23: named volumes stay). On one machine 45G of 75G, left by test runs.
 pub const DOCKER_VOLUME_PRUNE: &[&str] = &["docker", "volume", "prune", "-f"];

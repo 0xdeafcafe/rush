@@ -25,6 +25,7 @@ pub mod place;
 #[doc(hidden)]
 pub mod projectmem;
 pub mod prsheet;
+pub mod quiet;
 #[doc(hidden)]
 pub mod rows;
 #[doc(hidden)]
