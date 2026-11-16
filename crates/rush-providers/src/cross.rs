@@ -20,10 +20,13 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use rush_core::adapter::{
-    Account, Adapter, Choice, Choices, Chooser, Conn, ContextWindower, Driver, Feature, Features,
-    Kind, Level, PlanRider, Profile, Programmer, Provided, QuotaSource, Registry, Result, Rider,
-    Sink, StartOptions, Support,
+    Account, Adapter, AdapterRef, Choice, Choices, Chooser, Conn, ContextWindower, Driver, Feature,
+    Features, Follow, HistoryFollower, HistoryReader, Kind, Level, PlanRider, Profile, Programmer,
+    Provided, QuotaSource, Registry, Result, Rider, Session, Sink, StartOptions, Support,
+    TranscriptLocator, Transcripts,
 };
+use rush_core::event::Event;
+use rush_core::time::Ms;
 use rush_core::usage::Quota;
 
 use crate::{Getenv, process_env};
@@ -211,11 +214,16 @@ impl Pair {
         dir.join(self.kind).to_string_lossy().into_owned()
     }
 
-    fn harness_driver(&self) -> Result<rush_core::adapter::AdapterRef> {
+    fn harness_driver(&self) -> Result<AdapterRef> {
         self.reg
             .get(self.harness)
             .filter(|a| a.driver().is_some())
             .ok_or_else(|| err(format!("rush can't run {}", self.harness)))
+    }
+
+    /// The pair's harness adapter, when one is registered.
+    fn harness_adapter(&self) -> Option<AdapterRef> {
+        self.reg.get(self.harness)
     }
 
     /// Runs Pi on the provider's plan its /login signed in to, with the
@@ -401,9 +409,13 @@ impl Adapter for Pair {
     /// pays, and has no window to show.
     fn features(&self) -> Features {
         let mut out = self.reg.features(self.harness).unwrap_or_default();
-        // Its sessions are in a folder of its own, found by nothing yet,
-        // and the harness's commands and prices are for its own provider.
-        for f in [Feature::Live, Feature::History, Feature::Commands] {
+        // Its sessions are in a folder of its own, and the harness's
+        // commands and prices are for its own provider. Its history is the
+        // harness's, read in that folder (Rust-only: Go found a provider in
+        // another's harness by nothing, cross.go saying History No, "not
+        // for a provider in another's harness yet", so a finished pair
+        // session's conversation left the list with its last turn).
+        for f in [Feature::Live, Feature::Commands] {
             out.insert(
                 f,
                 Support::NO.with("not for a provider in another's harness yet"),
@@ -455,10 +467,12 @@ impl Adapter for Pair {
             dir: self.home(),
         }]
     }
-    /// A pair in Claude Code writes Claude Code's transcripts, in the
-    /// pair's own Claude folder; Pi's sessions rush can't read yet.
+    /// The harness's: a pair in Claude Code writes Claude Code's
+    /// transcripts in the pair's folder, and the pane reads them as they
+    /// grow; Pi's sessions rush can't read yet.
     fn claude_transcripts(&self) -> bool {
-        self.harness == CLAUDE
+        self.harness_adapter()
+            .is_some_and(|a| a.claude_transcripts())
     }
     rush_core::has!(
         driver: Driver,
@@ -466,6 +480,10 @@ impl Adapter for Pair {
         rider: Rider,
         provided: Provided,
         plan_rider: PlanRider,
+        transcript_locator: TranscriptLocator,
+        transcripts: Transcripts,
+        history_reader: HistoryReader,
+        history_follower: HistoryFollower,
     );
     /// A Claude Code pair's own models, with Claude Code's modes: what a
     /// session's picker and the agents rush offers other sessions name
@@ -593,6 +611,71 @@ impl Driver for Pair {
     }
 }
 
+/// A pair's sessions live in its own folder, in its harness's formats, so
+/// every transcript part is the harness's, said in the pair's profile
+/// (whose dir is that folder): located, found again and read back by the
+/// same machinery as the harness's own sessions.
+impl TranscriptLocator for Pair {
+    fn transcript_path(&self, p: &Profile, cwd: &str, sid: &str) -> String {
+        self.harness_adapter()
+            .and_then(|h| {
+                h.transcript_locator()
+                    .map(|t| t.transcript_path(p, cwd, sid))
+            })
+            .unwrap_or_default()
+    }
+}
+
+impl Transcripts for Pair {
+    fn find_transcript(&self, p: &Profile, cwd: &str, sid: &str) -> String {
+        self.harness_adapter()
+            .and_then(|h| h.transcripts().map(|t| t.find_transcript(p, cwd, sid)))
+            .unwrap_or_default()
+    }
+    fn find_transcripts(&self, p: &Profile, wants: &[(&str, &str)]) -> Vec<String> {
+        self.harness_adapter()
+            .and_then(|h| h.transcripts().map(|t| t.find_transcripts(p, wants)))
+            .unwrap_or_else(|| wants.iter().map(|_| String::new()).collect())
+    }
+    fn transcripts_dir(&self, p: &Profile) -> String {
+        self.harness_adapter()
+            .and_then(|h| h.transcripts().map(|t| t.transcripts_dir(p)))
+            .unwrap_or_default()
+    }
+}
+
+impl HistoryReader for Pair {
+    fn history(
+        &self,
+        s: &Session,
+        before: Ms,
+        most: usize,
+        each: &mut dyn FnMut(Vec<Event>) -> bool,
+    ) -> Result<()> {
+        // The adapter stays: its part is borrowed of it.
+        let a = self
+            .harness_adapter()
+            .ok_or_else(|| err(format!("rush can't run {}", self.harness)))?;
+        let h = a
+            .history_reader()
+            .ok_or_else(|| err(format!("rush can't read {}'s sessions yet", self.harness)))?;
+        h.history(s, before, most, each)
+    }
+}
+
+impl HistoryFollower for Pair {
+    fn follow_history(&self, s: &Session) -> Result<Box<dyn Follow>> {
+        // The adapter stays: its part is borrowed of it.
+        let a = self
+            .harness_adapter()
+            .ok_or_else(|| err(format!("rush can't run {}", self.harness)))?;
+        let h = a
+            .history_follower()
+            .ok_or_else(|| err(format!("rush can't read {}'s sessions yet", self.harness)))?;
+        h.follow_history(s)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -684,6 +767,46 @@ mod tests {
         ] {
             assert_eq!(reg.context_window(k, m), w, "{k} {m}");
         }
+    }
+
+    // A pair's history is its harness's, in the pair's own folder: a
+    // finished GLM-in-Claude-Code session keeps a transcript the registry
+    // can name and read back, so the list holds its conversation past its
+    // last turn (Go found a provider in another's harness by nothing:
+    // cross.go's Features said History No).
+    #[test]
+    fn a_pairs_history_is_its_harnesses() {
+        let reg = Registry::new();
+        reg.register(rush_claude::Claude::new());
+        for p in pairs_with(&reg, Arc::new(|_| None), None) {
+            reg.register(p);
+        }
+        let home = tempfile::tempdir().unwrap();
+        let p = Profile {
+            kind: Kind::from("glm-claude"),
+            name: "GLM in Claude Code".into(),
+            dir: home.path().to_string_lossy().into_owned(),
+        };
+        let (cwd, sid) = (
+            "/Users/afr/Source/github.com/0xdeafcafe/rush",
+            "d2eea96b-f6e0-4faa-914a-50f811af25d8",
+        );
+        // Located: the pair's folder, in Claude Code's own layout.
+        let want = home
+            .path()
+            .join("projects/-Users-afr-Source-github-com-0xdeafcafe-rush")
+            .join(format!("{sid}.jsonl"))
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(reg.transcript_path("glm-claude", &p, cwd, sid), want);
+        // Read back through the registry's parts, and said to write the
+        // harness's transcripts, so the pane follows them as they grow.
+        let a = reg.get("glm-claude").unwrap();
+        assert!(a.transcripts().is_some());
+        assert!(a.history_reader().is_some());
+        assert!(a.history_follower().is_some());
+        assert!(a.claude_transcripts());
+        assert!(reg.supports("glm-claude", Feature::History));
     }
 
     // Pi reads a provider it knows from the key's variable, and one it
