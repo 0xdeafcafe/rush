@@ -7,6 +7,7 @@
 //! Port of internal/fleet. See DESIGN.md "Contracts".
 
 mod caches;
+mod diskmap;
 mod emeritus;
 mod folder;
 mod git;
@@ -29,6 +30,11 @@ mod watch;
 mod worktree;
 
 pub use caches::{CACHE_NAMES, caches_in, remove_cache, walk};
+pub use diskmap::{
+    BIG, DockerReclaim, HomeMap, MAP_FOR, UNTOUCHED, Untouched, VmDisk, classify, colima_disk,
+    command_sizes, docker_reclaim, home_map, load_map, map_home, may_be_yours, parse_df,
+    parse_docker_df, parse_size, save_map,
+};
 pub use folder::{Commit, Folder, GitState, check_folder, folder_wants, git_state, short_remote};
 pub use git::git_at;
 pub use hosted::{
@@ -55,8 +61,8 @@ pub use pr::{as_linked, find_pr, from_linked, from_status};
 pub use predicates::*;
 pub use rules::{
     BUILT_IN, BuiltIn, CacheRule, FoundCache, How, RULES_FILE, cache_rules, decide, go_mod_cache,
-    learn, learn_from_plan, may_be_rule, measure_caches, read_rules, remove_rule_cache, rule_for,
-    rules_with,
+    learn, learn_from_plan, make_rule, may_be_rule, measure_caches, read_rules, remove_rule_cache,
+    rule_for, rules_with,
 };
 pub use sweep::{
     COLIMA_TRIM, CacheFound, DAY, DOCKER_BUILDER_PRUNE, DOCKER_IMAGE_PRUNE, DOCKER_OLD_IMAGE_PRUNE,

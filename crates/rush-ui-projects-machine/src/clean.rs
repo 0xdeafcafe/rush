@@ -84,12 +84,17 @@ pub struct CleanItem {
     /// Something big rush never touches, for you to decide on: never
     /// ticked (Rust-only).
     pub never: Option<rush_fleet::FoundCache>,
+    /// Big and untouched for a month, and no rule names it: r makes it
+    /// one, and then it's ticked (Rust-only).
+    pub untouched: Option<rush_fleet::Untouched>,
 }
 
 impl CleanItem {
     fn group(&self) -> &'static str {
         if self.never.is_some() {
             "Yours to decide: rush never touches these"
+        } else if self.untouched.is_some() {
+            "Big and untouched for a month: no rule names these yet"
         } else if self
             .cache
             .as_ref()
@@ -120,7 +125,7 @@ impl CleanItem {
         if let Some(l) = &self.left {
             return self.busy.is_empty() && l.safe();
         }
-        if self.never.is_some() {
+        if self.never.is_some() || self.untouched.is_some() {
             return false;
         }
         if let Some(c) = &self.cache {
@@ -173,6 +178,55 @@ pub struct CleanSheet {
     pub cur: usize,
     /// The caches are still being measured.
     pub measuring: bool,
+    /// Where the disk goes, once the home folder's map is in (kept for
+    /// rush_fleet::MAP_FOR, walked afresh after), with the disk's free and
+    /// total bytes then.
+    pub map: Option<(rush_fleet::HomeMap, u64, u64)>,
+}
+
+/// What's big and untouched, as Clean up lists it: never ticked until r
+/// makes it a rule.
+pub fn untouched_items(u: Vec<rush_fleet::Untouched>) -> Vec<CleanItem> {
+    u.into_iter()
+        .map(|u| CleanItem {
+            untouched: Some(u),
+            ..CleanItem::default()
+        })
+        .collect()
+}
+
+/// The item a rule just made turns into: its folder as a cache the rule
+/// names, ticked (it's untouched for as long as the rule waits).
+pub fn ruled_item(u: &rush_fleet::Untouched, why: &str, now: Ms) -> CleanItem {
+    let mut it = CleanItem {
+        cache: Some(CacheFound {
+            found: rush_fleet::FoundCache {
+                path: u.path.clone(),
+                why: why.to_string(),
+                size: u.size,
+                newest: u.newest,
+                ok: true,
+                note: format!(
+                    "a rule you made · untouched for {}",
+                    untouched_for(now - u.newest)
+                ),
+                ..rush_fleet::FoundCache::default()
+            },
+            wt: String::new(),
+        }),
+        stale: true,
+        ..CleanItem::default()
+    };
+    it.on = it.safe();
+    it
+}
+
+/// Why a rule made of u lets it go, in a few words.
+fn rule_why(u: &rush_fleet::Untouched) -> String {
+    match u.kind.as_str() {
+        "" => "a folder you said may go once untouched for a month".into(),
+        k => format!("{k} you said may go once untouched for a month"),
+    }
 }
 
 /// The caches as Clean up lists them: ticked when the rules say so, those
@@ -303,6 +357,34 @@ fn measure_into_sheet(
                     m.kept::<Data>().never = never.clone();
                     if let Some(s) = m.sheet_as::<CleanSheet>() {
                         s.items.extend(never_items(never));
+                    }
+                    Out::Draw
+                },
+            );
+            // Where the disk goes, and what's big and untouched no rule
+            // names: the kept map, or home walked afresh when it's old.
+            let now = m.now;
+            m.later(
+                move || {
+                    let map = rush_fleet::home_map(&rush_fleet::cache_rules(), now);
+                    let d = rush_sys::sysinfo::read_disk();
+                    (map, d.free, d.total)
+                },
+                |m, (map, free, total)| {
+                    if let Some(s) = m.sheet_as::<CleanSheet>() {
+                        let at = s
+                            .items
+                            .iter()
+                            .position(|it| it.never.is_some())
+                            .unwrap_or(s.items.len());
+                        let rows = untouched_items(map.untouched.clone());
+                        let (n, was) = (rows.len(), s.items.len());
+                        s.items.splice(at..at, rows);
+                        // The cursor stays on the row it was on.
+                        if was > 0 && s.cur >= at {
+                            s.cur += n;
+                        }
+                        s.map = Some((map, free, total));
                     }
                     Out::Draw
                 },
@@ -483,6 +565,7 @@ pub fn open_clean_sheet(m: &mut Model) {
         items,
         cur: 0,
         measuring,
+        map: None,
     }));
     if measuring {
         // Cleanup agents' plans, done or waiting on you: what they mark
@@ -600,6 +683,28 @@ impl CleanSheet {
                 w,
             );
         }
+        if let Some(u) = &it.untouched {
+            let what = match u.kind.as_str() {
+                "" => "big".to_string(),
+                k => k.to_string(),
+            };
+            let path = rush_draw::truncate(&tildify(&u.path), 43, "…").into_owned();
+            return fit(
+                ln([
+                    sp("○ ", FAINT),
+                    sp(pad_to(&path, 44), TEXT),
+                    sp(format!("{:>7}  ", disk(u.size)), FAINT),
+                    sp(
+                        format!(
+                            "{what} · untouched for {} · r makes it a rule, then it's ticked",
+                            untouched_for(m.now - u.newest)
+                        ),
+                        YELLOW,
+                    ),
+                ]),
+                w,
+            );
+        }
         if let Some(f) = &it.never {
             let path = rush_draw::truncate(&tildify(&f.path), 43, "…").into_owned();
             return fit(
@@ -631,7 +736,13 @@ impl CleanSheet {
             }
             let why = ln([sp(words, col)]);
             let (path, size) = if matches!(c.found.how, How::Run(_)) {
-                (c.found.path.clone(), "?".to_string())
+                // What docker or colima says it could give back: at most.
+                let size = if c.found.size > 0 {
+                    format!("~{}", disk(c.found.size))
+                } else {
+                    "?".to_string()
+                };
+                (c.found.path.clone(), size)
             } else {
                 (
                     rush_draw::truncate(&tildify(&c.found.path), 43, "…").into_owned(),
@@ -789,6 +900,46 @@ impl CleanSheet {
     }
 }
 
+/// Where the disk goes, in two lines for Clean up's top: the disk's free
+/// space and what's ticked and found; then the biggest places (the home
+/// folder's tops and the worktrees together), biggest first, at most five,
+/// and how long ago home was walked.
+pub fn where_words(
+    map: &rush_fleet::HomeMap,
+    free: u64,
+    total: u64,
+    worktrees: i64,
+    ticked: i64,
+    now: Ms,
+) -> (String, String) {
+    let found: i64 = map.untouched.iter().map(|u| u.size).sum();
+    let mut first = format!(
+        "disk {} free of {} · Clean up frees {} ticked",
+        disk(free as i64),
+        disk(total as i64),
+        disk(ticked)
+    );
+    if found > 0 {
+        first += &format!(" · {} more big and untouched, below", disk(found));
+    }
+    let mut places: Vec<(String, i64)> = map
+        .tops
+        .iter()
+        .map(|(n, s)| (format!("~/{n}"), *s))
+        .collect();
+    if worktrees > 0 {
+        places.push(("worktrees".into(), worktrees));
+    }
+    places.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    let mut second: Vec<String> = places
+        .iter()
+        .take(5)
+        .map(|(n, s)| format!("{n} {}", disk(*s)))
+        .collect();
+    second.push(format!("walked {} ago", untouched_for(now - map.at)));
+    (first, format!("where: {}", second.join(" · ")))
+}
+
 /// How long something has sat, as Clean up says it: "3 days", "5h", "20m".
 pub fn untouched_for(ms: rush_core::time::Ms) -> String {
     let (m, h, d) = (ms / 60_000, ms / 3_600_000, ms / 86_400_000);
@@ -833,7 +984,28 @@ impl Sheet for CleanSheet {
             );
         }
         let mut out = vec![sheet_title("Clean up", &about, w), Line::new()];
-        let (from, to) = window(self.items.len(), self.cur, 1.max(h.saturating_sub(10)));
+        let mut chrome = 10;
+        if let Some((map, free, total)) = &self.map {
+            let wts: i64 = self
+                .items
+                .iter()
+                .filter_map(|it| it.wt.as_ref())
+                .map(|w| w.size)
+                .sum();
+            let (a, b) = where_words(map, *free, *total, wts, size, m.now);
+            out.push(fit(ln([plain("  "), sp(a, TEXT)]), w));
+            out.push(fit(ln([plain("  "), sp(b, DIM)]), w));
+            out.push(Line::new());
+            chrome += 3;
+        } else if !data(m).frozen {
+            out.push(ln([
+                plain("  "),
+                sp("measuring where the disk goes…", FAINT),
+            ]));
+            out.push(Line::new());
+            chrome += 2;
+        }
+        let (from, to) = window(self.items.len(), self.cur, 1.max(h.saturating_sub(chrome)));
         let edge = sp("┃", BLUE);
         let mut group = "";
         for i in from..to {
@@ -875,6 +1047,7 @@ impl Sheet for CleanSheet {
                     ("↑↓", "move"),
                     ("space", "tick"),
                     ("a", "all safe / none"),
+                    ("r", "make a rule"),
                     ("enter", "remove ticked"),
                     ("esc", "close"),
                 ],
@@ -890,10 +1063,47 @@ impl Sheet for CleanSheet {
             "up" | "k" | "shift+tab" => self.cur = round_move(self.cur, -1, n),
             "down" | "j" | "tab" => self.cur = round_move(self.cur, 1, n),
             "space" | " " | "x" => {
+                if self
+                    .items
+                    .get(self.cur)
+                    .is_some_and(|it| it.untouched.is_some())
+                {
+                    m.flash("no rule names it yet · r makes it one, and then it's ticked");
+                    return Out::Draw;
+                }
                 if let Some(it) = self.items.get_mut(self.cur)
                     && it.busy.is_empty()
+                    && it.never.is_none()
                 {
                     it.on = !it.on;
+                }
+            }
+            "r" => {
+                let Some(u) = self.items.get(self.cur).and_then(|it| it.untouched.clone()) else {
+                    return Out::Idle;
+                };
+                let why = rule_why(&u);
+                match rush_fleet::make_rule(&u.path, &why, rush_fleet::UNTOUCHED) {
+                    Ok(_) => {
+                        // It joins the caches the rules name, after the last.
+                        self.items.remove(self.cur);
+                        let at = self
+                            .items
+                            .iter()
+                            .rposition(|i| {
+                                i.cache
+                                    .as_ref()
+                                    .is_some_and(|c| !matches!(c.found.how, How::Run(_)))
+                            })
+                            .map_or(0, |i| i + 1);
+                        self.items.insert(at, ruled_item(&u, &why, m.now));
+                        self.cur = at;
+                        m.flash(&format!(
+                            "rule made: {} goes once untouched for a month · ticked",
+                            tildify(&u.path)
+                        ));
+                    }
+                    Err(e) => m.flash(&e),
                 }
             }
             "a" => {
@@ -1041,8 +1251,68 @@ mod tests {
             items,
             cur: 0,
             measuring: false,
+            map: None,
         };
         assert_eq!(s.more_safe(), (2, 18));
+    }
+
+    // The top of Clean up: the disk, what's ticked and found; then the
+    // biggest places, worktrees among them, and when home was walked.
+    #[test]
+    fn says_where_the_disk_goes() {
+        const G: i64 = 1 << 30;
+        let map = rush_fleet::HomeMap {
+            at: NOW - 2 * 3_600_000,
+            tops: vec![
+                (".colima".into(), 42 * G),
+                (".langwatch".into(), 12 * G),
+                (".codex".into(), 10 * G),
+                (".cache".into(), 9 * G),
+                (".cursor".into(), 3 * G),
+                (".npm".into(), G),
+            ],
+            untouched: vec![rush_fleet::Untouched {
+                path: "/Users/me/.zed/old-logs".into(),
+                size: 4 * G,
+                newest: NOW - 90 * 86_400_000,
+                kind: "logs".into(),
+            }],
+        };
+        let (a, b) = where_words(&map, (58 * G) as u64, (460 * G) as u64, 35 * G, 31 * G, NOW);
+        assert_eq!(
+            a,
+            "disk 58.0G free of 460.0G · Clean up frees 31.0G ticked · 4.0G more big and untouched, below"
+        );
+        assert_eq!(
+            b,
+            "where: ~/.colima 42.0G · worktrees 35.0G · ~/.langwatch 12.0G · ~/.codex 10.0G · ~/.cache 9.0G · walked 2h ago"
+        );
+    }
+
+    // A row r makes a rule of becomes a cache the rule names, ticked.
+    #[test]
+    fn a_rule_made_ticks_its_row() {
+        let u = rush_fleet::Untouched {
+            path: "/Users/me/.zed/old-logs".into(),
+            size: 4 << 30,
+            newest: NOW - 90 * 86_400_000,
+            kind: "logs".into(),
+        };
+        let rows = untouched_items(vec![u.clone()]);
+        assert!(!rows[0].on && !rows[0].safe(), "listed, never ticked");
+        assert_eq!(
+            rows[0].group(),
+            "Big and untouched for a month: no rule names these yet"
+        );
+        let it = ruled_item(&u, &rule_why(&u), NOW);
+        assert!(it.on, "ticked once ruled");
+        assert_eq!(it.group(), "Caches that rebuild themselves");
+        let c = it.cache.unwrap();
+        assert_eq!(
+            c.found.why,
+            "logs you said may go once untouched for a month"
+        );
+        assert_eq!(c.found.note, "a rule you made · untouched for 90 days");
     }
 
     // What rush never touches is listed, never ticked, and can't be.

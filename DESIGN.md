@@ -1378,7 +1378,32 @@ deleted as it went. Here it never deletes on its own:
     no container used, while the prunes alone gave macOS nothing back.
     The volume prune is the one that loses data only you can call
     unwanted (`asks_you`): ticked in Clean up, never run by the dire
-    clean.
+    clean. The rows are sized (`size_commands`, shown "~15.1G", at most
+    what's freed): docker's by `docker system df`'s reclaimable per kind
+    (`docker_reclaim`, 20s, else "docker didn't answer"), the trim by
+    colima's disk file beyond what's used inside (`colima_disk`: the
+    file's blocks against `colima ssh -- df -k /var/lib/docker`); under 5%
+    or 2G left inside, the rows say so: docker hangs then.
+  - where the disk goes, without an agent (rush-fleet's `diskmap.rs`): one
+    walk of home (`map_home`), never into a git checkout, what rush never
+    touches, your own folders (Documents, Desktop, Downloads, Movies,
+    Music, Pictures), the Trash, or Library but its Caches and Logs;
+    ~/.colima counted as its VM disk files take on macOS, not walked. Kept
+    in rush's cache (`diskmap.json`) for `MAP_FOR` (6h) and walked afresh
+    after, off the UI, since a whole walk took minutes. Clean up's top says
+    the disk's free space, what's ticked and found, and the five biggest
+    places (home's tops and the worktrees), and how long ago home was
+    walked (`where_words`). From the same walk, "Big and untouched for a
+    month: no rule names these yet": each folder 1G or more (`BIG`), two
+    or more below home, untouched for `UNTOUCHED` (30 days), that no rule
+    names, holds or is in, outermost only, at most 12, with a guess at
+    what it is by its name (`classify`: logs, a cache, scratch). Never
+    ticked and can't be; r makes it a rule (`make_rule`, kept in
+    cleanup-rules.tsv as `path\twhy\tyours\t30`): a rule you make may be
+    anywhere `may_be_yours` allows (two or more below home, outside all
+    the walk never enters and rush's own folders, never in a git checkout
+    as made), and goes only once untouched for its days, checked again at
+    removal; the row then joins the caches, ticked.
   Each worktree row says its group and why (`rush_fleet::Triage`,
   `triage.rs`), from its uncommitted files (noise told from work: a lone
   .claude/settings.local.json, a lockfile; `noise`), its pull request as

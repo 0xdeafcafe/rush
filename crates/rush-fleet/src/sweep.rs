@@ -517,15 +517,70 @@ pub fn survey(rules: &[CacheRule], wts: &[String], free: &[String], now: Ms) -> 
         }
     }
     let h = home();
-    caches.extend(
-        end_commands(&|t| find_tool(t).is_some(), &h)
-            .into_iter()
-            .map(|found| CacheFound {
-                found,
-                wt: String::new(),
-            }),
-    );
+    let mut cmds: Vec<CacheFound> = end_commands(&|t| find_tool(t).is_some(), &h)
+        .into_iter()
+        .map(|found| CacheFound {
+            found,
+            wt: String::new(),
+        })
+        .collect();
+    if cmds.iter().any(|c| c.found.path.starts_with("docker")) {
+        let (d, vm) = crate::diskmap::command_sizes(&h);
+        size_commands(&mut cmds, d, vm);
+    }
+    caches.extend(cmds);
     Survey { caches, facts }
+}
+
+/// Bytes in G, one decimal, as rush's notes say sizes.
+fn gigs(b: i64) -> String {
+    format!("{:.1}G", b as f64 / (1u64 << 30) as f64)
+}
+
+/// The commands' rows sized by what docker says it could free and what a
+/// trim gives colima's VM disk back, and said when docker doesn't answer
+/// or colima's disk is nearly full inside (docker hangs then). The images
+/// docker could free are all it doesn't use, the volumes named ones too:
+/// what the prunes free is at most that.
+pub fn size_commands(
+    cmds: &mut [CacheFound],
+    d: Option<crate::diskmap::DockerReclaim>,
+    vm: Option<crate::diskmap::VmDisk>,
+) {
+    let full = vm.filter(|v| v.full()).map(|v| {
+        format!(
+            "colima's disk is full inside ({} left): docker may hang until something goes",
+            gigs(v.avail)
+        )
+    });
+    for c in cmds.iter_mut() {
+        let How::Run(args) = c.found.how else {
+            continue;
+        };
+        let size = if args == COLIMA_TRIM {
+            vm.map(|v| v.slack())
+        } else {
+            d.map(|d| match args {
+                a if a == DOCKER_OLD_IMAGE_PRUNE => d.images,
+                a if a == DOCKER_BUILDER_PRUNE => d.build,
+                a if a == DOCKER_VOLUME_PRUNE => d.volumes,
+                _ => 0,
+            })
+        };
+        c.found.size = size.unwrap_or(0).max(0);
+        let docker = args.first() == Some(&"docker");
+        if docker && d.is_none() {
+            c.found.note += "; docker didn't answer: not running, or hung";
+        }
+        if let Some(f) = &full
+            && (docker || args == COLIMA_TRIM)
+        {
+            c.found.note += &format!("; {f}");
+        }
+        if args == COLIMA_TRIM && size.is_some() {
+            c.found.note += "; more once the prunes above have run";
+        }
+    }
 }
 
 /// Removes what Clean up offered, as it was decided: a command run, a
@@ -803,6 +858,64 @@ mod tests {
             .map(|c| c.path.clone())
             .collect();
         assert_eq!(asks, ["docker volume prune -f"]);
+    }
+
+    // Docker's rows take what docker says it could free, the trim what
+    // colima's file holds beyond what's used; a full VM and a docker that
+    // doesn't answer are said.
+    #[test]
+    fn sizes_the_commands() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir(d.path().join(".colima")).unwrap();
+        let home = s(d.path());
+        let all = |_: &str| true;
+        let rows = || -> Vec<CacheFound> {
+            end_commands(&all, &home)
+                .into_iter()
+                .map(|found| CacheFound {
+                    found,
+                    wt: String::new(),
+                })
+                .collect()
+        };
+        let size_of = |v: &[CacheFound], p: &str| {
+            v.iter()
+                .find(|c| c.found.path == p)
+                .map(|c| (c.found.size, c.found.note.clone()))
+                .unwrap()
+        };
+        const G: i64 = 1 << 30;
+        let dock = crate::diskmap::DockerReclaim {
+            images: 15 * G,
+            build: 2 * G,
+            volumes: 45 * G,
+        };
+        let full = crate::diskmap::VmDisk {
+            file: 75 * G,
+            size: 79 * G,
+            used: 75 * G,
+            avail: G / 2,
+        };
+        let mut v = rows();
+        size_commands(&mut v, Some(dock), Some(full));
+        assert_eq!(
+            size_of(&v, "docker image prune -a -f --filter until=168h").0,
+            15 * G
+        );
+        assert_eq!(size_of(&v, "docker builder prune -f").0, 2 * G);
+        assert_eq!(size_of(&v, "docker volume prune -f").0, 45 * G);
+        assert_eq!(size_of(&v, "docker image prune -f").0, 0);
+        let (trim, note) = size_of(&v, "colima ssh -- sudo fstrim -a");
+        assert_eq!(trim, 0, "nothing to trim while it's full");
+        assert!(note.contains("full inside (0.5G left)"), "{note}");
+        let mut v = rows();
+        size_commands(&mut v, None, None);
+        let (size, note) = size_of(&v, "docker volume prune -f");
+        assert_eq!(size, 0);
+        assert!(note.contains("docker didn't answer"), "{note}");
+        let pnpm = size_of(&v, "pnpm store prune");
+        assert_eq!(pnpm.0, 0);
+        assert!(!pnpm.1.contains("docker"), "{}", pnpm.1);
     }
 
     #[test]

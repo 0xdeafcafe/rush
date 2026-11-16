@@ -134,6 +134,10 @@ pub struct CacheRule {
     pub why: String,
     /// Learned from a cleanup agent's plan, not built in.
     pub learned: bool,
+    /// Made by you in Clean up, from what it found big and untouched: it
+    /// may be anywhere diskmap::may_be_yours allows, and goes only once
+    /// untouched for idle.
+    pub yours: bool,
     pub idle: Ms,
     pub each: bool,
     pub how: How,
@@ -213,14 +217,26 @@ fn untilde(p: &str, home: &str) -> String {
     }
 }
 
-/// The rules file's text read: path and why per line. What may not be a
-/// rule is left out.
+/// The rules file's text read: path and why per line, and for one you
+/// made, "yours" and the days it waits untouched. What may not be a rule
+/// is left out.
 pub fn read_rules(text: &str, home: &str) -> Vec<CacheRule> {
     text.lines()
         .filter_map(|l| {
-            let mut f = l.splitn(2, '\t');
+            let mut f = l.split('\t');
             let path = untilde(f.next()?.trim().trim_end_matches('/'), home);
             let why = f.next().unwrap_or("").trim().to_string();
+            if f.next().map(str::trim) == Some("yours") {
+                let days: i64 = f.next().and_then(|d| d.trim().parse().ok()).unwrap_or(30);
+                return crate::diskmap::may_be_yours(&path, home).then_some(CacheRule {
+                    path,
+                    why,
+                    learned: true,
+                    yours: true,
+                    idle: days.max(1) * DAY,
+                    ..CacheRule::default()
+                });
+            }
             may_be_rule(&path, home).then_some(CacheRule {
                 path,
                 why,
@@ -229,6 +245,56 @@ pub fn read_rules(text: &str, home: &str) -> Vec<CacheRule> {
             })
         })
         .collect()
+}
+
+/// Makes a rule of a folder Clean up found big and untouched, kept with
+/// the learned ones: it goes, from now on, once untouched for idle.
+/// Refused where a rule you make may not be, in a git checkout, or not a
+/// folder.
+pub fn make_rule(path: &str, why: &str, idle: Ms) -> Result<CacheRule, String> {
+    let home = home();
+    if !crate::diskmap::may_be_yours(path, &home) {
+        return Err(format!(
+            "won't make a rule of {path}: rush keeps out of there"
+        ));
+    }
+    if !is_dir(path) {
+        return Err(format!("{path}: gone, or not a folder"));
+    }
+    if Path::new(path)
+        .ancestors()
+        .take_while(|a| a.to_string_lossy().len() > home.trim_end_matches('/').len())
+        .any(|a| std::fs::symlink_metadata(a.join(".git")).is_ok())
+    {
+        return Err(format!(
+            "won't make a rule of {path}: it's in a git checkout"
+        ));
+    }
+    let days = (idle / DAY).max(1);
+    let p = rules_path();
+    let mut text = std::fs::read_to_string(&p).unwrap_or_default();
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    let w = why.replace(['\t', '\n'], " ");
+    text.push_str(&format!("{}\t{w}\tyours\t{days}\n", tilde(path, &home)));
+    if let Some(d) = p.parent() {
+        std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&p, text).map_err(|e| e.to_string())?;
+    agent_event(
+        None,
+        "cleanup-rule-made",
+        json!({ "path": path, "why": why, "idleDays": days }),
+    );
+    Ok(CacheRule {
+        path: path.to_string(),
+        why: w,
+        learned: true,
+        yours: true,
+        idle: days * DAY,
+        ..CacheRule::default()
+    })
 }
 
 /// The built-in rules for home, Go's module cache, then the learned ones,
@@ -416,7 +482,9 @@ pub fn rule_for<'a>(path: &str, rules: &'a [CacheRule], home: &str) -> Option<&'
     }
     let ours = rules_with(Vec::new(), home);
     let allowed = |r: &CacheRule| {
-        if r.learned {
+        if r.yours {
+            crate::diskmap::may_be_yours(&r.path, home) && r.idle > 0
+        } else if r.learned {
             may_be_rule(&r.path, home)
         } else {
             ours.iter().any(|o| o == r)
@@ -529,7 +597,15 @@ mod tests {
     // root, never one made up that rush doesn't build.
     #[test]
     fn which_rule_names_a_path() {
-        let learned = read_rules("~/Library/Caches/Arc2\tArc's other\n", H);
+        let learned = read_rules(
+            "~/Library/Caches/Arc2\tArc's other\n\
+             ~/.zed/old-logs\tZed's logs\tyours\t30\n\
+             ~/Documents/old\tnot yours to make\tyours\t30\n\
+             ~/.zed\ttoo shallow\tyours\t30\n",
+            H,
+        );
+        assert_eq!(learned.len(), 2, "{learned:?}");
+        assert!(learned[1].yours && learned[1].idle == 30 * DAY);
         let mut rules = rules_with(learned, H);
         rules.push(CacheRule {
             path: "/Users/me/Documents".into(),
@@ -572,6 +648,8 @@ mod tests {
                 Some("uv's package cache; running sessions use it"),
             ),
             ("/Users/me/Library/Caches/Arc2", Some("Arc's other")),
+            ("/Users/me/.zed/old-logs", Some("Zed's logs")),
+            ("/Users/me/Documents/old", None),
             ("/Users/me/Library/Caches/rush", None),
             ("/Users/me/Documents", None),
             ("/Users/me/.claude/projects", None),
