@@ -30,7 +30,7 @@ pub(crate) fn inline(s: &str, base: Style) -> Txt {
     if s.is_empty() {
         return Txt::new();
     }
-    if !s.contains(['*', '`', 'h', '[', '@']) {
+    if !s.contains(['*', '`', 'h', '[', '@', '#']) {
         return Txt::raw(s);
     }
     let code = if base == C_SUB || base == C_DIM {
@@ -44,7 +44,7 @@ pub(crate) fn inline(s: &str, base: Style) -> Txt {
     }];
     runs = pairs(runs, "**", base.bold());
     runs = pairs(runs, "`", code);
-    crate::handles::agent_links(md_links(&runs, base))
+    crate::issuelinks::issue_links(crate::handles::agent_links(md_links(&runs, base)), code)
 }
 
 /// Text between two delimiters in style st, the delimiters dropped, where

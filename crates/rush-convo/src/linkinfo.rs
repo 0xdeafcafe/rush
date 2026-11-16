@@ -113,6 +113,17 @@ fn moved() {
     }
 }
 
+/// An answer of another kind landed (a folder's repository for its
+/// #numbers): drawn again, and the UI told. Rust-only.
+pub(crate) fn landed() {
+    moved();
+}
+
+/// Whether lookups are on: the UI's, never tests' or --render's.
+pub(crate) fn live() -> bool {
+    LIVE.load(Ordering::SeqCst)
+}
+
 /// Draws again what links were drawn in: the agents tags name changed
 /// (handles.go:29 SetHandles moving lookupsGen).
 pub(crate) fn redraw() {

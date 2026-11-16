@@ -10,6 +10,7 @@
 pub mod decisions;
 pub mod emeritus;
 pub mod handles;
+pub mod issuelinks;
 pub mod linkinfo;
 pub mod model;
 pub mod peers;

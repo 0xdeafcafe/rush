@@ -893,6 +893,8 @@ impl Renderer {
     /// Every row, oldest first: for a dump, or a caller that wants all of
     /// it. Every turn is drawn; at most KEEP_ROWS rows are kept after.
     pub fn render(&mut self, s: &Session, o: &Options) -> Vec<RenderedLine> {
+        // Its #numbers link to its own repository's issues.
+        let _repo = crate::issuelinks::Scope::of(&s.cwd);
         self.prepare(s, o, true);
         self.windows += 1;
         let latest = latest_at(s);
@@ -926,6 +928,7 @@ impl Renderer {
     /// then on, so a caller whose rows moved draws again (Go's ui does up
     /// to three passes).
     pub fn window(&mut self, s: &Session, o: &Options, from: usize, to: usize) -> (usize, usize) {
+        let _repo = crate::issuelinks::Scope::of(&s.cwd);
         self.prepare(s, o, true);
         self.windows += 1;
         let n = s.turns.len();

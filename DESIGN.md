@@ -3270,6 +3270,16 @@ is made. Everything below is in `rush_ui::frame`.
   the PR sheet writing, and Re-run asks before `gh run rerun`. The whole
   PR sheet is In rush's PR sheet, never opened by itself. Any other link
   keeps the link menu.
+- **#1234 links to its issue or pull request** (`rush_convo::issuelinks`,
+  Rust-only). In a message's text, a #number that starts a word (not a
+  URL's anchor, an entity, nor in `code` or a link) links to
+  github.com/<owner>/<repo>/issues/N of the session's repository, which
+  GitHub sends on to the pull request when N is one. The repository is
+  the session folder's origin (`github_repo`: https, ssh, scp-like;
+  GitHub only), asked of git once per folder on a thread of its own with
+  lookups on, and drawn again once it lands (`linkinfo::landed`); the
+  session being drawn holds it in scope (`Scope`, in `Renderer::render`
+  and `window`).
 - **The list and the Session side by side.** `list.rs` groups each
   section by project (Settings' split by project) and draws the rail look
   or the classic; `list_extras/split.rs` decides the layout as Go's
