@@ -1,0 +1,606 @@
+{
+ "commit": "1a46216e704133f4b80e561e209fba67c88a9437",
+ "ref": "main",
+ "run": "43805418812",
+ "at": "2026-11-16T05:01:53Z",
+ "window_s": 60,
+ "metrics": {
+  "binary: rush, release": {
+   "kind": "binary",
+   "value": 64437528
+  },
+  "follow a run: read on, each write, allocated": {
+   "kind": "bytes",
+   "value": 18664666
+  },
+  "follow a run: read on, each write, allocations made": {
+   "kind": "allocs",
+   "value": 62060
+  },
+  "follow a run: read whole, shared, each write, allocated": {
+   "kind": "bytes",
+   "value": 2404059066
+  },
+  "follow a run: read whole, shared, each write, allocations made": {
+   "kind": "allocs",
+   "value": 10082016
+  },
+  "follow a run: read whole, shared, once a second, allocated": {
+   "kind": "bytes",
+   "value": 284848930
+  },
+  "follow a run: read whole, shared, once a second, allocations made": {
+   "kind": "allocs",
+   "value": 1057820
+  },
+  "frame, ctrl+k open: down or up, then the frame, allocations": {
+   "kind": "allocs",
+   "value": 3855
+  },
+  "frame, ctrl+k open: down or up, then the frame, bytes": {
+   "kind": "bytes",
+   "value": 715030
+  },
+  "frame, ctrl+k open: frame drawn (rows + cells), allocations": {
+   "kind": "allocs",
+   "value": 3850
+  },
+  "frame, ctrl+k open: frame drawn (rows + cells), bytes": {
+   "kind": "bytes",
+   "value": 714905
+  },
+  "frame, the list: down or up, then the frame, allocations": {
+   "kind": "allocs",
+   "value": 2934
+  },
+  "frame, the list: down or up, then the frame, bytes": {
+   "kind": "bytes",
+   "value": 532494
+  },
+  "frame, the list: frame drawn (rows + cells), allocations": {
+   "kind": "allocs",
+   "value": 2560
+  },
+  "frame, the list: frame drawn (rows + cells), bytes": {
+   "kind": "bytes",
+   "value": 500197
+  },
+  "frame, the list: rows (Model::frame), allocations": {
+   "kind": "allocs",
+   "value": 2558
+  },
+  "frame, the list: rows (Model::frame), bytes": {
+   "kind": "bytes",
+   "value": 500169
+  },
+  "host: CPU to start, s": {
+   "kind": "info",
+   "value": 0.151
+  },
+  "host: footprint": {
+   "kind": "footprint",
+   "value": 3900800
+  },
+  "host: idle CPU": {
+   "kind": "cpu",
+   "value": 0.0014
+  },
+  "host: idle wake-ups": {
+   "kind": "wakeups",
+   "value": 1.0
+  },
+  "host: threads": {
+   "kind": "threads",
+   "value": 7
+  },
+  "list, past left out (the feed's): loader alone, allocations kept": {
+   "kind": "allocs",
+   "value": 15004
+  },
+  "list, past left out (the feed's): loader alone, retained": {
+   "kind": "heap",
+   "value": 2552174
+  },
+  "list, past left out (the feed's): rows": {
+   "kind": "info",
+   "value": 400
+  },
+  "list: a reading, allocations made": {
+   "kind": "allocs",
+   "value": 25248
+  },
+  "list: loader alone, allocations kept": {
+   "kind": "allocs",
+   "value": 23077
+  },
+  "list: loader alone, retained": {
+   "kind": "heap",
+   "value": 4255528
+  },
+  "list: loader and reading, retained": {
+   "kind": "heap",
+   "value": 5444977
+  },
+  "list: rows": {
+   "kind": "info",
+   "value": 641
+  },
+  "list: rows, allocations kept": {
+   "kind": "allocs",
+   "value": 7934
+  },
+  "list: rows, retained": {
+   "kind": "heap",
+   "value": 1186995
+  },
+  "menu bar feed: every row, retained": {
+   "kind": "heap",
+   "value": 518290
+  },
+  "menu bar feed: rows kept, retained": {
+   "kind": "heap",
+   "value": 3686
+  },
+  "menubar feed: CPU to start, s": {
+   "kind": "info",
+   "value": 0.115
+  },
+  "menubar feed: footprint": {
+   "kind": "footprint",
+   "value": 13714816
+  },
+  "menubar feed: idle CPU": {
+   "kind": "cpu",
+   "value": 0.0
+  },
+  "menubar feed: idle wake-ups": {
+   "kind": "wakeups",
+   "value": 0.0
+  },
+  "menubar feed: threads": {
+   "kind": "threads",
+   "value": 4
+  },
+  "open last 2 MB: allocated": {
+   "kind": "bytes",
+   "value": 11912006
+  },
+  "open last 2 MB: allocations kept": {
+   "kind": "allocs",
+   "value": 5283
+  },
+  "open last 2 MB: allocations made": {
+   "kind": "allocs",
+   "value": 27431
+  },
+  "open last 2 MB: peak": {
+   "kind": "heap",
+   "value": 1703994
+  },
+  "open last 2 MB: retained": {
+   "kind": "heap",
+   "value": 1615178
+  },
+  "open whole file, fetch+apply: allocated": {
+   "kind": "bytes",
+   "value": 58794734
+  },
+  "open whole file, fetch+apply: allocations kept": {
+   "kind": "allocs",
+   "value": 25910
+  },
+  "open whole file, fetch+apply: allocations made": {
+   "kind": "allocs",
+   "value": 134234
+  },
+  "open whole file, fetch+apply: peak": {
+   "kind": "heap",
+   "value": 21250576
+  },
+  "open whole file, fetch+apply: retained": {
+   "kind": "heap",
+   "value": 7527991
+  },
+  "open whole file: allocated": {
+   "kind": "bytes",
+   "value": 46385612
+  },
+  "open whole file: allocations kept": {
+   "kind": "allocs",
+   "value": 25910
+  },
+  "open whole file: allocations made": {
+   "kind": "allocs",
+   "value": 134234
+  },
+  "open whole file: peak": {
+   "kind": "heap",
+   "value": 7613065
+  },
+  "open whole file: retained": {
+   "kind": "heap",
+   "value": 7527991
+  },
+  "open whole session, copied: allocated": {
+   "kind": "bytes",
+   "value": 7015927
+  },
+  "open whole session, copied: allocations kept": {
+   "kind": "allocs",
+   "value": 25909
+  },
+  "open whole session, copied: allocations made": {
+   "kind": "allocs",
+   "value": 25909
+  },
+  "open whole session, copied: peak": {
+   "kind": "heap",
+   "value": 7015927
+  },
+  "open whole session, copied: retained": {
+   "kind": "heap",
+   "value": 7015927
+  },
+  "open: its subagent runs, retained": {
+   "kind": "heap",
+   "value": 1744480
+  },
+  "open: subagent runs followed, allocations kept": {
+   "kind": "allocs",
+   "value": 43
+  },
+  "open: subagent runs followed, allocations made": {
+   "kind": "allocs",
+   "value": 32397
+  },
+  "open: subagent runs followed, peak": {
+   "kind": "heap",
+   "value": 379480
+  },
+  "open: subagent runs followed, retained": {
+   "kind": "heap",
+   "value": 9499
+  },
+  "plugind: CPU to start, s": {
+   "kind": "info",
+   "value": 0.051
+  },
+  "plugind: footprint": {
+   "kind": "footprint",
+   "value": 4752768
+  },
+  "plugind: idle CPU": {
+   "kind": "cpu",
+   "value": 0.0152
+  },
+  "plugind: idle wake-ups": {
+   "kind": "wakeups",
+   "value": 14.7
+  },
+  "plugind: threads": {
+   "kind": "threads",
+   "value": 9
+  },
+  "render 300 turns w120: cold frame at the end, allocations": {
+   "kind": "allocs",
+   "value": 1386
+  },
+  "render 300 turns w120: cold frame at the end, bytes": {
+   "kind": "bytes",
+   "value": 509298
+  },
+  "render 300 turns w120: cold jump to the top (window), allocations": {
+   "kind": "allocs",
+   "value": 4100
+  },
+  "render 300 turns w120: cold jump to the top (window), bytes": {
+   "kind": "bytes",
+   "value": 942122
+  },
+  "render 300 turns w120: cold layout (all turns), allocations": {
+   "kind": "allocs",
+   "value": 202359
+  },
+  "render 300 turns w120: cold layout (all turns), bytes": {
+   "kind": "bytes",
+   "value": 30821925
+  },
+  "render 300 turns w120: stream: delta, then a frame, allocations": {
+   "kind": "allocs",
+   "value": 91
+  },
+  "render 300 turns w120: stream: delta, then a frame, bytes": {
+   "kind": "bytes",
+   "value": 15956
+  },
+  "render 300 turns w120: warm frame at the end, allocations": {
+   "kind": "allocs",
+   "value": 75
+  },
+  "render 300 turns w120: warm frame at the end, bytes": {
+   "kind": "bytes",
+   "value": 9866
+  },
+  "render 300 turns w120: warm frame mid-way (range), allocations": {
+   "kind": "allocs",
+   "value": 73
+  },
+  "render 300 turns w120: warm frame mid-way (range), bytes": {
+   "kind": "bytes",
+   "value": 7898
+  },
+  "render 300 turns w250: cold frame at the end, allocations": {
+   "kind": "allocs",
+   "value": 1386
+  },
+  "render 300 turns w250: cold frame at the end, bytes": {
+   "kind": "bytes",
+   "value": 509355
+  },
+  "render 300 turns w250: cold jump to the top (window), allocations": {
+   "kind": "allocs",
+   "value": 4100
+  },
+  "render 300 turns w250: cold jump to the top (window), bytes": {
+   "kind": "bytes",
+   "value": 942275
+  },
+  "render 300 turns w250: cold layout (all turns), allocations": {
+   "kind": "allocs",
+   "value": 136083
+  },
+  "render 300 turns w250: cold layout (all turns), bytes": {
+   "kind": "bytes",
+   "value": 20883663
+  },
+  "render 300 turns w250: stream: delta, then a frame, allocations": {
+   "kind": "allocs",
+   "value": 91
+  },
+  "render 300 turns w250: stream: delta, then a frame, bytes": {
+   "kind": "bytes",
+   "value": 15973
+  },
+  "render 300 turns w250: warm frame at the end, allocations": {
+   "kind": "allocs",
+   "value": 75
+  },
+  "render 300 turns w250: warm frame at the end, bytes": {
+   "kind": "bytes",
+   "value": 9874
+  },
+  "render 300 turns w250: warm frame mid-way (range), allocations": {
+   "kind": "allocs",
+   "value": 73
+  },
+  "render 300 turns w250: warm frame mid-way (range), bytes": {
+   "kind": "bytes",
+   "value": 7906
+  },
+  "render 3000 turns w120: chat: cold frame at the end, allocations": {
+   "kind": "allocs",
+   "value": 1118
+  },
+  "render 3000 turns w120: chat: cold frame at the end, bytes": {
+   "kind": "bytes",
+   "value": 3078114
+  },
+  "render 3000 turns w120: chat: warm frame at the end, allocations": {
+   "kind": "allocs",
+   "value": 98
+  },
+  "render 3000 turns w120: chat: warm frame at the end, bytes": {
+   "kind": "bytes",
+   "value": 14649
+  },
+  "render 3000 turns w120: chat: warm frame mid-way, allocations": {
+   "kind": "allocs",
+   "value": 96
+  },
+  "render 3000 turns w120: chat: warm frame mid-way, bytes": {
+   "kind": "bytes",
+   "value": 12737
+  },
+  "render 3000 turns w120: code: cold frame at the end, allocations": {
+   "kind": "allocs",
+   "value": 1288
+  },
+  "render 3000 turns w120: code: cold frame at the end, bytes": {
+   "kind": "bytes",
+   "value": 3129068
+  },
+  "render 3000 turns w120: code: warm frame at the end, allocations": {
+   "kind": "allocs",
+   "value": 34
+  },
+  "render 3000 turns w120: code: warm frame at the end, bytes": {
+   "kind": "bytes",
+   "value": 5217
+  },
+  "render 3000 turns w120: code: warm frame mid-way, allocations": {
+   "kind": "allocs",
+   "value": 32
+  },
+  "render 3000 turns w120: code: warm frame mid-way, bytes": {
+   "kind": "bytes",
+   "value": 3497
+  },
+  "render 3000 turns w120: cold frame at the end, allocations": {
+   "kind": "allocs",
+   "value": 4085
+  },
+  "render 3000 turns w120: cold frame at the end, bytes": {
+   "kind": "bytes",
+   "value": 3002074
+  },
+  "render 3000 turns w120: cold jump to the top (window), allocations": {
+   "kind": "allocs",
+   "value": 6961
+  },
+  "render 3000 turns w120: cold jump to the top (window), bytes": {
+   "kind": "bytes",
+   "value": 3442937
+  },
+  "render 3000 turns w120: cold layout (all turns), allocations": {
+   "kind": "allocs",
+   "value": 2925183
+  },
+  "render 3000 turns w120: cold layout (all turns), bytes": {
+   "kind": "bytes",
+   "value": 285501075
+  },
+  "render 3000 turns w120: normal: cold frame at the end, allocations": {
+   "kind": "allocs",
+   "value": 4085
+  },
+  "render 3000 turns w120: normal: cold frame at the end, bytes": {
+   "kind": "bytes",
+   "value": 3002074
+  },
+  "render 3000 turns w120: normal: warm frame at the end, allocations": {
+   "kind": "allocs",
+   "value": 74
+  },
+  "render 3000 turns w120: normal: warm frame at the end, bytes": {
+   "kind": "bytes",
+   "value": 9817
+  },
+  "render 3000 turns w120: normal: warm frame mid-way, allocations": {
+   "kind": "allocs",
+   "value": 72
+  },
+  "render 3000 turns w120: normal: warm frame mid-way, bytes": {
+   "kind": "bytes",
+   "value": 7849
+  },
+  "render 3000 turns w120: orchestrator: cold frame at the end, allocations": {
+   "kind": "allocs",
+   "value": 847
+  },
+  "render 3000 turns w120: orchestrator: cold frame at the end, bytes": {
+   "kind": "bytes",
+   "value": 3348209
+  },
+  "render 3000 turns w120: orchestrator: warm frame at the end, allocations": {
+   "kind": "allocs",
+   "value": 69
+  },
+  "render 3000 turns w120: orchestrator: warm frame at the end, bytes": {
+   "kind": "bytes",
+   "value": 7054
+  },
+  "render 3000 turns w120: orchestrator: warm frame mid-way, allocations": {
+   "kind": "allocs",
+   "value": 67
+  },
+  "render 3000 turns w120: orchestrator: warm frame mid-way, bytes": {
+   "kind": "bytes",
+   "value": 5166
+  },
+  "render 3000 turns w120: stream: delta, then a frame, allocations": {
+   "kind": "allocs",
+   "value": 90
+  },
+  "render 3000 turns w120: stream: delta, then a frame, bytes": {
+   "kind": "bytes",
+   "value": 15902
+  },
+  "render 3000 turns w120: warm frame at the end, allocations": {
+   "kind": "allocs",
+   "value": 74
+  },
+  "render 3000 turns w120: warm frame at the end, bytes": {
+   "kind": "bytes",
+   "value": 9817
+  },
+  "render 3000 turns w120: warm frame mid-way (range), allocations": {
+   "kind": "allocs",
+   "value": 72
+  },
+  "render 3000 turns w120: warm frame mid-way (range), bytes": {
+   "kind": "bytes",
+   "value": 7849
+  },
+  "serve: CPU to start, s": {
+   "kind": "info",
+   "value": 0.279
+  },
+  "serve: a listing, retained": {
+   "kind": "heap",
+   "value": 2547846
+  },
+  "serve: footprint": {
+   "kind": "footprint",
+   "value": 6489472
+  },
+  "serve: idle CPU": {
+   "kind": "cpu",
+   "value": 0.4495
+  },
+  "serve: idle wake-ups": {
+   "kind": "wakeups",
+   "value": 70.7
+  },
+  "serve: threads": {
+   "kind": "threads",
+   "value": 7
+  },
+  "ui: CPU to start, s": {
+   "kind": "info",
+   "value": 1.681
+  },
+  "ui: footprint": {
+   "kind": "footprint",
+   "value": 33687104
+  },
+  "ui: idle CPU": {
+   "kind": "cpu",
+   "value": 0.2678
+  },
+  "ui: idle wake-ups": {
+   "kind": "wakeups",
+   "value": 197.5
+  },
+  "ui: threads": {
+   "kind": "threads",
+   "value": 8
+  }
+ },
+ "errors": {},
+ "notes": {
+  "plugind": {
+   "threads seen": [
+    9
+   ],
+   "ps cpu over the window": 0.02
+  },
+  "serve": {
+   "threads seen": [
+    7
+   ],
+   "ps cpu over the window": 0.46
+  },
+  "host": {
+   "threads seen": [
+    7
+   ],
+   "ps cpu over the window": 0.0
+  },
+  "menubar feed": {
+   "threads seen": [
+    4
+   ],
+   "ps cpu over the window": 0.0
+  },
+  "ui": {
+   "threads seen": [
+    8,
+    9,
+    10,
+    12,
+    13
+   ],
+   "ps cpu over the window": 0.27
+  }
+ }
+}
