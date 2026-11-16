@@ -302,3 +302,80 @@ fn rust_things() {
         .collect();
     assert_eq!(ids, ["crates", "cargo-git"]);
 }
+
+// rust-clean finds sccache's caches beyond its own: the SCCACHE_DIR a
+// project's .cargo/config.toml sets in [env] (relative to the project
+// when it says so), an .envrc's, and a folder in the cache folder named
+// for sccache that nothing on disk names; each once, each a folder.
+#[test]
+fn sccache_where_projects_put_it() {
+    let home = tempfile::tempdir().unwrap();
+    let h = home.path().to_string_lossy().into_owned();
+    let p = |s: &str| format!("{h}/{s}");
+    for d in [
+        "own",
+        "Library/Caches/proj-sccache",
+        "Library/Caches/unrelated",
+        "repo/.git",
+        "repo/.cargo",
+        "repo/cache/sc",
+        "repo/crates/app",
+        "envsc",
+    ] {
+        std::fs::create_dir_all(p(d)).unwrap();
+    }
+    std::fs::write(
+        p("repo/.cargo/config.toml"),
+        "[env]\nSCCACHE_DIR = { value = \"cache/sc\", relative = true }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        p("repo/.envrc"),
+        "export SCCACHE_DIR=\"$HOME/envsc\"\nexport SCCACHE_DIR=\"$HOME/gone\"\n",
+    )
+    .unwrap();
+    let own = p("own");
+    let env = |k: &str| match k {
+        "HOME" => Some(h.clone()),
+        "SCCACHE_DIR" => Some(own.clone()),
+        _ => None,
+    };
+    let seen = [Session {
+        id: "a".into(),
+        cwd: p("repo/crates/app"),
+        state: "idle".into(),
+    }];
+    assert_eq!(
+        kits::sccache_dirs(&env, &seen),
+        [
+            p("own"),
+            p("repo/cache/sc"),
+            p("Library/Caches/proj-sccache")
+        ],
+        "the .envrc's last SCCACHE_DIR is gone, so it isn't listed"
+    );
+    std::fs::create_dir_all(p("gone")).unwrap();
+    assert_eq!(
+        kits::sccache_dirs(&env, &seen),
+        [
+            p("own"),
+            p("repo/cache/sc"),
+            p("gone"),
+            p("Library/Caches/proj-sccache")
+        ]
+    );
+    let titles: Vec<String> = kits::rust_things_with(&env, &seen)
+        .into_iter()
+        .filter(|t| t.id.starts_with("sccache"))
+        .map(|t| t.title)
+        .collect();
+    assert_eq!(
+        titles,
+        [
+            "sccache cache",
+            "sccache cache in sc",
+            "sccache cache in gone",
+            "sccache cache in proj-sccache"
+        ]
+    );
+}

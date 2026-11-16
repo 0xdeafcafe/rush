@@ -25,7 +25,11 @@
 //! subagents' worktrees in .claude/worktrees are ticked by the same rule
 //! as rush's own (ticks_itself); the rest that would lose nothing, made by
 //! hand or another tool, stay for you to tick, and the title says how many
-//! and how much (more_safe).
+//! and how much (more_safe). And: the build caches of sessions between
+//! turns, or stopped and not done (between_sessions), in their worktrees
+//! and at the tops of their $TMPDIRs (cargo's target folders by their
+//! CACHEDIR.TAG), ticked unless another process works there: a build
+//! puts them back, and an open session's are where most of the disk goes.
 
 use rush_core::text::Line;
 use rush_core::time::Ms;
@@ -213,6 +217,7 @@ pub fn ruled_item(u: &rush_fleet::Untouched, why: &str, now: Ms) -> CleanItem {
                 ..rush_fleet::FoundCache::default()
             },
             wt: String::new(),
+            session: String::new(),
         }),
         stale: true,
         ..CleanItem::default()
@@ -271,23 +276,78 @@ pub fn never_items(never: Vec<rush_fleet::FoundCache>) -> Vec<CleanItem> {
 const NEVER_SHOWN: i64 = 1 << 30;
 const NEVER_MAX: usize = 8;
 
-/// The worktrees a survey reads the facts of (all but main checkouts), and
-/// those whose build caches it measures: nobody works in them, git could
-/// look, and they aren't ones rush removes whole.
-pub fn survey_paths(m: &Model) -> (Vec<String>, Vec<String>) {
+/// The sessions whose build caches go while they're open (Rust-only):
+/// between turns, or stopped, and not done (a done one's $TMPDIR goes
+/// whole). Each with its worktree, when it's a linked one no session in a
+/// turn shares, and its $TMPDIRs that no session in a turn has too.
+pub fn between_sessions(m: &Model) -> Vec<rush_fleet::Between> {
     let d = data(m);
+    let busy: Vec<&str> = agents(m)
+        .filter(|g| g.in_turn())
+        .map(|g| g.a.key.as_str())
+        .collect();
+    let busy_temps: Vec<&str> = busy
+        .iter()
+        .filter_map(|k| d.temp.get(*k))
+        .flat_map(|t| t.dirs.iter().map(|x| x.path.as_str()))
+        .collect();
+    agents(m)
+        .filter(|g| !g.in_turn() && m.group_of.get(&g.a.key).map(String::as_str) != Some(FINISHED))
+        .map(|g| {
+            let n = one_line(&g.a.display_name);
+            let wt = d
+                .wts
+                .iter()
+                .find(|w| {
+                    w.path != w.repo
+                        && w.agents.contains(&g.a.key)
+                        && !w.agents.iter().any(|k| busy.contains(&k.as_str()))
+                        && w.err.is_empty()
+                })
+                .map(|w| w.path.clone())
+                .unwrap_or_default();
+            let temps = d
+                .temp
+                .get(&g.a.key)
+                .map(|t| {
+                    t.dirs
+                        .iter()
+                        .map(|x| x.path.clone())
+                        .filter(|p| !busy_temps.contains(&p.as_str()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            rush_fleet::Between {
+                key: g.a.key.clone(),
+                name: if n.is_empty() { "a session".into() } else { n },
+                pid: g.a.pid,
+                wt,
+                temps,
+            }
+        })
+        .filter(|b| !b.wt.is_empty() || !b.temps.is_empty())
+        .collect()
+}
+
+/// The worktrees a survey reads the facts of (all but main checkouts),
+/// those whose build caches it measures (nobody works in them, or only a
+/// session between turns does; git could look, and they aren't ones rush
+/// removes whole), and the sessions between turns.
+pub fn survey_paths(m: &Model) -> (Vec<String>, Vec<String>, Vec<rush_fleet::Between>) {
+    let d = data(m);
+    let between = between_sessions(m);
     let wts: Vec<&Worktree> = d.wts.iter().filter(|w| w.path != w.repo).collect();
     let free = wts
         .iter()
         .filter(|w| {
             !(ticks_itself(w) && w.verdict().can_go())
-                && running(m, &w.agents).is_none()
                 && w.err.is_empty()
-                && w.in_use.is_empty()
+                && (running(m, &w.agents).is_none() && w.in_use.is_empty()
+                    || between.iter().any(|b| b.wt == w.path))
         })
         .map(|w| w.path.clone())
         .collect();
-    (wts.iter().map(|w| w.path.clone()).collect(), free)
+    (wts.iter().map(|w| w.path.clone()).collect(), free, between)
 }
 
 /// Everything a survey measures, and the biggest of what rush never
@@ -295,11 +355,12 @@ pub fn survey_paths(m: &Model) -> (Vec<String>, Vec<String>) {
 pub fn survey_all(
     wts: &[String],
     free: &[String],
+    between: &[rush_fleet::Between],
     now: Ms,
 ) -> (rush_fleet::Survey, Vec<rush_fleet::FoundCache>) {
     let home = std::env::var("HOME").unwrap_or_default();
     (
-        rush_fleet::survey(&rush_fleet::cache_rules(), wts, free, now),
+        rush_fleet::survey(&rush_fleet::cache_rules(), wts, free, between, now),
         rush_fleet::never_touch_big(&home, NEVER_SHOWN, NEVER_MAX),
     )
 }
@@ -329,6 +390,7 @@ fn measure_into_sheet(
     m: &mut Model,
     wts: Vec<String>,
     free_wts: Vec<String>,
+    between: Vec<rush_fleet::Between>,
     plans: Vec<std::path::PathBuf>,
 ) {
     let now = m.now;
@@ -340,7 +402,13 @@ fn measure_into_sheet(
                 .filter_map(|t| rush_fleet::learn(&t).ok())
                 .map(|n| n.len())
                 .sum();
-            let s = rush_fleet::survey(&rush_fleet::cache_rules(), &wts, &free_wts, now);
+            let s = rush_fleet::survey(
+                &rush_fleet::cache_rules(),
+                &wts,
+                &free_wts,
+                &between,
+                now,
+            );
             (s, learned)
         },
         |m, (survey, learned)| {
@@ -534,9 +602,11 @@ pub fn open_clean_sheet(m: &mut Model) {
             ..CleanItem::default()
         });
     }
-    // The worktrees whose build caches are offered: nobody works in them,
-    // git could look, and they aren't going whole; never a main checkout.
-    let free_wts: Vec<String> = items
+    // The worktrees whose build caches are offered: nobody works in them
+    // (or only a session between turns does), git could look, and they
+    // aren't going whole; never a main checkout.
+    let between = between_sessions(m);
+    let mut free_wts: Vec<String> = items
         .iter()
         .filter_map(|it| it.wt.as_ref().map(|w| (it, w)))
         .filter(|(it, w)| {
@@ -548,6 +618,14 @@ pub fn open_clean_sheet(m: &mut Model) {
         })
         .map(|(_, w)| w.path.clone())
         .collect();
+    for b in &between {
+        let whole = items
+            .iter()
+            .any(|it| it.on && it.wt.as_ref().is_some_and(|w| w.path == b.wt));
+        if !b.wt.is_empty() && !whole && !free_wts.contains(&b.wt) {
+            free_wts.push(b.wt.clone());
+        }
+    }
     let wts: Vec<String> = data(m)
         .wts
         .iter()
@@ -579,7 +657,7 @@ pub fn open_clean_sheet(m: &mut Model) {
                     .join(super::care::CARE_PLAN_FILE)
             })
             .collect();
-        measure_into_sheet(m, wts, free_wts, plans);
+        measure_into_sheet(m, wts, free_wts, between, plans);
     }
 }
 
@@ -1162,6 +1240,7 @@ mod tests {
                 ..rush_fleet::FoundCache::default()
             },
             wt: wt.into(),
+            session: String::new(),
         }
     }
 

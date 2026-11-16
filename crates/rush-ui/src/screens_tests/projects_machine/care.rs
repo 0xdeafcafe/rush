@@ -703,6 +703,7 @@ fn known_says_what_the_rules_decided() {
             ..rush_fleet::FoundCache::default()
         },
         wt: String::new(),
+        session: String::new(),
     };
     let d = m.kept::<Data>();
     d.survey = vec![

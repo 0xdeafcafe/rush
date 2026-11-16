@@ -153,6 +153,32 @@ pub fn process_cwds() -> Vec<String> {
     out
 }
 
+/// process_cwds, but for pids and everything under them: a session
+/// between turns sits in its worktree with its MCP servers and language
+/// servers, and none of that is work that writes a build cache.
+pub fn process_cwds_but(pids: &[i32]) -> Vec<String> {
+    if pids.is_empty() {
+        return process_cwds();
+    }
+    let t = rush_sys::proc::snapshot();
+    let skip: std::collections::HashSet<i32> = pids
+        .iter()
+        .filter(|&&p| p != 0)
+        .flat_map(|&p| t.tree(p).into_iter().map(|n| n.pid))
+        .collect();
+    let mut out: Vec<String> = t
+        .procs
+        .keys()
+        .filter(|pid| !skip.contains(pid))
+        .filter_map(|&pid| rush_sys::proc::cwd(pid))
+        .map(|p| p.to_string_lossy().into_owned())
+        .filter(|p| p != "/")
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// Whether any of cwds is dir or in it.
 pub fn works_in(cwds: &[String], dir: &str) -> bool {
     let d = crate::worktree::clean(dir);
@@ -419,6 +445,10 @@ pub fn never_touch_big(home: &str, min: i64, n: usize) -> Vec<FoundCache> {
 pub struct CacheFound {
     pub found: FoundCache,
     pub wt: String,
+    /// The key of the session between turns it's a build cache of, when
+    /// it's one's: it's kept if that session is in a turn when it would
+    /// go (Rust-only).
+    pub session: String,
 }
 
 impl CacheFound {
@@ -484,6 +514,64 @@ pub fn wt_cache(path: String, wt: &str, size: i64, newest: Ms, f: WtFacts, now: 
             ..FoundCache::default()
         },
         wt: wt.to_string(),
+        session: String::new(),
+    }
+}
+
+/// A session open between turns, or stopped and not done (Rust-only): its
+/// build caches go whenever no other process works where they are, as a
+/// build puts them back. Its own processes (pid and what's under it)
+/// aren't work.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Between {
+    pub key: String,
+    pub name: String,
+    /// 0 when it's stopped.
+    pub pid: i32,
+    /// Its worktree, "" when it has none of its own.
+    pub wt: String,
+    /// Its $TMPDIRs.
+    pub temps: Vec<String>,
+}
+
+/// A build cache of a session between turns (b), in root (its worktree,
+/// or one of its $TMPDIRs), decided: yes unless another process works in
+/// root.
+pub fn between_cache(
+    path: String,
+    root: &str,
+    size: i64,
+    newest: Ms,
+    b: &Between,
+    works_here: bool,
+) -> CacheFound {
+    let temp = b.temps.iter().any(|t| t == root);
+    let (ok, note) = if works_here {
+        (false, "a process works in it".to_string())
+    } else if b.pid == 0 {
+        (true, format!("{} is stopped: a build puts it back", b.name))
+    } else {
+        (
+            true,
+            format!("{} is between turns: a build puts it back", b.name),
+        )
+    };
+    CacheFound {
+        found: FoundCache {
+            path,
+            why: if temp {
+                "build cache in a session's $TMPDIR".into()
+            } else {
+                "build cache in a session's worktree".into()
+            },
+            size,
+            newest,
+            ok,
+            note,
+            ..FoundCache::default()
+        },
+        wt: root.to_string(),
+        session: b.key.clone(),
     }
 }
 
@@ -497,10 +585,21 @@ pub struct Survey {
 }
 
 /// Measures what Clean up offers: the rules' caches, the build caches of
-/// the worktrees in free (nobody's, not going whole), and the facts of
-/// every worktree in wts. Off the UI: it walks each.
-pub fn survey(rules: &[CacheRule], wts: &[String], free: &[String], now: Ms) -> Survey {
+/// the worktrees in free (nobody's, not going whole), those of the
+/// sessions between turns (their worktrees and $TMPDIRs), and the facts
+/// of every worktree in wts. Off the UI: it walks each.
+pub fn survey(
+    rules: &[CacheRule],
+    wts: &[String],
+    free: &[String],
+    between: &[Between],
+    now: Ms,
+) -> Survey {
+    // Every process counts for the worktrees' facts (triage, and whether
+    // one goes whole); a session's own don't, for its build caches.
     let cwds = process_cwds();
+    let pids: Vec<i32> = between.iter().map(|b| b.pid).collect();
+    let others = process_cwds_but(&pids);
     let mut all: Vec<String> = wts.to_vec();
     all.extend(free.iter().filter(|f| !wts.contains(f)).cloned());
     let facts = wt_facts(&all, &cwds);
@@ -509,14 +608,34 @@ pub fn survey(rules: &[CacheRule], wts: &[String], free: &[String], now: Ms) -> 
         .map(|found| CacheFound {
             found,
             wt: String::new(),
+            session: String::new(),
         })
         .collect();
     for wt in free {
         let f = facts.get(wt).copied().unwrap_or_default();
+        let b = between.iter().find(|b| !b.wt.is_empty() && b.wt == *wt);
         for p in crate::caches_in(wt) {
             let (size, newest) = crate::walk(&p);
-            if size > 0 {
-                caches.push(wt_cache(p, wt, size, newest, f, now));
+            if size == 0 {
+                continue;
+            }
+            caches.push(match b {
+                Some(b) => between_cache(p, wt, size, newest, b, works_in(&others, wt)),
+                None => wt_cache(p, wt, size, newest, f, now),
+            });
+        }
+    }
+    for b in between {
+        for t in &b.temps {
+            let works_here = works_in(&others, t);
+            for p in crate::temp_caches_in(t) {
+                if caches.iter().any(|c| c.found.path == p) {
+                    continue;
+                }
+                let (size, newest) = crate::walk(&p);
+                if size > 0 {
+                    caches.push(between_cache(p, t, size, newest, b, works_here));
+                }
             }
         }
     }
@@ -526,6 +645,7 @@ pub fn survey(rules: &[CacheRule], wts: &[String], free: &[String], now: Ms) -> 
         .map(|found| CacheFound {
             found,
             wt: String::new(),
+            session: String::new(),
         })
         .collect();
     if cmds.iter().any(|c| c.found.path.starts_with("docker")) {
@@ -879,6 +999,7 @@ mod tests {
                 .map(|found| CacheFound {
                     found,
                     wt: String::new(),
+                    session: String::new(),
                 })
                 .collect()
         };

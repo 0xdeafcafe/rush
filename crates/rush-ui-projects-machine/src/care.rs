@@ -538,12 +538,12 @@ impl CareSheet {
         let short = self.short.clone();
         // What rush's own rules decide, measured beside the rest: the agent
         // is told, and looks only at what they can't.
-        let (wts, free) = super::clean::survey_paths(m);
+        let (wts, free, between) = super::clean::survey_paths(m);
         let (now, frozen) = (m.now, data(m).frozen);
         m.later(
             move || {
                 let survey = (!frozen).then(|| {
-                    std::thread::spawn(move || super::clean::survey_all(&wts, &free, now))
+                    std::thread::spawn(move || super::clean::survey_all(&wts, &free, &between, now))
                 });
                 let st = care_start(scan, care_reports, CARE_SCAN_WAIT);
                 (st, survey.and_then(|h| h.join().ok()))

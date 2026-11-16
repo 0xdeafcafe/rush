@@ -106,9 +106,25 @@ pub fn cleaned_words(c: &Cleaned) -> String {
 /// run ends with, once each (pnpm store prune frees what node_modules
 /// linked). The free disk is read before and after. Rust-only.
 fn remove_caches(m: &mut Model, list: Vec<CacheFound>) {
+    // A session's build cache stays once it's in a turn again; those of
+    // sessions between turns go with their own processes not counted as
+    // work there (rush_fleet::process_cwds_but).
+    let (list, held): (Vec<CacheFound>, Vec<CacheFound>) = list.into_iter().partition(|c| {
+        c.session.is_empty() || agent_by_key(m, &c.session).is_none_or(|g| !g.in_turn())
+    });
+    if let Some(c) = held.first() {
+        m.flash_err(&format!(
+            "{}: its session is in a turn now; it stays",
+            tildify(&c.found.path)
+        ));
+    }
     if list.is_empty() {
         return;
     }
+    let pids: Vec<i32> = super::clean::between_sessions(m)
+        .iter()
+        .map(|b| b.pid)
+        .collect();
     let total: i64 = list.iter().map(|c| c.found.size).sum();
     m.flash(&format!("deleting {} of caches…", disk(total)));
     m.later(
@@ -116,7 +132,7 @@ fn remove_caches(m: &mut Model, list: Vec<CacheFound>) {
             let why = "ticked in Clean up";
             let before = rush_sys::sysinfo::read_disk().free;
             let rules = rush_fleet::cache_rules();
-            let cwds = rush_fleet::process_cwds();
+            let cwds = rush_fleet::process_cwds_but(&pids);
             let (cmds, folders): (Vec<CacheFound>, Vec<CacheFound>) = list
                 .into_iter()
                 .partition(|c| matches!(c.found.how, rush_fleet::How::Run(_)));

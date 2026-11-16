@@ -1366,6 +1366,25 @@ deleted as it went. Here it never deletes on its own:
     outside node_modules, sat untouched for a day (`WT_IDLE`,
     `newest_outside`) and no process works in it (`process_cwds`: every
     process's cwd, `rush_sys::proc::cwd`);
+  - the build caches of each session between turns, or stopped and not
+    done (`between_sessions`, `rush_fleet::Between`): in its own linked
+    worktree (one no session in a turn shares) as above, and at the top of
+    its $TMPDIRs (`temp_caches_in`); a folder anywhere there with a
+    CACHEDIR.TAG carrying the signature is one too (`cache_tagged`:
+    cargo's target folders wherever CARGO_TARGET_DIR put them, a venv).
+    Ticked unless a process other than the session's own (its pid and
+    what's under it, `process_cwds_but`) works there, with no idle wait
+    (`between_cache`); kept at removal if the session is in a turn by then
+    (`CacheFound::session`). Why: on a machine down to 7G free, about 60G
+    sat in open sessions' target folders, and Clean up offered 300M: an
+    open session marks its worktree in use, its own process sits in it,
+    and $TMPDIRs weren't surveyed.
+  The rust-clean plugin lists every sccache cache (`kits.rs`
+  `sccache_dirs`, Rust-only): sccache's own, a project's SCCACHE_DIR in
+  `.cargo/config.toml`'s [env] or a `.env`/`.envrc` from a session's
+  folder up to its repository's top, and any folder in ~/Library/Caches or
+  ~/.cache named for sccache (one agents pass per command, which nothing
+  on disk says: h2recomp's 18G was that).
   - last, the commands every run ends with (`end_commands`, group "Run
     last, once"): pnpm store prune when pnpm is there, then, when docker
     is, `docker image prune -f`, `docker image prune -a -f --filter

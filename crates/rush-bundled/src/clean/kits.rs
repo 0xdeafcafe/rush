@@ -1,6 +1,7 @@
 //! The four kits: what go-clean, rust-clean, js-clean and git-clean each
 //! find. Ported from internal/bundled/clean/kits.go:1-241 (rustKit,
-//! cargoHome and sccacheDir at :90-151).
+//! cargoHome and sccacheDir at :90-151). Rust-only: sccache's caches
+//! where projects put them too (sccache_dirs).
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -152,12 +153,21 @@ pub(super) fn rust_things_with(
             out.push(Thing::new(id, title, does, removed(&d)).at(d));
         }
     }
-    let d = sccache_dir(env);
-    if is_dir(&d) {
+    for (i, d) in sccache_dirs(env, seen).into_iter().enumerate() {
+        // The first is sccache's own, as Go named it; the rest by folder.
+        let (id, title) = if i == 0 && d == sccache_dir(env) {
+            ("sccache".to_string(), "sccache cache".to_string())
+        } else {
+            let base = Path::new(&d)
+                .file_name()
+                .map(|b| b.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            (format!("sccache:{d}"), format!("sccache cache in {base}"))
+        };
         out.push(
             Thing::new(
-                "sccache",
-                "sccache cache",
+                id,
+                title,
                 "deletes it: builds are slower until it fills again",
                 removed(&d),
             )
@@ -231,6 +241,124 @@ fn sccache_dir(env: &dyn Fn(&str) -> Option<String>) -> String {
         return d;
     }
     cache_dir("sccache")
+}
+
+/// Every sccache cache there is: sccache_dir's first, then the
+/// SCCACHE_DIR a project sets (its .cargo/config.toml's [env], or a .env
+/// or .envrc) in a folder sessions work in or one above it, up to its
+/// repository's top, then any folder in the user's cache folders named
+/// for sccache (one agents pass to each command, which nothing on disk
+/// says). Those that are folders, each once. Rust-only past the first.
+pub(super) fn sccache_dirs(env: &dyn Fn(&str) -> Option<String>, seen: &[Session]) -> Vec<String> {
+    let home = env("HOME").unwrap_or_default();
+    let mut out: Vec<String> = Vec::new();
+    let mut add = |d: String| {
+        let d = d.trim_end_matches('/').to_string();
+        if is_dir(&d) && !out.contains(&d) {
+            out.push(d);
+        }
+    };
+    add(sccache_dir(env));
+    let mut looked = std::collections::HashSet::new();
+    for s in seen {
+        let mut dir = Some(Path::new(&s.cwd));
+        while let Some(d) = dir {
+            if d.as_os_str().is_empty() || !looked.insert(d.to_path_buf()) {
+                break;
+            }
+            for f in [".cargo/config.toml", ".cargo/config"] {
+                if let Some(v) = cargo_env_sccache(&d.join(f), d) {
+                    add(expand(&v, &home, d));
+                }
+            }
+            for f in [".env", ".envrc"] {
+                if let Some(v) = env_file_sccache(&d.join(f)) {
+                    add(expand(&v, &home, d));
+                }
+            }
+            if d.join(".git").exists() || d == Path::new(&home) {
+                break;
+            }
+            dir = d.parent();
+        }
+    }
+    for root in ["Library/Caches", ".cache"] {
+        let root = Path::new(&home).join(root);
+        if home.is_empty() {
+            break;
+        }
+        let Ok(rd) = std::fs::read_dir(&root) else {
+            continue;
+        };
+        let mut named: Vec<String> = rd
+            .flatten()
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .to_ascii_lowercase()
+                    .contains("sccache")
+            })
+            .map(|e| e.path().to_string_lossy().into_owned())
+            .collect();
+        named.sort();
+        for d in named {
+            add(d);
+        }
+    }
+    out
+}
+
+/// The SCCACHE_DIR a cargo config at path sets in [env]: a string, or a
+/// table's value (relative to the folder holding .cargo when it says so).
+fn cargo_env_sccache(path: &Path, top: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let doc: toml::Table = text.parse().ok()?;
+    match doc.get("env")?.get("SCCACHE_DIR")? {
+        toml::Value::String(s) => Some(s.clone()),
+        toml::Value::Table(t) => {
+            let v = t.get("value")?.as_str()?;
+            let rel = t.get("relative").and_then(toml::Value::as_bool) == Some(true);
+            Some(if rel && !v.starts_with('/') {
+                top.join(v).to_string_lossy().into_owned()
+            } else {
+                v.to_string()
+            })
+        }
+        _ => None,
+    }
+}
+
+/// The SCCACHE_DIR an env file sets: SCCACHE_DIR=… or export SCCACHE_DIR=…,
+/// the last one, unquoted.
+fn env_file_sccache(path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    // The last one is what a shell is left with.
+    text.lines().rev().find_map(|l| {
+        let l = l.trim();
+        let l = l.strip_prefix("export ").unwrap_or(l).trim_start();
+        let v = l.strip_prefix("SCCACHE_DIR=")?.trim();
+        let v = v
+            .strip_prefix('"')
+            .and_then(|v| v.strip_suffix('"'))
+            .or_else(|| v.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
+            .unwrap_or(v);
+        (!v.is_empty()).then(|| v.to_string())
+    })
+}
+
+/// v with ~, $HOME and ${HOME} as home, and relative to dir when it isn't
+/// absolute.
+fn expand(v: &str, home: &str, dir: &Path) -> String {
+    let v = if let Some(r) = v.strip_prefix("~/") {
+        format!("{home}/{r}")
+    } else {
+        v.replace("${HOME}", home).replace("$HOME", home)
+    };
+    if v.starts_with('/') {
+        v
+    } else {
+        dir.join(v).to_string_lossy().into_owned()
+    }
 }
 
 fn js_things(ctx: &Ctx, seen: &[Session]) -> Vec<Thing> {

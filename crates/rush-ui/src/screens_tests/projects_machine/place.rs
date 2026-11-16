@@ -611,6 +611,78 @@ fn clean_up_lists_scratch_no_session_owns() {
     assert_eq!(paths, ["/cfg/tmp/os27-builds"]);
 }
 
+/// The sessions whose build caches Clean up offers while they're open:
+/// between turns, with their own worktree and $TMPDIR; not one in a turn,
+/// and not a worktree or $TMPDIR one in a turn shares.
+#[test]
+fn clean_up_offers_build_caches_between_turns() {
+    use rush_ui_projects_machine::clean::between_sessions;
+    let mut idle = agent("idle0001", "perf work", "/src/alpha", "/src/alpha", 7, 0);
+    idle.0.job.state = State::Idle;
+    let mut pair = agent("pair0001", "pair idle", "/src/alpha", "/src/alpha", 9, 0);
+    pair.0.job.state = State::Idle;
+    let busy = agent("busy0001", "seed build", "/src/alpha", "/src/alpha", 8, 0);
+    let mut m = model(vec![idle, pair, busy], 140, 50, classic());
+    let d = m.kept::<Data>();
+    d.checked = NOW;
+    let wt = |id: &str, agents: &[&str]| {
+        let mut w = Worktree::default();
+        w.path = format!("/src/alpha/.claude/worktrees/{id}");
+        w.repo = "/src/alpha".into();
+        w.branch = format!("rush/{id}");
+        w.checked = NOW;
+        w.agents = agents.iter().map(|a| a.to_string()).collect();
+        w
+    };
+    d.wts = vec![
+        wt("idle0001", &["idle0001"]),
+        wt("shared", &["pair0001", "busy0001"]),
+    ];
+    let tmp = |dirs: &[&str]| TempWork {
+        dirs: dirs
+            .iter()
+            .map(|p| rush_core::adapter::TempDir {
+                path: p.to_string(),
+                keep: true,
+            })
+            .collect(),
+        bytes: 0,
+        known: true,
+    };
+    d.temp
+        .insert("idle0001".into(), tmp(&["/cfg/tmp/a/idle0001"]));
+    d.temp.insert(
+        "pair0001".into(),
+        tmp(&["/cfg/tmp/a/pair0001", "/cfg/tmp/a/shared"]),
+    );
+    d.temp.insert(
+        "busy0001".into(),
+        tmp(&["/cfg/tmp/a/busy0001", "/cfg/tmp/a/shared"]),
+    );
+    let mut got: Vec<(String, i32, String, Vec<String>)> = between_sessions(&m)
+        .into_iter()
+        .map(|b| (b.key, b.pid, b.wt, b.temps))
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        [
+            (
+                "idle0001".to_string(),
+                7,
+                "/src/alpha/.claude/worktrees/idle0001".to_string(),
+                vec!["/cfg/tmp/a/idle0001".to_string()]
+            ),
+            (
+                "pair0001".to_string(),
+                9,
+                String::new(),
+                vec!["/cfg/tmp/a/pair0001".to_string()]
+            ),
+        ]
+    );
+}
+
 /// A rush session's temp work is the folder rush gives it first, then its
 /// agent's scratch (fleet/temp.go:27-40 TempDirs): Temporary counts it,
 /// worked out by rush_fleet's own TempDirs off the UI thread.

@@ -316,6 +316,12 @@ impl<'a> Ag<'a> {
         self.a.busy()
     }
 
+    /// In a turn, waiting on you in one, or its background work still
+    /// running after it: what it builds may be changing.
+    pub fn in_turn(&self) -> bool {
+        self.a.job.live() || self.busy()
+    }
+
     pub fn waiting(&self) -> bool {
         self.a.job.state == State::Blocked
     }

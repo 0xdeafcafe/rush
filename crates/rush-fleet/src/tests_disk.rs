@@ -501,6 +501,104 @@ fn caches_removed_safely() {
     assert!(!wt.join("apps/web/node_modules").exists() && wt.join("apps/web/src").exists());
 }
 
+// At the top of a session's $TMPDIR (and of a worktree), a folder is a
+// cache by its CACHEDIR.TAG, whatever its name; a tag without the
+// signature, a folder with none, or a link to a tagged one isn't, and
+// remove_cache refuses them.
+#[test]
+fn tagged_caches_in_temp() {
+    let d = tempfile::tempdir().unwrap();
+    let tmp = d.path().join("tmp");
+    let tag = "Signature: 8a477f597d28d172789f06886806bc55\n# cargo\n";
+    for (n, t) in [
+        ("seed-target", Some(tag)),
+        ("venv", Some(tag)),
+        ("notes", Some("# not a tag\n")),
+        ("h2art", None),
+    ] {
+        std::fs::create_dir_all(tmp.join(n).join("x")).unwrap();
+        std::fs::write(tmp.join(n).join("x").join("f"), "data").unwrap();
+        if let Some(t) = t {
+            std::fs::write(tmp.join(n).join(CACHE_TAG), t).unwrap();
+        }
+    }
+    std::os::unix::fs::symlink(tmp.join("seed-target"), tmp.join("link")).unwrap();
+    assert_eq!(
+        temp_caches_in(&s(&tmp)),
+        [s(&tmp.join("seed-target")), s(&tmp.join("venv"))]
+    );
+    // In a worktree too, after those it has by name.
+    assert_eq!(
+        caches_in(&s(&tmp)),
+        [s(&tmp.join("seed-target")), s(&tmp.join("venv"))]
+    );
+    let later = now() + 60_000;
+    let roots = vec![s(&tmp)];
+    for n in ["notes", "h2art", "link"] {
+        let p = s(&tmp.join(n));
+        assert!(
+            remove_cache(&p, &roots, later, "test", None).is_err(),
+            "{n}"
+        );
+        assert!(tmp.join(n).exists(), "removed {n}");
+    }
+    let seed = s(&tmp.join("seed-target"));
+    let (size, _) = walk(&seed);
+    assert_eq!(
+        remove_cache(&seed, &roots, later, "test", None).unwrap(),
+        size
+    );
+    assert!(!tmp.join("seed-target").exists() && tmp.join("h2art").exists());
+}
+
+// A session between turns: its build caches go unless another process
+// works where they are, said by whether it's stopped or between turns,
+// and by where they are; each says whose it is.
+#[test]
+fn between_turns_caches() {
+    let b = |pid| Between {
+        key: "k1".into(),
+        name: "perf work".into(),
+        pid,
+        wt: "/r/.claude/worktrees/k1".into(),
+        temps: vec!["/cfg/tmp/r-1a2b3c4d/k1".into()],
+    };
+    for (root, pid, works, ok, why, note) in [
+        (
+            "/cfg/tmp/r-1a2b3c4d/k1",
+            7,
+            false,
+            true,
+            "build cache in a session's $TMPDIR",
+            "perf work is between turns: a build puts it back",
+        ),
+        (
+            "/r/.claude/worktrees/k1",
+            0,
+            false,
+            true,
+            "build cache in a session's worktree",
+            "perf work is stopped: a build puts it back",
+        ),
+        (
+            "/r/.claude/worktrees/k1",
+            7,
+            true,
+            false,
+            "build cache in a session's worktree",
+            "a process works in it",
+        ),
+    ] {
+        let c = between_cache(format!("{root}/target"), root, 1 << 30, 5, &b(pid), works);
+        assert_eq!(
+            (c.found.ok, c.found.why.as_str(), c.found.note.as_str()),
+            (ok, why, note),
+            "{root} pid {pid} works {works}"
+        );
+        assert_eq!((c.wt.as_str(), c.session.as_str()), (root, "k1"));
+    }
+}
+
 // An orphan goes only as it was looked at: not while a running session's
 // id prefixes it, not once it changed, and nothing a session owns, no
 // project folder and not the root.

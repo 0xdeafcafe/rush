@@ -29,7 +29,9 @@ mod verdict;
 mod watch;
 mod worktree;
 
-pub use caches::{CACHE_NAMES, caches_in, remove_cache, walk};
+pub use caches::{
+    CACHE_NAMES, CACHE_TAG, cache_tagged, caches_in, remove_cache, temp_caches_in, walk,
+};
 pub use diskmap::{
     BIG, DockerReclaim, HomeMap, MAP_FOR, UNTOUCHED, Untouched, VmDisk, classify, colima_disk,
     command_sizes, docker_reclaim, home_map, load_map, map_home, may_be_yours, parse_df,
@@ -65,11 +67,11 @@ pub use rules::{
     rule_for, rules_with,
 };
 pub use sweep::{
-    COLIMA_TRIM, CacheFound, DAY, DOCKER_BUILDER_PRUNE, DOCKER_IMAGE_PRUNE, DOCKER_OLD_BUILD_PRUNE,
-    DOCKER_OLD_IMAGE_PRUNE, DOCKER_VOLUME_PRUNE, HOUR, NEVER_TOUCH, PNPM_PRUNE, Survey, WT_IDLE,
-    WtFacts, asks_you, colima, end_commands, find_tool, never_touch, never_touch_big,
-    newest_outside, process_cwds, remove_found, remove_tree, run_command, span, survey, works_in,
-    wt_cache, wt_facts,
+    Between, COLIMA_TRIM, CacheFound, DAY, DOCKER_BUILDER_PRUNE, DOCKER_IMAGE_PRUNE,
+    DOCKER_OLD_BUILD_PRUNE, DOCKER_OLD_IMAGE_PRUNE, DOCKER_VOLUME_PRUNE, HOUR, NEVER_TOUCH,
+    PNPM_PRUNE, Survey, WT_IDLE, WtFacts, asks_you, between_cache, colima, end_commands, find_tool,
+    never_touch, never_touch_big, newest_outside, process_cwds, process_cwds_but, remove_found,
+    remove_tree, run_command, span, survey, works_in, wt_cache, wt_facts,
 };
 pub use temp::{
     TempSize, TempSizes, clean_stale_temp, clean_temp, disk_usage, disk_usage_background,
