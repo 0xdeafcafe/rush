@@ -271,7 +271,7 @@ pub fn tidy(reg: &rush_core::adapter::Registry, p: TidyPlan) -> Tidied {
             out.failed = Some(e);
         }
         let s = measure(a);
-        out.freed += a.temp - s.bytes;
+        out.freed += (a.temp - s.bytes).max(0);
         out.temp.insert(a.key.clone(), s);
     }
     for a in &p.stale {
@@ -411,6 +411,16 @@ pub fn on_tidied(m: &mut Model, t: Tidied) -> Out {
             }
         }
         st.temp_sizes.set(t.temp.clone());
+        // Written now, so the loader, which reads the file, doesn't put
+        // the size from before back on the agent for tidy to free again.
+        if st.temp_sizes.dirty {
+            let mut save = st.temp_sizes.clone();
+            st.temp_sizes.dirty = false;
+            m.later(
+                move || save.save(&super::temp::temp_path()),
+                |_, ()| Out::Idle,
+            );
+        }
         m.rebuild();
     }
     let after = data(m).cfg.cleanup_after();

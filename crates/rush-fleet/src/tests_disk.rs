@@ -87,6 +87,29 @@ fn temp_due_backs_off() {
     );
 }
 
+// The sizes are read again when the UI rewrites the file: an emptied
+// folder measured 0 there isn't kept at what it was when rush started.
+#[test]
+fn temp_sizes_follow_the_file() {
+    let _h = RushHome::new();
+    let path = rush_state::cache_path("temp.json");
+    let write = |bytes: i64, at: Ms| {
+        let j =
+            format!(r#"{{"sizes":{{"a":{{"bytes":{bytes},"at":"2026-11-16T14:41:37.725Z"}}}}}}"#);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, j).unwrap();
+        touch(&path, at);
+    };
+    let t = now();
+    write(83_000_000, t - HOUR);
+    let ts = TempSizes::new();
+    ts.load();
+    assert_eq!(ts.bytes("a"), 83_000_000);
+    write(0, t);
+    ts.load();
+    assert_eq!(ts.bytes("a"), 0, "the rewritten file's size");
+}
+
 // A stopped agent isn't walked again however long it sits.
 #[test]
 fn stopped_temp_not_rewalked() {

@@ -275,6 +275,8 @@ struct SizesIn {
     sizes: HashMap<String, TempSize>,
     dirty: bool,
     loaded: bool,
+    /// The file's modified time when last read or written here.
+    seen: Option<std::time::SystemTime>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -302,20 +304,36 @@ impl TempSizes {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Reads the last measurements, once, under any set since.
+    /// Reads the last measurements under any set since; and again whenever
+    /// the file has changed since (the UI measures and writes it, and
+    /// tidy's emptied folders measure 0 there), the file's sizes then
+    /// over what was read before. Read once only, a session's size stayed
+    /// what it was when rush started, and tidy counted it freed again on
+    /// every round.
     pub fn load(&self) {
-        if self.lock().loaded {
-            return;
+        let path = temp_path();
+        let mtime = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+        {
+            let t = self.lock();
+            if t.loaded && (mtime.is_none() || mtime == t.seen) {
+                return;
+            }
         }
-        let disk: OnDisk = std::fs::read(temp_path())
+        let disk: OnDisk = std::fs::read(&path)
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
         let mut t = self.lock();
+        let again = t.loaded && !t.dirty;
         for (k, v) in disk.sizes.unwrap_or_default() {
-            t.sizes.entry(k).or_insert(v);
+            if again {
+                t.sizes.insert(k, v);
+            } else {
+                t.sizes.entry(k).or_insert(v);
+            }
         }
         t.loaded = true;
+        t.seen = mtime;
     }
 
     /// The agents whose temp work should be measured: never measured,
@@ -351,7 +369,10 @@ impl TempSizes {
             sizes: Some(t.sizes.clone()),
         };
         if let Ok(b) = serde_json::to_vec(&disk) {
-            let _ = rush_state::write_bytes(&temp_path(), &b);
+            let path = temp_path();
+            if rush_state::write_bytes(&path, &b).is_ok() {
+                t.seen = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+            }
         }
         t.dirty = false;
     }
