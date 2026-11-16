@@ -1034,6 +1034,12 @@ impl Sheet for CleanSheet {
                 sp(" measuring caches that rebuild themselves…", DIM),
             ]));
         }
+        // r only when there's something big and untouched to make a rule of.
+        let mut keys = vec![("↑↓", "move"), ("space", "tick"), ("a", "all safe / none")];
+        if self.items.iter().any(|it| it.untouched.is_some()) {
+            keys.push(("r", "make a rule"));
+        }
+        keys.extend([("enter", "remove ticked"), ("esc", "close")]);
         out.extend([
             Line::new(),
             ln([sp(
@@ -1041,17 +1047,7 @@ impl Sheet for CleanSheet {
                 DIM,
             )]),
             Line::new(),
-            keys_fit(
-                w,
-                &[
-                    ("↑↓", "move"),
-                    ("space", "tick"),
-                    ("a", "all safe / none"),
-                    ("r", "make a rule"),
-                    ("enter", "remove ticked"),
-                    ("esc", "close"),
-                ],
-            ),
+            keys_fit(w, &keys),
         ]);
         out
     }
