@@ -122,6 +122,7 @@ fn picks() {
         procs: &["gopls"],
         things: |_, _| Vec::new(),
         settings: Vec::new(),
+        auto: None,
     };
     let mut gocache =
         Thing::new("gocache", "Go build cache", "runs go clean -cache", noop()).at("/c");
@@ -296,7 +297,7 @@ fn rust_things() {
         "SCCACHE_DIR" => Some(none.clone()),
         _ => None,
     };
-    let ids: Vec<String> = kits::rust_things_with(&env, &[])
+    let ids: Vec<String> = kits::rust_things_with(&env, &[], &[])
         .into_iter()
         .map(|t| t.id)
         .collect();
@@ -364,7 +365,7 @@ fn sccache_where_projects_put_it() {
             p("Library/Caches/proj-sccache")
         ]
     );
-    let titles: Vec<String> = kits::rust_things_with(&env, &seen)
+    let titles: Vec<String> = kits::rust_things_with(&env, &seen, &[])
         .into_iter()
         .filter(|t| t.id.starts_with("sccache"))
         .map(|t| t.title)
@@ -377,5 +378,235 @@ fn sccache_where_projects_put_it() {
             "sccache cache in gone",
             "sccache cache in proj-sccache"
         ]
+    );
+}
+
+// ---- disk.rs: targets, the in-use check, the auto mode's plan ----
+
+/// A cargo target at root/name with a debug profile: an old and a new
+/// artifact in deps, an incremental session, every part last written ago
+/// before now except what's named in fresh.
+fn target_at(
+    root: &std::path::Path,
+    name: &str,
+    ago: Duration,
+    fresh: &[&str],
+) -> std::path::PathBuf {
+    let t = root.join(name);
+    let prof = t.join("debug");
+    for d in [".fingerprint", "deps", "incremental/s1"] {
+        std::fs::create_dir_all(prof.join(d)).unwrap();
+    }
+    std::fs::write(
+        t.join("CACHEDIR.TAG"),
+        "Signature: 8a477f597d28d172789f06886806bc55\n",
+    )
+    .unwrap();
+    std::fs::write(t.join(".rustc_info.json"), "{}").unwrap();
+    for f in [
+        "deps/libold.rlib",
+        "deps/libnew.rlib",
+        "incremental/s1/q.bin",
+    ] {
+        std::fs::write(prof.join(f), vec![7u8; 8192]).unwrap();
+    }
+    let at = |p: &std::path::Path, when: SystemTime| {
+        std::fs::File::open(p)
+            .unwrap()
+            .set_times(
+                std::fs::FileTimes::new()
+                    .set_modified(when)
+                    .set_accessed(when),
+            )
+            .unwrap();
+    };
+    let old = SystemTime::now() - ago;
+    // Deepest first: writing in a folder touches it.
+    for p in [
+        "debug/deps/libold.rlib",
+        "debug/deps/libnew.rlib",
+        "debug/incremental/s1/q.bin",
+        "debug/incremental/s1",
+        "debug/incremental",
+        "debug/deps",
+        "debug/.fingerprint",
+        "debug",
+        ".rustc_info.json",
+        "CACHEDIR.TAG",
+        "",
+    ] {
+        let p = if p.is_empty() { t.clone() } else { t.join(p) };
+        at(&p, old);
+    }
+    for p in fresh {
+        at(&t.join(p), SystemTime::now());
+    }
+    t
+}
+
+// A target is a folder with both CACHEDIR.TAG and .rustc_info.json, found
+// up to 3 levels down, never inside another, never through a link; run
+// folders and a tag alone aren't targets.
+#[test]
+fn targets_found() {
+    let d = tempfile::tempdir().unwrap();
+    let tmp = d.path();
+    let hour = Duration::from_secs(3600);
+    let release = target_at(tmp, "h2-1a2b3c4d/sess/release-target", hour, &[]);
+    target_at(&release, "nested-target", hour, &[]);
+    target_at(tmp, "a/b/c/too-deep-target", hour, &[]);
+    std::fs::create_dir_all(tmp.join("h2-1a2b3c4d/sess/run")).unwrap();
+    std::fs::create_dir_all(tmp.join("h2-1a2b3c4d/sess/tagged-only")).unwrap();
+    std::fs::write(
+        tmp.join("h2-1a2b3c4d/sess/tagged-only/CACHEDIR.TAG"),
+        "Signature: 8a477f597d28d172789f06886806bc55\n",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(&release, tmp.join("h2-1a2b3c4d/sess/link-target")).unwrap();
+    let mut found = std::collections::BTreeSet::new();
+    disk::find_targets(tmp, disk::SCAN_DEPTH, &mut found);
+    assert_eq!(found.into_iter().collect::<Vec<_>>(), [release]);
+}
+
+// The auto mode does nothing at or above 50 GB free, waits 2 days under
+// it, and half an hour under 20 GB.
+#[test]
+fn auto_levels() {
+    const GB: u64 = 1 << 30;
+    for (free, want) in [
+        (80 * GB, None),
+        (50 * GB, None),
+        (49 * GB, Some(disk::TARGET_IDLE)),
+        (20 * GB, Some(disk::TARGET_IDLE)),
+        (19 * GB, Some(disk::LOW_TARGET_IDLE)),
+    ] {
+        assert_eq!(disk::level(free), want, "{free}");
+    }
+}
+
+// In use: lsof printed anything, or couldn't run; ps couldn't run; or a
+// process other than rush names the path in its arguments or environment.
+#[test]
+fn in_use_from_what_lsof_and_ps_said() {
+    let t = std::path::Path::new("/cfg/tmp/h2/s1/release-target");
+    let ps = "  101 cargo build CARGO_TARGET_DIR=/cfg/tmp/h2/s1/release-target HOME=/u\n  7 rush plugin /cfg/tmp/h2/s1/release-target\n";
+    let quiet = "  101 sleep 60 HOME=/u\n";
+    for (lsof, ps, want, why) in [
+        (None, Some(quiet), true, "lsof couldn't run"),
+        (
+            Some(&b"cargo 101 u cwd DIR /cfg/tmp\n"[..]),
+            Some(quiet),
+            true,
+            "a file is open",
+        ),
+        (Some(&b""[..]), None, true, "ps couldn't run"),
+        (
+            Some(&b""[..]),
+            Some(ps),
+            true,
+            "cargo names it in its environment",
+        ),
+        (Some(&b""[..]), Some(quiet), false, "nothing uses it"),
+        (
+            Some(&b""[..]),
+            Some("  7 rush plugin /cfg/tmp/h2/s1/release-target\n"),
+            false,
+            "only rush names it",
+        ),
+    ] {
+        assert_eq!(disk::in_use_from(lsof, ps, t, 7), want, "{why}");
+    }
+}
+
+// Removing frees only files with no other hard link: kache's links free
+// nothing.
+#[test]
+fn freeable_counts_lone_files() {
+    let d = tempfile::tempdir().unwrap();
+    let t = d.path().join("t");
+    std::fs::create_dir_all(&t).unwrap();
+    std::fs::write(t.join("own"), vec![1u8; 64 << 10]).unwrap();
+    std::fs::write(d.path().join("store"), vec![1u8; 64 << 10]).unwrap();
+    std::fs::hard_link(d.path().join("store"), t.join("linked")).unwrap();
+    let own = disk::freeable(&t.join("own"));
+    assert!(own >= 64 << 10, "{own}");
+    assert_eq!(disk::freeable(&t.join("linked")), 0);
+    assert_eq!(disk::freeable(&t), own);
+}
+
+// The plan: an idle, unused target goes whole; an idle one in use stays;
+// in a target built in lately, only artifacts older than 2 days go; one a
+// session works on is left out. Each removal asks again, and one in use
+// by then stays.
+#[test]
+fn auto_plan_and_apply() {
+    let d = tempfile::tempdir().unwrap();
+    let scratch = d.path().join("tmp");
+    let three_days = Duration::from_secs(3 * 24 * 3600);
+    let idle = target_at(&scratch, "p/s1/idle-target", three_days, &[]);
+    let held = target_at(&scratch, "p/s2/held-target", three_days, &[]);
+    let live = target_at(
+        &scratch,
+        "p/s3/live-target",
+        three_days,
+        &["debug/.fingerprint", "debug/deps/libnew.rlib"],
+    );
+    let working = target_at(&scratch, "p/s4/work-target", three_days, &[]);
+    let used = |p: &std::path::Path| p == held;
+    let skip = |p: &std::path::Path| p.starts_with(scratch.join("p/s4"));
+    let (acts, kept) = disk::plan(
+        &[],
+        std::slice::from_ref(&scratch),
+        SystemTime::now(),
+        disk::TARGET_IDLE,
+        &skip,
+        &used,
+    );
+    assert_eq!(
+        acts,
+        [
+            disk::Act::Target(idle.clone()),
+            disk::Act::Prune {
+                target: live.clone(),
+                paths: vec![
+                    live.join("debug/deps/libold.rlib"),
+                    live.join("debug/incremental/s1"),
+                ],
+            },
+        ]
+    );
+    let kept: Vec<_> = kept.into_iter().map(|(p, _)| p).collect();
+    assert_eq!(kept, [held.clone(), working.clone()]);
+    // Asked again right before: now in use, so it stays.
+    assert!(disk::apply(&acts[0], &|_| true).is_err());
+    assert!(idle.exists());
+    assert!(disk::apply(&acts[0], &|_| false).unwrap() > 0);
+    assert!(!idle.exists());
+    assert!(disk::apply(&acts[1], &|_| false).unwrap() > 0);
+    assert!(!live.join("debug/deps/libold.rlib").exists());
+    assert!(!live.join("debug/incremental/s1").exists());
+    assert!(live.join("debug/deps/libnew.rlib").exists() && disk::is_target(&live));
+}
+
+// What an auto mode says: nothing when it did nothing, else what and how
+// much, and the first thing left alone.
+#[test]
+fn auto_says() {
+    assert_eq!(
+        kits::auto_said("rust-clean", 10 << 30, &[], 0, Some("x".into())),
+        None
+    );
+    assert_eq!(
+        kits::auto_said(
+            "rust-clean",
+            10 << 30,
+            &["removed 2 targets no build touched lately".into()],
+            3 << 30,
+            Some("/t: in use now; it stays".into())
+        )
+        .as_deref(),
+        Some(
+            "rust-clean cleaned on its own with 10.0 GB free: removed 2 targets no build touched lately, freeing 3.0 GB · left alone: /t: in use now; it stays"
+        )
     );
 }

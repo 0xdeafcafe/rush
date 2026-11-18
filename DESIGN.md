@@ -1385,6 +1385,29 @@ deleted as it went. Here it never deletes on its own:
   folder up to its repository's top, and any folder in ~/Library/Caches or
   ~/.cache named for sccache (one agents pass per command, which nothing
   on disk says: h2recomp's 18G was that).
+  rust-clean also lists the targets sessions build into under rush's
+  scratch root with CARGO_TARGET_DIR (`tmp/<project>/<session>/<name>-target`,
+  13-22G each), and git-clean and rust-clean have an auto mode, each off
+  until its "Clean on its own when disk is low" setting is on
+  (`clean/disk.rs`, ported from h2recomp's `crates/diskclean` at 5f24c7b3,
+  which this replaces). On each 15-minute measure, under 50G free
+  (`AUTO_UNDER`), without asking: git-clean removes the worktrees `reap`'s
+  `refusals` allow; rust-clean removes cargo targets (a folder with both
+  CACHEDIR.TAG and .rustc_info.json, at each worktree's and main
+  checkout's `target` and up to 3 levels under the scratch root, never
+  inside a target) that no build touched for 2 days (`target_activity`:
+  the profile folders and lock files cargo writes each build), and in the
+  rest, `deps` artifacts and `incremental` sessions not written for 2 days.
+  Under 20G (`LOW_UNDER`), targets untouched for half an hour go too, and
+  kache's store is emptied (`kache clean --cache --yes`) when that's
+  installed and it's still under. Each says what it freed, in every window,
+  and nothing when it did nothing. Every removal, picked or automatic, asks
+  `in_use` right before and goes only on no: `lsof +D` printed anything or
+  couldn't run, or a process other than rush names the path in its
+  arguments or environment (`ps axeww`: macOS hides platform binaries'
+  environment, Homebrew's cargo and rustc show theirs). Sizes count files
+  with one link only (`freeable`): what kache hard-links frees nothing.
+  Why: the machine hit 100% disk twice in a day from agents' builds.
   - last, the commands every run ends with (`end_commands`, group "Run
     last, once"): pnpm store prune when pnpm is there, then, when docker
     is, `docker image prune -f`, `docker image prune -a -f --filter

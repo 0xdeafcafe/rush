@@ -1,16 +1,21 @@
 //! The four kits: what go-clean, rust-clean, js-clean and git-clean each
 //! find. Ported from internal/bundled/clean/kits.go:1-241 (rustKit,
 //! cargoHome and sccacheDir at :90-151). Rust-only: sccache's caches
-//! where projects put them too (sccache_dirs).
+//! where projects put them too (sccache_dirs); the targets sessions build
+//! into under rush's scratch root, removed only once nothing uses them;
+//! and rust-clean's and git-clean's auto modes (rust_auto, reap::git_auto;
+//! disk.rs).
 
-use std::collections::HashMap;
-use std::path::Path;
+use std::collections::{BTreeSet, HashMap};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
+use std::time::SystemTime;
 
 use rush_plugin::Ctx;
 
 use super::{
-    Kit, Session, Thing, cache_dir, command, fleet, is_dir, plural, ran, removed, repos, worktrees,
+    Clean, Kit, Session, Thing, cache_dir, command, fleet, is_dir, plural, ran, removed, repos,
+    worktrees,
 };
 
 static GO: LazyLock<Kit> = LazyLock::new(|| Kit {
@@ -21,6 +26,7 @@ static GO: LazyLock<Kit> = LazyLock::new(|| Kit {
     procs: &["gopls", "golangci-lint", "dlv"],
     things: go_things,
     settings: Vec::new(),
+    auto: None,
 });
 
 static RUST: LazyLock<Kit> = LazyLock::new(|| Kit {
@@ -30,7 +36,11 @@ static RUST: LazyLock<Kit> = LazyLock::new(|| Kit {
     needs: &["cargo"],
     procs: &["rust-analyzer", "bacon", "cargo-watch", "sccache"],
     things: rust_things,
-    settings: Vec::new(),
+    settings: vec![super::disk::auto_setting(
+        "Cargo targets no build has touched for 2 days and nothing uses (half an hour under 20 GB free, and kache's store emptied), \
+         and in targets that stay, artifacts not written for 2 days",
+    )],
+    auto: Some(rust_auto),
 });
 
 static JS: LazyLock<Kit> = LazyLock::new(|| Kit {
@@ -41,6 +51,7 @@ static JS: LazyLock<Kit> = LazyLock::new(|| Kit {
     procs: &["node", "bun", "deno"],
     things: js_things,
     settings: Vec::new(),
+    auto: None,
 });
 
 static GIT: LazyLock<Kit> = LazyLock::new(|| Kit {
@@ -50,7 +61,14 @@ static GIT: LazyLock<Kit> = LazyLock::new(|| Kit {
     needs: &["git"],
     procs: &[],
     things: git_things,
-    settings: super::reap::git_settings(),
+    settings: {
+        let mut s = super::reap::git_settings();
+        s.push(super::disk::auto_setting(
+            "worktrees no longer needed (clean, merged, idle, nothing running there or using them)",
+        ));
+        s
+    },
+    auto: Some(super::reap::git_auto),
 });
 
 pub(crate) fn go_kit() -> &'static Kit {
@@ -118,13 +136,25 @@ fn go_things(ctx: &Ctx, _: &[Session]) -> Vec<Thing> {
 }
 
 fn rust_things(_: &Ctx, seen: &[Session]) -> Vec<Thing> {
-    rust_things_with(&|k| std::env::var(k).ok().filter(|v| !v.is_empty()), seen)
+    rust_things_with(
+        &|k| std::env::var(k).ok().filter(|v| !v.is_empty()),
+        seen,
+        &[scratch_root()],
+    )
 }
 
-/// rust_things with the environment as env says.
+/// Where sessions' scratch folders are, one per project, and in them the
+/// targets sessions build into with CARGO_TARGET_DIR.
+fn scratch_root() -> PathBuf {
+    rush_state::dir().join("tmp")
+}
+
+/// rust_things with the environment as env says, and the targets under
+/// scans (disk::SCAN_DEPTH down) too.
 pub(super) fn rust_things_with(
     env: &dyn Fn(&str) -> Option<String>,
     seen: &[Session],
+    scans: &[PathBuf],
 ) -> Vec<Thing> {
     let mut out = Vec::new();
     let home = cargo_home(env);
@@ -209,13 +239,150 @@ pub(super) fn rust_things_with(
                 format!("target:{}", w.path),
                 format!("target in {base}"),
                 "deletes it: git ignores it, and a build puts it back",
-                removed(&t),
+                removed_unused(&t),
             )
             .at(t)
             .within(w.path),
         );
     }
+    // What sessions built into their scratch folders with
+    // CARGO_TARGET_DIR (tmp/<project>/<session>/<name>-target): only what
+    // cargo made, never the folders beside it.
+    let mut tmp = BTreeSet::new();
+    for d in scans {
+        super::disk::find_targets(d, super::disk::SCAN_DEPTH, &mut tmp);
+    }
+    for t in tmp {
+        let p = t.to_string_lossy().into_owned();
+        let rel = scans
+            .iter()
+            .find_map(|d| t.strip_prefix(d).ok())
+            .map_or_else(|| p.clone(), |r| r.to_string_lossy().into_owned());
+        out.push(
+            Thing::new(
+                format!("target:{p}"),
+                format!("target in rush's scratch: {rel}"),
+                "deletes it once nothing uses it: a build puts it back",
+                removed_unused(&p),
+            )
+            .at(p),
+        );
+    }
     out
+}
+
+/// A Clean that deletes a folder, but only once nothing uses it, asked
+/// right before (disk::in_use).
+fn removed_unused(path: &str) -> Clean {
+    let path = path.to_string();
+    Arc::new(move |ctx| {
+        if super::disk::in_use(Path::new(&path)) {
+            return Err("something has a file open in it, or names it; it stays".into());
+        }
+        removed(&path)(ctx)
+    })
+}
+
+/// rust-clean's auto mode, at free bytes free (disk.rs): the targets of
+/// the repos sessions work in (each worktree's and main checkout's
+/// target) and under rush's scratch root, whole once no build touched them
+/// for 2 days (half an hour under 20 GB free) and nothing uses them, and
+/// old artifacts in the rest; then, still under 20 GB, kache's store
+/// emptied. None when it did nothing.
+fn rust_auto(ctx: &Ctx, seen: &[Session], free: u64) -> Option<String> {
+    use super::disk;
+    let idle = disk::level(free)?;
+    let (wts, _) = worktrees(seen);
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for r in wts
+        .iter()
+        .flat_map(|w| [w.path.clone(), w.repo.clone()])
+        .chain(repos(ctx, seen))
+    {
+        let r = PathBuf::from(r);
+        if !r.as_os_str().is_empty() && !roots.contains(&r) {
+            roots.push(r);
+        }
+    }
+    let working: Vec<&Session> = seen.iter().filter(|s| s.state == "working").collect();
+    let skip = |t: &Path| {
+        working.iter().any(|s| {
+            !s.cwd.is_empty() && t.starts_with(&s.cwd)
+                || !s.id.is_empty() && t.to_string_lossy().contains(&format!("/{}/", s.id))
+        })
+    };
+    let (acts, _) = disk::plan(
+        &roots,
+        &[scratch_root()],
+        SystemTime::now(),
+        idle,
+        &skip,
+        &disk::in_use,
+    );
+    let (mut freed, mut whole, mut pruned) = (0i64, 0usize, 0usize);
+    let mut kept = None;
+    for a in &acts {
+        match disk::apply(a, &disk::in_use) {
+            Ok(n) => {
+                freed += n;
+                match a {
+                    disk::Act::Target(_) => whole += 1,
+                    disk::Act::Prune { .. } => pruned += 1,
+                }
+            }
+            Err(e) => {
+                kept.get_or_insert(e);
+            }
+        }
+    }
+    let mut did = Vec::new();
+    if whole > 0 {
+        did.push(format!(
+            "removed {} no build touched lately",
+            plural(whole, "target", "targets")
+        ));
+    }
+    if pruned > 0 {
+        did.push(format!(
+            "old artifacts in {}",
+            plural(pruned, "target", "targets")
+        ));
+    }
+    let now = rush_sys::sysinfo::read_disk().free;
+    if now < disk::LOW_UNDER
+        && rush_core::adapter::find("kache", &[]).is_some()
+        && command(ctx, "", "kache", &["clean", "--cache", "--yes"]).is_ok()
+    {
+        let after = rush_sys::sysinfo::read_disk().free;
+        freed += after.saturating_sub(now) as i64;
+        did.push("emptied kache's store".into());
+    }
+    auto_said("rust-clean", free, &did, freed, kept)
+}
+
+/// What an auto mode says it did, and the first thing it left alone
+/// after all; None when it did nothing, so a removal that keeps failing
+/// isn't said every 15 minutes.
+pub(super) fn auto_said(
+    name: &str,
+    free: u64,
+    did: &[String],
+    freed: i64,
+    kept: Option<String>,
+) -> Option<String> {
+    if did.is_empty() {
+        return None;
+    }
+    let mut t = format!(
+        "{name} cleaned on its own with {} free: {}, freeing {}",
+        super::bytes(free as i64),
+        did.join(", "),
+        super::bytes(freed)
+    );
+    if let Some(k) = kept {
+        t += &format!(" · left alone: {k}");
+    }
+    Some(t)
 }
 
 /// Where cargo keeps what it downloads.

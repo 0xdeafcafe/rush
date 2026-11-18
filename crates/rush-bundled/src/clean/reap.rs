@@ -1,7 +1,9 @@
 //! git-clean's reaping of worktrees no longer needed: clean, merged, idle
 //! a while, and nothing running there. Each that's stale is listed, with
 //! why it's kept when it is; only one you pick goes.
-//! Ported from internal/bundled/clean/reap.go:1-264.
+//! Ported from internal/bundled/clean/reap.go:1-264. Rust-only: a
+//! worktree goes only once nothing has a file open in it or names it,
+//! asked right before (disk::in_use), and git_auto, git-clean's auto mode.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -353,6 +355,9 @@ fn reap(w: Worktree, base: String, idle_for: Duration) -> Clean {
         if !why.is_empty() {
             return Err(format!("left alone: {}", why.join(", ")));
         }
+        if super::disk::in_use(Path::new(&w.path)) {
+            return Err("left alone: something has a file open in it, or names it".into());
+        }
         // Not stopped halfway, though the clean's time runs out: a removal
         // killed partway leaves the checkout hollowed out.
         command(
@@ -364,6 +369,39 @@ fn reap(w: Worktree, base: String, idle_for: Duration) -> Clean {
         command(ctx, &w.repo, "git", &["worktree", "prune"])?;
         Ok("Removed; its branch stays.".into())
     })
+}
+
+/// git-clean's auto mode, at free bytes free (disk.rs): every worktree
+/// reap_rows offers (refusals has none for it) goes, each looked at again
+/// and only once nothing uses it. None when none went.
+pub(crate) fn git_auto(ctx: &Ctx, seen: &[Session], free: u64) -> Option<String> {
+    super::disk::level(free)?;
+    let (mut n, mut freed, mut kept) = (0usize, 0i64, None);
+    for t in reap_rows(ctx, seen)
+        .into_iter()
+        .filter(|t| t.id.starts_with("reap:"))
+    {
+        let size = super::disk::freeable(Path::new(&t.path));
+        match (t.clean)(ctx) {
+            Ok(_) => {
+                n += 1;
+                freed += size;
+            }
+            Err(e) => {
+                kept.get_or_insert(format!("{}: {e}", t.title));
+            }
+        }
+    }
+    let did: Vec<String> = (n > 0)
+        .then(|| {
+            format!(
+                "removed {} no longer needed",
+                plural(n, "worktree", "worktrees")
+            )
+        })
+        .into_iter()
+        .collect();
+    super::kits::auto_said("git-clean", free, &did, freed, kept)
 }
 
 /// The Clean of a stale worktree that stays: it only says why.

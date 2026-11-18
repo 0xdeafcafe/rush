@@ -10,6 +10,7 @@
 //! what you pick is cleaned.
 //! Ported from internal/bundled/clean/clean.go:1-574.
 
+pub mod disk;
 pub mod fleet;
 mod kits;
 mod reap;
@@ -74,7 +75,16 @@ pub(crate) struct Kit {
     pub things: fn(&Ctx, &[Session]) -> Vec<Thing>,
     /// What it offers under Settings, Plugins.
     pub settings: Vec<SettingSpec>,
+    /// Its auto mode (Rust-only, disk.rs): cleans on its own, while its
+    /// auto-clean setting is on and the disk is under disk::AUTO_UNDER,
+    /// what loses nothing, given the free bytes; what it did, to say, or
+    /// None when it did nothing.
+    pub auto: Option<Auto>,
 }
+
+/// A kit's auto mode: given the sessions seen and the free bytes, it cleans
+/// what loses nothing and says what it did, None when nothing.
+pub(crate) type Auto = fn(&Ctx, &[Session], u64) -> Option<String>;
 
 /// One row of what a kit keeps.
 #[derive(Clone)]
@@ -353,6 +363,7 @@ impl App {
             st.measuring = true;
             st.due = None;
         }
+        self.auto(conn);
         let mut things = (self.k.things)(&self.ctx, &self.sessions());
         for t in &mut things {
             if !t.path.is_empty() {
@@ -374,6 +385,24 @@ impl App {
         };
         if !text.is_empty() {
             self.notify(conn, "", &text); // every window: it's nobody's in particular
+        }
+    }
+
+    /// The auto mode, when it's on and the disk is low: it says what it
+    /// freed, in every window.
+    fn auto(&self, conn: &Conn) {
+        let Some(f) = self.k.auto else {
+            return;
+        };
+        if !disk::auto_on(&self.k.manifest()) {
+            return;
+        }
+        let free = rush_sys::sysinfo::read_disk().free;
+        if free == 0 || disk::level(free).is_none() {
+            return;
+        }
+        if let Some(text) = f(&self.ctx, &self.sessions(), free) {
+            self.notify(conn, "", &text);
         }
     }
 
