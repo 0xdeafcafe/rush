@@ -60,6 +60,14 @@ pub struct Config {
         skip_serializing_if = "is_zero_i64"
     )]
     pub cleanup_dire_gb: i64,
+    /// The disk engine's switch (Rust-only): Settings › Disk's "Clean on
+    /// its own when disk is low". Off until turned on.
+    #[serde(
+        rename = "disk",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_default"
+    )]
+    pub disk: Disk,
     /// Hides the conversation overview rail; narrow panes hide it automatically.
     #[serde(
         rename = "hideMinimap",
@@ -687,6 +695,29 @@ pub struct Rest {
         skip_serializing_if = "is_default"
     )]
     pub spawned_after_seconds: i64,
+}
+
+/// The disk engine's switch (rush-fleet's disk module), Rust-only.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Disk {
+    /// Clean on its own when disk is low: the engine runs every 15
+    /// minutes under 50 GB free, every 3 under 20 GB. Off by default.
+    #[serde(
+        rename = "auto",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_false"
+    )]
+    pub auto: bool,
+    /// The clean plugins' own auto-clean and git-clean's worktree idle
+    /// days were taken in, once: auto turned on if either plugin had it,
+    /// the days made the worktree rule's.
+    #[serde(
+        rename = "pluginsTakenIn",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_false"
+    )]
+    pub plugins_taken_in: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -1701,6 +1732,32 @@ fn key_in_own(id: &str, k: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The disk engine's switch: off and unsaid until set, kept under
+    // "disk" as "auto", and read back as written.
+    #[test]
+    fn disk_switch_in_config() {
+        for (json, auto, taken_in) in [
+            ("{}", false, false),
+            (r#"{"disk":{"auto":true}}"#, true, false),
+            (r#"{"disk":{"pluginsTakenIn":true}}"#, false, true),
+            (
+                r#"{"disk":{"auto":true,"pluginsTakenIn":true}}"#,
+                true,
+                true,
+            ),
+        ] {
+            let c: Config = serde_json::from_str(json).unwrap();
+            assert_eq!(
+                (c.disk.auto, c.disk.plugins_taken_in),
+                (auto, taken_in),
+                "{json}"
+            );
+            let want: serde_json::Value = serde_json::from_str(json).unwrap();
+            let got = serde_json::to_value(&c).unwrap();
+            assert_eq!(got.get("disk"), want.get("disk"), "{json}");
+        }
+    }
 
     // Emeritus is off until turned on and says nothing until set; its
     // threshold is 300k tokens or 70% of the window, whichever comes

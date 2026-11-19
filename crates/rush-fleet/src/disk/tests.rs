@@ -1221,3 +1221,58 @@ fn worktrees_found_and_removed() {
     assert!(dirty.exists());
     git_run(&repo, &["rev-parse", "--verify", "refs/heads/done"]);
 }
+
+// A tool command runs only when its program is a known tool, named bare;
+// anything else stays, "not a known tool", and nothing of it runs.
+#[test]
+fn only_known_tools_run() {
+    for (cmd, want) in [
+        (&["kache", "clean", "--cache", "--yes"][..], true),
+        (&["go", "clean", "-cache"], true),
+        (&["cargo", "cache", "-a"], true),
+        (&["pnpm", "store", "prune"], true),
+        (&["npm", "cache", "clean", "--force"], true),
+        (&["yarn", "cache", "clean"], true),
+        (&["bun", "pm", "cache", "rm"], true),
+        (&["rm", "-rf", "/"], false),
+        (&["/usr/local/bin/kache", "clean"], false),
+        (&["./kache"], false),
+        (&["sh", "-c", "kache clean"], false),
+        (&["Kache"], false),
+        (&["kache2"], false),
+        (&[""], false),
+        (&[], false),
+    ] {
+        let cmd: Vec<String> = cmd.iter().map(|s| s.to_string()).collect();
+        assert_eq!(known_tool(&cmd), want, "{cmd:?}");
+    }
+    let d = tempfile::tempdir().unwrap();
+    let f = d.path().join("stays");
+    std::fs::write(&f, "x").unwrap();
+    let rm = vec![
+        "rm".to_string(),
+        "-rf".to_string(),
+        d.path().to_string_lossy().into_owned(),
+    ];
+    let act = Act {
+        rule: "proposed".into(),
+        path: PathBuf::new(),
+        kind: TOOL_COMMAND.into(),
+        why: "a tool's clean-up".into(),
+        bytes: 0,
+        how: How::Run {
+            command: rm.clone(),
+        },
+    };
+    let o = apply_all(&[act], Vec::new(), &|_: &Path| InUse::No);
+    assert!(o.did.is_empty(), "{o:?}");
+    assert_eq!(
+        o.left,
+        [Kept {
+            path: PathBuf::new(),
+            rule: "proposed".into(),
+            why: format!("{}: not a known tool", rm.join(" ")),
+        }]
+    );
+    assert!(f.exists(), "nothing of it ran");
+}

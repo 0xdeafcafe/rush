@@ -19,7 +19,7 @@ mod find;
 mod plan;
 mod ruleset;
 
-pub use apply::{apply, apply_all, event_fields, run};
+pub use apply::{KNOWN_TOOLS, apply, apply_all, event_fields, known_tool, run, run_at};
 pub use cargo::{
     LSOF, SCAN_DEPTH, artifacts, build_of, find_targets, freeable, in_use, in_use_from, is_target,
     old_artifacts, superseded_artifacts, target_activity,

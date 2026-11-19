@@ -16,18 +16,21 @@
 //! when changed or in use, dry-run aware, logged), and the cleanup session
 //! is told what went, its decisions still open for the rest.
 //!
-//! Rust-only too, rush's rules run here as they are: what a cleanup rule
-//! says goes now (rush_fleet::measure_caches: a cache that rebuilds
-//! itself, some once untouched for a while) is in the set whatever the
-//! plan says, a worktree's build caches only once the worktree, outside
-//! node_modules, sat untouched for WT_IDLE and no process works in it, and
-//! every clean ends with the commands Clean up's do (pnpm store prune,
-//! docker's prunes when docker is there). What it freed is what df shows,
-//! read before and after.
+//! Rust-only too, rush's disk engine runs first, at the low level whatever
+//! the dire level is (rush_fleet::disk::run_at, under diskauto's
+//! engine_lock, with the plugins' candidates): its rules but the worktree
+//! one (cargo targets and their old builds, the cache folders rush's rules
+//! name, kache's store, Go's module cache) go whatever the plan says. Then, if free is still under the level and the margin, the
+//! conservative set: a worktree's build caches only once the worktree,
+//! outside node_modules, sat untouched for WT_IDLE and no process works in
+//! it. Every clean that did anything ends with the commands Clean up's do
+//! (pnpm store prune, docker's prunes when docker is there). What it freed
+//! is what df shows, read before and after.
 
 use rush_core::agent::Agent;
 use rush_core::time::Ms;
 use rush_fleet::How;
+use rush_fleet::disk::{self as engine, Level, Scan};
 
 use super::care::{CARE_PLAN_FILE, CARE_PLUGIN, Care};
 use super::data::*;
@@ -70,8 +73,6 @@ pub fn dire_due(free: u64, level: u64, plan_since: Ms, last_input: Ms, now: Ms) 
 pub enum DireKind {
     DoneScratch,
     BuildCache,
-    /// A folder a cleanup rule names and says goes now.
-    RuleCache,
     /// A command every clean ends with (how says which).
     Command,
 }
@@ -200,9 +201,9 @@ pub fn pick_dire(mut set: Vec<DireItem>, need: i64, ends: Vec<DireItem>) -> Vec<
     out
 }
 
-/// The whole rule: nothing unless dire_due; else the set, with what the
-/// cleanup rules say goes now (rules: no plan narrows those), picked until
-/// free is back over the level and the margin, then ends.
+/// The whole rule: nothing unless dire_due; else the set, picked until
+/// free is back over the level and the margin, then ends. What rush's
+/// rules say goes the disk engine did before (dire_clean).
 #[allow(clippy::too_many_arguments)]
 pub fn plan_dire(
     free: u64,
@@ -213,7 +214,6 @@ pub fn plan_dire(
     sessions: &[DireSession],
     worktrees: &[DireWorktree],
     plan: Option<&[PlanLine]>,
-    rules: Vec<DireItem>,
     ends: Vec<DireItem>,
 ) -> Vec<DireItem> {
     if !dire_due(free, level, plan_since, last_input, now) {
@@ -226,12 +226,7 @@ pub fn plan_dire(
         now - DIRE_AWAY
     };
     let need = (level + DIRE_MARGIN).saturating_sub(free) as i64;
-    let mut set = conservative_set(sessions, worktrees, plan, not_since);
-    for r in rules {
-        if !set.iter().any(|s| s.path == r.path) {
-            set.push(r);
-        }
-    }
+    let set = conservative_set(sessions, worktrees, plan, not_since);
     pick_dire(set, need, ends)
 }
 
@@ -299,13 +294,14 @@ pub fn watch_dire(m: &mut Model, free: u64, total: u64) {
             caches: Vec::new(),
         })
         .collect();
+    let scan = super::diskauto::scan_of(m);
     let d = m.kept::<Dire>();
     d.running = true;
     d.at = now;
     m.later(
         move || {
             dire_clean(
-                free, level, plan_since, last_input, now, sessions, wts, care,
+                free, level, plan_since, last_input, now, sessions, wts, care, scan,
             )
         },
         |m, r| {
@@ -326,8 +322,41 @@ pub struct DireDone {
     pub after: u64,
 }
 
-/// Measures the caches, reads the plan, picks the set and removes it, each
-/// through rush_fleet's checked removals. Off the UI.
+/// The disk engine at the low level, on the rules as kept but the
+/// worktree rule (a dire clean never removes a worktree) and the plugins'
+/// candidates, holding engine_lock: what it removed, by path (or what it
+/// ran), and why it couldn't run.
+fn dire_engine(scan: Scan, free: u64, now: Ms) -> (Vec<(String, i64)>, Vec<String>) {
+    let _one = super::diskauto::engine_lock();
+    let rules: Vec<engine::Rule> = match engine::load_rules() {
+        Ok(f) => f
+            .rules
+            .into_iter()
+            .filter(|r| r.kind != engine::Kind::Worktree)
+            .collect(),
+        Err(e) => return (Vec::new(), vec![format!("the disk rules: {e}")]),
+    };
+    let handed = super::diskauto::plugin_candidates();
+    let scan = super::diskauto::complete_scan(scan);
+    let o = engine::run_at(&scan, handed, &rules, free, Level::Low, now);
+    let removed = o
+        .did
+        .into_iter()
+        .map(|d| {
+            let p = if d.path.as_os_str().is_empty() {
+                d.what
+            } else {
+                d.path.to_string_lossy().into_owned()
+            };
+            (p, d.freed as i64)
+        })
+        .collect();
+    (removed, Vec::new())
+}
+
+/// Runs the disk engine, then measures the caches, reads the plan, picks
+/// the set and removes it, each through rush_fleet's checked removals.
+/// Off the UI.
 #[allow(clippy::too_many_arguments)]
 fn dire_clean(
     free: u64,
@@ -338,8 +367,16 @@ fn dire_clean(
     sessions: Vec<DireSession>,
     mut wts: Vec<DireWorktree>,
     care: Option<Agent>,
+    scan: Scan,
 ) -> DireDone {
     let before = rush_sys::sysinfo::read_disk().free;
+    let (engine_removed, engine_kept) =
+        dire_engine(scan, if before == 0 { free } else { before }, now);
+    // What's left to free is what df says now.
+    let free_now = match rush_sys::sysinfo::read_disk().free {
+        0 => free,
+        f => f,
+    };
     let cwds = rush_fleet::process_cwds();
     for w in wts.iter_mut().filter(|w| !w.busy && !w.would_lose) {
         let f = rush_fleet::wt_facts(std::slice::from_ref(&w.path), &cwds)
@@ -361,15 +398,6 @@ fn dire_clean(
         let p = std::path::Path::new(&rush_fleet::temp_dir(&a.job.id)).join(CARE_PLAN_FILE);
         std::fs::read_to_string(p).ok().map(|t| read_plan(&t))
     });
-    let rules = rush_fleet::cache_rules();
-    let rule_items: Vec<DireItem> = rush_fleet::measure_caches(&rules, now)
-        .into_iter()
-        .filter(|c| c.ok)
-        .map(|c| DireItem {
-            how: c.how,
-            ..DireItem::new(DireKind::RuleCache, &c.path, c.size)
-        })
-        .collect();
     let home = std::env::var("HOME").unwrap_or_default();
     let ends: Vec<DireItem> =
         rush_fleet::end_commands(&|t| rush_fleet::find_tool(t).is_some(), &home)
@@ -381,8 +409,8 @@ fn dire_clean(
                 ..DireItem::new(DireKind::Command, &c.path, 0)
             })
             .collect();
-    let picked = plan_dire(
-        free,
+    let mut picked = plan_dire(
+        free_now,
         level,
         plan_since,
         last_input,
@@ -390,9 +418,12 @@ fn dire_clean(
         &sessions,
         &wts,
         plan.as_deref(),
-        rule_items,
-        ends,
+        ends.clone(),
     );
+    // The engine's removals end with the commands too.
+    if picked.is_empty() && !engine_removed.is_empty() {
+        picked = ends;
+    }
     let not_since = if plan_since > 0 {
         plan_since
     } else {
@@ -409,8 +440,8 @@ fn dire_clean(
         disk(level as i64)
     );
     let mut done = DireDone {
-        removed: Vec::new(),
-        kept: Vec::new(),
+        removed: engine_removed,
+        kept: engine_kept,
         care,
         before,
         after: before,
@@ -432,7 +463,6 @@ fn dire_clean(
             DireKind::BuildCache => {
                 rush_fleet::remove_cache(&it.path, &free_wts, not_since, &why, done.care.as_ref())
             }
-            DireKind::RuleCache => rush_fleet::remove_rule_cache(&it.path, &rules, &why),
             DireKind::Command => match it.how {
                 How::Run(args) => rush_fleet::run_command(args, &why).map(|_| 0),
                 _ => Err(format!("{}: not a command", it.path)),
@@ -625,7 +655,6 @@ mod tests {
             how: How::Run(rush_fleet::PNPM_PRUNE),
             ..DireItem::new(DireKind::Command, "pnpm store prune", 0)
         };
-        let rule = DireItem::new(DireKind::RuleCache, "/h/Library/Caches/go-build", 2 << 30);
         let away = NOW - 31 * MIN;
         let plan = [
             PlanLine {
@@ -641,23 +670,15 @@ mod tests {
                 conservative: true,
             },
         ];
-        // (free, last input, plan, rules' items, what goes, why)
-        type Case<'a> = (
-            u64,
-            Ms,
-            Option<&'a [PlanLine]>,
-            Vec<DireItem>,
-            Vec<&'a str>,
-            &'a str,
-        );
+        // (free, last input, plan, what goes, why)
+        type Case<'a> = (u64, Ms, Option<&'a [PlanLine]>, Vec<&'a str>, &'a str);
         let cases: Vec<Case> = vec![
-            (6 * G, away, None, vec![], vec![], "not dire"),
-            (G, NOW - MIN, None, vec![], vec![], "dire, but you're here"),
+            (6 * G, away, None, vec![], "not dire"),
+            (G, NOW - MIN, None, vec![], "dire, but you're here"),
             (
                 5 * G - (1 << 20),
                 away,
                 None,
-                vec![],
                 vec!["/w/free/target", "pnpm store prune"],
                 "a little short: the biggest only, then the commands",
             ),
@@ -665,7 +686,6 @@ mod tests {
                 G,
                 away,
                 None,
-                vec![],
                 vec!["/w/free/target", "/s/done-old", "pnpm store prune"],
                 "far short: biggest first until there's room",
             ),
@@ -673,24 +693,11 @@ mod tests {
                 G,
                 away,
                 Some(&plan[..]),
-                vec![],
                 vec!["/w/free/node_modules", "pnpm store prune"],
                 "only what the plan marks conservative and rush agrees with",
             ),
-            (
-                G,
-                away,
-                Some(&plan[..]),
-                vec![rule.clone()],
-                vec![
-                    "/h/Library/Caches/go-build",
-                    "/w/free/node_modules",
-                    "pnpm store prune",
-                ],
-                "what the rules say goes needs no plan's word",
-            ),
         ];
-        for (free, last_input, plan, rules, want, why) in cases {
+        for (free, last_input, plan, want, why) in cases {
             let got = plan_dire(
                 free,
                 5 * G,
@@ -700,7 +707,6 @@ mod tests {
                 &sessions,
                 &wts,
                 plan,
-                rules,
                 vec![prune.clone()],
             );
             let got: Vec<String> = got.into_iter().map(|i| i.path).collect();

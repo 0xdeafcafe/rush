@@ -86,6 +86,10 @@ pub struct Cfg {
     /// never.
     #[serde(rename = "cleanupDireGB")]
     pub cleanup_dire_gb: i64,
+    /// The disk engine's switch, "Clean on its own when disk is low"
+    /// (Config.Disk.Auto; super::diskauto). Rust-only.
+    #[serde(skip)]
+    pub disk_auto: bool,
     /// Settings › General's Hibernate after, in minutes: 0 never
     /// (Config.Hibernate.AfterMinutes).
     #[serde(skip)]
@@ -105,6 +109,7 @@ impl Cfg {
             cleanup_disk_gb: c.cleanup_disk_gb,
             cleanup_ram_minutes: c.cleanup_ram_minutes,
             cleanup_dire_gb: c.cleanup_dire_gb,
+            disk_auto: c.disk.auto,
             hibernate_minutes: c.hibernate.after_minutes,
         };
         let done = st

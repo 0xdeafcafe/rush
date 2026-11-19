@@ -1596,17 +1596,19 @@ from `watch_machine`'s disk read, in the rush that leads, at most every
   node_modules for a day with no process in them (`touched`). Never a
   worktree, a stopped session's scratch, an orphan, or anything changed
   since the plan. With a plan file, only what it marks conservative and
-  rush's own look agrees with. To it, whatever the plan says, what the
-  cleanup rules say goes now (`DireKind::RuleCache`). Biggest first, until
-  free is back over the level and 2G, then the commands every clean ends
-  with (`pick_dire`'s ends: pnpm store prune, docker's prunes). Xcode's
+  rush's own look agrees with. Before it, whatever the plan says, the
+  disk engine runs at the low level (`run_at`, its rules but the worktree
+  one, with the plugins' candidates); the set is picked only if free is
+  still short. Biggest first, until free is back over the level and 2G,
+  then the commands every clean that did anything ends with
+  (`pick_dire`'s ends: pnpm store prune, docker's prunes). Xcode's
   DerivedData isn't in it: it isn't in a worktree, and rush can't tell
   Xcode's in use;
-- each goes through rush-fleet's checked removals (`clean_stale_temp`,
-  `remove_cache`, `remove_rule_cache`, `run_command`: refused when changed
-  or in use, dry-run aware as `empty-stale-temp`, `remove-cache`,
-  `remove-rule-cache`, `go-clean-modcache`, `run-cleanup-command`, each
-  logged: `temp-cleaned`, `cache-removed` with the cleanup session,
+- each goes through rush-fleet's checked removals (the engine's `apply`,
+  `clean_stale_temp`, `remove_cache`, `run_command`: refused when changed
+  or in use, dry-run aware as `disk-clean`, `empty-stale-temp`,
+  `remove-cache`, `run-cleanup-command`, each logged: the engine's
+  `disk-clean`, `temp-cleaned`, `cache-removed` with the cleanup session,
   `cleanup-command`, and one `dire-clean` with what went and the free disk
   before and after), then the news and a flash say what df shows it freed
   and that the rest waits, and the cleanup session is sent a note
@@ -1735,8 +1737,34 @@ what they find; the cleanup agent only proposes rules.
   find through `disk.candidates` (kinds `go.*`, `rust.*`, `js.*`, above
   under the clean-ups) and remove nothing on their own; their picked
   rows remove through `apply`.
-- Not wired yet: the scheduler and switch, Settings → Disk and the
-  agent's proposals are their own lanes.
+- A tool command runs only when its program, named bare, is a known tool
+  (`KNOWN_TOOLS`: kache, go, cargo, pnpm, npm, yarn, bun); anything else
+  stays, "not a known tool", so a rule written into disk-rules.json is no
+  way to run anything else.
+- `run_at(scan, handed, rules, free, level, now)` is a run at a level
+  whatever free says: the dire clean's, at low.
+- The switch (rush-ui-projects-machine `diskauto.rs`): config.json's
+  `disk.auto` ("Clean on its own when disk is low"), off by default. With
+  it on, the rush that leads runs the engine from `watch_machine`'s disk
+  read every 15 minutes (`AUTO_EVERY`), every 3 while free is under
+  `LOW_UNDER` (`AUTO_EVERY_LOW`), the first at once; off the UI, never two
+  at once (`engine_lock`, which the dire clean holds too). The scan is
+  what rush knows: the repos its recent sessions work in (their main
+  checkouts; git lists the worktrees), every session with a folder (its
+  id, where, mid-turn as working), `temp_roots`, `process_cwds`, HOME.
+  Plugins answering `disk.candidates` have `CANDIDATES_WAIT` (10s) to
+  say; one that doesn't is left out of that run. A run that removed
+  anything says so in the news ("disk: rush freed 3.0G on its own (2
+  things, by its rules)"); nothing when nothing. A rules file that can't
+  be read is a disk-clean event and said once.
+- Taken in once, before the first run (`take_plugins_in`, marked by
+  `disk.pluginsTakenIn`): rust-clean's or git-clean's old `auto-clean`
+  setting "true" in plugins/settings.json (read directly: the plugins
+  no longer declare it) turns the switch on; git-clean's `worktree-idle-days`,
+  when set, becomes the worktree rule's idle at both levels
+  (`update_rules`).
+- Not wired yet: Settings → Disk and the agent's proposals are their own
+  lanes.
 
 ## The Projects tree (Rust-only)
 

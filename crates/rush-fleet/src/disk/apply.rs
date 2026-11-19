@@ -7,6 +7,8 @@
 //! goes only on no; it goes through sweep::remove_tree (which refuses
 //! NEVER_TOUCH), go clean -modcache, or git worktree remove unforced, and
 //! nothing else. A dry run (rush_core::dryrun) writes each down instead.
+//! A tool command runs only when its program is a known tool
+//! (KNOWN_TOOLS); anything else stays, "not a known tool".
 
 use std::path::Path;
 
@@ -19,6 +21,18 @@ use super::plan::plan;
 use super::{Act, CARGO_TARGET, Candidate, Done, How, InUse, Kept, Level, Outcome, Rule, level};
 use crate::sweep::{never_touch, remove_tree, run_command};
 use crate::temp::agent_event;
+
+/// The programs a tool-command rule may run: their own clean-ups, run by
+/// bare name (found on PATH), nothing else. A rule file anyone can write
+/// to must not be a way to run anything.
+pub const KNOWN_TOOLS: &[&str] = &["kache", "go", "cargo", "pnpm", "npm", "yarn", "bun"];
+
+/// Whether command's program is one of KNOWN_TOOLS, by bare name.
+pub fn known_tool(command: &[String]) -> bool {
+    command
+        .first()
+        .is_some_and(|p| KNOWN_TOOLS.contains(&p.as_str()))
+}
 
 /// Err unless in_use says no for p, now.
 fn unused(p: &Path, in_use: &dyn Fn(&Path) -> InUse) -> Result<(), String> {
@@ -44,6 +58,9 @@ pub fn apply(a: &Act, in_use: &dyn Fn(&Path) -> InUse) -> Result<u64, String> {
     let ps = p.to_string_lossy();
     match &a.how {
         How::Run { command } => {
+            if !known_tool(command) {
+                return Err(format!("{}: not a known tool", command.join(" ")));
+            }
             let args: Vec<&str> = command.iter().map(String::as_str).collect();
             let before = rush_sys::sysinfo::read_disk().free;
             run_command(&args, &a.why)?;
@@ -199,6 +216,19 @@ pub fn run(scan: &Scan, handed: Vec<Candidate>, rules: &[Rule], free: u64, now: 
         );
         return Outcome::default();
     };
+    run_at(scan, handed, rules, free, lv, now)
+}
+
+/// run at level lv whatever free says: the dire clean's, which cleans as
+/// hard as low however its own level is set. free is only said.
+pub fn run_at(
+    scan: &Scan,
+    handed: Vec<Candidate>,
+    rules: &[Rule],
+    free: u64,
+    lv: Level,
+    now: Ms,
+) -> Outcome {
     let mut cands = find_candidates(scan, rules, lv, now);
     cands.extend(handed);
     let (acts, kept) = plan(&cands, rules, lv, now);
