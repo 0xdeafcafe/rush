@@ -557,6 +557,22 @@ Claude, fleet, the other adapters) builds on these.
   `tool_response` is a string and it can't replace a tool's output, so
   the context guard doesn't squeeze there. All tried with codex-cli
   0.169.0 and throwaway CODEX_HOMEs.
+- **Kept sign-ins are kept fresh (Rust-only).** Codex refreshes the
+  sign-in in its home once it's eight days old, but one rush keeps in
+  the vault for an account not in use is never used, so its refresh
+  token lapsed and switching to it said to sign in again.
+  `Accounts::keep_fresh` (default: nothing) refreshes it. The periodic
+  limits read (rush-ui-bars `fetch::read_again`) calls it for each kept
+  account, in the rush that leads only (`lead::renews`, as Claude's
+  logins). Codex's (`fresh.rs`) refreshes a sign-in last refreshed a
+  week or more ago the way Codex does (auth.openai.com/oauth/token,
+  client `app_EMoam…`), under the vault's lock. It leaves the account
+  alone while any Codex home is signed in as it, or while a home's
+  sign-in is in the keyring or unreadable, because a refresh of rush's
+  copy would revoke the one in use. A refused refresh token isn't sent
+  again, and a failed try waits an hour. Each try is logged as
+  `signin-renewed`, with why "kept unused for a week". Claude's logins
+  needed no such pass: each reading refreshes an expired one.
 - **Shared types.** `SubagentStats` is `rush_core::agent`'s (the adapter
   module re-exports it). Processes are read by `rush_sys::proc` (a table
   with `snapshot`, filled only for the trees asked; `Sampler` for one

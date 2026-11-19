@@ -434,6 +434,9 @@ impl Accounts for Codex {
     fn forget(&self, a: &Account) -> adapter::Result<()> {
         accounts::forget(a)
     }
+    fn keep_fresh(&self, profiles: &[Profile], a: &Account) -> adapter::Result<bool> {
+        crate::fresh::keep_fresh(profiles, a)
+    }
 }
 
 impl Chooser for Codex {

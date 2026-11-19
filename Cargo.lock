@@ -1355,6 +1355,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "toml",
+ "ureq",
 ]
 
 [[package]]

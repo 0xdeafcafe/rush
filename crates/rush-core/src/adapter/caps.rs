@@ -257,6 +257,15 @@ pub trait Accounts {
     fn sign_in(&self, p: &Profile) -> Result<(Cmd, SignInDone)>;
     /// Drops the credential rush keeps for a.
     fn forget(&self, a: &Account) -> Result<()>;
+    /// Refreshes the credential rush keeps for a once it has gone unused
+    /// long enough that it might lapse: true when it did. A kept sign-in
+    /// is otherwise only refreshed once it's switched to, by which time
+    /// its refresh token may have expired. It must leave a alone while any
+    /// of profiles is signed in as it, or can't say who it's signed in as:
+    /// refreshing rush's copy would revoke the one in use. Rust-only.
+    fn keep_fresh(&self, _profiles: &[Profile], _a: &Account) -> Result<bool> {
+        Ok(false)
+    }
 }
 
 /// An agent whose profile says which account it's signed in as: the

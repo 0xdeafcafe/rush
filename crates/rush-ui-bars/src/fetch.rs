@@ -123,10 +123,16 @@ fn read_again(m: &mut Model, asked: bool) {
         .filter(|lg| !peek(m).logins.iter().any(|l| l.id == lg.id && l.current))
         .cloned()
         .collect();
+    let fresh = if rush_ui_base::lead::renews(m)() {
+        keep_fresh_jobs(m)
+    } else {
+        Vec::new()
+    };
     m.later(
         move || {
             let mut got = read_all(&jobs);
             got.readings.extend(read_logins(&c, &logins));
+            keep_fresh(&fresh);
             got
         },
         |m, got| {
@@ -226,6 +232,49 @@ fn read_all(jobs: &[Job]) -> Got {
         got.quotas.insert(p.dir.clone(), q);
     }
     got
+}
+
+/// Each agent that keeps accounts, with its profiles and the accounts
+/// kept for it (keep_fresh).
+type FreshJob = (AdapterRef, Vec<Profile>, Vec<Account>);
+
+fn keep_fresh_jobs(m: &Model) -> Vec<FreshJob> {
+    let c = cfg(m);
+    agent_order(m)
+        .into_iter()
+        .filter(|a| a.kind().as_str() != LOGINS_KIND && a.accounts().is_some())
+        .filter_map(|a| {
+            let kept: Vec<Account> = c
+                .sign_ins_of(a.kind().as_str())
+                .iter()
+                .map(sign_in_account)
+                .collect();
+            let profiles = m.reg.profiles_of(&a);
+            (!kept.is_empty()).then_some((a, profiles, kept))
+        })
+        .collect()
+}
+
+/// Refreshes the kept sign-ins of accounts not in use once they've gone
+/// unused long enough to lapse (Accounts::keep_fresh), off the UI thread.
+/// Only the rush that leads does this, as only it refreshes Claude's.
+fn keep_fresh(jobs: &[FreshJob]) {
+    const JOB: &str = "keep sign-ins fresh";
+    for (ad, profiles, kept) in jobs {
+        let Some(ac) = ad.accounts() else { continue };
+        for a in kept {
+            if !rush_net::netwatch::run(JOB) {
+                return;
+            }
+            let r = ac.keep_fresh(profiles, a);
+            rush_net::netwatch::done(
+                JOB,
+                r.as_ref()
+                    .err()
+                    .map(|e| &**e as &(dyn std::error::Error + 'static)),
+            );
+        }
+    }
 }
 
 // Where a reading is kept is the base's (the accounts read it too).

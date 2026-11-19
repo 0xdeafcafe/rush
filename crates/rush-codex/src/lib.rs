@@ -17,6 +17,7 @@ mod children;
 mod conn;
 mod diff;
 mod discover;
+mod fresh;
 mod grants;
 mod history;
 pub mod hooks;

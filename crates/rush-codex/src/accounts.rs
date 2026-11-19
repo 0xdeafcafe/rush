@@ -17,7 +17,7 @@ use crate::json::{get, s};
 use crate::quota::{hex, random};
 
 /// Where the vault keeps an account's auth.json.
-fn vault_key(id: &str) -> String {
+pub(crate) fn vault_key(id: &str) -> String {
     format!("codex:{id}")
 }
 
