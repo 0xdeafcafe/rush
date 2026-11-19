@@ -1398,10 +1398,20 @@ deleted as it went. Here it never deletes on its own:
   inside a target) that no build touched for 2 days (`target_activity`:
   the profile folders and lock files cargo writes each build), and in the
   rest, `deps` artifacts and `incremental` sessions not written for 2 days.
-  Under 20G (`LOW_UNDER`), targets untouched for half an hour go too, and
-  kache's store is emptied (`kache clean --cache --yes`) when that's
-  installed and it's still under. Each says what it freed, in every window,
-  and nothing when it did nothing. Every removal, picked or automatic, asks
+  Under 20G (`LOW_UNDER`), targets untouched for half an hour go too,
+  artifacts go at 6 hours old (a target built every few minutes is never
+  idle: one reached 49G, half of it untouched for 6 hours), and kache's
+  store is emptied (`kache clean --cache --yes`) when that's installed and
+  it's still under. Each says what it freed, in every window, and nothing
+  when it did nothing; each tick it's on is an `auto-clean` event (free,
+  level, what it did, what it left and why, or why it did nothing), so a
+  quiet night can be told from a broken one. The clean-ups run as you
+  (`as_the_user`): the broker gives a plugin its data folder for HOME and
+  `/usr/bin:/bin` for PATH, and beta.29's auto mode did nothing all night
+  because of it (kache not found in `~/.cargo/bin`, and `lsof`, in
+  `/usr/sbin`, couldn't run, which `in_use` takes as yes); HOME is the
+  account's from the password file, PATH gets sbin and the tool folders,
+  and lsof and ps are run by path. Every removal, picked or automatic, asks
   `in_use` right before and goes only on no: `lsof +D` printed anything or
   couldn't run, or a process other than rush names the path in its
   arguments or environment (`ps axeww`: macOS hides platform binaries'

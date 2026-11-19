@@ -36,19 +36,38 @@ pub const LOW_TARGET_IDLE: Duration = Duration::from_secs(30 * 60);
 /// In targets that stay, deps artifacts and incremental sessions not
 /// written for this long go; cargo rebuilds any it finds missing.
 pub const ARTIFACT_AGE: Duration = Duration::from_secs(2 * 24 * 3600);
+/// The same, when the disk is low: a target built every few minutes is
+/// never idle, and piles up copies of crates no build reads any more
+/// (49 GB in one, half of it untouched for 6 hours).
+pub const LOW_ARTIFACT_AGE: Duration = Duration::from_secs(6 * 3600);
 /// How deep under rush's scratch root targets are looked for:
 /// tmp/<project>/<session>/<name>-target.
 pub const SCAN_DEPTH: usize = 3;
 
+/// How hard the auto mode cleans.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Level {
+    /// How long no build may have touched a target before it goes whole.
+    pub target_idle: Duration,
+    /// How old an artifact in a target that stays may get.
+    pub artifact_age: Duration,
+}
+
 /// How hard the auto mode cleans at free bytes free: None when there's
 /// enough.
-pub fn level(free: u64) -> Option<Duration> {
+pub fn level(free: u64) -> Option<Level> {
     if free >= AUTO_UNDER {
         None
     } else if free < LOW_UNDER {
-        Some(LOW_TARGET_IDLE)
+        Some(Level {
+            target_idle: LOW_TARGET_IDLE,
+            artifact_age: LOW_ARTIFACT_AGE,
+        })
     } else {
-        Some(TARGET_IDLE)
+        Some(Level {
+            target_idle: TARGET_IDLE,
+            artifact_age: ARTIFACT_AGE,
+        })
     }
 }
 
@@ -195,12 +214,17 @@ pub fn in_use_from(lsof: Option<&[u8]>, ps: Option<&str>, path: &Path, me: u32) 
     })
 }
 
+/// lsof, by its path: it's in /usr/sbin, which a plugin's PATH lacks, and
+/// not finding it answered "in use" for every target.
+pub const LSOF: &str = "/usr/sbin/lsof";
+const PS: &str = "/bin/ps";
+
 /// Whether anything uses path now: lsof +D, then every process's arguments
 /// and environment (macOS hides the environment of platform binaries;
 /// Homebrew's cargo and rustc show theirs). Asked right before a removal.
 pub fn in_use(path: &Path) -> bool {
-    let lsof = Command::new("lsof").arg("+D").arg(path).output().ok();
-    let ps = Command::new("ps")
+    let lsof = Command::new(LSOF).arg("+D").arg(path).output().ok();
+    let ps = Command::new(PS)
         .args(["axeww", "-o", "pid=,command="])
         .output()
         .ok()
@@ -229,13 +253,14 @@ pub enum Act {
 /// What the auto mode would do with the targets at roots' tops (worktrees
 /// and main checkouts: root/target only) and SCAN_DEPTH under scans, and
 /// why it keeps the rest it looked at. A target goes whole once untouched
-/// for target_idle and unused; in the rest that are unused, artifacts
-/// older than ARTIFACT_AGE go. skip names targets a session is working on.
+/// for the level's target_idle and unused; in the rest that are unused,
+/// artifacts older than its artifact_age go. skip names targets a session
+/// is working on.
 pub fn plan(
     roots: &[PathBuf],
     scans: &[PathBuf],
     now: SystemTime,
-    target_idle: Duration,
+    lv: Level,
     skip: &dyn Fn(&Path) -> bool,
     in_use: &dyn Fn(&Path) -> bool,
 ) -> (Vec<Act>, Vec<(PathBuf, String)>) {
@@ -252,7 +277,7 @@ pub fn plan(
             kept.push((t, "a session is working on it".into()));
             continue;
         }
-        if age(now, target_activity(&t)) >= target_idle {
+        if age(now, target_activity(&t)) >= lv.target_idle {
             if in_use(&t) {
                 kept.push((t, "idle, but in use".into()));
             } else {
@@ -260,7 +285,7 @@ pub fn plan(
             }
             continue;
         }
-        let paths = old_artifacts(&t, now, ARTIFACT_AGE);
+        let paths = old_artifacts(&t, now, lv.artifact_age);
         if paths.is_empty() {
             continue;
         }
