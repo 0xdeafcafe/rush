@@ -592,8 +592,13 @@ impl Model {
     /// alt, then the frame routes it (frame/keys.rs).
     pub fn key(&mut self, code: Key, mods: KeyMods) -> Step {
         let (code, mods) = crate::frame::keyname::mac_option(code, mods);
-        self.guarded(|m| m.press_key(&Press::new(code, mods)))
-            .step()
+        let p = Press::new(code, mods);
+        let held = crate::frame::keepundo::wipes(&p.s).then(|| self.box_texts());
+        let out = self.guarded(|m| m.press_key(&p)).step();
+        if let Some(held) = held {
+            self.note_wiped(held);
+        }
+        out
     }
 
     /// Picks the agent that has waited longest for you, so a stack of

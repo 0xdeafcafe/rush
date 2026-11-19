@@ -169,6 +169,41 @@ fn clearing_undoes_in_both_boxes() {
     }
 }
 
+/// cmd+backspace (and its like) taking all that's typed clears the box as
+/// esc does: kept as Cleared, the flash saying undo brings it back. One
+/// that leaves some of it is only a deletion.
+#[test]
+fn wiping_it_all_is_clearing() {
+    for which in ["session", "prompt"] {
+        for del in ["super+backspace", "ctrl+u"] {
+            let mut m = if which == "session" {
+                session()
+            } else {
+                prompt()
+            };
+            let get = |m: &mut Model| if which == "session" { sbox(m) } else { pbox(m) };
+            typed_and_back(&mut m);
+            key(&mut m, del);
+            assert_eq!(get(&mut m).0, " parser", "{which} {del}");
+            assert_ne!(
+                flash(&m),
+                "cleared · cmd+z or ctrl+/ brings it back",
+                "{which} {del}"
+            );
+            key(&mut m, "end");
+            key(&mut m, del);
+            assert_eq!(get(&mut m).0, "", "{which} {del}");
+            assert_eq!(
+                flash(&m),
+                "cleared · cmd+z or ctrl+/ brings it back",
+                "{which} {del}"
+            );
+            key(&mut m, "super+z");
+            assert_eq!(get(&mut m).0, " parser", "{which} {del}");
+        }
+    }
+}
+
 /// A paste chip taken out whole, or opened in place, comes back folded.
 #[test]
 fn paste_chips_undo() {

@@ -45,7 +45,54 @@ pub(crate) struct BoxGuard {
     conns: Vec<(String, Held)>,
 }
 
+/// Whether a key can take a whole box at once: cmd+backspace and its
+/// like, from the cursor to a line's end or start.
+pub(crate) fn wipes(key: &str) -> bool {
+    matches!(
+        key,
+        "super+backspace" | "ctrl+u" | "super+delete" | "ctrl+k"
+    )
+}
+
 impl Model {
+    /// What each box holds, by its session's key ("" for the Agents box).
+    pub(crate) fn box_texts(&self) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        if self.prompt_undoes() {
+            out.push((String::new(), self.input.string()));
+        }
+        for v in [self.session.as_ref(), self.pane.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            if let Some(input) = crate::sess::conn_box(self, &v.key)
+                && !out.iter().any(|(k, _)| *k == v.key)
+            {
+                out.push((v.key.clone(), input.string()));
+            }
+        }
+        out
+    }
+
+    /// A box a key emptied whole is cleared as esc clears it: kept in
+    /// the stash's history as Cleared, and the flash says undo brings it
+    /// back (undo already does).
+    pub(crate) fn note_wiped(&mut self, held: Vec<(String, String)>) {
+        for (key, was) in held {
+            if was.trim().is_empty() {
+                continue;
+            }
+            let now = if key.is_empty() {
+                self.prompt_undoes().then(|| self.input.string())
+            } else {
+                crate::sess::conn_box(self, &key).map(|e| e.string())
+            };
+            if now.is_some_and(|t| t.is_empty()) {
+                self.ext.calls.cleared()(self, &key, &was);
+            }
+        }
+    }
+
     /// The Agents box holds a message, whose changes undo takes back: not
     /// a name being renamed.
     fn prompt_undoes(&self) -> bool {
