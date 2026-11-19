@@ -5,5 +5,6 @@ mod memreview;
 mod place;
 mod projectmem;
 mod prsheet;
+mod research;
 mod tidy;
 mod tidydone;

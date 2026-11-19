@@ -1529,8 +1529,9 @@ deleted as it went. Here it never deletes on its own:
     or more below home, untouched for `UNTOUCHED` (30 days), that no rule
     names, holds or is in, outermost only, at most 12, with a guess at
     what it is by its name (`classify`: logs, a cache, scratch). Never
-    ticked and can't be; r makes it a rule (`make_rule`, kept in
-    cleanup-rules.tsv as `path\twhy\tyours\t30`): a rule you make may be
+    ticked and can't be; r makes it a rule (`make_rule`, kept in the disk
+    engine's rules, on, as a `cache-dir` rule at both levels, 30 days
+    idle: you said yes by making it): a rule you make may be
     anywhere `may_be_yours` allows (two or more below home, outside all
     the walk never enters and rush's own folders, never in a git checkout
     as made), and goes only once untouched for its days, checked again at
@@ -1572,12 +1573,22 @@ deleted as it went. Here it never deletes on its own:
   commands rush runs, and the biggest of what rush never touches, which
   the agent may only list. Starting one measures the survey beside the
   worktree scan and the plugins' reports.
-- Learning: when Clean up opens, each cleanup session's
-  `cleanup-plan.tsv` is read, and each line marked conservative: yes whose
-  path may be a rule and isn't one yet is kept in rush's folder
-  (`cleanup-rules.tsv`, path with ~ and why, tab separated) and said in the
-  news. The prompt tells the agent so. So what an agent found once is
-  offered by rush, without an agent, from then on.
+- Learning proposes, never adds a rule that runs: when Clean up opens,
+  and when a cleanup agent ends, each cleanup session's
+  `cleanup-plan.tsv` is read once (`learn`, keyed `<session>/cleanup-plan.tsv`
+  in the rules file's `takenFrom`, so a dismissed one isn't proposed
+  again), and each line marked conservative: yes whose path may be a rule
+  and isn't one yet becomes a proposal in Settings › Disk (a `cache-dir`
+  rule at low, idle 0, as the built-in ones; its evidence the path, the
+  plan's size and why) and is said in the news. The prompt tells the
+  agent so. Clean up's rules (`cache_rules`) are the built-in ones and
+  the `cache-dir` rules of yours in `disk-rules.json` that are on
+  (accepted proposals, rules you made); `cleanup-rules.tsv` is no longer
+  read. Its lines, learned before rules waited for your yes, are made
+  proposals once (`take_learned_in`, marked by the rules file's
+  `learnedTakenIn`, from the leading rush's first disk read): a learned
+  one as above, one you made at both levels at its days; so nothing a
+  past agent learned runs without your yes.
 
 When the disk is dire and you're away, rush itself (not the agent, which
 would need to run unattended) cleans the conservative set (`dire.rs`,
@@ -1763,7 +1774,40 @@ what they find; the cleanup agent only proposes rules.
   no longer declare it) turns the switch on; git-clean's `worktree-idle-days`,
   when set, becomes the worktree rule's idle at both levels
   (`update_rules`).
-- Not wired yet: the agent's proposals are their own lane.
+- A plugin's candidate in a cache folder a rule removes whole, or at
+  its path (your rules too), is removed once, by that rule (`plan`'s
+  `once`): of whole removals (cache folders and plugins' candidates), one
+  another holds is left out.
+- Proposals (`disk/propose.rs`): `add_proposals` takes one only with
+  evidence and when `check_rule` passes: an id and a title, numbers at a
+  level at least, a `cache-dir` folder where a rule may be
+  (`cache_dir_allowed`: directly in a cache root, or `may_be_yours`; never
+  NEVER_TOUCH, never climbing out) with a why, a `tool-command` of
+  `KNOWN_TOOLS` with a why, a `plugin-candidate` of a plugin's kind
+  (`plugin.what`, not one the engine finds) and never `js.pnpm-store`
+  (pnpm's store is `pnpm store prune`, never removed whole), targets and
+  worktrees with an idle, artifacts with an age or keep and superseded.
+  An id that's a rule of another kind is refused. One that does what a
+  rule or proposal there does at the same numbers (`same_rule`: ids,
+  titles, whys and on/off aside, ~ made home) is dropped; one of the same
+  id as a proposal replaces it. `propose` keeps them under the lock, by
+  and at as given, each source (`<session>/<file>`) once, and logs
+  `disk-proposed` (added, same, refused with why).
+- The cleanup agent's research (rush-ui-projects-machine `research.rs`,
+  `research_now`, Settings › Disk's Research now, wired in session_core's
+  `start::install`): rush looks first, off the UI (Clean up's survey and
+  the never-touched biggest, `home_map`'s tops and big untouched folders,
+  the plugins' `disk.candidates` by kind, their cleanup reports, the
+  rules), then starts the cleanup agent ("Disk research", asking mode,
+  `care_allow`) told to delete, stop and run nothing that changes the
+  disk, the rule kinds as JSON with `KNOWN_TOOLS`, pnpm's store as `pnpm
+  store prune`, the rules and proposals there are as JSON (propose none
+  again), and to write `$TMPDIR/disk-proposals.json` (`PROPOSALS_FILE`:
+  each rule with evidence: paths, sizes, what made them and how it's
+  known, when they changed, why it's safe). When a cleanup agent ends
+  (`end_care`), its plan and research file are taken in (`take_in`) and
+  the news says how many were proposed and what was left out and why.
+  Not while a cleanup agent is at work.
 
 ### Settings › Disk (Rust-only)
 
@@ -1776,8 +1820,10 @@ Remote does) and writes only through `update_rules`.
   `disk.auto`, off by default: what `diskauto.rs` obeys); the two levels,
   read-only (normal under 50G, low under 20G); the last run (when, free,
   level, freed, or why it did nothing); and "Research now", shown only
-  once something gives it its work (`disk::on_research`: the cleanup
-  agent in research mode, which proposes and removes nothing).
+  once something gives it its work (`disk::on_research`, which
+  session_core's `start::install` calls with `research::research_now`:
+  the cleanup agent in research mode, which proposes and removes
+  nothing).
 - Rules: one row per rule, built-in then yours: ● on / ○ off, its title,
   its numbers at normal and at low (`2d`; artifacts as `6h, 3 past 1h`:
   age, builds kept, superseded; `runs` for a command; `–` where it

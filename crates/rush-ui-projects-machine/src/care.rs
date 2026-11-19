@@ -15,7 +15,8 @@
 //! plugin, with why in its meta, so the list says so and finds it again
 //! after a reload. Once its turn is over and has settled, the watch marks
 //! it done, stops its host and says so (watchMachine :80-115): only in
-//! the rush that leads.
+//! the rush that leads. Its research mode, Settings › Disk's Research
+//! now, is research.rs: it proposes rules and removes nothing.
 
 use rush_core::text::Line;
 use rush_core::time::Ms;
@@ -164,8 +165,26 @@ pub fn finished_care(m: &mut Model, now: Ms) -> (Vec<rush_core::agent::Agent>, b
 
 /// Each finished cleanup agent marked done, its host stopped (its report
 /// stays, and a message resumes it), and said (watchMachine :100-115).
+/// Beyond Go: what it proposes (its plan's caches, its research's rules)
+/// is taken in first, off the UI, and said (research.rs take_in).
 pub fn end_care(m: &mut Model, done: Vec<rush_core::agent::Agent>) {
     for a in done {
+        let (id, now) = (a.job.id.clone(), m.now);
+        if !id.is_empty() {
+            m.later(
+                move || super::research::take_in(&id, now),
+                |m, (learned, research, errs)| {
+                    for e in errs {
+                        m.fail(&e);
+                    }
+                    let w = super::research::proposed_words(learned, research.as_ref());
+                    if !w.is_empty() {
+                        m.news(&w, "");
+                    }
+                    Out::Draw
+                },
+            );
+        }
         if rush_core::dryrun::would(
             "stop-cleanup-agent",
             &a.key,
@@ -757,7 +776,7 @@ impl Sheet for CareSheet {
             (
                 format!(
                     "{noticed}Clean up now opens rush's own list, with no agent: worktrees that can go, done sessions' scratch, \
-                     and caches that rebuild themselves (ones rush knows, and ones cleanup agents' plans taught it), ticked for you to confirm. \
+                     and caches that rebuild themselves (ones rush knows, and ones you accepted in Settings › Disk), ticked for you to confirm. \
                      A cleanup agent can look at {reads}, \
                      deleting nothing, and propose a list of what can go without losing work (a worktree only once it's committed and pushed) \
                      and what holds memory that nobody works in, with each path, its size and why, for you to approve: all, some or none. \
@@ -1101,7 +1120,7 @@ pub fn ago(d: Ms) -> String {
 
 /// Asks every plugin that provides cleanup.report for what it knows; one
 /// that can't answer is left out. Off the UI.
-fn care_reports() -> Vec<CleanupReport> {
+pub(crate) fn care_reports() -> Vec<CleanupReport> {
     let ctx = Ctx::background().with_timeout(SERVICE_TIMEOUT + std::time::Duration::from_secs(5));
     let answers = rush_plugin::ask_service(&ctx, SERVICE_CLEANUP_REPORT).unwrap_or_default();
     answers
@@ -1178,7 +1197,7 @@ const CARE_PHASES: &str = "Phase 1, now, is read-only: survey (df -h, du, git st
 - every path you would delete, each with its size and why it's safe to go (a can-go worktree, a done session's scratch, a cache that rebuilds itself, …) and conservative: yes when it's only something made or fetched again that loses no work (a done session's scratch untouched for days, a build cache in a worktree nobody works in, pnpm store prune), else conservative: no;
 - each group's total, and a grand total of the space it frees;
 - what you'd leave, and why;
-- the same plan as $TMPDIR/cleanup-plan.tsv, one line per path: path, bytes, conservative (yes or no) and why, tab separated; it's the one file you write in phase 1. rush learns from it: a folder directly in ~/Library/Caches or ~/.cache marked yes becomes one of its rules, and its Clean up offers it from then on without an agent, so give each such line a why that says what makes it again;
+- the same plan as $TMPDIR/cleanup-plan.tsv, one line per path: path, bytes, conservative (yes or no) and why, tab separated; it's the one file you write in phase 1. rush learns from it: a folder directly in ~/Library/Caches or ~/.cache marked yes is proposed to the user as one of its rules (Settings › Disk), which runs only once they accept it, so give each such line a why that says what makes it again;
 - then a decisions block with one decision: (a) delete all of it; (b) only some, the user names which; (c) none.
 Phase 2 starts only once the user answers. Delete exactly what they approved, nothing new: write the removals as one script, $TMPDIR/cleanup.sh, one line per approved path (rm -rf for a folder or file, git -C <repo> worktree remove for a worktree), then pnpm store prune if the plan has it, and run it once, so the user sees and approves one command. Run df -h before and after. Look at each path again first: one that changed since the plan (touched since, or now in use) stays out of the script, and you say so. With (c), delete nothing and say what you'd have freed.
 ";

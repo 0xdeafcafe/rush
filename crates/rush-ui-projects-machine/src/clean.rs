@@ -12,8 +12,8 @@
 //! Rust-only too: caches that rebuild themselves, measured off the UI once
 //! the sheet is open (rush_fleet::survey), so rush offers them itself
 //! rather than starting an agent to find them. The folders cleanup rules
-//! name (rush_fleet::cache_rules: built in, and learned from cleanup
-//! agents' plans), ticked when the rule says so (some only once untouched
+//! name (rush_fleet::cache_rules: built in, and yours in the disk
+//! engine's rules: proposals you accepted, rules you made here), ticked when the rule says so (some only once untouched
 //! for a while); the build caches of each worktree nobody works in that
 //! isn't going whole (rush_fleet::caches_in: its top, apps/*/node_modules),
 //! ticked once the worktree, outside node_modules, sat untouched for
@@ -381,7 +381,8 @@ fn triage_items(
     }
 }
 
-/// Learns from cleanup agents' plans (rush_fleet::learn), then measures
+/// Proposes what cleanup agents' plans teach (rush_fleet::learn: each
+/// plan once, a proposal in Settings › Disk, never a rule), then measures
 /// the caches and the worktrees' facts for the Clean up sheet that's open
 /// (rush_fleet::survey), and adds them when that's done; closes it, saying
 /// so, when there's nothing at all. What rush never touches is measured
@@ -391,15 +392,15 @@ fn measure_into_sheet(
     wts: Vec<String>,
     free_wts: Vec<String>,
     between: Vec<rush_fleet::Between>,
-    plans: Vec<std::path::PathBuf>,
+    plans: Vec<(String, std::path::PathBuf)>,
 ) {
     let now = m.now;
     m.later(
         move || {
             let learned: usize = plans
                 .iter()
-                .filter_map(|p| std::fs::read_to_string(p).ok())
-                .filter_map(|t| rush_fleet::learn(&t).ok())
+                .filter_map(|(from, p)| Some((from, std::fs::read_to_string(p).ok()?)))
+                .filter_map(|(from, t)| rush_fleet::learn(from, &t).ok())
                 .map(|n| n.len())
                 .sum();
             let s = rush_fleet::survey(
@@ -460,7 +461,7 @@ fn measure_into_sheet(
             if learned > 0 {
                 m.news(
                     &format!(
-                        "rush learned {learned} cache{} from a cleanup agent's plan · Clean up offers {} from now on",
+                        "a cleanup agent's plan proposes {learned} cache rule{} · Settings › Disk runs {} once you accept",
                         plural(learned),
                         if learned == 1 { "it" } else { "them" }
                     ),
@@ -647,14 +648,18 @@ pub fn open_clean_sheet(m: &mut Model) {
     }));
     if measuring {
         // Cleanup agents' plans, done or waiting on you: what they mark
-        // conservative is learned before the rules are read.
-        let plans: Vec<std::path::PathBuf> = m
+        // conservative is proposed, each plan once, before the rules are
+        // read.
+        let plans: Vec<(String, std::path::PathBuf)> = m
             .agents
             .iter()
             .filter(|a| a.rush && a.started_by == super::care::CARE_PLUGIN && !a.job.id.is_empty())
             .map(|a| {
-                std::path::Path::new(&rush_fleet::temp_dir(&a.job.id))
-                    .join(super::care::CARE_PLAN_FILE)
+                (
+                    format!("{}/{}", a.job.id, super::care::CARE_PLAN_FILE),
+                    std::path::Path::new(&rush_fleet::temp_dir(&a.job.id))
+                        .join(super::care::CARE_PLAN_FILE),
+                )
             })
             .collect();
         measure_into_sheet(m, wts, free_wts, between, plans);

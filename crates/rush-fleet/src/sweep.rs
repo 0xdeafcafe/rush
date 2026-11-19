@@ -657,7 +657,7 @@ pub fn survey(
 }
 
 /// Bytes in G, one decimal, as rush's notes say sizes.
-fn gigs(b: i64) -> String {
+pub(crate) fn gigs(b: i64) -> String {
     format!("{:.1}G", b as f64 / (1u64 << 30) as f64)
 }
 

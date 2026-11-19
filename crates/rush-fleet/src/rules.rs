@@ -1,10 +1,16 @@
 //! The machine's caches that rebuild themselves: what Clean up offers when
 //! the disk runs low, without starting an agent to look. Rush starts with
-//! the ones it knows ([`BUILT_IN`], and Go's module cache) and learns more
-//! from each cleanup agent's plan: a folder the plan marks conservative:
-//! yes, directly in ~/Library/Caches or ~/.cache, is kept in rush's folder
-//! (cleanup-rules.tsv, path and why, tab separated) and offered from then
-//! on. Rust-only: Go had no such rules.
+//! the ones it knows ([`BUILT_IN`], and Go's module cache), and adds the
+//! cache-folder rules of yours in the disk engine's rules
+//! (disk-rules.json: proposals you accepted, rules you made in Clean up).
+//! Rust-only: Go had no such rules.
+//!
+//! What a cleanup agent's plan teaches (a folder the plan marks
+//! conservative: yes, directly in ~/Library/Caches or ~/.cache) is
+//! proposed, never a rule that runs: it waits in Settings › Disk for your
+//! yes (learn). The rules learned before that, kept in rush's folder as
+//! cleanup-rules.tsv (path and why, tab separated; yours with "yours" and
+//! days), are made proposals once (take_learned_in) and no longer read.
 //!
 //! A learned rule is only ever a folder directly in a cache root, never
 //! one of rush's own caches. The built-in ones are an explicit allowlist,
@@ -21,7 +27,8 @@ use std::path::Path;
 use rush_core::time::Ms;
 use serde_json::json;
 
-use crate::sweep::{DAY, HOUR, never_touch, remove_tree, span};
+use crate::disk::{self, Kind, Params, Proposal, Rule, RulesFile};
+use crate::sweep::{DAY, HOUR, gigs, never_touch, remove_tree, span};
 use crate::temp::{agent_event, err_text};
 
 /// How a rule's folder goes.
@@ -121,7 +128,8 @@ pub const BUILT_IN: [BuiltIn; 19] = [
     },
 ];
 
-/// The file rush keeps what it learned in, in its folder.
+/// The file rush kept what it learned in, in its folder, before rules
+/// waited for your yes: read once, to make its lines proposals.
 pub const RULES_FILE: &str = "cleanup-rules.tsv";
 
 /// Folders in a cache root that are never a learned rule: rush's own.
@@ -247,10 +255,10 @@ pub fn read_rules(text: &str, home: &str) -> Vec<CacheRule> {
         .collect()
 }
 
-/// Makes a rule of a folder Clean up found big and untouched, kept with
-/// the learned ones: it goes, from now on, once untouched for idle.
-/// Refused where a rule you make may not be, in a git checkout, or not a
-/// folder.
+/// Makes a rule of a folder Clean up found big and untouched, as you
+/// asked (r there): kept with the disk engine's rules, on (disk-rules.json,
+/// update_rules), it goes from now on once untouched for idle. Refused
+/// where a rule you make may not be, in a git checkout, or not a folder.
 pub fn make_rule(path: &str, why: &str, idle: Ms) -> Result<CacheRule, String> {
     let home = home();
     if !crate::diskmap::may_be_yours(path, &home) {
@@ -271,30 +279,109 @@ pub fn make_rule(path: &str, why: &str, idle: Ms) -> Result<CacheRule, String> {
         ));
     }
     let days = (idle / DAY).max(1);
-    let p = rules_path();
-    let mut text = std::fs::read_to_string(&p).unwrap_or_default();
-    if !text.is_empty() && !text.ends_with('\n') {
-        text.push('\n');
-    }
     let w = why.replace(['\t', '\n'], " ");
-    text.push_str(&format!("{}\t{w}\tyours\t{days}\n", tilde(path, &home)));
-    if let Some(d) = p.parent() {
-        std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
-    }
-    std::fs::write(&p, text).map_err(|e| e.to_string())?;
-    agent_event(
-        None,
-        "cleanup-rule-made",
-        json!({ "path": path, "why": why, "idleDays": days }),
-    );
-    Ok(CacheRule {
+    let made = CacheRule {
         path: path.to_string(),
         why: w,
         learned: true,
         yours: true,
         idle: days * DAY,
         ..CacheRule::default()
+    };
+    let rule = as_disk_rule(&made, &home);
+    disk::update_rules(|f| {
+        f.rules.retain(|r| r.id != rule.id);
+        f.rules.push(rule);
     })
+    .map_err(|e| e.to_string())?;
+    agent_event(
+        None,
+        "cleanup-rule-made",
+        json!({ "path": path, "why": why, "idleDays": days }),
+    );
+    Ok(made)
+}
+
+/// A cache rule's id in the disk engine's rules: "cache:" and its path
+/// below home, as the built-in ones; or its whole path.
+fn rule_id(path: &str, home: &str) -> String {
+    let t = tilde(path, home);
+    match t.strip_prefix("~/") {
+        Some(rest) => format!("cache:{rest}"),
+        None => format!("cache:{t}"),
+    }
+}
+
+fn idle_secs(idle: Ms) -> Params {
+    Params {
+        idle_secs: Some((idle.max(0) / 1000) as u64),
+        ..Params::default()
+    }
+}
+
+/// r as a disk engine rule, on: a cache folder at r's idle; one you made
+/// at both levels, a learned one only when low (as the built-in ones).
+pub fn as_disk_rule(r: &CacheRule, home: &str) -> Rule {
+    let why = if r.why.trim().is_empty() {
+        "a cache its tool makes again".to_string()
+    } else {
+        r.why.clone()
+    };
+    Rule {
+        id: rule_id(&r.path, home),
+        title: why.clone(),
+        kind: Kind::CacheDir {
+            path: tilde(&r.path, home),
+            why,
+            each: r.each,
+            go_clean: false,
+        },
+        enabled: true,
+        normal: r.yours.then(|| idle_secs(r.idle)),
+        low: Some(idle_secs(r.idle)),
+    }
+}
+
+/// The cache-folder rules of yours in f that are on (proposals you
+/// accepted, rules you made), as Clean up's rules: the built-in ones and
+/// Go's module cache are left to rules_with. One outside a cache root is
+/// yours, by where it is.
+pub fn accepted_cache_rules(f: &RulesFile, home: &str) -> Vec<CacheRule> {
+    let built: Vec<String> = disk::built_in_rules().into_iter().map(|r| r.id).collect();
+    f.rules
+        .iter()
+        .filter(|r| r.enabled && !built.contains(&r.id))
+        .filter_map(|r| {
+            let Kind::CacheDir {
+                path,
+                why,
+                each,
+                go_clean: false,
+            } = &r.kind
+            else {
+                return None;
+            };
+            if path.is_empty() {
+                return None;
+            }
+            let p = untilde(path.trim_end_matches('/'), home);
+            let idle = r
+                .low
+                .as_ref()
+                .or(r.normal.as_ref())
+                .and_then(|p| p.idle_secs)
+                .unwrap_or(0);
+            Some(CacheRule {
+                yours: !may_be_rule(&p, home),
+                path: p,
+                why: why.clone(),
+                learned: true,
+                idle: (idle as Ms).saturating_mul(1000),
+                each: *each,
+                how: How::Remove,
+            })
+        })
+        .collect()
 }
 
 /// The built-in rules for home, Go's module cache, then the learned ones,
@@ -330,13 +417,15 @@ fn rules_path() -> std::path::PathBuf {
     rush_state::dir().join(RULES_FILE)
 }
 
-/// Every rule: built in, and learned (rush's folder's cleanup-rules.tsv).
+/// Every rule: built in, and yours in the disk engine's rules
+/// (accepted_cache_rules); only the built-in ones when those can't be
+/// read.
 pub fn cache_rules() -> Vec<CacheRule> {
     let home = home();
-    let learned = std::fs::read_to_string(rules_path())
-        .map(|t| read_rules(&t, &home))
+    let yours = disk::load_rules()
+        .map(|f| accepted_cache_rules(&f, &home))
         .unwrap_or_default();
-    rules_with(learned, &home)
+    rules_with(yours, &home)
 }
 
 /// What a cleanup agent's plan (cleanup-plan.tsv: path, bytes,
@@ -368,33 +457,116 @@ pub fn learn_from_plan(plan: &str, have: &[CacheRule], home: &str) -> Vec<CacheR
     out
 }
 
-/// Learns from a cleanup agent's plan, kept in rush's folder: what it
-/// learned, empty when nothing new.
-pub fn learn(plan: &str) -> Result<Vec<CacheRule>, String> {
+/// What plan says of path: its bytes, as the plan measured them.
+fn plan_bytes(plan: &str, path: &str, home: &str) -> Option<i64> {
+    plan.lines().find_map(|l| {
+        let f: Vec<&str> = l.split('\t').collect();
+        (untilde(f.first()?.trim().trim_end_matches('/'), home) == path)
+            .then(|| f.get(1)?.trim().parse().ok())
+            .flatten()
+    })
+}
+
+/// Learns from a cleanup agent's plan: what it teaches (learn_from_plan)
+/// is proposed in Settings › Disk, never made a rule that runs; from (the
+/// plan as "<session>/cleanup-plan.tsv") once, so one dismissed isn't
+/// proposed again. What it proposed; empty when nothing new.
+pub fn learn(from: &str, plan: &str) -> Result<Vec<CacheRule>, String> {
     let home = home();
     let new = learn_from_plan(plan, &cache_rules(), &home);
     if new.is_empty() {
         return Ok(new);
     }
-    let p = rules_path();
-    let mut text = std::fs::read_to_string(&p).unwrap_or_default();
-    if !text.is_empty() && !text.ends_with('\n') {
-        text.push('\n');
+    let at = rush_core::time::now();
+    let props = new
+        .iter()
+        .map(|r| {
+            let size = plan_bytes(plan, &r.path, &home)
+                .map(|b| format!(", {}", gigs(b)))
+                .unwrap_or_default();
+            Proposal {
+                rule: as_disk_rule(r, &home),
+                evidence: format!(
+                    "{}{size}, in a cleanup agent's plan, marked conservative: yes (only something made or fetched again): {}",
+                    tilde(&r.path, &home),
+                    if r.why.is_empty() { "no why given" } else { r.why.as_str() }
+                ),
+                by: String::new(),
+                at,
+            }
+        })
+        .collect();
+    let got = disk::propose(props, Vec::new(), "a cleanup agent's plan", at, from)
+        .map_err(|e| e.to_string())?;
+    Ok(new
+        .into_iter()
+        .filter(|r| got.added.contains(&rule_id(&r.path, &home)))
+        .collect())
+}
+
+/// The cache rules learned before rules waited for your yes
+/// (cleanup-rules.tsv: learned from cleanup agents' plans, or made by you
+/// in Clean up) made proposals, once (the rules file's learnedTakenIn), so
+/// nothing a past agent learned runs without your yes. How many were
+/// proposed. A file that can't be read is an error, and tried again
+/// next time.
+pub fn take_learned_in() -> Result<usize, String> {
+    let home = home();
+    let at = rush_core::time::now();
+    let mut n = 0;
+    let mut err = String::new();
+    disk::update_rules(|f| {
+        if f.learned_taken_in {
+            return;
+        }
+        let text = match std::fs::read_to_string(rules_path()) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => {
+                err = format!("{}: {e}", rules_path().display());
+                return;
+            }
+        };
+        let props = read_rules(&text, &home)
+            .into_iter()
+            .map(|r| Proposal {
+                rule: as_disk_rule(&r, &home),
+                evidence: if r.yours {
+                    format!(
+                        "{}: you made it in Clean up, before rules waited for your yes: it went once untouched for {}. It was in cleanup-rules.tsv.",
+                        tilde(&r.path, &home),
+                        span(r.idle)
+                    )
+                } else {
+                    format!(
+                        "{}: learned from a cleanup agent's plan before rules waited for your yes ({}). It was in cleanup-rules.tsv, and Clean up offered it.",
+                        tilde(&r.path, &home),
+                        if r.why.is_empty() { "no why given" } else { r.why.as_str() }
+                    )
+                },
+                by: if r.yours {
+                    "you, in Clean up".into()
+                } else {
+                    "a cleanup agent's plan".into()
+                },
+                at,
+            })
+            .collect();
+        n = disk::add_proposals(f, props, &home).added.len();
+        f.learned_taken_in = true;
+    })
+    .map_err(|e| e.to_string())?;
+    if !err.is_empty() {
+        return Err(err);
     }
-    for r in &new {
-        let why = r.why.replace(['\t', '\n'], " ");
-        text.push_str(&format!("{}\t{why}\n", tilde(&r.path, &home)));
+    if n > 0 {
+        agent_event(
+            None,
+            "cleanup-rules-proposed",
+            json!({ "from": RULES_FILE, "proposed": n }),
+        );
     }
-    if let Some(d) = p.parent() {
-        std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
-    }
-    std::fs::write(&p, text).map_err(|e| e.to_string())?;
-    agent_event(
-        None,
-        "cleanup-rules-learned",
-        json!({ "paths": new.iter().map(|r| r.path.clone()).collect::<Vec<_>>() }),
-    );
-    Ok(new)
+    Ok(n)
 }
 
 fn is_dir(p: &str) -> bool {
@@ -752,16 +924,61 @@ mod tests {
         assert_eq!(go_mod_cache(""), None);
     }
 
+    /// rush's folder, for this test's thread only.
+    struct RushDir(tempfile::TempDir);
+
+    impl RushDir {
+        fn new() -> RushDir {
+            let d = tempfile::tempdir().unwrap();
+            rush_state::set_thread_dir(Some(d.path().canonicalize().unwrap()));
+            RushDir(d)
+        }
+    }
+
+    impl Drop for RushDir {
+        fn drop(&mut self) {
+            rush_state::set_thread_dir(None);
+        }
+    }
+
+    // What a plan teaches is proposed, never a rule that runs: Clean up
+    // neither offers nor removes it until it's accepted; a plan is taken
+    // once, and the same proposal isn't made twice.
     #[test]
     fn learns_measures_and_removes() {
+        let _dir = RushDir::new();
         let home = home();
         let sp = format!("{home}/Library/Caches/Spotify");
         std::fs::create_dir_all(format!("{sp}/a")).unwrap();
         std::fs::write(format!("{sp}/a/f"), vec![0u8; 8192]).unwrap();
         let plan = format!("{sp}\t8192\tyes\tSpotify's cache\n");
-        let new = learn(&plan).unwrap();
+        let new = learn("s1/cleanup-plan.tsv", &plan).unwrap();
         assert_eq!(new.len(), 1);
-        assert!(learn(&plan).unwrap().is_empty(), "learned once");
+        let f = disk::load_rules().unwrap();
+        assert_eq!(f.proposed.len(), 1, "{f:?}");
+        let p = &f.proposed[0];
+        assert_eq!(p.rule.id, "cache:Library/Caches/Spotify");
+        assert_eq!(p.by, "a cleanup agent's plan");
+        assert!(p.evidence.contains("Spotify's cache"), "{}", p.evidence);
+        assert!(!f.rules.iter().any(|r| r.id == p.rule.id), "not a rule");
+        assert!(cache_rules().iter().all(|r| r.path != sp), "not offered");
+        assert!(remove_rule_cache(&sp, &cache_rules(), "test").is_err());
+        assert!(Path::new(&sp).exists());
+        assert!(
+            learn("s1/cleanup-plan.tsv", &plan).unwrap().is_empty(),
+            "a plan is taken once"
+        );
+        assert!(
+            learn("s2/cleanup-plan.tsv", &plan).unwrap().is_empty(),
+            "the same proposal isn't made twice"
+        );
+        assert_eq!(disk::load_rules().unwrap().proposed.len(), 1);
+        // Accepted, it's a rule Clean up offers.
+        disk::update_rules(|f| {
+            let p = f.proposed.remove(0);
+            f.rules.push(p.rule);
+        })
+        .unwrap();
         // A read-only bundle, as dotslash keeps them.
         let ds = format!("{home}/Library/Caches/dotslash");
         let app = format!("{ds}/x/Tool.app/Contents");
@@ -794,6 +1011,80 @@ mod tests {
         assert!(remove_rule_cache(&ds, &rules, "test").unwrap() > 0);
         assert!(!Path::new(&sp).exists() && !Path::new(&ds).exists());
         assert!(Path::new(&not_rule).exists());
+    }
+
+    // cleanup-rules.tsv's lines become proposals once, by who made them,
+    // and run nowhere; what isn't a rule is left out. A rule you make in
+    // Clean up is one, on, in the disk engine's rules.
+    #[test]
+    fn learned_rules_taken_in_once() {
+        let dir = RushDir::new();
+        let home = home();
+        std::fs::write(
+            dir.0.path().join(RULES_FILE),
+            "~/Library/Caches/Spotify\tSpotify's cache\n\
+             ~/.zed/old-logs\tZed's logs\tyours\t30\n\
+             ~/Documents\tnot a cache\n",
+        )
+        .unwrap();
+        assert_eq!(take_learned_in(), Ok(2));
+        let f = disk::load_rules().unwrap();
+        assert!(f.learned_taken_in);
+        let got: Vec<(&str, &str, bool, bool)> = f
+            .proposed
+            .iter()
+            .map(|p| {
+                (
+                    p.rule.id.as_str(),
+                    p.by.as_str(),
+                    p.rule.normal.is_some(),
+                    p.rule.low.is_some(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (
+                    "cache:Library/Caches/Spotify",
+                    "a cleanup agent's plan",
+                    false,
+                    true
+                ),
+                ("cache:.zed/old-logs", "you, in Clean up", true, true),
+            ]
+        );
+        assert!(
+            f.proposed[1].evidence.contains("30 days"),
+            "{}",
+            f.proposed[1].evidence
+        );
+        let rules = cache_rules();
+        assert!(
+            rules
+                .iter()
+                .all(|r| !r.path.ends_with("/Spotify") && !r.path.ends_with("/old-logs")),
+            "nothing learned runs"
+        );
+        assert_eq!(take_learned_in(), Ok(0), "once");
+        assert_eq!(disk::load_rules().unwrap().proposed.len(), 2);
+        // Made in Clean up: a rule, on, at both levels.
+        let logs = format!("{home}/.kanban/old-logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        let made = make_rule(&logs, "Kanban's old logs", 30 * DAY).unwrap();
+        assert!(made.yours && made.idle == 30 * DAY);
+        let f = disk::load_rules().unwrap();
+        let r = f
+            .rules
+            .iter()
+            .find(|r| r.id == "cache:.kanban/old-logs")
+            .expect("made");
+        assert!(r.enabled);
+        assert_eq!(r.normal.as_ref().unwrap().idle_secs, Some(30 * 24 * 3600));
+        let c = cache_rules();
+        let mine = c.iter().find(|r| r.path == logs).expect("offered");
+        assert!(mine.yours && mine.idle == 30 * DAY);
+        assert!(rule_for(&logs, &c, &home).is_some());
     }
 
     fn set_mode(p: &str, mode: u32) {

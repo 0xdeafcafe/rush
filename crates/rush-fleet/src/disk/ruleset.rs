@@ -147,6 +147,15 @@ pub struct Proposal {
 pub struct RulesFile {
     pub rules: Vec<Rule>,
     pub proposed: Vec<Proposal>,
+    /// The cache rules learned before rules waited for your yes
+    /// (cleanup-rules.tsv) were made proposals: once only.
+    #[serde(rename = "learnedTakenIn", skip_serializing_if = "is_false")]
+    pub learned_taken_in: bool,
+    /// What proposals were taken from (a cleanup agent's plan or research,
+    /// as "<session>/<file>"), each once: dismissing one isn't undone by
+    /// the same file read again.
+    #[serde(rename = "takenFrom", skip_serializing_if = "Vec::is_empty")]
+    pub taken_from: Vec<String>,
 }
 
 fn at(idle_secs: u64) -> Params {
@@ -255,6 +264,8 @@ pub fn merge_built_in(f: RulesFile) -> RulesFile {
     RulesFile {
         rules,
         proposed: f.proposed,
+        learned_taken_in: f.learned_taken_in,
+        taken_from: f.taken_from,
     }
 }
 

@@ -243,6 +243,7 @@ fn changes_to_the_rules() {
                 why: "pnpm's store".into(),
             },
         )],
+        ..RulesFile::default()
     };
     // Accepting moves it into rules, on.
     let mut f = base();
@@ -296,9 +297,14 @@ fn changes_to_the_rules() {
     assert!(t.rule(&f).is_some() && p.rule(&f).unwrap().normal.is_some());
 }
 
-/// The page: the switch, both levels, every rule, and nothing proposed.
+/// The page: the switch, both levels, Research now (session_core's
+/// start::install gives it the cleanup agent's research), every rule,
+/// and nothing proposed.
 #[test]
 fn disk_page_shows_switch_levels_and_rules() {
+    // As start::install does once hosts can start sessions (the process's
+    // first; set here so the test doesn't hang on another's order).
+    disk::on_research(rush_ui_projects_machine::research::research_now);
     let (mut m, _d) = model(240, 60);
     set_settings_page(&mut m, PAGE_DISK);
     let b = body(&m, 230);
@@ -312,10 +318,10 @@ fn disk_page_shows_switch_levels_and_rules() {
         "● kache's store",
         "Proposed",
         "none waiting",
+        "Research now",
     ] {
         assert!(b.contains(want), "Disk lacks {want:?}:\n{b}");
     }
-    assert!(!b.contains("Research now"), "hidden until it's wired:\n{b}");
     // The switch is off until turned on, and saved to config.json.
     assert!(!config(&m).disk.auto);
     to_row(&mut m, "Clean on its own when disk is low");

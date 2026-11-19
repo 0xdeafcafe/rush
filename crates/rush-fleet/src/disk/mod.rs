@@ -4,7 +4,7 @@
 //! disk that a rule may be about, each with the facts that decide it,
 //! found by the engine itself or reported by plugins (disk.candidates);
 //! the plan is acts and what's kept and why, and an outcome is what an act
-//! did. Rust-only: Go had no such engine. Ported from rush-bundled's
+//! did. Proposed rules (propose.rs) wait in the file until you accept one. Rust-only: Go had no such engine. Ported from rush-bundled's
 //! clean/disk.rs (levels, targets, artifacts, in_use) and reap.rs
 //! (worktrees), and this crate's rules.rs (cache folders).
 //!
@@ -17,6 +17,7 @@ mod apply;
 mod cargo;
 mod find;
 mod plan;
+mod propose;
 mod ruleset;
 
 pub use apply::{KNOWN_TOOLS, apply, apply_all, event_fields, known_tool, run, run_at};
@@ -28,6 +29,10 @@ pub use find::{
     GitWorktree, Scan, Session, cache_dirs, find_candidates, last_touched, parse_worktrees,
 };
 pub use plan::plan;
+pub use propose::{
+    PROPOSALS_FILE, Proposed, add_proposals, cache_dir_allowed, check_rule, parse_proposals,
+    propose, propose_file, same_rule,
+};
 pub use ruleset::{
     DISK_RULES_FILE, DISK_RULES_LOCK, Kind, Params, Proposal, Rule, RulesFile, built_in_rules,
     load_rules, merge_built_in, rules_path, update_rules,
@@ -298,3 +303,5 @@ pub fn from_answer(plugin: &str, answer: &serde_json::Value) -> Result<Vec<Candi
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_propose;

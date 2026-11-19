@@ -33,6 +33,9 @@ pub fn install(m: &mut Model) {
     // The cleanup agent starts here too (machinecare.go:313).
     m.kept::<rush_ui_projects_machine::CareStarter>().0 =
         Some(rush_ui_projects_machine::care_start_with_hosts);
+    // Settings › Disk's Research now starts it in research mode (once per
+    // process; the row shows from then on).
+    rush_ui_settings::disk::on_research(rush_ui_projects_machine::research::research_now);
 }
 
 /// Accounts' starter: a session on o with msg in dir, once o's account is

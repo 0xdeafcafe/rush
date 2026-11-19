@@ -7,7 +7,10 @@
 //! Only what a rule would act on is said to stay: something not idle long
 //! enough yet is neither done nor kept. Of several enabled rules of one
 //! kind, the first decides. Commands run last, after every removal, as
-//! kache's store was emptied after the targets.
+//! kache's store was emptied after the targets. A folder removed whole by
+//! a cache-dir rule or a plugin's candidate is removed once: what's in
+//! another such removal (a plugin's candidate in a cache folder your rule
+//! names) is left to it.
 
 use rush_core::time::Ms;
 
@@ -74,6 +77,7 @@ pub fn plan(cands: &[Candidate], rules: &[Rule], lv: Level, now: Ms) -> (Vec<Act
             _ => plugin(c, rules, lv, now, &mut acts, &mut keep),
         }
     }
+    once(&mut acts);
     for r in rules {
         if let Kind::ToolCommand { command, why } = &r.kind
             && r.at(lv).is_some()
@@ -92,6 +96,34 @@ pub fn plan(cands: &[Candidate], rules: &[Rule], lv: Level, now: Ms) -> (Vec<Act
         }
     }
     (acts, keep)
+}
+
+/// Whether a is a cache folder or a plugin's candidate removed whole.
+fn whole(a: &Act) -> bool {
+    matches!(a.how, How::Remove | How::GoClean)
+        && a.path.is_absolute()
+        && ![CARGO_TARGET, WORKTREE, TOOL_COMMAND].contains(&a.kind.as_str())
+}
+
+/// Leaves out each whole removal that another one holds: one in another's
+/// folder, or at the same path after it (a cache-dir rule's first).
+fn once(acts: &mut Vec<Act>) {
+    let rank = |i: usize, a: &Act| (a.kind != CACHE_DIR, i);
+    let held: Vec<bool> = acts
+        .iter()
+        .enumerate()
+        .map(|(i, a)| {
+            whole(a)
+                && acts.iter().enumerate().any(|(j, b)| {
+                    j != i
+                        && whole(b)
+                        && a.path.starts_with(&b.path)
+                        && (a.path != b.path || rank(j, b) < rank(i, a))
+                })
+        })
+        .collect();
+    let mut held = held.into_iter();
+    acts.retain(|_| !held.next().unwrap_or(false));
 }
 
 /// A cargo target: whole once no build touched it for the target rule's

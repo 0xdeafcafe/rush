@@ -68,9 +68,9 @@ pub use orphans::{ORPHAN_IDLE, TempOrphan, find_temp_orphans, remove_temp_orphan
 pub use pr::{as_linked, find_pr, from_linked, from_status};
 pub use predicates::*;
 pub use rules::{
-    BUILT_IN, BuiltIn, CacheRule, FoundCache, How, RULES_FILE, cache_rules, decide, go_mod_cache,
-    learn, learn_from_plan, make_rule, may_be_rule, measure_caches, read_rules, remove_rule_cache,
-    rule_for, rules_with,
+    BUILT_IN, BuiltIn, CacheRule, FoundCache, How, RULES_FILE, accepted_cache_rules, as_disk_rule,
+    cache_rules, decide, go_mod_cache, learn, learn_from_plan, make_rule, may_be_rule,
+    measure_caches, read_rules, remove_rule_cache, rule_for, rules_with, take_learned_in,
 };
 pub use sweep::{
     Between, COLIMA_TRIM, CacheFound, DAY, DOCKER_BUILDER_PRUNE, DOCKER_IMAGE_PRUNE,

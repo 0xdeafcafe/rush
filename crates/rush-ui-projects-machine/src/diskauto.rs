@@ -9,8 +9,10 @@
 //! says what it freed in the news; nothing when nothing. Every run is the
 //! engine's disk-clean event.
 //!
-//! Once, before the first run: the clean plugins' own auto mode is taken
-//! in. If rust-clean's or git-clean's auto-clean setting was on, the
+//! Once, before the first run: the cache rules learned before rules
+//! waited for your yes (cleanup-rules.tsv) are made proposals
+//! (rush_fleet::take_learned_in), and the clean plugins' own auto mode is
+//! taken in. If rust-clean's or git-clean's auto-clean setting was on, the
 //! switch is turned on; git-clean's worktree-idle-days, when set, becomes
 //! the worktree rule's idle (disk::update_rules). Both are read straight
 //! from plugins/settings.json: the plugins no longer declare auto-clean.
@@ -82,6 +84,17 @@ pub fn auto_words(o: &Outcome) -> String {
         "disk: rush freed {} on its own ({n} thing{}, by its rules)",
         size(o.freed as i64),
         if n == 1 { "" } else { "s" }
+    )
+}
+
+/// The cache rules learned before rules waited for your yes, made
+/// proposals (rush_fleet::take_learned_in), in a few words for the news.
+pub fn learned_words(n: usize) -> String {
+    format!(
+        "disk: {n} cache rule{} learned before {} proposed now · {} once you accept in Settings › Disk",
+        if n == 1 { "" } else { "s" },
+        if n == 1 { "is" } else { "are" },
+        if n == 1 { "it runs" } else { "they run" }
     )
 }
 
@@ -295,7 +308,19 @@ pub fn watch_disk(m: &mut Model, free: u64) {
     if !st.taken_in {
         if !st.taking_in {
             st.taking_in = true;
-            m.later(take_plugins_in, on_taken_in);
+            m.later(
+                || (take_plugins_in(), rush_fleet::take_learned_in()),
+                |m, (r, learned)| {
+                    match learned {
+                        Ok(0) => {}
+                        Ok(n) => m.news(&learned_words(n), ""),
+                        Err(e) => m.fail(&format!(
+                            "couldn't propose the cache rules learned before: {e}"
+                        )),
+                    }
+                    on_taken_in(m, r)
+                },
+            );
         }
         return;
     }
@@ -488,7 +513,7 @@ mod tests {
         }
         let mut f = RulesFile {
             rules: built_in_rules(),
-            proposed: Vec::new(),
+            ..RulesFile::default()
         };
         with_worktree_idle(&mut f, 7);
         let w = f.rules.iter().find(|r| r.kind == Kind::Worktree).unwrap();
