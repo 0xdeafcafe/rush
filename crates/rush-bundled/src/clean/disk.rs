@@ -55,8 +55,8 @@ pub const LOW_SUPERSEDED_AGE: Duration = Duration::from_secs(3600);
 /// machine building in many targets fills 8 GB in minutes, and a target
 /// left because a build was using it is worth asking about again soon.
 pub const LOW_EVERY: Duration = Duration::from_secs(3 * 60);
-/// How deep under rush's scratch root targets are looked for:
-/// tmp/<project>/<session>/<name>-target.
+/// How deep under rush's scratch roots targets are looked for:
+/// <root>/<project>/<session>/<name>-target (rush_state::scratch_roots).
 pub const SCAN_DEPTH: usize = 3;
 
 /// How hard the auto mode cleans.

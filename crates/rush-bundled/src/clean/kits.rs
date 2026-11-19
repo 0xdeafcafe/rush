@@ -139,14 +139,15 @@ fn rust_things(_: &Ctx, seen: &[Session]) -> Vec<Thing> {
     rust_things_with(
         &|k| std::env::var(k).ok().filter(|v| !v.is_empty()),
         seen,
-        &[scratch_root()],
+        &scratch_roots(),
     )
 }
 
 /// Where sessions' scratch folders are, one per project, and in them the
-/// targets sessions build into with CARGO_TARGET_DIR.
-fn scratch_root() -> PathBuf {
-    rush_state::dir().join("tmp")
+/// targets sessions build into with CARGO_TARGET_DIR: rush's root in /tmp
+/// and the one in rush's folder sessions started before keep.
+fn scratch_roots() -> Vec<PathBuf> {
+    rush_state::scratch_roots()
 }
 
 /// rust_things with the environment as env says, and the targets under
@@ -312,7 +313,7 @@ fn rust_auto(ctx: &Ctx, seen: &[Session], lv: super::disk::Level, _free: u64) ->
     };
     let (acts, kept) = disk::plan(
         &roots,
-        &[scratch_root()],
+        &scratch_roots(),
         SystemTime::now(),
         lv,
         &skip,

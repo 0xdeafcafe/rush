@@ -789,8 +789,10 @@ pub fn empty_scratch(dir: &str, project_folders: &[String]) -> Result<(), String
             .unwrap_or_default()
     };
     let in_project = base(Some(p)) == "tmp" && project_folders.contains(&base(p.parent()));
-    let rush_tmp = crate::config::dir().join("tmp");
-    if !in_project && p.parent() != Some(rush_tmp.as_path()) {
+    let in_rush_tmp = p
+        .parent()
+        .is_some_and(|q| rush_state::scratch_roots().iter().any(|r| r == q));
+    if !in_project && !in_rush_tmp {
         return Err(format!("won't empty {dir}"));
     }
     for e in std::fs::read_dir(p).map_err(|e| e.to_string())?.flatten() {

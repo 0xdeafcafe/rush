@@ -1,5 +1,6 @@
 //! Rush's own scratch that no session owns: what's under the sessions'
-//! scratch root (tmp/) but isn't tmp/<project>/<a known session's id>. A
+//! scratch roots (rush/ in /tmp, and tmp/ in rush's folder that sessions
+//! started before keep) but isn't <root>/<project>/<a known session's id>. A
 //! script writing "$TMPDIR$name" before TMPDIR ended in "/" left
 //! tmp/<project>/<id><name> beside the session's folder; files dropped in
 //! tmp/<project>/, folders made at the top of tmp/, and the folders of
@@ -13,7 +14,7 @@ use std::path::Path;
 use rush_core::time::Ms;
 use serde_json::json;
 
-use crate::hosted::{host_root, temp_root};
+use crate::hosted::{host_root, temp_roots};
 use crate::left::scratch_walk;
 use crate::temp::err_text;
 
@@ -95,19 +96,21 @@ fn owned(p: &Path, known: &HashSet<String>) -> bool {
 /// directly in a project's folder and not a known session's own. Never
 /// the scratch root or a project's folder itself.
 fn orphan_at(p: &Path, known: &HashSet<String>) -> bool {
-    let root = temp_root();
+    let roots = temp_roots();
     let Some(parent) = p.parent() else {
         return false;
     };
     let Some(name) = p.file_name().map(|n| n.to_string_lossy().into_owned()) else {
         return false;
     };
-    if parent == root {
+    if roots.iter().any(|r| r == parent) {
         // A project's folder never is; anything else at the top is.
         let dir = std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir());
         return !dir || !is_project_slug(&name);
     }
-    parent.parent() == Some(root.as_path())
+    parent
+        .parent()
+        .is_some_and(|g| roots.iter().any(|r| r == g))
         && parent
             .file_name()
             .is_some_and(|n| is_project_slug(&n.to_string_lossy()))
@@ -141,15 +144,27 @@ fn look(path: &str, known: &HashSet<String>) -> TempOrphan {
     }
 }
 
-/// Everything under rush's scratch root no session owns, each with its
+/// Everything under rush's scratch roots no session owns, each with its
 /// size and when anything in it last changed, oldest first. Off the UI.
 pub fn find_temp_orphans() -> Vec<TempOrphan> {
     let known = known_sessions();
-    let root = temp_root();
     let mut paths = Vec::new();
-    for e in sorted(&root) {
+    for root in temp_roots() {
+        orphans_in(&root, &known, &mut paths);
+    }
+    let mut out: Vec<TempOrphan> = paths
+        .iter()
+        .map(|p| look(&p.to_string_lossy(), &known))
+        .collect();
+    out.sort_by_key(|o| o.newest);
+    out
+}
+
+/// What's in scratch root root that no session owns, onto paths.
+fn orphans_in(root: &Path, known: &HashSet<String>, paths: &mut Vec<std::path::PathBuf>) {
+    for e in sorted(root) {
         let p = root.join(&e);
-        if orphan_at(&p, &known) {
+        if orphan_at(&p, known) {
             paths.push(p);
             continue;
         }
@@ -158,17 +173,11 @@ pub fn find_temp_orphans() -> Vec<TempOrphan> {
         }
         for c in sorted(&p) {
             let q = p.join(&c);
-            if orphan_at(&q, &known) {
+            if orphan_at(&q, known) {
                 paths.push(q);
             }
         }
     }
-    let mut out: Vec<TempOrphan> = paths
-        .iter()
-        .map(|p| look(&p.to_string_lossy(), &known))
-        .collect();
-    out.sort_by_key(|o| o.newest);
-    out
 }
 
 fn sorted(dir: &Path) -> Vec<String> {

@@ -129,8 +129,8 @@ fn accept_now(ln: &UnixListener) -> std::io::Result<(UnixStream, std::os::unix::
 }
 
 impl Host {
-    /// Looks every TRIM_EVERY whether to trim the session's tmp, as long
-    /// as the host runs.
+    /// Looks every TRIM_EVERY whether to trim the session's tmp, and that
+    /// it's still there, as long as the host runs.
     pub(super) fn arm_trim(&self) {
         let h = self.clone();
         self.timers
@@ -145,10 +145,11 @@ impl Host {
             return;
         }
         self.arm_trim();
+        let id = self.lock().cfg.id.clone();
+        crate::tmp::remake_temp(&id); // the system cleared /tmp's, unused for days
         if !rush_state::Store::load().config.trim_running_tmp {
             return;
         }
-        let id = self.lock().cfg.id.clone();
         let tmp = crate::tmp::temp_dir(&id);
         if !crate::trim::disk_low(&tmp) {
             return;

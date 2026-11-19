@@ -243,9 +243,12 @@ pub fn host_root() -> PathBuf {
     rush_state::dir().join("sessions")
 }
 
-/// Where sessions' scratch folders are, one per project.
-pub fn temp_root() -> PathBuf {
-    rush_state::dir().join("tmp")
+/// Where sessions' scratch folders are, one folder per project in each:
+/// rush's root in /tmp, where new sessions' go, then the one in rush's
+/// folder that sessions started before keep until done
+/// (rush_state::scratch_roots).
+pub fn temp_roots() -> Vec<PathBuf> {
+    rush_state::scratch_roots()
 }
 
 /// Where sessions keep what they made to look at again ($RUSH_KEEP), one
@@ -266,19 +269,23 @@ pub fn temp_dir(id: &str) -> String {
 }
 
 /// Whether p is a session's scratch folder as rush lays them out: the
-/// only folders its tidy-ups empty. Under the scratch root that's
+/// only folders its tidy-ups empty. Under either scratch root that's
 /// tmp/<project>/<id> of a session rush knows, not anything two below it
 /// (a sibling a script left, a deleted session's): those are orphans
 /// (orphans.rs). A trailing "/", as TMPDIR has, is the same folder.
 pub fn is_temp_dir(p: &str) -> bool {
     let p = crate::worktree::clean(p);
     let path = Path::new(&p);
-    let tr = temp_root();
-    if path == tr {
-        return false; // named tmp, but it holds every project's
+    let roots = temp_roots();
+    if roots.iter().any(|r| r == path)
+        || ["/tmp", "/private/tmp"].contains(&p.as_str())
+        || path == rush_state::system_tmp()
+    {
+        return false; // named tmp, but it holds every project's, or everyone's
     }
+    let above = path.parent().and_then(Path::parent);
     path.file_name().is_some_and(|n| n == "tmp")
-        || path.parent().and_then(Path::parent) == Some(tr.as_path())
+        || roots.iter().any(|r| Some(r.as_path()) == above)
             && path
                 .file_name()
                 .is_some_and(|n| host_root().join(n).is_dir())
@@ -291,9 +298,12 @@ pub fn is_temp(p: &str) -> bool {
         return false;
     }
     let p = crate::worktree::clean(p);
-    let tmp = temp_root();
     let keep = keep_root();
-    if inside(&tmp.to_string_lossy(), &p) || inside(&keep.to_string_lossy(), &p) || system_temp(&p)
+    if temp_roots()
+        .iter()
+        .any(|r| inside(&r.to_string_lossy(), &p))
+        || inside(&keep.to_string_lossy(), &p)
+        || system_temp(&p)
     {
         return true;
     }

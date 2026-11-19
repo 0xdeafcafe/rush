@@ -1231,9 +1231,38 @@ not by reading transcripts or polling `list`:
 
 ## Sessions' scratch folders
 
-Each session's scratch is `tmp/<project-slug>/<id>` in rush's folder
-(rush-host's `tmp.rs`, Go's tmp.go), linked from `sessions/<id>/tmp`.
-Beyond Go:
+Each session's scratch is `<root>/<project-slug>/<id>` (rush-host's
+`tmp.rs`, Go's tmp.go), linked from `sessions/<id>/tmp`. Go had one root,
+`tmp/` in rush's folder. Beyond Go:
+
+- There are two roots, and `rush_state::scratch_roots()` lists both, new
+  first: everything that cleans, trims or measures scratch asks it
+  (rush-host's `is_temp`/`is_temp_dir`, rush-fleet's `temp_roots`,
+  `orphans.rs`, `left.rs`, rush-bundled's clean, the Projects view's
+  `empty_scratch`, rush-ui-base's `is_temp`). New sessions' scratch goes
+  in `rush/` in the system's tmp, by its real path (`/private/tmp/rush`
+  on macOS, so a path a process reports compares equal). The system
+  empties it: macOS clears `/private/tmp` at boot, and
+  `/usr/libexec/tmp_cleaner` (launchd's `com.apple.tmp_cleaner`, daily at
+  midnight) deletes files there whose atime, mtime and ctime are all over
+  3 days old, then empty folders over 3 days old; Linux's systemd-tmpfiles
+  ages `/tmp` out after 10 days by default. Scratch no longer piles up in
+  rush's folder.
+- `/tmp` is everyone's, so `rush_state::make_scratch_root` makes
+  `/tmp/rush` owner-only (0700), closes one of the user's own that others
+  can reach, and refuses a link, a file or a folder another user owns:
+  then new sessions' scratch goes in `tmp/` in rush's folder as before.
+  A session's folder in it is made owner-only too.
+- A session started before scratch moved keeps its folder under
+  `tmp/` in rush's folder until it's done (`place_temp` keeps any folder
+  that's there in either root), and what's there is cleaned by the same
+  rules; one whose folder was cleaned away gets a new one in /tmp. A
+  session resumed after a reboot has its folder made again in /tmp, at
+  the same path. A running session's folder the system cleared is made
+  again by the host's 10-minute look (`tmp::remake_temp`, from
+  `trim_due`), since its agent's TMPDIR still names it.
+- Clean up's "/tmp" row (rush-fleet `scratch_entries`) leaves out rush's
+  root there: its sessions' folders go with them.
 
 - The agent is given it ending in "/" (`TMPDIR`, and Claude Code's `TMP`,
   `TEMP`, `CLAUDE_CODE_TMPDIR`), as macOS's own TMPDIR does
@@ -1386,7 +1415,7 @@ deleted as it went. Here it never deletes on its own:
   ~/.cache named for sccache (one agents pass per command, which nothing
   on disk says: h2recomp's 18G was that).
   rust-clean also lists the targets sessions build into under rush's
-  scratch root with CARGO_TARGET_DIR (`tmp/<project>/<session>/<name>-target`,
+  scratch roots with CARGO_TARGET_DIR (`<root>/<project>/<session>/<name>-target`,
   13-22G each), and git-clean and rust-clean have an auto mode, each off
   until its "Clean on its own when disk is low" setting is on
   (`clean/disk.rs`, ported from h2recomp's `crates/diskclean` at 5f24c7b3,
@@ -1394,7 +1423,7 @@ deleted as it went. Here it never deletes on its own:
   (`AUTO_UNDER`), without asking: git-clean removes the worktrees `reap`'s
   `refusals` allow; rust-clean removes cargo targets (a folder with both
   CACHEDIR.TAG and .rustc_info.json, at each worktree's and main
-  checkout's `target` and up to 3 levels under the scratch root, never
+  checkout's `target` and up to 3 levels under each scratch root, never
   inside a target) that no build touched for 2 days (`target_activity`:
   the profile folders and lock files cargo writes each build), and in the
   rest, `deps` artifacts and `incremental` sessions not written for 2 days.
@@ -1781,10 +1810,14 @@ and signals to other processes as well (the sweep's `lead-trial.sb`).
 Every session gets two folders, set in its environment by the host
 (`server.rs`, where it starts the agent):
 
-- `$TMPDIR`, its scratch: `tmp/<project>/<id>`, linked from
-  `sessions/<id>/tmp` (rush-host's `tmp.rs`). Builds, clones, downloads,
-  caches. It may be cleaned whenever nothing has it open: the host's
-  low-disk trim (`trim.rs`), done work's clean-up and Projects › clean.
+- `$TMPDIR`, its scratch: `/tmp/rush/<project>/<id>/` (an older session's
+  `tmp/<project>/<id>` in rush's folder), linked from `sessions/<id>/tmp`
+  (rush-host's `tmp.rs`, see "Sessions' scratch folders"). Builds,
+  clones, downloads, caches: short-lived. It may be cleaned whenever
+  nothing has it open: the host's low-disk trim (`trim.rs`), done work's
+  clean-up, Projects › clean, and the system at reboot and of what's gone
+  unused for days. So never a git worktree or uncommitted work: those go
+  in the repository's `.claude/worktrees`, or `$RUSH_KEEP`.
 - `$RUSH_KEEP`, what it or you may want to look at again (screenshots,
   outputs, logs, reports): `keep/<project>/<id>`, linked from
   `sessions/<id>/keep` (rush-host's `keep.rs`). A tree of its own, so
@@ -1795,7 +1828,11 @@ Every session gets two folders, set in its environment by the host
   scratch has gone, the oldest first until there's 5G. Never one whose
   host runs, nor one something has open (lsof).
 
-The prompt every agent gets (`SCRATCH_PROMPT`) says which goes where.
+The prompt every agent gets (`SCRATCH_PROMPT`) says which goes where:
+`$TMPDIR` short-lived (cleared at reboot and when unused for days),
+worktrees and anything with uncommitted work in `.claude/worktrees` or
+`$RUSH_KEEP`, never `$TMPDIR`, and `$RUSH_KEEP` for what's looked at
+again (30 days).
 Plugins keep theirs in `$RUSH_PLUGIN_DATA` as before. Projects › clean
 doesn't list kept folders yet, nor does the Overview show `$RUSH_KEEP`.
 

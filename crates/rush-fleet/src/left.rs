@@ -12,7 +12,7 @@ use rush_core::agent::{Agent, Left};
 use rush_core::time::{Ms, now};
 use serde_json::json;
 
-use crate::hosted::{host_root, is_temp, temp_root};
+use crate::hosted::{host_root, is_temp, temp_roots};
 use crate::temp::{agent_event, err_text, ms_of};
 
 /// How long after an agent was last active something it wrote may still
@@ -127,7 +127,6 @@ fn look_left_one(mut it: LeftItem) -> LeftItem {
 fn shallow(p: &str) -> bool {
     let home = std::env::var("HOME").unwrap_or_default();
     let tmp = crate::worktree::clean(&std::env::temp_dir().to_string_lossy());
-    let troot = temp_root().to_string_lossy().into_owned();
     let tops = [
         "/",
         &home,
@@ -136,9 +135,8 @@ fn shallow(p: &str) -> bool {
         "/var/folders",
         "/private/var/folders",
         &tmp,
-        &troot,
     ];
-    if tops.contains(&p) {
+    if tops.contains(&p) || temp_roots().iter().any(|r| r.as_os_str() == p) {
         return true;
     }
     let d = Path::new(p)
@@ -298,10 +296,14 @@ fn scratch_entries(reg: &Registry, dir: &str) -> Vec<String> {
                 .map(|n| n.to_string_lossy().into_owned())
         })
         .collect();
+    // Rush's own scratch root in /tmp: its sessions' folders are cleaned
+    // with them (by the real path, as /tmp is a link on macOS).
+    let real = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.into());
+    let roots = temp_roots();
     let mut out = Vec::new();
     for e in rd.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
-        if own.contains(&name) || name.starts_with("tmux-") {
+        if own.contains(&name) || name.starts_with("tmux-") || roots.contains(&real.join(&name)) {
             continue;
         }
         let Ok(m) = e.metadata() else { continue };

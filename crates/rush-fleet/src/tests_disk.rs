@@ -172,6 +172,39 @@ fn clean_stale_temp_folder() {
     assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
 }
 
+// Beyond Go: the tidy-up empties a gone session's folder in either
+// scratch root, /tmp's or the one in rush's folder sessions started
+// before keep, and nothing beside it.
+#[test]
+fn clean_stale_temp_in_either_root() {
+    for which in 0..2 {
+        let _h = RushHome::new();
+        let root = temp_roots().remove(which);
+        let t = now();
+        let mut a = Agent {
+            rush: true,
+            ..Agent::default()
+        };
+        a.job.id = "gone".into();
+        let dir = root.join("app-1a2b3c4d").join("gone");
+        let beside = root.join("app-1a2b3c4d").join("gonebrowsefix-dd");
+        for d in [&dir, &beside] {
+            std::fs::create_dir_all(d.join("old")).unwrap();
+            touch(&d.join("old"), t - 5 * HOUR);
+        }
+        std::fs::create_dir_all(host_root().join("gone")).unwrap();
+        std::os::unix::fs::symlink(&dir, host_root().join("gone").join("tmp")).unwrap();
+        assert_eq!(PathBuf::from(temp_dir("gone")), dir, "{root:?}");
+        assert!(is_temp_dir(&s(&dir)), "{root:?}");
+        assert!(clean_stale_temp(&a, 3 * HOUR, t).unwrap(), "{root:?}");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0, "{root:?}");
+        assert!(
+            beside.join("old").exists(),
+            "{root:?}: emptied what's beside it"
+        );
+    }
+}
+
 // One thing in a gone session's temp folder goes alone; nothing outside
 // it does, nor anything while the session runs.
 #[test]
@@ -291,6 +324,32 @@ fn scratch() {
     }
 }
 
+// Rush's own root in /tmp is never what's at the top of /tmp to clear:
+// its sessions' folders go with them.
+#[test]
+fn scratch_leaves_rushs_root() {
+    let d = tempfile::tempdir().unwrap();
+    let dir = d.path().canonicalize().unwrap();
+    rush_state::set_thread_system_tmp(Some(dir.clone()));
+    let reg = Registry::new();
+    let old = now() - 2 * SCRATCH_IDLE;
+    for p in [dir.join("rush/app-1a2b3c4d/s1/f"), dir.join("left/f")] {
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, "x").unwrap();
+        for q in p.ancestors().take_while(|q| *q != dir) {
+            touch(q, old);
+        }
+    }
+    assert_eq!(rush_state::scratch_root(), dir.join("rush"));
+    let got: Vec<String> = stale_scratch(&reg, &s(&dir))
+        .into_iter()
+        .map(|i| i.path)
+        .collect();
+    assert_eq!(got, vec![s(&dir.join("left"))]);
+    assert_eq!(find_scratch(&reg, &s(&dir)).items, 1);
+    rush_state::set_thread_system_tmp(None);
+}
+
 /// A tree of folders and files, links among them.
 fn disk_fixture(dir: &Path) {
     for (i, p) in [
@@ -379,65 +438,67 @@ fn unused(_: SystemTime) {}
 // Beyond Go: what's under rush's scratch root and no session owns is
 // found, each with the session its name starts with: a sibling a script
 // left, a deleted session's folder, a file in a project's folder, things
-// at the top. A session's own folder (TMPDIR's "/" or not), the project
-// folders and the root never are.
+// at the top, in either scratch root. A session's own folder (TMPDIR's
+// "/" or not), the project folders and the roots never are.
 #[test]
 fn temp_orphans_found() {
-    let _h = RushHome::new();
-    let root = temp_root();
-    let proj = root.join("app-1a2b3c4d");
-    for id in ["6a3b0b5d", "6a3b"] {
-        std::fs::create_dir_all(host_root().join(id)).unwrap();
-    }
-    let own = proj.join("6a3b0b5d");
-    let sib = proj.join("6a3b0b5dbrowsefix-dd");
-    for d in [
-        &own,
-        &sib,
-        &proj.join("deadbeef"),
-        &root.join("os27-builds"),
-    ] {
-        std::fs::create_dir_all(d.join("x")).unwrap();
-        std::fs::write(d.join("x").join("f"), "data").unwrap();
-    }
-    std::fs::create_dir_all(root.join("other-0000ffff")).unwrap(); // a project's, empty
-    std::fs::write(proj.join("share_links_patch.py"), "py").unwrap();
-    std::fs::write(root.join("notes.txt"), "n").unwrap();
-    let top = format!("{}/", s(&root));
-    let mut got: Vec<(String, String)> = find_temp_orphans()
+    for which in 0..2 {
+        let _h = RushHome::new();
+        let root = temp_roots().remove(which);
+        let proj = root.join("app-1a2b3c4d");
+        for id in ["6a3b0b5d", "6a3b"] {
+            std::fs::create_dir_all(host_root().join(id)).unwrap();
+        }
+        let own = proj.join("6a3b0b5d");
+        let sib = proj.join("6a3b0b5dbrowsefix-dd");
+        for d in [
+            &own,
+            &sib,
+            &proj.join("deadbeef"),
+            &root.join("os27-builds"),
+        ] {
+            std::fs::create_dir_all(d.join("x")).unwrap();
+            std::fs::write(d.join("x").join("f"), "data").unwrap();
+        }
+        std::fs::create_dir_all(root.join("other-0000ffff")).unwrap(); // a project's, empty
+        std::fs::write(proj.join("share_links_patch.py"), "py").unwrap();
+        std::fs::write(root.join("notes.txt"), "n").unwrap();
+        let top = format!("{}/", s(&root));
+        let mut got: Vec<(String, String)> = find_temp_orphans()
+            .iter()
+            .map(|o| {
+                let p = o.path.strip_prefix(&top).unwrap_or(&o.path);
+                (p.to_string(), o.session.clone())
+            })
+            .collect();
+        got.sort();
+        let want: Vec<(String, String)> = [
+            ("app-1a2b3c4d/6a3b0b5dbrowsefix-dd", "6a3b0b5d"),
+            ("app-1a2b3c4d/deadbeef", ""),
+            ("app-1a2b3c4d/share_links_patch.py", ""),
+            ("notes.txt", ""),
+            ("os27-builds", ""),
+        ]
         .iter()
-        .map(|o| {
-            let p = o.path.strip_prefix(&top).unwrap_or(&o.path);
-            (p.to_string(), o.session.clone())
-        })
+        .map(|(p, s)| (p.to_string(), s.to_string()))
         .collect();
-    got.sort();
-    let want: Vec<(String, String)> = [
-        ("app-1a2b3c4d/6a3b0b5dbrowsefix-dd", "6a3b0b5d"),
-        ("app-1a2b3c4d/deadbeef", ""),
-        ("app-1a2b3c4d/share_links_patch.py", ""),
-        ("notes.txt", ""),
-        ("os27-builds", ""),
-    ]
-    .iter()
-    .map(|(p, s)| (p.to_string(), s.to_string()))
-    .collect();
-    assert_eq!(got, want);
-    for o in find_temp_orphans() {
-        assert!(o.size > 0 && o.newest > 0 && !o.gone, "{o:?}");
-        assert!(!o.idle(now()), "{} is idle when just made", o.path);
-    }
-    // A session's own folder is one with TMPDIR's "/"; what's beside it isn't.
-    for (p, want) in [
-        (s(&own), true),
-        (rush_core::adapter::tmpdir_env(&s(&own)), true),
-        (s(&sib), false),
-        (s(&proj.join("deadbeef")), false),
-        (s(&proj), false),
-        (s(&root), false),
-        (rush_core::adapter::tmpdir_env(&s(&root)), false),
-    ] {
-        assert_eq!(is_temp_dir(&p), want, "is_temp_dir({p:?})");
+        assert_eq!(got, want);
+        for o in find_temp_orphans() {
+            assert!(o.size > 0 && o.newest > 0 && !o.gone, "{o:?}");
+            assert!(!o.idle(now()), "{} is idle when just made", o.path);
+        }
+        // A session's own folder is one with TMPDIR's "/"; what's beside it isn't.
+        for (p, want) in [
+            (s(&own), true),
+            (rush_core::adapter::tmpdir_env(&s(&own)), true),
+            (s(&sib), false),
+            (s(&proj.join("deadbeef")), false),
+            (s(&proj), false),
+            (s(&root), false),
+            (rush_core::adapter::tmpdir_env(&s(&root)), false),
+        ] {
+            assert_eq!(is_temp_dir(&p), want, "is_temp_dir({p:?})");
+        }
     }
 }
 
@@ -601,45 +662,47 @@ fn between_turns_caches() {
 
 // An orphan goes only as it was looked at: not while a running session's
 // id prefixes it, not once it changed, and nothing a session owns, no
-// project folder and not the root.
+// project folder and not the root, in either scratch root.
 #[test]
 fn temp_orphans_removed_safely() {
-    let _h = RushHome::new();
-    let root = temp_root();
-    let proj = root.join("app-1a2b3c4d");
-    std::fs::create_dir_all(host_root().join("6a3b0b5d")).unwrap();
-    let own = proj.join("6a3b0b5d");
-    let sib = proj.join("6a3b0b5dbrowsefix-dd");
-    for d in [&own, &sib, &root.join("os27-builds")] {
-        std::fs::create_dir_all(d.join("x")).unwrap();
-        std::fs::write(d.join("x").join("f"), "data").unwrap();
-    }
-    let find = |p: &Path| {
-        find_temp_orphans()
-            .into_iter()
-            .find(|o| o.path == s(p))
-            .unwrap()
-    };
-    let o = find(&sib);
-    let running = vec!["6a3b0b5d".to_string()];
-    assert!(remove_temp_orphan(&o, &running).is_err());
-    assert!(sib.exists(), "removed what a running session may use");
-    touch(&sib.join("x").join("f"), o.newest + 60_000);
-    assert!(remove_temp_orphan(&o, &[]).is_err());
-    assert!(sib.exists(), "removed one changed since it was looked at");
-    let o = find(&sib);
-    assert_eq!(remove_temp_orphan(&o, &[]).unwrap(), o.size);
-    assert!(!sib.exists());
-    let top = find(&root.join("os27-builds"));
-    remove_temp_orphan(&top, &[]).unwrap();
-    assert!(!root.join("os27-builds").exists());
-    let up = format!("{}/../os27-x", s(&proj));
-    for p in [s(&own), s(&proj), s(&root), up] {
-        let fake = TempOrphan {
-            path: p.clone(),
-            ..TempOrphan::default()
+    for which in 0..2 {
+        let _h = RushHome::new();
+        let root = temp_roots().remove(which);
+        let proj = root.join("app-1a2b3c4d");
+        std::fs::create_dir_all(host_root().join("6a3b0b5d")).unwrap();
+        let own = proj.join("6a3b0b5d");
+        let sib = proj.join("6a3b0b5dbrowsefix-dd");
+        for d in [&own, &sib, &root.join("os27-builds")] {
+            std::fs::create_dir_all(d.join("x")).unwrap();
+            std::fs::write(d.join("x").join("f"), "data").unwrap();
+        }
+        let find = |p: &Path| {
+            find_temp_orphans()
+                .into_iter()
+                .find(|o| o.path == s(p))
+                .unwrap()
         };
-        assert!(remove_temp_orphan(&fake, &[]).is_err(), "{p:?}");
+        let o = find(&sib);
+        let running = vec!["6a3b0b5d".to_string()];
+        assert!(remove_temp_orphan(&o, &running).is_err());
+        assert!(sib.exists(), "removed what a running session may use");
+        touch(&sib.join("x").join("f"), o.newest + 60_000);
+        assert!(remove_temp_orphan(&o, &[]).is_err());
+        assert!(sib.exists(), "removed one changed since it was looked at");
+        let o = find(&sib);
+        assert_eq!(remove_temp_orphan(&o, &[]).unwrap(), o.size);
+        assert!(!sib.exists());
+        let top = find(&root.join("os27-builds"));
+        remove_temp_orphan(&top, &[]).unwrap();
+        assert!(!root.join("os27-builds").exists());
+        let up = format!("{}/../os27-x", s(&proj));
+        for p in [s(&own), s(&proj), s(&root), up] {
+            let fake = TempOrphan {
+                path: p.clone(),
+                ..TempOrphan::default()
+            };
+            assert!(remove_temp_orphan(&fake, &[]).is_err(), "{p:?}");
+        }
+        assert!(own.join("x").join("f").exists() && proj.exists() && root.exists());
     }
-    assert!(own.join("x").join("f").exists() && proj.exists() && root.exists());
 }

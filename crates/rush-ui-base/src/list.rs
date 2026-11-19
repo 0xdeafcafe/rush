@@ -241,7 +241,10 @@ pub fn is_temp(p: &str) -> bool {
         let r = root.to_string_lossy();
         p.starts_with(r.as_ref()) && (p.len() == r.len() || p.as_bytes()[r.len()] == b'/')
     };
-    if inside(&d.join("tmp")) {
+    if rush_state::scratch_roots()
+        .iter()
+        .any(|r| inside(r.as_path()))
+    {
         return true;
     }
     let root = d.join("sessions");

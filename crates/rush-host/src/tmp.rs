@@ -1,17 +1,28 @@
 //! Sessions' scratch folders: one folder per project, one per session in
-//! it (tmp/<project>/<id>), so what's left behind says whose it is and what
-//! it was working on.
+//! it (<root>/<project>/<id>), so what's left behind says whose it is and
+//! what it was working on. New sessions' are in the system's /tmp
+//! (rush_state::scratch_root, owner-only), cleared at reboot and of what's
+//! unused for days; those started before keep theirs in rush's folder
+//! (rush_state::old_scratch_root) until they're done.
 //!
-//! Ported from internal/host/tmp.go.
+//! Ported from internal/host/tmp.go; the root in /tmp is Rust-only.
 
 use std::cell::Cell;
 use std::path::{Component, Path, PathBuf};
 
 use crate::paths::{dir, root};
 
-/// Holds sessions' scratch folders.
+/// Holds new sessions' scratch folders: rush's root in /tmp when it's
+/// rush's own (rush_state::make_scratch_root), else the one in rush's
+/// folder sessions had before.
 pub fn temp_root() -> PathBuf {
-    rush_state::dir().join("tmp")
+    rush_state::make_scratch_root().unwrap_or_else(rush_state::old_scratch_root)
+}
+
+/// Whether p is a folder directly in a scratch root: a project's, or two
+/// below, by the parent given.
+fn in_a_root(p: Option<&Path>) -> bool {
+    p.is_some_and(|p| rush_state::scratch_roots().iter().any(|r| r == p))
 }
 
 /// Where a session's agent and everything it runs keep their scratch
@@ -52,13 +63,18 @@ pub(crate) fn clean(p: &Path) -> PathBuf {
 /// TMPDIR has, is the same folder.
 pub fn is_temp_dir(p: &Path) -> bool {
     let p = clean(p);
-    let tr = temp_root();
-    if p == tr {
-        return false; // named tmp, but it holds every project's
+    let roots = rush_state::scratch_roots();
+    if roots.contains(&p) || system_tmp_itself(&p) {
+        return false; // named tmp, but it holds every project's, or everyone's
     }
     p.file_name().is_some_and(|n| n == "tmp")
-        || p.parent().and_then(Path::parent) == Some(tr.as_path())
+        || in_a_root(p.parent().and_then(Path::parent))
             && p.file_name().is_some_and(|n| root().join(n).is_dir())
+}
+
+/// Whether clean p is the system's temp folder itself, by any name.
+fn system_tmp_itself(p: &Path) -> bool {
+    p == Path::new("/tmp") || p == Path::new("/private/tmp") || p == rush_state::system_tmp()
 }
 
 thread_local! {
@@ -93,9 +109,13 @@ pub fn is_temp(p: &str) -> bool {
     }
     let p = clean(Path::new(p));
     let p = p.to_string_lossy();
-    let tr = temp_root();
     let kr = crate::keep::keep_root();
-    if inside(&tr.to_string_lossy(), &p) || inside(&kr.to_string_lossy(), &p) || system_temp(&p) {
+    if rush_state::scratch_roots()
+        .iter()
+        .any(|r| inside(&r.to_string_lossy(), &p))
+        || inside(&kr.to_string_lossy(), &p)
+        || system_temp(&p)
+    {
         return true;
     }
     let r = root();
@@ -112,23 +132,25 @@ pub fn is_temp(p: &str) -> bool {
 /// moved there with all it holds from the old layout, when nothing has it
 /// open. Once under a project it stays there, wherever the session goes:
 /// its conversation names the files in it by path. A cwd that's itself
-/// scratch keeps it where it is.
+/// scratch keeps it where it is. One under either root stays where it
+/// is, so a session started before scratch moved to /tmp keeps its own;
+/// one the system cleared (a reboot) is made again, where new ones go.
 pub fn place_temp(id: &str, cwd: &str) -> PathBuf {
     let was = temp_dir(id);
-    if was.parent().and_then(Path::parent) == Some(temp_root().as_path())
-        && std::fs::metadata(&was).is_ok()
-    {
+    if in_a_root(was.parent().and_then(Path::parent)) && std::fs::metadata(&was).is_ok() {
         return was;
     }
     let proj = project_of(cwd);
     if proj.is_empty() || within(&was, Path::new(cwd)) {
-        let _ = mkdir(&was);
+        let _ = make(&was);
         return was;
     }
     let want = project_temp(&proj).join(id);
     if was == want {
-        let _ = mkdir(&want);
-        return want;
+        if make(&want).is_ok() {
+            return want;
+        }
+        return link_to(id, &old_place(&proj, id).unwrap_or(want));
     }
     if std::fs::metadata(&was).is_ok() {
         // Something running out of it would lose its files mid-way.
@@ -137,19 +159,55 @@ pub fn place_temp(id: &str, cwd: &str) -> PathBuf {
             _ => return was,
         }
         if std::fs::metadata(&want).is_ok()
-            || want.parent().is_none_or(|p| mkdir(p).is_err())
+            || want.parent().is_none_or(|p| make(p).is_err())
             || std::fs::rename(&was, &want).is_err()
         {
             return was;
         }
     }
-    if mkdir(&want).is_err() {
-        return was;
+    if make(&want).is_err() {
+        return match old_place(&proj, id) {
+            Some(p) => link_to(id, &p),
+            None => was,
+        };
     }
+    link_to(id, &want)
+}
+
+/// Makes session id's scratch folder again when it's gone from under a
+/// running session: the system empties /tmp's folders nothing has used
+/// for days, and its agent's TMPDIR still names it. Only a folder in a
+/// scratch root, and one in /tmp only while rush's root there is its own.
+pub fn remake_temp(id: &str) {
+    let p = temp_dir(id);
+    if in_a_root(p.parent().and_then(Path::parent)) && std::fs::metadata(&p).is_err() {
+        let _ = make(&p);
+    }
+}
+
+/// The session's folder in the old root, made, for when the one in /tmp
+/// can't be: someone else's rush folder there, or /tmp unwritable.
+fn old_place(proj: &str, id: &str) -> Option<PathBuf> {
+    let p = rush_state::old_scratch_root().join(slug(proj)).join(id);
+    mkdir(&p).is_ok().then_some(p)
+}
+
+/// Links the session's folder (tmp) to its scratch folder p, and says p.
+fn link_to(id: &str, p: &Path) -> PathBuf {
     let link = dir(id).join("tmp");
     let _ = std::fs::remove_file(&link); // the old link; an old folder there was just moved
-    let _ = std::os::unix::fs::symlink(&want, &link);
-    want
+    let _ = std::os::unix::fs::symlink(p, &link);
+    p.to_path_buf()
+}
+
+/// Makes folder p, owner-only; one in /tmp only while rush's root there
+/// is its own (rush_state::make_scratch_root), as anyone may make
+/// folders in /tmp.
+fn make(p: &Path) -> std::io::Result<()> {
+    if within(&rush_state::scratch_root(), p) && rush_state::make_scratch_root().is_none() {
+        return Err(std::io::Error::other("rush's folder in /tmp isn't its own"));
+    }
+    mkdir(p)
 }
 
 fn mkdir(p: &Path) -> std::io::Result<()> {
@@ -326,37 +384,123 @@ mod tests {
     }
 
     // Beyond Go: a session's scratch is the same folder as its TMPDIR,
-    // "/" and all; what a script left beside it, or a deleted session's
-    // folder, isn't one, nor are the folders above.
+    // "/" and all, in either root; what a script left beside it, or a
+    // deleted session's folder, isn't one, nor are the folders above, nor
+    // the system's tmp itself.
     #[test]
     fn is_temp_dir_table() {
         let _h = Home::new();
         std::fs::create_dir_all(dir("s1")).unwrap();
-        let proj = project_temp("/src/app");
-        let s = |x: &str| proj.join(x).to_string_lossy().into_owned();
         let env = |p: &str| rush_core::adapter::tmpdir_env(p);
         let old = dir("s1").join("tmp").to_string_lossy().into_owned();
-        for (p, want) in [
-            (s("s1"), true),
-            (env(&s("s1")), true),
-            (format!("{}//", s("s1")), true),
-            (s("s1browsefix-dd"), false),
-            (s("gone"), false),
-            (proj.to_string_lossy().into_owned(), false),
-            (temp_root().to_string_lossy().into_owned(), false),
-            (old.clone(), true),
-            (env(&old), true),
-        ] {
-            assert_eq!(is_temp_dir(Path::new(&p)), want, "{p:?}");
+        for root in rush_state::scratch_roots() {
+            let proj = root.join(slug("/src/app"));
+            let s = |x: &str| proj.join(x).to_string_lossy().into_owned();
+            for (p, want) in [
+                (s("s1"), true),
+                (env(&s("s1")), true),
+                (format!("{}//", s("s1")), true),
+                (s("s1browsefix-dd"), false),
+                (s("gone"), false),
+                (proj.to_string_lossy().into_owned(), false),
+                (root.to_string_lossy().into_owned(), false),
+                (env(&root.to_string_lossy()), false),
+                (old.clone(), true),
+                (env(&old), true),
+                ("/tmp".into(), false),
+                ("/private/tmp/".into(), false),
+                (
+                    rush_state::system_tmp().to_string_lossy().into_owned(),
+                    false,
+                ),
+            ] {
+                assert_eq!(is_temp_dir(Path::new(&p)), want, "{p:?}");
+            }
         }
     }
 
-    // tmp_test.go:53
+    // Rust-only: a new session's scratch is in rush's root in /tmp,
+    // owner-only, given to the agent ending in "/"; one started before
+    // keeps its folder in rush's own root; one the system cleared (a
+    // reboot) is made again.
+    #[test]
+    fn new_scratch_goes_in_tmp_old_stays() {
+        use std::os::unix::fs::PermissionsExt;
+        let _h = Home::new();
+        ignore_system_temp(true);
+        let a = tempfile::tempdir().unwrap();
+        let a = a.path().to_string_lossy().into_owned();
+        let new = rush_state::scratch_root();
+        let old = rush_state::old_scratch_root();
+        for id in ["s1", "s2"] {
+            std::fs::create_dir_all(dir(id)).unwrap();
+        }
+        // s1 is new.
+        let got = place_temp("s1", &a);
+        assert_eq!(got, new.join(slug(&a)).join("s1"));
+        assert_eq!(temp_dir("s1"), got);
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&new), 0o700, "the root in /tmp");
+        assert_eq!(mode(&got), 0o700, "the session's folder");
+        let env = rush_core::adapter::tmpdir_env(&got.to_string_lossy());
+        assert_eq!(env, format!("{}/", got.to_string_lossy()));
+        assert!(is_temp_dir(Path::new(&env)));
+        // s2 started before: its folder in rush's root stays its own.
+        let before = old.join(slug(&a)).join("s2");
+        std::fs::create_dir_all(&before).unwrap();
+        std::os::unix::fs::symlink(&before, dir("s2").join("tmp")).unwrap();
+        assert_eq!(place_temp("s2", &a), before, "an old session's moved");
+        assert!(is_temp_dir(&before) && is_temp(&before.join("x").to_string_lossy()));
+        // After a reboot cleared /tmp, s1 resumes into a new one there.
+        std::fs::remove_dir_all(&new).unwrap();
+        assert_eq!(place_temp("s1", &a), got);
+        assert!(got.is_dir() && mode(&new) == 0o700);
+        // Cleared under a running session: made again where its TMPDIR says.
+        std::fs::remove_dir_all(&got).unwrap();
+        remake_temp("s1");
+        assert!(got.is_dir() && temp_dir("s1") == got);
+        // s2's old one cleaned away: it moves to /tmp.
+        std::fs::remove_dir_all(&before).unwrap();
+        assert_eq!(place_temp("s2", &a), new.join(slug(&a)).join("s2"));
+        ignore_system_temp(false);
+    }
+
+    // Rust-only: when rush's root in /tmp isn't its own (a link someone
+    // left, a file), a session's scratch goes in rush's folder instead.
+    #[test]
+    fn scratch_stays_home_when_tmp_isnt_ours() {
+        type Plant = fn(&Path);
+        let plants: [(&str, Plant); 2] = [
+            ("a link", |r| {
+                let to = r.with_file_name("theirs");
+                std::fs::create_dir_all(&to).unwrap();
+                std::os::unix::fs::symlink(&to, r).unwrap();
+            }),
+            ("a file", |r| {
+                std::fs::create_dir_all(r.parent().unwrap()).unwrap();
+                std::fs::write(r, "x").unwrap();
+            }),
+        ];
+        for (what, plant) in plants {
+            let _h = Home::new();
+            ignore_system_temp(true);
+            let a = tempfile::tempdir().unwrap();
+            let a = a.path().to_string_lossy().into_owned();
+            std::fs::create_dir_all(dir("s1")).unwrap();
+            plant(&rush_state::scratch_root());
+            let want = rush_state::old_scratch_root().join(slug(&a)).join("s1");
+            assert_eq!(temp_root(), rush_state::old_scratch_root(), "{what}");
+            assert_eq!(place_temp("s1", &a), want, "{what}");
+            assert!(want.is_dir() && temp_dir("s1") == want, "{what}");
+            ignore_system_temp(false);
+        }
+    }
+
+    // tmp_test.go:53, for each scratch root.
     #[test]
     fn is_temp_table() {
         let _h = Home::new();
         ignore_system_temp(true);
-        let tr = temp_root().to_string_lossy().into_owned();
         let r = root();
         let j = |p: &Path, s: &[&str]| {
             let mut p = p.to_path_buf();
@@ -365,24 +509,27 @@ mod tests {
             }
             p.to_string_lossy().into_owned()
         };
-        for (p, want) in [
-            (String::new(), false),
-            (tr.clone(), true),
-            (j(&temp_root(), &["a", "b"]), true),
-            (format!("{}/", j(&temp_root(), &["a", "b"])), true), // as TMPDIR has it
-            (format!("{}/", j(&r, &["s1", "tmp"])), true),
-            (format!("{tr}x"), false),
-            (j(&crate::keep::keep_root(), &["a", "b", "c"]), true),
-            (j(&r, &["s1", "tmp"]), true),
-            (j(&r, &["s1", "tmp", "x"]), true),
-            (j(&r, &["s1", "tmpx"]), false),
-            (j(&r, &["s1"]), false),
-            (r.to_string_lossy().into_owned(), false),
-            (j(&r, &["tmp"]), false),
-            ("/elsewhere/s1/tmp".into(), false),
-            ("rel/tmp".into(), false),
-        ] {
-            assert_eq!(is_temp(&p), want, "{p:?}");
+        for root in rush_state::scratch_roots() {
+            let tr = root.to_string_lossy().into_owned();
+            for (p, want) in [
+                (String::new(), false),
+                (tr.clone(), true),
+                (j(&root, &["a", "b"]), true),
+                (format!("{}/", j(&root, &["a", "b"])), true), // as TMPDIR has it
+                (format!("{}/", j(&r, &["s1", "tmp"])), true),
+                (format!("{tr}x"), false),
+                (j(&crate::keep::keep_root(), &["a", "b", "c"]), true),
+                (j(&r, &["s1", "tmp"]), true),
+                (j(&r, &["s1", "tmp", "x"]), true),
+                (j(&r, &["s1", "tmpx"]), false),
+                (j(&r, &["s1"]), false),
+                (r.to_string_lossy().into_owned(), false),
+                (j(&r, &["tmp"]), false),
+                ("/elsewhere/s1/tmp".into(), false),
+                ("rel/tmp".into(), false),
+            ] {
+                assert_eq!(is_temp(&p), want, "{p:?}");
+            }
         }
         ignore_system_temp(false);
     }

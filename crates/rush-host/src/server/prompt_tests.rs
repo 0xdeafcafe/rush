@@ -118,6 +118,22 @@ fn every_harness_is_told_rushs_guidance() {
     }
 }
 
+/// Where scratch goes: $TMPDIR short-lived, worktrees and uncommitted work
+/// never there, $RUSH_KEEP for what's looked at again.
+#[test]
+fn scratch_guidance_says_which_goes_where() {
+    for want in [
+        "in $TMPDIR, never straight in /tmp",
+        "short-lived",
+        "clears it at reboot",
+        "never put a git worktree, or anything with work not yet committed, in $TMPDIR",
+        "the repository's .claude/worktrees, or in $RUSH_KEEP",
+        "in $RUSH_KEEP: it stays after the session is done, for 30 days",
+    ] {
+        assert!(SCRATCH_PROMPT.contains(want), "no {want:?}");
+    }
+}
+
 /// A harness with a system prompt takes it there; one without (Kimi over
 /// ACP) has it atop its first message, once, which the conversation
 /// doesn't show as yours.

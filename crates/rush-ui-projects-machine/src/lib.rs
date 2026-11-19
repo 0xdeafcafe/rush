@@ -7,7 +7,7 @@
 
 // The base's modules, so crate::frame::.. and the like read as they did
 // in rush-ui. Each is the one module, not a copy.
-use rush_ui_base::{config, frame, header, host, list, look, model, sess, session, style, worker};
+use rush_ui_base::{frame, header, host, list, look, model, sess, session, style, worker};
 
 use crate::frame::{Ext, PlaceId};
 use crate::model::Model;
