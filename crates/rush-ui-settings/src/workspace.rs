@@ -11,7 +11,7 @@ use rush_draw::MouseKind;
 
 use super::form::{self, Section, Setting, flat, row_at};
 use super::{
-    PAGE_CONFIG, PAGE_GENERAL, PAGE_HARNESSES, PAGE_KEYS, PAGE_PLUGINS, PAGE_PROVIDERS,
+    PAGE_CONFIG, PAGE_DISK, PAGE_GENERAL, PAGE_HARNESSES, PAGE_KEYS, PAGE_PLUGINS, PAGE_PROVIDERS,
     PAGE_REMOTE, PAGE_UPDATES, PAGE_USAGE, cur_page, dialog, dialog_len, dialog_mut, place_pages,
 };
 use crate::frame::overlayclick::MouseEv;
@@ -63,6 +63,9 @@ pub fn heading(m: &Model, w: usize) -> Vec<Line> {
         PAGE_UPDATES => "Keep rush and your installed tools up to date.",
         PAGE_REMOTE => {
             "Your sessions from your phone or another device: in a browser, or over SSH."
+        }
+        PAGE_DISK => {
+            "What rush may remove when the disk runs low, and when: its rules, yours, and those proposed."
         }
         _ => "",
     };

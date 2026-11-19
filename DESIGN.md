@@ -1763,8 +1763,44 @@ what they find; the cleanup agent only proposes rules.
   no longer declare it) turns the switch on; git-clean's `worktree-idle-days`,
   when set, becomes the worktree rule's idle at both levels
   (`update_rules`).
-- Not wired yet: Settings → Disk and the agent's proposals are their own
-  lanes.
+- Not wired yet: the agent's proposals are their own lane.
+
+### Settings › Disk (Rust-only)
+
+The page (rush-ui-settings `disk.rs`, `PAGE_DISK`, after Remote) shows
+and changes the engine's rules; it reads `disk-rules.json` and the
+newest 20 `disk-clean` events off the UI (again after 2 seconds, as
+Remote does) and writes only through `update_rules`.
+
+- Disk: the switch "Clean on its own when disk is low" (config.json
+  `disk.auto`, off by default: what `diskauto.rs` obeys); the two levels,
+  read-only (normal under 50G, low under 20G); the last run (when, free,
+  level, freed, or why it did nothing); and "Research now", shown only
+  once something gives it its work (`disk::on_research`: the cleanup
+  agent in research mode, which proposes and removes nothing).
+- Rules: one row per rule, built-in then yours: ● on / ○ off, its title,
+  its numbers at normal and at low (`2d`; artifacts as `6h, 3 past 1h`:
+  age, builds kept, superseded; `runs` for a command; `–` where it
+  doesn't run), `changed` (yellow) for a built-in that differs from
+  rush's or `yours` (blue), then what the runs read did: freed (green),
+  and how many it left with the first reason, from the newest run that
+  left any. space turns it on or off, enter opens its numbers (each at
+  each level, typed as 30m, 6h, 2d, 1w or 0, keep as a count; or stop it
+  running at a level, or have it run there, starting from the other
+  level's numbers), r puts a changed built-in back, x twice removes one
+  of yours (a built-in can only be turned off). About says what it does
+  (a command word for word, and that it never runs when its program
+  isn't in `KNOWN_TOOLS`), its numbers in words, rush's numbers when
+  changed, and what it did lately.
+- Proposed: each proposal as a rule row with who proposed it and when;
+  enter asks before accepting, showing the rule whole (a tool command
+  word for word, its numbers, the evidence, who) and accepting moves it
+  into rules, on, replacing a rule of the same id; e edits its numbers
+  first; x twice dismisses it. "none waiting" when there are none.
+- What the runs did is read back from the event's `did` and `left`
+  lines as `event_fields` writes them (`path: what (rule, freed)`,
+  `path: why (rule)`); a test writes them with `event_fields` and reads
+  them back, so the two can't drift apart.
 
 ## The Projects tree (Rust-only)
 

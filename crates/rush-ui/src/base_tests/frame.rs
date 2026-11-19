@@ -254,7 +254,7 @@ fn page_tabs_look_alike_and_click() {
     assert_eq!(m.place, PlaceId::Settings);
     let f = screen(&mut m);
     assert!(
-        f[3].contains("RUSH      General   Usage   Keys   Plugins   Updates   Remote   [ ]"),
+        f[3].contains("RUSH      General   Usage   Keys   Plugins   Updates   Remote   Disk   [ ]"),
         "{f:?}"
     );
     assert!(under(&mut m, "General"));

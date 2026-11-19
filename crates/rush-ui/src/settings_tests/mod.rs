@@ -26,6 +26,7 @@ use rush_core::text::Line;
 
 mod tests;
 mod tests_config;
+mod tests_disk;
 mod tests_own;
 mod tests_providers;
 mod tests_remote;

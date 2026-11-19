@@ -25,6 +25,7 @@ pub mod catalog;
 pub mod cheap;
 pub mod common;
 pub mod configpage;
+pub mod disk;
 pub mod efficiency;
 pub mod emeritus;
 pub mod files;
@@ -73,6 +74,8 @@ pub const PAGE_KEYS: usize = 5;
 pub const PAGE_PLUGINS: usize = 6;
 pub const PAGE_UPDATES: usize = 7;
 pub const PAGE_REMOTE: usize = 8;
+/// The disk engine's switch, rules and proposals (Rust-only).
+pub const PAGE_DISK: usize = 9;
 
 /// A page's own drawing, when it isn't a form: w wide, h tall, its
 /// geometry noted for the mouse.
@@ -136,6 +139,7 @@ pub fn pages() -> Vec<Page> {
         plugins::page(),
         updates::page(),
         remote::page(),
+        disk::page(),
     ]
 }
 
@@ -211,6 +215,8 @@ pub struct State {
     pub plugins_reading: bool,
     pub updates: updates::Updates,
     pub remote: remote::Snap,
+    /// The disk rules and their runs as last read (Settings › Disk).
+    pub disk: disk::Snap,
     /// The logins' health as last read off the UI thread, for Providers
     /// (acct::read_health), and whether a reading is on its way.
     pub health: Option<std::sync::Arc<rush_state::health::All>>,
@@ -285,7 +291,7 @@ pub fn place_pages(p: PlaceId) -> (usize, usize) {
     if p == PlaceId::Harnesses {
         (PAGE_PROVIDERS, PAGE_GENERAL)
     } else {
-        (PAGE_GENERAL, PAGE_REMOTE + 1)
+        (PAGE_GENERAL, PAGE_DISK + 1)
     }
 }
 
@@ -307,6 +313,7 @@ pub fn open_dialog(m: &mut Model, p: usize) {
         PAGE_PLUGINS => plugins::read(m),
         PAGE_UPDATES => updates::recheck_after(m),
         PAGE_REMOTE => remote::want(m),
+        PAGE_DISK => disk::want(m),
         _ => {}
     }
     if p <= PAGE_CONFIG {
