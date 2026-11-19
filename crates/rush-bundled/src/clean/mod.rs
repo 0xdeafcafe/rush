@@ -77,14 +77,26 @@ pub(crate) struct Kit {
     pub settings: Vec<SettingSpec>,
     /// Its auto mode (Rust-only, disk.rs): cleans on its own, while its
     /// auto-clean setting is on and the disk is under disk::AUTO_UNDER,
-    /// what loses nothing, given the free bytes; what it did, to say, or
-    /// None when it did nothing.
+    /// what loses nothing at the level the free bytes call for.
     pub auto: Option<Auto>,
 }
 
-/// A kit's auto mode: given the sessions seen and the free bytes, it cleans
-/// what loses nothing and says what it did, None when nothing.
-pub(crate) type Auto = fn(&Ctx, &[Session], u64) -> Option<String>;
+/// A kit's auto mode: given the sessions seen, how hard to clean and the
+/// free bytes, it cleans what loses nothing and says what it did.
+pub(crate) type Auto = fn(&Ctx, &[Session], disk::Level, u64) -> Tick;
+
+/// What one auto-mode tick did, and what it left alone and why.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Tick {
+    /// What it did, each said in a few words.
+    pub did: Vec<String>,
+    /// What that freed, in bytes.
+    pub freed: i64,
+    /// What it looked at and left, each with why: for the event log.
+    pub kept: Vec<String>,
+    /// The first removal that failed after all: said with what it did.
+    pub failed: Option<String>,
+}
 
 /// One row of what a kit keeps.
 #[derive(Clone)]
@@ -203,6 +215,7 @@ struct App {
 }
 
 fn run(k: &'static Kit, s: UnixStream) -> Result<(), String> {
+    as_the_user();
     let (ctx, cancel) = Ctx::background().with_cancel();
     let a = Arc::new(App {
         k,
@@ -389,7 +402,9 @@ impl App {
     }
 
     /// The auto mode, when it's on and the disk is low: it says what it
-    /// freed, in every window.
+    /// freed, in every window. Each tick it's on is in the event log
+    /// (auto-clean), what it did or why it did nothing, so a quiet night
+    /// can be told from a broken one.
     fn auto(&self, conn: &Conn) {
         let Some(f) = self.k.auto else {
             return;
@@ -397,11 +412,36 @@ impl App {
         if !disk::auto_on(&self.k.manifest()) {
             return;
         }
+        let name = self.k.name;
         let free = rush_sys::sysinfo::read_disk().free;
-        if free == 0 || disk::level(free).is_none() {
+        if free == 0 {
+            rush_events::log(
+                "auto-clean",
+                tick_fields(
+                    name,
+                    free,
+                    None,
+                    &Tick::default(),
+                    "couldn't read the disk's free space",
+                ),
+            );
             return;
         }
-        if let Some(text) = f(&self.ctx, &self.sessions(), free) {
+        let Some(lv) = disk::level(free) else {
+            rush_events::log(
+                "auto-clean",
+                tick_fields(name, free, None, &Tick::default(), "enough free"),
+            );
+            return;
+        };
+        let t = f(&self.ctx, &self.sessions(), lv, free);
+        let why = if t.did.is_empty() {
+            "nothing it may clean"
+        } else {
+            ""
+        };
+        rush_events::log("auto-clean", tick_fields(name, free, Some(lv), &t, why));
+        if let Some(text) = kits::auto_said(name, free, &t.did, t.freed, t.failed.clone()) {
             self.notify(conn, "", &text);
         }
     }
@@ -775,6 +815,98 @@ pub(crate) fn removed(path: &str) -> Clean {
 /// Whether path is a folder.
 pub(crate) fn is_dir(path: &str) -> bool {
     !path.is_empty() && std::fs::metadata(path).is_ok_and(|m| m.is_dir())
+}
+
+/// An auto-mode tick as the event log has it: the kit, the free bytes,
+/// the level it cleaned at (none: it didn't), what it did and freed, what
+/// it left and why (the first 20), and why it did nothing, if it didn't.
+pub(crate) fn tick_fields(
+    name: &str,
+    free: u64,
+    lv: Option<disk::Level>,
+    t: &Tick,
+    why: &str,
+) -> rush_events::Fields {
+    let mut f = rush_events::Fields::new();
+    f.insert("plugin".into(), json!(name));
+    f.insert("free".into(), json!(free));
+    if let Some(lv) = lv {
+        f.insert("target_idle".into(), json!(lv.target_idle.as_secs()));
+        f.insert("artifact_age".into(), json!(lv.artifact_age.as_secs()));
+    }
+    f.insert("did".into(), json!(t.did));
+    f.insert("freed".into(), json!(t.freed));
+    if !t.kept.is_empty() {
+        f.insert(
+            "kept".into(),
+            json!(t.kept.iter().take(20).collect::<Vec<_>>()),
+        );
+    }
+    if let Some(e) = &t.failed {
+        f.insert("failed".into(), json!(e));
+    }
+    if !why.is_empty() {
+        f.insert("why".into(), json!(why));
+    }
+    f
+}
+
+/// The clean-ups run as you, not as a plugin: the broker gives a plugin
+/// its data folder for HOME and /usr/bin:/bin for PATH, so they looked for
+/// caches in the wrong folder and couldn't find kache in ~/.cargo/bin.
+/// HOME is the account's, from the password file, and PATH has
+/// user_path's folders. Set before any thread starts.
+fn as_the_user() {
+    let Some(home) = account_home() else {
+        return;
+    };
+    let path = user_path(&home, &std::env::var("PATH").unwrap_or_default());
+    // SAFETY: called first thing in run, before the plugin starts a thread.
+    unsafe {
+        std::env::set_var("HOME", &home);
+        std::env::set_var("PATH", path);
+    }
+}
+
+/// The home folder of the account this runs as, from the password file.
+fn account_home() -> Option<String> {
+    // SAFETY: getpwuid returns static storage or null; read at once.
+    unsafe {
+        let pw = libc::getpwuid(libc::getuid());
+        if pw.is_null() || (*pw).pw_dir.is_null() {
+            return None;
+        }
+        let dir = std::ffi::CStr::from_ptr((*pw).pw_dir).to_string_lossy();
+        (!dir.is_empty()).then(|| dir.into_owned())
+    }
+}
+
+/// path with the system's sbin folders and where your tools install
+/// themselves (cargo, go, bun, ~/.local/bin, Homebrew) after it, each once.
+pub(crate) fn user_path(home: &str, path: &str) -> String {
+    let mut out: Vec<String> = path
+        .split(':')
+        .filter(|d| !d.is_empty())
+        .map(String::from)
+        .collect();
+    let more = [
+        "/usr/bin".to_string(),
+        "/bin".into(),
+        "/usr/sbin".into(),
+        "/sbin".into(),
+        format!("{home}/.cargo/bin"),
+        format!("{home}/go/bin"),
+        format!("{home}/.bun/bin"),
+        format!("{home}/.local/bin"),
+        "/opt/homebrew/bin".into(),
+        "/usr/local/bin".into(),
+    ];
+    for d in more {
+        if !out.contains(&d) {
+            out.push(d);
+        }
+    }
+    out.join(":")
 }
 
 /// A folder under the user's cache folder (os.UserCacheDir).

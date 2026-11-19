@@ -331,7 +331,7 @@ fn walk(root: &Path, p: &Path, touch: &mut impl FnMut(SystemTime) -> bool) -> bo
 fn process_cwds(ctx: &Ctx) -> Option<Vec<String>> {
     // SAFETY: getuid has no failure mode.
     let uid = unsafe { libc::getuid() };
-    let mut cmd = Command::new("lsof");
+    let mut cmd = Command::new(super::disk::LSOF);
     cmd.args(["-n", "-a", "-d", "cwd", "-Fn", "-u", &uid.to_string()]);
     let out = crate::exec::run(cmd, ctx, None, false).ok()?;
     if !out.success() && out.stdout.is_empty() {
@@ -371,37 +371,41 @@ fn reap(w: Worktree, base: String, idle_for: Duration) -> Clean {
     })
 }
 
-/// git-clean's auto mode, at free bytes free (disk.rs): every worktree
+/// git-clean's auto mode (disk.rs), at any level: every worktree
 /// reap_rows offers (refusals has none for it) goes, each looked at again
-/// and only once nothing uses it. None when none went.
-pub(crate) fn git_auto(ctx: &Ctx, seen: &[Session], free: u64) -> Option<String> {
-    super::disk::level(free)?;
-    let (mut n, mut freed, mut kept) = (0usize, 0i64, None);
-    for t in reap_rows(ctx, seen)
+/// and only once nothing uses it.
+pub(crate) fn git_auto(
+    ctx: &Ctx,
+    seen: &[Session],
+    _: super::disk::Level,
+    _free: u64,
+) -> super::Tick {
+    let mut t = super::Tick::default();
+    let mut n = 0usize;
+    for r in reap_rows(ctx, seen)
         .into_iter()
-        .filter(|t| t.id.starts_with("reap:"))
+        .filter(|r| r.id.starts_with("reap:"))
     {
-        let size = super::disk::freeable(Path::new(&t.path));
-        match (t.clean)(ctx) {
+        let size = super::disk::freeable(Path::new(&r.path));
+        match (r.clean)(ctx) {
             Ok(_) => {
                 n += 1;
-                freed += size;
+                t.freed += size;
             }
             Err(e) => {
-                kept.get_or_insert(format!("{}: {e}", t.title));
+                let e = format!("{}: {e}", r.title);
+                t.kept.push(e.clone());
+                t.failed.get_or_insert(e);
             }
         }
     }
-    let did: Vec<String> = (n > 0)
-        .then(|| {
-            format!(
-                "removed {} no longer needed",
-                plural(n, "worktree", "worktrees")
-            )
-        })
-        .into_iter()
-        .collect();
-    super::kits::auto_said("git-clean", free, &did, freed, kept)
+    if n > 0 {
+        t.did.push(format!(
+            "removed {} no longer needed",
+            plural(n, "worktree", "worktrees")
+        ));
+    }
+    t
 }
 
 /// The Clean of a stale worktree that stays: it only says why.

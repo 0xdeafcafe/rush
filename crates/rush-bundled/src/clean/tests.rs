@@ -468,20 +468,107 @@ fn targets_found() {
     assert_eq!(found.into_iter().collect::<Vec<_>>(), [release]);
 }
 
-// The auto mode does nothing at or above 50 GB free, waits 2 days under
-// it, and half an hour under 20 GB.
+// The auto mode does nothing at or above 50 GB free; under it, targets
+// go after 2 days idle and artifacts at 2 days old; under 20 GB, half an
+// hour and 6 hours.
 #[test]
 fn auto_levels() {
     const GB: u64 = 1 << 30;
+    let normal = disk::Level {
+        target_idle: disk::TARGET_IDLE,
+        artifact_age: disk::ARTIFACT_AGE,
+    };
+    let low = disk::Level {
+        target_idle: disk::LOW_TARGET_IDLE,
+        artifact_age: disk::LOW_ARTIFACT_AGE,
+    };
     for (free, want) in [
         (80 * GB, None),
         (50 * GB, None),
-        (49 * GB, Some(disk::TARGET_IDLE)),
-        (20 * GB, Some(disk::TARGET_IDLE)),
-        (19 * GB, Some(disk::LOW_TARGET_IDLE)),
+        (49 * GB, Some(normal)),
+        (20 * GB, Some(normal)),
+        (19 * GB, Some(low)),
     ] {
         assert_eq!(disk::level(free), want, "{free}");
     }
+    assert_eq!(disk::LOW_ARTIFACT_AGE, Duration::from_secs(6 * 3600));
+}
+
+// A target built in every few minutes is never idle: with plenty free its
+// 7-hour-old artifacts stay, and under 20 GB they go.
+#[test]
+fn low_disk_prunes_younger_artifacts() {
+    const GB: u64 = 1 << 30;
+    let d = tempfile::tempdir().unwrap();
+    let scratch = d.path().join("tmp");
+    let busy = target_at(
+        &scratch,
+        "p/s1/busy-target",
+        Duration::from_secs(7 * 3600),
+        &["debug/.fingerprint", "debug/deps/libnew.rlib"],
+    );
+    let plan = |free: u64| {
+        disk::plan(
+            &[],
+            std::slice::from_ref(&scratch),
+            SystemTime::now(),
+            disk::level(free).unwrap(),
+            &|_| false,
+            &|_| false,
+        )
+        .0
+    };
+    assert_eq!(plan(30 * GB), []);
+    assert_eq!(
+        plan(10 * GB),
+        [disk::Act::Prune {
+            target: busy.clone(),
+            paths: vec![
+                busy.join("debug/deps/libold.rlib"),
+                busy.join("debug/incremental/s1"),
+            ],
+        }]
+    );
+}
+
+// The clean-ups run with your tools on PATH, after what it had, each once:
+// lsof's /usr/sbin, and kache's ~/.cargo/bin.
+#[test]
+fn user_path_finds_tools() {
+    assert_eq!(
+        user_path("/Users/me", "/usr/bin:/bin"),
+        "/usr/bin:/bin:/usr/sbin:/sbin:/Users/me/.cargo/bin:/Users/me/go/bin:/Users/me/.bun/bin:/Users/me/.local/bin:/opt/homebrew/bin:/usr/local/bin"
+    );
+    assert_eq!(
+        user_path("/h", "/opt/homebrew/bin:/usr/bin"),
+        "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:/h/.cargo/bin:/h/go/bin:/h/.bun/bin:/h/.local/bin:/usr/local/bin"
+    );
+}
+
+// Each tick is in the event log: what it did, or why it did nothing.
+#[test]
+fn ticks_logged() {
+    let quiet = tick_fields(
+        "rust-clean",
+        60 << 30,
+        None,
+        &Tick::default(),
+        "enough free",
+    );
+    assert_eq!(quiet["why"], "enough free");
+    assert_eq!(quiet["free"], 60u64 << 30);
+    assert!(quiet.get("target_idle").is_none() && quiet.get("kept").is_none());
+    let t = Tick {
+        did: vec!["emptied kache's store".into()],
+        freed: 5,
+        kept: vec!["/t: idle, but in use".into()],
+        failed: None,
+    };
+    let f = tick_fields("rust-clean", 10 << 30, disk::level(10 << 30), &t, "");
+    assert_eq!(f["artifact_age"], 6 * 3600);
+    assert_eq!(f["did"], json!(["emptied kache's store"]));
+    assert_eq!(f["kept"], json!(["/t: idle, but in use"]));
+    assert!(f.get("why").is_none());
 }
 
 // In use: lsof printed anything, or couldn't run; ps couldn't run; or a
@@ -558,7 +645,7 @@ fn auto_plan_and_apply() {
         &[],
         std::slice::from_ref(&scratch),
         SystemTime::now(),
-        disk::TARGET_IDLE,
+        disk::level(30 << 30).unwrap(),
         &skip,
         &used,
     );

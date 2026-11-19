@@ -283,15 +283,14 @@ fn removed_unused(path: &str) -> Clean {
     })
 }
 
-/// rust-clean's auto mode, at free bytes free (disk.rs): the targets of
-/// the repos sessions work in (each worktree's and main checkout's
-/// target) and under rush's scratch root, whole once no build touched them
-/// for 2 days (half an hour under 20 GB free) and nothing uses them, and
-/// old artifacts in the rest; then, still under 20 GB, kache's store
-/// emptied. None when it did nothing.
-fn rust_auto(ctx: &Ctx, seen: &[Session], free: u64) -> Option<String> {
+/// rust-clean's auto mode at level lv (disk.rs): the targets of the repos
+/// sessions work in (each worktree's and main checkout's target) and under
+/// rush's scratch root, whole once no build touched them for lv's
+/// target_idle and nothing uses them, and artifacts older than its
+/// artifact_age in the rest; then, under 20 GB free, kache's store
+/// emptied.
+fn rust_auto(ctx: &Ctx, seen: &[Session], lv: super::disk::Level, _free: u64) -> super::Tick {
     use super::disk;
-    let idle = disk::level(free)?;
     let (wts, _) = worktrees(seen);
     let mut roots: Vec<PathBuf> = Vec::new();
     for r in wts
@@ -311,53 +310,69 @@ fn rust_auto(ctx: &Ctx, seen: &[Session], free: u64) -> Option<String> {
                 || !s.id.is_empty() && t.to_string_lossy().contains(&format!("/{}/", s.id))
         })
     };
-    let (acts, _) = disk::plan(
+    let (acts, kept) = disk::plan(
         &roots,
         &[scratch_root()],
         SystemTime::now(),
-        idle,
+        lv,
         &skip,
         &disk::in_use,
     );
-    let (mut freed, mut whole, mut pruned) = (0i64, 0usize, 0usize);
-    let mut kept = None;
+    let mut t = super::Tick {
+        kept: kept
+            .iter()
+            .map(|(p, why)| format!("{}: {why}", p.display()))
+            .collect(),
+        ..Default::default()
+    };
+    let (mut whole, mut pruned) = (0usize, 0usize);
     for a in &acts {
         match disk::apply(a, &disk::in_use) {
             Ok(n) => {
-                freed += n;
+                t.freed += n;
                 match a {
                     disk::Act::Target(_) => whole += 1,
                     disk::Act::Prune { .. } => pruned += 1,
                 }
             }
             Err(e) => {
-                kept.get_or_insert(e);
+                t.kept.push(e.clone());
+                t.failed.get_or_insert(e);
             }
         }
     }
-    let mut did = Vec::new();
     if whole > 0 {
-        did.push(format!(
+        t.did.push(format!(
             "removed {} no build touched lately",
             plural(whole, "target", "targets")
         ));
     }
     if pruned > 0 {
-        did.push(format!(
+        t.did.push(format!(
             "old artifacts in {}",
             plural(pruned, "target", "targets")
         ));
     }
     let now = rush_sys::sysinfo::read_disk().free;
-    if now < disk::LOW_UNDER
-        && rush_core::adapter::find("kache", &[]).is_some()
-        && command(ctx, "", "kache", &["clean", "--cache", "--yes"]).is_ok()
-    {
-        let after = rush_sys::sysinfo::read_disk().free;
-        freed += after.saturating_sub(now) as i64;
-        did.push("emptied kache's store".into());
+    if now < disk::LOW_UNDER {
+        if rush_core::adapter::find("kache", &[]).is_none() {
+            t.kept.push("kache's store: kache isn't installed".into());
+        } else {
+            match command(ctx, "", "kache", &["clean", "--cache", "--yes"]) {
+                Ok(_) => {
+                    let after = rush_sys::sysinfo::read_disk().free;
+                    t.freed += after.saturating_sub(now) as i64;
+                    t.did.push("emptied kache's store".into());
+                }
+                Err(e) => {
+                    let e = format!("kache's store: {e}");
+                    t.kept.push(e.clone());
+                    t.failed.get_or_insert(e);
+                }
+            }
+        }
     }
-    auto_said("rust-clean", free, &did, freed, kept)
+    t
 }
 
 /// What an auto mode says it did, and the first thing it left alone
