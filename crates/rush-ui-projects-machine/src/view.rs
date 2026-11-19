@@ -63,7 +63,7 @@ pub fn projects_summary(m: &Model, running: usize) -> Line {
     let mut safe: i64 = 0;
     for w in &d.wts {
         if w.verdict().can_go() && running_of(m, &w.agents).is_none() {
-            safe += w.size;
+            safe += w.frees();
         }
     }
     for g in agents(m) {
@@ -740,6 +740,9 @@ pub fn worktree_line(t: &str, st: &GitState, wt: &Worktree, running: usize, w: u
         work.push(ln([sp("✓ clean", GREEN)]));
         name = sp(base(t), DIM);
     }
+    if let Some(f) = frees_words(wt) {
+        work.push(ln([sp(f, FAINT)]));
+    }
     let mut from = String::new();
     if !st.base.is_empty() {
         from = st.base.clone();
@@ -1099,15 +1102,27 @@ fn tree_what(m: &Model, t: &Worktree) -> Line {
 
 /// What clean-up may do with a worktree, in a few words, said only when
 /// there's something to do: kept ones (in use, a pull request open) say
-/// nothing.
+/// nothing. One that can go says what it frees when that's less than its
+/// size (files kache's store links too stay).
 pub fn tree_verdict(t: &Worktree) -> Line {
     let v = t.verdict();
-    match v.kind {
-        VerdictKind::KeepInUse | VerdictKind::KeepPrOpen => Line::new(),
-        VerdictKind::CanGo if !t.own => ln([sp("can go, by hand", BLUE)]),
-        VerdictKind::CanGo => ln([sp("can go", BLUE)]),
-        VerdictKind::WouldLose => ln([sp(format!("⚠ {}", v.reason), YELLOW)]),
+    let frees = frees_words(t);
+    match (v.kind, frees) {
+        (VerdictKind::KeepInUse | VerdictKind::KeepPrOpen, _) => Line::new(),
+        (VerdictKind::CanGo, Some(f)) if !t.own => ln([sp(format!("by hand, {f}"), BLUE)]),
+        (VerdictKind::CanGo, Some(f)) => ln([sp(format!("can go · {f}"), BLUE)]),
+        (VerdictKind::CanGo, None) if !t.own => ln([sp("can go, by hand", BLUE)]),
+        (VerdictKind::CanGo, None) => ln([sp("can go", BLUE)]),
+        (VerdictKind::WouldLose, _) => ln([sp(format!("⚠ {}", v.reason), YELLOW)]),
     }
+}
+
+/// "frees 3.9G" when removing t gives back noticeably less than its size
+/// (a twentieth or more stays, linked from elsewhere); None otherwise,
+/// the size saying it already.
+pub fn frees_words(t: &Worktree) -> Option<String> {
+    (t.freeable > 0 && t.freeable < t.size - t.size / 20)
+        .then(|| format!("frees {}", disk(t.freeable)))
 }
 
 /// left, then size and verdict in their columns at the right of w.
@@ -1715,4 +1730,29 @@ pub fn pr_review_word(pr: &PR) -> Line {
 #[allow(dead_code)]
 pub fn cells(s: &str) -> usize {
     width(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // What removing a worktree frees is said only when it's noticeably
+    // less than its size: kache's store keeps what it links.
+    #[test]
+    fn frees_said_when_less() {
+        const G: i64 = 1 << 30;
+        for (size, freeable, want) in [
+            (0, 0, None),
+            (4 * G, 0, None),
+            (4 * G, 4 * G, None),
+            (4 * G, 4 * G - G / 100, None),
+            (4 * G, 3 * G, Some("frees 3.0G")),
+            (4 * G, 200 << 20, Some("frees 200M")),
+        ] {
+            let mut w = Worktree::default();
+            (w.size, w.freeable) = (size, freeable);
+            assert_eq!(frees_words(&w).as_deref(), want, "{size} {freeable}");
+            assert_eq!(w.frees(), if freeable > 0 { freeable } else { size });
+        }
+    }
 }

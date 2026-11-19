@@ -172,8 +172,25 @@ fn worktree_force() {
         assert!(remove_worktree(&bad, true).is_err(), "removed {}", bad.path);
     }
     assert!(repo.join("a.txt").exists(), "the repository was touched");
+    // What was built for it outside it goes with it: cargo targets in a
+    // temp folder only, never a folder that merely sits there.
+    let built = root.join("x-target");
+    let plain = root.join("notes");
+    for d in [&built, &plain] {
+        std::fs::create_dir_all(d.join("release")).unwrap();
+        std::fs::write(d.join("release").join("lib.rlib"), "x").unwrap();
+    }
+    std::fs::write(
+        built.join("CACHEDIR.TAG"),
+        "Signature: 8a477f597d28d172789f06886806bc55",
+    )
+    .unwrap();
+    std::fs::write(built.join(".rustc_info.json"), "{}").unwrap();
+    ws[0].targets = vec![s(&built), s(&plain)];
     remove_worktree(&ws[0], true).unwrap();
     assert!(!wt.exists(), "still there");
+    assert!(!built.exists(), "its target stayed");
+    assert!(plain.exists(), "a folder not a target went");
 }
 
 // A worktree with no repository named is refused as the repository

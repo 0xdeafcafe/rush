@@ -604,6 +604,47 @@ Claude, fleet, the other adapters) builds on these.
   (`find_scratch`, `clear_scratch`); `Reaper` for what agents leave
   running; `next_login` and `chain`. Claude's subagent runs are read by
   rush-claude's `subruns::SubagentRuns`, its `RunFollower::subagent_runs`.
+- **Honest sizes** (Rust-only, lane F of the disk engine). `disk_space`
+  (and `disk_space_background`) returns a `Space`: `on_disk`, each file
+  counted once by (device, inode) however many of its hard links the one
+  measurement meets, and `freeable`, the files whose every link was met
+  (so a file kache's store also links frees nothing, and cargo's own
+  deps/ ↔ debug/ links free in full). `disk_usage` is its `on_disk`.
+  getattrlistbulk asks for each entry's device, inode and link count too;
+  the stat walk elsewhere reads the same from lstat. A heavy folder's
+  kept total (`node_modules`, `target`, now also `<name>-target`) is a
+  `Space` measured on its own, so a link from inside one to outside it
+  is counted on both sides; nothing rush measures links that way.
+  A worktree's `size` is its folder plus the cargo targets built for it
+  outside it (`built.rs` `tie_targets`, run by the Projects scan before
+  it measures): sessions build with CARGO_TARGET_DIR into their scratch
+  (<root>/<project>/<session>/<name>-target, under each of `temp_roots`:
+  the real /tmp's for new sessions, ~/.config/rush/tmp for older ones),
+  2–49 GB each, where its own
+  folder is 50–230 MB. A target goes to one worktree at most, by the
+  first of: processes working in exactly one worktree name it in
+  CARGO_TARGET_DIR (and none elsewhere among those read); the session
+  whose scratch holds it works in that worktree alone; its newest cargo
+  dep-info (deps/*.d) naming one of the session's worktrees (any, for a
+  session working in none rush knows), at most 4,000 files read and the
+  answer kept while the deps folders are unchanged; its name as a
+  dash-separated part of exactly one of the session's worktrees'. Else
+  it's tied to none. Removing a worktree (`remove_worktree`,
+  `tidy_worktree`) removes its targets after git removes the folder:
+  only cargo targets (CACHEDIR.TAG and .rustc_info.json) in a temp
+  folder, each only when no process works in it or names it in its
+  arguments or environment; a `worktree-targets-removed` event says
+  which went and which stayed. `Worktree::frees` (its `freeable`, or its
+  size when unmeasured) is what Projects' summary, Clean up's ticked
+  total and rows, the remove confirmation and its "freed" use; the SIZE
+  columns stay `size`, and a worktree that can go says "can go · frees
+  3.9G" when a twentieth or more of it stays. Measured 2026-11-19 on
+  h2recomp's worktrees: h1-hud3 0.08 G → 2.36 G with hud3-target,
+  sky-depth 0.08 → 3.88 (sky-target), h1-veh-phys 0.08 → 2.80
+  (lane-target), h1-bipd-colour 0.08 → 0.71 (colour-target), each tied
+  by its dep-info; a 36 G coord-target names only worktrees since
+  removed and stays untied. h2recomp's own target: 15.04 G summed, 14.82
+  G with links once, all of it freeable.
 
 Measured (`RUSH_REAL=1 cargo bench -p rush-fleet --bench load` against
 `RUSH_REAL=1 go test -bench Real ./internal/fleet`, 2026-10-29, M1 Max,

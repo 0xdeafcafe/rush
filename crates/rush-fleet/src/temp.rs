@@ -1,7 +1,8 @@
 //! An agent's temp work: where it is, how much disk it takes, emptying
 //! it, and the sizes kept across restarts. Port of internal/fleet/temp.go,
 //! diskusage.go, diskusage_darwin.go (getattrlistbulk) and
-//! diskusage_background.go (paced walks, heavy folders reused).
+//! diskusage_background.go (paced walks, heavy folders reused). Rust-only:
+//! each hard-linked file counted once, and what's freeable (Space).
 
 use std::collections::HashMap;
 #[cfg(target_os = "macos")]
@@ -380,9 +381,93 @@ impl TempSizes {
 
 // ---- How much disk a folder takes (diskusage*.go) ----
 
+/// How much disk a measurement found: what it takes, and what deleting
+/// all of it would give back. Rust-only: Go summed blocks.
+///
+/// Each file is counted once however many of its hard links the
+/// measurement meets (by device and inode), so a build tree whose files
+/// kache or cargo linked twice isn't counted twice. freeable leaves out
+/// the files with a link outside what was measured (kache's store keeps
+/// those blocks): a file counts when every one of its links was met.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Space {
+    pub on_disk: i64,
+    pub freeable: i64,
+}
+
+impl std::ops::AddAssign for Space {
+    fn add_assign(&mut self, o: Space) {
+        self.on_disk += o.on_disk;
+        self.freeable += o.freeable;
+    }
+}
+
+/// What one measurement has met: things with one link summed as they
+/// come, those with more kept by device and inode with how many of their
+/// links were met, so each is counted once.
+#[derive(Default)]
+struct Seen {
+    alone: i64,
+    /// (device, inode) → (links, links met, blocks).
+    linked: HashMap<(u64, u64), (u32, u32, i64)>,
+    linked_bytes: i64,
+}
+
+impl Seen {
+    /// A file, folder or link of size allocated bytes with nlink links;
+    /// folders are given 1 (theirs counts subfolders, not hard links).
+    fn add(&mut self, dev: u64, ino: u64, nlink: u32, size: i64) {
+        if nlink <= 1 {
+            self.alone += size;
+            return;
+        }
+        match self.linked.entry((dev, ino)) {
+            std::collections::hash_map::Entry::Occupied(mut o) => o.get_mut().1 += 1,
+            std::collections::hash_map::Entry::Vacant(v) => {
+                v.insert((nlink, 1, size));
+                self.linked_bytes += size;
+            }
+        }
+    }
+
+    fn add_meta(&mut self, m: &std::fs::Metadata) {
+        use std::os::unix::fs::MetadataExt;
+        let nlink = if m.is_dir() { 1 } else { m.nlink() as u32 };
+        self.add(m.dev(), m.ino(), nlink, blocks(m));
+    }
+
+    /// A part measured on its own (a heavy folder's reused total): its
+    /// links are not compared with the rest.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    fn add_space(&mut self, s: Space) {
+        self.alone += s.freeable;
+        // What isn't freeable stays on disk, counted, never freed.
+        self.linked_bytes += s.on_disk - s.freeable;
+    }
+
+    fn space(&self) -> Space {
+        let freeable = self.alone
+            + self
+                .linked
+                .values()
+                .filter(|&&(n, met, _)| met >= n)
+                .map(|&(_, _, size)| size)
+                .sum::<i64>();
+        Space {
+            on_disk: self.alone + self.linked_bytes,
+            freeable,
+        }
+    }
+}
+
 /// How much disk the folders take, counted as du does (allocated blocks),
-/// without following links.
+/// without following links, each hard-linked file once.
 pub fn disk_usage(dirs: &[TempDir]) -> i64 {
+    disk_space(dirs).on_disk
+}
+
+/// disk_usage, with what deleting all of dirs would free.
+pub fn disk_space(dirs: &[TempDir]) -> Space {
     usage(dirs, &mut None)
 }
 
@@ -414,6 +499,11 @@ impl Pacer {
 
 /// disk_usage at a background pace, sharing one budget.
 pub fn disk_usage_background(dirs: &[TempDir]) -> i64 {
+    disk_space_background(dirs).on_disk
+}
+
+/// disk_space at a background pace, sharing one budget.
+pub fn disk_space_background(dirs: &[TempDir]) -> Space {
     let _g = BACKGROUND.lock().unwrap_or_else(|e| e.into_inner());
     // Time between walks does not consume the work budget.
     let mut p = Some(Pacer {
@@ -425,19 +515,19 @@ pub fn disk_usage_background(dirs: &[TempDir]) -> i64 {
     n
 }
 
-fn usage(dirs: &[TempDir], pace: &mut Option<Pacer>) -> i64 {
-    let mut n = 0;
+fn usage(dirs: &[TempDir], pace: &mut Option<Pacer>) -> Space {
+    let mut seen = Seen::default();
     for d in dirs {
         Pacer::yield_now(pace);
         let Ok(m) = std::fs::symlink_metadata(&d.path) else {
             continue;
         };
-        n += blocks(&m);
+        seen.add_meta(&m);
         if m.is_dir() {
-            n += dir_usage(&d.path, pace);
+            dir_usage(&d.path, pace, &mut seen);
         }
     }
-    n
+    seen.space()
 }
 
 fn blocks(m: &std::fs::Metadata) -> i64 {
@@ -447,34 +537,42 @@ fn blocks(m: &std::fs::Metadata) -> i64 {
 
 /// What's inside a folder, each entry looked at through the folder's own
 /// descriptor (statUsage).
-fn stat_usage(dir: &str, pace: &mut Option<Pacer>) -> i64 {
+fn stat_usage(dir: &str, pace: &mut Option<Pacer>, seen: &mut Seen) {
     Pacer::yield_now(pace);
     let Ok(rd) = std::fs::read_dir(dir) else {
-        return 0;
+        return;
     };
-    let mut n = 0;
     for e in rd.flatten() {
         Pacer::yield_now(pace);
         let Ok(m) = e.metadata() else { continue }; // DirEntry::metadata doesn't follow links
-        n += blocks(&m);
+        seen.add_meta(&m);
         if m.is_dir() {
-            n += stat_usage(&format!("{dir}/{}", e.file_name().to_string_lossy()), pace);
+            stat_usage(
+                &format!("{dir}/{}", e.file_name().to_string_lossy()),
+                pace,
+                seen,
+            );
         }
     }
-    n
 }
 
 /// Folders that are huge, rarely change, and cost thousands of calls a
 /// walk: a background walk reuses one's last total while its own modified
-/// time holds and the total is under an hour old.
+/// time holds and the total is under an hour old. A cargo target a
+/// session named with CARGO_TARGET_DIR (<name>-target) is one too.
 #[cfg(target_os = "macos")]
 const HEAVY: &[&str] = &["node_modules", ".git", "target", ".venv", "venv", "Pods"];
 #[cfg(target_os = "macos")]
 const HEAVY_TTL: Duration = Duration::from_secs(3600);
 
+#[cfg(target_os = "macos")]
+fn heavy(name: &str) -> bool {
+    HEAVY.contains(&name) || name.ends_with("-target")
+}
+
 /// A heavy folder's modified time, when its total was counted, and it.
 #[cfg(target_os = "macos")]
-type Heavy = HashMap<String, (i128, Instant, i64)>;
+type Heavy = HashMap<String, (i128, Instant, Space)>;
 
 #[cfg(target_os = "macos")]
 static HEAVY_CACHE: Mutex<Option<Heavy>> = Mutex::new(None);
@@ -487,11 +585,12 @@ fn mtime_nanos(dir: &str) -> Option<i128> {
 }
 
 /// Whether dir is a heavy folder whose last total still holds; the stamp
-/// is its modified time, to store the new total under.
+/// is its modified time, to store the new total under (0: not heavy, or
+/// not a background walk).
 #[cfg(target_os = "macos")]
-fn heavy_hit(dir: &str, pace: &Option<Pacer>) -> (i128, Option<i64>) {
+fn heavy_hit(dir: &str, pace: &Option<Pacer>) -> (i128, Option<Space>) {
     let name = dir.rsplit('/').next().unwrap_or(dir);
-    if pace.is_none() || !HEAVY.contains(&name) {
+    if pace.is_none() || !heavy(name) {
         return (0, None);
     }
     let Some(stamp) = mtime_nanos(dir) else {
@@ -508,7 +607,7 @@ fn heavy_hit(dir: &str, pace: &Option<Pacer>) -> (i128, Option<i64>) {
 }
 
 #[cfg(target_os = "macos")]
-fn heavy_store(dir: &str, stamp: i128, total: i64) {
+fn heavy_store(dir: &str, stamp: i128, total: Space) {
     if stamp == 0 {
         return;
     }
@@ -522,16 +621,17 @@ fn heavy_store(dir: &str, stamp: i128, total: i64) {
 
 /// What's inside a folder, read with getattrlistbulk where the file
 /// system has it (macOS's): each call hands back a folder's worth of
-/// entries' names, types and allocated sizes. Elsewhere, a stat of each.
-fn dir_usage(dir: &str, pace: &mut Option<Pacer>) -> i64 {
+/// entries' names, types, inodes, links and allocated sizes. Elsewhere,
+/// a stat of each.
+fn dir_usage(dir: &str, pace: &mut Option<Pacer>, seen: &mut Seen) {
     #[cfg(target_os = "macos")]
     {
         let mut buf = vec![0u8; 128 << 10];
-        if let Some(n) = bulk::usage(libc::AT_FDCWD, dir, dir, &mut buf, pace) {
-            return n;
+        if bulk::usage(libc::AT_FDCWD, dir, dir, &mut buf, pace, seen).is_some() {
+            return;
         }
     }
-    stat_usage(dir, pace) // a file system without it
+    stat_usage(dir, pace, seen) // a file system without it
 }
 
 #[cfg(target_os = "macos")]
@@ -551,9 +651,12 @@ mod bulk {
 
     const ATTR_BIT_MAP_COUNT: u16 = 5;
     const ATTR_CMN_NAME: u32 = 0x1;
+    const ATTR_CMN_DEVID: u32 = 0x2;
     const ATTR_CMN_OBJTYPE: u32 = 0x8;
+    const ATTR_CMN_FILEID: u32 = 0x0200_0000;
     const ATTR_CMN_RETURNED_ATTRS: u32 = 0x8000_0000;
     const ATTR_DIR_ALLOCSIZE: u32 = 0x8;
+    const ATTR_FILE_LINKCOUNT: u32 = 0x1;
     const ATTR_FILE_ALLOCSIZE: u32 = 0x4;
     const VDIR: u32 = 2;
 
@@ -567,22 +670,44 @@ mod bulk {
         ) -> libc::c_int;
     }
 
-    /// One folder and those under it; None when its file system can't
-    /// answer getattrlistbulk. buf is reused all the way down.
+    /// One folder and those under it, into seen; None when its file
+    /// system can't answer getattrlistbulk. buf is reused all the way
+    /// down. A heavy folder is measured on its own, its total kept.
     pub(super) fn usage(
         parent: libc::c_int,
         name: &str,
         dir: &str,
         buf: &mut [u8],
         pace: &mut Option<Pacer>,
-    ) -> Option<i64> {
+        seen: &mut Seen,
+    ) -> Option<()> {
         Pacer::yield_now(pace);
         let (stamp, hit) = heavy_hit(dir, pace);
         if let Some(t) = hit {
-            return Some(t);
+            seen.add_space(t);
+            return Some(());
         }
+        if stamp != 0 {
+            let mut own = Seen::default();
+            walk(parent, name, dir, buf, pace, &mut own)?;
+            let s = own.space();
+            heavy_store(dir, stamp, s);
+            seen.add_space(s);
+            return Some(());
+        }
+        walk(parent, name, dir, buf, pace, seen)
+    }
+
+    fn walk(
+        parent: libc::c_int,
+        name: &str,
+        dir: &str,
+        buf: &mut [u8],
+        pace: &mut Option<Pacer>,
+        seen: &mut Seen,
+    ) -> Option<()> {
         let Ok(c) = CString::new(name) else {
-            return Some(0);
+            return Some(());
         };
         // Opening by name from the parent's descriptor skips resolving the
         // whole path again.
@@ -595,18 +720,21 @@ mod bulk {
             )
         };
         if fd < 0 {
-            return Some(0);
+            return Some(());
         }
         let mut attrs = AttrList {
             bitmapcount: ATTR_BIT_MAP_COUNT,
             reserved: 0,
-            commonattr: ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_NAME | ATTR_CMN_OBJTYPE,
+            commonattr: ATTR_CMN_RETURNED_ATTRS
+                | ATTR_CMN_NAME
+                | ATTR_CMN_DEVID
+                | ATTR_CMN_OBJTYPE
+                | ATTR_CMN_FILEID,
             volattr: 0,
             dirattr: ATTR_DIR_ALLOCSIZE,
-            fileattr: ATTR_FILE_ALLOCSIZE,
+            fileattr: ATTR_FILE_LINKCOUNT | ATTR_FILE_ALLOCSIZE,
             forkattr: 0,
         };
-        let mut n = 0i64;
         let mut subs = Vec::new();
         loop {
             Pacer::yield_now(pace);
@@ -623,39 +751,54 @@ mod bulk {
                 if e == libc::ENOTSUP || e == libc::EINVAL {
                     return None;
                 }
-                return Some(n);
+                return Some(());
             }
             if r == 0 {
                 break;
             }
             let mut p: &[u8] = buf;
             for _ in 0..r {
-                let Some((size, sub, next)) = entry(p) else {
+                let Some((e, next)) = entry(p) else {
                     break;
                 };
-                n += size;
-                if let Some(s) = sub {
+                seen.add(e.dev, e.ino, e.nlink, e.size);
+                if let Some(s) = e.sub {
                     subs.push(s);
                 }
                 p = next;
             }
         }
         for s in subs {
-            n += usage(fd, &s, &format!("{dir}/{s}"), buf, pace).unwrap_or(0);
+            let _ = usage(fd, &s, &format!("{dir}/{s}"), buf, pace, seen);
         }
         // SAFETY: fd is ours.
         unsafe { libc::close(fd) };
-        heavy_store(dir, stamp, n);
-        Some(n)
+        Some(())
     }
 
     fn u32_at(b: &[u8], o: usize) -> u32 {
         u32::from_le_bytes(b[o..o + 4].try_into().unwrap())
     }
 
-    /// One entry getattrlistbulk packed: its allocated size, its name when
-    /// it's a folder, and what follows it.
-    pub(super) fn entry(p: &[u8]) -> Option<(i64, Option<String>, &[u8])> {
+    fn i64_at(b: &[u8], o: usize) -> i64 {
+        i64::from_le_bytes(b[o..o + 8].try_into().unwrap())
+    }
+
+    /// One entry as getattrlistbulk packed it.
+    pub(super) struct Entry {
+        pub size: i64,
+        pub dev: u64,
+        pub ino: u64,
+        /// 1 for a folder: its link count isn't hard links.
+        pub nlink: u32,
+        /// Its name when it's a folder.
+        pub sub: Option<String>,
+    }
+
+    /// One entry getattrlistbulk packed, and what follows it. Attributes
+    /// come in their bits' order within each group (common, dir, file);
+    /// the returned set says which are there.
+    pub(super) fn entry(p: &[u8]) -> Option<(Entry, &[u8])> {
         if p.len() < 24 {
             return None;
         }
@@ -667,11 +810,18 @@ mod bulk {
         let common = u32_at(ent, 4);
         let dir_set = u32_at(ent, 12);
         let file_set = u32_at(ent, 16);
+        let mut e = Entry {
+            size: 0,
+            dev: 0,
+            ino: 0,
+            nlink: 1,
+            sub: None,
+        };
         let mut o = 24;
         let mut name: &[u8] = &[];
         if common & ATTR_CMN_NAME != 0 {
             if o + 8 > l {
-                return Some((0, None, next));
+                return Some((e, next));
             }
             let off = u32_at(ent, o) as i32 as isize;
             let nl = u32_at(ent, o + 4) as usize;
@@ -681,26 +831,43 @@ mod bulk {
             }
             o += 8;
         }
+        if common & ATTR_CMN_DEVID != 0 && o + 4 <= l {
+            e.dev = u32_at(ent, o) as u64;
+            o += 4;
+        }
         let mut typ = 0;
         if common & ATTR_CMN_OBJTYPE != 0 && o + 4 <= l {
             typ = u32_at(ent, o);
             o += 4;
         }
-        let mut size = 0i64;
-        if dir_set & ATTR_DIR_ALLOCSIZE != 0 && o + 8 <= l {
-            size = i64::from_le_bytes(ent[o..o + 8].try_into().unwrap());
+        if common & ATTR_CMN_FILEID != 0 && o + 8 <= l {
+            e.ino = i64_at(ent, o) as u64;
             o += 8;
         }
-        if file_set & ATTR_FILE_ALLOCSIZE != 0 && o + 8 <= l {
-            size = i64::from_le_bytes(ent[o..o + 8].try_into().unwrap());
+        if dir_set & ATTR_DIR_ALLOCSIZE != 0 && o + 8 <= l {
+            e.size = i64_at(ent, o);
+            o += 8;
         }
-        let sub =
-            (typ == VDIR && !name.is_empty()).then(|| String::from_utf8_lossy(name).into_owned());
-        Some((size, sub, next))
+        if file_set & ATTR_FILE_LINKCOUNT != 0 && o + 4 <= l {
+            e.nlink = u32_at(ent, o);
+            o += 4;
+        }
+        if file_set & ATTR_FILE_ALLOCSIZE != 0 && o + 8 <= l {
+            e.size = i64_at(ent, o);
+        }
+        if typ == VDIR {
+            e.nlink = 1;
+            if !name.is_empty() {
+                e.sub = Some(String::from_utf8_lossy(name).into_owned());
+            }
+        }
+        Some((e, next))
     }
 }
 
 #[cfg(test)]
 pub(crate) fn stat_usage_for_test(dir: &str) -> i64 {
-    stat_usage(dir, &mut None)
+    let mut seen = Seen::default();
+    stat_usage(dir, &mut None, &mut seen);
+    seen.space().on_disk
 }

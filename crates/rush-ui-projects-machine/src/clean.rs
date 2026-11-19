@@ -687,7 +687,7 @@ impl CleanSheet {
             match &it.wt {
                 None => size += data(m).tmp.stale,
                 Some(w) => {
-                    size += w.size;
+                    size += w.frees();
                     if !w.safe() {
                         losing += 1;
                     }
@@ -704,7 +704,7 @@ impl CleanSheet {
             .iter()
             .filter(|it| !it.on && it.loses_nothing())
             .fold((0, 0), |(n, s), it| {
-                (n + 1, s + it.wt.as_ref().map_or(0, |w| w.size))
+                (n + 1, s + it.wt.as_ref().map_or(0, |w| w.frees()))
             })
     }
 
@@ -917,7 +917,7 @@ impl CleanSheet {
                     bx,
                     sp(pad_to(&name, 28), TEXT),
                     sp(pad_to(&repo, 16), DIM),
-                    sp(format!("{:>7}  ", disk(wt.size)), FAINT),
+                    sp(format!("{:>7}  ", disk(wt.frees())), FAINT),
                 ]),
                 why,
             ),
@@ -1205,7 +1205,7 @@ pub fn nudge_clean(m: &mut Model) {
     for w in &d.wts {
         if w.verdict().can_go() && running(m, &w.agents).is_none() {
             n += 1;
-            size += w.size;
+            size += w.frees();
         }
     }
     size += d.tmp.stale;

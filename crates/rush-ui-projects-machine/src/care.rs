@@ -906,6 +906,10 @@ pub fn care_known_with(m: &Model, out: &mut Vec<String>, mem_level: i32) {
         if !t.reason.is_empty() {
             l += &format!(" ({})", t.reason);
         }
+        if !w.targets.is_empty() {
+            // Its size counts them; removing it through rush removes them.
+            l += &format!(" · its cargo targets outside it: {}", w.targets.join(", "));
+        }
         if running(m, &w.agents).is_some() {
             l += " · an agent is working in it now";
         }

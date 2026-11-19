@@ -8,7 +8,8 @@
 //! :101, askPRsAgain :148), projects_paths.go (peekDir :46, listTemp
 //! :130, openTemp :150), tempwork.go (measureTemp :28), fleet/temp.go:27-40 (TempDirs) and
 //! model.go:1110
-//! (the tick's rescans).
+//! (the tick's rescans). Rust-only: a worktree measured with the targets
+//! built for it (rush_fleet::tie_targets).
 
 use std::collections::HashMap;
 use std::os::unix::fs::MetadataExt;
@@ -272,6 +273,9 @@ pub fn worktree_scan(
         f.outside = rush_fleet::look_left(&workers);
         f.orphans = rush_fleet::find_temp_orphans();
         if measure {
+            // Each worktree measured with the targets its sessions built
+            // for it outside it (rush's scratch, CARGO_TARGET_DIR).
+            rush_fleet::tie_targets(&mut f.wts, &workers);
             for (w, ok) in f.wts.iter_mut().zip(looked) {
                 if ok {
                     w.measure();
@@ -341,7 +345,7 @@ fn on_looked(m: &mut Model, mut wts: Vec<Worktree>) {
     }
     for w in &mut wts {
         if let Some(old) = st.wts.iter().find(|o| o.path == w.path) {
-            w.size = old.size;
+            keep_size(w, old);
         }
     }
     // Those not looked at yet stay as they were, until the scan is done.
@@ -356,6 +360,14 @@ fn on_looked(m: &mut Model, mut wts: Vec<Worktree>) {
     st.wts = wts;
 }
 
+/// w keeps what old measured: its size, what it frees, and the targets
+/// built for it.
+fn keep_size(w: &mut Worktree, old: &Worktree) {
+    w.size = old.size;
+    w.freeable = old.freeable;
+    w.targets.clone_from(&old.targets);
+}
+
 pub fn on_worktrees(m: &mut Model, f: Found) {
     let st = d(m);
     st.checking = false;
@@ -364,7 +376,7 @@ pub fn on_worktrees(m: &mut Model, f: Found) {
     if !f.measured {
         for w in &mut wts {
             if let Some(old) = st.wts.iter().find(|o| o.path == w.path) {
-                w.size = old.size;
+                keep_size(w, old);
             }
         }
     }

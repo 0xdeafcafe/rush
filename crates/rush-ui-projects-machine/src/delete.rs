@@ -289,7 +289,7 @@ impl Doomed {
     fn size(&self, m: &Model) -> i64 {
         let st = data(m);
         if let Some(w) = &self.wt {
-            return w.size;
+            return w.frees();
         }
         if let Some(l) = &self.left {
             return l.size;
@@ -398,17 +398,35 @@ impl Doomed {
                 ])
             };
             let name = wt.path.rsplit('/').next().unwrap_or(&wt.path);
-            return vec![
+            let mut out = vec![
                 kind_line(
                     Kind::Worktree,
                     name,
                     "worktree · git removes it",
-                    &disk(wt.size),
+                    &disk(wt.frees()),
                     w,
                 ),
                 ln([plain("   "), sp(tildify(&wt.path), FAINT)]),
-                keeps,
             ];
+            if !wt.targets.is_empty() {
+                // Built for it outside it: they go too, once nothing uses
+                // them (rush_fleet::remove_worktree).
+                let names: Vec<&str> = wt
+                    .targets
+                    .iter()
+                    .map(|t| t.rsplit('/').next().unwrap_or(t))
+                    .collect();
+                out.push(fit(
+                    ln([
+                        plain("   "),
+                        sp("and what was built for it: ", DIM),
+                        sp(names.join(", "), FAINT),
+                    ]),
+                    w,
+                ));
+            }
+            out.push(keeps);
+            return out;
         }
         if let Some(l) = &self.left {
             let what = format!("left by {} · deleted", one_line(&l.agent.display_name));
@@ -919,7 +937,7 @@ pub fn ask_clean_all(m: &mut Model) {
 fn remove_wt(m: &mut Model, wt: Worktree, force: bool) {
     let name = wt.path.rsplit('/').next().unwrap_or(&wt.path).to_string();
     m.flash(&format!("removing {name}…"));
-    let (path, freed) = (wt.path.clone(), wt.size);
+    let (path, freed) = (wt.path.clone(), wt.frees());
     m.later(
         move || remove_worktree(&wt, force),
         move |m, r| {

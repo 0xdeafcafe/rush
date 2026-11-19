@@ -22,7 +22,7 @@ use serde_json::json;
 use crate::Predicates;
 use crate::git::git_at;
 use crate::pr::from_status;
-use crate::temp::{disk_usage, disk_usage_background};
+use crate::temp::{Space, disk_space, disk_space_background};
 use crate::verdict::{MADE_BY_RUSH, made_by};
 
 /// A linked git worktree an agent works in, and whether it can go without
@@ -37,7 +37,15 @@ pub struct Worktree {
     pub agents: Vec<String>,
     /// Under a repo's .claude/worktrees: made for an agent.
     pub claude: bool,
+    /// What it takes on disk, the targets built for it included, each
+    /// hard-linked file once (Rust-only: Go's was the folder's blocks).
     pub size: i64,
+    /// What removing it, and those targets, would give back: size less
+    /// the files linked from elsewhere too (kache's store).
+    pub freeable: i64,
+    /// The cargo targets outside it built for it (built.rs): removed with
+    /// it, once nothing uses them.
+    pub targets: Vec<String>,
 
     /// Files with uncommitted changes, untracked ones included.
     pub changed: usize,
@@ -172,13 +180,33 @@ impl Worktree {
         ok
     }
 
-    /// The rest of check: how much disk it takes, walked at a background
+    /// The rest of check: how much disk it takes with the targets built
+    /// for it, and what removing them all frees, walked at a background
     /// pace (a big checkout's build folders take minutes).
     pub fn measure(&mut self) {
-        self.size = disk_usage_background(&[TempDir {
-            path: self.path.clone(),
-            keep: false,
-        }]);
+        let s = disk_space_background(&self.dirs());
+        (self.size, self.freeable) = (s.on_disk, s.freeable);
+    }
+
+    /// Its folder and the targets built for it: what a measure walks.
+    fn dirs(&self) -> Vec<TempDir> {
+        std::iter::once(&self.path)
+            .chain(&self.targets)
+            .map(|p| TempDir {
+                path: p.clone(),
+                keep: false,
+            })
+            .collect()
+    }
+
+    /// What removing it gives back, as last measured: freeable when it
+    /// was measured, else its size.
+    pub fn frees(&self) -> i64 {
+        if self.freeable > 0 {
+            self.freeable
+        } else {
+            self.size
+        }
     }
 
     /// Looks at it afresh with git and says, line by line, what removing it
@@ -607,12 +635,9 @@ pub(crate) fn remove(w: &Worktree, force: bool, measure: bool) -> Result<i64, St
         return Err(format!("{base}: {DRY_RUN}"));
     }
     let size = if measure {
-        disk_usage(&[TempDir {
-            path: w.path.clone(),
-            keep: false,
-        }])
+        disk_space(&w.dirs())
     } else {
-        0
+        Space::default()
     };
     let mut args = vec!["worktree", "remove"];
     if deleted {
@@ -625,7 +650,42 @@ pub(crate) fn remove(w: &Worktree, force: bool, measure: bool) -> Result<i64, St
     }
     args.push(&w.path);
     git_within(None, &w.repo, &args)?;
-    Ok(size)
+    let kept = remove_targets(w);
+    if measure && !kept.is_empty() {
+        // What stayed isn't freed: measured again, it's taken off.
+        let left: Vec<TempDir> = kept
+            .iter()
+            .map(|p| TempDir {
+                path: p.clone(),
+                keep: false,
+            })
+            .collect();
+        return Ok((size.freeable - disk_space(&left).freeable).max(0));
+    }
+    Ok(size.freeable)
+}
+
+/// Removes the targets built for w, once its folder's gone: only cargo
+/// targets in a temp folder (rush's scratch, the system's), each once
+/// nothing uses it. The ones left, in use or refused.
+fn remove_targets(w: &Worktree) -> Vec<String> {
+    let mut kept = Vec::new();
+    for t in &w.targets {
+        let ok = crate::built::is_target(Path::new(t))
+            && crate::hosted::is_temp(t)
+            && !crate::built::target_in_use(t)
+            && crate::sweep::remove_tree(t).is_ok();
+        if !ok && Path::new(t).exists() {
+            kept.push(t.clone());
+        }
+    }
+    if !w.targets.is_empty() {
+        rush_sys::events::log(
+            "worktree-targets-removed",
+            json!({"path": w.path, "targets": w.targets, "kept": kept}),
+        );
+    }
+    kept
 }
 
 pub(crate) fn first_non_empty<'a>(s: &[&'a str]) -> &'a str {

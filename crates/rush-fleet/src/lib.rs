@@ -6,6 +6,7 @@
 //! binning it would lose anything; temp work and what agents left behind.
 //! Port of internal/fleet. See DESIGN.md "Contracts".
 
+mod built;
 mod caches;
 pub mod disk;
 mod diskmap;
@@ -30,6 +31,10 @@ mod verdict;
 mod watch;
 mod worktree;
 
+pub use built::{
+    ProcTarget, ScratchTarget, is_target, process_targets, scratch_targets, tie_targets,
+    tie_targets_with,
+};
 pub use caches::{
     CACHE_NAMES, CACHE_TAG, cache_tagged, caches_in, remove_cache, temp_caches_in, walk,
 };
@@ -75,8 +80,8 @@ pub use sweep::{
     remove_tree, run_command, span, survey, works_in, wt_cache, wt_facts,
 };
 pub use temp::{
-    TempSize, TempSizes, clean_stale_temp, clean_temp, disk_usage, disk_usage_background,
-    remove_temp_entry, temp_dirs,
+    Space, TempSize, TempSizes, clean_stale_temp, clean_temp, disk_space, disk_space_background,
+    disk_usage, disk_usage_background, remove_temp_entry, temp_dirs,
 };
 pub use triage::{Class, Triage, noise};
 pub use verdict::{
@@ -96,6 +101,8 @@ mod tests_disk;
 mod tests_git;
 #[cfg(test)]
 mod tests_logins;
+#[cfg(test)]
+mod tests_sizes;
 
 // Every test runs in a throwaway home (rush-testenv).
 #[cfg(test)]
