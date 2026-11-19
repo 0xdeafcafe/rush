@@ -349,7 +349,7 @@ fn rust_auto(ctx: &Ctx, seen: &[Session], lv: super::disk::Level, _free: u64) ->
     }
     if pruned > 0 {
         t.did.push(format!(
-            "old artifacts in {}",
+            "old or superseded builds in {}",
             plural(pruned, "target", "targets")
         ));
     }

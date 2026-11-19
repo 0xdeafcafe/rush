@@ -1417,6 +1417,21 @@ deleted as it went. Here it never deletes on its own:
   arguments or environment (`ps axeww`: macOS hides platform binaries'
   environment, Homebrew's cargo and rustc show theirs). Sizes count files
   with one link only (`freeable`): what kache hard-links frees nothing.
+  Superseded builds: a crate gets a build in `deps` per set of features
+  and profile settings (`build_of`: `lib<crate>-<16 hex>.rlib`, `.rmeta`,
+  `.d`, test binaries and their `.dSYM`), and a target built every few
+  minutes keeps every earlier one (178 builds of one crate in a 49G
+  target), all too young for the age rule. Of each crate's builds the 3
+  newest (`KEEP_BUILDS`) always stay; older ones go once their newest file
+  is a day old, an hour when low (`superseded_artifacts`). Age alone can't
+  tell a superseded build from a live one, since cargo reuses a fresh build
+  without writing it; three newer builds of the same crate can. A target a
+  working session is in (h2recomp's main checkout, which every session
+  works in) is never removed whole but is pruned like the rest, still only
+  when `in_use` says no right before. While it's low the auto mode runs
+  every 3 minutes (`LOW_EVERY`) between the 15-minute measures, without
+  measuring sizes: one tick left a busy target "in use", and the disk
+  filled before the next.
   Why: the machine hit 100% disk twice in a day from agents' builds.
   - last, the commands every run ends with (`end_commands`, group "Run
     last, once"): pnpm store prune when pnpm is there, then, when docker

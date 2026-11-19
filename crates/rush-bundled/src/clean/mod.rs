@@ -198,6 +198,9 @@ struct State {
     measured: Option<Time>,
     /// when it measures next
     due: Option<Instant>,
+    /// when the auto mode runs next on its own, between measures: only
+    /// while it's on and the disk is low (disk::LOW_EVERY)
+    auto_due: Option<Instant>,
     measuring: bool,
     /// things being cleaned
     busy: std::collections::HashSet<String>,
@@ -352,13 +355,25 @@ impl App {
                 return;
             }
             let due = st.due.unwrap_or_else(|| Instant::now() + MEASURE_EVERY);
+            let next = st.auto_due.map_or(due, |a| a.min(due));
             let now = Instant::now();
-            if now < due {
+            if now < next {
                 st = self
                     .wake
-                    .wait_timeout(st, due - now)
+                    .wait_timeout(st, next - now)
                     .unwrap_or_else(|e| e.into_inner())
                     .0;
+                continue;
+            }
+            if now < due && !st.measuring {
+                // Only the auto mode is due: the disk is low.
+                st.measuring = true;
+                st.auto_due = None;
+                drop(st);
+                let low = self.auto(conn);
+                st = self.lock();
+                st.measuring = false;
+                st.auto_due = low.then(|| Instant::now() + disk::LOW_EVERY);
                 continue;
             }
             drop(st);
@@ -375,8 +390,9 @@ impl App {
             }
             st.measuring = true;
             st.due = None;
+            st.auto_due = None;
         }
-        self.auto(conn);
+        let low = self.auto(conn);
         let mut things = (self.k.things)(&self.ctx, &self.sessions());
         for t in &mut things {
             if !t.path.is_empty() {
@@ -390,6 +406,7 @@ impl App {
             st.measured = Some(now);
             st.measuring = false;
             st.due = Some(Instant::now() + MEASURE_EVERY);
+            st.auto_due = low.then(|| Instant::now() + disk::LOW_EVERY);
             let text = reap_notice(&st.things, st.said, now);
             if !text.is_empty() {
                 st.said = Some(now);
@@ -405,12 +422,13 @@ impl App {
     /// freed, in every window. Each tick it's on is in the event log
     /// (auto-clean), what it did or why it did nothing, so a quiet night
     /// can be told from a broken one.
-    fn auto(&self, conn: &Conn) {
+    /// It says whether the disk is still low after, so it runs again soon.
+    fn auto(&self, conn: &Conn) -> bool {
         let Some(f) = self.k.auto else {
-            return;
+            return false;
         };
         if !disk::auto_on(&self.k.manifest()) {
-            return;
+            return false;
         }
         let name = self.k.name;
         let free = rush_sys::sysinfo::read_disk().free;
@@ -425,14 +443,14 @@ impl App {
                     "couldn't read the disk's free space",
                 ),
             );
-            return;
+            return false;
         }
         let Some(lv) = disk::level(free) else {
             rush_events::log(
                 "auto-clean",
                 tick_fields(name, free, None, &Tick::default(), "enough free"),
             );
-            return;
+            return false;
         };
         let t = f(&self.ctx, &self.sessions(), lv, free);
         let why = if t.did.is_empty() {
@@ -444,6 +462,7 @@ impl App {
         if let Some(text) = kits::auto_said(name, free, &t.did, t.freed, t.failed.clone()) {
             self.notify(conn, "", &text);
         }
+        disk::is_low(rush_sys::sysinfo::read_disk().free)
     }
 
     /// What it keeps, as last measured, for rush's cleanup agent.

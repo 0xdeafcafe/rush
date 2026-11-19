@@ -13,7 +13,7 @@
 //! the answer is no. Sizes count files with no other hard link only: an
 //! artifact kache links from its store frees nothing.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -40,6 +40,21 @@ pub const ARTIFACT_AGE: Duration = Duration::from_secs(2 * 24 * 3600);
 /// never idle, and piles up copies of crates no build reads any more
 /// (49 GB in one, half of it untouched for 6 hours).
 pub const LOW_ARTIFACT_AGE: Duration = Duration::from_secs(6 * 3600);
+/// How many builds of one crate a target keeps, however old: the newest.
+/// A crate gets a build per set of features and profile settings, and a
+/// workspace builds a few of those; the rest are what earlier builds left
+/// (178 builds of one crate in a target built every few minutes).
+pub const KEEP_BUILDS: usize = 3;
+/// How old a build of a crate past the newest KEEP_BUILDS must be before it
+/// goes. A build cargo still uses keeps its old time when it's reused, so
+/// age alone can't tell; being superseded by 3 newer ones can.
+pub const SUPERSEDED_AGE: Duration = DAY;
+/// The same, when the disk is low.
+pub const LOW_SUPERSEDED_AGE: Duration = Duration::from_secs(3600);
+/// How often the auto mode runs while the disk is low, between measures: a
+/// machine building in many targets fills 8 GB in minutes, and a target
+/// left because a build was using it is worth asking about again soon.
+pub const LOW_EVERY: Duration = Duration::from_secs(3 * 60);
 /// How deep under rush's scratch root targets are looked for:
 /// tmp/<project>/<session>/<name>-target.
 pub const SCAN_DEPTH: usize = 3;
@@ -51,6 +66,8 @@ pub struct Level {
     pub target_idle: Duration,
     /// How old an artifact in a target that stays may get.
     pub artifact_age: Duration,
+    /// How old a superseded build of a crate may get.
+    pub superseded_age: Duration,
 }
 
 /// How hard the auto mode cleans at free bytes free: None when there's
@@ -62,13 +79,21 @@ pub fn level(free: u64) -> Option<Level> {
         Some(Level {
             target_idle: LOW_TARGET_IDLE,
             artifact_age: LOW_ARTIFACT_AGE,
+            superseded_age: LOW_SUPERSEDED_AGE,
         })
     } else {
         Some(Level {
             target_idle: TARGET_IDLE,
             artifact_age: ARTIFACT_AGE,
+            superseded_age: SUPERSEDED_AGE,
         })
     }
+}
+
+/// Whether free bytes free is low (under LOW_UNDER), so the auto mode runs
+/// every LOW_EVERY. 0 is not knowing, not low.
+pub fn is_low(free: u64) -> bool {
+    free > 0 && free < LOW_UNDER
 }
 
 /// Whether dir is a cargo target: cargo writes both into every one.
@@ -170,6 +195,69 @@ pub fn old_artifacts(target: &Path, now: SystemTime, max_age: Duration) -> Vec<P
     out
 }
 
+/// The crate and the build a file or folder in deps is of, by its name:
+/// lib<crate>-<16 hex>.rlib, .rmeta, .dylib, <crate>-<16 hex>.d, a test
+/// binary <crate>-<16 hex> and its .dSYM. A lib's "lib" is dropped, so a
+/// crate's library and its test binaries are one crate. None for anything
+/// else.
+pub fn build_of(name: &str) -> Option<(&str, &str)> {
+    let stem = name.split('.').next()?;
+    let (krate, hash) = stem.rsplit_once('-')?;
+    let hex = hash.len() == 16 && hash.bytes().all(|b| b.is_ascii_hexdigit());
+    if !hex || krate.is_empty() {
+        return None;
+    }
+    Some((
+        krate
+            .strip_prefix("lib")
+            .filter(|k| !k.is_empty())
+            .unwrap_or(krate),
+        hash,
+    ))
+}
+
+/// In each profile's deps, the files of a crate's builds older than the
+/// newest KEEP_BUILDS, whose newest file is at least min_age old, sorted.
+/// Cargo builds again any it later finds missing.
+pub fn superseded_artifacts(target: &Path, now: SystemTime, min_age: Duration) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for p in profile_dirs(target) {
+        // crate -> build -> (its newest file's time, its files)
+        let mut crates: BTreeMap<String, BTreeMap<String, (SystemTime, Vec<PathBuf>)>> =
+            BTreeMap::new();
+        for e in std::fs::read_dir(p.join("deps"))
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            let name = e.file_name();
+            let Some((krate, hash)) = name.to_str().and_then(build_of) else {
+                continue;
+            };
+            let path = e.path();
+            let t = mtime(&path).unwrap_or(SystemTime::UNIX_EPOCH);
+            let b = crates
+                .entry(krate.to_string())
+                .or_default()
+                .entry(hash.to_string())
+                .or_insert((SystemTime::UNIX_EPOCH, Vec::new()));
+            b.0 = b.0.max(t);
+            b.1.push(path);
+        }
+        for builds in crates.into_values() {
+            let mut builds: Vec<_> = builds.into_values().collect();
+            builds.sort_by_key(|b| std::cmp::Reverse(b.0));
+            for (t, files) in builds.into_iter().skip(KEEP_BUILDS) {
+                if age(now, t) >= min_age {
+                    out.extend(files);
+                }
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
 /// What removing path would free: the blocks of the files under it with no
 /// other hard link, links not followed.
 pub fn freeable(path: &Path) -> i64 {
@@ -254,8 +342,11 @@ pub enum Act {
 /// and main checkouts: root/target only) and SCAN_DEPTH under scans, and
 /// why it keeps the rest it looked at. A target goes whole once untouched
 /// for the level's target_idle and unused; in the rest that are unused,
-/// artifacts older than its artifact_age go. skip names targets a session
-/// is working on.
+/// artifacts older than its artifact_age go, and builds of a crate
+/// superseded by KEEP_BUILDS newer ones once superseded_age old. skip
+/// names targets a session is working on: never removed whole, but pruned
+/// like the rest when nothing has them open (a main checkout every session
+/// works in would otherwise never be).
 pub fn plan(
     roots: &[PathBuf],
     scans: &[PathBuf],
@@ -273,11 +364,8 @@ pub fn plan(
     }
     let (mut acts, mut kept) = (Vec::new(), Vec::new());
     for t in targets {
-        if skip(&t) {
-            kept.push((t, "a session is working on it".into()));
-            continue;
-        }
-        if age(now, target_activity(&t)) >= lv.target_idle {
+        let working = skip(&t);
+        if !working && age(now, target_activity(&t)) >= lv.target_idle {
             if in_use(&t) {
                 kept.push((t, "idle, but in use".into()));
             } else {
@@ -285,8 +373,14 @@ pub fn plan(
             }
             continue;
         }
-        let paths = old_artifacts(&t, now, lv.artifact_age);
+        let mut paths = old_artifacts(&t, now, lv.artifact_age);
+        paths.extend(superseded_artifacts(&t, now, lv.superseded_age));
+        paths.sort();
+        paths.dedup();
         if paths.is_empty() {
+            if working {
+                kept.push((t, "a session is working on it".into()));
+            }
             continue;
         }
         if in_use(&t) {
@@ -358,7 +452,7 @@ pub fn auto_setting(what: &str) -> rush_plugin::SettingSpec {
         choices: Vec::new(),
         default: "false".into(),
         description: format!(
-            "Every 15 minutes, under 50 GB free, cleans without asking only what loses nothing: {what}. Says what it freed."
+            "Every 15 minutes under 50 GB free, and every 3 under 20 GB, cleans without asking only what loses nothing: {what}. Says what it freed."
         ),
     }
 }

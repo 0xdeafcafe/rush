@@ -477,10 +477,12 @@ fn auto_levels() {
     let normal = disk::Level {
         target_idle: disk::TARGET_IDLE,
         artifact_age: disk::ARTIFACT_AGE,
+        superseded_age: disk::SUPERSEDED_AGE,
     };
     let low = disk::Level {
         target_idle: disk::LOW_TARGET_IDLE,
         artifact_age: disk::LOW_ARTIFACT_AGE,
+        superseded_age: disk::LOW_SUPERSEDED_AGE,
     };
     for (free, want) in [
         (80 * GB, None),
@@ -492,6 +494,97 @@ fn auto_levels() {
         assert_eq!(disk::level(free), want, "{free}");
     }
     assert_eq!(disk::LOW_ARTIFACT_AGE, Duration::from_secs(6 * 3600));
+    for (free, low) in [
+        (0, false),
+        (GB, true),
+        (19 * GB, true),
+        (20 * GB, false),
+        (49 * GB, false),
+    ] {
+        assert_eq!(disk::is_low(free), low, "{free}");
+    }
+    assert_eq!(disk::LOW_EVERY, Duration::from_secs(3 * 60));
+}
+
+// A file in deps names its crate and build; a lib's "lib" is dropped so it
+// and its test binaries are one crate; anything else is no build.
+#[test]
+fn builds_named() {
+    let h = "0123456789abcdef";
+    for (name, want) in [
+        (format!("libserde-{h}.rlib"), Some(("serde", h))),
+        (format!("libserde-{h}.rmeta"), Some(("serde", h))),
+        (format!("serde-{h}.d"), Some(("serde", h))),
+        (format!("live_server-{h}"), Some(("live_server", h))),
+        (format!("live_server-{h}.dSYM"), Some(("live_server", h))),
+        (
+            format!("libsqlx_sqlite-{h}.dylib"),
+            Some(("sqlx_sqlite", h)),
+        ),
+        (format!("lib-{h}.rlib"), Some(("lib", h))),
+        ("libserde.rlib".to_string(), None),
+        ("serde-0123.d".to_string(), None),
+        (format!("serde-{}.d", "g".repeat(16)), None),
+        (format!("-{h}.d"), None),
+    ] {
+        assert_eq!(disk::build_of(&name), want, "{name}");
+    }
+}
+
+// Of one crate's builds, the 3 newest stay however old; older ones go once
+// their newest file is old enough. Other crates and other files are left.
+#[test]
+fn superseded_builds() {
+    let d = tempfile::tempdir().unwrap();
+    let t = target_at(d.path(), "t", Duration::from_secs(60), &[]);
+    let deps = t.join("debug/deps");
+    let now = SystemTime::now();
+    let at = |p: &std::path::Path, when: SystemTime| {
+        std::fs::File::open(p)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(when))
+            .unwrap();
+    };
+    let hours = |n: u64| now - Duration::from_secs(n * 3600);
+    // Five builds of foo, newest first: 0, 1, 2, 3 and 30 hours old.
+    let mut files = Vec::new();
+    for (i, ago) in [0, 1, 2, 3, 30].into_iter().enumerate() {
+        let h = format!("{i:016x}");
+        for f in [format!("libfoo-{h}.rlib"), format!("foo-{h}.d")] {
+            let p = deps.join(&f);
+            std::fs::write(&p, b"x").unwrap();
+            at(&p, hours(ago));
+            files.push(p);
+        }
+    }
+    // One old build of bar: the newest of its crate, so it stays.
+    let bar = deps.join("libbar-ffffffffffffffff.rlib");
+    std::fs::write(&bar, b"x").unwrap();
+    at(&bar, hours(100));
+    let rel = |v: Vec<std::path::PathBuf>| -> Vec<String> {
+        v.iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect()
+    };
+    // An hour: the 4th (3 hours) and 5th (30 hours) builds go.
+    assert_eq!(
+        rel(disk::superseded_artifacts(
+            &t,
+            now,
+            disk::LOW_SUPERSEDED_AGE
+        )),
+        [
+            "foo-0000000000000003.d",
+            "foo-0000000000000004.d",
+            "libfoo-0000000000000003.rlib",
+            "libfoo-0000000000000004.rlib",
+        ]
+    );
+    // A day: only the 30-hour one.
+    assert_eq!(
+        rel(disk::superseded_artifacts(&t, now, disk::SUPERSEDED_AGE)),
+        ["foo-0000000000000004.d", "libfoo-0000000000000004.rlib"]
+    );
 }
 
 // A target built in every few minutes is never idle: with plenty free its
@@ -660,10 +753,19 @@ fn auto_plan_and_apply() {
                     live.join("debug/incremental/s1"),
                 ],
             },
+            // A session works in it: never whole, but its old artifacts go.
+            disk::Act::Prune {
+                target: working.clone(),
+                paths: vec![
+                    working.join("debug/deps/libnew.rlib"),
+                    working.join("debug/deps/libold.rlib"),
+                    working.join("debug/incremental/s1"),
+                ],
+            },
         ]
     );
     let kept: Vec<_> = kept.into_iter().map(|(p, _)| p).collect();
-    assert_eq!(kept, [held.clone(), working.clone()]);
+    assert_eq!(kept, std::slice::from_ref(&held));
     // Asked again right before: now in use, so it stays.
     assert!(disk::apply(&acts[0], &|_| true).is_err());
     assert!(idle.exists());
