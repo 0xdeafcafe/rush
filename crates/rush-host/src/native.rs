@@ -259,7 +259,8 @@ pub fn readings() -> BTreeMap<String, rush_core::usage::Quota> {
 }
 
 /// Whether agent k of provider prov has room, as readings last said: one
-/// account of its with room is enough, and none read is room.
+/// account of its with room is enough, credits on hand are room, and none
+/// read is room.
 pub fn has_quota(
     readings: &BTreeMap<String, rush_core::usage::Quota>,
     k: &str,
@@ -271,7 +272,7 @@ pub fn has_quota(
         .iter()
         .filter(|(key, _)| key.starts_with(&a) || key.starts_with(&b))
         .peekable();
-    mine.peek().is_none() || mine.any(|(_, q)| !q.nearly_out("", Duration::ZERO, now))
+    mine.peek().is_none() || mine.any(|(_, q)| q.room("", Duration::ZERO, now))
 }
 
 /// The candidates a tier could run on, of offers: ready when signed in

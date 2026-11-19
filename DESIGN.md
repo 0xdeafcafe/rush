@@ -491,6 +491,13 @@ Claude, fleet, the other adapters) builds on these.
   `usage::backoff` (5, 10, 20, 40, then 60 minutes) before asking
   again, where Go asked every 5 minutes from each. A read has Go's
   30-second deadline (`usage::Deadline`; requests ask `usage::within`).
+  Codex's credits (bought for use past the plan) are kept on the
+  reading as `Quota::credits`, balance and all ("65,988 credits"),
+  Rust-only; a reading that doesn't say keeps the last one's
+  (`usage::record`). Credits on hand are room (`Quota::room`): a tier
+  still picks the account, auto-switch doesn't count it out (it moves
+  to an account with plan room when there is one), and its meter says
+  "credits" in yellow rather than "out".
   A claude process whose environment the kernel won't give (another
   user's, or one exited and not yet reaped) runs on no folder, where Go
   counted it as in use on every folder: that kept an idle login's

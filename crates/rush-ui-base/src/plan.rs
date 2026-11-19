@@ -313,8 +313,13 @@ pub fn queue_min(qu: &Queue, now: Ms) -> usize {
 }
 
 /// How much of its short and long windows an account has used, "2%/4%",
-/// and of its short one alone; "out", red, when one is full (windowsUsed).
+/// and of its short one alone; "out", red, when one is full (windowsUsed),
+/// or "credits", yellow, when credits on hand pay past it.
 pub fn windows_used(q: &Quota, now: Ms) -> (Line, Line) {
+    if q.since(now).used("") >= 100.0 && q.credits_pay() {
+        let paid = line([sp("credits", YELLOW)]);
+        return (paid.clone(), paid);
+    }
     if q.since(now).used("") >= 100.0 {
         let out = line([sp("out", RED)]);
         return (out.clone(), out);

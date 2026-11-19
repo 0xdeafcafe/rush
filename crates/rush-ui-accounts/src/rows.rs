@@ -169,9 +169,10 @@ fn now(m: &Model) -> Ms {
     m.clock.unwrap_or_else(rush_core::time::now)
 }
 
-/// Whether a fresh reading says it's nearly out (nearlyOut).
+/// Whether a fresh reading says it's nearly out (nearlyOut): credits on
+/// hand mean it isn't.
 pub fn nearly_out(q: &Quota, now: Ms) -> bool {
-    !q.windows.is_empty() && now - q.fetched_at < FRESH && q.nearly_out("", usage::LEAD, now)
+    !q.windows.is_empty() && now - q.fetched_at < FRESH && !q.room("", usage::LEAD, now)
 }
 
 /// What rush knows of each installed provider's accounts: which is in
@@ -528,6 +529,26 @@ pub fn window_lines(q: &Quota, now: Ms, label: &dyn Fn(&str) -> Span) -> Vec<Lin
     }
     if !q.balance.is_empty() {
         out.push(line([label("balance"), sp(q.balance.clone(), TEXT)]));
+    }
+    if let Some(c) = q
+        .credits
+        .as_ref()
+        .filter(|c| c.pay() || !c.balance.is_empty())
+    {
+        let words = match (c.unlimited, c.balance.is_empty()) {
+            (true, _) => "unlimited".to_string(),
+            (false, true) => "on hand".to_string(),
+            (false, false) => c.balance.clone(),
+        };
+        let paying = q.since(now).used("") >= 100.0 && c.pay();
+        let mut s = line([
+            label("credits"),
+            sp(words, if c.pay() { TEXT } else { FAINT }),
+        ]);
+        if paying {
+            s.spans.push(sp("  paying past the plan's limits", YELLOW));
+        }
+        out.push(s);
     }
     if q.windows.is_empty() && !q.problem.is_empty() {
         out.push(line([label("limits"), sp(q.problem.clone(), YELLOW)]));

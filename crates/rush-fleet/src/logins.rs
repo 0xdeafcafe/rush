@@ -193,7 +193,9 @@ pub fn next_login(logins: &[LoginView], stopped: bool, now: Ms) -> Option<LoginV
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     let nearly = cur.quota.nearly_out("", usage::LEAD, now);
-    let out = stopped || cur.quota.used("") >= 100.0;
+    // Full with credits on hand isn't out: they pay until another
+    // account has room.
+    let out = stopped || (cur.quota.used("") >= 100.0 && !cur.quota.credits_pay());
     if let Some(o) = others
         .iter()
         .find(|o| !(o.quota.used("") >= SWITCH_AT || o.quota.nearly_out("", usage::LEAD, now)))

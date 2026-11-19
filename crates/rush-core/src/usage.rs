@@ -374,6 +374,10 @@ pub struct Quota {
     /// none, or didn't say.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resets: Option<Resets>,
+    /// What pays once its windows fill, Codex's credits; None when the
+    /// reading doesn't say, as a partial update may not. Rust-only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub credits: Option<Credits>,
     /// Reads that failed in a row since the last good one, and when the
     /// last of them did: the next waits backoff(failures) after it, in
     /// every process. Rust-only.
@@ -385,6 +389,26 @@ pub struct Quota {
 
 fn is_zero_i64(n: &i64) -> bool {
     *n == 0
+}
+
+/// Credits bought for use past a plan's windows: with some on hand (or
+/// unlimited), a full window doesn't stop the account, they pay.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "PascalCase")]
+pub struct Credits {
+    /// Whether any are left to spend.
+    pub on_hand: bool,
+    pub unlimited: bool,
+    /// What's left, in the provider's words: "65,988 credits"; "" when
+    /// it didn't say.
+    pub balance: String,
+}
+
+impl Credits {
+    /// Whether they pay past a full window.
+    pub fn pay(&self) -> bool {
+        self.on_hand || self.unlimited
+    }
 }
 
 /// An account's earned limit resets: each one, spent, resets the limits
@@ -424,6 +448,17 @@ impl Quota {
                 && (w.percent >= 99.0
                     || w.percent + w.rate(now) * (w.ahead(lead, now) as f64 / HOUR_MS) >= 100.0)
         })
+    }
+
+    /// Whether credits on hand pay once its windows fill.
+    pub fn credits_pay(&self) -> bool {
+        self.credits.as_ref().is_some_and(Credits::pay)
+    }
+
+    /// Whether it can take work for model within lead: its windows have
+    /// room, or credits pay past them.
+    pub fn room(&self, model: &str, lead: Duration, now: Ms) -> bool {
+        self.credits_pay() || !self.nearly_out(model, lead, now)
     }
 
     /// How full the tightest window for model gets before nearly_out says
@@ -604,12 +639,18 @@ pub fn load(path: &Path) -> BTreeMap<String, Quota> {
 /// Keeps q under key, unless the reading there is newer.
 pub fn record(path: &Path, key: &str, q: &Quota) -> io::Result<()> {
     update(path, |all| {
-        if let Some(old) = all.get(key)
-            && q.fetched_at <= old.fetched_at
-        {
-            return false;
+        let mut q = q.clone();
+        if let Some(old) = all.get(key) {
+            if q.fetched_at <= old.fetched_at {
+                return false;
+            }
+            // A reading that doesn't say keeps what the last said of its
+            // credits.
+            if q.credits.is_none() {
+                q.credits.clone_from(&old.credits);
+            }
         }
-        all.insert(key.to_string(), q.clone());
+        all.insert(key.to_string(), q);
         true
     })
 }
@@ -1307,6 +1348,27 @@ mod tests {
         old.fetched_at = time::now() - HOUR;
         record(&path, "codex:a", &old).unwrap();
         assert_ne!(load(&path)["codex:a"].fetched_at, old.fetched_at);
+
+        // A reading that doesn't say of its credits keeps what the last
+        // said; one that does replaces it.
+        let mut paid = load(&path).remove("codex:a").unwrap();
+        paid.fetched_at += 1;
+        paid.credits = Some(Credits {
+            on_hand: true,
+            balance: "65,988 credits".into(),
+            ..Credits::default()
+        });
+        record(&path, "codex:a", &paid).unwrap();
+        let mut partial = paid.clone();
+        partial.fetched_at += 1;
+        partial.credits = None;
+        record(&path, "codex:a", &partial).unwrap();
+        assert_eq!(load(&path)["codex:a"].credits, paid.credits);
+        let mut spent = partial.clone();
+        spent.fetched_at += 1;
+        spent.credits = Some(Credits::default());
+        record(&path, "codex:a", &spent).unwrap();
+        assert!(!load(&path)["codex:a"].credits_pay());
         {
             use std::os::unix::fs::PermissionsExt as _;
             let mode = fs::metadata(&path).unwrap().permissions().mode();
@@ -1454,6 +1516,39 @@ mod tests {
 
     // A window that has reset since its reading isn't nearly out, however
     // full it read.
+    // Credits on hand are room past a full window; spent ones aren't.
+    #[test]
+    fn credits_are_room_past_a_full_window() {
+        let now = time::now();
+        let full = week(now, 100.0, 0, HOUR);
+        for (credits, room) in [
+            (None, false),
+            (Some(Credits::default()), false),
+            (
+                Some(Credits {
+                    on_hand: true,
+                    ..Credits::default()
+                }),
+                true,
+            ),
+            (
+                Some(Credits {
+                    unlimited: true,
+                    ..Credits::default()
+                }),
+                true,
+            ),
+        ] {
+            let q = Quota {
+                credits: credits.clone(),
+                ..full.clone()
+            };
+            assert!(q.nearly_out("", LEAD, now), "{credits:?}");
+            assert_eq!(q.room("", LEAD, now), room, "{credits:?}");
+        }
+        assert!(week(now, 10.0, 0, HOUR).room("", LEAD, now));
+    }
+
     #[test]
     fn a_reset_window_isnt_nearly_out() {
         let now = time::now();

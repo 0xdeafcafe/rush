@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use rush_core::adapter::{self, Profile};
 use rush_core::time::now;
-use rush_core::usage::{Billing, Quota, ResetCredit, Resets, Scope, Source, Window};
+use rush_core::usage::{Billing, Credits, Quota, ResetCredit, Resets, Scope, Source, Window};
 use serde_json::Value;
 
 use crate::json::{arr, get, int, num, s, st};
@@ -32,8 +32,8 @@ pub(crate) struct Snapshot {
     pub primary: Option<LimitWindow>,
     pub secondary: Option<LimitWindow>,
     pub plan_type: String,
-    /// (has credits, unlimited)
-    pub credits: Option<(bool, bool)>,
+    /// Its CreditsSnapshot, when it has one.
+    pub credits: Option<Credits>,
     pub reached_type: String,
 }
 
@@ -54,14 +54,16 @@ impl Snapshot {
             primary: w("primary"),
             secondary: w("secondary"),
             plan_type: st(v, "planType"),
-            credits: get(v, "credits").map(|c| {
-                (
-                    c.get("hasCredits")
+            credits: get(v, "credits")
+                .filter(|c| c.is_object())
+                .map(|c| Credits {
+                    on_hand: c
+                        .get("hasCredits")
                         .and_then(Value::as_bool)
                         .unwrap_or(false),
-                    c.get("unlimited").and_then(Value::as_bool).unwrap_or(false),
-                )
-            }),
+                    unlimited: c.get("unlimited").and_then(Value::as_bool).unwrap_or(false),
+                    balance: balance_words(s(c, "balance")),
+                }),
             reached_type: st(v, "rateLimitReachedType"),
         }
     }
@@ -99,11 +101,7 @@ impl Snapshot {
         for w in [&self.primary, &self.secondary].into_iter().flatten() {
             spent = spent || w.used_percent >= 100.0;
         }
-        if spent
-            && self
-                .credits
-                .is_some_and(|(has, unlimited)| has || unlimited)
-        {
+        if spent && self.credits.as_ref().is_some_and(Credits::pay) {
             return Some(Billing::Overage);
         }
         Some(Billing::Plan)
@@ -133,7 +131,34 @@ pub(crate) fn quota_from(s: &Snapshot) -> Quota {
         fetched_at: now(),
         source: Source::Live,
         windows: windows_of(s),
+        credits: s.credits.clone(),
         ..Quota::default()
+    }
+}
+
+/// A CreditsSnapshot's balance as words: "65988" reads "65,988 credits";
+/// a balance that isn't a number is kept as it came.
+pub(crate) fn balance_words(b: &str) -> String {
+    let b = b.trim();
+    let Ok(n) = b.replace(',', "").parse::<f64>() else {
+        return b.to_string();
+    };
+    let whole = n.abs().trunc() as u64;
+    let digits = whole.to_string();
+    let mut grouped = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            grouped.push(',');
+        }
+        grouped.push(c);
+    }
+    let frac = n.abs().fract();
+    let sign = if n < 0.0 { "-" } else { "" };
+    if frac >= 0.005 {
+        let cents = format!("{frac:.2}");
+        format!("{sign}{grouped}{} credits", &cents[1..])
+    } else {
+        format!("{sign}{grouped} credits")
     }
 }
 
@@ -443,18 +468,47 @@ mod tests {
         }
     }
 
+    // A snapshot's credits, balance and all, are the reading's.
+    #[test]
+    fn credits_and_their_balance() {
+        let v: Value = serde_json::from_str(
+            r#"{"primary":{"usedPercent":100},"credits":{"hasCredits":true,"unlimited":false,"balance":"65988"}}"#,
+        )
+        .unwrap();
+        let q = quota_from(&Snapshot::from_value(&v));
+        let c = q.credits.as_ref().expect("credits");
+        assert!(c.on_hand && !c.unlimited);
+        assert_eq!(c.balance, "65,988 credits");
+        assert!(q.credits_pay());
+        let none: Value = serde_json::from_str(r#"{"primary":{"usedPercent":1}}"#).unwrap();
+        assert_eq!(quota_from(&Snapshot::from_value(&none)).credits, None);
+        for (b, want) in [
+            ("65988", "65,988 credits"),
+            ("1234567.5", "1,234,567.50 credits"),
+            ("12", "12 credits"),
+            ("0", "0 credits"),
+            ("", ""),
+            ("lots", "lots"),
+        ] {
+            assert_eq!(balance_words(b), want, "{b}");
+        }
+    }
+
     // codex_test.go:TestBilling
     #[test]
     fn billing() {
         let full = win(100.0, None, None);
         let part = win(40.0, None, None);
-        let credits = Some((true, false));
+        let credits = Some(Credits {
+            on_hand: true,
+            ..Credits::default()
+        });
         let cases: Vec<(&str, Snapshot, Option<Billing>)> = vec![
             (
                 "within the plan",
                 Snapshot {
                     primary: part.clone(),
-                    credits,
+                    credits: credits.clone(),
                     ..Snapshot::default()
                 },
                 Some(Billing::Plan),
@@ -464,7 +518,7 @@ mod tests {
                 Snapshot {
                     primary: part.clone(),
                     secondary: full.clone(),
-                    credits,
+                    credits: credits.clone(),
                     ..Snapshot::default()
                 },
                 Some(Billing::Overage),
@@ -481,7 +535,7 @@ mod tests {
                 "reached, credits pay",
                 Snapshot {
                     reached_type: "rate_limit_reached".into(),
-                    credits,
+                    credits: credits.clone(),
                     ..Snapshot::default()
                 },
                 Some(Billing::Overage),

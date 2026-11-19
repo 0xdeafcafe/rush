@@ -738,7 +738,7 @@ pub fn has_room(m: &Model) -> bool {
         .logins
         .iter()
         .find(|l| l.current)
-        .is_some_and(|l| fresh(&l.quota, now) && !l.quota.nearly_out("", usage::LEAD, now))
+        .is_some_and(|l| fresh(&l.quota, now) && l.quota.room("", usage::LEAD, now))
 }
 
 // ---- A line of text, asked for ----
