@@ -344,7 +344,9 @@ Claude, fleet, the other adapters) builds on these.
   padding: rows stay 1280 B); the menu bar's notification for it opens
   the parent, its buttons answering the child on the child's host
   (`Agent::sub_asker()`, the parent's subagent tile marked `asking`;
-  the wait's and op's `via`). docs/subagents.md has it whole.
+  the wait's and op's `via`). Decisions a child ended on are its
+  parent's, never folded up; a child's usage limit carries on at the
+  reset rather than asking. docs/subagents.md has it whole.
 - **A host's lines in a burst.** A session streaming big tool results
   makes tens of thousands of lines a second. Each end of a host's socket
   asks for 4 MiB (rush-host `sys::widen`; macOS gives 8 KiB, so the

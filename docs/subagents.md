@@ -133,6 +133,13 @@ count of its runs asking you in `subs.asking`, which fits the stats'
 padding, so a row stays 1280 B. An asleep parent with no child asking
 is as it was, not under Needs you.
 
+Not everything a child waits on is yours. Decisions a child's turn
+ended on are its answer to the agent that started it, which has them
+already, so they don't fold up into the parent (`fold_spawns` skips a
+run that `decides`). Nor does a usage limit ask about a child: the
+agent waiting on it can't say, so its host carries on by itself at the
+reset, as the `auto` setting would.
+
 In the menu bar the parent's row is the one waiting, and a click on its
 notification opens the parent; but its buttons are the child's ask's:
 Allow and Deny for a permission, the options and a typed answer for a

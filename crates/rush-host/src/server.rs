@@ -4135,6 +4135,12 @@ impl Host {
                 l.continue_ = true;
                 l.ask = false;
             }
+            if l.ask && st.cfg.meta.get("spawnedBy").is_some_and(|s| !s.is_empty()) {
+                // A subagent's agent waits on it, not you: it carries on
+                // at the reset, as the agent that started it can't say.
+                l.continue_ = true;
+                l.ask = false;
+            }
             let f = json!({"window": l.window, "resetsAt": l.resets_at.format(), "setting": st.cfg.limit_mode, "continue": l.continue_, "ask": l.ask, "away": gone, "account": st.info.home});
             st.info.limit = Some(l);
             st.info.state = "idle".into();

@@ -1076,3 +1076,22 @@ fn a_limit_said_before_isnt_a_sign_in() {
         "a new agent starts with the old one's limit"
     );
 }
+
+// A usage limit asks you whether to carry on at the reset; a subagent's
+// doesn't, as its agent waits on it and can't say: it carries on.
+#[test]
+fn a_limit_asks_you_but_not_of_a_subagent() {
+    let _home = Home::new();
+    for (spawned, asks) in [(false, true), (true, false)] {
+        let h = idle_host("limited", spawned);
+        let mut st = h.lock();
+        let e = event::TurnEnd {
+            reason: "error".into(),
+            err: "Claude usage limit reached".into(),
+            ..event::TurnEnd::default()
+        };
+        assert!(h.stalled(&mut st, &e), "spawned {spawned}: not a stall");
+        let l = st.info.limit.as_ref().expect("a limit");
+        assert_eq!(l.ask, asks, "spawned {spawned}");
+    }
+}

@@ -270,7 +270,9 @@ impl Loader {
         };
         // What each asks you, as it was read: one asking you something
         // folds too, the row it folds into asking for it (Rust-only; Go
-        // kept it a row of its own).
+        // kept it a row of its own). Decisions a run ended on aren't
+        // yours: they're its answer to the agent that started it, which
+        // has them already.
         let names: Vec<String> = agents
             .iter()
             .map(|a| {
@@ -283,7 +285,9 @@ impl Loader {
         let asks: Vec<Option<Ask>> = agents
             .iter()
             .zip(&names)
-            .map(|(a, n)| (a.job.state == State::Blocked && !a.checking).then(|| Ask::of(a, n)))
+            .map(|(a, n)| {
+                (a.job.state == State::Blocked && !a.checking && !a.decides).then(|| Ask::of(a, n))
+            })
             .collect();
         // The rows a run they started, or one it started, waits on you
         // through: their tiles say so.

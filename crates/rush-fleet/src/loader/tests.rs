@@ -1390,6 +1390,21 @@ fn hosted_spawns() {
     );
     assert!(got[0].waiting() && !got[0].needs_you(), "seen since");
 
+    // Decisions a spawn ended on are its answer to its parent, not a
+    // question for you: the parent doesn't need you for them.
+    let mut k3 = k2.clone();
+    k3.job.needs = "1 decision".into();
+    k3.decides = true;
+    let got = l.fold_spawns(
+        Some(&empty),
+        vec![p3.clone(), k3],
+        Vec::new(),
+        &mut HashSet::new(),
+    );
+    assert_eq!(got.len(), 1);
+    assert_ne!(got[0].job.state, State::Blocked, "{:?}", got[0].job.needs);
+    assert!(!got[0].needs_you() && !got[0].waiting());
+
     // A parent asking something of its own says that.
     let mut p4 = p3;
     p4.job.state = State::Blocked;
