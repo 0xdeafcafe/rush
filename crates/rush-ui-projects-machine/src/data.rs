@@ -75,15 +75,16 @@ pub struct Cfg {
     /// How long, in hours, done work waits before the tidy-up: 0 the
     /// default (3h), below 0 never.
     pub cleanup_hours: i64,
-    /// Settings › Disk and memory: the free disk, in GB, and the minutes
-    /// under memory pressure that have rush offer a cleanup agent (0 the
+    /// Settings › Disk's "Offer a cleanup when disk is under" and
+    /// General's Memory: the free disk, in GB, and the minutes under
+    /// memory pressure that have rush offer a cleanup agent (0 the
     /// default, -1 never).
     #[serde(rename = "cleanupDiskGB")]
     pub cleanup_disk_gb: i64,
     #[serde(rename = "cleanupRAMMinutes")]
     pub cleanup_ram_minutes: i64,
-    /// The free disk, in GB, that's dire (super::dire): 0 the default, -1
-    /// never.
+    /// The free disk, in GB, that's dire (super::dire; Settings › Disk's
+    /// "When nearly full, clean anyway under"): 0 the default, -1 never.
     #[serde(rename = "cleanupDireGB")]
     pub cleanup_dire_gb: i64,
     /// The disk engine's switch, "Clean on its own when disk is low"

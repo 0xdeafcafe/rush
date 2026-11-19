@@ -1,20 +1,21 @@
 //! A dire disk with nobody there (Rust-only; Go had no such clean). The
 //! cleanup agent deletes nothing you haven't approved, but when free disk
-//! falls under the dire level (Settings › Disk and memory's "Clean up on
-//! its own when disk is under": 0 the lower of 5G and 2% of the disk), its
-//! plan has waited DIRE_AWAY for you and you haven't touched rush for as
-//! long, rush itself removes the conservative set: only what's made or
-//! fetched again and loses no work. Done sessions' scratch untouched for
-//! days, build caches (rush_fleet::CACHE_NAMES) in worktrees nobody works
-//! in and none would lose work, then pnpm store prune; never a worktree, a
-//! stopped session's scratch, an orphan, or anything changed since the
-//! plan. Biggest first, only until free space is back over the dire level
-//! and DIRE_MARGIN. With a plan ($TMPDIR/cleanup-plan.tsv, care.rs's
-//! CARE_PLAN_FILE) only what it marks conservative: yes and rush's own
-//! look agrees with; with none yet, what rush knows. Each goes through
-//! rush_fleet's checked removals (clean_stale_temp, remove_cache: refused
-//! when changed or in use, dry-run aware, logged), and the cleanup session
-//! is told what went, its decisions still open for the rest.
+//! falls under the dire level (Settings › Disk's "When nearly full, clean
+//! anyway under", whatever its switch says: 0 the lower of 5G and 2% of
+//! the disk), its plan has waited DIRE_AWAY for you and you haven't
+//! touched rush for as long, rush itself removes the conservative set:
+//! only what's made or fetched again and loses no work. Done sessions'
+//! scratch untouched for days, build caches (rush_fleet::CACHE_NAMES) in
+//! worktrees nobody works in and none would lose work, then pnpm store
+//! prune; never a worktree, a stopped session's scratch, an orphan, or
+//! anything changed since the plan. Biggest first, only until free space
+//! is back over the dire level and DIRE_MARGIN. With a plan
+//! ($TMPDIR/cleanup-plan.tsv, care.rs's CARE_PLAN_FILE) only what it marks
+//! conservative: yes and rush's own look agrees with; with none yet, what
+//! rush knows. Each goes through rush_fleet's checked removals
+//! (clean_stale_temp, remove_cache: refused when changed or in use,
+//! dry-run aware, logged), and the cleanup session is told what went, its
+//! decisions still open for the rest.
 //!
 //! Rust-only too, rush's disk engine runs first, at the low level whatever
 //! the dire level is (rush_fleet::disk::run_at, under diskauto's

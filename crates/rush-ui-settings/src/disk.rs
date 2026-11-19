@@ -1,6 +1,10 @@
 //! Settings › Disk: the disk engine's switch, its levels, every rule it
 //! runs (on or off, its numbers per level, what it freed and left in the
-//! last runs) and the rules proposed to it, waiting for your yes.
+//! last runs) and the rules proposed to it, waiting for your yes. With
+//! them, what rush does when space runs short whatever the switch says
+//! (`when_short`: offer a cleanup, the nearly-full clean, trimming a
+//! running session's temp files), once General's Disk and memory (Go's
+//! settings_general.go:13 had the offer; the rest are Rust-only).
 //! Rust-only: Go had no disk engine. Laid out as remote.rs is (a page
 //! backed by its own file, read off the UI), its rows' own keys as
 //! ollama.rs's. The rules are rush-fleet's (disk/ruleset.rs: load_rules,
@@ -21,7 +25,9 @@ use rush_fleet::disk::{
 };
 use serde_json::Value;
 
-use super::form::{Section, Setting, set};
+use super::form::{Section, Setting, choice, set};
+use super::general::{off_pick, off_value};
+use super::paint::on_off;
 use super::paint::trunc;
 use super::{Page, State, ask, config, config_mut};
 use crate::frame::Out;
@@ -697,6 +703,7 @@ pub fn sections(m: &Model) -> Vec<Section> {
         rows: top,
         ..Section::default()
     }];
+    out.push(when_short(m));
     let file = match &snap.file {
         None => {
             out.push(Section::new(
@@ -757,6 +764,66 @@ pub fn sections(m: &Model) -> Vec<Section> {
     out
 }
 
+/// What rush does when space runs short, whatever the switch says: offer
+/// a cleanup (care.rs), the nearly-full clean (dire.rs: the rules below
+/// at low, then its own set), and trimming a running session's temp
+/// files (rush-host's trim.rs). Their keys are config.json's as they were
+/// on General: cleanupDiskGB, cleanupDireGB, trimRunningTmp.
+fn when_short(m: &Model) -> Section {
+    let c = config(m);
+    let mut offer = choice(
+        "Offer a cleanup when disk is under",
+        &off_pick(c.cleanup_disk_gb, "G"),
+        "rush watches your free disk itself, without AI, whether Clean on its own is on or off. When there's less than this it asks, at most every 6 hours, what you'd like: Clean up now opens rush's own list with no agent (worktrees that can go, done sessions' scratch, and caches that rebuild themselves: ones rush knows, and ones you accepted under Proposed), ticked for you to confirm; or a cleanup agent (with the cleanup plugin on; off, it recommends turning it on) reads your worktrees, rush's scratch folders, what's left in /tmp and what plugins like Haven and go-clean report, and proposes a list of what can go without losing work for you to approve. Nothing is removed until you say yes, and then only what you approve.",
+        &[
+            ("", "it asks once there's less than 20G free."),
+            ("10G", "it asks once there's less than 10G free."),
+            ("50G", "it asks once there's less than 50G free."),
+            ("off", "it never asks about disk."),
+        ],
+        set(|m, v| config_mut(m).cleanup_disk_gb = off_value(v)),
+    );
+    offer.unset = "20G".into();
+    let mut dire = choice(
+        "When nearly full, clean anyway under",
+        &off_pick(c.cleanup_dire_gb, "G"),
+        &format!(
+            "A last resort, apart from Clean on its own above: it runs even with that off. When free disk is under this, you haven't touched rush for 30 minutes and a cleanup's list (if there is one) has waited as long, rush cleans in two steps. First the rules below, at their low numbers (under {} free), all but the worktree rule; a rule you turned off stays off. Then, only if there still isn't room, its own set of what's made again and loses no work: done sessions' scratch folders untouched for days, build caches (target, node_modules, .next, .turbo, dist) in worktrees nobody works in, then pnpm's unused store and docker's prunes. Biggest first, only until there's room again. Never a worktree, a stopped session's scratch, or anything changed lately; the rest of the list still waits for you.",
+            gb(LOW_UNDER)
+        ),
+        &[
+            ("", "under 5G free, or 2% of the disk if that's less."),
+            ("2G", "under 2G free."),
+            ("10G", "under 10G free."),
+            (
+                "off",
+                "rush never cleans on its own because the disk is nearly full.",
+            ),
+        ],
+        set(|m, v| config_mut(m).cleanup_dire_gb = off_value(v)),
+    );
+    dire.unset = "5G".into();
+    let trim = choice(
+        "Trim a running session's temp files",
+        on_off(c.trim_running_tmp),
+        "Each session has a temp folder of its own. With this on, while free disk is under 20G (or under a tenth of the disk), whether Clean on its own is on or off, rush looks every 10 minutes and removes what's in a running session's temp folder that's 3 hours old and open in no process. Claude Code's own folders there stay. A session that's ended has its temp folder removed anyway.",
+        &[
+            ("off", "a running session's temp files stay until it ends."),
+            (
+                "on",
+                "under 20G free, its old temp files that nothing has open go.",
+            ),
+        ],
+        set(|m, v| config_mut(m).trim_running_tmp = v == "on"),
+    );
+    Section {
+        title: "When space runs short".into(),
+        note: "whether Clean on its own is on or off".into(),
+        rows: vec![offer, dire, trim],
+        ..Section::default()
+    }
+}
+
 /// A line of the page with nothing to change.
 fn note_row(text: &str, c: Color) -> Setting {
     let t = text.to_string();
@@ -770,16 +837,19 @@ fn note_row(text: &str, c: Color) -> Setting {
 /// The switch.
 fn auto_row(m: &Model) -> Setting {
     let on = config(m).disk.auto;
-    let mut st = super::form::choice(
+    let mut st = choice(
         "Clean on its own when disk is low",
         if on { "on" } else { "off" },
         &format!(
-            "Rush runs these rules itself while free disk is under {} (harder under {}), and logs each run as a disk-clean event saying what went and what stayed and why. Off, nothing is removed without you: Clean up still offers the same rules.",
+            "Rush runs these rules itself while free disk is under {} (harder under {}), and logs each run as a disk-clean event saying what went and what stayed and why. Off, rush runs them by itself only as a last resort, when the disk is nearly full (below, When nearly full: a switch of its own); Clean up still offers the same rules.",
             gb(NORMAL_UNDER),
             gb(LOW_UNDER)
         ),
         &[
-            ("off", "nothing is removed without you."),
+            (
+                "off",
+                "the rules run on their own only in the nearly-full clean below.",
+            ),
             (
                 "on",
                 "rush cleans by the rules when the disk is low, removing nothing in use.",

@@ -1,6 +1,7 @@
 //! Disk and memory: a cleanup agent, offered when they run low. Plain code
 //! watches the free disk and the memory pressure; when either passes what
-//! Settings › Disk and memory says, rush asks whether to start a cleanup
+//! Settings › Disk ("Offer a cleanup when disk is under") or General's
+//! Memory says, rush asks whether to start a cleanup
 //! agent, and no agent runs until you say yes. Go: internal/ui/
 //! machinecare.go (careReason :48, watchMachine :67, short :125,
 //! careSheet :164, reads :179, andList :188, body :197, key :234, pick

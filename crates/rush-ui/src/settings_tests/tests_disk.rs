@@ -402,3 +402,89 @@ fn disk_proposal_accepted_after_seeing_its_command() {
     press(&mut m, "x");
     assert!(load_rules().unwrap().proposed.is_empty());
 }
+
+/// Everything about the disk is on this page: the rows that were
+/// General's "Disk and memory" sit under When space runs short, keep
+/// their config.json keys, and General keeps only the memory row.
+#[test]
+fn disk_rows_moved_from_general() {
+    let (mut m, _d) = model(240, 60);
+    set_settings_page(&mut m, PAGE_DISK);
+    let secs = disk::sections(&m);
+    let titles: Vec<&str> = secs.iter().map(|s| s.title.as_str()).collect();
+    assert_eq!(
+        titles,
+        ["Disk", "When space runs short", "Rules", "Proposed"],
+        "the moved rows come after the switch and levels"
+    );
+    let short: Vec<&str> = secs[1].rows.iter().map(|r| r.label.as_str()).collect();
+    assert_eq!(
+        short,
+        [
+            "Offer a cleanup when disk is under",
+            "When nearly full, clean anyway under",
+            "Trim a running session's temp files",
+        ]
+    );
+    // The nearly-full clean says it's a switch of its own and what it
+    // does, with the Low level's number as the page shows it; the switch
+    // says the same from its side.
+    let dire = &secs[1].rows[1];
+    for want in [
+        "runs even with that off",
+        "the rules below, at their low numbers (under 40G free)",
+        "only until there's room again",
+    ] {
+        assert!(dire.what.contains(want), "lacks {want:?}: {}", dire.what);
+    }
+    assert!(body(&m, 230).contains("under 40G free"));
+    let auto = &secs[0].rows[0];
+    assert!(
+        auto.what.contains("nearly full"),
+        "the switch points at the nearly-full clean: {}",
+        auto.what
+    );
+
+    // General has none of them, and its section is Memory now.
+    let general = (pages()[PAGE_GENERAL].form.unwrap())(&m);
+    assert!(general.iter().all(|s| s.title != "Disk and memory"));
+    let memory = general
+        .iter()
+        .find(|s| s.title == "Memory")
+        .expect("General's Memory section");
+    let labels: Vec<&str> = memory.rows.iter().map(|r| r.label.as_str()).collect();
+    assert_eq!(labels, ["Offer a cleanup when memory is full for"]);
+    for gone in short {
+        assert!(
+            flat(&general).iter().all(|r| r.label != gone),
+            "{gone} is on Disk now"
+        );
+    }
+
+    // Each row still writes the key it always did.
+    for (label, key, want) in [
+        ("Offer a cleanup when disk is under", "cleanupDiskGB", "10"),
+        ("When nearly full, clean anyway under", "cleanupDireGB", "2"),
+        (
+            "Trim a running session's temp files",
+            "trimRunningTmp",
+            "true",
+        ),
+    ] {
+        let row = flat(&disk::sections(&m))
+            .into_iter()
+            .find(|r| r.label == label)
+            .unwrap_or_else(|| panic!("no row {label:?}"));
+        // As a pick does: set, then saved.
+        rush_ui_settings::form::cycle(&mut m, &row, 1);
+        rush_ui_settings::changed(&mut m);
+        let raw = std::fs::read_to_string(rush_state::dir().join("config.json")).unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(saved[key].to_string(), want, "{label}: {raw}");
+    }
+    let c = config(&m);
+    assert_eq!(
+        (c.cleanup_disk_gb, c.cleanup_dire_gb, c.trim_running_tmp),
+        (10, 2, true)
+    );
+}

@@ -1,6 +1,6 @@
 //! Settings › General's first half: how long agents stay where, what
-//! happens to finished work, notifications, the feed, cleanups and
-//! stalls. After Go's internal/ui/settings_general.go (generalSections
+//! happens to finished work, notifications, the feed, the memory
+//! cleanup and stalls (the disk's are Settings › Disk's). After Go's internal/ui/settings_general.go (generalSections
 //! :13, offPick :206, offValue :218, onOffWord :231, cleanupValue :238,
 //! countValue :249, activeValue :257, attributionSetting :269).
 
@@ -451,37 +451,13 @@ pub fn sections(m: &Model) -> Vec<Section> {
     );
     secs.push(Section::new("Agent views", vec![views]));
 
-    let mut low_disk = choice(
-        "Offer a cleanup when disk is under",
-        &off_pick(c.cleanup_disk_gb, "G"),
-        "rush watches your free disk itself, without AI. When it's this low it asks whether to start a cleanup agent (with the cleanup plugin on; off, it recommends turning it on): one that reads your worktrees, rush's scratch folders, what's left in /tmp and what plugins like Haven and go-clean report, and proposes a list of what can go without losing work for you to approve. It deletes only what you approve, then says what it freed. Nothing starts until you say yes.",
-        &[
-            ("", "it asks once there's less than 20G free."),
-            ("10G", "it asks once there's less than 10G free."),
-            ("50G", "it asks once there's less than 50G free."),
-            ("off", "it never asks about disk."),
-        ],
-        set(|m, v| config_mut(m).cleanup_disk_gb = off_value(v)),
-    );
-    low_disk.unset = "20G".into();
-    // Rush-only: what rush removes itself when the disk is dire and you're away.
-    let mut dire_disk = choice(
-        "Clean up on its own when disk is under",
-        &off_pick(c.cleanup_dire_gb, "G"),
-        "When the disk is this low, a cleanup's list has waited 30 minutes for you and you haven't touched rush for as long, rush itself removes only what's made again and loses no work: done sessions' scratch folders untouched for days, build caches (target, node_modules, .next, .turbo, dist) in worktrees nobody works in, and pnpm's unused store. Never a worktree, a stopped session's scratch, or anything changed lately. Biggest first, only until there's room again; the rest of the list still waits for you.",
-        &[
-            ("", "under 5G free, or 2% of the disk if that's less."),
-            ("2G", "under 2G free."),
-            ("10G", "under 10G free."),
-            ("off", "rush never removes anything without you."),
-        ],
-        set(|m, v| config_mut(m).cleanup_dire_gb = off_value(v)),
-    );
-    dire_disk.unset = "5G".into();
+    // The disk's rows (offer a cleanup, the nearly-full clean, trimming a
+    // running session's temp files) are Settings › Disk's (disk.rs
+    // `when_short`), with the engine's switch and levels.
     let mut high_ram = choice(
         "Offer a cleanup when memory is full for",
         &off_pick(c.cleanup_ram_minutes, "m"),
-        "rush watches memory pressure itself, without AI. When the memory has been under pressure this long it asks whether to start a cleanup agent, which can stop what's holding memory (Haven's stacks, dev servers left running; with the cleanup plugin on) as well as free disk. Nothing starts until you say yes.",
+        "rush watches memory pressure itself, without AI. When the memory has been under pressure this long it asks whether to start a cleanup agent, which can stop what's holding memory (Haven's stacks, dev servers left running; with the cleanup plugin on) as well as free disk. Nothing starts until you say yes. When to offer one for the disk is on Settings › Disk.",
         &[
             ("", "it asks after 15 minutes under memory pressure."),
             ("5m", "it asks after 5 minutes under memory pressure."),
@@ -492,25 +468,9 @@ pub fn sections(m: &Model) -> Vec<Section> {
     );
     high_ram.unset = "15m".into();
     // Rush-only rows from here to Stalls: config.json had these with no
-    // row (trimRunningTmp, ownWorktrees, onboarding.hidden, compactKind;
-    // the advisor's is on Usage).
-    let trim = choice(
-        "Trim a running session's temp files",
-        on_off(c.trim_running_tmp),
-        "Each session has a temp folder of its own. With this on, when the disk is low (under 20G free, or a tenth of it) rush looks every 10 minutes and removes what's in a running session's temp folder that's 3 hours old and open in no process. Claude Code's own folders there stay. A session that's ended has its temp folder removed anyway.",
-        &[
-            ("off", "a running session's temp files stay until it ends."),
-            (
-                "on",
-                "when the disk is low, its old temp files that nothing has open go.",
-            ),
-        ],
-        set(|m, v| config_mut(m).trim_running_tmp = v == "on"),
-    );
-    secs.push(Section::new(
-        "Disk and memory",
-        vec![low_disk, dire_disk, high_ram, trim],
-    ));
+    // row (ownWorktrees, onboarding.hidden, compactKind; trimRunningTmp is
+    // Settings › Disk's, the advisor's on Usage).
+    secs.push(Section::new("Memory", vec![high_ram]));
 
     let mut projects = Section::new("Projects", project_rows(m));
     projects.note = projects_note(m);

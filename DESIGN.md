@@ -1405,8 +1405,9 @@ deleted as it went. Here it never deletes on its own:
   Blocked (loader.rs, as any session's decisions): it sits under Needs
   you, and the watch (`finished_care`) counts only Done as its end, so the
   plan isn't taken for it; while it waits nothing more is offered.
-- The sheet, the cleanup plugin's description and Settings › Disk and
-  memory say it proposes a list for you to approve.
+- The sheet, the cleanup plugin's description and Settings › Disk's
+  "Offer a cleanup when disk is under" say it proposes a list for you to
+  approve.
 - The sheet's first choice is Clean up now (`CareChoice::CleanUp`, `c`):
   rush's own list by its rules, no agent and no plugin needed. It opens
   Clean up, which beyond worktrees and scratch measures, off the UI once
@@ -1595,9 +1596,9 @@ would need to run unattended) cleans the conservative set (`dire.rs`,
 from `watch_machine`'s disk read, in the rush that leads, at most every
 30 minutes):
 
-- dire: free disk under Settings › Disk and memory's "Clean up on its own
-  when disk is under" (`cleanupDireGB`: 0 the lower of 5G and 2% of the
-  disk, -1 never; `dire_level`);
+- dire: free disk under Settings › Disk's "When nearly full, clean anyway
+  under" (`cleanupDireGB`: 0 the lower of 5G and 2% of the disk, -1
+  never; `dire_level`), whatever the engine's switch (`disk.auto`) says;
 - away: no key, click or paste in rush (`Model::last_input`, else rush's
   start) for 30 minutes, and the cleanup's plan (its agent Blocked) open
   as long; with no plan yet, what rush knows is used (`dire_due`);
@@ -1854,6 +1855,22 @@ Remote does) and writes only through `update_rules`.
   session_core's `start::install` calls with `research::research_now`:
   the cleanup agent in research mode, which proposes and removes
   nothing).
+- When space runs short (note: "whether Clean on its own is on or off"):
+  the three disk rows that were General's "Disk and memory", moved here
+  so everything about the disk is on one page; their config.json keys
+  are as they were (`cleanupDiskGB`, `cleanupDireGB`, `trimRunningTmp`),
+  so nothing is migrated. General keeps the memory row, its section
+  renamed Memory. "Offer a cleanup when disk is under" (care.rs, 20G
+  unless set): the sheet with Clean up now and the cleanup agent.
+  "When nearly full, clean anyway under" (dire.rs, the lower of 5G and
+  2% unless set): named apart from the switch, and its words say it runs
+  even with the switch off and what it does: the rules at their low
+  numbers (the Low level's number from `LOW_UNDER`, so the two can't
+  disagree), all but the worktree rule, then its own set only until
+  there's room. The switch's own words say the same from its side: off,
+  the rules run on their own only in the nearly-full clean. "Trim a running
+  session's temp files" (rush-host's trim.rs) says "under 20G free"
+  rather than "low", which on this page is the engine's 40G level.
 - Rules: one row per rule, built-in then yours: ● on / ○ off, its title,
   its numbers at normal and at low (`2d`; artifacts as `6h, 3 past 1h`:
   age, builds kept, superseded; `runs` for a command; `–` where it
@@ -2277,7 +2294,8 @@ check, on one page after General (`PAGE_USAGE`, rush-ui-settings
 - Then what the transcripts say, once read: totals, the heaviest
   sessions, findings and handovers ("Where the figures show" below).
 
-Left where they were, on purpose: General's Hibernate, Disk and memory,
+Left where they were, on purpose: General's Hibernate, Memory (its disk
+rows went to Settings › Disk's "When space runs short"),
 Stalls (the machine and the list, not tokens), and "#compact starts on"
 (your own /compact's choice, not something rush does by itself); Config's
 "At a usage limit" (it's the order of that page's grid); Claude Code's
