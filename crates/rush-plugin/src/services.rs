@@ -36,6 +36,76 @@ pub struct CleanupReport {
     pub rules: String,
 }
 
+/// What a plugin finds on disk that rush's disk engine may clean
+/// (rush-fleet's disk module): DiskCandidates. The plugin removes nothing
+/// itself; the engine's rules decide, and its removals ask whether
+/// anything uses the path right before.
+pub const SERVICE_DISK_CANDIDATES: &str = "disk.candidates";
+
+/// What a disk.candidates ask may say: the level rush cleans at ("normal"
+/// or "low") and the free bytes. services.ask carries no parameters yet,
+/// so a plugin gets this empty and reports everything it found.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DiskCandidatesAsk {
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub level: String,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub free: u64,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
+}
+
+/// A disk.candidates answer.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DiskCandidates {
+    pub candidates: Vec<DiskCandidate>,
+}
+
+/// One thing on disk a plugin reports: rush-fleet's disk::Candidate on the
+/// wire, the fields a plugin can know.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DiskCandidate {
+    /// Absolute.
+    pub path: String,
+    /// What it is, which rules name ("go-build-cache", "node-modules"):
+    /// lowercase, dashes.
+    pub kind: String,
+    /// What it is, in a few words, for you.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub why: String,
+    /// Its blocks on disk, every file counted once; 0 when not measured.
+    pub bytes_on_disk: u64,
+    /// What removing it would free: files with no other hard link.
+    pub bytes_freeable: u64,
+    pub facts: DiskFacts,
+}
+
+/// What decides whether a reported candidate goes; what the plugin didn't
+/// look at is left out.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DiskFacts {
+    /// When a build last wrote it, in Unix milliseconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_build: Option<i64>,
+    /// When anything in it last changed, in Unix milliseconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mtime: Option<i64>,
+    /// Whether anything uses it: "unknown" (or left out), "yes" or "no".
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub in_use: String,
+    /// The session it belongs to, and the worktree.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub session: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub worktree: String,
+}
+
 /// How long one plugin has to answer a service.call.
 pub const SERVICE_TIMEOUT: Duration = Duration::from_secs(45);
 
@@ -116,6 +186,42 @@ pub fn providers(service: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // disk.candidates' answer, as rush-fleet's disk::from_answer reads it:
+    // camelCase, what wasn't looked at left out.
+    #[test]
+    fn disk_candidates_on_the_wire() {
+        let a = DiskCandidates {
+            candidates: vec![DiskCandidate {
+                path: "/Users/me/src/app/node_modules".into(),
+                kind: "node-modules".into(),
+                why: "app's packages".into(),
+                bytes_on_disk: 900,
+                bytes_freeable: 800,
+                facts: DiskFacts {
+                    mtime: Some(1_700_000_000_000),
+                    in_use: "no".into(),
+                    session: "s1".into(),
+                    ..Default::default()
+                },
+            }],
+        };
+        assert_eq!(
+            serde_json::to_value(&a).unwrap(),
+            serde_json::json!({"candidates": [{
+                "path": "/Users/me/src/app/node_modules",
+                "kind": "node-modules",
+                "why": "app's packages",
+                "bytesOnDisk": 900,
+                "bytesFreeable": 800,
+                "facts": {"mtime": 1_700_000_000_000i64, "inUse": "no", "session": "s1"}
+            }]})
+        );
+        assert_eq!(
+            serde_json::to_value(DiskCandidatesAsk::default()).unwrap(),
+            serde_json::json!({})
+        );
+    }
 
     #[test]
     fn service_names() {

@@ -71,7 +71,8 @@ pub use proxy::Proxy;
 pub use rpc::{CallError, Conn, Error, Handler, MAX_FRAME, Raw};
 pub use sandbox::{Launch, supported};
 pub use services::{
-    Answer, CleanupReport, SERVICE_CLEANUP_REPORT, SERVICE_TIMEOUT, ask_service, providers,
+    Answer, CleanupReport, DiskCandidate, DiskCandidates, DiskCandidatesAsk, DiskFacts,
+    SERVICE_CLEANUP_REPORT, SERVICE_DISK_CANDIDATES, SERVICE_TIMEOUT, ask_service, providers,
 };
 pub use sidebar::{Sidebar, SidebarAgent, SidebarSection, Sidebars};
 pub use text::{clean, clip, printable};

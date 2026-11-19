@@ -502,7 +502,7 @@ pub fn rule_for<'a>(path: &str, rules: &'a [CacheRule], home: &str) -> Option<&'
 }
 
 /// go clean -modcache for the cache at path (or a dry run writes it down).
-fn go_clean(path: &str, why: &str) -> Result<(), String> {
+pub(crate) fn go_clean(path: &str, why: &str) -> Result<(), String> {
     if rush_core::dryrun::would("go-clean-modcache", path, why) {
         return Ok(());
     }

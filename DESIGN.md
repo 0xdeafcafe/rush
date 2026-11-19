@@ -1608,6 +1608,87 @@ Each removal is logged as its own event, and the run as `quiet-clean`
 (what went, what stayed and why, the free disk before and after). The
 news says so (`quiet_words`) only when df shows a gigabyte or more freed.
 
+## The disk engine (Rust-only)
+
+Disk cleanup is a core feature, off by default, run by a deterministic
+engine (rush-fleet's `disk` module) on data rules. Plugins only report
+what they find; the cleanup agent only proposes rules.
+
+- Levels by free space (`disk::level`): normal under 50G
+  (`NORMAL_UNDER`), low under 20G (`LOW_UNDER`); nothing at or above 50G,
+  nor when free can't be read (0).
+- A rule (`disk::Rule`): id, title, kind, enabled, and its numbers per
+  level (`normal`, `low`: `Params` with `idleSecs`, `ageSecs`, `keep`,
+  `supersededSecs`); a level with none is one the rule doesn't run at.
+  Kinds: `cargo-target` (a whole target no build touched for idle),
+  `cargo-artifacts` (deps artifacts and incremental sessions older than
+  age; of each crate's builds the newest keep stay, older ones go once
+  superseded old), `worktree` (merged into base, clean, idle, nothing
+  working there), `cache-dir` (a folder its tool makes again, idle; each
+  hex-named folder in it; or Go's module cache through go clean),
+  `tool-command` (a tool's own clean-up, run once), `plugin-candidate`
+  (what plugins report of a kind, idle).
+- The built-in rules are what the clean-ups did on their own before:
+  targets 2 days idle (30 minutes low), artifacts 2 days old (6 hours
+  low), builds past the newest 3 a day old (an hour low), worktrees 3
+  days idle, kache's store emptied when low; plus rules.rs's `BUILT_IN`
+  cache folders and Go's module cache, which Clean up offered, only when
+  low.
+- `disk-rules.json` in rush's folder, `{ "rules": [...], "proposed":
+  [...] }`, keeps only what differs from the built-in rules (your edits,
+  rules you made, proposals), so an untouched built-in follows rush's
+  defaults as they change; a built-in can be turned off, not removed.
+  Every change reads, changes and writes under a flock on
+  `disk-rules.lock` beside it (`update_rules`, `rush_state::write_json`).
+  A file that can't be read is an error, never the defaults: they'd run
+  what you turned off. A proposal (`disk::Proposal`: the rule, evidence
+  text, who, when) never runs until accepted into rules.
+- Candidates (`disk::Candidate`): path, kind, the rule that found it,
+  bytes on disk and freeable (files with one link only), and the facts
+  that decide it (`Facts`: last build, mtime, merged, uncommitted files,
+  processes working there, main, locked, in use unknown/yes/no, its
+  session, whether that's working now, its worktree, a target's
+  artifacts). Plugins report theirs through the `disk.candidates`
+  service (rush-plugin's `DiskCandidates`, the same JSON); `from_answer`
+  takes them in, leaving out any not absolute or claiming a kind the
+  engine finds itself.
+- What the engine finds itself (`find_candidates`, for the rules that
+  run at the level): cargo targets at each worktree's and main checkout's
+  `target` (the repos sessions work in, worktrees from `git worktree
+  list`) and 3 levels under the scratch roots the caller gives
+  (`temp_roots`: the system tmp's `rush/` and rush's old `tmp/`), each with when a build last touched it and its
+  artifacts (deps files with the crate and build `build_of` names, and
+  incremental sessions); the linked worktrees, looked at as reap.rs did
+  (when anything changed, git status, processes working there, how its
+  commits are kept); each cache-dir rule's folders, walked. A target or
+  worktree belongs to the session whose cwd it's in or whose id is on
+  its path, a working one first.
+- `plan(candidates, rules, level, now) -> (acts, kept)` is pure: no disk,
+  clock or processes. A target goes whole once untouched for the
+  cargo-target rule's idle, unless a session is working on it; else its
+  artifacts past the artifact rule's age and its crates' builds past the
+  newest `keep` once superseded old are pruned, a working session's
+  target too. A worktree a session is working in, or not yet idle, is
+  neither done nor kept; an idle one goes when nothing refuses it
+  (locked, uncommitted files, git status failed, processes there or not
+  knowing, commits not in the default branch, in use), else it's kept
+  with those reasons. Only what a rule would act on is said to stay.
+  Tool commands run last, after every removal. Of several enabled rules
+  of a kind, the first that runs at the level decides.
+- `apply(act, in_use)` asks in_use right before each removal and goes
+  only on no (not knowing keeps it): through `sweep::remove_tree`
+  (NEVER_TOUCH refused), go clean -modcache, or `git worktree remove`
+  unforced then `git worktree prune` (the branch stays). A target that
+  isn't one any more stays. A dry run writes each down instead.
+  `in_use` is clean/disk.rs's: `lsof +D` by its path, then `ps axeww`.
+- `run(scan, handed, rules, free, now)` finds, plans and applies, and
+  logs one `disk-clean` event: free, level, what it did (path, what,
+  rule, freed), what it left and why, freed; or why it did nothing
+  (enough free, free unknown, nothing a rule says goes).
+- Not wired yet: the scheduler and switch, Settings → Disk, plugins'
+  candidates and the agent's proposals are their own lanes; the clean
+  plugins' auto mode still runs as before.
+
 ## The Projects tree (Rust-only)
 
 In the rail look Projects draws every repository as a tree

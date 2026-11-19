@@ -7,6 +7,7 @@
 //! Port of internal/fleet. See DESIGN.md "Contracts".
 
 mod caches;
+pub mod disk;
 mod diskmap;
 mod emeritus;
 mod folder;
