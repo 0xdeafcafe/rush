@@ -102,7 +102,7 @@ pub enum InUse {
 pub struct Candidate {
     pub path: PathBuf,
     /// CARGO_TARGET, WORKTREE, CACHE_DIR, or a kind a plugin reports
-    /// ("go-build-cache", "node-modules", …), which plugin-candidate rules
+    /// ("js.node-modules", "rust.sccache", …), which plugin-candidate rules
     /// name.
     pub kind: String,
     /// The rule it was found by: a cache-dir rule's id; "" otherwise.

@@ -12,6 +12,9 @@ rush-state = { path = "../rush-state" }
 rush-events = { path = "../rush-events" }
 rush-sys = { path = "../rush-sys" }
 rush-gh = { path = "../rush-gh" }
+# The disk engine: picked removals go through its apply, and the kits'
+# disk.candidates name what its own cache rules find, to leave it out.
+rush-fleet = { path = "../rush-fleet" }
 # Anthropic's image rule (patches, resize, tiers): one copy, efficiency's.
 rush-efficiency = { path = "../rush-efficiency" }
 serde = { version = "1", features = ["derive"] }

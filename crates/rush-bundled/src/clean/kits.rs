@@ -3,20 +3,48 @@
 //! cargoHome and sccacheDir at :90-151). Rust-only: sccache's caches
 //! where projects put them too (sccache_dirs); the targets sessions build
 //! into under rush's scratch root, removed only once nothing uses them;
-//! and rust-clean's and git-clean's auto modes (rust_auto, reap::git_auto;
-//! disk.rs).
+//! and each folder's kind for the disk engine (the KIND_ consts), which
+//! the kit reports in disk.candidates. Targets and worktrees carry none:
+//! the engine finds those itself. Nothing here deletes on its own.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
-use std::time::SystemTime;
 
+use rush_fleet::disk;
 use rush_plugin::Ctx;
 
 use super::{
-    Clean, Kit, Session, Thing, cache_dir, command, fleet, is_dir, plural, ran, removed, repos,
-    worktrees,
+    Kit, Session, Thing, cache_dir, command, fleet, is_dir, plural, ran, removed, repos, worktrees,
 };
+
+/// Go's build cache where GOCACHE puts it (the engine's own cache-dir rule
+/// has the default folder).
+pub(crate) const KIND_GO_BUILD_CACHE: &str = "go.build-cache";
+/// gopls's cache.
+pub(crate) const KIND_GO_GOPLS_CACHE: &str = "go.gopls-cache";
+/// golangci-lint's cache (the default folder is the engine's).
+pub(crate) const KIND_GO_LINT_CACHE: &str = "go.golangci-lint-cache";
+/// Cargo's downloaded crates (registry/cache).
+pub(crate) const KIND_RUST_REGISTRY_CACHE: &str = "rust.registry-cache";
+/// Cargo's unpacked crates (registry/src).
+pub(crate) const KIND_RUST_REGISTRY_SRC: &str = "rust.registry-src";
+/// Cargo's git dependencies.
+pub(crate) const KIND_RUST_GIT_DEPS: &str = "rust.git-deps";
+/// An sccache cache: sccache's own, or one a project or agent names.
+pub(crate) const KIND_RUST_SCCACHE: &str = "rust.sccache";
+/// The one target folder CARGO_TARGET_DIR makes every project build into.
+pub(crate) const KIND_RUST_SHARED_TARGET: &str = "rust.shared-target";
+/// pnpm's content-addressed store.
+pub(crate) const KIND_JS_PNPM_STORE: &str = "js.pnpm-store";
+/// npm's cache.
+pub(crate) const KIND_JS_NPM_CACHE: &str = "js.npm-cache";
+/// yarn's cache.
+pub(crate) const KIND_JS_YARN_CACHE: &str = "js.yarn-cache";
+/// bun's install cache.
+pub(crate) const KIND_JS_BUN_CACHE: &str = "js.bun-cache";
+/// node_modules in a linked worktree no session is working in.
+pub(crate) const KIND_JS_NODE_MODULES: &str = "js.node-modules";
 
 static GO: LazyLock<Kit> = LazyLock::new(|| Kit {
     name: "go-clean",
@@ -26,7 +54,6 @@ static GO: LazyLock<Kit> = LazyLock::new(|| Kit {
     procs: &["gopls", "golangci-lint", "dlv"],
     things: go_things,
     settings: Vec::new(),
-    auto: None,
 });
 
 static RUST: LazyLock<Kit> = LazyLock::new(|| Kit {
@@ -36,11 +63,7 @@ static RUST: LazyLock<Kit> = LazyLock::new(|| Kit {
     needs: &["cargo"],
     procs: &["rust-analyzer", "bacon", "cargo-watch", "sccache"],
     things: rust_things,
-    settings: vec![super::disk::auto_setting(
-        "Cargo targets no build has touched for 2 days and nothing uses (half an hour under 20 GB free, and kache's store emptied), \
-         and in targets that stay, artifacts not written for 2 days",
-    )],
-    auto: Some(rust_auto),
+    settings: Vec::new(),
 });
 
 static JS: LazyLock<Kit> = LazyLock::new(|| Kit {
@@ -51,7 +74,6 @@ static JS: LazyLock<Kit> = LazyLock::new(|| Kit {
     procs: &["node", "bun", "deno"],
     things: js_things,
     settings: Vec::new(),
-    auto: None,
 });
 
 static GIT: LazyLock<Kit> = LazyLock::new(|| Kit {
@@ -61,14 +83,7 @@ static GIT: LazyLock<Kit> = LazyLock::new(|| Kit {
     needs: &["git"],
     procs: &[],
     things: git_things,
-    settings: {
-        let mut s = super::reap::git_settings();
-        s.push(super::disk::auto_setting(
-            "worktrees no longer needed (clean, merged, idle, nothing running there or using them)",
-        ));
-        s
-    },
-    auto: Some(super::reap::git_auto),
+    settings: super::reap::git_settings(),
 });
 
 pub(crate) fn go_kit() -> &'static Kit {
@@ -99,7 +114,8 @@ fn go_things(ctx: &Ctx, _: &[Session]) -> Vec<Thing> {
                 "runs go clean -cache: builds and tests are slower until it fills again",
                 ran("", "go", &["clean", "-cache"]),
             )
-            .at(d),
+            .at(d)
+            .kind(KIND_GO_BUILD_CACHE),
         );
     }
     if let Ok(d) = command(ctx, "", "go", &["env", "GOMODCACHE"])
@@ -115,9 +131,14 @@ fn go_things(ctx: &Ctx, _: &[Session]) -> Vec<Thing> {
             .at(d),
         );
     }
-    for (id, title, dir) in [
-        ("gopls", "gopls cache", "gopls"),
-        ("golangci-lint", "golangci-lint cache", "golangci-lint"),
+    for (id, title, dir, kind) in [
+        ("gopls", "gopls cache", "gopls", KIND_GO_GOPLS_CACHE),
+        (
+            "golangci-lint",
+            "golangci-lint cache",
+            "golangci-lint",
+            KIND_GO_LINT_CACHE,
+        ),
     ] {
         let d = cache_dir(dir);
         if !d.is_empty() && is_dir(&d) {
@@ -126,9 +147,10 @@ fn go_things(ctx: &Ctx, _: &[Session]) -> Vec<Thing> {
                     id,
                     title,
                     "deletes it; it's built again as needed",
-                    removed(&d),
+                    removed(&d, kind),
                 )
-                .at(d),
+                .at(d)
+                .kind(kind),
             );
         }
     }
@@ -159,29 +181,36 @@ pub(super) fn rust_things_with(
 ) -> Vec<Thing> {
     let mut out = Vec::new();
     let home = cargo_home(env);
-    for (id, title, dir, does) in [
+    for (id, title, dir, does, kind) in [
         (
             "crates",
             "Cargo's downloaded crates",
             "registry/cache",
             "deletes them: crates download again when next built",
+            KIND_RUST_REGISTRY_CACHE,
         ),
         (
             "crates-src",
             "Cargo's unpacked crates",
             "registry/src",
             "deletes them: cargo unpacks them again from what it downloaded",
+            KIND_RUST_REGISTRY_SRC,
         ),
         (
             "cargo-git",
             "Cargo's git dependencies",
             "git",
             "deletes them: git dependencies are cloned again when next built",
+            KIND_RUST_GIT_DEPS,
         ),
     ] {
         let d = Path::new(&home).join(dir).to_string_lossy().into_owned();
         if is_dir(&d) {
-            out.push(Thing::new(id, title, does, removed(&d)).at(d));
+            out.push(
+                Thing::new(id, title, does, removed(&d, kind))
+                    .at(d)
+                    .kind(kind),
+            );
         }
     }
     for (i, d) in sccache_dirs(env, seen).into_iter().enumerate() {
@@ -200,9 +229,10 @@ pub(super) fn rust_things_with(
                 id,
                 title,
                 "deletes it: builds are slower until it fills again",
-                removed(&d),
+                removed(&d, KIND_RUST_SCCACHE),
             )
-            .at(d),
+            .at(d)
+            .kind(KIND_RUST_SCCACHE),
         );
     }
     // One target folder every project builds into.
@@ -212,9 +242,10 @@ pub(super) fn rust_things_with(
                 "target-dir",
                 "Shared target folder",
                 "deletes it: every project builds again from scratch",
-                removed(&d),
+                removed(&d, KIND_RUST_SHARED_TARGET),
             )
-            .at(d),
+            .at(d)
+            .kind(KIND_RUST_SHARED_TARGET),
         );
     }
     // What was built in worktrees no agent is working in. The main
@@ -240,7 +271,7 @@ pub(super) fn rust_things_with(
                 format!("target:{}", w.path),
                 format!("target in {base}"),
                 "deletes it: git ignores it, and a build puts it back",
-                removed_unused(&t),
+                removed(&t, disk::CARGO_TARGET),
             )
             .at(t)
             .within(w.path),
@@ -251,7 +282,7 @@ pub(super) fn rust_things_with(
     // cargo made, never the folders beside it.
     let mut tmp = BTreeSet::new();
     for d in scans {
-        super::disk::find_targets(d, super::disk::SCAN_DEPTH, &mut tmp);
+        disk::find_targets(d, disk::SCAN_DEPTH, &mut tmp);
     }
     for t in tmp {
         let p = t.to_string_lossy().into_owned();
@@ -264,141 +295,12 @@ pub(super) fn rust_things_with(
                 format!("target:{p}"),
                 format!("target in rush's scratch: {rel}"),
                 "deletes it once nothing uses it: a build puts it back",
-                removed_unused(&p),
+                removed(&p, disk::CARGO_TARGET),
             )
             .at(p),
         );
     }
     out
-}
-
-/// A Clean that deletes a folder, but only once nothing uses it, asked
-/// right before (disk::in_use).
-fn removed_unused(path: &str) -> Clean {
-    let path = path.to_string();
-    Arc::new(move |ctx| {
-        if super::disk::in_use(Path::new(&path)) {
-            return Err("something has a file open in it, or names it; it stays".into());
-        }
-        removed(&path)(ctx)
-    })
-}
-
-/// rust-clean's auto mode at level lv (disk.rs): the targets of the repos
-/// sessions work in (each worktree's and main checkout's target) and under
-/// rush's scratch root, whole once no build touched them for lv's
-/// target_idle and nothing uses them, and artifacts older than its
-/// artifact_age in the rest; then, under 20 GB free, kache's store
-/// emptied.
-fn rust_auto(ctx: &Ctx, seen: &[Session], lv: super::disk::Level, _free: u64) -> super::Tick {
-    use super::disk;
-    let (wts, _) = worktrees(seen);
-    let mut roots: Vec<PathBuf> = Vec::new();
-    for r in wts
-        .iter()
-        .flat_map(|w| [w.path.clone(), w.repo.clone()])
-        .chain(repos(ctx, seen))
-    {
-        let r = PathBuf::from(r);
-        if !r.as_os_str().is_empty() && !roots.contains(&r) {
-            roots.push(r);
-        }
-    }
-    let working: Vec<&Session> = seen.iter().filter(|s| s.state == "working").collect();
-    let skip = |t: &Path| {
-        working.iter().any(|s| {
-            !s.cwd.is_empty() && t.starts_with(&s.cwd)
-                || !s.id.is_empty() && t.to_string_lossy().contains(&format!("/{}/", s.id))
-        })
-    };
-    let (acts, kept) = disk::plan(
-        &roots,
-        &scratch_roots(),
-        SystemTime::now(),
-        lv,
-        &skip,
-        &disk::in_use,
-    );
-    let mut t = super::Tick {
-        kept: kept
-            .iter()
-            .map(|(p, why)| format!("{}: {why}", p.display()))
-            .collect(),
-        ..Default::default()
-    };
-    let (mut whole, mut pruned) = (0usize, 0usize);
-    for a in &acts {
-        match disk::apply(a, &disk::in_use) {
-            Ok(n) => {
-                t.freed += n;
-                match a {
-                    disk::Act::Target(_) => whole += 1,
-                    disk::Act::Prune { .. } => pruned += 1,
-                }
-            }
-            Err(e) => {
-                t.kept.push(e.clone());
-                t.failed.get_or_insert(e);
-            }
-        }
-    }
-    if whole > 0 {
-        t.did.push(format!(
-            "removed {} no build touched lately",
-            plural(whole, "target", "targets")
-        ));
-    }
-    if pruned > 0 {
-        t.did.push(format!(
-            "old or superseded builds in {}",
-            plural(pruned, "target", "targets")
-        ));
-    }
-    let now = rush_sys::sysinfo::read_disk().free;
-    if now < disk::LOW_UNDER {
-        if rush_core::adapter::find("kache", &[]).is_none() {
-            t.kept.push("kache's store: kache isn't installed".into());
-        } else {
-            match command(ctx, "", "kache", &["clean", "--cache", "--yes"]) {
-                Ok(_) => {
-                    let after = rush_sys::sysinfo::read_disk().free;
-                    t.freed += after.saturating_sub(now) as i64;
-                    t.did.push("emptied kache's store".into());
-                }
-                Err(e) => {
-                    let e = format!("kache's store: {e}");
-                    t.kept.push(e.clone());
-                    t.failed.get_or_insert(e);
-                }
-            }
-        }
-    }
-    t
-}
-
-/// What an auto mode says it did, and the first thing it left alone
-/// after all; None when it did nothing, so a removal that keeps failing
-/// isn't said every 15 minutes.
-pub(super) fn auto_said(
-    name: &str,
-    free: u64,
-    did: &[String],
-    freed: i64,
-    kept: Option<String>,
-) -> Option<String> {
-    if did.is_empty() {
-        return None;
-    }
-    let mut t = format!(
-        "{name} cleaned on its own with {} free: {}, freeing {}",
-        super::bytes(free as i64),
-        did.join(", "),
-        super::bytes(freed)
-    );
-    if let Some(k) = kept {
-        t += &format!(" · left alone: {k}");
-    }
-    Some(t)
 }
 
 /// Where cargo keeps what it downloads.
@@ -556,7 +458,8 @@ fn js_things(ctx: &Ctx, seen: &[Session]) -> Vec<Thing> {
                 "runs pnpm store prune: removes packages no project uses",
                 ran("", "pnpm", &["store", "prune"]),
             )
-            .at(d),
+            .at(d)
+            .kind(KIND_JS_PNPM_STORE),
         );
     }
     if let Ok(d) = command(ctx, "", "npm", &["config", "get", "cache"])
@@ -569,7 +472,8 @@ fn js_things(ctx: &Ctx, seen: &[Session]) -> Vec<Thing> {
                 "runs npm cache clean --force: packages download again when next installed",
                 ran("", "npm", &["cache", "clean", "--force"]),
             )
-            .at(d),
+            .at(d)
+            .kind(KIND_JS_NPM_CACHE),
         );
     }
     if let Ok(d) = command(ctx, "", "yarn", &["cache", "dir"])
@@ -582,7 +486,8 @@ fn js_things(ctx: &Ctx, seen: &[Session]) -> Vec<Thing> {
                 "runs yarn cache clean: packages download again when next installed",
                 ran("", "yarn", &["cache", "clean"]),
             )
-            .at(d),
+            .at(d)
+            .kind(KIND_JS_YARN_CACHE),
         );
     }
     let d = bun_cache();
@@ -594,7 +499,8 @@ fn js_things(ctx: &Ctx, seen: &[Session]) -> Vec<Thing> {
                 "runs bun pm cache rm: packages download again when next installed",
                 ran("", "bun", &["pm", "cache", "rm"]),
             )
-            .at(d),
+            .at(d)
+            .kind(KIND_JS_BUN_CACHE),
         );
     }
     // Dependencies in worktrees no agent is working in. The main
@@ -617,9 +523,11 @@ fn js_things(ctx: &Ctx, seen: &[Session]) -> Vec<Thing> {
                 format!("nm:{}", w.path),
                 format!("node_modules in {base}"),
                 "deletes it: git ignores it, and an install puts it back",
-                removed(&nm),
+                removed(&nm, KIND_JS_NODE_MODULES),
             )
             .at(nm)
+            .kind(KIND_JS_NODE_MODULES)
+            .of_session(w.agents.first().cloned().unwrap_or_default())
             .within(w.path),
         );
     }

@@ -1457,52 +1457,46 @@ deleted as it went. Here it never deletes on its own:
   on disk says: h2recomp's 18G was that).
   rust-clean also lists the targets sessions build into under rush's
   scratch roots with CARGO_TARGET_DIR (`<root>/<project>/<session>/<name>-target`,
-  13-22G each), and git-clean and rust-clean have an auto mode, each off
-  until its "Clean on its own when disk is low" setting is on
-  (`clean/disk.rs`, ported from h2recomp's `crates/diskclean` at 5f24c7b3,
-  which this replaces). On each 15-minute measure, under 50G free
-  (`AUTO_UNDER`), without asking: git-clean removes the worktrees `reap`'s
-  `refusals` allow; rust-clean removes cargo targets (a folder with both
-  CACHEDIR.TAG and .rustc_info.json, at each worktree's and main
-  checkout's `target` and up to 3 levels under each scratch root, never
-  inside a target) that no build touched for 2 days (`target_activity`:
-  the profile folders and lock files cargo writes each build), and in the
-  rest, `deps` artifacts and `incremental` sessions not written for 2 days.
-  Under 20G (`LOW_UNDER`), targets untouched for half an hour go too,
-  artifacts go at 6 hours old (a target built every few minutes is never
-  idle: one reached 49G, half of it untouched for 6 hours), and kache's
-  store is emptied (`kache clean --cache --yes`) when that's installed and
-  it's still under. Each says what it freed, in every window, and nothing
-  when it did nothing; each tick it's on is an `auto-clean` event (free,
-  level, what it did, what it left and why, or why it did nothing), so a
-  quiet night can be told from a broken one. The clean-ups run as you
+  13-22G each). None of the clean-ups cleans on its own any more: their
+  auto mode (git-clean's worktrees, rust-clean's targets, artifacts and
+  kache's store, each behind an "auto-clean" setting, every 15 minutes
+  under 50G and every 3 under 20G) is the disk engine's built-in rules
+  now (below), run by rush, not a plugin. Each kit answers
+  `disk.candidates` instead (`clean/mod.rs` `candidates`): every folder it
+  measured that has a kind and isn't one the engine finds itself (a
+  built-in cache-dir rule's folder, `engine_finds`; targets and worktrees
+  carry no kind), with its size on disk (each file once), what it would
+  free (files with one link) and when anything in it last changed (one
+  walk, `sizes`), and for node_modules its worktree and a session seen
+  there; whether anything uses it is left unknown, as the engine asks
+  right before a removal. The kinds (`kits.rs` `KIND_*`): go-clean's
+  `go.build-cache` (GOCACHE, when not the engine's folder),
+  `go.gopls-cache`, `go.golangci-lint-cache`; rust-clean's
+  `rust.registry-cache`, `rust.registry-src`, `rust.git-deps`,
+  `rust.sccache` (each sccache cache), `rust.shared-target`
+  (CARGO_TARGET_DIR); js-clean's `js.pnpm-store`, `js.npm-cache`,
+  `js.yarn-cache`, `js.bun-cache`, `js.node-modules` (in a linked
+  worktree no session is working in); git-clean has none (its worktrees
+  are the engine's). No built-in rule acts on them: none was cleaned on
+  its own before, so a plugin-candidate rule for one is a proposal's.
+  `cleanup.report` stays, for the cleanup agent. A row picked in a kit's
+  list whose clean is a removal goes through the engine's `disk::apply`
+  (`removed`, `engine_removed`): a target or folder with `How::Remove`,
+  a worktree no longer needed with `How::RemoveWorktree` after `reap`
+  looks again; apply asks `in_use` right before and goes only on no,
+  through `sweep::remove_tree` (NEVER_TOUCH refused) or git worktree
+  remove unforced. Rows that run a tool (go clean -cache, pnpm store
+  prune, git gc, deleting merged branches) still run it.
+  The clean-ups run as you
   (`as_the_user`): the broker gives a plugin its data folder for HOME and
   `/usr/bin:/bin` for PATH, and beta.29's auto mode did nothing all night
   because of it (kache not found in `~/.cargo/bin`, and `lsof`, in
   `/usr/sbin`, couldn't run, which `in_use` takes as yes); HOME is the
   account's from the password file, PATH gets sbin and the tool folders,
-  and lsof and ps are run by path. Every removal, picked or automatic, asks
-  `in_use` right before and goes only on no: `lsof +D` printed anything or
-  couldn't run, or a process other than rush names the path in its
-  arguments or environment (`ps axeww`: macOS hides platform binaries'
-  environment, Homebrew's cargo and rustc show theirs). Sizes count files
-  with one link only (`freeable`): what kache hard-links frees nothing.
-  Superseded builds: a crate gets a build in `deps` per set of features
-  and profile settings (`build_of`: `lib<crate>-<16 hex>.rlib`, `.rmeta`,
-  `.d`, test binaries and their `.dSYM`), and a target built every few
-  minutes keeps every earlier one (178 builds of one crate in a 49G
-  target), all too young for the age rule. Of each crate's builds the 3
-  newest (`KEEP_BUILDS`) always stay; older ones go once their newest file
-  is a day old, an hour when low (`superseded_artifacts`). Age alone can't
-  tell a superseded build from a live one, since cargo reuses a fresh build
-  without writing it; three newer builds of the same crate can. A target a
-  working session is in (h2recomp's main checkout, which every session
-  works in) is never removed whole but is pruned like the rest, still only
-  when `in_use` says no right before. While it's low the auto mode runs
-  every 3 minutes (`LOW_EVERY`) between the 15-minute measures, without
-  measuring sizes: one tick left a busy target "in use", and the disk
-  filled before the next.
-  Why: the machine hit 100% disk twice in a day from agents' builds.
+  and lsof and ps are run by path.
+  Why: the machine hit 100% disk twice in a day from agents' builds; the
+  history of the targets, artifacts and superseded-builds rules is under
+  the disk engine below.
   - last, the commands every run ends with (`end_commands`, group "Run
     last, once"): pnpm store prune when pnpm is there, then, when docker
     is, `docker image prune -f`, `docker image prune -a -f --filter
@@ -1675,6 +1669,14 @@ what they find; the cleanup agent only proposes rules.
   days idle, kache's store emptied when low; plus rules.rs's `BUILT_IN`
   cache folders and Go's module cache, which Clean up offered, only when
   low.
+  Why the numbers: a target built every few minutes is never idle (one
+  reached 49G, half of it untouched for 6 hours), and keeps every earlier
+  build of each crate (`build_of`: `lib<crate>-<16 hex>.rlib`, `.rmeta`,
+  `.d`, test binaries and their `.dSYM`; 178 builds of one crate), all
+  too young for the age rule: age alone can't tell a superseded build from
+  a live one, since cargo reuses a fresh build without writing it; three
+  newer builds of the same crate can. Sizes count files with one link
+  only: what kache hard-links frees nothing.
 - `disk-rules.json` in rush's folder, `{ "rules": [...], "proposed":
   [...] }`, keeps only what differs from the built-in rules (your edits,
   rules you made, proposals), so an untouched built-in follows rush's
@@ -1721,14 +1723,20 @@ what they find; the cleanup agent only proposes rules.
   (NEVER_TOUCH refused), go clean -modcache, or `git worktree remove`
   unforced then `git worktree prune` (the branch stays). A target that
   isn't one any more stays. A dry run writes each down instead.
-  `in_use` is clean/disk.rs's: `lsof +D` by its path, then `ps axeww`.
+  `in_use`: `lsof +D` by its path, then `ps axeww` (a process other than
+  rush naming the path in its arguments or environment: macOS hides
+  platform binaries' environment, Homebrew's cargo and rustc show
+  theirs); couldn't run is unknown, which keeps it.
 - `run(scan, handed, rules, free, now)` finds, plans and applies, and
   logs one `disk-clean` event: free, level, what it did (path, what,
   rule, freed), what it left and why, freed; or why it did nothing
   (enough free, free unknown, nothing a rule says goes).
-- Not wired yet: the scheduler and switch, Settings → Disk, plugins'
-  candidates and the agent's proposals are their own lanes; the clean
-  plugins' auto mode still runs as before.
+- The bundled clean-ups (go-, rust-, js-, git-clean) report what they
+  find through `disk.candidates` (kinds `go.*`, `rust.*`, `js.*`, above
+  under the clean-ups) and remove nothing on their own; their picked
+  rows remove through `apply`.
+- Not wired yet: the scheduler and switch, Settings → Disk and the
+  agent's proposals are their own lanes.
 
 ## The Projects tree (Rust-only)
 

@@ -1,16 +1,18 @@
 //! git-clean's reaping of worktrees no longer needed: clean, merged, idle
 //! a while, and nothing running there. Each that's stale is listed, with
 //! why it's kept when it is; only one you pick goes.
-//! Ported from internal/bundled/clean/reap.go:1-264. Rust-only: a
-//! worktree goes only once nothing has a file open in it or names it,
-//! asked right before (disk::in_use), and git_auto, git-clean's auto mode.
+//! Ported from internal/bundled/clean/reap.go:1-264. Rust-only: a picked
+//! worktree goes through the disk engine's apply (rush_fleet::disk), only
+//! once nothing has a file open in it or names it, asked right before.
+//! Nothing goes on its own: the engine's worktree rule does that.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use rush_fleet::disk;
 use rush_plugin::{Ctx, Manifest, SettingSpec};
 
 use super::fleet::Worktree;
@@ -331,7 +333,7 @@ fn walk(root: &Path, p: &Path, touch: &mut impl FnMut(SystemTime) -> bool) -> bo
 fn process_cwds(ctx: &Ctx) -> Option<Vec<String>> {
     // SAFETY: getuid has no failure mode.
     let uid = unsafe { libc::getuid() };
-    let mut cmd = Command::new(super::disk::LSOF);
+    let mut cmd = Command::new(disk::LSOF);
     cmd.args(["-n", "-a", "-d", "cwd", "-Fn", "-u", &uid.to_string()]);
     let out = crate::exec::run(cmd, ctx, None, false).ok()?;
     if !out.success() && out.stdout.is_empty() {
@@ -346,66 +348,31 @@ fn process_cwds(ctx: &Ctx) -> Option<Vec<String>> {
 }
 
 /// The Clean of a worktree that can go: it looks again, as things may have
-/// changed since it was listed, then removes it without force, so git
-/// refuses anything dirty or locked too.
+/// changed since it was listed, then has the disk engine remove it
+/// (disk::apply): asked whether anything uses it right before, then git
+/// worktree remove without force, so git refuses anything dirty or locked
+/// too, not stopped halfway, and git worktree prune.
 fn reap(w: Worktree, base: String, idle_for: Duration) -> Clean {
     Arc::new(move |ctx| {
         let cwds = process_cwds(ctx);
-        let why = refusals(&look(ctx, &w, &base, cwds.as_deref(), idle_for), idle_for);
+        let f = look(ctx, &w, &base, cwds.as_deref(), idle_for);
+        let why = refusals(&f, idle_for);
         if !why.is_empty() {
             return Err(format!("left alone: {}", why.join(", ")));
         }
-        if super::disk::in_use(Path::new(&w.path)) {
-            return Err("left alone: something has a file open in it, or names it".into());
-        }
-        // Not stopped halfway, though the clean's time runs out: a removal
-        // killed partway leaves the checkout hollowed out.
-        command(
-            &Ctx::background(),
-            &w.repo,
-            "git",
-            &["worktree", "remove", &w.path],
-        )?;
-        command(ctx, &w.repo, "git", &["worktree", "prune"])?;
+        let act = disk::Act {
+            rule: "picked".into(),
+            path: PathBuf::from(&w.path),
+            kind: disk::WORKTREE.into(),
+            why: format!("picked in git-clean: {}", f.merged),
+            bytes: 0,
+            how: disk::How::RemoveWorktree {
+                repo: PathBuf::from(&w.repo),
+            },
+        };
+        disk::apply(&act, &disk::in_use).map_err(|e| format!("left alone: {e}"))?;
         Ok("Removed; its branch stays.".into())
     })
-}
-
-/// git-clean's auto mode (disk.rs), at any level: every worktree
-/// reap_rows offers (refusals has none for it) goes, each looked at again
-/// and only once nothing uses it.
-pub(crate) fn git_auto(
-    ctx: &Ctx,
-    seen: &[Session],
-    _: super::disk::Level,
-    _free: u64,
-) -> super::Tick {
-    let mut t = super::Tick::default();
-    let mut n = 0usize;
-    for r in reap_rows(ctx, seen)
-        .into_iter()
-        .filter(|r| r.id.starts_with("reap:"))
-    {
-        let size = super::disk::freeable(Path::new(&r.path));
-        match (r.clean)(ctx) {
-            Ok(_) => {
-                n += 1;
-                t.freed += size;
-            }
-            Err(e) => {
-                let e = format!("{}: {e}", r.title);
-                t.kept.push(e.clone());
-                t.failed.get_or_insert(e);
-            }
-        }
-    }
-    if n > 0 {
-        t.did.push(format!(
-            "removed {} no longer needed",
-            plural(n, "worktree", "worktrees")
-        ));
-    }
-    t
 }
 
 /// The Clean of a stale worktree that stays: it only says why.

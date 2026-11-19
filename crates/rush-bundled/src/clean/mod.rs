@@ -8,24 +8,32 @@
 //!
 //! Nothing goes by itself: sizes are measured in the background, and only
 //! what you pick is cleaned.
-//! Ported from internal/bundled/clean/clean.go:1-574.
+//! Ported from internal/bundled/clean/clean.go:1-574. Rust-only: each kit
+//! answers disk.candidates with what it found that rush's disk engine
+//! (rush_fleet::disk) doesn't find itself, each with a kind, its sizes
+//! and facts (candidates); the engine's rules decide what goes, never the
+//! kit. A picked row whose clean is a removal goes through the engine's
+//! apply, which asks whether anything uses the path right before
+//! (engine_removed).
 
-pub mod disk;
 pub mod fleet;
 mod kits;
 mod reap;
 
 use std::collections::{BTreeMap, HashMap};
 use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
+use rush_fleet::disk;
 use rush_plugin::rpc::{Error, from_raw, no_method};
 use rush_plugin::{
-    Bundle, CleanupReport, CommandSpec, Conn, Ctx, EV_SESSION_STOPPED, EV_TURN_ENDED,
-    EV_TURN_STARTED, Manifest, Pick, PickAction, PickItem, Picked, Requires,
-    SERVICE_CLEANUP_REPORT, SettingSpec, UI_EVENTS, UI_NOTIFY, UiEvent,
+    Bundle, CleanupReport, CommandSpec, Conn, Ctx, DiskCandidate, DiskCandidates, DiskFacts,
+    EV_SESSION_STOPPED, EV_TURN_ENDED, EV_TURN_STARTED, Manifest, Pick, PickAction, PickItem,
+    Picked, Requires, SERVICE_CLEANUP_REPORT, SERVICE_DISK_CANDIDATES, SettingSpec, UI_EVENTS,
+    UI_NOTIFY, UiEvent,
 };
 use rush_state::Time;
 use rush_sys::proc;
@@ -75,27 +83,6 @@ pub(crate) struct Kit {
     pub things: fn(&Ctx, &[Session]) -> Vec<Thing>,
     /// What it offers under Settings, Plugins.
     pub settings: Vec<SettingSpec>,
-    /// Its auto mode (Rust-only, disk.rs): cleans on its own, while its
-    /// auto-clean setting is on and the disk is under disk::AUTO_UNDER,
-    /// what loses nothing at the level the free bytes call for.
-    pub auto: Option<Auto>,
-}
-
-/// A kit's auto mode: given the sessions seen, how hard to clean and the
-/// free bytes, it cleans what loses nothing and says what it did.
-pub(crate) type Auto = fn(&Ctx, &[Session], disk::Level, u64) -> Tick;
-
-/// What one auto-mode tick did, and what it left alone and why.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct Tick {
-    /// What it did, each said in a few words.
-    pub did: Vec<String>,
-    /// What that freed, in bytes.
-    pub freed: i64,
-    /// What it looked at and left, each with why: for the event log.
-    pub kept: Vec<String>,
-    /// The first removal that failed after all: said with what it did.
-    pub failed: Option<String>,
 }
 
 /// One row of what a kit keeps.
@@ -111,8 +98,20 @@ pub(crate) struct Thing {
     pub does: String,
     /// A worktree it's in: it isn't cleaned while a session works there.
     pub in_dir: String,
+    /// What it is to the disk engine ("js.node-modules"): a candidate
+    /// the kit reports in disk.candidates when it has a path; "" for
+    /// what's no folder to remove (branches, git's objects) or what the
+    /// engine finds itself (targets, worktrees).
+    pub kind: String,
+    /// A session seen working in in_dir, by id; "" when none.
+    pub session: String,
     pub clean: Clean,
+    /// Its blocks on disk, every file counted once (Sizes::on_disk).
     pub size: i64,
+    /// What removing it would free: files with one link only.
+    pub freeable: u64,
+    /// When anything in it last changed, in Unix milliseconds.
+    pub mtime: Option<i64>,
 }
 
 impl Thing {
@@ -129,9 +128,25 @@ impl Thing {
             meta: String::new(),
             does: does.into(),
             in_dir: String::new(),
+            kind: String::new(),
+            session: String::new(),
             clean,
             size: 0,
+            freeable: 0,
+            mtime: None,
         }
+    }
+
+    /// Reported to the disk engine as a candidate of kind.
+    pub fn kind(mut self, kind: &str) -> Thing {
+        self.kind = kind.into();
+        self
+    }
+
+    /// The session seen working in its worktree.
+    pub fn of_session(mut self, id: impl Into<String>) -> Thing {
+        self.session = id.into();
+        self
     }
 
     pub fn at(mut self, path: impl Into<String>) -> Thing {
@@ -178,7 +193,10 @@ impl Kit {
                 ..Default::default()
             },
             settings: self.settings.clone(),
-            provides: vec![SERVICE_CLEANUP_REPORT.into()],
+            provides: vec![
+                SERVICE_CLEANUP_REPORT.into(),
+                SERVICE_DISK_CANDIDATES.into(),
+            ],
             ..crate::manifest(self.name, "machine", self.about, 128)
         }
     }
@@ -198,9 +216,6 @@ struct State {
     measured: Option<Time>,
     /// when it measures next
     due: Option<Instant>,
-    /// when the auto mode runs next on its own, between measures: only
-    /// while it's on and the disk is low (disk::LOW_EVERY)
-    auto_due: Option<Instant>,
     measuring: bool,
     /// things being cleaned
     busy: std::collections::HashSet<String>,
@@ -294,6 +309,11 @@ impl App {
                 if input.service == SERVICE_CLEANUP_REPORT {
                     return crate::answer(&self.report());
                 }
+                if input.service == SERVICE_DISK_CANDIDATES {
+                    let things = self.lock().things.clone();
+                    let home = std::env::var("HOME").unwrap_or_default();
+                    return crate::answer(&candidates(&things, &home));
+                }
                 Err(no_method(method))
             }
             "ui.picked" => {
@@ -355,25 +375,13 @@ impl App {
                 return;
             }
             let due = st.due.unwrap_or_else(|| Instant::now() + MEASURE_EVERY);
-            let next = st.auto_due.map_or(due, |a| a.min(due));
             let now = Instant::now();
-            if now < next {
+            if now < due {
                 st = self
                     .wake
-                    .wait_timeout(st, next - now)
+                    .wait_timeout(st, due - now)
                     .unwrap_or_else(|e| e.into_inner())
                     .0;
-                continue;
-            }
-            if now < due && !st.measuring {
-                // Only the auto mode is due: the disk is low.
-                st.measuring = true;
-                st.auto_due = None;
-                drop(st);
-                let low = self.auto(conn);
-                st = self.lock();
-                st.measuring = false;
-                st.auto_due = low.then(|| Instant::now() + disk::LOW_EVERY);
                 continue;
             }
             drop(st);
@@ -390,13 +398,14 @@ impl App {
             }
             st.measuring = true;
             st.due = None;
-            st.auto_due = None;
         }
-        let low = self.auto(conn);
         let mut things = (self.k.things)(&self.ctx, &self.sessions());
         for t in &mut things {
             if !t.path.is_empty() {
-                t.size = fleet::disk_usage(&t.path);
+                let s = sizes(Path::new(&t.path));
+                t.size = s.on_disk as i64;
+                t.freeable = s.freeable;
+                t.mtime = s.newest;
             }
         }
         let text = {
@@ -406,7 +415,6 @@ impl App {
             st.measured = Some(now);
             st.measuring = false;
             st.due = Some(Instant::now() + MEASURE_EVERY);
-            st.auto_due = low.then(|| Instant::now() + disk::LOW_EVERY);
             let text = reap_notice(&st.things, st.said, now);
             if !text.is_empty() {
                 st.said = Some(now);
@@ -416,53 +424,6 @@ impl App {
         if !text.is_empty() {
             self.notify(conn, "", &text); // every window: it's nobody's in particular
         }
-    }
-
-    /// The auto mode, when it's on and the disk is low: it says what it
-    /// freed, in every window. Each tick it's on is in the event log
-    /// (auto-clean), what it did or why it did nothing, so a quiet night
-    /// can be told from a broken one.
-    /// It says whether the disk is still low after, so it runs again soon.
-    fn auto(&self, conn: &Conn) -> bool {
-        let Some(f) = self.k.auto else {
-            return false;
-        };
-        if !disk::auto_on(&self.k.manifest()) {
-            return false;
-        }
-        let name = self.k.name;
-        let free = rush_sys::sysinfo::read_disk().free;
-        if free == 0 {
-            rush_events::log(
-                "auto-clean",
-                tick_fields(
-                    name,
-                    free,
-                    None,
-                    &Tick::default(),
-                    "couldn't read the disk's free space",
-                ),
-            );
-            return false;
-        }
-        let Some(lv) = disk::level(free) else {
-            rush_events::log(
-                "auto-clean",
-                tick_fields(name, free, None, &Tick::default(), "enough free"),
-            );
-            return false;
-        };
-        let t = f(&self.ctx, &self.sessions(), lv, free);
-        let why = if t.did.is_empty() {
-            "nothing it may clean"
-        } else {
-            ""
-        };
-        rush_events::log("auto-clean", tick_fields(name, free, Some(lv), &t, why));
-        if let Some(text) = kits::auto_said(name, free, &t.did, t.freed, t.failed.clone()) {
-            self.notify(conn, "", &text);
-        }
-        disk::is_low(rush_sys::sysinfo::read_disk().free)
     }
 
     /// What it keeps, as last measured, for rush's cleanup agent.
@@ -549,7 +510,7 @@ impl App {
         let freed = if t.path.is_empty() {
             0
         } else {
-            t.size - fleet::disk_usage(&t.path)
+            t.size - sizes(Path::new(&t.path)).on_disk as i64
         };
         {
             let mut st = self.lock();
@@ -817,57 +778,124 @@ pub(crate) fn ran(dir: &str, name: &'static str, args: &[&str]) -> Clean {
     })
 }
 
-/// A Clean that deletes a folder.
-pub(crate) fn removed(path: &str) -> Clean {
-    let path = path.to_string();
-    Arc::new(move |_| match std::fs::remove_dir_all(&path) {
-        Ok(()) => Ok(String::new()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-        Err(e) => Err(rush_plugin::gopath::os_err(
-            "unlinkat",
-            std::path::Path::new(&path),
-            &e,
-        )),
+/// A Clean that removes a folder of kind (a candidate's, or
+/// disk::CARGO_TARGET) through the disk engine's apply: asked whether
+/// anything uses it right before, and gone only on no, through
+/// sweep::remove_tree, which refuses what rush never touches. The kit
+/// deletes nothing itself.
+pub(crate) fn removed(path: &str, kind: &str) -> Clean {
+    engine_removed(
+        path,
+        kind,
+        disk::How::Remove,
+        "picked in the clean-up list".into(),
+    )
+}
+
+/// A Clean that does one act through the disk engine's apply, asking
+/// disk::in_use right before.
+pub(crate) fn engine_removed(path: &str, kind: &str, how: disk::How, why: String) -> Clean {
+    let act = disk::Act {
+        rule: "picked".into(),
+        path: PathBuf::from(path),
+        kind: kind.into(),
+        why,
+        bytes: 0,
+        how,
+    };
+    Arc::new(move |_| disk::apply(&act, &disk::in_use).map(|_| String::new()))
+}
+
+/// A folder's sizes, and when anything in it last changed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Sizes {
+    /// Its blocks on disk, each file counted once however many links it
+    /// has in it.
+    pub on_disk: u64,
+    /// What removing it would free: the blocks of files with no other
+    /// link.
+    pub freeable: u64,
+    /// The newest modified time in it, in Unix milliseconds; None when
+    /// it isn't there.
+    pub newest: Option<i64>,
+}
+
+/// path's Sizes, in one walk, links not followed.
+pub(crate) fn sizes(path: &Path) -> Sizes {
+    use std::os::unix::fs::MetadataExt;
+    let mut s = Sizes::default();
+    let mut linked = std::collections::HashSet::new();
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(p) = stack.pop() {
+        let Ok(m) = std::fs::symlink_metadata(&p) else {
+            continue;
+        };
+        let at = m.mtime() * 1000 + m.mtime_nsec() / 1_000_000;
+        s.newest = Some(s.newest.map_or(at, |n| n.max(at)));
+        let blocks = m.blocks() * 512;
+        if m.is_dir() {
+            s.on_disk += blocks;
+            if let Ok(rd) = std::fs::read_dir(&p) {
+                stack.extend(rd.flatten().map(|e| e.path()));
+            }
+        } else if m.nlink() <= 1 {
+            s.on_disk += blocks;
+            s.freeable += blocks;
+        } else if linked.insert((m.dev(), m.ino())) {
+            s.on_disk += blocks;
+        }
+    }
+    s
+}
+
+/// Whether the disk engine finds path itself, under one of its built-in
+/// cache-dir rules' folders (~ as home): a kit leaves those out of its
+/// candidates, or one folder would be two.
+pub(crate) fn engine_finds(path: &str, home: &str) -> bool {
+    let home = home.trim_end_matches('/');
+    disk::built_in_rules().iter().any(|r| match &r.kind {
+        disk::Kind::CacheDir { path: p, .. } if !p.is_empty() => {
+            let p = match p.strip_prefix("~/") {
+                Some(rest) if !home.is_empty() => format!("{home}/{rest}"),
+                Some(_) => return false,
+                None => p.clone(),
+            };
+            path == p || path.starts_with(&format!("{p}/"))
+        }
+        _ => false,
     })
+}
+
+/// A kit's disk.candidates answer: each thing it measured with a kind and
+/// an absolute path, but those the engine finds itself (engine_finds),
+/// with its sizes and facts. Whether anything uses it is left unknown:
+/// the engine asks right before a removal.
+pub(crate) fn candidates(things: &[Thing], home: &str) -> DiskCandidates {
+    DiskCandidates {
+        candidates: things
+            .iter()
+            .filter(|t| !t.kind.is_empty() && t.path.starts_with('/'))
+            .filter(|t| !engine_finds(&t.path, home))
+            .map(|t| DiskCandidate {
+                path: t.path.clone(),
+                kind: t.kind.clone(),
+                why: t.title.clone(),
+                bytes_on_disk: t.size.max(0) as u64,
+                bytes_freeable: t.freeable,
+                facts: DiskFacts {
+                    mtime: t.mtime,
+                    session: t.session.clone(),
+                    worktree: t.in_dir.clone(),
+                    ..DiskFacts::default()
+                },
+            })
+            .collect(),
+    }
 }
 
 /// Whether path is a folder.
 pub(crate) fn is_dir(path: &str) -> bool {
     !path.is_empty() && std::fs::metadata(path).is_ok_and(|m| m.is_dir())
-}
-
-/// An auto-mode tick as the event log has it: the kit, the free bytes,
-/// the level it cleaned at (none: it didn't), what it did and freed, what
-/// it left and why (the first 20), and why it did nothing, if it didn't.
-pub(crate) fn tick_fields(
-    name: &str,
-    free: u64,
-    lv: Option<disk::Level>,
-    t: &Tick,
-    why: &str,
-) -> rush_events::Fields {
-    let mut f = rush_events::Fields::new();
-    f.insert("plugin".into(), json!(name));
-    f.insert("free".into(), json!(free));
-    if let Some(lv) = lv {
-        f.insert("target_idle".into(), json!(lv.target_idle.as_secs()));
-        f.insert("artifact_age".into(), json!(lv.artifact_age.as_secs()));
-    }
-    f.insert("did".into(), json!(t.did));
-    f.insert("freed".into(), json!(t.freed));
-    if !t.kept.is_empty() {
-        f.insert(
-            "kept".into(),
-            json!(t.kept.iter().take(20).collect::<Vec<_>>()),
-        );
-    }
-    if let Some(e) = &t.failed {
-        f.insert("failed".into(), json!(e));
-    }
-    if !why.is_empty() {
-        f.insert("why".into(), json!(why));
-    }
-    f
 }
 
 /// The clean-ups run as you, not as a plugin: the broker gives a plugin

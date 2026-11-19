@@ -1,13 +1,11 @@
 //! The little of the fleet module the clean-up plugins use: the linked
-//! worktrees of the repos sessions work in, how much disk a folder takes,
-//! and which local branches have landed.
-//! Ported from internal/fleet/worktree.go:101-197 and :427-461 (git,
-//! FindWorktrees, mainCheckout), temp.go:53-70 and diskusage.go:14-36
-//! (DiskUsage, statUsage), and verdict.go:205-245 (LandedBranches). Only
-//! what the plugins read of a worktree is kept.
+//! worktrees of the repos sessions work in, and which local branches have
+//! landed. Ported from internal/fleet/worktree.go:101-197 and :427-461
+//! (git, FindWorktrees, mainCheckout) and verdict.go:205-245
+//! (LandedBranches). Only what the plugins read of a worktree is kept.
+//! Sizes are clean/mod.rs's sizes now, each file counted once.
 
 use std::collections::{BTreeSet, HashMap};
-use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
@@ -156,36 +154,6 @@ pub fn find_worktrees(agents: &[Agent]) -> Vec<Worktree> {
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
     out
-}
-
-/// How much disk the folder takes, counted as du does (allocated blocks),
-/// without following links.
-pub fn disk_usage(path: &str) -> i64 {
-    let Ok(st) = std::fs::symlink_metadata(path) else {
-        return 0;
-    };
-    let mut n = st.blocks() as i64 * 512;
-    if st.is_dir() {
-        n += dir_usage(Path::new(path));
-    }
-    n
-}
-
-fn dir_usage(dir: &Path) -> i64 {
-    let Ok(ents) = std::fs::read_dir(dir) else {
-        return 0;
-    };
-    let mut n = 0;
-    for e in ents.flatten() {
-        let Ok(st) = std::fs::symlink_metadata(e.path()) else {
-            continue;
-        };
-        n += st.blocks() as i64 * 512;
-        if st.is_dir() {
-            n += dir_usage(&e.path());
-        }
-    }
-    n
 }
 
 /// repo's local branches, checked out nowhere, whose work is on target: in

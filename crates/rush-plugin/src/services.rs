@@ -72,8 +72,9 @@ pub struct DiskCandidates {
 pub struct DiskCandidate {
     /// Absolute.
     pub path: String,
-    /// What it is, which rules name ("go-build-cache", "node-modules"):
-    /// lowercase, dashes.
+    /// What it is, which plugin-candidate rules name: its ecosystem, a
+    /// dot, then lowercase and dashes ("js.node-modules", "rust.sccache";
+    /// the bundled clean-ups' are in rush-bundled's clean/kits.rs).
     pub kind: String,
     /// What it is, in a few words, for you.
     #[serde(skip_serializing_if = "String::is_empty")]

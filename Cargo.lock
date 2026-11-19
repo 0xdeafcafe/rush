@@ -1300,6 +1300,7 @@ dependencies = [
  "rush-core",
  "rush-efficiency",
  "rush-events",
+ "rush-fleet",
  "rush-gh",
  "rush-plugin",
  "rush-plugind",

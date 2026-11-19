@@ -112,6 +112,15 @@ fn broker_runs_the_bundled_plugins() {
         rep.title == "git-clean" && !rep.report.is_empty() && rep.rules.contains("git-clean"),
         "{rep:?}"
     );
+    // And disk.candidates, for the disk engine: whatever it found, nothing
+    // the engine finds itself (git-clean's worktrees are the engine's).
+    let answers = b.ask(&ctx, rush_plugin::SERVICE_DISK_CANDIDATES, "");
+    let git = answers
+        .iter()
+        .find(|a| a.plugin == "git-clean")
+        .unwrap_or_else(|| panic!("no git-clean disk.candidates: {answers:?}"));
+    let found: rush_plugin::DiskCandidates = from_raw(git.result.as_deref()).unwrap();
+    assert!(found.candidates.is_empty(), "{found:?}");
     // Turned off, it stops.
     rush_plugin::set_bundled("git-clean", false).unwrap();
     b.reload();
