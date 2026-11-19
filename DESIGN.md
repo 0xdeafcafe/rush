@@ -1734,7 +1734,7 @@ what they find; the cleanup agent only proposes rules.
   graphs. For each digest, rush ages the rustc crate data by the later
   of the unit directory mtime and recorded last use. It takes kache's
   unit.lock without waiting, verifies use has not changed and checks
-  lsof and ps at the graph before removing it. Other units can keep
+  lsof and ps at the incremental root rustc names before removing the graph. Other units can keep
   building. The unit, lock inode, and kache metadata stay. The shared
   store still uses kache's native clean command after checking use of
   the store data directories reported by `kache stats --json`.

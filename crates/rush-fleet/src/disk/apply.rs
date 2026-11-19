@@ -121,7 +121,10 @@ fn apply_checked(
             let _lock = super::cargo::lock_graph(p, *last_used)
                 .ok_or_else(|| format!("{ps}: kache unit busy, changed or unavailable"))?;
             let bytes = freeable(p);
-            unused(p, in_use)?;
+            // rustc names the incremental root on its command line, and
+            // chooses the crate subdirectory itself. The held unit.lock
+            // is a sibling of that root.
+            unused(p.parent().ok_or("graph has no rustc directory")?, in_use)?;
             if dry(a) {
                 return Ok(0);
             }

@@ -689,9 +689,9 @@ fn managed_graphs_are_rechecked_individually() {
     lock.try_lock().unwrap();
     set_mtime(unit(4), now);
     let res = apply_all(&acts, vec![], &|p| {
-        if p == expected[1] {
+        if Some(p) == expected[1].parent() {
             InUse::Yes
-        } else if p == expected[2] {
+        } else if Some(p) == expected[2].parent() {
             InUse::Unknown
         } else {
             InUse::No
