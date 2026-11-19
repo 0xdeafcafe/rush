@@ -9,7 +9,7 @@
 //! .rustc_info.json are both in it; nothing is looked for inside one.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
@@ -25,7 +25,18 @@ pub const SCAN_DEPTH: usize = 3;
 
 /// Whether dir is a cargo target: cargo writes both into every one.
 pub fn is_target(dir: &Path) -> bool {
-    dir.join("CACHEDIR.TAG").is_file() && dir.join(".rustc_info.json").is_file()
+    real_dir(dir)
+        && !dir.join(".git").exists()
+        && !dir.join("Cargo.toml").exists()
+        && dir
+            .join("CACHEDIR.TAG")
+            .symlink_metadata()
+            .is_ok_and(|m| m.is_file())
+        && crate::cache_tagged(&dir.to_string_lossy())
+        && dir
+            .join(".rustc_info.json")
+            .symlink_metadata()
+            .is_ok_and(|m| m.is_file())
 }
 
 /// The targets at or below root, depth levels down, never inside one and
@@ -52,6 +63,10 @@ pub fn find_targets(root: &Path, depth: usize, out: &mut BTreeSet<PathBuf>) {
     }
 }
 
+pub(super) fn real_dir(p: &Path) -> bool {
+    p.symlink_metadata().is_ok_and(|m| m.is_dir())
+}
+
 fn mtime(p: &Path) -> Option<SystemTime> {
     std::fs::symlink_metadata(p).ok()?.modified().ok()
 }
@@ -65,7 +80,7 @@ fn profile_dirs(target: &Path) -> Vec<PathBuf> {
             .flatten()
             .flatten()
             .map(|e| e.path())
-            .filter(|p| p.join(".fingerprint").is_dir())
+            .filter(|p| real_dir(p) && real_dir(&p.join(".fingerprint")))
             .collect()
     };
     let mut out = profiles(target);
@@ -118,7 +133,11 @@ pub fn build_of(name: &str) -> Option<(&str, &str)> {
 pub fn artifacts(target: &Path) -> Vec<Artifact> {
     let mut out = Vec::new();
     for p in profile_dirs(target) {
+        managed_graphs(&p, &mut out);
         for (sub, incremental) in [("deps", false), ("incremental", true)] {
+            if !real_dir(&p.join(sub)) {
+                continue;
+            }
             for e in std::fs::read_dir(p.join(sub))
                 .into_iter()
                 .flatten()
@@ -145,12 +164,117 @@ pub fn artifacts(target: &Path) -> Vec<Artifact> {
     out
 }
 
-/// Of arts, those last written at least max_age before now, sorted; one
+/// Only the crate directories inside a managed unit's rustc directory are
+/// Cargo artifacts. Keep kache's metadata, seed markers and lock inode.
+fn managed_graphs(profile: &Path, out: &mut Vec<Artifact>) {
+    let root = profile.join("incremental.kache-auto");
+    if !real_dir(&root) {
+        return;
+    }
+    for version in ["v1", "v2"] {
+        let dir = root.join(version);
+        if !real_dir(&dir) {
+            continue;
+        }
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let unit = e.path();
+            let key = e.file_name();
+            let key = key.as_encoded_bytes();
+            if key.len() != 64 || !key.iter().all(u8::is_ascii_hexdigit) || !real_dir(&unit) {
+                continue;
+            }
+            let rustc = unit.join("rustc");
+            if !real_dir(&rustc) {
+                continue;
+            }
+            let Some(used) = graph_used(&unit) else {
+                continue;
+            };
+            for graph in std::fs::read_dir(rustc).into_iter().flatten().flatten() {
+                if graph.file_type().is_ok_and(|t| t.is_dir()) {
+                    out.push(Artifact {
+                        path: graph.path(),
+                        profile: profile.to_owned(),
+                        mtime: used,
+                        incremental: true,
+                        ..Artifact::default()
+                    });
+                }
+            }
+        }
+    }
+}
+
+/// kache updates the unit directory on use and may record a later clock.
+fn graph_used(unit: &Path) -> Option<Ms> {
+    let modified = ms_of(mtime(unit)?);
+    let path = unit.join("state.json");
+    match path.symlink_metadata() {
+        Ok(m) if m.is_file() && m.len() < 64 * 1024 => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(modified),
+        _ => return None,
+    }
+    let state = match std::fs::read(path) {
+        Ok(data) => serde_json::from_slice::<serde_json::Value>(&data)
+            .ok()?
+            .get("last_used_secs")?
+            .as_i64()?
+            .checked_mul(1000)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => 0,
+        Err(_) => return None,
+    };
+    Some(modified.max(state))
+}
+
+pub(super) fn managed_graph(a: &Artifact) -> bool {
+    a.incremental && a.path.starts_with(a.profile.join("incremental.kache-auto"))
+}
+
+/// Take the same exclusive lock as kache. A build that used this unit
+/// since discovery, a busy lock, or any link in the layout keeps it.
+pub(super) fn lock_graph(graph: &Path, used: Ms) -> Option<std::fs::File> {
+    let rustc = graph.parent()?;
+    let unit = rustc.parent()?;
+    let version = unit.parent()?;
+    let root = version.parent()?;
+    let profile = root.parent()?;
+    let key = unit.file_name()?.as_encoded_bytes();
+    if key.len() != 64
+        || !key.iter().all(u8::is_ascii_hexdigit)
+        || !profile
+            .ancestors()
+            .skip(1)
+            .take(2)
+            .take_while(|d| real_dir(d))
+            .any(is_target)
+        || rustc.file_name()? != "rustc"
+        || root.file_name()? != "incremental.kache-auto"
+        || !matches!(version.file_name()?.to_str()?, "v1" | "v2")
+        || ![graph, rustc, unit, version, root, profile]
+            .into_iter()
+            .all(real_dir)
+    {
+        return None;
+    }
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(unit.join("unit.lock"))
+        .ok()?;
+    if !lock.metadata().ok()?.is_file() {
+        return None;
+    }
+    lock.try_lock().ok()?;
+    (graph_used(unit)? == used).then_some(lock)
+}
+
+/// Of the ordinary Cargo artifacts, those last written at least max_age before now, sorted; one
 /// whose time isn't known (0) stays.
 pub fn old_artifacts(arts: &[Artifact], now: Ms, max_age: Ms) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = arts
         .iter()
-        .filter(|a| a.mtime > 0 && now - a.mtime >= max_age)
+        .filter(|a| !managed_graph(a) && a.mtime > 0 && now - a.mtime >= max_age)
         .map(|a| a.path.clone())
         .collect();
     out.sort();
@@ -223,7 +347,7 @@ pub fn in_use_from(lsof: Option<&[u8]>, ps: Option<&str>, path: &Path, me: u32) 
         Some(out) if !out.is_empty() => return InUse::Yes,
         Some(_) => {}
     }
-    let Some(ps) = ps else {
+    let Some(ps) = ps.filter(|s| !s.trim().is_empty()) else {
         return InUse::Unknown;
     };
     let needle = path.to_string_lossy();
@@ -246,7 +370,13 @@ const PS: &str = "/bin/ps";
 /// and environment (macOS hides the environment of platform binaries;
 /// Homebrew's cargo and rustc show theirs). Asked right before a removal.
 pub fn in_use(path: &Path) -> InUse {
-    let lsof = Command::new(LSOF).arg("+D").arg(path).output().ok();
+    let mut lsof = Command::new(LSOF);
+    match path.symlink_metadata() {
+        Ok(m) if m.is_dir() => lsof.arg("+D"),
+        Ok(m) if m.is_file() => lsof.arg("--"),
+        _ => return InUse::Unknown,
+    };
+    let lsof = lsof.arg(path).output().ok();
     let ps = Command::new(PS)
         .args(["axeww", "-o", "pid=,command="])
         .output()
@@ -256,7 +386,10 @@ pub fn in_use(path: &Path) -> InUse {
     // A link to path names it as its real path.
     let real = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let me = std::process::id();
-    let lsof = lsof.as_ref().map(|o| o.stdout.as_slice());
+    let lsof = lsof
+        .as_ref()
+        .filter(|o| !o.stdout.is_empty() || (o.status.code() == Some(1) && o.stderr.is_empty()))
+        .map(|o| o.stdout.as_slice());
     match in_use_from(lsof, ps.as_deref(), path, me) {
         InUse::No if real != path => in_use_from(Some(&[][..]), ps.as_deref(), &real, me),
         u => u,

@@ -103,7 +103,7 @@ pub struct Rule {
     /// Under 50 GB free.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub normal: Option<Params>,
-    /// Under 20 GB free.
+    /// Under 40 GiB free.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub low: Option<Params>,
 }

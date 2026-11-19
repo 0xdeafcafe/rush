@@ -244,7 +244,11 @@ pub fn research_prompt(known: &[String], reports: &[CleanupReport]) -> String {
     );
     b += "- {\"type\": \"plugin-candidate\", \"kind\": \"<kind>\"}: what plugins report of that kind (listed below), each removed whole once untouched for idleSecs, unless a session works there. Never js.pnpm-store: that's pnpm store prune, above.\n";
     b += "- {\"type\": \"cargo-target\"}, {\"type\": \"cargo-artifacts\"}, {\"type\": \"worktree\"}: rush's own, listed below; propose one only to change its numbers, with its id.\n";
-    b += "A rule runs at the levels it has numbers for: \"normal\" (under 50G free) and \"low\" (under 20G free), each {\"idleSecs\": N} (cargo-artifacts: ageSecs, keep, supersededSecs); a level left out is one it doesn't run at. Prefer low only, and days idle, for what costs a rebuild or a download.\n\n";
+    b += &format!(
+        "A rule runs at the levels it has numbers for: \"normal\" (under {}G free) and \"low\" (under {}G free), each {{\"idleSecs\": N}} (cargo-artifacts: ageSecs, keep, supersededSecs); a level left out is one it doesn't run at. Prefer low only, and days idle, for what costs a rebuild or a download.\n\n",
+        disk::NORMAL_UNDER >> 30,
+        disk::LOW_UNDER >> 30
+    );
     b += &format!(
         "Write your proposals as $TMPDIR/{PROPOSALS_FILE}, the one file you write: a JSON array, each {{\"rule\": {{\"id\", \"title\", \"kind\", \"normal\" and/or \"low\"}}, \"evidence\": \"...\"}}. The id of a folder's rule is cache: and its path below home, as rush's are; the title a few words. The evidence, in a few sentences: the paths, each with its size, what made them and how you know, when they last changed, and why it's safe to go (what makes it again; what's lost is a rebuild or a download, never work). For example:\n{EXAMPLE}\n"
     );

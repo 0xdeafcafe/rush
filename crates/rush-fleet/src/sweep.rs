@@ -275,7 +275,13 @@ pub fn find_tool(name: &str) -> Option<PathBuf> {
         dirs.push(d.into());
     }
     if !h.is_empty() {
-        for d in ["Library/pnpm", ".local/bin", "go/bin", ".docker/bin"] {
+        for d in [
+            "Library/pnpm",
+            ".local/bin",
+            ".cargo/bin",
+            "go/bin",
+            ".docker/bin",
+        ] {
             dirs.push(Path::new(&h).join(d));
         }
     }

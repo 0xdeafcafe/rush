@@ -1,12 +1,12 @@
 //! The disk engine on its own (Rust-only; Go had no engine): with the
 //! switch on (config.json's disk.auto, "Clean on its own when disk is
-//! low"), the rush that leads runs rush-fleet's disk engine every
-//! AUTO_EVERY, every AUTO_EVERY_LOW while free is under disk::LOW_UNDER,
+//! low"), the rush that leads runs rush-fleet's disk engine at
+//! the level's interval, sooner when a reading shows space falling,
 //! off the UI and never two at once (engine_lock, which the dire clean
 //! holds too). It looks where rush's sessions work (their repos and
 //! worktrees, the scratch roots, the processes' folders), takes what the
 //! plugins that answer disk.candidates report within CANDIDATES_WAIT, and
-//! says what it freed in the news; nothing when nothing. Every run is the
+//! reports space freed and any remaining shortage in the news. Every run is the
 //! engine's disk-clean event.
 //!
 //! Once, before the first run: the cache rules learned before rules
@@ -35,9 +35,9 @@ use crate::model::Model;
 use crate::style::disk as size;
 
 /// How often the engine runs with the switch on.
-pub const AUTO_EVERY: Ms = 15 * 60_000;
+pub const AUTO_EVERY: Ms = 10 * 60_000;
 /// How often while free is under disk::LOW_UNDER.
-pub const AUTO_EVERY_LOW: Ms = 3 * 60_000;
+pub const AUTO_EVERY_LOW: Ms = 2 * 60_000;
 /// How long the plugins have to say what they found; one that hasn't by
 /// then is left out of this run.
 pub const CANDIDATES_WAIT: Duration = Duration::from_secs(10);
@@ -58,26 +58,30 @@ pub fn engine_lock() -> MutexGuard<'static, ()> {
     ENGINE.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// How long between runs at free bytes free.
-pub fn auto_every(free: u64) -> Ms {
-    if free > 0 && free < disk::LOW_UNDER {
+/// Uses watch_machine's existing statfs readings. Crossings bypass the regular
+/// interval. A loss of 1 GiB since the last run brings the next scan forward
+/// to one minute. A healthy or unknown reading never starts a scan.
+pub fn auto_due(last: Ms, previous_free: u64, free: u64, now: Ms) -> bool {
+    let Some(level) = disk::level(free) else {
+        return false;
+    };
+    let previous = disk::level(previous_free);
+    let crossed = previous.is_none() || (level == disk::Level::Low && previous != Some(level));
+    let interval = if crossed || previous_free.saturating_sub(free) >= 1 << 30 {
+        60_000
+    } else if level == disk::Level::Low {
         AUTO_EVERY_LOW
     } else {
         AUTO_EVERY
-    }
-}
-
-/// Whether a run is due: never one before (last 0), or auto_every(free)
-/// since the last.
-pub fn auto_due(last: Ms, free: u64, now: Ms) -> bool {
-    last == 0 || now - last >= auto_every(free)
+    };
+    last == 0 || now.saturating_sub(last) >= interval
 }
 
 /// What a run did, in a few words; "" when it did nothing, which isn't
 /// said.
 pub fn auto_words(o: &Outcome) -> String {
     let n = o.did.len();
-    if n == 0 {
+    if n == 0 || o.freed == 0 {
         return String::new();
     }
     format!(
@@ -104,6 +108,9 @@ pub struct DiskAuto {
     /// When the last run started; 0 before one.
     pub at: Ms,
     pub running: bool,
+    /// Baseline for cumulative loss and crossing into cleanup from healthy space.
+    pub free_at_run: u64,
+    pub warned_low: bool,
     /// The plugins' settings are being taken in, or were.
     pub taking_in: bool,
     pub taken_in: bool,
@@ -265,6 +272,7 @@ pub fn complete_scan(mut s: Scan) -> Scan {
 /// What a run came back with.
 pub struct AutoRun {
     pub outcome: Outcome,
+    pub free_after: u64,
     /// Why it couldn't run; "" when it did.
     pub err: String,
 }
@@ -284,18 +292,19 @@ pub fn auto_run(scan: Scan, now: Ms) -> AutoRun {
             rush_events::log("disk-clean", f);
             return AutoRun {
                 outcome: Outcome::default(),
+                free_after: free,
                 err,
             };
         }
     };
-    let handed = if disk::level(free).is_some() {
-        plugin_candidates()
+    let outcome = if disk::level(free).is_some() {
+        disk::run(&complete_scan(scan), plugin_candidates(), &rules, free, now)
     } else {
-        Vec::new()
+        disk::run(&scan, Vec::new(), &rules, free, now)
     };
-    let outcome = disk::run(&complete_scan(scan), handed, &rules, free, now);
     AutoRun {
         outcome,
+        free_after: rush_sys::sysinfo::read_disk().free,
         err: String::new(),
     }
 }
@@ -327,11 +336,27 @@ pub fn watch_disk(m: &mut Model, free: u64) {
     let now = m.now;
     let on = data(m).cfg_read && data(m).cfg.disk_auto;
     let st = m.kept::<DiskAuto>();
-    if !on || st.running || !auto_due(st.at, free, now) {
+    if !on {
+        st.at = 0;
+        st.free_at_run = 0;
+        st.warned_low = false;
+        return;
+    }
+    if st.running {
+        return;
+    }
+    // Use recoveries as the baseline for the next fall, even between runs.
+    st.free_at_run = st.free_at_run.max(free);
+    if free >= disk::LOW_UNDER {
+        st.warned_low = false;
+    }
+
+    if !auto_due(st.at, st.free_at_run, free, now) {
         return;
     }
     st.running = true;
     st.at = now;
+    st.free_at_run = free;
     let scan = scan_of(m);
     m.later(move || auto_run(scan, now), on_run);
 }
@@ -382,12 +407,34 @@ fn on_run(m: &mut Model, r: AutoRun) -> Out {
         return Out::Draw;
     }
     st.said_err.clear();
-    let said = auto_words(&r.outcome);
+    if r.free_after != 0 {
+        st.free_at_run = r.free_after;
+    }
+    let said = finish_words(&r.outcome, r.free_after, &mut st.warned_low);
     if said.is_empty() {
         return Out::Idle;
     }
     m.news(&said, "");
     Out::Draw
+}
+
+/// News after a run, using measured free space. Say a shortage once per episode.
+pub fn finish_words(outcome: &Outcome, free_after: u64, warned_low: &mut bool) -> String {
+    let mut said = auto_words(outcome);
+    if disk::level(free_after) == Some(disk::Level::Low) && !*warned_low {
+        *warned_low = true;
+        if !said.is_empty() {
+            said.push_str(". ");
+        }
+        said.push_str(&format!(
+            "Only {} free after cleanup. Review what rush kept in Settings › Disk.",
+            size(free_after as i64)
+        ));
+    }
+    if free_after >= disk::LOW_UNDER {
+        *warned_low = false;
+    }
+    said
 }
 
 #[cfg(test)]
@@ -399,20 +446,30 @@ mod tests {
     const MIN: Ms = 60_000;
     const NOW: Ms = 1_793_190_896_789;
 
-    // Every 15 minutes, every 3 under 20 GB free; the first at once. Free
-    // not known (0) is the slower pace.
     #[test]
     fn due_by_free() {
-        for (last, free, want, why) in [
-            (0, 80 * G, true, "never ran"),
-            (NOW - 14 * MIN, 30 * G, false, "14m ago, 30G free"),
-            (NOW - 15 * MIN, 30 * G, true, "15m ago, 30G free"),
-            (NOW - 2 * MIN, 10 * G, false, "2m ago, low"),
-            (NOW - 3 * MIN, 10 * G, true, "3m ago, low"),
-            (NOW - 3 * MIN, 20 * G, false, "3m ago, just not low"),
-            (NOW - 5 * MIN, 0, false, "free not known"),
+        assert!(auto_due(0, 0, 44 * G, NOW));
+        for (elapsed, before, free, want) in [
+            (0, 0, 0, false),
+            (0, 0, 80, false),
+            (1, 0, 42, true),
+            (1, 50, 49, true),
+            (0, 40, 39, false),
+            (1, 40, 39, true),
+            (1, 45, 44, true),
+            (0, 45, 44, false),
+            (9, 45, 45, false),
+            (10, 45, 45, true),
+            (1, 35, 35, false),
+            (2, 35, 35, true),
+            (15, 30, 50, false),
+            (15, 30, 0, false),
         ] {
-            assert_eq!(auto_due(last, free, NOW), want, "{why}");
+            assert_eq!(
+                auto_due(NOW - elapsed * MIN, before * G, free * G, NOW),
+                want,
+                "{elapsed} min, {before}G -> {free}G"
+            );
         }
     }
 
@@ -425,6 +482,7 @@ mod tests {
             freed,
         };
         for (did, freed, want) in [
+            (vec![done(0)], 0, ""),
             (vec![], 0, ""),
             (
                 vec![done(3 * G)],
@@ -443,6 +501,25 @@ mod tests {
                 freed,
             };
             assert_eq!(auto_words(&o), want);
+        }
+    }
+
+    #[test]
+    fn warns_once_until_the_disk_recovers() {
+        let mut warned = false;
+        for (free, warn) in [
+            (0, false),
+            (35, true),
+            (12, false),
+            (0, false),
+            (40, false),
+            (39, true),
+        ] {
+            let news = finish_words(&Outcome::default(), free * G, &mut warned);
+            assert_eq!(news.contains("Settings › Disk"), warn);
+            if warn {
+                assert!(news.contains(&size((free * G) as i64)));
+            }
         }
     }
 

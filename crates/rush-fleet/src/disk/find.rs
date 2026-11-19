@@ -150,8 +150,46 @@ pub fn find_candidates(scan: &Scan, rules: &[Rule], lv: Level, now: Ms) -> Vec<C
         for s in &scan.scratch {
             find_targets(s, SCAN_DEPTH, &mut targets);
         }
+        // Shared CARGO_TARGET_DIRs in the cache named after a repository.
+        // Keep whole targets when a session is working in any of its checkouts.
+        let mut shared = HashMap::new();
+        for repo in &repos {
+            let Some(name) = repo.file_name() else {
+                continue;
+            };
+            if !Path::new(&scan.home).is_absolute() {
+                continue;
+            }
+            let owner = scan.sessions.iter().find(|s| {
+                s.working
+                    && wts
+                        .iter()
+                        .any(|(r, w)| r == repo && s.cwd.starts_with(&w.path))
+            });
+            for base in ["Library/Caches", ".cache"] {
+                let cache = Path::new(&scan.home).join(base);
+                if !super::cargo::real_dir(&cache) {
+                    continue;
+                }
+                let project = cache.join(name);
+                if !super::cargo::real_dir(&project) {
+                    continue;
+                }
+                for e in std::fs::read_dir(project).into_iter().flatten().flatten() {
+                    if super::is_target(&e.path()) {
+                        if let Some(s) = owner {
+                            shared.insert(e.path(), s);
+                        }
+                        targets.insert(e.path());
+                    }
+                }
+            }
+        }
         for t in targets {
-            let s = session_of(&t, &scan.sessions);
+            let s = shared
+                .get(&t)
+                .copied()
+                .or_else(|| session_of(&t, &scan.sessions));
             let worktree = wts
                 .iter()
                 .map(|(_, w)| &w.path)

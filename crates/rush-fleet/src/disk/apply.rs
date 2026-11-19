@@ -46,6 +46,35 @@ fn unused(p: &Path, in_use: &dyn Fn(&Path) -> InUse) -> Result<(), String> {
     }
 }
 
+/// kache resolves its own configured store. Check the data it would purge,
+/// then let the native command coordinate with concurrent writers.
+fn unused_kache_store(in_use: &dyn Fn(&Path) -> InUse) -> Result<(), String> {
+    let tool = crate::sweep::find_tool("kache").ok_or("kache isn't installed")?;
+    let stats = rush_sys::cmd::output_within(
+        std::process::Command::new(tool).args(["stats", "--json"]),
+        std::time::Duration::from_secs(10),
+    )
+    .map_err(|e| format!("couldn't locate kache's store: {e}"))?;
+    let report = serde_json::from_slice::<Value>(&stats.out).ok();
+    let stores = report.as_ref().and_then(|r| r["stores"].as_array());
+    let Some(stores) = stores.filter(|s| stats.ok() && !s.is_empty()) else {
+        return Err("couldn't locate kache's store".into());
+    };
+    for store in stores {
+        let root = store["path"]
+            .as_str()
+            .map(Path::new)
+            .filter(|p| p.is_absolute() && store["error"].is_null())
+            .ok_or("couldn't locate kache's store")?;
+        let data = root.join("store");
+        if !super::cargo::real_dir(&data) {
+            return Err(format!("{}: no kache store", data.display()));
+        }
+        unused(&data, in_use)?;
+    }
+    Ok(())
+}
+
 /// Whether a dry run writes a down instead of doing it.
 fn dry(a: &Act) -> bool {
     rush_core::dryrun::would("disk-clean", &a.path.to_string_lossy(), &a.why)
@@ -54,6 +83,23 @@ fn dry(a: &Act) -> bool {
 /// Does one act, once in_use (asked now, right before) says nothing uses
 /// its path, and says how much it freed, or why it didn't.
 pub fn apply(a: &Act, in_use: &dyn Fn(&Path) -> InUse) -> Result<u64, String> {
+    apply_checked(a, in_use, &|| true, &mut Pruned::default())
+}
+
+// An artifact becoming busy after earlier removals ends this batch. Keep
+// the completed part in the event even when the rest has to wait.
+#[derive(Default)]
+struct Pruned {
+    files: usize,
+    bytes: u64,
+}
+
+fn apply_checked(
+    a: &Act,
+    in_use: &dyn Fn(&Path) -> InUse,
+    needed: &dyn Fn() -> bool,
+    pruned: &mut Pruned,
+) -> Result<u64, String> {
     let p = &a.path;
     let ps = p.to_string_lossy();
     match &a.how {
@@ -62,21 +108,38 @@ pub fn apply(a: &Act, in_use: &dyn Fn(&Path) -> InUse) -> Result<u64, String> {
                 return Err(format!("{}: not a known tool", command.join(" ")));
             }
             let args: Vec<&str> = command.iter().map(String::as_str).collect();
+            if args.starts_with(&["kache", "clean"]) && args.contains(&"--cache") {
+                unused_kache_store(in_use)?;
+            }
             let before = rush_sys::sysinfo::read_disk().free;
             run_command(&args, &a.why)?;
             let after = rush_sys::sysinfo::read_disk().free;
             Ok(after.saturating_sub(before))
         }
         _ if !p.is_absolute() => Err(format!("won't delete {ps}: not an absolute path")),
+        How::PruneGraph { last_used } => {
+            let _lock = super::cargo::lock_graph(p, *last_used)
+                .ok_or_else(|| format!("{ps}: kache unit busy, changed or unavailable"))?;
+            let bytes = freeable(p);
+            // rustc names the incremental root on its command line, and
+            // chooses the crate subdirectory itself. The held unit.lock
+            // is a sibling of that root.
+            unused(p.parent().ok_or("graph has no rustc directory")?, in_use)?;
+            if dry(a) {
+                return Ok(0);
+            }
+            remove_tree(&ps)?;
+            Ok(bytes)
+        }
         How::Remove => {
             if a.kind == CARGO_TARGET && !is_target(p) {
                 return Err(format!("{ps}: no longer a target"));
             }
+            let n = freeable(p);
             unused(p, in_use)?;
             if dry(a) {
                 return Ok(0);
             }
-            let n = freeable(p);
             remove_tree(&ps)?;
             Ok(n)
         }
@@ -85,30 +148,45 @@ pub fn apply(a: &Act, in_use: &dyn Fn(&Path) -> InUse) -> Result<u64, String> {
             if dry(a) {
                 return Ok(0);
             }
-            let mut n = 0;
-            for q in paths.iter().filter(|q| q.starts_with(p) && *q != p) {
-                let f = freeable(q);
+            for q in paths.iter().take_while(|_| needed()) {
+                // A profile or deps directory may have been replaced since discovery.
+                let within_target = q.strip_prefix(p).is_ok_and(|rel| {
+                    !rel.as_os_str().is_empty()
+                        && rel
+                            .components()
+                            .all(|c| matches!(c, std::path::Component::Normal(_)))
+                }) && q
+                    .ancestors()
+                    .skip(1)
+                    .take_while(|dir| *dir != p)
+                    .all(super::cargo::real_dir);
+                if !within_target || !is_target(p) {
+                    return Err(format!("{}: no longer in a cargo target", q.display()));
+                }
+                let bytes = freeable(q);
+                unused(q, in_use)?;
                 remove_tree(&q.to_string_lossy())?;
-                n += f;
+                pruned.bytes += bytes;
+                pruned.files += 1;
             }
-            Ok(n)
+            Ok(pruned.bytes)
         }
         How::RemoveWorktree { repo } => {
             let home = std::env::var("HOME").unwrap_or_default();
             if let Some(r) = never_touch(&ps, &home) {
                 return Err(format!("won't delete {ps}: rush never touches {r}"));
             }
+            let n = freeable(p);
             unused(p, in_use)?;
             if dry(a) {
                 return Ok(0);
             }
-            let n = freeable(p);
             remove_worktree_git(repo, p).map_err(|e| format!("{ps}: {e}"))?;
             Ok(n)
         }
         How::GoClean => {
-            unused(p, in_use)?;
             let (size, _) = crate::walk(&ps);
+            unused(p, in_use)?;
             crate::rules::go_clean(&ps, &a.why)?;
             Ok(size.max(0) as u64)
         }
@@ -116,15 +194,16 @@ pub fn apply(a: &Act, in_use: &dyn Fn(&Path) -> InUse) -> Result<u64, String> {
 }
 
 /// What an act did, in a few words.
-fn what(a: &Act) -> String {
+fn what(a: &Act, pruned: usize) -> String {
     match &a.how {
         How::Remove => "removed".into(),
-        How::Prune { paths } => format!(
+        How::PruneGraph { .. } => "removed old kache incremental graph".into(),
+        How::Prune { .. } => format!(
             "removed {} in it",
-            if paths.len() == 1 {
+            if pruned == 1 {
                 "1 old build file".to_string()
             } else {
-                format!("{} old build files", paths.len())
+                format!("{pruned} old build files")
             }
         ),
         How::RemoveWorktree { .. } => "removed the worktree; its branch stays".into(),
@@ -136,27 +215,45 @@ fn what(a: &Act) -> String {
 /// Does acts in order, each asking in_use right before: what went, and
 /// what stayed and why, after kept (the plan's).
 pub fn apply_all(acts: &[Act], kept: Vec<Kept>, in_use: &dyn Fn(&Path) -> InUse) -> Outcome {
+    apply_while(acts, kept, in_use, &|| true)
+}
+
+fn apply_while(
+    acts: &[Act],
+    kept: Vec<Kept>,
+    in_use: &dyn Fn(&Path) -> InUse,
+    needed: &dyn Fn() -> bool,
+) -> Outcome {
     let mut o = Outcome {
         left: kept,
         ..Outcome::default()
     };
-    for a in acts {
-        match apply(a, in_use) {
-            Ok(n) => {
-                o.freed += n;
-                o.did.push(Done {
-                    rule: a.rule.clone(),
+    for a in acts.iter().take_while(|_| needed()) {
+        let mut pruned = Pruned::default();
+        let freed = match apply_checked(a, in_use, needed, &mut pruned) {
+            Ok(n) => n,
+            Err(why) => {
+                o.left.push(Kept {
                     path: a.path.clone(),
-                    what: what(a),
-                    freed: n,
+                    rule: a.rule.clone(),
+                    why,
                 });
+                if pruned.files == 0 {
+                    continue;
+                }
+                pruned.bytes
             }
-            Err(e) => o.left.push(Kept {
-                path: a.path.clone(),
-                rule: a.rule.clone(),
-                why: e,
-            }),
+        };
+        if matches!(a.how, How::Prune { .. }) && pruned.files == 0 {
+            continue;
         }
+        o.freed += freed;
+        o.did.push(Done {
+            rule: a.rule.clone(),
+            path: a.path.clone(),
+            what: what(a, pruned.files),
+            freed,
+        });
     }
     o
 }
@@ -216,7 +313,15 @@ pub fn run(scan: &Scan, handed: Vec<Candidate>, rules: &[Rule], free: u64, now: 
         );
         return Outcome::default();
     };
-    run_at(scan, handed, rules, free, lv, now)
+    run_while(
+        scan,
+        handed,
+        rules,
+        free,
+        lv,
+        now,
+        || matches!(level(rush_sys::sysinfo::read_disk().free), Some(next) if next == lv || next == Level::Low),
+    )
 }
 
 /// run at level lv whatever free says: the dire clean's, which cleans as
@@ -229,11 +334,25 @@ pub fn run_at(
     lv: Level,
     now: Ms,
 ) -> Outcome {
+    run_while(scan, handed, rules, free, lv, now, || true)
+}
+
+fn run_while(
+    scan: &Scan,
+    handed: Vec<Candidate>,
+    rules: &[Rule],
+    free: u64,
+    lv: Level,
+    now: Ms,
+    still_needed: impl Fn() -> bool,
+) -> Outcome {
     let mut cands = find_candidates(scan, rules, lv, now);
     cands.extend(handed);
     let (acts, kept) = plan(&cands, rules, lv, now);
-    let o = apply_all(&acts, kept, &in_use);
-    let why = if o.did.is_empty() && o.left.is_empty() {
+    let o = apply_while(&acts, kept, &in_use, &still_needed);
+    let why = if !acts.is_empty() && o.did.is_empty() && o.left.is_empty() {
+        "disk level changed before removal"
+    } else if o.did.is_empty() && o.left.is_empty() {
         "nothing a rule says goes"
     } else {
         ""

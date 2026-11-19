@@ -1663,7 +1663,7 @@ engine (rush-fleet's `disk` module) on data rules. Plugins only report
 what they find; the cleanup agent only proposes rules.
 
 - Levels by free space (`disk::level`): normal under 50G
-  (`NORMAL_UNDER`), low under 20G (`LOW_UNDER`); nothing at or above 50G,
+  (`NORMAL_UNDER`), low under 40G (`LOW_UNDER`); nothing at or above 50G,
   nor when free can't be read (0).
 - A rule (`disk::Rule`): id, title, kind, enabled, and its numbers per
   level (`normal`, `low`: `Params` with `idleSecs`, `ageSecs`, `keep`,
@@ -1719,6 +1719,25 @@ what they find; the cleanup agent only proposes rules.
   commits are kept); each cache-dir rule's folders, walked. A target or
   worktree belongs to the session whose cwd it's in or whose id is on
   its path, a working one first.
+- On a 1 TB Mac the old cleaner recorded 46.1 GB free at 14:10 UTC
+  and 34.4 GB at 14:53 on November 19. Rush scratch occupied 76 GiB.
+  One working session's 43 GiB target held 22 GiB under
+  `debug/incremental.kache-auto` and another 8 GiB of Cargo targets sat
+  in the project's user cache. The shared kache store was about 21 GiB
+  including blocks cloned into targets.
+- The cargo rules also look one level inside each known repository's
+  namesake folder under ~/Library/Caches and ~/.cache. Only real Cargo
+  targets with the cache tag signature and rustc metadata qualify. A
+  source root with Cargo.toml or .git stays. A working session in any
+  of the repository's checkouts protects its shared target from whole
+  removal. The artifact age rule includes kache's v1/v2 incremental
+  graphs. For each digest, rush ages the rustc crate data by the later
+  of the unit directory mtime and recorded last use. It takes kache's
+  unit.lock without waiting, verifies use has not changed and checks
+  lsof and ps at the incremental root rustc names before removing the graph. Other units can keep
+  building. The unit, lock inode, and kache metadata stay. The shared
+  store still uses kache's native clean command after checking use of
+  the store data directories reported by `kache stats --json`.
 - `plan(candidates, rules, level, now) -> (acts, kept)` is pure: no disk,
   clock or processes. A target goes whole once untouched for the
   cargo-target rule's idle, unless a session is working on it; else its
@@ -1757,8 +1776,17 @@ what they find; the cleanup agent only proposes rules.
 - The switch (rush-ui-projects-machine `diskauto.rs`): config.json's
   `disk.auto` ("Clean on its own when disk is low"), off by default. With
   it on, the rush that leads runs the engine from `watch_machine`'s disk
-  read every 15 minutes (`AUTO_EVERY`), every 3 while free is under
-  `LOW_UNDER` (`AUTO_EVERY_LOW`), the first at once; off the UI, never two
+  read (statfs, already sampled every 5 seconds). Healthy and unknown
+  readings start no scan. The first eligible scan runs immediately.
+  At steady pressure the interval is 10 minutes under 50 GiB and 2
+  under 40 GiB. Crossing into a worse level or losing 1 GiB from the
+  baseline (the latest run or a subsequent high) shortens it to one
+  minute. The automatic pass rechecks free space between acts and between ordinary
+  Cargo artifacts. It stops once the starting
+  level has recovered or free space is unknown. Each artifact gets its own
+  final open-file and process check. If one becomes busy, the event records
+  the files already removed and why the rest of the batch stopped.
+  Runs are off the UI, never two
   at once (`engine_lock`, which the dire clean holds too). The scan is
   what rush knows: the repos its recent sessions work in (their main
   checkouts; git lists the worktrees), every session with a folder (its
@@ -1766,7 +1794,9 @@ what they find; the cleanup agent only proposes rules.
   Plugins answering `disk.candidates` have `CANDIDATES_WAIT` (10s) to
   say; one that doesn't is left out of that run. A run that removed
   anything says so in the news ("disk: rush freed 3.0G on its own (2
-  things, by its rules)"); nothing when nothing. A rules file that can't
+  things, by its rules)"). If a fresh statfs reading after cleanup is
+  still under 40 GiB, the news gives the remaining space and points to
+  Settings › Disk, once until space recovers. A rules file that can't
   be read is a disk-clean event and said once.
 - Taken in once, before the first run (`take_plugins_in`, marked by
   `disk.pluginsTakenIn`): rust-clean's or git-clean's old `auto-clean`
@@ -1818,7 +1848,7 @@ Remote does) and writes only through `update_rules`.
 
 - Disk: the switch "Clean on its own when disk is low" (config.json
   `disk.auto`, off by default: what `diskauto.rs` obeys); the two levels,
-  read-only (normal under 50G, low under 20G); the last run (when, free,
+  read-only (normal under 50G, low under 40G); the last run (when, free,
   level, freed, or why it did nothing); and "Research now", shown only
   once something gives it its work (`disk::on_research`, which
   session_core's `start::install` calls with `research::research_now`:
