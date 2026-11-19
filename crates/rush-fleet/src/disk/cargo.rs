@@ -370,7 +370,13 @@ const PS: &str = "/bin/ps";
 /// and environment (macOS hides the environment of platform binaries;
 /// Homebrew's cargo and rustc show theirs). Asked right before a removal.
 pub fn in_use(path: &Path) -> InUse {
-    let lsof = Command::new(LSOF).arg("+D").arg(path).output().ok();
+    let mut lsof = Command::new(LSOF);
+    match path.symlink_metadata() {
+        Ok(m) if m.is_dir() => lsof.arg("+D"),
+        Ok(m) if m.is_file() => lsof.arg("--"),
+        _ => return InUse::Unknown,
+    };
+    let lsof = lsof.arg(path).output().ok();
     let ps = Command::new(PS)
         .args(["axeww", "-o", "pid=,command="])
         .output()

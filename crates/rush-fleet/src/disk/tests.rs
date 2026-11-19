@@ -586,6 +586,43 @@ fn targets_planned_and_applied() {
     assert!(gone.left[0].why.ends_with("no longer a target"), "{gone:?}");
 }
 
+// A target can become busy partway through a planned prune. Keep the
+// newly held artifact and report the work that actually completed.
+#[test]
+fn prune_rechecks_each_artifact_and_counts_partial_progress() {
+    for held in [InUse::Yes, InUse::Unknown] {
+        let d = tempfile::tempdir().unwrap();
+        let target = target_at(d.path(), "target", 3 * DAY_MS, &[]);
+        let first = target.join("debug/deps/libold.rlib");
+        let second = target.join("debug/incremental/s1");
+        let bytes = freeable(&first);
+        let act = Act {
+            path: target.clone(),
+            rule: "cargo-artifacts".into(),
+            kind: CARGO_TARGET.into(),
+            why: "old".into(),
+            bytes: 0,
+            how: How::Prune {
+                paths: vec![first.clone(), second.clone()],
+            },
+        };
+        let o = apply_all(&[act], vec![], &|path| {
+            if path == second {
+                assert!(!first.exists());
+                held
+            } else {
+                InUse::No
+            }
+        });
+        assert!(second.is_dir());
+        assert_eq!(o.left.len(), 1);
+        assert!(o.left[0].why.contains(second.to_string_lossy().as_ref()));
+        assert_eq!(o.did.len(), 1);
+        assert_eq!(o.did[0].what, "removed 1 old build file in it");
+        assert_eq!(o.freed, bytes);
+    }
+}
+
 // Exercise discovery, the age rule, kache's unit lock and the final in-use
 // check on the same layout found in a working session's scratch target.
 #[test]

@@ -1781,8 +1781,11 @@ what they find; the cleanup agent only proposes rules.
   At steady pressure the interval is 10 minutes under 50 GiB and 2
   under 40 GiB. Crossing into a worse level or losing 1 GiB from the
   baseline (the latest run or a subsequent high) shortens it to one
-  minute. The automatic pass rechecks free space between acts and
-  stops once the starting level has recovered or free space is unknown.
+  minute. The automatic pass rechecks free space between acts and between ordinary
+  Cargo artifacts. It stops once the starting
+  level has recovered or free space is unknown. Each artifact gets its own
+  final open-file and process check. If one becomes busy, the event records
+  the files already removed and why the rest of the batch stopped.
   Runs are off the UI, never two
   at once (`engine_lock`, which the dire clean holds too). The scan is
   what rush knows: the repos its recent sessions work in (their main
