@@ -46,6 +46,35 @@ fn unused(p: &Path, in_use: &dyn Fn(&Path) -> InUse) -> Result<(), String> {
     }
 }
 
+/// kache resolves its own configured store. Check the data it would purge,
+/// then let the native command coordinate with concurrent writers.
+fn unused_kache_store(in_use: &dyn Fn(&Path) -> InUse) -> Result<(), String> {
+    let tool = crate::sweep::find_tool("kache").ok_or("kache isn't installed")?;
+    let stats = rush_sys::cmd::output_within(
+        std::process::Command::new(tool).args(["stats", "--json"]),
+        std::time::Duration::from_secs(10),
+    )
+    .map_err(|e| format!("couldn't locate kache's store: {e}"))?;
+    let report = serde_json::from_slice::<Value>(&stats.out).ok();
+    let stores = report.as_ref().and_then(|r| r["stores"].as_array());
+    let Some(stores) = stores.filter(|s| stats.ok() && !s.is_empty()) else {
+        return Err("couldn't locate kache's store".into());
+    };
+    for store in stores {
+        let root = store["path"]
+            .as_str()
+            .map(Path::new)
+            .filter(|p| p.is_absolute() && store["error"].is_null())
+            .ok_or("couldn't locate kache's store")?;
+        let data = root.join("store");
+        if !super::cargo::real_dir(&data) {
+            return Err(format!("{}: no kache store", data.display()));
+        }
+        unused(&data, in_use)?;
+    }
+    Ok(())
+}
+
 /// Whether a dry run writes a down instead of doing it.
 fn dry(a: &Act) -> bool {
     rush_core::dryrun::would("disk-clean", &a.path.to_string_lossy(), &a.why)
@@ -62,21 +91,35 @@ pub fn apply(a: &Act, in_use: &dyn Fn(&Path) -> InUse) -> Result<u64, String> {
                 return Err(format!("{}: not a known tool", command.join(" ")));
             }
             let args: Vec<&str> = command.iter().map(String::as_str).collect();
+            if args.starts_with(&["kache", "clean"]) && args.contains(&"--cache") {
+                unused_kache_store(in_use)?;
+            }
             let before = rush_sys::sysinfo::read_disk().free;
             run_command(&args, &a.why)?;
             let after = rush_sys::sysinfo::read_disk().free;
             Ok(after.saturating_sub(before))
         }
         _ if !p.is_absolute() => Err(format!("won't delete {ps}: not an absolute path")),
-        How::Remove => {
-            if a.kind == CARGO_TARGET && !is_target(p) {
-                return Err(format!("{ps}: no longer a target"));
-            }
+        How::PruneGraph { last_used } => {
+            let _lock = super::cargo::lock_graph(p, *last_used)
+                .ok_or_else(|| format!("{ps}: kache unit busy, changed or unavailable"))?;
+            let bytes = freeable(p);
             unused(p, in_use)?;
             if dry(a) {
                 return Ok(0);
             }
+            remove_tree(&ps)?;
+            Ok(bytes)
+        }
+        How::Remove => {
+            if a.kind == CARGO_TARGET && !is_target(p) {
+                return Err(format!("{ps}: no longer a target"));
+            }
             let n = freeable(p);
+            unused(p, in_use)?;
+            if dry(a) {
+                return Ok(0);
+            }
             remove_tree(&ps)?;
             Ok(n)
         }
@@ -98,11 +141,11 @@ pub fn apply(a: &Act, in_use: &dyn Fn(&Path) -> InUse) -> Result<u64, String> {
             if let Some(r) = never_touch(&ps, &home) {
                 return Err(format!("won't delete {ps}: rush never touches {r}"));
             }
+            let n = freeable(p);
             unused(p, in_use)?;
             if dry(a) {
                 return Ok(0);
             }
-            let n = freeable(p);
             remove_worktree_git(repo, p).map_err(|e| format!("{ps}: {e}"))?;
             Ok(n)
         }
@@ -119,6 +162,7 @@ pub fn apply(a: &Act, in_use: &dyn Fn(&Path) -> InUse) -> Result<u64, String> {
 fn what(a: &Act) -> String {
     match &a.how {
         How::Remove => "removed".into(),
+        How::PruneGraph { .. } => "removed old kache incremental graph".into(),
         How::Prune { paths } => format!(
             "removed {} in it",
             if paths.len() == 1 {
@@ -136,6 +180,14 @@ fn what(a: &Act) -> String {
 /// Does acts in order, each asking in_use right before: what went, and
 /// what stayed and why, after kept (the plan's).
 pub fn apply_all(acts: &[Act], kept: Vec<Kept>, in_use: &dyn Fn(&Path) -> InUse) -> Outcome {
+    apply_while(acts.iter(), kept, in_use)
+}
+
+fn apply_while<'a>(
+    acts: impl Iterator<Item = &'a Act>,
+    kept: Vec<Kept>,
+    in_use: &dyn Fn(&Path) -> InUse,
+) -> Outcome {
     let mut o = Outcome {
         left: kept,
         ..Outcome::default()
@@ -216,7 +268,15 @@ pub fn run(scan: &Scan, handed: Vec<Candidate>, rules: &[Rule], free: u64, now: 
         );
         return Outcome::default();
     };
-    run_at(scan, handed, rules, free, lv, now)
+    run_while(
+        scan,
+        handed,
+        rules,
+        free,
+        lv,
+        now,
+        || matches!(level(rush_sys::sysinfo::read_disk().free), Some(next) if next == lv || next == Level::Low),
+    )
 }
 
 /// run at level lv whatever free says: the dire clean's, which cleans as
@@ -229,11 +289,25 @@ pub fn run_at(
     lv: Level,
     now: Ms,
 ) -> Outcome {
+    run_while(scan, handed, rules, free, lv, now, || true)
+}
+
+fn run_while(
+    scan: &Scan,
+    handed: Vec<Candidate>,
+    rules: &[Rule],
+    free: u64,
+    lv: Level,
+    now: Ms,
+    still_needed: impl Fn() -> bool,
+) -> Outcome {
     let mut cands = find_candidates(scan, rules, lv, now);
     cands.extend(handed);
     let (acts, kept) = plan(&cands, rules, lv, now);
-    let o = apply_all(&acts, kept, &in_use);
-    let why = if o.did.is_empty() && o.left.is_empty() {
+    let o = apply_while(acts.iter().take_while(|_| still_needed()), kept, &in_use);
+    let why = if !acts.is_empty() && o.did.is_empty() && o.left.is_empty() {
+        "disk level changed before removal"
+    } else if o.did.is_empty() && o.left.is_empty() {
         "nothing a rule says goes"
     } else {
         ""

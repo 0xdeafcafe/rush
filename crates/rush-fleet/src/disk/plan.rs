@@ -14,7 +14,7 @@
 
 use rush_core::time::Ms;
 
-use super::cargo::{old_artifacts, superseded_artifacts};
+use super::cargo::{managed_graph, old_artifacts, superseded_artifacts};
 use super::{
     Act, CACHE_DIR, CARGO_TARGET, Candidate, How, InUse, Kept, Kind, Level, Params, Rule,
     TOOL_COMMAND, WORKTREE,
@@ -155,8 +155,20 @@ fn cargo(
     }
     let parts = first(rules, lv, |k| *k == Kind::CargoArtifacts);
     let mut paths = Vec::new();
-    if let Some((_, p)) = parts {
+    if let Some((r, p)) = parts {
         if let Some(age) = p.age_secs {
+            for a in f.artifacts.iter().filter(|a| managed_graph(a)) {
+                if a.mtime > 0 && now - a.mtime >= ms(age) {
+                    let mut graph = act(
+                        c,
+                        r,
+                        "old kache incremental graph".into(),
+                        How::PruneGraph { last_used: a.mtime },
+                    );
+                    graph.path.clone_from(&a.path);
+                    acts.push(graph);
+                }
+            }
             paths.extend(old_artifacts(&f.artifacts, now, ms(age)));
         }
         if let (Some(n), Some(age)) = (p.keep, p.superseded_secs) {

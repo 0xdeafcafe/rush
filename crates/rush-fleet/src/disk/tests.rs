@@ -34,7 +34,7 @@ impl Drop for RushHome {
 }
 
 // Nothing at or above 50 GB free, or when free can't be read (0); normal
-// under it, low under 20 GB.
+// under it, low under 40 GiB.
 #[test]
 fn levels_by_free_space() {
     for (free, want) in [
@@ -42,8 +42,8 @@ fn levels_by_free_space() {
         (80 * GB, None),
         (50 * GB, None),
         (50 * GB - 1, Some(Level::Normal)),
-        (20 * GB, Some(Level::Normal)),
-        (20 * GB - 1, Some(Level::Low)),
+        (40 * GB, Some(Level::Normal)),
+        (40 * GB - 1, Some(Level::Low)),
         (GB, Some(Level::Low)),
     ] {
         assert_eq!(level(free), want, "{free}");
@@ -480,7 +480,12 @@ fn scan_of(scratch: &Path, sessions: Vec<Session>) -> Scan {
     Scan {
         scratch: vec![scratch.to_path_buf()],
         sessions,
-        home: std::env::var("HOME").unwrap(),
+        home: scratch
+            .parent()
+            .unwrap()
+            .join("home")
+            .to_string_lossy()
+            .into_owned(),
         cwds: Some(Vec::new()),
         ..Scan::default()
     }
@@ -581,6 +586,131 @@ fn targets_planned_and_applied() {
     assert!(gone.left[0].why.ends_with("no longer a target"), "{gone:?}");
 }
 
+// Exercise discovery, the age rule, kache's unit lock and the final in-use
+// check on the same layout found in a working session's scratch target.
+#[test]
+fn managed_graphs_are_rechecked_individually() {
+    let d = tempfile::tempdir().unwrap();
+    let scratch = d.path().join("tmp");
+    let t = target_at(&scratch, "repo/active/coord-target", HOUR_MS, &[]);
+    let version = t.join("debug/incremental.kache-auto/v2");
+    let old = now_ms() - 8 * HOUR_MS;
+    let rules = built_in_rules()
+        .into_iter()
+        .filter(|r| r.kind == Kind::CargoArtifacts)
+        .collect::<Vec<_>>();
+    let scan = scan_of(
+        &scratch,
+        vec![Session {
+            id: "active".into(),
+            working: true,
+            ..Session::default()
+        }],
+    );
+    let mut expected = Vec::new();
+    for (i, label) in [
+        "old",
+        "open",
+        "unknown",
+        "locked",
+        "reused",
+        "recent",
+        "bad state",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let unit = version.join(format!("{i:064x}"));
+        let graph = unit.join("rustc/example");
+        std::fs::create_dir_all(&graph).unwrap();
+        std::fs::write(graph.join("dep-graph.bin"), vec![7; 8192]).unwrap();
+        std::fs::write(unit.join("unit.lock"), "").unwrap();
+        if *label == "recent" {
+            std::fs::write(
+                unit.join("state.json"),
+                json!({"last_used_secs": now_ms()/1000}).to_string(),
+            )
+            .unwrap();
+        } else if *label == "bad state" {
+            std::fs::write(unit.join("state.json"), "?").unwrap();
+        } else {
+            expected.push(graph);
+        }
+        set_mtime(&unit, old);
+    }
+    std::os::unix::fs::symlink(&version, version.parent().unwrap().join("v1")).unwrap();
+    let now = now_ms();
+    let cands = find_candidates(&scan, &rules, Level::Low, now);
+    assert!(plan(&cands, &rules, Level::Normal, now).0.is_empty());
+    let (acts, _) = plan(&cands, &rules, Level::Low, now);
+    assert_eq!(
+        acts.iter().map(|a| a.path.clone()).collect::<Vec<_>>(),
+        expected
+    );
+    let unit = |i: usize| expected[i].parent().unwrap().parent().unwrap();
+    let lock = std::fs::File::open(unit(3).join("unit.lock")).unwrap();
+    lock.try_lock().unwrap();
+    set_mtime(unit(4), now);
+    let res = apply_all(&acts, vec![], &|p| {
+        if p == expected[1] {
+            InUse::Yes
+        } else if p == expected[2] {
+            InUse::Unknown
+        } else {
+            InUse::No
+        }
+    });
+    assert_eq!((res.did.len(), res.left.len()), (1, 4));
+    assert!(!expected[0].exists());
+    assert!(unit(0).join("unit.lock").is_file());
+    assert!(expected[1..].iter().all(|p| p.exists()));
+}
+
+#[test]
+fn finds_shared_targets_in_the_project_cache_only() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().canonicalize().unwrap();
+    let repo = root.join("repo");
+    std::fs::create_dir(&repo).unwrap();
+    git_run(&repo, &["init", "-q"]);
+    let scan = Scan {
+        repos: vec![repo.clone()],
+        home: root.to_string_lossy().into_owned(),
+        sessions: vec![Session {
+            id: "s".into(),
+            cwd: repo,
+            working: true,
+        }],
+        ..Scan::default()
+    };
+    let mut expected = Vec::new();
+    for base in ["Library/Caches", ".cache"] {
+        let project = root.join(base).join("repo");
+        let target = target_at(&project, "coord-target2", 3 * DAY_MS, &[]);
+        std::os::unix::fs::symlink(&target, project.join("alias")).unwrap();
+        let source = target_at(&project, "source", 3 * DAY_MS, &[]);
+        std::fs::write(source.join("Cargo.toml"), "").unwrap();
+        let other = target_at(&project, "unmarked", 3 * DAY_MS, &[]);
+        std::fs::write(other.join("CACHEDIR.TAG"), "").unwrap();
+        expected.push(target);
+    }
+    expected.sort();
+    let rules = built_in_rules();
+    let now = now_ms();
+    let cands = find_candidates(&scan, &rules, Level::Normal, now);
+    assert_eq!(
+        cands.iter().map(|c| c.path.clone()).collect::<Vec<_>>(),
+        expected
+    );
+    assert!(cands.iter().all(|c| c.facts.working));
+    assert!(
+        plan(&cands, &rules, Level::Normal, now)
+            .0
+            .iter()
+            .all(|a| matches!(a.how, How::Prune { .. }))
+    );
+}
+
 // A target built in every few minutes is never idle: with plenty free its
 // 7-hour-old artifacts stay, and when low they go.
 #[test]
@@ -678,6 +808,7 @@ fn said(cands: &[Candidate], rules: &[Rule], lv: Level) -> (Vec<String>, Vec<Str
     let (acts, kept) = plan(cands, rules, lv, T);
     let how = |h: &How| match h {
         How::Remove => "remove".to_string(),
+        How::PruneGraph { .. } => "prune graph".into(),
         How::Prune { paths } => format!(
             "prune {}",
             paths
@@ -1176,7 +1307,7 @@ fn worktrees_found_and_removed() {
     let scan = Scan {
         repos: vec![dirty.clone()],
         cwds: Some(Vec::new()),
-        home: std::env::var("HOME").unwrap(),
+        home: root.join("home").to_string_lossy().into_owned(),
         ..Scan::default()
     };
     let rules = built_in_rules();

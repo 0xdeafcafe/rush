@@ -48,7 +48,7 @@ const GB: u64 = 1 << 30;
 /// Under this free, rush cleans at the normal level.
 pub const NORMAL_UNDER: u64 = 50 * GB;
 /// Under this free, it's low: rules clean harder, and some run only then.
-pub const LOW_UNDER: u64 = 20 * GB;
+pub const LOW_UNDER: u64 = 40 * GB;
 
 /// How hard rush cleans, by the disk's free space.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -56,7 +56,7 @@ pub const LOW_UNDER: u64 = 20 * GB;
 pub enum Level {
     /// Under NORMAL_UNDER (50 GB) free.
     Normal,
-    /// Under LOW_UNDER (20 GB) free.
+    /// Under LOW_UNDER (40 GiB) free.
     Low,
 }
 
@@ -220,6 +220,9 @@ pub enum How {
     Remove,
     /// These paths in it go, each through sweep::remove_tree; it stays.
     Prune { paths: Vec<PathBuf> },
+    /// A kache-managed crate's rustc incremental data. Recheck its unit
+    /// under kache's own lock before removing these rebuildable files.
+    PruneGraph { last_used: Ms },
     /// git worktree remove (never forced) in repo, then git worktree prune.
     RemoveWorktree { repo: PathBuf },
     /// go clean -modcache, Go's module files being read-only.

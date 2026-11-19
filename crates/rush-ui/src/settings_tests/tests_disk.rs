@@ -311,7 +311,7 @@ fn disk_page_shows_switch_levels_and_rules() {
     for want in [
         "Clean on its own when disk is low",
         "under 50G free",
-        "under 20G free",
+        "under 40G free",
         "Last run",
         "none yet",
         "● Cargo targets no build touched",
