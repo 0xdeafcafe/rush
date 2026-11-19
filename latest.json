@@ -1,13 +1,13 @@
 {
- "commit": "cce63f436b6ff8cae04fe6f23f9f3bef3c76d1e6",
+ "commit": "239f592ace5ba3f2e525d6a6818e4e838fdc59bd",
  "ref": "main",
- "run": "44503431246",
- "at": "2026-11-19T10:48:32Z",
+ "run": "44515157941",
+ "at": "2026-11-19T11:39:16Z",
  "window_s": 60,
  "metrics": {
   "binary: rush, release": {
    "kind": "binary",
-   "value": 64770568
+   "value": 64791704
   },
   "follow a run: read on, each write, allocated": {
    "kind": "bytes",
@@ -67,27 +67,27 @@
   },
   "frame, the list: rows (Model::frame), allocations": {
    "kind": "allocs",
-   "value": 2557
+   "value": 2558
   },
   "frame, the list: rows (Model::frame), bytes": {
    "kind": "bytes",
-   "value": 500163
+   "value": 500169
   },
   "host: CPU to start, s": {
    "kind": "info",
-   "value": 0.149
+   "value": 0.037
   },
   "host: footprint": {
    "kind": "footprint",
-   "value": 3884352
+   "value": 3998976
   },
   "host: idle CPU": {
    "kind": "cpu",
-   "value": 0.004
+   "value": 0.0012
   },
   "host: idle wake-ups": {
    "kind": "wakeups",
-   "value": 3.0
+   "value": 2.0
   },
   "host: threads": {
    "kind": "threads",
@@ -107,7 +107,7 @@
   },
   "list: a reading, allocations made": {
    "kind": "allocs",
-   "value": 25256
+   "value": 25266
   },
   "list: loader alone, allocations kept": {
    "kind": "allocs",
@@ -143,11 +143,11 @@
   },
   "menubar feed: CPU to start, s": {
    "kind": "info",
-   "value": 0.193
+   "value": 0.102
   },
   "menubar feed: footprint": {
    "kind": "footprint",
-   "value": 13894912
+   "value": 13452544
   },
   "menubar feed: idle CPU": {
    "kind": "cpu",
@@ -263,19 +263,19 @@
   },
   "plugind: CPU to start, s": {
    "kind": "info",
-   "value": 0.067
+   "value": 0.03
   },
   "plugind: footprint": {
    "kind": "footprint",
-   "value": 4851008
+   "value": 4801856
   },
   "plugind: idle CPU": {
    "kind": "cpu",
-   "value": 0.0211
+   "value": 0.0117
   },
   "plugind: idle wake-ups": {
    "kind": "wakeups",
-   "value": 11.8
+   "value": 15.8
   },
   "plugind: threads": {
    "kind": "threads",
@@ -303,7 +303,7 @@
   },
   "render 300 turns w120: cold layout (all turns), bytes": {
    "kind": "bytes",
-   "value": 30821925
+   "value": 30823290
   },
   "render 300 turns w120: stream: delta, then a frame, allocations": {
    "kind": "allocs",
@@ -407,7 +407,7 @@
   },
   "render 3000 turns w120: code: cold frame at the end, bytes": {
    "kind": "bytes",
-   "value": 3129068
+   "value": 3129075
   },
   "render 3000 turns w120: code: warm frame at the end, allocations": {
    "kind": "allocs",
@@ -523,7 +523,7 @@
   },
   "serve: CPU to start, s": {
    "kind": "info",
-   "value": 0.358
+   "value": 0.273
   },
   "serve: a listing, retained": {
    "kind": "heap",
@@ -531,15 +531,15 @@
   },
   "serve: footprint": {
    "kind": "footprint",
-   "value": 6538496
+   "value": 6849792
   },
   "serve: idle CPU": {
    "kind": "cpu",
-   "value": 0.6161
+   "value": 0.5372
   },
   "serve: idle wake-ups": {
    "kind": "wakeups",
-   "value": 55.3
+   "value": 85.7
   },
   "serve: threads": {
    "kind": "threads",
@@ -547,23 +547,23 @@
   },
   "ui: CPU to start, s": {
    "kind": "info",
-   "value": 1.812
+   "value": 1.849
   },
   "ui: footprint": {
    "kind": "footprint",
-   "value": 32163328
+   "value": 28444160
   },
   "ui: idle CPU": {
    "kind": "cpu",
-   "value": 0.397
+   "value": 0.3398
   },
   "ui: idle wake-ups": {
    "kind": "wakeups",
-   "value": 173.7
+   "value": 239.3
   },
   "ui: threads": {
    "kind": "threads",
-   "value": 9
+   "value": 8
   }
  },
  "errors": {},
@@ -572,13 +572,13 @@
    "threads seen": [
     9
    ],
-   "ps cpu over the window": 0.02
+   "ps cpu over the window": 0.01
   },
   "serve": {
    "threads seen": [
     7
    ],
-   "ps cpu over the window": 0.62
+   "ps cpu over the window": 0.55
   },
   "host": {
    "threads seen": [
@@ -594,11 +594,12 @@
   },
   "ui": {
    "threads seen": [
+    8,
     9,
     10,
-    14
+    12
    ],
-   "ps cpu over the window": 0.4
+   "ps cpu over the window": 0.34
   }
  }
 }
