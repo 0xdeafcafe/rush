@@ -35,7 +35,22 @@ pub struct Projects {
 /// Picks the list's row id ("" for the first project), from outside what's
 /// picked: taken up the next time the place draws or has a key.
 pub fn pick_in_projects(m: &mut Model, id: &str) {
-    m.kept::<Data>().pick = Some(id.to_string());
+    let d = m.kept::<Data>();
+    d.pick = Some(id.to_string());
+    // What it's in opens, so it's there to pick: This Mac for Temporary,
+    // System and the plugins' items, a worktree's repository for it.
+    if id == PANE_TEMP || id == PANE_SYSTEM || id.starts_with('k') {
+        d.unfolded.insert(GROUP_MAC.to_string());
+    }
+    if let Some(path) = id.strip_prefix('w')
+        && let Some(repo) = d
+            .wts
+            .iter()
+            .find(|t| t.path == path)
+            .map(|t| t.repo.clone())
+    {
+        d.folded.remove(&repo);
+    }
 }
 
 /// The row picked on the Projects page, by id (the command bar's spot).

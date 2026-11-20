@@ -801,7 +801,8 @@ fn x_on_an_agent_asks_first() {
 #[test]
 fn left_outside_is_shown_and_offered() {
     let (a1, root) = agent("a1", "fix alpha", "/src/alpha", "/src/alpha", 0, 0);
-    let mut m = model(vec![(a1.clone(), root)], 160, 40, classic());
+    // Wide: the tree takes three fifths, and the pick's columns room.
+    let mut m = model(vec![(a1.clone(), root)], 220, 40, classic());
     {
         let d = m.kept::<Data>();
         d.checked = NOW;
@@ -852,7 +853,7 @@ fn a_busy_agent_says_what_it_runs() {
     a1.job.background = vec!["agent\0x1".into(), "agent\0x2".into()];
     a1.job.in_flight = 2;
     let want = crate::screens::list_extras::wall::lanes_line(&a1);
-    let mut m = model(vec![(a1, root)], 160, 40, classic());
+    let mut m = model(vec![(a1, root)], 220, 40, classic());
     m.frame();
     press(&mut m, "enter");
     let b = body(&mut m);
@@ -972,10 +973,10 @@ fn the_tree_sits_beside_its_pick_when_wide() {
         let f = frame(&mut m);
         let top = f.lines().find(|l| l.contains("╭─ Projects")).unwrap();
         assert_eq!(top.contains("╭─ ◆ alpha"), beside, "{w}: {f}");
-        // Pull requests, Temporary and System come before the projects,
-        // and the first project is picked.
-        let prs = f.find("⇡ Pull requests").unwrap();
-        assert!(prs < f.find("┃ alpha").unwrap(), "{w}: {f}");
+        // The projects come first, This Mac and pull requests after
+        // them, and the first project is picked.
+        let first = f.lines().skip_while(|l| !l.contains("╭─ Projects")).nth(1);
+        assert!(first.is_some_and(|l| l.contains("┃ ▾ alpha")), "{w}: {f}");
         assert!(f.contains("╭─ ◆ alpha"), "{w}: {f}");
     }
     // A worktree's row shows its repository on the right.

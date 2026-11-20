@@ -1,54 +1,48 @@
 === 160 classic []
-                                                                                                                                ● 3 running · – ram · 0% cpu
+                                                                                                                                                 ● 3 running
 
-╭─ Projects ─────────────────────────────────────────────── 2 ─╮ ╭─ ◆ alpha ─────────────────────────────────────────────────────────────── 2 working · 2 ─╮
-│   NAME                GIT                     AGENTS         │ │ /src/alpha                                                                              │
-│ ◆ alpha               asking git…             ✱2 2 in all    │ │ asking git…                                                                             │
-│ ◆ beta                asking git…             ✱1 1 in all    │ │                                                                                         │
-│                                                              │ │ AGENTS  2 ───────────────────────────────────────────────────────────────────────────── │
-│ EVERY PROJECT'S ──────────────────────────────────────────── │ │  WHERE                 AGENT                      DOING                                 │
-│ ⇡ Pull requests       asking GitHub…                         │ │  main checkout       · fix alpha                  working                            0s │
-│                                                              │ │  main checkout       · test alpha                 working                            0s │
-│ NO PROJECT'S ─────────────────────────────────────────────── │ │                                                                                         │
-│ ◌ Temporary           –                                      │ │                                                                                         │
-│ ⚙ System              0 processes                            │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-╰──────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Projects ──────────────────────────────────────────────────────────────────────────── 2 ─╮ ╭─ ◆ alpha ────────────────────────────────── 2 working · 2 ─╮
+│ ┃ alpha  /src/alpha · asking git…                                                         │ │ /src/alpha                                                 │
+│                                                                                           │ │ asking git…                                                │
+│ ┃ beta  /src/beta · asking git…                                                           │ │                                                            │
+│                                                                                           │ │ AGENTS  2 ──────────────────────────────────────────────── │
+│ ▸ This Mac  temp work, caches, processes                                                  │ │  WHERE                 AGENT                      DOING    │
+│ ⇡ Pull requests       asking GitHub…                                                      │ │  main checkout       · fix alpha                  …     0s │
+│                                                                                           │ │  main checkout       · test alpha                 …     0s │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+╰───────────────────────────────────────────────────────────────────────────────────────────╯ ╰────────────────────────────────────────────────────────────╯
 HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
 === 120  []
-                                                                                        ● 3 running · – ram · 0% cpu
+                                                                                                         ● 3 running
 
 ╭─ Projects ─────────────────────────────────────────────────────────────────────────────────────────────────── 2 ─╮
-│ ⇡ Pull requests       asking GitHub…                                                                             │
-│ ◌ Temporary           –                                                                                          │
-│ ⚙ System              0 processes                                                                                │
-│                                                                                                                  │
 │ ┃ alpha  /src/alpha · asking git…                                                                                │
 │                                                                                                                  │
 │ ┃ beta  /src/beta · asking git…                                                                                  │
+│                                                                                                                  │
+│ ▸ This Mac  temp work, caches, processes                                                                         │
+│ ⇡ Pull requests       asking GitHub…                                                                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 
 ╭─ ◆ alpha ──────────────────────────────────────────────────────────────────────────────────────── 2 working · 2 ─╮
@@ -62,122 +56,107 @@ HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
 === 160 classic [enter]
-                                                                                                                                ● 3 running · – ram · 0% cpu
+                                                                                                                                                 ● 3 running
 
-╭─ Projects ─────────────────────────────────────────────── 2 ─╮ ╭─ ◆ alpha ─────────────────────────────────────────────────────────────── 2 working · 2 ─╮
-│   NAME                GIT                     AGENTS         │ │ /src/alpha                                                                              │
-│ ◆ alpha               asking git…             ✱2 2 in all    │ │ asking git…                                                                             │
-│ ◆ beta                asking git…             ✱1 1 in all    │ │                                                                                         │
-│                                                              │ │ AGENTS  2 ───────────────────────────────────────────────────────────────────────────── │
-│ EVERY PROJECT'S ──────────────────────────────────────────── │ │  WHERE                 AGENT                      DOING                                 │
-│ ⇡ Pull requests       asking GitHub…                         │ │  main checkout       · fix alpha                  working                            0s │
-│                                                              │ │  main checkout       · test alpha                 working                            0s │
-│ NO PROJECT'S ─────────────────────────────────────────────── │ │                                                                                         │
-│ ◌ Temporary           –                                      │ │                                                                                         │
-│ ⚙ System              0 processes                            │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-╰──────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Projects ──────────────────────────────────────────────────────────────────────────── 2 ─╮ ╭─ ◆ alpha ────────────────────────────────── 2 working · 2 ─╮
+│ ┃ alpha  /src/alpha · asking git…                                                         │ │ /src/alpha                                                 │
+│                                                                                           │ │ asking git…                                                │
+│ ┃ beta  /src/beta · asking git…                                                           │ │                                                            │
+│                                                                                           │ │ AGENTS  2 ──────────────────────────────────────────────── │
+│ ▸ This Mac  temp work, caches, processes                                                  │ │  WHERE                 AGENT                      DOING    │
+│ ⇡ Pull requests       asking GitHub…                                                      │ │  main checkout       · fix alpha                  …     0s │
+│                                                                                           │ │  main checkout       · test alpha                 …     0s │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+╰───────────────────────────────────────────────────────────────────────────────────────────╯ ╰────────────────────────────────────────────────────────────╯
 HINT ↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl+b keep going  ·  ← the list  ·  esc back
 === 160 classic [enter down]
-                                                                                                                                ● 3 running · – ram · 0% cpu
+                                                                                                                                                 ● 3 running
 
-╭─ Projects ─────────────────────────────────────────────── 2 ─╮ ╭─ ◆ alpha ─────────────────────────────────────────────────────────────── 2 working · 2 ─╮
-│   NAME                GIT                     AGENTS         │ │ /src/alpha                                                                              │
-│ ◆ alpha               asking git…             ✱2 2 in all    │ │ asking git…                                                                             │
-│ ◆ beta                asking git…             ✱1 1 in all    │ │                                                                                         │
-│                                                              │ │ AGENTS  2 ───────────────────────────────────────────────────────────────────────────── │
-│ EVERY PROJECT'S ──────────────────────────────────────────── │ │  WHERE                 AGENT                      DOING                                 │
-│ ⇡ Pull requests       asking GitHub…                         │ │  main checkout       · fix alpha                  working                            0s │
-│                                                              │ │  main checkout       · test alpha                 working                            0s │
-│ NO PROJECT'S ─────────────────────────────────────────────── │ │                                                                                         │
-│ ◌ Temporary           –                                      │ │                                                                                         │
-│ ⚙ System              0 processes                            │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-╰──────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Projects ──────────────────────────────────────────────────────────────────────────── 2 ─╮ ╭─ ◆ alpha ────────────────────────────────── 2 working · 2 ─╮
+│ ┃ alpha  /src/alpha · asking git…                                                         │ │ /src/alpha                                                 │
+│                                                                                           │ │ asking git…                                                │
+│ ┃ beta  /src/beta · asking git…                                                           │ │                                                            │
+│                                                                                           │ │ AGENTS  2 ──────────────────────────────────────────────── │
+│ ▸ This Mac  temp work, caches, processes                                                  │ │  WHERE                 AGENT                      DOING    │
+│ ⇡ Pull requests       asking GitHub…                                                      │ │  main checkout       · fix alpha                  …     0s │
+│                                                                                           │ │  main checkout       · test alpha                 …     0s │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+╰───────────────────────────────────────────────────────────────────────────────────────────╯ ╰────────────────────────────────────────────────────────────╯
 HINT ↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl+b keep going  ·  ← the list  ·  esc back
 === 160 classic [down down down]
-                                                                                                                                ● 3 running · – ram · 0% cpu
+                                                                                                                                                 ● 3 running
 
-╭─ Projects ─────────────────────────────────────────────── 2 ─╮ ╭─ ◌ Temporary ──────────────────────────────────────── /tmp and all sessions’ temp work ─╮
-│   NAME                GIT                     AGENTS         │ │ no measured scratch in /tmp or session temp folders                                     │
-│ ◆ alpha               asking git…             ✱2 2 in all    │ │                                                                                         │
-│ ◆ beta                asking git…             ✱1 1 in all    │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│ EVERY PROJECT'S ──────────────────────────────────────────── │ │                                                                                         │
-│ ⇡ Pull requests       asking GitHub…                         │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│ NO PROJECT'S ─────────────────────────────────────────────── │ │                                                                                         │
-│ ◌ Temporary           –                                      │ │                                                                                         │
-│ ⚙ System              0 processes                            │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-│                                                              │ │                                                                                         │
-╰──────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Projects ──────────────────────────────────────────────────────────────────────────── 2 ─╮ ╭─ ⇡ Pull requests ─ yours and asking for your review · 0 ope…
+│ ┃ alpha  /src/alpha · asking git…                                                         │ │ no open pull request of yours or asking for your review    │
+│                                                                                           │ │                                                            │
+│ ┃ beta  /src/beta · asking git…                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│ ▸ This Mac  temp work, caches, processes                                                  │ │                                                            │
+│ ⇡ Pull requests       asking GitHub…                                                      │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+│                                                                                           │ │                                                            │
+╰───────────────────────────────────────────────────────────────────────────────────────────╯ ╰────────────────────────────────────────────────────────────╯
 HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back

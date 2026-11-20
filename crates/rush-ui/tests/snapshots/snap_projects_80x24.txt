@@ -4,14 +4,13 @@
     RUSH
    ▀▀▀▀▀▀
 ────────────────────────────────────────────────────────────────────────────────
-                                                  ● 3 running · – ram · 0% cpu
+                                                                   ● 3 running
 
   ╭─ Projects ─────────────────────────────────────────────────────────── 1 ─╮
-  │ ⇡ Pull requests       asking GitHub…                                     │
-  │ ◌ Temporary           –                                                  │
-  │ ⚙ System              0 processes                                        │
-  │                                                                          │
   │ ┃ checkout  /src/checkout · asking git…                                  │
+  │                                                                          │
+  │ ▸ This Mac  temp work, caches, processes                                 │
+  │ ⇡ Pull requests       asking GitHub…                                     │
   ╰──────────────────────────────────────────────────────────────────────────╯
 
   ╭─ ◆ checkout ──────────────────────── 2 working · 1 need you · 4 · $7.01 ─╮
@@ -20,5 +19,6 @@
   │                                                                          │
   │ AGENTS  4 ────────────────────────────────────────────────────────────── │
   │  WHERE                 AGENT                      DOING                  │
+  │  main checkout       ? fix the flaky tax roundin… asks: asks: Ro…     2m │
 ────────────────────────────────────────────────────────────────────────────────
   ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back

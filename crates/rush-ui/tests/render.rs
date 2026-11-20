@@ -707,12 +707,19 @@ const SIZES: [(u16, u16); 3] = [(80, 24), (120, 40), (200, 50)];
 /// Draws one view at every size, each from a fresh model, as
 /// `name_WxH`.
 fn views(name: &str, setup: impl Fn(&mut Model), keys: &[(Key, KeyMods)]) {
+    // Every size is drawn and checked before any failure is told, so one
+    // run shows all a change moved.
+    let mut failed = Vec::new();
     for (w, h) in SIZES {
         let mut m = model();
         setup(&mut m);
         let f = plain(&mut m, w, h, keys);
-        snapshot(&format!("{name}_{w}x{h}"), &f);
+        let name = format!("{name}_{w}x{h}");
+        if std::panic::catch_unwind(|| snapshot(&name, &f)).is_err() {
+            failed.push(name);
+        }
     }
+    assert!(failed.is_empty(), "snapshots differ: {failed:?}");
 }
 
 #[test]
