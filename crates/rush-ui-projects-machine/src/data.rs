@@ -63,6 +63,10 @@ pub const FOLDER_EVERY: Ms = 15_000;
 pub const PANE_TEMP: &str = "~temp";
 pub const PANE_SYSTEM: &str = "~system";
 pub const PANE_PRS: &str = "~prs";
+/// This Mac's group in the tree: /tmp and temp work, processes, and what
+/// the clean-up plugins found that's no worktree's. Folded until opened
+/// (in Data.unfolded).
+pub const GROUP_MAC: &str = "~mac";
 
 /// The settings the page reads from rush's config.json (state.Config's
 /// ListLook, KeepOrphans, CleanupHours, CleanupDiskGB and
@@ -250,6 +254,8 @@ pub struct Data {
     /// Repositories whose subagent worktrees are unfolded in the tree, by
     /// key (Rust-only: the tree folds them into one row).
     pub unfolded: HashSet<String>,
+    /// Repositories folded in the tree, by key: open until folded.
+    pub folded: HashSet<String>,
     pub lists: HashMap<String, (Vec<TempEntry>, Ms)>,
     pub sizes: HashMap<String, i64>,
     /// Each project's memory as last read, by root, and those being read

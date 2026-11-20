@@ -140,6 +140,17 @@ pub enum What {
     /// A repository's subagent worktrees folded into one row in the tree,
     /// by the repository's key: → unfolds it, ← folds it again.
     Fold(String),
+    /// A group of rows that folds, by its key: This Mac's.
+    Group(String),
+    /// Something a clean-up plugin found: a cache, a build, old sessions.
+    Kit(Box<KitRow>),
+}
+
+/// A clean-up plugin's item, with the plugin that cleans it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct KitRow {
+    pub plugin: String,
+    pub item: rush_plugin::CleanupItem,
 }
 
 /// One line of the Projects page: something to pick, or text.

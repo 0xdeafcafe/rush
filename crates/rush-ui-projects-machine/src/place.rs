@@ -105,13 +105,9 @@ impl Place for Projects {
         self.take_pick(m);
         let w = w.saturating_sub(2);
         let mut out = vec![summary_bar(m, w), Line::new()];
-        // The tree is wider than the table, and capped so a row's verdict
-        // sits near its name (Rust-only: Go's rail look always stacked).
-        let mut lw = if data(m).cfg.rail() {
-            (w * 3 / 5).clamp(72, 112)
-        } else {
-            (w * 2 / 5).clamp(64, 84)
-        };
+        // The tree, capped so a row's verdict sits near its name
+        // (Rust-only: Go's rail look always stacked).
+        let mut lw = (w * 3 / 5).clamp(72, 112);
         let mut rw = w.saturating_sub(lw + 1);
         let stack = w < 130;
         if stack {
@@ -121,7 +117,10 @@ impl Place for Projects {
         first_project(&list, &mut self.proj_pos, &mut self.proj_sel);
         let pick = pick_row(&list, &mut self.proj_pos, &mut self.proj_sel);
         // A worktree's row, or its subagents' fold, shows its repository.
+        // This Mac's Temporary and System show themselves.
         let shown = match pick.map(|i| &list[i]) {
+            Some(r) if r.owner == GROUP_MAC && r.what == What::Pane => r.id.clone(),
+            Some(r) if r.owner == GROUP_MAC => GROUP_MAC.to_string(),
             Some(r) if !r.owner.is_empty() => format!("p{}", r.owner),
             _ => self.proj_sel.clone(),
         };
@@ -142,6 +141,10 @@ impl Place for Projects {
                 ln([sp("/tmp and all sessions’ temp work", DIM)]),
             ),
             PANE_SYSTEM => (bold("System"), ln([sp("processes no project owns", DIM)])),
+            GROUP_MAC => (
+                bold("This Mac"),
+                ln([sp("temp work, caches, processes", DIM)]),
+            ),
             PANE_PRS => {
                 let (open, want) = pr_counts(m);
                 (
@@ -315,6 +318,18 @@ pub fn projects_hint(m: &Model, r: &WorkRow, w: usize) -> Line {
                 &[("↑↓", "move"), fold, ("c", "clean up"), ("esc", "back")],
             )
         }
+        What::Group(key) => {
+            let fold = if d.unfolded.contains(key) {
+                ("←", "fold")
+            } else {
+                ("→", "unfold")
+            };
+            keys_fit(
+                w,
+                &[("↑↓", "move"), fold, ("c", "clean up"), ("esc", "back")],
+            )
+        }
+        What::Kit(_) => keys_fit(w, &[("↑↓", "move"), ("c", "clean up"), ("esc", "back")]),
         What::Mem(_) => keys_fit(
             w,
             &[
@@ -345,6 +360,14 @@ impl Projects {
             "pgup" => self.mv(&rows, i, -10),
             "pgdown" => self.mv(&rows, i, 10),
             "enter" | "right" => match &r.what {
+                // A folded repository opens before it's gone into.
+                What::Proj(key) if m.kept::<Data>().folded.remove(key) => {}
+                What::Group(key) => {
+                    let d = m.kept::<Data>();
+                    if !d.unfolded.remove(key) {
+                        d.unfolded.insert(key.clone());
+                    }
+                }
                 What::Proj(_) | What::Pane => {
                     self.proj_in = true;
                     self.in_pos = 0;
@@ -453,6 +476,33 @@ impl Projects {
     /// ← on an unfolded fold, or on a worktree inside one, folds it and
     /// puts the cursor on the fold; false when ← isn't that.
     fn fold_back(&mut self, m: &mut Model, rows: &[WorkRow], r: &WorkRow) -> bool {
+        // A repository folds, and This Mac, from its head or a row in it.
+        let group = match &r.what {
+            What::Proj(key) if !m.kept::<Data>().folded.contains(key) => {
+                Some((key.clone(), format!("p{key}"), true))
+            }
+            What::Group(key) => Some((key.clone(), key.clone(), false)),
+            _ if r.owner == GROUP_MAC => {
+                Some((GROUP_MAC.to_string(), GROUP_MAC.to_string(), false))
+            }
+            _ => None,
+        };
+        if let Some((key, id, repo)) = group {
+            let d = m.kept::<Data>();
+            let changed = if repo {
+                d.folded.insert(key)
+            } else {
+                d.unfolded.remove(&key)
+            };
+            if !changed {
+                return false;
+            }
+            if let Some(i) = rows.iter().position(|r| r.id == id) {
+                self.proj_pos = i;
+            }
+            self.proj_sel = id;
+            return true;
+        }
         let key = match &r.what {
             What::Fold(key) => key.clone(),
             What::Wt(t) if t.made == rush_fleet::MADE_BY_SUBAGENT => r.owner.clone(),

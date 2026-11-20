@@ -133,34 +133,53 @@ fn frames_match_go() {
     ];
     let want = oracle(include_str!("testdata/projects.txt"));
     assert_eq!(want.len(), cases.len());
+    let mut all = Vec::new();
     for ((w, cfg, keys), (name, want)) in cases.into_iter().zip(want) {
         let mut m = model(three(), w, 42, cfg);
         for k in keys {
             press(&mut m, k);
         }
-        same_as_go(&mut m, &name, &want);
+        all.push(same_as_go(&mut m, &name, &want));
     }
+    frames_all_same(&all);
 }
 
-/// The frame's body and hint against Go's.
-fn same_as_go(m: &mut Model, name: &str, want: &str) {
-    {
-        let got = body(m);
-        // Go's body runs past the screen, its boxes to the bottom; Go's
-        // frame (and the real one, checked with rush --render) shows the
-        // boxes' bottom edge on the screen's last body row.
-        let got_rows: Vec<&str> = got.lines().collect();
-        let want_rows: Vec<&str> = want.lines().collect();
-        let n = got_rows.len() - 1;
-        let mut want: Vec<&str> = want_rows[..want_rows.len() - 1].to_vec();
-        if want.len() > n {
-            let edge = want[want.len() - 1];
-            want.truncate(n - 1);
-            want.push(edge);
-        }
-        let want = want.join("\n") + "\n" + want_rows[want_rows.len() - 1] + "\n";
-        assert_eq!(got, want, "{name}");
+/// The frame's body and hint against the case's, as want had it and as
+/// drawn: (name, want, got).
+fn same_as_go(m: &mut Model, name: &str, want: &str) -> (String, String, String) {
+    let got = body(m);
+    // Go's body runs past the screen, its boxes to the bottom; Go's
+    // frame (and the real one, checked with rush --render) shows the
+    // boxes' bottom edge on the screen's last body row.
+    let got_rows: Vec<&str> = got.lines().collect();
+    let want_rows: Vec<&str> = want.lines().collect();
+    let n = got_rows.len() - 1;
+    let mut cut: Vec<&str> = want_rows[..want_rows.len() - 1].to_vec();
+    if cut.len() > n {
+        let edge = cut[cut.len() - 1];
+        cut.truncate(n - 1);
+        cut.push(edge);
     }
+    let want = cut.join("\n") + "\n" + want_rows[want_rows.len() - 1] + "\n";
+    (name.to_string(), want, got)
+}
+
+/// Every case's frame as its want, else every frame drawn, in the
+/// testdata's own form, so one run gives all a change moved.
+fn frames_all_same(all: &[(String, String, String)]) {
+    let bad: Vec<&str> = all
+        .iter()
+        .filter(|(_, want, got)| want != got)
+        .map(|(name, ..)| name.as_str())
+        .collect();
+    if bad.is_empty() {
+        return;
+    }
+    let mut drawn = String::new();
+    for (name, _, got) in all {
+        drawn.push_str(&format!("=== {name}\n{got}"));
+    }
+    panic!("frames differ: {bad:?}\n--- drawn ---\n{drawn}--- end ---");
 }
 
 /// Go's richModel: a worktree checked and measured, an agent done with,
@@ -246,6 +265,7 @@ fn rich_frames_match_go() {
     ];
     let want = oracle(include_str!("testdata/projects_rich.txt"));
     assert_eq!(want.len(), cases.len());
+    let mut all = Vec::new();
     for ((w, cfg, pick, keys), (name, want)) in cases.into_iter().zip(want) {
         let mut m = rich(w, cfg);
         if !pick.is_empty() {
@@ -254,8 +274,9 @@ fn rich_frames_match_go() {
         for k in keys {
             press(&mut m, k);
         }
-        same_as_go(&mut m, &name, &want);
+        all.push(same_as_go(&mut m, &name, &want));
     }
+    frames_all_same(&all);
 }
 
 /// The bottom row's keys, as the frame draws them.

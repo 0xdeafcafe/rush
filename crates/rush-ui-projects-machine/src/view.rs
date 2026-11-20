@@ -31,7 +31,6 @@ use crate::model::Model;
 use crate::style::*;
 
 const PROJ_NAME_W: usize = 22;
-const PROJ_GIT_W: usize = 24;
 const TREE_NAME_W: usize = 22;
 const TREE_SIZE_W: usize = 7;
 const TREE_VERD_W: usize = 24;
@@ -55,32 +54,24 @@ pub fn summary_bar(m: &Model, w: usize) -> Line {
     spread(Line::new(), projects_summary(m, running), w)
 }
 
-/// The machine's load and how much can go without losing anything.
+/// How many agents run, what's on disk that Projects knows of, and how
+/// much of it can go without losing anything.
 pub fn projects_summary(m: &Model, running: usize) -> Line {
     let d = data(m);
-    let mc = &d.machine;
-    let mut safe: i64 = 0;
+    let mut safe: i64 = mac_can_go(m);
+    let mut on_disk: i64 = mac_size(m);
     for w in &d.wts {
+        on_disk += w.size;
         if mark_now(m, w).0 == Mark::CanGo && running_of(m, &w.agents).is_none() {
             safe += w.frees();
         }
     }
-    for g in agents(m) {
-        if g.a.pid == 0 {
-            let t = d.temp_of(&g.a.key);
-            if t >= TEMP_SHOWN {
-                safe += t;
-            }
-        }
+    safe += kits_in_worktrees_can_go(m, |_| true);
+    let mut l = ln([sp(format!("● {running} running"), ORANGE)]);
+    if on_disk > 0 {
+        l.spans
+            .push(sp(format!(" · {} on disk", disk(on_disk)), DIM));
     }
-    safe += d.tmp.stale;
-    let mut l = ln([
-        sp(format!("● {running} running"), ORANGE),
-        sp(
-            format!(" · {} ram · {:.0}% cpu", mem(mc.total_mem), mc.total_cpu),
-            DIM,
-        ),
-    ]);
     if d.checking && d.checked == 0 {
         l.spans
             .extend([sp(" · ", DIM), spin(m), sp(" asking git…", DIM)]);
@@ -93,6 +84,62 @@ pub fn projects_summary(m: &Model, running: usize) -> Line {
         ]);
     }
     l
+}
+
+/// What clean-up plugins found in worktrees (target/, node_modules) that
+/// can go, in the worktrees keep says, those that can't go whole: one
+/// that can is counted whole already.
+fn kits_in_worktrees_can_go(m: &Model, keep: impl Fn(&Worktree) -> bool) -> i64 {
+    let d = data(m);
+    d.wts
+        .iter()
+        .filter(|t| keep(t) && mark_now(m, t).0 != Mark::CanGo)
+        .flat_map(|t| d.kits.in_worktree(&t.path))
+        .filter(|(_, i)| i.can_go)
+        .map(|(_, i)| i.bytes as i64)
+        .sum()
+}
+
+/// /tmp and the agents' temp work, all of it.
+fn temp_total(m: &Model) -> i64 {
+    let d = data(m);
+    agents(m)
+        .map(|g| d.temp_of(&g.a.key))
+        .filter(|&t| t >= TEMP_SHOWN)
+        .sum::<i64>()
+        + d.tmp.size
+}
+
+/// This Mac's size: temp work, and what the plugins found in no worktree.
+pub fn mac_size(m: &Model) -> i64 {
+    temp_total(m)
+        + data(m)
+            .kits
+            .machine()
+            .map(|(_, i)| i.bytes as i64)
+            .sum::<i64>()
+}
+
+/// What of This Mac can go: stopped agents' temp work, /tmp that's
+/// stale, and what the plugins say loses nothing.
+pub fn mac_can_go(m: &Model) -> i64 {
+    let d = data(m);
+    let mut safe = 0;
+    for g in agents(m) {
+        if g.a.pid == 0 {
+            let t = d.temp_of(&g.a.key);
+            if t >= TEMP_SHOWN {
+                safe += t;
+            }
+        }
+    }
+    safe += d.tmp.stale;
+    safe + d
+        .kits
+        .machine()
+        .filter(|(_, i)| i.can_go)
+        .map(|(_, i)| i.bytes as i64)
+        .sum::<i64>()
 }
 
 fn running_of<'a>(m: &'a Model, keys: &[String]) -> Option<Ag<'a>> {
@@ -112,115 +159,10 @@ pub fn picked_rows(m: &Model, sel: &str, w: usize) -> Vec<WorkRow> {
     }
 }
 
-/// The page's list: in the rail look a tree, else a table.
+/// The page's list: every repository's tree, other folders, This Mac,
+/// and pull requests.
 pub fn project_list(m: &Model, w: usize) -> Vec<WorkRow> {
-    if data(m).cfg.rail() {
-        project_tree(m, w)
-    } else {
-        classic_project_list(m, w)
-    }
-}
-
-fn kind_of(p: &Project) -> Kind {
-    if p.repo { Kind::Project } else { Kind::Folder }
-}
-
-/// Every project in one table: repositories, then the folders that aren't.
-pub fn classic_project_list(m: &Model, w: usize) -> Vec<WorkRow> {
-    let d = data(m);
-    let list = projects(m);
-    let now = m.now;
-    let mut rows = vec![WorkRow::text(thead(&[
-        ("  NAME", PROJ_NAME_W),
-        ("GIT", PROJ_GIT_W),
-        ("AGENTS", 10),
-    ]))];
-    if list.is_empty() {
-        rows = vec![WorkRow::text(ln([sp(
-            "no agent has worked anywhere in the last day",
-            DIM,
-        )]))];
-    }
-    for (i, p) in list.iter().enumerate() {
-        if i > 0 && p.repo != list[i - 1].repo {
-            rows.push(WorkRow::blank());
-            rows.push(WorkRow::text(psection(
-                "Other folders",
-                "◇ not a repository",
-                w,
-            )));
-        }
-        let mut git = Line::new();
-        match d.folders.get(&p.key) {
-            Some(f) if p.repo => {
-                git.spans.push(sp(f.git.branch.clone(), SUB));
-                if f.git.changed > 0 {
-                    git.spans.push(sp(format!(" ±{}", f.git.changed), YELLOW));
-                }
-                if f.worktrees > 0 {
-                    git.spans.push(sp(format!(" ⎇{}", f.worktrees), BLUE));
-                }
-            }
-            _ if p.repo => git.spans.push(sp("asking git…", FAINT)),
-            _ => {}
-        }
-        let mut l = ln([kind_mark(kind_of(p)), plain(" ")]);
-        join(
-            &mut l,
-            fit(ln([spb(p.title.clone(), TEXT)]), PROJ_NAME_W - 2),
-        );
-        join(&mut l, fit(git, PROJ_GIT_W));
-        join(&mut l, agent_counts(&p.agents, now));
-        rows.push(WorkRow {
-            id: format!("p{}", p.key),
-            what: What::Proj(p.key.clone()),
-            line: l,
-            owner: String::new(),
-        });
-    }
-    // What's no project's: temp work, and processes.
-    let temp: i64 = agents(m)
-        .map(|g| d.temp_of(&g.a.key))
-        .filter(|&t| t >= TEMP_SHOWN)
-        .sum::<i64>()
-        + d.tmp.size;
-    let mut procs = ln([sp(format!("{} processes", proc_rows(m).len()), DIM)]);
-    if d.machine.orphans > 0 {
-        procs = cat(
-            ln([
-                sp(format!("{} orphaned", d.machine.orphans), YELLOW),
-                sp(" · ", DIM),
-            ]),
-            procs,
-        );
-    }
-    let name = |s: &str| fit(ln([spb(s, TEXT)]), PROJ_NAME_W - 2);
-    rows.push(WorkRow::blank());
-    rows.push(WorkRow::text(psection("Every project's", "", w)));
-    rows.push(WorkRow {
-        id: PANE_PRS.into(),
-        what: What::Pane,
-        line: prs_list_line(m),
-        owner: String::new(),
-    });
-    rows.push(WorkRow::blank());
-    rows.push(WorkRow::text(psection("No project's", "", w)));
-    rows.push(WorkRow {
-        id: PANE_TEMP.into(),
-        what: What::Pane,
-        line: cat(
-            cat(ln([kind_mark(Kind::Temp), plain(" ")]), name("Temporary")),
-            ln([sp(disk(temp), DIM)]),
-        ),
-        owner: String::new(),
-    });
-    rows.push(WorkRow {
-        id: PANE_SYSTEM.into(),
-        what: What::Pane,
-        line: cat(cat(ln([sp("⚙", FAINT), plain(" ")]), name("System")), procs),
-        owner: String::new(),
-    });
-    rows
+    project_tree(m, w)
 }
 
 /// A project's agents in a few cells: working, needing you, your turn,
@@ -786,11 +728,6 @@ pub fn worktree_line(
 pub fn project_tree(m: &Model, w: usize) -> Vec<WorkRow> {
     let list = projects(m);
     let mut rows = Vec::new();
-    let tail = classic_project_list(m, w);
-    if let Some(i) = tail.iter().position(|r| r.id == PANE_PRS) {
-        rows.extend(tail.into_iter().skip(i).filter(WorkRow::pickable));
-        rows.push(WorkRow::blank());
-    }
     if list.is_empty() {
         rows.push(WorkRow::text(ln([sp(
             "no agent has worked anywhere in the last day",
@@ -810,7 +747,134 @@ pub fn project_tree(m: &Model, w: usize) -> Vec<WorkRow> {
         }
         rows.extend(project_tree_rows(m, p, w));
     }
+    rows.push(WorkRow::blank());
+    rows.extend(mac_rows(m, w));
+    rows.push(WorkRow {
+        id: PANE_PRS.into(),
+        what: What::Pane,
+        line: prs_list_line(m),
+        owner: String::new(),
+    });
     rows
+}
+
+/// This Mac's row, and when it's open what's in it: Temporary, System,
+/// and what the clean-up plugins found in no worktree.
+fn mac_rows(m: &Model, w: usize) -> Vec<WorkRow> {
+    let d = data(m);
+    let open = d.unfolded.contains(GROUP_MAC);
+    let can_go = mac_can_go(m);
+    let verdict = if can_go > 0 {
+        ln([sp(format!("{} can go", disk(can_go)), BLUE)])
+    } else {
+        Line::new()
+    };
+    let head = ln([
+        sp(if open { "▾" } else { "▸" }, SUB),
+        plain(" "),
+        spb("This Mac", TEXT),
+        plain("  "),
+        sp("temp work, caches, processes", DIM),
+    ]);
+    let mut rows = vec![WorkRow {
+        id: GROUP_MAC.into(),
+        what: What::Group(GROUP_MAC.into()),
+        line: tree_tail(head, mac_size(m), verdict, w),
+        owner: String::new(),
+    }];
+    if !open {
+        return rows;
+    }
+    let edge = sp("┃", FAINT);
+    let mut procs = ln([sp(format!("{} processes", proc_rows(m).len()), DIM)]);
+    if d.machine.orphans > 0 {
+        procs = cat(
+            ln([
+                sp(format!("{} orphaned", d.machine.orphans), YELLOW),
+                sp(" · ", DIM),
+            ]),
+            procs,
+        );
+    }
+    let kits: Vec<(&str, &rush_plugin::CleanupItem)> = d.kits.machine().collect();
+    let n = 2 + kits.len();
+    let lead = |i: usize| if i == n - 1 { "└─" } else { "├─" };
+    rows.push(WorkRow {
+        id: PANE_TEMP.into(),
+        what: What::Pane,
+        owner: GROUP_MAC.into(),
+        line: wt_tree_line(
+            &edge,
+            lead(0),
+            kind_mark(Kind::Temp),
+            sp("Temporary", TEXT),
+            ln([sp("/tmp and agents' temp work", DIM)]),
+            temp_total(m),
+            Line::new(),
+            w,
+        ),
+    });
+    rows.push(WorkRow {
+        id: PANE_SYSTEM.into(),
+        what: What::Pane,
+        owner: GROUP_MAC.into(),
+        line: wt_tree_line(
+            &edge,
+            lead(1),
+            sp("⚙", FAINT),
+            sp("System", TEXT),
+            procs,
+            0,
+            Line::new(),
+            w,
+        ),
+    });
+    for (j, (plugin, item)) in kits.into_iter().enumerate() {
+        rows.push(kit_row(&edge, lead(2 + j), plugin, item, GROUP_MAC, w));
+    }
+    rows
+}
+
+/// A clean-up plugin's item as a row: ✓ when it loses nothing.
+fn kit_row(
+    edge: &Span,
+    lead: &str,
+    plugin: &str,
+    item: &rush_plugin::CleanupItem,
+    owner: &str,
+    w: usize,
+) -> WorkRow {
+    let mark = if item.can_go { Mark::CanGo } else { Mark::Kept };
+    let what = if item.bytes == 0 && !item.meta.is_empty() {
+        ln([sp(item.meta.clone(), DIM)])
+    } else if item.comes_back {
+        ln([sp("comes back by itself", DIM)])
+    } else {
+        Line::new()
+    };
+    let verdict = if item.can_go {
+        ln([sp("can go", BLUE)])
+    } else {
+        Line::new()
+    };
+    WorkRow {
+        id: format!("k{plugin}:{}", item.id),
+        owner: owner.to_string(),
+        line: wt_tree_line(
+            edge,
+            lead,
+            mark_span(mark),
+            sp(item.title.clone(), TEXT),
+            what,
+            item.bytes as i64,
+            verdict,
+            w,
+        ),
+        what: What::Kit(Box::new(KitRow {
+            plugin: plugin.to_string(),
+            item: item.clone(),
+        })),
+    }
 }
 
 /// The id of a repository's folded subagent worktrees' row.
@@ -826,7 +890,12 @@ fn project_tree_rows(m: &Model, p: &Project, w: usize) -> Vec<WorkRow> {
     let f = d.folders.get(&p.key);
     let trees = repo_worktrees(d, p);
     let total: i64 = trees.iter().map(|t| t.size).sum();
+    let shut = d.folded.contains(&p.key);
     let mut head = ln([edge.clone(), plain(" ")]);
+    if p.repo && !trees.is_empty() {
+        head.spans.push(sp(if shut { "▸" } else { "▾" }, SUB));
+        head.spans.push(plain(" "));
+    }
     if !p.repo {
         head.spans.push(kind_mark(Kind::Folder));
         head.spans.push(plain(" "));
@@ -834,7 +903,6 @@ fn project_tree_rows(m: &Model, p: &Project, w: usize) -> Vec<WorkRow> {
     head.spans.push(spb(p.title.clone(), TEXT));
     head.spans.push(plain("  "));
     head.spans.push(sp(tildify(&p.key), DIM));
-    let mut verdict = Line::new();
     match f {
         Some(f) if p.repo => {
             head.spans.push(sp(format!(" · {}", f.git.branch), DIM));
@@ -847,21 +915,38 @@ fn project_tree_rows(m: &Model, p: &Project, w: usize) -> Vec<WorkRow> {
                 head.spans.push(sp(" · ", DIM));
                 head.spans
                     .push(sp(format!("{} behind", f.git.behind), YELLOW));
-                verdict = ln([sp("needs a pull", YELLOW)]);
             }
         }
         None if p.repo => head.spans.push(sp(" · asking git…", FAINT)),
         _ => {}
     }
+    let can_go: i64 = trees
+        .iter()
+        .filter(|t| mark_now(m, t).0 == Mark::CanGo && running_of(m, &t.agents).is_none())
+        .map(Worktree::frees)
+        .sum::<i64>()
+        + kits_in_worktrees_can_go(m, |t| t.repo == p.key);
+    let verdict = if can_go > 0 {
+        ln([sp(format!("{} can go", disk(can_go)), BLUE)])
+    } else {
+        Line::new()
+    };
     let mut rows = vec![WorkRow {
         id: format!("p{}", p.key),
         what: What::Proj(p.key.clone()),
         line: tree_tail(head, total, verdict, w),
         owner: String::new(),
     }];
-    if !p.repo {
+    if !p.repo || shut {
         return rows;
     }
+    // What the clean-up plugins found in its worktrees: builds,
+    // dependencies.
+    let kits: Vec<(String, rush_plugin::CleanupItem)> = trees
+        .iter()
+        .flat_map(|t| d.kits.in_worktree(&t.path))
+        .map(|(plugin, i)| (plugin.to_string(), i.clone()))
+        .collect();
     let (subs, own): (Vec<Worktree>, Vec<Worktree>) =
         trees.into_iter().partition(|t| t.made == MADE_BY_SUBAGENT);
     // The subagents' fold sits where they'd sort: after rush's and Claude
@@ -878,7 +963,7 @@ fn project_tree_rows(m: &Model, p: &Project, w: usize) -> Vec<WorkRow> {
     if !folded {
         items.push(None);
     }
-    let n = items.len();
+    let n = items.len() + kits.len();
     let open = d.unfolded.contains(&p.key);
     for (i, it) in items.into_iter().enumerate() {
         let last = i == n - 1;
@@ -900,6 +985,11 @@ fn project_tree_rows(m: &Model, p: &Project, w: usize) -> Vec<WorkRow> {
                 }
             }
         }
+    }
+    let k = kits.len();
+    for (j, (plugin, item)) in kits.into_iter().enumerate() {
+        let lead = if j == k - 1 { "└─" } else { "├─" };
+        rows.push(kit_row(&edge, lead, &plugin, &item, &p.key, w));
     }
     rows
 }
