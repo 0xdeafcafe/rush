@@ -401,10 +401,28 @@ pub fn projects(m: &Model) -> Vec<Project<'_>> {
         p.open = p.open || g.open() || g.busy();
         p.agents.push(g);
     }
+    // Repositories the worktree scan knows of that no agent worked in
+    // lately: listed with no agents, so old worktrees show. Matched by
+    // main checkout, as git names it (the scan's and the agents' roots both
+    // come from it), less any trailing slash.
+    let same = |a: &str, b: &str| a.trim_end_matches('/') == b.trim_end_matches('/');
+    for w in &data(m).wts {
+        if w.path == w.repo || w.repo.is_empty() || by.iter().any(|p| same(&p.key, &w.repo)) {
+            continue;
+        }
+        by.push(Project {
+            key: w.repo.clone(),
+            title: String::new(),
+            agents: Vec::new(),
+            open: false,
+            repo: true,
+        });
+    }
     let titles = folder_titles(by.iter().map(|p| p.key.as_str()));
     for p in &mut by {
         p.title = titles.get(&p.key).cloned().unwrap_or_default();
-        p.repo = p.key.starts_with('/') && p.agents.iter().any(|g| g.root == p.key);
+        p.repo = p.key.starts_with('/')
+            && (p.agents.is_empty() || p.agents.iter().any(|g| g.root == p.key));
         p.agents.sort_by(|a, b| {
             a.tree().cmp(b.tree()).then(
                 order
@@ -417,6 +435,9 @@ pub fn projects(m: &Model) -> Vec<Project<'_>> {
     by.sort_by(|a, b| {
         b.repo
             .cmp(&a.repo)
+            // Worktree-only repositories after those agents worked in,
+            // by name.
+            .then(a.agents.is_empty().cmp(&b.agents.is_empty()))
             .then(b.open.cmp(&a.open))
             .then(a.title.to_lowercase().cmp(&b.title.to_lowercase()))
     });

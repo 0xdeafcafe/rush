@@ -927,3 +927,56 @@ fn the_tree_sits_beside_its_pick_when_wide() {
     rush_ui_projects_machine::pick_in_projects(&mut m, "w/src/alpha/.claude/worktrees/fix");
     assert!(frame(&mut m).contains("╭─ ◆ alpha"));
 }
+
+/// rich with a repository no agent worked in lately, its worktree old.
+fn with_old_repo(w: usize) -> Model {
+    let mut m = rich(w, Cfg::default());
+    let d = m.kept::<Data>();
+    let mut t = Worktree::default();
+    t.path = "/src/zeta/.claude/worktrees/old".into();
+    t.repo = "/src/zeta".into();
+    t.branch = "old".into();
+    t.size = 3 << 30;
+    t.checked = NOW;
+    d.wts.push(t);
+    m
+}
+
+#[test]
+fn a_repo_with_only_old_worktrees_is_listed() {
+    let mut m = with_old_repo(160);
+    {
+        let list = projects(&m);
+        let keys: Vec<&str> = list.iter().map(|p| p.key.as_str()).collect();
+        assert_eq!(
+            keys.iter().filter(|k| **k == "/src/zeta").count(),
+            1,
+            "{keys:?}"
+        );
+        let at = keys.iter().position(|k| *k == "/src/zeta").unwrap();
+        let p = &list[at];
+        assert!(p.repo && p.agents.is_empty() && !p.open);
+        // After every repository agents worked in, before other folders.
+        assert!(
+            list[..at].iter().all(|p| p.repo && !p.agents.is_empty()),
+            "{keys:?}"
+        );
+        assert!(list[at + 1..].iter().all(|p| !p.repo), "{keys:?}");
+    }
+    let f = tree(&mut m);
+    assert!(f.contains("zeta  /src/zeta"), "{f}");
+    // Picked, its details have no agents section and say none.
+    rush_ui_projects_machine::pick_in_projects(&mut m, "p/src/zeta");
+    let f = frame(&mut m);
+    assert!(f.contains("╭─ ◆ zeta"), "{f}");
+    assert!(f.contains("no agents"), "{f}");
+    assert!(!f.contains("WHERE"), "{f}");
+    assert!(f.contains("Worktrees"), "{f}");
+    // A repository found both ways is listed once.
+    let m = with_subagents(160);
+    let n = projects(&m)
+        .iter()
+        .filter(|p| p.key == "/src/alpha")
+        .count();
+    assert_eq!(n, 1);
+}
