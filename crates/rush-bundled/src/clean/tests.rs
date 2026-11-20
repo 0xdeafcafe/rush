@@ -620,3 +620,37 @@ fn nothing_deletes_on_its_own() {
         );
     }
 }
+
+// A measure a new session asks for walks only folders not sized yet;
+// those it has keep their sizes until the next full measure.
+#[test]
+fn size_things_walks_only_folders_not_sized() {
+    let thing = |p: &str| Thing::new(p, p, "", Arc::new(|_: &Ctx| Ok(String::new()))).at(p);
+    let mut prev = vec![thing("/old")];
+    (prev[0].size, prev[0].freeable, prev[0].mtime) = (7, 5, Some(3));
+    let walked = std::cell::RefCell::new(Vec::new());
+    let mut measure = |p: &std::path::Path| {
+        walked.borrow_mut().push(p.to_string_lossy().into_owned());
+        Sizes {
+            on_disk: 11,
+            freeable: 9,
+            newest: Some(1),
+        }
+    };
+    let mut things = vec![
+        thing("/old"),
+        thing("/new"),
+        Thing::new("b", "b", "", Arc::new(|_: &Ctx| Ok(String::new()))),
+    ];
+    size_things(&mut things, &prev, &mut measure);
+    assert_eq!(*walked.borrow(), ["/new"]);
+    let got: Vec<_> = things
+        .iter()
+        .map(|t| (t.size, t.freeable, t.mtime))
+        .collect();
+    assert_eq!(got, [(7, 5, Some(3)), (11, 9, Some(1)), (0, 0, None)]);
+
+    walked.borrow_mut().clear();
+    size_things(&mut things, &[], &mut measure);
+    assert_eq!(*walked.borrow(), ["/old", "/new"]);
+}

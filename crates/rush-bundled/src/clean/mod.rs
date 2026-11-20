@@ -217,6 +217,8 @@ struct State {
     /// when it measures next
     due: Option<Instant>,
     measuring: bool,
+    /// when everything is measured again; None when it's due now
+    full_due: Option<Instant>,
     /// things being cleaned
     busy: std::collections::HashSet<String>,
     /// when it last said worktrees can be reaped
@@ -347,14 +349,19 @@ impl App {
         let fresh = st.seen.get(&s.id).is_none_or(|was| was.cwd != s.cwd);
         st.seen.insert(s.id.clone(), s);
         if fresh && !st.measuring {
-            // A folder came in: what's in it is worth measuring soon.
-            self.soon(&mut st);
+            // A folder came in: what's in it is worth measuring soon, and
+            // only it: what was sized waits for the next full measure.
+            self.soon(&mut st, false);
         }
     }
 
-    /// Measures again soon. Under the lock.
-    fn soon(&self, st: &mut State) {
-        st.measured = None;
+    /// Measures again soon: everything when full, else only folders not
+    /// sized yet. Under the lock.
+    fn soon(&self, st: &mut State, full: bool) {
+        if full {
+            st.measured = None;
+            st.full_due = None;
+        }
         let soon = Instant::now() + MEASURE_SOON;
         st.due = Some(st.due.map_or(soon, |d| d.min(soon)));
         self.wake.notify_all();
@@ -369,6 +376,8 @@ impl App {
     /// first seen. It sleeps until a measure is due, as Go's ticker would
     /// find it, without waking in between.
     fn run_loop(&self, conn: &Conn) {
+        // Measuring is housekeeping: off the performance cores.
+        rush_sys::qos::background();
         let mut st = self.lock();
         loop {
             if st.done {
@@ -390,31 +399,31 @@ impl App {
         }
     }
 
+    /// Measures what it keeps: everything when a full measure is due,
+    /// else only the folders it hasn't sized yet. The walks are paced.
     fn measure(&self, conn: &Conn) {
-        {
+        let (full, prev) = {
             let mut st = self.lock();
             if st.measuring {
                 return;
             }
             st.measuring = true;
             st.due = None;
-        }
+            let full = st.full_due.is_none_or(|d| Instant::now() >= d);
+            (full, if full { Vec::new() } else { st.things.clone() })
+        };
         let mut things = (self.k.things)(&self.ctx, &self.sessions());
-        for t in &mut things {
-            if !t.path.is_empty() {
-                let s = sizes(Path::new(&t.path));
-                t.size = s.on_disk as i64;
-                t.freeable = s.freeable;
-                t.mtime = s.newest;
-            }
-        }
+        size_things(&mut things, &prev, &mut sizes_background);
         let text = {
             let mut st = self.lock();
             let now = Time::now();
             st.things = things;
             st.measured = Some(now);
             st.measuring = false;
-            st.due = Some(Instant::now() + MEASURE_EVERY);
+            if full {
+                st.full_due = Some(Instant::now() + MEASURE_EVERY);
+            }
+            st.due = st.full_due;
             let text = reap_notice(&st.things, st.said, now);
             if !text.is_empty() {
                 st.said = Some(now);
@@ -515,7 +524,7 @@ impl App {
         {
             let mut st = self.lock();
             st.busy.remove(id);
-            self.soon(&mut st); // measure again, soon
+            self.soon(&mut st, true); // measure everything again, soon
         }
         let said = match got {
             Err(e) => format!("{}: {e}", t.title),
@@ -820,13 +829,44 @@ pub(crate) struct Sizes {
     pub newest: Option<i64>,
 }
 
+/// Sizes each thing that has a path: as prev had it at the same path,
+/// else by measure. An empty prev measures them all.
+pub(crate) fn size_things(
+    things: &mut [Thing],
+    prev: &[Thing],
+    measure: &mut dyn FnMut(&Path) -> Sizes,
+) {
+    for t in things.iter_mut().filter(|t| !t.path.is_empty()) {
+        if let Some(p) = prev.iter().find(|p| p.path == t.path) {
+            (t.size, t.freeable, t.mtime) = (p.size, p.freeable, p.mtime);
+            continue;
+        }
+        let s = measure(Path::new(&t.path));
+        t.size = s.on_disk as i64;
+        t.freeable = s.freeable;
+        t.mtime = s.newest;
+    }
+}
+
 /// path's Sizes, in one walk, links not followed.
 pub(crate) fn sizes(path: &Path) -> Sizes {
+    sizes_with(path, &mut || {})
+}
+
+/// path's Sizes at the background pace (rush_fleet::paced): what the
+/// measures nobody waits on use.
+fn sizes_background(path: &Path) -> Sizes {
+    rush_fleet::paced(|step| sizes_with(path, step))
+}
+
+/// sizes, calling step before each entry it looks at.
+fn sizes_with(path: &Path, step: &mut dyn FnMut()) -> Sizes {
     use std::os::unix::fs::MetadataExt;
     let mut s = Sizes::default();
     let mut linked = std::collections::HashSet::new();
     let mut stack = vec![path.to_path_buf()];
     while let Some(p) = stack.pop() {
+        step();
         let Ok(m) = std::fs::symlink_metadata(&p) else {
             continue;
         };

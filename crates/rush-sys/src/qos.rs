@@ -13,3 +13,14 @@ pub fn plain() {
         libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_DEFAULT, 0);
     }
 }
+
+/// Puts the calling thread in the background class, for housekeeping
+/// nobody waits on: efficiency cores and throttled disk reads. Elsewhere
+/// does nothing.
+pub fn background() {
+    #[cfg(target_os = "macos")]
+    // SAFETY: takes plain values and changes only the calling thread.
+    unsafe {
+        libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_BACKGROUND, 0);
+    }
+}

@@ -1493,7 +1493,12 @@ deleted as it went. Here it never deletes on its own:
   built-in cache-dir rule's folder, `engine_finds`; targets and worktrees
   carry no kind), with its size on disk (each file once), what it would
   free (files with one link) and when anything in it last changed (one
-  walk, `sizes`), and for node_modules its worktree and a session seen
+  walk, `sizes`; a kit's own measures walk at rush-fleet's background pace,
+  `paced`, on a background-class thread: a session coming in measures
+  only the folders not sized yet, everything again every 15 minutes and
+  after a clean; walking the pnpm store and every idle worktree's
+  node_modules again on each new session kept js-clean at 50–100% of a
+  core all day), and for node_modules its worktree and a session seen
   there; whether anything uses it is left unknown, as the engine asks
   right before a removal. The kinds (`kits.rs` `KIND_*`): go-clean's
   `go.build-cache` (GOCACHE, when not the engine's folder),
