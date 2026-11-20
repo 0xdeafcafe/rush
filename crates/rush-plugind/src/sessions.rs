@@ -284,6 +284,8 @@ impl Runner {
                 #[serde(default)]
                 struct Q {
                     service: String,
+                    plugin: String,
+                    params: Option<Raw>,
                 }
                 let q: Q = crate::params(params)?;
                 if !p.uses.contains(&q.service) {
@@ -295,7 +297,9 @@ impl Runner {
                 let Some(b) = self.broker() else {
                     return Err(server("no broker"));
                 };
-                Ok(Some(to_raw(&b.ask(ctx, &q.service, &self.name))))
+                Ok(Some(to_raw(&b.ask_with(
+                    ctx, &q.service, &self.name, &q.plugin, q.params,
+                ))))
             }
             "sessions.list" => {
                 need(CAP_LIST)?;

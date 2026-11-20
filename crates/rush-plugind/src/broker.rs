@@ -389,9 +389,13 @@ impl Broker {
                 #[serde(default)]
                 struct P {
                     service: String,
+                    plugin: String,
+                    params: Option<Raw>,
                 }
                 let p: P = params(p)?;
-                Ok(Some(to_raw(&self.ask(ctx, &p.service, ""))))
+                Ok(Some(to_raw(
+                    &self.ask_with(ctx, &p.service, "", &p.plugin, p.params),
+                )))
             }
             "reload" => {
                 let b = self.clone();
@@ -418,25 +422,47 @@ impl Broker {
     /// at once, but the one asking (from), and gathers their answers by
     /// plugin. One that can't answer in time says so in its error.
     pub fn ask(&self, ctx: &Ctx, service: &str, from: &str) -> Vec<Answer> {
+        self.ask_with(ctx, service, from, "", None)
+    }
+
+    /// ask, of only the plugin named to when it isn't "", with params
+    /// passed on in service.call's (Rust-only: cleanup.clean's item id).
+    /// Each has service_timeout(service) to answer.
+    pub fn ask_with(
+        &self,
+        ctx: &Ctx,
+        service: &str,
+        from: &str,
+        to: &str,
+        params: Option<Raw>,
+    ) -> Vec<Answer> {
         let rs = self.0.runners();
+        let params = params.as_ref();
         let out: Mutex<Vec<Answer>> = Mutex::new(Vec::new());
         std::thread::scope(|s| {
             for r in &rs {
                 let (p, conn) = r.live();
                 let Some(conn) = conn else { continue };
-                if r.name == from || !p.provides.iter().any(|x| x == service) {
+                if r.name == from
+                    || (!to.is_empty() && r.name != to)
+                    || !p.provides.iter().any(|x| x == service)
+                {
                     continue;
                 }
                 let out = &out;
                 let scope = &self.0.scope;
                 s.spawn(move || {
                     scope.enter();
-                    let ctx = ctx.with_timeout(rush_plugin::SERVICE_TIMEOUT);
+                    let ctx = ctx.with_timeout(rush_plugin::service_timeout(service));
                     let mut a = Answer {
                         plugin: r.name.clone(),
                         ..Default::default()
                     };
-                    let q = crate::object(vec![("service", to_raw(service))]);
+                    let mut kv = vec![("service", to_raw(service))];
+                    if let Some(p) = params {
+                        kv.push(("params", p.clone()));
+                    }
+                    let q = crate::object(kv);
                     match conn.call_raw(&ctx, "service.call", Some(q)) {
                         Ok(res) => a.result = res,
                         Err(e) => a.error = e.to_string(),
