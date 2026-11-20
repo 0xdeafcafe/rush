@@ -1830,6 +1830,19 @@ what they find; the cleanup agent only proposes rules.
   no longer declare it) turns the switch on; git-clean's `worktree-idle-days`,
   when set, becomes the worktree rule's idle at both levels
   (`update_rules`).
+- Spotlight and Time Machine (`disk/quiet.rs`, Settings › Disk's
+  section of that name; `quietScratch`, unset on, and `quietProjects`,
+  opted in): once an hour, whatever the switch says, the rush that
+  leads (`diskauto::watch_quiet`, off the UI) gives rush's scratch
+  roots, each repo's `.claude/worktrees` and every checkout's `target`
+  (and, opted in, the checkouts) a `.metadata_never_index`, which
+  Spotlight skips, put in the repo's `info/exclude` first so git never
+  shows it, and excludes them from Time Machine with one `tmutil
+  addexclusion` (the sticky xattr; no admin). What's done already (the
+  file there, the xattr set) is left, so a quiet pass writes and runs
+  nothing. FSEvents itself can't be stopped per folder; this stops
+  what reads it. Turning a switch off undoes nothing. No tmutil in a
+  test's sandbox.
 - A plugin's candidate in a cache folder a rule removes whole, or at
   its path (your rules too), is removed once, by that rule (`plan`'s
   `once`): of whole removals (cache folders and plugins' candidates), one

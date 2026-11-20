@@ -527,6 +527,23 @@ pub struct Config {
         skip_serializing_if = "is_false"
     )]
     pub trim_running_tmp: bool,
+    /// Keeps rush's scratch (its tmp, repos' .claude/worktrees, build
+    /// targets) out of Spotlight and Time Machine (rush-fleet's
+    /// disk::quiet). Unset is on. Rust-only.
+    #[serde(
+        rename = "quietScratch",
+        deserialize_with = "lenient",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub quiet_scratch: Option<bool>,
+    /// The same for the checkouts themselves; off unless opted in.
+    /// Rust-only.
+    #[serde(
+        rename = "quietProjects",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_false"
+    )]
+    pub quiet_projects: bool,
     /// Picks the lines of a failed CI job that say why with linetag's
     /// hand-weighted net instead of keywords (rush watch, rush pr
     /// follow). Rush-only; off by default.
@@ -1429,6 +1446,12 @@ impl Config {
         self.migrate_key_harness();
         self.move_profiles_in();
         self.dispatch.move_harness_starts();
+    }
+
+    /// Whether rush's scratch is kept out of Spotlight and Time Machine:
+    /// see quiet_scratch.
+    pub fn quiets_scratch(&self) -> bool {
+        self.quiet_scratch.unwrap_or(true)
     }
 
     /// Whether a drag copies as it ends: see copy_on_select.

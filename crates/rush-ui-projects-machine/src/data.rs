@@ -95,6 +95,10 @@ pub struct Cfg {
     /// (Config.Hibernate.AfterMinutes).
     #[serde(skip)]
     pub hibernate_minutes: i64,
+    /// Settings › Disk's Spotlight and Time Machine switches
+    /// (super::diskauto's quiet pass). Rust-only.
+    #[serde(skip)]
+    pub quiet: rush_fleet::disk::quiet::Quiet,
 }
 
 impl Cfg {
@@ -112,6 +116,10 @@ impl Cfg {
             cleanup_dire_gb: c.cleanup_dire_gb,
             disk_auto: c.disk.auto,
             hibernate_minutes: c.hibernate.after_minutes,
+            quiet: rush_fleet::disk::quiet::Quiet {
+                scratch: c.quiets_scratch(),
+                projects: c.quiet_projects,
+            },
         };
         let done = st
             .overlay

@@ -414,7 +414,13 @@ fn disk_rows_moved_from_general() {
     let titles: Vec<&str> = secs.iter().map(|s| s.title.as_str()).collect();
     assert_eq!(
         titles,
-        ["Disk", "When space runs short", "Rules", "Proposed"],
+        [
+            "Disk",
+            "When space runs short",
+            "Spotlight and Time Machine",
+            "Rules",
+            "Proposed"
+        ],
         "the moved rows come after the switch and levels"
     );
     let short: Vec<&str> = secs[1].rows.iter().map(|r| r.label.as_str()).collect();
@@ -487,4 +493,55 @@ fn disk_rows_moved_from_general() {
         (c.cleanup_disk_gb, c.cleanup_dire_gb, c.trim_running_tmp),
         (10, 2, true)
     );
+}
+
+/// Scratch is kept out of Spotlight and Time Machine unless turned off;
+/// projects only once opted in, and each switch says what it costs.
+#[test]
+fn spotlight_and_time_machine_rows() {
+    let (mut m, _d) = model(240, 60);
+    set_settings_page(&mut m, PAGE_DISK);
+    let secs = disk::sections(&m);
+    let quiet = secs
+        .iter()
+        .find(|s| s.title == "Spotlight and Time Machine")
+        .expect("the section");
+    let rows: Vec<(&str, &str)> = quiet
+        .rows
+        .iter()
+        .map(|r| (r.label.as_str(), r.value.as_str()))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("Keep scratch out of Spotlight and Time Machine", "on"),
+            ("Keep your projects out of them too", "off"),
+        ]
+    );
+    assert!(quiet.rows[0].what.contains("tmutil addexclusion"));
+    assert!(quiet.rows[1].what.contains("won't back it up"));
+    for (label, key, want) in [
+        (
+            "Keep scratch out of Spotlight and Time Machine",
+            "quietScratch",
+            "false",
+        ),
+        (
+            "Keep your projects out of them too",
+            "quietProjects",
+            "true",
+        ),
+    ] {
+        let row = flat(&disk::sections(&m))
+            .into_iter()
+            .find(|r| r.label == label)
+            .unwrap_or_else(|| panic!("no row {label:?}"));
+        rush_ui_settings::form::cycle(&mut m, &row, 1);
+        rush_ui_settings::changed(&mut m);
+        let raw = std::fs::read_to_string(rush_state::dir().join("config.json")).unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(saved[key].to_string(), want, "{label}: {raw}");
+    }
+    let c = config(&m);
+    assert!(!c.quiets_scratch() && c.quiet_projects);
 }

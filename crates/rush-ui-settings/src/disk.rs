@@ -704,6 +704,7 @@ pub fn sections(m: &Model) -> Vec<Section> {
         ..Section::default()
     }];
     out.push(when_short(m));
+    out.push(quiet(m));
     let file = match &snap.file {
         None => {
             out.push(Section::new(
@@ -820,6 +821,45 @@ fn when_short(m: &Model) -> Section {
         title: "When space runs short".into(),
         note: "whether Clean on its own is on or off".into(),
         rows: vec![offer, dire, trim],
+        ..Section::default()
+    }
+}
+
+/// Folders kept out of Spotlight and Time Machine (rush-fleet's
+/// disk::quiet): quietScratch, on unless turned off, and quietProjects,
+/// off unless turned on.
+fn quiet(m: &Model) -> Section {
+    let c = config(m);
+    let scratch = choice(
+        "Keep scratch out of Spotlight and Time Machine",
+        on_off(c.quiets_scratch()),
+        "Builds and agents write thousands of files a minute in rush's scratch: its tmp folders, each repo's .claude/worktrees and Rust target folders. macOS tells Spotlight and Time Machine of every write, and they go and look. With this on, rush (the one that leads, once an hour) puts a .metadata_never_index file in each, which Spotlight skips, and excludes each from Time Machine backups (tmutil addexclusion, no password). git is told to ignore the file, so it never shows as untracked. Nothing is moved or removed. macOS can't stop telling of the writes; this stops what reads them doing the work. Turning it off doesn't undo what was done: tmutil removeexclusion and removing the file do.",
+        &[
+            (
+                "on",
+                "scratch isn't indexed or backed up: worktrees with work not committed aren't backed up either.",
+            ),
+            ("off", "rush leaves Spotlight and Time Machine alone."),
+        ],
+        set(|m, v| config_mut(m).quiet_scratch = Some(v == "on")),
+    );
+    let projects = choice(
+        "Keep your projects out of them too",
+        on_off(c.quiet_projects),
+        "The same for the checkouts of every repo rush's sessions work in, main checkout and worktrees alike: Spotlight won't find your code, and Time Machine won't back it up. For code that lives in git and is pushed anyway. Turning it off doesn't undo what was done: tmutil removeexclusion on the folder and removing its .metadata_never_index do.",
+        &[
+            ("off", "your projects stay searchable and backed up."),
+            (
+                "on",
+                "your projects aren't indexed or backed up: only what's pushed is kept elsewhere.",
+            ),
+        ],
+        set(|m, v| config_mut(m).quiet_projects = v == "on"),
+    );
+    Section {
+        title: "Spotlight and Time Machine".into(),
+        note: "macOS only".into(),
+        rows: vec![scratch, projects],
         ..Section::default()
     }
 }

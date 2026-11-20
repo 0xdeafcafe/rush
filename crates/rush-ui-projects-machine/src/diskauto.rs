@@ -116,6 +116,54 @@ pub struct DiskAuto {
     pub taken_in: bool,
     /// The last error said, so it's said once, not every run.
     pub said_err: String,
+    /// When the last quiet pass started; 0 before one.
+    pub quiet_at: Ms,
+    pub quieting: bool,
+    /// The last quiet pass's error said, so it's said once.
+    pub quiet_err: String,
+}
+
+/// How often folders are kept quiet (disk::quiet): new worktrees and
+/// targets are found within the hour.
+pub const QUIET_EVERY: Ms = 60 * 60_000;
+
+/// Keeps rush's scratch, and opted in its projects, out of Spotlight and
+/// Time Machine, once an hour, off the UI: whatever the engine's switch
+/// says.
+fn watch_quiet(m: &mut Model) {
+    if !data(m).cfg_read {
+        return;
+    }
+    let q = data(m).cfg.quiet;
+    let now = m.now;
+    let st = m.kept::<DiskAuto>();
+    if !q.any() || st.quieting || (st.quiet_at != 0 && now - st.quiet_at < QUIET_EVERY) {
+        return;
+    }
+    st.quieting = true;
+    st.quiet_at = now;
+    let repos = scan_of(m).repos;
+    m.later(
+        move || {
+            let repos = disk::quiet::repos_of(&repos);
+            let scratch = rush_fleet::temp_roots();
+            disk::quiet::quiet(&disk::quiet::folders(q, &repos, &scratch))
+        },
+        |m, did| {
+            let st = m.kept::<DiskAuto>();
+            st.quieting = false;
+            let err = did.errs.first().cloned().unwrap_or_default();
+            if err.is_empty() || err == st.quiet_err {
+                st.quiet_err = err;
+                return Out::Idle;
+            }
+            st.quiet_err.clone_from(&err);
+            m.fail(&format!(
+                "couldn't keep a folder out of Spotlight or Time Machine: {err}"
+            ));
+            Out::Draw
+        },
+    );
 }
 
 /// What the clean plugins' settings said, to take in.
@@ -313,6 +361,7 @@ pub fn auto_run(scan: Scan, now: Ms) -> AutoRun {
 /// only): takes the plugins' auto mode in once, then with the switch on
 /// runs the engine when it's due, off the UI.
 pub fn watch_disk(m: &mut Model, free: u64) {
+    watch_quiet(m);
     let st = m.kept::<DiskAuto>();
     if !st.taken_in {
         if !st.taking_in {

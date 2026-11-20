@@ -90,7 +90,7 @@ pub fn parse_worktrees(porcelain: &str) -> Vec<GitWorktree> {
 }
 
 /// The main checkout of the repo dir is in; None when it's in none.
-fn repo_of(dir: &Path) -> Option<PathBuf> {
+pub(crate) fn repo_of(dir: &Path) -> Option<PathBuf> {
     let common = git(
         &dir.to_string_lossy(),
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
