@@ -21,12 +21,11 @@ use rush_core::time::Ms;
 use rush_fleet::GitState;
 use rush_fleet::Predicates;
 use rush_fleet::Role;
-use rush_fleet::{
-    MADE_BY_CLAUDE, MADE_BY_OTHER, MADE_BY_RUSH, MADE_BY_SUBAGENT, VerdictKind, Worktree,
-};
+use rush_fleet::{MADE_BY_CLAUDE, MADE_BY_OTHER, MADE_BY_RUSH, MADE_BY_SUBAGENT, Worktree};
 use rush_gh::ghpr::PR;
 
 use super::data::*;
+use super::mark::{Mark, mark_now};
 use super::rows::*;
 use crate::model::Model;
 use crate::style::*;
@@ -62,7 +61,7 @@ pub fn projects_summary(m: &Model, running: usize) -> Line {
     let mc = &d.machine;
     let mut safe: i64 = 0;
     for w in &d.wts {
-        if w.verdict().can_go() && running_of(m, &w.agents).is_none() {
+        if mark_now(m, w).0 == Mark::CanGo && running_of(m, &w.agents).is_none() {
             safe += w.frees();
         }
     }
@@ -519,40 +518,11 @@ pub fn project_detail(m: &Model, p: &Project, w: usize) -> Vec<WorkRow> {
             line: l,
         });
     }
-    // Worktrees, each with its size.
-    let trees = project_trees(p, f);
+    // Worktrees, each with its size: what the tree has of them, and
+    // what it says of each.
+    let trees = repo_worktrees(d, p);
     if p.repo && !trees.is_empty() {
-        let mut size = 0;
-        let mut wrows = Vec::with_capacity(trees.len());
-        for t in &trees {
-            let running = p
-                .agents
-                .iter()
-                .filter(|g| g.tree() == t && (g.open() || g.busy()))
-                .count();
-            let wt = d.worktree_at(t);
-            size += wt.size;
-            let st = f.and_then(|f| f.trees.get(t));
-            let l = match st {
-                Some(st) => worktree_line(t, st, &wt, running, w),
-                None => {
-                    let (nw, ..) = wt_cols(w);
-                    cat(
-                        fit(
-                            ln([kind_mark(Kind::Worktree), plain(" "), sp(base(t), DIM)]),
-                            nw,
-                        ),
-                        ln([sp("asking git…", FAINT)]),
-                    )
-                }
-            };
-            wrows.push(WorkRow {
-                id: format!("w{t}"),
-                what: What::Wt(Box::new(wt)),
-                owner: p.key.clone(),
-                line: l,
-            });
-        }
+        let size: i64 = trees.iter().map(|t| t.size).sum();
         let mut meta = trees.len().to_string();
         if size > 0 {
             meta += &format!(" · {}", disk(size));
@@ -560,7 +530,16 @@ pub fn project_detail(m: &Model, p: &Project, w: usize) -> Vec<WorkRow> {
         text(&mut rows, Line::new());
         text(&mut rows, psection("Worktrees", &meta, w));
         text(&mut rows, worktree_head(w));
-        rows.extend(wrows);
+        for t in trees {
+            let (mark, why) = mark_now(m, &t);
+            let st = f.and_then(|f| f.trees.get(&t.path));
+            rows.push(WorkRow {
+                id: format!("w{}", t.path),
+                owner: p.key.clone(),
+                line: worktree_line(&t, mark, &why, st, w),
+                what: What::Wt(Box::new(t)),
+            });
+        }
     }
     // What agents keep as scratch in it: .claude/tmp.
     let mut scratch = Vec::new();
@@ -715,37 +694,56 @@ pub fn worktree_head(w: usize) -> Line {
     ])
 }
 
-/// A worktree in a table row: name, branch, what it has of its own or
-/// that it's clean, size, and what it came from.
-pub fn worktree_line(t: &str, st: &GitState, wt: &Worktree, running: usize, w: usize) -> Line {
-    let mut work = Vec::new();
-    if running > 0 {
-        work.push(ln([sp(format!("● {running} running"), ORANGE)]));
-    }
-    if !st.err.is_empty() {
-        work.push(ln([sp(st.err.clone(), RED)]));
-    }
-    let n = own_commits(st);
-    if n > 0 {
-        work.push(ln([sp(format!("{n} commit{}", plural(n)), ORANGE)]));
-    }
-    if st.changed > 0 {
-        work.push(ln([sp(format!("{} changed", st.changed), YELLOW)]));
-    }
-    if !wt.err.is_empty() {
-        work.push(ln([sp(wt.err.clone(), RED)]));
-    }
-    let mut name = sp(base(t), TEXT);
-    if work.is_empty() && st.err.is_empty() && wt.err.is_empty() {
-        work.push(ln([sp("✓ clean", GREEN)]));
-        name = sp(base(t), DIM);
+/// A worktree's mark drawn: ✱ working, ✓ can go, ⚠ keep, blank kept for
+/// now.
+pub fn mark_span(mark: Mark) -> Span {
+    let c = match mark {
+        Mark::Working => ORANGE,
+        Mark::CanGo => GREEN,
+        Mark::Keep => YELLOW,
+        Mark::Kept => FAINT,
+    };
+    sp(mark.glyph(), c)
+}
+
+/// A worktree in a table row: its mark and name, branch, why it's kept or
+/// can go (the tree's own words, mark::worktree_mark), size, and what it
+/// came from with the commits it has of its own (git's, st, the one thing
+/// the scan doesn't keep).
+pub fn worktree_line(
+    wt: &Worktree,
+    mark: Mark,
+    why: &str,
+    st: Option<&GitState>,
+    w: usize,
+) -> Line {
+    let mut state = vec![ln([sp(
+        why.to_string(),
+        match mark {
+            Mark::Working => ORANGE,
+            Mark::CanGo => GREEN,
+            Mark::Keep => YELLOW,
+            Mark::Kept => DIM,
+        },
+    )])];
+    if mark != Mark::Keep && wt.checked != 0 {
+        let lose = wt.losses();
+        if !lose.is_empty() {
+            state.push(ln([sp(lose, YELLOW)]));
+        }
     }
     if let Some(f) = frees_words(wt) {
-        work.push(ln([sp(f, FAINT)]));
+        state.push(ln([sp(f, FAINT)]));
     }
     let mut from = String::new();
-    if !st.base.is_empty() {
+    if let Some(st) = st
+        && !st.base.is_empty()
+    {
         from = st.base.clone();
+        let n = own_commits(st);
+        if n > 0 {
+            from += &format!(" · {n} commit{}", plural(n));
+        }
         if st.base_behind > 0 {
             from += &format!(" · {} behind", st.base_behind);
         }
@@ -755,15 +753,17 @@ pub fn worktree_line(t: &str, st: &GitState, wt: &Worktree, running: usize, w: u
     } else {
         String::new()
     };
-    let mut branch = st.branch.as_str();
-    let b = base(t);
-    if branch == b || branch == format!("worktree-{b}") {
+    let b = tree_name(wt);
+    let mut branch = wt.branch.as_str();
+    let short = base(&wt.path);
+    if branch == short || branch == format!("worktree-{short}") {
         branch = ""; // it says nothing the name doesn't
     }
+    let name = sp(b, if mark == Mark::CanGo { DIM } else { TEXT });
     let (nw, bw, sw, zw) = wt_cols(w);
-    let mut l = fit(ln([kind_mark(Kind::Worktree), plain(" "), name]), nw);
+    let mut l = fit(ln([mark_span(mark), plain(" "), name]), nw);
     join(&mut l, fit(ln([sp(branch, DIM)]), bw));
-    join(&mut l, fit(joined(work, sp(" · ", DIM)), sw));
+    join(&mut l, fit(joined(state, sp(" · ", DIM)), sw));
     l.spans.push(sp(right(&size, zw), DIM));
     l.spans.push(plain("   "));
     l.spans.push(sp(from, FAINT));
@@ -906,14 +906,15 @@ fn tree_row(m: &Model, edge: &Span, lead: &str, t: Worktree, owner: &str, w: usi
     } else {
         t.branch.clone()
     };
+    let (mark, why) = mark_now(m, &t);
     let l = wt_tree_line(
         edge,
         lead,
-        tree_mark(m, &t),
+        mark_span(mark),
         sp(name, TEXT),
         tree_what(m, &t),
         t.size,
-        tree_verdict(&t),
+        tree_verdict(&t, mark, &why),
         w,
     );
     WorkRow {
@@ -939,13 +940,11 @@ fn fold_row(
     let size: i64 = subs.iter().map(|t| t.size).sum();
     let (mut go, mut lose, mut working) = (0, 0, 0);
     for t in subs {
-        match t.verdict().kind {
-            VerdictKind::CanGo => go += 1,
-            VerdictKind::WouldLose => lose += 1,
-            _ => {}
-        }
-        if tree_mark(m, t).text == "✱" {
-            working += 1;
+        match mark_now(m, t).0 {
+            Mark::CanGo => go += 1,
+            Mark::Keep => lose += 1,
+            Mark::Working => working += 1,
+            Mark::Kept => {}
         }
     }
     let mut what = Vec::new();
@@ -1030,30 +1029,6 @@ pub fn tree_name(t: &Worktree) -> String {
     name.to_string()
 }
 
-/// A worktree's session's state: working, waiting on you, or finished.
-fn tree_mark(m: &Model, t: &Worktree) -> Span {
-    let now = m.now;
-    for &i in &m.order {
-        let g = Ag {
-            a: &m.agents[i],
-            root: m.roots.get(i).map_or("", String::as_str),
-        };
-        if g.tree() != t.path {
-            continue;
-        }
-        return if g.live() || g.busy() {
-            sp("✱", ORANGE)
-        } else if g.a.needs_you() || g.waiting() || g.a.halted() {
-            sp("●", GREEN)
-        } else if g.a.your_turn(now) || g.a.just_finished(now) {
-            sp("●", BLUE)
-        } else {
-            sp("·", FAINT)
-        };
-    }
-    plain(" ")
-}
-
 /// The middle of a worktree's line: its pull request, else its session's
 /// title, else who made it.
 fn tree_what(m: &Model, t: &Worktree) -> Line {
@@ -1100,20 +1075,19 @@ fn tree_what(m: &Model, t: &Worktree) -> Line {
     )])
 }
 
-/// What clean-up may do with a worktree, in a few words, said only when
-/// there's something to do: kept ones (in use, a pull request open) say
-/// nothing. One that can go says what it frees when that's less than its
-/// size (files kache's store links too stay).
-pub fn tree_verdict(t: &Worktree) -> Line {
-    let v = t.verdict();
-    let frees = frees_words(t);
-    match (v.kind, frees) {
-        (VerdictKind::KeepInUse | VerdictKind::KeepPrOpen, _) => Line::new(),
-        (VerdictKind::CanGo, Some(f)) if !t.own => ln([sp(format!("by hand, {f}"), BLUE)]),
-        (VerdictKind::CanGo, Some(f)) => ln([sp(format!("can go · {f}"), BLUE)]),
-        (VerdictKind::CanGo, None) if !t.own => ln([sp("can go, by hand", BLUE)]),
-        (VerdictKind::CanGo, None) => ln([sp("can go", BLUE)]),
-        (VerdictKind::WouldLose, _) => ln([sp(format!("⚠ {}", v.reason), YELLOW)]),
+/// What clean-up may do with a worktree, in a few words beside its mark,
+/// said only when there's something to do: one working or kept for now
+/// says nothing. One that can go says what it frees when that's less than
+/// its size (files kache's store links too stay); one to keep, what it
+/// would lose.
+pub fn tree_verdict(t: &Worktree, mark: Mark, why: &str) -> Line {
+    match mark {
+        Mark::Working | Mark::Kept => Line::new(),
+        Mark::CanGo => match frees_words(t) {
+            Some(f) => ln([sp(format!("can go · {f}"), BLUE)]),
+            None => ln([sp("can go", BLUE)]),
+        },
+        Mark::Keep => ln([sp(why.to_string(), YELLOW)]),
     }
 }
 

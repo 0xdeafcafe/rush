@@ -1947,9 +1947,17 @@ worktrees stays readable:
   many files changed, how far behind), with `needs a pull` in the
   verdict column. There is no `main checkout` row.
 - A worktree is named by its branch (its folder's name when it has no
-  branch). Its verdict is said only when there's something to do:
-  `can go`, `can go, by hand`, or `⚠` and what removing it would lose.
-  `in use` and `PR open` leave the column blank.
+  branch). Its one mark (`mark.rs` `worktree_mark`) comes from the
+  clean-up scan's verdict, who's in it read from the list this frame:
+  `✱` an agent is working in it, `✓` can go (loses nothing), `⚠` keep
+  (would lose work), blank kept for now (pull request open, a session
+  open in it but idle, not looked at yet). The verdict column says
+  `can go` (and what it frees) or, for `⚠`, what removing it would
+  lose; otherwise it's blank.
+- A project's WORKTREES table (the details pane) lists the same
+  worktrees (`repo_worktrees`) with the same mark and its words; git's
+  `GitState` gives only what the scan doesn't keep: the commits it has
+  of its own since what it came from, and how far behind that it is.
 - A repository's subagent worktrees fold into one row
   (`What::Fold`, id `f<repo>`): how many, their branches, their size,
   how many are working, and how many can go or would lose work. → or

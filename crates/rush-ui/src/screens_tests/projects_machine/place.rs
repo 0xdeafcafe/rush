@@ -448,42 +448,77 @@ fn done_work_is_due_after_its_wait() {
     assert_eq!(due(&m, &["old"]), None, "off");
 }
 
-/// A worktree's row says what it has: its name once (not again as its
-/// branch), its own commits, how far behind what it came from it is, who
-/// runs in it and its size (worktreerow_test.go
-/// TestWorktreeRowSaysWhatItHas).
+/// A worktree's row says what it has: its mark, its name once (not again
+/// as its branch), why it's kept or can go in the tree's own words, what
+/// it would lose, its own commits and how far behind what it came from it
+/// is, and its size (worktreerow_test.go TestWorktreeRowSaysWhatItHas;
+/// the state is the scan's, mark::worktree_mark, Rust-only).
 #[test]
 fn worktree_row_says_what_it_has() {
+    use rush_ui_projects_machine::mark::{Mark, worktree_mark};
     let st = GitState {
         branch: "worktree-devclean".into(),
         base: "main".into(),
         base_ahead: 3,
         base_behind: 89,
+        changed: 4, // git's, not the scan's: not what the row says
         ..GitState::default()
     };
     let mut wt = Worktree::default();
+    wt.path = "/r/.claude/worktrees/devclean".into();
+    wt.branch = "worktree-devclean".into();
     wt.size = 3 << 20;
-    let got = rush_ui_projects_machine::view::worktree_line(
-        "/r/.claude/worktrees/devclean",
-        &st,
-        &wt,
-        1,
-        120,
-    )
-    .plain();
+    wt.checked = NOW;
+    wt.in_use = "fix it".into();
+    wt.changed = 1;
+    let row = |wt: &Worktree, working: bool| {
+        let (mark, why) = worktree_mark(wt, working);
+        (
+            mark,
+            rush_ui_projects_machine::view::worktree_line(wt, mark, &why, Some(&st), 160).plain(),
+        )
+    };
+    let (mark, got) = row(&wt, true);
+    assert_eq!(mark, Mark::Working);
     for want in [
-        "devclean",
-        "3 commits",
-        "main · 89 behind",
-        "● 1 running",
+        "✱ devclean",
+        "fix it is working in it",
+        "1 file with uncommitted changes",
+        "main · 3 commits · 89 behind",
         "3M",
     ] {
         assert!(got.contains(want), "row {got:?} lacks {want:?}");
     }
+    assert!(!got.contains("4 changed"), "row {got:?} says git's changes");
     assert!(
         !got.contains("worktree-devclean"),
         "row {got:?} repeats the name as its branch"
     );
+    wt.in_use.clear();
+    let (mark, got) = row(&wt, false);
+    assert_eq!(mark, Mark::Keep);
+    assert!(got.contains("⚠ devclean"), "{got:?}");
+    wt.changed = 0;
+    let (mark, got) = row(&wt, false);
+    assert_eq!(mark, Mark::CanGo);
+    assert!(
+        got.contains("✓ devclean") && got.contains("every commit is pushed"),
+        "{got:?}"
+    );
+}
+
+/// The tree and a project's WORKTREES say the same of a worktree: rich's
+/// fix, a session working in it, is ✱ in both, and neither says it can go
+/// (the scan, run before the session started, thought it could).
+#[test]
+fn tree_and_details_agree() {
+    let mut m = rich(120, Cfg::default());
+    let f = frame(&mut m);
+    let lines: Vec<&str> = f.lines().filter(|l| l.contains("✱ fix")).collect();
+    assert_eq!(lines.len(), 2, "the tree's row and the details' row:\n{f}");
+    assert!(f.contains("fix the parser is working in it"), "{f}");
+    assert!(!f.contains("can go, by hand"), "{f}");
+    assert!(!f.contains("● 1 running · 3 commits"), "{f}");
 }
 
 /// An agent untouched for hours says it can go (projects_test.go
