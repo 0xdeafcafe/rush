@@ -20,4 +20,4 @@ Clean up  1 ticked · 1M · loses nothing
 
 on its own: when a PR merges, and 3h after a session is done · keeps the newest 3 per repo · worktrees rush didn't make only by hand · branches stay
 
-↑↓ move  ·  space tick  ·  a all safe / none  ·  enter remove ticked  ·  esc close
+↑↓ move  ·  space tick  ·  a all that loses nothing / none  ·  y clean up ticked  ·  esc close
