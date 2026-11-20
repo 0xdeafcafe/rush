@@ -5087,6 +5087,28 @@ Go rush is gone from the tree; its last version is the `go-final` tag
   a second, 2026-11-02): read on each write 233 → 84 MiB allocated in
   36,866 allocations; read whole and shared each write 6,280,862
   allocations and 2,011 MiB, once a second 661,372 and 303 MiB.
+- Codex's past threads listed (Rust-only, 2026-11-20): a rush view up
+  19 hours sat at 110-120% CPU in `rush_codex::discover::Heads`. Each
+  rush-hosted Codex run a session spawned had its transcript looked up
+  (rush `hosted.rs` hosted_transcript: Codex has no transcript_path, so
+  its `live` and `past` are searched) on every hosted-runs reading, every
+  SPAWN_EVERY (2 s) while the session is busy, and every `past` walked
+  all of `sessions/`, stat'd every rollout under one lock each, spawned
+  up to 8 threads to do it, and read session_index.jsonl again. The heads
+  were kept (by path, time and size), so no rollout was read twice; the
+  walk itself was the cost, times the runs, times the ticks. Now, as
+  rush-claude keeps Claude's, a profile's listing is kept and given as
+  it was for PAST_EVERY (15 s), or until `Discoverer::changed` names
+  something under its home; listed again, only rollouts new or changed
+  since are read (threads only for those), heads of rollouts gone are
+  forgotten, and the index is read again only when it changed.
+  `Codex::past_reads` counts what is read. `cargo bench -p rush-codex
+  --bench past` (3,000 rollouts in 100 day folders, footprint job,
+  macos-latest, 2026-11-20): asked again 18.6 → 0.91 ms (a copy of the
+  listing kept); told of a change, then asked, 26.9 → 22.3 ms, reading
+  no rollout; cold 44 → 51 ms, the same within the runner's noise. A
+  quiet minute was some 30 listings per hosted Codex run; it is now 4 at
+  most a profile, each reading only what changed.
 - A drawn run's text (`rush_core::text::Span::text`) is a
   `CompactString` (Rust-only): up to 24 bytes held in place, so a glyph,
   a word or a time is made and copied without the heap, and a turn's
@@ -5442,7 +5464,8 @@ and 400 stopped rush sessions; RUSH_REAL's real home is never read in CI):
   (a line each: name, kind, value). rush-host `--bench list` on that home
   (retained heap, allocations made and kept), rush-convo `--bench open` on
   its largest transcript (its subagent runs read whole and as the reader
-  follows them), `--bench render` and `--bench follow` (its made-up run),
+  follows them), `--bench render` and `--bench follow` (its made-up run), rush-codex
+  `--bench past` (criterion times, in the log only),
   rush-host's list again with past conversations left out (the menu bar
   feed's reading), rush-ui `--bench frame`
   (bytes and allocations per frame), rush-menubar `tests/retained.rs` and

@@ -22,4 +22,9 @@ ureq.workspace = true
 
 [dev-dependencies]
 rush-testenv = { path = "../rush-testenv" }
+criterion.workspace = true
 tempfile.workspace = true
+
+[[bench]]
+name = "past"
+harness = false

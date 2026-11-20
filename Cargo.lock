@@ -1342,6 +1342,7 @@ name = "rush-codex"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "criterion",
  "libc",
  "memchr",
  "regex",

@@ -72,6 +72,13 @@ impl Codex {
         }
     }
 
+    /// How many rollouts (and session indexes) its past and live listings
+    /// have opened and read, in all: listing an unchanged tree again
+    /// reads none.
+    pub fn past_reads(&self) -> u64 {
+        self.heads.reads()
+    }
+
     fn home_dir(&self) -> Option<String> {
         let (codex, home) = match &self.env {
             Some((c, h)) => (c.clone(), h.clone()),
@@ -274,6 +281,9 @@ impl Discoverer for Codex {
     }
     fn past(&self, p: &Profile) -> Vec<Session> {
         self.heads.past(p)
+    }
+    fn changed(&self, p: &Profile, paths: Option<&[std::path::PathBuf]>) {
+        self.heads.changed(p, paths);
     }
 }
 

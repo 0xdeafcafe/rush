@@ -1,12 +1,14 @@
 //! Codex's threads outside rush: those whose rollouts it wrote to lately,
 //! and every past one, each read from its rollout's head. Port of
-//! internal/adapters/codex/discover.go:1-296.
+//! internal/adapters/codex/discover.go:1-296; the past listing kept
+//! PAST_EVERY is Rust-only, as rush-claude's discover.rs keeps Claude's.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use rush_core::adapter::{Kind, Profile, Session};
@@ -28,15 +30,42 @@ const HEAD_LINES: usize = 400;
 /// How many characters of a prompt name a thread.
 pub(crate) const NAME_LEN: usize = 80;
 
+/// How often a profile's sessions folder is listed again for threads that
+/// began, ended or were written to since: rush-claude's PAST_EVERY. In
+/// between, `past` gives the listing it kept and touches no file.
+pub const PAST_EVERY: Ms = 15_000;
+
 /// Rollouts' heads as last read, by path: a rollout is read again only
-/// once it has changed, and one finished never does.
+/// once it has changed, and one finished never does. Each profile's past
+/// listing is kept too, listed again at most every PAST_EVERY (or once
+/// told something changed), and session_index.jsonl read again only when
+/// it changed.
 #[derive(Default)]
-pub(crate) struct Heads(Mutex<HashMap<PathBuf, Head>>);
+pub struct Heads {
+    heads: Mutex<HashMap<PathBuf, Head>>,
+    pasts: Mutex<HashMap<Profile, Listing>>,
+    names: Mutex<HashMap<PathBuf, Names>>,
+    /// Rollouts and indexes opened and read, in all.
+    reads: AtomicU64,
+}
 
 struct Head {
     modified: SystemTime,
     size: u64,
     s: Option<Session>,
+}
+
+/// A profile's past threads as last listed, and when.
+struct Listing {
+    at: Ms,
+    out: Vec<Session>,
+}
+
+/// session_index.jsonl as last read.
+struct Names {
+    modified: SystemTime,
+    size: u64,
+    names: Arc<HashMap<String, String>>,
 }
 
 fn mod_ms(t: SystemTime) -> Ms {
@@ -95,7 +124,7 @@ impl Heads {
     /// here; the host's rows claim them.
     pub fn live(&self, p: &Profile) -> Vec<Session> {
         let now = now();
-        let mut names: Option<HashMap<String, String>> = None;
+        let mut names: Option<Arc<HashMap<String, String>>> = None;
         let mut out = Vec::new();
         for d in 0..7 {
             let dir = day_dir(&p.dir, local_day(now, d));
@@ -115,9 +144,7 @@ impl Heads {
                 let Some(mut s) = self.past_session(&dir.join(&name)) else {
                     continue;
                 };
-                let names = names.get_or_insert_with(|| {
-                    thread_names(&Path::new(&p.dir).join("session_index.jsonl"))
-                });
+                let names = names.get_or_insert_with(|| self.names(p));
                 if let Some(n) = names.get(&s.id).filter(|n| !n.is_empty()) {
                     s.name = one_line(n);
                 }
@@ -141,14 +168,127 @@ impl Heads {
     /// them. A thread's name is the one Codex keeps in
     /// session_index.jsonl when it has one (only renamed or titled threads
     /// are there), else its first prompt.
+    ///
+    /// The listing is kept: asked again within PAST_EVERY, it is given as
+    /// it was without a look at the disk. Listed again, only the rollouts
+    /// new or changed since (by size and time) are read.
     pub fn past(&self, p: &Profile) -> Vec<Session> {
-        let names = thread_names(&Path::new(&p.dir).join("session_index.jsonl"));
-        let mut paths = Vec::new();
-        self.walk(&Path::new(&p.dir).join("sessions"), &mut |path| {
-            paths.push(path.to_path_buf());
+        self.past_at(p, now())
+    }
+
+    /// past as at now.
+    pub fn past_at(&self, p: &Profile, now: Ms) -> Vec<Session> {
+        {
+            let ls = self.pasts.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(l) = ls.get(p)
+                && (0..PAST_EVERY).contains(&(now - l.at))
+            {
+                return l.out.clone();
+            }
+        }
+        let out = self.list(p);
+        let mut ls = self.pasts.lock().unwrap_or_else(|e| e.into_inner());
+        ls.insert(
+            p.clone(),
+            Listing {
+                at: now,
+                out: out.clone(),
+            },
+        );
+        out
+    }
+
+    /// Something under p's home changed (None: anything may have): its
+    /// past threads are listed again at the next `past`.
+    pub fn changed(&self, p: &Profile, paths: Option<&[PathBuf]>) {
+        let home = Path::new(&p.dir);
+        if paths.is_none_or(|ps| ps.iter().any(|x| x.starts_with(home))) {
+            let mut ls = self.pasts.lock().unwrap_or_else(|e| e.into_inner());
+            ls.remove(p);
+        }
+    }
+
+    /// How many rollouts (and session indexes) were opened and read, in
+    /// all: a listing of a tree that hasn't changed reads none.
+    pub fn reads(&self) -> u64 {
+        self.reads.load(Ordering::Relaxed)
+    }
+
+    /// p's session_index.jsonl's names, read again only once it changed.
+    fn names(&self, p: &Profile) -> Arc<HashMap<String, String>> {
+        let path = Path::new(&p.dir).join("session_index.jsonl");
+        let md = std::fs::metadata(&path).ok();
+        let key = md
+            .as_ref()
+            .map(|m| (m.modified().unwrap_or(SystemTime::UNIX_EPOCH), m.len()));
+        let mut m = self.names.lock().unwrap_or_else(|e| e.into_inner());
+        let Some((modified, size)) = key else {
+            m.remove(&path);
+            return Arc::default();
+        };
+        if let Some(n) = m.get(&path)
+            && n.modified == modified
+            && n.size == size
+        {
+            return n.names.clone();
+        }
+        self.reads.fetch_add(1, Ordering::Relaxed);
+        let names = Arc::new(thread_names(&path));
+        m.insert(
+            path,
+            Names {
+                modified,
+                size,
+                names: names.clone(),
+            },
+        );
+        names
+    }
+
+    /// Every rollout under p's sessions folder looked at again: those
+    /// whose size and time are as when last read are given as read, the
+    /// rest read side by side. Heads of rollouts gone are forgotten.
+    fn list(&self, p: &Profile) -> Vec<Session> {
+        let names = self.names(p);
+        let root = Path::new(&p.dir).join("sessions");
+        let mut found = Vec::new();
+        self.walk(&root, &mut |path| {
+            // As past_session looks: a link to a rollout is the rollout.
+            if let Ok(md) = std::fs::metadata(path) {
+                let modified = md.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+                found.push((path.to_path_buf(), modified, md.len()));
+            }
         });
+        // Those kept are taken under one lock; the rest are read after.
+        let mut heads: Vec<Option<Session>> = Vec::with_capacity(found.len());
+        let mut unread = Vec::new();
+        {
+            let mut m = self.heads.lock().unwrap_or_else(|e| e.into_inner());
+            {
+                let listed: HashSet<&Path> = found.iter().map(|(p, ..)| p.as_path()).collect();
+                m.retain(|k, _| !k.starts_with(&root) || listed.contains(k.as_path()));
+            }
+            for (path, modified, size) in found {
+                match m.get(&path) {
+                    Some(h) if h.modified == modified && h.size == size => {
+                        heads.push(h.s.clone());
+                    }
+                    _ => {
+                        unread.push((heads.len(), path, modified, size));
+                        heads.push(None);
+                    }
+                }
+            }
+        }
         // Each head is a wait on the disk: read side by side.
-        let heads = rush_core::par::map_with(paths, || (), |_, path| self.past_session(&path));
+        let read = rush_core::par::map_with(
+            unread,
+            || (),
+            |_, (i, path, modified, size)| (i, self.read(path, modified, size)),
+        );
+        for (i, s) in read {
+            heads[i] = s;
+        }
         let mut out = Vec::new();
         for mut s in heads.into_iter().flatten() {
             s.kind = Kind::from(KIND);
@@ -182,7 +322,7 @@ impl Heads {
         let md = std::fs::metadata(path).ok()?;
         let modified = md.modified().unwrap_or(SystemTime::UNIX_EPOCH);
         {
-            let m = self.0.lock().unwrap_or_else(|e| e.into_inner());
+            let m = self.heads.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(h) = m.get(path)
                 && h.modified == modified
                 && h.size == md.len()
@@ -190,13 +330,19 @@ impl Heads {
                 return h.s.clone();
             }
         }
-        let s = read_head(path, mod_ms(modified));
-        let mut m = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        self.read(path.to_path_buf(), modified, md.len())
+    }
+
+    /// Reads a rollout's head, and keeps it.
+    fn read(&self, path: PathBuf, modified: SystemTime, size: u64) -> Option<Session> {
+        self.reads.fetch_add(1, Ordering::Relaxed);
+        let s = read_head(&path, mod_ms(modified));
+        let mut m = self.heads.lock().unwrap_or_else(|e| e.into_inner());
         m.insert(
-            path.to_path_buf(),
+            path,
             Head {
                 modified,
-                size: md.len(),
+                size,
                 s: s.clone(),
             },
         );
@@ -474,6 +620,124 @@ mod tests {
         assert!(h.live(&p).is_empty());
         // Read again, the heads are as kept.
         assert_eq!(h.past(&p).len(), 3);
+    }
+
+    // Rust-only: the past listing is kept, and listed again reads only
+    // what changed.
+    #[test]
+    fn a_second_listing_reads_only_what_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        let day = dir.path().join("sessions/2026/09/20");
+        let uuid = |n: u32| format!("01a0c9a2-0000-7000-8000-{n:012}");
+        let path = |n: u32| day.join(format!("rollout-2026-09-20T10-00-0{n}-{}.jsonl", uuid(n)));
+        let write = |n: u32| {
+            Rollout::new(t0())
+                .add("session_meta", meta(&uuid(n), "cli".into()))
+                .add("turn_context", json!({"model": "gpt-5"}))
+                .response("message", user_msg(&[&format!("thread {n}")]))
+                .write(&path(n));
+            let hours = std::time::Duration::from_secs(u64::from(n) * 3600);
+            set_mtime(&path(n), SystemTime::now() - hours);
+        };
+        for n in 1..=3 {
+            write(n);
+        }
+        let index = dir.path().join("session_index.jsonl");
+        std::fs::write(
+            &index,
+            format!("{{\"id\":{:?},\"thread_name\":\"Named\"}}\n", uuid(1)),
+        )
+        .unwrap();
+        let p = Profile {
+            kind: Kind::from(KIND),
+            name: ".codex".into(),
+            dir: dir.path().to_string_lossy().into_owned(),
+        };
+        // All a listing says of each thread.
+        type Row = (
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            Ms,
+            Ms,
+            bool,
+            Profile,
+        );
+        let rows = |l: &[Session]| -> Vec<Row> {
+            l.iter()
+                .map(|s| {
+                    (
+                        s.id.clone(),
+                        s.name.clone(),
+                        s.model.clone(),
+                        s.cwd.clone(),
+                        s.state.clone(),
+                        s.transcript.clone(),
+                        s.created_at,
+                        s.updated_at,
+                        s.headless,
+                        s.profile.clone(),
+                    )
+                })
+                .collect()
+        };
+        let ids = |l: &[Session]| {
+            l.iter()
+                .map(|s| (s.id.clone(), s.name.clone()))
+                .collect::<Vec<_>>()
+        };
+        let h = Heads::default();
+        let t = 1_000_000;
+        let first = h.past_at(&p, t);
+        assert_eq!(first.len(), 3);
+        assert_eq!(first[0].name, "Named");
+        assert_eq!(h.reads(), 4, "three heads and the index");
+
+        // Within PAST_EVERY: as kept, even with a new rollout on disk.
+        write(4);
+        assert_eq!(rows(&h.past_at(&p, t + PAST_EVERY - 1)), rows(&first));
+        assert_eq!(h.reads(), 4);
+
+        // Listed again: only the new one is read.
+        let second = h.past_at(&p, t + PAST_EVERY);
+        assert_eq!(second.len(), 4);
+        assert_eq!(h.reads(), 5);
+        assert_eq!(rows(&second[..3]), rows(&first), "the rest as they were");
+
+        // Listed again with nothing changed: nothing read, all the same.
+        h.changed(&p, None);
+        assert_eq!(rows(&h.past_at(&p, t + PAST_EVERY + 1)), rows(&second));
+        assert_eq!(h.reads(), 5);
+
+        // One written to and one gone: only the one written to is read.
+        let mut f = File::options().append(true).open(path(2)).unwrap();
+        std::io::Write::write_all(&mut f, b"{}\n").unwrap();
+        drop(f);
+        std::fs::remove_file(path(3)).unwrap();
+        h.changed(&p, Some(&[path(2)]));
+        let third = h.past_at(&p, t + PAST_EVERY + 2);
+        assert_eq!(h.reads(), 6);
+        assert_eq!(
+            ids(&third),
+            vec![
+                (uuid(2), "thread 2".into()),
+                (uuid(1), "Named".into()),
+                (uuid(4), "thread 4".into()),
+            ]
+        );
+        assert!(
+            !h.heads.lock().unwrap().contains_key(&path(3)),
+            "its head forgotten"
+        );
+
+        // Told of a change elsewhere, it keeps its listing.
+        h.changed(&p, Some(&[PathBuf::from("/elsewhere")]));
+        assert_eq!(rows(&h.past_at(&p, t + PAST_EVERY + 3)), rows(&third));
+        // A fresh Heads lists the same.
+        assert_eq!(rows(&Heads::default().past(&p)), rows(&third));
     }
 
     // rollout_test.go:TestLiveIsWhatWasWrittenLately
