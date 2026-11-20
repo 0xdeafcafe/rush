@@ -276,7 +276,9 @@ pub fn folder_meta(agents: &[Ag], now: Ms) -> Line {
     if turn > 0 {
         parts.push(ln([sp(format!("{turn} your turn"), GREEN)]));
     }
-    let mut meta = if cost > 0.0 {
+    let mut meta = if agents.is_empty() {
+        "no agents".to_string()
+    } else if cost > 0.0 {
         format!("{} · {}", agents.len(), money(cost))
     } else {
         agents.len().to_string()
@@ -477,46 +479,49 @@ pub fn project_detail(m: &Model, p: &Project, w: usize) -> Vec<WorkRow> {
         }
     }
     super::projectmem::project_memory(m, p, w, &mut rows);
-    // Agents, each with where it works.
-    text(&mut rows, Line::new());
-    let goes = p.agents.iter().filter(|g| can_go(d, g, now)).count();
-    let mut meta = p.agents.len().to_string();
-    if goes > 0 {
-        meta += &format!(
-            " · {goes} can go: stopped, untouched {}, nothing left only in them · x closes one",
-            age(goes_after(d))
-        );
-    }
-    text(&mut rows, psection("Agents", &meta, w));
-    text(
-        &mut rows,
-        thead(&[(" WHERE", 20), ("   AGENT", 30), ("DOING", 10)]),
-    );
-    for g in &p.agents {
-        let t = g.tree();
-        let wh = if t.is_empty() {
-            ln([sp("main checkout", DIM)])
-        } else {
-            ln([sp("⎇ ", BLUE), sp(base(t), SUB)])
-        };
-        let mut l = cat(ln([plain(" ")]), fit(wh, 19));
-        join(&mut l, work_session(m, g, w.saturating_sub(20), now));
-        let temp = d.temp_of(&g.a.key);
-        if can_go(d, g, now) {
-            l = fit(l, w.saturating_sub(24));
-            l.spans.push(plain("  "));
-            l.spans.push(sp("✓ can go", GREEN));
-        } else if temp >= TEMP_SHOWN {
-            l = fit(l, w.saturating_sub(24));
-            l.spans.push(plain("  "));
-            l.spans.push(temp_status(m, g, now));
+    // Agents, each with where it works (none for a repository only its
+    // worktrees brought here).
+    if !p.agents.is_empty() {
+        text(&mut rows, Line::new());
+        let goes = p.agents.iter().filter(|g| can_go(d, g, now)).count();
+        let mut meta = p.agents.len().to_string();
+        if goes > 0 {
+            meta += &format!(
+                " · {goes} can go: stopped, untouched {}, nothing left only in them · x closes one",
+                age(goes_after(d))
+            );
         }
-        rows.push(WorkRow {
-            id: format!("a{}", g.a.key),
-            what: What::Agent(g.a.key.clone()),
-            owner: p.key.clone(),
-            line: l,
-        });
+        text(&mut rows, psection("Agents", &meta, w));
+        text(
+            &mut rows,
+            thead(&[(" WHERE", 20), ("   AGENT", 30), ("DOING", 10)]),
+        );
+        for g in &p.agents {
+            let t = g.tree();
+            let wh = if t.is_empty() {
+                ln([sp("main checkout", DIM)])
+            } else {
+                ln([sp("⎇ ", BLUE), sp(base(t), SUB)])
+            };
+            let mut l = cat(ln([plain(" ")]), fit(wh, 19));
+            join(&mut l, work_session(m, g, w.saturating_sub(20), now));
+            let temp = d.temp_of(&g.a.key);
+            if can_go(d, g, now) {
+                l = fit(l, w.saturating_sub(24));
+                l.spans.push(plain("  "));
+                l.spans.push(sp("✓ can go", GREEN));
+            } else if temp >= TEMP_SHOWN {
+                l = fit(l, w.saturating_sub(24));
+                l.spans.push(plain("  "));
+                l.spans.push(temp_status(m, g, now));
+            }
+            rows.push(WorkRow {
+                id: format!("a{}", g.a.key),
+                what: What::Agent(g.a.key.clone()),
+                owner: p.key.clone(),
+                line: l,
+            });
+        }
     }
     // Worktrees, each with its size: what the tree has of them, and
     // what it says of each.
