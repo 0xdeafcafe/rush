@@ -1959,39 +1959,73 @@ Remote does) and writes only through `update_rules`.
 
 ## The Projects tree (Rust-only)
 
-In the rail look Projects draws every repository as a tree
-(rush-ui-projects-machine `view.rs` `project_tree`). It differs from
-Go's projecttree.go in these ways, so a machine with many subagent
-worktrees stays readable:
+Projects is one tree, whatever the list look (rush-ui-projects-machine
+`view.rs` `project_tree`); Go's classic table is gone. It was rebuilt
+around three keys that mean the same on every row
+(docs/projects-redesign-task-list.md): today's Go had about 25 actions
+on 9 kinds of row, `x` six things, and enter on a worktree opened
+Delete, whose enter force-removed it.
 
-- Pull requests, Temporary and System come first, above the projects.
-  With nothing picked yet, the first project is picked
-  (`place.rs` `first_project`).
-- A repository's heading holds its main checkout's state (branch, how
-  many files changed, how far behind), with `needs a pull` in the
-  verdict column. There is no `main checkout` row.
-- A worktree is named by its branch (its folder's name when it has no
-  branch). Its one mark (`mark.rs` `worktree_mark`) comes from the
-  clean-up scan's verdict, who's in it read from the list this frame:
-  `✱` an agent is working in it, `✓` can go (loses nothing), `⚠` keep
-  (would lose work), blank kept for now (pull request open, a session
-  open in it but idle, not looked at yet). The verdict column says
-  `can go` (and what it frees) or, for `⚠`, what removing it would
-  lose; otherwise it's blank.
-- A project's WORKTREES table (the details pane) lists the same
-  worktrees (`repo_worktrees`) with the same mark and its words; git's
-  `GitState` gives only what the scan doesn't keep: the commits it has
-  of its own since what it came from, and how far behind that it is.
-- A repository's subagent worktrees fold into one row
-  (`What::Fold`, id `f<repo>`): how many, their branches, their size,
-  how many are working, and how many can go or would lose work. → or
-  enter unfolds it, ← folds it again (also from a worktree inside it).
-  `Data::unfolded` keeps which are open for the rest of the run.
-- At 130 columns or wider the tree sits beside what's picked, as the
-  classic table does, its box 60% of the width (72 to 112 columns) so a
-  verdict stays near its name. A worktree's or fold's row shows its
-  repository on the right. Below 130 columns the boxes stack.
+**What it lists.** Every repository an agent worked in lately, and
+every one the worktree scan found linked worktrees in, even with no
+agent (`data.rs` `projects()`); then folders that aren't repositories;
+then This Mac; then Pull requests. With nothing picked yet, the first
+project is.
 
+- A repository's head folds (`Data::folded`; open until folded) and
+  holds its main checkout's state: branch, files changed, how far
+  behind. Its tail says its size and what of it can go.
+- A worktree is named by its branch. Its one mark (`mark.rs`
+  `worktree_mark`) comes from the clean-up scan's verdict, who's in it
+  read from the list this frame: `✱` an agent is working in it, `✓` can
+  go (loses nothing), `⚠` keep (would lose work, said in words), blank
+  kept for now (pull request open, a session open in it but idle, not
+  looked at yet).
+- A repository's subagent worktrees fold into one row (`What::Fold`, id
+  `f<repo>`): how many, their branches, size, how many work, can go or
+  would lose work. `Data::unfolded` keeps which are open.
+- What the clean-up plugins found (`cleanup.report`'s items, slice 3)
+  sits under the repository whose worktree it's in (target/,
+  node_modules), or under This Mac (caches, old Codex sessions).
+- This Mac (`GROUP_MAC`, folded until opened) holds Temporary (/tmp and
+  agents' temp work), System (processes) and the plugins' items in no
+  worktree. Picking something in it from elsewhere opens it
+  (`pick_in_projects`).
+- The top line: how many run, what's on disk that Projects knows of,
+  and what of it can go. RAM and CPU are System's.
+
+**What's picked shows on the right** (beside the tree at 130 columns or
+more, its box 60% of the width; stacked below that): a repository
+whole; a worktree on its own (`worktree_detail`: whether it can go and
+why, what's only in it, who works in it, what the plugins found in it,
+its keys written out); This Mac's Temporary or System; pull requests.
+
+**Keys** (`place.rs` `key_on`; the footer, `projects_hint`, shows only
+what works on the row):
+
+- enter opens: a repository, fold or This Mac folds and unfolds; a
+  worktree, Temporary, System or Pull requests goes into its details;
+  an agent opens its chat; a PR its sheet. Enter never removes
+  anything, here or in Delete, where only `y` deletes.
+- → goes in (a folded head opens first); ← folds, then goes back; esc
+  clears a filter, then leaves. q no longer leaves.
+- x cleans up the row: Clean up scoped to it (`clean::Scope`: a
+  repository and its worktrees, one worktree, or This Mac). In the
+  details pane x keeps each row's own: close an agent, end a process,
+  clean up /tmp, a session's temp work or a path.
+- c is Clean up on everything that can go.
+- / filters the tree: rows whose words hold what's typed, any case,
+  each under its repository's head; enter keeps it, esc clears it.
+- r checks again. In System, ! SIGKILLs a process's tree and X ends
+  every orphan. t, A and Temporary's X are gone.
+
+**Clean up** (`clean.rs`) ticks what loses nothing. A row that would
+lose work (a worktree whose verdict says so, a plugin's item that
+doesn't say it loses nothing) takes a second space to tick: the first
+says, in red, what goes with it. Only `y` hands what's ticked to Delete,
+which looks at each again and asks `y` once more; enter does nothing in
+either. The plugins' items it lists are cleaned by their plugin
+(`cleanup.clean`).
 ## The list kept between runs (Rust-only)
 
 rush opens on the list as it last read it (rush-ui `listcache.rs`): each
