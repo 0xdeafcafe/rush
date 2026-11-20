@@ -1984,7 +1984,7 @@ project is.
 - A repository's subagent worktrees fold into one row (`What::Fold`, id
   `f<repo>`): how many, their branches, size, how many work, can go or
   would lose work. `Data::unfolded` keeps which are open.
-- What the clean-up plugins found (`cleanup.report`'s items, slice 3)
+- What the clean-up plugins found (`cleanup.report`'s items)
   sits under the repository whose worktree it's in (target/,
   node_modules), or under This Mac (caches, old Codex sessions).
 - This Mac (`GROUP_MAC`, folded until opened) holds Temporary (/tmp and
