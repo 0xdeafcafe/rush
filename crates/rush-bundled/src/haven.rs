@@ -83,6 +83,7 @@ pub fn report(ctx: &Ctx) -> CleanupReport {
             haven(ctx, &["status", "--json", "stacks,footprint,focus"])
         ),
         rules: RULES.into(),
+        ..Default::default()
     }
 }
 

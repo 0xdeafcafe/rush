@@ -9,6 +9,10 @@
 //! and the cleanup plugin (with rush's own cleanup agent) uses whatever
 //! answers it. The broker answers rush itself for any service; a plugin
 //! only for the ones in its uses.
+//!
+//! Rust-only: an ask may name one plugin and carry params, which reach
+//! it as service.call's params (ask_service_of): how Projects has a kit
+//! clean one item of its cleanup.report through cleanup.clean.
 
 use std::time::Duration;
 
@@ -34,6 +38,61 @@ pub struct CleanupReport {
     /// What the agent may do with it, and what it must never do.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub rules: String,
+    /// What it found, row by row, for Projects to show and clean one by
+    /// one through cleanup.clean; left out by a plugin that only has text.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub items: Vec<CleanupItem>,
+}
+
+/// One thing a cleanup.report found: a row Projects shows, cleaned by its
+/// id through cleanup.clean.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CleanupItem {
+    /// What cleanup.clean is asked with: the plugin's own, unique in its
+    /// report.
+    pub id: String,
+    pub title: String,
+    /// Its blocks on disk; 0 when it's no size (meta says what it is).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub bytes: u64,
+    /// Shown instead of a size: "3 branches", "kept".
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub meta: String,
+    /// Where it is, when it's a folder or a file.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub path: String,
+    /// The worktree it's in, when it's in one (target/, node_modules).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub worktree: String,
+    /// Cleaning it loses nothing.
+    pub can_go: bool,
+    /// A cache that fills again by itself, as it's used.
+    pub comes_back: bool,
+    /// What cleaning it does, in words: "deletes it: a build puts it back".
+    pub does: String,
+}
+
+/// Cleans one thing a plugin's cleanup.report listed, by its id:
+/// CleanupClean in, CleanupDone out, or an error saying why not.
+pub const SERVICE_CLEANUP_CLEAN: &str = "cleanup.clean";
+
+/// What cleanup.clean is asked.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CleanupClean {
+    pub id: String,
+}
+
+/// A cleanup.clean answer.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CleanupDone {
+    /// What it did, in words: "target in wt: freed 1.2 GB."
+    pub said: String,
+    /// What it freed, as measured after; 0 when not known.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub freed: u64,
 }
 
 /// What a plugin finds on disk that rush's disk engine may clean
@@ -43,8 +102,9 @@ pub struct CleanupReport {
 pub const SERVICE_DISK_CANDIDATES: &str = "disk.candidates";
 
 /// What a disk.candidates ask may say: the level rush cleans at ("normal"
-/// or "low") and the free bytes. services.ask carries no parameters yet,
-/// so a plugin gets this empty and reports everything it found.
+/// or "low") and the free bytes. rush's disk engine asks with no
+/// parameters yet, so a plugin gets this empty and reports everything it
+/// found.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct DiskCandidatesAsk {
@@ -109,6 +169,18 @@ pub struct DiskFacts {
 
 /// How long one plugin has to answer a service.call.
 pub const SERVICE_TIMEOUT: Duration = Duration::from_secs(45);
+/// How long a cleanup.clean may take: a kit gives a clean ten minutes (git
+/// gc on a big repository, a cache of many files).
+pub const SERVICE_CLEAN_TIMEOUT: Duration = Duration::from_secs(11 * 60);
+
+/// How long one plugin has to answer service.
+pub fn service_timeout(service: &str) -> Duration {
+    if service == SERVICE_CLEANUP_CLEAN {
+        SERVICE_CLEAN_TIMEOUT
+    } else {
+        SERVICE_TIMEOUT
+    }
+}
 
 /// One plugin's answer to a services.ask.
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -171,6 +243,64 @@ pub fn ask_service(ctx: &Ctx, service: &str) -> Result<Vec<Answer>, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Asks one running plugin for service with params, through the broker,
+/// and returns its answer's result. That it isn't running or doesn't
+/// provide it is an error, as is the broker not running.
+pub fn ask_service_of<P: Serialize>(
+    ctx: &Ctx,
+    plugin: &str,
+    service: &str,
+    params: &P,
+) -> Result<Raw, String> {
+    let c = client::dial_broker().map_err(|_| "the plugin broker isn't running".to_string())?;
+    #[derive(Serialize)]
+    struct Params<'a, P> {
+        service: &'a str,
+        plugin: &'a str,
+        params: &'a P,
+    }
+    let out: Result<Option<Vec<Answer>>, _> = c.call(
+        ctx,
+        "services.ask",
+        &Params {
+            service,
+            plugin,
+            params,
+        },
+    );
+    c.close();
+    one_answer(
+        out.map_err(|e| e.to_string())?.unwrap_or_default(),
+        plugin,
+        service,
+    )
+}
+
+/// plugin's answer among answers: its result, or its error.
+fn one_answer(answers: Vec<Answer>, plugin: &str, service: &str) -> Result<Raw, String> {
+    let a = answers
+        .into_iter()
+        .find(|a| a.plugin == plugin)
+        .ok_or_else(|| format!("{plugin} isn't running, or doesn't answer {service}"))?;
+    if !a.error.is_empty() {
+        return Err(a.error);
+    }
+    a.result.ok_or_else(|| format!("{plugin} said nothing"))
+}
+
+/// Asks plugin to clean the item of its cleanup.report with id, and waits
+/// for it (up to SERVICE_CLEAN_TIMEOUT). It's not for the UI thread.
+pub fn clean_item(plugin: &str, id: &str) -> Result<CleanupDone, String> {
+    let ctx = Ctx::background().with_timeout(SERVICE_CLEAN_TIMEOUT + Duration::from_secs(5));
+    let raw = ask_service_of(
+        &ctx,
+        plugin,
+        SERVICE_CLEANUP_CLEAN,
+        &CleanupClean { id: id.into() },
+    )?;
+    serde_json::from_str(raw.get()).map_err(|e| format!("{plugin}: {e}"))
+}
+
 /// Names the plugins that run and provide service. It reads the disk, so
 /// it's not for the UI thread.
 pub fn providers(service: &str) -> Vec<String> {
@@ -222,6 +352,114 @@ mod tests {
             serde_json::to_value(DiskCandidatesAsk::default()).unwrap(),
             serde_json::json!({})
         );
+    }
+
+    // cleanup.report on the wire: an old report, with no items, reads as
+    // it did and writes no items; one with items keeps them, camelCase,
+    // what's empty left out.
+    #[test]
+    fn cleanup_report_on_the_wire() {
+        let old: CleanupReport =
+            serde_json::from_str(r#"{"title":"Haven","report":"2 GB of caches"}"#).unwrap();
+        assert_eq!(
+            old,
+            CleanupReport {
+                title: "Haven".into(),
+                report: "2 GB of caches".into(),
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(&old).unwrap(),
+            serde_json::json!({"title": "Haven", "report": "2 GB of caches"})
+        );
+        let rep = CleanupReport {
+            title: "rust-clean".into(),
+            report: "- target in wt · 1.0G".into(),
+            rules: "safe".into(),
+            items: vec![
+                CleanupItem {
+                    id: "target:/w/wt".into(),
+                    title: "target in wt".into(),
+                    bytes: 1 << 30,
+                    path: "/w/wt/target".into(),
+                    worktree: "/w/wt".into(),
+                    can_go: true,
+                    comes_back: true,
+                    does: "deletes it: a build puts it back".into(),
+                    ..Default::default()
+                },
+                CleanupItem {
+                    id: "merged:/w".into(),
+                    title: "w: branches merged into origin/main".into(),
+                    meta: "3 branches".into(),
+                    can_go: true,
+                    does: "deletes them locally".into(),
+                    ..Default::default()
+                },
+            ],
+        };
+        let v = serde_json::to_value(&rep).unwrap();
+        assert_eq!(
+            v["items"],
+            serde_json::json!([
+                {"id": "target:/w/wt", "title": "target in wt", "bytes": 1u64 << 30,
+                 "path": "/w/wt/target", "worktree": "/w/wt", "canGo": true,
+                 "comesBack": true, "does": "deletes it: a build puts it back"},
+                {"id": "merged:/w", "title": "w: branches merged into origin/main",
+                 "meta": "3 branches", "canGo": true, "comesBack": false,
+                 "does": "deletes them locally"}
+            ])
+        );
+        let back: CleanupReport = serde_json::from_value(v).unwrap();
+        assert_eq!(back, rep);
+        let done = CleanupDone {
+            said: "done.".into(),
+            freed: 0,
+        };
+        assert_eq!(
+            serde_json::to_value(&done).unwrap(),
+            serde_json::json!({"said": "done."})
+        );
+        assert_eq!(
+            serde_json::to_value(CleanupClean { id: "gc:/w".into() }).unwrap(),
+            serde_json::json!({"id": "gc:/w"})
+        );
+    }
+
+    // ask_service_of: the plugin named's result, its error, or that it
+    // didn't answer.
+    #[test]
+    fn one_plugins_answer() {
+        let raw = |s: &str| serde_json::value::RawValue::from_string(s.into()).unwrap();
+        let answers = || {
+            vec![
+                Answer {
+                    plugin: "a".into(),
+                    result: Some(raw("1")),
+                    ..Default::default()
+                },
+                Answer {
+                    plugin: "b".into(),
+                    error: "no such item: x".into(),
+                    ..Default::default()
+                },
+            ]
+        };
+        assert_eq!(one_answer(answers(), "a", "s.t").unwrap().get(), "1");
+        assert_eq!(
+            one_answer(answers(), "b", "s.t").unwrap_err(),
+            "no such item: x"
+        );
+        assert_eq!(
+            one_answer(answers(), "c", "s.t").unwrap_err(),
+            "c isn't running, or doesn't answer s.t"
+        );
+        assert_eq!(
+            service_timeout(SERVICE_CLEANUP_CLEAN),
+            SERVICE_CLEAN_TIMEOUT
+        );
+        assert_eq!(service_timeout(SERVICE_CLEANUP_REPORT), SERVICE_TIMEOUT);
     }
 
     #[test]

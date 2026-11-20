@@ -54,7 +54,7 @@ fn research_prompt_proposes_and_removes_nothing() {
     let r = CleanupReport {
         title: "Haven".into(),
         report: "3 stacks idle".into(),
-        rules: String::new(),
+        ..Default::default()
     };
     let p = research_prompt(&["Disk: 9G free of 500G.".into()], &[r]);
     for want in [
