@@ -136,6 +136,8 @@ impl Place for Projects {
         let shown = match pick.map(|i| &list[i]) {
             Some(r) if r.owner == GROUP_MAC && r.what == What::Pane => r.id.clone(),
             Some(r) if r.owner == GROUP_MAC => GROUP_MAC.to_string(),
+            // A worktree shows itself.
+            Some(r) if matches!(r.what, What::Wt(_)) => r.id.clone(),
             Some(r) if !r.owner.is_empty() => format!("p{}", r.owner),
             _ => self.proj_sel.clone(),
         };
@@ -156,6 +158,16 @@ impl Place for Projects {
                 ln([sp("/tmp and all sessions’ temp work", DIM)]),
             ),
             PANE_SYSTEM => (bold("System"), ln([sp("processes no project owns", DIM)])),
+            sel if sel.starts_with('w') => {
+                let t = data(m).wts.iter().find(|t| sel[1..] == t.path);
+                (
+                    cat(
+                        ln([sp("⎇", BLUE), plain(" ")]),
+                        bold(t.map_or("", |t| t.path.rsplit('/').next().unwrap_or(""))),
+                    ),
+                    ln([sp(t.map_or(String::new(), |t| tildify(&t.repo)), DIM)]),
+                )
+            }
             GROUP_MAC => (
                 bold("This Mac"),
                 ln([sp("temp work, caches, processes", DIM)]),

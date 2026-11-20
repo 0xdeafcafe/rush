@@ -152,6 +152,10 @@ pub fn picked_rows(m: &Model, sel: &str, w: usize) -> Vec<WorkRow> {
         PANE_TEMP => temp_rows(m, w),
         PANE_SYSTEM => system_rows(m, w),
         PANE_PRS => prs_rows(m, w),
+        _ if sel.starts_with('w') => match data(m).wts.iter().find(|t| sel[1..] == t.path) {
+            Some(t) => worktree_detail(m, t, w),
+            None => Vec::new(),
+        },
         _ => match picked_project(m, sel) {
             Some(p) => project_detail(m, &p, w),
             None => Vec::new(),
@@ -883,6 +887,132 @@ fn kit_row(
             item: item.clone(),
         })),
     }
+}
+
+/// A worktree on its own, as its row's details: where it is and where it
+/// came from, whether it can go and why, what's only in it, who works in
+/// it, and what of it the clean-up plugins found; then its keys.
+pub fn worktree_detail(m: &Model, t: &Worktree, w: usize) -> Vec<WorkRow> {
+    let d = data(m);
+    let owner = format!("w{}", t.path);
+    let text = |rows: &mut Vec<WorkRow>, l: Line| {
+        rows.push(WorkRow {
+            line: l,
+            owner: owner.clone(),
+            ..WorkRow::default()
+        })
+    };
+    let mut rows = Vec::new();
+    text(&mut rows, ln([sp(tildify(&t.path), SUB)]));
+    let mut from = ln([sp(
+        if t.branch.is_empty() {
+            "no branch (detached)".to_string()
+        } else {
+            t.branch.clone()
+        },
+        TEXT,
+    )]);
+    if !t.target.is_empty() {
+        from.spans
+            .push(sp(format!(" · lands on {}", t.target), DIM));
+    }
+    if let Some(pr) = &t.pr {
+        from.spans.push(sp(" · ", DIM));
+        from.spans.push(sp(
+            format!(
+                "PR #{}{}",
+                pr.number,
+                if pr.merged() { " merged" } else { "" }
+            ),
+            BLUE,
+        ));
+    }
+    text(&mut rows, from);
+    // Whether it can go, in words.
+    text(&mut rows, Line::new());
+    let (mark, why) = mark_now(m, t);
+    let (word, col) = match mark {
+        Mark::Working => ("WORKING", ORANGE),
+        Mark::CanGo => ("CAN GO", GREEN),
+        Mark::Keep => ("KEEP", YELLOW),
+        Mark::Kept => ("KEPT FOR NOW", DIM),
+    };
+    let mut l = ln([mark_span(mark), plain(" "), spb(word, col)]);
+    if !why.is_empty() {
+        l.spans.push(plain("  "));
+        l.spans.push(sp(why, col));
+    }
+    text(&mut rows, l);
+    let mut only = Vec::new();
+    if t.unpushed > 0 {
+        only.push(format!(
+            "{} commit{} on no remote and not in main",
+            t.unpushed,
+            plural(t.unpushed)
+        ));
+    }
+    if t.changed > 0 {
+        only.push(format!(
+            "{} file{} not committed",
+            t.changed,
+            plural(t.changed)
+        ));
+    }
+    for o in only {
+        text(&mut rows, ln([plain("  "), sp(o, YELLOW)]));
+    }
+    if !t.err.is_empty() {
+        text(&mut rows, ln([plain("  "), sp(t.err.clone(), RED)]));
+    }
+    // Who works in it.
+    let here: Vec<Ag> = agents(m).filter(|g| g.tree() == t.path).collect();
+    if !here.is_empty() {
+        text(&mut rows, Line::new());
+        text(&mut rows, psection("Agents", &here.len().to_string(), w));
+        for g in &here {
+            rows.push(WorkRow {
+                id: format!("a{}", g.a.key),
+                what: What::Agent(g.a.key.clone()),
+                owner: owner.clone(),
+                line: cat(
+                    ln([plain(" ")]),
+                    work_session(m, g, w.saturating_sub(1), m.now),
+                ),
+            });
+        }
+    }
+    // What it takes, and what the clean-up plugins found in it.
+    text(&mut rows, Line::new());
+    let size = if t.size > 0 {
+        disk(t.size)
+    } else {
+        "measuring…".to_string()
+    };
+    text(&mut rows, psection("Disk", &size, w));
+    let kits: Vec<(&str, &rush_plugin::CleanupItem)> = d.kits.in_worktree(&t.path).collect();
+    let edge = sp("┃", FAINT);
+    let k = kits.len();
+    for (j, (plugin, item)) in kits.into_iter().enumerate() {
+        let lead = if j == k - 1 { "└─" } else { "├─" };
+        rows.push(kit_row(&edge, lead, plugin, item, &owner, w));
+    }
+    if let Some(f) = frees_words(t) {
+        text(&mut rows, ln([plain("  "), sp(f, DIM)]));
+    }
+    // Its keys, written out.
+    text(&mut rows, Line::new());
+    text(
+        &mut rows,
+        ln([
+            sp("x", SUB),
+            sp(" clean up…   ", DIM),
+            sp("r", SUB),
+            sp(" check again   ", DIM),
+            sp("→", SUB),
+            sp(" into it", DIM),
+        ]),
+    );
+    rows
 }
 
 /// The id of a repository's folded subagent worktrees' row.
