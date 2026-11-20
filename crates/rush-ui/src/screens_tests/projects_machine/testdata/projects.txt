@@ -32,7 +32,7 @@
 │                                                                                           │ │                                                            │
 │                                                                                           │ │                                                            │
 ╰───────────────────────────────────────────────────────────────────────────────────────────╯ ╰────────────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter details  ·  c clean up all that can go  ·  esc back
+HINT ↑↓ move  ·  enter details  ·  c clean up all that can go  ·  / filter  ·  esc back
 === 120  []
                                                                                                          ● 3 running
 
@@ -54,7 +54,7 @@ HINT ↑↓ move  ·  enter details  ·  c clean up all that can go  ·  esc bac
 │  main checkout       · fix alpha                  working                                                     0s │
 │  main checkout       · test alpha                 working                                                     0s │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter details  ·  c clean up all that can go  ·  esc back
+HINT ↑↓ move  ·  enter details  ·  c clean up all that can go  ·  / filter  ·  esc back
 === 160 classic [enter]
                                                                                                                                                  ● 3 running
 
@@ -159,4 +159,4 @@ HINT ↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl
 │                                                                                           │ │                                                            │
 │                                                                                           │ │                                                            │
 ╰───────────────────────────────────────────────────────────────────────────────────────────╯ ╰────────────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter details  ·  c clean up all that can go  ·  esc back
+HINT ↑↓ move  ·  enter details  ·  c clean up all that can go  ·  / filter  ·  esc back

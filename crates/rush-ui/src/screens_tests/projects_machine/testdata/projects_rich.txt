@@ -47,7 +47,7 @@
 │                                                                                           │ │                                                            │
 │                                                                                           │ │                                                            │
 ╰───────────────────────────────────────────────────────────────────────────────────────────╯ ╰────────────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter fold  ·  → details  ·  x clean up…  ·  c clean up all that can go  ·  esc back
+HINT ↑↓ move  ·  enter fold  ·  → details  ·  x clean up…  ·  c clean up all that can go  ·  / filter  ·  esc back
 === 160 classic  [enter]
                                                                                                                     ● 1 running · 306M on disk · 3M can go c
 
@@ -197,7 +197,7 @@ HINT ↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl
 │                                                                               │ │                                                    │
 │                                                                               │ │                                                    │
 ╰───────────────────────────────────────────────────────────────────────────────╯ ╰────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter details  ·  c clean up all that can go  ·  esc back
+HINT ↑↓ move  ·  enter details  ·  c clean up all that can go  ·  / filter  ·  esc back
 === 140 classic ~temp []
                                                                                                 ● 1 running · 306M on disk · 3M can go c
 
@@ -247,7 +247,7 @@ HINT ↑↓ move  ·  enter details  ·  c clean up all that can go  ·  esc bac
 │                                                                               │ │                                                    │
 │                                                                               │ │                                                    │
 ╰───────────────────────────────────────────────────────────────────────────────╯ ╰────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter details  ·  x clean up…  ·  c clean up all that can go  ·  esc back
+HINT ↑↓ move  ·  enter details  ·  x clean up…  ·  c clean up all that can go  ·  / filter  ·  esc back
 === 140 classic ~temp [enter]
                                                                                                 ● 1 running · 306M on disk · 3M can go c
 
@@ -347,7 +347,7 @@ HINT ↑↓ move  ·  x clean up…  ·  r look again  ·  c clean up all that c
 │                                                                               │ │                                                    │
 │                                                                               │ │                                                    │
 ╰───────────────────────────────────────────────────────────────────────────────╯ ╰────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter details  ·  x clean up…  ·  c clean up all that can go  ·  esc back
+HINT ↑↓ move  ·  enter details  ·  x clean up…  ·  c clean up all that can go  ·  / filter  ·  esc back
 === 120   []
                                                                             ● 1 running · 306M on disk · 3M can go c
 
@@ -378,7 +378,7 @@ HINT ↑↓ move  ·  enter details  ·  x clean up…  ·  c clean up all that 
 │ AGENTS' SCRATCH  files agents kept while they worked here · x empties it ─────────────────────────────────────── │
 │ ◌ .claude/tmp                               0 items                                     12M                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter fold  ·  → details  ·  x clean up…  ·  c clean up all that can go  ·  esc back
+HINT ↑↓ move  ·  enter fold  ·  → details  ·  x clean up…  ·  c clean up all that can go  ·  / filter  ·  esc back
 === 100   []
                                                         ● 1 running · 306M on disk · 3M can go c
 
@@ -459,4 +459,4 @@ HINT ↑↓ move  ·  enter fold  ·  → details  ·  x clean up…  ·  c clea
 │                                                                                                              │ │                                                                                 │
 │                                                                                                              │ │                                                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter details  ·  c clean up all that can go  ·  esc back
+HINT ↑↓ move  ·  enter details  ·  c clean up all that can go  ·  / filter  ·  esc back

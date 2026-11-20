@@ -2,13 +2,13 @@
 [right down]	p/src/alpha	↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl+b keep going  ·  c clean up all that can go  ·  ← the list
 [right down down]	p/src/alpha	↑↓ move  ·  x clean up…  ·  r check again  ·  c clean up all that can go  ·  ← the list
 [right down down down]	p/src/alpha	↑↓ move  ·  x clean up…  ·  c clean up all that can go  ·  ← the list
-[down]	w/src/alpha/.claude/worktrees/fix	↑↓ move  ·  enter details  ·  x clean up…  ·  r check again  ·  c clean up all that can go  ·  esc back
-[down down]	p/Users/me/Downloads	↑↓ move  ·  enter details  ·  c clean up all that can go  ·  esc back
-[down down down]	~mac	↑↓ move  ·  enter unfold  ·  x clean up…  ·  c clean up all that can go  ·  esc back
-[down down down enter]	~mac	↑↓ move  ·  enter fold  ·  x clean up…  ·  c clean up all that can go  ·  esc back
-[down down down enter down]	~temp	↑↓ move  ·  enter details  ·  x clean up…  ·  c clean up all that can go  ·  esc back
+[down]	w/src/alpha/.claude/worktrees/fix	↑↓ move  ·  enter details  ·  x clean up…  ·  r check again  ·  c clean up all that can go  ·  / filter  ·  esc back
+[down down]	p/Users/me/Downloads	↑↓ move  ·  enter details  ·  c clean up all that can go  ·  / filter  ·  esc back
+[down down down]	~mac	↑↓ move  ·  enter unfold  ·  x clean up…  ·  c clean up all that can go  ·  / filter  ·  esc back
+[down down down enter]	~mac	↑↓ move  ·  enter fold  ·  x clean up…  ·  c clean up all that can go  ·  / filter  ·  esc back
+[down down down enter down]	~temp	↑↓ move  ·  enter details  ·  x clean up…  ·  c clean up all that can go  ·  / filter  ·  esc back
 [down down down enter down enter]	~temp	↑↓ move  ·  x clean up…  ·  r look again  ·  c clean up all that can go  ·  ← the list
-[down down down down]	~prs	↑↓ move  ·  enter details  ·  c clean up all that can go  ·  esc back
+[down down down down]	~prs	↑↓ move  ·  enter details  ·  c clean up all that can go  ·  / filter  ·  esc back
 === clean
 Clean up  1 ticked · 1M · loses nothing
 

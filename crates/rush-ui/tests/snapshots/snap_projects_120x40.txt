@@ -37,4 +37,4 @@
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move  ·  enter details  ·  c clean up all that can go  ·  esc back
+  ↑↓ move  ·  enter details  ·  c clean up all that can go  ·  / filter  ·  esc back

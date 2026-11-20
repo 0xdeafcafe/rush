@@ -1019,10 +1019,12 @@ fn the_tree_sits_beside_its_pick_when_wide() {
         assert!(first.is_some_and(|l| l.contains("┃ ▾ alpha")), "{w}: {f}");
         assert!(f.contains("╭─ ◆ alpha"), "{w}: {f}");
     }
-    // A worktree's row shows its repository on the right.
+    // A worktree's row shows the worktree on the right, and who's in it.
     let mut m = with_subagents(160);
     rush_ui_projects_machine::pick_in_projects(&mut m, "w/src/alpha/.claude/worktrees/fix");
-    assert!(frame(&mut m).contains("╭─ ◆ alpha"));
+    let f = frame(&mut m);
+    assert!(f.contains("╭─ ⎇ fix"), "{f}");
+    assert!(f.contains("fix the parser"), "{f}");
 }
 
 /// rich with a repository no agent worked in lately, its worktree old.
