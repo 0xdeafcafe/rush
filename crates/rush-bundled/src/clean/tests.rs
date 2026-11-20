@@ -808,3 +808,69 @@ fn cleanup_clean_by_id() {
     );
     assert!(a.lock().busy.is_empty());
 }
+
+// codex-clean offers the sessions not written to within the days set, and
+// deletes only those, with the folders they leave empty.
+#[test]
+fn old_codex_sessions() {
+    let home = tempfile::tempdir().unwrap();
+    let sessions = home.path().join("sessions");
+    let now = SystemTime::now();
+    let day = Duration::from_secs(24 * 3600);
+    // (path under sessions, days since written, bytes, offered)
+    let files = [
+        ("2026/01/02/rollout-a.jsonl", 90, 300, true),
+        ("2026/01/02/rollout-b.jsonl", 31, 200, true),
+        ("2026/11/01/rollout-c.jsonl", 29, 100, false),
+        ("2026/11/20/rollout-d.jsonl", 0, 50, false),
+        ("2026/01/02/notes.txt", 90, 10, false),
+    ];
+    for (p, age, n, _) in files {
+        let p = sessions.join(p);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, vec![b'x'; n]).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&p)
+            .unwrap()
+            .set_modified(now - day * age)
+            .unwrap();
+    }
+    let things = codex::codex_things_in(home.path(), 30, now);
+    assert_eq!(things.len(), 1);
+    assert_eq!(things[0].title, "Codex sessions older than 30 days");
+    assert_eq!(things[0].meta, "500 B · 2 sessions");
+
+    let said = (things[0].clean)(&Ctx::background()).unwrap();
+    assert_eq!(said, "Deleted 2 sessions, freed 500 B.");
+    for (p, _, _, offered) in files {
+        assert_eq!(!sessions.join(p).exists(), offered, "{p}");
+    }
+    assert!(
+        sessions.join("2026/01/02").is_dir(),
+        "notes.txt keeps its folder"
+    );
+    assert!(codex::codex_things_in(home.path(), 30, now).is_empty());
+
+    // Once nothing's left in a day's folder, it goes, and its month's.
+    std::fs::remove_file(sessions.join("2026/01/02/notes.txt")).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(sessions.join("2026/11/01/rollout-c.jsonl"))
+        .unwrap()
+        .set_modified(now - day * 40)
+        .unwrap();
+    let things = codex::codex_things_in(home.path(), 30, now);
+    (things[0].clean)(&Ctx::background()).unwrap();
+    assert!(!sessions.join("2026/01").exists());
+    assert!(!sessions.join("2026/11/01").exists());
+    assert!(sessions.join("2026/11/20/rollout-d.jsonl").is_file());
+    assert!(sessions.is_dir());
+}
+
+// None when there's no sessions folder at all.
+#[test]
+fn no_codex_sessions() {
+    let home = tempfile::tempdir().unwrap();
+    assert!(codex::codex_things_in(home.path(), 30, SystemTime::now()).is_empty());
+}

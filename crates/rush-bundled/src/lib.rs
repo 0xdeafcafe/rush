@@ -363,6 +363,7 @@ mod tests {
                 "apple-intelligence",
                 "apple-voice",
                 "cleanup",
+                "codex-clean",
                 "context-guard",
                 "drafts",
                 "drive",
