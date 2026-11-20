@@ -214,7 +214,7 @@ impl Place for Projects {
         };
         let (rows, i) = me.cur(m);
         let r = i.map(|i| rows[i].clone()).unwrap_or_default();
-        projects_hint(m, &r, m.w.saturating_sub(4))
+        projects_hint(m, &r, me.proj_in, m.w.saturating_sub(4))
     }
 
     fn key(&mut self, m: &mut Model, k: &Press) -> Out {
@@ -230,130 +230,101 @@ impl Place for Projects {
     }
 }
 
-/// The bottom row's keys for the row r the cursor is on (projectsHint).
-pub fn projects_hint(m: &Model, r: &WorkRow, w: usize) -> Line {
+/// The bottom row's keys for the row r the cursor is on, in the list or
+/// gone into what's picked (inside): only what works there. enter opens
+/// or folds, x cleans up the row, c everything that can go.
+pub fn projects_hint(m: &Model, r: &WorkRow, inside: bool, w: usize) -> Line {
     let d = data(m);
+    let fold = |open: bool| if open { "fold" } else { "unfold" };
+    let mut k: Vec<(&str, &str)> = vec![("↑↓", "move")];
     match &r.what {
-        What::Pr(_) => keys_fit(
-            w,
-            &[
-                ("↑↓", "move"),
-                ("enter", "open it"),
-                ("o", "on GitHub"),
-                ("r", "ask GitHub again"),
-                ("←", "back"),
-            ],
-        ),
+        What::Pr(_) => k.extend([
+            ("enter", "open it"),
+            ("o", "on GitHub"),
+            ("r", "ask GitHub again"),
+        ]),
         What::Proc(_) => {
-            let mut k = vec![("↑↓", "move"), ("x", "end"), ("!", "SIGKILL tree")];
+            k.extend([("x", "end"), ("!", "SIGKILL tree")]);
             if d.machine.orphans > 0 {
                 k.push(("X", "end all orphans"));
             }
-            k.push(("esc", "back"));
-            keys_fit(w, &k)
         }
-        What::Wt(_) => keys_fit(
-            w,
-            &[
-                ("↑↓", "move"),
-                ("x", "remove…"),
-                ("c", "clean up"),
-                ("r", "check again"),
-                ("esc", "back"),
-            ],
-        ),
-        What::Tmp => keys_fit(
-            w,
-            &[
-                ("↑↓", "move"),
-                ("x", "clear untouched…"),
-                ("c", "clean up"),
-                ("r", "look again"),
-                ("esc", "back"),
-            ],
-        ),
-        What::Temp(key) => {
-            let open = if d.opened.contains(key) {
-                "close it"
-            } else {
-                "open it"
-            };
-            keys_fit(
-                w,
-                &[
-                    ("↑↓", "move"),
-                    ("enter", open),
-                    ("x", "delete all of it…"),
-                    ("X", "every finished agent's…"),
-                    ("esc", "back"),
-                ],
-            )
-        }
-        What::Path(p) => {
-            let x = if p.scratch.is_empty() {
-                "delete it…"
-            } else {
-                "empty it…"
-            };
-            keys_fit(w, &[("↑↓", "move"), ("x", x), ("←", "back")])
-        }
-        What::Proj(_) | What::Pane => keys_fit(
-            w,
-            &[
-                ("↑↓", "move"),
-                ("enter", "into it"),
-                ("c", "clean up"),
-                ("esc", "back"),
-            ],
-        ),
-        What::Agent(key) => {
-            let mut k = vec![("↑↓", "move"), ("enter", "open"), ("x", "close it…")];
-            if let Some(g) = agent_by_key(m, key)
-                && d.temp_of(key) >= TEMP_SHOWN
-                && g.a.pid == 0
-            {
-                k.push(("t", "remove temp work"));
-            }
-            k.extend([
-                ("ctrl+y", "its PR"),
-                ("ctrl+b", "keep going"),
-                ("←", "the list"),
-                ("esc", "back"),
-            ]);
-            keys_fit(w, &k)
-        }
-        What::Fold(key) => {
-            let fold = if d.unfolded.contains(key) {
-                ("←", "fold")
-            } else {
-                ("→", "unfold")
-            };
-            keys_fit(
-                w,
-                &[("↑↓", "move"), fold, ("c", "clean up"), ("esc", "back")],
-            )
-        }
-        What::Group(key) => {
-            let fold = if d.unfolded.contains(key) {
-                ("←", "fold")
-            } else {
-                ("→", "unfold")
-            };
-            keys_fit(
-                w,
-                &[("↑↓", "move"), fold, ("c", "clean up"), ("esc", "back")],
-            )
-        }
-        What::Kit(_) => keys_fit(w, &[("↑↓", "move"), ("c", "clean up"), ("esc", "back")]),
-        What::Mem(_) => keys_fit(
-            w,
-            &[
-                ("↑↓", "move"),
-                ("enter", "review its memory"),
-                ("←", "back"),
-            ],
-        ),
-        What::Text => keys_fit(w, &[("esc", "back")]),
+        What::Wt(_) if inside => k.extend([("x", "clean up…"), ("r", "check again")]),
+        What::Wt(_) => k.extend([
+            ("enter", "details"),
+            ("x", "clean up…"),
+            ("r", "check again"),
+        ]),
+        What::Tmp => k.extend([("x", "clean up…"), ("r", "look again")]),
+        What::Temp(key) => k.extend([
+            (
+                "enter",
+                if d.opened.contains(key) {
+                    "close it"
+                } else {
+                    "open it"
+                },
+            ),
+            ("x", "clean up…"),
+        ]),
+        What::Path(_) => k.push(("x", "clean up…")),
+        What::Proj(key) if !inside && repo_folds(m, key) => k.extend([
+            ("enter", fold(!d.folded.contains(key))),
+            ("→", "details"),
+            ("x", "clean up…"),
+        ]),
+        What::Proj(_) => k.push(("enter", "details")),
+        What::Pane if r.id == PANE_PRS => k.push(("enter", "details")),
+        What::Pane => k.extend([("enter", "details"), ("x", "clean up…")]),
+        What::Agent(_) => k.extend([
+            ("enter", "open"),
+            ("x", "close it…"),
+            ("ctrl+y", "its PR"),
+            ("ctrl+b", "keep going"),
+        ]),
+        What::Fold(key) | What::Group(key) => k.extend([
+            ("enter", fold(d.unfolded.contains(key))),
+            ("x", "clean up…"),
+        ]),
+        What::Kit(_) => k.push(("x", "clean up…")),
+        What::Mem(_) => k.push(("enter", "review its memory")),
+        What::Text => k.clear(),
+    }
+    k.push(("c", "clean up all that can go"));
+    k.push(if inside {
+        ("←", "the list")
+    } else {
+        ("esc", "back")
+    });
+    keys_fit(w, &k)
+}
+
+/// Whether a project's head folds: a repository with worktrees under it.
+fn repo_folds(m: &Model, key: &str) -> bool {
+    picked_project(m, &format!("p{key}"))
+        .is_some_and(|p| p.repo && !repo_worktrees(data(m), &p).is_empty())
+}
+
+/// What x on r cleans up: the row's repository, worktree, or This Mac.
+fn scope_of(m: &Model, r: &WorkRow) -> Option<clean::Scope> {
+    let repo = |key: &str| clean::Scope::Repo {
+        key: key.to_string(),
+        wts: data(m)
+            .wts
+            .iter()
+            .filter(|t| t.repo == key)
+            .map(|t| t.path.clone())
+            .collect(),
+    };
+    match &r.what {
+        What::Proj(key) if repo_folds(m, key) => Some(repo(key)),
+        What::Fold(key) => Some(repo(key)),
+        What::Wt(t) => Some(clean::Scope::Worktree(t.path.clone())),
+        What::Group(_) => Some(clean::Scope::Mac),
+        What::Pane if r.id != PANE_PRS => Some(clean::Scope::Mac),
+        What::Kit(k) if k.item.worktree.is_empty() => Some(clean::Scope::Mac),
+        What::Kit(k) => Some(clean::Scope::Worktree(k.item.worktree.clone())),
+        _ => None,
     }
 }
 
@@ -363,7 +334,7 @@ impl Projects {
         let r = i.map(|i| rows[i].clone()).unwrap_or_default();
         match k.s.as_str() {
             "left" if !self.proj_in && self.fold_back(m, &rows, &r) => {}
-            "esc" | "q" | "left" => {
+            "esc" | "left" => {
                 if self.proj_in {
                     self.proj_in = false;
                     return Out::Draw;
@@ -374,35 +345,25 @@ impl Projects {
             "down" | "j" => self.mv(&rows, i, 1),
             "pgup" => self.mv(&rows, i, -10),
             "pgdown" => self.mv(&rows, i, 10),
-            "enter" | "right" => match &r.what {
-                // A folded repository opens before it's gone into.
-                What::Proj(key) if m.kept::<Data>().folded.remove(key) => {}
-                What::Group(key) => {
+            // enter opens: a repository or group folds and unfolds, a
+            // worktree shows its details, an agent its chat, a PR its
+            // sheet. It never removes anything.
+            "enter" => match &r.what {
+                What::Proj(key) if !self.proj_in && repo_folds(m, key) => {
+                    let d = m.kept::<Data>();
+                    if !d.folded.remove(key) {
+                        d.folded.insert(key.clone());
+                    }
+                }
+                What::Fold(key) | What::Group(key) => {
                     let d = m.kept::<Data>();
                     if !d.unfolded.remove(key) {
                         d.unfolded.insert(key.clone());
                     }
                 }
-                What::Proj(_) | What::Pane => {
-                    self.proj_in = true;
-                    self.in_pos = 0;
-                    self.in_sel.clear();
-                    let (rows, j) = self.cur(m);
-                    if j.is_none_or(|j| rows[j].id.is_empty()) {
-                        self.proj_in = false; // nothing in it to pick
-                    }
-                }
+                What::Proj(_) | What::Pane | What::Wt(_) if !self.proj_in => self.go_in(m, &r),
                 What::Agent(key) => return open_agent(m, key),
-                What::Fold(key) => {
-                    let d = m.kept::<Data>();
-                    if !d.unfolded.remove(key) {
-                        d.unfolded.insert(key.clone());
-                    }
-                }
-                What::Wt(wt) => delete::ask_remove_worktree(m, (**wt).clone()),
-                What::Tmp => delete::ask_clear_scratch(m),
                 What::Temp(key) => scan::open_temp(m, key),
-                What::Path(p) => ask_remove_path(m, p.clone()),
                 What::Pr(p) => super::prsheet::open_pr_sheet(m, &p.root, &p.pr),
                 What::Mem(s) => {
                     let title = std::path::Path::new(&s.root)
@@ -411,6 +372,17 @@ impl Projects {
                         .unwrap_or_default();
                     super::memreview::open_mem_review(m, s.p.clone(), &s.root, &title)
                 }
+                What::Kit(k) => m.flash(&format!("{} · x cleans it up", k.item.does)),
+                _ => return Out::Idle,
+            },
+            // → goes in: a folded repository or group opens first.
+            "right" => match &r.what {
+                What::Proj(key) if m.kept::<Data>().folded.remove(key) => {}
+                What::Fold(key) | What::Group(key) => {
+                    m.kept::<Data>().unfolded.insert(key.clone());
+                }
+                What::Proj(_) | What::Pane | What::Wt(_) if !self.proj_in => self.go_in(m, &r),
+                What::Agent(key) => return open_agent(m, key),
                 _ => return Out::Idle,
             },
             "o" => match &r.what {
@@ -434,8 +406,8 @@ impl Projects {
                 }
                 _ => return Out::Idle,
             },
+            // x cleans up the row: one sheet, scoped to it.
             "x" | "ctrl+x" | "backspace" | "delete" => match &r.what {
-                What::Wt(wt) => delete::ask_remove_worktree(m, (**wt).clone()),
                 What::Proc(p) => end_proc(m, (**p).clone()),
                 What::Tmp => delete::ask_clear_scratch(m),
                 What::Temp(key) => delete::ask_clean(m, key),
@@ -446,11 +418,10 @@ impl Projects {
                     let a = m.agents.iter().find(|a| a.key == **key).cloned();
                     return m.ext.calls.ask_close()(m, a);
                 }
-                _ => return Out::Idle,
-            },
-            "t" => match &r.what {
-                What::Agent(key) if data(m).temp_of(key) >= TEMP_SHOWN => delete::ask_clean(m, key),
-                _ => return Out::Idle,
+                _ => match scope_of(m, &r) {
+                    Some(scope) => clean::open_clean_sheet_for(m, scope),
+                    None => return Out::Idle,
+                },
             },
             "!" => {
                 if let What::Proc(p) = &r.what {
@@ -464,14 +435,8 @@ impl Projects {
                     );
                 }
             }
-            "X" => {
-                if let What::Temp(_) = r.what {
-                    delete::ask_clean_all(m);
-                } else {
-                    end_all_orphans(m);
-                }
-            }
-            "A" | "c" => clean::open_clean_sheet(m),
+            "X" if matches!(r.what, What::Proc(_)) => end_all_orphans(m),
+            "c" => clean::open_clean_sheet(m),
             "r" => {
                 if matches!(r.what, What::Pr(_)) || self.proj_sel == PANE_PRS {
                     scan::ask_prs_again(m);
@@ -488,6 +453,21 @@ impl Projects {
 }
 
 impl Projects {
+    /// Goes into what r is: a project or pane's rows on the right, or a
+    /// worktree's, the cursor on its own row there.
+    fn go_in(&mut self, m: &mut Model, r: &WorkRow) {
+        self.proj_in = true;
+        self.in_pos = 0;
+        self.in_sel = match &r.what {
+            What::Wt(t) => format!("w{}", t.path),
+            _ => String::new(),
+        };
+        let (rows, j) = self.cur(m);
+        if j.is_none_or(|j| rows[j].id.is_empty()) {
+            self.proj_in = false; // nothing in it to pick
+        }
+    }
+
     /// ← on an unfolded fold, or on a worktree inside one, folds it and
     /// puts the cursor on the fold; false when ← isn't that.
     fn fold_back(&mut self, m: &mut Model, rows: &[WorkRow], r: &WorkRow) -> bool {

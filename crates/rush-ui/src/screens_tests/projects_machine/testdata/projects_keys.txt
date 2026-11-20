@@ -1,7 +1,7 @@
-[enter]	p/src/alpha	↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl+b keep going  ·  ← the list  ·  esc back
-[enter down]	p/src/alpha	↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl+b keep going  ·  ← the list  ·  esc back
-[enter down down]	p/src/alpha	↑↓ move  ·  x remove…  ·  c clean up  ·  r check again  ·  esc back
-[enter down down down]	p/src/alpha	↑↓ move  ·  x empty it…  ·  ← back
+[right]	p/src/alpha	↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl+b keep going  ·  ← the list  ·  esc back
+[right down]	p/src/alpha	↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl+b keep going  ·  ← the list  ·  esc back
+[right down down]	p/src/alpha	↑↓ move  ·  x remove…  ·  c clean up  ·  r check again  ·  esc back
+[right down down down]	p/src/alpha	↑↓ move  ·  x empty it…  ·  ← back
 [down]	w/src/alpha/.claude/worktrees/fix	↑↓ move  ·  x remove…  ·  c clean up  ·  r check again  ·  esc back
 [down down]	p/Users/me/Downloads	↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
 [down down down]	~mac	↑↓ move  ·  → unfold  ·  c clean up  ·  esc back

@@ -40,6 +40,8 @@ pub struct Doomed {
     pub orphan: Option<rush_fleet::TempOrphan>,
     /// A cache that rebuilds itself, as Clean up measured it (Rust-only).
     pub cache: Option<CacheFound>,
+    /// What a clean-up plugin found: the plugin cleans it, by its id.
+    pub kit: Option<KitRow>,
     // Looked at off the UI.
     pub looked: bool,
     /// The orphan changed, or went, since Clean up saw it.
@@ -300,6 +302,9 @@ impl Doomed {
         if let Some(c) = &self.cache {
             return c.found.size;
         }
+        if let Some(k) = &self.kit {
+            return k.item.bytes as i64;
+        }
         if self.tmp && !self.looked {
             return st.tmp.stale;
         }
@@ -378,6 +383,17 @@ impl Doomed {
 
     /// What it is, where, and how it goes.
     fn head(&self, m: &Model, w: usize) -> Vec<Line> {
+        if let Some(k) = &self.kit {
+            let size = if k.item.bytes > 0 {
+                disk(k.item.bytes as i64)
+            } else {
+                k.item.meta.clone()
+            };
+            return vec![
+                kind_line(Kind::Temp, &k.item.title, &k.plugin, &size, w),
+                ln([plain("   "), sp(k.item.does.clone(), DIM)]),
+            ];
+        }
         if let Some(wt) = &self.wt {
             let keeps = if wt.branch.is_empty() {
                 ln([
@@ -552,7 +568,11 @@ impl Doomed {
         if self.wt.is_some() {
             return self.worktree_loss(m, w);
         }
-        if self.left.is_some() || self.orphan.is_some() || self.cache.is_some() {
+        if self.left.is_some()
+            || self.orphan.is_some()
+            || self.cache.is_some()
+            || self.kit.is_some()
+        {
             return Vec::new();
         }
         if self.tmp {
@@ -755,6 +775,8 @@ impl DeleteSheet {
         for d in std::mem::take(&mut self.items) {
             if let Some(c) = d.cache {
                 caches.push(c);
+            } else if let Some(k) = d.kit {
+                super::kititems::clean_kit_item(m, &k.plugin, &k.item.id);
             } else if let Some(w) = d.wt {
                 let force = !w.safe();
                 remove_wt(m, w, force);
@@ -847,7 +869,12 @@ impl Sheet for DeleteSheet {
                 self.scroll += 10;
                 Out::Draw
             }
-            "y" | "enter" => self.remove(m),
+            "y" => self.remove(m),
+            // Only y deletes: an enter meant for another sheet never does.
+            "enter" => {
+                m.flash("y deletes · esc goes back");
+                Out::Draw
+            }
             _ => Out::Idle,
         }
     }

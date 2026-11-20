@@ -91,11 +91,15 @@ pub struct CleanItem {
     /// Big and untouched for a month, and no rule names it: r makes it
     /// one, and then it's ticked (Rust-only).
     pub untouched: Option<rush_fleet::Untouched>,
+    /// What a clean-up plugin found, cleaned by the plugin.
+    pub kit: Option<KitRow>,
 }
 
 impl CleanItem {
     fn group(&self) -> &'static str {
-        if self.never.is_some() {
+        if self.kit.is_some() {
+            "Found by clean-up plugins"
+        } else if self.never.is_some() {
             "Yours to decide: rush never touches these"
         } else if self.untouched.is_some() {
             "Big and untouched for a month: no rule names these yet"
@@ -123,6 +127,9 @@ impl CleanItem {
     }
 
     fn safe(&self) -> bool {
+        if let Some(k) = &self.kit {
+            return self.busy.is_empty() && k.item.can_go;
+        }
         if let Some(k) = self.kind {
             return k == Temps::Done;
         }
@@ -141,6 +148,40 @@ impl CleanItem {
         match &self.wt {
             None => self.busy.is_empty(),
             Some(w) => ticks_itself(w) && self.loses_nothing(),
+        }
+    }
+
+    /// What's lost if it goes, when something is: a worktree's work that's
+    /// nowhere else, or a plugin's item it doesn't say loses nothing.
+    pub fn would_lose(&self) -> Option<String> {
+        if let Some(w) = &self.wt {
+            let v = w.verdict();
+            if v.kind == VerdictKind::WouldLose {
+                return Some(v.reason);
+            }
+        }
+        if let Some(k) = &self.kit
+            && !k.item.can_go
+        {
+            return Some(k.item.does.clone());
+        }
+        None
+    }
+
+    /// Whether it's in what scope covers.
+    fn in_scope(&self, scope: &Scope) -> bool {
+        let wt = self
+            .wt
+            .as_ref()
+            .map(|w| w.path.as_str())
+            .or(self.cache.as_ref().map(|c| c.wt.as_str()))
+            .or(self.kit.as_ref().map(|k| k.item.worktree.as_str()))
+            .unwrap_or("");
+        match scope {
+            Scope::All => true,
+            Scope::Worktree(p) => wt == p,
+            Scope::Repo { wts, .. } => !wt.is_empty() && wts.iter().any(|w| w == wt),
+            Scope::Mac => wt.is_empty(),
         }
     }
 
@@ -176,10 +217,42 @@ fn class_color(c: Class) -> rush_core::text::Color {
     }
 }
 
+/// What a Clean up covers: everything (c), or the row x was pressed on:
+/// a repository and its worktrees, one worktree, or This Mac.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum Scope {
+    #[default]
+    All,
+    /// A repository, by its key, and its worktrees' paths.
+    Repo {
+        key: String,
+        wts: Vec<String>,
+    },
+    Worktree(String),
+    Mac,
+}
+
+impl Scope {
+    /// Its name in the sheet's title: "Clean up alpha".
+    pub fn name(&self) -> String {
+        match self {
+            Scope::All => String::new(),
+            Scope::Repo { key, .. } => base(key).to_string(),
+            Scope::Worktree(p) => base(p).to_string(),
+            Scope::Mac => "This Mac".into(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct CleanSheet {
     pub items: Vec<CleanItem>,
     pub cur: usize,
+    /// What it covers; items measured later are kept to it too.
+    pub scope: Scope,
+    /// A row that would lose work, once space was pressed on it: space
+    /// again ticks it.
+    pub armed: Option<usize>,
     /// The caches are still being measured.
     pub measuring: bool,
     /// Where the disk goes, once the home folder's map is in (kept for
@@ -425,7 +498,12 @@ fn measure_into_sheet(
                 |m, never| {
                     m.kept::<Data>().never = never.clone();
                     if let Some(s) = m.sheet_as::<CleanSheet>() {
-                        s.items.extend(never_items(never));
+                        let scope = s.scope.clone();
+                        s.items.extend(
+                            never_items(never)
+                                .into_iter()
+                                .filter(|it| it.in_scope(&scope)),
+                        );
                     }
                     Out::Draw
                 },
@@ -446,7 +524,11 @@ fn measure_into_sheet(
                             .iter()
                             .position(|it| it.never.is_some())
                             .unwrap_or(s.items.len());
-                        let rows = untouched_items(map.untouched.clone());
+                        let scope = s.scope.clone();
+                        let rows: Vec<CleanItem> = untouched_items(map.untouched.clone())
+                            .into_iter()
+                            .filter(|it| it.in_scope(&scope))
+                            .collect();
                         let (n, was) = (rows.len(), s.items.len());
                         s.items.splice(at..at, rows);
                         // The cursor stays on the row it was on.
@@ -475,7 +557,12 @@ fn measure_into_sheet(
             };
             s.measuring = false;
             triage_items(&mut s.items, &facts, now);
-            s.items.extend(cache_items(found));
+            let scope = s.scope.clone();
+            s.items.extend(
+                cache_items(found)
+                    .into_iter()
+                    .filter(|it| it.in_scope(&scope)),
+            );
             let empty = s.items.is_empty();
             if empty {
                 m.sheet = None;
@@ -488,8 +575,13 @@ fn measure_into_sheet(
     );
 }
 
-/// Opens Clean up, once git has looked at the worktrees.
+/// Opens Clean up on everything, once git has looked at the worktrees.
 pub fn open_clean_sheet(m: &mut Model) {
+    open_clean_sheet_for(m, Scope::All);
+}
+
+/// Opens Clean up on what scope covers.
+pub fn open_clean_sheet_for(m: &mut Model, scope: Scope) {
     let d = data(m);
     if d.checked == 0 {
         m.flash("still looking at worktrees with git · a moment");
@@ -633,16 +725,42 @@ pub fn open_clean_sheet(m: &mut Model) {
         .filter(|w| w.path != w.repo)
         .map(|w| w.path.clone())
         .collect();
-    let measuring = !data(m).frozen;
+    // What the clean-up plugins found: ticked when it loses nothing and
+    // nobody works in its worktree.
+    for (plugin, i) in data(m).kits.all() {
+        let busy = data(m)
+            .wts
+            .iter()
+            .find(|w| !i.worktree.is_empty() && w.path == i.worktree)
+            .and_then(|w| running(m, &w.agents))
+            .map(|g| one_line(&g.a.display_name))
+            .unwrap_or_default();
+        items.push(CleanItem {
+            on: i.can_go && busy.is_empty(),
+            busy,
+            kit: Some(KitRow {
+                plugin: plugin.to_string(),
+                item: i.clone(),
+            }),
+            ..CleanItem::default()
+        });
+    }
+    items.retain(|it| it.in_scope(&scope));
+    // What only Clean up on everything or This Mac measures.
+    let measuring = !data(m).frozen && matches!(scope, Scope::All | Scope::Mac);
     if items.is_empty() && !measuring {
-        m.flash(
-            "no worktrees, nothing left outside projects and nothing stale in /tmp · nothing to clean",
-        );
+        let what = match &scope {
+            Scope::All => String::new(),
+            s => format!(" in {}", s.name()),
+        };
+        m.flash(&format!("nothing to clean up{what}"));
         return;
     }
     m.open_sheet(Box::new(CleanSheet {
         items,
         cur: 0,
+        scope,
+        armed: None,
         measuring,
         map: None,
     }));
@@ -685,6 +803,13 @@ impl CleanSheet {
                 size += c.found.size;
                 continue;
             }
+            if let Some(k) = &it.kit {
+                size += k.item.bytes as i64;
+                if !k.item.can_go {
+                    losing += 1;
+                }
+                continue;
+            }
             if it.kind.is_some() {
                 size += it.temps_size();
                 continue;
@@ -719,6 +844,31 @@ impl CleanSheet {
         } else {
             sp("○ ", FAINT)
         };
+        if let Some(k) = &it.kit {
+            let size = if k.item.bytes > 0 {
+                disk(k.item.bytes as i64)
+            } else {
+                k.item.meta.clone()
+            };
+            let why = if !it.busy.is_empty() {
+                bx = sp("· ", FAINT);
+                sp(format!("{} is working there", it.busy), DIM)
+            } else if k.item.can_go {
+                sp(k.item.does.clone(), GREEN)
+            } else {
+                sp(format!("⚠ {}", k.item.does), YELLOW)
+            };
+            let title = rush_draw::truncate(&k.item.title, 43, "…").into_owned();
+            return fit(
+                ln([
+                    bx,
+                    sp(pad_to(&title, 44), TEXT),
+                    sp(format!("{size:>7}  "), FAINT),
+                    why,
+                ]),
+                w,
+            );
+        }
         if let Some(k) = it.kind {
             let what = match k {
                 Temps::Done => sp("sessions done", GREEN),
@@ -957,6 +1107,13 @@ impl CleanSheet {
                 });
                 continue;
             }
+            if let Some(k) = &it.kit {
+                picked.push(Doomed {
+                    kit: Some(k.clone()),
+                    ..Doomed::default()
+                });
+                continue;
+            }
             if it.kind.is_some() {
                 picked.push(Doomed {
                     agents: it
@@ -975,7 +1132,7 @@ impl CleanSheet {
             });
         }
         if picked.is_empty() {
-            m.flash("nothing ticked · space ticks one, a ticks all that's safe");
+            m.flash("nothing ticked · space ticks one, a ticks all that loses nothing");
             return Out::Draw;
         }
         open_delete(m, Some(Box::new(self.clone())), picked);
@@ -1066,7 +1223,11 @@ impl Sheet for CleanSheet {
                 disk(more_size)
             );
         }
-        let mut out = vec![sheet_title("Clean up", &about, w), Line::new()];
+        let title = match &self.scope {
+            Scope::All => "Clean up".to_string(),
+            s => format!("Clean up {}", s.name()),
+        };
+        let mut out = vec![sheet_title(&title, &about, w), Line::new()];
         let mut chrome = 10;
         if let Some((map, free, total)) = &self.map {
             let wts: i64 = self
@@ -1118,11 +1279,15 @@ impl Sheet for CleanSheet {
             ]));
         }
         // r only when there's something big and untouched to make a rule of.
-        let mut keys = vec![("↑↓", "move"), ("space", "tick"), ("a", "all safe / none")];
+        let mut keys = vec![
+            ("↑↓", "move"),
+            ("space", "tick"),
+            ("a", "all that loses nothing / none"),
+        ];
         if self.items.iter().any(|it| it.untouched.is_some()) {
             keys.push(("r", "make a rule"));
         }
-        keys.extend([("enter", "remove ticked"), ("esc", "close")]);
+        keys.extend([("y", "clean up ticked"), ("esc", "close")]);
         out.extend([
             Line::new(),
             ln([sp(
@@ -1150,10 +1315,24 @@ impl Sheet for CleanSheet {
                     m.flash("no rule names it yet · r makes it one, and then it's ticked");
                     return Out::Draw;
                 }
-                if let Some(it) = self.items.get_mut(self.cur)
+                let cur = self.cur;
+                let armed = self.armed.take() == Some(cur);
+                if let Some(it) = self.items.get_mut(cur)
                     && it.busy.is_empty()
                     && it.never.is_none()
                 {
+                    // One that would lose work is never ticked by one
+                    // press: the first says what goes with it.
+                    if !it.on
+                        && !armed
+                        && let Some(lost) = it.would_lose()
+                    {
+                        self.armed = Some(cur);
+                        m.flash_err(&format!(
+                            "⚠ it would lose {lost} · space again ticks it anyway"
+                        ));
+                        return Out::Draw;
+                    }
                     it.on = !it.on;
                 }
             }
@@ -1192,7 +1371,10 @@ impl Sheet for CleanSheet {
                     it.on = !all && it.safe();
                 }
             }
-            "enter" => return self.confirm(m),
+            "y" => return self.confirm(m),
+            "enter" => {
+                m.flash("y cleans up what's ticked · space ticks");
+            }
             _ => return Out::Idle,
         }
         Out::Draw
@@ -1330,6 +1512,8 @@ mod tests {
         let s = CleanSheet {
             items,
             cur: 0,
+            scope: Scope::All,
+            armed: None,
             measuring: false,
             map: None,
         };

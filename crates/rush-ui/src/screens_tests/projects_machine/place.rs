@@ -127,8 +127,8 @@ fn frames_match_go() {
     let cases: [(usize, Cfg, &[&str]); 5] = [
         (160, classic(), &[]),
         (120, Cfg::default(), &[]),
-        (160, classic(), &["enter"]),
-        (160, classic(), &["enter", "down"]),
+        (160, classic(), &["right"]),
+        (160, classic(), &["right", "down"]),
         (160, classic(), &["down", "down", "down"]),
     ];
     let want = oracle(include_str!("testdata/projects.txt"));
@@ -253,11 +253,11 @@ fn rich(w: usize, cfg: Cfg) -> Model {
 fn rich_frames_match_go() {
     let cases: [(usize, Cfg, &str, &[&str]); 10] = [
         (160, classic(), "", &[]),
-        (160, classic(), "", &["enter"]),
-        (160, classic(), "", &["enter", "down"]),
+        (160, classic(), "", &["right"]),
+        (160, classic(), "", &["right", "down"]),
         (140, classic(), "p/Users/me/Downloads", &[]),
         (140, classic(), PANE_TEMP, &[]),
-        (140, classic(), PANE_TEMP, &["enter"]),
+        (140, classic(), PANE_TEMP, &["right"]),
         (140, classic(), PANE_SYSTEM, &[]),
         (120, Cfg::default(), "", &[]),
         (100, Cfg::default(), "", &[]),
@@ -293,22 +293,18 @@ fn hint(m: &mut Model) -> String {
 fn keys_move_and_hint_as_go() {
     let want = include_str!("testdata/projects_keys.txt");
     let (table, clean) = want.split_once("=== clean\n").unwrap();
+    let mut got_table = String::new();
     for row in table.lines() {
-        let mut parts = row.split('\t');
-        let (keys, sel, want_hint) = (
-            parts.next().unwrap(),
-            parts.next().unwrap(),
-            parts.next().unwrap(),
-        );
+        let keys = row.split('\t').next().unwrap();
         let mut m = rich(160, classic());
         m.frame();
         for k in keys.trim_matches(['[', ']']).split(' ') {
             press(&mut m, k);
             m.frame();
         }
-        assert_eq!(data(&m).sel, sel, "{keys}");
-        assert_eq!(hint(&mut m), want_hint, "{keys}");
+        got_table.push_str(&format!("{keys}\t{}\t{}\n", data(&m).sel, hint(&mut m)));
     }
+    assert_eq!(got_table, table, "--- drawn ---\n{got_table}--- end ---");
     // c opens Clean up over the page.
     let mut m = rich(160, classic());
     m.frame();
@@ -323,7 +319,46 @@ fn keys_move_and_hint_as_go() {
     for sp in crate::style::SPINNER {
         got = got.replace(&format!("─ {sp} fix"), "─ · fix");
     }
-    assert_eq!(got, clean);
+    assert_eq!(got, clean, "--- drawn ---\n{got}--- end ---");
+}
+
+/// Enter on a worktree only shows it: nothing is removed by enter, in the
+/// list or in Delete. x opens Clean up on that worktree alone, and only y
+/// there hands it on.
+#[test]
+fn enter_never_removes_and_x_cleans_up_the_row() {
+    use rush_ui_projects_machine::clean::{CleanSheet, Scope};
+    use rush_ui_projects_machine::delete::DeleteSheet;
+    let mut m = rich(160, classic());
+    m.frame();
+    press(&mut m, "down");
+    m.frame();
+    assert_eq!(data(&m).sel, "w/src/alpha/.claude/worktrees/fix");
+    press(&mut m, "enter");
+    m.frame();
+    assert!(m.sheet.is_none(), "enter on a worktree opened a sheet");
+    assert!(
+        hint(&mut m).contains("the list"),
+        "enter went into its details"
+    );
+    press(&mut m, "left");
+    m.frame();
+    press(&mut m, "x");
+    let s = m.sheet_as::<CleanSheet>().expect("x opened Clean up");
+    assert_eq!(
+        s.scope,
+        Scope::Worktree("/src/alpha/.claude/worktrees/fix".into())
+    );
+    assert!(s.items.iter().all(|it| {
+        it.wt
+            .as_ref()
+            .is_none_or(|w| w.path == "/src/alpha/.claude/worktrees/fix")
+    }));
+    press(&mut m, "enter");
+    assert!(
+        m.sheet_as::<DeleteSheet>().is_none(),
+        "enter in Clean up went on to Delete"
+    );
 }
 
 /// Up and down go from project to project in the list; enter goes into
@@ -340,11 +375,11 @@ fn moving_keeps_level() {
     };
     step(&mut m, "down", "p/src/beta");
     step(&mut m, "up", "p/src/alpha");
-    step(&mut m, "enter", "p/src/alpha");
+    step(&mut m, "right", "p/src/alpha");
     assert!(hint(&mut m).contains("enter open"), "in alpha, on an agent");
     step(&mut m, "down", "p/src/alpha");
     step(&mut m, "left", "p/src/alpha");
-    assert!(hint(&mut m).contains("enter into it"), "back in the list");
+    assert!(hint(&mut m).contains("enter details"), "back in the list");
     press(&mut m, "esc");
     assert_eq!(m.place, PlaceId::Agents, "esc goes back to Agents");
 }
@@ -570,7 +605,7 @@ fn an_untouched_agent_says_it_can_go() {
     );
 }
 
-/// Enter in Clean up hands what's ticked to Delete, and esc there comes
+/// y in Clean up hands what's ticked to Delete, and esc there comes
 /// back to Clean up (deletesheet_test.go TestCleanSheetHandsToDelete).
 #[test]
 fn clean_up_hands_to_delete() {
@@ -588,8 +623,8 @@ fn clean_up_hands_to_delete() {
     d.wts = vec![wt];
     open_clean_sheet(&mut m);
     assert!(m.sheet_as::<CleanSheet>().is_some(), "Clean up didn't open");
-    press(&mut m, "enter");
-    let d = m.sheet_as::<DeleteSheet>().expect("enter opened Delete");
+    press(&mut m, "y");
+    let d = m.sheet_as::<DeleteSheet>().expect("y opened Delete");
     assert!(
         d.items.len() == 1 && d.items[0].wt.is_some(),
         "Delete has {} items",
@@ -657,8 +692,8 @@ fn clean_up_lists_scratch_no_session_owns() {
     ] {
         assert!(page.contains(want), "Clean up lacks {want:?}:\n{page}");
     }
-    press(&mut m, "enter");
-    let d = m.sheet_as::<DeleteSheet>().expect("enter opened Delete");
+    press(&mut m, "y");
+    let d = m.sheet_as::<DeleteSheet>().expect("y opened Delete");
     let paths: Vec<&str> = d
         .items
         .iter()

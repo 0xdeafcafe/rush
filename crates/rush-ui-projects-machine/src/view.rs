@@ -244,7 +244,15 @@ pub fn picked_project<'a>(m: &'a Model, sel: &str) -> Option<Project<'a>> {
     if sel.starts_with('~') {
         return None;
     }
-    let key = sel.strip_prefix('p').unwrap_or(sel);
+    // A worktree's row is its repository's.
+    let repo = sel.strip_prefix('w').and_then(|path| {
+        data(m)
+            .wts
+            .iter()
+            .find(|t| t.path == path)
+            .map(|t| t.repo.as_str())
+    });
+    let key = repo.unwrap_or_else(|| sel.strip_prefix('p').unwrap_or(sel));
     let list = projects(m);
     if let Some(p) = list.iter().find(|p| p.key == key) {
         return Some(p.clone());
