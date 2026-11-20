@@ -302,7 +302,8 @@ fn keys_move_and_hint_as_go() {
             press(&mut m, k);
             m.frame();
         }
-        got_table.push_str(&format!("{keys}\t{}\t{}\n", data(&m).sel, hint(&mut m)));
+        let sel = data(&m).sel.clone();
+        got_table.push_str(&format!("{keys}\t{sel}\t{}\n", hint(&mut m)));
     }
     assert_eq!(got_table, table, "--- drawn ---\n{got_table}--- end ---");
     // c opens Clean up over the page.
