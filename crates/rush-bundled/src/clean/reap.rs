@@ -168,6 +168,7 @@ pub(crate) fn reap_rows(ctx: &Ctx, seen: &[Session]) -> Vec<Thing> {
                 ),
                 reap(w.clone(), base, idle_for),
             )
+            .lost_nothing()
             .at(w.path.clone())
             .within(w.path),
         );

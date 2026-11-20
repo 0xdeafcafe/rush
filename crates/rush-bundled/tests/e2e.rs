@@ -112,6 +112,23 @@ fn broker_runs_the_bundled_plugins() {
         rep.title == "git-clean" && !rep.report.is_empty() && rep.rules.contains("git-clean"),
         "{rep:?}"
     );
+    // cleanup.clean, asked of git-clean alone with an id it never listed,
+    // cleans nothing and says so.
+    let params = rush_plugin::rpc::to_raw(&rush_plugin::CleanupClean { id: "nope".into() }).ok();
+    let answers = b.ask_with(
+        &ctx,
+        rush_plugin::SERVICE_CLEANUP_CLEAN,
+        "",
+        "git-clean",
+        params,
+    );
+    assert!(
+        answers.len() == 1
+            && answers[0].plugin == "git-clean"
+            && answers[0].result.is_none()
+            && answers[0].error.contains("no such item: nope"),
+        "{answers:?}"
+    );
     // And disk.candidates, for the disk engine: whatever it found, nothing
     // the engine finds itself (git-clean's worktrees are the engine's).
     let answers = b.ask(&ctx, rush_plugin::SERVICE_DISK_CANDIDATES, "");

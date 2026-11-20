@@ -114,6 +114,7 @@ fn go_things(ctx: &Ctx, _: &[Session]) -> Vec<Thing> {
                 "runs go clean -cache: builds and tests are slower until it fills again",
                 ran("", "go", &["clean", "-cache"]),
             )
+            .refills()
             .at(d)
             .kind(KIND_GO_BUILD_CACHE),
         );
@@ -128,6 +129,7 @@ fn go_things(ctx: &Ctx, _: &[Session]) -> Vec<Thing> {
                 "runs go clean -modcache: every module downloads again when next built",
                 ran("", "go", &["clean", "-modcache"]),
             )
+            .refills()
             .at(d),
         );
     }
@@ -149,6 +151,7 @@ fn go_things(ctx: &Ctx, _: &[Session]) -> Vec<Thing> {
                     "deletes it; it's built again as needed",
                     removed(&d, kind),
                 )
+                .refills()
                 .at(d)
                 .kind(kind),
             );
@@ -208,6 +211,7 @@ pub(super) fn rust_things_with(
         if is_dir(&d) {
             out.push(
                 Thing::new(id, title, does, removed(&d, kind))
+                    .refills()
                     .at(d)
                     .kind(kind),
             );
@@ -231,6 +235,7 @@ pub(super) fn rust_things_with(
                 "deletes it: builds are slower until it fills again",
                 removed(&d, KIND_RUST_SCCACHE),
             )
+            .refills()
             .at(d)
             .kind(KIND_RUST_SCCACHE),
         );
@@ -244,6 +249,7 @@ pub(super) fn rust_things_with(
                 "deletes it: every project builds again from scratch",
                 removed(&d, KIND_RUST_SHARED_TARGET),
             )
+            .refills()
             .at(d)
             .kind(KIND_RUST_SHARED_TARGET),
         );
@@ -273,6 +279,7 @@ pub(super) fn rust_things_with(
                 "deletes it: git ignores it, and a build puts it back",
                 removed(&t, disk::CARGO_TARGET),
             )
+            .refills()
             .at(t)
             .within(w.path),
         );
@@ -297,6 +304,7 @@ pub(super) fn rust_things_with(
                 "deletes it once nothing uses it: a build puts it back",
                 removed(&p, disk::CARGO_TARGET),
             )
+            .refills()
             .at(p),
         );
     }
@@ -458,6 +466,7 @@ fn js_things(ctx: &Ctx, seen: &[Session]) -> Vec<Thing> {
                 "runs pnpm store prune: removes packages no project uses",
                 ran("", "pnpm", &["store", "prune"]),
             )
+            .refills()
             .at(d)
             .kind(KIND_JS_PNPM_STORE),
         );
@@ -472,6 +481,7 @@ fn js_things(ctx: &Ctx, seen: &[Session]) -> Vec<Thing> {
                 "runs npm cache clean --force: packages download again when next installed",
                 ran("", "npm", &["cache", "clean", "--force"]),
             )
+            .refills()
             .at(d)
             .kind(KIND_JS_NPM_CACHE),
         );
@@ -486,6 +496,7 @@ fn js_things(ctx: &Ctx, seen: &[Session]) -> Vec<Thing> {
                 "runs yarn cache clean: packages download again when next installed",
                 ran("", "yarn", &["cache", "clean"]),
             )
+            .refills()
             .at(d)
             .kind(KIND_JS_YARN_CACHE),
         );
@@ -499,6 +510,7 @@ fn js_things(ctx: &Ctx, seen: &[Session]) -> Vec<Thing> {
                 "runs bun pm cache rm: packages download again when next installed",
                 ran("", "bun", &["pm", "cache", "rm"]),
             )
+            .refills()
             .at(d)
             .kind(KIND_JS_BUN_CACHE),
         );
@@ -525,6 +537,7 @@ fn js_things(ctx: &Ctx, seen: &[Session]) -> Vec<Thing> {
                 "deletes it: git ignores it, and an install puts it back",
                 removed(&nm, KIND_JS_NODE_MODULES),
             )
+            .lost_nothing()
             .at(nm)
             .kind(KIND_JS_NODE_MODULES)
             .of_session(w.agents.first().cloned().unwrap_or_default())
@@ -560,6 +573,7 @@ fn git_things(ctx: &Ctx, seen: &[Session]) -> Vec<Thing> {
                     "runs git worktree prune",
                     ran(&repo, "git", &["worktree", "prune"]),
                 )
+                .lost_nothing()
                 .meta(plural(n, "entry", "entries")),
             );
         }
@@ -575,6 +589,7 @@ fn git_things(ctx: &Ctx, seen: &[Session]) -> Vec<Thing> {
                     ),
                     delete_branches(&repo, merged.clone()),
                 )
+                .lost_nothing()
                 .meta(plural(merged.len(), "branch", "branches")),
             );
         }
@@ -585,6 +600,7 @@ fn git_things(ctx: &Ctx, seen: &[Session]) -> Vec<Thing> {
                 "runs git gc: packs objects and drops unreachable ones older than two weeks",
                 ran(&repo, "git", &["gc", "--quiet"]),
             )
+            .lost_nothing()
             .at(Path::new(&repo).join(".git").to_string_lossy().into_owned()),
         );
     }

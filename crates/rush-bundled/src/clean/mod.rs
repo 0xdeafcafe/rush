@@ -15,6 +15,13 @@
 //! kit. A picked row whose clean is a removal goes through the engine's
 //! apply, which asks whether anything uses the path right before
 //! (engine_removed).
+//!
+//! Rust-only: its cleanup.report carries the things as items too (items:
+//! id, size, whether cleaning loses nothing and whether it comes back by
+//! itself), for Projects to show as rows, and it answers cleanup.clean
+//! with one cleaned by id, as enter on its row in the pick does (take,
+//! clean_thing): refused while an agent works in its worktree or it's
+//! being cleaned already.
 
 pub mod fleet;
 mod kits;
@@ -30,10 +37,10 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 use rush_fleet::disk;
 use rush_plugin::rpc::{Error, from_raw, no_method};
 use rush_plugin::{
-    Bundle, CleanupReport, CommandSpec, Conn, Ctx, DiskCandidate, DiskCandidates, DiskFacts,
-    EV_SESSION_STOPPED, EV_TURN_ENDED, EV_TURN_STARTED, Manifest, Pick, PickAction, PickItem,
-    Picked, Requires, SERVICE_CLEANUP_REPORT, SERVICE_DISK_CANDIDATES, SettingSpec, UI_EVENTS,
-    UI_NOTIFY, UiEvent,
+    Bundle, CleanupClean, CleanupDone, CleanupItem, CleanupReport, CommandSpec, Conn, Ctx,
+    DiskCandidate, DiskCandidates, DiskFacts, EV_SESSION_STOPPED, EV_TURN_ENDED, EV_TURN_STARTED,
+    Manifest, Pick, PickAction, PickItem, Picked, Requires, SERVICE_CLEANUP_CLEAN,
+    SERVICE_CLEANUP_REPORT, SERVICE_DISK_CANDIDATES, SettingSpec, UI_EVENTS, UI_NOTIFY, UiEvent,
 };
 use rush_state::Time;
 use rush_sys::proc;
@@ -112,6 +119,10 @@ pub(crate) struct Thing {
     pub freeable: u64,
     /// When anything in it last changed, in Unix milliseconds.
     pub mtime: Option<i64>,
+    /// Cleaning it loses nothing (lost_nothing); off until a kit says so.
+    pub can_go: bool,
+    /// A cache that fills again by itself as it's used (refills).
+    pub comes_back: bool,
 }
 
 impl Thing {
@@ -134,7 +145,22 @@ impl Thing {
             size: 0,
             freeable: 0,
             mtime: None,
+            can_go: false,
+            comes_back: false,
         }
+    }
+
+    /// Cleaning it loses nothing: what's merged, or can be had again.
+    pub fn lost_nothing(mut self) -> Thing {
+        self.can_go = true;
+        self
+    }
+
+    /// A cache that fills again by itself as it's used; it loses nothing.
+    pub fn refills(mut self) -> Thing {
+        self.can_go = true;
+        self.comes_back = true;
+        self
     }
 
     /// Reported to the disk engine as a candidate of kind.
@@ -195,6 +221,7 @@ impl Kit {
             settings: self.settings.clone(),
             provides: vec![
                 SERVICE_CLEANUP_REPORT.into(),
+                SERVICE_CLEANUP_CLEAN.into(),
                 SERVICE_DISK_CANDIDATES.into(),
             ],
             ..crate::manifest(self.name, "machine", self.about, 128)
@@ -268,6 +295,30 @@ fn run(k: &'static Kit, s: UnixStream) -> Result<(), String> {
 #[serde(default)]
 struct ServiceCall {
     service: String,
+    params: Option<rush_plugin::Raw>,
+}
+
+/// Why a thing wasn't cleaned (App::take).
+#[derive(Debug, PartialEq, Eq)]
+enum Refused {
+    /// Not in the list as last measured.
+    Unknown,
+    /// Being cleaned already.
+    Busy(String),
+    /// A session is working in its worktree: its title.
+    Working(String),
+}
+
+impl Refused {
+    fn said(&self, id: &str) -> String {
+        match self {
+            Refused::Unknown => format!("no such item: {id}; measure again and look"),
+            Refused::Busy(title) => format!("{title}: it's being cleaned up already"),
+            Refused::Working(title) => {
+                format!("{title}: an agent is working there now, so it's left alone")
+            }
+        }
+    }
 }
 
 #[derive(Deserialize, Default)]
@@ -304,18 +355,7 @@ impl App {
                 std::thread::spawn(move || a.show(&c, &input.ui));
                 crate::empty()
             }
-            "service.call" => {
-                let input: ServiceCall = from_raw(params).unwrap_or_default();
-                if input.service == SERVICE_CLEANUP_REPORT {
-                    return crate::answer(&self.report());
-                }
-                if input.service == SERVICE_DISK_CANDIDATES {
-                    let things = self.lock().things.clone();
-                    let home = std::env::var("HOME").unwrap_or_default();
-                    return crate::answer(&candidates(&things, &home));
-                }
-                Err(no_method(method))
-            }
+            "service.call" => self.service(params),
             "ui.picked" => {
                 let input: Picked = from_raw(params).map_err(Error::server)?;
                 if input.action == "enter" {
@@ -325,6 +365,38 @@ impl App {
                 crate::empty()
             }
             _ => Err(no_method(method)),
+        }
+    }
+
+    /// Answers a service.call: cleanup.report, cleanup.clean (Rust-only:
+    /// one item by id, as enter on its row) and disk.candidates.
+    fn service(
+        &self,
+        params: Option<&serde_json::value::RawValue>,
+    ) -> Result<Option<rush_plugin::Raw>, Error> {
+        let input: ServiceCall = from_raw(params).unwrap_or_default();
+        match input.service.as_str() {
+            SERVICE_CLEANUP_REPORT => crate::answer(&self.report()),
+            SERVICE_CLEANUP_CLEAN => {
+                let ask: CleanupClean = from_raw(input.params.as_deref()).unwrap_or_default();
+                let t = self
+                    .take(&ask.id)
+                    .map_err(|r| Error::server(r.said(&ask.id)))?;
+                let (got, freed) = self.clean_thing(&t);
+                match got {
+                    Ok(said) => crate::answer(&CleanupDone {
+                        said: cleaned_said(&t, &said, freed),
+                        freed: freed.max(0) as u64,
+                    }),
+                    Err(e) => Err(Error::server(format!("{}: {e}", t.title))),
+                }
+            }
+            SERVICE_DISK_CANDIDATES => {
+                let things = self.lock().things.clone();
+                let home = std::env::var("HOME").unwrap_or_default();
+                crate::answer(&candidates(&things, &home))
+            }
+            _ => Err(no_method("service.call")),
         }
     }
 
@@ -461,6 +533,7 @@ impl App {
             lines.push(l);
         }
         r.report = lines.join("\n");
+        r.items = items(&things);
         r
     }
 
@@ -481,30 +554,43 @@ impl App {
             self.notify(conn, ui, &end(self.k, id));
             return;
         }
-        let t = {
-            let mut st = self.lock();
-            let Some(t) = st.things.iter().find(|t| t.id == id).cloned() else {
-                return;
-            };
-            if st.busy.contains(id) {
+        let t = match self.take(id) {
+            Ok(t) => t,
+            Err(r @ Refused::Working(_)) => {
+                self.notify(conn, ui, &r.said(id));
                 return;
             }
-            if !t.in_dir.is_empty() && working_in(&st.seen, &t.in_dir) {
-                drop(st);
-                self.notify(
-                    conn,
-                    ui,
-                    &format!(
-                        "{}: an agent is working there now, so it's left alone",
-                        t.title
-                    ),
-                );
-                return;
-            }
-            st.busy.insert(id.to_string());
-            t
+            Err(_) => return,
         };
         self.notify(conn, ui, &format!("cleaning up {}…", t.title));
+        let said = match self.clean_thing(&t) {
+            (Err(e), _) => format!("{}: {e}", t.title),
+            (Ok(said), freed) => cleaned_said(&t, &said, freed),
+        };
+        self.notify(conn, ui, &said);
+    }
+
+    /// The thing with id, as last measured, marked busy; refused when it
+    /// isn't there, is being cleaned, or an agent is working in its
+    /// worktree.
+    fn take(&self, id: &str) -> Result<Thing, Refused> {
+        let mut st = self.lock();
+        let Some(t) = st.things.iter().find(|t| t.id == id).cloned() else {
+            return Err(Refused::Unknown);
+        };
+        if st.busy.contains(id) {
+            return Err(Refused::Busy(t.title));
+        }
+        if !t.in_dir.is_empty() && working_in(&st.seen, &t.in_dir) {
+            return Err(Refused::Working(t.title));
+        }
+        st.busy.insert(id.to_string());
+        Ok(t)
+    }
+
+    /// Cleans a thing take gave, then lets it go and measures again soon:
+    /// what its clean said, and what it freed.
+    fn clean_thing(&self, t: &Thing) -> (Result<String, String>, i64) {
         let ctx = self.ctx.with_timeout(Duration::from_secs(10 * 60));
         let got = (t.clean)(&ctx);
         let freed = if t.path.is_empty() {
@@ -514,17 +600,10 @@ impl App {
         };
         {
             let mut st = self.lock();
-            st.busy.remove(id);
+            st.busy.remove(&t.id);
             self.soon(&mut st); // measure again, soon
         }
-        let said = match got {
-            Err(e) => format!("{}: {e}", t.title),
-            Ok(said) if freed > 0 => format!("{}: freed {}. {said}", t.title, bytes(freed))
-                .trim()
-                .to_string(),
-            Ok(said) => format!("{}: done. {said}", t.title).trim().to_string(),
-        };
-        self.notify(conn, ui, &said);
+        (got, freed)
     }
 
     fn notify(&self, conn: &Conn, ui: &str, text: &str) {
@@ -535,6 +614,41 @@ impl App {
             &json!({ "ui": ui, "text": text }),
         );
     }
+}
+
+/// What cleaning t did, as said once it's done: "target in wt: freed
+/// 1.2 GB. …", or "…: done. …" when it freed nothing measured.
+fn cleaned_said(t: &Thing, said: &str, freed: i64) -> String {
+    if freed > 0 {
+        format!("{}: freed {}. {said}", t.title, bytes(freed))
+    } else {
+        format!("{}: done. {said}", t.title)
+    }
+    .trim()
+    .to_string()
+}
+
+/// The things as cleanup.report's items: one each, by its id, as the
+/// pick lists them.
+pub(crate) fn items(things: &[Thing]) -> Vec<CleanupItem> {
+    things
+        .iter()
+        .map(|t| CleanupItem {
+            id: t.id.clone(),
+            title: t.title.clone(),
+            bytes: if t.meta.is_empty() {
+                t.size.max(0) as u64
+            } else {
+                0
+            },
+            meta: t.meta.clone(),
+            path: t.path.clone(),
+            worktree: t.in_dir.clone(),
+            can_go: t.can_go,
+            comes_back: t.comes_back,
+            does: t.does.clone(),
+        })
+        .collect()
 }
 
 /// Whether a session seen is working in dir.
