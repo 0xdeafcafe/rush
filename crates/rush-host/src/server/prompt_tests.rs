@@ -125,7 +125,7 @@ fn scratch_guidance_says_which_goes_where() {
     for want in [
         "in $TMPDIR, never straight in /tmp",
         "short-lived",
-        "clears it at reboot",
+        "cleaned up whenever nothing has it open, at reboot",
         "never put a git worktree, or anything with work not yet committed, in $TMPDIR",
         "the repository's .claude/worktrees, or in $RUSH_KEEP",
         "in $RUSH_KEEP: it stays after the session is done, for 30 days",

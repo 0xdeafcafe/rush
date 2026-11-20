@@ -412,15 +412,17 @@ fn disk_rows_moved_from_general() {
     set_settings_page(&mut m, PAGE_DISK);
     let secs = disk::sections(&m);
     let titles: Vec<&str> = secs.iter().map(|s| s.title.as_str()).collect();
+    let mut want = vec![
+        "Disk",
+        "When space runs short",
+        "Spotlight and Time Machine",
+    ];
+    if cfg!(target_os = "macos") {
+        want.push("Scratch volume");
+    }
+    want.extend(["Rules", "Proposed"]);
     assert_eq!(
-        titles,
-        [
-            "Disk",
-            "When space runs short",
-            "Spotlight and Time Machine",
-            "Rules",
-            "Proposed"
-        ],
+        titles, want,
         "the moved rows come after the switch and levels"
     );
     let short: Vec<&str> = secs[1].rows.iter().map(|r| r.label.as_str()).collect();
@@ -544,4 +546,58 @@ fn spotlight_and_time_machine_rows() {
     }
     let c = config(&m);
     assert!(!c.quiets_scratch() && c.quiet_projects);
+}
+
+/// The scratch volume is off until made here, only through a question
+/// that says it shares the disk's space; a test never runs diskutil, so
+/// yes comes back refused and nothing is made.
+#[cfg(target_os = "macos")]
+#[test]
+fn scratch_volume_made_only_on_yes() {
+    let (mut m, _d) = model(240, 60);
+    set_settings_page(&mut m, PAGE_DISK);
+    let secs = disk::sections(&m);
+    let sec = secs
+        .iter()
+        .find(|s| s.title == "Scratch volume")
+        .expect("the section");
+    let row = &sec.rows[0];
+    assert_eq!(row.label, disk::VOLUME_ROW);
+    assert_eq!(row.value, "off · scratch goes in /tmp/rush");
+    assert_eq!(row.keys, ["enter", "make it"]);
+    for want in [
+        "sharing its free space",
+        "fseventsd",
+        "password once",
+        "running ones keep theirs",
+    ] {
+        assert!(row.what.contains(want), "no {want:?}: {}", row.what);
+    }
+    to_row(&mut m, disk::VOLUME_ROW);
+    press(&mut m, "enter");
+    let c = m.confirm.as_ref().expect("a question before making it");
+    assert_eq!(c.question, "Make a volume for rush's scratch?");
+    assert!(
+        c.detail.contains("shares the disk's free space"),
+        "{}",
+        c.detail
+    );
+    assert_eq!(c.yes_text, "make it");
+    press(&mut m, "y");
+    let l = m.said.last().expect("rush said something");
+    assert_eq!(l.text, "couldn't change the scratch volume: not in a test");
+    let b = body(&m, 230);
+    assert!(b.contains("off · scratch goes in /tmp/rush"), "{b}");
+}
+
+/// Removing asks too, and says it deletes what's on the volume.
+#[test]
+fn scratch_volume_removal_asks() {
+    let c = disk::remove_volume_confirm("disk3s7".into());
+    assert_eq!(c.question, "Remove the scratch volume?");
+    assert!(
+        c.detail
+            .contains("Refused while a running session's scratch is on it")
+    );
+    assert_eq!(c.yes_text, "remove it");
 }

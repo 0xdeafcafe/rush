@@ -10,7 +10,8 @@
 //! ollama.rs's. The rules are rush-fleet's (disk/ruleset.rs: load_rules,
 //! update_rules, built_in_rules); what the runs did is read back from the
 //! disk-clean events disk/apply.rs logs (event_fields). Nothing here reads
-//! or writes the disk while drawing.
+//! or writes the disk while drawing. On macOS, the scratch volume
+//! (rush-fleet's disk::volume): made or removed only on your yes.
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -19,6 +20,7 @@ use std::time::{Duration, Instant};
 
 use rush_core::text::{Color, Line, width};
 use rush_core::time::Ms;
+use rush_fleet::disk::volume::{self, Status};
 use rush_fleet::disk::{
     KNOWN_TOOLS, Kind, LOW_UNDER, Level, NORMAL_UNDER, Params, Rule, RulesFile, built_in_rules,
     known_tool, load_rules, update_rules,
@@ -56,6 +58,10 @@ pub struct Snap {
     pub runs: Runs,
     /// The row x was pressed on once: a second x removes it.
     pub removing: String,
+    /// The scratch volume as last read (macOS only).
+    pub volume: Option<Status>,
+    /// What's being done to it now: "making" or "removing", "" nothing.
+    pub volume_busy: &'static str,
 }
 
 /// What the newest runs did, summed up by rule.
@@ -620,13 +626,20 @@ pub fn want(m: &mut Model) {
     }
     st.reading = true;
     m.later(
-        || (load_rules().map_err(|e| e.to_string()), read_runs()),
-        |m, (file, runs)| {
+        || {
+            (
+                load_rules().map_err(|e| e.to_string()),
+                read_runs(),
+                cfg!(target_os = "macos").then(volume::status),
+            )
+        },
+        |m, (file, runs, vol)| {
             let st = &mut m.kept::<State>().disk;
             st.at = Some(Instant::now());
             st.reading = false;
             st.file = Some(file);
             st.runs = runs;
+            st.volume = vol;
             Out::Draw
         },
     );
@@ -705,6 +718,9 @@ pub fn sections(m: &Model) -> Vec<Section> {
     }];
     out.push(when_short(m));
     out.push(quiet(m));
+    if cfg!(target_os = "macos") {
+        out.push(scratch_volume(&snap));
+    }
     let file = match &snap.file {
         None => {
             out.push(Section::new(
@@ -862,6 +878,158 @@ fn quiet(m: &Model) -> Section {
         rows: vec![scratch, projects],
         ..Section::default()
     }
+}
+
+/// What the scratch volume row says, and what enter does there.
+pub const VOLUME_ROW: &str = "Give scratch its own volume";
+
+/// The scratch volume (rush-fleet's disk::volume): off until you make it
+/// here, with macOS asking for your password; removed here too.
+fn scratch_volume(snap: &Snap) -> Section {
+    let busy = snap.volume_busy;
+    let st = snap.volume.clone();
+    let (styled, keys) = match (&st, busy) {
+        (_, "making") => (
+            line([sp("making it… macOS asks for your password", YELLOW)]),
+            vec![],
+        ),
+        (_, "removing") => (
+            line([sp("removing it… macOS asks for your password", YELLOW)]),
+            vec![],
+        ),
+        (None, _) => (line([sp("reading…", DIM)]), vec![]),
+        (Some(s), _) if !s.mounted => (
+            line([sp("off", TEXT), sp(" · scratch goes in /tmp/rush", DIM)]),
+            vec!["enter", "make it"],
+        ),
+        (Some(s), _) if !s.ready => (
+            line([sp("made, not used", RED), sp(format!(" · {}", s.why), DIM)]),
+            vec!["enter", "remove it"],
+        ),
+        (Some(s), _) => {
+            let mut l = line([
+                sp("on", GREEN),
+                sp(format!(" · {}", rush_state::VOLUME_MOUNT), DIM),
+            ]);
+            let fse = if s.no_log {
+                "no FSEvents log"
+            } else {
+                "FSEvents logging"
+            };
+            l.spans
+                .push(sp(format!(" · {fse}"), if s.no_log { DIM } else { YELLOW }));
+            match s.indexing {
+                Some(true) => l.spans.push(sp(" · Spotlight indexing", YELLOW)),
+                Some(false) => l.spans.push(sp(" · no Spotlight", DIM)),
+                None => {}
+            }
+            (l, vec!["enter", "remove it"])
+        }
+    };
+    let row = Setting {
+        label: VOLUME_ROW.into(),
+        value: styled.plain(),
+        styled,
+        what: format!(
+            "Builds write and delete hundreds of thousands of files an hour in sessions' scratch ($TMPDIR), and macOS's fseventsd logs every one: it can grow to gigabytes and keep a core busy, and Spotlight and Time Machine look at each too. This makes an APFS volume, {name}, on your startup disk, sharing its free space (no size of its own: it takes only what's on it). macOS keeps no FSEvents log of it, Spotlight doesn't index it and Time Machine doesn't back it up. New sessions' scratch goes there, in {mount}/rush; running ones keep theirs. It isn't emptied at reboot as /tmp is: rush's own clean-ups empty it (done and stopped sessions' scratch, what no session owns, Rust targets). macOS asks for your password once to make it, and again to remove it, which deletes what's on it and is refused while a running session's scratch is there.",
+            name = rush_state::VOLUME_NAME,
+            mount = rush_state::VOLUME_MOUNT,
+        ),
+        keys: keys.into_iter().map(String::from).collect(),
+        key: Some(Rc::new(move |m: &mut Model, k: &str| {
+            if k != "enter" || !snap_busy(m).is_empty() {
+                return Out::Pass;
+            }
+            match &st {
+                Some(s) if !s.mounted => {
+                    m.ask(make_volume_confirm());
+                    Out::Draw
+                }
+                Some(s) => {
+                    m.ask(remove_volume_confirm(s.device.clone()));
+                    Out::Draw
+                }
+                None => Out::Pass,
+            }
+        })),
+        ..Setting::default()
+    };
+    Section {
+        title: "Scratch volume".into(),
+        note: "macOS only · off until you make it".into(),
+        rows: vec![row],
+        ..Section::default()
+    }
+}
+
+fn snap_busy(m: &Model) -> &'static str {
+    m.kept
+        .peek::<State>()
+        .map(|s| s.disk.volume_busy)
+        .unwrap_or_default()
+}
+
+/// The question making the volume asks, before macOS asks for the
+/// password.
+pub fn make_volume_confirm() -> Confirm {
+    let mut c = Confirm::new("Make a volume for rush's scratch?", |m: &mut Model| {
+        volume_work(m, "making", volume::create, "made the scratch volume: new sessions' scratch goes there")
+    })
+    .detail(format!(
+        "rush adds an APFS volume, {}, to your startup disk. It shares the disk's free space: no size is set aside, it holds only what's on it. macOS keeps no FSEvents log of it, Spotlight doesn't index it and Time Machine doesn't back it up. New sessions' $TMPDIR goes there; running sessions keep theirs. macOS asks for your password once. Remove it here whenever you like.",
+        rush_state::VOLUME_NAME
+    ));
+    c.yes_text = "make it".into();
+    c
+}
+
+/// The question removing the volume asks.
+pub fn remove_volume_confirm(device: String) -> Confirm {
+    let mut c = Confirm::new("Remove the scratch volume?", move |m: &mut Model| {
+        volume_work(
+            m,
+            "removing",
+            move || {
+                let root = rush_state::volume_root().unwrap_or_default();
+                let temps: Vec<(String, String)> = rush_host::client::list()
+                    .into_iter()
+                    .filter(rush_host::client::running)
+                    .map(|i| (i.id.clone(), i.temp_dir.clone()))
+                    .collect();
+                volume::remove(&device, &volume::using(&root, &temps))
+            },
+            "removed the scratch volume: new sessions' scratch goes in /tmp/rush",
+        )
+    })
+    .detail(format!(
+        "Deletes {} and everything on it: sessions' scratch only, nothing kept in $RUSH_KEEP or your projects. Refused while a running session's scratch is on it. macOS asks for your password. New sessions' scratch goes in /tmp/rush again.",
+        rush_state::VOLUME_NAME
+    ));
+    c.yes_text = "remove it".into();
+    c
+}
+
+/// Makes or removes the volume off the UI, then reads it again.
+fn volume_work(
+    m: &mut Model,
+    busy: &'static str,
+    f: impl FnOnce() -> Result<(), String> + Send + 'static,
+    said: &'static str,
+) -> Out {
+    m.kept::<State>().disk.volume_busy = busy;
+    m.later(f, move |m, r| {
+        let st = &mut m.kept::<State>().disk;
+        st.volume_busy = "";
+        st.at = None;
+        match r {
+            Ok(()) => m.flash(said),
+            Err(e) if e == "cancelled" => m.flash("left the scratch volume as it was"),
+            Err(e) => m.fail(&format!("couldn't change the scratch volume: {e}")),
+        }
+        want(m);
+        Out::Draw
+    });
+    Out::Draw
 }
 
 /// A line of the page with nothing to change.

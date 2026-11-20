@@ -20,6 +20,7 @@ mod plan;
 mod propose;
 pub mod quiet;
 mod ruleset;
+pub mod volume;
 
 pub use apply::{KNOWN_TOOLS, apply, apply_all, event_fields, known_tool, run, run_at};
 pub use cargo::{

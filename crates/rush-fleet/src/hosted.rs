@@ -244,7 +244,8 @@ pub fn host_root() -> PathBuf {
 }
 
 /// Where sessions' scratch folders are, one folder per project in each:
-/// rush's root in /tmp, where new sessions' go, then the one in rush's
+/// the scratch volume's (macOS, once made), rush's root in /tmp, where new
+/// sessions' go without it, then the one in rush's
 /// folder that sessions started before keep until done
 /// (rush_state::scratch_roots).
 pub fn temp_roots() -> Vec<PathBuf> {

@@ -1329,6 +1329,46 @@ Each session's scratch is `<root>/<project-slug>/<id>` (rush-host's
   `trim_due`), since its agent's TMPDIR still names it.
 - Clean up's "/tmp" row (rush-fleet `scratch_entries`) leaves out rush's
   root there: its sessions' folders go with them.
+- The scratch volume (macOS, opt-in on Settings › Disk, rush-fleet's
+  `disk/volume.rs`): an APFS volume `rush-scratch` in the startup disk's
+  container, sharing its space (no quota, no reserve), mounted at
+  `/Volumes/rush-scratch`, with no FSEvents log (`.fseventsd/no_log`),
+  Spotlight off (`mdutil -i off`) and out of Time Machine (`tmutil
+  addexclusion -p`). Why: builds write and delete hundreds of thousands
+  of files an hour in $TMPDIR, and fseventsd logs each (10 GB resident
+  after 28 days, at 60–100% CPU, on one Mac). It's the first of
+  `scratch_roots()` (`<mount>/rush`), always on macOS, so a session's
+  folder there reads as scratch even while it's unmounted; no test sees
+  the real one (`volume_mount` is None in a test unless
+  `set_thread_volume` gives a stand-in). New sessions' scratch goes in
+  `<mount>/rush/<slug>/<id>` when `ready_volume_root` says so
+  (`volume_ready`, pure: statfs says an APFS volume is mounted right
+  there, owners honoured, and `rush/` is a real folder the user owns,
+  0700), else /tmp as before (`pick_scratch_root`); `make` refuses a
+  folder under the mount while it isn't ready, so nothing is made in
+  /Volumes. Running sessions keep theirs (`place_temp` keeps an existing
+  folder in any root). The name has no space: a TMPDIR with one breaks
+  every script that leaves "$TMPDIR" unquoted.
+- What holds across a reboot: all three are kept on the volume or by
+  path, not in memory. fseventsd reads `.fseventsd/no_log` each time it
+  mounts a volume (so the script remounts once after writing it);
+  `mdutil -i off` is kept in the volume's own `.Spotlight-V100` store;
+  `tmutil addexclusion -p` in Time Machine's preferences; owners in
+  `/var/db/volinfo.database` by the volume's UUID. Not yet seen on a
+  real reboot: Settings › Disk reads no_log and `mdutil -s` back every
+  time it shows, so one that didn't hold shows in yellow.
+- Reboots and tmp_cleaner don't empty the volume. What does, by path
+  through `scratch_roots()`: done work's clean-up (a done session's
+  scratch after "Clean up done work after"), the quiet clean (done
+  sessions' scratch untouched 3 days, stopped ones' 14, what no session
+  owns 3; daily while you're away, off with "Clean up done work after"
+  off), the disk engine's cargo rules (`temp_roots`), the nearly-full
+  clean, trimming a running session's temp (under 20G), and Clean up.
+  What tmp_cleaner did that nothing here does: age out a running
+  session's untouched files above 20G free.
+- Free space: the volume shares the container, so statfs on it says the
+  container's free and size as the Data volume does; the levels (HOME's
+  statfs) and trim's `disk_low` (TMPDIR's) agree.
 
 - The agent is given it ending in "/" (`TMPDIR`, and Claude Code's `TMP`,
   `TEMP`, `CLAUDE_CODE_TMPDIR`), as macOS's own TMPDIR does
@@ -1738,7 +1778,7 @@ what they find; the cleanup agent only proposes rules.
   run at the level): cargo targets at each worktree's and main checkout's
   `target` (the repos sessions work in, worktrees from `git worktree
   list`) and 3 levels under the scratch roots the caller gives
-  (`temp_roots`: the system tmp's `rush/` and rush's old `tmp/`), each with when a build last touched it and its
+  (`temp_roots`: the scratch volume's `rush/` on macOS, the system tmp's `rush/` and rush's old `tmp/`), each with when a build last touched it and its
   artifacts (deps files with the crate and build `build_of` names, and
   incremental sessions); the linked worktrees, looked at as reap.rs did
   (when anything changed, git status, processes working there, how its
@@ -1909,6 +1949,21 @@ Remote does) and writes only through `update_rules`.
   the rules run on their own only in the nearly-full clean. "Trim a running
   session's temp files" (rush-host's trim.rs) says "under 20G free"
   rather than "low", which on this page is the engine's 40G level.
+- Scratch volume (macOS only, after Spotlight and Time Machine): "Give
+  scratch its own volume", off until made. Its value: off (scratch goes
+  in /tmp/rush), on (the mount, whether FSEvents logs it, whether
+  Spotlight indexes it, read with statfs, the no_log file and `mdutil
+  -s` off the UI with the rules), made but not used and why, or making
+  / removing. enter asks first ("Make a volume for rush's scratch?",
+  saying it shares the disk's space; or "Remove the scratch volume?",
+  saying everything on it goes), then runs one admin script through
+  `osascript … with administrator privileges` off the UI, so macOS's
+  dialog asks for the password once; cancelling says the volume was left
+  as it was. Removing is refused while a running session's TMPDIR
+  (`rush_host::client::list`, `running`) is on it, and the script checks
+  the device is still `rush-scratch` at the mount before `diskutil apfs
+  deleteVolume`. Each is logged as a `scratch-volume` event. Nothing
+  offers it elsewhere: no news, no notice.
 - Rules: one row per rule, built-in then yours: ● on / ○ off, its title,
   its numbers at normal and at low (`2d`; artifacts as `6h, 3 past 1h`:
   age, builds kept, superseded; `runs` for a command; `–` where it
@@ -2135,8 +2190,9 @@ and signals to other processes as well (the sweep's `lead-trial.sb`).
 Every session gets two folders, set in its environment by the host
 (`server.rs`, where it starts the agent):
 
-- `$TMPDIR`, its scratch: `/tmp/rush/<project>/<id>/` (an older session's
-  `tmp/<project>/<id>` in rush's folder), linked from `sessions/<id>/tmp`
+- `$TMPDIR`, its scratch: `/tmp/rush/<project>/<id>/`, or
+  `/Volumes/rush-scratch/rush/<project>/<id>/` with the scratch volume
+  (an older session's `tmp/<project>/<id>` in rush's folder), linked from `sessions/<id>/tmp`
   (rush-host's `tmp.rs`, see "Sessions' scratch folders"). Builds,
   clones, downloads, caches: short-lived. It may be cleaned whenever
   nothing has it open: the host's low-disk trim (`trim.rs`), done work's
@@ -2154,7 +2210,9 @@ Every session gets two folders, set in its environment by the host
   host runs, nor one something has open (lsof).
 
 The prompt every agent gets (`SCRATCH_PROMPT`) says which goes where:
-`$TMPDIR` short-lived (cleared at reboot and when unused for days),
+`$TMPDIR` short-lived (cleaned whenever nothing has it open, at reboot,
+or once unused for days: "may", as the scratch volume isn't emptied at
+reboot),
 worktrees and anything with uncommitted work in `.claude/worktrees` or
 `$RUSH_KEEP`, never `$TMPDIR`, and `$RUSH_KEEP` for what's looked at
 again (30 days).

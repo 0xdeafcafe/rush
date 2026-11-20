@@ -3,20 +3,32 @@
 //! what it was working on. New sessions' are in the system's /tmp
 //! (rush_state::scratch_root, owner-only), cleared at reboot and of what's
 //! unused for days; those started before keep theirs in rush's folder
-//! (rush_state::old_scratch_root) until they're done.
+//! (rush_state::old_scratch_root) until they're done. With the scratch
+//! volume made (Settings › Disk, macOS), new sessions' go on it instead
+//! while it's mounted and safe (rush_state::ready_volume_root); running
+//! ones keep theirs.
 //!
-//! Ported from internal/host/tmp.go; the root in /tmp is Rust-only.
+//! Ported from internal/host/tmp.go; the roots in /tmp and on the volume
+//! are Rust-only.
 
 use std::cell::Cell;
 use std::path::{Component, Path, PathBuf};
 
 use crate::paths::{dir, root};
 
-/// Holds new sessions' scratch folders: rush's root in /tmp when it's
-/// rush's own (rush_state::make_scratch_root), else the one in rush's
-/// folder sessions had before.
+/// Holds new sessions' scratch folders: the scratch volume's when it's
+/// ready (rush_state::ready_volume_root), else rush's root in /tmp when
+/// it's rush's own (rush_state::make_scratch_root), else the one in
+/// rush's folder sessions had before.
 pub fn temp_root() -> PathBuf {
-    rush_state::make_scratch_root().unwrap_or_else(rush_state::old_scratch_root)
+    match rush_state::ready_volume_root() {
+        Some(v) => v,
+        None => rush_state::pick_scratch_root(
+            None,
+            rush_state::make_scratch_root(),
+            rush_state::old_scratch_root(),
+        ),
+    }
 }
 
 /// Whether p is a folder directly in a scratch root: a project's, or two
@@ -202,10 +214,17 @@ fn link_to(id: &str, p: &Path) -> PathBuf {
 
 /// Makes folder p, owner-only; one in /tmp only while rush's root there
 /// is its own (rush_state::make_scratch_root), as anyone may make
-/// folders in /tmp.
+/// folders in /tmp; one on the scratch volume only while it's mounted
+/// and safe, never a folder in /Volumes where it was.
 fn make(p: &Path) -> std::io::Result<()> {
     if within(&rush_state::scratch_root(), p) && rush_state::make_scratch_root().is_none() {
         return Err(std::io::Error::other("rush's folder in /tmp isn't its own"));
+    }
+    if let Some(v) = rush_state::volume_root()
+        && within(&v, p)
+        && rush_state::ready_volume_root().is_none()
+    {
+        return Err(std::io::Error::other("the scratch volume isn't ready"));
     }
     mkdir(p)
 }
@@ -462,6 +481,52 @@ mod tests {
         // s2's old one cleaned away: it moves to /tmp.
         std::fs::remove_dir_all(&before).unwrap();
         assert_eq!(place_temp("s2", &a), new.join(slug(&a)).join("s2"));
+        ignore_system_temp(false);
+    }
+
+    // Rust-only: with the scratch volume ready, a new session's scratch
+    // goes on it; one already in /tmp keeps its folder; with the volume
+    // gone, nothing is made where it was mounted and new ones go to /tmp.
+    #[test]
+    fn new_scratch_goes_on_the_volume_when_ready() {
+        use std::os::unix::fs::PermissionsExt;
+        let _h = Home::new();
+        ignore_system_temp(true);
+        let a = tempfile::tempdir().unwrap();
+        let a = a.path().to_string_lossy().into_owned();
+        let vol = tempfile::tempdir().unwrap();
+        let mount = vol.path().join("rush-scratch");
+        let vroot = mount.join("rush");
+        std::fs::create_dir_all(&vroot).unwrap();
+        std::fs::set_permissions(&vroot, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mounted = Some(rush_state::MountFacts {
+            on: mount.clone(),
+            from: "/dev/disk3s7".into(),
+            fs: "apfs".into(),
+            owners: true,
+        });
+        for id in ["s1", "s2", "s3"] {
+            std::fs::create_dir_all(dir(id)).unwrap();
+        }
+        // s1 started before the volume: its folder in /tmp stays.
+        let before = place_temp("s1", &a);
+        assert!(before.starts_with(rush_state::scratch_root()), "{before:?}");
+        rush_state::set_thread_volume(Some((mount.clone(), mounted.clone())));
+        assert_eq!(temp_root(), vroot);
+        let got = place_temp("s2", &a);
+        assert_eq!(got, vroot.join(slug(&a)).join("s2"));
+        assert!(got.is_dir() && temp_dir("s2") == got);
+        assert!(is_temp_dir(&got) && is_temp(&got.join("x").to_string_lossy()));
+        assert_eq!(place_temp("s1", &a), before, "a running session's moved");
+        // Unmounted: s2's folder isn't made again where the volume was,
+        // and s3 goes to /tmp.
+        std::fs::remove_dir_all(&got).unwrap();
+        rush_state::set_thread_volume(Some((mount.clone(), None)));
+        remake_temp("s2");
+        assert!(!got.exists(), "made a folder where the volume was mounted");
+        let s3 = place_temp("s3", &a);
+        assert!(s3.starts_with(rush_state::scratch_root()), "{s3:?}");
+        rush_state::set_thread_volume(None);
         ignore_system_temp(false);
     }
 
