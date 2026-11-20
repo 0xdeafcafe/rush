@@ -194,10 +194,17 @@ impl Place for Projects {
             },
         };
         let n_projects = projects(m).len();
+        let d = data(m);
+        let lmeta = if d.filtering || !d.filter.is_empty() {
+            let cursor = if d.filtering { "▏" } else { "" };
+            ln([sp(format!("/ {}{cursor}", d.filter), SUB)])
+        } else {
+            ln([sp(n_projects.to_string(), DIM)])
+        };
         let lbox = |left: Vec<Line>, n: usize| {
             pbox(
                 bold("Projects"),
-                ln([sp(n_projects.to_string(), DIM)]),
+                lmeta.clone(),
                 pad_rows(left, n),
                 lw,
                 !self.proj_in,
@@ -247,6 +254,17 @@ impl Place for Projects {
 /// or folds, x cleans up the row, c everything that can go.
 pub fn projects_hint(m: &Model, r: &WorkRow, inside: bool, w: usize) -> Line {
     let d = data(m);
+    if d.filtering {
+        return keys_fit(
+            w,
+            &[
+                ("type", "to narrow"),
+                ("↑↓", "move"),
+                ("enter", "keep it"),
+                ("esc", "clear it"),
+            ],
+        );
+    }
     let fold = |open: bool| if open { "fold" } else { "unfold" };
     let mut k: Vec<(&str, &str)> = vec![("↑↓", "move")];
     match &r.what {
@@ -303,6 +321,16 @@ pub fn projects_hint(m: &Model, r: &WorkRow, inside: bool, w: usize) -> Line {
         What::Text => k.clear(),
     }
     k.push(("c", "clean up all that can go"));
+    if !inside {
+        k.push((
+            "/",
+            if d.filter.is_empty() {
+                "filter"
+            } else {
+                "filter again"
+            },
+        ));
+    }
     k.push(if inside {
         ("←", "the list")
     } else {
@@ -342,10 +370,19 @@ fn scope_of(m: &Model, r: &WorkRow) -> Option<clean::Scope> {
 
 impl Projects {
     fn key_on(&mut self, m: &mut Model, k: &Press) -> Out {
+        if data(m).filtering
+            && let Some(out) = filter_key(m, k)
+        {
+            return out;
+        }
         let (rows, i) = self.cur(m);
         let r = i.map(|i| rows[i].clone()).unwrap_or_default();
         match k.s.as_str() {
             "left" if !self.proj_in && self.fold_back(m, &rows, &r) => {}
+            // esc clears a filter before it leaves.
+            "esc" if !self.proj_in && !data(m).filter.is_empty() => {
+                m.kept::<Data>().filter.clear();
+            }
             "esc" | "left" => {
                 if self.proj_in {
                     self.proj_in = false;
@@ -449,6 +486,10 @@ impl Projects {
             }
             "X" if matches!(r.what, What::Proc(_)) => end_all_orphans(m),
             "c" => clean::open_clean_sheet(m),
+            "/" if !self.proj_in => {
+                let d = m.kept::<Data>();
+                d.filtering = true;
+            }
             "r" => {
                 if matches!(r.what, What::Pr(_)) || self.proj_sel == PANE_PRS {
                     scan::ask_prs_again(m);
@@ -525,6 +566,30 @@ impl Projects {
         self.proj_sel = id;
         true
     }
+}
+
+/// A key while / is being typed: letters narrow the tree, backspace
+/// takes one back, enter keeps it, esc clears it; None for keys that
+/// still move (↑↓).
+fn filter_key(m: &mut Model, k: &Press) -> Option<Out> {
+    let d = m.kept::<Data>();
+    match k.s.as_str() {
+        "esc" => {
+            d.filter.clear();
+            d.filtering = false;
+        }
+        "enter" => d.filtering = false,
+        "backspace" => {
+            if d.filter.pop().is_none() {
+                d.filtering = false;
+            }
+        }
+        "space" => d.filter.push(' '),
+        "up" | "down" | "pgup" | "pgdown" => return None,
+        s if s.chars().count() == 1 => d.filter.push_str(s),
+        _ => return Some(Out::Idle),
+    }
+    Some(Out::Draw)
 }
 
 /// With nothing picked yet, the list's first project, not the panes the

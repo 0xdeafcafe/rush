@@ -166,7 +166,36 @@ pub fn picked_rows(m: &Model, sel: &str, w: usize) -> Vec<WorkRow> {
 /// The page's list: every repository's tree, other folders, This Mac,
 /// and pull requests.
 pub fn project_list(m: &Model, w: usize) -> Vec<WorkRow> {
-    project_tree(m, w)
+    filtered(project_tree(m, w), &data(m).filter)
+}
+
+/// The rows whose words hold q, any case, each under its repository's
+/// head; all of them when q is empty.
+pub fn filtered(rows: Vec<WorkRow>, q: &str) -> Vec<WorkRow> {
+    let q = q.trim().to_lowercase();
+    if q.is_empty() {
+        return rows;
+    }
+    let hit = |r: &WorkRow| r.pickable() && r.line.plain().to_lowercase().contains(&q);
+    let heads: std::collections::HashSet<String> = rows
+        .iter()
+        .filter(|r| hit(r) && !r.owner.is_empty())
+        .map(|r| {
+            if r.owner.starts_with('~') {
+                r.owner.clone()
+            } else {
+                format!("p{}", r.owner)
+            }
+        })
+        .collect();
+    let kept: Vec<WorkRow> = rows
+        .into_iter()
+        .filter(|r| hit(r) || heads.contains(&r.id))
+        .collect();
+    if kept.is_empty() {
+        return vec![WorkRow::text(ln([sp("nothing here has those words", DIM)]))];
+    }
+    kept
 }
 
 /// A project's agents in a few cells: working, needing you, your turn,

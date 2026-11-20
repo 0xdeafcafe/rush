@@ -1077,3 +1077,29 @@ fn a_repo_with_only_old_worktrees_is_listed() {
         .count();
     assert_eq!(n, 1);
 }
+
+/// / narrows the tree to the rows holding what's typed, each under its
+/// repository's head; esc clears it, and a second esc leaves.
+#[test]
+fn slash_filters_the_tree() {
+    let mut m = with_old_repo(160);
+    let f = tree(&mut m);
+    assert!(f.contains("alpha") && f.contains("zeta"), "{f}");
+    press(&mut m, "/");
+    assert!(hint(&mut m).contains("esc clear it"), "typing the filter");
+    for k in ["o", "l", "d"] {
+        press(&mut m, k);
+    }
+    let f = tree(&mut m);
+    assert!(
+        f.contains("/ old"),
+        "the box says what it's narrowed to: {f}"
+    );
+    assert!(f.contains("zeta") && f.contains("└─"), "{f}");
+    assert!(!f.contains("alpha  /src/alpha"), "{f}");
+    press(&mut m, "enter");
+    assert!(!data(&m).filtering && data(&m).filter == "old");
+    assert!(press(&mut m, "esc") == Out::Draw, "esc clears it first");
+    assert!(data(&m).filter.is_empty());
+    assert!(tree(&mut m).contains("alpha  /src/alpha"));
+}

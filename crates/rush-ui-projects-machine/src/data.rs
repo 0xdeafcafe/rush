@@ -256,6 +256,9 @@ pub struct Data {
     pub unfolded: HashSet<String>,
     /// Repositories folded in the tree, by key: open until folded.
     pub folded: HashSet<String>,
+    /// What / narrows the tree to, and whether it's being typed.
+    pub filter: String,
+    pub filtering: bool,
     pub lists: HashMap<String, (Vec<TempEntry>, Ms)>,
     pub sizes: HashMap<String, i64>,
     /// Each project's memory as last read, by root, and those being read
