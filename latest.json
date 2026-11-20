@@ -1,8 +1,8 @@
 {
- "commit": "9d62f0c861d24dd99464d0b7c12310506b165aac",
+ "commit": "693e89660d37442e58354b29c6becda7fc298fd7",
  "ref": "main",
- "run": "44577347622",
- "at": "2026-11-19T17:43:20Z",
+ "run": "44641519967",
+ "at": "2026-11-20T00:26:04Z",
  "window_s": 60,
  "metrics": {
   "binary: rush, release": {
@@ -67,27 +67,27 @@
   },
   "frame, the list: rows (Model::frame), allocations": {
    "kind": "allocs",
-   "value": 2594
+   "value": 2593
   },
   "frame, the list: rows (Model::frame), bytes": {
    "kind": "bytes",
-   "value": 501951
+   "value": 501918
   },
   "host: CPU to start, s": {
    "kind": "info",
-   "value": 0.059
+   "value": 0.135
   },
   "host: footprint": {
    "kind": "footprint",
-   "value": 4130176
+   "value": 3835136
   },
   "host: idle CPU": {
    "kind": "cpu",
-   "value": 0.0009
+   "value": 0.0041
   },
   "host: idle wake-ups": {
    "kind": "wakeups",
-   "value": 2.0
+   "value": 1.0
   },
   "host: threads": {
    "kind": "threads",
@@ -99,7 +99,7 @@
   },
   "list, past left out (the feed's): loader alone, retained": {
    "kind": "heap",
-   "value": 2552046
+   "value": 2552030
   },
   "list, past left out (the feed's): rows": {
    "kind": "info",
@@ -107,7 +107,7 @@
   },
   "list: a reading, allocations made": {
    "kind": "allocs",
-   "value": 25266
+   "value": 25256
   },
   "list: loader alone, allocations kept": {
    "kind": "allocs",
@@ -143,11 +143,11 @@
   },
   "menubar feed: CPU to start, s": {
    "kind": "info",
-   "value": 0.104
+   "value": 0.208
   },
   "menubar feed: footprint": {
    "kind": "footprint",
-   "value": 13485440
+   "value": 13993216
   },
   "menubar feed: idle CPU": {
    "kind": "cpu",
@@ -263,19 +263,19 @@
   },
   "plugind: CPU to start, s": {
    "kind": "info",
-   "value": 0.033
+   "value": 0.067
   },
   "plugind: footprint": {
    "kind": "footprint",
-   "value": 4867456
+   "value": 4883776
   },
   "plugind: idle CPU": {
    "kind": "cpu",
-   "value": 0.0141
+   "value": 0.0133
   },
   "plugind: idle wake-ups": {
    "kind": "wakeups",
-   "value": 21.7
+   "value": 16.7
   },
   "plugind: threads": {
    "kind": "threads",
@@ -303,7 +303,7 @@
   },
   "render 300 turns w120: cold layout (all turns), bytes": {
    "kind": "bytes",
-   "value": 30823290
+   "value": 30821925
   },
   "render 300 turns w120: stream: delta, then a frame, allocations": {
    "kind": "allocs",
@@ -407,7 +407,7 @@
   },
   "render 3000 turns w120: code: cold frame at the end, bytes": {
    "kind": "bytes",
-   "value": 3129075
+   "value": 3129068
   },
   "render 3000 turns w120: code: warm frame at the end, allocations": {
    "kind": "allocs",
@@ -523,7 +523,7 @@
   },
   "serve: CPU to start, s": {
    "kind": "info",
-   "value": 0.398
+   "value": 0.39
   },
   "serve: a listing, retained": {
    "kind": "heap",
@@ -531,15 +531,15 @@
   },
   "serve: footprint": {
    "kind": "footprint",
-   "value": 6718784
+   "value": 6571264
   },
   "serve: idle CPU": {
    "kind": "cpu",
-   "value": 0.4795
+   "value": 0.4587
   },
   "serve: idle wake-ups": {
    "kind": "wakeups",
-   "value": 95.5
+   "value": 90.4
   },
   "serve: threads": {
    "kind": "threads",
@@ -547,19 +547,19 @@
   },
   "ui: CPU to start, s": {
    "kind": "info",
-   "value": 2.171
+   "value": 1.828
   },
   "ui: footprint": {
    "kind": "footprint",
-   "value": 30754304
+   "value": 30410176
   },
   "ui: idle CPU": {
    "kind": "cpu",
-   "value": 0.3253
+   "value": 0.3139
   },
   "ui: idle wake-ups": {
    "kind": "wakeups",
-   "value": 252.9
+   "value": 250.7
   },
   "ui: threads": {
    "kind": "threads",
@@ -572,13 +572,13 @@
    "threads seen": [
     9
    ],
-   "ps cpu over the window": 0.02
+   "ps cpu over the window": 0.01
   },
   "serve": {
    "threads seen": [
     7
    ],
-   "ps cpu over the window": 0.49
+   "ps cpu over the window": 0.47
   },
   "host": {
    "threads seen": [
@@ -596,9 +596,10 @@
    "threads seen": [
     8,
     9,
-    12
+    10,
+    13
    ],
-   "ps cpu over the window": 0.33
+   "ps cpu over the window": 0.32
   }
  }
 }
