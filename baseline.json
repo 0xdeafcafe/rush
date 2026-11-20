@@ -1,6 +1,6 @@
 {
- "commit": "9f91cd1abd188207dd73ec3b27d45899b2da8bb0",
- "at": "2026-11-20T21:41:39Z",
+ "commit": "e59cc170e37fa5b6d9dbae5547c71f3537aa9d3f",
+ "at": "2026-11-20T22:23:51Z",
  "metrics": {
   "binary: rush, release": {
    "kind": "binary",
@@ -705,7 +705,6 @@
  },
  "flagged": [
   "binary: rush, release",
-  "menubar feed: footprint",
   "open last 2 MB: allocations made",
   "open whole file, fetch+apply: allocations made",
   "open whole file: allocations made",
