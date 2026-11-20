@@ -770,7 +770,11 @@ fn cleanup_clean_by_id() {
         clean("merged:/r").unwrap_err(),
         "r: branches merged: it's being cleaned up already"
     );
-    a.lock().busy.clear();
+    {
+        let mut st = a.lock();
+        st.busy.clear();
+        st.last = st.measured;
+    }
     assert_eq!(
         clean("merged:/r").unwrap(),
         CleanupDone {
@@ -785,6 +789,9 @@ fn cleanup_clean_by_id() {
         "let go, and measured again soon"
     );
     drop(st);
+    // Till it has, it reports what it last measured, less what went.
+    let ids: Vec<String> = a.report().items.into_iter().map(|i| i.id).collect();
+    assert_eq!(ids, ["nm:/w"]);
     // A failed clean is an error that names it.
     let failing: Clean = Arc::new(|_| Err("git: locked".into()));
     let a = app_with(

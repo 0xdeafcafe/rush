@@ -247,6 +247,9 @@ struct State {
     things: Vec<Thing>,
     /// when it last measured; None before it has, or once it should again
     measured: Option<Time>,
+    /// When things were last measured, kept while a measure is due: what
+    /// it reports meanwhile.
+    last: Option<Time>,
     /// when it measures next
     due: Option<Instant>,
     measuring: bool,
@@ -491,6 +494,7 @@ impl App {
             let now = Time::now();
             st.things = things;
             st.measured = Some(now);
+            st.last = Some(now);
             st.measuring = false;
             st.due = Some(Instant::now() + MEASURE_EVERY);
             let text = reap_notice(&st.things, st.said, now);
@@ -508,7 +512,9 @@ impl App {
     fn report(&self) -> CleanupReport {
         let (things, measured) = {
             let st = self.lock();
-            (st.things.clone(), st.measured)
+            // Due to measure again after a clean: what it last measured,
+            // less what's been cleaned since, rather than nothing.
+            (st.things.clone(), st.measured.or(st.last))
         };
         let mut r = CleanupReport {
             title: self.k.name.into(),
@@ -607,6 +613,9 @@ impl App {
         {
             let mut st = self.lock();
             st.busy.remove(&t.id);
+            if got.is_ok() {
+                st.things.retain(|x| x.id != t.id);
+            }
             self.soon(&mut st); // measure again, soon
         }
         (got, freed)
