@@ -706,3 +706,58 @@ fn temp_orphans_removed_safely() {
         assert!(own.join("x").join("f").exists() && proj.exists() && root.exists());
     }
 }
+
+// Beyond Go: with config.json's scratchRoot naming a folder of the user's
+// (a volume of its own), rush's scratch is rush/ in it, the first root:
+// a gone session's there is emptied and what no session owns there is
+// found, but nothing beside rush/ on that volume, nor the folder itself,
+// is ever scratch, an orphan, or removed.
+#[test]
+fn the_configured_root_is_cleaned_and_nothing_beside_it() {
+    let h = RushHome::new();
+    let vol = h.0.path().canonicalize().unwrap().join("Builds");
+    std::fs::create_dir(&vol).unwrap();
+    let b = serde_json::json!({ "scratchRoot": vol }).to_string();
+    std::fs::write(rush_state::dir().join("config.json"), b).unwrap();
+    let root = vol.join("rush");
+    assert_eq!(temp_roots()[0], root);
+    let t = now();
+    // The user's own on the volume, shaped like rush's to fool a guess.
+    let theirs = vol.join("app-1a2b3c4d").join("gone");
+    let build = vol.join("game-build");
+    for d in [&theirs, &build] {
+        std::fs::create_dir_all(d.join("old")).unwrap();
+        touch(&d.join("old"), t - 5 * HOUR);
+    }
+    // A gone session's scratch in rush/, and a folder no session owns.
+    let dir = root.join("app-1a2b3c4d").join("gone");
+    let orphan = root.join("app-1a2b3c4d").join("deadbeef");
+    for d in [&dir, &orphan] {
+        std::fs::create_dir_all(d.join("old")).unwrap();
+        touch(&d.join("old"), t - 5 * HOUR);
+    }
+    std::fs::create_dir_all(host_root().join("gone")).unwrap();
+    std::os::unix::fs::symlink(&dir, host_root().join("gone").join("tmp")).unwrap();
+    let mut a = Agent {
+        rush: true,
+        ..Agent::default()
+    };
+    a.job.id = "gone".into();
+    assert!(clean_stale_temp(&a, 3 * HOUR, t).unwrap());
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+    let found: Vec<String> = find_temp_orphans().into_iter().map(|o| o.path).collect();
+    assert_eq!(found, [s(&orphan)]);
+    for p in [&vol, &root, &theirs, &build, &vol.join("app-1a2b3c4d")] {
+        assert!(!is_temp_dir(&s(p)), "is_temp_dir({p:?})");
+    }
+    // Asked to remove the user's, as if it were an orphan: refused.
+    for p in [&theirs, &build, &vol] {
+        let o = TempOrphan {
+            path: s(p),
+            ..TempOrphan::default()
+        };
+        assert!(remove_temp_orphan(&o, &[]).is_err(), "{p:?}");
+        assert!(p.exists(), "{p:?} removed");
+    }
+    assert!(theirs.join("old").exists() && build.join("old").exists());
+}

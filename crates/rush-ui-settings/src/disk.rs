@@ -704,6 +704,7 @@ pub fn sections(m: &Model) -> Vec<Section> {
         ..Section::default()
     }];
     out.push(when_short(m));
+    out.push(scratch_place(m));
     out.push(quiet(m));
     let file = match &snap.file {
         None => {
@@ -821,6 +822,44 @@ fn when_short(m: &Model) -> Section {
         title: "When space runs short".into(),
         note: "whether Clean on its own is on or off".into(),
         rows: vec![offer, dire, trim],
+        ..Section::default()
+    }
+}
+
+/// Where new sessions' scratch goes: config.json's scratchRoot, typed
+/// (rush_state::scratch). A path rush won't use is said as it's set; one
+/// that isn't there when a session starts is in its events.
+fn scratch_place(m: &Model) -> Section {
+    let c = config(m);
+    let mut root = Setting {
+        label: "Keep sessions' scratch in".into(),
+        value: c.scratch_root.clone(),
+        typed: true,
+        unset: "/tmp".into(),
+        what: "The folder new sessions' scratch ($TMPDIR: their builds, clones and downloads) goes in. rush keeps a folder of its own in it, rush/, open only to you, so nothing else there is ever taken for scratch or cleaned. Put it on a volume of its own (with Spotlight and fseventsd's logging off) and builds stop costing the rest of the Mac. Type a whole path; ~ is your home. Sessions already running keep theirs where it is, and it's cleaned as before. When the folder isn't there when a session starts (its volume not mounted, say) or can't be written, the session's scratch goes in /tmp instead and its events say why. Empty: /tmp.".into(),
+        set: set(|m, v| {
+            let v = v.trim().to_string();
+            let home = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default());
+            match rush_state::scratch::resolve_setting(&v, &home, &rush_state::dir()) {
+                Some(Err(why)) => m.flash_err(&format!("scratch stays in /tmp: {why}")),
+                Some(Ok(r)) if r.parent().is_some_and(|p| !p.is_dir()) => m.flash_err(&format!(
+                    "{v} isn't there now: scratch goes in /tmp until it is"
+                )),
+                _ => {}
+            }
+            config_mut(m).scratch_root = v;
+        }),
+        ..Setting::default()
+    };
+    root.means.insert(
+        String::new(),
+        "rush's folder in /tmp, which macOS empties at restart and of what's unused for days."
+            .into(),
+    );
+    Section {
+        title: "Where scratch goes".into(),
+        note: "new sessions; running ones keep theirs".into(),
+        rows: vec![root],
         ..Section::default()
     }
 }

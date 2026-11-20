@@ -1608,6 +1608,15 @@ impl Host {
             return Err(format!("rush can't run {}", a.name()));
         };
         let tmp = crate::tmp::place_temp(&st.cfg.id, &st.cfg.cwd); // follows it to the project it works in now
+        if let Some(f) = crate::tmp::fell_back(&tmp) {
+            // scratchRoot set but unusable (a volume not mounted): said,
+            // never a session that doesn't start.
+            log_event(
+                &st.cfg.id,
+                "scratch-root-unused",
+                json!({"wanted": f.wanted, "why": f.why, "dir": tmp}),
+            );
+        }
         st.info.temp_dir = tmp.to_string_lossy().into_owned();
         // Its start is the cause of what its commands and hooks log.
         let ev = rush_events::id();

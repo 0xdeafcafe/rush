@@ -417,6 +417,7 @@ fn disk_rows_moved_from_general() {
         [
             "Disk",
             "When space runs short",
+            "Where scratch goes",
             "Spotlight and Time Machine",
             "Rules",
             "Proposed"
@@ -544,4 +545,34 @@ fn spotlight_and_time_machine_rows() {
     }
     let c = config(&m);
     assert!(!c.quiets_scratch() && c.quiet_projects);
+}
+
+/// Where new sessions' scratch goes is typed, kept as config.json's
+/// scratchRoot, and empty is /tmp's.
+#[test]
+fn scratch_root_row() {
+    let (mut m, _d) = model(240, 60);
+    set_settings_page(&mut m, PAGE_DISK);
+    let row = flat(&disk::sections(&m))
+        .into_iter()
+        .find(|r| r.label == "Keep sessions' scratch in")
+        .expect("the row");
+    assert!(row.typed && row.value.is_empty());
+    assert_eq!(row.shown(), "/tmp");
+    assert!(row.what.contains("rush/") && row.what.contains("not mounted"));
+    let d = tempfile::tempdir().unwrap();
+    let vol = d.path().join("Builds"); // never in rush's folder: refused there
+    std::fs::create_dir_all(&vol).unwrap();
+    let typed = vol.to_string_lossy().into_owned();
+    (row.set.as_ref().unwrap())(&mut m, &typed);
+    rush_ui_settings::changed(&mut m);
+    let raw = std::fs::read_to_string(rush_state::dir().join("config.json")).unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(saved["scratchRoot"], typed.as_str(), "{raw}");
+    assert_eq!(config(&m).scratch_root, typed);
+    assert_eq!(
+        rush_state::configured_scratch_root(),
+        Some(vol.join("rush")),
+        "rush reads it as set"
+    );
 }

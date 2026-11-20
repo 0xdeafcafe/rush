@@ -12,11 +12,12 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::paths::{dir, root};
 
-/// Holds new sessions' scratch folders: rush's root in /tmp when it's
-/// rush's own (rush_state::make_scratch_root), else the one in rush's
-/// folder sessions had before.
+/// Holds new sessions' scratch folders: rush's in the folder config.json's
+/// scratchRoot names when it can be used, else rush's root in /tmp when
+/// it's rush's own (rush_state::make_scratch_root), else the one in rush's
+/// folder sessions had before (rush_state::new_scratch_root).
 pub fn temp_root() -> PathBuf {
-    rush_state::make_scratch_root().unwrap_or_else(rush_state::old_scratch_root)
+    rush_state::new_scratch_root().root
 }
 
 /// Whether p is a folder directly in a scratch root: a project's, or two
@@ -174,6 +175,18 @@ pub fn place_temp(id: &str, cwd: &str) -> PathBuf {
     link_to(id, &want)
 }
 
+/// Why session scratch folder tmp isn't in the folder config.json's
+/// scratchRoot names when that's set and can't be used now: for the
+/// session's events. None when it's there, unset or usable (a session
+/// started before it was set keeps its folder where it is, unsaid).
+pub fn fell_back(tmp: &Path) -> Option<rush_state::FellBack> {
+    let r = rush_state::configured_scratch_root();
+    if r.as_deref().is_some_and(|r| within(r, tmp)) {
+        return None;
+    }
+    rush_state::new_scratch_root().fell_back
+}
+
 /// Makes session id's scratch folder again when it's gone from under a
 /// running session: the system empties /tmp's folders nothing has used
 /// for days, and its agent's TMPDIR still names it. Only a folder in a
@@ -202,10 +215,17 @@ fn link_to(id: &str, p: &Path) -> PathBuf {
 
 /// Makes folder p, owner-only; one in /tmp only while rush's root there
 /// is its own (rush_state::make_scratch_root), as anyone may make
-/// folders in /tmp.
+/// folders in /tmp; one in scratchRoot's only while it can be used.
 fn make(p: &Path) -> std::io::Result<()> {
     if within(&rush_state::scratch_root(), p) && rush_state::make_scratch_root().is_none() {
         return Err(std::io::Error::other("rush's folder in /tmp isn't its own"));
+    }
+    // Nor one in scratchRoot's while it can't be used: a volume not
+    // mounted would get a folder at its mount point.
+    if let Some(r) = rush_state::configured_scratch_root()
+        && within(&r, p)
+    {
+        rush_state::scratch::make_configured_root(&r).map_err(std::io::Error::other)?;
     }
     mkdir(p)
 }
@@ -315,6 +335,7 @@ pub fn allow_rules(rules: &[String], tmp: &str) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::testing::Home;
+    use std::time::SystemTime;
 
     #[test]
     fn allow_rules_name_the_scratch() {
@@ -494,6 +515,98 @@ mod tests {
             assert!(want.is_dir() && temp_dir("s1") == want, "{what}");
             ignore_system_temp(false);
         }
+    }
+
+    /// Sets config.json's scratchRoot in the test's rush folder.
+    fn set_scratch_root(v: &Path) {
+        let b = serde_json::json!({"scratchRoot": v}).to_string();
+        std::fs::write(rush_state::dir().join("config.json"), b).unwrap();
+    }
+
+    // Rust-only: with scratchRoot set, a new session's scratch is in rush/
+    // in it; one started before keeps its own, in either other root. Each
+    // is a session's scratch to the tidy-ups; what else is on that volume,
+    // and the folders above, never are, nor are trimmed.
+    #[test]
+    fn scratch_goes_where_the_setting_says() {
+        let h = Home::new();
+        ignore_system_temp(true);
+        let a = tempfile::tempdir().unwrap();
+        let a = a.path().to_string_lossy().into_owned();
+        let vol = h.path().join("Builds");
+        std::fs::create_dir(&vol).unwrap();
+        set_scratch_root(&vol);
+        let mine = vol.join("rush");
+        for id in ["s1", "s2", "s3"] {
+            std::fs::create_dir_all(dir(id)).unwrap();
+        }
+        let got = place_temp("s1", &a);
+        assert_eq!(got, mine.join(slug(&a)).join("s1"));
+        assert_eq!(temp_dir("s1"), got);
+        assert_eq!(fell_back(&got), None);
+        // Started before: in /tmp's root and in rush's folder's.
+        let in_tmp = rush_state::scratch_root().join(slug(&a)).join("s2");
+        let in_old = rush_state::old_scratch_root().join(slug(&a)).join("s3");
+        for (id, p) in [("s2", &in_tmp), ("s3", &in_old)] {
+            std::fs::create_dir_all(p).unwrap();
+            std::os::unix::fs::symlink(p, dir(id).join("tmp")).unwrap();
+            assert_eq!(place_temp(id, &a), *p, "{id} moved");
+        }
+        for p in [&got, &in_tmp, &in_old] {
+            assert!(is_temp_dir(p), "{p:?}");
+            assert!(is_temp(&p.join("x").to_string_lossy()), "{p:?}");
+        }
+        // What else is on the volume isn't rush's.
+        let theirs = vol.join("game").join("s1");
+        let old = SystemTime::now() - std::time::Duration::from_secs(4 * 3600);
+        for p in [&theirs, &vol.join(slug(&a)).join("s1")] {
+            std::fs::create_dir_all(p.join("build")).unwrap();
+            std::fs::File::open(p.join("build"))
+                .unwrap()
+                .set_modified(old)
+                .unwrap();
+            assert!(!is_temp_dir(p), "{p:?}");
+            assert!(!is_temp(&p.to_string_lossy()), "{p:?}");
+            let none = std::collections::HashSet::new();
+            assert_eq!(crate::trim::trim_tmp(p, SystemTime::now(), &none), 0);
+            assert!(p.join("build").exists(), "{p:?} trimmed");
+        }
+        for p in [&vol, &mine, &mine.join(slug(&a))] {
+            assert!(!is_temp_dir(p), "{p:?}");
+        }
+        ignore_system_temp(false);
+    }
+
+    // Rust-only: scratchRoot set but its volume not mounted: a new
+    // session's scratch goes where it would without it, which is said; a
+    // running one's under it isn't made again at the mount point.
+    #[test]
+    fn an_unmounted_scratch_root_falls_back() {
+        let h = Home::new();
+        ignore_system_temp(true);
+        let a = tempfile::tempdir().unwrap();
+        let a = a.path().to_string_lossy().into_owned();
+        let vol = h.path().join("Builds");
+        set_scratch_root(&vol);
+        std::fs::create_dir_all(dir("s1")).unwrap();
+        let got = place_temp("s1", &a);
+        assert_eq!(got, rush_state::scratch_root().join(slug(&a)).join("s1"));
+        let f = fell_back(&got).expect("the fallback wasn't said");
+        assert_eq!(f.wanted, vol.to_string_lossy());
+        assert!(f.why.contains("mounted"), "{}", f.why);
+        // s2 was in it before the volume went.
+        std::fs::create_dir_all(dir("s2")).unwrap();
+        let gone = vol.join("rush").join(slug(&a)).join("s2");
+        std::os::unix::fs::symlink(&gone, dir("s2").join("tmp")).unwrap();
+        remake_temp("s2");
+        assert!(!vol.exists(), "made a folder where the volume mounts");
+        // Back: new sessions go in it again, nothing said.
+        std::fs::create_dir(&vol).unwrap();
+        std::fs::create_dir_all(dir("s3")).unwrap();
+        let got = place_temp("s3", &a);
+        assert_eq!(got, vol.join("rush").join(slug(&a)).join("s3"));
+        assert_eq!(fell_back(&got), None);
+        ignore_system_temp(false);
     }
 
     // tmp_test.go:53, for each scratch root.

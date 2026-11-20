@@ -1329,6 +1329,32 @@ Each session's scratch is `<root>/<project-slug>/<id>` (rush-host's
   `trim_due`), since its agent's TMPDIR still names it.
 - Clean up's "/tmp" row (rush-fleet `scratch_entries`) leaves out rush's
   root there: its sessions' folders go with them.
+- config.json's `scratchRoot` (env `RUSH_SCRATCH_ROOT`; Settings › Disk ›
+  Where scratch goes) names a folder of the user's for new sessions'
+  scratch instead: a volume of its own with Spotlight and fseventsd's
+  logging off, so build churn stops costing fseventsd CPU. rush's root is
+  `rush/` in it (`configured_scratch_root`), made owner-only as `/tmp`'s,
+  never the folder itself: with the folder as the root, Clean up's
+  orphans (anything at the top that isn't a project's folder) would have
+  been the user's own files there. It's read through `rush_state::scratch`
+  only, cached on config.json's mtime, size and inode, and is first in
+  `scratch_roots()` whether it's mounted or not, so the other two stay
+  roots and nothing under any of them is left behind. Refused by its
+  text (`resolve_setting`): a relative path, and one whose `rush/` would
+  be, hold or sit in rush's folder or hold home (`~/.config` would make
+  rush's own folder scratch). `new_scratch_root` picks where a new
+  session's folder goes: there when its folder exists, `rush/` can be
+  made and written in (a probe folder), else `/tmp`'s, else rush's
+  folder's, with why (`FellBack`). It never makes the folder named, only
+  `rush/` in it, so a volume not mounted gets nothing at its mount point;
+  `tmp::make` won't make a folder under it then either (`remake_temp`).
+  The host logs `scratch-root-unused` (wanted, why, dir) in the
+  session's events when a session starts elsewhere because of it
+  (`tmp::fell_back`); a session never fails to start for it. Sessions
+  already placed keep their folders (`place_temp` keeps any folder in any
+  root). Read on each session start, so a change needs no restart.
+  `left.rs`'s `shallow` counts the folder named as a top, never deleted
+  from Left outside.
 
 - The agent is given it ending in "/" (`TMPDIR`, and Claude Code's `TMP`,
   `TEMP`, `CLAUDE_CODE_TMPDIR`), as macOS's own TMPDIR does
@@ -1893,6 +1919,10 @@ Remote does) and writes only through `update_rules`.
   session_core's `start::install` calls with `research::research_now`:
   the cleanup agent in research mode, which proposes and removes
   nothing).
+- Where scratch goes: "Keep sessions' scratch in", typed, config.json's
+  `scratchRoot` (see Sessions' scratch folders); empty shows `/tmp`. Set,
+  it flashes when rush won't use it (`resolve_setting`) or the folder
+  isn't there now; it's saved either way.
 - When space runs short (note: "whether Clean on its own is on or off"):
   the three disk rows that were General's "Disk and memory", moved here
   so everything about the disk is on one page; their config.json keys

@@ -99,6 +99,7 @@ static FIELDS: &[Field] = fields![
     "keepOrphans" => Bool: keep_orphans,
     "restartOnInstall" => Bool: restart_on_install,
     "trimRunningTmp" => Bool: trim_running_tmp,
+    "scratchRoot" => Str: scratch_root,
     "quietScratch" => OptBool: quiet_scratch,
     "quietProjects" => Bool: quiet_projects,
     "linetagPicks" => Bool: linetag_picks,
@@ -229,6 +230,7 @@ mod tests {
             ("searchTranscriptsOnKey", "RUSH_SEARCH_TRANSCRIPTS_ON_KEY"),
             ("cleanupDiskGB", "RUSH_CLEANUP_DISK_G_B"),
             ("dispatch.every.mode", "RUSH_DISPATCH_EVERY_MODE"),
+            ("scratchRoot", "RUSH_SCRATCH_ROOT"),
         ] {
             assert_eq!(env_name(key), want, "{key}");
         }

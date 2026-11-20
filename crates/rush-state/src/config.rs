@@ -527,6 +527,16 @@ pub struct Config {
         skip_serializing_if = "is_false"
     )]
     pub trim_running_tmp: bool,
+    /// The folder new sessions' scratch ($TMPDIR) goes in, ~ for home:
+    /// rush keeps a folder of its own (rush/) in it. Unset, or when it's
+    /// missing or can't be written (a volume not mounted), /tmp's.
+    /// Rust-only: see rush_state::scratch.
+    #[serde(
+        rename = "scratchRoot",
+        deserialize_with = "lenient",
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub scratch_root: String,
     /// Keeps rush's scratch (its tmp, repos' .claude/worktrees, build
     /// targets) out of Spotlight and Time Machine (rush-fleet's
     /// disk::quiet). Unset is on. Rust-only.

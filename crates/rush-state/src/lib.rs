@@ -43,8 +43,9 @@ pub use dir::{
 pub use envconfig::{env_bool, env_name};
 pub use profiles::{LOGINS_KIND, Pick, Profile, Room, Seat, ids};
 pub use scratch::{
-    make_scratch_root, old_scratch_root, scratch_root, scratch_root_of, scratch_roots,
-    set_thread_system_tmp, system_tmp,
+    FellBack, NewRoot, configured_scratch_root, make_scratch_root, new_scratch_root,
+    old_scratch_root, scratch_root, scratch_root_of, scratch_roots, set_thread_system_tmp,
+    system_tmp,
 };
 pub use store::{
     Overlay, Store, config_on_disk, keep_before, set_on_save, write_bytes, write_json,

@@ -123,7 +123,8 @@ fn look_left_one(mut it: LeftItem) -> LeftItem {
 }
 
 /// A path too near the top to delete from here, wherever an agent wrote:
-/// /, home, their own folders (/opt, ~/Documents), and the temp folders.
+/// /, home, their own folders (/opt, ~/Documents), and the temp folders,
+/// the one config.json's scratchRoot names among them.
 fn shallow(p: &str) -> bool {
     let home = std::env::var("HOME").unwrap_or_default();
     let tmp = crate::worktree::clean(&std::env::temp_dir().to_string_lossy());
@@ -136,7 +137,12 @@ fn shallow(p: &str) -> bool {
         "/private/var/folders",
         &tmp,
     ];
-    if tops.contains(&p) || temp_roots().iter().any(|r| r.as_os_str() == p) {
+    let named =
+        rush_state::configured_scratch_root().and_then(|r| r.parent().map(Path::to_path_buf));
+    if tops.contains(&p)
+        || temp_roots().iter().any(|r| r.as_os_str() == p)
+        || named.is_some_and(|n| n.as_os_str() == p)
+    {
         return true;
     }
     let d = Path::new(p)
