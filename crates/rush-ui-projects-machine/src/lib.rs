@@ -20,6 +20,7 @@ pub mod data;
 pub mod delete;
 pub mod dire;
 pub mod diskauto;
+pub mod kititems;
 pub mod memory;
 pub mod memreview;
 pub mod place;
