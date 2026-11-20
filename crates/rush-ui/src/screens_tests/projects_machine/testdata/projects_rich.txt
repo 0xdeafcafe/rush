@@ -12,7 +12,7 @@
 │ ⇡ Pull requests       asking GitHub…                         │ │                                                                                         │
 │                                                              │ │ WORKTREES  1 · 300M ─────────────────────────────────────────────────────────────────── │
 │ NO PROJECT'S ─────────────────────────────────────────────── │ │   WORKTREE       BRANCH           STATE                           SIZE   CAME FROM      │
-│ ◌ Temporary           6M                                     │ │ ⎇ fix                             ● 1 running · 3 commits · 1…    300M   main · 7 behi… │
+│ ◌ Temporary           6M                                     │ │ ✱ fix                             fix the parser is working i…    300M   main · 3 comm… │
 │ ⚙ System              0 processes                            │ │                                                                                         │
 │                                                              │ │ AGENTS' SCRATCH  files agents kept while they worked here · x empties it ────────────── │
 │                                                              │ │ ◌ .claude/tmp                     0 items                          12M                  │
@@ -67,7 +67,7 @@ HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
 │ ⇡ Pull requests       asking GitHub…                         │ │                                                                                         │
 │                                                              │ │ WORKTREES  1 · 300M ─────────────────────────────────────────────────────────────────── │
 │ NO PROJECT'S ─────────────────────────────────────────────── │ │   WORKTREE       BRANCH           STATE                           SIZE   CAME FROM      │
-│ ◌ Temporary           6M                                     │ │ ⎇ fix                             ● 1 running · 3 commits · 1…    300M   main · 7 behi… │
+│ ◌ Temporary           6M                                     │ │ ✱ fix                             fix the parser is working i…    300M   main · 3 comm… │
 │ ⚙ System              0 processes                            │ │                                                                                         │
 │                                                              │ │ AGENTS' SCRATCH  files agents kept while they worked here · x empties it ────────────── │
 │                                                              │ │ ◌ .claude/tmp                     0 items                          12M                  │
@@ -122,7 +122,7 @@ HINT ↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl
 │ ⇡ Pull requests       asking GitHub…                         │ │                                                                                         │
 │                                                              │ │ WORKTREES  1 · 300M ─────────────────────────────────────────────────────────────────── │
 │ NO PROJECT'S ─────────────────────────────────────────────── │ │   WORKTREE       BRANCH           STATE                           SIZE   CAME FROM      │
-│ ◌ Temporary           6M                                     │ │ ⎇ fix                             ● 1 running · 3 commits · 1…    300M   main · 7 behi… │
+│ ◌ Temporary           6M                                     │ │ ✱ fix                             fix the parser is working i…    300M   main · 3 comm… │
 │ ⚙ System              0 processes                            │ │                                                                                         │
 │                                                              │ │ AGENTS' SCRATCH  files agents kept while they worked here · x empties it ────────────── │
 │                                                              │ │ ◌ .claude/tmp                     0 items                          12M                  │
@@ -392,7 +392,7 @@ HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
 │ ⚙ System              0 processes                                                                                │
 │                                                                                                                  │
 │ ┃ alpha  /src/alpha · main · 2 changed                                            300M                           │
-│ ┃ └─ ✱ fix                   fix the parser                                       300M  can go, by hand          │
+│ ┃ └─ ✱ fix                   fix the parser                                       300M                           │
 │                                                                                                                  │
 │ OTHER FOLDERS  ◇ not a repository ────────────────────────────────────────────────────────────────────────────── │
 │ ┃ ◇ Downloads  /Users/me/Downloads                                                                               │
@@ -409,7 +409,7 @@ HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
 │                                                                                                                  │
 │ WORKTREES  1 · 300M ──────────────────────────────────────────────────────────────────────────────────────────── │
 │   WORKTREE            BRANCH                STATE                                      SIZE   CAME FROM          │
-│ ⎇ fix                                       ● 1 running · 3 commits · 1 changed        300M   main · 7 behind    │
+│ ✱ fix                                       fix the parser is working in it            300M   main · 3 commits … │
 │                                                                                                                  │
 │ AGENTS' SCRATCH  files agents kept while they worked here · x empties it ─────────────────────────────────────── │
 │ ◌ .claude/tmp                               0 items                                     12M                      │
@@ -424,7 +424,7 @@ HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
 │ ⚙ System              0 processes                                                            │
 │                                                                                              │
 │ ┃ alpha  /src/alpha · main · 2 changed                        300M                           │
-│ ┃ └─ ✱ fix                   fix the parser                   300M  can go, by hand          │
+│ ┃ └─ ✱ fix                   fix the parser                   300M                           │
 │                                                                                              │
 │ OTHER FOLDERS  ◇ not a repository ────────────────────────────────────────────────────────── │
 │ ┃ ◇ Downloads  /Users/me/Downloads                                                           │
@@ -441,7 +441,7 @@ HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
 │                                                                                              │
 │ WORKTREES  1 · 300M ──────────────────────────────────────────────────────────────────────── │
 │   WORKTREE        BRANCH            STATE                             SIZE   CAME FROM       │
-│ ⎇ fix                               ● 1 running · 3 commits · 1 c…    300M   main · 7 behind │
+│ ✱ fix                               fix the parser is working in …    300M   main · 3 commi… │
 │                                                                                              │
 │ AGENTS' SCRATCH  files agents kept while they worked here · x empties it ─────────────────── │
 │ ◌ .claude/tmp                       0 items                            12M                   │
