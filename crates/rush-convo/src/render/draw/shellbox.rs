@@ -35,6 +35,7 @@ pub(crate) fn turn_sig(o: &Options, prefix: &str) -> u64 {
     for (k, r) in runs {
         (k, r.ver, r.end, r.exit, r.stopped, r.paused, r.sent).hash(&mut h);
         (r.told, r.told_summary, r.edited, r.summing, &r.note).hash(&mut h);
+        (r.asks, r.typed).hash(&mut h);
         running |= r.running() || r.summing;
     }
     if let Some(e) = o.shell_edit.as_ref().filter(|e| e.r.starts_with(prefix)) {
@@ -411,6 +412,25 @@ impl Drawer<'_> {
                 if open && picked && out.len() > OUT_SHOWN + 1 {
                     body.push(dim("enter folds it"));
                 }
+            }
+            // It asks for a password: a masked field, what's typed in it
+            // dots (it's never here to draw).
+            if x.running() && x.asks {
+                let mut f = paint(C_YELLOW.bold(), "password ");
+                f.push(text(&"•".repeat(x.typed)));
+                if picked {
+                    let cur = Style {
+                        mods: rush_core::text::Mods::REVERSE,
+                        ..C_TEXT
+                    };
+                    f.push(paint(cur, " "));
+                }
+                body.push(f);
+                body.push(dim(if picked {
+                    "type it · enter gives it to the command · rush keeps none of it"
+                } else {
+                    "pick this box to type it"
+                }));
             }
             // A summary that couldn't be made says why.
             if !x.note.is_empty() {

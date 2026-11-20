@@ -26,6 +26,15 @@
 //! same one still (pid and start time), runs on in its box; one whose
 //! code was written is done; one with neither ended while rush was
 //! closed. Rust-only.
+//!
+//! With Settings › General › "Commands you run" in a terminal, each runs
+//! in a terminal of its own (rush_sys::pty, by way of `rush pty-run`):
+//! sudo and the rest that need one work. While its terminal reads a
+//! password (echo off) and Settings has you type it in its box, the box
+//! shows a masked field; what you type there goes to the command's input
+//! FIFO as enter is pressed and is never drawn, logged or kept. Without
+//! the terminal, sudo saying it needs one has rush say, once, which row
+//! of Settings gives it one.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
@@ -66,6 +75,8 @@ pub struct Shared {
     pub exit: Option<Option<i32>>,
     pub eof: bool,
     pub at: Ms,
+    /// Its terminal reads a password now (rush_sys::pty::asks_of).
+    pub asks: bool,
 }
 
 /// How long after a run of a block the agent asked for ended its output
@@ -82,6 +93,8 @@ struct Proc {
     exited: Option<Ms>,
     reading: bool,
     looked: Ms,
+    /// Its terminal asked for a password when last looked at.
+    asking: bool,
 }
 
 /// One session's runs.
@@ -102,12 +115,31 @@ pub struct Kept {
     told: std::collections::HashSet<String>,
     /// The box whose next run starts in the background (◐ background).
     bg_next: Option<String>,
+    /// The password being typed in a box's field, by the box's ref: only
+    /// here until enter gives it to the command, and wiped then.
+    secret: Option<(String, Secret)>,
+}
+
+/// What's typed in a password field: wiped as it's let go of.
+#[derive(Default)]
+struct Secret(Vec<char>);
+
+impl Drop for Secret {
+    fn drop(&mut self) {
+        self.0.fill('\0');
+        std::hint::black_box(&self.0);
+    }
 }
 
 /// Every session's runs, by its key.
 #[derive(Default)]
 pub struct Boxes {
     pub by: HashMap<String, Kept>,
+    /// Said once while rush runs: which row of Settings gives a command
+    /// a terminal (sudo said it needs one), and which lets you type the
+    /// password one asks for.
+    said_terminal: bool,
+    said_password: bool,
 }
 
 fn kept<'a>(m: &'a mut Model, key: &str) -> &'a mut Kept {
@@ -122,6 +154,7 @@ thread_local! {
     static FAKE: Cell<Option<Fake>> = const { Cell::new(None) };
     static KEEP: Cell<bool> = const { Cell::new(true) };
     static RAN: RefCell<Vec<(String, String)>> = const { RefCell::new(Vec::new()) };
+    static TYPED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
 /// For tests: runs nothing, f says what each run printed; and keeps
@@ -149,6 +182,19 @@ pub fn end_fake(m: &mut Model, key: &str, r: &str, out: &str, code: i32, at: Ms)
 /// For tests: the scripts the fake was given, and their folders.
 pub fn ran() -> Vec<(String, String)> {
     RAN.with(|r| r.borrow().clone())
+}
+
+/// For tests: run r of session key, one the fake left running, asks for
+/// a password now (on) or no longer, as its terminal would say.
+pub fn ask_fake(m: &mut Model, key: &str, r: &str, on: bool) {
+    if let Some(p) = kept(m, key).procs.get(r) {
+        p.shared.lock().unwrap_or_else(|e| e.into_inner()).asks = on;
+    }
+}
+
+/// For tests: what the fake's commands were given as typed, in turn.
+pub fn typed() -> Vec<String> {
+    TYPED.with(|r| r.borrow().clone())
 }
 
 /// The folder the session works in, where its commands run.
@@ -223,14 +269,16 @@ pub fn still_running(pid: i32, start: Ms) -> bool {
 /// Starts script in cwd with shell -lc, stdin closed, stdout and stderr
 /// into the file log, in a session (and process group) of its own, so
 /// it carries on when rush quits; its code is written beside it as it
-/// ends (exit_of). A thread follows the file into the Shared it returns.
-/// Returns its process (the runner's, the group's leader) and when that
-/// started.
+/// ends (exit_of). With tty, `rush pty-run` runs it in a terminal of its
+/// own instead and copies what it writes to log (rush_sys::pty). A
+/// thread follows the file into the Shared it returns. Returns its
+/// process (the runner's, the group's leader) and when that started.
 pub fn spawn(
     script: &str,
     cwd: &str,
     shell: &str,
     log: &std::path::Path,
+    tty: bool,
 ) -> std::io::Result<(i32, Ms, Arc<Mutex<Shared>>)> {
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
@@ -241,13 +289,21 @@ pub fn spawn(
     let err = out.try_clone()?;
     let exit = exit_of(log);
     let _ = std::fs::remove_file(&exit);
-    let mut cmd = Command::new("/bin/sh");
-    cmd.arg("-c")
-        .arg(RUNNER)
-        .arg(shell)
-        .arg(script)
-        .arg(&exit)
-        .current_dir(cwd)
+    let mut cmd = if tty {
+        let mut c = Command::new(std::env::current_exe()?);
+        c.arg("pty-run")
+            .arg(shell)
+            .arg(script)
+            .arg(&exit)
+            .arg(rush_sys::pty::input_of(log))
+            .arg(rush_sys::pty::asks_of(log));
+        c
+    } else {
+        let mut c = Command::new("/bin/sh");
+        c.arg("-c").arg(RUNNER).arg(shell).arg(script).arg(&exit);
+        c
+    };
+    cmd.current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(out)
         .stderr(err);
@@ -298,6 +354,7 @@ pub fn follow(
         .name("rush-shell-out".into())
         .spawn(move || {
             let exit = exit_of(&log);
+            let asks = rush_sys::pty::asks_of(&log);
             let open = || {
                 let mut f = std::fs::File::open(&log).ok()?;
                 f.seek(SeekFrom::Start(from)).ok()?;
@@ -318,6 +375,8 @@ pub fn follow(
                     return; // let go of
                 }
                 let ended = exit.exists() || !alive();
+                let asking = !ended && asks.exists();
+                out.lock().unwrap_or_else(|e| e.into_inner()).asks = asking;
                 if f.is_none() {
                     f = open();
                 }
@@ -536,6 +595,8 @@ pub fn start(m: &mut Model, key: &str, r: &str, script: &str, bang: Option<(u32,
     run.background = kept(m, key).bg_next.take().as_deref() == Some(r);
     run.told_before = kept(m, key).told.contains(r)
         || run_of(m, key, r).is_some_and(|x| x.told_before || x.told || x.told_summary);
+    run.tty = crate::accounts::store(m).config.shell_terminal;
+    let tty = run.tty;
     let proc_ = match fake {
         Some(f) => {
             RAN.with(|x| x.borrow_mut().push((script.to_string(), cwd.clone())));
@@ -550,7 +611,7 @@ pub fn start(m: &mut Model, key: &str, r: &str, script: &str, bang: Option<(u32,
         }
         None => {
             let log = log_of(key, r, now);
-            match spawn(script, &cwd, &login_shell(), &log) {
+            match spawn(script, &cwd, &login_shell(), &log, tty) {
                 Ok((pid, pid_start, shared)) => {
                     (run.pid, run.pid_start) = (pid, pid_start);
                     run.log = log.to_string_lossy().into_owned();
@@ -573,6 +634,7 @@ pub fn start(m: &mut Model, key: &str, r: &str, script: &str, bang: Option<(u32,
                 exited: None,
                 reading: false,
                 looked: now,
+                asking: false,
             },
         );
     }
@@ -584,7 +646,9 @@ pub fn start(m: &mut Model, key: &str, r: &str, script: &str, bang: Option<(u32,
     show(m, key);
     m.ask_wake(Instant::now() + Duration::from_millis(100));
     if ended {
-        return send_itself(m, key, r, now).unwrap_or(Out::Draw);
+        let o = send_itself(m, key, r, now).unwrap_or(Out::Draw);
+        said_needs_terminal(m, key, r);
+        return o;
     }
     Out::Draw
 }
@@ -680,6 +744,9 @@ pub fn sync(m: &mut Model, key: &str) {
     let now = m.now;
     let (mut ended, mut running): (Vec<(String, Ms)>, bool) = (Vec::new(), false);
     let mut looks: Vec<(String, i32, String)> = Vec::new();
+    // The runs whose asking for a password changed, and whether they ask
+    // now.
+    let mut asked: Vec<(String, bool)> = Vec::new();
     let k = kept(m, key);
     let refs: Vec<String> = k.procs.keys().cloned().collect();
     for r in refs {
@@ -690,13 +757,18 @@ pub fn sync(m: &mut Model, key: &str) {
         let Some(p) = k.procs.get_mut(&r) else {
             continue;
         };
-        let (out, exit, eof, seen) = {
+        let (out, exit, eof, seen, asking) = {
             let mut s = p.shared.lock().unwrap_or_else(|e| e.into_inner());
-            (std::mem::take(&mut s.out), s.exit, s.eof, s.at)
+            (std::mem::take(&mut s.out), s.exit, s.eof, s.at, s.asks)
         };
         if !out.is_empty() {
             Arc::make_mut(run).push(&out);
             k.r#gen += 1;
+        }
+        let asking = asking && exit.is_none();
+        if asking != p.asking {
+            p.asking = asking;
+            asked.push((r.clone(), asking));
         }
         if let Some(code) = exit {
             let at = *p.exited.get_or_insert(now);
@@ -739,16 +811,204 @@ pub fn sync(m: &mut Model, key: &str) {
             },
         );
     }
+    for (r, on) in asked {
+        asks(m, key, &r, on);
+    }
     if !ended.is_empty() {
         save(m, key);
     }
     for (r, at) in &ended {
         let _ = send_itself(m, key, r, *at);
+        said_needs_terminal(m, key, r);
     }
     if running {
         m.ask_wake(Instant::now() + Duration::from_millis(100));
     }
     show(m, key);
+}
+
+/// Run r of session key began (on) or stopped asking for a password.
+/// With Settings › General › "Passwords commands ask for" typed in its
+/// box, the box shows a masked field, picked when nothing else is and
+/// the message box is empty (a `!` run you just started); without, rush
+/// says once which row lets you. A field let go of is wiped.
+fn asks(m: &mut Model, key: &str, r: &str, on: bool) {
+    let k = kept(m, key);
+    if !on && k.secret.as_ref().is_some_and(|(x, _)| x == r) {
+        k.secret = None;
+    }
+    if on && !crate::accounts::store(m).config.shell_passwords {
+        let b = m.kept::<Boxes>();
+        if !b.said_password {
+            b.said_password = true;
+            m.flash("it asks for a password · Settings › General › \"Passwords commands ask for\" lets you type it in its box");
+        }
+        return;
+    }
+    change(m, key, r, |x| (x.asks, x.typed) = (on, 0));
+    if !on {
+        return;
+    }
+    let empty = conn(m, key).input.is_empty();
+    if let Some(v) = m.session.as_mut().filter(|v| v.key == key)
+        && v.sel.is_empty()
+        && empty
+    {
+        v.sel = r.to_string();
+    }
+    m.flash("it asks for a password · type it in its box");
+}
+
+/// What sudo says when it has no terminal to ask for a password on.
+const NEEDS_TERMINAL: [&str; 2] = [
+    "a terminal is required to read the password",
+    "no tty present and no askpass program specified",
+];
+
+/// Says once, as run r of session key ends, which row of Settings gives
+/// a command a terminal, when it ran without one and sudo said it needs
+/// one.
+fn said_needs_terminal(m: &mut Model, key: &str, r: &str) {
+    if m.kept::<Boxes>().said_terminal {
+        return;
+    }
+    let Some(run) = run_of(m, key, r) else {
+        return;
+    };
+    if run.tty || !NEEDS_TERMINAL.iter().any(|w| run.out.contains(w)) {
+        return;
+    }
+    m.kept::<Boxes>().said_terminal = true;
+    m.flash("sudo needs a terminal to ask for your password · Settings › General › \"Commands you run\" in a terminal gives it one");
+}
+
+/// The most characters a password field takes.
+const SECRET_MOST: usize = 1024;
+
+/// A key on box r while it asks for a password: a character is added to
+/// the field, ⌫ rubs one out, ctrl+u all, enter gives it to the command,
+/// ctrl+c stops it; esc wipes the field and goes on to unpick the box
+/// (None, as any other key does).
+fn password_key(m: &mut Model, key: &str, r: &str, k: &Press) -> Option<Out> {
+    match k.s.as_str() {
+        "enter" => return Some(give_password(m, key, r)),
+        "ctrl+c" => {
+            kept(m, key).secret = None;
+            return Some(stop(m, key, r));
+        }
+        "esc" => {
+            kept(m, key).secret = None;
+            change(m, key, r, |x| x.typed = 0);
+            return None;
+        }
+        _ => {}
+    }
+    let typed = k.text();
+    let rub = matches!(k.s.as_str(), "backspace" | "ctrl+h");
+    let all = k.s == "ctrl+u";
+    if typed.is_none() && !rub && !all {
+        return None;
+    }
+    let kp = kept(m, key);
+    if kp.secret.as_ref().is_some_and(|(x, _)| x != r) {
+        kp.secret = None;
+    }
+    let s = &mut kp
+        .secret
+        .get_or_insert_with(|| (r.to_string(), Secret(Vec::with_capacity(SECRET_MOST))))
+        .1;
+    if rub {
+        if let Some(c) = s.0.last_mut() {
+            *c = '\0';
+        }
+        s.0.pop();
+    } else if all {
+        s.0.fill('\0');
+        s.0.clear();
+    } else if let Some(c) = typed
+        && s.0.len() < SECRET_MOST
+    {
+        s.0.push(c);
+    }
+    let n = s.0.len();
+    change(m, key, r, |x| x.typed = n);
+    Some(Out::Draw)
+}
+
+/// A paste while the box picked asks for a password: its first line goes
+/// into the field, as if typed.
+pub fn paste(m: &mut Model, text: &str) -> Out {
+    let Some(key) = open_key(m) else {
+        return Out::Pass;
+    };
+    let Some(r) = picked(m).filter(|r| run_of(m, &key, r).is_some_and(|x| x.asks && x.running()))
+    else {
+        return Out::Pass;
+    };
+    let kp = kept(m, &key);
+    if kp.secret.as_ref().is_some_and(|(x, _)| *x != r) {
+        kp.secret = None;
+    }
+    let s = &mut kp
+        .secret
+        .get_or_insert_with(|| (r.clone(), Secret(Vec::with_capacity(SECRET_MOST))))
+        .1;
+    for c in text.lines().next().unwrap_or_default().chars() {
+        if s.0.len() >= SECRET_MOST {
+            break;
+        }
+        s.0.push(c);
+    }
+    let n = s.0.len();
+    change(m, &key, &r, |x| x.typed = n);
+    Out::Draw
+}
+
+/// enter in box r's password field: what's typed and a new line go to
+/// the command's terminal (its input FIFO, off the UI thread), wiped
+/// from rush as they go.
+fn give_password(m: &mut Model, key: &str, r: &str) -> Out {
+    let secret = match kept(m, key).secret.take() {
+        Some((x, s)) if x == r => s,
+        _ => Secret::default(),
+    };
+    change(m, key, r, |x| x.typed = 0);
+    let Some(run) = run_of(m, key, r) else {
+        return Out::Idle;
+    };
+    let mut b: Vec<u8> = Vec::with_capacity(secret.0.len() * 4 + 1);
+    for c in &secret.0 {
+        let mut u = [0u8; 4];
+        b.extend_from_slice(c.encode_utf8(&mut u).as_bytes());
+        u.fill(0);
+    }
+    b.push(b'\n');
+    drop(secret);
+    if FAKE.with(Cell::get).is_some() || run.log.is_empty() {
+        // A test's: nothing runs to give it to.
+        TYPED.with(|t| {
+            t.borrow_mut()
+                .push(String::from_utf8_lossy(&b).into_owned())
+        });
+        b.fill(0);
+        return Out::Draw;
+    }
+    let input = rush_sys::pty::input_of(std::path::Path::new(&run.log));
+    m.later(
+        move || {
+            let r = rush_sys::pty::send(&input, &b);
+            b.fill(0);
+            std::hint::black_box(&b);
+            r.map_err(|e| e.to_string())
+        },
+        |m, r: Result<(), String>| {
+            if let Err(e) = r {
+                m.flash_err(&format!("couldn't give it the password: {e}"));
+            }
+            Out::Draw
+        },
+    );
+    Out::Draw
 }
 
 /// Hands the open view session key's runs, when they've changed since.
@@ -1349,6 +1609,12 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     if editing(m, &key) {
         return edit_key(m, &key, k);
     }
+    if let Some(r) = picked(m)
+        && run_of(m, &key, &r).is_some_and(|x| x.asks && x.running())
+        && let Some(o) = password_key(m, &key, &r, k)
+    {
+        return o;
+    }
     let s = k.s.as_str();
     if conn(m, &key).bang {
         return bang_key(m, &key, s);
@@ -1476,6 +1742,17 @@ pub fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Option<Line> {
         ));
     }
     BoxRef::parse(picked)?;
+    if run_of(m, key, picked).is_some_and(|x| x.asks && x.running()) {
+        return Some(fit_keys(
+            w,
+            &[
+                ("enter", "give it the password"),
+                ("⌫", "rub out"),
+                ("ctrl+c", "stop it"),
+                ("esc", "back to message"),
+            ],
+        ));
+    }
     let running = kept(m, key).procs.contains_key(picked);
     let done = !running && run_of(m, key, picked).is_some();
     let bg = running && run_of(m, key, picked).is_some_and(|x| x.background);
@@ -1632,6 +1909,7 @@ fn load(m: &mut Model, key: &str) {
                         exited: None,
                         reading: false,
                         looked: now,
+                        asking: false,
                     },
                 );
             }
@@ -1712,6 +1990,7 @@ mod tests {
             dir.path().to_str().unwrap(),
             "/bin/sh",
             &log,
+            false,
         )
         .expect("started");
         assert!(pid > 1);

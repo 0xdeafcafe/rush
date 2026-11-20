@@ -155,6 +155,8 @@ pub fn register(x: &mut Ext) {
     x.session_dock.push(dock::dock);
     x.session_body.push(views::body);
     x.session_head.push(views::head);
+    // A password pasted into a box's field (shellbox.rs) goes there.
+    x.paste.push(shellbox::paste);
     x.paste.push(subbox::paste);
     x.paste.push(keys::paste);
     // The views beside the conversation have the pointer over them first.

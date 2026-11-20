@@ -23,6 +23,7 @@ rush_testenv::sandboxed!();
 pub mod acct;
 pub mod catalog;
 pub mod cheap;
+pub mod commands;
 pub mod common;
 pub mod configpage;
 pub mod disk;
@@ -119,6 +120,7 @@ pub fn pages() -> Vec<Page> {
             form: Some(|m| {
                 let mut s = general::sections(m);
                 s.extend(interface::sections(m));
+                s.push(commands::section(m));
                 s
             }),
             prep: Some(general::prep),
@@ -221,6 +223,8 @@ pub struct State {
     /// (acct::read_health), and whether a reading is on its way.
     pub health: Option<std::sync::Arc<rush_state::health::All>>,
     pub health_reading: bool,
+    /// Touch ID for sudo as last read (Commands you run).
+    pub touch_id: commands::TouchId,
 }
 
 thread_local! {
@@ -307,7 +311,10 @@ pub fn open_dialog(m: &mut Model, p: usize) {
     }
     match p {
         // Microphones plugged in since show at once.
-        PAGE_GENERAL => (m.ext.calls.dictation_read_mics())(m),
+        PAGE_GENERAL => {
+            (m.ext.calls.dictation_read_mics())(m);
+            commands::read(m);
+        }
         PAGE_PROVIDERS => acct::read_health(m),
         PAGE_USAGE => usage::read(m),
         PAGE_PLUGINS => plugins::read(m),

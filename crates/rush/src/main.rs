@@ -106,6 +106,11 @@ fn main() {
         return;
     }
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // A command of yours run in a terminal of its own (rush_sys::pty),
+    // started by a shell box: before anything else, it only relays.
+    if args.first().map(String::as_str) == Some("pty-run") {
+        std::process::exit(rush_sys::pty::main(&args[1..]));
+    }
     // A view lives long and keeps much: malloc's space-efficient mode
     // holds it in about half the memory (rush_sys::malloc). Not a one-shot
     // --dump or --render: its memory goes as it ends, and the mode costs

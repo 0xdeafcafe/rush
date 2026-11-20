@@ -324,6 +324,18 @@ pub struct ShellRun {
     /// Waits to go with the next message you send (+ with my next
     /// message).
     pub attached: bool,
+    /// It runs in a terminal of its own (Settings), so what you type in
+    /// its password field can reach it.
+    pub tty: bool,
+    /// It asks for a password now (its terminal reads a line without
+    /// echoing it) and Settings has you type it in its box: the box shows
+    /// a masked field.
+    #[serde(skip)]
+    pub asks: bool,
+    /// How many characters are typed in that field: shown as dots, what
+    /// they are never kept here.
+    #[serde(skip)]
+    pub typed: usize,
 }
 
 impl ShellRun {

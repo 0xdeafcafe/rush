@@ -621,6 +621,23 @@ pub struct Config {
         skip_serializing_if = "is_false"
     )]
     pub hold_asked_output: bool,
+    /// Shell boxes and `!` commands run in a terminal of their own (a
+    /// pseudo-terminal), so sudo and the like can ask for a password.
+    /// Rust-only.
+    #[serde(
+        rename = "shellTerminal",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_false"
+    )]
+    pub shell_terminal: bool,
+    /// A password such a command asks for is typed in its box, masked.
+    /// Rust-only.
+    #[serde(
+        rename = "shellPasswords",
+        deserialize_with = "lenient",
+        skip_serializing_if = "is_false"
+    )]
+    pub shell_passwords: bool,
     /// The key that opens or closes a picked conversation row: "enter",
     /// "space", or empty for either.
     #[serde(

@@ -8,14 +8,14 @@
 
 
   Idle and finished
-  ▍ Hibernate finished agents                ‹ off             ›
-    Keep stopped agents in Active for        ‹ 5m              ›
-    Keep agents in Just left for             ‹ 120m            ›
-    Just left holds at most                  ‹ 10              ›
-    Reopen the last agent if closed within   ‹ 30m             ›
-    Clean up done work after                 ‹ 3h              ›
-    Orphaned processes                       ‹ end             ›
-    When rush is installed again             ‹ ask             ›
+  ▍ Hibernate finished agents                ‹ off                ›
+    Keep stopped agents in Active for        ‹ 5m                 ›
+    Keep agents in Just left for             ‹ 120m               ›
+    Just left holds at most                  ‹ 10                 ›
+    Reopen the last agent if closed within   ‹ 30m                ›
+    Clean up done work after                 ‹ 3h                 ›
+    Orphaned processes                       ‹ end                ›
+    When rush is installed again             ‹ ask                ›
   Hibernate finished agents
 
   A finished agent's process stays in memory (often 300–800 MB) until it is stopped. Hibernating stops it; the
@@ -34,6 +34,6 @@
 
 
 
-    1 of 47 ───────────────────────────────────────────────────────────────────────────────────────────────────────
+    1 of 49 ───────────────────────────────────────────────────────────────────────────────────────────────────────
   enter choose  ·  ? details  ·  ctrl+↑↓ section  ·  [ ] page  ·  esc back
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

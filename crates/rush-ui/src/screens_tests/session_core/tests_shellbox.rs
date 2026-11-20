@@ -1016,3 +1016,129 @@ fn a_claude_agent_gets_its_own_bang() {
         "<bash-input>rm ~/x.p12</bash-input>\n<bash-stdout>ran rm ~/x.p12 in /src/checkout</bash-stdout><bash-stderr></bash-stderr>"
     );
 }
+
+/// With commands in a terminal and passwords typed in their box, a run
+/// whose terminal asks for one shows a masked field: what's typed is
+/// dots, letters that are a box's keys are typed too, ⌫ rubs one out,
+/// and enter gives it, with a new line, to the command; the field goes
+/// once it no longer asks.
+#[test]
+fn a_password_is_typed_in_its_box() {
+    let fake = Fake::new();
+    let mut m = replied(&fake);
+    shellbox::set_fake(Some(hangs));
+    crate::accounts::config_mut(&mut m).shell_terminal = true;
+    crate::accounts::config_mut(&mut m).shell_passwords = true;
+    pick_the_box(&mut m);
+    press(&mut m, "enter");
+    assert!(
+        shellbox::run_of(&mut m, KEY, BOX).unwrap().tty,
+        "in a terminal"
+    );
+    assert!(!shown(&mut m).contains("password"));
+    shellbox::ask_fake(&mut m, KEY, BOX, true);
+    let s = shown(&mut m);
+    assert!(s.contains("password"), "{s}");
+    assert!(s.contains("enter gives it to the command"), "{s}");
+    for k in ["x", "s", "r", "c", "space", "k", "p", "!"] {
+        press(&mut m, k);
+    }
+    press(&mut m, "backspace");
+    let s = shown(&mut m);
+    assert!(s.contains("password •••••••"), "{s}");
+    assert!(!s.contains("password ••••••••"), "{s}");
+    let run = shellbox::run_of(&mut m, KEY, BOX).unwrap();
+    assert!(run.running() && !run.stopped, "x, k and p were typed");
+    assert!(m.pending_copy.is_none(), "c was typed");
+    press(&mut m, "enter");
+    assert_eq!(shellbox::typed(), ["xsrc kp\n"]);
+    assert!(
+        shown(&mut m).contains("password  "),
+        "the field is empty again"
+    );
+    shellbox::ask_fake(&mut m, KEY, BOX, false);
+    // The flash may still say it asked; the field is gone.
+    let s = shown(&mut m);
+    assert!(
+        !s.contains("password  ") && !s.contains("enter gives it"),
+        "{s}"
+    );
+    assert!(shellbox::run_of(&mut m, KEY, BOX).unwrap().running());
+}
+
+/// esc in the field wipes it and unpicks the box; ctrl+c stops the run.
+#[test]
+fn esc_and_ctrl_c_in_a_password_field() {
+    let fake = Fake::new();
+    let mut m = replied(&fake);
+    shellbox::set_fake(Some(hangs));
+    crate::accounts::config_mut(&mut m).shell_terminal = true;
+    crate::accounts::config_mut(&mut m).shell_passwords = true;
+    pick_the_box(&mut m);
+    press(&mut m, "enter");
+    shellbox::ask_fake(&mut m, KEY, BOX, true);
+    let _ = shown(&mut m);
+    press(&mut m, "a");
+    press(&mut m, "esc");
+    assert_eq!(shellbox::run_of(&mut m, KEY, BOX).unwrap().typed, 0);
+    pick_the_box(&mut m);
+    press(&mut m, "ctrl+c");
+    let run = shellbox::run_of(&mut m, KEY, BOX).unwrap();
+    assert!(!run.running() && run.stopped);
+    assert!(shellbox::typed().is_empty(), "nothing was given");
+}
+
+/// Without "Passwords commands ask for" on, no field shows: rush says,
+/// once, which row of Settings gives one.
+#[test]
+fn a_password_asked_for_without_the_setting() {
+    let fake = Fake::new();
+    let mut m = replied(&fake);
+    shellbox::set_fake(Some(hangs));
+    crate::accounts::config_mut(&mut m).shell_terminal = true;
+    pick_the_box(&mut m);
+    press(&mut m, "enter");
+    shellbox::ask_fake(&mut m, KEY, BOX, true);
+    let s = shown(&mut m);
+    assert!(
+        !s.contains("password •") && !s.contains("enter gives it"),
+        "{s}"
+    );
+    assert!(
+        super::tests::flash(&m).contains("\"Passwords commands ask for\""),
+        "{}",
+        super::tests::flash(&m)
+    );
+    press(&mut m, "x");
+    assert!(
+        shellbox::run_of(&mut m, KEY, BOX).unwrap().stopped,
+        "x is a key"
+    );
+}
+
+fn sudo_says(_: &str, _: &str) -> Option<(String, i32)> {
+    Some((
+        "sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper\nsudo: a password is required\n".into(),
+        1,
+    ))
+}
+
+/// sudo saying it needs a terminal, in a run without one, has rush say
+/// which row of Settings gives one: once while rush runs.
+#[test]
+fn sudo_without_a_terminal_says_which_row_once() {
+    let fake = Fake::new();
+    let mut m = replied(&fake);
+    shellbox::set_fake(Some(sudo_says));
+    pick_the_box(&mut m);
+    press(&mut m, "enter");
+    assert!(!shellbox::run_of(&mut m, KEY, BOX).unwrap().tty);
+    let f = super::tests::flash(&m);
+    assert!(
+        f.contains("Settings › General › \"Commands you run\""),
+        "{f}"
+    );
+    press(&mut m, "r");
+    let f = super::tests::flash(&m);
+    assert!(!f.contains("Commands you run"), "said once: {f}");
+}

@@ -66,6 +66,8 @@ Every command in the box gets its own line with a tick and how long it took, the
 
 When it's done, short output goes back to the agent by itself. Longer output waits for you: `→ send` hands over the last 80 lines, `✎ draft` drops it in your message to trim first, and `≈ summary` has a quick model boil it down to what passed, what failed and where. Runs live in a process of their own too, so quitting rush mid-deploy doesn't kill the deploy.
 
+`sudo` needs a terminal, which a box doesn't have unless you give it one: Settings › General › Commands you run can run boxes and `!` commands in a terminal of their own, show a masked password field when a command asks for one (what you type goes to the command and nowhere else), and on a Mac turn on Touch ID for `sudo` through macOS's own admin dialog. All three are off until you turn them on.
+
 The agent's own commands get the same treatment: they read as what they do, a long chain says which step it's on, and `k` cuts loose the one that's hung.
 
 ## Agents that draw

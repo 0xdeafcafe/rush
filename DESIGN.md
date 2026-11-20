@@ -4213,6 +4213,65 @@ a run that sends itself). Once it ends it's a box again.
 **A click on a command** edits it (the same ✎ edit), unless it runs
 now. Letter keys on a picked box keep their actions.
 
+**In a terminal, sudo and passwords** (Rust-only, opt-in). A run has
+no terminal by default, so sudo fails with "a terminal is required to
+read the password". Settings › General › Commands you run has three
+rows, all off until you turn them on, and nothing offers them unasked:
+
+- **Commands you run: in a terminal** (`shellTerminal`). The run is
+  started as `rush pty-run <shell> <script> <exit> <in> <asks>` in place
+  of the `/bin/sh` runner, in the same session of its own with its
+  output to the same file (`ShellRun::tty`, kept). pty-run
+  (rush_sys::pty) opens a pseudo-terminal (100×30, ONLCR off so a new
+  line stays `\n`), starts `$SHELL -lc` on it as a session leader with
+  it as its controlling terminal (TIOCSCTTY), stdin still /dev/null (a
+  command reading stdin ends as before; sudo, ssh and the like open
+  /dev/tty), TERM=xterm-256color, PAGER and GIT_PAGER `cat` (a pager
+  would wait for keys). What the terminal writes goes to stdout through
+  `Clean`: SGR colours kept, other CSI, OSC/DCS strings, charset picks,
+  bells and other C0 controls taken out, a sequence cut between reads
+  read whole; `\r` and `\n` stay. pty-run forwards TERM, INT, HUP and
+  CONT to the command's group (✕ stop's TERM reaches it; a TERM it
+  outlives 2.5 s is followed by KILL), reads for 300 ms after the shell
+  ends, then writes the exit file itself (128 + signal when one ended
+  the shell), so the follower never ends before the output is in.
+  Running in a terminal, a command's background jobs get a hangup when
+  its shell ends, as in a terminal window. Without the row, a run whose
+  output has sudo's "a terminal is required…" (or the older "no tty
+  present…") has rush say once while it runs which row gives it one.
+- **Passwords commands ask for: typed in its box** (`shellPasswords`).
+  pty-run reads the terminal's mode each pass (50 ms at most): echo off
+  with line mode on (`pty::asks`; sudo's, ssh's and passwd's prompts,
+  not a full-screen program's raw mode) makes `<log>.asks`, removed as
+  it changes back. The follower turns that into `Shared::asks`; `sync`
+  sets `ShellRun::asks` and picks the box when nothing is picked and the
+  message box is empty (a `!` run just started). The box draws
+  `password ••••` (`ShellRun::typed`, a count; the characters are only
+  in session-core's `Kept::secret`, a `Vec<char>` zeroed when dropped)
+  and "type it · enter gives it to the command · rush keeps none of
+  it". While it asks, every character typed on the picked box (box keys
+  like x, s, k, p too) and a paste's first line go into the field; ⌫
+  rubs one out, ctrl+u all, ctrl+c stops the run, esc wipes it and
+  unpicks. enter writes it and a new line, off the UI thread, to the
+  run's FIFO `<log>.in` (`pty::send`, O_NONBLOCK, failing once pty-run
+  has gone), whose bytes pty-run passes to the terminal and zeroes. It
+  is never drawn, logged, saved or sent anywhere else. Without the row,
+  a run that asks has rush say once which row lets you type it.
+- **Touch ID for sudo** (macOS, shown once /etc/pam.d/sudo_local or its
+  template is found; `rush_sys::touchid`). Read off the UI as General
+  opens. On writes sudo_local as `turned_on` makes it: the file as it is
+  (or the shipped `sudo_local.template`, or the template's text when
+  neither is there) with its `#auth sufficient pam_tid.so` line
+  uncommented, or such a line put in before the first rule that isn't
+  pam_reattach's. Off comments that line out again. It's written as a
+  temp file put in place by `osascript -e 'do shell script
+  "/usr/bin/install -m 0444 -o root -g wheel <tmp>
+  /etc/pam.d/sudo_local" with prompt "…" with administrator
+  privileges'`: macOS's own dialog asks, rush never sees the password,
+  and /etc/pam.d/sudo is never touched. Cancelled, the row stays as it
+  was and says so. With it on, sudo in a box run in a terminal shows the
+  Touch ID screen through pam_tid (in tmux it also needs pam_reattach).
+
 **A rush watch in the background** (Rust-only): an agent's Bash call
 that put `rush watch pr|run` in the background draws, in the
 conversation, the watch's head row in place of `↳ running in the

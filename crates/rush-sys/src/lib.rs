@@ -11,7 +11,9 @@
 //! a newer version out is rush-harnessup's, so that users of these don't
 //! build a TLS stack. How many threads this process runs, and starting
 //! one with a stack sized to its work (`threads`); waiting for many
-//! children on one thread (`reap`).
+//! children on one thread (`reap`). A command of yours run in a terminal
+//! of its own, a password typed into it (`pty`); Touch ID for sudo on a
+//! Mac (`touchid`).
 //!
 //! Ported from the Go packages of the same names under `internal/`.
 
@@ -24,6 +26,7 @@ pub mod malloc;
 pub mod mem;
 pub mod pgguard;
 pub mod proc;
+pub mod pty;
 pub mod qos;
 pub mod reap;
 pub mod reexec;
@@ -34,6 +37,7 @@ pub mod squeeze;
 pub mod sysinfo;
 pub mod threads;
 pub mod timefmt;
+pub mod touchid;
 
 #[cfg(test)]
 mod testutil;
