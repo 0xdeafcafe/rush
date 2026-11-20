@@ -81,7 +81,7 @@ pub use sweep::{
 };
 pub use temp::{
     Space, TempSize, TempSizes, clean_stale_temp, clean_temp, disk_space, disk_space_background,
-    disk_usage, disk_usage_background, remove_temp_entry, temp_dirs,
+    disk_usage, disk_usage_background, paced, remove_temp_entry, temp_dirs,
 };
 pub use triage::{Class, Triage, noise};
 pub use verdict::{

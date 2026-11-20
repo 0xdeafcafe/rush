@@ -515,6 +515,19 @@ pub fn disk_space_background(dirs: &[TempDir]) -> Space {
     n
 }
 
+/// Runs a walk of another crate's at the background pace, sharing the one
+/// budget: walk calls the yield it's handed once per entry it looks at.
+pub fn paced<T>(walk: impl FnOnce(&mut dyn FnMut()) -> T) -> T {
+    let _g = BACKGROUND.lock().unwrap_or_else(|e| e.into_inner());
+    let mut p = Some(Pacer {
+        last: Instant::now(),
+        work: Duration::ZERO,
+    });
+    let n = walk(&mut || Pacer::yield_now(&mut p));
+    Pacer::yield_now(&mut p);
+    n
+}
+
 fn usage(dirs: &[TempDir], pace: &mut Option<Pacer>) -> Space {
     let mut seen = Seen::default();
     for d in dirs {
