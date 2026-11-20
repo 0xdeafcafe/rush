@@ -121,6 +121,54 @@ pub struct DiskAuto {
     pub quieting: bool,
     /// The last quiet pass's error said, so it's said once.
     pub quiet_err: String,
+    /// When the scratch volume was last looked at to unlock; 0 before.
+    pub unlock_at: Ms,
+    pub unlocking: bool,
+    /// The last unlock error said, so it's said once.
+    pub unlock_err: String,
+}
+
+/// How often the rush that leads looks whether the scratch volume is
+/// locked (rush-fleet's disk::volume::unlock): cheap, statfs only, when
+/// it's mounted.
+pub const UNLOCK_EVERY: Ms = 10 * 60_000;
+
+/// Unlocks an encrypted scratch volume, when it starts and every
+/// UNLOCK_EVERY after, off the UI: macOS doesn't after a restart. Until
+/// it's unlocked new sessions' scratch goes in /tmp. macOS only.
+fn watch_volume(m: &mut Model) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let now = m.now;
+    let st = m.kept::<DiskAuto>();
+    if st.unlocking || (st.unlock_at != 0 && now - st.unlock_at < UNLOCK_EVERY) {
+        return;
+    }
+    st.unlocking = true;
+    st.unlock_at = now;
+    m.later(disk::volume::unlock, |m, r| {
+        let st = m.kept::<DiskAuto>();
+        st.unlocking = false;
+        match r {
+            Ok(disk::volume::Unlocked::Nothing) => Out::Idle,
+            Ok(disk::volume::Unlocked::Unlocked) => {
+                st.unlock_err.clear();
+                m.noted("disk: unlocked the scratch volume; new sessions' scratch goes there");
+                Out::Draw
+            }
+            Err(e) => {
+                if e == st.unlock_err {
+                    return Out::Idle;
+                }
+                st.unlock_err.clone_from(&e);
+                m.fail(&format!(
+                    "couldn't unlock the scratch volume, so scratch goes in /tmp: {e}"
+                ));
+                Out::Draw
+            }
+        }
+    });
 }
 
 /// How often folders are kept quiet (disk::quiet): new worktrees and
@@ -361,6 +409,7 @@ pub fn auto_run(scan: Scan, now: Ms) -> AutoRun {
 /// only): takes the plugins' auto mode in once, then with the switch on
 /// runs the engine when it's due, off the UI.
 pub fn watch_disk(m: &mut Model, free: u64) {
+    watch_volume(m);
     watch_quiet(m);
     let st = m.kept::<DiskAuto>();
     if !st.taken_in {

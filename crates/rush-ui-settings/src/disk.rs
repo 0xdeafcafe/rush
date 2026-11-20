@@ -898,19 +898,38 @@ fn scratch_volume(snap: &Snap) -> Section {
             vec![],
         ),
         (None, _) => (line([sp("reading…", DIM)]), vec![]),
-        (Some(s), _) if !s.mounted => (
+        (Some(s), _) if !s.made => (
             line([sp("off", TEXT), sp(" · scratch goes in /tmp/rush", DIM)]),
             vec!["enter", "make it"],
+        ),
+        (Some(s), _) if s.locked => (
+            line([
+                sp("made, locked", YELLOW),
+                sp(
+                    " · rush unlocks it when it starts; till then scratch goes in /tmp/rush",
+                    DIM,
+                ),
+            ]),
+            vec!["enter", "remove it"],
+        ),
+        (Some(s), _) if !s.mounted => (
+            line([
+                sp("made, not mounted", RED),
+                sp(" · scratch goes in /tmp/rush", DIM),
+            ]),
+            vec!["enter", "remove it"],
         ),
         (Some(s), _) if !s.ready => (
             line([sp("made, not used", RED), sp(format!(" · {}", s.why), DIM)]),
             vec!["enter", "remove it"],
         ),
         (Some(s), _) => {
-            let mut l = line([
-                sp("on", GREEN),
-                sp(format!(" · {}", rush_state::VOLUME_MOUNT), DIM),
-            ]);
+            let mut l = line([sp("on", GREEN)]);
+            if s.encrypted {
+                l.spans.push(sp(", encrypted, like your disk", GREEN));
+            }
+            l.spans
+                .push(sp(format!(" · {}", rush_state::VOLUME_MOUNT), DIM));
             let fse = if s.no_log {
                 "no FSEvents log"
             } else {
@@ -931,7 +950,7 @@ fn scratch_volume(snap: &Snap) -> Section {
         value: styled.plain(),
         styled,
         what: format!(
-            "Builds write and delete hundreds of thousands of files an hour in sessions' scratch ($TMPDIR), and macOS's fseventsd logs every one: it can grow to gigabytes and keep a core busy, and Spotlight and Time Machine look at each too. This makes an APFS volume, {name}, on your startup disk, sharing its free space (no size of its own: it takes only what's on it). macOS keeps no FSEvents log of it, Spotlight doesn't index it and Time Machine doesn't back it up. New sessions' scratch goes there, in {mount}/rush; running ones keep theirs. It isn't emptied at reboot as /tmp is: rush's own clean-ups empty it (done and stopped sessions' scratch, what no session owns, Rust targets). macOS asks for your password once to make it, and again to remove it, which deletes what's on it and is refused while a running session's scratch is there.",
+            "Builds write and delete hundreds of thousands of files an hour in sessions' scratch ($TMPDIR), and macOS's fseventsd logs every one: it can grow to gigabytes and keep a core busy, and Spotlight and Time Machine look at each too. This makes an APFS volume, {name}, on your startup disk, sharing its free space (no size of its own: it takes only what's on it). macOS keeps no FSEvents log of it, Spotlight doesn't index it and Time Machine doesn't back it up. New sessions' scratch goes there, in {mount}/rush; running ones keep theirs. It isn't emptied at reboot as /tmp is: rush's own clean-ups empty it (done and stopped sessions' scratch, what no session owns, Rust targets). With FileVault on it's encrypted, like your disk: its passphrase is a random one rush keeps in your login keychain (rush-scratch-volume), and rush unlocks it when it starts after a restart (until then scratch goes in /tmp/rush). macOS asks for your password once to make it, and again to remove it, which deletes what's on it and its keychain item, and is refused while a running session's scratch is there.",
             name = rush_state::VOLUME_NAME,
             mount = rush_state::VOLUME_MOUNT,
         ),
@@ -941,8 +960,8 @@ fn scratch_volume(snap: &Snap) -> Section {
                 return Out::Pass;
             }
             match &st {
-                Some(s) if !s.mounted => {
-                    m.ask(make_volume_confirm());
+                Some(s) if !s.made => {
+                    m.ask(make_volume_confirm(s.filevault == Some(true)));
                     Out::Draw
                 }
                 Some(s) => {
@@ -971,13 +990,20 @@ fn snap_busy(m: &Model) -> &'static str {
 
 /// The question making the volume asks, before macOS asks for the
 /// password.
-pub fn make_volume_confirm() -> Confirm {
+/// With FileVault on (encrypted), it says the volume will be encrypted
+/// too.
+pub fn make_volume_confirm(encrypted: bool) -> Confirm {
     let mut c = Confirm::new("Make a volume for rush's scratch?", |m: &mut Model| {
         volume_work(m, "making", volume::create, "made the scratch volume: new sessions' scratch goes there")
     })
     .detail(format!(
-        "rush adds an APFS volume, {}, to your startup disk. It shares the disk's free space: no size is set aside, it holds only what's on it. macOS keeps no FSEvents log of it, Spotlight doesn't index it and Time Machine doesn't back it up. New sessions' $TMPDIR goes there; running sessions keep theirs. macOS asks for your password once. Remove it here whenever you like.",
-        rush_state::VOLUME_NAME
+        "rush adds an APFS volume, {}, to your startup disk. It shares the disk's free space: no size is set aside, it holds only what's on it.{} macOS keeps no FSEvents log of it, Spotlight doesn't index it and Time Machine doesn't back it up. New sessions' $TMPDIR goes there; running sessions keep theirs. macOS asks for your password once. Remove it here whenever you like.",
+        rush_state::VOLUME_NAME,
+        if encrypted {
+            " It's encrypted, like your disk: rush keeps its passphrase in your login keychain and unlocks it when it starts."
+        } else {
+            ""
+        }
     ));
     c.yes_text = "make it".into();
     c
@@ -1002,7 +1028,7 @@ pub fn remove_volume_confirm(device: String) -> Confirm {
         )
     })
     .detail(format!(
-        "Deletes {} and everything on it: sessions' scratch only, nothing kept in $RUSH_KEEP or your projects. Refused while a running session's scratch is on it. macOS asks for your password. New sessions' scratch goes in /tmp/rush again.",
+        "Deletes {} and everything on it: sessions' scratch only, nothing kept in $RUSH_KEEP or your projects. Its passphrase goes from your keychain too, if it has one. Refused while a running session's scratch is on it. macOS asks for your password. New sessions' scratch goes in /tmp/rush again.",
         rush_state::VOLUME_NAME
     ));
     c.yes_text = "remove it".into();

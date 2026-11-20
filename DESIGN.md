@@ -1357,6 +1357,30 @@ Each session's scratch is `<root>/<project-slug>/<id>` (rush-host's
   `/var/db/volinfo.database` by the volume's UUID. Not yet seen on a
   real reboot: Settings › Disk reads no_log and `mdutil -s` back every
   time it shows, so one that didn't hold shows in yellow.
+- It follows FileVault: with `fdesetup status` on, it's made encrypted.
+  Rush makes a random passphrase (32 bytes of /dev/urandom, hex), keeps
+  it in the login keychain first (service `rush-scratch-volume`, account
+  `rush-scratch`, through `security -i` reading the command on stdin, so
+  it's in no process's arguments), writes it to an owner-only
+  `scratch-volume.pass` in rush's folder, and the admin script reads it
+  on diskutil's stdin (`addVolume … -stdinpassphrase < "$p"`; the remount
+  unlocks from it if it comes back locked) and removes the file on any
+  exit (`trap`); rush removes it again after. If making fails and no
+  volume of its name is there, the keychain item goes. It's never logged
+  or drawn. macOS doesn't unlock such a volume after a restart: it does
+  only with a password it saved itself through its own prompt, in its
+  own keychain format. So the rush that leads unlocks it
+  (`diskutil apfs unlockVolume <dev> -stdinpassphrase`, the passphrase
+  from `security find-generic-password -w`, no admin), from
+  `diskauto::watch_volume` with its first disk reading and every 10
+  minutes (`UNLOCK_EVERY`; statfs only while it's mounted). The device
+  is found by name in `diskutil apfs list` (`find_volume`: the volume,
+  whether it's encrypted, whether locked). Until it's unlocked, it isn't
+  mounted, `ready_volume_root` says no, and new sessions' scratch goes in
+  /tmp/rush. A failure to unlock is said once and logged
+  (`scratch-volume`, did unlocked). FileVault off: made plain, as
+  before. Removing it (a locked one too: the remove script takes "Not
+  Mounted" as well as its mount point) removes the keychain item.
 - Reboots and tmp_cleaner don't empty the volume. What does, by path
   through `scratch_roots()`: done work's clean-up (a done session's
   scratch after "Clean up done work after"), the quiet clean (done
@@ -1963,7 +1987,12 @@ Remote does) and writes only through `update_rules`.
   (`rush_host::client::list`, `running`) is on it, and the script checks
   the device is still `rush-scratch` at the mount before `diskutil apfs
   deleteVolume`. Each is logged as a `scratch-volume` event. Nothing
-  offers it elsewhere: no news, no notice.
+  offers it elsewhere: no news, no notice. Encrypted, the row says "on,
+  encrypted, like your disk", and the question making it says so; a
+  locked one reads "made, locked · rush unlocks it when it starts; till
+  then scratch goes in /tmp/rush". `diskutil apfs list` is read with the
+  rest (whether it's made, encrypted, locked), `fdesetup status` once a
+  process.
 - Rules: one row per rule, built-in then yours: ● on / ○ off, its title,
   its numbers at normal and at low (`2d`; artifacts as `6h, 3 past 1h`:
   age, builds kept, superseded; `runs` for a command; `–` where it

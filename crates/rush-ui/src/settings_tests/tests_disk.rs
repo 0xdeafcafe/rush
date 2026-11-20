@@ -582,6 +582,11 @@ fn scratch_volume_made_only_on_yes() {
         "{}",
         c.detail
     );
+    assert!(
+        !c.detail.contains("encrypted"),
+        "a test has no FileVault: {}",
+        c.detail
+    );
     assert_eq!(c.yes_text, "make it");
     press(&mut m, "y");
     let l = m.said.last().expect("rush said something");
@@ -600,4 +605,20 @@ fn scratch_volume_removal_asks() {
             .contains("Refused while a running session's scratch is on it")
     );
     assert_eq!(c.yes_text, "remove it");
+}
+
+/// With FileVault on, making it says it's encrypted like the disk.
+#[test]
+fn scratch_volume_encrypted_like_the_disk() {
+    let c = disk::make_volume_confirm(true);
+    assert!(
+        c.detail.contains("It's encrypted, like your disk"),
+        "{}",
+        c.detail
+    );
+    assert!(c.detail.contains("login keychain"), "{}", c.detail);
+    let c = disk::make_volume_confirm(false);
+    assert!(!c.detail.contains("encrypted"), "{}", c.detail);
+    let c = disk::remove_volume_confirm("disk3s7".into());
+    assert!(c.detail.contains("passphrase goes from your keychain"));
 }
