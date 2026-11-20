@@ -1,6 +1,6 @@
 {
- "commit": "215c61db209f2a26640a50b2895e5ad8c5250567",
- "at": "2026-11-20T20:44:04Z",
+ "commit": "d97364328946e840b14aed89de727fdcdfcaa06d",
+ "at": "2026-11-20T20:58:31Z",
  "metrics": {
   "binary: rush, release": {
    "kind": "binary",
@@ -717,6 +717,7 @@
   "render 3000 turns w120: code: cold frame at the end, bytes",
   "render 3000 turns w120: cold frame at the end, bytes",
   "render 3000 turns w120: cold jump to the top (window), bytes",
-  "render 3000 turns w120: normal: cold frame at the end, bytes"
+  "render 3000 turns w120: normal: cold frame at the end, bytes",
+  "serve: footprint"
  ]
 }
