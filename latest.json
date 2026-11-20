@@ -1,13 +1,13 @@
 {
- "commit": "3bbc26c0e10c4ee0252c67ba3f5d9437bf2712f6",
+ "commit": "67c4a61015a828b3040951eddd4a866af1789929",
  "ref": "main",
- "run": "44643581670",
- "at": "2026-11-20T01:09:43Z",
+ "run": "44648748043",
+ "at": "2026-11-20T01:23:22Z",
  "window_s": 60,
  "metrics": {
   "binary: rush, release": {
    "kind": "binary",
-   "value": 65688952
+   "value": 65734344
   },
   "follow a run: read on, each write, allocated": {
    "kind": "bytes",
@@ -67,23 +67,23 @@
   },
   "frame, the list: rows (Model::frame), allocations": {
    "kind": "allocs",
-   "value": 2593
+   "value": 2594
   },
   "frame, the list: rows (Model::frame), bytes": {
    "kind": "bytes",
-   "value": 501948
+   "value": 501951
   },
   "host: CPU to start, s": {
    "kind": "info",
-   "value": 0.165
+   "value": 0.051
   },
   "host: footprint": {
    "kind": "footprint",
-   "value": 3949824
+   "value": 4080896
   },
   "host: idle CPU": {
    "kind": "cpu",
-   "value": 0.0012
+   "value": 0.0019
   },
   "host: idle wake-ups": {
    "kind": "wakeups",
@@ -99,7 +99,7 @@
   },
   "list, past left out (the feed's): loader alone, retained": {
    "kind": "heap",
-   "value": 2552174
+   "value": 2552030
   },
   "list, past left out (the feed's): rows": {
    "kind": "info",
@@ -107,7 +107,7 @@
   },
   "list: a reading, allocations made": {
    "kind": "allocs",
-   "value": 25256
+   "value": 25266
   },
   "list: loader alone, allocations kept": {
    "kind": "allocs",
@@ -143,11 +143,11 @@
   },
   "menubar feed: CPU to start, s": {
    "kind": "info",
-   "value": 0.22
+   "value": 0.112
   },
   "menubar feed: footprint": {
    "kind": "footprint",
-   "value": 13894976
+   "value": 13665536
   },
   "menubar feed: idle CPU": {
    "kind": "cpu",
@@ -263,19 +263,19 @@
   },
   "plugind: CPU to start, s": {
    "kind": "info",
-   "value": 0.049
+   "value": 0.031
   },
   "plugind: footprint": {
    "kind": "footprint",
-   "value": 4801856
+   "value": 4850944
   },
   "plugind: idle CPU": {
    "kind": "cpu",
-   "value": 0.0136
+   "value": 0.0177
   },
   "plugind: idle wake-ups": {
    "kind": "wakeups",
-   "value": 21.6
+   "value": 20.6
   },
   "plugind: threads": {
    "kind": "threads",
@@ -303,7 +303,7 @@
   },
   "render 300 turns w120: cold layout (all turns), bytes": {
    "kind": "bytes",
-   "value": 30821925
+   "value": 30823290
   },
   "render 300 turns w120: stream: delta, then a frame, allocations": {
    "kind": "allocs",
@@ -407,7 +407,7 @@
   },
   "render 3000 turns w120: code: cold frame at the end, bytes": {
    "kind": "bytes",
-   "value": 3129068
+   "value": 3129075
   },
   "render 3000 turns w120: code: warm frame at the end, allocations": {
    "kind": "allocs",
@@ -523,7 +523,7 @@
   },
   "serve: CPU to start, s": {
    "kind": "info",
-   "value": 0.345
+   "value": 0.383
   },
   "serve: a listing, retained": {
    "kind": "heap",
@@ -531,15 +531,15 @@
   },
   "serve: footprint": {
    "kind": "footprint",
-   "value": 6522112
+   "value": 6800576
   },
   "serve: idle CPU": {
    "kind": "cpu",
-   "value": 0.3924
+   "value": 0.4397
   },
   "serve: idle wake-ups": {
    "kind": "wakeups",
-   "value": 92.5
+   "value": 90.1
   },
   "serve: threads": {
    "kind": "threads",
@@ -547,19 +547,19 @@
   },
   "ui: CPU to start, s": {
    "kind": "info",
-   "value": 2.243
+   "value": 1.844
   },
   "ui: footprint": {
    "kind": "footprint",
-   "value": 33637888
+   "value": 30803392
   },
   "ui: idle CPU": {
    "kind": "cpu",
-   "value": 0.2794
+   "value": 0.361
   },
   "ui: idle wake-ups": {
    "kind": "wakeups",
-   "value": 249.9
+   "value": 235.0
   },
   "ui: threads": {
    "kind": "threads",
@@ -572,13 +572,13 @@
    "threads seen": [
     9
    ],
-   "ps cpu over the window": 0.01
+   "ps cpu over the window": 0.02
   },
   "serve": {
    "threads seen": [
     7
    ],
-   "ps cpu over the window": 0.4
+   "ps cpu over the window": 0.45
   },
   "host": {
    "threads seen": [
@@ -597,10 +597,9 @@
     8,
     9,
     10,
-    11,
-    13
+    11
    ],
-   "ps cpu over the window": 0.29
+   "ps cpu over the window": 0.37
   }
  }
 }
