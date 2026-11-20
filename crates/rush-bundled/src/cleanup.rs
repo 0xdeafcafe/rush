@@ -5,7 +5,7 @@
 //!
 //! What the agent is told comes from rush's own check of worktrees, its
 //! own scratch folders (Rust-only) and /tmp, and from every plugin that provides the cleanup.report service:
-//! Haven, go-clean, rust-clean, js-clean and git-clean, and any plugin you
+//! Haven, go-clean, rust-clean, js-clean, git-clean and codex-clean, and any plugin you
 //! install that says it does.
 //! Ported from internal/bundled/cleanup/plugin.go:1-53.
 
@@ -22,7 +22,7 @@ pub fn manifest() -> Manifest {
             NAME,
             "machine",
             "When the disk runs low or the memory stays under pressure, rush asks whether to start a cleanup agent. \
-             It reads your worktrees, rush's scratch folders, what agents left in /tmp and what other plugins report (Haven, go-clean, rust-clean, js-clean, git-clean), \
+             It reads your worktrees, rush's scratch folders, what agents left in /tmp and what other plugins report (Haven, go-clean, rust-clean, js-clean, git-clean, codex-clean), \
              and proposes a list of what can go without losing work for you to approve; it deletes only what you approve. Nothing starts until you say yes.",
             16,
         )

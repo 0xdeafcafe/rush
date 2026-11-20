@@ -1,5 +1,5 @@
-//! rush's bundled clean-up plugins: go-clean, rust-clean, js-clean and
-//! git-clean. Each is off until you turn it on, and runs only with its
+//! rush's bundled clean-up plugins: go-clean, rust-clean, js-clean,
+//! git-clean and codex-clean. Each is off until you turn it on, and runs only with its
 //! tools installed. Its one command lists what that ecosystem keeps on your
 //! disk (caches, stores, dependencies and builds in agents' worktrees,
 //! merged branches) with how much each takes, and what of it is running
@@ -10,6 +10,7 @@
 //! what you pick is cleaned.
 //! Ported from internal/bundled/clean/clean.go:1-574.
 
+mod codex;
 pub mod fleet;
 mod kits;
 mod reap;
@@ -40,6 +41,7 @@ pub(crate) fn bundles() -> Vec<Bundle> {
         crate::bundle_of(kits::rust_kit().manifest(), true, run_rust),
         crate::bundle_of(kits::js_kit().manifest(), true, run_js),
         crate::bundle_of(kits::git_kit().manifest(), true, run_git),
+        crate::bundle_of(codex::codex_kit().manifest(), true, run_codex),
     ]
 }
 
@@ -57,6 +59,10 @@ fn run_js(s: UnixStream) -> Result<(), String> {
 
 fn run_git(s: UnixStream) -> Result<(), String> {
     run(kits::git_kit(), s)
+}
+
+fn run_codex(s: UnixStream) -> Result<(), String> {
+    run(codex::codex_kit(), s)
 }
 
 /// Cleans a thing up, and says what it did beyond what it freed.
