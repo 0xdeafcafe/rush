@@ -971,7 +971,7 @@ fn a_repo_with_only_old_worktrees_is_listed() {
     assert!(f.contains("╭─ ◆ zeta"), "{f}");
     assert!(f.contains("no agents"), "{f}");
     assert!(!f.contains("WHERE"), "{f}");
-    assert!(f.contains("Worktrees"), "{f}");
+    assert!(f.contains("WORKTREES  1"), "{f}");
     // A repository found both ways is listed once.
     let m = with_subagents(160);
     let n = projects(&m)
