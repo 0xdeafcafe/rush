@@ -68,6 +68,7 @@ pub fn refresh(m: &mut Model) {
     if now() - d(m).checked > RESCAN_EVERY {
         scan_worktrees(m);
     }
+    super::kititems::refresh_kits(m);
     arm(m);
 }
 

@@ -594,7 +594,8 @@ fn nothing_deletes_on_its_own() {
         );
         assert!(
             m.provides.iter().any(|s| s == SERVICE_DISK_CANDIDATES)
-                && m.provides.iter().any(|s| s == SERVICE_CLEANUP_REPORT),
+                && m.provides.iter().any(|s| s == SERVICE_CLEANUP_REPORT)
+                && m.provides.iter().any(|s| s == SERVICE_CLEANUP_CLEAN),
             "{}: {:?}",
             k.name,
             m.provides
@@ -619,4 +620,191 @@ fn nothing_deletes_on_its_own() {
             "{file} removes worktrees itself"
         );
     }
+}
+
+/// An App of kit k that has measured things, and knows sessions seen.
+fn app_with(k: &'static Kit, things: Vec<Thing>, seen: Vec<Session>) -> Arc<App> {
+    Arc::new(App {
+        k,
+        st: Mutex::new(State {
+            things,
+            measured: Some(Time::now()),
+            seen: seen.into_iter().map(|s| (s.id.clone(), s)).collect(),
+            ..Default::default()
+        }),
+        wake: Condvar::new(),
+        ctx: Ctx::background(),
+    })
+}
+
+fn service_call(service: &str, params: serde_json::Value) -> Box<serde_json::value::RawValue> {
+    rush_plugin::rpc::to_raw(&serde_json::json!({"service": service, "params": params})).unwrap()
+}
+
+// cleanup.report's items are the kit's things, one each by id, with what
+// cleaning loses: rust-clean's caches come back by themselves, and the
+// report's text is as it was for the cleanup agent.
+#[test]
+fn report_items_are_the_things() {
+    let home = tempfile::tempdir().unwrap();
+    for d in ["registry/cache", "git"] {
+        std::fs::create_dir_all(home.path().join(d)).unwrap();
+    }
+    let h = home.path().to_string_lossy().into_owned();
+    let none = home.path().join("none").to_string_lossy().into_owned();
+    let env = |k: &str| match k {
+        "CARGO_HOME" => Some(h.clone()),
+        "SCCACHE_DIR" => Some(none.clone()),
+        _ => None,
+    };
+    let mut things = kits::rust_things_with(&env, &[], &[]);
+    things[0].size = 2 << 30;
+    let mut kept = Thing::new("stale:/w", "w is stale but kept", "does nothing", noop())
+        .meta("kept")
+        .within("/w");
+    kept.size = 9;
+    things.push(kept);
+    let got = items(&things);
+    assert_eq!(
+        got.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+        things.iter().map(|t| t.id.as_str()).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        got[0],
+        CleanupItem {
+            id: "crates".into(),
+            title: "Cargo's downloaded crates".into(),
+            bytes: 2 << 30,
+            path: format!("{h}/registry/cache"),
+            can_go: true,
+            comes_back: true,
+            does: "deletes them: crates download again when next built".into(),
+            ..Default::default()
+        }
+    );
+    assert!(got[1].can_go && got[1].comes_back, "{:?}", got[1]);
+    // What's kept is no size, loses something, and says it's in /w.
+    assert_eq!(
+        got[2],
+        CleanupItem {
+            id: "stale:/w".into(),
+            title: "w is stale but kept".into(),
+            meta: "kept".into(),
+            worktree: "/w".into(),
+            does: "does nothing".into(),
+            ..Default::default()
+        }
+    );
+
+    let k: &'static Kit = kits::rust_kit();
+    let a = app_with(k, things, Vec::new());
+    let raw = a
+        .service(Some(&service_call(
+            SERVICE_CLEANUP_REPORT,
+            serde_json::json!(null),
+        )))
+        .unwrap()
+        .unwrap();
+    let rep: CleanupReport = serde_json::from_str(raw.get()).unwrap();
+    assert_eq!(rep.items, got);
+    assert!(
+        rep.report
+            .contains("- Cargo's downloaded crates · 2.0G · deletes them"),
+        "{}",
+        rep.report
+    );
+    // Before it has measured: no items, and the text says so.
+    let a = app_with(k, Vec::new(), Vec::new());
+    a.lock().measured = None;
+    let rep = a.report();
+    assert!(rep.items.is_empty() && rep.report == "It hasn't measured yet.");
+}
+
+// cleanup.clean cleans one thing by id, as enter on its row does: an id
+// it doesn't have, one an agent works in, and one being cleaned already
+// are refused, each saying why; one it can is cleaned once.
+#[test]
+fn cleanup_clean_by_id() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let ran = Arc::new(AtomicUsize::new(0));
+    let counted: Clean = {
+        let ran = ran.clone();
+        Arc::new(move |_| {
+            ran.fetch_add(1, Ordering::SeqCst);
+            Ok("Deleted 2 branches.".into())
+        })
+    };
+    let things = vec![
+        Thing::new("merged:/r", "r: branches merged", "deletes them", counted)
+            .meta("2 branches")
+            .lost_nothing(),
+        Thing::new("nm:/w", "node_modules in w", "deletes it", noop())
+            .at("/w/node_modules")
+            .within("/w"),
+    ];
+    let seen = vec![Session {
+        id: "s1".into(),
+        cwd: "/w/src".into(),
+        state: "working".into(),
+    }];
+    let a = app_with(kits::git_kit(), things, seen);
+    let clean = |id: &str| {
+        a.service(Some(&service_call(
+            SERVICE_CLEANUP_CLEAN,
+            serde_json::json!({"id": id}),
+        )))
+        .map(|r| serde_json::from_str::<CleanupDone>(r.unwrap().get()).unwrap())
+        .map_err(|e| e.message)
+    };
+    for (id, want) in [
+        ("nope", "no such item: nope; measure again and look"),
+        (
+            "nm:/w",
+            "node_modules in w: an agent is working there now, so it's left alone",
+        ),
+    ] {
+        assert_eq!(clean(id).unwrap_err(), want, "{id}");
+    }
+    a.lock().busy.insert("merged:/r".into());
+    assert_eq!(
+        clean("merged:/r").unwrap_err(),
+        "r: branches merged: it's being cleaned up already"
+    );
+    a.lock().busy.clear();
+    assert_eq!(
+        clean("merged:/r").unwrap(),
+        CleanupDone {
+            said: "r: branches merged: done. Deleted 2 branches.".into(),
+            freed: 0,
+        }
+    );
+    assert_eq!(ran.load(Ordering::SeqCst), 1);
+    let st = a.lock();
+    assert!(
+        st.busy.is_empty() && st.measured.is_none(),
+        "let go, and measured again soon"
+    );
+    drop(st);
+    // A failed clean is an error that names it.
+    let failing: Clean = Arc::new(|_| Err("git: locked".into()));
+    let a = app_with(
+        kits::git_kit(),
+        vec![Thing::new(
+            "gc:/r",
+            "r: git's objects",
+            "runs git gc",
+            failing,
+        )],
+        Vec::new(),
+    );
+    assert_eq!(
+        a.service(Some(&service_call(
+            SERVICE_CLEANUP_CLEAN,
+            serde_json::json!({"id": "gc:/r"})
+        )))
+        .unwrap_err()
+        .message,
+        "r: git's objects: git: locked"
+    );
+    assert!(a.lock().busy.is_empty());
 }

@@ -339,6 +339,7 @@ fn prompt_has_rules_known_and_reports() {
         title: "Haven".into(),
         report: " 3 stacks idle \n".into(),
         rules: "Stop only idle stacks.".into(),
+        ..Default::default()
     };
     let p = care_prompt(
         "the disk is low",

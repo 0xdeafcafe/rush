@@ -139,7 +139,7 @@ Plugins are asked in name order, each seeing the text as the ones before left it
 
 ### `service.call` (request) — for a plugin with `provides`
 
-`{"service": "cleanup.report"}`: rush or another plugin asked for a service in your `provides`. Answer within 45 seconds with the service's shape. `cleanup.report` is `{"title": "Haven", "report": "what you found, as text for an agent", "rules": "- what an agent may do with it, and must never do"}`; rush's cleanup agent reads every answer. A service you don't answer, answer with `-32601`.
+`{"service": "cleanup.report"}`: rush or another plugin asked for a service in your `provides`. Answer within 45 seconds with the service's shape. `cleanup.report` is `{"title": "Haven", "report": "what you found, as text for an agent", "rules": "- what an agent may do with it, and must never do"}`; rush's cleanup agent reads every answer. It may also carry `"items"`, the rows Projects shows and cleans one by one: `[{"id": "target:/w/wt", "title": "target in wt", "bytes": 1073741824, "path": "/w/wt/target", "worktree": "/w/wt", "canGo": true, "comesBack": true, "does": "deletes it: a build puts it back"}]` (`meta` instead of `bytes` for what is no size, like `"3 branches"`; `canGo`: cleaning it loses nothing; `comesBack`: a cache that fills again by itself). A plugin that lists items should provide `cleanup.clean` too: `{"service": "cleanup.clean", "params": {"id": "target:/w/wt"}}` cleans that one, within 11 minutes, answering `{"said": "target in wt: freed 1.0 GB.", "freed": 1073741824}`, or an error saying why not (an id it doesn't list, one an agent is working in). A service you don't answer, answer with `-32601`.
 
 ### `models.list` (request) — for a plugin with `models`
 
@@ -318,7 +318,7 @@ Everything a plugin adds to the screen is cleaned of escapes and control charact
 
 ### `services.ask` — needs the service in `uses`
 
-`{"service": "cleanup.report"}`. rush calls `service.call` on every running plugin that `provides` it, but you, all at once, and returns each answer by plugin: `[{"plugin": "haven", "result": {…}}, {"plugin": "go-clean", "error": "…"}]`. Nobody providing it is `[]`, not an error. You never name the plugins you ask, so another one providing the service later answers too.
+`{"service": "cleanup.report"}`. rush calls `service.call` on every running plugin that `provides` it, but you, all at once, and returns each answer by plugin: `[{"plugin": "haven", "result": {…}}, {"plugin": "go-clean", "error": "…"}]`. Nobody providing it is `[]`, not an error. You never name the plugins you ask, so another one providing the service later answers too. Add `"plugin": "name"` to ask that one alone, and `"params": {…}` to hand it what the service takes (it gets them as `service.call`'s `params`).
 
 ### `log`
 

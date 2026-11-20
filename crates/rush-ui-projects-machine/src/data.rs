@@ -256,6 +256,9 @@ pub struct Data {
     /// (Go's m.memCounts).
     pub mem_counts: HashMap<String, super::projectmem::MemSummary>,
     pub mem_reading: HashSet<String>,
+    /// What the clean-up kits found, as rows, and what cleaning each
+    /// did (kititems.rs).
+    pub kits: super::kititems::Kits,
 }
 
 impl Data {

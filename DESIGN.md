@@ -1505,7 +1505,31 @@ deleted as it went. Here it never deletes on its own:
   worktree no session is working in); git-clean has none (its worktrees
   are the engine's). No built-in rule acts on them: none was cleaned on
   its own before, so a plugin-candidate rule for one is a proposal's.
-  `cleanup.report` stays, for the cleanup agent. A row picked in a kit's
+  `cleanup.report` stays, for the cleanup agent: its `report` text is
+  what the agent reads. It carries the kit's rows too, as `items`
+  (`rush-plugin` `CleanupItem`, left out when empty, so an old report
+  without them reads as before): each thing's id, title, size on disk
+  (or `meta` when it's no size: "3 branches", "kept"), path, the
+  worktree it's in, `canGo` (cleaning loses nothing: caches, merged
+  branches, git gc, prune, a worktree no longer needed; a stale but
+  kept one doesn't), `comesBack` (a cache that fills again by itself:
+  every cache, store and target; node_modules needs an install, so not)
+  and `does`, what cleaning it does in words. A kit marks a `Thing` with
+  `refills()` or `lost_nothing()`; one that says neither (codex-clean's
+  old sessions) is neither. `cleanup.clean` cleans one of them by id
+  (`CleanupClean {id}` in, `CleanupDone {said, freed}` out): the same
+  `take` and `clean_thing` as enter on its row, so it's refused, with
+  why as the error, for an id it doesn't list ("no such item"), one
+  being cleaned already, or one in a worktree an agent is working in.
+  `services.ask` may name one `plugin` and carry `params`, handed on as
+  `service.call`'s (`Broker::ask_with`, `rush_plugin::ask_service_of`,
+  `clean_item`); `cleanup.clean` has `SERVICE_CLEAN_TIMEOUT` (11 min,
+  a kit gives a clean ten) where other services have 45s. Projects asks
+  every `cleanup.report` provider for items every 2 minutes while it
+  shows, and cleans one by plugin and id, both off the UI thread, into
+  `Data.kits` (`rush-ui-projects-machine` `kititems.rs`), for its tree
+  to show those with a worktree under it and the rest under This Mac
+  (not drawn yet). A row picked in a kit's
   list whose clean is a removal goes through the engine's `disk::apply`
   (`removed`, `engine_removed`): a target or folder with `How::Remove`,
   a worktree no longer needed with `How::RemoveWorktree` after `reap`
