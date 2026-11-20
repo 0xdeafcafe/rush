@@ -714,8 +714,10 @@ fn temp_orphans_removed_safely() {
 // is ever scratch, an orphan, or removed.
 #[test]
 fn the_configured_root_is_cleaned_and_nothing_beside_it() {
-    let h = RushHome::new();
-    let vol = h.0.path().canonicalize().unwrap().join("Builds");
+    let _h = RushHome::new();
+    // Beside rush's folder, never in it: refused there.
+    let v = tempfile::tempdir().unwrap();
+    let vol = v.path().canonicalize().unwrap().join("Builds");
     std::fs::create_dir(&vol).unwrap();
     let b = serde_json::json!({ "scratchRoot": vol }).to_string();
     std::fs::write(rush_state::dir().join("config.json"), b).unwrap();

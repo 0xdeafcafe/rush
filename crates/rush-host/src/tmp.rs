@@ -529,11 +529,16 @@ mod tests {
     // and the folders above, never are, nor are trimmed.
     #[test]
     fn scratch_goes_where_the_setting_says() {
-        let h = Home::new();
+        let _h = Home::new();
         ignore_system_temp(true);
         let a = tempfile::tempdir().unwrap();
         let a = a.path().to_string_lossy().into_owned();
-        let vol = h.path().join("Builds");
+        // Beside rush's folder, never in it: refused there.
+        let v = tempfile::Builder::new()
+            .prefix("rv-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let vol = std::fs::canonicalize(v.path()).unwrap().join("Builds");
         std::fs::create_dir(&vol).unwrap();
         set_scratch_root(&vol);
         let mine = vol.join("rush");
@@ -582,11 +587,16 @@ mod tests {
     // running one's under it isn't made again at the mount point.
     #[test]
     fn an_unmounted_scratch_root_falls_back() {
-        let h = Home::new();
+        let _h = Home::new();
         ignore_system_temp(true);
         let a = tempfile::tempdir().unwrap();
         let a = a.path().to_string_lossy().into_owned();
-        let vol = h.path().join("Builds");
+        // Beside rush's folder, never in it: refused there.
+        let v = tempfile::Builder::new()
+            .prefix("rv-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let vol = std::fs::canonicalize(v.path()).unwrap().join("Builds");
         set_scratch_root(&vol);
         std::fs::create_dir_all(dir("s1")).unwrap();
         let got = place_temp("s1", &a);
