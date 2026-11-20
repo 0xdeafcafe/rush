@@ -4,14 +4,14 @@
     RUSH
    ▀▀▀▀▀▀
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-                                                                                                                                                                          ● 3 running · – ram · 0% cpu
+                                                                                                                                                                                           ● 3 running
 
   ╭─ Projects ─────────────────────────────────────────────────────────────────────────────────────────────── 1 ─╮ ╭─ ◆ checkout ─────────────────────────────── 2 working · 1 need you · 4 · $7.01 ─╮
-  │ ⇡ Pull requests       asking GitHub…                                                                         │ │ /src/checkout                                                                   │
-  │ ◌ Temporary           –                                                                                      │ │ asking git…                                                                     │
-  │ ⚙ System              0 processes                                                                            │ │                                                                                 │
-  │                                                                                                              │ │ AGENTS  4 ───────────────────────────────────────────────────────────────────── │
-  │ ┃ checkout  /src/checkout · asking git…                                                                      │ │  WHERE                 AGENT                      DOING                         │
+  │ ┃ checkout  /src/checkout · asking git…                                                                      │ │ /src/checkout                                                                   │
+  │                                                                                                              │ │ asking git…                                                                     │
+  │ ▸ This Mac  temp work, caches, processes                                                                     │ │                                                                                 │
+  │ ⇡ Pull requests       asking GitHub…                                                                         │ │ AGENTS  4 ───────────────────────────────────────────────────────────────────── │
+  │                                                                                                              │ │  WHERE                 AGENT                      DOING                         │
   │                                                                                                              │ │  main checkout       ? fix the flaky tax roundin… asks: asks: Round hal…     2m │
   │                                                                                                              │ │  main checkout       ✳ add Apple Pay to checkout  subagent: dr…  ctx 14%     1m │
   │                                                                                                              │ │  main checkout       ✳ move the design tokens to… working                   30s │
@@ -47,4 +47,4 @@
   ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────────────────╯
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
+  ↑↓ move  ·  enter details  ·  c clean up all that can go  ·  esc back

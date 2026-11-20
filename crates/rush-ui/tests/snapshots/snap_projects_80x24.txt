@@ -21,4 +21,4 @@
   │  WHERE                 AGENT                      DOING                  │
   │  main checkout       ? fix the flaky tax roundin… asks: asks: Ro…     2m │
 ────────────────────────────────────────────────────────────────────────────────
-  ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
+  ↑↓ move  ·  enter details  ·  c clean up all that can go  ·  esc back

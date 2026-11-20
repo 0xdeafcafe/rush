@@ -47,7 +47,7 @@
 │                                                                                           │ │                                                            │
 │                                                                                           │ │                                                            │
 ╰───────────────────────────────────────────────────────────────────────────────────────────╯ ╰────────────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
+HINT ↑↓ move  ·  enter fold  ·  → details  ·  x clean up…  ·  c clean up all that can go  ·  esc back
 === 160 classic  [enter]
                                                                                                                     ● 1 running · 306M on disk · 3M can go c
 
@@ -97,7 +97,7 @@ HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
 │                                                                                           │ │                                                            │
 │                                                                                           │ │                                                            │
 ╰───────────────────────────────────────────────────────────────────────────────────────────╯ ╰────────────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl+b keep going  ·  ← the list  ·  esc back
+HINT ↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl+b keep going  ·  c clean up all that can go  ·  ← the list
 === 160 classic  [enter down]
                                                                                                                     ● 1 running · 306M on disk · 3M can go c
 
@@ -147,7 +147,7 @@ HINT ↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl
 │                                                                                           │ │                                                            │
 │                                                                                           │ │                                                            │
 ╰───────────────────────────────────────────────────────────────────────────────────────────╯ ╰────────────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl+b keep going  ·  ← the list  ·  esc back
+HINT ↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl+b keep going  ·  c clean up all that can go  ·  ← the list
 === 140 classic p/Users/me/Downloads []
                                                                                                 ● 1 running · 306M on disk · 3M can go c
 
@@ -197,25 +197,25 @@ HINT ↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl
 │                                                                               │ │                                                    │
 │                                                                               │ │                                                    │
 ╰───────────────────────────────────────────────────────────────────────────────╯ ╰────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
+HINT ↑↓ move  ·  enter details  ·  c clean up all that can go  ·  esc back
 === 140 classic ~temp []
                                                                                                 ● 1 running · 306M on disk · 3M can go c
 
-╭─ Projects ──────────────────────────────────────────────────────────────── 2 ─╮ ╭─ ◆ alpha ────────────────────────── 1 working · 2 ─╮
-│ ┃ ▾ alpha  /src/alpha · main · 2 changed       300M                           │ │ /src/alpha                                         │
-│ ┃ └─ ✱ fix                   fix the parser    300M                           │ │ main · 2 changed · not pushed anywhere             │
+╭─ Projects ──────────────────────────────────────────────────────────────── 2 ─╮ ╭─ ◌ Temporary ─── /tmp and all sessions’ temp work ─╮
+│ ┃ ▾ alpha  /src/alpha · main · 2 changed       300M                           │ │ Session scratch and caches, including running and… │
+│ ┃ └─ ✱ fix                   fix the parser    300M                           │ │                                                    │
+│                                                                               │ │   WHAT                                       SIZE… │
+│ OTHER FOLDERS  ◇ not a repository ─────────────────────────────────────────── │ │ ◌ /tmp  3 of yours                             4M… │
+│ ┃ ◇ Downloads  /Users/me/Downloads                                            │ │ ◌ Sort downloads ▸                             2M… │
 │                                                                               │ │                                                    │
-│ OTHER FOLDERS  ◇ not a repository ─────────────────────────────────────────── │ │ AGENTS  2 · 1 can go: stopped, untouched 3h, noth… │
-│ ┃ ◇ Downloads  /Users/me/Downloads                                            │ │  WHERE                 AGENT                     … │
-│                                                                               │ │  main checkout       ◦ ol…  ✓ can go               │
-│ ▸ This Mac  temp work, caches, processes         6M  3M can go                │ │  ⎇ fix               · fix the parser            … │
+│ ▾ This Mac  temp work, caches, processes         6M  3M can go                │ │                                                    │
+│ ┃ ├─ ◌ Temporary             /tmp and agen…      6M                           │ │                                                    │
+│ ┃ └─ ⚙ System                0 processes                                      │ │                                                    │
 │ ⇡ Pull requests       asking GitHub…                                          │ │                                                    │
-│                                                                               │ │ WORKTREES  1 · 300M ────────────────────────────── │
-│                                                                               │ │   WORKTREEBRANCH    STATE               SIZE   CA… │
-│                                                                               │ │ ✱ fix               fix the parser …    300M   ma… │
 │                                                                               │ │                                                    │
-│                                                                               │ │ AGENTS' SCRATCH  files agents kept while they wor… │
-│                                                                               │ │ ◌ .claude/tmp       0 items              12M       │
+│                                                                               │ │                                                    │
+│                                                                               │ │                                                    │
+│                                                                               │ │                                                    │
 │                                                                               │ │                                                    │
 │                                                                               │ │                                                    │
 │                                                                               │ │                                                    │
@@ -247,25 +247,25 @@ HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
 │                                                                               │ │                                                    │
 │                                                                               │ │                                                    │
 ╰───────────────────────────────────────────────────────────────────────────────╯ ╰────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
+HINT ↑↓ move  ·  enter details  ·  x clean up…  ·  c clean up all that can go  ·  esc back
 === 140 classic ~temp [enter]
                                                                                                 ● 1 running · 306M on disk · 3M can go c
 
-╭─ Projects ──────────────────────────────────────────────────────────────── 2 ─╮ ╭─ ◆ alpha ────────────────────────── 1 working · 2 ─╮
-│ ┃ ▾ alpha  /src/alpha · main · 2 changed       300M                           │ │ /src/alpha                                         │
-│ ┃ └─ ✱ fix                   fix the parser    300M                           │ │ main · 2 changed · not pushed anywhere             │
+╭─ Projects ──────────────────────────────────────────────────────────────── 2 ─╮ ╭─ ◌ Temporary ─── /tmp and all sessions’ temp work ─╮
+│ ┃ ▾ alpha  /src/alpha · main · 2 changed       300M                           │ │ Session scratch and caches, including running and… │
+│ ┃ └─ ✱ fix                   fix the parser    300M                           │ │                                                    │
+│                                                                               │ │   WHAT                                       SIZE… │
+│ OTHER FOLDERS  ◇ not a repository ─────────────────────────────────────────── │ │ ◌ /tmp  3 of yours                             4M… │
+│ ┃ ◇ Downloads  /Users/me/Downloads                                            │ │ ◌ Sort downloads ▸                             2M… │
 │                                                                               │ │                                                    │
-│ OTHER FOLDERS  ◇ not a repository ─────────────────────────────────────────── │ │ AGENTS  2 · 1 can go: stopped, untouched 3h, noth… │
-│ ┃ ◇ Downloads  /Users/me/Downloads                                            │ │  WHERE                 AGENT                     … │
-│                                                                               │ │  main checkout       ◦ ol…  ✓ can go               │
-│ ▸ This Mac  temp work, caches, processes         6M  3M can go                │ │  ⎇ fix               · fix the parser            … │
+│ ▾ This Mac  temp work, caches, processes         6M  3M can go                │ │                                                    │
+│ ┃ ├─ ◌ Temporary             /tmp and agen…      6M                           │ │                                                    │
+│ ┃ └─ ⚙ System                0 processes                                      │ │                                                    │
 │ ⇡ Pull requests       asking GitHub…                                          │ │                                                    │
-│                                                                               │ │ WORKTREES  1 · 300M ────────────────────────────── │
-│                                                                               │ │   WORKTREEBRANCH    STATE               SIZE   CA… │
-│                                                                               │ │ ✱ fix               fix the parser …    300M   ma… │
 │                                                                               │ │                                                    │
-│                                                                               │ │ AGENTS' SCRATCH  files agents kept while they wor… │
-│                                                                               │ │ ◌ .claude/tmp       0 items              12M       │
+│                                                                               │ │                                                    │
+│                                                                               │ │                                                    │
+│                                                                               │ │                                                    │
 │                                                                               │ │                                                    │
 │                                                                               │ │                                                    │
 │                                                                               │ │                                                    │
@@ -297,25 +297,25 @@ HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
 │                                                                               │ │                                                    │
 │                                                                               │ │                                                    │
 ╰───────────────────────────────────────────────────────────────────────────────╯ ╰────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl+b keep going  ·  ← the list  ·  esc back
+HINT ↑↓ move  ·  x clean up…  ·  r look again  ·  c clean up all that can go  ·  ← the list
 === 140 classic ~system []
                                                                                                 ● 1 running · 306M on disk · 3M can go c
 
-╭─ Projects ──────────────────────────────────────────────────────────────── 2 ─╮ ╭─ ◆ alpha ────────────────────────── 1 working · 2 ─╮
-│ ┃ ▾ alpha  /src/alpha · main · 2 changed       300M                           │ │ /src/alpha                                         │
-│ ┃ └─ ✱ fix                   fix the parser    300M                           │ │ main · 2 changed · not pushed anywhere             │
+╭─ Projects ──────────────────────────────────────────────────────────────── 2 ─╮ ╭─ System ─────────────── processes no project owns ─╮
+│ ┃ ▾ alpha  /src/alpha · main · 2 changed       300M                           │ │ no process here belongs to no one                  │
+│ ┃ └─ ✱ fix                   fix the parser    300M                           │ │                                                    │
 │                                                                               │ │                                                    │
-│ OTHER FOLDERS  ◇ not a repository ─────────────────────────────────────────── │ │ AGENTS  2 · 1 can go: stopped, untouched 3h, noth… │
-│ ┃ ◇ Downloads  /Users/me/Downloads                                            │ │  WHERE                 AGENT                     … │
-│                                                                               │ │  main checkout       ◦ ol…  ✓ can go               │
-│ ▸ This Mac  temp work, caches, processes         6M  3M can go                │ │  ⎇ fix               · fix the parser            … │
+│ OTHER FOLDERS  ◇ not a repository ─────────────────────────────────────────── │ │                                                    │
+│ ┃ ◇ Downloads  /Users/me/Downloads                                            │ │                                                    │
+│                                                                               │ │                                                    │
+│ ▾ This Mac  temp work, caches, processes         6M  3M can go                │ │                                                    │
+│ ┃ ├─ ◌ Temporary             /tmp and agen…      6M                           │ │                                                    │
+│ ┃ └─ ⚙ System                0 processes                                      │ │                                                    │
 │ ⇡ Pull requests       asking GitHub…                                          │ │                                                    │
-│                                                                               │ │ WORKTREES  1 · 300M ────────────────────────────── │
-│                                                                               │ │   WORKTREEBRANCH    STATE               SIZE   CA… │
-│                                                                               │ │ ✱ fix               fix the parser …    300M   ma… │
 │                                                                               │ │                                                    │
-│                                                                               │ │ AGENTS' SCRATCH  files agents kept while they wor… │
-│                                                                               │ │ ◌ .claude/tmp       0 items              12M       │
+│                                                                               │ │                                                    │
+│                                                                               │ │                                                    │
+│                                                                               │ │                                                    │
 │                                                                               │ │                                                    │
 │                                                                               │ │                                                    │
 │                                                                               │ │                                                    │
@@ -347,7 +347,7 @@ HINT ↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl
 │                                                                               │ │                                                    │
 │                                                                               │ │                                                    │
 ╰───────────────────────────────────────────────────────────────────────────────╯ ╰────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
+HINT ↑↓ move  ·  enter details  ·  x clean up…  ·  c clean up all that can go  ·  esc back
 === 120   []
                                                                             ● 1 running · 306M on disk · 3M can go c
 
@@ -378,7 +378,7 @@ HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
 │ AGENTS' SCRATCH  files agents kept while they worked here · x empties it ─────────────────────────────────────── │
 │ ◌ .claude/tmp                               0 items                                     12M                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
+HINT ↑↓ move  ·  enter fold  ·  → details  ·  x clean up…  ·  c clean up all that can go  ·  esc back
 === 100   []
                                                         ● 1 running · 306M on disk · 3M can go c
 
@@ -409,7 +409,7 @@ HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
 │ AGENTS' SCRATCH  files agents kept while they worked here · x empties it ─────────────────── │
 │ ◌ .claude/tmp                       0 items                            12M                   │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
+HINT ↑↓ move  ·  enter fold  ·  → details  ·  x clean up…  ·  c clean up all that can go  ·  esc back
 === 200 classic ~prs []
                                                                                                                                                             ● 1 running · 306M on disk · 3M can go c
 
@@ -459,4 +459,4 @@ HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
 │                                                                                                              │ │                                                                                 │
 │                                                                                                              │ │                                                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
+HINT ↑↓ move  ·  enter details  ·  c clean up all that can go  ·  esc back

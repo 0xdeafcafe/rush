@@ -32,7 +32,7 @@
 │                                                                                           │ │                                                            │
 │                                                                                           │ │                                                            │
 ╰───────────────────────────────────────────────────────────────────────────────────────────╯ ╰────────────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
+HINT ↑↓ move  ·  enter details  ·  c clean up all that can go  ·  esc back
 === 120  []
                                                                                                          ● 3 running
 
@@ -54,7 +54,7 @@ HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
 │  main checkout       · fix alpha                  working                                                     0s │
 │  main checkout       · test alpha                 working                                                     0s │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
+HINT ↑↓ move  ·  enter details  ·  c clean up all that can go  ·  esc back
 === 160 classic [enter]
                                                                                                                                                  ● 3 running
 
@@ -89,7 +89,7 @@ HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
 │                                                                                           │ │                                                            │
 │                                                                                           │ │                                                            │
 ╰───────────────────────────────────────────────────────────────────────────────────────────╯ ╰────────────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl+b keep going  ·  ← the list  ·  esc back
+HINT ↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl+b keep going  ·  c clean up all that can go  ·  ← the list
 === 160 classic [enter down]
                                                                                                                                                  ● 3 running
 
@@ -124,7 +124,7 @@ HINT ↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl
 │                                                                                           │ │                                                            │
 │                                                                                           │ │                                                            │
 ╰───────────────────────────────────────────────────────────────────────────────────────────╯ ╰────────────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl+b keep going  ·  ← the list  ·  esc back
+HINT ↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl+b keep going  ·  c clean up all that can go  ·  ← the list
 === 160 classic [down down down]
                                                                                                                                                  ● 3 running
 
@@ -159,4 +159,4 @@ HINT ↑↓ move  ·  enter open  ·  x close it…  ·  ctrl+y its PR  ·  ctrl
 │                                                                                           │ │                                                            │
 │                                                                                           │ │                                                            │
 ╰───────────────────────────────────────────────────────────────────────────────────────────╯ ╰────────────────────────────────────────────────────────────╯
-HINT ↑↓ move  ·  enter into it  ·  c clean up  ·  esc back
+HINT ↑↓ move  ·  enter details  ·  c clean up all that can go  ·  esc back

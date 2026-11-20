@@ -599,7 +599,11 @@ fn an_untouched_agent_says_it_can_go() {
     );
     let fresh = agent("new", "probe-codex", "/src/alpha", "/src/alpha", 0, HOUR);
     let mut m = model(vec![fresh], 160, 40, classic());
-    let page = body(&mut m);
+    // The page, not its keys: c's says what it cleans up.
+    let page: String = body(&mut m)
+        .lines()
+        .filter(|l| !l.starts_with("HINT"))
+        .collect();
     assert!(
         !page.contains("can go"),
         "'can go' for an agent touched an hour ago:\n{page}"
@@ -986,20 +990,20 @@ fn subagent_worktrees_fold_into_one_row() {
     }
 
     rush_ui_projects_machine::pick_in_projects(&mut m, "f/src/alpha");
-    assert!(hint(&mut m).contains("→ unfold"));
+    assert!(hint(&mut m).contains("enter unfold"));
     press(&mut m, "right");
     let f = tree(&mut m);
     assert!(f.contains("▾ 3 subagent worktrees"), "{f}");
     for n in ["one", "two", "three"] {
         assert!(f.contains(&format!("worktree-agent-{n}")), "{f}");
     }
-    assert!(hint(&mut m).contains("← fold"));
+    assert!(hint(&mut m).contains("enter fold"));
     // ← on a worktree inside folds it again, the cursor back on the fold.
     press(&mut m, "down");
     assert!(press(&mut m, "left") != Out::Close);
     let f = tree(&mut m);
     assert!(f.contains("▸ 3 subagent worktrees"), "{f}");
-    assert!(hint(&mut m).contains("→ unfold"));
+    assert!(hint(&mut m).contains("enter unfold"));
 }
 
 #[test]
