@@ -1,5 +1,5 @@
 //! The sheets' and panels' behaviour, after Go's internal/ui tests
-//! (misdirect_test.go, mention_test.go, quickask_test.go,
+//! (mention_test.go, quickask_test.go,
 //! sidekick_test.go, discuss_test.go, rewind_test.go,
 //! compactsheet_test.go, messagesheet_test.go, handoff_ready_test.go)
 //! and the keys each sheet answers, as tables. No sleeps: a model with
@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use rush_core::agent::{Agent, State, Todo};
+use rush_core::agent::Agent;
 
 use super::btw::{Btws, Qa};
 use super::discuss::{chat_turns, ctx_words};
@@ -19,7 +19,6 @@ use super::mention::*;
 use super::message::{
     MessageSheet, UserMessage, expanded_message, hard_wrap, message_link, open_user_message,
 };
-use super::misdirect::*;
 use super::quickask::{QuickAsk, guide_opens};
 use super::rewind::turn_starts;
 use super::sidekick::parse_side;
@@ -34,236 +33,6 @@ fn agent(key: &str, name: &str) -> Agent {
         display_name: name.into(),
         ..Agent::default()
     }
-}
-
-// The two sessions of the day it went wrong: a langwatch coordinator and
-// a yap session whose newest commit was its History window.
-fn misdirect_fleet() -> (Agent, Agent, HashMap<String, Vec<String>>) {
-    let mut lw = agent("lw", "coordinator");
-    lw.repo = "langwatch".into();
-    lw.branch = "feat/strict-feature-layout-v0".into();
-    lw.job.cwd = "/src/langwatch".into();
-    lw.job.name = "coordinator".into();
-    lw.job.intent = "collect lanes and commit slices".into();
-    lw.job.todos = vec![
-        Todo {
-            label: "Collect dashboard lane".into(),
-            ..Todo::default()
-        },
-        Todo {
-            label: "Run lint on identity module".into(),
-            ..Todo::default()
-        },
-    ];
-    lw.job.state = State::Working;
-    let mut yap = agent("yap", "yap");
-    yap.repo = "yap".into();
-    yap.branch = "main".into();
-    yap.job.cwd = "/src/yap".into();
-    yap.job.name = "dictation app".into();
-    yap.job.intent = "build the dictation app".into();
-    yap.job.state = State::Working;
-    yap.pid = 42;
-    let mut subjects = HashMap::new();
-    subjects.insert(
-        "/src/langwatch".to_string(),
-        vec![
-            "fix(dashboard): an invalid widget definition is a 422 refusal".to_string(),
-            "refactor(identity): auth commands go through AuthApi".to_string(),
-        ],
-    );
-    subjects.insert(
-        "/src/yap".to_string(),
-        vec![
-            "feat: History window lists past dictations".to_string(),
-            "feat(macos): menu bar icon".to_string(),
-        ],
-    );
-    (lw, yap, subjects)
-}
-
-/// TestMisdirectedRoutesToTheBetterMatch, …LeavesOrdinaryMessagesAlone,
-/// …NeedsMoreThanAWord.
-#[test]
-fn misdirected_picks_only_a_clear_match() {
-    let (lw, yap, mut subjects) = misdirect_fleet();
-    let agents = vec![lw.clone(), yap.clone()];
-    for text in [
-        "this history needs to use macos liquid glass ui!!",
-        "in yap, make the window wider",
-    ] {
-        let (to, words) = misdirected(text, &lw, &[1], &agents, &subjects).expect(text);
-        assert_eq!(to, 1, "{text}");
-        assert!(!words.is_empty());
-    }
-    for text in [
-        "keep going",
-        "commit",
-        "yes",
-        "looks good, ship it",
-        "fix the failing test",
-        "why did the dashboard widget refuse with a 422?",
-        "use astra for all ui stuff",
-        "",
-        "the dashboard history window",
-        "the history is wrong",
-    ] {
-        assert!(
-            misdirected(text, &lw, &[1], &agents, &subjects).is_none(),
-            "{text}"
-        );
-    }
-    // Two sessions as likely as each other: nothing stands out.
-    let mut yap2 = yap.clone();
-    yap2.key = "yap2".into();
-    let three = vec![lw.clone(), yap.clone(), yap2];
-    assert!(
-        misdirected(
-            "in yap, make the window wider",
-            &lw,
-            &[1, 2],
-            &three,
-            &subjects
-        )
-        .is_none()
-    );
-    // A session in the same repo says nothing.
-    let mut other = yap.clone();
-    other.key = "lw2".into();
-    other.repo = "langwatch".into();
-    other.job.cwd = "/src/langwatch2".into();
-    subjects.insert("/src/langwatch2".into(), subjects["/src/yap"].clone());
-    let two = vec![lw.clone(), other];
-    assert!(
-        misdirected(
-            "this history needs to use macos liquid glass ui!!",
-            &lw,
-            &[1],
-            &two,
-            &subjects
-        )
-        .is_none()
-    );
-}
-
-#[derive(Default)]
-struct Sent(usize);
-
-fn misdirect_model() -> Model {
-    let (lw, yap, subjects) = misdirect_fleet();
-    let mut m = hosted(120, 40);
-    m.agents = vec![lw, yap];
-    m.order = vec![0, 1];
-    m.kept::<Fake>().info.insert(
-        "lw".into(),
-        HostInfo {
-            kind: "claude".into(),
-            ..HostInfo::default()
-        },
-    );
-    m.kept::<Misdirect>().subjects = subjects;
-    m
-}
-
-fn send_here() -> crate::frame::confirm::Then {
-    Box::new(|m: &mut Model| {
-        m.kept::<Sent>().0 += 1;
-        Out::Draw
-    })
-}
-
-/// enter in the Session's box asks before a message that looks meant
-/// for another agent goes (rushmode.go:4722 sendPane's askMisdirected).
-#[test]
-fn misdirected_asks_from_the_box() {
-    let mut m = misdirect_model();
-    m.session.as_mut().unwrap().key = "lw".into();
-    let text = "this history needs to use macos liquid glass ui!!";
-    crate::sess::conn(&mut m, "lw").input.set(text);
-    crate::screens::session_core::keys::send(&mut m, "lw", false);
-    let c = m.confirm.as_ref().expect("asks first");
-    assert!(
-        c.question.starts_with("Looks meant for yap"),
-        "{}",
-        c.question
-    );
-    // Asked on the box's top line, not in a box over the conversation
-    // (rushmode.go:3740, view.go:629; sweep 3 N2).
-    let f: Vec<String> = m.frame().iter().map(|l| l.plain()).collect();
-    let at: Vec<&String> = f
-        .iter()
-        .filter(|l| l.contains("Looks meant for yap"))
-        .collect();
-    assert_eq!(at.len(), 1, "{f:#?}");
-    assert!(
-        at[0].contains("enter send there · s send here anyway · esc edit"),
-        "{}",
-        at[0]
-    );
-    assert!(m.confirm.as_ref().unwrap().inlined);
-    assert!(
-        !f.iter().any(|l| l.contains("it mentions")),
-        "no box over the screen"
-    );
-    press(&mut m, "esc");
-    assert_eq!(
-        crate::sess::conn(&mut m, "lw").input.string(),
-        text,
-        "left in the box to edit"
-    );
-}
-
-/// TestAskMisdirectedKeys, TestAskMisdirectedSkipsFinishedSessions.
-#[test]
-fn misdirected_asks_and_its_keys() {
-    let text = "this history needs to use macos liquid glass ui!!";
-    let mut m = misdirect_model();
-    assert!(!ask_misdirected(&mut m, "lw", "keep going", send_here()) && m.confirm.is_none());
-    assert!(ask_misdirected(&mut m, "lw", text, send_here()));
-    let line = m.confirm.as_ref().unwrap().box_line().plain();
-    for want in [
-        "Looks meant for yap (yap)",
-        "send there",
-        "s send here anyway",
-    ] {
-        assert!(line.contains(want), "{line}");
-    }
-    // esc: nothing sent, nothing forwarded.
-    press(&mut m, "esc");
-    assert!(m.confirm.is_none() && m.kept::<Sent>().0 == 0 && acts(&mut m).is_empty());
-    // s: sent here.
-    ask_misdirected(&mut m, "lw", text, send_here());
-    press(&mut m, "s");
-    assert_eq!(m.kept::<Sent>().0, 1);
-    assert!(
-        !m.kept::<Misdirect>().skip,
-        "the next send is checked again"
-    );
-    // enter and space: forwarded to yap, the box emptied.
-    for k in ["enter", "space"] {
-        let mut m = misdirect_model();
-        ask_misdirected(&mut m, "lw", text, send_here());
-        press(&mut m, k);
-        assert_eq!(
-            acts(&mut m),
-            vec![Act::ReplyTo {
-                to: "yap".into(),
-                text: text.into(),
-                tagged: text.into()
-            }],
-            "{k}"
-        );
-        assert_eq!(m.kept::<Sent>().0, 0);
-    }
-    // A finished session isn't offered.
-    let mut m = misdirect_model();
-    m.agents[1].job.state = State::Done;
-    assert!(!ask_misdirected(
-        &mut m,
-        "lw",
-        "in yap, make the window wider",
-        send_here()
-    ));
 }
 
 fn mention_model() -> Model {

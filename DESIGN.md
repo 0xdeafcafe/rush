@@ -4807,6 +4807,15 @@ ago into its successor's row (rush_fleet's fold_retired), which shows
 handover event carries both conversations (`fromSession`, `toSession`)
 and `cwd`.
 
+## A message goes where it was typed (differs from Go)
+
+Go asked "Looks meant for … ?" before sending a message whose words
+matched another live session's name or newest commits
+(rushmode.go:4722 askMisdirected, misdirect.go). The guess was wrong far
+more often than right, and saying yes sent the message to a session you
+weren't looking at, so it seemed lost. rush sends every message to the
+session it was typed in and never asks; the module is gone.
+
 ## Guests in a conversation (Rust-only)
 
 Other models answer in a conversation rush hosts: `@kimi …` in the box,

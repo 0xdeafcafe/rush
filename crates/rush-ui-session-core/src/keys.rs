@@ -718,13 +718,10 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
     if conn(m, key).hosted() && super::guests::tagged(&text) {
         return super::guests::send(m, key, text);
     }
-    // A message that looks meant for another agent asks where it goes
-    // (rushmode.go:4722 askMisdirected).
-    let k = key.to_string();
-    let again: crate::frame::confirm::Then = Box::new(move |m| send(m, &k, asked_now));
-    if rush_ui_session_cards::misdirect::ask_misdirected(m, key, &text, again) {
-        return Out::Draw;
-    }
+    // A message goes to the session it was typed in. Go asked first when
+    // it looked meant for another agent (rushmode.go:4722 askMisdirected);
+    // the guess was wrong more often than right and sent messages off to
+    // sessions you weren't looking at, so rush no longer asks.
     // A message waking a cold cache asks first; yes sends it as it was
     // (rushmode.go:4725 askCold).
     let k = key.to_string();

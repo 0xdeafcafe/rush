@@ -3,8 +3,8 @@
 //! Rust-only), Claude's questions, a decisions
 //! block as a card, /rewind, /fork, /compact, #slim, the export sheet,
 //! the message sheet, enter's first-time question, the quick ask, /btw,
-//! the sidekick's notes, rooms on a session, mentions, misdirected
-//! messages, a stop with a message, handing a session to another harness,
+//! the sidekick's notes, rooms on a session, mentions,
+//! a stop with a message, handing a session to another harness,
 //! and the message box's pastes and pictures.
 //!
 //! Go: permcard.go, permissions.go, question.go, rushmode.go's cards
@@ -14,7 +14,7 @@
 //! (cardModal :32), host/decisions.go (DecisionsOf :377, DecisionAnswer
 //! :400), host/answer.go, asksheets.go, rewindsheet.go, forksheet.go,
 //! compactsheet.go, slimsheet.go, entersheet.go, messagesheet.go,
-//! pastes.go, imagerefs.go, clipimage.go, mention.go, misdirect.go,
+//! pastes.go, imagerefs.go, clipimage.go, mention.go,
 //! handoff.go, handoff_ready.go, stopnote.go, quickask.go, btwpanel.go,
 //! sidekick.go, discuss.go.
 //!
@@ -54,7 +54,6 @@ pub mod memcard;
 pub mod mention;
 pub mod mentionfiles;
 pub mod message;
-pub mod misdirect;
 pub mod pastes;
 pub mod permcard;
 pub mod permissions;
@@ -674,7 +673,6 @@ pub fn register(x: &mut Ext) {
     x.mouse.push(mouse);
     x.overlays.push(btw::btw_overlay);
     x.overlays.push(quickask::quick_over);
-    x.on_fleet.push(misdirect::refresh_subjects);
     x.on_fleet.push(handles::sync);
     x.command(
         "remember",
