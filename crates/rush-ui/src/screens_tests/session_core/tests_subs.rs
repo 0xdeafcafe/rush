@@ -691,3 +691,26 @@ fn a_runs_name_before_its_facts() {
     assert!(row.contains("Build the emergency rollback"), "{row:?}");
     assert!(!row.contains("steps"), "{row:?}");
 }
+
+/// The Running card says what rush's own tools and another MCP server's
+/// do, never the mcp__server__tool the harness calls them (Rust-only).
+#[test]
+fn running_tools_by_what_they_do() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("s.jsonl");
+    let lines = [
+        r#"{"type":"user","timestamp":"2026-09-23T20:00:00Z","message":{"role":"user","content":"land it"}}"#,
+        r#"{"type":"assistant","timestamp":"2026-09-23T20:00:01Z","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"mcp__rush__agent_send","input":{"id":"c2ac16ec","prompt":"merge it"}},{"type":"tool_use","id":"t2","name":"mcp__rush__view","input":{"name":"integ"}},{"type":"tool_use","id":"t3","name":"mcp__linear__search","input":{"q":"x"}}]}}"#,
+    ];
+    std::fs::write(&p, lines.join("\n") + "\n").unwrap();
+    let mut t = Tail::new(&p, rush_convo::decode(rush_claude::messages));
+    let mut s = Session::new();
+    t.read(&mut s).unwrap();
+    let spin = |_: usize| rush_core::text::Span::plain("*");
+    let (ls, _) = super::side::tools(&s, &spin, "", NOW, 60);
+    let got = text(&ls);
+    assert!(!got.contains("mcp__"), "{got}");
+    assert!(got.contains("telling an agent"), "{got}");
+    assert!(got.contains("updating its view"), "{got}");
+    assert!(got.contains("search  linear"), "{got}");
+}

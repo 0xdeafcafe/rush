@@ -136,7 +136,7 @@ pub fn decisions(open: &[(u32, Vec<Decision>)], w: usize) -> (Vec<Line>, Vec<Str
 /// What a tool at work does, in two parts: in its agent's words or its
 /// tool's name, then what it works on, quieter (after the conversation's
 /// step label, render/draw.rs label).
-fn step_what(st: &Step, dir: &str) -> (String, String) {
+fn step_what(s: &Session, st: &Step, dir: &str) -> (String, String) {
     let x = &st.call().input;
     let rel = |p: &str| -> String {
         if !dir.is_empty()
@@ -162,6 +162,19 @@ fn step_what(st: &Step, dir: &str) -> (String, String) {
         Kind::Fetch => (st.tool.to_string(), one_line(&x.url)),
         Kind::WebSearch => (st.tool.to_string(), one_line(&x.query)),
         _ => {
+            // rush's own tools by what they do, to which agent; another
+            // MCP server's tool by its name and server: never the
+            // mcp__server__tool the harness calls it.
+            if let Some(w) = rush_convo::model::runs::rush_words(s, st, true) {
+                return (w, String::new());
+            }
+            if let Some((server, tool)) = st
+                .tool
+                .strip_prefix("mcp__")
+                .and_then(|r| r.split_once("__"))
+            {
+                return (tool.to_string(), server.to_string());
+            }
             let title = one_line(&st.call().title);
             if title.is_empty() {
                 (st.tool.to_string(), desc)
@@ -216,7 +229,7 @@ pub fn tools(
         } else {
             Line::new()
         };
-        let (what, on) = step_what(st, dir);
+        let (what, on) = step_what(s, st, dir);
         let mut left = line([plain("   "), spin(i), plain(" "), sp(what, TEXT)]);
         if !on.is_empty() {
             left.spans.push(plain("  "));

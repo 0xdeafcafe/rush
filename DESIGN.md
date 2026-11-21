@@ -629,6 +629,12 @@ Claude, fleet, the other adapters) builds on these.
   (`find_scratch`, `clear_scratch`); `Reaper` for what agents leave
   running; `next_login` and `chain`. Claude's subagent runs are read by
   rush-claude's `subruns::SubagentRuns`, its `RunFollower::subagent_runs`.
+  The transcripts are read one after another (the session's, then its
+  runs'), so a run's end told after its background launch by their
+  times is its end whatever order they were read in, and an end seen
+  again counts as late as it's last seen (Rust-only: a run another run
+  started, its end in the session's transcript and its launch in that
+  run's, stayed running for a day).
 - **Honest sizes** (Rust-only, lane F of the disk engine). `disk_space`
   (and `disk_space_background`) returns a `Space`: `on_disk`, each file
   counted once by (device, inode) however many of its hard links the one
@@ -1177,6 +1183,12 @@ is taken over too (`pgguard::adopt`), and the agent is reaped by pid
 If the exec fails, the fds go back to close-on-exec, the state file is
 removed, the adapter is told to `keep` (its reader and writer carry on)
 and `Info.upgrade` says `failed: why`. Nothing is ever stopped to move.
+An agent busy a moment as it's passed (`adapter::Busy`: Claude Code
+awaiting the reply to one of rush's control requests, or asking as it's
+paused) isn't a failure: the move stays due and is tried again every
+`UPGRADE_AGAIN` (2 s), up to `UPGRADE_TRIES` (30), each an `upgrade-busy`
+event (Rust-only: a busy orchestrator's rehost once failed on the first
+such moment and left it on its old rush).
 
 What survives: the agent process and its pipes, the conversation, the
 replay, queue/hold/away/decisions state, costs, the turn count. What
@@ -3644,7 +3656,10 @@ is made. Everything below is in `rush_ui::frame`.
   message). Never in the system prompt, which stays the same for the
   cache; the conversation leaves it out of your message
   (`transcript::STALE_VIEWS_LEAD`, only as the message's last
-  paragraph). The agent's set clears the grey. **Views off** (Settings, Agent views;
+  paragraph). An agent that takes rush's notices at its tool calls
+  (`Info.inbox`: Claude Code) gets the line there instead, once, headed
+  as rush's word (`inbox::NOTICE_NOTE`), and your message goes as you
+  wrote it: agents took the line at its end for yours (Rust-only). The agent's set clears the grey. **Views off** (Settings, Agent views;
   config `viewsOff`, on by default): the panel and list lines hide, the
   prompt part and the `view` MCP tool aren't given to agents started
   afterwards, a call is refused and no sweep or notice runs. The agent's

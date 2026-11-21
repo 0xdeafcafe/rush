@@ -489,6 +489,8 @@ pub(crate) struct State {
     /// being tried (server/upgrade.rs).
     upgrade_due: bool,
     upgrading: bool,
+    /// Tries the move has had, its agent busy a moment each (Busy).
+    upgrade_tries: u32,
     /// Its socket's listener, by number: what a move keeps open.
     listen_fd: i32,
     /// Its part in a conversation with guests: see server/guests.rs.
@@ -873,6 +875,7 @@ fn build(reg: Registry, hooks: Hooks, mut cfg: Config) -> (Host, Receiver<Msg>) 
         em: Em::default(),
         upgrade_due: false,
         upgrading: false,
+        upgrade_tries: 0,
         listen_fd: -1,
         gs: guests::GuestState::default(),
     };
@@ -2161,13 +2164,28 @@ impl Host {
     }
 
     /// The line on the stale views put at the end of the agent's next
-    /// message, "" for none: it names each greyed view still there.
+    /// message, "" for none: it names each greyed view still there. An
+    /// agent that takes rush's notices at its tool calls (Info.inbox) is
+    /// told there instead, as rush's word, and your message goes as you
+    /// wrote it (Rust-only: agents took the line for yours).
     fn views_note(&self, st: &State) -> String {
         let names = crate::views::greyed_names(&st.cfg.id);
         if names.is_empty() || rush_state::Store::load().config.views_off {
             return String::new();
         }
-        crate::viewstale::note(&names)
+        let note = crate::viewstale::note(&names);
+        if st.info.inbox {
+            let waiting = std::fs::read_to_string(
+                crate::inbox::inbox_dir(&st.cfg.id).join(crate::inbox::MAIN_NOTICE),
+            )
+            .unwrap_or_default();
+            if waiting.contains(&note)
+                || crate::inbox::tell(&st.cfg.id, crate::inbox::MAIN_NOTICE, &note).is_ok()
+            {
+                return String::new();
+            }
+        }
+        note
     }
 
     fn arm_views_always(&self, st: &mut State) {
@@ -3570,6 +3588,7 @@ impl Host {
         }
         self.record(st, lines::answered_line(id));
         st.info.asking.retain(|a| a.id != id);
+        st.info.parent_answers &= !st.info.asking.is_empty();
         st.info.questions.retain(|q| q.id != id);
         if st.pending.is_empty() && st.info.state == "blocked" {
             st.info.state = "working".into();
@@ -3624,6 +3643,7 @@ impl Host {
         st.info.retry = None;
         st.info.needs.clear();
         st.info.asking.clear();
+        st.info.parent_answers = false;
         st.info.questions.clear();
         st.info.decisions = None;
         if !resume {
@@ -3745,6 +3765,7 @@ impl Host {
                         call: call_text(&a.call),
                         reason: a.reason.clone(),
                     });
+                    self.ask_parent(st);
                 }
             }
             Event::Question(q) => {
@@ -4020,6 +4041,7 @@ impl Host {
             st.info.state = "idle".into();
             st.info.needs.clear();
             st.info.asking.clear();
+            st.info.parent_answers = false;
             st.info.questions.clear();
             self.views_at_turn_end(st);
             let t = e.text.trim();

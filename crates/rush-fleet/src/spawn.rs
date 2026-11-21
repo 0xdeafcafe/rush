@@ -282,11 +282,21 @@ impl Loader {
                     .unwrap_or_default()
             })
             .collect();
+        // A run a rush session started that's done asks nothing of you
+        // whatever it last said, a usage limit's "continue?" among them:
+        // the session that started it was told how it ended, and it's
+        // that session's to deal with (Rust-only). Nor does one whose
+        // ask went to that session to answer (Info.parentAnswers).
         let asks: Vec<Option<Ask>> = agents
             .iter()
             .zip(&names)
-            .map(|(a, n)| {
-                (a.job.state == State::Blocked && !a.checking && !a.decides).then(|| Ask::of(a, n))
+            .zip(&up)
+            .map(|((a, n), u)| {
+                let started = matches!(u, Some((_, false)));
+                let done = started && a.pid == 0;
+                let handled = started && a.parent_answers;
+                (a.job.state == State::Blocked && !a.checking && !a.decides && !done && !handled)
+                    .then(|| Ask::of(a, n))
             })
             .collect();
         // The rows a run they started, or one it started, waits on you

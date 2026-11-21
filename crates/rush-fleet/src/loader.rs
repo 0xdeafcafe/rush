@@ -1861,6 +1861,7 @@ impl Loader {
             why: info.meta.get("why").cloned().unwrap_or_default(),
             peer: info.remote.clone(),
             decides: blocked && info.decisions.is_some(),
+            parent_answers: info.parent_answers,
             at_work,
             lineage: crate::emeritus::lineage_of(info),
             job: j,

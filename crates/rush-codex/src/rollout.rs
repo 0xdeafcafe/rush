@@ -615,14 +615,26 @@ impl Replay {
                 if s(&ri, "recipient") != me {
                     return;
                 }
+                // Only the agent that started this one speaks to it as its
+                // user: what the others of its team (and, for the first
+                // agent, those it started) say is between them. Codex
+                // writes each as an envelope, its payload often sealed;
+                // the payload alone is said (Rust-only).
+                let parent = me.rsplit_once('/').map_or("", |(p, _)| p);
+                let from = s(&ri, "author");
+                if parent.is_empty() || !from.is_empty() && from != parent {
+                    return;
+                }
                 let mut m = Message {
                     role: "user".into(),
                     id: st(&ri, "id"),
                     ..Message::default()
                 };
                 for c in content {
-                    if s(c, "type") == "input_text" && !s(c, "text").is_empty() {
-                        m.parts.push(text_part(PartKind::Text, st(c, "text")));
+                    let t = s(c, "type");
+                    let said = envelope_payload(s(c, "text"));
+                    if t == "input_text" && !said.is_empty() {
+                        m.parts.push(text_part(PartKind::Text, said.to_string()));
                     }
                 }
                 if !m.parts.is_empty() {
@@ -632,6 +644,16 @@ impl Replay {
             _ => {}
         }
     }
+}
+
+/// What one Codex agent says to another, without the envelope Codex
+/// puts it in ("Message Type: …\nTask name: …\nSender: …\nPayload:\n");
+/// text with no envelope, as it was.
+fn envelope_payload(text: &str) -> &str {
+    if !text.starts_with("Message Type: ") {
+        return text.trim();
+    }
+    text.split_once("\nPayload:").map_or("", |(_, p)| p).trim()
 }
 
 /// An item_completed payload's item, kept as written.
@@ -1159,6 +1181,71 @@ pub(crate) mod tests {
     fn history_items() {
         let got = history(&item_turn(Rollout::new(t0())), 0);
         assert_eq!(got, item_turn_want());
+    }
+
+    // What a Codex agent's team says to it: only the agent that started
+    // it is its user, and then only what its envelope carries. The first
+    // agent has no one above it, so nothing its own agents say reaches
+    // the conversation (Rust-only).
+    #[test]
+    fn team_messages() {
+        let env = |kind: &str, to: &str, from: &str, said: &str| {
+            json!({"id": "am", "author": from, "recipient": to, "content": [
+                {"type": "input_text", "text": format!("Message Type: {kind}\nTask name: {to}\nSender: {from}\nPayload:\n{said}")},
+            ]})
+        };
+        for (path, msg, want) in [
+            (
+                "",
+                env(
+                    "FINAL_ANSWER",
+                    "/root",
+                    "/root/drawable",
+                    "Extended the test.",
+                ),
+                None,
+            ),
+            ("", env("MESSAGE", "/root", "/root/native", ""), None),
+            (
+                "/root/graph",
+                env("NEW_TASK", "/root/graph", "/root", "Build the graph."),
+                Some("user() text:Build the graph."),
+            ),
+            (
+                "/root/graph",
+                env("NEW_TASK", "/root/graph", "/root", ""),
+                None,
+            ),
+            (
+                "/root/graph",
+                env("MESSAGE", "/root/graph", "/root/sink", "done"),
+                None,
+            ),
+            (
+                "/root/graph",
+                json!({"id": "am", "author": "/root", "recipient": "/root/graph", "content": [{"type": "input_text", "text": "plain"}]}),
+                Some("user() text:plain"),
+            ),
+        ] {
+            let mut m = meta("thread-3", "exec".into());
+            if !path.is_empty() {
+                m["agent_path"] = json!(path);
+            }
+            let r = Rollout::new(t0())
+                .add("session_meta", m)
+                .add(
+                    "turn_context",
+                    json!({"model": "gpt-5", "approval_policy": "never"}),
+                )
+                .event("task_started", json!({}))
+                .response("agent_message", msg.clone());
+            let got = history(&r, 0);
+            let users: Vec<&String> = got.iter().filter(|l| l.starts_with("user(")).collect();
+            match want {
+                Some(w) => assert_eq!(users, [w], "{path} {msg}"),
+                None => assert!(users.is_empty(), "{path} {msg}: {got:?}"),
+            }
+        }
     }
 
     // A turn without items, as older and guardian rollouts are, is read

@@ -501,8 +501,14 @@ impl SubagentRuns {
             ids.extend(tag_texts(seg, "tool-use-id"));
             for id in ids {
                 let woke = self.woken.get(&id).copied().unwrap_or(0);
-                match self.ends.get(&id) {
-                    Some(e) if e.status == end.status && woke <= e.seq => {}
+                match self.ends.get_mut(&id) {
+                    // Seen again, it's the same end, kept from when first
+                    // seen: but as late as it's last seen, since the
+                    // transcripts are read one after another, not in the
+                    // order they were written (Rust-only).
+                    Some(e) if e.status == end.status && woke <= e.seq => {
+                        e.seq = e.seq.max(end.seq);
+                    }
                     _ => {
                         self.ends.insert(id, end.clone());
                     }
@@ -518,6 +524,10 @@ impl SubagentRuns {
     pub fn state(&self, id: &str, tool_use_id: &str) -> (RunState, String, Ms) {
         let (mut run, mut done): (i64, i64) = (-1, -1);
         let mut end = RunEnd::default();
+        // When it was launched in the background, while that's what says
+        // it runs: a run another run started is launched in that run's
+        // transcript, read after the session's, where its end is told.
+        let mut launched: Ms = 0;
         if !tool_use_id.is_empty()
             && let Some(c) = self.calls.get(tool_use_id)
         {
@@ -525,6 +535,7 @@ impl SubagentRuns {
                 run = c.seq as i64;
             } else if c.is_async {
                 run = c.res_seq as i64;
+                launched = c.at;
             } else {
                 done = c.res_seq as i64;
                 end = RunEnd {
@@ -549,12 +560,17 @@ impl SubagentRuns {
                 && w as i64 > run
             {
                 run = w as i64;
+                launched = 0;
             }
         }
         if run < 0 && done < 0 {
             return (RunState::Unknown, String::new(), 0);
         }
-        if run > done {
+        // Its end told after its launch, by their times, is its end, read
+        // in whichever order (Rust-only: a nested run stayed running for
+        // a day, its end read before its launch).
+        let ended_after = done >= 0 && launched != 0 && end.at >= launched;
+        if run > done && !ended_after {
             return (RunState::Running, String::new(), 0);
         }
         (RunState::Done, end.status, end.at)
@@ -1118,6 +1134,30 @@ mod tests {
             r.going("a1", "t1", ms(quiet), now()),
             (false, "ended".into())
         );
+    }
+
+    /// A run another run started is launched in that run's transcript,
+    /// read after the session's, which tells of its end: read that way
+    /// round, it has still ended, with or without its end told again
+    /// where it was launched (Rust-only: one stayed running for a day).
+    #[test]
+    fn a_nested_runs_end_read_before_its_launch() {
+        let end = r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T18:50:58Z","content":"<task-notification>\n<task-id>a17</task-id>\n<tool-use-id>t9</tool-use-id>\n<status>completed</status>\n</task-notification>"}"#;
+        let launch = r#"{"type":"assistant","isSidechain":true,"timestamp":"2026-11-15T18:40:00Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t9","name":"Agent","input":{"description":"Research","run_in_background":true}}]}}"#;
+        let launched = r#"{"type":"user","isSidechain":true,"timestamp":"2026-11-15T18:40:01Z","toolUseResult":{"isAsync":true,"agentId":"a17"},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t9","content":"Async agent launched successfully."}]}}"#;
+        let again = r#"{"isSidechain":true,"timestamp":"2026-11-15T18:50:59Z","attachment":{"type":"queued_command","prompt":"<task-notification>\n<task-id>a17</task-id>\n<tool-use-id>t9</tool-use-id>\n<status>completed</status>\n</task-notification>"}}"#;
+        for lines in [
+            vec![end, launch, launched],
+            vec![end, launch, launched, again],
+        ] {
+            let r = fed(&lines.iter().map(|l| l.to_string()).collect::<Vec<_>>());
+            let (st, status, _) = r.state("a17", "t9");
+            assert!(
+                st == RunState::Done && status == "completed",
+                "{} lines: {st:?} {status:?}",
+                lines.len()
+            );
+        }
     }
 
     /// The lines given, read as the session's transcript's.

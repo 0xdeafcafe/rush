@@ -90,6 +90,7 @@ impl adapter::Adopter for Fake {
         Ok(Box::new(FakeConn {
             sink,
             closed: AtomicUsize::new(0),
+            busy: AtomicUsize::new(0),
         }))
     }
 }
@@ -126,6 +127,9 @@ impl Driver for Fake {
         Ok(Box::new(FakeConn {
             sink,
             closed: AtomicUsize::new(0),
+            // Started on model "busy-twice", its first two passes are
+            // refused as Busy, as Claude's is mid-exchange with rush.
+            busy: AtomicUsize::new(if o.model == "busy-twice" { 2 } else { 0 }),
         }))
     }
 }
@@ -133,6 +137,7 @@ impl Driver for Fake {
 struct FakeConn {
     sink: Arc<dyn Sink>,
     closed: AtomicUsize,
+    busy: AtomicUsize,
 }
 
 impl Conn for FakeConn {
@@ -238,6 +243,13 @@ impl Conn for FakeConn {
 
 impl adapter::Upgrader for FakeConn {
     fn pass(&self) -> adapter::Result<adapter::Upgrade> {
+        if self
+            .busy
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .is_ok()
+        {
+            return Err(Box::new(adapter::Busy("answering rush".into())));
+        }
         Ok(adapter::Upgrade {
             unread: b"half a line".to_vec(),
             state: serde_json::json!({"fake": true}),

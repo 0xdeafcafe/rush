@@ -85,14 +85,26 @@ pub struct AnswerInput {
     pub reason: String,
 }
 
-/// What a session sends agent_send.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// What a session sends agent_send. It goes in the background unless
+/// background is false: a session waiting on an agent's answer can't
+/// read what the user sends it meanwhile (Rust-only; it waited unless
+/// told not to, and sessions sat for half an hour on one).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SendInput {
     pub id: String,
     pub prompt: String,
-    #[serde(skip_serializing_if = "is_false")]
     pub background: bool,
+}
+
+impl Default for SendInput {
+    fn default() -> SendInput {
+        SendInput {
+            id: String::new(),
+            prompt: String::new(),
+            background: true,
+        }
+    }
 }
 
 /// Keeps a session's views, the panel rush draws beside its conversation.
@@ -241,13 +253,14 @@ waits up to that long for it to finish (at most 600); 0 answers at once."
         Tool {
             name: AGENT_SEND.into(),
             description: "Send a follow-up to an agent you started with spawn_agent or start_agent: it carries on with its own conversation. \
-Waits for its answer unless background."
+Returns at once; its answer comes as a message when it's done. Set background to false only when your very next \
+step needs its answer: you can't read what the user sends while you wait."
                 .into(),
             input_schema: schema(
                 serde_json::json!({
                     "id": prop("string", "The agent's id, as spawn_agent or start_agent returned it."),
                     "prompt": prop("string", "What to tell it."),
-                    "background": prop("boolean", "Return at once; its answer comes as a message."),
+                    "background": prop("boolean", "True when left out: return at once, its answer coming as a message. False waits for it."),
                 }),
                 &["id", "prompt"],
             ),

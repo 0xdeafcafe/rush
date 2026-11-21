@@ -505,6 +505,10 @@ pub struct Info {
         deserialize_with = "nullvec::deserialize"
     )]
     pub asking: Vec<Asking>,
+    /// What it asks was sent to the session that started it, which answers
+    /// it (answer_agent): it isn't the user's to see to. Rust-only.
+    #[serde(rename = "parentAnswers", skip_serializing_if = "std::ops::Not::not")]
+    pub parent_answers: bool,
     /// The questions it waits on you to answer, each whole (its options,
     /// multi-select or not): what its parent's session answers it from
     /// (a subagent's ask, Rust-only). Kept apart from asking, which only

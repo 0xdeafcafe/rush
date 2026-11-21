@@ -293,6 +293,8 @@ struct WireInfo {
     state: String,
     detail: String,
     needs: String,
+    #[serde(rename = "parentAnswers")]
+    parent_answers: bool,
     #[serde(rename = "costUsd")]
     cost_usd: f64,
     limit: Option<WireLimit>,
@@ -387,6 +389,7 @@ pub(crate) fn read_info(dir: &Path) -> Option<HostInfo> {
         state: w.state,
         detail: w.detail,
         needs: w.needs,
+        parent_answers: w.parent_answers,
         cost_usd: w.cost_usd,
         limit: w.limit.map(|l| Limit {
             resets_at: time(&l.resets_at),

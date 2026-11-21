@@ -50,7 +50,7 @@ idle child "working" (DESIGN.md, "Background tasks an earlier turn left").
 | `spawn_agent` | `agent` (a name its description lists: `astra`, `haiku`, `kimi-code-k3`; or a model, harness or provider by its own name: `gpt-6.1-sol`, `sol 6.1`, `codex`, `codex astra`), `prompt`, optional `model`, `effort`, `background` | the answer, or the child's id when `background` |
 | `start_agent` | `agent`, `prompt`, optional `model`, `effort`, as `spawn_agent`, and `cwd` | the new session's id, at once |
 | `agent_result` | `id` (a child's or a sibling's), `wait_seconds` (≤600) | the answer once done, else how it stands |
-| `agent_send` | `id`, `prompt`, `background` | a follow-up's answer; the child keeps its conversation |
+| `agent_send` | `id`, `prompt`, `background` (true when left out, Rust-only) | `Sent.` at once, its answer coming as a message; with `background: false`, the answer; the child keeps its conversation |
 | `answer_agent` | `id`, `request`, `allow`, `reason` (when denied) | allows or denies what the agent asks, then waits as `agent_result` does |
 
 ### The caller answers what its agent asks (Rust-only)
@@ -59,7 +59,10 @@ A child that asks to be allowed something (Codex's sandbox escalations,
 a command its mode won't run unasked) is blocked: its host keeps each ask
 whole in `Info.asking` (the approval's id, the tool and its command,
 every line, cut at 4000 bytes, and why the agent asks). A waiting
-`spawn_agent`, `agent_send` or `agent_result` returns at once with them:
+`spawn_agent`, `agent_send` or `agent_result` returns at once with them, and a
+child running in the background sends them to its caller as a message the
+moment it asks (`Info.parentAnswers` then set, so rush's list doesn't put
+the caller under Needs you for it while it's the caller's to answer):
 `<agent> asks to be allowed to go on: request <id>: Bash: …`. The caller
 answers with `answer_agent`, which sends the child's host `allow` or
 `deny` (with the reason, or a default asking it to find another way) and

@@ -440,8 +440,10 @@ impl adapter::Upgrader for ClaudeConn {
         if !lock(&c.asks).is_empty() {
             return Err(err("it's waiting on your answer"));
         }
+        // Those of a moment are Busy: asked again shortly, it passes.
+        let busy = |why: &str| -> adapter::Error { Box::new(adapter::Busy(why.into())) };
         if !lock(&c.waits).is_empty() {
-            return Err(err("it's answering a question of rush's"));
+            return Err(busy("it's answering a question of rush's"));
         }
         if c.native.as_ref().is_some_and(|n| n.busy()) {
             return Err(err("another model is at work on its subagent call"));
@@ -449,7 +451,7 @@ impl adapter::Upgrader for ClaudeConn {
         let unread = c.s.pause(Duration::from_secs(5))?;
         if !lock(&c.asks).is_empty() || !lock(&c.waits).is_empty() {
             c.s.resume();
-            return Err(err("it asked something as it was passed"));
+            return Err(busy("it asked something as it was passed"));
         }
         let k = c.s.kept(unread);
         let mut fds = std::collections::BTreeMap::new();

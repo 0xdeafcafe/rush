@@ -766,7 +766,7 @@ fn wait_once(
 }
 
 /// What agent id asks to be allowed, for the caller to answer.
-fn asking(name: &str, id: &str, asks: &[&crate::wire::Asking]) -> String {
+pub(crate) fn asking(name: &str, id: &str, asks: &[&crate::wire::Asking]) -> String {
     let mut out = format!("{name} asks to be allowed to go on:\n");
     for a in asks {
         out += &format!("\nrequest {}: {}\n", a.id, a.call);
@@ -894,6 +894,22 @@ pub fn send_result(child: &str, parent: &str, text: &str) -> Result<(), String> 
         id: hex_id(),
         direction: "received".into(),
         phase: "result".into(),
+        text: text.into(),
+        sender: peer(child),
+        receiver: peer(parent),
+        ..Exchange::default()
+    };
+    deliver(parent, &e, false).map_err(|e| e.to_string())
+}
+
+/// Tells parent what its agent child asks to be allowed, as a message
+/// from the child: the parent answers it with answer_agent (Rust-only).
+pub fn send_ask(child: &str, parent: &str, text: &str) -> Result<(), String> {
+    let parent = &crate::emeritus::live(parent);
+    let e = Exchange {
+        id: hex_id(),
+        direction: "received".into(),
+        phase: "message".into(),
         text: text.into(),
         sender: peer(child),
         receiver: peer(parent),

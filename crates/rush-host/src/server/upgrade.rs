@@ -13,11 +13,18 @@ use crate::upgrade::{Kept, dec, enc, state_path};
 /// returns is why it didn't happen.
 pub type Exec = Arc<dyn Fn(&Path, &[String]) -> std::io::Error + Send + Sync>;
 
+/// How long a move waits to try again when its agent was busy a moment
+/// (adapter::Busy), and how many times it tries before saying it failed.
+/// Rust-only: one busy moment once left a host on its old rush for good.
+pub const UPGRADE_AGAIN: Duration = Duration::from_secs(2);
+pub const UPGRADE_TRIES: u32 = 30;
+
 impl Host {
     /// Asked to move onto the installed rush: once it's between turns, at
     /// once when it is. Asked again, it tries again.
     pub(super) fn want_upgrade(&self, st: &mut State) {
         st.upgrade_due = true;
+        st.upgrade_tries = 0;
         st.info.upgrade = "due".into();
         self.event(st, "upgrade-asked", json!({"state": st.info.state}));
         self.publish(st); // which moves it, between turns
@@ -83,6 +90,24 @@ impl Host {
                 };
                 match u.pass() {
                     Ok(a) => Some(a),
+                    Err(e)
+                        if e.downcast_ref::<rush_core::adapter::Busy>().is_some()
+                            && st.upgrade_tries < UPGRADE_TRIES =>
+                    {
+                        // Busy a moment: still due, tried again shortly.
+                        st.upgrade_tries += 1;
+                        self.event(
+                            &st,
+                            "upgrade-busy",
+                            json!({"why": e.to_string(), "try": st.upgrade_tries}),
+                        );
+                        let h = self.clone();
+                        self.timers.after(UPGRADE_AGAIN, move || {
+                            let mut st = h.lock();
+                            h.upgrade_when_due(&mut st);
+                        });
+                        return;
+                    }
                     Err(e) => return self.upgrade_failed(&mut st, &e.to_string()),
                 }
             }
@@ -162,6 +187,7 @@ impl Host {
     /// agent as it was, and says why.
     fn upgrade_failed(&self, st: &mut State, why: &str) {
         st.upgrade_due = false;
+        st.upgrade_tries = 0;
         st.info.upgrade = format!("failed: {why}");
         self.event(st, "upgrade-failed", json!({"err": why}));
         self.publish(st);
@@ -413,6 +439,46 @@ mod tests {
         // Its agent carries on.
         c.send("again").unwrap();
         next(&c, |l| matches!(l, Line::Event(Event::Approval(_))));
+        c.stop().unwrap();
+        server.join().unwrap().unwrap();
+    }
+
+    // An agent busy a moment as the move comes (Busy: Claude's waiting on
+    // a reply to rush) is tried again shortly, still due, rather than the
+    // move failing for good (Rust-only).
+    #[test]
+    fn a_busy_moment_is_tried_again() {
+        let home = Home::new();
+        let id = "up3";
+        std::fs::create_dir_all(dir(id)).unwrap();
+        let mut c0 = cfg(&home, id);
+        c0.model = "busy-twice".into();
+        std::fs::write(dir(id).join("config.json"), c0.to_json_indent()).unwrap();
+        let (tx, execs) = mpsc::channel::<Vec<String>>();
+        let tx = Mutex::new(tx);
+        let mut hooks = Hooks::quiet();
+        hooks.exec = Some(Arc::new(move |_exe: &Path, args: &[String]| {
+            tx.lock().unwrap().send(args.to_vec()).unwrap();
+            std::io::Error::from(std::io::ErrorKind::NotFound)
+        }));
+        let hp = home.path();
+        let server = std::thread::spawn(move || {
+            Home::enter(&hp);
+            run_with(registry(), hooks, id)
+        });
+        let c = dial(id);
+        let Line::Event(Event::Approval(ap)) =
+            next(&c, |l| matches!(l, Line::Event(Event::Approval(_))))
+        else {
+            unreachable!()
+        };
+        c.allow(&ap.id, None, false).unwrap();
+        next(&c, in_state("idle"));
+        c.send_op(Op::named("upgrade")).unwrap();
+        let args = execs
+            .recv_timeout(Duration::from_secs(20))
+            .expect("a busy moment failed the move for good");
+        assert_eq!(&args[1..4], ["host", "adopt", id]);
         c.stop().unwrap();
         server.join().unwrap().unwrap();
     }

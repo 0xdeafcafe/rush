@@ -428,6 +428,20 @@ pub fn serve(
 mod tests {
     use super::*;
 
+    /// agent_send goes in the background unless told to wait
+    /// (Rust-only).
+    #[test]
+    fn agent_send_waits_only_when_asked() {
+        for (raw, background) in [
+            (r#"{"id":"a1","prompt":"go"}"#, true),
+            (r#"{"id":"a1","prompt":"go","background":true}"#, true),
+            (r#"{"id":"a1","prompt":"go","background":false}"#, false),
+        ] {
+            let got: SendInput = rush_state::json::from_slice(raw.as_bytes()).unwrap();
+            assert_eq!(got.background, background, "{raw}");
+        }
+    }
+
     fn rpc(msg: &str) -> Value {
         serde_json::from_slice(&handle(msg.as_bytes())).unwrap()
     }

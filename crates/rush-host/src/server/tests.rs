@@ -2471,6 +2471,23 @@ fn greyed_views_are_named_at_the_end_of_the_next_message() {
     assert_eq!(clean(&got[1].text), "next");
     let yours = "rush: stale views: are they?\n\nmore";
     assert_eq!(clean(yours), yours);
+    drop(got);
+
+    // An agent that takes rush's notices at its tool calls is told there,
+    // once, and your message goes as you wrote it (Rust-only).
+    h.lock().info.inbox = true;
+    for (i, msg) in ["again", "and again"].into_iter().enumerate() {
+        h.lock().info.state = "idle".into();
+        h.send(msg, &[], false).unwrap();
+        assert_eq!(c.got.lock().unwrap()[2 + i].text, msg);
+    }
+    let waiting =
+        std::fs::read_to_string(crate::inbox::inbox_dir("vn").join(crate::inbox::MAIN_NOTICE))
+            .unwrap();
+    assert_eq!(
+        waiting,
+        "rush: stale views: ci. Set each again with what's current, or clear it.\n\n"
+    );
 }
 
 /// A host's socket is there only once it listens: a starting rush that

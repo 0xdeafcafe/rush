@@ -127,6 +127,20 @@ impl std::fmt::Display for Gone {
 
 impl std::error::Error for Gone {}
 
+/// An agent that can't be handed on this moment, mid-exchange with rush
+/// (a control request awaiting its reply): asked again shortly, it can.
+/// What it says is why (Rust-only).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Busy(pub String);
+
+impl std::fmt::Display for Busy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Busy {}
+
 /// A session's screen opened in another window, which takes it from this
 /// one (Go's ErrElsewhere).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

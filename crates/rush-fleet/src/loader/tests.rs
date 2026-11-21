@@ -1353,8 +1353,8 @@ fn hosted_spawns() {
     assert_eq!(got[0].sub_asker(), "kid00000", "answered on the kid's host");
 
     // Its host asleep, a parent whose live spawn asks still needs you
-    // (Rust-only): it's the spawn that waits. One whose spawn is asleep
-    // too doesn't, as an asleep row asking doesn't.
+    // (Rust-only): it's the spawn that waits. One whose spawn is done
+    // doesn't, and isn't asking: its parent was told how it ended.
     for (kid_pid, needs, asker) in [(41, true, "kid00000"), (0, false, "")] {
         let mut k = k2.clone();
         k.pid = kid_pid;
@@ -1366,10 +1366,39 @@ fn hosted_spawns() {
         );
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].pid, 0, "the parent's host is asleep");
-        assert_eq!(got[0].job.state, State::Blocked);
+        assert_eq!(
+            got[0].job.state == State::Blocked,
+            needs,
+            "kid pid {kid_pid}"
+        );
         assert_eq!(got[0].needs_you(), needs, "kid pid {kid_pid}");
         assert_eq!(got[0].sub_asker(), asker, "kid pid {kid_pid}");
     }
+    // A live parent whose spawn is done, its last turn ending on a usage
+    // limit's "continue?", doesn't need you either (Rust-only).
+    let mut k = k2.clone();
+    k.pid = 0;
+    k.job.needs = "continue when the limit resets?".into();
+    let mut live = p2.clone();
+    live.pid = 40;
+    let got = l.fold_spawns(Some(&empty), vec![live, k], Vec::new(), &mut HashSet::new());
+    assert!(
+        got[0].job.state != State::Blocked && !got[0].needs_you(),
+        "a done spawn's limit: {:?}",
+        got[0].job
+    );
+    // A live spawn whose ask went to its parent to answer leaves the
+    // parent at work, not needing you (Rust-only).
+    let mut k = k2.clone();
+    k.parent_answers = true;
+    let mut live = p2.clone();
+    live.pid = 40;
+    let got = l.fold_spawns(Some(&empty), vec![live, k], Vec::new(), &mut HashSet::new());
+    assert!(
+        got[0].job.state != State::Blocked && !got[0].needs_you(),
+        "an ask its parent answers: {:?}",
+        got[0].job
+    );
     let mut asleep = p2.clone();
     asleep.job.state = State::Blocked;
     assert!(
