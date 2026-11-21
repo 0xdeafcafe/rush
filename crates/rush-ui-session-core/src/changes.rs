@@ -36,6 +36,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use rush_convo::Session;
 use rush_convo::render::Places;
@@ -76,27 +77,52 @@ pub fn prime(m: &mut Model, key: Ver, cwd: &str, c: Arc<Vec<FileChange>>) {
     if memo_ver(v) != key || v.sess.info.cwd != cwd {
         return;
     }
-    m.kept::<Trees>().memo = Some((key, c));
+    let t = m.kept::<Trees>();
+    t.memo = Some((key, c));
+    t.memo_cost = None;
 }
 
 /// The open session's edits, worked out again only when a step changed,
-/// its own or a subagent's (Changes' memo).
+/// its own or a subagent's (Changes' memo). A long session's take a
+/// while to work out, and its subagents at work change a step several
+/// times a second: those are worked out again at most once each HOLD
+/// (or ten times what they took), the last kept between (Rust-only; a
+/// 870-turn session with three subagents streaming spent ~300 ms of
+/// every frame here).
 pub fn of_open(m: &mut Model) -> Arc<Vec<FileChange>> {
     let Some(v) = m.session.as_ref() else {
         return Arc::default();
     };
     let at = memo_ver(v);
-    if let Some((k, c)) = &m.kept::<Trees>().memo
-        && *k == at
-    {
-        return c.clone();
+    if let Some(c) = held(m.kept::<Trees>(), at) {
+        return c;
     }
     let Some(v) = m.session.as_ref() else {
         return Arc::default();
     };
+    let began = Instant::now();
     let c = Arc::new(changes_with(&v.sess, &v.o.kids));
-    m.kept::<Trees>().memo = Some((at, c.clone()));
+    let t = m.kept::<Trees>();
+    t.memo = Some((at, c.clone()));
+    t.memo_cost = Some((Instant::now(), began.elapsed()));
     c
+}
+
+/// Edits that take this long to work out are kept a while as they change.
+const SLOW: Duration = Duration::from_millis(10);
+/// The least while slow edits are kept.
+const HOLD: Duration = Duration::from_secs(1);
+
+/// The memo's edits for version at: the same version, or the same
+/// session's when they were slow to work out and were worked out moments
+/// ago.
+fn held(t: &Trees, at: Ver) -> Option<Arc<Vec<FileChange>>> {
+    let (k, c) = t.memo.as_ref()?;
+    if *k == at {
+        return Some(c.clone());
+    }
+    let (made, took) = t.memo_cost?;
+    (k.0 == at.0 && took >= SLOW && made.elapsed() < HOLD.max(took * 10)).then(|| c.clone())
 }
 
 /// The open session's changes split in two: the files in the project,
@@ -175,9 +201,9 @@ pub fn project_count_of(m: &Model, s: &Session) -> ((i64, i64), usize) {
     // frame's header reads them first). Worked out again each time, a
     // long session's took most of a frame, several times a frame.
     match m.session.as_ref().filter(|v| std::ptr::eq(&v.sess, s)) {
-        Some(v) => match m.kept.peek::<Trees>().and_then(|t| t.memo.as_ref()) {
-            Some((k, c)) if *k == memo_ver(v) => count(c.iter().filter(mine)),
-            _ => count(changes_with(s, &v.o.kids).iter().filter(mine)),
+        Some(v) => match m.kept.peek::<Trees>().and_then(|t| held(t, memo_ver(v))) {
+            Some(c) => count(c.iter().filter(mine)),
+            None => count(changes_with(s, &v.o.kids).iter().filter(mine)),
         },
         None => count(changes(s).iter().filter(mine)),
     }
@@ -224,6 +250,24 @@ pub fn own_changes(m: &mut Model, key: &str) -> (Vec<FileChange>, Vec<FileChange
             && (read.contains(&fc.path)
                 || rush_ui_projects_machine::memory::in_memory_dir(&fc.path))
     })
+}
+
+/// The lines own_changes' memory side adds and deletes, counted where
+/// they lie: the Memory tab says it each frame, and copying out every
+/// file's patches to count them took a long session's frame (Rust-only).
+pub fn memory_stat(m: &mut Model, key: &str) -> (i64, i64) {
+    let own = project_changes(m).1;
+    if own.is_empty() || !super::views::views(m, key).contains(&"memory") {
+        return (0, 0);
+    }
+    let read: HashSet<String> = super::memory::memory_known(m, key)
+        .map(|r| r.files.into_iter().map(|f| f.path).collect())
+        .unwrap_or_default();
+    own.iter()
+        .filter(|fc| {
+            read.contains(&fc.path) || rush_ui_projects_machine::memory::in_memory_dir(&fc.path)
+        })
+        .fold((0, 0), |(a, d), f| (a + f.add, d + f.del))
 }
 
 /// A +a −d pair, each side only when it's something (addDel).
@@ -283,6 +327,9 @@ pub struct Trees {
     /// The open session's edits, and the session and step version they're
     /// of.
     pub memo: Option<(Ver, Arc<Vec<FileChange>>)>,
+    /// When memo was worked out and how long that took; none when a
+    /// worker worked it out.
+    memo_cost: Option<(Instant, Duration)>,
     /// memo's edits split by project_changes, with the root it split them
     /// by: those in the project and the rest.
     split: Option<(Changed, String, Changed, Changed)>,

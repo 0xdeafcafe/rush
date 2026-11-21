@@ -43,6 +43,15 @@ speed or memory claim has a number behind it.
   `Canvas::keep`), and what several parts of one frame each ask (the
   accounts, which read folders on disk) is asked once a frame
   (rush-ui `frame/framememo.rs`).
+  The header's Changes and Memory counts are the exception that proves
+  it: they sum every edit of the conversation. A 870-turn session
+  (1,109 files edited) with three subagents streaming changed its steps
+  several times a second, so the memo of its edits never held, and
+  `sample` of the UI showed 46% of each ~300 ms frame working them out
+  again and copying them to count. Edits that took 10 ms or more to work
+  out are now kept a second (or ten times what they took) while the same
+  session's steps move on, and the Memory count sums them in place
+  (rush-ui-session-core `changes.rs` `of_open`, `memory_stat`).
 - **Same look.** Screens copy the Go TUI exactly (`docs/screenshots`,
   `internal/ui/style.go`, `internal/convo/style.go`). Same keys, same words.
 

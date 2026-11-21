@@ -215,11 +215,7 @@ pub fn tab_stat(m: &mut Model, key: &str, v: &str) -> Line {
             l
         }
         "memory" => {
-            let mem = super::changes::own_changes(m, key).0;
-            if mem.is_empty() {
-                return Line::new();
-            }
-            let (a, d) = super::changes::change_stat(&mem);
+            let (a, d) = super::changes::memory_stat(m, key);
             super::changes::add_del(a, d)
         }
         _ => Line::new(),

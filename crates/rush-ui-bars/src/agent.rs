@@ -967,11 +967,15 @@ pub fn state_words(o: &Of, now: Ms) -> Line {
     }
     if asks {
         // Asked in its last message, not on a card: the list has it
-        // under Needs you, so the pane says so rather than "idle".
-        return line([
-            spb("needs you", YELLOW),
-            sp(" · its last message asks", YELLOW),
-        ]);
+        // under Needs you, so the pane says so rather than "idle". One a
+        // run it started asks through it says who asks and what, not
+        // "its last message", which then asks nothing (Rust-only).
+        let why = if a.decides || a.job.needs.is_empty() {
+            " · its last message asks".to_string()
+        } else {
+            format!(" · {}", rush_core::tool::one_line(&a.job.needs))
+        };
+        return line([spb("needs you", YELLOW), sp(why, YELLOW)]);
     }
     // What its open conversation says it runs, the column beside it says
     // too: the two agree (Rust-only; Go said its host's word alone).

@@ -478,6 +478,39 @@ fn a_running_workflow_says_working() {
     );
 }
 
+/// Needs you says who asks what when a run it started asks through it,
+/// and "its last message asks" only when its own last message does
+/// (Rust-only).
+#[test]
+fn needs_you_says_who_asks() {
+    use crate::host::Info;
+    use rush_core::agent::State;
+    let cases = [
+        (
+            false,
+            "subagent Lab Consent asks: which Mac?",
+            "needs you · subagent Lab Consent asks: which Mac?",
+        ),
+        (true, "1 decision", "needs you · its last message asks"),
+        (false, "", "needs you · its last message asks"),
+    ];
+    for (decides, needs, want) in cases {
+        let mut m = opened("default");
+        if let Some(a) = m.agents.iter_mut().find(|a| a.key == KEY) {
+            a.job.state = State::Blocked;
+            a.job.needs = needs.into();
+            a.pid = 42;
+            a.decides = decides;
+            a.seen = false;
+            a.checking = false;
+        }
+        let info = Info::default();
+        let mut o = super::agent::Of::read(&m, KEY).unwrap();
+        o.info = Some(&info);
+        assert_eq!(super::agent::state_words(&o, NOW).plain(), want, "{needs}");
+    }
+}
+
 /// The header says what the open conversation says runs, as the column
 /// beside it does, over its host's word: three subagents, each with a
 /// command of its own, are three subagents running, not tasks besides
