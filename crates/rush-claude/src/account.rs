@@ -106,7 +106,16 @@ impl Account {
     /// process's environment, less another account's folder and the
     /// markers of a Claude Code session rush may have been started from.
     pub fn env(&self) -> Vec<String> {
-        let mut env: Vec<String> = std::env::vars_os()
+        self.env_from(std::env::vars_os())
+    }
+
+    /// env, from the variables given in place of this process's.
+    fn env_from(
+        &self,
+        vars: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+    ) -> Vec<String> {
+        let mut env: Vec<String> = vars
+            .into_iter()
             .filter_map(|(k, v)| {
                 let k = k.to_string_lossy();
                 if k == "CLAUDE_CONFIG_DIR" || INHERITED.contains(&k.as_ref()) {
@@ -145,7 +154,8 @@ impl Account {
 /// The markers a Claude Code session sets for what it runs. rush started
 /// from inside one would pass them on, and the sessions rush starts would
 /// think they're that session's children: Claude Code then saves no
-/// transcript for them, among other things.
+/// transcript for them, among other things. TRACEPARENT and TRACESTATE
+/// would make every session's telemetry join the trace rush was started in.
 const INHERITED: &[&str] = &[
     "CLAUDECODE",
     "CLAUDE_CODE_CHILD_SESSION",
@@ -158,6 +168,8 @@ const INHERITED: &[&str] = &[
     "CLAUDE_PID",
     "CLAUDE_JOB_DIR",
     "CLAUDE_CODE_VERSION",
+    "TRACEPARENT",
+    "TRACESTATE",
 ];
 
 /// p as a string, for the records rush_core keeps paths in.
@@ -203,5 +215,21 @@ mod tests {
                 .iter()
                 .any(|e| e.starts_with("CLAUDE_CONFIG_DIR="))
         );
+    }
+
+    // claude/account_env_test.go (TestEnvDropsTheTraceContextItWasStartedIn).
+    #[test]
+    fn env_drops_the_trace_context_it_was_started_in() {
+        let vars = [
+            (
+                "TRACEPARENT",
+                "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+            ),
+            ("TRACESTATE", "lw=1"),
+            ("RUSH_TEST_KEPT", "yes"),
+        ]
+        .map(|(k, v)| (k.into(), v.into()));
+        let env = Account::at("x", "/c").env_from(vars);
+        assert_eq!(env, ["RUSH_TEST_KEPT=yes", "CLAUDE_CONFIG_DIR=/c"]);
     }
 }
