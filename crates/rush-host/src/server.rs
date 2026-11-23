@@ -473,6 +473,9 @@ pub(crate) struct State {
     /// the agent was told is stale (views::sweep).
     views_armed: bool,
     views_told: HashMap<String, i64>,
+    /// The agent's task list as its calls leave it, and how long it has
+    /// left it alone (taskwatch).
+    task_watch: crate::taskwatch::Watch,
     quit: bool,
     /// info.json as last written, but for what changes on every message
     /// (see INFO_EVERY), when, and the latest info not written yet.
@@ -866,6 +869,7 @@ fn build(reg: Registry, hooks: Hooks, mut cfg: Config) -> (Host, Receiver<Msg>) 
         turn_changes: Vec::new(),
         views_armed: false,
         views_told: HashMap::new(),
+        task_watch: crate::taskwatch::Watch::default(),
         quit: false,
         info_key: Vec::new(),
         info_at: None,
@@ -2121,6 +2125,22 @@ impl Host {
         }
         if swept.more || working {
             self.arm_views_always(&mut st);
+        }
+    }
+
+    /// Tells the agent, as a notice at its next tool call, of a task list
+    /// it has worked past without touching (taskwatch): only an agent
+    /// that takes rush's notices is told. The list is watched either way,
+    /// so one that starts taking them is told of the list as it stands.
+    fn tasks_stale(&self, st: &mut State, m: &event::Message) {
+        let Some(note) = st.task_watch.saw(m) else {
+            return;
+        };
+        if !st.info.inbox {
+            return;
+        }
+        if crate::inbox::tell(&st.cfg.id, crate::inbox::MAIN_NOTICE, &note).is_ok() {
+            self.event(st, "tasks-stale", json!({"note": note}));
         }
     }
 
@@ -3744,6 +3764,7 @@ impl Host {
                     st.w.unheard = None;
                 }
                 self.shell_calls(st, &m);
+                self.tasks_stale(st, &m);
                 self.sub_message(st, &m);
                 self.guests_message(st, &m);
                 self.on_message(st, &m);

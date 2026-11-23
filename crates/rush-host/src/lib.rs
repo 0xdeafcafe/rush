@@ -60,6 +60,7 @@ pub mod shim;
 pub mod stuck;
 pub mod subtool;
 pub mod sys;
+pub mod taskwatch;
 pub mod timer;
 pub mod title;
 pub mod tmp;

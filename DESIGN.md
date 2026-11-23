@@ -4700,6 +4700,27 @@ would; the tokens are exact either way, as they follow from the sizes.
 On a standard-tier model (which cuts every image to 1,568 tokens
 itself) the copy saves bytes, not tokens.
 
+### A task list left behind (Rust-only)
+
+Agents make a task list and then work on without it: several tasks "in
+progress" for an hour, done ones never marked. Claude Code's own
+reminder (a system-reminder after the task tools go unused a while)
+names no task and says it may be ignored, and it is; nothing brings the
+list back after a compaction either. rush's host watches the session's
+own tool calls (rush-host `taskwatch.rs`, `Watch::saw`: TodoWrite and
+any harness's plan call for the whole list, TaskCreate and TaskUpdate
+for one task, a subagent's calls left out) and, 25 calls after the list
+was last written or read (`AFTER`) with anything in it not done, tells
+the agent once, as a notice at its next tool call (the inbox, so only a
+harness that takes rush's notices): what the list still says it is in
+the middle of, by name and id, or that nothing is in progress and how
+many aren't done; and that the user reads the list. It says so again
+every 100 calls more (`AGAIN`) while the list stays untouched. A list
+all done, or none, is never mentioned. Each notice is a `tasks-stale`
+event for `rush why`. The prompt's words on the task list are unchanged
+(they are cached). Not yet: the open tasks given back after a
+compaction; a turn that ends with tasks still in progress.
+
 ### What rush adds to an agent's context, word for word (Rust-only)
 
 A provider caches the prompt in order: tools, system prompt, then the
