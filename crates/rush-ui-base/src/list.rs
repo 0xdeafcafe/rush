@@ -26,6 +26,8 @@
 //! projectLine, :309 treeLine, :319 treeTag) and subrows.go's rows.
 //! Rust-only: Go's list also laid rooms out, a room one row with its
 //! members under it (roomrows.go); rooms were removed 2026-11-23.
+//! Rust-only too: the WORK column and the weight by a row's name (widths,
+//! weighs; rush-host's work.rs counts them).
 
 use std::collections::HashMap;
 
@@ -67,6 +69,10 @@ const W_RAM: usize = 7;
 const W_TOK: usize = 7;
 const W_COST: usize = 8;
 const W_AGE: usize = 5;
+/// The WORK column: "13/18 · 42f" and the two cells before it (Rust-only).
+const W_WORK: usize = 13;
+/// The weight by a row's name: three cells and a space (Rust-only).
+const WEIGHT_W: usize = 4;
 /// What a row keeps for its name before a column goes, when some are
 /// turned off (Rust-only).
 const ROOM_FOR_NAME: usize = 40;
@@ -850,22 +856,60 @@ impl Model {
         self.selected().map(|i| self.agents[i].clone())
     }
 
-    /// The list's right-hand columns at width w.
+    /// The list's right-hand columns at width w, but WORK (see widths):
+    /// running, CPU, RAM, tokens, cost, time.
     pub fn col_widths(&self, w: usize) -> [usize; 6] {
-        let mut c = [W_ACT, W_CPU, W_RAM, W_TOK, W_COST, W_AGE + 2];
-        const COLS: [&str; 6] = ["running", "cpu", "ram", "tokens", "cost", "time"];
+        let [act, cpu, ram, tok, _, cost, time] = self.widths(w);
+        [act, cpu, ram, tok, cost, time]
+    }
+
+    /// Whether some row has work to show, with the WORK column turned on
+    /// (Rust-only): a list of none has no WORK column and no weights.
+    fn any_work(&self) -> bool {
+        self.cfg.shows("work") && self.agents.iter().any(|a| !a.work.is_empty())
+    }
+
+    /// Whether rows draw their weight by their name (Rust-only): some row
+    /// has work, and with the figures and the weight drawn every row still
+    /// has ROOM_FOR_NAME for its name.
+    fn weighs(&self, w: usize) -> bool {
+        // The rail's edge and branch, and the state mark, before the name.
+        const LEAD: usize = 8;
+        self.any_work()
+            && self.widths(w).iter().sum::<usize>() + LEAD + WEIGHT_W + ROOM_FOR_NAME <= w
+    }
+
+    /// The list's right-hand columns at width w, in the order drawn:
+    /// running, CPU, RAM, tokens, WORK, cost, time. WORK (Rust-only) is
+    /// there only while some row has work (any_work); it goes before
+    /// cost when the list is narrow.
+    fn widths(&self, w: usize) -> [usize; 7] {
+        let work = self.any_work();
+        let mut c = [
+            W_ACT,
+            W_CPU,
+            W_RAM,
+            W_TOK,
+            if work { W_WORK } else { 0 },
+            W_COST,
+            W_AGE + 2,
+        ];
+        const COLS: [&str; 7] = ["running", "cpu", "ram", "tokens", "work", "cost", "time"];
         // With columns turned off, those left go only as the list has no
         // room for them and a name (ROOM_FOR_NAME), the first to go as
-        // below: running, CPU, tokens, RAM, cost. Not Go's, whose widths
-        // below are where each goes with all six on, so CPU alone was
-        // hidden under 96 wide and RAM alone under 64.
-        if COLS.iter().any(|col| !self.cfg.shows(col)) {
+        // below: running, CPU, tokens, RAM, WORK, cost. Not Go's, whose
+        // widths below are where each goes with all six on, so CPU alone
+        // was hidden under 96 wide and RAM alone under 64.
+        if COLS
+            .iter()
+            .any(|col| *col != "work" && !self.cfg.shows(col))
+        {
             for (i, col) in COLS.iter().enumerate() {
                 if !self.cfg.shows(col) {
                     c[i] = 0;
                 }
             }
-            for i in [0, 1, 3, 2, 4] {
+            for i in [0, 1, 3, 2, 4, 5] {
                 if c.iter().sum::<usize>() + ROOM_FOR_NAME <= w {
                     break;
                 }
@@ -884,12 +928,16 @@ impl Model {
             c[2] = 0;
         }
         if w < 44 {
-            c[4] = 0;
+            c[5] = 0;
         }
-        for (i, col) in COLS.iter().enumerate() {
-            if !self.cfg.shows(col) {
-                c[i] = 0;
-            }
+        // Go's six all on: WORK, when there is any, takes running's and
+        // CPU's place before it goes itself, the name keeping its room.
+        if c[4] > 0 && c.iter().sum::<usize>() + ROOM_FOR_NAME > w {
+            c[0] = 0;
+            c[1] = 0;
+        }
+        if c[4] > 0 && c.iter().sum::<usize>() + ROOM_FOR_NAME > w {
+            c[4] = 0;
         }
         c
     }
@@ -983,7 +1031,7 @@ impl Model {
     pub fn name_column(&self, w: usize) -> usize {
         let widest = self.widest_name();
         if w < 96 {
-            let rest: usize = self.col_widths(w).iter().sum();
+            let rest: usize = self.widths(w).iter().sum();
             return 12.max(widest.min((w as isize - 4 - rest as isize - 3).max(0) as usize));
         }
         20.max(widest.min(w.saturating_sub(30) * 2 / 5))
@@ -995,7 +1043,7 @@ impl Model {
         if at > 0 && w * 100 <= self.w * at {
             return true;
         }
-        let rest: usize = self.col_widths(w).iter().sum::<usize>() + 1;
+        let rest: usize = self.widths(w).iter().sum::<usize>() + 1;
         (w as isize) - 3 - rest as isize - name_col as isize - 2 < 20
     }
 
@@ -1004,8 +1052,9 @@ impl Model {
         if let Some(l) = self.ext.column_header.iter().find_map(|f| f(self, w)) {
             return l;
         }
-        let [act, cpu, ram, tok, cost, time] = self.col_widths(w);
-        let name_col = self.name_column(w);
+        let [act, cpu, ram, tok, work, cost, time] = self.widths(w);
+        // The rows' weights take their cells before the name (Rust-only).
+        let name_col = self.name_column(w) + if self.weighs(w) { WEIGHT_W } else { 0 };
         let sort = self.cfg.sort_by();
         let label = |text: &str, mode: &str| {
             if mode == sort {
@@ -1033,7 +1082,7 @@ impl Model {
         if !self.stacked(w, name_col) {
             left.spans.push(sp("LATEST", DIM));
         }
-        let right_w = act + cpu + ram + tok + cost + time + 1;
+        let right_w = act + cpu + ram + tok + work + cost + time + 1;
         let gap = w as isize - left.width() as isize - right_w as isize;
         if gap < 1 {
             return fit(left, w);
@@ -1048,6 +1097,7 @@ impl Model {
             col("CPU", "cpu", cpu),
             col("RAM", "ram", ram),
             col("TOKENS", "tokens", tok),
+            col("WORK", "work", work),
             col("COST", "cost", cost),
             col("TIME", "time", time),
             plain(" "),
@@ -1569,7 +1619,7 @@ impl Model {
         tag: Option<&Line>,
     ) -> Line {
         let a = &self.agents[i];
-        let [w_act, w_cpu, w_ram, w_tok, w_cost, w_time] = self.col_widths(list_w);
+        let [w_act, w_cpu, w_ram, w_tok, w_work, w_cost, w_time] = self.widths(list_w);
         let now = self.now;
         let live = a.job.live();
         // The list kept from last time, not read again yet (listcache.rs):
@@ -1666,6 +1716,16 @@ impl Model {
                 sp(v, FAINT)
             }
         };
+        // What it has done: tasks done of all, files changed (Rust-only).
+        let work_cell = |active: bool| {
+            if w_work == 0 || a.work.is_empty() {
+                return plain(blanks(w_work));
+            }
+            sp(
+                right(&a.work.cell(), w_work),
+                if active { DIM } else { FAINT },
+            )
+        };
         let mut rt = act.clone();
         if live || busy {
             let v = right(&money_short(a.spend.cost), w_cost);
@@ -1673,6 +1733,7 @@ impl Model {
                 cpu_cell(),
                 ram_cell(true),
                 tok_cell(true),
+                work_cell(true),
                 if a.spend.cost >= 100.0 {
                     sp(v, YELLOW)
                 } else {
@@ -1684,6 +1745,7 @@ impl Model {
                 sp(right(&format!("{:.0}%", a.cpu), w_cpu), FAINT),
                 ram_cell(false),
                 tok_cell(false),
+                work_cell(false),
                 sp(right(&money_short(a.spend.cost), w_cost), FAINT),
             ]);
         } else {
@@ -1694,6 +1756,7 @@ impl Model {
             rt.spans.extend([
                 plain(blanks(w_cpu + w_ram)),
                 tok_cell(false),
+                work_cell(false),
                 sp(right(&cost, w_cost), FAINT),
             ]);
         }
@@ -1774,6 +1837,13 @@ impl Model {
             || self.ext.calls.filter_match()(self, a))
             && !stacked;
         let mut name_col = name_col as isize;
+        // Its weight before its name, where every row has room for it
+        // (weighs, Rust-only): the name column grows by it, as the
+        // header's does.
+        let weigh = self.weighs(list_w);
+        if weigh {
+            name_col += WEIGHT_W as isize;
+        }
         let (full, extra) = if sel || a.key == self.hover {
             let f = self.badges(a, true);
             let extra = f.width() as isize - short.width() as isize;
@@ -1789,6 +1859,9 @@ impl Model {
             name_room = name_room.min(name_col);
         }
         name_room -= badges.width() as isize + 1;
+        if weigh {
+            name_room -= WEIGHT_W as isize;
+        }
         let name_w = width(&name) as isize;
         if let Some(full) = full
             && (grew || name_w > name_room || name_w <= name_room - extra)
@@ -1805,6 +1878,19 @@ impl Model {
             rush_draw::truncate(&name, name_room.max(0) as usize, "…").into_owned(),
             name_style,
         )]);
+        if weigh {
+            // Three cells, as many filled as it has work to it (Work::
+            // weight), never louder than its mark.
+            let n = a.work.weight().min(3);
+            let ink = if marker.style.fg == FAINT { FAINT } else { DIM };
+            let mut weighed = line([
+                sp("▮".repeat(n), ink),
+                sp("▯".repeat(3 - n), FAINT),
+                plain(" "),
+            ]);
+            join(&mut weighed, left);
+            left = weighed;
+        }
         left.spans.push(plain(" "));
         join(&mut left, badges);
         if let Some(t) = tag {

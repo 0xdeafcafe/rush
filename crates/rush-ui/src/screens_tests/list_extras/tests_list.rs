@@ -65,6 +65,52 @@ fn a_column_alone_keeps_its_room() {
     }
 }
 
+/// A rush session's work as its host counted it: the WORK column says
+/// its tasks done of all and the files it changed, and the weight by its
+/// name fills as there's more to it; a list where no row has any has
+/// neither (Rust-only).
+#[test]
+fn work_column_and_weight() {
+    use rush_core::agent::Work;
+    let mut big = agent("a1", "add Apple Pay to checkout", State::Idle, 0);
+    big.work = Work {
+        done: 13,
+        total: 18,
+        files: 42,
+    };
+    let mut small = agent("b2", "fix the flaky rounding test", State::Idle, 0);
+    small.work = Work {
+        done: 2,
+        total: 2,
+        files: 1,
+    };
+    let none = agent("c3", "what does this regex do", State::Idle, 0);
+    let m = model_of(vec![big, small, none], 200, 50);
+    let h = text_of(&m.column_header(200));
+    assert!(h.contains("WORK"), "{h:?}");
+    // (row, what it says, what it doesn't)
+    let cases: [(usize, &[&str], &[&str]); 3] = [
+        (0, &["▮▮▮ add Apple Pay", "13/18 · 42f"], &[]),
+        (1, &["▮▯▯ fix the", "2/2 ·  1f"], &[]),
+        (2, &["▯▯▯ what does"], &["/"]),
+    ];
+    for (i, has, lacks) in cases {
+        let row = m.agent_line(i, 196, 200, false, 30, false, None).plain();
+        for want in has {
+            assert!(row.contains(want), "row {i} says {want:?}: {row:?}");
+        }
+        for not in lacks {
+            assert!(!row.contains(not), "row {i} doesn't say {not:?}: {row:?}");
+        }
+    }
+    let quiet = model_of(vec![agent("d4", "no work to it", State::Idle, 0)], 200, 50);
+    assert!(!text_of(&quiet.column_header(200)).contains("WORK"));
+    let row = quiet
+        .agent_line(0, 196, 200, false, 30, false, None)
+        .plain();
+    assert!(!row.contains('▯'), "{row:?}");
+}
+
 /// Rows stack once the list has StackAt percent of the screen or less,
 /// and only when too narrow once that's off (stacked_test.go).
 #[test]

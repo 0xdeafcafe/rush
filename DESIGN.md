@@ -3224,6 +3224,30 @@ show in. With any column turned off in Settings, those left go only
 when the row has no room for them and 40 cells of name
 (`ROOM_FOR_NAME`), in the same order. All six on, the widths are Go's.
 
+### The list's WORK column and weights (Rust-only)
+
+- A rush session's host counts what it has done as it hears its agent,
+  never by reading a transcript: its task list's tasks done and in all
+  (`taskwatch::Watch`, TodoWrite and TaskCreate/TaskUpdate) and the files
+  its Edit and Write calls changed and weren't refused, its subagents'
+  too, shell writes not (rush-host `work.rs`). They're kept in the
+  session's `work.json`, so a woken host counts on, and said in
+  info.json's `work` (`rush_core::agent::Work`), which the fleet puts on
+  the row (`Agent::work`). Any other row, and a rush session that hasn't
+  touched its list or a file since, has none: its cell is blank.
+- The WORK column (`list.rs` `widths`, between TOKENS and COST, 13
+  cells) says `13/18 · 42f`. It's on by default (Settings, "work") but
+  only there while some row has work, so a list of none looks as Go's.
+  Narrow, it goes before cost: with Go's six on, it first takes running
+  and CPU's place, then goes too, the name keeping `ROOM_FOR_NAME`.
+- A weight by each name, three cells (`Work::weight`): by the files
+  changed plus the tasks still open, none for no count, one up to 5,
+  two up to 20, three past that. Dim, faint where the row's mark is; drawn
+  only where every row keeps `ROOM_FOR_NAME` for its name after it
+  (`weighs`), the name column and the header's LATEST moved by it.
+- "Sort rows by" takes `work` as it takes cost: like the others it marks
+  the header (▾); rows within a section keep their section's order.
+
 ### One name for a model, and a new session's effort (Rust-only)
 
 A Claude alias (`fable`, `opus[1m]`) is named as the model it runs now:

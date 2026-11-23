@@ -276,6 +276,10 @@ pub fn sections(m: &Model) -> Vec<Section> {
                 "tokens",
                 "biggest context first, by its newest message's tokens.",
             ),
+            (
+                "work",
+                "most work first, by files changed and tasks still open.",
+            ),
             ("time", "longest-running first."),
         ],
         set(|m, v| config_mut(m).sort_by = v.into()),
@@ -554,6 +558,11 @@ pub fn sections(m: &Model) -> Vec<Section> {
             "the memory everything each agent started holds.",
         ),
         ("tokens", "TOKENS", "how full each agent's context is."),
+        (
+            "work",
+            "WORK",
+            "each rush session's tasks done of its task list and the files it changed, with a weight by its name.",
+        ),
         ("cost", "COST", "what each agent has spent."),
         (
             "time",
