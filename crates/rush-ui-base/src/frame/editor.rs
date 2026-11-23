@@ -814,7 +814,9 @@ pub fn image_path(tok: &str, look: Look) -> Option<String> {
 /// there). Rust-only: Go left it in the box as text.
 pub fn names_far_image(text: &str, look: Look) -> bool {
     let t = text.trim();
-    if t.is_empty() || t.contains('\n') {
+    // A file that's here, its spaces escaped as a drop writes them, is a
+    // drop.
+    if t.is_empty() || t.contains('\n') || is_drop(t, look) {
         return false;
     }
     let p = file_path(t);
