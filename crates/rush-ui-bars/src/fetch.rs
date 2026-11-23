@@ -18,7 +18,7 @@ use rush_core::time::Ms;
 use rush_core::usage::{self, EVERY, Reading};
 use rush_state::{Config, Login};
 
-use crate::accounts::{cfg, peek};
+use crate::accounts::cfg;
 use crate::frame::Out;
 use crate::look::LOGINS_KIND;
 use crate::model::Model;
@@ -45,6 +45,8 @@ pub struct Fetch {
     at: Ms,
     /// Reads out.
     busy: u32,
+    /// A wake-up for the next read is set (arm).
+    armed: bool,
 }
 
 impl Fetch {
@@ -78,6 +80,33 @@ impl usage::Network for Net {
 /// with a loop: a test or `--render` never asks the network.
 pub fn on_fleet(m: &mut Model) {
     read_again(m, false);
+    arm(m);
+}
+
+/// The limits read again every EVERY whether or not the list is: Go read
+/// them on its tick, but the list here is read again only when something
+/// changes, which an idle machine never does, and every account's row
+/// aged into "not read since" while a sign-in nothing used ran out
+/// unrenewed (a read is what renews one, oauth's or_renew). A wake-up of
+/// the loop's own, one at a time, set by the first reading of the list;
+/// each account is still asked at most once per EVERY, whoever asks.
+/// Rust-only.
+fn arm(m: &mut Model) {
+    if m.sender().is_none() || m.ext.calls.hosted_id()(m).is_some() {
+        return;
+    }
+    let st = m.kept::<Fetch>();
+    if st.armed {
+        return;
+    }
+    st.armed = true;
+    // A second past it, so the read it wakes for is due by the clock too.
+    m.after(EVERY + std::time::Duration::from_secs(1), |m| {
+        m.kept::<Fetch>().armed = false;
+        read_again(m, false);
+        arm(m);
+        Out::Idle
+    });
 }
 
 /// Whether the plans' limits have been read once since rush started,
@@ -116,13 +145,13 @@ fn read_again(m: &mut Model, asked: bool) {
             profile_of(m, &a).map(|p| (a, p, kept))
         })
         .collect();
-    // Every saved login but the one in use, whose reading is ~/.claude's.
-    let logins: Vec<Login> = c
-        .logins
-        .iter()
-        .filter(|lg| !peek(m).logins.iter().any(|l| l.id == lg.id && l.current))
-        .cloned()
-        .collect();
+    // Every saved login. Go left out the one in use, read through
+    // ~/.claude; but after a switch the login in use runs in a home of
+    // its own while ~/.claude stays signed in as the old one, so it was
+    // never read here (logins.rs refresh_logins, which r runs, says the
+    // same). Each is asked at most once per EVERY whichever way it's
+    // read, so the one ~/.claude does hold costs nothing more. Rust-only.
+    let logins: Vec<Login> = c.logins.clone();
     let fresh = if rush_ui_base::lead::renews(m)() {
         keep_fresh_jobs(m)
     } else {
@@ -292,17 +321,18 @@ mod tests {
         let out = Fetch {
             at: now - 1,
             busy: 1,
+            ..Fetch::default()
         };
         assert!(out.due(now, true), "asked, it reads again");
         assert!(!out.due(now, false), "by itself, it waits");
         let old = Fetch {
             at: now - EVERY.as_millis() as Ms,
-            busy: 0,
+            ..Fetch::default()
         };
         assert!(old.due(now, false));
         let fresh = Fetch {
             at: now - 1,
-            busy: 0,
+            ..Fetch::default()
         };
         assert!(!fresh.due(now, false));
     }

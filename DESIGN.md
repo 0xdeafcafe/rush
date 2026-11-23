@@ -3796,7 +3796,12 @@ is made. Everything below is in `rush_ui::frame`.
   what a line left out is kept by `which*10+line` for /statusline.
   Account readings: logins' through the logins agent's `PlanReader`
   (`accounts::state::readings`), others' from quotas.json; `fetch.rs`
-  reads both again every `usage::EVERY` with a loop running. A Claude
+  reads both again every `usage::EVERY` with a loop running, on a
+  wake-up of its own (`arm`, Rust-only: the list is read again only when
+  something changes, so on an idle machine nothing was read, rows aged
+  into "not read since", and a sign-in nothing used was never renewed,
+  a read being what renews one), every saved login among them, the one
+  in use too (after a switch it isn't ~/.claude's). A Claude
   plan without a 5-hour limit (Anthropic's top plan, since Go): its
   5-hour window, absent, null or sent with no reset time, is read as
   none (`rush_claude::usage::Window::five_hour`, also on usage.json
