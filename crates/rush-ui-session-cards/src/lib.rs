@@ -632,6 +632,18 @@ pub fn conn_ref<'a>(m: &'a Model, key: &str) -> Option<&'a Conn> {
     m.kept.peek::<Cards>()?.conns.get(key)
 }
 
+/// Whether a card waits on session key that can take the keys: a stop
+/// for ↑↓ between the box and the conversation (session_core's
+/// stack_nav).
+pub fn card_waits(m: &Model, key: &str) -> bool {
+    let Some(i) = card_info(m, key) else {
+        return false;
+    };
+    let none = Conn::default();
+    let c = conn_ref(m, key).unwrap_or(&none);
+    !question::card_kind(m, key, c, &i).is_empty()
+}
+
 /// Agent key's card state, made on first use.
 pub fn conn<'a>(m: &'a mut Model, key: &str) -> &'a mut Conn {
     m.cards().conns.entry(key.to_string()).or_default()

@@ -722,9 +722,8 @@ pub fn key_first(m: &mut Model, k: &Press) -> Out {
 
 /// enter or → on a subagent's step in the conversation, or space too on a
 /// run in the dock or the column, opens that run on the conversation's
-/// page; on a workflow, its phases and agents. ↑↓ go through the dock's
-/// runs between the conversation and the queue (paneKey :4255-4270,
-/// moveSel :4932, subOfStep).
+/// page; on a workflow, its phases and agents (paneKey :4255-4270,
+/// subOfStep). ↑↓ through the dock's runs are keys.rs's stack_nav.
 pub fn key(m: &mut Model, k: &Press) -> Out {
     let Some(key) = open_key(m) else {
         return Out::Pass;
@@ -770,9 +769,6 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
                 return Out::Draw;
             }
             Out::Pass
-        }
-        "up" | "down" if name == "conversation" && (empty || !picked.is_empty()) => {
-            dock_nav(m, &key, s == "up", &picked)
         }
         // Through the conversation and its runs, each opened in turn
         // (cycleSub); a picked queued message has taken shift+↑↓ before
@@ -858,48 +854,11 @@ fn is_workflow_ref(m: &Model, r: &str) -> bool {
         .is_some_and(|v| super::workflow::is_workflow_ref(&v.sess, r))
 }
 
-/// ↑↓ through the dock's runs, between the conversation and the queue
-/// (moveSel over dockRefs). Pass leaves the rest to the conversation and
-/// the queue.
-fn dock_nav(m: &mut Model, key: &str, up: bool, picked: &str) -> Out {
-    let refs = dock_refs(m, key);
-    if refs.is_empty() {
-        return Out::Pass;
-    }
-    let at = refs.iter().position(|r| r == picked);
-    let queued = !super::queue::queue_of(m, key).items.is_empty();
-    match (at, up) {
-        // ↑ from the box, nothing queued: the dock's last (from the
-        // queue's first, keys.rs's queue_nav).
-        (None, true) if picked.is_empty() && !queued => set_sel(m, refs[refs.len() - 1].clone()),
-        // ↓ past the conversation's last row: the dock's first.
-        (None, false) if !picked.is_empty() && !picked.starts_with("q:") => {
-            let rows = conn(m, key).vs.rows.max(1);
-            let Some(v) = m.session.as_mut() else {
-                return Out::Pass;
-            };
-            v.move_sel(1, rows);
-            if v.sel.is_empty() {
-                v.sel.clone_from(&refs[0]);
-            }
-            return Out::Draw;
-        }
-        (None, _) => return Out::Pass,
-        (Some(0), true) => {
-            // Past the dock's first: the conversation's last row in view.
-            set_sel(m, String::new());
-            let rows = conn(m, key).vs.rows.max(1);
-            if let Some(v) = m.session.as_mut() {
-                v.move_sel(-1, rows);
-            }
-        }
-        (Some(i), true) => set_sel(m, refs[i - 1].clone()),
-        (Some(i), false) if i + 1 < refs.len() => set_sel(m, refs[i + 1].clone()),
-        (Some(_), false) => {
-            // Past the dock's last: the queue's first, else the box.
-            set_sel(m, if queued { "q:0".into() } else { String::new() });
-        }
-    }
+/// The picked run kept where it is as the dock's runs come and go
+/// (keepRunPick), after ↑↓ put the cursor on one of the dock's rows
+/// (keys.rs's stack_nav, which goes through them between the queue and
+/// the conversation: moveSel :4932 over dockRefs).
+pub(super) fn keep_pick(m: &mut Model, key: &str) {
     let Model { session, kept, .. } = m;
     if let Some(v) = session.as_mut() {
         let r = &mut kept
@@ -911,7 +870,6 @@ fn dock_nav(m: &mut Model, key: &str, up: bool, picked: &str) -> Out {
         let (run, flows) = (r.shown.dock.clone(), r.shown.flows.clone());
         v.sel = super::running::keep_run_pick(&v.sel, r, &run, &flows);
     }
-    Out::Draw
 }
 
 /// The run the box beside the list is for, while it shows.

@@ -219,7 +219,8 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     } else {
         w - 1
     };
-    let runs = super::running::blocks(m, &key, run_w, in_panel);
+    // Whole in the column, which scrolls; a few round the pick in the dock.
+    let runs = super::running::blocks_as(m, &key, run_w, in_panel, sw > 0);
     let mut run_rows = (0, Vec::new());
     if sw > 0 {
         conn(m, &key).side_runs = runs;
@@ -262,7 +263,14 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         block(&mut out, &mut blocks);
         let when = queue::when(m, &key, &queued);
         let send_now = super::spawned::send_now_key(m);
-        let (rows, at) = queue_rows(&queued, when, &picked, typed, &send_now, w - 1);
+        // With a run open on the page its own queue can show too: this
+        // one says it's the session's.
+        let title = if super::openrun::is_open(m, &key) {
+            "queue for the main session"
+        } else {
+            "queue"
+        };
+        let (rows, at) = queue_rows_of(title, &queued, when, &picked, typed, &send_now, w - 1);
         q_off = out.len();
         q_rows = at;
         out.extend(dock_card(QUEUE, rows, w));
@@ -402,12 +410,27 @@ pub fn queue_rows(
     send_now: &str,
     w: usize,
 ) -> (Vec<Line>, Vec<Option<usize>>) {
+    queue_rows_of("queue", q, when, picked, typed, send_now, w)
+}
+
+/// queue_rows under another title: whose queue it is, where more than
+/// one can show at once (a subagent's over its box, the session's own
+/// while a run is open beside it). Rust-only: each said only "queue".
+pub fn queue_rows_of(
+    title: &str,
+    q: &Queued,
+    when: Line,
+    picked: &str,
+    typed: bool,
+    send_now: &str,
+    w: usize,
+) -> (Vec<Line>, Vec<Option<usize>>) {
     let mut rows = Vec::new();
     let mut at = Vec::new();
     let pick = queue::sel(picked, q.items.len());
     let mut title = line([
         plain(" "),
-        spb("queue", QUEUE),
+        spb(title, QUEUE),
         sp(format!(" ·{}", q.items.len()), FAINT),
     ]);
     // Held: said on the card's title, and on each row you hold.
@@ -714,8 +737,14 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         send_top = top.plain();
     }
     let away = (m.ext.calls.hosted_away())(m) || m.pane_idle;
-    let typing = picked.is_empty() && !away && !card_focus && !btw_on;
-    if btw_on {
+    // The column beside the conversation, or the views panel in its
+    // place, has the keys: the box isn't the lit one.
+    let beside = super::side::focused(m, key)
+        || rush_ui_plugin_ui::views::read::state_of(m, key).is_some_and(|st| st.focus);
+    let typing = picked.is_empty() && !away && !card_focus && !btw_on && !beside;
+    if beside {
+        top = line([sp("picking beside · typing or esc returns here", DIM)]);
+    } else if btw_on {
         top = line([sp("asking on the side, above · esc returns here", DIM)]);
     } else if card_focus {
         top = line([sp("answering the card above · esc returns here", DIM)]);
@@ -879,15 +908,30 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
     if queue::sel(picked, q.items.len()).is_some() {
         return queue::hint(&q, w);
     }
-    // The column beside the conversation has the keys.
+    // The column beside the conversation has the keys: tab brought them,
+    // and takes them on to the list.
     if super::side::focused(m, key) {
         return fit_keys(
             w,
             &[
                 ("↑↓", "pick"),
                 ("enter · →", "open"),
-                ("←", "back"),
-                ("esc", "back"),
+                ("esc", "back to message"),
+                ("tab", "Agents"),
+            ],
+        );
+    }
+    // The task list's head on the box, picked.
+    if picked == super::tasks::TASKS_REF {
+        let open = conn(m, key).tasks_open;
+        return fit_keys(
+            w,
+            &[
+                ("enter", if open { "shut" } else { "open" }),
+                ("→", if open { "all tasks" } else { "open" }),
+                ("←", "shut"),
+                ("↑↓", "move"),
+                ("esc", "back to message"),
             ],
         );
     }
@@ -1008,13 +1052,13 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
                 ("x", "stop it"),
                 ("shift+x", "…and say why"),
                 ("↑↓", "pick"),
-                ("shift+↑↓", "next run"),
+                ("alt+↑↓", "next subagent"),
             ]
         } else if picked.starts_with("sub:") {
             &[
                 ("→ · tab", "message it"),
                 ("↑↓", "pick"),
-                ("shift+↑↓", "next run"),
+                ("alt+↑↓", "next subagent"),
             ]
         } else if let Some((kill, pause)) = &part {
             &[
@@ -1093,15 +1137,10 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
                 ("ctrl+o", "show all"),
             ]
         };
-        // → opens the row picked, or moves on into the column beside.
+        // → opens the row picked and ← shuts it, and nothing else.
         let mut pairs = pairs.to_vec();
         if view == "conversation" && !pairs.iter().any(|p| p.0.contains('→')) {
-            let says = if super::side::has_items(m, key) {
-                "open · the side"
-            } else {
-                "open"
-            };
-            pairs.insert(1.min(pairs.len()), ("→", says));
+            pairs.insert(1.min(pairs.len()), ("→ ←", "open · shut"));
         }
         return fit_keys(w, &pairs);
     }
@@ -1164,7 +1203,7 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
         .collect();
     // Room left: the conversation's own ways in.
     if side_items {
-        pairs.push(("→", "the side"));
+        pairs.push(("tab", "the side"));
     }
     // Its runs, each opened in turn without picking it from the list.
     if has_subs {

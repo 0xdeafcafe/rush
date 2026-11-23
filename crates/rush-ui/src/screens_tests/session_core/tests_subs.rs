@@ -53,6 +53,7 @@ fn ctx<'a>(s: &'a Session, r: &'a Runs, reg: &'a Registry, sel: &'a str) -> Ctx<
         idle_box: true,
         queued: &|_| 0,
         cache_kept: &|_| None,
+        whole: false,
     }
 }
 
@@ -713,4 +714,117 @@ fn running_tools_by_what_they_do() {
     assert!(got.contains("telling an agent"), "{got}");
     assert!(got.contains("updating its view"), "{got}");
     assert!(got.contains("search  linear"), "{got}");
+}
+
+/// Seven runs with a dozen shells each: n runs, each with its own shells
+/// started in the background, named `a{i}` and `b{i}-{j}`.
+fn runs_with_shells(n: usize, shells: usize) -> (Session, Runs) {
+    let mut s = Session::new();
+    let mut r = Runs {
+        follow: follower(),
+        ..Runs::default()
+    };
+    for i in 0..n {
+        let mut lines = vec![format!(
+            r#"{{"type":"user","isSidechain":true,"timestamp":"2026-09-23T20:00:00Z","message":{{"role":"user","content":"lane {i}"}}}}"#
+        )];
+        let mut calls = Vec::new();
+        for j in 0..shells {
+            lines.push(format!(
+                r#"{{"type":"assistant","isSidechain":true,"timestamp":"2026-09-23T20:00:01Z","message":{{"id":"m{i}-{j}","role":"assistant","content":[{{"type":"tool_use","id":"t{i}-{j}","name":"Bash","input":{{"command":"watch-{i}-{j}","run_in_background":true}}}}]}}}}"#
+            ));
+            calls.push(format!("t{i}-{j}"));
+            s.apply(
+                &Event::TaskStarted(TaskStarted {
+                    id: format!("b{i}-{j}"),
+                    call_id: format!("t{i}-{j}"),
+                    kind: TaskKind::Shell,
+                    label: format!("watch-{i}-{j}"),
+                    background: true,
+                    ..TaskStarted::default()
+                }),
+                NOW - 60_000,
+            );
+        }
+        r.subs.push(Subagent {
+            id: format!("a{i}"),
+            typ: "lane".into(),
+            description: format!("lane {i}"),
+            path: format!("/x/agent-a{i}.jsonl"),
+            modified: NOW - i as Ms,
+            ..Subagent::default()
+        });
+        let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+        r.stats.insert(format!("a{i}"), stat_of(&lines, &calls));
+    }
+    (s, r)
+}
+
+/// Going up (and back down) through runs that each have many shells
+/// open, a row at a time: the row picked is always among those drawn,
+/// once; the block stays a few rows however many shells there are; and
+/// the runs drawn move a run at a time, never back to the first few and
+/// out again. Not Go's: its window followed only a run picked, so each
+/// step onto a shell of a run past the fifth drew the first five again,
+/// the pick out of sight.
+#[test]
+fn many_shells_under_many_runs_keep_the_pick_in_sight() {
+    let (s, mut r) = runs_with_shells(7, 12);
+    let running = r.running(&s, NOW);
+    assert_eq!(running.len(), 7);
+    let dock = r.dock_subs(&s, &running, NOW);
+    // Every row the keys go through, top to bottom as drawn.
+    let mut all = Vec::new();
+    for sa in &dock {
+        all.push(format!("run:{}", sa.id));
+        for j in super::subs::jobs_of(&r, &s, &sa.id) {
+            all.push(format!("job:{}", j.id));
+        }
+    }
+    assert_eq!(all.len(), 7 * 13, "{all:?}");
+    let runs_in = |refs: &[String]| -> Vec<String> {
+        refs.iter()
+            .filter(|x| x.starts_with("run:"))
+            .cloned()
+            .collect()
+    };
+    let up: Vec<&String> = all.iter().rev().collect();
+    let down: Vec<&String> = all.iter().collect();
+    for (way, walk) in [("up", up), ("down", down)] {
+        let mut last: Option<Vec<String>> = None;
+        for sel in walk {
+            let sel = keep_run_pick(sel, &mut r, &dock, &[]);
+            let (out, refs) = preview(&s, &mut r, &sel, 60);
+            assert_eq!(
+                refs.iter().filter(|x| **x == sel).count(),
+                1,
+                "{way}: {sel} drawn once in\n{out}"
+            );
+            assert_eq!(refs.len(), out.lines().count(), "a ref a row");
+            assert!(
+                // Its head, "… N newer", five runs with four tasks each
+                // and a row saying how many more (two under the run
+                // picked), "+ N older".
+                refs.len() <= 2 + 5 * 6 + 2,
+                "{way} at {sel}: {} rows\n{out}",
+                refs.len()
+            );
+            let now = runs_in(&refs);
+            assert!(now.len() <= 5, "{now:?}");
+            if let Some(was) = &last {
+                let moved = now.iter().filter(|x| !was.contains(x)).count();
+                assert!(moved <= 1, "{way} at {sel}: from {was:?} to {now:?}");
+            }
+            last = Some(now);
+        }
+    }
+    // The column beside a wide conversation scrolls, so it has them all.
+    let reg = Registry::new();
+    let mut c = ctx(&s, &r, &reg, "");
+    c.whole = true;
+    let (rows, refs) = running_preview(&c, &dock, &[], &[], 0, 60);
+    assert_eq!(rows.len(), refs.len());
+    for x in &all {
+        assert_eq!(refs.iter().filter(|y| *y == x).count(), 1, "{x}");
+    }
 }

@@ -139,7 +139,16 @@ pub struct Ctx<'a> {
     /// What rush did to keep a subagent's prompt cache, by the call that
     /// started it, as its host says (Info.sub_kept).
     pub cache_kept: &'a dyn Fn(&str) -> Option<String>,
+    /// Every run and every one of its tasks drawn, not a few round the
+    /// pick: the column beside a wide conversation, which scrolls
+    /// (side.rs).
+    pub whole: bool,
 }
+
+/// How many of a run's tasks the dock draws under it, kept round the one
+/// picked; the rest are counted (Rust-only: Go drew them all, and a run
+/// with a dozen shells pushed the rest of the dock off the screen).
+pub const DOCK_JOBS_SHOWN: usize = 4;
 
 impl Ctx<'_> {
     /// f with how the dock draws its tasks.
@@ -214,14 +223,31 @@ pub fn running_preview(
     w: usize,
 ) -> (Vec<Line>, Vec<String>) {
     let picked = c.sel.starts_with("run:");
-    let start = if picked && run_pick >= DOCK_RUNS_SHOWN {
+    // The run the pick is on, or whose task it is on: the few runs drawn
+    // are kept round it either way. Not Go's, which looked only for a run
+    // picked: with a task of a run past the fifth picked the rows went
+    // back to the first five, the pick out of sight, and came back at the
+    // next ↑ onto its run, so going up through runs with shells of their
+    // own the list jumped at every other row.
+    let owner = c
+        .sel
+        .strip_prefix("job:")
+        .and_then(|id| c.s.job(id))
+        .and_then(|j| c.r.job_owner(j))
+        .and_then(|o| run.iter().position(|sa| sa.id == o.id));
+    let at = match owner {
+        Some(i) => Some(i),
         // The pick can sit on a workflow's agent, not in run, its place
         // counted where run hasn't as many.
-        (run_pick - DOCK_RUNS_SHOWN + 1).min(run.len().saturating_sub(DOCK_RUNS_SHOWN))
-    } else {
-        0
+        None if picked => Some(run_pick),
+        None => None,
     };
-    let shown = &run[start.min(run.len())..run.len().min(start + DOCK_RUNS_SHOWN)];
+    let few = if c.whole { run.len() } else { DOCK_RUNS_SHOWN };
+    let start = match at {
+        Some(i) if i >= few => (i - few + 1).min(run.len().saturating_sub(few)),
+        _ => 0,
+    };
+    let shown = &run[start.min(run.len())..run.len().min(start + few)];
     let on_run = run.iter().any(|sa| c.sel == format!("run:{}", sa.id));
     let mut hint = if picked && !on_run {
         keys(&[("space", "read what it did")])
@@ -304,9 +330,11 @@ pub fn running_preview(
             let head = line([plain(lead), spin_of(c.reg, &kind, c.tick + i), plain(" ")]);
             let mut rest = Line::new();
             let q = (c.queued)(&sa.id);
+            // Your messages waiting for it, said as that (Rust-only: Go
+            // drew ✉ and a number).
             if q > 0 {
                 rest.spans.push(plain(" "));
-                rest.spans.push(sp(format!("✉{q}"), QUEUE));
+                rest.spans.push(sp(format!("✉{q} queued"), QUEUE));
             }
             rest.spans.push(plain("  "));
             rest.spans.push(sp("›", ORANGE));
@@ -315,7 +343,7 @@ pub fn running_preview(
             join(&mut rest, trail);
             let name = |nw: usize| sub_name(sa, &tag, nw, TEXT);
             let queue_w = if q > 0 {
-                rush_core::text::width(&format!(" ✉{q}"))
+                rush_core::text::width(&format!(" ✉{q} queued"))
             } else {
                 0
             };
@@ -326,12 +354,32 @@ pub fn running_preview(
             }
             out.push(top);
             refs.push(format!("run:{}", sa.id));
-            // What it's running itself, hung under it.
-            for (k, j) in jobs_of(c.r, c.s, &sa.id).iter().enumerate() {
+            // What it's running itself, hung under it: a few, kept round
+            // the one picked, the rest counted.
+            let jobs = jobs_of(c.r, c.s, &sa.id);
+            let (from, to) = if c.whole || jobs.len() <= DOCK_JOBS_SHOWN {
+                (0, jobs.len())
+            } else {
+                let at = jobs
+                    .iter()
+                    .position(|j| c.sel == format!("job:{}", j.id))
+                    .unwrap_or(0);
+                let from = (at + 1).saturating_sub(DOCK_JOBS_SHOWN);
+                (from, from + DOCK_JOBS_SHOWN)
+            };
+            if from > 0 {
+                out.push(line([dim(format!("{lead}  … {from} more above"))]));
+                refs.push(String::new());
+            }
+            for (k, j) in jobs.iter().enumerate().take(to).skip(from) {
                 out.push(
                     c.with_dock(|d| job_row(c.s, j, i + k, w, &format!("{lead}  "), false, d)),
                 );
                 refs.push(format!("job:{}", j.id));
+            }
+            if to < jobs.len() {
+                out.push(line([dim(format!("{lead}  + {} more", jobs.len() - to))]));
+                refs.push(String::new());
             }
         };
     // Workflows first, each with its agents working under it.
@@ -462,6 +510,12 @@ fn kept_note(c: &Ctx, sa: &Subagent) -> Option<String> {
 /// subagents' (blue-violet edge) and the loose tasks' (orange), unless
 /// they show at the top of the views panel (paneDock :3488-3494).
 pub fn blocks(m: &mut Model, key: &str, w: usize, in_panel: bool) -> Vec<Block> {
+    blocks_as(m, key, w, in_panel, false)
+}
+
+/// blocks, whole for the column beside a wide conversation: every run
+/// and every task of each (Ctx::whole).
+pub fn blocks_as(m: &mut Model, key: &str, w: usize, in_panel: bool, whole: bool) -> Vec<Block> {
     if in_panel || super::views::view_name(m, key) != "conversation" {
         return Vec::new();
     }
@@ -518,6 +572,7 @@ pub fn blocks(m: &mut Model, key: &str, w: usize, in_panel: bool) -> Vec<Block> 
         idle_box,
         queued: &queued,
         cache_kept: &cache_kept,
+        whole,
     };
     let mut out = Vec::new();
     if shown.runs() {
@@ -637,6 +692,7 @@ pub fn task_rows(m: &mut Model, key: &str, w: usize) -> HashMap<String, Vec<Line
         idle_box: false,
         queued: &no_queue,
         cache_kept: &no_kept,
+        whole: false,
     };
     let is_open = |rf: &str| {
         if let Some(id) = rf.strip_prefix("job:") {

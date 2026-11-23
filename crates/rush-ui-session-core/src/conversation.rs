@@ -203,10 +203,16 @@ fn text(m: &mut Model, key: &str, w: usize, rows: usize) -> Vec<Line> {
     let rows = rows - peek_h;
     conn(m, key).vs.rows = rows;
     let (between, action) = turn_state(m, key);
+    // The column beside it, or the views panel in its place, has the
+    // keys: the row picked here is drawn as one without them.
+    let no_keys = m.pane_idle
+        || super::side::focused(m, key)
+        || views::read::state_of(m, key).is_some_and(|st| st.focus);
     let Some(v) = m.session.as_mut() else {
         return Vec::new();
     };
     v.side = side;
+    v.idle = no_keys;
     // A run beside it can leave the text less than its reading width
     // (openrun::run_width keeps it 90 to 124): its rows are laid out to
     // the room left of the run, so none runs on under it.
@@ -401,6 +407,18 @@ pub fn rows_of(
     }
     let mut b = v.body(n);
     let drawn = v.r.rows();
+    // The picked row's cursor is the bar every picked row has, orange
+    // with the keys and faint without (dock::picked1). Not Go's, whose
+    // conversation drew a thin grey ▏ where the dock, the queue and the
+    // column drew ▍: three marks for one cursor.
+    if !v.sel.is_empty() {
+        for (i, l) in b.iter_mut().enumerate() {
+            let at = (v.start + i).checked_sub(v.base).and_then(|j| drawn.get(j));
+            if at.is_some_and(|r| r.r#ref == v.sel) {
+                cursor_mark(l, !v.idle);
+            }
+        }
+    }
     if !hover.is_empty() {
         let under = format!("{hover}{OWNER_SEP}");
         for (i, l) in b.iter_mut().enumerate() {
@@ -442,6 +460,14 @@ pub fn rows_of(
         b.push(spread(Line::new(), pill, cw));
     }
     (b, n)
+}
+
+/// Makes the conversation's thin cursor in a picked row's gutter the bar
+/// the other picked rows have.
+pub(super) fn cursor_mark(l: &mut Line, keys: bool) {
+    if let Some(s) = l.spans.iter_mut().take(3).find(|s| s.text == "▏") {
+        *s = sp("▍", if keys { ORANGE } else { FAINT });
+    }
 }
 
 // What a pinned row's ref starts with is the base's (crate::sess).
@@ -694,6 +720,19 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     let rows = conn(m, &key).vs.rows.max(1);
     if e.kind == MouseKind::Down(Button::Left) && super::side::click(m, x, y) {
         return Out::Draw;
+    }
+    // The wheel over the column beside the text scrolls the column, not
+    // the conversation under it (Rust-only: the column didn't scroll).
+    if matches!(e.kind, MouseKind::ScrollUp | MouseKind::ScrollDown)
+        && super::views::view_name(m, &key) == "conversation"
+        && super::side::over(m, &key, x, y)
+        && conn(m, &key).side.rows.len() > conn(m, &key).side.shown
+    {
+        return if super::side::wheel(m, &key, e.kind == MouseKind::ScrollUp) {
+            Out::Draw
+        } else {
+            Out::Idle
+        };
     }
     // Right-clicking a link asks what to do with it: open it, in Preview,
     // Quick Look, reveal or copy it (model.go:1720, linkMenu); on a

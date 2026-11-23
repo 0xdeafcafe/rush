@@ -1797,6 +1797,9 @@ mod close_tests;
 #[path = "tests_stepkeys.rs"]
 mod stepkeys_tests;
 
+#[path = "tests_cursor.rs"]
+mod cursor_tests;
+
 #[path = "tests_arrows.rs"]
 mod arrows_tests;
 

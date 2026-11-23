@@ -374,6 +374,54 @@ pub struct Side {
     /// The run (or workflow) open in the column in its parts' place, at
     /// all the room it has (openrun.rs); "" while it shows its parts.
     pub run: String,
+    /// The first of its rows drawn: taller than its room, it scrolls
+    /// (Rust-only: its rows past the foot were cut, and what was down
+    /// there, a run's tasks or the changes under many runs, could be
+    /// neither seen nor picked).
+    pub top: usize,
+    /// The ref of the item the keys are on, so the pick stays on it as
+    /// rows come and go above it.
+    pub pick: String,
+}
+
+impl Side {
+    /// The rows of its own it can draw at once, as last drawn.
+    fn room_rows(&self) -> usize {
+        self.shown.max(1)
+    }
+
+    /// The furthest it scrolls.
+    fn most(&self) -> usize {
+        self.rows.len().saturating_sub(self.room_rows())
+    }
+
+    /// Whether row i starts an item: the first row of a run of rows with
+    /// one ref.
+    fn starts(&self, i: usize) -> bool {
+        self.refs.get(i).is_some_and(|r| !r.is_empty())
+            && (i == 0 || self.refs[i - 1] != self.refs[i])
+    }
+
+    /// Scrolls so rows are in sight, clear of the row at either end that
+    /// says how much more there is; the first item brings the top with
+    /// it, the last the foot.
+    fn reveal(&mut self, rows: std::ops::Range<usize>) {
+        let n = self.room_rows();
+        let most = self.most();
+        let first = !(0..rows.start).any(|i| self.starts(i));
+        let last = !(rows.end..self.refs.len()).any(|i| self.starts(i));
+        if first {
+            self.top = 0;
+        } else if rows.start < self.top + 1 {
+            self.top = rows.start.saturating_sub(1);
+        }
+        if last && rows.end + n > self.rows.len() {
+            self.top = self.top.max(most.min(rows.start.saturating_sub(1)));
+        } else if rows.end + 1 > self.top + n {
+            self.top = (rows.end + 1).saturating_sub(n);
+        }
+        self.top = self.top.min(most);
+    }
 }
 
 /// The column's width beside session key's conversation, text w wide:
@@ -546,9 +594,13 @@ pub fn edge_mouse(m: &mut Model, e: &crate::frame::Mouse) -> Out {
 pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
     // The room is right of the text, left of any views beside it.
     let (sw, room) = room_beside(m, key, w);
+    let was = &conn(m, key).side;
     let mut side = Side {
         w: sw,
         room,
+        top: was.top,
+        pick: was.pick.clone(),
+        shown: was.shown,
         ..Side::default()
     };
     let runs = std::mem::take(&mut conn(m, key).side_runs);
@@ -560,11 +612,13 @@ pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
             side.w = rw;
             side.room = rw;
             side.run = id;
+            side.shown = 0;
             conn(m, key).side = side;
             return false;
         }
     }
     if sw == 0 || !conversation {
+        side.shown = 0; // not drawn: nothing of it to pick or point at
         conn(m, key).side = side;
         return false;
     }
@@ -693,6 +747,27 @@ pub fn make(m: &mut Model, key: &str, w: usize, conversation: bool) -> bool {
     {
         part(&mut side, edge, rows, refs);
     }
+    // The pick stays on its item, wherever its rows are now; an item
+    // gone, on the one in its place.
+    let c = conn(m, key);
+    if let Some(at) = c.side_pick
+        && (!side.starts(at) || side.refs[at] != side.pick)
+    {
+        let all: Vec<usize> = (0..side.refs.len()).filter(|&i| side.starts(i)).collect();
+        let to = all
+            .iter()
+            .copied()
+            .find(|&i| side.refs[i] == side.pick)
+            .or_else(|| all.iter().copied().find(|&i| i >= at))
+            .or(all.last().copied());
+        c.side_pick = to;
+        if let Some(i) = to {
+            side.pick.clone_from(&side.refs[i]);
+            let rows = picked_rows(&side, to);
+            side.reveal(rows);
+        }
+    }
+    side.top = side.top.min(side.most());
     conn(m, key).side = side;
     beside
 }
@@ -756,28 +831,57 @@ pub fn paste(m: &mut Model, key: &str, out: &mut Vec<Line>, foot: usize, cw: usi
     while out.len() < foot {
         out.push(Line::new());
     }
-    let n = side.rows.len().min(foot.saturating_sub(first)); // and clicks only what shows
+    let total = side.rows.len();
+    let n = total.min(foot.saturating_sub(first)); // and clicks only what shows
     let y = first;
+    // Taller than its room, it shows from side.top, its first and last
+    // rows saying how many more there are that way.
+    let from = side.top.min(total - n);
+    side.top = from;
+    let (above, below) = (from, total - from - n);
     // The item the arrow keys picked, lit as a picked row is.
     let lit = picked_rows(side, at);
     for (i, l) in out.iter_mut().enumerate().take(foot).skip(first) {
         let mut r = fit(cut(l, 0, x), x);
         if (y..y + n).contains(&i) {
-            let row = side.rows[i - y].clone();
-            join(
-                &mut r,
-                if lit.contains(&(i - y)) {
-                    super::dock::picked1(row, side.w, true)
-                } else {
-                    row
-                },
-            );
+            let at = from + i - y;
+            let row = if above > 0 && i == y {
+                more_row("↑", above + 1, side.w)
+            } else if below > 0 && i + 1 == y + n {
+                more_row("↓", below + 1, side.w)
+            } else if lit.contains(&at) {
+                super::dock::picked1(side.rows[at].clone(), side.w, true)
+            } else {
+                side.rows[at].clone()
+            };
+            join(&mut r, row);
         }
         *l = fit(r, cw);
     }
     side.shown = n;
     side.y = top + y;
     side.x = 2 + x;
+}
+
+/// The row at an end of a column scrolled: how many rows more that way.
+fn more_row(arrow: &str, n: usize, w: usize) -> Line {
+    fit(line([plain("  "), faint(format!("{arrow} {n} more"))]), w)
+}
+
+/// The wheel over the column scrolls it, three rows a turn, when it's
+/// taller than its room. Whether it moved.
+pub fn wheel(m: &mut Model, key: &str, up: bool) -> bool {
+    let side = &mut conn(m, key).side;
+    if side.shown == 0 || !side.run.is_empty() {
+        return false;
+    }
+    let was = side.top;
+    side.top = if up {
+        side.top.saturating_sub(3)
+    } else {
+        (side.top + 3).min(side.most())
+    };
+    side.top != was
 }
 
 /// The column with a run open in it (openrun::beside), laid over the
@@ -821,7 +925,17 @@ pub fn click(m: &mut Model, x: usize, y: usize) -> bool {
     {
         return false;
     }
-    let r = side.refs.get(y - side.y).cloned().unwrap_or_default();
+    // The rows that say how many more there are scroll to them.
+    let (row, n, total) = (y - side.y, side.shown, side.rows.len());
+    if side.top > 0 && row == 0 {
+        wheel(m, &key, true);
+        return true;
+    }
+    if side.top + n < total && row + 1 == n {
+        wheel(m, &key, false);
+        return true;
+    }
+    let r = side.refs.get(side.top + row).cloned().unwrap_or_default();
     act(m, &key, &r)
 }
 
@@ -873,13 +987,14 @@ fn act(m: &mut Model, key: &str, r: &str) -> bool {
 }
 
 /// The column's items that can be picked: the first row of each run of
-/// rows with one ref, as drawn.
+/// rows with one ref, those scrolled out of sight too; none while the
+/// column doesn't show.
 fn items(m: &mut Model, key: &str) -> Vec<usize> {
     let side = &conn(m, key).side;
-    let n = side.shown.min(side.refs.len());
-    (0..n)
-        .filter(|&i| !side.refs[i].is_empty() && (i == 0 || side.refs[i - 1] != side.refs[i]))
-        .collect()
+    if side.shown == 0 {
+        return Vec::new();
+    }
+    (0..side.refs.len()).filter(|&i| side.starts(i)).collect()
 }
 
 /// Whether a column shows with something in it to pick.
@@ -890,8 +1005,24 @@ pub fn has_items(m: &mut Model, key: &str) -> bool {
 /// Gives the column the keys, its first item picked. Whether it has one.
 pub fn focus(m: &mut Model, key: &str) -> bool {
     let first = items(m, key).first().copied();
-    conn(m, key).side_pick = first;
+    pick(m, key, first);
     first.is_some()
+}
+
+/// Puts the column's pick on the item starting at row at, scrolled into
+/// sight; none takes the keys off the column.
+fn pick(m: &mut Model, key: &str, at: Option<usize>) {
+    let c = conn(m, key);
+    c.side_pick = at;
+    let side = &mut c.side;
+    match at {
+        Some(i) => {
+            side.pick = side.refs.get(i).cloned().unwrap_or_default();
+            let rows = picked_rows(side, at);
+            side.reveal(rows);
+        }
+        None => side.pick.clear(),
+    }
 }
 
 /// Whether the column has the keys: the row picked is still an item.
@@ -915,7 +1046,7 @@ fn picked_rows(side: &Side, at: Option<usize>) -> std::ops::Range<usize> {
     let Some(r) = side.refs.get(i).filter(|r| !r.is_empty()) else {
         return 0..0;
     };
-    let end = side.shown.min(side.refs.len());
+    let end = side.refs.len();
     let mut to = i;
     while to < end && side.refs[to] == *r {
         to += 1;
@@ -923,10 +1054,14 @@ fn picked_rows(side: &Side, at: Option<usize>) -> std::ops::Range<usize> {
     i..to
 }
 
-/// The keys while the column has them: ↑↓ through its items, enter, space
-/// or → opens one, ← or esc goes back to where the keys came from (the
-/// conversation's pick, or the box). Any other key goes back too, and is
-/// the box's or the conversation's.
+/// The keys while the column has them (tab or } from the conversation
+/// gave them): ↑↓ through its items, enter, space or → opens one, esc or
+/// { goes back to where the keys came from (the conversation's pick, or
+/// the box), tab or } on to the list. ← does nothing: there is nothing in
+/// the column to shut, and it isn't the way between panes (Rust-only: →
+/// came in and ← went back, the same keys that open and shut a row of
+/// the conversation). Any other key goes back too, and is the box's or
+/// the conversation's.
 pub fn focus_key(m: &mut Model, k: &Press) -> Out {
     let Some(key) = open_key(m) else {
         return Out::Pass;
@@ -941,16 +1076,21 @@ pub fn focus_key(m: &mut Model, k: &Press) -> Out {
     let at = conn(m, &key).side_pick.unwrap_or(0);
     let i = all.iter().position(|&r| r == at).unwrap_or(0);
     match k.s.as_str() {
-        "up" => conn(m, &key).side_pick = Some(all[i.saturating_sub(1)]),
-        "down" => conn(m, &key).side_pick = Some(all[(i + 1).min(all.len() - 1)]),
+        "up" => pick(m, &key, Some(all[i.saturating_sub(1)])),
+        "down" => pick(m, &key, Some(all[(i + 1).min(all.len() - 1)])),
         "enter" | "space" | "right" => {
             let r = conn(m, &key).side.refs[at].clone();
-            conn(m, &key).side_pick = None;
+            pick(m, &key, None);
             act(m, &key, &r);
         }
-        "left" | "esc" => conn(m, &key).side_pick = None,
+        "left" => return Out::Idle,
+        "esc" | "{" => pick(m, &key, None),
+        "tab" | "}" => {
+            pick(m, &key, None);
+            super::keys::to_list(m);
+        }
         _ => {
-            conn(m, &key).side_pick = None;
+            pick(m, &key, None);
             return Out::Pass;
         }
     }

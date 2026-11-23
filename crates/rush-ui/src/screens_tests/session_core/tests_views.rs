@@ -12,7 +12,7 @@ use super::*;
 use crate::frame::Mouse;
 
 /// A turn with an edit to a file, a task list and the context used.
-fn worked(m: &mut Model) {
+pub(super) fn worked(m: &mut Model) {
     let now = m.now;
     sess(m).sent("fix the parser".into(), Vec::new(), now - 60_000);
     let call = Call {
@@ -122,7 +122,7 @@ fn worked(m: &mut Model) {
     );
 }
 
-fn opened(w: usize, h: usize) -> Model {
+pub(super) fn opened(w: usize, h: usize) -> Model {
     let fake = Fake::new();
     let mut m = open(agent("steer", State::Idle), &fake, w, h);
     worked(&mut m);
@@ -381,7 +381,7 @@ fn changes_view() {
     press(&mut m, "enter");
     let s = screen(&mut m);
     assert!(
-        s[y + 1].starts_with("  ▏ ▾   /src/"),
+        s[y + 1].starts_with("  ▍ ▾   /src/"),
         "picked and open: {}",
         s[y + 1]
     );
@@ -1554,17 +1554,17 @@ fn the_task_row_by_keys() {
     let mut m = opened(120, 40);
     screen(&mut m);
     press(&mut m, "up");
-    assert!(row_with(&mut m, "▌ ▸ Tasks").is_some(), "picked, shut");
+    assert!(row_with(&mut m, "▍ ▸ Tasks").is_some(), "picked, shut");
     press(&mut m, "enter");
-    assert!(row_with(&mut m, "▌ ▾ Tasks").is_some(), "enter opens it");
+    assert!(row_with(&mut m, "▍ ▾ Tasks").is_some(), "enter opens it");
     press(&mut m, "left");
-    assert!(row_with(&mut m, "▌ ▸ Tasks").is_some(), "← shuts it");
+    assert!(row_with(&mut m, "▍ ▸ Tasks").is_some(), "← shuts it");
     press(&mut m, "down");
     assert!(
         row_with(&mut m, "  ▸ Tasks").is_some(),
         "↓ is the box's again"
     );
-    assert!(row_with(&mut m, "▌ ▸ Tasks").is_none());
+    assert!(row_with(&mut m, "▍ ▸ Tasks").is_none());
     press(&mut m, "up");
     press(&mut m, "right");
     press(&mut m, "right");
@@ -2264,11 +2264,12 @@ fn needs_you_with_nothing_to_act_on_is_not_drawn() {
     assert!(row_with(&mut m, "Needs you").is_none());
 }
 
-/// ← in the conversation goes back a stage at a time: it closes the open
-/// step the pick is on, then, with nothing open, drops the pick to the
-/// message box, and from the box goes back to the Agents list.
+/// ← in the conversation only shuts: it closes the open step the pick
+/// is on, and with nothing open stays there. esc steps out, a level at
+/// a time: off the row to the message box, then from the box to the
+/// Agents list (Not Go's ←, which went all that way itself).
 #[test]
-fn left_closes_then_leaves_the_pick_then_the_session() {
+fn left_only_closes_and_esc_steps_out() {
     let mut m = opened(120, 40);
     let s = screen(&mut m);
     let y = row_with(&mut m, "parse.rs").expect("the step");
@@ -2280,15 +2281,22 @@ fn left_closes_then_leaves_the_pick_then_the_session() {
     press(&mut m, "right");
     let open = |m: &Model| m.session.as_ref().unwrap().o.open.get(&picked).copied();
     assert_eq!(open(&m), Some(true), "→ opens the step");
-    // 1st: it closes, the pick stays on its header.
+    // It closes, the pick stays on its header.
     press(&mut m, "left");
     assert_eq!(open(&m), Some(false), "← closes the step");
     assert_eq!(m.session.as_ref().unwrap().sel, picked);
-    // 2nd: nothing open, so off the row, to the box.
+    // Nothing open: ← stays where it is.
     press(&mut m, "left");
+    assert_eq!(m.session.as_ref().unwrap().sel, picked);
+    // esc: off the row, to the box.
+    press(&mut m, "esc");
     assert!(m.session.as_ref().is_some_and(|v| v.sel.is_empty()));
-    // 3rd: from the box, back to the list.
+    // ← in the empty box doesn't leave.
     press(&mut m, "left");
+    assert!(m.session.is_some(), "still in the Session");
+    assert_eq!(flash(&m), "esc goes back to Agents");
+    // esc from the box: back to the list.
+    press(&mut m, "esc");
     assert!(m.session.is_none(), "back to the Agents list");
 }
 

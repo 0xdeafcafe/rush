@@ -359,7 +359,10 @@ fn heredoc_note_gets_the_memory_card() {
     assert!(!out.contains("Always ok") && !out.contains("<<"), "{out}");
     press(&mut m, "a");
     assert!(acts(&mut m).is_empty(), "no always for a shell write");
-    press(&mut m, "up"); // the keys back to the card
+    // The keys back to the card: ↑ from the empty box, which is the
+    // Session's to do (session_core's stack_nav; this host's box is its
+    // own, not the Session's the "a" went into).
+    crate::screens::session_cards::conn(&mut m, "k").card_focus = true;
     press(&mut m, "e");
     assert!(
         matches!(

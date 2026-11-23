@@ -1061,7 +1061,7 @@ impl ViewsState {
     /// A key while the panel has the keys (k as rush names it): ↑↓ move
     /// the cursor, pgup and pgdn scroll a page, enter, space or → do what
     /// a click on it does (open a row, press a button), ← and → pick
-    /// among a row of buttons, ← or esc give the keys back. None for a key
+    /// among a row of buttons, esc gives the keys back. None for a key
     /// that isn't the panel's: the keys go back, and it goes on.
     pub fn key(&mut self, k: &str) -> Option<Click> {
         if !self.focus {
@@ -1116,7 +1116,10 @@ impl ViewsState {
             "left" if btns > 0 && self.btn > 0 => self.btn -= 1,
             "right" if btns > 0 && self.btn + 1 < btns => self.btn += 1,
             "right" if btns > 0 => {}
-            "left" | "esc" => self.focus = false,
+            // ← with no button to go back to does nothing: it isn't the
+            // way between panes (Rust-only: it gave the keys back).
+            "left" => {}
+            "esc" => self.focus = false,
             "enter" | "space" | "right" => {
                 let cu = match a.btns.get(self.btn) {
                     Some(b) => b.from,

@@ -156,11 +156,11 @@ fn keys_between_the_two_sides() {
     assert_eq!(split::widths(&m), (120, 0), "the list alone again");
 }
 
-/// ← with nothing typed, { } and tab go back to the list as esc does
-/// (switchFocus, paneKey's left).
+/// { } and tab go back to the list as esc does (switchFocus). ← doesn't
+/// (Not Go's paneKey left: ← only shuts what's picked).
 #[test]
 fn back_to_the_list_keys() {
-    for k in ["left", "{", "}", "tab"] {
+    for k in ["{", "}", "tab"] {
         let mut m = opened(120, 40, "split");
         press(&mut m, k);
         assert!(m.session.is_none(), "{k}");
@@ -168,6 +168,9 @@ fn back_to_the_list_keys() {
         press(&mut m, "tab");
         assert!(m.session.is_some(), "tab goes back in");
     }
+    let mut m = opened(120, 40, "split");
+    press(&mut m, "left");
+    assert!(m.session.is_some(), "← stays in the Session");
 }
 
 /// tab goes into the Session with text typed too; → pushed at the end

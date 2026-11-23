@@ -2072,46 +2072,13 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
         }
         _ => {}
     }
-    // The card sits just above the box: ↑ from the box goes straight onto
-    // it, and ↑ again on up into the conversation; ↓ off the last of its
-    // rows comes back onto it, and ↓ off it to the box.
-    let above = if s == "up" || s == "down" {
-        m.session
-            .as_ref()
-            .and_then(|v| v.shown.iter().rev().find(|r| !r.is_empty()).cloned())
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
-    let sel = m
-        .session
-        .as_ref()
-        .map(|v| v.sel.clone())
-        .unwrap_or_default();
-    if !c.card_focus && empty && s == "up" && sel.is_empty() {
-        c.card_focus = true;
-        return Out::Draw;
-    }
-    if !c.card_focus && empty && s == "down" && !sel.is_empty() && sel == above {
-        c.card_focus = true;
-        if let Some(v) = m.session.as_mut() {
-            v.sel.clear();
-        }
-        return Out::Draw;
-    }
-    if c.card_focus && s == "down" {
-        c.card_focus = false;
-        return Out::Draw;
-    }
-    if c.card_focus && s == "up" && !above.is_empty() {
-        c.card_focus = false;
-        if let Some(v) = m.session.as_mut() {
-            v.sel = above;
-        }
-        return Out::Draw;
-    }
-    if c.card_focus && s == "up" {
-        return Out::Draw; // nothing above it: stay
+    // ↑ and ↓ onto and off the card are the Session's (session_core's
+    // keys.rs, stack_nav), which goes through the card and everything
+    // else stacked on the box in the order it's drawn. Not Go's (cardKey's
+    // own ↑↓): ↑ from the box went straight onto the card past the task
+    // list's head, and ↑ from the card past the queue.
+    if c.card_focus && (s == "up" || s == "down") {
+        return Out::Pass;
     }
     if c.card_focus && s == "esc" {
         c.card_focus = false;

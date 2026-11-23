@@ -774,6 +774,11 @@ pub fn body(m: &mut Model, w: usize, rows: usize) -> Option<Vec<Line>> {
         .map(|(l, r)| {
             if lit(r.as_str()) {
                 hover_line(l.clone(), w)
+            } else if !sel.is_empty() && *r == sel {
+                // The cursor's bar, as on every picked row.
+                let mut l = l.clone();
+                super::conversation::cursor_mark(&mut l, true);
+                l
             } else {
                 l.clone()
             }

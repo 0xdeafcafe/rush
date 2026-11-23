@@ -101,14 +101,10 @@ pub fn task_row(s: &Session, w: usize, shut: bool, picked: bool) -> Vec<Line> {
     if total == 0 || now.is_none() && done == total {
         return Vec::new();
     }
-    // Picked by ↑ from the box (TASKS_REF): its edge and its name lit, as
-    // a picked row of the conversation is.
+    // Picked by ↑ from the box (TASKS_REF): the bar and the ground every
+    // picked row has (dock::picked1), put on below.
     let mut head = line([
-        if picked {
-            sp("▌ ", ORANGE)
-        } else {
-            plain("  ")
-        },
+        plain("  "),
         sp(if shut { "▸ " } else { "▾ " }, ORANGE),
         spb("Tasks", if picked { TEXT } else { SUB }),
         plain("  "),
@@ -130,7 +126,11 @@ pub fn task_row(s: &Session, w: usize, shut: bool, picked: bool) -> Vec<Line> {
     // "all tasks ›" isn't on the head (Rust-only: there it sat over the
     // box's edge words, a third thing on one line): it's the last of the
     // open list's rows, after what more there is.
-    let mut out = vec![fit(head, w)];
+    let mut out = vec![if picked {
+        super::dock::picked1(head, w, true)
+    } else {
+        fit(head, w)
+    }];
     if shut {
         return out;
     }

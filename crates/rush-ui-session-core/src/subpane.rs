@@ -261,19 +261,23 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
             conn(m, &key).watch.msg_focus = false;
             Out::Draw
         }
-        "left" if empty && !picked => {
-            conn(m, &key).watch.msg_focus = false;
+        // alt+↑ and alt+↓ go on to the run before and the next, opened
+        // in this one's place with the keys still its pane's (Rust-only:
+        // only the conversation took them, so going from one run to the
+        // next was tab, the key, and tab again).
+        "alt+up" | "alt+down" => {
+            super::subview::cycle_sub(m, &key, if s == "alt+up" { -1 } else { 1 });
             Out::Draw
         }
+        // ← only shuts what's open round the row picked, as in a
+        // session; it doesn't leave the row or the pane (Rust-only: tab
+        // goes back to the conversation, esc closes the run).
+        "left" if empty && !picked => Out::Idle,
         "left" if empty => {
-            // ← goes back a stage: what's open round the row, then off it.
             let rows = conn(m, &key).watch.peek.rows.max(1);
-            let closed = as_run(m, &key, &id, |m| {
+            as_run(m, &key, &id, |m| {
                 m.session.as_mut().is_some_and(|v| v.fold_in(rows))
             });
-            if closed != Some(true) {
-                set_run_sel(m, &key, String::new());
-            }
             Out::Draw
         }
         "up" if empty && !picked && queued && routed.is_ok() => {
@@ -359,6 +363,7 @@ pub fn here_keys(m: &mut Model) -> Option<(&'static str, Vec<(&'static str, &'st
             ),
             ("/compact", "compact a run rush hosts"),
             ("alt+o", "a run rush hosts: its own session"),
+            ("alt+↑ · alt+↓", "the run before, the next"),
             ("tab", "back to the conversation"),
             ("esc", "close it"),
         ],
@@ -458,9 +463,10 @@ pub fn parent_of(m: &Model) -> Option<(String, String, String)> {
 }
 
 /// The breadcrumb over a hosted child's own session: `‹ parent › its
-/// name`, the parent clickable (crumb_click).
+/// name`, the parent clickable (crumb_click), then which of its parent's
+/// subagents it is and the keys between them and back (child_key).
 pub fn child_crumb(m: &Model, rows: &mut [Line], w: usize) -> Option<(usize, usize)> {
-    let (_, parent, _) = parent_of(m)?;
+    let (pkey, parent, child) = parent_of(m)?;
     let v = m.session.as_ref()?;
     let me = m.agents.iter().find(|a| a.key == v.key)?;
     let hw = w.saturating_sub(3);
@@ -469,10 +475,109 @@ pub fn child_crumb(m: &Model, rows: &mut [Line], w: usize) -> Option<(usize, usi
     let mut l = lead;
     l.spans.push(sp(" › ", FAINT));
     l.spans.push(dim(one_line(&me.display_name)));
-    l.spans.push(faint("   · subagents"));
+    let all = siblings(m, &pkey);
+    match all.iter().position(|id| *id == child) {
+        Some(i) if all.len() > 1 => l.spans.push(faint(format!(
+            "   · subagent {} of {} · alt+↑↓ the others · esc back",
+            i + 1,
+            all.len()
+        ))),
+        _ => l.spans.push(faint("   · subagent · esc back")),
+    }
     let first = rows.first_mut()?;
     *first = super::views::chrome(rush_draw::truncate_line(&l, hw, "…"), hw);
     Some(crumb)
+}
+
+/// The sessions rush hosts for the session with row key parent, oldest
+/// first: its children, as its runs were last read.
+fn siblings(m: &Model, parent: &str) -> Vec<String> {
+    let Some(c) = m
+        .kept
+        .peek::<super::Core>()
+        .and_then(|c| c.conns.get(parent))
+    else {
+        return Vec::new();
+    };
+    let mut all: Vec<_> = c
+        .runs
+        .spawns
+        .values()
+        .filter(|s| !s.hosted.is_empty())
+        .map(|s| (s.born, s.step.as_str(), s.hosted.clone()))
+        .collect();
+    all.sort();
+    all.into_iter().map(|(_, _, id)| id).collect()
+}
+
+/// Back in the parent's session, the run of the child with rush session
+/// id child opened there.
+fn back_to_parent(m: &mut Model, parent: &str, child: &str) {
+    super::menubar_jump::jump_to(m, parent.to_string());
+    if m.session.as_ref().is_some_and(|v| v.key == parent) {
+        let run = conn(m, parent)
+            .runs
+            .spawns
+            .iter()
+            .find(|(_, s)| s.hosted == child)
+            .map(|(step, _)| format!("{}{step}", crate::spawns::SPAWN_PREFIX));
+        if let Some(id) = run {
+            super::subview::pick_run(m, parent, &id);
+        }
+    }
+}
+
+/// The keys of a hosted child open as a session of its own (Rust-only):
+/// alt+↑ and alt+↓ go on to its parent's subagent before it and the
+/// next, each opened in this one's place, and esc from its empty box,
+/// nothing picked and no turn to stop, steps back out to its parent, not
+/// past it to the list. Before the box's own keys.
+pub fn child_key(m: &mut Model, k: &Press) -> Out {
+    let s = k.s.as_str();
+    if !matches!(s, "alt+up" | "alt+down" | "esc")
+        || m.confirm.is_some()
+        || m.sheet.is_some()
+        || m.on_place()
+    {
+        return Out::Pass;
+    }
+    let Some((parent, _, child)) = parent_of(m) else {
+        return Out::Pass;
+    };
+    let Some(key) = open_key(m) else {
+        return Out::Pass;
+    };
+    if s == "esc" {
+        let c = conn(m, &key);
+        let busy = !c.input.is_empty() || c.edit_q > 0 || c.bang;
+        let picked = m.session.as_ref().is_some_and(|v| !v.sel.is_empty());
+        if busy
+            || picked
+            || super::openrun::is_open(m, &key)
+            || rush_ui_session_cards::conn_ref(m, &key).is_some_and(|c| c.card_focus)
+            || super::keys::can_interrupt(m, &key)
+        {
+            return Out::Pass;
+        }
+        back_to_parent(m, &parent, &child);
+        return Out::Draw;
+    }
+    let all = siblings(m, &parent);
+    let Some(i) = all.iter().position(|id| *id == child) else {
+        return Out::Pass;
+    };
+    if all.len() < 2 {
+        m.flash("its only subagent");
+        return Out::Draw;
+    }
+    let n = all.len();
+    let to = if s == "alt+up" {
+        (i + n - 1) % n
+    } else {
+        (i + 1) % n
+    };
+    super::spawned::open_session(m, &all[to]);
+    Out::Draw
 }
 
 /// A click on a hosted child's breadcrumb: its parent's session, on its
@@ -504,17 +609,6 @@ pub fn crumb_click(m: &mut Model, e: &Mouse) -> Out {
     let Some((parent, _, child)) = parent_of(m) else {
         return Out::Pass;
     };
-    super::menubar_jump::jump_to(m, parent.clone());
-    if m.session.as_ref().is_some_and(|v| v.key == parent) {
-        let run = conn(m, &parent)
-            .runs
-            .spawns
-            .iter()
-            .find(|(_, s)| s.hosted == child)
-            .map(|(step, _)| format!("{}{step}", crate::spawns::SPAWN_PREFIX));
-        if let Some(id) = run {
-            super::subview::pick_run(m, &parent, &id);
-        }
-    }
+    back_to_parent(m, &parent, &child);
     Out::Draw
 }

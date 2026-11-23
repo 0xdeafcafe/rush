@@ -1,6 +1,7 @@
-//! The arrows between the message box, the conversation and the column
-//! beside it: ↑ on the box's first line goes up into the conversation, →
-//! opens the picked item or goes on into the column, ← comes back.
+//! The arrows between the message box and the conversation, and tab
+//! between it and the column beside it: ↑ on the box's first line goes
+//! up into the conversation, → opens the picked item and no more, tab
+//! goes on into the column and esc comes back.
 
 use super::beside_tests::{rush_open, view};
 use super::stepkeys_tests::add_fetch;
@@ -98,11 +99,11 @@ fn up_in_a_long_draft_moves_the_cursor_first() {
     assert_eq!(input(&mut m), "one\ntwo");
 }
 
-/// → on a picked step that can open opens it; once it is open, → goes on
-/// into the column, its first item picked; ← comes back with the pick
-/// kept.
+/// → on a picked step that can open opens it, and once it is open does
+/// no more: it is tab that goes on into the column, its first item
+/// picked, and esc that comes back with the pick kept.
 #[test]
-fn right_opens_then_goes_on_to_the_column() {
+fn right_opens_and_tab_goes_on_to_the_column() {
     let (mut m, r) = with_column("arrows-convo");
     m.session.as_mut().unwrap().sel = r.clone();
     screen(&mut m);
@@ -112,42 +113,55 @@ fn right_opens_then_goes_on_to_the_column() {
         Some(&true),
         "opened"
     );
-    assert_eq!(side_pick(&mut m), None, "not yet in the column");
     press(&mut m, "right");
+    assert_eq!(side_pick(&mut m), None, "→ never changes pane");
+    assert_eq!(sel(&m), r);
+    press(&mut m, "tab");
     assert!(side_pick(&mut m).is_some(), "in the column");
     screen(&mut m);
     press(&mut m, "left");
+    assert!(side_pick(&mut m).is_some(), "← isn't the way back");
+    press(&mut m, "esc");
     assert_eq!(side_pick(&mut m), None, "back out");
     assert_eq!(sel(&m), r, "to the pick it came from");
 }
 
-/// → with nothing picked and the box empty goes into the column; ←
-/// returns to the box.
+/// tab with nothing picked goes into the column, and { comes back to the
+/// box; } does as tab, and from the column tab goes on to the list.
 #[test]
-fn right_with_nothing_picked_goes_to_the_column() {
+fn tab_with_nothing_picked_goes_to_the_column() {
     let (mut m, _) = with_column("arrows-none");
     press(&mut m, "right");
+    assert_eq!(side_pick(&mut m), None, "→ has nowhere to go");
+    press(&mut m, "tab");
     assert!(side_pick(&mut m).is_some(), "in the column");
-    press(&mut m, "left");
+    press(&mut m, "{");
     assert_eq!(side_pick(&mut m), None);
     assert!(sel(&m).is_empty(), "back to the box");
+    assert!(m.session.is_some());
+    press(&mut m, "}");
+    assert!(side_pick(&mut m).is_some(), "}} goes on as tab does");
+    screen(&mut m);
+    press(&mut m, "tab");
+    assert_eq!(side_pick(&mut m), None);
+    assert!(m.session.is_none(), "on round to the list");
 }
 
-/// → at the end of a draft does the same; with the cursor inside the text
-/// it only moves the cursor.
+/// → in a draft only moves the cursor, at its end too; tab goes into the
+/// column whatever is typed, and what's typed stays.
 #[test]
-fn right_in_a_draft_moves_the_cursor_until_its_end() {
+fn right_in_a_draft_only_moves_the_cursor() {
     let (mut m, _) = with_column("arrows-draft");
     set_box(&mut m, "hello", 3);
     press(&mut m, "right");
     assert_eq!(conn(&mut m, KEY).input.pos, 4, "the cursor moved");
-    assert_eq!(side_pick(&mut m), None);
     press(&mut m, "right");
     assert_eq!(conn(&mut m, KEY).input.pos, 5);
-    assert_eq!(side_pick(&mut m), None);
     press(&mut m, "right");
-    assert!(side_pick(&mut m).is_some(), "at the end: the column");
-    press(&mut m, "left");
+    assert_eq!(side_pick(&mut m), None, "at the end: still the box");
+    press(&mut m, "tab");
+    assert!(side_pick(&mut m).is_some(), "tab: the column");
+    press(&mut m, "esc");
     assert_eq!(side_pick(&mut m), None);
     assert_eq!(input(&mut m), "hello", "the draft is where it was");
 }
@@ -185,7 +199,7 @@ fn a_click_in_the_box_takes_the_keys_from_the_column() {
     use crate::frame::Mouse;
     use rush_draw::{Button, KeyMods, MouseKind};
     let (mut m, _) = with_column("arrows-click");
-    press(&mut m, "right");
+    press(&mut m, "tab");
     assert!(side_pick(&mut m).is_some(), "in the column");
     conn(&mut m, KEY).txt.on = true;
     screen(&mut m);

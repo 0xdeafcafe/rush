@@ -1208,7 +1208,8 @@ fn decisions_card_takes_the_keys() {
 /// ↓ off the decisions card does nothing; esc lets go of it (Rust-only:
 /// it did nothing, while the box said "esc returns here"): the keys are
 /// the box's, a letter no longer the card's, the card still there with
-/// nothing sent or set aside, and ↑ from the empty box is back on it.
+/// nothing sent or set aside (↑ from the empty box is back on it:
+/// session_core's tests_cursor.rs).
 #[test]
 fn decisions_card_esc_lets_go() {
     let mut m = decisions_model(DECISIONS_MSG);
@@ -1227,8 +1228,10 @@ fn decisions_card_esc_lets_go() {
         !m.cards().conns["k"].card_focus,
         "a letter is the box's, the card doesn't take the keys back"
     );
-    assert_eq!(card_key(&mut m, "k", &i, "up", true), Out::Draw);
-    assert!(m.cards().conns["k"].card_focus, "↑ is back on the card");
+    // ↑ back onto it is the Session's (session_core's stack_nav, which
+    // goes through everything stacked on the box): the card passes it.
+    assert_eq!(card_key(&mut m, "k", &i, "up", true), Out::Pass);
+    crate::screens::session_cards::conn(&mut m, "k").card_focus = true;
     // { and } are the list's from the card too, and it keeps the keys.
     for k in ["{", "}"] {
         assert_eq!(card_key(&mut m, "k", &i, k, true), Out::Pass, "{k}");

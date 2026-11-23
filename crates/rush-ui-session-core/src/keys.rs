@@ -91,8 +91,13 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         return Out::Pass;
     };
     let s = k.s.as_str();
+    // ↑↓ through what's stacked on the box, in the order it's drawn.
+    let o = stack_nav(m, &key, s);
+    if o.used() {
+        return o;
+    }
     // The task row's head on the box, picked: its own keys.
-    let o = tasks_nav(m, &key, s);
+    let o = tasks_keys(m, &key, s);
     if o.used() {
         return o;
     }
@@ -100,10 +105,6 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     let empty = conn(m, &key).input.is_empty();
     // A picked queued message takes plain keys.
     let o = queue::key(m, &key, s);
-    if o.used() {
-        return o;
-    }
-    let o = queue_nav(m, &key, s, &picked, empty);
     if o.used() {
         return o;
     }
@@ -170,9 +171,9 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
             return o;
         }
     }
-    // → from the box with nothing typed, or the cursor at the end of what
-    // is: open the picked item, else into the column beside the
-    // conversation.
+    // → with nothing typed, or the cursor at the end of what is, opens
+    // the picked row. It never changes pane (Rust-only, as the column
+    // beside the conversation is: tab goes there).
     if s == "right" && (empty || conn(m, &key).input.pos >= conn(m, &key).input.text.len()) {
         let o = arrow_right(m, &key, empty, !picked.is_empty());
         if o.used() {
@@ -302,35 +303,39 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
                 return Out::Draw;
             }
             if empty {
-                // ← goes back a stage at a time: it closes what's open
-                // round the picked row (a step, a group of steps, a turn),
-                // then, with nothing open, off the row to the box, then
-                // from the box to the list.
+                // ← only shuts: what's open round the picked row (a step,
+                // a group of steps, a turn), a stage at a time, and with
+                // nothing open it stays where it is. Not Go's, where it
+                // went on off the row to the box and from the box to the
+                // list (leavePane): held to shut a turn, it ended in
+                // Agents. esc steps out, tab changes pane.
                 if !picked.is_empty() {
                     let rows = conn(m, &key).vs.rows.max(1);
-                    let closed = m.session.as_mut().is_some_and(|v| v.fold_in(rows));
-                    if !closed {
-                        set_sel(m, String::new());
+                    if let Some(v) = m.session.as_mut() {
+                        v.fold_in(rows);
                     }
-                } else {
-                    // Back to Agents, as esc goes (leavePane).
-                    m.close();
-                    super::live::sync(m);
+                } else if !(m.ext.calls.hosted_alone())(m) {
+                    m.flash("esc goes back to Agents");
                 }
                 return Out::Draw;
             }
         }
         "pgup" | "pgdown" | "ctrl+o" => return Out::Pass,
-        // { } and tab go back to the list, as they came (switchFocus);
-        // tab completes a / command being typed.
-        "{" | "}" if empty => {
-            m.close();
-            super::live::sync(m);
+        // tab and } go on to the next pane, { back to the one before:
+        // the list, the conversation, the column beside it (Rust-only:
+        // → went into the column and ← came back). With no column they
+        // go back to the list, as they came (switchFocus). tab completes
+        // a / command being typed.
+        "{" if empty => {
+            to_list(m);
+            return Out::Draw;
+        }
+        "}" if empty => {
+            next_pane(m, &key);
             return Out::Draw;
         }
         "tab" if !conn(m, &key).input.string().starts_with('/') => {
-            m.close();
-            super::live::sync(m);
+            next_pane(m, &key);
             return Out::Draw;
         }
         // shift+← → move the list's edge, as in the list (stepSplit).
@@ -381,66 +386,222 @@ pub fn next_needing_you(m: &mut Model) -> Out {
     Out::Draw
 }
 
-/// ↑ from the empty box picks the last queued message; ↑↓ go through the
-/// queue, ↑ past its first into the conversation, ↓ past its last back
-/// to the box (dockRefs and moveSel, for the queue).
-fn queue_nav(m: &mut Model, key: &str, s: &str, picked: &str, empty: bool) -> Out {
-    let n = queue_of(m, key).items.len();
-    if n == 0 || s != "up" && s != "down" {
+/// The keys to the list, the Session staying beside it where it shows
+/// there (leavePane).
+pub fn to_list(m: &mut Model) {
+    m.close();
+    super::live::sync(m);
+}
+
+/// tab or } from the conversation: on to the column beside it (or the
+/// views panel in its place) when one shows with something to pick, else
+/// round to the list.
+fn next_pane(m: &mut Model, key: &str) {
+    if view_is_conversation(m, key)
+        && (super::side::focus(m, key) || rush_ui_plugin_ui::views::beside::focus(m, key))
+    {
+        return;
+    }
+    to_list(m);
+}
+
+/// The keys between panes while the views panel beside the conversation
+/// has them, as in the column whose place it stands in (side::focus_key):
+/// { back to the conversation, tab or } on to the list.
+pub fn panel_pane_key(m: &mut Model, k: &Press) -> Out {
+    let s = k.s.as_str();
+    if !matches!(s, "tab" | "{" | "}") || !showing(m) {
         return Out::Pass;
     }
-    match queue::sel(picked, n) {
-        Some(i) if s == "up" => {
-            if i == 0 {
-                // The dock's runs above it, else the conversation's last
-                // row in view.
-                if let Some(last) = super::subview::dock_refs(m, key).pop() {
-                    set_sel(m, last);
-                    return Out::Draw;
-                }
-                set_sel(m, String::new());
+    let Some(key) = open_key(m) else {
+        return Out::Pass;
+    };
+    use rush_ui_plugin_ui::views::read;
+    if !read::state_of(m, &key).is_some_and(|st| st.focus) {
+        return Out::Pass;
+    }
+    read::state(m, &key).focus = false;
+    if s != "{" {
+        to_list(m);
+    }
+    Out::Draw
+}
+
+/// Where the cursor stops between the box and the conversation's rows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Stop {
+    /// The task list's head on the box (TASKS_REF).
+    Tasks,
+    /// The card waiting on you.
+    Card,
+    /// A queued message (`q:N`) or one of the dock's runs.
+    Row(String),
+}
+
+/// What's stacked on the box where the cursor stops, from the box up as
+/// it's drawn: the task list's head, the card waiting, the queue's
+/// messages last to first, the dock's runs last to first. On a wide
+/// conversation the tasks and the runs are in the column beside it, and
+/// are that pane's to pick, not stops on the way up.
+fn stops(m: &mut Model, key: &str) -> Vec<Stop> {
+    let mut out = Vec::new();
+    let conversation = view_is_conversation(m, key);
+    if conversation && conn(m, key).task_rows > 0 {
+        out.push(Stop::Tasks);
+    }
+    if rush_ui_session_cards::card_waits(m, key) {
+        out.push(Stop::Card);
+    }
+    let n = queue_of(m, key).items.len();
+    out.extend((0..n).rev().map(|i| Stop::Row(format!("q:{i}"))));
+    let c = conn(m, key);
+    let in_column = c.side.w > 0 && c.run_rows.1.is_empty();
+    if !in_column {
+        let runs = super::subview::dock_refs(m, key);
+        out.extend(runs.into_iter().rev().map(Stop::Row));
+    }
+    out
+}
+
+/// Which of stops the cursor is on; none in the box or the conversation.
+fn stop_at(m: &Model, key: &str, stops: &[Stop]) -> Option<usize> {
+    let on_card = rush_ui_session_cards::conn_ref(m, key).is_some_and(|c| c.card_focus);
+    if on_card {
+        return stops.iter().position(|s| *s == Stop::Card);
+    }
+    let picked = sel(m);
+    if picked == super::tasks::TASKS_REF {
+        return stops.iter().position(|s| *s == Stop::Tasks);
+    }
+    stops
+        .iter()
+        .position(|s| matches!(s, Stop::Row(r) if *r == picked))
+}
+
+/// Puts the cursor on a stop; none is the box.
+fn go_stop(m: &mut Model, key: &str, to: Option<&Stop>) {
+    if rush_ui_session_cards::conn_ref(m, key).is_some_and(|c| c.card_focus) {
+        rush_ui_session_cards::conn(m, key).card_focus = false;
+    }
+    match to {
+        None => set_sel(m, String::new()),
+        Some(Stop::Tasks) => set_sel(m, super::tasks::TASKS_REF.to_string()),
+        Some(Stop::Card) => {
+            set_sel(m, String::new());
+            rush_ui_session_cards::conn(m, key).card_focus = true;
+        }
+        Some(Stop::Row(r)) => {
+            set_sel(m, r.clone());
+            super::subview::keep_pick(m, key);
+        }
+    }
+}
+
+/// The next row up (d < 0) or down in the view showing.
+fn row_step(m: &mut Model, key: &str, d: isize) {
+    match super::views::view_name(m, key) {
+        "conversation" => {
+            let rows = conn(m, key).vs.rows.max(1);
+            if let Some(v) = m.session.as_mut() {
+                v.move_sel(d, rows);
+            }
+        }
+        "memory" => {
+            super::memory::step(m, d);
+        }
+        _ => super::views::move_sel(m, key, d),
+    }
+}
+
+/// ↑↓ between the box and the conversation go through every stop on the
+/// way, in the order it's drawn (stops), one at a time: ↑ from the box,
+/// nothing typed or the cursor on its first line, lands on the nearest;
+/// ↑ past the topmost goes on into the conversation; ↓ past the
+/// conversation's last row comes down onto the topmost, and ↓ past the
+/// nearest is back in the box. Not Go's (moveSel, dockRefs, cardKey's ↑↓),
+/// where each part moved the cursor its own way and a card took ↑ from
+/// the box past the task list, ↑ from a card went past the queue, and ↓
+/// from the conversation, the queue or a card went past whatever was
+/// under it. A card is a stop only over an empty box, as its letters
+/// answer it.
+fn stack_nav(m: &mut Model, key: &str, s: &str) -> Out {
+    if s != "up" && s != "down" {
+        return Out::Pass;
+    }
+    let up = s == "up";
+    let c = conn(m, key);
+    let (editing, empty) = (c.edit_q > 0, c.input.is_empty());
+    let mut all = stops(m, key);
+    all.retain(|s| empty || *s != Stop::Card);
+    let at = stop_at(m, key, &all);
+    let picked = sel(m);
+    match at {
+        // The box.
+        None if picked.is_empty() => {
+            if !up || editing || !(empty || on_first_row(m, key)) {
                 return Out::Pass;
             }
-            set_sel(m, format!("q:{}", i - 1));
+            let Some(first) = all.first() else {
+                return Out::Pass;
+            };
+            go_stop(m, key, Some(first));
         }
-        Some(i) => set_sel(
-            m,
-            if i + 1 < n {
-                format!("q:{}", i + 1)
-            } else {
-                String::new()
-            },
-        ),
-        None if s == "up" && empty && picked.is_empty() => set_sel(m, format!("q:{}", n - 1)),
-        None => return Out::Pass,
+        // A row of the conversation: ↓ past its last comes down onto
+        // what's stacked on the box, its topmost first.
+        None => {
+            if up || all.is_empty() {
+                return Out::Pass;
+            }
+            row_step(m, key, 1);
+            if sel(m).is_empty() {
+                go_stop(m, key, all.last());
+            }
+        }
+        Some(i) if up => match all.get(i + 1) {
+            Some(next) => go_stop(m, key, Some(next)),
+            // Past the topmost: the conversation's last row in view;
+            // with none to pick, it stays. From a card that's the last
+            // row drawn that can be picked, as cardKey had it: a card
+            // can be the conversation's own last part, the rows over it
+            // under a pinned prompt, where a step would scroll instead.
+            None if all[i] == Stop::Card => {
+                let conversation = view_is_conversation(m, key);
+                let above = m
+                    .session
+                    .as_ref()
+                    .filter(|_| conversation)
+                    .and_then(|v| v.shown.iter().rev().find(|r| !r.is_empty()).cloned());
+                if let Some(above) = above {
+                    go_stop(m, key, None);
+                    set_sel(m, above);
+                }
+            }
+            None => {
+                go_stop(m, key, None);
+                row_step(m, key, -1);
+                if sel(m).is_empty() {
+                    go_stop(m, key, Some(&all[i]));
+                }
+            }
+        },
+        Some(0) => go_stop(m, key, None),
+        Some(i) => go_stop(m, key, Some(&all[i - 1])),
     }
     Out::Draw
 }
 
 /// The task list's head on the box takes the cursor (Rust-only: only a
-/// click opened and shut it): ↑ from the box, nothing typed or the cursor
-/// on its first line, lands on it; enter and space there shut and open
-/// the list, ← shuts it, → opens it and then the Tasks view, ↓ and esc go
-/// back to the box,
-/// and ↑ goes on up as it would have from the box (the queue, the dock,
-/// the conversation). Anything else is the box's again.
-fn tasks_nav(m: &mut Model, key: &str, s: &str) -> Out {
+/// click opened and shut it; ↑↓ onto and off it are stack_nav's): enter
+/// and space there shut and open the list, ← shuts it, → opens it and
+/// then the Tasks view, esc goes back to the box. Anything else is the
+/// box's again.
+fn tasks_keys(m: &mut Model, key: &str, s: &str) -> Out {
     use super::tasks::TASKS_REF;
-    let picked = sel(m);
-    let on = picked == TASKS_REF;
-    if conn(m, key).task_rows == 0 || !view_is_conversation(m, key) {
-        if on {
-            set_sel(m, String::new());
-        }
+    if sel(m) != TASKS_REF {
         return Out::Pass;
     }
-    if !on {
-        let c = conn(m, key);
-        let (editing, empty) = (c.edit_q > 0, c.input.is_empty());
-        if s == "up" && picked.is_empty() && !editing && (empty || on_first_row(m, key)) {
-            set_sel(m, TASKS_REF.to_string());
-            return Out::Draw;
-        }
+    if conn(m, key).task_rows == 0 || !view_is_conversation(m, key) {
+        set_sel(m, String::new());
         return Out::Pass;
     }
     match s {
@@ -463,23 +624,8 @@ fn tasks_nav(m: &mut Model, key: &str, s: &str) -> Out {
             }
             Out::Draw
         }
-        "down" | "esc" => {
+        "esc" => {
             set_sel(m, String::new());
-            Out::Draw
-        }
-        "up" => {
-            // On up, as from the box: the queue's last, else the rest of
-            // the keys' doing with nothing picked.
-            set_sel(m, String::new());
-            let n = queue_of(m, key).items.len();
-            if n > 0 {
-                set_sel(m, format!("q:{}", n - 1));
-                return Out::Draw;
-            }
-            if conn(m, key).input.is_empty() {
-                return Out::Pass;
-            }
-            leave_box(m, key);
             Out::Draw
         }
         _ => {
@@ -628,10 +774,10 @@ fn end_queue_edit(m: &mut Model, key: &str) {
 }
 
 /// → from the box (empty, or its cursor at the end of the text): opens the
-/// row picked in the conversation when it can open and is not open, else
-/// moves into the column beside the conversation, its first item picked.
-/// Pass when the conversation's own keys should have it (an empty box with
-/// a pick and no column), Idle when there is nowhere to go.
+/// row picked in the conversation when it can open and is not open. Pass
+/// when the conversation's own keys should have it (an empty box with a
+/// pick: a step a subagent made goes on into its run), Idle when there
+/// is nothing to open.
 fn arrow_right(m: &mut Model, key: &str, empty: bool, picked: bool) -> Out {
     if view_is_conversation(m, key) {
         let rows = conn(m, key).vs.rows.max(1);
@@ -645,12 +791,9 @@ fn arrow_right(m: &mut Model, key: &str, empty: bool, picked: bool) -> Out {
             }
             return Out::Draw;
         }
-        if super::side::focus(m, key) || rush_ui_plugin_ui::views::beside::focus(m, key) {
-            return Out::Draw;
-        }
     }
     if picked && empty {
-        return Out::Pass; // as before: what that row does with →
+        return Out::Pass; // what that row does with →
     }
     Out::Idle
 }
@@ -672,17 +815,12 @@ fn on_first_row(m: &mut Model, key: &str) -> bool {
 }
 
 /// ↑ out of the box into the conversation: the row nearest the box picked
-/// (the queue's last message when one waits). What's typed stays in the
+/// (what's stacked on the box came first: stack_nav). What's typed stays in the
 /// box. Whether it moved; the conversation not showing, or nothing to
 /// pick, leaves the cursor to move instead.
 fn leave_box(m: &mut Model, key: &str) -> bool {
     if !view_is_conversation(m, key) {
         return false;
-    }
-    let n = queue_of(m, key).items.len();
-    if n > 0 {
-        set_sel(m, format!("q:{}", n - 1));
-        return true;
     }
     let rows = conn(m, key).vs.rows.max(1);
     let Some(v) = m.session.as_mut() else {

@@ -117,12 +117,14 @@ pub fn register(x: &mut Ext) {
     // ctrl+b backgrounds what the turn waits on before /btw has it
     // (paneKey :4003).
     x.session_keys.insert(0, jobkeys::ctrl_b);
-    // Focus in the column beside the conversation (→ from the box or the
-    // conversation): its keys come before everything else's.
+    // Focus in the column beside the conversation (tab or } from the box
+    // or the conversation): its keys come before everything else's.
     x.session_keys.insert(0, side::focus_key);
-    // And in the views panel standing in its place.
+    // And in the views panel standing in its place; the keys between
+    // panes there first, as in the column.
     x.session_keys
         .insert(0, rush_ui_plugin_ui::views::beside::focus_key);
+    x.session_keys.insert(0, keys::panel_pane_key);
     // A memory file being edited has every key first.
     x.session_keys.push(memedit::key);
     x.session_keys.push(memedit::draft_key);
@@ -133,6 +135,9 @@ pub fn register(x: &mut Ext) {
     // A shell block picked in the conversation, and the box's ! mode,
     // before esc twice and the box's own keys (shellbox.rs).
     x.session_keys.push(shellbox::key);
+    // A hosted child's own session: esc from its empty box is back in
+    // its parent, alt+↑↓ its siblings, before esc twice and the box.
+    x.session_keys.push(subpane::child_key);
     x.session_keys.push(keys::esc_twice);
     // The conversation's views: the key through them, and enter on a
     // turn or a step in another view, before a picked row's own keys.
