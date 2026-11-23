@@ -236,13 +236,13 @@ pub fn fold_head(
         join(row, cut(&meta, from, from + n));
         map.push((at, from, n));
     };
-    let both = lw > 0 && rw > 0 && tw + 2 + lw + 3 + rw + 1 <= iw;
+    let both = lw > 0 && rw > 0 && tw + lw + rw + 5 < iw;
     if both {
         put(&mut row, iw - rw - 1 - 3 - lw, 2, lw);
         put(&mut row, iw - rw - 1, r0, rw);
-    } else if lw > 0 && tw + 2 + lw + 1 <= iw {
+    } else if lw > 0 && tw + 2 + lw < iw {
         put(&mut row, iw - lw - 1, 2, lw);
-    } else if lw == 0 && rw > 0 && tw + 2 + rw + 1 <= iw {
+    } else if lw == 0 && rw > 0 && tw + 2 + rw < iw {
         put(&mut row, iw - rw - 1, r0, rw);
     }
     let mut folded = line([Span::new("  ", Style::default().on(CHROME_BG))]);
