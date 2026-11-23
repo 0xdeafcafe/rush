@@ -111,6 +111,60 @@ fn work_column_and_weight() {
     assert!(!row.contains('▯'), "{row:?}");
 }
 
+/// "Sort rows by" orders the rows inside a section, biggest first; by
+/// name a section keeps its own order (Rust-only: Go's moved no row).
+#[test]
+fn sort_rows_by_reorders_a_section() {
+    use rush_core::agent::Work;
+    let mk = |id: &str, cost: f64, mem: u64, files: u16| {
+        let mut a = agent(id, id, State::Idle, 5);
+        a.spend.cost = cost;
+        a.mem = mem;
+        a.work = Work {
+            done: 0,
+            total: 0,
+            files,
+        };
+        a
+    };
+    let agents = || {
+        vec![
+            mk("a1", 1.0, 30, 9),
+            mk("b2", 3.0, 10, 2),
+            mk("c3", 2.0, 20, 40),
+        ]
+    };
+    let order = |m: &crate::model::Model| -> Vec<String> {
+        m.lines
+            .iter()
+            .filter_map(|l| match l {
+                ListLine::Agent(i) => Some(m.agents[*i].key.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let mut m = model_of(agents(), 200, 50);
+    let own = order(&m);
+    // (sort by, the rows in order)
+    let cases: [(&str, [&str; 3]); 4] = [
+        ("cost", ["b2", "c3", "a1"]),
+        ("ram", ["a1", "c3", "b2"]),
+        ("work", ["c3", "a1", "b2"]),
+        ("name", ["", "", ""]),
+    ];
+    for (by, want) in cases {
+        m.cfg.sort_by = by.into();
+        m.rebuild();
+        let got = order(&m);
+        if by == "name" {
+            assert_eq!(got, own, "by name, its own order");
+            continue;
+        }
+        let ids: Vec<&str> = got.iter().map(|k| &k[k.len() - 2..]).collect();
+        assert_eq!(ids, want, "by {by}");
+    }
+}
+
 /// Rows stack once the list has StackAt percent of the screen or less,
 /// and only when too narrow once that's off (stacked_test.go).
 #[test]

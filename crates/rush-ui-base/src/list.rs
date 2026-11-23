@@ -612,9 +612,32 @@ impl Model {
             Some(&t) if t != 0 => now - t,
             _ => a.elapsed(now),
         };
+        // The column picked to sort by, biggest first, ahead of each
+        // section's own order. Rust-only: Go's sortLess ran only under a
+        // plugin's own sections, so "Sort rows by" and a click on a
+        // column's header moved the ▾ and no row. "name" (the default)
+        // keeps each section's own order.
+        let sort = self.cfg.sort_by().to_string();
+        let picked = |a: &Agent, b: &Agent| {
+            let (x, y) = match sort.as_str() {
+                "recent" => (-(a.age(now) as f64), -(b.age(now) as f64)),
+                "cost" => (a.spend.cost, b.spend.cost),
+                "cpu" => (f64::from(a.cpu), f64::from(b.cpu)),
+                "ram" => (a.mem as f64, b.mem as f64),
+                "tokens" => (a.spend.context as f64, b.spend.context as f64),
+                "work" => (f64::from(a.work.score()), f64::from(b.work.score())),
+                "time" => (a.elapsed(now) as f64, b.elapsed(now) as f64),
+                _ => (0.0, 0.0),
+            };
+            y.total_cmp(&x)
+        };
         for g in &mut groups {
             let within = |x: &Item, y: &Item| {
                 let (a, b) = (of(x), of(y));
+                let by = picked(a, b);
+                if by.is_ne() {
+                    return by;
+                }
                 match g.name.as_str() {
                     // What you'd look at first: a question, then the
                     // longest waiting or silent (waitedLess).

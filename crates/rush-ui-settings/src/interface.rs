@@ -257,7 +257,9 @@ pub fn sections(m: &Model) -> Vec<Section> {
         &[
             (
                 "name",
-                "alphabetical, so a row stays put while its agent works.",
+                // Not Go's words ("alphabetical…"): by name no section was
+                // ever alphabetical, there or here.
+                "each section's own order: what asks first, then the longest at it.",
             ),
             (
                 "recent",

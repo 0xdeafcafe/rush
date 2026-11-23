@@ -1,4 +1,4 @@
-  rush   ● 1 needs   ✻ 2    Agents   Projects   Harnesses   Settings
+  rush    ● 1 needs you · ctrl+n    ✻ 2    Agents   Projects   Harnesses   Sett…
     set up caching for CI   @set-up-caching-for-ci  ·  idle         context 0%
     Conversation ▾   Overview   Changes    [ ] views           checkout · main
 

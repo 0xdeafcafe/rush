@@ -79,6 +79,43 @@ impl Model {
         self.w >= NARROW && self.session.is_some() && !self.on_place()
     }
 
+    /// The agents waiting on you that aren't the conversation open: how
+    /// many, and the one that has waited longest (its key and name), as
+    /// ctrl+n picks (next_needing_you).
+    pub fn waiting_elsewhere(&self) -> Option<(usize, String, String)> {
+        let open = self.session.as_ref().map(|v| v.key.as_str());
+        let mut n = 0;
+        let mut best: Option<&rush_core::agent::Agent> = None;
+        for a in &self.agents {
+            if !a.needs_you() || Some(a.key.as_str()) == open {
+                continue;
+            }
+            n += 1;
+            if best.is_none_or(|b| a.job.updated_at < b.job.updated_at) {
+                best = Some(a);
+            }
+        }
+        best.map(|a| (n, a.key.clone(), one_line(&a.display_name)))
+    }
+
+    /// What says so in the one-row header: a filled chip, not the quiet
+    /// count the list's header has. The conversation fills the screen
+    /// there, and nothing else says another agent is waiting.
+    fn waiting_chip(&self, short: bool) -> Option<Line> {
+        let (n, _, name) = self.waiting_elsewhere()?;
+        let name = rush_draw::truncate(&name, 28, "…").into_owned();
+        let said = match (n, short) {
+            (1, false) => format!(" ● {name} needs you · ctrl+n "),
+            (1, true) => " ● 1 needs you · ctrl+n ".to_string(),
+            (_, false) => format!(" ● {n} need you · {name} first · ctrl+n "),
+            (_, true) => format!(" ● {n} need you · ctrl+n "),
+        };
+        Some(line([Span::new(
+            said,
+            Style::fg(TAB_ON_FG).on(YELLOW).bold(),
+        )]))
+    }
+
     /// The header as one row (see `compact`). The places' and the pages'
     /// parts are kept apart for clicks: both are on row 0, and a page may
     /// have a place's name.
@@ -103,7 +140,15 @@ impl Model {
                 plain("  "),
                 Span::new("rush", Style::fg(TEXT).bold().italic()),
             ]);
-            for c in notice.iter().cloned().chain(m.counts(t, short)) {
+            // Waiting elsewhere is the chip's to say; the count would
+            // say it twice.
+            let chip = m.waiting_chip(short);
+            let mut t = t;
+            if chip.is_some() {
+                t.blocked = 0;
+            }
+            let said = notice.iter().cloned().chain(chip).chain(m.counts(t, short));
+            for c in said {
                 l.spans.push(plain("   "));
                 join(&mut l, c);
             }

@@ -4131,6 +4131,19 @@ is made. Everything below is in `rush_ui::frame`.
   depth's chip. With no rule, the tab showing is orange while the
   Session has the keys. The pointer on the tabs' row is put back by
   `meta_map` to where the built meta row has its marks.
+- **Another agent waits while a conversation fills the screen**
+  (`header.rs` `waiting_elsewhere`, `waiting_chip`;
+  `session_core/needsjump.rs`). Rust-only: the one-row header says it as
+  a filled yellow chip with the name of the one that has waited longest
+  and the key, where the list's header has the quiet count; the open
+  conversation isn't counted. ctrl+n from a conversation opens that
+  agent (Go's ctrl+n is the list's and only picks its row).
+- **"Sort rows by" orders rows** (`list.rs` `rebuild`, `picked`).
+  Rust-only: a column picked (recent, cost, cpu, ram, tokens, work,
+  time) orders the rows inside each section, biggest first, ahead of the
+  section's own order; "name", the default, keeps each section's own.
+  Go's sortLess ran only under a plugin's own sections, so the setting
+  moved the ▾ and no row.
 - **clanker's reactions** (`clanker.rs`). What `session_core::finish`
   keeps (`Finish.fx`) is drawn on him as Go's clkFX: drawing the header
   moves the reaction on a frame for every 70 ms gone and asks for a wake

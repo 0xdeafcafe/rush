@@ -25,13 +25,14 @@ pub mod agentrows;
 pub mod cards_host;
 pub mod carry;
 pub mod changes;
+pub mod needsjump;
 // What fills a session's context window, drawn, is the base's (the accounts' info sheet draws it too).
 pub use rush_ui_base::context;
 pub mod conversation;
 pub mod dock;
 pub mod emeritus;
-pub mod exchange;
 pub mod evict;
+pub mod exchange;
 pub mod finish;
 pub mod history;
 // What a session sends through, and the paint helpers, are the base's.
@@ -126,6 +127,8 @@ pub fn register(x: &mut Ext) {
     x.session_keys
         .insert(0, rush_ui_plugin_ui::views::beside::focus_key);
     x.session_keys.insert(0, keys::panel_pane_key);
+    // ctrl+n: to the agent that waits on you elsewhere (Rust-only).
+    x.session_keys.insert(0, needsjump::key);
     // A memory file being edited has every key first.
     x.session_keys.push(memedit::key);
     x.session_keys.push(memedit::draft_key);
@@ -190,11 +193,11 @@ pub fn register(x: &mut Ext) {
     x.on_fleet.push(finish::on_fleet);
     // The agent you were in when rush last closed, opened again.
     reopen::register(x);
+    // What sessions out of sight for a while hold of their runs, let go.
+    evict::register(x);
     x.status.push(dock::status);
     // The views' dropdown under the Conversation tab, while open, has the
     // keys and the pointer before anything else.
-    // What sessions out of sight for a while hold of their runs, let go.
-    evict::register(x);
     x.session_keys.insert(0, presets::menu_key);
     x.mouse.insert(0, presets::menu_mouse);
     // Every key and turn of the wheel, first and passed on: a view's
@@ -439,13 +442,13 @@ pub struct Conn {
     /// The box runs what's typed as a shell command (`!` typed into it
     /// empty): enter runs it in the session's folder (shellbox.rs).
     pub bang: bool,
-}
-
-impl std::ops::Deref for Conn {
     /// When it was last seen shown (opened, beside the list, a tile's),
     /// 0 for not yet: its runs' conversations are let go once it hasn't
     /// been for a while (evict.rs; Rust-only).
     pub shown_at: Ms,
+}
+
+impl std::ops::Deref for Conn {
     type Target = ConnCore;
     fn deref(&self) -> &ConnCore {
         &self.base

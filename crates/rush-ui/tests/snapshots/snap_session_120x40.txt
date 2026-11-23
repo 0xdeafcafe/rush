@@ -1,4 +1,4 @@
-  rush   ● 1 needs you   ✻ 2 working    Agents   Projects   Harnesses   Settings    Agents   Wall   [ ]        default
+  rush    ● 1 needs you · ctrl+n    ✻ 2    Agents   Projects   Harnesses   Settings    Agents   Wall   [ ]     default
   AGENTS▾                   TIME │    set up caching for CI   @set-up-caching-for-ci  ·  idle               context 0%
 ┃ Needs you  1 · $0.19           │    Conversation ▾   Overview   Changes    [ ] views                 checkout · main
 ┃ └─ ? fix the flaky t… ✻   2m ● │
