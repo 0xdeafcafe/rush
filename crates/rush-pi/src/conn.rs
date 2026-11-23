@@ -250,7 +250,11 @@ pub(crate) fn start(o: &StartOptions, path: &str, sink: Arc<dyn Sink>) -> adapte
         "pi".into()
     };
     let mut c = std::process::Command::new(binary);
-    c.args(&args).env("PI_SKIP_VERSION_CHECK", "1");
+    // The trace rush was started in isn't the session's to join.
+    c.args(&args)
+        .env("PI_SKIP_VERSION_CHECK", "1")
+        .env_remove("TRACEPARENT")
+        .env_remove("TRACESTATE");
     if !o.dir.is_empty() {
         c.current_dir(&o.dir);
     }

@@ -35,6 +35,8 @@ const INHERITED: &[&str] = &[
     "CLAUDE_PID",
     "CLAUDE_JOB_DIR",
     "CLAUDE_CODE_VERSION",
+    "TRACEPARENT",
+    "TRACESTATE",
 ];
 
 fn home() -> PathBuf {
@@ -58,7 +60,13 @@ fn state_path(dir: &Path) -> PathBuf {
 
 /// The environment Claude Code runs in for the account in dir.
 fn account_env(dir: &Path) -> Vec<String> {
-    let mut env: Vec<String> = std::env::vars()
+    env_from(dir, std::env::vars())
+}
+
+/// account_env, from the variables given in place of this process's.
+fn env_from(dir: &Path, vars: impl IntoIterator<Item = (String, String)>) -> Vec<String> {
+    let mut env: Vec<String> = vars
+        .into_iter()
         .filter(|(k, _)| k != "CLAUDE_CONFIG_DIR" && !INHERITED.contains(&k.as_str()))
         .map(|(k, v)| format!("{k}={v}"))
         .collect();
@@ -520,5 +528,26 @@ fn result_size(raw: Option<&RawValue>, model: &str) -> (i64, Vec<i64>) {
             (n, images)
         }
         Err(_) => (raw.len() as i64, Vec::new()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn env_drops_the_trace_context_it_was_started_in() {
+        let vars = [
+            (
+                "TRACEPARENT",
+                "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+            ),
+            ("TRACESTATE", "lw=1"),
+            ("CLAUDECODE", "1"),
+            ("RUSH_TEST_KEPT", "yes"),
+        ]
+        .map(|(k, v)| (k.to_string(), v.to_string()));
+        let env = env_from(Path::new("/c"), vars);
+        assert_eq!(env, ["RUSH_TEST_KEPT=yes", "CLAUDE_CONFIG_DIR=/c"]);
     }
 }

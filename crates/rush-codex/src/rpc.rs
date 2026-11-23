@@ -718,7 +718,11 @@ pub(crate) fn spawn(
         binary.to_string()
     };
     let mut cmd = Command::new(&binary);
-    cmd.arg("app-server").args(flags);
+    // The trace rush was started in isn't the sessions' to join.
+    cmd.arg("app-server")
+        .args(flags)
+        .env_remove("TRACEPARENT")
+        .env_remove("TRACESTATE");
     for kv in env {
         if let Some((k, v)) = kv.split_once('=') {
             cmd.env(k, v);
