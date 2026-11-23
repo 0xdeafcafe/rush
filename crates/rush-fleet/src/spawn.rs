@@ -285,8 +285,7 @@ impl Loader {
         // A run a rush session started that's done asks nothing of you
         // whatever it last said, a usage limit's "continue?" among them:
         // the session that started it was told how it ended, and it's
-        // that session's to deal with (Rust-only). Nor does one whose
-        // ask went to that session to answer (Info.parentAnswers).
+        // that session's to deal with (Rust-only).
         let asks: Vec<Option<Ask>> = agents
             .iter()
             .zip(&names)
@@ -294,8 +293,7 @@ impl Loader {
             .map(|((a, n), u)| {
                 let started = matches!(u, Some((_, false)));
                 let done = started && a.pid == 0;
-                let handled = started && a.parent_answers;
-                (a.job.state == State::Blocked && !a.checking && !a.decides && !done && !handled)
+                (a.job.state == State::Blocked && !a.checking && !a.decides && !done)
                     .then(|| Ask::of(a, n))
             })
             .collect();

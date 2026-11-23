@@ -270,9 +270,6 @@ pub struct Agent {
     /// asks, by its headings.
     pub decides: bool,
     pub decisions_key: String,
-    /// A rush session's ask went to the session that started it, which
-    /// answers it: not yours to see to (Rust-only).
-    pub parent_answers: bool,
     /// Waiting on you with that card still open, but at work too: something
     /// that isn't your answer woke it. It's listed as asking you and drawn
     /// as working.
@@ -520,10 +517,8 @@ mod sizes {
     #[test]
     fn rows_stay_small() {
         let cases = [
-            // 1288: Emeritus's lineage, boxed (8 B). 1296: parent_answers,
-            // a subagent's ask its parent answers, off Needs you (8 B with
-            // its padding).
-            ("Agent", size_of::<Agent>(), 1296),
+            // 1288: Emeritus's lineage, boxed (8 B).
+            ("Agent", size_of::<Agent>(), 1288),
             ("Job", size_of::<Job>(), 384),
             ("Spend", size_of::<Spend>(), 304),
             (

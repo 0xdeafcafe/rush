@@ -4989,19 +4989,6 @@ more often than right, and saying yes sent the message to a session you
 weren't looking at, so it seemed lost. rush sends every message to the
 session it was typed in and never asks; the module is gone.
 
-## Guests in a conversation (Rust-only)
-
-Other models answer in a conversation rush hosts: `@kimi …` in the box,
-or an agent's `ask_guest`, starts (once) a guest, a hosted session per
-conversation and agent (Meta `guestOf`, `spawnedBy`), and gives it what
-was said since its last turn, as a room member gets it
-(`rush_room::seen`). Its replies are exchange cards in the lead's
-conversation (phase `guest`, kept in the lead's journal); the lead is
-told what guests said atop its next turn. One participant changes files
-at a time: a lease per conversation, held at the approval step in every
-harness and by a PreToolUse hook in Claude Code. `rush-host`'s `guests`
-module; the whole design in `docs/guests.md`.
-
 ## Panics
 
 Release builds unwind (`panic = "unwind"`), so one thread's panic ends
@@ -5734,6 +5721,17 @@ log when it went.
   `implementation`, `hover`, `callers`, `callees`, `outline` and
   `find_symbol`. `references`, `diagnostics`, `rename`, `rename_file` and
   `rush ts status` stay (docs/typescript.md).
+- 2026-11-23: guests in a conversation: `@kimi …` in a session's box
+  and the `ask_guest` tool, with `rush-host`'s `guests` module (the
+  roster, the chat, the write lease and its `rush guests hook`), the
+  guest cards (an exchange of phase `guest`) and `docs/guests.md`. A
+  message that starts with `@name` goes to the session's own agent as
+  typed.
+- 2026-11-23: the `answer_agent` tool, by which a session answered what
+  an agent it started asked to be allowed, and `Info.parentAnswers`. What
+  a child asks is the user's to answer again, on its card in the parent's
+  session or in its own; the caller's wait says it waits on the user, as
+  Go's did (docs/subagents.md).
 
 ## Milestones (full plan: PLAN.md)
 

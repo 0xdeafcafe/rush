@@ -2,10 +2,8 @@
 //! others' messages, the tools they ran a line each, and anything you
 //! said, the newest kept whole and the oldest left out first past a
 //! budget set by the smallest context window in the chat. A room's
-//! members are told it each turn; so are a conversation's guests
-//! (rush-host's guests, docs/guests.md).
-//! Ported from internal/room/run.go (since, budget); shared since rush's
-//! guests, which are Rust-only, read their chat the same way.
+//! members are told it each turn.
+//! Ported from internal/room/run.go (since, budget).
 
 use crate::room::{Entry, SAY, TOOL, USER};
 

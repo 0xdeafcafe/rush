@@ -32,7 +32,6 @@ pub mod dock;
 pub mod emeritus;
 pub mod exchange;
 pub mod finish;
-pub mod guests;
 pub mod history;
 // What a session sends through, and the paint helpers, are the base's.
 pub use rush_ui_base::host;

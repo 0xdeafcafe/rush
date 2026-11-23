@@ -221,7 +221,6 @@ pub fn host_info(i: &Info) -> HostInfo {
         state: i.state.clone(),
         detail: i.detail.clone(),
         needs: i.needs.clone(),
-        parent_answers: i.parent_answers,
         cost_usd: i.cost_usd,
         limit: i.limit.as_ref().map(|l| Limit {
             resets_at: ms(l.resets_at),

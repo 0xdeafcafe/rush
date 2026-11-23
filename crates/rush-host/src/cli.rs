@@ -104,29 +104,6 @@ pub fn inbox_cmd(
     0
 }
 
-/// `rush guests hook <id>`: a session's write lease before each edit and
-/// shell call (guests::hook), not meant to be run by hand. Rust-only.
-pub fn guests_cmd(
-    args: &[String],
-    stdin: &mut dyn Read,
-    stdout: &mut dyn Write,
-    stderr: &mut dyn Write,
-) -> i32 {
-    let (Some("hook"), Some(id)) = (args.first().map(String::as_str), args.get(1)) else {
-        let _ = writeln!(stderr, "usage: rush guests hook <session id>");
-        return 2;
-    };
-    let mut wait = |d: std::time::Duration| {
-        std::thread::sleep(d);
-        true
-    };
-    if let Err(e) = crate::guests::hook::hook(id, stdin, stdout, &mut wait) {
-        let _ = writeln!(stderr, "rush: {e}");
-        return 1;
-    }
-    0
-}
-
 /// `rush reload`: every listed rush view reloads, and every session's host
 /// on an older rush is moved onto this one in place, its agent running on:
 /// at once between turns, else once its turn ends. One that can't move

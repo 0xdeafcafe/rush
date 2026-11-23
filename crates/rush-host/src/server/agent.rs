@@ -34,8 +34,8 @@ use crate::longtask::{LONG_TASK_LAST, last_output, long_task_note, overdue_tasks
 use crate::paths::dir;
 use crate::stuck::{STUCK_AFTER, STUCK_LOOK, Waited, agent_command, short, stuck_note};
 use crate::subtool::{
-    Answer, agent_name, answer_path, asking, fail_report, finished, report, report_path, send_ask,
-    send_result, titled,
+    Answer, agent_name, answer_path, fail_report, finished, report, report_path, send_result,
+    titled,
 };
 use crate::wire::{Away, Held, Task};
 
@@ -1068,9 +1068,6 @@ impl Host {
     /// session it reports to once there's nothing more to do. Called once
     /// on_turn_end has settled the state.
     pub(super) fn turn_done(&self, st: &mut State, e: &event::TurnEnd) {
-        // Its words in its conversation's chat, its write lease given up,
-        // a guest's reply drawn in the lead's (server/guests.rs).
-        self.guests_turn_end(st, e);
         // A nudge's turn, or the one a handover began after, answers no
         // one: what the agent was asked is answered by the turn after, or
         // by its successor (server/emeritus.rs).
@@ -1120,32 +1117,6 @@ impl Host {
             return;
         }
         self.report_answer(st);
-    }
-
-    /// Sends what it asks to be allowed to the session it reports to (one
-    /// that started it in the background), which answers it with
-    /// answer_agent; that session waiting on it in the foreground is told
-    /// by its wait instead. Asked through it, it isn't the user's to see
-    /// to (Info.parent_answers). Rust-only.
-    pub(super) fn ask_parent(&self, st: &mut State) {
-        let to = std::fs::read_to_string(report_path(&st.cfg.id)).unwrap_or_default();
-        if to.is_empty() || st.info.asking.is_empty() {
-            return;
-        }
-        let name = format!(
-            "{} (agent {})",
-            agent_name(&self.reg, &rush_core::adapter::migrated(&st.cfg.kind).0),
-            st.cfg.id
-        );
-        let asks: Vec<&crate::wire::Asking> = st.info.asking.iter().collect();
-        let text = asking(&name, &st.cfg.id, &asks[asks.len() - 1..]);
-        st.info.parent_answers = true;
-        let child = st.cfg.id.clone();
-        self.go("ask parent", move |_| {
-            if let Err(e) = send_ask(&child, &to, &text) {
-                eprintln!("rush: couldn't send {to} what {child} asks: {e}");
-            }
-        });
     }
 
     /// Sends the last answer to the session it reports to, once there's

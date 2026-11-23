@@ -12,7 +12,7 @@
 use std::io::Write;
 use std::sync::Arc;
 
-use rush_bundled::agtools::{self, Agents, Guests, Reminders, Retirer, Viewer};
+use rush_bundled::agtools::{self, Agents, Reminders, Retirer, Viewer};
 use rush_core::adapter::{Handle, Registry, ToolServer};
 use rush_core::wire::RawJson;
 use serde_json::value::RawValue;
@@ -76,18 +76,6 @@ impl Agents for SubAgents {
         )
     }
 
-    fn answer(&self, input: agtools::AnswerInput) -> Result<String, String> {
-        SubAgents::answer(
-            self,
-            &subtool::AnswerInput {
-                id: input.id,
-                request: input.request,
-                allow: input.allow,
-                reason: input.reason,
-            },
-        )
-    }
-
     fn viewer(&self) -> Option<&dyn Viewer> {
         // Views off: the tool isn't listed and a call is refused.
         (!rush_state::Store::load().config.views_off).then_some(self as &dyn Viewer)
@@ -108,34 +96,6 @@ impl Agents for SubAgents {
             .emeritus
             .on
             .then_some(self as &dyn Retirer)
-    }
-
-    fn guests(&self) -> Option<&dyn Guests> {
-        // A run no one watches has no conversation to ask in.
-        (!SubAgents::headless(self)).then_some(self as &dyn Guests)
-    }
-}
-
-impl Guests for SubAgents {
-    /// Asks a participant of the caller's conversation (its lead's, when
-    /// it's a guest; else its own, which it starts having guests in).
-    fn ask_guest(&self, input: agtools::GuestInput) -> Result<String, String> {
-        let me = self.parent().to_string();
-        let meta = crate::client::read_config(&me)
-            .map(|c| c.meta)
-            .unwrap_or_default();
-        let lead = crate::guests::lead_of(&me, &meta).unwrap_or_else(|| me.clone());
-        crate::guests::ask(
-            self.reg(),
-            crate::guests::Ask {
-                lead,
-                to: vec![input.name],
-                text: input.prompt,
-                asker: crate::guests::Asker::Agent(me),
-                before: String::new(),
-                wait: input.wait,
-            },
-        )
     }
 }
 

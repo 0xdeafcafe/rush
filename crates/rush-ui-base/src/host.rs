@@ -659,8 +659,8 @@ pub trait Hosts: Send + Sync {
         Vec::new()
     }
     /// Allows, or denies telling it why, what rush session id (a spawned
-    /// agent) asks as request, from its parent's session: as answer_agent
-    /// does (rush_host::subtool::SubAgents::answer). Rust-only. Waits.
+    /// agent) asks as request, from its parent's session. Rust-only.
+    /// Waits.
     fn answer_spawn(
         &self,
         _id: &str,

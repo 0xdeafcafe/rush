@@ -807,11 +807,6 @@ pub fn send(m: &mut Model, key: &str, now: bool) -> Out {
             return Out::Draw;
         }
     }
-    // A message that starts by tagging other models asks them, guests of
-    // this conversation, rather than its agent (Rust-only; guests.rs).
-    if conn(m, key).hosted() && super::guests::tagged(&text) {
-        return super::guests::send(m, key, text);
-    }
     // A message goes to the session it was typed in. Go asked first when
     // it looked meant for another agent (rushmode.go:4722 askMisdirected);
     // the guess was wrong more often than right and sent messages off to

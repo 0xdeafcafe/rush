@@ -34,7 +34,6 @@ pub mod exchange_journal;
 #[cfg(any(test, feature = "fake"))]
 pub mod fake;
 pub mod feed;
-pub mod guests;
 pub mod hello;
 pub mod hosts;
 pub mod inbox;

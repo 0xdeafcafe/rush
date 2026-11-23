@@ -127,12 +127,6 @@ pub struct StartOptions {
     /// call's output. Before a shell call bash_hook asks it. A harness
     /// with hooks runs it; others go without.
     pub tool_hook: String,
-    /// A command to run before each file edit and shell call, the hook
-    /// input on its stdin: the write lease of a conversation with guests
-    /// (rush-host's guests). It may wait, or refuse the call. A harness
-    /// with hooks runs it whatever its permission mode; others go without
-    /// (their asks wait at the host instead). Rust-only.
-    pub lease_hook: String,
     /// When set, pays for the session per token with the provider's API key
     /// rather than out of the subscription signed in.
     pub api_key: String,

@@ -476,47 +476,6 @@ fn away_holds() {
     assert!(st.info.state == "blocked" && st.info.away.as_ref().unwrap().held.len() == 2);
 }
 
-// Rust-only: started in the background by another session, what it asks
-// to be allowed goes to that session to answer, and the info says so
-// (Info.parentAnswers) till it's answered; one no session waits on in
-// the background keeps it the user's.
-#[test]
-fn an_ask_goes_to_the_parent_it_reports_to() {
-    let _home = Home::new();
-    for (id, parent, told) in [("pa1", "parent01", true), ("pa2", "", false)] {
-        let h = host(cfg(id));
-        if !parent.is_empty() {
-            crate::subtool::report(id, parent).unwrap();
-        }
-        let c = Arc::new(Kept::default());
-        let conn: Arc<dyn Conn> = c.clone();
-        with_conn(&h, conn.clone());
-        let mut st = h.lock();
-        st.info.state = "working".into();
-        let ap = event::Approval {
-            id: "p".into(),
-            call: tool::Call {
-                name: "Bash".into(),
-                input: tool::Input {
-                    command: "rm -rf build".into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        h.on_agent_event(&mut st, &conn, Event::Approval(Box::new(ap)));
-        assert_eq!(st.info.state, "blocked", "{id}");
-        assert_eq!(st.info.parent_answers, told, "{id}");
-        h.on_agent_event(
-            &mut st,
-            &conn,
-            Event::ApprovalCancelled(event::ApprovalCancelled { id: "p".into() }),
-        );
-        assert!(!st.info.parent_answers, "{id}: answered");
-    }
-}
-
 // Rust-only: a question asked is in the info whole, for a parent's
 // session to answer it from (Info.questions); asking stays permissions
 // only; answered, it's gone.

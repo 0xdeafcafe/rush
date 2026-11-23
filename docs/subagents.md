@@ -51,27 +51,18 @@ idle child "working" (DESIGN.md, "Background tasks an earlier turn left").
 | `start_agent` | `agent`, `prompt`, optional `model`, `effort`, as `spawn_agent`, and `cwd` | the new session's id, at once |
 | `agent_result` | `id` (a child's or a sibling's), `wait_seconds` (≤600) | the answer once done, else how it stands |
 | `agent_send` | `id`, `prompt`, `background` (true when left out, Rust-only) | `Sent.` at once, its answer coming as a message; with `background: false`, the answer; the child keeps its conversation |
-| `answer_agent` | `id`, `request`, `allow`, `reason` (when denied) | allows or denies what the agent asks, then waits as `agent_result` does |
 
-### The caller answers what its agent asks (Rust-only)
+### What its agent asks is the user's to answer
 
 A child that asks to be allowed something (Codex's sandbox escalations,
 a command its mode won't run unasked) is blocked: its host keeps each ask
 whole in `Info.asking` (the approval's id, the tool and its command,
-every line, cut at 4000 bytes, and why the agent asks). A waiting
-`spawn_agent`, `agent_send` or `agent_result` returns at once with them, and a
-child running in the background sends them to its caller as a message the
-moment it asks (`Info.parentAnswers` then set, so rush's list doesn't put
-the caller under Needs you for it while it's the caller's to answer):
-`<agent> asks to be allowed to go on: request <id>: Bash: …`. The caller
-answers with `answer_agent`, which sends the child's host `allow` or
-`deny` (with the reason, or a default asking it to find another way) and
-goes on waiting past that request. The user can still answer the card in
-rush; whoever answers first wins, and `answer_agent` on a request no
-longer asked is refused. `answer_agent` is the one rush tool left off
-the trusted list, so the caller's own permissions judge it: a Claude
-session in auto mode has its classifier vet the child's command as if it
-were its own, one in default mode asks the user.
+every line, cut at 4000 bytes, and why the agent asks), for the card in
+its parent's session. A waiting `spawn_agent`, `agent_send` or
+`agent_result` returns at once saying it waits for the user to allow it,
+and to ask again with `agent_result`. Until 2026-11-23 the caller could
+answer with an `answer_agent` tool (Rust-only); it had no recorded use in
+25 days of the event log and was removed.
 
 ### What a subagent asks you shows in its parent (Rust-only)
 
@@ -90,12 +81,12 @@ them it (with the box of one line typed in too), and then **y**, **n**
 and **o**, ←→ and enter, and clicks, work as on the session's own
 permission card, a denial telling the subagent why with the words in the
 box. Typed words and enter with the card left alone are the parent's
-message, as ever. Allow and deny go to the child's host as
-`answer_agent` does (`Hosts::answer_spawn`), and the card goes at once;
+message, as ever. Allow and deny go to the child's host
+(`Hosts::answer_spawn`), and the card goes at once;
 it stays away while the child's host still lists the request
 (`SpawnRun::mark_answered`, `take_asks`), so it doesn't come back while
 the answer's on its way, and an answer to one no longer asked (answered
-by the caller first) is no error.
+in its own session first) is no error.
 
 What the agents a child started ask in turn comes with the child's
 (`hosted_runs`' `nested_asks`): the card says whose (`⇉ from Codex · fix
@@ -107,8 +98,8 @@ decisions card, its picks sent to the child as a message
 
 A question a child rush hosts asks (its options, multi-select or not,
 and your own words) is in its `Info.questions` whole, beside
-`Info.asking`, which stays permissions only (so `answer_agent` and
-older readers read it as ever). In the parent's session it is the
+`Info.asking`, which stays permissions only (so older readers read it
+as ever). In the parent's session it is the
 session's own question card, its heading saying whose it is (`? Branch
 ⇉ from Codex · fix the flaky test`), with the same keys: ↑ gives it the
 keys, ↑↓ and digits choose, enter picks, typed words and enter answer in

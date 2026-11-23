@@ -516,10 +516,9 @@ impl Hosts for RushHosts {
     }
 
     fn answer_spawn(&self, id: &str, request: &str, allow: bool, why: &str) -> Result<(), String> {
-        // As answer_agent does (rush_host::subtool::SubAgents::answer),
-        // for the user, from the parent's session. One no longer asked
-        // was answered already, here or by its caller: whoever answers
-        // first wins, and there's nothing to say (Rust-only).
+        // For the user, from the parent's session. One no longer asked
+        // was answered already, here or in its own session: whoever
+        // answers first wins, and there's nothing to say (Rust-only).
         if !still_asks(id, request) {
             return Ok(());
         }

@@ -1387,18 +1387,6 @@ fn hosted_spawns() {
         "a done spawn's limit: {:?}",
         got[0].job
     );
-    // A live spawn whose ask went to its parent to answer leaves the
-    // parent at work, not needing you (Rust-only).
-    let mut k = k2.clone();
-    k.parent_answers = true;
-    let mut live = p2.clone();
-    live.pid = 40;
-    let got = l.fold_spawns(Some(&empty), vec![live, k], Vec::new(), &mut HashSet::new());
-    assert!(
-        got[0].job.state != State::Blocked && !got[0].needs_you(),
-        "an ask its parent answers: {:?}",
-        got[0].job
-    );
     let mut asleep = p2.clone();
     asleep.job.state = State::Blocked;
     assert!(

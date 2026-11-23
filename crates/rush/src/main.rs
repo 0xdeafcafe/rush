@@ -157,11 +157,6 @@ fn run(args: &[String]) -> i32 {
         Some("inbox") => {
             return rush_host::cli::inbox_cmd(&args[1..], &mut stdin, &mut stdout, &mut stderr);
         }
-        // A session's write lease before each edit and shell call, in a
-        // conversation with guests: not meant to be run by hand.
-        Some("guests") => {
-            return rush_host::cli::guests_cmd(&args[1..], &mut stdin, &mut stdout, &mut stderr);
-        }
         Some("reload") => return rush_host::cli::reload_cmd(&mut stdout),
         // rush's own tools, for a session's agent that runs MCP servers as
         // processes: not meant to be run by hand.

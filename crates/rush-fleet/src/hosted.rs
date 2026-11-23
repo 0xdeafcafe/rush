@@ -88,9 +88,6 @@ pub struct HostInfo {
     pub state: String,
     pub detail: String,
     pub needs: String,
-    /// What it asks went to the session that started it, to answer
-    /// (Rust-only).
-    pub parent_answers: bool,
     pub cost_usd: f64,
     pub limit: Option<Limit>,
     pub retry: Option<Retry>,

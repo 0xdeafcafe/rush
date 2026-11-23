@@ -513,14 +513,6 @@ The board uses private files and atomic writes with an interprocess lock. It kee
 
 `#room <topic>` sets up a group chat: choose a fresh panel of agents (Tab, then Space), Enter, and they take turns arguing the topic, running tools to check facts, until they agree on a verdict. The room is a row in the list, its agents grouped under it; Enter or a click shows it in the pane like any agent. Round 1 is blind openings, then they take turns; the verdict lists each agent's own final position. Type at any time, `@name` to one agent, `/pause` (or ctrl+x) and `/resume`, `/verdict` to end early, `/stop` to end it. alt+1…9 opens one agent's own session; ctrl+x then y on the row hides the room. A room opened from a chat (`#discuss`, `#review`, or Enter in the discuss send mode) shows above that chat's box while it runs, and its verdict comes back there as a card to send on, edit or drop. `rush room help` has the same from the shell. How it works: [room.md](room.md).
 
-## Guests
-
-Start a message with `@kimi`, `@sol` or `@claude haiku` to ask another model in the conversation you're in. It joins as a guest: it's given the end of the conversation and who's there, answers under its own name and mark as a card below the conversation's own agent's (`◐ Kimi → you`), and the conversation's agent is told what guests said at the start of its next turn. Tag several at once (`@kimi @sol what do you think?`); a tag that names no agent sends the message to the conversation's agent as typed. The guest is a session of its own under the conversation's row, so alt+o shows all it did.
-
-Agents ask each other with rush's `ask_guest` tool, by name; an answer to an agent says who asked (`(asked by Claude)`). After six asks between agents with nothing from you between, rush refuses the next until you say something.
-
-Only one participant changes files at a time. When one is editing or running a command that writes, another's file change waits at its approval step and its row says `waiting for Kimi to finish editing`; it goes on by itself once the first's turn ends, or its session stops. Reading and read-only commands never wait. How it works: [guests.md](guests.md).
-
 ## Session permission overrides
 
 Shift+Tab includes a Permissions row alongside model, effort and harness. `#perm` (also `#permissions`) opens that same row; `#perm <mode>` requests a specific supported mode. `#yolo` requests the harness's advertised bypass mode. Harnesses without one report that limitation.
