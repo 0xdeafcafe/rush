@@ -302,8 +302,8 @@ pub fn card_id(m: &Model, key: &str, c: &Conn, i: &HostInfo) -> String {
 /// (upOnly). A subagent's ask is too (Rust-only): its y and n would
 /// answer for another agent, so only alt+y and alt+n do until it's given
 /// the keys. A decisions card isn't (Rust-only): the box hides under it,
-/// so it always has them, and one that comes while you type waits
-/// (hold.rs) until you stop or open it.
+/// so it has them until esc lets go of it, and one that comes while you
+/// type waits (hold.rs) until you stop or open it.
 fn up_only(kind: &str) -> bool {
     matches!(kind, "finish" | "question" | "subquestion" | "subask")
 }
@@ -321,6 +321,7 @@ pub fn card_rows(m: &mut Model, key: &str, i: &HostInfo, w: usize, max_h: usize)
     if id != c.card_shown {
         c.card_shown = id.clone();
         c.btn_pick = 0;
+        c.q_let_go = false;
         let now = m.clock.unwrap_or_else(rush_core::time::now);
         c.card_typing = now.saturating_sub(m.cards().last_key) < 1_000;
         c.card_at = now;
@@ -1085,6 +1086,8 @@ pub fn draw_question(
     } else {
         let (a, b, c2) = if c.q_decide && c.q_own {
             ("esc", " back to the choices", "")
+        } else if c.q_decide && c.q_let_go {
+            ("↑", " back to the decision", "")
         } else if c.q_decide {
             ("↓", " back to the decision", "")
         } else {
@@ -2013,7 +2016,20 @@ fn card_key_on(m: &mut Model, key: &str, i: &HostInfo, c: &mut Conn, s: &str, em
                 c.card_focus = true;
                 return Out::Draw;
             }
-            if !c.q_own && sel_empty && !c.card_focus {
+            // Esc lets go of the card (Rust-only; it did nothing, while
+            // the box said "esc returns here"): the keys are the box's
+            // for a message as ever, the card stays where it is, and ↑
+            // from the empty box is back on it. Let go, it no longer
+            // takes every key back.
+            if c.card_focus {
+                c.q_let_go = false;
+            }
+            if c.card_focus && s == "esc" && !c.q_own && !c.q_full {
+                c.card_focus = false;
+                c.q_let_go = true;
+                return Out::Draw;
+            }
+            if !c.q_own && sel_empty && !c.card_focus && !c.q_let_go {
                 // ↑ that gives it the keys does only that, as on any card.
                 c.card_focus = true;
                 if s == "up" {
@@ -2510,6 +2526,7 @@ fn done(m: &mut Model, key: &str, c: &mut Conn, acts: Vec<Act>) -> Out {
     if c.card_focus {
         c.card_again = c.card_shown.clone();
     }
+    c.q_let_go = false;
     c.card_focus = false;
     for a in acts {
         act(m, key, a);

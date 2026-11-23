@@ -348,7 +348,13 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
     // (Rust-only): the card is what you answer, and a box beside it read
     // as a second way to. What it says of a text set aside stays.
     let (deciding, own, _) = cards_now(m, &key);
-    let decide_only = deciding && !own && conn(m, &key).hosted();
+    // Esc let go of the card: the box is back, for a message as ever.
+    let let_go = m
+        .kept
+        .peek::<rush_ui_session_cards::Cards>()
+        .and_then(|k| k.conns.get(&key))
+        .is_some_and(|c| c.q_let_go);
+    let decide_only = deciding && !own && !let_go && conn(m, &key).hosted();
     let c = conn(m, &key);
     c.box_off = out.len();
     c.q_off = q_off;

@@ -3361,8 +3361,12 @@ is made. Everything below is in `rush_ui::frame`.
   In a session the card has no message box under it (beyond Go, whose
   card waited for ↑ above the box: two ways to answer read as one too
   many): it takes the keys as it comes (`up_only` leaves it out) and
-  keeps them whenever no conversation row is picked; esc and ↓ off its
-  last row do nothing. Something else (enter on its row, or any
+  keeps them whenever no conversation row is picked; ↓ off its last row
+  does nothing. Esc lets go of it (`Conn::q_let_go`; it did nothing at
+  first, while the box said "esc returns here"): the box is drawn again
+  and has the keys, for a message as ever, the card stays, no longer
+  taking every key back, and ↑ from the empty box (or a click) is back
+  on it. Something else (enter on its row, or any
   character not an option's letter: `question::own_typed`) brings the
   box up as the answer's own (yellow edge, ✎, "something else · enter
   gives your answer", `dock::message_box`), and esc or ↑ from it empty

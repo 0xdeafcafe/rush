@@ -1205,21 +1205,31 @@ fn decisions_card_takes_the_keys() {
     assert!(c.card_focus);
 }
 
-/// esc and ↓ off the decisions card do nothing: with no box under it,
-/// it keeps the keys; nothing sent, nothing set aside.
+/// ↓ off the decisions card does nothing; esc lets go of it (Rust-only:
+/// it did nothing, while the box said "esc returns here"): the keys are
+/// the box's, a letter no longer the card's, the card still there with
+/// nothing sent or set aside, and ↑ from the empty box is back on it.
 #[test]
-fn decisions_card_esc_keeps_it() {
+fn decisions_card_esc_lets_go() {
     let mut m = decisions_model(DECISIONS_MSG);
     let i = info(&m, "k").unwrap();
     card_key(&mut m, "k", &i, "up", true);
-    assert_eq!(card_key(&mut m, "k", &i, "esc", true), Out::Draw);
     for _ in 0..4 {
         card_key(&mut m, "k", &i, "down", true);
     }
-    assert!(acts(&mut m).is_empty());
+    assert!(m.cards().conns["k"].card_focus, "↓ off its last row stays");
+    assert_eq!(card_key(&mut m, "k", &i, "esc", true), Out::Draw);
     let c = m.cards().conns["k"].clone();
-    assert!(c.card_focus && !c.q_own);
-    assert_eq!(card_kind(&m, "k", &c, &i), "decisions");
+    assert!(!c.card_focus && !c.q_own, "esc gives the box the keys");
+    assert_eq!(card_kind(&m, "k", &c, &i), "decisions", "the card stays");
+    assert_eq!(card_key(&mut m, "k", &i, "x", true), Out::Pass);
+    assert!(
+        !m.cards().conns["k"].card_focus,
+        "a letter is the box's, the card doesn't take the keys back"
+    );
+    assert_eq!(card_key(&mut m, "k", &i, "up", true), Out::Draw);
+    assert!(m.cards().conns["k"].card_focus, "↑ is back on the card");
+    assert!(acts(&mut m).is_empty());
 }
 
 /// A letter picks the option it keys; p with only some decisions picked

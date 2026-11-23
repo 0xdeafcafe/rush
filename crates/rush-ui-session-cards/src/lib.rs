@@ -422,6 +422,9 @@ pub struct Conn {
     pub q_full: bool,
     /// You chose to answer in your own words.
     pub q_own: bool,
+    /// Esc let go of the decisions card: the keys are the box's until ↑
+    /// from it, or a click, puts them back on the card.
+    pub q_let_go: bool,
     /// It's a decisions block, not a question of the agent's.
     pub q_decide: bool,
     /// The key being pressed puts a decisions card's answers in the box to
