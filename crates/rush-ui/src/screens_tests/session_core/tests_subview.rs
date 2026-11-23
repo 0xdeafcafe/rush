@@ -826,7 +826,9 @@ fn a_subagents_queue_shows_and_edits_like_a_sessions() {
     let items = |m: &mut Model| super::subbox::queue_of(m, KEY, "x").items;
     assert_eq!(items(&mut m), ["one", "two", "three"]);
     let all = text(&m.frame());
-    assert!(all.contains("queue ·3"), "{all}");
+    // Whose queue, and when it goes.
+    assert!(all.contains("queue for ") && all.contains(" ·3"), "{all}");
+    assert!(all.contains("one goes each time it ends a step"), "{all}");
     assert!(fake.ops().is_empty(), "sent before its step ended");
     // ↑ picks the last; [ moves it up, the pick with it; ⌫ drops it,
     // and the pick goes to the one after.

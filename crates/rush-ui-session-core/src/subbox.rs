@@ -122,14 +122,27 @@ pub fn lines_for(m: &mut Model, key: &str, id: &str, w: usize, focused: bool) ->
     let mut out = Vec::new();
     if !q.items.is_empty() {
         let pick = d.pick.filter(|_| focused);
+        // Whose queue it is, and when it goes (Rust-only: "queue", as
+        // the session's own says, and "one goes each time a step ends").
         let when = if q.held {
             line([sp(format!(" · {send_now} sends it now"), DIM)])
         } else {
-            line([sp(" · one goes each time a step ends", DIM)])
+            line([sp(" · one goes each time it ends a step", DIM)])
         };
+        let title = format!(
+            "queue for {}",
+            rush_draw::truncate(&name, w.saturating_sub(48).max(12), "…")
+        );
         let picked = pick.map(|i| format!("q:{i}")).unwrap_or_default();
-        let (rows, _) =
-            super::dock::queue_rows(&q, when, &picked, !d.input.is_empty(), &send_now, w);
+        let (rows, _) = super::dock::queue_rows_of(
+            &title,
+            &q,
+            when,
+            &picked,
+            !d.input.is_empty(),
+            &send_now,
+            w,
+        );
         out.extend(rows);
     }
     let to = rush_draw::truncate(&name, w.saturating_sub(40).max(8), "…").into_owned();
@@ -241,8 +254,13 @@ pub fn hint(m: &mut Model, key: &str, id: &str, w: usize) -> Line {
     if conn(m, key).runs.hosted_of(id).is_some() {
         pairs.push(("alt+o", "its own session"));
     }
+    // The run before and the next, without going back for them.
+    if conn(m, key).runs.subs.len() > 1 {
+        pairs.push(("alt+↑↓", "next subagent"));
+    }
     pairs.push(("ctrl+v", "image"));
-    pairs.push(("tab · esc", "back to the list"));
+    pairs.push(("tab", "the conversation"));
+    pairs.push(("esc", "close it"));
     fit_keys(w, &pairs)
 }
 
