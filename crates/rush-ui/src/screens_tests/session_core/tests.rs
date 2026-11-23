@@ -281,7 +281,7 @@ fn box_keys_table() {
         aside_did: "set aside",
         ..b
     };
-    let cases: &[(&str, BoxState, &[(&str, &str)], &str)] = &[
+    let cases: &[BoxCase] = &[
         ("empty, idle", idle, &[], "back"),
         ("typed, idle", typed, &[("enter", "send")], "clear"),
         (
@@ -1962,3 +1962,11 @@ fn a_stall_with_nothing_to_stop_it_offers_no_keys() {
     );
     assert!(!row.contains("esc"), "{row}");
 }
+
+/// (what, the box, its keys, what esc says).
+type BoxCase = (
+    &'static str,
+    BoxState,
+    &'static [(&'static str, &'static str)],
+    &'static str,
+);

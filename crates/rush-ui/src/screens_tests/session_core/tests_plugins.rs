@@ -515,7 +515,7 @@ fn each_way_out_of_the_box_says_where() {
 #[test]
 fn the_session_box_hint_row() {
     // (what, stash on, working, typed, the row has, the row hasn't)
-    let cases: &[(&str, bool, bool, &str, &[&str], &[&str])] = &[
+    let cases: &[HintCase] = &[
         (
             "typed, idle, stash on",
             true,
@@ -634,3 +634,13 @@ fn the_agents_box_hint_row() {
     m.kept::<hooks::PromptCleared>().0 -= 120_000;
     assert!(!last(&mut m).contains("bring back"));
 }
+
+/// (what, stash on, working, typed, the row has, the row hasn't).
+type HintCase = (
+    &'static str,
+    bool,
+    bool,
+    &'static str,
+    &'static [&'static str],
+    &'static [&'static str],
+);
