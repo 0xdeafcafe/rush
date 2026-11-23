@@ -109,6 +109,7 @@ pub fn shell_run(cmd: &str, cwd: &str) -> (Vec<ShellWrite>, Vec<String>, String)
             || p.contains(NOT_A_PATH)
             || p.starts_with("/dev/")
             || p.starts_with('&')
+            || elsewhere(p)
         {
             return;
         }
@@ -249,6 +250,14 @@ pub fn shell_run(cmd: &str, cwd: &str) -> (Vec<ShellWrite>, Vec<String>, String)
         }
     }
     (out, removed, cwd)
+}
+
+/// Whether a word names somewhere that isn't a file here: a URL
+/// (file:///x, https://…) or another machine's path (box:site/,
+/// me@box:a.go), which is a colon before any slash. Not Go's, which
+/// takes them for files of the folder.
+fn elsewhere(p: &str) -> bool {
+    p.split('/').next().is_some_and(|head| head.contains(':'))
 }
 
 /// Path p, from cwd, made whole: "" for home (the Left ledger has those),
@@ -460,6 +469,11 @@ mod tests {
                 &["/w/internal/a.go"],
             ),
             ("echo $x > \"$f\"; mv a.go b.go # > c.go", &["/w/b.go"]),
+            // A URL or another machine's path isn't a file here.
+            (
+                "cp a.go file:///Users/x/b.go; rsync -a out/ me@box:site/; touch box:a.go c.go",
+                &["/w/c.go"],
+            ),
         ];
         for (cmd, want) in cases {
             let got: Vec<String> = shell_writes(cmd, "/w")
