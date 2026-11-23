@@ -24,4 +24,4 @@
 ▍
 ▍ oxlint found 6 errors; fixing them.
 ▍
-▍   · waiting for the agent…  20s
+▍   · working…  20s

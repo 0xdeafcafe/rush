@@ -541,7 +541,10 @@ fn the_newest_step_opens_only_when_its_of_use() {
         at(2),
     );
     let out = draw(&s, false);
-    assert!(out.contains("alpha_new"), "an edit:\n{out}");
+    assert!(
+        out.contains("The file has been updated."),
+        "an edit:\n{out}"
+    );
 }
 
 #[test]
@@ -1073,7 +1076,22 @@ fn the_live_line_says_the_state_plainly() {
     type Fed = fn(&mut Session);
     let cases: [(&str, Fed, &str); 5] = [
         ("nothing yet", |_| {}, "starting…"),
-        ("thinking", |s| s.feed(thinking("hm"), at(1)), "thinking…"),
+        (
+            "thinking",
+            |s| {
+                s.feed(
+                    Ev::Do(rush_core::event::Event::PartStart(
+                        rush_core::event::PartStart {
+                            index: 0,
+                            kind: rush_core::event::PartKind::Thinking,
+                        },
+                    )),
+                    at(1),
+                );
+                s.feed(thinking("hm"), at(1));
+            },
+            "thinking…",
+        ),
         ("writing", |s| s.feed(delta("So the"), at(1)), "writing…"),
         (
             "a step came back",
@@ -1324,7 +1342,7 @@ fn an_opened_step_wraps_inside_the_column() {
         }
         assert!(
             !out.lines()
-                .any(|l| l.contains('…') && !l.contains("joining")),
+                .any(|l| l.contains('…') && !l.contains("reading the results")),
             "{w}: clipped:\n{out}"
         );
         assert!(out.contains("'abcdefghij', ".trim()), "{w}:\n{out}");

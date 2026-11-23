@@ -11,5 +11,5 @@
 │       ▏No races found.
 │       ▏One nit in view.rs.
 
-▍   · working out what's next…  1.0s  turn 2m 52s
+▍   · reading the results…  1.0s  turn 2m 52s
 

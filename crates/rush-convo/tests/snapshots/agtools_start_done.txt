@@ -9,5 +9,5 @@
 ▍
 ▍ Started sol on the parser.
 
-▍   · waiting for the agent…  4.0s
+▍   · working…  4.0s
 

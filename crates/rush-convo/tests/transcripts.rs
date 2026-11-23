@@ -108,11 +108,16 @@ fn times_keep_the_offset_they_had() {
 }
 
 /// A turn read from a history, whose events carry no times, still under
-/// way: its working line says what Go's does for its zero time.
+/// way: its working line says the state and no time (Go's said one of its
+/// phrases, picked by that zero time).
 #[test]
-fn an_untimed_turn_under_way_reads_as_gos() {
+fn an_untimed_turn_under_way_says_no_time() {
     let mut s = Session::new();
     s.feed(sent("sleep 60"), 0);
     let out = render(&s, &opts());
-    assert!(out.contains("clearing its throat…"), "{out}");
+    let line = out
+        .lines()
+        .find(|l| l.contains("starting…"))
+        .unwrap_or_else(|| panic!("{out}"));
+    assert!(line.trim_end().ends_with("starting…"), "{line}");
 }
