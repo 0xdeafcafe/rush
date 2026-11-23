@@ -586,16 +586,10 @@ pub fn crumb_click(m: &mut Model, e: &Mouse) -> Out {
     if e.kind != MouseKind::Down(Button::Left) || m.confirm.is_some() || m.sheet.is_some() {
         return Out::Pass;
     }
-    // Its row is over the header's two, when it's drawn at all.
-    let Some((top, off)) = m
-        .session
-        .as_ref()
-        .filter(|v| v.crumb_row)
-        .map(|v| (v.top, v.top_off))
-    else {
+    let Some((top, off)) = m.session.as_ref().map(|v| (v.top, v.top_off)) else {
         return Out::Pass;
     };
-    if top.checked_sub(HEAD_H + 1 + off) != Some(e.y as usize) {
+    if top.checked_sub(HEAD_H + off) != Some(e.y as usize) {
         return Out::Pass;
     }
     let Some(key) = open_key(m) else {

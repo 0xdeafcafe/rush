@@ -156,11 +156,11 @@ fn keys_between_the_two_sides() {
     assert_eq!(split::widths(&m), (120, 0), "the list alone again");
 }
 
-/// { } and tab go back to the list as esc does (switchFocus). ← doesn't
-/// (Not Go's paneKey left: ← only shuts what's picked).
+/// { } and tab go back to the list as esc does (switchFocus), and so
+/// does ← from the empty box (paneKey left).
 #[test]
 fn back_to_the_list_keys() {
-    for k in ["{", "}", "tab"] {
+    for k in ["{", "}", "tab", "left"] {
         let mut m = opened(120, 40, "split");
         press(&mut m, k);
         assert!(m.session.is_none(), "{k}");
@@ -168,9 +168,6 @@ fn back_to_the_list_keys() {
         press(&mut m, "tab");
         assert!(m.session.is_some(), "tab goes back in");
     }
-    let mut m = opened(120, 40, "split");
-    press(&mut m, "left");
-    assert!(m.session.is_some(), "← stays in the Session");
 }
 
 /// tab goes into the Session with text typed too; → pushed at the end
@@ -233,8 +230,8 @@ fn narrow_esc_is_the_list() {
     assert_eq!(split::widths(&m), (0, 80));
     let f = rows(&mut m);
     assert!(
-        f.iter().any(|l| l.contains("esc back")),
-        "alone, the keys say the list is behind:\n{}",
+        f.iter().any(|l| l.contains("esc back to the list")),
+        "alone, the header says the list is behind:\n{}",
         f.join("\n")
     );
     press(&mut m, "esc");
@@ -320,17 +317,22 @@ fn shift_arrows_step_the_split() {
 #[test]
 fn rule_and_fade_follow_the_keys() {
     let mut m = opened(120, 40, "split");
-    // No rule now (Rust-only): the tab showing is orange with the keys.
     let lit = |m: &mut Model| {
-        m.frame()
+        let f = m.frame();
+        let rule = f
             .iter()
-            .flat_map(|l| l.spans.clone())
-            .find(|s| s.text.contains("Conversation"))
-            .map(|s| s.style.bg)
+            .find(|l| l.plain().contains('━'))
+            .expect("the rule")
+            .clone();
+        rule.spans
+            .iter()
+            .find(|s| s.text.contains('━'))
+            .map(|s| s.style.fg)
     };
     assert_eq!(lit(&mut m), Some(ORANGE));
     press(&mut m, "esc");
-    assert!(lit(&mut m).is_some());
+    let faded = split::fade_row(Line::from_spans(vec![Span::new("━", Style::fg(SUB))]));
+    assert_eq!(lit(&mut m), faded.spans[0].style.fg.into());
     assert_ne!(lit(&mut m), Some(ORANGE));
 }
 

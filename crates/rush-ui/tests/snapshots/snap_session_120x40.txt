@@ -1,18 +1,23 @@
-  rush    ● 1 needs you · ctrl+n    ✻ 2    Agents   Projects   Harnesses   Settings    Agents   Wall   [ ]     default
-  AGENTS▾                   TIME │    set up caching for CI   @set-up-caching-for-ci  ·  idle               context 0%
-┃ Needs you  1 · $0.19           │    Conversation ▾   Overview   Changes    [ ] views                 checkout · main
-┃ └─ ? fix the flaky t… ✻   2m ● │
-┃      checkout · main           │  ▍ You  12:00
-┃        ╰ asks: Round half up…  │  ▍ fix the test
+     !
+    ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working                                                               default
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings                                  0% cpu · – · 37.0G free · 80%
+    RUSH      Agents   Wall   [ ]
+   ▀▀▀▀▀▀
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  AGENTS▾                   TIME │
+┃ Needs you  1 · $0.19           │    set up caching for CI   @set-up-caching-for-ci  ·  idle               context 0%
+┃ └─ ? fix the flaky t… ✻   2m ● │    checkout · main          Claude Code · open in a terminal · /rush copies it here
+┃      checkout · main           │    Conversation ▾   Overview   Changes    [ ] views
+┃        ╰ asks: Round half up…  │───━━━━━━━━━━━━━━━━───────────────────────────────────────────────────────────────────
                                  │
-┃ Working  2 · $5.72             │    Claude  12:00 · @set-up-caching-for-ci
-┃ ├─ ✳ add Apple Pa… ✻ ↳1    21m │      ✓ cargo test                                                               7s
+┃ Working  2 · $5.72             │  ▍ You  12:00
+┃ ├─ ✳ add Apple Pa… ✻ ↳1    21m │  ▍ fix the test
 ┃ │    checkout · feat/apple-pay │
-┃ └─ ✳ move the design… ✻    20m │    Fixed it.
-┃      checkout · main           │                                                                       1 step   13s
+┃ └─ ✳ move the design… ✻    20m │    Claude  12:00 · @set-up-caching-for-ci
+┃      checkout · main           │      ✓ cargo test                                                               7s
                                  │
-┃ Idle  1 · $1.10 · 120M idle ram│
-▌ └─ ◦ set… ✻ Claude Code    10m │
+┃ Idle  1 · $1.10 · 120M idle ram│    Fixed it.
+▌ └─ ◦ set… ✻ Claude Code    10m │                                                                       1 step   13s
 ▌      checkout · main           │
                                  │
 ┃ Today  1 · $1.71               │
@@ -20,11 +25,6 @@
 ┃      checkout · main           │
                                  │
  ▸ Earlier  1 · $0.42            │
-                                 │
-                                 │
-                                 │
-                                 │
-                                 │
                                  │
                                  │
                                  │

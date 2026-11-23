@@ -4,12 +4,12 @@
     RUSH      Agents   Wall   [ ]
    ▀▀▀▀▀▀
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  AGENTS▾                                   COST   TIME │    fix the flaky tax rounding test   @fix-the-flaky-tax-roun…  ·  needs you
-┃ Needs you  1 · $0.19                                  │    Conversation ▾   Overview   Changes    [ ] views                                                                          checkout · main
-▌ └─ ? fix the flaky tax rounding test ✻   $0.19   2m ● │  couldn't read it: No such file or directory (os error 2)                                                                         ▌
-▌      checkout · main                                  │                                                                                                                                   │
-▌        ╰ asks: Round half up, or half to even?        │                                                                                                                                   │
-                                                        │                                                                                                                                   │
+  AGENTS▾                                   COST   TIME │
+┃ Needs you  1 · $0.19                                  │    fix the flaky tax rounding test   @fix-the-flaky-tax-roun…  ·  needs you
+▌ └─ ? fix the flaky tax rounding test ✻   $0.19   2m ● │    checkout · main                                                   ✻ Claude Code   Claude Code · open in a terminal · /rush copies it here
+▌      checkout · main                                  │    Conversation ▾   Overview   Changes    [ ] views
+▌        ╰ asks: Round half up, or half to even?        │───━━━━━━━━━━━━━━━━────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+                                                        │  couldn't read it: No such file or directory (os error 2)                                                                         ▌
 ┃ Working  2 · $5.72                                    │                                                                                                                                   │
 ┃ ├─ ✳ add Apple Pay to checkout ✻ ↳1      $2.62    21m │                                                                                                                                   │
 ┃ │    checkout · feat/apple-pay                        │                                                                                                                                   │

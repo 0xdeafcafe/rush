@@ -1218,7 +1218,6 @@ impl Model {
             return;
         };
         (v.beside, v.idle) = (beside, idle);
-        (v.tabs_w, v.meta_w) = (0, 0);
         let a = self.agents.iter().find(|a| a.key == v.key);
         let mut head = session::header(a, v, w, now, &self.reg);
         let a_live = a.is_some_and(|a| a.job.live());
@@ -1229,22 +1228,12 @@ impl Model {
             let f = self.ext.session_head[i];
             f(self, &mut head, w);
         }
-        // Built as Go's five rows, drawn as two (session::fold_head).
-        let (tabs_w, meta_w) = self
-            .session
-            .as_ref()
-            .map_or((0, 0), |v| (v.tabs_w, v.meta_w));
-        let (mut head, meta_map, crumb_row) = session::fold_head(head, tabs_w, meta_w, w);
-        if let Some(v) = self.session.as_mut() {
-            (v.meta_map, v.crumb_row) = (meta_map, crumb_row);
-        }
         if let Some(kind) = kind {
             crate::frame::headerwash::wash_head(&self.reg, &kind, &mut head, w);
         }
-        let head_h = head.len();
         out.extend(head);
         let docks = self.docks(true, self.w);
-        let rows = body_h.saturating_sub(head_h + docks.len());
+        let rows = body_h.saturating_sub(session::HEAD_H + docks.len());
         if let Some(v) = self.session.as_mut() {
             v.top = out.len();
         }

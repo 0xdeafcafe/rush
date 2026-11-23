@@ -303,19 +303,19 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
                 return Out::Draw;
             }
             if empty {
-                // ← only shuts: what's open round the picked row (a step,
-                // a group of steps, a turn), a stage at a time, and with
-                // nothing open it stays where it is. Not Go's, where it
-                // went on off the row to the box and from the box to the
-                // list (leavePane): held to shut a turn, it ended in
-                // Agents. esc steps out, tab changes pane.
+                // ← goes back a stage at a time: it shuts what's open
+                // round the picked row (a step, a group of steps, a turn),
+                // then, with nothing open, off the row to the box, then
+                // from the box to the list (leavePane). esc is the
+                // agent's (it interrupts), so ← is the way back.
                 if !picked.is_empty() {
                     let rows = conn(m, &key).vs.rows.max(1);
-                    if let Some(v) = m.session.as_mut() {
-                        v.fold_in(rows);
+                    let shut = m.session.as_mut().is_some_and(|v| v.fold_in(rows));
+                    if !shut {
+                        set_sel(m, String::new());
                     }
                 } else if !(m.ext.calls.hosted_alone())(m) {
-                    m.flash("esc goes back to Agents");
+                    to_list(m);
                 }
                 return Out::Draw;
             }

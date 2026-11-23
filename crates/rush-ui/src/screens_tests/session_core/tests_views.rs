@@ -186,26 +186,16 @@ fn tabs_and_the_rule_under_them() {
     let mut m = opened(120, 40);
     let s = screen(&mut m);
     let tabs = row_with(&mut m, "Conversation").expect("a tabs row");
-    assert!(
-        s[tabs].starts_with(
-            "    Conversation ▾   Overview   Changes +1 −1   Tasks 1 of 3    [ ] views   "
-        ),
-        "{:?}",
-        s[tabs]
+    assert_eq!(
+        s[tabs].trim_end(),
+        "    Conversation ▾   Overview   Changes +1 −1   Tasks 1 of 3    [ ] views                         esc back to the list"
     );
-    assert!(s[tabs].contains("checkout · main"), "{:?}", s[tabs]);
-    // No rule under them (Rust-only): the tab showing is the lit one.
     let lit = |m: &mut Model| -> (usize, usize) {
-        let r = m.frame()[tabs].clone();
-        let (mut x, mut from, mut n) = (0, None, 0);
-        for s in &r.spans {
-            if s.style.bg == crate::style::ORANGE || s.style.bg == crate::style::TAB_ON_BG {
-                from.get_or_insert(x);
-                n += s.width();
-            }
-            x += s.width();
-        }
-        (from.expect("a lit tab"), n)
+        let r = screen(m)[tabs + 1].clone();
+        let cs: Vec<char> = r.chars().collect();
+        let from = cs.iter().position(|c| *c == '━').unwrap();
+        let n = cs.iter().filter(|c| **c == '━').count();
+        (from, n)
     };
     assert_eq!(lit(&mut m), (3, " Conversation ▾ ".chars().count()));
     press(&mut m, "]");
@@ -1203,9 +1193,7 @@ fn ours_through_a_symlink() {
 #[test]
 fn prompt_pins() {
     let fake = Fake::new();
-    // 28 rows: the conversation has what it had at 36 under Go's taller
-    // headers (eight rows more).
-    let mut m = open(agent("steer", State::Idle), &fake, 123, 28);
+    let mut m = open(agent("steer", State::Idle), &fake, 123, 36);
     long(&mut m, 30);
     let s = screen(&mut m);
     assert!(!s.iter().any(|l| l.contains("current question")));
@@ -2264,12 +2252,11 @@ fn needs_you_with_nothing_to_act_on_is_not_drawn() {
     assert!(row_with(&mut m, "Needs you").is_none());
 }
 
-/// ← in the conversation only shuts: it closes the open step the pick
-/// is on, and with nothing open stays there. esc steps out, a level at
-/// a time: off the row to the message box, then from the box to the
-/// Agents list (Not Go's ←, which went all that way itself).
+/// ← in the conversation goes back a stage at a time, as Go's leavePane:
+/// it closes the open step the pick is on, then lets go of the row, then
+/// goes from the empty box to the Agents list.
 #[test]
-fn left_only_closes_and_esc_steps_out() {
+fn left_closes_then_steps_back_to_the_list() {
     let mut m = opened(120, 40);
     let s = screen(&mut m);
     let y = row_with(&mut m, "parse.rs").expect("the step");
@@ -2285,18 +2272,11 @@ fn left_only_closes_and_esc_steps_out() {
     press(&mut m, "left");
     assert_eq!(open(&m), Some(false), "← closes the step");
     assert_eq!(m.session.as_ref().unwrap().sel, picked);
-    // Nothing open: ← stays where it is.
+    // Nothing open: ← lets go of the row, to the box.
     press(&mut m, "left");
-    assert_eq!(m.session.as_ref().unwrap().sel, picked);
-    // esc: off the row, to the box.
-    press(&mut m, "esc");
     assert!(m.session.as_ref().is_some_and(|v| v.sel.is_empty()));
-    // ← in the empty box doesn't leave.
+    // ← from the empty box: back to the list.
     press(&mut m, "left");
-    assert!(m.session.is_some(), "still in the Session");
-    assert_eq!(flash(&m), "esc goes back to Agents");
-    // esc from the box: back to the list.
-    press(&mut m, "esc");
     assert!(m.session.is_none(), "back to the Agents list");
 }
 

@@ -649,9 +649,6 @@ pub fn seg_at(row: &str, part: &str, word: &str, last: bool) -> Option<usize> {
 pub struct Labels {
     pub context: (usize, usize),
     pub mode: (usize, usize, usize),
-    /// How much of the row under the name is the bar's and where it
-    /// works: what the folded header draws of it.
-    pub meta_w: usize,
 }
 
 /// Where the agent label landed on the row under the name: from and
@@ -821,10 +818,6 @@ fn rows_with(
         left2.spans.push(sp("  ·  ", DIM));
         join(&mut left2, more);
     }
-    // What of this row is drawn, along the tabs' row (fold_head): the
-    // bar's second line and where it works, not the label and the
-    // connection after them.
-    labels.meta_w = left2.width();
     conn.spans.push(plain(" "));
     // Where the label is, for a click on it to open the switch sheet.
     let mut label = (0, 0);
@@ -895,9 +888,6 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     rows[NAME_ROW] = chrome(r1, hw);
     rows[META_ROW] = chrome(r2, hw);
     m.ext.calls.set_context_at()(m, &key, labels.context);
-    if let Some(v) = m.session.as_mut() {
-        v.meta_w = labels.meta_w;
-    }
     let st = m.kept::<State>();
     st.mode_at = labels.mode;
     st.label_at = label;
@@ -1123,32 +1113,17 @@ pub fn mouse(m: &mut Model, e: &crate::frame::Mouse) -> Out {
         .map(|s| s.mode_at)
         .unwrap_or_default();
     // The header's rows end where the body starts.
-    // Drawn as two (session::fold_head): the name's row as built, and
-    // the meta row's left part moved right along the tabs' row. The
-    // pointer is put back where the built rows have it.
-    let (off, map) = m
-        .session
-        .as_ref()
-        .map_or((0, Vec::new()), |v| (v.top_off, v.meta_map.clone()));
-    let name_y = top.checked_sub(crate::session::HEAD_H + off);
-    let (built, x) = match name_y {
-        Some(t) if y == t => (Some(NAME_ROW), x),
-        Some(t) if y == t + 1 && x >= 2 => {
-            match map.iter().find(|s| x - 2 >= s.0 && x - 2 < s.0 + s.2) {
-                Some(s) => (Some(META_ROW), 2 + s.1 + (x - 2 - s.0)),
-                None => (None, x),
-            }
-        }
-        _ => (None, x),
-    };
-    let on = mw > 0 && built == Some(row) && x >= 2 + at && x < 2 + at + mw;
+    let off = m.session.as_ref().map_or(0, |v| v.top_off);
+    let head_top = top.checked_sub(crate::session::HEAD_H + off);
+    let on = mw > 0 && head_top.is_some_and(|t| y == t + row) && x >= 2 + at && x < 2 + at + mw;
     // The agent label, on the row under the name (setup.go:570 clickLabel).
     let (lx, lw) = m
         .kept
         .peek::<State>()
         .map(|s| s.label_at)
         .unwrap_or_default();
-    let on_label = lw > 0 && built == Some(META_ROW) && x >= 2 + lx && x < 2 + lx + lw;
+    let on_label =
+        lw > 0 && head_top.is_some_and(|t| y == t + META_ROW) && x >= 2 + lx && x < 2 + lx + lw;
     // The other segments a click takes (model, effort, account), and the
     // label's part under the pointer.
     let hits = m
@@ -1156,7 +1131,8 @@ pub fn mouse(m: &mut Model, e: &crate::frame::Mouse) -> Out {
         .peek::<State>()
         .map(|s| s.hits.clone())
         .unwrap_or_default();
-    let seg = built.and_then(|r| {
+    let row = head_top.and_then(|t| y.checked_sub(t));
+    let seg = row.and_then(|r| {
         hits.segs
             .iter()
             .find(|h| h.0 == r && x >= 2 + h.1 && x < 2 + h.2)

@@ -60,13 +60,8 @@ fn a_stopped_rush_session_reads_as_its_host_left_it() {
     let (mut m, _) = stopped(false);
     let row = name_row(&mut m);
     assert!(row.contains("·  stopped"), "{row}");
-    // How it's reached is at the tabs' right when there's room for it;
-    // the box says it either way.
     let f = screen(&mut m).join("\n");
-    assert!(
-        f.contains("send to resume") || f.contains("enter resumes it"),
-        "{f}"
-    );
+    assert!(f.contains("send to resume"), "{f}");
 }
 
 /// The box's top edge says its permission mode on the right, stopped or

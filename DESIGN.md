@@ -3210,13 +3210,13 @@ place for each layout):
    only by luck of which hook saw it first.) Rows drawn in the column
    beside a wide conversation are not in this walk: they are the
    column's.
-2. **← → only shut and open the thing under the cursor.** → on a thing
+2. **→ opens the thing under the cursor; ← shuts it, then steps back.** → on a thing
    already open goes into it (the task list's head: the Tasks view; a
-   run: its pane). ← on a row shuts it and stays on it; in an empty box
-   with nothing picked it does nothing and says "esc goes back to
-   Agents". Neither changes pane. (Go: → from the box went into the
-   column, ← came out of it, ← on a row unpicked it and ← in the box
-   closed the Session.) Kept from Go: → on an agent in the list opens
+   run: its pane). ← on a row shuts what's open round it; with nothing
+   open it lets go of the row, and in an empty box with nothing picked
+   it goes back to the list, as Go's ← did (esc is the agent's, so ← is
+   the way back). (Go: → from the box went into the column and ← came
+   out of it.) Kept from Go: → on an agent in the list opens
    it, and ← pushed three times against the start of typed text asks
    "Back to the list?".
 3. **tab, and { }, change pane.** tab and } go on: list → conversation
@@ -4110,34 +4110,16 @@ is made. Everything below is in `rush_ui::frame`.
   an agent reading any account's, a session's billing and its host's
   rush version (no Info for them), the name's @handle, headerGit, the
   hover on the label and its click to switch.
-- **The header with a conversation open** (`header.rs` `compact`).
-  Rust-only: one row and no rule, where Go's is clanker's six rows
-  wherever you are. It holds rush's name, the counts, the places, the
-  pages after them and, at the right, the account new agents start on;
-  clanker, the machine's readings and a top bar of your own are the
-  list's. The counts lose their words before the account goes. The
-  places and the pages share row 0, so `header_text` keeps the pages'
-  part with the places' blanked: a page may have a place's name
-  (Agents). A newer rush is its key alone, as on a small screen, and
-  isn't clicked there.
-- **The Session's header is two rows** (`session::fold_head`).
-  Rust-only: Go's is five (blank, name, meta, tabs, rule). Everything
-  still builds and marks the five (`HEAD_BUILT`), and the frame folds
-  them before the wash: the name's row as built; the tabs with the meta
-  row's left part (the bar's second line and where it works) at their
-  right when both fit. Not drawn: the blank row, unless a hosted child's
-  breadcrumb is on it (then three rows, `crumb_row`); the rule; the
-  agent label and how it's connected; "esc back to the list" and the
-  depth's chip. With no rule, the tab showing is orange while the
-  Session has the keys. The pointer on the tabs' row is put back by
-  `meta_map` to where the built meta row has its marks.
-- **Another agent waits while a conversation fills the screen**
-  (`header.rs` `waiting_elsewhere`, `waiting_chip`;
-  `session_core/needsjump.rs`). Rust-only: the one-row header says it as
-  a filled yellow chip with the name of the one that has waited longest
-  and the key, where the list's header has the quiet count; the open
-  conversation isn't counted. ctrl+n from a conversation opens that
-  agent (Go's ctrl+n is the list's and only picks its row).
+- **ctrl+n from a conversation** (`header.rs` `waiting_elsewhere`;
+  `session_core/needsjump.rs`). Rust-only: it opens the agent that has
+  waited on you longest, the open one not counted (Go's ctrl+n is the
+  list's and only picks its row). The header with a conversation open is
+  the list's, as tall as Go's: a one-row header with a yellow chip was
+  tried and undone as noisy.
+- **← in a conversation goes back** (`session_core/keys.rs`), as Go's
+  leavePane: it shuts what's open round the picked row, then lets go of
+  the row, then goes to the list. Making it only shut, with esc the way
+  back, was tried and undone: esc is the agent's.
 - **"Sort rows by" orders rows** (`list.rs` `rebuild`, `picked`).
   Rust-only: a column picked (recent, cost, cpu, ram, tokens, work,
   time) orders the rows inside each section, biggest first, ahead of the

@@ -92,9 +92,7 @@ pub fn wash(l: &Line, colours: &[Color]) -> Line {
     out
 }
 
-/// The Session's header rows as drawn (session::fold_head: the name's
-/// and the tabs', a breadcrumb's over them for a hosted child; Go's are
-/// blank, name, meta, tabs), w wide with the
+/// The Session's header rows (blank, name, meta, tabs), w wide with the
 /// pane's gutters (two cells left, one right), washed for an agent of
 /// kind: the rows between the gutters, the right gutter in the wash's
 /// last colour; the rule under them in the harness's grey
@@ -102,13 +100,13 @@ pub fn wash(l: &Line, colours: &[Color]) -> Line {
 pub fn wash_head(reg: &rush_core::adapter::Registry, kind: &str, rows: &mut [Line], w: usize) {
     use crate::look::look_of;
     let iw = w.saturating_sub(3);
-    if iw == 0 {
+    if iw == 0 || rows.len() < 4 {
         return;
     }
     let harness = look_of(reg, reg.harness_of(kind).as_str()).rgb;
     let provider = look_of(reg, &reg.provider_of(kind)).rgb;
     let ground = super::ground::painted();
-    for (r, row) in rows.iter_mut().enumerate() {
+    for (r, row) in rows.iter_mut().take(4).enumerate() {
         let colours = header_colours(ground, harness, provider, iw, r);
         let inner = crate::style::cut(row, 2, 2 + iw);
         let mut out = Line::from_spans(vec![Span::new(

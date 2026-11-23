@@ -141,7 +141,7 @@ fn the_conversation_has_the_row_back() {
     let mut m = talked(3);
     let (i, _) = tab_row(&mut m);
     let v = m.session.as_ref().unwrap();
-    assert_eq!(v.top, i + 1, "the body starts under the tabs");
+    assert_eq!(v.top, i + 2, "the body starts under the rule");
     assert_eq!(v.top_off, 0);
 }
 
@@ -160,7 +160,7 @@ fn the_key_opens_the_dropdown_and_picks() {
         .iter()
         .position(|l| l.contains("everything, as usual"))
         .unwrap();
-    assert_eq!(at, i + 1, "right under the tabs");
+    assert_eq!(at, i + 2, "right under the tab's rule");
     assert!(rows[0].contains("▸ ● Normal"), "{rows:?}");
     for (r, p) in rows.iter().zip(Preset::ALL) {
         assert!(r.contains(p.title()) && r.contains(p.about()), "{r}");

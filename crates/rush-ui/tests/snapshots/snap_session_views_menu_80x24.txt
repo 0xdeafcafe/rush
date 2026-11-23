@@ -1,21 +1,21 @@
-  rush    ● 1 needs you · ctrl+n    ✻ 2    Agents   Projects   Harnesses   Sett…
+     !
+    ▄▄▄▄      rush   ● 1 needs you   ✻ 2 working                       default
+   ▀▀▀▀▀▀      Agents   Projects   Harnesses   Settings             0% cpu · –
+    RUSH      Agents   Wall   [ ]
+   ▀▀▀▀▀▀
+────────────────────────────────────────────────────────────────────────────────
+
     set up caching for CI   @set-up-caching-for-ci  ·  idle         context 0%
-    Conversation ▾   Overview   Changes    [ ] views           checkout · main
-    ▸ ● Normal        everything, as usual
-  ▍     Chat          what did we say?
+    checkout · main    Claude Code · open in a terminal · /rush copies it here
+    Conversation ▾   Overview   Changes    [ ] views      esc back to the list
+───━━━━━━━━━━━━━━━━─────────────────────────────────────────────────────────────
+  ▍ ▸ ● Normal        everything, as usual
+        Chat          what did we say?
   ▍     Code          what did it change?
-        Orchestrator  who's doing what?
+  │     Orchestrator  who's doing what?                                    7s
   ▍   ↑↓ · enter shows it · esc closes
-  │   ✓ cargo test                                                         7s
-  ▍
   ▍ Fixed it.
   ▍                                                              1 step   13s
-
-
-
-
-
-
 
 
   ╭─ open in a terminal, so it can't take messages here ──────────────────────╮

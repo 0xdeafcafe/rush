@@ -66,7 +66,7 @@ fn the_move_map_narrow() {
         // The box.
         (&[], "up", "tasks"),
         (&[], "down", "box"),
-        (&[], "left", "box"),
+        (&[], "left", "list"),
         (&[], "right", "box"),
         (&[], "enter", "box"),
         (&[], "esc", "list"),
@@ -84,7 +84,7 @@ fn the_move_map_narrow() {
         (&["up"], "esc", "box"),
         // A row of the conversation.
         (&["up", "up"], "down", "tasks"),
-        (&["up", "up"], "left", "row"),
+        (&["up", "up"], "left", "box"),
         (&["up", "up"], "right", "row"),
         (&["up", "up"], "enter", "row"),
         (&["up", "up"], "space", "row"),
@@ -120,7 +120,7 @@ fn up_and_down_are_each_others_way_back() {
 }
 
 /// The Session beside the list: tab, { } and esc move between the two,
-/// enter and → open the agent picked in the list, ← never leaves the
+/// enter and → open the agent picked in the list, ← from the box leaves the
 /// Session.
 #[test]
 fn the_move_map_beside_the_list() {
@@ -132,14 +132,14 @@ fn the_move_map_beside_the_list() {
         m
     };
     let cases: &[(&[&str], &str, &str)] = &[
-        (&[], "left", "box"),
+        (&[], "left", "list"),
         (&[], "up", "tasks"),
         (&[], "esc", "list"),
         (&[], "tab", "list"),
         (&[], "{", "list"),
         (&[], "}", "list"),
         (&["up", "up"], "esc", "box"),
-        (&["up", "up"], "left", "row"),
+        (&["up", "up"], "left", "box"),
         // The list.
         (&["esc"], "tab", "box"),
         (&["esc"], "enter", "box"),
@@ -152,15 +152,15 @@ fn the_move_map_beside_the_list() {
 }
 
 /// Wide, the Session alone with the column beside its conversation: tab
-/// goes into the column and on to the list, { and esc come back, ←→
-/// don't change pane, and the column's pick stays put through frames.
+/// goes into the column and on to the list, { and esc come back, → and
+/// ← in the column don't change pane, and the column's pick stays put through frames.
 #[test]
 fn the_move_map_wide() {
     let cases: &[(&[&str], &str, &str)] = &[
         // The box: the tasks are in the column, so ↑ is the conversation.
         (&[], "up", "row"),
         (&[], "right", "box"),
-        (&[], "left", "box"),
+        (&[], "left", "list"),
         (&[], "tab", "side:tasks"),
         (&[], "}", "side:tasks"),
         (&[], "{", "list"),
@@ -177,7 +177,7 @@ fn the_move_map_wide() {
         // A row of the conversation keeps its pick while the column has
         // the keys, and gets them back.
         (&["up"], "right", "row"),
-        (&["up"], "left", "row"),
+        (&["up"], "left", "box"),
         (&["up"], "tab", "side:tasks"),
         (&["up", "tab"], "esc", "row"),
         (&["up"], "esc", "box"),

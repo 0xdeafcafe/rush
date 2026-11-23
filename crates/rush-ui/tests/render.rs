@@ -261,8 +261,7 @@ fn opens_a_session_read_only() {
         f.contains("set up caching for CI   @set-up-caching-for-ci  ·  idle"),
         "{f}"
     );
-    // The keys under the box say the way back; the header no longer does.
-    assert!(f.contains("esc back"), "{f}");
+    assert!(f.contains("esc back to the list"), "{f}");
     assert!(f.contains("fix the test"), "{f}");
     assert!(f.contains("Fixed it."), "{f}");
     // ↑ picks a row; esc drops it, esc again goes back to the list.
