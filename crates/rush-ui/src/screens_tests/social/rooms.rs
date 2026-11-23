@@ -277,7 +277,7 @@ fn a_rooms_pane_has_an_agents_header() {
         "Conversation   Overview   Changes",
         // The box says what enter does, as a busy agent's
         // (rushmode.go:3680).
-        "queuing",
+        "enter queues it for when it's done",
     ] {
         assert!(f.contains(want), "no {want:?} in:\n{f}");
     }

@@ -1515,14 +1515,18 @@ fn the_task_row_on_the_box() {
         "{:?}",
         s[y]
     );
-    assert!(s[y].contains("all tasks ›"));
+    assert!(!s[y].contains("all tasks ›"), "only under the open list");
     assert!(s[y + 1].trim_start().starts_with('╭'), "on the box");
     click(&mut m, MouseKind::Down(Button::Left), 10, y);
     let s = screen(&mut m);
     let y = row_with(&mut m, "▾ Tasks").expect("opened");
     assert!(s[y + 1].contains("✓ Read the parser"), "{:?}", s[y + 1]);
     assert!(s[y + 2].contains("■ Fixing the bug"));
-    assert!(s[y + 3].contains("☐ Run the tests"));
+    assert!(
+        s[y + 3].contains("☐ Run the tests  all tasks ›"),
+        "{:?}",
+        s[y + 3]
+    );
     assert!(s[y + 4].trim_start().starts_with('╭'));
     click(&mut m, MouseKind::Down(Button::Left), 10, y + 2);
     assert_eq!(
@@ -1549,7 +1553,11 @@ fn the_column_beside_a_wide_conversation() {
     assert_eq!(x, 2 + 139, "{:?}", s[y]);
     assert!(s[y + 1].contains("✓ Read the parser"));
     assert!(s[y + 2].contains("■ Fixing the bug"));
-    assert!(s[y + 3].contains("☐ Run the tests"));
+    assert!(
+        s[y + 3].contains("☐ Run the tests  all tasks ›"),
+        "{:?}",
+        s[y + 3]
+    );
     let c = row_with(&mut m, "▌ Changes  +1 −1").expect("the changes");
     assert_eq!(c, y + 5, "a row apart");
     assert!(s[c + 1].contains("/src/checkout/src/parse.rs"));
@@ -1576,7 +1584,7 @@ fn the_column_beside_a_wide_conversation() {
     // Narrower, they sit on the box again.
     let mut m = opened(170, 40);
     let s = screen(&mut m);
-    assert!(s.iter().any(|l| l.contains("all tasks ›")));
+    assert!(s.iter().any(|l| l.contains("▸ Tasks")));
 }
 
 /// Every view, at every width from nothing to wide and short heights,

@@ -611,7 +611,7 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
                 ]),
             );
         } else if busy(a) {
-            add(&mut top, line([sp("queuing", DIM)]));
+            add(&mut top, line([sp(sendmode::SendMode::Queue.state(), DIM)]));
             if typed {
                 add(
                     &mut top,
@@ -673,7 +673,7 @@ fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
         let mut l = line([sp(cur.state(), DIM)]);
         if next != cur {
             l.spans
-                .push(sp(format!(" · {SEND_MODE} {}", next.switch()), DIM));
+                .push(sp(format!(" · {SEND_MODE} to {}", next.switch()), DIM));
             // A click on it goes round as ctrl+t does.
             let at = if top.spans.is_empty() {
                 0

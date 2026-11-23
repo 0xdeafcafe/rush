@@ -39,14 +39,15 @@ impl SendMode {
         }
     }
 
-    /// How enter sends now, on the box's edge: guide is what the box calls
-    /// coalescing.
+    /// What enter does now, on the box's edge, said as that. Not Go's
+    /// words ("queuing", and "coalescing" for guide, which named how the
+    /// host batches what's typed and told nobody what enter would do).
     pub fn state(self) -> &'static str {
         match self {
-            SendMode::Queue => "queuing",
-            SendMode::Guide => "coalescing",
-            SendMode::Stop => "stop & send",
-            SendMode::Discuss => "discussing",
+            SendMode::Queue => "enter queues it for when it's done",
+            SendMode::Guide => "enter guides it at its next step",
+            SendMode::Stop => "enter stops it and sends",
+            SendMode::Discuss => "enter opens a room on it",
         }
     }
 
@@ -54,7 +55,7 @@ impl SendMode {
     pub fn switch(self) -> &'static str {
         match self {
             SendMode::Queue => "queue",
-            SendMode::Guide => "coalesce",
+            SendMode::Guide => "guide",
             SendMode::Stop => "stop & send",
             SendMode::Discuss => "discuss",
         }

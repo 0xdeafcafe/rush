@@ -3168,6 +3168,19 @@ own adapter, `read_history`), again only once their file grows: their
 steps and replies go under the step that ran them, and Changes takes
 their edits.
 
+### What enter does while it works, and "all tasks" (Rust-only)
+
+The box's edge says what enter does, not a name for it: "enter queues
+it for when it's done", "enter guides it at its next step", "enter
+stops it and sends", "enter opens a room on it", then "ctrl+t to
+guide" (the next way). Go's edge said "queuing · ctrl+t coalesce":
+"coalesce" was the host's word for batching what's typed into the turn
+under way, and nobody knew what it meant. The task row on the box no
+longer has "all tasks ›" at its right, over the edge's words; it ends
+the last row of the open list ("+12 more · all tasks ›"), a click on
+any of whose rows opens Tasks as before, and all of the head opens and
+shuts it.
+
 ### The list's columns, some turned off (Rust-only)
 
 `Model::col_widths` hid each column under a width worked out for all six

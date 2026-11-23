@@ -1115,9 +1115,10 @@ enum Found {
 }
 
 /// By agent kind, account and session id.
-static FOUND: std::sync::LazyLock<
-    std::sync::Mutex<std::collections::HashMap<(String, String, String), Found>>,
-> = std::sync::LazyLock::new(Default::default);
+static FOUND: std::sync::LazyLock<std::sync::Mutex<FoundBy>> =
+    std::sync::LazyLock::new(Default::default);
+
+type FoundBy = std::collections::HashMap<(String, String, String), Found>;
 
 /// How long a session found nowhere isn't looked for again: one just
 /// started has no file for a moment.

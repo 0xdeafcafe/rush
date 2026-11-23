@@ -9,7 +9,7 @@
 use rush_convo::Session;
 use rush_core::text::Line;
 
-use super::paint::{dim, faint, spread};
+use super::paint::{dim, faint};
 use crate::model::Model;
 use crate::style::*;
 
@@ -116,7 +116,10 @@ pub fn task_row(s: &Session, w: usize, shut: bool) -> Vec<Line> {
         head.spans.push(plain("  "));
         head.spans.push(sp(one_line(label), TEXT));
     }
-    let mut out = vec![spread(head, line([sp(TASK_ALL, SUB), plain("  ")]), w)];
+    // "all tasks ›" isn't on the head (Rust-only: there it sat over the
+    // box's edge words, a third thing on one line): it's the last of the
+    // open list's rows, after what more there is.
+    let mut out = vec![fit(head, w)];
     if shut {
         return out;
     }
@@ -146,9 +149,12 @@ pub fn task_row(s: &Session, w: usize, shut: bool) -> Vec<Line> {
             _ => (dim("☐"), line([sp(one_line(&t.subject), SUB)])),
         };
         let more = s.tasks.len() - to;
-        if i == to - from - 1 && more > 0 {
+        if i == to - from - 1 {
             label.spans.push(plain("  "));
-            label.spans.push(faint(format!("+{more} more")));
+            if more > 0 {
+                label.spans.push(faint(format!("+{more} more · ")));
+            }
+            label.spans.push(sp(TASK_ALL, SUB));
         }
         let mut l = line([plain("    "), mark, plain(" ")]);
         join(&mut l, label);

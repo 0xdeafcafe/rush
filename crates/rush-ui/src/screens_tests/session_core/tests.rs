@@ -222,7 +222,10 @@ fn send_mode_cycles() {
     working(&mut m, "go");
     typed(&mut m, "hi");
     let f = screen(&mut m).join("\n");
-    assert!(f.contains("coalescing · ctrl+t stop & send"), "{f}");
+    assert!(
+        f.contains("enter guides it at its next step · ctrl+t to stop & send"),
+        "{f}"
+    );
     // Another session keeps its own.
     assert!(!core(&mut m).send_modes.contains_key("default/other"));
 }
@@ -998,12 +1001,15 @@ fn the_local_queue_card() {
         f.contains("↑ edit, reorder or steer  ·  ctrl+enter send now"),
         "{f}"
     );
-    assert!(f.contains("╭─ queuing ─"), "{f}");
+    assert!(f.contains("╭─ enter queues it for when it's done ─"), "{f}");
     // Something typed: the keys give way to when it goes.
     typed(&mut m, "x");
     let f = screen(&mut m).join("\n");
     assert!(f.contains("sends within 15s, or when it's idle"), "{f}");
-    assert!(f.contains("╭─ queuing · ctrl+enter sends it now ─"), "{f}");
+    assert!(
+        f.contains("╭─ enter queues it for when it's done · ctrl+enter sends it now ─"),
+        "{f}"
+    );
 }
 
 /// A held queue says so on its title and on each row; one that isn't
@@ -1547,7 +1553,7 @@ fn dock_frame_while_it_works() {
     let f = screen(&mut m);
     let n = f.len();
     assert!(
-        f[n - 4].starts_with("  ╭─ queuing · ctrl+t coalesce ─"),
+        f[n - 4].starts_with("  ╭─ enter queues it for when it's done · ctrl+t to guide ─"),
         "{f:?}"
     );
     assert!(f[n - 3].contains("❯ more"), "{f:?}");
