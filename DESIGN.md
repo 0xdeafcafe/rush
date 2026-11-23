@@ -5234,6 +5234,16 @@ Go rush is gone from the tree; its last version is the `go-final` tag
   no rollout; cold 44 → 51 ms, the same within the runner's noise. A
   quiet minute was some 30 listings per hosted Codex run; it is now 4 at
   most a profile, each reading only what changed.
+  2026-11-23, a sample of a view up 25 hours (1 ms, 1,812 samples a
+  thread): the same lookup was still 739 of one `rush-later` thread's
+  1,812 samples, 41% of a core, 318 in `fstatat` under `live` (never
+  kept: seven day folders listed, sorted and stat'd each time), 234
+  listing them and 53 copying `past`'s kept listing; the UI thread sat
+  93% in its wait. `hosted_transcript` now keeps where it found each
+  session (by kind, account and session id; checked with one `exists`),
+  and one found nowhere isn't looked for again for 10 s, so `live` and
+  `past` are walked once a hosted run, not every 2 s. Not measured
+  after: the sampled process was gone.
 - A drawn run's text (`rush_core::text::Span::text`) is a
   `CompactString` (Rust-only): up to 24 bytes held in place, so a glyph,
   a word or a time is made and copied without the heap, and a turn's

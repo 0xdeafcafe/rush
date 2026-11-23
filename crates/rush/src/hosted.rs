@@ -1061,19 +1061,71 @@ fn hosted_transcript(reg: &Registry, k: &str, cfg: &Config, sid: &str) -> Option
     if !t.is_empty() {
         return Some((t, cfg.account.name.clone()));
     }
-    let a = reg.get(k)?;
-    let d = a.discoverer()?;
-    let mut profiles = vec![cfg.account.clone()];
-    profiles.extend(reg.profiles_of(&a));
-    for p in &profiles {
-        for f in d.live(p).into_iter().chain(d.past(p)) {
-            if f.id == sid && !f.transcript.is_empty() {
-                return Some((f.transcript, f.profile.name));
+    // Looked for in its agent's own list: every session of every profile
+    // read to find one, which for Codex is seven days' folders listed and
+    // each file asked about. A session's file doesn't move, so what was
+    // found is kept, and one not found isn't looked for again for a few
+    // seconds (Rust-only: asked every 2 s for each hosted child, this was
+    // 41% of a core in a sample of a machine with a few Codex children).
+    let key = (k.to_string(), cfg.account.name.clone(), sid.to_string());
+    {
+        let mut found = FOUND.lock().unwrap_or_else(|e| e.into_inner());
+        match found.get(&key) {
+            Some(Found::At(t, p)) if std::path::Path::new(t).exists() => {
+                return Some((t.clone(), p.clone()));
             }
+            Some(Found::Nowhere(at)) if at.elapsed() < LOOK_AGAIN => return None,
+            _ => {}
+        }
+        if found.len() >= FOUND_MAX {
+            found.clear();
         }
     }
-    None
+    let look = || {
+        let a = reg.get(k)?;
+        let d = a.discoverer()?;
+        let mut profiles = vec![cfg.account.clone()];
+        profiles.extend(reg.profiles_of(&a));
+        for p in &profiles {
+            for f in d.live(p).into_iter().chain(d.past(p)) {
+                if f.id == sid && !f.transcript.is_empty() {
+                    return Some((f.transcript, f.profile.name));
+                }
+            }
+        }
+        None
+    };
+    let got: Option<(String, String)> = look();
+    let kept = match &got {
+        Some((t, p)) => Found::At(t.clone(), p.clone()),
+        None => Found::Nowhere(std::time::Instant::now()),
+    };
+    FOUND
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key, kept);
+    got
 }
+
+/// Where hosted_transcript found a session in its agent's list, or when it
+/// last found it nowhere.
+enum Found {
+    At(String, String),
+    Nowhere(std::time::Instant),
+}
+
+/// By agent kind, account and session id.
+static FOUND: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<(String, String, String), Found>>,
+> = std::sync::LazyLock::new(Default::default);
+
+/// How long a session found nowhere isn't looked for again: one just
+/// started has no file for a moment.
+const LOOK_AGAIN: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// More kept than this and all are forgotten: a day's hosted children are
+/// tens.
+const FOUND_MAX: usize = 4096;
 
 /// Ends a's process the agent's own way, keeping its conversation; a rush
 /// session stops with the agents it spawned (stopOutside, outside.go:19-22,
