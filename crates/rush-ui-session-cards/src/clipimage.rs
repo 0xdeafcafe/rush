@@ -54,6 +54,41 @@ pub fn paste_clip_image(m: &mut Model, key: &str) -> Out {
     Out::Draw
 }
 
+/// A paste that was only a picture's name, the file not on this machine
+/// (a picture copied on another Mac, pasted here through the shared
+/// clipboard, comes to the terminal as its name): the clipboard is asked
+/// for the picture itself, and the name goes in the box as text only when
+/// it holds none. Over ssh the clipboard is the far machine's, out of
+/// reach: the name is pasted, and rush says why. Rust-only: Go pasted the
+/// name.
+pub fn paste_named(m: &mut Model, key: &str, name: String) -> Out {
+    let far = std::env::var_os("SSH_CONNECTION").is_some() || std::env::var_os("SSH_TTY").is_some();
+    if far || !cfg!(target_os = "macos") || m.sender().is_none() || m.kept::<ClipState>().pasting {
+        super::conn(m, key).input.paste(&name, true);
+        if far {
+            m.flash(
+                "only the picture's name came through: the file is on the machine you're typing at",
+            );
+        }
+        return Out::Draw;
+    }
+    m.kept::<ClipState>().pasting = true;
+    m.flash("reading the clipboard…");
+    let key = key.to_string();
+    m.later(clip_image, move |m, r| {
+        m.kept::<ClipState>().pasting = false;
+        match r {
+            Ok(Some(p)) => act(m, &key, Act::AttachImages(vec![p])),
+            _ => {
+                super::conn(m, &key).input.paste(&name, true);
+                m.flash("no picture came with that name: it's in the box as text");
+                Out::Draw
+            }
+        }
+    });
+    Out::Draw
+}
+
 /// The image on the clipboard as a file: an image file copied in the
 /// Finder as itself, image data saved as a PNG under the temp dir. None
 /// when the clipboard holds no image.

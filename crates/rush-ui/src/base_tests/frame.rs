@@ -591,6 +591,17 @@ fn image_paths_and_drops() {
     assert_eq!(rest, "still here\nand /var/nope.png stays");
     assert!(is_drop(&escaped, look));
     assert!(!is_drop("just words", look));
+    // Only a picture's name, no such file here: the clipboard is asked.
+    for (paste, want) in [
+        ("Screenshot 2026-11-23 at 10.19.02.png".to_string(), true),
+        ("/Users/other/Desktop/shot.jpg\n".to_string(), true),
+        (escaped.clone(), false), // it's here: a drop
+        ("see shot.png\nand more".to_string(), false),
+        ("notes.txt".to_string(), false),
+        (String::new(), false),
+    ] {
+        assert_eq!(names_far_image(&paste, look), want, "{paste:?}");
+    }
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

@@ -3993,7 +3993,13 @@ is made. Everything below is in `rush_ui::frame`.
   macOS too: rush's copy of it is made a PNG by `sips` on a thread of
   its own as it's attached (`imagerefs::keep`, `as_png`), so a
   screenshot dragged from its corner preview is an image, not the path
-  of a temporary file gone a moment later.
+  of a temporary file gone a moment later. A paste that is only an
+  image's name or path with no such file here (`names_far_image`: a
+  picture copied on another Mac comes through the shared clipboard to
+  the terminal as its name) asks the clipboard for the picture itself
+  (`clipimage::paste_named`) and attaches that; the name goes in as
+  text only when the clipboard holds no picture, and over ssh, where
+  the clipboard is out of reach, rush says only the name came through.
 - **Pictures.** `screens/session_cards/pictures.rs` draws an image fitted
   to a box of cells in quarter blocks (Go's convo/picture.go and thumb.go
   where Kitty isn't there), each image and size made once on a thread of

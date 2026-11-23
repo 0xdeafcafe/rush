@@ -808,6 +808,19 @@ pub fn image_path(tok: &str, look: Look) -> Option<String> {
     }
 }
 
+/// Whether a paste is nothing but an image's name or path with no such
+/// file here: what a terminal pastes for a picture copied on another
+/// machine (a shared clipboard gives its name, a drop over ssh its path
+/// there). Rust-only: Go left it in the box as text.
+pub fn names_far_image(text: &str, look: Look) -> bool {
+    let t = text.trim();
+    if t.is_empty() || t.contains('\n') {
+        return false;
+    }
+    let p = file_path(t);
+    is_image_file(&p) && look(&p).is_none()
+}
+
 /// Whether a paste is files dropped onto the terminal: nothing but
 /// absolute paths that exist (isDrop).
 pub fn is_drop(text: &str, look: Look) -> bool {

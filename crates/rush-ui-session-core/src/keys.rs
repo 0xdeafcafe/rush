@@ -1274,8 +1274,14 @@ pub fn paste(m: &mut Model, text: &str) -> Out {
     // paths: each becomes [Image #N] where it was dropped (model.go:1420).
     // Newlines kept, so a pasted log or snippet arrives whole; a long one
     // shows as a chip and goes out whole (model.go:1435-1446).
+    let text = clean_paste(text);
+    // Only a picture's name, the picture itself on another machine: the
+    // clipboard is asked for it (Rust-only).
+    if crate::frame::editor::names_far_image(&text, &look_disk) {
+        return rush_ui_session_cards::clipimage::paste_named(m, &key, text);
+    }
     let c = conn(m, &key);
-    let mut text = clean_paste(text);
+    let mut text = text;
     if let Some(t) = c.imgs.inline(&text, &look_disk) {
         text = t;
     }
