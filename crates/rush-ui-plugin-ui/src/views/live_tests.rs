@@ -124,9 +124,12 @@ fn keys_move_through_rows_open_them_and_press_their_buttons() {
     st.key("pgdown");
     draw(&mut st);
     assert!(st.scroll > 0 && (st.scroll..st.scroll + 10).contains(&st.cursor));
-    // ← off the buttons, then ← again gives the keys back; so does any
-    // key that isn't the panel's.
+    // ← with no button to go back to does nothing (it isn't the way
+    // between panes); esc gives the keys back, and so does any key that
+    // isn't the panel's.
     st.key("left");
+    assert!(st.focus);
+    st.key("esc");
     assert!(!st.focus);
     assert!(st.take_focus());
     assert_eq!(st.key("x"), None);
