@@ -288,6 +288,7 @@ pub fn host_info(i: &Info) -> HostInfo {
             .decisions
             .as_ref()
             .map(|d| d.asks.iter().map(|a| a.header.clone()).collect()),
+        work: i.work,
     }
 }
 

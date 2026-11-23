@@ -1863,6 +1863,7 @@ impl Loader {
             decides: blocked && info.decisions.is_some(),
             at_work,
             lineage: crate::emeritus::lineage_of(info),
+            work: info.work,
             job: j,
             ..Agent::default()
         };

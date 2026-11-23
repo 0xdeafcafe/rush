@@ -325,6 +325,8 @@ struct WireInfo {
     decisions: Option<WireQuestion>,
     emeritus: String,
     successor: String,
+    /// Rust-only (rush-host's work.rs).
+    work: rush_core::agent::Work,
 }
 
 #[derive(Deserialize, Default)]
@@ -459,6 +461,7 @@ pub(crate) fn read_info(dir: &Path) -> Option<HostInfo> {
         }),
         emeritus: w.emeritus,
         successor: w.successor,
+        work: w.work,
     })
 }
 

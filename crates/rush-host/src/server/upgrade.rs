@@ -277,6 +277,9 @@ pub fn adopt_with(reg: Registry, hooks: Hooks, id: &str, state: &Path) -> Result
         info.upgrade.clear();
         info.claude_pid = 0;
         st.info = info;
+        // Its task list and the files it changed count on (work.rs,
+        // Rust-only).
+        (st.task_watch, st.work_files) = crate::work::load(id);
         st.began = k.began;
         st.turn = k.turn;
         st.untold = k.untold.clone();

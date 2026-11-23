@@ -747,6 +747,10 @@ pub struct Info {
     /// The session that took over from it, once it's retired.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub successor: String,
+    /// What it has done, for the list's WORK column (Rust-only, work.rs):
+    /// its task list's tasks done and in all, the files its edits changed.
+    #[serde(skip_serializing_if = "rush_core::agent::Work::is_empty")]
+    pub work: rush_core::agent::Work,
 }
 
 /// Each queued message's images: a message with none is null, as Go

@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use rush_core::event::{Message, PartKind};
 use rush_core::tool::{Call, Kind};
 use rush_core::wire::RawJson;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Tool calls an agent may make without touching a list that has work
 /// open before it is told: more than reading into a task takes, fewer
@@ -23,7 +23,7 @@ pub const AGAIN: usize = 100;
 /// The tasks a notice names, at most.
 const NAMED: usize = 6;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Task {
     id: String,
     subject: String,
@@ -31,15 +31,24 @@ struct Task {
     status: String,
 }
 
-/// One session's list, and how long the agent has left it alone.
-#[derive(Debug, Default)]
+/// One session's list, and how long the agent has left it alone. Its
+/// list is kept in work.json for the list's WORK column (work.rs,
+/// Rust-only); what's being made and the count of calls start again
+/// with each host.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Watch {
     tasks: Vec<Task>,
     /// The tasks being made, by their call: a task's id is only in its
     /// result ("Task #3 created").
+    #[serde(skip)]
     making: HashMap<String, String>,
     /// The tool calls since the list was last written or read.
+    #[serde(skip)]
     since: usize,
+    /// The list changed since `take_changed` last asked.
+    #[serde(skip)]
+    changed: bool,
 }
 
 #[derive(Deserialize, Default)]
@@ -88,6 +97,7 @@ impl Watch {
                         subject,
                         status: "pending".into(),
                     });
+                    self.changed = true;
                 }
                 _ => {}
             }
@@ -108,6 +118,7 @@ impl Watch {
             "TaskUpdate" => {
                 let inp: In = serde_json::from_str(raw).unwrap_or_default();
                 if let Some(i) = self.tasks.iter().position(|t| t.id == inp.id) {
+                    self.changed = true;
                     if inp.status == "deleted" {
                         self.tasks.remove(i);
                     } else {
@@ -134,10 +145,26 @@ impl Watch {
                         status: td.status.clone(),
                     })
                     .collect();
+                self.changed = true;
             }
             _ => return false,
         }
         true
+    }
+
+    /// Its list's tasks done, and in all.
+    pub fn counts(&self) -> (usize, usize) {
+        let done = self
+            .tasks
+            .iter()
+            .filter(|t| t.status == "completed")
+            .count();
+        (done, self.tasks.len())
+    }
+
+    /// Whether the list changed since this was last asked.
+    pub fn take_changed(&mut self) -> bool {
+        std::mem::take(&mut self.changed)
     }
 
     /// What to tell the agent of its list as it stands, None when nothing

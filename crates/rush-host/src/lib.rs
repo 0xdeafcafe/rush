@@ -71,6 +71,7 @@ pub mod views;
 pub mod viewstale;
 pub mod viewwords;
 pub mod wire;
+pub mod work;
 pub mod workspace;
 
 #[cfg(test)]

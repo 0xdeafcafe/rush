@@ -488,6 +488,9 @@ pub(crate) struct State {
     /// The agent's task list as its calls leave it, and how long it has
     /// left it alone (taskwatch).
     task_watch: crate::taskwatch::Watch,
+    /// The files its edits changed, for the list's WORK column (work.rs,
+    /// Rust-only).
+    work_files: crate::work::Files,
     quit: bool,
     /// info.json as last written, but for what changes on every message
     /// (see INFO_EVERY), when, and the latest info not written yet.
@@ -624,6 +627,10 @@ pub fn run_with(reg: Registry, hooks: Hooks, id: &str) -> Result<(), String> {
     let sh = h.0.clone();
     {
         let mut st = sh.lock();
+        // What it has done, as the last host kept it (work.rs, Rust-only).
+        let (tasks, files) = crate::work::load(id);
+        st.info.work = crate::work::of(&tasks, &files);
+        (st.task_watch, st.work_files) = (tasks, files);
         if let Ok(old) = crate::client::read_info_file(id) {
             st.info.generation = old.generation + 1;
             st.turn = old.turn;
@@ -880,6 +887,7 @@ fn build(reg: Registry, hooks: Hooks, mut cfg: Config) -> (Host, Receiver<Msg>) 
         views_armed: false,
         views_told: HashMap::new(),
         task_watch: crate::taskwatch::Watch::default(),
+        work_files: crate::work::Files::default(),
         quit: false,
         info_key: Vec::new(),
         info_at: None,
@@ -2148,6 +2156,19 @@ impl Host {
         if crate::inbox::tell(&st.cfg.id, crate::inbox::MAIN_NOTICE, &note).is_ok() {
             self.event(st, "tasks-stale", json!({"note": note}));
         }
+    }
+
+    /// Counts what the session has done for the list's WORK column, kept
+    /// in work.json as it changes (work.rs, Rust-only): its task list, as
+    /// tasks_stale has just taken the message in, and the files its edits
+    /// changed. The info goes out with the message's.
+    fn work_saw(st: &mut State, m: &event::Message) {
+        let files = st.work_files.saw(m);
+        if !st.task_watch.take_changed() && !files {
+            return;
+        }
+        st.info.work = crate::work::of(&st.task_watch, &st.work_files);
+        crate::work::save(&st.cfg.id, &st.task_watch, &st.work_files);
     }
 
     /// An event for each view greyed or put away, for `rush why`: by says
@@ -3765,6 +3786,7 @@ impl Host {
                 }
                 self.shell_calls(st, &m);
                 self.tasks_stale(st, &m);
+                Self::work_saw(st, &m);
                 self.sub_message(st, &m);
                 self.on_message(st, &m);
             }

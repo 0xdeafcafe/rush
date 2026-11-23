@@ -142,6 +142,9 @@ pub struct HostInfo {
     /// and the session that took over from it.
     pub emeritus: String,
     pub successor: String,
+    /// What it has done: its task list's tasks done and in all, the files
+    /// its edits changed (info.json's work, Rust-only).
+    pub work: rush_core::agent::Work,
 }
 
 impl HostInfo {
