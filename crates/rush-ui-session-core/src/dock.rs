@@ -330,7 +330,7 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         .session
         .as_ref()
         .filter(|_| !beside)
-        .map(|v| super::tasks::task_row(&v.sess, w, shut))
+        .map(|v| super::tasks::task_row(&v.sess, w, shut, picked == super::tasks::TASKS_REF))
         .unwrap_or_default();
     // The picker over the box while a command is typed (slashLines).
     out.extend(super::slash::slash_lines(m, &key, w));

@@ -1534,6 +1534,34 @@ fn the_task_row_on_the_box() {
         "tasks"
     );
 }
+
+/// ↑ from the box lands on the task row's head: enter shuts and opens the
+/// list, ↓ is back in the box, → from open is the Tasks view.
+#[test]
+fn the_task_row_by_keys() {
+    let mut m = opened(120, 40);
+    screen(&mut m);
+    press(&mut m, "up");
+    assert!(row_with(&mut m, "▌ ▸ Tasks").is_some(), "picked, shut");
+    press(&mut m, "enter");
+    assert!(row_with(&mut m, "▌ ▾ Tasks").is_some(), "enter opens it");
+    press(&mut m, "left");
+    assert!(row_with(&mut m, "▌ ▸ Tasks").is_some(), "← shuts it");
+    press(&mut m, "down");
+    assert!(
+        row_with(&mut m, "  ▸ Tasks").is_some(),
+        "↓ is the box's again"
+    );
+    assert!(row_with(&mut m, "▌ ▸ Tasks").is_none());
+    press(&mut m, "up");
+    press(&mut m, "right");
+    press(&mut m, "right");
+    assert_eq!(
+        crate::screens::session_core::views::view_name(&m, KEY),
+        "tasks"
+    );
+}
+
 /// With room right of the conversation's text (from 171 wide less the
 /// map), the tasks and what the session changed sit in a column there,
 /// at the foot beside the newest turn, and leave the box; a click on a task opens Tasks, on a file Changes

@@ -87,19 +87,30 @@ pub fn lines(m: &Model, w: usize) -> Vec<(Line, String)> {
 /// The way from the task row to the Tasks view.
 pub const TASK_ALL: &str = "all tasks ›";
 
+/// The task row's head on the box, as what's picked: ↑ from the box lands
+/// on it, and enter, space, ← or → there shut and open the list
+/// (Rust-only: only a click did).
+pub const TASKS_REF: &str = "tasks";
+
 /// The task list where it is, sat on the box, w wide: how far through it
 /// is, then the tasks around the one under way (the last done, it, the
 /// next two). Shut, it's the one row with the task under way on it. A list
 /// all done says nothing (taskRow).
-pub fn task_row(s: &Session, w: usize, shut: bool) -> Vec<Line> {
+pub fn task_row(s: &Session, w: usize, shut: bool, picked: bool) -> Vec<Line> {
     let (now, done, total) = s.current();
     if total == 0 || now.is_none() && done == total {
         return Vec::new();
     }
+    // Picked by ↑ from the box (TASKS_REF): its edge and its name lit, as
+    // a picked row of the conversation is.
     let mut head = line([
-        plain("  "),
+        if picked {
+            sp("▌ ", ORANGE)
+        } else {
+            plain("  ")
+        },
         sp(if shut { "▸ " } else { "▾ " }, ORANGE),
-        spb("Tasks", SUB),
+        spb("Tasks", if picked { TEXT } else { SUB }),
         plain("  "),
         dim(format!("{done} of {total} done")),
         plain("  "),

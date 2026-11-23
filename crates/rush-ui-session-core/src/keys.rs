@@ -96,6 +96,11 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     if o.used() {
         return o;
     }
+    // The task row's head on the box, picked: its own keys.
+    let o = tasks_nav(m, &key, s);
+    if o.used() {
+        return o;
+    }
     let picked = sel(m);
     let empty = conn(m, &key).input.is_empty();
     // A picked queued message takes plain keys.
@@ -414,6 +419,78 @@ fn queue_nav(m: &mut Model, key: &str, s: &str, picked: &str, empty: bool) -> Ou
         None => return Out::Pass,
     }
     Out::Draw
+}
+
+/// The task list's head on the box takes the cursor (Rust-only: only a
+/// click opened and shut it): ↑ from the box, nothing typed or the cursor
+/// on its first line, lands on it; enter and space there shut and open
+/// the list, ← shuts it, → opens it and then the Tasks view, ↓ and esc go
+/// back to the box,
+/// and ↑ goes on up as it would have from the box (the queue, the dock,
+/// the conversation). Anything else is the box's again.
+fn tasks_nav(m: &mut Model, key: &str, s: &str) -> Out {
+    use super::tasks::TASKS_REF;
+    let picked = sel(m);
+    let on = picked == TASKS_REF;
+    if conn(m, key).task_rows == 0 || !view_is_conversation(m, key) {
+        if on {
+            set_sel(m, String::new());
+        }
+        return Out::Pass;
+    }
+    if !on {
+        let c = conn(m, key);
+        let (editing, empty) = (c.edit_q > 0, c.input.is_empty());
+        if s == "up" && picked.is_empty() && !editing && (empty || on_first_row(m, key)) {
+            set_sel(m, TASKS_REF.to_string());
+            return Out::Draw;
+        }
+        return Out::Pass;
+    }
+    match s {
+        "enter" | "space" => {
+            let c = conn(m, key);
+            c.tasks_open = !c.tasks_open;
+            Out::Draw
+        }
+        "left" => {
+            conn(m, key).tasks_open = false;
+            Out::Draw
+        }
+        // → opens it, and from open goes on to the Tasks view.
+        "right" => {
+            if conn(m, key).tasks_open {
+                set_sel(m, String::new());
+                super::views::show_view(m, key, "tasks");
+            } else {
+                conn(m, key).tasks_open = true;
+            }
+            Out::Draw
+        }
+        "down" | "esc" => {
+            set_sel(m, String::new());
+            Out::Draw
+        }
+        "up" => {
+            // On up, as from the box: the queue's last, else the rest of
+            // the keys' doing with nothing picked.
+            set_sel(m, String::new());
+            let n = queue_of(m, key).items.len();
+            if n > 0 {
+                set_sel(m, format!("q:{}", n - 1));
+                return Out::Draw;
+            }
+            if conn(m, key).input.is_empty() {
+                return Out::Pass;
+            }
+            leave_box(m, key);
+            Out::Draw
+        }
+        _ => {
+            set_sel(m, String::new());
+            Out::Pass
+        }
+    }
 }
 
 /// y · a · n on an approval waiting, with the box empty and no row
