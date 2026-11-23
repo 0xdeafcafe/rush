@@ -3204,6 +3204,17 @@ and your next message carries it on. The header says "now", not Go's
 "in –", once the time has come. The header's folder is bright and
 bold, so the project a session is in reads at a glance.
 
+### What you open, counted (Rust-only)
+
+`rush_ui_base::usage::opened` writes a `ui-open` event (`rush events
+-k ui-open`) with two fields, `what` and `name`: a sheet's type as
+`Model::open_sheet` takes it (`Sheet::type_name`), a session's view as
+`show_view` changes it, a preset shown, a # command run, a / command
+rush answered. Names of rush's own only (`tidy`: one short word, else
+nothing is written): never what's typed, a session's name or a path.
+It's there so what is never opened can be found and taken out; the
+log said nothing of the UI before.
+
 ### The list's columns, some turned off (Rust-only)
 
 `Model::col_widths` hid each column under a width worked out for all six

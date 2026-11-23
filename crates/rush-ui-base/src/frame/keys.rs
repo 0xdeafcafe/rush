@@ -311,6 +311,7 @@ impl Model {
             self.select(key);
         }
         if let Some(c) = self.ext.commands.iter().find(|c| c.name == name).copied() {
+            crate::usage::opened("command", c.name);
             // Typed in the Agents box, it's sent; from a Session's box,
             // what's in this one stays, kept for undo if it goes.
             if self.input.string().trim() == text.trim() {

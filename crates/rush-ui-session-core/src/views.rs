@@ -124,6 +124,9 @@ pub fn show_view(m: &mut Model, key: &str, name: &str) -> bool {
         return false;
     };
     let c = conn(m, key);
+    if c.vs.view != i {
+        rush_ui_base::usage::opened("view", name);
+    }
     c.vs.view = i;
     c.vs.top = 0;
     c.vs.free = None;

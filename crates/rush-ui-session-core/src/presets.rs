@@ -259,6 +259,7 @@ pub fn set(m: &mut Model, p: Preset) {
 /// message it was on: the picked row's, else the turn at its top.
 pub fn show(m: &mut Model, p: Preset) {
     keep(m, p);
+    rush_ui_base::usage::opened("preset", &format!("{p:?}"));
     let rows = rows(m);
     if let Some(v) = m.session.as_mut() {
         v.o.preset = p;

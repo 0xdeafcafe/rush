@@ -48,6 +48,10 @@ pub trait Sheet: Any {
     fn popover(&self, _m: &Model) -> Option<Popover> {
         None
     }
+    /// Its type's name, for the record of what's opened (usage.rs).
+    fn type_name(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
 }
 
 /// How a sheet drawn as a popover sits (Sheet::popover).
@@ -135,6 +139,7 @@ pub fn popover_at(
 impl Model {
     /// Opens s over the screen, closing any sheet that was.
     pub fn open_sheet(&mut self, s: Box<dyn Sheet>) {
+        crate::usage::opened("sheet", s.type_name());
         self.sheet = Some(s);
     }
 

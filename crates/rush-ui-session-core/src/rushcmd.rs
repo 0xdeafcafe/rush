@@ -36,13 +36,19 @@ pub fn run(m: &mut Model, key: &str, text: &str) -> Out {
     let arg = arg.trim();
     let (o, name) = claudescreen::command(m, key, name, arg);
     if o.used() {
+        rush_ui_base::usage::opened("slash", &name);
         return o;
     }
     let o = command(m, key, &name, arg, text);
     if o.used() {
+        rush_ui_base::usage::opened("slash", &name);
         return o;
     }
-    claudescreen::screen_command(m, key, &name, arg)
+    let o = claudescreen::screen_command(m, key, &name, arg);
+    if o.used() {
+        rush_ui_base::usage::opened("slash", &name);
+    }
+    o
 }
 
 /// rush's own commands, by name (runRushCommand's switch); Pass for the
