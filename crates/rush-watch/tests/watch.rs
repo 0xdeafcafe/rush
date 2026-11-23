@@ -176,8 +176,14 @@ fn no_checks_ends_after_a_while() {
 fn interval_backs_off() {
     for (since, left, want) in [
         (0, -1, 15),
+        (0, 4000, 15),
         (6 * 60, 4000, 30),
         (20 * 60, 4000, 60),
+        // Under half the hour's budget, twice as slow; under a fifth, four times.
+        (0, 2000, 30),
+        (6 * 60, 2000, 60),
+        (0, 900, 60),
+        (20 * 60, 900, 240),
         (0, 300, 120),
         (0, 50, 300),
     ] {

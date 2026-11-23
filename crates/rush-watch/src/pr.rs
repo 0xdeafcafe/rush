@@ -391,14 +391,23 @@ impl Options<'_> {
 const NO_CHECKS_AFTER: Duration = Duration::from_secs(3 * 60);
 
 /// How long to wait before asking again, a watch since long: often at
-/// first, less as the wait grows, and much less when the user's rate limit
-/// runs low.
+/// first, less as the wait grows, and less again as the user's rate limit
+/// is spent. Not Go's two floors alone: every watcher on the machine
+/// spends the one hourly budget, and twenty of them at 15 seconds spent
+/// all of it, so each slows as the budget goes (twice as slow under half
+/// of it, four times under a fifth) and the hour's last asks are kept
+/// for whoever is still waiting.
 pub fn interval(since: Duration, remaining: i64) -> Duration {
     let mut d = Duration::from_secs(15);
     if since >= Duration::from_secs(15 * 60) {
         d = Duration::from_secs(60);
     } else if since >= Duration::from_secs(5 * 60) {
         d = Duration::from_secs(30);
+    }
+    if (0..LOW).contains(&remaining) {
+        d *= 4;
+    } else if (0..HALF).contains(&remaining) {
+        d *= 2;
     }
     if (0..100).contains(&remaining) {
         d = d.max(Duration::from_secs(5 * 60));
@@ -407,6 +416,11 @@ pub fn interval(since: Duration, remaining: i64) -> Duration {
     }
     d
 }
+
+/// Half of GitHub's 5000 asks an hour, and a fifth: under each a watch
+/// asks less often.
+const HALF: i64 = 2500;
+const LOW: i64 = 1000;
 
 fn since(now: Time, start: Time) -> Duration {
     Duration::from_nanos(now.sub_nanos(start).clamp(0, u64::MAX as i128) as u64)

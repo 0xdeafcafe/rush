@@ -439,12 +439,16 @@ struct RunJson {
     run_started_at: Time,
 }
 
+/// How old the jobs of a run still going may be: any watcher's answer
+/// within it is used as it is. Rust-only.
+pub const JOBS_FRESH: Duration = Duration::from_secs(45);
+
 /// The runs t names as GitHub says now, or as another watcher heard within
 /// fresh: the newest run of each workflow on its commit, or the one run,
 /// each with its jobs. With it, the rate limit left, -1 when unknown.
 pub fn fetch(t: &Target, fresh: Duration) -> (Result<Runs, Error>, i64) {
     let remaining = Cell::new(-1i64);
-    let get = |path: String| -> Result<Vec<u8>, Error> {
+    let get = |path: String, fresh: Duration| -> Result<Vec<u8>, Error> {
         let (b, r) = gh::get(&path, fresh)?;
         if r >= 0 {
             remaining.set(r);
@@ -457,11 +461,11 @@ pub fn fetch(t: &Target, fresh: Duration) -> (Result<Runs, Error>, i64) {
         workflow_runs: Vec<RunJson>,
     }
     let found: Vec<RunJson> = match &t.what {
-        What::Run(_) => match get(t.runs_path()).and_then(|b| decode::<RunJson>(&b)) {
+        What::Run(_) => match get(t.runs_path(), fresh).and_then(|b| decode::<RunJson>(&b)) {
             Ok(r) => vec![r],
             Err(e) => return (Err(e), remaining.get()),
         },
-        What::Sha { .. } => match get(t.runs_path()).and_then(|b| decode::<List>(&b)) {
+        What::Sha { .. } => match get(t.runs_path(), fresh).and_then(|b| decode::<List>(&b)) {
             Ok(l) => {
                 // Newest first, as GitHub lists them: the first of each
                 // workflow is its newest.
@@ -499,10 +503,19 @@ pub fn fetch(t: &Target, fresh: Duration) -> (Result<Runs, Error>, i64) {
     let many = found.len() > 1;
     let mut out = Runs::default();
     for r in found {
-        let jobs: Jobs = match get(format!(
-            "repos/{}/actions/runs/{}/jobs?per_page=100",
-            t.repo, r.id
-        ))
+        // A run still going has its jobs asked for less often than the
+        // run is: the run says when it ends, and its jobs are half of
+        // what a watch spends. One that ended is asked as fresh as the
+        // run was, so its last word is never an old one.
+        let jobs_fresh = if r.status == "completed" {
+            fresh
+        } else {
+            fresh.max(JOBS_FRESH)
+        };
+        let jobs: Jobs = match get(
+            format!("repos/{}/actions/runs/{}/jobs?per_page=100", t.repo, r.id),
+            jobs_fresh,
+        )
         .and_then(|b| decode(&b))
         {
             Ok(j) => j,
