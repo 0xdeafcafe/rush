@@ -617,9 +617,10 @@ pub(crate) fn links_ok(tty: bool, env: impl Fn(&str) -> Option<String>) -> bool 
     !set("NO_COLOR") && set("CLICOLOR_FORCE")
 }
 
-/// The link a cell is written with: none for a quiet one, rush's alone.
+/// The link a cell is written with: none for a quiet one or one of
+/// rush's own scheme, which are rush's alone (Link::is_written).
 pub(crate) fn written(l: Link) -> Link {
-    if l.is_quiet() { Link::NONE } else { l }
+    if l.is_written() { l } else { Link::NONE }
 }
 
 /// The cells of next to write over prev: ratatui's Buffer::diff, with a
@@ -760,7 +761,7 @@ mod tests {
         });
         let (nb, nl) = frame(6, |c| {
             c.put_str(0, 0, "ab ", Style::default(), 6);
-            c.put_str(3, 0, "cd", Style::default().linked("rush:agent/a"), 6);
+            c.put_str(3, 0, "cd", Style::default().linked("https://a.example"), 6);
         });
         assert!(diff(&pb, &pl, &nb, &nl, false).is_empty());
         let ups = diff(&pb, &pl, &nb, &nl, true);
@@ -784,10 +785,18 @@ mod tests {
         drop(out);
         let s = String::from_utf8(got.take()).unwrap();
         assert!(
-            s.starts_with("\x1b]8;;rush:agent/a\x1b\\\x1b[1;4Hcd"),
+            s.starts_with("\x1b]8;;https://a.example\x1b\\\x1b[1;4Hcd"),
             "{s:?}"
         );
         assert!(s.ends_with("\x1b]8;;\x1b\\"), "{s:?}");
+        // A link of rush's own scheme is rush's alone: a cell that only
+        // gained one isn't written again, as no OSC 8 goes round it.
+        let (ob, ol) = frame(6, |c| {
+            c.put_str(0, 0, "ab ", Style::default(), 6);
+            c.put_str(3, 0, "cd", Style::default().linked("rush:agent/a"), 6);
+        });
+        assert!(!ol[3].is_none() && written(ol[3]).is_none());
+        assert!(diff(&pb, &pl, &ob, &ol, true).is_empty());
     }
 
     #[test]

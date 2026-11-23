@@ -243,7 +243,12 @@ Claude, fleet, the other adapters) builds on these.
   so the terminal opens it on cmd+click; as Go's renderer, not where its
   colour profile would be NoTTY (off a terminal, TERM unset or dumb,
   unless CLICOLOR_FORCE). `Headless::ansi` (`--render`) writes them too,
-  as Go prints its view's escapes.
+  as Go prints its view's escapes. A link of rush's own scheme
+  (`rush:agent/…`, `rush:message/…`, `rush:shell/…`; `Link::is_own`) is
+  read back for a click like any other but never written (Rust-only: Go
+  wrote them): no terminal can open one, and a terminal with a menu for
+  every link (Terminal Decline) answered a click on it with Open and
+  Copy.
 - **Widths** (Rust-only). Text is laid out a grapheme at a time, at
   the cells the canvas draws it in: `rush_core::text::grapheme_width`
   and `graphemes` are the one measure, used by rush-draw's canvas, the

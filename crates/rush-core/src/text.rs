@@ -49,11 +49,22 @@ impl Mods {
 /// ([`Link::quiet`]) is rush's alone: read back for a click like any
 /// other, but never written to the terminal as OSC 8, so the terminal
 /// neither underlines it nor offers its own menu for it (a picture).
+/// A link of rush's own scheme (`rush:agent/…`, `rush:message/…`,
+/// `rush:shell/…`; [`Link::is_own`]) is never written either: no
+/// terminal can open it, and one that offers a menu for every link
+/// would answer a click on it with Open and Copy. Rust-only: Go wrote
+/// them.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Link(pub u32);
 
 /// The bit a quiet link's number carries.
 const QUIET: u32 = 1 << 31;
+
+/// The bit the number of a link of rush's own scheme carries.
+const OWN: u32 = 1 << 30;
+
+/// The scheme of the links only rush can follow.
+const OWN_SCHEME: &str = "rush:";
 
 /// Every URL a Link has been made for, by its number less one.
 struct Links {
@@ -77,14 +88,15 @@ impl Link {
             return Link::NONE;
         }
         let mut l = LINKS.lock().unwrap_or_else(|e| e.into_inner());
+        let own = if url.starts_with(OWN_SCHEME) { OWN } else { 0 };
         if let Some(&id) = l.ids.get(url) {
-            return Link(id);
+            return Link(id | own);
         }
         let u: Arc<str> = Arc::from(url);
         l.urls.push(u.clone());
         let id = l.urls.len() as u32;
         l.ids.insert(u, id);
-        Link(id)
+        Link(id | own)
     }
 
     /// The link to url that only rush follows: clicked, it's read back
@@ -101,9 +113,21 @@ impl Link {
         self.0 & QUIET != 0
     }
 
+    /// Whether it's of rush's own scheme, which only rush can follow:
+    /// never written to the terminal.
+    pub const fn is_own(self) -> bool {
+        self.0 & OWN != 0
+    }
+
+    /// Whether the terminal is told of it, as OSC 8 around its words:
+    /// not a quiet one, nor one of rush's own scheme.
+    pub const fn is_written(self) -> bool {
+        self.0 != 0 && self.0 & (QUIET | OWN) == 0
+    }
+
     /// The URL it links to; None for NONE.
     pub fn url(self) -> Option<Arc<str>> {
-        let id = self.0 & !QUIET;
+        let id = self.0 & !(QUIET | OWN);
         if id == 0 {
             return None;
         }
@@ -334,14 +358,33 @@ pub fn graphemes_width(s: &str) -> usize {
 mod tests {
     use super::*;
 
+    /// A link of rush's own scheme reads back as any other, the same
+    /// one each time it's made, and is never one the terminal is told
+    /// of; a web address or a file is.
+    #[test]
+    fn own_links_are_not_written() {
+        for url in ["rush:agent/ann", "rush:message/t1", "rush:shell/run/t1"] {
+            let l = Link::to(url);
+            assert!(l.is_own() && !l.is_written() && !l.is_quiet(), "{url}");
+            assert_eq!((l, l.url().as_deref()), (Link::to(url), Some(url)));
+            assert!(Link::quiet(url).is_own() && !Link::quiet(url).is_written());
+        }
+        for url in ["https://example.com/rush:agent", "file:///rush/a.png"] {
+            let l = Link::to(url);
+            assert!(!l.is_own() && l.is_written(), "{url}");
+        }
+        assert!(!Link::NONE.is_own() && !Link::NONE.is_written());
+    }
+
     /// A quiet link reads back as its URL, as a click does, and is told
     /// apart from the same URL's loud one.
     #[test]
     fn quiet_links_read_back() {
-        let url = "rush:message/t1/image/1";
+        let url = "file:///t1/shot.png";
         let (loud, quiet) = (Link::to(url), Link::quiet(url));
         assert_ne!(loud, quiet);
         assert!(quiet.is_quiet() && !loud.is_quiet());
+        assert!(loud.is_written() && !quiet.is_written());
         assert_eq!(quiet.url(), loud.url());
         assert_eq!(Link::quiet(""), Link::NONE);
         let l = Line::from_spans(vec![
