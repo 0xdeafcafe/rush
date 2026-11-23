@@ -777,10 +777,15 @@ impl Renderer {
                 for (step, cs) in kids {
                     step.hash(&mut h);
                     for c in cs {
-                        (&c.id, c.live).hash(&mut h);
+                        // Its newest step and cost on the board: its
+                        // session as read (Rust-only).
+                        (&c.id, c.live, c.print()).hash(&mut h);
                         going |= c.live;
                     }
                 }
+                // A subagent's newest step, model and cost: the steps and
+                // requests made under its call.
+                (s.steps().len(), s.requests.len()).hash(&mut h);
                 if going {
                     (o.now / 1000).hash(&mut h);
                 }

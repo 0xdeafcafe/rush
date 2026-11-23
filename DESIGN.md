@@ -4197,19 +4197,33 @@ config.json as `convoView` ("" is Normal). Each answers one question:
   or a few: what you said (2 rows at most) and what the lead answered
   (3), opening the turn. Turns woken by an agent's news (a background
   subagent's notice, a "Codex (agent 21bcc40e) finished:" report) draw
-  nothing. Under the last turn, a board: "Agents · 2 working · 14 done ·
-  $1,103", what needs you (`[answer]`, as Normal's needs), then every
+  nothing. Under the last turn, a board: "Agents  2 working · 14 done ·
+  $41.20" (what the agents whose cost is known cost), what needs you
+  (`[answer]`, as Normal's needs), then every
   agent it started: its subagents (Agent/Task calls, how they stand from
   their background task, else their step) and those it started through
   rush's spawn_agent (at work from "as agent <id>" till that agent's
   report comes, or its own session while rush has it found). Those at
   work come first, oldest first, then those done, newest first, eight of
-  them and "and N more before them". A row: its mark (● at work, ?
-  asks, ✓ done, ✗ failed, ✕ stopped or lost), what it was given (the
-  subagent's description, what the agent was asked), what runs it and
-  for how long; under it, the last word on it: the first sentence of
-  what the lead said in the turn its news woke, else its own progress
-  or answer. Enter on a row opens its step in Normal. Read from every
+  them and "and N more before them". One row an agent, in columns
+  (Rust-only, the live board): its mark (orange ✻ at work, yellow ?
+  asks, dim ✓ done, red ✗ failed, ✕ stopped or lost), what it was given
+  (the subagent's description, what the agent was asked), its model
+  (`rush_claude::modelname`; a hosted run's "top · astra"), what it's
+  doing, its cost and how long it has run or ran ("12m"). What it's
+  doing is its newest step as tool and main argument ("Edit draw.rs",
+  "Bash rg -n x crates": from its own session when rush hosts it, else
+  the subagent call's own steps, else its background task's progress),
+  "asks: …" when it waits, and once ended "done · " and its last words
+  (its session's last answer, its report, else the lead's first
+  sentence on it). Cost is its own session's (turns, else its list's,
+  else its requests at list prices) or, for Claude Code's subagents, the
+  requests made under the call at list prices; the model is those
+  requests' or the call's `model`. Unknown, the cell is blank: a
+  spawn_agent run rush hasn't found yet has no cost or step, and a
+  subagent of a harness that reports no requests under its call has no
+  model or cost. Narrower, the cost column goes, then the model; never
+  the step. Enter on a row opens its step in Normal. Read from every
   turn, so the board costs what the session's steps do; it's drawn with
   the last turn only, its key holding every task's and found agent's
   state, and the clock while one works.

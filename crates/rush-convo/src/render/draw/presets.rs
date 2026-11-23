@@ -12,8 +12,9 @@
 //!   hands work to. What you said and what it answered, a few rows each;
 //!   the turns its agents' news woke draw nothing. Under the last turn, a
 //!   board of every agent it started (its subagents, and those started
-//!   through rush's spawn_agent), at work first, each with the last word
-//!   on it, the lead's own where it said one.
+//!   through rush's spawn_agent), at work first, a row each: its model,
+//!   its newest step (what it asks, or, ended, its last words), what it
+//!   has cost and how long it has run (Rust-only, as all of this).
 //!
 //! Every view is drawn from the turn as the session already holds it, from
 //! the generic model only (Kind, Status, exit codes, the shell's command),
@@ -351,14 +352,19 @@ pub(crate) struct Lane {
     /// What it was given: a subagent's description, what a started agent
     /// was asked.
     pub name: String,
-    /// What runs it: the subagent's type, the agent and its model.
-    pub what: String,
+    /// The model that runs it as people say it ("Opus 5.5", "top ·
+    /// astra"); "" when nothing says (Rust-only).
+    pub model: String,
+    /// What its model calls have cost, when they're known (Rust-only).
+    pub cost: Option<f64>,
+    /// What it's doing: its newest step said shortly, what it asks, or,
+    /// ended, its last words; "" when nothing says (Rust-only).
+    pub step: String,
     pub state: LaneState,
     pub start: Ms,
     pub end: Ms,
-    /// The last word on it: what the lead said when its news came, else
-    /// its own; and when.
-    pub news: String,
+    /// When the last word on it came (the lead's on its news, else its
+    /// own): the ended are shown newest first by it.
     pub news_at: Ms,
     /// The step that started it, which the row opens.
     pub r: String,
@@ -395,6 +401,197 @@ fn started_id(out: &str) -> Option<String> {
         .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
         .collect();
     (!id.is_empty()).then_some(id)
+}
+
+// ---- the board's columns (Rust-only: Go rush had no such board) ----
+
+/// The board's name column at least, and its share of the width.
+const NAME_MIN: usize = 12;
+/// The step column at least: narrower, cost goes, then the model.
+const STEP_MIN: usize = 16;
+/// The model column at most.
+const MODEL_W: usize = 16;
+
+/// A step said shortly: its tool and what it works on ("Edit draw.rs",
+/// "Bash rg -n x crates").
+fn step_said(st: &Step) -> String {
+    let tool = st.tool.rsplit("__").next().unwrap_or("");
+    let x = &st.call().input;
+    let arg = if !x.command.trim().is_empty() {
+        one_line(first_line(x.command.trim()))
+    } else if !x.path.is_empty() {
+        let p = x.path.trim_end_matches('/');
+        p.rsplit('/').next().unwrap_or(p).to_string()
+    } else if !x.pattern.is_empty() {
+        one_line(&x.pattern)
+    } else if !x.query.is_empty() {
+        one_line(&x.query)
+    } else if !x.url.is_empty() {
+        x.url.clone()
+    } else {
+        one_line(&x.description)
+    };
+    if arg.is_empty() {
+        tool.to_string()
+    } else {
+        format!("{tool} {arg}")
+    }
+}
+
+/// The newest step of steps that the conversation shows.
+fn newest_shown<'s>(s: &'s Session, ids: &[StepId]) -> Option<&'s Step> {
+    ids.iter()
+        .rev()
+        .map(|&id| s.step(id))
+        .find(|st| !hidden(st))
+}
+
+/// The newest step of session s that the conversation shows.
+fn newest_of(s: &Session) -> Option<&Step> {
+    s.steps().iter().rev().find(|st| !hidden(st))
+}
+
+/// What a waiting agent asks: "asks: " and why, else the step that waits.
+fn asks_of(s: &Session, st: &Step) -> String {
+    let w = st
+        .children
+        .iter()
+        .rev()
+        .map(|&c| s.step(c))
+        .find(|c| c.status == Status::Waiting)
+        .unwrap_or(st);
+    let why = w
+        .approval
+        .as_ref()
+        .map(|a| one_line(&a.reason))
+        .unwrap_or_default();
+    let what = if why.is_empty() { step_said(w) } else { why };
+    format!("asks: {what}")
+}
+
+/// The model of a subagent call's requests as people say it, and what
+/// they cost at list prices; no cost when none is of a model rush prices.
+fn sub_spend(s: &Session, call: &str) -> (String, Option<f64>) {
+    let mut model = String::new();
+    let (mut cost, mut priced) = (0.0, false);
+    for r in s.requests.iter().filter(|r| &*r.run == call) {
+        model = rush_claude::modelname::model_name(&r.model);
+        if rush_claude::pricing::price_for(&r.model).is_some() {
+            cost += rush_claude::pricing::cost(&r.model, r.usage, false);
+            priced = true;
+        }
+    }
+    (model, priced.then_some(cost))
+}
+
+/// What an agent's own session has cost: its turns', else what its list
+/// says, else its requests' at list prices. None when nothing says.
+fn sess_cost(s: &Session) -> Option<f64> {
+    let turns: f64 = s.turns.iter().map(|t| t.cost).sum();
+    if turns > 0.0 {
+        return Some(turns);
+    }
+    if s.info.cost > 0.0 {
+        return Some(s.info.cost);
+    }
+    let mut cost = 0.0;
+    for r in &s.requests {
+        if rush_claude::pricing::price_for(&r.model).is_some() {
+            cost += rush_claude::pricing::cost(&r.model, r.usage, false);
+        }
+    }
+    (cost > 0.0).then_some(cost)
+}
+
+/// What runs an agent rush started, for the model column: its tier and
+/// model as one ("top · astra"), else its model as people say it, else
+/// its name.
+fn model_cell(name: &str, model: &str) -> String {
+    if name.contains(" · ") || model.is_empty() {
+        name.to_string()
+    } else {
+        rush_claude::modelname::model_name(model)
+    }
+}
+
+/// A duration as the board's time column says it: 40s, 12m, 2h05m.
+fn short_dur(ms: Ms) -> String {
+    let s = ms.max(0) / 1000;
+    if s < 60 {
+        format!("{s}s")
+    } else if s < 3600 {
+        format!("{}m", s / 60)
+    } else {
+        format!("{}h{:02}m", s / 3600, (s / 60) % 60)
+    }
+}
+
+/// How long a lane has run, or ran, at now; "" when it isn't known.
+fn lane_took(l: &Lane, now: Ms) -> String {
+    match l.state {
+        LaneState::Working | LaneState::Waiting if l.start != 0 => short_dur(now - l.start),
+        _ if l.start != 0 && l.end > l.start => short_dur(l.end - l.start),
+        _ => String::new(),
+    }
+}
+
+/// A lane's cost cell: "" when it isn't known.
+fn lane_cost(l: &Lane) -> String {
+    l.cost.map(|c| format!("${c:.2}")).unwrap_or_default()
+}
+
+/// The board's column widths; 0 is a column left out.
+struct Cols {
+    name: usize,
+    model: usize,
+    step: usize,
+    cost: usize,
+    took: usize,
+}
+
+impl Cols {
+    /// The columns lanes fit in w: the step's gets what's left, at least
+    /// STEP_MIN, cost then the model dropped for it.
+    fn of(lanes: &[&Lane], w: usize, now: Ms) -> Cols {
+        let most = |f: &dyn Fn(&Lane) -> usize| lanes.iter().map(|&l| f(l)).max().unwrap_or(0);
+        let took = most(&|l| width(&lane_took(l, now)));
+        let mut cost = most(&|l| width(&lane_cost(l)));
+        let mut model = most(&|l| width(&l.model)).min(MODEL_W);
+        let gap = |n: usize| if n > 0 { n + 2 } else { 0 };
+        let left = |name: usize, model: usize, cost: usize| {
+            w.saturating_sub(2 + name + 2 + gap(model) + gap(cost) + gap(took))
+        };
+        let mut name = most(&|l| width(&l.name)).min(NAME_MIN.max(w * 3 / 10));
+        if left(name, model, cost) < STEP_MIN {
+            cost = 0;
+        }
+        if left(name, model, cost) < STEP_MIN {
+            model = 0;
+        }
+        if left(name, model, cost) < STEP_MIN {
+            name = name.min(NAME_MIN);
+        }
+        Cols {
+            name,
+            model,
+            step: left(name, model, cost),
+            cost,
+            took,
+        }
+    }
+}
+
+/// t in w cells: cut with … past them, blanks after it.
+fn cell(t: Txt, w: usize) -> Txt {
+    let t = t.truncate(w, &faint("…"));
+    let pad = w.saturating_sub(t.width());
+    t.and(blanks(pad))
+}
+
+/// t in w cells, to their right.
+fn cell_right(t: Txt, w: usize) -> Txt {
+    let t = t.truncate(w, &faint("…"));
+    blanks(w.saturating_sub(t.width())).and(t)
 }
 
 /// A card's label, LABEL_W wide.
@@ -1380,10 +1577,16 @@ impl<'a> Drawer<'a> {
                     if name.is_empty() {
                         name = self.label(id).plain();
                     }
-                    let mut what = job
-                        .map(|j| j.agent.clone())
-                        .filter(|a| !a.is_empty())
-                        .unwrap_or_else(|| "subagent".into());
+                    // Its model and cost from the requests made under the
+                    // call; else the model the call asked for (Rust-only).
+                    let (mut model, mut cost) = sub_spend(s, &st.id);
+                    if model.is_empty() {
+                        let m = input_str(st, "model");
+                        if !m.is_empty() {
+                            model = rush_claude::modelname::model_name(&m);
+                        }
+                    }
+                    let mut kid_sess: Option<&'a Session> = None;
                     let mut state = match job {
                         Some(j) if j.running() => LaneState::Working,
                         Some(j) if j.status == "failed" => LaneState::Failed,
@@ -1396,17 +1599,14 @@ impl<'a> Drawer<'a> {
                     // long as it is, not Claude Code's stand-in
                     // (Rust-only).
                     if let Some(k) = o.kids.get(&*st.id).and_then(|ks| ks.first()) {
-                        what = k.spawn.name.clone();
                         // "top · astra" says it already.
-                        if !k.spawn.model.is_empty()
-                            && k.spawn.model != what
-                            && !what.contains(" · ")
-                        {
-                            what = format!("{what} · {}", k.spawn.model);
-                        }
+                        model = model_cell(&k.spawn.name, &k.spawn.model);
                         if k.live {
                             state = LaneState::Working;
                         }
+                        // Its own session's cost, not the stand-in's.
+                        kid_sess = k.sess.as_deref();
+                        cost = kid_sess.and_then(sess_cost);
                     }
                     let end = job.map_or(st.end, |j| j.end);
                     let (mut news, mut at) = woke
@@ -1421,13 +1621,36 @@ impl<'a> Drawer<'a> {
                     if news.is_empty() && !st.output.is_empty() && state != LaneState::Working {
                         news = first_sentence(&st.output);
                     }
+                    // At work, its newest step: in its own session when
+                    // another model answers, else among the call's own.
+                    let step = match state {
+                        LaneState::Working => kid_sess
+                            .and_then(|ks| newest_of(ks).map(step_said))
+                            .or_else(|| newest_shown(s, &st.children).map(step_said))
+                            .or_else(|| {
+                                job.map(|j| {
+                                    if j.summary.trim().is_empty() {
+                                        j.last_tool.clone()
+                                    } else {
+                                        one_line(&j.summary)
+                                    }
+                                })
+                            })
+                            .unwrap_or_default(),
+                        LaneState::Waiting => asks_of(s, st),
+                        _ => kid_sess
+                            .map(|ks| first_sentence(&ks.last_answer(1)))
+                            .filter(|w| !w.is_empty())
+                            .unwrap_or(news),
+                    };
                     out.push(Lane {
                         name,
-                        what,
+                        model,
+                        cost,
+                        step,
                         state,
                         start: job.map_or(st.start, |j| j.start).max(st.start),
                         end,
-                        news,
                         news_at: at,
                         r: self.step_ref(st),
                         turn: ti,
@@ -1443,12 +1666,15 @@ impl<'a> Drawer<'a> {
                         state = LaneState::Working;
                     }
                     let (mut news, mut at, mut end) = (String::new(), 0, st.end);
+                    // Its own last words: its report's first sentence.
+                    let mut report = String::new();
                     if let Some(i) = agent.as_ref().and_then(|a| came.get(a)) {
                         state = LaneState::Done;
                         (news, at) = news_of(*i);
                         end = s.turns[*i].start;
+                        report = first_sentence(after_report(&s.turns[*i].prompt));
                         if news.is_empty() {
-                            news = first_sentence(after_report(&s.turns[*i].prompt));
+                            news = report.clone();
                         }
                         // Sent more since: at work on it.
                         if agent
@@ -1468,17 +1694,33 @@ impl<'a> Drawer<'a> {
                             state
                         };
                     }
-                    let mut what = sp.name.clone();
-                    if !sp.model.is_empty() && sp.model != sp.name {
-                        what = format!("{what} · {}", sp.model);
-                    }
+                    // What runs it, what it has cost and is doing: its own
+                    // session's, once rush has it found (Rust-only).
+                    let kid_sess: Option<&'a Session> = kid.and_then(|k| k.sess.as_deref());
+                    let model = match kid {
+                        Some(k) => model_cell(&k.spawn.name, &k.spawn.model),
+                        None => model_cell(&sp.name, &sp.model),
+                    };
+                    let step = match state {
+                        LaneState::Working => kid_sess
+                            .and_then(newest_of)
+                            .map(step_said)
+                            .unwrap_or_default(),
+                        LaneState::Waiting => asks_of(s, st),
+                        _ => kid_sess
+                            .map(|ks| first_sentence(&ks.last_answer(1)))
+                            .filter(|w| !w.is_empty())
+                            .or_else(|| Some(report).filter(|w| !w.is_empty()))
+                            .unwrap_or(news),
+                    };
                     out.push(Lane {
                         name: asked(&sp),
-                        what,
+                        model,
+                        cost: kid_sess.and_then(sess_cost),
+                        step,
                         state,
                         start: st.start,
                         end,
-                        news,
                         news_at: at,
                         r: self.step_ref(st),
                         turn: ti,
@@ -1501,9 +1743,11 @@ impl<'a> Drawer<'a> {
         kept
     }
 
-    /// The board: a heading counting the agents by how they're doing, what
-    /// needs you, then the agents at work, oldest first, and those done,
-    /// newest first, BOARD_DONE of them and how many more.
+    /// The board: a heading counting the agents by how they're doing and
+    /// what those with a known cost have cost, what needs you, then the
+    /// agents at work, oldest first, and those done, newest first,
+    /// BOARD_DONE of them and how many more; a row each, in columns
+    /// (Rust-only).
     fn board(&mut self) {
         let s = self.s;
         let lanes = self.lanes();
@@ -1530,8 +1774,9 @@ impl<'a> Drawer<'a> {
         if said.is_empty() {
             said.push("none started yet".into());
         }
-        head.push(dim(&format!(" · {}", said.join(" · "))));
-        let cost: f64 = s.turns.iter().map(|t| t.cost).sum();
+        head.push(dim(&format!("  {}", said.join(" · "))));
+        // What the agents have cost, those whose cost is known.
+        let cost: f64 = lanes.iter().filter_map(|l| l.cost).sum();
         let m = money(cost);
         if !m.is_empty() {
             head.push(dim(&format!(" · {m}")));
@@ -1577,8 +1822,14 @@ impl<'a> Drawer<'a> {
             .collect();
         ended.sort_by_key(|l| std::cmp::Reverse((l.end.max(l.news_at), l.turn)));
         let more = ended.len().saturating_sub(BOARD_DONE);
-        for l in at_work.iter().chain(ended.iter().take(BOARD_DONE)) {
-            rows.extend(self.lane_rows(l, inner));
+        let shown: Vec<&Lane> = at_work
+            .iter()
+            .chain(ended.iter().take(BOARD_DONE))
+            .copied()
+            .collect();
+        let cols = Cols::of(&shown, inner, self.o.now);
+        for l in &shown {
+            rows.push(self.lane_row(l, &cols));
         }
         if more > 0 {
             let l = blanks(2).and(dim(&format!("and {more} more before them")));
@@ -1609,41 +1860,48 @@ impl<'a> Drawer<'a> {
         self.own(&first_r, from_row);
     }
 
-    /// One agent on the board: its mark, what it was given, what runs it
-    /// and for how long; under it, at work or done, the last word on it.
-    fn lane_rows(&mut self, l: &Lane, inner: usize) -> Vec<(Txt, String)> {
-        let (mark, c) = match l.state {
-            LaneState::Working => ("●", C_ORANGE),
+    /// One agent on the board, a row (Rust-only): its mark, what it was
+    /// given, its model, what it's doing (or, ended, its last words), what
+    /// it has cost and how long it has run, in cols. It opens the step
+    /// that started it.
+    fn lane_row(&self, l: &Lane, c: &Cols) -> (Txt, String) {
+        let (mark, mc) = match l.state {
+            LaneState::Working => ("✻", C_ORANGE),
             LaneState::Waiting => ("?", C_YELLOW),
-            LaneState::Done => ("✓", C_GREEN),
+            LaneState::Done => ("✓", C_DIM),
             LaneState::Failed => ("✗", C_RED),
             LaneState::Stopped => ("✕", C_FAINT),
         };
-        let took = match l.state {
-            LaneState::Working | LaneState::Waiting if l.start != 0 => self.since(l.start),
-            _ if l.start != 0 && l.end > l.start => dur(l.end - l.start),
-            _ => String::new(),
+        let at_work = matches!(l.state, LaneState::Working | LaneState::Waiting);
+        let name = if at_work { text(&l.name) } else { sub(&l.name) };
+        let ended = match l.state {
+            LaneState::Done => "done",
+            LaneState::Failed => "failed",
+            LaneState::Stopped => "stopped",
+            _ => "",
         };
-        let mut right = dim(&l.what);
-        if !took.is_empty() {
-            right.push(dim(&format!(" · {took}")));
-        }
-        let room = inner.saturating_sub(right.width() + 5).max(8);
-        let name = if matches!(l.state, LaneState::Working | LaneState::Waiting) {
-            text(&l.name)
-        } else {
-            sub(&l.name)
+        let step = match l.state {
+            LaneState::Working if l.step.is_empty() => faint("working"),
+            LaneState::Working => sub(&l.step),
+            LaneState::Waiting => paint(C_YELLOW, &l.step),
+            _ if l.step.is_empty() => dim(ended),
+            LaneState::Failed => paint(C_RED, ended).and(dim(&format!(" · {}", l.step))),
+            _ => dim(&format!("{ended} · {}", l.step)),
         };
-        let head = paint(c, mark)
-            .and_raw(" ")
-            .and(name.truncate(room, &faint("…")))
-            .and_raw("  ")
-            .and(right);
-        let mut out = vec![(head, l.r.clone())];
-        if !l.news.is_empty() {
-            let w = faint(&l.news).truncate(inner.saturating_sub(2), &faint("…"));
-            out.push((blanks(2).and(w), l.r.clone()));
+        let mut row = paint(mc, mark).and_raw(" ").and(cell(name, c.name));
+        if c.model > 0 {
+            row = row.and(blanks(2)).and(cell(dim(&l.model), c.model));
         }
-        out
+        row = row.and(blanks(2)).and(cell(step, c.step));
+        if c.cost > 0 {
+            row = row
+                .and(blanks(2))
+                .and(cell_right(dim(&lane_cost(l)), c.cost));
+        }
+        if c.took > 0 {
+            let took = lane_took(l, self.o.now);
+            row = row.and(blanks(2)).and(cell_right(dim(&took), c.took));
+        }
+        (row, l.r.clone())
     }
 }

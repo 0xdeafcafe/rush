@@ -509,17 +509,19 @@ fn orchestrator_is_the_agents_a_lead_hands_work_to() {
     assert!(!got.contains("Codex (agent"), "{got}");
     // The board: one at work, two done; the one at work first.
     assert!(row("Agents").contains("1 working · 2 done"), "{got}");
-    assert!(row("Depth render-to-texture").contains("●"), "{got}");
+    assert!(row("Depth render-to-texture").contains("✻"), "{got}");
     assert!(row("Shaders: z-max clamp").contains("✓"), "{got}");
     let sol = row("Review the boot branch");
     assert!(sol.contains("✓") && sol.contains("sol"), "{sol}");
     let rows: Vec<&str> = got.lines().collect();
     let at = |w: &str| rows.iter().position(|l| l.contains(w)).unwrap();
     assert!(at("Depth render") < at("Review the boot"), "{got}");
-    // The last word on Sol is the lead's, under its row.
-    assert_eq!(at("Sol found no races"), at("Review the boot") + 1, "{got}");
-    // A subagent's answer, under its row.
-    assert_eq!(at("Clamped z-max"), at("Shaders: z-max") + 1, "{got}");
+    // Ended, an agent's own last words are on its row: Sol's report,
+    // a subagent's answer.
+    assert_eq!(at("done · No races found."), at("Review the boot"), "{got}");
+    assert_eq!(at("done · Clamped z-max"), at("Shaders: z-max"), "{got}");
+    // One at work with no step known yet says so.
+    assert!(row("Depth render-to-texture").contains("working"), "{got}");
 }
 
 #[test]
@@ -556,7 +558,7 @@ fn orchestrator_shows_the_model_that_answered_an_agent_call() {
     for (sec, e) in evs {
         s.feed(e, at(sec));
     }
-    for (live, mark) in [(true, "●"), (false, "✓")] {
+    for (live, mark) in [(true, "✻"), (false, "✓")] {
         let mut o = opts(Preset::Orchestrator, 120);
         o.kids.insert(
             "n1".into(),
@@ -582,5 +584,101 @@ fn orchestrator_shows_the_model_that_answered_an_agent_call() {
         assert!(lanes[0].contains("top · astra"), "{got}");
         assert!(!lanes[0].contains("gpt-6-astra"), "{got}");
         assert!(lanes[0].contains(mark), "{live}: {got}");
+    }
+}
+
+/// Rust-only: the board is a row an agent, in columns: its model, its
+/// newest step while it works, what its own session has cost and how long
+/// it has run. Narrower, the cost goes, then the model; never the step.
+#[test]
+fn orchestrator_rows_say_step_model_cost_and_time() {
+    let mut s = Session::new();
+    s.cwd = "/work/game".into();
+    let evs = vec![
+        (0, sent("have sol review boot")),
+        (
+            1,
+            tool_use(
+                "s1",
+                "mcp__rush__spawn_agent",
+                json!({"agent": "sol", "prompt": "Review the boot branch", "background": true}),
+            ),
+        ),
+        (
+            2,
+            tool_result(
+                "s1",
+                "sol started in the background as agent 21bcc40e.",
+                false,
+                None,
+            ),
+        ),
+    ];
+    for (sec, e) in evs {
+        s.feed(e, at(sec));
+    }
+    // The agent's own session: a search, then a read, and its cost.
+    let mut kid = Session::new();
+    kid.cwd = "/work/game".into();
+    let evs = vec![
+        (3, sent("Review the boot branch")),
+        (
+            4,
+            tool_use("k1", "Bash", json!({"command": "rg -n ask_guest crates"})),
+        ),
+        (5, tool_result("k1", "crates/x.rs:1", false, None)),
+        (
+            6,
+            tool_use("k2", "Read", json!({"file_path": "/work/game/src/boot.rs"})),
+        ),
+        (7, tool_result("k2", "fn boot() {}", false, None)),
+        (8, say("Looked.")),
+        (9, done(1.25)),
+    ];
+    for (sec, e) in evs {
+        kid.feed(e, at(sec));
+    }
+    let kid = std::sync::Arc::new(kid);
+    // (width, in the row, not in it)
+    let cases: [(usize, &[&str], &[&str]); 2] = [
+        (
+            120,
+            &["✻", "gpt-6.2-sol", "Read boot.rs", "$1.25", "29m"],
+            &["working"],
+        ),
+        (40, &["✻", "Read boot.rs", "29m"], &["$1.25", "gpt-6.2-sol"]),
+    ];
+    for (w, has, hasnt) in cases {
+        let mut o = opts(Preset::Orchestrator, w);
+        o.kids.insert(
+            "s1".into(),
+            vec![rush_convo::render::Child {
+                id: "21bcc40e".into(),
+                spawn: rush_convo::render::Spawn {
+                    kind: "codex".into(),
+                    name: "sol".into(),
+                    model: "gpt-6.2-sol".into(),
+                    ..Default::default()
+                },
+                sess: Some(kid.clone()),
+                live: true,
+                start: at(2),
+            }],
+        );
+        let got = plain(&Renderer::new().render(&s, &o));
+        let row = got
+            .lines()
+            .find(|l| l.contains("Review the"))
+            .unwrap_or_else(|| panic!("{w}: no row in\n{got}"));
+        for want in has {
+            assert!(row.contains(*want), "{w}: no {want:?} in {row:?}\n{got}");
+        }
+        for not in hasnt {
+            assert!(!row.contains(*not), "{w}: {not:?} in {row:?}\n{got}");
+        }
+        if w == 120 {
+            let head = got.lines().find(|l| l.contains("Agents")).unwrap_or("");
+            assert!(head.contains("1 working · $1.25"), "{got}");
+        }
     }
 }
