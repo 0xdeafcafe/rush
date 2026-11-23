@@ -3506,6 +3506,15 @@ is made. Everything below is in `rush_ui::frame`.
   what was picked on the `Conn` (`picked`), put back when the host
   refuses it. The session's own commands come whole on
   `Session::command_list`.
+- **Which step shows opened** (`render::draw`, `step_open`,
+  `worth_opening`). Rust-only: Go opened the newest step whatever it was,
+  so each read drew its file's lines as it went by. The newest step shows
+  opened only when that's of use: one that failed or whose tests failed,
+  an edit or a write (its diff), a picture, one still running, a question
+  or any tool that isn't a look at the disk or the web. A read, a search,
+  a listing, a fetch, a web search and a shell command that came back fine
+  stay one row, as the steps above them are; enter opens it. A step you
+  opened or closed stays as you left it, and verbose opens them all.
 - **Pausing and killing a chain's command** (`session_core::jobkeys`,
   shells.go). k and p act on the command of a running Bash call's chain
   that runs now (`Session::running_part`): its processes are matched

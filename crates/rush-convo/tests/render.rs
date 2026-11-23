@@ -455,6 +455,95 @@ fn a_failure_never_folds() {
     assert!(ls.iter().any(|l| l.r#ref == "t2:s:b2"));
 }
 
+// The newest step shows opened only when that's of use: one that failed,
+// an edit (its diff). A read, a search, a listing and a command that came
+// back fine stay one row; enter opens any of them. Rust-only: Go opened
+// the newest whatever it was.
+#[test]
+fn the_newest_step_opens_only_when_its_of_use() {
+    const LINES: [&str; 3] = ["alpha_line", "beta_line", "gamma_line"];
+    let draw = |s: &Session, open: bool| {
+        let mut o = opts(100, at(3));
+        if open {
+            o.open.insert("t1:s:c1".into(), true);
+        }
+        text(&Renderer::new().render(s, &o))
+    };
+    for (name, tool, input, failed, open) in [
+        (
+            "a read",
+            "Read",
+            json!({"file_path": "/work/app/notes.txt"}),
+            false,
+            false,
+        ),
+        (
+            "a search",
+            "Grep",
+            json!({"pattern": "alpha"}),
+            false,
+            false,
+        ),
+        (
+            "a listing",
+            "Glob",
+            json!({"pattern": "*.txt"}),
+            false,
+            false,
+        ),
+        (
+            "a command that came back fine",
+            "Bash",
+            json!({"command": "cat notes.txt"}),
+            false,
+            false,
+        ),
+        (
+            "a command that failed",
+            "Bash",
+            json!({"command": "make notes"}),
+            true,
+            true,
+        ),
+    ] {
+        let mut s = Session::new();
+        s.cwd = "/work/app".into();
+        s.feed(sent("go"), at(0));
+        s.feed(tool_use("c1", tool, input), at(1));
+        s.feed(tool_result("c1", &LINES.join("\n"), failed, None), at(2));
+        let out = draw(&s, false);
+        let shown = LINES.iter().all(|l| out.contains(l));
+        assert_eq!(shown, open, "{name}, as it comes:\n{out}");
+        let out = draw(&s, true);
+        assert!(
+            LINES.iter().all(|l| out.contains(l)),
+            "{name}, opened:\n{out}"
+        );
+    }
+    // An edit shows its diff.
+    let mut s = Session::new();
+    s.cwd = "/work/app".into();
+    s.feed(sent("go"), at(0));
+    s.feed(
+        tool_use(
+            "c1",
+            "Edit",
+            json!({
+                "file_path": "/work/app/notes.txt",
+                "old_string": "alpha_old",
+                "new_string": "alpha_new",
+            }),
+        ),
+        at(1),
+    );
+    s.feed(
+        tool_result("c1", "The file has been updated.", false, None),
+        at(2),
+    );
+    let out = draw(&s, false);
+    assert!(out.contains("alpha_new"), "an edit:\n{out}");
+}
+
 #[test]
 fn markdown_answers() {
     let s = bench_session(1);
