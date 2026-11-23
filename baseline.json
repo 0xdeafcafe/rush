@@ -1,6 +1,6 @@
 {
- "commit": "e61d1813c5ad66161f22815e8133739eb9d3983c",
- "at": "2026-11-23T11:58:51Z",
+ "commit": "4d45b9b88e51bfb0d7ba6102b486ed19a9f698aa",
+ "at": "2026-11-23T16:46:23Z",
  "metrics": {
   "binary: rush, release": {
    "kind": "binary",
@@ -389,8 +389,8 @@
   },
   "render 300 turns w120: warm frame at the end, allocations": {
    "kind": "allocs",
-   "value": 75,
-   "commit": "9df70072d538cf062bd62d6d87f31b6102a0691c"
+   "value": 71,
+   "commit": "4d45b9b88e51bfb0d7ba6102b486ed19a9f698aa"
   },
   "render 300 turns w120: warm frame at the end, bytes": {
    "kind": "bytes",
@@ -399,8 +399,8 @@
   },
   "render 300 turns w120: warm frame mid-way (range), allocations": {
    "kind": "allocs",
-   "value": 73,
-   "commit": "9df70072d538cf062bd62d6d87f31b6102a0691c"
+   "value": 69,
+   "commit": "4d45b9b88e51bfb0d7ba6102b486ed19a9f698aa"
   },
   "render 300 turns w120: warm frame mid-way (range), bytes": {
    "kind": "bytes",
@@ -449,8 +449,8 @@
   },
   "render 300 turns w250: warm frame at the end, allocations": {
    "kind": "allocs",
-   "value": 75,
-   "commit": "9df70072d538cf062bd62d6d87f31b6102a0691c"
+   "value": 71,
+   "commit": "4d45b9b88e51bfb0d7ba6102b486ed19a9f698aa"
   },
   "render 300 turns w250: warm frame at the end, bytes": {
    "kind": "bytes",
@@ -459,8 +459,8 @@
   },
   "render 300 turns w250: warm frame mid-way (range), allocations": {
    "kind": "allocs",
-   "value": 73,
-   "commit": "9df70072d538cf062bd62d6d87f31b6102a0691c"
+   "value": 69,
+   "commit": "4d45b9b88e51bfb0d7ba6102b486ed19a9f698aa"
   },
   "render 300 turns w250: warm frame mid-way (range), bytes": {
    "kind": "bytes",
@@ -717,6 +717,7 @@
   "render 3000 turns w120: code: cold frame at the end, bytes",
   "render 3000 turns w120: cold frame at the end, bytes",
   "render 3000 turns w120: cold jump to the top (window), bytes",
-  "render 3000 turns w120: normal: cold frame at the end, bytes"
+  "render 3000 turns w120: normal: cold frame at the end, bytes",
+  "ui: footprint"
  ]
 }
