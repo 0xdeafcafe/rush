@@ -15,10 +15,10 @@
 ┃ │    checkout · feat/apple-pay │
 ┃ └─ ✳ move the design… ✻    20m │    Claude  12:00 · @set-up-caching-for-ci
 ┃      checkout · main           │      ✓ cargo test                                                               7s
-                                 │          │ ok
-┃ Idle  1 · $1.10 · 120M idle ram│
-▌ └─ ◦ set… ✻ Claude Code    10m │    Fixed it.
-▌      checkout · main           │                                                                       1 step   13s
+                                 │
+┃ Idle  1 · $1.10 · 120M idle ram│    Fixed it.
+▌ └─ ◦ set… ✻ Claude Code    10m │                                                                       1 step   13s
+▌      checkout · main           │
                                  │
 ┃ Today  1 · $1.71               │
 ┃ └─ · why does the le… ✻     3h │
