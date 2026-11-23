@@ -202,31 +202,7 @@ fn agent_label(kind: &str) -> String {
     rush_core::adapter::global().harness_label(k.as_str())
 }
 
-/// claude-opus-5-5[1m] as "opus 5.5 · 1M" (overview.go:150 PrettyModel).
-pub(crate) fn pretty_model(m: &str) -> String {
-    if m.is_empty() {
-        return "?".into();
-    }
-    let long = m.contains("[1m]");
-    let m = m.replace("[1m]", "");
-    let mut m = m.strip_prefix("claude-").unwrap_or(&m).to_string();
-    if let Some(i) = m.rfind('-')
-        && m.len() - i == 9
-        && m[i + 1..].bytes().all(|b| b.is_ascii_digit())
-    {
-        m.truncate(i); // its date: -20250929
-    }
-    let parts: Vec<&str> = m.split('-').collect();
-    let mut out = parts[0].to_string();
-    if parts.len() > 1 {
-        out.push(' ');
-        out.push_str(&parts[1..].join("."));
-    }
-    if long {
-        out.push_str(" · 1M");
-    }
-    out
-}
+use super::pretty_model;
 
 /// p with your home as ~ (homeDir).
 fn home_dir(p: &str) -> String {

@@ -458,33 +458,7 @@ impl Sheet for InfoSheet {
     }
 }
 
-/// A model id as people say it: claude-opus-5-5[1m] is "opus 5.5 · 1M"
-/// (convo.PrettyModel).
-pub fn pretty_model(m: &str) -> String {
-    if m.is_empty() {
-        return "?".into();
-    }
-    let long = m.contains("[1m]");
-    let m = m.replace("[1m]", "");
-    let mut m = m.strip_prefix("claude-").unwrap_or(&m).to_string();
-    // A date at the end: -20250929.
-    if let Some(i) = m.rfind('-')
-        && m.len() - i == 9
-        && m[i + 1..].bytes().all(|b| b.is_ascii_digit())
-    {
-        m.truncate(i);
-    }
-    let mut parts = m.split('-');
-    let mut out = parts.next().unwrap_or("").to_string();
-    let rest: Vec<&str> = parts.collect();
-    if !rest.is_empty() {
-        out += &format!(" {}", rest.join("."));
-    }
-    if long {
-        out += " · 1M";
-    }
-    out
-}
+pub use rush_convo::render::pretty_model;
 
 /// A context row's bar (view.go ctxBar).
 fn ctx_bar(pct: f64) -> Line {

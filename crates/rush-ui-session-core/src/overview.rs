@@ -66,32 +66,7 @@ pub fn turn_costs(s: &Session, ag: &Agentry) -> Vec<f64> {
     out
 }
 
-/// claude-opus-5-5[1m] as "opus 5.5 · 1M" (PrettyModel).
-pub fn pretty_model(m: &str) -> String {
-    if m.is_empty() {
-        return "?".into();
-    }
-    let long = m.contains("[1m]");
-    let m = m.replace("[1m]", "");
-    let mut m = m.strip_prefix("claude-").unwrap_or(&m).to_string();
-    // A date at its end: -20250929.
-    if let Some(i) = m.rfind('-')
-        && m.len() - i == 9
-        && m[i + 1..].bytes().all(|b| b.is_ascii_digit())
-    {
-        m.truncate(i);
-    }
-    let parts: Vec<&str> = m.split('-').collect();
-    let mut out = parts[0].to_string();
-    if parts.len() > 1 {
-        out.push(' ');
-        out.push_str(&parts[1..].join("."));
-    }
-    if long {
-        out.push_str(" · 1M");
-    }
-    out
-}
+pub use rush_convo::render::pretty_model;
 
 /// Tells models apart in the per-turn bars (modelColour).
 pub fn model_colour(m: &str) -> Color {
