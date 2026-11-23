@@ -48,6 +48,72 @@ pub fn dock_card(edge: rush_core::text::Color, rows: Vec<Line>, w: usize) -> Vec
         .collect()
 }
 
+/// A draft's pictures, at most this wide and high in cells.
+const DRAFT_PIC: (usize, usize) = (16, 4);
+
+/// The images in the box's text small in a row over the box, in the
+/// order their markers stand, each over its marker's number: what
+/// [Image #2] is, without opening it. As many as fit the width, then how
+/// many more; one not made yet (or that can't be read) is its number
+/// alone. Nothing without an image in the text. Rust-only.
+fn draft_pictures(m: &mut Model, key: &str, w: usize) -> Vec<Line> {
+    let c = conn(m, key);
+    if c.imgs.path.is_empty() {
+        return Vec::new();
+    }
+    let text: String = c.input.text.iter().collect();
+    let mut pics: Vec<(usize, String)> = Vec::new();
+    for part in text.split("[Image #").skip(1) {
+        let digits: String = part.chars().take_while(char::is_ascii_digit).collect();
+        if !part[digits.len()..].starts_with(']') {
+            continue;
+        }
+        if let Ok(n) = digits.parse::<usize>()
+            && let Some(p) = c.imgs.path.get(&n)
+            && !pics.iter().any(|(k, _)| *k == n)
+        {
+            pics.push((n, p.clone()));
+        }
+    }
+    if pics.is_empty() {
+        return Vec::new();
+    }
+    let (tw, th) = DRAFT_PIC;
+    let room = w.saturating_sub(8);
+    let shown = pics.len().min(1.max((room + 2) / (tw + 2)));
+    let thumbs: Vec<Vec<Line>> = pics[..shown]
+        .iter()
+        .map(
+            |(_, p)| match rush_ui_session_cards::pictures::picture(m, p, tw, th) {
+                Some(rows) if !rows.is_empty() => rows.to_vec(),
+                _ => vec![line([sp("▣", BLUE)])],
+            },
+        )
+        .collect();
+    let (rows, at) = rush_convo::pictures::tile(&thumbs, usize::MAX / 2, 2);
+    let mut out: Vec<Line> = rows
+        .into_iter()
+        .map(|r| {
+            let mut l = line([plain("    ")]);
+            l.spans.extend(r.spans);
+            l
+        })
+        .collect();
+    // Each one's number under its left edge.
+    let mut names = String::from("    ");
+    for (i, (n, _)) in pics[..shown].iter().enumerate() {
+        let x = 4 + at[i][0];
+        let have = rush_core::text::width(&names);
+        names.push_str(&" ".repeat(x.saturating_sub(have)));
+        names.push_str(&format!("#{n}"));
+    }
+    if pics.len() > shown {
+        names.push_str(&format!("   and {} more", pics.len() - shown));
+    }
+    out.push(line([sp(names, DIM)]));
+    out
+}
+
 /// A row drawn as picked: the selection's ground, a bar down its left,
 /// orange while the keys are there (picked1).
 pub fn picked1(row: Line, w: usize, focused: bool) -> Line {
@@ -251,6 +317,9 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         v.panels = panels;
         v.panel_refs = panel_refs;
     }
+
+    // The pictures in the box's text, small, over it.
+    out.extend(draft_pictures(m, &key, w));
 
     // With room right of the conversation's text the tasks go in the
     // column there; else they sit on the box, one row until opened.

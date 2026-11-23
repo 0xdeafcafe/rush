@@ -3975,6 +3975,21 @@ is made. Everything below is in `rush_ui::frame`.
   Past Go, ctrl+enter for a session rush can't send to at once (open in
   a terminal, past, not connected) puts the text back in the box and
   says why (`queue::cant_send_now`); Go's sendQueueNow said nothing.
+- **Images in the message box (Rust-only).** An image is a chip in the
+  text (`[Image #1]`). Over the box, the images in its text are drawn
+  small in a row, in the order their markers stand, each over its
+  number (`dock.rs` `draft_pictures`, 16 by 4 cells, as many as fit and
+  "and N more"). Backspace after a chip (or delete before one) picks it
+  first and the next takes it, where Go took it at once: with the cursor
+  drawn on the letter after an image, backspace read as joining the
+  lines. A chip picked whole is lit as one block (orange, reversed) and
+  no cursor is drawn (`InputBox::content`). Esc with something picked
+  lets go of it; only the next clears the box. A HEIC or HEIF file
+  (macOS's screenshots and photos, which no agent reads) is an image on
+  macOS too: rush's copy of it is made a PNG by `sips` on a thread of
+  its own as it's attached (`imagerefs::keep`, `as_png`), so a
+  screenshot dragged from its corner preview is an image, not the path
+  of a temporary file gone a moment later.
 - **Pictures.** `screens/session_cards/pictures.rs` draws an image fitted
   to a box of cells in quarter blocks (Go's convo/picture.go and thumb.go
   where Kitty isn't there), each image and size made once on a thread of

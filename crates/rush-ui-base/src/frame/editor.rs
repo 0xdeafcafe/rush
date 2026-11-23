@@ -301,8 +301,8 @@ pub fn out_of_chip(spans: &[Seg], p: usize, forward: bool) -> usize {
 
 /// edit_sel for a message box, where a chip is one thing: an arrow onto
 /// one selects it whole, the next goes past it; backspace or delete
-/// beside one takes all of it; no move or word delete stops inside one
-/// (editChips).
+/// beside one picks all of it and the next takes it; no move or word
+/// delete stops inside one (editChips).
 pub fn edit_chips(buf: &[char], pos: usize, anchor: Option<usize>, k: &Press) -> Option<Edited> {
     let spans = chip_spans(buf);
     if spans.is_empty() {
@@ -353,10 +353,15 @@ fn chip_key(
         if s == "left" && pos == c.to {
             return ed(buf.to_vec(), c.from, Some(c.to));
         }
-        if (matches!(s, "backspace" | "ctrl+h" | "shift+backspace") && pos == c.to)
-            || (s == "delete" && pos == c.from)
-        {
-            return ed(cut(buf, c.from, c.to), c.from, None);
+        // Not Go's, which took it at once: the first picks it, drawn as
+        // picked, and the next takes it. With the cursor on the letter
+        // after an image, backspace read as joining the lines, not as
+        // taking the image.
+        if matches!(s, "backspace" | "ctrl+h" | "shift+backspace") && pos == c.to {
+            return ed(buf.to_vec(), c.to, Some(c.from));
+        }
+        if s == "delete" && pos == c.from {
+            return ed(buf.to_vec(), c.from, Some(c.to));
         }
     }
     if picked.is_some() {
@@ -777,6 +782,15 @@ pub fn is_image_file(p: &str) -> bool {
         .map(|e| e.to_string_lossy().to_lowercase())
         .unwrap_or_default();
     matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp")
+        || cfg!(target_os = "macos") && is_heic(&ext)
+}
+
+/// An extension macOS writes screenshots and photos with that no agent
+/// reads: attached, it is made a PNG (imagerefs::keep). Rust-only: Go left
+/// such a path as text, and a screenshot dragged from its corner preview
+/// with HEIC as the format stayed a path to a file gone a moment later.
+pub fn is_heic(ext: &str) -> bool {
+    matches!(ext, "heic" | "heif")
 }
 
 /// What's at a path, as a lookup says (pathLookup): there, and a folder.

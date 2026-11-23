@@ -166,6 +166,39 @@ pub fn keep(path: &str) -> String {
     keep_in(path, &attached_dir())
 }
 
+/// rush's copy of a HEIC image made a PNG beside it, which is the file
+/// the message gets: no agent reads HEIC, and macOS writes screenshots
+/// and photos as it. Made by macOS's own sips on a thread of its own (a
+/// few tenths of a second, never the UI thread's), so the PNG is there a
+/// moment after its marker is; the HEIC copy goes once it is. One sips
+/// can't make leaves no file, and the message says its image is gone.
+fn as_png(heic: PathBuf) -> String {
+    let png = heic.with_extension("png");
+    let to = png.clone();
+    let made = std::thread::Builder::new()
+        .name("rush-heic".into())
+        .spawn(move || {
+            let ok = std::process::Command::new("/usr/bin/sips")
+                .args(["-s", "format", "png"])
+                .arg(&heic)
+                .arg("--out")
+                .arg(&to)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success());
+            if !ok {
+                let _ = std::fs::remove_file(&to);
+            }
+            let _ = std::fs::remove_file(&heic);
+        });
+    if made.is_err() {
+        return png.with_extension("heic").to_string_lossy().into_owned();
+    }
+    png.to_string_lossy().into_owned()
+}
+
 fn keep_in(path: &str, dir: &Path) -> String {
     let src = Path::new(path);
     if src.starts_with(dir) {
@@ -187,6 +220,13 @@ fn keep_in(path: &str, dir: &Path) -> String {
     if std::fs::create_dir_all(&to).is_err() || std::fs::copy(src, &out).is_err() {
         let _ = std::fs::remove_dir_all(&to);
         return path.to_string();
+    }
+    let ext = src
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    if cfg!(target_os = "macos") && crate::frame::editor::is_heic(&ext) {
+        return as_png(out);
     }
     out.to_string_lossy().into_owned()
 }

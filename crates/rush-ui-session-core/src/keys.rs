@@ -181,6 +181,14 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
     }
     match s {
         "esc" => {
+            // Something picked in the box (an image, a run of words): esc
+            // lets go of it first, and only the next clears the box. Go
+            // cleared at once, the picked image with all the rest.
+            let c = conn(m, &key);
+            if c.input.selection().is_some() {
+                c.input.anchor = None;
+                return Out::Draw;
+            }
             if !empty {
                 wipe_box(m, &key);
                 return Out::Draw;

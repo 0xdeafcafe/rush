@@ -361,6 +361,15 @@ impl InputBox {
             .anchor
             .filter(|&a| a != self.cursor)
             .map(|a| (a.min(self.cursor), a.max(self.cursor)));
+        // A chip picked whole (an arrow or a backspace onto it) is lit as
+        // one thing and no cursor is drawn: with the block on the letter
+        // after an image, backspace looked as if it would take the letter
+        // before, and took the image. Rust-only.
+        let picked_chip = sel.is_some_and(|(f, t)| {
+            chip_spans(&self.text)
+                .iter()
+                .any(|c| c.from == f && c.to == t)
+        });
         let mut rows = Vec::new();
         for i in start..end {
             let sg = segs[i];
@@ -381,7 +390,9 @@ impl InputBox {
                 let c = self.text[p];
                 let ink = self.ink(p, x, i - start);
                 x += rune_w(c);
-                let st = if self.focused && !self.idle && p == self.cursor {
+                let st = if picked_chip && sel.is_some_and(|(f, t)| p >= f && p < t) {
+                    reversed(Style::fg(ORANGE))
+                } else if self.focused && !self.idle && p == self.cursor && !picked_chip {
                     if self.look.is_some() {
                         caret
                     } else {
@@ -406,7 +417,7 @@ impl InputBox {
             flush(&mut l, &mut run, run_style);
             // The cursor at the end of a row shows as a block after it.
             let last = i == segs.len() - 1 || segs[i + 1].from > sg.to;
-            if self.focused && !self.idle && self.cursor == sg.to && last {
+            if self.focused && !self.idle && self.cursor == sg.to && last && !picked_chip {
                 l.spans.push(Span::new(" ", caret));
             }
             rows.push(l);

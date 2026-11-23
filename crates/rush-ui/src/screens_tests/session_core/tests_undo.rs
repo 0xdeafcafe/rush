@@ -214,6 +214,8 @@ fn paste_chips_undo() {
     let chipped = sbox(&mut m).0;
     assert!(chipped.contains("[pasted text #1"), "{chipped}");
     key(&mut m, "backspace");
+    assert_eq!(sbox(&mut m).0, chipped, "picked first");
+    key(&mut m, "backspace");
     assert_eq!(sbox(&mut m).0, "see ", "the chip goes whole");
     key(&mut m, "ctrl+/");
     assert_eq!(sbox(&mut m).0, chipped, "and comes back");
@@ -224,6 +226,7 @@ fn paste_chips_undo() {
     m.paste(long);
     let chipped = pbox(&m).0;
     assert!(chipped.contains("[pasted text #1"), "{chipped}");
+    key(&mut m, "backspace");
     key(&mut m, "backspace");
     assert_eq!(pbox(&m).0, "");
     key(&mut m, "ctrl+/");

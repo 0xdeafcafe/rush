@@ -511,11 +511,23 @@ fn chips_go_whole() {
     let chip = "[pasted text #1 · 5 lines: a b c d e]";
     let draft: Vec<char> = format!("look at {chip} please").chars().collect();
     let end = format!("look at {chip}").chars().count();
-    let e = edit_chips(&draft, end, None, &Press::of("backspace").unwrap()).unwrap();
-    assert_eq!(e.buf.iter().collect::<String>(), "look at  please");
-    assert_eq!(e.pos, "look at ".len());
-    // → onto it selects it whole; → again goes past.
+    // Backspace after it picks it whole (Rust-only: Go took it at once);
+    // the next takes it. Delete before it, the same.
     let at = "look at ".len();
+    for (key, from) in [("backspace", end), ("delete", at)] {
+        let e = edit_chips(&draft, from, None, &Press::of(key).unwrap()).unwrap();
+        assert_eq!(e.buf, draft, "{key} picks it");
+        let (p, a) = (e.pos, e.anchor.expect("picked"));
+        assert_eq!((p.min(a), p.max(a)), (at, end), "{key}");
+        let e = edit_chips(&draft, e.pos, e.anchor, &Press::of(key).unwrap()).unwrap();
+        assert_eq!(e.buf.iter().collect::<String>(), "look at  please", "{key}");
+        assert_eq!((e.pos, e.anchor), (at, None), "{key}");
+    }
+    // An image is a chip as a paste is.
+    let img: Vec<char> = "[Image #1]hello".chars().collect();
+    let e = edit_chips(&img, 10, None, &Press::of("backspace").unwrap()).unwrap();
+    assert_eq!((e.buf.len(), e.pos, e.anchor), (15, 10, Some(0)));
+    // → onto it selects it whole; → again goes past.
     let e = edit_chips(&draft, at, None, &Press::of("right").unwrap()).unwrap();
     assert_eq!((e.pos, e.anchor), (end, Some(at)));
     let e = edit_chips(&draft, e.pos, e.anchor, &Press::of("right").unwrap()).unwrap();
