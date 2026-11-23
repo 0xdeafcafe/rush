@@ -32,7 +32,7 @@
 //! hunks are coloured as code (changes.go:571-606, render.go:4115
 //! diffText).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
@@ -760,12 +760,119 @@ pub fn turns_right(mut counts: Line, turns: &[u32], capw: usize) -> Line {
         }
         b.push_str(&format!("#{n}"));
         if b.len() > room {
-            return Line::new();
+            // Not Go's, which says nothing then: the first and the last,
+            // or the counts alone.
+            let (Some(first), Some(last)) = (turns.first(), turns.last()) else {
+                return counts;
+            };
+            b = format!("#{first} … #{last}");
+            if turns.len() < 3 || b.chars().count() > room {
+                return counts;
+            }
+            break;
         }
     }
     counts.spans.push(plain("   "));
     counts.spans.push(dim(b));
     counts
+}
+
+/// A session's list is flat, in the order its files were first touched,
+/// up to this many files; past it they go under their folders, and what
+/// only shell commands wrote under one row after them. Not Go's, which
+/// lists every file whatever their number.
+pub const FLAT: usize = 30;
+
+/// The row the files only shell commands wrote are under, in a long list.
+pub const MORE: &str = "more:shell";
+
+/// Whether r is a row of Changes that opens and closes: a file, a
+/// folder of them, or the shell's row.
+pub fn opens(r: &str) -> bool {
+    r.starts_with("chg:") || r.starts_with("tree:") || r.starts_with("dir:") || r == MORE
+}
+
+/// Only shell commands made it: its lines aren't known (shellOnly's test).
+fn by_shell_only(fc: &FileChange) -> bool {
+    fc.add + fc.del == 0 && !fc.new && !fc.shell.is_empty()
+}
+
+/// One row of the session's list, before it's drawn.
+enum Entry<'a> {
+    /// A folder and what the files in it come to.
+    Dir {
+        key: String,
+        name: String,
+        files: usize,
+        add: i64,
+        del: i64,
+        open: bool,
+        depth: usize,
+    },
+    /// The files only shell commands wrote; alone when nothing else is
+    /// listed.
+    More { n: usize, open: bool, alone: bool },
+    File {
+        fc: &'a FileChange,
+        name: String,
+        depth: usize,
+    },
+}
+
+/// files as rows: each by its path up to FLAT of them, else under its
+/// folder, the folders by name and shut unless opened (tag tells the
+/// edited files' folders from the shell's) or holding the picked file.
+fn folders<'a>(
+    files: &[&'a FileChange],
+    places: &Places,
+    tag: &str,
+    depth: usize,
+    open: &HashMap<String, bool>,
+    sel: &str,
+    out: &mut Vec<Entry<'a>>,
+) {
+    if files.len() <= FLAT {
+        out.extend(files.iter().map(|&fc| Entry::File {
+            fc,
+            name: places.rel(&fc.path),
+            depth,
+        }));
+        return;
+    }
+    let picked = sel.strip_prefix("chg:").unwrap_or("");
+    let mut dirs: BTreeMap<String, Vec<(&'a FileChange, String)>> = BTreeMap::new();
+    for &fc in files {
+        let rel = places.rel(&fc.path);
+        let (dir, name) = match rel.rsplit_once('/') {
+            Some((d, n)) => (format!("{d}/"), n.to_string()),
+            None => ("./".to_string(), rel.clone()),
+        };
+        dirs.entry(dir).or_default().push((fc, name));
+    }
+    for (dir, fs) in dirs {
+        let key = format!("dir:{tag}:{dir}");
+        let is_open = open.get(&key).copied().unwrap_or(false)
+            || !picked.is_empty() && fs.iter().any(|(f, _)| f.path == picked);
+        let (add, del) = fs
+            .iter()
+            .fold((0, 0), |(a, d), (f, _)| (a + f.add, d + f.del));
+        out.push(Entry::Dir {
+            key,
+            name: dir,
+            files: fs.len(),
+            add,
+            del,
+            open: is_open,
+            depth,
+        });
+        if is_open {
+            out.extend(fs.into_iter().map(|(fc, name)| Entry::File {
+                fc,
+                name,
+                depth: depth + 1,
+            }));
+        }
+    }
 }
 
 /// The folders the session says its paths from: its host's folder and
@@ -858,23 +965,33 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
         ));
     };
     let (adds, dels) = change_stat(&chg);
+    // A long list says its edits first, and what only shell commands
+    // wrote under one row after them.
+    let big = chg.len() > FLAT;
+    let (edited, shelled): (Vec<&FileChange>, Vec<&FileChange>) = if big {
+        chg.iter().partition(|fc| !by_shell_only(fc))
+    } else {
+        (chg.iter().collect(), Vec::new())
+    };
     let mut meta = "nothing edited yet".to_string();
-    if !chg.is_empty() {
-        let seen = chg
+    if !chg.is_empty() && edited.is_empty() {
+        meta = "no edits of its own".to_string();
+    } else if !chg.is_empty() {
+        let seen = edited
             .iter()
             .filter(|f| marks.get(&f.path).copied().unwrap_or(false))
             .count();
         let mut shell = String::new();
         let n = shell_only(&chg);
-        if n > 0 {
+        if n > 0 && !big {
             shell = format!(" · {n} by shell, their lines not counted");
         }
         meta = format!(
             "{} · +{adds} −{dels}{shell}{}",
-            plural(chg.len(), "file"),
+            plural(edited.len(), "file"),
             rush_convo::render::key_word(&format!(
                 " · {seen} of {} reviewed · alt+r marks one",
-                chg.len()
+                edited.len()
             ))
         );
     }
@@ -886,7 +1003,77 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
     }
     rule(&mut out, "This session", &meta);
     let bw = w.saturating_sub(16);
-    for fc in chg.iter() {
+    let mut plan: Vec<Entry> = Vec::new();
+    folders(&edited, &places, "e", 0, &open, &sel, &mut plan);
+    if !shelled.is_empty() {
+        let picked = sel.strip_prefix("chg:").unwrap_or("");
+        let is_open = open.get(MORE).copied().unwrap_or(false)
+            || !picked.is_empty() && shelled.iter().any(|f| f.path == picked);
+        plan.push(Entry::More {
+            n: shelled.len(),
+            open: is_open,
+            alone: edited.is_empty(),
+        });
+        if is_open {
+            folders(&shelled, &places, "s", 1, &open, &sel, &mut plan);
+        }
+    }
+    for e in &plan {
+        let (fc, name, depth) = match e {
+            Entry::Dir {
+                key,
+                name,
+                files,
+                add: a,
+                del: d,
+                open,
+                depth,
+            } => {
+                let mut right = line([dim(plural(*files, "file"))]);
+                if a + d > 0 {
+                    right.spans.extend([
+                        dim(" · "),
+                        sp(format!("+{a}"), GREEN),
+                        plain(" "),
+                        sp(format!("−{d}"), RED),
+                    ]);
+                }
+                add(
+                    &mut out,
+                    key,
+                    line([
+                        plain(format!("  {}", "  ".repeat(*depth))),
+                        faint(if *open { "▾" } else { "▸" }),
+                        plain(" "),
+                        sp(name.clone(), SUB),
+                    ]),
+                    right,
+                );
+                continue;
+            }
+            Entry::More { n, open, alone } => {
+                let what = match (*alone, *n) {
+                    (true, 1) => "1 file by shell, its lines not counted".to_string(),
+                    (true, n) => format!("{n} files by shell, their lines not counted"),
+                    (false, 1) => "1 more by shell, its lines not counted".to_string(),
+                    (false, n) => format!("{n} more by shell, their lines not counted"),
+                };
+                add(
+                    &mut out,
+                    MORE,
+                    line([
+                        plain("  "),
+                        faint(if *open { "▾" } else { "▸" }),
+                        plain(" "),
+                        dim(what),
+                    ]),
+                    Line::new(),
+                );
+                continue;
+            }
+            Entry::File { fc, name, depth } => (*fc, name, *depth),
+        };
+        let indent = "  ".repeat(depth);
         let r = format!("chg:{}", fc.path);
         let is_open = open.get(&r).copied().unwrap_or(false);
         let arrow = faint(if is_open { "▾" } else { "▸" });
@@ -912,21 +1099,22 @@ pub fn lines(m: &mut Model, key: &str, w: usize) -> Vec<(Line, String)> {
         }
         let marked = marks.get(&fc.path).copied().unwrap_or(false);
         let (mark, name) = if marked {
-            (sp("✓ ", GREEN), dim(places.rel(&fc.path)))
+            (sp("✓ ", GREEN), dim(name.clone()))
         } else {
-            (plain("  "), text(places.rel(&fc.path)))
+            (plain("  "), text(name.clone()))
         };
         let name = file_link(&places, &fc.path, name);
         add(
             &mut out,
             &r,
-            line([plain("  "), arrow, plain(" "), mark, name]),
+            line([plain(format!("  {indent}")), arrow, plain(" "), mark, name]),
             turns_right(counts, &fc.turns, w),
         );
         if !is_open {
             continue;
         }
-        let pad = "       ";
+        let pad = format!("       {indent}");
+        let pad = pad.as_str();
         // Each hunk under a row naming the turn that made it; enter on it goes
         // to that step in the conversation.
         let hunk = |out: &mut Vec<(Line, String)>, from: &str, what: &str| {

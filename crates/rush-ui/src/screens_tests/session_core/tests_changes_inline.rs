@@ -65,9 +65,16 @@ fn diff_lines_drop_headers() {
 #[test]
 fn turns_leave_the_row_when_they_crowd_it() {
     let c = line([plain("+1 −0")]);
-    assert_eq!(turns_right(c.clone(), &[3, 4], 80).plain(), "+1 −0   #3 #4");
-    let many: Vec<u32> = (1..60).collect();
-    assert_eq!(turns_right(c, &many, 40).plain(), "");
+    for (turns, w, want) in [
+        (vec![3, 4], 80, "+1 −0   #3 #4"),
+        // Too many for the row: the first and the last.
+        ((1..60).collect(), 40, "+1 −0   #1 … #59"),
+        // No room for those either, or only two: the counts alone.
+        ((1..60).collect(), 16, "+1 −0"),
+        (vec![100_000, 200_000], 22, "+1 −0"),
+    ] {
+        assert_eq!(turns_right(c.clone(), &turns, w).plain(), want, "{turns:?}");
+    }
 }
 
 // render.go:2560 rel, :2571 shortAbs: from the first folder it's in,

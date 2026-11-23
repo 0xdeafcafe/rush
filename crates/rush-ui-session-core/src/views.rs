@@ -632,7 +632,7 @@ fn act(m: &mut Model, key: &str, name: &str, s: &str) -> Out {
         show_view(m, key, "memory");
         return Out::Draw;
     }
-    if name == "changes" && (sel.starts_with("chg:") || sel.starts_with("tree:")) {
+    if name == "changes" && super::changes::opens(&sel) {
         let c = conn(m, key);
         let open = c.vs.open.get(&sel).copied().unwrap_or(false);
         c.vs.open.insert(sel, s == "right" || !open);

@@ -946,6 +946,13 @@ fn hint(m: &mut Model, key: &str, w: usize, picked: &str) -> Line {
                 ("↑↓", "pick"),
                 ("esc", "back to message"),
             ]
+        } else if view == "changes" && super::changes::opens(picked) {
+            // A folder of a long list, or what its shell commands wrote.
+            &[
+                (rk.as_str(), "open or close"),
+                ("↑↓", "pick"),
+                ("esc", "back to message"),
+            ]
         } else if view == "background" && picked.starts_with("job:") {
             // A task in the background view (rushmode.go:3816).
             &[

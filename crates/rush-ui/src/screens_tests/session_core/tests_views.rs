@@ -1850,6 +1850,97 @@ fn shell_writes_in_changes() {
     );
 }
 
+/// A list past thirty files says its edits first and what only shell
+/// commands wrote under one row after them, shut; opened, those are
+/// under their folders, each shut with how many it holds. Not Go's.
+#[test]
+fn a_long_changes_list_folds() {
+    let mut m = opened(140, 40);
+    let now = m.now;
+    sess(&mut m).info.cwd = "/src/checkout".into();
+    let files: Vec<String> = (0..40)
+        .map(|i| format!("{}/f{i}.rs", if i < 25 { "gen" } else { "out" }))
+        .collect();
+    let call = Call {
+        id: "b1".into(),
+        name: "Bash".into(),
+        kind: ToolKind::Shell,
+        input: Input {
+            command: format!("touch {}", files.join(" ")),
+            ..Input::default()
+        },
+        ..Call::default()
+    };
+    for (role, part) in [
+        (
+            "assistant",
+            Part {
+                kind: PartKind::ToolCall,
+                call: Some(Box::new(call)),
+                ..Part::default()
+            },
+        ),
+        (
+            "user",
+            Part {
+                kind: PartKind::ToolResult,
+                output: Some(Box::new(Output {
+                    call_id: "b1".into(),
+                    ..Output::default()
+                })),
+                ..Part::default()
+            },
+        ),
+    ] {
+        sess(&mut m).apply(
+            &Event::Message(Message {
+                role: role.into(),
+                id: format!("{role}-touch"),
+                parts: vec![part],
+                ..Message::default()
+            }),
+            now - 15_000,
+        );
+    }
+    assert!(crate::screens::session_core::views::show_view(
+        &mut m, KEY, "changes"
+    ));
+    let s = screen(&mut m);
+    let y = row_with(&mut m, "This session").unwrap();
+    assert!(
+        s[y].contains("1 file · +1 −1 · 0 of 1 reviewed") && !s[y].contains("by shell"),
+        "{}",
+        s[y]
+    );
+    let more = row_with(&mut m, "40 more by shell, their lines not counted").expect("its row");
+    assert!(s[more].trim_start().starts_with('▸'), "{}", s[more]);
+    assert!(s[more - 1].contains("parse.rs"), "after the edits");
+    assert_eq!(row_with(&mut m, "f0.rs"), None, "shut");
+    conn(&mut m, KEY).vs.open.insert("more:shell".into(), true);
+    let s = screen(&mut m);
+    assert!(
+        s[more + 1].contains("▸ gen/") && s[more + 1].trim_end().ends_with("25 files"),
+        "{}",
+        s[more + 1]
+    );
+    assert!(
+        s[more + 2].contains("▸ out/") && s[more + 2].trim_end().ends_with("15 files"),
+        "{}",
+        s[more + 2]
+    );
+    conn(&mut m, KEY).vs.open.insert("dir:s:gen/".into(), true);
+    let s = screen(&mut m);
+    assert!(
+        s[more + 2].contains("f0.rs") && s[more + 2].trim_end().ends_with("by shell   #2"),
+        "{}",
+        s[more + 2]
+    );
+    assert!(
+        !s[more + 2].contains("gen/f0.rs"),
+        "its name, under its folder"
+    );
+}
+
 /// A finished turn whose last message wants something of you ends with a
 /// Needs-you section, laid out by the model that read it; a click on a
 /// reply sends it, and its key puts it in the box (turnwants.go needsOf,

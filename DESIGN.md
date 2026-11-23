@@ -3168,6 +3168,33 @@ own adapter, `read_history`), again only once their file grows: their
 steps and replies go under the step that ran them, and Changes takes
 their edits.
 
+### A long Changes list (Rust-only)
+
+Go lists every file a session changed in the order it first touched
+them, whatever their number; a session of six thousand files, most of
+them only what its shell commands seem to have written, was a wall with
+its edits lost in it. Up to 30 files (`changes::FLAT`) the list is
+Go's. Past that (rush-ui-session-core `changes.rs`, `folders`):
+
+- The files with lines of their own come first, and the heading counts
+  only them (files, lines, reviewed). What only shell commands wrote is
+  under one row after them, shut: `▸ 4757 more by shell, their lines
+  not counted` (`more:shell`).
+- More than 30 files, in either part, go under their folders: one row a
+  folder, by name, shut, with how many files it holds and what they add
+  and delete; a file under it is said by its name alone. A folder (or
+  the shell's row) holding the picked file is open, so a file picked
+  from the column beside the conversation is always in sight.
+- Space, enter or → opens and shuts these rows as it does a file's
+  (`changes::opens`).
+
+At any length, a row too narrow for all of a file's turns says the
+first and the last (`#2 … #475`) where Go said neither turns nor counts,
+and the counts alone when even that has no room (`turns_right`).
+`shell_writes` no longer takes a URL or another machine's path for a
+file of the folder (`file:///x`, `me@box:site/`: a colon before any
+slash, `elsewhere`).
+
 ## Screens
 
 rush-ui's frame (`src/frame/`) is what every screen hangs off: the
