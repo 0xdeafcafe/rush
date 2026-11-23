@@ -3181,14 +3181,97 @@ the last row of the open list ("+12 more · all tasks ›"), a click on
 any of whose rows opens Tasks as before, and all of the head opens and
 shuts it.
 
-The task row's head takes the cursor (`keys::tasks_nav`, `TASKS_REF`):
-↑ from the box lands on it, enter and space shut and open the list, ←
-shuts it, → opens it and then the Tasks view, ↓ and esc are back in the
-box, ↑ goes on up to the queue, the dock and the conversation. The
+The task row's head takes the cursor (`keys::stack_nav`, `tasks_keys`,
+`TASKS_REF`): ↑ from the box lands on it, enter and space shut and open
+the list, ← shuts it, → opens it and then the Tasks view, ↓ and esc are
+back in the box, ↑ goes on up to the card, the queue, the dock and the
+conversation ("Where the cursor goes", below). The
 hints under the box say ctrl+t changes "what enter does while it
 works" (Go named the four ways), and a message sent flashes "sent ·
 ctrl+r lists what you've sent" (Go: "ctrl+r › Sent has it"); "The two
 message boxes", below, has the rest.
+
+### Where the cursor goes (Rust-only)
+
+One model for an open Session, in every layout (alone at any width,
+beside the list, wide with its column). Go's keys differed from place to
+place; where they did, these five rules win
+(`session_core::keys::stack_nav`, `side::focus_key`, tests in
+`screens_tests/session_core/tests_cursor.rs`, a table of place × key →
+place for each layout):
+
+1. **↑ ↓ go through what's on screen, in the order it's drawn.** From
+   the box up: the task list's head, the card that waits, the queue's
+   messages last first, the dock's runs and tasks bottom to top, then
+   the conversation's rows. ↓ undoes ↑ a stop at a time and ends in the
+   box. No stop is passed over. (Go: a card took ↑ before the task
+   list's head; ↑ from a card went to the conversation past the queue;
+   ↓ from the conversation went to the box past the dock's bottom rows
+   only by luck of which hook saw it first.) Rows drawn in the column
+   beside a wide conversation are not in this walk: they are the
+   column's.
+2. **← → only shut and open the thing under the cursor.** → on a thing
+   already open goes into it (the task list's head: the Tasks view; a
+   run: its pane). ← on a row shuts it and stays on it; in an empty box
+   with nothing picked it does nothing and says "esc goes back to
+   Agents". Neither changes pane. (Go: → from the box went into the
+   column, ← came out of it, ← on a row unpicked it and ← in the box
+   closed the Session.) Kept from Go: → on an agent in the list opens
+   it, and ← pushed three times against the start of typed text asks
+   "Back to the list?".
+3. **tab, and { }, change pane.** tab and } go on: list → conversation
+   → the column or views panel beside it, if there is one → list. { goes
+   back one. With nothing beside the conversation this is Go's tab.
+4. **esc steps out a level at a time**: the column → the box (the row
+   picked in the conversation still picked) → no row picked → the list.
+5. **enter acts on the thing under the cursor and space does the same
+   wherever enter acts** (the task list's head, a column item, a row
+   that opens). In the box enter sends, as ever.
+
+One mark for the cursor: `▍` in orange on the selection's ground
+(`dock::picked1`, `conversation::cursor_mark`), on a conversation row
+(Go: a grey `▏`), a queued message, a dock row, a column item and the
+task list's head (was `▌`). While the column or the views panel has the
+keys the conversation's mark goes faint and the box's top line says
+"picking beside · typing or esc returns here", so one pane is lit. The
+hint row names the moves from where the cursor is: on the task list's
+head, on a row ("→ ← open · shut"), in the column ("↑↓ pick · enter ·
+→ open · esc back to message · tab Agents"), and in the box "tab the
+side" where → used to be.
+
+A card that waits has the keys from the start while the box is empty
+(its letters answer it), so with one up the walk starts on the card; a
+card is a stop only over an empty box, as before. ctrl+n, from anywhere
+in a conversation, opens the agent that has waited on you longest
+(`needsjump`).
+
+The column scrolls (`Side.top`, `Side::reveal`, `side::wheel`): it was
+cut at its foot, so a pick could go below it. Its window follows the
+pick, keeps to its ends, and says "↑ N more" / "↓ N more" on the rows
+it gives up; the wheel over it moves it and not the conversation. The
+pick is kept by the item's name from frame to frame, not its row, so
+rows arriving above it don't move it.
+
+Subagents with many shells (`running::running_preview`): the few runs
+drawn (five) follow the run the pick is on *or whose task it is on*.
+Go followed only a run picked, so stepping up through runs with shells
+of their own, each step onto a shell of a run past the fifth drew the
+first five again with the pick out of sight. Under a run at most four
+of its tasks are drawn, round the pick, with "… N more above" and "+ N
+more" (`DOCK_JOBS_SHOWN`); the column, which scrolls, draws them all
+(`Ctx.whole`).
+
+Switching between subagents: alt+↑ and alt+↓ open the previous and next
+run of the session, from its box, from a run's pane, and from inside a
+hosted child (`subview::cycle_sub`, `subpane::child_key`), without going
+back to the list of them. esc from a child's empty box is its parent
+with that run's pane open. The child's breadcrumb says so: "· subagent 2
+of 5 · alt+↑↓ the others · esc back".
+
+Queues round subagents say whose they are: the session's own is "queue
+for the main session" while a run's pane is open beside it, a run's is
+"queue for <its name>" with "one goes each time it ends a step", and
+the count on a run's row is "✉2 queued" (was a bare "✉2").
 
 ### The two message boxes: one model, one set of words (Rust-only)
 
@@ -5539,6 +5622,38 @@ Go rush is gone from the tree; its last version is the `go-final` tag
   transcript's 45 runs 20.4 → 0.43 MiB (one written lately, kept read
   on), 1,103 allocations kept; the 221 runs 82.0 → 0.19 MiB in 1,527,
   a peak of 2.7 MiB while reading.
+- A session out of sight lets go of its runs (Rust-only; Go keeps every
+  hostConn for the life of the process; rush-ui-session-core
+  `evict.rs`, `subs.rs` `Runs::evict`). A session's side (`Core::conns`)
+  was never dropped, and with it what it had read of its runs: each
+  agent rush hosted for it, read whole while it shows (`Runs::full`,
+  shared with the reader), every subagent run read whole once Changes
+  was opened (kept after Changes closed), and the runs read on for their
+  numbers while working, frozen as they were once the session was left
+  (the reader reads only for the session shown). Measured with `cargo
+  bench -p rush-ui --bench sessmem` (a counting allocator's live bytes;
+  2026-11-23, Apple silicon): 30 sessions opened in turn, 5 of them
+  5,000 turns with 30 hosted agents and 40 subagents each (two opening
+  Changes), 25 of 40 turns with 2 hosted agents; each hosted agent or
+  subagent 150 reads of 2 KB, 0.5 MiB read whole; a 5,000-turn session
+  19.1 MiB read whole (one view's, bounded: the open one, the one beside
+  the list, pinned tiles, the read-ahead's one). Back on the list, 267.2
+  MiB held: the 280 runs read whole 150.8, the runs read on 107.9 (every
+  run counts as working there: the files are newer than the model's
+  clock), the rest 8.6 (4.2 of it the 30 sessions' sides). Now a sweep
+  on each reading of the list notes the sessions shown and, of those
+  out of sight for `EVICT_AFTER` (5 minutes: going back and forth
+  between a few sessions comes back sooner, and a session with dozens
+  of hosted agents takes a second or more to read them again), lets go
+  of the runs read whole or read on, and the process table: 267.2 → 8.6
+  MiB. What stays is what no transcript gives back: the draft in the
+  box, the outbox and queue, the picks, the views, the runs' numbers and
+  rows, and the run open on the page (`Runs::detail`, one a session,
+  kept with its scroll). Not while a read of its runs is out. Opened
+  again, every run due whole and not held is read at once, and runs read
+  whole for Changes before are read whole again (`Runs::full_again`), so
+  the conversation draws its hosted agents and Changes counts their edits
+  as before (`tests_evict.rs`).
 - `cargo bench -p rush-host --bench list` (`RUSH_REAL=1` for this home,
   read only; its lister follows, never reviving a host): the list's
   loader and a reading of it, the rows' and the loader's retained heap
