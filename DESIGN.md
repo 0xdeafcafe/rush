@@ -3956,6 +3956,17 @@ is made. Everything below is in `rush_ui::frame`.
   part with the places' blanked: a page may have a place's name
   (Agents). A newer rush is its key alone, as on a small screen, and
   isn't clicked there.
+- **The Session's header is two rows** (`session::fold_head`).
+  Rust-only: Go's is five (blank, name, meta, tabs, rule). Everything
+  still builds and marks the five (`HEAD_BUILT`), and the frame folds
+  them before the wash: the name's row as built; the tabs with the meta
+  row's left part (the bar's second line and where it works) at their
+  right when both fit. Not drawn: the blank row, unless a hosted child's
+  breadcrumb is on it (then three rows, `crumb_row`); the rule; the
+  agent label and how it's connected; "esc back to the list" and the
+  depth's chip. With no rule, the tab showing is orange while the
+  Session has the keys. The pointer on the tabs' row is put back by
+  `meta_dx` to where the built meta row has its marks.
 - **clanker's reactions** (`clanker.rs`). What `session_core::finish`
   keeps (`Finish.fx`) is drawn on him as Go's clkFX: drawing the header
   moves the reaction on a frame for every 70 ms gone and asks for a wake

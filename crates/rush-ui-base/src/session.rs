@@ -178,9 +178,71 @@ pub fn harness_name(reg: &Registry, k: &Kind) -> String {
     reg.harness_label(migrated(k.as_str()).as_str())
 }
 
-/// The pane's chrome: a blank row, the name, where it works, its tabs,
-/// and a rule.
-pub const HEAD_H: usize = 5;
+/// The pane's chrome as drawn: the name's row, and its tabs with where
+/// it works at their right. Rust-only: Go's is five (a blank row, the
+/// name, where it works, the tabs, a rule); the header is still built as
+/// those five (`HEAD_BUILT`) and folded to these by `fold_head`. A hosted
+/// child's has a row more, its breadcrumb's (`SessionView::crumb_row`).
+pub const HEAD_H: usize = 2;
+
+/// The rows the header is built as, before it is folded.
+pub const HEAD_BUILT: usize = 5;
+
+/// The header's five built rows as the two drawn, w wide: the name's row
+/// as it is, and the tabs (their first `tabs_w` cells) with the meta
+/// row's left part (its first `meta_w` cells, less its indent) at their
+/// right, when both fit; the blank row only when it says something (a
+/// hosted child's breadcrumb); the rule never. Also how far right the
+/// meta row's cells went, for the pointer (None: not drawn), and whether
+/// the breadcrumb's row is there. 0 for a width takes the row's own.
+pub fn fold_head(
+    rows: Vec<Line>,
+    tabs_w: usize,
+    meta_w: usize,
+    w: usize,
+) -> (Vec<Line>, Option<usize>, bool) {
+    if rows.len() < HEAD_BUILT {
+        return (rows, None, false);
+    }
+    let iw = w.saturating_sub(3);
+    let inner = |l: &Line| cut(l, 2, 2 + iw);
+    let used = |l: &Line| width(l.plain().trim_end());
+    let (tabs, meta) = (inner(&rows[3]), inner(&rows[2]));
+    let tw = if tabs_w > 0 {
+        tabs_w.min(iw)
+    } else {
+        used(&tabs)
+    };
+    let mw = if meta_w > 0 {
+        meta_w.min(iw)
+    } else {
+        used(&meta)
+    };
+    let mut row = cut(&tabs, 0, tw);
+    let mut dx = None;
+    // The meta's cells from its indent on, a cell before the right edge.
+    if mw > 2 && tw + mw + 2 <= iw {
+        let at = iw - (mw - 2) - 1;
+        row.spans.push(plain(blanks(at - tw)));
+        join(&mut row, cut(&meta, 2, mw));
+        dx = Some(at - 2);
+    }
+    let mut folded = line([Span::new("  ", Style::default().on(CHROME_BG))]);
+    join(&mut folded, on_ground(row, iw, CHROME_BG));
+    folded
+        .spans
+        .push(Span::new(" ", Style::default().on(CHROME_BG)));
+    let crumb = !rows[0].plain().trim().is_empty();
+    let mut out = Vec::with_capacity(3);
+    let mut rows = rows.into_iter();
+    let first = rows.next().unwrap_or_default();
+    if crumb {
+        out.push(first);
+    }
+    out.extend(rows.next());
+    out.push(folded);
+    (out, dx, crumb)
+}
 
 /// Where the view is: following the conversation's end, or scrolled up to
 /// a row of a turn, kept there whatever is added below or counted again
@@ -233,6 +295,15 @@ pub struct SessionView {
     /// Rows at the body's top that aren't the header's nor the transcript's
     /// (none drawn now): top is that far below the header.
     pub top_off: usize,
+    /// The tabs' and the meta row's left part's widths as last built, for
+    /// `fold_head` (0: not said), set by who draws them.
+    pub tabs_w: usize,
+    pub meta_w: usize,
+    /// How far right the meta row's cells are drawn, on the tabs' row
+    /// (None: they had no room), and whether a breadcrumb's row is over
+    /// the name's.
+    pub meta_dx: Option<usize>,
+    pub crumb_row: bool,
     /// Columns kept at the right of the conversation for what's drawn
     /// beside it (the map): the conversation is drawn that much narrower.
     pub side: usize,
@@ -299,6 +370,10 @@ impl SessionView {
             shown: Vec::new(),
             top: 0,
             top_off: 0,
+            tabs_w: 0,
+            meta_w: 0,
+            meta_dx: None,
+            crumb_row: false,
             side: 0,
             beside: false,
             idle: false,

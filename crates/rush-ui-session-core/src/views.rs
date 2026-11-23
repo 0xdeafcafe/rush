@@ -27,7 +27,7 @@ use super::paint::{dim, spread};
 use super::{agent, conn, open_key};
 use crate::frame::{Mouse, Out, Press};
 use crate::model::Model;
-use crate::session::{HEAD_H, Pos};
+use crate::session::{HEAD_BUILT, HEAD_H, Pos};
 use crate::style::*;
 
 /// Every session has these; the rest only when there's something in them.
@@ -268,7 +268,7 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     let Some(key) = open_key(m) else {
         return;
     };
-    if rows.len() < HEAD_H || crate::sess::agent(m, &key).is_none() {
+    if rows.len() < HEAD_BUILT || crate::sess::agent(m, &key).is_none() {
         return; // gone: the frame says so
     }
     let hw = w.saturating_sub(3);
@@ -308,9 +308,16 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
         tabs.push((x, (x + tw).min(hw), i));
         if i == cur {
             (on_x, on_w) = (x, tw);
-            let mut t = line([Span::new(label, bold(BRIGHT).on(TAB_ON_BG))]);
+            // Rust-only: no rule under the tabs now, so the tab showing
+            // says who has the keys: orange while the Session has them.
+            let (fg, bg) = if m.pane_idle {
+                (BRIGHT, TAB_ON_BG)
+            } else {
+                (TAB_ON_FG, ORANGE)
+            };
+            let mut t = line([Span::new(label, bold(fg).on(bg))]);
             join(&mut t, stat);
-            join(&mut strip, on_ground(t, tw, TAB_ON_BG));
+            join(&mut strip, on_ground(t, tw, bg));
         } else {
             let mut t = line([sp(label, SUB)]);
             join(&mut t, stat);
@@ -346,6 +353,9 @@ pub fn head(m: &mut Model, rows: &mut [Line], w: usize) {
     let sw = strip.width();
     for t in &mut tabs {
         t.1 = t.1.min(sw);
+    }
+    if let Some(v) = m.session.as_mut() {
+        v.tabs_w = sw;
     }
     let row3 = spread(strip, chips, hw);
     rows[3] = chrome(row3, hw);
@@ -392,7 +402,7 @@ pub fn head_last(m: &mut Model, rows: &mut [Line], w: usize) {
     let Some(key) = open_key(m) else {
         return;
     };
-    if rows.len() < HEAD_H || crate::sess::agent(m, &key).is_none() {
+    if rows.len() < HEAD_BUILT || crate::sess::agent(m, &key).is_none() {
         return;
     }
     let crumb = super::subpane::child_crumb(m, rows, w).unwrap_or_default();
@@ -794,8 +804,10 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     let name = view_name(m, &key);
     let rows = conn(m, &key).vs.rows.max(1);
     let off = m.session.as_ref().map_or(0, |v| v.top_off);
-    let tabs_y = top.checked_sub(HEAD_H - 3 + off);
-    let name_y = top.checked_sub(HEAD_H - 1 + off);
+    // The header's two rows end where the body starts: the name's, then
+    // the tabs'.
+    let tabs_y = top.checked_sub(1 + off);
+    let name_y = top.checked_sub(HEAD_H + off);
     let tab_at = |m: &mut Model| -> Option<usize> {
         if Some(y) != tabs_y || x < 2 {
             return None;
