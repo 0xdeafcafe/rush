@@ -7,6 +7,8 @@ license.workspace = true
 
 [dependencies]
 rush-core.workspace = true
+# Model names and prices for the Orchestrator board (no terminal code).
+rush-claude.workspace = true
 rush-hl.workspace = true
 rush-gh.workspace = true
 rush-sys.workspace = true
@@ -21,7 +23,6 @@ sha2.workspace = true
 
 [dev-dependencies]
 rush-testenv = { path = "../rush-testenv" }
-rush-claude.workspace = true
 tempfile.workspace = true
 libc.workspace = true
 
