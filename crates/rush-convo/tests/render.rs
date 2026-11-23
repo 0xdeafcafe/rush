@@ -1065,6 +1065,135 @@ fn the_docked_live_line_names_the_step() {
     );
 }
 
+// The row at the foot of a running turn says its state in one plain
+// word, the same every time (Rust-only: Go picked one of a dozen phrases
+// for each).
+#[test]
+fn the_live_line_says_the_state_plainly() {
+    type Fed = fn(&mut Session);
+    let cases: [(&str, Fed, &str); 5] = [
+        ("nothing yet", |_| {}, "starting…"),
+        ("thinking", |s| s.feed(thinking("hm"), at(1)), "thinking…"),
+        ("writing", |s| s.feed(delta("So the"), at(1)), "writing…"),
+        (
+            "a step came back",
+            |s| {
+                s.feed(tool_use("r", "Read", json!({"file_path": "/a.txt"})), at(1));
+                s.feed(tool_result("r", "words", false, None), at(2));
+            },
+            "reading the results…",
+        ),
+        (
+            "said something, and no more yet",
+            |s| s.feed(say("On it."), at(1)),
+            "working…",
+        ),
+    ];
+    for (name, feed, want) in cases {
+        let mut s = Session::new();
+        s.feed(sent("go"), at(0));
+        feed(&mut s);
+        // Whenever it's drawn, the word is the same.
+        for now in [at(3), at(4), at(61)] {
+            let out = text(&Renderer::new().render(&s, &opts(100, now)));
+            assert!(
+                out.contains(want),
+                "{name} at {now}: no {want:?} in:\n{out}"
+            );
+        }
+    }
+}
+
+// A turn that has produced nothing while a command an earlier turn
+// started still runs is waiting on it, and says how long your message has
+// waited; once the turn is at work the command is named after its facts.
+#[test]
+fn the_live_line_names_what_still_runs_from_before() {
+    use rush_core::event::{Event, TaskKind, TaskStarted};
+    let mut s = Session::new();
+    s.cwd = "/work/app".into();
+    s.feed(sent("run the sim"), at(0));
+    s.feed(
+        tool_use(
+            "b1",
+            "Bash",
+            json!({"command": "cargo h2 sim bounces", "run_in_background": true}),
+        ),
+        at(1),
+    );
+    s.feed(
+        Event::TaskStarted(TaskStarted {
+            id: "j1".into(),
+            call_id: "b1".into(),
+            kind: TaskKind::Shell,
+            label: "cargo h2 sim bounces".into(),
+            background: true,
+            ..TaskStarted::default()
+        }),
+        at(1),
+    );
+    s.feed(
+        tool_result("b1", "started in the background", false, None),
+        at(2),
+    );
+    s.feed(done(0.1), at(3));
+    s.feed(sent("and now?"), at(100));
+    // In the background it needn't hold the agent: named beside the turn
+    // at first.
+    let out = text(&Renderer::new().render(&s, &opts(120, at(105))));
+    let row = out
+        .lines()
+        .find(|l| l.contains("starting…"))
+        .unwrap_or_else(|| panic!("no starting row:\n{out}"));
+    assert!(
+        row.contains("cargo h2 sim bounces still running 1m 44s"),
+        "{row}"
+    );
+    // Still nothing after a while: the turn waits on it.
+    let out = text(&Renderer::new().render(&s, &opts(120, at(400))));
+    let row = out
+        .lines()
+        .find(|l| l.contains("waiting on"))
+        .unwrap_or_else(|| panic!("no waiting row:\n{out}"));
+    assert!(
+        row.contains("waiting on cargo h2 sim bounces · 6m 39s"),
+        "{row}"
+    );
+    assert!(row.contains("your message has waited 5m 00s"), "{row}");
+    assert!(!row.contains("still running"), "said once: {row}");
+    assert!(!out.contains("starting…"), "{out}");
+    assert!(
+        !out.contains("stalled"),
+        "it waits, it hasn't stalled:\n{out}"
+    );
+
+    // At work, the command runs beside it.
+    s.feed(say("Looking at it."), at(401));
+    let out = text(&Renderer::new().render(&s, &opts(120, at(420))));
+    let row = out
+        .lines()
+        .find(|l| l.contains("working…"))
+        .unwrap_or_else(|| panic!("no working row:\n{out}"));
+    assert!(
+        row.contains("cargo h2 sim bounces still running 6m 59s"),
+        "{row}"
+    );
+    assert!(!out.contains("waiting on"), "{out}");
+
+    // Nothing running from before: a quiet turn is starting.
+    let mut s = Session::new();
+    s.feed(sent("one"), at(0));
+    s.feed(say("Done."), at(1));
+    s.feed(done(0.1), at(2));
+    s.feed(sent("two"), at(10));
+    let out = text(&Renderer::new().render(&s, &opts(120, at(20))));
+    assert!(out.contains("starting…"), "{out}");
+    assert!(
+        !out.contains("waiting on") && !out.contains("still running"),
+        "{out}"
+    );
+}
+
 // Spaces and tabs in diffs, shown: each space a ·, each tab → and three
 // spaces, the line cut with › (highlight.go paintCode, render.go:4115
 // diffText).

@@ -1713,21 +1713,36 @@ impl<'a> Drawer<'a> {
     }
 
     /// What the agent is doing right now, at the end of a running turn
-    /// (render.go:1131).
+    /// (render.go:1131). Not Go's words: Go picked one of a dozen phrases
+    /// for each state ("warming up", "switching it off and on again"),
+    /// which said nothing of the state. Here each state has one plain
+    /// word: starting (nothing from the turn yet), thinking, writing,
+    /// reading the results (a step came back), working. A turn that has
+    /// produced nothing while a step of an earlier turn still runs is
+    /// waiting on that step, and says how long your message has waited;
+    /// a command or job running beside a turn at work is named after the
+    /// turn's facts. Rust-only.
     fn live_line(&mut self) {
         let t = self.t;
         if let Some(c) = self.s.compacting() {
             self.compacting_line(c);
             return;
         }
-        let (mut verb, mut since, mut waiting) =
-            (pick(OPENINGS, t.start).to_string(), t.start, false);
+        let quiet_turn = !t
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Text { .. } | Item::Thinking(_) | Item::Step(_)));
+        let (mut verb, mut since, mut waiting) = (
+            if quiet_turn { "starting" } else { "working" }.to_string(),
+            t.start,
+            false,
+        );
         let mut tool_active = false;
         if let Some(last) = t.items.last() {
             let n = t.items.len() - 1;
             match last {
                 Item::Thinking(_) if t.thinking != 0 => {
-                    verb = pick(MUSINGS, t.thinking).into();
+                    verb = "thinking".into();
                     since = t.thinking;
                 }
                 Item::Text { .. }
@@ -1735,7 +1750,7 @@ impl<'a> Drawer<'a> {
                         ti as usize + 1 == t.n as usize && ii as usize == n
                     }) =>
                 {
-                    verb = pick(WRITINGS, t.start).into();
+                    verb = "writing".into();
                 }
                 Item::Step(id) => {
                     let st = self.s.step(*id);
@@ -1755,7 +1770,7 @@ impl<'a> Drawer<'a> {
                         };
                         since = st.start;
                     } else if st.end != 0 {
-                        verb = pick(WAITINGS, st.end).into();
+                        verb = "reading the results".into();
                         since = st.end;
                         waiting = true;
                     }
@@ -1763,14 +1778,49 @@ impl<'a> Drawer<'a> {
                 _ => {}
             }
         }
+        // Nothing from this turn yet, and a step of an earlier turn still
+        // runs: the agent is in that, not starting on this.
+        // One in the background needn't hold the agent: the turn is said
+        // to wait on it only once it has stayed quiet a while; until then
+        // it's named after the facts, as beside a turn at work.
+        let held = if quiet_turn {
+            self.earlier_running()
+                .filter(|h| !h.3 || self.o.now - t.start >= HELD_AFTER)
+        } else {
+            None
+        };
         let pad = self.spine().and_raw("   ");
         self.air();
-        let took = (since != 0).then(|| self.since(since));
-        let mut head = live_head_txt(self.o.tick, &verb, took.as_deref());
         let mut facts = Vec::new();
-        if t.start != 0 && since != t.start {
-            facts.push(format!("turn {}", self.since(t.start)));
-        }
+        let mut head = match &held {
+            Some((what, start, _, _)) => {
+                tool_active = true;
+                let mut head = paint(
+                    C_ORANGE.bold(),
+                    &format!("{} waiting on {what}", spin(self.o.tick)),
+                );
+                if *start != 0 {
+                    head.push(faint(" · "));
+                    head.push(paint(C_ORANGE, &self.since(*start)));
+                }
+                if t.start != 0 {
+                    let whose = if t.from.is_empty() && t.cause.is_empty() {
+                        "your message"
+                    } else {
+                        "this turn"
+                    };
+                    facts.push(format!("{whose} has waited {}", self.since(t.start)));
+                }
+                head
+            }
+            None => {
+                let took = (since != 0).then(|| self.since(since));
+                if t.start != 0 && since != t.start {
+                    facts.push(format!("turn {}", self.since(t.start)));
+                }
+                live_head_txt(self.o.tick, &verb, took.as_deref())
+            }
+        };
         if t.streamed > 0 {
             facts.push(format!("↓ {} tokens", tokens((t.streamed / 4) as i64)));
         }
@@ -1781,6 +1831,12 @@ impl<'a> Drawer<'a> {
             if self.cache_cold(since) {
                 facts.push("cache expired, read uncached".into());
             }
+        }
+        // What runs beside the turn: a command sent to the background, a
+        // job, by an earlier turn or this one.
+        let held = held.map(|h| h.2).unwrap_or_default();
+        if let Some(b) = self.beside(&held) {
+            facts.push(b);
         }
         if !facts.is_empty() {
             head.push_str("  ", Style::default());
@@ -1806,6 +1862,84 @@ impl<'a> Drawer<'a> {
             let l = pad.and_raw("  ").and(paint(C_YELLOW, &words));
             self.add("", Color::Default, l, Txt::new());
         }
+    }
+
+    /// What an earlier turn started that still runs: a step still running
+    /// there (a command before any other tool, the one started last),
+    /// else a task of the session's, one that holds its turn before one
+    /// in the background, the one running longest. What it is in a few
+    /// words, when it started, its call's or its task's id, and whether
+    /// it runs in the background. Asked only of a turn with no step of its
+    /// own, so whatever runs is from before it.
+    fn earlier_running(&self) -> Option<(String, Ms, String, bool)> {
+        let (s, t) = (self.s, self.t);
+        let mut found: Option<&Step> = None;
+        for turn in s.turns.iter().filter(|x| x.n < t.n) {
+            for &id in &turn.steps {
+                let st = s.step(id);
+                if st.status != Status::Running {
+                    continue;
+                }
+                let better = found.is_none_or(|f| {
+                    (st.kind == Kind::Shell, st.start) >= (f.kind == Kind::Shell, f.start)
+                });
+                if better {
+                    found = Some(st);
+                }
+            }
+        }
+        if let Some(st) = found {
+            let what = if st.kind == Kind::Shell {
+                command_words(&st.call().input.command, 32)
+            } else {
+                let w = self.running_words(st);
+                let w = w.strip_prefix("running ").unwrap_or(&w);
+                w.strip_prefix("waiting on ").unwrap_or(w).to_string()
+            };
+            return Some((what, st.start, st.id.to_string(), false));
+        }
+        let j = s
+            .jobs()
+            .iter()
+            .filter(|j| j.running() && j.parent.is_empty())
+            .min_by_key(|j| (j.background, j.start))?;
+        let cmd = s.job_command(j);
+        let what = command_words(if cmd.is_empty() { &j.label } else { &cmd }, 32);
+        (!what.is_empty()).then(|| (what, j.start, j.id.clone(), j.background))
+    }
+
+    /// The command or job of this session that runs beside the turn, the
+    /// one running longest, and how many more do: "cargo test still
+    /// running 2m 25s". Not one whose call still runs in this turn (its
+    /// row says so) nor held, the call or task the turn waits on.
+    fn beside(&mut self, held: &str) -> Option<String> {
+        let (s, t) = (self.s, self.t);
+        let mut jobs: Vec<&crate::model::Job> = s
+            .jobs()
+            .iter()
+            .filter(|j| j.running() && j.parent.is_empty())
+            .filter(|j| held.is_empty() || j.tool_use_id != held && j.id != held)
+            .filter(|j| {
+                s.step_by_call(&j.tool_use_id)
+                    .is_none_or(|id| s.step(id).status != Status::Running || !t.steps.contains(&id))
+            })
+            .collect();
+        jobs.sort_by_key(|j| j.start);
+        let j = jobs.first()?;
+        let cmd = s.job_command(j);
+        let name = command_words(if cmd.is_empty() { &j.label } else { &cmd }, 28);
+        if name.is_empty() {
+            return None;
+        }
+        let mut out = format!("{name} still running");
+        if j.start != 0 {
+            out.push(' ');
+            out.push_str(&self.since(j.start));
+        }
+        if jobs.len() > 1 {
+            out.push_str(&format!(" and {} more", jobs.len() - 1));
+        }
+        Some(out)
     }
 
     /// A turn the conversation holds open that its host or row says is
@@ -1836,7 +1970,7 @@ impl<'a> Drawer<'a> {
             .clone()
             .and(paint(
                 C_ORANGE.bold(),
-                &format!("{} {}…", spin(self.o.tick), pick(COMPACTIONS, since)),
+                &format!("{} compacting the context…", spin(self.o.tick)),
             ))
             .and_raw("  ")
             .and(paint(C_ORANGE, &s));
@@ -4184,77 +4318,16 @@ pub(crate) fn waiting(s: &Session, t: &Turn) -> bool {
 
 pub(crate) const SPAWN_SHOWN: usize = 4;
 
-/// One of words for the stretch that began at since, the same for all of
-/// it. A time not known (0; a history's events carry none) is Go's zero
-/// time, year 1, whose UnixNano wraps: its pick is the one Go makes.
-fn pick(words: &[&'static str], since: Ms) -> &'static str {
-    const GO_ZERO_MS: u64 = 11_651_379_494_838_206_464 / 1_000_000;
-    let ms = if since == 0 { GO_ZERO_MS } else { since as u64 };
-    words[(ms % words.len() as u64) as usize]
-}
+/// How long a turn that has produced nothing is quiet before it's said to
+/// wait on a task in the background.
+const HELD_AFTER: Ms = 30_000;
 
-const OPENINGS: &[&str] = &[
-    "waiting for the agent",
-    "waking it up",
-    "getting its bearings",
-    "reading the room",
-    "finding its feet",
-    "rolling up its sleeves",
-    "clearing its throat",
-    "warming up",
-    "pulling up the cuck chair",
-    "stretching its legs",
-    "finding its glasses",
-    "switching it off and on again",
-];
-const WAITINGS: &[&str] = &[
-    "working out what's next",
-    "reading the results",
-    "chewing it over",
-    "weighing it up",
-    "taking stock",
-    "joining the dots",
-    "sizing it up",
-    "having a think",
-    "watching the langs",
-    "watching from the cuck chair",
-    "checking its working",
-    "squinting at the output",
-    "blaming the compiler",
-    "reading the tea leaves",
-    "nodding knowingly",
-];
-const WRITINGS: &[&str] = &[
-    "writing",
-    "scribbling",
-    "putting pen to paper",
-    "drafting",
-    "typing away",
-    "jotting it down",
-    "spinning a yarn",
-    "writing it up",
-    "licking the pencil",
-    "writing its memoirs",
-    "embellishing slightly",
-];
-const COMPACTIONS: &[&str] = &[
-    "compacting the context",
-    "boiling it all down",
-    "sitting on the suitcase",
-    "vacuum-packing",
-    "writing the cliff notes",
-    "squeezing the sponge",
-    "folding the laundry",
-    "tidying the attic",
-    "cramming it in the loft",
-    "taking the minutes",
-    "reducing the stock",
-    "packing it into a flask",
-    "rolling up the maps",
-    "wringing it out",
-    "making a précis",
-    "putting it in a nutshell",
-];
+/// A command by its first words, for a row that names it in passing:
+/// past a cd, its first line, cut to w cells.
+fn command_words(cmd: &str, w: usize) -> String {
+    let c = drop_cd(cmd.trim()).trim();
+    truncate_cells(&one_line(c.lines().next().unwrap_or("")), w)
+}
 
 fn dots_bar(frac: f64, w: usize, tick: usize) -> Txt {
     let at = (tick % (w + 3)) as isize;

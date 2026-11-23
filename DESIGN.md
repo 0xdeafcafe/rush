@@ -3515,6 +3515,29 @@ is made. Everything below is in `rush_ui::frame`.
   a listing, a fetch, a web search and a shell command that came back fine
   stay one row, as the steps above them are; enter opens it. A step you
   opened or closed stays as you left it, and verbose opens them all.
+- **The row at the foot of a running turn** (`render::draw::live_line`).
+  Rust-only words: Go picked one of a dozen phrases for each state by the
+  time it began ("warming up", "switching it off and on again",
+  "squinting at the output"), which said nothing of the state and read as
+  a state of their own. Each state has one fixed phrase: `starting` (the
+  turn has produced nothing yet), `thinking`, `writing`, `reading the
+  results` (a step came back and the model has the floor), `working`
+  (anything else), and `compacting the context`. After it, as before: how
+  long, the turn's time, tokens streamed, tokens in and a cold cache, and
+  under it the retry or stall line. Two things it says that Go's didn't:
+  a turn that has produced nothing while something an earlier turn
+  started still runs (a step still running there, else a task of the
+  session's, one holding its turn before one in the background) leads
+  with `waiting on <command> · <how long it has run>` and adds `your
+  message has waited <time>` (`this turn has waited` when no message of
+  yours started it), and is never called stalled (a task in the
+  background needn't hold the agent, so the turn is said to wait on one
+  only after 30 seconds of nothing, `HELD_AFTER`; until then it's named
+  as beside a turn at work); and a turn at work
+  beside a task of the session's that runs on (a command sent to the
+  background, a monitor, a job) ends its facts with `<command> still
+  running <time>`, `and N more` when there are others. A command is named
+  by its first words, past a cd, cut to fit (`command_words`).
 - **Pausing and killing a chain's command** (`session_core::jobkeys`,
   shells.go). k and p act on the command of a running Bash call's chain
   that runs now (`Session::running_part`): its processes are matched
