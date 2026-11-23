@@ -3,8 +3,8 @@ t1            |▍ You  22:00
 t1            |▍ check it all
               |
               |▍ Agent  22:00
-t1:s:b1       |│   ✳ cargo build, cargo test, cargo clippy  · 2/3 cargo test                                  19s
-              |│       $ cargo build                                                                       ✓ 4.0s
-              |│       ▸ cargo test --workspace                                                             · 15s
-              |│       $ cargo clippy
-              |│       ↑ pick this step, then  k skip cargo test · x stop the whole chain · p pause it
+t1:s:b1       |│   ✳ cargo build, cargo test, cargo clippy                                                    19s
+t1:s:b1       |│       ✓ cargo build                                                                         4.0s
+t1:s:b1       |│       · cargo test --workspace                                                               15s
+t1:s:b1       |│       ○ cargo clippy
+t1:s:b1       |│       ▸ ↑ pick this step, then  enter opens it · x stops the chain

@@ -260,10 +260,10 @@ fn a_chain_beside_another_call_stays_open() {
     let got = draw(&s, Preset::Normal, "");
     let build = got
         .lines()
-        .find(|l| l.contains("$ cargo build"))
+        .find(|l| l.contains("✓ cargo build"))
         .unwrap_or_else(|| panic!("the chain's commands are shown:\n{got}"));
-    assert!(build.contains("✓ 4"), "{build}");
-    assert!(got.contains("k skip cargo test"), "{got}");
+    assert!(build.contains("4.0s"), "{build}");
+    assert!(got.contains("x stops the chain"), "{got}");
 }
 
 /// A Bash call with a quote in it, in Claude Code's real wrapper, with a
@@ -288,6 +288,22 @@ fn a_quoted_chain_in_claude_codes_wrapper() {
     );
     s.watch_shells(&[dev, mine], at(3));
     let got = draw(&s, Preset::Normal, "");
+    // Its list has the command running now, and how long it has run.
+    let row = got
+        .lines()
+        .find(|l| l.starts_with("t1:s:b1") && l.contains("cargo test --workspace"))
+        .unwrap_or_else(|| panic!("{got}"));
+    assert!(row.contains("18s"), "{row}");
+    assert!(got.contains("x stops the chain"), "{got}");
+    // Opened, its row says where it is.
+    let mut o = Options {
+        width: 100,
+        now: at(20),
+        preset: Preset::Normal,
+        ..Options::default()
+    };
+    o.open.insert("t1:s:b1".into(), true);
+    let got = plain(&Renderer::new().render(&s, &o));
     assert!(
         got.lines()
             .any(|l| l.starts_with("t1:s:b1") && l.contains("2/2 cargo test")),
@@ -393,7 +409,24 @@ fn piping() -> Session {
 #[test]
 fn a_pipeline_is_drawn_a_stage_a_line() {
     let s = piping();
+    // In the list of its steps a pipeline is one row, named by the
+    // command it starts with.
     let got = draw(&s, Preset::Normal, "");
+    let row = got
+        .lines()
+        .find(|l| l.contains("cargo test --workspace 2>&1"))
+        .unwrap_or_else(|| panic!("{got}"));
+    assert!(row.contains("15"), "the time: {row}");
+    assert!(!got.contains("grep"), "the filters are left out: {got}");
+    // Opened, it's drawn a stage a line.
+    let mut o = Options {
+        width: 100,
+        now: at(20),
+        preset: Preset::Normal,
+        ..Options::default()
+    };
+    o.open.insert("t1:s:b1".into(), true);
+    let got = plain(&Renderer::new().render(&s, &o));
     let rows: Vec<&str> = got.lines().collect();
     let at_test = rows
         .iter()
