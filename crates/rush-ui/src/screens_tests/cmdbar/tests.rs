@@ -800,6 +800,7 @@ fn link_menu_acts() {
         "no Preview for text"
     );
     assert!(link_acts("two words").is_empty());
+    assert!(link_acts("rush:agent/ann").is_empty(), "rush's own");
     assert!(previewable("A.PDF") && !previewable("a.go"));
 }
 

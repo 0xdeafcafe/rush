@@ -109,9 +109,14 @@ fn hex(c: u8) -> Option<u8> {
     (c as char).to_digit(16).map(|d| d as u8)
 }
 
-/// What can be done with a link (linkActs); empty for one that isn't.
+/// What can be done with a link (linkActs); empty for one that isn't,
+/// and for one of rush's own scheme, which nothing outside rush opens
+/// (Rust-only: Go offered a browser for it).
 pub fn link_acts(target: &str) -> Vec<LinkAct> {
-    if target.trim().is_empty() || target.contains(char::is_whitespace) {
+    if target.trim().is_empty()
+        || target.contains(char::is_whitespace)
+        || target.starts_with("rush:")
+    {
         return Vec::new();
     }
     let Some(p) = file_path(target) else {

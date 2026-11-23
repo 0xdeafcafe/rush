@@ -697,9 +697,11 @@ pub fn mouse(m: &mut Model, e: &Mouse) -> Out {
     }
     // Right-clicking a link asks what to do with it: open it, in Preview,
     // Quick Look, reveal or copy it (model.go:1720, linkMenu); on a
-    // picture, nothing: a click opens it.
+    // picture, nothing: a click opens it. Nor on a link of rush's own
+    // scheme (an @agent, a message's chip, a shell box's button), which
+    // nothing outside rush can open or make use of copied (Rust-only).
     if e.kind == MouseKind::Down(Button::Right) {
-        if cell_link(m, &key, x, y).is_some_and(|l| l.is_quiet()) {
+        if cell_link(m, &key, x, y).is_some_and(|l| l.is_quiet() || l.is_own()) {
             return Out::Pass;
         }
         return match link_under(m, &key, x, y) {

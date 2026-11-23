@@ -248,7 +248,11 @@ Claude, fleet, the other adapters) builds on these.
   read back for a click like any other but never written (Rust-only: Go
   wrote them): no terminal can open one, and a terminal with a menu for
   every link (Terminal Decline) answered a click on it with Open and
-  Copy.
+  Copy. A right click on one does nothing, as on a picture. Going in,
+  rush sets private mode 5387 (Terminal Decline's, ignored elsewhere):
+  it has menus of its own for the links it shows, so a right click on
+  one comes to rush there too, as in every other terminal, and the menu
+  that opens is rush's everywhere (Rust-only).
 - **Widths** (Rust-only). Text is laid out a grapheme at a time, at
   the cells the canvas draws it in: `rush_core::text::grapheme_width`
   and `graphemes` are the one measure, used by rush-draw's canvas, the

@@ -39,10 +39,18 @@ use crate::canvas::Canvas;
 // drops them, keys and all), so that's left off: a terminal without the
 // kitty keyboard sends ctrl+\ ] ^ _ as the bytes 0x1c-0x1f, which
 // input.rs names as bubbletea does.
-const ENTER: &str = "\x1b[?1049h\x1b[?25l\x1b[?1003h\x1b[?1006h\x1b[?2004h\x1b[?1004h\x1b[>3u";
+//
+// Rust-only: private mode 5387 says rush has menus of its own for the
+// links it shows. Terminal Decline answers a right click on a link or a
+// path with its own menu even while a program takes the mouse, unless
+// the program sets this; then the click comes here, as it does in every
+// other terminal, and rush's menu is the one that opens everywhere. A
+// terminal that doesn't know the mode ignores it.
+const ENTER: &str =
+    "\x1b[?1049h\x1b[?25l\x1b[?1003h\x1b[?1006h\x1b[?5387h\x1b[?2004h\x1b[?1004h\x1b[>3u";
 // The same undone, in reverse; the cursor shown again.
 const LEAVE: &str =
-    "\x1b[<1u\x1b[?1004l\x1b[?2004l\x1b[?1006l\x1b[?1003l\x1b[0m\x1b[?25h\x1b[?1049l";
+    "\x1b[<1u\x1b[?1004l\x1b[?2004l\x1b[?5387l\x1b[?1006l\x1b[?1003l\x1b[0m\x1b[?25h\x1b[?1049l";
 
 // Whether the terminal is set up, so drop and the panic hook give it back
 // once between them.
@@ -797,6 +805,20 @@ mod tests {
         });
         assert!(!ol[3].is_none() && written(ol[3]).is_none());
         assert!(diff(&pb, &pl, &ob, &ol, true).is_empty());
+    }
+
+    // Each mode set going in is reset coming out, the one that says
+    // rush has its own link menus among them.
+    #[test]
+    fn leaving_resets_what_entering_set() {
+        let set: Vec<&str> = ENTER
+            .split("\x1b[?")
+            .filter_map(|m| m.strip_suffix('h'))
+            .collect();
+        assert!(set.contains(&"1003") && set.contains(&"5387"), "{set:?}");
+        for m in set.iter().filter(|m| **m != "25") {
+            assert!(LEAVE.contains(&format!("\x1b[?{m}l")), "{m}");
+        }
     }
 
     #[test]
