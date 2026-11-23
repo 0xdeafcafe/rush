@@ -3293,6 +3293,26 @@ impl Host {
                     self.publish(&mut st);
                 }
             }
+            // Stop while it waits to try again after a provider's error
+            // gives the retry up (Rust-only: the stop went to an agent with
+            // no turn to stop, and it tried again all the same): the wait
+            // is moot, and it says so till your next message, which
+            // carries it on.
+            "interrupt"
+                if st.info.state == "idle"
+                    && st.info.retry.as_ref().is_some_and(|r| !r.gave_up) =>
+            {
+                st.generation += 1;
+                let mut r = st.info.retry.take().unwrap_or_default();
+                r.gave_up = true;
+                r.why = "you stopped it trying again".into();
+                r.next = Time::default();
+                r.offline = false;
+                r.proof = false;
+                st.info.retry = Some(r);
+                self.publish(&mut st);
+                return Ok(());
+            }
             "without" => {
                 // What the agent's told of is fixed for its process, so it
                 // takes hold when one next starts: right away when idle.

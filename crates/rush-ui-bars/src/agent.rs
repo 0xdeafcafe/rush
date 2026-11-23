@@ -236,7 +236,10 @@ pub static SEGS: &[Seg] = &[
         about: "the folder it works in",
         draw: |x| {
             let o = of(x);
-            one(dim(folder(o.a, &o.a.root, o.live_cwd(), x.room)))
+            // The project it's in, in the header's brightest after its
+            // name (Rust-only: Go's was dim with the rest of the row, and
+            // which project a session was in took reading for).
+            one(spb(folder(o.a, &o.a.root, o.live_cwd(), x.room), TEXT))
         },
     },
     Seg {
@@ -949,8 +952,14 @@ pub fn state_words(o: &Of, now: Ms) -> Line {
         } else {
             // time.Until(next).Round(time.Second)
             let left = (r.next - now + 500).div_euclid(1000) * 1000;
+            // Its time come, it's trying: Go's "in –" said nothing.
+            let when = if left > 0 {
+                format!("in {}", dur(left))
+            } else {
+                "now".to_string()
+            };
             one(sp(
-                format!("retrying · {} of {} in {}", r.attempt, r.max, dur(left)),
+                format!("retrying · {} of {} {when}", r.attempt, r.max),
                 YELLOW,
             ))
         };

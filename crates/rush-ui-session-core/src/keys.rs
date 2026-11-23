@@ -248,6 +248,15 @@ pub fn key(m: &mut Model, k: &Press) -> Out {
         "ctrl+r" => return rush_ui_list_extras::stash::command(m, "history"),
         // Gone for good: stopped with all it set going (rushmode.go:4440).
         "ctrl+x" => {
+            // Waiting to try again after a provider's error: it gives
+            // that up, and the session stays (Rust-only).
+            let live = m.session.as_ref().is_some_and(|v| v.sess.live().is_some());
+            let c = conn(m, &key);
+            if !live && c.hosted() && c.info.retry.as_ref().is_some_and(|r| !r.gave_up) {
+                queue::run(m, &key, Op::Interrupt);
+                m.flash("it won't try again by itself · your next message carries it on");
+                return Out::Draw;
+            }
             let a = agent(m, &key).cloned();
             return rush_ui_cmdbar::stops::dismiss(m, a);
         }

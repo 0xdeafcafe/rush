@@ -332,6 +332,7 @@ pub fn dock(m: &mut Model, w: usize) -> Vec<Line> {
         .filter(|_| !beside)
         .map(|v| super::tasks::task_row(&v.sess, w, shut, picked == super::tasks::TASKS_REF))
         .unwrap_or_default();
+    out.extend(retry_row(m, &key, w));
     // The picker over the box while a command is typed (slashLines).
     out.extend(super::slash::slash_lines(m, &key, w));
     let c = conn(m, &key);
@@ -522,6 +523,44 @@ fn stopped_cache(m: &mut Model, key: &str) -> Option<Line> {
 
 /// The message box, w wide, with who it goes to and what enter does on
 /// its edge (paneDock's box).
+/// A turn a provider's error stopped, waiting to be tried again, said
+/// over the box: when it tries, which try it is, and the keys that try
+/// now or give up (Rust-only: the header's "retrying · 1 of 8 in 12s" was
+/// all there was, and no key stopped it). Nothing while the try runs.
+fn retry_row(m: &mut Model, key: &str, w: usize) -> Vec<Line> {
+    let now = m.now;
+    if m.session.as_ref().is_some_and(|v| v.sess.live().is_some()) {
+        return Vec::new();
+    }
+    let c = conn(m, key);
+    if !c.hosted() {
+        return Vec::new();
+    }
+    let Some(r) = c.info.retry.as_ref().filter(|r| !r.gave_up) else {
+        return Vec::new();
+    };
+    let left = (r.next - now + 500).div_euclid(1000) * 1000;
+    let when = if r.offline {
+        "when the network is back".to_string()
+    } else if r.proof {
+        "once the connection holds".to_string()
+    } else if left > 0 {
+        format!("in {}", dur(left))
+    } else {
+        "now".to_string()
+    };
+    let l = line([
+        plain("  "),
+        sp("↻ ", YELLOW),
+        spb(format!("trying again {when}"), YELLOW),
+        sp(format!("  try {} of {}", r.attempt, r.max), DIM),
+        sp("   ·   a message goes now   ·   ", DIM),
+        sp(sendmode::STOP, SUB),
+        sp(" gives up", DIM),
+    ]);
+    vec![fit(l, w)]
+}
+
 fn message_box(m: &mut Model, key: &str, w: usize, picked: &str) -> InputBox {
     let send_now = super::spawned::send_now_key(m);
     // The cards' word on the box: a decisions card waiting (in your own

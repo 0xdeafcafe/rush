@@ -3190,6 +3190,20 @@ works" (Go named the four ways), and a message sent or a box cleared
 flashes "sent · ctrl+r lists what you've sent" (Go: "ctrl+r › Sent has
 it").
 
+### A turn waiting to be tried again (Rust-only)
+
+A provider's error (529) has the host try the turn again, 15 s then
+doubling, eight times. The header said "retrying · 1 of 8 in 12s" and
+nothing else did, and no key stopped it. Over the box now
+(`dock::retry_row`): "↻ trying again in 12s  try 1 of 8 · a message
+goes now · ctrl+x gives up", gone while the try runs. ctrl+x there
+sends the host `interrupt`, which with a retry waiting and no turn
+running gives it up (`gave_up`, "you stopped it trying again", the
+generation moved on so the timer's send is moot); the session stays
+and your next message carries it on. The header says "now", not Go's
+"in –", once the time has come. The header's folder is bright and
+bold, so the project a session is in reads at a glance.
+
 ### The list's columns, some turned off (Rust-only)
 
 `Model::col_widths` hid each column under a width worked out for all six
